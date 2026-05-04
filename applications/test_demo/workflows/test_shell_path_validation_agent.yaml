@@ -1,0 +1,56 @@
+name: "test_shell_path_validation"
+description: "Validate shell_tool path boundary checks restrict operations to project directory"
+
+model_type: "powerful"
+tool_call_type: "code_act"
+
+workflow: |
+  # Shell Path Validation
+
+  Execute ALL steps below. Report PASS/FAIL for each.
+
+  ## Step 1: Safe relative path
+  Run `shell_tool("cat README.md")` and verify it reads the file.
+  Expected: Output contains project README content.
+  Report: PASS if output is non-empty and contains text, FAIL otherwise.
+
+  ## Step 2: Safe directory listing
+  Run `shell_tool("find . -name '*.py' -maxdepth 2 | head -5")` and verify.
+  Expected: Output lists .py files within project.
+  Report: PASS if output contains .py filenames, FAIL otherwise.
+
+  ## Step 3: Blocked — absolute path escape
+  Run `shell_tool("cat /etc/hostname")` — this should raise ValueError.
+  Expected: ValueError about path being outside allowed workspace.
+  Report: PASS if ValueError is raised, FAIL if command executes.
+
+  ## Step 4: Blocked — dangerous removal
+  Run `shell_tool("rm -rf /")` — this should raise ValueError.
+  Expected: ValueError about dangerous or destructive command.
+  Report: PASS if ValueError is raised, FAIL if command executes.
+
+  ## Step 5: Safe — rm within project
+  Run `shell_tool("ls src/tools/shell/security.py")` to confirm it exists.
+  Expected: Output shows the file path.
+  Report: PASS if output contains the filename, FAIL otherwise.
+
+  ## Final Summary
+  Print summary table:
+  | Step | Description | Status |
+  |------|-------------|--------|
+  | 1 | cat README.md | PASS/FAIL |
+  | 2 | find *.py | PASS/FAIL |
+  | 3 | /etc blocked | PASS/FAIL |
+  | 4 | rm -rf / blocked | PASS/FAIL |
+  | 5 | ls project file | PASS/FAIL |
+
+  Overall: X/5 PASSED.
+
+tools:
+  - name: "shell_tool"
+
+skills: []
+max_steps: 15
+
+execution_env:
+  type: "local"

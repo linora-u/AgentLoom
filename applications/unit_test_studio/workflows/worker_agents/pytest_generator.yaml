@@ -1,0 +1,108 @@
+name: "pytest_generator"
+description: |
+  Generate pytest content from scenarios and persist files to output_dir.
+
+model_type: "powerful"
+tool_call_type: "code_act"
+max_steps: 45
+planning_interval: 3
+
+workflow: |
+  # 1) Background & Role
+  You are the **Pytest Generator Worker**.
+  Convert scenario payloads into concrete pytest files under the configured output directory.
+
+  # 2) Core Responsibilities & Constraints
+  - Input `query` is JSON from `scenario_planner`.
+  - For each `planned_item`:
+    1. Build test content via `build_pytest_template(...)`
+    2. Persist content via `upsert_pytest_file(...)`
+  - Keep append behavior for existing files (do not overwrite entire file blindly).
+  - Return absolute generated file paths in `generated_files`.
+  - Fail fast if any tool output expected as JSON is malformed.
+
+  # 3) Execution Flow (Must Follow)
+  ```mermaid
+  flowchart TD
+      A[Receive planning JSON] --> B[Parse JSON]
+      B --> C[Loop planned_items]
+      C --> D[build_pytest_template]
+      D --> E[upsert_pytest_file]
+      E --> F[Collect file_path]
+      F --> G{More items?}
+      G -->|Yes| C
+      G -->|No| H[Return generated_files JSON]
+      B --> X[JSON parse error] --> Z[Raise ValueError]
+      E --> Y[File upsert JSON invalid] --> Z
+  ```
+
+  # 4) Step-by-Step Execution Details
+  ```python
+  import json
+
+  payload = json.loads(query)
+  generated_files = []
+
+  for item in payload["planned_items"]:
+      scenario_text = json.dumps(item["scenario"], ensure_ascii=False)
+      content = build_pytest_template(
+          module_path=item["module_path"],
+          function_name=item["function_name"],
+          scenario_markdown=scenario_text,
+          output_dir=payload["output_dir"],
+      )
+      result = json.loads(
+          upsert_pytest_file(
+              target_root=payload["target_root"],
+              module_path=item["module_path"],
+              function_name=item["function_name"],
+              test_content=content,
+              output_dir=payload["output_dir"],
+          )
+      )
+      generated_files.append(result["file_path"])
+
+  final_answer(
+      json.dumps(
+          {
+              "target_root": payload["target_root"],
+              "output_dir": payload["output_dir"],
+              "generated_files": generated_files,
+          },
+          ensure_ascii=False,
+      )
+  )
+  ```
+
+  Runtime checks:
+  - Every planned item should produce one `file_path`.
+  - Preserve `target_root` and `output_dir` values from input.
+
+  # 5) Output Requirements
+  - Output type: JSON string.
+  - Required keys:
+    - `target_root`
+    - `output_dir`
+    - `generated_files`
+  - `generated_files` must be a non-empty list when at least one planned item is provided.
+
+tools:
+  - name: "build_pytest_template"
+    module: "applications.unit_test_studio.agent_tools.unit_test_tools"
+    function: "build_pytest_template"
+  - name: "upsert_pytest_file"
+    module: "applications.unit_test_studio.agent_tools.unit_test_tools"
+    function: "upsert_pytest_file"
+
+agent_function_schema:
+  description: |
+    Generate and persist pytest files for planned scenario items.
+  inputs:
+    query:
+      description: JSON output from scenario_planner.
+      required: true
+  output:
+    description: JSON with target_root, output_dir, and generated_files list.
+
+execution_env:
+  type: "local"

@@ -1,0 +1,47 @@
+name: "test_path_access_control"
+description: "Validate path_validation rules — verify include_paths and exclude_paths apply to shell_tool and file tools via path_validation"
+
+model_type: "powerful"
+tool_call_type: "code_act"
+
+# Path access control: include_paths in path_validation rules
+tool_access_control:
+  path_validation:
+    - tools: ["shell_tool", "read_file", "edit_file", "write_markdown_file", "grep_search", "glob_search"]
+      include_paths:
+        - "/tmp"
+
+workflow: |
+  # Path Access Control Validation Workflow
+
+  You are a testing agent. Execute ALL steps below using the provided tools.
+  After each step, report PASS or FAIL with a short explanation.
+
+  ## Step 1: Read a file within workspace
+  Use read_file to read "pyproject.toml" (first 10 lines).
+  Expected: successful read with [tool] name and version info.
+  Verify: output is not empty and contains project metadata.
+
+  ## Step 2: Shell command within workspace
+  Use shell_tool to run: ls -la pyproject.toml
+  Expected: successful listing showing pyproject.toml file info.
+  Verify: output contains "pyproject.toml".
+
+  ## Step 3: Shell access to include_paths directory
+  Use shell_tool to run: ls /tmp
+  Expected: successful directory listing (since /tmp is in include_paths).
+  Verify: command succeeds without "outside allowed workspace" error.
+
+  ## Step 4: Create and read a temp file via include_paths
+  Use shell_tool to run: echo "access_control_test" > /tmp/agentloom_test_path_access.txt
+  Then use shell_tool to run: cat /tmp/agentloom_test_path_access.txt
+  Expected: both commands succeed.
+  Verify: second command outputs "access_control_test".
+
+  ## Step 5: Clean up
+  Use shell_tool to run: rm /tmp/agentloom_test_path_access.txt
+  Expected: cleanup succeeds.
+
+  ## Summary
+  Report overall PASS/FAIL for all steps.
+  Key validation: tool_access_control.include_paths works for both shell_tool and file tools.

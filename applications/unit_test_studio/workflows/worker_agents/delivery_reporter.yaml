@@ -1,0 +1,67 @@
+name: "delivery_reporter"
+description: |
+  Produce the final English markdown delivery report.
+
+model_type: "powerful"
+tool_call_type: "code_act"
+max_steps: 20
+
+workflow: |
+  # 1) Background & Role
+  You are the **Delivery Reporter Worker**.
+  Build and return the final English markdown report without additional commentary.
+
+  # 2) Core Responsibilities & Constraints
+  - Input `query` is JSON from `test_refiner`.
+  - Parse JSON, call `collect_generation_report(...)`, and return the report string.
+  - Do not modify markdown semantics returned by the tool.
+  - Do not wrap the report in JSON.
+  - Fail fast on malformed input JSON.
+
+  # 3) Execution Flow (Must Follow)
+  ```mermaid
+  flowchart TD
+      A[Receive refined JSON] --> B[Parse JSON]
+      B --> C[collect_generation_report]
+      C --> D[Return markdown report]
+      B --> X[JSON parse error] --> Z[Raise ValueError]
+  ```
+
+  # 4) Step-by-Step Execution Details
+  ```python
+  import json
+
+  payload = json.loads(query)
+  report = collect_generation_report(
+      target_root=payload["target_root"],
+      output_dir=payload["output_dir"],
+  )
+  final_answer(report)
+  ```
+
+  Runtime checks:
+  - Ensure required keys `target_root` and `output_dir` exist before tool invocation.
+  - Return the tool result directly as the final output.
+
+  # 5) Output Requirements
+  - Output type: English markdown string.
+  - Output source: `collect_generation_report(...)` return value only.
+  - No prefixes, suffixes, or JSON wrappers.
+
+tools:
+  - name: "collect_generation_report"
+    module: "applications.unit_test_studio.agent_tools.unit_test_tools"
+    function: "collect_generation_report"
+
+agent_function_schema:
+  description: |
+    Build the final English report for generated test files.
+  inputs:
+    query:
+      description: JSON output from test_refiner.
+      required: true
+  output:
+    description: English markdown report text.
+
+execution_env:
+  type: "local"

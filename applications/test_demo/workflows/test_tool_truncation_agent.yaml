@@ -1,0 +1,38 @@
+name: "test_tool_truncation"
+description: "Validate tool result truncation, persistence, and pagination feedback"
+
+model_type: "powerful"
+tool_call_type: "code_act"
+
+workflow: |
+  # Tool Result Truncation Validation
+
+  Execute ALL steps below. Report PASS or FAIL for each.
+
+  ## Step 1: Normal search — result within limits
+  Use grep_search to search for "import" in path "src/tools/search/" with max_results=5.
+  Expected: normal result with matches and metadata footer.
+  Verify: output contains line numbers and file paths.
+
+  ## Step 2: Large search — pagination hint
+  Use grep_search to search for "def " in path "src/" with max_results=10.
+  Expected: truncated results with pagination hint.
+  Verify: output contains "[Use offset=" guidance for fetching more results.
+
+  ## Step 3: Empty directory search
+  Use grep_search to search for "UNLIKELY_PATTERN_XYZ_123" in path "src/tools/search/".
+  Expected: "No matches found." message (non-empty response).
+  Verify: output is NOT empty, contains "No matches found".
+
+  ## Final Summary
+  Print PASS/FAIL for each step and overall result.
+
+tools:
+  - name: "grep_search"
+
+worker_agents: []
+skills: []
+max_steps: 10
+
+execution_env:
+  type: "local"

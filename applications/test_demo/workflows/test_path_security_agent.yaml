@@ -1,0 +1,40 @@
+name: "test_path_security"
+description: "Validate path security hardening — workspace boundaries, symlink, tilde"
+
+model_type: "powerful"
+tool_call_type: "code_act"
+
+workflow: |
+  # Path Security Validation
+
+  Execute ALL steps below. Report PASS or FAIL for each.
+
+  ## Step 1: Normal path — workspace internal read
+  Use read_file to read "config/system.yaml".
+  Expected: file content returned successfully.
+  Verify: output contains "AgentLoom".
+
+  ## Step 2: Normal search — within workspace
+  Use grep_search to search for "system" in path="config/".
+  Expected: matches found.
+  Verify: output contains match results.
+
+  ## Step 3: Browse workspace directory
+  Use glob_search to find "*.yaml" under "config/".
+  Expected: list of YAML files.
+  Verify: output contains file paths.
+
+  ## Final Summary
+  Print PASS/FAIL for each step and overall result.
+
+tools:
+  - name: "read_file"
+  - name: "grep_search"
+  - name: "glob_search"
+
+worker_agents: []
+skills: []
+max_steps: 10
+
+execution_env:
+  type: "local"

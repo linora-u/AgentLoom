@@ -1,0 +1,78 @@
+name: "function_intake"
+description: |
+  Parse and normalize raw function targets for downstream workers.
+
+model_type: "powerful"
+tool_call_type: "code_act"
+max_steps: 30
+
+workflow: |
+  # 1) Background & Role
+  You are the **Function Intake Worker**.
+  Your responsibility is deterministic normalization of incoming target spec.
+
+  # 2) Core Responsibilities & Constraints
+  - Input `query` is a JSON string containing:
+    - `target_root` (required)
+    - `targets` (required)
+    - `output_dir` (optional)
+  - Parse input JSON exactly once.
+  - Call `resolve_function_targets(...)` exactly once.
+  - If `output_dir` is missing, default to `test/generated`.
+  - Return normalized JSON only; do not return markdown.
+  - Fail fast on malformed input JSON or missing required keys.
+
+  # 3) Execution Flow (Must Follow)
+  ```mermaid
+  flowchart TD
+      A[Receive query JSON] --> B[Parse JSON]
+      B --> C[resolve_function_targets]
+      C --> D[Attach output_dir default]
+      D --> E[Return normalized JSON]
+      B --> X[JSON parse/key error] --> Z[Raise ValueError]
+  ```
+
+  # 4) Step-by-Step Execution Details
+  ```python
+  import json
+
+  payload = json.loads(query)
+  output_dir = payload.get("output_dir", "test/generated")
+  resolved = json.loads(
+      resolve_function_targets(
+          target_root=payload["target_root"],
+          targets=payload["targets"],
+      )
+  )
+  resolved["output_dir"] = output_dir
+  final_answer(json.dumps(resolved, ensure_ascii=False))
+  ```
+
+  Runtime checks:
+  - Ensure `payload["target_root"]` and `payload["targets"]` exist.
+  - Ensure tool output is valid JSON before forwarding.
+
+  # 5) Output Requirements
+  - Output type: JSON string.
+  - Required keys: `target_root`, `items`, `output_dir`.
+  - `items` must preserve all valid target entries from parser output.
+
+tools:
+  - name: "resolve_function_targets"
+    module: "applications.unit_test_studio.agent_tools.unit_test_tools"
+    function: "resolve_function_targets"
+
+agent_function_schema:
+  description: |
+    Validate and normalize function targets for downstream test generation workers.
+  inputs:
+    query:
+      description: |
+        JSON string containing target_root, targets, and optional output_dir.
+      required: true
+  output:
+    description: |
+      JSON string containing normalized target items and output_dir.
+
+execution_env:
+  type: "local"

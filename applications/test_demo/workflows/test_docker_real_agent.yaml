@@ -1,0 +1,28 @@
+name: "docker_real_agent_supervisor"
+description: |
+  真实 Docker agent 演示：在容器执行环境中读取 /root/sandbox/README.md。
+
+model_type: "powerful"
+tool_call_type: "code_act"
+
+workflow: |
+  # Docker Real Agent Workflow
+  目标：通过 docker 执行器读取容器内 README 文件并返回完整内容。
+
+  执行步骤：
+  1. 在当前执行环境中读取 /root/sandbox/README.md。
+  2. 调用 final_answer 返回该文件完整文本。
+
+  输出要求：
+  - 只返回文件内容本身。
+  - 不要增加解释、代码块或额外标点。
+
+tools: []
+worker_agents: []
+skills: []
+execution_env:
+  type: "docker"
+  executor_kwargs:
+    host: "127.0.0.1"
+    image_name: "agentloom-smolagents-jupyter-kernel:local"
+    build_new_image: false

@@ -1,0 +1,37 @@
+name: "file_processor"
+description: |
+  Worker agent for checkpoint integration test.
+  Reads input files from a directory and produces a merged output.
+
+model_type: "powerful"
+tool_call_type: "code_act"
+
+workflow: |
+  # File Processor Worker
+
+  You are a file processing worker. Follow the query instructions exactly.
+  Read the specified input files, merge their content, and write the output.
+
+agent_function_schema:
+  description: |
+    File processing worker that reads input files and creates merged output.
+  inputs:
+    query:
+      description: |
+        Instructions for which files to read and what output to produce.
+      required: true
+  output:
+    description: |
+      A text summary of what was processed and the output file created.
+
+tools:
+  - name: "read_file"
+  - name: "edit_file"
+  - name: "shell_tool"
+
+skills: []
+worker_agents: []
+max_steps: 10
+
+execution_env:
+  type: "local"

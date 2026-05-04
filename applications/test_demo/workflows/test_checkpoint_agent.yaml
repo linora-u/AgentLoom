@@ -1,0 +1,75 @@
+name: "test_checkpoint"
+description: |
+  Checkpoint & Resume integration test.
+
+  This agent performs multiple file operations across several steps,
+  making it suitable for interrupt/resume testing. Each step creates
+  or modifies a file in /tmp/agentloom_checkpoint_test/, allowing
+  verification that:
+  1. Checkpoint is saved after each step.
+  2. Resume skips already-completed steps.
+  3. File history backup is created before edits.
+  4. Heartbeat file is written during execution.
+
+  Steps:
+  - Step 1: Create /tmp/agentloom_checkpoint_test/step1.txt with "Hello from step 1"
+  - Step 2: Create /tmp/agentloom_checkpoint_test/step2.txt with "Hello from step 2"
+  - Step 3: Edit step1.txt to append " — modified in step 3"
+  - Step 4: Use grep_search to verify both files exist and contain expected content
+  - Step 5: Create /tmp/agentloom_checkpoint_test/summary.txt with a summary of all steps
+
+  After completion, the test directory should contain:
+    step1.txt (modified), step2.txt (original), summary.txt
+
+model_type: "powerful"
+tool_call_type: "code_act"
+
+workflow: |
+  # Checkpoint Resume Test Workflow
+
+  Execute ALL steps below IN ORDER, one at a time. Each step MUST use
+  the specified tool. Report the result of each step.
+
+  IMPORTANT: create the working directory first with shell_tool:
+    mkdir -p /tmp/agentloom_checkpoint_test
+
+  ## Step 1: Create step1.txt
+  Use edit_file to create "/tmp/agentloom_checkpoint_test/step1.txt"
+  with content: "Hello from step 1\n"
+  Verify: report success or failure.
+
+  ## Step 2: Create step2.txt
+  Use edit_file to create "/tmp/agentloom_checkpoint_test/step2.txt"
+  with content: "Hello from step 2\n"
+  Verify: report success or failure.
+
+  ## Step 3: Modify step1.txt
+  Use edit_file to replace "Hello from step 1" with
+  "Hello from step 1 — modified in step 3"
+  in "/tmp/agentloom_checkpoint_test/step1.txt".
+  Verify: report success or failure.
+
+  ## Step 4: Verify files
+  Use read_file to read both step1.txt and step2.txt.
+  Verify: step1.txt contains "modified in step 3",
+          step2.txt contains "Hello from step 2".
+
+  ## Step 5: Create summary
+  Use edit_file to create "/tmp/agentloom_checkpoint_test/summary.txt"
+  with content listing what was done in each step.
+  Verify: report success or failure.
+
+  ## Final Report
+  Report: ALL STEPS COMPLETED. List each step status.
+
+tools:
+  - name: "shell_tool"
+  - name: "read_file"
+  - name: "edit_file"
+
+worker_agents: []
+skills: []
+max_steps: 15
+
+execution_env:
+  type: "local"

@@ -1,0 +1,71 @@
+name: "code_review_agent"
+description: |
+  Universal Code Review Supervisor Agent. Orchestrates comprehensive code quality review
+  by coordinating specialized worker agents across multiple analysis stages.
+
+model_type: "powerful"
+tool_call_type: "code_act"
+
+workflow: |
+  # Universal Code Review Workflow (Standard Operating Procedure)
+  ## Overview
+
+  This workflow defines the end-to-end collaboration and delivery process for comprehensive code quality review.
+
+  ## Available Worker Agents
+
+  1. **project_scan** — Project structure scan, file role classification, dependency mapping.
+  2. **coding_standards** — Naming conventions, formatting, magic numbers, dead code.
+  3. **error_handling** — Uncaught exceptions, resource leaks, null checks, error propagation.
+  4. **concurrency_safety** — Shared state, synchronization, races, deadlocks.
+  5. **security_scan** — Input validation, injection, buffer overflow, hardcoded secrets.
+  6. **performance_analysis** — Algorithmic complexity, unnecessary copies, I/O bottlenecks.
+  7. **architecture_review** — Coupling/cohesion, SOLID principles, API design, layering.
+  8. **scenario_coverage** — Risk-to-scenario mapping, blind spots, edge cases.
+  9. **testability_review** — Test structure, mock-friendliness, coverage gaps.
+  10. **documentation_review** — Function docs, README, API documentation.
+  11. **recommendations** — Prioritized remediation plans.
+  12. **report_integration** — Final comprehensive report.
+
+  ## Orchestration Flow
+
+  ```mermaid
+  flowchart TD
+    A[Receive review request] --> B[Parse scope and priorities]
+    B --> C[Call get_module_context — mandatory gate]
+
+    C --> D["Phase A: project_scan"]
+
+    D --> E1["Phase B: coding_standards"]
+    D --> E2["Phase B: error_handling"]
+    D --> E3["Phase B: concurrency_safety"]
+    D --> E4["Phase B: security_scan"]
+    D --> E5["Phase B: performance_analysis"]
+    D --> E6["Phase B: architecture_review"]
+
+    E1 --> F1["Phase C: scenario_coverage"]
+    E2 --> F1
+    E3 --> F1
+    E4 --> F1
+    E5 --> F1
+    E6 --> F1
+
+    D --> F2["Phase C: testability_review"]
+    D --> F3["Phase C: documentation_review"]
+
+    F1 --> G["Phase D: recommendations"]
+    F2 --> G
+    F3 --> G
+
+    G --> H["Phase D: report_integration"]
+    H --> Z[Deliver final report]
+  ```
+
+tools:
+  - name: "get_module_context"
+    module: "applications.ai_quality_analysis.agent_tools.module_context_generator"
+    function: "get_module_context"
+    description: "Retrieve module context."
+
+execution_env:
+  type: "local"

@@ -1,0 +1,60 @@
+# AI Agents LLM 配置文件
+
+# ============================================
+# 模型配置
+# ============================================
+model:
+  # 默认模型类型
+  default_model_type: powerful
+
+  # 通用配置（作为默认值，当 powerful/fast/summary 未设置时使用）
+  # 平台名称可以选择: gemini, anthropic, openai。其他平台请查litellm 官方手册
+  common:
+    model: "gemini/gemini-3_1-pro-preview"
+    base_url: "xxxxxxx"
+    api_key: "xxxxxxx"
+    # 速率限制：每分钟最大请求数（用于 smolagents，防止超出 API 限制）
+    requests_per_minute: 10
+  
+  # 强大模型配置（用于复杂任务，如代码生成、复杂推理）
+  powerful:
+    base_url: "xxxxxxx"
+    model: "openai/azure-gpt-5_2"
+    # base_url 和 api_key 未设置时，使用 common 的配置
+    temperature: 0.2
+    max_tokens: 128000
+    timeout: 300
+    # context_cache: true enables automatic prompt caching for ALL models.
+    # litellm handles per-provider behavior (Anthropic preserves, OpenAI strips, etc.)
+    context_cache: true
+    # system_prompt_boundary: optional marker to split system prompt into
+    # static (cached) and dynamic (uncached) segments for higher cache hit rates.
+    # Example: system_prompt_boundary: "<!-- DYNAMIC_BOUNDARY -->"
+    # supports_native_tool_calls: three-state flag for tool calling capability.
+    #   "auto" (default): detect at runtime from first API response
+    #   "true": always use native tool_calls (skip detection)
+    #   "false": always use multi-strategy text parsing fallback
+    # supports_native_tool_calls: "auto"
+
+  # 快速模型配置（用于简单任务，如意图识别、分类）
+  fast:
+    # 使用 openai/ 前缀让 LiteLLM 识别这是 OpenAI 兼容端点
+    base_url: "xxxxxxx"
+    model: "gemini/gemini-3_1-pro-preview"
+    # api_key 未设置时，使用 common 的配置
+    # 注意：LiteLLM 对 gpt-5 模型要求 temperature=1.0
+    temperature: 1.0
+    max_tokens: 50000
+    timeout: 300
+    context_cache: true
+  
+  # 摘要模型配置（用于文本摘要、内容提取）
+  summary:
+    # Use Fast model config to avoid 401 Auth errors on the other endpoint
+    model: "anthropic/claude-sonnet-4-5"
+    # api_key 未设置时，使用 common 的配置
+    # 注意：LiteLLM 对 gpt-5 模型要求 temperature=1.0
+    temperature: 0.3
+    max_tokens: 50000
+    timeout: 300
+    context_cache: true

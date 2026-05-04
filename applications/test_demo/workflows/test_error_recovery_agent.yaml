@@ -1,0 +1,40 @@
+name: "test_error_recovery"
+description: "Validate error recovery: strategy cache, error classification, progressive recovery messages, and error consolidation"
+
+model_type: "powerful"
+tool_call_type: "tool_call"
+
+workflow: |
+  # Error Recovery Validation Workflow
+
+  You are a testing agent. Execute the steps below using the provided tools.
+  After each step, report the result.
+
+  ## Step 1: Read the error_recovery module
+  Use read_file to read "src/lib/smolagents/error_recovery.py" and confirm
+  that it contains the ErrorCategory enum with exactly 4 members:
+  FORMAT_NOT_FOUND, JSON_SYNTAX_ERROR, UNKNOWN_TOOL, ARGUMENT_ERROR.
+
+  ## Step 2: Read the tool_call_parsing_patch module
+  Use read_file to read "src/lib/smolagents/monkey_patch/tool_call_parsing_patch.py"
+  and confirm:
+  - ToolCallParseError has an error_category attribute
+  - _strategy_cache dict exists at module level
+  - parse_tool_call_resilient has a model_id parameter
+
+  ## Step 3: Read the base_agent module
+  Use read_file to read "src/lib/smolagents/agent/base_agent.py" and confirm:
+  - _consolidate_error_messages method exists
+  - _inject_parse_error_circuit_breaker has been removed
+  - Recovery imports error_recovery module functions
+
+  ## Step 4: Read the compression module
+  Use read_file to read "src/lib/smolagents/memory/context_compression.py"
+  and confirm that RECENT_ERROR_EXEMPT_COUNT constant exists.
+
+  ## Step 5: Summary
+  Summarize what you found about the error recovery implementation.
+  Use final_answer with a summary of whether all components are correctly implemented.
+
+tools:
+  - name: "read_file"

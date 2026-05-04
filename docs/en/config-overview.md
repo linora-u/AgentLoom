@@ -1,0 +1,88 @@
+# AgentLoom Configuration System Overview
+
+This document introduces the configuration system architecture of the AgentLoom framework, including configuration file classification, loading hierarchy, override mechanisms, and the independence of LLM configuration.
+
+## 1. Configuration File Classification
+
+The configuration of AgentLoom is primarily divided into three major categories, stored in different configuration files:
+
+| Configuration File | Default Path | Role and Purpose |
+|----------|----------|------------|
+| `system.yaml` | `config/system.yaml` | **Global system configuration**. Controls execution environment, tool lists, tool access control, code execution permissions and other system-level behaviors. |
+| `llm.yaml` | `config/llm.yaml` | **Global model configuration**. Independently manages parameters for all LLM models (`api_key`, `base_url`, temperature, timeout, retry policies, etc.) and Langfuse observability configuration. |
+| `agent_xxx.yaml` | `applications/<app>/workflows/*.yaml` | **Agent configuration**. Defines a single agent's role, workflow, tools used, model type (`model_type`), etc. Worker Agents also support batch parallel invocation via the `concurrency` field (see [Agent Config 3.11](agent_config.md#311-concurrency--concurrency-configuration)). |
+| *Application-level system configuration* | `applications/<app>/config/system.yaml` | **Optional application-level override**. Used to override default system behaviors for specific applications (e.g., modifying tool access control or replacing default tools). |
+
+> For more information, refer to:
+> - [Agent YAML Configuration Reference](agent_config.md)
+> - [System Configuration Reference](system_config.md)
+> - [LLM Configuration Reference](llm_config.md)
+
+## 2. Configuration Loading and Merging Hierarchy (Cascade)
+
+AgentLoom uses `LayeredConfigBuilder` to implement immutable and validation-supporting deep configuration merging. The loading process accumulates from bottom to top, with each upper layer overriding the previous one.
+
+### Override and Merge Rules
+1. **Dictionary (Dict) deep merge**: For example, merging within `default_loaded_tools`.
+2. **Scalar and list complete replacement**: If an upper layer defines a list, it directly replaces the lower layer's list without concatenation.
+3. **Node validation**: Each merged layer is validated through Pydantic (`RootSettings`).
+
+### Hierarchy Overview
+
+```mermaid
+flowchart TD
+  A["1. Framework defaults"] --> B["2. Global config/system.yaml"]
+  B --> C["3. Application-level <app>/config/system.yaml (optional)"]
+  C --> D["4. Agent YAML whitelisted field overrides"]
+  D --> E["Effective Config"]
+```
+
+#### Level 1: Global Base Configuration
+The system first locates the project root directory (`agent_root`) and loads `config/system.yaml` as the global foundation.
+
+#### Level 2: Application-level Override (App Overlay)
+When loading an Agent YAML, the system automatically searches upward for its parent `applications/<app>` directory. If a `config/system.yaml` exists in that application directory, it is deep-merged on top of the global configuration.
+
+#### Level 3: Agent-level Override
+In addition to defining its own workflow, a single Agent's YAML file can override certain system configurations. The whitelisted fields that support override (`_WORKFLOW_OVERLAY_KEYS`) contain only 7 fields:
+- `system`, `smart_summary`, `tool_access_control`, `execution_env`, `code_agent`, `tools`, `prompt`.
+
+## 3. Complete Isolation of LLM Configuration
+
+In AgentLoom, **LLM configuration (`llm.yaml`) is physically isolated from system configuration (`system.yaml`)**.
+
+### Why Isolation?
+- **Prevent leakage**: Ensures sensitive `api_key` values are not accidentally written into business Agent configurations.
+- **Single responsibility**: Agents only need to focus on what they should do, not on the model's underlying network request parameters.
+- **Independent schema**: System configuration uses `RootSettings` validation, while model configuration uses `LLMConfig` validation.
+
+### Isolation Mechanism
+1. **Write interception**: When loading `system.yaml` or Agent YAML, the system actively filters out three top-level fields: `model`, `llm`, `langfuse`, and prints a warning.
+2. **Association via `model_type`**: An Agent only specifies `model_type: "powerful"` (model classification label) in its configuration.
+3. **Fallback chain**:
+   When requesting parameters for a specific `model_type`, the lookup order is:
+   `models[model_type].parameter` → `models.common.parameter` → `built-in code default values`.
+
+## 4. Global C Singleton (Unified Access)
+
+Regardless of how configurations are merged, both developers and the framework's underlying layers access configuration through a unique `C` singleton object. `C` encapsulates complex merging logic and provides a very simple API.
+
+```python
+from src.lib.config import C
+
+# 1. Access system configuration
+tools_list = C.get_nested("tools", "default", default=[])
+is_summary_enabled = C.get("smart_summary")
+
+# 2. Access LLM configuration
+api_key = C.llm_api_key                # Automatically resolves common.api_key
+temp = C.get_model_config("powerful", "temperature")  # Get parameters for specific model
+
+# 3. Access raw merged dictionary
+full_dict = C.raw
+```
+
+**How it works**:
+1. **Lazy loading**: On first access to `C`, it triggers finding and merging all configuration file layers from the root directory.
+2. **Global caching**: The parsed results are cached in `_ACTIVE_CONFIG`, ensuring configuration consistency throughout the lifecycle.
+3. **Dual storage**: The `UnifiedConfig` object internally maintains both the merged `_raw` dictionary and an independent `_llm_config` (Pydantic object).

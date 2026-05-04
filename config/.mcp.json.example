@@ -1,0 +1,28 @@
+{
+  "mcpServers": {
+    "filesystem": {
+      "type": "stdio",
+      "command": "npx",
+      "args": ["-y", "@modelcontextprotocol/server-filesystem", "/workspace"],
+      "env": {
+        "NODE_ENV": "production"
+      }
+    },
+    "database": {
+      "type": "stdio",
+      "command": "python",
+      "args": ["-m", "mcp_server_sqlite", "--db", "data.db"]
+    },
+    "web-search": {
+      "type": "sse",
+      "url": "http://localhost:8080/mcp",
+      "headers": {
+        "Authorization": "Bearer YOUR_TOKEN_HERE"
+      }
+    },
+    "remote-api": {
+      "type": "http",
+      "url": "https://api.example.com/mcp"
+    }
+  }
+}

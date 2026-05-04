@@ -1,0 +1,46 @@
+name: "test_tool_resolve"
+description: "Validate convention-based tool resolution and metadata loading"
+
+model_type: "powerful"
+tool_call_type: "code_act"
+
+workflow: |
+  # Tool Resolution Validation
+
+  Execute ALL steps below. Report PASS or FAIL for each.
+
+  ## Step 1: grep_search resolves and works
+  Use grep_search to search for "class ToolMeta" in path "src/tools/".
+  Expected: find the ToolMeta class definition in tool_meta.py.
+  Verify: output contains "tool_meta.py".
+
+  ## Step 2: glob_search resolves and works
+  Use glob_search to find "*.yaml" under "config/".
+  Expected: find system.yaml and llm.yaml.
+  Verify: output contains "system.yaml".
+
+  ## Step 3: shell_tool resolves and works
+  Use shell_tool to run "echo hello_from_shell".
+  Expected: output contains "hello_from_shell".
+  Verify: output is not empty and contains the expected text.
+
+  ## Step 4: read_file resolves and works
+  Use read_file to read "config/system.yaml".
+  Expected: file content with system configuration.
+  Verify: output contains "AgentLoom" and "tool_metadata".
+
+  ## Final Summary
+  Print PASS/FAIL for each step and overall result.
+
+tools:
+  - name: "grep_search"
+  - name: "glob_search"
+  - name: "shell_tool"
+  - name: "read_file"
+
+worker_agents: []
+skills: []
+max_steps: 12
+
+execution_env:
+  type: "local"

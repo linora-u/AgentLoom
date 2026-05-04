@@ -1,0 +1,33 @@
+name: "test_lsp_definition"
+description: "Validate lsp_find_definition across Python, Go, TypeScript"
+
+model_type: "powerful"
+tool_call_type: "code_act"
+
+workflow: |
+  # LSP Go-To-Definition Validation
+
+  Test lsp_find_definition on real source files in the project.
+
+  ## Step 1: Python definition
+  Use lsp_find_definition on "src/tools/search/grep_tool/grep_tool.py", line=51, character=5.
+  Expected: find "grep_search" definition with file path and line number.
+  Verify: output contains "grep_tool.py" and line 51.
+
+  ## Step 2: Python definition — cross-file
+  Use lsp_find_definition on "src/tools/__init__.py", line=5, character=5.
+  Expected: return a definition location.
+  Verify: output contains a file path and line number (non-empty).
+
+  ## Step 3: Report
+  Print PASS/FAIL for each step.
+
+tools:
+  - name: "lsp_find_definition"
+
+worker_agents: []
+skills: []
+max_steps: 10
+
+execution_env:
+  type: "local"

@@ -1,0 +1,77 @@
+name: "worker_schema_direct"
+description: |
+  直连测试 worker，用于验证 agent_function_schema 是否驱动 tool 注册，以及工具调用时是否收到了输入并返回输出。
+model_type: "powerful"
+tool_call_type: "code_act"
+workflow: |
+  你是一个直连验证 worker。
+
+  任务要求：
+  1. 阅读用户输入内容。
+  2. 如果输入中包含 <inputs> JSON 片段，请一起考虑。
+  3. 输出一段简短文本，必须包含：
+     - query 的核心内容
+     - 是否收到了额外参数
+     - 所有参数名与参数值
+
+  ```mermaid
+  flowchart TD
+    A[接收用户输入] --> B[解析 query 与附加参数]
+    B --> C{是否包含 <inputs> JSON?}
+    C -->|是| D[合并 JSON 片段与显式参数]
+    C -->|否| E[仅使用显式参数]
+    D --> F[提取 query 核心内容]
+    E --> F
+    F --> G[判断是否收到额外参数]
+    G --> H[整理全部参数名与参数值]
+    H --> I[输出简短文本结果]
+  ```
+
+  输出用普通文本即可。
+
+agent_function_schema:
+  description: |
+    直连 worker tool，用于验证输入参数透传和输出返回。
+  inputs:
+    query:
+      description: |
+        主任务文本。
+      required: true
+    tag:
+      description: |
+        可选标记参数，用于验证多参数输入透传。
+      required: false
+    scene:
+      description: |
+        调用场景标记，例如 smoke-test、manual-review。
+      required: false
+    retry_count:
+      description: |
+        重试次数示例参数，用于验证 integer 类型透传。
+      required: false
+    dry_run:
+      description: |
+        是否仅做演练，用于验证 boolean 类型透传。
+      required: false
+    threshold:
+      description: |
+        阈值示例参数，用于验证 number 类型透传。
+      required: false
+    context:
+      description: |
+        上下文对象示例参数，用于验证 object 类型透传。
+      required: false
+    checkpoints:
+      description: |
+        检查点数组示例参数，用于验证 array 类型透传。
+      required: false
+  output:
+    description: |
+      worker 返回的文本结果。
+
+tools: []
+
+skills: []
+worker_agents: []
+execution_env:
+  type: "local"

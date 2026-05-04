@@ -1,0 +1,53 @@
+name: "test_write_file"
+description: "Validate write_file tool: create, overwrite, error handling"
+
+model_type: "powerful"
+tool_call_type: "code_act"
+
+workflow: |
+  # write_file Tool Validation Workflow
+
+  You are a testing agent. Execute ALL steps below using the provided tools.
+  After each step, report PASS or FAIL with a short explanation.
+
+  ## Step 1: Create a new file
+  Use write_file to create "/tmp/test_write_agent.txt" with content "Hello from write_file test\nLine 2\n".
+  Expected: file created.
+  Verify: result contains "Created" and char count.
+
+  ## Step 2: Read the created file
+  Use read_file to verify the content.
+  Expected: output contains "Hello from write_file test" and "Line 2".
+  Verify: both strings present.
+
+  ## Step 3: Overwrite the file
+  Use write_file to overwrite "/tmp/test_write_agent.txt" with "Completely new content\n".
+  Expected: file updated.
+  Verify: result contains "Updated".
+
+  ## Step 4: Verify the overwrite
+  Use read_file to verify old content is gone.
+  Expected: only "Completely new content" present, no "Hello" or "Line 2".
+  Verify: content matches.
+
+  ## Step 5: Create with nested directories
+  Use write_file to create "/tmp/test_write_agent_nested/a/b/file.txt" with content "nested!".
+  Expected: parent directories created automatically.
+  Verify: result contains "Created".
+
+  ## Step 6: Error — empty path
+  Try write_file with empty file_path "".
+  Expected: ValueError raised.
+  Verify: error message about empty path.
+
+  ## Final Summary
+  Print a summary table:
+  | Step | Description | Status |
+  Report overall: X/6 PASSED.
+
+  ## Cleanup
+  Delete /tmp/test_write_agent.txt and /tmp/test_write_agent_nested/ if possible.
+
+tools:
+  - name: "read_file"
+  - name: "write_file"

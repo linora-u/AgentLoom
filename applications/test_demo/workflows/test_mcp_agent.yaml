@@ -1,0 +1,32 @@
+name: "test_mcp_tools"
+description: "Validate MCP client integration with MiniMax web_search"
+
+model_type: "powerful"
+tool_call_type: "code_act"
+
+mcp_servers: "applications/test_demo/config/.mcp.json"
+
+tools:
+  - name: "read_file"
+
+workflow: |
+  # MCP Integration Test
+
+  You are a testing agent. You have access to MCP tools from MiniMax.
+
+  ## Step 1: List available tools
+  Print the names of all tools you have access to, especially any MCP tools.
+
+  ## Step 2: Use web_search
+  Use the web_search tool (it may be prefixed as mcp__MiniMax__web_search) to search for "Python 3.13 new features".
+
+  ## Step 3: Summarize results
+  Summarize the search results in 3-5 bullet points.
+
+  ## Step 4: Final report
+  Output a final report with:
+  - Which MCP tools were discovered
+  - The search query used
+  - The search results summary
+
+max_steps: 10

@@ -1,0 +1,298 @@
+# ============================================
+# System Information
+# ============================================
+system:
+  name: "AgentLoom"
+  version: "1.0.0"
+  user_agent: "AgentLoom/1.0.0"
+
+smart_summary: false
+
+# ============================================
+# Global Skills Configuration
+# ============================================
+# All agents inherit the skills declared here by default, and then additionally layer on:
+# 1. Skills in the C.agent_root/skills directory
+# 2. Top-level skills in the current agent / workflow YAML
+# Notes:
+# - A skill with the same name will raise an error within the final view of the same agent
+# - The examples below are commented out by default to avoid conflicts with existing agent-private skills
+# - The loading strategy is controlled by invocation-control.allow-model:
+#   true (load on demand) | false (hidden) | "force-inject" (force injection into the system prompt)
+skills:
+  # NOTE: agent-recall-with-files is disabled by default.
+  # This skill appends recall prompts (context.md, trace.md, insights.md) at the
+  # end of tool result messages via PreToolUse/PostToolUse hooks. Weak LLMs suffer
+  # from attention sparsity on long contexts — the appended instructions are often
+  # ignored or interfere with subsequent tool result parsing.
+  # Enable manually for strong LLMs only (e.g. Claude Sonnet/Opus, GPT-4o).
+  # - path: "skills/agent-recall-with-files"
+  #   invocation-control:
+  #     allow-model: "force-inject"
+  #     allow-hook: true
+
+
+  - path: "skills/agent-visualization"
+    invocation-control:
+      allow-model: false
+      allow-hook: true
+
+# ============================================
+# Global Execution Environment Configuration
+# ============================================
+# LSP Language Server Configuration
+# ============================================
+# LSP servers start when agent initializes and remain alive for the session.
+# After `uv sync`, all required binaries are in .venv/bin/.
+lsp_servers:
+  enabled: true
+  max_restarts: 3              # crash recovery limit (applies to all servers)
+  servers:
+    - python                   # jedi-language-server (pip, in .venv/bin)
+    - go                       # gopls (via go-bin + go install)
+    - typescript               # typescript-language-server (via nodejs-bin + npm)
+
+# ============================================
+# MCP (Model Context Protocol) Client Configuration
+# ============================================
+# Point to a .mcp.json file (Claude Code compatible format) containing
+# MCP server definitions.  Relative paths resolve from agent_root.
+# Uncomment and adjust to enable global MCP servers for all agents.
+#
+# mcp_servers: "config/.mcp.json"
+#
+# Advanced options:
+# mcp_servers:
+#   path: "config/.mcp.json"
+#   timeout: 30               # connection timeout (seconds)
+#   tool_timeout: 60          # per-tool call timeout (seconds)
+#   tool_name_prefix: true    # add mcp__{server}__ prefix to tool names
+
+# ============================================
+# Global Execution Environment Configuration
+# ============================================
+execution_env:
+  type: "local"
+
+# ============================================
+# CodeAgent Execution Environment Configuration
+# ============================================
+code_agent:
+  # Additional importable modules allowed during Python code execution; "*" means all are allowed
+  additional_authorized_imports: "*"
+  
+  # Additional built-in functions allowed during Python code execution; "*" means all callable builtins are allowed
+  additional_functions: "*"
+
+logging:
+  enabled: true
+  level: "INFO"
+  file_path: null
+  dir: ".logs"
+
+# ============================================
+# Tool Access Control
+# ============================================
+tool_access_control:
+  # ---- Path validation rules ----
+  # All path access control is configured here.  Only tools listed in
+  # a rule's `tools` array are subject to path checks.  Tools NOT listed
+  # in any rule are allowed without restrictions.
+  #
+  # Each entry supports:
+  #   tools:              list of tool names this rule applies to
+  #   include_paths:      directories to allow outside workspace.
+  #                       Supports ~ expansion, glob patterns (fnmatch),
+  #                       and "*" (allow all paths).
+  #   exclude_paths:      directories to deny access to (relative or absolute).
+  #                       Supports ~ expansion, glob patterns (fnmatch),
+  #                       and "*" (deny all paths).
+  #   path_param_patterns: tool parameter names to treat as file paths
+  #                       (defaults to built-in list: file_path, path, etc.)
+  #
+  # Conflict resolution:
+  #   - exclude takes priority over include (security-first)
+  #   - A tool in multiple rules: include/exclude are merged (union)
+  #   - A tool not in any rule: no path checks applied
+  #
+  path_validation: []
+  # Example:
+  # path_validation:
+  #   - tools: ["shell_tool", "read_file", "edit_file", "grep_search"]
+  #     include_paths: ["~/shared-libs", "/home/*/code"]
+  #     exclude_paths: ["secrets", ".env"]
+  #
+  #   - tools: ["move_file", "copy_file"]
+  #     exclude_paths: ["build", "dist"]
+  #     path_param_patterns: ["source", "destination"]
+  #
+  #   - tools: ["some_unrestricted_tool"]
+  #     include_paths: ["*"]          # allow all paths
+  #
+  #   - tools: ["some_locked_tool"]
+  #     exclude_paths: ["*"]          # deny all paths
+
+# ============================================
+# Checkpoint / Resume 配置
+# ============================================
+checkpoint:
+  enabled: true
+  # 任务成功完成后自动清理 checkpoint（节省磁盘）
+  cleanup_on_success: true
+  # checkpoint 最大保留时间（秒），默认 7 天
+  max_resume_age: 604800
+  # 心跳写入间隔（秒）
+  heartbeat_interval: 5
+
+# ============================================
+# Tool Metadata Configuration
+# ============================================
+# Per-tool runtime metadata.  Keys are canonical tool names.
+# The ``default`` key provides fallback values for unconfigured tools.
+# Agent YAML can override per-tool metadata via ``tools[].xxx``.
+tool_metadata:
+  grep_search:
+    max_result_chars: 20000
+    is_concurrency_safe: true
+    category: search
+  glob_search:
+    max_result_chars: 10000
+    is_concurrency_safe: true
+    category: search
+  shell_tool:
+    max_result_chars: 5000
+    is_concurrency_safe: false
+    category: shell
+  check_background_task:
+    max_result_chars: 5000
+    is_concurrency_safe: true
+    category: shell
+  kill_background_task:
+    max_result_chars: 3000
+    is_concurrency_safe: false
+    category: shell
+  list_background_tasks:
+    max_result_chars: 5000
+    is_concurrency_safe: true
+    category: shell
+  read_file:
+    max_result_chars: null          # exempt — handled by context compression dedup
+    is_concurrency_safe: true
+    category: file_ops
+  default:
+    max_result_chars: 20000
+    is_concurrency_safe: true
+    category: general
+
+# ============================================
+# Tool Output Limits (context compression layer)
+# ============================================
+# Overrides the hardcoded TOOL_MAX_RETAIN_CHARS in context_compression.py.
+# Set to null to exempt a tool (e.g. read_file uses dedup instead).
+# tool_output_limits:
+#   grep_search: 3000
+#   shell_tool: 2000
+#   default: 3000
+
+# ============================================
+# Default Loaded Tools
+# ============================================
+# Tools loaded by default for every agent (unless overridden by agent YAML).
+default_loaded_tools:
+  - "load_skill"
+  - "list_skills"
+  - "shell_tool"
+  - "check_background_task"
+  - "kill_background_task"
+  - "list_background_tasks"
+  - "read_file"
+  - "grep_search"
+  - "glob_search"
+  - "lsp_find_definition"
+  - "lsp_find_references"
+  - "lsp_get_document_symbols"
+  - "edit_file"
+  - "write_markdown_file"
+
+# ============================================
+# Shell Settings
+# ============================================
+# Security, path validation, background tasks, and audit log configuration
+# for shell_tool.  Can be overridden per-agent via agent YAML `shell_settings:`.
+shell_settings:
+  # Allowed command names for shell_tool; "*" means allow all command names.
+  # Example: ["ls", "cat", "grep", "find"] to restrict to read-only commands.
+  allowed_commands: "*"
+  # Allowed shell operators; "*" means allow all operators.
+  # Example: ["|", "&&"] to restrict dangerous operators.
+  allowed_operators: "*"
+
+  # System-critical paths where destructive operations (rm, rmdir) are blocked.
+  dangerous_paths:
+    - "/"
+    - "/etc"
+    - "/usr"
+    - "/var"
+    - "/boot"
+    - "/sys"
+    - "/proc"
+    - "/home"
+    - "/root"
+    - "/dev"
+    - "/lib"
+    - "/lib64"
+    - "/bin"
+    - "/sbin"
+    - "/opt"
+    - "/srv"
+    - "/tmp"
+  # Enable/disable blocking destructive operations on dangerous paths.
+  block_destructive: true
+
+  # Security check toggles (all default to true when absent).
+  # Each check can be individually disabled for specific use cases.
+  # See docs/cn/system_config.md §8 for details.
+  security_checks:
+    command_substitution: true     # Block $() and backticks
+    parameter_expansion: true      # Block ${}
+    process_substitution: true     # Block <(), >()
+    env_injection: true            # Block LD_PRELOAD, PATH injection
+    control_characters: true       # Block hidden control characters
+    dangerous_shell_prefix: true   # Block sudo, bash -c, env, etc.
+    zsh_dangerous_commands: true   # Block zmodload, ztcp, etc.
+    incomplete_commands: true      # Block incomplete command fragments
+    ifs_injection: true            # Block IFS manipulation
+    destructive_patterns: true     # Block rm -rf /, mkfs, etc.
+
+  # Background task management
+  background_tasks:
+    enabled: true
+    max_concurrent: 10
+    auto_background_on_timeout: true
+    max_output_bytes: 104857600   # 100 MB per task
+    stall_detection: true
+    stall_threshold_seconds: 45
+
+  # Per-agent shell security audit log.
+  # Writes structured events (blocks, stalls, timeouts, path violations)
+  # to .logs/{agent_name}/{timestamp}/shell_audit.log (co-located with
+  # the agent run log) so users can quickly diagnose shell permissions.
+  # Log directory is controlled by the top-level logging.dir setting.
+  audit_log:
+    enabled: true           # Master switch (default: true)
+    log_success: false      # Also log successful executions (default: false)
+
+# ============================================
+# Tool Alias Mapping
+# ============================================
+tools_mapping:
+  Claude:
+    Read: "read_file"
+    Write: "write_markdown_file"
+    Bash: "shell_tool"
+    Glob: "glob_search"
+    Grep: "grep_search"
+    Edit: "edit_file"
+    Definition: "lsp_find_definition"
+    References: "lsp_find_references"
+    Symbols: "lsp_get_document_symbols"

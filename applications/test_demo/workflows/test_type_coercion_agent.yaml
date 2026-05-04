@@ -1,0 +1,38 @@
+name: "test_type_coercion"
+description: "Validate LLM semantic type coercion for tool parameters"
+
+model_type: "powerful"
+tool_call_type: "code_act"
+
+workflow: |
+  # Type Coercion Validation
+
+  Execute ALL steps below. Report PASS or FAIL for each.
+
+  ## Step 1: Boolean parameter — normal
+  Use grep_search with pattern="def ", path="src/tools/search/grep_tool/", case_insensitive=True.
+  Expected: case-insensitive search returns results.
+  Verify: output contains function definitions.
+
+  ## Step 2: Integer parameter — normal
+  Use grep_search with pattern="import", path="src/tools/search/", max_results=3.
+  Expected: returns at most 3 result entries.
+  Verify: output contains results and metadata.
+
+  ## Step 3: Search with context lines
+  Use grep_search with pattern="def grep_search", path="src/tools/search/", context_lines=2.
+  Expected: matching lines with 2 lines of context before and after.
+  Verify: output shows context around the match.
+
+  ## Final Summary
+  Print PASS/FAIL for each step and overall result.
+
+tools:
+  - name: "grep_search"
+
+worker_agents: []
+skills: []
+max_steps: 10
+
+execution_env:
+  type: "local"

@@ -1,0 +1,67 @@
+name: "test_search_tools"
+description: "Validate search & navigation tools (grep_search, glob_search, lsp_find_definition, lsp_find_references, lsp_get_document_symbols)"
+
+model_type: "powerful"
+tool_call_type: "code_act"
+
+workflow: |
+  # Search Tools Validation Workflow
+
+  You are a testing agent. Execute ALL steps below using the provided tools.
+  After each step, report PASS or FAIL with a short explanation.
+
+  ## Step 1: glob_search — find Python files
+  Use glob_search to find all Python files under "src/tools/search/".
+  Expected: output should contain grep_tool.py, glob_tool.py, lsp_tool.py, treesitter_fallback.py, ast_grep_tool.py.
+  Verify: at least 5 .py files found.
+
+  ## Step 2: grep_search — content mode
+  Use grep_search to search for pattern "def grep_search" in path "src/tools/search/".
+  Expected: find the function definition in grep_tool/grep_tool.py with line number.
+  Verify: output contains "grep_tool.py" and a line number.
+
+  ## Step 3: grep_search — files_with_matches mode
+  Use grep_search with output_mode="files_with_matches" to find files containing "import json" in path "src/tools/search/".
+  Expected: return a list of file paths (not line content).
+  Verify: output is a list of paths, no "|" separator in output.
+
+  ## Step 4: grep_search — count mode
+  Use grep_search with output_mode="count" to count how many lines match "def " in path "src/tools/search/".
+  Expected: return file:count pairs.
+  Verify: output contains ":" with numeric counts.
+
+  ## Step 5: lsp_get_document_symbols — file symbols
+  Use lsp_get_document_symbols on file "src/tools/search/grep_tool/grep_tool.py".
+  Expected: return a list of functions/classes defined in the file.
+  Verify: output contains "grep_search" as a symbol.
+
+  ## Step 6: lsp_find_references — find references
+  Use lsp_find_references on file "src/tools/search/grep_tool/grep_tool.py", line=51, character=5.
+  (line 51, character 5 points to the "grep_search" function definition)
+  Expected: return a list of files referencing grep_search.
+  Verify: output contains references and at least one file path.
+
+  ## Step 7: lsp_find_definition — find definition
+  Use lsp_find_definition on file "src/tools/search/grep_tool/grep_tool.py", line=51, character=5.
+  (line 51, character 5 points to the "grep_search" function definition)
+  Expected: return the definition location with file path and line number.
+  Verify: output contains "grep_tool.py" and line number 45.
+
+  ## Final Summary
+  Print a summary table:
+  | Step | Tool | Status |
+  Report overall: X/7 PASSED.
+
+tools:
+  - name: "grep_search"
+  - name: "glob_search"
+  - name: "lsp_find_definition"
+  - name: "lsp_find_references"
+  - name: "lsp_get_document_symbols"
+
+worker_agents: []
+skills: []
+max_steps: 20
+
+execution_env:
+  type: "local"

@@ -1,0 +1,44 @@
+name: "test_pipe_redirect"
+description: "Validate pipe redirect normalization: piped commands should execute without hanging"
+
+model_type: "powerful"
+tool_call_type: "code_act"
+
+workflow: |
+  # Pipe Redirect Normalization Validation Workflow
+
+  You are a testing agent. Execute ALL steps below using shell_tool.
+  After each step, report PASS or FAIL with a short explanation.
+
+  ## Step 1: Simple piped command
+  Use shell_tool to run: echo -e "line1\nline2\nline3" | wc -l
+  Expected: output contains "3" (three lines counted).
+  Verify: the number 3 appears in the output.
+
+  ## Step 2: Multi-pipe command
+  Use shell_tool to run: echo -e "banana\napple\ncherry" | sort | head -2
+  Expected: output contains "apple" and "banana" (first two after sort).
+  Verify: both "apple" and "banana" appear.
+
+  ## Step 3: Pipe with grep
+  Use shell_tool to run: echo -e "foo\nbar\nbaz" | grep -c "ba"
+  Expected: output contains "2" (two lines match "ba").
+  Verify: the number 2 appears in the output.
+
+  ## Step 4: Pipe does not hang (timeout test)
+  Use shell_tool with a short timeout to run a piped command:
+    shell_tool("seq 1 1000 | tail -5", timeout=10)
+  Expected: output contains "996" through "1000" (last 5 of 1000).
+  Verify: command completes within timeout and has correct output.
+
+  ## Final Summary
+  Print a summary table:
+  | Step | Command | Status |
+  Report overall: X/4 PASSED.
+
+tools:
+  - name: "shell_tool"
+
+worker_agents: []
+skills: []
+max_steps: 15

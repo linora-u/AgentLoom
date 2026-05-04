@@ -1,0 +1,44 @@
+name: "test_read_file"
+description: "Validate read_file tool: line-numbered output, offset/limit, error handling"
+
+model_type: "powerful"
+tool_call_type: "code_act"
+
+workflow: |
+  # read_file Tool Validation Workflow
+
+  You are a testing agent. Execute ALL steps below using the provided tools.
+  After each step, report PASS or FAIL with a short explanation.
+
+  ## Step 1: Read a small file
+  Use read_file to read "README.md" in the current directory.
+  Expected: output contains line numbers in cat -n format (number + tab + content).
+  Verify: first line starts with a number followed by tab.
+
+  ## Step 2: Read with offset and limit
+  Use read_file to read "README.md" with offset=5 and limit=3.
+  Expected: exactly 3 lines starting from line 5.
+  Verify: first displayed line number is 5, last is 7.
+
+  ## Step 3: Read a Python file
+  Use read_file to read "src/tools/file_ops/read_file/read_file.py".
+  Expected: output contains Python code with line numbers.
+  Verify: output contains "def read_file" and line numbers.
+
+  ## Step 4: Error handling — directory path
+  Try to read_file on "src/tools/" (a directory).
+  Expected: ValueError with message about directory.
+  Verify: error message contains "directory".
+
+  ## Step 5: Error handling — nonexistent file
+  Try to read_file on "nonexistent_file_xyz.txt".
+  Expected: FileNotFoundError.
+  Verify: error mentions "not found" or "does not exist".
+
+  ## Final Summary
+  Print a summary table:
+  | Step | Description | Status |
+  Report overall: X/5 PASSED.
+
+tools:
+  - name: "read_file"
