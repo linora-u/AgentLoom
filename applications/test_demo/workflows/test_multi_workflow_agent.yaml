@@ -1,0 +1,26 @@
+name: "test_multi_workflow_agent"
+description: |
+  Demo agent for sequential list workflows.
+
+model_type: "powerful"
+tool_call_type: "tool_call"
+max_steps: 3
+
+workflow:
+  - |
+    # First workflow
+    Return exactly:
+    FIRST_WORKFLOW_DONE marker=ALPHA17
+  - |
+    # Second workflow
+    This is a new workflow item. Ignore earlier answers.
+    Return exactly:
+    SECOND_WORKFLOW_DONE marker=BETA29
+
+tools: []
+worker_agents: []
+default_loaded_tools: []
+skills: []
+
+execution_env:
+  type: "local"

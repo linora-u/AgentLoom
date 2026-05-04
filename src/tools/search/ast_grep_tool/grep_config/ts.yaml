@@ -1,0 +1,140 @@
+id: export function
+language: typescript
+rule:
+  all:
+    - kind: export_statement
+    - has:
+        all:
+          - kind: function_declaration
+          - has:
+              field: name
+              regex: ^{WORDS}$
+---
+id: function
+language: typescript
+rule:
+  all:
+    - kind: function_declaration
+    - has:
+        field: name
+        regex: ^{WORDS}$
+    - not:
+        inside:
+          kind: export_statement
+---
+id: variable arrow function
+language: typescript
+rule:
+  all:
+    - kind: lexical_declaration
+    - has:
+        all:
+          - kind: variable_declarator
+          - has:
+              field: name
+              regex: ^{WORDS}$
+          - has:
+              field: value
+              kind: arrow_function
+---
+id: variable function expression
+language: typescript
+rule:
+  kind: lexical_declaration
+  regex: \b(?:const|let|var)\s+{WORDS}\s*=\s*(?:async\s+)?function\b
+---
+id: export interface
+language: typescript
+rule:
+  all:
+    - kind: export_statement
+    - has:
+        all:
+          - kind: interface_declaration
+          - has:
+              field: name
+              regex: ^{WORDS}$
+---
+id: interface
+language: typescript
+rule:
+  all:
+    - kind: interface_declaration
+    - has:
+        field: name
+        regex: ^{WORDS}$
+    - not:
+        inside:
+          kind: export_statement
+---
+id: export type
+language: typescript
+rule:
+  all:
+    - kind: export_statement
+    - has:
+        all:
+          - kind: type_alias_declaration
+          - has:
+              field: name
+              regex: ^{WORDS}$
+---
+id: type
+language: typescript
+rule:
+  all:
+    - kind: type_alias_declaration
+    - has:
+        field: name
+        regex: ^{WORDS}$
+    - not:
+        inside:
+          kind: export_statement
+---
+id: export class
+language: typescript
+rule:
+  all:
+    - kind: export_statement
+    - has:
+        all:
+          - kind: class_declaration
+          - has:
+              field: name
+              regex: ^{WORDS}$
+---
+id: class
+language: typescript
+rule:
+  all:
+    - kind: class_declaration
+    - has:
+        field: name
+        regex: ^{WORDS}$
+    - not:
+        inside:
+          kind: export_statement
+---
+id: export enum
+language: typescript
+rule:
+  all:
+    - kind: export_statement
+    - has:
+        all:
+          - kind: enum_declaration
+          - has:
+              field: name
+              regex: ^{WORDS}$
+---
+id: enum
+language: typescript
+rule:
+  all:
+    - kind: enum_declaration
+    - has:
+        field: name
+        regex: ^{WORDS}$
+    - not:
+        inside:
+          kind: export_statement

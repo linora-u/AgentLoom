@@ -1,0 +1,39 @@
+name: "test_empty_result"
+description: "Validate empty result protection — tools returning no output get marker injected"
+
+model_type: "powerful"
+tool_call_type: "code_act"
+
+workflow: |
+  # Empty Result Protection Validation
+
+  Execute ALL steps below. Report PASS or FAIL for each.
+
+  ## Step 1: Shell command with output
+  Use shell_tool to run "echo 'hello world'".
+  Expected: output contains "hello world" (non-empty, no marker injection).
+  Verify: output does NOT contain "completed with no output".
+
+  ## Step 2: Search with no matches
+  Use grep_search to search for "VERY_UNLIKELY_PATTERN_ZZZZZ_99999" in path="src/tools/search/".
+  Expected: "No matches found." (non-empty string, should NOT trigger empty marker).
+  Verify: output contains "No matches found", does NOT contain "completed with no output".
+
+  ## Step 3: Shell silent command
+  Use shell_tool to run "true" (exits 0, produces no output).
+  Expected: if the output is empty, the framework should inject a marker.
+  Verify: check whether the result says "completed with no output" or has actual output.
+
+  ## Final Summary
+  Print PASS/FAIL for each step and overall result.
+
+tools:
+  - name: "shell_tool"
+  - name: "grep_search"
+
+worker_agents: []
+skills: []
+max_steps: 10
+
+execution_env:
+  type: "local"

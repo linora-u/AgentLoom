@@ -1,0 +1,53 @@
+name: "test_shell_semantics"
+description: "Validate shell_tool exit code semantic interpretation (grep no-match is not an error)"
+
+model_type: "powerful"
+tool_call_type: "code_act"
+
+workflow: |
+  # Shell Exit Code Semantics Validation
+
+  Execute ALL steps below. Report PASS/FAIL for each.
+
+  ## Step 1: grep with matches
+  Run `shell_tool("grep -r 'def shell_tool' src/tools/shell/")`.
+  Expected: Output contains matching lines with "def shell_tool".
+  Report: PASS if output contains match results, FAIL otherwise.
+
+  ## Step 2: grep with no matches (exit code 1 — NOT an error)
+  Run `shell_tool("grep 'this_string_definitely_does_not_exist_xyz123' README.md")`.
+  Expected: This should NOT raise an error. The output may be empty or indicate no matches.
+  Note: grep returns exit code 1 for "no matches" which is NOT a failure.
+  Report: PASS if no error raised, FAIL if exception occurs.
+
+  ## Step 3: diff between identical content
+  Create two temp files with same content and diff them:
+  Run `shell_tool("echo 'test' > /tmp/agentloom_test_a.txt && echo 'test' > /tmp/agentloom_test_b.txt && diff /tmp/agentloom_test_a.txt /tmp/agentloom_test_b.txt; echo 'diff_done'")`.
+  Note: This may be blocked by path validation. If so, skip and report SKIP.
+  Expected: No error, output may be empty (files identical) followed by "diff_done".
+  Report: PASS/SKIP.
+
+  ## Step 4: Basic command success
+  Run `shell_tool("echo 'semantics_test_ok'")`.
+  Expected: Output contains "semantics_test_ok".
+  Report: PASS if output matches, FAIL otherwise.
+
+  ## Final Summary
+  Print summary:
+  | Step | Description | Status |
+  |------|-------------|--------|
+  | 1 | grep with matches | PASS/FAIL |
+  | 2 | grep no matches | PASS/FAIL |
+  | 3 | diff identical | PASS/FAIL/SKIP |
+  | 4 | echo test | PASS/FAIL |
+
+  Overall: X/4 PASSED.
+
+tools:
+  - name: "shell_tool"
+
+skills: []
+max_steps: 15
+
+execution_env:
+  type: "local"

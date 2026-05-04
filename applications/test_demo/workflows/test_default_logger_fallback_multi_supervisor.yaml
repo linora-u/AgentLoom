@@ -1,0 +1,25 @@
+name: "default_logger_multi_supervisor"
+description: |
+  多 agent 默认 logger 回退演示：主 agent + 子 agent。
+
+model_type: "powerful"
+tool_call_type: "code_act"
+
+workflow: |
+  # Multi-Agent Default Logger Fallback Demo
+  目标：验证未显式传 logger 时，主 agent 与子 agent 都可以正常运行并打印日志。
+
+  执行步骤：
+  1. 主 agent 先执行一次 shell_tool，输出固定文本 "supervisor_ready"。
+  2. 调度子 agent `fallback_demo_worker`，让它执行一次 shell_tool，输出固定文本 "worker_ready"。
+  3. 汇总返回主 agent 与子 agent 的执行结果。
+
+tools:
+  - name: "shell_tool"
+
+worker_agents:
+  - path: "applications/test_demo/workflows/worker_agents/test_default_logger_fallback_worker.yaml"
+
+skills: []
+execution_env:
+  type: "local"

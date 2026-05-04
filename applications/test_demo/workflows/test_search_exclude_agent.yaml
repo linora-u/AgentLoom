@@ -1,0 +1,39 @@
+name: "test_search_exclude"
+description: "Validate search tools respect tool_access_control exclude_paths"
+
+model_type: "powerful"
+tool_call_type: "code_act"
+
+workflow: |
+  # Search Exclude Validation
+
+  Execute ALL steps below. Report PASS or FAIL for each.
+
+  ## Step 1: Normal search — non-excluded directory
+  Use grep_search to search for "import" in path="src/tools/search/" with max_results=5.
+  Expected: results found (directory is not excluded).
+  Verify: output contains matches.
+
+  ## Step 2: Search across full source tree
+  Use grep_search to search for "def " in path="src/tools/" with output_mode="files_with_matches", max_results=10.
+  Expected: multiple files found.
+  Verify: output contains file paths.
+
+  ## Step 3: glob_search — find Python files
+  Use glob_search to find "**/*.py" under path="src/tools/search/".
+  Expected: multiple Python files found.
+  Verify: output contains .py file paths.
+
+  ## Final Summary
+  Print PASS/FAIL for each step and overall result.
+
+tools:
+  - name: "grep_search"
+  - name: "glob_search"
+
+worker_agents: []
+skills: []
+max_steps: 10
+
+execution_env:
+  type: "local"

@@ -1,0 +1,31 @@
+name: "test_lsp_hover"
+description: "Validate lsp_hover returns type information for Python symbols"
+
+model_type: "powerful"
+tool_call_type: "code_act"
+
+workflow: |
+  # LSP Hover Validation
+
+  ## Step 1: Hover on function definition
+  Use lsp_hover on "src/tools/search/grep_tool/grep_tool.py", line=51, character=5.
+  Expected: return type signature showing "def grep_search(...) -> str" or similar.
+  Verify: output contains "grep_search" and parameter types.
+
+  ## Step 2: Hover on a class
+  Use lsp_hover on "src/services/lsp/lsp_server_instance.py", line=30, character=7.
+  Expected: return class information for LSPServerState.
+  Verify: output is non-empty and contains "LSPServerState".
+
+  ## Step 3: Report
+  Print PASS/FAIL for each step.
+
+tools:
+  - name: "lsp_hover"
+
+worker_agents: []
+skills: []
+max_steps: 10
+
+execution_env:
+  type: "local"

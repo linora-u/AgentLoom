@@ -1,0 +1,111 @@
+name: "dir_architecture_analysis"
+description: |
+  对单个目录进行 LLM 架构分析。
+  接收 dir_path 和 index_content（由调用方前置读取），
+  返回 Markdown 格式的架构分析文本（由调用方后置写入 analysis.md）。
+  不做文件读写，只做分析。
+
+model_type: "powerful"
+tool_call_type: "code_act"
+concurrency: auto
+
+workflow: |
+  # 单目录架构分析（支持子目录分析复用）
+
+  ```mermaid
+  flowchart TD
+    A["从 inputs 读取 dir_path、index_content、children_analyses"] --> B["LLM 分析五个维度"]
+    B --> C["返回 Markdown 格式分析文本"]
+  ```
+
+  ## 任务
+  基于传入的 index_content（某个目录的 index.md 全文）和 children_analyses（子目录的分析结果），
+  分析代码结构，返回 Markdown 格式的架构分析文本。
+
+  **你不需要读写任何文件**，index_content 和 children_analyses 已由调用方读好，
+  你的输出会由调用方写入 analysis.md。
+
+  ## 输入
+  - `dir_path`：目录路径（用于标题，如 "src/utils" 或 "(root)"）
+  - `index_content`：该目录 index.md 的完整文本内容
+  - `children_analyses`（可选）：该目录直接子目录的架构分析全文，由 `---` 分隔。
+    如果为空字符串，表示该目录没有已分析的子目录（叶子目录）。
+
+  ## 分析维度
+  基于 index_content 和 children_analyses，分析以下五个维度：
+  1. **核心功能**：该目录的主要职责是什么？
+  2. **关键模块**：最重要的 2-3 个文件/函数是什么？为什么？
+  3. **设计模式**：是否可识别出设计模式（工厂、单例、观察者等）？
+  4. **依赖关系**：该目录依赖什么？被什么依赖？
+  5. **注意事项**：从代码结构看有什么值得注意的地方？
+
+  ## 子目录分析复用
+  当 children_analyses 非空时，你应该：
+  - 结合子目录的分析结论，做**跨层级**的架构推断
+  - 子目录已分析的"核心功能"和"关键模块"可直接引用，不要重复分析
+  - 重点分析**子目录之间的协作关系**和**该目录作为父目录的整合职责**
+  - 在"依赖关系"中体现子目录间的内部依赖
+
+  当 children_analyses 为空时（叶子目录），只基于 index_content 分析即可。
+
+  ## 输出格式
+  使用**分段构建**方式生成 Markdown 文本，**不要**把所有内容塞进一个巨大的 f-string：
+
+  ```python
+  parts = []
+  parts.append(f"# 架构分析: {dir_path}")
+  parts.append("")
+  parts.append("## 核心功能")
+  parts.append("该目录的核心功能是...")
+  parts.append("")
+  parts.append("## 关键模块")
+  parts.append("- `module_a.py`: ...")
+  parts.append("")
+  parts.append("## 设计模式")
+  parts.append("...")
+  parts.append("")
+  parts.append("## 依赖关系")
+  parts.append("...")
+  parts.append("")
+  parts.append("## 注意事项")
+  parts.append("...")
+  result = "\n".join(parts)
+  final_answer(result)
+  ```
+
+  ### ⚠️ 代码生成安全规则（必须遵守）
+  - **不要**用一个 `f"""..."""`  包裹整个输出 —— 容易导致三引号未闭合或括号不匹配
+  - 只在 `parts.append(f"...")` 中对**单行**使用 f-string 插值
+  - Markdown 中的花括号（如 `{config}`）**不是** Python 变量，不要用 f-string 包裹它们
+  - 只使用已知变量：`dir_path`, `index_content`, `children_analyses`，不要引用未定义变量
+
+  ## 注意事项
+  - index_content 内容很少时（目录只有少量文件），简短分析即可
+  - 目录名含 test/spec 时，重点分析测试覆盖策略
+  - 保持客观，基于 index_content 和 children_analyses 实际内容，不过度推断
+  - **不要调用任何文件读写工具**，直接分析并返回
+
+tools: []
+
+execution_env:
+  type: "local"
+
+agent_function_schema:
+  description: |
+    对单个目录进行 LLM 架构分析，返回 Markdown 格式分析文本。
+    不做文件读写，由调用方负责前置读 index.md、后置写 analysis.md。
+  inputs:
+    dir_path:
+      description: 要分析的相对目录路径，如 "src/utils" 或 "(root)"（项目根目录），用于标题
+      required: true
+    index_content:
+      description: 该目录 index.md 的完整文本内容，由调用方前置读取传入
+      required: true
+    children_analyses:
+      description: |
+        该目录直接子目录的架构分析全文，多个子目录用 --- 分隔。
+        由调用方收集已完成分析的子目录 analysis.md 内容拼接而成。
+        为空字符串时表示无已分析的子目录（叶子目录或子目录均未完成分析）。
+      required: false
+  output:
+    description: Markdown 格式的架构分析文本，由调用方写入 analysis.md

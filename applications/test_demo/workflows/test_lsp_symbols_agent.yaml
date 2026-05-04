@@ -1,0 +1,32 @@
+name: "test_lsp_symbols"
+description: "Validate lsp_get_document_symbols and lsp_get_workspace_symbols"
+
+model_type: "powerful"
+tool_call_type: "code_act"
+
+workflow: |
+  # LSP Document & Workspace Symbols Validation
+
+  ## Step 1: Document symbols
+  Use lsp_get_document_symbols on "src/tools/search/grep_tool/grep_tool.py".
+  Expected: list of functions including grep_search, _build_rg_args, _run_ripgrep, etc.
+  Verify: output contains "grep_search" as a symbol name.
+
+  ## Step 2: Workspace symbols
+  Use lsp_get_workspace_symbols with directory="src/tools/search/", query="grep_search".
+  Expected: find grep_search symbol with file location.
+  Verify: output contains "grep_search" and a file path.
+
+  ## Step 3: Report
+  Print PASS/FAIL for each step.
+
+tools:
+  - name: "lsp_get_document_symbols"
+  - name: "lsp_get_workspace_symbols"
+
+worker_agents: []
+skills: []
+max_steps: 10
+
+execution_env:
+  type: "local"

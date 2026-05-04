@@ -1,0 +1,76 @@
+from pathlib import Path
+
+import src.lib.smolagents.agent.yaml_agent_factory as yaml_agent_factory
+from src.lib.smolagents.agent.yaml_agent_factory import YamlAgentFactory, YamlConfiguredSupervisorAgent
+
+FIXTURE_ROOT = Path(__file__).resolve().parent / "fixtures"
+WORKFLOW_INTRO = yaml_agent_factory.WORKFLOW_EXECUTION_INTRO
+WORKFLOW_GUIDANCE = yaml_agent_factory.TASK_SPEC_WORKFLOW_GUIDANCE
+
+
+def _make_supervisor_from_yaml(relative_yaml_path: str) -> YamlConfiguredSupervisorAgent:
+    config = YamlAgentFactory._load_config_from_file(FIXTURE_ROOT / relative_yaml_path)
+    supervisor = object.__new__(YamlConfiguredSupervisorAgent)
+    supervisor._config = config
+    supervisor._logger = None
+    return supervisor
+
+
+def test_transform_task_uses_task_spec_without_mermaid():
+    supervisor = _make_supervisor_from_yaml("supervisor/test_shell_persist_supervisor.yaml")
+    out = supervisor._transform_task("analyze this module")
+
+    assert "Task specification (what you must follow in this task):" in out
+    assert "<task_spec>" in out
+    assert "</task_spec>" in out
+    assert "<workflow>" not in out
+    assert WORKFLOW_INTRO not in out
+    assert WORKFLOW_GUIDANCE not in out
+    assert "<task_request>" in out
+    assert "analyze this module" in out
+
+
+def test_transform_task_wraps_mermaid_in_workflow():
+    supervisor = _make_supervisor_from_yaml("supervisor/test_supervisor_code_review_agent.yaml")
+    out = supervisor._transform_task("run all checks")
+
+    assert "<task_spec>" in out
+    assert WORKFLOW_GUIDANCE in out
+    assert WORKFLOW_INTRO in out
+    assert "<workflow>" in out
+    assert "\n  <workflow>\n" in out
+    assert "\n    flowchart TD\n" in out
+    assert "flowchart TD" in out
+    assert "A[Receive review request]" in out
+    assert "<task_request>" in out
+    assert "run all checks" in out
+
+
+def test_transform_tasks_keeps_single_string_workflow_behavior():
+    supervisor = _make_supervisor_from_yaml("supervisor/test_shell_persist_supervisor.yaml")
+
+    transformed_tasks = supervisor._transform_tasks("analyze this module")
+
+    assert transformed_tasks == [supervisor._transform_task("analyze this module")]
+
+
+def test_transform_tasks_list_workflow_returns_user_items_without_stage_wrappers():
+    supervisor = object.__new__(YamlConfiguredSupervisorAgent)
+    supervisor._config = {
+        "name": "multi_workflow",
+        "description": "Overall task description.",
+        "workflow": [
+            "First workflow item.\nUse exactly this instruction.",
+            "Second workflow item.\nContinue from previous memory.",
+        ],
+    }
+    supervisor._logger = None
+
+    transformed_tasks = supervisor._transform_tasks("ignored task request")
+
+    assert transformed_tasks == [
+        "First workflow item.\nUse exactly this instruction.",
+        "Second workflow item.\nContinue from previous memory.",
+    ]
+    assert all("Task specification" not in task for task in transformed_tasks)
+    assert all("Stage" not in task for task in transformed_tasks)

@@ -1,0 +1,162 @@
+max_steps: 80
+
+name: "unit_test_studio_append"
+description: |
+  基于 Unit Test Studio 的函数级 pytest 生成与补充智能体。
+  负责解析目标函数、规划场景、生成/追加测试文件、执行轻量校验，并输出交付报告。
+
+tool_call_type: "code_act"
+model_type: "powerful"
+
+workflow: |
+  你是一个专业的 Python 单元测试工程师，请严格按 Unit Test Studio 流程执行。
+
+  **输入约定（query 中 JSON）**：
+  - `target_root`：项目根目录
+  - `targets`：逗号分隔的目标函数列表，格式 `module.py:function_name`
+  - `output_dir`：测试输出目录（可选，默认 `test/generated`）
+
+  **流水线顺序（必须保持）**：
+  1. 调用 `resolve_function_targets(target_root, targets)` 解析目标函数
+  2. 对每个目标调用：
+     - `get_function_context(...)`
+     - `plan_test_scenarios(...)`
+  3. 对每个场景调用：
+     - `build_pytest_template(...)`
+     - `upsert_pytest_file(...)`
+  4. 汇总生成文件后调用：
+     - `validate_and_refine_generated_tests(...)`
+  5. 最后调用：
+     - `collect_generation_report(...)`
+
+  **执行要求**：
+  - 必须按上面阶段顺序执行，不得跳阶段。
+  - `upsert_pytest_file` 采用追加策略，不要粗暴覆盖已有文件。
+  - 任一阶段 JSON 解析失败需立即报错并说明阶段。
+  - 最终输出应包含：
+    1) 生成文件列表；
+    2) refine 结果；
+    3) 交付报告正文。
+
+  **建议代码骨架**：
+  ```python
+  import json
+
+  payload = json.loads(query)
+  output_dir = payload.get("output_dir", "test/generated")
+
+  intake = json.loads(
+      resolve_function_targets(
+          target_root=payload["target_root"],
+          targets=payload["targets"],
+      )
+  )
+
+  generated_files = []
+  for item in intake["items"]:
+      ctx = get_function_context(
+          target_root=intake["target_root"],
+          module_path=item["module_path"],
+          function_name=item["function_name"],
+      )
+      scenario_text = plan_test_scenarios(
+          function_context=ctx,
+          function_name=item["function_name"],
+      )
+      test_content = build_pytest_template(
+          module_path=item["module_path"],
+          function_name=item["function_name"],
+          scenario_markdown=scenario_text,
+          output_dir=output_dir,
+      )
+      upsert = json.loads(
+          upsert_pytest_file(
+              target_root=intake["target_root"],
+              module_path=item["module_path"],
+              function_name=item["function_name"],
+              test_content=test_content,
+              output_dir=output_dir,
+          )
+      )
+      generated_files.append(upsert["file_path"])
+
+  refinement = validate_and_refine_generated_tests(
+      target_root=intake["target_root"],
+      file_paths=json.dumps(generated_files, ensure_ascii=False),
+  )
+
+  report = collect_generation_report(
+      target_root=intake["target_root"],
+      output_dir=output_dir,
+  )
+
+  final_answer(
+      json.dumps(
+          {
+              "target_root": intake["target_root"],
+              "output_dir": output_dir,
+              "generated_files": generated_files,
+              "refinement": json.loads(refinement),
+              "report": report,
+          },
+          ensure_ascii=False,
+      )
+  )
+  ```
+
+tools:
+  - name: "write_file"
+  - name: "read_file"
+  - name: "browse_directory"
+  - name: "grep_search"
+  - name: "code_edit"
+  - name: "code_search"
+  - name: "code_replace"
+  - name: "search_and_replace"
+
+  - name: "resolve_function_targets"
+    module: "applications.unit_test_studio.agent_tools.unit_test_tools"
+    function: "resolve_function_targets"
+  - name: "get_function_context"
+    module: "applications.unit_test_studio.agent_tools.unit_test_tools"
+    function: "get_function_context"
+  - name: "plan_test_scenarios"
+    module: "applications.unit_test_studio.agent_tools.unit_test_tools"
+    function: "plan_test_scenarios"
+  - name: "build_pytest_template"
+    module: "applications.unit_test_studio.agent_tools.unit_test_tools"
+    function: "build_pytest_template"
+  - name: "upsert_pytest_file"
+    module: "applications.unit_test_studio.agent_tools.unit_test_tools"
+    function: "upsert_pytest_file"
+  - name: "validate_and_refine_generated_tests"
+    module: "applications.unit_test_studio.agent_tools.unit_test_tools"
+    function: "validate_and_refine_generated_tests"
+  - name: "collect_generation_report"
+    module: "applications.unit_test_studio.agent_tools.unit_test_tools"
+    function: "collect_generation_report"
+
+execution_env:
+  type: "local"
+
+agent_function_schema:
+  description: |
+    基于 Unit Test Studio 的函数级测试补充智能体。
+
+    核心能力：
+    - 解析函数目标并规范化输入
+    - 生成可执行场景并产出参数化 pytest
+    - 以 append/upsert 方式写入测试文件
+    - 对生成结果进行轻量校验与修正
+    - 输出最终交付报告
+  inputs:
+    query:
+      description: |
+        JSON 字符串，包含：
+        - target_root: 目标项目根目录
+        - targets: 逗号分隔 module.py:function_name 列表
+        - output_dir: 可选，输出目录（默认 test/generated）
+      required: true
+  output:
+    description: |
+      str: JSON 字符串，包含 target_root、output_dir、generated_files、refinement 与 report。

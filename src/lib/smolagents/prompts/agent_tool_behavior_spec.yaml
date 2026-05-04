@@ -1,0 +1,65 @@
+prompt_protocol:
+  variables:
+    task_spec_open_tag: "<task_spec>"
+    task_spec_close_tag: "</task_spec>"
+    workflow_open_tag: "<workflow>"
+    workflow_close_tag: "</workflow>"
+    task_request_open_tag: "<task_request>"
+    task_request_close_tag: "</task_request>"
+    inputs_open_tag: "<inputs>"
+    inputs_close_tag: "</inputs>"
+    output_open_tag: "<output>"
+    output_close_tag: "</output>"
+
+  task_spec_block_template: |-
+    ${task_spec_open_tag}
+    {content}
+    ${task_spec_close_tag}
+  workflow_block_template: |-
+    ${workflow_open_tag}
+    {content}
+    ${workflow_close_tag}
+  task_request_block_template: |-
+    ${task_request_open_tag}
+    {content}
+    ${task_request_close_tag}
+  inputs_block_template: |-
+    ${inputs_open_tag}
+    {content}
+    ${inputs_close_tag}
+  output_block_template: |-
+    ${output_open_tag}
+    {content}
+    ${output_close_tag}
+
+  task_spec_section_header: "Task specification (what you must follow in this task):"
+  task_spec_section_guidance_base: >-
+    The ${task_spec_open_tag} section is the complete execution specification for this run. It defines the task context, constraints, and decision rules. The ${inputs_open_tag} section contains critical user-provided information and must be treated as the primary source of task facts and requirements. The ${output_open_tag} section defines the final response contract; return the final result strictly according to ${output_open_tag}.
+  task_spec_workflow_guidance: >-
+    The ${workflow_open_tag} block defines the step-by-step process for this task and must be followed strictly.
+  task_spec_section_guidance_tail: >-
+    Follow ${task_spec_open_tag} first, then process ${inputs_open_tag}, and finally produce ${output_open_tag}.
+  task_request_section_header: "Task request (what you must accomplish in this run):"
+  task_request_section_guidance: >-
+    The ${task_request_open_tag} section is the user request to execute under the rules in ${task_spec_open_tag}.
+  task_spec_warning_header: "Workflow validation warnings:"
+  inputs_section_header: "Task inputs (what you should process for this specific call):"
+  inputs_section_guidance: >-
+    The ${inputs_open_tag} section contains the call payload. Process each listed item as concrete task input.
+  inputs_list_intro_line: "Please process the following call inputs in order:"
+  inputs_empty_line: "1. No explicit inputs were provided."
+  output_section_header: "Expected output (what result you must produce):"
+  output_section_guidance: >-
+    The ${output_open_tag} section defines the output contract. Your final answer must satisfy this requirement.
+  output_rule_header: "Output rules:"
+  output_rule_lines:
+    - "1. Return the final result as plain text."
+    - "2. Ensure the result satisfies the requirement above."
+    - "3. Do not include unrelated internal reasoning unless explicitly requested."
+  final_bridge_instruction: >-
+    Follow ${task_spec_open_tag} first, then solve the task inputs, and finally produce an output that satisfies the ${output_open_tag} contract.
+  supervisor_bridge_instruction: >-
+    Follow ${task_spec_open_tag} first, then execute ${task_request_open_tag} and provide the final result.
+  workflow_execution_intro: "Current task workflow:"
+  workflow_outer_indent: "  "
+  workflow_inner_indent: "    "

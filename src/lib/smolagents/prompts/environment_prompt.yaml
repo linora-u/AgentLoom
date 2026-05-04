@@ -1,0 +1,10 @@
+template: |+
+
+  <<<< ENVIRONMENT CONTEXT >>>>
+  Current Workspace Root: {workspace_root}
+  
+  Excluded Directories:
+  {exclude_section}
+
+  {security_behavior_section}
+  <<<< END ENVIRONMENT CONTEXT >>>>

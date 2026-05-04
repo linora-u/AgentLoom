@@ -1,0 +1,61 @@
+name: "test_checkpoint_supervisor"
+description: |
+  Multi-agent checkpoint & resume integration test (supervisor).
+
+  This supervisor coordinates a worker agent to perform file operations,
+  testing checkpoint/resume across supervisor-worker boundaries:
+  1. Supervisor creates initial files.
+  2. Worker processes files (creating derived output).
+  3. Supervisor verifies worker output.
+
+  Resume test scenario:
+  - Run once, interrupt after step 2 (worker completes).
+  - Resume: worker should be SKIPPED (input hash match), supervisor continues from step 3.
+
+model_type: "powerful"
+tool_call_type: "code_act"
+
+workflow: |
+  # Multi-Agent Checkpoint Test
+
+  Execute ALL steps below IN ORDER. Each step MUST complete before
+  proceeding to the next.
+
+  ## Step 1: Setup — create input files
+  Use shell_tool to run:
+    mkdir -p /tmp/agentloom_ckpt_multi
+    echo "line1: alpha" > /tmp/agentloom_ckpt_multi/input_a.txt
+    echo "line2: beta" >> /tmp/agentloom_ckpt_multi/input_a.txt
+    echo "data: 42" > /tmp/agentloom_ckpt_multi/input_b.txt
+
+  Verify the files exist by reading them.
+
+  ## Step 2: Dispatch worker
+  Call the file_processor worker with query:
+    "Process files in /tmp/agentloom_ckpt_multi/. Read input_a.txt and input_b.txt,
+     then create output.txt containing a merged summary of both inputs."
+
+  ## Step 3: Verify worker output
+  Use read_file to read /tmp/agentloom_ckpt_multi/output.txt.
+  Verify it contains content from both input files.
+
+  ## Step 4: Final summary
+  Create /tmp/agentloom_ckpt_multi/done.txt containing:
+    "Supervisor: all steps completed. Worker output verified."
+
+  ## Final Report
+  Report: ALL STEPS COMPLETED with status of each step.
+
+tools:
+  - name: "shell_tool"
+  - name: "read_file"
+  - name: "edit_file"
+
+worker_agents:
+  - path: "applications/test_demo/workflows/worker_agents/test_checkpoint_worker.yaml"
+
+skills: []
+max_steps: 20
+
+execution_env:
+  type: "local"

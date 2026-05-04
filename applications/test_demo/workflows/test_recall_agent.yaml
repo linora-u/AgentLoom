@@ -1,0 +1,32 @@
+name: "recall_skill_test_agent"
+description: |
+  Test agent for the agent-recall-with-files skill.
+
+model_type: "powerful"
+tool_call_type: "code_act"
+
+workflow: |
+  # Planning Skill Test Workflow
+
+  ## 任务目标
+  Verify that agent-recall-with-files skill is loaded and used correctly.
+
+  ## 执行步骤
+  1. 打印当前加载的所有 Tool 名称
+  2. 尝试调用 Read (read_file) 读取当前目录下的 README.md (如果有) 或本文件。
+  3. 你的目标是验证 'Read' 这个 alias 是否工作，以及 pre-hook是否生效。
+
+tools:
+  - name: "read_file"
+  - name: "write_file"
+  - name: "edit_file"
+
+worker_agents:
+  []
+
+# NOTE: agent-recall-with-files disabled — see config/system.yaml for rationale.
+# skills:
+#   - path: "skills/agent-recall-with-files"
+
+execution_env:
+  type: "local"

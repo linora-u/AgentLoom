@@ -1,0 +1,37 @@
+name: "compression_test_agent"
+description: |
+  压缩功能测试专用agent，用于验证ConversationHistoryManager的完整工作流程。
+
+model_type: "powerful"
+tool_call_type: "code_act"
+
+workflow: |
+  # 压缩功能测试 Workflow
+
+  ## 任务目标
+  验证 ConversationHistoryManager 的压缩功能，包括：
+  1. 执行足够多的操作以触发压缩
+  2. 验证 system prompt 在压缩后仍然保留
+  3. 验证 command blocks 在压缩后仍然保留
+  4. 验证缓存机制正常工作
+
+  ## 执行步骤
+  1. 列出指定目录下的文件
+  2. 读取指定的文件内容
+  3. 对每个任务都详细说明你看到了什么
+  4. 最后总结所有执行结果
+
+  ## 注意事项
+  - 对每个任务都要生成足够详细的输出，以便触发压缩
+  - 执行完成后要总结所有任务的执行结果
+
+tools:
+  # File operations for analysis
+  - name: "read_file"
+  - name: "browse_directory"
+
+worker_agents:
+  []
+
+execution_env:
+  type: "local"

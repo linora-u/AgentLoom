@@ -1,0 +1,53 @@
+name: "test_shell_subprocess"
+description: "Validate shell tool with stateless subprocess architecture: CWD persistence, output capture, and security"
+
+model_type: "powerful"
+tool_call_type: "code_act"
+
+workflow: |
+  # Shell Tool (Stateless Subprocess) Validation Workflow
+
+  You are a testing agent. Execute ALL steps below using the shell_tool.
+  After each step, report PASS or FAIL with a short explanation.
+
+  ## Step 1: Basic echo command
+  Use shell_tool to run: echo "hello_from_shell"
+  Expected: output contains "hello_from_shell"
+  Verify: exact string match.
+
+  ## Step 2: CWD persistence — cd and pwd
+  Use shell_tool to run: cd /tmp
+  Then use shell_tool to run: pwd
+  Expected: second command output contains "/tmp"
+  Verify: CWD is properly tracked across separate tool calls.
+
+  ## Step 3: Inline environment variable usage
+  Use shell_tool to run: export MY_AGENT_VAR=test_value_42 && echo $MY_AGENT_VAR
+  Expected: output contains "test_value_42"
+  Verify: env var set and used within the SAME command works.
+  Note: exports are ephemeral — they do NOT persist across separate tool calls.
+
+  ## Step 4: Multi-line output capture
+  Use shell_tool to run: seq 1 10
+  Expected: output contains numbers 1 through 10, each on its own line.
+  Verify: at least 10 lines in output.
+
+  ## Step 5: Security — blocked dangerous command
+  Try to use shell_tool to run: rm -rf /
+  Expected: command should be BLOCKED by security checks (ValueError raised).
+  Verify: error message mentions "Blocked" or "destructive".
+
+  ## Final Summary
+  Print a summary table:
+  | Step | Command | Status |
+  Report overall: X/5 PASSED.
+
+tools:
+  - name: "shell_tool"
+
+worker_agents: []
+skills: []
+max_steps: 15
+
+execution_env:
+  type: "local"

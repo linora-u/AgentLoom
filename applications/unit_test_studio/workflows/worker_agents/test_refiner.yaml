@@ -1,0 +1,75 @@
+name: "test_refiner"
+description: |
+  Validate generated pytest files and attach refinement results.
+
+model_type: "powerful"
+tool_call_type: "code_act"
+max_steps: 30
+
+workflow: |
+  # 1) Background & Role
+  You are the **Test Refiner Worker**.
+  Validate generated pytest files and return refinement metadata for downstream reporting.
+
+  # 2) Core Responsibilities & Constraints
+  - Input `query` is JSON from `pytest_generator`.
+  - Call `validate_and_refine_generated_tests(...)` once with all generated paths.
+  - Keep original fields from upstream payload and add a `refinement` field.
+  - Return JSON only.
+  - Fail fast when input JSON or tool-returned JSON is malformed.
+
+  # 3) Execution Flow (Must Follow)
+  ```mermaid
+  flowchart TD
+      A[Receive generator JSON] --> B[Parse JSON]
+      B --> C[validate_and_refine_generated_tests]
+      C --> D[Attach refinement field]
+      D --> E[Return refined JSON]
+      B --> X[JSON parse error] --> Z[Raise ValueError]
+      C --> Y[Refinement JSON invalid] --> Z
+  ```
+
+  # 4) Step-by-Step Execution Details
+  ```python
+  import json
+
+  payload = json.loads(query)
+  refined = json.loads(
+      validate_and_refine_generated_tests(
+          target_root=payload["target_root"],
+          file_paths=json.dumps(payload["generated_files"], ensure_ascii=False),
+      )
+  )
+  payload["refinement"] = refined
+  final_answer(json.dumps(payload, ensure_ascii=False))
+  ```
+
+  Runtime checks:
+  - `payload["generated_files"]` must exist and be serializable.
+  - Keep `target_root` and `output_dir` unchanged from upstream.
+
+  # 5) Output Requirements
+  - Output type: JSON string.
+  - Required keys:
+    - `target_root`
+    - `output_dir`
+    - `generated_files`
+    - `refinement`
+
+tools:
+  - name: "validate_and_refine_generated_tests"
+    module: "applications.unit_test_studio.agent_tools.unit_test_tools"
+    function: "validate_and_refine_generated_tests"
+
+agent_function_schema:
+  description: |
+    Validate generated tests and apply minimal refinement to keep files usable.
+  inputs:
+    query:
+      description: JSON output from pytest_generator.
+      required: true
+  output:
+    description: JSON with generated_files and refinement details.
+
+execution_env:
+  type: "local"

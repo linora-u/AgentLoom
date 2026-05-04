@@ -1,0 +1,30 @@
+name: "shell_worker"
+description: |
+  一个工作 agent，负责演示 shell 的持久性和独立性。
+model_type: "powerful"
+tool_call_type: "code_act"
+workflow: |
+  # Shell Worker Workflow
+  1. 接收 supervisor 的指令
+  2. 使用 bash/shell 工具执行对应的 cd, pwd 等命令
+  3. 必须返回真实的指令执行结果
+
+agent_function_schema:
+  description: |
+    子 agent，用于隔离 shell 执行环境
+  inputs:
+    query:
+      description: |
+        传递给 worker 的具体 shell 执行指令或任务描述。
+      required: true
+  output:
+    description: |
+      Worker execution result text
+tools:
+  - name: "shell_tool"
+
+skills: []
+worker_agents: []
+execution_env:
+  type: "local"
+  bash_path: "zsh"

@@ -1,0 +1,54 @@
+name: "test_edit_file"
+description: "Validate edit_file tool: create, replace, replace_all, error handling"
+
+model_type: "powerful"
+tool_call_type: "code_act"
+
+workflow: |
+  # edit_file Tool Validation Workflow
+
+  You are a testing agent. Execute ALL steps below using the provided tools.
+  After each step, report PASS or FAIL with a short explanation.
+
+  ## Step 1: Create a new file
+  Use edit_file to create "/tmp/test_edit_agent.py" with empty old_string
+  and new_string = "def hello():\n    return 'world'\n".
+  Expected: file created successfully.
+  Verify: result contains "Successfully created".
+
+  ## Step 2: Read the created file
+  Use read_file to verify the file was created with correct content.
+  Expected: file contains "def hello():" and "return 'world'".
+  Verify: both strings present in output.
+
+  ## Step 3: Edit with exact match
+  Use edit_file on "/tmp/test_edit_agent.py" to replace "return 'world'" with "return 'universe'".
+  Expected: edit succeeds.
+  Verify: result contains "Successfully edited".
+
+  ## Step 4: Verify the edit
+  Use read_file to verify the edit took effect.
+  Expected: file now contains "return 'universe'" instead of "return 'world'".
+  Verify: "universe" present, "world" absent.
+
+  ## Step 5: replace_all mode
+  Use edit_file on "/tmp/test_edit_agent.py" with old_string="'", new_string='"', replace_all=True.
+  Expected: all single quotes replaced with double quotes.
+  Verify: result contains "replaced all".
+
+  ## Step 6: Error — same old and new
+  Use edit_file on "/tmp/test_edit_agent.py" with old_string="hello" and new_string="hello".
+  Expected: rejected because old_string == new_string.
+  Verify: result contains "identical".
+
+  ## Final Summary
+  Print a summary table:
+  | Step | Description | Status |
+  Report overall: X/6 PASSED.
+
+  ## Cleanup
+  Delete /tmp/test_edit_agent.py using shell or ignore if not possible.
+
+tools:
+  - name: "read_file"
+  - name: "edit_file"

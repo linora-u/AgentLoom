@@ -1,0 +1,47 @@
+id: function
+language: python
+rule:
+  all:
+    - kind: function_definition
+    - has:
+        field: name
+        regex: ^{WORDS}$
+    - not:
+        inside:
+          kind: decorated_definition
+---
+id: class
+language: python
+rule:
+  all:
+    - kind: class_definition
+    - has:
+        field: name
+        regex: ^{WORDS}$
+    - not:
+        inside:
+          kind: decorated_definition
+---
+id: decorated class
+language: python
+rule:
+  all:
+    - kind: decorated_definition
+    - has:
+        all:
+          - kind: class_definition
+          - has:
+              field: name
+              regex: ^{WORDS}$
+---
+id: decorated function
+language: python
+rule:
+  all:
+    - kind: decorated_definition
+    - has:
+        all:
+          - kind: function_definition
+          - has:
+              field: name
+              regex: ^{WORDS}$

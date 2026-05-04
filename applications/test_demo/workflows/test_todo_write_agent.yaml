@@ -1,0 +1,48 @@
+name: "test_todo_write"
+description: "Verify todo_write tool + planning_interval-driven task tracking"
+
+model_type: "powerful"
+tool_call_type: "code_act"
+planning_interval: 3
+
+workflow: |
+  # Todo Write Tool Verification
+
+  You are a test Agent. Execute the following steps in order and report PASS or FAIL for each.
+
+  ## Step 1: Create initial task list
+  Call todo_write to register these tasks:
+  - "Verify todo_write accepts valid input" (in_progress)
+  - "Test status transitions" (pending)
+  - "Verify disk persistence" (pending)
+  - "Test auto-clear on all completed" (pending)
+
+  Report the return value.
+
+  ## Step 2: Update task progress
+  Call todo_write marking step 1 as completed, step 2 as in_progress, and keeping the rest as pending.
+  Report the return value.
+
+  ## Step 3: Read todos.md
+  Use read_file to read .runtime/test_todo_write/todos.md content.
+  Verify it contains Markdown checkbox format (- [x], - [ ]).
+
+  ## Step 4: Complete all tasks
+  Call todo_write marking all tasks as completed.
+  Verify the return value contains "cleared".
+
+  ## Final Summary
+  Report results as a table:
+  | Step | Description | Status |
+  X/4 PASSED.
+
+tools:
+  - name: "todo_write"
+  - name: "read_file"
+
+worker_agents: []
+skills: []
+max_steps: 15
+
+execution_env:
+  type: "local"

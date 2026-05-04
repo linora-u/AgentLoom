@@ -1,0 +1,7 @@
+# ============================================
+# 项目配置 (用户自定义)
+# ============================================
+tool_access_control:
+  path_validation:
+    - tools: ["read_file", "edit_file", "write_markdown_file", "glob_search", "grep_search"]
+      exclude_paths: ["Tools", "Test", ".git"]

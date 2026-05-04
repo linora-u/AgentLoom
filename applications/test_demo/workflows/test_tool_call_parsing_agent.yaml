@@ -1,0 +1,26 @@
+name: "test_tool_call_parsing"
+description: |
+  Test agent for validating tool_call mode parsing resilience.
+  Uses tool_call mode to verify that the multi-strategy parsing chain works correctly.
+
+model_type: "powerful"
+tool_call_type: "tool_call"
+max_steps: 10
+
+workflow: |
+  # Tool Call Parsing Validation
+
+  ## Task
+  Execute the following steps using structured tool calls.
+  After each step, report what you found.
+
+  ## Steps
+  1. Use browse_directory to list files in the "src/lib/smolagents/monkey_patch/" directory.
+  2. Use read_file to read the first 30 lines of "src/lib/smolagents/monkey_patch/tool_call_parsing_patch.py".
+  3. Use final_answer to summarize what the tool_call_parsing_patch.py file does.
+
+tools:
+  - name: "read_file"
+  - name: "browse_directory"
+
+worker_agents: []

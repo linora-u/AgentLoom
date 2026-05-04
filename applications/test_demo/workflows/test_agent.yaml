@@ -1,0 +1,34 @@
+name: "test_agent"
+description: |
+  测试专用agent，用于调试代码。
+
+model_type: "powerful"
+tool_call_type: "code_act"
+
+workflow: |
+  # Directory Inspection Workflow
+
+  ## 任务目标
+  按照用户的要求，检查指定目录下的文件列表，并查看特定文件的内容。
+
+  ## 执行步骤
+  1. 使用 Python 代码列出用户提供的目录路径下的所有文件和文件夹。
+  2. 如果用户指定了要查看的文件名，或者你发现了相关的关键文件，读取该文件的内容并打印出来。
+  3. 简要说明你发现了什么。
+
+tools:
+  # File operations for analysis and generation
+  - name: "write_file"
+  - name: "read_file"
+  - name: "get_file_outline"
+  - name: "browse_directory"
+
+worker_agents:
+  []
+
+skills:
+  - path: "applications/test_demo/skills"
+    platform: "Claude"
+
+execution_env:
+  type: "local"

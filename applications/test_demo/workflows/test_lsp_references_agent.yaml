@@ -1,0 +1,31 @@
+name: "test_lsp_references"
+description: "Validate lsp_find_references on Python source files"
+
+model_type: "powerful"
+tool_call_type: "code_act"
+
+workflow: |
+  # LSP Find References Validation
+
+  ## Step 1: Find references to grep_search
+  Use lsp_find_references on "src/tools/search/grep_tool/grep_tool.py", line=51, character=5.
+  Expected: find multiple references across files (imports, tests, registry).
+  Verify: output contains "references" and at least 2 file paths.
+
+  ## Step 2: Find references to glob_search
+  Use lsp_find_references on "src/tools/search/glob_tool/glob_tool.py", line=40, character=5.
+  Expected: find references in __init__.py and test files.
+  Verify: output is non-empty.
+
+  ## Step 3: Report
+  Print PASS/FAIL for each step.
+
+tools:
+  - name: "lsp_find_references"
+
+worker_agents: []
+skills: []
+max_steps: 10
+
+execution_env:
+  type: "local"

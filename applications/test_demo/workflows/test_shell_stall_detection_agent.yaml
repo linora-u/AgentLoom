@@ -1,0 +1,54 @@
+name: "test_shell_stall_detection"
+description: "Validate foreground stall detection: interactive prompts are automatically detected and killed, normal commands unaffected"
+
+model_type: "powerful"
+tool_call_type: "code_act"
+
+workflow: |
+  # Shell Stall Detection Validation Workflow
+
+  You are a testing agent. Execute ALL steps below using the shell_tool.
+  After each step, report PASS or FAIL with a short explanation.
+
+  ## Step 1: Normal command — no stall interference
+  Use shell_tool to run: echo "stall_test_normal_output"
+  Expected: output contains "stall_test_normal_output", no stall warning.
+  Verify: output does NOT contain "Stall Warning".
+
+  ## Step 2: Interactive prompt — stall detection and auto-kill
+  Use shell_tool to run: printf "Continue? (y/n) " && sleep 300
+  Expected: the command should be automatically terminated after stall detection.
+  The output should contain a "Stall Warning" message indicating the process
+  was waiting for interactive input.
+  Verify: output contains "Stall Warning" and mentions "interactive input".
+
+  ## Step 3: Partial output before stall
+  Use shell_tool to run: echo "partial_output_marker" && printf "Proceed? (y/n) " && sleep 300
+  Expected: the output should contain "partial_output_marker" (from before the stall)
+  AND a "Stall Warning" message.
+  Verify: both "partial_output_marker" and "Stall Warning" are in the output.
+
+  ## Step 4: No orphan processes
+  Use shell_tool to run: ps aux | grep "sleep 300" | grep -v grep | wc -l
+  Expected: 0 orphan processes from the stalled commands above.
+  Verify: output is "0" or empty (no leftover processes).
+
+  ## Step 5: Multi-line output before stall
+  Use shell_tool to run: for i in 1 2 3 4 5; do echo "line_$i"; done && printf "[Y/n] " && sleep 300
+  Expected: output contains "line_1" through "line_5" AND "Stall Warning".
+  Verify: all 5 lines are preserved, stall warning is appended.
+
+  ## Final Summary
+  Print a summary table:
+  | Step | Command | Expected | Status |
+  Report overall: X/5 PASSED.
+
+tools:
+  - name: "shell_tool"
+
+worker_agents: []
+skills: []
+max_steps: 20
+
+execution_env:
+  type: "local"

@@ -1,0 +1,56 @@
+name: "test_file_rewind"
+description: |
+  File history rewind integration test.
+
+  Verifies that the FileHistoryManager automatically creates pre-edit
+  backups when edit_file is used, and that snapshot files are persisted
+  under the checkpoint file-history directory.
+
+  Steps:
+  - Step 1: Create /tmp/agentloom_rewind_test/original.txt with known content
+  - Step 2: Edit original.txt (replace content)
+  - Step 3: Edit original.txt again (second modification)
+  - Step 4: Verify the file contains the third version of content
+  - Step 5: Report that all edits completed — the test harness will
+            verify that file-history backups exist in .logs/
+
+model_type: "powerful"
+tool_call_type: "code_act"
+
+workflow: |
+  # File Rewind Test Workflow
+
+  Execute ALL steps below IN ORDER. Each step MUST use the specified tool.
+
+  ## Step 1: Create original file
+  Use shell_tool to run: mkdir -p /tmp/agentloom_rewind_test
+  Then use edit_file to create "/tmp/agentloom_rewind_test/original.txt"
+  with content: "version_1: original content\n"
+
+  ## Step 2: First edit
+  Use edit_file to replace "version_1: original content" with
+  "version_2: first modification" in "/tmp/agentloom_rewind_test/original.txt".
+
+  ## Step 3: Second edit
+  Use edit_file to replace "version_2: first modification" with
+  "version_3: second modification" in "/tmp/agentloom_rewind_test/original.txt".
+
+  ## Step 4: Verify final content
+  Use read_file to read "/tmp/agentloom_rewind_test/original.txt".
+  Verify it contains "version_3: second modification".
+
+  ## Step 5: Report
+  Report: ALL EDITS COMPLETED. The file history system should have
+  created pre-edit backups for each edit_file call.
+
+tools:
+  - name: "shell_tool"
+  - name: "read_file"
+  - name: "edit_file"
+
+worker_agents: []
+skills: []
+max_steps: 15
+
+execution_env:
+  type: "local"

@@ -1,0 +1,27 @@
+name: "shell_supervisor"
+description: |
+  主 agent，负责自身的 shell 操作并调度 worker agent，验证两者 shell 是否相互隔离。
+
+model_type: "powerful"
+tool_call_type: "code_act"
+
+workflow: |
+  # Shell Persistence & Isolation Test
+  我们的目标是验证主 agent (你) 和 子 agent (shell_worker) 的 Bash/shell 环境是完全隔离并持久的。
+
+  请严格按照以下步骤顺序执行，并且只向我返回最终整理好的结论：
+  1. 你自己执行工具代码调用：`shell_tool("cd /tmp")` （如果工具名是别的，请查阅可用 tools，用 Bash 或 shell_tool 执行）
+  2. 调度你的 worker (`shell_worker`)，让它执行一次 shell 操作: `cd /var/log`。
+  3. 你自己执行工具调用：`shell_tool("pwd")` 并记录结果（预期应仍为 /tmp）。同理执行 `shell_tool("echo $0")` 观察你自己的 Shell 环境是不是默认配置。
+  4. 调度你的 worker (`shell_worker`)，让它执行: `pwd` 并记录结果（预期应仍为 /var/log）。另外，让它执行 `echo $0`。如果隔离配置生效了，它的 $0 非常有可能返回包含 `zsh`，而你的可能不是。
+  5. 向我总结：主 agent 和 shell_worker 的最终 pwd 分别是什么？各自的 Shell 类型（echo $0）分别是什么？以此证明两者的 shell 是相互独立、各自维持上下文，且使用了不同的配置环境（worker 应该是被 yaml 配置强制隔离启动了 zsh）。
+
+tools:
+  - name: "shell_tool"
+
+worker_agents:
+  - path: "applications/test_demo/workflows/worker_agents/test_shell_persist_worker.yaml"
+
+skills: []
+execution_env:
+  type: "local"

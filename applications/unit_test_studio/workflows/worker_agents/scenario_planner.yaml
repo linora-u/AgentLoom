@@ -1,0 +1,106 @@
+name: "scenario_planner"
+description: |
+  Build executable test scenarios for each normalized function target.
+
+model_type: "powerful"
+tool_call_type: "code_act"
+max_steps: 40
+planning_interval: 3
+
+workflow: |
+  # 1) Background & Role
+  You are the **Scenario Planner Worker**.
+  Convert normalized targets into structured scenario payloads for test generation.
+
+  # 2) Core Responsibilities & Constraints
+  - Input `query` is JSON from `function_intake`.
+  - For every entry in `payload["items"]`:
+    1. Call `get_function_context(...)`
+    2. Call `plan_test_scenarios(...)`
+  - Preserve one output `planned_item` per input item.
+  - Do not write files in this step.
+  - Fail fast on malformed upstream JSON or malformed scenario JSON.
+
+  # 3) Execution Flow (Must Follow)
+  ```mermaid
+  flowchart TD
+      A[Receive intake JSON] --> B[Parse JSON]
+      B --> C[Loop items]
+      C --> D[get_function_context]
+      D --> E[plan_test_scenarios]
+      E --> F[Append planned_items]
+      F --> G{More items?}
+      G -->|Yes| C
+      G -->|No| H[Return planning JSON]
+      B --> X[JSON parse error] --> Z[Raise ValueError]
+      E --> Y[Scenario JSON invalid] --> Z
+  ```
+
+  # 4) Step-by-Step Execution Details
+  ```python
+  import json
+
+  payload = json.loads(query)
+  planned_items = []
+  for item in payload["items"]:
+      ctx = get_function_context(
+          target_root=payload["target_root"],
+          module_path=item["module_path"],
+          function_name=item["function_name"],
+      )
+      scenarios = plan_test_scenarios(
+          function_context=ctx,
+          function_name=item["function_name"],
+      )
+      planned_items.append(
+          {
+              "module_path": item["module_path"],
+              "function_name": item["function_name"],
+              "scenario": json.loads(scenarios),
+          }
+      )
+
+  final_answer(
+      json.dumps(
+          {
+              "target_root": payload["target_root"],
+              "output_dir": payload["output_dir"],
+              "planned_items": planned_items,
+          },
+          ensure_ascii=False,
+      )
+  )
+  ```
+
+  Runtime checks:
+  - `len(planned_items)` should equal `len(payload["items"])` unless an exception is raised.
+  - `json.loads(scenarios)` must succeed for every item.
+
+  # 5) Output Requirements
+  - Output type: JSON string.
+  - Required keys:
+    - `target_root`
+    - `output_dir`
+    - `planned_items`
+  - Each `planned_item` must include `module_path`, `function_name`, and parsed `scenario`.
+
+tools:
+  - name: "get_function_context"
+    module: "applications.unit_test_studio.agent_tools.unit_test_tools"
+    function: "get_function_context"
+  - name: "plan_test_scenarios"
+    module: "applications.unit_test_studio.agent_tools.unit_test_tools"
+    function: "plan_test_scenarios"
+
+agent_function_schema:
+  description: |
+    Build scenario plans for every normalized function target.
+  inputs:
+    query:
+      description: JSON output from function_intake.
+      required: true
+  output:
+    description: JSON containing planned_items with scenario payloads.
+
+execution_env:
+  type: "local"

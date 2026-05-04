@@ -1,0 +1,166 @@
+import json
+import logging
+import sys
+import tempfile
+import unittest
+from pathlib import Path
+
+SCRIPT_DIR = Path(__file__).resolve().parent
+AGENT_LOOM_ROOT = SCRIPT_DIR.parents[1]
+if str(AGENT_LOOM_ROOT) not in sys.path:
+    sys.path.insert(0, str(AGENT_LOOM_ROOT))
+
+from src.tools.skills import load_skill as skill_tool, list_skills
+from src.trace.task_context import (
+    clear_current_skills_manager,
+    set_current_skills_manager,
+)
+from src.lib.smolagents.hooks.hook_manager import HookManager
+from src.lib.smolagents.skills.skills import SkillsManager
+
+
+def _reset_singletons():
+    SkillsManager._instance = None
+    HookManager._instance = None
+
+
+class TestSkillTool(unittest.TestCase):
+    def setUp(self):
+        _reset_singletons()
+        self.skills_manager = SkillsManager.get_instance(logger=logging.getLogger(__name__))
+        self._temp_dirs = []
+
+    def tearDown(self):
+        clear_current_skills_manager()
+        for temp_dir in self._temp_dirs:
+            temp_dir.cleanup()
+
+    def _write_temp_skill(self, content: str, filename: str = "skill.md") -> Path:
+        temp_dir = tempfile.TemporaryDirectory()
+        self._temp_dirs.append(temp_dir)
+        file_path = Path(temp_dir.name) / filename
+        file_path.write_text(content, encoding="utf-8")
+        return file_path
+
+    def test_skill_tool_returns_instructions(self):
+        content = (
+            "---\n"
+            "name: demo-skill\n"
+            "description: Demo\n"
+            "---\n"
+            "# Body\n"
+        )
+        skill_path = self._write_temp_skill(content)
+        self.skills_manager.load_skill_metadata(str(skill_path))
+
+        result = skill_tool("demo-skill")
+        self.assertIn("<skill_name>demo-skill</skill_name>", result)
+        self.assertIn("<description>Demo</description>", result)
+        self.assertIn("<instructions>", result)
+        self.assertIn("# Body", result)
+
+    def test_skill_tool_lazy_loads_body_without_persistent_activation(self):
+        content = (
+            "---\n"
+            "name: lazy-skill\n"
+            "description: Lazy demo\n"
+            "hooks:\n"
+            "  PreToolUse:\n"
+            "    - matcher: \"*\"\n"
+            "      hooks:\n"
+            "        - type: command\n"
+            "          command: \"true\"\n"
+            "---\n"
+            "# Body\n"
+        )
+        skill_path = self._write_temp_skill(content)
+        self.skills_manager.load_skill_metadata(str(skill_path))
+
+        stored_skill = self.skills_manager.skills["lazy-skill"]
+        self.assertIsNone(stored_skill.content)
+        self.assertTrue(stored_skill.hooks_registered)
+        self.assertFalse(hasattr(self.skills_manager, "active_skills"))
+
+        result = skill_tool("lazy-skill")
+
+        self.assertIn("# Body", result)
+        self.assertEqual(stored_skill.content, "# Body\n")
+        self.assertTrue(stored_skill.hooks_registered)
+        self.assertFalse(hasattr(self.skills_manager, "active_skills"))
+
+    def test_skill_tool_unknown_skill(self):
+        with self.assertRaises(ValueError) as ctx:
+            skill_tool("missing-skill")
+        self.assertIn("Skill 'missing-skill' not found", str(ctx.exception))
+
+    def test_list_skills_returns_json(self):
+        content = (
+            "---\n"
+            "name: list-skill\n"
+            "description: List demo\n"
+            "---\n"
+            "# Body\n"
+        )
+        skill_path = self._write_temp_skill(content)
+        self.skills_manager.load_skill_metadata(str(skill_path))
+
+        data = json.loads(list_skills())
+        names = {item["name"] for item in data}
+        self.assertIn("list-skill", names)
+        item = next((i for i in data if i["name"] == "list-skill"), None)
+        self.assertIsNotNone(item)
+        self.assertEqual(item.get("description"), "List demo")
+
+    def test_skill_tool_prefers_current_skills_manager_context(self):
+        skill_a_path = self._write_temp_skill("---\nname: skill-a\n---\n# Body A\n")
+        skill_b_path = self._write_temp_skill("---\nname: skill-b\n---\n# Body B\n")
+
+        manager_a = SkillsManager(
+            logger=logging.getLogger(__name__),
+            hook_manager=HookManager(),
+        )
+        manager_b = SkillsManager(
+            logger=logging.getLogger(__name__),
+            hook_manager=HookManager(),
+        )
+        manager_a.load_skill_metadata(str(skill_a_path))
+        manager_b.load_skill_metadata(str(skill_b_path))
+
+        set_current_skills_manager(manager_a)
+        result = skill_tool("skill-a")
+        self.assertIn("# Body A", result)
+        with self.assertRaises(ValueError):
+            skill_tool("skill-b")
+
+        set_current_skills_manager(manager_b)
+        result = skill_tool("skill-b")
+        self.assertIn("# Body B", result)
+        with self.assertRaises(ValueError):
+            skill_tool("skill-a")
+
+    def test_list_skills_prefers_current_skills_manager_context(self):
+        skill_a_path = self._write_temp_skill("---\nname: ctx-a\ndescription: A\n---\n# A\n")
+        skill_b_path = self._write_temp_skill("---\nname: ctx-b\ndescription: B\n---\n# B\n")
+
+        manager_a = SkillsManager(
+            logger=logging.getLogger(__name__),
+            hook_manager=HookManager(),
+        )
+        manager_b = SkillsManager(
+            logger=logging.getLogger(__name__),
+            hook_manager=HookManager(),
+        )
+        manager_a.load_skill_metadata(str(skill_a_path))
+        manager_b.load_skill_metadata(str(skill_b_path))
+
+        set_current_skills_manager(manager_a)
+        data = json.loads(list_skills())
+        self.assertEqual([item["name"] for item in data], ["ctx-a"])
+
+        set_current_skills_manager(manager_b)
+        data = json.loads(list_skills())
+        self.assertEqual([item["name"] for item in data], ["ctx-b"])
+
+
+if __name__ == "__main__":
+    unittest.main()

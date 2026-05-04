@@ -1,0 +1,57 @@
+name: "test_background_task"
+description: "Validate background task management: explicit background execution, task monitoring, task killing, and task listing"
+
+model_type: "powerful"
+tool_call_type: "code_act"
+
+workflow: |
+  # Background Task Management Validation Workflow
+
+  You are a testing agent. Execute ALL steps below using the available tools.
+  After each step, report PASS or FAIL with a short explanation.
+
+  ## Step 1: List background tasks (empty)
+  Use list_background_tasks() to verify the registry starts empty.
+  Expected: output indicates no background tasks.
+  Verify: message says "No background tasks" or similar.
+
+  ## Step 2: Start a background task
+  Use shell_tool to start a long-running command in the background:
+    shell_tool("sleep 30 && echo background_done", run_in_background=True)
+  Expected: output contains a task_id and instructions for monitoring.
+  Verify: output contains "Background Task:" and a task_id string.
+
+  ## Step 3: List background tasks (one running)
+  Use list_background_tasks() to verify the task is tracked.
+  Expected: output shows one task in "running" status.
+  Verify: the task_id from Step 2 appears in the list.
+
+  ## Step 4: Check the background task
+  Use check_background_task(task_id) with the task_id from Step 2.
+  Expected: output shows "running" status with elapsed time and PID.
+  Verify: status is "running", PID is a positive number.
+
+  ## Step 5: Kill the background task
+  Use kill_background_task(task_id) with the task_id from Step 2.
+  Expected: task is terminated, output shows "killed" status.
+  Verify: status is "killed" or "failed".
+
+  ## Step 6: Verify task is no longer running
+  Use list_background_tasks() again.
+  Expected: the task shows as killed/completed, not running.
+  Verify: task status is terminal.
+
+  ## Final Summary
+  Print a summary table:
+  | Step | Action | Status |
+  Report overall: X/6 PASSED.
+
+tools:
+  - name: "shell_tool"
+  - name: "check_background_task"
+  - name: "kill_background_task"
+  - name: "list_background_tasks"
+
+worker_agents: []
+skills: []
+max_steps: 20

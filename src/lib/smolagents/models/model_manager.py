@@ -1,0 +1,336 @@
+"""
+Model manager.
+
+Provides unified management of different model types, including model selection
+and configuration.
+"""
+
+from dataclasses import dataclass, replace
+import json
+from typing import Any, Optional, Union
+
+import litellm
+
+litellm.suppress_debug_info = True
+litellm.drop_params = True
+
+from smolagents import AgentLogger
+
+from src.lib.config import C
+from src.lib.logging import get_logger
+from src.lib.smolagents.models.litellm_retry import patch_litellm_completion
+from src.lib.smolagents.models.litellm_model import LiteLLMModelV2
+
+from .model_types import ModelConfig, ModelType, ModelTypeManager
+
+logger = get_logger(__name__)
+
+
+@dataclass(frozen=True)
+class ModelConfigOverlay:
+    model_id: Optional[str] = None
+    base_url: Optional[str] = None
+    api_key: Optional[str] = None
+    temperature: Optional[float] = None
+    max_tokens: Optional[int] = None
+    timeout: Optional[int] = None
+    description: Optional[str] = None
+    num_retries: Optional[int] = None
+    retry_delay: Optional[float] = None
+    max_retry_delay: Optional[float] = None
+    extra_headers: Optional[dict] = None
+    context_cache: Optional[bool] = None
+    system_prompt_boundary: Optional[str] = None
+    requests_per_minute: Optional[int] = None
+    supports_native_tool_calls: Optional[str] = None
+
+    def to_mapping(self) -> dict:
+        return {k: v for k, v in self.__dict__.items() if v is not None}
+
+
+class ModelConfigBuilder:
+    """Build model config with ordered typed overlays."""
+
+    def __init__(self) -> None:
+        self._layers: list[tuple[str, dict]] = []
+
+    def apply_overlay(
+        self,
+        overlay: ModelConfigOverlay,
+        *,
+        source: str = "overlay",
+    ) -> "ModelConfigBuilder":
+        self._layers.append((source, overlay.to_mapping()))
+        return self
+
+    def build(self, base_config: ModelConfig) -> ModelConfig:
+        merged = replace(base_config)
+        for _source, layer in self._layers:
+            if not layer:
+                continue
+            merged = replace(merged, **layer)
+        return merged
+
+    def cache_fragment(self) -> str:
+        if not self._layers:
+            return ""
+        serializable = [{"source": source, "data": layer} for source, layer in self._layers]
+        return json.dumps(serializable, sort_keys=True, default=str)
+
+
+class ModelManager:
+    """
+    Model manager.
+
+    Manages different model types and provides unified model retrieval APIs.
+    """
+
+    def __init__(self):
+        """Initialize model manager."""
+        self._model_cache = {}
+
+        # Configure global litellm retry settings.
+        self._configure_litellm_retry()
+
+        logger.debug("Model manager initialized")
+
+    def _configure_litellm_retry(self):
+        """Configure litellm retry behavior."""
+
+        # Apply custom retry wrapper.
+        patch_litellm_completion(litellm)
+
+        # Configure global headers from config.
+        if hasattr(litellm, 'default_headers'):
+            litellm.default_headers = {
+                "User-Agent": C.user_agent,
+            }
+
+        logger.debug(f"Configured litellm retry: exponential backoff via tenacity, User-Agent: {C.user_agent}")
+
+    def get_model_config(
+        self,
+        model_type: ModelType,
+        model_builder: ModelConfigBuilder | None = None
+    ) -> ModelConfig:
+        """
+        Get model configuration.
+
+        Args:
+            model_type: Model type.
+            model_builder: Overlay builder for runtime model overrides.
+
+        Returns:
+            ModelConfig: Full model configuration.
+        """
+        # Get base configuration.
+        base_config = ModelTypeManager.get_llm_config(model_type)
+
+        effective_builder = model_builder or ModelConfigBuilder()
+        return effective_builder.build(base_config)
+
+    def _generate_cache_key(
+        self,
+        prefix: str,
+        model_type: ModelType,
+        model_builder: ModelConfigBuilder | None = None,
+    ) -> str:
+        """Generate a deterministic cache key including builder overlays."""
+        cache_key = f"{prefix}_{model_type.value}"
+        if model_builder is not None:
+            builder_fragment = model_builder.cache_fragment()
+            if builder_fragment:
+                cache_key += f"_{hash(builder_fragment)}"
+        return cache_key
+
+    def get_litellm_config(
+        self,
+        model_type: ModelType,
+        model_builder: ModelConfigBuilder | None = None,
+        model_cache: bool = True
+    ) -> dict:
+        """
+        Get configuration parameters for `litellm.completion`.
+
+        Args:
+            model_type: Model type.
+            model_builder: Overlay builder for runtime model overrides.
+            model_cache: Whether to use object cache.
+
+        Returns:
+            dict: Configuration parameters for `litellm.completion`.
+        """
+        cache_key = self._generate_cache_key("litellm_config", model_type, model_builder)
+
+        if model_cache and cache_key in self._model_cache:
+            return self._model_cache[cache_key]
+
+        model_config = self.get_model_config(model_type, model_builder)
+
+        # Build parameters for litellm.completion.
+        # If new parameters are added here, verify they are supported by litellm.
+        # Unsupported parameters may be forwarded to provider APIs and cause failures.
+        # Retry-related params (retry_delay, max_retry_delay) are removed in retry wrapper.
+        litellm_params = {
+            "model": model_config.model_id,
+            "temperature": model_config.temperature,
+            "max_tokens": model_config.max_tokens,
+            # Retry-related parameters
+            "num_retries": model_config.num_retries,
+            "retry_delay": model_config.retry_delay,
+            "max_retry_delay": model_config.max_retry_delay,
+            "timeout": model_config.timeout,
+        }
+
+        # Add custom headers if configured.
+        if model_config.extra_headers is not None:
+            litellm_params["extra_headers"] = model_config.extra_headers
+
+        # Add API fields only if configured.
+        if model_config.base_url:
+            litellm_params["api_base"] = model_config.base_url
+        if model_config.api_key:
+            litellm_params["api_key"] = model_config.api_key
+
+        if model_cache:
+            self._model_cache[cache_key] = litellm_params
+
+        logger.debug(f"Resolved litellm config: {model_type.value} -> {model_config.model_id}")
+        return litellm_params
+
+    def get_smolagents_model(
+        self,
+        model_type: ModelType,
+        model_builder: ModelConfigBuilder | None = None,
+        model_cache: bool = True,
+        logger: Optional[AgentLogger] = None
+    ) -> LiteLLMModelV2:
+        """
+        Get a model instance for smolagents.
+
+        Args:
+            model_type: Model type.
+            model_builder: Overlay builder for runtime model overrides.
+            model_cache: Whether to use object cache.
+            logger: Logger instance.
+
+        Returns:
+            LiteLLMModelV2: Smolagents model instance.
+        """
+        cache_key = self._generate_cache_key("smolagents", model_type, model_builder)
+
+        if model_cache and cache_key in self._model_cache:
+            return self._model_cache[cache_key]
+
+        runtime_logger = get_logger(logger, __name__) if logger is not None else None
+        model_config = self.get_model_config(model_type, model_builder)
+        logger.info(f"Creating smolagents model with config: {model_config}")
+
+
+        # Create smolagents model with retry settings.
+        # If new parameters are added here, verify litellm/provider compatibility.
+        # Retry params are removed in retry wrapper and will not be forwarded downstream.
+        model = LiteLLMModelV2(
+            model_id=model_config.model_id,
+            api_base=model_config.base_url,
+            api_key=model_config.api_key,
+            timeout=model_config.timeout,
+            max_tokens=model_config.max_tokens,
+            temperature=model_config.temperature,
+            requests_per_minute=model_config.requests_per_minute or 10,
+            # Retry-related parameters
+            num_retries=model_config.num_retries,
+            retry_delay=model_config.retry_delay,
+            max_retry_delay=model_config.max_retry_delay,
+            extra_headers=model_config.extra_headers,
+            logger=runtime_logger,
+            context_cache=model_config.context_cache,
+            system_prompt_boundary=model_config.system_prompt_boundary,
+            supports_native_tool_calls=model_config.supports_native_tool_calls,
+        )
+
+        # Inject model_type for global rate limiting (consumed by litellm_retry wrapper)
+        model._agent_loom_model_type = model_type.value
+
+        if model_cache:
+            self._model_cache[cache_key] = model
+
+        if runtime_logger:
+            runtime_logger.info(f"Resolved smolagents model: {model_type.value} -> {model_config.model_id}")
+        return model
+
+    def get_model(
+        self,
+        model_type: str,
+        framework: str = "litellm",
+        model_builder: ModelConfigBuilder | None = None,
+        model_cache: bool = True,
+        logger: Optional[AgentLogger] = None
+    ) -> Union[dict, LiteLLMModelV2]:
+        """
+        Get an appropriate model based on model type.
+
+        Args:
+            model_type: Model type.
+            framework: Framework to use ("litellm" or "smolagents").
+            model_builder: Overlay builder for runtime model overrides.
+            model_cache: Whether to use object cache.
+            logger: Logger instance.
+
+        Returns:
+            Union[dict, LiteLLMModelV2]: LiteLLM config dict or smolagents model instance.
+        """
+        resolved_type = ModelTypeManager.resolve_model_type(model_type)
+
+        runtime_logger = get_logger(logger, __name__) if logger is not None else None
+        if runtime_logger:
+            runtime_logger.info(f"Requested model type '{model_type}', resolved to: {resolved_type.value}")
+        
+        if framework.lower() == "litellm":
+            return self.get_litellm_config(resolved_type, model_builder, model_cache)
+        elif framework.lower() == "smolagents":
+            return self.get_smolagents_model(resolved_type, model_builder, model_cache, logger=runtime_logger)
+        else:
+            raise ValueError(f"Unsupported framework: {framework}")
+
+    def clear_cache(self):
+        """Clear model cache."""
+        self._model_cache.clear()
+        logger.info("Model cache cleared")
+
+    def get_cache_info(self) -> dict:
+        """
+        Get cache information.
+
+        Returns:
+            dict: Cache information.
+        """
+        return {
+            "cached_models": list(self._model_cache.keys()),
+            "cache_size": len(self._model_cache)
+        }
+
+# Global model manager instance.
+model_manager = ModelManager()
+
+
+def get_model(
+    model_type: str,
+    framework: str = "litellm",
+    model_builder: ModelConfigBuilder | None = None,
+    model_cache: bool = True,
+    logger: Optional[AgentLogger] = None
+) -> Union[dict, LiteLLMModelV2]:
+    """
+    Convenience helper: get a model by model type.
+
+    Args:
+        model_type: Model type.
+        framework: Framework to use.
+        model_builder: Overlay builder for runtime model overrides.
+        logger: Logger instance.
+
+    Returns:
+        Union[dict, LiteLLMModelV2]: LiteLLM config dict or smolagents model instance.
+    """
+    return model_manager.get_model(model_type, framework, model_builder, model_cache, logger=logger)

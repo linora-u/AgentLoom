@@ -1,0 +1,32 @@
+name: "fallback_demo_worker"
+description: |
+  默认 logger 回退演示用子 agent。
+
+model_type: "powerful"
+tool_call_type: "code_act"
+
+workflow: |
+  # Worker Demo Workflow
+  1. 接收 supervisor 传入的指令。
+  2. 执行 shell_tool。
+  3. 返回真实执行结果文本。
+
+agent_function_schema:
+  description: |
+    子 agent：执行 shell 指令并返回结果。
+  inputs:
+    query:
+      description: |
+        需要子 agent 执行的 shell 指令描述。
+      required: true
+  output:
+    description: |
+      Worker execution result text
+
+tools:
+  - name: "shell_tool"
+
+skills: []
+worker_agents: []
+execution_env:
+  type: "local"

@@ -1,0 +1,35 @@
+id: struct
+language: go
+rule:
+  kind: type_declaration
+  regex: \btype\s+{WORDS}(?:\[[^\]]+\])?\s+struct\b
+---
+id: func
+language: go
+rule:
+  all:
+    - kind: function_declaration
+    - has:
+        field: name
+        regex: ^{WORDS}$
+---
+id: method
+language: go
+rule:
+  all:
+    - kind: method_declaration
+    - has:
+        field: name
+        regex: ^{WORDS}$
+---
+id: interface
+language: go
+rule:
+  kind: type_declaration
+  regex: \btype\s+{WORDS}(?:\[[^\]]+\])?\s+interface\b
+---
+id: type alias
+language: go
+rule:
+  kind: type_declaration
+  regex: \btype\s+{WORDS}(?:\[[^\]]+\])?\s*=

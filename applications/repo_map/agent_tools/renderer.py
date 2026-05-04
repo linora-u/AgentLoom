@@ -1,0 +1,296 @@
+"""
+Renderer: converts ranked tags data into a directory-mirrored Markdown structure.
+
+Called by markdown_tool.generate_markdown_map().
+"""
+
+import hashlib
+import json
+from collections import defaultdict
+from pathlib import Path
+from typing import Optional
+
+
+IMPORTANCE_STARS = ["", "★", "★★", "★★★", "★★★★", "★★★★★"]
+
+
+def _stars(rank: int, total: int) -> str:
+    """Convert rank position to star rating."""
+    if total == 0:
+        return ""
+    pct = 1.0 - (rank - 1) / total
+    idx = max(1, min(5, int(pct * 5) + 1))
+    return IMPORTANCE_STARS[idx]
+
+
+def _safe_dir_name(rel_dir: str) -> str:
+    """Convert relative directory path to a safe display name."""
+    if not rel_dir:
+        return "(root)"
+    return rel_dir.replace("\\", "/")
+
+
+def render_directory_map(
+    ranked_file: str,
+    tags_file: str,
+    output_dir: str,
+) -> str:
+    """
+    Read ranked.json + tags.json and generate Markdown files mirroring
+    the project directory structure.
+
+    For each directory that contains source files, creates:
+      <output_dir>/repo_map/<rel_dir>/index.md
+
+    Also creates:
+      <output_dir>/repo_map/index.md   — project-level overview
+      <output_dir>/repo_map/dependencies.md — top cross-file dependencies
+
+    Args:
+        ranked_file: Path to ranked.json produced by scan_rank_tool.
+        tags_file:   Path to tags.json produced by scan_rank_tool.
+        output_dir:  Root output directory.
+
+    Returns:
+        Summary string listing all generated files.
+    """
+    ranked_path = Path(ranked_file)
+    tags_path = Path(tags_file)
+    meta_path = ranked_path.parent / "scan_meta.json"
+
+    ranked: list[dict] = json.loads(ranked_path.read_text(encoding="utf-8"))
+    all_tags: list[dict] = json.loads(tags_path.read_text(encoding="utf-8"))
+    meta: dict = json.loads(meta_path.read_text(encoding="utf-8")) if meta_path.exists() else {}
+
+    out_map = Path(output_dir) / "repo_map"
+    out_map.mkdir(parents=True, exist_ok=True)
+
+    total = len(ranked)
+    project_name = Path(meta.get("project_path", "project")).name
+
+    # Index tags by file
+    file_defs: dict[str, list[dict]] = defaultdict(list)
+    file_refs: dict[str, set] = defaultdict(set)
+    for t in all_tags:
+        if t["kind"] == "def":
+            file_defs[t["rel_fname"]].append(t)
+        elif t["kind"] == "ref" and t["line"] >= 0:
+            file_refs[t["rel_fname"]].add(t["name"])
+
+    # Build definition → file mapping for "referenced by" info
+    def_to_files: dict[str, list[str]] = defaultdict(list)
+    for t in all_tags:
+        if t["kind"] == "def":
+            def_to_files[t["name"]].append(t["rel_fname"])
+
+    # Group ranked files by directory
+    dir_files: dict[str, list[dict]] = defaultdict(list)
+    for rf in ranked:
+        rel = rf["rel_fname"]
+        parent = str(Path(rel).parent)
+        if parent == ".":
+            parent = ""
+        dir_files[parent].append(rf)
+
+    generated_files: list[str] = []
+    _index_md_hashes: dict[str, str] = {}  # dir_key -> md5 of index.md content
+
+    # ------------------------------------------------------------------ #
+    # 1. Per-directory index.md
+    # ------------------------------------------------------------------ #
+    for rel_dir, dir_ranked_files in sorted(dir_files.items()):
+        # Stable sort: by rank first, then by filename for deterministic output
+        dir_ranked_files = sorted(dir_ranked_files, key=lambda rf: (rf["rank"], rf["rel_fname"]))
+        dir_out = out_map / rel_dir if rel_dir else out_map
+        dir_out.mkdir(parents=True, exist_ok=True)
+        md_path = dir_out / "index.md"
+
+        lines: list[str] = []
+        dir_display = _safe_dir_name(rel_dir) if rel_dir else f"{project_name}/ (root)"
+        lines.append(f"# {dir_display}\n")
+
+        total_defs = sum(len(file_defs.get(rf["rel_fname"], [])) for rf in dir_ranked_files)
+        lines.append(f"- 文件数: {len(dir_ranked_files)}")
+        lines.append(f"- 总定义数: {total_defs}\n")
+
+        lines.append("## 文件列表（按重要性排序）\n")
+
+        for rf in dir_ranked_files:
+            rel = rf["rel_fname"]
+            stars = _stars(rf["rank"], total)
+            defs = file_defs.get(rel, [])
+
+            lines.append(f"### {Path(rel).name} {stars}")
+            lines.append(f"*{rel}*\n")
+
+            if defs:
+                for d in sorted(defs, key=lambda x: x["line"]):
+                    lines.append(f"- `{d['name']}` (line {d['line'] + 1})")
+            else:
+                lines.append("- *(no definitions extracted)*")
+
+            # "referenced by" — find files that reference symbols from this file
+            our_def_names = {d["name"] for d in defs}
+            referencing_files: set[str] = set()
+            for sym in our_def_names:
+                for other_rel in def_to_files.get(sym, []):
+                    if other_rel != rel:
+                        referencing_files.add(other_rel)
+            # Also check files that import symbols defined here
+            for other_rel, other_refs in file_refs.items():
+                if other_rel != rel and our_def_names & other_refs:
+                    referencing_files.add(other_rel)
+
+            if referencing_files:
+                sample = sorted(referencing_files)[:5]
+                more = len(referencing_files) - len(sample)
+                refs_str = ", ".join(f"`{Path(f).name}`" for f in sample)
+                if more > 0:
+                    refs_str += f" ... +{more} more"
+                lines.append(f"\n*被引用于*: {refs_str}")
+
+            lines.append("")
+
+        md_content = "\n".join(lines)
+        md_path.write_text(md_content, encoding="utf-8")
+        generated_files.append(str(md_path))
+        # Track index.md content hash for incremental analysis detection
+        _dir_key = rel_dir if rel_dir else "(root)"
+        _index_md_hashes[_dir_key] = hashlib.md5(md_content.encode("utf-8")).hexdigest()
+
+    # ------------------------------------------------------------------ #
+    # 2. Root index.md — project overview with PageRank top-20
+    # ------------------------------------------------------------------ #
+    root_index = out_map / "index.md"
+    root_lines: list[str] = []
+    root_lines.append(f"# Repo Map: {project_name}\n")
+
+    root_lines.append("## 项目概览\n")
+    root_lines.append(f"- 文件数: {meta.get('total_files', total)}")
+    root_lines.append(f"- 总 tags: {meta.get('total_tags', len(all_tags))}")
+    root_lines.append(f"- 目录数: {len(dir_files)}")
+    exclude = meta.get("exclude_dirs", [])
+    if exclude:
+        root_lines.append(f"- 排除目录: {', '.join(exclude)}")
+    root_lines.append("")
+
+    root_lines.append("## 关键模块（PageRank 排序 top-20）\n")
+    root_lines.append("| # | 文件 | 定义数 | 重要性 |")
+    root_lines.append("|---|------|--------|--------|")
+    for rf in ranked[:20]:
+        stars = _stars(rf["rank"], total)
+        def_count = len(file_defs.get(rf["rel_fname"], []))
+        root_lines.append(
+            f"| {rf['rank']} | `{rf['rel_fname']}` | {def_count} | {stars} |"
+        )
+    root_lines.append("")
+
+    root_lines.append("## 目录结构\n")
+    for rel_dir in sorted(dir_files.keys()):
+        count = len(dir_files[rel_dir])
+        indent = "  " * rel_dir.count("/") if rel_dir else ""
+        display = _safe_dir_name(rel_dir) if rel_dir else "(root)"
+        dir_link = (rel_dir + "/index.md") if rel_dir else "index.md"
+        root_lines.append(f"{indent}- [{display}/]({dir_link}) — {count} 文件")
+    root_lines.append("")
+
+    root_index.write_text("\n".join(root_lines), encoding="utf-8")
+    generated_files.insert(0, str(root_index))
+
+    # ------------------------------------------------------------------ #
+    # 3. dependencies.md — cross-file dependency graph (top files)
+    # ------------------------------------------------------------------ #
+    deps_path = out_map / "dependencies.md"
+    deps_lines: list[str] = []
+    deps_lines.append("# 跨文件依赖关系\n")
+    deps_lines.append("*基于符号定义/引用关系生成（top-30 文件）*\n")
+
+    deps_lines.append("## 核心依赖\n")
+    for rf in ranked[:30]:
+        rel = rf["rel_fname"]
+        defs = file_defs.get(rel, [])
+        if not defs:
+            continue
+        our_names = {d["name"] for d in defs}
+        callers: dict[str, int] = defaultdict(int)
+        for other_rel, other_refs in file_refs.items():
+            if other_rel == rel:
+                continue
+            cnt = len(our_names & other_refs)
+            if cnt > 0:
+                callers[other_rel] += cnt
+        if callers:
+            top_callers = sorted(callers.items(), key=lambda x: -x[1])[:5]
+            caller_str = ", ".join(
+                f"`{Path(c).name}` ({n})" for c, n in top_callers
+            )
+            deps_lines.append(f"- **`{Path(rel).name}`** ← {caller_str}")
+
+    deps_path.write_text("\n".join(deps_lines), encoding="utf-8")
+    generated_files.append(str(deps_path))
+
+    # ------------------------------------------------------------------ #
+    # 4. analysis_progress.json — state for step3 for loop
+    # ------------------------------------------------------------------ #
+    data_dir = Path(output_dir) / "data"
+
+    # ── Incremental: load old progress to preserve completed analyses ──
+    progress_path = data_dir / "analysis_progress.json"
+    old_progress: dict[str, dict] = {}
+    if progress_path.exists():
+        try:
+            old_progress = json.loads(progress_path.read_text(encoding="utf-8"))
+        except (json.JSONDecodeError, OSError):
+            old_progress = {}
+
+    progress: dict[str, dict] = {}
+    reused, invalidated = 0, 0
+    for rel_dir in sorted(dir_files.keys()):
+        dir_key = rel_dir if rel_dir else "(root)"
+        md_rel = (rel_dir + "/index.md") if rel_dir else "index.md"
+        md_abs = str(out_map / rel_dir / "index.md") if rel_dir else str(out_map / "index.md")
+        best_rank = min(rf["rank"] for rf in dir_files[rel_dir])
+        new_hash = _index_md_hashes.get(dir_key, "")
+
+        old_entry = old_progress.get(dir_key)
+        if (
+            old_entry
+            and old_entry.get("status") == "completed"
+            and old_entry.get("index_md_hash")
+            and old_entry["index_md_hash"] == new_hash
+        ):
+            # Source unchanged — preserve completed analysis
+            progress[dir_key] = {
+                **old_entry,
+                "md_file": md_abs,
+                "md_rel": md_rel,
+                "rank": best_rank,
+                "file_count": len(dir_files[rel_dir]),
+                "index_md_hash": new_hash,
+            }
+            reused += 1
+        else:
+            if old_entry and old_entry.get("status") == "completed":
+                invalidated += 1
+            progress[dir_key] = {
+                "status": "pending",
+                "md_file": md_abs,
+                "md_rel": md_rel,
+                "output": None,
+                "rank": best_rank,
+                "file_count": len(dir_files[rel_dir]),
+                "index_md_hash": new_hash,
+            }
+
+    if reused or invalidated:
+        print(f"[renderer] Incremental: {reused} dirs reused (unchanged), {invalidated} dirs invalidated (source changed)")
+
+    progress_path.write_text(json.dumps(progress, ensure_ascii=False, indent=2), encoding="utf-8")
+    generated_files.append(str(progress_path))
+
+    summary = (
+        f"Generated {len(generated_files)} files:\n"
+        + "\n".join(f"  {f}" for f in generated_files[:10])
+        + (f"\n  ... and {len(generated_files) - 10} more" if len(generated_files) > 10 else "")
+    )
+    return summary

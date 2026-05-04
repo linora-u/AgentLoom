@@ -1,0 +1,63 @@
+name: "test_context_cache"
+description: "Validate that context_cache injection works correctly with the configured LLM model"
+
+model_type: "powerful"
+tool_call_type: "code_act"
+
+workflow: |
+  # Context Cache Validation Workflow
+
+  You are a testing agent. Execute ALL steps below to validate that
+  context_cache prompt caching is working correctly.
+
+  ## Step 1: Verify environment
+  Use shell_tool to run: echo "Agent started successfully"
+  Expected: shell returns the echo message.
+  Verify: output contains "Agent started successfully".
+
+  ## Step 2: Read the litellm_model.py source
+  Use read_file to read lines 80-110 of file "src/lib/smolagents/models/litellm_model.py".
+  Expected: you should see the _inject_cache_control method that handles universal
+  cache_control injection for all providers.
+  Verify: output contains "_inject_cache_control" and "cache_control" and "ephemeral".
+
+  ## Step 3: Check LLM config
+  Use shell_tool to run: cat config/llm.yaml | grep -A2 "context_cache"
+  Expected: see context_cache: true under one or more model types.
+  Verify: output shows "context_cache: true".
+
+  ## Step 4: Verify no provider-specific code remains
+  Use shell_tool to run: grep -c "is_claude\|is_gpt\|_enable_anthropic_caching\|_enable_openai_caching" src/lib/smolagents/models/litellm_model.py || echo "CLEAN: 0 matches"
+  Expected: No provider-specific caching code should exist.
+  Verify: output shows "CLEAN: 0 matches" or count is 0.
+
+  ## Step 5: Verify cache_control injection logic
+  Use shell_tool to run the following Python command:
+  .venv/bin/python -c "
+  from src.lib.smolagents.models.litellm_model import LiteLLMModelV2
+  import json
+
+  model = LiteLLMModelV2(model_id='anthropic/test-model', api_key='test', context_cache=True)
+  messages = [{'role': 'system', 'content': 'You are a helpful assistant.'}]
+  model._inject_cache_control(messages)
+  result = json.dumps(messages[0]['content'], indent=2)
+  print('CACHE_RESULT:', result)
+  "
+  Expected: system message content should be converted to a list with cache_control.
+  Verify: output contains "cache_control" and "ephemeral".
+
+  ## Final Summary
+  Print a summary table:
+  | Step | Check | Status |
+  Report overall: X/5 PASSED.
+
+tools:
+  - name: "shell_tool"
+  - name: "read_file"
+
+worker_agents: []
+skills: []
+max_steps: 15
+
+execution_env:
+  type: "local"

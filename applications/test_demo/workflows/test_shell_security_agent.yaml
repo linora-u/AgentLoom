@@ -1,0 +1,56 @@
+name: "test_shell_security"
+description: "Validate shell_tool security checks block injection patterns while allowing safe commands"
+
+model_type: "powerful"
+tool_call_type: "code_act"
+
+workflow: |
+  # Shell Security Validation
+
+  Execute ALL steps below. Report PASS/FAIL for each.
+
+  ## Step 1: Safe command execution
+  Run `shell_tool("ls -la")` and verify it returns a file listing.
+  Expected: Output contains file/directory names (e.g., "src", "README.md").
+  Report: PASS if output contains file listing, FAIL otherwise.
+
+  ## Step 2: Another safe command
+  Run `shell_tool("echo 'hello world'")` and verify it returns "hello world".
+  Expected: Output contains "hello world".
+  Report: PASS if output matches, FAIL otherwise.
+
+  ## Step 3: Git status (safe)
+  Run `shell_tool("git status")` and verify it runs without error.
+  Expected: Output contains git status information (branch name, changes, etc.).
+  Report: PASS if output contains git info, FAIL otherwise.
+
+  ## Step 4: Blocked command — command substitution
+  Run `shell_tool("echo $(id)")` — this should raise a ValueError.
+  Expected: ValueError with message containing "Blocked" or "substitution".
+  Report: PASS if ValueError is raised, FAIL if command executes.
+
+  ## Step 5: Blocked command — dangerous prefix
+  Run `shell_tool("sudo ls")` — this should raise a ValueError.
+  Expected: ValueError with message containing "Blocked".
+  Report: PASS if ValueError is raised, FAIL if command executes.
+
+  ## Final Summary
+  Print a summary table:
+  | Step | Description | Status |
+  |------|-------------|--------|
+  | 1 | ls -la | PASS/FAIL |
+  | 2 | echo hello | PASS/FAIL |
+  | 3 | git status | PASS/FAIL |
+  | 4 | $() blocked | PASS/FAIL |
+  | 5 | sudo blocked | PASS/FAIL |
+
+  Overall: X/5 PASSED.
+
+tools:
+  - name: "shell_tool"
+
+skills: []
+max_steps: 15
+
+execution_env:
+  type: "local"
