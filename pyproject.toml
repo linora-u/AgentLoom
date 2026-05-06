@@ -8,7 +8,6 @@ version = "0.1.0"
 description = "Agent framework with workflow and LLM integration"
 readme = {file = "README.md", content-type = "text/markdown"}
 requires-python = ">=3.12"
-license = {text = "MIT"}
 authors = [
     {name = "lin"},
 ]
@@ -137,4 +136,3 @@ dev = [
 
 [tool.uv]
 prerelease = "allow"
-
