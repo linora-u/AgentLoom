@@ -324,7 +324,7 @@ class CheckpointManager:
         tid = threading.get_ident()
         tmp = path.with_suffix(f".{os.getpid()}.{tid}.tmp")
         tmp.write_text(json.dumps(data, ensure_ascii=False, indent=2, default=str), encoding="utf-8")
-        tmp.rename(path)
+        tmp.replace(path)
 
     @staticmethod
     def _read_json(path: Path) -> dict | None:
