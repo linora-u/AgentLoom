@@ -210,8 +210,10 @@ def _replace_security_section(description: str, new_section: str) -> str:
     marker_pos = description.index(_SHELL_SECURITY_SECTION_MARKER)
 
     # Find the start of the next section after Security:
+    # Use \s* (not \s{4}) because Python strips common docstring indentation
+    # when storing __doc__, so section headers may have no leading whitespace.
     next_section_pattern = re.compile(
-        r'^\s{4}(?:Args|Returns|Raises|Examples):',
+        r'^\s*(?:Args|Returns|Raises|Examples):',
         re.MULTILINE,
     )
     after_marker = description[marker_pos:]
@@ -224,14 +226,7 @@ def _replace_security_section(description: str, new_section: str) -> str:
     else:
         end_pos = len(description)
 
-    # Build replacement: indent the new section to match docstring indentation
-    indented_lines = []
-    for line in new_section.splitlines():
-        if line.strip():
-            indented_lines.append(f"    {line}")
-        else:
-            indented_lines.append("")
-    replacement = "\n".join(indented_lines) + "\n\n"
+    replacement = new_section + "\n\n"
 
     return description[:marker_pos] + replacement + description[end_pos:]
 
