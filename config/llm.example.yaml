@@ -1,60 +1,96 @@
-# AI Agents LLM 配置文件
+# ============================================================
+# AgentLoom LLM 模型配置文件（示例模板）
+# ============================================================
+#
+# 继承优先级（从高到低）：
+#   模型类型自己的值  >  common 的值  >  代码默认值
+#
+# 也就是说：只要模型类型里显式写了某个字段，就用它自己的值，
+# 不会去继承 common。只有「没写」的字段才会从 common 继承。
+#
+# 举例：
+#   common.base_url = "http://shared/v1"
+#
+#   powerful:
+#     base_url: "http://dedicated/v1"   ← 显式写了，用自己的
+#   summary:
+#     # base_url 没写                   ← 没写，继承 common 的
+#
+# 支持继承的字段：
+#   base_url, api_key, temperature, max_tokens, timeout,
+#   num_retries, retry_delay, max_retry_delay, extra_headers,
+#   requests_per_minute, context_cache, system_prompt_boundary,
+#   supports_native_tool_calls
+#
+# 注意：model（模型 ID）和 description 不参与继承，每个类型必须自己指定。
+#
+# 模型 ID 格式：{provider}/{model-name}
+# 常见 provider：openai, anthropic, gemini, ollama 等
+# 完整列表见 LiteLLM 官方文档
 
-# ============================================
-# 模型配置
-# ============================================
 model:
-  # 默认模型类型
+  # 全局默认模型类型（Agent 未指定 model_type 时使用）
   default_model_type: powerful
 
-  # 通用配置（作为默认值，当 powerful/fast/summary 未设置时使用）
-  # 平台名称可以选择: gemini, anthropic, openai。其他平台请查litellm 官方手册
+  # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  # common — 共享配置（其他类型未设置的字段从此继承）
+  # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
   common:
     model: "gemini/gemini-3_1-pro-preview"
     base_url: "xxxxxxx"
     api_key: "xxxxxxx"
-    # 速率限制：每分钟最大请求数（用于 smolagents，防止超出 API 限制）
     requests_per_minute: 10
-  
-  # 强大模型配置（用于复杂任务，如代码生成、复杂推理）
+
+    # --- 以下为可选参数（在 common 中设置后，所有类型自动继承）---
+    #
+    # temperature: 0.2          # 温度参数 (0.0~2.0)，越高越随机
+    # max_tokens: 128000        # 最大输出 token 数
+    # timeout: 300              # 请求超时（秒）
+    # num_retries: 5            # 失败重试次数
+    # retry_delay: 15.0         # 重试间隔（秒）
+    # max_retry_delay: 100.0    # 重试最大间隔（秒）
+    #
+    # context_cache: true       # 启用 prompt 缓存（LiteLLM 自动适配各平台）
+    #
+    # system_prompt_boundary: "<!-- DYNAMIC_BOUNDARY -->"
+    #   将 system prompt 拆分为静态（可缓存）和动态两部分，
+    #   提高缓存命中率。标记之后的内容视为动态部分。
+    #
+    # supports_native_tool_calls: "auto"
+    #   三态开关："auto" 运行时检测 / "true" 强制原生 / "false" 文本解析
+    #
+    # extra_headers:            # 自定义 HTTP 请求头
+    #   X-Custom-Header: "value"
+
+  # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  # powerful — 强大模型（复杂推理、代码生成）
+  # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
   powerful:
-    base_url: "xxxxxxx"
     model: "openai/azure-gpt-5_2"
-    # base_url 和 api_key 未设置时，使用 common 的配置
+    base_url: "xxxxxxx"           # 显式设置，不继承 common
     temperature: 0.2
     max_tokens: 128000
     timeout: 300
-    # context_cache: true enables automatic prompt caching for ALL models.
-    # litellm handles per-provider behavior (Anthropic preserves, OpenAI strips, etc.)
     context_cache: true
-    # system_prompt_boundary: optional marker to split system prompt into
-    # static (cached) and dynamic (uncached) segments for higher cache hit rates.
-    # Example: system_prompt_boundary: "<!-- DYNAMIC_BOUNDARY -->"
-    # supports_native_tool_calls: three-state flag for tool calling capability.
-    #   "auto" (default): detect at runtime from first API response
-    #   "true": always use native tool_calls (skip detection)
-    #   "false": always use multi-strategy text parsing fallback
-    # supports_native_tool_calls: "auto"
 
-  # 快速模型配置（用于简单任务，如意图识别、分类）
+  # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  # fast — 快速模型（意图识别、简单分类）
+  # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
   fast:
-    # 使用 openai/ 前缀让 LiteLLM 识别这是 OpenAI 兼容端点
-    base_url: "xxxxxxx"
     model: "gemini/gemini-3_1-pro-preview"
-    # api_key 未设置时，使用 common 的配置
-    # 注意：LiteLLM 对 gpt-5 模型要求 temperature=1.0
+    base_url: "xxxxxxx"           # 显式设置，不继承 common
     temperature: 1.0
     max_tokens: 50000
     timeout: 300
     context_cache: true
-  
-  # 摘要模型配置（用于文本摘要、内容提取）
+
+  # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  # summary — 摘要模型（上下文压缩、内容提取）
+  # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
   summary:
-    # Use Fast model config to avoid 401 Auth errors on the other endpoint
     model: "anthropic/claude-sonnet-4-5"
-    # api_key 未设置时，使用 common 的配置
-    # 注意：LiteLLM 对 gpt-5 模型要求 temperature=1.0
     temperature: 0.3
     max_tokens: 50000
     timeout: 300
     context_cache: true
+    # base_url 和 api_key 未设置，自动从 common 继承

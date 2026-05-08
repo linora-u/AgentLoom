@@ -149,8 +149,13 @@ class LLMConfig(BaseModel):
                 retry_delay=float(resolved_retry_delay),
                 max_retry_delay=float(resolved_max_retry_delay),
                 extra_headers=resolved_extra_headers,
-                context_cache=BoolParser.parse(v.get("context_cache", DEFAULT_MODEL_CONTEXT_CACHE), default=DEFAULT_MODEL_CONTEXT_CACHE),
-                system_prompt_boundary=v.get("system_prompt_boundary", None),
+                context_cache=BoolParser.parse(
+                    v.get("context_cache", common_raw.get("context_cache", DEFAULT_MODEL_CONTEXT_CACHE)),
+                    default=DEFAULT_MODEL_CONTEXT_CACHE,
+                ),
+                system_prompt_boundary=v.get(
+                    "system_prompt_boundary", common_raw.get("system_prompt_boundary")
+                ),
                 description=str(v.get("description", f"Model type '{k}' loaded from YAML config")),
                 requests_per_minute=int(resolved_rpm),
                 supports_native_tool_calls=resolved_tool_calls,
