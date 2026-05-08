@@ -95,6 +95,6 @@ class BaseHeartbeatWriter:
             self._path.parent.mkdir(parents=True, exist_ok=True)
             tmp = self._path.with_suffix(".tmp")
             tmp.write_text(json.dumps(data, indent=2), encoding="utf-8")
-            tmp.rename(self._path)
+            tmp.replace(self._path)
         except Exception:
             pass  # heartbeat must never crash the host process
