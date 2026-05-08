@@ -23,8 +23,8 @@ logger = get_logger(__name__)
 # Grace period between SIGTERM and SIGKILL (milliseconds).
 _KILL_GRACE_MS = 200
 
-
-def tree_kill(pid: int, sig: int = signal.SIGKILL) -> bool:
+DEFAULT_KILL_SIGNAL = getattr(signal, "SIGKILL", signal.SIGTERM)
+def tree_kill(pid: int, sig: int = DEFAULT_KILL_SIGNAL) -> bool:
     """Kill a process tree rooted at *pid*.
 
     Strategy:
