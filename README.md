@@ -16,7 +16,7 @@ English | <a href="docs/cn/README.md">简体中文</a>
 <p align="center">
   <a href="https://github.com/linora-u/AgentLoom/actions/workflows/tests.yml"><img alt="tests" src="https://github.com/linora-u/AgentLoom/actions/workflows/tests.yml/badge.svg"></a>
   <a href="https://www.python.org/downloads/"><img alt="python >=3.12" src="https://img.shields.io/badge/python-%3E%3D3.12-3776AB?logo=python&logoColor=white"></a>
-  <img alt="v1.0.0" src="https://img.shields.io/badge/-v1.0.0-007EC6">
+  <a href="https://github.com/linora-u/AgentLoom/releases/tag/v1.0.0"><img alt="release v1.0.0" src="https://img.shields.io/badge/release-v1.0.0-007EC6"></a>
 </p>
 
 ---
