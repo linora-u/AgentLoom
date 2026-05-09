@@ -44,8 +44,8 @@ The following shows the **complete structure and repository example values** for
 # ============================================
 system:
   name: "AgentLoom"
-  version: "1.0.0"
-  user_agent: "AgentLoom/1.0.0"
+  version: "1.0.1"
+  user_agent: "AgentLoom/1.0.1"
 
 # ============================================
 # Context Compression Strategy
@@ -167,8 +167,8 @@ Controls basic system identity, used for logging and HTTP request User-Agent hea
 | Parameter | Type | Default | Required | Description |
 |------|------|--------|------|------|
 | `system.name` | `str` | `"AgentLoom"` | ❌ No | System name, used for log identification and User-Agent construction |
-| `system.version` | `str` | `"1.0.0"` | ❌ No | System version number (informational field) |
-| `system.user_agent` | `str` | `"AgentLoom/1.0.0"` | ❌ No | User-Agent string for HTTP API requests |
+| `system.version` | `str` | `"1.0.1"` | ❌ No | System version number (informational field) |
+| `system.user_agent` | `str` | `"AgentLoom/1.0.1"` | ❌ No | User-Agent string for HTTP API requests |
 
 **Example**:
 

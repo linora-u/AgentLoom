@@ -15,7 +15,7 @@
 <p align="center">
   <a href="https://github.com/linora-u/AgentLoom/actions/workflows/tests.yml"><img alt="tests" src="https://github.com/linora-u/AgentLoom/actions/workflows/tests.yml/badge.svg"></a>
   <a href="https://www.python.org/downloads/"><img alt="python >=3.12" src="https://img.shields.io/badge/python-%3E%3D3.12-3776AB?logo=python&logoColor=white"></a>
-  <img alt="v1.0.0" src="https://img.shields.io/badge/-v1.0.0-007EC6">
+  <img alt="v1.0.1" src="https://img.shields.io/badge/-v1.0.1-007EC6">
 </p>
 
 ---
@@ -66,7 +66,7 @@ AgentLoom 已经实现了一套构建和运行复杂 Agent 应用所需的运行
 | 长任务韧性 | checkpoint resume、心跳检测、对话恢复、工具调用错误恢复、文件历史、worker skip-on-resume 和任务清理。 |
 | 可观测性 | Rich 终端日志、纯文本文件日志、每步耗时、累计/增量 Token、task/subtask/agent 上下文，以及 `.logs/` 运行归档。 |
 | UI 与监控 | Web UI 支持 SSE 实时更新、拓扑图、时间线回放、多运行分组；TUI dashboard 支持活跃任务和可恢复任务监控。 |
-| 示例应用 | `ai_quality_analysis`、`unit_test_studio`、`repo_map` 展示直接运行、自定义 Python 入口、严格流水线和并发 Worker 分析。 |
+| 示例应用 | `ai_quality_analysis`、`unit_test_studio`、`repo_map`、`codex_exec_demo` 展示直接运行、自定义 Python 入口、严格流水线、并发 Worker 分析和本地 Codex 工具调用。 |
 
 ## 为什么选择 AgentLoom
 

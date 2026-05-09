@@ -45,8 +45,8 @@
 # ============================================
 system:
   name: "AgentLoom"
-  version: "1.0.0"
-  user_agent: "AgentLoom/1.0.0"
+  version: "1.0.1"
+  user_agent: "AgentLoom/1.0.1"
 
 # ============================================
 # 上下文压缩策略
@@ -167,8 +167,8 @@ checkpoint:
 | 参数 | 类型 | 默认值 | 必选 | 说明 |
 |------|------|--------|------|------|
 | `system.name` | `str` | `"AgentLoom"` | ❌ 否 | 系统名称，用于日志标识和 User-Agent 构建 |
-| `system.version` | `str` | `"1.0.0"` | ❌ 否 | 系统版本号（信息性字段） |
-| `system.user_agent` | `str` | `"AgentLoom/1.0.0"` | ❌ 否 | HTTP API 请求时的 User-Agent 字符串 |
+| `system.version` | `str` | `"1.0.1"` | ❌ 否 | 系统版本号（信息性字段） |
+| `system.user_agent` | `str` | `"AgentLoom/1.0.1"` | ❌ 否 | HTTP API 请求时的 User-Agent 字符串 |
 
 **示例**：
 
