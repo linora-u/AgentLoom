@@ -166,6 +166,8 @@ def test_bash_load_profile_isolation(clean_registry, monkeypatch):
 
         monkeypatch.setenv("HOME", temp_dir)
         monkeypatch.setenv("SHELL", shutil.which("bash"))
+        monkeypatch.setenv("SSH_CLIENT", "127.0.0.1 10000 22")
+        monkeypatch.setenv("SSH_CONNECTION", "127.0.0.1 10000 127.0.0.1 22")
         # Clear shell detection cache so it picks up the new $SHELL.
         from src.tools.shell.process import find_suitable_shell
         find_suitable_shell.cache_clear()

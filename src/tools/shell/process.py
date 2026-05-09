@@ -438,6 +438,14 @@ class ShellProcess:
             shell_args = [self._shell_path, "-c", composite]
         elif self.load_profile:
             shell_args = [self._shell_path, "-l", "-c", composite]
+        elif "bash" in os.path.basename(self._shell_path).lower():
+            shell_args = [
+                self._shell_path,
+                "--noprofile",
+                "--norc",
+                "-c",
+                composite,
+            ]
         else:
             shell_args = [self._shell_path, "-c", composite]
 
