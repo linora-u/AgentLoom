@@ -1,0 +1,58 @@
+name: "codex_exec_demo"
+description: |
+  Demonstrate AgentLoom registering two local Codex aliases and calling them
+  sequentially through structured tool calls.
+
+model_type: "powerful"
+tool_call_type: "tool_call"
+
+workflow: |
+  # Local Codex Exec Chain Demo
+
+  You are demonstrating how an AgentLoom LLM uses two registered Codex-backed
+  tools through the framework's structured tool-call path.
+
+  ## Execution Steps
+
+  1. Read the task request.
+  2. Call `codex1` exactly once.
+  3. After `codex1` returns, call `codex2` exactly once.
+  4. Use the returned tool results as the authoritative answer source.
+  5. When both tools succeed, the final answer must contain only the exact
+     `output` field from each Codex tool result. Put each raw output under a
+     separate heading:
+     - `codex1 raw output`
+     - `codex2 raw output`
+  6. If either tool reports failure, return the error details and diagnostic metadata
+     instead of retrying blindly.
+
+tools:
+  - name: "codex1"
+    module: "src.tools.codex.codex_tool"
+    function: "codex"
+    fixed_args:
+      prompt: "Read pyproject.toml and return the project name and version. Keep it concise."
+      cwd: "."
+      model: ""
+      timeout: "600"
+      sandbox: ""
+      search: "false"
+    description: "Run the first fixed local Codex task in the demo chain."
+  - name: "codex2"
+    module: "src.tools.codex.codex_tool"
+    function: "codex"
+    fixed_args:
+      prompt: "Inspect the repository root and return a concise list of top-level directories with one short role for each."
+      cwd: "."
+      model: ""
+      timeout: "600"
+      sandbox: ""
+      search: "false"
+    description: "Run the second fixed local Codex task in the demo chain."
+
+worker_agents: []
+skills: []
+max_steps: 8
+
+execution_env:
+  type: "local"

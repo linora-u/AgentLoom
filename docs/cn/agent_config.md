@@ -734,6 +734,20 @@ tools:
   - name: "shell_tool"
 ```
 
+#### 固定工具参数
+
+当 Agent YAML 需要锁定某些工具参数时，使用 `fixed_args`。这些参数由框架绑定，
+会从 LLM 可见的 tool schema 中移除，LLM 的 tool call 不能覆盖这些值。
+
+```yaml
+tools:
+  - name: "codex"
+    fixed_args:
+      cwd: "."
+      sandbox: "workspace-write"
+      search: "false"
+```
+
 #### 预定义工具 + 元数据覆盖
 
 Agent YAML 中可按需覆盖 `config/system.yaml` 中 `tool_metadata` 段定义的元数据：

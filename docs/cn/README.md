@@ -59,7 +59,8 @@ AgentLoom 已经实现了一套构建和运行复杂 Agent 应用所需的运行
 | 批量并发 | Worker 支持 `concurrency: auto` 或固定并发，支持 `tool.batch(tasks)`、反压控制、熔断、进度回调和单次调用状态隔离。 |
 | Skills 与 Hooks | 可复用 Skills、强制注入 / 按需加载 / 隐藏模式，以及工具、任务、子 Agent、会话、压缩、安装、配置变更等生命周期 Hooks。 |
 | 模型与上下文控制 | 按 Agent 配置 `model_type`、多 LLM 端点、参数继承、重试机制、Prompt 定制和多层上下文压缩。 |
-| 工具体系 | 内置文件、Shell、搜索、代码编辑、Git、Todo、Skill 加载和本地 Python 工具，并支持 MCP Client 集成。 |
+| 工具体系 | 内置文件、Shell、搜索、代码编辑、Git、Todo、Skill 加载、本地 Python 工具和本地 Codex Exec 工具，并支持 MCP Client 集成。 |
+| 本地 Codex 集成 | 可把本机 `codex exec` 注册为普通 function tool，支持多个别名、`fixed_args` 固定参数、`sandbox` / `search` 透传，并遵循本机 Codex 登录和权限配置。 |
 | 代码智能 | LSP 服务管理，支持 definition、references、symbols、hover、workspace symbols，并提供 tree-sitter fallback。 |
 | 运行时安全 | 路径边界、include/exclude、按 Agent 生效的权限策略、Shell 命令/操作符白名单、安全检查、沙盒包装和 `shell_audit.log`。 |
 | 长任务韧性 | checkpoint resume、心跳检测、对话恢复、工具调用错误恢复、文件历史、worker skip-on-resume 和任务清理。 |
@@ -141,6 +142,7 @@ flowchart LR
 | `ai_quality_analysis` | 多维度代码审查应用。 | 12 个 Worker Agent、分阶段审查、直接 `loom run`、长时间代码库分析。 |
 | `unit_test_studio` | Python pytest 生成工作流。 | 严格多步骤流水线、自定义入口脚本、函数接收、场景规划、测试生成、精炼、交付报告。 |
 | `repo_map` | 仓库架构地图生成器。 | 确定性 Python 预处理 + Agent 架构分析、Bottom-Up 目录处理、`tool.batch(tasks)`、进度持久化。 |
+| `codex_exec_demo` | 本地 Codex Exec 工具调用示例。 | 直接 `loom run`、普通 function tool 注册、`fixed_args` 固定 Codex 参数、结构化 `tool_call` 顺序调用。 |
 
 运行默认代码审查示例：
 
@@ -166,6 +168,12 @@ uv run python applications/unit_test_studio/studio_runner.py \
   --output_dir tests/generated
 ```
 
+运行本地 Codex Exec 工具示例：
+
+```bash
+uv run loom run applications/codex_exec_demo/workflows/use_codex_exec_demo.yaml
+```
+
 ## 核心概念
 
 ### Agent 即工具
@@ -187,6 +195,18 @@ Skills 提供可复用知识或行为。Hooks 可以挂载在任务生命周期�
 ### 执行模式
 
 AgentLoom 支持结构化工具调用，也支持更灵活的代码执行模式。每个 Agent 可以根据自己的职责选择更合适的模式。
+
+### 本地 Codex 工具
+
+AgentLoom 内置 `src.tools.codex.codex_tool.codex`，用于把本机 `codex exec`
+作为普通 function tool 暴露给 Agent。它不需要额外的 `system.yaml` 专用配置；
+在 Agent YAML 的 `tools` 中通过 `module/function` 注册即可。
+
+如果希望锁定 Codex 的 `prompt`、`cwd`、`sandbox`、`search` 等输入，使用
+`fixed_args`。被固定的参数会由框架绑定，不会出现在 LLM 可传入的 tool schema
+中；未固定的参数仍会暴露给 LLM。`sandbox: ""` 表示不传 `--sandbox`，由本机
+Codex 配置和默认规则决定权限；`search: "true"` 会透传 `--search`，默认不启用
+网络搜索。使用前需要确保 `codex` 在 `PATH` 中，并且 `codex login status` 成功。
 
 ## CLI 命令
 
