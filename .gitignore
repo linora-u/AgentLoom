@@ -167,7 +167,12 @@ test_fileai_testsrc/
 llm_cfg.yaml
 llm_config.yaml
 
-.github/
+# GitHub config: keep local assistant prompts/skills ignored, track repo-facing config.
+.github/*
+!.github/
+!.github/workflows/
+!.github/workflows/tests.yml
+!.github/pull_request_template.md
 .claude/
 AGENTS.md
 

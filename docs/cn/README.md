@@ -13,6 +13,7 @@
 </p>
 
 <p align="center">
+  <a href="https://github.com/linora-u/AgentLoom/actions/workflows/tests.yml"><img alt="tests" src="https://github.com/linora-u/AgentLoom/actions/workflows/tests.yml/badge.svg"></a>
   <a href="https://www.python.org/downloads/"><img alt="python >=3.12" src="https://img.shields.io/badge/python-%3E%3D3.12-3776AB?logo=python&logoColor=white"></a>
   <img alt="v1.0.0" src="https://img.shields.io/badge/-v1.0.0-007EC6">
 </p>
@@ -28,6 +29,9 @@ git clone <repo-url> AgentLoom
 cd AgentLoom
 
 uv sync
+# 如果 PyPI 在你的网络环境中较慢或不可用：
+# UV_DEFAULT_INDEX=https://mirrors.aliyun.com/pypi/simple uv sync
+
 cp config/llm.example.yaml config/llm.yaml
 # 编辑 config/llm.yaml，填入你的模型配置。
 
