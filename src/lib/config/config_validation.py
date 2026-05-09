@@ -209,8 +209,8 @@ class LogLevelParser:
 class SystemSettings(BaseModel):
     model_config = ConfigDict(extra="allow")
     name: str = "AgentLoom"
-    version: str = "1.0.0"
-    user_agent: str = "AgentLoom/1.0.0"
+    version: str = "1.0.1"
+    user_agent: str = "AgentLoom/1.0.1"
 
 
 class PathValidationRule(BaseModel):

@@ -3,8 +3,8 @@
 # ============================================
 system:
   name: "AgentLoom"
-  version: "1.0.0"
-  user_agent: "AgentLoom/1.0.0"
+  version: "1.0.1"
+  user_agent: "AgentLoom/1.0.1"
 
 smart_summary: false
 

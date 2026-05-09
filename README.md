@@ -16,7 +16,7 @@ English | <a href="docs/cn/README.md">简体中文</a>
 <p align="center">
   <a href="https://github.com/linora-u/AgentLoom/actions/workflows/tests.yml"><img alt="tests" src="https://github.com/linora-u/AgentLoom/actions/workflows/tests.yml/badge.svg"></a>
   <a href="https://www.python.org/downloads/"><img alt="python >=3.12" src="https://img.shields.io/badge/python-%3E%3D3.12-3776AB?logo=python&logoColor=white"></a>
-  <a href="https://github.com/linora-u/AgentLoom/releases/tag/v1.0.0"><img alt="release v1.0.0" src="https://img.shields.io/badge/release-v1.0.0-007EC6"></a>
+  <a href="https://github.com/linora-u/AgentLoom/releases/tag/v1.0.1"><img alt="release v1.0.1" src="https://img.shields.io/badge/release-v1.0.1-007EC6"></a>
 </p>
 
 ---
@@ -60,13 +60,14 @@ AgentLoom already implements the runtime pieces needed to build and operate comp
 | Batch concurrency | Worker `concurrency: auto` or fixed concurrency, `tool.batch(tasks)`, back-pressure, circuit breaker, progress callbacks, and per-call state isolation. |
 | Skills and Hooks | Reusable Skills, force-injected / on-demand / hidden modes, lifecycle Hooks for tools, tasks, sub-agents, sessions, compaction, setup, and config changes. |
 | Model and context control | Per-agent `model_type`, multiple LLM endpoints, parameter inheritance, retry behavior, prompt customization, and multi-layer context compression. |
-| Tool ecosystem | Built-in file, shell, search, code-edit, git, todo, skill-loading, and local Python tools, plus MCP client integration. |
+| Tool ecosystem | Built-in file, shell, search, code-edit, git, todo, skill-loading, local Python tools, and local Codex Exec tools, plus MCP client integration. |
+| Local Codex integration | Register local `codex exec` as a normal function tool, with multiple aliases, `fixed_args`, `sandbox` / `search` pass-through, and local Codex login/permission behavior. |
 | Code intelligence | LSP service management for definition, references, symbols, hover, and workspace symbols, with tree-sitter fallback. |
 | Runtime safety | Path boundaries, include/exclude rules, per-agent policies, shell command/operator allowlists, shell security checks, sandbox wrapping, and `shell_audit.log`. |
 | Long-task resilience | Checkpoint resume, heartbeat detection, conversation recovery, tool-call error recovery, file history, worker skip-on-resume, and task cleanup. |
 | Observability | Rich terminal logs, plain text file logs, per-step duration, cumulative/incremental token usage, task/subtask/agent context, and run archiving under `.logs/`. |
 | UI and monitoring | Web UI with SSE updates, topology graph, timeline replay, multi-run grouping, plus TUI dashboard for active and resumable tasks. |
-| Reference applications | `ai_quality_analysis`, `unit_test_studio`, and `repo_map` demonstrate direct runs, custom Python entrypoints, strict pipelines, and concurrent Worker analysis. |
+| Reference applications | `ai_quality_analysis`, `unit_test_studio`, `repo_map`, and `codex_exec_demo` demonstrate direct runs, custom Python entrypoints, strict pipelines, concurrent Worker analysis, and local Codex tool calls. |
 
 ## Why AgentLoom
 
@@ -142,6 +143,7 @@ The `applications/` directory contains working apps that show how AgentLoom is i
 | `ai_quality_analysis` | Multi-dimensional code review application. | 12 Worker Agents, staged review, direct `loom run`, long-running codebase analysis. |
 | `unit_test_studio` | Python pytest generation workflow. | Strict multi-step pipeline, custom entry script, function intake, scenario planning, test generation, refinement, delivery report. |
 | `repo_map` | Repository architecture map generator. | Deterministic Python preprocessing plus Agent-driven analysis, bottom-up directory processing, `tool.batch(tasks)`, progress persistence. |
+| `codex_exec_demo` | Local Codex Exec tool-call example. | Direct `loom run`, normal function tool registration, `fixed_args` for Codex parameters, structured `tool_call` sequencing. |
 
 Run the default code review example:
 
@@ -167,6 +169,12 @@ uv run python applications/unit_test_studio/studio_runner.py \
   --output_dir tests/generated
 ```
 
+Run the local Codex Exec tool example:
+
+```bash
+uv run loom run applications/codex_exec_demo/workflows/use_codex_exec_demo.yaml
+```
+
 ## Core Concepts
 
 ### Agent As Tool
@@ -188,6 +196,20 @@ Skills add reusable knowledge or behavior. Hooks attach logic around task lifecy
 ### Execution Modes
 
 AgentLoom supports structured tool calling for controlled orchestration and code execution mode for more flexible programming tasks. Each agent can choose the mode that fits its role.
+
+### Local Codex Tool
+
+AgentLoom includes `src.tools.codex.codex_tool.codex`, which exposes local
+`codex exec` as a normal function tool. Register it in Agent YAML with
+`module/function`; no dedicated `system.yaml` Codex section is required.
+
+Use `fixed_args` to lock inputs such as `prompt`, `cwd`, `sandbox`, and
+`search`. Fixed inputs are bound by the framework and removed from the
+LLM-visible tool schema; unfixed inputs remain available for the LLM to provide.
+`sandbox: ""` omits `--sandbox` and lets the local Codex CLI configuration decide
+permissions. `search: "true"` passes `--search`; search is off by default. Before
+running the tool, make sure `codex` is on `PATH` and `codex login status`
+succeeds.
 
 ## CLI Reference
 
