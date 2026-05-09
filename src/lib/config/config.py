@@ -27,7 +27,6 @@ from .config_validation import (
 from .layered_builder import LayeredConfigBuilder
 from .llm_config import LLMConfig
 
-
 SYSTEM_CONFIG_NAME = "system.yaml"
 LLM_CONFIG_NAME = "llm.yaml"
 APP_CONFIG_RELATIVE_PATH = Path("config") / SYSTEM_CONFIG_NAME
@@ -177,7 +176,7 @@ def _resolve_app_root_from_yaml(agent_root: Path, yaml_config_path: Path) -> Pat
 
 
 class UnifiedConfig:
-    def __init__(self, raw: dict[str, Any], agent_root: Path, llm_config: "LLMConfig"):
+    def __init__(self, raw: dict[str, Any], agent_root: Path, llm_config: LLMConfig):
         normalized = dict(raw)
         if "project" in normalized:
             raise raise_project_key_error("merged config")
@@ -252,7 +251,7 @@ class UnifiedConfig:
         return api_key if api_key else "not_provided"
 
     @property
-    def llm(self) -> "LLMConfig":
+    def llm(self) -> LLMConfig:
         return self._llm_config
 
     @property
@@ -317,7 +316,7 @@ class ConfigProxy:
         return get_config().get_model_config(model_type, key, default=default)
 
     @property
-    def llm(self) -> "LLMConfig":
+    def llm(self) -> LLMConfig:
         return get_config().llm
 
     @property
@@ -494,7 +493,7 @@ def get_code_agent_config(config_map: dict[str, Any] | None = None) -> dict[str,
         code_cfg = config_map.get("code_agent", {})
     else:
         code_cfg = C.get("code_agent", {})
-        
+
     if not isinstance(code_cfg, dict):
         code_cfg = {}
 

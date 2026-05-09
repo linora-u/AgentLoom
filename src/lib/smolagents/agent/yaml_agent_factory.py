@@ -5,6 +5,7 @@ import inspect
 import hashlib
 import copy
 import threading
+from functools import wraps
 from typing import Callable, List, Dict, Union, Optional, Any
 from pathlib import Path
 
@@ -53,6 +54,62 @@ _PROMPT_PROTOCOL_REQUIRED_STRING_KEYS = (
 )
 _PROMPT_PROTOCOL_REQUIRED_KEYS = _PROMPT_PROTOCOL_REQUIRED_STRING_KEYS + ("output_rule_lines",)
 _PROMPT_PROTOCOL_VAR_PATTERN = re.compile(r"\$\{([A-Za-z_][A-Za-z0-9_]*)\}")
+_FIXED_ARGS_CONFIG_KEY = "fixed_args"
+
+
+def _get_fixed_tool_args(tool_config: dict[str, Any]) -> dict[str, Any]:
+    raw_fixed_args = tool_config.get(_FIXED_ARGS_CONFIG_KEY)
+    if raw_fixed_args is None:
+        return {}
+    if not isinstance(raw_fixed_args, dict):
+        raise ValueError(
+            f"Tool '{tool_config.get('name')}' fixed_args must be a dictionary when provided"
+        )
+    return dict(raw_fixed_args)
+
+
+def _bind_fixed_tool_args(tool_func: Callable, tool_name: str, fixed_args: dict[str, Any]) -> Callable:
+    if not fixed_args:
+        return tool_func
+
+    signature = inspect.signature(tool_func)
+    parameters = signature.parameters
+    accepts_var_kwargs = any(
+        param.kind == inspect.Parameter.VAR_KEYWORD for param in parameters.values()
+    )
+    unknown_args = [
+        arg_name for arg_name in fixed_args
+        if arg_name not in parameters and not accepts_var_kwargs
+    ]
+    if unknown_args:
+        joined_args = ", ".join(sorted(unknown_args))
+        raise ValueError(f"Unknown fixed_args for tool '{tool_name}': {joined_args}")
+
+    visible_parameters = [
+        parameter for arg_name, parameter in parameters.items()
+        if arg_name not in fixed_args
+    ]
+    visible_signature = signature.replace(parameters=visible_parameters)
+
+    @wraps(tool_func)
+    def fixed_args_tool(*args, **kwargs):
+        visible_kwargs = dict(kwargs)
+        for arg_name in fixed_args:
+            visible_kwargs.pop(arg_name, None)
+        bound = visible_signature.bind_partial(*args, **visible_kwargs)
+        call_kwargs = dict(bound.arguments)
+        call_kwargs.update(fixed_args)
+        return tool_func(**call_kwargs)
+
+    annotations = dict(getattr(tool_func, "__annotations__", {}))
+    for arg_name in fixed_args:
+        annotations.pop(arg_name, None)
+    fixed_args_tool.__name__ = tool_name
+    fixed_args_tool.__qualname__ = tool_name
+    fixed_args_tool.__annotations__ = annotations
+    fixed_args_tool.__signature__ = visible_signature
+    fixed_args_tool._agentloom_fixed_args = tuple(sorted(fixed_args))  # type: ignore[attr-defined]
+    return fixed_args_tool
 
 
 def _resolve_prompt_protocol_symbols(raw_symbols: dict[str, str], config_path: Path) -> dict[str, str]:
@@ -852,6 +909,7 @@ class YamlAgentFactory:
 
         for tool_config in raw_tools:
             tool_name = tool_config.get('name')
+            fixed_args = _get_fixed_tool_args(tool_config)
 
             # Check whether this is a dynamically loaded tool
             if 'module' in tool_config and 'function' in tool_config:
@@ -863,18 +921,20 @@ class YamlAgentFactory:
                 except (ImportError, AttributeError, TypeError) as e:
                     log.error(f"[YamlAgentFactory] Failed to load dynamic tool: {tool_name} from {module}.{function}. Error: {e}")
                     raise ValueError(f"Failed to dynamically load tool '{tool_name}': {e}") from e
-                
+
+                loaded_function = _bind_fixed_tool_args(loaded_function, tool_name, fixed_args)
                 _append_tool(loaded_function, explicit_name=tool_name)
                 log.info(f"[YamlAgentFactory] Successfully loaded dynamic tool: {tool_name} from {module}.{function}")
             else:
                 # Convention-based resolution via src.tools attributes
                 try:
                     tool_function = resolve_tool_function(tool_name)
-                    _append_tool(tool_function)
-                    log.info(f"[YamlAgentFactory] Successfully loaded predefined tool: {tool_name}")
                 except ValueError as e:
                     log.error(f"[YamlAgentFactory] Failed to find predefined tool: {tool_name}")
                     raise ValueError(f"Tool '{tool_name}' not found, please verify the tool name") from e
+                tool_function = _bind_fixed_tool_args(tool_function, tool_name, fixed_args)
+                _append_tool(tool_function)
+                log.info(f"[YamlAgentFactory] Successfully loaded predefined tool: {tool_name}")
 
         # Phase 3: MCP tools (connect to external MCP servers)
         mcp_manager = _load_mcp_tools(

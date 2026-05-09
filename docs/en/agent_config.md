@@ -708,6 +708,21 @@ tools:
   - name: "shell_tool"
 ```
 
+#### Fixed Tool Arguments
+
+Use `fixed_args` when an Agent YAML should lock specific tool parameters. Fixed
+arguments are bound by the framework, removed from the LLM-visible tool schema,
+and cannot be overridden by a tool call.
+
+```yaml
+tools:
+  - name: "codex"
+    fixed_args:
+      cwd: "."
+      sandbox: "workspace-write"
+      search: "false"
+```
+
 #### Predefined Tools + Metadata Override
 
 Agent YAML can override per-tool metadata defined in `config/system.yaml` `tool_metadata` section:

@@ -40,7 +40,6 @@ class BoolParser:
 
         if logger is not None:
             from src.lib.logging.logger_manager import get_logger
-            from src.lib.logging.logger_manager import get_logger
             log = get_logger(logger, __name__)
             log.warning(
                 "Unrecognised boolean for '%s': %r — defaulting to %s",
@@ -144,19 +143,19 @@ class EnumParser:
         """Parse a choice based on a mapping, returning default if unrecognized."""
         if value is None:
             return default
-            
+
         if isinstance(value, str):
             normalized = value.strip()
             if ignore_case:
                 normalized = normalized.upper()
-            
+
             if normalized in choices_map:
                 return choices_map[normalized]
         else:
             # Also allow direct integer or object values if they exactly match values in choices_map
-            # But normally choices_map keys are strings. 
+            # But normally choices_map keys are strings.
             pass
-        
+
         if logger is not None:
             from src.lib.logging.logger_manager import get_logger
             log = get_logger(logger, __name__)

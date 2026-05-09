@@ -227,6 +227,11 @@ class AgentConfigNormalizer:
                     raise ValueError(
                         f"Dynamically loaded tool '{tool_config['name']}' must include both 'module' and 'function' fields"
                     )
+            if "fixed_args" in tool_config and tool_config["fixed_args"] is not None:
+                if not isinstance(tool_config["fixed_args"], dict):
+                    raise ValueError(
+                        f"Tool '{tool_config['name']}' fixed_args must be a dictionary when provided"
+                    )
 
     @staticmethod
     def validate_required_fields(config: dict, required_fields: list[str] | tuple[str, ...]) -> None:
