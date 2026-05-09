@@ -5,7 +5,7 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "AgentLoom"
 version = "0.1.0"
-description = "Agent framework with workflow and LLM integration"
+description = "Simple, flexible workflow orchestration for multi-agent AI applications"
 readme = {file = "README.md", content-type = "text/markdown"}
 requires-python = ">=3.12"
 authors = [
