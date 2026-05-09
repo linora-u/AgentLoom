@@ -34,6 +34,7 @@ PIPFILE.lock
 # Installer logs
 pip-log.txt
 pip-delete-this-directory.txt
+hook.log
 
 # Unit test / coverage reports
 htmlcov/
