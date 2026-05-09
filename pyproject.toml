@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "AgentLoom"
-version = "0.1.0"
+version = "1.0.0"
 description = "Simple, flexible workflow orchestration for multi-agent AI applications"
 readme = {file = "README.md", content-type = "text/markdown"}
 requires-python = ">=3.12"
@@ -13,12 +13,13 @@ authors = [
 ]
 keywords = ["agent", "workflow", "ai", "llm", "smolagents"]
 classifiers = [
-    "Development Status :: 3 - Alpha",
+    "Development Status :: 4 - Beta",
     "Operating System :: POSIX :: Linux",
     "Programming Language :: Python :: 3",
     "Programming Language :: Python :: 3.12",
     "Topic :: Scientific/Engineering :: Artificial Intelligence",
 ]
+
 dependencies = [
     # Core framework
     "smolagents[litellm,mcp,openai,telemetry]==1.21.1",
@@ -79,6 +80,12 @@ dependencies = [
     "textual",
 ]
 
+[project.urls]
+Homepage = "https://github.com/linora-u/AgentLoom#readme"
+Repository = "https://github.com/linora-u/AgentLoom"
+Issues = "https://github.com/linora-u/AgentLoom/issues"
+Documentation = "https://github.com/linora-u/AgentLoom/tree/main/docs/en"
+
 [project.optional-dependencies]
 dev = [
     "pytest>=8.3.5",
@@ -123,10 +130,6 @@ ignore = ["E501"]
 [tool.mypy]
 python_version = "3.12"
 ignore_missing_imports = true
-
-[[tool.uv.index]]
-url = "https://mirrors.aliyun.com/pypi/simple"
-default = true
 
 [dependency-groups]
 dev = [
