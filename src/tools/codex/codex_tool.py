@@ -192,13 +192,8 @@ class CodexExecRunner:
             )
 
         metadata["exit_code"] = completed.returncode
-
-        stdout = _coerce_str(completed.stdout)
-        stderr = _coerce_str(completed.stderr)
-
-        output = _extract_output(stdout)
-        logs = stderr
-
+        output = _extract_output(completed.stdout)
+        logs = completed.stderr.strip()
         if completed.returncode != 0:
             logger.warning(
                 "Local codex exec failed with exit_code=%s: cwd=%s",
@@ -210,7 +205,7 @@ class CodexExecRunner:
                 f"codex exec exited with code {completed.returncode}",
                 start,
                 output=output,
-                logs=logs or stdout,
+                logs=logs or completed.stdout.strip(),
                 metadata=metadata,
             )
 
@@ -316,8 +311,7 @@ def _run_checked(command: list[str], *, timeout: int, cwd: Path) -> dict[str, An
         return {"returncode": 1, "stdout": "", "stderr": str(exc)}
 
 
-def _extract_output(stdout: Any) -> str:
-    stdout = _coerce_str(stdout)
+def _extract_output(stdout: str) -> str:
     last_text = ""
     raw_lines: list[str] = []
     for line in stdout.splitlines():
@@ -393,11 +387,10 @@ def _truncate_output(output: str, max_chars: int) -> tuple[str, bool]:
     return output[:max_chars], True
 
 
-def _summarize_success(output: Any) -> str:
-    output = _coerce_str(output)
-    if not output:
+def _summarize_success(output: str) -> str:
+    if not output.strip():
         return "Codex execution completed with no output"
-    first_line = output.splitlines()[0]
+    first_line = output.strip().splitlines()[0]
     return first_line[:160]
 
 
