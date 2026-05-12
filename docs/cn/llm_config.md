@@ -15,9 +15,9 @@
 
 - [快速参考：完整 YAML 结构](#快速参考完整-yaml-结构)
 - [1. model.default_model_type — 全局默认模型类型](#1-modeldefault_model_type--全局默认模型类型)
-- [2. model.common — 通用后备配置](#2-modelcommon--通用后备配置)
+- [2. 模型类型命名规则](#2-模型类型命名规则)
 - [3. model.\<type\> — 模型类型配置](#3-modeltype--模型类型配置)
-- [4. 参数继承链](#4-参数继承链)
+- [4. 参数默认值](#4-参数默认值)
 - [5. langfuse — 可观测性配置（后续支持）](#5-langfuse--可观测性配置后续支持)
 - [6. 重试机制详解](#6-重试机制详解)
 - [7. Provider 前缀与特定行为](#7-provider-前缀与特定行为)
@@ -36,24 +36,14 @@
 # 模型配置
 # ============================================
 model:
-  # 全局默认模型类型（可选，默认为 "common"）
+  # 全局默认模型类型；若省略，未写 model_type 的 Agent 会直接报错
   default_model_type: "powerful"
-
-  # ━━━ 必填：通用共享配置（也是一个普通模型类型） ━━━
-  # 其他模型类型缺少的字段会自动从 common 继承
-  # Agent 也可以直接 model_type: "common" 使用它
-  common:
-    model: "openai/gpt-4o"            # ❗ 必填：LiteLLM 模型 ID
-    base_url: "https://llm-gateway-proxy.inner.chj.cloud/llm-gateway/v1"
-    api_key: "your-api-key"
-    requests_per_minute: 10
-    num_retries: 5
-    retry_delay: 15.0
-    max_retry_delay: 100.0
 
   # ━━━ 必填：摘要模型（上下文压缩 smart_summary 功能依赖） ━━━
   summary:
     model: "openai/azure-gpt-5-chat"
+    base_url: "https://llm-gateway.example.com/v1"
+    api_key: "your-api-key"
     description: "摘要模型，适合总结和提取"
     temperature: 1.0
     max_tokens: 2048
@@ -65,6 +55,7 @@ model:
   powerful:
     model: "anthropic/aws-claude-opus-4-5"
     base_url: "https://llm-gateway-proxy.inner.chj.cloud/llm-gateway"
+    api_key: "your-api-key"
     description: "高质量推理模型，适合复杂分析/代码任务"
     temperature: 0.2
     max_tokens: 8192
@@ -74,6 +65,8 @@ model:
   # 快速模型（意图识别、分类）
   fast:
     model: "anthropic/aws-claude-sonnet-4-5"
+    base_url: "https://llm-gateway.example.com/v1"
+    api_key: "your-api-key"
     description: "低延迟模型，适合简单任务"
     temperature: 1.0
     max_tokens: 1024
@@ -94,9 +87,9 @@ model:
 
 | 参数 | 类型 | 默认值 | 必选 | 说明 |
 |------|------|--------|------|------|
-| `model.default_model_type` | `str` | `"common"` | ❌ 否 | 全局默认模型类型。值必须是 `model` 块下定义的某个类型 key（如 `powerful`、`fast`、`summary`，或自定义类型名）。未配置时默认为 `"common"`，即使用 common 共享配置作为兜底 |
+| `model.default_model_type` | `str` | `""` | ❌ 否 | 全局默认模型类型。值必须是 `model` 块下定义的某个类型 key（如 `powerful`、`fast`、`summary`，或自定义类型名）。未配置时，未指定 `model_type` 的 Agent 会直接抛出 `ValueError` |
 
-### 1.1 完整 Fallback 链
+### 1.1 解析规则
 
 当 Agent 需要获取模型配置时，按以下优先级解析：
 
@@ -104,11 +97,11 @@ model:
 Agent YAML 中的 model_type（如 model_type: "fast"）
        ↓ (未指定时)
 config/llm.yaml 中的 default_model_type（如 default_model_type: "powerful"）
-       ↓ (也未配置时)
-common 共享配置作为兜底
+       ↓ (default_model_type 未配置时)
+ValueError
 ```
 
-> ⚠️ **注意**：如果 Agent YAML 明确指定了 `model_type` 但该类型在 `llm.yaml` 中不存在，框架会**直接报错**（`ValueError`），不会静默回退。这是为了尽早暴露配置错误。
+> ⚠️ **注意**：最终解析出的模型类型必须存在于 `llm.yaml`。如果 Agent YAML 明确指定了不存在的 `model_type`，全局默认类型指向不存在的类型，或 Agent 与全局配置都没有提供模型类型，框架都会**直接报错**（`ValueError`）。
 
 **示例**：
 
@@ -117,59 +110,48 @@ model:
   default_model_type: "powerful"   # 所有 Agent 默认使用 powerful 类型
   # default_model_type: "fast"     # 如果默认用快速模型
 
-  common:
-    base_url: "https://your-gateway.com/v1"
-    api_key: "your-key"
-
   powerful:
     model: "anthropic/claude-3-5-sonnet"
+    base_url: "https://your-gateway.com/v1"
+    api_key: "your-key"
     temperature: 0.2
 ```
 
 ```yaml
 # Agent YAML 示例
 name: "my_agent"
-model_type: "powerful"    # 使用 powerful 类型，如果不写则使用 default_model_type
+model_type: "powerful"    # 使用 powerful 类型；如果不写，则使用已配置的 default_model_type
 ```
 
 ---
 
-## 2. model.common — 通用共享配置（必填）
+## 2. 模型类型命名规则
 
-`common` 是一个**必须配置的模型类型**，它有双重角色：
+`model` 块下除 `default_model_type` 外，所有值为 dict 的 key 都是模型类型名。框架不会对类型名做特殊语义处理，`powerful`、`fast`、`summary` 只是示例命名。
 
-1. **普通模型类型**：Agent 可以通过 `model_type: "common"` 直接使用它，和 `powerful`/`fast` 完全一样
-2. **共享参数池**：其他模型类型缺少的字段（如 `base_url`、`api_key`）会自动从 `common` 继承
+- `summary` 是上下文压缩（`smart_summary`）依赖的必需类型。
+- `default_model_type` 是保留 key，不是模型类型。
 
-> `common` 和其他模型类型**完全一样**，拥有相同的字段列表（见 [3.1 完整参数列表](#31-完整参数列表)）。`model` 字段也是必填的。
-
-**示例**：
+**示例：**
 
 ```yaml
 model:
-  common:
-    model: "openai/gpt-4o"              # ❗ 必填：LiteLLM 模型 ID
-    base_url: "https://your-gateway.com/v1"
-    api_key: "sk-your-api-key"
-    requests_per_minute: 10
-    num_retries: 5
-    retry_delay: 15.0
-    max_retry_delay: 100.0
-```
-
-**参数继承示例**：
-
-```yaml
-model:
-  common:
-    model: "openai/gpt-4o"              # 默认模型
-    base_url: "https://your-gateway.com/v1"
-    api_key: "sk-your-key"
+  default_model_type: "powerful"
 
   powerful:
-    model: "anthropic/claude-3-5-sonnet"  # 覆盖 common 的 model
-    temperature: 0.2                      # 覆盖 common 的 temperature
-    # base_url 和 api_key 未设置 → 自动继承 common 的值
+    model: "openai/gpt-4o"
+    base_url: "https://your-gateway.com/v1"
+    api_key: "sk-your-api-key"
+
+  fast:
+    model: "openai/gpt-4o-mini"
+    base_url: "https://your-gateway.com/v1"
+    api_key: "sk-your-api-key"
+
+  summary:
+    model: "openai/gpt-4o-mini"
+    base_url: "https://your-gateway.com/v1"
+    api_key: "sk-your-api-key"
 ```
 
 ---
@@ -180,35 +162,34 @@ model:
 
 | Key | 是否必填 | 说明 |
 |-----|---------|------|
-| `common` | ❗ **必填** | 普通模型类型 + 其他类型的参数继承源，`default_model_type` 默认指向它 |
 | `summary` | ❗ **必填** | 上下文压缩（`smart_summary`）功能硬依赖此类型 |
-| `default_model_type` | ❌ 可选 | 保留 key，默认 `"common"` |
+| `default_model_type` | ❌ 可选 | 保留 key。没有隐式默认值；仅当所有 Agent 都显式指定 `model_type` 时才可省略 |
 | 其他任意 key | ❌ 可选 | 自由定义、删除、改名，如 `powerful`、`fast`、`code_review` 等 |
 
-除 `default_model_type` 外，`model` 块下的**所有 key 都会被解析为模型类型**（包括 `common`）。框架对类型名没有任何限制——`powerful`、`fast` 只是示例命名，你可以自由删除、重命名或新增。每个模型类型（包括 `common`）的 `model` 字段都是必填的。
+除 `default_model_type` 外，`model` 块下**所有值为 dict 的 key 都会被解析为模型类型**。框架对类型名没有任何限制——`powerful`、`fast` 只是示例命名，你可以自由删除、重命名或新增。每个模型类型的 `model` 字段都是必填的。
 
 **YAML 路径**：`model.<你的类型名>.*`（如 `model.powerful.*`、`model.my_llm.*`）
 **Pydantic 模型**：`LlmModelTypeSettings`
 
 ### 3.1 完整参数列表
 
-| 参数 | 类型 | 默认值 | 必选 | 继承自 common | 说明 |
-|------|------|--------|------|--------------|------|
-| `model` | `str` | — | ❗ **必填** | ❌ 不继承 | **LiteLLM 模型 ID**，必须带 Provider 前缀。格式：`{provider}/{model-name}`。例如：`openai/gpt-4o`, `anthropic/claude-3-5-sonnet`, `gemini/gemini-1.5-pro`。**未配置会在加载时直接报错。** |
-| `base_url` | `str` | `""` | ❌ 否 | ✅ 继承 | API 网关地址。未设置时继承 `common.base_url`。**注意：字段名是 `base_url`，不是 `api_base`** |
-| `api_key` | `str` | `""` | ❌ 否 | ✅ 继承 | API 认证密钥。未设置时继承 `common.api_key` |
-| `description` | `str` | `"Model type '{k}' loaded from YAML config"` | ❌ 否 | ❌ 不继承 | 模型的人类可读描述。用于日志和文档 |
-| `temperature` | `float` | `0.1` | ❌ 否 | ✅ 继承 | 创造力/随机性控制 (0.0 - 2.0)。详见 [3.2 temperature 建议](#32-temperature-配置建议) |
-| `max_tokens` | `int` \| `str` | `150000` | ❌ 否 | ✅ 继承 | 模型单次生成的最大 Token 数。特殊值 `"max"` 表示使用模型原生最大值 |
-| `timeout` | `int` | `60` | ❌ 否 | ✅ 继承 | 单次 HTTP 请求超时（秒）。超过此时间未响应则中断 |
-| `num_retries` | `int` | `5` | ❌ 否 | ✅ 继承 | API 调用失败重试次数 |
-| `retry_delay` | `float` | `15.0` | ❌ 否 | ✅ 继承 | 重试初始延迟（秒）。详见 [第 6 节](#6-重试机制详解) |
-| `max_retry_delay` | `float` | `100.0` | ❌ 否 | ✅ 继承 | 重试最大延迟（秒）。指数退避的上限 |
-| `extra_headers` | `dict` \| `null` | `null` | ❌ 否 | ✅ 继承（但不 merge） | 自定义 HTTP 请求头。**⚠️ 模型级别的 `extra_headers` 会完全覆盖 `common.extra_headers`，不做合并** |
-| `context_cache` | `bool` | `false` | ❌ 否 | ❌ 不继承 | 通用 Prompt 缓存优化。`true` 时框架对**所有模型**统一注入 `cache_control: {"type": "ephemeral"}`，litellm 根据 Provider 自动处理（Anthropic 保留、OpenAI 剥离、Vertex AI 转换为 Gemini 格式） |
-| `system_prompt_boundary` | `str` \| `null` | `null` | ❌ 否 | ❌ 不继承 | 系统提示词分割标记。设置后，系统提示词以此标记分割为 **静态（缓存）** + **动态（不缓存）** 两段，提升缓存命中率。例如：`"<!-- DYNAMIC_BOUNDARY -->"` |
-| `requests_per_minute` | `int` | `60` | ❌ 否 | ✅ 继承 | 该模型类型的速率限制 |
-| `supports_native_tool_calls` | `str` | `"auto"` | ❌ 否 | ✅ 继承 | 原生 tool_calls 能力标记。三态值：`"auto"` 运行时首次调用自动探测，`"true"` 强制使用原生路径，`"false"` 强制走文本解析兜底。详见 [3.6 supports_native_tool_calls 行为](#36-supports_native_tool_calls-行为) |
+| 参数 | 类型 | 默认值 | 必选 | 说明 |
+|------|------|--------|------|------|
+| `model` | `str` | — | ❗ **必填** | **LiteLLM 模型 ID**，必须带 Provider 前缀。格式：`{provider}/{model-name}`。例如：`openai/gpt-4o`, `anthropic/claude-3-5-sonnet`, `gemini/gemini-1.5-pro`。**未配置会在加载时直接报错。** |
+| `base_url` | `str` | `""` | ❌ 否 | API 网关地址。每个模型类型独立配置。**注意：字段名是 `base_url`，不是 `api_base`** |
+| `api_key` | `str` | `""` | ❌ 否 | API 认证密钥。每个模型类型独立配置 |
+| `description` | `str` | `"Model type '{k}' loaded from YAML config"` | ❌ 否 | 模型的人类可读描述。用于日志和文档 |
+| `temperature` | `float` | `0.1` | ❌ 否 | 创造力/随机性控制 (0.0 - 2.0)。详见 [3.2 temperature 建议](#32-temperature-配置建议) |
+| `max_tokens` | `int` \| `str` | `150000` | ❌ 否 | 模型单次生成的最大 Token 数。特殊值 `"max"` 表示使用模型原生最大值 |
+| `timeout` | `int` | `60` | ❌ 否 | 单次 HTTP 请求超时（秒）。超过此时间未响应则中断 |
+| `num_retries` | `int` | `5` | ❌ 否 | API 调用失败重试次数 |
+| `retry_delay` | `float` | `15.0` | ❌ 否 | 重试初始延迟（秒）。详见 [第 6 节](#6-重试机制详解) |
+| `max_retry_delay` | `float` | `100.0` | ❌ 否 | 重试最大延迟（秒）。指数退避的上限 |
+| `extra_headers` | `dict` \| `null` | `null` | ❌ 否 | 自定义 HTTP 请求头。每个模型类型独立配置，不做跨类型合并 |
+| `context_cache` | `bool` | `false` | ❌ 否 | 通用 Prompt 缓存优化。`true` 时框架对**所有模型**统一注入 `cache_control: {"type": "ephemeral"}`，litellm 根据 Provider 自动处理（Anthropic 保留、OpenAI 剥离、Vertex AI 转换为 Gemini 格式） |
+| `system_prompt_boundary` | `str` \| `null` | `null` | ❌ 否 | 系统提示词分割标记。设置后，系统提示词以此标记分割为 **静态（缓存）** + **动态（不缓存）** 两段，提升缓存命中率。例如：`"<!-- DYNAMIC_BOUNDARY -->"` |
+| `requests_per_minute` | `int` | `60` | ❌ 否 | 该模型类型的速率限制 |
+| `supports_native_tool_calls` | `str` | `"auto"` | ❌ 否 | 原生 tool_calls 能力标记。三态值：`"auto"` 运行时首次调用自动探测，`"true"` 强制使用原生路径，`"false"` 强制走文本解析兜底。详见 [3.6 supports_native_tool_calls 行为](#36-supports_native_tool_calls-行为) |
 
 ### 3.2 temperature 配置建议
 
@@ -233,20 +214,14 @@ model:
 
 ```yaml
 model:
-  common:
-    extra_headers:
-      X-Project: "AgentLoom"
-      X-Env: "dev"
-
   powerful:
-    extra_headers:          # ⚠️ 完全覆盖 common 的 extra_headers
+    extra_headers:
       X-Model-Tier: "powerful"
       X-Biz-Tag: "demo"
-    # 最终 powerful 的 headers = {X-Model-Tier: "powerful", X-Biz-Tag: "demo"}
-    # common 的 {X-Project, X-Env} 不会被合并进来
 
   fast:
-    # 未设置 extra_headers → 继承 common 的 {X-Project: "AgentLoom", X-Env: "dev"}
+    extra_headers:
+      X-Model-Tier: "fast"
 ```
 
 > 也可通过**环境变量**覆盖（JSON 字符串格式）：
@@ -344,27 +319,31 @@ Agent YAML 通过 `model_type` 字段引用你定义的类型名。
 model:
   default_model_type: "main"
 
-  common:
-    base_url: "https://your-gateway.com/v1"
-    api_key: "your-key"
-
   main:                          # ✅ 自定义名称，替代 powerful
     model: "anthropic/claude-3-5-sonnet"
+    base_url: "https://your-gateway.com/v1"
+    api_key: "your-key"
     temperature: 0.2
 
   code_review:                   # ✅ 自定义类型
     model: "anthropic/claude-3-5-sonnet"
+    base_url: "https://your-gateway.com/v1"
+    api_key: "your-key"
     temperature: 0.1
     max_tokens: 16384
     timeout: 600
 
   translation:                   # ✅ 自定义类型
     model: "openai/gpt-4o"
+    base_url: "https://api.openai.com/v1"
+    api_key: "your-openai-key"
     temperature: 0.3
     max_tokens: 4096
 
   summary:                       # 保留 summary 以支持 smart_summary 功能
     model: "openai/gpt-4o-mini"
+    base_url: "https://api.openai.com/v1"
+    api_key: "your-openai-key"
     temperature: 0.3
 ```
 
@@ -381,16 +360,14 @@ model_type: "code_review"        # 引用 llm.yaml 中定义的 code_review
 model:
   default_model_type: "default"
 
-  common:
-    base_url: "https://your-gateway.com/v1"
-    api_key: "your-key"
-
   default:
     model: "openai/gpt-4o"
+    base_url: "https://your-gateway.com/v1"
+    api_key: "your-key"
     temperature: 0.3
 ```
 
-> 所有自定义类型与框架示例中的 `powerful`/`fast`/`summary` **完全等价**，享有同样的 common 继承机制。
+> 所有自定义类型与框架示例中的 `powerful`/`fast`/`summary` **完全等价**。每个类型独立声明自己的模型和参数。
 
 **示例**：
 
@@ -412,15 +389,17 @@ model:
 
   fast:
     model: "gemini/gemini-3_1-pro-preview"
+    base_url: "https://generativelanguage.googleapis.com/v1"
+    api_key: "gemini-key"
     temperature: 1.0
     max_tokens: 1024
     timeout: 60
     context_cache: true
-    # base_url 和 api_key 未设置，继承 common
 
   summary:
     model: "openai/azure-gpt-5-chat"
     base_url: "https://portal-k8s-prod.ep.chehejia.com/api/copilot/v3/openai/azure-gpt-5-chat/v1"
+    api_key: "summary-key"
     temperature: 1.0
     max_tokens: 2048
     timeout: 300
@@ -428,35 +407,33 @@ model:
 
 ---
 
-## 4. 参数继承链
+## 4. 参数默认值
 
-模型参数的最终值按以下优先级链从高到低解析：
+模型参数的最终值按以下规则解析：
 
 ```
 模型类型设置 (model.powerful.xxx)
-       ↓ (未设置时 fallback)
-通用设置 (model.common.xxx)
-       ↓ (未设置时 fallback)
+      ↓ (未设置时)
 代码默认值 (defaults.py)
 ```
 
-**具体继承规则**：
+**具体默认规则**：
 
-| 字段 | 继承行为 |
+| 字段 | 默认行为 |
 |------|----------|
-| `base_url` | model type → common → `""` |
-| `api_key` | model type → common → `""` |
-| `temperature` | model type → common → `0.1` |
-| `max_tokens` | model type → common → `150000` |
-| `timeout` | model type → common → `60` |
-| `num_retries` | model type → common → `5` |
-| `retry_delay` | model type → common → `15.0` |
-| `max_retry_delay` | model type → common → `100.0` |
-| `extra_headers` | model type → common → `null`（**覆盖，不 merge**） |
-| `requests_per_minute` | model type → common → `60` |
-| `model` | ❌ **不继承**，各类型独立设置 |
-| `description` | ❌ **不继承**，各类型独立设置 |
-| `context_cache` | ❌ **不继承**，默认 `false` |
+| `base_url` | 未设置时为 `""` |
+| `api_key` | 未设置时为 `""` |
+| `temperature` | 未设置时为 `0.1` |
+| `max_tokens` | 未设置时为 `150000` |
+| `timeout` | 未设置时为 `60` |
+| `num_retries` | 未设置时为 `5` |
+| `retry_delay` | 未设置时为 `15.0` |
+| `max_retry_delay` | 未设置时为 `100.0` |
+| `extra_headers` | 未设置时为 `null` |
+| `requests_per_minute` | 未设置时为 `60` |
+| `model` | ❗ 必填，不存在默认值 |
+| `description` | 未设置时自动生成 |
+| `context_cache` | 未设置时为 `false` |
 
 ---
 
@@ -571,17 +548,6 @@ litellm.completion failed (attempt 2/5): RateLimitError: Rate limit exceeded. Re
 
 ## 附录 A：完整 Pydantic 模型
 
-### LlmCommonSettings
-
-```python
-class LlmCommonSettings(BaseModel):
-    base_url: str = ""
-    api_key: str = ""
-    requests_per_minute: int = 60  # DEFAULT_MODEL_REQUESTS_PER_MINUTE
-```
-
-> **注**：尽管上述 Pydantic 模型仅显式声明了这三个字段，但在实际解析逻辑（`LLMConfig.from_dict`）中，框架会直接读取 YAML 中的 `common` 原始字典，从而为其他模型提供 `temperature`、`timeout`、`extra_headers` 等更多参数的默认值继承（Fallback）能力。
-
 ### LlmModelTypeSettings
 
 ```python
@@ -619,9 +585,8 @@ class LangfuseSettings(BaseModel):
 ```python
 class LLMConfig(BaseModel):
     langfuse: LangfuseSettings           # 预留，后续启用
-    common: LlmCommonSettings
-    default_model_type: str = "common"   # 未配置时默认为 "common"
-    models: dict[str, LlmModelTypeSettings]  # {"common": ..., "powerful": ..., "summary": ..., 或自定义类型}
+    default_model_type: str = ""         # 没有隐式模型类型默认值
+    models: dict[str, LlmModelTypeSettings]  # {"powerful": ..., "summary": ..., 或自定义类型}
 ```
 
 **运行时访问方式**：
@@ -661,17 +626,16 @@ model:
 
 ```yaml
 model:
-  common:
-    base_url: "http://localhost:11434"
-
   powerful:
     model: "ollama/llama3"
+    base_url: "http://localhost:11434"
     temperature: 0.3
     max_tokens: 4096
     timeout: 120
 
   fast:
     model: "ollama/phi3"
+    base_url: "http://localhost:11434"
     temperature: 0.7
     max_tokens: 1024
     timeout: 30
@@ -683,14 +647,11 @@ model:
 model:
   default_model_type: "powerful"
 
-  common:
-    api_key: "default-key"
-    requests_per_minute: 30
-
   powerful:
     model: "anthropic/aws-claude-opus-4-5"
     base_url: "https://your-anthropic-gateway.com"
     api_key: "anthropic-specific-key"
+    requests_per_minute: 30
     temperature: 0.2
     max_tokens: 8192
 
@@ -698,6 +659,7 @@ model:
     model: "openai/gpt-4o-mini"
     base_url: "https://api.openai.com/v1"
     api_key: "openai-specific-key"
+    requests_per_minute: 30
     temperature: 0.7
     max_tokens: 1024
 
@@ -705,6 +667,7 @@ model:
     model: "gemini/gemini-1.5-flash"
     base_url: "https://generativelanguage.googleapis.com/v1"
     api_key: "gemini-specific-key"
+    requests_per_minute: 30
     temperature: 0.3
     max_tokens: 2048
 ```
@@ -713,19 +676,21 @@ model:
 
 ```yaml
 model:
-  common:
-    base_url: "https://your-openai-proxy.com/v1"
-    api_key: "sk-your-key"
-
   powerful:
     model: "openai/gpt-4o"
+    base_url: "https://your-openai-proxy.com/v1"
+    api_key: "sk-your-key"
     temperature: 0.2
 
   fast:
     model: "openai/gpt-4o-mini"
+    base_url: "https://your-openai-proxy.com/v1"
+    api_key: "sk-your-key"
     temperature: 0.7
 
   summary:
     model: "openai/gpt-4o-mini"
+    base_url: "https://your-openai-proxy.com/v1"
+    api_key: "sk-your-key"
     temperature: 0.3
 ```

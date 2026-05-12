@@ -15,15 +15,15 @@
 
 - [Quick Reference: Complete YAML Structure](#quick-reference-complete-yaml-structure)
 - [1. model.default_model_type — Global Default Model Type](#1-modeldefault_model_type--global-default-model-type)
-- [2. model.common — Common Fallback Configuration](#2-modelcommon--common-fallback-configuration)
+- [2. Model Type Naming Rules](#2-model-type-naming-rules)
 - [3. model.\<type\> — Model Type Configuration](#3-modeltype--model-type-configuration)
-- [4. Parameter Inheritance Chain](#4-parameter-inheritance-chain)
+- [4. Parameter Defaults](#4-parameter-defaults)
 - [5. langfuse — Observability Configuration (Future Support)](#5-langfuse--observability-configuration-future-support)
 - [6. Retry Mechanism Details](#6-retry-mechanism-details)
 - [7. Provider Prefixes and Specific Behaviors](#7-provider-prefixes-and-specific-behaviors)
 - [8. Default Value Constants Reference Table](#8-default-value-constants-reference-table)
 - [Appendix A: Complete Pydantic Models](#appendix-a-complete-pydantic-models)
-- [Appendix B: Common Configuration Scenarios](#appendix-b-common-configuration-scenarios)
+- [Appendix B: Typical Configuration Scenarios](#appendix-b-typical-configuration-scenarios)
 
 ---
 
@@ -36,24 +36,14 @@ The following shows the **complete structure** of `config/llm.yaml`, with all fi
 # Model Configuration
 # ============================================
 model:
-  # Global default model type (optional, defaults to "common")
+  # Global default model type. If omitted, Agents without model_type fail fast.
   default_model_type: "powerful"
-
-  # ━━━ Required: Common shared configuration (also a regular model type) ━━━
-  # Fields missing from other model types are automatically inherited from common
-  # Agents can also directly use model_type: "common"
-  common:
-    model: "openai/gpt-4o"            # ❗ Required: LiteLLM model ID
-    base_url: "https://llm-gateway-proxy.inner.chj.cloud/llm-gateway/v1"
-    api_key: "your-api-key"
-    requests_per_minute: 10
-    num_retries: 5
-    retry_delay: 15.0
-    max_retry_delay: 100.0
 
   # ━━━ Required: Summary model (smart_summary context compression depends on this) ━━━
   summary:
     model: "openai/azure-gpt-5-chat"
+    base_url: "https://llm-gateway.example.com/v1"
+    api_key: "your-api-key"
     description: "Summary model, suitable for summarization and extraction"
     temperature: 1.0
     max_tokens: 2048
@@ -65,6 +55,7 @@ model:
   powerful:
     model: "anthropic/aws-claude-opus-4-5"
     base_url: "https://llm-gateway-proxy.inner.chj.cloud/llm-gateway"
+    api_key: "your-api-key"
     description: "High-quality reasoning model, suitable for complex analysis/code tasks"
     temperature: 0.2
     max_tokens: 8192
@@ -74,6 +65,8 @@ model:
   # Fast model (intent recognition, classification)
   fast:
     model: "anthropic/aws-claude-sonnet-4-5"
+    base_url: "https://llm-gateway.example.com/v1"
+    api_key: "your-api-key"
     description: "Low-latency model, suitable for simple tasks"
     temperature: 1.0
     max_tokens: 1024
@@ -94,9 +87,9 @@ Controls which model type the entire Agent system uses when an Agent YAML does n
 
 | Parameter | Type | Default | Required | Description |
 |------|------|--------|------|------|
-| `model.default_model_type` | `str` | `"common"` | ❌ No | Global default model type. Must be a type key defined under the `model` block (e.g., `powerful`, `fast`, `summary`, or a custom type name). Defaults to `"common"` when not configured, using the common shared configuration as fallback |
+| `model.default_model_type` | `str` | `""` | ❌ No | Global default model type. Must be a type key defined under the `model` block (e.g., `powerful`, `fast`, `summary`, or a custom type name). If omitted, Agents that do not specify `model_type` raise `ValueError` directly |
 
-### 1.1 Complete Fallback Chain
+### 1.1 Resolution Rules
 
 When an Agent needs to obtain model configuration, resolution follows this priority:
 
@@ -104,11 +97,11 @@ When an Agent needs to obtain model configuration, resolution follows this prior
 model_type in Agent YAML (e.g., model_type: "fast")
        ↓ (when not specified)
 default_model_type in config/llm.yaml (e.g., default_model_type: "powerful")
-       ↓ (when also not configured)
-common shared configuration as fallback
+       ↓ (when default_model_type is not configured)
+ValueError
 ```
 
-> ⚠️ **Note**: If an Agent YAML explicitly specifies `model_type` but that type does not exist in `llm.yaml`, the framework will **raise an error** (`ValueError`) directly, without silently falling back. This is to expose configuration errors as early as possible.
+> ⚠️ **Note**: The resolved model type must exist in `llm.yaml`. If an Agent YAML explicitly specifies a missing `model_type`, the global default points to a missing type, or neither Agent nor global config provides a model type, the framework will **raise an error** (`ValueError`) directly.
 
 **Example**:
 
@@ -117,59 +110,48 @@ model:
   default_model_type: "powerful"   # All Agents default to the powerful type
   # default_model_type: "fast"     # If defaulting to the fast model
 
-  common:
-    base_url: "https://your-gateway.com/v1"
-    api_key: "your-key"
-
   powerful:
     model: "anthropic/claude-3-5-sonnet"
+    base_url: "https://your-gateway.com/v1"
+    api_key: "your-key"
     temperature: 0.2
 ```
 
 ```yaml
 # Agent YAML example
 name: "my_agent"
-model_type: "powerful"    # Uses the powerful type; if omitted, uses default_model_type
+model_type: "powerful"    # Uses the powerful type; if omitted, uses configured default_model_type
 ```
 
 ---
 
-## 2. model.common — Common Shared Configuration (Required)
+## 2. Model Type Naming Rules
 
-`common` is a **required model type** with a dual role:
+Under the `model` block, every dict-valued key except `default_model_type` is a model type name. The framework does not assign special semantics to type names; `powerful`, `fast`, and `summary` are examples.
 
-1. **Regular model type**: Agents can use it directly via `model_type: "common"`, just like `powerful`/`fast`
-2. **Shared parameter pool**: Fields missing from other model types (e.g., `base_url`, `api_key`) are automatically inherited from `common`
+- `summary` is required by context compression (`smart_summary`).
+- `default_model_type` is a reserved key, not a model type.
 
-> `common` is **exactly the same** as other model types, with the same field list (see [3.1 Complete Parameter List](#31-complete-parameter-list)). The `model` field is also required.
-
-**Example**:
+**Example:**
 
 ```yaml
 model:
-  common:
-    model: "openai/gpt-4o"              # ❗ Required: LiteLLM model ID
-    base_url: "https://your-gateway.com/v1"
-    api_key: "sk-your-api-key"
-    requests_per_minute: 10
-    num_retries: 5
-    retry_delay: 15.0
-    max_retry_delay: 100.0
-```
-
-**Parameter inheritance example**:
-
-```yaml
-model:
-  common:
-    model: "openai/gpt-4o"              # Default model
-    base_url: "https://your-gateway.com/v1"
-    api_key: "sk-your-key"
+  default_model_type: "powerful"
 
   powerful:
-    model: "anthropic/claude-3-5-sonnet"  # Overrides common's model
-    temperature: 0.2                      # Overrides common's temperature
-    # base_url and api_key not set → automatically inherited from common
+    model: "openai/gpt-4o"
+    base_url: "https://your-gateway.com/v1"
+    api_key: "sk-your-api-key"
+
+  fast:
+    model: "openai/gpt-4o-mini"
+    base_url: "https://your-gateway.com/v1"
+    api_key: "sk-your-api-key"
+
+  summary:
+    model: "openai/gpt-4o-mini"
+    base_url: "https://your-gateway.com/v1"
+    api_key: "sk-your-api-key"
 ```
 
 ---
@@ -180,35 +162,34 @@ model:
 
 | Key | Required | Description |
 |-----|---------|------|
-| `common` | ❗ **Required** | Regular model type + parameter inheritance source for other types; `default_model_type` points to it by default |
 | `summary` | ❗ **Required** | Context compression (`smart_summary`) feature has a hard dependency on this type |
-| `default_model_type` | ❌ Optional | Reserved key, defaults to `"common"` |
+| `default_model_type` | ❌ Optional | Reserved key. No implicit default; omit only when every Agent specifies `model_type` |
 | Any other key | ❌ Optional | Freely define, delete, or rename, e.g., `powerful`, `fast`, `code_review`, etc. |
 
-Except for `default_model_type`, **all keys under the `model` block are parsed as model types** (including `common`). The framework has no restrictions on type names — `powerful` and `fast` are just example names. You can freely delete, rename, or add new ones. The `model` field for each model type (including `common`) is required.
+Except for `default_model_type`, **all dict-valued keys under the `model` block are parsed as model types**. The framework has no restrictions on type names — `powerful` and `fast` are just example names. You can freely delete, rename, or add new ones. The `model` field for each model type is required.
 
 **YAML path**: `model.<your-type-name>.*` (e.g., `model.powerful.*`, `model.my_llm.*`)
 **Pydantic model**: `LlmModelTypeSettings`
 
 ### 3.1 Complete Parameter List
 
-| Parameter | Type | Default | Required | Inherited from common | Description |
-|------|------|--------|------|--------------|------|
-| `model` | `str` | — | ❗ **Required** | ❌ Not inherited | **LiteLLM model ID**, must include Provider prefix. Format: `{provider}/{model-name}`. Examples: `openai/gpt-4o`, `anthropic/claude-3-5-sonnet`, `gemini/gemini-1.5-pro`. **Raises an error if not configured.** |
-| `base_url` | `str` | `""` | ❌ No | ✅ Inherited | API gateway address. Inherits `common.base_url` when not set. **Note: field name is `base_url`, not `api_base`** |
-| `api_key` | `str` | `""` | ❌ No | ✅ Inherited | API authentication key. Inherits `common.api_key` when not set |
-| `description` | `str` | `"Model type '{k}' loaded from YAML config"` | ❌ No | ❌ Not inherited | Human-readable model description. Used in logs and documentation |
-| `temperature` | `float` | `0.1` | ❌ No | ✅ Inherited | Creativity/randomness control (0.0 - 2.0). See [3.2 temperature Recommendations](#32-temperature-configuration-recommendations) |
-| `max_tokens` | `int` \| `str` | `150000` | ❌ No | ✅ Inherited | Maximum tokens per single model generation. Special value `"max"` uses the model's native maximum |
-| `timeout` | `int` | `60` | ❌ No | ✅ Inherited | Single HTTP request timeout (seconds). Interrupted if no response within this time |
-| `num_retries` | `int` | `5` | ❌ No | ✅ Inherited | Number of retries on API call failure |
-| `retry_delay` | `float` | `15.0` | ❌ No | ✅ Inherited | Initial retry delay (seconds). See [Section 6](#6-retry-mechanism-details) |
-| `max_retry_delay` | `float` | `100.0` | ❌ No | ✅ Inherited | Maximum retry delay (seconds). Upper limit for exponential backoff |
-| `extra_headers` | `dict` \| `null` | `null` | ❌ No | ✅ Inherited (no merge) | Custom HTTP request headers. **⚠️ Model-level `extra_headers` completely overrides `common.extra_headers`, no merging** |
-| `context_cache` | `bool` | `false` | ❌ No | ❌ Not inherited | Universal Prompt cache optimization. When `true`, the framework injects `cache_control: {"type": "ephemeral"}` for **ALL models** universally. litellm handles per-provider behavior automatically (Anthropic preserves, OpenAI strips, Vertex AI converts to Gemini format) |
-| `system_prompt_boundary` | `str` \| `null` | `null` | ❌ No | ❌ Not inherited | System prompt split marker. When set, the system prompt is split into **static (cached)** + **dynamic (uncached)** segments at this marker, improving cache hit rates. Example: `"<!-- DYNAMIC_BOUNDARY -->"` |
-| `requests_per_minute` | `int` | `60` | ❌ No | ✅ Inherited | Rate limit for this model type |
-| `supports_native_tool_calls` | `str` | `"auto"` | ❌ No | ✅ Inherited | Native tool_calls capability flag. Tri-state: `"auto"` auto-detects on first call, `"true"` always uses native path, `"false"` always uses text parsing fallback. See [3.6 supports_native_tool_calls Behavior](#36-supports_native_tool_calls-behavior) |
+| Parameter | Type | Default | Required | Description |
+|------|------|--------|------|------|
+| `model` | `str` | — | ❗ **Required** | **LiteLLM model ID**, must include Provider prefix. Format: `{provider}/{model-name}`. Examples: `openai/gpt-4o`, `anthropic/claude-3-5-sonnet`, `gemini/gemini-1.5-pro`. **Raises an error if not configured.** |
+| `base_url` | `str` | `""` | ❌ No | API gateway address. Configure independently for each model type. **Note: field name is `base_url`, not `api_base`** |
+| `api_key` | `str` | `""` | ❌ No | API authentication key. Configure independently for each model type |
+| `description` | `str` | `"Model type '{k}' loaded from YAML config"` | ❌ No | Human-readable model description. Used in logs and documentation |
+| `temperature` | `float` | `0.1` | ❌ No | Creativity/randomness control (0.0 - 2.0). See [3.2 temperature Recommendations](#32-temperature-configuration-recommendations) |
+| `max_tokens` | `int` \| `str` | `150000` | ❌ No | Maximum tokens per single model generation. Special value `"max"` uses the model's native maximum |
+| `timeout` | `int` | `60` | ❌ No | Single HTTP request timeout (seconds). Interrupted if no response within this time |
+| `num_retries` | `int` | `5` | ❌ No | Number of retries on API call failure |
+| `retry_delay` | `float` | `15.0` | ❌ No | Initial retry delay (seconds). See [Section 6](#6-retry-mechanism-details) |
+| `max_retry_delay` | `float` | `100.0` | ❌ No | Maximum retry delay (seconds). Upper limit for exponential backoff |
+| `extra_headers` | `dict` \| `null` | `null` | ❌ No | Custom HTTP request headers. Configure independently for each model type; no cross-type merge is performed |
+| `context_cache` | `bool` | `false` | ❌ No | Universal Prompt cache optimization. When `true`, the framework injects `cache_control: {"type": "ephemeral"}` for **ALL models** universally. litellm handles per-provider behavior automatically (Anthropic preserves, OpenAI strips, Vertex AI converts to Gemini format) |
+| `system_prompt_boundary` | `str` \| `null` | `null` | ❌ No | System prompt split marker. When set, the system prompt is split into **static (cached)** + **dynamic (uncached)** segments at this marker, improving cache hit rates. Example: `"<!-- DYNAMIC_BOUNDARY -->"` |
+| `requests_per_minute` | `int` | `60` | ❌ No | Rate limit for this model type |
+| `supports_native_tool_calls` | `str` | `"auto"` | ❌ No | Native tool_calls capability flag. Tri-state: `"auto"` auto-detects on first call, `"true"` always uses native path, `"false"` always uses text parsing fallback. See [3.6 supports_native_tool_calls Behavior](#36-supports_native_tool_calls-behavior) |
 
 ### 3.2 temperature Configuration Recommendations
 
@@ -233,20 +214,14 @@ Except for `default_model_type`, **all keys under the `model` block are parsed a
 
 ```yaml
 model:
-  common:
-    extra_headers:
-      X-Project: "AgentLoom"
-      X-Env: "dev"
-
   powerful:
-    extra_headers:          # ⚠️ Completely overrides common's extra_headers
+    extra_headers:
       X-Model-Tier: "powerful"
       X-Biz-Tag: "demo"
-    # Final powerful headers = {X-Model-Tier: "powerful", X-Biz-Tag: "demo"}
-    # common's {X-Project, X-Env} are NOT merged in
 
   fast:
-    # extra_headers not set → inherits common's {X-Project: "AgentLoom", X-Env: "dev"}
+    extra_headers:
+      X-Model-Tier: "fast"
 ```
 
 > You can also override via **environment variables** (JSON string format):
@@ -344,27 +319,31 @@ Agent YAML references your defined type names through the `model_type` field.
 model:
   default_model_type: "main"
 
-  common:
-    base_url: "https://your-gateway.com/v1"
-    api_key: "your-key"
-
   main:                          # ✅ Custom name, replaces powerful
     model: "anthropic/claude-3-5-sonnet"
+    base_url: "https://your-gateway.com/v1"
+    api_key: "your-key"
     temperature: 0.2
 
   code_review:                   # ✅ Custom type
     model: "anthropic/claude-3-5-sonnet"
+    base_url: "https://your-gateway.com/v1"
+    api_key: "your-key"
     temperature: 0.1
     max_tokens: 16384
     timeout: 600
 
   translation:                   # ✅ Custom type
     model: "openai/gpt-4o"
+    base_url: "https://api.openai.com/v1"
+    api_key: "your-openai-key"
     temperature: 0.3
     max_tokens: 4096
 
   summary:                       # Keep summary to support smart_summary feature
     model: "openai/gpt-4o-mini"
+    base_url: "https://api.openai.com/v1"
+    api_key: "your-openai-key"
     temperature: 0.3
 ```
 
@@ -381,16 +360,14 @@ model_type: "code_review"        # References code_review defined in llm.yaml
 model:
   default_model_type: "default"
 
-  common:
-    base_url: "https://your-gateway.com/v1"
-    api_key: "your-key"
-
   default:
     model: "openai/gpt-4o"
+    base_url: "https://your-gateway.com/v1"
+    api_key: "your-key"
     temperature: 0.3
 ```
 
-> All custom types are **fully equivalent** to the framework examples' `powerful`/`fast`/`summary`, with the same common inheritance mechanism.
+> All custom types are **fully equivalent** to the framework examples' `powerful`/`fast`/`summary`. Each type declares its own model and parameters independently.
 
 **Example**:
 
@@ -412,15 +389,17 @@ model:
 
   fast:
     model: "gemini/gemini-3_1-pro-preview"
+    base_url: "https://generativelanguage.googleapis.com/v1"
+    api_key: "gemini-key"
     temperature: 1.0
     max_tokens: 1024
     timeout: 60
     context_cache: true
-    # base_url and api_key not set, inherited from common
 
   summary:
     model: "openai/azure-gpt-5-chat"
     base_url: "https://portal-k8s-prod.ep.chehejia.com/api/copilot/v3/openai/azure-gpt-5-chat/v1"
+    api_key: "summary-key"
     temperature: 1.0
     max_tokens: 2048
     timeout: 300
@@ -428,35 +407,33 @@ model:
 
 ---
 
-## 4. Parameter Inheritance Chain
+## 4. Parameter Defaults
 
-The final value of model parameters is resolved in the following priority chain from high to low:
+The final value of model parameters is resolved as follows:
 
 ```
 Model type settings (model.powerful.xxx)
-       ↓ (fallback when not set)
-Common settings (model.common.xxx)
-       ↓ (fallback when not set)
+      ↓ (when not set)
 Code default values (defaults.py)
 ```
 
-**Specific inheritance rules**:
+**Specific default rules**:
 
-| Field | Inheritance Behavior |
+| Field | Default Behavior |
 |------|----------|
-| `base_url` | model type → common → `""` |
-| `api_key` | model type → common → `""` |
-| `temperature` | model type → common → `0.1` |
-| `max_tokens` | model type → common → `150000` |
-| `timeout` | model type → common → `60` |
-| `num_retries` | model type → common → `5` |
-| `retry_delay` | model type → common → `15.0` |
-| `max_retry_delay` | model type → common → `100.0` |
-| `extra_headers` | model type → common → `null` (**overrides, no merge**) |
-| `requests_per_minute` | model type → common → `60` |
-| `model` | ❌ **Not inherited**, set independently per type |
-| `description` | ❌ **Not inherited**, set independently per type |
-| `context_cache` | ❌ **Not inherited**, defaults to `false` |
+| `base_url` | `""` when unset |
+| `api_key` | `""` when unset |
+| `temperature` | `0.1` when unset |
+| `max_tokens` | `150000` when unset |
+| `timeout` | `60` when unset |
+| `num_retries` | `5` when unset |
+| `retry_delay` | `15.0` when unset |
+| `max_retry_delay` | `100.0` when unset |
+| `extra_headers` | `null` when unset |
+| `requests_per_minute` | `60` when unset |
+| `model` | ❗ Required; no default |
+| `description` | Auto-generated when unset |
+| `context_cache` | `false` when unset |
 
 ---
 
@@ -571,17 +548,6 @@ The following constants are defined in `src/lib/config/defaults.py` and serve as
 
 ## Appendix A: Complete Pydantic Models
 
-### LlmCommonSettings
-
-```python
-class LlmCommonSettings(BaseModel):
-    base_url: str = ""
-    api_key: str = ""
-    requests_per_minute: int = 60  # DEFAULT_MODEL_REQUESTS_PER_MINUTE
-```
-
-> **Note**: Although the Pydantic model above only explicitly declares these three fields, the actual parsing logic (`LLMConfig.from_dict`) reads the raw `common` dictionary from YAML directly, providing fallback inheritance for additional parameters like `temperature`, `timeout`, `extra_headers`, etc.
-
 ### LlmModelTypeSettings
 
 ```python
@@ -618,9 +584,8 @@ class LangfuseSettings(BaseModel):
 ```python
 class LLMConfig(BaseModel):
     langfuse: LangfuseSettings           # Reserved, future activation
-    common: LlmCommonSettings
-    default_model_type: str = "common"   # Defaults to "common" when not configured
-    models: dict[str, LlmModelTypeSettings]  # {"common": ..., "powerful": ..., "summary": ..., or custom types}
+    default_model_type: str = ""         # No implicit model-type default
+    models: dict[str, LlmModelTypeSettings]  # {"powerful": ..., "summary": ..., or custom types}
 ```
 
 **Runtime access**:
@@ -641,7 +606,7 @@ available = C.llm.available_types              # → ["powerful", "fast", "summa
 
 ---
 
-## Appendix B: Common Configuration Scenarios
+## Appendix B: Typical Configuration Scenarios
 
 ### B.1 Switching to OpenAI GPT-4o
 
@@ -660,17 +625,16 @@ model:
 
 ```yaml
 model:
-  common:
-    base_url: "http://localhost:11434"
-
   powerful:
     model: "ollama/llama3"
+    base_url: "http://localhost:11434"
     temperature: 0.3
     max_tokens: 4096
     timeout: 120
 
   fast:
     model: "ollama/phi3"
+    base_url: "http://localhost:11434"
     temperature: 0.7
     max_tokens: 1024
     timeout: 30
@@ -682,14 +646,11 @@ model:
 model:
   default_model_type: "powerful"
 
-  common:
-    api_key: "default-key"
-    requests_per_minute: 30
-
   powerful:
     model: "anthropic/aws-claude-opus-4-5"
     base_url: "https://your-anthropic-gateway.com"
     api_key: "anthropic-specific-key"
+    requests_per_minute: 30
     temperature: 0.2
     max_tokens: 8192
 
@@ -697,6 +658,7 @@ model:
     model: "openai/gpt-4o-mini"
     base_url: "https://api.openai.com/v1"
     api_key: "openai-specific-key"
+    requests_per_minute: 30
     temperature: 0.7
     max_tokens: 1024
 
@@ -704,6 +666,7 @@ model:
     model: "gemini/gemini-1.5-flash"
     base_url: "https://generativelanguage.googleapis.com/v1"
     api_key: "gemini-specific-key"
+    requests_per_minute: 30
     temperature: 0.3
     max_tokens: 2048
 ```
@@ -712,19 +675,21 @@ model:
 
 ```yaml
 model:
-  common:
-    base_url: "https://your-openai-proxy.com/v1"
-    api_key: "sk-your-key"
-
   powerful:
     model: "openai/gpt-4o"
+    base_url: "https://your-openai-proxy.com/v1"
+    api_key: "sk-your-key"
     temperature: 0.2
 
   fast:
     model: "openai/gpt-4o-mini"
+    base_url: "https://your-openai-proxy.com/v1"
+    api_key: "sk-your-key"
     temperature: 0.7
 
   summary:
     model: "openai/gpt-4o-mini"
+    base_url: "https://your-openai-proxy.com/v1"
+    api_key: "sk-your-key"
     temperature: 0.3
 ```

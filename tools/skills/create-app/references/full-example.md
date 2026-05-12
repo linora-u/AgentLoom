@@ -19,8 +19,8 @@ User requirement: "Help me create a Code Review Application that can perform mul
 | Q1 Application name | `code_review` |
 | Q2 One-line description | `Perform multi-dimensional code review on a Git repository and output a structured review report` |
 | Q3 Worker stages | 3 stages: ① Code scanning & structure analysis ② Risk assessment & issue tagging ③ Report summary |
-| Q4 model_type available options discovery | Read `config/llm.yaml`, discovered available types: `common` / `powerful` / `fast` / `summary`, `default_model_type=powerful` |
-| Q5 Supervisor model_type strategy | Use `default_model_type` (not explicitly specified) |
+| Q4 model_type available options discovery | Read `config/llm.yaml`, discovered available types: `powerful` / `fast` / `summary`, `default_model_type=powerful` |
+| Q5 Supervisor model_type strategy | Use configured `default_model_type` (not explicitly specified) |
 | Q6 Worker model_type strategy | Same as Supervisor (not explicitly specified) |
 | Q7 tool_call_type | `code_act` |
 | Q8 Custom tools | One `get_repo_context` tool to get repository overview |
@@ -57,7 +57,7 @@ applications/code_review/
 
 Supervisor configuration summary:
 - name: code_review_agent
-- model_type: Inherits default_model_type (not explicitly specified)
+- model_type: Uses configured default_model_type (not explicitly specified)
 - tool_call_type: code_act
 - Custom tools: get_repo_context
 - Worker count: 3
@@ -65,9 +65,9 @@ Supervisor configuration summary:
 Worker configuration summary:
 | Stage | Name                    | Responsibility              | model_type Strategy | Tools                                                   |
 |-------|-------------------------|-----------------------------|---------------------|---------------------------------------------------------|
-| 1     | code_scan               | Code scanning & structure analysis | Inherit default     | read_file, get_file_outline, ripgrep_search_directory |
-| 2     | risk_assessment         | Risk assessment & issue tagging    | Inherit default     | read_file, ripgrep_search_directory             |
-| 3     | report_generation       | Report summary              | Inherit default     | write_markdown_file                                      |
+| 1     | code_scan               | Code scanning & structure analysis | Use configured default | read_file, get_file_outline, ripgrep_search_directory |
+| 2     | risk_assessment         | Risk assessment & issue tagging    | Use configured default | read_file, ripgrep_search_directory             |
+| 3     | report_generation       | Report summary              | Use configured default | write_markdown_file                                      |
 ```
 
 User confirmation: ✅

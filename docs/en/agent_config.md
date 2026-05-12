@@ -372,7 +372,7 @@ workflow: |
 | Field | Type | Default | Description |
 |------|------|--------|------|
 | `tools` | `list[dict]` | `[]` | Tool list. See [Section 4](#4-tool-configuration-details) |
-| `model_type` | `str` | Global `default_model_type` | Model selection. See [3.7](#37-model_type--model-selection) |
+| `model_type` | `str` | Configured global `default_model_type` | Model selection. See [3.7](#37-model_type--model-selection) |
 | `tool_call_type` | `str` | `"code_act"` | Agent interaction mode. See [3.6](#36-tool_call_type--interaction-mode) |
 | `execution_env` | `dict` | `{type: "local"}` | Execution environment configuration. See [3.5](#35-execution_env--execution-environment) |
 | `prompt` | `str` or `dict` | Framework built-in | Custom System Prompt template. See [3.9](#39-prompt--custom-prompt) |
@@ -486,7 +486,7 @@ Custom type names from `llm.yaml` are also supported (e.g., `"code_review"`).
 
 **Resolution logic**:
 1. Agent YAML specifies `model_type` → Uses that value; if the type doesn't exist, **raises an error (`ValueError`) directly, no silent fallback**.
-2. Not specified → Uses `config/llm.yaml`'s `model.default_model_type` (defaults to `"common"`). If `default_model_type` points to a non-existent type, **also raises an error directly**.
+2. Not specified → Uses the global `config/llm.yaml` `model.default_model_type`. If `default_model_type` is omitted or the resolved type does not exist, **also raises an error directly**.
 
 ---
 
@@ -1546,7 +1546,7 @@ workflow: |
 ```yaml
 name: "text_analyzer"
 description: "Pure text analysis agent, no shell needed"
-model_type: "common"
+model_type: "fast"
 tool_call_type: "code_act"
 
 # No shell_tool declared — agent cannot execute any shell commands
@@ -1685,7 +1685,7 @@ These tolerance mechanisms significantly reduce wasted retries caused by LLM out
 | `description` | ✅ | ✅ | ✅ | `str` | — |
 | `workflow` | ✅ | ✅ | ✅ | `str`/`list[str]` | — |
 | `tools` | ❌ | ✅ | ✅ | `list[dict]` | `[]` |
-| `model_type` | ❌ | ✅ | ✅ | `str` | `"common" (depends on llm.yaml)` |
+| `model_type` | ❌ | ✅ | ✅ | `str` | `model.default_model_type` from `config/llm.yaml`; no implicit default |
 | `tool_call_type` | ❌ | ✅ | ✅ | `str` | `"code_act"` |
 | `execution_env` | ❌ | ✅ | ✅ | `dict` | `{type: "local"}` |
 | `prompt` | ❌ | ✅ | ✅ | `str`/`dict` | Framework built-in |

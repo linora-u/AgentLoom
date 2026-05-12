@@ -113,7 +113,7 @@ This checklist is used for item-by-item review. You may only output items with f
 - [ ] Does the specified `model_type` exist in `config/llm.yaml`? (Non-existent types cause `ValueError` at runtime — no silent fallback)
 - [ ] Is `model_type` appropriate for the task? (`powerful` for complex reasoning, `fast` for simple classification, `summary` for extraction)
 - [ ] Does the Agent YAML contain prohibited LLM fields (`model`, `llm`, `langfuse`)? (These are auto-filtered with warnings — all LLM params must be in `config/llm.yaml`)
-- [ ] When `model_type` is omitted, is the `default_model_type` (defaults to `"common"`) from `llm.yaml` suitable?
+- [ ] When `model_type` is omitted, is `default_model_type` configured in `llm.yaml` and suitable?
 
 ### 3.5 Tool Capability Discovery
 

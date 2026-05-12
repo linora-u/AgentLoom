@@ -16,7 +16,7 @@ description: |
   <用户提供的一句话描述，扩展为 2-3 句完整的角色定位>
 
 # model_type 选项：
-# - 省略：继承 config/llm.yaml 中 model.default_model_type 的值
+# - 仅当 config/llm.yaml 配置了 model.default_model_type 时可省略
 # - 指定：使用明确的类型（必须存在于 config/llm.yaml 的 model 节点中）
 # model_type: "<selected_model_type>"
 tool_call_type: "<tool_call_type>"
@@ -88,7 +88,7 @@ workflow:
 name: "step<N>_<name>"
 description: "<阶段描述>"
 tool_call_type: "<tool_call_type>"
-# model_type 可选，策略与 Supervisor 相同
+# model_type 策略与 Supervisor 相同
 # model_type: "<selected_model_type>"
 tools:
   - name: "<tool1>"
@@ -274,7 +274,7 @@ system_prompt: |
 name: "<app_name>"
 description: "<一句话描述>"
 # model_type 选项：
-# - 省略：继承 config/llm.yaml 中 model.default_model_type 的值
+# - 仅当 config/llm.yaml 配置了 model.default_model_type 时可省略
 # - 指定：使用明确的类型（必须存在于 config/llm.yaml 的 model 节点中）
 # model_type: "<selected_model_type>"
 tool_call_type: "<tool_call_type>"

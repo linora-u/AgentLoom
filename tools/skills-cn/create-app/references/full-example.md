@@ -19,8 +19,8 @@
 | Q1 Application 名称 | `code_review` |
 | Q2 一句话描述 | `对 Git 仓库进行多维度代码审查并输出结构化审查报告` |
 | Q3 Worker 阶段 | 3 个阶段：① 代码扫描与结构分析 ② 风险评估与问题标记 ③ 报告汇总 |
-| Q4 model_type 可用选项发现 | 读取 `config/llm.yaml`，发现可用类型：`common` / `powerful` / `fast` / `summary`，`default_model_type=powerful` |
-| Q5 Supervisor model_type 策略 | 使用 `default_model_type`（不明确指定） |
+| Q4 model_type 可用选项发现 | 读取 `config/llm.yaml`，发现可用类型：`powerful` / `fast` / `summary`，`default_model_type=powerful` |
+| Q5 Supervisor model_type 策略 | 使用已配置的 `default_model_type`（不明确指定） |
 | Q6 Worker model_type 策略 | 与 Supervisor 相同（不明确指定） |
 | Q7 tool_call_type | `code_act` |
 | Q8 自定义 Tool | 一个 `get_repo_context` Tool，用于获取仓库概览 |
@@ -57,7 +57,7 @@ applications/code_review/
 
 Supervisor 配置摘要：
 - name: code_review_agent
-- model_type: 继承 default_model_type（不明确指定）
+- model_type: 使用已配置的 default_model_type（不明确指定）
 - tool_call_type: code_act
 - 自定义 Tool：get_repo_context
 - Worker 数量：3
@@ -65,9 +65,9 @@ Supervisor 配置摘要：
 Worker 配置摘要：
 | 阶段 | 名称                    | 职责              | model_type 策略 | Tool                                                   |
 |------|-------------------------|--------------------|-----------------|--------------------------------------------------------|
-| 1    | code_scan               | 代码扫描与结构分析 | 继承默认        | read_file, get_file_outline, ripgrep_search_directory |
-| 2    | risk_assessment         | 风险评估与问题标记 | 继承默认        | read_file, ripgrep_search_directory             |
-| 3    | report_generation       | 报告汇总           | 继承默认        | write_markdown_file                                     |
+| 1    | code_scan               | 代码扫描与结构分析 | 使用已配置默认 | read_file, get_file_outline, ripgrep_search_directory |
+| 2    | risk_assessment         | 风险评估与问题标记 | 使用已配置默认 | read_file, ripgrep_search_directory             |
+| 3    | report_generation       | 报告汇总           | 使用已配置默认 | write_markdown_file                                     |
 ```
 
 用户确认：✅
