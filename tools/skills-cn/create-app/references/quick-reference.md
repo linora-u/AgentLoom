@@ -59,7 +59,7 @@
 
 `model_type` 不是固定枚举——应从项目的 `config/llm.yaml` 中动态读取：
 
-1. 读取 `model.default_model_type` 作为默认类型。
+1. 读取 `model.default_model_type` 作为项目默认类型。如果缺失，生成的 Agent YAML 必须显式设置 `model_type`。
 2. 读取 `model` 下的其余键作为可用类型（排除保留键 `default_model_type` 和非 dict 值）。
 3. 在交互场景中，向用户确认：使用默认 / 明确指定 / 自定义。
 4. 自定义值必须已在 `config/llm.yaml` 中定义，否则运行时会报错。

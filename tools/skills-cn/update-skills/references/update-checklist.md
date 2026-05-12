@@ -29,11 +29,11 @@
   - 必填字段数量是否正确（name, description, workflow -- 3 个必填）
   - 可选字段列表是否完整（tools, model_type, tool_call_type, worker_agents, execution_env, prompt, skills, planning_interval, max_steps）
 - [ ] **信息提取检查清单（#1-#14）**：默认值和描述是否与最新文档一致
-  - `model_type` 默认值描述：继承自 `config/llm.yaml` 的 `model.default_model_type`
+  - `model_type` 默认值描述：仅当 `config/llm.yaml` 配置了 `model.default_model_type` 时使用；否则必须显式指定 `model_type`
   - `tool_call_type` 默认值：`code_act`
   - `execution_env` 可用值：`local`、`docker`、`e2b`、`wasm`
 - [ ] **model_type 发现和确认工作流**：与 `docs/cn/llm_config.md` 对齐
-  - 参数继承链：`models[model_type].param` -> `models.common.param` -> 代码默认值
+  - 参数读取链：`models[model_type].param` -> 代码默认值
   - 可用的 model_types 应从 `config/llm.yaml` 动态发现（排除 `default_model_type`），而非硬编码为固定集合
 - [ ] **LLM 配置隔离描述**：与 `docs/cn/config-overview.md` 和 `docs/cn/agent_config.md` 对齐
   - Agent YAML 中不得包含 `model`/`llm`/`langfuse`；这些会被自动过滤并输出警告
@@ -75,7 +75,7 @@
 ### references/full-example.md
 
 - [ ] **端到端示例流程**：目录结构和字段与最新文档和代码行为一致
-- [ ] **示例中的 model_type 策略**：反映了"动态发现 + 默认继承"机制
+- [ ] **示例中的 model_type 策略**：反映动态发现，以及必须使用已配置默认或显式类型的机制
 - [ ] **示例中的 skills/worker 配置**：与当前 `docs/cn/agent_config.md` 规则一致
 
 ### references/agent-yaml-schema.json
