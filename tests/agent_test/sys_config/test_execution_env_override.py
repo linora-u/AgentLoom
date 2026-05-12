@@ -27,9 +27,12 @@ execution_env:
   bash_path: /bin/bash
     """)
     (system_config_dir / "llm.yaml").write_text("""
-common:
-  provider: "openai"
-  model: "gpt-4o"
+model:
+  default_model_type: powerful
+  powerful:
+    model: "openai/gpt-4o"
+  summary:
+    model: "openai/gpt-4o-mini"
 """)
     
     # Create application config override

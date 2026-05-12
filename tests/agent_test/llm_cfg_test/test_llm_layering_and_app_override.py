@@ -58,22 +58,21 @@ def test_layering_precedence_with_application_override(tmp_path):
             "prompt": {"path": "prompts/system_prompt.yaml"},
             "model": {
                 "default_model_type": "powerful",
-                "common": {"model": "openai/test-common", "base_url": "https://system.example/v1", "api_key": "system-key", "requests_per_minute": 3},
-                "powerful": {"model": "openai/system-powerful", "timeout": 50},
+                "powerful": {"model": "openai/system-powerful", "base_url": "https://system.example/v1", "api_key": "system-key", "requests_per_minute": 3, "timeout": 50},
                 "summary": {"model": "openai/test-summary"},
             },
         },
         llm_data={
             "model": {
-                "common": {"model": "openai/test-common", "base_url": "https://llm.example/v1", "api_key": "llm-key", "requests_per_minute": 9},
-                "powerful": {"model": "openai/llm-powerful", "timeout": 60},
+                "default_model_type": "powerful",
+                "powerful": {"model": "openai/llm-powerful", "base_url": "https://llm.example/v1", "api_key": "llm-key", "requests_per_minute": 9, "timeout": 60},
                 "summary": {"model": "openai/test-summary"},
             }
         },
         app_data={
             "tool_access_control": {"exclude_paths": ["Tools", ".git"]},
             "prompt": {"path": "prompts/app_prompt.yaml"},
-            "model": {"common": {"model": "openai/test-common", "api_key": "app-key"}, "powerful": {"model": "openai/app-powerful"}},
+            "model": {"powerful": {"model": "openai/app-powerful", "api_key": "app-key"}},
             "summary": {"model": "openai/test-summary"},
             "langfuse": {"host": "https://app-langfuse.example"},
         },
@@ -96,8 +95,8 @@ def test_non_application_path_does_not_load_app_override(tmp_path):
     _write_yaml(config_dir / "system.yaml", {"prompt": {"path": "prompts/system_prompt.yaml"}})
     _write_yaml(config_dir / "llm.yaml", {
         "model": {
-            "common": {"model": "openai/test-common", "base_url": "https://llm.example/v1"},
-            "powerful": {"model": "openai/llm-powerful"},
+            "default_model_type": "powerful",
+            "powerful": {"model": "openai/llm-powerful", "base_url": "https://llm.example/v1"},
             "summary": {"model": "openai/test-summary"},
         }
     })
@@ -122,13 +121,13 @@ def test_max_tokens_uses_llm_yaml_only_and_ignores_system_layers(tmp_path):
     config_dir, yaml_file = _setup_layered(
         tmp_path,
         system_data={
-            "model": {"default_model_type": "powerful", "common": {"model": "openai/test-common", "max_tokens": 11111}, "powerful": {"model": "openai/system-powerful", "max_tokens": 22222}, "summary": {"model": "openai/test-summary"}},
+            "model": {"default_model_type": "powerful", "powerful": {"model": "openai/system-powerful", "max_tokens": 22222}, "summary": {"model": "openai/test-summary"}},
         },
         llm_data={
-            "model": {"common": {"model": "openai/test-common", "max_tokens": 33333}, "powerful": {"model": "openai/llm-powerful", "max_tokens": 44444}, "summary": {"model": "openai/test-summary"}},
+            "model": {"default_model_type": "powerful", "powerful": {"model": "openai/llm-powerful", "max_tokens": 44444}, "summary": {"model": "openai/test-summary"}},
         },
         app_data={
-            "model": {"common": {"model": "openai/test-common", "max_tokens": 55555}, "powerful": {"max_tokens": 66666}, "summary": {"model": "openai/test-summary"}},
+            "model": {"powerful": {"max_tokens": 66666}, "summary": {"model": "openai/test-summary"}},
         },
     )
     _build_effective(config_dir, yaml_file)
@@ -140,13 +139,13 @@ def test_max_tokens_falls_back_to_builtin_when_llm_yaml_omits_it(tmp_path):
     config_dir, yaml_file = _setup_layered(
         tmp_path,
         system_data={
-            "model": {"default_model_type": "powerful", "common": {"model": "openai/test-common", "max_tokens": 22222}, "powerful": {"model": "openai/system-powerful", "max_tokens": 33333}, "summary": {"model": "openai/test-summary"}},
+            "model": {"default_model_type": "powerful", "powerful": {"model": "openai/system-powerful", "max_tokens": 33333}, "summary": {"model": "openai/test-summary"}},
         },
         llm_data={
-            "model": {"common": {"model": "openai/test-common"}, "powerful": {"model": "openai/llm-powerful"}, "summary": {"model": "openai/test-summary"}},
+            "model": {"default_model_type": "powerful", "powerful": {"model": "openai/llm-powerful"}, "summary": {"model": "openai/test-summary"}},
         },
         app_data={
-            "model": {"common": {"model": "openai/test-common", "max_tokens": 44444}, "powerful": {"max_tokens": 55555}, "summary": {"model": "openai/test-summary"}},
+            "model": {"powerful": {"max_tokens": 55555}, "summary": {"model": "openai/test-summary"}},
         },
     )
     _build_effective(config_dir, yaml_file)

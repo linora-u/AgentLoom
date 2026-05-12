@@ -21,7 +21,43 @@ from src.lib.config.defaults import (
     DEFAULT_MODEL_TIMEOUT,
 )
 
-_RESERVED_MODEL_KEYS = {"default_model_type"}
+_RESERVED_MODEL_KEYS = {"default_model_type", "common"}
+
+
+def _available_types_text(models: Dict[str, Any]) -> str:
+    available = list(models.keys())
+    return ", ".join(available) if available else "(none)"
+
+
+def _missing_default_model_type_error(models: Dict[str, Any]) -> str:
+    return (
+        "No model_type was provided and config/llm.yaml does not set "
+        "`model.default_model_type`; the model call was not started. "
+        "Fix: add `model_type: <type>` to the Agent YAML, or set "
+        "`model.default_model_type: <type>` in config/llm.yaml. "
+        f"Available model types: {_available_types_text(models)}."
+    )
+
+
+def _unknown_model_type_error(model_type: Any, models: Dict[str, Any]) -> str:
+    return (
+        f"Model type '{model_type}' is not defined in config/llm.yaml; "
+        "the model call was not started. "
+        f"Available model types: {_available_types_text(models)}. "
+        "Fix: set Agent YAML `model_type` to one of the available types, "
+        f"or add `model.{model_type}.model: <provider/model>` in config/llm.yaml."
+    )
+
+
+def _missing_default_target_error(default_type: str, models: Dict[str, Any]) -> str:
+    return (
+        f"config/llm.yaml sets `model.default_model_type: {default_type}`, "
+        "but that model type is not defined; the model call was not started. "
+        f"Available model types: {_available_types_text(models)}. "
+        f"Fix: change `model.default_model_type` to an available type, "
+        f"or add `model.{default_type}.model: <provider/model>`."
+    )
+
 
 class LangfuseSettings(BaseModel):
     model_config = ConfigDict(extra="allow", frozen=True)
@@ -43,12 +79,6 @@ class LangfuseSettings(BaseModel):
 
     def get_actual_private_key(self) -> str:
         return self.private_key or self.secret_key or ""
-
-class LlmCommonSettings(BaseModel):
-    model_config = ConfigDict(extra="allow", frozen=True)
-    base_url: str = ""
-    api_key: str = ""
-    requests_per_minute: int = DEFAULT_MODEL_REQUESTS_PER_MINUTE
 
 class LlmModelTypeSettings(BaseModel):
     model_config = ConfigDict(extra="allow", arbitrary_types_allowed=True, frozen=True)
@@ -76,8 +106,7 @@ class LLMConfig(BaseModel):
     # Internal representation from yaml
     langfuse: LangfuseSettings = Field(default_factory=LangfuseSettings)
     # the entire "model" block gets split into its pieces
-    common: LlmCommonSettings = Field(default_factory=LlmCommonSettings)
-    default_model_type: str = "common"
+    default_model_type: str = ""
     models: Dict[str, LlmModelTypeSettings] = Field(default_factory=dict)
     
     @classmethod
@@ -93,33 +122,24 @@ class LLMConfig(BaseModel):
     def from_dict(cls, raw: Dict[str, Any]) -> "LLMConfig":
         langfuse_raw = raw.get("langfuse", {})
         model_raw = raw.get("model", {})
-        
-        common_raw = model_raw.get("common", {})
-        default_type = model_raw.get("default_model_type", "common")
+        default_type = model_raw.get("default_model_type", "")
         
         # Build models dict
         models: Dict[str, LlmModelTypeSettings] = {}
         for k, v in model_raw.items():
             if k in _RESERVED_MODEL_KEYS or not isinstance(v, dict):
                 continue
-                
-            # Merge common defaults explicitly when parsing model types
-            resolved_base_url = v.get("base_url") or common_raw.get("base_url") or ""
-            resolved_api_key = v.get("api_key") or common_raw.get("api_key") or ""
-            
-            resolved_rpm = v.get("requests_per_minute")
-            if resolved_rpm is None:
-                 resolved_rpm = common_raw.get("requests_per_minute", DEFAULT_MODEL_REQUESTS_PER_MINUTE)
-                 
-            resolved_temp = v.get("temperature", common_raw.get("temperature", DEFAULT_MODEL_TEMPERATURE))
-            resolved_max_tokens = v.get("max_tokens", common_raw.get("max_tokens", DEFAULT_MAX_TOKENS))
-            resolved_timeout = v.get("timeout", common_raw.get("timeout", DEFAULT_MODEL_TIMEOUT))
-            resolved_num_retries = v.get("num_retries", common_raw.get("num_retries", DEFAULT_MODEL_NUM_RETRIES))
-            resolved_retry_delay = v.get("retry_delay", common_raw.get("retry_delay", DEFAULT_MODEL_RETRY_DELAY))
-            resolved_max_retry_delay = v.get("max_retry_delay", common_raw.get("max_retry_delay", DEFAULT_MODEL_MAX_RETRY_DELAY))
+
+            resolved_base_url = v.get("base_url") or ""
+            resolved_api_key = v.get("api_key") or ""
+            resolved_rpm = v.get("requests_per_minute", DEFAULT_MODEL_REQUESTS_PER_MINUTE)
+            resolved_temp = v.get("temperature", DEFAULT_MODEL_TEMPERATURE)
+            resolved_max_tokens = v.get("max_tokens", DEFAULT_MAX_TOKENS)
+            resolved_timeout = v.get("timeout", DEFAULT_MODEL_TIMEOUT)
+            resolved_num_retries = v.get("num_retries", DEFAULT_MODEL_NUM_RETRIES)
+            resolved_retry_delay = v.get("retry_delay", DEFAULT_MODEL_RETRY_DELAY)
+            resolved_max_retry_delay = v.get("max_retry_delay", DEFAULT_MODEL_MAX_RETRY_DELAY)
             resolved_extra_headers = v.get("extra_headers")
-            if resolved_extra_headers is None:
-                resolved_extra_headers = common_raw.get("extra_headers")
 
             model_id = v.get("model", "")
             if not model_id:
@@ -132,7 +152,7 @@ class LLMConfig(BaseModel):
             # Resolve supports_native_tool_calls (three-state: auto/true/false)
             raw_tool_calls = v.get(
                 "supports_native_tool_calls",
-                common_raw.get("supports_native_tool_calls", "auto"),
+                "auto",
             )
             resolved_tool_calls = str(raw_tool_calls).strip().lower()
             if resolved_tool_calls not in ("auto", "true", "false"):
@@ -157,10 +177,9 @@ class LLMConfig(BaseModel):
             )
 
         # Validate required model types:
-        # - 'common': default model type + shared parameter pool
         # - 'summary': context compression (smart_summary) depends on it
         if models:
-            for required in ("common", "summary"):
+            for required in ("summary",):
                 if required not in models:
                     raise ValueError(
                         f"Model type '{required}' is required in llm.yaml but not found. "
@@ -169,8 +188,7 @@ class LLMConfig(BaseModel):
 
         return cls(
             langfuse=LangfuseSettings(**langfuse_raw),
-            common=LlmCommonSettings(**common_raw),
-            default_model_type=default_type,
+            default_model_type=str(default_type or ""),
             models=models
         )
         
@@ -180,7 +198,6 @@ class LLMConfig(BaseModel):
         if arbitrary code tries to read C.raw['model'] or C.raw['langfuse'].
         """
         model_dict = {
-            "common": self.common.model_dump(),
             "default_model_type": self.default_model_type
         }
         for k, v in self.models.items():
@@ -193,28 +210,24 @@ class LLMConfig(BaseModel):
 
     def for_type(self, model_type: Optional[str]) -> LlmModelTypeSettings:
         desired = (model_type or "").strip().lower()
-        
+
         # If user explicitly requested a type and it exists, return it.
         if desired and desired in self.models:
             return self.models[desired]
-            
-        # If user explicitly requested a type but it DOES NOT exist, raise error immediately (do not fallback).
+
+        # If user explicitly requested a type but it DOES NOT exist, raise error immediately.
         if desired:
-             raise ValueError(
-                f"Model type '{model_type}' requested by Agent is not defined in llm.yaml. "
-                f"Available types: {list(self.models.keys())}"
-            )
-            
-        # If user did not request a type (empty/None), fallback to default_model_type
+            raise ValueError(_unknown_model_type_error(model_type, self.models))
+
+        # If user did not request a type (empty/None), use global default_model_type.
         default_type = self.default_model_type.strip().lower()
         if default_type and default_type in self.models:
             return self.models[default_type]
-            
-        raise ValueError(
-            f"No model type found for '{model_type}' and default "
-            f"'{self.default_model_type}' is also not available. "
-            f"Available types: {list(self.models.keys())}"
-        )
+
+        if not default_type:
+            raise ValueError(_missing_default_model_type_error(self.models))
+
+        raise ValueError(_missing_default_target_error(self.default_model_type, self.models))
 
     @property
     def available_types(self) -> list[str]:

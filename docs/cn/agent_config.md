@@ -374,7 +374,7 @@ workflow: |
 | 字段 | 类型 | 默认值 | 说明 |
 |------|------|--------|------|
 | `tools` | `list[dict]` | `[]` | 工具列表。详见 [第 4 节](#4-工具配置详解) |
-| `model_type` | `str` | 全局 `default_model_type` | 模型选择。详见 [3.7](#37-model_type--模型选择) |
+| `model_type` | `str` | 已配置的全局 `default_model_type` | 模型选择。详见 [3.7](#37-model_type--模型选择) |
 | `tool_call_type` | `str` | `"code_act"` | Agent 交互模式。详见 [3.6](#36-tool_call_type--交互模式) |
 | `execution_env` | `dict` | `{type: "local"}` | 执行环境配置。详见 [3.5](#35-execution_env--执行环境) |
 | `prompt` | `str` 或 `dict` | 框架内置 | 自定义 System Prompt 模板。详见 [3.9](#39-prompt--自定义-prompt) |
@@ -488,7 +488,7 @@ Agent YAML 不能直接修改 LLM 参数，但可以通过 `model_type` **选择
 
 **解析逻辑**：
 1. Agent YAML 指定了 `model_type` → 使用该值，如果该类型不存在，**直接报错 (`ValueError`)，不会静默回退**。
-2. 未指定 → 使用 `config/llm.yaml` 的 `model.default_model_type`（默认是 `"common"`）。如果 `default_model_type` 指向的类型也不存在，**同样直接报错**。
+2. 未指定 → 使用全局 `config/llm.yaml` 的 `model.default_model_type`。如果 `default_model_type` 未配置，或最终解析出的类型不存在，**同样直接报错**。
 
 ---
 
@@ -1581,7 +1581,7 @@ workflow: |
 ```yaml
 name: "text_analyzer"
 description: "纯文本分析 Agent，不需要 Shell"
-model_type: "common"
+model_type: "fast"
 tool_call_type: "code_act"
 
 # 不声明 shell_tool，Agent 无法执行任何 Shell 命令
@@ -1723,7 +1723,7 @@ grep -r 'SECURITY_BLOCK\|WHITELIST_REJECT\|PATH_VIOLATION' .logs/my_agent/
 | `description` | ✅ | ✅ | ✅ | `str` | — |
 | `workflow` | ✅ | ✅ | ✅ | `str`/`list[str]` | — |
 | `tools` | ❌ | ✅ | ✅ | `list[dict]` | `[]` |
-| `model_type` | ❌ | ✅ | ✅ | `str` | `"common" (依赖 llm.yaml)` |
+| `model_type` | ❌ | ✅ | ✅ | `str` | `config/llm.yaml` 中的 `model.default_model_type`；无隐式默认值 |
 | `tool_call_type` | ❌ | ✅ | ✅ | `str` | `"code_act"` |
 | `execution_env` | ❌ | ✅ | ✅ | `dict` | `{type: "local"}` |
 | `prompt` | ❌ | ✅ | ✅ | `str`/`dict` | 框架内置 |
