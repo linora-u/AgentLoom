@@ -258,7 +258,7 @@ AgentLoom provides a **built-in checkpoint/resume/heartbeat system** requiring n
 
 | Parameter | Default | Common Pitfalls | Recommended Practice |
 |-----------|---------|----------------|---------------------|
-| `model_type` | `default_model_type` from `llm.yaml` (usually `"common"`) | Specifying a non-existent type causes `ValueError` at runtime (no silent fallback) | Verify the type exists in `llm.yaml`; use `powerful` for complex reasoning, `fast` for simple tasks |
+| `model_type` | Global `default_model_type` from `llm.yaml`; no implicit default if omitted there | Specifying a non-existent type causes `ValueError` at runtime (no silent fallback) | Verify the type exists in `llm.yaml`; use `powerful` for complex reasoning, `fast` for simple tasks |
 | `tool_call_type` | `"code_act"` | Using `tool_call` for Supervisors limits orchestration capability | Use `code_act` for Supervisors and complex Workers; `tool_call` only for simple single-tool Workers |
 | `max_steps` | `80` | Default too high for simple Workers (wastes resources); too low for complex Supervisors | Set proportional to task complexity; simple Workers: 20-40; complex Supervisors: 60-120 |
 | `planning_interval` | Not set | Long task chains without periodic planning lose track of progress | Set to 3-5 for Agents with 20+ expected steps |
@@ -269,7 +269,7 @@ AgentLoom provides a **built-in checkpoint/resume/heartbeat system** requiring n
 
 - **Never write** `model`, `llm`, or `langfuse` fields in Agent YAML or `system.yaml` — they are auto-filtered with warning logs
 - Agent selects model via `model_type` only; all LLM parameters live exclusively in `config/llm.yaml`
-- When `model_type` is unspecified, fallback chain: `default_model_type` → `"common"` type → built-in defaults
+- When `model_type` is unspecified, the Agent uses the global `default_model_type`; if that key is omitted or resolves to a missing type, runtime raises `ValueError`.
 
 ### Configuration Overlay Whitelist
 

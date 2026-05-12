@@ -59,7 +59,7 @@
 
 `model_type` is not a fixed enum — it should be dynamically read from the project's `config/llm.yaml`:
 
-1. Read `model.default_model_type` as the default type.
+1. Read `model.default_model_type` as the project default type. If it is missing, generated Agent YAML must explicitly set `model_type`.
 2. Read the remaining keys under `model` as available types (excluding reserved keys `default_model_type` and non-dict values).
 3. In interactive scenarios, confirm with the user: use default / specify explicitly / custom.
 4. Custom values must already be defined in `config/llm.yaml`, otherwise a runtime error will occur.

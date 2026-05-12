@@ -24,6 +24,7 @@ from .config_validation import (
     raise_project_key_error,
     validate_system_snapshot,
 )
+from .defaults import DEFAULT_MODEL_REQUESTS_PER_MINUTE
 from .layered_builder import LayeredConfigBuilder
 from .llm_config import LLMConfig
 
@@ -215,10 +216,6 @@ class UnifiedConfig:
             val = getattr(specific, key)
             if val is not None and val != "":
                 return val
-        if hasattr(self._llm_config.common, key):
-            val = getattr(self._llm_config.common, key)
-            if val is not None and val != "":
-                return val
         return default
 
     @property
@@ -239,15 +236,24 @@ class UnifiedConfig:
 
     @property
     def requests_per_minute(self) -> int:
-        return self._llm_config.common.requests_per_minute
+        try:
+            return self._llm_config.for_type(None).requests_per_minute
+        except ValueError:
+            return DEFAULT_MODEL_REQUESTS_PER_MINUTE
 
     @property
     def llm_base_url(self) -> str:
-        return self._llm_config.common.base_url
+        try:
+            return self._llm_config.for_type(None).base_url
+        except ValueError:
+            return ""
 
     @property
     def llm_api_key(self) -> str:
-        api_key = self._llm_config.common.api_key
+        try:
+            api_key = self._llm_config.for_type(None).api_key
+        except ValueError:
+            api_key = ""
         return api_key if api_key else "not_provided"
 
     @property

@@ -71,7 +71,7 @@ Does not declare `shell_tool`, so the agent cannot execute any shell commands.
 ```yaml
 name: "text_analyzer"
 description: "Pure text analysis agent, no shell needed"
-model_type: "common"
+model_type: "fast"
 tool_call_type: "code_act"
 
 tools:

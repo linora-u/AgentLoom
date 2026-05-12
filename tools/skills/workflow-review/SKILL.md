@@ -219,7 +219,7 @@ Only output dimensions with findings; dimensions without findings are covered in
 **LLM configuration isolation:**
 - Fields `model`, `llm`, `langfuse` in Agent YAML or `system.yaml` are **auto-filtered** with warning logs — all LLM parameters must only be in `config/llm.yaml`
 - Agent selects model via `model_type`; if the specified type does not exist in `llm.yaml`, runtime raises `ValueError` (no silent fallback)
-- Fallback chain when `model_type` is omitted: uses `default_model_type` from `llm.yaml` (defaults to `"common"`)
+- When `model_type` is omitted, use the global `default_model_type` from `llm.yaml`; if that key is omitted or resolves to a missing type, runtime raises `ValueError`.
 
 **Configuration overlay:**
 - Agent YAML overlay whitelist (7 keys only): `system`, `smart_summary`, `tool_access_control`, `execution_env`, `code_agent`, `tools`, `prompt`

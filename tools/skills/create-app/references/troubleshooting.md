@@ -73,8 +73,8 @@ print(<function_name>.__doc__[:100])
 
 ### Symptoms
 ```
-KeyError: 'xxx' not found in llm config
-ValueError: Unknown model_type: ...
+ValueError: Model type 'xxx' is not defined in config/llm.yaml; the model call was not started.
+ValueError: No model_type was provided and config/llm.yaml does not set `model.default_model_type`; the model call was not started.
 ```
 
 ### Troubleshooting Steps
@@ -82,6 +82,7 @@ ValueError: Unknown model_type: ...
 1. Check whether the model_type is defined in `config/llm.yaml`
 2. Dynamically confirm available types from the `model` node in `config/llm.yaml` (excluding `default_model_type` and non-dict values)
 3. Custom model_type values must first be added as a configuration block in `config/llm.yaml`
+4. If Agent YAML omits `model_type`, make sure `model.default_model_type` is configured and points to an available type
 
 ### Quick Verification
 
