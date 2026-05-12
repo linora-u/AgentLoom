@@ -29,11 +29,11 @@
   - Is the number of required fields correct (name, description, workflow -- 3 required)
   - Is the optional field list complete (tools, model_type, tool_call_type, worker_agents, execution_env, prompt, skills, planning_interval, max_steps)
 - [ ] **Information Extraction Checklist (#1-#14)**: Are default values and descriptions consistent with the latest documentation
-  - `model_type` default value description: inherits from `config/llm.yaml`'s `model.default_model_type`
+  - `model_type` default value description: uses `config/llm.yaml`'s `model.default_model_type` only when configured; otherwise explicit `model_type` is required
   - `tool_call_type` default value: `code_act`
   - `execution_env` available values: `local`, `docker`, `e2b`, `wasm`
 - [ ] **model_type Discovery and Confirmation Workflow**: Aligned with `docs/en/llm_config.md`
-  - Parameter inheritance chain: `models[model_type].param` -> `models.common.param` -> code defaults
+  - Parameter lookup chain: `models[model_type].param` -> code defaults
   - Available model_types should be dynamically discovered from `config/llm.yaml` (excluding `default_model_type`), not hardcoded to a fixed set
 - [ ] **LLM Config Isolation Description**: Aligned with `docs/en/config-overview.md` and `docs/en/agent_config.md`
   - Agent YAML must not contain `model`/`llm`/`langfuse`; these will be automatically filtered with a warning output
@@ -75,7 +75,7 @@
 ### references/full-example.md
 
 - [ ] **End-to-End Example Flow**: Directory structure and fields consistent with the latest documentation and code behavior
-- [ ] **model_type Strategy in Example**: Reflects the "dynamic discovery + default inheritance" mechanism
+- [ ] **model_type Strategy in Example**: Reflects dynamic discovery and the requirement to use a configured default or explicit type
 - [ ] **skills/worker Configuration in Example**: Consistent with current `docs/en/agent_config.md` rules
 
 ### references/agent-yaml-schema.json

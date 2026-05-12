@@ -27,23 +27,19 @@ def _base_model_config() -> dict:
         },
         "model": {
             "default_model_type": "powerful",
-            "common": {
-                "model": "openai/test-common",
+            "powerful": {
+                "model": "openai/test-model",
                 "base_url": "https://example.test/v1",
-                "api_key": "key-common",
+                "api_key": "key-powerful",
                 "temperature": 0.2,
                 "max_tokens": 1024,
-                "timeout": 30,
+                "timeout": 60,
                 "num_retries": 7,
                 "retry_delay": 2.5,
                 "max_retry_delay": 20.0,
-                "extra_headers": {"X-Common": "1"},
+                "extra_headers": {"X-Model": "powerful"},
                 "requests_per_minute": 11,
-            },
-            "powerful": {
-                "model": "openai/test-model",
                 "description": "Powerful model for complex tasks",
-                "timeout": 60,
             },
             "fast": {
                 "model": "openai/fast-model",
@@ -62,23 +58,21 @@ def test_llm_member_access_and_model_config_fields(monkeypatch):
     cfg = model_types.ModelTypeManager.get_llm_config(model_types.ModelType("powerful"))
 
     assert llm.default_model_type == "powerful"
-    assert set(llm.available_types) == {"common", "powerful", "fast", "summary"}
-    assert llm.common.base_url == "https://example.test/v1"
-    assert llm.common.requests_per_minute == 11
+    assert set(llm.available_types) == {"powerful", "fast", "summary"}
     assert llm.for_type("powerful").model == "openai/test-model"
 
     assert cfg.model_id == "openai/test-model"
     assert cfg.base_url == "https://example.test/v1"
-    assert cfg.api_key == "key-common"
+    assert cfg.api_key == "key-powerful"
     assert cfg.timeout == 60
     assert cfg.num_retries == 7
     assert cfg.retry_delay == 2.5
     assert cfg.max_retry_delay == 20.0
     assert cfg.description == "Powerful model for complex tasks"
-    assert cfg.extra_headers == {"X-Common": "1"}
+    assert cfg.extra_headers == {"X-Model": "powerful"}
 
 
-def test_model_config_specific_extra_headers_override_common(monkeypatch):
+def test_model_config_specific_extra_headers_are_preserved(monkeypatch):
     config = _base_model_config()
     config["model"]["powerful"]["extra_headers"] = {"X-Specific": "yes"}
     _patch_yaml_config(monkeypatch, config)
@@ -103,9 +97,9 @@ def test_model_manager_litellm_config_contains_passthrough_fields(monkeypatch):
     assert params["num_retries"] == 7
     assert params["retry_delay"] == 2.5
     assert params["max_retry_delay"] == 20.0
-    assert params["extra_headers"] == {"X-Common": "1"}
+    assert params["extra_headers"] == {"X-Model": "powerful"}
     assert params["api_base"] == "https://example.test/v1"
-    assert params["api_key"] == "key-common"
+    assert params["api_key"] == "key-powerful"
 
 
 def test_langfuse_private_key_fallback(monkeypatch):

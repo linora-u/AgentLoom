@@ -113,7 +113,7 @@
 - [ ] 指定的 `model_type` 是否存在于 `config/llm.yaml` 中？（不存在的类型会在运行时抛出 `ValueError`——不会静默回退）
 - [ ] `model_type` 是否与任务复杂度匹配？（`powerful` 用于复杂推理，`fast` 用于简单分类，`summary` 用于信息提取）
 - [ ] Agent YAML 是否包含被禁止的 LLM 字段（`model`、`llm`、`langfuse`）？（被自动过滤并输出 warning——所有 LLM 参数只能在 `config/llm.yaml`）
-- [ ] 未指定 `model_type` 时，`default_model_type`（默认为 `"common"`）是否适合？
+- [ ] 未指定 `model_type` 时，`llm.yaml` 中是否配置了合适的 `default_model_type`？
 
 ### 3.5 工具能力发现
 

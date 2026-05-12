@@ -22,6 +22,30 @@ from src.lib.config.defaults import (
 logger = get_logger(__name__)
 
 
+def _available_types_text(available: list[str]) -> str:
+    return ", ".join(available) if available else "(none)"
+
+
+def _missing_default_model_type_error(available: list[str]) -> str:
+    return (
+        "No model_type was provided and config/llm.yaml does not set "
+        "`model.default_model_type`; the model call was not started. "
+        "Fix: add `model_type: <type>` to the Agent YAML, or set "
+        "`model.default_model_type: <type>` in config/llm.yaml. "
+        f"Available model types: {_available_types_text(available)}."
+    )
+
+
+def _unknown_model_type_error(model_type: str, available: list[str]) -> str:
+    return (
+        f"Model type '{model_type}' is not defined in config/llm.yaml; "
+        "the model call was not started. "
+        f"Available model types: {_available_types_text(available)}. "
+        "Fix: set Agent YAML `model_type` to one of the available types, "
+        f"or add `model.{model_type}.model: <provider/model>` in config/llm.yaml."
+    )
+
+
 def _parse_extra_headers(value: Any, source: str) -> Optional[dict]:
     """
     Parse extra_headers from dict or JSON string.
@@ -118,7 +142,7 @@ def _build_model_config_from_yaml(type_name: str) -> ModelConfig:
     resolved = C.llm.for_type(type_name)
     extra_headers = _parse_extra_headers(
         resolved.extra_headers,
-        f"model.{type_name}.extra_headers/model.common.extra_headers",
+        f"model.{type_name}.extra_headers",
     )
 
     return ModelConfig(
@@ -146,7 +170,7 @@ class ModelTypeManager:
     def _get_available_types(cls) -> list[str]:
         """
         Return all model type names defined in config under 'model:',
-        excluding reserved keys like 'common' and 'default_model_type'.
+        excluding reserved keys like 'default_model_type'.
         """
         return list(C.llm.available_types)
 
@@ -166,10 +190,7 @@ class ModelTypeManager:
         """
         available = cls._get_available_types()
         if model_type.value not in available:
-            raise ValueError(
-                f"Unsupported model type: '{model_type.value}'. "
-                f"Available types from YAML: {available}"
-            )
+            raise ValueError(_unknown_model_type_error(model_type.value, available))
         return _build_model_config_from_yaml(model_type.value)
 
     @classmethod
@@ -190,9 +211,9 @@ class ModelTypeManager:
         """
         Resolve a model type string to a ModelType instance.
 
-        If `model_type` is None or empty, uses the default model type from
-        YAML (model.default_model_type).  If that is also unset, the
-        framework falls back to common shared settings (via ``for_type``).
+        If `model_type` is None or empty, uses the global default model type
+        from YAML (model.default_model_type). If that key is unset, the
+        framework raises ``ValueError`` immediately.
 
         If `model_type` is explicitly specified but not defined in
         llm.yaml, a ``ValueError`` is raised to surface configuration
@@ -210,7 +231,10 @@ class ModelTypeManager:
                 defined in llm.yaml.
         """
         if not model_type:
-            return ModelType(C.default_model_type or "common")
+            default_type = (C.default_model_type or "").strip()
+            if not default_type:
+                raise ValueError(_missing_default_model_type_error(cls._get_available_types()))
+            return ModelType(default_type)
 
         type_name = model_type.lower().strip()
         available = cls._get_available_types()
@@ -218,7 +242,4 @@ class ModelTypeManager:
         if type_name in available:
             return ModelType(type_name)
 
-        raise ValueError(
-            f"Model type '{model_type}' is not defined in llm.yaml. "
-            f"Available types: {available}"
-        )
+        raise ValueError(_unknown_model_type_error(model_type, available))

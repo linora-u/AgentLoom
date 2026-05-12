@@ -45,14 +45,17 @@ def test_model_config_loaded_from_llm_yaml(tmp_path, monkeypatch):
         llm_yaml_data={
             "model": {
                 "default_model_type": "powerful",
-                "common": {
-                    "model": "openai/test-common",
+                "powerful": {
+                    "model": "openai/gpt-5",
                     "base_url": "https://llm-from-llm-yaml.test/v1",
                     "api_key": "llm-yaml-key",
                     "requests_per_minute": 15,
                 },
-                "powerful": {"model": "openai/gpt-5"},
-                "fast": {"model": "openai/gpt-4o-mini"},
+                "fast": {
+                    "model": "openai/gpt-4o-mini",
+                    "base_url": "https://fast.test/v1",
+                    "api_key": "fast-key",
+                },
                 "summary": {"model": "openai/test-summary"},
             },
         },
@@ -61,10 +64,10 @@ def test_model_config_loaded_from_llm_yaml(tmp_path, monkeypatch):
 
     assert cfg.llm.for_type("powerful").model == "openai/gpt-5"
     assert cfg.llm.for_type("fast").model == "openai/gpt-4o-mini"
-    assert cfg.llm.common.base_url == "https://llm-from-llm-yaml.test/v1"
-    assert cfg.llm.common.api_key == "llm-yaml-key"
-    assert cfg.llm.common.requests_per_minute == 15
-    assert set(cfg.llm.available_types) == {"common", "powerful", "fast", "summary"}
+    assert cfg.llm.for_type("powerful").base_url == "https://llm-from-llm-yaml.test/v1"
+    assert cfg.llm.for_type("powerful").api_key == "llm-yaml-key"
+    assert cfg.llm.for_type("powerful").requests_per_minute == 15
+    assert set(cfg.llm.available_types) == {"powerful", "fast", "summary"}
 
 
 def test_langfuse_loaded_from_llm_yaml(tmp_path, monkeypatch):
@@ -75,8 +78,7 @@ def test_langfuse_loaded_from_llm_yaml(tmp_path, monkeypatch):
         llm_yaml_data={
             "model": {
                 "default_model_type": "powerful",
-                "common": {"model": "openai/test-common", "base_url": "https://test/v1", "api_key": "k"},
-                "powerful": {"model": "openai/test"},
+                "powerful": {"model": "openai/test", "base_url": "https://test/v1", "api_key": "k"},
                 "summary": {"model": "openai/test-summary"},
             },
             "langfuse": {
@@ -103,8 +105,7 @@ def test_model_in_system_yaml_ignored_llm_yaml_wins(tmp_path, monkeypatch):
             # 这些 LLM 键会被 _filter_llm_only_top_level_keys 过滤
             "model": {
                 "default_model_type": "fast",
-                "common": {"model": "openai/test-common", "base_url": "https://wrong.test/v1", "api_key": "wrong-key"},
-                "powerful": {"model": "openai/wrong-model"},
+                "powerful": {"model": "openai/wrong-model", "base_url": "https://wrong.test/v1", "api_key": "wrong-key"},
                 "summary": {"model": "openai/test-summary"},
             },
             "langfuse": {
@@ -115,8 +116,7 @@ def test_model_in_system_yaml_ignored_llm_yaml_wins(tmp_path, monkeypatch):
         llm_yaml_data={
             "model": {
                 "default_model_type": "powerful",
-                "common": {"model": "openai/test-common", "base_url": "https://correct.test/v1", "api_key": "correct-key"},
-                "powerful": {"model": "openai/correct-model"},
+                "powerful": {"model": "openai/correct-model", "base_url": "https://correct.test/v1", "api_key": "correct-key"},
                 "summary": {"model": "openai/test-summary"},
             },
             "langfuse": {
@@ -129,9 +129,9 @@ def test_model_in_system_yaml_ignored_llm_yaml_wins(tmp_path, monkeypatch):
 
     # llm.yaml 的配置生效
     assert cfg.llm.default_model_type == "powerful"
-    assert cfg.llm.common.base_url == "https://correct.test/v1"
-    assert cfg.llm.common.api_key == "correct-key"
     assert cfg.llm.for_type("powerful").model == "openai/correct-model"
+    assert cfg.llm.for_type("powerful").base_url == "https://correct.test/v1"
+    assert cfg.llm.for_type("powerful").api_key == "correct-key"
     assert cfg.llm.langfuse.enabled is True
     assert cfg.llm.langfuse.host == "https://correct-langfuse.test"
 
@@ -144,8 +144,7 @@ def test_llm_yaml_missing_fields_use_defaults(tmp_path, monkeypatch):
         llm_yaml_data={
             "model": {
                 "default_model_type": "powerful",
-                "common": {"model": "openai/test-common", "base_url": "https://test/v1", "api_key": "k"},
-                "powerful": {"model": "openai/test"},
+                "powerful": {"model": "openai/test", "base_url": "https://test/v1", "api_key": "k"},
                 "summary": {"model": "openai/test-summary"},
             },
             # 不写 langfuse — 应使用默认值
