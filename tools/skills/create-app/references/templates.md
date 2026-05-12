@@ -16,7 +16,7 @@ description: |
   <User-provided one-line description, expanded into 2-3 sentences of complete role positioning>
 
 # model_type options:
-# - Omit: Inherits model.default_model_type from config/llm.yaml
+# - Omit only when config/llm.yaml sets model.default_model_type
 # - Specify: Use an explicit type (must exist in the model node of config/llm.yaml)
 # model_type: "<selected_model_type>"
 tool_call_type: "<tool_call_type>"
@@ -88,7 +88,7 @@ workflow:
 name: "step<N>_<name>"
 description: "<stage description>"
 tool_call_type: "<tool_call_type>"
-# model_type is optional, same strategy as Supervisor
+# model_type follows the same strategy as Supervisor
 # model_type: "<selected_model_type>"
 tools:
   - name: "<tool1>"
@@ -274,7 +274,7 @@ system_prompt: |
 name: "<app_name>"
 description: "<one-line description>"
 # model_type options:
-# - Omit: Inherits model.default_model_type from config/llm.yaml
+# - Omit only when config/llm.yaml sets model.default_model_type
 # - Specify: Use an explicit type (must exist in the model node of config/llm.yaml)
 # model_type: "<selected_model_type>"
 tool_call_type: "<tool_call_type>"

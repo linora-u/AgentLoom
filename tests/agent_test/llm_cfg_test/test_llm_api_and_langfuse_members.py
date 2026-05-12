@@ -30,13 +30,12 @@ def test_langfuse_app_override_and_defaults(tmp_path):
         {
             "model": {
                 "default_model_type": "powerful",
-                "common": {
-                    "model": "openai/test-common",
-                    "base_url": "https://common.example/v1",
-                    "api_key": "common-key",
+                "powerful": {
+                    "model": "openai/powerful",
+                    "base_url": "https://powerful.example/v1",
+                    "api_key": "powerful-key",
                     "requests_per_minute": 5,
                 },
-                "powerful": {"model": "openai/powerful"},
                 "summary": {"model": "openai/test-summary"},
             },
         },

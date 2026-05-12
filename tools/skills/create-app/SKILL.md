@@ -84,7 +84,7 @@ Extract the following information from the user's prompt or conversation. **Bold
 | 2 | **One-line feature description** | ✅ | — | Must be provided by user; used for Agent description |
 | 3 | **Mode selection: single Agent / multi-Agent** | ✅ | — | Task can be split into multiple phases → multi-Agent; single responsibility → single Agent |
 | 4 | Multi-Agent: phase names and responsibilities | Required for multi-Agent ✅ | — | Extract from user description, or suggest splits based on task nature |
-| 5 | model_type | ❌ | Inherits `config/llm.yaml`'s `model.default_model_type` | Confirm after reading project config: use default / explicitly specify |
+| 5 | model_type | ❌ | Uses `config/llm.yaml`'s `model.default_model_type` only when that key is configured | Confirm after reading project config: use configured default / explicitly specify |
 | 6 | tool_call_type | ❌ | `code_act` | Rarely needs changing |
 | 7 | Predefined tool list | ❌ | Auto-recommended based on task | Analysis → `read_file`+`get_file_outline`; Modification → `edit_file`; Reporting → `write_markdown_file` |
 | 8 | Custom tools | ❌ | None | When user explicitly mentions needing custom Python functions |
@@ -100,13 +100,14 @@ Extract the following information from the user's prompt or conversation. **Bold
 Before writing any Agent YAML, first read `config/llm.yaml` from the project root:
 
 1. Extract available types from the `model` node (excluding reserved keys `default_model_type` and non-dict values).
-2. Read `model.default_model_type` as the default model type.
+2. Read `model.default_model_type` as the project default model type. If it is missing, do not omit `model_type`; choose an explicit available type.
 3. In interactive scenarios, confirm with the user:
    - Whether to use the `default_model_type`;
    - If not, display "available types in the project + custom" for selection.
 4. In autonomous scenarios:
-   - If config is readable, default to using `default_model_type`;
-   - If reading fails, use the "inherit project default model type" strategy and declare it in the "assumptions list".
+   - If config is readable and `default_model_type` is set, default to using it;
+   - If `default_model_type` is missing, explicitly choose an available type;
+   - If reading fails, use the "explicit model_type required or configured project default required" strategy and declare it in the "assumptions list".
 
 > Constraint: The available options for `model_type` are determined by the project configuration, not hardcoded as `powerful/fast/summary`.
 
@@ -138,7 +139,7 @@ If `config/llm.yaml` has been identified, follow up with (optional but recommend
 
 ```
 4. Which model_type strategy to use?
-   - Use project default (default_model_type)
+   - Use configured project default (`default_model_type`)
    - Explicitly specify (choose from available model_type list in the project)
    - Custom (must be already defined in config/llm.yaml)
 ```
@@ -176,7 +177,7 @@ applications/<app_name>/
 
 ### Supervisor Configuration Summary
 - name: <supervisor_name>
-- model_type: <use default_model_type or explicitly specified value>
+- model_type: <use configured default_model_type or explicitly specified value>
 - tool_call_type: <tool_call_type>
 - Custom tools: <list>
 - Worker count: N
@@ -184,8 +185,8 @@ applications/<app_name>/
 ### Worker Configuration Summary
 | Stage | Name | Responsibility | model_type Strategy | Tools |
 |-------|------|----------------|---------------------|-------|
-| 1 | <worker_a> | ... | Inherit default or explicitly specify | [...] |
-| 2 | <worker_b> | ... | Inherit default or explicitly specify | [...] |
+| 1 | <worker_a> | ... | Use configured default or explicitly specify | [...] |
+| 2 | <worker_b> | ... | Use configured default or explicitly specify | [...] |
 ```
 
 ### Single Agent Mode Plan Template
@@ -205,7 +206,7 @@ applications/<app_name>/
 
 ### Agent Configuration Summary
 - name: <agent_name>
-- model_type: <use default_model_type or explicitly specified value>
+- model_type: <use configured default_model_type or explicitly specified value>
 - tool_call_type: <tool_call_type>
 - Tools: <list>
 - max_steps: <N>
@@ -229,7 +230,7 @@ After entering Phase 3, **generate all files in the following order** (interacti
 - **Path**: `applications/<app_name>/workflows/<app_name>_agent.yaml`
 - **Required fields**: `name`, `description`, `workflow` (`|` multiline text, or non-empty `list[str]` for sequential workflows)
 - **Workflow Best Practice**: The `workflow` field should ideally follow a five-section structure: 1. Background, 2. Core Responsibilities & Constraints, 3. Execution Flow (use ````mermaid```` code blocks — the framework automatically extracts this to inject strict instructions), 4. Detailed Steps, 5. Output Requirements.
-- **Key fields**: `model_type` (optional, inherits default when omitted), `tool_call_type`, `tools`, `worker_agents` (use `path` only), `skills` (optional), `execution_env`
+- **Key fields**: `model_type` (optional only when `model.default_model_type` is configured; otherwise specify explicitly), `tool_call_type`, `tools`, `worker_agents` (use `path` only), `skills` (optional), `execution_env`
 - **Full template** → See [templates.md](./references/templates.md) §3.1
 
 ### 3.2 Worker YAML (one file per phase)
@@ -425,7 +426,7 @@ After all files are generated, perform the following checks to ensure correctnes
 - [ ] Custom tool `module` and `function` appear in pairs
 - [ ] Custom tools are plain Python functions (no `@tool` decorator) with complete docstrings
 - [ ] Agent YAML does not contain `model`/`llm`/`langfuse` fields
-- [ ] `model_type` strategy has been confirmed: use `default_model_type` or explicitly specify an available type in the project
+- [ ] `model_type` strategy has been confirmed: use configured `default_model_type` or explicitly specify an available type in the project
 - [ ] If `execution_env` is configured, `type` must be one of `local` / `docker` / `e2b` / `wasm`
 - [ ] If `skills` is configured, its structure must be `list / dict / string`
 - [ ] The YAML path in the entry script `_app.py` matches the actual file path

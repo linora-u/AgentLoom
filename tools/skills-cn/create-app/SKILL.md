@@ -84,7 +84,7 @@ AgentLoom Application 脚手架生成 Skill。可被 **Copilot Codex / Claude Co
 | 2 | **一句话功能描述** | ✅ | — | 必须由用户提供；用于 Agent 描述 |
 | 3 | **模式选择：单 Agent / 多 Agent** | ✅ | — | 任务可拆分为多个阶段 → 多 Agent；单一职责 → 单 Agent |
 | 4 | 多 Agent：阶段名称及职责 | 多 Agent 时必填 ✅ | — | 从用户描述中提取，或根据任务性质建议拆分方案 |
-| 5 | model_type | ❌ | 继承 `config/llm.yaml` 的 `model.default_model_type` | 读取项目配置后确认：使用默认 / 明确指定 |
+| 5 | model_type | ❌ | 仅当 `config/llm.yaml` 配置了 `model.default_model_type` 时才使用该默认值 | 读取项目配置后确认：使用已配置默认 / 明确指定 |
 | 6 | tool_call_type | ❌ | `code_act` | 极少需要更改 |
 | 7 | 预定义 Tool 列表 | ❌ | 根据任务自动推荐 | 分析 → `read_file`+`get_file_outline`；修改 → `edit_file`；报告 → `write_markdown_file` |
 | 8 | 自定义 Tool | ❌ | 无 | 用户明确提到需要自定义 Python 函数时 |
@@ -100,13 +100,14 @@ AgentLoom Application 脚手架生成 Skill。可被 **Copilot Codex / Claude Co
 在编写任何 Agent YAML 之前，先从项目根目录读取 `config/llm.yaml`：
 
 1. 从 `model` 节点提取可用类型（排除保留键 `default_model_type` 和非 dict 值）。
-2. 读取 `model.default_model_type` 作为默认模型类型。
+2. 读取 `model.default_model_type` 作为项目默认模型类型。如果缺失，不要省略 `model_type`；应明确选择一个可用类型。
 3. 在交互场景中，向用户确认：
    - 是否使用 `default_model_type`；
    - 如果不使用，展示"项目中可用的类型 + 自定义"供选择。
 4. 在自主场景中：
-   - 如果配置可读，默认使用 `default_model_type`；
-   - 如果读取失败，使用"继承项目默认模型类型"策略并在"假设列表"中声明。
+   - 如果配置可读且设置了 `default_model_type`，默认使用它；
+   - 如果缺少 `default_model_type`，明确选择一个可用类型；
+   - 如果读取失败，使用"必须显式指定 model_type 或确保项目默认已配置"策略并在"假设列表"中声明。
 
 > 约束：`model_type` 的可选值由项目配置决定，不是硬编码为 `powerful/fast/summary`。
 
@@ -138,7 +139,7 @@ AgentLoom Application 脚手架生成 Skill。可被 **Copilot Codex / Claude Co
 
 ```
 4. 使用哪种 model_type 策略？
-   - 使用项目默认（default_model_type）
+   - 使用已配置的项目默认（default_model_type）
    - 明确指定（从项目可用 model_type 列表中选择）
    - 自定义（必须已在 config/llm.yaml 中定义）
 ```
@@ -176,7 +177,7 @@ applications/<app_name>/
 
 ### Supervisor 配置摘要
 - name: <supervisor_name>
-- model_type: <使用 default_model_type 或明确指定的值>
+- model_type: <使用已配置的 default_model_type 或明确指定的值>
 - tool_call_type: <tool_call_type>
 - 自定义 Tool：<列表>
 - Worker 数量：N
@@ -184,8 +185,8 @@ applications/<app_name>/
 ### Worker 配置摘要
 | 阶段 | 名称 | 职责 | model_type 策略 | Tool |
 |------|------|------|-----------------|------|
-| 1 | <worker_a> | ... | 继承默认或明确指定 | [...] |
-| 2 | <worker_b> | ... | 继承默认或明确指定 | [...] |
+| 1 | <worker_a> | ... | 使用已配置默认或明确指定 | [...] |
+| 2 | <worker_b> | ... | 使用已配置默认或明确指定 | [...] |
 ```
 
 ### 单 Agent 模式计划模板
@@ -205,7 +206,7 @@ applications/<app_name>/
 
 ### Agent 配置摘要
 - name: <agent_name>
-- model_type: <使用 default_model_type 或明确指定的值>
+- model_type: <使用已配置的 default_model_type 或明确指定的值>
 - tool_call_type: <tool_call_type>
 - Tool：<列表>
 - max_steps: <N>
@@ -229,7 +230,7 @@ applications/<app_name>/
 - **路径**：`applications/<app_name>/workflows/<app_name>_agent.yaml`
 - **必填字段**：`name`、`description`、`workflow`（`|` 多行文本，或用于顺序工作流的非空 `list[str]`）
 - **Workflow 最佳实践**：建议采用五段式结构（① 背景与角色 ② 核心职责与约束 ③ 执行流程（使用 ````mermaid```` 代码块，框架会自动提取以注入强约束指令） ④ 各步骤详细说明 ⑤ 输出要求）。
-- **关键字段**：`model_type`（可选，省略时继承默认值）、`tool_call_type`、`tools`、`worker_agents`（仅使用 `path`）、`skills`（可选）、`execution_env`
+- **关键字段**：`model_type`（仅当已配置 `model.default_model_type` 时才可省略；否则必须明确指定）、`tool_call_type`、`tools`、`worker_agents`（仅使用 `path`）、`skills`（可选）、`execution_env`
 - **完整模板** → 参见 [templates.md](./references/templates.md) §3.1
 
 ### 3.2 Worker YAML（每个阶段一个文件）
@@ -424,7 +425,7 @@ loom run applications/<app_name>/workflows/<app_name>_agent.yaml
 - [ ] 自定义 Tool 的 `module` 和 `function` 成对出现
 - [ ] 自定义 Tool 是纯 Python 函数（无 `@tool` 装饰器），且有完整的 docstring
 - [ ] Agent YAML 中不包含 `model`/`llm`/`langfuse` 字段
-- [ ] `model_type` 策略已确认：使用 `default_model_type` 或明确指定项目中可用的类型
+- [ ] `model_type` 策略已确认：使用已配置的 `default_model_type` 或明确指定项目中可用的类型
 - [ ] 如果配置了 `execution_env`，`type` 必须为 `local` / `docker` / `e2b` / `wasm` 之一
 - [ ] 如果配置了 `skills`，其结构必须为 `list / dict / string`
 - [ ] 入口脚本 `_app.py` 中的 YAML 路径与实际文件路径一致

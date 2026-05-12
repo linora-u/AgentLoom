@@ -59,9 +59,10 @@ flowchart TD
 ### 隔离机制
 1. **拦截写入**：在加载 `system.yaml` 或 Agent YAML 时，系统会主动过滤掉 `model`, `llm`, `langfuse` 这三个顶级字段，并打印警告。
 2. **通过 `model_type` 关联**：Agent 在配置中只指定 `model_type: "powerful"`（模型分类标签）。
-3. **回退链 (Fallback)**：
-   当请求某个 `model_type` 的参数时，查找顺序为：
-   `models[model_type].参数` → `models.common.参数` → `代码内置默认值`。
+3. **参数读取链**：
+   当 `model_type` 已经解析完成后，参数查找顺序为：
+   `models[model_type].参数` → `代码内置默认值`。
+   如果 Agent YAML 和 `model.default_model_type` 都没有提供模型类型，模型调用会直接以 `ValueError` 失败。
 
 ## 4. 全局 C 单例 (Unified Access)
 
@@ -75,7 +76,7 @@ tools_list = C.get_nested("tools", "default", default=[])
 is_summary_enabled = C.get("smart_summary")
 
 # 2. 访问 LLM 配置
-api_key = C.llm_api_key                # 自动解析 common.api_key
+api_key = C.llm_api_key                # 读取默认模型类型的 api_key
 temp = C.get_model_config("powerful", "temperature")  # 获取 specific 模型的参数
 
 # 3. 访问原始合并字典

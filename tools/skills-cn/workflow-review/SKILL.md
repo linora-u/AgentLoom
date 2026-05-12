@@ -219,7 +219,7 @@ print(extract_workflow_text('.../worker_agents/<step>.yaml'))
 **LLM 配置隔离：**
 - Agent YAML 或 `system.yaml` 中的 `model`、`llm`、`langfuse` 字段会被**自动过滤**并输出 warning 日志——所有 LLM 参数只能在 `config/llm.yaml` 中配置
 - Agent 通过 `model_type` 选择模型；若指定的类型在 `llm.yaml` 中不存在，运行时直接抛出 `ValueError`（不会静默回退）
-- 未指定 `model_type` 时的回退链：使用 `llm.yaml` 的 `default_model_type`（默认为 `"common"`）
+- 未指定 `model_type` 时，使用全局 `llm.yaml` 的 `default_model_type`；如果该 key 未配置或解析出的类型不存在，运行时抛出 `ValueError`。
 
 **配置覆盖：**
 - Agent YAML overlay 白名单（仅 7 个字段）：`system`、`smart_summary`、`tool_access_control`、`execution_env`、`code_agent`、`tools`、`prompt`

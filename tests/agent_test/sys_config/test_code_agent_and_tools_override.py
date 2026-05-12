@@ -24,9 +24,12 @@ default_loaded_tools:
   - shell_tool
     """)
     (system_config_dir / "llm.yaml").write_text("""
-common:
-  provider: "openai"
-  model: "gpt-4o"
+model:
+  default_model_type: powerful
+  powerful:
+    model: "openai/gpt-4o"
+  summary:
+    model: "openai/gpt-4o-mini"
 """)
     
     (config_dir / "system.yaml").write_text("""
@@ -80,4 +83,3 @@ def test_code_agent_and_tools_inherits_from_app_override(code_agent_override_con
     tool_names = [getattr(t, "name", getattr(t, "__name__", str(t))) for t in tools]
     assert "load_skill" in tool_names
     assert "shell_tool" not in tool_names
-

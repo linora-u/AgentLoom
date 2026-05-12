@@ -71,7 +71,7 @@ workflow: |
 ```yaml
 name: "text_analyzer"
 description: "纯文本分析 Agent，不需要 Shell"
-model_type: "common"
+model_type: "fast"
 tool_call_type: "code_act"
 tools:
 

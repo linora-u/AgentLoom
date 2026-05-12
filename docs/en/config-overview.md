@@ -59,9 +59,10 @@ In AgentLoom, **LLM configuration (`llm.yaml`) is physically isolated from syste
 ### Isolation Mechanism
 1. **Write interception**: When loading `system.yaml` or Agent YAML, the system actively filters out three top-level fields: `model`, `llm`, `langfuse`, and prints a warning.
 2. **Association via `model_type`**: An Agent only specifies `model_type: "powerful"` (model classification label) in its configuration.
-3. **Fallback chain**:
-   When requesting parameters for a specific `model_type`, the lookup order is:
-   `models[model_type].parameter` → `models.common.parameter` → `built-in code default values`.
+3. **Parameter lookup chain**:
+   After `model_type` has been resolved, parameter lookup order is:
+   `models[model_type].parameter` → `built-in code default values`.
+   If neither the Agent YAML nor `model.default_model_type` provides a model type, the model call fails fast with `ValueError`.
 
 ## 4. Global C Singleton (Unified Access)
 
@@ -75,7 +76,7 @@ tools_list = C.get_nested("tools", "default", default=[])
 is_summary_enabled = C.get("smart_summary")
 
 # 2. Access LLM configuration
-api_key = C.llm_api_key                # Automatically resolves common.api_key
+api_key = C.llm_api_key                # Reads api_key from the default model type
 temp = C.get_model_config("powerful", "temperature")  # Get parameters for specific model
 
 # 3. Access raw merged dictionary
