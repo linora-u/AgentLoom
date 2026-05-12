@@ -173,10 +173,10 @@ class TestStallWatchdog:
         )
         sw.start()
 
-        # Wait for detection.
+        # Wait for detection and for the one-shot watchdog to stop.
         deadline = time.monotonic() + 5
         while time.monotonic() < deadline:
-            if sw.stall_message is not None:
+            if sw.stall_message is not None and sw._stopped:
                 break
             time.sleep(0.2)
 
