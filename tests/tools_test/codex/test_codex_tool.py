@@ -57,6 +57,68 @@ exit 2
         encoding="utf-8",
     )
     fake.chmod(fake.stat().st_mode | stat.S_IXUSR)
+
+    if os.name == "nt":
+        fake_py = bin_dir / "codex_fake.py"
+        fake_py.write_text(
+            f"""import json
+import os
+import sys
+import time
+from pathlib import Path
+
+args_file = Path(r"{args_file}")
+stdin_file = Path(r"{stdin_file}")
+args = sys.argv[1:]
+
+with args_file.open("a", encoding="utf-8") as f:
+    f.write("CALL:" + " ".join(args) + "\\n")
+
+if args and args[0] == "--version":
+    print("codex-cli 9.9.9")
+    sys.exit(0)
+
+if len(args) >= 2 and args[0] == "login" and args[1] == "status":
+    if os.environ.get("FAKE_CODEX_LOGIN_FAIL") == "1":
+        print("not logged in", file=sys.stderr)
+        sys.exit(1)
+    print("Logged in")
+    sys.exit(0)
+
+if args and args[0] == "--search":
+    args = args[1:]
+
+if args and args[0] == "exec":
+    stdin_file.write_text(sys.stdin.read(), encoding="utf-8")
+
+    if os.environ.get("FAKE_CODEX_SLEEP"):
+        time.sleep(float(os.environ["FAKE_CODEX_SLEEP"]))
+
+    if os.environ.get("FAKE_CODEX_EXIT"):
+        print("codex failed", file=sys.stderr)
+        sys.exit(int(os.environ["FAKE_CODEX_EXIT"]))
+
+    if os.environ.get("FAKE_CODEX_BIG") == "1":
+        print(json.dumps({{"type": "agent_message", "message": "X" * 50}}))
+        sys.exit(0)
+
+    print('{{"type":"agent_message","message":"Codex final output"}}')
+    sys.exit(0)
+
+print("unexpected invocation: " + " ".join(args), file=sys.stderr)
+sys.exit(2)
+""",
+            encoding="utf-8",
+        )
+
+        fake_cmd = bin_dir / "codex.cmd"
+        fake_cmd.write_text(
+            f"""@echo off
+python "{fake_py}" %*
+""",
+            encoding="utf-8",
+        )
+
     monkeypatch.setenv("PATH", f"{bin_dir}{os.pathsep}{os.environ.get('PATH', '')}")
     return fake, args_file, stdin_file
 
