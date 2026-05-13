@@ -78,22 +78,18 @@ def _load_model_runtime_from_yaml() -> dict[str, Any] | None:
     if not selected_model_id:
         return None
 
-    common_cfg = model_section.get("common")
-    if not isinstance(common_cfg, dict):
-        common_cfg = {}
-
     selected_cfg = model_section.get(selected_profile) if selected_profile else {}
     if not isinstance(selected_cfg, dict):
         selected_cfg = {}
 
     return {
         "model_id": selected_model_id,
-        "api_base": selected_cfg.get("base_url", common_cfg.get("base_url")),
-        "api_key": selected_cfg.get("api_key", common_cfg.get("api_key")),
-        "requests_per_minute": selected_cfg.get("requests_per_minute", common_cfg.get("requests_per_minute")),
-        "timeout": selected_cfg.get("timeout", common_cfg.get("timeout", 120)),
-        "temperature": selected_cfg.get("temperature", common_cfg.get("temperature", 0.0)),
-        "max_tokens": selected_cfg.get("max_tokens", common_cfg.get("max_tokens", 1024)),
+        "api_base": selected_cfg.get("base_url"),
+        "api_key": selected_cfg.get("api_key"),
+        "requests_per_minute": selected_cfg.get("requests_per_minute"),
+        "timeout": selected_cfg.get("timeout", 120),
+        "temperature": selected_cfg.get("temperature", 0.0),
+        "max_tokens": selected_cfg.get("max_tokens", 1024),
     }
 
 

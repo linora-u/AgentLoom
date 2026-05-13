@@ -122,9 +122,6 @@ class TestLlmConfigParsing:
 
         raw = {
             "model": {
-                "common": {
-                    "model": "test/common",
-                },
                 "powerful": {
                     "model": "test/powerful",
                     "supports_native_tool_calls": "false",
@@ -136,7 +133,6 @@ class TestLlmConfigParsing:
         }
         config = LLMConfig.from_dict(raw)
         assert config.models["powerful"].supports_native_tool_calls == "false"
-        # summary should default to common's value (auto by default)
         assert config.models["summary"].supports_native_tool_calls == "auto"
 
     def test_from_dict_invalid_value_defaults_to_auto(self):
@@ -145,9 +141,6 @@ class TestLlmConfigParsing:
 
         raw = {
             "model": {
-                "common": {
-                    "model": "test/common",
-                },
                 "powerful": {
                     "model": "test/powerful",
                     "supports_native_tool_calls": "invalid_value",
@@ -160,8 +153,8 @@ class TestLlmConfigParsing:
         config = LLMConfig.from_dict(raw)
         assert config.models["powerful"].supports_native_tool_calls == "auto"
 
-    def test_common_value_inherited(self):
-        """Common-level supports_native_tool_calls should be inherited."""
+    def test_type_value_defaults_to_auto_without_inheritance(self):
+        """Model types do not inherit supports_native_tool_calls from other types."""
         from src.lib.config.llm_config import LLMConfig
 
         raw = {
@@ -179,11 +172,11 @@ class TestLlmConfigParsing:
             },
         }
         config = LLMConfig.from_dict(raw)
-        # Should inherit from common
-        assert config.models["powerful"].supports_native_tool_calls == "false"
+        assert "common" not in config.models
+        assert config.models["powerful"].supports_native_tool_calls == "auto"
 
-    def test_type_level_overrides_common(self):
-        """Type-level value should override common value."""
+    def test_type_level_value_is_independent(self):
+        """Each type's supports_native_tool_calls value is independent."""
         from src.lib.config.llm_config import LLMConfig
 
         raw = {
@@ -203,4 +196,4 @@ class TestLlmConfigParsing:
         }
         config = LLMConfig.from_dict(raw)
         assert config.models["powerful"].supports_native_tool_calls == "true"
-        assert config.models["summary"].supports_native_tool_calls == "false"
+        assert config.models["summary"].supports_native_tool_calls == "auto"

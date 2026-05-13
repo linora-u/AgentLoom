@@ -256,7 +256,7 @@ AgentLoom 提供**内置断点续跑/心跳监控系统**，无需应用层代�
 
 | 参数 | 默认值 | 常见陷阱 | 推荐做法 |
 |------|--------|---------|---------|
-| `model_type` | `llm.yaml` 的 `default_model_type`（通常为 `"common"`） | 指定不存在的类型导致运行时 `ValueError`（不会静默回退） | 验证类型在 `llm.yaml` 中存在；复杂推理用 `powerful`，简单任务用 `fast` |
+| `model_type` | 全局 `llm.yaml` 的 `default_model_type`；若该 key 未配置则没有隐式默认值 | 指定不存在的类型导致运行时 `ValueError`（不会静默回退） | 验证类型在 `llm.yaml` 中存在；复杂推理用 `powerful`，简单任务用 `fast` |
 | `tool_call_type` | `"code_act"` | 对 Supervisor 使用 `tool_call` 会限制编排能力 | Supervisor 和复杂 Worker 用 `code_act`；简单单工具 Worker 用 `tool_call` |
 | `max_steps` | `80` | 简单 Worker 默认值过高（浪费资源）；复杂 Supervisor 可能过低 | 按任务复杂度设置；简单 Worker: 20-40；复杂 Supervisor: 60-120 |
 | `planning_interval` | 未设置 | 长任务链无定期规划会迷失进度 | 预期 20+ 步的 Agent 设置为 3-5 |
@@ -267,7 +267,7 @@ AgentLoom 提供**内置断点续跑/心跳监控系统**，无需应用层代�
 
 - **禁止**在 Agent YAML 或 `system.yaml` 中写 `model`、`llm`、`langfuse` 字段——它们会被自动过滤并输出 warning 日志
 - Agent 仅通过 `model_type` 选择模型；所有 LLM 参数只能在 `config/llm.yaml` 中配置
-- 未指定 `model_type` 时的回退链：`default_model_type` → `"common"` 类型 → 代码内置默认值
+- 未指定 `model_type` 时，Agent 使用全局 `default_model_type`；若该 key 未配置或解析出的类型不存在，运行时抛出 `ValueError`。
 
 ### 配置 overlay 白名单
 
