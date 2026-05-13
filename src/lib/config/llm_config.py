@@ -176,15 +176,7 @@ class LLMConfig(BaseModel):
                 supports_native_tool_calls=resolved_tool_calls,
             )
 
-        # Validate required model types:
-        # - 'summary': context compression (smart_summary) depends on it
-        if models:
-            for required in ("summary",):
-                if required not in models:
-                    raise ValueError(
-                        f"Model type '{required}' is required in llm.yaml but not found. "
-                        f"Defined types: {list(models.keys())}"
-                    )
+
 
         return cls(
             langfuse=LangfuseSettings(**langfuse_raw),

@@ -60,7 +60,7 @@ def test_from_dict_allows_missing_common_when_profiles_are_defined() -> None:
 
 
 
-def test_from_dict_requires_summary_when_profiles_are_defined() -> None:
+def test_from_dict_allows_missing_summary_profile() -> None:
     raw = {
         "model": {
             "common": {"model": "openai/test-common"},
@@ -68,7 +68,19 @@ def test_from_dict_requires_summary_when_profiles_are_defined() -> None:
         }
     }
 
-    with pytest.raises(ValueError, match="summary"):
+    config = LLMConfig.from_dict(raw)
+
+    assert "powerful" in config.models
+    assert "summary" not in config.models
+
+def test_from_dict_requires_model_field_for_configured_summary_profile() -> None:
+    raw = {
+        "model": {
+            "summary": {"temperature": 0.2},
+        }
+    }
+
+    with pytest.raises(ValueError, match="model"):
         LLMConfig.from_dict(raw)
 
 
