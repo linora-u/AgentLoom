@@ -9,84 +9,64 @@ description: |
   4) 校验 skill 完整性并输出总结
 
 model_type: "powerful"
-tool_call_type: "code_act"
+tool_call_type: "tool_call"
 
 workflow: |
-  # Repo Map 架构分析工作流 — CodeAct 必执行模式
+  # Repo Map 架构分析工作流
 
-  你是 Repo Map 架构分析监督智能体。你**必须通过编写并执行 Python 代码**来驱动工具（禁止仅输出 JSON/伪指令当作执行）。
+  你是 Repo Map 架构分析监督智能体。你需要按顺序调用工具来完成架构分析和 Skill 文档生成。
 
   ## 执行流程（必须严格按序）
 
   ```mermaid
   flowchart TD
-    A["Step1: 读取环境变量 REPO_MAP_OUTPUT_DIR"] --> B["Step2: 调用 run_analysis_loop(output_dir)"]
-    B --> C["Step3: 调用 prepare_repo_map_skill_workspace(output_dir)"]
-    C --> D["Step4: 调用 repo_map_skill_writer(output_dir)"]
-    D --> E["Step5: 调用 validate_repo_map_skill(output_dir)"]
-    E --> F["Step6: 调用 get_analysis_summary(output_dir)"]
+    A["Step1: 调用 get_analysis_summary 获取当前进度"] --> B["Step2: 调用 run_analysis_loop 执行 LLM 架构分析"]
+    B --> C["Step3: 调用 prepare_repo_map_skill_workspace 组装 skill 工作区"]
+    C --> D["Step4: 调用 repo_map_skill_writer 写入 SKILL.md 与示例"]
+    D --> E["Step5: 调用 validate_repo_map_skill 校验 skill"]
+    E --> F["Step6: 调用 get_analysis_summary 获取最终总结"]
     F --> G["Step7: final_answer 返回完整结果"]
   ```
 
-  ## 可用工具（必须调用）
+  ## 可用工具
 
   | 工具 | 调用方式 | 作用 |
   |------|---------|------|
-  | `run_analysis_loop` | `run_analysis_loop(output_dir=output_dir)` | 逐目录调用 dir_architecture_analysis 子 Agent 进行 LLM 架构分析 |
-  | `prepare_repo_map_skill_workspace` | `prepare_repo_map_skill_workspace(output_dir=output_dir)` | 拷贝 repo_map 并生成 manifest/resolver/context |
-  | `repo_map_skill_writer` | `repo_map_skill_writer(output_dir=output_dir)` | 根据上下文写入 SKILL.md 和 assets/examples/*.md |
-  | `validate_repo_map_skill` | `validate_repo_map_skill(output_dir=output_dir)` | 校验 skill 目录结构和 frontmatter 规则 |
-  | `get_analysis_summary` | `get_analysis_summary(output_dir=output_dir)` | 读取 analysis_progress.json，返回完成/失败统计和交付物路径 |
+  | `run_analysis_loop` | `run_analysis_loop(output_dir=...)` | 逐目录调用 dir_architecture_analysis 子 Agent 进行 LLM 架构分析 |
+  | `prepare_repo_map_skill_workspace` | `prepare_repo_map_skill_workspace(output_dir=...)` | 拷贝 repo_map 并生成 manifest/resolver/context |
+  | `repo_map_skill_writer` | `repo_map_skill_writer(output_dir=...)` | 根据上下文写入 SKILL.md 和 assets/examples/*.md |
+  | `validate_repo_map_skill` | `validate_repo_map_skill(output_dir=...)` | 校验 skill 目录结构和 frontmatter 规则 |
+  | `get_analysis_summary` | `get_analysis_summary(output_dir=...)` | 读取 analysis_progress.json，返回完成/失败统计和交付物路径 |
 
-  ## 必须执行的 Python 代码模式
+  ## 执行步骤
 
-  你必须严格按以下模式编写并执行 Python 代码，**不允许跳过任何工具调用**：
+  你必须按以下顺序逐个调用工具。所有工具都需要 `output_dir` 参数，其值在 task 描述中以 `output_dir=xxx` 格式给出。
 
-  ```python
-  import os
+  1. **调用 `run_analysis_loop(output_dir=<output_dir>)`**
+     - 逐目录调用 dir_architecture_analysis 子 Agent 进行 LLM 架构分析
+     - 可能耗时较长（每个目录约 30 秒），这是正常的
 
-  # Step 1: 读取环境变量（必须有值，否则 raise 异常）
-  output_dir = os.environ.get("REPO_MAP_OUTPUT_DIR", "")
-  if not output_dir:
-      raise ValueError("REPO_MAP_OUTPUT_DIR 环境变量未设置，无法继续")
-  print(f"output_dir = {output_dir}")
+  2. **调用 `prepare_repo_map_skill_workspace(output_dir=<output_dir>)`**
+     - 拷贝 repo_map 文档到 skill 目录
+     - 生成 manifest.jsonl、resolver 脚本、context 文件
 
-  # Step 2: 调用主分析循环（必须调用，不允许跳过）
-  loop_result = run_analysis_loop(output_dir=output_dir)
-  print(f"分析循环结果:\n{loop_result}")
+  3. **调用 `repo_map_skill_writer(output_dir=<output_dir>)`**
+     - 让 worker agent 写入 SKILL.md 和示例文件
 
-  # Step 3: 组装 skill 工作区（必须调用）
-  prep_summary = prepare_repo_map_skill_workspace(output_dir=output_dir)
-  print(f"技能工作区结果:\n{prep_summary}")
+  4. **调用 `validate_repo_map_skill(output_dir=<output_dir>)`**
+     - 校验 skill 目录完整性、frontmatter 规则
 
-  # Step 4: 调用 worker 写入 SKILL.md 与示例（必须调用）
-  writer_summary = repo_map_skill_writer(output_dir=output_dir)
-  print(f"技能文档写入结果:\n{writer_summary}")
+  5. **调用 `get_analysis_summary(output_dir=<output_dir>)`**
+     - 获取最终总结报告
 
-  # Step 5: 校验 skill（必须调用）
-  validate_summary = validate_repo_map_skill(output_dir=output_dir)
-  print(f"技能校验结果:\n{validate_summary}")
+  6. **调用 `final_answer(...)` 返回结果**
+     - 包含分析总结、skill 工作区结果、校验结果
 
-  # Step 6: 获取最终总结报告（必须调用）
-  summary = get_analysis_summary(output_dir=output_dir)
-  print(f"最终总结:\n{summary}")
-
-  # Step 7: 返回最终答案
-  final_answer(
-      f"{summary}\n\n"
-      f"{prep_summary}\n\n"
-      f"{writer_summary}\n\n"
-      f"{validate_summary}"
-  )
-  ```
-
-  ## 执行原则
-  - **所有七个 Step 必须完整执行**，不允许跳过任何工具调用
-  - 环境变量 `REPO_MAP_OUTPUT_DIR` 已由 repo_map_app.py 预先设置，正常情况下一定有值
-  - 若环境变量为空，使用 `raise ValueError(...)` 抛异常，**不要调用 final_answer 报错**
-  - run_analysis_loop 可能耗时较长（每个目录都会调用子 Agent），这是正常的
-  - worker 仅接收 `output_dir`，skill 根路径由工具层提前写入 context 文件
-  - 不要在调用工具之前就调用 final_answer，**必须按顺序调用所有步骤再返回**
+  ## 注意事项
+  - `output_dir` 参数值来自输入参数，直接传入即可
+  - **所有步骤必须按顺序执行**，不允许跳过任何工具调用
+  - run_analysis_loop 可能耗时较长，耐心等待
+  - 不要在调用完所有工具之前就调用 final_answer
 
 tools:
   - name: "run_analysis_loop"
@@ -110,6 +90,3 @@ tools:
 
 worker_agents:
   - path: "repo_map_skill_writer.yaml"
-
-execution_env:
-  type: "local"

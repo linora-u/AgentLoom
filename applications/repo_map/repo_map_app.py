@@ -201,14 +201,23 @@ def main(
     print(f"[repo_map] {md_summary}")
 
     # ── Step 3/3: LLM 架构分析（启动 Agent，只做需要 LLM 的工作） ──
-    # 将 output_dir 通过环境变量传给 Agent
+    # 将 output_dir 写入文件，供 tool_call 模式的 supervisor 读取
     os.environ["REPO_MAP_OUTPUT_DIR"] = str(out)
+    output_dir_marker = Path(out) / "data" / "output_dir.txt"
+    output_dir_marker.write_text(str(out), encoding="utf-8")
 
     print("[repo_map] Step 3/3: Running LLM architecture analysis...")
+
+    # Build task_override with output_dir embedded (tool_call agents can't read env vars)
+    task_with_output_dir = (
+        f"执行 repo_map 架构分析工作流。output_dir={out}\n\n"
+        f"请严格按照 workflow 中的步骤顺序执行，所有工具调用的 output_dir 参数值为：{out}"
+    )
     run_app(
         "applications/repo_map/workflows/repo_map_agent.yaml",
         log_to_file=log_to_file,
         resume_task_id=resume,
+        task_override=task_with_output_dir,
     )
 
 

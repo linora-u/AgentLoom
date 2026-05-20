@@ -115,7 +115,16 @@ tool_access_control:
   #   - A tool in multiple rules: include/exclude are merged (union)
   #   - A tool not in any rule: no path checks applied
   #
-  path_validation: []
+  path_validation:
+    # ⚠️ SECURITY WARNING: include_paths: ["*"] allows unrestricted file system
+    # access for the listed tools. This means an LLM agent could read sensitive
+    # files (e.g. ~/.ssh/keys, ~/.aws/credentials, /etc/shadow) or write to
+    # arbitrary locations. Only use this in trusted, isolated environments.
+    # For production, replace "*" with specific project directories, e.g.:
+    #   include_paths: ["/home/user/code", "/data/projects"]
+    - tools: ["shell_tool", "read_file", "edit_file", "write_markdown_file", "grep_search", "glob_search"]
+      include_paths:
+        - "*"
   # Example:
   # path_validation:
   #   - tools: ["shell_tool", "read_file", "edit_file", "grep_search"]
