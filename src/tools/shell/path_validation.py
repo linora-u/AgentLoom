@@ -324,6 +324,8 @@ def _is_path_within_allowed(resolved_path: str, allowed_roots: List[str]) -> boo
     if os.path.exists(resolved):
         resolved = os.path.realpath(resolved)
     for root in allowed_roots:
+        if root == "*":
+            return True
         norm_root = os.path.normpath(root)
         if os.path.exists(norm_root):
             norm_root = os.path.realpath(norm_root)

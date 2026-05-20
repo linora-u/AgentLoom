@@ -31,6 +31,7 @@ DEFAULT_EXCLUDE_DIRS = {
     "build", "dist", ".eggs", ".tox", ".mypy_cache", ".pytest_cache",
     ".ruff_cache", "*.egg-info",
     ".idea", ".vscode", ".DS_Store",
+    ".repo_map", ".codebase",  # Exclude our own output and CI metadata
 }
 
 # Extensions to skip (binary / generated)
