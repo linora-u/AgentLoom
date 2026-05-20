@@ -109,7 +109,23 @@ def render_directory_map(
         dir_display = _safe_dir_name(rel_dir) if rel_dir else f"{project_name}/ (root)"
         lines.append(f"# {dir_display}\n")
 
-        total_defs = sum(len(file_defs.get(rf["rel_fname"], [])) for rf in dir_ranked_files)
+        # Count unique definitions (excluding duplicates and package/namespace declarations at line 0)
+        total_defs = 0
+        for rf in dir_ranked_files:
+            _rel = rf["rel_fname"]
+            _defs = file_defs.get(_rel, [])
+            _parent = Path(_rel).parent.name if Path(_rel).parent.name else ""
+            _seen_count: set[tuple[str, int]] = set()
+            for _d in _defs:
+                _k = (_d["name"], _d["line"])
+                if _k in _seen_count:
+                    continue
+                # Skip package/namespace declarations at line 0
+                # (e.g. Go package declarations, C++ namespace declarations)
+                if _d["line"] == 0 and _d["name"] == _parent:
+                    continue
+                _seen_count.add(_k)
+            total_defs += len(_seen_count)
         lines.append(f"- 文件数: {len(dir_ranked_files)}")
         lines.append(f"- 总定义数: {total_defs}\n")
 
@@ -124,7 +140,20 @@ def render_directory_map(
             lines.append(f"*{rel}*\n")
 
             if defs:
+                # Deduplicate: same (name, line) can be captured by multiple
+                # tree-sitter queries (e.g. type_spec + type_decl in Go, class + method in Python)
+                seen: set[tuple[str, int]] = set()
+                # Skip package/namespace declarations at line 0 whose name
+                # matches the directory basename (Go package, C++ namespace convention)
+                parent_name = Path(rel).parent.name if Path(rel).parent.name else ""
                 for d in sorted(defs, key=lambda x: x["line"]):
+                    key = (d["name"], d["line"])
+                    if key in seen:
+                        continue
+                    seen.add(key)
+                    # Skip package/namespace declarations (line 0, name = parent dir name)
+                    if d["line"] == 0 and d["name"] == parent_name:
+                        continue
                     lines.append(f"- `{d['name']}` (line {d['line'] + 1})")
             else:
                 lines.append("- *(no definitions extracted)*")
@@ -142,9 +171,39 @@ def render_directory_map(
                     referencing_files.add(other_rel)
 
             if referencing_files:
-                sample = sorted(referencing_files)[:5]
-                more = len(referencing_files) - len(sample)
-                refs_str = ", ".join(f"`{Path(f).name}`" for f in sample)
+                # Deduplicate and show parent dir for ambiguous filenames
+                seen_display: dict[str, str] = {}  # display_name -> rel_path
+                for f in sorted(referencing_files):
+                    fname = Path(f).name
+                    if fname in seen_display:
+                        # Ambiguous: replace with dir/filename for both
+                        prev = seen_display[fname]
+                        if "/" not in prev:
+                            # Upgrade previous entry to include parent
+                            old_key = fname
+                            new_key = str(Path(prev).parent / fname) if "/" in prev else prev
+                            seen_display[old_key] = prev  # keep the full path
+                        seen_display[f] = f  # store full path for this one too
+                    else:
+                        seen_display[fname] = f
+
+                # Build display: use short name if unique, parent/name if ambiguous
+                name_count: dict[str, int] = defaultdict(int)
+                for f in referencing_files:
+                    name_count[Path(f).name] += 1
+
+                sample_files = sorted(referencing_files)[:5]
+                more = len(referencing_files) - len(sample_files)
+                display_parts = []
+                for f in sample_files:
+                    fname = Path(f).name
+                    if name_count[fname] > 1:
+                        # Show parent_dir/filename for disambiguation
+                        parent = Path(f).parent.name
+                        display_parts.append(f"`{parent}/{fname}`")
+                    else:
+                        display_parts.append(f"`{fname}`")
+                refs_str = ", ".join(display_parts)
                 if more > 0:
                     refs_str += f" ... +{more} more"
                 lines.append(f"\n*被引用于*: {refs_str}")
@@ -198,15 +257,53 @@ def render_directory_map(
     generated_files.insert(0, str(root_index))
 
     # ------------------------------------------------------------------ #
-    # 3. dependencies.md — cross-file dependency graph (top files)
+    # 3. dependencies.md — package-level dependency graph
     # ------------------------------------------------------------------ #
     deps_path = out_map / "dependencies.md"
     deps_lines: list[str] = []
-    deps_lines.append("# 跨文件依赖关系\n")
-    deps_lines.append("*基于符号定义/引用关系生成（top-30 文件）*\n")
+    deps_lines.append("# 跨模块依赖关系\n")
+    deps_lines.append("*基于符号定义/引用关系生成，按目录（模块）聚合*\n")
 
-    deps_lines.append("## 核心依赖\n")
-    for rf in ranked[:30]:
+    # Build package-level dependency: pkg_a -> pkg_b means files in pkg_a
+    # reference symbols defined in pkg_b
+    pkg_deps: dict[str, dict[str, int]] = defaultdict(lambda: defaultdict(int))
+    for rf in ranked:
+        rel = rf["rel_fname"]
+        defs = file_defs.get(rel, [])
+        if not defs:
+            continue
+        our_names = {d["name"] for d in defs}
+        src_pkg = str(Path(rel).parent) if str(Path(rel).parent) != "." else "(root)"
+        for other_rel, other_refs in file_refs.items():
+            if other_rel == rel:
+                continue
+            cnt = len(our_names & other_refs)
+            if cnt > 0:
+                caller_pkg = str(Path(other_rel).parent) if str(Path(other_rel).parent) != "." else "(root)"
+                if caller_pkg != src_pkg:  # Only cross-module deps
+                    pkg_deps[src_pkg][caller_pkg] += cnt
+
+    # Sort packages by total incoming references (most depended-on first)
+    pkg_incoming = sorted(
+        pkg_deps.items(),
+        key=lambda x: sum(x[1].values()),
+        reverse=True,
+    )
+
+    deps_lines.append("## 核心模块依赖（被依赖最多）\n")
+    deps_lines.append("| 模块 | 被引用次数 | 主要消费者 |")
+    deps_lines.append("|------|-----------|-----------|")
+    for src_pkg, consumers in pkg_incoming[:20]:
+        total_refs = sum(consumers.values())
+        top_consumers = sorted(consumers.items(), key=lambda x: -x[1])[:4]
+        consumer_str = ", ".join(f"`{p}` ({n})" for p, n in top_consumers)
+        deps_lines.append(f"| `{src_pkg}` | {total_refs} | {consumer_str} |")
+
+    deps_lines.append("")
+
+    # Show key file-level dependencies for top-10 files
+    deps_lines.append("## 核心文件依赖（top-10 高引用文件）\n")
+    for rf in ranked[:10]:
         rel = rf["rel_fname"]
         defs = file_defs.get(rel, [])
         if not defs:
@@ -220,11 +317,16 @@ def render_directory_map(
             if cnt > 0:
                 callers[other_rel] += cnt
         if callers:
-            top_callers = sorted(callers.items(), key=lambda x: -x[1])[:5]
-            caller_str = ", ".join(
-                f"`{Path(c).name}` ({n})" for c, n in top_callers
-            )
-            deps_lines.append(f"- **`{Path(rel).name}`** ← {caller_str}")
+            total_refs = sum(callers.values())
+            top_callers = sorted(callers.items(), key=lambda x: -x[1])[:4]
+            # Use parent/filename for disambiguation
+            caller_parts = []
+            for c, n in top_callers:
+                cname = Path(c).name
+                cparent = Path(c).parent.name
+                caller_parts.append(f"`{cparent}/{cname}` ({n})")
+            caller_str = ", ".join(caller_parts)
+            deps_lines.append(f"- **`{rel}`** ({total_refs} refs) ← {caller_str}")
 
     deps_path.write_text("\n".join(deps_lines), encoding="utf-8")
     generated_files.append(str(deps_path))
