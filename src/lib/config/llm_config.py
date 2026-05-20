@@ -102,6 +102,14 @@ class LlmModelTypeSettings(BaseModel):
     supports_native_tool_calls: str = "auto"
 
 
+class LLMConfigCheckIssue(BaseModel):
+    model_config = ConfigDict(frozen=True)
+
+    level: str
+    field: str
+    message: str
+
+
 class LLMConfig(BaseModel):
     model_config = ConfigDict(extra="allow")
 
@@ -218,6 +226,37 @@ class LLMConfig(BaseModel):
             "langfuse": self.langfuse.model_dump(),
             "model": model_dict,
         }
+
+    def check_runtime_readiness(self) -> list[LLMConfigCheckIssue]:
+        """Check whether configured model profiles have runtime-required fields."""
+        issues: list[LLMConfigCheckIssue] = []
+
+        for profile_name, profile in self.models.items():
+            if not profile.base_url:
+                issues.append(
+                    LLMConfigCheckIssue(
+                        level="error",
+                        field=f"model.{profile_name}.base_url",
+                        message=(
+                            f"Model profile '{profile_name}' is missing required "
+                            "base_url for runtime model calls."
+                        ),
+                    )
+                )
+
+            if not profile.api_key:
+                issues.append(
+                    LLMConfigCheckIssue(
+                        level="error",
+                        field=f"model.{profile_name}.api_key",
+                        message=(
+                            f"Model profile '{profile_name}' is missing required "
+                            "api_key for runtime model calls. The secret value is not printed."
+                        ),
+                    )
+                )
+
+        return issues
 
     def for_type(self, model_type: Optional[str]) -> LlmModelTypeSettings:
         desired = (model_type or "").strip().lower()

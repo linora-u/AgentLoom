@@ -59,7 +59,6 @@ def test_from_dict_allows_missing_common_when_profiles_are_defined() -> None:
     assert set(config.available_types) == {"powerful", "summary"}
 
 
-
 def test_from_dict_requires_summary_when_profiles_are_defined() -> None:
     raw = {
         "model": {
@@ -116,3 +115,90 @@ def test_empty_model_type_falls_back_to_default_model_type(requested_type) -> No
     resolved = config.for_type(requested_type)
 
     assert resolved.model == "openai/test-powerful"
+
+
+# Runtime readiness checks
+
+def test_check_runtime_readiness_reports_missing_base_url() -> None:
+    config = LLMConfig.from_dict(_valid_raw())
+
+    issues = config.check_runtime_readiness()
+
+    assert any(issue.field == "model.powerful.base_url" for issue in issues)
+    assert any(issue.field == "model.summary.base_url" for issue in issues)
+
+
+def test_check_runtime_readiness_reports_missing_api_key() -> None:
+    config = LLMConfig.from_dict(_valid_raw())
+
+    issues = config.check_runtime_readiness()
+
+    assert any(issue.field == "model.powerful.api_key" for issue in issues)
+    assert any(issue.field == "model.summary.api_key" for issue in issues)
+
+
+def test_check_runtime_readiness_passes_when_profiles_have_base_url_and_api_key() -> None:
+    raw = _valid_raw()
+    raw["model"]["powerful"]["base_url"] = "https://powerful.example/v1"
+    raw["model"]["powerful"]["api_key"] = "powerful_key"
+    raw["model"]["summary"]["base_url"] = "https://summary.example/v1"
+    raw["model"]["summary"]["api_key"] = "summary_key"
+
+    config = LLMConfig.from_dict(raw)
+
+    assert config.check_runtime_readiness() == []
+
+
+def test_check_runtime_readiness_does_not_check_common_as_profile() -> None:
+    raw = _valid_raw()
+    raw["model"]["powerful"]["base_url"] = "https://powerful.example/v1"
+    raw["model"]["powerful"]["api_key"] = "powerful_key"
+    raw["model"]["summary"]["base_url"] = "https://summary.example/v1"
+    raw["model"]["summary"]["api_key"] = "summary_key"
+    raw["model"]["common"].pop("base_url")
+    raw["model"]["common"].pop("api_key")
+
+    config = LLMConfig.from_dict(raw)
+
+    issues = config.check_runtime_readiness()
+
+    assert all(not issue.field.startswith("model.common.") for issue in issues)
+
+
+def test_check_runtime_readiness_does_not_check_default_model_type_as_profile() -> None:
+    raw = _valid_raw()
+    raw["model"]["powerful"]["base_url"] = "https://powerful.example/v1"
+    raw["model"]["powerful"]["api_key"] = "powerful_key"
+    raw["model"]["summary"]["base_url"] = "https://summary.example/v1"
+    raw["model"]["summary"]["api_key"] = "summary_key"
+
+    config = LLMConfig.from_dict(raw)
+
+    issues = config.check_runtime_readiness()
+
+    assert all(
+        not issue.field.startswith("model.default_model_type.")
+        for issue in issues
+    )
+
+
+def test_check_runtime_readiness_allows_missing_default_backed_fields() -> None:
+    raw = {
+        "model": {
+            "default_model_type": "powerful",
+            "powerful": {
+                "model": "openai/test-powerful",
+                "base_url": "https://powerful.example/v1",
+                "api_key": "powerful_key",
+            },
+            "summary": {
+                "model": "openai/test-summary",
+                "base_url": "https://summary.example/v1",
+                "api_key": "summary_key",
+            },
+        }
+    }
+
+    config = LLMConfig.from_dict(raw)
+
+    assert config.check_runtime_readiness() == []
