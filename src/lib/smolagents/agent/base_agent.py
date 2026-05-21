@@ -871,6 +871,7 @@ class RoleDrivenAgent(BaseAgent):
             skills_manager=self._skills_manager,
             logger=runtime_logger,
             tool_call_type=self.tool_call_type,
+            use_structured_output=getattr(self._model, 'supports_structured_output', 'false') == 'true',
         )
 
     def _create_agent(
@@ -982,12 +983,13 @@ class RoleDrivenAgent(BaseAgent):
                 **agent_kwargs,
             )
         else:
+            use_structured = getattr(self._model, 'supports_structured_output', 'false') == 'true'
             agent = CodeAgentV2(
                 tools=hooked_tools,
                 stream_outputs=False,
                 prompt_templates=prompt_templates,
                 additional_authorized_imports=resolved_additional_authorized_imports,
-                use_structured_outputs_internally=True,
+                use_structured_outputs_internally=use_structured,
                 **agent_kwargs,
             )
 

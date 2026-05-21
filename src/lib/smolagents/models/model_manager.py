@@ -247,6 +247,7 @@ class ModelManager:
             context_cache=model_config.context_cache,
             system_prompt_boundary=model_config.system_prompt_boundary,
             supports_native_tool_calls=model_config.supports_native_tool_calls,
+            supports_structured_output=model_config.supports_structured_output,
         )
 
         # Inject model_type for global rate limiting (consumed by litellm_retry wrapper)
