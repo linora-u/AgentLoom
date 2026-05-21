@@ -5,7 +5,7 @@ description: |
   使用 write_markdown_file 写入 SKILL.md 与 assets/examples/*.md。
 
 model_type: "powerful"
-tool_call_type: "code_act"
+tool_call_type: "tool_call"
 
 workflow: |
   # Repo Map Skill Writer
@@ -16,8 +16,8 @@ workflow: |
 
   ## 强制规则
   - 输入参数只有 `output_dir`。
-  - 只从 `<output_dir>/data/skill_build_context.json` 读取 skill 路径和元信息。
-  - 所有 Markdown 文件必须通过 `write_markdown_file(...)` 写入。
+  - 只从 `<output_dir>/data/skill_build_context.json` 读取 skill 路径和元信息（用 `read_file` 工具读取）。
+  - 所有 Markdown 文件必须通过 `write_markdown_file(...)` 工具写入。
   - `SKILL.md` frontmatter 必须且只能包含 `name` 和 `description`。
   - 使用 `write_markdown_file` 写 `SKILL.md` 时：
     - `title=""`（不要标题）
@@ -34,223 +34,69 @@ workflow: |
 
   ---
 
-  ## SKILL.md 内容要求
+  ## 执行步骤（必须严格按序）
 
-  ### Frontmatter
+  ### Step 1：读取上下文
+  调用 `read_file` 工具读取 `<output_dir>/data/skill_build_context.json`，
+  拿到：`skill_name`、`project_name`、`source_root`、`skill_root`、`description`。
 
-  frontmatter 的 `description` 必须简明扼要（不超过 200 字符），说明 skill 核心用途。
-  推荐格式（用 context 中的 `project_name` 替换 `{project}`）：
-
-  > 在阅读或修改 {project} 源码前，先查阅对应路径的 repo_map 文档。index.md 定位文件与符号，analysis.md 理解架构设计。支持精确匹配、父目录回退、根目录回退三级路由。
-
-  ### 正文结构
+  ### Step 2：写入 SKILL.md
+  调用 `write_markdown_file(file_path=<skill_root>/SKILL.md, sections=[...], title="", metadata=None)` 写入。
 
   SKILL.md 正文使用命令式语气，必须按以下顺序包含 7 个段落：
 
-  #### 1. 概述（## 概述）
-  用 2-3 句话说明：
-  - 本项目已预生成了目录级别的代码地图（repo_map）。
-  - repo_map 的目录结构与源码目录一一镜像，每个目录下有 `index.md`（符号索引）和 `analysis.md`（架构分析）。
-  - **在阅读或修改任何源码之前**，先查阅对应路径的 repo_map 文档，以快速建立上下文。
+  1. **概述（## 概述）** - 2-3 句话说明 repo_map 是什么、目录结构与源码镜像、阅读源码前先查阅 repo_map。提及项目名称。
+  2. **何时使用（## 何时使用）** - 4 种触发场景：阅读源码、Code Review、理解架构、跨模块追踪
+  3. **不适用场景（## 不适用场景）** - 简单 typo、非代码文件、已熟悉目录的小改动
+  4. **文档类型说明（## 文档类型说明）** - Markdown 表格对比 index.md 和 analysis.md，强调先 index 后 analysis 的阅读顺序
+  5. **路由规则（## 路由规则）** - 三级回退：精确目录命中 -> 父目录回退 -> 根目录回退。使用 project_name 构造路径示例。提及 manifest.jsonl 和 resolve_repo_map_docs.py 脚本
+  6. **跨模块分析（## 跨模块分析）** - 触发条件和分析步骤，具体场景示例。使用 project_name 构造示例
+  7. **参考文件清单（## 参考文件清单）** - 列出 references/repo_map/、manifest.jsonl、scripts/ 等关键路径
 
-  #### 2. 何时使用（## 何时使用）
-  明确列出以下 4 种触发场景（每个场景一行，用 bullet）：
-  - **阅读源码**：首次打开某个目录/文件时，先读对应 repo_map 了解目录背景。
-  - **Code Review**：审查 PR/MR 涉及的目录时，先读 analysis.md 理解设计意图和依赖关系。
-  - **理解架构**：需要了解某个模块的职责、设计模式、风险点时，直接读 analysis.md。
-  - **跨模块追踪**：需要理解模块间依赖或追踪调用链时，读 dependencies.md 和各模块的 analysis.md。
+  Frontmatter 说明：
+  - description 不超过 200 字符
+  - 推荐格式：在阅读或修改 {project} 源码前，先查阅对应路径的 repo_map 文档。index.md 定位文件与符号，analysis.md 理解架构设计。支持精确匹配、父目录回退、根目录回退三级路由。
+  - 优先使用 context 中的 skill_description 字段，若超 200 字符则截断
 
-  #### 3. 不适用场景（## 不适用场景）
-  明确列出不需要读 repo_map 的情况（避免 AI 过度查阅）：
-  - 修改单个文件的简单 typo / 格式调整
-  - 操作非代码文件（配置文件、文档、图片等）
-  - 对已经充分熟悉的目录进行小改动
+  ### Step 3：写入示例文件
+  调用 `write_markdown_file` 写入两个示例文件：
 
-  #### 4. 文档类型说明（## 文档类型说明）
-  用 Markdown 表格对比两类文档，必须包含以下列：
+  **resolve-by-source-path.md** - 3 个场景：
+  - 场景 1：精确目录命中（如 src/api/routes.py -> references/repo_map/src/api/）
+  - 场景 2：父目录回退（如 src/api/v2/handlers.py -> 回退到 src/api）
+  - 场景 3：根目录回退（如 scripts/deploy.sh -> 根目录文档）
 
-  | 文件 | 用途 | 包含内容 | 何时读 |
-  |------|------|----------|--------|
-  | `index.md` | 快速定位目录下的文件、符号和入口点 | 文件列表（按 PageRank 重要性排序）、每个文件的类/函数定义（含行号）、跨文件引用关系、重要性星级 | 每次进入一个目录时必读 |
-  | `analysis.md` | 深入理解目录的架构设计 | 核心功能概述、关键模块及原因、设计模式识别、依赖关系（内部+外部）、注意事项与风险点 | 需要理解设计决策时读 |
+  **cross-module-analysis.md** - 2 个场景：
+  - 场景 1：修改引发的影响分析（修改某文件 -> 通过 dependencies.md 追踪影响范围）
+  - 场景 2：理解模块协作关系（通过读各目录 analysis.md 理解跨层协作）
 
-  在表格后强调：**先读 `index.md` 建立文件概览，再读 `analysis.md` 理解设计决策。这是固定的阅读顺序。**
+  每个场景都要突出 analysis.md 的价值。
 
-  #### 5. 路由规则（## 路由规则）
-  描述三级路由回退机制，每一级都要有具体的路径映射示例：
+  ### Step 4：校验
+  写完所有文件后，调用 `read_file` 重新读取 `SKILL.md`，校验：
+  - frontmatter 只含 name 和 description 两个键
+  - 正文包含 "何时使用" 和 "文档类型说明" 段落
+  - 正文至少出现 3 次 analysis.md
+  - 正文至少出现 3 次 index.md
+  - 正文包含 dependencies.md
+  - 正文包含 manifest.jsonl
+  - 若任一校验失败，立刻重新调用 write_markdown_file 覆盖写入
 
-  **Level 1 精确目录命中**：当查看 `src/api/routes.py` 时，定位目录为 `src/api`，
-  读取 `references/repo_map/src/api/index.md`，再读 `references/repo_map/src/api/analysis.md`。
+  ### Step 5：返回结果
+  调用 `final_answer(...)` 返回简短写入结果摘要，包含：
+  - skill_root 真实路径
+  - 写入的文件列表
+  - 校验结果（通过/重写次数）
 
-  **Level 2 父目录回退**：若 `references/repo_map/src/api/v2/` 不存在，向上回退到 `src/api`，
-  读取 `references/repo_map/src/api/index.md` 和 `analysis.md`（若存在）。
+  ## 内容样例参考
 
-  **Level 3 根目录回退**：若所有父目录都无匹配，回退到根目录，同时读取：
-  - `references/repo_map/index.md`（项目级文件总览）
-  - `references/repo_map/analysis.md`（项目级架构分析）
+  index.md 典型内容：文件列表按 PageRank 重要性排序，每个文件列出类/函数定义含行号，标注被引用于哪些文件，附重要性星级。
 
-  在路由规则末尾说明：可通过 `scripts/resolve_repo_map_docs.py` 脚本自动解析路由，
-  或查阅 `references/manifest.jsonl` 获取所有已索引目录的完整清单。
-
-  #### 6. 跨模块分析（## 跨模块分析）
-  描述何时及如何进行跨模块分析：
-  - 触发条件：当修改涉及多个目录、或需要追踪跨目录的调用链/依赖时。
-  - 步骤：
-    1. 先读 `references/repo_map/dependencies.md`，掌握全局跨文件依赖图。
-    2. 对每个相关目录，重复 `index.md -> analysis.md` 的双文档阅读流程。
-    3. 结合 `dependencies.md` 和各目录的 `analysis.md`，分析模块间的耦合关系和影响范围。
-  - 给出一个具体场景示例，如：修改 `models/user.py` 影响 `services/` 和 `api/`，
-    需要读取三个目录的 repo_map 文档。
-
-  #### 7. 参考文件清单（## 参考文件清单）
-  列出 skill 包内的关键路径（用 bullet 格式）：
-  - `references/repo_map/` — 所有 repo_map 文档的根目录（镜像源码目录结构）
-  - `references/repo_map/index.md` — 项目级文件总览（Top-20 高影响力模块）
-  - `references/repo_map/analysis.md` — 项目级架构分析
-  - `references/repo_map/dependencies.md` — 全局跨文件依赖关系图
-  - `references/manifest.jsonl` — 已索引目录清单（含 index/analysis 路径、排名、文件数）
-  - `scripts/resolve_repo_map_docs.py` — 源码路径到 repo_map 文档的自动解析脚本
-
-  ### 内容样例参考
-
-  在写 SKILL.md 时，参考以下 index.md 和 analysis.md 的典型内容片段，
-  帮助你准确描述这两类文档的格式和信息量：
-
-  **index.md 典型内容（目录级别）：**
-
-      # api
-      - 文件数: 3
-      - 总定义数: 16
-
-      ## 文件列表（按重要性排序）
-
-      ### middleware.py ★★★★
-      *api/middleware.py*
-      - `AuthMiddleware` (line 5)
-      - `authenticate` (line 11)
-      - `wrap` (line 16)
-      *被引用于*: `routes.py`, `database.py`, `exceptions.py`
-
-      ### routes.py ★
-      *api/routes.py*
-      - `Router` (line 9)
-      - `handle` (line 16)
-      *被引用于*: `middleware.py`, `database.py`
-
-  **analysis.md 典型内容（目录级别）：**
-
-      # 架构分析: api
-
-      ## 核心功能
-      API 入口层 + 认证/日志中间件。
-
-      ## 关键模块
-      - middleware.py — 鉴权 + 日志横切基础设施，被多模块引用。
-      - routes.py — 路由分发，统一入口。
-
-      ## 设计模式
-      - Middleware/Decorator：wrap 方法包裹处理流程
-      - Chain of Responsibility：before_request / after_response 生命周期钩子
-
-      ## 依赖关系
-      - middleware <-> routes 相互引用（耦合较强）
-      - 被 database.py、user_service.py、order_service.py 引用
-
-      ## 注意事项
-      - 循环依赖风险：middleware <-> routes 双向引用
-      - 服务层反向依赖 API 层，分层边界需关注
-
-  ---
-
-  ## 示例文件内容要求
-
-  ### resolve-by-source-path.md
-
-  此示例文档展示「根据源码路径定位 repo_map 文档」的完整过程。
-  必须包含以下 3 个场景（每个场景独立为一个 section）：
-
-  **场景 1：精确目录命中**
-  - 给定源码路径（如 `src/api/routes.py`）
-  - 展示定位过程：提取目录 `src/api` -> 查找 `references/repo_map/src/api/`
-  - 列出应读取的文件：`index.md`（必读）+ `analysis.md`（推荐读）
-  - 展示 index.md 能告诉你什么（文件列表、符号定义、引用关系、重要性星级）
-  - 展示 analysis.md 能告诉你什么（核心功能、设计模式、依赖关系、风险点）
-
-  **场景 2：父目录回退**
-  - 给定源码路径（如 `src/api/v2/handlers.py`），但 `src/api/v2/` 无 repo_map
-  - 展示回退过程：`src/api/v2` -> 不存在 -> 回退到 `src/api` -> 找到文档
-  - 说明：回退后读到的是父目录的文档，可能不含当前子目录的详细信息
-
-  **场景 3：根目录回退**
-  - 给定源码路径（如 `scripts/deploy.sh`），但 `scripts/` 无 repo_map
-  - 展示回退到根目录：读取 `references/repo_map/index.md` + `analysis.md`
-  - 说明：根目录文档提供项目级全局视角（Top-20 模块、整体架构分析）
-
-  ### cross-module-analysis.md
-
-  此示例文档展示「跨模块分析」的完整过程。
-  必须包含以下 2 个场景：
-
-  **场景 1：修改引发的影响分析**
-  - 给定一个修改任务（如修改 `models/user.py` 的 `User` 类字段）
-  - 展示分析过程：
-    1. 先读 `references/repo_map/dependencies.md`，找到 `user.py` 的被引用方
-    2. 对每个相关目录（`models/`、`services/`、`tests/`）分别执行 `index.md -> analysis.md` 阅读
-    3. 从各目录 analysis.md 中理解依赖方式和设计模式
-    4. 得出结论：影响范围和需要同步修改的文件
-
-  **场景 2：理解模块协作关系**
-  - 给定一个架构问题（如 API 层和 Service 层如何协作）
-  - 展示分析过程：
-    1. 读 `dependencies.md` 了解两层之间的符号引用
-    2. 分别读 `api/` 和 `services/` 的 index.md + analysis.md
-    3. 从两个 analysis.md 中提取协作模式、接口约定、耦合风险
-    4. 综合分析得出结论
-
-  每个场景都要突出 analysis.md 的价值——它提供的「为什么这样设计」的洞察
-  是 index.md 无法给出的。
-
-  ---
-
-  ## 执行步骤
-
-  1. 用 Python 读取 `<output_dir>/data/skill_build_context.json`，拿到：
-     `skill_name`、`project_name`、`source_root`、`skill_root`、`description`。
-
-  2. 组装 YAML frontmatter 字符串（只含 `name` 和 `description`）：
-     - `description` 优先使用 context 中的 `skill_description` 字段。
-     - 若 `skill_description` 超过 200 字符，截断并附省略号。
-     - 将 frontmatter 放入第一个 section 的 `body` 开头。
-
-  3. 按上述「正文结构」的 7 个段落组装 SKILL.md 的 sections 内容：
-     - 在 `路由规则` 和 `跨模块分析` 段落中使用 `project_name` 构造贴切的路径示例。
-     - 在 `概述` 段落中提及项目名称。
-
-  4. 调用 `write_markdown_file(file_path=<skill_root>/SKILL.md, sections=[...], title="", metadata=None)` 写入。
-
-  5. 按「示例文件内容要求」组装两个示例文件的内容，同样用 `write_markdown_file` 写入：
-     - `<skill_root>/assets/examples/resolve-by-source-path.md`
-     - `<skill_root>/assets/examples/cross-module-analysis.md`
-
-  6. 校验（写完后必须执行）：
-     - 重新读取 `SKILL.md`，校验 frontmatter 只含 `name` 和 `description` 两个键。
-     - 校验正文包含 `## 何时使用` 和 `## 文档类型说明` 段落。
-     - 校验正文至少出现 3 次 `analysis.md`。
-     - 校验正文至少出现 3 次 `index.md`。
-     - 校验正文包含 `dependencies.md`。
-     - 校验正文包含 `manifest.jsonl`。
-     - 若任一校验失败，立刻重新生成并覆盖写入。
-
-  7. 用 `final_answer(...)` 返回简短写入结果摘要，必须包含：
-     - context 中的 `skill_root` 真实路径
-     - 写入的文件列表
-     - 校验结果（通过/重写次数）
+  analysis.md 典型内容：核心功能概述、关键模块及原因、设计模式识别（如 Middleware/Decorator、Chain of Responsibility）、依赖关系（含循环依赖风险）、注意事项与风险点。
 
 tools:
   - name: "write_markdown_file"
-
-execution_env:
-  type: "local"
+  - name: "read_file"
 
 agent_function_schema:
   description: |

@@ -6,7 +6,7 @@ description: |
   不做文件读写，只做分析。
 
 model_type: "powerful"
-tool_call_type: "code_act"
+tool_call_type: "tool_call"
 concurrency: auto
 
 workflow: |
@@ -15,12 +15,12 @@ workflow: |
   ```mermaid
   flowchart TD
     A["从 inputs 读取 dir_path、index_content、children_analyses"] --> B["LLM 分析五个维度"]
-    B --> C["返回 Markdown 格式分析文本"]
+    B --> C["通过 final_answer 返回 Markdown 格式分析文本"]
   ```
 
   ## 任务
   基于传入的 index_content（某个目录的 index.md 全文）和 children_analyses（子目录的分析结果），
-  分析代码结构，返回 Markdown 格式的架构分析文本。
+  分析代码结构，通过 `final_answer` 工具直接返回 Markdown 格式文本。
 
   **你不需要读写任何文件**，index_content 和 children_analyses 已由调用方读好，
   你的输出会由调用方写入 analysis.md。
@@ -31,13 +31,62 @@ workflow: |
   - `children_analyses`（可选）：该目录直接子目录的架构分析全文，由 `---` 分隔。
     如果为空字符串，表示该目录没有已分析的子目录（叶子目录）。
 
+  ## index.md 阅读指南
+  在分析之前，理解 index.md 的格式特点：
+  - **有意义的定义**：类（class）、函数/方法（func/method）、接口（interface）、常量（const）、变量（var）、类型别名（type）等。
+  - **"被引用于"的路径格式**：`parent_dir/filename` 表示引用方所在目录；
+    利用这些路径信息判断跨目录依赖方向。
+  - **同目录内引用**：同一目录下的文件之间互相引用是内部访问，不涉及跨模块 import。
+    跨目录引用才是真正的模块间依赖。
+  - **★评级**：反映 PageRank 计算出的结构重要性，★越多越关键。
+  - **`+N more`**：表示还有 N 个未列出的引用方，数字越大说明该符号越核心。
+
+  ## 根目录 (root) 分析特殊规则
+  当 `dir_path` 为 `(root)` 时，index_content 格式不同——它是项目概览：
+  - 包含 PageRank top-20 关键文件表格和目录结构树
+  - 此时你的分析应该是**项目全局架构总结**而非单个 package 分析
+  - 核心功能：整个项目做什么（一句话）
+  - 关键模块：从 top-20 表格中总结最核心的 3-5 个 package/子系统
+  - 设计模式：项目的整体架构模式（如分层架构、插件体系、worker 池等）
+  - 依赖关系：通过目录结构和 children_analyses 梳理各子系统间的依赖流向
+  - 注意事项：全局性问题（如模块间耦合、分层是否清晰等）
+
   ## 分析维度
   基于 index_content 和 children_analyses，分析以下五个维度：
-  1. **核心功能**：该目录的主要职责是什么？
-  2. **关键模块**：最重要的 2-3 个文件/函数是什么？为什么？
-  3. **设计模式**：是否可识别出设计模式（工厂、单例、观察者等）？
-  4. **依赖关系**：该目录依赖什么？被什么依赖？
+
+  1. **核心功能**：该目录/模块的主要职责是什么？一句话概括，再展开说明。
+     - 从模块的视角描述——它对外提供什么能力？
+
+  2. **关键模块**：最重要的 2-3 个文件/类型/函数是什么？为什么？
+     - 优先选择 PageRank 重要性高（★★★★★/★★★★）的文件
+     - **关注公开导出符号**（如 public 方法、导出的类/函数）——它们是模块的公开 API
+     - 说明每个关键模块的职责和它在模块中的角色
+     - 对于"被引用于"数量极多（+20 more 以上）的符号，标注为**高扇出核心 API**
+
+  3. **设计模式**：是否可识别出设计模式？
+     - 通用模式：工厂、单例、观察者、策略、装饰器、中间件链、模板方法等
+     - **常见架构模式**（根据代码特征自动检测，命中时标注）：
+       - **Interface + 实现**：接口/协议定义与具体实现的配对（如 Go 的隐式接口、Java/C# 的 implements、Python 的 ABC/Protocol）
+       - **Typed Constants / 枚举**：自定义类型 + 常量块构成枚举（如 Go 的 `iota`、Java/C# 的 enum、Python 的 Enum 类）
+       - **Client Wrapper**：目录名为 `clients/` 或含 `Client` 类时，这是 RPC/HTTP 客户端封装层
+       - **初始化注册**：文件含 `init()`/`__init__`/静态初始化块时，通常是全局注册、配置初始化或插件注册
+       - **impl/ 目录约定**：目录名为 `impl` 且含 `plugin/` 和 `worker/` 子目录时，这是插件架构
+       - **Error 体系**：目录含 `errors.go`/`exceptions.py`/`ErrorHandler` 或大量错误相关定义时，关注错误链和错误码体系
+       - **并发模型**：文件名含 `worker`、`pool`、`scheduler` 或定义含 `Serve`/`Process`/`Handle`/`run` 方法时，关注并发/异步模型
+       - **Model/Message 层**：目录名为 `model`/`models`/`schema`/`dto` 时，关注数据结构定义及其序列化标签
+
+  4. **依赖关系**：该模块依赖什么？被什么依赖？
+     - **充分利用"被引用于"信息**：
+       - 统计引用来源，按目录/模块归类（如"被 handler、worker 两个模块大量使用"）
+       - 引用数极高的文件是**基础设施层**，引用数低的是**叶子业务层**
+     - 区分**内部依赖**（同项目其他模块）和**外部依赖**（标准库/第三方包）
+     - 当 children_analyses 非空时，体现子模块间的内部依赖
+
   5. **注意事项**：从代码结构看有什么值得注意的地方？
+     - 循环依赖风险（双向"被引用于"跨目录出现则有风险）
+     - 过度耦合（单文件被 30+ 文件引用，说明该文件是变更热点）
+     - 分层违反（如 util 层 import 了 business 层）
+     - God Module（单目录文件过多/定义过多，可能需要拆分）
 
   ## 子目录分析复用
   当 children_analyses 非空时，你应该：
@@ -45,50 +94,53 @@ workflow: |
   - 子目录已分析的"核心功能"和"关键模块"可直接引用，不要重复分析
   - 重点分析**子目录之间的协作关系**和**该目录作为父目录的整合职责**
   - 在"依赖关系"中体现子目录间的内部依赖
+  - **对于父目录的"核心功能"**：用一句话综合各子目录能力，描述该目录整体对外提供的能力组合
+  - **对于父目录的"设计模式"**：关注架构级模式（分层架构、插件体系、client/server 分离等），而非重复子目录级别的代码模式
+  - **对于父目录的"注意事项"**：关注跨子目录的问题（依赖方向是否合理、职责边界是否清晰、是否有子目录间循环依赖）
 
   当 children_analyses 为空时（叶子目录），只基于 index_content 分析即可。
 
+  ## 输出篇幅控制
+  - **小目录**（≤ 3 文件或 ≤ 20 定义）：每个分析维度 1-2 句话即可，总输出控制在 300 字以内
+  - **中等目录**（4-10 文件）：正常分析，总输出 400-600 字
+  - **大目录**（> 10 文件或作为父目录有多个子目录）：可以更详细，总输出 600-800 字
+  - **切勿凑字数**：宁可简短有洞察，也不要冗长平庸
+
   ## 输出格式
-  使用**分段构建**方式生成 Markdown 文本，**不要**把所有内容塞进一个巨大的 f-string：
+  直接通过 `final_answer` 工具返回 Markdown 文本，格式如下：
 
-  ```python
-  parts = []
-  parts.append(f"# 架构分析: {dir_path}")
-  parts.append("")
-  parts.append("## 核心功能")
-  parts.append("该目录的核心功能是...")
-  parts.append("")
-  parts.append("## 关键模块")
-  parts.append("- `module_a.py`: ...")
-  parts.append("")
-  parts.append("## 设计模式")
-  parts.append("...")
-  parts.append("")
-  parts.append("## 依赖关系")
-  parts.append("...")
-  parts.append("")
-  parts.append("## 注意事项")
-  parts.append("...")
-  result = "\n".join(parts)
-  final_answer(result)
-  ```
+  ```markdown
+  # 架构分析: {dir_path}
 
-  ### ⚠️ 代码生成安全规则（必须遵守）
-  - **不要**用一个 `f"""..."""`  包裹整个输出 —— 容易导致三引号未闭合或括号不匹配
-  - 只在 `parts.append(f"...")` 中对**单行**使用 f-string 插值
-  - Markdown 中的花括号（如 `{config}`）**不是** Python 变量，不要用 f-string 包裹它们
-  - 只使用已知变量：`dir_path`, `index_content`, `children_analyses`，不要引用未定义变量
+  ## 核心功能
+  该模块的核心功能是...（一句话概括 + 展开）
+
+  ## 关键模块
+  - `module_a.ext` — `TypeOrFunc`（★★★★★）: 职责描述。被引用于 N 个文件，是高扇出核心 API。
+  - `module_b.ext` — `AnotherFunc`（★★★★）: 职责描述。
+
+  ## 设计模式
+  - **Typed Constants / 枚举**: `XxxType` 定义 + 常量块...
+  - ...
+
+  ## 依赖关系
+  - 被依赖（下游消费者）: handler、worker 等模块大量 import 本目录
+  - 内部依赖（本目录 import 的）: ...
+  - 外部依赖: ...
 
   ## 注意事项
-  - index_content 内容很少时（目录只有少量文件），简短分析即可
-  - 目录名含 test/spec 时，重点分析测试覆盖策略
+  - ...
+  ```
+
+  ## 注意事项
+  - index_content 内容很少时（目录只有少量文件），简短分析即可，不要凑字数
+  - 测试文件与实现文件同目录存放是常见惯例（如 Go 的 `_test.go`、Python 的 `test_*.py`），不属于"test/spec 专用目录"
+  - 目录名含 test/spec 且**仅含**测试文件时，才重点分析测试覆盖策略
   - 保持客观，基于 index_content 和 children_analyses 实际内容，不过度推断
-  - **不要调用任何文件读写工具**，直接分析并返回
+  - **不要逐个列出所有定义**，只提取有结构意义的关键符号
+  - 分析使用中文，但代码符号（文件名、函数名、类型名）保持原文（英文）
 
 tools: []
-
-execution_env:
-  type: "local"
 
 agent_function_schema:
   description: |
