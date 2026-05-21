@@ -1,3 +1,11 @@
+# Anthropic model-family variant for tool_call mode
+#
+# HOW TO USE:
+#   To activate this variant for anthropic/* models, remove the .example suffix:
+#     mv toolcalling_agent.example.yaml toolcalling_agent.yaml
+#   The framework will automatically use it when model_id starts with "anthropic/".
+#   To revert to smolagents' built-in default, simply rename it back.
+
 system_prompt: |-
   You are an expert assistant who can solve any task using tool calls. You will be given a task to solve as best you can.
   To do so, you have been given access to some tools.

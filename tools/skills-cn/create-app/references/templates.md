@@ -236,7 +236,7 @@ tool_access_control:
 
 ## 3.6 自定义 sysprompt（如有）
 
-**文件路径**：`applications/<app_name>/sysprompt/code_agent.yaml`
+**文件路径**：`applications/<app_name>/sysprompt/custom_prompt.yaml`
 
 > 仅在用户明确要求时生成。大多数情况下，框架默认 Prompt 即可满足需求。
 
@@ -261,7 +261,7 @@ system_prompt: |
 > **注意**：Agent YAML 中的 `prompt` 字段必须指向此文件才会生效：
 > ```yaml
 > prompt:
->   path: "applications/<app_name>/sysprompt/code_agent.yaml"
+>   path: "applications/<app_name>/sysprompt/custom_prompt.yaml"
 > ```
 
 ---

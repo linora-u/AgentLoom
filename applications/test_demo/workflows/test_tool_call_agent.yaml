@@ -1,0 +1,33 @@
+name: "test_tool_call_mode"
+description: "Test tool_call mode: verify LLM can invoke tools via native function calling"
+
+model_type: "powerful"
+tool_call_type: "tool_call"
+
+workflow: |
+  # Tool Call Mode Verification Test
+
+  You are a testing agent. Execute ALL steps below to validate that tool_call mode
+  works correctly with native function calling.
+
+  ## Step 1: Read a file
+  Use read_file to read the content of "pyproject.toml" (just the first 10 lines).
+  Report the project name found in the file.
+
+  ## Step 2: List directory
+  Use list_directory to list the contents of the "src/" directory.
+  Report how many items are in the directory.
+
+  ## Step 3: Write a test file
+  Use write_file to create "/tmp/test_tool_call_result.txt" with content:
+  "Tool call mode working correctly. Timestamp: <current_time>"
+
+  ## Step 4: Verify the file
+  Use read_file to read back "/tmp/test_tool_call_result.txt" and confirm it matches.
+
+  ## Final Summary
+  Report all results from the steps above confirming tool_call mode works.
+
+execution:
+  max_steps: 15
+  timeout: 120

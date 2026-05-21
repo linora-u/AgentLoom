@@ -502,8 +502,7 @@ def test_create_agent_strips_wildcard_imports_for_remote_executor(monkeypatch, e
 
 
 def test_build_prompt_templates_uses_default_when_not_configured(monkeypatch, tmp_path):
-    default_prompt = tmp_path / "default.yaml"
-    default_prompt.write_text("system_prompt: default", encoding="utf-8")
+    """When no prompt path is configured, loads smolagents built-in."""
 
     class _DummyConfig:
         agent_root = tmp_path
@@ -512,22 +511,13 @@ def test_build_prompt_templates_uses_default_when_not_configured(monkeypatch, tm
         def get(key: str, default=None):
             return default
 
-    class _NoSkills:
-        def get_force_injected_prompt(self):
-            return ""
-
-        def get_skills_prompt(self):
-            return ""
-
     agent = _make_agent(logger=DummyLoggerBackend())
     from src.lib.smolagents.skills.skills import SkillsManager as _SM
     from src.lib.smolagents.hooks.hook_manager import HookManager as _HM
     agent._skills_manager = _SM(logger=DummyLoggerBackend(), hook_manager=_HM())
 
     monkeypatch.setattr(base_agent_module, "C", _DummyConfig())
-    monkeypatch.setattr(prompt_builder_module, "DEFAULT_CODE_AGENT_PROMPT_PATH", default_prompt)
     monkeypatch.setattr(prompt_builder_module, "get_agent_environment_prompt", lambda: "")
-    monkeypatch.setattr(prompt_builder_module.SkillsManager, "get_instance", lambda logger=None: _NoSkills())
 
     templates = agent._build_prompt_templates(
         runtime_logger=DummyLoggerBackend(),
@@ -535,7 +525,9 @@ def test_build_prompt_templates_uses_default_when_not_configured(monkeypatch, tm
         prompt_template_path=None,
     )
 
-    assert templates["system_prompt"] == "default"
+    # Should have loaded smolagents' built-in prompt
+    assert "system_prompt" in templates
+    assert "planning" in templates
 
 
 def test_build_prompt_templates_raises_on_invalid_explicit_prompt_path(monkeypatch, tmp_path):
