@@ -97,6 +97,10 @@ class TestSafeCommands:
         with _ws_patch():
             check_path_constraints("rm -rf ./build")
 
+    def test_wildcard_allowed_root_allows_workspace_path(self):
+        """The shared permissions wildcard sentinel allows any shell path."""
+        assert _is_path_within_allowed(os.getcwd(), ["*"]) is True
+
 
 # =========================================================================
 # Abnormal path — boundary violations blocked
