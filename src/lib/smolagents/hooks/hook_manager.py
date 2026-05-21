@@ -312,7 +312,7 @@ class HookManager:
     # -----------------------------------------------------------------
 
     def build_stop_check(self) -> Callable[[Any, Any], bool]:
-        def _check(final_answer: Any, memory: Any) -> bool:
+        def _check(final_answer: Any, memory: Any, **_kwargs: Any) -> bool:
             memory_steps = getattr(memory, "steps", None)
             tool_response = None
             if isinstance(memory_steps, list):
