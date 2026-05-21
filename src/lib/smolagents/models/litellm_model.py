@@ -42,6 +42,7 @@ class LiteLLMModelV2(LiteLLMModel):
     def __init__(self, *args, logger: Optional[AgentLogger] = None,
                  context_cache=False, system_prompt_boundary: Optional[str] = None,
                  supports_native_tool_calls: str = "auto",
+                 supports_structured_output: str = "false",
                  **kwargs):
         # Extract custom headers before passing kwargs to parent
         # This prevents the parent class from receiving unknown parameters
@@ -56,6 +57,10 @@ class LiteLLMModelV2(LiteLLMModel):
         #   "true"  - always use native tool_calls (skip detection)
         #   "false" - always use text parsing fallback (skip detection)
         self.supports_native_tool_calls = supports_native_tool_calls.lower().strip()
+        # Whether the model supports json_schema structured output.
+        # "true" - use structured output (json_schema) for code_act mode
+        # "false" - use text-based <code> block parsing for code_act mode
+        self.supports_structured_output = supports_structured_output.lower().strip()
         # Runtime detection cache: None means not yet detected.
         # Set to True/False after first API call in auto mode.
         self._native_tool_calls_detected: Optional[bool] = None
@@ -111,6 +116,13 @@ class LiteLLMModelV2(LiteLLMModel):
 
     def _prepare_completion_kwargs(self, *args, **kwargs):
         completion_kwargs = super()._prepare_completion_kwargs(*args, **kwargs)
+
+        # Remove </code> from stop sequences. smolagents adds it as a stop token,
+        # but some APIs (e.g. ARK) return partial residue ("</cod") when given
+        # multiple stops. Removing it is safe: parse_code_blobs uses regex to
+        # extract code blocks regardless of whether the response was truncated.
+        if "stop" in completion_kwargs and completion_kwargs["stop"]:
+            completion_kwargs["stop"] = [s for s in completion_kwargs["stop"] if s != "</code>"]
 
         # Only add extra_headers if they were provided during initialization
         # This avoids passing None or empty dict to the API

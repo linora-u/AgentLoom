@@ -94,6 +94,10 @@ class ModelConfig:
     # Three-state flag: "auto" (detect at runtime), "true" (skip detection,
     # use native), "false" (skip detection, use text parsing fallback).
     supports_native_tool_calls: str = "auto"
+    # Whether the model supports json_schema structured output (response_format).
+    # "true" - use structured output (json_schema) for code_act mode
+    # "false" - use text-based <code> block parsing for code_act mode
+    supports_structured_output: str = "false"
 
 
 class ModelType:
@@ -161,6 +165,7 @@ def _build_model_config_from_yaml(type_name: str) -> ModelConfig:
         system_prompt_boundary=getattr(resolved, 'system_prompt_boundary', None),
         requests_per_minute=int(resolved.requests_per_minute),
         supports_native_tool_calls=getattr(resolved, 'supports_native_tool_calls', 'auto'),
+        supports_structured_output=getattr(resolved, 'supports_structured_output', 'false'),
     )
 
 class ModelTypeManager:
