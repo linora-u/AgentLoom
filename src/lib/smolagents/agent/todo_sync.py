@@ -34,25 +34,69 @@ class TodoSyncMixin:
     # Todo prompt validation
     # ------------------------------------------------------------------
 
-    def _validate_todo_prompts(self):
-        """Validate that todo prompt keys exist in YAML config.
+    # Default todo prompt sections injected when missing from planning config
+    _DEFAULT_TODO_INITIAL = (
+        "<tool_restriction>\n"
+        "⚠️ CRITICAL: You can ONLY call `todo_write`. ALL other tools are DISABLED.\n"
+        "Do NOT call read_file, shell_tool, write_markdown_file, or ANY other tool.\n"
+        "The ONLY action you may take is: call `todo_write`.\n"
+        "</tool_restriction>\n\n"
+        "Register your planned tasks using todo_write. Based on your plan above:\n"
+        "- Set the first task as \"in_progress\"\n"
+        "- Set remaining tasks as \"pending\"\n"
+        "- Use clear, imperative task descriptions\n\n"
+        "You MUST register your tasks every time. Do not skip this step.\n"
+        "Provide the COMPLETE task list — todo_write replaces the entire list."
+    )
 
-        Raises ValueError if any required key is missing when
-        todo_write is configured with planning_interval.
+    _DEFAULT_TODO_UPDATE = (
+        "<tool_restriction>\n"
+        "⚠️ CRITICAL: You can ONLY call `todo_write`. ALL other tools are DISABLED.\n"
+        "Do NOT call read_file, shell_tool, write_markdown_file, or ANY other tool.\n"
+        "The ONLY action you may take is: call `todo_write`.\n"
+        "</tool_restriction>\n\n"
+        "Update your task list to reflect current progress. Based on your plan review:\n"
+        "- Mark completed tasks as \"completed\"\n"
+        "- Set your current/next task as \"in_progress\"\n"
+        "- Add any newly discovered tasks as \"pending\"\n"
+        "- Remove tasks that are no longer relevant\n\n"
+        "Provide the COMPLETE updated list — todo_write replaces the entire list, not append."
+    )
+
+    _DEFAULT_TODO_FINAL = (
+        "<tool_restriction>\n"
+        "⚠️ CRITICAL: You can ONLY call `todo_write`. ALL other tools are DISABLED.\n"
+        "Do NOT call read_file, shell_tool, write_markdown_file, or ANY other tool.\n"
+        "The ONLY action you may take is: call `todo_write`.\n"
+        "</tool_restriction>\n\n"
+        "Finalize your task list. You are about to deliver the final answer.\n"
+        "- Mark all completed tasks as \"completed\"\n"
+        "- If any tasks were skipped, mark them as \"completed\" with a note\n"
+        "- Ensure the task list accurately reflects what was accomplished\n"
+        "- Do NOT pass an empty list. Always include all tasks.\n\n"
+        "Provide the COMPLETE finalized list via todo_write."
+    )
+
+    def _validate_todo_prompts(self):
+        """Ensure todo prompt keys exist in planning config.
+
+        When todo_write is active with planning_interval, injects default
+        todo prompt sections if they are missing from the loaded templates.
         """
         if "todo_write" not in getattr(self, "tools", {}):
             return
         if getattr(self, "planning_interval", None) is None:
             return
 
-        planning = self.prompt_templates.get("planning", {})
-        required_keys = ["todo_initial", "todo_update", "todo_final"]
-        missing = [k for k in required_keys if not planning.get(k)]
-        if missing:
-            raise ValueError(
-                f"Todo prompt keys missing in YAML planning config: {missing}. "
-                "Add them to the agent's prompt YAML under 'planning:' section."
-            )
+        planning = self.prompt_templates.get("planning")
+        if planning is None:
+            return
+        if not planning.get("todo_initial"):
+            planning["todo_initial"] = self._DEFAULT_TODO_INITIAL
+        if not planning.get("todo_update"):
+            planning["todo_update"] = self._DEFAULT_TODO_UPDATE
+        if not planning.get("todo_final"):
+            planning["todo_final"] = self._DEFAULT_TODO_FINAL
 
     # ------------------------------------------------------------------
     # Todo state helpers
