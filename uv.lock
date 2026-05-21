@@ -130,7 +130,7 @@ requires-dist = [
     { name = "sentry-sdk", specifier = ">=2.35.1" },
     { name = "serena-agent", specifier = ">=1.0.0" },
     { name = "shellcheck-py", specifier = ">=0.10.0.1" },
-    { name = "smolagents", extras = ["litellm", "mcp", "openai", "telemetry"], specifier = "==1.21.1" },
+    { name = "smolagents", extras = ["litellm", "mcp", "openai", "telemetry"], specifier = ">=1.25.0" },
     { name = "snowflake-id", specifier = ">=1.0.2" },
     { name = "tenacity", specifier = ">=9.1.2" },
     { name = "textual" },
@@ -1364,7 +1364,11 @@ wheels = [
     { url = "https://files.pythonhosted.org/packages/3b/05/a38dc20cceb6cb61bc9a41c7908af9ce5ed98335da7d5302bcc80eaadc6b/go_bin-1.26.1-py3-none-macosx_10_12_x86_64.whl", hash = "sha256:762de4f10fe365bb3355deff39751c18f5f7f2349271ce36c3d0e5442bbb3b70", size = 71186092, upload-time = "2026-03-06T06:12:16.059Z" },
     { url = "https://files.pythonhosted.org/packages/c8/40/d7d639c4b5173cc9aa7727d82b6eb57bd86314ab5ed70815296fc43e0af3/go_bin-1.26.1-py3-none-macosx_11_0_arm64.whl", hash = "sha256:485a955f7938b7841d994458998f1329111559bb980946ae20be4923d160ab41", size = 67896017, upload-time = "2026-03-06T06:12:16.2Z" },
     { url = "https://files.pythonhosted.org/packages/2e/e0/3eb4730da9fa94a62c8a82e90c7fc82016226a1a5d47fdef9d743896c314/go_bin-1.26.1-py3-none-manylinux_2_17_aarch64.whl", hash = "sha256:df3232f845892d8b5ac6ed6d6876acd65d8f13594a878b5f96c8f1f6263300c1", size = 66930659, upload-time = "2026-03-06T06:12:09.166Z" },
+    { url = "https://files.pythonhosted.org/packages/b4/4e/2a354283f69405a774468b583d31c7c1461456445178d2667cbfdeff29b0/go_bin-1.26.1-py3-none-manylinux_2_17_i686.whl", hash = "sha256:88a86850392028a4f4a35aa14eccd001fd10bb90399cb2c4b2bb07b8241e9f58", size = 68544769, upload-time = "2026-05-10T04:54:14.714Z" },
+    { url = "https://files.pythonhosted.org/packages/4b/a5/2adf379d534e1e56863c2ded90ccda16b0c2af848c5b62809722b11441cd/go_bin-1.26.1-py3-none-manylinux_2_17_ppc64le.whl", hash = "sha256:d6cf64c7f06dfb799374be350be6ba5ed5cc49e548bb5cdad1680e15b3c55b78", size = 67716727, upload-time = "2026-05-10T04:54:16.056Z" },
+    { url = "https://files.pythonhosted.org/packages/1a/c9/340ac0cd08b53d13878cc382eccf66ea66394fcc6e2620bb5cfd0502430e/go_bin-1.26.1-py3-none-manylinux_2_17_s390x.whl", hash = "sha256:2e476ae7a8f52c0beb2cc34b2c9d365c8ac7f07fbd8fa2ea751e946444d974d1", size = 69957307, upload-time = "2026-05-10T04:54:10.991Z" },
     { url = "https://files.pythonhosted.org/packages/06/e7/c27b462b98379b515f66db07edfff6c4274b803d314056f969ce8394e7aa/go_bin-1.26.1-py3-none-manylinux_2_17_x86_64.whl", hash = "sha256:31d11c66df592f6de454d5a29f01ac9ce8268b5f676f29f21be6fd9922aad66d", size = 70239333, upload-time = "2026-03-06T06:12:16.495Z" },
+    { url = "https://files.pythonhosted.org/packages/a9/3d/9f5006bad20e32f7c3a8107e0817d4353fb51a8ca2b6d35ff08cb250fc3f/go_bin-1.26.1-py3-none-win32.whl", hash = "sha256:2fc38248a9e67d5af064c06d9f8ec152e88130abd09182dcf11635ffef355a40", size = 70085523, upload-time = "2026-05-10T04:54:18.804Z" },
     { url = "https://files.pythonhosted.org/packages/04/c1/91118d48b56508df54c3d091bd25d8e66577d120128df956e9bafbc6b129/go_bin-1.26.1-py3-none-win_amd64.whl", hash = "sha256:e663332eada7e967caba05a682ce1b499fe95a8125c55515817692e287d3b268", size = 71196285, upload-time = "2026-03-06T06:12:17.633Z" },
     { url = "https://files.pythonhosted.org/packages/9a/a3/ee565c3d874f95aa7af3bd58a4a90fae5cdf4475ea3b613af82d8bf547a5/go_bin-1.26.1-py3-none-win_arm64.whl", hash = "sha256:1dc3bdd1e2c80449ac680c6848c1c3dfbeead5e699df6fa9d46c91366a0a2fa9", size = 67548530, upload-time = "2026-03-09T15:54:11.282Z" },
 ]
@@ -4040,7 +4044,7 @@ wheels = [
 
 [[package]]
 name = "smolagents"
-version = "1.21.1"
+version = "1.25.0"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "huggingface-hub" },
@@ -4050,9 +4054,9 @@ dependencies = [
     { name = "requests" },
     { name = "rich" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/31/a9/f50c7e921675c7295fb4e80795b3cfd4baa8f3ebd0d3c5d7e9d4221f6e30/smolagents-1.21.1.tar.gz", hash = "sha256:bd8a26868cb294949aa8ced954f90f1f1ece96f417fc60c6be1ac6d2f762f130", size = 202388, upload-time = "2025-08-11T10:49:05.942Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/44/b0/bb21276a171d99910649da5fd54f450033135858caf63257532bbac7b7fe/smolagents-1.25.0.tar.gz", hash = "sha256:f394a65cb1de76c5938624ca8ef56573460f55a9ab517c2a4b6c2c4dbc932228", size = 242056, upload-time = "2026-05-14T11:36:18.356Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/12/ec/ad3f2e88aac2b143bb1c7c301a8d248d42f710a5d8113ad73ded146f6be5/smolagents-1.21.1-py3-none-any.whl", hash = "sha256:9490bc16a1efd326132daef4add6c09099aa5d652777332239f62d3b75f55761", size = 145419, upload-time = "2025-08-11T10:49:03.915Z" },
+    { url = "https://files.pythonhosted.org/packages/d6/f9/8e3c92bdf5310c307d3d1ec105e8a6677c34b9c85650facc890569395efa/smolagents-1.25.0-py3-none-any.whl", hash = "sha256:fbb6716ef9ff164c9ca6238d8bd2559736c9e171a21443e2c61c400d443bdcde", size = 164726, upload-time = "2026-05-14T11:36:16.367Z" },
 ]
 
 [package.optional-dependencies]

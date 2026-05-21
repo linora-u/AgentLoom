@@ -236,7 +236,7 @@ tool_access_control:
 
 ## 3.6 Custom sysprompt (If Any)
 
-**File path**: `applications/<app_name>/sysprompt/code_agent.yaml`
+**File path**: `applications/<app_name>/sysprompt/custom_prompt.yaml`
 
 > Only generated when the user explicitly requests it. In most cases, the framework's default prompt is sufficient.
 
@@ -261,7 +261,7 @@ system_prompt: |
 > **Note**: The `prompt` field in Agent YAML must point to this file for it to take effect:
 > ```yaml
 > prompt:
->   path: "applications/<app_name>/sysprompt/code_agent.yaml"
+>   path: "applications/<app_name>/sysprompt/custom_prompt.yaml"
 > ```
 
 ---

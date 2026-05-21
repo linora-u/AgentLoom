@@ -1,0 +1,88 @@
+name: "test_markdown_write_code_act"
+description: "Test code_act mode writing complex Markdown files with special characters, code blocks, and structured content"
+
+model_type: "powerful"
+tool_call_type: "code_act"
+
+workflow: |
+  # Markdown File Generation Test (code_act mode)
+
+  You are a testing agent. Execute ALL steps below to validate that code_act mode
+  can correctly generate and write Markdown files containing special characters,
+  code blocks, YAML front matter, tables, and nested formatting.
+
+  ## Step 1: Create a Markdown file with code blocks
+  Use write_file to create "/tmp/test_markdown_code_act.md" with the following content:
+  - A title "# Project Documentation"
+  - A code block with Python code containing triple backticks
+  - A code block with JSON containing curly braces
+  - A code block with shell commands
+
+  The content MUST include:
+  ```
+  # Project Documentation
+
+  ## Installation
+
+  ```python
+  def setup():
+      config = {"key": "value", "nested": {"a": 1}}
+      return config
+  ```
+
+  ## Configuration
+
+  ```json
+  {
+    "name": "test-project",
+    "version": "1.0.0",
+    "scripts": {
+      "start": "python main.py"
+    }
+  }
+  ```
+
+  ## Usage
+
+  ```bash
+  pip install -r requirements.txt
+  python -m pytest tests/
+  ```
+  ```
+
+  Verify: Use read_file to confirm the content was written correctly.
+
+  ## Step 2: Create a Markdown file with a table and special characters
+  Use write_file to create "/tmp/test_markdown_table.md" with content that includes:
+  - A title "# API Reference"
+  - A Markdown table with columns: Method | Endpoint | Description
+  - At least 3 rows with pipe characters properly escaped in descriptions
+  - A section with backslash sequences like `\n`, `\t`, `[pattern]`
+
+  Verify: Use read_file to confirm the table renders correctly.
+
+  ## Step 3: Create a Markdown file with YAML front matter
+  Use write_file to create "/tmp/test_markdown_frontmatter.md" with:
+  - YAML front matter (between --- delimiters)
+  - Title, date, tags fields in front matter
+  - Body content with headers, lists, and emphasis
+
+  Verify: read_file and confirm front matter starts with "---" and ends with "---".
+
+  ## Step 4: Create a complex README-style Markdown
+  Use write_file to create "/tmp/test_markdown_readme.md" with a realistic README:
+  - Project name with badges (use placeholder URLs)
+  - Features list with checkboxes (- [x] and - [ ])
+  - A mermaid diagram code block
+  - Links with special characters in URLs
+  - A "Contributing" section with numbered steps
+
+  Verify: read_file and confirm all sections present.
+
+  ## Final Summary
+  Print a summary:
+  | Step | Description | Status |
+  Report overall: X/4 PASSED.
+
+  ## Cleanup
+  Delete all /tmp/test_markdown_*.md files.

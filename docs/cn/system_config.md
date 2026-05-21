@@ -1256,8 +1256,8 @@ checkpoint:
 │   └── worker_agents/
 ├── config/             ← 可选（有则叠加覆盖 config/system.yaml）
 │   └── system.yaml
-└── sysprompt/          ← 可选
-    └── code_agent.yaml
+└── sysprompt/          ← 可选（自定义 prompt 模板，参考 .example.yaml）
+    └── my_prompt.yaml
 ```
 
 ### 应用级覆盖发现机制

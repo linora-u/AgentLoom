@@ -258,7 +258,7 @@ After entering Phase 3, **generate all files in the following order** (interacti
 - **Full template** → See [templates.md](./references/templates.md) §3.5
 
 ### 3.6 Custom sysprompt (if any)
-- **Path**: `applications/<app_name>/sysprompt/code_agent.yaml`
+- **Path**: `applications/<app_name>/sysprompt/custom_prompt.yaml`
 - Only generate when explicitly requested by the user. The framework default prompt is sufficient for most scenarios.
 
 ### 3.7 Single Agent Mode YAML (replaces 3.1 and 3.2)
