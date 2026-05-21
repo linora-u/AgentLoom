@@ -573,8 +573,19 @@ prompt:
 |--------|------|------|
 | 1 | 函数参数 `prompt_template_path` | 代码中显式传入 |
 | 2 | Agent YAML `prompt` 字段 | 当前文档配置 |
-| 3 | 模型家族变体 | `<prompts_dir>/<family>/code_agent.yaml`（如 `anthropic/code_agent.yaml`） |
-| 4 | 框架默认 | `src/lib/smolagents/prompts/code_agent.yaml` |
+| 3 | 模型家族变体 | `<prompts_dir>/<family>/toolcalling_agent.yaml`（用户从 `.example.yaml` 去掉后缀激活） |
+| 4 | 本地覆盖 | `<prompts_dir>/structured_code_agent.yaml` 或 `toolcalling_agent.yaml`（用户从 `.example.yaml` 去掉后缀激活） |
+| 5 | smolagents 内置默认 | smolagents 包自带的内置 prompt（无需任何文件） |
+
+> **自定义方式**：所有 `.example.yaml` 文件（包括 `anthropic/`、`openai/`、`gemini/` 目录下的）均为参考模板。要激活自定义 prompt，只需去掉 `.example` 后缀即可：
+> ```bash
+> # 激活全局自定义 prompt（code_act 模式）
+> mv structured_code_agent.example.yaml structured_code_agent.yaml
+>
+> # 激活 anthropic 模型家族变体
+> mv anthropic/toolcalling_agent.example.yaml anthropic/toolcalling_agent.yaml
+> ```
+> 要恢复默认，重新加回 `.example` 后缀即可。
 
 **校验**：字典形式时必须包含 `path` key，否则报错 `must include 'path' when prompt is a mapping`。prompt 文件必须是合法 YAML mapping。
 

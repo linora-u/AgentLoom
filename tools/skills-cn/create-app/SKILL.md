@@ -257,7 +257,7 @@ applications/<app_name>/
 - **完整模板** → 参见 [templates.md](./references/templates.md) §3.5
 
 ### 3.6 自定义 sysprompt（如有）
-- **路径**：`applications/<app_name>/sysprompt/code_agent.yaml`
+- **路径**：`applications/<app_name>/sysprompt/custom_prompt.yaml`
 - 仅在用户明确要求时生成。框架默认 Prompt 适用于大多数场景。
 
 ### 3.7 单 Agent 模式 YAML（替代 3.1 和 3.2）

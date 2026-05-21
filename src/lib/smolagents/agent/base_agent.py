@@ -22,7 +22,6 @@ from src.lib.smolagents.models.model_manager import (
 )
 from src.lib.smolagents.memory.context_compression import ConversationHistoryManager
 from src.lib.smolagents.monkey_patch.memory_truncate import disable_smolagents_truncation
-from src.lib.smolagents.monkey_patch.code_extraction_patch import patch_smolagents_code_extraction
 from src.lib.smolagents.monkey_patch.monitor_metrics import patch_monitor_metrics
 from src.lib.smolagents.monkey_patch.rate_limiter_patch import patch_rate_limiter
 from src.lib.smolagents.monkey_patch.reasoning_content_patch import patch_litellm_reasoning_content
@@ -83,7 +82,6 @@ from typing import Any as _Any
 _current_worker_memory: ContextVar[list | None] = ContextVar("_current_worker_memory", default=None)
 
 disable_smolagents_truncation()
-patch_smolagents_code_extraction()
 patch_monitor_metrics()
 patch_rate_limiter()
 patch_litellm_reasoning_content()
@@ -122,7 +120,6 @@ class ToolCallingAgentV2(LoomAgentMixin, ToolCallingAgent):
     ):
         # Remove all code_act specific kwargs before calling ToolCallingAgent.__init__
         # ToolCallingAgent does not support these parameters
-        kwargs.pop("code_block_tags", None)
         kwargs.pop("executor_type", None)
         kwargs.pop("executor_kwargs", None)
         
@@ -886,7 +883,6 @@ class RoleDrivenAgent(BaseAgent):
         agent_name: Optional[str] = None,
         use_customized_prompt: bool = True,
         prompt_template_path: Optional[str] = None,
-        code_block_tags: str | tuple[str, str] = ("<code>", "</code>"),
         executor_type: Optional[str] = None,
         executor_kwargs: Optional[dict[str, Any]] = None,
         planning_interval: Optional[int] = None,
@@ -927,7 +923,6 @@ class RoleDrivenAgent(BaseAgent):
             "logger": resolved_logger_backend,
             "before_run_callbacks": list(self._before_run_callbacks),
             "final_answer_checks": self._build_runtime_final_answer_checks(),
-            "code_block_tags": code_block_tags,
         }
         if executor_type is not None:
             agent_kwargs["executor_type"] = executor_type
@@ -992,6 +987,7 @@ class RoleDrivenAgent(BaseAgent):
                 stream_outputs=False,
                 prompt_templates=prompt_templates,
                 additional_authorized_imports=resolved_additional_authorized_imports,
+                use_structured_outputs_internally=True,
                 **agent_kwargs,
             )
 

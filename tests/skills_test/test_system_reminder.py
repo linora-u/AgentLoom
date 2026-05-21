@@ -147,10 +147,10 @@ class TestPromptContainsSystemReminderSection(unittest.TestCase):
     """Verify all 4 prompt variant YAMLs contain the System Reminders section."""
 
     PROMPT_FILES = [
-        "src/lib/smolagents/prompts/toolcalling_agent.yaml",
-        "src/lib/smolagents/prompts/anthropic/toolcalling_agent.yaml",
-        "src/lib/smolagents/prompts/openai/toolcalling_agent.yaml",
-        "src/lib/smolagents/prompts/gemini/toolcalling_agent.yaml",
+        "src/lib/smolagents/prompts/toolcalling_agent.example.yaml",
+        "src/lib/smolagents/prompts/anthropic/toolcalling_agent.example.yaml",
+        "src/lib/smolagents/prompts/openai/toolcalling_agent.example.yaml",
+        "src/lib/smolagents/prompts/gemini/toolcalling_agent.example.yaml",
     ]
 
     def test_all_prompts_contain_system_reminder_section(self):

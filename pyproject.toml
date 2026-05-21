@@ -22,7 +22,7 @@ classifiers = [
 
 dependencies = [
     # Core framework
-    "smolagents[litellm,mcp,openai,telemetry]==1.21.1",
+    "smolagents[litellm,mcp,openai,telemetry]>=1.25.0",
     "litellm>=1.72.0",
     # Monitoring and tracing
     "langfuse>=2.0.0,<3.0.0",

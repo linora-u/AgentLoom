@@ -65,7 +65,7 @@ class TestResolveModelFamilyPromptPath:
     def test_returns_path_when_variant_exists(self, monkeypatch, tmp_path):
         family_dir = tmp_path / "myfamily"
         family_dir.mkdir()
-        variant = family_dir / "code_agent.yaml"
+        variant = family_dir / "structured_code_agent.yaml"
         variant.write_text("system_prompt: variant", encoding="utf-8")
 
         monkeypatch.setattr(pb_module, "_PROMPTS_DIR", tmp_path)
@@ -76,7 +76,7 @@ class TestResolveModelFamilyPromptPath:
     def test_family_is_case_insensitive(self, monkeypatch, tmp_path):
         family_dir = tmp_path / "anthropic"
         family_dir.mkdir()
-        variant = family_dir / "code_agent.yaml"
+        variant = family_dir / "structured_code_agent.yaml"
         variant.write_text("system_prompt: anthropic-variant", encoding="utf-8")
 
         monkeypatch.setattr(pb_module, "_PROMPTS_DIR", tmp_path)
@@ -121,7 +121,7 @@ class TestResolvePromptPath:
     def test_model_family_variant_when_no_config(self, monkeypatch, tmp_path):
         family_dir = tmp_path / "testfamily"
         family_dir.mkdir()
-        variant = family_dir / "code_agent.yaml"
+        variant = family_dir / "structured_code_agent.yaml"
         variant.write_text("system_prompt: family-variant", encoding="utf-8")
         monkeypatch.setattr(pb_module, "_PROMPTS_DIR", tmp_path)
 
@@ -135,10 +135,9 @@ class TestResolvePromptPath:
         assert is_explicit is False
         assert path == variant.resolve()
 
-    def test_falls_back_to_default(self, monkeypatch, tmp_path):
-        default = tmp_path / "default.yaml"
-        default.write_text("system_prompt: default", encoding="utf-8")
-        monkeypatch.setattr(pb_module, "DEFAULT_CODE_AGENT_PROMPT_PATH", default)
+    def test_falls_back_to_none_when_no_variant(self, monkeypatch, tmp_path):
+        """When no explicit path and no model-family variant, returns (None, False)."""
+        monkeypatch.setattr(pb_module, "_PROMPTS_DIR", tmp_path)
 
         path, is_explicit = resolve_prompt_path(
             prompt_template_path=None,
@@ -148,7 +147,7 @@ class TestResolvePromptPath:
             logger=_LOGGER,
         )
         assert is_explicit is False
-        assert path == default
+        assert path is None
 
 
 # ---------------------------------------------------------------------------
@@ -157,10 +156,8 @@ class TestResolvePromptPath:
 
 
 class TestBuildPromptTemplates:
-    def test_loads_default_yaml_and_returns_dict(self, monkeypatch, tmp_path):
-        prompt_file = tmp_path / "code_agent.yaml"
-        prompt_file.write_text("system_prompt: hello world", encoding="utf-8")
-        monkeypatch.setattr(pb_module, "DEFAULT_CODE_AGENT_PROMPT_PATH", prompt_file)
+    def test_loads_smolagents_builtin_when_no_explicit_path(self, monkeypatch, tmp_path):
+        """When no explicit path is configured, loads smolagents built-in."""
         monkeypatch.setattr(pb_module, "get_agent_environment_prompt", lambda: "")
 
         result = build_prompt_templates(
@@ -172,12 +169,10 @@ class TestBuildPromptTemplates:
             logger=_LOGGER,
         )
         assert isinstance(result, dict)
-        assert result["system_prompt"] == "hello world"
+        assert "system_prompt" in result
+        assert "planning" in result
 
     def test_appends_environment_prompt(self, monkeypatch, tmp_path):
-        prompt_file = tmp_path / "code_agent.yaml"
-        prompt_file.write_text("system_prompt: base", encoding="utf-8")
-        monkeypatch.setattr(pb_module, "DEFAULT_CODE_AGENT_PROMPT_PATH", prompt_file)
         monkeypatch.setattr(pb_module, "get_agent_environment_prompt", lambda: "\n[ENV]")
 
         result = build_prompt_templates(
@@ -188,13 +183,9 @@ class TestBuildPromptTemplates:
             skills_manager=_NoSkills(),
             logger=_LOGGER,
         )
-        assert "base" in result["system_prompt"]
         assert "[ENV]" in result["system_prompt"]
 
     def test_appends_skills_sections(self, monkeypatch, tmp_path):
-        prompt_file = tmp_path / "code_agent.yaml"
-        prompt_file.write_text("system_prompt: base", encoding="utf-8")
-        monkeypatch.setattr(pb_module, "DEFAULT_CODE_AGENT_PROMPT_PATH", prompt_file)
         monkeypatch.setattr(pb_module, "get_agent_environment_prompt", lambda: "")
 
         result = build_prompt_templates(
@@ -223,10 +214,11 @@ class TestBuildPromptTemplates:
             )
 
     def test_returns_none_on_fallback_load_failure(self, monkeypatch, tmp_path):
-        """When default prompt fails to load (not explicit), returns None."""
-        bad_file = tmp_path / "bad.yaml"
-        bad_file.write_text("not_a_mapping", encoding="utf-8")
-        monkeypatch.setattr(pb_module, "DEFAULT_CODE_AGENT_PROMPT_PATH", bad_file)
+        """When smolagents built-in fails to load, returns None."""
+        # Make the extensions loader raise an error
+        def _broken_builtin(tool_call_type):
+            raise RuntimeError("simulated failure")
+        monkeypatch.setattr(pb_module, "_load_smolagents_builtin", _broken_builtin)
 
         result = build_prompt_templates(
             prompt_template_path=None,
@@ -255,9 +247,6 @@ class TestBuildPromptTemplates:
 
     def test_falls_back_to_skills_manager_get_instance(self, monkeypatch, tmp_path):
         """When skills_manager=None, falls back to SkillsManager.get_instance()."""
-        prompt_file = tmp_path / "code_agent.yaml"
-        prompt_file.write_text("system_prompt: base", encoding="utf-8")
-        monkeypatch.setattr(pb_module, "DEFAULT_CODE_AGENT_PROMPT_PATH", prompt_file)
         monkeypatch.setattr(pb_module, "get_agent_environment_prompt", lambda: "")
         monkeypatch.setattr(
             pb_module.SkillsManager,

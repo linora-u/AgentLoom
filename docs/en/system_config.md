@@ -1238,8 +1238,8 @@ Each Application **must** contain a `workflows/` directory, which the framework 
 │   └── worker_agents/
 ├── config/             ← Optional (if present, overlaid on config/system.yaml)
 │   └── system.yaml
-└── sysprompt/          ← Optional
-    └── code_agent.yaml
+└── sysprompt/          ← Optional (custom prompt templates, see .example.yaml for reference)
+    └── my_prompt.yaml
 ```
 
 ### Application-Level Override Discovery Mechanism

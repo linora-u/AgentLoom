@@ -571,8 +571,19 @@ prompt:
 |--------|------|------|
 | 1 | Function parameter `prompt_template_path` | Explicitly passed in code |
 | 2 | Agent YAML `prompt` field | Current document configuration |
-| 3 | Model family variant | `<prompts_dir>/<family>/code_agent.yaml` (e.g., `anthropic/code_agent.yaml`) |
-| 4 | Framework default | `src/lib/smolagents/prompts/code_agent.yaml` |
+| 3 | Model family variant | `<prompts_dir>/<family>/toolcalling_agent.yaml` (user activates by removing `.example` suffix) |
+| 4 | Local override | `<prompts_dir>/structured_code_agent.yaml` or `toolcalling_agent.yaml` (user activates by removing `.example` suffix) |
+| 5 | smolagents built-in default | smolagents package's built-in prompt (no file needed) |
+
+> **Customization**: All `.example.yaml` files (including those under `anthropic/`, `openai/`, `gemini/` directories) are reference templates. To activate a custom prompt, simply remove the `.example` suffix:
+> ```bash
+> # Activate global custom prompt (code_act mode)
+> mv structured_code_agent.example.yaml structured_code_agent.yaml
+>
+> # Activate anthropic model-family variant
+> mv anthropic/toolcalling_agent.example.yaml anthropic/toolcalling_agent.yaml
+> ```
+> To revert to defaults, add the `.example` suffix back.
 
 **Validation**: Dictionary form must include the `path` key; otherwise raises `must include 'path' when prompt is a mapping`. Prompt file must be a valid YAML mapping.
 
