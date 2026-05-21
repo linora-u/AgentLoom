@@ -1,0 +1,79 @@
+name: "test_complex_code_act"
+description: "Test code_act structured output mode with multi-step file operations, shell commands, and complex string handling"
+
+model_type: "powerful"
+tool_call_type: "code_act"
+
+workflow: |
+  # Complex Code Act Structured Output Test
+
+  You are a testing agent. This workflow validates that code_act mode with
+  structured JSON outputs works correctly for complex multi-step tasks
+  involving file I/O, shell commands, and string manipulation.
+
+  ## Step 1: Create a Python script via write_file
+  Create "/tmp/test_code_act_script.py" with content:
+  ```python
+  import json
+  import sys
+
+  def generate_report(data):
+      """Generate a formatted report from input data."""
+      lines = []
+      lines.append(f"# Report: {data['title']}")
+      lines.append("")
+      for item in data["items"]:
+          lines.append(f"- {item['name']}: {item['value']}")
+      lines.append("")
+      lines.append(f"Total items: {len(data['items'])}")
+      return "\n".join(lines)
+
+  if __name__ == "__main__":
+      sample = {
+          "title": "Test Report",
+          "items": [
+              {"name": "Alpha", "value": 42},
+              {"name": "Beta", "value": 17},
+              {"name": "Gamma", "value": 99}
+          ]
+      }
+      print(generate_report(sample))
+  ```
+  Verify: read_file confirms the script content.
+
+  ## Step 2: Execute the Python script
+  Use shell_tool to run: python3 /tmp/test_code_act_script.py
+  Expected output should contain "# Report: Test Report" and "Total items: 3".
+  Verify: output contains expected strings.
+
+  ## Step 3: Create a file with escaped characters
+  Use write_file to create "/tmp/test_code_act_escapes.txt" with content containing:
+  - Backslash-n literal: "line1\nline2" (not actual newlines, the literal text)
+  - Tab characters
+  - Curly braces: {key: value}
+  - Square brackets: [item1, item2]
+  - Dollar signs: $HOME, ${PATH}
+  - Single and double quotes mixed
+
+  Verify: read_file and confirm all special characters preserved.
+
+  ## Step 4: Multi-file creation workflow
+  Create a project structure:
+  1. "/tmp/test_code_act_project/src/main.py" - a simple Python main
+  2. "/tmp/test_code_act_project/README.md" - project README with code examples
+  3. "/tmp/test_code_act_project/config.json" - JSON config with nested objects
+
+  Verify: read_file each file to confirm correct content.
+
+  ## Step 5: Shell command with output parsing
+  Use shell_tool to run: echo '{"status": "ok", "count": 42}' | python3 -c "import sys, json; d=json.load(sys.stdin); print(f'Status: {d[\"status\"]}, Count: {d[\"count\"]}')"
+  Expected: "Status: ok, Count: 42"
+  Verify: output matches expected.
+
+  ## Final Summary
+  Print a summary table:
+  | Step | Description | Status |
+  Report overall: X/5 PASSED.
+
+  ## Cleanup
+  Delete /tmp/test_code_act_script.py, /tmp/test_code_act_escapes.txt, /tmp/test_code_act_project/

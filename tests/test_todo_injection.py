@@ -1,7 +1,7 @@
 """Tests for todo sync ActionStep injection after PlanningStep.
 
 Covers:
-- _validate_todo_prompts: YAML key validation with fail-fast ValueError
+- _validate_todo_prompts: todo prompt key injection with defaults
 - _inject_todo_action_step: tool restriction, isolation, retry, error recovery
 - _append_todo_result: result message appended to PlanningStep
 - _run_stream integration: 3 states (initial/update/final)
@@ -82,8 +82,8 @@ class TestValidateTodoPrompts:
         # Should not raise
         obj._validate_todo_prompts()
 
-    def test_missing_single_key_raises_value_error(self):
-        """Missing one key raises ValueError."""
+    def test_missing_single_key_injects_default(self):
+        """Missing one key gets injected with default."""
         obj = _make_mixin(
             tools={"todo_write": _make_todo_tool()},
             prompt_templates={
@@ -94,20 +94,25 @@ class TestValidateTodoPrompts:
                 }
             },
         )
-        with pytest.raises(ValueError, match="todo_final"):
-            obj._validate_todo_prompts()
+        obj._validate_todo_prompts()
+        assert obj.prompt_templates["planning"]["todo_final"]
+        # Existing values preserved
+        assert obj.prompt_templates["planning"]["todo_initial"] == "custom initial"
+        assert obj.prompt_templates["planning"]["todo_update"] == "custom update"
 
-    def test_all_keys_missing_raises_value_error(self):
-        """All 3 keys missing → ValueError listing all."""
+    def test_all_keys_missing_injects_defaults(self):
+        """All 3 keys missing → all get injected with defaults."""
         obj = _make_mixin(
             tools={"todo_write": _make_todo_tool()},
             prompt_templates={"planning": {}},
         )
-        with pytest.raises(ValueError, match="todo_initial"):
-            obj._validate_todo_prompts()
+        obj._validate_todo_prompts()
+        assert obj.prompt_templates["planning"]["todo_initial"]
+        assert obj.prompt_templates["planning"]["todo_update"]
+        assert obj.prompt_templates["planning"]["todo_final"]
 
-    def test_empty_string_treated_as_missing(self):
-        """Empty string values are treated as missing."""
+    def test_empty_string_treated_as_missing_and_injected(self):
+        """Empty string values are treated as missing and get injected."""
         obj = _make_mixin(
             tools={"todo_write": _make_todo_tool()},
             prompt_templates={
@@ -118,8 +123,10 @@ class TestValidateTodoPrompts:
                 }
             },
         )
-        with pytest.raises(ValueError, match="todo_initial"):
-            obj._validate_todo_prompts()
+        obj._validate_todo_prompts()
+        assert obj.prompt_templates["planning"]["todo_initial"]
+        assert obj.prompt_templates["planning"]["todo_update"] == "valid"
+        assert obj.prompt_templates["planning"]["todo_final"]
 
     def test_no_todo_write_tool_skips_validation(self):
         """Agent without todo_write skips validation entirely."""
@@ -759,17 +766,19 @@ class TestTodoBoundaryConditions:
 
         assert call_count == 2  # Not 4
 
-    def test_validate_raises_on_missing_yaml_keys(self):
-        """Missing YAML keys raise ValueError."""
+    def test_validate_injects_on_missing_yaml_keys(self):
+        """Missing YAML keys get injected with defaults."""
         obj = _make_mixin(
             tools={"todo_write": _make_todo_tool()},
             prompt_templates={"planning": {"todo_initial": "init"}},
         )
-        with pytest.raises(ValueError, match="todo_update"):
-            obj._validate_todo_prompts()
+        obj._validate_todo_prompts()
+        assert obj.prompt_templates["planning"]["todo_update"]
+        assert obj.prompt_templates["planning"]["todo_final"]
+        assert obj.prompt_templates["planning"]["todo_initial"] == "init"
 
-    def test_validate_raises_on_empty_string_keys(self):
-        """Empty string YAML keys raise ValueError."""
+    def test_validate_injects_on_empty_string_keys(self):
+        """Empty string YAML keys get injected with defaults."""
         obj = _make_mixin(
             tools={"todo_write": _make_todo_tool()},
             prompt_templates={
@@ -780,8 +789,10 @@ class TestTodoBoundaryConditions:
                 }
             },
         )
-        with pytest.raises(ValueError, match="todo_update"):
-            obj._validate_todo_prompts()
+        obj._validate_todo_prompts()
+        assert obj.prompt_templates["planning"]["todo_update"]
+        assert obj.prompt_templates["planning"]["todo_initial"] == "init"
+        assert obj.prompt_templates["planning"]["todo_final"] == "final"
 
     def test_empty_memory_steps_no_crash(self):
         """_append_todo_result doesn't crash when no PlanningStep in memory."""
@@ -946,11 +957,11 @@ class TestYamlTodoPrompts:
     """Test that todo prompt keys are present in all YAML template files."""
 
     @pytest.fixture(params=[
-        "src/lib/smolagents/prompts/code_agent.yaml",
-        "src/lib/smolagents/prompts/toolcalling_agent.yaml",
-        "src/lib/smolagents/prompts/openai/toolcalling_agent.yaml",
-        "src/lib/smolagents/prompts/anthropic/toolcalling_agent.yaml",
-        "src/lib/smolagents/prompts/gemini/toolcalling_agent.yaml",
+        "src/lib/smolagents/prompts/structured_code_agent.example.yaml",
+        "src/lib/smolagents/prompts/toolcalling_agent.example.yaml",
+        "src/lib/smolagents/prompts/openai/toolcalling_agent.example.yaml",
+        "src/lib/smolagents/prompts/anthropic/toolcalling_agent.example.yaml",
+        "src/lib/smolagents/prompts/gemini/toolcalling_agent.example.yaml",
     ])
     def yaml_path(self, request):
         """Return path to each YAML template file."""
@@ -1002,9 +1013,9 @@ class TestYamlTodoPrompts:
         assert "update it via todo_write" not in update
 
     def test_system_prompt_has_task_tracking(self, yaml_path):
-        """system_prompt should contain Task Tracking section."""
+        """system_prompt (or system_prompt_extra) should contain Task Tracking section."""
         import yaml
         data = yaml.safe_load(yaml_path.read_text())
-        system = data["system_prompt"]
+        system = data.get("system_prompt") or data.get("system_prompt_extra", "")
         assert "Task Tracking" in system
         assert "todo_write" in system
