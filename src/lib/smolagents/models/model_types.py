@@ -4,7 +4,7 @@ Model type definitions and configuration.
 
 import json
 from dataclasses import dataclass
-from typing import Any, Optional
+from typing import Optional
 
 from src.lib.config import C
 from src.lib.logging import get_logger
@@ -46,34 +46,6 @@ def _unknown_model_type_error(model_type: str, available: list[str]) -> str:
     )
 
 
-def _parse_extra_headers(value: Any, source: str) -> Optional[dict]:
-    """
-    Parse extra_headers from dict or JSON string.
-    """
-    if value is None:
-        return None
-
-    if isinstance(value, dict):
-        return value
-
-    if isinstance(value, str):
-        raw = value.strip()
-        if not raw:
-            return None
-        try:
-            parsed = json.loads(raw)
-        except json.JSONDecodeError:
-            logger.warning(f"Invalid extra_headers in {source}: expected JSON object string.")
-            return None
-        if isinstance(parsed, dict):
-            return parsed
-        logger.warning(f"Invalid extra_headers in {source}: JSON value must be an object.")
-        return None
-
-    logger.warning(f"Invalid extra_headers in {source}: expected dict or JSON string, got {type(value).__name__}.")
-    return None
-
-
 @dataclass
 class ModelConfig:
     """Model configuration."""
@@ -98,6 +70,9 @@ class ModelConfig:
     # "true" - use structured output (json_schema) for code_act mode
     # "false" - use text-based <code> block parsing for code_act mode
     supports_structured_output: str = "false"
+    # Extra parameters passed through to litellm.completion() (e.g. reasoning_effort,
+    # extra_body for provider-specific features like DeepSeek thinking mode).
+    extra_completion_params: Optional[dict] = None
 
 
 class ModelType:
@@ -144,10 +119,19 @@ def _build_model_config_from_yaml(type_name: str) -> ModelConfig:
     Build a ModelConfig by reading merged config model section.
     """
     resolved = C.llm.for_type(type_name)
-    extra_headers = _parse_extra_headers(
-        resolved.extra_headers,
-        f"model.{type_name}.extra_headers",
-    )
+
+    # Parse extra_headers: accept dict or JSON string.
+    raw_headers = resolved.extra_headers
+    if isinstance(raw_headers, dict):
+        extra_headers = raw_headers
+    elif isinstance(raw_headers, str) and raw_headers.strip():
+        try:
+            parsed = json.loads(raw_headers)
+            extra_headers = parsed if isinstance(parsed, dict) else None
+        except (json.JSONDecodeError, ValueError):
+            extra_headers = None
+    else:
+        extra_headers = None
 
     return ModelConfig(
         model_id=resolved.model,
@@ -166,6 +150,7 @@ def _build_model_config_from_yaml(type_name: str) -> ModelConfig:
         requests_per_minute=int(resolved.requests_per_minute),
         supports_native_tool_calls=getattr(resolved, 'supports_native_tool_calls', 'auto'),
         supports_structured_output=getattr(resolved, 'supports_structured_output', 'false'),
+        extra_completion_params=getattr(resolved, 'extra_completion_params', None),
     )
 
 class ModelTypeManager:
