@@ -10,7 +10,6 @@ Covers:
 - Regression: no "unsupported model" warning
 """
 
-import hashlib
 import json
 from unittest.mock import patch, MagicMock
 import pytest
@@ -28,15 +27,11 @@ def _make_model(model_id="anthropic/claude-sonnet-4-20250514",
     """Create a LiteLLMModelV2 instance with mocked parent init."""
     with patch.object(LiteLLMModelV2, '__init__', lambda self, *a, **kw: None):
         m = LiteLLMModelV2.__new__(LiteLLMModelV2)
-        m._extra_headers = None
         m.logger = MagicMock()
         m.context_cache = context_cache
         m.system_prompt_boundary = system_prompt_boundary
         m.agent_id = None
         m.model_id = model_id
-        m._prev_system_hash = None
-        m._prev_tools_hash = None
-        m._prev_model_id = None
     return m
 
 
@@ -243,133 +238,21 @@ class TestSystemPromptSplitting:
 
 
 # ===========================================================================
-# 5.3 — TestCacheBreakDetection
-# ===========================================================================
-
-class TestCacheBreakDetection:
-    """Lightweight cache break detection via hashing."""
-
-    def test_first_request_no_log(self):
-        """First request stores hashes but does NOT log any cache break."""
-        model = _make_model()
-        kwargs = _completion_kwargs("System prompt")
-        model._detect_cache_break(kwargs)
-
-        model.logger.info.assert_not_called()
-        assert model._prev_system_hash is not None
-        assert model._prev_model_id == model.model_id
-
-    def test_system_prompt_change_detected(self):
-        """System prompt change is detected and logged."""
-        model = _make_model()
-        kwargs1 = _completion_kwargs("Prompt version 1")
-        model._detect_cache_break(kwargs1)
-
-        kwargs2 = _completion_kwargs("Prompt version 2")
-        model._detect_cache_break(kwargs2)
-
-        # Should have logged a CacheBreak for system_prompt
-        calls = [str(c) for c in model.logger.info.call_args_list]
-        assert any("[CacheBreak] system_prompt changed" in c for c in calls)
-
-    def test_tool_schema_change_detected(self):
-        """Tool schema change is detected and logged."""
-        model = _make_model()
-        tools1 = [{"type": "function", "function": {"name": "tool_a"}}]
-        kwargs1 = _completion_kwargs("Prompt")
-        kwargs1["tools"] = tools1
-        model._detect_cache_break(kwargs1)
-
-        tools2 = [{"type": "function", "function": {"name": "tool_b"}}]
-        kwargs2 = _completion_kwargs("Prompt")
-        kwargs2["tools"] = tools2
-        model._detect_cache_break(kwargs2)
-
-        calls = [str(c) for c in model.logger.info.call_args_list]
-        assert any("[CacheBreak] tool_schemas changed" in c for c in calls)
-
-    def test_model_change_detected(self):
-        """Model ID change is detected and logged."""
-        model = _make_model(model_id="anthropic/claude-sonnet-4-20250514")
-        kwargs = _completion_kwargs("Prompt")
-        model._detect_cache_break(kwargs)
-
-        # Simulate model change
-        model.model_id = "anthropic/claude-opus-4-20250514"
-        model._detect_cache_break(kwargs)
-
-        calls = [str(c) for c in model.logger.info.call_args_list]
-        assert any("[CacheBreak] model changed" in c for c in calls)
-
-    def test_identical_requests_no_false_positive(self):
-        """Identical consecutive requests do NOT log cache break."""
-        model = _make_model()
-        kwargs = _completion_kwargs("Same prompt")
-        model._detect_cache_break(kwargs)
-        model.logger.info.reset_mock()
-
-        model._detect_cache_break(kwargs)
-        model.logger.info.assert_not_called()
-
-    def test_exception_in_detection_non_blocking(self):
-        """Exception during detection is swallowed — request proceeds."""
-        model = _make_model()
-        # Force an exception by making messages non-iterable
-        kwargs = {"messages": None}
-        # Should not raise
-        model._detect_cache_break(kwargs)
-        # Verify debug log was called (non-blocking error)
-        model.logger.debug.assert_called()
-
-    def test_no_tools_hash_none(self):
-        """When no tools are provided, tools_hash is None."""
-        model = _make_model()
-        kwargs = _completion_kwargs("Prompt")
-        model._detect_cache_break(kwargs)
-        assert model._prev_tools_hash is None
-
-    def test_list_content_hashed_correctly(self):
-        """List content is hashed by joining text blocks."""
-        model = _make_model()
-        blocks = [
-            {"type": "text", "text": "Part A"},
-            {"type": "text", "text": "Part B"},
-        ]
-        kwargs = _completion_kwargs(blocks)
-        model._detect_cache_break(kwargs)
-
-        expected = hashlib.md5("Part APart B".encode("utf-8")).hexdigest()
-        assert model._prev_system_hash == expected
-
-
-# ===========================================================================
-# 5.4 — TestContextCacheDisabled
+# 5.3 — TestContextCacheDisabled
 # ===========================================================================
 
 class TestContextCacheDisabled:
     """context_cache=False skips all caching logic."""
 
-    def test_disabled_skips_injection(self):
+    def test_disabled_skips_caching(self):
         """No cache_control injected when context_cache=False."""
         model = _make_model(context_cache=False)
         kwargs = _completion_kwargs("System prompt")
         model._apply_automatic_caching(kwargs)
 
         content = kwargs["messages"][0]["content"]
-        # Content should remain a plain string, not converted
         assert isinstance(content, str)
         assert content == "System prompt"
-
-    def test_disabled_skips_break_detection(self):
-        """No cache break detection when context_cache=False."""
-        model = _make_model(context_cache=False)
-        kwargs = _completion_kwargs("System prompt")
-        model._apply_automatic_caching(kwargs)
-
-        # _prev hashes should all still be None
-        assert model._prev_system_hash is None
-        assert model._prev_tools_hash is None
-        assert model._prev_model_id is None
 
     def test_disabled_skips_splitting(self):
         """No system prompt splitting when context_cache=False."""
