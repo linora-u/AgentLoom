@@ -132,6 +132,9 @@ def test_initialize_skills_manager_loads_system_root_and_agent_layers(monkeypatc
         logger=logging.getLogger(__name__),
         hook_manager=HookManager(),
     )
+    agent._effective_agent_config = {
+        "skills": [{"path": "global_cfg", "platform": "Claude"}],
+    }
 
     agent.initialize_skills_manager(
         {"skills": [{"path": "agent_local", "platform": "Claude"}]},
