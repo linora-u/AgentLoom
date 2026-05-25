@@ -14,7 +14,6 @@ Automatic prompt caching:
   No provider-specific branching is needed in this code.
 """
 
-import hashlib
 import json
 from typing import List, Dict, Any, Optional
 from smolagents import AgentLogger, LiteLLMModel
@@ -44,10 +43,8 @@ class LiteLLMModelV2(LiteLLMModel):
                  supports_native_tool_calls: str = "auto",
                  supports_structured_output: str = "false",
                  **kwargs):
-        # Extract custom headers before passing kwargs to parent
-        # This prevents the parent class from receiving unknown parameters
-        extra_headers = kwargs.pop("extra_headers", None)
-        self._extra_headers = extra_headers
+        # extra_headers flows through to self.kwargs via parent __init__,
+        # then gets injected into every litellm.completion() call natively.
         # self.logger stores a LoggerAdapter (internal impl detail) wrapping the AgentLogger.
         self.logger = get_logger(logger, __name__) if logger is not None else _LOG
         self.context_cache = context_cache
@@ -66,10 +63,6 @@ class LiteLLMModelV2(LiteLLMModel):
         self._native_tool_calls_detected: Optional[bool] = None
         # Agent ID injected by upper-level Agent at runtime (used for tracing).
         self.agent_id = None
-        # Cache break detection state
-        self._prev_system_hash: Optional[str] = None
-        self._prev_tools_hash: Optional[str] = None
-        self._prev_model_id: Optional[str] = None
         super().__init__(*args, **kwargs)
 
     def should_use_native_tool_calls(self) -> bool:
@@ -124,11 +117,6 @@ class LiteLLMModelV2(LiteLLMModel):
         if "stop" in completion_kwargs and completion_kwargs["stop"]:
             completion_kwargs["stop"] = [s for s in completion_kwargs["stop"] if s != "</code>"]
 
-        # Only add extra_headers if they were provided during initialization
-        # This avoids passing None or empty dict to the API
-        if self._extra_headers:
-            completion_kwargs["extra_headers"] = self._extra_headers
-
         # Inject model_type for global rate limiting in litellm_retry wrapper
         if hasattr(self, "_agent_loom_model_type"):
             completion_kwargs["_agent_loom_model_type"] = self._agent_loom_model_type
@@ -149,9 +137,6 @@ class LiteLLMModelV2(LiteLLMModel):
                 return
 
             messages = completion_kwargs.get("messages", [])
-
-            # Detect cache breaks before injection (log-only, non-blocking)
-            self._detect_cache_break(completion_kwargs)
 
             # Inject cache_control into system message — universal for all providers
             self._inject_cache_control(messages)
@@ -223,63 +208,4 @@ class LiteLLMModelV2(LiteLLMModel):
             if isinstance(last_block, dict) and "cache_control" not in last_block:
                 last_block["cache_control"] = {"type": "ephemeral"}
 
-    def _detect_cache_break(self, completion_kwargs: Dict[str, Any]):
-        """
-        Lightweight cache break detection. Computes hashes of system prompt and
-        tool schemas, compares with previous request. Logs changes for diagnostics.
-        Non-blocking — exceptions are caught and swallowed.
-        """
-        try:
-            messages = completion_kwargs.get("messages", [])
-            tools = completion_kwargs.get("tools", [])
 
-            # Hash system prompt content
-            system_msg = next(
-                (m for m in messages if m.get("role") == "system"), None
-            )
-            system_hash = None
-            if system_msg:
-                raw = system_msg.get("content", "")
-                if isinstance(raw, str):
-                    system_hash = hashlib.md5(raw.encode("utf-8")).hexdigest()
-                elif isinstance(raw, list):
-                    text = "".join(
-                        b.get("text", "") for b in raw if isinstance(b, dict)
-                    )
-                    system_hash = hashlib.md5(text.encode("utf-8")).hexdigest()
-
-            # Hash tool schemas
-            tools_hash = None
-            if tools:
-                tools_str = json.dumps(tools, sort_keys=True, default=str)
-                tools_hash = hashlib.md5(tools_str.encode("utf-8")).hexdigest()
-
-            current_model = self.model_id
-
-            # Compare with previous state (skip logging on first request)
-            if self._prev_system_hash is not None:
-                if system_hash != self._prev_system_hash:
-                    self.logger.info(
-                        f"[CacheBreak] system_prompt changed "
-                        f"(prev={self._prev_system_hash[:8]}, "
-                        f"new={system_hash[:8] if system_hash else 'None'})"
-                    )
-
-            if self._prev_tools_hash is not None:
-                if tools_hash != self._prev_tools_hash:
-                    self.logger.info("[CacheBreak] tool_schemas changed")
-
-            if self._prev_model_id is not None:
-                if current_model != self._prev_model_id:
-                    self.logger.info(
-                        f"[CacheBreak] model changed "
-                        f"from {self._prev_model_id} to {current_model}"
-                    )
-
-            # Store current state for next comparison
-            self._prev_system_hash = system_hash
-            self._prev_tools_hash = tools_hash
-            self._prev_model_id = current_model
-
-        except Exception as e:
-            self.logger.debug(f"Cache break detection error (non-blocking): {e}")

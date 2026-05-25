@@ -47,7 +47,6 @@ class TestModelTypePassthrough:
         from src.lib.smolagents.models.litellm_model import LiteLLMModelV2
 
         model = LiteLLMModelV2.__new__(LiteLLMModelV2)
-        model._extra_headers = None
         model.context_cache = False
         model._agent_loom_model_type = "fast"
 
@@ -62,7 +61,6 @@ class TestModelTypePassthrough:
         from src.lib.smolagents.models.litellm_model import LiteLLMModelV2
 
         model = LiteLLMModelV2.__new__(LiteLLMModelV2)
-        model._extra_headers = None
         model.context_cache = False
         # Deliberately NOT setting _agent_loom_model_type
 

@@ -43,6 +43,7 @@ class ModelConfigOverlay:
     system_prompt_boundary: Optional[str] = None
     requests_per_minute: Optional[int] = None
     supports_native_tool_calls: Optional[str] = None
+    extra_completion_params: Optional[dict] = None
 
     def to_mapping(self) -> dict:
         return {k: v for k, v in self.__dict__.items() if v is not None}
@@ -192,6 +193,10 @@ class ModelManager:
         if model_config.api_key:
             litellm_params["api_key"] = model_config.api_key
 
+        # Merge extra completion params (reasoning_effort, extra_body, etc.)
+        if model_config.extra_completion_params:
+            litellm_params.update(model_config.extra_completion_params)
+
         if model_cache:
             self._model_cache[cache_key] = litellm_params
 
@@ -224,12 +229,22 @@ class ModelManager:
 
         runtime_logger = get_logger(logger, __name__) if logger is not None else None
         model_config = self.get_model_config(model_type, model_builder)
-        logger.info(f"Creating smolagents model with config: {model_config}")
+        _log = runtime_logger or logger
+        if _log:
+            _log.info(f"Creating smolagents model with config: {model_config}")
 
 
         # Create smolagents model with retry settings.
         # If new parameters are added here, verify litellm/provider compatibility.
         # Retry params are removed in retry wrapper and will not be forwarded downstream.
+        # Build optional kwargs that should only be passed when set.
+        # extra_headers flows through smolagents self.kwargs → litellm.completion() natively.
+        optional_kwargs = {}
+        if model_config.extra_headers:
+            optional_kwargs["extra_headers"] = model_config.extra_headers
+        if model_config.extra_completion_params:
+            optional_kwargs.update(model_config.extra_completion_params)
+
         model = LiteLLMModelV2(
             model_id=model_config.model_id,
             api_base=model_config.base_url,
@@ -242,12 +257,12 @@ class ModelManager:
             num_retries=model_config.num_retries,
             retry_delay=model_config.retry_delay,
             max_retry_delay=model_config.max_retry_delay,
-            extra_headers=model_config.extra_headers,
             logger=runtime_logger,
             context_cache=model_config.context_cache,
             system_prompt_boundary=model_config.system_prompt_boundary,
             supports_native_tool_calls=model_config.supports_native_tool_calls,
             supports_structured_output=model_config.supports_structured_output,
+            **optional_kwargs,
         )
 
         # Inject model_type for global rate limiting (consumed by litellm_retry wrapper)
