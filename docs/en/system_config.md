@@ -267,6 +267,22 @@ skills:
 
 > ⚠️ **Duplicate Skill names**: If the same Skill name appears in an Agent's final Skill view, the framework will raise an error.
 
+### 4.4 Disabling Global Skills (opt-out)
+
+Set `skills` to an empty list to fully disable Layer 1 and Layer 2 loading (global entries + directory auto-discovery are both skipped):
+
+```yaml
+skills: []   # Explicit opt-out: skip all global skills including AGENT_ROOT/skills/ directory
+```
+
+| `skills` value | Behavior |
+|---|---|
+| Not configured / `null` | Global entries not loaded, but `AGENT_ROOT/skills/` directory is still auto-discovered |
+| `[]` (empty list) | **Fully disabled**: both global entries and directory auto-discovery are skipped |
+| `[entries...]` | Load specified entries AND auto-discover `AGENT_ROOT/skills/` directory |
+
+Useful for lightweight Agents that don't need any Skills (e.g., intent_labeler). Layer 3 Agent-private Skills are unaffected.
+
 **Example**:
 
 ```yaml

@@ -156,7 +156,7 @@ tools:
     description: "Retrieve module context including module description and related code file list. Must be called before any worker agent."
 
 worker_agents:
-  - path: "applications/ai_quality_analysis/workflows/worker_agents/project_scan.yaml"
+  - path: "project_scan.yaml"
   - path: "applications/ai_quality_analysis/workflows/worker_agents/coding_standards.yaml"
   - path: "applications/ai_quality_analysis/workflows/worker_agents/error_handling.yaml"
   - path: "applications/ai_quality_analysis/workflows/worker_agents/concurrency_safety.yaml"
