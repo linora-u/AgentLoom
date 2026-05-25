@@ -697,15 +697,21 @@ class RoleDrivenAgent(BaseAgent):
 
         skills_manager.set_tools_mapping(tools_mapping)
 
-        global_skills_conf = C.get("skills")
-        if global_skills_conf is not None:
+        # Load skills from effective agent config (app-level system.yaml overlay).
+        # skills: []   → explicit opt-out, skip all global skills including default directory.
+        # skills: null → not configured, only load default directory.
+        # skills: [p1] → load specified entries + default directory.
+        global_skills_conf = self._effective_agent_config.get("skills")
+
+        if global_skills_conf:
             self._load_skills_from_config_entries(
                 skills_manager,
                 global_skills_conf,
                 logger=log,
             )
 
-        skills_manager.load_skills_from_directory(str(Path(C.agent_root) / "skills"))
+        if global_skills_conf != []:
+            skills_manager.load_skills_from_directory(str(Path(C.agent_root) / "skills"))
 
         if 'skills' in config:
             self._load_skills_from_config_entries(
