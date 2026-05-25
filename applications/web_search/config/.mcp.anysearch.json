@@ -1,0 +1,11 @@
+{
+  "mcpServers": {
+    "AnySearch": {
+      "type": "streamable-http",
+      "url": "https://api.anysearch.com/mcp",
+      "headers": {
+        "Authorization": "xxxxxx"
+      }
+    }
+  }
+}

@@ -710,6 +710,14 @@ class YamlConfiguredSupervisorAgent(RoleDrivenAgent):
         execution_normalized = self._ensure_execution_normalized()
         execution_env_type = execution_normalized.executor_type
         inject_default_file_tools = execution_env_type not in {"docker", "e2b"}
+        # If user explicitly set default_loaded_tools: [] (empty list) in YAML,
+        # suppress auto-injected file tools to respect the "no default tools" intent.
+        cfg_default_tools = self._config.get("default_loaded_tools")
+        if isinstance(cfg_default_tools, list) and len(cfg_default_tools) == 0:
+            inject_default_file_tools = False
+        # Also honour an explicit inject_default_file_tools: false in the YAML.
+        if "inject_default_file_tools" in self._config:
+            inject_default_file_tools = bool(self._config["inject_default_file_tools"])
         return AgentRoleProfile(
             agent_type=AgentType.SUPERVISOR,
             tool_call_type=self._resolve_tool_call_type(),
@@ -745,7 +753,17 @@ class YamlConfiguredSupervisorAgent(RoleDrivenAgent):
     def _transform_tasks(self, task: str) -> list[str]:
         workflow_content = self._config['workflow']
         if isinstance(workflow_content, list):
-            return AgentConfigNormalizer.normalize_workflow_items(workflow_content)
+            # List workflows are executed sequentially: each item becomes a
+            # separate runtime_agent.run() call with reset=False preserving
+            # memory from previous steps.  The original task data (e.g. sample
+            # row content) is injected into the first item via <inputs> block
+            # so it is visible to the agent in step 1; subsequent steps access
+            # it through preserved memory.steps.
+            items = list(AgentConfigNormalizer.normalize_workflow_items(workflow_content))
+            if task.strip():
+                inputs_block = INPUTS_BLOCK_TEMPLATE.format(content=task)
+                items[0] = f"{items[0]}\n\n{inputs_block}"
+            return items
         return [self._transform_task(task)]
 
     def _get_tools(self) -> List:
@@ -884,8 +902,14 @@ class YamlAgentFactory:
                 execution_env_type,
             )
         else:
+            # Agent-level config takes priority: if the agent YAML explicitly declares
+            # `default_loaded_tools`, use that instead of the global effective config.
+            if "default_loaded_tools" in config:
+                default_tools_source = config
+            else:
+                default_tools_source = effective_agent_config
             # Load default tools from unified config (config/system.yaml + overrides)
-            for tool_name in get_default_tools(effective_agent_config):
+            for tool_name in get_default_tools(default_tools_source):
                 try:
                     tool_function = resolve_tool_function(tool_name)
                     _append_tool(tool_function, explicit_name=tool_name)
