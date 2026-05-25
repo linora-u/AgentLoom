@@ -146,7 +146,7 @@
       }
     },
     "skills": {
-      "description": "私有 Skill 配置。支持 string / dict / list 三种格式。",
+      "description": "私有 Skill 配置。支持 string / dict / list 三种格式。空列表 skills: [] 表示显式禁用全局 Skills（全局条目 + AGENT_ROOT/skills/ 目录自动发现均跳过）。",
       "oneOf": [
         {
           "type": "string",
@@ -158,6 +158,7 @@
         },
         {
           "type": "array",
+          "description": "列表格式。空列表 [] 为显式 opt-out，跳过所有全局 skills 加载。",
           "items": {
             "oneOf": [
               {

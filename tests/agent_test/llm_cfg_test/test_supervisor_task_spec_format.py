@@ -68,9 +68,35 @@ def test_transform_tasks_list_workflow_returns_user_items_without_stage_wrappers
 
     transformed_tasks = supervisor._transform_tasks("ignored task request")
 
+    # List workflows return one item per step for sequential execution.
+    assert len(transformed_tasks) == 2
+    # First item contains the workflow text plus the task data in <inputs> block.
+    assert "First workflow item.\nUse exactly this instruction." in transformed_tasks[0]
+    assert "<inputs>" in transformed_tasks[0]
+    assert "ignored task request" in transformed_tasks[0]
+    # Subsequent items are raw workflow text without task data injection.
+    assert transformed_tasks[1] == "Second workflow item.\nContinue from previous memory."
+    # No task_spec wrapping or stage labels on any item.
+    assert all("Task specification" not in task for task in transformed_tasks)
+    assert all("Stage" not in task for task in transformed_tasks)
+
+
+def test_transform_tasks_list_workflow_empty_task_returns_raw_items():
+    supervisor = object.__new__(YamlConfiguredSupervisorAgent)
+    supervisor._config = {
+        "name": "multi_workflow",
+        "description": "Overall task description.",
+        "workflow": [
+            "First workflow item.\nUse exactly this instruction.",
+            "Second workflow item.\nContinue from previous memory.",
+        ],
+    }
+    supervisor._logger = None
+
+    transformed_tasks = supervisor._transform_tasks("")
+
+    # When task is empty, no <inputs> block is injected.
     assert transformed_tasks == [
         "First workflow item.\nUse exactly this instruction.",
         "Second workflow item.\nContinue from previous memory.",
     ]
-    assert all("Task specification" not in task for task in transformed_tasks)
-    assert all("Stage" not in task for task in transformed_tasks)

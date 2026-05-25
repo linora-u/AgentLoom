@@ -505,6 +505,21 @@ Layer 3: skills field in Agent YAML              ← Read directly from raw YAML
 The three layers are **additive**, not overriding. Skills with the same name are overridden by later-loaded ones (with a warning).
 `AGENT_ROOT` refers to the project root directory containing `config/system.yaml` (`C.agent_root`), not the directory of the current Agent YAML file.
 
+#### Disabling Global Skills (opt-out)
+
+Set `skills` to an empty list in the app-level `config/system.yaml` to **completely disable** Layer 1 and Layer 2 loading (global entries + directory auto-discovery are both skipped), leaving only Layer 3 Agent-private Skills:
+
+```yaml
+# applications/<app>/config/system.yaml
+skills: []   # Explicit opt-out: skip all global skills including AGENT_ROOT/skills/ directory
+```
+
+| `skills` value | Behavior |
+|---|---|
+| Not configured / `null` | Global entries not loaded, but `AGENT_ROOT/skills/` directory is still auto-discovered |
+| `[]` (empty list) | **Fully disabled**: both global entries and directory auto-discovery are skipped |
+| `[entries...]` | Load specified entries AND auto-discover `AGENT_ROOT/skills/` directory |
+
 #### Three Supported Formats
 
 **Format 1: List format (recommended)**

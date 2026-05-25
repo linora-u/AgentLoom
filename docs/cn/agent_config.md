@@ -507,6 +507,21 @@ Agent YAML 中的 `skills` 用于声明当前 Agent 的私有技能包。**不�
 三层是**叠加**关系，不是覆盖。同名 skill 后加载的会覆盖先加载的（输出 warning）。
 其中 `AGENT_ROOT` 指包含 `config/system.yaml` 的项目根目录（`C.agent_root`），不是当前 Agent YAML 文件目录。
 
+#### 禁用全局 Skills（opt-out）
+
+在 app 级别的 `config/system.yaml` 中将 `skills` 设置为空列表，可以**完全禁用**第 1 层和第 2 层的 Skills 加载（全局条目 + 目录自动发现均跳过），仅保留第 3 层 Agent 私有 Skills：
+
+```yaml
+# applications/<app>/config/system.yaml
+skills: []   # 显式 opt-out：跳过所有全局 skills，包括 AGENT_ROOT/skills/ 目录
+```
+
+| `skills` 值 | 行为 |
+|---|---|
+| 未配置 / `null` | 不加载全局条目，但仍自动发现 `AGENT_ROOT/skills/` 目录 |
+| `[]`（空列表） | **完全禁用**：全局条目和目录自动发现均跳过 |
+| `[entries...]` | 加载指定条目，同时自动发现 `AGENT_ROOT/skills/` 目录 |
+
 #### 支持的三种格式
 
 **格式 1：列表格式（推荐）**
