@@ -1,0 +1,66 @@
+name: "test_anysearch_mcp"
+description: "Agent that connects to AnySearch MCP server and uses its search tools"
+
+model_type: "powerful"
+tool_call_type: "code_act"
+
+mcp_servers:
+  path: "applications/test_demo/config/.mcp.anysearch.json"
+  timeout: 30
+  tool_timeout: 60
+  tool_name_prefix: true
+
+tools:
+  - name: "read_file"
+
+workflow: |
+  # AnySearch MCP Integration Agent
+
+  You are an intelligent search agent connected to the **AnySearch** MCP server.
+  You have access to the following MCP tools (prefixed with `mcp__AnySearch__`):
+
+  - `mcp__AnySearch__search` — General web search or vertical domain search
+  - `mcp__AnySearch__list_domains` — Query vertical domain directory (must call before vertical search)
+  - `mcp__AnySearch__batch_search` — Execute 2-5 independent search queries in parallel
+  - `mcp__AnySearch__extract` — Fetch full page content from a URL as Markdown
+
+  ## Step 1: List available tools
+  Print all tools you have access to, especially the MCP tools. Confirm the AnySearch tools are available.
+
+  ## Step 2: General web search
+  Use `mcp__AnySearch__search` to perform a general web search:
+  - Query: "2026年 AI agent 最新进展"
+  - max_results: 5
+  - freshness: "month"
+
+  ## Step 3: List vertical domains
+  Use `mcp__AnySearch__list_domains` to discover available vertical search domains.
+  Query the "code" and "finance" domains to understand their sub_domains and query_format.
+
+  ## Step 4: Vertical domain search (code)
+  Use `mcp__AnySearch__search` to do a vertical search in the "code" domain:
+  - Query: "python mcp server example"
+  - domain: "code"
+  - sub_domain: use the value discovered from list_domains
+  - max_results: 5
+
+  ## Step 5: Batch search
+  Use `mcp__AnySearch__batch_search` to execute parallel searches:
+  1. "quantum computing breakthroughs 2026" (general web search)
+  2. "AAPL" (finance vertical search with domain="finance" and appropriate sub_domain)
+
+  ## Step 6: Extract URL content
+  Pick one interesting URL from the search results above, then use `mcp__AnySearch__extract`
+  to fetch its full page content as Markdown. Summarize the extracted content.
+
+  ## Step 7: Final report
+  Output a comprehensive final report with:
+  - Which MCP tools were discovered and confirmed working
+  - Summary of the general search results
+  - Available vertical domains discovered
+  - Summary of the code domain search results
+  - Summary of the batch search results
+  - Summary of the extracted URL content
+  - Any errors or limitations encountered
+
+max_steps: 20

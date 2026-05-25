@@ -267,6 +267,22 @@ skills:
 
 > ⚠️ **同名 Skill 冲突**：同一个 Agent 的最终 Skill 视图中如果出现同名 Skill，框架会报错。
 
+### 4.4 禁用全局 Skills（opt-out）
+
+将 `skills` 设置为空列表可完全禁用第 1、2 层加载（全局条目 + 目录自动发现均跳过）：
+
+```yaml
+skills: []   # 显式 opt-out：跳过所有全局 skills，包括 AGENT_ROOT/skills/ 目录
+```
+
+| `skills` 值 | 行为 |
+|---|---|
+| 未配置 / `null` | 不加载全局条目，但仍自动发现 `AGENT_ROOT/skills/` 目录 |
+| `[]`（空列表） | **完全禁用**：全局条目和目录自动发现均跳过 |
+| `[entries...]` | 加载指定条目，同时自动发现 `AGENT_ROOT/skills/` 目录 |
+
+适用于不需要任何 Skill 的轻量级 Agent（如 intent_labeler）。第 3 层 Agent 私有 Skills 不受影响。
+
 **示例**：
 
 ```yaml
