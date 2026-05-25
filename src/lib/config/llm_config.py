@@ -99,6 +99,9 @@ class LlmModelTypeSettings(BaseModel):
     # Three-state flag: "auto" (detect at runtime), "true" (always use
     # native tool_calls), "false" (always use text parsing fallback).
     supports_native_tool_calls: str = "auto"
+    # Extra parameters passed through to litellm.completion() (e.g. reasoning_effort,
+    # extra_body). Any YAML key not in the known fields list is collected here.
+    extra_completion_params: Optional[Dict[str, Any]] = None
 
 class LLMConfig(BaseModel):
     model_config = ConfigDict(extra="allow")
@@ -158,6 +161,19 @@ class LLMConfig(BaseModel):
             if resolved_tool_calls not in ("auto", "true", "false"):
                 resolved_tool_calls = "auto"
 
+            # Collect extra keys not in the known fields list.
+            # These are passed through to litellm.completion() as-is.
+            _KNOWN_FIELDS = {
+                "model", "base_url", "api_key", "temperature", "max_tokens",
+                "timeout", "num_retries", "retry_delay", "max_retry_delay",
+                "extra_headers", "context_cache", "system_prompt_boundary",
+                "description", "requests_per_minute", "supports_native_tool_calls",
+                "supports_structured_output",
+            }
+            extra_completion_params = {
+                ek: ev for ek, ev in v.items() if ek not in _KNOWN_FIELDS
+            } or None
+
             models[k] = LlmModelTypeSettings(
                 model=model_id,
                 base_url=resolved_base_url,
@@ -174,6 +190,7 @@ class LLMConfig(BaseModel):
                 description=str(v.get("description", f"Model type '{k}' loaded from YAML config")),
                 requests_per_minute=int(resolved_rpm),
                 supports_native_tool_calls=resolved_tool_calls,
+                extra_completion_params=extra_completion_params,
             )
 
         # Validate required model types:
