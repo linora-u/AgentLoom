@@ -268,6 +268,15 @@ class ModelManager:
         # Inject model_type for global rate limiting (consumed by litellm_retry wrapper)
         model._agent_loom_model_type = model_type.value
 
+        # Pre-register rate limiter with the configured RPM so litellm_retry
+        # doesn't fall back to the default (10 RPM).
+        try:
+            from src.lib.concurrency.rate_limiter import GlobalRateLimiterRegistry
+            _rpm = model_config.requests_per_minute or 60
+            GlobalRateLimiterRegistry.get_limiter(model_type.value, rpm=_rpm)
+        except Exception:
+            pass
+
         if model_cache:
             self._model_cache[cache_key] = model
 
