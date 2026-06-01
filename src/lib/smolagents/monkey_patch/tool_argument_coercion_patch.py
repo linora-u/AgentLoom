@@ -3,12 +3,16 @@ Monkey-patch: Coerce stringified JSON arguments before type validation.
 
 Problem
 -------
-Some LLMs (notably MiniMax) serialize complex tool arguments (arrays, objects)
-as JSON strings instead of native types when making tool calls. For example::
+Some LLMs serialize tool arguments as strings instead of native types when
+making tool calls. For example::
 
     sections: '[{"heading": "Intro", "body": "..."}]'  # string
     # Expected:
     sections: [{"heading": "Intro", "body": "..."}]    # native list
+
+    step: "1"  # string
+    # Expected:
+    step: 1    # native int
 
 The smolagents framework validates argument types *before* calling the tool,
 so our tool-level coercion never gets a chance to run. The framework raises::
@@ -17,18 +21,20 @@ so our tool-level coercion never gets a chance to run. The framework raises::
 
 Fix
 ---
-Monkey-patch ``validate_tool_arguments`` to attempt ``json.loads()`` on string
-arguments when the expected type is ``array`` or ``object``. If deserialization
-succeeds and the result type matches, the argument is coerced in-place.
+Monkey-patch ``validate_tool_arguments`` to coerce string arguments before
+validation when the expected schema type is a safe scalar/container type.
 """
 
 import json
+import re
 
 from src.lib.logging import get_logger
 
 _LOG = get_logger(__name__)
 
 _PATCHED = False
+_RE_INTEGER = re.compile(r"^-?\d+$")
+_RE_NUMBER = re.compile(r"^-?\d+(\.\d+)?$")
 
 
 def _coerce_stringified_json(tool, arguments):
@@ -47,8 +53,37 @@ def _coerce_stringified_json(tool, arguments):
 
         expected_type = tool.inputs[key].get("type")
 
+        if isinstance(value, str) and expected_type == "integer":
+            stripped = value.strip()
+            if _RE_INTEGER.match(stripped):
+                try:
+                    arguments[key] = int(stripped)
+                    _LOG.debug("Coerced string argument '%s' to int", key)
+                except (ValueError, OverflowError):
+                    pass
+
+        elif isinstance(value, str) and expected_type == "number":
+            stripped = value.strip()
+            if _RE_NUMBER.match(stripped):
+                try:
+                    parsed_number = float(stripped)
+                except (ValueError, OverflowError):
+                    parsed_number = None
+                if parsed_number is not None and parsed_number not in (float("inf"), float("-inf")):
+                    arguments[key] = parsed_number
+                    _LOG.debug("Coerced string argument '%s' to float", key)
+
+        elif isinstance(value, str) and expected_type == "boolean":
+            lower = value.strip().lower()
+            if lower == "true":
+                arguments[key] = True
+                _LOG.debug("Coerced string argument '%s' to bool", key)
+            elif lower == "false":
+                arguments[key] = False
+                _LOG.debug("Coerced string argument '%s' to bool", key)
+
         # Forward: string → array/object
-        if isinstance(value, str) and expected_type in ("array", "object"):
+        elif isinstance(value, str) and expected_type in ("array", "object"):
             parsed = None
 
             # Attempt 1: direct parse
