@@ -1,5 +1,5 @@
 """
-Workflow Architecture Review — 辅助扫描工具
+AgentLoom Framework Skill — 辅助扫描工具
 
 提供轻量扫描能力，用于审核前快速获取 Application 的结构化信息。
 这些工具只做确定性的目录扫描和字段提取，不做分析判断。
@@ -345,6 +345,7 @@ def _extract_agent_summary(agent_file: Path, role: str = "Agent") -> str:
     planning_interval = data.get("planning_interval")
     prompt_cfg = data.get("prompt")
     skills_cfg = data.get("skills")
+    default_loaded_tools_cfg = data.get("default_loaded_tools", None)
 
     execution_env_type = "(未指定)"
     execution_env = data.get("execution_env")
@@ -391,6 +392,13 @@ def _extract_agent_summary(agent_file: Path, role: str = "Agent") -> str:
         lines.append("- **默认工具加载**: 跳过 `default_loaded_tools`（execution_env.type=remote）")
 
     lines.append(f"- **max_steps**: {max_steps}")
+
+    if default_loaded_tools_cfg is not None:
+        if isinstance(default_loaded_tools_cfg, list):
+            value = ", ".join(str(item) for item in default_loaded_tools_cfg) if default_loaded_tools_cfg else "[]"
+        else:
+            value = str(default_loaded_tools_cfg)
+        lines.append(f"- **default_loaded_tools 覆盖**: {value}")
 
     if planning_interval is not None:
         lines.append(f"- **planning_interval**: {planning_interval}")

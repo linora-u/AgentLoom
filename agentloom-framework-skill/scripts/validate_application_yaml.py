@@ -2,7 +2,7 @@
 """Validate generated AgentLoom application YAML configuration.
 
 Public CLI:
-    .venv/bin/python scripts/validate_application_yaml.py \
+    .venv/bin/python agentloom-framework-skill/scripts/validate_application_yaml.py \
       --app-root applications/<app_name>
 """
 
