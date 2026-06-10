@@ -11,9 +11,7 @@ import yaml
 
 SCRIPT_PATH = (
     Path(__file__).resolve().parents[2]
-    / "tools"
-    / "skills"
-    / "create-app"
+    / "agentloom-framework-skill"
     / "scripts"
     / "validate_application_yaml.py"
 )
