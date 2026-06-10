@@ -234,19 +234,24 @@ succeeds.
 | [Hooks Reference](docs/en/hooks.md) | Lifecycle events, hook types, matching, and execution behavior. |
 | [Checkpoint Resume](docs/en/checkpoint.md) | Checkpoint layout, resume behavior, and long-task recovery. |
 
-## Development Skills
+## AgentLoom Framework Skill
 
-The `tools/skills/` directory provides optional development skills for AI coding assistants working on AgentLoom applications:
+The repository includes one root-level Agent Skill for AI coding assistants:
+`agentloom-framework-skill/`.
 
-| Skill | Purpose |
-|---|---|
-| `create-app` | Generate an AgentLoom application scaffold. |
-| `create-skill` | Create a custom AgentLoom skill. |
-| `workflow-review` | Review Agent/Tool boundaries, orchestration contracts, and resilience design. |
-| `shell-security` | Configure shell execution safety policies. |
-| `update-skills` | Keep development skills aligned with source and docs changes. |
+Use it when you want an assistant to develop with AgentLoom instead of guessing
+the framework shape from scratch. Ask the assistant to read
+`agentloom-framework-skill/SKILL.md`, then describe the capability you want to
+build or extend.
 
-These are development aids, not required runtime dependencies.
+The Skill guides the assistant to clarify the goal, inputs, outputs, and
+acceptance criteria; decide whether a single Agent, Supervisor/Worker workflow,
+Tool, private Skill, Hook, or documentation change is the shortest path; create
+or update the relevant files; and record validation results in the README.
+
+This Skill is a development aid for coding assistants. It is not stored under
+`skills/`, so AgentLoom runtime applications do not auto-load it as a normal
+runtime Skill.
 
 ## Support & Contributing
 
