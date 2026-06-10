@@ -19,7 +19,7 @@ import importlib.util
 import sys
 
 _AGENT_LOOM_ROOT = Path(__file__).resolve().parents[4]
-_SCAN_TOOLS_PATH = _AGENT_LOOM_ROOT / "tools" / "skills" / "workflow-review" / "scripts" / "scan_tools.py"
+_SCAN_TOOLS_PATH = _AGENT_LOOM_ROOT / "agentloom-framework-skill" / "scripts" / "scan_tools.py"
 _spec = importlib.util.spec_from_file_location("scan_tools", _SCAN_TOOLS_PATH)
 _mod = importlib.util.module_from_spec(_spec)
 _spec.loader.exec_module(_mod)
@@ -1432,17 +1432,17 @@ class TestExecutionEnvAndMarkdownSupport:
 
 
 class TestSkillContractText:
-    """文档契约回归测试：确保输出标记要求保留。"""
+    """文档契约回归测试：确保框架级 Skill 的核心要求保留。"""
 
-    def test_skill_output_contract_contains_evidence_and_inference_tags(self):
-        skill_path = _AGENT_LOOM_ROOT / "tools" / "skills" / "workflow-review" / "SKILL.md"
+    def test_skill_clarifies_goal_and_acceptance_criteria(self):
+        skill_path = _AGENT_LOOM_ROOT / "agentloom-framework-skill" / "SKILL.md"
         content = skill_path.read_text(encoding="utf-8")
-        assert "[Evidence]" in content
-        assert "[Inferred]" in content
-        assert "[Severity]" in content
+        assert "功能目标、输入、输出、验收标准" in content
+        assert "判断任务类型" in content
+        assert "最后必须运行验证命令" in content
 
     def test_skill_mentions_agent_loom_root_precondition(self):
-        skill_path = _AGENT_LOOM_ROOT / "tools" / "skills" / "workflow-review" / "SKILL.md"
+        skill_path = _AGENT_LOOM_ROOT / "agentloom-framework-skill" / "SKILL.md"
         content = skill_path.read_text(encoding="utf-8")
-        assert "config/system.yaml" in content
-        assert "Navigate to the AgentLoom root directory" in content
+        assert "config/llm.yaml" in content
+        assert "不要用 `config/system.yaml`" in content
