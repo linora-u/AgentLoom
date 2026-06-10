@@ -231,19 +231,19 @@ Codex 配置和默认规则决定权限；`search: "true"` 会透传 `--search`�
 | [Hooks 参考](hooks.md) | 生命周期事件、Hook 类型、匹配规则和执行行为。 |
 | [Checkpoint 断点恢复](checkpoint.md) | Checkpoint 布局、恢复行为和长任务恢复机制。 |
 
-## 开发辅助 Skills
+## AgentLoom Framework Skill
 
-`tools/skills-cn/` 目录提供了一组可选的开发辅助 Skills，供 AI 编程助手在开发 AgentLoom 应用时使用：
+仓库根目录提供一个给 AI 编程助手使用的框架级 Skill：
+`agentloom-framework-skill/`。
 
-| Skill | 用途 |
-|---|---|
-| `create-app` | 生成 AgentLoom 应用脚手架。 |
-| `create-skill` | 创建自定义 AgentLoom Skill。 |
-| `workflow-review` | 审核 Agent/Tool 边界、编排合约和韧性设计。 |
-| `shell-security` | 配置 Shell 执行安全策略。 |
-| `update-skills` | 在源码或文档变化后同步开发辅助 Skills。 |
+当你想快速开发或扩展 AgentLoom 能力时，让助手先读取
+`agentloom-framework-skill/SKILL.md`，再描述你要做的功能。这个 Skill 会引导
+助手先澄清目标、输入、输出和验收标准，再判断最短路径：创建 Application、扩展
+现有 Application、增加 Worker、实现 Tool、创建私有 Skill/Hook，或只更新文档。
+最后必须同步运行验证并把结果写进 README。
 
-这些 Skills 是开发辅助，不是运行 AgentLoom 应用的必需依赖。
+这个 Skill 是开发辅助，不放在 `skills/` 运行时自动发现目录下，因此不是运行
+AgentLoom 应用的必需依赖。
 
 ## 支持与参与
 
