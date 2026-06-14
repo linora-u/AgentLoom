@@ -567,7 +567,7 @@ def test_create_agent_prioritizes_explicit_prompt_over_system_default(monkeypatc
             return default
 
     class _NoSkills:
-        def get_force_injected_prompt(self):
+        def get_eager_skills_prompt(self):
             return ""
 
         def get_skills_prompt(self):

@@ -58,7 +58,7 @@ AgentLoom already implements the runtime pieces needed to build and operate comp
 | Execution modes | Structured `tool_call` mode for traceable orchestration and `code_act` mode for flexible code-execution tasks. |
 | Python pre/post processing | Custom tool functions and wrappers for scanning, caching, loops, retries, validation, error isolation, progress persistence, and artifact writing. |
 | Batch concurrency | Worker `concurrency: auto` or fixed concurrency, `tool.batch(tasks)`, back-pressure, circuit breaker, progress callbacks, and per-call state isolation. |
-| Skills and Hooks | Reusable Skills, force-injected / on-demand / hidden modes, lifecycle Hooks for tools, tasks, sub-agents, sessions, compaction, setup, and config changes. |
+| Skills and Hooks | Claude-style `SKILL.md` packages, YAML-controlled on-demand / eager loading, bundled resources and scripts, and lifecycle Hooks for tools, tasks, sub-agents, sessions, compaction, setup, and config changes. |
 | Model and context control | Per-agent `model_type`, multiple LLM endpoints, parameter inheritance, retry behavior, prompt customization, and multi-layer context compression. |
 | Tool ecosystem | Built-in file, shell, search, code-edit, git, todo, skill-loading, local Python tools, and local Codex Exec tools, plus MCP client integration. |
 | Local Codex integration | Register local `codex exec` as a normal function tool, with multiple aliases, `fixed_args`, `sandbox` / `search` pass-through, and local Codex login/permission behavior. |

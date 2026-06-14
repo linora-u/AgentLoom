@@ -1,12 +1,8 @@
 ---
 name: agentloom-framework-skill
 description: "当用户需要理解、开发、扩展或验证 AgentLoom 框架能力时使用。覆盖创建/扩展 Application、设计单 Agent 或多 Agent、编写 Agent/Worker YAML、实现 Tool、创建私有 Skill 或 Hook、更新 README、验证 YAML/结构/运行结果。也适用于用户问“这个功能用 AgentLoom 怎么实现”。"
-version: "1.1.0"
 allowed-tools: "Read, Write, Edit, Bash, Grep, Glob"
-metadata:
-  requires:
-    bins: [".venv/bin/python", ".venv/bin/loom"]
-  cliHelp: ".venv/bin/loom --help"
+argument-hint: "<AgentLoom task or application path>"
 ---
 
 # AgentLoom Framework Skill
@@ -25,6 +21,7 @@ metadata:
 - 用户说“帮我实现一个功能 / 用框架做一个功能 / 创建一个应用 / 扩展框架能力”：先读 [`references/function-routing.md`](references/function-routing.md)，判断是新建 Application、扩展现有 Application、加 Worker、加 Tool、加私有 Skill、加 Hook，还是只改文档。
 - 需要生成或修改 `applications/<app_name>/`：读 [`references/application-generation.md`](references/application-generation.md)。
 - 需要写 Agent YAML / Worker YAML / `agent_function_schema` / `worker_agents`：读 [`references/yaml-contract.md`](references/yaml-contract.md)。
+- 需要为 Application 配置或创建私有 Skill：读 [`references/yaml-contract.md`](references/yaml-contract.md) 的 Skills 配置，再读 [`references/application-generation.md`](references/application-generation.md) 的目录规范。
 - 需要验证是否真是多 Agent、是否能运行、问题怎么记录：读 [`references/validation-and-review.md`](references/validation-and-review.md)。
 - 需要写 README 或验证记录：读 [`references/readme-template.md`](references/readme-template.md)。
 - 需要看一个按本 Skill 创建的简单多 Agent 示例：参考 `applications/feature_planner_demo/README.md`。
