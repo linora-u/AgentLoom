@@ -1,0 +1,134 @@
+skill_github_probe:
+  targets:
+    - label: anthropic-skill-creator
+      category: skill-authoring
+      repo: https://github.com/anthropics/skills.git
+      ref: 57546260929473d4e0d1c1bb75297be2fdfa1949
+      skill-path: skills/skill-creator
+      load-mode: eager
+      commands:
+        - name: quick_validate
+          command: python scripts/quick_validate.py .
+          expect-returncode: 0
+
+    - label: anthropic-webapp-testing
+      category: frontend-testing
+      repo: https://github.com/anthropics/skills.git
+      ref: 57546260929473d4e0d1c1bb75297be2fdfa1949
+      skill-path: skills/webapp-testing
+      commands:
+        - name: helper_help
+          command: python scripts/with_server.py --help
+          expect-returncode: 0
+          expect-stdout-contains: Run command with one or more servers
+
+    - label: anthropic-pdf
+      category: document-processing
+      repo: https://github.com/anthropics/skills.git
+      ref: 57546260929473d4e0d1c1bb75297be2fdfa1949
+      skill-path: skills/pdf
+      commands:
+        - name: pdf_script_dependency_check
+          command: python scripts/convert_pdf_to_images.py --help
+          expect-returncode: 1
+          expect-stderr-contains: No module named 'pdf2image'
+          diagnostic-reason: pdf2image is not installed in the current runtime
+
+    - label: anthropic-xlsx
+      category: spreadsheet-processing
+      repo: https://github.com/anthropics/skills.git
+      ref: 57546260929473d4e0d1c1bb75297be2fdfa1949
+      skill-path: skills/xlsx
+      commands:
+        - name: xlsx_script_dependency_check
+          command: python scripts/recalc.py --help
+          expect-returncode: 1
+          expect-stderr-contains: No module named 'openpyxl'
+          diagnostic-reason: openpyxl is not installed in the current runtime
+
+    - label: addy-test-driven-development
+      category: coding
+      repo: https://github.com/addyosmani/agent-skills.git
+      ref: d187883b7d761265309cdcc0f202cc76b4b3fb06
+      skill-path: skills/test-driven-development
+
+    - label: addy-code-review-and-quality
+      category: code-review
+      repo: https://github.com/addyosmani/agent-skills.git
+      ref: d187883b7d761265309cdcc0f202cc76b4b3fb06
+      skill-path: skills/code-review-and-quality
+
+    - label: addy-frontend-ui-engineering
+      category: frontend-development
+      repo: https://github.com/addyosmani/agent-skills.git
+      ref: d187883b7d761265309cdcc0f202cc76b4b3fb06
+      skill-path: skills/frontend-ui-engineering
+
+    - label: addy-performance-optimization
+      category: performance
+      repo: https://github.com/addyosmani/agent-skills.git
+      ref: d187883b7d761265309cdcc0f202cc76b4b3fb06
+      skill-path: skills/performance-optimization
+
+    - label: addy-security-and-hardening
+      category: security
+      repo: https://github.com/addyosmani/agent-skills.git
+      ref: d187883b7d761265309cdcc0f202cc76b4b3fb06
+      skill-path: skills/security-and-hardening
+
+    - label: pi-brave-search
+      category: search-and-news
+      repo: https://github.com/badlogic/pi-skills.git
+      ref: 90bb51cae36515a648515b633a81c0c6efc8c74d
+      skill-path: brave-search
+      commands:
+        - name: npm_install
+          command: npm install --ignore-scripts --no-audit --no-fund
+          expect-returncode: 0
+          timeout: 120
+        - name: news_search_without_api_key
+          command: PATH=/opt/homebrew/bin:/usr/local/bin:$PATH node search.js "AI news" -n 1 --freshness pd
+          expect-returncode: 1
+          expect-stderr-contains: BRAVE_API_KEY
+          diagnostic-reason: BRAVE_API_KEY is required for live Brave Search/news queries
+
+    - label: pi-browser-tools
+      category: browser-automation
+      repo: https://github.com/badlogic/pi-skills.git
+      ref: 90bb51cae36515a648515b633a81c0c6efc8c74d
+      skill-path: browser-tools
+      commands:
+        - name: npm_install
+          command: npm install --ignore-scripts --no-audit --no-fund
+          expect-returncode: 0
+          timeout: 120
+        - name: browser_nav_usage
+          command: node browser-nav.js
+          expect-returncode: 1
+          expect-stdout-contains: "Usage: browser-nav.js"
+
+    - label: pi-youtube-transcript
+      category: media-transcript
+      repo: https://github.com/badlogic/pi-skills.git
+      ref: 90bb51cae36515a648515b633a81c0c6efc8c74d
+      skill-path: youtube-transcript
+      commands:
+        - name: npm_install
+          command: npm install --ignore-scripts --no-audit --no-fund
+          expect-returncode: 0
+          timeout: 120
+        - name: usage_path
+          command: node transcript.js
+          expect-returncode: 1
+          expect-stderr-contains: "Usage: transcript.js"
+
+    - label: pi-vscode
+      category: ide-integration
+      repo: https://github.com/badlogic/pi-skills.git
+      ref: 90bb51cae36515a648515b633a81c0c6efc8c74d
+      skill-path: vscode
+      commands:
+        - name: code_cli_check
+          command: code --version
+          expect-returncode: 0
+          diagnostic-on-failure: VS Code code CLI is not installed or not on PATH

@@ -231,7 +231,9 @@ class ModelManager:
         model_config = self.get_model_config(model_type, model_builder)
         _log = runtime_logger or logger
         if _log:
-            _log.info(f"Creating smolagents model with config: {model_config}")
+            safe_model_config = model_config.__dict__.copy()
+            safe_model_config["api_key"] = "***" if model_config.api_key else None
+            _log.info(f"Creating smolagents model with config: {safe_model_config}")
 
 
         # Create smolagents model with retry settings.

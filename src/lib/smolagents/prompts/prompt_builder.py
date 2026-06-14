@@ -6,7 +6,7 @@ Encapsulates the full prompt resolution chain:
 
 And the multi-section assembly:
   base YAML → todo section injection → environment context →
-  force-injected skills → on-demand skills catalogue
+  eager skills → on-demand skills catalogue
 
 When no explicit prompt path is configured, the module uses smolagents' native
 built-in prompt template. Users can provide custom prompt YAML files (see
@@ -247,9 +247,9 @@ def build_prompt_templates(
         if resolved_skills is None:
             resolved_skills = SkillsManager.get_instance(logger=logger)
 
-        # 3) Force-injected skills (full instructions)
+        # 3) Eager skills (full instructions)
         _append_to_system_prompt(
-            prompt_templates, resolved_skills.get_force_injected_prompt()
+            prompt_templates, resolved_skills.get_eager_skills_prompt()
         )
 
         # 4) On-demand skills catalogue

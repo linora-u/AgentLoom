@@ -203,7 +203,7 @@ Hooks 目前通过 **Skill YAML** 声明，然后通过 `system.yaml` 或 Agent 
 | 配置位置 | 是否直接写 `hooks:` | 说明 |
 |----------|---------------------|------|
 | **Skill YAML** (`SKILL.md` frontmatter) | ✅ 是 | **主要方式**，在 YAML frontmatter 的 `hooks:` 字段中声明 |
-| **system.yaml** | ❌ 间接 | 通过 `skills:` 引用包含 hooks 的 Skill，并用 `allow-hook` 控制开关 |
+| **system.yaml** | ❌ 间接 | 通过 `skills:` 引用包含 hooks 的 Skill |
 | **Agent YAML** | ❌ 间接 | 同上，通过 `skills:` 引用 Skill 来加载 hooks |
 
 > **注意**：Agent YAML 顶层写 `hooks:` 字段目前不会生效——`HooksConfigManager` 桥接器已实现但未在 Agent 初始化流程中接线。所有 hooks 都应通过 Skill 的方式配置。
@@ -246,7 +246,7 @@ hooks:
 ---
 ```
 
-**加载时机**：Skill 的 hooks 在 `load_skill_metadata()` 时**立即注册**（Eager Registration），不需要等 LLM 调用 `load_skill()`。这意味着即使 `allow-model: false` 的隐藏 Skill，其 hooks 也能正常工作。
+**加载时机**：配置了 skill 后，hooks 会在 `load_skill_metadata()` 阶段注册，不需要等 LLM 调用 `load_skill()`。`load-mode: on-demand` 和 `load-mode: eager` 只控制 prompt 加载方式，不影响 hook 注册。
 
 ### 6.3 通过 system.yaml 全局加载
 
@@ -256,25 +256,13 @@ hooks:
 # config/system.yaml
 skills:
   - path: "skills/agent-recall-with-files"
-    invocation-control:
-      allow-model: "force-inject"   # LLM 可见，强制注入系统提示
-      allow-hook: true              # hooks 注册 ✅
+    load-mode: "eager"              # 完整正文注入 system prompt
 
   - path: "skills/agent-visualization"
-    invocation-control:
-      allow-model: false            # LLM 不可见（纯被动观察者）
-      allow-hook: true              # hooks 仍然注册 ✅
+    load-mode: "on-demand"          # 只放 catalogue；hooks 仍然注册
 ```
 
-**`invocation-control` 字段说明**：
-
-| 字段 | 取值 | 说明 |
-|------|------|------|
-| `allow-model` | `true` | LLM 可按需调用该 Skill |
-| | `false` | LLM 不可见，仅 hooks 生效（被动 Skill） |
-| | `"force-inject"` | 强制注入到系统提示中 |
-| `allow-hook` | `true` (默认) | 注册该 Skill 的 hooks |
-| | `false` | 跳过该 Skill 的 hooks 注册 |
+配置了的 skill 会注册 hooks。不再有单独的 hidden 或 hook-only skill 状态。
 
 ### 6.4 通过 Agent YAML 加载
 
@@ -287,9 +275,7 @@ model_type: powerful
 
 skills:
   - path: "skills/agent-recall-with-files"
-    invocation-control:
-      allow-model: true
-      allow-hook: true
+    load-mode: "on-demand"
 ```
 
 ### 6.5 完整 YAML Schema

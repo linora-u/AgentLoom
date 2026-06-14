@@ -16,51 +16,67 @@ def _reset_singletons():
     SkillsManager._instance = None
 
 
+def _skill_body(name: str, description: str = "Skill") -> str:
+    return f"---\nname: {name}\ndescription: {description}\n---\n# {name}\n"
+
+
 class TestSkillsDirectoryLoading(unittest.TestCase):
     def setUp(self):
         _reset_singletons()
         self.skills_manager = SkillsManager.get_instance(logger=logging.getLogger(__name__))
 
-    def test_directory_loading_recursively_loads_skill_files(self):
+    def test_directory_loading_recursively_loads_skill_entrypoints_only(self):
         with tempfile.TemporaryDirectory() as temp_dir:
             root = Path(temp_dir)
 
-            (root / "SKILL.md").write_text("---\nname: root-skill\n---\n# Root\n", encoding="utf-8")
+            (root / "SKILL.md").write_text(_skill_body("root-skill"), encoding="utf-8")
 
             alpha = root / "alpha"
             alpha.mkdir()
-            (alpha / "skill.md").write_text("---\nname: alpha-skill\n---\n# A\n", encoding="utf-8")
+            (alpha / "skill.md").write_text(_skill_body("alpha-skill"), encoding="utf-8")
 
             beta = root / "beta"
             beta.mkdir()
-            (beta / "skill.md").write_text("---\nname: beta-skill\n---\n# B\n", encoding="utf-8")
-            (beta / "skills.md").write_text("---\nname: beta-skills\n---\n# B2\n", encoding="utf-8")
-
-            gamma = root / "gamma"
-            gamma.mkdir()
-            (gamma / "SKILLS.MD").write_text("---\nname: gamma-skills\n---\n# G\n", encoding="utf-8")
-
-            delta = root / "delta"
-            delta.mkdir()
-            nested = delta / "nested"
-            nested.mkdir()
-            (nested / "skill.md").write_text("---\nname: nested-skill\n---\n# N\n", encoding="utf-8")
-            (nested / "skills.md").write_text("---\nname: nested-skills\n---\n# N2\n", encoding="utf-8")
+            (beta / "SKILLS.MD").write_text(_skill_body("beta-skills"), encoding="utf-8")
 
             misc = root / "misc"
             misc.mkdir()
-            (misc / "note.md").write_text("---\nname: misc\n---\n# Misc\n", encoding="utf-8")
+            (misc / "note.md").write_text(_skill_body("misc"), encoding="utf-8")
 
-            self.skills_manager.load_skills_from_directory(str(root))
+            loaded = self.skills_manager.load_skills_from_directory(str(root))
 
+            self.assertEqual(loaded, ["root-skill"])
             self.assertIn("root-skill", self.skills_manager.skills)
-            self.assertIn("alpha-skill", self.skills_manager.skills)
-            self.assertIn("beta-skill", self.skills_manager.skills)
-            self.assertIn("beta-skills", self.skills_manager.skills)
-            self.assertIn("gamma-skills", self.skills_manager.skills)
-            self.assertIn("nested-skill", self.skills_manager.skills)
-            self.assertIn("nested-skills", self.skills_manager.skills)
+            self.assertNotIn("alpha-skill", self.skills_manager.skills)
+            self.assertNotIn("beta-skills", self.skills_manager.skills)
             self.assertNotIn("misc", self.skills_manager.skills)
+
+    def test_directory_without_root_skill_recurses_into_subdirectories(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            alpha = root / "alpha"
+            alpha.mkdir()
+            (alpha / "SKILL.md").write_text(_skill_body("alpha-skill"), encoding="utf-8")
+            lower = root / "lower"
+            lower.mkdir()
+            (lower / "skill.md").write_text(_skill_body("lower-skill"), encoding="utf-8")
+
+            loaded = self.skills_manager.load_skills_from_directory(str(root))
+
+            self.assertEqual(loaded, ["alpha-skill", "lower-skill"])
+            self.assertIn("alpha-skill", self.skills_manager.skills)
+            self.assertIn("lower-skill", self.skills_manager.skills)
+
+    def test_direct_file_must_be_skill_entrypoint(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            direct = root / "SKILL.md"
+            direct.write_text(_skill_body("direct-skill"), encoding="utf-8")
+            loose = root / "loose.md"
+            loose.write_text(_skill_body("loose-skill"), encoding="utf-8")
+
+            self.assertEqual(self.skills_manager.load_skills_from_directory(str(direct)), ["direct-skill"])
+            self.assertEqual(self.skills_manager.load_skills_from_directory(str(loose)), [])
 
 
 if __name__ == "__main__":

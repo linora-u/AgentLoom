@@ -27,8 +27,9 @@ worker_agents:
   []
 
 skills:
-  - path: "applications/test_demo/skills"
-    platform: "Claude"
+  load-mode: "on-demand"
+  items:
+    - "applications/test_demo/skills"
 
 execution_env:
   type: "local"
