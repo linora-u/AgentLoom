@@ -78,3 +78,99 @@ workflow: |
 | Path C: Python 包装 Agent | 批量、断点、错误隔离、前后置处理 | Tool 内调用 `YamlAgentFactory.create_agent_as_tool()` |
 
 优先 Path A；需要 Python 控制流时再用 Path C。
+
+## Skills 配置
+
+AgentLoom 的 Skill 配置是 application/agent 行为配置，不是元数据登记表。配置了就启动时注册；默认按需加载。
+
+最常用写法：
+
+```yaml
+skills:
+  load-mode: on-demand
+  items:
+    - applications/<app_name>/skills/<skill_name>
+    - applications/<app_name>/skills/<another_skill>
+```
+
+全文预加载：
+
+```yaml
+skills:
+  load-mode: eager
+  items:
+    - applications/<app_name>/skills/strict-review
+```
+
+显式收紧脚本或网络：
+
+```yaml
+skills:
+  load-mode: on-demand
+  allow-scripts: false
+  allow-network: false
+  items:
+    - applications/<app_name>/skills/safe-review
+```
+
+规则：
+
+- `load-mode` 只支持 `on-demand` 和 `eager`，不写时默认 `on-demand`。
+- `on-demand` 只把 catalogue 放进 prompt：`name`、`description`、`argument_hint`、`when_to_use`；模型需要时调用 `load_skill`。
+- `eager` 把完整 Skill 正文注入系统 prompt，不再重复放 catalogue。
+- `items` 推荐写应用内相对路径，例如 `applications/<app_name>/skills/tdd`。
+- 单个 item 可以写字符串路径；只有需要覆盖策略时才写字典。
+- `allow-scripts` 和 `allow-network` 默认允许；用户明确禁止时才设置为 `false`。
+- 不再使用 `invocation-control`、`force-inject`、`hidden`、`user-invocable` 这类状态。
+
+字典 item 写法仅用于局部覆盖：
+
+```yaml
+skills:
+  load-mode: on-demand
+  items:
+    - path: applications/<app_name>/skills/script-probe
+      load-mode: eager
+      allow-scripts: true
+      allow-network: false
+```
+
+## Skill 包结构
+
+标准结构：
+
+```text
+applications/<app_name>/skills/<skill_name>/
+├── SKILL.md
+├── references/
+├── scripts/
+└── assets/
+```
+
+`SKILL.md` frontmatter 参考 Claude Code 风格：
+
+```yaml
+---
+name: tdd
+description: Test-driven development workflow.
+allowed-tools: Bash, Read, Edit
+argument-hint: "<task>"
+arguments: [task]
+when_to_use: Use when implementing or fixing behavior with tests.
+model: powerful
+context: fork
+agent: reviewer
+effort: high
+shell: bash
+hooks: {}
+---
+```
+
+规则：
+
+- `name` 和 `description` 必填。
+- `SKILL.md` 文件发现忽略大小写，但新写文件统一使用 `SKILL.md`。
+- 不加载散落 `.md`、`skills.md` 或 loose markdown。
+- 未识别 frontmatter 字段静默忽略，不映射旧字段。
+- `when-to-use` 不等于 `when_to_use`，`argument-names` 不等于 `arguments`。
+- skill 需要脚本时，把脚本放在 `scripts/`，由 `run_skill_script` 执行并保留审计日志。

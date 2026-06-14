@@ -623,11 +623,45 @@ class RoleDrivenAgent(BaseAgent):
     def _normalize_skills_config_items(skills_conf: Any) -> list[Any]:
         if skills_conf is None:
             return []
+        if isinstance(skills_conf, dict) and "items" in skills_conf:
+            items = skills_conf.get("items")
+            if items is None:
+                return []
+            if isinstance(items, (str, dict)):
+                return [items]
+            if isinstance(items, list):
+                return items
+            raise ValueError("Configuration error: skills.items must be a list, dict, or string path")
         if isinstance(skills_conf, (str, dict)):
             return [skills_conf]
         if isinstance(skills_conf, list):
             return skills_conf
         raise ValueError("Configuration error: skills must be a list, dict, or string path")
+
+    @staticmethod
+    def _skills_config_defaults(skills_conf: Any, *, logger: Any) -> dict[str, Any]:
+        log = get_logger(logger, __name__)
+        defaults = {
+            "load_mode": "on-demand",
+            "allow_scripts": True,
+            "allow_network": True,
+        }
+        if not isinstance(skills_conf, dict) or "items" not in skills_conf:
+            return defaults
+        defaults["load_mode"] = str(skills_conf.get("load-mode", "on-demand")).strip().lower()
+        defaults["allow_scripts"] = BoolParser.parse(
+            skills_conf.get("allow-scripts", True),
+            default=True,
+            field_name="skills.allow-scripts",
+            logger=log,
+        )
+        defaults["allow_network"] = BoolParser.parse(
+            skills_conf.get("allow-network", True),
+            default=True,
+            field_name="skills.allow-network",
+            logger=log,
+        )
+        return defaults
 
     def _load_skills_from_config_entries(
         self,
@@ -636,20 +670,34 @@ class RoleDrivenAgent(BaseAgent):
         *,
         logger: Any,
     ) -> None:
-        from src.lib.smolagents.skills.parser import parse_invocation_control
-
         log = get_logger(logger, __name__)
+        defaults = self._skills_config_defaults(skills_conf, logger=log)
         for sk in self._normalize_skills_config_items(skills_conf):
             sk_path = None
             sk_platform = None
-            sk_invocation_control = None
+            sk_load_mode = defaults["load_mode"]
+            sk_allow_scripts = defaults["allow_scripts"]
+            sk_allow_network = defaults["allow_network"]
 
             if isinstance(sk, dict):
                 sk_path = sk.get('path')
                 sk_platform = sk.get('platform')
-                ic_raw = sk.get('invocation-control')
-                if ic_raw is not None:
-                    sk_invocation_control = parse_invocation_control(ic_raw, logger=log)
+                if "load-mode" in sk:
+                    sk_load_mode = str(sk.get("load-mode", sk_load_mode)).strip().lower()
+                if "allow-scripts" in sk:
+                    sk_allow_scripts = BoolParser.parse(
+                        sk.get("allow-scripts"),
+                        default=sk_allow_scripts,
+                        field_name="skills.items.allow-scripts",
+                        logger=log,
+                    )
+                if "allow-network" in sk:
+                    sk_allow_network = BoolParser.parse(
+                        sk.get("allow-network"),
+                        default=sk_allow_network,
+                        field_name="skills.items.allow-network",
+                        logger=log,
+                    )
                 if not sk_path:
                     msg = f"Skill configuration error: dictionary item is missing required 'path' field: {sk}"
                     log.warning(msg)
@@ -665,9 +713,11 @@ class RoleDrivenAgent(BaseAgent):
                 path_obj = Path(C.agent_root) / path_obj
 
             # Load skills from the directory and keep track of loaded skill names
-            loaded_names = skills_manager.load_skills_from_directory(
+            skills_manager.load_skills_from_directory(
                 str(path_obj), platform=sk_platform,
-                invocation_control=sk_invocation_control,
+                load_mode=sk_load_mode,
+                allow_scripts=sk_allow_scripts,
+                allow_network=sk_allow_network,
             )
 
     def initialize_skills_manager(self, config: dict, logger: Optional[AgentLogger] = None):
@@ -698,9 +748,10 @@ class RoleDrivenAgent(BaseAgent):
         skills_manager.set_tools_mapping(tools_mapping)
 
         # Load skills from effective agent config (app-level system.yaml overlay).
-        # skills: []   → explicit opt-out, skip all global skills including default directory.
-        # skills: null → not configured, only load default directory.
-        # skills: [p1] → load specified entries + default directory.
+        # skills: []                         → explicit opt-out, skip default directory.
+        # skills: null                       → not configured, only load default directory.
+        # skills: [p1]                       → load entries + default directory.
+        # skills: {load-mode, items: [...]}  → load entries with a shared policy.
         global_skills_conf = self._effective_agent_config.get("skills")
 
         if global_skills_conf:

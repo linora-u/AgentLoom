@@ -30,6 +30,14 @@ class TestSkillConfigValidator(unittest.TestCase):
                 "description: Parser fixture\n"
                 "version: \"1.0\"\n"
                 "allowed-tools: Read, Write\n"
+                "argument-hint: \"<path>\"\n"
+                "arguments: [path]\n"
+                "when_to_use: Use when inspecting files.\n"
+                "model: powerful\n"
+                "context: fork\n"
+                "agent: reviewer\n"
+                "effort: high\n"
+                "shell: bash\n"
                 "hooks:\n"
                 "  PreToolUse:\n"
                 "    - matcher: \"Read|Write\"\n"
@@ -38,6 +46,8 @@ class TestSkillConfigValidator(unittest.TestCase):
                 "          command: \"echo hi\"\n"
                 "platform: Claude\n"
                 "custom-field: ignored\n"
+                "when-to-use: legacy ignored\n"
+                "argument-names: [legacy]\n"
                 "---\n"
                 "# Body\n",
                 encoding="utf-8",
@@ -48,11 +58,18 @@ class TestSkillConfigValidator(unittest.TestCase):
             self.assertEqual(skill.metadata.name, "parser-alignment")
             self.assertEqual(skill.metadata.description, "Parser fixture")
             self.assertEqual(skill.metadata.version, "1.0")
-            # Default invocation_control when not passed via parameter
-            self.assertTrue(skill.metadata.invocation_control.get("allow-model"))
             self.assertEqual(skill.metadata.allowed_tools, ["Read", "Write"])
+            self.assertEqual(skill.metadata.argument_hint, "<path>")
+            self.assertEqual(skill.metadata.arguments, ["path"])
+            self.assertEqual(skill.metadata.when_to_use, "Use when inspecting files.")
+            self.assertEqual(skill.metadata.model, "powerful")
+            self.assertEqual(skill.metadata.context, "fork")
+            self.assertEqual(skill.metadata.agent, "reviewer")
+            self.assertEqual(skill.metadata.effort, "high")
+            self.assertEqual(skill.metadata.shell, "bash")
             self.assertIn("PreToolUse", skill.metadata.hooks)
             self.assertIsNone(skill.metadata.platform)
+            self.assertFalse(hasattr(skill.metadata, "argument_names"))
             self.assertFalse(hasattr(skill.metadata, "runtime"))
             self.assertFalse(hasattr(skill.metadata, "custom-field"))
 

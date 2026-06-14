@@ -29,7 +29,7 @@ _LOGGER = logging.getLogger(__name__)
 class _NoSkills:
     """Stub SkillsManager that contributes no prompt sections."""
 
-    def get_force_injected_prompt(self) -> str:
+    def get_eager_skills_prompt(self) -> str:
         return ""
 
     def get_skills_prompt(self) -> str:
@@ -39,8 +39,8 @@ class _NoSkills:
 class _TaggedSkills:
     """SkillsManager stub returning identifiable prompt fragments."""
 
-    def get_force_injected_prompt(self) -> str:
-        return "\n[FORCE_INJECTED]"
+    def get_eager_skills_prompt(self) -> str:
+        return "\n[EAGER]"
 
     def get_skills_prompt(self) -> str:
         return "\n[ON_DEMAND_CATALOGUE]"
@@ -197,10 +197,10 @@ class TestBuildPromptTemplates:
             logger=_LOGGER,
         )
         system = result["system_prompt"]
-        assert "[FORCE_INJECTED]" in system
+        assert "[EAGER]" in system
         assert "[ON_DEMAND_CATALOGUE]" in system
-        # Force-injected should come before on-demand catalogue
-        assert system.index("[FORCE_INJECTED]") < system.index("[ON_DEMAND_CATALOGUE]")
+        # Eager full instructions should come before the on-demand catalogue.
+        assert system.index("[EAGER]") < system.index("[ON_DEMAND_CATALOGUE]")
 
     def test_raises_on_missing_explicit_path(self, tmp_path):
         with pytest.raises(ValueError, match="does not exist"):
@@ -262,4 +262,4 @@ class TestBuildPromptTemplates:
             skills_manager=None,
             logger=_LOGGER,
         )
-        assert "[FORCE_INJECTED]" in result["system_prompt"]
+        assert "[EAGER]" in result["system_prompt"]

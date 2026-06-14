@@ -527,9 +527,22 @@ skills: []   # Explicit opt-out: skip all global skills including AGENT_ROOT/ski
 ```yaml
 skills:
   - path: "skills/agent-recall-with-files"
-    platform: "Claude"
+    load-mode: "eager"
   - path: "skills/agent-visualization"
   - "skills/another-skill"              # Plain strings work as list items too
+```
+
+**Format 1b: Shared policy with `items`**
+
+```yaml
+skills:
+  load-mode: "on-demand"
+  allow-scripts: false
+  allow-network: false
+  items:
+    - "skills/safe-review"
+    - path: "skills/strict-review"
+      load-mode: "eager"
 ```
 
 **Format 2: Dictionary format (single skill)**
@@ -552,9 +565,11 @@ skills: "skills/agent-recall-with-files"
 
 | Sub-field | Type | Default | Required | Description |
 |--------|------|--------|------|------|
-| `path` | `str` | — | ✅ Required | Skill directory path. Relative paths resolved based on `AGENT_ROOT`. Framework recursively searches for `skill.md` or `skills.md` files (case-insensitive) in the directory |
-| `platform` | `str` | `null` | ❌ Optional | Specify the platform the skill is adapted for (e.g., `"Claude"`). When set, overrides the platform defined in the skill file, affecting `tools_mapping` matching |
-| `invocation-control` | `dict` | `{"allow-model": true, "allow-hook": true}` | ❌ Optional | Controls Skill visibility and Hook permissions. `allow-model` supports three states: `true` (on-demand), `false` (hidden), `"force-inject"` (force-injected); `allow-hook` is boolean. See [Skills Configuration Reference](skills_config.md#52-invocation-control--invocation-control-and-visibility) |
+| `path` | `str` | — | ✅ Required | Skill package path. Relative paths resolve from `AGENT_ROOT`. The runtime loads only a package entrypoint named `SKILL.md` / `skill.md` (case-insensitive), not loose Markdown or `skills.md` |
+| `platform` | `str` | `null` | ❌ Optional | Specify the platform the skill is adapted for (e.g., `"Claude"`), used by `tools_mapping` |
+| `load-mode` | `str` | `on-demand` | ❌ Optional | `on-demand` puts only the catalogue in the prompt; `eager` injects the full skill body |
+| `allow-scripts` | `bool` | `true` | ❌ Optional | Set to `false` to block `run_skill_script` for this skill |
+| `allow-network` | `bool` | `true` | ❌ Optional | Set to `false` to block common network commands inside `run_skill_script` |
 
 **Validation**: `skills` overall must be `list`, `dict`, or `str`; otherwise raises `skills must be a list, dict, or string path`.
 

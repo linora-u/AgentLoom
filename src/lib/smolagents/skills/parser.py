@@ -1,7 +1,9 @@
 """Skill file parsing and prompt generation.
 
-Extracts metadata and markdown body from SKILL.md / skill.md files
-with YAML frontmatter, and builds the skills catalogue prompt.
+AgentLoom skills use Claude Code style ``SKILL.md`` packages.  The parser is
+strict about the required contract (valid YAML frontmatter with ``name`` and
+``description``) and intentionally ignores unknown frontmatter fields instead
+of mapping legacy aliases.
 """
 
 from __future__ import annotations
@@ -13,26 +15,36 @@ from typing import Any, Dict, List, Optional
 
 import frontmatter
 
-from src.lib.config.config_validation import BoolParser
 from src.lib.logging import get_logger
 
 # ---------------------------------------------------------------------------
 # Data classes
 # ---------------------------------------------------------------------------
 
+_SKILL_NAME_RE = re.compile(r"^[a-z0-9]+(?:-[a-z0-9]+)*$")
+_MAX_SKILL_NAME_LENGTH = 64
+_MAX_SKILL_DESCRIPTION_LENGTH = 1024
+
+
 @dataclass
 class SkillMetadata:
     name: str
     description: str
     version: Optional[str] = None
-    invocation_control: Optional[Dict[str, Any]] = None
     allowed_tools: Optional[List[str]] = None
     hooks: Optional[Dict[str, Any]] = None
     platform: Optional[str] = None
-
-    def __post_init__(self):
-        if self.invocation_control is None:
-            self.invocation_control = {"allow-model": True, "allow-hook": True}
+    argument_hint: Optional[str] = None
+    arguments: Optional[List[str]] = None
+    when_to_use: Optional[str] = None
+    model: Optional[str] = None
+    context: Optional[str] = None
+    agent: Optional[str] = None
+    effort: Optional[str] = None
+    shell: Optional[str] = None
+    load_mode: str = "on-demand"
+    allow_scripts: bool = True
+    allow_network: bool = True
 
 
 @dataclass
@@ -41,6 +53,10 @@ class Skill:
     content: Optional[str]
     file_path: str
     hooks_registered: bool = False
+
+    @property
+    def base_dir(self) -> str:
+        return str(Path(self.file_path).parent)
 
 
 @dataclass
@@ -127,52 +143,40 @@ def parse_skill_file(file_path: str, logger=None) -> tuple[SkillMetadata, str]:
 
     try:
         post = frontmatter.loads(content)
-        data = post.metadata or {}
+        data = post.metadata
         markdown_body = post.content
         if content.endswith(("\n", "\r\n")) and not markdown_body.endswith(("\n", "\r\n")):
             markdown_body += "\n"
     except Exception as e:
-        logger.warning(
-            "Failed to parse YAML in %s; treating as markdown only: %s",
-            file_path,
-            e,
-        )
-        data = {}
-        markdown_body = content
-
-    if data is None:
-        data = {}
+        raise ValueError(f"Invalid skill frontmatter in {file_path}: {e}") from e
 
     if not isinstance(data, dict):
-        logger.warning(
-            "Skill in %s has invalid frontmatter (expected mapping); treating as markdown only",
-            file_path,
-        )
-        data = {}
-        markdown_body = content
+        raise ValueError(f"Skill frontmatter must be a YAML mapping: {file_path}")
 
     name = data.get("name")
-    if not isinstance(name, str) or not name:
-        name = Path(file_path).parent.name
+    if not isinstance(name, str) or not name.strip():
+        raise ValueError(f"Skill frontmatter requires non-empty string field 'name': {file_path}")
+    name = name.strip()
+    _validate_skill_name(name, file_path)
 
     description = data.get("description", "")
-    if not isinstance(description, str):
-        description = ""
+    if not isinstance(description, str) or not description.strip():
+        raise ValueError(f"Skill frontmatter requires non-empty string field 'description': {file_path}")
+    description = description.strip()
+    if len(description) > _MAX_SKILL_DESCRIPTION_LENGTH:
+        raise ValueError(
+            f"Skill description exceeds {_MAX_SKILL_DESCRIPTION_LENGTH} characters: {file_path}"
+        )
 
     version = data.get("version")
     if not isinstance(version, str):
         version = None
 
-    allowed_tools_raw = data.get("allowed-tools")
-    allowed_tools: Optional[List[str]] = None
-    if isinstance(allowed_tools_raw, list):
-        if all(isinstance(tool, str) for tool in allowed_tools_raw):
-            allowed_tools = allowed_tools_raw
-    elif isinstance(allowed_tools_raw, str):
-        parts = re.split(r"[,|\s]+", allowed_tools_raw.strip())
-        allowed_tools = [t for t in parts if t] or None
+    allowed_tools = _parse_string_list(data.get("allowed-tools"), field_name="allowed-tools")
 
     hooks_raw = data.get("hooks")
+    if hooks_raw is not None and not isinstance(hooks_raw, dict):
+        raise ValueError(f"Skill field 'hooks' must be a mapping: {file_path}")
     hooks = hooks_raw if isinstance(hooks_raw, dict) else None
 
     metadata = SkillMetadata(
@@ -181,62 +185,55 @@ def parse_skill_file(file_path: str, logger=None) -> tuple[SkillMetadata, str]:
         version=version,
         allowed_tools=allowed_tools,
         hooks=hooks,
+        argument_hint=_optional_str(data.get("argument-hint")),
+        arguments=_parse_string_list(data.get("arguments"), field_name="arguments"),
+        when_to_use=_optional_str(data.get("when_to_use")),
+        model=_optional_str(data.get("model")),
+        context=_parse_context(data.get("context")),
+        agent=_optional_str(data.get("agent")),
+        effort=_optional_str(data.get("effort")),
+        shell=_optional_str(data.get("shell")),
     )
 
     return metadata, markdown_body
 
 
-# ---------------------------------------------------------------------------
-# Invocation-control parsing (reference-site config)
-# ---------------------------------------------------------------------------
-
-def parse_invocation_control(
-    raw: Any,
-    *,
-    logger: Any = None,
-) -> Dict[str, Any]:
-    """Parse an ``invocation-control`` dict from Agent YAML / system.yaml.
-
-    Returns a normalised dict with keys ``"allow-model"`` (tri-state:
-    ``True`` | ``False`` | ``"force-inject"``) and ``"allow-hook"`` (bool).
-
-    When *raw* is not a dict, returns the default
-    ``{"allow-model": True, "allow-hook": True}``.
-    """
-    logger = get_logger(logger, __name__)
-
-    if not isinstance(raw, dict):
-        logger.warning(
-            "invocation-control value is not a dict (%r); using defaults",
-            raw,
-        )
-        return {"allow-model": True, "allow-hook": True}
-
-    result: Dict[str, Any] = {}
-
-    # allow-model: tri-state — True | False | "force-inject"
-    _raw_allow_model = raw.get("allow-model", True)
-    if isinstance(_raw_allow_model, str) and _raw_allow_model.strip().lower() in (
-        "force-inject", "force_inject", "inject",
-    ):
-        result["allow-model"] = "force-inject"
-    else:
-        result["allow-model"] = BoolParser.parse(
-            _raw_allow_model,
-            default=True,
-            field_name="invocation-control.allow-model",
-            logger=logger,
+def _validate_skill_name(name: str, file_path: str) -> None:
+    if len(name) > _MAX_SKILL_NAME_LENGTH:
+        raise ValueError(f"Skill name exceeds {_MAX_SKILL_NAME_LENGTH} characters: {file_path}")
+    if not _SKILL_NAME_RE.fullmatch(name):
+        raise ValueError(
+            "Skill name must use lowercase kebab-case with letters, digits, and single hyphens: "
+            f"{file_path}"
         )
 
-    # allow-hook: boolean
-    result["allow-hook"] = BoolParser.parse(
-        raw.get("allow-hook", True),
-        default=True,
-        field_name="invocation-control.allow-hook",
-        logger=logger,
-    )
 
-    return result
+def _optional_str(value: Any) -> Optional[str]:
+    if isinstance(value, str) and value.strip():
+        return value.strip()
+    return None
+
+
+def _parse_string_list(value: Any, *, field_name: str) -> Optional[List[str]]:
+    if value is None:
+        return None
+    if isinstance(value, list):
+        items = [item.strip() for item in value if isinstance(item, str) and item.strip()]
+        return items or None
+    if isinstance(value, str):
+        parts = re.split(r"[,|\n]+", value.strip())
+        items = [part.strip() for part in parts if part.strip()]
+        return items or None
+    raise ValueError(f"Skill field '{field_name}' must be a string or list of strings")
+
+
+def _parse_context(value: Any) -> Optional[str]:
+    if isinstance(value, str) and value.strip():
+        parsed = value.strip()
+        if parsed not in {"inline", "fork"}:
+            raise ValueError("Skill field 'context' must be 'inline' or 'fork'")
+        return parsed
+    return None
 
 
 # ---------------------------------------------------------------------------
@@ -248,20 +245,17 @@ def build_skills_prompt(
 ) -> str:
     """Build the skills catalogue section for the system prompt.
 
-    Only skills with ``allow-model: true`` (on-demand) are included.
-    Skills with ``allow-model: false`` (hidden) or
-    ``allow-model: "force-inject"`` are excluded.
+    Only skills configured with ``load_mode == "on-demand"`` are included.
+    Eager skills are injected separately with their full instructions.
     """
     if not skills:
         return ""
 
-    # Only on-demand skills (allow-model is exactly True) go into the catalogue
     on_demand_skills = [
         s for s in sorted(skills.values(), key=lambda s: s.metadata.name)
-        if s.metadata.invocation_control.get("allow-model", True) is True
+        if s.metadata.load_mode == "on-demand"
     ]
 
-    # If every skill is force-injected, no catalogue or mandatory check needed
     if not on_demand_skills:
         return ""
 
@@ -270,6 +264,10 @@ def build_skills_prompt(
         skills_xml_parts.append("<skill>")
         skills_xml_parts.append(f"<name>{skill.metadata.name}</name>")
         skills_xml_parts.append(f"<description>{skill.metadata.description}</description>")
+        if skill.metadata.argument_hint:
+            skills_xml_parts.append(f"<argument_hint>{skill.metadata.argument_hint}</argument_hint>")
+        if skill.metadata.when_to_use:
+            skills_xml_parts.append(f"<when_to_use>{skill.metadata.when_to_use}</when_to_use>")
         skills_xml_parts.append("</skill>")
     skills_xml = "\n".join(skills_xml_parts)
     return SKILLS_PROMPT.format(skillsXml=skills_xml)
