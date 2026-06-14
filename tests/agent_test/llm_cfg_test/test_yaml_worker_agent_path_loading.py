@@ -216,7 +216,12 @@ agent_function_schema:
     monkeypatch.setattr(yaml_factory_module, "AGENT_ROOT", tmp_path)
     monkeypatch.setattr(yaml_factory_module, "get_worker_agent_yaml_path", lambda _category: worker_folder)
     monkeypatch.setattr(YamlAgentFactory, "get_tools_from_config", lambda *_args, **_kwargs: ([], None))
-    # DO NOT mock create_agent_as_tool here to test the real integration
+    real_create_agent_as_tool = YamlAgentFactory.create_agent_as_tool
+
+    def _create_with_test_model(config, **kwargs):
+        return real_create_agent_as_tool(config, model=object(), **kwargs)
+
+    monkeypatch.setattr(YamlAgentFactory, "create_agent_as_tool", _create_with_test_model)
 
     supervisor = _build_supervisor_for_get_tools([{"path": "valid.yaml"}])
     tools = supervisor._get_tools()
@@ -245,7 +250,12 @@ workflow: "wf"
     monkeypatch.setattr(yaml_factory_module, "AGENT_ROOT", tmp_path)
     monkeypatch.setattr(yaml_factory_module, "get_worker_agent_yaml_path", lambda _category: worker_folder)
     monkeypatch.setattr(YamlAgentFactory, "get_tools_from_config", lambda *_args, **_kwargs: ([], None))
-    # DO NOT mock create_agent_as_tool here to test the real integration
+    real_create_agent_as_tool = YamlAgentFactory.create_agent_as_tool
+
+    def _create_with_test_model(config, **kwargs):
+        return real_create_agent_as_tool(config, model=object(), **kwargs)
+
+    monkeypatch.setattr(YamlAgentFactory, "create_agent_as_tool", _create_with_test_model)
 
     supervisor = _build_supervisor_for_get_tools([{"path": "missing.yaml"}])
     tools = supervisor._get_tools()

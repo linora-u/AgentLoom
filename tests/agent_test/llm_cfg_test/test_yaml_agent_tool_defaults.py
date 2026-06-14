@@ -261,7 +261,7 @@ def test_factory_create_agent_as_tool_exports_when_schema_present():
         "workflow": "demo workflow",
         "agent_function_schema": _basic_schema("factory tool doc"),
     }
-    tool = YamlAgentFactory.create_agent_as_tool(config)
+    tool = YamlAgentFactory.create_agent_as_tool(config, model=object())
     assert tool is not None
     assert tool.__name__ == "demo_worker"
 
@@ -273,7 +273,7 @@ def test_factory_create_agent_as_tool_not_exported_when_schema_missing():
         "tools": [],
         "workflow": "demo workflow",
     }
-    tool = YamlAgentFactory.create_agent_as_tool(config)
+    tool = YamlAgentFactory.create_agent_as_tool(config, model=object())
     assert tool is None
 
 

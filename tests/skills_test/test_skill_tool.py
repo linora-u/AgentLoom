@@ -3,6 +3,7 @@ import logging
 import sys
 import tempfile
 import unittest
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
 SCRIPT_DIR = Path(__file__).resolve().parent
@@ -10,7 +11,7 @@ AGENT_LOOM_ROOT = SCRIPT_DIR.parents[1]
 if str(AGENT_LOOM_ROOT) not in sys.path:
     sys.path.insert(0, str(AGENT_LOOM_ROOT))
 
-from src.tools.skills import load_skill as skill_tool, list_skills
+from src.tools.skills import load_skill as skill_tool, list_skills, read_skill_resource
 from src.trace.task_context import (
     clear_current_skills_manager,
     set_current_skills_manager,
@@ -112,8 +113,8 @@ class TestSkillTool(unittest.TestCase):
         self.assertEqual(item.get("description"), "List demo")
 
     def test_skill_tool_prefers_current_skills_manager_context(self):
-        skill_a_path = self._write_temp_skill("---\nname: skill-a\n---\n# Body A\n")
-        skill_b_path = self._write_temp_skill("---\nname: skill-b\n---\n# Body B\n")
+        skill_a_path = self._write_temp_skill("---\nname: skill-a\ndescription: A\n---\n# Body A\n")
+        skill_b_path = self._write_temp_skill("---\nname: skill-b\ndescription: B\n---\n# Body B\n")
 
         manager_a = SkillsManager(
             logger=logging.getLogger(__name__),
@@ -160,6 +161,47 @@ class TestSkillTool(unittest.TestCase):
         set_current_skills_manager(manager_b)
         data = json.loads(list_skills())
         self.assertEqual([item["name"] for item in data], ["ctx-b"])
+
+    def test_list_skills_uses_context_fallback_across_threads(self):
+        skill_path = self._write_temp_skill("---\nname: threaded-skill\ndescription: Threaded\n---\n# Body\n")
+        self.skills_manager.load_skill_metadata(str(skill_path))
+        set_current_skills_manager(self.skills_manager)
+
+        with ThreadPoolExecutor(max_workers=1) as executor:
+            data = json.loads(executor.submit(list_skills).result())
+
+        self.assertEqual([item["name"] for item in data], ["threaded-skill"])
+
+    def test_read_skill_resource_reads_bundled_file_by_lines(self):
+        temp_dir = tempfile.TemporaryDirectory()
+        self._temp_dirs.append(temp_dir)
+        skill_dir = Path(temp_dir.name) / "resource-skill"
+        (skill_dir / "references").mkdir(parents=True)
+        (skill_dir / "SKILL.md").write_text(
+            "---\nname: resource-skill\ndescription: Resource\n---\n# Body\n",
+            encoding="utf-8",
+        )
+        (skill_dir / "references" / "guide.md").write_text("one\ntwo\nthree\n", encoding="utf-8")
+        self.skills_manager.load_skill_metadata(str(skill_dir / "SKILL.md"))
+
+        data = json.loads(read_skill_resource("resource-skill", "references/guide.md", offset=2, limit=1))
+
+        self.assertEqual(data["content"], "two")
+        self.assertEqual(data["total_lines"], 3)
+
+    def test_read_skill_resource_rejects_directory_escape(self):
+        temp_dir = tempfile.TemporaryDirectory()
+        self._temp_dirs.append(temp_dir)
+        skill_dir = Path(temp_dir.name) / "resource-skill"
+        skill_dir.mkdir(parents=True)
+        (skill_dir / "SKILL.md").write_text(
+            "---\nname: escape-skill\ndescription: Escape\n---\n# Body\n",
+            encoding="utf-8",
+        )
+        self.skills_manager.load_skill_metadata(str(skill_dir / "SKILL.md"))
+
+        with self.assertRaises(ValueError):
+            read_skill_resource("escape-skill", "../outside.txt")
 
 
 if __name__ == "__main__":

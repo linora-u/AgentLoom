@@ -225,7 +225,7 @@ prompt:
 
 ## 4. skills — 全局 Skills 配置
 
-定义所有 Agent 默认继承的全局 Skill 包。Skills 是可复用的指令集（Instruction），加载策略由引用侧的 `invocation-control.allow-model` 控制：`true`（按需加载）、`false`（隐藏）、`"force-inject"`（强制注入到系统提示词）。
+定义所有 Agent 默认继承的全局 Skill 包。Skills 是可复用的 Claude 风格 `SKILL.md` 包。加载策略由 `load-mode` 控制：`on-demand`（只放 catalogue）或 `eager`（完整正文注入 system prompt）。
 
 **YAML 路径**：`skills` (顶层字段)
 **类型**：`list[dict | str]`
@@ -255,7 +255,9 @@ skills:
 |------|------|--------|------|------|
 | `path` | `str` | — | ✅ 是（字典格式时） | Skill 包所在目录路径。相对路径基于 `AGENT_ROOT`（包含 `config/system.yaml` 的项目根目录）解析 |
 | `platform` | `str` | — | ❌ 否 | 平台标识符（如 `"Claude"`），用于通过 `tools_mapping` 映射工具别名 |
-| `invocation-control` | `dict` | `{"allow-model": true, "allow-hook": true}` | ❌ 否 | 控制 Skill 可见性与 Hook 权限。详见 [Skills 配置文档](skills_config.md#52-invocation-control--调用权限与可见性控制) |
+| `load-mode` | `str` | `on-demand` | ❌ 否 | `on-demand` catalogue 加载，或 `eager` 完整正文注入 |
+| `allow-scripts` | `bool` | `true` | ❌ 否 | 设为 `false` 时阻断 `run_skill_script` |
+| `allow-network` | `bool` | `true` | ❌ 否 | 设为 `false` 时阻断 `run_skill_script` 中常见网络命令 |
 
 ### 4.3 Skills 加载顺序
 
@@ -288,16 +290,12 @@ skills: []   # 显式 opt-out：跳过所有全局 skills，包括 AGENT_ROOT/sk
 ```yaml
 skills:
   - path: "skills/agent-recall-with-files"
-    invocation-control:
-      allow-model: "force-inject"
-      allow-hook: true
+    load-mode: "eager"
 
   - path: "skills/agent-visualization"
-    invocation-control:
-      allow-model: false
-      allow-hook: true
+    allow-scripts: false
 
-  # 简写格式（默认 allow-model: true, allow-hook: true）
+  # 简写格式（默认 load-mode=on-demand，允许脚本和网络）
   - "skills/my-custom-skill"
 ```
 
@@ -1251,7 +1249,7 @@ checkpoint:
 
 | 解析器 | 用途 | 位于 |
 |--------|------|------|
-| `BoolParser` | 兼容布尔输入归一化，实际用于 `logging.enabled`、Skill 的 `invocation-control` 解析、以及部分 LLM 配置开关 | `config_validation.py` / `src/lib/logging/logger_manager.py` / `src/lib/smolagents/skills/parser.py` / `src/lib/config/llm_config.py` |
+| `BoolParser` | 兼容布尔输入归一化，实际用于 `logging.enabled`、Skill 的 `allow-scripts` / `allow-network` 解析、以及部分 LLM 配置开关 | `config_validation.py` / `src/lib/logging/logger_manager.py` / `src/lib/smolagents/agent/base_agent.py` / `src/lib/config/llm_config.py` |
 | `IntParser` | 兼容整数与旁路字符串输入，实际用于模型配置里的 `max_tokens`（支持 `"max"`） | `config_validation.py` / `src/lib/config/llm_config.py` |
 | `FloatParser` | 兼容浮点与整数字符串输入，实际用于模型配置里的 `temperature`、`retry_delay`、`max_retry_delay` | `config_validation.py` / `src/lib/config/llm_config.py` |
 | `EnumParser` | 通用枚举归一化辅助函数，当前未在 system.yaml 主链路中直接消费 | `config_validation.py` |

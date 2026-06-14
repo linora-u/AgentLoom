@@ -1,0 +1,28 @@
+name: "skill_security_probe_agent"
+description: "Probe explicit skill script and network restrictions."
+
+model_type: "powerful"
+tool_call_type: "code_act"
+
+workflow: |
+  Validate explicit restrictions:
+  1. Confirm locked-probe is registered.
+  2. Attempt run_skill_script("locked-probe", "sh scripts/echo.sh") and confirm it is blocked because allow-scripts=false.
+  3. Attempt run_skill_script("network-locked-probe", "curl https://example.com") and confirm it is blocked because allow-network=false.
+  4. Attempt read_skill_resource("network-locked-probe", "../secret.txt") and confirm the directory escape fails.
+
+tools:
+  - name: "list_skills"
+  - name: "read_skill_resource"
+  - name: "run_skill_script"
+
+skills:
+  load-mode: "on-demand"
+  items:
+    - path: "applications/skill_security_probe/skills/locked-probe"
+      allow-scripts: false
+    - path: "applications/skill_security_probe/skills/network-locked-probe"
+      allow-network: false
+
+execution_env:
+  type: "local"

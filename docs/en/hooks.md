@@ -203,7 +203,7 @@ Hooks are currently declared via **Skill YAML**, then loaded through the `skills
 | Configuration Location | Direct `hooks:` field? | Description |
 |------------------------|------------------------|-------------|
 | **Skill YAML** (`SKILL.md` frontmatter) | ✅ Yes | **Primary method** — declare hooks in the YAML frontmatter `hooks:` field |
-| **system.yaml** | ❌ Indirect | Load Skills containing hooks via `skills:`, control with `allow-hook` |
+| **system.yaml** | ❌ Indirect | Load Skills containing hooks via `skills:` |
 | **Agent YAML** | ❌ Indirect | Same — load hooks by referencing Skills via `skills:` |
 
 > **Note**: Writing a `hooks:` top-level field directly in Agent YAML will not take effect — the `HooksConfigManager` bridge is implemented but not wired into the Agent initialization flow. All hooks should be configured through Skills.
@@ -246,7 +246,7 @@ hooks:
 ---
 ```
 
-**Loading timing**: Skill hooks are **eagerly registered** during `load_skill_metadata()` — no need to wait for the LLM to call `load_skill()`. This means even hidden Skills with `allow-model: false` will have their hooks working normally.
+**Loading timing**: Skill hooks are registered during `load_skill_metadata()` when the skill is configured. The model does not need to call `load_skill()` first. `load-mode: on-demand` and `load-mode: eager` only control prompt loading, not hook registration.
 
 ### 6.3 Loading Globally via system.yaml
 
@@ -256,25 +256,13 @@ Reference Skills containing hooks in the `skills:` field of `config/system.yaml`
 # config/system.yaml
 skills:
   - path: "skills/agent-recall-with-files"
-    invocation-control:
-      allow-model: "force-inject"   # Visible to LLM, force-injected into system prompt
-      allow-hook: true              # Hooks registered ✅
+    load-mode: "eager"              # Full body injected into system prompt
 
   - path: "skills/agent-visualization"
-    invocation-control:
-      allow-model: false            # Invisible to LLM (passive observer only)
-      allow-hook: true              # Hooks still registered ✅
+    load-mode: "on-demand"          # Catalogue only; hooks still registered
 ```
 
-**`invocation-control` field reference**:
-
-| Field | Value | Description |
-|-------|-------|-------------|
-| `allow-model` | `true` | LLM can invoke the Skill on demand |
-| | `false` | Invisible to LLM, only hooks are active (passive Skill) |
-| | `"force-inject"` | Force-injected into the system prompt |
-| `allow-hook` | `true` (default) | Register the Skill's hooks |
-| | `false` | Skip hook registration for this Skill |
+Configured skills register their hooks. There is no separate hidden or hook-only skill state.
 
 ### 6.4 Loading via Agent YAML
 
@@ -287,9 +275,7 @@ model_type: powerful
 
 skills:
   - path: "skills/agent-recall-with-files"
-    invocation-control:
-      allow-model: true
-      allow-hook: true
+    load-mode: "on-demand"
 ```
 
 ### 6.5 Complete YAML Schema
