@@ -41,6 +41,8 @@ _global_lock = threading.Lock()
 _global_agent_config_fallback: Optional[dict] = None
 _global_agent_name_fallback: Optional[str] = None
 _global_runtime_agent_path_fallback: Optional[str] = None
+_global_skills_manager_fallback: Optional[Any] = None
+_global_hook_manager_fallback: Optional[Any] = None
 
 
 def set_current_task_id(task_id: str) -> None:
@@ -196,35 +198,55 @@ def clear_current_agent_config() -> None:
 
 def set_current_skills_manager(skills_manager: Any) -> None:
     """Set the current skills manager for the active agent context."""
+    global _global_skills_manager_fallback
     _current_skills_manager.set(skills_manager)
+    with _global_lock:
+        _global_skills_manager_fallback = skills_manager
     logger.debug("Set current skills manager")
 
 
 def get_current_skills_manager() -> Optional[Any]:
     """Get the current skills manager for the active agent context."""
-    return _current_skills_manager.get()
+    value = _current_skills_manager.get()
+    if value is not None:
+        return value
+    with _global_lock:
+        return _global_skills_manager_fallback
 
 
 def clear_current_skills_manager() -> None:
     """Clear the current skills manager."""
+    global _global_skills_manager_fallback
     _current_skills_manager.set(None)
+    with _global_lock:
+        _global_skills_manager_fallback = None
     logger.debug("Cleared current skills manager")
 
 
 def set_current_hook_manager(hook_manager: Any) -> None:
     """Set the current hook manager for the active agent context."""
+    global _global_hook_manager_fallback
     _current_hook_manager.set(hook_manager)
+    with _global_lock:
+        _global_hook_manager_fallback = hook_manager
     logger.debug("Set current hook manager")
 
 
 def get_current_hook_manager() -> Optional[Any]:
     """Get the current hook manager for the active agent context."""
-    return _current_hook_manager.get()
+    value = _current_hook_manager.get()
+    if value is not None:
+        return value
+    with _global_lock:
+        return _global_hook_manager_fallback
 
 
 def clear_current_hook_manager() -> None:
     """Clear the current hook manager."""
+    global _global_hook_manager_fallback
     _current_hook_manager.set(None)
+    with _global_lock:
+        _global_hook_manager_fallback = None
     logger.debug("Cleared current hook manager")
 
 

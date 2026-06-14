@@ -529,9 +529,22 @@ skills: []   # 显式 opt-out：跳过所有全局 skills，包括 AGENT_ROOT/sk
 ```yaml
 skills:
   - path: "skills/agent-recall-with-files"
-    platform: "Claude"
+    load-mode: "eager"
   - path: "skills/agent-visualization"
   - "skills/another-skill"              # 纯字符串也可以作为列表项
+```
+
+**格式 1b：通过 `items` 设置共享策略**
+
+```yaml
+skills:
+  load-mode: "on-demand"
+  allow-scripts: false
+  allow-network: false
+  items:
+    - "skills/safe-review"
+    - path: "skills/strict-review"
+      load-mode: "eager"
 ```
 
 **格式 2：字典格式（单个 skill）**
@@ -554,9 +567,11 @@ skills: "skills/agent-recall-with-files"
 
 | 子字段 | 类型 | 默认值 | 必填 | 说明 |
 |--------|------|--------|------|------|
-| `path` | `str` | — | ✅ 必填 | Skill 目录路径。相对路径基于 `AGENT_ROOT` 解析。框架在该目录下递归查找 `skill.md` 或 `skills.md` 文件（大小写不敏感） |
-| `platform` | `str` | `null` | ❌ 可选 | 指定 skill 适配的平台（如 `"Claude"`）。设置后覆盖 skill 文件中定义的 platform，影响 `tools_mapping` 匹配 |
-| `invocation-control` | `dict` | `{"allow-model": true, "allow-hook": true}` | ❌ 可选 | 控制 Skill 的可见性与 Hook 权限。`allow-model` 支持三态：`true`（按需加载）、`false`（隐藏）、`"force-inject"`（强制注入）；`allow-hook` 布尔值。详见 [Skills 配置文档](skills_config.md#52-invocation-control--调用权限与可见性控制) |
+| `path` | `str` | — | ✅ 必填 | Skill 包路径。相对路径基于 `AGENT_ROOT` 解析。运行时只加载名为 `SKILL.md` / `skill.md` 的包入口（大小写不敏感），不加载散落 Markdown 或 `skills.md` |
+| `platform` | `str` | `null` | ❌ 可选 | 指定 skill 适配的平台（如 `"Claude"`），用于 `tools_mapping` |
+| `load-mode` | `str` | `on-demand` | ❌ 可选 | `on-demand` 只在 prompt 放 catalogue；`eager` 注入完整 skill 正文 |
+| `allow-scripts` | `bool` | `true` | ❌ 可选 | 设为 `false` 时阻断该 skill 的 `run_skill_script` |
+| `allow-network` | `bool` | `true` | ❌ 可选 | 设为 `false` 时阻断 `run_skill_script` 中常见网络命令 |
 
 **校验**：`skills` 整体必须是 `list`、`dict` 或 `str`，否则报错 `skills must be a list, dict, or string path`。
 

@@ -21,7 +21,13 @@ from src.tools.shell import (
     list_background_tasks,
     shell_tool,
 )
-from src.tools.skills import list_skills, load_skill
+from src.tools.skills import (
+    check_skill_dependencies,
+    list_skills,
+    load_skill,
+    read_skill_resource,
+    run_skill_script,
+)
 
 from .file_ops import (
     append_markdown_sections,
@@ -83,6 +89,9 @@ __all__ = [
     # Skills
     "load_skill",
     "list_skills",
+    "read_skill_resource",
+    "check_skill_dependencies",
+    "run_skill_script",
     # Shell
     "shell_tool",
     "check_background_task",

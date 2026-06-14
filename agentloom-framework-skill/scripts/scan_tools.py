@@ -422,20 +422,45 @@ def _extract_agent_summary(agent_file: Path, role: str = "Agent") -> str:
         lines.append(f"- **agent_function_schema**:\n{schema_text}")
 
     if skills_cfg is not None:
-        if isinstance(skills_cfg, list):
-            skill_items = []
-            for item in skills_cfg:
-                if isinstance(item, dict):
-                    skill_items.append(item.get("path", str(item)))
-                else:
-                    skill_items.append(str(item))
-            lines.append(f"- **skills**: {', '.join(skill_items)}")
-        elif isinstance(skills_cfg, dict):
-            lines.append(f"- **skills**: {skills_cfg.get('path', str(skills_cfg))}")
-        else:
-            lines.append(f"- **skills**: {skills_cfg}")
+        lines.append(f"- **skills**: {_format_skills_summary(skills_cfg)}")
 
     return "\n".join(lines)
+
+
+def _format_skills_summary(skills_cfg: Any) -> str:
+    def _format_item(item: Any) -> str:
+        if isinstance(item, dict):
+            return str(item.get("path", item))
+        return str(item)
+
+    if isinstance(skills_cfg, dict) and "items" in skills_cfg:
+        items = skills_cfg.get("items")
+        if isinstance(items, list):
+            skill_items = [_format_item(item) for item in items]
+        elif items is None:
+            skill_items = []
+        else:
+            skill_items = [_format_item(items)]
+
+        suffix = []
+        load_mode = skills_cfg.get("load-mode")
+        if load_mode:
+            suffix.append(f"load-mode={load_mode}")
+        if skills_cfg.get("allow-scripts") is False:
+            suffix.append("allow-scripts=false")
+        if skills_cfg.get("allow-network") is False:
+            suffix.append("allow-network=false")
+
+        summary = ", ".join(skill_items) if skill_items else "(无)"
+        if suffix:
+            summary += f" ({', '.join(suffix)})"
+        return summary
+
+    if isinstance(skills_cfg, list):
+        return ", ".join(_format_item(item) for item in skills_cfg)
+    if isinstance(skills_cfg, dict):
+        return _format_item(skills_cfg)
+    return str(skills_cfg)
 
 
 def _load_agent_config_from_file(agent_file: Path) -> tuple[dict[str, Any] | None, str | None]:
