@@ -22,7 +22,7 @@ FORBIDDEN_TOP_LEVEL = {"model", "llm", "langfuse"}
 ALLOWED_TOOL_CALL_TYPES = {"code_act", "tool_call"}
 ALLOWED_EXECUTION_ENV_TYPES = {"local", "docker", "e2b", "wasm"}
 ALLOWED_WORKER_EXTENSIONS = {".yaml", ".yml", ".md"}
-ALLOWED_INVOCATION_ALLOW_MODEL = {"force-inject"}
+ALLOWED_SKILL_LOAD_MODES = {"on-demand", "eager"}
 
 
 def _add_error(
@@ -298,7 +298,7 @@ def _validate_single_skill_entry(
             field=field_prefix,
             rule="type_dict_or_string",
             message="skills 列表项必须是字符串或字典",
-            suggestion="使用字符串路径，或使用 {path/platform/invocation-control} 字典",
+            suggestion="使用字符串路径，或使用 {path/platform/load-mode/allow-scripts/allow-network} 字典",
             project_root=project_root,
         )
         return
@@ -327,47 +327,88 @@ def _validate_single_skill_entry(
             project_root=project_root,
         )
 
-    invocation = item.get("invocation-control")
-    if invocation is None:
-        return
-    if not isinstance(invocation, dict):
+    _validate_skill_runtime_options(
+        item,
+        file_path=file_path,
+        field_prefix=field_prefix,
+        errors=errors,
+        project_root=project_root,
+    )
+
+
+def _validate_skill_runtime_options(
+    options: dict[str, Any],
+    *,
+    file_path: Path,
+    field_prefix: str,
+    errors: list[dict[str, str]],
+    project_root: Path,
+) -> None:
+    load_mode = options.get("load-mode")
+    if load_mode is not None and (
+        not isinstance(load_mode, str)
+        or load_mode.strip().lower() not in ALLOWED_SKILL_LOAD_MODES
+    ):
         _add_error(
             errors,
             file_path=file_path,
-            field=f"{field_prefix}.invocation-control",
-            rule="type_dict",
-            message="skills.invocation-control 必须是字典",
-            suggestion="使用 {allow-model: true|false|force-inject, allow-hook: true|false}",
+            field=f"{field_prefix}.load-mode",
+            rule="allowed_values",
+            message="skills.load-mode 仅支持 on-demand 或 eager",
+            suggestion="删除该字段或设置为 on-demand/eager",
+            project_root=project_root,
+        )
+
+    for key in ("allow-scripts", "allow-network"):
+        value = options.get(key)
+        if value is not None and not isinstance(value, bool):
+            _add_error(
+                errors,
+                file_path=file_path,
+                field=f"{field_prefix}.{key}",
+                rule="type_bool",
+                message=f"skills.{key} 必须是布尔值",
+                suggestion=f"将 {key} 设置为 true 或 false，或删除该字段使用默认允许",
+                project_root=project_root,
+            )
+
+
+def _validate_skill_items(
+    items: Any,
+    *,
+    file_path: Path,
+    field_prefix: str,
+    errors: list[dict[str, str]],
+    project_root: Path,
+) -> None:
+    if isinstance(items, (str, dict)):
+        _validate_single_skill_entry(
+            items,
+            file_path=file_path,
+            field_prefix=field_prefix,
+            errors=errors,
             project_root=project_root,
         )
         return
 
-    allow_model = invocation.get("allow-model")
-    if allow_model is not None:
-        if isinstance(allow_model, bool):
-            pass
-        elif isinstance(allow_model, str) and allow_model.strip().lower() in ALLOWED_INVOCATION_ALLOW_MODEL:
-            pass
-        else:
-            _add_error(
-                errors,
-                file_path=file_path,
-                field=f"{field_prefix}.invocation-control.allow-model",
-                rule="allowed_values",
-                message="allow-model 仅支持 true/false/force-inject",
-                suggestion="将 allow-model 改为布尔值或字符串 force-inject",
-                project_root=project_root,
-            )
-
-    allow_hook = invocation.get("allow-hook")
-    if allow_hook is not None and not isinstance(allow_hook, bool):
+    if not isinstance(items, list):
         _add_error(
             errors,
             file_path=file_path,
-            field=f"{field_prefix}.invocation-control.allow-hook",
-            rule="type_bool",
-            message="allow-hook 必须是布尔值",
-            suggestion="将 allow-hook 设置为 true 或 false",
+            field=field_prefix,
+            rule="type_list_dict_or_string",
+            message="skills.items 必须是 list / dict / string",
+            suggestion="使用字符串路径，或使用路径字典，或使用列表组合多个 skill",
+            project_root=project_root,
+        )
+        return
+
+    for idx, item in enumerate(items):
+        _validate_single_skill_entry(
+            item,
+            file_path=file_path,
+            field_prefix=f"{field_prefix}[{idx}]",
+            errors=errors,
             project_root=project_root,
         )
 
@@ -382,7 +423,7 @@ def _validate_skills_config(
     if skills is None:
         return
 
-    if isinstance(skills, (str, dict)):
+    if isinstance(skills, str):
         _validate_single_skill_entry(
             skills,
             file_path=file_path,
@@ -390,6 +431,32 @@ def _validate_skills_config(
             errors=errors,
             project_root=project_root,
         )
+        return
+
+    if isinstance(skills, dict):
+        if "items" in skills:
+            _validate_skill_runtime_options(
+                skills,
+                file_path=file_path,
+                field_prefix="skills",
+                errors=errors,
+                project_root=project_root,
+            )
+            _validate_skill_items(
+                skills.get("items"),
+                file_path=file_path,
+                field_prefix="skills.items",
+                errors=errors,
+                project_root=project_root,
+            )
+        else:
+            _validate_single_skill_entry(
+                skills,
+                file_path=file_path,
+                field_prefix="skills",
+                errors=errors,
+                project_root=project_root,
+            )
         return
 
     if not isinstance(skills, list):
@@ -404,14 +471,13 @@ def _validate_skills_config(
         )
         return
 
-    for idx, item in enumerate(skills):
-        _validate_single_skill_entry(
-            item,
-            file_path=file_path,
-            field_prefix=f"skills[{idx}]",
-            errors=errors,
-            project_root=project_root,
-        )
+    _validate_skill_items(
+        skills,
+        file_path=file_path,
+        field_prefix="skills",
+        errors=errors,
+        project_root=project_root,
+    )
 
 
 def _validate_supervisor_worker_agents(

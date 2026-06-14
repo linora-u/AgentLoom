@@ -321,7 +321,7 @@ class TestTaskLifecycleHooks(unittest.TestCase):
             },
         )
 
-        self.assertEqual(result.reason, str(skill_dir))
+        self.assertEqual(Path(result.reason).resolve(), skill_dir.resolve())
 
     def test_stop_hook_allows_without_plan_validation(self):
         """Stop hook should always allow and never read task_plan state."""

@@ -66,9 +66,18 @@ def _run_validator(project_root: Path, app_root: str = "applications/demo") -> t
             "skills/agent-recall-with-files",
             {
                 "path": "skills/agent-visualization",
-                "invocation-control": {"allow-model": "force-inject", "allow-hook": True},
+                "load-mode": "eager",
+                "allow-scripts": False,
             },
         ],
+        {
+            "load-mode": "on-demand",
+            "allow-network": False,
+            "items": [
+                "skills/agent-recall-with-files",
+                {"path": "skills/agent-visualization", "load-mode": "eager"},
+            ],
+        },
     ],
 )
 def test_skills_config_formats_are_supported(tmp_path: Path, skills_value) -> None:

@@ -225,7 +225,7 @@ prompt:
 
 ## 4. skills — Global Skills Configuration
 
-Defines global Skill packages inherited by all Agents by default. Skills are reusable instruction sets, with loading strategy controlled by the reference-side `invocation-control.allow-model`: `true` (on-demand loading), `false` (hidden), `"force-inject"` (force-injected into system prompt).
+Defines global Skill packages inherited by all Agents by default. Skills are reusable Claude-style `SKILL.md` packages. Loading is controlled by `load-mode`: `on-demand` (catalogue only) or `eager` (full body injected into the system prompt).
 
 **YAML path**: `skills` (top-level field)
 **Type**: `list[dict | str]`
@@ -255,7 +255,9 @@ skills:
 |------|------|--------|------|------|
 | `path` | `str` | — | ✅ Yes (in dictionary format) | Skill package directory path. Relative paths are resolved based on `AGENT_ROOT` (project root containing `config/system.yaml`) |
 | `platform` | `str` | — | ❌ No | Platform identifier (e.g., `"Claude"`), used for mapping tool aliases via `tools_mapping` |
-| `invocation-control` | `dict` | `{"allow-model": true, "allow-hook": true}` | ❌ No | Controls Skill visibility and Hook permissions. See [Skills Configuration Reference](skills_config.md#52-invocation-control--invocation-control-and-visibility) for details |
+| `load-mode` | `str` | `on-demand` | ❌ No | `on-demand` catalogue loading or `eager` full-body injection |
+| `allow-scripts` | `bool` | `true` | ❌ No | Set to `false` to block `run_skill_script` |
+| `allow-network` | `bool` | `true` | ❌ No | Set to `false` to block common network commands in `run_skill_script` |
 
 ### 4.3 Skills Loading Order
 
@@ -288,16 +290,12 @@ Useful for lightweight Agents that don't need any Skills (e.g., intent_labeler).
 ```yaml
 skills:
   - path: "skills/agent-recall-with-files"
-    invocation-control:
-      allow-model: "force-inject"
-      allow-hook: true
+    load-mode: "eager"
 
   - path: "skills/agent-visualization"
-    invocation-control:
-      allow-model: false
-      allow-hook: true
+    allow-scripts: false
 
-  # Shorthand format (defaults: allow-model: true, allow-hook: true)
+  # Shorthand format (defaults: load-mode=on-demand, scripts/network allowed)
   - "skills/my-custom-skill"
 ```
 
@@ -1233,7 +1231,7 @@ The framework uses Pydantic to validate system configuration. The following show
 
 | Parser | Purpose | Located in |
 |--------|------|------|
-| `BoolParser` | Compatible boolean input normalization, used for `logging.enabled`, Skill `invocation-control` parsing, and some LLM config switches | `config_validation.py` / `src/lib/logging/logger_manager.py` / `src/lib/smolagents/skills/parser.py` / `src/lib/config/llm_config.py` |
+| `BoolParser` | Compatible boolean input normalization, used for `logging.enabled`, Skill `allow-scripts` / `allow-network` parsing, and some LLM config switches | `config_validation.py` / `src/lib/logging/logger_manager.py` / `src/lib/smolagents/agent/base_agent.py` / `src/lib/config/llm_config.py` |
 | `IntParser` | Compatible integer and bypass string input, used for `max_tokens` in model config (supports `"max"`) | `config_validation.py` / `src/lib/config/llm_config.py` |
 | `FloatParser` | Compatible float and integer string input, used for `temperature`, `retry_delay`, `max_retry_delay` in model config | `config_validation.py` / `src/lib/config/llm_config.py` |
 | `EnumParser` | General-purpose enum normalization helper, not currently consumed directly in the system.yaml main pipeline | `config_validation.py` |

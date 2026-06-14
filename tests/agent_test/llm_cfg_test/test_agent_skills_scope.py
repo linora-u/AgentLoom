@@ -162,6 +162,9 @@ def test_build_prompt_templates_uses_agent_scoped_skills_manager(monkeypatch, tm
     agent._skills_manager.load_skill_metadata(str(skill_path))
 
     class _NoSkills:
+        def get_eager_skills_prompt(self):
+            return ""
+
         def get_skills_prompt(self):
             return ""
 
