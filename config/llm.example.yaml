@@ -43,12 +43,13 @@ model:
   
   # 摘要模型配置（用于文本摘要、内容提取）
   summary:
-    # Use Fast model config to avoid 401 Auth errors on the other endpoint
-    model: "anthropic/claude-sonnet-4-6"
+    # Compact reads ModelType.SUMMARY directly. Configure this to any
+    # compatible, working summary model endpoint for your environment.
     base_url: "xxxxxxx"
     api_key: "xxxxxxx"
-    # 注意：LiteLLM 对 gpt-5 模型要求 temperature=1.0
-    temperature: 0.3
-    max_tokens: 50000
+    model: "openai/gpt-5_5"
+    temperature: 0.2
+    max_tokens: 128000
     timeout: 300
+    requests_per_minute: 10
     context_cache: true

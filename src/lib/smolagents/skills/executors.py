@@ -80,6 +80,75 @@ def _resolve_uv_managed_binary(binary_name: str) -> Optional[str]:
     return shutil.which(binary_name)
 
 
+def _find_project_roots_for_hook_path(*starts: Optional[str]) -> list[Path]:
+    """Find likely AgentLoom roots so hook commands can see local runtimes."""
+    roots: list[Path] = []
+    for raw_start in starts:
+        if not raw_start:
+            continue
+        try:
+            current = Path(raw_start).resolve()
+        except OSError:
+            continue
+        if current.is_file():
+            current = current.parent
+        while current != current.parent:
+            if (current / "config" / "llm.yaml").exists() or (current / "pyproject.toml").exists():
+                if current not in roots:
+                    roots.append(current)
+                break
+            current = current.parent
+    return roots
+
+
+def _prepend_hook_python_paths(
+    env: Dict[str, str],
+    *,
+    skill_dir: Optional[str],
+    execution_cwd: str,
+) -> None:
+    """Put the active Python environment on PATH for shell hook commands.
+
+    Built-in skills historically use commands like ``python ./scripts/foo.py``.
+    Some macOS/Linux environments only provide ``python3`` on the inherited
+    PATH, while AgentLoom itself is launched through an explicit venv Python.
+    Hook scripts should resolve against the same runtime without requiring a
+    user-level ``python`` shim.
+    """
+    candidates: list[Path] = []
+
+    executable = Path(sys.executable)
+    candidates.append(executable.parent)
+    try:
+        candidates.append(executable.resolve().parent)
+    except OSError:
+        pass
+
+    bin_subdir = "Scripts" if os.name == "nt" else "bin"
+    candidates.append(Path(sys.prefix) / bin_subdir)
+
+    for root in _find_project_roots_for_hook_path(
+        skill_dir,
+        execution_cwd,
+        str(Path(__file__).resolve()),
+    ):
+        candidates.append(root / ".venv" / bin_subdir)
+
+    existing_parts = [
+        part for part in env.get("PATH", "").split(os.pathsep)
+        if part
+    ]
+    merged: list[str] = []
+    candidate_parts = [
+        str(candidate) for candidate in candidates
+        if candidate.is_dir()
+    ]
+    for path in [*candidate_parts, *existing_parts]:
+        if path not in merged:
+            merged.append(path)
+    env["PATH"] = os.pathsep.join(merged)
+
+
 # ---------------------------------------------------------------------------
 # Structured result builder  (JSON payload → HookResult)
 # ---------------------------------------------------------------------------
@@ -270,6 +339,7 @@ def _create_shell_executor(
         except ImportError:
             env = os.environ.copy()
         execution_cwd = skill_dir if skill_dir and os.path.isdir(skill_dir) else os.getcwd()
+        _prepend_hook_python_paths(env, skill_dir=skill_dir, execution_cwd=execution_cwd)
 
         from src.trace.task_context import (
             get_current_agent_name,
