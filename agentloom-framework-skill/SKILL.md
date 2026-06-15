@@ -12,6 +12,7 @@ argument-hint: "<AgentLoom task or application path>"
 ## 前置条件
 
 - 先进入 AgentLoom 根目录，根目录判定只看 `config/llm.yaml`，不要用 `config/system.yaml`。
+- 新建 worktree 或干净 checkout 后先检查 `config/llm.yaml`；该文件通常被 `.gitignore` 忽略，不会随 worktree 自动生成。缺失时从同机可信工作区复制，或让用户提供本地配置；不要提交该文件，也不要凭空生成模型配置。
 - 当前本地环境可能没有 `uv`；验证优先用 `.venv/bin/python` 和 `.venv/bin/loom`。
 - 写 Application 前先读真实仓库结构与 `config/llm.yaml`，`model_type` 只能来自项目配置。
 - 如果用户目标不清晰，先问清“功能目标、输入、输出、验收标准”；不要为了显得完整而发明需求。
@@ -52,6 +53,8 @@ argument-hint: "<AgentLoom task or application path>"
 # 根目录校验
 pwd
 test -f config/llm.yaml
+# 新 worktree 缺失时，先确认它是否为被忽略的本地配置
+git check-ignore -v config/llm.yaml || true
 
 # YAML 契约校验
 .venv/bin/python agentloom-framework-skill/scripts/validate_application_yaml.py \
