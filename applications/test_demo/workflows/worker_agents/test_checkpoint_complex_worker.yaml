@@ -1,0 +1,51 @@
+name: "artifact_worker"
+description: |
+  Worker for complex checkpoint and resume validation. It reads prepared input
+  files and writes a combined report in several observable steps.
+
+model_type: "powerful"
+tool_call_type: "code_act"
+
+workflow: |
+  # Artifact Worker
+
+  Follow the query exactly. Work in these explicit steps. Use each command
+  once; do not repeat verification after it succeeds.
+
+  1. Use shell_tool once to run:
+       mkdir -p /tmp/agentloom_ckpt_complex/worker_progress &&
+       printf 'worker:started\n' > /tmp/agentloom_ckpt_complex/worker_progress/started.txt &&
+       cat /tmp/agentloom_ckpt_complex/items/a.txt /tmp/agentloom_ckpt_complex/items/b.txt /tmp/agentloom_ckpt_complex/items/c.txt /tmp/agentloom_ckpt_complex/supervisor_manifest.txt > /tmp/agentloom_ckpt_complex/worker_progress/combined.txt
+  2. Use shell_tool once to run:
+       printf 'worker_status=complete\nalpha=11\nbeta=22\ngamma=33\nmanifest_status=ready\n' > /tmp/agentloom_ckpt_complex/worker_report.txt
+  3. Use shell_tool once to run:
+       grep -q 'worker_status=complete' /tmp/agentloom_ckpt_complex/worker_report.txt &&
+       grep -q 'alpha=11' /tmp/agentloom_ckpt_complex/worker_report.txt &&
+       grep -q 'beta=22' /tmp/agentloom_ckpt_complex/worker_report.txt &&
+       grep -q 'gamma=33' /tmp/agentloom_ckpt_complex/worker_report.txt &&
+       grep -q 'manifest_status=ready' /tmp/agentloom_ckpt_complex/worker_report.txt
+  4. Return a final answer saying the report files were created.
+
+agent_function_schema:
+  description: |
+    Build a checkpoint validation report from supervisor-provided inputs.
+  inputs:
+    query:
+      description: |
+        Instructions for the report files to read and write.
+      required: true
+  output:
+    description: |
+      A concise plain-text summary of the report files created.
+
+tools:
+  - name: "read_file"
+  - name: "edit_file"
+  - name: "shell_tool"
+
+skills: []
+worker_agents: []
+max_steps: 8
+
+execution_env:
+  type: "local"

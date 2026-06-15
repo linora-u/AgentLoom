@@ -337,3 +337,29 @@ class TestExecuteGroups:
         batch = executor.execute_batch(tasks, tool)
         group = executor.execute_groups([tasks], tool)
         assert len(group[0]) == len(batch)
+
+
+# ═══════════════════════════════════════════════════════════════════ #
+#  Context propagation
+# ═══════════════════════════════════════════════════════════════════ #
+
+class TestParallelExecutorContextPropagation:
+    def test_checkpoint_coordinator_context_visible_in_worker_thread(self, tmp_path):
+        """ThreadPoolExecutor workers inherit the active checkpoint coordinator."""
+        from src.lib.checkpoint.checkpoint_manager import CheckpointManager
+        from src.lib.checkpoint.coordinator import CheckpointCoordinator, _current_coordinator
+
+        cm = CheckpointManager("parallel_context", base_dir=tmp_path)
+        coord = CheckpointCoordinator.activate(cm, "task_ctx", "task")
+
+        def tool(task_id, **kw):
+            return CheckpointCoordinator.current() is coord
+        tool = _make_tool(tool)
+
+        try:
+            executor = ParallelAgentExecutor(max_workers=1)
+            results = executor.execute_batch([{"task_id": "a"}], tool)
+            assert results[0].status == "completed"
+            assert results[0].result is True
+        finally:
+            _current_coordinator.set(None)

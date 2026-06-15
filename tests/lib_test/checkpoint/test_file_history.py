@@ -186,6 +186,39 @@ class TestMakePostStepSnapshot:
             bk = snap.tracked_file_backups[abs_path]
             assert bk.backup_filename is None
 
+    def test_later_step_snapshot_does_not_overwrite_original_v1(self, fh, sample_file, backup_dir):
+        """Regression: a later snapshot must not overwrite the original v1 backup."""
+        fh.track_edit(sample_file, step_number=1)
+        with open(sample_file, "w", encoding="utf-8") as f:
+            f.write("after step 1\n")
+        fh.make_post_step_snapshot(step_number=1)
+
+        v1_path = next(backup_dir.glob("*@v1"))
+        assert v1_path.read_text(encoding="utf-8") == "original content\n"
+
+        # The file is tracked, but no edit was tracked for step 2. Snapshotting
+        # step 2 should inherit the latest backup and never rewrite @v1.
+        fh.make_post_step_snapshot(step_number=2)
+
+        assert v1_path.read_text(encoding="utf-8") == "original content\n"
+
+    def test_new_step_unchanged_file_inherits_previous_backup(self, fh, sample_file, backup_dir):
+        """Unchanged files in later steps reuse the existing latest backup."""
+        fh.track_edit(sample_file, step_number=1)
+        with open(sample_file, "w", encoding="utf-8") as f:
+            f.write("after step 1\n")
+        fh.make_post_step_snapshot(step_number=1)
+
+        backups_before = sorted(p.name for p in backup_dir.glob("*@v*"))
+        fh.make_post_step_snapshot(step_number=2)
+        backups_after = sorted(p.name for p in backup_dir.glob("*@v*"))
+
+        assert backups_after == backups_before
+        with fh._lock:
+            step2 = [s for s in fh._snapshots if s.step_number == 2][0]
+            abs_path = os.path.abspath(sample_file)
+            assert step2.tracked_file_backups[abs_path].version == 2
+
 
 # ===================================================================
 # rewind_to_step
@@ -265,6 +298,20 @@ class TestRewindToStep:
         fh.rewind_to_step(step_number=1)
         assert os.path.exists(sample_file)
         assert open(sample_file, "rb").read() == original
+
+    def test_rewind_to_earlier_step_deletes_file_created_later(self, fh, sample_file, tmp_path):
+        """Files first tracked as non-existent after target step are deleted on rewind."""
+        fh.track_edit(sample_file, step_number=1)
+        fh.make_post_step_snapshot(step_number=1)
+
+        later_file = tmp_path / "created_later.txt"
+        fh.track_edit(str(later_file), step_number=2)
+        later_file.write_text("created in step 2", encoding="utf-8")
+        fh.make_post_step_snapshot(step_number=2)
+        assert later_file.exists()
+
+        fh.rewind_to_step(step_number=1)
+        assert not later_file.exists()
 
 
 # ===================================================================
@@ -359,3 +406,22 @@ class TestRestoreFromIndex:
         fh.restore_from_index({})
         assert fh.snapshot_count == 0
         assert fh.tracked_file_count == 0
+
+    def test_restore_then_snapshot_continues_versions(self, fh, sample_file, backup_dir):
+        """After restore_from_index, later snapshots continue version numbers."""
+        fh.track_edit(sample_file, step_number=1)
+        with open(sample_file, "w", encoding="utf-8") as f:
+            f.write("after step 1\n")
+        fh.make_post_step_snapshot(step_number=1)
+
+        import json
+        data = json.loads((backup_dir / "snapshots.json").read_text(encoding="utf-8"))
+
+        fh2 = FileHistoryManager(backup_dir)
+        fh2.restore_from_index(data)
+        with open(sample_file, "w", encoding="utf-8") as f:
+            f.write("after restore\n")
+        fh2.make_post_step_snapshot(step_number=2)
+
+        backups = [p.name for p in backup_dir.glob("*@v*")]
+        assert any("@v3" in name for name in backups)

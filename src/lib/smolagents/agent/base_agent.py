@@ -1092,7 +1092,12 @@ class RoleDrivenAgent(BaseAgent):
 
         # Supervisor activates a new coordinator; workers inherit via ContextVar.
         if checkpoint_manager is not None:
-            coord = CheckpointCoordinator.activate(checkpoint_manager, final_task_id, transformed_task)
+            coord = CheckpointCoordinator.activate(
+                checkpoint_manager,
+                final_task_id,
+                transformed_task,
+                resume=resume,
+            )
         else:
             coord = CheckpointCoordinator.current()
 
@@ -1114,6 +1119,8 @@ class RoleDrivenAgent(BaseAgent):
             set_current_agent_config(self._effective_agent_config or self._config)
             set_current_skills_manager(self._skills_manager)
             set_current_hook_manager(self._hook_manager)
+            if coord is not None:
+                coord.register_file_history_hook(self._hook_manager)
 
             # Build hierarchical runtime path for .runtime directory nesting.
             # This is a SEPARATE variable that only affects the runtime dir
@@ -1174,8 +1181,8 @@ class RoleDrivenAgent(BaseAgent):
                         run_kwargs["_skip_task_step_on_reset_false"] = False
                     result = runtime_agent.run(**run_kwargs)
 
-                # P2 fix: expose worker memory INSIDE run() lifecycle so
-                # SubTaskTrackedAgent._execute_with_lifecycle can read it.
+                # Compatibility fallback for wrapper paths that cannot read
+                # memory directly from the runtime agent.
                 try:
                     _current_worker_memory.set(list(runtime_agent.memory.steps))
                 except Exception:
@@ -1239,6 +1246,9 @@ class RoleDrivenAgent(BaseAgent):
                 else:
                     clear_current_runtime_agent_path()
 
+                if checkpoint_manager is not None and coord is not None:
+                    CheckpointCoordinator.deactivate(coord)
+
         if current_task_id:
             return _execute_agent()
 
@@ -1281,6 +1291,17 @@ class SubTaskTrackedAgent:
     def _compute_input_hash(task_text: str) -> str:
         """Short hash of the worker input for skip-on-resume matching."""
         return _hashlib.sha256(str(task_text).encode()).hexdigest()[:16]
+
+    def _snapshot_worker_memory(self) -> list | None:
+        """Return the wrapped runtime agent memory at the lifecycle boundary."""
+        try:
+            memory = getattr(self._agent, "memory", None)
+            steps = getattr(memory, "steps", None)
+            if steps is not None:
+                return list(steps)
+        except Exception:
+            pass
+        return _current_worker_memory.get(None)
 
     def _execute_with_lifecycle(self, callable_fn, task, call_label, *args, **kwargs):
         """Run callable within sub-task context, broadcasting lifecycle events.
@@ -1334,14 +1355,28 @@ class SubTaskTrackedAgent:
             call_index = coord.record_worker_start(
                 self._agent_name, input_hash, str(task)
             ) if coord is not None else 0
+            worker_restored = (
+                coord.restore_worker(self._agent, self._agent_name, call_index)
+                if coord is not None
+                else False
+            )
+            if worker_restored:
+                kwargs.setdefault("reset", False)
 
             try:
                 result = callable_fn(task, *args, **kwargs)
+            except KeyboardInterrupt:
+                if coord is not None:
+                    coord.record_worker_interrupted(
+                        self._agent_name, call_index, input_hash, str(task),
+                        self._snapshot_worker_memory(),
+                    )
+                raise
             except Exception as exc:
                 if coord is not None:
                     coord.record_worker_failure(
                         self._agent_name, call_index, input_hash, str(task),
-                        str(exc), _current_worker_memory.get(None),
+                        str(exc), self._snapshot_worker_memory(),
                     )
                 if hook_manager is not None:
                     try:
@@ -1359,7 +1394,7 @@ class SubTaskTrackedAgent:
             if coord is not None:
                 coord.record_worker_success(
                     self._agent_name, call_index, input_hash, str(task),
-                    result, _current_worker_memory.get(None),
+                    result, self._snapshot_worker_memory(),
                 )
 
             if hook_manager is not None:
