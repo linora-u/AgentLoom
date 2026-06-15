@@ -1,0 +1,2 @@
+# Keep this probe isolated from globally auto-discovered skills.
+skills: []
