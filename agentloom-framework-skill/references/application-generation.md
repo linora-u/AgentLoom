@@ -5,7 +5,7 @@
 ```
 applications/<app_name>/
 ├── README.md
-├── <app_name>_app.py
+├── <app_name>_app.py                 # 可选：需要自定义 CLI/task_override 时才创建
 ├── agent_tools/
 │   └── <tool_module>.py
 ├── skills/
@@ -28,12 +28,20 @@ applications/<app_name>/
 3. `skills/<skill_name>/SKILL.md` 与必要的 `references/`、`scripts/`、`assets/`
 4. `agent_tools/*.py`
 5. `config/system.yaml`
-6. `<app_name>_app.py`
+6. `<app_name>_app.py`（可选；只有需要自定义 CLI 参数、预处理/后处理、批处理或 `task_override` 时创建）
 7. `README.md`
 
 没有对应需求时不要创建空目录。应用专属的 skill 和 skill 运行目标应放在 Application 下面，不要放到全局 `skills/` 或额外的孤立配置文件里。
 
 ## 入口脚本模板
+
+默认优先使用直接 YAML 入口：
+
+```bash
+.venv/bin/loom run applications/<app_name>/workflows/<app_name>_agent.yaml
+```
+
+`<app_name>_app.py` 不是 Application 必需文件。只有当应用需要自定义自然语言请求、预处理/后处理、批量循环、`log_to_file`/`resume` 包装，或需要通过 `run_app(..., task_override=...)` 嵌入到别的 Python 流程时，才创建入口脚本。
 
 ```python
 #!/usr/bin/env python3
