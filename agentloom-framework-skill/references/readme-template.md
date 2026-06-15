@@ -36,6 +36,14 @@ applications/<app_name>/
 
 ## 运行
 
+默认直接运行 Agent YAML：
+
+```bash
+.venv/bin/loom run applications/<app_name>/workflows/<agent>.yaml
+```
+
+如果应用提供了自定义 Python wrapper，再补充 wrapper 用法：
+
 ```bash
 .venv/bin/python applications/<app_name>/<app_name>_app.py "<用户需求>"
 ```

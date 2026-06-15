@@ -1,0 +1,4 @@
+interface:
+  display_name: "Browser Harness AgentLoom"
+  short_description: "AgentLoom browser-harness integration guide"
+  default_prompt: "Use $browser-harness-agentloom to integrate or debug browser-harness inside AgentLoom."
