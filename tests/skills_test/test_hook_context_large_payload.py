@@ -98,6 +98,22 @@ class TestShellExecutorTempFile(unittest.TestCase):
         self.assertEqual(result.decision, "allow")
         self.assertEqual(result.telemetry.get("read_from"), "file")
 
+    def test_bare_python_command_uses_active_runtime_path(self):
+        """Skill hook commands using bare `python` should work without a user shim."""
+        executor = create_hook_executor(
+            code=f"python {self.script_path}",
+            skill_name="test-skill",
+            skill_dir=self.tmp_dir,
+            logger=logging.getLogger(__name__),
+            timeout=30,
+        )
+        with patch.dict(os.environ, {"PATH": "/usr/bin"}, clear=False):
+            result = executor(_make_context({"file": "test.txt"}))
+
+        self.assertTrue(result.success, f"Hook failed: {result.telemetry}")
+        self.assertEqual(result.decision, "allow")
+        self.assertEqual(result.telemetry.get("read_from"), "file")
+
     def test_large_payload_no_errno7(self):
         """Payloads >64KB must NOT cause [Errno 7] Argument list too long.
 
