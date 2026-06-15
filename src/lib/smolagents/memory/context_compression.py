@@ -112,9 +112,19 @@ TOOL_MAX_RETAIN_CHARS: dict[str, Union[int, None]] = {
     "glob_search": 1500,
     "grep_search": 3000,
     "read_file": None,
+    "get_file_outline": None,
     "python_interpreter": 3000,
     "default": 3000,
 }
+AST_TOOL_CALL_NAME_ALLOWLIST: frozenset[str] = frozenset(TOOL_MAX_RETAIN_CHARS) | frozenset({
+    "get_file_outline",
+    "read_file_content",
+    "ripgrep_search_directory",
+    "list_files_glob",
+    "browse_directory",
+    "write_file",
+    "write_markdown_file",
+})
 
 # ===========================================================================
 # Layer 3 Constants – Observation Masking
@@ -251,6 +261,10 @@ Please provide your summary based on the conversation so far, following this str
 Note: Any <command> blocks from the original task will be automatically appended to your summary wrapped in <system-reminder> tags. You do not need to include them in your summary text.
 """
 
+# Tool responses are useful to summaries, but raw multi-thousand-line outputs
+# can make the summarization request fail before compaction can help.
+SUMMARY_TOOL_OUTPUT_MAX_CHARS: int = 2000
+
 
 # ===========================================================================
 # Data Classes
@@ -325,6 +339,31 @@ class ContextBudgetConfig:
         return cls()
 
 
+@dataclass(frozen=True)
+class ToolInvocation:
+    """A normalized tool call extracted from text, native metadata, or CodeAct code."""
+
+    name: str
+    arguments: Optional[str] = None
+    dedup_key: Optional[str] = None
+
+
+@dataclass(frozen=True)
+class ToolResponsePair:
+    """Visible tool-call/tool-response pair with original message indexes."""
+
+    call_index: int
+    response_index: int
+    invocations: tuple[ToolInvocation, ...]
+
+
+@dataclass(frozen=True)
+class VisibleMessageGroup:
+    """Visible non-system messages that must be truncated together."""
+
+    indices: tuple[int, ...]
+
+
 # ===========================================================================
 # Utility / Helper Functions
 # ===========================================================================
@@ -347,7 +386,40 @@ def _extract_content_text(content: object) -> str:
     return str(content)
 
 
-def _extract_tool_payload(text: str) -> tuple[Optional[str], Optional[str]]:
+def _role_value(role: object) -> str:
+    return role.value if hasattr(role, "value") else str(role)
+
+
+def _is_tool_call_role(role: object) -> bool:
+    return _role_value(role) in ("tool-call", "tool_call")
+
+
+def _is_tool_response_role(role: object) -> bool:
+    return _role_value(role) in ("tool-response", "tool_response")
+
+
+def _clone_internal_message_with_content(
+    internal_msg: InternalChatMessage,
+    text: str,
+) -> InternalChatMessage:
+    return InternalChatMessage(
+        message=ChatMessage(
+            role=internal_msg.message.role,
+            content=[{"type": "text", "text": text}],
+            tool_calls=internal_msg.message.tool_calls,
+            raw=internal_msg.message.raw,
+            token_usage=internal_msg.message.token_usage,
+        ),
+        truncation_parent=internal_msg.truncation_parent,
+        is_truncation_marker=internal_msg.is_truncation_marker,
+        truncation_id=internal_msg.truncation_id,
+        condense_id=internal_msg.condense_id,
+        is_summary=internal_msg.is_summary,
+        ts=internal_msg.ts,
+    )
+
+
+def _extract_tool_payload(text: str) -> tuple[Optional[str], object]:
     if not text:
         return None, None
 
@@ -371,21 +443,70 @@ def _extract_tool_payload(text: str) -> tuple[Optional[str], Optional[str]]:
                 arguments = payload.get("arguments")
 
             if isinstance(name, str):
-                return name.strip().lower(), arguments if isinstance(arguments, str) else None
+                return name.strip().lower(), arguments
 
         if isinstance(payload, list):
             for item in payload:
                 if not isinstance(item, dict):
                     continue
                 function_payload = item.get("function")
-                if not isinstance(function_payload, dict):
-                    continue
-                name = function_payload.get("name")
-                arguments = function_payload.get("arguments")
+                if isinstance(function_payload, dict):
+                    name = function_payload.get("name")
+                    arguments = function_payload.get("arguments")
+                else:
+                    name = item.get("name") or item.get("tool")
+                    arguments = item.get("arguments")
                 if isinstance(name, str):
-                    return name.strip().lower(), arguments if isinstance(arguments, str) else None
+                    return name.strip().lower(), arguments
 
     return None, None
+
+
+def _tool_invocation_from_name_args(
+    name: object,
+    arguments: object = None,
+) -> Optional[ToolInvocation]:
+    if not isinstance(name, str) or not name.strip():
+        return None
+
+    normalized_name = name.strip().lower()
+    if isinstance(arguments, str):
+        normalized_arguments = arguments
+    elif arguments is None:
+        normalized_arguments = None
+    else:
+        try:
+            normalized_arguments = json.dumps(arguments, ensure_ascii=True, sort_keys=True)
+        except Exception:
+            normalized_arguments = str(arguments)
+
+    dedup_key = normalized_arguments if normalized_name in FILE_READ_TOOL_NAMES else None
+    return ToolInvocation(
+        name=normalized_name,
+        arguments=normalized_arguments,
+        dedup_key=dedup_key,
+    )
+
+
+def _extract_native_tool_invocations(msg: ChatMessage) -> list[ToolInvocation]:
+    invocations: list[ToolInvocation] = []
+    for call in getattr(msg, "tool_calls", None) or []:
+        if isinstance(call, dict):
+            function = call.get("function")
+            if isinstance(function, dict):
+                name = function.get("name")
+                arguments = function.get("arguments")
+            else:
+                name = call.get("name") or call.get("tool")
+                arguments = call.get("arguments")
+        else:
+            function = getattr(call, "function", None)
+            name = getattr(function, "name", None) or getattr(call, "name", None)
+            arguments = getattr(function, "arguments", None) or getattr(call, "arguments", None)
+        invocation = _tool_invocation_from_name_args(name, arguments)
+        if invocation:
+            invocations.append(invocation)
+    return invocations
 
 
 def _get_ast_call_name(node: ast.AST) -> Optional[str]:
@@ -422,6 +543,8 @@ def _extract_tool_calls_from_source(source: str) -> List[tuple[str, str]]:
         tool_name = _get_ast_call_name(node.func)
         if not tool_name:
             continue
+        if tool_name not in AST_TOOL_CALL_NAME_ALLOWLIST and not tool_name.endswith(("_tool", "_search")):
+            continue
 
         call_payload = {
             "args": [_normalize_ast_value(arg) for arg in node.args],
@@ -435,6 +558,168 @@ def _extract_tool_calls_from_source(source: str) -> List[tuple[str, str]]:
     return calls
 
 
+def _invocations_from_python_source(source: str) -> list[ToolInvocation]:
+    invocations: list[ToolInvocation] = []
+    for tool_name, arguments in _extract_tool_calls_from_source(source):
+        invocation = _tool_invocation_from_name_args(tool_name, arguments)
+        if invocation:
+            invocations.append(invocation)
+    return invocations
+
+
+def _extract_tool_invocations_from_text(text: str) -> list[ToolInvocation]:
+    primary_tool, nested_source = _extract_tool_payload(text)
+    if primary_tool:
+        if primary_tool == "python_interpreter" and isinstance(nested_source, str) and nested_source:
+            nested = _invocations_from_python_source(nested_source)
+            return nested
+        invocation = _tool_invocation_from_name_args(primary_tool, nested_source)
+        return [invocation] if invocation else []
+
+    invocations = _invocations_from_python_source(text)
+    if invocations:
+        return invocations
+
+    # Last-resort fallback for non-Python text snippets that still contain
+    # familiar read-file calls.
+    fallback: list[ToolInvocation] = []
+    for tool_name, pattern in TOOL_DEDUP_PATTERNS.items():
+        for match in pattern.findall(text):
+            if match:
+                fallback.append(
+                    ToolInvocation(
+                        name=tool_name,
+                        arguments=match.strip(),
+                        dedup_key=match.strip(),
+                    )
+                )
+    return fallback
+
+
+def _extract_tool_invocations(msg: ChatMessage) -> list[ToolInvocation]:
+    """Extract normalized tool invocations from native metadata or message text."""
+    native = _extract_native_tool_invocations(msg)
+    if native:
+        expanded: list[ToolInvocation] = []
+        for invocation in native:
+            if invocation.name == "python_interpreter" and invocation.arguments:
+                nested = _invocations_from_python_source(invocation.arguments)
+                expanded.extend(nested)
+            else:
+                expanded.append(invocation)
+        return expanded
+
+    text = _extract_content_text(msg.content)
+    if not text:
+        return []
+    return _extract_tool_invocations_from_text(text)
+
+
+def _iter_visible_tool_response_pairs(messages: List[InternalChatMessage]) -> list[ToolResponsePair]:
+    visible = [(idx, msg) for idx, msg in enumerate(messages) if msg.is_visible()]
+    pairs: list[ToolResponsePair] = []
+    for visible_idx, (call_idx, call_msg) in enumerate(visible[:-1]):
+        if not _is_tool_call_role(call_msg.message.role):
+            continue
+        response_idx, response_msg = visible[visible_idx + 1]
+        if not _is_tool_response_role(response_msg.message.role):
+            continue
+        pairs.append(
+            ToolResponsePair(
+                call_index=call_idx,
+                response_index=response_idx,
+                invocations=tuple(_extract_tool_invocations(call_msg.message)),
+            )
+        )
+    return pairs
+
+
+def _iter_visible_non_system_groups(messages: List[InternalChatMessage]) -> list[VisibleMessageGroup]:
+    """Group visible non-system messages without splitting tool-call/tool-response pairs."""
+    visible = [
+        (idx, msg)
+        for idx, msg in enumerate(messages)
+        if msg.is_visible() and msg.message.role != MessageRole.SYSTEM
+        and not msg.is_truncation_marker
+    ]
+    groups: list[VisibleMessageGroup] = []
+    visible_idx = 0
+    while visible_idx < len(visible):
+        idx, msg = visible[visible_idx]
+        if (
+            _is_tool_call_role(msg.message.role)
+            and visible_idx + 1 < len(visible)
+            and _is_tool_response_role(visible[visible_idx + 1][1].message.role)
+        ):
+            groups.append(VisibleMessageGroup((idx, visible[visible_idx + 1][0])))
+            visible_idx += 2
+            continue
+        groups.append(VisibleMessageGroup((idx,)))
+        visible_idx += 1
+    return groups
+
+
+def _build_response_pair_map(messages: List[InternalChatMessage]) -> dict[int, ToolResponsePair]:
+    return {pair.response_index: pair for pair in _iter_visible_tool_response_pairs(messages)}
+
+
+def _is_tool_response_exempt(
+    messages: List[InternalChatMessage],
+    response_index: int,
+    pair_by_response: Optional[dict[int, ToolResponsePair]] = None,
+) -> bool:
+    pair_by_response = pair_by_response if pair_by_response is not None else _build_response_pair_map(messages)
+    pair = pair_by_response.get(response_index)
+    if pair:
+        if any(invocation.name in COMPRESSION_EXEMPT_TOOL_NAMES for invocation in pair.invocations):
+            return True
+        call_text = _extract_content_text(messages[pair.call_index].message.content)
+        return any(tool_name in call_text for tool_name in COMPRESSION_EXEMPT_TOOL_NAMES)
+
+    if response_index > 0 and _is_tool_call_role(messages[response_index - 1].message.role):
+        call_text = _extract_content_text(messages[response_index - 1].message.content)
+        return any(tool_name in call_text for tool_name in COMPRESSION_EXEMPT_TOOL_NAMES)
+    return False
+
+
+def _recent_error_response_indices(
+    messages: List[InternalChatMessage],
+    candidate_indices: list[int],
+) -> set[int]:
+    exempt_indices: set[int] = set()
+    exempt_remaining = RECENT_ERROR_EXEMPT_COUNT
+    for response_index in reversed(candidate_indices):
+        if exempt_remaining <= 0:
+            break
+        content_text = _extract_content_text(messages[response_index].message.content)
+        if content_text.startswith("Error:"):
+            exempt_indices.add(response_index)
+            exempt_remaining -= 1
+    return exempt_indices
+
+
+def _is_placeholder_response(text: str) -> bool:
+    return text in (OBSERVATION_MASKING_PLACEHOLDER, FILE_DEDUP_PLACEHOLDER)
+
+
+def _is_group_truncatable(
+    messages: List[InternalChatMessage],
+    group: VisibleMessageGroup,
+    pair_by_response: dict[int, ToolResponsePair],
+    error_exempt_indices: set[int],
+) -> bool:
+    for idx in group.indices:
+        if messages[idx].is_summary:
+            return False
+        if not _is_tool_response_role(messages[idx].message.role):
+            continue
+        if _is_tool_response_exempt(messages, idx, pair_by_response):
+            return False
+        if idx in error_exempt_indices:
+            return False
+    return True
+
+
 def _extract_dedup_keys_from_tool_call(msg: ChatMessage) -> List[tuple[str, str]]:
     """Extract deduplication keys (like file paths) from a TOOL_CALL message.
 
@@ -443,28 +728,11 @@ def _extract_dedup_keys_from_tool_call(msg: ChatMessage) -> List[tuple[str, str]
     We scan the entire text for patterns defined in TOOL_DEDUP_PATTERNS.
     Returns: A list of tuples (tool_name: str, dedup_key: str)
     """
-    text = _extract_content_text(msg.content)
-    if not text:
-        return []
-
-    primary_tool, nested_source = _extract_tool_payload(text)
-    source = nested_source if primary_tool == "python_interpreter" and nested_source else text
-
-    results = [
-        (tool_name, dedup_key)
-        for tool_name, dedup_key in _extract_tool_calls_from_source(source)
-        if tool_name in FILE_READ_TOOL_NAMES
+    return [
+        (invocation.name, invocation.dedup_key)
+        for invocation in _extract_tool_invocations(msg)
+        if invocation.name in FILE_READ_TOOL_NAMES and invocation.dedup_key
     ]
-    if results:
-        return results
-
-    for tool_name, pattern in TOOL_DEDUP_PATTERNS.items():
-        matches = pattern.findall(text)
-        for match in matches:
-            if match:
-                results.append((tool_name, match.strip()))
-
-    return results
 
 
 # ===========================================================================
@@ -486,51 +754,34 @@ def _apply_tool_dedup(
     Returns:
         (new_messages, saved_ratio) — ``saved_ratio`` = chars_saved / total_chars.
     """
-    # Only operate on visible (non-compressed, non-truncated) messages
-    effective = [m for m in messages if m.is_visible()]
-
     # -----------------------------------------------------------------------
-    # Step 1: build (tool_name, dedup_key) -> [(tool_call_idx, tool_resp_idx)] mapping
-    #   indices into `effective` list
+    # Step 1: build (tool_name, dedup_key) -> [tool_response_original_idx]
     # -----------------------------------------------------------------------
-    # (tool_name, dedup_key) -> list of (tool_call_effective_idx, tool_resp_effective_idx)
-    tool_read_pairs: dict = {}  # tuple[str, str] -> List[Tuple[int, int]]
+    tool_read_pairs: dict[tuple[str, str], list[int]] = {}
 
-    i = 0
-    while i < len(effective):
-        msg = effective[i]
-        role_value = msg.message.role.value if hasattr(msg.message.role, 'value') else str(msg.message.role)
-
-        if role_value in ("tool-call", "tool_call"):
-            # Look for the corresponding TOOL_RESPONSE immediately following
-            tool_keys = _extract_dedup_keys_from_tool_call(msg.message)
-            if tool_keys and i + 1 < len(effective):
-                next_role = effective[i + 1].message.role
-                next_role_val = next_role.value if hasattr(next_role, 'value') else str(next_role)
-                if next_role_val in ("tool-response", "tool_response"):
-                    for tool_name, key in tool_keys:
-                        # Normalize path: strip quotes / f-string artifacts
-                        key = key.strip()
-                        if not key:
-                            continue
-                        pairs = tool_read_pairs.setdefault((tool_name, key), [])
-                        pairs.append((i, i + 1))
-        i += 1
+    for pair in _iter_visible_tool_response_pairs(messages):
+        for invocation in pair.invocations:
+            if invocation.name not in FILE_READ_TOOL_NAMES or not invocation.dedup_key:
+                continue
+            key = invocation.dedup_key.strip()
+            if not key:
+                continue
+            tool_read_pairs.setdefault((invocation.name, key), []).append(pair.response_index)
 
     # -----------------------------------------------------------------------
     # Step 2: for tools with overlapping targets >1 time, collect (effective_idx, original_text, new_text)
     # -----------------------------------------------------------------------
-    # Map from effective_idx -> new Observation text (only old reads)
-    replacements: dict = {}  # int -> str (new content text)
+    # Map from original message idx -> new observation text (only old reads)
+    replacements: dict[int, tuple[str, str]] = {}
 
-    for (tool_name, key), pairs in tool_read_pairs.items():
-        if len(pairs) <= 1:
+    for (tool_name, key), response_indices in tool_read_pairs.items():
+        if len(response_indices) <= 1:
             continue  # only read once, nothing to deduplicate
         # Keep the LAST read; replace all earlier ones
-        for (tc_idx, tr_idx) in pairs[:-1]:
-            if tr_idx not in replacements:
-                original_text = _extract_content_text(effective[tr_idx].message.content)
-                replacements[tr_idx] = (original_text, FILE_DEDUP_PLACEHOLDER)
+        for response_idx in response_indices[:-1]:
+            if response_idx not in replacements:
+                original_text = _extract_content_text(messages[response_idx].message.content)
+                replacements[response_idx] = (original_text, FILE_DEDUP_PLACEHOLDER)
 
     if not replacements:
         return messages, 0.0
@@ -550,30 +801,10 @@ def _apply_tool_dedup(
         raw_text = _extract_content_text(msg.message.content)
         original_chars += len(raw_text)
 
-        eff_idx = -1
-        try:
-            eff_idx = effective.index(msg)
-        except ValueError:
-            pass # msg not in effective (e.g. it's a system message or already compressed/truncated)
-
-        if eff_idx in replacements:
-            original_text, new_text = replacements[eff_idx]
-            saved_chars += (len(raw_text) - len(new_text))
-
-            new_chat_msg = ChatMessage(
-                role=msg.message.role,
-                content=[{"type": "text", "text": new_text}],
-            )
-            new_internal = InternalChatMessage(
-                message=new_chat_msg,
-                truncation_parent=msg.truncation_parent,
-                is_truncation_marker=msg.is_truncation_marker,
-                truncation_id=msg.truncation_id,
-                condense_id=msg.condense_id,
-                is_summary=msg.is_summary,
-                ts=msg.ts,
-            )
-            new_messages.append(new_internal)
+        if idx in replacements:
+            original_text, new_text = replacements[idx]
+            saved_chars += max(0, len(raw_text) - len(new_text))
+            new_messages.append(_clone_internal_message_with_content(msg, new_text))
         else:
             new_messages.append(msg)
 
@@ -591,18 +822,10 @@ def _apply_tool_dedup(
 
 def _extract_tools_from_code(code: str) -> List[str]:
     """Identify underlying native tool calls from direct code or a tool payload wrapper."""
-    primary_tool, nested_source = _extract_tool_payload(code)
-
-    if primary_tool and primary_tool != "python_interpreter":
-        return [primary_tool]
-
-    source = nested_source if primary_tool == "python_interpreter" and nested_source else code
-    tools = []
-    for tool_name, _ in _extract_tool_calls_from_source(source):
-        if tool_name not in FILE_READ_TOOL_NAMES and tool_name not in TOOL_MAX_RETAIN_CHARS:
-            continue
-        if tool_name not in tools:
-            tools.append(tool_name)
+    tools: list[str] = []
+    for invocation in _extract_tool_invocations_from_text(code):
+        if invocation.name not in tools:
+            tools.append(invocation.name)
     return tools
 
 
@@ -624,97 +847,43 @@ def _apply_tool_output_truncation(
         (new_messages, total_chars_saved).
     """
     log = get_logger(logger, __name__)
-    effective = [m for m in messages if m.is_visible()]
-    
-    replacements = {}
+    replacements: dict[int, str] = {}
     total_saved_chars = 0
-    
-    i = 0
-    while i < len(effective):
-        msg = effective[i]
-        role_value = msg.message.role.value if hasattr(msg.message.role, 'value') else str(msg.message.role)
-        
-        if role_value in ("tool-call", "tool_call"):
-            if i + 1 < len(effective):
-                next_msg = effective[i + 1]
-                next_role_val = next_msg.message.role.value if hasattr(next_msg.message.role, 'value') else str(next_msg.message.role)
-                
-                if next_role_val in ("tool-response", "tool_response"):
-                    # Find out which tool was called
-                    tools_used = []
-                    call_text = _extract_content_text(msg.message.content)
-                    
-                    # Direct check in text for standard codeact formatting
-                    # Example: {'name': 'python_interpreter', 'arguments': '...'}
-                    m = re.search(r"\'name\':\s*\'([^\']+)\'", call_text)
-                    if m:
-                        primary_tool = m.group(1)
-                        if primary_tool == "python_interpreter":
-                            # Try to dig deeper into the actual argument code
-                            tools_used.extend(_extract_tools_from_code(call_text))
-                        else:
-                            tools_used.append(primary_tool)
-                            
-                    if not tools_used:
-                        tools_used = ["default"]
-                        
-                    # Find min quota among invoked tools (ignoring None)
-                    quotas = []
-                    for t in tools_used:
-                        # If the tool is a deduplication tool, and it doesn't have an explicit
-                        # truncation limit, we skip truncating its overall content, trusting Layer 1.
-                        if t in TOOL_DEDUP_PATTERNS and t not in TOOL_MAX_RETAIN_CHARS:
-                            continue
-                            
-                        quota = TOOL_MAX_RETAIN_CHARS.get(t, TOOL_MAX_RETAIN_CHARS["default"])
-                        if quota is not None:
-                            quotas.append(quota)
-                    
-                    if quotas:
-                        quota = min(quotas)
-                        resp_text = _extract_content_text(next_msg.message.content)
-                        if len(resp_text) > quota:
-                            half = quota // 2
-                            head = resp_text[:half]
-                            tail = resp_text[-half:]
-                            omitted = len(resp_text) - quota
-                            
-                            primary = tools_used[0] if tools_used else "tool"
-                            trunc_notice = f"\n\n... [Truncated {omitted:,} characters from {primary} output due to TOOL_MAX_RETAIN_CHARS ({quota})] ...\n\n"
-                            
-                            new_text = head + trunc_notice + tail
-                            replacements[i + 1] = new_text
-                            total_saved_chars += omitted
-        i += 1
+
+    for pair in _iter_visible_tool_response_pairs(messages):
+        tools_used = [invocation.name for invocation in pair.invocations] or ["default"]
+        quotas: list[tuple[str, int]] = []
+        for tool_name in tools_used:
+            quota = TOOL_MAX_RETAIN_CHARS.get(tool_name, TOOL_MAX_RETAIN_CHARS["default"])
+            if quota is not None:
+                quotas.append((tool_name, quota))
+
+        if not quotas:
+            continue
+
+        primary, quota = min(quotas, key=lambda item: item[1])
+        response_text = _extract_content_text(messages[pair.response_index].message.content)
+        if len(response_text) <= quota:
+            continue
+
+        half = quota // 2
+        head = response_text[:half]
+        tail = response_text[-half:] if half > 0 else ""
+        omitted = len(response_text) - quota
+        trunc_notice = (
+            f"\n\n... [Truncated {omitted:,} characters from {primary} output "
+            f"due to TOOL_MAX_RETAIN_CHARS ({quota})] ...\n\n"
+        )
+        replacements[pair.response_index] = head + trunc_notice + tail
+        total_saved_chars += omitted
 
     if not replacements:
         return messages, 0.0
         
     new_messages = []
-    
     for idx, msg in enumerate(messages):
-        eff_idx = -1
-        try:
-            eff_idx = effective.index(msg)
-        except ValueError:
-            pass # msg not in effective (e.g. it's a system message or already compressed/truncated)
-
-        if eff_idx in replacements:
-            new_text = replacements[eff_idx]
-            new_chat_msg = ChatMessage(
-                role=msg.message.role,
-                content=[{"type": "text", "text": new_text}],
-            )
-            new_internal = InternalChatMessage(
-                message=new_chat_msg,
-                truncation_parent=msg.truncation_parent,
-                is_truncation_marker=msg.is_truncation_marker,
-                truncation_id=msg.truncation_id,
-                condense_id=msg.condense_id,
-                is_summary=msg.is_summary,
-                ts=msg.ts,
-            )
-            new_messages.append(new_internal)
+        if idx in replacements:
+            new_messages.append(_clone_internal_message_with_content(msg, replacements[idx]))
         else:
             new_messages.append(msg)
             
@@ -745,49 +914,23 @@ def _apply_observation_masking(
     """
     log = get_logger(logger, __name__)
 
-    # Collect indices of visible TOOL_RESPONSE messages
+    pair_by_response = _build_response_pair_map(messages)
     tool_response_indices: list[int] = []
     for idx, internal_msg in enumerate(messages):
-        if (
-            internal_msg.is_visible()
-            and internal_msg.message.role == MessageRole.TOOL_RESPONSE
-        ):
-            content_text = _extract_content_text(internal_msg.message.content)
-            # Skip already-masked or placeholder responses
-            if content_text and content_text not in (
-                OBSERVATION_MASKING_PLACEHOLDER,
-                FILE_DEDUP_PLACEHOLDER,
-            ):
-                # [Mechanism A] Exempt skill-loading tool responses from masking.
-                # Check if the preceding message is a TOOL_CALL containing an exempt tool.
-                if idx > 0:
-                    prev_msg = messages[idx - 1]
-                    prev_role = prev_msg.message.role.value if hasattr(prev_msg.message.role, 'value') else str(prev_msg.message.role)
-                    if prev_role in ("tool-call", "tool_call"):
-                        prev_text = _extract_content_text(prev_msg.message.content)
-                        if prev_text and any(t in prev_text for t in COMPRESSION_EXEMPT_TOOL_NAMES):
-                            continue
-                tool_response_indices.append(idx)
+        if not internal_msg.is_visible() or not _is_tool_response_role(internal_msg.message.role):
+            continue
+        content_text = _extract_content_text(internal_msg.message.content)
+        if not content_text or _is_placeholder_response(content_text):
+            continue
+        if _is_tool_response_exempt(messages, idx, pair_by_response):
+            continue
+        tool_response_indices.append(idx)
 
     if not tool_response_indices:
         return messages, 0
 
-    # [Mechanism B] Exempt the most recent N error-related TOOL_RESPONSE messages
-    # from masking, so the latest error recovery guidance is preserved.
-    try:
-        error_exempt_indices: set[int] = set()
-        exempt_remaining = RECENT_ERROR_EXEMPT_COUNT
-        for tr_idx in reversed(tool_response_indices):
-            if exempt_remaining <= 0:
-                break
-            content_text = _extract_content_text(messages[tr_idx].message.content)
-            if content_text and content_text.startswith("Error:"):
-                error_exempt_indices.add(tr_idx)
-                exempt_remaining -= 1
-        maskable_indices = [i for i in tool_response_indices if i not in error_exempt_indices]
-    except Exception:
-        # Safety: fall back to no exemption on any error
-        maskable_indices = tool_response_indices
+    error_exempt_indices = _recent_error_response_indices(messages, tool_response_indices)
+    maskable_indices = [i for i in tool_response_indices if i not in error_exempt_indices]
 
     num_to_mask = int(len(maskable_indices) * frac_to_mask)
     if num_to_mask <= 0:
@@ -803,22 +946,7 @@ def _apply_observation_masking(
             chars_saved = len(original_text) - len(OBSERVATION_MASKING_PLACEHOLDER)
             if chars_saved > 0:
                 total_chars_saved += chars_saved
-            masked_msg = InternalChatMessage(
-                message=ChatMessage(
-                    role=internal_msg.message.role,
-                    content=[{"type": "text", "text": OBSERVATION_MASKING_PLACEHOLDER}],
-                    tool_calls=internal_msg.message.tool_calls,
-                    raw=internal_msg.message.raw,
-                    token_usage=internal_msg.message.token_usage,
-                ),
-                truncation_parent=internal_msg.truncation_parent,
-                is_truncation_marker=internal_msg.is_truncation_marker,
-                truncation_id=internal_msg.truncation_id,
-                condense_id=internal_msg.condense_id,
-                is_summary=internal_msg.is_summary,
-                ts=internal_msg.ts,
-            )
-            new_messages.append(masked_msg)
+            new_messages.append(_clone_internal_message_with_content(internal_msg, OBSERVATION_MASKING_PLACEHOLDER))
         else:
             new_messages.append(internal_msg)
 
@@ -858,9 +986,8 @@ def get_messages_since_last_summary(messages: List[InternalChatMessage]) -> List
             break
 
     if last_summary_idx >= 0:
-        return messages[last_summary_idx + 1:]
-    else:
-        return messages
+        return [msg for msg in messages[last_summary_idx:] if msg.is_visible()]
+    return [msg for msg in messages if msg.is_visible()]
 
 
 def _count_tokens(messages: Iterable[ChatMessage], model_id: str) -> int:
@@ -886,6 +1013,42 @@ def _count_tokens(messages: Iterable[ChatMessage], model_id: str) -> int:
 # Layer 4 – LLM Summarization
 # ===========================================================================
 
+def _truncate_text_for_summary(text: str, limit: int = SUMMARY_TOOL_OUTPUT_MAX_CHARS) -> str:
+    if len(text) <= limit:
+        return text
+    half = limit // 2
+    omitted = len(text) - limit
+    return (
+        text[:half]
+        + f"\n\n... [{omitted:,} characters truncated for summary] ...\n\n"
+        + (text[-half:] if half > 0 else "")
+    )
+
+
+def _summary_role_label(role: object) -> str:
+    if _is_tool_call_role(role):
+        return "Tool call"
+    if _is_tool_response_role(role):
+        return "Tool result"
+    value = _role_value(role)
+    return value.replace("_", " ").replace("-", " ").title()
+
+
+def _serialize_messages_for_summary(messages: List[InternalChatMessage]) -> str:
+    """Serialize visible history into bounded text for the real summary model."""
+    lines = ["<conversation>"]
+    for internal_msg in messages:
+        if not internal_msg.is_visible() or internal_msg.message.role == MessageRole.SYSTEM:
+            continue
+        label = _summary_role_label(internal_msg.message.role)
+        text = _extract_message_text(internal_msg.message)
+        if _is_tool_response_role(internal_msg.message.role):
+            text = _truncate_text_for_summary(text)
+        lines.append(f"[{label}]:")
+        lines.append(text)
+    lines.append("</conversation>")
+    return "\n".join(lines)
+
 def summarize_conversation(
     messages: List[InternalChatMessage],
     model_id: str,
@@ -907,17 +1070,17 @@ def summarize_conversation(
     log = get_logger(None, __name__)
 
     messages_to_summarize = get_messages_since_last_summary(messages)
+    summarizable_messages = [
+        msg for msg in messages_to_summarize
+        if msg.message.role != MessageRole.SYSTEM and msg.is_visible()
+    ]
 
-    if len(messages_to_summarize) <= 1:
+    if len(summarizable_messages) <= 1:
         error = "Not enough messages available for compression"
         return SummarizeResponse(messages=messages, summary="", error=error)
 
-    recent_summary_exists = any(msg.is_summary for msg in messages_to_summarize)
-    if recent_summary_exists and len(messages_to_summarize) <= 2:
-        error = "Recently compressed; no need to compress again yet"
-        return SummarizeResponse(messages=messages, summary="", error=error)
-
     condense_instructions = custom_condense_prompt.strip() if custom_condense_prompt else CONDENSE_INSTRUCTION
+    serialized_history = _serialize_messages_for_summary(messages_to_summarize)
 
     # CONDENSE + history
     request_messages: List[Union[ChatMessage, dict]] = []
@@ -935,9 +1098,18 @@ def summarize_conversation(
     )
     request_messages.append(condense_message)
 
-    for internal_msg in messages_to_summarize:
-        if internal_msg.message.role != MessageRole.SYSTEM:
-            request_messages.append(internal_msg.message)
+    request_messages.append(
+        ChatMessage(
+            role=MessageRole.USER,
+            content=[{
+                "type": "text",
+                "text": serialized_history,
+            }],
+            tool_calls=None,
+            raw=None,
+            token_usage=None,
+        )
+    )
 
     log.info(f"Preparing to compress {len(messages_to_summarize)} messages...")
     log.info("=" * 80)
@@ -1019,12 +1191,17 @@ def summarize_conversation(
 
     # set condense_id
     new_messages = []
+    messages_to_condense = {
+        id(msg)
+        for msg in messages_to_summarize
+        if msg.message.role != MessageRole.SYSTEM
+    }
     for msg in messages:
         is_system_msg = msg.message.role == MessageRole.SYSTEM
 
         if is_system_msg:
             new_messages.append(msg)
-        elif not msg.condense_id:
+        elif id(msg) in messages_to_condense and not msg.condense_id:
             new_msg = InternalChatMessage(
                 message=msg.message,
                 truncation_parent=msg.truncation_parent,
@@ -1122,15 +1299,10 @@ def truncate_conversation(
 ) -> TruncationResult:
     """Fallback: Sliding-Window Truncation.
 
-    Hides the oldest ``frac_to_remove`` fraction of visible non-system
-    messages by tagging them with a ``truncation_parent`` ID, then inserts
-    a synthetic truncation marker at the boundary.
-
-    Steps:
-        1. Collect visible non-system messages.
-        2. Compute how many to hide (even-aligned to preserve message pairs).
-        3. Tag those messages with ``truncation_parent``.
-        4. Insert a truncation marker carrying any cached command blocks.
+    Hides the oldest visible non-system message groups by tagging them with a
+    ``truncation_parent`` ID, then inserts a synthetic truncation marker at
+    the boundary. TOOL_CALL + immediately following TOOL_RESPONSE is treated
+    as one atomic group; ordinary messages are single-message groups.
 
     Returns:
         A ``TruncationResult`` with the updated message list.
@@ -1138,12 +1310,19 @@ def truncate_conversation(
     log = get_logger(None, __name__)
     truncation_id = str(uuid.uuid4())
 
-    visible_non_system_indices = []
-    for idx, internal_msg in enumerate(messages):
-        if internal_msg.is_visible() and internal_msg.message.role != MessageRole.SYSTEM:
-            visible_non_system_indices.append(idx)
-
-    visible_count = len(visible_non_system_indices)
+    all_groups = _iter_visible_non_system_groups(messages)
+    pair_by_response = _build_response_pair_map(messages)
+    visible_response_indices = [
+        idx
+        for idx, msg in enumerate(messages)
+        if msg.is_visible() and _is_tool_response_role(msg.message.role)
+    ]
+    error_exempt_indices = _recent_error_response_indices(messages, visible_response_indices)
+    groups = [
+        group for group in all_groups
+        if _is_group_truncatable(messages, group, pair_by_response, error_exempt_indices)
+    ]
+    visible_count = sum(len(group.indices) for group in groups)
     if visible_count <= 0:
         return TruncationResult(
             messages=messages,
@@ -1151,25 +1330,32 @@ def truncate_conversation(
             messages_removed=0,
         )
 
-    raw_messages_to_remove = int(visible_count * frac_to_remove)
-    # Even-align to preserve user/assistant (or tool-call/tool-response) pairs.
-    # (the minimum meaningful pair removal), provided enough visible messages exist.
-    messages_to_remove = raw_messages_to_remove - (raw_messages_to_remove % 2)
-    if messages_to_remove == 0 and raw_messages_to_remove >= 1 and visible_count >= 2:
-        messages_to_remove = 2
+    target_messages_to_remove = max(1, int(visible_count * frac_to_remove))
+    groups_to_truncate: list[VisibleMessageGroup] = []
+    messages_to_remove = 0
+    for group in groups:
+        groups_to_truncate.append(group)
+        messages_to_remove += len(group.indices)
+        if messages_to_remove >= target_messages_to_remove:
+            break
 
-    if messages_to_remove <= 0:
+    if not groups_to_truncate:
         return TruncationResult(
             messages=messages,
             truncation_id=truncation_id,
             messages_removed=0,
         )
 
-    indices_to_truncate = set(visible_non_system_indices[:messages_to_remove])
+    indices_to_truncate = {idx for group in groups_to_truncate for idx in group.indices}
+    old_marker_indices = {
+        idx
+        for idx, msg in enumerate(messages)
+        if msg.is_visible() and msg.is_truncation_marker
+    }
 
     tagged_messages = []
     for idx, internal_msg in enumerate(messages):
-        if idx in indices_to_truncate:
+        if idx in indices_to_truncate or idx in old_marker_indices:
             tagged_msg = InternalChatMessage(
                 message=internal_msg.message,
                 truncation_parent=truncation_id,
@@ -1183,9 +1369,8 @@ def truncate_conversation(
         else:
             tagged_messages.append(internal_msg)
 
-    # Locate where to insert the truncation marker
-    if messages_to_remove < len(visible_non_system_indices):
-        first_kept_visible_index = visible_non_system_indices[messages_to_remove]
+    if len(groups_to_truncate) < len(groups):
+        first_kept_visible_index = groups[len(groups_to_truncate)].indices[0]
     else:
         first_kept_visible_index = len(tagged_messages)
 
@@ -1321,47 +1506,30 @@ class ConversationHistoryManager:
             # mask the oldest visible tool_response content with a placeholder.
             # -------------------------------------------------------------------
             masked_any = False
-
-            # [Mechanism B] Build set of indices to exempt (recent error messages)
-            _error_exempt_fb: set[int] = set()
-            try:
-                _exempt_left = RECENT_ERROR_EXEMPT_COUNT
-                for _ri in range(len(self._internal_message_history) - 1, -1, -1):
-                    if _exempt_left <= 0:
-                        break
-                    _rm = self._internal_message_history[_ri]
-                    if _rm.is_visible() and _rm.message.role == MessageRole.TOOL_RESPONSE:
-                        _rt = _extract_content_text(_rm.message.content)
-                        if _rt and _rt.startswith("Error:"):
-                            _error_exempt_fb.add(_ri)
-                            _exempt_left -= 1
-            except Exception:
-                _error_exempt_fb = set()
-
+            pair_by_response = _build_response_pair_map(self._internal_message_history)
+            visible_response_indices = [
+                idx
+                for idx, msg in enumerate(self._internal_message_history)
+                if msg.is_visible() and _is_tool_response_role(msg.message.role)
+            ]
+            error_exempt_indices = _recent_error_response_indices(self._internal_message_history, visible_response_indices)
             for i, internal_msg in enumerate(self._internal_message_history):
-                if (
-                    internal_msg.is_visible()
-                    and internal_msg.message.role == MessageRole.TOOL_RESPONSE
-                ):
-                    content_text = _extract_content_text(internal_msg.message.content)
-                    if content_text and content_text != OBSERVATION_MASKING_PLACEHOLDER:
-                        # [Mechanism A] Exempt skill-loading tool responses.
-                        if i > 0:
-                            prev_msg = self._internal_message_history[i - 1]
-                            prev_role = prev_msg.message.role.value if hasattr(prev_msg.message.role, 'value') else str(prev_msg.message.role)
-                            if prev_role in ("tool-call", "tool_call"):
-                                prev_text = _extract_content_text(prev_msg.message.content)
-                                if prev_text and any(t in prev_text for t in COMPRESSION_EXEMPT_TOOL_NAMES):
-                                    continue
-                        # [Mechanism B] Exempt recent error messages.
-                        if i in _error_exempt_fb:
-                            continue
-                        internal_msg.message.content = [
-                            {"type": "text", "text": OBSERVATION_MASKING_PLACEHOLDER}
-                        ]
-                        masked_any = True
-                        log.info("Content-level fallback: masked oldest visible tool_response")
-                        break  # mask one at a time, then re-check tokens
+                if not internal_msg.is_visible() or not _is_tool_response_role(internal_msg.message.role):
+                    continue
+                content_text = _extract_content_text(internal_msg.message.content)
+                if not content_text or _is_placeholder_response(content_text):
+                    continue
+                if _is_tool_response_exempt(self._internal_message_history, i, pair_by_response):
+                    continue
+                if i in error_exempt_indices:
+                    continue
+                self._internal_message_history[i] = _clone_internal_message_with_content(
+                    internal_msg,
+                    OBSERVATION_MASKING_PLACEHOLDER,
+                )
+                masked_any = True
+                log.info("Content-level fallback: masked oldest visible tool_response")
+                break  # mask one at a time, then re-check tokens
 
             if not masked_any:
                 remaining = len([m for m in self._internal_message_history if m.is_visible()])
