@@ -34,7 +34,7 @@ SubTaskTrackedAgent lifecycle:
 from __future__ import annotations
 
 from contextvars import ContextVar
-from datetime import datetime, timezone
+import threading
 from typing import Any, Optional
 
 from src.lib.logging import get_logger
@@ -52,6 +52,8 @@ _current_coordinator: ContextVar[Optional["CheckpointCoordinator"]] = ContextVar
 _pending_supervisor_heartbeat: ContextVar[Any] = ContextVar("_pending_supervisor_heartbeat", default=None)
 # Stores a file history manager set by runner.py before supervisor.run(); consumed by activate().
 _pending_file_history: ContextVar[Any] = ContextVar("_pending_file_history", default=None)
+_active_coordinator_lock = threading.Lock()
+_active_coordinator: Optional["CheckpointCoordinator"] = None
 
 
 class CheckpointCoordinator:
@@ -70,10 +72,13 @@ class CheckpointCoordinator:
         checkpoint_manager: Any,
         task_id: str,
         task_text: str,
+        *,
+        resume: bool = False,
     ) -> None:
         self._cm = checkpoint_manager
         self._task_id = task_id
         self._task_text = task_text
+        self._resume = resume
         # Set after register_supervisor_step_callback(); workers inherit it.
         self._step_cb: Any = None
         # Worker heartbeat writers — one per worker_name.
@@ -108,10 +113,15 @@ class CheckpointCoordinator:
         checkpoint_manager: Any,
         task_id: str,
         task_text: str,
+        *,
+        resume: bool = False,
     ) -> "CheckpointCoordinator":
         """Create and store a new coordinator for this task.  Called by supervisor."""
-        coord = cls(checkpoint_manager, task_id, task_text)
+        global _active_coordinator
+        coord = cls(checkpoint_manager, task_id, task_text, resume=resume)
         _current_coordinator.set(coord)
+        with _active_coordinator_lock:
+            _active_coordinator = coord
         # Auto-inject any heartbeat writer set by runner.py before supervisor.run().
         pending_hb = _pending_supervisor_heartbeat.get()
         if pending_hb is not None:
@@ -127,7 +137,21 @@ class CheckpointCoordinator:
     @staticmethod
     def current() -> Optional["CheckpointCoordinator"]:
         """Return the coordinator inherited from the current context (may be None)."""
-        return _current_coordinator.get()
+        coord = _current_coordinator.get()
+        if coord is not None:
+            return coord
+        with _active_coordinator_lock:
+            return _active_coordinator
+
+    @staticmethod
+    def deactivate(coord: Optional["CheckpointCoordinator"] = None) -> None:
+        """Clear the active coordinator after a supervisor run finishes."""
+        global _active_coordinator
+        if _current_coordinator.get() is coord or coord is None:
+            _current_coordinator.set(None)
+        with _active_coordinator_lock:
+            if coord is None or _active_coordinator is coord:
+                _active_coordinator = None
 
     # ── Supervisor ops ───────────────────────────────────────────────
 
@@ -195,6 +219,27 @@ class CheckpointCoordinator:
         # Store for workers to inherit.
         self._step_cb = _on_step_complete
 
+    def register_file_history_hook(self, hook_manager: Any) -> None:
+        """Register file-history pre-edit backups on an agent's hook manager."""
+        if self._file_history is None or hook_manager is None:
+            return
+        if getattr(hook_manager, "_agentloom_file_history_hook_registered", False):
+            return
+        try:
+            from src.lib.checkpoint.file_history_hook import FileHistoryHook
+            from src.lib.smolagents.hooks.types import HookEvent
+
+            hook_manager.register_hook(
+                HookEvent.PRE_TOOL_USE,
+                "*",
+                FileHistoryHook(self._file_history),
+                source="file_history",
+                allow_duplicates=False,
+            )
+            setattr(hook_manager, "_agentloom_file_history_hook_registered", True)
+        except Exception as exc:
+            _logger.warning("Failed to register file history hook: %s", exc)
+
     def save_supervisor(
         self,
         runtime_agent: Any,
@@ -214,12 +259,12 @@ class CheckpointCoordinator:
                 result=result,
                 error=error,
             )
-            def _update_status(tree):
-                tree["status"] = status
-                if status == "interrupted":
-                    tree["interrupted_at"] = datetime.now().astimezone().isoformat()
-                return tree
-            self._cm.update_task_tree(self._task_id, _update_status)
+            self._cm.record_task_status_changed(
+                self._task_id,
+                status,
+                result=result,
+                error=error,
+            )
 
             _logger.info(
                 "Checkpoint saved [%s] task_id=%s steps=%d",
@@ -266,7 +311,15 @@ class CheckpointCoordinator:
         except Exception as exc:
             _logger.warning("Failed to register worker step callback: %s", exc)
 
-    def register_worker_step_tracker(self, runtime_agent: Any, agent_name: str, call_index: int) -> None:
+    def register_worker_step_tracker(
+        self,
+        runtime_agent: Any,
+        agent_name: str,
+        call_index: int,
+        *,
+        input_hash: str = "",
+        task_input: str = "",
+    ) -> None:
         """Register a dedicated step-counter callback for a specific worker call.
 
         Called from ``SubTaskTrackedAgent._execute_with_lifecycle`` **after**
@@ -284,6 +337,15 @@ class CheckpointCoordinator:
 
             def _on_worker_step(memory_step, **kwargs):
                 try:
+                    self._cm.save_worker_checkpoint(
+                        self._task_id,
+                        agent_name,
+                        call_index=call_index,
+                        input_hash=input_hash,
+                        memory_steps=list(inner.memory.steps),
+                        task_input=str(task_input),
+                        status="running",
+                    )
                     whb = self._worker_heartbeats.get(agent_name)
                     if whb is not None:
                         whb.update_call_step(
@@ -323,24 +385,13 @@ class CheckpointCoordinator:
         """Record a worker call start in the task_tree.  Returns call_index."""
         call_index = 0
         try:
-            tree = self._cm.load_task_tree(self._task_id) or {}
-            workers = tree.setdefault("workers", {})
-            calls = workers.setdefault(agent_name, [])
-            if not isinstance(calls, list):
-                calls = [calls]
-                workers[agent_name] = calls
-            call_index = len(calls)
-            calls.append(
-                {
-                    "call_index": call_index,
-                    "input_hash": input_hash,
-                    "agent_name": agent_name,
-                    "status": "running",
-                    "task_input": str(task_input),
-                    "result": None,
-                }
+            call_index = self._cm.record_worker_started(
+                self._task_id,
+                agent_name,
+                input_hash=input_hash,
+                task_input=str(task_input),
+                reuse_incomplete=self._resume,
             )
-            self._cm.save_task_tree(self._task_id, tree)
         except Exception:
             pass
 
@@ -365,11 +416,51 @@ class CheckpointCoordinator:
         try:
             inner = self._pending_worker_runtime.pop(agent_name, None)
             if inner is not None:
-                self.register_worker_step_tracker(inner, agent_name, call_index)
+                self.register_worker_step_tracker(
+                    inner,
+                    agent_name,
+                    call_index,
+                    input_hash=input_hash,
+                    task_input=str(task_input),
+                )
         except Exception as exc:
             _logger.debug("Worker step tracker register failed: %s", exc)
 
         return call_index
+
+    def restore_worker(self, runtime_agent: Any, agent_name: str, call_index: int) -> bool:
+        """Inject saved worker memory for an incomplete resumed worker call."""
+        try:
+            if not self._resume:
+                return False
+            from src.lib.checkpoint.serializer import CheckpointSerializer
+            from src.lib.checkpoint.conversation_recovery import prepare_steps_for_resume
+
+            worker_ckpt = self._cm.load_worker_checkpoint(
+                self._task_id,
+                agent_name,
+                call_index=call_index,
+            )
+            if not worker_ckpt or worker_ckpt.get("status") == "completed":
+                return False
+            raw_steps = worker_ckpt.get("memory_steps") or []
+            if not raw_steps:
+                return False
+            steps = CheckpointSerializer.deserialize_memory_steps(raw_steps)
+            steps, interruption = prepare_steps_for_resume(steps)
+            inner = getattr(runtime_agent, "_agent", runtime_agent)
+            inner.memory.steps = steps
+            _logger.info(
+                "Restored worker %s #%d with %d steps (interruption=%s)",
+                agent_name,
+                call_index,
+                len(steps),
+                interruption.kind,
+            )
+            return True
+        except Exception as exc:
+            _logger.warning("Failed to restore worker checkpoint: %s", exc)
+            return False
 
     def record_worker_success(
         self,
@@ -393,12 +484,15 @@ class CheckpointCoordinator:
                 status="completed",
                 result=full_result,
             )
-            tree = self._cm.load_task_tree(self._task_id) or {}
-            calls = tree.get("workers", {}).get(agent_name, [])
-            if isinstance(calls, list) and call_index < len(calls):
-                calls[call_index]["status"] = "completed"
-                calls[call_index]["result"] = full_result
-            self._cm.save_task_tree(self._task_id, tree)
+            self._cm.record_worker_finished(
+                self._task_id,
+                agent_name,
+                call_index=call_index,
+                input_hash=input_hash,
+                task_input=str(task_input),
+                status="completed",
+                result=full_result,
+            )
             # ── Worker heartbeat: mark completed ──
             self._update_worker_heartbeat(agent_name, call_index, "completed")
         except Exception:
@@ -425,14 +519,48 @@ class CheckpointCoordinator:
                 status="failed",
                 error=error,
             )
-            tree = self._cm.load_task_tree(self._task_id) or {}
-            calls = tree.get("workers", {}).get(agent_name, [])
-            if isinstance(calls, list) and call_index < len(calls):
-                calls[call_index]["status"] = "failed"
-                calls[call_index]["error"] = error[:300]
-            self._cm.save_task_tree(self._task_id, tree)
+            self._cm.record_worker_finished(
+                self._task_id,
+                agent_name,
+                call_index=call_index,
+                input_hash=input_hash,
+                task_input=str(task_input),
+                status="failed",
+                error=error[:300],
+            )
             # ── Worker heartbeat: mark failed ──
             self._update_worker_heartbeat(agent_name, call_index, "failed")
+        except Exception:
+            pass
+
+    def record_worker_interrupted(
+        self,
+        agent_name: str,
+        call_index: int,
+        input_hash: str,
+        task_input: str,
+        worker_mem: Any,
+    ) -> None:
+        """Record an interrupted worker so resume can continue the same call."""
+        try:
+            self._cm.save_worker_checkpoint(
+                self._task_id,
+                agent_name,
+                call_index=call_index,
+                input_hash=input_hash,
+                memory_steps=worker_mem,
+                task_input=str(task_input),
+                status="interrupted",
+            )
+            self._cm.record_worker_finished(
+                self._task_id,
+                agent_name,
+                call_index=call_index,
+                input_hash=input_hash,
+                task_input=str(task_input),
+                status="interrupted",
+            )
+            self._update_worker_heartbeat(agent_name, call_index, "interrupted")
         except Exception:
             pass
 

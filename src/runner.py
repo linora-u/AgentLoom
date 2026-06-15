@@ -231,15 +231,13 @@ def run_app(
     else:
         task_id = generate_id(f"supervisor_{agent_name}", prefix="task")
         if checkpoint_mgr is not None:
-            checkpoint_mgr.save_task_tree(task_id, {
-                "task_id": task_id,
-                "yaml_path": str(yaml_path),
-                "agent_name": agent_name,
-                "task_text": effective_task,
-                "status": "running",
-                "created_at": datetime.now().astimezone().isoformat(),
-                "workers": {},
-            })
+            checkpoint_mgr.record_task_created(
+                task_id,
+                yaml_path=str(yaml_path),
+                agent_name=agent_name,
+                task_text=effective_task,
+                created_at=datetime.now().astimezone().isoformat(),
+            )
             # Record task_id → run_log_dir mapping in index for resume lookup.
             checkpoint_mgr.save_task_to_index(task_id)
 
@@ -277,19 +275,11 @@ def run_app(
     except Exception:
         pass
 
-    # Register file history hook for pre-edit backups.
+    # File-history hooks are registered on each agent's own HookManager inside
+    # the agent run lifecycle. Registering on the global singleton would miss
+    # the per-agent tool shim path.
     if file_history is not None:
-        try:
-            from src.lib.checkpoint.file_history_hook import FileHistoryHook
-            from src.lib.smolagents.hooks.hook_manager import HookManager
-            from src.lib.smolagents.hooks.types import HookEvent
-
-            hook_mgr = HookManager.get_instance()
-            fh_hook = FileHistoryHook(file_history)
-            hook_mgr.register_hook(HookEvent.PRE_TOOL_USE, "*", fh_hook, source="file_history")
-            log.info("File history hook registered for pre-edit backups")
-        except Exception as exc:
-            log.warning("Failed to register file history hook: %s", exc)
+        log.info("File history manager prepared for pre-edit backups")
 
     log.info("=" * 70)
     log.info("Application: %s", agent_name)

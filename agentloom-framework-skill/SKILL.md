@@ -12,6 +12,7 @@ argument-hint: "<AgentLoom task or application path>"
 ## 前置条件
 
 - 先进入 AgentLoom 根目录，根目录判定只看 `config/llm.yaml`，不要用 `config/system.yaml`。
+- 新建 worktree 或干净 checkout 后先检查 `config/llm.yaml`；该文件通常被 `.gitignore` 忽略，不会随 worktree 自动生成。缺失时从同机可信工作区复制，或让用户提供本地配置；不要提交该文件，也不要凭空生成模型配置。
 - 当前本地环境可能没有 `uv`；验证优先用 `.venv/bin/python` 和 `.venv/bin/loom`。
 - 写 Application 前先读真实仓库结构与 `config/llm.yaml`，`model_type` 只能来自项目配置。
 - 如果用户目标不清晰，先问清“功能目标、输入、输出、验收标准”；不要为了显得完整而发明需求。
@@ -23,6 +24,7 @@ argument-hint: "<AgentLoom task or application path>"
 - 需要写 Agent YAML / Worker YAML / `agent_function_schema` / `worker_agents`：读 [`references/yaml-contract.md`](references/yaml-contract.md)。
 - 需要为 Application 配置或创建私有 Skill：读 [`references/yaml-contract.md`](references/yaml-contract.md) 的 Skills 配置，再读 [`references/application-generation.md`](references/application-generation.md) 的目录规范。
 - 需要验证是否真是多 Agent、是否能运行、问题怎么记录：读 [`references/validation-and-review.md`](references/validation-and-review.md)。
+- 修改 checkpoint、resume、日志/维测、并发 Worker、文件回滚、`loom list-tasks` 或 `loom clean-tasks` 这类框架运行时能力：读 [`references/validation-and-review.md`](references/validation-and-review.md) 的“框架运行时功能验证”，并用真实 Application 跑功能路径。
 - 需要写 README 或验证记录：读 [`references/readme-template.md`](references/readme-template.md)。
 - 需要看一个按本 Skill 创建的简单多 Agent 示例：参考 `applications/feature_planner_demo/README.md`。
 - 只有当规则会跨多个 Application 复用、需要 Hook、或必须长期注入领域协议时，才创建新的私有 Skill；否则不要创建 Skill。
@@ -34,7 +36,7 @@ argument-hint: "<AgentLoom task or application path>"
 | 需求路由 | 用户只说一个功能，判断 AgentLoom 应该怎么落地 | `function-routing.md` | 实现路径、需要问的问题、应用边界 |
 | Application 生成 | 新建/扩展 `applications/<app_name>` | `application-generation.md` | 目录、入口脚本、workflow、README |
 | YAML 契约 | Supervisor/Worker/Tool/Skill 配置 | `yaml-contract.md` | 合法 Agent YAML 与 Worker schema |
-| 验证评审 | 结构扫描、YAML 校验、运行边界、架构风险 | `validation-and-review.md` | 验证命令、结果、问题清单 |
+| 验证评审 | 结构扫描、YAML 校验、运行边界、checkpoint/resume 功能、架构风险 | `validation-and-review.md` | 验证命令、结果、问题清单 |
 | README 交付 | 给用户和后续 Agent 看的使用说明 | `readme-template.md` | 可运行说明、验证记录、已知问题 |
 
 ## 执行协议
@@ -52,6 +54,8 @@ argument-hint: "<AgentLoom task or application path>"
 # 根目录校验
 pwd
 test -f config/llm.yaml
+# 新 worktree 缺失时，先确认它是否为被忽略的本地配置
+git check-ignore -v config/llm.yaml || true
 
 # YAML 契约校验
 .venv/bin/python agentloom-framework-skill/scripts/validate_application_yaml.py \

@@ -1,0 +1,64 @@
+name: "test_checkpoint_complex_supervisor"
+description: |
+  Complex checkpoint and resume validation with one supervisor and one worker.
+
+  The supervisor prepares several input files, calls a worker to build a
+  report, verifies the report, and writes a final manifest. This workflow is
+  intentionally multi-step so real LLM interruption tests can stop either the
+  supervisor or the worker mid-run and then resume from checkpoint.
+
+model_type: "powerful"
+tool_call_type: "code_act"
+
+workflow: |
+  # Complex Checkpoint Validation
+
+  Execute these phases in order. Use each shell command once. Do not repeat
+  verification after it succeeds.
+
+  ## Phase 1: Supervisor setup
+  Use shell_tool once to run this exact command:
+    rm -rf /tmp/agentloom_ckpt_complex &&
+    mkdir -p /tmp/agentloom_ckpt_complex/items &&
+    printf 'alpha=11\n' > /tmp/agentloom_ckpt_complex/items/a.txt &&
+    printf 'beta=22\n' > /tmp/agentloom_ckpt_complex/items/b.txt &&
+    printf 'gamma=33\n' > /tmp/agentloom_ckpt_complex/items/c.txt &&
+    printf 'supervisor:setup\n' > /tmp/agentloom_ckpt_complex/ledger.txt &&
+    printf 'alpha=11\nbeta=22\ngamma=33\nmanifest_status=ready\n' > /tmp/agentloom_ckpt_complex/supervisor_manifest.txt &&
+    test -s /tmp/agentloom_ckpt_complex/supervisor_manifest.txt
+
+  ## Phase 2: Worker report
+  Call artifact_worker with query:
+    "Build a checkpoint validation report in /tmp/agentloom_ckpt_complex.
+     Read items/a.txt, items/b.txt, items/c.txt, and supervisor_manifest.txt.
+     Create worker_progress/started.txt, worker_progress/combined.txt, and
+     worker_report.txt. worker_report.txt must include alpha=11, beta=22,
+     gamma=33, manifest_status=ready, and worker_status=complete."
+
+  ## Phase 3: Supervisor verification and final manifest
+  Use shell_tool once to run this exact command:
+    grep -q 'worker_status=complete' /tmp/agentloom_ckpt_complex/worker_report.txt &&
+    grep -q 'alpha=11' /tmp/agentloom_ckpt_complex/worker_report.txt &&
+    grep -q 'beta=22' /tmp/agentloom_ckpt_complex/worker_report.txt &&
+    grep -q 'gamma=33' /tmp/agentloom_ckpt_complex/worker_report.txt &&
+    grep -q 'manifest_status=ready' /tmp/agentloom_ckpt_complex/worker_report.txt &&
+    printf 'checkpoint_complex=complete\nalpha=11\nbeta=22\ngamma=33\nworker_status=complete\n' > /tmp/agentloom_ckpt_complex/final_manifest.txt &&
+    printf 'supervisor:complete\n' >> /tmp/agentloom_ckpt_complex/ledger.txt &&
+    test -s /tmp/agentloom_ckpt_complex/final_manifest.txt
+
+  ## Final answer
+  Report exactly: CHECKPOINT COMPLEX COMPLETE
+
+tools:
+  - name: "shell_tool"
+  - name: "read_file"
+  - name: "edit_file"
+
+worker_agents:
+  - path: "applications/test_demo/workflows/worker_agents/test_checkpoint_complex_worker.yaml"
+
+skills: []
+max_steps: 10
+
+execution_env:
+  type: "local"

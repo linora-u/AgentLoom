@@ -11,6 +11,7 @@ from __future__ import annotations
 import time
 import traceback
 from concurrent.futures import Future, ThreadPoolExecutor, as_completed, wait, FIRST_COMPLETED
+from contextvars import copy_context
 from typing import Any, Callable, List, Optional
 
 from src.lib.concurrency.models import TaskResult
@@ -104,7 +105,8 @@ class ParallelAgentExecutor:
 
                 # ── Submit ──
                 task["_start_time"] = time.monotonic()
-                future = executor.submit(self._run_one, task, agent_tool)
+                ctx = copy_context()
+                future = executor.submit(ctx.run, self._run_one, task, agent_tool)
                 active[future] = task
 
             # ── Drain remaining futures ──
