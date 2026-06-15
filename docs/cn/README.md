@@ -5,11 +5,11 @@
 <h1 align="center">AgentLoom</h1>
 
 <p align="center">
-  <strong>用简单配置和少量代码搭建复杂 multi-agent 应用，并获得安全运行边界与人性化日志追踪系统。</strong>
+  <strong>用 YAML 构建应用级 multi-agent 系统的框架。</strong>
 </p>
 
 <p align="center">
-  <strong>AgentLoom 帮开发者把 multi-agent 工作流变成可运行、可观测、可恢复、可控的应用。</strong>
+  通过 YAML 构建 multi-agent 应用，为不同子 Agent 选择合适模型，加载 Skills / MCP / 工具，并发处理重复任务，并从保存的状态恢复长任务。
 </p>
 
 <p align="center">
@@ -18,11 +18,15 @@
   <a href="https://github.com/linora-u/AgentLoom/releases/tag/v1.0.1"><img alt="release v1.0.1" src="https://img.shields.io/badge/release-v1.0.1-007EC6"></a>
 </p>
 
+<p align="center">
+  <img alt="AgentLoom application flow" src="../assets/agentloom-application-flow.svg">
+</p>
+
 ---
 
-## 快速开始
+## 3 分钟快速开始
 
-AgentLoom 的目标是让你尽快从仓库克隆进入一个真实可运行的 multi-agent 应用。
+AgentLoom 面向想构建可直接运行的 Agent 应用的开发者：YAML 定义 Agent，Worker 有明确调用契约，模型可以按 Agent 路由，运行过程有日志、checkpoint 状态和可选 UI 监控。
 
 ```bash
 git clone <repo-url> AgentLoom
@@ -46,92 +50,92 @@ uv run loom run applications/ai_quality_analysis/workflows/code_review_agent.yam
 - 可通过 `uv run loom ui` 打开的 Web 可视化面板；
 - 可通过 `uv run loom dashboard` 打开的终端任务监控面板。
 
-## AgentLoom 提供什么能力
+## 以 Codex 为例快速创建多 Agent 应用
 
-AgentLoom 已经实现了一套构建和运行复杂 Agent 应用所需的运行时能力：
+最快的方式是让 Codex 使用仓库自带的 framework skill。Codex 不只是生成 YAML：它也可以直接运行 AgentLoom 应用，观察终端输出和 `.logs/`，查看 checkpoint 状态，并在 Worker 卡住或配置出错时继续修改应用。
 
-| 能力领域 | 已实现功能 |
-|---|---|
-| Multi-agent 应用组装 | Supervisor / Worker 角色、YAML `workflow`、`worker_agents`、`loom run` 直接运行、`loom create` 生成入口脚本、`run_app()` 嵌入 Python。 |
-| Agent-as-Tool | Worker 通过 `agent_function_schema` 导出为可调用工具，自动生成函数签名、必填参数校验、docstring、字符串结果和 `.batch(tasks)`。 |
-| 执行模式 | `tool_call` 用于结构化、可追踪编排，`code_act` 用于更灵活的代码执行任务。 |
-| Python 前后置处理 | 支持自定义工具函数和 wrapper，用于扫描、缓存、循环、重试、校验、错误隔离、进度持久化和产物落盘。 |
-| 批量并发 | Worker 支持 `concurrency: auto` 或固定并发，支持 `tool.batch(tasks)`、反压控制、熔断、进度回调和单次调用状态隔离。 |
-| Skills 与 Hooks | 可复用 Skills、强制注入 / 按需加载 / 隐藏模式，以及工具、任务、子 Agent、会话、压缩、安装、配置变更等生命周期 Hooks。 |
-| 模型与上下文控制 | 按 Agent 配置 `model_type`、多 LLM 端点、参数继承、重试机制、Prompt 定制和多层上下文压缩。 |
-| 工具体系 | 内置文件、Shell、搜索、代码编辑、Git、Todo、Skill 加载、本地 Python 工具和本地 Codex Exec 工具，并支持 MCP Client 集成。 |
-| 本地 Codex 集成 | 可把本机 `codex exec` 注册为普通 function tool，支持多个别名、`fixed_args` 固定参数、`sandbox` / `search` 透传，并遵循本机 Codex 登录和权限配置。 |
-| 代码智能 | LSP 服务管理，支持 definition、references、symbols、hover、workspace symbols，并提供 tree-sitter fallback。 |
-| 运行时安全 | 路径边界、include/exclude、按 Agent 生效的权限策略、Shell 命令/操作符白名单、安全检查、沙盒包装和 `shell_audit.log`。 |
-| 长任务韧性 | checkpoint resume、心跳检测、对话恢复、工具调用错误恢复、文件历史、worker skip-on-resume 和任务清理。 |
-| 可观测性 | Rich 终端日志、纯文本文件日志、每步耗时、累计/增量 Token、task/subtask/agent 上下文，以及 `.logs/` 运行归档。 |
-| UI 与监控 | Web UI 支持 SSE 实时更新、拓扑图、时间线回放、多运行分组；TUI dashboard 支持活跃任务和可恢复任务监控。 |
-| 示例应用 | `ai_quality_analysis`、`unit_test_studio`、`repo_map`、`codex_exec_demo` 展示直接运行、自定义 Python 入口、严格流水线、并发 Worker 分析和本地 Codex 工具调用。 |
+可以这样对 Codex 说：
+
+```text
+先读取 agentloom-framework-skill/SKILL.md。
+
+为下面目标创建一个名为 <app_name> 的 AgentLoom 应用：
+<说明用户任务、输入、输出和验收标准>
+
+要求：
+- 所有文件放在 applications/<app_name>/ 下。
+- 使用一个 Supervisor YAML 和至少两个 Worker YAML。
+- 每个 Worker 必须定义 agent_function_schema，写清输入和输出。
+- model_type 只能从 config/llm.yaml 中选择。
+- 只有对这个应用有帮助时，才添加 Skills 或 MCP 配置。
+- 编写应用 README，包含运行命令、Worker 分工、验证记录和已知限制。
+- 运行应用，观察日志和 checkpoint，并修复发现的 YAML 或工具问题。
+```
+
+你可以让 Codex 帮你运行和观察，也可以自己运行：
+
+```bash
+uv run loom run applications/<app_name>/workflows/<app_name>_agent.yaml
+```
+
+运行过程中常用的查看命令：
+
+```bash
+uv run loom list-tasks
+uv run loom dashboard
+ls .logs/
+```
+
+如果你更习惯 Claude Code，也可以用同样的思路：先读 `agentloom-framework-skill/SKILL.md`，在 `applications/<app_name>/` 下创建应用，运行它，并总结成功和失败的地方。
+
+核心配置可以先理解成四件事：
+
+- `model_type`：这个 Agent 用哪一类已配置好的模型。
+- `worker_agents`：Supervisor 可以调用哪些 Worker YAML。
+- `agent_function_schema`：Worker 接收什么输入、返回什么输出。
+- `skills` / `mcp_servers`：可选的额外知识和外部工具。
 
 ## 为什么选择 AgentLoom
 
-### 用更少代码搭建复杂 Agent 应用
+很多 Agent 框架提供的是组件。AgentLoom 提供的是完整应用结构。
 
-很多 Agent 框架提供的是组件。AgentLoom 提供的是应用形态。
+复杂 Agent 应用经常重复写同一批基础代码：Worker 注册、参数适配、运行入口、批量并发、日志、checkpoint 和安全控制。AgentLoom 把这些可复用部分放进 YAML 和运行时里。你的应用代码只需要关注领域任务：前处理、校验、产物落盘，以及真正的 Agent 分工。
 
-复杂 Agent 应用通常会反复长出同一批胶水代码：Worker 注册、参数适配、运行入口、前后置处理、批量并发、日志追踪和安全控制。更麻烦的是，这些代码在下一个 Agent 应用里往往又要重新写一遍。
+实际收益是：
 
-Worker Agent 可以被导出为可调用工具，Supervisor Agent 会自动加载并调度这些 Worker。复杂流程可以由多个专职 Agent、少量业务胶水代码和直接可运行的入口组成。
-
-AgentLoom 把可复用部分沉到 YAML 和运行时里。YAML 描述 workflow、Worker 列表、工具、模型、权限和 Skills；Worker 自动变成可调用工具；Supervisor 自动加载 Worker；Python 只保留项目特有的前处理、后处理、缓存、循环、校验和产物落盘逻辑。Skills 与 Hooks 则把生命周期能力打包成可跨应用复用的模块。
-
-你可以从这些入口开始：
-
-- `uv run loom run <workflow>` 直接运行一个应用；
-- `uv run loom create <workflow>` 生成 Python 入口脚本；
-- `run_app("<workflow>")` 把 AgentLoom 应用嵌入自己的 Python 流水线；
-- `tool.batch(tasks)` 用同一个 Worker Agent 并发处理大量输入。
-
-这就是开发周期上的核心收益：少写编排胶水，多花时间设计 Agent 分工、工具边界和任务流程。
-
-## AgentLoom 的不同之处
-
-| 普通 Agent 框架常见模式 | AgentLoom 的方式 |
+| 需求 | AgentLoom 的方式 |
 |---|---|
-| 组件优先，用户自己组装底层抽象。 | 应用优先：直接运行、生成入口、嵌入业务代码、监控和恢复 multi-agent 应用。 |
-| 每个复杂应用都容易重新长出一层胶水代码。 | 可复用编排、运行边界、观测和生命周期扩展沉到 AgentLoom，应用层只保留业务差异。 |
-| 安全、恢复、观测能力经常后置。 | 运行边界、checkpoint、日志、审计、Web UI、dashboard 是框架路径的一部分。 |
-| 日志主要围绕模型调用和最终输出。 | 日志服务于 Agent 应用调试：task、subtask、agent、step、token、checkpoint、拓扑都能追踪。 |
-| 快速 demo 容易，长期无人值守任务需要额外基础设施。 | 面向多阶段、长时间、可恢复、可复盘的 Agent 自动化任务。 |
+| 构建完整 multi-agent 应用 | 用 YAML 定义 Supervisor、Workers、工具、Skills 和运行时行为。 |
+| 为不同角色选择不同模型 | 每个 Agent 设置自己的 `model_type`，真实密钥和端点隔离在 `config/llm.yaml`。 |
+| 把子 Agent 当工具调用 | Worker 定义 `agent_function_schema`，Supervisor 像调用普通工具一样调用它。 |
+| 复用编程助手知识 | 加载 Claude-style `SKILL.md` 包，支持按需加载或全文预加载。 |
+| 接入外部工具 | 注册本地 Python 工具、本地 `codex exec`，并通过 `mcp_servers` 接入 MCP servers。 |
+| 处理重复性工作 | 用 Worker `concurrency` 和 `tool.batch(tasks)` 并发处理独立输入。 |
+| 理解长任务状态 | 使用结构化日志、`.logs/` 归档、checkpoint、`loom ui` 和 `loom dashboard`。 |
 
-## 用更少代码构建 multi-agent 应用
+## 架构
 
-AgentLoom 的核心模型很直接：
-
-```mermaid
-flowchart LR
-    User["Application / CLI"] --> Supervisor["Supervisor Agent"]
-    Supervisor --> WorkerA["Worker Agent as Tool"]
-    Supervisor --> WorkerB["Worker Agent as Tool"]
-    Supervisor --> LocalTools["Local Tools"]
-    Supervisor --> MCP["MCP Tools"]
-    WorkerA --> Runtime["Runtime Controls"]
-    WorkerB --> Runtime
-    Runtime --> Logs["Logs / Checkpoints / UI"]
-```
+<p align="center">
+  <img alt="AgentLoom runtime architecture" src="../assets/agentloom-runtime-architecture.svg">
+</p>
 
 关键边界是：
 
-- Worker Agent 定义自己的职责、工具、输入和输出契约；
-- AgentLoom 把 Worker 转成带真实函数签名的可调用工具；
-- Supervisor 像调用工具一样调度 Worker，完成完整任务；
-- 业务 Python 仍然可以包在外层，处理扫描、缓存、参数解析、校验、落盘等确定性逻辑。
+- Worker Agent 定义自己的角色、工具、输入和输出契约。
+- AgentLoom 把 Worker 转成带真实函数签名的可调用工具。
+- Supervisor 协调 Workers 和普通工具，完成应用级任务。
+- Python 仍然可以负责确定性的前处理、校验、缓存和产物落盘。
 
-### 胶水代码放在哪里
+## 核心能力
 
-| 通常会变成胶水代码的部分 | AgentLoom 中的位置 |
+| 能力 | 已实现内容 |
 |---|---|
-| 可复用 Agent 编排 | YAML `workflow` 和 `worker_agents`。 |
-| Worker 参数适配 | `agent_function_schema` 和生成的函数签名。 |
-| 项目特有前后置处理 | 注册为工具的 Python wrapper。 |
-| 跨应用生命周期行为 | Skills 与 Hooks。 |
-
-`repo_map` 应用展示了这种混合模式：Python 负责确定性的仓库扫描和排序，AgentLoom 负责调用 Worker Agent 逐目录分析并生成架构文档。
+| 应用优先的 YAML | `loom run` 直接执行 Agent YAML；`loom create` 生成 Python 入口脚本；`run_app()` 可嵌入 Python。 |
+| 按 Agent 路由模型 | 每个 Agent 选择 `model_type`；真实 provider、key、endpoint、retry 和参数在 `config/llm.yaml` 中管理。 |
+| Agent-as-Tool 协作 | Worker 通过 `agent_function_schema` 导出为可调用工具，包含必填输入校验和字符串输出。 |
+| Skills、MCP 与工具 | Agent 可加载 `SKILL.md` 包、本地 Python 函数、内置文件/Shell/搜索/Git 工具、本地 Codex 工具，并通过 `mcp_servers` 接入 MCP Client 工具。 |
+| 并发重复任务 | Worker `concurrency: auto` 或固定并发配合 `.batch(tasks)` 处理大量独立输入。 |
+| 状态与可观测性 | Rich 终端日志、纯文本文件日志、每步耗时、Token 统计、`.logs/` 归档、checkpoint resume、Web UI 和 TUI dashboard。 |
 
 ## 示例应用
 
@@ -176,37 +180,23 @@ uv run loom run applications/codex_exec_demo/workflows/use_codex_exec_demo.yaml
 
 ## 核心概念
 
+### Supervisor / Worker
+
+Supervisor Agent 负责协调任务。Worker Agent 专注其中一个部分。多 Agent 应用中，Supervisor 通过 `worker_agents` 引用 Workers，Workers 通过 `agent_function_schema` 暴露可调用契约。
+
 ### Agent 即工具
 
 Worker Agent 可以导出为可调用工具。AgentLoom 会生成函数签名、校验必填输入、构造任务载荷并返回字符串结果。同一个 Worker 还可以暴露 `.batch(tasks)` 用于并发执行。
 
-### Supervisor / Worker
-
-Supervisor Agent 负责协调任务。Worker Agent 专注其中一个部分。这样的拆分让职责更明确，也更容易调试。
-
-### Workflow
-
-Workflow 描述 Agent 要完成什么，以及 Supervisor 应如何使用 Worker。AgentLoom 会基于 Workflow 构造运行时任务说明，让长任务更容易保持方向。
-
 ### Skills 与 Hooks
 
-Skills 提供可复用知识或行为。Hooks 可以挂载在任务生命周期、子 Agent 生命周期、工具调用等运行时事件上，用于校验、记忆、策略约束、结果转换和可视化采集。
-
-### 执行模式
-
-AgentLoom 支持结构化工具调用，也支持更灵活的代码执行模式。每个 Agent 可以根据自己的职责选择更合适的模式。
+Skills 通过 Claude-style `SKILL.md` 包提供可复用知识或行为。Hooks 可以挂载在任务生命周期、子 Agent 生命周期、工具调用、会话、压缩、安装和配置变更等运行时事件上。
 
 ### 本地 Codex 工具
 
-AgentLoom 内置 `src.tools.codex.codex_tool.codex`，用于把本机 `codex exec`
-作为普通 function tool 暴露给 Agent。它不需要额外的 `system.yaml` 专用配置；
-在 Agent YAML 的 `tools` 中通过 `module/function` 注册即可。
+AgentLoom 内置 `src.tools.codex.codex_tool.codex`，用于把本机 `codex exec` 作为普通 function tool 暴露给 Agent。在 Agent YAML 的 `tools` 中通过 `module/function` 注册即可。使用 `fixed_args` 可以锁定 `prompt`、`cwd`、`sandbox`、`search` 等输入；被固定的参数不会出现在 LLM 可见的 tool schema 中。
 
-如果希望锁定 Codex 的 `prompt`、`cwd`、`sandbox`、`search` 等输入，使用
-`fixed_args`。被固定的参数会由框架绑定，不会出现在 LLM 可传入的 tool schema
-中；未固定的参数仍会暴露给 LLM。`sandbox: ""` 表示不传 `--sandbox`，由本机
-Codex 配置和默认规则决定权限；`search: "true"` 会透传 `--search`，默认不启用
-网络搜索。使用前需要确保 `codex` 在 `PATH` 中，并且 `codex login status` 成功。
+使用前需要确保 `codex` 在 `PATH` 中，并且 `codex login status` 成功。
 
 ## CLI 命令
 
@@ -227,23 +217,17 @@ Codex 配置和默认规则决定权限；`search: "true"` 会透传 `--search`�
 | [Agent 配置](agent_config.md) | Supervisor/Worker 字段、工具、模型选择、工作流和 Skills。 |
 | [LLM 配置](llm_config.md) | 模型类型、Provider 设置、继承、重试和 Prompt 缓存。 |
 | [系统配置](system_config.md) | 运行时设置、权限、日志、执行环境和工具系统。 |
-| [Skills 配置](skills_config.md) | Skill 包格式、加载方式、调用控制和内置 Skills。 |
+| [Skills 配置](skills_config.md) | Skill 包格式、加载方式、运行时策略和内置 Skills。 |
 | [Hooks 参考](hooks.md) | 生命周期事件、Hook 类型、匹配规则和执行行为。 |
 | [Checkpoint 断点恢复](checkpoint.md) | Checkpoint 布局、恢复行为和长任务恢复机制。 |
 
 ## AgentLoom Framework Skill
 
-仓库根目录提供一个给 AI 编程助手使用的框架级 Skill：
-`agentloom-framework-skill/`。
+仓库根目录提供一个给 AI 编程助手使用的框架级 Skill：`agentloom-framework-skill/`。
 
-当你想快速开发或扩展 AgentLoom 能力时，让助手先读取
-`agentloom-framework-skill/SKILL.md`，再描述你要做的功能。这个 Skill 会引导
-助手先澄清目标、输入、输出和验收标准，再判断最短路径：创建 Application、扩展
-现有 Application、增加 Worker、实现 Tool、创建私有 Skill/Hook，或只更新文档。
-最后必须同步运行验证并把结果写进 README。
+当你想让 Codex、Claude Code 或其他编程助手基于 AgentLoom 开发，而不是从零猜框架结构时，让助手先读取 `agentloom-framework-skill/SKILL.md`，再描述你要构建的应用能力。
 
-这个 Skill 是开发辅助，不放在 `skills/` 运行时自动发现目录下，因此不是运行
-AgentLoom 应用的必需依赖。
+这个 Skill 是开发辅助，不放在 `skills/` 运行时自动发现目录下，因此不是运行 AgentLoom 应用的必需依赖。
 
 ## 支持与参与
 
