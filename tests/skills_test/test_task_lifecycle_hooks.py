@@ -12,6 +12,7 @@ import tempfile
 import textwrap
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 SCRIPT_DIR = Path(__file__).resolve().parent
 AGENT_LOOM_ROOT = SCRIPT_DIR.parents[1]
@@ -63,6 +64,42 @@ class _SubtaskRunner:
         if self._exc is not None:
             raise self._exc
         return f"ok:{task}"
+
+
+class _MemoryBackedSubtaskRunner(_SubtaskRunner):
+    def __init__(self, *, exc: Exception | None = None):
+        super().__init__(exc=exc)
+        self.memory = type("_Memory", (), {"steps": ["prompt", "tool", "final"]})()
+
+
+class _RecordingCheckpointCoordinator:
+    def __init__(self):
+        self.success_memory_steps = None
+        self.interrupted_memory_steps = None
+
+    def check_worker_skip(self, agent_name, input_hash):
+        return None
+
+    def record_worker_start(self, agent_name, input_hash, task_input):
+        return 0
+
+    def restore_worker(self, runtime_agent, agent_name, call_index):
+        return False
+
+    def record_worker_success(
+        self, agent_name, call_index, input_hash, task_input, result, memory_steps
+    ):
+        self.success_memory_steps = memory_steps
+
+    def record_worker_failure(
+        self, agent_name, call_index, input_hash, task_input, error, memory_steps
+    ):
+        raise AssertionError("worker failure should not be recorded")
+
+    def record_worker_interrupted(
+        self, agent_name, call_index, input_hash, task_input, memory_steps
+    ):
+        self.interrupted_memory_steps = memory_steps
 
 
 class TestTaskLifecycleHooks(unittest.TestCase):
@@ -464,6 +501,35 @@ class TestTaskLifecycleHooks(unittest.TestCase):
         self.assertTrue(any("custom-subtask-start" in message for message in delivered))
         self.assertTrue(any("custom-subtask-finish" in message for message in delivered))
         self.assertEqual(self.hook_manager.consume_pending_user_messages(), [])
+
+    def test_subtask_checkpoint_records_runtime_memory_before_outer_fallback(self):
+        coord = _RecordingCheckpointCoordinator()
+        wrapped = SubTaskTrackedAgent(_MemoryBackedSubtaskRunner(), "worker_agent")
+
+        with patch(
+            "src.lib.checkpoint.coordinator.CheckpointCoordinator.current",
+            return_value=coord,
+        ):
+            result = wrapped.run("do work")
+
+        self.assertEqual(result, "ok:do work")
+        self.assertEqual(coord.success_memory_steps, ["prompt", "tool", "final"])
+
+    def test_subtask_checkpoint_records_interrupted_runtime_memory(self):
+        coord = _RecordingCheckpointCoordinator()
+        wrapped = SubTaskTrackedAgent(
+            _MemoryBackedSubtaskRunner(exc=KeyboardInterrupt()),
+            "worker_agent",
+        )
+
+        with patch(
+            "src.lib.checkpoint.coordinator.CheckpointCoordinator.current",
+            return_value=coord,
+        ):
+            with self.assertRaises(KeyboardInterrupt):
+                wrapped.run("do work")
+
+        self.assertEqual(coord.interrupted_memory_steps, ["prompt", "tool", "final"])
 
     def test_task_start_preserves_existing_insights(self):
         """TaskStart must preserve insights.md that has real content from prior sessions."""

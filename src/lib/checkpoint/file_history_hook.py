@@ -63,7 +63,7 @@ class FileHistoryHook:
         get_step_number: Any = None,
     ) -> None:
         self._fh = fh
-        self._get_step_number = get_step_number or (lambda: 0)
+        self._get_step_number = get_step_number
 
     def __call__(
         self,
@@ -82,11 +82,35 @@ class FileHistoryHook:
         if context is not None:
             tool_name = getattr(context, "tool_name", tool_name)
             tool_input = getattr(context, "tool_input", tool_input)
+            if self._get_step_number is None:
+                context_step = getattr(context, "step_number", None)
+                if context_step is not None:
+                    try:
+                        step_number = int(context_step)
+                    except (TypeError, ValueError):
+                        step_number = 0
+                else:
+                    step_number = 0
+            else:
+                step_number = self._get_step_number()
         elif args and hasattr(args[0], "tool_name"):
             # Single positional HookContext.
             ctx = args[0]
             tool_name = getattr(ctx, "tool_name", tool_name)
             tool_input = getattr(ctx, "tool_input", tool_input)
+            if self._get_step_number is None:
+                context_step = getattr(ctx, "step_number", None)
+                if context_step is not None:
+                    try:
+                        step_number = int(context_step)
+                    except (TypeError, ValueError):
+                        step_number = 0
+                else:
+                    step_number = 0
+            else:
+                step_number = self._get_step_number()
+        else:
+            step_number = self._get_step_number() if self._get_step_number is not None else 0
 
         if not tool_name or not tool_input:
             return None
@@ -108,7 +132,6 @@ class FileHistoryHook:
             )
             return None
 
-        step_number = self._get_step_number()
         try:
             self._fh.track_edit(str(file_path), step_number)
         except Exception as exc:
