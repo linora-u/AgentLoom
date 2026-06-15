@@ -55,6 +55,8 @@ def _discover_project_root(start: Path) -> Path | None:
     current = start.resolve()
     # Prefer config/llm.yaml — it only exists at the project root,
     # unlike config/system.yaml which may also appear in application subdirectories.
+    # In new worktrees this ignored local file may be missing; callers should
+    # surface that as an environment precondition, not as an Application error.
     for candidate in [current, *current.parents]:
         if (candidate / "config" / "llm.yaml").is_file():
             return candidate
@@ -743,8 +745,12 @@ def main() -> int:
                                 "file": str(Path.cwd()),
                                 "field": "project_root",
                                 "rule": "project_root_discovery",
-                                "message": "未找到 config/llm.yaml，无法定位项目根目录",
-                                "suggestion": "请在项目根目录下执行脚本，确保 config/llm.yaml 存在",
+                                "message": "未找到 config/llm.yaml 或 config/system.yaml，无法定位项目根目录",
+                                "suggestion": (
+                                    "请在项目根目录下执行脚本；若这是新建 worktree 或干净 checkout，"
+                                    "config/llm.yaml 可能因 .gitignore 未自动带过来，应从同机可信工作区复制"
+                                    "或让用户提供本地配置，不要提交该文件"
+                                ),
                             }
                         ],
                     },
