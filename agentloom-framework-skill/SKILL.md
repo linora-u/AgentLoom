@@ -11,7 +11,7 @@ argument-hint: "<AgentLoom task or application path>"
 
 ## 前置条件
 
-- 先进入 AgentLoom 根目录，根目录判定只看 `config/llm.yaml`，不要用 `config/system.yaml`。
+- 先进入 AgentLoom 根目录。运行时代码用 `pyproject.toml` 中 `[project].name == "AgentLoom"` 发现项目根；本 Skill 的操作前置检查额外要求 `config/llm.yaml` 存在，因为它是被忽略的本地模型配置，也是生成/验证 Application 前必须确认的环境条件。不要只用 `config/system.yaml` 判定环境可用。
 - 新建 worktree 或干净 checkout 后先检查 `config/llm.yaml`；该文件通常被 `.gitignore` 忽略，不会随 worktree 自动生成。缺失时从同机可信工作区复制，或让用户提供本地配置；不要提交该文件，也不要凭空生成模型配置。
 - 当前本地环境可能没有 `uv`；验证优先用 `.venv/bin/python` 和 `.venv/bin/loom`。
 - 写 Application 前先读真实仓库结构与 `config/llm.yaml`，`model_type` 只能来自项目配置。
@@ -20,9 +20,10 @@ argument-hint: "<AgentLoom task or application path>"
 ## 快速决策
 
 - 用户说“帮我实现一个功能 / 用框架做一个功能 / 创建一个应用 / 扩展框架能力”：先读 [`references/function-routing.md`](references/function-routing.md)，判断是新建 Application、扩展现有 Application、加 Worker、加 Tool、加私有 Skill、加 Hook，还是只改文档。
+- 用户说“有哪些配置 / 这个配置能不能写 / skill 漏了配置 / system.yaml、llm.yaml、Agent YAML 怎么配”：先读 [`references/configuration-surface.md`](references/configuration-surface.md)，再按需要读 `docs/en/*.md` 和对应代码交叉验证。
 - 需要生成或修改 `applications/<app_name>/`：读 [`references/application-generation.md`](references/application-generation.md)。
 - 需要写 Agent YAML / Worker YAML / `agent_function_schema` / `worker_agents`：读 [`references/yaml-contract.md`](references/yaml-contract.md)。
-- 需要为 Application 配置或创建私有 Skill：读 [`references/yaml-contract.md`](references/yaml-contract.md) 的 Skills 配置，再读 [`references/application-generation.md`](references/application-generation.md) 的目录规范。
+- 需要为 Application 配置或创建私有 Skill：读 [`references/configuration-surface.md`](references/configuration-surface.md) 的 Skills/Hook 配置，再读 [`references/application-generation.md`](references/application-generation.md) 的目录规范。
 - 需要验证是否真是多 Agent、是否能运行、问题怎么记录：读 [`references/validation-and-review.md`](references/validation-and-review.md)。
 - 修改 checkpoint、resume、日志/维测、并发 Worker、文件回滚、`loom list-tasks` 或 `loom clean-tasks` 这类框架运行时能力：读 [`references/validation-and-review.md`](references/validation-and-review.md) 的“框架运行时功能验证”，并用真实 Application 跑功能路径。
 - 需要写 README 或验证记录：读 [`references/readme-template.md`](references/readme-template.md)。
@@ -34,6 +35,7 @@ argument-hint: "<AgentLoom task or application path>"
 | 模块 | 处理什么问题 | 必读 reference | 输出 |
 |---|---|---|---|
 | 需求路由 | 用户只说一个功能，判断 AgentLoom 应该怎么落地 | `function-routing.md` | 实现路径、需要问的问题、应用边界 |
+| 配置面 | 判断 system/llm/Agent/Skill/Hook/MCP/checkpoint 等配置写在哪里、是否可覆盖 | `configuration-surface.md` | 配置位置、字段、覆盖层级、验证来源 |
 | Application 生成 | 新建/扩展 `applications/<app_name>` | `application-generation.md` | 目录、入口脚本、workflow、README |
 | YAML 契约 | Supervisor/Worker/Tool/Skill 配置 | `yaml-contract.md` | 合法 Agent YAML 与 Worker schema |
 | 验证评审 | 结构扫描、YAML 校验、运行边界、checkpoint/resume 功能、架构风险 | `validation-and-review.md` | 验证命令、结果、问题清单 |
@@ -42,11 +44,12 @@ argument-hint: "<AgentLoom task or application path>"
 ## 执行协议
 
 1. 先判断任务类型。目标清晰但路径绕远时，直接建议更短路径。
-2. 先做确定性扫描，再设计 Agent。不要凭印象写路径、工具名、模型名。
+2. 先做确定性扫描，再设计 Agent。不要凭印象写路径、工具名、模型名或配置字段。
 3. 能用 Python 确定性完成的放进 `agent_tools/*.py`；需要推理、判断、写作的放进 Agent workflow。
 4. 单职责用单 Agent；多个可独立验收阶段才用 Supervisor + N Worker。
 5. Application 内容必须落到 `applications/<app_name>/`；框架级 Skill/Hook 扩展按真实加载路径落盘；README 必须同步写验证记录。
-6. 最后必须运行验证命令。能跑到哪一步就记录到哪一步，不把“未执行”说成“通过”。
+6. 写配置前先确认配置归属：LLM 参数只进 `config/llm.yaml`；应用行为优先用 `applications/<app>/config/system.yaml` 或 Agent YAML 白名单字段；Skill hooks 只写在 `SKILL.md` frontmatter。
+7. 最后必须运行验证命令。能跑到哪一步就记录到哪一步，不把“未执行”说成“通过”。
 
 ## 命令速查
 
