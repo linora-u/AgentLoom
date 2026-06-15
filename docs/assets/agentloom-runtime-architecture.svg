@@ -1,0 +1,132 @@
+<svg width="1200" height="640" viewBox="0 0 1200 640" fill="none" xmlns="http://www.w3.org/2000/svg" role="img" aria-labelledby="title desc">
+  <title id="title">AgentLoom runtime architecture</title>
+  <desc id="desc">A layered architecture diagram showing Codex and the framework skill creating YAML application specs, AgentLoom running a Supervisor and Worker Agents, shared capabilities, and runtime state.</desc>
+  <defs>
+    <linearGradient id="bg" x1="90" y1="36" x2="1104" y2="610" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#06172A"/>
+      <stop offset="0.55" stop-color="#0B2539"/>
+      <stop offset="1" stop-color="#0F3D3A"/>
+    </linearGradient>
+    <radialGradient id="glowBlue" cx="0" cy="0" r="1" gradientUnits="userSpaceOnUse" gradientTransform="translate(286 164) rotate(42) scale(510 290)">
+      <stop stop-color="#38BDF8" stop-opacity="0.45"/>
+      <stop offset="1" stop-color="#38BDF8" stop-opacity="0"/>
+    </radialGradient>
+    <radialGradient id="glowGreen" cx="0" cy="0" r="1" gradientUnits="userSpaceOnUse" gradientTransform="translate(922 486) rotate(148) scale(520 310)">
+      <stop stop-color="#34D399" stop-opacity="0.36"/>
+      <stop offset="1" stop-color="#34D399" stop-opacity="0"/>
+    </radialGradient>
+    <linearGradient id="runtime" x1="252" y1="186" x2="848" y2="454" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#102A43"/>
+      <stop offset="1" stop-color="#0F766E"/>
+    </linearGradient>
+    <linearGradient id="accent" x1="174" y1="0" x2="1014" y2="0" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#38BDF8"/>
+      <stop offset="0.5" stop-color="#22C55E"/>
+      <stop offset="1" stop-color="#F97316"/>
+    </linearGradient>
+    <filter id="shadow" x="-20%" y="-25%" width="140%" height="160%" color-interpolation-filters="sRGB">
+      <feDropShadow dx="0" dy="18" stdDeviation="20" flood-color="#020617" flood-opacity="0.24"/>
+    </filter>
+    <filter id="softShadow" x="-20%" y="-30%" width="140%" height="170%" color-interpolation-filters="sRGB">
+      <feDropShadow dx="0" dy="10" stdDeviation="12" flood-color="#020617" flood-opacity="0.16"/>
+    </filter>
+    <pattern id="grid" width="36" height="36" patternUnits="userSpaceOnUse">
+      <path d="M36 0H0V36" stroke="#93C5FD" stroke-opacity="0.08" stroke-width="1"/>
+    </pattern>
+    <style>
+      .text { font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; letter-spacing: 0; }
+      .heading { fill: #F8FAFC; font-size: 30px; font-weight: 850; }
+      .label { fill: #0F172A; font-size: 19px; font-weight: 800; }
+      .small { fill: #475569; font-size: 15px; font-weight: 650; }
+      .white { fill: #F8FAFC; }
+      .soft { fill: #CFFAFE; font-size: 16px; font-weight: 700; }
+      .tiny { fill: #64748B; font-size: 13px; font-weight: 650; }
+      .pill { fill: #334155; font-size: 15px; font-weight: 720; }
+    </style>
+  </defs>
+
+  <rect width="1200" height="640" rx="34" fill="url(#bg)"/>
+  <rect width="1200" height="640" rx="34" fill="url(#glowBlue)"/>
+  <rect width="1200" height="640" rx="34" fill="url(#glowGreen)"/>
+  <rect x="36" y="34" width="1128" height="572" rx="28" fill="url(#grid)"/>
+
+  <text x="600" y="76" text-anchor="middle" class="text heading">AgentLoom Runtime Architecture</text>
+  <rect x="184" y="100" width="832" height="4" rx="2" fill="url(#accent)"/>
+  <rect x="74" y="278" width="1052" height="2" rx="1" fill="#67E8F9" opacity="0.25"/>
+  <rect x="74" y="506" width="1052" height="2" rx="1" fill="#A7F3D0" opacity="0.25"/>
+
+  <g filter="url(#softShadow)">
+    <rect x="76" y="132" width="260" height="132" rx="24" fill="#F8FAFC" stroke="#C7DDEC"/>
+    <text x="108" y="170" class="text label">Build with Codex</text>
+    <text x="108" y="200" class="text small">reads framework skill</text>
+    <text x="108" y="226" class="text small">creates YAML app files</text>
+    <text x="108" y="252" class="text small">runs and fixes the app</text>
+  </g>
+
+  <g filter="url(#softShadow)">
+    <rect x="382" y="124" width="436" height="118" rx="24" fill="#F8FAFC" stroke="#C7DDEC"/>
+    <text x="414" y="162" class="text label">Application Spec</text>
+    <rect x="414" y="184" width="112" height="30" rx="15" fill="#E0F2FE"/>
+    <text x="470" y="204" text-anchor="middle" class="text pill">Supervisor</text>
+    <rect x="542" y="184" width="104" height="30" rx="15" fill="#DCFCE7"/>
+    <text x="594" y="204" text-anchor="middle" class="text pill">Workers</text>
+    <rect x="662" y="184" width="122" height="30" rx="15" fill="#FFEDD5"/>
+    <text x="723" y="204" text-anchor="middle" class="text pill">Skills/MCP</text>
+  </g>
+
+  <g filter="url(#softShadow)">
+    <rect x="864" y="132" width="260" height="132" rx="24" fill="#F8FAFC" stroke="#C7DDEC"/>
+    <text x="896" y="170" class="text label">Run State</text>
+    <text x="896" y="200" class="text small">terminal output</text>
+    <text x="896" y="226" class="text small">.logs archive</text>
+    <text x="896" y="252" class="text small">checkpoints + UI</text>
+  </g>
+
+  <g filter="url(#shadow)">
+    <rect x="192" y="294" width="816" height="194" rx="34" fill="url(#runtime)" stroke="#5EEAD4" stroke-opacity="0.42"/>
+    <text x="600" y="340" text-anchor="middle" class="text heading">AgentLoom Runtime</text>
+    <text x="600" y="370" text-anchor="middle" class="text soft">loads YAML, wires Workers as tools, manages execution state</text>
+
+    <rect x="250" y="404" width="194" height="56" rx="18" fill="#FFFFFF" fill-opacity="0.95"/>
+    <text x="347" y="439" text-anchor="middle" class="text label">Supervisor</text>
+
+    <rect x="502" y="400" width="96" height="64" rx="18" fill="#FFFFFF" fill-opacity="0.95"/>
+    <text x="550" y="426" text-anchor="middle" class="text label">Worker</text>
+    <text x="550" y="447" text-anchor="middle" class="text tiny">as tool</text>
+
+    <rect x="622" y="400" width="96" height="64" rx="18" fill="#FFFFFF" fill-opacity="0.95"/>
+    <text x="670" y="426" text-anchor="middle" class="text label">Worker</text>
+    <text x="670" y="447" text-anchor="middle" class="text tiny">as tool</text>
+
+    <rect x="742" y="400" width="96" height="64" rx="18" fill="#FFFFFF" fill-opacity="0.95"/>
+    <text x="790" y="426" text-anchor="middle" class="text label">Worker</text>
+    <text x="790" y="447" text-anchor="middle" class="text tiny">batch</text>
+  </g>
+
+  <g opacity="0.9">
+    <path d="M206 264V278" stroke="#67E8F9" stroke-width="3" stroke-linecap="round"/>
+    <path d="M600 242V294" stroke="#A7F3D0" stroke-width="3" stroke-linecap="round"/>
+    <path d="M994 264V278" stroke="#FBBF24" stroke-width="3" stroke-linecap="round"/>
+    <path d="M347 488V506" stroke="#5EEAD4" stroke-width="3" stroke-linecap="round"/>
+    <path d="M670 488V506" stroke="#5EEAD4" stroke-width="3" stroke-linecap="round"/>
+    <path d="M972 488V506" stroke="#5EEAD4" stroke-width="3" stroke-linecap="round"/>
+  </g>
+
+  <g filter="url(#softShadow)">
+    <rect x="92" y="526" width="218" height="58" rx="19" fill="#F8FAFC" stroke="#C7DDEC"/>
+    <text x="201" y="562" text-anchor="middle" class="text label">LLM models</text>
+  </g>
+  <g filter="url(#softShadow)">
+    <rect x="340" y="526" width="218" height="58" rx="19" fill="#F8FAFC" stroke="#C7DDEC"/>
+    <text x="449" y="562" text-anchor="middle" class="text label">Built-in tools</text>
+  </g>
+  <g filter="url(#softShadow)">
+    <rect x="588" y="526" width="218" height="58" rx="19" fill="#F8FAFC" stroke="#C7DDEC"/>
+    <text x="697" y="562" text-anchor="middle" class="text label">Skills / MCP</text>
+  </g>
+  <g filter="url(#softShadow)">
+    <rect x="836" y="526" width="272" height="58" rx="19" fill="#F8FAFC" stroke="#C7DDEC"/>
+    <text x="972" y="562" text-anchor="middle" class="text label">Logs / Checkpoints</text>
+  </g>
+
+</svg>
