@@ -20,6 +20,8 @@ def populated_runtime(tmp_path: Path, monkeypatch):
 
     cm1 = CheckpointManager("agent_a", base_dir=ckpt_root)
     cm1.save_task_tree("t1", {"task_id": "t1", "agent_name": "agent_a", "status": "interrupted", "created_at": "2026-03-31T10:00:00Z"})
+    c0 = cm1.record_worker_started("t1", "worker_a", input_hash="h", task_input="input")
+    cm1.record_worker_finished("t1", "worker_a", call_index=c0, status="completed", result="done")
 
     cm2 = CheckpointManager("agent_b", base_dir=ckpt_root)
     cm2.save_task_tree("t2", {"task_id": "t2", "agent_name": "agent_b", "status": "failed", "created_at": "2026-03-31T11:00:00Z"})
@@ -46,6 +48,13 @@ class TestListTasks:
         assert "agent_a" in result.output
         assert "t2" in result.output
         assert "agent_b" in result.output
+
+    def test_detail_shows_worker_calls_from_event_projection(self, populated_runtime):
+        runner = CliRunner()
+        result = runner.invoke(main, ["list-tasks", "--detail"])
+        assert result.exit_code == 0
+        assert "worker_a #0" in result.output
+        assert "completed" in result.output
 
 
 class TestCleanTasks:

@@ -15,6 +15,7 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 from src.lib.checkpoint import CheckpointManager, CheckpointSerializer
+from src.lib.checkpoint.coordinator import CheckpointCoordinator
 
 
 # ── fixtures ─────────────────────────────────────────────────────────────
@@ -99,6 +100,43 @@ class TestSupervisorRestore:
         assert isinstance(restored[1], ActionStep)
         assert restored[1].observations == "file.py"
         assert restored[1].tool_calls[0].name == "shell_tool"
+
+
+class TestWorkerRestore:
+
+    def test_restore_worker_memory_steps_for_incomplete_resumed_call(self, cm: CheckpointManager, task_id: str):
+        from smolagents.memory import TaskStep, ActionStep
+        from smolagents.monitoring import Timing
+
+        steps = [
+            TaskStep(task="worker task"),
+            ActionStep(step_number=1, timing=Timing(start_time=time.time()), observations="partial"),
+        ]
+        cm.record_worker_started(task_id, "worker_a", input_hash="h", task_input="worker task")
+        cm.record_worker_finished(
+            task_id,
+            "worker_a",
+            call_index=0,
+            status="interrupted",
+            input_hash="h",
+            task_input="worker task",
+        )
+        cm.save_worker_checkpoint(
+            task_id,
+            "worker_a",
+            call_index=0,
+            input_hash="h",
+            memory_steps=steps,
+            task_input="worker task",
+            status="interrupted",
+        )
+
+        runtime_agent = SimpleNamespace(memory=SimpleNamespace(steps=[]))
+        coord = CheckpointCoordinator(cm, task_id, "supervisor task", resume=True)
+
+        assert coord.restore_worker(runtime_agent, "worker_a", 0) is True
+        assert len(runtime_agent.memory.steps) == 2
+        assert runtime_agent.memory.steps[0].task == "worker task"
 
     def test_drops_incomplete_last_action(self, cm: CheckpointManager, task_id: str):
         """An interrupted ActionStep (tool_calls but no observations) should be dropped."""

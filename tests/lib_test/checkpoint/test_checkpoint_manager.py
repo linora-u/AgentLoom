@@ -49,6 +49,124 @@ class TestTaskTree:
         assert loaded["status"] == "interrupted"
 
 
+class TestTaskEvents:
+
+    def test_event_log_rebuilds_task_tree(self, cm: CheckpointManager):
+        task_id = "task_events"
+        cm.record_task_created(
+            task_id,
+            yaml_path="applications/demo/workflows/agent.yaml",
+            agent_name="test_supervisor",
+            task_text="do work",
+            created_at="2026-06-15T12:00:00+08:00",
+        )
+        call_index = cm.record_worker_started(
+            task_id,
+            "worker_a",
+            input_hash="hash-a",
+            task_input="scan files",
+        )
+        cm.record_worker_finished(
+            task_id,
+            "worker_a",
+            call_index=call_index,
+            status="completed",
+            input_hash="hash-a",
+            task_input="scan files",
+            result="done",
+        )
+        cm.record_task_status_changed(task_id, "completed", result="ok")
+
+        event_path = cm._task_events_path(task_id)
+        assert event_path.exists()
+
+        # Remove the compatibility projection; load_task_tree must replay events.
+        cm._task_tree_path(task_id).unlink()
+        loaded = cm.load_task_tree(task_id)
+
+        assert loaded["task_id"] == task_id
+        assert loaded["status"] == "completed"
+        assert loaded["result"] == "ok"
+        assert loaded["workers"]["worker_a"][0]["call_index"] == 0
+        assert loaded["workers"]["worker_a"][0]["status"] == "completed"
+        assert loaded["workers"]["worker_a"][0]["result"] == "done"
+
+    def test_legacy_task_tree_without_events_still_loads(self, cm: CheckpointManager):
+        task_id = "task_legacy_only"
+        path = cm._task_tree_path(task_id)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(
+            json.dumps(
+                {
+                    "task_id": task_id,
+                    "agent_name": "test_supervisor",
+                    "status": "interrupted",
+                    "workers": {"legacy_worker": {"status": "completed"}},
+                }
+            ),
+            encoding="utf-8",
+        )
+
+        loaded = cm.load_task_tree(task_id)
+        assert loaded["status"] == "interrupted"
+        assert isinstance(loaded["workers"]["legacy_worker"], list)
+        assert loaded["workers"]["legacy_worker"][0]["call_index"] == 0
+
+    def test_malformed_event_line_is_skipped(self, cm: CheckpointManager):
+        task_id = "task_malformed_events"
+        event_path = cm._task_events_path(task_id)
+        event_path.parent.mkdir(parents=True, exist_ok=True)
+        event_path.write_text(
+            "\n".join(
+                [
+                    json.dumps(
+                        {
+                            "type": "task_created",
+                            "task_id": task_id,
+                            "yaml_path": "app.yaml",
+                            "agent_name": "test_supervisor",
+                            "task_text": "task",
+                            "created_at": "2026-06-15T12:00:00+08:00",
+                        }
+                    ),
+                    "{not valid json",
+                    json.dumps(
+                        {
+                            "type": "worker_call_started",
+                            "agent_name": "worker_a",
+                            "call_index": 0,
+                            "input_hash": "h",
+                            "task_input": "input",
+                        }
+                    ),
+                ]
+            ),
+            encoding="utf-8",
+        )
+
+        loaded = cm.load_task_tree(task_id)
+        assert loaded["task_id"] == task_id
+        assert loaded["workers"]["worker_a"][0]["status"] == "running"
+
+    def test_append_after_partial_event_tail_keeps_new_event_readable(self, cm: CheckpointManager):
+        task_id = "task_partial_tail"
+        event_path = cm._task_events_path(task_id)
+        event_path.parent.mkdir(parents=True, exist_ok=True)
+        event_path.write_text('{"type": "task_created"', encoding="utf-8")
+
+        cm.record_task_created(
+            task_id,
+            yaml_path="app.yaml",
+            agent_name="test_supervisor",
+            task_text="task",
+            created_at="2026-06-15T12:00:00+08:00",
+        )
+
+        loaded = cm.load_task_tree(task_id)
+        assert loaded["task_id"] == task_id
+        assert loaded["agent_name"] == "test_supervisor"
+
+
 # ── supervisor checkpoint ────────────────────────────────────────────────
 
 
@@ -102,6 +220,56 @@ class TestWorkerCheckpoint:
         assert cm.load_worker_checkpoint(task_id, "w1")["status"] == "completed"
         assert cm.load_worker_checkpoint(task_id, "w2")["status"] == "failed"
         assert cm.load_worker_checkpoint(task_id, "w3")["status"] == "interrupted"
+
+    def test_worker_checkpoints_are_per_call_and_latest_default(self, cm: CheckpointManager, task_id: str):
+        cm.save_task_tree(task_id, {"task_id": task_id, "agent_name": "sup", "status": "running", "workers": {}})
+        c0 = cm.record_worker_started(task_id, "repeat_worker", input_hash="h0", task_input="first")
+        cm.save_worker_checkpoint(task_id, "repeat_worker", call_index=c0, status="completed", result="first")
+        cm.record_worker_finished(task_id, "repeat_worker", call_index=c0, status="completed", result="first")
+
+        c1 = cm.record_worker_started(task_id, "repeat_worker", input_hash="h1", task_input="second")
+        cm.save_worker_checkpoint(task_id, "repeat_worker", call_index=c1, status="completed", result="second")
+        cm.record_worker_finished(task_id, "repeat_worker", call_index=c1, status="completed", result="second")
+
+        assert c0 == 0
+        assert c1 == 1
+        assert cm.load_worker_checkpoint(task_id, "repeat_worker", call_index=0)["result"] == "first"
+        assert cm.load_worker_checkpoint(task_id, "repeat_worker", call_index=1)["result"] == "second"
+        assert cm.load_worker_checkpoint(task_id, "repeat_worker")["result"] == "second"
+        assert cm._worker_call_ckpt(task_id, "repeat_worker", 0).exists()
+        assert cm._worker_call_ckpt(task_id, "repeat_worker", 1).exists()
+
+    def test_worker_start_reuses_incomplete_call_only_when_requested(self, cm: CheckpointManager, task_id: str):
+        cm.save_task_tree(task_id, {"task_id": task_id, "agent_name": "sup", "status": "interrupted", "workers": {}})
+        c0 = cm.record_worker_started(task_id, "resume_worker", input_hash="same", task_input="first")
+        cm.record_worker_finished(
+            task_id,
+            "resume_worker",
+            call_index=c0,
+            status="interrupted",
+            input_hash="same",
+            task_input="first",
+        )
+
+        c1 = cm.record_worker_started(
+            task_id,
+            "resume_worker",
+            input_hash="same",
+            task_input="normal retry",
+        )
+        reused = cm.record_worker_started(
+            task_id,
+            "resume_worker",
+            input_hash="same",
+            task_input="resume retry",
+            reuse_incomplete=True,
+        )
+
+        assert c0 == 0
+        assert c1 == 1
+        assert reused == 0
+        calls = cm.load_task_tree(task_id)["workers"]["resume_worker"]
+        assert [c["call_index"] for c in calls] == [0, 1]
 
 
 # ── listing ──────────────────────────────────────────────────────────────
