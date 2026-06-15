@@ -22,6 +22,8 @@ from src.lib.smolagents.memory.context_compression import (
     FILE_DEDUP_PLACEHOLDER,
     OBSERVATION_MASKING_PLACEHOLDER,
     TRUNCATION_FRAC_TO_REMOVE,
+    _extract_tool_invocations,
+    _serialize_messages_for_summary,
 )
 
 MOCK_DIR = pathlib.Path(__file__).parent
@@ -48,6 +50,62 @@ def create_history_messages():
         ChatMessage(role=MessageRole.USER, content="user request"),
         ChatMessage(role=MessageRole.ASSISTANT, content="assistant reply"),
     ]
+
+
+def test_extract_tool_invocations_from_native_dict_tool_calls():
+    msg = ChatMessage(
+        role=MessageRole.TOOL_CALL,
+        content="",
+    )
+    msg.tool_calls = [
+        {
+            "type": "function",
+            "function": {
+                "name": "read_file",
+                "arguments": {
+                    "file_path": "/tmp/native.py",
+                    "offset": 10,
+                    "limit": 20,
+                },
+            },
+        }
+    ]
+
+    invocations = _extract_tool_invocations(msg)
+
+    assert [invocation.name for invocation in invocations] == ["read_file"]
+    assert '"file_path": "/tmp/native.py"' in invocations[0].arguments
+    assert invocations[0].dedup_key == invocations[0].arguments
+
+
+def test_extract_tool_invocations_from_codeact_python_interpreter():
+    code = """
+content = read_file(file_path="/tmp/codeact.py", offset=1, limit=40)
+result = shell_tool(commands=["printf hello"])
+print(content, result)
+""".strip()
+    msg = ChatMessage(
+        role=MessageRole.TOOL_CALL,
+        content="{'name': 'python_interpreter', 'arguments': " + repr(code) + "}",
+    )
+
+    invocations = _extract_tool_invocations(msg)
+
+    assert [invocation.name for invocation in invocations] == ["read_file", "shell_tool"]
+    assert invocations[0].dedup_key == invocations[0].arguments
+    assert invocations[1].dedup_key is None
+
+
+def test_extract_tool_invocations_from_direct_python_ast():
+    msg = ChatMessage(
+        role=MessageRole.TOOL_CALL,
+        content='read_file("/tmp/direct.py", offset=5, limit=10)\nprint("ignored")',
+    )
+
+    invocations = _extract_tool_invocations(msg)
+
+    assert [invocation.name for invocation in invocations] == ["read_file"]
+    assert "/tmp/direct.py" in invocations[0].arguments
 
 
 def test_tool_deduplication_basic(tmp_path):
@@ -190,6 +248,22 @@ print(outline)
     assert saved_ratio > 0
 
 
+def test_tool_deduplication_preserves_latest_identical_response():
+    code = "content = read_file('/tmp/same-output.txt')\nprint(content)"
+    messages = [
+        create_python_interpreter_call(code),
+        create_mock_message(MessageRole.TOOL_RESPONSE, "unchanged file content"),
+        create_python_interpreter_call(code),
+        create_mock_message(MessageRole.TOOL_RESPONSE, "unchanged file content"),
+    ]
+
+    new_messages, saved_ratio = _apply_tool_dedup(messages, "dummy_model", logger=None)
+
+    assert new_messages[1].message.content[0]["text"] == FILE_DEDUP_PLACEHOLDER
+    assert new_messages[3].message.content[0]["text"] == "unchanged file content"
+    assert saved_ratio == 0
+
+
 def test_tool_deduplication_case_insensitive():
     # 测试路径匹配忽略大小写
     msg1 = create_mock_message(MessageRole.TOOL_CALL, "READ_FILE('/tmp/test.txt')")
@@ -270,6 +344,24 @@ def test_python_interpreter_shell_tool_still_truncates():
 
     assert saved_chars == 1200
     assert "shell_tool output" in new_messages[1].message.content[0]["text"]
+
+
+def test_tool_output_truncation_uses_message_position_not_object_equality():
+    long_content = "Z" * 4000
+    read_call = create_python_interpreter_call("content = read_file('/tmp/large.txt')\nprint(content)")
+    shell_call = create_python_interpreter_call("result = shell_tool(commands=['cat /tmp/large.txt'])\nprint(result)")
+    messages = [
+        read_call,
+        create_mock_message(MessageRole.TOOL_RESPONSE, long_content),
+        shell_call,
+        create_mock_message(MessageRole.TOOL_RESPONSE, long_content),
+    ]
+
+    new_messages, saved_chars = _apply_tool_output_truncation(messages, logger=None)
+
+    assert saved_chars == 2000
+    assert new_messages[1].message.content[0]["text"] == long_content
+    assert "shell_tool output" in new_messages[3].message.content[0]["text"]
 
 
 def test_python_interpreter_ripgrep_still_truncates():
@@ -809,24 +901,22 @@ class TestTruncateConversation:
         return msgs
 
     def test_basic_truncation_removes_messages(self):
-        """6 visible messages, frac=0.3 → raw=1 → fixed to 2 → removes 2."""
+        """6 visible messages, frac=0.3 → removes the oldest single-message group."""
         messages = self._make_visible_messages(6)
         result = truncate_conversation(messages, frac_to_remove=0.3)
-        assert result.messages_removed == 2
+        assert result.messages_removed == 1
 
-    def test_even_alignment_bug_fixed(self):
-        """5 visible → raw=int(5*0.3)=1 → old code: 0, fixed: 2."""
+    def test_group_truncation_does_not_even_align_plain_messages(self):
+        """Plain messages are single groups; only tool-call/tool-response pairs are atomic."""
         messages = self._make_visible_messages(5)
         result = truncate_conversation(messages, frac_to_remove=0.3)
-        # With the fix: raw=1, visible>=2, so forced to 2
-        assert result.messages_removed == 2
+        assert result.messages_removed == 1
 
     def test_very_few_messages_still_works(self):
-        """2 visible → raw=int(2*0.3)=0 → 0, but visible>=2 doesn't help since raw=0."""
+        """2 visible messages still make progress by removing the oldest group."""
         messages = self._make_visible_messages(2)
         result = truncate_conversation(messages, frac_to_remove=0.3)
-        # raw = int(2 * 0.3) = 0, so messages_to_remove stays 0
-        assert result.messages_removed == 0
+        assert result.messages_removed == 1
 
     def test_inserts_truncation_marker(self):
         """After truncation, a marker message with is_truncation_marker=True exists."""
@@ -847,6 +937,29 @@ class TestTruncateConversation:
             if m.message.role == MessageRole.SYSTEM and m.is_visible()
         ]
         assert len(system_msgs) == 1
+
+    def test_preserves_visible_summary_messages(self):
+        """Summary messages are the recovery point after smart compact."""
+        messages = [
+            create_mock_message(MessageRole.SYSTEM, "system prompt"),
+            create_mock_message(MessageRole.USER, "old user request " * 100),
+            InternalChatMessage(
+                message=ChatMessage(
+                    role=MessageRole.USER,
+                    content=[{"type": "text", "text": "## Conversation Summary\nimportant state"}],
+                ),
+                is_summary=True,
+            ),
+            create_mock_message(MessageRole.ASSISTANT, "newer assistant state " * 100),
+        ]
+
+        result = truncate_conversation(messages, frac_to_remove=1.0)
+        summary_messages = [message for message in result.messages if message.is_summary]
+
+        assert len(summary_messages) == 1
+        assert summary_messages[0].is_visible()
+        assert summary_messages[0].truncation_parent is None
+        assert "## Conversation Summary" in _extract_content_text(summary_messages[0].message.content)
 
     def test_large_frac_removes_all(self):
         """frac=1.0 → removes all visible (even-aligned)."""
@@ -880,6 +993,30 @@ class TestTruncateConversation:
         marker_text = _extract_content_text(markers[0].message.content)
         assert "Recent Skill Load" in marker_text
         assert "<skill_name>agent-recall-with-files</skill_name>" in marker_text
+
+    def test_truncation_preserves_tool_pair_when_only_plain_group_removed(self):
+        messages = [
+            create_mock_message(MessageRole.SYSTEM, "system prompt"),
+            create_mock_message(MessageRole.USER, "old user request"),
+            create_mock_message(MessageRole.TOOL_CALL, "{'name': 'shell_tool', 'arguments': ''}"),
+            create_mock_message(MessageRole.TOOL_RESPONSE, "old shell output"),
+            create_mock_message(MessageRole.ASSISTANT, "newer assistant state"),
+        ]
+
+        result = truncate_conversation(messages, frac_to_remove=0.3)
+        visible = to_api_messages(result.messages)
+        visible_roles = [msg.role for msg in visible]
+
+        assert result.messages_removed == 1
+        assert visible_roles == [
+            MessageRole.SYSTEM,
+            MessageRole.USER,
+            MessageRole.TOOL_CALL,
+            MessageRole.TOOL_RESPONSE,
+            MessageRole.ASSISTANT,
+        ]
+        tool_response_idx = visible_roles.index(MessageRole.TOOL_RESPONSE)
+        assert visible_roles[tool_response_idx - 1] == MessageRole.TOOL_CALL
 
 
 # =============================================================================
@@ -1092,3 +1229,44 @@ class TestIntegration:
 
         final_chars = count_chars(result, "dummy")
         assert final_chars <= max_tokens
+
+    def test_standard_pipeline_keeps_tool_pairs_structurally_valid(self, monkeypatch):
+        messages = [
+            ChatMessage(role=MessageRole.SYSTEM, content="system"),
+            ChatMessage(role=MessageRole.USER, content="Investigate the failing test."),
+            ChatMessage(role=MessageRole.TOOL_CALL, content="{'name': 'shell_tool', 'arguments': ''}"),
+            ChatMessage(role=MessageRole.TOOL_RESPONSE, content=[{"type": "text", "text": "X" * 5000}]),
+            ChatMessage(role=MessageRole.ASSISTANT, content="The shell output shows the root cause."),
+        ]
+
+        monkeypatch.setattr(
+            compression_module,
+            "_count_tokens",
+            lambda msgs, _mid: sum(len(_extract_content_text(m.content)) for m in msgs),
+        )
+
+        manager = ConversationHistoryManager(max_tokens=100, smart_summary=False)
+        manager.sync_from_messages(messages)
+        result = manager.get_compressed_messages(model_id="dummy-model")
+
+        for idx, msg in enumerate(result):
+            if msg.role == MessageRole.TOOL_RESPONSE:
+                assert idx > 0
+                assert result[idx - 1].role == MessageRole.TOOL_CALL
+
+
+def test_summary_serialization_truncates_large_tool_results():
+    messages = [
+        create_mock_message(MessageRole.USER, "Please inspect the logs."),
+        create_mock_message(MessageRole.TOOL_CALL, "{'name': 'shell_tool', 'arguments': 'cat /tmp/log'}"),
+        create_mock_message(MessageRole.TOOL_RESPONSE, "A" * 5000),
+        create_mock_message(MessageRole.ASSISTANT, "The log points at timeout handling."),
+    ]
+
+    serialized = _serialize_messages_for_summary(messages)
+
+    assert "<conversation>" in serialized
+    assert "[Tool call]:" in serialized
+    assert "[Tool result]:" in serialized
+    assert "characters truncated for summary" in serialized
+    assert "A" * 5000 not in serialized
