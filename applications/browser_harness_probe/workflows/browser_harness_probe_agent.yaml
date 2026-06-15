@@ -1,0 +1,68 @@
+name: "browser_harness_probe"
+description: "Run browser-harness doctor, then verify both isolated Chrome and real Chrome demo probes."
+model_type: "powerful"
+tool_call_type: "tool_call"
+max_steps: 8
+default_loaded_tools: []
+skills: []
+
+tools:
+  - name: "browser_harness_doctor"
+    module: "applications.browser_harness_probe.agent_tools.browser_harness_tools"
+    function: "browser_harness_doctor"
+    description: "Run browser-harness --doctor and return JSON diagnostics."
+  - name: "run_isolated_demo_probe"
+    module: "applications.browser_harness_probe.agent_tools.browser_harness_tools"
+    function: "run_demo_probe"
+    fixed_args:
+      browser_mode: "isolated"
+      url: "https://github.com/browser-use/browser-harness"
+      timeout_seconds: "90"
+    description: "Open the browser-harness GitHub page in an isolated Chrome profile and return page_info JSON."
+  - name: "run_real_demo_probe"
+    module: "applications.browser_harness_probe.agent_tools.browser_harness_tools"
+    function: "run_demo_probe"
+    fixed_args:
+      browser_mode: "real"
+      url: "https://github.com/browser-use/browser-harness"
+      timeout_seconds: "90"
+    description: "Open the browser-harness GitHub page in the user's real Chrome and return page_info JSON."
+  - name: "run_browser_harness_python"
+    module: "applications.browser_harness_probe.agent_tools.browser_harness_tools"
+    function: "run_browser_harness_python"
+    description: "Run custom Python code through browser-harness. Use only when the user asks for a custom browser script."
+
+worker_agents: []
+
+execution_env:
+  type: "local"
+
+workflow: |
+  # Browser Harness Probe
+
+  You verify whether AgentLoom can call browser-harness through registered Python tools.
+
+  ## Required behavior
+
+  1. Always call `browser_harness_doctor` first.
+  2. If the request does not specify a browser mode, verify both modes. Run isolated first, then real.
+  3. If the user asks for isolated verification, call `run_isolated_demo_probe`.
+  4. If the user asks for real Chrome verification, call `run_real_demo_probe`.
+  5. If the user asks to verify both modes, call both demo tools. Run isolated first, then real.
+  6. Use `run_browser_harness_python` only for an explicit custom script request.
+  7. Do not invent a browser script for the default demo; use the fixed demo tools.
+
+  ## Result interpretation
+
+  - A demo passes when the tool JSON has `success: true` and stdout contains the target GitHub URL or browser-harness page information.
+  - A real Chrome failure that asks the user to enable `chrome://inspect/#remote-debugging` or click Allow is a browser authorization/setup issue, not an AgentLoom tool-registration failure.
+  - Return the raw JSON snippets needed to diagnose any failure. Do not hide stderr.
+
+  ## Final answer
+
+  Keep the final answer concise and include:
+
+  - doctor status
+  - isolated mode status if run
+  - real Chrome mode status if run
+  - the concrete next step for any failing mode

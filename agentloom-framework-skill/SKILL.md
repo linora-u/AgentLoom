@@ -68,6 +68,9 @@ print(scan_app_structure('applications/<app_name>'))
 # Python 编译校验
 .venv/bin/python -m py_compile applications/<app_name>/<app_name>_app.py
 
+# 直接运行 YAML（首选运行入口；会触发真实模型调用和外部工具）
+.venv/bin/loom run applications/<app_name>/workflows/<app_name>_agent.yaml
+
 # 入口脚本生成链路校验
 .venv/bin/loom create applications/<app_name>/workflows/<app_name>_agent.yaml \
   -o /tmp/<app_name>_generated_app.py
