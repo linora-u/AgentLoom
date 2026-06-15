@@ -23,6 +23,112 @@ ALLOWED_TOOL_CALL_TYPES = {"code_act", "tool_call"}
 ALLOWED_EXECUTION_ENV_TYPES = {"local", "docker", "e2b", "wasm"}
 ALLOWED_WORKER_EXTENSIONS = {".yaml", ".yml", ".md"}
 ALLOWED_SKILL_LOAD_MODES = {"on-demand", "eager"}
+ALLOWED_CONCURRENCY_VALUES = {"auto"}
+LLM_ONLY_TOP_LEVEL = {"model", "llm", "langfuse"}
+
+
+def _is_positive_int_value(value: Any) -> bool:
+    if isinstance(value, bool):
+        return False
+    if isinstance(value, int):
+        return value > 0
+    return False
+
+
+def _is_positive_int_or_numeric_string(value: Any) -> bool:
+    if _is_positive_int_value(value):
+        return True
+    if isinstance(value, str):
+        text = value.strip()
+        if not text:
+            return False
+        try:
+            parsed = int(text)
+        except ValueError:
+            return False
+        return parsed > 0
+    return False
+
+
+def _load_llm_model_index(project_root: Path) -> tuple[set[str], str, Path | None]:
+    llm_path = project_root / "config" / "llm.yaml"
+    if not llm_path.is_file():
+        return set(), "", None
+    raw = yaml.safe_load(llm_path.read_text(encoding="utf-8")) or {}
+    if not isinstance(raw, dict):
+        return set(), "", llm_path
+    model_raw = raw.get("model", {})
+    if not isinstance(model_raw, dict):
+        return set(), "", llm_path
+    model_types = {
+        str(key).strip().lower()
+        for key, value in model_raw.items()
+        if key not in {"default_model_type", "common"} and isinstance(value, dict)
+    }
+    default_model_type = str(model_raw.get("default_model_type") or "").strip().lower()
+    return model_types, default_model_type, llm_path
+
+
+def _validate_model_type_reference(
+    config: dict[str, Any],
+    file_path: Path,
+    errors: list[dict[str, str]],
+    project_root: Path,
+    *,
+    model_types: set[str],
+    default_model_type: str,
+    llm_path: Path | None,
+) -> None:
+    if llm_path is None:
+        return
+
+    model_type = config.get("model_type")
+    if model_type is None:
+        if not default_model_type:
+            _add_error(
+                errors,
+                file_path=file_path,
+                field="model_type",
+                rule="model_type_or_default_required",
+                message="Agent 未配置 model_type，且 config/llm.yaml 未配置 model.default_model_type",
+                suggestion="在 Agent YAML 显式设置 model_type，或在 config/llm.yaml 设置 model.default_model_type",
+                project_root=project_root,
+            )
+        elif default_model_type not in model_types:
+            _add_error(
+                errors,
+                file_path=file_path,
+                field="model_type",
+                rule="default_model_type_exists",
+                message=f"config/llm.yaml 的默认模型类型不存在: {default_model_type}",
+                suggestion=f"把 model.default_model_type 改成以下之一: {', '.join(sorted(model_types))}",
+                project_root=project_root,
+            )
+        return
+
+    if not isinstance(model_type, str) or not model_type.strip():
+        _add_error(
+            errors,
+            file_path=file_path,
+            field="model_type",
+            rule="type_non_empty_string",
+            message="model_type 必须是非空字符串",
+            suggestion="设置为 config/llm.yaml 中已有的模型类型",
+            project_root=project_root,
+        )
+        return
+
+    normalized = model_type.strip().lower()
+    if normalized not in model_types:
+        _add_error(
+            errors,
+            file_path=file_path,
+            field="model_type",
+            rule="model_type_exists",
+            message=f"model_type={model_type!r} 未在 config/llm.yaml 中定义",
+            suggestion=f"改为以下之一，或先在 config/llm.yaml 添加该模型类型: {', '.join(sorted(model_types))}",
+            project_root=project_root,
+        )
 
 
 def _add_error(
@@ -220,8 +326,182 @@ def _validate_common_rules(
                     rule="allowed_values",
                     message=f"execution_env.type={env_type!r} 非法",
                     suggestion="仅使用 local/docker/e2b/wasm",
+            project_root=project_root,
+        )
+
+
+def _validate_runtime_options(
+    config: dict[str, Any],
+    file_path: Path,
+    errors: list[dict[str, str]],
+    project_root: Path,
+) -> None:
+    if "max_steps" in config and not _is_positive_int_value(config.get("max_steps")):
+        _add_error(
+            errors,
+            file_path=file_path,
+            field="max_steps",
+            rule="positive_integer",
+            message="max_steps 必须是正整数",
+            suggestion="删除该字段使用默认值 80，或设置为正整数",
+            project_root=project_root,
+        )
+
+    if "planning_interval" in config and not _is_positive_int_or_numeric_string(config.get("planning_interval")):
+        _add_error(
+            errors,
+            file_path=file_path,
+            field="planning_interval",
+            rule="positive_integer_or_numeric_string",
+            message="planning_interval 必须是正整数或数字字符串",
+            suggestion="删除该字段禁用周期 planning，或设置为如 3 的正整数",
+            project_root=project_root,
+        )
+
+    if "concurrency" in config:
+        concurrency = config.get("concurrency")
+        valid = (
+            _is_positive_int_value(concurrency)
+            or (
+                isinstance(concurrency, str)
+                and concurrency.strip().lower() in ALLOWED_CONCURRENCY_VALUES
+            )
+        )
+        if not valid:
+            _add_error(
+                errors,
+                file_path=file_path,
+                field="concurrency",
+                rule="positive_integer_or_auto",
+                message="concurrency 仅支持正整数或字符串 'auto'",
+                suggestion="删除该字段使用 auto，或设置为正整数，例如 4",
+                project_root=project_root,
+            )
+
+
+def _validate_prompt_config(
+    config: dict[str, Any],
+    file_path: Path,
+    errors: list[dict[str, str]],
+    project_root: Path,
+) -> None:
+    if "prompt" not in config:
+        return
+    prompt = config.get("prompt")
+    if isinstance(prompt, str):
+        if prompt.strip():
+            return
+    elif isinstance(prompt, dict):
+        path_value = prompt.get("path")
+        if isinstance(path_value, str) and path_value.strip():
+            return
+
+    _add_error(
+        errors,
+        file_path=file_path,
+        field="prompt",
+        rule="type_string_or_mapping_with_path",
+        message="prompt 必须是非空字符串路径，或包含非空 path 的字典",
+        suggestion="使用 prompt: applications/<app>/sysprompt/code_agent.yaml 或 prompt: {path: ...}",
+        project_root=project_root,
+    )
+
+
+def _validate_overlay_config_types(
+    config: dict[str, Any],
+    file_path: Path,
+    errors: list[dict[str, str]],
+    project_root: Path,
+) -> None:
+    dict_fields = (
+        "system",
+        "tool_access_control",
+        "execution_env",
+        "code_agent",
+        "shell_settings",
+        "tools_mapping",
+    )
+    for field in dict_fields:
+        if field in config and not isinstance(config.get(field), dict):
+            _add_error(
+                errors,
+                file_path=file_path,
+                field=field,
+                rule="type_dict",
+                message=f"{field} 必须是字典",
+                suggestion=f"删除 {field} 或改为 YAML mapping",
+                project_root=project_root,
+            )
+
+    if "default_loaded_tools" in config:
+        tools = config.get("default_loaded_tools")
+        if (
+            not isinstance(tools, list)
+            or any(not isinstance(item, str) or not item.strip() for item in tools)
+        ):
+            _add_error(
+                errors,
+                file_path=file_path,
+                field="default_loaded_tools",
+                rule="type_list_of_strings",
+                message="default_loaded_tools 必须是字符串列表",
+                suggestion="使用如 default_loaded_tools: ['read_file', 'grep_search']；空列表表示显式关闭默认工具",
+                project_root=project_root,
+            )
+
+
+def _validate_mcp_servers_config(
+    config: dict[str, Any],
+    file_path: Path,
+    errors: list[dict[str, str]],
+    project_root: Path,
+) -> None:
+    if "mcp_servers" not in config:
+        return
+    value = config.get("mcp_servers")
+    if isinstance(value, str):
+        if value.strip():
+            return
+    elif isinstance(value, list):
+        if all(isinstance(item, str) and item.strip() for item in value):
+            return
+    elif isinstance(value, dict):
+        has_path = isinstance(value.get("path"), str) and value.get("path", "").strip()
+        paths = value.get("paths")
+        has_paths = isinstance(paths, list) and all(isinstance(item, str) and item.strip() for item in paths)
+        if has_path or has_paths:
+            for key in ("timeout", "tool_timeout"):
+                if key in value and not _is_positive_int_value(value.get(key)):
+                    _add_error(
+                        errors,
+                        file_path=file_path,
+                        field=f"mcp_servers.{key}",
+                        rule="positive_integer",
+                        message=f"mcp_servers.{key} 必须是正整数秒数",
+                        suggestion=f"删除 {key} 使用默认值，或设置为正整数",
+                        project_root=project_root,
+                    )
+            if "tool_name_prefix" in value and not isinstance(value.get("tool_name_prefix"), bool):
+                _add_error(
+                    errors,
+                    file_path=file_path,
+                    field="mcp_servers.tool_name_prefix",
+                    rule="type_bool",
+                    message="mcp_servers.tool_name_prefix 必须是布尔值",
+                    suggestion="设置为 true/false，或删除使用默认值 true",
                     project_root=project_root,
                 )
+            return
+
+    _add_error(
+        errors,
+        file_path=file_path,
+        field="mcp_servers",
+        rule="type_string_list_or_mapping_with_path",
+        message="mcp_servers 必须是路径字符串、路径字符串列表，或包含 path/paths 的字典",
+        suggestion="使用 mcp_servers: 'config/.mcp.json' 或 mcp_servers: {path: 'config/.mcp.json'}",
+        project_root=project_root,
+    )
 
 
 def _validate_dynamic_tools(
@@ -258,6 +538,19 @@ def _validate_dynamic_tools(
             )
             continue
 
+        name = tool.get("name")
+        if not isinstance(name, str) or not name.strip():
+            _add_error(
+                errors,
+                file_path=file_path,
+                field=f"tools[{idx}].name",
+                rule="required_non_empty_string",
+                message="工具配置必须包含非空 name",
+                suggestion="预定义工具写 {'name': 'read_file'}；动态工具还要补 module/function",
+                project_root=project_root,
+            )
+            continue
+
         has_module = "module" in tool
         has_function = "function" in tool
         if has_module != has_function:
@@ -268,6 +561,17 @@ def _validate_dynamic_tools(
                 rule="dynamic_tool_pair_required",
                 message="动态工具必须同时包含 module 和 function",
                 suggestion="为该工具同时补齐 module 与 function，或删除两者回退为预定义工具",
+                project_root=project_root,
+            )
+
+        if "fixed_args" in tool and tool.get("fixed_args") is not None and not isinstance(tool.get("fixed_args"), dict):
+            _add_error(
+                errors,
+                file_path=file_path,
+                field=f"tools[{idx}].fixed_args",
+                rule="type_dict",
+                message="fixed_args 必须是字典",
+                suggestion="删除 fixed_args，或使用 fixed_args: {参数名: 固定值}",
                 project_root=project_root,
             )
 
@@ -480,6 +784,101 @@ def _validate_skills_config(
         errors=errors,
         project_root=project_root,
     )
+
+
+def _validate_system_config_map(
+    config: dict[str, Any],
+    file_path: Path,
+    errors: list[dict[str, str]],
+    project_root: Path,
+) -> None:
+    for field in LLM_ONLY_TOP_LEVEL:
+        if field in config:
+            _add_error(
+                errors,
+                file_path=file_path,
+                field=field,
+                rule="forbidden_top_level_key",
+                message=f"禁止在 system.yaml 中使用 '{field}'",
+                suggestion="删除该字段，并改为在全局本地 config/llm.yaml 中配置",
+                project_root=project_root,
+            )
+
+    _validate_skills_config(config, file_path, errors, project_root)
+    _validate_overlay_config_types(config, file_path, errors, project_root)
+    _validate_mcp_servers_config(config, file_path, errors, project_root)
+
+    checkpoint = config.get("checkpoint")
+    if checkpoint is not None:
+        if not isinstance(checkpoint, dict):
+            _add_error(
+                errors,
+                file_path=file_path,
+                field="checkpoint",
+                rule="type_dict",
+                message="checkpoint 必须是字典",
+                suggestion="使用 checkpoint: {enabled: true, cleanup_on_success: true, max_resume_age: 604800, heartbeat_interval: 5}",
+                project_root=project_root,
+            )
+        else:
+            for key in ("enabled", "cleanup_on_success"):
+                if key in checkpoint and not isinstance(checkpoint.get(key), bool):
+                    _add_error(
+                        errors,
+                        file_path=file_path,
+                        field=f"checkpoint.{key}",
+                        rule="type_bool",
+                        message=f"checkpoint.{key} 必须是布尔值",
+                        suggestion=f"将 {key} 设置为 true 或 false",
+                        project_root=project_root,
+                    )
+            for key in ("max_resume_age", "heartbeat_interval"):
+                if key in checkpoint and not _is_positive_int_value(checkpoint.get(key)):
+                    _add_error(
+                        errors,
+                        file_path=file_path,
+                        field=f"checkpoint.{key}",
+                        rule="positive_integer",
+                        message=f"checkpoint.{key} 必须是正整数秒数",
+                        suggestion=f"删除 {key} 使用默认值，或设置为正整数",
+                        project_root=project_root,
+                    )
+
+    lsp_servers = config.get("lsp_servers")
+    if lsp_servers is not None and not isinstance(lsp_servers, dict):
+        _add_error(
+            errors,
+            file_path=file_path,
+            field="lsp_servers",
+            rule="type_dict",
+            message="lsp_servers 必须是字典",
+            suggestion="删除该字段，或使用 lsp_servers: {enabled: true, servers: ['python']}",
+            project_root=project_root,
+        )
+
+    logging_cfg = config.get("logging")
+    if logging_cfg is not None and not isinstance(logging_cfg, dict):
+        _add_error(
+            errors,
+            file_path=file_path,
+            field="logging",
+            rule="type_dict",
+            message="logging 必须是字典",
+            suggestion="删除该字段，或使用 logging: {enabled: true, level: INFO}",
+            project_root=project_root,
+        )
+
+    for field in ("tool_metadata", "tool_output_limits"):
+        if field in config and not isinstance(config.get(field), dict):
+            _add_error(
+                errors,
+                file_path=file_path,
+                field=field,
+                rule="type_dict",
+                message=f"{field} 必须是字典",
+                suggestion=f"删除 {field} 或改为 YAML mapping",
+                project_root=project_root,
+            )
 
 
 def _validate_supervisor_worker_agents(
@@ -766,6 +1165,7 @@ def main() -> int:
             app_root = app_root.resolve()
 
         errors: list[dict[str, str]] = []
+        model_types, default_model_type, llm_path = _load_llm_model_index(project_root)
 
         if not app_root.exists() or not app_root.is_dir():
             _add_error(
@@ -788,6 +1188,26 @@ def main() -> int:
             }
             print(json.dumps(payload, ensure_ascii=False))
             return 1
+
+        config_files_checked = 0
+        app_system_config = app_root / "config" / "system.yaml"
+        if app_system_config.is_file():
+            config_files_checked += 1
+            try:
+                loaded_system = yaml.safe_load(app_system_config.read_text(encoding="utf-8")) or {}
+                if not isinstance(loaded_system, dict):
+                    raise ValueError("system.yaml 顶层必须是字典对象")
+                _validate_system_config_map(loaded_system, app_system_config, errors, project_root)
+            except Exception as exc:  # noqa: BLE001
+                _add_error(
+                    errors,
+                    file_path=app_system_config,
+                    field="yaml_parse",
+                    rule="parse_success",
+                    message=f"应用级 system.yaml 解析失败: {exc}",
+                    suggestion="修复 YAML 语法或顶层结构后重试",
+                    project_root=project_root,
+                )
 
         workflows_dir = app_root / "workflows"
         if not workflows_dir.is_dir():
@@ -833,8 +1253,21 @@ def main() -> int:
 
             parsed[file_path.resolve()] = config
             _validate_common_rules(config, file_path, errors, project_root)
+            _validate_runtime_options(config, file_path, errors, project_root)
+            _validate_prompt_config(config, file_path, errors, project_root)
+            _validate_overlay_config_types(config, file_path, errors, project_root)
+            _validate_mcp_servers_config(config, file_path, errors, project_root)
             _validate_dynamic_tools(config, file_path, errors, project_root)
             _validate_skills_config(config, file_path, errors, project_root)
+            _validate_model_type_reference(
+                config,
+                file_path,
+                errors,
+                project_root,
+                model_types=model_types,
+                default_model_type=default_model_type,
+                llm_path=llm_path,
+            )
             referenced_workers.update(
                 _validate_supervisor_worker_agents(config, file_path, errors, project_root)
             )
@@ -849,6 +1282,7 @@ def main() -> int:
                 "valid": len(errors) == 0,
                 "error_count": len(errors),
                 "files_checked": len(parsed),
+                "config_files_checked": config_files_checked,
                 "app_root": str(app_root),
             },
             "errors": errors,
