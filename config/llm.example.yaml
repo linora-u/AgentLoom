@@ -20,6 +20,9 @@ model:
     # context_cache: true enables automatic prompt caching for ALL models.
     # litellm handles per-provider behavior (Anthropic preserves, OpenAI strips, etc.)
     context_cache: true
+    extra_body:
+      thinking:
+        type: "enabled"
     # system_prompt_boundary: optional marker to split system prompt into
     # static (cached) and dynamic (uncached) segments for higher cache hit rates.
     # Example: system_prompt_boundary: "<!-- DYNAMIC_BOUNDARY -->"
