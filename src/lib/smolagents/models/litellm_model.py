@@ -110,6 +110,16 @@ class LiteLLMModelV2(LiteLLMModel):
     def _prepare_completion_kwargs(self, *args, **kwargs):
         completion_kwargs = super()._prepare_completion_kwargs(*args, **kwargs)
 
+        if getattr(self, "supports_native_tool_calls", "auto") == "false":
+            removed_tool_choice = completion_kwargs.pop("tool_choice", None)
+            self.logger.debug(
+                "[DEBUG_TOOL_CHOICE] supports_native_tool_calls=false; "
+                "removed tool_choice=%r; has_tools=%s; extra_body=%s",
+                removed_tool_choice,
+                "tools" in completion_kwargs,
+                completion_kwargs.get("extra_body"),
+            )
+
         # Remove </code> from stop sequences. smolagents adds it as a stop token,
         # but some APIs (e.g. ARK) return partial residue ("</cod") when given
         # multiple stops. Removing it is safe: parse_code_blobs uses regex to
