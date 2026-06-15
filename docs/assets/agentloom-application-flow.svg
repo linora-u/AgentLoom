@@ -1,0 +1,106 @@
+<svg width="1200" height="520" viewBox="0 0 1200 520" fill="none" xmlns="http://www.w3.org/2000/svg" role="img" aria-labelledby="title desc">
+  <title id="title">AgentLoom hero visual</title>
+  <desc id="desc">A stylized AgentLoom hero visual showing a central application runtime surrounded by model routing, Worker Agents, Skills, MCP tools, concurrency, and state.</desc>
+  <defs>
+    <radialGradient id="bgA" cx="0" cy="0" r="1" gradientUnits="userSpaceOnUse" gradientTransform="translate(274 126) rotate(35) scale(520 330)">
+      <stop stop-color="#0EA5E9" stop-opacity="0.75"/>
+      <stop offset="1" stop-color="#0EA5E9" stop-opacity="0"/>
+    </radialGradient>
+    <radialGradient id="bgB" cx="0" cy="0" r="1" gradientUnits="userSpaceOnUse" gradientTransform="translate(930 322) rotate(150) scale(550 360)">
+      <stop stop-color="#22C55E" stop-opacity="0.65"/>
+      <stop offset="1" stop-color="#22C55E" stop-opacity="0"/>
+    </radialGradient>
+    <radialGradient id="coreGlow" cx="0" cy="0" r="1" gradientUnits="userSpaceOnUse" gradientTransform="translate(600 250) scale(260 170)">
+      <stop stop-color="#5EEAD4" stop-opacity="0.62"/>
+      <stop offset="1" stop-color="#5EEAD4" stop-opacity="0"/>
+    </radialGradient>
+    <linearGradient id="core" x1="430" y1="135" x2="782" y2="362" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#101B35"/>
+      <stop offset="0.48" stop-color="#0F3756"/>
+      <stop offset="1" stop-color="#0F766E"/>
+    </linearGradient>
+    <linearGradient id="shine" x1="432" y1="0" x2="768" y2="0" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#38BDF8"/>
+      <stop offset="0.46" stop-color="#22C55E"/>
+      <stop offset="1" stop-color="#F97316"/>
+    </linearGradient>
+    <linearGradient id="glass" x1="0" y1="0" x2="1" y2="1">
+      <stop stop-color="#FFFFFF" stop-opacity="0.9"/>
+      <stop offset="1" stop-color="#E0F2FE" stop-opacity="0.78"/>
+    </linearGradient>
+    <filter id="shadow" x="-30%" y="-35%" width="160%" height="180%" color-interpolation-filters="sRGB">
+      <feDropShadow dx="0" dy="22" stdDeviation="24" flood-color="#020617" flood-opacity="0.26"/>
+    </filter>
+    <filter id="soft" x="-30%" y="-35%" width="160%" height="180%" color-interpolation-filters="sRGB">
+      <feDropShadow dx="0" dy="12" stdDeviation="16" flood-color="#020617" flood-opacity="0.16"/>
+    </filter>
+    <pattern id="grid" width="36" height="36" patternUnits="userSpaceOnUse">
+      <path d="M36 0H0V36" stroke="#93C5FD" stroke-opacity="0.11" stroke-width="1"/>
+    </pattern>
+    <style>
+      .text { font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; letter-spacing: 0; }
+      .brand { fill: #F8FAFC; font-size: 55px; font-weight: 850; }
+      .tag { fill: #CFFAFE; font-size: 21px; font-weight: 720; }
+      .node { fill: #0F172A; font-size: 18px; font-weight: 780; }
+      .panel { fill: #334155; font-size: 16px; font-weight: 720; }
+      .panel-soft { fill: #64748B; font-size: 14px; font-weight: 650; }
+      .white { fill: #FFFFFF; }
+    </style>
+  </defs>
+
+  <rect width="1200" height="520" rx="34" fill="#07111F"/>
+  <rect width="1200" height="520" rx="34" fill="url(#bgA)"/>
+  <rect width="1200" height="520" rx="34" fill="url(#bgB)"/>
+  <rect x="34" y="34" width="1132" height="452" rx="30" fill="url(#grid)"/>
+
+  <ellipse cx="600" cy="260" rx="410" ry="166" stroke="#67E8F9" stroke-opacity="0.2" stroke-width="2"/>
+  <ellipse cx="600" cy="260" rx="318" ry="118" stroke="#A7F3D0" stroke-opacity="0.22" stroke-width="2"/>
+  <ellipse cx="600" cy="260" rx="238" ry="78" stroke="#FDBA74" stroke-opacity="0.2" stroke-width="2"/>
+
+  <g filter="url(#soft)" opacity="0.95">
+    <path d="M148 132C148 114 162 100 180 100H366C384 100 398 114 398 132V246C398 264 384 278 366 278H180C162 278 148 264 148 246V132Z" fill="url(#glass)" stroke="#C7DBEA"/>
+    <text x="182" y="146" class="text panel">assistant prompt</text>
+    <rect x="182" y="169" width="112" height="10" rx="5" fill="#2563EB" opacity="0.85"/>
+    <rect x="182" y="194" width="158" height="10" rx="5" fill="#22C55E" opacity="0.7"/>
+    <rect x="182" y="219" width="126" height="10" rx="5" fill="#F97316" opacity="0.64"/>
+    <text x="182" y="254" class="text panel-soft">Codex / Claude Code</text>
+  </g>
+
+  <g filter="url(#soft)" opacity="0.95">
+    <path d="M808 96C808 78 822 64 840 64H1026C1044 64 1058 78 1058 96V214C1058 232 1044 246 1026 246H840C822 246 808 232 808 214V96Z" fill="url(#glass)" stroke="#C7DBEA"/>
+    <text x="842" y="112" class="text panel">application.yaml</text>
+    <path d="M846 142H980M846 168H1010M846 194H936" stroke="#0891B2" stroke-width="10" stroke-linecap="round" opacity="0.72"/>
+    <text x="842" y="224" class="text panel-soft">Supervisor + Workers</text>
+  </g>
+
+  <g filter="url(#shadow)">
+    <circle cx="600" cy="250" r="150" fill="url(#coreGlow)"/>
+    <rect x="422" y="142" width="356" height="216" rx="46" fill="url(#core)"/>
+    <rect x="456" y="174" width="288" height="5" rx="2.5" fill="url(#shine)"/>
+    <text x="600" y="248" text-anchor="middle" class="text brand">AgentLoom</text>
+    <text x="600" y="286" text-anchor="middle" class="text tag">Application-level agents</text>
+  </g>
+
+  <g filter="url(#soft)">
+    <circle cx="337" cy="357" r="45" fill="#FFFFFF" stroke="#BFE4F5"/>
+    <text x="337" y="363" text-anchor="middle" class="text node">Models</text>
+  </g>
+  <g filter="url(#soft)">
+    <circle cx="472" cy="407" r="48" fill="#FFFFFF" stroke="#BFE4F5"/>
+    <text x="472" y="413" text-anchor="middle" class="text node">Workers</text>
+  </g>
+  <g filter="url(#soft)">
+    <circle cx="632" cy="414" r="52" fill="#FFFFFF" stroke="#BFE4F5"/>
+    <text x="632" y="411" text-anchor="middle" class="text node">Skills</text>
+    <text x="632" y="434" text-anchor="middle" class="text panel-soft">MCP</text>
+  </g>
+  <g filter="url(#soft)">
+    <circle cx="790" cy="388" r="51" fill="#FFFFFF" stroke="#BFE4F5"/>
+    <text x="790" y="394" text-anchor="middle" class="text node">Parallel</text>
+  </g>
+  <g filter="url(#soft)">
+    <circle cx="922" cy="318" r="45" fill="#FFFFFF" stroke="#BFE4F5"/>
+    <text x="922" y="324" text-anchor="middle" class="text node">State</text>
+  </g>
+
+</svg>

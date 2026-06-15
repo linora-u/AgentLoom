@@ -2,15 +2,14 @@
 English | <a href="docs/cn/README.md">简体中文</a>
 </sub></div>
 
-
 <h1 align="center">AgentLoom</h1>
 
 <p align="center">
-  <strong>Build complex multi-agent applications with simple configuration, minimal glue code, safe runtime controls, and first-class observability.</strong>
+  <strong>Application-level framework for building multi-agent systems from YAML.</strong>
 </p>
 
 <p align="center">
-  <strong>AgentLoom helps developers turn multi-agent workflows into runnable, observable, resumable, and controllable applications.</strong>
+  Build multi-agent apps by writing YAML, route each sub-agent to the right model, load Skills / MCP / tools, run repeated work in parallel, and resume long runs from saved state.
 </p>
 
 <p align="center">
@@ -19,11 +18,15 @@ English | <a href="docs/cn/README.md">简体中文</a>
   <a href="https://github.com/linora-u/AgentLoom/releases/tag/v1.0.1"><img alt="release v1.0.1" src="https://img.shields.io/badge/release-v1.0.1-007EC6"></a>
 </p>
 
+<p align="center">
+  <img alt="AgentLoom application flow" src="docs/assets/agentloom-application-flow.svg">
+</p>
+
 ---
 
-## Quick Start
+## 3-Minute Quick Start
 
-AgentLoom is designed to get you from repository clone to a real multi-agent application quickly.
+AgentLoom is for developers who want ready-to-run agent apps: YAML-defined agents, explicit Worker contracts, model routing, runtime logs, checkpoint state, and optional UI monitoring.
 
 ```bash
 git clone <repo-url> AgentLoom
@@ -47,102 +50,102 @@ After the first run, you should see:
 - optional visualization through `uv run loom ui`;
 - optional terminal monitoring through `uv run loom dashboard`.
 
-## What AgentLoom Provides
+## Create a Multi-Agent App with Codex
 
-AgentLoom already implements the runtime pieces needed to build and operate complex agent applications:
+The fastest path is to let Codex use the framework skill that ships with this repository. Codex can create the YAML files, run the AgentLoom app, watch terminal output and `.logs/`, inspect checkpoint state, and revise the app when a Worker gets stuck or a config is wrong.
 
-| Area | Implemented Capabilities |
-|---|---|
-| Multi-agent app assembly | Supervisor / Worker roles, YAML `workflow`, `worker_agents`, direct `loom run`, generated entry scripts with `loom create`, and Python embedding through `run_app()`. |
-| Agent-as-Tool | Workers export as callable tools through `agent_function_schema`, with generated function signatures, required-input validation, docstrings, string results, and `.batch(tasks)`. |
-| Execution modes | Structured `tool_call` mode for traceable orchestration and `code_act` mode for flexible code-execution tasks. |
-| Python pre/post processing | Custom tool functions and wrappers for scanning, caching, loops, retries, validation, error isolation, progress persistence, and artifact writing. |
-| Batch concurrency | Worker `concurrency: auto` or fixed concurrency, `tool.batch(tasks)`, back-pressure, circuit breaker, progress callbacks, and per-call state isolation. |
-| Skills and Hooks | Claude-style `SKILL.md` packages, YAML-controlled on-demand / eager loading, bundled resources and scripts, and lifecycle Hooks for tools, tasks, sub-agents, sessions, compaction, setup, and config changes. |
-| Model and context control | Per-agent `model_type`, multiple LLM endpoints, parameter inheritance, retry behavior, prompt customization, and multi-layer context compression. |
-| Tool ecosystem | Built-in file, shell, search, code-edit, git, todo, skill-loading, local Python tools, and local Codex Exec tools, plus MCP client integration. |
-| Local Codex integration | Register local `codex exec` as a normal function tool, with multiple aliases, `fixed_args`, `sandbox` / `search` pass-through, and local Codex login/permission behavior. |
-| Code intelligence | LSP service management for definition, references, symbols, hover, and workspace symbols, with tree-sitter fallback. |
-| Runtime safety | Path boundaries, include/exclude rules, per-agent policies, shell command/operator allowlists, shell security checks, sandbox wrapping, and `shell_audit.log`. |
-| Long-task resilience | Checkpoint resume, heartbeat detection, conversation recovery, tool-call error recovery, file history, worker skip-on-resume, and task cleanup. |
-| Observability | Rich terminal logs, plain text file logs, per-step duration, cumulative/incremental token usage, task/subtask/agent context, and run archiving under `.logs/`. |
-| UI and monitoring | Web UI with SSE updates, topology graph, timeline replay, multi-run grouping, plus TUI dashboard for active and resumable tasks. |
-| Reference applications | `ai_quality_analysis`, `unit_test_studio`, `repo_map`, and `codex_exec_demo` demonstrate direct runs, custom Python entrypoints, strict pipelines, concurrent Worker analysis, and local Codex tool calls. |
+Use a prompt like this:
+
+```text
+Read agentloom-framework-skill/SKILL.md first.
+
+Create an AgentLoom application named <app_name> for this goal:
+<describe the user-facing task, input, output, and acceptance criteria>
+
+Requirements:
+- Create files under applications/<app_name>/.
+- Use a Supervisor YAML plus at least two Worker YAML files.
+- Each Worker must define agent_function_schema with clear inputs and output.
+- Choose model_type values only from config/llm.yaml.
+- Add Skills or MCP config only if they are useful for this app.
+- Write an application README with run commands, Worker responsibilities, validation records, and known limits.
+- Run the app, watch the logs/checkpoints, and fix any YAML or tool issues you find.
+```
+
+You can let Codex run and monitor the app for you, or run it yourself:
+
+```bash
+uv run loom run applications/<app_name>/workflows/<app_name>_agent.yaml
+```
+
+Useful runtime checks while the app is running:
+
+```bash
+uv run loom list-tasks
+uv run loom dashboard
+ls .logs/
+```
+
+If you prefer Claude Code, give it the same request: read `agentloom-framework-skill/SKILL.md`, create the app under `applications/<app_name>/`, run it, and summarize what worked or failed.
+
+The main config ideas are simple:
+
+- `model_type`: which configured model category this Agent uses.
+- `worker_agents`: which Worker YAML files the Supervisor can call.
+- `agent_function_schema`: the input and output contract for a Worker.
+- `skills` / `mcp_servers`: optional extra knowledge and external tools.
 
 ## Why AgentLoom
 
-### Build Complex Agent Apps With Less Code
+Many agent frameworks expose components. AgentLoom gives you a complete app structure.
 
-Many agent frameworks give you components. AgentLoom gives you an application shape.
+Complex agent applications often repeat the same setup code: Worker registration, parameter adapters, runtime entrypoints, batch execution, logging, checkpointing, and safety controls. AgentLoom moves those reusable parts into YAML and the runtime. Your application code stays focused on domain work: preprocessing, validation, artifact writing, and the actual Agent roles.
 
-Complex agent applications often grow the same glue code again and again: Worker registration, parameter adapters, runtime entrypoints, pre/post processing, batch execution, logging, tracing, and safety controls. That code is costly because it is rarely reusable when the next agent application has a different workflow.
+The practical result:
 
-Worker Agents are exported as callable tools, and Supervisor Agents load and schedule them automatically. That means a complex workflow can be assembled from focused agents, a small amount of business glue code, and a direct runtime entrypoint.
-
-AgentLoom moves the reusable parts into YAML and the runtime. YAML describes the workflow, Worker list, tools, models, permissions, and skills; Workers become callable tools; Supervisors load them automatically; Python stays focused on the application-specific parts such as preprocessing, postprocessing, caching, loops, validation, and artifact writing. Skills and Hooks package lifecycle behavior so it can be reused across applications.
-
-You can start with:
-
-- `uv run loom run <workflow>` to run an application directly;
-- `uv run loom create <workflow>` to generate a Python entry script;
-- `run_app("<workflow>")` to embed an AgentLoom app inside your own Python pipeline;
-- `tool.batch(tasks)` to call the same Worker Agent across many inputs in parallel.
-
-This is the core development-cycle win: you spend less time building orchestration plumbing and more time shaping the actual agent roles, tools, and task flow.
-
-## How AgentLoom Is Different
-
-| Common Agent Framework Pattern | AgentLoom's Approach |
+| Need | AgentLoom approach |
 |---|---|
-| Component-first: users assemble low-level primitives themselves. | Application-first: run, generate, embed, monitor, and resume multi-agent apps directly. |
-| Each complex app tends to grow a new layer of glue code. | Reusable orchestration, runtime controls, observability, and lifecycle extensions live in AgentLoom; app code handles business-specific differences. |
-| Safety, recovery, and observability are often added later. | Runtime guardrails, checkpoints, logs, audit trails, UI, and dashboard are built into the framework path. |
-| Logs mostly describe model calls and final output. | Logs are designed to debug agent application structure: task, subtask, agent, step, token, checkpoint, and topology. |
-| Good for quick demos, but production-like runs need extra infrastructure. | Built for long-running, unattended tasks that need progress, recovery, and post-run analysis. |
+| Build a full multi-agent app | Define a Supervisor, Workers, tools, Skills, and runtime behavior in YAML. |
+| Route roles to different models | Set `model_type` per Agent and keep credentials isolated in `config/llm.yaml`. |
+| Turn sub-agents into tools | Give Workers `agent_function_schema`; the Supervisor calls them like normal tools. |
+| Reuse coding-assistant knowledge | Load Claude-style `SKILL.md` packages on demand or eagerly. |
+| Connect external tools | Register local Python tools, local `codex exec`, and MCP servers through `mcp_servers`. |
+| Handle repeated work | Use Worker `concurrency` and `tool.batch(tasks)` for independent repeated inputs. |
+| Understand long runs | Use structured logs, `.logs/` archives, checkpoints, `loom ui`, and `loom dashboard`. |
 
-## Build A multi-agent App With Less Code
+## Architecture
 
-AgentLoom's core model is simple:
+<p align="center">
+  <img alt="AgentLoom runtime architecture" src="docs/assets/agentloom-runtime-architecture.svg">
+</p>
 
-```mermaid
-flowchart LR
-    User["Application / CLI"] --> Supervisor["Supervisor Agent"]
-    Supervisor --> WorkerA["Worker Agent as Tool"]
-    Supervisor --> WorkerB["Worker Agent as Tool"]
-    Supervisor --> LocalTools["Local Tools"]
-    Supervisor --> MCP["MCP Tools"]
-    WorkerA --> Runtime["Runtime Controls"]
-    WorkerB --> Runtime
-    Runtime --> Logs["Logs / Checkpoints / UI"]
-```
+The important boundary is:
 
-The important part is the boundary:
+- Worker Agents define their role, tools, inputs, and output contract.
+- AgentLoom turns Workers into callable tools with generated function signatures.
+- The Supervisor coordinates Workers and normal tools to complete the application task.
+- Python remains available for deterministic preprocessing, validation, caching, and artifact writing.
 
-- a Worker Agent defines its purpose, tools, inputs, and output contract;
-- AgentLoom turns that Worker into a callable Python tool with a real function signature;
-- the Supervisor calls Workers like tools and coordinates the full task;
-- business Python can still wrap the workflow for deterministic steps such as scanning, caching, validation, argument parsing, and artifact writing.
+## Capabilities
 
-### Where The Glue Code Goes
-
-| Work That Usually Becomes Glue Code | AgentLoom Placement |
+| Capability | What is already implemented |
 |---|---|
-| Reusable agent orchestration | YAML `workflow` and `worker_agents`. |
-| Worker parameter adaptation | `agent_function_schema` and generated function signatures. |
-| Project-specific pre/post processing | Python wrappers registered as tools. |
-| Cross-application lifecycle behavior | Skills and Hooks. |
-
-The `repo_map` application demonstrates this hybrid style: deterministic Python scans and ranks a repository, then AgentLoom calls Worker Agents to analyze directories and produce architecture documentation.
+| Application-first YAML | `loom run` executes an Agent YAML directly; `loom create` generates a Python entry script; `run_app()` embeds the app in Python. |
+| Per-Agent model routing | Each Agent selects a `model_type`; the actual provider, key, endpoint, retries, and parameters live in `config/llm.yaml`. |
+| Agent-as-Tool coordination | Worker Agents export as callable tools through `agent_function_schema`, including required-input validation and string outputs. |
+| Skills, MCP, and tools | Agents can load `SKILL.md` packages, local Python functions, built-in file/shell/search/git tools, local Codex tools, and MCP client tools through `mcp_servers`. |
+| Concurrent repeated work | Worker `concurrency: auto` or fixed concurrency works with `.batch(tasks)` for many independent inputs. |
+| State and observability | Rich terminal logs, plain text file logs, per-step timing, token usage, `.logs/` archives, checkpoint resume, Web UI, and TUI dashboard. |
 
 ## Example Applications
 
-The `applications/` directory contains working apps that show how AgentLoom is intended to be used.
+The `applications/` directory contains working apps that show the intended usage patterns.
 
-| Application | What It Builds | What It Demonstrates |
+| Application | What it builds | What it demonstrates |
 |---|---|---|
 | `ai_quality_analysis` | Multi-dimensional code review application. | 12 Worker Agents, staged review, direct `loom run`, long-running codebase analysis. |
 | `unit_test_studio` | Python pytest generation workflow. | Strict multi-step pipeline, custom entry script, function intake, scenario planning, test generation, refinement, delivery report. |
-| `repo_map` | Repository architecture map generator. | Deterministic Python preprocessing plus Agent-driven analysis, bottom-up directory processing, `tool.batch(tasks)`, progress persistence. |
+| `repo_map` | Repository architecture map generator. | Deterministic Python preprocessing plus Agent analysis, bottom-up directory processing, `tool.batch(tasks)`, progress persistence. |
 | `codex_exec_demo` | Local Codex Exec tool-call example. | Direct `loom run`, normal function tool registration, `fixed_args` for Codex parameters, structured `tool_call` sequencing. |
 
 Run the default code review example:
@@ -177,39 +180,23 @@ uv run loom run applications/codex_exec_demo/workflows/use_codex_exec_demo.yaml
 
 ## Core Concepts
 
-### Agent As Tool
-
-Worker Agents can be exported as callable tools. AgentLoom generates function signatures, validates required inputs, builds the task payload, and returns a string result. The same Worker can also expose `.batch(tasks)` for parallel execution.
-
 ### Supervisor / Worker
 
-A Supervisor Agent coordinates the task. Worker Agents specialize in one part of the job. This keeps responsibilities explicit and makes the workflow easier to debug.
+A Supervisor Agent coordinates the task. Worker Agents specialize in one part of the job. In multi-agent apps, the Supervisor references Workers through `worker_agents`, and Workers expose callable contracts through `agent_function_schema`.
 
-### Workflow
+### Agent as Tool
 
-A workflow describes what an agent should accomplish and how the Supervisor should use its Workers. AgentLoom uses the workflow to build the runtime task specification and keep long-running runs aligned.
+Worker Agents can be exported as callable tools. AgentLoom generates function signatures, validates required inputs, builds the task payload, and returns a string result. The same Worker can expose `.batch(tasks)` for parallel execution.
 
-### Skills And Hooks
+### Skills and Hooks
 
-Skills add reusable knowledge or behavior. Hooks attach logic around task lifecycle, sub-agent lifecycle, tool calls, and other runtime events. They can be used for validation, memory, policy enforcement, result transformation, and visualization collection.
-
-### Execution Modes
-
-AgentLoom supports structured tool calling for controlled orchestration and code execution mode for more flexible programming tasks. Each agent can choose the mode that fits its role.
+Skills provide reusable knowledge or behavior through Claude-style `SKILL.md` packages. Hooks attach logic around task lifecycle, sub-agent lifecycle, tool calls, sessions, compaction, setup, and config changes.
 
 ### Local Codex Tool
 
-AgentLoom includes `src.tools.codex.codex_tool.codex`, which exposes local
-`codex exec` as a normal function tool. Register it in Agent YAML with
-`module/function`; no dedicated `system.yaml` Codex section is required.
+AgentLoom includes `src.tools.codex.codex_tool.codex`, which exposes local `codex exec` as a normal function tool. Register it in Agent YAML with `module/function`. Use `fixed_args` to lock inputs such as `prompt`, `cwd`, `sandbox`, and `search`; fixed inputs are removed from the LLM-visible tool schema.
 
-Use `fixed_args` to lock inputs such as `prompt`, `cwd`, `sandbox`, and
-`search`. Fixed inputs are bound by the framework and removed from the
-LLM-visible tool schema; unfixed inputs remain available for the LLM to provide.
-`sandbox: ""` omits `--sandbox` and lets the local Codex CLI configuration decide
-permissions. `search: "true"` passes `--search`; search is off by default. Before
-running the tool, make sure `codex` is on `PATH` and `codex login status`
-succeeds.
+Before running the tool, make sure `codex` is on `PATH` and `codex login status` succeeds.
 
 ## CLI Reference
 
@@ -230,32 +217,21 @@ succeeds.
 | [Agent Configuration](docs/en/agent_config.md) | Supervisor/Worker fields, tools, model selection, workflows, and skills. |
 | [LLM Configuration](docs/en/llm_config.md) | Model types, provider settings, inheritance, retries, and prompt cache settings. |
 | [System Configuration](docs/en/system_config.md) | Runtime settings, permissions, logging, execution environments, and tools. |
-| [Skills Configuration](docs/en/skills_config.md) | Skill package format, loading, invocation controls, and built-in skills. |
+| [Skills Configuration](docs/en/skills_config.md) | Skill package format, loading, runtime policy, and built-in skills. |
 | [Hooks Reference](docs/en/hooks.md) | Lifecycle events, hook types, matching, and execution behavior. |
 | [Checkpoint Resume](docs/en/checkpoint.md) | Checkpoint layout, resume behavior, and long-task recovery. |
 
 ## AgentLoom Framework Skill
 
-The repository includes one root-level Agent Skill for AI coding assistants:
-`agentloom-framework-skill/`.
+The repository includes one root-level Agent Skill for AI coding assistants: `agentloom-framework-skill/`.
 
-Use it when you want an assistant to develop with AgentLoom instead of guessing
-the framework shape from scratch. Ask the assistant to read
-`agentloom-framework-skill/SKILL.md`, then describe the capability you want to
-build or extend.
+Use it when you want Codex, Claude Code, or another coding assistant to develop with AgentLoom instead of guessing the required files and fields from scratch. Ask the assistant to read `agentloom-framework-skill/SKILL.md`, then describe the application capability you want to build.
 
-The Skill guides the assistant to clarify the goal, inputs, outputs, and
-acceptance criteria; decide whether a single Agent, Supervisor/Worker workflow,
-Tool, private Skill, Hook, or documentation change is the shortest path; create
-or update the relevant files; and record validation results in the README.
+This Skill is a development aid for coding assistants. It is not stored under `skills/`, so AgentLoom runtime applications do not auto-load it as a normal runtime Skill.
 
-This Skill is a development aid for coding assistants. It is not stored under
-`skills/`, so AgentLoom runtime applications do not auto-load it as a normal
-runtime Skill.
+## Support and Contributing
 
-## Support & Contributing
-
-AgentLoom is built as a practical framework for complex agent automation. Issues, feature ideas, docs improvements, and example applications are welcome.
+AgentLoom is built as a practical framework for complex agent automation. Issues, feature ideas, documentation improvements, and example applications are welcome.
 
 - Open an issue: [GitHub Issues](https://github.com/linora-u/AgentLoom/issues)
 - Contact: [raine_walker@163.com](mailto:raine_walker@163.com?subject=AgentLoom%20Collaboration)
