@@ -47,6 +47,39 @@ find applications/<app_name>/agent_tools -name '*.py' -print0 2>/dev/null | xarg
 
 运行会触发模型调用。失败时记录真实错误，不要伪装通过。
 
+## 框架运行时功能验证
+
+修改 checkpoint、resume、日志/维测、并发 Worker、文件回滚、任务列表或任务清理时，不能只跑单测；至少选 2 个真实 Application 或已有真实 workflow 跑功能路径。优先使用仓库里的 `applications/test_demo/*checkpoint*`、`applications/test_demo/*file_rewind*`、`applications/feature_planner_demo` 这类覆盖面明确的应用。
+
+建议用隔离运行根，避免污染用户已有 checkpoint：
+
+```bash
+export AGENT_LOOM_RUNTIME_ROOT=/tmp/agentloom-runtime-checkpoint
+rm -rf "$AGENT_LOOM_RUNTIME_ROOT"
+```
+
+必须验证的证据：
+
+- `loom run <workflow.yaml> "<task>"` 能创建 checkpoint 目录。
+- 新 checkpoint 有 `task_events.jsonl`；`task_tree.json` 只是投影且能被 `loom list-tasks --detail` 展示。
+- 多 Worker 或重复 Worker 调用场景下，`workers/<worker>/calls/<call_index>/checkpoint.json` 存在，`call_index` 不互相覆盖。
+- resume 场景要实际执行 `loom run <workflow.yaml> --resume <task_id>`；若为了制造中断而提前停止，记录中断方式和恢复结果。
+- 涉及 subagent/Worker checkpoint 时，要分别验证 Supervisor 中断恢复和 Worker 半路中断恢复；Worker 恢复必须证明没有新开重复 `call_index`，且能从 per-call memory checkpoint 继续。
+- file-history 场景要检查 `file-history/snapshots.json` 和备份文件，确认早期备份没有被后续 snapshot 覆盖。
+- 清理场景要实际跑 `loom clean-tasks --all`，确认新旧 worker checkpoint 布局都会被删除。
+
+当前仓库可用的真实 LLM 验证脚本：
+
+```bash
+PYTHONPATH=/Users/bytedance/code/data_clear/AgentLoom-checkpoint \
+/Users/bytedance/code/data_clear/AgentLoom/.venv/bin/python \
+  tests/agent_test/real_checkpoint_validation.py --scenario all
+```
+
+它会运行 `applications/test_demo/workflows/test_checkpoint_complex_supervisor.yaml`，分别制造 Supervisor 中断和 Worker 中断，并检查最终文件、task event、worker call 复用和 Worker memory restore。
+
+如果真实模型调用因权限、额度或超时失败，不能标为通过；记录失败命令、错误文本、已产生的 checkpoint 证据，以及还缺哪条功能路径。
+
 ## 多 Agent 验证
 
 多 Agent Application 至少满足：

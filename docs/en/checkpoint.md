@@ -8,7 +8,7 @@ Core components:
 
 | Component | Description |
 |-----------|-------------|
-| **CheckpointManager** | Persistence layer: atomic JSON writes, task tree management, checkpoint file organization |
+| **CheckpointManager** | Persistence layer: append-only task events, task tree projection, checkpoint file organization |
 | **CheckpointCoordinator** | Coordination layer: ContextVar singleton, manages checkpoint lifecycle |
 | **CheckpointSerializer** | Serialization layer: smolagents MemoryStep serialization/deserialization |
 | **ConversationRecovery** | Recovery pipeline: filters unresolved tool calls, orphaned thinking steps, empty steps |
@@ -26,12 +26,15 @@ Checkpoint data is written inside each run's timestamp log directory, co-located
 ├── 20260413_104447/                        # Per-run timestamp directory
 │   ├── {agent_name}.log                    # Run log
 │   └── checkpoints/{task_id}/              # Checkpoint data for this run
-│       ├── task_tree.json                  # Task metadata (status, worker call records)
+│       ├── task_events.jsonl               # Source of truth: append-only task/worker events
+│       ├── task_tree.json                  # Compatibility projection rebuilt from events
 │       ├── checkpoint.json                 # Supervisor Agent memory snapshot
 │       ├── heartbeat.json                  # Supervisor heartbeat (PID, timestamp)
 │       ├── file-history/                   # File edit history backups
 │       └── workers/{worker_name}/
-│           ├── checkpoint.json             # Worker Agent memory snapshot
+│           ├── calls/{call_index}/
+│           │   └── checkpoint.json         # Worker Agent memory snapshot for one call
+│           ├── checkpoint.json             # Legacy worker checkpoint path, still readable
 │           └── heartbeat.json              # Worker heartbeat
 └── 20260413_104837/
     ├── {agent_name}.log
@@ -43,6 +46,9 @@ Checkpoint data is written inside each run's timestamp log directory, co-located
 - Checkpoints always remain in the timestamp directory where they were first created; they are not migrated on resume
 - `.task_index.json` records the `task_id → timestamp` mapping for O(1) lookup during `--resume`
 - If the index is lost, the system automatically scans all timestamp directories as a degraded fallback
+- `task_events.jsonl` is the durable state source. `task_tree.json` is a compatibility projection for older tools and quick inspection
+- Malformed or half-written JSONL event lines are skipped during replay, so a crash-tail line does not make the whole checkpoint unreadable
+- Old checkpoints without `task_events.jsonl` continue to load from legacy `task_tree.json`
 
 ## Configuration
 
@@ -114,6 +120,7 @@ The file history feature automatically creates backups before Agent edits files,
 - **Three-phase lock safety**: Check → I/O → Commit, minimizing lock hold time
 - **Snapshot management**: Up to 100 snapshots retained; oldest are automatically evicted
 - **Null-backup**: Non-existent files get a null backup; on rewind the file is deleted
+- **Immutable original backup**: later snapshots inherit or append versions; they must never overwrite an earlier `@v1` original backup
 
 Storage structure:
 
@@ -124,13 +131,28 @@ Storage structure:
     snapshots.json       # Persisted index
 ```
 
-## Worker Skip Mechanism
+## Worker Resume / Skip Mechanism
 
-In multi-Agent tasks, already-completed Workers are automatically skipped on resume:
+In multi-Agent tasks, Worker calls are checkpointed per call:
 
 1. Worker computes SHA256 hash of input at startup
-2. On completion, result and hash are stored in checkpoint
-3. On resume, hash is checked — if matched, cached result is returned directly
+2. Worker calls are atomically assigned a per-worker `call_index`
+3. During execution, the Worker memory is saved to the per-call checkpoint after each Worker step
+4. On interruption, incomplete Worker calls can be resumed by reusing the same `call_index` and restoring Worker memory with `reset=False`
+5. On completion, result and hash are stored in both `task_events.jsonl` and the per-call Worker checkpoint
+6. On resume, completed calls with the same hash are skipped and the cached result is returned directly
+
+Incomplete Worker call reuse is enabled only during `--resume`; normal concurrent Worker calls still receive unique call indexes.
+
+Worker checkpoint layout:
+
+```
+.logs/{agent_name}/{timestamp}/checkpoints/{task_id}/workers/{worker_name}/
+    calls/{call_index}/checkpoint.json
+    heartbeat.json
+```
+
+The legacy path `workers/{worker_name}/checkpoint.json` is still readable for old checkpoint data.
 
 ## Crash Detection
 

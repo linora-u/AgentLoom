@@ -4,10 +4,11 @@ Checkpoint persistence manager.
 Manages the on-disk checkpoint tree under::
 
     {logging.dir}/{supervisor_name}/{timestamp}/checkpoints/{task_id}/
+        task_events.jsonl
         task_tree.json
         heartbeat.json
         checkpoint.json                          # supervisor
-        workers/{worker_name}/checkpoint.json    # per worker
+        workers/{worker_name}/calls/{call_index}/checkpoint.json
 
 Checkpoint data lives inside the per-run timestamp log directory so that
 all artefacts for a single run (log, checkpoint, file-history) are
@@ -38,6 +39,9 @@ from src.lib.heartbeat.status import (
     detect_crashed_status as _detect_crashed_status,
     detect_worker_call_crashed as _detect_worker_call_crashed,
 )
+from src.lib.logging import get_logger
+
+_logger = get_logger(__name__)
 
 
 # =========================================================================
@@ -126,6 +130,140 @@ def _migrate_task_tree_workers(tree: dict) -> dict:
     return tree
 
 
+def _jsonable(data: Any) -> Any:
+    """Return JSON-roundtrippable data using the same coercion as disk writes."""
+    return json.loads(json.dumps(data, ensure_ascii=False, default=str))
+
+
+def _coerce_call_index(value: Any, default: int = 0) -> int:
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return default
+
+
+def _find_worker_call(calls: list[dict], call_index: int) -> dict | None:
+    for call in calls:
+        if _coerce_call_index(call.get("call_index")) == call_index:
+            return call
+    return None
+
+
+def _sorted_worker_calls(calls: list[dict]) -> list[dict]:
+    return sorted(calls, key=lambda c: _coerce_call_index(c.get("call_index")))
+
+
+def _apply_task_event(tree: dict | None, event: dict, fallback_task_id: str = "") -> dict:
+    """Apply one checkpoint event to a task-tree projection."""
+    event_type = event.get("type")
+    timestamp = event.get("timestamp", "")
+
+    if event_type == "task_tree_replaced":
+        replaced = event.get("tree") or {}
+        if not isinstance(replaced, dict):
+            replaced = {}
+        return _migrate_task_tree_workers(_jsonable(replaced))
+
+    if tree is None:
+        tree = {
+            "task_id": event.get("task_id", fallback_task_id),
+            "agent_name": event.get("supervisor_name", ""),
+            "status": "running",
+            "created_at": timestamp,
+            "workers": {},
+        }
+
+    workers = tree.setdefault("workers", {})
+
+    if event_type == "task_created":
+        tree.update(
+            {
+                "task_id": event.get("task_id", fallback_task_id),
+                "yaml_path": event.get("yaml_path", tree.get("yaml_path", "")),
+                "agent_name": event.get("agent_name", tree.get("agent_name", "")),
+                "task_text": event.get("task_text", tree.get("task_text", "")),
+                "status": event.get("status", tree.get("status", "running")),
+                "created_at": event.get("created_at", timestamp),
+            }
+        )
+        tree.setdefault("workers", workers)
+
+    elif event_type == "task_status_changed":
+        status = event.get("status")
+        if status:
+            tree["status"] = status
+        if event.get("result") is not None:
+            tree["result"] = event.get("result")
+        if event.get("error") is not None:
+            tree["error"] = event.get("error")
+        if status == "interrupted":
+            tree["interrupted_at"] = event.get("interrupted_at", timestamp)
+
+    elif event_type == "worker_call_started":
+        worker_name = event.get("agent_name") or event.get("worker_name")
+        if worker_name:
+            calls = workers.setdefault(worker_name, [])
+            if not isinstance(calls, list):
+                calls = [calls]
+                workers[worker_name] = calls
+            call_index = _coerce_call_index(event.get("call_index"), len(calls))
+            call = _find_worker_call(calls, call_index)
+            if call is None:
+                call = {"call_index": call_index}
+                calls.append(call)
+            call.update(
+                {
+                    "call_index": call_index,
+                    "input_hash": event.get("input_hash", call.get("input_hash", "")),
+                    "agent_name": worker_name,
+                    "status": "running",
+                    "task_input": event.get("task_input", call.get("task_input", "")),
+                    "result": None,
+                    "started_at": event.get("started_at", timestamp),
+                }
+            )
+            workers[worker_name] = _sorted_worker_calls(calls)
+
+    elif event_type == "worker_call_finished":
+        worker_name = event.get("agent_name") or event.get("worker_name")
+        if worker_name:
+            calls = workers.setdefault(worker_name, [])
+            if not isinstance(calls, list):
+                calls = [calls]
+                workers[worker_name] = calls
+            call_index = _coerce_call_index(event.get("call_index"), len(calls))
+            call = _find_worker_call(calls, call_index)
+            if call is None:
+                call = {"call_index": call_index, "agent_name": worker_name}
+                calls.append(call)
+            call["status"] = event.get("status", call.get("status", "unknown"))
+            call["finished_at"] = event.get("finished_at", timestamp)
+            if event.get("input_hash") is not None:
+                call["input_hash"] = event.get("input_hash")
+            if event.get("task_input") is not None:
+                call["task_input"] = event.get("task_input")
+            if event.get("result") is not None:
+                call["result"] = event.get("result")
+            if event.get("error") is not None:
+                call["error"] = event.get("error")
+            workers[worker_name] = _sorted_worker_calls(calls)
+
+    return _migrate_task_tree_workers(tree)
+
+
+def _project_task_tree_from_events(events: list[dict], fallback_task_id: str = "") -> dict | None:
+    if not events:
+        return None
+    tree: dict | None = None
+    for event in events:
+        tree = _apply_task_event(tree, event, fallback_task_id=fallback_task_id)
+    if tree is None:
+        return None
+    tree.setdefault("task_id", fallback_task_id)
+    tree.setdefault("workers", {})
+    return _migrate_task_tree_workers(tree)
+
+
 
 
 
@@ -140,10 +278,11 @@ class CheckpointManager:
     Checkpoint layout (v2 — per-run timestamp directory)::
 
         {base_dir}/{supervisor_name}/{timestamp}/checkpoints/{task_id}/
+            task_events.jsonl
             task_tree.json
             heartbeat.json
             checkpoint.json
-            workers/{worker_name}/checkpoint.json
+            workers/{worker_name}/calls/{call_index}/checkpoint.json
 
     A lightweight index file keeps the ``task_id → timestamp`` mapping::
 
@@ -230,8 +369,21 @@ class CheckpointManager:
     def _worker_ckpt(self, task_id: str, worker_name: str) -> Path:
         return self._task_dir(task_id) / "workers" / worker_name / "checkpoint.json"
 
+    def _worker_call_ckpt(self, task_id: str, worker_name: str, call_index: int) -> Path:
+        return (
+            self._task_dir(task_id)
+            / "workers"
+            / worker_name
+            / "calls"
+            / str(call_index)
+            / "checkpoint.json"
+        )
+
     def _task_tree_path(self, task_id: str) -> Path:
         return self._task_dir(task_id) / "task_tree.json"
+
+    def _task_events_path(self, task_id: str) -> Path:
+        return self._task_dir(task_id) / "task_events.jsonl"
 
     def _heartbeat_path(self, task_id: str) -> Path:
         return self._task_dir(task_id) / "heartbeat.json"
@@ -336,21 +488,115 @@ class CheckpointManager:
         except (json.JSONDecodeError, OSError):
             return None
 
-    # ── task tree ────────────────────────────────────────────────────────
+    @staticmethod
+    def _read_task_events_from_path(path: Path) -> list[dict]:
+        """Read append-only task events, skipping malformed crash-tail lines."""
+        if not path.exists():
+            return []
+        events: list[dict] = []
+        try:
+            for line_no, line in enumerate(path.read_text(encoding="utf-8").splitlines(), start=1):
+                raw = line.strip()
+                if not raw:
+                    continue
+                try:
+                    event = json.loads(raw)
+                except json.JSONDecodeError:
+                    _logger.warning("Skipping malformed checkpoint event %s:%d", path, line_no)
+                    continue
+                if not isinstance(event, dict) or not event.get("type"):
+                    _logger.warning("Skipping invalid checkpoint event %s:%d", path, line_no)
+                    continue
+                events.append(event)
+        except OSError as exc:
+            _logger.warning("Failed reading checkpoint events %s: %s", path, exc)
+        return events
 
-    def save_task_tree(self, task_id: str, tree: dict) -> Path:
-        """Persist the execution-tree metadata (thread-safe)."""
-        with self._tree_lock:
-            p = self._task_tree_path(task_id)
-            self._atomic_write(p, tree)
-            return p
+    def _append_task_event_unlocked(self, task_id: str, event: dict) -> None:
+        """Append one event. Caller must hold ``_tree_lock``."""
+        event = _jsonable(event)
+        event.setdefault("timestamp", datetime.now().astimezone().isoformat())
+        path = self._task_events_path(task_id)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        needs_leading_newline = False
+        try:
+            if path.exists() and path.stat().st_size > 0:
+                with path.open("rb") as existing:
+                    existing.seek(-1, os.SEEK_END)
+                    needs_leading_newline = existing.read(1) != b"\n"
+        except OSError:
+            needs_leading_newline = False
+        with path.open("ab") as f:
+            if needs_leading_newline:
+                f.write(b"\n")
+            f.write(json.dumps(event, ensure_ascii=False, default=str).encode("utf-8"))
+            f.write(b"\n")
+            f.flush()
+            os.fsync(f.fileno())
 
-    def load_task_tree(self, task_id: str) -> dict | None:
-        with self._tree_lock:
-            tree = self._read_json(self._task_tree_path(task_id))
+    def _load_task_tree_unlocked(self, task_id: str) -> dict | None:
+        """Load task tree projection. Caller must hold ``_tree_lock``."""
+        event_tree = _project_task_tree_from_events(
+            self._read_task_events_from_path(self._task_events_path(task_id)),
+            fallback_task_id=task_id,
+        )
+        if event_tree is not None:
+            return event_tree
+
+        tree = self._read_json(self._task_tree_path(task_id))
         if tree is not None:
             tree = _migrate_task_tree_workers(tree)
         return tree
+
+    def _load_task_tree_from_dir(self, task_dir: Path) -> dict | None:
+        event_tree = _project_task_tree_from_events(
+            self._read_task_events_from_path(task_dir / "task_events.jsonl"),
+            fallback_task_id=task_dir.name,
+        )
+        if event_tree is not None:
+            return event_tree
+
+        tree = self._read_json(task_dir / "task_tree.json")
+        if tree is not None:
+            tree = _migrate_task_tree_workers(tree)
+        return tree
+
+    def _write_task_tree_projection_unlocked(self, task_id: str, tree: dict) -> Path:
+        """Persist the compatibility projection. Caller must hold ``_tree_lock``."""
+        p = self._task_tree_path(task_id)
+        self._atomic_write(p, _migrate_task_tree_workers(_jsonable(tree)))
+        return p
+
+    def _append_event_and_refresh_projection_unlocked(self, task_id: str, event: dict) -> dict:
+        """Append an event and refresh ``task_tree.json`` from the event log."""
+        self._append_task_event_unlocked(task_id, event)
+        tree = _project_task_tree_from_events(
+            self._read_task_events_from_path(self._task_events_path(task_id)),
+            fallback_task_id=task_id,
+        ) or {}
+        self._write_task_tree_projection_unlocked(task_id, tree)
+        return tree
+
+    # ── task tree ────────────────────────────────────────────────────────
+
+    def save_task_tree(self, task_id: str, tree: dict) -> Path:
+        """Persist the execution-tree metadata (thread-safe).
+
+        New code treats ``task_events.jsonl`` as the source of truth and this
+        method as a compatibility escape hatch: it appends a full replacement
+        event, then writes the legacy ``task_tree.json`` projection.
+        """
+        with self._tree_lock:
+            event = {
+                "type": "task_tree_replaced",
+                "tree": _migrate_task_tree_workers(_jsonable(tree)),
+            }
+            self._append_event_and_refresh_projection_unlocked(task_id, event)
+            return self._task_tree_path(task_id)
+
+    def load_task_tree(self, task_id: str) -> dict | None:
+        with self._tree_lock:
+            return self._load_task_tree_unlocked(task_id)
 
     def update_task_tree(self, task_id: str, updater) -> dict:
         """Atomically read-modify-write the task tree (thread-safe).
@@ -365,13 +611,135 @@ class CheckpointManager:
             The updated tree dict.
         """
         with self._tree_lock:
-            tree = self._read_json(self._task_tree_path(task_id)) or {}
-            if tree:
-                tree = _migrate_task_tree_workers(tree)
+            tree = self._load_task_tree_unlocked(task_id) or {}
             updated = updater(tree)
-            p = self._task_tree_path(task_id)
-            self._atomic_write(p, updated)
+            updated = _migrate_task_tree_workers(_jsonable(updated))
+            self._append_event_and_refresh_projection_unlocked(
+                task_id,
+                {"type": "task_tree_replaced", "tree": updated},
+            )
             return updated
+
+    def record_task_created(
+        self,
+        task_id: str,
+        *,
+        yaml_path: str,
+        agent_name: str,
+        task_text: str,
+        created_at: str,
+    ) -> dict:
+        """Append a task creation event and refresh the task-tree projection."""
+        with self._tree_lock:
+            return self._append_event_and_refresh_projection_unlocked(
+                task_id,
+                {
+                    "type": "task_created",
+                    "task_id": task_id,
+                    "yaml_path": yaml_path,
+                    "agent_name": agent_name,
+                    "task_text": task_text,
+                    "created_at": created_at,
+                },
+            )
+
+    def record_task_status_changed(
+        self,
+        task_id: str,
+        status: str,
+        *,
+        result: str | None = None,
+        error: str | None = None,
+    ) -> dict:
+        """Append a task status event and refresh the projection."""
+        event: dict[str, Any] = {
+            "type": "task_status_changed",
+            "status": status,
+        }
+        if result is not None:
+            event["result"] = result
+        if error is not None:
+            event["error"] = error
+        if status == "interrupted":
+            event["interrupted_at"] = datetime.now().astimezone().isoformat()
+        with self._tree_lock:
+            return self._append_event_and_refresh_projection_unlocked(task_id, event)
+
+    def record_worker_started(
+        self,
+        task_id: str,
+        worker_name: str,
+        *,
+        input_hash: str,
+        task_input: str,
+        reuse_incomplete: bool = False,
+    ) -> int:
+        """Atomically allocate and record a worker call index."""
+        with self._tree_lock:
+            tree = self._load_task_tree_unlocked(task_id) or {
+                "task_id": task_id,
+                "agent_name": self._supervisor_name,
+                "status": "running",
+                "workers": {},
+            }
+            workers = tree.setdefault("workers", {})
+            calls = workers.setdefault(worker_name, [])
+            if not isinstance(calls, list):
+                calls = [calls]
+                workers[worker_name] = calls
+            if reuse_incomplete:
+                reusable_statuses = {"running", "interrupted", "crashed"}
+                for call in calls:
+                    if (
+                        call.get("input_hash") == input_hash
+                        and call.get("status") in reusable_statuses
+                    ):
+                        return _coerce_call_index(call.get("call_index"), 0)
+            existing = [_coerce_call_index(c.get("call_index"), -1) for c in calls]
+            call_index = (max(existing) + 1) if existing else 0
+            self._append_event_and_refresh_projection_unlocked(
+                task_id,
+                {
+                    "type": "worker_call_started",
+                    "agent_name": worker_name,
+                    "call_index": call_index,
+                    "input_hash": input_hash,
+                    "task_input": str(task_input),
+                    "started_at": datetime.now().astimezone().isoformat(),
+                },
+            )
+            return call_index
+
+    def record_worker_finished(
+        self,
+        task_id: str,
+        worker_name: str,
+        *,
+        call_index: int,
+        status: str,
+        input_hash: str = "",
+        task_input: str = "",
+        result: str | None = None,
+        error: str | None = None,
+    ) -> dict:
+        """Record terminal state for one worker call."""
+        event: dict[str, Any] = {
+            "type": "worker_call_finished",
+            "agent_name": worker_name,
+            "call_index": call_index,
+            "status": status,
+            "finished_at": datetime.now().astimezone().isoformat(),
+        }
+        if input_hash:
+            event["input_hash"] = input_hash
+        if task_input:
+            event["task_input"] = str(task_input)
+        if result is not None:
+            event["result"] = result
+        if error is not None:
+            event["error"] = error
+        with self._tree_lock:
+            return self._append_event_and_refresh_projection_unlocked(task_id, event)
 
     # ── supervisor checkpoint ────────────────────────────────────────────
 
@@ -442,11 +810,60 @@ class CheckpointManager:
             data["result"] = result
         if error is not None:
             data["error"] = error
-        p = self._worker_ckpt(task_id, worker_name)
+        p = self._worker_call_ckpt(task_id, worker_name, call_index)
         self._atomic_write(p, data)
         return p
 
-    def load_worker_checkpoint(self, task_id: str, worker_name: str) -> dict | None:
+    def load_worker_checkpoint(
+        self,
+        task_id: str,
+        worker_name: str,
+        call_index: int | None = None,
+    ) -> dict | None:
+        """Load a worker checkpoint.
+
+        New checkpoints are stored per call under
+        ``workers/{worker_name}/calls/{call_index}/checkpoint.json``.  When
+        *call_index* is omitted, the latest call for the worker is returned.
+        The legacy single-file layout remains readable for old checkpoints.
+        """
+        if call_index is not None:
+            data = self._read_json(self._worker_call_ckpt(task_id, worker_name, call_index))
+            if data is not None:
+                return data
+            if call_index == 0:
+                return self._read_json(self._worker_ckpt(task_id, worker_name))
+            return None
+
+        latest_index: int | None = None
+        try:
+            tree = self.load_task_tree(task_id) or {}
+            calls = tree.get("workers", {}).get(worker_name, [])
+            if isinstance(calls, dict):
+                calls = [calls]
+            if isinstance(calls, list) and calls:
+                latest_index = max(_coerce_call_index(c.get("call_index"), -1) for c in calls)
+                if latest_index < 0:
+                    latest_index = None
+        except Exception:
+            latest_index = None
+
+        if latest_index is None:
+            calls_dir = self._task_dir(task_id) / "workers" / worker_name / "calls"
+            if calls_dir.is_dir():
+                indexes = [
+                    _coerce_call_index(child.name, -1)
+                    for child in calls_dir.iterdir()
+                    if child.is_dir()
+                ]
+                indexes = [idx for idx in indexes if idx >= 0]
+                latest_index = max(indexes) if indexes else None
+
+        if latest_index is not None:
+            data = self._read_json(self._worker_call_ckpt(task_id, worker_name, latest_index))
+            if data is not None:
+                return data
+
         return self._read_json(self._worker_ckpt(task_id, worker_name))
 
     # ── listing / enumeration ────────────────────────────────────────────
@@ -491,7 +908,7 @@ class CheckpointManager:
         for task_dir in all_task_dirs:
             if not task_dir.is_dir():
                 continue
-            tree = self._read_json(task_dir / "task_tree.json")
+            tree = self._load_task_tree_from_dir(task_dir)
             if tree:
                 entry = {
                     "task_id": tree.get("task_id", task_dir.name),

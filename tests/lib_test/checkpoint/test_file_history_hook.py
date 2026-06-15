@@ -17,6 +17,7 @@ from src.lib.checkpoint.file_history_hook import (
     FILE_MODIFYING_TOOLS,
     FileHistoryHook,
 )
+from src.lib.smolagents.hooks.types import HookContext
 
 
 @pytest.fixture
@@ -140,6 +141,22 @@ class TestFileHistoryHook:
             tool_input={"file_path": "/tmp/test.py"},
         )
         mock_fh.track_edit.assert_called_once_with("/tmp/test.py", 5)
+
+    def test_step_number_from_hook_context(self, mock_fh):
+        """Normal: HookManager context step number is used by default."""
+        hook = FileHistoryHook(mock_fh)
+        context = HookContext(
+            session_id="session",
+            cwd="/tmp",
+            hook_event_name="PreToolUse",
+            tool_name="edit_file",
+            tool_input={"file_path": "/tmp/test.py"},
+            step_number=7,
+        )
+
+        hook(context)
+
+        mock_fh.track_edit.assert_called_once_with("/tmp/test.py", 7)
 
     def test_all_file_modifying_tools_recognized(self, mock_fh):
         """Verify all tools in FILE_MODIFYING_TOOLS trigger backup."""

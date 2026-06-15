@@ -89,6 +89,7 @@ class FileHistoryManager:
         self._lock = threading.Lock()
         self._snapshots: list[FileHistorySnapshot] = []
         self._tracked_files: set[str] = set()
+        self._first_backups: dict[str, FileHistoryBackup] = {}
 
     # ------------------------------------------------------------------
     # Public API
@@ -115,7 +116,10 @@ class FileHistoryManager:
 
         # Phase 2: expensive I/O outside the lock.
         try:
-            backup = self._create_backup(abs_path, version=1)
+            with self._lock:
+                previous = self._latest_backup_for_path(abs_path, exclude_step=step_number)
+                next_version = (previous.version + 1) if previous else 1
+            backup = self._create_backup(abs_path, version=next_version)
         except Exception as exc:
             _logger.warning("FileHistory: backup failed for %s: %s", abs_path, exc)
             return
@@ -126,6 +130,8 @@ class FileHistoryManager:
             if abs_path not in current.tracked_file_backups:
                 current.tracked_file_backups[abs_path] = backup
                 self._tracked_files.add(abs_path)
+                self._first_backups.setdefault(abs_path, backup)
+        self._persist_index()
 
     def make_post_step_snapshot(self, step_number: int) -> None:
         """Create a post-step snapshot for all tracked files.
@@ -145,7 +151,11 @@ class FileHistoryManager:
         new_backups: dict[str, FileHistoryBackup] = {}
         for abs_path in list(self._tracked_files):
             try:
-                prev_backup = current.tracked_file_backups.get(abs_path)
+                with self._lock:
+                    current = self._get_or_create_snapshot(step_number)
+                    prev_backup = current.tracked_file_backups.get(abs_path)
+                    if prev_backup is None:
+                        prev_backup = self._latest_backup_for_path(abs_path, exclude_step=step_number)
                 next_version = (prev_backup.version + 1) if prev_backup else 1
 
                 if not os.path.exists(abs_path):
@@ -205,8 +215,16 @@ class FileHistoryManager:
                     f"No snapshot for step_number={step_number}. "
                     f"Available: {[s.step_number for s in self._snapshots]}"
                 )
-            # Shallow copy so mutations don't affect state.
-            backups = dict(target.tracked_file_backups)
+            # Shallow copy so mutations don't affect state. Include files first
+            # tracked after the target step: their first backup represents the
+            # target-time state, and null-backups mean "delete on rewind".
+            backups = {}
+            for abs_path in self._tracked_files:
+                backup = target.tracked_file_backups.get(abs_path)
+                if backup is None:
+                    backup = self._first_backup_for_path(abs_path)
+                if backup is not None:
+                    backups[abs_path] = backup
 
         restored: list[str] = []
         for abs_path, backup in backups.items():
@@ -240,6 +258,14 @@ class FileHistoryManager:
         with self._lock:
             self._snapshots = []
             self._tracked_files = set()
+            self._first_backups = {}
+            for path, bk in data.get("first_tracked_backups", {}).items():
+                self._first_backups[path] = FileHistoryBackup(
+                    backup_filename=bk.get("backup_filename"),
+                    version=bk.get("version", 1),
+                    backup_time=bk.get("backup_time", 0.0),
+                )
+                self._tracked_files.add(path)
             for snap_data in data.get("snapshots", []):
                 backups = {}
                 for path, bk in snap_data.get("tracked_file_backups", {}).items():
@@ -249,6 +275,7 @@ class FileHistoryManager:
                         backup_time=bk.get("backup_time", 0.0),
                     )
                     self._tracked_files.add(path)
+                    self._first_backups.setdefault(path, backups[path])
                 self._snapshots.append(FileHistorySnapshot(
                     step_number=snap_data.get("step_number", 0),
                     tracked_file_backups=backups,
@@ -282,6 +309,38 @@ class FileHistoryManager:
         new_snap = FileHistorySnapshot(step_number=step_number)
         self._snapshots.append(new_snap)
         return new_snap
+
+    def _latest_backup_for_path(
+        self,
+        abs_path: str,
+        *,
+        exclude_step: int | None = None,
+    ) -> FileHistoryBackup | None:
+        """Return the newest backup for a file.
+
+        Must be called under ``self._lock``.
+        """
+        for snap in reversed(self._snapshots):
+            if exclude_step is not None and snap.step_number == exclude_step:
+                continue
+            backup = snap.tracked_file_backups.get(abs_path)
+            if backup is not None:
+                return backup
+        return None
+
+    def _first_backup_for_path(self, abs_path: str) -> FileHistoryBackup | None:
+        """Return the oldest backup for a file.
+
+        Must be called under ``self._lock``.
+        """
+        first = self._first_backups.get(abs_path)
+        if first is not None:
+            return first
+        for snap in self._snapshots:
+            backup = snap.tracked_file_backups.get(abs_path)
+            if backup is not None:
+                return backup
+        return None
 
     def _create_backup(self, file_path: str, version: int) -> FileHistoryBackup:
         """Copy *file_path* into the backup directory.
@@ -338,6 +397,14 @@ class FileHistoryManager:
         index_path = self._backup_dir / "snapshots.json"
         with self._lock:
             data = {
+                "first_tracked_backups": {
+                    path: {
+                        "backup_filename": bk.backup_filename,
+                        "version": bk.version,
+                        "backup_time": bk.backup_time,
+                    }
+                    for path, bk in self._first_backups.items()
+                },
                 "snapshots": [
                     {
                         "step_number": s.step_number,
