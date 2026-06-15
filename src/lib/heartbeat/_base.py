@@ -38,6 +38,7 @@ class BaseHeartbeatWriter:
         self._stop_event = threading.Event()
         self._thread: threading.Thread | None = None
         self._registered_atexit = False
+        self._write_lock = threading.Lock()
 
     # ── public API ───────────────────────────────────────────────────
 
@@ -59,12 +60,12 @@ class BaseHeartbeatWriter:
 
     def stop(self) -> None:
         """Stop the heartbeat thread and write a final beat."""
-        self._on_stopping()
-        self._write_once()
         self._stop_event.set()
         if self._thread is not None:
             self._thread.join(timeout=2.0)
             self._thread = None
+        self._on_stopping()
+        self._write_once()
 
     @property
     def path(self) -> Path:
@@ -91,10 +92,11 @@ class BaseHeartbeatWriter:
 
     def _write_once(self) -> None:
         try:
-            data = self._build_payload()
-            self._path.parent.mkdir(parents=True, exist_ok=True)
-            tmp = self._path.with_suffix(".tmp")
-            tmp.write_text(json.dumps(data, indent=2), encoding="utf-8")
-            tmp.replace(self._path)
+            with self._write_lock:
+                data = self._build_payload()
+                self._path.parent.mkdir(parents=True, exist_ok=True)
+                tmp = self._path.with_suffix(".tmp")
+                tmp.write_text(json.dumps(data, indent=2), encoding="utf-8")
+                tmp.replace(self._path)
         except Exception:
             pass  # heartbeat must never crash the host process
