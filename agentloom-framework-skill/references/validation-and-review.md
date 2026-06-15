@@ -2,6 +2,16 @@
 
 ## 必跑校验
 
+先做环境前置检查：
+
+```bash
+pwd
+test -f config/llm.yaml
+git check-ignore -v config/llm.yaml || true
+```
+
+`config/llm.yaml` 通常是本机私有配置，缺失时先从同机可信工作区复制或让用户提供；不要凭空生成，也不要提交。
+
 ```bash
 .venv/bin/python agentloom-framework-skill/scripts/validate_application_yaml.py \
   --app-root applications/<app_name>
@@ -25,6 +35,7 @@ print(scan_app_structure('applications/<app_name>'))
 - 每个 Worker 是否有 `agent_function_schema`。
 - `tools` 是否与 workflow 动作匹配。
 - `model_type`、`tool_call_type`、`max_steps` 是否合理。
+- Agent YAML 是否误写 LLM 参数、无效 `planning_interval`/`concurrency`、错误 `prompt`、错误 `fixed_args`、错误 `mcp_servers`。
 
 ```bash
 .venv/bin/python -m py_compile applications/<app_name>/<app_name>_app.py
@@ -79,6 +90,29 @@ PYTHONPATH=/Users/bytedance/code/data_clear/AgentLoom-checkpoint \
 它会运行 `applications/test_demo/workflows/test_checkpoint_complex_supervisor.yaml`，分别制造 Supervisor 中断和 Worker 中断，并检查最终文件、task event、worker call 复用和 Worker memory restore。
 
 如果真实模型调用因权限、额度或超时失败，不能标为通过；记录失败命令、错误文本、已产生的 checkpoint 证据，以及还缺哪条功能路径。
+
+## 配置合同交叉验证
+
+修改 `agentloom-framework-skill`、配置文档或 runtime 配置语义时，必须同时查文档与代码。不要只根据 `docs/en` 改 skill，因为文档可能落后于实现。
+
+最小检查：
+
+```bash
+rg -n "_WORKFLOW_OVERLAY_KEYS|_LLM_ONLY_TOP_LEVEL_KEYS|extract_workflow_overlay" src/lib/config/config.py
+rg -n "class RootSettings|class ToolAccessControlSettings|class LlmModelTypeSettings|extra_completion_params|supports_structured_output" src/lib/config src/lib/smolagents/models
+rg -n "load-mode|allow-scripts|allow-network|Duplicate skill name|hooks:" src/lib/smolagents/skills src/lib/smolagents/hooks docs/en agentloom-framework-skill
+rg -n "mcp_servers|parse_mcp_servers_yaml_value" src tests docs/en agentloom-framework-skill
+```
+
+需要核对的事实：
+
+- Agent YAML 白名单字段是否与 `_WORKFLOW_OVERLAY_KEYS` 一致。
+- `model` / `llm` / `langfuse` 是否仍被 `_LLM_ONLY_TOP_LEVEL_KEYS` 过滤。
+- `RootSettings`、`LLMConfig`、`LlmModelTypeSettings` 是否新增可配置字段。
+- `skills` 的格式、默认值、同名处理、hook 注册时机是否与 `SkillsManager` 一致。
+- `hooks` 是否仍只通过 Skill frontmatter 接入 Agent 初始化。
+- `mcp_servers` 的 string/list/dict 三种形式是否仍被 parser 支持。
+- `docs/en/config-overview.md`、`agent_config.md`、`system_config.md` 如果和代码冲突，最终 skill 先写代码真相，并在交付里说明文档漂移。
 
 ## 多 Agent 验证
 

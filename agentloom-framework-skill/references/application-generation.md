@@ -19,7 +19,9 @@ applications/<app_name>/
         └── <worker>.yaml
 ```
 
-`workflows/` 是 Application 标识；`agent_tools/` 只在需要确定性工具时创建；`skills/` 只在需要应用私有 Skill 时创建；`config/` 只在需要应用级配置时创建，例如把 GitHub skill 目标或其他验证参数放在 `config/system.yaml`。
+`workflows/` 是 Application 标识；`agent_tools/` 只在需要确定性工具时创建；`skills/` 只在需要应用私有 Skill 或 Hook 时创建；`config/` 只在需要应用级系统配置时创建，例如关闭全局 skills、限制 shell、增加 path allowlist、配置默认工具、注册 MCP 或设置应用级 prompt。
+
+不要在 Application 目录里新建 `llm.yaml`。模型路由、密钥、温度、重试、限流等只写全局本地 `config/llm.yaml`，Agent 通过 `model_type` 选择。
 
 ## 文件生成顺序
 
@@ -31,7 +33,7 @@ applications/<app_name>/
 6. `<app_name>_app.py`（可选；只有需要自定义 CLI 参数、预处理/后处理、批处理或 `task_override` 时创建）
 7. `README.md`
 
-没有对应需求时不要创建空目录。应用专属的 skill 和 skill 运行目标应放在 Application 下面，不要放到全局 `skills/` 或额外的孤立配置文件里。
+没有对应需求时不要创建空目录。应用专属的 skill、hook 和 skill 运行目标应放在 Application 下面，不要放到全局 `skills/` 或额外的孤立配置文件里。
 
 ## 入口脚本模板
 
@@ -93,6 +95,27 @@ if __name__ == "__main__":
 - Agent YAML 只配置要注册的 skill 路径和加载策略；不要在 YAML 里维护 source、commit、hash、license 这类审计元数据。
 - 第三方脚本默认允许执行；只有用户明确要求限制时，才配置 `allow-scripts: false` 或 `allow-network: false`。
 - 如果某个 skill 只服务当前 Application，放在 `applications/<app_name>/skills/`；确实跨应用复用时，再考虑全局 runtime skill。
+- 如果需要 Hook，把 `hooks:` 写在应用私有 Skill 的 frontmatter，并通过 `skills:` 注册该 Skill；不要把 `hooks:` 直接写进 Agent YAML。
+
+## 应用级 config/system.yaml 原则
+
+只有需要覆盖当前 Application 的系统行为时才创建：
+
+```yaml
+skills: []                 # 关闭全局 skill 列表和 AGENT_ROOT/skills 自动发现
+default_loaded_tools: []   # 纯规划 Agent 可显式关闭默认工具
+tool_access_control:
+  path_validation:
+    - tools: ["read_file", "grep_search", "shell_tool"]
+      include_paths: ["/absolute/allowed/path"]
+shell_settings:
+  allowed_commands: "*"
+  allowed_operators: "*"
+mcp_servers:
+  path: "applications/<app_name>/config/.mcp.json"
+```
+
+列表是整体替换，不是追加；写 `default_loaded_tools`、`skills` 这类列表时要表达完整意图。完整配置面见 `configuration-surface.md`。
 
 ## README 必写内容
 

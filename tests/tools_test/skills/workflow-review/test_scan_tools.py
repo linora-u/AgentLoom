@@ -1444,5 +1444,6 @@ class TestSkillContractText:
     def test_skill_mentions_agent_loom_root_precondition(self):
         skill_path = _AGENT_LOOM_ROOT / "agentloom-framework-skill" / "SKILL.md"
         content = skill_path.read_text(encoding="utf-8")
+        assert 'pyproject.toml` 中 `[project].name == "AgentLoom"' in content
         assert "config/llm.yaml" in content
-        assert "不要用 `config/system.yaml`" in content
+        assert "不要只用 `config/system.yaml` 判定环境可用" in content
