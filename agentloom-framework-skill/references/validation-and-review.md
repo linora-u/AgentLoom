@@ -91,6 +91,44 @@ PYTHONPATH=/Users/bytedance/code/data_clear/AgentLoom-checkpoint \
 
 如果真实模型调用因权限、额度或超时失败，不能标为通过；记录失败命令、错误文本、已产生的 checkpoint 证据，以及还缺哪条功能路径。
 
+## Shell 安全与审计验证
+
+修改 shell 权限、审计、sandbox、路径安全、后台任务或 stall 检测时，不能只跑单测。按 `shell-security-audit.md` 先确认 audit log 能记录有效策略，再用真实 Application 验证该允许的允许、该拒绝的拒绝。
+
+建议使用隔离 runtime：
+
+```bash
+export AGENT_LOOM_RUNTIME_ROOT=/tmp/agentloom-runtime-shell-security
+```
+
+核心真实 LLM 验证：
+
+```bash
+.venv/bin/loom run applications/test_shell_audit/workflows/test_shell_policy_snapshot_agent.yaml --log-to-file
+.venv/bin/loom run applications/test_shell_audit/workflows/test_shell_audit_log_agent.yaml --log-to-file
+.venv/bin/loom run applications/test_shell_audit/workflows/test_shell_audit_signals_agent.yaml --log-to-file
+.venv/bin/loom run applications/test_shell_allowlist_matrix/workflows/test_shell_allowlist_matrix_agent.yaml --log-to-file
+```
+
+补充验证：
+
+```bash
+.venv/bin/loom run applications/test_demo/workflows/test_security_transparency_agent.yaml --log-to-file
+.venv/bin/loom run applications/test_demo/workflows/test_background_task_agent.yaml --log-to-file
+.venv/bin/loom run applications/test_demo/workflows/test_shell_stall_detection_agent.yaml --log-to-file
+.venv/bin/loom run applications/test_demo/workflows/test_shell_session_isolation_supervisor.yaml --log-to-file
+```
+
+通过标准：
+
+- LLM final 不能只写 PASS，必须列出实际 `shell_audit.log` 路径和关键证据行。
+- agent log 与 shell audit log 父目录一致。
+- 全允许场景必须有 `[POLICY_SNAPSHOT]`，且记录 `allowed_commands: *` / `allowed_operators: *`。
+- 白名单场景必须证明允许命令成功、未允许命令被拒绝、未允许操作符被拒绝。
+- `;` 等操作符拒绝的 suggestion 必须指向 `allowed_operators`，不得建议放进 `allowed_commands`。
+- timeout/stall/background 场景结束后检查无 `sleep 300` 等残留进程。
+- sandbox 不可用时记录真实 unavailable reason，不伪造 sandbox PASS。
+
 ## 配置合同交叉验证
 
 修改 `agentloom-framework-skill`、配置文档或 runtime 配置语义时，必须同时查文档与代码。不要只根据 `docs/en` 改 skill，因为文档可能落后于实现。
