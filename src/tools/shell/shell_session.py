@@ -78,7 +78,7 @@ class ShellSession:
 
     @property
     def cwd_file(self) -> str:
-        """Path to the temp file where ``pwd -P`` output is written."""
+        """Path to the temp file where logical ``pwd`` output is written."""
         return os.path.join(self._ensure_state_dir(), "cwd.txt")
 
     # ------------------------------------------------------------------

@@ -78,7 +78,8 @@ def _create_tool_with_mock_agent(config=None, agent_instances=None):
         def process_tool_query(self, query):
             return query
 
-        def run(self, formatted_query):
+        def run(self, formatted_query, additional_args=None):
+            self.additional_args = additional_args
             return f"result_from_{self._id}"
 
         def agent_as_tool(self):
@@ -126,6 +127,16 @@ class TestFactoryMode:
         call_agents = instances[1:]
         # Both should reference the same model
         assert call_agents[0]._model is call_agents[1]._model
+
+    def test_tool_inputs_are_passed_as_additional_args(self):
+        """Schema inputs should become executor state, not just prompt text."""
+        instances = []
+        tool, _, _ = _create_tool_with_mock_agent(agent_instances=instances)
+
+        tool(query="payload")
+
+        call_agent = instances[1]
+        assert call_agent.additional_args == {"query": "payload"}
 
     def test_concurrent_calls_no_memory_crosstalk(self):
         """Concurrent calls should each get their own Agent (no shared state)."""
@@ -183,7 +194,7 @@ class TestFactoryMode:
             def process_tool_query(self, q):
                 return q
 
-            def run(self, q):
+            def run(self, q, additional_args=None):
                 with lock:
                     call_count["n"] += 1
                     n = call_count["n"]

@@ -189,7 +189,6 @@ Except for `default_model_type`, **all dict-valued keys under the `model` block 
 | `context_cache` | `bool` | `false` | ❌ No | Universal Prompt cache optimization. When `true`, the framework injects `cache_control: {"type": "ephemeral"}` for **ALL models** universally. litellm handles per-provider behavior automatically (Anthropic preserves, OpenAI strips, Vertex AI converts to Gemini format) |
 | `system_prompt_boundary` | `str` \| `null` | `null` | ❌ No | System prompt split marker. When set, the system prompt is split into **static (cached)** + **dynamic (uncached)** segments at this marker, improving cache hit rates. Example: `"<!-- DYNAMIC_BOUNDARY -->"` |
 | `requests_per_minute` | `int` | `60` | ❌ No | Rate limit for this model type |
-| `supports_native_tool_calls` | `str` | `"auto"` | ❌ No | Native tool_calls capability flag. Tri-state: `"auto"` auto-detects on first call, `"true"` always uses native path, `"false"` always uses text parsing fallback. See [3.6 supports_native_tool_calls Behavior](#36-supports_native_tool_calls-behavior) |
 
 ### 3.2 temperature Configuration Recommendations
 
@@ -266,41 +265,17 @@ The framework automatically detects changes that may invalidate the cache, loggi
 
 This detection is diagnostic only and does not block requests.
 
-### 3.6 supports_native_tool_calls Behavior
+### 3.6 Tool Call Behavior
 
-`supports_native_tool_calls` controls how an Agent in tool_call mode handles LLM tool call output:
+In `tool_call` mode, AgentLoom sends structured tool schemas whenever tools are available. `tool_choice` is passed through as a normal provider/smolagents request parameter and is not used as a capability detection switch.
 
-| Value | Behavior |
-|-------|----------|
-| `"auto"` (default) | On the first API call, attempts the native path and checks whether the response contains `tool_calls`. If yes, subsequent calls use the native path directly; if no, subsequent calls use the multi-strategy text parsing fallback. Detection result is cached on the model instance and not repeated within the same session |
-| `"true"` | Skip detection, always assume the model returns native `tool_calls`. Suitable for models known to support native tool calling (e.g., OpenAI GPT-4o, Anthropic Claude) |
-| `"false"` | Skip detection, always use multi-strategy text parsing. Suitable for models known not to return native `tool_calls` (e.g., non-Anthropic models connected via Anthropic-compatible endpoints) |
+Native provider `tool_calls` are the primary path. If a provider returns a structured text block instead of native `tool_calls`, AgentLoom only accepts explicit tool-call containers:
 
-#### Multi-Strategy Text Parsing
+1. Standard JSON objects such as `{"name": "...", "arguments": {...}}`
+2. Provider-dumped native `tool_calls` / `function` structures
+3. Explicit XML or invoke wrappers
 
-When the model does not return native `tool_calls`, the framework's built-in multi-strategy parsing chain handles text-based tool calls, trying approaches in priority order:
-
-1. **JSON** — Standard JSON format
-2. **XML/bracket** — XML-wrapped formats (e.g., `<minimax:tool_call>[...]</minimax:tool_call>`), auto-delegating to nested parsing
-3. **Regex** — Regular expression extraction
-4. **Structural extraction** — Bracket-depth based parsing, handles large text with apostrophes or special characters
-
-The parser uses a generic design not tied to any specific model vendor — regardless of XML namespace prefix or tag format the model outputs, it is automatically recognized. The first successful strategy returns the result; only when all fail does it report an error (using the smolagents native error feedback retry flow).
-
-**Configuration example**:
-
-```yaml
-# Model known not to support native tool_calls
-powerful:
-  model: "anthropic/MiniMax-M2.7"
-  base_url: "https://api.minimaxi.com/anthropic"
-  supports_native_tool_calls: "false"   # Skip detection, use multi-strategy parsing
-
-# Model supporting native tool_calls
-fast:
-  model: "openai/gpt-4o"
-  supports_native_tool_calls: "true"    # Skip detection, use native path directly
-```
+The parser does not guess from prose such as “Calling tool X with args...”. It repairs only the argument JSON string payload, limited to raw control characters and invalid backslashes inside JSON string literals. Unknown tools, ambiguous multiple text candidates, prose/free-text, and incomplete JSON fail loudly so the agent can retry with a clear error observation or surface the provider issue.
 
 ### 3.7 Custom Model Types
 
