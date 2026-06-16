@@ -28,8 +28,8 @@ def session_shell():
     proc.cleanup()
 
 
-def _real(path: str) -> str:
-    return os.path.realpath(path)
+def _logical(path: str) -> str:
+    return os.path.normpath(path)
 
 
 # ---------------------------------------------------------------------------
@@ -51,25 +51,25 @@ class TestCwdTrackingSessionScoped:
         assert os.path.isdir(session_shell.cwd)
 
     def test_cd_updates_cwd(self, session_shell):
-        """cd /tmp updates cwd to the physical /tmp location."""
+        """cd /tmp updates cwd to the shell-facing logical path."""
         session_shell.run("cd /tmp")
-        assert session_shell.cwd == _real("/tmp")
+        assert session_shell.cwd == _logical("/tmp")
 
     def test_multiple_cd_tracks_last(self, session_shell):
         """Multiple cd commands -- cwd follows the last one."""
         session_shell.run("cd /tmp")
-        assert session_shell.cwd == _real("/tmp")
+        assert session_shell.cwd == _logical("/tmp")
         session_shell.run("cd /var")
-        assert session_shell.cwd == _real("/var")
+        assert session_shell.cwd == _logical("/var")
         session_shell.run("cd /usr")
-        assert session_shell.cwd == _real("/usr")
+        assert session_shell.cwd == _logical("/usr")
 
     def test_cd_nonexistent_keeps_previous(self, session_shell):
         """cd to non-existent directory does not change cwd."""
         session_shell.run("cd /tmp")
-        assert session_shell.cwd == _real("/tmp")
+        assert session_shell.cwd == _logical("/tmp")
         session_shell.run("cd /nonexistent_dir_xyz 2>/dev/null || true")
-        assert session_shell.cwd == _real("/tmp")  # Unchanged
+        assert session_shell.cwd == _logical("/tmp")  # Unchanged
 
     def test_tracking_invisible_in_output(self, session_shell):
         """CWD tracking data (file paths, pwd output) never appears in user output."""
