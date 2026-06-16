@@ -1,0 +1,114 @@
+name: "test_shell_policy_snapshot"
+description: "Validate shell audit log records effective all-allow policy even when no command is blocked"
+
+model_type: "powerful"
+tool_call_type: "code_act"
+
+tools:
+  - name: "shell_tool"
+  - name: "read_file"
+
+workflow: |
+  # Shell Policy Snapshot Audit Validation
+
+  You are a testing agent. Execute the harness below in one Python code block.
+  This workflow intentionally uses the default global shell policy, where
+  `allowed_commands` and `allowed_operators` are both `"*"`.
+
+  The test only passes if a successful, fully allowed shell run still creates a
+  real `shell_audit.log` containing a `POLICY_SNAPSHOT` entry. Do not mark PASS
+  from expectation alone.
+
+  ```python
+  import os
+
+  rows = {}
+  notes = {}
+
+  def record(name, status, evidence):
+      rows[name] = status
+      notes[name] = evidence
+
+  first = shell_tool(command="echo policy_snapshot_all_allow_ok", timeout=10)
+  record(
+      "SUCCESSFUL_ALLOWED_COMMAND",
+      "PASS" if "policy_snapshot_all_allow_ok" in first else "FAIL",
+      first.strip()[:300],
+  )
+
+  second = shell_tool(command="printf 'alpha\nbeta\n' | grep beta", timeout=10)
+  record(
+      "ALLOWED_OPERATOR_PIPE",
+      "PASS" if "beta" in second else "FAIL",
+      second.strip()[:300],
+  )
+
+  audit_path = shell_tool(
+      command="ls -dt .logs/test_shell_policy_snapshot/*/shell_audit.log | head -1",
+      timeout=10,
+  ).strip().splitlines()[0]
+  audit_content = read_file(file_path=audit_path)
+  print("AUDIT_PATH", audit_path)
+  print(audit_content)
+
+  agent_log_path = shell_tool(
+      command="ls -dt .logs/test_shell_policy_snapshot/*/test_shell_policy_snapshot.log | head -1",
+      timeout=10,
+  ).strip().splitlines()[0]
+  same_parent = os.path.dirname(audit_path) == os.path.dirname(agent_log_path)
+  record(
+      "CO_LOCATION",
+      "PASS" if same_parent else "FAIL",
+      f"audit={audit_path}; agent={agent_log_path}",
+  )
+
+  required = [
+      "[POLICY_SNAPSHOT]",
+      "allowed_commands: * (all command names allowed)",
+      "allowed_operators: * (all shell operators allowed)",
+      "command_success_logging: false",
+      "sandbox_enabled:",
+  ]
+  missing = [item for item in required if item not in audit_content]
+  record(
+      "POLICY_SNAPSHOT",
+      "PASS" if not missing else "FAIL",
+      "missing=" + ", ".join(missing) if missing else "all required fields present",
+  )
+
+  record(
+      "NO_SUCCESS_SPAM",
+      "PASS" if "[COMMAND_SUCCESS]" not in audit_content else "FAIL",
+      "COMMAND_SUCCESS absent because log_success=false",
+  )
+
+  ordered = [
+      "SUCCESSFUL_ALLOWED_COMMAND",
+      "ALLOWED_OPERATOR_PIPE",
+      "POLICY_SNAPSHOT",
+      "NO_SUCCESS_SPAM",
+      "CO_LOCATION",
+  ]
+  overall = "PASS" if all(rows.get(name) == "PASS" for name in ordered) else "FAIL"
+
+  summary_lines = [
+      f"Overall: {overall}",
+      f"shell_audit.log: {audit_path}",
+      f"agent log: {agent_log_path}",
+      "",
+      "| Check | Status | Evidence |",
+      "|---|---|---|",
+  ]
+  for name in ordered:
+      summary_lines.append(f"| {name} | {rows.get(name, 'FAIL')} | {notes.get(name, 'missing')} |")
+  summary = "\n".join(summary_lines)
+  print(summary)
+  final_answer(summary)
+  ```
+
+skills: []
+worker_agents: []
+max_steps: 24
+
+execution_env:
+  type: "local"

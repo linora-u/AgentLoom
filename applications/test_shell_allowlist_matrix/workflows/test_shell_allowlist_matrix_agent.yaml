@@ -22,56 +22,154 @@ shell_settings:
 workflow: |
   # Shell Allow-list Matrix Validation
 
-  You are a testing agent. Execute the validation below with real shell_tool
-  calls. This agent intentionally allows only a small subset of shell commands:
+  You are a testing agent. Execute the harness below in one Python code block.
+  This agent intentionally allows only a small subset of shell commands:
   cat, echo, grep, ls, printf, pwd, wc. It allows only the "|" and "&&"
   operators.
 
-  Do not mark PASS from expectation alone. You must inspect the real outputs
-  and the real shell_audit.log produced by this run.
+  The test only passes if the real shell outputs and real shell_audit.log
+  contain the expected evidence. Do not mark PASS from expectation alone.
 
-  Execute this deterministic validation:
+  ```python
+  import os
 
-  1. Allowed commands must work:
-     - `echo allow_matrix_ok`
-     - `pwd`
-     - `printf "alpha\nbeta\n" | grep beta`
-     - `echo allow_pipe_marker | wc -c`
+  rows = {}
+  notes = {}
 
-  2. Disallowed commands must be rejected:
-     - `date`
-     - `whoami`
-     - `uname -a`
-     Each rejection must include the exact current allow-list text:
-     `Allowed commands: cat, echo, grep, ls, printf, pwd, wc`.
+  def record(name, status, evidence):
+      rows[name] = status
+      notes[name] = evidence
 
-  3. Disallowed operators must be rejected:
-     - `echo first ; echo second`
-     The rejection must include:
-     `Allowed operators: &&, |`.
+  def expect_success(name, command, expected_text):
+      try:
+          output = shell_tool(command=command, timeout=10)
+          status = "PASS" if expected_text in output else "FAIL"
+          record(name, status, output.strip()[:300])
+      except Exception as exc:
+          record(name, "FAIL", f"unexpected block: {exc}")
 
-  4. Locate this run's audit log with shell_tool:
-     `ls -dt .logs/test_shell_allowlist_matrix/*/shell_audit.log`
-     Use the first path returned.
+  def expect_block(name, command, expected_text):
+      try:
+          output = shell_tool(command=command, timeout=10)
+          record(name, "FAIL", f"expected block, got: {output[:300]}")
+      except Exception as exc:
+          text = str(exc)
+          status = "PASS" if expected_text in text else "FAIL"
+          record(name, status, text)
 
-  5. Use read_file on that audit log. Verify it contains:
-     - [WHITELIST_REJECT] entries for date, whoami, uname, and operator ;
-     - the exact allowed commands text above;
-     - the exact allowed operators text above;
-     - command rejections suggest `allowed_commands`;
-     - operator rejection suggests `allowed_operators`;
-     - operator rejection does NOT suggest `allowed_commands: [";", ...]`.
+  expect_success("ALLOW_ECHO", "echo allow_matrix_ok", "allow_matrix_ok")
+  expect_success("ALLOW_PWD", "pwd", "/")
+  expect_success("ALLOW_PIPE_GREP", 'printf "alpha\nbeta\n" | grep beta', "beta")
+  expect_success("ALLOW_PIPE_WC", "echo allow_pipe_marker | wc -c", "18")
 
-  6. Locate the agent log with shell_tool:
-     `ls -dt .logs/test_shell_allowlist_matrix/*/test_shell_allowlist_matrix.log`
-     Confirm its parent directory equals the audit log parent directory.
+  allowed_commands_text = "Allowed commands: cat, echo, grep, ls, printf, pwd, wc"
+  allowed_operators_text = "Allowed operators: &&, |"
 
-  Final answer must include:
-  - PASS/FAIL for each row.
-  - The exact audit log path inspected.
-  - The exact allowed commands text observed.
-  - The exact allowed operators text observed.
-  - A truthful failure reason for any missing evidence.
+  expect_block("BLOCK_DATE", "date", allowed_commands_text)
+  expect_block("BLOCK_WHOAMI", "whoami", allowed_commands_text)
+  expect_block("BLOCK_UNAME", "uname -a", allowed_commands_text)
+  expect_block("BLOCK_SEMICOLON", "echo first ; echo second", allowed_operators_text)
+
+  # Use ls only (no head) so the audit lookup obeys this workflow's allow-list.
+  ls_output = shell_tool(
+      command="ls -dt .logs/test_shell_allowlist_matrix/*/shell_audit.log",
+      timeout=10,
+  )
+  audit_path = ls_output.strip().splitlines()[0]
+  audit_content = read_file(file_path=audit_path)
+  print("AUDIT_PATH", audit_path)
+  print(audit_content)
+
+  agent_ls_output = shell_tool(
+      command="ls -dt .logs/test_shell_allowlist_matrix/*/test_shell_allowlist_matrix.log",
+      timeout=10,
+  )
+  agent_log_path = agent_ls_output.strip().splitlines()[0]
+  same_parent = os.path.dirname(audit_path) == os.path.dirname(agent_log_path)
+  record(
+      "CO_LOCATION",
+      "PASS" if same_parent else "FAIL",
+      f"audit={audit_path}; agent={agent_log_path}",
+  )
+
+  audit_checks = {
+      "POLICY_SNAPSHOT": [
+          "[POLICY_SNAPSHOT]",
+          "allowed_commands: cat, echo, grep, ls, printf, pwd, wc",
+          "allowed_operators: |, &&",
+          "command_success_logging: false",
+      ],
+      "AUDIT_DATE": ["[WHITELIST_REJECT]", "command: date", "allowed_commands"],
+      "AUDIT_WHOAMI": ["[WHITELIST_REJECT]", "command: whoami", "allowed_commands"],
+      "AUDIT_UNAME": ["[WHITELIST_REJECT]", "command: uname -a", "allowed_commands"],
+      "AUDIT_SEMICOLON": [
+          "[WHITELIST_REJECT]",
+          "command: echo first ; echo second",
+          "allowed_operators",
+      ],
+      "NO_OPERATOR_COMMAND_SUGGESTION": [],
+      "NO_SUCCESS_SPAM": [],
+  }
+
+  for name, required in audit_checks.items():
+      if name == "NO_OPERATOR_COMMAND_SUGGESTION":
+          forbidden = 'allowed_commands: [";", ...]'
+          record(
+              name,
+              "PASS" if forbidden not in audit_content else "FAIL",
+              f"{forbidden} absent",
+          )
+          continue
+      if name == "NO_SUCCESS_SPAM":
+          record(
+              name,
+              "PASS" if "[COMMAND_SUCCESS]" not in audit_content else "FAIL",
+              "COMMAND_SUCCESS absent because log_success=false",
+          )
+          continue
+      missing = [item for item in required if item not in audit_content]
+      record(
+          name,
+          "PASS" if not missing else "FAIL",
+          "missing=" + ", ".join(missing) if missing else "all required fields present",
+      )
+
+  ordered = [
+      "ALLOW_ECHO",
+      "ALLOW_PWD",
+      "ALLOW_PIPE_GREP",
+      "ALLOW_PIPE_WC",
+      "BLOCK_DATE",
+      "BLOCK_WHOAMI",
+      "BLOCK_UNAME",
+      "BLOCK_SEMICOLON",
+      "POLICY_SNAPSHOT",
+      "AUDIT_DATE",
+      "AUDIT_WHOAMI",
+      "AUDIT_UNAME",
+      "AUDIT_SEMICOLON",
+      "NO_OPERATOR_COMMAND_SUGGESTION",
+      "NO_SUCCESS_SPAM",
+      "CO_LOCATION",
+  ]
+  overall = "PASS" if all(rows.get(name) == "PASS" for name in ordered) else "FAIL"
+
+  summary_lines = [
+      f"Overall: {overall}",
+      f"shell_audit.log: {audit_path}",
+      f"agent log: {agent_log_path}",
+      f"allowed commands evidence: {allowed_commands_text}",
+      f"allowed operators evidence: {allowed_operators_text}",
+      "",
+      "| Check | Status | Evidence |",
+      "|---|---|---|",
+  ]
+  for name in ordered:
+      summary_lines.append(f"| {name} | {rows.get(name, 'FAIL')} | {notes.get(name, 'missing')} |")
+  summary = "\n".join(summary_lines)
+  print(summary)
+  final_answer(summary)
+  ```
 
 skills: []
 worker_agents: []

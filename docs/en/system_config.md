@@ -913,6 +913,16 @@ The framework automatically exposes security policy configuration to the LLM, pr
 
 > This feature requires no additional configuration — it activates automatically based on existing `security_checks` and `tool_access_control` settings.
 
+#### audit_log — Shell Audit Log
+
+| Parameter | Type | Default | Description |
+|------|------|--------|------|
+| `shell_settings.audit_log.enabled` | `bool` | `true` | Enable per-agent shell audit logs |
+| `shell_settings.audit_log.log_policy_snapshot` | `bool` | `true` | Write one `POLICY_SNAPSHOT` entry per run with the effective shell policy, including all-allow defaults such as `allowed_commands: "*"` |
+| `shell_settings.audit_log.log_success` | `bool` | `false` | Also log successful commands as `COMMAND_SUCCESS` entries |
+
+`POLICY_SNAPSHOT` is written before the first shell command execution, so fully permissive runs still leave auditable evidence that command/operator allow-list checks were intentionally disabled.
+
 #### sandbox — Sandbox Mode
 
 | Parameter | Type | Default | Description |
@@ -938,6 +948,10 @@ shell_settings:
     destructive_patterns: true
   dangerous_paths: ["/", "/etc", "/usr", "/var", "/boot", "/sys", "/proc"]
   block_destructive: true
+  audit_log:
+    enabled: true
+    log_policy_snapshot: true
+    log_success: false
   sandbox:
     enabled: false
     mode: "bwrap"

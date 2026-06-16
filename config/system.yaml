@@ -293,6 +293,7 @@ shell_settings:
   # Log directory is controlled by the top-level logging.dir setting.
   audit_log:
     enabled: true           # Master switch (default: true)
+    log_policy_snapshot: true  # Log effective shell policy once per run
     log_success: false      # Also log successful executions (default: false)
 
 # ============================================
