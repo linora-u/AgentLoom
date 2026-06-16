@@ -332,14 +332,21 @@ def _canonicalize_existing_prefix(abs_path: str) -> str:
     return os.path.normpath(base)
 
 
-def _resolve_path(path_str: str, cwd: str) -> str:
-    """Resolve a path to a canonical absolute path.
+def _canonical_path(path: str, cwd: str = os.sep) -> str:
+    """Return the filesystem-identity form used for security comparison."""
+    return _canonicalize_existing_prefix(_absolute_norm_path(str(path), cwd))
 
-    The nearest existing parent directory is resolved with ``realpath`` and
-    any non-existent suffix is preserved.  This prevents symlink aliases such
-    as ``/tmp`` -> ``/private/tmp`` from splitting security decisions.
+
+def _resolve_path(path_str: str, cwd: str) -> str:
+    """Resolve a path to a logical absolute path.
+
+    This function preserves the shell-facing spelling of absolute path
+    prefixes such as ``/tmp`` while collapsing ``.`` and ``..``. Security
+    checks canonicalise paths separately so symlink escapes are still caught
+    without leaking physical path aliases into user-facing errors or session
+    state.
     """
-    return _canonicalize_existing_prefix(_absolute_norm_path(path_str, cwd))
+    return _absolute_norm_path(path_str, cwd)
 
 
 def _path_match_keys(path_str: str, cwd: str = os.sep) -> Set[str]:
@@ -359,18 +366,17 @@ def _expanded_dangerous_paths(dangerous: Set[str]) -> Set[str]:
 
 
 def _is_path_within_allowed(resolved_path: str, allowed_roots: List[str]) -> bool:
-    """Check if a resolved path is within any allowed root directory.
+    """Check if a path is within any allowed root directory.
 
-    Both the target path and the allowed roots are normalised via
-    ``realpath`` (when they exist on disk) to prevent symlink-based
-    escapes.
+    The caller passes the logical path used in user-facing messages. The
+    comparison itself uses canonical filesystem identity so aliases such as
+    ``/tmp`` and symlink escapes are handled consistently.
     """
-    resolved = _canonicalize_existing_prefix(os.path.normpath(resolved_path))
+    resolved = _canonical_path(resolved_path)
     for root in allowed_roots:
         if root == "*":
             return True
-        norm_root = _resolve_path(root, os.getcwd())
-        # Use os.path.commonpath to check containment
+        norm_root = _canonical_path(root, os.getcwd())
         try:
             common = os.path.commonpath([resolved, norm_root])
             if common == norm_root:
