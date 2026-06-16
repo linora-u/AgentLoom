@@ -239,7 +239,7 @@ def test_cross_agent_cwd_isolation(bypass_shell_security):
             original_dir_a = shell_tool("pwd", load_profile=False).strip()
             shell_tool("cd /tmp", load_profile=False)
             new_dir_a = shell_tool("pwd", load_profile=False).strip()
-            assert new_dir_a == os.path.realpath("/tmp"), (
+            assert new_dir_a == os.path.normpath("/tmp"), (
                 "Agent A failed to change directory"
             )
 
@@ -247,7 +247,7 @@ def test_cross_agent_cwd_isolation(bypass_shell_security):
         with sub_task_context("agent_B_cwd"):
             set_current_agent_id("agent_B_cwd_id")
             dir_b = shell_tool("pwd", load_profile=False).strip()
-            assert dir_b != os.path.realpath("/tmp"), (
+            assert dir_b != os.path.normpath("/tmp"), (
                 "Agent B's working directory was polluted by Agent A"
             )
 

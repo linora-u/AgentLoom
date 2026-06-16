@@ -72,11 +72,15 @@ def _in_context(fn, *args, **kwargs):
 
 
 def _path_output(output: str) -> str:
-    """Extract the physical path from shell output that may include login noise."""
+    """Extract the logical path from shell output that may include login noise."""
     last_line = output.strip().splitlines()[-1].strip()
     if last_line.startswith("login: "):
         return last_line.removeprefix("login: ").strip()
     return last_line
+
+
+def _logical(path: str) -> str:
+    return os.path.normpath(path)
 
 
 # ---------------------------------------------------------------------------
@@ -298,7 +302,7 @@ def test_agent_id_fallback_preserves_cwd_from_executor_thread(bypass_shell_secur
 
     assert not thread.is_alive(), "executor thread should finish"
     assert "error" not in results, results.get("error")
-    assert _path_output(results["pwd"]) == os.path.realpath("/tmp")
+    assert _path_output(results["pwd"]) == _logical("/tmp")
 
 
 # ---------------------------------------------------------------------------
@@ -320,8 +324,8 @@ def test_cwd_persists_within_same_agent(bypass_shell_security):
         return shell_tool("pwd")    # 在同一 session-scoped session 中读取 cwd
 
     result = _in_context(_run)
-    assert _path_output(result) == os.path.realpath("/tmp"), \
-        f"cd /tmp 后 pwd 应返回 physical /tmp，实际输出: {result!r}"
+    assert _path_output(result) == _logical("/tmp"), \
+        f"cd /tmp 后 pwd 应返回逻辑 /tmp，实际输出: {result!r}"
 
 
 def test_two_agents_have_independent_cwd(bypass_shell_security):
@@ -366,20 +370,20 @@ def test_two_agents_have_independent_cwd(bypass_shell_security):
     _in_context(_run_worker)
 
     # --- supervisor 断言 ---
-    assert _path_output(sup_cwds["step3"]) == os.path.realpath("/tmp"), \
-        f"step3: supervisor cd /tmp 后 pwd 应为 physical /tmp，实际: {sup_cwds['step3']!r}"
-    assert _path_output(sup_cwds["step3"]) != os.path.realpath("/var/log"), \
+    assert _path_output(sup_cwds["step3"]) == _logical("/tmp"), \
+        f"step3: supervisor cd /tmp 后 pwd 应为逻辑 /tmp，实际: {sup_cwds['step3']!r}"
+    assert _path_output(sup_cwds["step3"]) != _logical("/var/log"), \
         f"step3: supervisor 不应受 worker cd /var/log 的影响，实际: {sup_cwds['step3']!r}"
-    assert _path_output(sup_cwds["step7"]) == os.path.realpath("/var"), \
-        f"step7: supervisor cd /var 后 pwd 应为 physical /var，实际: {sup_cwds['step7']!r}"
+    assert _path_output(sup_cwds["step7"]) == _logical("/var"), \
+        f"step7: supervisor cd /var 后 pwd 应为逻辑 /var，实际: {sup_cwds['step7']!r}"
 
     # --- worker 断言 ---
-    assert _path_output(wkr_cwds["step4"]) == os.path.realpath("/var/log"), \
-        f"step4: worker cd /var/log 后 pwd 应为 physical /var/log，实际: {wkr_cwds['step4']!r}"
-    assert _path_output(wkr_cwds["step4"]) != os.path.realpath("/tmp"), \
+    assert _path_output(wkr_cwds["step4"]) == _logical("/var/log"), \
+        f"step4: worker cd /var/log 后 pwd 应为逻辑 /var/log，实际: {wkr_cwds['step4']!r}"
+    assert _path_output(wkr_cwds["step4"]) != _logical("/tmp"), \
         f"step4: worker 不应受 supervisor cd /tmp 的影响，实际: {wkr_cwds['step4']!r}"
-    assert _path_output(wkr_cwds["step8"]) == os.path.realpath("/tmp"), \
-        f"step8: worker cd /tmp 后 pwd 应为 physical /tmp，实际: {wkr_cwds['step8']!r}"
+    assert _path_output(wkr_cwds["step8"]) == _logical("/tmp"), \
+        f"step8: worker cd /tmp 后 pwd 应为逻辑 /tmp，实际: {wkr_cwds['step8']!r}"
 
 
 def test_supervisor_and_worker_shells_are_independent(bypass_shell_security):
@@ -407,7 +411,7 @@ def test_supervisor_and_worker_shells_are_independent(bypass_shell_security):
     _in_context(_run_sup)
     _in_context(_run_wkr)
 
-    assert _path_output(results["sup"]) == os.path.realpath("/tmp"), \
-        f"supervisor 应在 physical /tmp，实际: {results['sup']!r}"
+    assert _path_output(results["sup"]) == _logical("/tmp"), \
+        f"supervisor 应在逻辑 /tmp，实际: {results['sup']!r}"
     assert _path_output(results["sup"]) != _path_output(results["wkr"]), \
         f"worker 的 cwd 必须与 supervisor 独立，supervisor={results['sup']!r}, worker={results['wkr']!r}"
