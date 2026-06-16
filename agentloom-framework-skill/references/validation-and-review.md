@@ -99,7 +99,7 @@ PYTHONPATH=/Users/bytedance/code/data_clear/AgentLoom-checkpoint \
 
 ```bash
 rg -n "_WORKFLOW_OVERLAY_KEYS|_LLM_ONLY_TOP_LEVEL_KEYS|extract_workflow_overlay" src/lib/config/config.py
-rg -n "class RootSettings|class ToolAccessControlSettings|class LlmModelTypeSettings|extra_completion_params|supports_structured_output|tool_choice" src/lib/config src/lib/smolagents/models docs/en docs/cn agentloom-framework-skill
+rg -n "class RootSettings|class ToolAccessControlSettings|class LlmModelTypeSettings|extra_completion_params|supports_structured_output|supports_native_tool_calls|tool_choice" src/lib/config src/lib/smolagents/models docs/en docs/cn agentloom-framework-skill
 rg -n "install_agentloom_runtime_adapters|parse_structured_tool_call|ToolCallCandidate|schema-bound|tool_call_type" src/lib/smolagents src/lib/config tests docs/en docs/cn agentloom-framework-skill
 rg -n "load-mode|allow-scripts|allow-network|Duplicate skill name|hooks:" src/lib/smolagents/skills src/lib/smolagents/hooks docs/en agentloom-framework-skill
 rg -n "mcp_servers|parse_mcp_servers_yaml_value" src tests docs/en agentloom-framework-skill
@@ -110,6 +110,7 @@ rg -n "mcp_servers|parse_mcp_servers_yaml_value" src tests docs/en agentloom-fra
 - Agent YAML 白名单字段是否与 `_WORKFLOW_OVERLAY_KEYS` 一致。
 - `model` / `llm` / `langfuse` 是否仍被 `_LLM_ONLY_TOP_LEVEL_KEYS` 过滤。
 - `RootSettings`、`LLMConfig`、`LlmModelTypeSettings` 是否新增可配置字段。
+- `supports_native_tool_calls` 是否仍只作为 removed-field 拒绝逻辑存在；不要在 skill/docs/example 里重新教用户配置它。
 - `tool_choice` 是否仍只是模型请求透传参数；不要把它写成 native tool-call 能力探测开关。
 - `tool_call` 模式是否仍只接受结构化 native/tool-call block；不要恢复自由文本猜测、fuzzy tool-name repair 或坏参数 `{}` 兜底。
 - `skills` 的格式、默认值、同名处理、hook 注册时机是否与 `SkillsManager` 一致。
