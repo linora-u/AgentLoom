@@ -454,6 +454,7 @@ shell_settings:
 | 参数 | 类型 | 默认值 | 说明 |
 |------|------|--------|------|
 | `max_print_outputs_length` | `int` | `50000` | 单次代码执行中 `print()` 输出的最大字符数。超出部分会被截断 |
+| `timeout_seconds` | `int \| null` | `30` | 单个生成 Python 代码块的最长墙钟执行秒数。同步调用 Worker Agent 或其他长耗时工具时可调大 |
 
 > `additional_functions` 由框架根据 `code_agent.additional_functions` 配置自动注入，无需在 `executor_kwargs` 中手动指定。
 
@@ -471,6 +472,7 @@ execution_env:
   type: "local"
   executor_kwargs:
     max_print_outputs_length: 100000
+    timeout_seconds: 120
 ```
 
 ### 5.4 `docker` — Docker 容器执行器
