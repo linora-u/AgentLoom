@@ -42,7 +42,6 @@ class ModelConfigOverlay:
     context_cache: Optional[bool] = None
     system_prompt_boundary: Optional[str] = None
     requests_per_minute: Optional[int] = None
-    supports_native_tool_calls: Optional[str] = None
     extra_completion_params: Optional[dict] = None
 
     def to_mapping(self) -> dict:
@@ -262,7 +261,6 @@ class ModelManager:
             logger=runtime_logger,
             context_cache=model_config.context_cache,
             system_prompt_boundary=model_config.system_prompt_boundary,
-            supports_native_tool_calls=model_config.supports_native_tool_calls,
             supports_structured_output=model_config.supports_structured_output,
             **optional_kwargs,
         )

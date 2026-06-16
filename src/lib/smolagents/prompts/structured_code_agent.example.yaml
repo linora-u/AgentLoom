@@ -249,9 +249,10 @@ planning:
     Write your updated plan, then '<end_plan>'.
   todo_initial: |-
     <tool_restriction>
-    ⚠️ CRITICAL: You can ONLY call `todo_write`. ALL other tools are DISABLED.
+    ⚠️ CRITICAL: You can ONLY execute Python code that calls `todo_write`. ALL other tools are DISABLED.
     Do NOT call read_file, shell_tool, write_markdown_file, or ANY other tool.
-    The ONLY action you may take is: call `todo_write`.
+    The ONLY action you may take is a `<code>` block containing `todo_write(todos=[...])`.
+    Do NOT use XML, `<tool_call>`, `<function_calls>`, JSON tool-call wrappers, or prose-only output.
     </tool_restriction>
 
     Register your planned tasks using todo_write. Based on your plan above:
@@ -261,11 +262,16 @@ planning:
 
     You MUST register your tasks every time. Do not skip this step.
     Provide the COMPLETE task list — todo_write replaces the entire list.
+    Output exactly one code block:
+    <code>
+    todo_write(todos=[{"content": "...", "status": "in_progress"}, {"content": "...", "status": "pending"}])
+    </code>
   todo_update: |-
     <tool_restriction>
-    ⚠️ CRITICAL: You can ONLY call `todo_write`. ALL other tools are DISABLED.
+    ⚠️ CRITICAL: You can ONLY execute Python code that calls `todo_write`. ALL other tools are DISABLED.
     Do NOT call read_file, shell_tool, write_markdown_file, or ANY other tool.
-    The ONLY action you may take is: call `todo_write`.
+    The ONLY action you may take is a `<code>` block containing `todo_write(todos=[...])`.
+    Do NOT use XML, `<tool_call>`, `<function_calls>`, JSON tool-call wrappers, or prose-only output.
     </tool_restriction>
 
     Update your task list to reflect current progress. Based on your plan review:
@@ -275,11 +281,16 @@ planning:
     - Remove tasks that are no longer relevant
 
     Provide the COMPLETE updated list — todo_write replaces the entire list, not append.
+    Output exactly one code block:
+    <code>
+    todo_write(todos=[{"content": "...", "status": "completed"}, {"content": "...", "status": "in_progress"}])
+    </code>
   todo_final: |-
     <tool_restriction>
-    ⚠️ CRITICAL: You can ONLY call `todo_write`. ALL other tools are DISABLED.
+    ⚠️ CRITICAL: You can ONLY execute Python code that calls `todo_write`. ALL other tools are DISABLED.
     Do NOT call read_file, shell_tool, write_markdown_file, or ANY other tool.
-    The ONLY action you may take is: call `todo_write`.
+    The ONLY action you may take is a `<code>` block containing `todo_write(todos=[...])`.
+    Do NOT use XML, `<tool_call>`, `<function_calls>`, JSON tool-call wrappers, or prose-only output.
     </tool_restriction>
 
     Finalize your task list. You are about to deliver the final answer.
@@ -289,6 +300,10 @@ planning:
     - Do NOT pass an empty list. Always include all tasks.
 
     Provide the COMPLETE finalized list via todo_write.
+    Output exactly one code block:
+    <code>
+    todo_write(todos=[{"content": "...", "status": "completed"}])
+    </code>
 managed_agent:
   task: |-
       You're a helpful agent named '{{name}}'.

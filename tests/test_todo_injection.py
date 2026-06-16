@@ -840,11 +840,11 @@ class TestReadTodoStateLabel:
 
 
 # ===========================================================================
-# Bidirectional type coercion tests
+# Strict type coercion tests
 # ===========================================================================
 
 class TestBidirectionalCoercion:
-    """Test array/object → string coercion added to the patch."""
+    """Test schema-bound one-directional coercion."""
 
     def _make_tool_with_input(self, key, expected_type):
         """Create a mock tool with a specific input type."""
@@ -852,100 +852,81 @@ class TestBidirectionalCoercion:
         tool.inputs = {key: {"type": expected_type}}
         return tool
 
-    def test_list_to_string_coercion(self):
-        """Array value coerced to JSON string when expected type is string."""
-        from src.lib.smolagents.monkey_patch.tool_argument_coercion_patch import (
-            _coerce_stringified_json,
-        )
+    def test_list_to_string_is_not_coerced(self):
+        """Array value is not coerced when expected type is string."""
+        from src.lib.smolagents.agent.tool_argument_coercion import coerce_tool_arguments
 
         tool = self._make_tool_with_input("todos", "string")
         args = {"todos": [{"content": "Task A", "status": "pending"}]}
-        _coerce_stringified_json(tool, args)
-        assert isinstance(args["todos"], str)
-        parsed = json.loads(args["todos"])
-        assert parsed[0]["content"] == "Task A"
+        coerce_tool_arguments(tool, args)
+        assert args["todos"] == [{"content": "Task A", "status": "pending"}]
 
-    def test_dict_to_string_coercion(self):
-        """Dict value coerced to JSON string when expected type is string."""
-        from src.lib.smolagents.monkey_patch.tool_argument_coercion_patch import (
-            _coerce_stringified_json,
-        )
+    def test_dict_to_string_is_not_coerced(self):
+        """Dict value is not coerced when expected type is string."""
+        from src.lib.smolagents.agent.tool_argument_coercion import coerce_tool_arguments
 
         tool = self._make_tool_with_input("config", "string")
         args = {"config": {"key": "value"}}
-        _coerce_stringified_json(tool, args)
-        assert isinstance(args["config"], str)
-        assert json.loads(args["config"]) == {"key": "value"}
+        coerce_tool_arguments(tool, args)
+        assert args["config"] == {"key": "value"}
 
     def test_string_to_array_coercion(self):
         """Existing: string value parsed to list when expected type is array."""
-        from src.lib.smolagents.monkey_patch.tool_argument_coercion_patch import (
-            _coerce_stringified_json,
-        )
+        from src.lib.smolagents.agent.tool_argument_coercion import coerce_tool_arguments
 
         tool = self._make_tool_with_input("items", "array")
         args = {"items": '[1, 2, 3]'}
-        _coerce_stringified_json(tool, args)
+        coerce_tool_arguments(tool, args)
         assert args["items"] == [1, 2, 3]
 
     def test_string_to_object_coercion(self):
         """Existing: string value parsed to dict when expected type is object."""
-        from src.lib.smolagents.monkey_patch.tool_argument_coercion_patch import (
-            _coerce_stringified_json,
-        )
+        from src.lib.smolagents.agent.tool_argument_coercion import coerce_tool_arguments
 
         tool = self._make_tool_with_input("data", "object")
         args = {"data": '{"a": 1}'}
-        _coerce_stringified_json(tool, args)
+        coerce_tool_arguments(tool, args)
         assert args["data"] == {"a": 1}
 
     def test_double_serialized_json_coercion(self):
         """Double-serialized JSON string correctly parsed to list."""
-        from src.lib.smolagents.monkey_patch.tool_argument_coercion_patch import (
-            _coerce_stringified_json,
-        )
+        from src.lib.smolagents.agent.tool_argument_coercion import coerce_tool_arguments
 
         tool = self._make_tool_with_input("sections", "array")
         # LLM wraps JSON in an extra string layer
         inner_json = json.dumps([{"heading": "Intro", "body": "Hello"}])
         double_serialized = json.dumps(inner_json)
         args = {"sections": double_serialized}
-        _coerce_stringified_json(tool, args)
+        coerce_tool_arguments(tool, args)
         assert isinstance(args["sections"], list)
         assert args["sections"][0]["heading"] == "Intro"
 
     def test_no_double_coercion(self):
         """Already correct type should not be coerced."""
-        from src.lib.smolagents.monkey_patch.tool_argument_coercion_patch import (
-            _coerce_stringified_json,
-        )
+        from src.lib.smolagents.agent.tool_argument_coercion import coerce_tool_arguments
 
         tool = self._make_tool_with_input("name", "string")
         args = {"name": "already a string"}
-        _coerce_stringified_json(tool, args)
+        coerce_tool_arguments(tool, args)
         assert args["name"] == "already a string"
 
     def test_array_stays_as_array(self):
         """Array value stays when expected type is array."""
-        from src.lib.smolagents.monkey_patch.tool_argument_coercion_patch import (
-            _coerce_stringified_json,
-        )
+        from src.lib.smolagents.agent.tool_argument_coercion import coerce_tool_arguments
 
         tool = self._make_tool_with_input("items", "array")
         original = [1, 2, 3]
         args = {"items": original}
-        _coerce_stringified_json(tool, args)
+        coerce_tool_arguments(tool, args)
         assert args["items"] is original
 
     def test_unknown_key_ignored(self):
         """Keys not in tool.inputs are skipped."""
-        from src.lib.smolagents.monkey_patch.tool_argument_coercion_patch import (
-            _coerce_stringified_json,
-        )
+        from src.lib.smolagents.agent.tool_argument_coercion import coerce_tool_arguments
 
         tool = self._make_tool_with_input("known", "string")
         args = {"known": "ok", "unknown": [1, 2]}
-        _coerce_stringified_json(tool, args)
+        coerce_tool_arguments(tool, args)
         assert args["unknown"] == [1, 2]  # untouched
 
 

@@ -1,193 +1,258 @@
-"""
-Tests for enhanced multi-strategy tool call text parsing.
-
-Tests cover:
-- _extract_balanced_patch() — bracket-depth matching
-- _try_structural_extract() — structural extraction fallback
-- xml_tags + nested delegation (MiniMax XML wrapper format)
-- Large string handling (>2KB quote conversion skip)
-- Integration: parse_tool_call_resilient() end-to-end
-"""
-
 import json
+import time
+from types import SimpleNamespace
+
 import pytest
+from smolagents import Tool
+from smolagents.memory import ActionStep
+from smolagents.monitoring import Timing
+from smolagents.models import ChatMessage, ChatMessageToolCall, ChatMessageToolCallFunction, MessageRole
 
-from src.lib.smolagents.monkey_patch.tool_call_parsing_patch import (
-    ParsedToolCall,
-    _extract_balanced_patch,
-    _strategy_nested_tool_calls,
-    _strategy_xml_tags,
-    _try_structural_extract,
-    parse_tool_call_resilient,
-)
-
-
-# ===================================================================
-#  _extract_balanced_patch() tests
-# ===================================================================
-
-class TestExtractBalancedPatch:
-    """Tests for the patch-module bracket-depth extraction."""
-
-    def test_basic(self):
-        result = _extract_balanced_patch('{"a": 1}', 0, "{", "}")
-        assert result == '{"a": 1}'
-
-    def test_nested(self):
-        result = _extract_balanced_patch('{"a": {"b": [1,2]}}', 0, "{", "}")
-        assert result == '{"a": {"b": [1,2]}}'
+from src.lib.smolagents.agent.base_agent import ToolCallingAgentV2
+from src.lib.smolagents.models.litellm_model import LiteLLMModelV2
+from src.lib.smolagents.models.tool_call_parser import ToolCallParseError
 
 
-# ===================================================================
-#  Phase 2: _try_structural_extract() tests
-# ===================================================================
+class EchoTool(Tool):
+    name = "echo"
+    description = "Echo text."
+    inputs = {"text": {"type": "string", "description": "Text to echo"}}
+    output_type = "string"
 
-class TestTryStructuralExtract:
-    """Tests for structural extraction in the text parsing fallback."""
-
-    def test_basic_function_call(self):
-        text = "{'id': 'c1', 'type': 'function', 'function': {'name': 'read_file', 'arguments': {'file_path': '/a.h'}}}"
-        result = _try_structural_extract(text)
-        assert result is not None
-        assert isinstance(result, list)
-        assert len(result) == 1
-        assert result[0]["function"]["name"] == "read_file"
-
-    def test_no_function_key(self):
-        text = "{'name': 'read_file', 'arguments': {'path': '/a.h'}}"
-        result = _try_structural_extract(text)
-        assert result is None
-
-    def test_large_content(self):
-        """Structural extraction should handle large content without quote conversion."""
-        big_arg = "a" * 5000
-        text = (
-            "{'function': {'name': 'shell_tool', 'arguments': "
-            "{'command': '" + big_arg + "'}}}"
-        )
-        result = _try_structural_extract(text)
-        assert result is not None
-        assert result[0]["function"]["name"] == "shell_tool"
+    def forward(self, text: str) -> str:
+        return f"echo:{text}"
 
 
-# ===================================================================
-#  Phase 2: xml_tags + nested delegation integration tests
-# ===================================================================
+class AddTool(Tool):
+    name = "add"
+    description = "Add two integers."
+    inputs = {
+        "a": {"type": "integer", "description": "First integer"},
+        "b": {"type": "integer", "description": "Second integer"},
+    }
+    output_type = "integer"
 
-class TestXmlTagsNestedDelegation:
-    """Test that xml_tags delegates to nested_tool_calls when wrapper
-    contains a list/dict format."""
-
-    def test_minimax_wrapper_delegates_to_nested(self):
-        text = (
-            '<minimax:tool_call>\n'
-            "[{'id': 'c1', 'type': 'function', 'function': {'name': 'read_file', "
-            "'arguments': {'file_path': '/a.h'}}}]\n"
-            '</minimax:tool_call>'
-        )
-        result = _strategy_xml_tags(text)
-        assert result is not None
-        assert result.name == "read_file"
-        assert "nested_delegate" in result.strategy or result.strategy == "xml_tags"
-
-    def test_regular_xml_still_works(self):
-        """Ensure regular XML format is not broken by the delegation."""
-        text = '<tool_call><name>shell_tool</name><arguments>{"command": "ls"}</arguments></tool_call>'
-        result = _strategy_xml_tags(text)
-        assert result is not None
-        assert result.name == "shell_tool"
-        assert result.arguments.get("command") == "ls"
+    def forward(self, a: int, b: int) -> int:
+        return a + b
 
 
-# ===================================================================
-#  Phase 2: nested_tool_calls with structural fallback
-# ===================================================================
+class TextFallbackModel:
+    tool_name_key = "name"
+    tool_arguments_key = "arguments"
+    model_id = "fake-text"
 
-class TestNestedToolCallsStructuralFallback:
-    """Test that nested_tool_calls falls back to structural extraction."""
+    def __init__(self, content: str):
+        self.content = content
+        self._last_tools_to_call_from = []
+        self.seen_tools = None
 
-    def test_normal_small_content_still_works(self):
-        text = "[{'id': 'c1', 'type': 'function', 'function': {'name': 'read_file', 'arguments': {'file_path': '/a.h'}}}]"
-        result = _strategy_nested_tool_calls(text)
-        assert result is not None
-        assert result.name == "read_file"
+    def generate(self, _messages, stop_sequences=None, tools_to_call_from=None, **_kwargs):
+        self.seen_tools = tools_to_call_from
+        self._last_tools_to_call_from = list(tools_to_call_from or [])
+        return ChatMessage(role=MessageRole.ASSISTANT, content=self.content)
 
-    def test_large_content_uses_structural(self):
-        """Large content that breaks quote conversion should still work via structural extraction."""
-        # Build a large argument value without embedded apostrophes or problematic escapes
-        # that would break the bracket-depth parser. The key test is that the string
-        # is > 2KB so quote conversion is skipped, forcing structural extraction.
-        big_body = "table row data " * 200  # ~3KB, no apostrophes
-        text = (
-            "[{'id': 'c1', 'type': 'function', 'function': {'name': 'write_markdown_file', "
-            "'arguments': {'file_path': './report.md', 'sections': [{'body': '"
-            + big_body
-            + "'}]}}}]"
-        )
-        result = _strategy_nested_tool_calls(text)
-        assert result is not None
-        assert result.name == "write_markdown_file"
-
-    def test_malformed_parallel_calls_structural_fallback(self):
-        """MiniMax malformed parallel calls — each dict missing one closing brace."""
-        text = (
-            "[{'id': 'c1', 'type': 'function', 'function': {'name': 'read_file', "
-            "'arguments': {'file_path': '/a.h'}}, "
-            "{'id': 'c2', 'type': 'function', 'function': {'name': 'read_file', "
-            "'arguments': {'file_path': '/b.h'}}]"
-        )
-        result = _strategy_nested_tool_calls(text)
-        # Should extract at least the first tool call via structural fallback
-        assert result is not None
-        assert result.name == "read_file"
+    def parse_tool_calls(self, message):
+        return LiteLLMModelV2.parse_tool_calls(self, message)
 
 
-# ===================================================================
-#  Integration: parse_tool_call_resilient() end-to-end
-# ===================================================================
+class NativeToolCallModel:
+    def __init__(self, tool_call: ChatMessageToolCall):
+        self.tool_call = tool_call
+        self.seen_tools = None
 
-class TestParseToolCallResilientIntegration:
-    """End-to-end tests for the full parsing chain."""
-
-    def test_minimax_wrapper_with_nested_list(self):
-        text = (
-            '<minimax:tool_call>\n'
-            "[{'id': 'c1', 'type': 'function', 'function': {'name': 'read_file', "
-            "'arguments': {'file_path': '/test.h'}}}]\n"
-            '</minimax:tool_call>'
-        )
-        result = parse_tool_call_resilient(
-            text, available_tool_names=["read_file"]
-        )
-        assert result.name == "read_file"
-        assert result.arguments["file_path"] == "/test.h"
-
-    def test_standard_json_still_works(self):
-        text = '{"name": "shell_tool", "arguments": {"command": "pwd"}}'
-        result = parse_tool_call_resilient(
-            text, available_tool_names=["shell_tool"]
-        )
-        assert result.name == "shell_tool"
-
-    def test_large_write_markdown_file_call(self):
-        """The exact scenario that was causing FORMAT_NOT_FOUND errors."""
-        sections = [
-            {"heading": "Report", "level": 1, "body": "| " + "c|" * 50 + "\\n"},
-            {"heading": "Details", "level": 2, "body": "Content " * 100},
-        ]
-        text = (
-            '<minimax:tool_call>\n'
-            "[{'id': 'call_big', 'type': 'function', 'function': "
-            "{'name': 'write_markdown_file', 'arguments': "
-            "{'file_path': './temp/CAN_RiskList.md', 'overwrite': True, "
-            f"'sections': {sections}" + "}}}]\n"
-            '</minimax:tool_call>'
-        )
-        result = parse_tool_call_resilient(
-            text, available_tool_names=["write_markdown_file"]
-        )
-        assert result.name == "write_markdown_file"
+    def generate(self, _messages, stop_sequences=None, tools_to_call_from=None, **_kwargs):
+        self.seen_tools = tools_to_call_from
+        return ChatMessage(role=MessageRole.ASSISTANT, content="", tool_calls=[self.tool_call])
 
 
-if __name__ == "__main__":
-    pytest.main([__file__, "-v"])
+def _make_agent(model, tools):
+    return ToolCallingAgentV2(
+        tools=tools,
+        model=model,
+        max_steps=1,
+        max_tokens=4096,
+        verbosity_level=0,
+    )
+
+
+def _action_step() -> ActionStep:
+    return ActionStep(step_number=1, timing=Timing(start_time=time.time()))
+
+
+def test_tool_calling_agent_executes_text_fallback_call():
+    model = TextFallbackModel('{"name": "echo", "arguments": {"text": "hello"}}')
+    agent = _make_agent(model, [EchoTool()])
+
+    memory_step = _action_step()
+    result = agent.step(memory_step)
+
+    assert result.output is None
+    assert model.seen_tools[0].name == "echo"
+    assert memory_step.observations.strip() == "echo:hello"
+
+
+def test_tool_calling_agent_executes_native_tool_call():
+    tool_call = ChatMessageToolCall(
+        id="call_native",
+        type="function",
+        function=ChatMessageToolCallFunction(name="echo", arguments={"text": "native"}),
+    )
+    model = NativeToolCallModel(tool_call)
+    agent = _make_agent(model, [EchoTool()])
+
+    memory_step = _action_step()
+    agent.step(memory_step)
+
+    assert model.seen_tools[0].name == "echo"
+    assert memory_step.tool_calls[0].id == "call_native"
+    assert memory_step.observations.strip() == "echo:native"
+
+
+def test_tool_calling_agent_executes_native_tool_call_with_json_string_arguments():
+    tool_call = ChatMessageToolCall(
+        id="call_native_json",
+        type="function",
+        function=ChatMessageToolCallFunction(name="echo", arguments=json.dumps({"text": "native-json"})),
+    )
+    model = NativeToolCallModel(tool_call)
+    agent = _make_agent(model, [EchoTool()])
+
+    memory_step = _action_step()
+    agent.step(memory_step)
+
+    assert memory_step.tool_calls[0].id == "call_native_json"
+    assert memory_step.observations.strip() == "echo:native-json"
+
+
+def test_tool_calling_agent_executes_native_tool_call_with_double_encoded_arguments():
+    tool_call = ChatMessageToolCall(
+        id="call_native_double",
+        type="function",
+        function=ChatMessageToolCallFunction(
+            name="echo",
+            arguments=json.dumps(json.dumps({"text": "native-double"})),
+        ),
+    )
+    model = NativeToolCallModel(tool_call)
+    agent = _make_agent(model, [EchoTool()])
+
+    memory_step = _action_step()
+    agent.step(memory_step)
+
+    assert memory_step.tool_calls[0].id == "call_native_double"
+    assert memory_step.observations.strip() == "echo:native-double"
+
+
+def test_text_fallback_applies_schema_bound_coercion_at_execution():
+    model = TextFallbackModel('{"name": "add", "arguments": {"a": "2", "b": "3"}}')
+    agent = _make_agent(model, [AddTool()])
+
+    memory_step = _action_step()
+    agent.step(memory_step)
+
+    assert memory_step.observations.strip() == "5"
+
+
+def test_litellm_model_keeps_tools_schema_and_tool_choice():
+    model = LiteLLMModelV2(model_id="test/model")
+    completion_kwargs = model._prepare_completion_kwargs(
+        messages=[{"role": "user", "content": "hi"}],
+        tools_to_call_from=[EchoTool()],
+        tool_choice="auto",
+    )
+
+    assert completion_kwargs["tools"][0]["function"]["name"] == "echo"
+    assert completion_kwargs["tool_choice"] == "auto"
+
+
+def test_generate_without_tool_calls_does_not_create_native_detection_state():
+    model = LiteLLMModelV2(model_id="test/model")
+    response = SimpleNamespace(
+        choices=[
+            SimpleNamespace(
+                message=SimpleNamespace(role=MessageRole.ASSISTANT, content='{"name":"echo","arguments":{"text":"x"}}', tool_calls=None)
+            )
+        ],
+        usage=SimpleNamespace(prompt_tokens=1, completion_tokens=1),
+    )
+    model.retryer = lambda _func, **_kwargs: response
+    model.client = SimpleNamespace(completion=lambda **_kwargs: response)
+
+    message = model.generate([{"role": "user", "content": "hi"}], tools_to_call_from=[EchoTool()])
+
+    assert message.tool_calls is None
+    assert not hasattr(model, "_native_tool_calls_detected")
+    assert not hasattr(model, "should_use_native_tool_calls")
+
+
+def test_generate_with_native_tool_calls_does_not_create_native_detection_state():
+    model = LiteLLMModelV2(model_id="test/model")
+    tool_call = ChatMessageToolCall(
+        id="call_auto",
+        type="function",
+        function=ChatMessageToolCallFunction(name="echo", arguments={"text": "x"}),
+    )
+    response = SimpleNamespace(
+        choices=[SimpleNamespace(message=SimpleNamespace(role=MessageRole.ASSISTANT, content="", tool_calls=[tool_call]))],
+        usage=SimpleNamespace(prompt_tokens=1, completion_tokens=1),
+    )
+    model.retryer = lambda _func, **_kwargs: response
+    model.client = SimpleNamespace(completion=lambda **_kwargs: response)
+
+    message = model.generate([{"role": "user", "content": "hi"}], tools_to_call_from=[EchoTool()])
+
+    assert message.tool_calls == [tool_call]
+    assert not hasattr(model, "_native_tool_calls_detected")
+    assert not hasattr(model, "should_use_native_tool_calls")
+
+
+def test_litellm_generate_normalizes_native_tool_call_arguments():
+    model = LiteLLMModelV2(model_id="test/model")
+    tool_call = ChatMessageToolCall(
+        id="call_auto_json",
+        type="function",
+        function=ChatMessageToolCallFunction(
+            name="echo",
+            arguments=json.dumps(json.dumps({"text": "x"})),
+        ),
+    )
+    response = SimpleNamespace(
+        choices=[SimpleNamespace(message=SimpleNamespace(role=MessageRole.ASSISTANT, content="", tool_calls=[tool_call]))],
+        usage=SimpleNamespace(prompt_tokens=1, completion_tokens=1),
+    )
+    model.retryer = lambda _func, **_kwargs: response
+    model.client = SimpleNamespace(completion=lambda **_kwargs: response)
+
+    message = model.generate([{"role": "user", "content": "hi"}], tools_to_call_from=[EchoTool()])
+
+    assert message.tool_calls[0].function.arguments == {"text": "x"}
+
+
+def test_litellm_generate_rejects_unknown_native_tool():
+    model = LiteLLMModelV2(model_id="test/model")
+    tool_call = ChatMessageToolCall(
+        id="call_unknown",
+        type="function",
+        function=ChatMessageToolCallFunction(name="missing", arguments=json.dumps({"text": "x"})),
+    )
+    response = SimpleNamespace(
+        choices=[SimpleNamespace(message=SimpleNamespace(role=MessageRole.ASSISTANT, content="", tool_calls=[tool_call]))],
+        usage=SimpleNamespace(prompt_tokens=1, completion_tokens=1),
+    )
+    model.retryer = lambda _func, **_kwargs: response
+    model.client = SimpleNamespace(completion=lambda **_kwargs: response)
+
+    with pytest.raises(ToolCallParseError) as exc_info:
+        model.generate([{"role": "user", "content": "hi"}], tools_to_call_from=[EchoTool()])
+
+    assert "Tool 'missing' not found" in str(exc_info.value)
+
+
+def test_text_fallback_rejects_unknown_tool_before_execution():
+    model = TextFallbackModel('{"name": "missing", "arguments": {"text": "x"}}')
+    agent = _make_agent(model, [EchoTool()])
+
+    with pytest.raises(Exception) as exc_info:
+        agent.step(_action_step())
+
+    assert "Tool 'missing' not found" in str(exc_info.value)
