@@ -9,6 +9,7 @@ from src.tools.shell.path_validation import (
     check_path_constraints,
     _filter_out_flags,
     _resolve_path,
+    _canonical_path,
     _is_path_within_allowed,
     _is_dangerous_removal_path,
     _extract_redirect_targets,
@@ -213,14 +214,11 @@ class TestEdgeCases:
 
     def test_resolve_path_relative(self):
         cwd = '/home/user/project'
-        expected = os.path.join(
-            os.path.realpath('/home'),
-            'user/project/src/main.py',
-        )
-        assert _resolve_path('src/main.py', cwd) == expected
+        assert _resolve_path('src/main.py', cwd) == '/home/user/project/src/main.py'
 
     def test_resolve_path_absolute(self):
-        assert _resolve_path('/etc/passwd', '/home/user') == os.path.realpath('/etc/passwd')
+        assert _resolve_path('/etc/passwd', '/home/user') == '/etc/passwd'
+        assert _canonical_path('/etc/passwd') == os.path.realpath('/etc/passwd')
 
     def test_resolve_path_tilde(self):
         result = _resolve_path('~/file.txt', '/home/user/project')
@@ -254,9 +252,10 @@ class TestEdgeCases:
             check_path_constraints("cat /tmp/test.txt")  # should not raise
 
     def test_nonexistent_child_under_symlinked_include_path_allowed(self):
-        """/tmp/nonexistent canonicalizes under /private/tmp on macOS."""
+        """/tmp/nonexistent stays logical but canonicalizes under /private/tmp on macOS."""
         target = "/tmp/agentloom_shell_nonexistent_child"
-        assert _resolve_path(target, os.getcwd()) == os.path.join(
+        assert _resolve_path(target, os.getcwd()) == target
+        assert _canonical_path(target) == os.path.join(
             os.path.realpath("/tmp"),
             "agentloom_shell_nonexistent_child",
         )
@@ -314,8 +313,7 @@ class TestEdgeCases:
     def test_resolve_path_nonexistent_still_normalizes(self):
         """_resolve_path normalizes non-existent paths without crash."""
         result = _resolve_path("../foo/bar/../baz", "/home/user/project")
-        expected = os.path.join(os.path.realpath('/home'), 'user/foo/baz')
-        assert result == expected
+        assert result == "/home/user/foo/baz"
 
 
 # =========================================================================
