@@ -13,7 +13,7 @@ import os
 import re
 import threading
 import time
-from typing import Optional
+from typing import Callable, Optional
 
 from src.lib.logging import get_logger
 
@@ -40,6 +40,49 @@ PROMPT_PATTERNS = [
 _TAIL_BYTES = 1024
 
 
+def _build_stall_message(task_id: str, last_line: str) -> str:
+    return (
+        f'Background task "{task_id}" appears to be '
+        f"waiting for interactive input.\n"
+        f"Last output line: {last_line.strip()}\n"
+        f"Consider killing this task and re-running with "
+        f"non-interactive flags (e.g. -y, --yes, --non-interactive)."
+    )
+
+
+def detect_stall_prompt(task_id: str, output_path: str) -> Optional[str]:
+    """Return a stall warning if the current output tail ends in a prompt."""
+    tail = _read_tail(output_path)
+    if not tail:
+        return None
+
+    last_line = tail.rstrip().rsplit("\n", 1)[-1]
+    if _matches_prompt(last_line):
+        return _build_stall_message(task_id, last_line)
+    return None
+
+
+def _read_tail(output_path: str) -> str:
+    """Read the last _TAIL_BYTES from the output file."""
+    try:
+        with open(output_path, "rb") as f:
+            f.seek(0, 2)
+            size = f.tell()
+            f.seek(max(0, size - _TAIL_BYTES))
+            data = f.read()
+        return data.decode(errors="replace")
+    except (OSError, IOError):
+        return ""
+
+
+def _matches_prompt(line: str) -> bool:
+    """Check if a line matches any known interactive-prompt pattern."""
+    for pattern in PROMPT_PATTERNS:
+        if pattern.search(line):
+            return True
+    return False
+
+
 class StallWatchdog:
     """Detect background tasks stalled on interactive prompts.
 
@@ -59,11 +102,13 @@ class StallWatchdog:
         output_path: str,
         poll_interval: float = 5.0,
         stall_threshold: float = 45.0,
+        on_stall: Optional[Callable[[str], None]] = None,
     ):
         self._task_id = task_id
         self._output_path = output_path
         self._poll_interval = poll_interval
         self._stall_threshold = stall_threshold
+        self._on_stall = on_stall
 
         self._stopped = False
         self._thread: Optional[threading.Thread] = None
@@ -108,34 +153,35 @@ class StallWatchdog:
                     continue
 
                 # Output has been stalled long enough — check for prompt.
-                tail = self._read_tail()
-                if not tail:
-                    # No output yet — reset and keep watching.
+                message = detect_stall_prompt(self._task_id, self._output_path)
+                if not message:
+                    tail = _read_tail(self._output_path)
+                    if not tail:
+                        # No output yet — reset and keep watching.
+                        last_growth = time.monotonic()
+                        self._sleep(self._poll_interval)
+                        continue
+                    # Output stalled but no prompt — silently keep watching.
+                    # Reset growth time to avoid repeated checks on same data.
                     last_growth = time.monotonic()
                     self._sleep(self._poll_interval)
                     continue
 
-                last_line = tail.rstrip().rsplit("\n", 1)[-1]
-                if self._matches_prompt(last_line):
-                    self.stall_message = (
-                        f'Background task "{self._task_id}" appears to be '
-                        f"waiting for interactive input.\n"
-                        f"Last output line: {last_line.strip()}\n"
-                        f"Consider killing this task and re-running with "
-                        f"non-interactive flags (e.g. -y, --yes, --non-interactive)."
-                    )
-                    logger.info(
-                        "Stall watchdog detected prompt for task %s: %s",
-                        self._task_id,
-                        last_line.strip()[:80],
-                    )
-                    # One-shot: stop after detection.
-                    self._stopped = True
-                    return
-                else:
-                    # Output stalled but no prompt — silently keep watching.
-                    # Reset growth time to avoid repeated checks on same data.
-                    last_growth = time.monotonic()
+                last_line = _read_tail(self._output_path).rstrip().rsplit("\n", 1)[-1]
+                self.stall_message = message
+                if self._on_stall is not None:
+                    try:
+                        self._on_stall(message)
+                    except Exception:
+                        pass
+                logger.info(
+                    "Stall watchdog detected prompt for task %s: %s",
+                    self._task_id,
+                    last_line.strip()[:80],
+                )
+                # One-shot: stop after detection.
+                self._stopped = True
+                return
 
             except Exception:
                 # Never crash the watchdog thread.
@@ -150,22 +196,7 @@ class StallWatchdog:
             time.sleep(min(0.2, seconds - elapsed))
             elapsed += 0.2
 
-    def _read_tail(self) -> str:
-        """Read the last _TAIL_BYTES from the output file."""
-        try:
-            with open(self._output_path, "rb") as f:
-                f.seek(0, 2)
-                size = f.tell()
-                f.seek(max(0, size - _TAIL_BYTES))
-                data = f.read()
-            return data.decode(errors="replace")
-        except (OSError, IOError):
-            return ""
-
     @staticmethod
     def _matches_prompt(line: str) -> bool:
         """Check if a line matches any known interactive-prompt pattern."""
-        for pattern in PROMPT_PATTERNS:
-            if pattern.search(line):
-                return True
-        return False
+        return _matches_prompt(line)

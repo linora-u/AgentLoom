@@ -1,0 +1,121 @@
+name: "test_shell_control_flow"
+description: "Validate integrated shell timeout, background task, foreground stall, and process cleanup behavior"
+
+model_type: "powerful"
+tool_call_type: "code_act"
+
+tools:
+  - name: "shell_tool"
+  - name: "check_background_task"
+  - name: "kill_background_task"
+  - name: "list_background_tasks"
+
+workflow: |
+  # Shell Control Flow Stress Workflow
+
+  You are a testing agent. Execute the harness below in one Python code block.
+  It intentionally mixes timeout promotion, explicit background tasks,
+  foreground stall detection, and process cleanup. Do not mark PASS from
+  expectation alone; use only the actual tool outputs collected by the harness.
+
+  ```python
+  import time
+
+  rows = []
+
+  def record(step, status, evidence):
+      rows.append((step, status, evidence.replace("\n", " | ")))
+
+  def extract_task_id(output):
+      marker = "[Background Task:"
+      start = output.find(marker)
+      if start < 0:
+          return ""
+      start += len(marker)
+      end = output.find("]", start)
+      if end < 0:
+          return ""
+      return output[start:end].strip()
+
+  auto_output = shell_tool(
+      command="echo auto_bg_started && sleep 45 && echo auto_bg_done",
+      timeout=2,
+  )
+  auto_task_id = extract_task_id(auto_output)
+  auto_ok = (
+      "auto_bg_started" in auto_output
+      and auto_task_id
+      and "promoted to background" in auto_output
+  )
+  record("auto-background promotion", "PASS" if auto_ok else "FAIL", auto_output)
+
+  if auto_task_id:
+      auto_status = check_background_task(auto_task_id)
+      if "Status: running" in auto_status:
+          kill_text = kill_background_task(auto_task_id)
+          killed_ok = "has been killed" in kill_text and "Status: failed" in kill_text
+          record("monitor and kill auto task", "PASS" if killed_ok else "FAIL", kill_text)
+      else:
+          terminal_ok = any(token in auto_status for token in ("Status: completed", "Status: failed", "Exit Code:"))
+          record("monitor and kill auto task", "PASS" if terminal_ok else "FAIL", auto_status)
+  else:
+      record("monitor and kill auto task", "FAIL", "missing auto background task id")
+
+  explicit_output = shell_tool(
+      command="sleep 5 && echo explicit_bg_done",
+      run_in_background=True,
+  )
+  explicit_task_id = extract_task_id(explicit_output)
+  explicit_status = ""
+  if explicit_task_id:
+      for _ in range(12):
+          explicit_status = check_background_task(explicit_task_id)
+          if "Status: completed" in explicit_status or "Exit Code:" in explicit_status:
+              break
+          time.sleep(1)
+  explicit_ok = (
+      explicit_task_id
+      and "Status: completed" in explicit_status
+      and "Exit Code: 0" in explicit_status
+      and "explicit_bg_done" in explicit_status
+  )
+  record("explicit background lifecycle", "PASS" if explicit_ok else "FAIL", explicit_output + "\n" + explicit_status)
+
+  stall_output = shell_tool(
+      command='printf "ControlFlow? (y/n) " && sleep 300',
+      timeout=30,
+  )
+  stall_ok = (
+      "Stall Warning" in stall_output
+      and "interactive input" in stall_output
+      and "Background Task:" not in stall_output
+  )
+  record("foreground stall detection", "PASS" if stall_ok else "FAIL", stall_output)
+
+  residual_output = shell_tool(
+      command='ps aux | grep -E "[a]uto_bg_done|[e]xplicit_bg_done|[C]ontrolFlow\\? \\(y/n\\)|[s]leep 300|[s]leep 45" | wc -l',
+      timeout=10,
+  ).strip()
+  residual_count = int(residual_output.splitlines()[-1])
+  record("residual process cleanup", "PASS" if residual_count == 0 else "FAIL", f"residual_count={residual_count}")
+
+  passed = sum(1 for _, status, _ in rows if status == "PASS")
+  overall = "PASS" if passed == len(rows) else "FAIL"
+  summary_lines = [
+      f"Overall: {overall} ({passed}/{len(rows)} passed)",
+      "| Step | Status | Evidence |",
+      "|---|---|---|",
+  ]
+  for step, status, evidence in rows:
+      summary_lines.append(f"| {step} | {status} | {evidence} |")
+  summary = "\n".join(summary_lines)
+  print(summary)
+  final_answer(summary)
+  ```
+
+skills: []
+worker_agents: []
+max_steps: 8
+
+execution_env:
+  type: "local"

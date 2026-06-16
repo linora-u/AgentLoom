@@ -42,7 +42,7 @@ import os
 import threading
 from datetime import datetime
 from pathlib import Path
-from typing import Optional
+from typing import Any, Optional
 
 from src.lib.config import C
 from src.lib.logging import get_logger
@@ -65,7 +65,9 @@ EVENT_STALL_DETECTED = "STALL_DETECTED"
 EVENT_TIMEOUT = "TIMEOUT"
 EVENT_BACKGROUND_PROMOTION = "BACKGROUND_PROMOTION"
 EVENT_SANDBOX_WRAP = "SANDBOX_WRAP"
+EVENT_SANDBOX_UNAVAILABLE = "SANDBOX_UNAVAILABLE"
 EVENT_COMMAND_SUCCESS = "COMMAND_SUCCESS"
+EVENT_POLICY_SNAPSHOT = "POLICY_SNAPSHOT"
 
 # ---------------------------------------------------------------------------
 # Suggestion templates
@@ -90,6 +92,11 @@ _SUGGESTIONS: dict[str, str] = {
         "  shell_settings:\n"
         "    allowed_commands: [\"{name}\", ...]"
     ),
+    "OPERATOR_WHITELIST_REJECT": (
+        "To allow this operator, add it to the agent YAML:\n"
+        "  shell_settings:\n"
+        "    allowed_operators: [\"{name}\", ...]"
+    ),
     EVENT_STALL_DETECTED: (
         "The command appears stuck on an interactive prompt. "
         "Re-run with a non-interactive flag (--yes, -y, --non-interactive) "
@@ -107,7 +114,17 @@ _SUGGESTIONS: dict[str, str] = {
         "Command was wrapped in a sandbox for OS-level isolation. "
         "No action needed unless sandbox is causing issues."
     ),
+    EVENT_SANDBOX_UNAVAILABLE: (
+        "Sandbox was requested but unavailable, so the command ran without "
+        "OS-level sandbox isolation. Install the configured sandbox backend "
+        "or disable shell_settings.sandbox.enabled for this agent."
+    ),
     EVENT_COMMAND_SUCCESS: "",
+    EVENT_POLICY_SNAPSHOT: (
+        "This entry records the effective shell security policy for this run. "
+        "If allowed_commands or allowed_operators is '*', command/operator "
+        "allow-list checks are intentionally disabled."
+    ),
 }
 
 
@@ -117,6 +134,62 @@ def _sanitize_component(value: str) -> str:
     normalized = re.sub(r"[^A-Za-z0-9._-]+", "_", value.strip())
     normalized = normalized.strip("._")
     return normalized or "unknown"
+
+
+def _coerce_bool(value: Any) -> bool:
+    if isinstance(value, str):
+        return value.lower() in ("true", "1", "yes", "on")
+    return bool(value)
+
+
+def _get_shell_config_with_source(key: str, *, default: Any = None) -> tuple[Any, str]:
+    """Read effective shell config and identify where it came from."""
+    try:
+        from src.trace import get_current_agent_config
+        agent_cfg = get_current_agent_config()
+        if isinstance(agent_cfg, dict):
+            shell = agent_cfg.get("shell_settings")
+            if isinstance(shell, dict) and key in shell:
+                return shell[key], "effective_agent_config"
+    except Exception:
+        pass
+    return C.get_nested("shell_settings", key, default=default), "global"
+
+
+def _format_allow_policy(value: Any, all_label: str) -> str:
+    """Format command/operator allow-list config for audit readability."""
+    if value is None:
+        return f"unset ({all_label})"
+
+    if isinstance(value, str):
+        items = [value.strip()]
+    elif isinstance(value, list):
+        items = [str(item).strip() for item in value if str(item).strip()]
+    else:
+        return f"{value!r} (invalid type; validation may reject)"
+
+    if not items:
+        return f"[] ({all_label})"
+    if "*" in items:
+        return f"* ({all_label})"
+    return ", ".join(items)
+
+
+def _format_security_checks(value: Any) -> tuple[str, str]:
+    if not isinstance(value, dict) or not value:
+        return "default enabled", "none"
+
+    enabled = sorted(str(key) for key, item in value.items() if _coerce_bool(item))
+    disabled = sorted(str(key) for key, item in value.items() if not _coerce_bool(item))
+    return ", ".join(enabled) or "none", ", ".join(disabled) or "none"
+
+
+def _format_list(value: Any) -> str:
+    if isinstance(value, list):
+        return ", ".join(str(item) for item in value) or "none"
+    if value is None:
+        return "none"
+    return str(value)
 
 
 # ---------------------------------------------------------------------------
@@ -139,6 +212,8 @@ class ShellAuditLogger:
         self._file_path: Optional[Path] = None
         self._enabled: Optional[bool] = None
         self._log_success: Optional[bool] = None
+        self._log_policy_snapshot: Optional[bool] = None
+        self._policy_snapshot_logged = False
         self._log_dir = log_dir
 
     # -- lazy initialization ------------------------------------------------
@@ -169,6 +244,20 @@ class ShellAuditLogger:
                     "true", "1", "yes",
                 )
         return bool(self._log_success)
+
+    @property
+    def log_policy_snapshot(self) -> bool:
+        """Whether to log the effective shell policy once per run."""
+        if self._log_policy_snapshot is None:
+            self._log_policy_snapshot = C.get_nested(
+                "shell_settings", "audit_log", "log_policy_snapshot",
+                default=True,
+            )
+            if isinstance(self._log_policy_snapshot, str):
+                self._log_policy_snapshot = self._log_policy_snapshot.lower() in (
+                    "true", "1", "yes",
+                )
+        return bool(self._log_policy_snapshot)
 
     @property
     def file_path(self) -> Path:
@@ -243,6 +332,8 @@ class ShellAuditLogger:
         """Write a single structured entry to the audit log file."""
         if not self.enabled:
             return
+        if event_type != EVENT_POLICY_SNAPSHOT:
+            self.log_effective_policy()
 
         now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         lines = [
@@ -276,6 +367,76 @@ class ShellAuditLogger:
                 )
 
     # -- public API ---------------------------------------------------------
+
+    def log_effective_policy(self) -> None:
+        """Log the effective shell security policy once per logger instance."""
+        if not self.enabled or not self.log_policy_snapshot:
+            return
+
+        with self._lock:
+            if self._policy_snapshot_logged:
+                return
+            self._policy_snapshot_logged = True
+
+        allowed_commands, commands_source = _get_shell_config_with_source(
+            "allowed_commands", default=None,
+        )
+        allowed_operators, operators_source = _get_shell_config_with_source(
+            "allowed_operators", default=None,
+        )
+        security_checks, security_source = _get_shell_config_with_source(
+            "security_checks", default={},
+        )
+        dangerous_paths, dangerous_source = _get_shell_config_with_source(
+            "dangerous_paths", default=[],
+        )
+        block_destructive, block_source = _get_shell_config_with_source(
+            "block_destructive", default=True,
+        )
+        sandbox, sandbox_source = _get_shell_config_with_source(
+            "sandbox", default={},
+        )
+
+        security_enabled, security_disabled = _format_security_checks(
+            security_checks,
+        )
+        sandbox = sandbox if isinstance(sandbox, dict) else {}
+        sandbox_enabled = _coerce_bool(sandbox.get("enabled", False))
+        sandbox_mode = str(sandbox.get("mode", "bwrap"))
+        sandbox_network = _coerce_bool(sandbox.get("network_isolation", False))
+
+        extra = {
+            "allowed_commands": _format_allow_policy(
+                allowed_commands, "all command names allowed",
+            ),
+            "allowed_commands_source": commands_source,
+            "allowed_operators": _format_allow_policy(
+                allowed_operators, "all shell operators allowed",
+            ),
+            "allowed_operators_source": operators_source,
+            "command_success_logging": str(self.log_success).lower(),
+            "security_checks_enabled": security_enabled,
+            "security_checks_disabled": security_disabled,
+            "security_checks_source": security_source,
+            "block_destructive": (
+                f"{str(_coerce_bool(block_destructive)).lower()} ({block_source})"
+            ),
+            "dangerous_paths": f"{_format_list(dangerous_paths)} ({dangerous_source})",
+            "sandbox_enabled": f"{str(sandbox_enabled).lower()} ({sandbox_source})",
+            "sandbox_mode": sandbox_mode,
+            "sandbox_network_isolation": str(sandbox_network).lower(),
+        }
+
+        self._write_entry(
+            EVENT_POLICY_SNAPSHOT,
+            "<shell policy>",
+            message=(
+                "Effective shell policy captured before command execution. "
+                "This records all-allow defaults even when no command is blocked."
+            ),
+            suggestion=_SUGGESTIONS[EVENT_POLICY_SNAPSHOT],
+            extra=extra,
+        )
 
     def log_security_block(
         self,
@@ -337,8 +498,17 @@ class ShellAuditLogger:
             message: The human-readable rejection reason.
             name: The rejected command or operator name.
         """
-        suggestion = _SUGGESTIONS[EVENT_WHITELIST_REJECT].format(
-            name=name or "<command>",
+        is_operator = (
+            message.startswith("Operator not allowed:")
+            or (name in {"&&", "|", ";", "||", "&"})
+        )
+        suggestion_key = (
+            "OPERATOR_WHITELIST_REJECT"
+            if is_operator
+            else EVENT_WHITELIST_REJECT
+        )
+        suggestion = _SUGGESTIONS[suggestion_key].format(
+            name=name or ("<operator>" if is_operator else "<command>"),
         )
         self._write_entry(
             EVENT_WHITELIST_REJECT,
@@ -414,6 +584,20 @@ class ShellAuditLogger:
             command,
             message=f"Command sandboxed via {sandbox_mode}",
             suggestion=_SUGGESTIONS[EVENT_SANDBOX_WRAP],
+        )
+
+    def log_sandbox_unavailable(
+        self,
+        command: str,
+        sandbox_mode: str,
+        reason: str,
+    ) -> None:
+        """Log when sandboxing was requested but could not be applied."""
+        self._write_entry(
+            EVENT_SANDBOX_UNAVAILABLE,
+            command,
+            message=f"Sandbox mode {sandbox_mode} unavailable: {reason}",
+            suggestion=_SUGGESTIONS[EVENT_SANDBOX_UNAVAILABLE],
         )
 
     def log_command_success(

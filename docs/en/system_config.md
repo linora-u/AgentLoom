@@ -382,11 +382,11 @@ Detection chain:
 
 **Execution architecture**: Uses a stateless subprocess model — each command spawns an independent `subprocess.Popen`, with context continuity maintained through environment snapshots and session state files. This avoids PTY long-connection fragility issues (buffer overflows, interactive command hangs, etc.).
 
-**Environment snapshot**: At agent session init, the user's shell environment (functions, aliases, shell options) is captured and saved as `snapshot.sh`. Each command execution sources this snapshot to restore the full user environment. The snapshot also injects extglob protection (`shopt -u extglob` / `setopt NO_EXTENDED_GLOB`) to prevent TOCTOU attacks.
+**Environment snapshot**: At agent session init, the user's shell environment (functions, aliases, shell options, PATH) is captured and saved as `snapshot.sh`. Each command execution sources this snapshot to restore shell configuration without carrying over command-side `export` changes. The snapshot also injects extglob protection (`shopt -u extglob` / `setopt NO_EXTENDED_GLOB`) to prevent TOCTOU attacks.
 
 **CWD tracking**: Uses out-of-band file tracking (`pwd -P >| cwd_file`) — no control characters embedded in stdout. After each command, the tracking file is read to update the working directory state.
 
-**Environment variable persistence**: Captures subprocess environment via `env > env_file`, diffs against the parent process environment, and saves new/modified variables to `session_env.sh` which is sourced before the next command.
+**Ephemeral environment variables**: `export` statements are visible inside the same shell command, for example `export X=1 && echo $X`, but do not persist to later `shell_tool` calls. Keep assignment and use in one command when command-local environment is needed.
 
 **Process tree management**: Subprocesses use `start_new_session=True` to create independent process groups. On timeout or error, `os.killpg()` sends SIGTERM → SIGKILL to clean up the entire process tree, preventing orphan processes.
 
@@ -427,6 +427,7 @@ Runs AI-generated Python code directly in the host environment. This is the defa
 | Parameter | Type | Default | Description |
 |------|------|--------|------|
 | `max_print_outputs_length` | `int` | `50000` | Maximum characters of `print()` output per code execution. Excess is truncated |
+| `timeout_seconds` | `int \| null` | `30` | Maximum wall-clock seconds for one generated Python code block. Use a larger value for workflows that synchronously invoke worker Agents or other long-running tool calls |
 
 > `additional_functions` is automatically injected by the framework based on `code_agent.additional_functions` configuration; no need to specify manually in `executor_kwargs`.
 
@@ -444,6 +445,7 @@ execution_env:
   type: "local"
   executor_kwargs:
     max_print_outputs_length: 100000
+    timeout_seconds: 120
 ```
 
 ### 5.4 `docker` — Docker Container Executor
@@ -889,7 +891,7 @@ Each check can be individually toggled (all enabled by default):
 - **cd boundary enforcement**: `cd` targets must be within workspace or `tool_access_control.include_paths`,
   preventing the shell session from escaping to arbitrary directories.
 - **CWD synchronisation**: Path validation uses the shell session's actual working directory
-  (not the Python process CWD), ensuring persistent session `cd` commands are tracked.
+  (not the Python process CWD), ensuring session-scoped `cd` commands are tracked.
 - **Compound command tracking**: Commands like `cd src && cd ../tests && ls` are tracked
   segment-by-segment, validating each `cd` target against the effective CWD.
 - **Symlink resolution**: Paths are resolved via `realpath` to prevent symlink-based escapes.
@@ -910,6 +912,16 @@ The framework automatically exposes security policy configuration to the LLM, pr
 - Command security block errors include `Suggested alternative:` advice (e.g. `Use write_markdown_file or edit_file tool for multi-line content`)
 
 > This feature requires no additional configuration — it activates automatically based on existing `security_checks` and `tool_access_control` settings.
+
+#### audit_log — Shell Audit Log
+
+| Parameter | Type | Default | Description |
+|------|------|--------|------|
+| `shell_settings.audit_log.enabled` | `bool` | `true` | Enable per-agent shell audit logs |
+| `shell_settings.audit_log.log_policy_snapshot` | `bool` | `true` | Write one `POLICY_SNAPSHOT` entry per run with the effective shell policy, including all-allow defaults such as `allowed_commands: "*"` |
+| `shell_settings.audit_log.log_success` | `bool` | `false` | Also log successful commands as `COMMAND_SUCCESS` entries |
+
+`POLICY_SNAPSHOT` is written before the first shell command execution, so fully permissive runs still leave auditable evidence that command/operator allow-list checks were intentionally disabled.
 
 #### sandbox — Sandbox Mode
 
@@ -936,6 +948,10 @@ shell_settings:
     destructive_patterns: true
   dangerous_paths: ["/", "/etc", "/usr", "/var", "/boot", "/sys", "/proc"]
   block_destructive: true
+  audit_log:
+    enabled: true
+    log_policy_snapshot: true
+    log_success: false
   sandbox:
     enabled: false
     mode: "bwrap"
@@ -1077,7 +1093,9 @@ tool_metadata:
     is_concurrency_safe: true
     category: search
   shell_tool:
-    max_result_chars: 5000
+    # shell_tool has its own large-output truncation and artifact notice.
+    # Keep the outer shim threshold above that preview so the notice survives.
+    max_result_chars: 40000
     is_concurrency_safe: false
     category: shell
   default:
