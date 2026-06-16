@@ -109,13 +109,19 @@ tool_access_control:
     - tools: ["read_file", "grep_search", "shell_tool"]
       include_paths: ["/absolute/allowed/path"]
 shell_settings:
-  allowed_commands: "*"
-  allowed_operators: "*"
+  allowed_commands: "*"     # 可信开发/先观察 audit 时可用；收敛后改成最小命令列表
+  allowed_operators: "*"    # 收敛时单独列出需要的操作符，例如 ["|", "&&"]
+  audit_log:
+    enabled: true
+    log_policy_snapshot: true
+    log_success: false
 mcp_servers:
   path: "applications/<app_name>/config/.mcp.json"
 ```
 
 列表是整体替换，不是追加；写 `default_loaded_tools`、`skills` 这类列表时要表达完整意图。完整配置面见 `configuration-surface.md`。
+
+Shell 权限不确定时，先跑真实 workflow 生成 `shell_audit.log`，根据 `[POLICY_SNAPSHOT]` 和拦截事件收敛白名单；不要把 `allowed_commands: "*"` 当作最终安全配置。
 
 ## README 必写内容
 

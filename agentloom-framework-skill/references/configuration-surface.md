@@ -154,7 +154,9 @@ code_agent:
 - `dangerous_paths`、`block_destructive`：破坏性操作保护。
 - `sandbox`：`enabled/mode/allow_write/deny_write/network_isolation/excluded_commands`。
 - `background_tasks`：`enabled/max_concurrent/auto_background_on_timeout/max_output_bytes/stall_detection/stall_threshold_seconds`。
-- `audit_log`：`enabled/log_success`。
+- `audit_log`：`enabled/log_policy_snapshot/log_success`。`log_policy_snapshot` 应保持开启，用 `[POLICY_SNAPSHOT]` 记录每次运行的有效策略，包含 `allowed_commands: "*"` / `allowed_operators: "*"` 这类全允许默认。
+
+如果用户不确定权限怎么收敛，先用真实 workflow 跑出 `shell_audit.log`，review `[POLICY_SNAPSHOT]` 和拦截事件，再把真实需要的命令、操作符、路径或 sandbox 例外写进配置。完整流程见 `shell-security-audit.md`。
 
 ### tool_access_control
 

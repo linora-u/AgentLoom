@@ -62,6 +62,8 @@ find applications/<app_name>/agent_tools -name '*.py' -print0 2>/dev/null | xarg
 
 修改 checkpoint、resume、日志/维测、并发 Worker、文件回滚、任务列表或任务清理时，不能只跑单测；至少选 2 个真实 Application 或已有真实 workflow 跑功能路径。优先使用仓库里的 `applications/test_demo/*checkpoint*`、`applications/test_demo/*file_rewind*`、`applications/feature_planner_demo` 这类覆盖面明确的应用。
 
+修改 shell 权限、审计日志、路径安全、sandbox、后台任务或 stall 检测时，也不能只跑单测。先读 `shell-security-audit.md`，再至少跑覆盖 audit 证据和功能行为的真实 workflow。
+
 建议用隔离运行根，避免污染用户已有 checkpoint：
 
 ```bash
@@ -90,6 +92,36 @@ PYTHONPATH=/Users/bytedance/code/data_clear/AgentLoom-checkpoint \
 它会运行 `applications/test_demo/workflows/test_checkpoint_complex_supervisor.yaml`，分别制造 Supervisor 中断和 Worker 中断，并检查最终文件、task event、worker call 复用和 Worker memory restore。
 
 如果真实模型调用因权限、额度或超时失败，不能标为通过；记录失败命令、错误文本、已产生的 checkpoint 证据，以及还缺哪条功能路径。
+
+## Shell 安全与审计验证
+
+Shell 安全变更至少跑：
+
+```bash
+export AGENT_LOOM_RUNTIME_ROOT=/tmp/agentloom-runtime-shell-security
+.venv/bin/loom run applications/test_shell_audit/workflows/test_shell_audit_signals_agent.yaml --log-to-file
+.venv/bin/loom run applications/test_shell_audit/workflows/test_shell_audit_log_agent.yaml --log-to-file
+.venv/bin/loom run applications/test_shell_audit/workflows/test_shell_policy_snapshot_agent.yaml --log-to-file
+.venv/bin/loom run applications/test_shell_allowlist_matrix/workflows/test_shell_allowlist_matrix_agent.yaml --log-to-file
+```
+
+补充功能回归按改动面选择：
+
+```bash
+.venv/bin/loom run applications/test_demo/workflows/test_security_transparency_agent.yaml --log-to-file
+.venv/bin/loom run applications/test_demo/workflows/test_shell_stall_detection_agent.yaml --log-to-file
+.venv/bin/loom run applications/test_demo/workflows/test_shell_session_isolation_supervisor.yaml --log-to-file
+.venv/bin/loom run applications/test_demo/workflows/test_background_task_agent.yaml --log-to-file
+```
+
+通过标准：
+
+- final answer 不能只说 PASS；必须列出真实 `shell_audit.log`、agent log 路径和关键证据。
+- 必须读取真实 audit log 判定，不要只按异常文本或预期推断。
+- 全允许场景有 `[POLICY_SNAPSHOT]`，并显示 `allowed_commands: *` / `allowed_operators: *`。
+- allow-list 场景证明允许命令成功、拒绝命令失败、拒绝操作符失败。
+- 操作符拒绝的 suggestion 指向 `allowed_operators`，不得指向 `allowed_commands`。
+- stall/background 场景结束后无残留进程。
 
 ## 配置合同交叉验证
 

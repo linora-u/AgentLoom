@@ -21,6 +21,7 @@ argument-hint: "<AgentLoom task or application path>"
 
 - 用户说“帮我实现一个功能 / 用框架做一个功能 / 创建一个应用 / 扩展框架能力”：先读 [`references/function-routing.md`](references/function-routing.md)，判断是新建 Application、扩展现有 Application、加 Worker、加 Tool、加私有 Skill、加 Hook，还是只改文档。
 - 用户说“有哪些配置 / 这个配置能不能写 / skill 漏了配置 / system.yaml、llm.yaml、Agent YAML 怎么配”：先读 [`references/configuration-surface.md`](references/configuration-surface.md)，再按需要读 `docs/en/*.md` 和对应代码交叉验证。
+- 用户说“shell 权限怎么配 / audit log 看什么 / 安全策略有没有生效 / sandbox 怎么验证”：先读 [`references/shell-security-audit.md`](references/shell-security-audit.md)，再按需要读 [`references/configuration-surface.md`](references/configuration-surface.md) 和 [`references/validation-and-review.md`](references/validation-and-review.md)。
 - 需要生成或修改 `applications/<app_name>/`：读 [`references/application-generation.md`](references/application-generation.md)。
 - 需要写 Agent YAML / Worker YAML / `agent_function_schema` / `worker_agents`：读 [`references/yaml-contract.md`](references/yaml-contract.md)。
 - 需要为 Application 配置或创建私有 Skill：读 [`references/configuration-surface.md`](references/configuration-surface.md) 的 Skills/Hook 配置，再读 [`references/application-generation.md`](references/application-generation.md) 的目录规范。
@@ -49,7 +50,8 @@ argument-hint: "<AgentLoom task or application path>"
 4. 单职责用单 Agent；多个可独立验收阶段才用 Supervisor + N Worker。
 5. Application 内容必须落到 `applications/<app_name>/`；框架级 Skill/Hook 扩展按真实加载路径落盘；README 必须同步写验证记录。
 6. 写配置前先确认配置归属：LLM 参数只进 `config/llm.yaml`；应用行为优先用 `applications/<app>/config/system.yaml` 或 Agent YAML 白名单字段；Skill hooks 只写在 `SKILL.md` frontmatter。
-7. 最后必须运行验证命令。能跑到哪一步就记录到哪一步，不把“未执行”说成“通过”。
+7. Shell 权限不确定时，先跑真实 workflow 生成 `shell_audit.log`，review `POLICY_SNAPSHOT` 与拦截事件，再按需收敛 `allowed_commands`、`allowed_operators`、路径规则或 sandbox。
+8. 最后必须运行验证命令。能跑到哪一步就记录到哪一步，不把“未执行”说成“通过”。
 
 ## 命令速查
 
