@@ -149,7 +149,7 @@ def is_binary_file(path: Union[str, Path]) -> bool:
 # ---------------------------------------------------------------------------
 
 def normalize_path(path: Union[str, Path]) -> Path:
-    """Expand ``~`` and resolve to an absolute path.
+    """Expand ``~`` and normalize to a logical absolute path.
 
     Handles ``~`` expansion and ``..`` resolution.  Does **not** follow
     symlinks (use ``Path.resolve()`` for that).
@@ -157,7 +157,8 @@ def normalize_path(path: Union[str, Path]) -> Path:
     Leading/trailing whitespace is stripped so that LLM-generated paths
     like ``' /tmp/foo.txt'`` are handled gracefully.
     """
-    return Path(os.path.expanduser(str(path).strip())).resolve()
+    expanded = os.path.expanduser(str(path).strip())
+    return Path(os.path.abspath(os.path.normpath(expanded)))
 
 
 def validate_file_access(

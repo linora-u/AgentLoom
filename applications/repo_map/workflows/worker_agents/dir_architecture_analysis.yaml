@@ -107,7 +107,9 @@ workflow: |
   - **切勿凑字数**：宁可简短有洞察，也不要冗长平庸
 
   ## 输出格式
-  直接通过 `final_answer` 工具返回 Markdown 文本，格式如下：
+  必须调用 `final_answer(answer=<markdown>)` 工具返回 Markdown 文本。
+  禁止直接输出裸 Markdown 或纯文本；裸 Markdown 会被解析器拒绝，且不会被当作最终答案。
+  Markdown 内容格式如下：
 
   ```markdown
   # 架构分析: {dir_path}
@@ -133,6 +135,7 @@ workflow: |
   ```
 
   ## 注意事项
+  - 这是 tool_call 模式。最终结果只能通过 `final_answer` 工具返回，不能直接回复 Markdown 正文
   - index_content 内容很少时（目录只有少量文件），简短分析即可，不要凑字数
   - 测试文件与实现文件同目录存放是常见惯例（如 Go 的 `_test.go`、Python 的 `test_*.py`），不属于"test/spec 专用目录"
   - 目录名含 test/spec 且**仅含**测试文件时，才重点分析测试覆盖策略

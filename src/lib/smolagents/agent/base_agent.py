@@ -13,7 +13,16 @@ from enum import Enum
 from pathlib import Path
 from typing import Any, Callable, List, Optional
 
-from smolagents import AgentLogger, CodeAgent, LogLevel, Tool, ToolCallingAgent
+from smolagents import (
+    AgentLogger,
+    AgentToolCallError,
+    AgentToolExecutionError,
+    CodeAgent,
+    LogLevel,
+    Tool,
+    ToolCallingAgent,
+    validate_tool_arguments,
+)
 from smolagents.models import ChatMessage, MessageRole
 
 from src.lib.smolagents.models.model_manager import (
@@ -21,12 +30,9 @@ from src.lib.smolagents.models.model_manager import (
     get_model,
 )
 from src.lib.smolagents.memory.context_compression import ConversationHistoryManager
-from src.lib.smolagents.monkey_patch.memory_truncate import disable_smolagents_truncation
-from src.lib.smolagents.monkey_patch.monitor_metrics import patch_monitor_metrics
-from src.lib.smolagents.monkey_patch.rate_limiter_patch import patch_rate_limiter
-from src.lib.smolagents.monkey_patch.reasoning_content_patch import patch_litellm_reasoning_content
-from src.lib.smolagents.monkey_patch.tool_call_parsing_patch import patch_smolagents_tool_call_parsing
-from src.lib.smolagents.monkey_patch.tool_argument_coercion_patch import patch_tool_argument_coercion
+from src.lib.smolagents.monkey_patch import install_agentloom_runtime_adapters
+from src.lib.smolagents.agent.tool_argument_coercion import coerce_tool_arguments
+from src.lib.smolagents.models.tool_call_parser import parse_json_with_repair
 from src.lib.smolagents.skills.skills import SkillsManager
 from src.lib.logging import (
     get_global_logger,
@@ -81,15 +87,26 @@ from typing import Any as _Any
 
 _current_worker_memory: ContextVar[list | None] = ContextVar("_current_worker_memory", default=None)
 
-disable_smolagents_truncation()
-patch_monitor_metrics()
-patch_rate_limiter()
-patch_litellm_reasoning_content()
-patch_smolagents_tool_call_parsing()
-patch_tool_argument_coercion()
+install_agentloom_runtime_adapters()
 
 
 from src.lib.smolagents.agent.loom_mixin import LoomAgentMixin
+
+
+def _normalize_tool_arguments_object(arguments: dict[str, Any] | str) -> dict[str, Any] | str:
+    if not isinstance(arguments, str):
+        return arguments
+
+    parsed: Any = arguments
+    for _ in range(2):
+        if not isinstance(parsed, str):
+            break
+        try:
+            parsed = parse_json_with_repair(parsed)
+        except Exception:
+            return arguments
+
+    return parsed if isinstance(parsed, dict) else arguments
 
 
 
@@ -131,6 +148,47 @@ class ToolCallingAgentV2(LoomAgentMixin, ToolCallingAgent):
             smart_summary=smart_summary,
         )
         super().__init__(*args, **kwargs)
+
+    def execute_tool_call(self, tool_name: str, arguments: dict[str, str] | str) -> Any:
+        """Execute a tool with AgentLoom-local schema-bound argument coercion."""
+
+        available_tools = {**self.tools, **self.managed_agents}
+        if tool_name not in available_tools:
+            raise AgentToolExecutionError(
+                f"Unknown tool {tool_name}, should be one of: {', '.join(available_tools)}.",
+                self.logger,
+            )
+
+        tool = available_tools[tool_name]
+        arguments = _normalize_tool_arguments_object(arguments)
+        arguments = self._substitute_state_variables(arguments)
+        arguments = coerce_tool_arguments(tool, arguments)
+        is_managed_agent = tool_name in self.managed_agents
+
+        try:
+            validate_tool_arguments(tool, arguments)
+        except (ValueError, TypeError) as e:
+            raise AgentToolCallError(str(e), self.logger) from e
+        except Exception as e:
+            error_msg = f"Error executing tool '{tool_name}' with arguments {str(arguments)}: {type(e).__name__}: {e}"
+            raise AgentToolExecutionError(error_msg, self.logger) from e
+
+        try:
+            if isinstance(arguments, dict):
+                return tool(**arguments) if is_managed_agent else tool(**arguments, sanitize_inputs_outputs=True)
+            return tool(arguments) if is_managed_agent else tool(arguments, sanitize_inputs_outputs=True)
+        except Exception as e:
+            if is_managed_agent:
+                error_msg = (
+                    f"Error executing request to team member '{tool_name}' with arguments {str(arguments)}: {e}\n"
+                    "Please try again or request to another team member"
+                )
+            else:
+                error_msg = (
+                    f"Error executing tool '{tool_name}' with arguments {str(arguments)}: {type(e).__name__}: {e}\n"
+                    "Please try again or use another tool"
+                )
+            raise AgentToolExecutionError(error_msg, self.logger) from e
 
 class AgentType(Enum):
     """Type of agent in the system."""
@@ -1075,6 +1133,7 @@ class RoleDrivenAgent(BaseAgent):
         task_id: Optional[str] = None,
         checkpoint_manager: Optional[Any] = None,
         resume: bool = False,
+        additional_args: Optional[dict[str, Any]] = None,
     ) -> str:
         from src.lib.checkpoint.coordinator import CheckpointCoordinator
 
@@ -1172,6 +1231,8 @@ class RoleDrivenAgent(BaseAgent):
                 result = None
                 for task_index, current_task in enumerate(transformed_tasks):
                     run_kwargs: dict = {"task": current_task}
+                    if additional_args:
+                        run_kwargs["additional_args"] = dict(additional_args)
                     if resume or task_index > 0:
                         run_kwargs["reset"] = False
                     if (

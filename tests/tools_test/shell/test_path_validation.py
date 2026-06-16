@@ -254,8 +254,8 @@ class TestEdgeCases:
             with pytest.raises(ValueError, match="outside allowed workspace"):
                 check_path_constraints("cat ./../../etc/passwd")
 
-    def test_resolve_path_realpath_follows_symlinks(self, tmp_path):
-        """_resolve_path resolves symlinks via realpath when path exists."""
+    def test_resolve_path_preserves_logical_symlink_path(self, tmp_path):
+        """_resolve_path returns the shell-facing logical path."""
         real_dir = tmp_path / "real"
         real_dir.mkdir()
         (real_dir / "file.txt").write_text("hello")
@@ -263,7 +263,38 @@ class TestEdgeCases:
         link.symlink_to(real_dir)
 
         result = _resolve_path("link/file.txt", str(tmp_path))
-        assert "real" in result  # symlink was resolved
+        assert result == str(link / "file.txt")
+
+    def test_path_comparison_resolves_symlink_alias(self, tmp_path):
+        """Allowed roots compare filesystem identity, not path spelling."""
+        real_dir = tmp_path / "real"
+        real_dir.mkdir()
+        (real_dir / "file.txt").write_text("hello")
+        alias = tmp_path / "alias"
+        alias.symlink_to(real_dir)
+
+        assert _is_path_within_allowed(str(alias / "file.txt"), [str(real_dir)]) is True
+
+    def test_path_comparison_blocks_symlink_escape(self, tmp_path):
+        """A workspace symlink to an outside directory is still outside."""
+        workspace = tmp_path / "workspace"
+        outside = tmp_path / "outside"
+        workspace.mkdir()
+        outside.mkdir()
+        (outside / "secret.txt").write_text("secret")
+        link = workspace / "escape"
+        link.symlink_to(outside)
+
+        assert _is_path_within_allowed(str(link / "secret.txt"), [str(workspace)]) is False
+
+    def test_dangerous_path_comparison_resolves_alias(self, tmp_path):
+        """Dangerous path checks compare canonical identity as well."""
+        real_dir = tmp_path / "critical"
+        real_dir.mkdir()
+        alias = tmp_path / "critical_alias"
+        alias.symlink_to(real_dir)
+
+        assert _is_dangerous_removal_path(str(alias), {str(real_dir)}) is True
 
     def test_resolve_path_nonexistent_still_normalizes(self):
         """_resolve_path normalizes non-existent paths without crash."""

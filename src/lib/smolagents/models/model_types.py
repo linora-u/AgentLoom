@@ -63,9 +63,6 @@ class ModelConfig:
     context_cache: bool = DEFAULT_MODEL_CONTEXT_CACHE
     system_prompt_boundary: Optional[str] = None
     requests_per_minute: int = DEFAULT_MODEL_REQUESTS_PER_MINUTE
-    # Three-state flag: "auto" (detect at runtime), "true" (skip detection,
-    # use native), "false" (skip detection, use text parsing fallback).
-    supports_native_tool_calls: str = "auto"
     # Whether the model supports json_schema structured output (response_format).
     # "true" - use structured output (json_schema) for code_act mode
     # "false" - use text-based <code> block parsing for code_act mode
@@ -148,7 +145,6 @@ def _build_model_config_from_yaml(type_name: str) -> ModelConfig:
         context_cache=bool(resolved.context_cache),
         system_prompt_boundary=getattr(resolved, 'system_prompt_boundary', None),
         requests_per_minute=int(resolved.requests_per_minute),
-        supports_native_tool_calls=getattr(resolved, 'supports_native_tool_calls', 'auto'),
         supports_structured_output=getattr(resolved, 'supports_structured_output', 'false'),
         extra_completion_params=getattr(resolved, 'extra_completion_params', None),
     )

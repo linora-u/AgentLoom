@@ -31,7 +31,7 @@ def _make_worker(config: dict) -> YamlConfiguredAgent:
     worker = object.__new__(YamlConfiguredAgent)
     worker._config = config
     worker._normalized = None
-    worker.run = lambda q: f"RUN::{q}"
+    worker.run = lambda q, additional_args=None: f"RUN::{q}"
     worker.process_tool_query = lambda q: q
     return worker
 

@@ -46,13 +46,15 @@ workflow: |
 |---|---|---|
 | `tools` | `list[dict]` | Agent 额外工具列表；预定义工具只写 `name`，动态工具写 `name/module/function` |
 | `model_type` | `str` | 选择 `config/llm.yaml` 中定义的模型类型；缺失时使用 `model.default_model_type` |
-| `tool_call_type` | `code_act` 或 `tool_call` | `code_act` 让模型写 Python 调工具；`tool_call` 使用结构化 tool calls |
+| `tool_call_type` | `code_act` 或 `tool_call` | `code_act` 让模型写 Python 调工具；`tool_call` 发送 provider/native tools schema，并只接受结构化 tool calls |
 | `max_steps` | `int` | smolagents 最大步数；默认 80 |
 | `planning_interval` | 正整数或数字字符串 | 周期性 planning；设置后自动注入 `todo_write` |
 | `concurrency` | 正整数或 `"auto"` | 仅影响同一 Worker 通过 `.batch()` 被多输入批量调用 |
 | `execution_env` | `dict` | `code_act` 的执行环境：`local`、`docker`、`e2b`、`wasm` |
 | `prompt` | `str` 或 `{path: ...}` | 自定义系统 prompt 模板路径 |
 | `skills` | `str` / `dict` / `list` | 当前 Agent 私有 Skill 配置 |
+
+`tool_call` 模式的主路径是 provider/native tool calls。只要当前 Agent 有可用工具，AgentLoom 就发送结构化 tools schema；如果 provider 返回文本 fallback，也只接受明确结构化容器，例如 `{name, arguments}`、dump 出来的 native `tool_calls/function`、XML/invoke wrapper。不要设计依赖自由文本正则兜底的 workflow。
 
 Supervisor 专属：
 
@@ -230,11 +232,12 @@ model:
 | `context_cache` | 是否注入 cache control |
 | `system_prompt_boundary` | 静态/动态系统 prompt 分割 marker |
 | `requests_per_minute` | 模型类型级 RPM，用于限流与并发 auto |
-| `supports_native_tool_calls` | `"auto"` / `"true"` / `"false"` |
 | `supports_structured_output` | `"true"` / `"false"`；影响 `code_act` 结构化输出路径 |
 | 其他未知字段 | 收进 `extra_completion_params` 并透传给 `litellm.completion()` |
 
-未知字段透传适合 provider 特性，例如 `reasoning_effort`、`extra_body`。写之前要确认目标 endpoint 支持；不要把业务配置误塞进模型类型里。
+`tool_choice` 只是 provider/smolagents 请求参数；如果写在模型类型里，会作为未知字段透传给 `litellm.completion()`，不参与 native tool-call 能力探测。
+
+未知字段透传适合 provider 特性，例如 `reasoning_effort`、`tool_choice`、`extra_body`。写之前要确认目标 endpoint 支持；不要把业务配置误塞进模型类型里。
 
 `langfuse` 目前只是配置模型预留，未接入自动 tracing；不要为了“完整”强行配置。
 
