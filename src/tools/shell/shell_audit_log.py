@@ -90,6 +90,11 @@ _SUGGESTIONS: dict[str, str] = {
         "  shell_settings:\n"
         "    allowed_commands: [\"{name}\", ...]"
     ),
+    "OPERATOR_WHITELIST_REJECT": (
+        "To allow this operator, add it to the agent YAML:\n"
+        "  shell_settings:\n"
+        "    allowed_operators: [\"{name}\", ...]"
+    ),
     EVENT_STALL_DETECTED: (
         "The command appears stuck on an interactive prompt. "
         "Re-run with a non-interactive flag (--yes, -y, --non-interactive) "
@@ -337,8 +342,17 @@ class ShellAuditLogger:
             message: The human-readable rejection reason.
             name: The rejected command or operator name.
         """
-        suggestion = _SUGGESTIONS[EVENT_WHITELIST_REJECT].format(
-            name=name or "<command>",
+        is_operator = (
+            message.startswith("Operator not allowed:")
+            or (name in {"&&", "|", ";", "||", "&"})
+        )
+        suggestion_key = (
+            "OPERATOR_WHITELIST_REJECT"
+            if is_operator
+            else EVENT_WHITELIST_REJECT
+        )
+        suggestion = _SUGGESTIONS[suggestion_key].format(
+            name=name or ("<operator>" if is_operator else "<command>"),
         )
         self._write_entry(
             EVENT_WHITELIST_REJECT,

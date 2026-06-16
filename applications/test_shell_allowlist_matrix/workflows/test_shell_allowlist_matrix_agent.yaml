@@ -1,0 +1,81 @@
+name: "test_shell_allowlist_matrix"
+description: "Validate explicit partial shell allow-list enforcement and audit evidence"
+
+model_type: "powerful"
+tool_call_type: "code_act"
+
+tools:
+  - name: "shell_tool"
+  - name: "read_file"
+
+shell_settings:
+  allowed_commands:
+    - "cat"
+    - "echo"
+    - "grep"
+    - "ls"
+    - "printf"
+    - "pwd"
+    - "wc"
+  allowed_operators: ["|", "&&"]
+
+workflow: |
+  # Shell Allow-list Matrix Validation
+
+  You are a testing agent. Execute the validation below with real shell_tool
+  calls. This agent intentionally allows only a small subset of shell commands:
+  cat, echo, grep, ls, printf, pwd, wc. It allows only the "|" and "&&"
+  operators.
+
+  Do not mark PASS from expectation alone. You must inspect the real outputs
+  and the real shell_audit.log produced by this run.
+
+  Execute this deterministic validation:
+
+  1. Allowed commands must work:
+     - `echo allow_matrix_ok`
+     - `pwd`
+     - `printf "alpha\nbeta\n" | grep beta`
+     - `echo allow_pipe_marker | wc -c`
+
+  2. Disallowed commands must be rejected:
+     - `date`
+     - `whoami`
+     - `uname -a`
+     Each rejection must include the exact current allow-list text:
+     `Allowed commands: cat, echo, grep, ls, printf, pwd, wc`.
+
+  3. Disallowed operators must be rejected:
+     - `echo first ; echo second`
+     The rejection must include:
+     `Allowed operators: &&, |`.
+
+  4. Locate this run's audit log with shell_tool:
+     `ls -dt .logs/test_shell_allowlist_matrix/*/shell_audit.log`
+     Use the first path returned.
+
+  5. Use read_file on that audit log. Verify it contains:
+     - [WHITELIST_REJECT] entries for date, whoami, uname, and operator ;
+     - the exact allowed commands text above;
+     - the exact allowed operators text above;
+     - command rejections suggest `allowed_commands`;
+     - operator rejection suggests `allowed_operators`;
+     - operator rejection does NOT suggest `allowed_commands: [";", ...]`.
+
+  6. Locate the agent log with shell_tool:
+     `ls -dt .logs/test_shell_allowlist_matrix/*/test_shell_allowlist_matrix.log`
+     Confirm its parent directory equals the audit log parent directory.
+
+  Final answer must include:
+  - PASS/FAIL for each row.
+  - The exact audit log path inspected.
+  - The exact allowed commands text observed.
+  - The exact allowed operators text observed.
+  - A truthful failure reason for any missing evidence.
+
+skills: []
+worker_agents: []
+max_steps: 24
+
+execution_env:
+  type: "local"

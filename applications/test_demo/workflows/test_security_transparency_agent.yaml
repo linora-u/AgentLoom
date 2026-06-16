@@ -7,59 +7,75 @@ tool_call_type: "code_act"
 workflow: |
   # Security Policy Transparency Validation Workflow
 
-  You are a testing agent. Execute ALL steps below using the provided tools.
-  After each step, report PASS or FAIL with a short explanation.
+  You are a testing agent. Execute the harness below in one Python code block.
+  It catches expected security denials and only marks a row PASS when the
+  actual tool output contains the required reason and suggested alternative.
+  After the harness returns, use its printed summary as your final answer.
 
-  ## Step 1: shell_tool — normal command succeeds
-  Use shell_tool to run: echo "security transparency test"
-  Expected: output contains "security transparency test"
-  Verify: command executes successfully, output is not empty.
+  ```python
+  rows = []
 
-  ## Step 2: shell_tool — list workspace files
-  Use shell_tool to run: ls -la
-  Expected: output contains a directory listing with file names.
-  Verify: command succeeds, output is non-empty.
+  def add(step, status, details):
+      rows.append((step, status, details.replace("\n", " | ")))
 
-  ## Step 3: shell_tool — blocked command substitution
-  Use shell_tool to run: echo $(whoami)
-  Expected: the command should be BLOCKED by security. The error message should contain:
-    1. "Blocked" or "command substitution"
-    2. "Suggested alternative:" with guidance about using write_markdown_file or edit_file
-  Verify: error message contains both the block reason AND an alternative suggestion.
+  def expect_success(step, command, required):
+      try:
+          output = shell_tool(command=command, timeout=10)
+      except Exception as exc:
+          add(step, "FAIL", f"unexpected error: {exc}")
+          return
+      status = "PASS" if required in output else "FAIL"
+      add(step, status, output[:300])
 
-  ## Step 4: shell_tool — blocked sudo
-  Use shell_tool to run: sudo ls /root
-  Expected: the command should be BLOCKED by security. The error message should contain:
-    1. "Blocked" about dangerous shell prefix
-    2. "Suggested alternative:" with guidance about running commands directly
-  Verify: error message contains both the block reason AND an alternative suggestion.
+  def expect_block(step, command, required_terms):
+      try:
+          output = shell_tool(command=command, timeout=10)
+          add(step, "FAIL", f"unexpected success: {output[:300]}")
+          return
+      except Exception as exc:
+          text = str(exc)
+      status = "PASS" if all(term in text for term in required_terms) else "FAIL"
+      add(step, status, text)
 
-  ## Step 5: shell_tool — blocked destructive command
-  Use shell_tool to run: rm -rf /
-  Expected: the command should be BLOCKED by security. The error message should contain:
-    1. "Blocked" or "destructive"
-    2. "Suggested alternative:" with guidance about targeted operations
-  Verify: error message contains both the block reason AND an alternative suggestion.
+  expect_success("normal command", 'echo "security transparency test"', "security transparency test")
+  expect_success("workspace listing", "ls -la", "README.md")
+  expect_block(
+      "command substitution blocked",
+      "echo $(whoami)",
+      ["Blocked", "command substitution", "Suggested alternative:", "write_markdown_file"],
+  )
+  expect_block(
+      "sudo blocked",
+      "sudo ls /root",
+      ["Blocked", "sudo", "Suggested alternative:", "without sudo"],
+  )
+  expect_block(
+      "destructive command blocked",
+      "rm -rf /",
+      ["Blocked", "destructive", "Suggested alternative:", "targeted operations"],
+  )
+  expect_success("workspace cat pipeline", "cat README.md | head -5", "English")
 
-  ## Step 6: shell_tool — read file with cat (should succeed within workspace)
-  Use shell_tool to run: cat README.md | head -5
-  Expected: output contains the first 5 lines of README.md.
-  Verify: command succeeds, output is non-empty.
-
-  ## Final Summary
-  Print a summary table:
-  | Step | Tool | Status | Details |
-  Report overall: X/6 PASSED.
-  
-  Also report: for each blocked command (steps 3-5), confirm that the error
-  message included BOTH a reason AND a suggested alternative.
+  passed = sum(1 for _, status, _ in rows if status == "PASS")
+  overall = "PASS" if passed == len(rows) else "FAIL"
+  summary_lines = [
+      f"Overall: {overall} ({passed}/{len(rows)} passed)",
+      "| Step | Status | Evidence |",
+      "|---|---|---|",
+  ]
+  for step, status, details in rows:
+      summary_lines.append(f"| {step} | {status} | {details} |")
+  summary = "\n".join(summary_lines)
+  print(summary)
+  final_answer(summary)
+  ```
 
 tools:
   - name: "shell_tool"
 
 worker_agents: []
 skills: []
-max_steps: 15
+max_steps: 8
 
 execution_env:
   type: "local"

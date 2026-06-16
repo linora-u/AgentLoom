@@ -213,10 +213,14 @@ class TestEdgeCases:
 
     def test_resolve_path_relative(self):
         cwd = '/home/user/project'
-        assert _resolve_path('src/main.py', cwd) == '/home/user/project/src/main.py'
+        expected = os.path.join(
+            os.path.realpath('/home'),
+            'user/project/src/main.py',
+        )
+        assert _resolve_path('src/main.py', cwd) == expected
 
     def test_resolve_path_absolute(self):
-        assert _resolve_path('/etc/passwd', '/home/user') == '/etc/passwd'
+        assert _resolve_path('/etc/passwd', '/home/user') == os.path.realpath('/etc/passwd')
 
     def test_resolve_path_tilde(self):
         result = _resolve_path('~/file.txt', '/home/user/project')
@@ -230,6 +234,7 @@ class TestEdgeCases:
     def test_is_dangerous_removal_path(self):
         assert _is_dangerous_removal_path('/', DEFAULT_DANGEROUS_PATHS) is True
         assert _is_dangerous_removal_path('/etc', DEFAULT_DANGEROUS_PATHS) is True
+        assert _is_dangerous_removal_path(os.path.realpath('/etc'), DEFAULT_DANGEROUS_PATHS) is True
         assert _is_dangerous_removal_path('/home/user/project', DEFAULT_DANGEROUS_PATHS) is False
 
     def test_extract_redirect_targets(self):
@@ -247,6 +252,16 @@ class TestEdgeCases:
         """/tmp is allowed when included in allowed directories."""
         with _patch_allowed_dirs(os.getcwd(), "/tmp"):
             check_path_constraints("cat /tmp/test.txt")  # should not raise
+
+    def test_nonexistent_child_under_symlinked_include_path_allowed(self):
+        """/tmp/nonexistent canonicalizes under /private/tmp on macOS."""
+        target = "/tmp/agentloom_shell_nonexistent_child"
+        assert _resolve_path(target, os.getcwd()) == os.path.join(
+            os.path.realpath("/tmp"),
+            "agentloom_shell_nonexistent_child",
+        )
+        with _patch_allowed_dirs(os.getcwd(), "/tmp"):
+            check_path_constraints(f"cat {target}")  # should not raise
 
     def test_path_traversal_normalized(self):
         """Path traversal attempts should be normalized and caught."""
@@ -299,7 +314,8 @@ class TestEdgeCases:
     def test_resolve_path_nonexistent_still_normalizes(self):
         """_resolve_path normalizes non-existent paths without crash."""
         result = _resolve_path("../foo/bar/../baz", "/home/user/project")
-        assert result == "/home/user/foo/baz"
+        expected = os.path.join(os.path.realpath('/home'), 'user/foo/baz')
+        assert result == expected
 
 
 # =========================================================================

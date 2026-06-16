@@ -1,4 +1,4 @@
-"""Tests for CWD tracking in persistent shell sessions.
+"""Tests for CWD tracking in session-scoped shell sessions.
 
 CWD is tracked out-of-band via a temp file (pwd >| cwd_file).
 The CWD marker is never embedded in stdout.
@@ -21,55 +21,59 @@ from src.tools.shell.process import ShellProcess
 
 
 @pytest.fixture
-def persistent_shell():
-    """Create a persistent ShellProcess and clean up after test."""
-    proc = ShellProcess(persistent=True, load_profile=False)
+def session_shell():
+    """Create a session-scoped ShellProcess and clean up after test."""
+    proc = ShellProcess(session_scoped=True, load_profile=False)
     yield proc
     proc.cleanup()
 
 
+def _real(path: str) -> str:
+    return os.path.realpath(path)
+
+
 # ---------------------------------------------------------------------------
-# CWD tracking -- persistent mode
+# CWD tracking -- session-scoped mode
 # ---------------------------------------------------------------------------
 
 @pytest.mark.skipif(
     not sys.platform.startswith(("linux", "darwin")),
-    reason="Unix persistent shell only",
+    reason="Unix session-scoped shell only",
 )
-class TestCwdTrackingPersistent:
-    """CWD tracking in persistent sessions."""
+class TestCwdTrackingSessionScoped:
+    """CWD tracking in session-scoped sessions."""
 
-    def test_initial_cwd_after_first_command(self, persistent_shell):
+    def test_initial_cwd_after_first_command(self, session_shell):
         """After the first command, cwd is set to the actual directory."""
-        assert persistent_shell.cwd is None  # Before any command
-        persistent_shell.run("echo init")
-        assert persistent_shell.cwd is not None
-        assert os.path.isdir(persistent_shell.cwd)
+        assert session_shell.cwd is None  # Before any command
+        session_shell.run("echo init")
+        assert session_shell.cwd is not None
+        assert os.path.isdir(session_shell.cwd)
 
-    def test_cd_updates_cwd(self, persistent_shell):
-        """cd /tmp updates cwd to /tmp."""
-        persistent_shell.run("cd /tmp")
-        assert persistent_shell.cwd == "/tmp"
+    def test_cd_updates_cwd(self, session_shell):
+        """cd /tmp updates cwd to the physical /tmp location."""
+        session_shell.run("cd /tmp")
+        assert session_shell.cwd == _real("/tmp")
 
-    def test_multiple_cd_tracks_last(self, persistent_shell):
+    def test_multiple_cd_tracks_last(self, session_shell):
         """Multiple cd commands -- cwd follows the last one."""
-        persistent_shell.run("cd /tmp")
-        assert persistent_shell.cwd == "/tmp"
-        persistent_shell.run("cd /var")
-        assert persistent_shell.cwd == "/var"
-        persistent_shell.run("cd /usr")
-        assert persistent_shell.cwd == "/usr"
+        session_shell.run("cd /tmp")
+        assert session_shell.cwd == _real("/tmp")
+        session_shell.run("cd /var")
+        assert session_shell.cwd == _real("/var")
+        session_shell.run("cd /usr")
+        assert session_shell.cwd == _real("/usr")
 
-    def test_cd_nonexistent_keeps_previous(self, persistent_shell):
+    def test_cd_nonexistent_keeps_previous(self, session_shell):
         """cd to non-existent directory does not change cwd."""
-        persistent_shell.run("cd /tmp")
-        assert persistent_shell.cwd == "/tmp"
-        persistent_shell.run("cd /nonexistent_dir_xyz 2>/dev/null || true")
-        assert persistent_shell.cwd == "/tmp"  # Unchanged
+        session_shell.run("cd /tmp")
+        assert session_shell.cwd == _real("/tmp")
+        session_shell.run("cd /nonexistent_dir_xyz 2>/dev/null || true")
+        assert session_shell.cwd == _real("/tmp")  # Unchanged
 
-    def test_tracking_invisible_in_output(self, persistent_shell):
+    def test_tracking_invisible_in_output(self, session_shell):
         """CWD tracking data (file paths, pwd output) never appears in user output."""
-        output = persistent_shell.run("echo HELLO_WORLD")
+        output = session_shell.run("echo HELLO_WORLD")
         # The CWD tracking is done out-of-band via temp files,
         # so NONE of the tracking artifacts should be in output.
         assert "HELLO_WORLD" in output
@@ -87,6 +91,6 @@ class TestCwdTrackingStandalone:
 
     def test_standalone_cwd_none(self):
         """Standalone process has cwd = None even after run."""
-        proc = ShellProcess(persistent=False)
+        proc = ShellProcess(session_scoped=False)
         proc.run("echo test")
         assert proc.cwd is None

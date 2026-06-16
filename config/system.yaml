@@ -169,7 +169,11 @@ tool_metadata:
     is_concurrency_safe: true
     category: search
   shell_tool:
-    max_result_chars: 5000
+    # shell_tool already truncates large command output to a head/tail preview
+    # and embeds the full-output artifact path in that preview. Keep the outer
+    # tool shim threshold above shell_tool's own preview size so the artifact
+    # notice remains visible to the agent.
+    max_result_chars: 40000
     is_concurrency_safe: false
     category: shell
   check_background_task:

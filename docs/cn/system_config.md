@@ -1102,7 +1102,9 @@ tool_metadata:
     is_concurrency_safe: true
     category: search
   shell_tool:
-    max_result_chars: 5000
+    # shell_tool 自身会对大输出做截断并写入完整输出路径。
+    # 外层 shim 阈值需高于该预览，避免隐藏完整输出提示。
+    max_result_chars: 40000
     is_concurrency_safe: false
     category: shell
   read_file:

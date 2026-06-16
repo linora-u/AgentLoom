@@ -1,17 +1,18 @@
-name: "shell_worker"
+name: "shell_session_worker"
 description: |
-  一个工作 agent，负责演示 shell 的持久性和独立性。
+  一个工作 agent，负责验证 shell session 的 CWD 隔离和环境变量非持久化。
 model_type: "powerful"
 tool_call_type: "code_act"
 workflow: |
   # Shell Worker Workflow
   1. 接收 supervisor 的指令
-  2. 使用 bash/shell 工具执行对应的 cd, pwd 等命令
-  3. 必须返回真实的指令执行结果
+  2. 使用 shell_tool 严格执行 supervisor 要求的 cd、pwd、export、echo 命令
+  3. 必须返回每一步真实的指令输出
+  4. 如果 `export X=... && echo $X` 同命令有输出，但下一次 `echo $X` 为空，应明确说明 env 不跨调用持久化
 
 agent_function_schema:
   description: |
-    子 agent，用于隔离 shell 执行环境
+    子 agent，用于隔离 shell session 执行环境
   inputs:
     query:
       description: |
