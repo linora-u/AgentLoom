@@ -1,7 +1,7 @@
 """Tests for file-based output capture in the subprocess engine.
 
 Covers:
-- Normal: Output correctly captured via file FD for persistent mode
+- Normal: Output correctly captured via file FD for session-scoped mode
 - Normal: Large output fully captured without memory issues
 - Abnormal: Empty output, command failure output
 - Boundary: Binary-like output, unicode output, zero-length output
@@ -29,8 +29,8 @@ class TestFileOutputCapture:
     """Verify output is correctly captured via file descriptors."""
 
     def test_simple_echo_captured(self):
-        """Simple echo output is captured in persistent mode."""
-        proc = ShellProcess(persistent=True, load_profile=False)
+        """Simple echo output is captured in session-scoped mode."""
+        proc = ShellProcess(session_scoped=True, load_profile=False)
         try:
             result = proc.run("echo hello_file_output")
             assert "hello_file_output" in result
@@ -39,7 +39,7 @@ class TestFileOutputCapture:
 
     def test_multiline_output_captured(self):
         """Multi-line output is fully captured."""
-        proc = ShellProcess(persistent=True, load_profile=False)
+        proc = ShellProcess(session_scoped=True, load_profile=False)
         try:
             result = proc.run("echo line1 && echo line2 && echo line3")
             assert "line1" in result
@@ -50,7 +50,7 @@ class TestFileOutputCapture:
 
     def test_stderr_captured_in_output(self):
         """stderr is captured alongside stdout."""
-        proc = ShellProcess(persistent=True, load_profile=False)
+        proc = ShellProcess(session_scoped=True, load_profile=False)
         try:
             result = proc.run("echo stdout_msg && echo stderr_msg >&2")
             assert "stdout_msg" in result
@@ -60,7 +60,7 @@ class TestFileOutputCapture:
 
     def test_large_output_captured_completely(self):
         """Large output (10K+ lines) is fully captured."""
-        proc = ShellProcess(persistent=True, load_profile=False)
+        proc = ShellProcess(session_scoped=True, load_profile=False)
         try:
             result = proc.run("seq 1 10000")
             assert "1" in result
@@ -74,7 +74,7 @@ class TestFileOutputCapture:
         """Output temp files are cleaned up after execution."""
         import glob
         before = set(glob.glob("/tmp/agentloom_output_*"))
-        proc = ShellProcess(persistent=True, load_profile=False)
+        proc = ShellProcess(session_scoped=True, load_profile=False)
         try:
             proc.run("echo test")
         finally:
@@ -93,7 +93,7 @@ class TestFileOutputErrors:
 
     def test_failed_command_output_captured(self):
         """Output from a command that exits non-zero is captured."""
-        proc = ShellProcess(persistent=True, load_profile=False)
+        proc = ShellProcess(session_scoped=True, load_profile=False)
         try:
             result = proc.run("echo before_error && false && echo after_error")
             assert "before_error" in result
@@ -103,7 +103,7 @@ class TestFileOutputErrors:
 
     def test_nonexistent_command_error(self):
         """Error message for nonexistent command is captured."""
-        proc = ShellProcess(persistent=True, load_profile=False)
+        proc = ShellProcess(session_scoped=True, load_profile=False)
         try:
             result = proc.run("nonexistent_command_xyz_123 2>&1 || true")
             assert "not found" in result.lower() or "command not found" in result.lower() or result != ""
@@ -120,7 +120,7 @@ class TestFileOutputBoundary:
 
     def test_empty_output_command(self):
         """Command producing no output returns empty string."""
-        proc = ShellProcess(persistent=True, load_profile=False)
+        proc = ShellProcess(session_scoped=True, load_profile=False)
         try:
             result = proc.run("true")
             # May be empty or contain minimal formatting
@@ -130,7 +130,7 @@ class TestFileOutputBoundary:
 
     def test_unicode_output(self):
         """Unicode content in output is preserved."""
-        proc = ShellProcess(persistent=True, load_profile=False)
+        proc = ShellProcess(session_scoped=True, load_profile=False)
         try:
             result = proc.run("echo 'Hello 你好 🌍'")
             assert "Hello" in result
@@ -140,7 +140,7 @@ class TestFileOutputBoundary:
 
     def test_output_with_ansi_codes_stripped(self):
         """ANSI escape codes in output are stripped."""
-        proc = ShellProcess(persistent=True, load_profile=False)
+        proc = ShellProcess(session_scoped=True, load_profile=False)
         try:
             # printf with ANSI color
             result = proc.run(r"printf '\033[31mRED\033[0m NORMAL'")
@@ -152,6 +152,6 @@ class TestFileOutputBoundary:
 
     def test_standalone_output_matches(self):
         """Standalone mode also captures output correctly."""
-        proc = ShellProcess(persistent=False)
+        proc = ShellProcess(session_scoped=False)
         result = proc.run("echo standalone_test_output")
         assert "standalone_test_output" in result

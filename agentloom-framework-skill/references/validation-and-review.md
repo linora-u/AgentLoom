@@ -91,6 +91,44 @@ PYTHONPATH=/Users/bytedance/code/data_clear/AgentLoom-checkpoint \
 
 如果真实模型调用因权限、额度或超时失败，不能标为通过；记录失败命令、错误文本、已产生的 checkpoint 证据，以及还缺哪条功能路径。
 
+## Shell 安全与审计验证
+
+修改 shell 权限、审计、sandbox、路径安全、后台任务或 stall 检测时，不能只跑单测。按 `shell-security-audit.md` 先确认 audit log 能记录有效策略，再用真实 Application 验证该允许的允许、该拒绝的拒绝。
+
+建议使用隔离 runtime：
+
+```bash
+export AGENT_LOOM_RUNTIME_ROOT=/tmp/agentloom-runtime-shell-security
+```
+
+核心真实 LLM 验证：
+
+```bash
+.venv/bin/loom run applications/test_shell_audit/workflows/test_shell_policy_snapshot_agent.yaml --log-to-file
+.venv/bin/loom run applications/test_shell_audit/workflows/test_shell_audit_log_agent.yaml --log-to-file
+.venv/bin/loom run applications/test_shell_audit/workflows/test_shell_audit_signals_agent.yaml --log-to-file
+.venv/bin/loom run applications/test_shell_allowlist_matrix/workflows/test_shell_allowlist_matrix_agent.yaml --log-to-file
+```
+
+补充验证：
+
+```bash
+.venv/bin/loom run applications/test_demo/workflows/test_security_transparency_agent.yaml --log-to-file
+.venv/bin/loom run applications/test_demo/workflows/test_background_task_agent.yaml --log-to-file
+.venv/bin/loom run applications/test_demo/workflows/test_shell_stall_detection_agent.yaml --log-to-file
+.venv/bin/loom run applications/test_demo/workflows/test_shell_session_isolation_supervisor.yaml --log-to-file
+```
+
+通过标准：
+
+- LLM final 不能只写 PASS，必须列出实际 `shell_audit.log` 路径和关键证据行。
+- agent log 与 shell audit log 父目录一致。
+- 全允许场景必须有 `[POLICY_SNAPSHOT]`，且记录 `allowed_commands: *` / `allowed_operators: *`。
+- 白名单场景必须证明允许命令成功、未允许命令被拒绝、未允许操作符被拒绝。
+- `;` 等操作符拒绝的 suggestion 必须指向 `allowed_operators`，不得建议放进 `allowed_commands`。
+- timeout/stall/background 场景结束后检查无 `sleep 300` 等残留进程。
+- sandbox 不可用时记录真实 unavailable reason，不伪造 sandbox PASS。
+
 ## 配置合同交叉验证
 
 修改 `agentloom-framework-skill`、配置文档或 runtime 配置语义时，必须同时查文档与代码。不要只根据 `docs/en` 改 skill，因为文档可能落后于实现。
@@ -99,7 +137,7 @@ PYTHONPATH=/Users/bytedance/code/data_clear/AgentLoom-checkpoint \
 
 ```bash
 rg -n "_WORKFLOW_OVERLAY_KEYS|_LLM_ONLY_TOP_LEVEL_KEYS|extract_workflow_overlay" src/lib/config/config.py
-rg -n "class RootSettings|class ToolAccessControlSettings|class LlmModelTypeSettings|extra_completion_params|supports_structured_output|tool_choice" src/lib/config src/lib/smolagents/models docs/en docs/cn agentloom-framework-skill
+rg -n "class RootSettings|class ToolAccessControlSettings|class LlmModelTypeSettings|extra_completion_params|supports_structured_output|supports_native_tool_calls|tool_choice" src/lib/config src/lib/smolagents/models docs/en docs/cn agentloom-framework-skill
 rg -n "install_agentloom_runtime_adapters|parse_structured_tool_call|ToolCallCandidate|schema-bound|tool_call_type" src/lib/smolagents src/lib/config tests docs/en docs/cn agentloom-framework-skill
 rg -n "load-mode|allow-scripts|allow-network|Duplicate skill name|hooks:" src/lib/smolagents/skills src/lib/smolagents/hooks docs/en agentloom-framework-skill
 rg -n "mcp_servers|parse_mcp_servers_yaml_value" src tests docs/en agentloom-framework-skill
@@ -110,6 +148,7 @@ rg -n "mcp_servers|parse_mcp_servers_yaml_value" src tests docs/en agentloom-fra
 - Agent YAML 白名单字段是否与 `_WORKFLOW_OVERLAY_KEYS` 一致。
 - `model` / `llm` / `langfuse` 是否仍被 `_LLM_ONLY_TOP_LEVEL_KEYS` 过滤。
 - `RootSettings`、`LLMConfig`、`LlmModelTypeSettings` 是否新增可配置字段。
+- `supports_native_tool_calls` 是否仍只作为 removed-field 拒绝逻辑存在；不要在 skill/docs/example 里重新教用户配置它。
 - `tool_choice` 是否仍只是模型请求透传参数；不要把它写成 native tool-call 能力探测开关。
 - `tool_call` 模式是否仍只接受结构化 native/tool-call block；不要恢复自由文本猜测、fuzzy tool-name repair 或坏参数 `{}` 兜底。
 - `skills` 的格式、默认值、同名处理、hook 注册时机是否与 `SkillsManager` 一致。

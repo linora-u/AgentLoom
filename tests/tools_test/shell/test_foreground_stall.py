@@ -22,10 +22,10 @@ from src.tools.shell.process import ExecResult, ShellProcess
 # Helpers
 # ---------------------------------------------------------------------------
 
-def _make_persistent_process(**kwargs) -> ShellProcess:
-    """Create a persistent ShellProcess with fast defaults for testing."""
+def _make_session_scoped_process(**kwargs) -> ShellProcess:
+    """Create a session-scoped ShellProcess with fast defaults for testing."""
     return ShellProcess(
-        persistent=True,
+        session_scoped=True,
         load_profile=False,
         timeout=kwargs.get("timeout", 120),
     )
@@ -53,7 +53,7 @@ class TestForegroundStallEarlyKill:
         block indefinitely.  This is shell-agnostic (works in both
         bash and zsh) and triggers the stall watchdog pattern matcher.
         """
-        proc = _make_persistent_process(timeout=120)
+        proc = _make_session_scoped_process(timeout=120)
         try:
             start = time.monotonic()
 
@@ -95,7 +95,7 @@ class TestForegroundStallEarlyKill:
     def test_normal_command_unaffected(self):
         """A fast command that completes normally is not affected by
         the polling loop — it returns immediately with correct output."""
-        proc = _make_persistent_process(timeout=120)
+        proc = _make_session_scoped_process(timeout=120)
         try:
             start = time.monotonic()
             result = proc.run("echo 'hello world'")
@@ -132,7 +132,7 @@ class TestForegroundStallRaceCondition:
         Since ``proc.poll() is None`` will be False (process exited),
         the kill branch is never taken.
         """
-        proc = _make_persistent_process(timeout=120)
+        proc = _make_session_scoped_process(timeout=120)
         try:
             # The command completes instantly.  Even if the watchdog
             # happened to set stall_message, proc.poll() != None so
@@ -168,7 +168,7 @@ class TestForegroundNoStallTimeout:
         (to prevent stall detection) but runs forever.
         """
         proc = ShellProcess(
-            persistent=True,
+            session_scoped=True,
             load_profile=False,
             timeout=3,
         )
@@ -197,6 +197,56 @@ class TestForegroundNoStallTimeout:
             proc.cleanup()
 
 
+@pytest.mark.skipif(
+    not sys.platform.startswith("linux") and not sys.platform.startswith("darwin"),
+    reason="Unix specific test — subprocess + signals",
+)
+class TestForegroundPromptAtTimeout:
+    """Prompt-like output at the timeout boundary must not become background."""
+
+    def test_standalone_prompt_uses_same_stall_detection(self):
+        proc = ShellProcess(
+            session_scoped=False,
+            load_profile=False,
+            timeout=4,
+        )
+        result = proc.run(
+            'printf "StandalonePrompt? (y/n) " && sleep 300'
+        )
+
+        assert "Stall Warning" in result
+        assert "interactive input" in result
+        assert "Background Task" not in result
+
+    def test_prompt_timeout_is_killed_not_promoted(self):
+        proc = ShellProcess(
+            session_scoped=True,
+            load_profile=False,
+            timeout=4,
+        )
+        try:
+            with patch("src.tools.shell.process.C") as mock_c:
+                mock_c.get_nested = MagicMock(side_effect=lambda *args, **kwargs: {
+                    ("shell_settings", "background_tasks",
+                     "stall_threshold_seconds"): 45,
+                    ("shell_settings", "background_tasks", "enabled"): True,
+                    ("shell_settings", "background_tasks",
+                     "auto_background_on_timeout"): True,
+                }.get(args, kwargs.get("default", None)))
+
+                result = proc.run(
+                    'printf "TimeoutPrompt? (y/n) " && sleep 300'
+                )
+
+            assert "Stall Warning" in result
+            assert "interactive input" in result
+            assert "Background Task" not in result
+            assert "promoted to background" not in result
+
+        finally:
+            proc.cleanup()
+
+
 # ---------------------------------------------------------------------------
 # Test: Partial output is preserved when stall kills the process
 # ---------------------------------------------------------------------------
@@ -212,7 +262,7 @@ class TestForegroundStallOutputPreserved:
     def test_output_before_stall_is_preserved(self):
         """Command writes output, then blocks on a prompt.  The stall
         kill should return the partial output plus the stall warning."""
-        proc = _make_persistent_process(timeout=120)
+        proc = _make_session_scoped_process(timeout=120)
         try:
             with patch("src.tools.shell.process.C") as mock_c:
                 mock_c.get_nested = MagicMock(side_effect=lambda *args, **kwargs: {

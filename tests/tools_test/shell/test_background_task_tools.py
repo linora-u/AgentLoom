@@ -4,6 +4,7 @@ import os
 import subprocess
 import tempfile
 import time
+from unittest.mock import MagicMock, patch
 
 import pytest
 
@@ -98,6 +99,35 @@ class TestCheckBackgroundTask:
         assert "line_30" in result
         # Should not include very early lines if output > 20 lines.
         assert "Last 20 lines" in result
+
+    def test_check_shows_stall_warning_from_watchdog(self):
+        with patch("src.tools.shell.background_task.C") as mock_c:
+            mock_c.get_nested = MagicMock(side_effect=lambda *args, **kwargs: {
+                ("shell_settings", "background_tasks", "max_concurrent"): 10,
+                ("shell_settings", "background_tasks", "stall_detection"): True,
+                ("shell_settings", "background_tasks",
+                 "stall_threshold_seconds"): 0.5,
+            }.get(args, kwargs.get("default", None)))
+
+            proc, tid, _ = _spawn_and_register(
+                ["sh", "-c", 'printf "Continue? (y/n) "; sleep 300'],
+                "interactive prompt",
+            )
+
+            try:
+                deadline = time.monotonic() + 5
+                result = ""
+                while time.monotonic() < deadline:
+                    result = check_background_task(tid)
+                    if "STALL WARNING" in result:
+                        break
+                    time.sleep(0.2)
+
+                assert "STALL WARNING" in result
+                assert "interactive input" in result
+                assert "Continue? (y/n)" in result
+            finally:
+                kill_background_task(tid)
 
 
 class TestKillBackgroundTask:

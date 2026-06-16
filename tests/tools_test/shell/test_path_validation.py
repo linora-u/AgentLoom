@@ -9,6 +9,7 @@ from src.tools.shell.path_validation import (
     check_path_constraints,
     _filter_out_flags,
     _resolve_path,
+    _canonical_path,
     _is_path_within_allowed,
     _is_dangerous_removal_path,
     _extract_redirect_targets,
@@ -217,6 +218,7 @@ class TestEdgeCases:
 
     def test_resolve_path_absolute(self):
         assert _resolve_path('/etc/passwd', '/home/user') == '/etc/passwd'
+        assert _canonical_path('/etc/passwd') == os.path.realpath('/etc/passwd')
 
     def test_resolve_path_tilde(self):
         result = _resolve_path('~/file.txt', '/home/user/project')
@@ -230,6 +232,7 @@ class TestEdgeCases:
     def test_is_dangerous_removal_path(self):
         assert _is_dangerous_removal_path('/', DEFAULT_DANGEROUS_PATHS) is True
         assert _is_dangerous_removal_path('/etc', DEFAULT_DANGEROUS_PATHS) is True
+        assert _is_dangerous_removal_path(os.path.realpath('/etc'), DEFAULT_DANGEROUS_PATHS) is True
         assert _is_dangerous_removal_path('/home/user/project', DEFAULT_DANGEROUS_PATHS) is False
 
     def test_extract_redirect_targets(self):
@@ -247,6 +250,17 @@ class TestEdgeCases:
         """/tmp is allowed when included in allowed directories."""
         with _patch_allowed_dirs(os.getcwd(), "/tmp"):
             check_path_constraints("cat /tmp/test.txt")  # should not raise
+
+    def test_nonexistent_child_under_symlinked_include_path_allowed(self):
+        """/tmp/nonexistent stays logical but canonicalizes under /private/tmp on macOS."""
+        target = "/tmp/agentloom_shell_nonexistent_child"
+        assert _resolve_path(target, os.getcwd()) == target
+        assert _canonical_path(target) == os.path.join(
+            os.path.realpath("/tmp"),
+            "agentloom_shell_nonexistent_child",
+        )
+        with _patch_allowed_dirs(os.getcwd(), "/tmp"):
+            check_path_constraints(f"cat {target}")  # should not raise
 
     def test_path_traversal_normalized(self):
         """Path traversal attempts should be normalized and caught."""

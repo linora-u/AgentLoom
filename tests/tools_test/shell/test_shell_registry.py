@@ -6,10 +6,11 @@ ShellProcessRegistry 与 shell_tool per-agent 绑定集成测试。
 背景
 ─────
 将 ShellProcess 与 agent 实例通过 agent_id 绑定在注册表中，
-使同一 Agent 的多次工具调用之间共享同一个持久 shell 会话，从而保留：
+使同一 Agent 的多次工具调用之间共享同一个 session-scoped shell 会话，从而保留：
   - 工作目录（cd 跨调用生效）
-  - 环境变量
-  - 其他 shell session 状态
+  - shell snapshot（aliases/functions/options/PATH）
+
+环境变量 export 只在单条命令内生效，不跨工具调用持久化。
 
 注册表 key = agent_id（如 "supervisor_001"、"worker_001"）
   - supervisor 和 worker 各有独立的 shell session，互不干扰
@@ -37,6 +38,8 @@ ShellProcessRegistry 与 shell_tool per-agent 绑定集成测试。
 """
 
 import pytest
+import os
+import threading
 from contextvars import copy_context
 
 from src.tools.shell.process import ShellProcess, ShellProcessRegistry
@@ -66,6 +69,18 @@ def _in_context(fn, *args, **kwargs):
 
     copy_context().run(_wrapper)
     return result_holder[0]
+
+
+def _path_output(output: str) -> str:
+    """Extract the logical path from shell output that may include login noise."""
+    last_line = output.strip().splitlines()[-1].strip()
+    if last_line.startswith("login: "):
+        return last_line.removeprefix("login: ").strip()
+    return last_line
+
+
+def _logical(path: str) -> str:
+    return os.path.normpath(path)
 
 
 # ---------------------------------------------------------------------------
@@ -111,11 +126,34 @@ def test_registry_singleton(registry):
 def test_same_agent_id_returns_same_process(registry):
     """
     对同一个 agent_id 多次调用 get_or_create()，必须返回同一个 ShellProcess 实例。
-    这是持久绑定的核心保证：同一 agent 的所有 shell 操作共享同一会话。
+    这是 session 绑定的核心保证：同一 agent 的所有 shell 操作共享同一会话。
     """
-    p1 = registry.get_or_create("supervisor_001", persistent=False)
-    p2 = registry.get_or_create("supervisor_001", persistent=False)
+    p1 = registry.get_or_create("supervisor_001", session_scoped=False)
+    p2 = registry.get_or_create("supervisor_001", session_scoped=False)
     assert p1 is p2, "相同 agent_id 必须返回同一 ShellProcess 对象"
+
+
+def test_existing_agent_process_refreshes_runtime_options(registry):
+    """
+    同一 agent 的 ShellProcess 对象会复用，但每次 shell_tool 调用传入的
+    timeout/load_profile 等运行参数必须刷新到对象上。
+    """
+    p1 = registry.get_or_create(
+        "timeout_agent",
+        timeout=3,
+        session_scoped=True,
+        load_profile=False,
+    )
+    p2 = registry.get_or_create(
+        "timeout_agent",
+        timeout=60,
+        session_scoped=True,
+        load_profile=True,
+    )
+
+    assert p1 is p2
+    assert p2.timeout == 60
+    assert p2.load_profile is True
 
 
 def test_different_agent_ids_return_different_processes(registry):
@@ -123,8 +161,8 @@ def test_different_agent_ids_return_different_processes(registry):
     不同的 agent_id 必须得到各自独立的 ShellProcess 实例。
     supervisor 和 worker 各有独立 shell session，数据结构层面已隔离。
     """
-    p_sup = registry.get_or_create("supervisor_001", persistent=False)
-    p_wkr = registry.get_or_create("worker_001", persistent=False)
+    p_sup = registry.get_or_create("supervisor_001", session_scoped=False)
+    p_wkr = registry.get_or_create("worker_001", session_scoped=False)
     assert p_sup is not p_wkr, "不同 agent_id 必须返回不同的 ShellProcess 对象"
 
 
@@ -133,9 +171,9 @@ def test_release_then_recreate_gives_new_process(registry):
     release() 后，再次 get_or_create() 必须返回全新的 ShellProcess 对象。
     用于 agent 生命周期结束时清理旧会话，下次重新创建干净环境。
     """
-    p1 = registry.get_or_create("agent_b", persistent=False)
+    p1 = registry.get_or_create("agent_b", session_scoped=False)
     registry.release("agent_b")
-    p2 = registry.get_or_create("agent_b", persistent=False)
+    p2 = registry.get_or_create("agent_b", session_scoped=False)
     assert p1 is not p2, "release 后再次创建必须返回新的 ShellProcess 对象"
 
 
@@ -152,8 +190,8 @@ def test_registered_agent_ids_snapshot(registry):
     registered_agent_ids() 返回当前注册表中所有 agent_id 的快照。
     release 后，对应 agent_id 应从快照中消失；未 release 的应保留。
     """
-    registry.get_or_create("alpha", persistent=False)
-    registry.get_or_create("beta", persistent=False)
+    registry.get_or_create("alpha", session_scoped=False)
+    registry.get_or_create("beta", session_scoped=False)
 
     ids = registry.registered_agent_ids()
     assert "alpha" in ids
@@ -172,7 +210,7 @@ def test_shell_tool_works_without_agent_context():
     """
     agent_id 为 None（无 agent 上下文）时，shell_tool 应当正常工作。
     此为向后兼容场景：直接调用 shell_tool（如单元测试、脚本中使用）不依赖 agent 框架。
-    此时底层创建一次性（non-persistent）子进程，执行完毕即销毁。
+    此时底层创建一次性 standalone 子进程，执行完毕即销毁。
     """
     def _run():
         clear_current_agent_id()
@@ -185,7 +223,7 @@ def test_shell_tool_works_without_agent_context():
 def test_fallback_does_not_pollute_registry(registry):
     """
     回退模式（agent_id 缺失）下执行 shell_tool 不应向注册表写入任何记录。
-    注册表只保存有真实 agent_id 的持久会话，一次性进程不应混入。
+    注册表只保存有真实 agent_id 的 session-scoped 会话，一次性进程不应混入。
     """
     before = set(registry.registered_agent_ids())
 
@@ -220,7 +258,7 @@ def test_same_agent_reuses_process_across_calls(registry):
     """
     同一 agent_id 在两次 shell_tool 调用之间，底层 ShellProcess 对象必须相同。
     通过比较两次从注册表取出的对象引用来验证复用行为。
-    对象相同 (is) 意味着 shell session 状态（cwd、环境变量等）会被保留。
+    对象相同 (is) 意味着 shell session 状态（cwd、snapshot）会被保留。
     """
     captured = {}
 
@@ -228,14 +266,43 @@ def test_same_agent_reuses_process_across_calls(registry):
         set_current_agent_id("reuse_agent")
         shell_tool("echo first")
         # 第一次调用后取出注册表中的进程对象
-        captured["p1"] = registry.get_or_create("reuse_agent", persistent=True)
+        captured["p1"] = registry.get_or_create("reuse_agent", session_scoped=True)
         shell_tool("echo second")
         # 第二次调用后再取出，应是同一个对象
-        captured["p2"] = registry.get_or_create("reuse_agent", persistent=True)
+        captured["p2"] = registry.get_or_create("reuse_agent", session_scoped=True)
 
     _in_context(_run)
     assert captured["p1"] is captured["p2"], \
         "同一 agent 的两次 shell_tool 调用必须复用相同的 ShellProcess 实例"
+
+
+def test_agent_id_fallback_preserves_cwd_from_executor_thread(bypass_shell_security):
+    """
+    【真实执行】模拟 code executor 在线程中直接调用 shell_tool。
+
+    ContextVar 不会自动传播到新线程；shell_tool 必须能通过 task_context
+    的 agent_id fallback 绑定到同一个 session-scoped ShellProcess。
+    """
+    results = {}
+
+    def _worker_thread():
+        try:
+            shell_tool("cd /tmp")
+            results["pwd"] = shell_tool("pwd")
+        except Exception as exc:
+            results["error"] = str(exc)
+
+    set_current_agent_id("executor_thread_agent")
+    try:
+        thread = threading.Thread(target=_worker_thread)
+        thread.start()
+        thread.join(timeout=10)
+    finally:
+        clear_current_agent_id()
+
+    assert not thread.is_alive(), "executor thread should finish"
+    assert "error" not in results, results.get("error")
+    assert _path_output(results["pwd"]) == _logical("/tmp")
 
 
 # ---------------------------------------------------------------------------
@@ -254,11 +321,11 @@ def test_cwd_persists_within_same_agent(bypass_shell_security):
     def _run():
         set_current_agent_id("cwd_persist_agent")
         shell_tool("cd /tmp")       # 切换工作目录
-        return shell_tool("pwd")    # 在同一 persistent session 中读取 cwd
+        return shell_tool("pwd")    # 在同一 session-scoped session 中读取 cwd
 
     result = _in_context(_run)
-    assert "/tmp" in result, \
-        f"cd /tmp 后 pwd 应返回 /tmp，实际输出: {result!r}"
+    assert _path_output(result) == _logical("/tmp"), \
+        f"cd /tmp 后 pwd 应返回逻辑 /tmp，实际输出: {result!r}"
 
 
 def test_two_agents_have_independent_cwd(bypass_shell_security):
@@ -303,20 +370,20 @@ def test_two_agents_have_independent_cwd(bypass_shell_security):
     _in_context(_run_worker)
 
     # --- supervisor 断言 ---
-    assert "/tmp" in sup_cwds["step3"], \
-        f"step3: supervisor cd /tmp 后 pwd 应为 /tmp，实际: {sup_cwds['step3']!r}"
-    assert "/var/log" not in sup_cwds["step3"], \
+    assert _path_output(sup_cwds["step3"]) == _logical("/tmp"), \
+        f"step3: supervisor cd /tmp 后 pwd 应为逻辑 /tmp，实际: {sup_cwds['step3']!r}"
+    assert _path_output(sup_cwds["step3"]) != _logical("/var/log"), \
         f"step3: supervisor 不应受 worker cd /var/log 的影响，实际: {sup_cwds['step3']!r}"
-    assert "/var" in sup_cwds["step7"], \
-        f"step7: supervisor cd /var 后 pwd 应为 /var，实际: {sup_cwds['step7']!r}"
+    assert _path_output(sup_cwds["step7"]) == _logical("/var"), \
+        f"step7: supervisor cd /var 后 pwd 应为逻辑 /var，实际: {sup_cwds['step7']!r}"
 
     # --- worker 断言 ---
-    assert "/var/log" in wkr_cwds["step4"], \
-        f"step4: worker cd /var/log 后 pwd 应为 /var/log，实际: {wkr_cwds['step4']!r}"
-    assert "/tmp" not in wkr_cwds["step4"], \
+    assert _path_output(wkr_cwds["step4"]) == _logical("/var/log"), \
+        f"step4: worker cd /var/log 后 pwd 应为逻辑 /var/log，实际: {wkr_cwds['step4']!r}"
+    assert _path_output(wkr_cwds["step4"]) != _logical("/tmp"), \
         f"step4: worker 不应受 supervisor cd /tmp 的影响，实际: {wkr_cwds['step4']!r}"
-    assert "/tmp" in wkr_cwds["step8"], \
-        f"step8: worker cd /tmp 后 pwd 应为 /tmp，实际: {wkr_cwds['step8']!r}"
+    assert _path_output(wkr_cwds["step8"]) == _logical("/tmp"), \
+        f"step8: worker cd /tmp 后 pwd 应为逻辑 /tmp，实际: {wkr_cwds['step8']!r}"
 
 
 def test_supervisor_and_worker_shells_are_independent(bypass_shell_security):
@@ -344,7 +411,7 @@ def test_supervisor_and_worker_shells_are_independent(bypass_shell_security):
     _in_context(_run_sup)
     _in_context(_run_wkr)
 
-    assert "/tmp" in results["sup"], \
-        f"supervisor 应在 /tmp，实际: {results['sup']!r}"
-    assert results["sup"].strip() != results["wkr"].strip(), \
+    assert _path_output(results["sup"]) == _logical("/tmp"), \
+        f"supervisor 应在逻辑 /tmp，实际: {results['sup']!r}"
+    assert _path_output(results["sup"]) != _path_output(results["wkr"]), \
         f"worker 的 cwd 必须与 supervisor 独立，supervisor={results['sup']!r}, worker={results['wkr']!r}"

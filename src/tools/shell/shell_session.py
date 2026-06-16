@@ -1,7 +1,7 @@
 """Shell session state manager for stateless subprocess execution.
 
 Maintains per-agent session state (CWD) across multiple command
-invocations without keeping a persistent process.  Each command spawns
+invocations without keeping a long-lived process.  Each command spawns
 a fresh subprocess; session continuity is achieved by replaying the
 captured CWD and sourcing the environment snapshot.
 
