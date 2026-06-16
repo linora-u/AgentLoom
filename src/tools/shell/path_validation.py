@@ -295,41 +295,39 @@ def _is_block_destructive() -> bool:
 # Core validation
 # ---------------------------------------------------------------------------
 
-def _resolve_path(path_str: str, cwd: str) -> str:
-    """Resolve a path to a canonical absolute path.
+def _canonical_path(path: str) -> str:
+    """Return the filesystem-identity form used for security comparison."""
+    expanded = os.path.expanduser(str(path).strip("'\""))
+    return os.path.realpath(os.path.normpath(expanded))
 
-    Uses ``os.path.realpath`` when the target exists on disk so that
-    symlinks are fully resolved.  Falls back to ``os.path.normpath``
-    for non-existent paths (still collapses ``..`` correctly).
+
+def _resolve_path(path_str: str, cwd: str) -> str:
+    """Resolve a path to a logical absolute path.
+
+    This function preserves the shell-facing spelling of absolute path
+    prefixes such as ``/tmp`` while collapsing ``.`` and ``..``.  Security
+    checks canonicalise paths separately via ``_canonical_path`` so symlink
+    escapes are still caught without leaking physical path aliases into
+    user-facing errors or session state.
     """
     expanded = os.path.expanduser(path_str.strip("'\""))
     if os.path.isabs(expanded):
-        normed = os.path.normpath(expanded)
-    else:
-        normed = os.path.normpath(os.path.join(cwd, expanded))
-    # Resolve symlinks when the path exists on disk
-    if os.path.exists(normed):
-        return os.path.realpath(normed)
-    return normed
+        return os.path.normpath(expanded)
+    return os.path.normpath(os.path.join(cwd, expanded))
 
 
 def _is_path_within_allowed(resolved_path: str, allowed_roots: List[str]) -> bool:
-    """Check if a resolved path is within any allowed root directory.
+    """Check if a path is within any allowed root directory.
 
-    Both the target path and the allowed roots are normalised via
-    ``realpath`` (when they exist on disk) to prevent symlink-based
-    escapes.
+    The caller passes the logical path used in user-facing messages.  The
+    comparison itself uses canonical filesystem identity so aliases such as
+    ``/tmp`` and symlink escapes are handled consistently.
     """
-    resolved = os.path.normpath(resolved_path)
-    if os.path.exists(resolved):
-        resolved = os.path.realpath(resolved)
+    resolved = _canonical_path(resolved_path)
     for root in allowed_roots:
         if root == "*":
             return True
-        norm_root = os.path.normpath(root)
-        if os.path.exists(norm_root):
-            norm_root = os.path.realpath(norm_root)
-        # Use os.path.commonpath to check containment
+        norm_root = _canonical_path(root)
         try:
             common = os.path.commonpath([resolved, norm_root])
             if common == norm_root:
@@ -342,7 +340,12 @@ def _is_path_within_allowed(resolved_path: str, allowed_roots: List[str]) -> boo
 def _is_dangerous_removal_path(resolved_path: str, dangerous: Set[str]) -> bool:
     """Check if a path is in the dangerous removal list."""
     normalized = os.path.normpath(resolved_path)
-    return normalized in dangerous
+    if normalized in dangerous:
+        return True
+
+    canonical = _canonical_path(normalized)
+    canonical_dangerous = {_canonical_path(path) for path in dangerous}
+    return canonical in canonical_dangerous
 
 
 def _extract_redirect_targets(command: str) -> List[str]:

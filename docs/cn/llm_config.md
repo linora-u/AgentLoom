@@ -189,7 +189,6 @@ model:
 | `context_cache` | `bool` | `false` | ❌ 否 | 通用 Prompt 缓存优化。`true` 时框架对**所有模型**统一注入 `cache_control: {"type": "ephemeral"}`，litellm 根据 Provider 自动处理（Anthropic 保留、OpenAI 剥离、Vertex AI 转换为 Gemini 格式） |
 | `system_prompt_boundary` | `str` \| `null` | `null` | ❌ 否 | 系统提示词分割标记。设置后，系统提示词以此标记分割为 **静态（缓存）** + **动态（不缓存）** 两段，提升缓存命中率。例如：`"<!-- DYNAMIC_BOUNDARY -->"` |
 | `requests_per_minute` | `int` | `60` | ❌ 否 | 该模型类型的速率限制 |
-| `supports_native_tool_calls` | `str` | `"auto"` | ❌ 否 | 原生 tool_calls 能力标记。三态值：`"auto"` 运行时首次调用自动探测，`"true"` 强制使用原生路径，`"false"` 强制走文本解析兜底。详见 [3.6 supports_native_tool_calls 行为](#36-supports_native_tool_calls-行为) |
 
 ### 3.2 temperature 配置建议
 
@@ -266,41 +265,17 @@ powerful:
 
 此检测仅用于诊断，不阻塞请求。
 
-### 3.6 supports_native_tool_calls 行为
+### 3.6 Tool Call 行为
 
-`supports_native_tool_calls` 控制 tool_call 模式下 Agent 如何处理 LLM 的工具调用输出：
+在 `tool_call` 模式下，只要有可用工具，AgentLoom 就会发送结构化 tools schema。`tool_choice` 只是普通 provider/smolagents 请求参数，不参与能力探测，也不会作为切换到文本兜底的开关。
 
-| 值 | 行为 |
-|------|------|
-| `"auto"` (默认) | 首次 API 调用时尝试原生路径，检查响应是否包含 `tool_calls`。如果包含，后续调用直接走原生路径；如果不包含，后续调用走多策略文本解析兜底。检测结果缓存在模型实例上，同一会话内不重复检测 |
-| `"true"` | 跳过检测，始终假定模型返回原生 `tool_calls`。适用于确认支持原生工具调用的模型（如 OpenAI GPT-4o、Anthropic Claude 等） |
-| `"false"` | 跳过检测，始终走多策略文本解析。适用于已知不返回原生 `tool_calls` 的模型（如通过 Anthropic 兼容端点连接的非 Anthropic 模型） |
+Provider 原生 `tool_calls` 是主路径。如果 provider 没有返回原生 `tool_calls`，但返回了结构化文本 block，AgentLoom 只接受明确的工具调用容器：
 
-#### 多策略文本解析
+1. 标准 JSON 对象，例如 `{"name": "...", "arguments": {...}}`
+2. provider dump 出来的原生 `tool_calls` / `function` 结构
+3. 明确 XML 或 invoke wrapper
 
-当模型未返回原生 `tool_calls` 时，框架内置多策略解析链自动处理文本形式的工具调用，按优先级依次尝试：
-
-1. **JSON** — 标准 JSON 格式
-2. **XML/bracket** — XML 包装格式（如 `<minimax:tool_call>[...]</minimax:tool_call>`），自动委派到 nested 解析
-3. **正则** — 正则表达式提取
-4. **结构化提取** — 基于括号深度的解析，能处理大文本中含撇号或特殊字符的场景
-
-解析器采用通用设计，不绑定特定模型厂商——无论模型输出何种 XML 命名空间前缀或标签格式，均可自动识别。任一策略成功即返回结果，全部失败才报错（走 smolagents 原生错误回传重试流程）。
-
-**配置示例**：
-
-```yaml
-# 已知不支持原生 tool_calls 的模型
-powerful:
-  model: "anthropic/MiniMax-M2.7"
-  base_url: "https://api.minimaxi.com/anthropic"
-  supports_native_tool_calls: "false"   # 跳过检测，直接走多策略解析
-
-# 支持原生 tool_calls 的模型
-fast:
-  model: "openai/gpt-4o"
-  supports_native_tool_calls: "true"    # 跳过检测，直接用原生路径
-```
+解析器不会从 “Calling tool X with args...” 这类自然语言里猜测工具调用。repair 只作用于参数 JSON 字符串，只修 JSON 字符串字面量里的裸 control chars 和非法 backslash。未知工具、多候选文本工具调用、prose/free-text、残缺 JSON 都会显式失败，让 agent 带着清晰错误观察重试，或者直接暴露 provider 问题。
 
 ### 3.7 自定义模型类型
 
@@ -566,7 +541,6 @@ class LlmModelTypeSettings(BaseModel):
     system_prompt_boundary: str | None = None
     description: str = ""
     requests_per_minute: int = 60     # DEFAULT_MODEL_REQUESTS_PER_MINUTE
-    supports_native_tool_calls: str = "auto"  # "auto" | "true" | "false"
 ```
 
 ### LangfuseSettings（后续版本启用，当前不需要配置）

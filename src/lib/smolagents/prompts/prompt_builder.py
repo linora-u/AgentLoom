@@ -40,6 +40,63 @@ _PROMPTS_DIR: Path = Path(__file__).parent.resolve()
 DEFAULT_CODE_AGENT_PROMPT_PATH: Path = _PROMPTS_DIR / "structured_code_agent.example.yaml"
 DEFAULT_TOOLCALLING_AGENT_PROMPT_PATH: Path = _PROMPTS_DIR / "toolcalling_agent.example.yaml"
 
+_CODE_ACT_TODO_PROMPTS: dict[str, str] = {
+    "todo_initial": """<tool_restriction>
+⚠️ CRITICAL: You can ONLY execute Python code that calls `todo_write`. ALL other tools are DISABLED.
+Do NOT call read_file, shell_tool, write_markdown_file, or ANY other tool.
+The ONLY action you may take is a `<code>` block containing `todo_write(todos=[...])`.
+Do NOT use XML, `<tool_call>`, `<function_calls>`, JSON tool-call wrappers, or prose-only output.
+</tool_restriction>
+
+Register your planned tasks using todo_write. Based on your plan above:
+- Set the first task as "in_progress"
+- Set remaining tasks as "pending"
+- Use clear, imperative task descriptions
+
+You MUST register your tasks every time. Do not skip this step.
+Provide the COMPLETE task list — todo_write replaces the entire list.
+Output exactly one code block:
+<code>
+todo_write(todos=[{"content": "...", "status": "in_progress"}, {"content": "...", "status": "pending"}])
+</code>""",
+    "todo_update": """<tool_restriction>
+⚠️ CRITICAL: You can ONLY execute Python code that calls `todo_write`. ALL other tools are DISABLED.
+Do NOT call read_file, shell_tool, write_markdown_file, or ANY other tool.
+The ONLY action you may take is a `<code>` block containing `todo_write(todos=[...])`.
+Do NOT use XML, `<tool_call>`, `<function_calls>`, JSON tool-call wrappers, or prose-only output.
+</tool_restriction>
+
+Update your task list to reflect current progress. Based on your plan review:
+- Mark completed tasks as "completed"
+- Set your current/next task as "in_progress"
+- Add any newly discovered tasks as "pending"
+- Remove tasks that are no longer relevant
+
+Provide the COMPLETE updated list — todo_write replaces the entire list, not append.
+Output exactly one code block:
+<code>
+todo_write(todos=[{"content": "...", "status": "completed"}, {"content": "...", "status": "in_progress"}])
+</code>""",
+    "todo_final": """<tool_restriction>
+⚠️ CRITICAL: You can ONLY execute Python code that calls `todo_write`. ALL other tools are DISABLED.
+Do NOT call read_file, shell_tool, write_markdown_file, or ANY other tool.
+The ONLY action you may take is a `<code>` block containing `todo_write(todos=[...])`.
+Do NOT use XML, `<tool_call>`, `<function_calls>`, JSON tool-call wrappers, or prose-only output.
+</tool_restriction>
+
+Finalize your task list. You are about to deliver the final answer.
+- Mark all completed tasks as "completed"
+- If any tasks were skipped, mark them as "completed" with a note
+- Ensure the task list accurately reflects what was accomplished
+- Do NOT pass an empty list. Always include all tasks.
+
+Provide the COMPLETE finalized list via todo_write.
+Output exactly one code block:
+<code>
+todo_write(todos=[{"content": "...", "status": "completed"}])
+</code>""",
+}
+
 def get_prompt_filename_for_tool_call_type(tool_call_type: str, use_structured_output: bool = True) -> str:
     """Return the base prompt filename based on tool_call_type.
     
@@ -176,6 +233,13 @@ def _append_to_system_prompt(templates: dict[str, Any], section: str) -> None:
         templates["system_prompt"] += section
 
 
+def _patch_code_act_todo_prompts(templates: dict[str, Any]) -> None:
+    planning = templates.get("planning")
+    if not isinstance(planning, dict):
+        return
+    planning.update(_CODE_ACT_TODO_PROMPTS)
+
+
 def _load_smolagents_builtin(tool_call_type: str, use_structured_output: bool = True) -> dict[str, Any]:
     """Load smolagents' built-in prompt template from the installed package."""
     if tool_call_type == "tool_call":
@@ -238,6 +302,9 @@ def build_prompt_templates(
         else:
             # Default: use smolagents' built-in prompt
             prompt_templates = _load_smolagents_builtin(tool_call_type, use_structured_output)
+
+        if tool_call_type == "code_act":
+            _patch_code_act_todo_prompts(prompt_templates)
 
         # 1) Environment context (workspace root, exclusions)
         _append_to_system_prompt(prompt_templates, get_agent_environment_prompt())

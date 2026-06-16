@@ -96,12 +96,17 @@ class LlmModelTypeSettings(BaseModel):
     system_prompt_boundary: Optional[str] = None
     description: str = ""
     requests_per_minute: int = DEFAULT_MODEL_REQUESTS_PER_MINUTE
-    # Three-state flag: "auto" (detect at runtime), "true" (always use
-    # native tool_calls), "false" (always use text parsing fallback).
-    supports_native_tool_calls: str = "auto"
     # Extra parameters passed through to litellm.completion() (e.g. reasoning_effort,
     # extra_body). Any YAML key not in the known fields list is collected here.
     extra_completion_params: Optional[Dict[str, Any]] = None
+
+    @model_validator(mode="before")
+    @classmethod
+    def _ignore_legacy_tool_call_detection(cls, values: dict) -> dict:
+        if isinstance(values, dict):
+            values = dict(values)
+            values.pop("supports_native_tool_calls", None)
+        return values
 
 class LLMConfig(BaseModel):
     model_config = ConfigDict(extra="allow")
@@ -152,23 +157,14 @@ class LLMConfig(BaseModel):
                     f"(e.g., 'openai/gpt-4o', 'anthropic/claude-3-5-sonnet')."
                 )
 
-            # Resolve supports_native_tool_calls (three-state: auto/true/false)
-            raw_tool_calls = v.get(
-                "supports_native_tool_calls",
-                "auto",
-            )
-            resolved_tool_calls = str(raw_tool_calls).strip().lower()
-            if resolved_tool_calls not in ("auto", "true", "false"):
-                resolved_tool_calls = "auto"
-
             # Collect extra keys not in the known fields list.
             # These are passed through to litellm.completion() as-is.
             _KNOWN_FIELDS = {
                 "model", "base_url", "api_key", "temperature", "max_tokens",
                 "timeout", "num_retries", "retry_delay", "max_retry_delay",
                 "extra_headers", "context_cache", "system_prompt_boundary",
-                "description", "requests_per_minute", "supports_native_tool_calls",
-                "supports_structured_output",
+                "description", "requests_per_minute", "supports_structured_output",
+                "supports_native_tool_calls",
             }
             extra_completion_params = {
                 ek: ev for ek, ev in v.items() if ek not in _KNOWN_FIELDS
@@ -189,7 +185,6 @@ class LLMConfig(BaseModel):
                 system_prompt_boundary=v.get("system_prompt_boundary", None),
                 description=str(v.get("description", f"Model type '{k}' loaded from YAML config")),
                 requests_per_minute=int(resolved_rpm),
-                supports_native_tool_calls=resolved_tool_calls,
                 extra_completion_params=extra_completion_params,
             )
 

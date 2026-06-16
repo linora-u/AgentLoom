@@ -25,7 +25,13 @@ workflow: |
   Verify: output is NOT empty, contains "No matches found".
 
   ## Final Summary
-  Print PASS/FAIL for each step and overall result.
+  Return PASS/FAIL for each step and overall result using the code_act final
+  answer format. Do not use XML/tool_call syntax. Your final response must be a
+  code block that calls final_answer, for example:
+
+  <code>
+  final_answer("Step 1: PASS\nStep 2: PASS\nStep 3: PASS\nOverall: PASS")
+  </code>
 
 tools:
   - name: "grep_search"

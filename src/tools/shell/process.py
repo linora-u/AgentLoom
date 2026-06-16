@@ -11,7 +11,7 @@ ShellSnapshot.ts, ShellCommand.ts).
 Key design decisions:
 - No persistent PTY — avoids fragility, buffer limits, and hang risks
   from interactive commands.
-- CWD tracked via ``pwd -P >| cwd_file`` (out-of-band, not embedded
+- CWD tracked via ``pwd >| cwd_file`` (out-of-band, not embedded
   in stdout).
 - Environment restored via snapshot (functions, aliases, options, PATH)
   captured once at session start.  No per-command ``env`` capture —
@@ -360,7 +360,7 @@ class ShellProcess:
         1. cd <cwd>            -- restore working directory
         2. source snapshot.sh  -- restore functions/aliases/options/PATH
         3. eval "user_command" -- run the actual command
-        4. pwd -P >| cwd_file -- capture new CWD
+        4. pwd >| cwd_file    -- capture new logical CWD
 
         Snapshot and login-shell are mutually exclusive (aligned with
         Claude Code's ``skipLoginShell = lastSnapshotFilePath !== undefined``):
@@ -416,8 +416,9 @@ class ShellProcess:
         parts.append(f"eval '{escaped_cmd}'")
         parts.append("__agentloom_ec=$?")
 
-        # 4. CWD tracking (out-of-band file write)
-        parts.append(f"pwd -P >| '{session.cwd_file}'")
+        # 4. CWD tracking (out-of-band file write).  Use shell-logical
+        # pwd so session state preserves the path spelling a user cd'ed to.
+        parts.append(f"pwd >| '{session.cwd_file}'")
 
         # 5. Propagate original exit code
         parts.append("exit $__agentloom_ec")
