@@ -36,3 +36,5 @@ worker_agents:
 skills: []
 execution_env:
   type: "local"
+  executor_kwargs:
+    timeout_seconds: 120

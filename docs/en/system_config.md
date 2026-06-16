@@ -427,6 +427,7 @@ Runs AI-generated Python code directly in the host environment. This is the defa
 | Parameter | Type | Default | Description |
 |------|------|--------|------|
 | `max_print_outputs_length` | `int` | `50000` | Maximum characters of `print()` output per code execution. Excess is truncated |
+| `timeout_seconds` | `int \| null` | `30` | Maximum wall-clock seconds for one generated Python code block. Use a larger value for workflows that synchronously invoke worker Agents or other long-running tool calls |
 
 > `additional_functions` is automatically injected by the framework based on `code_agent.additional_functions` configuration; no need to specify manually in `executor_kwargs`.
 
@@ -444,6 +445,7 @@ execution_env:
   type: "local"
   executor_kwargs:
     max_print_outputs_length: 100000
+    timeout_seconds: 120
 ```
 
 ### 5.4 `docker` — Docker Container Executor
