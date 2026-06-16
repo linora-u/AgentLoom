@@ -3,7 +3,7 @@
 Runs a detection script in the user's login shell to capture aliases,
 functions, and shell options, then saves the result as a sourceable
 ``snapshot.sh`` file.  Subsequent commands ``source`` this snapshot to
-restore the user's environment without needing a persistent PTY session.
+restore the user's environment without needing a long-lived PTY session.
 
 Design aligned with Claude Code's ShellSnapshot.ts.
 """
@@ -78,6 +78,20 @@ echo "export PATH=\"$PATH\""
 """
 
 
+def _format_zsh_options(options_block: str) -> str:
+    """Convert zsh ``setopt`` output into sourceable ``setopt <name>`` lines."""
+    lines = []
+    for raw_line in options_block.splitlines():
+        option = raw_line.strip()
+        if not option or option.startswith("#"):
+            continue
+        if option.startswith("setopt "):
+            lines.append(option)
+        else:
+            lines.append(f"setopt {option} 2>/dev/null || true")
+    return "\n".join(lines)
+
+
 def _build_snapshot_content(raw_output: str, shell_path: str) -> str:
     """Parse raw snapshot output and build a sourceable script.
 
@@ -117,6 +131,8 @@ def _build_snapshot_content(raw_output: str, shell_path: str) -> str:
     # Options
     if options_block:
         lines.append("# --- Captured options ---")
+        if is_zsh:
+            options_block = _format_zsh_options(options_block)
         lines.append(options_block)
         lines.append("")
 

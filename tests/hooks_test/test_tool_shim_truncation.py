@@ -16,7 +16,8 @@ from src.lib.smolagents.hooks.tool_shim import (
     HOOKS_INJECTED_ATTR,
 )
 from src.lib.smolagents.hooks.types import HookResult
-from src.tools.tool_meta import ToolMeta
+from src.tools.shell.output_interceptor import OutputInterceptor
+from src.tools.tool_meta import ToolMeta, get_tool_meta
 
 
 def _make_mock_tool(name: str, forward_return_value):
@@ -198,6 +199,18 @@ class TestLargeResultTruncation:
 
         result = _run_tool_with_meta("edge_tool", text, meta)
         assert "Output too large" in result
+
+    def test_shell_tool_notice_survives_outer_shim_threshold(self, tmp_path):
+        """shell_tool's own artifact notice must remain visible to agents."""
+        interceptor = OutputInterceptor(preview_bytes=30000, storage_dir=str(tmp_path))
+        interceptor.write("\n".join(str(i) for i in range(1, 12001)))
+        shell_result = interceptor.finalize()
+
+        assert "<system_notice>" in shell_result
+        assert "FULL, unbroken output log" in shell_result
+
+        meta = get_tool_meta("shell_tool")
+        assert meta.max_result_chars is None or len(shell_result) <= meta.max_result_chars
 
 
 # ---------------------------------------------------------------------------

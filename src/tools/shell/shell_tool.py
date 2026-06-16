@@ -1,5 +1,3 @@
-from typing import List, Union
-
 from src.lib.logging import get_logger
 from src.tools.shell.command_semantics import interpret_exit_code
 from src.tools.shell.output_interceptor import OutputInterceptor
@@ -31,11 +29,14 @@ def shell_tool(
     load_profile: bool = True,
     run_in_background: bool = False,
 ) -> str:
-    """Run a shell command in a persistent per-agent shell session.
+    """Run a shell command in a per-agent shell session.
 
-    Execute shell commands with full environment persistence across calls.
-    Each agent gets its own isolated shell process, preserving working
-    directory, environment variables, and session state.
+    Each invocation executes in a fresh subprocess.  Agents still get an
+    isolated shell session that preserves the current working directory
+    (CWD) across calls and replays a shell snapshot for aliases, functions,
+    shell options, and PATH.  Environment variable exports made inside one
+    command are intentionally ephemeral; keep assignment and use in the same
+    command when a variable is needed.
 
     Tool Preferences (use dedicated tools when available):
       - Prefer glob_search over ``find`` for file discovery
@@ -108,10 +109,7 @@ def shell_tool(
     if command is None:
         return _no_command_message()
 
-    # Backward compatibility: accept a list of strings and join them with " ; ".
-    if isinstance(command, list):
-        command = " ; ".join(str(c) for c in command if str(c).strip())
-    elif not isinstance(command, str):
+    if not isinstance(command, str):
         raise ValueError("command must be a non-empty string")
 
     command = command.strip()
@@ -131,7 +129,7 @@ def shell_tool(
 
     # Resolve agent context early so we can pass the shell session's
     # actual CWD to the path validator.  This closes a security gap
-    # where the persistent session CWD diverges from os.getcwd().
+    # where the session CWD diverges from os.getcwd().
     agent_id = get_current_agent_id()
     session_cwd = None
     if agent_id:
@@ -163,13 +161,13 @@ def shell_tool(
         return _run_in_background(exec_command, command, timeout, load_profile)
 
     # Resolve the shell process to use:
-    #   - In an agent context  -> reuse/create the agent's dedicated persistent shell
+    #   - In an agent context  -> reuse/create the agent's dedicated shell session
     #   - Outside agent context -> create a one-shot subprocess (legacy behaviour)
     if agent_id:
         process = registry.get_or_create(
             agent_id=agent_id,
             timeout=timeout,
-            persistent=True,
+            session_scoped=True,
             strip_newlines=False,
             return_err_output=True,
             load_profile=load_profile,
@@ -177,7 +175,7 @@ def shell_tool(
     else:
         process = ShellProcess(
             timeout=timeout,
-            persistent=False,
+            session_scoped=False,
             strip_newlines=False,
             return_err_output=True,
             load_profile=load_profile,
@@ -202,7 +200,7 @@ def _run_in_background(
     """Spawn a command as a background task without waiting.
 
     The command starts in a subprocess and is immediately registered
-    in the BackgroundTaskRegistry.  Output is written to a persistent
+    in the BackgroundTaskRegistry.  Output is written to a durable
     file that can be inspected via check_background_task().
     """
     import os
@@ -221,7 +219,7 @@ def _run_in_background(
     escaped = exec_command.replace("'", "'\\''")
     shell_args = [shell_path, "-c", f"eval '{escaped}'"]
 
-    # Create persistent output file.
+    # Create durable output file.
     fd, output_path = tempfile.mkstemp(
         prefix="agentloom_bg_", suffix=".txt",
     )

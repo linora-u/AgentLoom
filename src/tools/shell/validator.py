@@ -210,8 +210,8 @@ def validate_command(command: str, cwd: str | None = None):
         cwd: Current working directory of the shell session.  When
             provided, path boundary checks resolve relative paths
             against this directory instead of ``os.getcwd()``.
-            This closes a security gap where the persistent shell
-            session's CWD can diverge from the Python process CWD.
+            This closes a security gap where the session-scoped shell
+            CWD can diverge from the Python process CWD.
     """
     # Stage 1: Security checks (on raw command)
     validate_command_security(command)

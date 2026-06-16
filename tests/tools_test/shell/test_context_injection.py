@@ -49,7 +49,7 @@ def test_shell_tool_with_context_injection(clean_registry):
         
         # When load_profile is True it will load the rc scripts, 
         # so $0 inside echo might be -zsh or zsh
-        output = shell_tool(["echo $0"], load_profile=False)
+        output = shell_tool("echo $0", load_profile=False)
         assert "zsh" in output.lower(), f"Expected zsh to be executed based on injected config, but got output: {output}"
 
 def test_shell_tool_without_context_injection(clean_registry):
@@ -62,7 +62,7 @@ def test_shell_tool_without_context_injection(clean_registry):
         set_current_agent_name("test_supervisor")
         # Explicitly do NOT set agent config to mock global agent default behavior
         
-        output = shell_tool(["echo $0"], load_profile=False)
+        output = shell_tool("echo $0", load_profile=False)
         assert output is not None
         # It should fall back to either zsh (if installed) or bash
         has_zsh = shutil.which("zsh") is not None
@@ -202,7 +202,7 @@ def test_invalid_config_fallback(clean_registry):
 
         # bash_path is ignored; shell is auto-detected from $SHELL.
         # The command should succeed (not raise FileNotFoundError).
-        result = shell_tool(["echo hello"], load_profile=False)
+        result = shell_tool("echo hello", load_profile=False)
         assert "hello" in result, f"Expected 'hello' in output, got: {result}"
 
 def test_valid_config_execution(clean_registry):
@@ -223,11 +223,11 @@ def test_valid_config_execution(clean_registry):
         set_current_agent_config(mock_config)
 
         # This should execute successfully (shell auto-detected from $SHELL)
-        output = shell_tool(["echo hello_valid"], load_profile=False).strip()
+        output = shell_tool("echo hello_valid", load_profile=False).strip()
         assert "hello_valid" in output, f"Expected normal execution output, got {output}"
 
         # Verify it uses a valid shell (bash or zsh — whichever $SHELL points to)
-        shell_output = shell_tool(["echo $0"], load_profile=False).strip()
+        shell_output = shell_tool("echo $0", load_profile=False).strip()
         assert any(s in shell_output.lower() for s in ("bash", "zsh", "sh")), \
             f"Expected a valid shell, got {shell_output}"
 
@@ -256,13 +256,13 @@ def test_concurrent_shell_execution_isolation(clean_registry, monkeypatch):
                 set_current_agent_config({"execution_env": {}})
 
                 # Each agent cd's to a different workspace-relative directory.
-                shell_tool([f"mkdir -p {subdir}"], load_profile=False)
-                shell_tool([f"cd {subdir}"], load_profile=False)
+                shell_tool(f"mkdir -p {subdir}", load_profile=False)
+                shell_tool(f"cd {subdir}", load_profile=False)
 
                 # Sleep a bit to encourage thread interleaving.
                 time.sleep(0.1)
 
-                output_pwd = shell_tool(["pwd"], load_profile=False).strip()
+                output_pwd = shell_tool("pwd", load_profile=False).strip()
 
                 results[agent_id] = {
                     "cwd": output_pwd,
@@ -294,4 +294,3 @@ def test_concurrent_shell_execution_isolation(clean_registry, monkeypatch):
     assert "isolation_dir_b" in cwd_b, (
         f"Agent B CWD corrupted, expected isolation_dir_b in {cwd_b}"
     )
-

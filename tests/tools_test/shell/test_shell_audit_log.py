@@ -568,6 +568,36 @@ class TestSecurityPipelineIntegration:
             assert "wget" in call_args.kwargs.get("name", "") or \
                    "wget" in str(call_args)
 
+    def test_whitelist_rejection_logs_effective_allow_lists(self, enabled_audit):
+        """Rejected commands/operators should log the effective explicit allow-list."""
+        from src.tools.shell.validator import validate_command
+
+        with patch(
+            "src.tools.shell.shell_audit_log.get_shell_audit_logger",
+            return_value=enabled_audit,
+        ):
+            with patch("src.tools.shell.validator.validate_command_security"):
+                with patch("src.tools.shell.validator.check_path_constraints"):
+                    with patch(
+                        "src.tools.shell.validator.load_allowed_commands",
+                        return_value=["pwd", "echo", "cat"],
+                    ):
+                        with patch(
+                            "src.tools.shell.validator.load_allowed_operators",
+                            return_value=["|", "&&"],
+                        ):
+                            with pytest.raises(ValueError):
+                                validate_command("date")
+                            with pytest.raises(ValueError):
+                                validate_command("echo a ; echo b")
+
+        content = _read_audit_file(enabled_audit)
+        assert "Command not allowed: date. Allowed commands: cat, echo, pwd" in content
+        assert "Operator not allowed: ;. Allowed operators: &&, |" in content
+        assert 'allowed_commands: ["date", ...]' in content
+        assert 'allowed_operators: [";", ...]' in content
+        assert 'allowed_commands: [";", ...]' not in content
+
 
 # =========================================================================
 # Suggestion quality
@@ -603,6 +633,18 @@ class TestSuggestionContent:
         content = _read_audit_file(enabled_audit)
         assert "allowed_commands" in content
         assert "wget" in content
+
+    def test_operator_suggestion_references_allowed_operators(self, enabled_audit):
+        """Operator rejection suggestion should reference allowed_operators."""
+        enabled_audit.log_whitelist_rejection(
+            "echo hello ; echo world",
+            "Operator not allowed: ;. Allowed operators: &&, |",
+            ";",
+        )
+        content = _read_audit_file(enabled_audit)
+        assert "allowed_operators" in content
+        assert '[";", ...]' in content
+        assert 'allowed_commands: [";", ...]' not in content
 
     def test_stall_suggestion_mentions_non_interactive(self, enabled_audit):
         """Stall suggestion should mention non-interactive flags."""

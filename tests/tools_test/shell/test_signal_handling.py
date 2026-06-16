@@ -57,7 +57,7 @@ class TestPartialOutputPreservation:
         return the partial output."""
         proc = ShellProcess(
             timeout=2,
-            persistent=False,
+            session_scoped=False,
             return_err_output=True,
         )
         # This command prints immediately, then sleeps forever.
@@ -70,7 +70,7 @@ class TestPartialOutputPreservation:
         """A fast command should complete normally without timeout."""
         proc = ShellProcess(
             timeout=30,
-            persistent=False,
+            session_scoped=False,
             return_err_output=True,
         )
         result = proc.run("echo 'fast_result'")
@@ -87,7 +87,7 @@ class TestAutoBackgroundOnTimeout:
         a background task instead of killing the process."""
         proc = ShellProcess(
             timeout=2,
-            persistent=True,
+            session_scoped=True,
             return_err_output=True,
             load_profile=False,
         )
@@ -130,7 +130,7 @@ class TestAutoBackgroundOnTimeout:
 
         proc = ShellProcess(
             timeout=2,
-            persistent=True,
+            session_scoped=True,
             return_err_output=True,
             load_profile=False,
         )
@@ -148,7 +148,7 @@ class TestExitVsClose:
         cause the parent to hang waiting for the child's stdout."""
         proc = ShellProcess(
             timeout=10,
-            persistent=False,
+            session_scoped=False,
             return_err_output=True,
         )
         start = time.monotonic()
