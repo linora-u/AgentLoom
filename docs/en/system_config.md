@@ -382,11 +382,11 @@ Detection chain:
 
 **Execution architecture**: Uses a stateless subprocess model — each command spawns an independent `subprocess.Popen`, with context continuity maintained through environment snapshots and session state files. This avoids PTY long-connection fragility issues (buffer overflows, interactive command hangs, etc.).
 
-**Environment snapshot**: At agent session init, the user's shell environment (functions, aliases, shell options) is captured and saved as `snapshot.sh`. Each command execution sources this snapshot to restore the full user environment. The snapshot also injects extglob protection (`shopt -u extglob` / `setopt NO_EXTENDED_GLOB`) to prevent TOCTOU attacks.
+**Environment snapshot**: At agent session init, the user's shell environment (functions, aliases, shell options, PATH) is captured and saved as `snapshot.sh`. Each command execution sources this snapshot to restore shell configuration without carrying over command-side `export` changes. The snapshot also injects extglob protection (`shopt -u extglob` / `setopt NO_EXTENDED_GLOB`) to prevent TOCTOU attacks.
 
 **CWD tracking**: Uses out-of-band file tracking (`pwd -P >| cwd_file`) — no control characters embedded in stdout. After each command, the tracking file is read to update the working directory state.
 
-**Environment variable persistence**: Captures subprocess environment via `env > env_file`, diffs against the parent process environment, and saves new/modified variables to `session_env.sh` which is sourced before the next command.
+**Ephemeral environment variables**: `export` statements are visible inside the same shell command, for example `export X=1 && echo $X`, but do not persist to later `shell_tool` calls. Keep assignment and use in one command when command-local environment is needed.
 
 **Process tree management**: Subprocesses use `start_new_session=True` to create independent process groups. On timeout or error, `os.killpg()` sends SIGTERM → SIGKILL to clean up the entire process tree, preventing orphan processes.
 
@@ -889,7 +889,7 @@ Each check can be individually toggled (all enabled by default):
 - **cd boundary enforcement**: `cd` targets must be within workspace or `tool_access_control.include_paths`,
   preventing the shell session from escaping to arbitrary directories.
 - **CWD synchronisation**: Path validation uses the shell session's actual working directory
-  (not the Python process CWD), ensuring persistent session `cd` commands are tracked.
+  (not the Python process CWD), ensuring session-scoped `cd` commands are tracked.
 - **Compound command tracking**: Commands like `cd src && cd ../tests && ls` are tracked
   segment-by-segment, validating each `cd` target against the effective CWD.
 - **Symlink resolution**: Paths are resolved via `realpath` to prevent symlink-based escapes.
@@ -1077,7 +1077,9 @@ tool_metadata:
     is_concurrency_safe: true
     category: search
   shell_tool:
-    max_result_chars: 5000
+    # shell_tool has its own large-output truncation and artifact notice.
+    # Keep the outer shim threshold above that preview so the notice survives.
+    max_result_chars: 40000
     is_concurrency_safe: false
     category: shell
   default:

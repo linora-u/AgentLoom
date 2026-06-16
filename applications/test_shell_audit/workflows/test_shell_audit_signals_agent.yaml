@@ -1,0 +1,219 @@
+name: "test_shell_audit_signals"
+description: "Validate shell audit log records security, path, whitelist, timeout/background, and stall signals with actionable suggestions"
+
+model_type: "powerful"
+tool_call_type: "code_act"
+
+tools:
+  - name: "shell_tool"
+  - name: "read_file"
+  - name: "check_background_task"
+  - name: "kill_background_task"
+  - name: "list_background_tasks"
+
+tool_access_control:
+  path_validation:
+    - tools: ["shell_tool", "read_file"]
+      include_paths: []
+
+shell_settings:
+  allowed_commands:
+    - "cat"
+    - "echo"
+    - "grep"
+    - "head"
+    - "ls"
+    - "printf"
+    - "ps"
+    - "pwd"
+    - "sleep"
+    - "wc"
+  allowed_operators: ["|", "&&"]
+
+workflow: |
+  # Shell Audit Signals Validation Workflow
+
+  You are a testing agent. Execute the harness below in one Python code block.
+  The harness intentionally catches blocked shell_tool calls, reads the real
+  shell_audit.log, and only marks rows PASS when the audit file contains the
+  expected evidence. After the harness returns, use its printed summary as your
+  final answer. Do not invent PASS rows.
+
+  ```python
+  import os
+  import re
+
+  rows = {}
+  notes = {}
+
+  def record(name, status, evidence):
+      rows[name] = status
+      notes[name] = evidence
+
+  def expect_block(name, command, expected_text):
+      try:
+          output = shell_tool(command=command, timeout=10)
+          record(name + "_TOOL", "FAIL", "Expected block, but command succeeded")
+          print(name, "unexpected success", output[:200])
+      except Exception as exc:
+          text = str(exc)
+          status = "PASS" if expected_text in text else "FAIL"
+          record(name + "_TOOL", status, text)
+          print(name, status, text)
+
+  expect_block("WHITELIST_COMMAND", "wget http://example.com", "Command not allowed: wget")
+  expect_block("WHITELIST_OPERATOR", "echo hello ; echo world", "Operator not allowed: ;")
+  expect_block("PATH_VIOLATION", "cat /etc/passwd", "outside allowed workspace")
+  expect_block("SECURITY_BLOCK", "echo $(whoami)", "command substitution")
+
+  bg_output = shell_tool(
+      command="echo audit_bg_started && sleep 45 && echo audit_bg_done",
+      timeout=2,
+  )
+  print("BACKGROUND_OUTPUT", bg_output)
+
+  def extract_background_task_id(output):
+      marker = "[Background Task:"
+      start = output.find(marker)
+      if start < 0:
+          return ""
+      start += len(marker)
+      end = output.find("]", start)
+      if end < 0:
+          return ""
+      return output[start:end].strip()
+
+  task_id = extract_background_task_id(bg_output)
+  if task_id and "audit_bg_started" in bg_output:
+      kill_result = kill_background_task(task_id)
+      record("BACKGROUND_TOOL", "PASS", f"task_id={task_id}; kill={kill_result.splitlines()[0]}")
+  else:
+      record("BACKGROUND_TOOL", "FAIL", bg_output[:500])
+
+  stall_output = shell_tool(
+      command='printf "AuditSignal? (y/n) " && sleep 300',
+      timeout=30,
+  )
+  print("STALL_OUTPUT", stall_output)
+  if "Stall Warning" in stall_output and "Background Task" not in stall_output:
+      record("STALL_TOOL", "PASS", stall_output.splitlines()[0])
+  else:
+      record("STALL_TOOL", "FAIL", stall_output[:500])
+
+  sandbox_reasons = []
+  try:
+      from src.utils.sandbox.sandbox_manager import SandboxConfig, SandboxManager
+      for mode in ("bwrap", "docker"):
+          manager = SandboxManager(SandboxConfig(enabled=True, mode=mode))
+          available = manager.is_available()
+          reason = manager.get_unavailable_reason()
+          sandbox_reasons.append(
+              f"{mode}: available={available}; reason={reason or 'available'}"
+          )
+  except Exception as exc:
+      sandbox_reasons.append(f"sandbox inspection failed: {exc}")
+
+  audit_path = shell_tool(
+      command="ls -dt .logs/test_shell_audit_signals/*/shell_audit.log | head -1",
+      timeout=10,
+  ).strip().splitlines()[0]
+  audit_content = read_file(file_path=audit_path)
+  print("AUDIT_PATH", audit_path)
+  print(audit_content)
+
+  agent_log_path = shell_tool(
+      command="ls -dt .logs/test_shell_audit_signals/*/test_shell_audit_signals.log | head -1",
+      timeout=10,
+  ).strip().splitlines()[0]
+  same_parent = os.path.dirname(audit_path) == os.path.dirname(agent_log_path)
+  record(
+      "CO_LOCATION",
+      "PASS" if same_parent else "FAIL",
+      f"audit={audit_path}; agent={agent_log_path}",
+  )
+
+  residual_output = shell_tool(
+      command='ps aux | grep -E "[a]udit_bg_done|[A]uditSignal\\? \\(y/n\\)|[s]leep 300|[s]leep 45" | wc -l',
+      timeout=10,
+  ).strip()
+  residual_count = int(residual_output.splitlines()[-1])
+  record(
+      "RESIDUAL_PROCESS_CHECK",
+      "PASS" if residual_count == 0 else "FAIL",
+      f"residual_count={residual_count}",
+  )
+
+  def find_evidence(event, command_substr, required=None, forbidden=None):
+      required = required or []
+      forbidden = forbidden or []
+      lines = audit_content.splitlines()
+      for index, line in enumerate(lines):
+          if f"[{event}]" not in line:
+              continue
+          end = len(lines)
+          for next_index in range(index + 1, len(lines)):
+              if f"agent=test_shell_audit_signals" in lines[next_index] and "] [" in lines[next_index]:
+                  end = next_index
+                  break
+          block = lines[index:end]
+          text = "\n".join(block)
+          if command_substr not in text:
+              continue
+          if all(item in text for item in required) and not any(item in text for item in forbidden):
+              return "PASS", f"lines {index + 1}-{index + len(block)}: " + " | ".join(block[:8])
+          return "FAIL", f"lines {index + 1}-{index + len(block)} missing required/forbidden check: " + text
+      return "FAIL", f"No [{event}] block for {command_substr}"
+
+  for name, event, command_substr, required, forbidden in [
+      ("WHITELIST_COMMAND", "WHITELIST_REJECT", "wget http://example.com", ["allowed_commands"], []),
+      ("WHITELIST_OPERATOR", "WHITELIST_REJECT", "echo hello ; echo world", ["allowed_operators"], ['allowed_commands: [";", ...]']),
+      ("PATH_VIOLATION", "PATH_VIOLATION", "cat /etc/passwd", ["path_validation", "include_paths"], []),
+      ("SECURITY_BLOCK", "SECURITY_BLOCK", "echo $(whoami)", ["command_substitution", "command_substitution: false"], []),
+      ("BACKGROUND_PROMOTION", "BACKGROUND_PROMOTION", "audit_bg_started", ["timeout_seconds", "task_id"], []),
+      ("STALL_DETECTED", "STALL_DETECTED", "AuditSignal? (y/n)", ["non-interactive"], []),
+  ]:
+      status, evidence = find_evidence(event, command_substr, required, forbidden)
+      record(name, status, evidence)
+
+  if "[SANDBOX_WRAP]" in audit_content:
+      status, evidence = find_evidence("SANDBOX_WRAP", "", [], [])
+      record("SANDBOX_WRAP", status, evidence)
+  else:
+      record("SANDBOX_WRAP", "NOT_APPLICABLE", "; ".join(sandbox_reasons))
+
+  ordered = [
+      "WHITELIST_COMMAND",
+      "WHITELIST_OPERATOR",
+      "PATH_VIOLATION",
+      "SECURITY_BLOCK",
+      "BACKGROUND_PROMOTION",
+      "STALL_DETECTED",
+      "SANDBOX_WRAP",
+      "CO_LOCATION",
+      "RESIDUAL_PROCESS_CHECK",
+  ]
+  non_optional_ok = all(rows.get(name) == "PASS" for name in ordered if name != "SANDBOX_WRAP")
+  sandbox_ok = rows.get("SANDBOX_WRAP") in {"PASS", "NOT_APPLICABLE"}
+  overall = "PASS" if non_optional_ok and sandbox_ok else "FAIL"
+
+  summary_lines = [
+      f"Overall: {overall}",
+      f"shell_audit.log: {audit_path}",
+      f"agent log: {agent_log_path}",
+      "",
+      "| Signal | Status | Evidence |",
+      "|---|---|---|",
+  ]
+  for name in ordered:
+      summary_lines.append(f"| {name} | {rows.get(name, 'FAIL')} | {notes.get(name, 'missing')} |")
+  summary = "\n".join(summary_lines)
+  print(summary)
+  final_answer(summary)
+  ```
+
+skills: []
+worker_agents: []
+max_steps: 40
+
+execution_env:
+  type: "local"

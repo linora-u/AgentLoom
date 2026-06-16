@@ -1,8 +1,5 @@
 #!/usr/bin/env python3
-"""
-Test whether the shell tool persists state (like current working directory)
-and isolates it properly between supervisor and worker agents.
-"""
+"""Test shell session CWD isolation and ephemeral env semantics."""
 import sys
 import os
 from pathlib import Path
@@ -16,12 +13,12 @@ from src.lib.smolagents.agent.yaml_agent_factory import YamlAgentFactory, YamlCo
 from src.trace import generate_id
 
 
-def run_shell_persistence_test():
-    """Test shell persistence and isolation between supervisor and worker."""
+def run_shell_session_isolation_test():
+    """Test shell session isolation between supervisor and worker."""
 
     # 1. Load agent configuration.
     current_dir = Path(__file__).parent
-    yaml_path = current_dir / "workflows" / "test_shell_persist_supervisor.yaml"
+    yaml_path = current_dir / "workflows" / "test_shell_session_isolation_supervisor.yaml"
     
     print(f"Loading config file: {yaml_path}")
     if not yaml_path.exists():
@@ -35,20 +32,20 @@ def run_shell_persistence_test():
 
     # 3. Build task.
     task_content = """
-    请执行 shell 的隔离和持久性测试。
+    请执行 shell 的 session 隔离和环境变量非持久化测试。
     
     步骤：
     1. 你（主 agent）执行 `shell_tool("cd /tmp")`
-    2. 调度你的 worker (`shell_worker`)，让它执行: `shell_tool("cd /var/log")`
-    3. 你再次执行：`shell_tool("pwd")` 记录你的当前目录
-    4. 调度你的 worker (`shell_worker`) 执行: `shell_tool("pwd")` 获取它的当前目录
-    5. 返回最终总结，主 agent 的 pwd 是什么，worker 的 pwd 是什么。以此证明你们各自的目录更改成功且互相不影响。
+    2. 你执行 `shell_tool("export AGENTLOOM_SESSION_VAR=supervisor && echo $AGENTLOOM_SESSION_VAR")`
+    3. 你再次执行 `shell_tool("echo $AGENTLOOM_SESSION_VAR")`，确认变量不跨调用保留
+    4. 调度你的 worker (`shell_session_worker`) 执行 cd /var/log、inline export+echo、下一次 echo、pwd
+    5. 返回最终总结，主 agent 的 pwd 是什么，worker 的 pwd 是什么，env 是否只在同命令内可见。
     """
 
     task_id = generate_id(task_content, prefix="task")
 
     print("\n" + "="*80)
-    print("Starting shell persistence agent task...")
+    print("Starting shell session isolation agent task...")
     print("="*80 + "\n")
     
     try:
@@ -68,4 +65,4 @@ def run_shell_persistence_test():
 
 if __name__ == "__main__":
     
-    run_shell_persistence_test()
+    run_shell_session_isolation_test()

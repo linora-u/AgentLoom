@@ -19,42 +19,132 @@ shell_settings:
 workflow: |
   # Shell Audit Log Validation Workflow
 
-  You are a testing agent. Execute ALL steps below.
-  After each step, report PASS or FAIL with a short explanation.
+  You are a testing agent. Execute the harness below in one Python code block.
+  Do not replace the shell commands with alternatives. The harness catches
+  expected blocked shell_tool calls, reads the real shell_audit.log, and only
+  marks rows PASS when the audit file contains the expected evidence.
 
-  ## Step 1: Run a safe command
-  Use shell_tool to run: echo "audit log test"
-  Expected: command succeeds with output "audit log test".
+  ```python
+  import os
 
-  ## Step 2: Trigger whitelist rejection
-  Use shell_tool to run: wget http://example.com
-  Expected: command BLOCKED with error about "Command not allowed: wget".
-  This is expected behavior — report PASS if you see a whitelist rejection error.
+  rows = {}
+  notes = {}
 
-  ## Step 3: Trigger operator rejection
-  Use shell_tool to run: echo hello ; echo world
-  Expected: command BLOCKED with error about "Operator not allowed: ;".
-  This is expected behavior — report PASS if you see an operator rejection error.
+  def record(name, status, evidence):
+      rows[name] = status
+      notes[name] = evidence
 
-  ## Step 4: Verify audit log file exists
-  Use glob_search with pattern ".logs/test_shell_audit_log/*/shell_audit.log" to find audit log files.
-  Expected: at least one shell_audit.log file found inside a timestamp subdirectory.
-  Verify: output contains a file path matching the pattern.
+  safe_output = shell_tool(command='echo "audit log test"', timeout=10)
+  record(
+      "SAFE_COMMAND",
+      "PASS" if "audit log test" in safe_output else "FAIL",
+      safe_output.strip(),
+  )
 
-  ## Step 5: Verify audit log content
-  If Step 4 found an audit log file, use read_file to read its contents.
-  Expected: the file contains at least 2 entries:
-    - One [WHITELIST_REJECT] entry for "wget"
-    - One [WHITELIST_REJECT] entry for operator ";"
-  Verify: each entry has timestamp, agent name, command, message, and suggestion fields.
-  Also verify: suggestions reference "allowed_commands" YAML configuration.
+  def expect_block(name, command, expected_text):
+      try:
+          output = shell_tool(command=command, timeout=10)
+          record(name, "FAIL", "Expected block, but command succeeded: " + output[:200])
+      except Exception as exc:
+          text = str(exc)
+          record(name, "PASS" if expected_text in text else "FAIL", text)
 
-  ## Step 6: Verify agent log co-located with audit log
-  Use glob_search with pattern ".logs/test_shell_audit_log/*/test_shell_audit_log.log" to find the agent run log.
-  Expected: the agent log is in the SAME timestamp directory as the shell_audit.log from Step 4.
-  Verify: both files share the same parent directory (timestamp directory).
+  expect_block("WGET_REJECT", "wget http://example.com", "Command not allowed: wget")
+  expect_block("OPERATOR_REJECT", "echo hello ; echo world", "Operator not allowed: ;")
 
-  ## Final Summary
-  Report overall PASS/FAIL status.
-  List each step's result and summarize the audit log verification.
-  Specifically confirm whether the agent log and shell audit log are co-located in the same timestamp directory.
+  audit_path = shell_tool(
+      command="ls -dt .logs/test_shell_audit_log/*/shell_audit.log | head -1",
+      timeout=10,
+  ).strip().splitlines()[0]
+  audit_content = read_file(file_path=audit_path)
+  print("AUDIT_PATH", audit_path)
+  print(audit_content)
+
+  agent_log_path = shell_tool(
+      command="ls -dt .logs/test_shell_audit_log/*/test_shell_audit_log.log | head -1",
+      timeout=10,
+  ).strip().splitlines()[0]
+  same_parent = os.path.dirname(audit_path) == os.path.dirname(agent_log_path)
+  record(
+      "CO_LOCATION",
+      "PASS" if same_parent else "FAIL",
+      f"audit={audit_path}; agent={agent_log_path}",
+  )
+
+  def find_block(command_substr):
+      lines = audit_content.splitlines()
+      for index, line in enumerate(lines):
+          if "[WHITELIST_REJECT]" not in line:
+              continue
+          end = len(lines)
+          for next_index in range(index + 1, len(lines)):
+              if "[WHITELIST_REJECT]" in lines[next_index] and "agent=test_shell_audit_log" in lines[next_index]:
+                  end = next_index
+                  break
+          block = lines[index:end]
+          text = "\n".join(block)
+          if command_substr in text:
+              return index + 1, block, text
+      return 0, [], ""
+
+  wget_line, wget_block, wget_text = find_block("wget http://example.com")
+  operator_line, operator_block, operator_text = find_block("echo hello ; echo world")
+
+  wget_required = [
+      "message: Command not allowed: wget.",
+      "Allowed commands: cat, echo, find, grep, head, ls, pwd, tail, wc",
+      "allowed_commands",
+  ]
+  operator_required = [
+      "message: Operator not allowed: ;.",
+      "Allowed operators: &&, |",
+      "allowed_operators",
+  ]
+
+  record(
+      "WGET_AUDIT_ENTRY",
+      "PASS" if wget_text and all(item in wget_text for item in wget_required) else "FAIL",
+      f"line={wget_line}; " + " | ".join(wget_block[:8]),
+  )
+  record(
+      "OPERATOR_AUDIT_ENTRY",
+      "PASS"
+      if (
+          operator_text
+          and all(item in operator_text for item in operator_required)
+          and 'allowed_commands: [";", ...]' not in operator_text
+      )
+      else "FAIL",
+      f"line={operator_line}; " + " | ".join(operator_block[:8]),
+  )
+
+  ordered = [
+      "SAFE_COMMAND",
+      "WGET_REJECT",
+      "OPERATOR_REJECT",
+      "WGET_AUDIT_ENTRY",
+      "OPERATOR_AUDIT_ENTRY",
+      "CO_LOCATION",
+  ]
+  overall = "PASS" if all(rows.get(name) == "PASS" for name in ordered) else "FAIL"
+  summary_lines = [
+      f"Overall: {overall}",
+      f"shell_audit.log: {audit_path}",
+      f"agent log: {agent_log_path}",
+      "",
+      "| Step | Status | Evidence |",
+      "|---|---|---|",
+  ]
+  for name in ordered:
+      summary_lines.append(f"| {name} | {rows.get(name, 'FAIL')} | {notes.get(name, 'missing')} |")
+  summary = "\n".join(summary_lines)
+  print(summary)
+  final_answer(summary)
+  ```
+
+skills: []
+worker_agents: []
+max_steps: 12
+
+execution_env:
+  type: "local"

@@ -239,13 +239,17 @@ def test_cross_agent_cwd_isolation(bypass_shell_security):
             original_dir_a = shell_tool("pwd", load_profile=False).strip()
             shell_tool("cd /tmp", load_profile=False)
             new_dir_a = shell_tool("pwd", load_profile=False).strip()
-            assert new_dir_a == "/tmp", "Agent A failed to change directory"
+            assert new_dir_a == os.path.realpath("/tmp"), (
+                "Agent A failed to change directory"
+            )
 
         # Agent B should still be in its original directory
         with sub_task_context("agent_B_cwd"):
             set_current_agent_id("agent_B_cwd_id")
             dir_b = shell_tool("pwd", load_profile=False).strip()
-            assert dir_b != "/tmp", "Agent B's working directory was polluted by Agent A"
+            assert dir_b != os.path.realpath("/tmp"), (
+                "Agent B's working directory was polluted by Agent A"
+            )
 
 if __name__ == "__main__":
     pytest.main(["-v", __file__])
