@@ -9,7 +9,7 @@ snapshot + file-based output" design (Shell.ts, bashProvider.ts,
 ShellSnapshot.ts, ShellCommand.ts).
 
 Key design decisions:
-- No persistent PTY — avoids fragility, buffer limits, and hang risks
+- No long-lived PTY — avoids fragility, buffer limits, and hang risks
   from interactive commands.
 - CWD tracked via ``pwd >| cwd_file`` (out-of-band, not embedded
   in stdout).
@@ -42,6 +42,7 @@ from src.tools.shell.ansi_stripper import strip_ansi
 from src.tools.shell.pipe_redirect import rearrange_pipe_command
 from src.tools.shell.shell_session import ShellSession
 from src.tools.shell.shell_snapshot import create_snapshot, remove_snapshot
+from src.tools.shell.stall_watchdog import detect_stall_prompt
 from src.tools.shell.subprocess_env import build_subprocess_env as _build_subprocess_env
 from src.tools.shell.tree_kill import SizeWatchdog, graceful_kill
 
@@ -95,6 +96,26 @@ AGENT_SHELL_PROMPT_ENV = "AGENT_SHELL_PROMPT"
 
 # Maximum output file size before the size watchdog kills the process.
 _MAX_OUTPUT_BYTES = 100_000_000  # 100 MB
+
+
+def _foreground_stall_threshold(timeout: int) -> float:
+    """Bound foreground stall detection so it can fire before tool timeout.
+
+    Background tasks can afford a 45s prompt threshold.  A foreground tool call
+    blocks the agent executor, so prompt-like output must be classified sooner
+    than the command timeout; otherwise it is promoted to background and leaves
+    the interactive process alive.
+    """
+    configured = float(C.get_nested(
+        "shell_settings", "background_tasks",
+        "stall_threshold_seconds", default=45,
+    ))
+    half_timeout = max(float(timeout) * 0.5, 1.0)
+    return max(1.0, min(configured, half_timeout, 15.0))
+
+
+def _foreground_stall_poll_interval(stall_threshold: float) -> float:
+    return max(0.2, min(1.0, stall_threshold / 2.0))
 
 
 def _is_executable(shell_path: str) -> bool:
@@ -221,12 +242,14 @@ class ShellProcess:
 
     Two execution modes:
 
-    **Persistent** (persistent=True):
+    **Session-scoped** (session_scoped=True):
         Each run() call spawns a fresh subprocess, but session state
-        (CWD, env delta) is carried over from the previous call via the
-        ShellSession state tracker and optional environment snapshot.
+        (CWD only) is carried over from the previous call via the
+        ShellSession state tracker.  A shell snapshot restores aliases,
+        functions, shell options, and PATH; per-command ``export`` changes
+        are not persisted.
 
-    **Standalone** (persistent=False):
+    **Standalone** (session_scoped=False):
         Each run() is fully isolated — no state is preserved.
     """
 
@@ -234,13 +257,13 @@ class ShellProcess:
         self,
         strip_newlines: bool = False,
         return_err_output: bool = False,
-        persistent: bool = False,
+        session_scoped: bool = False,
         timeout: int = 120,
         load_profile: bool = True,
     ):
         self.strip_newlines = strip_newlines
         self.return_err_output = return_err_output
-        self.persistent = persistent
+        self.session_scoped = session_scoped
         self.timeout = timeout
         self.load_profile = load_profile
 
@@ -252,11 +275,11 @@ class ShellProcess:
         else:
             self._shell_path = find_suitable_shell()
 
-        # Session state for persistent mode.
+        # Session state for session-scoped mode.
         self._session: Optional[ShellSession] = None
         self._snapshot_path: Optional[str] = None
 
-        if self.persistent:
+        if self.session_scoped:
             self._init_session()
 
     # ------------------------------------------------------------------
@@ -283,7 +306,7 @@ class ShellProcess:
     def cwd(self) -> Optional[str]:
         """Current working directory of the shell session.
 
-        Updated after every persistent command via the out-of-band CWD
+        Updated after every session-scoped command via the out-of-band CWD
         tracking file.  Returns None for standalone processes or before
         any command has been executed.
         """
@@ -294,11 +317,11 @@ class ShellProcess:
     def run(self, command: str) -> str:
         """Execute a shell command.
 
-        In persistent mode, session state (CWD, env) is preserved across
-        calls.  In standalone mode, each call is fully isolated.
+        In session-scoped mode, CWD state is preserved across calls.
+        In standalone mode, each call is fully isolated.
         """
-        if self.persistent:
-            return self._run_persistent(command)
+        if self.session_scoped:
+            return self._run_session_scoped(command)
         else:
             return self._run_standalone(command)
 
@@ -310,48 +333,66 @@ class ShellProcess:
         """Run a command as an isolated subprocess."""
         if self.is_windows:
             command = f"chcp 65001 >nul & {command}"
+            try:
+                result = subprocess.run(
+                    command,
+                    shell=True,
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.STDOUT,
+                    timeout=self.timeout,
+                    text=True,
+                    errors="replace",
+                    env=_build_subprocess_env(),
+                )
+                return self._format_output(result.stdout or "")
+            except subprocess.TimeoutExpired as e:
+                partial = e.stdout or ""
+                if isinstance(partial, bytes):
+                    partial = partial.decode(errors="replace")
+                return self._format_output(
+                    f"{partial}\n\n"
+                    f"[Timeout Error: Command took longer than "
+                    f"{self.timeout} seconds]"
+                )
+            except Exception as e:
+                return self._format_output(f"Execution failed: {str(e)}")
 
         env = _build_subprocess_env()
+        is_zsh = "zsh" in os.path.basename(self._shell_path).lower()
+        composite = command
+        if not self.load_profile and is_zsh:
+            composite = (
+                "setopt NO_EXTENDED_GLOB 2>/dev/null || true ; "
+                f"{command}"
+            )
+
+        if self.load_profile:
+            shell_args = [self._shell_path, "-l", "-c", composite]
+        elif "bash" in os.path.basename(self._shell_path).lower():
+            shell_args = [
+                self._shell_path,
+                "--noprofile",
+                "--norc",
+                "-c",
+                composite,
+            ]
+        else:
+            shell_args = [self._shell_path, "-c", composite]
 
         try:
-            kwargs = dict(
-                shell=True,
-                stdout=subprocess.PIPE,
-                stderr=subprocess.STDOUT,
-                timeout=self.timeout,
-                text=True,
-                errors="replace",
-                env=env,
+            result = self._exec_subprocess(
+                shell_args, env, self.timeout, command=command,
             )
-            if not self.is_windows:
-                kwargs["executable"] = self._shell_path
-
-            result = subprocess.run(command, **kwargs)
-            output = result.stdout or ""
-        except subprocess.TimeoutExpired as e:
-            partial = e.stdout or ""
-            if isinstance(partial, bytes):
-                partial = partial.decode(errors="replace")
-            output = (
-                f"{partial}\n\n"
-                f"[Timeout Error: Command took longer than "
-                f"{self.timeout} seconds]"
-            )
-        except subprocess.CalledProcessError as e:
-            if self.return_err_output:
-                output = e.stdout or ""
-            else:
-                output = f"Execution failed: {e}"
         except Exception as e:
-            output = f"Execution failed: {str(e)}"
+            result = ExecResult(output=f"Execution failed: {str(e)}")
 
-        return self._format_output(output)
+        return self._render_exec_result(result)
 
     # ------------------------------------------------------------------
-    # Persistent execution (stateless subprocess + session state)
+    # Session-scoped execution (stateless subprocess + CWD state)
     # ------------------------------------------------------------------
 
-    def _run_persistent(self, command: str) -> str:
+    def _run_session_scoped(self, command: str) -> str:
         """Run a command with session state preservation.
 
         Each call spawns a new subprocess.  Previous session CWD is
@@ -458,6 +499,12 @@ class ShellProcess:
         except Exception as e:
             result = ExecResult(output=f"Execution failed: {str(e)}")
 
+        # Update session state from tracking files (CWD only).
+        session.update_cwd_from_file()
+
+        return self._render_exec_result(result)
+
+    def _render_exec_result(self, result: ExecResult) -> str:
         output = result.output
         if result.background_task_id:
             output = (
@@ -472,10 +519,6 @@ class ShellProcess:
                 f"[Timeout Error: Command took longer than "
                 f"{self.timeout} seconds]"
             )
-
-        # Update session state from tracking files (CWD only).
-        session.update_cwd_from_file()
-
         return self._format_output(output)
 
     def _exec_subprocess(
@@ -536,14 +579,13 @@ class ShellProcess:
             # prompts (y/n, Continue?, etc.) during the wait period.
             from src.tools.shell.stall_watchdog import StallWatchdog
 
+            stall_threshold = _foreground_stall_threshold(timeout)
+
             fg_stall = StallWatchdog(
                 task_id=f"fg-{proc.pid}",
                 output_path=output_file,
-                poll_interval=5.0,
-                stall_threshold=float(C.get_nested(
-                    "shell_settings", "background_tasks",
-                    "stall_threshold_seconds", default=45,
-                )),
+                poll_interval=_foreground_stall_poll_interval(stall_threshold),
+                stall_threshold=stall_threshold,
             )
             fg_stall.start()
 
@@ -609,6 +651,40 @@ class ShellProcess:
                         partial = f.read()
                 except Exception:
                     pass
+
+                prompt_message = detect_stall_prompt(f"fg-{proc.pid}", output_file)
+                if prompt_message and proc.poll() is None:
+                    logger.info(
+                        "Foreground prompt detected at timeout for pid %d — "
+                        "killing instead of promoting",
+                        proc.pid,
+                    )
+                    try:
+                        from src.tools.shell.shell_audit_log import (
+                            get_shell_audit_logger,
+                        )
+                        audit = get_shell_audit_logger()
+                        audit.log_stall_detected(
+                            command=command,
+                            pid=proc.pid,
+                            elapsed=elapsed,
+                            stall_message=prompt_message,
+                        )
+                    except Exception:
+                        pass
+                    graceful_kill(proc.pid)
+                    try:
+                        proc.wait(timeout=5)
+                    except subprocess.TimeoutExpired:
+                        pass
+                    return ExecResult(
+                        output=(
+                            f"{partial}\n\n"
+                            f"[Stall Warning: {prompt_message}]"
+                        ),
+                        interrupted=True,
+                        exit_code=-9,
+                    )
 
                 # Check if auto-background is enabled.
                 bg_enabled = C.get_nested(
@@ -807,9 +883,9 @@ class ShellProcessRegistry:
 
     Each agent (identified by agent_id) gets its own dedicated
     ShellProcess, which is created on first use and reused on subsequent
-    calls.  This allows the shell session to maintain state (CWD,
-    environment variables) across multiple tool invocations within the
-    same agent run.
+    calls.  This allows the shell session to maintain CWD across multiple
+    tool invocations within the same agent run. Environment variable exports
+    remain per-command and do not persist.
     """
 
     _instance: Optional["ShellProcessRegistry"] = None
@@ -832,7 +908,7 @@ class ShellProcessRegistry:
         self,
         agent_id: str,
         timeout: int = 120,
-        persistent: bool = True,
+        session_scoped: bool = True,
         strip_newlines: bool = False,
         return_err_output: bool = True,
         load_profile: bool = True,
@@ -842,12 +918,17 @@ class ShellProcessRegistry:
             if agent_id not in self._registry:
                 self._registry[agent_id] = ShellProcess(
                     timeout=timeout,
-                    persistent=persistent,
+                    session_scoped=session_scoped,
                     strip_newlines=strip_newlines,
                     return_err_output=return_err_output,
                     load_profile=load_profile,
                 )
-            return self._registry[agent_id]
+            process = self._registry[agent_id]
+            process.timeout = timeout
+            process.strip_newlines = strip_newlines
+            process.return_err_output = return_err_output
+            process.load_profile = load_profile
+            return process
 
     def release(self, agent_id: str) -> None:
         """Release and destroy the ShellProcess associated with *agent_id*."""

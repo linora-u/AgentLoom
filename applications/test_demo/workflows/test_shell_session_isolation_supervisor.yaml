@@ -1,0 +1,40 @@
+name: "shell_session_isolation_supervisor"
+description: |
+  主 agent，负责自身的 shell 操作并调度 worker agent，验证两者 shell session 互相隔离。
+
+model_type: "powerful"
+tool_call_type: "code_act"
+
+workflow: |
+  # Shell Session Isolation Test
+  我们的目标是验证主 agent (你) 和子 agent (shell_session_worker) 的 shell session 完全隔离：
+  - CWD 会在同一个 agent 的多次 shell_tool 调用之间保持。
+  - export 的环境变量不会跨 shell_tool 调用保持；只能在同一条命令内可见。
+
+  请严格按照以下步骤顺序执行，并且只向我返回最终整理好的结论：
+  1. 你自己执行：`shell_tool("cd /tmp")`。
+  2. 你自己执行：`shell_tool("export AGENTLOOM_SESSION_VAR=supervisor && echo $AGENTLOOM_SESSION_VAR")`，记录应输出 `supervisor`。
+  3. 你自己执行：`shell_tool("echo $AGENTLOOM_SESSION_VAR")`，记录不应再输出 `supervisor`。
+  4. 调度 worker (`shell_session_worker`)，让它执行：
+     - `cd /var/log`
+     - `export AGENTLOOM_SESSION_VAR=worker && echo $AGENTLOOM_SESSION_VAR`
+     - `echo $AGENTLOOM_SESSION_VAR`
+     - `pwd`
+  5. 你自己执行：`shell_tool("pwd")` 并记录结果。macOS 上 `/tmp` 的 physical path 可能是 `/private/tmp`，这是正确结果。
+  6. 向我总结并明确给出 PASS/FAIL：
+     - supervisor 的最终 pwd 是否仍为 `/tmp` 或 `/private/tmp`
+     - worker 的最终 pwd 是否为 `/var/log` 或 `/private/var/log`
+     - supervisor 与 worker 的 env 变量是否都只在同一条命令内可见、下一次调用为空
+     - 如果任一步失败，必须写真实失败原因，不能标 PASS。
+
+tools:
+  - name: "shell_tool"
+
+worker_agents:
+  - path: "applications/test_demo/workflows/worker_agents/test_shell_session_isolation_worker.yaml"
+
+skills: []
+execution_env:
+  type: "local"
+  executor_kwargs:
+    timeout_seconds: 120

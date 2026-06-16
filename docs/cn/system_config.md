@@ -454,6 +454,7 @@ shell_settings:
 | 参数 | 类型 | 默认值 | 说明 |
 |------|------|--------|------|
 | `max_print_outputs_length` | `int` | `50000` | 单次代码执行中 `print()` 输出的最大字符数。超出部分会被截断 |
+| `timeout_seconds` | `int \| null` | `30` | 单个生成 Python 代码块的最长墙钟执行秒数。同步调用 Worker Agent 或其他长耗时工具时可调大 |
 
 > `additional_functions` 由框架根据 `code_agent.additional_functions` 配置自动注入，无需在 `executor_kwargs` 中手动指定。
 
@@ -471,6 +472,7 @@ execution_env:
   type: "local"
   executor_kwargs:
     max_print_outputs_length: 100000
+    timeout_seconds: 120
 ```
 
 ### 5.4 `docker` — Docker 容器执行器
@@ -938,6 +940,16 @@ shell_settings:
 
 > 此功能无需额外配置，基于已有的 `security_checks` 和 `tool_access_control` 配置自动生效。
 
+#### audit_log — Shell 审计日志
+
+| 参数 | 类型 | 默认值 | 说明 |
+|------|------|--------|------|
+| `shell_settings.audit_log.enabled` | `bool` | `true` | 是否启用每个 agent 独立的 Shell 审计日志 |
+| `shell_settings.audit_log.log_policy_snapshot` | `bool` | `true` | 每次运行写入一条 `POLICY_SNAPSHOT`，记录有效 Shell 策略，包括 `allowed_commands: "*"` 这类全放行默认值 |
+| `shell_settings.audit_log.log_success` | `bool` | `false` | 是否把成功命令也记录为 `COMMAND_SUCCESS` |
+
+`POLICY_SNAPSHOT` 会在第一次 Shell 命令执行前写入，因此即使是完全放行、没有任何拦截的运行，也能审计到命令/操作符白名单检查是被显式关闭的。
+
 #### sandbox — 沙箱模式
 
 | 参数 | 类型 | 默认值 | 说明 |
@@ -963,6 +975,10 @@ shell_settings:
     destructive_patterns: true
   dangerous_paths: ["/", "/etc", "/usr", "/var", "/boot", "/sys", "/proc"]
   block_destructive: true
+  audit_log:
+    enabled: true
+    log_policy_snapshot: true
+    log_success: false
   sandbox:
     enabled: false
     mode: "bwrap"
@@ -1102,7 +1118,9 @@ tool_metadata:
     is_concurrency_safe: true
     category: search
   shell_tool:
-    max_result_chars: 5000
+    # shell_tool 自身会对大输出做截断并写入完整输出路径。
+    # 外层 shim 阈值需高于该预览，避免隐藏完整输出提示。
+    max_result_chars: 40000
     is_concurrency_safe: false
     category: shell
   read_file:

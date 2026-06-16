@@ -44,6 +44,11 @@ class BackgroundTaskState:
         running  ──►  completed   (exit code 0)
         running  ──►  failed      (exit code != 0)
         running  ──►  killed      (explicit kill or size watchdog)
+
+        A running task can also carry ``stall_message`` when its output
+        appears to be waiting for interactive input.  That warning is
+        orthogonal to terminal state; callers can inspect it and decide
+        whether to kill the task.
     """
 
     task_id: str
@@ -138,6 +143,11 @@ class BackgroundTaskRegistry:
                 with inst._lock:
                     # Stop all watchdogs.
                     for task in inst._tasks.values():
+                        if not task.is_terminal:
+                            try:
+                                graceful_kill(task.pid, grace_ms=500)
+                            except Exception:
+                                pass
                         if task._size_watchdog:
                             task._size_watchdog.stop()
                         if task._stall_watchdog:
@@ -252,10 +262,20 @@ class BackgroundTaskRegistry:
         if self._cfg_stall_detection():
             from src.tools.shell.stall_watchdog import StallWatchdog
 
+            def _record_stall(message: str) -> None:
+                with self._lock:
+                    current = self._tasks.get(task_id)
+                    if current is not None and not current.is_terminal:
+                        current.stall_message = message
+
+            stall_threshold = self._cfg_stall_threshold()
+
             sw = StallWatchdog(
                 task_id=task_id,
                 output_path=output_path,
-                stall_threshold=self._cfg_stall_threshold(),
+                poll_interval=max(0.2, min(5.0, stall_threshold / 2.0)),
+                stall_threshold=stall_threshold,
+                on_stall=_record_stall,
             )
             task._stall_watchdog = sw
             sw.start()

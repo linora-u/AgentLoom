@@ -15,8 +15,6 @@ from unittest.mock import patch, MagicMock
 
 from src.tools.shell.path_validation import (
     check_path_constraints,
-    _resolve_path,
-    _is_path_within_allowed,
     _build_allowed_roots,
 )
 
@@ -417,6 +415,15 @@ class TestDangerousVsInclude:
         with _patch_allowed_dirs(str(ws), "/etc"):
             with pytest.raises(ValueError, match="[Dd]angerous.*critical"):
                 check_path_constraints("rm -rf /etc", cwd=str(ws))
+
+    def test_rm_dangerous_canonical_alias_blocked(self, tmp_path):
+        """/private/etc alias is blocked even when that alias is included."""
+        ws = tmp_path / "workspace"
+        ws.mkdir()
+        etc_alias = os.path.realpath("/etc")
+        with _patch_allowed_dirs(str(ws), etc_alias):
+            with pytest.raises(ValueError, match="[Dd]angerous.*critical"):
+                check_path_constraints(f"rm -rf {etc_alias}", cwd=str(ws))
 
 
 # =========================================================================

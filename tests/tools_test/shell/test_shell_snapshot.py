@@ -90,6 +90,20 @@ class TestSnapshotContentBuilding:
         content = _build_snapshot_content(raw, "/usr/bin/zsh")
         assert "NO_EXTENDED_GLOB" in content
 
+    def test_build_zsh_content_makes_options_sourceable(self):
+        """Bare zsh option names must not become executable commands."""
+        raw = (
+            "# --- AGENTLOOM_SNAPSHOT_SEPARATOR ---\n"
+            "login\nmonitor\n"
+            "# --- AGENTLOOM_SNAPSHOT_SEPARATOR ---\n"
+            "# --- AGENTLOOM_SNAPSHOT_SEPARATOR ---\n"
+        )
+        content = _build_snapshot_content(raw, "/usr/bin/zsh")
+        assert "\nlogin\n" not in content
+        assert "\nmonitor\n" not in content
+        assert "setopt login" in content
+        assert "setopt monitor" in content
+
     def test_build_content_includes_functions(self):
         """Functions section is included in the output."""
         raw = "my_func() { echo test; }\n# --- AGENTLOOM_SNAPSHOT_SEPARATOR ---\n# --- AGENTLOOM_SNAPSHOT_SEPARATOR ---\n"

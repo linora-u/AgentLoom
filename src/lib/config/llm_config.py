@@ -102,10 +102,12 @@ class LlmModelTypeSettings(BaseModel):
 
     @model_validator(mode="before")
     @classmethod
-    def _ignore_legacy_tool_call_detection(cls, values: dict) -> dict:
-        if isinstance(values, dict):
-            values = dict(values)
-            values.pop("supports_native_tool_calls", None)
+    def _reject_removed_tool_call_detection(cls, values: dict) -> dict:
+        if isinstance(values, dict) and "supports_native_tool_calls" in values:
+            raise ValueError(
+                "supports_native_tool_calls was removed. AgentLoom now sends structured tool schemas "
+                "whenever tools are available; remove this field."
+            )
         return values
 
 class LLMConfig(BaseModel):
@@ -157,6 +159,13 @@ class LLMConfig(BaseModel):
                     f"(e.g., 'openai/gpt-4o', 'anthropic/claude-3-5-sonnet')."
                 )
 
+            if "supports_native_tool_calls" in v:
+                raise ValueError(
+                    f"Model type '{k}' uses removed field 'supports_native_tool_calls'. "
+                    "AgentLoom now always sends structured tool schemas when tools are available; "
+                    "remove this field from config/llm.yaml."
+                )
+
             # Collect extra keys not in the known fields list.
             # These are passed through to litellm.completion() as-is.
             _KNOWN_FIELDS = {
@@ -164,7 +173,6 @@ class LLMConfig(BaseModel):
                 "timeout", "num_retries", "retry_delay", "max_retry_delay",
                 "extra_headers", "context_cache", "system_prompt_boundary",
                 "description", "requests_per_minute", "supports_structured_output",
-                "supports_native_tool_calls",
             }
             extra_completion_params = {
                 ek: ev for ek, ev in v.items() if ek not in _KNOWN_FIELDS

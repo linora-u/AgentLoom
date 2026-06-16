@@ -1,0 +1,71 @@
+name: "test_shell_large_output"
+description: "Validate large shell output truncation, visible artifact notice, and follow-up inspection"
+
+model_type: "powerful"
+tool_call_type: "code_act"
+
+tools:
+  - name: "shell_tool"
+  - name: "read_file"
+
+workflow: |
+  # Shell Large Output Stress Workflow
+
+  You are a testing agent. Execute ALL steps below. Do not mark a step PASS
+  unless you saw the required evidence. If a step fails, report the real
+  failure.
+
+  ## Step 1: Produce output larger than the shell preview budget
+  Run this code exactly enough to print only the evidence markers and the
+  artifact path, not the whole output:
+
+    import re
+    result = shell_tool(command="seq 1 12000", timeout=30)
+    match = re.search(r"saved to: (.+)", result)
+    print("HAS_EARLY_1=", "1\n2\n3" in result)
+    print("HAS_LATE_12000=", "12000" in result)
+    print("HAS_BYTES_OMITTED=", "bytes omitted" in result)
+    print("HAS_SYSTEM_NOTICE=", "<system_notice>" in result)
+    print("ARTIFACT_PATH=", match.group(1).strip() if match else "MISSING")
+
+  Expected:
+    - HAS_EARLY_1=True.
+    - HAS_LATE_12000=True.
+    - HAS_BYTES_OMITTED=True.
+    - HAS_SYSTEM_NOTICE=True.
+    - ARTIFACT_PATH is a real path under .logs/shell_outputs.
+  Verify: extract the saved full-output file path from the response.
+
+  ## Step 2: Inspect the saved full-output artifact
+  Use read_file on the extracted path. Do not print the whole file. Read a
+  small slice around line 6000 and a small slice near the end.
+  Expected:
+    - The artifact exists.
+    - The artifact contains middle output that was missing from the preview,
+      especially the line "6000".
+    - The artifact contains the final line "12000".
+  Verify: do not use the preview alone for this step; inspect the saved file.
+
+  ## Step 3: Verify stderr is captured with stdout
+  Use shell_tool to run:
+    echo stdout_marker && echo stderr_marker >&2
+  Expected: the response contains both stdout_marker and stderr_marker.
+
+  ## Step 4: Verify follow-up commands still work after a large output
+  Use shell_tool to run:
+    pwd
+  Expected: command returns a non-empty working directory and does not include
+  stale large-output markers.
+
+  ## Final Summary
+  Return a concise table:
+  | Step | Expected Evidence | Status |
+  Report overall: X/4 PASSED.
+  Include the full-output artifact path you inspected.
+
+skills: []
+worker_agents: []
+max_steps: 12
+
+execution_env:
+  type: "local"

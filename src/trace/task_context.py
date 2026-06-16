@@ -6,12 +6,11 @@ sub-task ID, and agent ID handling.
 
 Note on threading:
     ContextVar values do NOT propagate automatically to child threads spawned
-    by ``concurrent.futures.ThreadPoolExecutor``.  To ensure hooks (such as
-    ``validate_workspace_path``) can still read the active agent config when
-    running inside a thread-pool worker, we maintain a **thread-safe global
-    fallback** (``_global_agent_config_fallback``) that is updated every time
-    ``set_current_agent_config`` is called.  ``get_current_agent_config``
-    first checks the ContextVar; if it is ``None``, it returns the fallback.
+    by ``concurrent.futures.ThreadPoolExecutor``.  To ensure hooks and tools
+    can still read the active agent identity/config when running inside a
+    thread-pool worker, we maintain **thread-safe global fallbacks** that are
+    updated by the matching ``set_current_*`` helpers.  Getters first check
+    their ContextVar; if it is ``None``, they return the fallback.
 """
 
 import logging
@@ -38,6 +37,7 @@ _current_runtime_agent_path: ContextVar[Optional[str]] = ContextVar('current_run
 # Thread-safe global fallbacks for values that must be accessible from
 # ThreadPoolExecutor worker threads where ContextVar is not propagated.
 _global_lock = threading.Lock()
+_global_agent_id_fallback: Optional[str] = None
 _global_agent_config_fallback: Optional[dict] = None
 _global_agent_name_fallback: Optional[str] = None
 _global_runtime_agent_path_fallback: Optional[str] = None
@@ -81,18 +81,28 @@ def clear_current_sub_task_id() -> None:
 
 def set_current_agent_id(agent_id: str) -> None:
     """Set the current agent ID."""
+    global _global_agent_id_fallback
     _current_agent_id.set(agent_id)
+    with _global_lock:
+        _global_agent_id_fallback = agent_id
     logger.debug(f"Set agent ID: {agent_id}")
 
 
 def get_current_agent_id() -> Optional[str]:
     """Get the current agent ID."""
-    return _current_agent_id.get()
+    value = _current_agent_id.get()
+    if value is not None:
+        return value
+    with _global_lock:
+        return _global_agent_id_fallback
 
 
 def clear_current_agent_id() -> None:
     """Clear the current agent ID."""
+    global _global_agent_id_fallback
     _current_agent_id.set(None)
+    with _global_lock:
+        _global_agent_id_fallback = None
     logger.debug("Cleared agent ID")
 
 

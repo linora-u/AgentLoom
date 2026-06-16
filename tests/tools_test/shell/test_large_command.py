@@ -28,9 +28,9 @@ TIMEOUT_SECONDS = 15
 
 
 def _make_shell() -> ShellProcess:
-    """Create a persistent shell with a short timeout."""
+    """Create a session-scoped shell with a short timeout."""
     return ShellProcess(
-        persistent=True,
+        session_scoped=True,
         timeout=TIMEOUT_SECONDS,
         strip_newlines=False,
         return_err_output=True,
@@ -54,7 +54,7 @@ def _generate_large_echo_command(target_bytes: int) -> tuple:
 
 
 @pytest.mark.timeout(TIMEOUT_SECONDS + 10)
-def test_persistent_large_echo_command():
+def test_session_scoped_large_echo_command():
     """A >5 KB echo command must execute without hanging."""
     proc = _make_shell()
     try:
@@ -71,7 +71,7 @@ def test_persistent_large_echo_command():
 
 
 @pytest.mark.timeout(TIMEOUT_SECONDS + 10)
-def test_persistent_large_heredoc_write():
+def test_session_scoped_large_heredoc_write():
     """A >10 KB heredoc writing a file must work correctly."""
     proc = _make_shell()
 
@@ -109,7 +109,7 @@ def test_persistent_large_heredoc_write():
 
 
 @pytest.mark.timeout(TIMEOUT_SECONDS + 10)
-def test_persistent_very_large_command():
+def test_session_scoped_very_large_command():
     """Stress test: a ~50 KB command must still complete successfully."""
     proc = _make_shell()
     try:
@@ -123,7 +123,7 @@ def test_persistent_very_large_command():
 
 
 @pytest.mark.timeout(TIMEOUT_SECONDS + 10)
-def test_persistent_small_command_still_works():
+def test_session_scoped_small_command_still_works():
     """Regression: small commands must produce correct output."""
     proc = _make_shell()
     try:
@@ -134,7 +134,7 @@ def test_persistent_small_command_still_works():
 
 
 @pytest.mark.timeout(TIMEOUT_SECONDS + 10)
-def test_persistent_large_command_with_special_chars():
+def test_session_scoped_large_command_with_special_chars():
     """Large commands containing shell-special characters work correctly."""
     proc = _make_shell()
     try:
@@ -158,7 +158,7 @@ def test_persistent_large_command_with_special_chars():
 @pytest.mark.timeout(TIMEOUT_SECONDS + 10)
 def test_large_output_captured_correctly():
     """Verify that large output (100+ lines) is fully captured."""
-    proc = ShellProcess(persistent=False)
+    proc = ShellProcess(session_scoped=False)
     result = proc.run("seq 1 500")
     # Should contain first and last numbers
     assert "1" in result
