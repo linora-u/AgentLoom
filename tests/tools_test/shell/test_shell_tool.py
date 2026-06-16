@@ -1,5 +1,5 @@
 import unittest
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
 
 
@@ -117,6 +117,17 @@ class TestShellTool(unittest.TestCase):
         result = shell_tool("python3 -c 'pass'")
         self.assertIn("produced no output", result)
         self.assertIn("python3 -c 'pass'", result)
+
+    def test_shell_tool_logs_policy_snapshot_for_successful_command(self):
+        mock_audit = MagicMock()
+        with patch(
+            "src.tools.shell.shell_audit_log.get_shell_audit_logger",
+            return_value=mock_audit,
+        ):
+            result = shell_tool("echo audit_policy_ok")
+
+        self.assertIn("audit_policy_ok", result)
+        mock_audit.log_effective_policy.assert_called()
 
 
 if __name__ == "__main__":

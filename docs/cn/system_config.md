@@ -940,6 +940,16 @@ shell_settings:
 
 > 此功能无需额外配置，基于已有的 `security_checks` 和 `tool_access_control` 配置自动生效。
 
+#### audit_log — Shell 审计日志
+
+| 参数 | 类型 | 默认值 | 说明 |
+|------|------|--------|------|
+| `shell_settings.audit_log.enabled` | `bool` | `true` | 是否启用每个 agent 独立的 Shell 审计日志 |
+| `shell_settings.audit_log.log_policy_snapshot` | `bool` | `true` | 每次运行写入一条 `POLICY_SNAPSHOT`，记录有效 Shell 策略，包括 `allowed_commands: "*"` 这类全放行默认值 |
+| `shell_settings.audit_log.log_success` | `bool` | `false` | 是否把成功命令也记录为 `COMMAND_SUCCESS` |
+
+`POLICY_SNAPSHOT` 会在第一次 Shell 命令执行前写入，因此即使是完全放行、没有任何拦截的运行，也能审计到命令/操作符白名单检查是被显式关闭的。
+
 #### sandbox — 沙箱模式
 
 | 参数 | 类型 | 默认值 | 说明 |
@@ -965,6 +975,10 @@ shell_settings:
     destructive_patterns: true
   dangerous_paths: ["/", "/etc", "/usr", "/var", "/boot", "/sys", "/proc"]
   block_destructive: true
+  audit_log:
+    enabled: true
+    log_policy_snapshot: true
+    log_success: false
   sandbox:
     enabled: false
     mode: "bwrap"

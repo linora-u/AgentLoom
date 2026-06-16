@@ -116,6 +116,12 @@ def shell_tool(
     if not command:
         return _no_command_message()
 
+    try:
+        from src.tools.shell.shell_audit_log import get_shell_audit_logger
+        get_shell_audit_logger().log_effective_policy()
+    except Exception:
+        pass
+
     # Detect trailing & (explicit background request).
     if not run_in_background and command.rstrip().endswith("&"):
         bare = command.rstrip().rstrip("&").rstrip()
@@ -155,6 +161,13 @@ def shell_tool(
         else:
             reason = sandbox_mgr.get_unavailable_reason()
             logger.warning("Sandbox requested but unavailable: %s", reason)
+            try:
+                from src.tools.shell.shell_audit_log import get_shell_audit_logger
+                get_shell_audit_logger().log_sandbox_unavailable(
+                    command, sandbox_mgr.config.mode, reason or "unknown",
+                )
+            except Exception:
+                pass
 
     # Handle explicit background execution.
     if run_in_background:
