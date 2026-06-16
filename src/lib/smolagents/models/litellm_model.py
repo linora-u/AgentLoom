@@ -49,7 +49,11 @@ class LiteLLMModelV2(LiteLLMModel):
                  context_cache=False, system_prompt_boundary: Optional[str] = None,
                  supports_structured_output: str = "false",
                  **kwargs):
-        kwargs.pop("supports_native_tool_calls", None)
+        if "supports_native_tool_calls" in kwargs:
+            raise TypeError(
+                "supports_native_tool_calls was removed. AgentLoom now sends structured tool schemas "
+                "whenever tools are available and rejects malformed tool calls explicitly."
+            )
 
         # extra_headers flows through to self.kwargs via parent __init__,
         # then gets injected into every litellm.completion() call natively.
