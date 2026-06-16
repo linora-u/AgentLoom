@@ -27,7 +27,9 @@ from src.tools.shell.shell_audit_log import (
     EVENT_TIMEOUT,
     EVENT_BACKGROUND_PROMOTION,
     EVENT_SANDBOX_WRAP,
+    EVENT_SANDBOX_UNAVAILABLE,
     EVENT_COMMAND_SUCCESS,
+    EVENT_POLICY_SNAPSHOT,
 )
 
 
@@ -217,6 +219,62 @@ class TestEntryFormatting:
 
         assert "[SANDBOX_WRAP]" in content
         assert "seatbelt" in content
+
+    def test_sandbox_unavailable_entry_format(self, enabled_audit):
+        """Sandbox unavailable entry should include mode and reason."""
+        enabled_audit.log_sandbox_unavailable(
+            command="npm install",
+            sandbox_mode="bwrap",
+            reason="bubblewrap is not installed",
+        )
+        content = _read_audit_file(enabled_audit)
+
+        assert "[SANDBOX_UNAVAILABLE]" in content
+        assert "bwrap" in content
+        assert "bubblewrap is not installed" in content
+
+    def test_policy_snapshot_records_all_allow_defaults(self, enabled_audit):
+        """Policy snapshot should make wildcard all-allow settings explicit."""
+        def fake_config(key, *, default=None):
+            values = {
+                "allowed_commands": "*",
+                "allowed_operators": "*",
+                "security_checks": {
+                    "command_substitution": True,
+                    "destructive_patterns": True,
+                },
+                "dangerous_paths": ["/", "/etc", "/tmp"],
+                "block_destructive": True,
+                "sandbox": {
+                    "enabled": False,
+                    "mode": "bwrap",
+                    "network_isolation": False,
+                },
+            }
+            return values.get(key, default), "effective_agent_config"
+
+        with patch(
+            "src.tools.shell.shell_audit_log._get_shell_config_with_source",
+            side_effect=fake_config,
+        ):
+            enabled_audit.log_effective_policy()
+
+        content = _read_audit_file(enabled_audit)
+        assert "[POLICY_SNAPSHOT]" in content
+        assert "allowed_commands: * (all command names allowed)" in content
+        assert "allowed_operators: * (all shell operators allowed)" in content
+        assert "command_success_logging: false" in content
+        assert "sandbox_enabled: false (effective_agent_config)" in content
+
+    def test_policy_snapshot_logged_only_once(self, enabled_audit):
+        """Repeated snapshot calls should not duplicate policy entries."""
+        enabled_audit.log_effective_policy()
+        enabled_audit.log_effective_policy()
+        enabled_audit.log_security_block("cmd", "check", "msg")
+
+        content = _read_audit_file(enabled_audit)
+        assert content.count("[POLICY_SNAPSHOT]") == 1
+        assert content.count("[SECURITY_BLOCK]") == 1
 
     def test_command_success_not_logged_by_default(self, enabled_audit):
         """Success events should NOT be logged when log_success=False."""
