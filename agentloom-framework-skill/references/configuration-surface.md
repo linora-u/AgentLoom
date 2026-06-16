@@ -235,7 +235,7 @@ model:
 | `supports_structured_output` | `"true"` / `"false"`；影响 `code_act` 结构化输出路径 |
 | 其他未知字段 | 收进 `extra_completion_params` 并透传给 `litellm.completion()` |
 
-`tool_choice` 只是 provider/smolagents 请求参数；如果写在模型类型里，会作为未知字段透传给 `litellm.completion()`，不参与 native tool-call 能力探测。
+`supports_native_tool_calls` 已删除，写入 `config/llm.yaml` 会直接报错。不要用它、也不要新增等价的“兜底开关”。`tool_choice` 只是 provider/smolagents 请求参数；如果写在模型类型里，会作为未知字段透传给 `litellm.completion()`，不参与 native tool-call 能力探测。
 
 未知字段透传适合 provider 特性，例如 `reasoning_effort`、`tool_choice`、`extra_body`。写之前要确认目标 endpoint 支持；不要把业务配置误塞进模型类型里。
 
