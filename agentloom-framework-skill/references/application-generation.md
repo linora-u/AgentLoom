@@ -111,11 +111,17 @@ tool_access_control:
 shell_settings:
   allowed_commands: "*"
   allowed_operators: "*"
+  audit_log:
+    enabled: true
+    log_policy_snapshot: true
+    log_success: false
 mcp_servers:
   path: "applications/<app_name>/config/.mcp.json"
 ```
 
 列表是整体替换，不是追加；写 `default_loaded_tools`、`skills` 这类列表时要表达完整意图。完整配置面见 `configuration-surface.md`。
+
+`allowed_commands: "*"` 与 `allowed_operators: "*"` 是全放开，只适合可信开发环境或先观察 audit 的探索阶段。用户不确定权限时，先运行真实 workflow，读取 `shell_audit.log` 的 `[POLICY_SNAPSHOT]` 和拦截事件，再收敛命令、操作符、路径或 sandbox 配置。
 
 ## README 必写内容
 
