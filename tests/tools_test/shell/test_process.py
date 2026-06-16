@@ -76,7 +76,7 @@ def test_shell_process_session_scoped_state_real():
         # CWD should persist across calls.
         proc.run("cd /tmp")
         result = proc.run("pwd")
-        assert result.strip() == os.path.realpath("/tmp")
+        assert result.strip() == os.path.normpath("/tmp")
 
         # Environment exports are ephemeral — they do NOT persist.
         # This matches the stateless subprocess design.
@@ -98,7 +98,7 @@ def test_shell_process_session_scoped_cwd_real():
     try:
         proc.run("cd /tmp")
         result = proc.run("pwd")
-        assert result.strip() == os.path.realpath("/tmp")
+        assert result.strip() == os.path.normpath("/tmp")
     finally:
         proc.cleanup()
 
