@@ -15,9 +15,16 @@ Automatic prompt caching:
 """
 
 import json
+import uuid
 from typing import List, Dict, Any, Optional
 from smolagents import AgentLogger, LiteLLMModel
+from smolagents.models import ChatMessage, ChatMessageToolCall, ChatMessageToolCallFunction, MessageRole
 from src.lib.logging import get_logger
+from src.lib.smolagents.models.tool_call_parser import (
+    ToolCallParseError,
+    parse_json_with_repair,
+    parse_structured_tool_call,
+)
 
 _LOG = get_logger(__name__)
 
@@ -40,72 +47,122 @@ class LiteLLMModelV2(LiteLLMModel):
     """
     def __init__(self, *args, logger: Optional[AgentLogger] = None,
                  context_cache=False, system_prompt_boundary: Optional[str] = None,
-                 supports_native_tool_calls: str = "auto",
                  supports_structured_output: str = "false",
                  **kwargs):
+        kwargs.pop("supports_native_tool_calls", None)
+
         # extra_headers flows through to self.kwargs via parent __init__,
         # then gets injected into every litellm.completion() call natively.
         # self.logger stores a LoggerAdapter (internal impl detail) wrapping the AgentLogger.
         self.logger = get_logger(logger, __name__) if logger is not None else _LOG
         self.context_cache = context_cache
         self.system_prompt_boundary = system_prompt_boundary
-        # Three-state tool call capability flag:
-        #   "auto"  - detect at runtime from first API response
-        #   "true"  - always use native tool_calls (skip detection)
-        #   "false" - always use text parsing fallback (skip detection)
-        self.supports_native_tool_calls = supports_native_tool_calls.lower().strip()
         # Whether the model supports json_schema structured output.
         # "true" - use structured output (json_schema) for code_act mode
         # "false" - use text-based <code> block parsing for code_act mode
         self.supports_structured_output = supports_structured_output.lower().strip()
-        # Runtime detection cache: None means not yet detected.
-        # Set to True/False after first API call in auto mode.
-        self._native_tool_calls_detected: Optional[bool] = None
         # Agent ID injected by upper-level Agent at runtime (used for tracing).
         self.agent_id = None
+        self._last_tools_to_call_from: list[Any] = []
         super().__init__(*args, **kwargs)
 
-    def should_use_native_tool_calls(self) -> bool:
-        """Determine whether native tool_calls path should be used.
-
-        Returns True if:
-        - supports_native_tool_calls is "true", OR
-        - supports_native_tool_calls is "auto" and detection result is True
-
-        Returns False if:
-        - supports_native_tool_calls is "false", OR
-        - supports_native_tool_calls is "auto" and detection result is False
-        - supports_native_tool_calls is "auto" and not yet detected (first call)
-        """
-        if self.supports_native_tool_calls == "true":
-            return True
-        if self.supports_native_tool_calls == "false":
-            return False
-        # auto mode: use cached detection result
-        if self._native_tool_calls_detected is not None:
-            return self._native_tool_calls_detected
-        # Not yet detected: for the first call, try native (send tool schemas).
-        # Detection happens after seeing the response.
-        return True
-
-    def update_native_tool_calls_detection(self, has_tool_calls: bool) -> None:
-        """Update the runtime detection cache after observing an API response.
-
-        Only updates when in "auto" mode and not yet detected.
-
-        Args:
-            has_tool_calls: Whether the API response contained tool_calls.
-        """
-        if self.supports_native_tool_calls != "auto":
-            return
-        if self._native_tool_calls_detected is not None:
-            return
-        self._native_tool_calls_detected = has_tool_calls
-        self.logger.info(
-            "Native tool_calls detection: model=%s, detected=%s",
-            self.model_id,
-            has_tool_calls,
+    def generate(
+        self,
+        messages: list[ChatMessage | dict],
+        stop_sequences: list[str] | None = None,
+        response_format: dict[str, str] | None = None,
+        tools_to_call_from: list[Any] | None = None,
+        **kwargs,
+    ) -> ChatMessage:
+        self._last_tools_to_call_from = list(tools_to_call_from or [])
+        message = super().generate(
+            messages,
+            stop_sequences=stop_sequences,
+            response_format=response_format,
+            tools_to_call_from=tools_to_call_from,
+            **kwargs,
         )
+        self._normalize_and_validate_tool_calls(message, self._last_tools_to_call_from)
+        return message
+
+    def parse_tool_calls(self, message: ChatMessage) -> ChatMessage:
+        """Parse text fallback tool calls without patching smolagents globals."""
+
+        message.role = MessageRole.ASSISTANT
+        if not message.tool_calls:
+            if message.content is None:
+                raise ToolCallParseError("Message contains no content and no tool calls")
+            available_tool_names = [tool.name for tool in self._last_tools_to_call_from if hasattr(tool, "name")]
+            candidate = parse_structured_tool_call(
+                str(message.content),
+                available_tool_names=available_tool_names or None,
+                tool_name_key=self.tool_name_key,
+                tool_arguments_key=self.tool_arguments_key,
+                model_id=self.model_id,
+            )
+            message.tool_calls = [
+                ChatMessageToolCall(
+                    id=candidate.id or str(uuid.uuid4()),
+                    type="function",
+                    function=ChatMessageToolCallFunction(
+                        name=candidate.name,
+                        arguments=candidate.arguments,
+                    ),
+                )
+            ]
+
+        if not message.tool_calls:
+            raise ToolCallParseError("No tool call was found in the model output")
+
+        LiteLLMModelV2._normalize_and_validate_tool_calls(message, self._last_tools_to_call_from)
+        return message
+
+    @staticmethod
+    def _normalize_tool_arguments(arguments: Any) -> Any:
+        """Normalize provider tool-call argument payloads.
+
+        Native tool_call arguments can arrive as JSON strings or, with some
+        providers/proxies, as a double-encoded JSON string. Only JSON payloads
+        are parsed here; non-JSON strings remain unchanged and fail later during
+        normal tool validation/execution.
+        """
+
+        parsed = arguments
+        if not isinstance(parsed, str):
+            return parsed
+
+        original = parsed
+        for _ in range(2):
+            if not isinstance(parsed, str):
+                return parsed
+            try:
+                parsed = parse_json_with_repair(parsed)
+            except Exception:
+                return original
+        return parsed
+
+    @staticmethod
+    def _available_tool_names(tools_to_call_from: list[Any]) -> set[str]:
+        return {tool.name for tool in tools_to_call_from if hasattr(tool, "name")}
+
+    @staticmethod
+    def _normalize_and_validate_tool_calls(
+        message: ChatMessage,
+        tools_to_call_from: list[Any],
+    ) -> None:
+        if not message.tool_calls:
+            return
+
+        available_tool_names = LiteLLMModelV2._available_tool_names(tools_to_call_from)
+        for tool_call in message.tool_calls:
+            tool_name = tool_call.function.name
+            if not isinstance(tool_name, str) or not tool_name:
+                raise ToolCallParseError("Malformed tool_call: missing function name")
+            if available_tool_names and tool_name not in available_tool_names:
+                raise ToolCallParseError(
+                    f"Tool '{tool_name}' not found in registered tools {sorted(available_tool_names)}"
+                )
+            tool_call.function.arguments = LiteLLMModelV2._normalize_tool_arguments(tool_call.function.arguments)
 
     def _prepare_completion_kwargs(self, *args, **kwargs):
         completion_kwargs = super()._prepare_completion_kwargs(*args, **kwargs)
@@ -125,6 +182,11 @@ class LiteLLMModelV2(LiteLLMModel):
         self._apply_automatic_caching(completion_kwargs)
 
         return completion_kwargs
+
+    def _apply_rate_limit(self) -> None:
+        """AgentLoom applies model-type rate limiting in litellm_retry."""
+
+        return None
 
     def _apply_automatic_caching(self, completion_kwargs: Dict[str, Any]):
         """
@@ -207,5 +269,3 @@ class LiteLLMModelV2(LiteLLMModel):
             last_block = content[-1]
             if isinstance(last_block, dict) and "cache_control" not in last_block:
                 last_block["cache_control"] = {"type": "ephemeral"}
-
-

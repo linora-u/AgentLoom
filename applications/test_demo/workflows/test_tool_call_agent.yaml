@@ -26,7 +26,7 @@ workflow: |
   Use read_file to read back "/tmp/test_tool_call_result.txt" and confirm it matches.
 
   ## Final Summary
-  Report all results from the steps above confirming tool_call mode works.
+  Use final_answer to report all results from the steps above confirming tool_call mode works.
 
 execution:
   max_steps: 15

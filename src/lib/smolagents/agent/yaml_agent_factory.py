@@ -571,11 +571,12 @@ class YamlConfiguredAgent(RoleDrivenAgent):
             for name in optional_names:
                 input_payload.setdefault(name, None)
 
+            state_args = {k: v for k, v in input_payload.items() if v is not None}
             formatted_query = _build_formatted_query(input_payload)
 
             # Factory mode: create a NEW agent for each call (thread-safe)
             agent = _create_fresh_agent()
-            result = agent.run(formatted_query)
+            result = agent.run(formatted_query, additional_args=state_args)
             # NOTE: _current_worker_memory is now set INSIDE _execute_agent()
             # (P2 fix — the old SET here was too late for GET in _execute_with_lifecycle)
 
