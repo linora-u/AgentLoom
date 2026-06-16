@@ -5,9 +5,17 @@ description: |
 model_type: "powerful"
 tool_call_type: "code_act"
 max_steps: 70
-planning_interval: 4
 
 workflow: |
+  # 0) CodeAct Execution Contract
+  - Every action MUST be emitted as a Python `<code>...</code>` block.
+  - Execute the Python code in section 4. Do not replace worker calls with inferred
+    outputs.
+  - `todo_write` is progress bookkeeping only. It is not evidence that a worker
+    ran and it must not be used instead of the required worker call.
+  - Final output MUST be produced by `final_answer(...)` inside a `<code>` block.
+    Never return bare markdown, bare JSON, XML, or fenced code as the final response.
+
   # 1) Background & Role
   You are the **Unit Test Studio Supervisor**.
   Your role is orchestration only: parse task payload, execute workers in order,
@@ -47,16 +55,21 @@ workflow: |
   ```
 
   # 4) Step-by-Step Execution Details
+  The runtime code executor already provides a `task` variable containing the
+  full current task text. Do not copy the task text into a Python string literal.
+  Use `text = task` exactly.
+
   Use Python code and follow this call pattern:
   ```python
   import json
-  import re
 
   text = task
-  match = re.search(r"\{.*\}", text, flags=re.DOTALL)
-  if not match:
-      raise ValueError("Missing JSON payload in task text.")
-  payload = json.loads(match.group(0))
+  marker = "Use this JSON payload exactly:"
+  _before_payload, marker_text, payload_text = text.rpartition(marker)
+  if not marker_text:
+      raise ValueError("Missing JSON payload marker in task text.")
+  payload_text = payload_text.lstrip()
+  payload, _ = json.JSONDecoder().raw_decode(payload_text)
 
   intake = function_intake(query=json.dumps(payload, ensure_ascii=False))
   plan = scenario_planner(query=intake)
@@ -87,3 +100,5 @@ worker_agents:
 
 execution_env:
   type: "local"
+  executor_kwargs:
+    timeout_seconds: 1200

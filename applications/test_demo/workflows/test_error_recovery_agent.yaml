@@ -1,40 +1,53 @@
 name: "test_error_recovery"
-description: "Validate error recovery: strategy cache, error classification, progressive recovery messages, and error consolidation"
+description: "Validate error recovery: explicit parser failures, error classification, progressive recovery messages, and error consolidation"
 
 model_type: "powerful"
 tool_call_type: "tool_call"
+max_steps: 4
 
 workflow: |
   # Error Recovery Validation Workflow
 
-  You are a testing agent. Execute the steps below using the provided tools.
-  After each step, report the result.
+  Execute exactly two structured tool-call steps. Do not use read_file or grep_search.
 
-  ## Step 1: Read the error_recovery module
-  Use read_file to read "src/lib/smolagents/error_recovery.py" and confirm
-  that it contains the ErrorCategory enum with exactly 4 members:
-  FORMAT_NOT_FOUND, JSON_SYNTAX_ERROR, UNKNOWN_TOOL, ARGUMENT_ERROR.
+  ## Step 1: Deterministic repository check
+  Use shell_tool once to run this Python script from the repository root:
 
-  ## Step 2: Read the tool_call_parsing_patch module
-  Use read_file to read "src/lib/smolagents/monkey_patch/tool_call_parsing_patch.py"
-  and confirm:
-  - ToolCallParseError has an error_category attribute
-  - _strategy_cache dict exists at module level
-  - parse_tool_call_resilient has a model_id parameter
+  python - <<'PY'
+  from pathlib import Path
 
-  ## Step 3: Read the base_agent module
-  Use read_file to read "src/lib/smolagents/agent/base_agent.py" and confirm:
-  - _consolidate_error_messages method exists
-  - _inject_parse_error_circuit_breaker has been removed
-  - Recovery imports error_recovery module functions
+  checks = []
+  error_recovery = Path("src/lib/smolagents/error_recovery.py").read_text()
+  parser = Path("src/lib/smolagents/models/tool_call_parser.py").read_text()
+  loom_mixin = Path("src/lib/smolagents/agent/loom_mixin.py").read_text()
+  compression = Path("src/lib/smolagents/memory/context_compression.py").read_text()
 
-  ## Step 4: Read the compression module
-  Use read_file to read "src/lib/smolagents/memory/context_compression.py"
-  and confirm that RECENT_ERROR_EXEMPT_COUNT constant exists.
+  categories = ["FORMAT_NOT_FOUND", "JSON_SYNTAX_ERROR", "UNKNOWN_TOOL", "ARGUMENT_ERROR"]
+  checks.append(("four_error_categories", all(item in error_recovery for item in categories)))
+  checks.append(("tool_call_parse_error_category", "self.error_category = error_category" in parser))
+  checks.append(("strict_parser_entrypoint", "def parse_structured_tool_call(" in parser))
+  checks.append(("model_id_parameter", "model_id: str | None = None" in parser))
+  checks.append(("no_strategy_cache", "strategy_cache" not in parser))
+  checks.append(("no_global_parser_patch", "patch_smolagents_tool_call_parsing" not in parser))
+  checks.append(("no_regex_fallback_strategy", "_strategy_regex_extraction" not in parser))
+  checks.append(("strict_container_failure", "Could not parse a structured tool call" in parser))
+  checks.append(("consolidate_error_messages", "_consolidate_error_messages" in loom_mixin))
+  checks.append(("circuit_breaker_removed", "_inject_parse_error_circuit_breaker" not in loom_mixin))
+  checks.append(("error_recovery_imports", "src.lib.smolagents.error_recovery" in loom_mixin))
+  checks.append(("recent_error_exempt_count", "RECENT_ERROR_EXEMPT_COUNT" in compression))
 
-  ## Step 5: Summary
-  Summarize what you found about the error recovery implementation.
-  Use final_answer with a summary of whether all components are correctly implemented.
+  for name, ok in checks:
+      print(f"{'PASS' if ok else 'FAIL'} {name}")
+  if not all(ok for _name, ok in checks):
+      raise SystemExit(1)
+  PY
+
+  ## Step 2: Final summary
+  Use final_answer to summarize whether every printed check passed. If every line starts with PASS, report success.
 
 tools:
-  - name: "read_file"
+  - name: "shell_tool"
+
+default_loaded_tools: []
+worker_agents: []
+skills: []

@@ -44,6 +44,9 @@ class LoomAgentMixin(TodoSyncMixin):
         for callback in self._before_run_callbacks:
             task = callback(self, task, *args, **kwargs)
 
+        if getattr(self, "python_executor", None) is not None and hasattr(self, "state"):
+            self.state["task"] = task
+
         # Determine if we are resetting memory
         reset = kwargs.get("reset", True)
         if len(args) >= 2:

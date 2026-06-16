@@ -70,7 +70,9 @@ workflow: |
 - `model_type` 必须存在于 `config/llm.yaml`。
 - 不写 `model_type` 时依赖 `model.default_model_type`，但生成新 Application 时推荐显式写出实际可用类型。
 - `summary` 模型类型是 `smart_summary` 依赖；`config/llm.yaml` 中只要配置了模型类型，就必须包含 `summary`。
-- `config/llm.yaml` 的模型类型支持 `supports_native_tool_calls`、`supports_structured_output`，未知字段会作为 `extra_completion_params` 透传给 `litellm.completion()`。
+- `config/llm.yaml` 的模型类型支持 `supports_structured_output`；未知字段会作为 `extra_completion_params` 透传给 `litellm.completion()`。
+- `tool_choice` 如需使用只能作为 provider 参数透传，不是能力探测或文本兜底开关。
+- `tool_call_type: tool_call` 使用结构化 tools schema；工具名必须来自本轮可用工具，参数只做 schema-bound 窄化转换。不要把 prose/free-text tool call 当成可执行格式。
 - `execution_env.type` 只支持 `local` / `docker` / `e2b` / `wasm`；`docker` / `e2b` 时默认工具不会自动加载。
 - 完整配置面、覆盖层级、system/llm/Skill/Hook/MCP/checkpoint 字段见 `configuration-surface.md`。
 

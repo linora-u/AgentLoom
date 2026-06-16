@@ -26,11 +26,6 @@ model:
     # system_prompt_boundary: optional marker to split system prompt into
     # static (cached) and dynamic (uncached) segments for higher cache hit rates.
     # Example: system_prompt_boundary: "<!-- DYNAMIC_BOUNDARY -->"
-    # supports_native_tool_calls: three-state flag for tool calling capability.
-    #   "auto" (default): detect at runtime from first API response
-    #   "true": always use native tool_calls (skip detection)
-    #   "false": always use multi-strategy text parsing fallback
-    # supports_native_tool_calls: "auto"
 
   # 快速模型配置（用于简单任务，如意图识别、分类）
   fast:

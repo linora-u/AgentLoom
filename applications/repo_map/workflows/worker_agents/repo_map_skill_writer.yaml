@@ -16,8 +16,11 @@ workflow: |
 
   ## 强制规则
   - 输入参数只有 `output_dir`。
+  - 这是 tool_call 模式。每一步都必须通过工具调用完成；不要输出空消息、裸 Markdown 或纯文本进度。
+  - 最终结果必须调用 `final_answer(answer=<summary>)` 返回。
   - 只从 `<output_dir>/data/skill_build_context.json` 读取 skill 路径和元信息（用 `read_file` 工具读取）。
   - 所有 Markdown 文件必须通过 `write_markdown_file(...)` 工具写入。
+  - 调用 `write_markdown_file` 时必须传结构化参数对象，不能把整段 JSON 当作字符串参数。
   - `SKILL.md` frontmatter 必须且只能包含 `name` 和 `description`。
   - 使用 `write_markdown_file` 写 `SKILL.md` 时：
     - `title=""`（不要标题）

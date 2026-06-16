@@ -1,6 +1,6 @@
 """Tests for CWD tracking in persistent shell sessions.
 
-CWD is tracked out-of-band via a temp file (pwd -P >| cwd_file).
+CWD is tracked out-of-band via a temp file (pwd >| cwd_file).
 The CWD marker is never embedded in stdout.
 
 Covers:
