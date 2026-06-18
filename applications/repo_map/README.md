@@ -144,6 +144,10 @@ uv run python applications/repo_map/repo_map_app.py /path/to/project \
   --exclude_dirs vendor \
   --exclude_dirs build
 
+# 指定 Skill 包输出到项目的 .agents/skills 下
+uv run python applications/repo_map/repo_map_app.py /path/to/project \
+  --skill_output_dir /path/to/project/.agents/skills
+
 # 从 AgentLoom checkpoint 恢复 LLM 分析阶段
 uv run python applications/repo_map/repo_map_app.py /path/to/project \
   --output_dir /tmp/repo-map-output \

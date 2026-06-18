@@ -1,0 +1,69 @@
+name: "zsxq_owner_post_scraper"
+description: "Scrape the group-owner posts from a zsxq.com group via the user's real Chrome and write them to CSV."
+model_type: "powerful"
+tool_call_type: "tool_call"
+max_steps: 6
+default_loaded_tools: []
+skills: []
+
+tools:
+  - name: "browser_harness_doctor"
+    module: "applications.browser_harness_probe.agent_tools.browser_harness_tools"
+    function: "browser_harness_doctor"
+    description: "Run browser-harness --doctor and return JSON diagnostics. Use only as a one-shot sanity check before scraping."
+  - name: "scrape_zsxq_owner_posts"
+    module: "applications.browser_harness_probe.agent_tools.browser_harness_tools"
+    function: "scrape_zsxq_owner_posts"
+    fixed_args:
+      group_url: "https://wx.zsxq.com/group/51111541884844"
+      since_date: "2024-01-01"
+      csv_path: "zsxq_owner_posts.csv"
+      max_scrolls: "300"
+      scroll_pause_seconds: "1.4"
+      stall_limit: "8"
+      timeout_seconds: "1500"
+    description: "Reuse the user's already-open Chrome tab on the zsxq group, scroll from newest until reaching posts before since_date, expand folded content, collect the group owner's posts, and write CSV with columns 时间/内容/超链接 to the project root."
+
+worker_agents: []
+
+execution_env:
+  type: "local"
+
+workflow: |
+  # ZSXQ Owner Post Scraper
+
+  You scrape the group owner's (`楼主`) posts from a zsxq.com group by driving the
+  user's existing Chrome through browser-harness, then save them to CSV.
+
+  ## Required behavior
+
+  1. Call `browser_harness_doctor` once. Treat `chrome running ok` as success; the
+     `daemon alive FAIL` and `active browser connections FAIL` lines are expected
+     when no daemon is running yet and must NOT block the scrape.
+  2. Call `scrape_zsxq_owner_posts` exactly once with no overrides. All knobs are
+     pre-bound via `fixed_args` (target group URL, since_date 2024-01-01, csv
+     path, scroll/pause/stall limits, owner auto-detect, timeout).
+  3. Do not invent any custom browser script. Do not call
+     `run_browser_harness_python` or any demo probe tool.
+  4. Do not retry on a single failed call. Report the failure verbatim instead.
+
+  ## Result interpretation
+
+  - The scrape tool returns JSON. Success means `success: true`, `post_count > 0`,
+    and `csv_path` points at an existing file.
+  - If `harness.success` is false and stderr mentions `chrome://inspect` or
+    `Allow remote debugging`, that is a Chrome remote-debugging authorization
+    issue. Tell the user to open `chrome://inspect/#remote-debugging`, tick
+    "Allow remote debugging for this browser instance", click Allow, and rerun.
+  - If `success` is false with `not_on_target_group`, ask the user to open the
+    zsxq group tab manually in their Chrome and rerun.
+  - `events` is a truncated trace of the scroll loop. Use it only to diagnose
+    failures; do not paraphrase every entry.
+
+  ## Final answer
+
+  Keep the final answer concise. Include:
+
+  - doctor status (one line)
+  - scrape outcome: owner name, post_count, csv_path, time_range.earliest, time_range.latest
+  - the next concrete action if any step failed

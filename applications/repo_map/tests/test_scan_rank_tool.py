@@ -7,6 +7,7 @@
 3. 增量扫描（git 路径）：新增提交后 → changed=M
 4. 增量扫描（mtime 路径）：非 git 目录
 5. force=True：强制全量，忽略缓存
+6. dirty 文件恢复到 HEAD 后，缓存内容哈希仍能发现陈旧 tags
 """
 
 import json
@@ -53,12 +54,25 @@ def git_project(tmp_path):
     """
     proj = tmp_path / "project"
     shutil.copytree(FIXTURE_DIR, proj, ignore=shutil.ignore_patterns(".git"))
-    subprocess.run(["git", "init"], cwd=str(proj), capture_output=True)
-    subprocess.run(["git", "add", "."], cwd=str(proj), capture_output=True)
+    subprocess.run(["git", "init"], cwd=str(proj), capture_output=True, check=True)
     subprocess.run(
-        ["git", "commit", "-m", "init", "--no-gpg-sign"],
-        cwd=str(proj), capture_output=True
+        ["git", "config", "user.email", "repo-map-test@example.com"],
+        cwd=str(proj),
+        capture_output=True,
+        check=True,
     )
+    subprocess.run(
+        ["git", "config", "user.name", "Repo Map Test"],
+        cwd=str(proj),
+        capture_output=True,
+        check=True,
+    )
+    subprocess.run(["git", "add", "."], cwd=str(proj), capture_output=True, check=True)
+    commit = subprocess.run(
+        ["git", "commit", "-m", "init", "--no-gpg-sign"],
+        cwd=str(proj), capture_output=True, text=True
+    )
+    assert commit.returncode == 0, commit.stderr
     return proj
 
 
@@ -227,7 +241,7 @@ def test_tags_cache_structure(git_project, tmp_output):
     assert cache_path.exists()
 
     cache = json.loads(cache_path.read_text())
-    assert cache.get("cache_version") == 1, "cache_version should be 1"
+    assert cache.get("cache_version") == 2, "cache_version should be 2"
     assert "project_path" in cache
     assert "last_scan_commit" in cache
     assert "entries" in cache
@@ -236,6 +250,7 @@ def test_tags_cache_structure(git_project, tmp_output):
     # 每个 entry 有 mtime 和 tags
     for fname, entry in cache["entries"].items():
         assert "mtime" in entry, f"entry {fname} missing mtime"
+        assert "content_hash" in entry, f"entry {fname} missing content_hash"
         assert "tags" in entry, f"entry {fname} missing tags"
         assert isinstance(entry["tags"], list)
 
@@ -261,3 +276,33 @@ def test_incremental_git_dirty_files(git_project, tmp_output):
     result = scan_and_rank(str(git_project), str(tmp_output), incremental=True)
     assert "0 changed" not in result, f"Should detect dirty file, got: {result}"
     print(f"[OK] Dirty file detected: {result}")
+
+
+def test_incremental_git_restored_dirty_file_invalidates_cached_tags(git_project, tmp_output):
+    """dirty 内容被扫描后恢复到 HEAD，也应刷新陈旧缓存 tags"""
+    scan_and_rank(str(git_project), str(tmp_output), force=True)
+
+    dirty_file = git_project / "models" / "user.py"
+    original = dirty_file.read_text()
+    dirty_file.write_text(
+        original + "\n\ndef transient_probe():\n    return 'repo-map-probe'\n"
+    )
+
+    result_dirty = scan_and_rank(str(git_project), str(tmp_output), incremental=True)
+    assert "0 changed" not in result_dirty, f"Should detect dirty file, got: {result_dirty}"
+
+    tags_path = tmp_output / "data" / "tags.json"
+    tags = json.loads(tags_path.read_text())
+    assert any(t["name"] == "transient_probe" for t in tags)
+
+    dirty_file.write_text(original)
+    assert _git(["status", "--short", "--", "models/user.py"], str(git_project)) == ""
+
+    result_restored = scan_and_rank(str(git_project), str(tmp_output), incremental=True)
+    assert "0 changed" not in result_restored, (
+        "Clean working tree must still invalidate tags cached from transient dirty content, "
+        f"got: {result_restored}"
+    )
+
+    tags = json.loads(tags_path.read_text())
+    assert not any(t["name"] == "transient_probe" for t in tags)

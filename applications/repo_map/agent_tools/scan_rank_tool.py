@@ -7,11 +7,12 @@ Called directly by repo_map_app.py (pure Python, no LLM agent needed).
 增量更新策略B（参考 aider repomap.py + repo.py 实现）：
 - 优先使用 git commit hash 检测变化文件（精确，大仓库性能好）
 - 非 git 仓库或 git 命令失败时，fallback 到 mtime 检测（对应 aider 的 mtime 缓存）
-- Tags 缓存结构与 aider 一致：{fname: {"mtime": float, "data": [tag, ...]}}
+- Tags 缓存结构：{fname: {"mtime": float, "content_hash": str, "tags": [tag, ...]}}
   存储在 tags_cache.json（aider 用 DiskCache/SQLite，我们用 json，零新依赖）
 - 修复 refresh="always" → refresh="files"，让 aider 内部 mtime 缓存真正生效
 """
 
+import hashlib
 import json
 import os
 import subprocess
@@ -22,7 +23,7 @@ from .repomap import RepoMap, MinimalIO, Tag
 
 
 # Tags 缓存版本，结构变化时递增（对应 aider CACHE_VERSION）
-TAGS_CACHE_VERSION = 1
+TAGS_CACHE_VERSION = 2
 
 # Default directories to always exclude
 DEFAULT_EXCLUDE_DIRS = {
@@ -209,6 +210,44 @@ def _get_file_mtime(fname: str) -> Optional[float]:
         return None
 
 
+def _get_file_content_hash(fname: str) -> Optional[str]:
+    """Return a stable content hash for cache validation."""
+    try:
+        h = hashlib.sha256()
+        with open(fname, "rb") as f:
+            for chunk in iter(lambda: f.read(1024 * 1024), b""):
+                h.update(chunk)
+        return h.hexdigest()
+    except (FileNotFoundError, OSError):
+        return None
+
+
+def _content_hash_changed_files(all_files: list, cache: dict) -> set:
+    """
+    Detect cached entries whose stored content no longer matches disk.
+
+    Git dirty detection can miss "changed, scanned, then restored to HEAD" because
+    the working tree becomes clean while the cache still reflects the transient
+    content. The content hash is the cache validity contract.
+    """
+    changed = set()
+    entries = cache.get("entries", {})
+    for fname in all_files:
+        entry = entries.get(fname)
+        if not entry:
+            changed.add(fname)
+            continue
+
+        current_hash = _get_file_content_hash(fname)
+        if current_hash is None:
+            continue
+
+        cached_hash = entry.get("content_hash")
+        if cached_hash != current_hash:
+            changed.add(fname)
+    return changed
+
+
 # ─────────────────────────────────────────────────────────────────── #
 #  Public API
 # ─────────────────────────────────────────────────────────────────── #
@@ -227,7 +266,7 @@ def scan_and_rank(
 
     增量更新策略B（参考 aider repomap.py + repo.py）：
     - git 仓库：优先用 git commit hash 差异检测变化文件
-      - commit 相同：只检查 untracked 文件的 mtime
+      - commit 相同：检查 dirty 文件 + untracked 文件
       - commit 不同：git diff 获取变更文件 + dirty 文件 + untracked 文件
     - 非 git 仓库 / git 失败：fallback 到 mtime 检测（与 aider mtime 缓存一致）
     - force=True：忽略所有缓存，强制全量扫描
@@ -286,16 +325,15 @@ def scan_and_rank(
             last_sha = cache.get("last_scan_commit")
 
             if current_sha and last_sha and current_sha == last_sha:
-                # ── commit 相同：只检查 untracked 文件 ──
+                # ── commit 相同：仍需检查 working tree/staged dirty 文件 ──
+                dirty_rel = _git_changed_files(str(proj), current_sha, current_sha)
                 untracked_rel = _git_untracked_files(str(proj))
+                all_changed_rel = dirty_rel | untracked_rel
                 changed_files = set()
-                for rel in untracked_rel:
+                for rel in all_changed_rel:
                     abs_path = str(proj / rel)
                     if abs_path in all_files_abs:
-                        cached_mtime = cache["entries"].get(abs_path, {}).get("mtime")
-                        current_mtime = _get_file_mtime(abs_path)
-                        if current_mtime != cached_mtime:
-                            changed_files.add(abs_path)
+                        changed_files.add(abs_path)
                 mode = f"git-same-commit ({current_sha[:7]})"
 
             elif current_sha and last_sha:
@@ -323,10 +361,13 @@ def scan_and_rank(
                 changed_files = _mtime_changed_files(all_files, cache)
                 mode = "mtime-fallback (no sha)"
 
+            changed_files |= _content_hash_changed_files(all_files, cache)
+
             cache["last_scan_commit"] = current_sha
         else:
             # ── 非 git 仓库：mtime 全量检测（对应 aider mtime 缓存）──
             changed_files = _mtime_changed_files(all_files, cache)
+            changed_files |= _content_hash_changed_files(all_files, cache)
             mode = "mtime (non-git)"
 
         # 清理缓存中已不存在的文件
@@ -359,9 +400,11 @@ def scan_and_rank(
             # 重新提取 tags（参考 aider get_tags() 的缓存更新逻辑）
             tags = repo_map.get_tags(fname, rel)
             current_mtime = _get_file_mtime(fname)
+            current_hash = _get_file_content_hash(fname)
             # 更新缓存（对应 aider: TAGS_CACHE[key] = {"mtime": ..., "data": ...}）
             cache["entries"][fname] = {
                 "mtime": current_mtime,
+                "content_hash": current_hash,
                 "tags": [{"rel_fname": t.rel_fname, "fname": t.fname, "line": t.line, "name": t.name, "kind": t.kind} for t in tags],
             }
         else:
