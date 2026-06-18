@@ -24,7 +24,7 @@ workflow: |
   - `SKILL.md` frontmatter 必须且只能包含 `name` 和 `description`。
   - 使用 `write_markdown_file` 写 `SKILL.md` 时：
     - `title=""`（不要标题）
-    - `metadata=None`（不要 metadata 引用块）
+    - 不要传 `metadata` 参数（不要 metadata 引用块）
     - 将完整 YAML frontmatter（`---` 包裹）放在第一个 section 的 `body` 开头。
   - 禁止调用 `load_skill` / `list_skills` / `shell_tool`，不要加载外部 skill 上下文。
   - 不生成 `agents/openai.yaml`。
@@ -44,7 +44,7 @@ workflow: |
   拿到：`skill_name`、`project_name`、`source_root`、`skill_root`、`description`。
 
   ### Step 2：写入 SKILL.md
-  调用 `write_markdown_file(file_path=<skill_root>/SKILL.md, sections=[...], title="", metadata=None)` 写入。
+  调用 `write_markdown_file(file_path=<skill_root>/SKILL.md, sections=[...], title="")` 写入。
 
   SKILL.md 正文使用命令式语气，必须按以下顺序包含 7 个段落：
 
