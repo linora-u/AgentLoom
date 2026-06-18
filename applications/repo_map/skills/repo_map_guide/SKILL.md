@@ -91,6 +91,7 @@ step3 通过 `analysis_progress.json` 支持断点续传：
 # 完整参数
 .venv/bin/python applications/repo_map/repo_map_app.py /path/to/project \
   --output_dir /tmp/mymap \
+  --skill_output_dir /path/to/project/.agents/skills \
   --exclude_dirs vendor \
   --exclude_dirs third_party \
   --exclude_dirs build
