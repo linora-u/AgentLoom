@@ -21,6 +21,7 @@ sys.path.insert(0, str(REPO_ROOT))
 from applications.repo_map.agent_tools import pipeline_agent_tools as pat
 from applications.repo_map.agent_tools.markdown_tool import generate_markdown_map
 from applications.repo_map.agent_tools.scan_rank_tool import scan_and_rank
+from src.lib.smolagents.skills.parser import parse_skill_file
 
 
 FIXTURE_PROJECT = Path(__file__).parent / "fixtures" / "sample_project"
@@ -102,6 +103,51 @@ def test_prepare_workspace_creates_expected_tree(tmp_path):
     assert len(manifest_lines) == len(progress)
 
 
+def test_prepare_workspace_supports_custom_skill_output_dir(tmp_path):
+    project = _copy_fixture_project(tmp_path)
+    output_dir = _prepare_repo_map_outputs(project)
+    custom_skills_dir = tmp_path / "project" / ".agents" / "skills"
+
+    summary = pat.prepare_repo_map_skill_workspace(
+        str(output_dir),
+        skill_output_dir=str(custom_skills_dir),
+    )
+    context = _load_skill_context(output_dir)
+    skill_root = Path(context["skill_root"])
+
+    assert "Skill workspace prepared:" in summary
+    assert context["skill_output_dir"] == str(custom_skills_dir.resolve())
+    assert skill_root == custom_skills_dir.resolve() / context["skill_name"]
+    assert skill_root.exists()
+    assert not (output_dir / "skills" / context["skill_name"]).exists()
+    assert (output_dir / "data" / "skill_output_dir.txt").read_text(
+        encoding="utf-8"
+    ) == str(custom_skills_dir.resolve())
+
+    _write_fake_skill_markdown(output_dir)
+    validate_summary = pat.validate_repo_map_skill(str(output_dir))
+    assert "Skill validation passed:" in validate_summary
+
+
+def test_write_skill_files_creates_loadable_skill(tmp_path):
+    project = _copy_fixture_project(tmp_path)
+    output_dir = _prepare_repo_map_outputs(project)
+    pat.prepare_repo_map_skill_workspace(str(output_dir))
+
+    write_summary = pat.write_repo_map_skill_files(str(output_dir))
+    validate_summary = pat.validate_repo_map_skill(str(output_dir))
+    context = _load_skill_context(output_dir)
+    skill_root = Path(context["skill_root"])
+    metadata, body = parse_skill_file(str(skill_root / "SKILL.md"))
+
+    assert "Skill files written:" in write_summary
+    assert "Skill validation passed:" in validate_summary
+    assert metadata.name == context["skill_name"]
+    assert metadata.description == context["skill_description"][:200]
+    assert "## 何时使用" in body
+    assert (skill_root / "assets" / "examples" / "resolve-by-source-path.md").exists()
+
+
 def test_resolver_script_supports_exact_and_fallback(tmp_path):
     project = _copy_fixture_project(tmp_path)
     output_dir = _prepare_repo_map_outputs(project)
@@ -152,6 +198,17 @@ extra: forbidden
     with pytest.raises(ValueError, match="frontmatter"):
         pat.validate_repo_map_skill(str(output_dir))
 
+    misplaced_frontmatter = """## 概述
+
+---
+name: invalid
+description: Use when invalid.
+---
+"""
+    (skill_root / "SKILL.md").write_text(misplaced_frontmatter, encoding="utf-8")
+    with pytest.raises(ValueError, match="must start with YAML frontmatter"):
+        pat.validate_repo_map_skill(str(output_dir))
+
 
 def test_analysis_loop_prepare_validate_integration(tmp_path, monkeypatch):
     project = _copy_fixture_project(tmp_path)
@@ -169,11 +226,12 @@ def test_analysis_loop_prepare_validate_integration(tmp_path, monkeypatch):
 
     loop_summary = pat.run_analysis_loop(str(output_dir))
     prep_summary = pat.prepare_repo_map_skill_workspace(str(output_dir))
-    _write_fake_skill_markdown(output_dir)
+    write_summary = pat.write_repo_map_skill_files(str(output_dir))
     validate_summary = pat.validate_repo_map_skill(str(output_dir))
     final_summary = pat.get_analysis_summary(str(output_dir))
 
     assert "Analysis loop complete" in loop_summary
     assert "Skill workspace prepared:" in prep_summary
+    assert "Skill files written:" in write_summary
     assert "Skill validation passed:" in validate_summary
     assert "Repo Map Generation Summary" in final_summary

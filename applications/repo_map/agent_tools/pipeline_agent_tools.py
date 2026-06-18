@@ -4,6 +4,7 @@ Pipeline Agent Tools for repo_map.
 只封装需要控制流处理的操作：
 - run_analysis_loop(): Python for 循环调用 dir_architecture_analysis 子 Agent，含断点续传和错误隔离
 - prepare_repo_map_skill_workspace(): 组装 skill 工作区（拷贝 repo_map / 生成 manifest / resolver）
+- write_repo_map_skill_files(): 确定性写入 SKILL.md 与示例文件
 - validate_repo_map_skill(): 校验 skill 产物完整性和 frontmatter 规则
 - get_analysis_summary(): 读取 progress.json，返回结构化总结报告
 
@@ -362,12 +363,31 @@ def _write_resolver_script(script_path: Path) -> None:
     script_path.write_text(script, encoding="utf-8")
 
 
-def _build_skill_context(out_path: Path, scan_meta: dict) -> dict:
+def _resolve_skill_output_dir(out_path: Path, skill_output_dir: str | Path | None) -> Path:
+    """Resolve the parent directory that should contain generated skill packages."""
+    if skill_output_dir is not None and str(skill_output_dir).strip():
+        return Path(skill_output_dir).resolve()
+
+    marker_path = out_path / "data" / "skill_output_dir.txt"
+    if marker_path.exists():
+        marker_value = marker_path.read_text(encoding="utf-8").strip()
+        if marker_value:
+            return Path(marker_value).resolve()
+
+    return out_path / "skills"
+
+
+def _build_skill_context(
+    out_path: Path,
+    scan_meta: dict,
+    skill_output_dir: str | Path | None = None,
+) -> dict:
     """Build deterministic skill metadata from output_dir + scan_meta."""
     project_path = str(scan_meta.get("project_path", "")).strip()
     project_name = Path(project_path).name if project_path else "project"
     skill_name = f"{_slugify_name(project_name)}-repo-map-navigator"
-    skill_root = out_path / "skills" / skill_name
+    skills_dir = _resolve_skill_output_dir(out_path, skill_output_dir)
+    skill_root = skills_dir / skill_name
     description = (
         f"Use when reading or changing code under {project_name} and you need "
         "repo_map routing from source paths to index.md/analysis.md, with "
@@ -381,6 +401,7 @@ def _build_skill_context(out_path: Path, scan_meta: dict) -> dict:
         "skill_name": skill_name,
         "description": description,
         "skill_description": description,
+        "skill_output_dir": str(skills_dir),
         "skill_root": str(skill_root),
         "repo_map_ref_root": "references/repo_map",
         "manifest_rel_path": "references/manifest.jsonl",
@@ -408,10 +429,15 @@ def _load_skill_context(output_dir: str) -> dict:
 
 def _validate_skill_frontmatter(skill_md_text: str) -> None:
     """Ensure SKILL.md frontmatter only contains name + description."""
-    parts = skill_md_text.split("---", 2)
-    if len(parts) != 3:
-        raise ValueError("SKILL.md must contain YAML frontmatter delimited by ---")
-    frontmatter_obj = yaml.safe_load(parts[1])
+    normalized = skill_md_text.replace("\r\n", "\n")
+    if not normalized.startswith("---\n"):
+        raise ValueError("SKILL.md must start with YAML frontmatter delimited by ---")
+
+    end = normalized.find("\n---\n", len("---\n"))
+    if end == -1:
+        raise ValueError("SKILL.md must contain closing YAML frontmatter delimiter")
+
+    frontmatter_obj = yaml.safe_load(normalized[len("---\n"):end])
     if not isinstance(frontmatter_obj, dict):
         raise ValueError("SKILL.md frontmatter must be a YAML mapping")
     keys = set(frontmatter_obj.keys())
@@ -419,6 +445,109 @@ def _validate_skill_frontmatter(skill_md_text: str) -> None:
         raise ValueError(
             f"SKILL.md frontmatter must contain only name/description, got keys: {sorted(keys)}"
         )
+    for key in ("name", "description"):
+        if not isinstance(frontmatter_obj.get(key), str) or not frontmatter_obj[key].strip():
+            raise ValueError(f"SKILL.md frontmatter field {key!r} must be a non-empty string")
+
+
+def _skill_description(context: dict) -> str:
+    raw = str(context.get("skill_description") or context.get("description") or "").strip()
+    if not raw:
+        raw = "Use when reading or changing code and you need repo_map routing."
+    return raw[:200]
+
+
+def _render_skill_markdown(context: dict) -> str:
+    project_name = str(context.get("project_name") or "project").strip()
+    skill_name = str(context.get("skill_name") or "repo-map-navigator").strip()
+    description = _skill_description(context)
+    frontmatter = yaml.safe_dump(
+        {"name": skill_name, "description": description},
+        allow_unicode=True,
+        sort_keys=False,
+    ).strip()
+    return f"""---
+{frontmatter}
+---
+
+## 概述
+
+repo_map 是 {project_name} 的源码镜像文档库，按源码目录结构组织 index.md、analysis.md 和 dependencies.md。阅读或修改 {project_name} 源码前，先用 repo_map 定位目录职责、关键符号和跨模块依赖。
+
+## 何时使用
+
+- 阅读源码：先用 index.md 定位目标文件、类、函数和引用关系。
+- Code Review：先用 analysis.md 理解改动目录的职责、设计模式和风险点。
+- 理解架构：从根目录 analysis.md 开始，再逐层进入相关子目录。
+- 跨模块追踪：结合 dependencies.md 判断改动影响的上游和下游模块。
+
+## 不适用场景
+
+- 只改 typo 或纯文本说明。
+- 只查看非代码资源。
+- 已明确知道目标目录且改动范围很小。
+
+## 文档类型说明
+
+| 文档 | 内容 | 用途 |
+|------|------|------|
+| index.md | 文件列表、重要性排序、符号定义行号、引用关系 | 定位文件与符号 |
+| analysis.md | 核心职责、关键模块、设计模式、依赖风险、注意事项 | 理解架构设计 |
+| dependencies.md | 跨文件/跨目录依赖图 | 分析影响范围 |
+
+阅读顺序固定为先 index.md 定位，再 analysis.md 理解，最后按需查 dependencies.md。
+
+## 路由规则
+
+1. 精确目录命中：源码目录存在对应 `references/repo_map/<dir>/index.md` 时，直接读取同目录 index.md 和 analysis.md。
+2. 父目录回退：精确目录无文档时，向父目录回退，直到命中可用 repo_map 文档。
+3. 根目录回退：父目录仍无命中时，读取 `references/repo_map/index.md` 和 `references/repo_map/analysis.md`。
+
+路径清单在 `references/manifest.jsonl` 中；脚本 `scripts/resolve_repo_map_docs.py` 可以把源码路径解析到最合适的 repo_map 文档。
+
+## 跨模块分析
+
+当一次改动可能影响多个目录时，先定位改动文件的 index.md，再读所在目录 analysis.md，最后查 dependencies.md。若 dependencies.md 指向其他关键目录，继续读取那些目录的 index.md 和 analysis.md，确认调用链、数据流和风险点。
+
+## 参考文件清单
+
+- `references/repo_map/`：按源码目录镜像的 repo_map 文档。
+- `references/manifest.jsonl`：源码目录到 repo_map 文档的映射清单。
+- `scripts/resolve_repo_map_docs.py`：源码路径到 repo_map 文档的解析脚本。
+- `assets/examples/`：常见使用场景示例。
+"""
+
+
+def _render_resolve_example(context: dict) -> str:
+    project_name = str(context.get("project_name") or "project").strip()
+    return f"""# 按源码路径解析 repo_map 文档
+
+## 场景 1：精确目录命中
+
+输入 `{project_name}/pkg/service/foo.go`，先取所在目录 `pkg/service`，再查 `references/manifest.jsonl`。如果存在 `references/repo_map/pkg/service/index.md`，同时读取该目录的 index.md 和 analysis.md。
+
+## 场景 2：父目录回退
+
+输入 `{project_name}/pkg/service/internal/foo.go`，如果 `pkg/service/internal` 没有 repo_map 文档，就回退到 `pkg/service`。父目录 analysis.md 用来理解该子目录在模块中的职责。
+
+## 场景 3：根目录回退
+
+输入路径没有任何目录命中时，读取 `references/repo_map/index.md` 和 `references/repo_map/analysis.md`，获得项目级入口和架构总览。
+"""
+
+
+def _render_cross_module_example(context: dict) -> str:
+    project_name = str(context.get("project_name") or "project").strip()
+    return f"""# 跨模块分析示例
+
+## 场景 1：修改引发的影响分析
+
+修改 {project_name} 中某个服务入口时，先读该目录 index.md 定位符号和引用，再读 analysis.md 理解职责边界。随后查 dependencies.md，列出可能受影响的调用方和被调用方。
+
+## 场景 2：理解模块协作关系
+
+需要理解两个目录如何协作时，分别读取两个目录的 analysis.md，再用 dependencies.md 验证依赖方向。index.md 用来回到具体文件和函数，避免只停留在抽象描述。
+"""
 
 
 # ─────────────────────────────────────────────────────────────────── #
@@ -719,9 +848,12 @@ def run_analysis_loop(
     return "\n".join(summary_lines)
 
 
-def prepare_repo_map_skill_workspace(output_dir: str) -> str:
+def prepare_repo_map_skill_workspace(
+    output_dir: str,
+    skill_output_dir: str | None = None,
+) -> str:
     """
-    Prepare deterministic skill workspace under <output_dir>/skills/.
+    Prepare deterministic skill workspace.
 
     This tool only does deterministic file preparation:
       1) Build skill name/path metadata
@@ -732,6 +864,9 @@ def prepare_repo_map_skill_workspace(output_dir: str) -> str:
 
     Args:
         output_dir: Repo map output directory (contains data/ and repo_map/)
+        skill_output_dir: Optional parent directory for generated skill packages.
+            Defaults to <output_dir>/skills. The generated package is written to
+            <skill_output_dir>/<project-name>-repo-map-navigator.
 
     Returns:
         Summary string with skill root path and artifact counts.
@@ -756,7 +891,11 @@ def prepare_repo_map_skill_workspace(output_dir: str) -> str:
         raise RuntimeError(f"analysis_progress.json is empty or invalid: {progress_file}")
 
     scan_meta = _read_json_file(scan_meta_file, default={})
-    context = _build_skill_context(out_path=out_path, scan_meta=scan_meta)
+    context = _build_skill_context(
+        out_path=out_path,
+        scan_meta=scan_meta,
+        skill_output_dir=skill_output_dir,
+    )
 
     skill_root = Path(context["skill_root"])
     references_dir = skill_root / "references"
@@ -785,6 +924,11 @@ def prepare_repo_map_skill_workspace(output_dir: str) -> str:
         json.dumps(context, ensure_ascii=False, indent=2),
         encoding="utf-8",
     )
+    if skill_output_dir is not None and str(skill_output_dir).strip():
+        (data_dir / "skill_output_dir.txt").write_text(
+            str(Path(skill_output_dir).resolve()),
+            encoding="utf-8",
+        )
 
     logger = resolve_logger(None, "repo_map_agent")
     logger.info(
@@ -799,6 +943,49 @@ def prepare_repo_map_skill_workspace(output_dir: str) -> str:
         f"Manifest entries: {manifest_count}",
         f"Context file: {context_path}",
     ]
+    return "\n".join(lines)
+
+
+def write_repo_map_skill_files(output_dir: str) -> str:
+    """
+    Write deterministic SKILL.md and example files for the prepared repo_map skill.
+
+    Args:
+        output_dir: Repo map output directory containing data/skill_build_context.json
+
+    Returns:
+        Summary string with written files.
+    """
+    context = _load_skill_context(output_dir)
+    skill_root = Path(str(context.get("skill_root", "")).strip())
+    if not skill_root:
+        raise RuntimeError("skill_root missing in skill_build_context.json")
+
+    skill_root.mkdir(parents=True, exist_ok=True)
+    examples_dir = skill_root / str(context.get("examples_rel_root", "assets/examples"))
+    examples_dir.mkdir(parents=True, exist_ok=True)
+
+    written = [
+        skill_root / "SKILL.md",
+        examples_dir / "resolve-by-source-path.md",
+        examples_dir / "cross-module-analysis.md",
+    ]
+    written[0].write_text(_render_skill_markdown(context), encoding="utf-8")
+    written[1].write_text(_render_resolve_example(context), encoding="utf-8")
+    written[2].write_text(_render_cross_module_example(context), encoding="utf-8")
+
+    logger = resolve_logger(None, "repo_map_agent")
+    logger.info(
+        "[Skill Writer] wrote deterministic files | "
+        f"skill={skill_root} | files={len(written)}"
+    )
+
+    lines = [
+        "Skill files written:",
+        f"Skill root: {skill_root}",
+        "Files:",
+    ]
+    lines.extend(f"  - {path.relative_to(skill_root)}" for path in written)
     return "\n".join(lines)
 
 
