@@ -5,7 +5,7 @@ description: |
   本 Agent 负责：
   1) 运行目录级 LLM 架构分析
   2) 组装技能工作区（确定性文件准备）
-  3) 调用 repo_map_skill_writer 写入 SKILL.md 与示例
+  3) 确定性写入 SKILL.md 与示例
   4) 校验 skill 完整性并输出总结
 
 model_type: "powerful"
@@ -22,7 +22,7 @@ workflow: |
   flowchart TD
     A["Step1: 调用 get_analysis_summary 获取当前进度"] --> B["Step2: 调用 run_analysis_loop 执行 LLM 架构分析"]
     B --> C["Step3: 调用 prepare_repo_map_skill_workspace 组装 skill 工作区"]
-    C --> D["Step4: 调用 repo_map_skill_writer 写入 SKILL.md 与示例"]
+    C --> D["Step4: 调用 write_repo_map_skill_files 写入 SKILL.md 与示例"]
     D --> E["Step5: 调用 validate_repo_map_skill 校验 skill"]
     E --> F["Step6: 调用 get_analysis_summary 获取最终总结"]
     F --> G["Step7: final_answer 返回完整结果"]
@@ -33,8 +33,8 @@ workflow: |
   | 工具 | 调用方式 | 作用 |
   |------|---------|------|
   | `run_analysis_loop` | `run_analysis_loop(output_dir=...)` | 逐目录调用 dir_architecture_analysis 子 Agent 进行 LLM 架构分析 |
-  | `prepare_repo_map_skill_workspace` | `prepare_repo_map_skill_workspace(output_dir=...)` | 拷贝 repo_map 并生成 manifest/resolver/context |
-  | `repo_map_skill_writer` | `repo_map_skill_writer(output_dir=...)` | 根据上下文写入 SKILL.md 和 assets/examples/*.md |
+  | `prepare_repo_map_skill_workspace` | `prepare_repo_map_skill_workspace(output_dir=..., skill_output_dir=...)` | 拷贝 repo_map 并生成 manifest/resolver/context；skill_output_dir 可选 |
+  | `write_repo_map_skill_files` | `write_repo_map_skill_files(output_dir=...)` | 根据 context 确定性写入 SKILL.md 和 assets/examples/*.md |
   | `validate_repo_map_skill` | `validate_repo_map_skill(output_dir=...)` | 校验 skill 目录结构和 frontmatter 规则 |
   | `get_analysis_summary` | `get_analysis_summary(output_dir=...)` | 读取 analysis_progress.json，返回完成/失败统计和交付物路径 |
 
@@ -49,9 +49,11 @@ workflow: |
   2. **调用 `prepare_repo_map_skill_workspace(output_dir=<output_dir>)`**
      - 拷贝 repo_map 文档到 skill 目录
      - 生成 manifest.jsonl、resolver 脚本、context 文件
+     - 如果任务描述中包含 `skill_output_dir=xxx`，必须传入
+       `prepare_repo_map_skill_workspace(output_dir=<output_dir>, skill_output_dir=xxx)`
 
-  3. **调用 `repo_map_skill_writer(output_dir=<output_dir>)`**
-     - 让 worker agent 写入 SKILL.md 和示例文件
+  3. **调用 `write_repo_map_skill_files(output_dir=<output_dir>)`**
+     - 确定性写入 SKILL.md 和示例文件
 
   4. **调用 `validate_repo_map_skill(output_dir=<output_dir>)`**
      - 校验 skill 目录完整性、frontmatter 规则
@@ -81,12 +83,13 @@ tools:
     module: "applications.repo_map.agent_tools.pipeline_agent_tools"
     function: "validate_repo_map_skill"
     description: "校验 skill 目录完整性、frontmatter 规则与 manifest 条目数"
+  - name: "write_repo_map_skill_files"
+    module: "applications.repo_map.agent_tools.pipeline_agent_tools"
+    function: "write_repo_map_skill_files"
+    description: "确定性写入 SKILL.md 与示例文件"
   - name: "get_analysis_summary"
     module: "applications.repo_map.agent_tools.pipeline_agent_tools"
     function: "get_analysis_summary"
     description: "读取 analysis_progress.json，返回总结报告（完成/失败数、交付物路径）"
   - name: "read_file"
   - name: "browse_directory"
-
-worker_agents:
-  - path: "repo_map_skill_writer.yaml"
