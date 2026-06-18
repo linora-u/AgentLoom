@@ -6,7 +6,7 @@ description: |
   不做文件读写，只做分析。
 
 model_type: "powerful"
-tool_call_type: "tool_call"
+tool_call_type: "code_act"
 concurrency: auto
 
 workflow: |

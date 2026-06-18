@@ -9,7 +9,7 @@ description: |
   4) 校验 skill 完整性并输出总结
 
 model_type: "powerful"
-tool_call_type: "tool_call"
+tool_call_type: "code_act"
 
 workflow: |
   # Repo Map 架构分析工作流
