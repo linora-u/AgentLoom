@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import importlib.util
 import json
+import os
 import shutil
 import sys
 from pathlib import Path
@@ -42,6 +43,30 @@ def _prepare_repo_map_outputs(project: Path) -> Path:
     )
     generate_markdown_map(output_dir=str(output_dir))
     return output_dir
+
+
+def test_generate_markdown_map_migrates_legacy_analysis_tree(tmp_path):
+    project = _copy_fixture_project(tmp_path)
+    output_dir = project / ".repo_map"
+    scan_and_rank(
+        project_path=str(project),
+        output_dir=str(output_dir),
+        incremental=True,
+    )
+    legacy_root = output_dir / "repo_map"
+    (legacy_root / "api").mkdir(parents=True)
+    (legacy_root / "analysis.md").write_text("legacy root analysis", encoding="utf-8")
+    (legacy_root / "api" / "analysis.md").write_text("legacy api analysis", encoding="utf-8")
+
+    generate_markdown_map(output_dir=str(output_dir))
+    skill_root = output_dir / "sample-project-repo-map"
+    docs_root = skill_root / "references" / "repo_map"
+
+    assert not legacy_root.exists()
+    assert (docs_root / "analysis.md").read_text(encoding="utf-8") == "legacy root analysis"
+    assert (docs_root / "api" / "analysis.md").read_text(
+        encoding="utf-8"
+    ) == "legacy api analysis"
 
 
 def _load_skill_context(output_dir: Path) -> dict:
@@ -86,13 +111,19 @@ def test_prepare_workspace_creates_expected_tree(tmp_path):
 
     assert "Skill workspace prepared:" in summary
     assert skill_root.exists()
-    assert context["skill_name"] == "sample-project-repo-map-navigator"
+    assert context["skill_name"] == "sample-project-repo-map"
+    assert skill_root == output_dir / "sample-project-repo-map"
 
     assert (skill_root / "references" / "repo_map" / "index.md").exists()
     assert (skill_root / "references" / "repo_map" / "dependencies.md").exists()
     assert (skill_root / "references" / "manifest.jsonl").exists()
     assert (skill_root / "scripts" / "resolve_repo_map_docs.py").exists()
+    assert os.access(skill_root / "scripts" / "resolve_repo_map_docs.py", os.X_OK)
     assert (skill_root / "assets" / "examples").exists()
+    assert (skill_root / "agents" / "openai.yaml").exists()
+    assert not (skill_root / "_repo_map").exists()
+    assert not (skill_root / "index.md").exists()
+    assert not (output_dir / "repo_map").exists()
 
     progress = json.loads((output_dir / "data" / "analysis_progress.json").read_text())
     manifest_lines = [
@@ -103,7 +134,7 @@ def test_prepare_workspace_creates_expected_tree(tmp_path):
     assert len(manifest_lines) == len(progress)
 
 
-def test_prepare_workspace_supports_custom_skill_output_dir(tmp_path):
+def test_prepare_workspace_ignores_deprecated_custom_skill_output_dir(tmp_path):
     project = _copy_fixture_project(tmp_path)
     output_dir = _prepare_repo_map_outputs(project)
     custom_skills_dir = tmp_path / "project" / ".agents" / "skills"
@@ -116,13 +147,11 @@ def test_prepare_workspace_supports_custom_skill_output_dir(tmp_path):
     skill_root = Path(context["skill_root"])
 
     assert "Skill workspace prepared:" in summary
-    assert context["skill_output_dir"] == str(custom_skills_dir.resolve())
-    assert skill_root == custom_skills_dir.resolve() / context["skill_name"]
+    assert context["skill_output_dir"] == str(output_dir)
+    assert skill_root == output_dir / context["skill_name"]
     assert skill_root.exists()
-    assert not (output_dir / "skills" / context["skill_name"]).exists()
-    assert (output_dir / "data" / "skill_output_dir.txt").read_text(
-        encoding="utf-8"
-    ) == str(custom_skills_dir.resolve())
+    assert not custom_skills_dir.exists()
+    assert not (output_dir / "data" / "skill_output_dir.txt").exists()
 
     _write_fake_skill_markdown(output_dir)
     validate_summary = pat.validate_repo_map_skill(str(output_dir))
@@ -176,7 +205,7 @@ def test_resolver_script_supports_exact_and_fallback(tmp_path):
     )
     assert fallback
     assert fallback[-1]["dir_path"] == "(root)"
-    assert fallback[-1]["index_path"].endswith("repo_map/index.md")
+    assert fallback[-1]["index_path"].endswith("references/repo_map/index.md")
 
 
 def test_validate_skill_checks_frontmatter_and_examples(tmp_path):

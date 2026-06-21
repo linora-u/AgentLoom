@@ -16,7 +16,7 @@ def generate_markdown_map(
 
     Reads tags.json, ranked.json, and scan_meta.json from <output_dir>/data/,
     then creates a Markdown file for every directory in the scanned project,
-    mirroring the project directory structure under <output_dir>/repo_map/.
+    mirroring the project directory structure under <output_dir>/<project-name>-repo-map/.
 
     Each directory gets an index.md containing:
     - All file definitions (functions, classes, structs) with line numbers
@@ -24,8 +24,8 @@ def generate_markdown_map(
     - Cross-file reference information
 
     Also creates:
-    - <output_dir>/repo_map/index.md — project overview with top-20 modules table
-    - <output_dir>/repo_map/dependencies.md — cross-file dependency relationships
+    - <output_dir>/<project-name>-repo-map/references/repo_map/index.md — project overview
+    - <output_dir>/<project-name>-repo-map/references/repo_map/dependencies.md — dependency relationships
     - <output_dir>/data/analysis_progress.json — per-directory status for step3
 
     Args:
@@ -35,8 +35,8 @@ def generate_markdown_map(
     Returns:
         A summary of generated files, e.g.:
         "Generated 18 files:
-          /path/.repo_map/repo_map/index.md
-          /path/.repo_map/repo_map/src/index.md
+          /path/.repo_map/my-project-repo-map/references/repo_map/index.md
+          /path/.repo_map/my-project-repo-map/references/repo_map/src/index.md
           ..."
 
     Raises:

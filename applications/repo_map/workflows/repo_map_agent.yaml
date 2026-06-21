@@ -4,7 +4,7 @@ description: |
   扫描和 Markdown 生成已由 repo_map_app.py 直接完成（纯 Python，零 LLM）。
   本 Agent 负责：
   1) 运行目录级 LLM 架构分析
-  2) 组装技能工作区（确定性文件准备）
+  2) 组装 repo_map Skill 元数据（确定性文件准备）
   3) 确定性写入 SKILL.md 与示例
   4) 校验 skill 完整性并输出总结
 
@@ -33,8 +33,8 @@ workflow: |
   | 工具 | 调用方式 | 作用 |
   |------|---------|------|
   | `run_analysis_loop` | `run_analysis_loop(output_dir=...)` | 逐目录调用 dir_architecture_analysis 子 Agent 进行 LLM 架构分析 |
-  | `prepare_repo_map_skill_workspace` | `prepare_repo_map_skill_workspace(output_dir=..., skill_output_dir=...)` | 拷贝 repo_map 并生成 manifest/resolver/context；skill_output_dir 可选 |
-  | `write_repo_map_skill_files` | `write_repo_map_skill_files(output_dir=...)` | 根据 context 确定性写入 SKILL.md 和 assets/examples/*.md |
+  | `prepare_repo_map_skill_workspace` | `prepare_repo_map_skill_workspace(output_dir=...)` | 在 `<output_dir>/<project>-repo-map` 内生成 references/scripts/assets/agents |
+  | `write_repo_map_skill_files` | `write_repo_map_skill_files(output_dir=...)` | 根据 context 确定性写入 SKILL.md 和 `assets/examples/*.md` |
   | `validate_repo_map_skill` | `validate_repo_map_skill(output_dir=...)` | 校验 skill 目录结构和 frontmatter 规则 |
   | `get_analysis_summary` | `get_analysis_summary(output_dir=...)` | 读取 analysis_progress.json，返回完成/失败统计和交付物路径 |
 
@@ -47,10 +47,8 @@ workflow: |
      - 可能耗时较长（每个目录约 30 秒），这是正常的
 
   2. **调用 `prepare_repo_map_skill_workspace(output_dir=<output_dir>)`**
-     - 拷贝 repo_map 文档到 skill 目录
-     - 生成 manifest.jsonl、resolver 脚本、context 文件
-     - 如果任务描述中包含 `skill_output_dir=xxx`，必须传入
-       `prepare_repo_map_skill_workspace(output_dir=<output_dir>, skill_output_dir=xxx)`
+     - 使用 `<output_dir>/<project>-repo-map` 作为唯一 Skill 根目录
+     - 生成 `references/manifest.jsonl`、`scripts/resolve_repo_map_docs.py`、`agents/openai.yaml`、context 文件
 
   3. **调用 `write_repo_map_skill_files(output_dir=<output_dir>)`**
      - 确定性写入 SKILL.md 和示例文件

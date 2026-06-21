@@ -156,6 +156,48 @@ class TestCheckpointSaveAndResume:
         assert workers[0]["input_hash"] == "abc123"
         assert workers[0]["result"] == "scan done"
 
+    def test_context_store_metadata_and_resume_retrieval(self, tmp_path):
+        """ContextEngine store is task-scoped and survives coordinator resume."""
+        cm = CheckpointManager("ctx_sup", base_dir=tmp_path)
+        task_id = "task_context_store"
+
+        class RuntimeAgent:
+            _config = {}
+
+            class Memory:
+                steps = []
+
+            memory = Memory()
+
+        coord = CheckpointCoordinator.activate(cm, task_id, "task")
+        try:
+            from src.lib.context_engine.runtime import get_current_context_engine
+
+            engine = get_current_context_engine()
+            assert engine is not None
+            preview = engine.compress_tool_result(
+                "resume needle\n" * 600,
+                tool_name="shell_tool",
+                source="checkpoint-test",
+            )
+            assert preview is not None
+            ref = preview.split()[1]
+            coord.save_supervisor(RuntimeAgent(), "running")
+            ckpt = cm.load_supervisor_checkpoint(task_id)
+            assert ckpt["context_store"]["ref_count"] == 1
+        finally:
+            CheckpointCoordinator.deactivate(coord)
+
+        resumed = CheckpointCoordinator.activate(cm, task_id, "task", resume=True)
+        try:
+            from src.lib.context_engine.runtime import get_current_context_engine
+
+            resumed_engine = get_current_context_engine()
+            assert resumed_engine is not None
+            assert "resume needle" in resumed_engine.retrieve(ref, offset=0, limit=1)
+        finally:
+            CheckpointCoordinator.deactivate(resumed)
+
 
 # ---------------------------------------------------------------------------
 # E2E: File history integration with coordinator step callback
