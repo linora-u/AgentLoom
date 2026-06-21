@@ -336,7 +336,7 @@ def test_generated_tool_embeds_list_workflow_items_without_stage_wrappers():
     assert "Workflow item 1" not in out
 
 
-def test_supervisor_respects_empty_default_loaded_tools():
+def test_supervisor_respects_empty_toolsets():
     supervisor = YamlConfiguredSupervisorAgent(
         config={
             "name": "demo",
@@ -344,7 +344,7 @@ def test_supervisor_respects_empty_default_loaded_tools():
             "workflow": "demo workflow",
             "tools": [],
             "worker_agents": [],
-            "default_loaded_tools": [],
+            "toolsets": [],
             "_yaml_file_path": str(Path("applications/test_demo/workflows/test_multi_workflow_agent.yaml").resolve()),
         },
         model="dummy",

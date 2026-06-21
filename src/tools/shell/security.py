@@ -211,7 +211,7 @@ def _check_command_substitution(command: str, unquoted: str) -> Optional[Securit
         (re.compile(r'\$\['), "$[] legacy arithmetic expansion"),
     ]
     _alt = (
-        "Use write_markdown_file or edit_file tool for multi-line content "
+        "Use write_file or edit_file tool for multi-line content "
         "containing backticks or $()"
     )
     for pattern, desc in _CMD_SUB_ONLY:

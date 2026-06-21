@@ -86,7 +86,7 @@ agent_function_schema:
 
 ```text
 system, smart_summary, context_engine, tool_access_control, execution_env,
-code_agent, tools, shell_settings, tools_mapping, default_loaded_tools,
+code_agent, tools, shell_settings, tools_mapping, default_toolsets, toolsets,
 prompt, mcp_servers
 ```
 
@@ -94,7 +94,7 @@ prompt, mcp_servers
 
 - 这不是 7 个字段；旧文档如果说只有 7 个已经过期。
 - `tools` 在白名单里只有当它是 `list` 时才进入 overlay；它同时也是 Agent 的工具列表。
-- `shell_settings`、`tools_mapping`、`default_loaded_tools` 可以在 Agent YAML 覆盖。
+- `shell_settings`、`tools_mapping`、`toolsets` 可以在 Agent YAML 覆盖；`toolsets` 会整体替换全局 `default_toolsets`。
 - `context_engine` 可以在 Agent YAML 覆盖，用于按应用或 Agent 调整可逆上下文压缩。
 - `mcp_servers` 可以在 Agent YAML 覆盖，并支持 string/list/dict。
 - Worker 的有效配置由全局、应用级、Worker YAML 自己重建；不会继承 Supervisor 的运行时覆盖。Worker 需要同样权限时必须自己写。
@@ -114,7 +114,8 @@ prompt, mcp_servers
 | `execution_env` | 默认执行环境 |
 | `code_agent` | `code_act` 可 import 模块和可调用内置函数 |
 | `logging` | 日志开关、级别、文件路径和目录；以全局配置为准 |
-| `default_loaded_tools` | 默认加载工具名列表 |
+| `default_toolsets` | 默认加载 toolset 名列表 |
+| `toolsets` | Agent 级内置 toolset 覆盖，空列表表示无内置工具 |
 | `shell_settings` | shell 命令白名单、安全检查、sandbox、后台任务、audit log |
 | `tools_mapping` | Skill `allowed-tools` 和 Hook matcher 的平台别名映射 |
 | `tool_access_control` | 工具路径访问控制 |
@@ -194,24 +195,27 @@ tool_access_control:
 
 规则：exclude 优先于 include；`tools: ["*"]` 匹配所有工具；工具没有命中任何规则时不做路径检查。
 
-### default_loaded_tools 与工具名
+### default_toolsets / toolsets 与工具名
 
-`default_loaded_tools` 必须写 runtime 真实工具名。常见工具包括：
+`default_toolsets` 与 Agent 级 `toolsets` 必须写 registry toolset 名，不是工具名。可用 toolsets：
 
 ```text
-read_file, write_file, edit_file, move_file, rename_file, copy_file,
-delete_file, write_whole_file, write_markdown_file, write_markdown_file_raw,
-append_markdown_sections, browse_directory, get_file_outline,
-grep_search, glob_search, search_files, code_search, code_replace, code_edit,
-search_and_replace, ast_grep_search_file, get_git_diff_content, git_grep_files,
-git_commit_files, git_auto_commit, git_check_dirty, is_path_in_repo,
-loom_retrieve_context,
-shell_tool, check_background_task, kill_background_task, list_background_tasks,
-load_skill, list_skills, read_skill_resource, check_skill_dependencies,
-run_skill_script, codex, todo_write
+core_shell, core_file, core_search, context, skills, markdown_report, code_nav
 ```
 
-实际完整列表以 `src/tools/__init__.py::__all__` 为准。
+常见工具包括：
+
+```text
+read_file, write_file, edit_file, list_directory,
+write_markdown_file, write_markdown_file_raw, append_markdown_sections,
+get_file_outline, lsp_find_definition, lsp_find_references,
+lsp_get_document_symbols, lsp_hover, lsp_get_workspace_symbols,
+grep_search, glob_search, ast_grep_search_file, loom_retrieve_context,
+shell_tool, check_background_task, kill_background_task, list_background_tasks,
+load_skill, list_skills, todo_write
+```
+
+实际完整列表以 `src/tools/registry.py` 的 `ToolSpec` registry 为准。
 
 ## llm.yaml 配置面
 
@@ -426,6 +430,6 @@ dict 形式也支持 `paths: [...]`。无效类型会跳过并 warning。
 - 配置越少越好。新增配置前先确认它改变用户可观察行为；能用代码默认表达的边界不要暴露成开关。
 - 只有模型路由和 API 参数进 `config/llm.yaml`；不要把 endpoint、key、temperature 写进 Agent YAML。
 - Worker 需要权限就写在 Worker YAML 或 app-level system；不要指望 Supervisor 传下去。
-- 列表是替换，不是追加。覆盖 `default_loaded_tools` 或 `skills` 时要写完整意图。
+- 列表是替换，不是追加。Agent YAML 覆盖 `toolsets` 或 `skills` 时要写完整意图。
 - 确定性逻辑放 `agent_tools/*.py`，推理协议放 workflow，长期领域协议才放 Skill。
 - 需要 Hook 时优先做应用私有 Skill，通过 Skill `hooks:` 注册。

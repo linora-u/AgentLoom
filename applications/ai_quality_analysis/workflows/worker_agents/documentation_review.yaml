@@ -2,7 +2,14 @@ name: "documentation_review"
 description: "Evaluates documentation quality: function/class docs, README completeness, API documentation, and inline comments."
 tool_call_type: "code_act"
 model_type: "powerful"
-tools: []
+toolsets:
+  - "core_shell"
+  - "core_file"
+  - "core_search"
+  - "context"
+  - "skills"
+  - "markdown_report"
+  - "code_nav"
 workflow: |
   You are a **senior technical writer and documentation expert**. In this phase you act as the **"Documentation & Maintainability"** worker agent, responsible for assessing how well the codebase is documented and how easy it is for a new developer to understand and maintain.
 
@@ -102,15 +109,6 @@ workflow: |
   Write analysis results as Markdown to `temp/QA_Documentation.md`.
 
   **Important: Use `write_markdown_file` tool with `sections` parameter. For large content, use `append_markdown_sections`.**
-
-tools:
-  - name: "write_file"
-  - name: "write_markdown_file"
-  - name: "write_markdown_file_raw"
-  - name: "append_markdown_sections"
-  - name: "read_file"
-  - name: "get_file_outline"
-  - name: "browse_directory"
 
 agent_function_schema:
   description: |

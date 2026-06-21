@@ -23,53 +23,64 @@ description: |
 
 model_type: "powerful"
 tool_call_type: "code_act"
+max_steps: 5
 
 workflow: |
   # Checkpoint Resume Test Workflow
 
-  Execute ALL steps below IN ORDER, one at a time. Each step MUST use
-  the specified tool. Report the result of each step.
+  Execute one Python code block that calls the tools below directly. Do not
+  split this into multiple code blocks. Do not output prose outside the code
+  block.
 
-  IMPORTANT: create the working directory first with shell_tool:
-    mkdir -p /tmp/agentloom_checkpoint_test
+  ```python
+  root = "/tmp/agentloom_checkpoint_test"
+  shell_tool(command=f"rm -rf {root} && mkdir -p {root}")
+  results = []
 
-  ## Step 1: Create step1.txt
-  Use edit_file to create "/tmp/agentloom_checkpoint_test/step1.txt"
-  with content: "Hello from step 1\n"
-  Verify: report success or failure.
+  step1 = f"{root}/step1.txt"
+  step2 = f"{root}/step2.txt"
+  summary = f"{root}/summary.txt"
 
-  ## Step 2: Create step2.txt
-  Use edit_file to create "/tmp/agentloom_checkpoint_test/step2.txt"
-  with content: "Hello from step 2\n"
-  Verify: report success or failure.
+  r1 = write_file(file_path=step1, content="Hello from step 1\n")
+  results.append(("write step1", "Created" in r1 or "Updated" in r1, r1))
 
-  ## Step 3: Modify step1.txt
-  Use edit_file to replace "Hello from step 1" with
-  "Hello from step 1 — modified in step 3"
-  in "/tmp/agentloom_checkpoint_test/step1.txt".
-  Verify: report success or failure.
+  r2 = write_file(file_path=step2, content="Hello from step 2\n")
+  results.append(("write step2", "Created" in r2 or "Updated" in r2, r2))
 
-  ## Step 4: Verify files
-  Use read_file to read both step1.txt and step2.txt.
-  Verify: step1.txt contains "modified in step 3",
-          step2.txt contains "Hello from step 2".
+  edited = edit_file(
+      file_path=step1,
+      edits=[{"old_text": "Hello from step 1", "new_text": "Hello from step 1 — modified in step 3"}],
+  )
+  results.append(("edit step1", "Successfully edited" in edited, edited))
 
-  ## Step 5: Create summary
-  Use edit_file to create "/tmp/agentloom_checkpoint_test/summary.txt"
-  with content listing what was done in each step.
-  Verify: report success or failure.
+  step1_content = read_file(file_path=step1)
+  step2_content = read_file(file_path=step2)
+  results.append(("verify step1", "modified in step 3" in step1_content, step1_content))
+  results.append(("verify step2", "Hello from step 2" in step2_content, step2_content))
 
-  ## Final Report
-  Report: ALL STEPS COMPLETED. List each step status.
+  summary_result = write_file(
+      file_path=summary,
+      content="step1 created and modified\nstep2 created\nsummary created\n",
+  )
+  results.append(("write summary", "Created" in summary_result or "Updated" in summary_result, summary_result))
+
+  ok = all(item[1] for item in results)
+  lines = ["CHECKPOINT_VALIDATION: " + ("PASS" if ok else "FAIL")]
+  for name, passed, detail in results:
+      lines.append(f"{name}: {'PASS' if passed else 'FAIL'}")
+      if not passed:
+          lines.append(str(detail))
+  final_answer("\n".join(lines))
+  ```
 
 tools:
   - name: "shell_tool"
   - name: "read_file"
+  - name: "write_file"
   - name: "edit_file"
 
 worker_agents: []
 skills: []
-max_steps: 15
 
 execution_env:
   type: "local"

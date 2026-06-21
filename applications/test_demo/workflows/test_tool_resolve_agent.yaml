@@ -3,34 +3,38 @@ description: "Validate convention-based tool resolution and metadata loading"
 
 model_type: "powerful"
 tool_call_type: "code_act"
+max_steps: 5
 
 workflow: |
   # Tool Resolution Validation
 
-  Execute ALL steps below. Report PASS or FAIL for each.
+  Execute one Python code block that calls the tools below directly. Do not
+  split this into multiple code blocks. Do not output prose outside the code
+  block.
 
-  ## Step 1: grep_search resolves and works
-  Use grep_search to search for "class ToolMeta" in path "src/tools/".
-  Expected: find the ToolMeta class definition in tool_meta.py.
-  Verify: output contains "tool_meta.py".
+  ```python
+  results = []
 
-  ## Step 2: glob_search resolves and works
-  Use glob_search to find "*.yaml" under "config/".
-  Expected: find system.yaml and llm.yaml.
-  Verify: output contains "system.yaml".
+  grep_result = grep_search(pattern="def get_tool_meta", path="src/tools/tool_meta.py")
+  results.append(("grep_search", "get_tool_meta" in grep_result, grep_result))
 
-  ## Step 3: shell_tool resolves and works
-  Use shell_tool to run "echo hello_from_shell".
-  Expected: output contains "hello_from_shell".
-  Verify: output is not empty and contains the expected text.
+  glob_result = glob_search(pattern="*.yaml", path="config/")
+  results.append(("glob_search", "system.yaml" in glob_result, glob_result))
 
-  ## Step 4: read_file resolves and works
-  Use read_file to read "config/system.yaml".
-  Expected: file content with system configuration.
-  Verify: output contains "AgentLoom" and "tool_metadata".
+  shell_result = shell_tool(command="echo hello_from_shell")
+  results.append(("shell_tool", "hello_from_shell" in shell_result, shell_result))
 
-  ## Final Summary
-  Print PASS/FAIL for each step and overall result.
+  read_result = read_file(file_path="config/system.yaml", offset=1, limit=20)
+  results.append(("read_file", "AgentLoom" in read_result and "System Information" in read_result, read_result))
+
+  ok = all(item[1] for item in results)
+  lines = ["TOOL_RESOLVE_VALIDATION: " + ("PASS" if ok else "FAIL")]
+  for name, passed, detail in results:
+      lines.append(f"{name}: {'PASS' if passed else 'FAIL'}")
+      if not passed:
+          lines.append(str(detail))
+  final_answer("\n".join(lines))
+  ```
 
 tools:
   - name: "grep_search"
@@ -40,7 +44,6 @@ tools:
 
 worker_agents: []
 skills: []
-max_steps: 12
 
 execution_env:
   type: "local"

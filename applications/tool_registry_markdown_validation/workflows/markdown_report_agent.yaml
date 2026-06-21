@@ -1,0 +1,28 @@
+name: "tool_registry_markdown_validation"
+description: "Validate explicit markdown_report toolset through real tool calls."
+
+model_type: "powerful"
+tool_call_type: "tool_call"
+toolsets:
+  - "core_file"
+  - "markdown_report"
+max_steps: 10
+
+workflow: |
+  # Tool Registry Markdown Validation
+
+  Execute every step with actual tools. Do not simulate tool results.
+
+  Use this output file:
+  `/tmp/agentloom_tool_registry_markdown_validation/report.md`
+
+  ## Steps
+
+  1. Use `write_markdown_file` with `title="Tool Registry Markdown Validation"` and two sections:
+     - heading: `Summary`, body: `markdown_report toolset is explicitly enabled.`
+     - heading: `Result`, body: `MARKDOWN_TOOLSET_VALIDATION: PASS`
+  2. Use `read_file` to verify the file contains both `Tool Registry Markdown Validation` and `MARKDOWN_TOOLSET_VALIDATION: PASS`.
+
+  Final answer must include:
+  - `MARKDOWN_TOOLSET_VALIDATION: PASS` if the read-back check passed, otherwise `FAIL`
+  - the output file path

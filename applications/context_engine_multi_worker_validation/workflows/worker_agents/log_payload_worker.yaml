@@ -1,0 +1,34 @@
+name: "log_payload_worker"
+description: "Worker that returns a large log payload for ContextEngine validation."
+model_type: "powerful"
+tool_call_type: "code_act"
+max_steps: 4
+
+workflow: |
+  # Log Payload Worker
+
+  Produce the payload by executing this logic in one code block:
+
+  ```
+  payload = make_context_engine_log_payload(case_id="log")
+  final_answer(payload)
+  ```
+
+  Return the payload exactly. Do not summarize it.
+
+agent_function_schema:
+  description: "Return the large log validation payload exactly."
+  inputs:
+    user_request:
+      description: "Validation request from the supervisor."
+      required: true
+  output:
+    description: "The complete large log payload."
+
+tools:
+  - name: "make_context_engine_log_payload"
+    module: "applications.context_engine_multi_worker_validation.agent_tools.payload_tools"
+    function: "make_context_engine_log_payload"
+
+skills: []
+worker_agents: []

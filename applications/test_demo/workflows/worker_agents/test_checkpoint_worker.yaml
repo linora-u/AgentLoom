@@ -10,7 +10,7 @@ workflow: |
   # File Processor Worker
 
   You are a file processing worker. Follow the query instructions exactly.
-  Read the specified input files, merge their content, and write the output.
+  Read the specified input files, merge their content, and write the output with write_file.
 
 agent_function_schema:
   description: |
@@ -26,6 +26,7 @@ agent_function_schema:
 
 tools:
   - name: "read_file"
+  - name: "write_file"
   - name: "edit_file"
   - name: "shell_tool"
 

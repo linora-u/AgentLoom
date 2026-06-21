@@ -6,6 +6,9 @@ description: |
 
 model_type: "powerful"
 tool_call_type: "tool_call"
+toolsets:
+  - "core_file"
+  - "markdown_report"
 
 workflow: |
   # Repo Map Skill Writer
@@ -96,10 +99,6 @@ workflow: |
   index.md 典型内容：文件列表按 PageRank 重要性排序，每个文件列出类/函数定义含行号，标注被引用于哪些文件，附重要性星级。
 
   analysis.md 典型内容：核心功能概述、关键模块及原因、设计模式识别（如 Middleware/Decorator、Chain of Responsibility）、依赖关系（含循环依赖风险）、注意事项与风险点。
-
-tools:
-  - name: "write_markdown_file"
-  - name: "read_file"
 
 agent_function_schema:
   description: |

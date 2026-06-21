@@ -52,9 +52,11 @@ argument-hint: "<AgentLoom task or application path>"
 6. 写配置前先确认配置归属：LLM 参数只进 `config/llm.yaml`；应用行为优先用 `applications/<app>/config/system.yaml` 或 Agent YAML 白名单字段；Skill hooks 只写在 `SKILL.md` frontmatter。
 7. 新增或改变任何可配置字段时，必须同步更新 `references/configuration-surface.md` 和相关 YAML 契约；优先精简配置，只暴露用户确实需要调的字段，不为了“完整”增加开关。
 8. 框架功能不要新增兼容桥、旧字段回退或第二套路径；如果契约需要变化，直接改主路径、配置白名单、文档和验证。
-9. 设计框架功能时必须先写验证矩阵：单测证明局部规则，真实 Application 证明完整运行链路；涉及上下文压缩时必须验证压缩后能按 `ContextRef` retrieve 原文，涉及 resume 时必须验证恢复后旧 ref 仍可 retrieve。
-10. 如果用户不确定 shell 权限怎么配，先用隔离 runtime 跑真实 workflow，读取 `shell_audit.log` 里的 `[POLICY_SNAPSHOT]` 和拦截事件，再收敛 `allowed_commands`、`allowed_operators`、路径规则或 sandbox。
-11. 最后必须运行验证命令。能跑到哪一步就记录到哪一步，不把“未执行”说成“通过”。
+9. 设计或修改框架功能时必须先写验证矩阵：单测证明局部规则，真实 Application 证明完整运行链路；涉及上下文压缩时必须验证压缩后能按 `ContextRef` retrieve 原文，涉及 resume 时必须验证恢复后旧 ref 仍可 retrieve。
+10. 代码编写完成后不能只跑单测或 YAML 校验。必须按改动风险选择多条真实 Application 跑功能验证；现有 Application 覆盖不足时，新增最小验证 Application，保留在 `applications/<validation_app>/`，让后续 Agent 可复跑。
+11. 每个真实 Application 跑完后都要读运行日志和关键产物，再判断是否符合预期；不要只看进程退出码或 LLM final answer。验证记录至少包含：命令、退出码、final answer、关键 tool 调用/worker 调用、日志里的错误/警告、产物文件或 checkpoint/context/audit 证据。
+12. 如果用户不确定 shell 权限怎么配，先用隔离 runtime 跑真实 workflow，读取 `shell_audit.log` 里的 `[POLICY_SNAPSHOT]` 和拦截事件，再收敛 `allowed_commands`、`allowed_operators`、路径规则或 sandbox。
+13. 最后必须运行验证命令。能跑到哪一步就记录到哪一步，不把“未执行”说成“通过”。
 
 ## 命令速查
 

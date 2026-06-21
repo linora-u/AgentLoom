@@ -3,5 +3,15 @@
 # ============================================
 tool_access_control:
   path_validation:
-    - tools: ["read_file", "edit_file", "write_markdown_file", "glob_search", "grep_search"]
+    - tools:
+        - "read_file"
+        - "edit_file"
+        - "write_file"
+        - "list_directory"
+        - "write_markdown_file"
+        - "write_markdown_file_raw"
+        - "append_markdown_sections"
+        - "get_file_outline"
+        - "glob_search"
+        - "grep_search"
       exclude_paths: ["Tools", "Test", ".git"]
