@@ -3,7 +3,7 @@ description: "Run browser-harness doctor, then verify both isolated Chrome and r
 model_type: "powerful"
 tool_call_type: "tool_call"
 max_steps: 8
-default_loaded_tools: []
+toolsets: []
 skills: []
 
 tools:

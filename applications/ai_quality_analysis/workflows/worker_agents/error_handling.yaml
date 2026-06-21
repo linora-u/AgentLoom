@@ -2,7 +2,14 @@ name: "error_handling"
 description: "Evaluates error handling robustness: uncaught exceptions, resource leaks, missing null checks, and error propagation patterns."
 tool_call_type: "code_act"
 model_type: "powerful"
-tools: []
+toolsets:
+  - "core_shell"
+  - "core_file"
+  - "core_search"
+  - "context"
+  - "skills"
+  - "markdown_report"
+  - "code_nav"
 workflow: |
   You are a **senior software engineer and reliability expert**. In this phase you act as the **"Error Handling & Robustness"** worker agent, responsible for systematically auditing how the codebase handles errors, exceptions, resource cleanup, and edge-case inputs.
 
@@ -88,15 +95,6 @@ workflow: |
   Write analysis results as Markdown to `temp/QA_ErrorHandling.md`.
 
   **Important: Use `write_markdown_file` tool with `sections` parameter. For large content, use `append_markdown_sections`.**
-
-tools:
-  - name: "write_file"
-  - name: "write_markdown_file"
-  - name: "write_markdown_file_raw"
-  - name: "append_markdown_sections"
-  - name: "read_file"
-  - name: "get_file_outline"
-  - name: "browse_directory"
 
 agent_function_schema:
   description: |

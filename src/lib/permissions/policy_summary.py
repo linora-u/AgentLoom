@@ -65,7 +65,7 @@ DENIAL_BEHAVIOR_TEXT = """\
 When a command is blocked by security:
   - Do NOT retry the same command
   - Use alternative tools instead:
-    - write_markdown_file or edit_file for file writing (not heredoc)
+    - write_file or edit_file for file writing (not heredoc)
     - read_file for reading files (not cat)
     - grep_search for text search (not grep)
     - glob_search for file discovery (not find)"""

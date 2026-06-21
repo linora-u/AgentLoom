@@ -58,6 +58,43 @@ find applications/<app_name>/agent_tools -name '*.py' -print0 2>/dev/null | xarg
 
 运行会触发模型调用。失败时记录真实错误，不要伪装通过。
 
+## 代码改动后的 Application 功能验证
+
+代码编写、配置契约、Tool/Hook/ContextEngine/checkpoint/shell 等框架能力改动后，验证不能停在单测、schema 校验或 `loom create`。必须把“真实 Application 运行”作为功能验收层。
+
+最低要求：
+
+- 至少选择 3 条能覆盖改动面的真实 workflow；改动影响默认工具、ToolSpec、工具权限、上下文压缩、checkpoint、shell、worker 调度时，优先跑 5 条以上。
+- 现有应用无法覆盖新契约时，新增最小验证 Application，目录保留在 `applications/<validation_app>/`，README 写明运行命令、覆盖的契约和预期证据。
+- 每条 Application 要使用隔离输出目录或 `/tmp/agentloom-*` 路径，避免污染用户业务产物。
+- 跑完必须读取日志和关键产物。只看退出码、只看最终回答、或只看“PASS”字样都不够。
+
+日志审计要求：
+
+- 保存或记录 `loom run ... --log-to-file` 的 log 路径；如果未使用 `--log-to-file`，至少把 stdout/stderr 落到 `/tmp/agentloom_<case>.log`。
+- 检查日志里实际出现了预期 tool 调用、worker 调用、hook 拦截/放行、checkpoint/context/audit 写入等证据。
+- 检查日志中的 `ERROR`、`Traceback`、`Exception`、`WARNING`、`parse failure`、`stale`、`blocked`；非阻塞警告也要判断是否符合预期。
+- 对写文件、ContextRef、checkpoint、shell audit 这类功能，必须检查落地产物内容，而不是只相信模型总结。
+
+推荐覆盖矩阵：
+
+| 改动类型 | 至少跑的 Application |
+|---|---|
+| 默认工具 / ToolSpec / toolsets | `applications/tool_registry_core_validation`、`applications/tool_registry_markdown_validation`、`applications/test_demo/workflows/test_tool_resolve_agent.yaml` |
+| 文件工具 / checkpoint file history | `applications/test_demo/workflows/test_edit_file_agent.yaml`、`test_file_rewind_agent.yaml`、`test_checkpoint_agent.yaml` |
+| 搜索 / 代码导航 | `applications/test_demo/workflows/test_search_tools_agent.yaml` |
+| ContextEngine / 压缩 | `applications/context_engine_*_retrieve_validation` 三个应用 |
+| shell 权限 / audit | `applications/test_shell_audit/*`、`applications/test_shell_allowlist_matrix/*` |
+| 多 Worker 调度 | `applications/context_engine_multi_worker_validation`、`applications/test_demo/workflows/test_checkpoint_complex_supervisor.yaml` |
+
+交付时至少列出：
+
+- 实际运行的 Application 数量和 workflow 路径。
+- 每条的退出码、日志路径、final answer 或关键输出。
+- 日志审计结论：哪些错误/警告是预期，哪些需要修复。
+- 新增验证 Application 的路径和覆盖目的。
+- 未跑的高风险 Application 及原因。
+
 ## 框架运行时功能验证
 
 修改 ContextEngine/CCR、checkpoint、resume、日志/维测、并发 Worker、文件回滚、任务列表或任务清理时，不能只跑单测；至少选 2 个真实 Application 或已有真实 workflow 跑功能路径。优先使用仓库里的 `applications/test_demo/*checkpoint*`、`applications/test_demo/*file_rewind*`、`applications/feature_planner_demo` 这类覆盖面明确的应用。
@@ -185,7 +222,7 @@ rg -n "mcp_servers|parse_mcp_servers_yaml_value" src tests docs/en agentloom-fra
 - `scan_app_structure('applications/feature_planner_demo')` 证明它包含 1 个 Supervisor 和 2 个 Worker，两个 Worker 都有 `agent_function_schema`。
 - `.venv/bin/loom create applications/feature_planner_demo/workflows/feature_planner_demo_agent.yaml -o /tmp/feature_planner_demo_generated_app.py` 通过，生成脚本可 `py_compile`。
 - 真实运行验证在 120 秒上限内完成 Supervisor 启动和 `requirement_router` 调用，并进入 `implementation_blueprint`；未得到最终回答，记录为“运行路径部分通过，端到端输出未完成”。
-- 运行时发现：如果纯规划 demo 不需要默认文件工具，应显式设置 Agent 级 `default_loaded_tools: []`；如果要关闭全局自动发现 Skills，应在应用级 `config/system.yaml` 写 `skills: []`，不是只写 Agent YAML 的 `skills: []`。
+- 运行时发现：如果纯规划 demo 不需要内置工具，应显式设置 Agent 级 `toolsets: []`；如果要关闭全局自动发现 Skills，应在应用级 `config/system.yaml` 写 `skills: []`，不是只写 Agent YAML 的 `skills: []`。
 
 ## 架构评审维度
 

@@ -13,11 +13,9 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from src.lib.checkpoint.file_history_hook import (
-    FILE_MODIFYING_TOOLS,
-    FileHistoryHook,
-)
+from src.lib.checkpoint.file_history_hook import FileHistoryHook
 from src.lib.smolagents.hooks.types import HookContext
+from src.tools import list_tool_specs
 
 
 @pytest.fixture
@@ -55,15 +53,6 @@ class TestFileHistoryHook:
         )
         mock_fh.track_edit.assert_called_once()
 
-    def test_create_file_triggers_backup(self, hook, mock_fh):
-        """Normal: create_file tool triggers track_edit."""
-        hook(
-            event_type="PRE_TOOL_USE",
-            tool_name="create_file",
-            tool_input={"file_path": "/tmp/new.py"},
-        )
-        mock_fh.track_edit.assert_called_once()
-
     def test_read_file_does_not_trigger_backup(self, hook, mock_fh):
         """Normal: read_file is not a file-modifying tool."""
         hook(
@@ -83,7 +72,7 @@ class TestFileHistoryHook:
         mock_fh.track_edit.assert_not_called()
 
     def test_shell_tool_does_not_trigger(self, hook, mock_fh):
-        """Normal: shell_tool is not in FILE_MODIFYING_TOOLS."""
+        """Normal: shell_tool is not a destructive path tool."""
         hook(
             event_type="PRE_TOOL_USE",
             tool_name="shell_tool",
@@ -111,25 +100,15 @@ class TestFileHistoryHook:
         )
         assert result is None
 
-    def test_alternative_path_param(self, mock_fh):
-        """Normal: Hook checks 'path' param as fallback."""
+    def test_undeclared_path_param_ignored(self, mock_fh):
+        """ToolSpec path_params are authoritative."""
         hook = FileHistoryHook(mock_fh)
         hook(
             event_type="PRE_TOOL_USE",
             tool_name="write_file",
             tool_input={"path": "/tmp/test.py"},
         )
-        mock_fh.track_edit.assert_called_once()
-
-    def test_filePath_param(self, mock_fh):
-        """Normal: Hook checks 'filePath' camelCase param."""
-        hook = FileHistoryHook(mock_fh)
-        hook(
-            event_type="PRE_TOOL_USE",
-            tool_name="edit_file",
-            tool_input={"filePath": "/tmp/test.py"},
-        )
-        mock_fh.track_edit.assert_called_once()
+        mock_fh.track_edit.assert_not_called()
 
     def test_step_number_from_callable(self, mock_fh):
         """Normal: Step number comes from the callable."""
@@ -159,9 +138,15 @@ class TestFileHistoryHook:
         mock_fh.track_edit.assert_called_once_with("/tmp/test.py", 7)
 
     def test_all_file_modifying_tools_recognized(self, mock_fh):
-        """Verify all tools in FILE_MODIFYING_TOOLS trigger backup."""
+        """Verify destructive registry tools with path params trigger backup."""
         hook = FileHistoryHook(mock_fh)
-        for tool_name in FILE_MODIFYING_TOOLS:
+        tool_names = [
+            spec.name
+            for spec in list_tool_specs()
+            if spec.is_destructive and spec.path_params
+        ]
+        assert tool_names
+        for tool_name in tool_names:
             mock_fh.reset_mock()
             hook(
                 event_type="PRE_TOOL_USE",

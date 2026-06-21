@@ -19,18 +19,23 @@ if TYPE_CHECKING:
 
 _logger = get_logger(__name__)
 
-# Tools that modify files on disk. Extend this set for custom tools.
-FILE_MODIFYING_TOOLS = frozenset({
-    "edit_file",
-    "write_file",
-    "write_markdown_file",
-    "create_file",
-    "move_file",
-    "copy_file",
-})
+def _file_modifying_specs() -> dict[str, tuple[str, ...]]:
+    try:
+        from src.tools import list_tool_specs
 
-# Tool parameter names that contain file paths.
-_PATH_PARAMS = ("file_path", "path", "filePath", "source", "destination")
+        return {
+            spec.name: spec.path_params
+            for spec in list_tool_specs()
+            if spec.is_destructive and spec.path_params
+        }
+    except Exception:
+        return {
+            "edit_file": ("file_path",),
+            "write_file": ("file_path",),
+            "write_markdown_file": ("file_path",),
+            "write_markdown_file_raw": ("file_path",),
+            "append_markdown_sections": ("file_path",),
+        }
 
 
 class FileHistoryHook:
@@ -115,12 +120,14 @@ class FileHistoryHook:
         if not tool_name or not tool_input:
             return None
 
-        if tool_name not in FILE_MODIFYING_TOOLS:
+        file_specs = _file_modifying_specs()
+        path_params = file_specs.get(tool_name)
+        if not path_params:
             return None
 
         # Extract the file path from tool arguments.
         file_path = None
-        for param in _PATH_PARAMS:
+        for param in path_params:
             file_path = tool_input.get(param)
             if file_path:
                 break

@@ -20,8 +20,8 @@ def code_agent_override_config(tmp_path, monkeypatch):
 code_agent:
   additional_functions: "*"
   additional_authorized_imports: "*"
-default_loaded_tools:
-  - shell_tool
+default_toolsets:
+  - core_shell
     """)
     (system_config_dir / "llm.yaml").write_text("""
 model:
@@ -35,8 +35,8 @@ model:
     (config_dir / "system.yaml").write_text("""
 code_agent:
   additional_functions: ["print"]
-default_loaded_tools:
-  - load_skill
+default_toolsets:
+  - skills
     """)
     
     agent_yaml_path = workflows_dir / "agent.yaml"
@@ -69,8 +69,8 @@ def test_code_agent_and_tools_inherits_from_app_override(code_agent_override_con
     code_cfg = agent._effective_agent_config.get("code_agent", {})
     assert code_cfg.get("additional_functions") == ["print"]
     
-    default_tools = agent._effective_agent_config.get("default_loaded_tools", [])
-    assert default_tools == ["load_skill"]
+    default_toolsets = agent._effective_agent_config.get("default_toolsets", [])
+    assert default_toolsets == ["skills"]
     
     # Also verify it got into runtime kwargs
     profile = agent._role_profile()
@@ -82,4 +82,5 @@ def test_code_agent_and_tools_inherits_from_app_override(code_agent_override_con
     tools = agent._get_tools()
     tool_names = [getattr(t, "name", getattr(t, "__name__", str(t))) for t in tools]
     assert "load_skill" in tool_names
+    assert "list_skills" in tool_names
     assert "shell_tool" not in tool_names

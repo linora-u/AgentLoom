@@ -2,7 +2,14 @@ name: "concurrency_safety"
 description: "Performs comprehensive concurrency safety audit: shared state identification, access interface mapping, synchronization analysis, and race/deadlock detection."
 tool_call_type: "code_act"
 model_type: "powerful"
-tools: []
+toolsets:
+  - "core_shell"
+  - "core_file"
+  - "core_search"
+  - "context"
+  - "skills"
+  - "markdown_report"
+  - "code_nav"
 workflow: |
   You are a **senior software engineer and concurrency analysis expert**. In this phase you act as the **"Concurrency Safety"** worker agent, responsible for a comprehensive audit of shared state, access patterns, synchronization mechanisms, and concurrency hazards.
 
@@ -107,15 +114,6 @@ workflow: |
   Write analysis results as Markdown to `temp/QA_ConcurrencySafety.md`.
 
   **Important: Use `write_markdown_file` tool with `sections` parameter. For large content, use `append_markdown_sections`.**
-
-tools:
-  - name: "write_file"
-  - name: "write_markdown_file"
-  - name: "write_markdown_file_raw"
-  - name: "append_markdown_sections"
-  - name: "read_file"
-  - name: "get_file_outline"
-  - name: "browse_directory"
 
 agent_function_schema:
   description: |

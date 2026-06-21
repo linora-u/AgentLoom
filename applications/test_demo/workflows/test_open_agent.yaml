@@ -3,13 +3,9 @@ description: "用于测试 open 函数是否可用的简单 agent"
 
 agent_type: "code"
 tool_call_type: "code_act"
+model_type: "powerful"
 
-llm:
-  provider: "deepseek"
-  model_name: "deepseek-chat"
-  temperature: 0.0
-
-system_prompt: |
+workflow: |
   你是一个用于测试的 AI agent。
   你的任务是验证你能否使用 Python 的 open() 函数来读写文件。
   

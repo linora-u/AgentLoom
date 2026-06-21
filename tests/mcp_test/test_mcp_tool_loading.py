@@ -41,14 +41,13 @@ def _make_mcp_json(tmp_path: Path, servers: dict) -> Path:
 
 class TestReturnType:
 
-    @patch("src.lib.smolagents.agent.yaml_agent_factory.get_default_tools", return_value=[])
-    def test_returns_tuple_without_mcp(self, mock_defaults):
+    def test_returns_tuple_without_mcp(self):
         """When no mcp_servers configured, returns (tools, None)."""
         from src.lib.smolagents.agent.yaml_agent_factory import YamlAgentFactory
 
         result = YamlAgentFactory.get_tools_from_config(
             {"tools": []},
-            effective_agent_config={},
+            effective_agent_config={"default_toolsets": []},
         )
         assert isinstance(result, tuple)
         assert len(result) == 2
@@ -56,12 +55,14 @@ class TestReturnType:
         assert isinstance(tools, list)
         assert mcp_mgr is None
 
-    @patch("src.lib.smolagents.agent.yaml_agent_factory.get_default_tools", return_value=[])
-    def test_returns_tuple_no_tools_key(self, mock_defaults):
+    def test_returns_tuple_no_tools_key(self):
         """Config without 'tools' key still returns tuple."""
         from src.lib.smolagents.agent.yaml_agent_factory import YamlAgentFactory
 
-        result = YamlAgentFactory.get_tools_from_config({}, effective_agent_config={})
+        result = YamlAgentFactory.get_tools_from_config(
+            {},
+            effective_agent_config={"default_toolsets": []},
+        )
         assert isinstance(result, tuple)
         tools, mcp_mgr = result
         assert tools == []
@@ -74,12 +75,11 @@ class TestReturnType:
 
 class TestMcpToolsLoading:
 
-    @patch("src.lib.smolagents.agent.yaml_agent_factory.get_default_tools", return_value=[])
     @patch("src.mcp.manager.McpManager")
     @patch("src.mcp.config.parse_mcp_yaml_value")
     @patch("src.mcp.config.merge_mcp_configs")
     def test_mcp_tools_appended(
-        self, mock_merge, mock_parse, MockManager, mock_defaults, tmp_path
+        self, mock_merge, mock_parse, MockManager, tmp_path
     ):
         """When mcp_servers is configured and servers connect, tools are appended."""
         from src.lib.smolagents.agent.yaml_agent_factory import YamlAgentFactory
@@ -101,7 +101,8 @@ class TestMcpToolsLoading:
             "mcp_servers": "config/.mcp.json",
         }
         tools, mcp_mgr = YamlAgentFactory.get_tools_from_config(
-            config, effective_agent_config={}
+            config,
+            effective_agent_config={"default_toolsets": []},
         )
 
         assert any(getattr(t, "name", None) == "mcp__srv__search" for t in tools)
@@ -113,20 +114,21 @@ class TestMcpToolsLoading:
 # Backward compatibility
 # ---------------------------------------------------------------------------
 
-class TestBackwardCompatibility:
+class TestNoMcpServers:
 
-    @patch("src.lib.smolagents.agent.yaml_agent_factory.get_default_tools", return_value=["shell_tool"])
-    @patch("src.lib.smolagents.agent.yaml_agent_factory.resolve_tool_function")
-    def test_no_mcp_servers_unchanged_behavior(self, mock_resolve, mock_defaults):
-        """Without mcp_servers, behavior is identical to before."""
+    def test_no_mcp_servers_loads_default_toolsets(self):
         from src.lib.smolagents.agent.yaml_agent_factory import YamlAgentFactory
-
-        mock_resolve.return_value = _fake_tool("shell_tool")
 
         config = {}  # no tools, no mcp_servers
         tools, mcp_mgr = YamlAgentFactory.get_tools_from_config(
-            config, effective_agent_config={}
+            config,
+            effective_agent_config={"default_toolsets": ["core_shell"]},
         )
         assert mcp_mgr is None
-        assert len(tools) == 1
-        assert tools[0].name == "shell_tool"
+        tool_names = {getattr(tool, "__name__", getattr(tool, "name", None)) for tool in tools}
+        assert tool_names == {
+            "shell_tool",
+            "check_background_task",
+            "kill_background_task",
+            "list_background_tasks",
+        }

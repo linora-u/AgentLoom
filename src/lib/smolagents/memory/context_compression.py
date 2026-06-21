@@ -129,7 +129,7 @@ AST_TOOL_CALL_NAME_ALLOWLIST: frozenset[str] = frozenset(TOOL_MAX_RETAIN_CHARS) 
     "read_file_content",
     "ripgrep_search_directory",
     "list_files_glob",
-    "browse_directory",
+    "list_directory",
     "write_file",
     "write_markdown_file",
 })

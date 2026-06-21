@@ -2,7 +2,14 @@ name: "project_scan"
 description: "Scans project structure, classifies file roles, maps dependencies, and identifies typical execution scenarios."
 tool_call_type: "code_act"
 model_type: "powerful"
-tools: []
+toolsets:
+  - "core_shell"
+  - "core_file"
+  - "core_search"
+  - "context"
+  - "skills"
+  - "markdown_report"
+  - "code_nav"
 planning_interval: 3
 workflow: |
   You are a **senior software engineer and code quality analysis expert**. In this phase you act as the **"Project Scan & Structure Analysis"** worker agent. Your goal is to perform a **static code structure scan and dependency analysis** on the user-specified project/module, producing foundational data that all subsequent review stages will consume.
@@ -77,13 +84,6 @@ workflow: |
   **Important: When writing Markdown files, use the `write_markdown_file` tool with the `sections` parameter (a list of structured sections, each with heading, level, body). Avoid concatenating long strings directly in code. For large content, use `append_markdown_sections` to add sections incrementally.**
 
 tools:
-  - name: "write_file"
-  - name: "write_markdown_file"
-  - name: "write_markdown_file_raw"
-  - name: "append_markdown_sections"
-  - name: "read_file"
-  - name: "get_file_outline"
-  - name: "browse_directory"
   - name: "get_module_context"
     module: "applications.ai_quality_analysis.agent_tools.module_context_generator"
     function: "get_module_context"

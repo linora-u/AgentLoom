@@ -10,7 +10,7 @@ from src.lib.config import (
     C,
     get_code_agent_config,
     get_config,
-    get_default_tools,
+    get_default_toolsets,
     get_model_config,
 )
 from src.runner import run_app
@@ -21,7 +21,7 @@ __all__ = [
     "__version__",
     "C",
     "get_config",
-    "get_default_tools",
+    "get_default_toolsets",
     "get_code_agent_config",
     "get_model_config",
     "run_app",
