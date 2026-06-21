@@ -242,6 +242,7 @@ class RootSettings(BaseModel):
     system: SystemSettings = Field(default_factory=SystemSettings)
     tool_access_control: ToolAccessControlSettings = Field(default_factory=ToolAccessControlSettings)
     smart_summary: bool = True
+    context_engine: dict[str, Any] = Field(default_factory=dict)
     model: dict[str, Any] = Field(default_factory=dict)
     execution_env: dict[str, Any] = Field(default_factory=dict)
     code_agent: dict[str, Any] = Field(default_factory=dict)

@@ -49,13 +49,23 @@ Repo Map 会在输出目录中生成与源码目录结构一致的文档树：
 │   ├── tags_cache.json
 │   ├── scan_meta.json
 │   └── analysis_progress.json
-└── repo_map/
-    ├── index.md
-    ├── analysis.md
-    ├── dependencies.md
-    └── <dir>/
-        ├── index.md
-        └── analysis.md
+└── <project-name>-repo-map/
+    ├── SKILL.md
+    ├── references/
+    │   ├── manifest.jsonl
+    │   └── repo_map/
+    │       ├── index.md
+    │       ├── analysis.md
+    │       ├── dependencies.md
+    │       └── <dir>/
+    │           ├── index.md
+    │           └── analysis.md
+    ├── scripts/
+    │   └── resolve_repo_map_docs.py
+    ├── assets/
+    │   └── examples/
+    └── agents/
+        └── openai.yaml
 ```
 
 `index.md` 负责记录代码事实，`analysis.md` 负责记录架构理解。目录与文档一一对应后，AI 助手可以根据源码路径精确路由到对应上下文；没有精确命中时，也可以回退到父目录或根目录。
@@ -93,12 +103,16 @@ Repo Map 同时在扫描层和分析层做增量判断：
 
 ### 7. 自动生成可复用 Skill
 
-分析完成后，Repo Map 会把 `repo_map/` 文档树打包成私有 Skill，生成：
+分析完成后，Repo Map 会把 `<output_dir>/<project-name>-repo-map/` 直接作为私有 Skill，生成：
 
 - `SKILL.md`：告诉 AI 助手何时查阅代码地图；
-- `manifest.jsonl`：记录目录到文档的路由关系；
-- `resolve_repo_map_docs.py`：根据源码路径解析对应文档；
-- `assets/examples/`：提供路径定位和跨模块分析示例。
+- `references/repo_map/`：按源码目录镜像的 repo_map 文档；
+- `references/manifest.jsonl`：记录目录到文档的路由关系；
+- `scripts/resolve_repo_map_docs.py`：根据源码路径解析对应文档；
+- `assets/examples/`：提供路径定位和跨模块分析示例；
+- `agents/openai.yaml`：Skill UI 元数据。
+
+`data/` 保留增量缓存和进度状态；`<project-name>-repo-map/` 是唯一 Skill 文档树，不再复制到外部 `lyc_skills` 或 `.agents/skills` 目录。
 
 这让一次分析可以长期复用。后续 AI 在阅读或修改项目源码前，可以先加载对应 Skill，直接获得目录结构、模块职责和架构设计上下文。
 
@@ -126,7 +140,6 @@ applications/repo_map/
 │   └── worker_agents/
 │       ├── dir_architecture_analysis.yaml
 │       └── repo_map_skill_writer.yaml
-├── skills/                      # 生成的私有 Skill
 └── tests/                       # 测试用例
 ```
 
@@ -143,10 +156,6 @@ uv run python applications/repo_map/repo_map_app.py /path/to/project \
   --output_dir /tmp/repo-map-output \
   --exclude_dirs vendor \
   --exclude_dirs build
-
-# 指定 Skill 包输出到项目的 .agents/skills 下
-uv run python applications/repo_map/repo_map_app.py /path/to/project \
-  --skill_output_dir /path/to/project/.agents/skills
 
 # 从 AgentLoom checkpoint 恢复 LLM 分析阶段
 uv run python applications/repo_map/repo_map_app.py /path/to/project \

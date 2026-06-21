@@ -1,5 +1,4 @@
-"""Tests for RootSettings config validation with new fields: tool_metadata
-and tool_output_limits."""
+"""Tests for RootSettings config validation with new runtime fields."""
 
 import pytest
 
@@ -81,6 +80,23 @@ class TestToolOutputLimitsField:
 
 
 # ===========================================================================
+# context_engine field
+# ===========================================================================
+
+class TestContextEngineField:
+    """Verify RootSettings accepts and defaults the context_engine field."""
+
+    def test_context_engine_accepted_with_dict(self):
+        settings = RootSettings(context_engine={"min_chars": 2000, "preview_max_chars": 3000})
+        assert settings.context_engine["min_chars"] == 2000
+        assert settings.context_engine["preview_max_chars"] == 3000
+
+    def test_context_engine_defaults_to_empty_dict(self):
+        settings = RootSettings()
+        assert settings.context_engine == {}
+
+
+# ===========================================================================
 # Missing fields default to empty dict
 # ===========================================================================
 
@@ -94,6 +110,7 @@ class TestMissingFieldsDefault:
         assert settings.model == {}
         assert settings.execution_env == {}
         assert settings.code_agent == {}
+        assert settings.context_engine == {}
         assert settings.tools == []
 
     def test_smart_summary_defaults_true(self):
@@ -121,6 +138,7 @@ class TestExistingFieldsCoexistence:
             execution_env={"timeout": 60},
             code_agent={"max_steps": 10},
             tools=[{"name": "bash_tool"}],
+            context_engine={"min_chars": 2000},
             tool_metadata={"bash_tool": {"label": "Shell"}},
             tool_output_limits={"max_chars": 8000},
             tool_access_control=ToolAccessControlSettings(
@@ -130,6 +148,7 @@ class TestExistingFieldsCoexistence:
         )
         assert settings.smart_summary is False
         assert settings.model["provider"] == "openai"
+        assert settings.context_engine["min_chars"] == 2000
         assert settings.tool_metadata["bash_tool"]["label"] == "Shell"
         assert settings.tool_output_limits["max_chars"] == 8000
         assert settings.tool_access_control.include_paths == ["/workspace"]
@@ -167,6 +186,7 @@ class TestValidateSystemSnapshot:
     def test_snapshot_with_both_new_fields(self):
         """Snapshot with both new fields should pass."""
         snapshot = {
+            "context_engine": {"min_chars": 2000},
             "tool_metadata": {"grep": {}},
             "tool_output_limits": {"max_chars": 10000},
         }
