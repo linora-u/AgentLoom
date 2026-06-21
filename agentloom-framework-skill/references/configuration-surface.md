@@ -85,8 +85,9 @@ agent_function_schema:
 当前代码里的 `_WORKFLOW_OVERLAY_KEYS` 是：
 
 ```text
-system, smart_summary, tool_access_control, execution_env, code_agent, tools,
-shell_settings, tools_mapping, default_loaded_tools, prompt, mcp_servers
+system, smart_summary, context_engine, tool_access_control, execution_env,
+code_agent, tools, shell_settings, tools_mapping, default_loaded_tools,
+prompt, mcp_servers
 ```
 
 注意：
@@ -94,6 +95,7 @@ shell_settings, tools_mapping, default_loaded_tools, prompt, mcp_servers
 - 这不是 7 个字段；旧文档如果说只有 7 个已经过期。
 - `tools` 在白名单里只有当它是 `list` 时才进入 overlay；它同时也是 Agent 的工具列表。
 - `shell_settings`、`tools_mapping`、`default_loaded_tools` 可以在 Agent YAML 覆盖。
+- `context_engine` 可以在 Agent YAML 覆盖，用于按应用或 Agent 调整可逆上下文压缩。
 - `mcp_servers` 可以在 Agent YAML 覆盖，并支持 string/list/dict。
 - Worker 的有效配置由全局、应用级、Worker YAML 自己重建；不会继承 Supervisor 的运行时覆盖。Worker 需要同样权限时必须自己写。
 
@@ -105,6 +107,7 @@ shell_settings, tools_mapping, default_loaded_tools, prompt, mcp_servers
 |---|---|
 | `system` | `name/version/user_agent` 元信息 |
 | `smart_summary` | 是否启用智能上下文压缩 |
+| `context_engine` | 可逆上下文压缩：工具原文进本地 store，模型可见压缩预览和 `ContextRef` |
 | `prompt` | 顶层系统 prompt 覆盖，字符串或 `{path: ...}` |
 | `skills` | 全局 Skill 列表或共享策略 |
 | `lsp_servers` | LSP 服务开关、重启次数、语言列表 |
@@ -119,6 +122,24 @@ shell_settings, tools_mapping, default_loaded_tools, prompt, mcp_servers
 | `tool_output_limits` | 上下文压缩阶段的工具输出保留上限 |
 | `checkpoint` | checkpoint、resume、heartbeat 开关与保留策略 |
 | `mcp_servers` | MCP server 配置入口 |
+
+### context_engine
+
+ContextEngine 默认开启并绑定当前 task 的 checkpoint store。配置只暴露常用阈值；不要新增“关闭开关”或第二套恢复路径。
+
+```yaml
+context_engine:
+  min_chars: 2000          # 小于该长度的工具输出不压缩
+  preview_max_chars: 3000  # 模型可见预览的最大字符数
+```
+
+运行契约：
+
+- 原始 tool/worker 输出写入 task-scoped `context_store`，模型只看到压缩预览和 `ContextRef`。
+- `loom_retrieve_context(ref=..., query="", offset=0, limit=200)` 是唯一取回原文的公开工具。
+- user/system 原始消息、写入/编辑/删除类工具内容不能被压缩。
+- 需要调阈值时优先放应用级 `applications/<app>/config/system.yaml`，不要改全局配置。
+- 如果确实新增配置字段，必须同时更新本文件、`yaml-contract.md` 的白名单说明、相关测试和真实 Application 验证。
 
 ### execution_env
 
@@ -184,6 +205,7 @@ append_markdown_sections, browse_directory, get_file_outline,
 grep_search, glob_search, search_files, code_search, code_replace, code_edit,
 search_and_replace, ast_grep_search_file, get_git_diff_content, git_grep_files,
 git_commit_files, git_auto_commit, git_check_dirty, is_path_in_repo,
+loom_retrieve_context,
 shell_tool, check_background_task, kill_background_task, list_background_tasks,
 load_skill, list_skills, read_skill_resource, check_skill_dependencies,
 run_skill_script, codex, todo_write
@@ -401,6 +423,7 @@ dict 形式也支持 `paths: [...]`。无效类型会跳过并 warning。
 ## 生成配置时的取舍
 
 - 只有当前应用需要的配置，优先放 `applications/<app>/config/system.yaml` 或 Agent YAML；不要改全局 `config/system.yaml`。
+- 配置越少越好。新增配置前先确认它改变用户可观察行为；能用代码默认表达的边界不要暴露成开关。
 - 只有模型路由和 API 参数进 `config/llm.yaml`；不要把 endpoint、key、temperature 写进 Agent YAML。
 - Worker 需要权限就写在 Worker YAML 或 app-level system；不要指望 Supervisor 传下去。
 - 列表是替换，不是追加。覆盖 `default_loaded_tools` 或 `skills` 时要写完整意图。

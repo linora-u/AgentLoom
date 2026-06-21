@@ -3,7 +3,7 @@ Pipeline Agent Tools for repo_map.
 
 只封装需要控制流处理的操作：
 - run_analysis_loop(): Python for 循环调用 dir_architecture_analysis 子 Agent，含断点续传和错误隔离
-- prepare_repo_map_skill_workspace(): 组装 skill 工作区（拷贝 repo_map / 生成 manifest / resolver）
+- prepare_repo_map_skill_workspace(): 组装标准 Skill 工作区（生成 manifest / resolver / metadata）
 - write_repo_map_skill_files(): 确定性写入 SKILL.md 与示例文件
 - validate_repo_map_skill(): 校验 skill 产物完整性和 frontmatter 规则
 - get_analysis_summary(): 读取 progress.json，返回结构化总结报告
@@ -23,8 +23,6 @@ from __future__ import annotations
 
 import hashlib
 import json
-import re
-import shutil
 import textwrap
 import traceback
 from pathlib import Path
@@ -32,6 +30,8 @@ from pathlib import Path
 import yaml
 
 from src.lib.logging import resolve_logger
+
+from .paths import repo_map_docs_root, repo_map_skill_name, repo_map_skill_root
 
 # yaml 路径（相对于 AGENT_ROOT）
 _DIR_ANALYSIS_YAML = "applications/repo_map/workflows/worker_agents/dir_architecture_analysis.yaml"
@@ -100,6 +100,7 @@ def _collect_children_analyses(
     children = _get_direct_children(dir_path, all_dirs)
     if not children:
         return ""
+    docs_root = repo_map_docs_root(out_path)
 
     parts = []
     for child in sorted(children):
@@ -108,9 +109,9 @@ def _collect_children_analyses(
             continue
         # 定位子目录的 analysis.md
         if child == "(root)":
-            analysis_file = out_path / "repo_map" / "analysis.md"
+            analysis_file = docs_root / "analysis.md"
         else:
-            analysis_file = out_path / "repo_map" / child / "analysis.md"
+            analysis_file = docs_root / child / "analysis.md"
         if analysis_file.exists():
             content = analysis_file.read_text(encoding="utf-8").strip()
             if content:
@@ -134,13 +135,14 @@ def _compute_children_hash(
     children = _get_direct_children(dir_path, all_dirs)
     if not children:
         return ""
+    docs_root = repo_map_docs_root(out_path)
 
     h = hashlib.md5()
     for child in sorted(children):  # 排序保证确定性
         if child == "(root)":
-            analysis_file = out_path / "repo_map" / "analysis.md"
+            analysis_file = docs_root / "analysis.md"
         else:
-            analysis_file = out_path / "repo_map" / child / "analysis.md"
+            analysis_file = docs_root / child / "analysis.md"
         if analysis_file.exists():
             content = analysis_file.read_bytes()
             h.update(child.encode("utf-8"))
@@ -174,12 +176,6 @@ def _group_by_depth(dirs_sorted: list[str], progress: dict) -> list[tuple[int, l
 # ─────────────────────────────────────────────────────────────────── #
 
 
-def _slugify_name(raw: str) -> str:
-    """Normalize project name to skill-safe slug (lowercase letters/digits/hyphen)."""
-    normalized = re.sub(r"[^a-z0-9]+", "-", raw.lower()).strip("-")
-    return normalized or "project"
-
-
 def _read_json_file(path: Path, default: dict | None = None) -> dict:
     if not path.exists():
         return default or {}
@@ -190,18 +186,10 @@ def _read_json_file(path: Path, default: dict | None = None) -> dict:
         return default or {}
 
 
-def _copy_repo_map_tree(repo_map_src: Path, repo_map_dst: Path) -> int:
-    """
-    Full-copy repo_map tree into skill references path.
-
-    Returns:
-        Number of files copied.
-    """
-    if repo_map_dst.exists():
-        shutil.rmtree(repo_map_dst)
-    repo_map_dst.parent.mkdir(parents=True, exist_ok=True)
-    shutil.copytree(repo_map_src, repo_map_dst)
-    return sum(1 for p in repo_map_dst.rglob("*") if p.is_file())
+def _doc_rel_path(dir_path: str, filename: str) -> str:
+    if dir_path == "(root)":
+        return filename
+    return f"{dir_path}/{filename}"
 
 
 def _write_manifest_jsonl(progress: dict, manifest_path: Path) -> int:
@@ -220,18 +208,11 @@ def _write_manifest_jsonl(progress: dict, manifest_path: Path) -> int:
         progress.items(),
         key=lambda item: (item[1].get("rank", 999999), item[0]),
     ):
-        if dir_path == "(root)":
-            index_rel = "references/repo_map/index.md"
-            analysis_rel = "references/repo_map/analysis.md"
-        else:
-            index_rel = f"references/repo_map/{dir_path}/index.md"
-            analysis_rel = f"references/repo_map/{dir_path}/analysis.md"
-
         entries.append(
             {
                 "dir_path": dir_path,
-                "index_path": index_rel,
-                "analysis_path": analysis_rel,
+                "index_path": f"references/repo_map/{_doc_rel_path(dir_path, 'index.md')}",
+                "analysis_path": f"references/repo_map/{_doc_rel_path(dir_path, 'analysis.md')}",
                 "rank": entry.get("rank"),
                 "file_count": entry.get("file_count"),
             }
@@ -289,13 +270,17 @@ def _write_resolver_script(script_path: Path) -> None:
             return dirs
 
 
+        def _default_repo_map_root() -> Path:
+            return Path(__file__).resolve().parents[1] / "references" / "repo_map"
+
+
         def resolve_repo_map_docs(
             source_path: str,
             source_root: str = "",
-            repo_map_ref_root: str = "references/repo_map",
+            repo_map_ref_root: str | None = None,
         ) -> list[dict]:
             rel_dir = _normalize_relative_dir(source_path=source_path, source_root=source_root)
-            repo_root = Path(repo_map_ref_root)
+            repo_root = Path(repo_map_ref_root) if repo_map_ref_root else _default_repo_map_root()
             resolved: list[dict] = []
 
             for dir_key in _candidate_dirs(rel_dir):
@@ -338,19 +323,22 @@ def _write_resolver_script(script_path: Path) -> None:
             parser.add_argument("--source-root", default="", help="Optional source root for relative conversion")
             parser.add_argument(
                 "--repo-map-ref-root",
-                default="references/repo_map",
-                help="repo_map reference root inside skill package",
+                default="",
+                help="repo_map document root. Defaults to the generated skill root.",
             )
             args = parser.parse_args()
 
             docs = resolve_repo_map_docs(
                 source_path=args.source_path,
                 source_root=args.source_root,
-                repo_map_ref_root=args.repo_map_ref_root,
+                repo_map_ref_root=args.repo_map_ref_root or None,
             )
             output = {
                 "docs": docs,
-                "dependencies_path": str(Path(args.repo_map_ref_root) / "dependencies.md"),
+                "dependencies_path": str(
+                    (Path(args.repo_map_ref_root) if args.repo_map_ref_root else _default_repo_map_root())
+                    / "dependencies.md"
+                ),
             }
             print(json.dumps(output, ensure_ascii=False, indent=2))
 
@@ -361,20 +349,32 @@ def _write_resolver_script(script_path: Path) -> None:
     )
     script_path.parent.mkdir(parents=True, exist_ok=True)
     script_path.write_text(script, encoding="utf-8")
+    script_path.chmod(0o755)
 
 
-def _resolve_skill_output_dir(out_path: Path, skill_output_dir: str | Path | None) -> Path:
-    """Resolve the parent directory that should contain generated skill packages."""
-    if skill_output_dir is not None and str(skill_output_dir).strip():
-        return Path(skill_output_dir).resolve()
-
-    marker_path = out_path / "data" / "skill_output_dir.txt"
-    if marker_path.exists():
-        marker_value = marker_path.read_text(encoding="utf-8").strip()
-        if marker_value:
-            return Path(marker_value).resolve()
-
-    return out_path / "skills"
+def _write_openai_yaml(context: dict, openai_yaml_path: Path) -> None:
+    """Generate recommended UI metadata for the generated Skill."""
+    project_name = str(context.get("project_name") or "project").strip()
+    skill_name = str(context.get("skill_name") or "repo-map").strip()
+    title = project_name.replace("-", " ").replace("_", " ").strip().title() or "Project"
+    payload = {
+        "interface": {
+            "display_name": f"{title} Repo Map",
+            "short_description": f"Navigate repo_map docs for {project_name} code",
+            "default_prompt": (
+                f"Use ${skill_name} to locate repo_map context before changing "
+                f"{project_name} code."
+            ),
+        },
+        "policy": {
+            "allow_implicit_invocation": True,
+        },
+    }
+    openai_yaml_path.parent.mkdir(parents=True, exist_ok=True)
+    openai_yaml_path.write_text(
+        yaml.safe_dump(payload, allow_unicode=True, sort_keys=False),
+        encoding="utf-8",
+    )
 
 
 def _build_skill_context(
@@ -385,9 +385,8 @@ def _build_skill_context(
     """Build deterministic skill metadata from output_dir + scan_meta."""
     project_path = str(scan_meta.get("project_path", "")).strip()
     project_name = Path(project_path).name if project_path else "project"
-    skill_name = f"{_slugify_name(project_name)}-repo-map-navigator"
-    skills_dir = _resolve_skill_output_dir(out_path, skill_output_dir)
-    skill_root = skills_dir / skill_name
+    skill_name = repo_map_skill_name(project_name)
+    skill_root = repo_map_skill_root(out_path, project_name=project_name)
     description = (
         f"Use when reading or changing code under {project_name} and you need "
         "repo_map routing from source paths to index.md/analysis.md, with "
@@ -401,12 +400,13 @@ def _build_skill_context(
         "skill_name": skill_name,
         "description": description,
         "skill_description": description,
-        "skill_output_dir": str(skills_dir),
+        "skill_output_dir": str(out_path),
         "skill_root": str(skill_root),
         "repo_map_ref_root": "references/repo_map",
         "manifest_rel_path": "references/manifest.jsonl",
         "resolver_script_rel_path": "scripts/resolve_repo_map_docs.py",
         "examples_rel_root": "assets/examples",
+        "agents_rel_root": "agents",
     }
 
 
@@ -459,7 +459,7 @@ def _skill_description(context: dict) -> str:
 
 def _render_skill_markdown(context: dict) -> str:
     project_name = str(context.get("project_name") or "project").strip()
-    skill_name = str(context.get("skill_name") or "repo-map-navigator").strip()
+    skill_name = str(context.get("skill_name") or "repo-map").strip()
     description = _skill_description(context)
     frontmatter = yaml.safe_dump(
         {"name": skill_name, "description": description},
@@ -472,7 +472,7 @@ def _render_skill_markdown(context: dict) -> str:
 
 ## 概述
 
-repo_map 是 {project_name} 的源码镜像文档库，按源码目录结构组织 index.md、analysis.md 和 dependencies.md。阅读或修改 {project_name} 源码前，先用 repo_map 定位目录职责、关键符号和跨模块依赖。
+repo_map 是 {project_name} 的源码镜像 Skill，核心文档位于 `references/repo_map/`，按源码目录结构组织 index.md、analysis.md 和 dependencies.md。阅读或修改 {project_name} 源码前，先用 repo_map 定位目录职责、关键符号和跨模块依赖。
 
 ## 何时使用
 
@@ -701,6 +701,7 @@ def run_analysis_loop(
 
     stats = {"completed": 0, "failed": 0, "skipped": 0, "invalidated": 0}
     out_path = Path(output_dir)
+    docs_root = repo_map_docs_root(out_path)
     depth_groups = _group_by_depth(dirs_sorted, progress)
 
     for depth, group_dirs in depth_groups:
@@ -728,18 +729,27 @@ def run_analysis_loop(
                     f"({stored_children_hash[:8]}.. → {current_children_hash[:8]}..) → 重置为 pending"
                 )
 
+            if dir_path == "(root)":
+                index_file = docs_root / "index.md"
+                analysis_file = docs_root / "analysis.md"
+            else:
+                index_file = docs_root / dir_path / "index.md"
+                analysis_file = docs_root / dir_path / "analysis.md"
+
+            if status == "completed" and not analysis_file.exists():
+                entry["status"] = "pending"
+                status = "pending"
+                stats["invalidated"] += 1
+                _save_progress(progress_file, progress)
+                logger.info(
+                    f"[Analysis Loop] analysis.md 缺失: {dir_path} -> 重置为 pending"
+                )
+
             if status in ("completed", "failed"):
                 stats["skipped"] += 1
                 continue
 
             # 读 index.md
-            if dir_path == "(root)":
-                index_file = out_path / "repo_map" / "index.md"
-                analysis_file = out_path / "repo_map" / "analysis.md"
-            else:
-                index_file = out_path / "repo_map" / dir_path / "index.md"
-                analysis_file = out_path / "repo_map" / dir_path / "analysis.md"
-
             if not index_file.exists():
                 entry["status"] = "failed"
                 entry["error_msg"] = f"index.md not found: {index_file}"
@@ -857,30 +867,22 @@ def prepare_repo_map_skill_workspace(
 
     This tool only does deterministic file preparation:
       1) Build skill name/path metadata
-      2) Full-copy <output_dir>/repo_map to references/repo_map
-      3) Generate references/manifest.jsonl
-      4) Generate scripts/resolve_repo_map_docs.py
+      2) Generate references/manifest.jsonl inside <output_dir>/<project>-repo-map
+      3) Generate scripts/resolve_repo_map_docs.py
+      4) Ensure assets/examples and agents/openai.yaml exist
       5) Persist context into data/skill_build_context.json
 
     Args:
-        output_dir: Repo map output directory (contains data/ and repo_map/)
-        skill_output_dir: Optional parent directory for generated skill packages.
-            Defaults to <output_dir>/skills. The generated package is written to
-            <skill_output_dir>/<project-name>-repo-map-navigator.
+        output_dir: Repo map output directory containing data/ and <project>-repo-map/.
+        skill_output_dir: Deprecated. Kept for CLI compatibility and ignored.
 
     Returns:
         Summary string with skill root path and artifact counts.
     """
     out_path = Path(output_dir)
     data_dir = out_path / "data"
-    repo_map_dir = out_path / "repo_map"
     progress_file = data_dir / "analysis_progress.json"
     scan_meta_file = data_dir / "scan_meta.json"
-
-    if not repo_map_dir.exists():
-        raise FileNotFoundError(
-            f"repo_map directory not found at {repo_map_dir}. Run generate_markdown_map() first."
-        )
     if not progress_file.exists():
         raise FileNotFoundError(
             f"analysis_progress.json not found at {progress_file}. Run generate_markdown_map() first."
@@ -898,25 +900,38 @@ def prepare_repo_map_skill_workspace(
     )
 
     skill_root = Path(context["skill_root"])
-    references_dir = skill_root / "references"
-    scripts_dir = skill_root / "scripts"
-    examples_dir = skill_root / "assets" / "examples"
+    docs_root = skill_root / str(context.get("repo_map_ref_root", "references/repo_map"))
+    if not skill_root.exists():
+        raise FileNotFoundError(
+            f"repo_map skill directory not found at {skill_root}. Run generate_markdown_map() first."
+        )
+    if not (docs_root / "index.md").exists():
+        raise FileNotFoundError(
+            f"repo_map skill index not found at {docs_root / 'index.md'}. "
+            "Run generate_markdown_map() first."
+        )
 
-    references_dir.mkdir(parents=True, exist_ok=True)
-    scripts_dir.mkdir(parents=True, exist_ok=True)
-    examples_dir.mkdir(parents=True, exist_ok=True)
-
-    copied_files = _copy_repo_map_tree(
-        repo_map_src=repo_map_dir,
-        repo_map_dst=references_dir / "repo_map",
+    manifest_path = skill_root / str(context.get("manifest_rel_path", "references/manifest.jsonl"))
+    resolver_path = skill_root / str(
+        context.get("resolver_script_rel_path", "scripts/resolve_repo_map_docs.py")
     )
+    examples_dir = skill_root / str(context.get("examples_rel_root", "assets/examples"))
+    agents_dir = skill_root / str(context.get("agents_rel_root", "agents"))
+
+    manifest_path.parent.mkdir(parents=True, exist_ok=True)
+    resolver_path.parent.mkdir(parents=True, exist_ok=True)
+    examples_dir.mkdir(parents=True, exist_ok=True)
+    agents_dir.mkdir(parents=True, exist_ok=True)
+
     manifest_count = _write_manifest_jsonl(
         progress=progress,
-        manifest_path=references_dir / "manifest.jsonl",
+        manifest_path=manifest_path,
     )
-    _write_resolver_script(scripts_dir / "resolve_repo_map_docs.py")
+    _write_resolver_script(resolver_path)
+    _write_openai_yaml(context, agents_dir / "openai.yaml")
 
-    context["copied_files"] = copied_files
+    doc_files = sum(1 for p in docs_root.rglob("*.md"))
+    context["doc_files"] = doc_files
     context["manifest_entries"] = manifest_count
     context_path = _get_skill_context_path(out_path)
     context_path.parent.mkdir(parents=True, exist_ok=True)
@@ -924,22 +939,17 @@ def prepare_repo_map_skill_workspace(
         json.dumps(context, ensure_ascii=False, indent=2),
         encoding="utf-8",
     )
-    if skill_output_dir is not None and str(skill_output_dir).strip():
-        (data_dir / "skill_output_dir.txt").write_text(
-            str(Path(skill_output_dir).resolve()),
-            encoding="utf-8",
-        )
 
     logger = resolve_logger(None, "repo_map_agent")
     logger.info(
         "[Skill Workspace] prepared | "
-        f"skill={skill_root} | copied_files={copied_files} | manifest_entries={manifest_count}"
+        f"skill={skill_root} | doc_files={doc_files} | manifest_entries={manifest_count}"
     )
 
     lines = [
         "Skill workspace prepared:",
         f"Skill root: {skill_root}",
-        f"Copied files: {copied_files}",
+        f"Doc files: {doc_files}",
         f"Manifest entries: {manifest_count}",
         f"Context file: {context_path}",
     ]
@@ -991,13 +1001,15 @@ def write_repo_map_skill_files(output_dir: str) -> str:
 
 def validate_repo_map_skill(output_dir: str) -> str:
     """
-    Validate generated skill artifacts under <output_dir>/skills/.
+    Validate generated skill artifacts under <output_dir>/<project>-repo-map/.
 
     Validation checks:
       - Required files/directories exist
       - SKILL.md frontmatter contains only name/description
       - manifest entry count == analysis_progress directory count
+      - scripts/resolve_repo_map_docs.py is executable
       - assets/examples contains at least one markdown example
+      - agents/openai.yaml has a default_prompt mentioning this skill
 
     Args:
         output_dir: Repo map output directory containing data/skill_build_context.json
@@ -1018,6 +1030,7 @@ def validate_repo_map_skill(output_dir: str) -> str:
     )
     repo_map_ref_root = str(context.get("repo_map_ref_root", "references/repo_map"))
     examples_rel_root = str(context.get("examples_rel_root", "assets/examples"))
+    agents_rel_root = str(context.get("agents_rel_root", "agents"))
 
     required_paths = [
         skill_root / "SKILL.md",
@@ -1025,6 +1038,7 @@ def validate_repo_map_skill(output_dir: str) -> str:
         skill_root / resolver_rel,
         skill_root / repo_map_ref_root / "index.md",
         skill_root / repo_map_ref_root / "dependencies.md",
+        skill_root / agents_rel_root / "openai.yaml",
     ]
     missing = [str(p) for p in required_paths if not p.exists()]
     if missing:
@@ -1032,6 +1046,10 @@ def validate_repo_map_skill(output_dir: str) -> str:
 
     skill_md_text = (skill_root / "SKILL.md").read_text(encoding="utf-8")
     _validate_skill_frontmatter(skill_md_text)
+
+    resolver_path = skill_root / resolver_rel
+    if not resolver_path.stat().st_mode & 0o111:
+        raise ValueError(f"Resolver script is not executable: {resolver_path}")
 
     progress_file = out_path / "data" / "analysis_progress.json"
     progress = _read_json_file(progress_file, default={})
@@ -1060,11 +1078,23 @@ def validate_repo_map_skill(output_dir: str) -> str:
     if not example_markdowns:
         raise ValueError(f"No markdown examples found under {examples_dir}")
 
+    openai_yaml = yaml.safe_load(
+        (skill_root / agents_rel_root / "openai.yaml").read_text(encoding="utf-8")
+    )
+    default_prompt = (
+        openai_yaml.get("interface", {}).get("default_prompt", "")
+        if isinstance(openai_yaml, dict)
+        else ""
+    )
+    if f"${context.get('skill_name')}" not in default_prompt:
+        raise ValueError("agents/openai.yaml default_prompt must mention the skill name")
+
     lines = [
         "Skill validation passed:",
         f"Skill root: {skill_root}",
         f"Manifest entries: {len(manifest_lines)}",
         f"Examples markdown files: {len(example_markdowns)}",
+        "OpenAI agent metadata: present",
     ]
     return "\n".join(lines)
 
@@ -1103,8 +1133,10 @@ def get_analysis_summary(output_dir: str) -> str:
         f"Pending (unrun)   : {pending}",
         "",
         "Output location:",
-        f"  {output_dir}/repo_map/index.md         (project overview)",
-        f"  {output_dir}/repo_map/dependencies.md  (dependency graph)",
+        f"  {repo_map_skill_root(output_dir)}/SKILL.md                     (generated skill)",
+        f"  {repo_map_docs_root(output_dir)}/index.md          (project overview)",
+        f"  {repo_map_docs_root(output_dir)}/dependencies.md   (dependency graph)",
+        f"  {repo_map_skill_root(output_dir)}/scripts/resolve_repo_map_docs.py (resolver)",
         f"  {output_dir}/data/analysis_progress.json (per-dir status)",
     ]
 

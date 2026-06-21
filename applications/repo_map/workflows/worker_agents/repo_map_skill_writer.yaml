@@ -27,7 +27,7 @@ workflow: |
     - 不要传 `metadata` 参数（不要 metadata 引用块）
     - 将完整 YAML frontmatter（`---` 包裹）放在第一个 section 的 `body` 开头。
   - 禁止调用 `load_skill` / `list_skills` / `shell_tool`，不要加载外部 skill 上下文。
-  - 不生成 `agents/openai.yaml`。
+  - Worker 不直接生成 `agents/openai.yaml`；该文件由 `prepare_repo_map_skill_workspace` 确定性生成，并由 `validate_repo_map_skill` 校验。
   - 不生成 README / INSTALL / CHANGELOG 等额外文档。
 
   ## 必须写入的文件
@@ -54,7 +54,7 @@ workflow: |
   4. **文档类型说明（## 文档类型说明）** - Markdown 表格对比 index.md 和 analysis.md，强调先 index 后 analysis 的阅读顺序
   5. **路由规则（## 路由规则）** - 三级回退：精确目录命中 -> 父目录回退 -> 根目录回退。使用 project_name 构造路径示例。提及 manifest.jsonl 和 resolve_repo_map_docs.py 脚本
   6. **跨模块分析（## 跨模块分析）** - 触发条件和分析步骤，具体场景示例。使用 project_name 构造示例
-  7. **参考文件清单（## 参考文件清单）** - 列出 references/repo_map/、manifest.jsonl、scripts/ 等关键路径
+  7. **参考文件清单（## 参考文件清单）** - 列出 references/repo_map/、references/manifest.jsonl、scripts/resolve_repo_map_docs.py 等关键路径
 
   Frontmatter 说明：
   - description 不超过 200 字符

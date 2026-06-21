@@ -8,6 +8,13 @@ system:
 
 smart_summary: false
 
+# Reversible context compression. Large tool/worker outputs are stored locally
+# and shown to the model as compact previews with ContextRef handles that can be
+# retrieved via loom_retrieve_context.
+context_engine:
+  min_chars: 2000
+  preview_max_chars: 3000
+
 # ============================================
 # Global Skills Configuration
 # ============================================
@@ -188,6 +195,10 @@ tool_metadata:
     max_result_chars: 5000
     is_concurrency_safe: true
     category: shell
+  loom_retrieve_context:
+    max_result_chars: null
+    is_concurrency_safe: true
+    category: context
   read_file:
     max_result_chars: null          # exempt — handled by context compression dedup
     is_concurrency_safe: true
@@ -218,6 +229,7 @@ default_loaded_tools:
   - "check_background_task"
   - "kill_background_task"
   - "list_background_tasks"
+  - "loom_retrieve_context"
   - "read_file"
   - "grep_search"
   - "glob_search"

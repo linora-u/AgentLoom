@@ -28,6 +28,13 @@ APP_NAME = "test_checkpoint_complex_supervisor"
 WORK_DIR = Path("/tmp/agentloom_ckpt_complex")
 
 
+def _checkpoint_root() -> Path:
+    runtime_root = os.environ.get("AGENT_LOOM_RUNTIME_ROOT", "").strip()
+    if runtime_root:
+        return Path(runtime_root)
+    return ROOT / ".logs"
+
+
 def _env() -> dict[str, str]:
     env = os.environ.copy()
     env["PYTHONPATH"] = str(ROOT)
@@ -50,12 +57,12 @@ def _run_code(resume_task_id: str | None = None) -> str:
 
 
 def _clean_runtime() -> None:
-    shutil.rmtree(ROOT / ".logs" / APP_NAME, ignore_errors=True)
+    shutil.rmtree(_checkpoint_root() / APP_NAME, ignore_errors=True)
     shutil.rmtree(WORK_DIR, ignore_errors=True)
 
 
 def _latest_task_dir() -> Path | None:
-    candidates = sorted((ROOT / ".logs" / APP_NAME).glob("*/checkpoints/task_*"))
+    candidates = sorted((_checkpoint_root() / APP_NAME).glob("*/checkpoints/task_*"))
     return candidates[-1] if candidates else None
 
 
@@ -184,7 +191,7 @@ def _wait_for_worker_interrupt_point(proc: subprocess.Popen, timeout: float = 24
             worker_ckpt_path = task_dir / "workers" / "artifact_worker" / "calls" / "0" / "checkpoint.json"
             if counts.get("worker_call_started", 0) == 1 and worker_ckpt_path.exists():
                 ckpt = json.loads(worker_ckpt_path.read_text(encoding="utf-8"))
-                if ckpt.get("status") == "running" and ckpt.get("step_count", 0) >= 2:
+                if ckpt.get("status") == "running" and ckpt.get("step_count", 0) >= 1:
                     return task_dir
         time.sleep(0.2)
     raise TimeoutError("timed out waiting for worker interrupt point")
