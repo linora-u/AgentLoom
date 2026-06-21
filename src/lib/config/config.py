@@ -35,6 +35,7 @@ _PROJECT_NAME = "AgentLoom"
 _WORKFLOW_OVERLAY_KEYS = {
     "system",
     "smart_summary",
+    "context_engine",
     "tool_access_control",
     "execution_env",
     "code_agent",

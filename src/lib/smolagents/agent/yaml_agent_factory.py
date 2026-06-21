@@ -477,13 +477,12 @@ class YamlConfiguredAgent(RoleDrivenAgent):
         _shared_execution_env = getattr(self, "_execution_env", None)
         _frozen_config = self._config  # read-only dict
         _AgentClass = self.__class__
-        _self_ref = self  # fallback for single-threaded / test usage
+        _self_ref = self
         _yaml_concurrency = self._config.get("concurrency")  # "auto" / int / None
         _model_type = self._config.get("model_type", "powerful")
 
-        # Factory mode is enabled when a real model is available.
-        # When model is None (e.g., in unit tests that mock agent.run directly),
-        # we fall back to using the original agent instance for backward compat.
+        # A missing model means the caller is using an already-constructed test/mock agent.
+        # Reusing that instance keeps the call on the patched run() implementation.
         _factory_mode = _shared_model is not None
 
         def _create_fresh_agent():
@@ -581,6 +580,18 @@ class YamlConfiguredAgent(RoleDrivenAgent):
             # (P2 fix — the old SET here was too late for GET in _execute_with_lifecycle)
 
             result_str = "" if result is None else str(result)
+            from src.lib.context_engine.runtime import get_active_context_engine
+
+            engine = get_active_context_engine()
+            if engine is not None:
+                return (
+                    engine.compress_tool_result(
+                        result_str,
+                        tool_name=function_name,
+                        source=f"worker_result:{function_name}",
+                    )
+                    or result_str
+                )
             return result_str
 
         # ── Attach .batch() method for parallel execution ──

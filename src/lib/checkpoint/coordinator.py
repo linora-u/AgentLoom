@@ -34,9 +34,16 @@ SubTaskTrackedAgent lifecycle:
 from __future__ import annotations
 
 from contextvars import ContextVar
+from dataclasses import replace
 import threading
 from typing import Any, Optional
 
+from src.lib.context_engine import (
+    ContextEngine,
+    ContextEngineConfig,
+    clear_current_context_engine,
+    set_current_context_engine,
+)
 from src.lib.logging import get_logger
 from src.lib.heartbeat.worker_heartbeat import WorkerHeartbeat
 
@@ -90,6 +97,7 @@ class CheckpointCoordinator:
         self._pending_worker_runtime: dict[str, Any] = {}
         # File history manager (set by runner.py after creation).
         self._file_history: Any = None
+        self._context_engine: ContextEngine | None = None
 
     # ── Properties ──────────────────────────────────────────────────
 
@@ -132,6 +140,7 @@ class CheckpointCoordinator:
         if pending_fh is not None:
             coord._file_history = pending_fh
             _pending_file_history.set(None)
+        coord._activate_context_engine()
         return coord
 
     @staticmethod
@@ -147,11 +156,31 @@ class CheckpointCoordinator:
     def deactivate(coord: Optional["CheckpointCoordinator"] = None) -> None:
         """Clear the active coordinator after a supervisor run finishes."""
         global _active_coordinator
+        if coord is not None:
+            clear_current_context_engine(coord._context_engine)
+        elif _active_coordinator is not None:
+            clear_current_context_engine(_active_coordinator._context_engine)
+        else:
+            clear_current_context_engine(None)
         if _current_coordinator.get() is coord or coord is None:
             _current_coordinator.set(None)
         with _active_coordinator_lock:
             if coord is None or _active_coordinator is coord:
                 _active_coordinator = None
+
+    def _activate_context_engine(self) -> None:
+        config = ContextEngineConfig.from_runtime()
+        if config.store.ttl_seconds is None:
+            from src.lib.config import C
+
+            ttl = C.get_nested("checkpoint", "max_resume_age", default=None)
+            if ttl is not None:
+                config = replace(config, store=replace(config.store, ttl_seconds=int(ttl)))
+        self._context_engine = ContextEngine(
+            self._cm.context_store_dir(self._task_id),
+            config=config,
+        )
+        set_current_context_engine(self._context_engine)
 
     # ── Supervisor ops ───────────────────────────────────────────────
 
@@ -258,6 +287,7 @@ class CheckpointCoordinator:
                 config_snapshot=getattr(runtime_agent, "_config", None),
                 result=result,
                 error=error,
+                context_store=self._context_engine.stats_snapshot() if self._context_engine else None,
             )
             self._cm.record_task_status_changed(
                 self._task_id,
@@ -474,6 +504,16 @@ class CheckpointCoordinator:
         """Record successful worker completion."""
         try:
             full_result = str(result) if result else None
+            stored_result = full_result
+            if full_result and self._context_engine is not None:
+                stored_result = (
+                    self._context_engine.compress_tool_result(
+                        full_result,
+                        tool_name=agent_name,
+                        source=f"worker_result:{agent_name}",
+                    )
+                    or full_result
+                )
             self._cm.save_worker_checkpoint(
                 self._task_id,
                 agent_name,
@@ -482,7 +522,7 @@ class CheckpointCoordinator:
                 memory_steps=worker_mem,
                 task_input=str(task_input),
                 status="completed",
-                result=full_result,
+                result=stored_result,
             )
             self._cm.record_worker_finished(
                 self._task_id,
@@ -491,7 +531,7 @@ class CheckpointCoordinator:
                 input_hash=input_hash,
                 task_input=str(task_input),
                 status="completed",
-                result=full_result,
+                result=stored_result,
             )
             # ── Worker heartbeat: mark completed ──
             self._update_worker_heartbeat(agent_name, call_index, "completed")

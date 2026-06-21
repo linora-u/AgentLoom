@@ -21,16 +21,17 @@ OUTPUT_DIR = REPO_ROOT / ".repo_map" / "repo_map_fixture_smoke"
 
 
 def _assert_required_outputs(output_dir: Path) -> None:
-    skill_root = output_dir / "skills" / "sample-project-repo-map-navigator"
+    skill_root = output_dir / "sample-project-repo-map"
     required_paths = [
-        output_dir / "repo_map" / "index.md",
-        output_dir / "repo_map" / "dependencies.md",
         output_dir / "data" / "analysis_progress.json",
         skill_root,
         skill_root / "SKILL.md",
+        skill_root / "references" / "repo_map" / "index.md",
+        skill_root / "references" / "repo_map" / "dependencies.md",
         skill_root / "references" / "manifest.jsonl",
         skill_root / "scripts" / "resolve_repo_map_docs.py",
-        skill_root / "references" / "repo_map",
+        skill_root / "assets" / "examples",
+        skill_root / "agents" / "openai.yaml",
     ]
     missing = [str(p) for p in required_paths if not p.exists()]
     if missing:
