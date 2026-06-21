@@ -103,7 +103,7 @@ if __name__ == "__main__":
 
 ```yaml
 skills: []                 # 关闭全局 skill 列表和 AGENT_ROOT/skills 自动发现
-default_loaded_tools: []   # 纯规划 Agent 可显式关闭默认工具
+toolsets: []   # 纯规划 Agent 可显式关闭内置工具
 tool_access_control:
   path_validation:
     - tools: ["read_file", "grep_search", "shell_tool"]
@@ -119,7 +119,7 @@ mcp_servers:
   path: "applications/<app_name>/config/.mcp.json"
 ```
 
-列表是整体替换，不是追加；写 `default_loaded_tools`、`skills` 这类列表时要表达完整意图。完整配置面见 `configuration-surface.md`。
+列表是整体替换，不是追加；写 Agent 级 `toolsets`、`skills` 这类列表时要表达完整意图。完整配置面见 `configuration-surface.md`。
 
 `allowed_commands: "*"` 与 `allowed_operators: "*"` 是全放开，只适合可信开发环境或先观察 audit 的探索阶段。用户不确定权限时，先运行真实 workflow，读取 `shell_audit.log` 的 `[POLICY_SNAPSHOT]` 和拦截事件，再收敛命令、操作符、路径或 sandbox 配置。
 

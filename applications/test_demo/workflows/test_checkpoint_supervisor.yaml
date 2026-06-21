@@ -40,7 +40,7 @@ workflow: |
   Verify it contains content from both input files.
 
   ## Step 4: Final summary
-  Create /tmp/agentloom_ckpt_multi/done.txt containing:
+  Use write_file to create /tmp/agentloom_ckpt_multi/done.txt containing:
     "Supervisor: all steps completed. Worker output verified."
 
   ## Final Report
@@ -49,6 +49,7 @@ workflow: |
 tools:
   - name: "shell_tool"
   - name: "read_file"
+  - name: "write_file"
   - name: "edit_file"
 
 worker_agents:

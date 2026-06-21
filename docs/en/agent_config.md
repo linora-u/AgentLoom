@@ -796,38 +796,28 @@ tools:
 |--------|----------|
 | `read_file` | Read file content (supports offset/limit for ranges) |
 | `write_file` | Create new file or overwrite existing |
-| `write_whole_file` | Write entire file |
-| `edit_file` | Edit file (find and replace) |
-| `move_file` | Move file |
-| `rename_file` | Rename file |
-| `copy_file` | Copy file |
-| `delete_file` | Delete file |
+| `edit_file` | Apply one or more unique text edits |
 | `write_markdown_file` | Write Markdown file |
 | `write_markdown_file_raw` | Write raw Markdown file |
 | `append_markdown_sections` | Append Markdown sections |
 | `get_file_outline` | Get code outline (functions/classes/structs) |
-| `browse_directory` | Browse directory structure |
+| `list_directory` | List directory structure |
 | `grep_search` | Regex search file contents (powered by ripgrep) |
 | `glob_search` | Glob pattern file search |
-| `search_files` | Search files |
-| `code_search` | Code search |
-| `search_and_replace` | In-file search and replace |
-| `code_replace` | Code replacement |
-| `code_edit` | Code editing |
 | `ast_grep_search_file` | AST pattern search |
-| `get_git_diff_content` | Get Git diff |
-| `git_grep_files` | Git grep search |
-| `git_commit_files` | Git commit specific files |
-| `git_auto_commit` | Git auto commit |
-| `git_check_dirty` | Git check uncommitted changes |
-| `is_path_in_repo` | Check if path is in Git repo |
+| `lsp_find_definition` | Find symbol definition |
+| `lsp_find_references` | Find symbol references |
+| `lsp_get_document_symbols` | List document symbols |
+| `lsp_hover` | Show hover/type information |
+| `lsp_get_workspace_symbols` | Search workspace symbols |
+| `loom_retrieve_context` | Retrieve compressed context refs |
 | `shell_tool` | Execute shell commands (whitelist-restricted) |
 | `load_skill` | Load specified skill |
 | `list_skills` | List available skills |
 
 ### 4.3 Tool Loading Priority
 
-1. **Default tools**: Tools in `default_loaded_tools` list from `config/system.yaml` are auto-loaded
+1. **Default toolsets**: Toolsets in `default_toolsets` from `config/system.yaml` are auto-loaded
 2. **Agent tools**: Tools in the Agent YAML `tools` list
 3. **Deduplication rule**: Same-named tools are overridden by later-loaded ones
 
@@ -1072,7 +1062,7 @@ tools:
 
   # Can also register other regular tools simultaneously
   - name: "read_file"
-  - name: "browse_directory"
+  - name: "list_directory"
 ```
 
 > **Tool description auto-extraction**: The framework automatically extracts tool descriptions from the Python function's `__doc__` (Docstring). Ensure good documentation in your functions; the `description` field in YAML is ignored.
@@ -1329,7 +1319,7 @@ tools:
     module: "applications.repo_map.agent_tools.pipeline_agent_tools"
     function: "get_analysis_summary"
   - name: "read_file"
-  - name: "browse_directory"
+  - name: "list_directory"
 
 worker_agents:
   - path: "applications/repo_map/workflows/worker_agents/dir_architecture_analysis.yaml"
@@ -1494,7 +1484,7 @@ WARNING: Ignoring top-level key 'model' in agent config;
 | **List** | **Complete replacement** (higher priority completely replaces lower priority) |
 | **Scalar** | Complete replacement |
 
-> ⚠️ Lists are completely replaced, not appended! Overriding `default_loaded_tools` requires writing the complete list.
+> ⚠️ Lists are completely replaced, not appended! Agent YAML `toolsets:` replaces global `default_toolsets`; `toolsets: []` disables built-in tools.
 
 ### 9.6 Override Examples
 

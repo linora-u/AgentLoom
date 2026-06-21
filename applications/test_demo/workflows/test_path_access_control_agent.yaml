@@ -7,7 +7,17 @@ tool_call_type: "code_act"
 # Path access control: include_paths in path_validation rules
 tool_access_control:
   path_validation:
-    - tools: ["shell_tool", "read_file", "edit_file", "write_markdown_file", "grep_search", "glob_search"]
+    - tools:
+        - "shell_tool"
+        - "read_file"
+        - "edit_file"
+        - "write_file"
+        - "list_directory"
+        - "write_markdown_file"
+        - "write_markdown_file_raw"
+        - "append_markdown_sections"
+        - "grep_search"
+        - "glob_search"
       include_paths:
         - "/tmp"
 

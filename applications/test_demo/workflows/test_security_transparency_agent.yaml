@@ -42,7 +42,7 @@ workflow: |
   expect_block(
       "command substitution blocked",
       "echo $(whoami)",
-      ["Blocked", "command substitution", "Suggested alternative:", "write_markdown_file"],
+      ["Blocked", "command substitution", "Suggested alternative:", "write_file"],
   )
   expect_block(
       "sudo blocked",

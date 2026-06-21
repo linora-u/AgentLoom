@@ -3,7 +3,7 @@ description: "Scrape the group-owner posts from a zsxq.com group via the user's 
 model_type: "powerful"
 tool_call_type: "tool_call"
 max_steps: 6
-default_loaded_tools: []
+toolsets: []
 skills: []
 
 tools:

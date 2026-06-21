@@ -314,7 +314,7 @@ def format_directory_tree(
     return output_lines, truncated, stats
 
 
-def browse_directory(
+def list_directory(
     directory_path: str,
     max_depth: int = 2,
     max_output_lines: int = 150,
@@ -325,7 +325,7 @@ def browse_directory(
     count_timeout_seconds: float = 2.0
 ) -> str:
     """
-    Intelligently browse directory structure for large repository exploration
+    List directory structure for repository exploration.
 
     Provides smart directory browsing functionality, especially suitable for understanding
     large code repository structures. Automatically excludes common non-user code directories
@@ -352,10 +352,10 @@ def browse_directory(
         OSError: If directory access fails
 
     Examples:
-        >>> browse_directory(".")  # Browse current directory
-        >>> browse_directory("/path/to/project", max_depth=1)  # Show first level only
-        >>> browse_directory("src", show_file_counts=True)  # Show file counts
-        >>> browse_directory(".", exclude_patterns=["*.tmp", "cache/"])  # Custom exclusions
+        >>> list_directory(".")  # List current directory
+        >>> list_directory("/path/to/project", max_depth=1)  # Show first level only
+        >>> list_directory("src", show_file_counts=True)  # Show file counts
+        >>> list_directory(".", exclude_patterns=["*.tmp", "cache/"])  # Custom exclusions
     """
     # Validate arguments.
     if not directory_path or not directory_path.strip():
@@ -417,14 +417,14 @@ def browse_directory(
         if truncated:
             result_lines.append("")
             result_lines.append("Output truncated - Suggestions:")
-            result_lines.append(f"   • Reduce depth: browse_directory('{directory_path}', max_depth=1)")
-            result_lines.append(f"   • Browse subdirectory: browse_directory('{directory_path}/subdir_name')")
-            result_lines.append(f"   • Increase line limit: browse_directory('{directory_path}', max_output_lines=300)")
+            result_lines.append(f"   • Reduce depth: list_directory('{directory_path}', max_depth=1)")
+            result_lines.append(f"   • Browse subdirectory: list_directory('{directory_path}/subdir_name')")
+            result_lines.append(f"   • Increase line limit: list_directory('{directory_path}', max_output_lines=300)")
             if not show_file_counts:
-                result_lines.append(f"   • Show file counts: browse_directory('{directory_path}', show_file_counts=True)")
+                result_lines.append(f"   • Show file counts: list_directory('{directory_path}', show_file_counts=True)")
 
         # Log operation.
-        logger.info(f"Browsing directory: {directory} (depth={max_depth}, displayed={stats['displayed_items']} items, truncated={truncated})")
+        logger.info(f"Listing directory: {directory} (depth={max_depth}, displayed={stats['displayed_items']} items, truncated={truncated})")
 
         return '\n'.join(result_lines)
 
@@ -439,15 +439,15 @@ def browse_directory(
         raise OSError(error_msg) from e
 
 
-def quick_browse_directory(
+def quick_list_directory(
     directory_path: str,
     show_only_dirs: bool = False,
     max_items: int = 50
 ) -> str:
     """
-    Quickly browse first-level directory content for fast structure overview.
+    Quickly list first-level directory content for fast structure overview.
 
-    This is a simplified version of `browse_directory`, showing only the first
+    This is a simplified version of `list_directory`, showing only the first
     level for faster response. It is especially useful for large projects.
 
     Args:
@@ -459,8 +459,8 @@ def quick_browse_directory(
         str: Simplified directory listing.
 
     Examples:
-        >>> quick_browse_directory(".")  # Quick view of current directory
-        >>> quick_browse_directory("/path/to/project", show_only_dirs=True)  # Directories only
+        >>> quick_list_directory(".")  # Quick view of current directory
+        >>> quick_list_directory("/path/to/project", show_only_dirs=True)  # Directories only
     """
     # Validate arguments.
     if not directory_path or not directory_path.strip():
@@ -544,7 +544,7 @@ def quick_browse_directory(
         if truncated:
             hidden_count = len(all_display_items) - max_items
             result_lines.append(f"   (+{hidden_count} items not shown)")
-            result_lines.append(f"Tip: Use browse_directory('{directory_path}') for full structure")
+            result_lines.append(f"Tip: Use list_directory('{directory_path}') for full structure")
 
         return '\n'.join(result_lines)
 

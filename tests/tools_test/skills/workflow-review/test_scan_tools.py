@@ -77,7 +77,7 @@ def fake_app(tmp_path):
         """),
         "tools": [
             {"name": "read_file"},
-            {"name": "browse_directory"},
+            {"name": "list_directory"},
         ],
         "agent_function_schema": {
             "description": "对模块进行静态分析",
@@ -1189,7 +1189,7 @@ class TestDynamicCapabilityDiscovery:
     """验证动态工具能力发现输出。"""
 
     def test_discovery_reads_app_and_project_system_yaml(self, fake_app):
-        """同时存在应用级和项目级 system.yaml 时，应按覆盖链给出有效 default tools。"""
+        """同时存在应用级和项目级 system.yaml 时，应按覆盖链给出有效 default toolsets。"""
         # fake_app: <tmp>/applications/test_app
         project_root = fake_app.parents[1]
         app_config = fake_app / "config"
@@ -1199,7 +1199,7 @@ class TestDynamicCapabilityDiscovery:
 
         (app_config / "system.yaml").write_text(
             yaml.safe_dump(
-                {"default_loaded_tools": ["app_only_tool"]},
+                {"default_toolsets": ["app_only_tool"]},
                 allow_unicode=True,
                 sort_keys=False,
             ),
@@ -1207,7 +1207,7 @@ class TestDynamicCapabilityDiscovery:
         )
         (project_config / "system.yaml").write_text(
             yaml.safe_dump(
-                {"default_loaded_tools": ["project_tool_a", "project_tool_b"]},
+                {"default_toolsets": ["project_tool_a", "project_tool_b"]},
                 allow_unicode=True,
                 sort_keys=False,
             ),
@@ -1263,19 +1263,19 @@ class TestEffectiveConfigDiscovery:
         with open(app_dir / "workflows" / "demo.yaml", "w", encoding="utf-8") as f:
             yaml.dump({"name": "demo", "description": "x", "workflow": "x"}, f, allow_unicode=True)
 
-        # Low priority: project-level default tools
+        # Low priority: project-level default toolsets
         with open(project_root / "config" / "system.yaml", "w", encoding="utf-8") as f:
-            yaml.dump({"default_loaded_tools": ["global_tool"]}, f, allow_unicode=True)
+            yaml.dump({"default_toolsets": ["global_tool"]}, f, allow_unicode=True)
 
         # High priority: app-level explicit override to empty list
         with open(app_dir / "config" / "system.yaml", "w", encoding="utf-8") as f:
-            yaml.dump({"default_loaded_tools": []}, f, allow_unicode=True)
+            yaml.dump({"default_toolsets": []}, f, allow_unicode=True)
 
         result = scan_app_structure(str(app_dir))
-        assert "有效 `default_loaded_tools`: []" in result
+        assert "有效 `default_toolsets`: []" in result
         assert str(app_dir / "config" / "system.yaml") in result
 
-    def test_mapping_detects_legacy_fallback(self, tmp_path):
+    def test_mapping_requires_platform_key(self, tmp_path):
         project_root = tmp_path / "proj"
         app_dir = project_root / "applications" / "demo_app"
         (project_root / "config").mkdir(parents=True)
@@ -1290,7 +1290,7 @@ class TestEffectiveConfigDiscovery:
                     "tools_mapping": {
                         "mapping": {
                             "Read": "read_file",
-                            "Write": "write_markdown_file",
+                            "Write": "write_file",
                         }
                     }
                 },
@@ -1299,10 +1299,9 @@ class TestEffectiveConfigDiscovery:
             )
 
         result = scan_app_structure(str(app_dir))
-        assert "mapping" in result
-        assert "回退来源" in result or "映射信息" in result
+        assert "未发现 `tools_mapping.Claude`" in result
 
-    def test_mapping_legacy_ignored_when_claude_mapping_exists(self, tmp_path):
+    def test_mapping_reports_claude_mapping(self, tmp_path):
         project_root = tmp_path / "proj"
         app_dir = project_root / "applications" / "demo_app"
         (project_root / "config").mkdir(parents=True)
@@ -1317,9 +1316,7 @@ class TestEffectiveConfigDiscovery:
                     "tools_mapping": {
                         "Claude": {
                             "Read": "read_file",
-                        },
-                        "mapping": {
-                            "Read": "legacy_read_file_content",
+                            "Write": "write_file",
                         },
                     }
                 },
@@ -1329,7 +1326,7 @@ class TestEffectiveConfigDiscovery:
 
         result = scan_app_structure(str(app_dir))
         assert "tools_mapping.Claude" in result
-        assert "legacy 将被忽略" in result
+        assert "Write->write_file" in result
 
 
 class TestExecutionEnvAndMarkdownSupport:
@@ -1356,7 +1353,7 @@ class TestExecutionEnvAndMarkdownSupport:
         result = scan_app_structure(str(app_dir))
         assert "execution_env.type" in result
         assert "docker" in result
-        assert "跳过 `default_loaded_tools`" in result
+        assert "跳过 `default_toolsets`" in result
 
     def test_markdown_agent_is_scanned_and_workflow_extractable(self, tmp_path):
         app_dir = tmp_path / "md_app"

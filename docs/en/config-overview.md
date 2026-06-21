@@ -23,7 +23,7 @@ The configuration of AgentLoom is primarily divided into three major categories,
 AgentLoom uses `LayeredConfigBuilder` to implement immutable and validation-supporting deep configuration merging. The loading process accumulates from bottom to top, with each upper layer overriding the previous one.
 
 ### Override and Merge Rules
-1. **Dictionary (Dict) deep merge**: For example, merging within `default_loaded_tools`.
+1. **Dictionary (Dict) deep merge**: For example, merging nested `tool_access_control` fields.
 2. **Scalar and list complete replacement**: If an upper layer defines a list, it directly replaces the lower layer's list without concatenation.
 3. **Node validation**: Each merged layer is validated through Pydantic (`RootSettings`).
 
@@ -45,7 +45,7 @@ When loading an Agent YAML, the system automatically searches upward for its par
 
 #### Level 3: Agent-level Override
 In addition to defining its own workflow, a single Agent's YAML file can override selected system configurations. The whitelisted fields that support override (`_WORKFLOW_OVERLAY_KEYS`) are:
-- `system`, `smart_summary`, `context_engine`, `tool_access_control`, `execution_env`, `code_agent`, `tools`, `shell_settings`, `tools_mapping`, `default_loaded_tools`, `prompt`, `mcp_servers`.
+- `system`, `smart_summary`, `context_engine`, `tool_access_control`, `execution_env`, `code_agent`, `tools`, `shell_settings`, `tools_mapping`, `default_toolsets`, `toolsets`, `prompt`, `mcp_servers`.
 
 `context_engine` is intentionally small. It is enabled by the task runtime and uses the task-scoped checkpoint context store; normal overrides should only tune:
 

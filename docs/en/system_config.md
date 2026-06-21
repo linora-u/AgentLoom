@@ -93,17 +93,14 @@ logging:
   dir: ".logs"
 
 # ============================================
-# Default Loaded Tools
+# Default Toolsets
 # ============================================
-default_loaded_tools:
-  - "load_skill"
-  - "list_skills"
-  - "shell_tool"
-  - "read_file"
-  - "grep_search"
-  - "glob_search"
-  - "edit_file"
-  - "write_markdown_file"
+default_toolsets:
+  - "core_shell"
+  - "core_file"
+  - "core_search"
+  - "context"
+  - "skills"
 
 # ============================================
 # Shell Settings
@@ -118,7 +115,7 @@ shell_settings:
 tools_mapping:
   Claude:
     Read: "read_file"
-    Write: "write_markdown_file"
+    Write: "write_file"
     Bash: "shell_tool"
     Glob: "glob_search"
     Grep: "grep_search"
@@ -751,42 +748,42 @@ Controls the tool list available to Agents at initialization and the security po
 
 **YAML path**: `tools.*`
 
-### 8.1 default_loaded_tools — Default Tool List
+### 8.1 default_toolsets — Default Toolsets
 
 | Parameter | Type | Default | Required | Description |
 |------|------|--------|------|------|
-| `default_loaded_tools` | `list[str]` | `[]` | ❌ No | Tool name list loaded by default for all Agents at system startup |
+| `default_toolsets` | `list[str]` | `[]` | ❌ No | Toolset list loaded by default for all Agents at startup |
 
-Tool names must be framework-predefined tools (exactly matching `src/tools/__init__.py::_TOOLS_MAP`). Complete predefined tool list:
+Agent YAML `toolsets:` replaces this global list entirely. `toolsets: []` means no built-in tools. Complete registry toolsets:
+
+| Toolset | Tools |
+|--------|-------|
+| `core_shell` | `shell_tool`, `check_background_task`, `kill_background_task`, `list_background_tasks` |
+| `core_file` | `read_file`, `edit_file`, `write_file`, `list_directory` |
+| `core_search` | `grep_search`, `glob_search` |
+| `context` | `loom_retrieve_context` |
+| `skills` | `load_skill`, `list_skills` |
+| `markdown_report` | `write_markdown_file`, `write_markdown_file_raw`, `append_markdown_sections` |
+| `code_nav` | `get_file_outline`, `ast_grep_search_file`, `lsp_find_definition`, `lsp_find_references`, `lsp_get_document_symbols`, `lsp_hover`, `lsp_get_workspace_symbols` |
+
+Complete predefined tool list:
 
 | Tool Name | Function |
 |--------|------|
-| `search_keyword_in_directory` | Keyword search within directory |
-| `search_keyword_with_context` | Keyword search + context return |
-| `list_files_glob` | Glob pattern file search |
-| `ripgrep_search_directory` | High-performance ripgrep search |
 | `write_file` | Create new file or overwrite existing |
 | `read_file` | Read file content (supports offset/limit for ranges) |
-| `edit_file` | Edit file (find and replace) |
+| `edit_file` | Apply one or more unique text edits |
 | `get_file_outline` | Get code outline (functions/classes/structs) |
-| `browse_directory` | Browse directory structure |
-| `delete_file` | Delete file |
-| `move_file` | Move file |
-| `rename_file` | Rename file |
-| `copy_file` | Copy file |
-| `search_files` | Search files |
-| `code_search` | Code search |
-| `code_replace` | Code replacement |
-| `code_edit` | Code editing |
-| `search_and_replace` | In-file search and replace |
-| `write_whole_file` | Write entire file |
-| `git_commit_files` | Commit specific files to Git |
-| `git_auto_commit` | Auto-generate Git commit |
-| `git_check_dirty` | Check if Git working tree is dirty |
+| `list_directory` | List directory structure |
+| `grep_search` | Regex search file contents |
+| `glob_search` | Find files by glob pattern |
 | `ast_grep_search_file` | AST pattern search |
-| `get_git_diff_content` | Get Git diff |
-| `git_grep_files` | Git grep search |
-| `is_path_in_repo` | Check if path is in Git repository |
+| `lsp_find_definition` | Find symbol definition |
+| `lsp_find_references` | Find symbol references |
+| `lsp_get_document_symbols` | List document symbols |
+| `lsp_hover` | Show hover/type information |
+| `lsp_get_workspace_symbols` | Search workspace symbols |
+| `loom_retrieve_context` | Retrieve compressed context refs |
 | `load_skill` | Load specified Skill |
 | `list_skills` | List available Skills |
 | `shell_tool` | Execute Shell commands (restricted by whitelist) |
@@ -800,15 +797,12 @@ Tool names must be framework-predefined tools (exactly matching `src/tools/__ini
 **Example**:
 
 ```yaml
-default_loaded_tools:
-  - "load_skill"
-  - "list_skills"
-  - "shell_tool"
-  - "read_file"
-  - "grep_search"
-  - "glob_search"
-  - "edit_file"
-  - "write_markdown_file"
+default_toolsets:
+  - "core_shell"
+  - "core_file"
+  - "core_search"
+  - "context"
+  - "skills"
 ```
 
 ### 8.2 shell_settings — Shell Tool Security Policy
@@ -909,7 +903,7 @@ The framework automatically exposes security policy configuration to the LLM, pr
 **Effect**:
 - The LLM knows which operations are restricted on the first attempt, reducing wasted steps
 - Path violation errors include `Use paths within allowed directories, or use read_file/grep_search tools instead.` guidance
-- Command security block errors include `Suggested alternative:` advice (e.g. `Use write_markdown_file or edit_file tool for multi-line content`)
+- Command security block errors include `Suggested alternative:` advice (e.g. `Use write_file or edit_file tool for multi-line content`)
 
 > This feature requires no additional configuration — it activates automatically based on existing `security_checks` and `tool_access_control` settings.
 
@@ -977,7 +971,7 @@ Used to map short tool aliases declared in Skill files (e.g., `Read`, `Write`, `
 tools_mapping:
   Claude:
     Read: "read_file"
-    Write: "write_markdown_file"
+    Write: "write_file"
     Bash: "shell_tool"
     Glob: "glob_search"
     Grep: "grep_search"
@@ -1056,7 +1050,7 @@ tool_access_control:
       exclude_paths: ["secrets", ".env"]
 
     # Move/copy tools: exclude build dirs
-    - tools: ["move_file", "copy_file"]
+    - tools: ["", ""]
       exclude_paths: ["build", "dist"]
       path_param_patterns: ["source", "destination"]
 

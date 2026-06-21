@@ -58,7 +58,7 @@ def write_file(
         raise ValueError("content is required and cannot be None")
 
     # -- Path access control -----------------------------------------------
-    validate_file_access(file_path, "write", tool_name="write_markdown_file")
+    validate_file_access(file_path, "write", tool_name="write_file")
 
     path = normalize_path(file_path)
 

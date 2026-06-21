@@ -89,5 +89,3 @@ tools:
     module: "applications.repo_map.agent_tools.pipeline_agent_tools"
     function: "get_analysis_summary"
     description: "读取 analysis_progress.json，返回总结报告（完成/失败数、交付物路径）"
-  - name: "read_file"
-  - name: "browse_directory"

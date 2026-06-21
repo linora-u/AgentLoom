@@ -49,13 +49,13 @@ class TestCommandSubstitutionAlternative:
 
     @patch("src.tools.shell.security._load_enabled_checks", return_value={})
     def test_dollar_paren_has_alternative(self, _mock):
-        """$() substitution error includes write_markdown_file suggestion."""
+        """$() substitution error includes file-tool suggestion."""
         failures = check_command_security("echo $(whoami)")
         assert len(failures) >= 1
         cmd_sub = [f for f in failures if f.check_id == "command_substitution"]
         assert cmd_sub
         assert cmd_sub[0].alternative
-        assert "write_markdown_file" in cmd_sub[0].alternative or "edit_file" in cmd_sub[0].alternative
+        assert "write_file" in cmd_sub[0].alternative or "edit_file" in cmd_sub[0].alternative
 
     @patch("src.tools.shell.security._load_enabled_checks", return_value={})
     def test_backtick_has_alternative(self, _mock):

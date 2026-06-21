@@ -1,0 +1,30 @@
+name: "context_engine_text_retrieve_validation"
+description: "Validate that a supervisor can retrieve original worker text through ContextRef."
+model_type: "powerful"
+tool_call_type: "tool_call"
+max_steps: 8
+
+workflow: |
+  # ContextEngine Text Retrieval Validation
+
+  Execute these steps in order.
+
+  1. Call text_payload_worker with user_request:
+     "Return the large text validation payload exactly."
+  2. The worker result must contain a ContextRef marker. Do not guess the hidden
+     value from the task or from prior knowledge.
+  3. Call loom_retrieve_context with:
+       ref: the ContextRef returned by the worker
+       query: "TARGET_RECORD case=text"
+       offset: 0
+       limit: 20
+  4. Final answer must be exactly:
+       TEXT_CONTEXT_RETRIEVE_PASS verification_value=<value>
+
+tools:
+  - name: "loom_retrieve_context"
+
+worker_agents:
+  - path: "applications/context_engine_text_retrieve_validation/workflows/worker_agents/text_payload_worker.yaml"
+
+skills: []
