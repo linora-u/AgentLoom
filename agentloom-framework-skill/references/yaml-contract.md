@@ -79,11 +79,14 @@ workflow: |
 Agent YAML 当前可覆盖的系统配置白名单：
 
 ```text
-system, smart_summary, tool_access_control, execution_env, code_agent, tools,
-shell_settings, tools_mapping, default_loaded_tools, prompt, mcp_servers
+system, smart_summary, context_engine, tool_access_control, execution_env,
+code_agent, tools, shell_settings, tools_mapping, default_loaded_tools, prompt,
+mcp_servers
 ```
 
 Worker 的有效配置由 Worker YAML 自己重建，不继承 Supervisor 的权限覆盖；需要相同路径权限或 shell 权限时，Worker YAML 或应用级 `config/system.yaml` 也要写。
+
+`context_engine` 只建议覆盖 `min_chars` / `preview_max_chars`。ContextEngine 默认启用并使用 task-scoped store；不要在 Agent YAML 里设计关闭开关或第二套恢复路径。
 
 ## 三种 Agent-Tool 路径
 

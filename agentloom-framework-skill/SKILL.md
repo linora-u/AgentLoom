@@ -26,7 +26,7 @@ argument-hint: "<AgentLoom task or application path>"
 - 需要为 Application 配置或创建私有 Skill：读 [`references/configuration-surface.md`](references/configuration-surface.md) 的 Skills/Hook 配置，再读 [`references/application-generation.md`](references/application-generation.md) 的目录规范。
 - 需要配置或验证 shell 权限、allowlist、audit log、sandbox、路径安全、后台任务或 stall 检测：先读 [`references/shell-security-audit.md`](references/shell-security-audit.md)，再按需要读配置面和验证评审。
 - 需要验证是否真是多 Agent、是否能运行、问题怎么记录：读 [`references/validation-and-review.md`](references/validation-and-review.md)。
-- 修改 checkpoint、resume、日志/维测、并发 Worker、文件回滚、`loom list-tasks` 或 `loom clean-tasks` 这类框架运行时能力：读 [`references/validation-and-review.md`](references/validation-and-review.md) 的“框架运行时功能验证”，并用真实 Application 跑功能路径。
+- 修改 ContextEngine/压缩、checkpoint、resume、日志/维测、并发 Worker、文件回滚、`loom list-tasks` 或 `loom clean-tasks` 这类框架运行时能力：读 [`references/validation-and-review.md`](references/validation-and-review.md) 的“框架运行时功能验证”，并用真实 Application 跑功能路径。
 - 需要写 README 或验证记录：读 [`references/readme-template.md`](references/readme-template.md)。
 - 需要看一个按本 Skill 创建的简单多 Agent 示例：参考 `applications/feature_planner_demo/README.md`。
 - 只有当规则会跨多个 Application 复用、需要 Hook、或必须长期注入领域协议时，才创建新的私有 Skill；否则不要创建 Skill。
@@ -50,8 +50,11 @@ argument-hint: "<AgentLoom task or application path>"
 4. 单职责用单 Agent；多个可独立验收阶段才用 Supervisor + N Worker。
 5. Application 内容必须落到 `applications/<app_name>/`；框架级 Skill/Hook 扩展按真实加载路径落盘；README 必须同步写验证记录。
 6. 写配置前先确认配置归属：LLM 参数只进 `config/llm.yaml`；应用行为优先用 `applications/<app>/config/system.yaml` 或 Agent YAML 白名单字段；Skill hooks 只写在 `SKILL.md` frontmatter。
-7. 如果用户不确定 shell 权限怎么配，先用隔离 runtime 跑真实 workflow，读取 `shell_audit.log` 里的 `[POLICY_SNAPSHOT]` 和拦截事件，再收敛 `allowed_commands`、`allowed_operators`、路径规则或 sandbox。
-8. 最后必须运行验证命令。能跑到哪一步就记录到哪一步，不把“未执行”说成“通过”。
+7. 新增或改变任何可配置字段时，必须同步更新 `references/configuration-surface.md` 和相关 YAML 契约；优先精简配置，只暴露用户确实需要调的字段，不为了“完整”增加开关。
+8. 框架功能不要新增兼容桥、旧字段回退或第二套路径；如果契约需要变化，直接改主路径、配置白名单、文档和验证。
+9. 设计框架功能时必须先写验证矩阵：单测证明局部规则，真实 Application 证明完整运行链路；涉及上下文压缩时必须验证压缩后能按 `ContextRef` retrieve 原文，涉及 resume 时必须验证恢复后旧 ref 仍可 retrieve。
+10. 如果用户不确定 shell 权限怎么配，先用隔离 runtime 跑真实 workflow，读取 `shell_audit.log` 里的 `[POLICY_SNAPSHOT]` 和拦截事件，再收敛 `allowed_commands`、`allowed_operators`、路径规则或 sandbox。
+11. 最后必须运行验证命令。能跑到哪一步就记录到哪一步，不把“未执行”说成“通过”。
 
 ## 命令速查
 

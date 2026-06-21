@@ -10,6 +10,7 @@ from src.tools.code_editor import (
     write_whole_file,
 )
 from src.tools.codex import codex
+from src.tools.context import loom_retrieve_context
 from src.tools.git import (
     get_git_diff_content,
     git_grep_files,
@@ -99,6 +100,8 @@ __all__ = [
     "list_background_tasks",
     # Codex
     "codex",
+    # Context
+    "loom_retrieve_context",
     # File ops — core (aligned with upstream)
     "read_file",
     "edit_file",

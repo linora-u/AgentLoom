@@ -44,8 +44,18 @@ The system first locates the project root directory (`agent_root`) and loads `co
 When loading an Agent YAML, the system automatically searches upward for its parent `applications/<app>` directory. If a `config/system.yaml` exists in that application directory, it is deep-merged on top of the global configuration.
 
 #### Level 3: Agent-level Override
-In addition to defining its own workflow, a single Agent's YAML file can override certain system configurations. The whitelisted fields that support override (`_WORKFLOW_OVERLAY_KEYS`) contain only 7 fields:
-- `system`, `smart_summary`, `tool_access_control`, `execution_env`, `code_agent`, `tools`, `prompt`.
+In addition to defining its own workflow, a single Agent's YAML file can override selected system configurations. The whitelisted fields that support override (`_WORKFLOW_OVERLAY_KEYS`) are:
+- `system`, `smart_summary`, `context_engine`, `tool_access_control`, `execution_env`, `code_agent`, `tools`, `shell_settings`, `tools_mapping`, `default_loaded_tools`, `prompt`, `mcp_servers`.
+
+`context_engine` is intentionally small. It is enabled by the task runtime and uses the task-scoped checkpoint context store; normal overrides should only tune:
+
+```yaml
+context_engine:
+  min_chars: 2000
+  preview_max_chars: 3000
+```
+
+Do not add a second retrieval path or a disable switch around ContextEngine. Large tool/worker output should be restored through `loom_retrieve_context` and `ContextRef`.
 
 ## 3. Complete Isolation of LLM Configuration
 

@@ -6,12 +6,65 @@ Called by markdown_tool.generate_markdown_map().
 
 import hashlib
 import json
+import shutil
 from collections import defaultdict
 from pathlib import Path
 from typing import Optional
 
+from .paths import repo_map_docs_root, repo_map_skill_root
+
 
 IMPORTANCE_STARS = ["", "★", "★★", "★★★", "★★★★", "★★★★★"]
+
+
+def _migrate_legacy_analysis_files(legacy_root: Path, docs_root: Path) -> int:
+    """Copy existing analysis.md files from a previous docs root to the canonical root."""
+    if not legacy_root.exists() or legacy_root.resolve() == docs_root.resolve():
+        return 0
+
+    migrated = 0
+    for legacy_analysis in legacy_root.rglob("analysis.md"):
+        try:
+            legacy_analysis.relative_to(docs_root)
+            continue
+        except ValueError:
+            pass
+        rel = legacy_analysis.relative_to(legacy_root)
+        target = docs_root / rel
+        if target.exists():
+            continue
+        target.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(legacy_analysis, target)
+        migrated += 1
+    return migrated
+
+
+def _cleanup_flat_skill_docs(skill_root: Path, docs_root: Path, dir_keys: list[str]) -> None:
+    """Remove docs from the previous flat Skill layout after migration."""
+    if not skill_root.exists():
+        return
+
+    for filename in ("index.md", "analysis.md", "dependencies.md"):
+        path = skill_root / filename
+        if path.exists():
+            path.unlink()
+
+    first_level_dirs = {
+        Path(dir_key).parts[0]
+        for dir_key in dir_keys
+        if dir_key and dir_key != "(root)" and Path(dir_key).parts
+    }
+    reserved = {"references", "scripts", "assets", "agents"}
+    for dirname in first_level_dirs:
+        if dirname in reserved:
+            continue
+        path = skill_root / dirname
+        if path.exists() and path.is_dir() and path.resolve() != docs_root.resolve():
+            shutil.rmtree(path)
+
+    old_meta = skill_root / "_repo_map"
+    if old_meta.exists():
+        shutil.rmtree(old_meta)
 
 
 def _stars(rank: int, total: int) -> str:
@@ -40,11 +93,11 @@ def render_directory_map(
     the project directory structure.
 
     For each directory that contains source files, creates:
-      <output_dir>/repo_map/<rel_dir>/index.md
+      <output_dir>/<project-name>-repo-map/references/repo_map/<rel_dir>/index.md
 
     Also creates:
-      <output_dir>/repo_map/index.md   — project-level overview
-      <output_dir>/repo_map/dependencies.md — top cross-file dependencies
+      <output_dir>/<project-name>-repo-map/references/repo_map/index.md   — project-level overview
+      <output_dir>/<project-name>-repo-map/references/repo_map/dependencies.md — top cross-file dependencies
 
     Args:
         ranked_file: Path to ranked.json produced by scan_rank_tool.
@@ -62,7 +115,10 @@ def render_directory_map(
     all_tags: list[dict] = json.loads(tags_path.read_text(encoding="utf-8"))
     meta: dict = json.loads(meta_path.read_text(encoding="utf-8")) if meta_path.exists() else {}
 
-    out_map = Path(output_dir) / "repo_map"
+    out_root = Path(output_dir)
+    skill_root = repo_map_skill_root(out_root, scan_meta=meta)
+    out_map = repo_map_docs_root(out_root, scan_meta=meta)
+    legacy_out_map = out_root / "repo_map"
     out_map.mkdir(parents=True, exist_ok=True)
 
     total = len(ranked)
@@ -331,6 +387,18 @@ def render_directory_map(
     deps_path.write_text("\n".join(deps_lines), encoding="utf-8")
     generated_files.append(str(deps_path))
 
+    migrated_analyses = _migrate_legacy_analysis_files(legacy_out_map, out_map)
+    migrated_analyses += _migrate_legacy_analysis_files(skill_root, out_map)
+    if legacy_out_map.exists() and legacy_out_map.resolve() != out_map.resolve():
+        shutil.rmtree(legacy_out_map)
+    _cleanup_flat_skill_docs(
+        skill_root=skill_root,
+        docs_root=out_map,
+        dir_keys=[rel_dir if rel_dir else "(root)" for rel_dir in dir_files.keys()],
+    )
+    if migrated_analyses:
+        print(f"[renderer] Migrated {migrated_analyses} legacy analysis.md files into {out_map}")
+
     # ------------------------------------------------------------------ #
     # 4. analysis_progress.json — state for step3 for loop
     # ------------------------------------------------------------------ #
@@ -351,6 +419,11 @@ def render_directory_map(
         dir_key = rel_dir if rel_dir else "(root)"
         md_rel = (rel_dir + "/index.md") if rel_dir else "index.md"
         md_abs = str(out_map / rel_dir / "index.md") if rel_dir else str(out_map / "index.md")
+        analysis_abs = (
+            str(out_map / rel_dir / "analysis.md")
+            if rel_dir
+            else str(out_map / "analysis.md")
+        )
         best_rank = min(rf["rank"] for rf in dir_files[rel_dir])
         new_hash = _index_md_hashes.get(dir_key, "")
 
@@ -366,6 +439,7 @@ def render_directory_map(
                 **old_entry,
                 "md_file": md_abs,
                 "md_rel": md_rel,
+                "output": analysis_abs,
                 "rank": best_rank,
                 "file_count": len(dir_files[rel_dir]),
                 "index_md_hash": new_hash,
