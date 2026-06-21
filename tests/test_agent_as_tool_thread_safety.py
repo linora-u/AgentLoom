@@ -229,8 +229,68 @@ class TestFactoryMode:
         assert len(errors) == 1
         assert len(results) == 3
 
-    def test_single_call_backward_compat(self):
-        """Single synchronous call should still work identically to before."""
+    def test_large_worker_result_returns_context_ref(self, tmp_path):
+        from src.lib.context_engine import ContextEngine, ContextEngineConfig
+        from src.lib.context_engine.runtime import clear_current_context_engine, set_current_context_engine
+        from src.lib.smolagents.agent.yaml_agent_factory import YamlConfiguredAgent
+
+        config = _make_minimal_config()
+
+        class LargeResultAgent:
+            REQUIRED_CONFIG_FIELDS = ["name", "description", "workflow"]
+
+            def __init__(self, config, model=None, execution_env=None, logger=None, **kw):
+                self._config = config
+                self._model = model or MagicMock(name="model")
+                self.model = self._model
+                self.logger = logger
+                self._execution_env = execution_env
+                self.name = config["name"]
+                self.description = config.get("description", "")
+
+            def _ensure_normalized(self):
+                from src.lib.smolagents.agent.agent_validation import AgentConfigNormalizer
+
+                return AgentConfigNormalizer.build_worker_normalized_config(
+                    self._config, agent_root=".", source_name="test",
+                )
+
+            def run(self, formatted_query, additional_args=None):
+                return "worker payload\n" * 80
+
+            def agent_as_tool(self):
+                return YamlConfiguredAgent.__dict__["agent_as_tool"](self)
+
+        engine = ContextEngine(
+            tmp_path / "context_store",
+            config=ContextEngineConfig(min_chars=10, preview_max_chars=120),
+        )
+        set_current_context_engine(engine)
+        try:
+            tool = LargeResultAgent(config).agent_as_tool()
+            result = tool(query="payload")
+
+            assert result.startswith("[ContextRef ctx_")
+            ref = result.split()[1]
+            assert "worker payload" in engine.retrieve(ref, offset=0, limit=1)
+        finally:
+            clear_current_context_engine(engine)
+
+    def test_worker_context_engine_failure_is_visible(self):
+        from src.lib.context_engine.runtime import clear_current_context_engine, set_current_context_engine
+
+        bad_engine = MagicMock()
+        bad_engine.compress_tool_result.side_effect = RuntimeError("worker context store unavailable")
+        set_current_context_engine(bad_engine)
+        try:
+            tool, _, _ = _create_tool_with_mock_agent()
+            with pytest.raises(RuntimeError, match="worker context store unavailable"):
+                tool(query="test")
+        finally:
+            clear_current_context_engine(bad_engine)
+
+    def test_single_synchronous_call_returns_string(self):
+        """Single synchronous call returns the worker result."""
         instances = []
         tool, _, _ = _create_tool_with_mock_agent(agent_instances=instances)
 

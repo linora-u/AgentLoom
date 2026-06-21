@@ -60,7 +60,7 @@ find applications/<app_name>/agent_tools -name '*.py' -print0 2>/dev/null | xarg
 
 ## 框架运行时功能验证
 
-修改 checkpoint、resume、日志/维测、并发 Worker、文件回滚、任务列表或任务清理时，不能只跑单测；至少选 2 个真实 Application 或已有真实 workflow 跑功能路径。优先使用仓库里的 `applications/test_demo/*checkpoint*`、`applications/test_demo/*file_rewind*`、`applications/feature_planner_demo` 这类覆盖面明确的应用。
+修改 ContextEngine/CCR、checkpoint、resume、日志/维测、并发 Worker、文件回滚、任务列表或任务清理时，不能只跑单测；至少选 2 个真实 Application 或已有真实 workflow 跑功能路径。优先使用仓库里的 `applications/test_demo/*checkpoint*`、`applications/test_demo/*file_rewind*`、`applications/feature_planner_demo` 这类覆盖面明确的应用。
 
 建议用隔离运行根，避免污染用户已有 checkpoint：
 
@@ -78,6 +78,17 @@ rm -rf "$AGENT_LOOM_RUNTIME_ROOT"
 - 涉及 subagent/Worker checkpoint 时，要分别验证 Supervisor 中断恢复和 Worker 半路中断恢复；Worker 恢复必须证明没有新开重复 `call_index`，且能从 per-call memory checkpoint 继续。
 - file-history 场景要检查 `file-history/snapshots.json` 和备份文件，确认早期备份没有被后续 snapshot 覆盖。
 - 清理场景要实际跑 `loom clean-tasks --all`，确认新旧 worker checkpoint 布局都会被删除。
+
+ContextEngine/CCR 额外必须验证：
+
+- 历史消息压缩后，tool/worker 原始输出进入 task-scoped `context_store/entries/*.json`。
+- 模型可见内容是 `ContextRef` 预览，不是旧 temp-file 路径或不可逆截断。
+- `loom_retrieve_context` 能按 ref、query、offset/limit 取回原文中的中间隐藏内容。
+- 重复压缩已带 `ContextRef` 的历史不会二次压缩。
+- 写入/编辑/删除类工具和 user/system 原始消息不会被压缩。
+- checkpoint/resume 后，旧历史里的 ref 仍能 retrieve。
+- JSON、search、log、多 worker 至少各有一条真实 Application 或集成验证覆盖；log 必须证明错误/traceback/尾部保留。
+- 如果新增或修改配置字段，验证必须覆盖默认配置和应用级覆盖，并同步 `agentloom-framework-skill/references/configuration-surface.md`。
 
 当前仓库可用的真实 LLM 验证脚本：
 

@@ -14,20 +14,26 @@ Compression Pipeline (executed in order by ``get_compressed_messages``):
       for each file are replaced with a short placeholder.
       *Idempotent – running twice has no additional effect.*
 
-  Layer 2 – Tool Output Hard Truncation  (``_apply_tool_output_truncation``)
+  Layer 2 – Reversible ContextEngine Compression  (``_apply_context_engine_compression``)
+      Stores large tool responses in the active task-scoped ContextStore and
+      replaces visible content with a compact preview plus ContextRef.  The
+      original content remains retrievable through ``loom_retrieve_context``.
+      *Idempotent.*
+
+  Layer 3 – Tool Output Hard Truncation  (``_apply_tool_output_truncation``)
       Caps excessively long TOOL_RESPONSE content to per-tool character
       limits (e.g. shell_tool → 2 000 chars, ripgrep → 3 000 chars).
       Head + tail are kept; the middle is replaced with a truncation notice.
       *Idempotent.*
 
-  Layer 3 – Observation Masking  (``_apply_observation_masking``)
+  Layer 4 – Observation Masking  (``_apply_observation_masking``)
       Inspired by OpenHands' ``ObservationMaskingCondenser``.  The oldest
       ``TRUNCATION_FRAC_TO_REMOVE`` fraction of visible tool responses are
       replaced with a short placeholder, while the corresponding tool-call
       messages are left intact to preserve the conversation structure.
       *Idempotent.*
 
-  Layer 4 – LLM Summarization  (``summarize_conversation``)
+  Layer 5 – LLM Summarization  (``summarize_conversation``)
       Sends the conversation to a summary model to produce a condensed
       replacement.  Gated behind the ``smart_summary`` flag.
       *NOT idempotent – costs an LLM call.*
@@ -60,6 +66,8 @@ from litellm.utils import token_counter
 from smolagents import AgentLogger
 from smolagents.models import ChatMessage, MessageRole
 from src.lib.config.defaults import DEFAULT_MAX_TOKENS
+from src.lib.context_engine.engine import CONTEXT_REF_PREFIX
+from src.lib.context_engine.runtime import get_current_context_engine
 from src.lib.logging import get_logger
 
 # ===========================================================================
@@ -698,8 +706,12 @@ def _recent_error_response_indices(
     return exempt_indices
 
 
+def _is_context_ref_response(text: str) -> bool:
+    return text.startswith(CONTEXT_REF_PREFIX) or CONTEXT_REF_PREFIX in text[:200]
+
+
 def _is_placeholder_response(text: str) -> bool:
-    return text in (OBSERVATION_MASKING_PLACEHOLDER, FILE_DEDUP_PLACEHOLDER)
+    return text in (OBSERVATION_MASKING_PLACEHOLDER, FILE_DEDUP_PLACEHOLDER) or _is_context_ref_response(text)
 
 
 def _is_group_truncatable(
@@ -773,6 +785,7 @@ def _apply_tool_dedup(
     # -----------------------------------------------------------------------
     # Map from original message idx -> new observation text (only old reads)
     replacements: dict[int, tuple[str, str]] = {}
+    engine = get_current_context_engine()
 
     for (tool_name, key), response_indices in tool_read_pairs.items():
         if len(response_indices) <= 1:
@@ -781,7 +794,17 @@ def _apply_tool_dedup(
         for response_idx in response_indices[:-1]:
             if response_idx not in replacements:
                 original_text = _extract_content_text(messages[response_idx].message.content)
-                replacements[response_idx] = (original_text, FILE_DEDUP_PLACEHOLDER)
+                ref_preview = None
+                if engine is not None:
+                    ref_preview = engine.compress_tool_result(
+                        original_text,
+                        tool_name=tool_name,
+                        source=f"file_dedup:{key}",
+                    )
+                replacements[response_idx] = (
+                    original_text,
+                    ref_preview or FILE_DEDUP_PLACEHOLDER,
+                )
 
     if not replacements:
         return messages, 0.0
@@ -830,7 +853,65 @@ def _extract_tools_from_code(code: str) -> List[str]:
 
 
 # ===========================================================================
-# Layer 2 – Tool Output Hard Truncation
+# Layer 2 – Reversible ContextEngine Compression
+# ===========================================================================
+
+def _apply_context_engine_compression(
+    messages: List[InternalChatMessage],
+    logger: Optional[AgentLogger] = None,
+) -> tuple[list[InternalChatMessage], int]:
+    """Compress large tool responses into previews backed by retrievable refs."""
+    engine = get_current_context_engine()
+    if engine is None:
+        return messages, 0
+
+    log = get_logger(logger, __name__)
+    replacements: dict[int, str] = {}
+    total_saved_chars = 0
+    pairs = _iter_visible_tool_response_pairs(messages)
+    candidate_indices = [pair.response_index for pair in pairs]
+    error_exempt_indices = _recent_error_response_indices(messages, candidate_indices)
+
+    for pair in pairs:
+        if pair.response_index in error_exempt_indices:
+            continue
+        if _is_tool_response_exempt(messages, pair.response_index):
+            continue
+        response_text = _extract_content_text(messages[pair.response_index].message.content)
+        if not response_text or _is_placeholder_response(response_text):
+            continue
+
+        tool_name = pair.invocations[0].name if pair.invocations else "default"
+        preview = engine.compress_tool_result(
+            response_text,
+            tool_name=tool_name,
+            source=f"conversation_tool_response:{pair.response_index}",
+        )
+        if preview is None:
+            continue
+        replacements[pair.response_index] = preview
+        total_saved_chars += max(0, len(response_text) - len(preview))
+
+    if not replacements:
+        return messages, 0
+
+    new_messages = []
+    for idx, msg in enumerate(messages):
+        if idx in replacements:
+            new_messages.append(_clone_internal_message_with_content(msg, replacements[idx]))
+        else:
+            new_messages.append(msg)
+
+    log.info(
+        "[ContextEngine] Replaced %d tool responses with retrievable previews. Chars saved: %d",
+        len(replacements),
+        total_saved_chars,
+    )
+    return new_messages, total_saved_chars
+
+
+# ===========================================================================
+# Layer 3 – Tool Output Hard Truncation
 # ===========================================================================
 
 def _apply_tool_output_truncation(
@@ -863,6 +944,8 @@ def _apply_tool_output_truncation(
 
         primary, quota = min(quotas, key=lambda item: item[1])
         response_text = _extract_content_text(messages[pair.response_index].message.content)
+        if _is_context_ref_response(response_text):
+            continue
         if len(response_text) <= quota:
             continue
 
@@ -894,7 +977,7 @@ def _apply_tool_output_truncation(
 
 
 # ===========================================================================
-# Layer 3 – Observation Masking
+# Layer 4 – Observation Masking
 # ===========================================================================
 
 def _apply_observation_masking(
@@ -1635,7 +1718,22 @@ class ConversationHistoryManager:
                 f"Continuing with Layer 2 Tool Output Truncation."
             )
 
-        # --- Layer 2: Tool Output Hard Truncation ---
+        # --- Layer 2: Reversible ContextEngine Compression ---
+        context_messages, context_saved = _apply_context_engine_compression(
+            self._internal_message_history,
+        )
+        if context_saved > 0:
+            self._internal_message_history = context_messages
+
+            current_tokens = _count_tokens(to_api_messages(self._internal_message_history), model_id)
+            if current_tokens <= self._max_tokens:
+                log.info(
+                    f"[Layer 2] ContextEngine reversible compression resolved context limits! "
+                    f"({current_tokens} <= {self._max_tokens})"
+                )
+                return to_api_messages(self._internal_message_history)
+
+        # --- Layer 3: Tool Output Hard Truncation ---
         trunc_messages, trunc_saved = _apply_tool_output_truncation(
             self._internal_message_history,
         )
@@ -1645,10 +1743,10 @@ class ConversationHistoryManager:
             # Recalculate tokens since we hard truncated strings
             current_tokens = _count_tokens(to_api_messages(self._internal_message_history), model_id)
             if current_tokens <= self._max_tokens:
-                log.info(f"[Layer 2] Tool output truncation resolved context limits! ({current_tokens} <= {self._max_tokens})")
+                log.info(f"[Layer 3] Tool output truncation resolved context limits! ({current_tokens} <= {self._max_tokens})")
                 return to_api_messages(self._internal_message_history)
 
-        # --- Layer 3: Observation Masking ---
+        # --- Layer 4: Observation Masking ---
         masked_messages, mask_saved = _apply_observation_masking(
             self._internal_message_history,
             frac_to_mask=TRUNCATION_FRAC_TO_REMOVE,
@@ -1658,7 +1756,7 @@ class ConversationHistoryManager:
 
             current_tokens = _count_tokens(to_api_messages(self._internal_message_history), model_id)
             if current_tokens <= self._max_tokens:
-                log.info(f"[Layer 3] Observation masking resolved context limits! ({current_tokens} <= {self._max_tokens})")
+                log.info(f"[Layer 4] Observation masking resolved context limits! ({current_tokens} <= {self._max_tokens})")
                 return to_api_messages(self._internal_message_history)
 
         if not self._smart_summary:

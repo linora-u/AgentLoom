@@ -194,6 +194,18 @@ class TestSupervisorCheckpoint:
     def test_load_nonexistent(self, cm: CheckpointManager, task_id: str):
         assert cm.load_supervisor_checkpoint(task_id) is None
 
+    def test_env_runtime_root_rebases_external_run_log_dir(self, monkeypatch, tmp_path):
+        runtime_root = tmp_path / "runtime"
+        external_log_dir = tmp_path / "project" / ".logs" / "test_supervisor" / "20260621_120000"
+        monkeypatch.setenv("AGENT_LOOM_RUNTIME_ROOT", str(runtime_root))
+
+        cm = CheckpointManager("test_supervisor", run_log_dir=external_log_dir)
+        cm.save_task_tree("task_env_root", {"task_id": "task_env_root", "status": "running"})
+
+        expected = runtime_root / "test_supervisor" / "20260621_120000" / "checkpoints" / "task_env_root" / "task_tree.json"
+        assert expected.exists()
+        assert not (external_log_dir / "checkpoints" / "task_env_root" / "task_tree.json").exists()
+
 
 # ── worker checkpoint ────────────────────────────────────────────────────
 

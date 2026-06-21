@@ -20,6 +20,7 @@ from applications.repo_map.agent_tools.pipeline_agent_tools import (
     _group_by_depth,
     _sort_bottom_up,
 )
+from applications.repo_map.agent_tools.paths import repo_map_docs_root
 
 
 # ═══════════════════════════════════════════════════════════════════ #
@@ -107,10 +108,11 @@ class TestParallelAnalysisIntegration:
         progress = {}
         for dir_path, cfg in dirs_config.items():
             cfg = dict(cfg)
+            docs_root = repo_map_docs_root(out)
             if dir_path == "(root)":
-                repo_dir = out / "repo_map"
+                repo_dir = docs_root
             else:
-                repo_dir = out / "repo_map" / dir_path
+                repo_dir = docs_root / dir_path
             repo_dir.mkdir(parents=True, exist_ok=True)
 
             analysis_content = cfg.pop("analysis", None)
@@ -168,4 +170,4 @@ class TestParallelAnalysisIntegration:
         data = json.loads(progress_file.read_text())
         assert "src" in data
         assert "(root)" in data
-        assert (out / "repo_map" / "src" / "index.md").exists()
+        assert (repo_map_docs_root(out) / "src" / "index.md").exists()

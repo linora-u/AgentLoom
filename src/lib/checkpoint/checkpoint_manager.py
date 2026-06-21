@@ -317,6 +317,11 @@ class CheckpointManager:
         # Per-run checkpoint root.
         if run_log_dir is not None:
             run_log_dir = Path(run_log_dir).resolve()
+            if os.environ.get("AGENT_LOOM_RUNTIME_ROOT", "").strip():
+                try:
+                    run_log_dir.relative_to(self._agent_root)
+                except ValueError:
+                    run_log_dir = self._agent_root / run_log_dir.name
             self._checkpoints_root: Path | None = run_log_dir / "checkpoints"
         elif self._explicit_base_dir:
             # Legacy / test mode: caller passed base_dir explicitly but no
@@ -387,6 +392,9 @@ class CheckpointManager:
 
     def _heartbeat_path(self, task_id: str) -> Path:
         return self._task_dir(task_id) / "heartbeat.json"
+
+    def context_store_dir(self, task_id: str) -> Path:
+        return self._task_dir(task_id) / "context_store"
 
     # ── task index (task_id → timestamp directory) ───────────────────────
 
@@ -753,6 +761,7 @@ class CheckpointManager:
         config_snapshot: dict | None = None,
         result: str | None = None,
         error: str | None = None,
+        context_store: dict | None = None,
     ) -> Path:
         """Save the supervisor's ``memory.steps`` plus metadata."""
         data = {
@@ -771,6 +780,8 @@ class CheckpointManager:
             data["result"] = result
         if error is not None:
             data["error"] = error
+        if context_store is not None:
+            data["context_store"] = context_store
         p = self._supervisor_ckpt(task_id)
         self._atomic_write(p, data)
         return p

@@ -29,7 +29,7 @@ Pipeline (3 steps):
     for cross-layer architectural reasoning.
 
   Step 4 — prepare Skill workspace (pure Python)
-    Copy repo_map docs and generate manifest/resolver/context.
+    Generate manifest/resolver/context inside the repo_map Skill root.
 
   Step 5 — write and validate Skill files (pure Python)
     Generate deterministic SKILL.md and examples, then validate the package.
@@ -42,12 +42,20 @@ Output structure:
   │   ├── tags_cache.json        # Incremental scan cache
   │   ├── scan_meta.json         # Scan metadata
   │   └── analysis_progress.json # Per-directory status + hashes
-  └── repo_map/
-      ├── index.md               # Root: top files + directory tree
-      ├── analysis.md             # Root architecture analysis
-      ├── dependencies.md         # Cross-file dependency graph
-      ├── <dir>/index.md          # Per-directory file listing
-      └── <dir>/analysis.md       # Per-directory LLM analysis
+  └── <project-name>-repo-map/
+      ├── SKILL.md               # Generated Skill entrypoint
+      ├── references/
+      │   ├── manifest.jsonl      # Source directory -> repo_map document routes
+      │   └── repo_map/
+      │       ├── index.md        # Root: top files + directory tree
+      │       ├── analysis.md      # Root architecture analysis
+      │       ├── dependencies.md  # Cross-file dependency graph
+      │       ├── <dir>/index.md   # Per-directory file listing
+      │       └── <dir>/analysis.md # Per-directory LLM analysis
+      ├── scripts/
+      │   └── resolve_repo_map_docs.py
+      ├── assets/examples/
+      └── agents/openai.yaml
 
 Usage:
     # Basic: scan project, output to <project>/.repo_map/
@@ -56,7 +64,6 @@ Usage:
     # With custom output dir and excluded directories
     .venv/bin/python applications/repo_map/repo_map_app.py /path/to/project \\
         --output_dir /tmp/mymap \\
-        --skill_output_dir /path/to/project/.agents/skills \\
         --exclude_dirs vendor \\
         --exclude_dirs third_party
 """
@@ -110,11 +117,10 @@ def _validate_and_prepare(
         raise PermissionError(f"No write permission on output_dir: {out}")
 
     # 3. skill_output_dir
+    # Deprecated: the generated Skill now lives under <output_dir>/<project>-repo-map
+    # so repo_map docs and incremental state are not duplicated into an external
+    # skills directory. Keep the argument accepted for old command lines.
     skill_out = Path(skill_output_dir).resolve() if skill_output_dir else None
-    if skill_out is not None:
-        skill_out.mkdir(parents=True, exist_ok=True)
-        if not os.access(skill_out, os.W_OK):
-            raise PermissionError(f"No write permission on skill_output_dir: {skill_out}")
 
     # 4. exclude_dirs
     cleaned: list[str] = []
@@ -168,9 +174,8 @@ def main(
         output_dir:   Where to write output files.
                       Defaults to <project_path>/.repo_map
         skill_output_dir:
-                      Parent directory where the generated Skill package is written.
-                      Defaults to <output_dir>/skills. The package name remains
-                      <project-name>-repo-map-navigator.
+                      Deprecated and ignored. The generated Skill package is
+                      <output_dir>/<project-name>-repo-map.
         exclude_dirs: Directory names/paths to exclude (relative to project_path).
                       Can be specified multiple times:
                         --exclude_dirs vendor --exclude_dirs third_party
@@ -185,7 +190,6 @@ def main(
         # With exclusions
         python repo_map_app.py /path/to/my_project \\
             --output_dir /tmp/map \\
-            --skill_output_dir /path/to/my_project/.agents/skills \\
             --exclude_dirs vendor \\
             --exclude_dirs build \\
             --exclude_dirs third_party
@@ -206,7 +210,10 @@ def main(
     print(f"[repo_map] Project: {proj}")
     print(f"[repo_map] Output:  {out}")
     if skill_out:
-        print(f"[repo_map] Skill output: {skill_out}")
+        print(
+            "[repo_map] Note: --skill_output_dir is deprecated and ignored; "
+            "Skill output is <output_dir>/<project-name>-repo-map."
+        )
     if excl:
         print(f"[repo_map] Exclude: {excl}")
 
@@ -239,10 +246,7 @@ def main(
     output_dir_marker = Path(out) / "data" / "output_dir.txt"
     output_dir_marker.write_text(str(out), encoding="utf-8")
     skill_output_dir_marker = Path(out) / "data" / "skill_output_dir.txt"
-    if skill_out:
-        os.environ["REPO_MAP_SKILL_OUTPUT_DIR"] = str(skill_out)
-        skill_output_dir_marker.write_text(str(skill_out), encoding="utf-8")
-    elif skill_output_dir_marker.exists():
+    if skill_output_dir_marker.exists():
         skill_output_dir_marker.unlink()
 
     from applications.repo_map.agent_tools.pipeline_agent_tools import (
@@ -260,7 +264,6 @@ def main(
     print("[repo_map] Step 4/5: Preparing Skill workspace...")
     prepare_summary = prepare_repo_map_skill_workspace(
         output_dir=str(out),
-        skill_output_dir=str(skill_out) if skill_out else None,
     )
     print(f"[repo_map] {prepare_summary}")
 

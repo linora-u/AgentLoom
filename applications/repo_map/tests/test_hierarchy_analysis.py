@@ -29,6 +29,7 @@ from applications.repo_map.agent_tools.pipeline_agent_tools import (
     _save_progress,
     _sort_bottom_up,
 )
+from applications.repo_map.agent_tools.paths import repo_map_docs_root
 
 
 # ═══════════════════════════════════════════════════════════════════ #
@@ -51,7 +52,7 @@ def _make_repo_map(
             - other keys go into analysis_progress.json entry
 
     Returns:
-        output_dir (= tmp_path itself, containing repo_map/ and data/)
+        output_dir (= tmp_path itself, containing project-repo-map/ and data/)
     """
     out = tmp_path
     data_dir = out / "data"
@@ -62,10 +63,11 @@ def _make_repo_map(
         cfg = dict(cfg)  # copy to avoid mutating caller's dict
 
         # Determine filesystem paths
+        docs_root = repo_map_docs_root(out)
         if dir_path == "(root)":
-            repo_dir = out / "repo_map"
+            repo_dir = docs_root
         else:
-            repo_dir = out / "repo_map" / dir_path
+            repo_dir = docs_root / dir_path
         repo_dir.mkdir(parents=True, exist_ok=True)
 
         # Write analysis.md if provided
@@ -361,7 +363,7 @@ class TestChildrenHash:
         h1 = _compute_children_hash("a", progress, out)
 
         # Change analysis.md content
-        (out / "repo_map" / "a" / "b" / "analysis.md").write_text(
+        (repo_map_docs_root(out) / "a" / "b" / "analysis.md").write_text(
             "updated content", encoding="utf-8"
         )
         h2 = _compute_children_hash("a", progress, out)
@@ -396,7 +398,7 @@ class TestChildrenHash:
         _save_progress(progress_file, progress)
 
         # Now update child's analysis.md (simulating re-analysis of a/b)
-        (out / "repo_map" / "a" / "b" / "analysis.md").write_text(
+        (repo_map_docs_root(out) / "a" / "b" / "analysis.md").write_text(
             "B analysis v2 — significantly different", encoding="utf-8"
         )
 
@@ -509,7 +511,7 @@ class TestChildrenHash:
         _save_progress(progress_file, progress)
 
         # --- Step 1: Leaf c changes ---
-        (out / "repo_map" / "a" / "b" / "c" / "analysis.md").write_text(
+        (repo_map_docs_root(out) / "a" / "b" / "c" / "analysis.md").write_text(
             "C analysis v2 — updated!", encoding="utf-8"
         )
 
@@ -521,7 +523,7 @@ class TestChildrenHash:
         progress["a/b"]["status"] = "pending"
 
         # --- Step 2: Simulate a/b re-analysis produces new analysis.md ---
-        (out / "repo_map" / "a" / "b" / "analysis.md").write_text(
+        (repo_map_docs_root(out) / "a" / "b" / "analysis.md").write_text(
             "B analysis v2 — includes new C insights", encoding="utf-8"
         )
         progress["a/b"]["status"] = "completed"
@@ -572,7 +574,7 @@ class TestChildrenHash:
         h1 = _compute_children_hash("a", progress, out)
 
         # Only change a/c
-        (out / "repo_map" / "a" / "c" / "analysis.md").write_text(
+        (repo_map_docs_root(out) / "a" / "c" / "analysis.md").write_text(
             "C changed!", encoding="utf-8"
         )
         h2 = _compute_children_hash("a", progress, out)
@@ -703,7 +705,7 @@ class TestEdgeCases:
         h1 = _compute_children_hash("a", progress, out)
 
         # Now create analysis.md for a/b (even empty)
-        (out / "repo_map" / "a" / "b" / "analysis.md").write_text(
+        (repo_map_docs_root(out) / "a" / "b" / "analysis.md").write_text(
             "", encoding="utf-8"
         )
         h2 = _compute_children_hash("a", progress, out)

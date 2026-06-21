@@ -1,10 +1,7 @@
 import inspect
 import json
-import os
-import tempfile
-import uuid
 from functools import wraps
-from typing import Any, Optional
+from typing import Any
 
 from smolagents.tools import Tool
 from src.trace.task_context import get_current_hook_manager
@@ -16,51 +13,19 @@ from .types import HookEvent
 logger = get_logger(__name__)
 HOOKS_INJECTED_ATTR = "_hooks_injected"
 
-# ---------------------------------------------------------------------------
-# Result persistence for oversized tool output (aligns with maxResultSizeChars)
-# ---------------------------------------------------------------------------
-_TOOL_RESULTS_DIR: Optional[str] = None
-_PREVIEW_SIZE = 2048
 
+def _try_context_engine_compress(tool_name: str, result: str) -> str | None:
+    """Compress a tool result through the active task-scoped ContextEngine."""
+    from src.lib.context_engine.runtime import get_active_context_engine
 
-def _ensure_tool_results_dir() -> str:
-    """Return (and lazily create) a temp directory for persisted tool results."""
-    global _TOOL_RESULTS_DIR
-    if _TOOL_RESULTS_DIR is None:
-        _TOOL_RESULTS_DIR = os.path.join(tempfile.gettempdir(), "agentloom_tool_results")
-        os.makedirs(_TOOL_RESULTS_DIR, exist_ok=True)
-    return _TOOL_RESULTS_DIR
-
-
-def _persist_large_result(tool_name: str, result: str, threshold: int) -> str:
-    """Write *result* to disk and return a preview message for the LLM.
-
-    The full output is saved to a file; the LLM receives a preview of the
-    first ``_PREVIEW_SIZE`` characters plus the file path so it can use
-    ``read_file`` to access the rest if needed.
-    """
-    results_dir = _ensure_tool_results_dir()
-    filename = f"{tool_name}_{uuid.uuid4().hex[:12]}.txt"
-    filepath = os.path.join(results_dir, filename)
-
-    with open(filepath, "w", encoding="utf-8") as f:
-        f.write(result)
-
-    size_kb = len(result) / 1024
-    preview = result[:_PREVIEW_SIZE]
-    has_more = len(result) > _PREVIEW_SIZE
-
-    lines = [
-        f"[Output too large ({size_kb:.1f} KB, threshold {threshold} chars). "
-        f"Full output saved to: {filepath}]",
-        "",
-        f"Preview (first {_PREVIEW_SIZE} chars):",
-        preview,
-    ]
-    if has_more:
-        lines.append("...")
-
-    return "\n".join(lines)
+    engine = get_active_context_engine()
+    if engine is None:
+        return None
+    return engine.compress_tool_result(
+        result,
+        tool_name=tool_name,
+        source=f"tool_result:{tool_name}",
+    )
 
 
 def _resolve_hook_manager() -> HookManager:
@@ -237,18 +202,12 @@ def inject_hooks(tool_instance: Tool) -> Tool:
             if result is None or (isinstance(result, str) and not result.strip()):
                 result = f"({tool_name} completed with no output)"
 
-            # Large-result persistence: if the result exceeds the per-tool
-            # threshold, persist the full output to disk and send a preview
-            # + file path to the LLM.
+            # Reversible CCR stores original tool output in the task-scoped
+            # ContextStore and returns a visible ContextRef preview.
             if isinstance(result, str):
-                try:
-                    from src.tools.tool_meta import get_tool_meta
-                    meta = get_tool_meta(tool_name)
-                    threshold = meta.max_result_chars
-                    if threshold is not None and len(result) > threshold:
-                        result = _persist_large_result(tool_name, result, threshold)
-                except Exception as trunc_err:
-                    logger.debug("Truncation check skipped for %s: %s", tool_name, trunc_err)
+                compressed_result = _try_context_engine_compress(tool_name, result)
+                if compressed_result is not None:
+                    result = compressed_result
 
             try:
                 post_result = hook_manager.trigger_hooks(
