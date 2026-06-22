@@ -1,0 +1,54 @@
+name: "tool_registry_core_validation"
+description: "Validate default ToolSpec registry core toolsets through real tool calls."
+
+model_type: "powerful"
+tool_call_type: "code_act"
+max_steps: 5
+
+workflow: |
+  # Tool Registry Core Validation
+
+  Execute one Python code block that calls the tools below directly. Do not
+  split this into multiple code blocks. Do not output prose outside the code
+  block.
+
+  ```python
+  root = "/tmp/agentloom_tool_registry_core_validation"
+  path = root + "/result.txt"
+  shell_tool(command=f"rm -rf {root} && mkdir -p {root}")
+  results = []
+
+  created = write_file(file_path=path, content="alpha one\nbeta two\ngamma three\n")
+  results.append(("write_file", "Created" in created or "Updated" in created, created))
+
+  edited = edit_file(
+      file_path=path,
+      edits=[
+          {"old_text": "alpha one", "new_text": "ALPHA one"},
+          {"old_text": "gamma three", "new_text": "GAMMA three"},
+      ],
+  )
+  results.append(("edit_file", "Successfully edited" in edited and "(2 edits)" in edited, edited))
+
+  final_content = read_file(file_path=path)
+  results.append(("read_file", "ALPHA one" in final_content and "GAMMA three" in final_content, final_content))
+
+  globbed = glob_search(pattern="*.txt", path=root)
+  results.append(("glob_search", "result.txt" in globbed, globbed))
+
+  grepped = grep_search(pattern="GAMMA", path=root)
+  results.append(("grep_search", "GAMMA three" in grepped, grepped))
+
+  listed = list_directory(directory_path=root)
+  results.append(("list_directory", "result.txt" in listed, listed))
+
+  ok = all(item[1] for item in results)
+  lines = ["CORE_TOOL_REGISTRY_VALIDATION: " + ("PASS" if ok else "FAIL")]
+  for name, passed, detail in results:
+      lines.append(f"{name}: {'PASS' if passed else 'FAIL'}")
+      if not passed:
+          lines.append(str(detail))
+  lines.append("Final file content:")
+  lines.append(final_content)
+  final_answer("\n".join(lines))
+  ```

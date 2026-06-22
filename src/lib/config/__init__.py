@@ -5,7 +5,7 @@ from .config import (
     build_effective_agent_config,
     get_code_agent_config,
     get_config,
-    get_default_tools,
+    get_default_toolsets,
     get_model_config,
 )
 from .config_validation import (
@@ -24,7 +24,7 @@ __all__ = [
     "build_effective_agent_config",
     "get_code_agent_config",
     "get_config",
-    "get_default_tools",
+    "get_default_toolsets",
     "get_model_config",
     "normalize_tool_access_control_section",
     "raise_project_key_error",

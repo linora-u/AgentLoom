@@ -2,7 +2,14 @@ name: "coding_standards"
 description: "Analyzes code for naming conventions, formatting, magic numbers, dead code, and duplication issues."
 tool_call_type: "code_act"
 model_type: "powerful"
-tools: []
+toolsets:
+  - "core_shell"
+  - "core_file"
+  - "core_search"
+  - "context"
+  - "skills"
+  - "markdown_report"
+  - "code_nav"
 workflow: |
   You are a **senior software engineer and code style expert**. In this phase you act as the **"Coding Standards & Style"** worker agent, responsible for identifying violations of coding conventions, style inconsistencies, and maintainability anti-patterns.
 
@@ -72,15 +79,6 @@ workflow: |
   Write analysis results as Markdown to `temp/QA_CodingStandards.md`, ensuring all sections above are included.
 
   **Important: Use `write_markdown_file` tool with `sections` parameter. For large content, use `append_markdown_sections`.**
-
-tools:
-  - name: "write_file"
-  - name: "write_markdown_file"
-  - name: "write_markdown_file_raw"
-  - name: "append_markdown_sections"
-  - name: "read_file"
-  - name: "get_file_outline"
-  - name: "browse_directory"
 
 agent_function_schema:
   description: |

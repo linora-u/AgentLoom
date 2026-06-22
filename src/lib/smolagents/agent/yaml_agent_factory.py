@@ -17,8 +17,8 @@ from src.lib.logging import (
 from src.lib.smolagents.agent.agent_validation import AgentConfigNormalizer, NormalizedAgentConfig
 from src.lib.utils.dynamic_import import load_function
 from src.workflows.workflow_manager import get_worker_agent_yaml_path, infer_category_from_yaml_path
-from src.lib.config import C, get_code_agent_config, get_default_tools
-from src.tools import resolve_tool_function
+from src.lib.config import C, get_code_agent_config, get_default_toolsets
+from src.tools import resolve_tool_function, resolve_toolsets
 
 # Keep module-level symbol for legacy tests that monkeypatch this path root.
 AGENT_ROOT = C.agent_root
@@ -719,24 +719,14 @@ class YamlConfiguredSupervisorAgent(RoleDrivenAgent):
         return self._inferred_category
 
     def _role_profile(self) -> AgentRoleProfile:
-        execution_normalized = self._ensure_execution_normalized()
-        execution_env_type = execution_normalized.executor_type
-        inject_default_file_tools = execution_env_type not in {"docker", "e2b"}
-        # If user explicitly set default_loaded_tools: [] (empty list) in YAML,
-        # suppress auto-injected file tools to respect the "no default tools" intent.
-        cfg_default_tools = self._config.get("default_loaded_tools")
-        if isinstance(cfg_default_tools, list) and len(cfg_default_tools) == 0:
-            inject_default_file_tools = False
-        # Also honour an explicit inject_default_file_tools: false in the YAML.
-        if "inject_default_file_tools" in self._config:
-            inject_default_file_tools = bool(self._config["inject_default_file_tools"])
+        self._ensure_execution_normalized()
         return AgentRoleProfile(
             agent_type=AgentType.SUPERVISOR,
             tool_call_type=self._resolve_tool_call_type(),
             cache_runtime_agent=True,
             enable_sub_task_tracking=False,
             additional_authorized_imports=['*'],
-            inject_default_file_tools=inject_default_file_tools
+            inject_default_file_tools=False,
         )
 
     def _transform_task(self, task: str) -> str:
@@ -914,20 +904,21 @@ class YamlAgentFactory:
                 execution_env_type,
             )
         else:
-            # Agent-level config takes priority: if the agent YAML explicitly declares
-            # `default_loaded_tools`, use that instead of the global effective config.
-            if "default_loaded_tools" in config:
-                default_tools_source = config
+            if "toolsets" in config:
+                raw_toolsets = config.get("toolsets", [])
             else:
-                default_tools_source = effective_agent_config
-            # Load default tools from unified config (config/system.yaml + overrides)
-            for tool_name in get_default_tools(default_tools_source):
-                try:
-                    tool_function = resolve_tool_function(tool_name)
-                    _append_tool(tool_function, explicit_name=tool_name)
-                    log.info(f"[YamlAgentFactory] Loaded default tool: {tool_name}")
-                except ValueError:
-                    log.warning(f"[YamlAgentFactory] Default tool not found: {tool_name}")
+                if isinstance(effective_agent_config, dict) and "default_toolsets" in effective_agent_config:
+                    raw_toolsets = get_default_toolsets(effective_agent_config)
+                else:
+                    raw_toolsets = None
+
+            if raw_toolsets is not None and not isinstance(raw_toolsets, list):
+                raise ValueError("toolsets/default_toolsets must be a list of toolset names")
+
+            for tool_name in resolve_toolsets(raw_toolsets):
+                tool_function = resolve_tool_function(tool_name)
+                _append_tool(tool_function, explicit_name=tool_name)
+                log.info(f"[YamlAgentFactory] Loaded toolset tool: {tool_name}")
 
         if 'tools' not in config:
             # Still check for MCP tools even when no explicit tools are listed.
@@ -938,6 +929,8 @@ class YamlAgentFactory:
                 append_tool=_append_tool,
                 log=log,
             )
+            from src.lib.permissions.policy_summary import patch_shell_tool_security
+            patch_shell_tool_security(tools, log)
             return tools, mcp_manager
 
         raw_tools = config['tools']
@@ -962,14 +955,14 @@ class YamlAgentFactory:
                 _append_tool(loaded_function, explicit_name=tool_name)
                 log.info(f"[YamlAgentFactory] Successfully loaded dynamic tool: {tool_name} from {module}.{function}")
             else:
-                # Convention-based resolution via src.tools attributes
+                # Registry-based built-in resolution.
                 try:
                     tool_function = resolve_tool_function(tool_name)
                 except ValueError as e:
                     log.error(f"[YamlAgentFactory] Failed to find predefined tool: {tool_name}")
                     raise ValueError(f"Tool '{tool_name}' not found, please verify the tool name") from e
                 tool_function = _bind_fixed_tool_args(tool_function, tool_name, fixed_args)
-                _append_tool(tool_function)
+                _append_tool(tool_function, explicit_name=tool_name)
                 log.info(f"[YamlAgentFactory] Successfully loaded predefined tool: {tool_name}")
 
         # Phase 3: MCP tools (connect to external MCP servers)

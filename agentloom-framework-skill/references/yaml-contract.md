@@ -80,7 +80,7 @@ Agent YAML 当前可覆盖的系统配置白名单：
 
 ```text
 system, smart_summary, context_engine, tool_access_control, execution_env,
-code_agent, tools, shell_settings, tools_mapping, default_loaded_tools, prompt,
+code_agent, tools, shell_settings, tools_mapping, default_toolsets, toolsets, prompt,
 mcp_servers
 ```
 

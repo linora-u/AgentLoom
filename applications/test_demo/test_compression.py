@@ -316,7 +316,7 @@ def _build_agent_scenarios() -> dict[str, AgentScenario]:
     workflow = demo_dir / "workflows" / "compression_test_agent.yaml"
 
     repeated_read_code = f"""
-dir_result = browse_directory(directory_path={str(demo_dir)!r}, max_depth=2, show_file_info=True)
+dir_result = list_directory(directory_path={str(demo_dir)!r}, max_depth=2, show_file_info=True)
 first_read = read_file(file_path={str(target)!r}, offset=1, limit=120)
 second_read = read_file(file_path={str(target)!r}, offset=1, limit=120)
 third_read = read_file(file_path={str(target)!r}, offset=121, limit=80)

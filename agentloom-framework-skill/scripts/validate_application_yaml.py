@@ -433,8 +433,10 @@ def _validate_overlay_config_types(
                 project_root=project_root,
             )
 
-    if "default_loaded_tools" in config:
-        tools = config.get("default_loaded_tools")
+    for field_name in ("default_toolsets", "toolsets"):
+        if field_name not in config:
+            continue
+        tools = config.get(field_name)
         if (
             not isinstance(tools, list)
             or any(not isinstance(item, str) or not item.strip() for item in tools)
@@ -442,12 +444,35 @@ def _validate_overlay_config_types(
             _add_error(
                 errors,
                 file_path=file_path,
-                field="default_loaded_tools",
+                field=field_name,
                 rule="type_list_of_strings",
-                message="default_loaded_tools 必须是字符串列表",
-                suggestion="使用如 default_loaded_tools: ['read_file', 'grep_search']；空列表表示显式关闭默认工具",
+                message=f"{field_name} 必须是字符串列表",
+                suggestion="使用如 toolsets: ['core_file', 'core_search']；空列表表示显式关闭内置工具",
                 project_root=project_root,
             )
+
+    if "default_loaded_tools" in config:
+        _add_error(
+            errors,
+            file_path=file_path,
+            field="default_loaded_tools",
+            rule="removed_field",
+            message="default_loaded_tools 已删除",
+            suggestion="全局配置使用 default_toolsets；Agent YAML 使用 toolsets，空列表表示无内置工具",
+            project_root=project_root,
+        )
+
+    tools_mapping = config.get("tools_mapping")
+    if isinstance(tools_mapping, dict) and "mapping" in tools_mapping:
+        _add_error(
+            errors,
+            file_path=file_path,
+            field="tools_mapping.mapping",
+            rule="removed_field",
+            message="tools_mapping.mapping legacy fallback 已删除",
+            suggestion="改用 tools_mapping.Claude 等平台键",
+            project_root=project_root,
+        )
 
 
 def _validate_mcp_servers_config(

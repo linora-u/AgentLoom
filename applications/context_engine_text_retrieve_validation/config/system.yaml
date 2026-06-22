@@ -1,0 +1,13 @@
+skills: []
+default_toolsets:
+  - context
+context_engine:
+  enabled: true
+  min_chars: 1000
+  preview_max_chars: 500
+  store:
+    max_entries: 1000
+    ttl_seconds: null
+tool_metadata:
+  make_context_engine_text_payload:
+    max_result_chars: null

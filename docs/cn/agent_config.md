@@ -821,38 +821,28 @@ tools:
 |--------|----------|
 | `read_file` | 读取文件内容（支持 offset/limit 分段读取） |
 | `write_file` | 创建新文件或覆盖已有文件 |
-| `write_whole_file` | 完整写入文件 |
-| `edit_file` | 编辑文件（查找替换） |
-| `move_file` | 移动文件 |
-| `rename_file` | 重命名文件 |
-| `copy_file` | 复制文件 |
-| `delete_file` | 删除文件 |
+| `edit_file` | 应用一个或多个唯一文本编辑 |
 | `write_markdown_file` | 写入 Markdown 文件 |
 | `write_markdown_file_raw` | 写入原始 Markdown 文件 |
 | `append_markdown_sections` | 追加 Markdown 章节内容 |
 | `get_file_outline` | 获取代码大纲（函数/类/结构体） |
-| `browse_directory` | 浏览目录结构 |
+| `list_directory` | 列出目录结构 |
 | `grep_search` | 正则搜索文件内容（基于 ripgrep） |
 | `glob_search` | Glob 模式搜索文件 |
-| `search_files` | 搜索文件 |
-| `code_search` | 搜索代码 |
-| `search_and_replace` | 文件内搜索替换 |
-| `code_replace` | 替换代码 |
-| `code_edit` | 代码编辑 |
 | `ast_grep_search_file` | AST 模式搜索 |
-| `get_git_diff_content` | 获取 Git diff |
-| `git_grep_files` | Git grep 搜索 |
-| `git_commit_files` | Git 提交特定文件 |
-| `git_auto_commit` | Git 自动提交 |
-| `git_check_dirty` | Git 检查未提交更改 |
-| `is_path_in_repo` | 检查路径是否在 Git 仓库内 |
+| `lsp_find_definition` | 查找符号定义 |
+| `lsp_find_references` | 查找符号引用 |
+| `lsp_get_document_symbols` | 列出文档符号 |
+| `lsp_hover` | 查看 hover/type 信息 |
+| `lsp_get_workspace_symbols` | 搜索工作区符号 |
+| `loom_retrieve_context` | 读取压缩上下文引用 |
 | `shell_tool` | 执行 shell 命令（受白名单限制） |
 | `load_skill` | 加载指定技能 |
 | `list_skills` | 列出可用技能 |
 
 ### 4.3 工具加载优先级
 
-1. **默认工具**：`config/system.yaml` 中 `default_loaded_tools` 列表自动加载
+1. **默认 toolsets**：`config/system.yaml` 中 `default_toolsets` 列表自动加载
 2. **Agent 工具**：Agent YAML 中 `tools` 列表的工具
 3. **去重规则**：同名工具后加载的覆盖先加载的
 
@@ -1097,7 +1087,7 @@ tools:
 
   # 也可以同时注册其他普通工具
   - name: "read_file"
-  - name: "browse_directory"
+  - name: "list_directory"
 ```
 
 > **工具描述自动提取**：框架会自动从 Python 函数的 `__doc__`（Docstring）提取工具描述。请确保在函数中写好文档注释，YAML 中的 `description` 字段会被忽略。
@@ -1364,7 +1354,7 @@ tools:
     module: "applications.repo_map.agent_tools.pipeline_agent_tools"
     function: "get_analysis_summary"
   - name: "read_file"
-  - name: "browse_directory"
+  - name: "list_directory"
 
 worker_agents:
   - path: "applications/repo_map/workflows/worker_agents/dir_architecture_analysis.yaml"
@@ -1529,7 +1519,7 @@ WARNING: Ignoring top-level key 'model' in agent config;
 | **列表** | **整体替换**（高优先级完全替代低优先级） |
 | **标量** | 整体替换 |
 
-> ⚠️ 列表是整体替换非追加！覆盖 `default_loaded_tools` 须写完整列表。
+> ⚠️ 列表是整体替换非追加！Agent YAML 的 `toolsets:` 会整体替换全局 `default_toolsets`；`toolsets: []` 表示不加载内置工具。
 
 ### 9.6 覆盖示例
 

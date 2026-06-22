@@ -1,0 +1,36 @@
+name: "context_engine_multi_worker_validation"
+description: "Validate multiple worker ContextRefs and retrievals in one supervisor run."
+model_type: "powerful"
+tool_call_type: "tool_call"
+max_steps: 12
+
+workflow: |
+  # ContextEngine Multi-Worker Validation
+
+  Execute these steps in order.
+
+  1. Call log_payload_worker with user_request:
+     "Return the large log validation payload exactly."
+  2. Call search_payload_worker with user_request:
+     "Return the large search validation payload exactly."
+  3. Each worker result must contain its own ContextRef marker. Do not guess the
+     hidden values from the task.
+  4. Call loom_retrieve_context for the log worker ref with:
+       query: "LOG_TARGET_RECORD"
+       offset: 0
+       limit: 20
+  5. Call loom_retrieve_context for the search worker ref with:
+       query: "SEARCH_TARGET_RECORD"
+       offset: 0
+       limit: 20
+  6. Final answer must be exactly:
+       MULTI_CONTEXT_RETRIEVE_PASS log_value=<log-value> search_value=<search-value>
+
+tools:
+  - name: "loom_retrieve_context"
+
+worker_agents:
+  - path: "applications/context_engine_multi_worker_validation/workflows/worker_agents/log_payload_worker.yaml"
+  - path: "applications/context_engine_multi_worker_validation/workflows/worker_agents/search_payload_worker.yaml"
+
+skills: []
