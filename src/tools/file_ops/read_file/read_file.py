@@ -41,7 +41,7 @@ def read_file(
     Results are returned using ``cat -n`` format, with line numbers
     starting at 1.
     This tool can only read text files, not directories or binary files.
-    To list a directory use the ``browse_directory`` or ``glob_search`` tool.
+    To list a directory use the ``list_directory`` or ``glob_search`` tool.
 
     Args:
         file_path: Absolute path to the file to read.
@@ -94,7 +94,7 @@ def read_file(
     if path.is_dir():
         raise ValueError(
             f"Path is a directory, not a file: {file_path}. "
-            "Use browse_directory or glob_search instead."
+            "Use list_directory or glob_search instead."
         )
 
     if not path.is_file():

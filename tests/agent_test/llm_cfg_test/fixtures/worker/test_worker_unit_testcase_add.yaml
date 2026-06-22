@@ -107,12 +107,8 @@ workflow: |
 tools:
   - name: "write_file"
   - name: "read_file"
-  - name: "browse_directory"
+  - name: "list_directory"
   - name: "grep_search"
-  - name: "code_edit"
-  - name: "code_search"
-  - name: "code_replace"
-  - name: "search_and_replace"
 
   - name: "resolve_function_targets"
     module: "applications.unit_test_studio.agent_tools.unit_test_tools"

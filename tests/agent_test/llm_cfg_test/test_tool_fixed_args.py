@@ -42,7 +42,7 @@ def test_fixed_args_are_hidden_from_llm_schema_and_applied(monkeypatch):
                 }
             ]
         },
-        effective_agent_config={"default_loaded_tools": []},
+        effective_agent_config={"default_toolsets": []},
     )
 
     tool_func = tools[0]
@@ -85,7 +85,7 @@ def test_dynamic_tool_fixed_args_use_yaml_name_as_exposed_tool_name(monkeypatch)
                 },
             ]
         },
-        effective_agent_config={"default_loaded_tools": []},
+        effective_agent_config={"default_toolsets": []},
     )
 
     assert [tool.__name__ for tool in tools] == ["codex1", "codex2"]
@@ -112,7 +112,7 @@ def test_fixed_args_reject_unknown_parameters(monkeypatch):
                     }
                 ]
             },
-            effective_agent_config={"default_loaded_tools": []},
+            effective_agent_config={"default_toolsets": []},
         )
 
 
@@ -127,5 +127,5 @@ def test_fixed_args_must_be_a_mapping():
                     }
                 ]
             },
-            effective_agent_config={"default_loaded_tools": []},
+            effective_agent_config={"default_toolsets": []},
         )

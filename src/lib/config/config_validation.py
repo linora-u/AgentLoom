@@ -247,7 +247,8 @@ class RootSettings(BaseModel):
     execution_env: dict[str, Any] = Field(default_factory=dict)
     code_agent: dict[str, Any] = Field(default_factory=dict)
     tools: list[Any] = Field(default_factory=list)
-    default_loaded_tools: list[str] = Field(default_factory=list)
+    default_toolsets: list[str] = Field(default_factory=list)
+    toolsets: list[str] = Field(default_factory=list)
     shell_settings: dict[str, Any] = Field(default_factory=dict)
     tools_mapping: dict[str, Any] = Field(default_factory=dict)
     tool_metadata: dict[str, Any] = Field(default_factory=dict)
@@ -264,6 +265,17 @@ def raise_project_key_error(source: str) -> ValueError:
 def validate_system_snapshot(snapshot: dict[str, Any], source: str) -> None:
     if "project" in snapshot:
         raise raise_project_key_error(source)
+    if "default_loaded_tools" in snapshot:
+        raise ValueError(
+            f"Unsupported top-level key 'default_loaded_tools' in {source}. "
+            "Use 'default_toolsets' in system config or 'toolsets' in Agent YAML."
+        )
+    tools_mapping = snapshot.get("tools_mapping")
+    if isinstance(tools_mapping, dict) and "mapping" in tools_mapping:
+        raise ValueError(
+            f"Unsupported key 'tools_mapping.mapping' in {source}. "
+            "Use platform keys such as 'tools_mapping.Claude'."
+        )
     RootSettings.model_validate(snapshot)
 
 

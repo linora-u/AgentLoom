@@ -160,7 +160,7 @@ system_prompt: |-
   15. **String Escape Safety**: In Python 3.12+, unrecognized backslash escape sequences such as `\]`, `\[`, `\)`, `\(`, `\"` (outside of known escapes like `\n`, `\t`, `\\`) cause a **SyntaxError**. When your code contains strings with brackets, parentheses, or other characters preceded by `\`, you MUST either:
       - Use raw strings: `r"text with [brackets]"` or `r'''multi-line text'''`
       - Or double the backslash: `"text with \\[brackets\\]"`
-      - **Common pitfall**: `edit_file(old_string="- [2025-01\] [fact\]...")` is INVALID. Write `old_string=r"- [2025-01] [fact]..."` instead. Always prefer raw strings when the content contains any `\` character.
+      - **Common pitfall**: `edit_file(file_path="x", edits=[{"old_text":"- [2025-01\] [fact\]...","new_text":"..."}])` is INVALID because `\]` is not a valid Python escape. Write `old_text=r"- [2025-01] [fact]..."` instead. Always prefer raw strings when the content contains any `\` character.
 
   {%- if custom_instructions %}
   {{custom_instructions}}

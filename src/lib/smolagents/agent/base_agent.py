@@ -48,10 +48,10 @@ from src.lib.smolagents.agent.agent_validation import (
     validate_execution_config_payload,
 )
 from src.lib.config.defaults import DEFAULT_MAX_TOKENS
-from src.lib.config import C, build_effective_agent_config, get_code_agent_config, get_default_tools
+from src.lib.config import C, build_effective_agent_config, get_code_agent_config, get_default_toolsets
 from src.lib.config.config_validation import BoolParser  # noqa: F401 — used elsewhere
 from src.lib.utils.workspace import ensure_workspace_mounted_once
-from src.tools.file_ops import browse_directory, read_file
+from src.tools import resolve_toolsets
 from src.trace import (
     clear_current_agent_id,
     clear_current_hook_manager,
@@ -564,10 +564,15 @@ class RoleDrivenAgent(BaseAgent):
         )
         self.initialize_skills_manager(self._config, logger=runtime_logger)
         try:
+            default_toolsets = (
+                self._config.get("toolsets")
+                if "toolsets" in self._config
+                else get_default_toolsets(self._effective_agent_config)
+            )
             AgentConfigNormalizer.validate_skill_dependencies(
                 self._config,
                 self._skills_manager,
-                default_tools=get_default_tools(self._effective_agent_config),
+                default_tools=resolve_toolsets(default_toolsets),
                 logger=runtime_logger,
             )
         except Exception:
@@ -793,17 +798,7 @@ class RoleDrivenAgent(BaseAgent):
         if skills_manager is None:
             skills_manager = SkillsManager.get_instance(logger=log)
 
-        tools_mapping = C.get('tools_mapping', {})
-
-        if not tools_mapping.get('Claude'):
-            legacy_mapping = tools_mapping.get('mapping', {})
-            if legacy_mapping:
-                if 'Claude' not in tools_mapping:
-                    tools_mapping['Claude'] = legacy_mapping
-                else:
-                    tools_mapping['Claude'].update(legacy_mapping)
-
-        skills_manager.set_tools_mapping(tools_mapping)
+        skills_manager.set_tools_mapping(C.get('tools_mapping', {}))
 
         # Load skills from effective agent config (app-level system.yaml overlay).
         # skills: []                         → explicit opt-out, skip default directory.
@@ -910,8 +905,6 @@ class RoleDrivenAgent(BaseAgent):
 
     def _build_runtime_tools(self, profile: AgentRoleProfile) -> List:
         tools = self.get_all_tools(agent_type=profile.agent_type.value.lower())
-        if profile.inject_default_file_tools:
-            tools = tools + [read_file, browse_directory]
 
         # Auto-inject todo_write when planning_interval is configured.
         planning_interval = normalize_positive_int_value(

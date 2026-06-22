@@ -16,41 +16,58 @@ description: |
 
 model_type: "powerful"
 tool_call_type: "code_act"
+max_steps: 5
 
 workflow: |
   # File Rewind Test Workflow
 
-  Execute ALL steps below IN ORDER. Each step MUST use the specified tool.
+  Execute one Python code block that calls the tools below directly. Do not
+  split this into multiple code blocks. Do not output prose outside the code
+  block.
 
-  ## Step 1: Create original file
-  Use shell_tool to run: mkdir -p /tmp/agentloom_rewind_test
-  Then use edit_file to create "/tmp/agentloom_rewind_test/original.txt"
-  with content: "version_1: original content\n"
+  ```python
+  path = "/tmp/agentloom_rewind_test/original.txt"
+  shell_tool(command="rm -rf /tmp/agentloom_rewind_test && mkdir -p /tmp/agentloom_rewind_test")
+  results = []
 
-  ## Step 2: First edit
-  Use edit_file to replace "version_1: original content" with
-  "version_2: first modification" in "/tmp/agentloom_rewind_test/original.txt".
+  created = write_file(file_path=path, content="version_1: original content\n")
+  results.append(("write_file original", "Created" in created or "Updated" in created, created))
 
-  ## Step 3: Second edit
-  Use edit_file to replace "version_2: first modification" with
-  "version_3: second modification" in "/tmp/agentloom_rewind_test/original.txt".
+  first = edit_file(
+      file_path=path,
+      edits=[{"old_text": "version_1: original content", "new_text": "version_2: first modification"}],
+  )
+  results.append(("edit_file first", "Successfully edited" in first, first))
 
-  ## Step 4: Verify final content
-  Use read_file to read "/tmp/agentloom_rewind_test/original.txt".
-  Verify it contains "version_3: second modification".
+  second = edit_file(
+      file_path=path,
+      edits=[{"old_text": "version_2: first modification", "new_text": "version_3: second modification"}],
+  )
+  results.append(("edit_file second", "Successfully edited" in second, second))
 
-  ## Step 5: Report
-  Report: ALL EDITS COMPLETED. The file history system should have
-  created pre-edit backups for each edit_file call.
+  final_content = read_file(file_path=path)
+  results.append(("read_file final", "version_3: second modification" in final_content, final_content))
+
+  ok = all(item[1] for item in results)
+  lines = ["FILE_REWIND_VALIDATION: " + ("PASS" if ok else "FAIL")]
+  for name, passed, detail in results:
+      lines.append(f"{name}: {'PASS' if passed else 'FAIL'}")
+      if not passed:
+          lines.append(str(detail))
+  lines.append("Final file content:")
+  lines.append(final_content)
+  lines.append("File history should have created pre-edit backups for each edit_file call.")
+  final_answer("\n".join(lines))
+  ```
 
 tools:
   - name: "shell_tool"
   - name: "read_file"
+  - name: "write_file"
   - name: "edit_file"
 
 worker_agents: []
 skills: []
-max_steps: 15
 
 execution_env:
   type: "local"

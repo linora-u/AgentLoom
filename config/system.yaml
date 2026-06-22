@@ -129,7 +129,24 @@ tool_access_control:
     # arbitrary locations. Only use this in trusted, isolated environments.
     # For production, replace "*" with specific project directories, e.g.:
     #   include_paths: ["/home/user/code", "/data/projects"]
-    - tools: ["shell_tool", "read_file", "edit_file", "write_markdown_file", "grep_search", "glob_search"]
+    - tools:
+        - "shell_tool"
+        - "read_file"
+        - "edit_file"
+        - "write_file"
+        - "list_directory"
+        - "grep_search"
+        - "glob_search"
+        - "write_markdown_file"
+        - "write_markdown_file_raw"
+        - "append_markdown_sections"
+        - "get_file_outline"
+        - "ast_grep_search_file"
+        - "lsp_find_definition"
+        - "lsp_find_references"
+        - "lsp_get_document_symbols"
+        - "lsp_hover"
+        - "lsp_get_workspace_symbols"
       include_paths:
         - "*"
   # Example:
@@ -137,10 +154,6 @@ tool_access_control:
   #   - tools: ["shell_tool", "read_file", "edit_file", "grep_search"]
   #     include_paths: ["~/shared-libs", "/home/*/code"]
   #     exclude_paths: ["secrets", ".env"]
-  #
-  #   - tools: ["move_file", "copy_file"]
-  #     exclude_paths: ["build", "dist"]
-  #     path_param_patterns: ["source", "destination"]
   #
   #   - tools: ["some_unrestricted_tool"]
   #     include_paths: ["*"]          # allow all paths
@@ -203,6 +216,18 @@ tool_metadata:
     max_result_chars: null          # exempt — handled by context compression dedup
     is_concurrency_safe: true
     category: file_ops
+  edit_file:
+    max_result_chars: 20000
+    is_concurrency_safe: true
+    category: file_ops
+  write_file:
+    max_result_chars: 20000
+    is_concurrency_safe: true
+    category: file_ops
+  list_directory:
+    max_result_chars: 12000
+    is_concurrency_safe: true
+    category: file_ops
   default:
     max_result_chars: 20000
     is_concurrency_safe: true
@@ -219,25 +244,16 @@ tool_metadata:
 #   default: 3000
 
 # ============================================
-# Default Loaded Tools
+# Default Toolsets
 # ============================================
-# Tools loaded by default for every agent (unless overridden by agent YAML).
-default_loaded_tools:
-  - "load_skill"
-  - "list_skills"
-  - "shell_tool"
-  - "check_background_task"
-  - "kill_background_task"
-  - "list_background_tasks"
-  - "loom_retrieve_context"
-  - "read_file"
-  - "grep_search"
-  - "glob_search"
-  - "lsp_find_definition"
-  - "lsp_find_references"
-  - "lsp_get_document_symbols"
-  - "edit_file"
-  - "write_markdown_file"
+# Toolsets loaded by default for every agent. Agent YAML `toolsets:` replaces
+# this list entirely; `toolsets: []` means no built-in tools.
+default_toolsets:
+  - "core_shell"
+  - "core_file"
+  - "core_search"
+  - "context"
+  - "skills"
 
 # ============================================
 # Shell Settings
@@ -314,7 +330,7 @@ shell_settings:
 tools_mapping:
   Claude:
     Read: "read_file"
-    Write: "write_markdown_file"
+    Write: "write_file"
     Bash: "shell_tool"
     Glob: "glob_search"
     Grep: "grep_search"

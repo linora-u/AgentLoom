@@ -24,16 +24,16 @@ def route_content(text: str, tool_name: str = "default") -> ContentKind:
     name = (tool_name or "").lower()
     stripped = (text or "").strip()
 
-    if name in {"grep_search", "git_grep_files", "search_files", "code_search", "ast_grep_search_file"}:
-        return ContentKind.SEARCH
     if re.search(r"(^|[_-])(log|logs|test|tests|build|pytest)([_-]|$)", name):
         return ContentKind.LOG
     if name in {"shell_tool", "python_interpreter", "run_skill_script"}:
         return ContentKind.LOG if _LOG_HINTS.search(stripped) else ContentKind.TEXT
-    if name in {"get_git_diff_content", "git_diff"}:
-        return ContentKind.DIFF
-    if name in {"read_file", "get_file_outline"}:
-        return ContentKind.CODE if _CODE_HINTS.search(stripped) else ContentKind.TEXT
+
+    registry_kind = _registry_content_kind(name)
+    if registry_kind is not None:
+        if registry_kind == ContentKind.CODE and not _CODE_HINTS.search(stripped):
+            return ContentKind.TEXT
+        return registry_kind
 
     if _looks_like_json(stripped):
         return ContentKind.JSON
@@ -46,6 +46,26 @@ def route_content(text: str, tool_name: str = "default") -> ContentKind:
     if _CODE_HINTS.search(stripped):
         return ContentKind.CODE
     return ContentKind.TEXT
+
+
+def _registry_content_kind(tool_name: str) -> ContentKind | None:
+    try:
+        from src.tools import get_tool_spec
+
+        output_kind = get_tool_spec(tool_name).output_kind
+    except ValueError:
+        return None
+    if output_kind == "search":
+        return ContentKind.SEARCH
+    if output_kind == "log":
+        return ContentKind.LOG
+    if output_kind == "diff":
+        return ContentKind.DIFF
+    if output_kind == "json":
+        return ContentKind.JSON
+    if output_kind == "code":
+        return ContentKind.CODE
+    return None
 
 
 def _looks_like_json(text: str) -> bool:

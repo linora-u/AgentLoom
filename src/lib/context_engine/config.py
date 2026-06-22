@@ -6,6 +6,28 @@ from dataclasses import dataclass, field
 from typing import Any
 
 
+def _default_skip_tools() -> tuple[str, ...]:
+    try:
+        from src.tools import list_tool_specs
+
+        destructive_file_tools = tuple(
+            spec.name
+            for spec in list_tool_specs()
+            if spec.is_destructive and spec.category == "file_ops"
+        )
+        if destructive_file_tools:
+            return destructive_file_tools
+    except Exception:
+        pass
+    return (
+        "edit_file",
+        "write_file",
+        "write_markdown_file",
+        "write_markdown_file_raw",
+        "append_markdown_sections",
+    )
+
+
 @dataclass(frozen=True)
 class ContextStoreConfig:
     max_entries: int = 1000
@@ -15,14 +37,7 @@ class ContextStoreConfig:
 @dataclass(frozen=True)
 class ContextSafetyConfig:
     skip_roles: tuple[str, ...] = ("user", "system")
-    skip_tools: tuple[str, ...] = (
-        "edit_file",
-        "write_file",
-        "write_markdown_file",
-        "write_markdown_file_raw",
-        "write_whole_file",
-        "delete_file",
-    )
+    skip_tools: tuple[str, ...] = field(default_factory=_default_skip_tools)
     preserve_recent_errors: int = 1
 
 

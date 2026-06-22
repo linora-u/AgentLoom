@@ -19,7 +19,7 @@ workflow:
 
 tools: []
 worker_agents: []
-default_loaded_tools: []
+toolsets: []
 skills: []
 
 execution_env:

@@ -1,4 +1,4 @@
-"""Tests for search tool exports and convention-based resolution.
+"""Tests for search tool exports and registry-backed resolution.
 
 Verifies that:
 1. Search tools are exported and callable from the package.
@@ -47,7 +47,7 @@ class TestSearchExportsCallable:
         assert callable(lsp_get_workspace_symbols)
 
 
-class TestConventionBasedResolution:
+class TestRegistryBasedResolution:
     """Tools resolve via ``resolve_tool_function()``."""
 
     def test_grep_search_resolves(self):
@@ -69,5 +69,5 @@ class TestConventionBasedResolution:
         assert resolve_tool_function("lsp_get_document_symbols") is lsp_get_document_symbols
 
     def test_nonexistent_tool_raises(self):
-        with pytest.raises(ValueError, match="not found"):
+        with pytest.raises(ValueError, match="registered built-in tool"):
             resolve_tool_function("nonexistent_tool_xyz")

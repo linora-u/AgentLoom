@@ -123,7 +123,7 @@ tools:
   - name: "write_file"
   - name: "read_file"
   - name: "get_file_outline"
-  - name: "browse_directory"
+  - name: "list_directory"
   - name: "get_module_context"
     module: "applications.ai_quality_analysis.agent_tools.module_context_generator"
     function: "get_module_context"

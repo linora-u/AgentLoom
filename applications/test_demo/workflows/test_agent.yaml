@@ -21,7 +21,7 @@ tools:
   - name: "write_file"
   - name: "read_file"
   - name: "get_file_outline"
-  - name: "browse_directory"
+  - name: "list_directory"
 
 worker_agents:
   []

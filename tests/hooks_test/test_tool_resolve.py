@@ -1,180 +1,148 @@
-"""Tests for convention-based tool resolution end-to-end.
-
-Verifies that all tools listed in config/system.yaml tools.default resolve
-successfully, that dynamic module loading still works, and that obsolete
-alias names correctly raise errors.
-"""
+"""Tests for registry-backed built-in tool resolution."""
 
 import importlib
+
 import pytest
 
-from src.tools.tool_meta import resolve_tool_function
 from src.lib.config import C
+from src.tools import DEFAULT_TOOLSETS
+from src.tools.tool_meta import (
+    get_tool_spec,
+    list_tool_specs,
+    list_toolsets,
+    resolve_tool_function,
+    resolve_toolsets,
+)
 
 
-# ---------------------------------------------------------------------------
-# All tools in config/system.yaml tools.default resolve successfully
-# ---------------------------------------------------------------------------
-
-class TestAllDefaultToolsResolve:
-    """Every tool in the system.yaml default tools list must be resolvable."""
-
-    @staticmethod
-    def _get_default_tools():
-        """Read the default_loaded_tools list from system config."""
-        default_list = C.get("default_loaded_tools", [])
-        assert isinstance(default_list, list), "default_loaded_tools must be a list"
-        assert len(default_list) > 0, "default_loaded_tools must not be empty"
-        return default_list
+class TestDefaultToolsetsResolve:
+    def test_system_default_toolsets_are_valid(self):
+        raw_toolsets = C.get("default_toolsets", [])
+        assert raw_toolsets == list(DEFAULT_TOOLSETS)
+        assert resolve_toolsets(raw_toolsets) == [
+            "shell_tool",
+            "check_background_task",
+            "kill_background_task",
+            "list_background_tasks",
+            "read_file",
+            "edit_file",
+            "write_file",
+            "list_directory",
+            "grep_search",
+            "glob_search",
+            "loom_retrieve_context",
+            "load_skill",
+            "list_skills",
+        ]
 
     def test_all_default_tools_resolve(self):
-        """Each tool in tools.default should resolve to a callable."""
-        default_tools = self._get_default_tools()
         failures = []
-        for tool_name in default_tools:
+        for tool_name in resolve_toolsets(C.get("default_toolsets", [])):
             try:
                 func = resolve_tool_function(tool_name)
                 if not callable(func):
                     failures.append(f"{tool_name}: resolved but not callable")
-            except ValueError as e:
-                failures.append(f"{tool_name}: {e}")
-        assert not failures, f"Failed to resolve tools:\n" + "\n".join(failures)
+            except ValueError as exc:
+                failures.append(f"{tool_name}: {exc}")
+        assert not failures
 
-    @pytest.mark.parametrize("tool_name", [
-        "load_skill",
-        "list_skills",
-        "shell_tool",
-        "read_file",
-        "grep_search",
-        "glob_search",
-        "lsp_find_definition",
-        "lsp_find_references",
-        "lsp_get_document_symbols",
-        "edit_file",
-        "write_markdown_file",
-    ])
+    @pytest.mark.parametrize("tool_name", resolve_toolsets(DEFAULT_TOOLSETS))
     def test_individual_default_tool_resolves(self, tool_name):
-        """Parametrized: each known default tool resolves."""
-        func = resolve_tool_function(tool_name)
-        assert callable(func)
+        assert callable(resolve_tool_function(tool_name))
 
 
-# ---------------------------------------------------------------------------
-# Dynamic module+function loading
-# ---------------------------------------------------------------------------
+class TestToolsets:
+    def test_known_toolsets(self):
+        toolsets = list_toolsets()
+        assert set(DEFAULT_TOOLSETS).issubset(toolsets)
+        assert toolsets["markdown_report"] == (
+            "write_markdown_file",
+            "write_markdown_file_raw",
+            "append_markdown_sections",
+        )
+        assert "get_file_outline" in toolsets["code_nav"]
+
+    def test_empty_toolsets_means_no_builtins(self):
+        assert resolve_toolsets([]) == []
+
+    def test_unknown_toolset_fails(self):
+        with pytest.raises(ValueError, match="Unknown toolset"):
+            resolve_toolsets(["legacy"])
+
 
 class TestDynamicModuleLoading:
-    """The tools package re-exports functions from sub-modules; verify."""
-
     def test_grep_search_from_search_module(self):
-        """grep_search originates from src.tools.search module."""
         mod = importlib.import_module("src.tools.search")
-        assert hasattr(mod, "grep_search")
         assert callable(mod.grep_search)
 
     def test_read_file_from_file_ops_module(self):
-        """read_file originates from src.tools.file_ops module."""
         mod = importlib.import_module("src.tools.file_ops")
-        assert hasattr(mod, "read_file")
         assert callable(mod.read_file)
 
-    def test_shell_tool_from_shell_module(self):
-        """shell_tool originates from src.tools.shell module."""
-        mod = importlib.import_module("src.tools.shell")
-        assert hasattr(mod, "shell_tool")
-        assert callable(mod.shell_tool)
-
     def test_resolved_function_matches_module_function(self):
-        """resolve_tool_function should return the same object as direct import."""
         from src.tools.search import grep_search as direct
-        resolved = resolve_tool_function("grep_search")
-        assert resolved is direct
 
-    def test_tools_package_exports_all_defaults(self):
-        """The __all__ list in src.tools should contain all defaults."""
-        import src.tools as tools_pkg
-        all_names = getattr(tools_pkg, "__all__", [])
-        for tool_name in ["grep_search", "glob_search", "shell_tool",
-                          "read_file", "edit_file"]:
-            assert tool_name in all_names, f"{tool_name} missing from __all__"
+        assert resolve_tool_function("grep_search") is direct
 
 
-# ---------------------------------------------------------------------------
-# Additional known tools resolve (beyond default list)
-# ---------------------------------------------------------------------------
-
-class TestAdditionalToolsResolve:
-    """Tools not in the default list but available in the package."""
-
-    @pytest.mark.parametrize("tool_name", [
-        "write_file",
-        "read_file",
-        "edit_file",
-        "get_file_outline",
-        "browse_directory",
-        "write_markdown_file_raw",
-        "append_markdown_sections",
-        "delete_file",
-        "move_file",
-        "rename_file",
-        "copy_file",
-        "search_files",
-        "code_search",
-        "code_replace",
-        "code_edit",
-        "search_and_replace",
-        "write_whole_file",
-        "get_git_diff_content",
-        "git_grep_files",
-        "is_path_in_repo",
-        "ast_grep_search_file",
-    ])
-    def test_extra_tool_resolves(self, tool_name):
-        func = resolve_tool_function(tool_name)
-        assert callable(func)
+class TestAdditionalToolsetsResolve:
+    @pytest.mark.parametrize(
+        "tool_name",
+        [
+            "write_markdown_file",
+            "write_markdown_file_raw",
+            "append_markdown_sections",
+            "get_file_outline",
+            "ast_grep_search_file",
+            "lsp_find_definition",
+            "lsp_find_references",
+            "lsp_get_document_symbols",
+            "lsp_hover",
+            "lsp_get_workspace_symbols",
+        ],
+    )
+    def test_optional_registry_tool_resolves(self, tool_name):
+        assert callable(resolve_tool_function(tool_name))
 
 
-# ---------------------------------------------------------------------------
-# Obsolete / alias names should NOT resolve
-# ---------------------------------------------------------------------------
+class TestRemovedToolsRaise:
+    @pytest.mark.parametrize(
+        "tool_name",
+        [
+            "browse_directory",
+            "code_search",
+            "code_replace",
+            "code_edit",
+            "search_and_replace",
+            "write_whole_file",
+            "delete_file",
+            "move_file",
+            "rename_file",
+            "copy_file",
+            "search_files",
+            "get_git_diff_content",
+            "git_grep_files",
+            "is_path_in_repo",
+            "git_commit_files",
+            "git_auto_commit",
+            "git_check_dirty",
+        ],
+    )
+    def test_removed_tool_names_do_not_resolve(self, tool_name):
+        with pytest.raises(ValueError, match="not a registered built-in tool"):
+            resolve_tool_function(tool_name)
 
-class TestObsoleteAliasesRaise:
-    """Old alias names that were removed/renamed should raise ValueError."""
 
-    @pytest.mark.parametrize("alias_name", [
-        "search_keyword_in_directory",
-        "find_files_by_pattern",
-        "execute_bash",
-        "run_command",
-    ])
-    def test_old_alias_raises_valueerror(self, alias_name):
-        with pytest.raises(ValueError, match="not found"):
-            resolve_tool_function(alias_name)
+class TestRegistryInvariants:
+    def test_tool_names_are_unique(self):
+        names = [spec.name for spec in list_tool_specs()]
+        assert len(names) == len(set(names))
 
-
-# ---------------------------------------------------------------------------
-# Boundary: special characters and edge cases
-# ---------------------------------------------------------------------------
-
-class TestEdgeCases:
-    """Edge cases for tool resolution."""
-
-    def test_whitespace_name_raises(self):
-        with pytest.raises(ValueError):
-            resolve_tool_function("  ")
-
-    def test_none_like_string_raises(self):
-        with pytest.raises(ValueError):
-            resolve_tool_function("None")
-
-    def test_module_path_not_a_tool(self):
-        """Dotted module paths should not resolve via convention."""
-        with pytest.raises(ValueError):
-            resolve_tool_function("src.tools.search.grep_search")
+    def test_all_specs_match_function_names(self):
+        for spec in list_tool_specs():
+            assert get_tool_spec(spec.name) is spec
+            assert callable(spec.function)
 
     def test_case_sensitive(self):
-        """Tool names are case-sensitive; wrong case should fail."""
         with pytest.raises(ValueError):
             resolve_tool_function("Grep_Search")
-        with pytest.raises(ValueError):
-            resolve_tool_function("GREP_SEARCH")

@@ -106,12 +106,12 @@ class TestConfigLoading:
 
     def test_entry_path_param_patterns_overrides_default(self, monkeypatch, tmp_path):
         """When entry has path_param_patterns, only those are used (not defaults)."""
-        _patch_config(monkeypatch, _tac([{"tools": ["move_file"], "path_param_patterns": ["source", "destination"]}]), tmp_path)
+        _patch_config(monkeypatch, _tac([{"tools": ["custom_move_tool"], "path_param_patterns": ["source", "destination"]}]), tmp_path)
         _patch_no_agent(monkeypatch)
         # "source" is in entry patterns -> detected
-        assert validate_workspace_path(_make_context("move_file", {"source": "/etc/passwd"}, {"source": {"type": "string"}})).decision == "block"
+        assert validate_workspace_path(_make_context("custom_move_tool", {"source": "/etc/passwd"}, {"source": {"type": "string"}})).decision == "block"
         # "file_path" is NOT in entry patterns (defaults not used) -> not detected -> allow
-        assert validate_workspace_path(_make_context("move_file", {"file_path": "/etc/passwd"}, {"file_path": {"type": "string"}})).decision == "allow"
+        assert validate_workspace_path(_make_context("custom_move_tool", {"file_path": "/etc/passwd"}, {"file_path": {"type": "string"}})).decision == "allow"
 
 
 # ===========================================================================
@@ -192,27 +192,27 @@ class TestExcludePaths:
 
 class TestPathParamPatterns:
     def test_default_fallback(self):
-        result = _resolve_path_params({"file_path": {"type": "string"}, "encoding": {"type": "string"}}, DEFAULT_PATH_PARAM_PATTERNS)
+        result = _resolve_path_params("custom_tool", {"file_path": {"type": "string"}, "encoding": {"type": "string"}}, DEFAULT_PATH_PARAM_PATTERNS)
         assert "file_path" in result
         assert "encoding" not in result
 
     def test_custom_patterns(self):
-        result = _resolve_path_params({"source": {"type": "string"}, "dest": {"type": "string"}}, ["source", "dest"])
+        result = _resolve_path_params("custom_tool", {"source": {"type": "string"}, "dest": {"type": "string"}}, ["source", "dest"])
         assert result == ["source", "dest"]
 
-    def test_no_schema_returns_empty(self):
-        assert _resolve_path_params(None, DEFAULT_PATH_PARAM_PATTERNS) == []
+    def test_no_schema_uses_registry_params_for_registered_tools(self):
+        assert _resolve_path_params("read_file", None, DEFAULT_PATH_PARAM_PATTERNS) == ["file_path"]
 
-    def test_empty_patterns_returns_empty(self):
-        assert _resolve_path_params({"file_path": {"type": "string"}}, []) == []
+    def test_empty_patterns_returns_empty_for_unknown_tools(self):
+        assert _resolve_path_params("custom_tool", {"file_path": {"type": "string"}}, []) == []
 
     def test_entry_with_custom_patterns_ignores_defaults(self, monkeypatch, tmp_path):
-        _patch_config(monkeypatch, _tac([{"tools": ["move_file"], "path_param_patterns": ["source"]}]), tmp_path)
+        _patch_config(monkeypatch, _tac([{"tools": ["custom_move_tool"], "path_param_patterns": ["source"]}]), tmp_path)
         _patch_no_agent(monkeypatch)
         # "source" detected -> block
-        assert validate_workspace_path(_make_context("move_file", {"source": "/etc/passwd"}, {"source": {"type": "string"}})).decision == "block"
+        assert validate_workspace_path(_make_context("custom_move_tool", {"source": "/etc/passwd"}, {"source": {"type": "string"}})).decision == "block"
         # "file_path" NOT detected (not in entry's patterns) -> allow
-        assert validate_workspace_path(_make_context("move_file", {"file_path": "/etc/passwd"}, {"file_path": {"type": "string"}})).decision == "allow"
+        assert validate_workspace_path(_make_context("custom_move_tool", {"file_path": "/etc/passwd"}, {"file_path": {"type": "string"}})).decision == "allow"
 
 
 # ===========================================================================
