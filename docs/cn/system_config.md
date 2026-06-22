@@ -93,17 +93,14 @@ logging:
   dir: ".logs"
 
 # ============================================
-# 默认加载工具
+# 默认加载 Toolsets
 # ============================================
-default_loaded_tools:
-  - "load_skill"
-  - "list_skills"
-  - "shell_tool"
-  - "read_file"
-  - "grep_search"
-  - "glob_search"
-  - "edit_file"
-  - "write_markdown_file"
+default_toolsets:
+  - "core_shell"
+  - "core_file"
+  - "core_search"
+  - "context"
+  - "skills"
 
 # ============================================
 # Shell 安全配置
@@ -118,7 +115,7 @@ shell_settings:
 tools_mapping:
   Claude:
     Read: "read_file"
-    Write: "write_markdown_file"
+    Write: "write_file"
     Bash: "shell_tool"
     Glob: "glob_search"
     Grep: "grep_search"
@@ -778,42 +775,42 @@ logging:
 
 **YAML 路径**：`tools.*`
 
-### 8.1 default_loaded_tools — 默认工具列表
+### 8.1 default_toolsets — 默认 Toolsets
 
 | 参数 | 类型 | 默认值 | 必选 | 说明 |
 |------|------|--------|------|------|
-| `default_loaded_tools` | `list[str]` | `[]` | ❌ 否 | 系统启动时所有 Agent 默认加载的工具名称列表 |
+| `default_toolsets` | `list[str]` | `[]` | ❌ 否 | 系统启动时所有 Agent 默认加载的 toolset 名称列表 |
 
-工具名称必须是框架预定义工具（与 `src/tools/__init__.py::_TOOLS_MAP` 完全一致）。完整预定义工具列表：
+Agent YAML 中的 `toolsets:` 会整体替换全局默认；`toolsets: []` 表示不加载任何内置工具。完整 registry toolsets：
+
+| Toolset | 工具 |
+|--------|------|
+| `core_shell` | `shell_tool`, `check_background_task`, `kill_background_task`, `list_background_tasks` |
+| `core_file` | `read_file`, `edit_file`, `write_file`, `list_directory` |
+| `core_search` | `grep_search`, `glob_search` |
+| `context` | `loom_retrieve_context` |
+| `skills` | `load_skill`, `list_skills` |
+| `markdown_report` | `write_markdown_file`, `write_markdown_file_raw`, `append_markdown_sections` |
+| `code_nav` | `get_file_outline`, `ast_grep_search_file`, `lsp_find_definition`, `lsp_find_references`, `lsp_get_document_symbols`, `lsp_hover`, `lsp_get_workspace_symbols` |
+
+完整预定义工具列表：
 
 | 工具名 | 功能 |
 |--------|------|
-| `search_keyword_in_directory` | 目录内关键词搜索 |
-| `search_keyword_with_context` | 搜索关键词 + 返回上下文 |
-| `list_files_glob` | Glob 模式搜索文件 |
-| `ripgrep_search_directory` | 高性能 ripgrep 搜索 |
 | `write_file` | 创建新文件或覆盖已有文件 |
 | `read_file` | 读取文件内容（支持 offset/limit 分段读取） |
-| `edit_file` | 编辑文件（查找替换） |
+| `edit_file` | 应用一个或多个唯一文本编辑 |
 | `get_file_outline` | 获取代码大纲（函数/类/结构体） |
-| `browse_directory` | 浏览目录结构 |
-| `delete_file` | 删除文件 |
-| `move_file` | 移动文件 |
-| `rename_file` | 重命名文件 |
-| `copy_file` | 复制文件 |
-| `search_files` | 文件搜索 |
-| `code_search` | 代码搜索 |
-| `code_replace` | 代码替换 |
-| `code_edit` | 代码编辑 |
-| `search_and_replace` | 文件内搜索替换 |
-| `write_whole_file` | 整文件写入 |
-| `git_commit_files` | 提交指定文件到 Git |
-| `git_auto_commit` | 自动生成 Git 提交 |
-| `git_check_dirty` | 检查 Git 工作区是否脏 |
+| `list_directory` | 列出目录结构 |
+| `grep_search` | 正则搜索文件内容 |
+| `glob_search` | 按 glob 查找文件 |
 | `ast_grep_search_file` | AST 模式搜索 |
-| `get_git_diff_content` | 获取 Git diff |
-| `git_grep_files` | Git grep 搜索 |
-| `is_path_in_repo` | 检查路径是否在 Git 仓库内 |
+| `lsp_find_definition` | 查找符号定义 |
+| `lsp_find_references` | 查找符号引用 |
+| `lsp_get_document_symbols` | 列出文档符号 |
+| `lsp_hover` | 查看 hover/type 信息 |
+| `lsp_get_workspace_symbols` | 搜索工作区符号 |
+| `loom_retrieve_context` | 读取压缩上下文引用 |
 | `load_skill` | 加载指定 Skill |
 | `list_skills` | 列出可用 Skills |
 | `shell_tool` | 执行 Shell 命令（受白名单限制） |
@@ -827,15 +824,12 @@ logging:
 **示例**：
 
 ```yaml
-default_loaded_tools:
-  - "load_skill"
-  - "list_skills"
-  - "shell_tool"
-  - "read_file"
-  - "grep_search"
-  - "glob_search"
-  - "edit_file"
-  - "write_markdown_file"
+default_toolsets:
+  - "core_shell"
+  - "core_file"
+  - "core_search"
+  - "context"
+  - "skills"
 ```
 
 ### 8.2 shell_settings — Shell 工具安全策略
@@ -936,7 +930,7 @@ shell_settings:
 **效果**：
 - LLM 第一次就知道哪些操作受限，减少无效尝试
 - 路径违规错误包含 `Use paths within allowed directories, or use read_file/grep_search tools instead.` 指导
-- 命令安全拦截错误包含 `Suggested alternative:` 建议（如 `Use write_markdown_file or edit_file tool for multi-line content`）
+- 命令安全拦截错误包含 `Suggested alternative:` 建议（如 `Use write_file or edit_file tool for multi-line content`）
 
 > 此功能无需额外配置，基于已有的 `security_checks` 和 `tool_access_control` 配置自动生效。
 
@@ -1004,7 +998,7 @@ shell_settings:
 tools_mapping:
   Claude:
     Read: "read_file"
-    Write: "write_markdown_file"
+    Write: "write_file"
     Bash: "shell_tool"
     Glob: "glob_search"
     Grep: "grep_search"
@@ -1081,7 +1075,7 @@ tool_access_control:
       exclude_paths: ["secrets", ".env"]
 
     # 移动/复制工具排除构建目录
-    - tools: ["move_file", "copy_file"]
+    - tools: ["", ""]
       exclude_paths: ["build", "dist"]
       path_param_patterns: ["source", "destination"]
 

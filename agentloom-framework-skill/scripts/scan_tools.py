@@ -27,7 +27,7 @@ def scan_app_structure(app_path: str) -> str:
     - 每个 Worker 的配置摘要（name、agent_function_schema 的 inputs/output、tools 列表、execution_env、max_steps）
     - agent_tools/ 下的 Python 文件名、公开函数名与 docstring 摘要
     - 入口脚本路径（如有）
-    - 动态能力发现（有效 tools.default、tools_mapping/legacy 映射线索）
+    - 动态能力发现（有效 tools、tools_mapping.<platform> 映射线索）
 
     不做任何分析判断，只提取事实。
 
@@ -236,34 +236,33 @@ def _discover_tool_capabilities(app_dir: Path) -> str:
         if _has_tools_default(snapshot):
             default_source = cfg
 
-    default_tools = effective.get("default_loaded_tools", []) if isinstance(effective, dict) else []
+    default_toolsets = effective.get("default_toolsets", []) if isinstance(effective, dict) else []
 
-    if isinstance(default_tools, list):
-        if default_tools:
-            lines.append(f"- 有效 `default_loaded_tools` ({len(default_tools)} 项): {', '.join(str(t) for t in default_tools)}")
+    if isinstance(default_toolsets, list):
+        if default_toolsets:
+            lines.append(f"- 有效 `default_toolsets` ({len(default_toolsets)} 项): {', '.join(str(t) for t in default_toolsets)}")
         else:
-            lines.append("- 有效 `default_loaded_tools`: []")
+            lines.append("- 有效 `default_toolsets`: []")
         if default_source is not None:
-            lines.append(f"- `default_loaded_tools` 来源层级: `{default_source}`（列表替换语义）")
+            lines.append(f"- `default_toolsets` 来源层级: `{default_source}`（列表替换语义）")
     else:
-        lines.append("- 有效 `default_loaded_tools`: (配置存在但类型不是 list，按不可用处理)")
+        lines.append("- 有效 `default_toolsets`: (配置存在但类型不是 list，按不可用处理)")
 
     mapping_info = _summarize_tools_mapping(effective)
     lines.extend(mapping_info)
 
-    lines.append("- 默认工具加载规则: 当 Agent `execution_env.type` 为 `docker`/`e2b` 时，默认工具列表会整体跳过。")
+    lines.append("- 默认工具加载规则: 当 Agent `execution_env.type` 为 `docker`/`e2b` 时，默认 toolsets 会整体跳过。")
 
     return "\n".join(lines)
 
 
 def _summarize_tools_mapping(effective: Any) -> list[str]:
-    """输出 tools_mapping 与 legacy mapping 的摘要。"""
+    """输出平台化 tools_mapping 摘要。"""
     if not isinstance(effective, dict):
         return ["- 映射信息: 未发现有效配置"]
 
     lines: list[str] = []
     tools_mapping = effective.get("tools_mapping", {})
-    legacy_mapping = tools_mapping.get("mapping", {}) if isinstance(tools_mapping, dict) else {}
 
     claude_mapping = {}
     if isinstance(tools_mapping, dict):
@@ -274,18 +273,9 @@ def _summarize_tools_mapping(effective: Any) -> list[str]:
     if claude_mapping:
         pairs = ", ".join(f"{k}->{v}" for k, v in sorted(claude_mapping.items()))
         lines.append(f"- 有效 `tools_mapping.Claude` ({len(claude_mapping)} 项): {pairs}")
-        if isinstance(legacy_mapping, dict) and legacy_mapping:
-            lines.append("- 检测到 legacy `tools_mapping.mapping`，但 `tools_mapping.Claude` 已存在，legacy 将被忽略。")
         return lines
 
-    if isinstance(legacy_mapping, dict) and legacy_mapping:
-        pairs = ", ".join(f"{k}->{v}" for k, v in sorted(legacy_mapping.items()))
-        lines.append("- `tools_mapping.Claude` 未配置或为空。")
-        lines.append(f"- 检测到 legacy `tools_mapping.mapping` ({len(legacy_mapping)} 项): {pairs}")
-        lines.append("- 运行时兼容行为: legacy `tools_mapping.mapping` 会作为 `Claude` 映射回退来源。")
-        return lines
-
-    lines.append("- 映射信息: 未发现 `tools_mapping.Claude` 或 legacy `tools_mapping.mapping`")
+    lines.append("- 映射信息: 未发现 `tools_mapping.Claude`")
     return lines
 
 
@@ -305,7 +295,7 @@ def _find_system_yaml_candidates(app_dir: Path) -> list[Path]:
 
 
 def _has_tools_default(snapshot: dict[str, Any]) -> bool:
-    return "default_loaded_tools" in snapshot
+    return "default_toolsets" in snapshot
 
 
 def _deep_merge_dict(base: dict[str, Any], overlay: dict[str, Any]) -> dict[str, Any]:
@@ -349,7 +339,7 @@ def _extract_agent_summary(agent_file: Path, role: str = "Agent") -> str:
     planning_interval = data.get("planning_interval")
     prompt_cfg = data.get("prompt")
     skills_cfg = data.get("skills")
-    default_loaded_tools_cfg = data.get("default_loaded_tools", None)
+    toolsets_cfg = data.get("toolsets", None)
 
     execution_env_type = "(未指定)"
     execution_env = data.get("execution_env")
@@ -393,16 +383,16 @@ def _extract_agent_summary(agent_file: Path, role: str = "Agent") -> str:
     lines.append(f"- **tool_call_type**: {tool_call_type}")
     lines.append(f"- **execution_env.type**: {execution_env_type}")
     if isinstance(execution_env_type, str) and execution_env_type.strip().lower() in {"docker", "e2b"}:
-        lines.append("- **默认工具加载**: 跳过 `default_loaded_tools`（execution_env.type=remote）")
+        lines.append("- **默认工具加载**: 跳过 `default_toolsets`（execution_env.type=remote）")
 
     lines.append(f"- **max_steps**: {max_steps}")
 
-    if default_loaded_tools_cfg is not None:
-        if isinstance(default_loaded_tools_cfg, list):
-            value = ", ".join(str(item) for item in default_loaded_tools_cfg) if default_loaded_tools_cfg else "[]"
+    if toolsets_cfg is not None:
+        if isinstance(toolsets_cfg, list):
+            value = ", ".join(str(item) for item in toolsets_cfg) if toolsets_cfg else "[]"
         else:
-            value = str(default_loaded_tools_cfg)
-        lines.append(f"- **default_loaded_tools 覆盖**: {value}")
+            value = str(toolsets_cfg)
+        lines.append(f"- **toolsets 覆盖**: {value}")
 
     if planning_interval is not None:
         lines.append(f"- **planning_interval**: {planning_interval}")

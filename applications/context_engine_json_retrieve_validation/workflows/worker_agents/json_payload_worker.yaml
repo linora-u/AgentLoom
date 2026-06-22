@@ -1,0 +1,34 @@
+name: "json_payload_worker"
+description: "Worker that returns a large JSON payload for ContextEngine validation."
+model_type: "powerful"
+tool_call_type: "code_act"
+max_steps: 4
+
+workflow: |
+  # JSON Payload Worker
+
+  Produce the payload by executing this logic in one code block:
+
+  ```
+  payload = make_context_engine_json_payload(case_id="json")
+  final_answer(payload)
+  ```
+
+  Return the payload exactly. Do not summarize it.
+
+agent_function_schema:
+  description: "Return the large JSON validation payload exactly."
+  inputs:
+    user_request:
+      description: "Validation request from the supervisor."
+      required: true
+  output:
+    description: "The complete large JSON payload."
+
+tools:
+  - name: "make_context_engine_json_payload"
+    module: "applications.context_engine_json_retrieve_validation.agent_tools.payload_tools"
+    function: "make_context_engine_json_payload"
+
+skills: []
+worker_agents: []

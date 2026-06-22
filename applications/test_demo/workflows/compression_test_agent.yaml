@@ -28,7 +28,7 @@ workflow: |
 tools:
   # File operations for analysis
   - name: "read_file"
-  - name: "browse_directory"
+  - name: "list_directory"
   - name: "shell_tool"
   - name: "grep_search"
   - name: "glob_search"

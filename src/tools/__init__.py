@@ -1,55 +1,22 @@
-"""Tools package for AI agents."""
-from src.tools.code_editor import (
-    code_edit,
-    code_replace,
-    code_search,
-    git_auto_commit,
-    git_check_dirty,
-    git_commit_files,
-    search_and_replace,
-    write_whole_file,
-)
-from src.tools.codex import codex
-from src.tools.context import loom_retrieve_context
-from src.tools.git import (
-    get_git_diff_content,
-    git_grep_files,
-    is_path_in_repo,
-)
-from src.tools.shell import (
-    check_background_task,
-    kill_background_task,
-    list_background_tasks,
-    shell_tool,
-)
-from src.tools.skills import (
-    check_skill_dependencies,
-    list_skills,
-    load_skill,
-    read_skill_resource,
-    run_skill_script,
-)
+"""Public tool exports.
 
-from .file_ops import (
+Only functions backed by ``src.tools.registry.ToolSpec`` are built-in tools.
+Additional helper modules may still be imported by their direct module paths,
+but ``resolve_tool_function()`` resolves registry entries only.
+"""
+
+from src.tools.context import loom_retrieve_context
+from src.tools.file_ops import (
     append_markdown_sections,
-    browse_directory,
-    copy_file,
-    # file_manager
-    delete_file,
     edit_file,
-    # Kept tools
     get_file_outline,
-    move_file,
-    # Core file tools (aligned with upstream)
+    list_directory,
     read_file,
-    rename_file,
-    # file_searcher
-    search_files,
     write_file,
     write_markdown_file,
     write_markdown_file_raw,
 )
-from .search import (
+from src.tools.search import (
     ast_grep_search_file,
     glob_search,
     grep_search,
@@ -59,68 +26,57 @@ from .search import (
     lsp_get_workspace_symbols,
     lsp_hover,
 )
-from .todo import todo_write
+from src.tools.shell import (
+    check_background_task,
+    kill_background_task,
+    list_background_tasks,
+    shell_tool,
+)
+from src.tools.skills import list_skills, load_skill
+from src.tools.todo import todo_write
 
-# Re-export tool metadata utilities for convenient access.
-from .tool_meta import ToolMeta, get_tool_meta, resolve_tool_function  # noqa: F401, E402
+from .tool_meta import (  # noqa: E402
+    DEFAULT_TOOLSETS,
+    ToolSpec,
+    get_tool_meta,
+    get_tool_spec,
+    list_tool_specs,
+    list_toolsets,
+    resolve_tool_function,
+    resolve_toolsets,
+)
 
 __all__ = [
-    # Search & navigation
+    "shell_tool",
+    "check_background_task",
+    "kill_background_task",
+    "list_background_tasks",
+    "read_file",
+    "edit_file",
+    "write_file",
+    "list_directory",
     "grep_search",
     "glob_search",
+    "loom_retrieve_context",
+    "load_skill",
+    "list_skills",
+    "todo_write",
+    "write_markdown_file",
+    "write_markdown_file_raw",
+    "append_markdown_sections",
+    "get_file_outline",
     "ast_grep_search_file",
     "lsp_find_definition",
     "lsp_find_references",
     "lsp_get_document_symbols",
     "lsp_hover",
     "lsp_get_workspace_symbols",
-    # Code editor
-    "code_search",
-    "code_replace",
-    "code_edit",
-    "search_and_replace",
-    "write_whole_file",
-    "git_commit_files",
-    "git_auto_commit",
-    "git_check_dirty",
-    # Git
-    "get_git_diff_content",
-    "git_grep_files",
-    "is_path_in_repo",
-    # Skills
-    "load_skill",
-    "list_skills",
-    "read_skill_resource",
-    "check_skill_dependencies",
-    "run_skill_script",
-    # Shell
-    "shell_tool",
-    "check_background_task",
-    "kill_background_task",
-    "list_background_tasks",
-    # Codex
-    "codex",
-    # Context
-    "loom_retrieve_context",
-    # File ops — core (aligned with upstream)
-    "read_file",
-    "edit_file",
-    "write_file",
-    # File ops — kept tools
-    "get_file_outline",
-    "browse_directory",
-    "write_markdown_file",
-    "write_markdown_file_raw",
-    "append_markdown_sections",
-    "delete_file",
-    "move_file",
-    "rename_file",
-    "copy_file",
-    "search_files",
-    # Todo
-    "todo_write",
-    # Tool metadata
-    "resolve_tool_function",
+    "DEFAULT_TOOLSETS",
+    "ToolSpec",
     "get_tool_meta",
-    "ToolMeta",
+    "get_tool_spec",
+    "list_tool_specs",
+    "list_toolsets",
+    "resolve_tool_function",
+    "resolve_toolsets",
 ]

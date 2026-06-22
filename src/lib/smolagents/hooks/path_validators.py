@@ -73,14 +73,27 @@ def _find_rule_for_tool(tool_name: str, rules: list) -> Optional[dict]:
 
 
 def _resolve_path_params(
+    tool_name: str,
     tool_inputs_schema: Optional[Dict[str, Any]],
     path_param_patterns: List[str],
 ) -> List[str]:
     """Match tool parameter names against path_param_patterns."""
+    try:
+        from src.tools import get_tool_spec
+
+        registry_params = list(get_tool_spec(tool_name).path_params)
+    except ValueError:
+        registry_params = []
+
     if not isinstance(tool_inputs_schema, dict) or not path_param_patterns:
-        return []
+        return registry_params
     pattern_set = set(path_param_patterns)
-    return [name for name in tool_inputs_schema if name in pattern_set]
+    schema_params = [name for name in tool_inputs_schema if name in pattern_set]
+    merged = []
+    for name in [*registry_params, *schema_params]:
+        if name not in merged:
+            merged.append(name)
+    return merged
 
 
 def _normalize_str_list(raw: Any, default: list | None = None) -> List[str]:
@@ -125,7 +138,7 @@ def validate_workspace_path(context: HookContext) -> HookResult:
 
     # Resolve path params from tool schema
     tool_inputs_schema = getattr(context, "tool_inputs_schema", None)
-    path_params = _resolve_path_params(tool_inputs_schema, effective_patterns)
+    path_params = _resolve_path_params(tool_name, tool_inputs_schema, effective_patterns)
     if not path_params:
         return HookResult(success=True, decision="allow")
 

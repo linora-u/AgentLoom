@@ -48,6 +48,6 @@ workflow: |
 tools:
   - name: "shell_tool"
 
-default_loaded_tools: []
+toolsets: []
 worker_agents: []
 skills: []

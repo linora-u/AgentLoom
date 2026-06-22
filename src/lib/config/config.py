@@ -42,7 +42,8 @@ _WORKFLOW_OVERLAY_KEYS = {
     "tools",
     "shell_settings",
     "tools_mapping",
-    "default_loaded_tools",
+    "default_toolsets",
+    "toolsets",
     "prompt",
     "mcp_servers",
 }
@@ -404,7 +405,7 @@ def extract_workflow_overlay(
                 overlay[key] = value
             continue
 
-        if key in ("shell_settings", "tools_mapping", "default_loaded_tools"):
+        if key in ("shell_settings", "tools_mapping", "default_toolsets", "toolsets"):
             overlay[key] = value
             continue
 
@@ -484,15 +485,15 @@ def get_model_config(model_type: str, key: str, default: Any = None) -> Any:
     return get_config().get_model_config(model_type, key, default=default)
 
 
-def get_default_tools(config_map: dict[str, Any] | None = None) -> list[str]:
+def get_default_toolsets(config_map: dict[str, Any] | None = None) -> list[str]:
     if config_map is not None:
-        tools = config_map.get("default_loaded_tools", [])
+        toolsets = config_map.get("default_toolsets", [])
     else:
-        tools = C.get("default_loaded_tools", [])
+        toolsets = C.get("default_toolsets", [])
 
-    if not isinstance(tools, list):
+    if not isinstance(toolsets, list):
         return []
-    return [tool for tool in tools if isinstance(tool, str) and tool.strip()]
+    return [toolset for toolset in toolsets if isinstance(toolset, str) and toolset.strip()]
 
 
 def get_code_agent_config(config_map: dict[str, Any] | None = None) -> dict[str, Any]:
