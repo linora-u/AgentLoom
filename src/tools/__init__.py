@@ -32,6 +32,7 @@ from src.tools.shell import (
     list_background_tasks,
     shell_tool,
 )
+from src.tools.self_learning import memory, session_scroll, session_search, skill_manage
 from src.tools.skills import list_skills, load_skill
 from src.tools.todo import todo_write
 
@@ -71,6 +72,10 @@ __all__ = [
     "lsp_get_document_symbols",
     "lsp_hover",
     "lsp_get_workspace_symbols",
+    "session_search",
+    "session_scroll",
+    "memory",
+    "skill_manage",
     "DEFAULT_TOOLSETS",
     "ToolSpec",
     "get_tool_meta",
