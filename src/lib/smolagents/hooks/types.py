@@ -208,6 +208,10 @@ class HookContext:
     tool_response: Optional[Dict[str, Any]] = None
     tool_inputs_schema: Optional[Dict[str, Any]] = None
     step_number: Optional[int] = None
+    task_id: Optional[str] = None
+    sub_task_id: Optional[str] = None
+    agent_name: Optional[str] = None
+    agent_config: Optional[Dict[str, Any]] = None
 
 
 # ---------------------------------------------------------------------------
