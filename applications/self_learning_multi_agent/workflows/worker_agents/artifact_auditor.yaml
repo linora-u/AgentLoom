@@ -1,0 +1,93 @@
+name: "artifact_auditor"
+description: "Audit durable self-learning artifacts created by other workers."
+
+model_type: "powerful"
+tool_call_type: "code_act"
+max_steps: 10
+
+default_loaded_tools: []
+skills: []
+worker_agents: []
+
+tools:
+  - name: "read_file"
+  - name: "shell_tool"
+  - name: "list_skills"
+  - name: "write_markdown_file"
+  - name: "edit_file"
+  - name: "glob_search"
+  - name: "grep_search"
+
+agent_function_schema:
+  description: "Verify durable files, proposal package files, and skill discovery isolation."
+  inputs:
+    query:
+      description: "JSON string containing marker and all prior worker outputs."
+      required: true
+  output:
+    description: "JSON audit evidence."
+
+workflow: |
+  # Artifact Auditor Worker
+
+  Parse `query`, verify durable artifacts and proposal isolation, and return JSON
+  only.
+
+  # Execution Contract
+  - Emit every action as a Python `<code>...</code>` block.
+  - Do not use native `<tool_call>` syntax.
+  - Do not call `load_skill`.
+  - Use `list_skills` to verify the generated proposal is not active.
+  - Use `shell_tool` only for filesystem existence checks.
+  - Return `ok=true` only when all audit checks pass.
+
+  # Required Code Shape
+  ```python
+  import json
+  import shlex
+
+  payload = json.loads(query)
+  marker = payload["marker"]
+  proposal_name = payload["skill"]["proposal_name"]
+  proposal_path = payload["skill"]["proposal_path"]
+
+  skills = json.loads(list_skills(include_description=True, detail="summary"))
+  active_skill_names = [item.get("name") for item in skills]
+  proposal_is_not_active = proposal_name not in active_skill_names
+
+  existence_raw = shell_tool(
+      command=(
+          "test -f .agentloom/self_learning.db && "
+          "test -f .agentloom/memory/MEMORY.md && "
+          f"test -f {shlex.quote(proposal_path + '/SKILL.md')} && "
+          f"test -f {shlex.quote(proposal_path + '/references/evidence.json')} && "
+          f"grep -q -- {shlex.quote(marker)} {shlex.quote(proposal_path + '/SKILL.md')} && "
+          f"grep -q -- {shlex.quote(marker)} {shlex.quote(proposal_path + '/references/evidence.json')} && "
+          "printf 'durable_files=ok\\n'"
+      ),
+      timeout=10,
+  )
+  marker_files_ok = "durable_files=ok" in existence_raw
+
+  result = {
+      "worker": "artifact_auditor",
+      "marker": marker,
+      "self_learning_db_exists": "durable_files=ok" in existence_raw,
+      "memory_projection_exists": "durable_files=ok" in existence_raw,
+      "proposal_skill_contains_marker": marker_files_ok,
+      "proposal_evidence_contains_marker": marker_files_ok,
+      "proposal_is_not_active": proposal_is_not_active,
+      "active_skill_count": len(active_skill_names),
+      "ok": (
+          "durable_files=ok" in existence_raw
+          and marker_files_ok
+          and proposal_is_not_active
+      ),
+  }
+  final_answer(json.dumps(result, ensure_ascii=False))
+  ```
+
+execution_env:
+  type: "local"
+  executor_kwargs:
+    timeout_seconds: 1200

@@ -164,6 +164,186 @@ def clean_tasks(clean_all: bool, before_days: int | None):
 
 
 # ─────────────────────────────────────────────
+# loom sessions
+# ─────────────────────────────────────────────
+
+@main.group()
+def sessions():
+    """Search and manage indexed AgentLoom run history."""
+
+
+@sessions.command("index")
+@click.argument("path", required=False, default=None)
+def sessions_index(path: str):
+    """Report ledger counts or import canonical self-learning event exports."""
+    import json as _json
+    from src.extensions.self_learning.session_index import SessionIndex
+
+    index = SessionIndex()
+    result = index.index_all(path)
+    click.echo(_json.dumps(result, ensure_ascii=False, indent=2, default=str))
+
+
+@sessions.command("search")
+@click.argument("query")
+@click.option("--limit", default=10, show_default=True, type=int)
+@click.option("--agent", default=None)
+@click.option("--app", default=None)
+@click.option("--since", default=None)
+@click.option("--scope", default="all", type=click.Choice(["current_app", "project", "all"]), show_default=True)
+def sessions_search(query: str, limit: int, agent: str | None, app: str | None, since: str | None, scope: str):
+    """Search indexed session events."""
+    import json as _json
+    from src.extensions.self_learning.session_index import SessionIndex
+
+    result = SessionIndex().search(query, limit=limit, agent=agent, app=app, since=since, scope=scope)
+    click.echo(_json.dumps(result, ensure_ascii=False, indent=2, default=str))
+
+
+@sessions.command("scroll")
+@click.argument("run_id")
+@click.argument("event_id", type=int)
+@click.option("--direction", default="after", type=click.Choice(["before", "after"]), show_default=True)
+@click.option("--window", default=5, show_default=True, type=int)
+def sessions_scroll(run_id: str, event_id: int, direction: str, window: int):
+    """Scroll before or after a session event."""
+    import json as _json
+    from src.extensions.self_learning.session_index import SessionIndex
+
+    result = SessionIndex().scroll(run_id, event_id, direction=direction, window=window)
+    click.echo(_json.dumps(result, ensure_ascii=False, indent=2, default=str))
+
+
+# ─────────────────────────────────────────────
+# loom memory
+# ─────────────────────────────────────────────
+
+@main.group()
+def memory():
+    """Manage durable AgentLoom memory."""
+
+
+@memory.command("list")
+@click.option("--scope", default=None, type=click.Choice(["project", "app", "application"]))
+@click.option("--scope-id", default="", help="Application id for app/application scope.")
+@click.option("--active-only", is_flag=True, default=False)
+def memory_list(scope: str | None, scope_id: str, active_only: bool):
+    """List memory items."""
+    import json as _json
+    from src.extensions.self_learning.memory_store import MemoryStore
+
+    result = MemoryStore().list(scope=scope, scope_id=scope_id, include_pending=not active_only)
+    click.echo(_json.dumps(result, ensure_ascii=False, indent=2, default=str))
+
+
+@memory.command("add")
+@click.option("--scope", default="project", type=click.Choice(["project", "app", "application"]), show_default=True)
+@click.option("--scope-id", default="", help="Application id for app/application scope.")
+@click.argument("content")
+def memory_add(scope: str, scope_id: str, content: str):
+    """Add active memory directly from CLI."""
+    import json as _json
+    from src.extensions.self_learning.memory_store import MemoryStore
+
+    result = MemoryStore().add(scope, content, proposal=False, source="cli", scope_id=scope_id)
+    click.echo(_json.dumps(result, ensure_ascii=False, indent=2, default=str))
+
+
+@memory.command("replace")
+@click.option("--scope", default="project", type=click.Choice(["project", "app", "application"]), show_default=True)
+@click.option("--scope-id", default="", help="Application id for app/application scope.")
+@click.argument("target")
+@click.argument("content")
+def memory_replace(scope: str, scope_id: str, target: str, content: str):
+    """Replace active memory directly from CLI."""
+    import json as _json
+    from src.extensions.self_learning.memory_store import MemoryStore
+
+    result = MemoryStore().replace(scope, target, content, proposal=False, source="cli", scope_id=scope_id)
+    click.echo(_json.dumps(result, ensure_ascii=False, indent=2, default=str))
+
+
+@memory.command("remove")
+@click.option("--scope", default="project", type=click.Choice(["project", "app", "application"]), show_default=True)
+@click.option("--scope-id", default="", help="Application id for app/application scope.")
+@click.argument("target")
+def memory_remove(scope: str, scope_id: str, target: str):
+    """Remove active memory directly from CLI."""
+    import json as _json
+    from src.extensions.self_learning.memory_store import MemoryStore
+
+    result = MemoryStore().remove(scope, target, proposal=False, source="cli", scope_id=scope_id)
+    click.echo(_json.dumps(result, ensure_ascii=False, indent=2, default=str))
+
+
+@memory.command("apply")
+@click.argument("target")
+def memory_apply(target: str):
+    """Apply a pending memory proposal by id or content substring."""
+    import json as _json
+    from src.extensions.self_learning.memory_store import MemoryStore
+
+    result = MemoryStore().apply(target)
+    click.echo(_json.dumps(result, ensure_ascii=False, indent=2, default=str))
+
+
+# ─────────────────────────────────────────────
+# loom skills proposals
+# ─────────────────────────────────────────────
+
+@main.group()
+def skills():
+    """Manage skills and skill proposals."""
+
+
+@skills.group("proposals")
+def skill_proposals():
+    """Review and promote generated skill proposals."""
+
+
+@skill_proposals.command("list")
+def skill_proposals_list():
+    """List generated skill proposals."""
+    import json as _json
+    from src.extensions.self_learning.proposal_writer import ProposalWriter
+
+    click.echo(_json.dumps(ProposalWriter().list(), ensure_ascii=False, indent=2, default=str))
+
+
+@skill_proposals.command("show")
+@click.argument("proposal_id")
+def skill_proposals_show(proposal_id: str):
+    """Show a generated skill proposal."""
+    import json as _json
+    from src.extensions.self_learning.proposal_writer import ProposalWriter
+
+    click.echo(_json.dumps(ProposalWriter().show(proposal_id), ensure_ascii=False, indent=2, default=str))
+
+
+@skill_proposals.command("promote")
+@click.argument("proposal_id")
+@click.option("--name", "destination", default="", help="Destination active skill name.")
+def skill_proposals_promote(proposal_id: str, destination: str):
+    """Promote a proposal with SKILL.md into active skills."""
+    import json as _json
+    from src.extensions.self_learning.proposal_writer import ProposalWriter
+
+    result = ProposalWriter().promote(proposal_id, destination=destination)
+    click.echo(_json.dumps(result, ensure_ascii=False, indent=2, default=str))
+
+
+@skill_proposals.command("archive")
+@click.argument("proposal_id")
+def skill_proposals_archive(proposal_id: str):
+    """Archive a generated skill proposal."""
+    import json as _json
+    from src.extensions.self_learning.proposal_writer import ProposalWriter
+
+    result = ProposalWriter().archive(proposal_id)
+    click.echo(_json.dumps(result, ensure_ascii=False, indent=2, default=str))
+
+
+# ─────────────────────────────────────────────
 # loom dashboard
 # ─────────────────────────────────────────────
 
