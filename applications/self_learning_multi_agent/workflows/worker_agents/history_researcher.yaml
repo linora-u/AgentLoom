@@ -1,0 +1,91 @@
+name: "history_researcher"
+description: "Search indexed session history and return real event evidence."
+
+model_type: "powerful"
+tool_call_type: "code_act"
+max_steps: 8
+
+toolsets: []
+skills: []
+worker_agents: []
+
+tools:
+  - name: "session_search"
+  - name: "session_scroll"
+  - name: "read_file"
+  - name: "write_markdown_file"
+  - name: "edit_file"
+  - name: "shell_tool"
+  - name: "glob_search"
+  - name: "grep_search"
+
+agent_function_schema:
+  description: "Search prior self-learning validation runs and scroll around one hit."
+  inputs:
+    query:
+      description: "JSON string containing marker and workspace."
+      required: true
+  output:
+    description: "JSON evidence with search counts, run ids, and scroll counts."
+
+workflow: |
+  # History Research Worker
+
+  Parse `query`, search real canonical session records, scroll around one hit, and
+  return JSON only.
+
+  # Execution Contract
+  - Emit every action as a Python `<code>...</code>` block.
+  - Do not use native `<tool_call>` syntax.
+  - Do not call `load_skill`.
+  - Call `session_search` for both `AL_SELF_LEARNING_SMOKE` and `Self-learning smoke marker`.
+  - Call `session_scroll` after the first non-empty search result.
+  - Return JSON with `ok=true` only when both search terms have at least one hit.
+
+  # Required Code Shape
+  ```python
+  import json
+
+  payload = json.loads(query)
+  marker = payload["marker"]
+  terms = ["AL_SELF_LEARNING_SMOKE", "Self-learning smoke marker"]
+  searches = {}
+  first_hit = None
+
+  for term in terms:
+      raw = session_search(query=term, limit=5, scope="all")
+      data = json.loads(raw)
+      rows = data.get("results", [])
+      searches[term] = {
+          "result_count": len(rows),
+          "run_ids": sorted({row.get("run_id", "") for row in rows if row.get("run_id")})[:5],
+          "first_event_id": rows[0].get("id") if rows else None,
+          "first_run_id": rows[0].get("run_id") if rows else "",
+      }
+      if rows and first_hit is None:
+          first_hit = rows[0]
+
+  scroll_count = 0
+  if first_hit:
+      scroll_raw = session_scroll(
+          run_id=first_hit["run_id"],
+          event_id=int(first_hit["id"]),
+          direction="after",
+          window=2,
+      )
+      scroll_count = len(json.loads(scroll_raw).get("results", []))
+
+  result = {
+      "worker": "history_researcher",
+      "marker": marker,
+      "searches": searches,
+      "scroll_count": scroll_count,
+      "ok": all(searches[term]["result_count"] > 0 for term in terms) and scroll_count >= 0,
+  }
+  final_answer(json.dumps(result, ensure_ascii=False))
+  ```
+
+execution_env:
+  type: "local"
+  executor_kwargs:
+    timeout_seconds: 1200

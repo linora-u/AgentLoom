@@ -168,6 +168,8 @@ class SkillsManager:
                     continue
                 if child.name in _RESOURCE_DIR_EXCLUDES or child.name.startswith("."):
                     continue
+                if _is_generated_proposal_path(child):
+                    continue
                 _walk(child)
 
         _walk(path)
@@ -669,8 +671,18 @@ def _is_skill_entrypoint(path: Path) -> bool:
     return path.name.lower() == "skill.md"
 
 
+def _is_generated_proposal_path(path: Path) -> bool:
+    parts = path.parts
+    for idx in range(len(parts) - 1):
+        if parts[idx] == "generated" and parts[idx + 1] == "proposals":
+            return True
+    return False
+
+
 def _is_ignored_resource_path(relative_path: str) -> bool:
     parts = Path(relative_path).parts
+    if _is_generated_proposal_path(Path(relative_path)):
+        return True
     return any(part in _RESOURCE_DIR_EXCLUDES for part in parts)
 
 

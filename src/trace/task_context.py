@@ -37,6 +37,8 @@ _current_runtime_agent_path: ContextVar[Optional[str]] = ContextVar('current_run
 # Thread-safe global fallbacks for values that must be accessible from
 # ThreadPoolExecutor worker threads where ContextVar is not propagated.
 _global_lock = threading.Lock()
+_global_task_id_fallback: Optional[str] = None
+_global_sub_task_id_fallback: Optional[str] = None
 _global_agent_id_fallback: Optional[str] = None
 _global_agent_config_fallback: Optional[dict] = None
 _global_agent_name_fallback: Optional[str] = None
@@ -47,35 +49,55 @@ _global_hook_manager_fallback: Optional[Any] = None
 
 def set_current_task_id(task_id: str) -> None:
     """Set the current task ID."""
+    global _global_task_id_fallback
     _current_task_id.set(task_id)
+    with _global_lock:
+        _global_task_id_fallback = task_id
     logger.debug(f"Set task ID: {task_id}")
 
 
 def get_current_task_id() -> Optional[str]:
     """Get the current task ID."""
-    return _current_task_id.get()
+    value = _current_task_id.get()
+    if value is not None:
+        return value
+    with _global_lock:
+        return _global_task_id_fallback
 
 
 def clear_current_task_id() -> None:
     """Clear the current task ID."""
+    global _global_task_id_fallback
     _current_task_id.set(None)
+    with _global_lock:
+        _global_task_id_fallback = None
     logger.debug("Cleared task ID")
 
 
 def set_current_sub_task_id(sub_task_id: str) -> None:
     """Set the current sub-task ID."""
+    global _global_sub_task_id_fallback
     _current_sub_task_id.set(sub_task_id)
+    with _global_lock:
+        _global_sub_task_id_fallback = sub_task_id
     logger.debug(f"Set sub-task ID: {sub_task_id}")
 
 
 def get_current_sub_task_id() -> Optional[str]:
     """Get the current sub-task ID."""
-    return _current_sub_task_id.get()
+    value = _current_sub_task_id.get()
+    if value is not None:
+        return value
+    with _global_lock:
+        return _global_sub_task_id_fallback
 
 
 def clear_current_sub_task_id() -> None:
     """Clear the current sub-task ID."""
+    global _global_sub_task_id_fallback
     _current_sub_task_id.set(None)
+    with _global_lock:
+        _global_sub_task_id_fallback = None
     logger.debug("Cleared sub-task ID")
 
 
