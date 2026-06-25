@@ -33,6 +33,7 @@ DEFAULT_TOOLSETS: tuple[str, ...] = (
     "core_search",
     "context",
     "skills",
+    "self_learning",
 )
 
 _REGISTRY: dict[str, ToolSpec] | None = None
@@ -98,6 +99,7 @@ def _build_registry() -> dict[str, ToolSpec]:
         list_background_tasks,
         shell_tool,
     )
+    from src.tools.self_learning import memory, session_scroll, session_search, skill_manage
     from src.tools.skills import list_skills, load_skill
     from src.tools.todo import todo_write
 
@@ -239,6 +241,48 @@ def _build_registry() -> dict[str, ToolSpec]:
             "skills",
             is_read_only=True,
             max_result_chars=10000,
+            output_kind="text",
+        ),
+        _spec(
+            "session_search",
+            session_search,
+            "self_learning",
+            "Search redacted records from prior AgentLoom runs.",
+            "self_learning",
+            is_read_only=True,
+            max_result_chars=30000,
+            output_kind="text",
+        ),
+        _spec(
+            "session_scroll",
+            session_scroll,
+            "self_learning",
+            "Scroll around an indexed session event.",
+            "self_learning",
+            is_read_only=True,
+            max_result_chars=30000,
+            output_kind="text",
+        ),
+        _spec(
+            "memory",
+            memory,
+            "self_learning",
+            "List or propose changes to durable AgentLoom memory.",
+            "self_learning",
+            is_read_only=False,
+            is_concurrency_safe=False,
+            max_result_chars=20000,
+            output_kind="text",
+        ),
+        _spec(
+            "skill_manage",
+            skill_manage,
+            "self_learning",
+            "Create and update generated skill proposal packages.",
+            "self_learning",
+            is_read_only=False,
+            is_concurrency_safe=False,
+            max_result_chars=20000,
             output_kind="text",
         ),
         _spec(

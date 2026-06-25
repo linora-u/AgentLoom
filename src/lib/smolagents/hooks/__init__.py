@@ -60,6 +60,50 @@ def register_builtin_hooks(manager: HookManager) -> HookManager:
     except Exception as e:
         logger.warning("Failed to auto-register path validators: %s", e)
 
+    try:
+        from src.extensions.self_learning.session_recorder import session_recorder_hook
+
+        for event in (
+            HookEvent.SESSION_START,
+            HookEvent.SESSION_END,
+            HookEvent.TASK_CREATED,
+            HookEvent.TASK_COMPLETED,
+            HookEvent.STOP_FAILURE,
+            HookEvent.SUBAGENT_START,
+            HookEvent.SUBAGENT_STOP,
+            HookEvent.PRE_TOOL_USE,
+            HookEvent.POST_TOOL_USE,
+            HookEvent.POST_TOOL_USE_FAILURE,
+        ):
+            manager.register_hook(
+                event,
+                "*",
+                session_recorder_hook,
+                allow_duplicates=False,
+                source="builtin:self_learning_recorder",
+            )
+    except Exception as e:
+        logger.warning("Failed to auto-register self-learning recorder: %s", e)
+
+    try:
+        from src.extensions.self_learning.reviewer import learning_review_hook
+
+        for event in (
+            HookEvent.TASK_COMPLETED,
+            HookEvent.STOP_FAILURE,
+            HookEvent.POST_TOOL_USE_FAILURE,
+            HookEvent.SESSION_END,
+        ):
+            manager.register_hook(
+                event,
+                "*",
+                learning_review_hook,
+                allow_duplicates=False,
+                source="builtin:self_learning_reviewer",
+            )
+    except Exception as e:
+        logger.warning("Failed to auto-register self-learning reviewer: %s", e)
+
     setattr(manager, _BUILTIN_HOOKS_REGISTERED_ATTR, True)
     return manager
 

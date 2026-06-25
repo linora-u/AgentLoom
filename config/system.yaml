@@ -174,6 +174,14 @@ checkpoint:
   heartbeat_interval: 5
 
 # ============================================
+# Self-learning foundation
+# ============================================
+self_learning:
+  enabled: true
+  root_dir: ".agentloom"
+  reviewer_enabled: true
+
+# ============================================
 # Tool Metadata Configuration
 # ============================================
 # Per-tool runtime metadata.  Keys are canonical tool names.
@@ -212,6 +220,22 @@ tool_metadata:
     max_result_chars: null
     is_concurrency_safe: true
     category: context
+  session_search:
+    max_result_chars: 30000
+    is_concurrency_safe: true
+    category: self_learning
+  session_scroll:
+    max_result_chars: 30000
+    is_concurrency_safe: true
+    category: self_learning
+  memory:
+    max_result_chars: 20000
+    is_concurrency_safe: false
+    category: self_learning
+  skill_manage:
+    max_result_chars: 20000
+    is_concurrency_safe: false
+    category: self_learning
   read_file:
     max_result_chars: null          # exempt — handled by context compression dedup
     is_concurrency_safe: true
@@ -254,6 +278,7 @@ default_toolsets:
   - "core_search"
   - "context"
   - "skills"
+  - "self_learning"
 
 # ============================================
 # Shell Settings
