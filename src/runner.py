@@ -326,6 +326,9 @@ def run_app(
                 mcp_mgr.disconnect_all()
         except Exception:
             pass
+        # Self-learning history is recorded live by canonical lifecycle hooks
+        # under .agentloom/sessions/events and indexed independently of
+        # checkpoint retention.
         # M1: cleanup_on_success — remove checkpoint after successful completion.
         if cleanup_on_success and checkpoint_mgr is not None:
             try:
