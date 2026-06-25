@@ -401,6 +401,63 @@ class BaseAgent(ABC):
             if self._logger:
                 self._logger.warning("%s hook error: %s", event.value, exc)
 
+    def _emit_session_lifecycle_event(
+        self,
+        event: HookEvent,
+        task: str,
+        *,
+        result: Any = None,
+        error: Optional[BaseException] = None,
+    ) -> None:
+        if get_current_sub_task_id() is not None:
+            return
+        task_id = get_current_task_id() or self._task_id
+        payload = {
+            "task_id": task_id,
+            "cwd": os.getcwd(),
+            "task_text": task,
+            "agent_name": self.name,
+        }
+        tool_response = None
+        if result is not None:
+            tool_response = {"result": result}
+        if error is not None:
+            payload["error"] = str(error)
+            payload["error_type"] = type(error).__name__
+            tool_response = {"error": str(error), "error_type": type(error).__name__}
+
+        try:
+            self._hook_manager.trigger_hooks(
+                event,
+                "session",
+                payload,
+                tool_response=tool_response,
+            )
+            self._hook_manager.flush_user_messages()
+        except Exception as exc:
+            if self._logger:
+                self._logger.warning("%s hook error: %s", event.value, exc)
+
+    def _inject_memory_snapshot(self, tasks: list[str]) -> list[str]:
+        if not tasks:
+            return tasks
+        try:
+            from src.extensions.self_learning.memory_store import MemoryStore
+            from src.extensions.self_learning.paths import config_bool
+
+            if not config_bool("enabled", True):
+                return tasks
+            snapshot = MemoryStore().snapshot_for_prompt(
+                agent_config=getattr(self, "_effective_agent_config", None) or self._config
+            )
+        except Exception as exc:
+            if self._logger:
+                self._logger.warning("Memory snapshot injection skipped: %s", exc)
+            return tasks
+        if not snapshot:
+            return tasks
+        return [f"{snapshot}\n\n{tasks[0]}", *tasks[1:]]
+
     def get_execution_tools(self) -> List:
         """
         Get tool list from execution environment.
@@ -1141,6 +1198,7 @@ class RoleDrivenAgent(BaseAgent):
         transformed_tasks = self._transform_tasks(task)
         if not transformed_tasks:
             raise ValueError("Agent task transformation produced no tasks")
+        transformed_tasks = self._inject_memory_snapshot(transformed_tasks)
         transformed_task = "\n\n".join(transformed_tasks)
         runtime_agent = self.build_runtime_agent()
 
@@ -1161,6 +1219,9 @@ class RoleDrivenAgent(BaseAgent):
             coord = CheckpointCoordinator.current()
 
         def _execute_agent():
+            session_started = False
+            session_result = None
+            session_error: Optional[BaseException] = None
             # Inject agent_id into model (for LiteLLM/Langfuse tracing)
             agent_id = self.get_agent_id()
             previous_model_agent_id = getattr(self._model, 'agent_id', ...) if hasattr(self._model, 'agent_id') else ...
@@ -1198,6 +1259,12 @@ class RoleDrivenAgent(BaseAgent):
 
             try:
                 ensure_workspace_mounted_once()
+                if get_current_sub_task_id() is None:
+                    self._emit_session_lifecycle_event(
+                        HookEvent.SESSION_START,
+                        transformed_task,
+                    )
+                    session_started = True
 
                 if coord is not None:
                     # ── Resume: restore memory from checkpoint ──
@@ -1254,16 +1321,19 @@ class RoleDrivenAgent(BaseAgent):
                     transformed_task,
                     result=result,
                 )
+                session_result = result
 
                 if coord is not None and checkpoint_manager is not None:
                     coord.save_supervisor(runtime_agent, "completed", result=str(result) if result else None)
 
                 return result
             except KeyboardInterrupt:
+                session_error = KeyboardInterrupt()
                 if coord is not None and checkpoint_manager is not None:
                     coord.save_supervisor(runtime_agent, "interrupted")
                 raise
             except Exception as exc:
+                session_error = exc
                 self._emit_task_lifecycle_event(
                     HookEvent.STOP_FAILURE,
                     transformed_task,
@@ -1273,6 +1343,14 @@ class RoleDrivenAgent(BaseAgent):
                     coord.save_supervisor(runtime_agent, "failed", error=str(exc))
                 raise
             finally:
+                if session_started:
+                    self._emit_session_lifecycle_event(
+                        HookEvent.SESSION_END,
+                        transformed_task,
+                        result=session_result,
+                        error=session_error,
+                    )
+
                 if previous_model_agent_id is not ...:
                     self._model.agent_id = previous_model_agent_id
 

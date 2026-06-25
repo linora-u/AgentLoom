@@ -178,6 +178,8 @@ AGENTS.md
 
 .runtime/
 .repo_map/
+.agentloom/
+skills/generated/proposals/
 
 .agent/
 

@@ -252,6 +252,7 @@ class RootSettings(BaseModel):
     tools_mapping: dict[str, Any] = Field(default_factory=dict)
     tool_metadata: dict[str, Any] = Field(default_factory=dict)
     tool_output_limits: dict[str, Any] = Field(default_factory=dict)
+    self_learning: dict[str, Any] = Field(default_factory=dict)
 
 
 def raise_project_key_error(source: str) -> ValueError:

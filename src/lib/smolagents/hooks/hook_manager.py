@@ -67,6 +67,10 @@ def _context_to_dict(ctx: HookContext) -> Dict[str, Any]:
         "tool_response": ctx.tool_response,
         "tool_inputs_schema": ctx.tool_inputs_schema,
         "step_number": ctx.step_number,
+        "task_id": ctx.task_id,
+        "sub_task_id": ctx.sub_task_id,
+        "agent_name": ctx.agent_name,
+        "agent_config": ctx.agent_config or {},
     }
 
 # Default per-hook timeout (seconds) when none is specified.
@@ -598,6 +602,24 @@ class HookManager:
         if not self.hooks_enabled:
             return HookResult(success=True, decision="allow")
 
+        try:
+            from src.trace import (
+                get_current_agent_config,
+                get_current_agent_name,
+                get_current_sub_task_id,
+                get_current_task_id,
+            )
+
+            task_id = get_current_task_id()
+            sub_task_id = get_current_sub_task_id()
+            agent_name = get_current_agent_name()
+            agent_config = get_current_agent_config()
+        except Exception:
+            task_id = None
+            sub_task_id = None
+            agent_name = None
+            agent_config = None
+
         context = HookContext(
             session_id=self._session_id,
             cwd=os.getcwd(),
@@ -607,6 +629,10 @@ class HookManager:
             tool_response=tool_response,
             tool_inputs_schema=tool_inputs_schema,
             step_number=self.step_number,
+            task_id=task_id,
+            sub_task_id=sub_task_id,
+            agent_name=agent_name,
+            agent_config=agent_config,
         )
 
         final_result = HookResult(success=True, decision="allow")

@@ -29,6 +29,12 @@ from src.tools.skills import (
     read_skill_resource,
     run_skill_script,
 )
+from src.tools.self_learning import (
+    memory,
+    session_scroll,
+    session_search,
+    skill_manage,
+)
 
 from .file_ops import (
     append_markdown_sections,
@@ -93,6 +99,11 @@ __all__ = [
     "read_skill_resource",
     "check_skill_dependencies",
     "run_skill_script",
+    # Self-learning
+    "session_search",
+    "session_scroll",
+    "memory",
+    "skill_manage",
     # Shell
     "shell_tool",
     "check_background_task",

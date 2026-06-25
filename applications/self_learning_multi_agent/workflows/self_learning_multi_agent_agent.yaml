@@ -1,0 +1,131 @@
+name: "self_learning_multi_agent"
+description: "Multi-subagent functional validation for AgentLoom self-learning."
+
+model_type: "powerful"
+tool_call_type: "code_act"
+max_steps: 18
+
+default_loaded_tools: []
+skills: []
+
+tools:
+  - name: "shell_tool"
+  - name: "read_file"
+  - name: "write_markdown_file"
+  - name: "edit_file"
+  - name: "glob_search"
+  - name: "grep_search"
+
+worker_agents:
+  - path: "applications/self_learning_multi_agent/workflows/worker_agents/history_researcher.yaml"
+  - path: "applications/self_learning_multi_agent/workflows/worker_agents/memory_reviewer.yaml"
+  - path: "applications/self_learning_multi_agent/workflows/worker_agents/skill_packager.yaml"
+  - path: "applications/self_learning_multi_agent/workflows/worker_agents/artifact_auditor.yaml"
+
+workflow: |
+  # Self-Learning Multi-Agent Functional Validation
+
+  Execute a real multi-worker validation of the self-learning foundation. This
+  is not a tool presence probe. The supervisor must call every worker tool and
+  verify that their returned JSON proves a functional outcome.
+
+  # Execution Contract
+  - Emit every action as a Python `<code>...</code>` block.
+  - Do not use native `<tool_call>` syntax.
+  - Do not call `load_skill`.
+  - Do not infer worker results. Call each worker tool exactly once.
+  - Execute the required code shape in one Python code block.
+  - Return the final result with `final_answer(JSON_STRING)`.
+  - The on-disk manifest and the final answer must describe the same final
+    state. Do not write `/tmp/<marker>/final_manifest.json` before
+    `manifest_path`, `manifest_written`, and final `ok` are set.
+  - Do not use `write_markdown_file`, `edit_file`, or `read_file` for the
+    final manifest. Use `shell_tool` with the Python heredoc below.
+
+  # Required Worker Flow
+  1. Generate a fresh marker beginning with `AL_SELF_LEARNING_MULTI_`.
+  2. Call `history_researcher` to search prior indexed sessions and scroll near
+     one hit.
+  3. Call `memory_reviewer` to create and verify a project memory proposal.
+  4. Call `skill_packager` to create a skill proposal package and write
+     `references/evidence.json`.
+  5. Call `artifact_auditor` to verify durable files and prove the generated
+     proposal is not in the active skill catalogue.
+  6. Write `/tmp/<marker>/final_manifest.json` with all worker outputs and
+     read it back to verify `manifest_written=true`.
+  7. Return JSON with `ok=true` only when every worker returned `ok=true` and the
+     manifest file was written.
+
+  # Required Code Shape
+  Use this code shape. Adapt only for small runtime errors.
+
+  ```python
+  import json
+  import shlex
+
+  marker = shell_tool(
+      command="python - <<'PY'\nfrom datetime import datetime, timezone\nprint('AL_SELF_LEARNING_MULTI_' + datetime.now(timezone.utc).strftime('%Y%m%d_%H%M%S_%f'))\nPY",
+      timeout=10,
+  ).strip().splitlines()[-1]
+  workspace = f"/tmp/{marker}"
+  shell_tool(command=f"rm -rf {shlex.quote(workspace)} && mkdir -p {shlex.quote(workspace)}", timeout=10)
+
+  base_payload = {"marker": marker, "workspace": workspace}
+
+  history = json.loads(history_researcher(query=json.dumps(base_payload, ensure_ascii=False)))
+  if not history.get("ok"):
+      raise ValueError(f"history_researcher failed: {history}")
+
+  memory_payload = dict(base_payload, history=history)
+  memory_result = json.loads(memory_reviewer(query=json.dumps(memory_payload, ensure_ascii=False)))
+  if not memory_result.get("ok"):
+      raise ValueError(f"memory_reviewer failed: {memory_result}")
+
+  skill_payload = dict(base_payload, history=history, memory=memory_result)
+  skill_result = json.loads(skill_packager(query=json.dumps(skill_payload, ensure_ascii=False)))
+  if not skill_result.get("ok"):
+      raise ValueError(f"skill_packager failed: {skill_result}")
+
+  audit_payload = dict(base_payload, history=history, memory=memory_result, skill=skill_result)
+  audit = json.loads(artifact_auditor(query=json.dumps(audit_payload, ensure_ascii=False)))
+  if not audit.get("ok"):
+      raise ValueError(f"artifact_auditor failed: {audit}")
+
+  result = {
+      "marker": marker,
+      "workspace": workspace,
+      "history": history,
+      "memory": memory_result,
+      "skill": skill_result,
+      "audit": audit,
+      "ok": all(item.get("ok") for item in [history, memory_result, skill_result, audit]),
+  }
+
+  manifest_path = f"{workspace}/final_manifest.json"
+  result["manifest_path"] = manifest_path
+  result["manifest_written"] = True
+  result["ok"] = bool(result["ok"] and result["manifest_written"])
+  manifest_json = json.dumps(result, ensure_ascii=False, indent=2)
+  write_raw = shell_tool(
+      command=(
+          f"cat > {shlex.quote(manifest_path)} <<'JSON'\n"
+          f"{manifest_json}\n"
+          "JSON\n"
+          f"python3 -m json.tool {shlex.quote(manifest_path)} >/dev/null && "
+          "printf 'manifest_written=ok\\n'"
+      ),
+      timeout=10,
+  )
+  if "manifest_written=ok" not in write_raw:
+      raise ValueError(f"manifest write failed: {write_raw}")
+  manifest_check = json.loads(shell_tool(command=f"cat {shlex.quote(manifest_path)}", timeout=10))
+  if manifest_check.get("manifest_written") is not True:
+      raise ValueError(f"manifest did not contain manifest_written=true: {manifest_check}")
+
+  final_answer(json.dumps(result, ensure_ascii=False, indent=2))
+  ```
+
+execution_env:
+  type: "local"
+  executor_kwargs:
+    timeout_seconds: 1200

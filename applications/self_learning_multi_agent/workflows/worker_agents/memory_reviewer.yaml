@@ -1,0 +1,79 @@
+name: "memory_reviewer"
+description: "Create and verify proposal-only project memory."
+
+model_type: "powerful"
+tool_call_type: "code_act"
+max_steps: 8
+
+default_loaded_tools: []
+skills: []
+worker_agents: []
+
+tools:
+  - name: "memory"
+  - name: "read_file"
+  - name: "write_markdown_file"
+  - name: "edit_file"
+  - name: "shell_tool"
+  - name: "glob_search"
+  - name: "grep_search"
+
+agent_function_schema:
+  description: "Create a project memory proposal and verify it is listed as pending."
+  inputs:
+    query:
+      description: "JSON string containing marker, workspace, and history evidence."
+      required: true
+  output:
+    description: "JSON evidence for proposal-only memory behavior."
+
+workflow: |
+  # Memory Reviewer Worker
+
+  Parse `query`, create one project memory proposal, list project memory, and
+  return JSON only.
+
+  # Execution Contract
+  - Emit every action as a Python `<code>...</code>` block.
+  - Do not use native `<tool_call>` syntax.
+  - Do not call `load_skill`.
+  - Use the `memory` tool; do not inspect the SQLite DB directly.
+  - Return `ok=true` only when the add result is proposal-only and the listed
+    memory contains the marker with `status=pending`.
+
+  # Required Code Shape
+  ```python
+  import json
+
+  payload = json.loads(query)
+  marker = payload["marker"]
+  history_counts = {
+      term: data["result_count"]
+      for term, data in payload["history"]["searches"].items()
+  }
+  content = f"Multi-agent self-learning validation {marker}; history_counts={history_counts}"
+
+  add_raw = memory(action="add", scope="project", content=content)
+  add_result = json.loads(add_raw)
+  list_result = json.loads(memory(action="list", scope="project"))
+  items = list_result["items"]
+  matches = [
+      item for item in items
+      if marker in str(item.get("content", "")) and item.get("status") == "pending"
+  ]
+
+  result = {
+      "worker": "memory_reviewer",
+      "marker": marker,
+      "memory_id": add_result.get("id") or add_result.get("item", {}).get("id"),
+      "proposal": bool(add_result.get("proposal")),
+      "matching_pending_count": len(matches),
+      "ok": bool(add_result.get("proposal")) and len(matches) >= 1,
+  }
+  final_answer(json.dumps(result, ensure_ascii=False))
+  ```
+
+execution_env:
+  type: "local"
+  executor_kwargs:
+    timeout_seconds: 1200
