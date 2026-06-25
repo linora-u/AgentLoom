@@ -33,6 +33,10 @@ class TestDefaultToolsetsResolve:
             "loom_retrieve_context",
             "load_skill",
             "list_skills",
+            "session_search",
+            "session_scroll",
+            "memory",
+            "skill_manage",
         ]
 
     def test_all_default_tools_resolve(self):
@@ -59,6 +63,12 @@ class TestToolsets:
             "write_markdown_file",
             "write_markdown_file_raw",
             "append_markdown_sections",
+        )
+        assert toolsets["self_learning"] == (
+            "session_search",
+            "session_scroll",
+            "memory",
+            "skill_manage",
         )
         assert "get_file_outline" in toolsets["code_nav"]
 
