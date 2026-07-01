@@ -6,7 +6,11 @@ import logging
 from pathlib import Path
 from typing import Any
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
+
+from src.lib.config.model_request_header_profiles import (
+    MODEL_REQUEST_HEADER_PROFILE_NAMES,
+)
 
 
 class BoolParser:
@@ -213,6 +217,45 @@ class SystemSettings(BaseModel):
     user_agent: str = "AgentLoom/1.0.1"
 
 
+class ModelRequestHeadersSettings(BaseModel):
+    """System-level default headers for outbound model API requests."""
+
+    model_config = ConfigDict(extra="allow")
+    profile: str = "agentloom"
+    profiles: dict[str, Any] = Field(default_factory=dict)
+    headers: dict[str, Any] = Field(default_factory=dict)
+
+    @field_validator("profile")
+    @classmethod
+    def _validate_profile(cls, value: str) -> str:
+        return str(value or "agentloom").strip().lower()
+
+    @field_validator("headers", "profiles", mode="before")
+    @classmethod
+    def _validate_mapping(cls, value: Any) -> dict[str, Any]:
+        if value is None:
+            return {}
+        if not isinstance(value, dict):
+            raise ValueError("model_request_headers headers/profiles must be mappings")
+        return value
+
+    @model_validator(mode="after")
+    def _validate_selected_profile(self) -> "ModelRequestHeadersSettings":
+        builtin_profiles = {
+            "agentloom",
+            "generic",
+            "none",
+        } | MODEL_REQUEST_HEADER_PROFILE_NAMES
+        custom_profiles = {str(name).strip().lower() for name in self.profiles}
+        if self.profile not in builtin_profiles and self.profile not in custom_profiles:
+            allowed_text = ", ".join(sorted(builtin_profiles | custom_profiles))
+            raise ValueError(
+                f"model_request_headers.profile must be built-in or configured under "
+                f"model_request_headers.profiles: {allowed_text}"
+            )
+        return self
+
+
 class PathValidationRule(BaseModel):
     """A single path-validation rule targeting a group of tools."""
     model_config = ConfigDict(extra="allow")
@@ -240,6 +283,7 @@ class ToolAccessControlSettings(BaseModel):
 class RootSettings(BaseModel):
     model_config = ConfigDict(extra="allow")
     system: SystemSettings = Field(default_factory=SystemSettings)
+    model_request_headers: ModelRequestHeadersSettings = Field(default_factory=ModelRequestHeadersSettings)
     tool_access_control: ToolAccessControlSettings = Field(default_factory=ToolAccessControlSettings)
     smart_summary: bool = True
     context_engine: dict[str, Any] = Field(default_factory=dict)

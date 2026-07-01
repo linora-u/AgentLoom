@@ -19,6 +19,7 @@ def _patch_yaml_config(monkeypatch, config: dict) -> dict:
 
 def _base_model_config() -> dict:
     return {
+        "model_request_headers": {"profile": "none"},
         "langfuse": {
             "enabled": True,
             "host": "https://langfuse.example",

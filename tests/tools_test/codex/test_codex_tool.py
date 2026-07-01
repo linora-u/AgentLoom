@@ -1,5 +1,6 @@
 import os
 import stat
+import sys
 from pathlib import Path
 
 import pytest
@@ -14,6 +15,7 @@ def _install_fake_codex(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> tupl
     args_file = tmp_path / "args.txt"
     stdin_file = tmp_path / "stdin.txt"
     fake = bin_dir / "codex"
+    python_bin = sys.executable
     fake.write_text(
         f"""#!/usr/bin/env bash
 echo "CALL:$*" >> "{args_file}"
@@ -42,7 +44,7 @@ if [[ "$1" == "exec" ]]; then
     exit "$FAKE_CODEX_EXIT"
   fi
   if [[ "$FAKE_CODEX_BIG" == "1" ]]; then
-    python - <<'PY'
+    "{python_bin}" - <<'PY'
 import json
 print(json.dumps({{"type": "agent_message", "message": "X" * 50}}))
 PY
