@@ -34,6 +34,7 @@ APP_CONFIG_RELATIVE_PATH = Path("config") / SYSTEM_CONFIG_NAME
 _PROJECT_NAME = "AgentLoom"
 _WORKFLOW_OVERLAY_KEYS = {
     "system",
+    "model_request_headers",
     "smart_summary",
     "context_engine",
     "tool_access_control",
