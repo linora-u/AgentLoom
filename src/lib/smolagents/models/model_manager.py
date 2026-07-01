@@ -16,10 +16,13 @@ litellm.drop_params = True
 
 from smolagents import AgentLogger
 
-from src.lib.config import C
 from src.lib.logging import get_logger
 from src.lib.smolagents.models.litellm_retry import patch_litellm_completion
 from src.lib.smolagents.models.litellm_model import LiteLLMModelV2
+from src.lib.smolagents.models.request_headers import (
+    build_model_request_headers,
+    get_system_model_request_headers,
+)
 
 from .model_types import ModelConfig, ModelType, ModelTypeManager
 
@@ -100,13 +103,17 @@ class ModelManager:
         # Apply custom retry wrapper.
         patch_litellm_completion(litellm)
 
-        # Configure global headers from config.
+        # Configure global headers from config for litellm versions that expose
+        # a module-level default. Per-call extra_headers is the authoritative path.
+        system_headers = get_system_model_request_headers()
         if hasattr(litellm, 'default_headers'):
-            litellm.default_headers = {
-                "User-Agent": C.user_agent,
-            }
+            litellm.default_headers = system_headers
 
-        logger.debug(f"Configured litellm retry: exponential backoff via tenacity, User-Agent: {C.user_agent}")
+        logger.debug(
+            "Configured litellm retry: exponential backoff via tenacity, "
+            "model request headers: %s",
+            sorted(system_headers),
+        )
 
     def get_model_config(
         self,
@@ -182,9 +189,10 @@ class ModelManager:
             "timeout": model_config.timeout,
         }
 
-        # Add custom headers if configured.
-        if model_config.extra_headers is not None:
-            litellm_params["extra_headers"] = model_config.extra_headers
+        # Add system-level privacy headers plus model-specific overrides.
+        request_headers = build_model_request_headers(model_config.extra_headers)
+        if request_headers:
+            litellm_params["extra_headers"] = request_headers
 
         # Add API fields only if configured.
         if model_config.base_url:
@@ -241,8 +249,9 @@ class ModelManager:
         # Build optional kwargs that should only be passed when set.
         # extra_headers flows through smolagents self.kwargs → litellm.completion() natively.
         optional_kwargs = {}
-        if model_config.extra_headers:
-            optional_kwargs["extra_headers"] = model_config.extra_headers
+        request_headers = build_model_request_headers(model_config.extra_headers)
+        if request_headers:
+            optional_kwargs["extra_headers"] = request_headers
         if model_config.extra_completion_params:
             optional_kwargs.update(model_config.extra_completion_params)
 

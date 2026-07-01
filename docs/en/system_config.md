@@ -17,6 +17,7 @@ The configuration loading order is `config/system.yaml` → `config/llm.yaml` �
 
 - [Quick Reference: Complete YAML Structure](#quick-reference-complete-yaml-structure)
 - [1. system — System Metadata](#1-system--system-metadata)
+- [1.5 model_request_headers — Model Request Header Privacy](#15-model_request_headers--model-request-header-privacy)
 - [2. smart_summary — Context Compression Strategy](#2-smart_summary--context-compression-strategy)
 - [3. prompt — Top-Level System Prompt Override](#3-prompt--top-level-system-prompt-override)
 - [4. skills — Global Skills Configuration](#4-skills--global-skills-configuration)
@@ -46,6 +47,13 @@ system:
   name: "AgentLoom"
   version: "1.0.1"
   user_agent: "AgentLoom/1.0.1"
+
+# ============================================
+# Model Request Header Privacy
+# ============================================
+model_request_headers:
+  profile: "opencode"  # agentloom | none | kimicode | openclaw | opencode
+  headers: {}
 
 # ============================================
 # Context Compression Strategy
@@ -156,7 +164,7 @@ checkpoint:
 
 ## 1. system — System Metadata
 
-Controls basic system identity, used for logging and HTTP request User-Agent headers.
+Controls basic system identity, used for logging and, when `model_request_headers.profile: "agentloom"` is selected, model request `User-Agent` construction.
 
 **YAML path**: `system.*`
 **Pydantic model**: `SystemSettings`
@@ -165,7 +173,7 @@ Controls basic system identity, used for logging and HTTP request User-Agent hea
 |------|------|--------|------|------|
 | `system.name` | `str` | `"AgentLoom"` | ❌ No | System name, used for log identification and User-Agent construction |
 | `system.version` | `str` | `"1.0.1"` | ❌ No | System version number (informational field) |
-| `system.user_agent` | `str` | `"AgentLoom/1.0.1"` | ❌ No | User-Agent string for HTTP API requests |
+| `system.user_agent` | `str` | `"AgentLoom/1.0.1"` | ❌ No | AgentLoom identity string used by the `agentloom` request-header profile |
 
 **Example**:
 
@@ -175,6 +183,70 @@ system:
   version: "2.0.0"
   user_agent: "my-project-agents/2.0.0"
 ```
+
+---
+
+## 1.5 model_request_headers — Model Request Header Privacy
+
+Configures default HTTP headers for outbound model API requests so AgentLoom's default identity is not exposed directly to model providers. Put global privacy defaults here; keep provider/model-specific overrides in `config/llm.yaml` `model.<type>.extra_headers`.
+
+The recommended repository default is `opencode`, which has been validated against the current OpenAI-compatible `llm.yaml` endpoint with the real OpenCode CLI:
+
+```yaml
+model_request_headers:
+  profile: "opencode"
+  headers: {}
+```
+
+Built-in profiles:
+
+| profile | Status | Description |
+|------|------|------|
+| `opencode` | Verified with real OpenCode | Suitable for the current OpenAI-compatible `llm.yaml`; sends OpenCode's current `User-Agent` and session headers |
+| `cline` | Verified with real Cline CLI | Suitable for the current OpenAI-compatible `llm.yaml`; sends Cline CLI's current OpenAI-compatible runtime `User-Agent` |
+| `kimicode` | Verified with real Kimi Code | Suitable for the current OpenAI-compatible `llm.yaml`; sends Kimi Code's current `User-Agent` and JS SDK headers |
+| `openclaw` | Verified with real OpenClaw | Suitable for the current OpenAI-compatible `llm.yaml`; sends OpenClaw's current direct-runtime OpenAI JS SDK headers |
+| `roo` | Verified with Roo Code OpenAI provider source | Suitable for the current OpenAI-compatible `llm.yaml`; sends Roo Code's current default `HTTP-Referer`, `X-Title`, and `User-Agent` |
+| `agentloom` | Explicit AgentLoom identity | Uses `system.user_agent` |
+| `none` | No system default identity header | Leaves only SDK headers and explicitly configured headers |
+
+Claude Code currently uses an Anthropic-compatible plan/coding protocol, so it
+cannot be proven endpoint-equivalent with this repository's current
+OpenAI-compatible `/api/v3` + `ep-...` config and is not exposed as a built-in
+profile. Define a custom `model_request_headers.profiles` entry if you need to
+experiment with Claude Code-style headers.
+
+The public npm registry does not currently provide a directly runnable official
+Roo CLI, and the repository CLI does not expose an OpenAI-compatible base URL
+option. The `roo` validation boundary is therefore a real request through Roo
+Code `3.53.0` `OpenAiHandler` provider source, not a full VS Code extension-host
+validation.
+
+Custom profile example:
+
+```yaml
+model_request_headers:
+  profile: "codex"
+  profiles:
+    codex:
+      headers:
+        User-Agent: "configured-agent/1.0"
+        X-Client-Profile: "codex"
+```
+
+Merge order:
+
+1. Built-in profile, or `model_request_headers.profiles.<name>`
+2. `model_request_headers.headers`
+3. `config/llm.yaml` `model.<type>.extra_headers`
+
+Later layers override earlier layers case-insensitively. This feature only controls AgentLoom-managed HTTP headers; it does not guarantee TLS fingerprints, body schemas, or header ordering are identical to a real client. Proving exact parity with a real client version requires capturing that client against the same endpoint and diffing the requests. The current validation boundary is recorded in the Chinese [model request header parity note](../cn/model_request_header_tool_parity.md).
+
+| Parameter | Type | Default | Required | Description |
+|------|------|--------|------|------|
+| `model_request_headers.profile` | `str` | `"agentloom"` | ❌ No | Selects a built-in or custom request-header profile; the repository example uses `opencode` |
+| `model_request_headers.profiles` | `dict` | `{}` | ❌ No | Local custom or overriding named request-header profiles |
+| `model_request_headers.headers` | `dict` | `{}` | ❌ No | System-level extra headers sent with every model request |
 
 ---
 
@@ -1221,6 +1293,7 @@ The framework uses Pydantic to validate system configuration. The following show
 |--------|--------------|--------|
 | Root configuration | `RootSettings` | `src/lib/config/config_validation.py` |
 | `system.*` | `SystemSettings` | `src/lib/config/config_validation.py` |
+| `model_request_headers.*` | `ModelRequestHeadersSettings` | `src/lib/config/config_validation.py` |
 | `tool_access_control.*` | `ToolAccessControlSettings` | `src/lib/config/config_validation.py` |
 
 **`RootSettings` complete field definitions**:
@@ -1228,6 +1301,7 @@ The framework uses Pydantic to validate system configuration. The following show
 | Field | Type | Default |
 |------|------|--------|
 | `system` | `SystemSettings` | `SystemSettings()` |
+| `model_request_headers` | `ModelRequestHeadersSettings` | `ModelRequestHeadersSettings()` |
 | `tool_access_control` | `ToolAccessControlSettings` | `ToolAccessControlSettings()` |
 | `smart_summary` | `bool` | `True` |
 | `model` | `dict[str, Any]` | `{}` |

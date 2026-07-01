@@ -6,6 +6,15 @@ system:
   version: "1.0.1"
   user_agent: "AgentLoom/1.0.1"
 
+# Default headers for outbound model API requests.
+# Profiles hide AgentLoom's default identity from model providers. The default
+# opencode profile was verified against the current OpenAI-compatible endpoint.
+# Claude Code uses a different Anthropic-compatible endpoint shape and is not
+# used as the default for this OpenAI-compatible llm.yaml.
+model_request_headers:
+  profile: "opencode"  # agentloom | none | cline | kimicode | openclaw | opencode | roo
+  headers: {}
+
 smart_summary: false
 
 # Reversible context compression. Large tool/worker outputs are stored locally
