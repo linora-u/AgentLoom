@@ -185,7 +185,7 @@ Except for `default_model_type`, **all dict-valued keys under the `model` block 
 | `num_retries` | `int` | `5` | ❌ No | Number of retries on API call failure |
 | `retry_delay` | `float` | `15.0` | ❌ No | Initial retry delay (seconds). See [Section 6](#6-retry-mechanism-details) |
 | `max_retry_delay` | `float` | `100.0` | ❌ No | Maximum retry delay (seconds). Upper limit for exponential backoff |
-| `extra_headers` | `dict` \| `null` | `null` | ❌ No | Custom HTTP request headers. Configure independently for each model type; no cross-type merge is performed |
+| `extra_headers` | `dict` \| `null` | `null` | ❌ No | Custom HTTP request headers. Configure independently for each model type; overrides same-name headers from `system.yaml` `model_request_headers` |
 | `context_cache` | `bool` | `false` | ❌ No | Universal Prompt cache optimization. When `true`, the framework injects `cache_control: {"type": "ephemeral"}` for **ALL models** universally. litellm handles per-provider behavior automatically (Anthropic preserves, OpenAI strips, Vertex AI converts to Gemini format) |
 | `system_prompt_boundary` | `str` \| `null` | `null` | ❌ No | System prompt split marker. When set, the system prompt is split into **static (cached)** + **dynamic (uncached)** segments at this marker, improving cache hit rates. Example: `"<!-- DYNAMIC_BOUNDARY -->"` |
 | `requests_per_minute` | `int` | `60` | ❌ No | Rate limit for this model type |
@@ -210,6 +210,8 @@ Except for `default_model_type`, **all dict-valued keys under the `model` block 
 > The framework uses `IntParser` for lenient parsing; `"max"` is a special bypass string.
 
 ### 3.4 extra_headers Override Behavior
+
+`system.yaml` `model_request_headers` first produces global default headers. The current model type's `extra_headers` is merged last and overrides same-name headers case-insensitively.
 
 ```yaml
 model:

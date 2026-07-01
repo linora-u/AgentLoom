@@ -17,6 +17,7 @@
 
 - [快速参考：完整 YAML 结构](#快速参考完整-yaml-结构)
 - [1. system — 系统元数据](#1-system--系统元数据)
+- [1.5 model_request_headers — 模型请求头隐私配置](#15-model_request_headers--模型请求头隐私配置)
 - [2. smart_summary — 上下文压缩策略](#2-smart_summary--上下文压缩策略)
 - [3. prompt — 顶层 System Prompt 覆盖](#3-prompt--顶层-system-prompt-覆盖)
 - [4. skills — 全局 Skills 配置](#4-skills--全局-skills-配置)
@@ -47,6 +48,13 @@ system:
   name: "AgentLoom"
   version: "1.0.1"
   user_agent: "AgentLoom/1.0.1"
+
+# ============================================
+# 模型请求头隐私配置
+# ============================================
+model_request_headers:
+  profile: "opencode"  # agentloom | none | kimicode | openclaw | opencode
+  headers: {}
 
 # ============================================
 # 上下文压缩策略
@@ -156,7 +164,7 @@ checkpoint:
 
 ## 1. system — 系统元数据
 
-控制系统的基本身份标识，用于日志、HTTP 请求的 User-Agent 头等。
+控制系统的基本身份标识，用于日志；当 `model_request_headers.profile: "agentloom"` 时，也用于模型请求的 `User-Agent`。
 
 **YAML 路径**：`system.*`
 **Pydantic 模型**：`SystemSettings`
@@ -165,7 +173,7 @@ checkpoint:
 |------|------|--------|------|------|
 | `system.name` | `str` | `"AgentLoom"` | ❌ 否 | 系统名称，用于日志标识和 User-Agent 构建 |
 | `system.version` | `str` | `"1.0.1"` | ❌ 否 | 系统版本号（信息性字段） |
-| `system.user_agent` | `str` | `"AgentLoom/1.0.1"` | ❌ 否 | HTTP API 请求时的 User-Agent 字符串 |
+| `system.user_agent` | `str` | `"AgentLoom/1.0.1"` | ❌ 否 | `agentloom` 请求头 profile 使用的 AgentLoom 身份字符串 |
 
 **示例**：
 
@@ -175,6 +183,67 @@ system:
   version: "2.0.0"
   user_agent: "my-project-agents/2.0.0"
 ```
+
+---
+
+## 1.5 model_request_headers — 模型请求头隐私配置
+
+配置所有模型 API 出站请求的默认 HTTP headers，用于避免 AgentLoom 默认身份直接暴露给模型供应商。全局隐私默认值放这里；某个模型或供应商需要单独覆盖时，仍放在 `config/llm.yaml` 的 `model.<type>.extra_headers`。
+
+当前推荐配置为 `opencode`，该 profile 已用当前 `llm.yaml` 的 Ark OpenAI-compatible endpoint 做过真实工具对比：
+
+```yaml
+model_request_headers:
+  profile: "opencode"
+  headers: {}
+```
+
+内置 profile：
+
+| profile | 状态 | 说明 |
+|------|------|------|
+| `opencode` | 已用真实 OpenCode 验证 | 适用于当前 OpenAI-compatible `llm.yaml`；发送 OpenCode 当前版本的 `User-Agent` 和 session headers |
+| `cline` | 已用真实 Cline CLI 验证 | 适用于当前 OpenAI-compatible `llm.yaml`；发送 Cline CLI 当前 OpenAI-compatible runtime 的 `User-Agent` |
+| `kimicode` | 已用真实 Kimi Code 验证 | 适用于当前 OpenAI-compatible `llm.yaml`；发送 Kimi Code 当前版本的 `User-Agent` 和 JS SDK headers |
+| `openclaw` | 已用真实 OpenClaw 验证 | 适用于当前 OpenAI-compatible `llm.yaml`；发送 OpenClaw 当前 direct runtime 的 OpenAI JS SDK headers |
+| `roo` | 已用 Roo Code OpenAI provider 源码验证 | 适用于当前 OpenAI-compatible `llm.yaml`；发送 Roo Code 当前默认 `HTTP-Referer`、`X-Title` 和 `User-Agent` |
+| `agentloom` | 显式使用 AgentLoom 身份 | 使用 `system.user_agent` |
+| `none` | 不加系统默认身份 header | 只保留模型 SDK 自带 headers 和显式配置的 headers |
+
+Claude Code 当前走 Anthropic-compatible plan/coding 协议，不能用仓库当前
+OpenAI-compatible `/api/v3` + `ep-...` 配置证明协议级一致，因此不作为内置 profile。
+如确实要实验 Claude Code 风格 header，可在 `model_request_headers.profiles` 里显式
+自定义。
+
+Roo Code 当前公开 npm 中没有可直接运行的官方 Roo CLI，仓库内 CLI 也不能用命令行
+配置 OpenAI-compatible base URL；因此 `roo` 的验收边界是 Roo Code `3.53.0`
+源码中的 `OpenAiHandler` provider 真实请求验证，不是完整 VS Code 扩展宿主验证。
+
+自定义 profile 示例：
+
+```yaml
+model_request_headers:
+  profile: "codex"
+  profiles:
+    codex:
+      headers:
+        User-Agent: "configured-agent/1.0"
+        X-Client-Profile: "codex"
+```
+
+合并顺序：
+
+1. 内置 profile，或 `model_request_headers.profiles.<name>`
+2. `model_request_headers.headers`
+3. `config/llm.yaml` 的 `model.<type>.extra_headers`
+
+后面的层级按 header 名大小写不敏感覆盖前面的层级。注意：这个功能只控制 AgentLoom 管理的 HTTP headers，不能保证 TLS 指纹、请求体 schema、header 顺序等与真实客户端完全相同；要证明某个真实客户端版本完全一致，需要用同一捕获端点抓真实客户端请求后做差异比对。当前验证边界见 [模型请求头伪装验证记录](model_request_header_tool_parity.md)。
+
+| 参数 | 类型 | 默认值 | 必选 | 说明 |
+|------|------|--------|------|------|
+| `model_request_headers.profile` | `str` | `"agentloom"` | ❌ 否 | 选择内置或自定义请求头 profile；仓库默认示例使用 `opencode` |
+| `model_request_headers.profiles` | `dict` | `{}` | ❌ 否 | 本地自定义或覆盖的命名请求头 profile |
+| `model_request_headers.headers` | `dict` | `{}` | ❌ 否 | 应用于每个模型请求的系统级额外 header |
 
 ---
 
@@ -1239,6 +1308,7 @@ checkpoint:
 |--------|--------------|--------|
 | 根配置 | `RootSettings` | `src/lib/config/config_validation.py` |
 | `system.*` | `SystemSettings` | `src/lib/config/config_validation.py` |
+| `model_request_headers.*` | `ModelRequestHeadersSettings` | `src/lib/config/config_validation.py` |
 | `tool_access_control.*` | `ToolAccessControlSettings` | `src/lib/config/config_validation.py` |
 
 **`RootSettings` 完整字段定义**：
@@ -1246,6 +1316,7 @@ checkpoint:
 | 字段 | 类型 | 默认值 |
 |------|------|--------|
 | `system` | `SystemSettings` | `SystemSettings()` |
+| `model_request_headers` | `ModelRequestHeadersSettings` | `ModelRequestHeadersSettings()` |
 | `tool_access_control` | `ToolAccessControlSettings` | `ToolAccessControlSettings()` |
 | `smart_summary` | `bool` | `True` |
 | `model` | `dict[str, Any]` | `{}` |
