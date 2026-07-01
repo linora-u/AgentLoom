@@ -18,6 +18,7 @@ import json
 from typing import Any, Dict, Optional
 
 from src.lib.logging import get_logger
+from src.lib.smolagents.models.request_headers import build_model_request_headers
 
 from .hook_helpers import add_arguments_to_prompt
 from .types import HookResult, PromptHook
@@ -99,6 +100,7 @@ def exec_prompt_hook(
             max_tokens=256,
             temperature=0.0,
             timeout=effective_timeout,
+            extra_headers=build_model_request_headers(),
         )
     except Exception as exc:
         # Catches litellm.Timeout, litellm.APIError, network errors, etc.

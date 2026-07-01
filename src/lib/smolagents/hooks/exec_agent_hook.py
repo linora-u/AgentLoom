@@ -18,6 +18,7 @@ import json
 from typing import Any, Dict, Optional
 
 from src.lib.logging import get_logger
+from src.lib.smolagents.models.request_headers import build_model_request_headers
 
 from .hook_helpers import add_arguments_to_prompt
 from .exec_prompt_hook import _parse_llm_response, _evaluate_ok_response
@@ -90,6 +91,7 @@ def exec_agent_hook(
             max_tokens=512,
             temperature=0.0,
             timeout=effective_timeout,
+            extra_headers=build_model_request_headers(),
         )
     except Exception as exc:
         exc_name = type(exc).__name__
