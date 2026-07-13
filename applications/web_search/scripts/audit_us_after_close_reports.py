@@ -9,7 +9,6 @@ from pathlib import Path
 from urllib.parse import urlparse
 from zoneinfo import ZoneInfo
 
-
 NEW_YORK_TZ = ZoneInfo("America/New_York")
 UTC_TZ = ZoneInfo("UTC")
 REQUIRED_COLUMNS = [
@@ -180,7 +179,16 @@ def _source_tags_from_url(value: str) -> list[str]:
 
 
 def _hosts_from_url(value: str) -> list[str]:
-    return [urlparse(match.group(2)).netloc.lower() for match in MARKDOWN_LINK_RE.finditer(value)]
+    hosts: list[str] = []
+    for match in MARKDOWN_LINK_RE.finditer(value):
+        hostname = urlparse(match.group(2)).hostname
+        if hostname:
+            hosts.append(hostname.rstrip(".").lower())
+    return hosts
+
+
+def _is_example_host(host: str) -> bool:
+    return host == "example.com" or host.endswith(".example.com")
 
 
 def _has_duplicates(values: list[str]) -> bool:
@@ -274,7 +282,7 @@ def _validate_sources(
                 row,
             )
         )
-    if any(host.endswith("example.com") for host in _hosts_from_url(url)):
+    if any(_is_example_host(host) for host in _hosts_from_url(url)):
         issues.append(AuditIssue("warning", "example.com URL is only suitable for tests", row))
 
 
