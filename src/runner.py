@@ -17,20 +17,18 @@ Usage (CLI)::
 
 from __future__ import annotations
 
-import sys
-from datetime import datetime, timezone
+from datetime import datetime
 from pathlib import Path
-from typing import Optional
 
-from src.lib.config import C
-from src.lib.logging import initialize_global_logger_once, get_logger
+from src.lib.checkpoint import CheckpointManager
+from src.lib.checkpoint.file_history import FileHistoryManager
+from src.lib.config import C, build_effective_agent_config
+from src.lib.heartbeat import SupervisorHeartbeat
+from src.lib.logging import get_logger, initialize_global_logger_once
 from src.lib.smolagents.agent.yaml_agent_factory import (
     YamlAgentFactory,
     YamlConfiguredSupervisorAgent,
 )
-from src.lib.checkpoint import CheckpointManager
-from src.lib.checkpoint.file_history import FileHistoryManager
-from src.lib.heartbeat import SupervisorHeartbeat
 from src.trace import generate_id
 
 #: 启动 agent 时 YAML 中必须提供的字段。
@@ -135,6 +133,10 @@ def run_app(
     resolved_path = _resolve_yaml_path(yaml_path)
     config = YamlAgentFactory._load_config_from_file(resolved_path)
     validate_required_yaml_fields(config, resolved_path)
+    effective_config = build_effective_agent_config(
+        config,
+        source_name=str(config.get("_yaml_file_path") or resolved_path),
+    )
 
     # 2. Initialise logging with the YAML app name.
     agent_name = config["name"]
@@ -163,11 +165,16 @@ def run_app(
         logger=global_logger,
     )
 
-    # 5. Checkpoint & heartbeat setup (reads config/system.yaml).
-    ckpt_enabled = C.get_nested("checkpoint", "enabled", default=True)
-    heartbeat_interval = C.get_nested("checkpoint", "heartbeat_interval", default=5.0)
-    cleanup_on_success = C.get_nested("checkpoint", "cleanup_on_success", default=True)
-    max_resume_age = C.get_nested("checkpoint", "max_resume_age", default=604800)
+    # 5. Checkpoint & heartbeat setup. Application-level system.yaml is part of
+    # the effective configuration, so isolated validation apps can disable raw
+    # checkpoint artifacts without changing the global project setting.
+    checkpoint_config = effective_config.get("checkpoint", {})
+    if not isinstance(checkpoint_config, dict):
+        checkpoint_config = {}
+    ckpt_enabled = checkpoint_config.get("enabled", True)
+    heartbeat_interval = checkpoint_config.get("heartbeat_interval", 5.0)
+    cleanup_on_success = checkpoint_config.get("cleanup_on_success", True)
+    max_resume_age = checkpoint_config.get("max_resume_age", 604800)
 
     # Obtain the current per-run log directory (already created by logger init).
     from src.lib.logging.logger_manager import get_current_run_log_dir as _get_run_dir

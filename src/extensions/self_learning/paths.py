@@ -56,6 +56,40 @@ def config_bool(name: str, default: bool = True) -> bool:
     return bool(value)
 
 
+def config_int(name: str, default: int = 0) -> int:
+    try:
+        return int(_config_section().get(name, default) or 0)
+    except (TypeError, ValueError):
+        return default
+
+
+_MEMORY_CONFIG_DEFAULTS: dict[str, Any] = {
+    "prompt_max_chars": 12000,
+    "max_item_chars": 4000,
+    "scope_budgets": {"project": 8000, "application": 6000, "session": 4000},
+    "session_ttl_days": 14,
+    "distill_enabled": True,
+    # Code defaults stay conservative (no LLM calls, no auto-apply) so tests
+    # and minimal configs are inert; config/system.yaml ships the active values.
+    "distill_model": "",
+    "auto_apply": "off",
+}
+
+
+def memory_config() -> dict[str, Any]:
+    """Return the ``self_learning.memory`` section merged over defaults."""
+    section = _config_section().get("memory", {})
+    if not isinstance(section, dict):
+        section = {}
+    merged = dict(_MEMORY_CONFIG_DEFAULTS)
+    merged.update({k: v for k, v in section.items() if v is not None})
+    budgets = dict(_MEMORY_CONFIG_DEFAULTS["scope_budgets"])
+    if isinstance(section.get("scope_budgets"), dict):
+        budgets.update({k: int(v) for k, v in section["scope_budgets"].items() if v is not None})
+    merged["scope_budgets"] = budgets
+    return merged
+
+
 def sessions_dir(root: str | Path | None = None) -> Path:
     return self_learning_root(root) / "sessions"
 

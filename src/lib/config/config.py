@@ -479,6 +479,11 @@ def build_effective_agent_config(
     merged = layered_builder.build()
     normalize_tool_access_control_section(merged, base.agent_root)
     validate_system_snapshot(merged, source_name)
+    if isinstance(agent_config, dict) and agent_config.get("_yaml_file_path"):
+        # Identity metadata, not configuration: application-scope resolution
+        # (self-learning memory layering, learning artifacts) reads the workflow
+        # path from the effective config at hook time.
+        merged["_yaml_file_path"] = str(agent_config["_yaml_file_path"])
     return merged
 
 

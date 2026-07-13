@@ -15,12 +15,12 @@ Note on threading:
 
 import logging
 import threading
-from contextvars import ContextVar
 from contextlib import contextmanager
-from typing import Any, Optional, Generator
+from contextvars import ContextVar
+from dataclasses import dataclass
+from typing import Any, Generator, Optional
 
 from .id_generator import generate_id
-
 
 logger = logging.getLogger(__name__)
 
@@ -33,6 +33,8 @@ _current_agent_config: ContextVar[Optional[dict]] = ContextVar('current_agent_co
 _current_skills_manager: ContextVar[Optional[Any]] = ContextVar('current_skills_manager', default=None)
 _current_hook_manager: ContextVar[Optional[Any]] = ContextVar('current_hook_manager', default=None)
 _current_runtime_agent_path: ContextVar[Optional[str]] = ContextVar('current_runtime_agent_path', default=None)
+_current_session_run_id: ContextVar[Optional[str]] = ContextVar('current_session_run_id', default=None)
+_current_local_run_id: ContextVar[Optional[str]] = ContextVar('current_local_run_id', default=None)
 
 # Thread-safe global fallbacks for values that must be accessible from
 # ThreadPoolExecutor worker threads where ContextVar is not propagated.
@@ -45,6 +47,85 @@ _global_agent_name_fallback: Optional[str] = None
 _global_runtime_agent_path_fallback: Optional[str] = None
 _global_skills_manager_fallback: Optional[Any] = None
 _global_hook_manager_fallback: Optional[Any] = None
+# NOTE: the session run id deliberately has NO global fallback. Worker threads
+# inherit it via contextvars.copy_context() (see ParallelAgentExecutor), and a
+# process-wide scalar would leak run A's identity into a concurrently running
+# run B — session memory and injection records would land on the wrong run.
+
+
+class MissingRunContextError(RuntimeError):
+    """Raised when run-scoped code executes without an explicit root binding."""
+
+
+@dataclass(frozen=True)
+class ExplicitExecutionContext:
+    """Immutable values required when execution crosses a thread boundary.
+
+    The regular getters in this module retain legacy process-wide fallbacks for
+    non-run-scoped integrations.  Runtime tools and hooks must not use those
+    fallbacks: a value from another concurrent run is worse than a missing
+    value.  This snapshot is captured from ContextVars only and can be rebound
+    independently in any number of worker threads.
+    """
+
+    task_id: Optional[str]
+    sub_task_id: Optional[str]
+    agent_id: Optional[str]
+    agent_name: Optional[str]
+    agent_config: Optional[dict]
+    skills_manager: Optional[Any]
+    hook_manager: Optional[Any]
+    runtime_agent_path: Optional[str]
+    root_run_id: Optional[str]
+    local_run_id: Optional[str]
+
+
+def capture_explicit_execution_context() -> ExplicitExecutionContext:
+    """Capture the active execution context without consulting fallbacks."""
+
+    return ExplicitExecutionContext(
+        task_id=_current_task_id.get(),
+        sub_task_id=_current_sub_task_id.get(),
+        agent_id=_current_agent_id.get(),
+        agent_name=_current_agent_name.get(),
+        agent_config=_current_agent_config.get(),
+        skills_manager=_current_skills_manager.get(),
+        hook_manager=_current_hook_manager.get(),
+        runtime_agent_path=_current_runtime_agent_path.get(),
+        root_run_id=_current_session_run_id.get(),
+        local_run_id=_current_local_run_id.get(),
+    )
+
+
+@contextmanager
+def bind_explicit_execution_context(
+    context: ExplicitExecutionContext,
+) -> Generator[None, None, None]:
+    """Rebind a captured context with ContextVar tokens only.
+
+    Deliberately bypasses the public setters because those also maintain
+    legacy global fallbacks.  Crossing a runtime thread must never mutate a
+    process-wide value shared by another run.
+    """
+
+    bindings = (
+        (_current_task_id, context.task_id),
+        (_current_sub_task_id, context.sub_task_id),
+        (_current_agent_id, context.agent_id),
+        (_current_agent_name, context.agent_name),
+        (_current_agent_config, context.agent_config),
+        (_current_skills_manager, context.skills_manager),
+        (_current_hook_manager, context.hook_manager),
+        (_current_runtime_agent_path, context.runtime_agent_path),
+        (_current_session_run_id, context.root_run_id),
+        (_current_local_run_id, context.local_run_id),
+    )
+    tokens = [(variable, variable.set(value)) for variable, value in bindings]
+    try:
+        yield
+    finally:
+        for variable, token in reversed(tokens):
+            variable.reset(token)
 
 
 def set_current_task_id(task_id: str) -> None:
@@ -282,6 +363,96 @@ def clear_current_hook_manager() -> None:
     logger.debug("Cleared current hook manager")
 
 
+# ---------------------------------------------------------------------------
+# Session run id — the TOP-LEVEL run's session identity, set only by the
+# session-owning (supervisor) agent.  Workers keep their own hook managers
+# (event attribution stays per-worker) but share this id, so run-scoped
+# state like session memory accrues to the run that gets the SessionEnd.
+# Pure ContextVar: worker threads see it through copy_context() propagation
+# at the spawn site, and concurrent runs in one process stay isolated.
+# ---------------------------------------------------------------------------
+
+def set_current_session_run_id(run_id: str) -> None:
+    """Set the top-level session run id for the active run."""
+    _current_session_run_id.set(run_id)
+    logger.debug(f"Set session run id: {run_id}")
+
+
+def get_current_session_run_id() -> Optional[str]:
+    """Get the top-level session run id for the current context."""
+    return _current_session_run_id.get()
+
+
+def clear_current_session_run_id() -> None:
+    """Clear the top-level session run id."""
+    _current_session_run_id.set(None)
+    logger.debug("Cleared session run id")
+
+
+def get_current_local_run_id() -> Optional[str]:
+    """Return the current agent invocation id without any global fallback."""
+
+    return _current_local_run_id.get()
+
+
+def require_local_run_id() -> str:
+    """Return the explicitly bound local run id or fail closed."""
+
+    run_id = _current_local_run_id.get()
+    if not isinstance(run_id, str) or not run_id.strip():
+        raise MissingRunContextError("missing explicit local run context")
+    return run_id.strip()
+
+
+@contextmanager
+def bind_local_run(run_id: str) -> Generator[None, None, None]:
+    """Bind one agent invocation id, restoring the parent invocation on exit."""
+
+    if not isinstance(run_id, str) or not run_id.strip():
+        raise ValueError("local run id must be a non-empty string")
+    token = _current_local_run_id.set(run_id.strip())
+    try:
+        yield
+    finally:
+        _current_local_run_id.reset(token)
+
+
+def require_root_run_id() -> str:
+    """Return the explicitly bound root run id or fail closed.
+
+    This accessor deliberately reads only the run ``ContextVar``.  In
+    particular, it must never consult the process-global hook-manager
+    fallback because that can belong to a concurrent run.
+    """
+    run_id = _current_session_run_id.get()
+    if not isinstance(run_id, str) or not run_id.strip():
+        raise MissingRunContextError("missing explicit root run context")
+    return run_id.strip()
+
+
+@contextmanager
+def bind_root_run(run_id: str) -> Generator[bool, None, None]:
+    """Bind the first run id in a call tree and report whether this call owns it.
+
+    Nested agents inherit the existing root even when their local hook manager
+    has a different session id.  Only the outer owner resets the binding, using
+    the ``ContextVar`` token so sibling/concurrent contexts remain isolated.
+    """
+    if not isinstance(run_id, str) or not run_id.strip():
+        raise ValueError("root run id must be a non-empty string")
+
+    current = _current_session_run_id.get()
+    if isinstance(current, str) and current.strip():
+        yield False
+        return
+
+    token = _current_session_run_id.set(run_id.strip())
+    try:
+        yield True
+    finally:
+        _current_session_run_id.reset(token)
+
+
 @contextmanager
 def task_context(task_id: Optional[str] = None) -> Generator[str, None, None]:
     """
@@ -358,7 +529,7 @@ def sub_task_context(agent_name: str, sub_task_id: Optional[str] = None) -> Gene
             set_current_agent_id(previous_agent_id)
         else:
             clear_current_agent_id()
-            
+
         if previous_agent_name is not None:
             set_current_agent_name(previous_agent_name)
         else:

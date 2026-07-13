@@ -9,17 +9,26 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any
 
+from src.lib.logging import get_logger
+
 from .application_scope import current_application_scope
 from .ledger import SelfLearningLedger
 from .paths import active_skills_dir, skill_proposals_dir
-from .redaction import redact_text
+from .redaction import (
+    require_safe_identity,
+    sanitize_text_fragment,
+    sanitize_value_fragments,
+)
+
+logger = get_logger(__name__)
 
 _VALID_ACTIONS = {"create", "patch", "edit", "archive", "write_file", "remove_file"}
 _SAFE_FILE_ROOTS = {"references", "scripts", "assets", "templates", "evals"}
 
 
 def _slug(value: str) -> str:
-    cleaned = re.sub(r"[^A-Za-z0-9_.-]+", "-", value.strip()).strip("-._")
+    raw = require_safe_identity(value, field="skill proposal path identity")
+    cleaned = re.sub(r"[^A-Za-z0-9_.-]+", "-", raw).strip("-._")
     if not cleaned:
         raise ValueError("name must contain at least one safe path character")
     if cleaned in {".", ".."} or "/" in cleaned or "\\" in cleaned:
@@ -32,7 +41,8 @@ def _timestamp() -> str:
 
 
 def _safe_relative_path(path: str) -> Path:
-    raw = Path(path)
+    safe_path = require_safe_identity(path, field="skill proposal file path")
+    raw = Path(safe_path)
     if raw.is_absolute() or ".." in raw.parts:
         raise ValueError("proposal file path must be relative and cannot contain '..'")
     if raw.name in {"", ".", ".."}:
@@ -74,7 +84,11 @@ class ProposalWriter:
 
     @staticmethod
     def _write_json(path: Path, data: dict[str, Any]) -> None:
-        path.write_text(json.dumps(data, ensure_ascii=False, indent=2, default=str), encoding="utf-8")
+        safe_data = sanitize_value_fragments(data)
+        path.write_text(
+            json.dumps(safe_data, ensure_ascii=False, indent=2, default=str),
+            encoding="utf-8",
+        )
 
     def create(
         self,
@@ -91,6 +105,16 @@ class ProposalWriter:
         if action not in _VALID_ACTIONS:
             raise ValueError(f"action must be one of {sorted(_VALID_ACTIONS)}")
         safe_name = _slug(name)
+        safe_path = require_safe_identity(
+            path,
+            field="skill proposal file path",
+            allow_empty=True,
+        )
+        safe_target = require_safe_identity(
+            target,
+            field="skill proposal target",
+            allow_empty=True,
+        )
 
         proposal_path = self._latest_for_name(safe_name) if action in {"write_file", "remove_file"} else None
         if proposal_path is None:
@@ -105,36 +129,60 @@ class ProposalWriter:
             "action": action,
             "created_at": now,
             "proposal_path": str(proposal_path),
-            "old_string": redact_text(old_string),
-            "new_string": redact_text(new_string),
-            "target": target,
-            "file_path": path,
+            "old_string": sanitize_text_fragment(old_string),
+            "new_string": sanitize_text_fragment(new_string),
+            "target": safe_target,
+            "file_path": safe_path,
             "status": "proposal",
         }
 
         if action == "create":
             skill_body = content.strip() or f"# {safe_name}\n\nDescribe when to use this skill and the procedure here.\n"
-            (proposal_path / "SKILL.md").write_text(redact_text(skill_body).rstrip() + "\n", encoding="utf-8")
+            (proposal_path / "SKILL.md").write_text(
+                sanitize_text_fragment(skill_body).rstrip() + "\n",
+                encoding="utf-8",
+            )
         elif action in {"patch", "edit", "archive"}:
             body = [
                 f"# Skill Proposal: {safe_name}",
                 "",
                 f"- action: {action}",
-                f"- target: {target or safe_name}",
+                f"- target: {safe_target or safe_name}",
                 "",
             ]
             if old_string:
-                body.extend(["## Old", "", "```text", redact_text(old_string), "```", ""])
+                body.extend(
+                    [
+                        "## Old",
+                        "",
+                        "```text",
+                        sanitize_text_fragment(old_string),
+                        "```",
+                        "",
+                    ]
+                )
             if new_string or content:
-                body.extend(["## New", "", "```text", redact_text(new_string or content), "```", ""])
+                body.extend(
+                    [
+                        "## New",
+                        "",
+                        "```text",
+                        sanitize_text_fragment(new_string or content),
+                        "```",
+                        "",
+                    ]
+                )
             (proposal_path / "README.md").write_text("\n".join(body), encoding="utf-8")
         elif action == "write_file":
-            rel = _safe_relative_path(path or "SKILL.md")
+            rel = _safe_relative_path(safe_path or "SKILL.md")
             target_path = proposal_path / rel
             target_path.parent.mkdir(parents=True, exist_ok=True)
-            target_path.write_text(redact_text(content).rstrip() + "\n", encoding="utf-8")
+            target_path.write_text(
+                sanitize_text_fragment(content).rstrip() + "\n",
+                encoding="utf-8",
+            )
         elif action == "remove_file":
-            rel = _safe_relative_path(path)
+            rel = _safe_relative_path(safe_path)
             meta["remove_file"] = str(rel)
             (proposal_path / "README.md").write_text(
                 f"# Remove File Proposal: {safe_name}\n\nRemove `{rel}` when this proposal is promoted manually.\n",
@@ -153,7 +201,7 @@ class ProposalWriter:
                 manifest=meta,
             )
         except Exception:
-            pass
+            logger.warning("Skill proposal ledger mirror failed for %s", proposal_path.name, exc_info=True)
         return {"ok": True, "proposal_path": str(proposal_path), "name": safe_name, "action": action}
 
     def list(self) -> list[dict[str, Any]]:
@@ -202,7 +250,10 @@ class ProposalWriter:
         for preferred in ("SKILL.md", "README.md", "proposal.json"):
             file_path = path / preferred
             if file_path.exists():
-                preview = redact_text(file_path.read_text(encoding="utf-8"), max_chars=20000)
+                preview = sanitize_text_fragment(
+                    file_path.read_text(encoding="utf-8"),
+                    max_chars=20000,
+                )
                 break
         return {
             "ok": True,
@@ -236,7 +287,7 @@ class ProposalWriter:
         try:
             self.ledger.update_skill_proposal_status(proposal_path.name, "promoted")
         except Exception:
-            pass
+            logger.warning("Skill proposal status mirror failed for %s", proposal_path.name, exc_info=True)
         return {"ok": True, "skill": skill_name, "path": str(dest)}
 
     def archive(self, proposal_id: str) -> dict[str, Any]:
@@ -249,7 +300,7 @@ class ProposalWriter:
         try:
             self.ledger.update_skill_proposal_status(proposal_path.name, "archived")
         except Exception:
-            pass
+            logger.warning("Skill proposal status mirror failed for %s", proposal_path.name, exc_info=True)
         return {"ok": True, "archived_path": str(dest)}
 
     def handle_tool_action(

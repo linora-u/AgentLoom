@@ -55,11 +55,13 @@ workflow: |
 
   add_raw = memory(action="add", scope="project", content=content)
   add_result = json.loads(add_raw)
+  added_id = add_result.get("id") or add_result.get("item", {}).get("id")
   list_result = json.loads(memory(action="list", scope="project"))
   items = list_result["items"]
+  # list previews are truncated to 80 chars, so match by id, not by full marker.
   matches = [
       item for item in items
-      if marker in str(item.get("content", "")) and item.get("status") == "pending"
+      if item.get("id") == added_id and item.get("status") == "pending"
   ]
 
   result = {
