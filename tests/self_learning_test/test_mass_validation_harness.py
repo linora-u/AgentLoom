@@ -15,6 +15,7 @@ import sys
 from pathlib import Path
 
 import pytest
+import yaml
 
 SCRIPT_PATH = (
     Path(__file__).resolve().parents[2]
@@ -24,6 +25,7 @@ SCRIPT_PATH = (
     / "run_offline_mass_validation.py"
 )
 FIXED_POINT_SCRIPT_PATH = SCRIPT_PATH.with_name("run_fixed_point_benchmark.py")
+TESTS_WORKFLOW_PATH = Path(__file__).resolve().parents[2] / ".github" / "workflows" / "tests.yml"
 
 
 def _load_harness():
@@ -49,6 +51,16 @@ def _load_fixed_point_driver():
 
 def _sha256(path: Path) -> str:
     return hashlib.sha256(path.read_bytes()).hexdigest()
+
+
+def test_tests_workflow_fetches_fixed_point_reference_history() -> None:
+    workflow = yaml.safe_load(TESTS_WORKFLOW_PATH.read_text(encoding="utf-8"))
+    steps = workflow["jobs"]["tests"]["steps"]
+    checkout = next(
+        step for step in steps if str(step.get("uses", "")).startswith("actions/checkout@")
+    )
+
+    assert checkout.get("with", {}).get("fetch-depth") == 0
 
 
 def test_allocate_quotas_uses_the_seven_literal_campaign_buckets():

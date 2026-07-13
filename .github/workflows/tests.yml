@@ -19,6 +19,10 @@ jobs:
     steps:
       - name: Check out repository
         uses: actions/checkout@v6
+        with:
+          # The fixed-point memory benchmark is intentionally bound to a
+          # historical reference commit and must not be skipped in CI.
+          fetch-depth: 0
 
       - name: Set up uv
         uses: astral-sh/setup-uv@v8.1.0
