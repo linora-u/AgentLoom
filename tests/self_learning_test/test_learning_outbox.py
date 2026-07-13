@@ -721,10 +721,18 @@ def test_v4_migration_never_spills_partially_sanitized_pages_to_wal(
     db = tmp_path / "self_learning.db"
     SelfLearningLedger(db)
     secret = "MIGRATION_TRANSIENT_WAL_SECRET_7f31"
+    deleted_secret = "MIGRATION_DELETED_ROW_SECRET_91af"
+    artifact_deleted_secret = "MIGRATION_ARTIFACT_TOMBSTONE_SECRET_b26d"
+    artifact_tombstone_uri = (f"password={artifact_deleted_secret} " * 20).strip()
     unsafe_run = f"password={secret}-run"
     payload = f"password={secret} " + ("legacy payload " * 150)
 
     with sqlite3.connect(db) as conn:
+        # Legacy SQLite builds usually default secure_delete to OFF. Make the
+        # precondition explicit so a local build compiled with SECURE_DELETE
+        # cannot hide stale B-tree/index bytes that CI will expose.
+        conn.execute("PRAGMA secure_delete=OFF")
+        assert conn.execute("PRAGMA secure_delete").fetchone()[0] == 0
         conn.execute("DELETE FROM schema_version WHERE version = 4")
         conn.execute(
             "UPDATE maintenance SET value = '3' "
@@ -746,6 +754,22 @@ def test_v4_migration_never_spills_partially_sanitized_pages_to_wal(
                 f"password={secret}",
             ),
         )
+        event_rows = []
+        for index in range(513):
+            row_secret = deleted_secret if index == 256 else secret
+            event_rows.append(
+                (
+                    f"password={row_secret}-event-{index}",
+                    f"password={row_secret}-run",
+                    f"password={row_secret}",
+                    json.dumps({"password": row_secret}),
+                    json.dumps({"client_secret": row_secret}),
+                    f"password={row_secret} " + ("legacy payload " * 150),
+                    _iso(),
+                    index,
+                    json.dumps({"authorization": row_secret}),
+                )
+            )
         conn.executemany(
             """
             INSERT INTO events (
@@ -754,20 +778,32 @@ def test_v4_migration_never_spills_partially_sanitized_pages_to_wal(
                 metadata_json
             ) VALUES (?, ?, NULL, 'tool_result', ?, ?, ?, ?, ?, ?, ?)
             """,
-            [
+            event_rows,
+        )
+        # Leave historical deleted cells in both a dense event B-tree and a
+        # sparse artifact B-tree. The migration must not copy either table or
+        # index free-space residue to WAL.
+        conn.execute(
+            "DELETE FROM events WHERE event_id = ?",
+            (f"password={deleted_secret}-event-256",),
+        )
+        conn.executemany(
+            """
+            INSERT INTO artifacts (run_id, kind, uri, sha256, metadata_json, created_at)
+            VALUES (?, 'trace', ?, '', '{}', ?)
+            """,
+            (
+                ("safe-run", "ordinary://artifact", _iso()),
                 (
-                    f"password={secret}-event-{index}",
-                    unsafe_run,
-                    f"password={secret}",
-                    json.dumps({"password": secret}),
-                    json.dumps({"client_secret": secret}),
-                    payload,
+                    "safe-run",
+                    artifact_tombstone_uri,
                     _iso(),
-                    index,
-                    json.dumps({"authorization": secret}),
-                )
-                for index in range(512)
-            ],
+                ),
+            ),
+        )
+        conn.execute(
+            "DELETE FROM artifacts WHERE uri = ?",
+            (artifact_tombstone_uri,),
         )
         conn.execute(
             """
@@ -814,7 +850,9 @@ def test_v4_migration_never_spills_partially_sanitized_pages_to_wal(
             ),
         )
         conn.commit()
-        conn.execute("PRAGMA wal_checkpoint(TRUNCATE)")
+        assert conn.execute("PRAGMA wal_checkpoint(TRUNCATE)").fetchone() == (0, 0, 0)
+        wal_path = Path(f"{db}-wal")
+        assert not wal_path.exists() or wal_path.stat().st_size == 0
 
     # Pin the pre-migration snapshot so the post-commit WAL remains available
     # for forensic inspection. Skip only the later checkpoint/VACUUM cleanup;
@@ -841,7 +879,12 @@ def test_v4_migration_never_spills_partially_sanitized_pages_to_wal(
     try:
         wal_path = Path(f"{db}-wal")
         assert wal_path.exists()
-        assert secret.encode() not in wal_path.read_bytes()
+        wal_bytes = wal_path.read_bytes()
+        for forbidden in (secret, deleted_secret, artifact_deleted_secret):
+            secret_offset = wal_bytes.find(forbidden.encode())
+            assert secret_offset < 0, (
+                f"legacy secret entered WAL at byte offset {secret_offset}"
+            )
         with sqlite3.connect(db) as conn:
             logical = " ".join(
                 str(value or "")
@@ -852,6 +895,7 @@ def test_v4_migration_never_spills_partially_sanitized_pages_to_wal(
                     "learning_jobs",
                     "events_fts",
                     "events_fts_trigram",
+                    "artifacts",
                 )
                 for row in conn.execute(f'SELECT * FROM "{table}"')
                 for value in row
@@ -862,7 +906,9 @@ def test_v4_migration_never_spills_partially_sanitized_pages_to_wal(
                     "SELECT name FROM sqlite_master WHERE type = 'trigger'"
                 )
             }
+            integrity = str(conn.execute("PRAGMA integrity_check").fetchone()[0])
         assert secret not in logical
+        assert integrity == "ok"
         assert {
             "events_fts_insert",
             "events_fts_delete",
@@ -874,6 +920,104 @@ def test_v4_migration_never_spills_partially_sanitized_pages_to_wal(
     finally:
         keeper.rollback()
         keeper.close()
+
+
+def test_v4_migration_rejects_temp_trigger_before_any_sanitizer_dml(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    db = tmp_path / "self_learning.db"
+    SelfLearningLedger(db)
+    with sqlite3.connect(db) as conn:
+        conn.execute(
+            "INSERT INTO runs (run_id, status, indexed_at) "
+            "VALUES ('stable-run', 'completed', ?)",
+            (_iso(),),
+        )
+        conn.execute(
+            "INSERT INTO events (event_id, run_id, content_text, ordinal) "
+            "VALUES ('stable-event', 'stable-run', '', 0)"
+        )
+        conn.execute(
+            "UPDATE maintenance SET value = '4' "
+            "WHERE key = 'schema_v4_sanitizer_revision'"
+        )
+        conn.commit()
+
+    original_connect = SelfLearningLedger._connect
+
+    def temp_trigger_connect(self):
+        conn = original_connect(self)
+        conn.execute(
+            """
+            CREATE TEMP TRIGGER rogue_v4_rewrite
+            BEFORE UPDATE ON main.runs
+            BEGIN
+                DELETE FROM events;
+            END
+            """
+        )
+        return conn
+
+    monkeypatch.setattr(SelfLearningLedger, "_connect", temp_trigger_connect)
+    SelfLearningLedger._initialized_paths.discard(str(db.resolve()))
+
+    with pytest.raises(sqlite3.OperationalError, match="unexpected trigger"):
+        SelfLearningLedger(db)
+
+    with sqlite3.connect(db) as conn:
+        assert conn.execute("SELECT COUNT(*) FROM runs").fetchone()[0] == 1
+        assert conn.execute("SELECT COUNT(*) FROM events").fetchone()[0] == 1
+        assert (
+            conn.execute(
+                "SELECT value FROM maintenance "
+                "WHERE key = 'schema_v4_sanitizer_revision'"
+            ).fetchone()[0]
+            == "4"
+        )
+
+
+def test_v4_migration_rejects_main_trigger_on_schema_version(
+    tmp_path: Path,
+):
+    db = tmp_path / "self_learning.db"
+    SelfLearningLedger(db)
+    with sqlite3.connect(db) as conn:
+        conn.execute(
+            "INSERT INTO runs (run_id, status, indexed_at) "
+            "VALUES ('stable-run', 'completed', ?)",
+            (_iso(),),
+        )
+        conn.execute(
+            "INSERT INTO events (event_id, run_id, content_text, ordinal) "
+            "VALUES ('stable-event', 'stable-run', '', 0)"
+        )
+        conn.execute("DELETE FROM schema_version WHERE version = 4")
+        conn.execute(
+            """
+            CREATE TRIGGER rogue_schema_version
+            AFTER INSERT ON schema_version
+            WHEN NEW.version = 4
+            BEGIN
+                DELETE FROM events;
+            END
+            """
+        )
+        conn.commit()
+
+    SelfLearningLedger._initialized_paths.discard(str(db.resolve()))
+    with pytest.raises(sqlite3.OperationalError, match="unexpected trigger"):
+        SelfLearningLedger(db)
+
+    with sqlite3.connect(db) as conn:
+        assert conn.execute("SELECT COUNT(*) FROM runs").fetchone()[0] == 1
+        assert conn.execute("SELECT COUNT(*) FROM events").fetchone()[0] == 1
+        assert (
+            conn.execute(
+                "SELECT COUNT(*) FROM schema_version WHERE version = 4"
+            ).fetchone()[0]
+            == 0
+        )
 
 
 def test_v4_migration_rolls_back_if_available_fts_trigger_restore_fails(
