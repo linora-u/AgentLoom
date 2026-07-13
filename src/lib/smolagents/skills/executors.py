@@ -382,6 +382,16 @@ def _create_shell_executor(
             "tool_response": context.tool_response,
             "step_number": context.step_number,
         }
+        from src.extensions.self_learning.redaction import (
+            sanitize_campaign_artifact_value,
+        )
+
+        sanitized_payload = sanitize_campaign_artifact_value(hook_context_payload)
+        hook_context_payload = (
+            sanitized_payload
+            if isinstance(sanitized_payload, dict)
+            else {"value": sanitized_payload}
+        )
         full_json = json.dumps(
             hook_context_payload, ensure_ascii=False, default=str,
         )

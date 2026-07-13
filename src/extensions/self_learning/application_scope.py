@@ -6,6 +6,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
+from .redaction import safe_storage_identity
+
 
 @dataclass(frozen=True)
 class ApplicationScope:
@@ -17,9 +19,20 @@ class ApplicationScope:
     workflow_path: str = ""
 
 
-def _safe_scope_id(value: str) -> str:
-    raw = str(value or "").strip().replace("\\", "/")
-    cleaned = "/".join(part for part in raw.split("/") if part not in {"", ".", ".."})
+def safe_application_id(value: str) -> str:
+    raw = safe_storage_identity(
+        value,
+        namespace="application",
+        allow_empty=True,
+    ).replace("\\", "/")
+    parts = []
+    for part in raw.split("/"):
+        if part in {"", ".", ".."}:
+            continue
+        parts.append(
+            "".join(ch if ch.isalnum() or ch in "._-" else "_" for ch in part)
+        )
+    cleaned = "/".join(parts)
     return cleaned[:240]
 
 
@@ -93,7 +106,7 @@ def resolve_application_scope(
             except ValueError:
                 rel = app_root.name
             return ApplicationScope(
-                application_id=_safe_scope_id(rel),
+                application_id=safe_application_id(rel),
                 application_name=app_root.name,
                 application_path=str(app_root),
                 workflow_path=str(yaml_path),
@@ -107,7 +120,7 @@ def resolve_application_scope(
             or ""
         )
         if app_value:
-            app_id = _safe_scope_id(str(app_value))
+            app_id = safe_application_id(str(app_value))
             return ApplicationScope(
                 application_id=app_id,
                 application_name=Path(app_id).name or app_id,

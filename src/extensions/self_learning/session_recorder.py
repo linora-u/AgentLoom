@@ -5,15 +5,17 @@ from __future__ import annotations
 import uuid
 from pathlib import Path
 from threading import RLock
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from src.lib.logging import get_logger
-from src.lib.smolagents.hooks.types import HookContext, HookResult
+
+if TYPE_CHECKING:
+    from src.lib.smolagents.hooks.types import HookContext, HookResult
 
 from .application_scope import resolve_application_scope
 from .event_schema import CanonicalSessionEvent, compact_content, now_iso, safe_run_id
 from .paths import config_bool, session_events_dir
-from .redaction import redact_mapping
+from .redaction import redact_mapping, sanitize_text_fragment
 from .session_index import SessionIndex
 
 logger = get_logger(__name__)
@@ -61,6 +63,26 @@ def _worker_name(context: HookContext) -> str:
     return _payload_value(context, "worker_name")
 
 
+def hook_context_failed(context: HookContext) -> bool:
+    """Return whether a lifecycle response explicitly carries an error.
+
+    Exception messages are allowed to be empty (``KeyboardInterrupt()`` and
+    ``RuntimeError()`` both commonly are), so truthiness is not an outcome
+    signal. Presence of the error contract is.
+    """
+    response = context.tool_response
+    if isinstance(response, dict) and (
+        "error" in response or "error_type" in response
+    ):
+        return True
+    tool_input = context.tool_input
+    return bool(
+        context.hook_event_name == "SessionEnd"
+        and isinstance(tool_input, dict)
+        and ("error" in tool_input or "error_type" in tool_input)
+    )
+
+
 def _status(context: HookContext, event_type: str) -> str:
     if event_type in {"tool_error", "task_failed"}:
         return "failed"
@@ -70,7 +92,7 @@ def _status(context: HookContext, event_type: str) -> str:
             return "failed"
         if success is True:
             return "completed"
-    if isinstance(context.tool_response, dict) and context.tool_response.get("error"):
+    if hook_context_failed(context):
         return "failed"
     if event_type in {"run_completed", "task_completed", "subagent_completed", "tool_result"}:
         return "completed"
@@ -124,12 +146,15 @@ def event_from_hook_context(context: HookContext) -> CanonicalSessionEvent | Non
     event_type = _HOOK_EVENT_TYPES.get(context.hook_event_name)
     if event_type is None:
         return None
-    if context.hook_event_name == "SessionEnd" and isinstance(context.tool_response, dict) and context.tool_response.get("error"):
+    if context.hook_event_name == "SessionEnd" and hook_context_failed(context):
         event_type = "run_failed"
     if context.hook_event_name == "SubagentStop" and isinstance(context.tool_input, dict) and context.tool_input.get("success") is False:
         event_type = "subagent_failed"
 
     run_id = safe_run_id(context.session_id)
+    root_run_id = safe_run_id(context.root_run_id or "")
+    if not run_id or not root_run_id:
+        return None
     task_id = _task_id(context)
     metadata = _metadata(context)
     input_data = context.tool_input if isinstance(context.tool_input, dict) else {}
@@ -137,6 +162,7 @@ def event_from_hook_context(context: HookContext) -> CanonicalSessionEvent | Non
     event = CanonicalSessionEvent(
         event_id=uuid.uuid4().hex,
         run_id=run_id,
+        root_run_id=root_run_id,
         task_id=task_id,
         parent_task_id=context.task_id or "",
         application_id=str(metadata.get("application_id") or ""),
@@ -171,6 +197,8 @@ class SessionRecorder:
         return indexed
 
     def record_hook(self, context: HookContext) -> HookResult:
+        from src.lib.smolagents.hooks.types import HookResult
+
         if not config_bool("enabled", True):
             return HookResult(success=True, decision="allow")
         try:
@@ -178,12 +206,16 @@ class SessionRecorder:
             if event is not None:
                 self.append(event)
         except Exception as exc:
-            logger.warning("Self-learning session recorder skipped event: %s", exc)
+            safe_error = sanitize_text_fragment(str(exc), max_chars=1000)
+            logger.warning(
+                "Self-learning session recorder skipped event: %s",
+                safe_error,
+            )
             return HookResult(
                 success=False,
                 decision="allow",
                 outcome="non_blocking_error",
-                reason=f"Self-learning recorder skipped: {exc}",
+                reason=f"Self-learning recorder skipped: {safe_error}",
             )
         return HookResult(success=True, decision="allow")
 

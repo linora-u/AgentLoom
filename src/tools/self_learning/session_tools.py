@@ -27,14 +27,23 @@ _TOOL_RESULT_FIELDS = (
 )
 
 
-def _current_run_id() -> str:
-    try:
-        from src.trace import get_current_hook_manager
+def _disabled_response() -> str | None:
+    from src.extensions.self_learning.paths import config_bool
 
-        manager = get_current_hook_manager()
-        raw = getattr(manager, "_session_id", "") if manager is not None else ""
-        return safe_run_id(raw) if raw else ""
-    except Exception:
+    if config_bool("enabled", True):
+        return None
+    return json.dumps(
+        {"ok": False, "error": "self_learning is disabled in config"},
+        ensure_ascii=False,
+    )
+
+
+def _current_run_id() -> str:
+    from src.trace import MissingRunContextError, require_root_run_id
+
+    try:
+        return require_root_run_id()
+    except MissingRunContextError:
         return ""
 
 
@@ -50,6 +59,7 @@ def _compact_records(records: list[dict], *, preview_chars: int) -> list[dict]:
             current["content"] = content[:preview_chars]
             current["content_truncated"] = True
         else:
+            current["content"] = content
             current["content_truncated"] = False
         compact.append(current)
     return compact
@@ -73,6 +83,16 @@ def session_search(
         since: Optional ISO timestamp lower bound.
         scope: "current_app", "project", or "all". Defaults to current app.
     """
+    disabled = _disabled_response()
+    if disabled is not None:
+        return disabled
+    root_run_id = _current_run_id()
+    if not root_run_id:
+        return json.dumps(
+            {"ok": False, "error": "missing_run_context"},
+            ensure_ascii=False,
+            separators=(",", ":"),
+        )
     if not query or not str(query).strip():
         raise ValueError("query is required")
     limit = max(1, min(int(limit or 10), _TOOL_MAX_RESULTS))
@@ -87,7 +107,7 @@ def session_search(
         agent=agent,
         app=app,
         since=since,
-        exclude_run_id=_current_run_id(),
+        exclude_run_id=root_run_id,
         scope=scope,
     )
     payload = {
@@ -115,16 +135,29 @@ def session_scroll(
         direction: "before" or "after".
         window: Number of neighboring events to return.
     """
+    disabled = _disabled_response()
+    if disabled is not None:
+        return disabled
+    current_run_id = _current_run_id()
+    if not current_run_id:
+        return json.dumps(
+            {"ok": False, "error": "missing_run_context"},
+            ensure_ascii=False,
+            separators=(",", ":"),
+        )
     if not run_id or not str(run_id).strip():
         raise ValueError("run_id is required")
     if direction not in {"before", "after"}:
         raise ValueError("direction must be 'before' or 'after'")
-    current_run_id = _current_run_id()
-    if current_run_id and safe_run_id(run_id) == current_run_id:
-        raise ValueError("session_scroll rejected current run; active context is already available")
+    index = SessionIndex()
+    requested_root = index.root_run_id_for(safe_run_id(run_id))
+    if requested_root == current_run_id:
+        raise ValueError(
+            "session_scroll rejected a run in the current root; active context is already available"
+        )
     window = max(1, min(int(window or 5), _TOOL_MAX_RESULTS))
     results = _compact_records(
-        SessionIndex().scroll(run_id, event_id, direction=direction, window=window),
+        index.scroll(run_id, event_id, direction=direction, window=window),
         preview_chars=_SCROLL_CONTENT_PREVIEW_CHARS,
     )
     return json.dumps(

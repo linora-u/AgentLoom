@@ -1,0 +1,38 @@
+name: "mem_worker_notes_agent"
+description: |
+  Delegate note-taking to the worker, then record one supervisor session note
+  yourself and report both results via final_answer.
+
+model_type: "summary"
+tool_call_type: "code_act"
+max_steps: 4
+
+workflow: |
+  # Worker session-note attribution validation
+
+  Keep the real note_taker worker boundary, but execute the supervisor flow in
+  one exact code block so there is no multi-step orchestration ambiguity:
+
+  ```python
+  import json
+  worker_raw = note_taker(query="record your assigned note")
+  worker_result = json.loads(worker_raw)
+  supervisor_result = json.loads(memory(
+      action="add",
+      scope="session",
+      content="learned: supervisor-level fact — the nightly job needs the ops lock released first",
+  ))
+  final_answer(json.dumps({
+      "worker_result": worker_result,
+      "supervisor_note_ok": supervisor_result.get("ok"),
+  }, ensure_ascii=False))
+  ```
+
+tools:
+  - name: "memory"
+
+toolsets: []
+skills: []
+
+worker_agents:
+  - path: "applications/memory_feature_validation/workflows/worker_agents/note_taker.yaml"

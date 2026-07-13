@@ -1,10 +1,11 @@
 from __future__ import annotations
 
+import logging
+import os
+import re
 from dataclasses import dataclass
 from datetime import datetime
-import logging
 from pathlib import Path
-import re
 from threading import Lock, RLock
 from typing import Any, Protocol, runtime_checkable
 
@@ -23,6 +24,17 @@ _PROCESS_LOG_PATH_LOCK = RLock()
 _GLOBAL_LOGGER_LOCK = RLock()
 _GLOBAL_LOGGER: Any | None = None
 _SAFE_COMPONENT_PATTERN = re.compile(r"[^A-Za-z0-9._-]+")
+_MEMORY_CAMPAIGN_SAFE_ARTIFACTS_ENV = "AGENTLOOM_MEMORY_CAMPAIGN_SAFE_ARTIFACTS"
+
+
+def _memory_campaign_safe_artifacts_enabled() -> bool:
+    """Return whether the internal validation campaign forbids file sinks."""
+    return os.environ.get(_MEMORY_CAMPAIGN_SAFE_ARTIFACTS_ENV, "").strip().casefold() in {
+        "1",
+        "true",
+        "yes",
+        "on",
+    }
 
 
 def _get_config_value(*keys: str, default: Any = None) -> Any:
@@ -414,7 +426,9 @@ def build_logger_backend_from_config(
         app_name: Application name from the YAML ``name`` field.
     """
     # Lazy import to keep logging core lightweight and avoid import cycles.
-    from src.lib.logging.agent_logger import EnhancedAgentLogger, AgentLoomLogLevel
+    from rich.console import Console
+
+    from src.lib.logging.agent_logger import AgentLoomLogLevel, EnhancedAgentLogger
     from src.lib.logging.rich_console import DualConsole
 
     effective_logging = merge_logging_config(logging_builder)
@@ -423,16 +437,22 @@ def build_logger_backend_from_config(
     if not enabled or level == AgentLoomLogLevel.OFF:
         return NullLoggerBackend()
 
-    resolved_path = get_or_create_process_log_path(
-        app_name,
-        log_file_path=log_file_path,
-        now=now,
-        logging_builder=LoggingConfigBuilder().apply_mapping(
-            effective_logging,
-            source="effective_logging",
-        ),
-    )
-    console = DualConsole(log_file_path=str(resolved_path))
+    if _memory_campaign_safe_artifacts_enabled():
+        # The campaign captures terminal output through a pipe and sanitizes it
+        # before its own atomic write. Creating a second process file sink would
+        # persist the unsanitized task/tool stream outside that boundary.
+        console = Console(highlight=False)
+    else:
+        resolved_path = get_or_create_process_log_path(
+            app_name,
+            log_file_path=log_file_path,
+            now=now,
+            logging_builder=LoggingConfigBuilder().apply_mapping(
+                effective_logging,
+                source="effective_logging",
+            ),
+        )
+        console = DualConsole(log_file_path=str(resolved_path))
     return EnhancedAgentLogger(
         level=level,
         console=console,

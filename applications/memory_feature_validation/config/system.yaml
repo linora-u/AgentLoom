@@ -1,0 +1,14 @@
+# Keep both the Application agent and asynchronous memory distiller on the
+# inexpensive summary tier for the real validation campaign.
+checkpoint:
+  # Checkpoints persist the full smolagents step transcript. This campaign
+  # validates the self-learning boundary, so raw probe-bearing transcripts are
+  # deliberately kept in memory and never written as unrelated artifacts.
+  enabled: false
+
+self_learning:
+  enabled: true
+  reviewer_enabled: true
+  memory:
+    distill_enabled: true
+    distill_model: "summary"
