@@ -1,0 +1,29 @@
+name: "mem_capacity_agent"
+description: |
+  Run the deterministic production-memory capacity probe and return its JSON.
+
+model_type: "summary"
+tool_call_type: "code_act"
+max_steps: 4
+
+workflow: |
+  # Capacity + batch consolidation validation
+
+  The validation tool itself calls the production `memory` API for all writes,
+  checks the exact 1,400/1,400/third-write capacity boundary, performs one
+  atomic consolidation batch, and proves rollback of an over-capacity batch.
+  Execute exactly this one code block, without adding any other memory writes:
+
+  ```python
+  result = validation_capacity_atomic_batch()
+  final_answer(result)
+  ```
+
+tools:
+  - name: "validation_capacity_atomic_batch"
+    module: "applications.memory_feature_validation.agent_tools.validation_probes"
+    function: "validation_capacity_atomic_batch"
+
+toolsets: []
+skills: []
+worker_agents: []

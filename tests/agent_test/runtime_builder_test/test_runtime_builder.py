@@ -1,6 +1,7 @@
 from __future__ import annotations
 
-from pathlib import Path
+import threading
+from concurrent.futures import ThreadPoolExecutor
 
 import pytest
 
@@ -291,7 +292,247 @@ def test_base_run_emits_task_complete_on_success(monkeypatch):
     assert runtime_agent.calls == [{"task": "do work"}]
 
 
-def test_base_run_executes_transformed_tasks_sequentially_with_reset_false(monkeypatch):
+def test_base_run_binds_root_before_memory_snapshot_and_only_owner_emits_session(monkeypatch):
+    from src.trace import bind_root_run, get_current_session_run_id, require_root_run_id
+
+    agent = _make_agent(logger=DummyLoggerBackend())
+    runtime_agent = DummyRuntimeRunner(result="ok")
+    events = []
+    snapshot_roots = []
+
+    monkeypatch.setattr(agent, "build_runtime_agent", lambda: runtime_agent)
+    monkeypatch.setattr(
+        agent,
+        "_inject_memory_snapshot",
+        lambda tasks: snapshot_roots.append(require_root_run_id()) or tasks,
+    )
+
+    def _record(event, tool_name, tool_input, tool_response=None):
+        events.append(event)
+        return HookResult(success=True, decision="allow")
+
+    monkeypatch.setattr(agent._hook_manager, "trigger_hooks", _record)
+
+    assert agent.run("top-level") == "ok"
+    first_root = snapshot_roots[0]
+    assert first_root != agent._hook_manager._session_id
+    assert events.count(HookEvent.SESSION_START) == 1
+    assert events.count(HookEvent.SESSION_END) == 1
+    assert get_current_session_run_id() is None
+
+    events.clear()
+    snapshot_roots.clear()
+    assert agent.run("same-instance-second-run") == "ok"
+    assert snapshot_roots[0] != first_root
+    assert events.count(HookEvent.SESSION_START) == 1
+    assert events.count(HookEvent.SESSION_END) == 1
+
+    events.clear()
+    snapshot_roots.clear()
+    with bind_root_run("supervisor-root"):
+        assert agent.run("nested-worker") == "ok"
+        assert get_current_session_run_id() == "supervisor-root"
+
+    assert snapshot_roots == ["supervisor-root"]
+    assert HookEvent.SESSION_START not in events
+    assert HookEvent.SESSION_END not in events
+
+
+def test_base_run_releases_owned_root_after_failure(monkeypatch):
+    from src.trace import get_current_session_run_id, require_root_run_id
+
+    agent = _make_agent(logger=DummyLoggerBackend())
+    runtime_agent = DummyRuntimeRunner(exc=RuntimeError("boom-root"))
+    snapshot_roots = []
+
+    monkeypatch.setattr(agent, "build_runtime_agent", lambda: runtime_agent)
+    monkeypatch.setattr(
+        agent,
+        "_inject_memory_snapshot",
+        lambda tasks: snapshot_roots.append(require_root_run_id()) or tasks,
+    )
+    monkeypatch.setattr(
+        agent._hook_manager,
+        "trigger_hooks",
+        lambda *args, **kwargs: HookResult(success=True, decision="allow"),
+    )
+
+    with pytest.raises(RuntimeError, match="boom-root"):
+        agent.run("top-level-failure")
+
+    assert len(snapshot_roots) == 1
+    assert snapshot_roots[0] != agent._hook_manager._session_id
+    assert get_current_session_run_id() is None
+
+
+def test_same_base_agent_concurrent_top_level_runs_do_not_cross_context(monkeypatch):
+    from src.trace import (
+        capture_explicit_execution_context,
+        clear_current_task_id,
+        set_current_task_id,
+    )
+
+    agent = _make_agent(logger=DummyLoggerBackend())
+    barrier = threading.Barrier(2)
+    runtime_observations = {}
+    lifecycle_observations = []
+
+    class _InterleavedRuntime:
+        def run(self, *, task, **_kwargs):
+            barrier.wait(timeout=5)
+            current = capture_explicit_execution_context()
+            runtime_observations[task] = {
+                "task_id": current.task_id,
+                "root_run_id": current.root_run_id,
+                "local_run_id": current.local_run_id,
+                "hook_manager": current.hook_manager,
+                "agent_name": current.agent_name,
+                "agent_config": current.agent_config,
+            }
+            return task
+
+    monkeypatch.setattr(agent, "build_runtime_agent", _InterleavedRuntime)
+    monkeypatch.setattr(agent, "_inject_memory_snapshot", lambda tasks: tasks)
+
+    def _record(event, *_args, **_kwargs):
+        if event in (HookEvent.SESSION_START, HookEvent.SESSION_END):
+            current = capture_explicit_execution_context()
+            lifecycle_observations.append(
+                (
+                    event,
+                    current.task_id,
+                    current.local_run_id,
+                    current.root_run_id,
+                )
+            )
+        return HookResult(success=True, decision="allow")
+
+    monkeypatch.setattr(agent._hook_manager, "trigger_hooks", _record)
+
+    # Poison only the legacy process-wide fallback. Fresh worker threads have
+    # no task ContextVar and must still use their explicit task_id arguments.
+    set_current_task_id("wrong-global-task")
+    try:
+        with ThreadPoolExecutor(max_workers=2) as pool:
+            futures = {
+                label: pool.submit(agent.run, label, task_id=f"task-{label}")
+                for label in ("A", "B")
+            }
+            assert {label: future.result() for label, future in futures.items()} == {
+                "A": "A",
+                "B": "B",
+            }
+    finally:
+        clear_current_task_id()
+
+    roots = set()
+    for label in ("A", "B"):
+        observed = runtime_observations[label]
+        assert observed["task_id"] == f"task-{label}"
+        assert observed["root_run_id"] == observed["local_run_id"]
+        assert observed["hook_manager"] is agent._hook_manager
+        assert observed["agent_name"] == agent.name
+        assert observed["agent_config"] == agent._effective_agent_config
+        roots.add(observed["root_run_id"])
+    assert len(roots) == 2
+
+    for label in ("A", "B"):
+        events = [item for item in lifecycle_observations if item[1] == f"task-{label}"]
+        assert [item[0] for item in events] == [
+            HookEvent.SESSION_START,
+            HookEvent.SESSION_END,
+        ]
+        assert all(item[2] == item[3] == runtime_observations[label]["root_run_id"] for item in events)
+
+
+def test_same_base_agent_serializes_real_cached_runtime_runs(monkeypatch):
+    from src.trace import require_root_run_id
+
+    agent = _make_agent(logger=DummyLoggerBackend())
+    base_profile = agent._role_profile()
+    monkeypatch.setattr(
+        agent,
+        "_role_profile",
+        lambda: base_agent_module.AgentRoleProfile(
+            agent_type=base_profile.agent_type,
+            tool_call_type=base_profile.tool_call_type,
+            cache_runtime_agent=True,
+        ),
+    )
+
+    state_lock = threading.Lock()
+    first_entered = threading.Event()
+    second_attempted = threading.Event()
+    second_entered = threading.Event()
+    release_first = threading.Event()
+
+    class _StatefulCachedRuntime:
+        def __init__(self):
+            self.state = {}
+            self.active = 0
+            self.max_active = 0
+
+        def run(self, *, task, **_kwargs):
+            with state_lock:
+                self.active += 1
+                self.max_active = max(self.max_active, self.active)
+                self.state["task"] = task
+            if task == "A":
+                first_entered.set()
+                assert release_first.wait(timeout=5)
+            else:
+                second_entered.set()
+            result = self.state["task"]
+            with state_lock:
+                self.active -= 1
+            return result
+
+    cached_runtime = _StatefulCachedRuntime()
+    monkeypatch.setattr(agent, "_create_agent", lambda **_kwargs: cached_runtime)
+    assert agent.build_runtime_agent() is cached_runtime
+    assert agent.build_runtime_agent() is cached_runtime
+
+    monkeypatch.setattr(agent, "_inject_memory_snapshot", lambda tasks: tasks)
+    monkeypatch.setattr(agent, "_emit_task_lifecycle_event", lambda *_args, **_kwargs: None)
+    session_ends = []
+
+    def _capture_session(event, task, *, result=None, error=None):
+        if event is HookEvent.SESSION_END:
+            session_ends.append((task, result, require_root_run_id()))
+
+    monkeypatch.setattr(agent, "_emit_session_lifecycle_event", _capture_session)
+
+    def _run_second():
+        second_attempted.set()
+        return agent.run("B", task_id="task-B")
+
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        first = pool.submit(agent.run, "A", task_id="task-A")
+        assert first_entered.wait(timeout=5)
+        second = pool.submit(_run_second)
+        assert second_attempted.wait(timeout=5)
+        # The second BaseAgent invocation has started, but it must not enter the
+        # shared smolagents runtime until A has completely finalized.
+        assert not second_entered.wait(timeout=0.1)
+        release_first.set()
+        assert first.result(timeout=5) == "A"
+        assert second.result(timeout=5) == "B"
+
+    assert cached_runtime.max_active == 1
+    assert {task: result for task, result, _root in session_ends} == {
+        "A": "A",
+        "B": "B",
+    }
+    assert len({root for _task, _result, root in session_ends}) == 2
+
+
+def test_base_run_executes_transformed_tasks_sequentially_with_reset_false(
+    tmp_path, monkeypatch
+):
+    monkeypatch.setenv(
+        "AGENTLOOM_SELF_LEARNING_ROOT",
+        str(tmp_path / ".agentloom"),
+    )
     agent = _make_agent(logger=DummyLoggerBackend())
     runtime_agent = DummyRuntimeRunner()
     runtime_agent._result = None

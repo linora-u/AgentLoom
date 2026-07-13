@@ -9,9 +9,21 @@ async hook registry with process-group control, and configuration
 management with YAML-to-callable bridge.
 """
 
+from src.lib.logging import get_logger
+
+from .async_hook_registry import AsyncHookRegistry
+from .hook_helpers import (
+    add_arguments_to_prompt,
+    hook_dedup_key,
+    kill_hook_process_group,
+    matches_pattern,
+)
+from .hook_manager import HookManager
+from .hooks_config import HooksConfigManager, HooksConfigSnapshot
 from .types import (
-    AggregatedHookResult,
+    HOOK_EVENT_NAMES,
     AgentHook,
+    AggregatedHookResult,
     CommandHook,
     HookCommand,
     HookContext,
@@ -21,18 +33,7 @@ from .types import (
     HooksSettings,
     HttpHook,
     PromptHook,
-    HOOK_EVENT_NAMES,
 )
-from .hook_manager import HookManager
-from .hook_helpers import (
-    matches_pattern,
-    hook_dedup_key,
-    add_arguments_to_prompt,
-    kill_hook_process_group,
-)
-from .hooks_config import HooksConfigManager, HooksConfigSnapshot
-from .async_hook_registry import AsyncHookRegistry
-from src.lib.logging import get_logger
 
 logger = get_logger(__name__)
 
@@ -65,7 +66,6 @@ def register_builtin_hooks(manager: HookManager) -> HookManager:
 
         for event in (
             HookEvent.SESSION_START,
-            HookEvent.SESSION_END,
             HookEvent.TASK_CREATED,
             HookEvent.TASK_COMPLETED,
             HookEvent.STOP_FAILURE,
@@ -92,7 +92,6 @@ def register_builtin_hooks(manager: HookManager) -> HookManager:
             HookEvent.TASK_COMPLETED,
             HookEvent.STOP_FAILURE,
             HookEvent.POST_TOOL_USE_FAILURE,
-            HookEvent.SESSION_END,
         ):
             manager.register_hook(
                 event,
@@ -103,6 +102,22 @@ def register_builtin_hooks(manager: HookManager) -> HookManager:
             )
     except Exception as e:
         logger.warning("Failed to auto-register self-learning reviewer: %s", e)
+
+    try:
+        from src.extensions.self_learning.finalizer import session_finalize_hook
+
+        # SessionEnd has exactly one synchronous owner: it atomically records
+        # the final event/outcome and inserts durable outbox rows.  Model calls,
+        # auto-apply, retention, and artifact delivery run in the worker.
+        manager.register_hook(
+            HookEvent.SESSION_END,
+            "*",
+            session_finalize_hook,
+            allow_duplicates=False,
+            source="builtin:self_learning_finalizer",
+        )
+    except Exception as e:
+        logger.warning("Failed to auto-register self-learning finalizer: %s", e)
 
     setattr(manager, _BUILTIN_HOOKS_REGISTERED_ATTR, True)
     return manager
