@@ -1,0 +1,25 @@
+name: "mem_final_only_agent"
+description: |
+  Return the fixed durable observation in final_answer without writing a
+  session note. SessionEnd must enqueue asynchronous summary distillation from
+  the final answer alone.
+
+model_type: "summary"
+tool_call_type: "code_act"
+max_steps: 4
+
+workflow: |
+  # Final-answer-only asynchronous distillation
+
+  Do not call the memory tool. Execute exactly:
+
+  ```python
+  import json
+  final_answer(json.dumps({
+      "durable_observation": "The validation export endpoint requires UTF-8 CSV files with a header row"
+  }))
+  ```
+
+tools: []
+skills: []
+worker_agents: []

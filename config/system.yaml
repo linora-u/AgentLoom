@@ -189,6 +189,40 @@ self_learning:
   enabled: true
   root_dir: ".agentloom"
   reviewer_enabled: true
+  # Runs/events older than this are pruned by a date-deduplicated durable
+  # retention job enqueued after SessionEnd. 0 disables event pruning.
+  events_retention_days: 90
+  # Durable memory (session / application / project scopes)
+  memory:
+    # Total char budget for the run-start prompt snapshot.
+    prompt_max_chars: 12000
+    # Per-item content cap; oversized writes are rejected with guidance.
+    max_item_chars: 4000
+    # Active-memory char capacity per scope bucket. When a direct write or an
+    # applied proposal would overflow, the write is rejected with the current
+    # entries so the caller can consolidate in one atomic batch.
+    scope_budgets:
+      project: 8000
+      application: 6000
+      session: 4000
+    # Session-scope notes older than this are deleted by `loom memory prune`.
+    session_ttl_days: 14
+    # Turn explicit session notes and safe run evidence into pending proposals
+    # through the durable post-SessionEnd worker.
+    distill_enabled: true
+    # Model type (from config/llm.yaml) used for semantic session distillation:
+    # the run digest goes through this model to become a few declarative,
+    # deduplicated fact proposals. Empty string = deterministic distillation
+    # of explicit session notes only, with no LLM cost. The model itself never
+    # retries; the durable job retries twice before the same frozen digest
+    # falls back to explicit notes on its third attempt.
+    distill_model: "summary"
+    # off  = proposals wait for `loom memory apply` (human review only).
+    # safe = add-proposals that pass every gate (injection scan, no conflicts
+    #        with active memory, exact-corroborated by >=2 distinct root runs,
+    #        capacity check, max 5 per session) auto-apply with an
+    #        applied_by=auto audit trail; replace/remove stay human-only.
+    auto_apply: "safe"
 
 # ============================================
 # Tool Metadata Configuration

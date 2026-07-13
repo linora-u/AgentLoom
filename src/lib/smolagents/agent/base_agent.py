@@ -6,11 +6,13 @@ Provides shared capabilities such as model management and execution environment 
 """
 
 import os
+import uuid
 from abc import ABC, abstractmethod
 from copy import deepcopy
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from enum import Enum
 from pathlib import Path
+from threading import RLock
 from typing import Any, Callable, List, Optional
 
 from smolagents import (
@@ -53,30 +55,20 @@ from src.lib.config.config_validation import BoolParser  # noqa: F401 — used e
 from src.lib.utils.workspace import ensure_workspace_mounted_once
 from src.tools import resolve_toolsets
 from src.trace import (
-    clear_current_agent_id,
-    clear_current_hook_manager,
+    bind_explicit_execution_context,
+    capture_explicit_execution_context,
     generate_id,
-    get_current_agent_id,
     get_current_hook_manager,
     get_current_task_id,
     get_current_sub_task_id,
-    get_current_skills_manager,
-    set_current_agent_id,
-    set_current_hook_manager,
-    set_current_skills_manager,
     sub_task_context,
-    task_context,
-    get_current_agent_name,
-    set_current_agent_name,
-    clear_current_agent_name,
-    get_current_agent_config,
-    set_current_agent_config,
-    clear_current_agent_config,
-    clear_current_skills_manager,
+    bind_local_run,
+    bind_root_run,
+    require_root_run_id,
 )
 from src.lib.smolagents.hooks import HookEvent, HookManager, register_builtin_hooks
 from src.lib.smolagents.hooks.hook_manager import wrap_in_system_reminder
-from src.lib.smolagents.hooks.tool_shim import inject_hooks
+from src.lib.smolagents.hooks.tool_shim import clone_tool_for_runtime, inject_hooks
 from src.lib.smolagents.tools.tools import ensure_tool_wrapped
 from src.lib.smolagents.prompts.prompt_builder import build_prompt_templates
 
@@ -272,6 +264,13 @@ class BaseAgent(ABC):
         # Task ID
         self._task_id = None
 
+        # Supervisor runtimes are cached and smolagents agents keep mutable
+        # memory/state/python-executor objects. A single BaseAgent instance may
+        # therefore only drive its cached runtime once at a time. The lock is
+        # per BaseAgent, so independent agents and factory-created workers still
+        # run concurrently.
+        self._cached_runtime_run_lock = RLock()
+
         # Generate unique agent ID
         self._agent_id = self._generate_agent_id()
 
@@ -409,8 +408,6 @@ class BaseAgent(ABC):
         result: Any = None,
         error: Optional[BaseException] = None,
     ) -> None:
-        if get_current_sub_task_id() is not None:
-            return
         task_id = get_current_task_id() or self._task_id
         payload = {
             "task_id": task_id,
@@ -448,7 +445,13 @@ class BaseAgent(ABC):
             if not config_bool("enabled", True):
                 return tasks
             snapshot = MemoryStore().snapshot_for_prompt(
-                agent_config=getattr(self, "_effective_agent_config", None) or self._config
+                agent_config=getattr(self, "_effective_agent_config", None) or self._config,
+                # Workers share the supervisor's session run id so they see the
+                # run's shared session notes and injections attribute to the
+                # run that SessionEnd will score.
+                session_run_id=require_root_run_id(),
+                task_text=str(tasks[0])[:2000],
+                record_usage=True,
             )
         except Exception as exc:
             if self._logger:
@@ -1073,7 +1076,9 @@ class RoleDrivenAgent(BaseAgent):
         runtime_logger = get_logger(resolved_logger_backend, __name__)
 
         wrapped_tools = ensure_tool_wrapped(self._deduplicate_tools(tools))
-        hooked_tools = [inject_hooks(tool) for tool in wrapped_tools]
+        hooked_tools = [
+            inject_hooks(clone_tool_for_runtime(tool)) for tool in wrapped_tools
+        ]
 
         normalized_planning_interval = normalize_positive_int_value(planning_interval)
         if planning_interval is not None and normalized_planning_interval is None:
@@ -1185,6 +1190,51 @@ class RoleDrivenAgent(BaseAgent):
         resume: bool = False,
         additional_args: Optional[dict[str, Any]] = None,
     ) -> str:
+        """Run inside one explicit root-run binding.
+
+        The first agent in the call tree owns the binding and the session
+        lifecycle. Delegated agents inherit the root through ``ContextVar``
+        propagation and therefore cannot emit duplicate SessionStart/End.
+        """
+        def _run_once() -> str:
+            # A HookManager belongs to an agent instance and can outlive many
+            # runs; its construction id is therefore not a run identity. Every
+            # invocation gets a fresh local id. The outermost invocation also
+            # owns that id as the root, while delegated workers retain the
+            # parent's root and use their fresh id only for leaf attribution.
+            local_run_id = str(uuid.uuid4())
+            with bind_local_run(local_run_id):
+                with bind_root_run(local_run_id) as owns_root_run:
+                    return self._run_with_root_context(
+                        task,
+                        task_id=task_id,
+                        checkpoint_manager=checkpoint_manager,
+                        resume=resume,
+                        additional_args=additional_args,
+                        owns_root_run=owns_root_run,
+                    )
+
+        role_profile_resolver = getattr(self, "_role_profile", None)
+        cache_runtime_agent = bool(
+            role_profile_resolver().cache_runtime_agent
+            if callable(role_profile_resolver)
+            else False
+        )
+        if cache_runtime_agent:
+            with self._cached_runtime_run_lock:
+                return _run_once()
+        return _run_once()
+
+    def _run_with_root_context(
+        self,
+        task: str,
+        task_id: Optional[str] = None,
+        checkpoint_manager: Optional[Any] = None,
+        resume: bool = False,
+        additional_args: Optional[dict[str, Any]] = None,
+        *,
+        owns_root_run: bool,
+    ) -> str:
         from src.lib.checkpoint.coordinator import CheckpointCoordinator
 
         # Transform task before passing it to the runtime agent.
@@ -1193,10 +1243,9 @@ class RoleDrivenAgent(BaseAgent):
             raise ValueError("Agent task transformation produced no tasks")
         transformed_tasks = self._inject_memory_snapshot(transformed_tasks)
         transformed_task = "\n\n".join(transformed_tasks)
-        runtime_agent = self.build_runtime_agent()
-
         # Determine ID
-        current_task_id = get_current_task_id()
+        parent_execution_context = capture_explicit_execution_context()
+        current_task_id = parent_execution_context.task_id
         final_task_id = current_task_id or task_id or generate_id(f"{self._get_agent_type().value.lower()}_{self.name}", prefix="task")
         self._task_id = final_task_id
 
@@ -1215,44 +1264,41 @@ class RoleDrivenAgent(BaseAgent):
             session_started = False
             session_result = None
             session_error: Optional[BaseException] = None
+            runtime_agent = None
             # Inject agent_id into model (for LiteLLM/Langfuse tracing)
             agent_id = self.get_agent_id()
             previous_model_agent_id = getattr(self._model, 'agent_id', ...) if hasattr(self._model, 'agent_id') else ...
             if previous_model_agent_id is not ...:
                 self._model.agent_id = agent_id
 
-            previous_agent_id = get_current_agent_id()
-            previous_agent_name = get_current_agent_name()
-            previous_agent_config = get_current_agent_config()
-            previous_skills_manager = get_current_skills_manager()
-            previous_hook_manager = get_current_hook_manager()
-
-            set_current_agent_id(agent_id)
-            set_current_agent_name(self.name)
-            set_current_agent_config(self._effective_agent_config or self._config)
-            set_current_skills_manager(self._skills_manager)
-            set_current_hook_manager(self._hook_manager)
-            if coord is not None:
-                coord.register_file_history_hook(self._hook_manager)
-
-            # Build hierarchical runtime path for .runtime directory nesting.
-            # This is a SEPARATE variable that only affects the runtime dir
-            # layout — it does NOT change agent_name used in logs/checkpoints.
-            from src.trace.task_context import (
-                get_current_runtime_agent_path,
-                set_current_runtime_agent_path,
-                clear_current_runtime_agent_path,
-            )
-            previous_runtime_path = get_current_runtime_agent_path()
+            active_context = capture_explicit_execution_context()
+            previous_runtime_path = active_context.runtime_agent_path
             if previous_runtime_path and previous_runtime_path != self.name:
                 runtime_path = f"{previous_runtime_path}/{self.name}"
             else:
                 runtime_path = self.name
-            set_current_runtime_agent_path(runtime_path)
+            execution_binding = bind_explicit_execution_context(
+                replace(
+                    active_context,
+                    agent_id=agent_id,
+                    agent_name=self.name,
+                    agent_config=self._effective_agent_config or self._config,
+                    skills_manager=self._skills_manager,
+                    hook_manager=self._hook_manager,
+                    runtime_agent_path=runtime_path,
+                )
+            )
+            execution_binding.__enter__()
 
             try:
+                if coord is not None:
+                    coord.register_file_history_hook(self._hook_manager)
+                # Build tools only after the complete explicit context has
+                # been bound.  LocalPythonExecutor/tool wrappers capture this
+                # context before crossing their timeout thread boundary.
+                runtime_agent = self.build_runtime_agent()
                 ensure_workspace_mounted_once()
-                if get_current_sub_task_id() is None:
+                if owns_root_run:
                     self._emit_session_lifecycle_event(
                         HookEvent.SESSION_START,
                         transformed_task,
@@ -1343,49 +1389,23 @@ class RoleDrivenAgent(BaseAgent):
                         result=session_result,
                         error=session_error,
                     )
-
                 if previous_model_agent_id is not ...:
                     self._model.agent_id = previous_model_agent_id
 
-                if previous_agent_id is not None:
-                    set_current_agent_id(previous_agent_id)
-                else:
-                    clear_current_agent_id()
-
-                if previous_agent_name is not None:
-                    set_current_agent_name(previous_agent_name)
-                else:
-                    clear_current_agent_name()
-
-                if previous_agent_config is not None:
-                    set_current_agent_config(previous_agent_config)
-                else:
-                    clear_current_agent_config()
-
-                if previous_skills_manager is not None:
-                    set_current_skills_manager(previous_skills_manager)
-                else:
-                    clear_current_skills_manager()
-
-                if previous_hook_manager is not None:
-                    set_current_hook_manager(previous_hook_manager)
-                else:
-                    clear_current_hook_manager()
-
-                # Restore runtime agent path.
-                if previous_runtime_path is not None:
-                    set_current_runtime_agent_path(previous_runtime_path)
-                else:
-                    clear_current_runtime_agent_path()
-
-                if checkpoint_manager is not None and coord is not None:
-                    CheckpointCoordinator.deactivate(coord)
+                try:
+                    if checkpoint_manager is not None and coord is not None:
+                        CheckpointCoordinator.deactivate(coord)
+                finally:
+                    execution_binding.__exit__(None, None, None)
 
         if current_task_id:
             return _execute_agent()
 
-        # Create a new task context if none exists
-        with task_context(final_task_id):
+        # Bind a fresh task id without mutating the legacy process-global
+        # fallback, which can belong to another concurrent top-level run.
+        with bind_explicit_execution_context(
+            replace(parent_execution_context, task_id=final_task_id)
+        ):
             return _execute_agent()
 
 
