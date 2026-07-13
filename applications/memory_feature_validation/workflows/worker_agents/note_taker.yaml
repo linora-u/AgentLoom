@@ -1,0 +1,33 @@
+name: "note_taker"
+description: "Worker that records one durable session note about what it learned."
+
+model_type: "summary"
+tool_call_type: "code_act"
+max_steps: 5
+
+agent_function_schema:
+  description: "Record one predefined session memory note and report the tool result."
+  inputs:
+    query:
+      description: "Ignored; the note content is fixed by the workflow."
+      required: true
+  output:
+    description: "JSON with note_ok and the scope_id the note landed under."
+
+workflow: |
+  # Session-note recording worker
+
+  Record EXACTLY this one note with the memory tool, then finish:
+
+  ```python
+  import json
+  raw = memory(action="add", scope="session", content="learned: the downstream parser only accepts ISO-8601 timestamps with explicit timezone offsets")
+  result = json.loads(raw)
+  final_answer(json.dumps({"note_ok": result.get("ok"), "scope_id": result.get("scope_id")}))
+  ```
+
+tools:
+  - name: "memory"
+
+skills: []
+worker_agents: []

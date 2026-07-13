@@ -1,13 +1,13 @@
 import pytest
 
+from src.lib.smolagents.hooks.hook_manager import HookManager
+from src.lib.smolagents.hooks.tool_shim import inject_hooks
+from src.lib.smolagents.hooks.types import HookEvent, HookResult
+from src.lib.smolagents.tools.tools import tool
 from src.trace.task_context import (
     clear_current_hook_manager,
     set_current_hook_manager,
 )
-from src.lib.smolagents.tools.tools import tool
-from src.lib.smolagents.hooks.hook_manager import HookManager
-from src.lib.smolagents.hooks.tool_shim import inject_hooks
-from src.lib.smolagents.hooks.types import HookEvent, HookResult
 
 
 @pytest.fixture(autouse=True)
@@ -16,6 +16,9 @@ def reset_hook_manager():
     clear_current_hook_manager()
     manager = HookManager.get_instance()
     manager.hooks = {event: [] for event in HookEvent}
+    # Hooked tools resolve only an explicitly bound manager; the process-wide
+    # singleton is not a safe runtime fallback under concurrent runs.
+    set_current_hook_manager(manager)
     yield manager
     clear_current_hook_manager()
     HookManager._instance = None

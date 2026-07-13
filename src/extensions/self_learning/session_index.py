@@ -125,3 +125,6 @@ class SessionIndex:
     ) -> list[dict[str, Any]]:
         """Return neighboring canonical events around an event row id."""
         return self._ledger.scroll_events(run_id, event_id, direction=direction, window=window)
+
+    def root_run_id_for(self, run_id: str) -> str:
+        return self._ledger.root_run_id_for(run_id)

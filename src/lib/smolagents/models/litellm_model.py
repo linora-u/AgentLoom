@@ -14,9 +14,10 @@ Automatic prompt caching:
   No provider-specific branching is needed in this code.
 """
 
-import json
 import uuid
-from typing import List, Dict, Any, Optional
+from contextvars import ContextVar
+from typing import Any, Dict, List, Optional
+
 from smolagents import AgentLogger, LiteLLMModel
 from smolagents.models import ChatMessage, ChatMessageToolCall, ChatMessageToolCallFunction, MessageRole
 from src.lib.logging import get_logger
@@ -65,10 +66,60 @@ class LiteLLMModelV2(LiteLLMModel):
         # "true" - use structured output (json_schema) for code_act mode
         # "false" - use text-based <code> block parsing for code_act mode
         self.supports_structured_output = supports_structured_output.lower().strip()
-        # Agent ID injected by upper-level Agent at runtime (used for tracing).
-        self.agent_id = None
-        self._last_tools_to_call_from: list[Any] = []
+        # Model instances are cached and shared by concurrent worker agents.
+        # Invocation-specific tracing/tool schema state must therefore live in
+        # ContextVars rather than mutable instance attributes.
+        self._agent_id_context: ContextVar[Any | None] = ContextVar(
+            f"agentloom_model_agent_id_{id(self)}",
+            default=None,
+        )
+        self._tools_to_call_from_context: ContextVar[tuple[Any, ...]] = ContextVar(
+            f"agentloom_model_tools_{id(self)}",
+            default=(),
+        )
         super().__init__(*args, **kwargs)
+
+    @property
+    def agent_id(self) -> Any | None:
+        """Return the tracing identity bound to the current execution context."""
+        context = getattr(self, "_agent_id_context", None)
+        return context.get() if context is not None else None
+
+    @agent_id.setter
+    def agent_id(self, value: Any | None) -> None:
+        context = getattr(self, "_agent_id_context", None)
+        if context is None:
+            context = ContextVar(
+                f"agentloom_model_agent_id_{id(self)}",
+                default=None,
+            )
+            self._agent_id_context = context
+        context.set(value)
+
+    def _set_current_tools(self, tools_to_call_from: list[Any] | None) -> tuple[Any, ...]:
+        tools = tuple(tools_to_call_from or ())
+        context = getattr(self, "_tools_to_call_from_context", None)
+        if context is None:
+            context = ContextVar(
+                f"agentloom_model_tools_{id(self)}",
+                default=(),
+            )
+            self._tools_to_call_from_context = context
+        context.set(tools)
+        return tools
+
+    def _current_tools(self) -> list[Any]:
+        context = getattr(self, "_tools_to_call_from_context", None)
+        if context is not None:
+            return list(context.get())
+        # Compatibility for lightweight test doubles that delegate only this
+        # parser method without running LiteLLMModelV2.__init__.
+        return list(getattr(self, "_last_tools_to_call_from", []) or [])
+
+    def _clear_current_tools(self) -> None:
+        context = getattr(self, "_tools_to_call_from_context", None)
+        if context is not None:
+            context.set(())
 
     def generate(
         self,
@@ -78,48 +129,63 @@ class LiteLLMModelV2(LiteLLMModel):
         tools_to_call_from: list[Any] | None = None,
         **kwargs,
     ) -> ChatMessage:
-        self._last_tools_to_call_from = list(tools_to_call_from or [])
-        message = super().generate(
-            messages,
-            stop_sequences=stop_sequences,
-            response_format=response_format,
-            tools_to_call_from=tools_to_call_from,
-            **kwargs,
-        )
-        self._normalize_and_validate_tool_calls(message, self._last_tools_to_call_from)
-        return message
+        current_tools = self._set_current_tools(tools_to_call_from)
+        try:
+            message = super().generate(
+                messages,
+                stop_sequences=stop_sequences,
+                response_format=response_format,
+                tools_to_call_from=tools_to_call_from,
+                **kwargs,
+            )
+            self._normalize_and_validate_tool_calls(message, list(current_tools))
+            # ToolCallingAgent invokes parse_tool_calls(message) immediately
+            # after generate() returns. Keep this call's schema in its Context
+            # until that parser consumes it; the next generate overwrites it.
+            return message
+        except BaseException:
+            self._clear_current_tools()
+            raise
 
     def parse_tool_calls(self, message: ChatMessage) -> ChatMessage:
         """Parse text fallback tool calls without patching smolagents globals."""
-
-        message.role = MessageRole.ASSISTANT
-        if not message.tool_calls:
-            if message.content is None:
-                raise ToolCallParseError("Message contains no content and no tool calls")
-            available_tool_names = [tool.name for tool in self._last_tools_to_call_from if hasattr(tool, "name")]
-            candidate = parse_structured_tool_call(
-                str(message.content),
-                available_tool_names=available_tool_names or None,
-                tool_name_key=self.tool_name_key,
-                tool_arguments_key=self.tool_arguments_key,
-                model_id=self.model_id,
-            )
-            message.tool_calls = [
-                ChatMessageToolCall(
-                    id=candidate.id or str(uuid.uuid4()),
-                    type="function",
-                    function=ChatMessageToolCallFunction(
-                        name=candidate.name,
-                        arguments=candidate.arguments,
-                    ),
+        current_tools = LiteLLMModelV2._current_tools(self)
+        try:
+            message.role = MessageRole.ASSISTANT
+            if not message.tool_calls:
+                if message.content is None:
+                    raise ToolCallParseError("Message contains no content and no tool calls")
+                available_tool_names = [
+                    tool.name for tool in current_tools if hasattr(tool, "name")
+                ]
+                candidate = parse_structured_tool_call(
+                    str(message.content),
+                    available_tool_names=available_tool_names or None,
+                    tool_name_key=self.tool_name_key,
+                    tool_arguments_key=self.tool_arguments_key,
+                    model_id=self.model_id,
                 )
-            ]
+                message.tool_calls = [
+                    ChatMessageToolCall(
+                        id=candidate.id or str(uuid.uuid4()),
+                        type="function",
+                        function=ChatMessageToolCallFunction(
+                            name=candidate.name,
+                            arguments=candidate.arguments,
+                        ),
+                    )
+                ]
 
-        if not message.tool_calls:
-            raise ToolCallParseError("No tool call was found in the model output")
+            if not message.tool_calls:
+                raise ToolCallParseError("No tool call was found in the model output")
 
-        LiteLLMModelV2._normalize_and_validate_tool_calls(message, self._last_tools_to_call_from)
-        return message
+            LiteLLMModelV2._normalize_and_validate_tool_calls(
+                message,
+                current_tools,
+            )
+            return message
+        finally:
+            LiteLLMModelV2._clear_current_tools(self)
 
     @staticmethod
     def _normalize_tool_arguments(arguments: Any) -> Any:

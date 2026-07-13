@@ -123,6 +123,7 @@ prompt, mcp_servers
 | `tool_output_limits` | 上下文压缩阶段的工具输出保留上限 |
 | `checkpoint` | checkpoint、resume、heartbeat 开关与保留策略 |
 | `mcp_servers` | MCP server 配置入口 |
+| `self_learning` | 会话记录、记忆分层（session/application/project）、蒸馏与预算 |
 
 ### context_engine
 
@@ -141,6 +142,53 @@ context_engine:
 - user/system 原始消息、写入/编辑/删除类工具内容不能被压缩。
 - 需要调阈值时优先放应用级 `applications/<app>/config/system.yaml`，不要改全局配置。
 - 如果确实新增配置字段，必须同时更新本文件、`yaml-contract.md` 的白名单说明、相关测试和真实 Application 验证。
+
+### self_learning
+
+自学习基础设施：hook 驱动的会话记录（ledger + FTS）、三层持久记忆（session / application / project）、LLM 语义蒸馏与门控自动应用。
+
+```yaml
+self_learning:
+  enabled: true              # 总开关：关闭后记录、注入、memory/session 工具、
+                             # SessionEnd 评审（蒸馏/自动应用/自动清理）全部停用
+  root_dir: ".agentloom"     # 持久状态根目录
+  reviewer_enabled: true     # 是否由 SessionEnd 持久队列执行语义评审
+  events_retention_days: 90  # 每日去重的 retention job 清理超龄 runs/events；0 关闭
+  memory:
+    prompt_max_chars: 12000   # run 开始时注入快照的总字符预算
+    max_item_chars: 4000      # 单条记忆上限，超出直接拒绝
+    scope_budgets:            # 各 scope 活跃记忆容量；直写/apply 超限时返回
+      project: 8000           # capacity_exceeded 与现有条目，要求 batch 整合
+      application: 6000
+      session: 4000
+    session_ttl_days: 14      # loom memory prune 清理过期 session 记忆
+    distill_enabled: true     # 持久 session-review job 的蒸馏总开关
+    distill_model: "summary"  # LLM 语义蒸馏用的模型档（llm.yaml 的 model type）；
+                              # 空串 = 仅蒸馏显式 session note，零模型开销
+    auto_apply: "safe"        # off = 提案全部等人工 apply；safe = 过全部安全门槛的
+                              # add 提案自动生效（审计为 applied_by=auto）
+```
+
+运行契约：
+
+- 记忆分层：`project` 全局共享；`application` 按应用隔离（scope_id=application_id）；`session` 按 run 隔离（scope_id=run_id），run 结束后由蒸馏转成 application/project 层 pending 提案并归档。
+- 模型侧 `memory` 工具对 project/app 只能写提案；session 层直写生效。批量整合用 `action="batch"` + `operations` JSON 数组，原子应用并按最终状态校验容量。同一 run 内 `capacity_exceeded` 连续 3 次后返回终止性结果，阻止无限重试。`action="feedback"`（helpful=true/false）对已注入记忆做显式信任反馈。
+- **持久异步蒸馏**：SessionEnd 的唯一同步 hook 只在一个 `BEGIN IMMEDIATE` 内写最终 event、CAS run outcome/trust，并去重插入 `session_review` 与每日 retention job；提交后 best-effort 拉起 detached worker，hook 不调用模型。`learning_jobs` 使用全局 worker lease + 单 job lease token fencing，过期 running 可恢复，模型最多 3 次 job attempt（2s、10s），第三次失败只用显式 session note 做确定性 fallback。digest 在首次 claim 后冻结并持久化，重试复用同一 hash/input；DB 结果先提交，artifact 失败不会重调模型。
+- **统一安全边界**：task、final answer、event、session note、existing memory、repeated failure、curator 输入统一经过 `DigestBuilder`：递归脱敏后做 Unicode/injection 扫描，命中 fragment 整体变为 `[BLOCKED]`，模型只接收带 `ref/kind/text/blocked` 的 JSON。模型提案必须引用 digest 中有效的 `evidence_refs`，并再次经过脱敏、注入、scope、长度与 replace-target 校验。重复失败只作为模型证据，不再由模板自动生成指令式记忆。
+- **自动应用（auto_apply: safe）**：仅 add 提案；须通过注入扫描、与 active 记忆无冲突（apply 写事务内复查）、**规范化完全一致且来自 ≥2 个不同 root run 的佐证**、容量检查；LLM 没有豁免，每次 job 最多应用 5 条，replace/remove 始终人工。审计保存在具体 memory revision id、memory_evidence 与 review_runs。
+- **佐证语义**：`memory_evidence(item_id, root_run_id)` 只为折叠空白、忽略大小写后 hash 完全一致的内容计票；数字、路径、版本、否定、单位、标点或其他文本变化均是不同事实。同 run 的 batch/add 重复不会增加票数。Jaccard/重叠度只用于冲突提示和人工审阅，绝不作为佐证。
+- **注入快照**：XML 闭合；条目按 相关性(与任务文本 Jaccard)×trust×时间衰减 排序装入；trust<0.2 的条目隔离不注入（保留在库）；超预算整条省略并注明数量；含注入模式的条目替换为 `[BLOCKED: ...]` 占位。注入过的条目记录到 memory_injections，run 成功后 trust +0.02；`loom memory feedback` 显式 ±（helpful +0.05 / unhelpful −0.10）。
+- **冲突检测**：相似内容可写入 `conflicts_json` 并由 `loom memory conflicts` 报告，供人工判断“高度相似但事实不同”的条目；完全相同文本仍由 exact hash 去重。冲突是 auto-apply 门控和审阅信号，不会被当作佐证，也不会静默隐藏 active 记忆。
+- **自动清理**：每日去重的 retention job 执行 session TTL prune + `events_retention_days` 清理（0 关闭）；空间回收需手动 `VACUUM`。`loom memory stats` 同时展示 job 状态和遗留库文件。
+- **root-run 归属**：顶层 BaseAgent 在快照前显式 `bind_root_run()`；worker 通过 ContextVar 继承同一个 root，只有 owner 发送最终 SessionEnd。HookContext、Canonical Event v3、runs/events、snapshot 和 memory/session tools 都携带显式 root_run_id；空上下文 fail-closed 为 `missing_run_context`，绝不从全局 HookManager 猜测。
+- **Unicode 加固**：注入扫描先在原始文本上检测不可见/双向控制码点，再 NFKC 折叠全角同形字后跑正则；写入 DB/FTS 前，命中注入的文本 fragment 整体替换为 `[BLOCKED]`，不保留攻击原文。
+- **快照使用率**（第二轮）：各 scope 开标签携带 `used_chars="..." budget_chars="..."`（与 capacity_exceeded 同口径的 bucket 总量），前言提示模型接近预算时主动 batch 整合。
+- **不可变 revision**：replace 将旧 row 标记为 `superseded`，新内容使用新 id、`generation+1` 和 `supersedes_id`；pending replace/remove 创建时固定 `target_item_id`，目标不再 active 时变为 `stale`。注入、trust、feedback 和 run outcome 均绑定具体 id，旧 revision 的资历不会传给新 revision。
+- **运行摘要**：session-review job 成功后写入 `session_summary.md`；SessionEnd 返回不等待摘要模型。
+- **记忆策展**：`loom memory curate [--scope] [--scope-id] [--model] [--dry-run]` —— LLM 策展一遍 active 记忆（project + 各 application bucket，session 由 TTL 管）：合并近重复、压缩冗长、按矛盾对提议清理。**全提案制**（source=curator 的 replace/remove pending 行，永不自动应用，`loom memory apply` 才生效）；代码级门槛：目标必须在 bucket 白名单、必须引用未阻断的目标 evidence、trust≥0.7 或 7 天内更新的条目受保护、内容过注入扫描、每次 ≤10 条提案。模型默认取 `memory.distill_model`。仅手动触发；未来自动化也必须使用去重的持久 outbox job。
+- **导出**：`loom memory export [--out FILE] [--format json|markdown] [--include-events]` —— 全状态（active/pending/removed/archived）连同 trust/注入元数据导出，用于备份、迁移与人工审阅。
+- 维护命令：`loom memory stats`（预算、job 状态、遗留文件）、`loom memory jobs [--status ...]`、`loom memory retry-job <id>`、`loom memory prune`、`loom memory distill <run_id>`、`loom memory conflicts`、`loom memory feedback <target> --helpful/--unhelpful`、`loom memory apply/reject`、`loom memory curate`、`loom memory export`。
+- **信任语义**：replace 生效（人工 apply、直写、batch）后新 revision 的 `trust_score` 为 0.5、`helpful/unhelpful_count` 为 0；旧 revision 保留自身注入、outcome 与 feedback 审计，迟到的旧 run 信号只更新旧 id。凭据键先做 NFKC/casefold/camel/snake/kebab 归一，覆盖 secret/token/password/cookie/authorization/credential 与受控前缀的 `*_key`，并保留 `sort_key`/`token_count` 等安全负样本。
 
 ### execution_env
 

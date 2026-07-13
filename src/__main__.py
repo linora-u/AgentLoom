@@ -223,9 +223,13 @@ def memory():
     """Manage durable AgentLoom memory."""
 
 
+_MEMORY_SCOPES = ["project", "app", "application", "session"]
+_CURATOR_SCOPES = ["project", "app", "application"]
+
+
 @memory.command("list")
-@click.option("--scope", default=None, type=click.Choice(["project", "app", "application"]))
-@click.option("--scope-id", default="", help="Application id for app/application scope.")
+@click.option("--scope", default=None, type=click.Choice(_MEMORY_SCOPES))
+@click.option("--scope-id", default="", help="Application id (app scope) or run id (session scope).")
 @click.option("--active-only", is_flag=True, default=False)
 def memory_list(scope: str | None, scope_id: str, active_only: bool):
     """List memory items."""
@@ -237,8 +241,8 @@ def memory_list(scope: str | None, scope_id: str, active_only: bool):
 
 
 @memory.command("add")
-@click.option("--scope", default="project", type=click.Choice(["project", "app", "application"]), show_default=True)
-@click.option("--scope-id", default="", help="Application id for app/application scope.")
+@click.option("--scope", default="project", type=click.Choice(_MEMORY_SCOPES), show_default=True)
+@click.option("--scope-id", default="", help="Application id (app scope) or run id (session scope).")
 @click.argument("content")
 def memory_add(scope: str, scope_id: str, content: str):
     """Add active memory directly from CLI."""
@@ -250,8 +254,8 @@ def memory_add(scope: str, scope_id: str, content: str):
 
 
 @memory.command("replace")
-@click.option("--scope", default="project", type=click.Choice(["project", "app", "application"]), show_default=True)
-@click.option("--scope-id", default="", help="Application id for app/application scope.")
+@click.option("--scope", default="project", type=click.Choice(_MEMORY_SCOPES), show_default=True)
+@click.option("--scope-id", default="", help="Application id (app scope) or run id (session scope).")
 @click.argument("target")
 @click.argument("content")
 def memory_replace(scope: str, scope_id: str, target: str, content: str):
@@ -264,8 +268,8 @@ def memory_replace(scope: str, scope_id: str, target: str, content: str):
 
 
 @memory.command("remove")
-@click.option("--scope", default="project", type=click.Choice(["project", "app", "application"]), show_default=True)
-@click.option("--scope-id", default="", help="Application id for app/application scope.")
+@click.option("--scope", default="project", type=click.Choice(_MEMORY_SCOPES), show_default=True)
+@click.option("--scope-id", default="", help="Application id (app scope) or run id (session scope).")
 @click.argument("target")
 def memory_remove(scope: str, scope_id: str, target: str):
     """Remove active memory directly from CLI."""
@@ -283,8 +287,217 @@ def memory_apply(target: str):
     import json as _json
     from src.extensions.self_learning.memory_store import MemoryStore
 
-    result = MemoryStore().apply(target)
+    result = MemoryStore().apply(target, applied_by="human")
     click.echo(_json.dumps(result, ensure_ascii=False, indent=2, default=str))
+
+
+@memory.command("feedback")
+@click.argument("target")
+@click.option("--helpful/--unhelpful", "helpful", default=True, help="Whether the memory helped or misled.")
+def memory_feedback(target: str, helpful: bool):
+    """Adjust an active memory's trust score with explicit feedback."""
+    import json as _json
+
+    from src.extensions.self_learning.memory_store import MemoryStore
+
+    result = MemoryStore().feedback(target, helpful=helpful)
+    click.echo(_json.dumps(result, ensure_ascii=False, indent=2, default=str))
+
+
+@memory.command("conflicts")
+@click.option("--scope", default=None, type=click.Choice(_MEMORY_SCOPES))
+@click.option("--scope-id", default="", help="Application id (app scope) or run id (session scope).")
+def memory_conflicts(scope: str | None, scope_id: str):
+    """Report conflicted pending proposals and contradicting active pairs."""
+    import json as _json
+
+    from src.extensions.self_learning.memory_store import MemoryStore
+
+    result = MemoryStore().conflicts(scope=scope, scope_id=scope_id)
+    click.echo(_json.dumps(result, ensure_ascii=False, indent=2, default=str))
+
+
+@memory.command("reject")
+@click.argument("target")
+def memory_reject(target: str):
+    """Reject a pending memory proposal without applying it."""
+    import json as _json
+
+    from src.extensions.self_learning.memory_store import MemoryStore
+
+    result = MemoryStore().reject(target)
+    click.echo(_json.dumps(result, ensure_ascii=False, indent=2, default=str))
+
+
+@memory.command("stats")
+def memory_stats():
+    """Show memory usage and durable learning-job state."""
+    import json as _json
+
+    from src.extensions.self_learning.learning_jobs import LearningJobQueue
+    from src.extensions.self_learning.memory_store import MemoryStore
+
+    result = MemoryStore().stats()
+    result["jobs"] = LearningJobQueue().stats()
+    click.echo(_json.dumps(result, ensure_ascii=False, indent=2, default=str))
+
+
+@memory.command("jobs")
+@click.option(
+    "--status",
+    default=None,
+    type=click.Choice(["pending", "running", "retry", "succeeded", "dead"]),
+)
+@click.option("--limit", default=100, type=int, show_default=True)
+def memory_jobs(status: str | None, limit: int):
+    """List durable self-learning jobs and their retry/lease state."""
+    import json as _json
+
+    from src.extensions.self_learning.learning_jobs import LearningJobQueue
+
+    result = LearningJobQueue().list_jobs(status=status, limit=limit)
+    click.echo(_json.dumps(result, ensure_ascii=False, indent=2, default=str))
+
+
+@memory.command("retry-job")
+@click.argument("job_id", type=int)
+def memory_retry_job(job_id: int):
+    """Reset one dead self-learning job for another bounded attempt cycle."""
+    import json as _json
+
+    from src.extensions.self_learning.learning_jobs import (
+        LearningJobQueue,
+        kick_learning_worker,
+    )
+
+    queue = LearningJobQueue()
+    result = queue.retry_job(job_id)
+    # Resetting a dead row must be operational on its own; do not require an
+    # unrelated future SessionEnd to discover the newly-pending work.
+    kick_learning_worker(queue.db_path)
+    click.echo(_json.dumps(result, ensure_ascii=False, indent=2, default=str))
+
+
+@memory.command("prune")
+@click.option("--session-ttl-days", default=None, type=int, help="Override the configured session memory TTL.")
+@click.option(
+    "--events-retention-days", default=None, type=int, help="Also prune ledger runs/events older than this many days."
+)
+def memory_prune(session_ttl_days: int | None, events_retention_days: int | None):
+    """Prune stale session memories, terminal items, and (optionally) old run events."""
+    import json as _json
+
+    from src.extensions.self_learning.ledger import SelfLearningLedger
+    from src.extensions.self_learning.memory_store import MemoryStore
+
+    result = MemoryStore().prune(session_ttl_days=session_ttl_days)
+    if events_retention_days is not None:
+        result["events"] = SelfLearningLedger().prune_events(retention_days=events_retention_days)
+    click.echo(_json.dumps(result, ensure_ascii=False, indent=2, default=str))
+
+
+@memory.command("distill")
+@click.argument("run_id")
+@click.option("--application-id", default="", help="Target application scope for the distilled proposals.")
+def memory_distill(run_id: str, application_id: str):
+    """Distill a finished run's session notes into pending memory proposals."""
+    import json as _json
+
+    from src.extensions.self_learning.memory_store import MemoryStore
+
+    result = MemoryStore().distill_session(run_id, application_id=application_id)
+    click.echo(_json.dumps(result, ensure_ascii=False, indent=2, default=str))
+
+
+@memory.command("curate")
+@click.option("--scope", default=None, type=click.Choice(_CURATOR_SCOPES))
+@click.option("--scope-id", default="", help="Application id to narrow the pass to one bucket.")
+@click.option("--model", "model_type", default=None, help="Model type override (defaults to memory.distill_model).")
+@click.option("--dry-run", is_flag=True, default=False, help="Report proposals without writing them.")
+def memory_curate(scope: str | None, scope_id: str, model_type: str | None, dry_run: bool):
+    """LLM curation pass: consolidate/compress/prune active memory via pending proposals."""
+    import json as _json
+
+    from src.extensions.self_learning.curator import curate_memory
+
+    result = curate_memory(scope=scope, scope_id=scope_id, model_type=model_type, dry_run=dry_run)
+    click.echo(_json.dumps(result, ensure_ascii=False, indent=2, default=str))
+
+
+@memory.command("export")
+@click.option("--out", "out_path", default="", help="Write to this file instead of stdout.")
+@click.option("--format", "fmt", default="json", type=click.Choice(["json", "markdown"]), show_default=True)
+@click.option("--include-events", is_flag=True, default=False, help="Include injection log rows (JSON only).")
+def memory_export(out_path: str, fmt: str, include_events: bool):
+    """Export all memory items (every status) with trust metadata for backup or review."""
+    import json as _json
+    import sqlite3 as _sqlite3
+    from datetime import datetime as _datetime
+
+    from src.extensions.self_learning.memory_store import MemoryStore
+
+    store = MemoryStore()
+    items = store.export_items()
+    stats = store.stats()
+    if fmt == "json":
+        payload = {
+            "exported_at": _datetime.now().astimezone().isoformat(),
+            "db_path": str(store.db_path),
+            "stats": stats,
+            "items": items,
+        }
+        if include_events:
+            with _sqlite3.connect(store.db_path) as conn:
+                payload["injections"] = [
+                    {"run_id": row[0], "item_id": row[1], "injected_at": row[2]}
+                    for row in conn.execute("SELECT run_id, item_id, injected_at FROM memory_injections ORDER BY id")
+                ]
+        rendered = _json.dumps(payload, ensure_ascii=False, indent=2, default=str)
+    else:
+        by_bucket: dict = {}
+        for item in items:
+            by_bucket.setdefault(f"{item['scope_type']}:{item['scope_id']}", []).append(item)
+        budgets = {bucket["scope_type"] + ":" + bucket["scope_id"]: bucket for bucket in stats.get("buckets", [])}
+        lines = ["# AgentLoom Memory Export", ""]
+        for bucket_key, bucket_items in by_bucket.items():
+            info = budgets.get(bucket_key, {})
+            active_chars = (info.get("by_status", {}).get("active") or {}).get("chars", 0)
+            lines.append(f"## {bucket_key} (used {active_chars} / budget {info.get('budget_chars', '?')} chars)")
+            lines.append("")
+            for item in bucket_items:
+                trust = item.get("trust_score")
+                trust_text = f"{float(trust):.2f}" if trust is not None else "?"
+                lines.append(
+                    f"- [{item['id']}] ({item['status']}/{item['action']}, trust={trust_text}, "
+                    f"injected={item.get('injected_count') or 0}, source={item.get('source') or '-'}) "
+                    f"{item['content']}"
+                )
+            lines.append("")
+        rendered = "\n".join(lines).rstrip() + "\n"
+    if out_path:
+        with open(out_path, "w", encoding="utf-8") as handle:
+            handle.write(rendered)
+        click.echo(f"Exported {len(items)} items to {out_path}")
+    else:
+        click.echo(rendered)
+
+
+@main.command("_memory-worker", hidden=True)
+@click.option("--db", "db_path", required=True, type=click.Path(dir_okay=False))
+@click.option("--max-wait", default=15.0, type=float, show_default=True)
+@click.option("--kick-token", default="", hidden=True)
+def memory_worker(db_path: str, max_wait: float, kick_token: str):
+    """Internal detached durable-learning worker."""
+    import json as _json
+
+    from src.extensions.self_learning.worker_entry import run_worker
+
+    result = run_worker(
+        db_path,
+        max_wait=max_wait,
+        kick_token=kick_token,
+    )
+    click.echo(_json.dumps(result, ensure_ascii=False, default=str))
 
 
 # ─────────────────────────────────────────────

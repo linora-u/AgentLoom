@@ -98,11 +98,14 @@ def test_session_search_tool_returns_compact_redacted_records(tmp_path: Path, mo
     monkeypatch.setenv("AGENTLOOM_SELF_LEARNING_ROOT", str(tmp_path / ".agentloom"))
     context = HookContext(
         session_id="recorder_session",
+        root_run_id="recorder_session",
         cwd=str(tmp_path),
         hook_event_name="PostToolUse",
         tool_name="shell_tool",
         tool_input={"command": "pytest"},
-        tool_response={"result": "needle compact api_key=supersecret123 " + ("long output " * 200)},
+        # The semicolon closes the unquoted credential before the long safe
+        # output; whitespace is intentionally part of an unquoted secret value.
+        tool_response={"result": "needle compact api_key=supersecret123; " + ("long output " * 200)},
         task_id="task_1",
         agent_name="demo_agent",
     )
@@ -116,8 +119,10 @@ def test_session_search_tool_returns_compact_redacted_records(tmp_path: Path, mo
         assert conn.execute("SELECT source_path FROM events").fetchone()[0] == ""
 
     from src.tools.self_learning.session_tools import session_search
+    from src.trace import bind_root_run
 
-    raw = session_search("needle compact", limit=10)
+    with bind_root_run("current-search-run"):
+        raw = session_search("needle compact", limit=10)
     payload = json.loads(raw)
     assert payload["ok"] is True
     assert len(raw) < 1500
@@ -143,6 +148,7 @@ def test_session_search_defaults_to_current_application_scope(tmp_path: Path, mo
     ):
         context = HookContext(
             session_id=session_id,
+            root_run_id=session_id,
             cwd=str(tmp_path),
             hook_event_name="PostToolUse",
             tool_name="shell_tool",
@@ -154,12 +160,14 @@ def test_session_search_defaults_to_current_application_scope(tmp_path: Path, mo
         )
         assert SessionRecorder().record_hook(context).decision == "allow"
 
-    from src.trace import set_current_agent_config, clear_current_agent_config
     from src.tools.self_learning.session_tools import session_search
+    from src.trace import bind_root_run, clear_current_agent_config, set_current_agent_config
 
     set_current_agent_config({"_yaml_file_path": str(app_a_yaml), "name": "demo_agent"})
     try:
-        payload = json.loads(session_search("shared needle"))
+        with bind_root_run("current-search-run"):
+            payload = json.loads(session_search("shared needle"))
+            all_payload = json.loads(session_search("shared needle", scope="all"))
     finally:
         clear_current_agent_config()
     assert payload["app"] == "alpha_app"
@@ -167,7 +175,6 @@ def test_session_search_defaults_to_current_application_scope(tmp_path: Path, mo
     assert payload["results"][0]["application_id"] == "alpha_app"
     assert "alpha only" in payload["results"][0]["content"]
 
-    all_payload = json.loads(session_search("shared needle", scope="all"))
     assert len(all_payload["results"]) == 2
 
 
@@ -186,16 +193,16 @@ def test_memory_proposal_policy_apply_duplicate_and_snapshot(tmp_path: Path):
     assert applied["ok"] is True
     active = store.list(include_pending=False)
     assert active[0]["content"] == "Repo uses pytest"
-    snapshot = store.snapshot_for_prompt()
+    snapshot = store.snapshot_for_prompt(session_run_id="snapshot-run")
     assert "Repo uses pytest" in snapshot
     late = store.add("project", "Late fact after run start", proposal=False, source="test")
     assert "Late fact after run start" not in snapshot
-    assert "Late fact after run start" in store.snapshot_for_prompt()
+    assert "Late fact after run start" in store.snapshot_for_prompt(session_run_id="snapshot-run")
     store.remove("project", str(late["id"]), proposal=False)
 
-    store.replace("project", str(active[0]["id"]), "Repo uses pytest and ruff", proposal=False)
-    assert "ruff" in store.snapshot_for_prompt()
-    store.remove("project", str(active[0]["id"]), proposal=False)
+    replaced = store.replace("project", str(active[0]["id"]), "Repo uses pytest and ruff", proposal=False)
+    assert "ruff" in store.snapshot_for_prompt(session_run_id="snapshot-run")
+    store.remove("project", str(replaced["new_id"]), proposal=False)
     assert store.list(include_pending=False) == []
 
 
@@ -220,8 +227,12 @@ def test_application_memory_is_isolated_and_project_memory_is_shared(tmp_path: P
     store.add("app", "Alpha-only reusable workflow", proposal=False, source="test", scope_id="alpha_app")
     store.add("app", "Beta-only reusable workflow", proposal=False, source="test", scope_id="beta_app")
 
-    alpha_snapshot = store.snapshot_for_prompt(agent_config={"_yaml_file_path": str(app_a_yaml)})
-    beta_snapshot = store.snapshot_for_prompt(agent_config={"_yaml_file_path": str(app_b_yaml)})
+    alpha_snapshot = store.snapshot_for_prompt(
+        agent_config={"_yaml_file_path": str(app_a_yaml)}, session_run_id="snapshot-run"
+    )
+    beta_snapshot = store.snapshot_for_prompt(
+        agent_config={"_yaml_file_path": str(app_b_yaml)}, session_run_id="snapshot-run"
+    )
 
     assert "Project-wide pytest convention" in alpha_snapshot
     assert "Project-wide pytest convention" in beta_snapshot
@@ -236,18 +247,19 @@ def test_memory_tool_list_returns_compact_items(tmp_path: Path, monkeypatch: pyt
     monkeypatch.setenv("AGENTLOOM_SELF_LEARNING_ROOT", str(tmp_path / ".agentloom"))
 
     from src.tools.self_learning.memory_tool import memory
+    from src.trace import bind_root_run
 
-    for idx in range(12):
-        add_payload = json.loads(
-            memory(
-                action="add",
-                scope="project",
-                content=f"compact memory marker {idx} " + ("long text " * 200),
+    with bind_root_run("root-compact-list"):
+        for idx in range(12):
+            add_payload = json.loads(
+                memory(
+                    action="add",
+                    scope="project",
+                    content=f"compact memory marker {idx} " + ("long text " * 200),
+                )
             )
-        )
-        assert add_payload["proposal"] is True
-
-    raw = memory(action="list", scope="project")
+            assert add_payload["proposal"] is True
+        raw = memory(action="list", scope="project")
     payload = json.loads(raw)
     assert payload["ok"] is True
     assert payload["item_count"] == 12
@@ -289,6 +301,7 @@ def test_reviewer_dedupes_and_stays_failure_safe(tmp_path: Path, monkeypatch: py
     monkeypatch.setenv("AGENTLOOM_SELF_LEARNING_ROOT", str(tmp_path / ".agentloom"))
     context = HookContext(
         session_id="session_1",
+        root_run_id="session_1",
         cwd=str(tmp_path),
         hook_event_name="TaskCompleted",
         tool_name="task",
@@ -298,11 +311,70 @@ def test_reviewer_dedupes_and_stays_failure_safe(tmp_path: Path, monkeypatch: py
 
     assert learning_review_hook(context).decision == "allow"
     assert learning_review_hook(context).decision == "allow"
-    run_dir = tmp_path / ".agentloom" / "learning" / "runs" / "task_1"
+    run_dir = tmp_path / ".agentloom" / "learning" / "runs" / "session_1"
     assert (run_dir / "taskcompleted.json").exists()
     assert (run_dir / "memory_proposals.md").exists()
     with sqlite3.connect(tmp_path / ".agentloom" / "self_learning.db") as conn:
         assert conn.execute("SELECT COUNT(*) FROM review_runs").fetchone()[0] == 1
+
+
+def test_reviewer_uses_only_sanitized_root_owned_payloads(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    root = tmp_path / ".agentloom"
+    monkeypatch.setenv("AGENTLOOM_SELF_LEARNING_ROOT", str(root))
+    secrets = {
+        "PATHSECRET7",
+        "SESSIONSECRET7",
+        "CWDSECRET7",
+        "TOOLSECRET7",
+    }
+    context = HookContext(
+        session_id="authorization=Bearer SESSIONSECRET7",
+        root_run_id="review-root-safe",
+        cwd="client_secret=CWDSECRET7",
+        hook_event_name="TaskCompleted",
+        tool_name="password=TOOLSECRET7",
+        tool_input={"task_id": "api_key=PATHSECRET7", "task_text": "safe task"},
+        tool_response={"result": "safe result"},
+    )
+
+    result = learning_review_hook(context)
+
+    assert result.success is True
+    run_dir = root / "learning" / "runs" / "review-root-safe"
+    assert run_dir.is_dir()
+    assert not (root / "learning" / "runs" / "api_key_PATHSECRET7").exists()
+    artifact_text = "\n".join(path.read_text(encoding="utf-8") for path in run_dir.rglob("*") if path.is_file())
+    with sqlite3.connect(root / "self_learning.db") as conn:
+        source_run_id, output_json = conn.execute("SELECT source_run_id, output_json FROM review_runs").fetchone()
+    persisted = f"{source_run_id}\n{output_json}\n{artifact_text}"
+    assert source_run_id == "review-root-safe"
+    assert all(secret not in persisted for secret in secrets)
+
+
+def test_reviewer_missing_root_context_writes_nothing(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    root = tmp_path / ".agentloom"
+    monkeypatch.setenv("AGENTLOOM_SELF_LEARNING_ROOT", str(root))
+    context = HookContext(
+        session_id="session-without-root",
+        cwd=str(tmp_path),
+        hook_event_name="TaskCompleted",
+        tool_name="task",
+        tool_input={"task_id": "api_key=SHOULDNOTOWNARTIFACT7"},
+        tool_response={"result": "done"},
+    )
+
+    result = learning_review_hook(context)
+
+    assert result.success is False
+    assert result.outcome == "non_blocking_error"
+    assert "missing_root_run_context" in result.reason
+    assert not root.exists()
 
 
 def test_ledger_schema_contains_unified_learning_tables(tmp_path: Path):
