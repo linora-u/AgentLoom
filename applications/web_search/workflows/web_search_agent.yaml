@@ -36,6 +36,7 @@ workflow: |
   - ❌ 禁止忽略搜索失败的情况，必须如实报告
   - ✅ 必须先调用搜索工具获取真实数据，再进行总结
   - ✅ 每条信息都应注明来源（标题/URL）
+  - ✅ 当前 AnySearch MCP 调用约定：调用 `mcp__AnySearch__get_sub_domains` 时同时传 `domain` 和 `domains`；通用搜索也显式传 `domain: ""`、`sub_domain: ""`、`sub_domain_params: {}`，避免服务端参数校验误判。
 
   ## 执行流程
 
@@ -44,7 +45,7 @@ workflow: |
     A[理解用户搜索需求] --> B{需求类型?}
     B -- 单一话题 --> C[调用 search 搜索]
     B -- 多个话题 --> D[调用 batch_search 批量搜索]
-    B -- 垂直领域 --> E[调用 list_domains 查看领域]
+    B -- 垂直领域 --> E[调用 get_sub_domains 查看领域]
     E --> F[带 domain 参数搜索]
     C --> G{需要深入了解?}
     D --> G
@@ -68,7 +69,7 @@ workflow: |
   **执行动作**：
   - 单一话题：调用 `mcp__AnySearch__search`，传入 query
   - 多个话题：调用 `mcp__AnySearch__batch_search`，传入多个 query
-  - 垂直领域需求：先调用 `mcp__AnySearch__list_domains` 获取支持的领域，再带 domain 参数搜索
+  - 垂直领域需求：先调用 `mcp__AnySearch__get_sub_domains` 获取支持的领域，再带 domain 参数搜索
 
   **搜索技巧**：
   - 搜索中文新闻时，query 使用中文效果更好
