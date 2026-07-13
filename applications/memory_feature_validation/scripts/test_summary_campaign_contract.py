@@ -36,6 +36,9 @@ from applications.memory_feature_validation.scripts.run_summary_campaign import 
     _loom_command,
     _max_job_id,
     _progress_payload,
+    _probe_findings,
+    _public_audit_line,
+    _public_progress_line,
     _run_group,
     _transport_evidence,
     _wait_for_jobs,
@@ -459,7 +462,6 @@ def test_retry_classifier_retries_only_explicit_infrastructure(tmp_path: Path) -
                     "path": "self_learning.db-wal",
                     "kind": "secret",
                     "probe_label": "password_short",
-                    "probe_sha256_prefix": "0123456789ab",
                 }
             ],
         },
@@ -601,6 +603,7 @@ def test_progress_checkpoint_omits_raw_errors_answers_and_paths() -> None:
                                     "kind": "scan_error",
                                     "scope": "sqlite_logical",
                                     "error_type": "OperationalError",
+                                    "probe_sha256_prefix": "legacy-sensitive-fingerprint",
                                 },
                                 secret,
                             ],
@@ -827,6 +830,79 @@ def test_campaign_deadline_includes_final_audit_work(
     assert report["metrics"]["campaign_elapsed_seconds"] > 8 * 60 * 60
     assert timing["elapsed_seconds"] == report["metrics"]["campaign_elapsed_seconds"]
     assert timing["within_eight_hours"] is False
+
+
+@pytest.mark.parametrize("json_mode", [False, True])
+def test_audit_cli_exposes_only_public_issue_codes(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    json_mode: bool,
+) -> None:
+    secret = SECRET_PROBES["spaced_client_secret"]
+    internal_report = {
+        "ok": False,
+        "status": "RELEASE_FAIL",
+        "release_eligible": False,
+        "dry_run": False,
+        "selected_runs": 100,
+        "issues": [
+            {
+                "code": "privacy",
+                "message": f"raw scanner detail contained {secret}",
+            }
+        ],
+        "metrics": {"internal_detail": secret},
+    }
+    monkeypatch.setattr(audit_campaign, "audit_campaign", lambda _path: internal_report)
+    argv = ["audit_campaign.py", str(tmp_path)]
+    if json_mode:
+        argv.append("--json")
+    monkeypatch.setattr(sys, "argv", argv)
+
+    assert audit_campaign.main() == 1
+
+    output = capsys.readouterr().out
+    assert secret not in output
+    if json_mode:
+        assert json.loads(output) == {
+            "issue_codes": ["privacy"],
+            "issue_count": 1,
+            "ok": False,
+            "release_eligible": False,
+            "status": "RELEASE_FAIL",
+        }
+    else:
+        assert output.splitlines() == ["RELEASE_FAIL", "[privacy]"]
+
+
+def test_campaign_report_never_persists_internal_issue_messages(tmp_path: Path) -> None:
+    secret = SECRET_PROBES["spaced_client_secret"]
+    report = {
+        "status": "RELEASE_FAIL",
+        "release_eligible": False,
+        "dry_run": False,
+        "selected_runs": 100,
+        "issues": [
+            {
+                "code": "privacy",
+                "message": f"scanner detail contained {secret}",
+            }
+        ],
+        "metrics": {},
+    }
+
+    audit_campaign._write_report(
+        tmp_path,
+        report,
+        {"finding_count": 1},
+        [],
+    )
+
+    rendered = (tmp_path / "report.md").read_text(encoding="utf-8")
+    assert secret not in rendered
+    assert "- [privacy]" in rendered
+    assert "scanner detail" not in rendered
 
 
 def test_selected_attempt_fields_are_the_only_authoritative_result_view(
@@ -1085,7 +1161,6 @@ def test_release_audit_does_not_relabel_retryable_scan_error_as_privacy_leak() -
                 "path": "self_learning.db-wal",
                 "kind": "secret",
                 "probe_label": "short_password",
-                "probe_sha256_prefix": "0123456789ab",
             }
         ],
     }
@@ -1991,6 +2066,54 @@ def test_captured_stdout_is_sanitized_before_atomic_log_write(tmp_path: Path) ->
     assert report["prewrite_sanitized"] is True
     assert report["source_probe_hit_count"] >= 2
     assert "p7!" not in json.dumps(report)
+
+
+def test_privacy_findings_use_public_probe_labels_without_secret_hashes(
+    tmp_path: Path,
+) -> None:
+    secret = SECRET_PROBES["spaced_client_secret"]
+    artifact = tmp_path / "unsafe.log"
+    artifact.write_text(secret, encoding="utf-8")
+
+    audit_findings = audit_campaign._scan_files(
+        [artifact],
+        {"spaced_client_secret": secret},
+    )
+    runtime_findings = _probe_findings(
+        secret.encode("utf-8"),
+        path=str(artifact),
+        binary_container=False,
+    )
+
+    assert audit_findings == [
+        {"path": str(artifact), "probe_label": "spaced_client_secret"}
+    ]
+    assert runtime_findings == [
+        {
+            "path": str(artifact),
+            "kind": "secret",
+            "probe_label": "spaced_client_secret",
+        }
+    ]
+    assert "sha256" not in json.dumps([audit_findings, runtime_findings])
+
+
+def test_progress_line_uses_only_allowlisted_stage_and_status() -> None:
+    secret = SECRET_PROBES["spaced_client_secret"]
+
+    assert _public_progress_line("CANARY", "completed") == "CANARY completed"
+    unsafe = _public_progress_line("RUN", f"failed: {secret}")
+    assert unsafe == "RUN invalid"
+    assert secret not in unsafe
+
+
+def test_final_audit_line_uses_only_a_boolean_boundary() -> None:
+    secret = SECRET_PROBES["spaced_client_secret"]
+
+    assert _public_audit_line(True) == "AUDIT passed"
+    unsafe = _public_audit_line(f"RELEASE_FAIL: {secret}")
+    assert unsafe == "AUDIT failed"
+    assert secret not in unsafe
 
 
 def test_runtime_inspection_is_read_only_and_cannot_repair_a_failure(tmp_path: Path) -> None:

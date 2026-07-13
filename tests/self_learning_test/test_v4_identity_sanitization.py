@@ -266,7 +266,7 @@ def test_v4_migration_rekeys_secret_identities_and_all_references(
     assert job["status"] == "dead"
     assert job["last_error"] == "legacy_v4_identity_sanitizer_changed_frozen_job_input"
     assert secret not in " ".join(logical_values)
-    assert sanitizer_revision == "4"
+    assert sanitizer_revision == "5"
     assert migrated.search_events(secret) == []
     assert str(integrity).casefold() == "ok"
     for path in (db_path, Path(f"{db_path}-wal"), Path(f"{db_path}-shm")):
