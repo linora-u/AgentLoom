@@ -50,6 +50,48 @@ _SESSION_NOTE_FACTS = (
     "progress: finished step 3 of 5 of today's pipeline debugging, resuming tomorrow",
 )
 _MAX_CAMPAIGN_SECONDS = 8 * 60 * 60
+_PUBLIC_STATUSES = (
+    "DRY_RUN_PASS",
+    "DRY_RUN_FAIL",
+    "RELEASE_PASS",
+    "RELEASE_FAIL",
+    "CANARY_PASS",
+    "CANARY_FAIL",
+)
+_PUBLIC_ISSUE_CODES = (
+    "hard_zero_failure",
+    "count_mismatch",
+    "release_shape",
+    "case_identity",
+    "concurrency",
+    "retry_policy",
+    "deadline",
+    "cli_contract",
+    "model_contract",
+    "canary_order",
+    "scenario_quota",
+    "workflow_missing",
+    "model_type",
+    "state_isolation",
+    "conflict_shapes",
+    "worker_model_type",
+    "distill_model",
+    "case_failure",
+    "first_attempt_rate",
+    "final_completion_rate",
+    "semantic_pass_rate",
+    "scenario_pass_rate",
+    "stuck_jobs",
+    "sqlite_integrity",
+    "llm_distillation_rate",
+    "session_end_measurement",
+    "session_end_p95",
+    "session_end_p99",
+    "privacy",
+    "canary_gate",
+    "dry_run_execution",
+    "campaign_deadline",
+)
 
 
 def _hard_violation_code(scenario: str, issue: str) -> str:
@@ -133,6 +175,39 @@ def _read_json(path: Path) -> Any:
 
 def _issue(issues: list[dict[str, str]], code: str, message: str) -> None:
     issues.append({"code": code, "message": message})
+
+
+def _public_status(value: Any) -> str:
+    for status in _PUBLIC_STATUSES:
+        if value == status:
+            return status
+    return "INVALID"
+
+
+def _public_issue_codes(issues: Any) -> list[str]:
+    codes: list[str] = []
+    for issue in issues if isinstance(issues, list) else []:
+        raw_code = issue.get("code") if isinstance(issue, dict) else None
+        public_code = next(
+            (code for code in _PUBLIC_ISSUE_CODES if raw_code == code),
+            "unknown_issue",
+        )
+        if public_code not in codes:
+            codes.append(public_code)
+    return codes
+
+
+def _public_report_view(report: dict[str, Any]) -> dict[str, Any]:
+    issue_codes = _public_issue_codes(report.get("issues"))
+    return {
+        "status": _public_status(report.get("status")),
+        "ok": True if report.get("ok") is True else False,
+        "release_eligible": True
+        if report.get("release_eligible") is True
+        else False,
+        "issue_count": len(report.get("issues") or []),
+        "issue_codes": issue_codes,
+    }
 
 
 def _hard_zero_issues(failures: list[dict[str, Any]]) -> list[dict[str, str]]:
@@ -400,10 +475,6 @@ def _percentile(values: list[float], percentile: float) -> float:
     return float(ordered[rank])
 
 
-def _probe_hash(value: str) -> str:
-    return hashlib.sha256(value.encode("utf-8")).hexdigest()[:16]
-
-
 def _scan_files(
     paths: Iterable[Path],
     probes: dict[str, str],
@@ -449,7 +520,6 @@ def _scan_files(
                 {
                     "path": str(path),
                     "probe_label": label,
-                    "probe_sha256_prefix": _probe_hash(probe),
                 }
             )
         if path.suffix.casefold() == ".db" and not injection:
@@ -1746,12 +1816,13 @@ def _write_report(
     failures: list[dict[str, Any]],
 ) -> None:
     metrics = report.get("metrics") or {}
+    public_report = _public_report_view(report)
     lines = [
         "# Memory Summary Campaign Report",
         "",
-        f"- status: {report['status']}",
-        f"- release_eligible: {report['release_eligible']}",
-        f"- dry_run: {report['dry_run']}",
+        f"- status: {public_report['status']}",
+        f"- release_eligible: {public_report['release_eligible']}",
+        f"- dry_run: {True if report.get('dry_run') is True else False}",
         f"- selected_runs: {metrics.get('selected_runs', report.get('selected_runs', 0))}",
         f"- privacy_findings: {privacy['finding_count']}",
         f"- failed_cases: {len(failures)}",
@@ -1759,8 +1830,8 @@ def _write_report(
         "## Release-gate issues",
         "",
     ]
-    if report["issues"]:
-        lines.extend(f"- [{issue['code']}] {issue['message']}" for issue in report["issues"])
+    if public_report["issue_codes"]:
+        lines.extend(f"- [{code}]" for code in public_report["issue_codes"])
     else:
         lines.append("- none")
     if metrics:
@@ -1952,13 +2023,14 @@ def main() -> int:
     parser.add_argument("--json", action="store_true")
     args = parser.parse_args()
     report = audit_campaign(args.campaign_dir)
+    public_report = _public_report_view(report)
     if args.json:
-        print(json.dumps(report, ensure_ascii=False, indent=2, sort_keys=True))
+        print(json.dumps(public_report, ensure_ascii=False, indent=2, sort_keys=True))
     else:
-        print(f"{report['status']} {args.campaign_dir}")
-        for issue in report["issues"]:
-            print(f"  [{issue['code']}] {issue['message']}")
-    return 0 if report["ok"] else 1
+        print(public_report["status"])
+        for code in public_report["issue_codes"]:
+            print(f"[{code}]")
+    return 0 if public_report["ok"] else 1
 
 
 if __name__ == "__main__":

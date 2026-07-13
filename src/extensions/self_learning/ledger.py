@@ -35,7 +35,7 @@ _V4_PHYSICAL_CLEANUP_KEY = "schema_v4_physical_cleanup"
 _V4_CLEANUP_PENDING = "pending"
 _V4_CLEANUP_COMPLETE = "complete"
 _V4_SANITIZER_REVISION_KEY = "schema_v4_sanitizer_revision"
-_V4_SANITIZER_REVISION = "4"
+_V4_SANITIZER_REVISION = "5"
 _FTS_TRIGGER_NAMES = (
     "events_fts_insert",
     "events_fts_delete",
@@ -43,6 +43,19 @@ _FTS_TRIGGER_NAMES = (
     "events_fts_trigram_insert",
     "events_fts_trigram_delete",
     "events_fts_trigram_update",
+)
+_V4_PRIVACY_BASE_TABLES = (
+    "runs",
+    "events",
+    "memory_items",
+    "memory_evidence",
+    "memory_injections",
+    "maintenance",
+    "skill_proposals",
+    "review_runs",
+    "learning_jobs",
+    "learning_job_effects",
+    "artifacts",
 )
 LEGACY_SANITIZER_DEAD_ERROR = (
     "legacy_v4_identity_sanitizer_changed_frozen_job_input"
@@ -141,12 +154,22 @@ class SelfLearningLedger:
         # rewritten.  The post-commit truncate below then removes superseded
         # WAL frames instead of leaving raw historical credentials on disk.
         conn.execute("PRAGMA secure_delete=ON")
+        secure_delete = int(conn.execute("PRAGMA secure_delete").fetchone()[0])
+        if secure_delete != 1:
+            raise sqlite3.OperationalError(
+                "SQLite refused the secure_delete privacy boundary"
+            )
         # SQLite WAL frames contain complete *new* page images.  With cache
         # spill enabled, a long migration can flush a page after only one of
         # its rows/columns was cleaned, transiently copying neighbouring
         # legacy secrets into WAL. Hold every dirty page until the transaction
         # reaches its fully sanitized final state.
         conn.execute("PRAGMA cache_spill=OFF")
+        cache_spill = conn.execute("PRAGMA cache_spill").fetchone()
+        if cache_spill is None or int(cache_spill[0]) != 0:
+            raise sqlite3.OperationalError(
+                "SQLite refused the cache_spill privacy boundary"
+            )
         conn.execute("BEGIN IMMEDIATE")
         migrated_v4 = False
         refreshed_v4_sanitizer = False
@@ -226,7 +249,10 @@ class SelfLearningLedger:
                 # FTS. Rebuild the indexes from final sanitized base rows and
                 # only then restore trigger maintenance.
                 for trigger_name in _FTS_TRIGGER_NAMES:
-                    conn.execute(f'DROP TRIGGER IF EXISTS "{trigger_name}"')
+                    conn.execute(
+                        f'DROP TRIGGER IF EXISTS main."{trigger_name}"'
+                    )
+                self._assert_no_v4_migration_triggers(conn)
             if current < 1:
                 conn.execute("INSERT INTO schema_version (version) VALUES (1)")
             if current < 2:
@@ -248,6 +274,14 @@ class SelfLearningLedger:
                 self._sanitize_v4_rows(conn)
                 refreshed_v4_sanitizer = True
             if sanitizing_legacy:
+                # Updating visible rows is insufficient: a legacy page can
+                # retain bytes from rows deleted while secure_delete was OFF.
+                # Rewrite every privacy-bearing base table from its final
+                # sanitized values, then rebuild all ordinary indexes. With
+                # cache spill fenced off, only zeroed or sanitized final page
+                # images can reach the migration WAL at commit.
+                self._rewrite_v4_base_tables(conn)
+                conn.execute("REINDEX")
                 # These scripts succeeded before trigger removal. A restore
                 # failure is therefore corruption of an available index path,
                 # not an optional-capability miss: let the outer transaction
@@ -480,6 +514,111 @@ class SelfLearningLedger:
         return column in {
             str(row[1]) for row in conn.execute(f'PRAGMA table_info("{table}")')
         }
+
+    @staticmethod
+    def _quote_identifier(value: str) -> str:
+        return '"' + str(value).replace('"', '""') + '"'
+
+    @staticmethod
+    def _assert_no_v4_migration_triggers(conn: sqlite3.Connection) -> None:
+        trigger_count = int(
+            conn.execute(
+                "SELECT ("
+                "SELECT COUNT(*) FROM main.sqlite_master WHERE type = 'trigger'"
+                ") + ("
+                "SELECT COUNT(*) FROM temp.sqlite_master WHERE type = 'trigger'"
+                ")"
+            ).fetchone()[0]
+        )
+        if trigger_count:
+            raise sqlite3.OperationalError(
+                "unexpected trigger remained during v4 table rewrite "
+                f"(count={trigger_count})"
+            )
+
+    @classmethod
+    def _rewrite_v4_base_tables(cls, conn: sqlite3.Connection) -> None:
+        """Physically rewrite sanitized rows without changing public identity.
+
+        ``secure_delete`` cannot retroactively clean free space created by a
+        legacy connection. Each table is therefore copied only after logical
+        sanitization, cleared under secure deletion, and restored with its
+        original rowid. The temporary copy contains sanitized values only.
+        """
+        privacy_tables = set(_V4_PRIVACY_BASE_TABLES)
+        cls._assert_no_v4_migration_triggers(conn)
+
+        existing_tables = {
+            str(row[0])
+            for row in conn.execute(
+                "SELECT name FROM sqlite_master WHERE type = 'table'"
+            )
+        }
+        missing = privacy_tables - existing_tables
+        if missing:
+            raise sqlite3.OperationalError(
+                "v4 privacy table missing during rewrite: "
+                + ", ".join(sorted(missing))
+            )
+
+        for table in _V4_PRIVACY_BASE_TABLES:
+            quoted_table = cls._quote_identifier(table)
+            column_rows = conn.execute(
+                f"PRAGMA table_xinfo({quoted_table})"
+            ).fetchall()
+            writable_columns = [
+                str(row[1]) for row in column_rows if int(row[6] or 0) == 0
+            ]
+            if not writable_columns:
+                raise sqlite3.OperationalError(
+                    f"v4 privacy table has no writable columns: {table}"
+                )
+            primary_key_columns = [row for row in column_rows if int(row[5] or 0) > 0]
+            has_rowid_alias = (
+                len(primary_key_columns) == 1
+                and str(primary_key_columns[0][2] or "").strip().upper()
+                == "INTEGER"
+            )
+            quoted_columns = [
+                cls._quote_identifier(column) for column in writable_columns
+            ]
+            temp_name = f"v4_rewrite_{table}"
+            quoted_temp = cls._quote_identifier(temp_name)
+            projection = ", ".join(quoted_columns)
+            target_columns = list(quoted_columns)
+            if not has_rowid_alias:
+                projection = f"rowid AS __v4_rowid, {projection}"
+                target_columns.insert(0, "rowid")
+            before = int(
+                conn.execute(f"SELECT COUNT(*) FROM {quoted_table}").fetchone()[0]
+            )
+            conn.execute(f"DROP TABLE IF EXISTS temp.{quoted_temp}")
+            try:
+                conn.execute(
+                    f"CREATE TEMP TABLE {quoted_temp} AS "
+                    f"SELECT {projection} FROM main.{quoted_table}"
+                )
+                conn.execute(f"DELETE FROM main.{quoted_table}")
+                source_columns = list(quoted_columns)
+                if not has_rowid_alias:
+                    source_columns.insert(0, "__v4_rowid")
+                conn.execute(
+                    f"INSERT INTO main.{quoted_table} "
+                    f"({', '.join(target_columns)}) "
+                    f"SELECT {', '.join(source_columns)} FROM temp.{quoted_temp}"
+                )
+                after = int(
+                    conn.execute(
+                        f"SELECT COUNT(*) FROM main.{quoted_table}"
+                    ).fetchone()[0]
+                )
+                if after != before:
+                    raise RuntimeError(
+                        f"v4 table rewrite changed {table} row count: "
+                        f"{before} -> {after}"
+                    )
+            finally:
+                conn.execute(f"DROP TABLE IF EXISTS temp.{quoted_temp}")
 
     @classmethod
     def _rekey_legacy_identity_domain(
@@ -1231,6 +1370,10 @@ class SelfLearningLedger:
             )
         }
         if "events_fts" in existing_fts_tables:
+            conn.execute(
+                "INSERT INTO events_fts(events_fts, rank) "
+                "VALUES('secure-delete', 1)"
+            )
             conn.execute("DELETE FROM events_fts")
             conn.execute(
                 """
@@ -1254,6 +1397,10 @@ class SelfLearningLedger:
             conn.execute("INSERT INTO events_fts(events_fts) VALUES('optimize')")
 
         if "events_fts_trigram" in existing_fts_tables:
+            conn.execute(
+                "INSERT INTO events_fts_trigram(events_fts_trigram, rank) "
+                "VALUES('secure-delete', 1)"
+            )
             conn.execute("DELETE FROM events_fts_trigram")
             conn.execute(
                 """

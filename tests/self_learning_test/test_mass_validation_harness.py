@@ -90,6 +90,23 @@ def test_payload_sizes_have_literal_percentile_boundaries():
     assert payload_size_for_position(999, 1000) == 60000
 
 
+def test_case_result_artifact_does_not_hash_sensitive_payload() -> None:
+    harness = _load_harness()
+
+    result = harness.CaseResult(
+        global_index=1,
+        case_id="redaction-001",
+        category="redaction_digest_injection",
+        payload_bytes=32,
+        oracle={"safe": True},
+        observed={"safe": True},
+        passed=True,
+        duration_ms=1.0,
+    )
+
+    assert "payload_sha256" not in vars(result)
+
+
 def test_cli_defaults_are_the_release_campaign_defaults():
     harness = _load_harness()
     args = harness._parser().parse_args([])
@@ -996,10 +1013,10 @@ def test_wal_privacy_scan_streams_and_detects_chunk_boundary_secret(
         "passed": False,
         "wal_shm_files_scanned": 1,
         "wal_shm_forbidden_hits": 1,
-        "wal_shm_forbidden_hit_fingerprints": [
+        "wal_shm_forbidden_findings": [
             {
                 "path": "self_learning.db-wal",
-                "prefix_sha256": hashlib.sha256(secret).hexdigest(),
+                "probe_index": 0,
                 "count": 1,
                 "offsets": [boundary - 5],
             }
@@ -1013,7 +1030,7 @@ def test_wal_privacy_scan_streams_and_detects_chunk_boundary_secret(
         "passed": True,
         "wal_shm_files_scanned": 1,
         "wal_shm_forbidden_hits": 0,
-        "wal_shm_forbidden_hit_fingerprints": [],
+        "wal_shm_forbidden_findings": [],
         "wal_shm_read_errors": 0,
         "wal_shm_disappeared_files": 0,
         "wal_shm_read_error_paths": [],
@@ -1040,7 +1057,7 @@ def test_wal_privacy_scan_does_not_mislabel_open_race_as_secret_hit(
     assert audit["passed"] is False
     assert audit["wal_shm_files_scanned"] == 1
     assert audit["wal_shm_forbidden_hits"] == 0
-    assert audit["wal_shm_forbidden_hit_fingerprints"] == []
+    assert audit["wal_shm_forbidden_findings"] == []
     assert audit["wal_shm_read_errors"] == 1
     assert audit["wal_shm_disappeared_files"] == 1
     assert audit["wal_shm_read_error_paths"] == ["self_learning.db-wal"]

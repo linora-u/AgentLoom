@@ -114,10 +114,30 @@ _SESSION_END_LATENCY_RE = re.compile(
     re.IGNORECASE,
 )
 _MAX_CAMPAIGN_SECONDS = 8 * 60 * 60
+_PUBLIC_PROGRESS_STATUSES = (
+    "completed",
+    "infrastructure_failed",
+    "deadline_exceeded",
+    "semantic_or_code_failed",
+    "dependency_failed",
+)
 
 
 def _now() -> str:
     return datetime.now().astimezone().isoformat()
+
+
+def _public_progress_line(stage: Any, status: Any) -> str:
+    public_stage = "CANARY" if stage == "CANARY" else "RUN" if stage == "RUN" else "PROGRESS"
+    public_status = next(
+        (candidate for candidate in _PUBLIC_PROGRESS_STATUSES if status == candidate),
+        "invalid",
+    )
+    return f"{public_stage} {public_status}"
+
+
+def _public_audit_line(ok: Any) -> str:
+    return "AUDIT passed" if ok is True else "AUDIT failed"
 
 
 def _default_campaign_id(dry_run: bool) -> str:
@@ -183,7 +203,6 @@ def _progress_payload(
                         "scope",
                         "error_type",
                         "probe_label",
-                        "probe_sha256_prefix",
                         "storage",
                         "table",
                         "column",
@@ -333,10 +352,6 @@ def _resolved_model_contract() -> dict[str, str]:
     }
 
 
-def _probe_hash(value: str) -> str:
-    return hashlib.sha256(value.encode("utf-8")).hexdigest()[:16]
-
-
 def _file_fingerprint(path: Path) -> dict[str, Any]:
     if not path.exists():
         return {"exists": False, "size": 0, "sha256": ""}
@@ -422,7 +437,6 @@ def _probe_findings(
                         "path": path,
                         "kind": kind,
                         "probe_label": label,
-                        "probe_sha256_prefix": _probe_hash(probe),
                     }
                 )
     return findings
@@ -1547,7 +1561,7 @@ def main() -> int:
         canary_ids = set(plan["canary_case_ids"])
         canary_cases = [case for case in cases if case.case_id in canary_ids]
         for group in group_cases(canary_cases):
-            for result in _run_group(
+            group_results = _run_group(
                 group,
                 campaign_dir=campaign_dir,
                 timeout_seconds=args.timeout_seconds,
@@ -1556,10 +1570,11 @@ def main() -> int:
                 on_result=lambda case, result: _write_case_progress(
                     campaign_dir, case, result
                 ),
-            ):
-                result_by_id[result["case_id"]] = result
+            )
+            for case, result in zip(group, group_results, strict=True):
+                result_by_id[case.case_id] = result
                 _write_progress(campaign_dir, cases, result_by_id)
-                print(f"CANARY {result['status']} {result['case_id']}", flush=True)
+                print(_public_progress_line("CANARY", result.get("status")), flush=True)
             if any(result_by_id[case.case_id]["status"] != "completed" for case in group):
                 break
 
@@ -1593,10 +1608,11 @@ def main() -> int:
                     for group in group_cases(remainder)
                 }
                 for future in as_completed(futures):
-                    for result in future.result():
-                        result_by_id[result["case_id"]] = result
+                    group = futures[future]
+                    for case, result in zip(group, future.result(), strict=True):
+                        result_by_id[case.case_id] = result
                         _write_progress(campaign_dir, cases, result_by_id)
-                        print(f"RUN {result['status']} {result['case_id']}", flush=True)
+                        print(_public_progress_line("RUN", result.get("status")), flush=True)
         else:
             for case in cases:
                 if case.case_id not in result_by_id:
@@ -1627,9 +1643,9 @@ def main() -> int:
         campaign_dir,
         campaign_started_monotonic=campaign_started_monotonic,
     )
-    print(f"campaign_dir={campaign_dir}")
-    print(f"audit={report['status']}")
-    return 0 if report["ok"] else 1
+    audit_ok = report.get("ok") is True
+    print(_public_audit_line(audit_ok))
+    return 0 if audit_ok else 1
 
 
 if __name__ == "__main__":

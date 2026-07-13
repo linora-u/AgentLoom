@@ -205,7 +205,6 @@ class CaseResult:
     case_id: str
     category: str
     payload_bytes: int
-    payload_sha256: str
     oracle: dict[str, Any]
     observed: dict[str, Any]
     passed: bool
@@ -1617,7 +1616,6 @@ def _execute_case(spec: CaseSpec, runtime: CampaignRuntime) -> CaseResult:
         case_id=spec.case_id,
         category=spec.category,
         payload_bytes=len(payload.encode("utf-8")),
-        payload_sha256=hashlib.sha256(payload.encode()).hexdigest(),
         oracle=spec.oracle,
         observed=observed,
         passed=passed,
@@ -1926,7 +1924,11 @@ def scan_wal_shm_privacy(
     ``OSError`` used to be misreported as a forbidden-byte match.
     """
     campaign_dir = Path(root).resolve()
-    needles = tuple(str(prefix).encode() for prefix in prefixes if str(prefix))
+    needles = tuple(
+        (probe_index, str(prefix).encode())
+        for probe_index, prefix in enumerate(prefixes)
+        if str(prefix)
+    )
     opened: list[tuple[Path, Any]] = []
     files_scanned = 0
     read_errors = 0
@@ -1949,17 +1951,16 @@ def scan_wal_shm_privacy(
             read_error_paths.append(str(path.relative_to(campaign_dir)))
 
     hits = 0
-    hit_details: dict[tuple[str, str], dict[str, Any]] = {}
+    hit_details: dict[tuple[str, int], dict[str, Any]] = {}
     for path, handle in opened:
         try:
-            overlap = max((len(needle) for needle in needles), default=1) - 1
+            overlap = max((len(needle) for _probe_index, needle in needles), default=1) - 1
             tail = b""
             bytes_read = 0
             while chunk := handle.read(4 * 1024 * 1024):
                 data = tail + chunk
-                for needle in needles:
+                for probe_index, needle in needles:
                     offset = 0
-                    needle_hash = hashlib.sha256(needle).hexdigest()
                     while (position := data.find(needle, offset)) >= 0:
                         # A match wholly inside the retained prefix was
                         # counted in the preceding chunk; a boundary-
@@ -1967,12 +1968,12 @@ def scan_wal_shm_privacy(
                         if position + len(needle) > len(tail):
                             hits += 1
                             relative_path = str(path.relative_to(campaign_dir))
-                            key = (relative_path, needle_hash)
+                            key = (relative_path, probe_index)
                             detail = hit_details.setdefault(
                                 key,
                                 {
                                     "path": relative_path,
-                                    "prefix_sha256": needle_hash,
+                                    "probe_index": probe_index,
                                     "count": 0,
                                     "offsets": [],
                                 },
@@ -1994,8 +1995,8 @@ def scan_wal_shm_privacy(
         "passed": hits == 0 and read_errors == 0,
         "wal_shm_files_scanned": files_scanned,
         "wal_shm_forbidden_hits": hits,
-        "wal_shm_forbidden_hit_fingerprints": sorted(
-            hit_details.values(), key=lambda item: (item["path"], item["prefix_sha256"])
+        "wal_shm_forbidden_findings": sorted(
+            hit_details.values(), key=lambda item: (item["path"], item["probe_index"])
         ),
         "wal_shm_read_errors": read_errors,
         "wal_shm_disappeared_files": disappeared_files,
@@ -2045,10 +2046,10 @@ def _merge_wal_privacy(*audits: dict[str, Any]) -> dict[str, Any]:
         "wal_shm_forbidden_hits": sum(
             int(audit.get("wal_shm_forbidden_hits") or 0) for audit in audits
         ),
-        "wal_shm_forbidden_hit_fingerprints": [
+        "wal_shm_forbidden_findings": [
             detail
             for audit in audits
-            for detail in audit.get("wal_shm_forbidden_hit_fingerprints") or []
+            for detail in audit.get("wal_shm_forbidden_findings") or []
         ],
         "wal_shm_read_errors": sum(
             int(audit.get("wal_shm_read_errors") or 0) for audit in audits
@@ -2137,15 +2138,15 @@ def scan_campaign_privacy(
         "database_files_scanned": len(db_files),
         "wal_shm_files_scanned": wal_shm_files_scanned,
         "wal_shm_forbidden_hits": wal_shm_hits,
-        "wal_shm_forbidden_hit_fingerprints": wal_privacy[
-            "wal_shm_forbidden_hit_fingerprints"
+        "wal_shm_forbidden_findings": wal_privacy[
+            "wal_shm_forbidden_findings"
         ],
         "wal_shm_read_errors": int(wal_privacy["wal_shm_read_errors"]),
         "wal_shm_disappeared_files": int(
             wal_privacy["wal_shm_disappeared_files"]
         ),
         "wal_shm_read_error_paths": wal_privacy["wal_shm_read_error_paths"],
-        "forbidden_prefix_hashes": [hashlib.sha256(prefix.encode()).hexdigest() for prefix in needles],
+        "forbidden_probe_count": len(needles),
     }
 
 
@@ -4177,16 +4178,16 @@ def run_campaign(
                 forensic_privacy["wal_shm_forbidden_hits"]
             )
             + int(central_wal_privacy["wal_shm_forbidden_hits"]),
-            "wal_shm_forbidden_hit_fingerprints": [
+            "wal_shm_forbidden_findings": [
                 *(
                     forensic_privacy.get(
-                        "wal_shm_forbidden_hit_fingerprints"
+                        "wal_shm_forbidden_findings"
                     )
                     or []
                 ),
                 *(
                     central_wal_privacy.get(
-                        "wal_shm_forbidden_hit_fingerprints"
+                        "wal_shm_forbidden_findings"
                     )
                     or []
                 ),
@@ -4263,8 +4264,8 @@ def run_campaign(
     privacy = scan_campaign_privacy(campaign_dir)
     privacy["wal_shm_files_scanned"] = int(precheckpoint_privacy.get("wal_shm_files_scanned") or 0)
     privacy["wal_shm_forbidden_hits"] = int(precheckpoint_privacy.get("wal_shm_forbidden_hits") or 0)
-    privacy["wal_shm_forbidden_hit_fingerprints"] = list(
-        precheckpoint_privacy.get("wal_shm_forbidden_hit_fingerprints") or []
+    privacy["wal_shm_forbidden_findings"] = list(
+        precheckpoint_privacy.get("wal_shm_forbidden_findings") or []
     )
     privacy["wal_shm_read_errors"] = int(
         precheckpoint_privacy.get("wal_shm_read_errors") or 0
