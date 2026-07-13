@@ -1,17 +1,59 @@
 import inspect
 import json
+from copy import copy
 from functools import wraps
 from typing import Any
 
 from smolagents.tools import Tool
-from src.trace.task_context import get_current_hook_manager
 from src.lib.logging import get_logger
-from .hook_manager import HookManager
+from src.trace import (
+    bind_explicit_execution_context,
+    capture_explicit_execution_context,
+)
+
 from .type_coercion import coerce_tool_parameters
 from .types import HookEvent
 
 logger = get_logger(__name__)
 HOOKS_INJECTED_ATTR = "_hooks_injected"
+EXECUTION_CONTEXT_ATTR = "_agentloom_execution_context"
+ORIGINAL_FORWARD_ATTR = "_agentloom_original_forward"
+
+
+def clone_tool_for_runtime(tool_instance: Tool) -> Tool:
+    """Return an invocation-local Tool object with no captured run state.
+
+    Decorated Tool instances may be shared by an execution environment across
+    builds.  Hook context cannot live on that shared object: concurrent run B
+    could overwrite run A before A's executor thread starts.  A shallow clone
+    preserves intentional tool state references while isolating the wrapper
+    and its immutable execution snapshot per runtime build.
+    """
+
+    cloned = copy(tool_instance)
+    original_forward = getattr(tool_instance, ORIGINAL_FORWARD_ATTR, None)
+    if original_forward is not None:
+        if inspect.ismethod(original_forward) and original_forward.__self__ is tool_instance:
+            original_forward = original_forward.__func__.__get__(cloned, type(cloned))
+        cloned.forward = original_forward
+    for attribute in (
+        HOOKS_INJECTED_ATTR,
+        EXECUTION_CONTEXT_ATTR,
+        ORIGINAL_FORWARD_ATTR,
+    ):
+        if attribute in getattr(cloned, "__dict__", {}):
+            delattr(cloned, attribute)
+    return cloned
+
+
+def _capture_execution_context(tool_instance: Tool) -> None:
+    """Refresh the explicit context carried across an executor thread hop."""
+
+    setattr(
+        tool_instance,
+        EXECUTION_CONTEXT_ATTR,
+        capture_explicit_execution_context(),
+    )
 
 
 def _try_context_engine_compress(tool_name: str, result: str) -> str | None:
@@ -28,11 +70,13 @@ def _try_context_engine_compress(tool_name: str, result: str) -> str | None:
     )
 
 
-def _resolve_hook_manager() -> HookManager:
-    current_manager = get_current_hook_manager()
-    if current_manager is not None:
-        return current_manager
-    return HookManager.get_instance()
+def _resolve_hook_manager():
+    """Resolve only the manager explicitly bound to this invocation."""
+
+    current_manager = capture_explicit_execution_context().hook_manager
+    if current_manager is None:
+        raise RuntimeError("missing explicit hook manager context")
+    return current_manager
 
 
 def _get_effective_signature(forward_callable):
@@ -126,13 +170,18 @@ def inject_hooks(tool_instance: Tool) -> Tool:
     """
     Inject hook execution logic into a Tool instance.
     Modifies the tool.forward method to trigger ToolStart and ToolEnd hooks.
-    
+
     Args:
         tool_instance: The Tool instance to modify.
-        
+
     Returns:
         The modified Tool instance.
     """
+    # LocalPythonExecutor enforces its timeout in a fresh thread.  The runtime
+    # adapter propagates ContextVars directly; this immutable snapshot is a
+    # fail-safe for custom executors that still strip them.  It contains the
+    # complete invocation identity, never a process-global inferred manager.
+    _capture_execution_context(tool_instance)
     if bool(getattr(tool_instance, HOOKS_INJECTED_ATTR, False)):
         return tool_instance
 
@@ -140,11 +189,11 @@ def inject_hooks(tool_instance: Tool) -> Tool:
         return tool_instance
 
     original_forward = tool_instance.forward
+    setattr(tool_instance, ORIGINAL_FORWARD_ATTR, original_forward)
     tool_name = tool_instance.name
     tool_inputs_schema = getattr(tool_instance, 'inputs', None)
 
-    @wraps(original_forward)
-    def wrapped_forward(*args, **kwargs):
+    def _forward_with_hooks(*args, **kwargs):
         try:
             hook_manager = _resolve_hook_manager()
         except Exception as hook_manager_error:
@@ -243,6 +292,17 @@ def inject_hooks(tool_instance: Tool) -> Tool:
                 logger.warning("Post-error hook error for tool %s: %s", tool_name, post_error_hook_error)
 
             raise
+
+    @wraps(original_forward)
+    def wrapped_forward(*args, **kwargs):
+        current_context = capture_explicit_execution_context()
+        if current_context.hook_manager is not None:
+            return _forward_with_hooks(*args, **kwargs)
+        captured_context = getattr(tool_instance, EXECUTION_CONTEXT_ATTR, None)
+        if captured_context is None:
+            return _forward_with_hooks(*args, **kwargs)
+        with bind_explicit_execution_context(captured_context):
+            return _forward_with_hooks(*args, **kwargs)
 
     tool_instance.forward = wrapped_forward
     setattr(tool_instance, HOOKS_INJECTED_ATTR, True)

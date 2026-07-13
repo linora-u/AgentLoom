@@ -1,12 +1,14 @@
 import json
+import threading
 import time
+from concurrent.futures import ThreadPoolExecutor
 from types import SimpleNamespace
 
 import pytest
-from smolagents import Tool
+from smolagents import LiteLLMModel, Tool
 from smolagents.memory import ActionStep
-from smolagents.monitoring import Timing
 from smolagents.models import ChatMessage, ChatMessageToolCall, ChatMessageToolCallFunction, MessageRole
+from smolagents.monitoring import Timing
 
 from src.lib.smolagents.agent.base_agent import ToolCallingAgentV2
 from src.lib.smolagents.models.litellm_model import LiteLLMModelV2
@@ -163,6 +165,74 @@ def test_litellm_model_keeps_tools_schema_and_tool_choice():
 
     assert completion_kwargs["tools"][0]["function"]["name"] == "echo"
     assert completion_kwargs["tool_choice"] == "auto"
+
+
+def test_shared_litellm_model_keeps_concurrent_tool_schemas_isolated(monkeypatch):
+    model = LiteLLMModelV2(model_id="test/model")
+    generate_barrier = threading.Barrier(2)
+
+    def _fake_parent_generate(
+        _self,
+        _messages,
+        stop_sequences=None,
+        response_format=None,
+        tools_to_call_from=None,
+        **_kwargs,
+    ):
+        tool_name = tools_to_call_from[0].name
+        generate_barrier.wait(timeout=5)
+        return ChatMessage(
+            role=MessageRole.ASSISTANT,
+            content="",
+            tool_calls=[
+                ChatMessageToolCall(
+                    id=f"call-{tool_name}",
+                    type="function",
+                    function=ChatMessageToolCallFunction(
+                        name=tool_name,
+                        arguments={"text": "x"} if tool_name == "echo" else {"a": 1, "b": 2},
+                    ),
+                )
+            ],
+        )
+
+    monkeypatch.setattr(LiteLLMModel, "generate", _fake_parent_generate)
+
+    def _generate_and_parse(tool):
+        message = model.generate([], tools_to_call_from=[tool])
+        return model.parse_tool_calls(message).tool_calls[0].function.name
+
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        futures = {
+            "echo": pool.submit(_generate_and_parse, EchoTool()),
+            "add": pool.submit(_generate_and_parse, AddTool()),
+        }
+        assert {name: future.result(timeout=5) for name, future in futures.items()} == {
+            "echo": "echo",
+            "add": "add",
+        }
+
+
+def test_shared_litellm_model_agent_id_is_execution_local():
+    model = LiteLLMModelV2(model_id="test/model")
+    assigned = threading.Barrier(2)
+    observed = threading.Barrier(2)
+
+    def _observe(label):
+        model.agent_id = label
+        assigned.wait(timeout=5)
+        current = model.agent_id
+        observed.wait(timeout=5)
+        model.agent_id = None
+        return current
+
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        futures = {label: pool.submit(_observe, label) for label in ("A", "B")}
+        assert {label: future.result(timeout=5) for label, future in futures.items()} == {
+            "A": "A",
+            "B": "B",
+        }
+    assert model.agent_id is None
 
 
 def test_generate_without_tool_calls_does_not_create_native_detection_state():

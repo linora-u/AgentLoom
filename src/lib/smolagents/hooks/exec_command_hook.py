@@ -51,6 +51,20 @@ DEFAULT_COMMAND_TIMEOUT: float = 600.0
 _MAX_ENV_BYTES: int = 65_536
 
 
+def _campaign_safe_hook_input(hook_input: dict[str, Any]) -> dict[str, Any]:
+    """Sanitize command-hook payloads before any temp/env/stdin serialization.
+
+    This mode is intentionally scoped to the memory validation subprocess. It
+    prevents passive command hooks (visualization/recall) from becoming an
+    alternate raw artifact sink while preserving normal hook semantics outside
+    the campaign.
+    """
+    from src.extensions.self_learning.redaction import sanitize_campaign_artifact_value
+
+    sanitized = sanitize_campaign_artifact_value(hook_input)
+    return sanitized if isinstance(sanitized, dict) else {"value": sanitized}
+
+
 def _build_hook_env(hook_input: Dict[str, Any]) -> Dict[str, str]:
     """Build the subprocess environment with hook-specific variables.
 
@@ -112,6 +126,7 @@ def exec_command_hook(
     effective_timeout = timeout or hook.timeout or DEFAULT_COMMAND_TIMEOUT
     effective_cwd = cwd or os.getcwd()
 
+    hook_input = _campaign_safe_hook_input(hook_input)
     env = _build_hook_env(hook_input)
 
     # Serialise hook input as JSON payload for stdin.

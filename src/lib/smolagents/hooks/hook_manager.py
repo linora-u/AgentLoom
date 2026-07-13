@@ -60,6 +60,7 @@ def _context_to_dict(ctx: HookContext) -> Dict[str, Any]:
     """Convert a ``HookContext`` to a plain dict for executor consumption."""
     return {
         "session_id": ctx.session_id,
+        "root_run_id": ctx.root_run_id,
         "cwd": ctx.cwd,
         "hook_event_name": ctx.hook_event_name,
         "tool_name": ctx.tool_name,
@@ -382,6 +383,7 @@ class HookManager:
         self,
         hook_info: Dict[str, Any],
         context: HookContext,
+        execution_context: Any = None,
     ) -> Optional[HookResult]:
         """Execute a single hook with timeout enforcement.
 
@@ -430,7 +432,16 @@ class HookManager:
 
             def _run_in_worker() -> None:
                 try:
-                    result_holder[0] = _invoke()
+                    if execution_context is None:
+                        result_holder[0] = _invoke()
+                    else:
+                        from src.trace import bind_explicit_execution_context
+
+                        # ``Thread`` does not copy ContextVars. Rebind the
+                        # immutable caller snapshot so Python hooks observe the
+                        # same run/config identity as their HookContext.
+                        with bind_explicit_execution_context(execution_context):
+                            result_holder[0] = _invoke()
                 finally:
                     completed.set()
 
@@ -469,6 +480,35 @@ class HookManager:
             return res
 
         return None
+
+    def _execute_single_hook_in_context(
+        self,
+        hook_info: Dict[str, Any],
+        context: HookContext,
+        execution_context: Any,
+    ) -> Optional[HookResult]:
+        """Execute one hook under the caller's explicit runtime context.
+
+        ``trigger_hooks`` may first cross a ThreadPoolExecutor boundary and raw
+        Python hooks then cross a second daemon-thread boundary for timeout
+        enforcement. This outer binding covers the pool/config-hook boundary;
+        ``_execute_single_hook`` rebinds once more inside the daemon worker.
+        """
+        if execution_context is None:
+            return self._execute_single_hook(
+                hook_info,
+                context,
+                execution_context=None,
+            )
+
+        from src.trace import bind_explicit_execution_context
+
+        with bind_explicit_execution_context(execution_context):
+            return self._execute_single_hook(
+                hook_info,
+                context,
+                execution_context=execution_context,
+            )
 
     # -----------------------------------------------------------------
     # Config hook bridge: HookCommand -> Callable
@@ -602,30 +642,35 @@ class HookManager:
         if not self.hooks_enabled:
             return HookResult(success=True, decision="allow")
 
+        execution_context = None
         try:
-            from src.trace import (
-                get_current_agent_config,
-                get_current_agent_name,
-                get_current_sub_task_id,
-                get_current_task_id,
-            )
+            from src.trace import capture_explicit_execution_context
 
-            task_id = get_current_task_id()
-            sub_task_id = get_current_sub_task_id()
-            agent_name = get_current_agent_name()
-            agent_config = get_current_agent_config()
+            execution_context = capture_explicit_execution_context()
+            task_id = execution_context.task_id
+            sub_task_id = execution_context.sub_task_id
+            agent_name = execution_context.agent_name
+            agent_config = execution_context.agent_config
+            root_run_id = execution_context.root_run_id
+            local_run_id = execution_context.local_run_id
         except Exception:
             task_id = None
             sub_task_id = None
             agent_name = None
             agent_config = None
+            root_run_id = None
+            local_run_id = None
 
         context = HookContext(
-            session_id=self._session_id,
+            # BaseAgent binds a fresh local id before dispatch. A manager's
+            # construction UUID is not a run identity, so direct/unbound calls
+            # stay explicitly empty and persistence can fail closed.
+            session_id=local_run_id or "",
             cwd=os.getcwd(),
             hook_event_name=event.value,
             tool_name=tool_name,
             tool_input=tool_input,
+            root_run_id=root_run_id,
             tool_response=tool_response,
             tool_inputs_schema=tool_inputs_schema,
             step_number=self.step_number,
@@ -670,13 +715,24 @@ class HookManager:
 
         # --- Execute: parallel for multiple hooks, direct for single ---
         if len(all_hooks) == 1:
-            results = [self._execute_single_hook(all_hooks[0], context)]
+            results = [
+                self._execute_single_hook_in_context(
+                    all_hooks[0],
+                    context,
+                    execution_context,
+                )
+            ]
         else:
             worker_count = min(len(all_hooks), _MAX_HOOK_WORKERS)
             results = [None] * len(all_hooks)
             with ThreadPoolExecutor(max_workers=worker_count) as pool:
                 future_map = {
-                    pool.submit(self._execute_single_hook, h, context): idx
+                    pool.submit(
+                        self._execute_single_hook_in_context,
+                        h,
+                        context,
+                        execution_context,
+                    ): idx
                     for idx, h in enumerate(all_hooks)
                 }
                 for future in as_completed(future_map):

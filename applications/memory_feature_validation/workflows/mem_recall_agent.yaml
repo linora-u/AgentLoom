@@ -1,0 +1,22 @@
+name: "mem_recall_agent"
+description: |
+  Read the internal data lake nickname and required upload region solely from
+  the frozen memory snapshot. Use "MISSING" for an absent value. Return both
+  values as a JSON object through final_answer.
+
+model_type: "summary"
+tool_call_type: "tool_call"
+max_steps: 3
+
+workflow: |
+  # Memory recall validation
+
+  The preceding <agentloom_memory_snapshot> block is the sole source for this
+  task. Call final_answer once with a JSON object containing exactly the keys
+  "nickname" and "region". Use "MISSING" when the corresponding value is not
+  present in the snapshot.
+
+tools: []
+
+skills: []
+worker_agents: []
