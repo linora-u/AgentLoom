@@ -47,29 +47,40 @@ from applications.memory_feature_validation.scripts.memory_review_campaign_commo
     terms_match,
 )
 
-_TRANSPORT_RE = re.compile(
-    r"(?:\b(?:429|502|503|504)\b|rate[ -]?limit|connection (?:reset|refused|aborted)|"
-    r"name resolution|service unavailable|gateway timeout|read timed out|connect timeout)",
-    re.IGNORECASE,
-)
-_SEMANTIC_EXCEPTION_RE = re.compile(
-    r"(?:AssertionError|ValueError|TypeError|KeyError|ValidationError|NotImplementedError)\s*:",
-    re.IGNORECASE,
-)
 _TRANSPORT_STATUS_LINE_RE = re.compile(
     r"^\s*(?:(?:HTTP(?:/\d(?:\.\d)?)?|status(?:\s+code)?|error\s+code)\s*[:=]?\s*"
     r"(?:429|502|503|504)\b)",
     re.IGNORECASE,
 )
 _TRANSPORT_EXCEPTION_LINE_RE = re.compile(
-    r"(?:^|[\s.])(?:APIConnectionError|APITimeoutError|RateLimitError|"
+    r"^\s*(?:(?:litellm(?:\.exceptions)?|openai|httpx|httpcore)\.)?"
+    r"(?:APIConnectionError|APITimeoutError|BadGatewayError|RateLimitError|"
     r"ConnectionError|ConnectError|ReadTimeout|ConnectTimeout|TimeoutError|"
     r"NameResolutionError|ServiceUnavailableError|GatewayTimeoutError)\s*:",
     re.IGNORECASE,
 )
-_TRANSPORT_LOG_LINE_RE = re.compile(
-    r"^\s*(?:\[[^\]]*\b(?:ERROR|WARNING|CRITICAL)\b[^\]]*\]|"
-    r"(?:ERROR|WARNING|CRITICAL)\b)",
+_LITELLM_NATIVE_TIMEOUT_LINE_RE = re.compile(
+    r"^\s*litellm(?:\.exceptions)?\.Timeout\s*:\s*Timeout Error\s*:",
+    re.IGNORECASE,
+)
+_LITELLM_TIMEOUT_EXCEPTION_RE = re.compile(
+    r"\blitellm\.Timeout\s*:\s*APITimeoutError\s*-\s*Request timed out"
+    r"(?:\.(?:\s*Error_str:\s*Request timed out\.)?)?"
+    r"(?=\s*(?:$|Execution failed:|Error while generating output:))",
+    re.IGNORECASE,
+)
+_LOG_RECORD_RE = re.compile(r"^\s*(?:\[[^\]\r\n]*\])+\s*")
+_ERROR_LEVEL_RE = re.compile(r"\[(?:ERROR|CRITICAL)\]", re.IGNORECASE)
+_TRANSPORT_LOG_LEVEL_RE = re.compile(
+    r"\[(?:ERROR|WARNING|CRITICAL)\]",
+    re.IGNORECASE,
+)
+_ERROR_MESSAGE_RE = re.compile(
+    r"^\s*(?:Error while generating output:|Execution failed:)",
+    re.IGNORECASE,
+)
+_BARE_LOG_LEVEL_RE = re.compile(
+    r"^\s*(?:ERROR|WARNING|CRITICAL)\b\s*[:=-]?\s*",
     re.IGNORECASE,
 )
 _INPUT_TOKEN_RE = re.compile(r"Input tokens:\s*[0-9,]+\s*\(\+([0-9,]+)\)")
@@ -649,17 +660,71 @@ def _restore_state(state_root: Path, backup: Path) -> None:
         state_root.mkdir(parents=True, exist_ok=True)
 
 
-def _retryable(raw_output: str) -> bool:
-    if _SEMANTIC_EXCEPTION_RE.search(raw_output):
-        return False
-    for line in str(raw_output or "").splitlines():
-        if not (
-            _TRANSPORT_STATUS_LINE_RE.search(line)
-            or _TRANSPORT_EXCEPTION_LINE_RE.search(line)
-            or _TRANSPORT_LOG_LINE_RE.search(line)
-        ):
+def _has_litellm_timeout_error(raw_output: str) -> bool:
+    lines = [
+        _ANSI_RE.sub("", line).strip()
+        for line in str(raw_output or "").splitlines()
+    ]
+    for index, line in enumerate(lines):
+        record = _LOG_RECORD_RE.match(line)
+        if record is not None:
+            header = record.group(0)
+            message = line[record.end() :]
+            block_start = message
+            is_error_record = bool(_ERROR_LEVEL_RE.search(header))
+            starts_error = is_error_record and bool(
+                _ERROR_MESSAGE_RE.match(message)
+                or _LITELLM_TIMEOUT_EXCEPTION_RE.match(message)
+            )
+        else:
+            block_start = line
+            starts_error = bool(_ERROR_MESSAGE_RE.match(line))
+            if starts_error and index > 0:
+                previous_index = index - 1
+                while previous_index >= 0 and not lines[previous_index]:
+                    previous_index -= 1
+                if previous_index >= 0:
+                    previous_record = _LOG_RECORD_RE.match(lines[previous_index])
+                    starts_error = bool(
+                        previous_record is not None
+                        and _ERROR_LEVEL_RE.search(previous_record.group(0))
+                    )
+        if not starts_error:
             continue
-        if _TRANSPORT_RE.search(line):
+        block_lines = [block_start]
+        for continuation in lines[index + 1 : index + 8]:
+            if _LOG_RECORD_RE.match(continuation):
+                break
+            if continuation:
+                block_lines.append(continuation)
+        error_block = " ".join(block_lines).strip()
+        while prefix := _ERROR_MESSAGE_RE.match(error_block):
+            error_block = error_block[prefix.end() :].lstrip()
+        if _LITELLM_TIMEOUT_EXCEPTION_RE.match(error_block):
+            return True
+    return False
+
+
+def _retryable(raw_output: str) -> bool:
+    if _has_litellm_timeout_error(raw_output):
+        return True
+    for raw_line in str(raw_output or "").splitlines():
+        line = _ANSI_RE.sub("", raw_line).strip()
+        record = _LOG_RECORD_RE.match(line)
+        if record is not None:
+            if not _TRANSPORT_LOG_LEVEL_RE.search(record.group(0)):
+                continue
+            messages = (line[record.end() :].lstrip(),)
+        elif level := _BARE_LOG_LEVEL_RE.match(line):
+            messages = (line, line[level.end() :].lstrip())
+        else:
+            messages = (line,)
+        if any(
+            _TRANSPORT_STATUS_LINE_RE.match(message)
+            or _TRANSPORT_EXCEPTION_LINE_RE.match(message)
+            or _LITELLM_NATIVE_TIMEOUT_LINE_RE.match(message)
+            for message in messages
+        ):
             return True
     return False
 
