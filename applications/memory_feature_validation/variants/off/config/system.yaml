@@ -5,6 +5,3 @@ skills: []
 
 self_learning:
   enabled: true
-  memory:
-    review_model: ""
-    write_approval: false

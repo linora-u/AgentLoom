@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import re
+import sqlite3
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
@@ -156,6 +157,105 @@ def test_string_false_does_not_enable_write_approval(tmp_path: Path) -> None:
     assert result["ok"] is True
     assert result["pending"] is False
     assert store.list_pending() == []
+
+
+def test_approval_add_does_not_stage_an_already_active_fact(tmp_path: Path) -> None:
+    config = _config(approval=True)
+    store = MemoryStore(tmp_path / "self_learning.db", agent_config=config)
+    active = store.add("project", "The API limit is 100 rows.")
+
+    result = store.handle_tool_action(
+        "add",
+        scope="project",
+        content="  the api limit is 100 rows.  ",
+        root_run_id="root-active-duplicate",
+        agent_config=config,
+    )
+
+    assert result["duplicate"] is True
+    assert result["pending"] is False
+    assert result["id"] == active["id"]
+    assert store.list_pending() == []
+
+
+def test_approval_add_deduplicates_normalized_pending_facts(tmp_path: Path) -> None:
+    config = _config(approval=True)
+    store = MemoryStore(tmp_path / "self_learning.db", agent_config=config)
+
+    first = store.handle_tool_action(
+        "add",
+        scope="project",
+        content="A durable fact.",
+        root_run_id="root-pending-first",
+        agent_config=config,
+    )
+    normalized_duplicate = store.handle_tool_action(
+        "add",
+        scope="project",
+        content="  a  durable FACT.  ",
+        root_run_id="root-pending-second",
+        agent_config=config,
+    )
+    exact_duplicate = store.handle_tool_action(
+        "add",
+        scope="project",
+        content="A durable fact.",
+        root_run_id="root-pending-third",
+        agent_config=config,
+    )
+
+    assert first["duplicate"] is False
+    assert normalized_duplicate == {
+        "ok": True,
+        "pending": True,
+        "duplicate": True,
+        "id": first["id"],
+    }
+    assert exact_duplicate == normalized_duplicate
+    assert len(store.list_pending()) == 1
+
+
+def test_approval_add_does_not_read_pending_payloads_for_dedup(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    config = _config(approval=True)
+    store = MemoryStore(tmp_path / "self_learning.db", agent_config=config)
+    original_connect = store._connect
+
+    def connect_without_pending_payload_reads() -> sqlite3.Connection:
+        conn = original_connect()
+
+        def authorize(
+            action: int,
+            table: str | None,
+            column: str | None,
+            _database: str | None,
+            _trigger: str | None,
+        ) -> int:
+            if (
+                action == sqlite3.SQLITE_READ
+                and table == "memory_pending_writes"
+                and column == "payload_json"
+            ):
+                return sqlite3.SQLITE_DENY
+            return sqlite3.SQLITE_OK
+
+        conn.set_authorizer(authorize)
+        return conn
+
+    monkeypatch.setattr(store, "_connect", connect_without_pending_payload_reads)
+
+    result = store.handle_tool_action(
+        "add",
+        scope="project",
+        content="A new durable fact.",
+        root_run_id="root-no-payload-scan",
+        agent_config=config,
+    )
+
+    assert result["ok"] is True
+    assert result["duplicate"] is False
 
 
 def test_memory_cli_exposes_only_the_simplified_public_commands() -> None:

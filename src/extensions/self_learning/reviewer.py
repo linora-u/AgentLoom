@@ -63,11 +63,11 @@ class _ReviewEvidenceAuthorization:
 @contextmanager
 def _root_review_lock(
     db_path: str | Path,
-    review_key: str,
+    _review_key: str,
 ) -> Iterator[None]:
-    """Serialize one root without persisting a crash-stale claim."""
+    """Serialize all reviews for one DB without a crash-stale claim."""
     resolved_db = Path(db_path).resolve()
-    lock_key = f"{resolved_db}:{review_key}"
+    lock_key = str(resolved_db)
     with _REVIEW_LOCKS_GUARD:
         entry = _REVIEW_THREAD_LOCKS.get(lock_key)
         if entry is None:
@@ -79,7 +79,7 @@ def _root_review_lock(
         with entry.lock:
             lock_dir = resolved_db.parent / ".review-locks"
             lock_dir.mkdir(mode=0o700, parents=True, exist_ok=True)
-            lock_name = hashlib.sha256(review_key.encode("utf-8")).hexdigest()
+            lock_name = hashlib.sha256(str(resolved_db).encode("utf-8")).hexdigest()
             fd = os.open(lock_dir / f"{lock_name}.lock", os.O_CREAT | os.O_RDWR, 0o600)
             try:
                 fcntl.flock(fd, fcntl.LOCK_EX)
@@ -291,10 +291,10 @@ def _persist_review_telemetry(
     telemetry: dict[str, Any],
     created_at: str,
     db_path: str | Path | None,
-) -> None:
+) -> bool:
     """Upsert one content-free v5 audit row for a completed root review."""
     ledger = SelfLearningLedger(db_path)
-    ledger.record_review(
+    review_id = ledger.record_review(
         review_key=f"root:{root_run_id}",
         root_run_id=root_run_id,
         application_id=ledger.review_application_id(root_run_id),
@@ -304,6 +304,7 @@ def _persist_review_telemetry(
         created_at=created_at,
         finished_at=now_iso(),
     )
+    return review_id is not None
 
 
 def _finish_review(
@@ -313,9 +314,9 @@ def _finish_review(
     db_path: str | Path | None,
     **telemetry_fields: Any,
 ) -> dict[str, Any]:
-    telemetry = _review_telemetry(**telemetry_fields)
+    telemetry = _review_telemetry(**telemetry_fields, emit=False)
     try:
-        _persist_review_telemetry(
+        persisted = _persist_review_telemetry(
             root_run_id=root_run_id,
             telemetry=telemetry,
             created_at=created_at,
@@ -325,6 +326,21 @@ def _finish_review(
         # Auditing must not change the user's task result and must not echo an
         # exception that may contain provider or database input.
         logger.warning("Memory review audit persistence failed: %s", type(exc).__name__)
+        _emit_review_telemetry(telemetry)
+        return telemetry
+    if not persisted:
+        return _review_telemetry(
+            enabled=bool(telemetry["enabled"]),
+            requested=str(telemetry["requested"]),
+            resolved=str(telemetry["resolved"]),
+            calls=int(telemetry["calls"]),
+            input_tokens=int(telemetry["input_tokens"]),
+            output_tokens=int(telemetry["output_tokens"]),
+            actions=0,
+            status="skipped",
+            reason="no_reviewable_context",
+        )
+    _emit_review_telemetry(telemetry)
     return telemetry
 
 
@@ -623,6 +639,34 @@ def review_finished_run(
             status="skipped",
             reason="review_model_not_configured",
         )
+
+    # A HookResult is an aggregate shared by every SessionEnd hook, so its
+    # telemetry alone is not a durable source-of-truth.  Independently verify
+    # the recorder's completed projection before constructing a digest or
+    # entering any path that persists a terminal review audit.  A missing or
+    # unreadable completion remains non-persistent telemetry: there is no
+    # completed review to audit yet.
+    try:
+        ledger = SelfLearningLedger(db_path)
+        persisted_completion = ledger.completed_review_context(
+            run_id,
+            tool_result_limit=0,
+        )
+    except Exception as exc:
+        return _review_telemetry(
+            enabled=True,
+            requested=model_type,
+            status="failed",
+            reason=type(exc).__name__,
+        )
+    if persisted_completion is None:
+        return _review_telemetry(
+            enabled=True,
+            requested=model_type,
+            status="skipped",
+            reason="no_reviewable_context",
+        )
+
     try:
         memory_config(agent_config)
     except Exception as exc:
@@ -637,7 +681,6 @@ def review_finished_run(
     provider_budget = None
     action_meter = _MemoryActionMeter()
     resolved = ""
-    ledger = SelfLearningLedger(db_path)
     review_key = f"root:{run_id}"
     try:
         with _root_review_lock(ledger.db_path, review_key):
@@ -655,7 +698,7 @@ def review_finished_run(
             try:
                 digest = _review_digest(run_id, db_path=db_path)
                 if digest is None:
-                    return finish(
+                    return _review_telemetry(
                         enabled=True,
                         requested=model_type,
                         status="skipped",
@@ -748,7 +791,6 @@ def review_finished_run(
                         )
 
                 staged_add = action_meter.staged_add
-                expected_actions = 1 if staged_add is not None else 0
                 telemetry = _review_telemetry(
                     enabled=True,
                     requested=model_type,
@@ -756,7 +798,7 @@ def review_finished_run(
                     calls=_review_provider_call_count(meter, provider_budget),
                     input_tokens=meter.input_tokens,
                     output_tokens=meter.output_tokens,
-                    actions=expected_actions,
+                    actions=0,
                     status="completed",
                     emit=False,
                 )
@@ -766,7 +808,6 @@ def review_finished_run(
                     ledger.db_path,
                     agent_config=agent_config,
                 ).finalize_completed_review(
-                    review_key=review_key,
                     root_run_id=run_id,
                     model_type=model_type,
                     telemetry=telemetry,
@@ -792,7 +833,8 @@ def review_finished_run(
                         status="skipped",
                         reason="already_reviewed",
                     )
-                action_meter.actions = expected_actions
+                telemetry = committed["telemetry"]
+                action_meter.actions = int(telemetry["actions"])
                 _emit_review_telemetry(telemetry)
                 return telemetry
             except Exception as exc:

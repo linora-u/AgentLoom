@@ -2,11 +2,124 @@ from __future__ import annotations
 
 import json
 import sqlite3
+import subprocess
+import sys
 import threading
+import time
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
 import pytest
+
+
+def test_root_review_lock_file_count_is_bounded_across_many_roots(
+    tmp_path: Path,
+) -> None:
+    from src.extensions.self_learning.reviewer import _root_review_lock
+
+    db_path = tmp_path / "self_learning.db"
+    for index in range(128):
+        with _root_review_lock(db_path, f"root:run-{index}"):
+            pass
+
+    assert len(list((tmp_path / ".review-locks").glob("*.lock"))) == 1
+
+
+def test_root_review_lock_serializes_different_roots_across_processes(
+    tmp_path: Path,
+) -> None:
+    repo_root = Path(__file__).resolve().parents[2]
+    db_path = tmp_path / "self_learning.db"
+    held = tmp_path / "held"
+    contender_ready = tmp_path / "contender-ready"
+    contender_entered = tmp_path / "contender-entered"
+    release = tmp_path / "release"
+    holder_script = """
+import sys
+import time
+from pathlib import Path
+from src.extensions.self_learning.reviewer import _root_review_lock
+
+db_path, held, release = map(Path, sys.argv[1:])
+with _root_review_lock(db_path, "root:holder"):
+    held.write_text("held", encoding="utf-8")
+    deadline = time.monotonic() + 10
+    while not release.exists() and time.monotonic() < deadline:
+        time.sleep(0.01)
+"""
+    contender_script = """
+import sys
+from pathlib import Path
+from src.extensions.self_learning.reviewer import _root_review_lock
+
+db_path, ready, entered = map(Path, sys.argv[1:])
+ready.write_text("ready", encoding="utf-8")
+with _root_review_lock(db_path, "root:contender"):
+    entered.write_text("entered", encoding="utf-8")
+"""
+
+    holder = subprocess.Popen(
+        [
+            sys.executable,
+            "-I",
+            "-P",
+            "-B",
+            "-c",
+            holder_script,
+            str(db_path),
+            str(held),
+            str(release),
+        ],
+        cwd=repo_root,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+    )
+    contender: subprocess.Popen[str] | None = None
+    try:
+        deadline = time.monotonic() + 10
+        while not held.exists() and time.monotonic() < deadline:
+            time.sleep(0.01)
+        assert held.exists(), holder.communicate(timeout=1)[1]
+
+        contender = subprocess.Popen(
+            [
+                sys.executable,
+                "-I",
+                "-P",
+                "-B",
+                "-c",
+                contender_script,
+                str(db_path),
+                str(contender_ready),
+                str(contender_entered),
+            ],
+            cwd=repo_root,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+        )
+        deadline = time.monotonic() + 10
+        while not contender_ready.exists() and time.monotonic() < deadline:
+            time.sleep(0.01)
+        assert contender_ready.exists(), contender.communicate(timeout=1)[1]
+
+        time.sleep(0.2)
+        assert contender.poll() is None
+        assert not contender_entered.exists()
+
+        release.write_text("release", encoding="utf-8")
+        holder_stdout, holder_stderr = holder.communicate(timeout=10)
+        contender_stdout, contender_stderr = contender.communicate(timeout=10)
+        assert holder.returncode == 0, holder_stdout + holder_stderr
+        assert contender.returncode == 0, contender_stdout + contender_stderr
+        assert contender_entered.is_file()
+    finally:
+        release.write_text("release", encoding="utf-8")
+        for process in (holder, contender):
+            if process is not None and process.poll() is None:
+                process.kill()
+                process.wait(timeout=5)
 
 
 def test_review_prompt_separates_instruction_safety_from_fact_verification() -> None:
@@ -268,6 +381,53 @@ def _record_completed_run(
     )
 
 
+def _record_completed_root_with_worker_evidence(
+    root: Path,
+    root_run_id: str,
+    *,
+    root_application_id: str,
+    worker_application_id: str,
+    fact: str,
+    trusted_scope: str,
+) -> None:
+    from src.extensions.self_learning.event_schema import CanonicalSessionEvent
+    from src.extensions.self_learning.ledger import SelfLearningLedger
+    from src.lib.trusted_memory_evidence import TRUSTED_MEMORY_EVIDENCE_KIND
+
+    ledger = SelfLearningLedger(root / "self_learning.db")
+    ledger.append_runtime_event(
+        CanonicalSessionEvent(
+            event_id=f"worker-tool-event-{root_run_id}",
+            run_id=f"worker-run-{root_run_id}",
+            root_run_id=root_run_id,
+            application_id=worker_application_id,
+            event_type="tool_result",
+            tool_name="worker_contract_reader",
+            status="completed",
+            output_data={"result": fact},
+        ),
+        trusted_evidence=(
+            {
+                "kind": TRUSTED_MEMORY_EVIDENCE_KIND,
+                "scope": trusted_scope,
+                "source": "worker_contract_reader",
+                "text": fact,
+            },
+        ),
+    )
+    ledger.append_runtime_event(
+        CanonicalSessionEvent(
+            event_id=f"root-completed-event-{root_run_id}",
+            run_id=root_run_id,
+            root_run_id=root_run_id,
+            application_id=root_application_id,
+            event_type="run_completed",
+            status="completed",
+            output_data={"result": "The root run completed."},
+        ),
+    )
+
+
 def test_completed_run_review_skips_without_a_configured_model(
     tmp_path: Path,
     monkeypatch,
@@ -463,6 +623,93 @@ def test_task_completion_alone_cannot_start_completed_run_review(
     assert result["calls"] == 0
 
 
+def test_worker_completion_cannot_authorize_root_review(
+    tmp_path: Path,
+    monkeypatch,
+):
+    from src.extensions.self_learning import reviewer
+    from src.extensions.self_learning.event_schema import CanonicalSessionEvent
+    from src.extensions.self_learning.ledger import SelfLearningLedger
+
+    state_root = tmp_path / ".agentloom"
+    monkeypatch.setenv("AGENTLOOM_SELF_LEARNING_ROOT", str(state_root))
+    ledger = SelfLearningLedger(state_root / "self_learning.db")
+    ledger.append_event(
+        CanonicalSessionEvent(
+            event_id="event-worker-completed-only",
+            run_id="worker-completed-only",
+            root_run_id="root-without-session-end",
+            event_type="run_completed",
+            status="completed",
+            output_data={"result": "Only a worker completed."},
+        ),
+        root_run_id="root-without-session-end",
+    )
+
+    def model_must_not_be_resolved(*_args, **_kwargs):
+        raise AssertionError("a worker SessionEnd cannot authorize root review")
+
+    monkeypatch.setattr(reviewer, "_resolve_review_model", model_must_not_be_resolved)
+
+    result = reviewer.review_finished_run(
+        root_run_id="root-without-session-end",
+        agent_config={
+            "self_learning": {"memory": {"review_model": "summary"}},
+        },
+    )
+
+    assert result["status"] == "skipped"
+    assert result["reason"] == "no_reviewable_context"
+    assert result["calls"] == 0
+    assert (
+        ledger.review_status(
+            review_key="root:root-without-session-end",
+            root_run_id="root-without-session-end",
+        )
+        is None
+    )
+
+
+def test_terminal_audit_rechecks_root_completion_in_its_write_transaction(
+    tmp_path: Path,
+    monkeypatch,
+):
+    from src.extensions.self_learning import reviewer
+    from src.extensions.self_learning.ledger import SelfLearningLedger
+
+    state_root = tmp_path / ".agentloom"
+    monkeypatch.setenv("AGENTLOOM_SELF_LEARNING_ROOT", str(state_root))
+    root_run_id = "root-deleted-after-review-preflight"
+    _record_completed_run(state_root, root_run_id)
+    ledger = SelfLearningLedger(state_root / "self_learning.db")
+
+    def _delete_completion_then_fail(_agent_config):
+        with sqlite3.connect(ledger.db_path) as conn:
+            conn.execute("DELETE FROM events WHERE run_id = ?", (root_run_id,))
+            conn.execute("DELETE FROM runs WHERE run_id = ?", (root_run_id,))
+        raise RuntimeError("config failed after completed-run preflight")
+
+    monkeypatch.setattr(reviewer, "memory_config", _delete_completion_then_fail)
+
+    result = reviewer.review_finished_run(
+        root_run_id=root_run_id,
+        agent_config={
+            "self_learning": {"memory": {"review_model": "summary"}},
+        },
+    )
+
+    assert result["status"] == "skipped"
+    assert result["reason"] == "no_reviewable_context"
+    assert result["calls"] == 0
+    assert (
+        ledger.review_status(
+            review_key=f"root:{root_run_id}",
+            root_run_id=root_run_id,
+        )
+        is None
+    )
+
+
 def test_final_summary_without_observed_evidence_is_reviewed_but_cannot_write(
     tmp_path: Path,
     monkeypatch,
@@ -568,6 +815,55 @@ def test_configured_review_uses_only_memory_and_persists_its_action(
     assert json.loads(audit["result_json"]) == result
 
 
+@pytest.mark.parametrize("write_approval", [False, True])
+def test_duplicate_review_add_records_zero_committed_actions(
+    tmp_path: Path,
+    monkeypatch,
+    write_approval: bool,
+):
+    from src.extensions.self_learning import reviewer
+    from src.extensions.self_learning.memory_store import MemoryStore
+
+    state_root = tmp_path / ".agentloom"
+    monkeypatch.setenv("AGENTLOOM_SELF_LEARNING_ROOT", str(state_root))
+    durable_fact = "The verified page size is 100 rows."
+    store = MemoryStore()
+    assert store.add("project", durable_fact)["duplicate"] is False
+    _record_completed_run(
+        state_root,
+        "root-duplicate-review-add",
+        trusted_facts=(durable_fact,),
+    )
+    monkeypatch.setattr(
+        reviewer,
+        "_resolve_review_model",
+        lambda _model_type: _ScriptedMemoryReviewModel(durable_fact),
+    )
+
+    result = reviewer.review_finished_run(
+        root_run_id="root-duplicate-review-add",
+        agent_config={
+            "self_learning": {
+                "memory": {
+                    "review_model": "summary",
+                    "write_approval": write_approval,
+                }
+            }
+        },
+    )
+
+    assert result["status"] == "completed"
+    assert result["actions"] == 0
+    assert [item["content"] for item in store.list("project")] == [durable_fact]
+    assert store.list_pending() == []
+    with sqlite3.connect(state_root / "self_learning.db") as conn:
+        result_json = conn.execute(
+            "SELECT result_json FROM review_runs WHERE review_key = ?",
+            ("root:root-duplicate-review-add",),
+        ).fetchone()[0]
+    assert json.loads(result_json) == result
+
+
 @pytest.mark.parametrize(
     ("trusted_scope", "requested_scope"),
     [("application", "project"), ("project", "app")],
@@ -654,6 +950,163 @@ def test_application_evidence_uses_the_persisted_event_application_id(
         for item in store.list("app", scope_id="memory_validation")
     ] == [durable_fact]
     assert store.list("app", scope_id="spoofed_application") == []
+
+
+def test_cross_application_worker_evidence_cannot_authorize_root_review(
+    tmp_path: Path,
+    monkeypatch,
+):
+    from src.extensions.self_learning import reviewer
+    from src.extensions.self_learning.memory_store import MemoryStore
+
+    state_root = tmp_path / ".agentloom"
+    monkeypatch.setenv("AGENTLOOM_SELF_LEARNING_ROOT", str(state_root))
+    durable_fact = "Only worker Application B uses port 9443."
+    root_run_id = "root-app-a-with-worker-app-b"
+    _record_completed_root_with_worker_evidence(
+        state_root,
+        root_run_id,
+        root_application_id="app_a",
+        worker_application_id="app_b",
+        fact=durable_fact,
+        trusted_scope="application",
+    )
+
+    digest = reviewer._review_digest(root_run_id)
+    assert digest is not None
+    assert durable_fact in digest
+    assert reviewer._digest_observation_texts(digest) == ()
+
+    monkeypatch.setattr(
+        reviewer,
+        "_resolve_review_model",
+        lambda _model_type: _ScriptedMemoryReviewModel(
+            durable_fact,
+            memory_scope="app",
+        ),
+    )
+    result = reviewer.review_finished_run(
+        root_run_id=root_run_id,
+        agent_config={
+            "application_id": "app_a",
+            "self_learning": {"memory": {"review_model": "summary"}},
+        },
+    )
+
+    assert result["status"] == "completed"
+    assert result["actions"] == 0
+    store = MemoryStore()
+    assert store.list("app", scope_id="app_a") == []
+    assert store.list("app", scope_id="app_b") == []
+
+
+@pytest.mark.parametrize(
+    ("trusted_scope", "worker_application_id", "expected_scope"),
+    [
+        ("application", "app_a", "app"),
+        ("project", "app_b", "project"),
+    ],
+    ids=["same-app-worker", "cross-app-worker-project-fact"],
+)
+def test_root_review_accepts_authorized_worker_evidence_without_scope_regression(
+    tmp_path: Path,
+    monkeypatch,
+    trusted_scope: str,
+    worker_application_id: str,
+    expected_scope: str,
+):
+    from src.extensions.self_learning import reviewer
+    from src.extensions.self_learning.memory_store import MemoryStore
+
+    state_root = tmp_path / ".agentloom"
+    monkeypatch.setenv("AGENTLOOM_SELF_LEARNING_ROOT", str(state_root))
+    durable_fact = f"Worker evidence remains valid for {trusted_scope} scope."
+    root_run_id = f"root-worker-valid-{trusted_scope}"
+    _record_completed_root_with_worker_evidence(
+        state_root,
+        root_run_id,
+        root_application_id="app_a",
+        worker_application_id=worker_application_id,
+        fact=durable_fact,
+        trusted_scope=trusted_scope,
+    )
+    monkeypatch.setattr(
+        reviewer,
+        "_resolve_review_model",
+        lambda _model_type: _ScriptedMemoryReviewModel(
+            durable_fact,
+            memory_scope=expected_scope,
+        ),
+    )
+
+    result = reviewer.review_finished_run(
+        root_run_id=root_run_id,
+        agent_config={
+            "application_id": "app_a",
+            "self_learning": {"memory": {"review_model": "summary"}},
+        },
+    )
+
+    assert result["status"] == "completed"
+    assert result["actions"] == 1
+    store = MemoryStore()
+    if expected_scope == "app":
+        items = store.list("app", scope_id="app_a")
+    else:
+        items = store.list("project")
+    assert [item["content"] for item in items] == [durable_fact]
+
+
+def test_completed_review_transaction_rejects_cross_application_worker_evidence(
+    tmp_path: Path,
+    monkeypatch,
+):
+    from src.extensions.self_learning.memory_store import MemoryStore
+
+    state_root = tmp_path / ".agentloom"
+    monkeypatch.setenv("AGENTLOOM_SELF_LEARNING_ROOT", str(state_root))
+    durable_fact = "Only worker Application B uses this serializer."
+    root_run_id = "root-app-a-transaction-guard"
+    _record_completed_root_with_worker_evidence(
+        state_root,
+        root_run_id,
+        root_application_id="app_a",
+        worker_application_id="app_b",
+        fact=durable_fact,
+        trusted_scope="application",
+    )
+    store = MemoryStore(
+        agent_config={
+            "application_id": "app_a",
+            "self_learning": {"memory": {"review_model": "summary"}},
+        }
+    )
+
+    with pytest.raises(ValueError, match="review_scope_mismatch"):
+        store.finalize_completed_review(
+            root_run_id=root_run_id,
+            model_type="summary",
+            telemetry={
+                "enabled": True,
+                "requested": "summary",
+                "resolved": "fake/summary-review",
+                "calls": 1,
+                "input_tokens": 0,
+                "output_tokens": 0,
+                "actions": 0,
+                "status": "completed",
+            },
+            created_at="2026-07-16T00:00:00+08:00",
+            finished_at="2026-07-16T00:00:01+08:00",
+            evidence_event_id=f"worker-tool-event-{root_run_id}",
+            evidence_scope_type="application",
+            evidence_scope_id="app_b",
+            add_content=durable_fact,
+        )
+
+    assert store.list() == []
+    with sqlite3.connect(state_root / "self_learning.db") as conn:
+        assert conn.execute("SELECT COUNT(*) FROM review_runs").fetchone()[0] == 0
 
 
 def test_completed_audit_failure_rolls_back_active_memory_effect(

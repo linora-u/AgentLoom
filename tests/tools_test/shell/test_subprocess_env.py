@@ -8,10 +8,7 @@ Covers:
 
 import os
 
-import pytest
-
-from src.tools.shell.subprocess_env import build_subprocess_env, _SCRUB_EXACT, _INJECT
-
+from src.tools.shell.subprocess_env import _INJECT, _SCRUB_EXACT, build_subprocess_env
 
 # ---------------------------------------------------------------------------
 # Sensitive variable filtering — 6 cases
@@ -43,6 +40,19 @@ class TestSensitiveVarFiltering:
         monkeypatch.setenv("ACTIONS_ID_TOKEN_REQUEST_TOKEN", "gha-token-123")
         env = build_subprocess_env()
         assert "ACTIONS_ID_TOKEN_REQUEST_TOKEN" not in env
+
+    def test_memory_campaign_config_transport_filtered(self, monkeypatch):
+        """Internal one-shot config channels never reach tool subprocesses."""
+        monkeypatch.setenv(
+            "AGENTLOOM_MEMORY_CAMPAIGN_LLM_CONFIG_SECRET",
+            "legacy-base64-secret",
+        )
+        monkeypatch.setenv("AGENTLOOM_MEMORY_CAMPAIGN_LLM_CONFIG_FD", "7")
+
+        env = build_subprocess_env()
+
+        assert "AGENTLOOM_MEMORY_CAMPAIGN_LLM_CONFIG_SECRET" not in env
+        assert "AGENTLOOM_MEMORY_CAMPAIGN_LLM_CONFIG_FD" not in env
 
     def test_multiple_sensitive_vars_all_filtered(self, monkeypatch):
         """18e: Multiple sensitive variables are all removed at once."""
