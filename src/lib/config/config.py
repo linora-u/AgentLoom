@@ -47,6 +47,7 @@ _WORKFLOW_OVERLAY_KEYS = {
     "toolsets",
     "prompt",
     "mcp_servers",
+    "self_learning",
 }
 _LLM_ONLY_TOP_LEVEL_KEYS = {"model", "llm", "langfuse"}
 

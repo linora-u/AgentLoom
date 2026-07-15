@@ -267,7 +267,7 @@ def _build_registry() -> dict[str, ToolSpec]:
             "memory",
             memory,
             "self_learning",
-            "Save durable project/app facts and session notes to AgentLoom memory; give feedback on injected memories.",
+            "Read or change curated project/current-application facts that remain useful after this run.",
             "self_learning",
             is_read_only=False,
             is_concurrency_safe=False,

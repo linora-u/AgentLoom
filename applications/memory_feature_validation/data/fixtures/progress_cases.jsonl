@@ -1,0 +1,5 @@
+{"case_id":"progress-00","evidence":{"date":"2026-07-14","status":"progress marker PG_00: migration step 3 of 5 finished today","next":"run step 4 tomorrow"},"memory_evidence":[]}
+{"case_id":"progress-01","evidence":{"run":"one-off backfill","status":"progress marker PG_01: shard 18 of 40 is currently complete","remaining":"22 shards in this execution"},"memory_evidence":[]}
+{"case_id":"progress-02","evidence":{"incident":"temporary response","status":"progress marker PG_02: responders are waiting for today's cache flush","next":"close after the temporary dashboard is green"},"memory_evidence":[]}
+{"case_id":"progress-03","evidence":{"test_run":"local validation","status":"progress marker PG_03: 73 tests passed and 12 remain in today's run"},"memory_evidence":[]}
+{"case_id":"progress-04","evidence":{"rollout":"temporary","status":"progress marker PG_04: batch blue-3 is currently running","next":"observe it for twenty minutes"},"memory_evidence":[]}

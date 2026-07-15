@@ -6,6 +6,11 @@ from typing import Any
 
 from smolagents.tools import Tool
 from src.lib.logging import get_logger
+from src.lib.trusted_memory_evidence import (
+    TRUSTED_MEMORY_EVIDENCE_RESPONSE_KEY,
+    TrustedMemoryEvidenceEnvelope,
+    extract_trusted_memory_evidence,
+)
 from src.trace import (
     bind_explicit_execution_context,
     capture_explicit_execution_context,
@@ -18,6 +23,20 @@ logger = get_logger(__name__)
 HOOKS_INJECTED_ATTR = "_hooks_injected"
 EXECUTION_CONTEXT_ATTR = "_agentloom_execution_context"
 ORIGINAL_FORWARD_ATTR = "_agentloom_original_forward"
+
+
+def _trusted_evidence_payload(tool_instance: Tool, raw_result: Any) -> list[dict[str, str]]:
+    """Extract trusted provenance without exposing payload-bearing failures."""
+
+    try:
+        return list(extract_trusted_memory_evidence(tool_instance, raw_result))
+    except Exception as exc:
+        logger.warning(
+            "Trusted memory evidence ignored for tool %s: %s",
+            getattr(tool_instance, "name", "") or "-",
+            type(exc).__name__,
+        )
+        return []
 
 
 def clone_tool_for_runtime(tool_instance: Tool) -> Tool:
@@ -242,7 +261,9 @@ def inject_hooks(tool_instance: Tool) -> Tool:
             logger.warning("Pre-execution hook error for tool %s: %s", tool_name, pre_hook_error)
 
         try:
-            result = original_forward(*call_args, **call_kwargs)
+            raw_result = original_forward(*call_args, **call_kwargs)
+            trusted_evidence = _trusted_evidence_payload(tool_instance, raw_result)
+            result = raw_result
 
             # Empty-result protection: empty tool_result content can trigger
             # LLM stop sequences causing the model to end its turn with zero
@@ -259,11 +280,16 @@ def inject_hooks(tool_instance: Tool) -> Tool:
                     result = compressed_result
 
             try:
+                tool_response = {"result": result} if result is not None else {}
+                if trusted_evidence:
+                    tool_response[TRUSTED_MEMORY_EVIDENCE_RESPONSE_KEY] = (
+                        TrustedMemoryEvidenceEnvelope(trusted_evidence)
+                    )
                 post_result = hook_manager.trigger_hooks(
                     HookEvent.POST_TOOL_USE,
                     tool_name,
                     effective_tool_input,
-                    tool_response={"result": result} if result is not None else {},
+                    tool_response=tool_response,
                     tool_inputs_schema=tool_inputs_schema,
                 )
                 hook_manager.flush_user_messages()

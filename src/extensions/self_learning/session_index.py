@@ -68,6 +68,19 @@ class SessionIndex:
         """Append one already-redacted canonical event to the ledger."""
         return self._ledger.append_event(event)
 
+    def record_runtime_event(
+        self,
+        event: CanonicalSessionEvent,
+        *,
+        trusted_evidence: tuple[dict[str, str], ...] = (),
+    ) -> dict[str, Any]:
+        """Atomically persist one live event and its code-owned provenance."""
+
+        return self._ledger.append_runtime_event(
+            event,
+            trusted_evidence=trusted_evidence,
+        )
+
     def index_run(self, target: str | Path) -> dict[str, Any]:
         """Import one optional JSONL event export into the DB ledger."""
         files = self._event_files(target)

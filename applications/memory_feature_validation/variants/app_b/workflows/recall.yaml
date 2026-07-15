@@ -1,0 +1,19 @@
+name: "memory_scope_app_b_recall"
+description: "Recall scoped memory from validation Application B."
+model_type: "summary"
+tool_call_type: "tool_call"
+max_steps: 5
+
+workflow: |
+  Load the follow-up with `validation_memory_case`. Answer only from the
+  run-start persistent snapshot. Return exactly one JSON object with key
+  `answer`; use `MISSING` when the fact is absent.
+
+tools:
+  - name: "validation_memory_case"
+    module: "applications.memory_feature_validation.agent_tools.validation_probes"
+    function: "validation_memory_case"
+
+toolsets: []
+skills: []
+worker_agents: []

@@ -44,6 +44,10 @@ _INVISIBLE_CHARS = frozenset(
 # an injection phrase, but their mere presence is not itself an injection.
 _CONTEXTUAL_JOINER_CHARS = frozenset({"\u200c", "\u200d"})
 _UNCONDITIONAL_INVISIBLE_CHARS = _INVISIBLE_CHARS - _CONTEXTUAL_JOINER_CHARS
+# NFKC intentionally does not collapse cross-script homoglyphs.  Keep this
+# mapping minimal and use it only in the scanner view: the original benign text
+# is still what redaction returns and persists.
+_SCAN_CONFUSABLE_TRANSLATION = str.maketrans({"\u043e": "o", "\u041e": "O"})
 
 _PREFIX_SECRET_PATTERNS: tuple[re.Pattern[str], ...] = (
     # Header-shaped values may be very short in fixtures. Length is not a
@@ -55,11 +59,15 @@ _PREFIX_SECRET_PATTERNS: tuple[re.Pattern[str], ...] = (
 _SENSITIVE_SEGMENTS = frozenset(
     {
         "secret",
+        "secrets",
         "password",
+        "passwords",
         "passwd",
         "pwd",
         "cookie",
+        "cookies",
         "authorization",
+        "bearer",
         "credential",
         "credentials",
     }
@@ -78,8 +86,10 @@ _SENSITIVE_KEY_PREFIXES = frozenset(
         "gitlab",
         "openai",
         "private",
+        "refresh",
         "secret",
         "service",
+        "session",
         "signing",
         "slack",
         "webhook",
@@ -103,16 +113,71 @@ _INJECTION_PATTERNS: tuple[tuple[str, re.Pattern[str]], ...] = (
     (
         "override-instructions",
         re.compile(
-            r"(?i)\b(ignore|disregard|forget)\s+"
-            r"(?:(?:all|any)\s+)?(?:the\s+)?"
-            r"(previous|prior|earlier|above)\s+"
-            r"(instructions?|prompts?|rules?|context)"
+            r"(?ix)\b(?:"
+            r"(?:ignore|disregard|forget|override)\s+"
+            r"(?:(?:all|any|every)\s+)?(?:the\s+)?"
+            r"(?:previous|prior|earlier|above)\s+"
+            r"(?:instructions?|prompts?|rules?|context|guidance)"
+            r"|do\s+not\s+follow\s+"
+            r"(?:(?:all|any|every)\s+)?(?:the\s+)?"
+            r"(?:previous|prior|earlier|above)\s+"
+            r"(?:instructions?|prompts?|rules?|context|guidance)"
+            r"|from\s+now\s+on\s*[,;:]?\s*"
+            r"(?:follow|obey)\s+(?:this|the)\s+"
+            r"(?:message|instruction|prompt)\s+instead\s+of\s+"
+            r"(?:the\s+)?system\s+prompt"
+            r"|treat\s+"
+            r"(?:(?:all|any|every)\s+)?(?:the\s+)?"
+            r"(?:previous|prior|earlier|above)\s+"
+            r"(?:instructions?|directives?|prompts?|rules?|context|guidance)\s+"
+            r"as\s+invalid\b[\s,;:.!?-]+"
+            r"(?:follow|obey)\s+(?:this|the)\s+"
+            r"(?:message|instruction|prompt)\s+instead\b"
+            r"|(?<!not\s)(?<!never\s)(?<!don't\s)(?<!do\snot\s)"
+            r"(?:ignore|disregard)\s+what\s+you\s+were\s+"
+            r"(?:told|instructed)\s+(?:before|previously)\s*[,;:]?\s+"
+            r"and\s+(?:then\s+)?(?:always\s+)?"
+            r"(?:answer|reply|respond|say|output)\b"
+            r")"
         ),
     ),
     (
         "role-hijack",
         re.compile(
             r"(?i)\bnew\s+system\s+prompt\b|\byou\s+are\s+now\b.{0,60}\b(unrestricted|jailbroken|developer\s+mode)\b"
+        ),
+    ),
+    (
+        "authority-impersonation",
+        re.compile(
+            r"(?i)(?<!not\s)(?<!never\s)(?<!don't\s)(?<!do\snot\s)"
+            r"\b(?:act|behave|operate)\s+as\s+(?:the\s+)?"
+            r"(?:system|administrator|developer|root)\b|"
+            r"\bsystem\s+message\s*:\s*"
+            r"(?:expose|reveal|ignore|disregard|override|send|print|dump|export|follow|obey)\b"
+        ),
+    ),
+    (
+        "override-safety",
+        re.compile(
+            r"(?i)(?<!not\s)(?<!never\s)(?<!don't\s)(?<!do\snot\s)"
+            r"\b(?:ignore|disregard|bypass|override|disable)\s+"
+            r"(?:the\s+)?(?:task|request|objective|policy|policies|rules?|"
+            r"safety(?:\s+(?:checks?|rules?|policy|policies|guardrails?))?|"
+            r"security(?:\s+(?:checks?|rules?|policy|policies|guardrails?))?|"
+            r"checks?|guardrails?)\b"
+        ),
+    ),
+    ("role-tag", re.compile(r"(?i)</?\s*role\b[^>]*>")),
+    (
+        "credential-exfiltration",
+        re.compile(
+            r"(?i)(?<!not\s)(?<!never\s)(?<!don't\s)(?<!do\snot\s)"
+            r"\b(?:send|export|expose|reveal|print|dump|upload|share|leak)\b"
+            r".{0,80}\b(?:credentials?|secrets?|passwords?|private\s+keys?|"
+            r"api\s+keys?|(?:access|auth|api|session|bearer)\s+tokens?|cookies?|"
+            r"environment\s+variables?|"
+            r"env(?:ironment)?\s+vars?|private\s+context)\b"
         ),
     ),
     # [^>]* allows attributes: the snapshot's own open tags carry them
@@ -146,7 +211,9 @@ def scan_injection_patterns(text: str) -> list[str]:
         lower = max(0, start - _SCAN_OVERLAP_CHARS)
         upper = min(len(value), start + _SCAN_CHUNK_CHARS)
         chunk = "".join(character for character in value[lower:upper] if character not in _INVISIBLE_CHARS)
-        normalized = unicodedata.normalize("NFKC", chunk)
+        normalized = unicodedata.normalize("NFKC", chunk).translate(
+            _SCAN_CONFUSABLE_TRANSLATION
+        )
         for pattern_id, pattern in _INJECTION_PATTERNS:
             if pattern.search(normalized):
                 pattern_hits.add(pattern_id)
@@ -158,6 +225,71 @@ def scan_injection_patterns(text: str) -> list[str]:
         if pattern_id in pattern_hits:
             findings.append(pattern_id)
     return findings
+
+
+def _structured_injection_scan_text(value: Any) -> str:
+    """Flatten individually safe structured leaves into one scanner view.
+
+    JSON punctuation and mapping keys can split a phrase that is obvious to a
+    model across otherwise harmless scalar leaves.  Keep three code-owned lanes
+    so value-to-value, key-to-key, and key-to-value continuations all cross a
+    plain whitespace boundary.  A leaf already collapsed to the exact blocked
+    marker is omitted; its normal recursive boundary already carries the taint.
+    """
+
+    keys: list[str] = []
+    values: list[str] = []
+    ordered: list[str] = []
+
+    def safe_component(item: Any) -> str:
+        if not isinstance(item, str):
+            if item is None or type(item) in {bool, int, float}:
+                item = str(item)
+            else:
+                return ""
+        return item if item and item != BLOCKED_TEXT else ""
+
+    def visit(item: Any) -> None:
+        if isinstance(item, dict):
+            for key, nested in item.items():
+                key_text = safe_component(key)
+                if key_text:
+                    keys.append(key_text)
+                    ordered.append(key_text)
+                visit(nested)
+            return
+        if isinstance(item, (list, tuple)):
+            for nested in item:
+                visit(nested)
+            return
+        if isinstance(item, (set, frozenset)):
+            for nested in sorted(item, key=lambda candidate: str(candidate)):
+                visit(nested)
+            return
+        value_text = safe_component(item)
+        if value_text:
+            values.append(value_text)
+            ordered.append(value_text)
+
+    visit(value)
+    return "\n".join(
+        lane
+        for lane in (
+            " ".join(values),
+            " ".join(keys),
+            " ".join(ordered),
+        )
+        if lane
+    )
+
+
+def scan_structured_injection_patterns(value: Any) -> list[str]:
+    """Return injection ids that emerge only after structured leaves join."""
+
+    if not isinstance(value, (dict, list, tuple, set, frozenset)):
+        return []
+    scanner_text = _structured_injection_scan_text(value)
+    return scan_injection_patterns(scanner_text) if scanner_text else []
 
 
 def _normalized_key(value: Any) -> str:
@@ -183,11 +315,22 @@ def _is_sensitive_key(value: Any) -> bool:
     parts = tuple(part for part in normalized.split("_") if part)
     if any(part in _SENSITIVE_SEGMENTS for part in parts):
         return True
-    if "token" in parts:
-        return True
-    if len(parts) < 2 or parts[-1] != "key":
+    token_indices = [index for index, part in enumerate(parts) if part in {"token", "tokens"}]
+    if token_indices:
+        if len(parts) == 1:
+            return True
+        prefixes = parts[: token_indices[0]]
+        if any(part in _SENSITIVE_KEY_PREFIXES for part in prefixes) or "".join(
+            prefixes
+        ) in _SENSITIVE_KEY_PREFIXES:
+            return True
+    if "key" not in parts:
         return False
-    return parts[-2] in _SENSITIVE_KEY_PREFIXES or "".join(parts[:-1]) in _SENSITIVE_KEY_PREFIXES
+    key_index = parts.index("key")
+    prefixes = parts[:key_index]
+    return any(part in _SENSITIVE_KEY_PREFIXES for part in prefixes) or "".join(
+        prefixes
+    ) in _SENSITIVE_KEY_PREFIXES
 
 
 def _syntax_char(value: str) -> str:
@@ -527,15 +670,18 @@ def _redact_structured_json(candidate: str) -> str | None:
     return json.dumps(sanitized, ensure_ascii=False, default=str)
 
 
+def _as_redaction_text(value: Any) -> str:
+    if isinstance(value, str):
+        return value
+    try:
+        return json.dumps(value, ensure_ascii=False, default=str)
+    except Exception:
+        return str(value)
+
+
 def redact_text(value: Any, *, max_chars: int | None = None) -> str:
     """Return a string with common credential shapes replaced."""
-    if isinstance(value, str):
-        text = value
-    else:
-        try:
-            text = json.dumps(value, ensure_ascii=False, default=str)
-        except Exception:
-            text = str(value)
+    text = _as_redaction_text(value)
 
     # Safe escaped JSON keeps its exact bytes: normalized views are returned
     # only after a credential is found. Structural redaction owns the complete
@@ -595,17 +741,43 @@ def redact_value(value: Any) -> Any:
     return redact_text(value)
 
 
-def sanitize_text_fragment(value: Any, *, max_chars: int | None = None) -> str:
-    """Redact one untrusted text fragment, replacing injections as a unit."""
+def sanitize_text_fragment_with_taint(
+    value: Any,
+    *,
+    max_chars: int | None = None,
+) -> tuple[str, bool]:
+    """Return sanitized text plus whether this boundary removed unsafe data.
+
+    The boolean is provenance, not an inference from the sanitized bytes.
+    Storage truncation and literal safety placeholders therefore do not taint a
+    run, while an actual credential redaction or injection match does.
+    """
     # Scan the complete redacted value before applying a storage/model size
     # cap. Otherwise an attacker can place the instruction one byte beyond the
     # truncation point and have the apparently safe prefix persisted/indexed.
-    redacted = redact_text(value)
-    if scan_injection_patterns(redacted):
-        return BLOCKED_TEXT
+    raw = _as_redaction_text(value)
+    redacted = redact_text(raw)
+    findings = scan_injection_patterns(redacted)
+    structured_findings = scan_structured_injection_patterns(redact_value(value))
+    tainted = redacted != raw or any(
+        finding != "blocked-fragment" for finding in findings
+    ) or any(
+        finding != "blocked-fragment" for finding in structured_findings
+    )
+    if findings or structured_findings:
+        return BLOCKED_TEXT, tainted
     if max_chars is not None and max_chars >= 0 and len(redacted) > max_chars:
-        return redacted[:max_chars] + f"\n...[truncated {len(redacted) - max_chars} chars]"
-    return redacted
+        return (
+            redacted[:max_chars]
+            + f"\n...[truncated {len(redacted) - max_chars} chars]",
+            tainted,
+        )
+    return redacted, tainted
+
+
+def sanitize_text_fragment(value: Any, *, max_chars: int | None = None) -> str:
+    """Redact one untrusted text fragment, replacing injections as a unit."""
+    return sanitize_text_fragment_with_taint(value, max_chars=max_chars)[0]
 
 
 def require_safe_identity(
@@ -651,35 +823,105 @@ def safe_storage_identity(
     return f"redacted-{namespace}-{digest}"
 
 
-def sanitize_value_fragments(value: Any) -> Any:
-    """Recursively redact values and block every injection-bearing string leaf."""
+def _sanitize_value_fragments_recursive(
+    value: Any,
+    *,
+    legacy_redaction_provenance: bool = False,
+) -> tuple[Any, bool]:
     if isinstance(value, dict):
         sanitized: dict[Any, Any] = {}
+        tainted = False
         for key, item in value.items():
-            safe_key = (
-                key
-                if key is None or type(key) in {bool, int, float}
-                else sanitize_text_fragment(key)
-            )
-            sanitized[safe_key] = (
-                _REDACTED
-                if _is_sensitive_key(key)
-                else (BLOCKED_TEXT if safe_key == BLOCKED_TEXT else sanitize_value_fragments(item))
-            )
-        return sanitized
+            if key is None or type(key) in {bool, int, float}:
+                safe_key = key
+                key_tainted = False
+            else:
+                safe_key, key_tainted = sanitize_text_fragment_with_taint(key)
+            if _is_sensitive_key(key):
+                safe_item = _REDACTED
+                item_tainted = legacy_redaction_provenance or item != _REDACTED
+            elif safe_key == BLOCKED_TEXT:
+                safe_item = BLOCKED_TEXT
+                item_tainted = False
+            else:
+                safe_item, item_tainted = _sanitize_value_fragments_recursive(
+                    item,
+                    legacy_redaction_provenance=legacy_redaction_provenance,
+                )
+            sanitized[safe_key] = safe_item
+            tainted = tainted or key_tainted or item_tainted
+        return sanitized, tainted
     if isinstance(value, list):
-        return [sanitize_value_fragments(item) for item in value]
+        values = [
+            _sanitize_value_fragments_recursive(
+                item,
+                legacy_redaction_provenance=legacy_redaction_provenance,
+            )
+            for item in value
+        ]
+        return [item for item, _ in values], any(tainted for _, tainted in values)
     if isinstance(value, tuple):
-        return tuple(sanitize_value_fragments(item) for item in value)
+        values = tuple(
+            _sanitize_value_fragments_recursive(
+                item,
+                legacy_redaction_provenance=legacy_redaction_provenance,
+            )
+            for item in value
+        )
+        return tuple(item for item, _ in values), any(tainted for _, tainted in values)
     if isinstance(value, set):
-        return {sanitize_value_fragments(item) for item in value}
+        values = tuple(
+            _sanitize_value_fragments_recursive(
+                item,
+                legacy_redaction_provenance=legacy_redaction_provenance,
+            )
+            for item in value
+        )
+        return {item for item, _ in values}, any(tainted for _, tainted in values)
     if isinstance(value, frozenset):
-        return frozenset(sanitize_value_fragments(item) for item in value)
+        values = tuple(
+            _sanitize_value_fragments_recursive(
+                item,
+                legacy_redaction_provenance=legacy_redaction_provenance,
+            )
+            for item in value
+        )
+        return frozenset(item for item, _ in values), any(
+            tainted for _, tainted in values
+        )
     if isinstance(value, str):
-        return sanitize_text_fragment(value)
+        return sanitize_text_fragment_with_taint(value)
     if value is None or type(value) in {bool, int, float}:
-        return value
-    return sanitize_text_fragment(value)
+        return value, False
+    return sanitize_text_fragment_with_taint(value)
+
+
+def sanitize_value_fragments_with_taint(
+    value: Any,
+    *,
+    legacy_redaction_provenance: bool = False,
+) -> tuple[Any, bool]:
+    """Recursively sanitize a value and return explicit safety provenance.
+
+    A pre-provenance database can only identify an earlier redaction when the
+    placeholder is still attached to a sensitive structured key.  Migration
+    callers opt into that narrow inference; live event boundaries never do.
+    A structured injection split across scalar leaves blocks the complete value
+    instead of preserving individually harmless pieces for later reassembly.
+    """
+
+    sanitized, tainted = _sanitize_value_fragments_recursive(
+        value,
+        legacy_redaction_provenance=legacy_redaction_provenance,
+    )
+    if scan_structured_injection_patterns(sanitized):
+        return BLOCKED_TEXT, True
+    return sanitized, tainted
+
+
+def sanitize_value_fragments(value: Any) -> Any:
+    """Recursively redact values and block every injection-bearing string leaf."""
+    return sanitize_value_fragments_with_taint(value)[0]
 
 
 def sanitize_campaign_artifact_value(value: Any) -> Any:

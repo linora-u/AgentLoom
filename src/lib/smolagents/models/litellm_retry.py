@@ -5,9 +5,13 @@ Adds exponential-backoff retry logic to `litellm.completion`, with support for
 custom `retry_delay` and `max_retry_delay`.
 """
 
-from functools import wraps
-from typing import Any, Callable, Optional
 import time
+from collections.abc import Callable, Iterator
+from contextlib import contextmanager
+from contextvars import ContextVar
+from dataclasses import dataclass
+from functools import wraps
+from typing import Any
 
 from litellm.exceptions import (
     APIConnectionError,
@@ -25,9 +29,58 @@ from tenacity import (
     stop_after_attempt,
     wait_exponential,
 )
+
 from src.lib.logging import get_logger
 
 logger = get_logger(__name__)
+
+
+class ProviderCallBudgetExceeded(RuntimeError):
+    """Raised before a provider request would exceed the active call budget."""
+
+
+@dataclass
+class ProviderCallBudget:
+    """Mutable request count scoped to one explicit execution context."""
+
+    max_calls: int
+    calls: int = 0
+    provider_boundary_observed: bool = False
+
+
+_PROVIDER_CALL_BUDGET: ContextVar[ProviderCallBudget | None] = ContextVar(
+    "agentloom_provider_call_budget",
+    default=None,
+)
+
+
+@contextmanager
+def limit_provider_calls(max_calls: int) -> Iterator[ProviderCallBudget]:
+    """Fence actual wrapped provider requests in the current context."""
+    max_calls = int(max_calls)
+    if max_calls < 1:
+        raise ValueError("provider call budget must be positive")
+    budget = ProviderCallBudget(max_calls=max_calls)
+    token = _PROVIDER_CALL_BUDGET.set(budget)
+    try:
+        yield budget
+    finally:
+        _PROVIDER_CALL_BUDGET.reset(token)
+
+
+def _call_provider(
+    original_func: Callable,
+    *args: Any,
+    **kwargs: Any,
+) -> Any:
+    """Count and fence one request immediately before provider invocation."""
+    budget = _PROVIDER_CALL_BUDGET.get()
+    if budget is not None:
+        budget.provider_boundary_observed = True
+        if budget.calls >= budget.max_calls:
+            raise ProviderCallBudgetExceeded("provider call budget exhausted")
+        budget.calls += 1
+    return original_func(*args, **kwargs)
 
 
 # ── Rate-limit helpers (used by enhanced retry wrapper) ──────────── #
@@ -40,7 +93,7 @@ def _is_rate_limit_error(exception: Exception) -> bool:
     return getattr(exception, "status_code", None) == 429
 
 
-def _parse_retry_after(exception: Exception) -> Optional[float]:
+def _parse_retry_after(exception: Exception) -> float | None:
     """
     Parse Retry-After header from a 429 response.
 
@@ -173,10 +226,15 @@ def create_retry_wrapper(
 
         # If retry params are not configured, call original function directly.
         if retry_delay is None or num_retries == 0:
-            return original_func(*args, **kwargs)
+            # Explicit zero must reach LiteLLM. An active budget also requires
+            # zero so one wrapped call cannot hide multiple provider requests.
+            # Otherwise preserve the historic retry_delay=None direct path.
+            if num_retries == 0 or _PROVIDER_CALL_BUDGET.get() is not None:
+                kwargs["num_retries"] = 0
+            return _call_provider(original_func, *args, **kwargs)
 
-        # Disable litellm built-in retry to avoid double retry.
-        # Tenacity handles all retry logic here.
+        # Disable LiteLLM built-in retry to avoid double retry. Tenacity makes
+        # each attempt observable at the provider-call budget boundary.
         kwargs["num_retries"] = 0
 
         # ── Build rate-limited wrapper around original_func ──
@@ -200,7 +258,7 @@ def create_retry_wrapper(
             if _limiter:
                 _limiter.throttle()
             try:
-                result = original_func(*a, **kw)
+                result = _call_provider(original_func, *a, **kw)
                 # 3. Report success → reset consecutive-error counter
                 if _state:
                     _state.report_success()
