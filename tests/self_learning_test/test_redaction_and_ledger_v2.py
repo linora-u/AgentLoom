@@ -771,6 +771,17 @@ def test_runtime_event_and_review_writes_share_the_writer_gate(
     db_path = tmp_path / "self_learning.db"
     runtime_ledger = SelfLearningLedger(db_path)
     review_ledger = SelfLearningLedger(db_path)
+    runtime_ledger.append_runtime_event(
+        CanonicalSessionEvent(
+            event_id=uuid.uuid4().hex,
+            run_id="run_runtime_review_gate",
+            root_run_id="run_runtime_review_gate",
+            event_type="run_completed",
+            status="completed",
+            content_text="root SessionEnd persisted",
+            created_at=now_iso(),
+        )
+    )
     runtime_transaction_started = threading.Event()
     runtime_errors: list[BaseException] = []
     original_append = runtime_ledger._append_event_in_conn

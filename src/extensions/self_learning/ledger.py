@@ -49,6 +49,14 @@ _V4_SANITIZER_REVISION = "5"
 _V5_MIGRATION_REPORT_KEY = "schema_v5_simplified_memory_migration"
 _V5_SANITIZER_REVISION_KEY = "schema_v5_sanitizer_revision"
 _V5_SANITIZER_REVISION = "4"
+_V5_PENDING_ADD_HASH_REVISION_KEY = "schema_v5_pending_add_hash_revision"
+_V5_PENDING_ADD_HASH_REVISION = "2"
+_V5_REVIEW_KEY_REVISION_KEY = "schema_v5_review_key_revision"
+_V5_REVIEW_KEY_REVISION = "1"
+_V5_PENDING_HASH_TRIGGERS = (
+    "trg_memory_pending_add_require_hash_insert",
+    "trg_memory_pending_add_require_hash_update",
+)
 _V5_REMOVED_TABLES = (
     "learning_job_effects",
     "learning_jobs",
@@ -181,6 +189,7 @@ CREATE TABLE{create_modifier} {pending_table} (
         CHECK (scope_type IN ('project', 'application')),
     scope_id TEXT NOT NULL,
     payload_json TEXT NOT NULL,
+    content_hash TEXT,
     source_run_id TEXT NOT NULL,
     created_at TEXT NOT NULL,
     resolved_at TEXT
@@ -311,6 +320,10 @@ class SelfLearningLedger:
                     or str(sanitizer_revision["value"] or "")
                     != _V5_SANITIZER_REVISION
                 ):
+                    return True
+                if self._v5_pending_add_hash_repair_required(conn):
+                    return True
+                if self._v5_review_key_repair_required(conn):
                     return True
                 placeholders = ", ".join(
                     "?" for _ in _V5_REMOVED_MAINTENANCE_KEYS
@@ -589,6 +602,10 @@ class SelfLearningLedger:
                     conn.execute(
                         f'DROP TRIGGER IF EXISTS main."{trigger_name}"'
                     )
+                for trigger_name in _V5_PENDING_HASH_TRIGGERS:
+                    conn.execute(
+                        f'DROP TRIGGER IF EXISTS main."{trigger_name}"'
+                    )
                 self._assert_no_v4_migration_triggers(conn)
             if current < 1:
                 conn.execute("INSERT INTO schema_version (version) VALUES (1)")
@@ -627,6 +644,18 @@ class SelfLearningLedger:
                 self._sanitize_v5_trusted_review_evidence(conn)
                 self._sanitize_v5_memory_state(conn)
                 refreshed_v5_sanitizer = True
+            if self._v5_pending_add_hash_repair_required(conn):
+                self._repair_v5_pending_add_hashes(conn)
+                conn.execute(
+                    """
+                    INSERT INTO maintenance (key, value) VALUES (?, ?)
+                    ON CONFLICT(key) DO UPDATE SET value = excluded.value
+                    """,
+                    (
+                        _V5_PENDING_ADD_HASH_REVISION_KEY,
+                        _V5_PENDING_ADD_HASH_REVISION,
+                    ),
+                )
             if sanitizing_storage:
                 # These scripts succeeded before trigger removal. A restore
                 # failure is therefore corruption of an available index path,
@@ -647,6 +676,15 @@ class SelfLearningLedger:
                 "DELETE FROM review_runs "
                 "WHERE status NOT IN ('completed', 'failed', 'skipped')"
             )
+            if self._v5_review_key_repair_required(conn):
+                self._repair_v5_review_keys(conn)
+                conn.execute(
+                    """
+                    INSERT INTO maintenance (key, value) VALUES (?, ?)
+                    ON CONFLICT(key) DO UPDATE SET value = excluded.value
+                    """,
+                    (_V5_REVIEW_KEY_REVISION_KEY, _V5_REVIEW_KEY_REVISION),
+                )
             conn.execute(
                 """
                 INSERT INTO maintenance (key, value) VALUES (?, ?)
@@ -815,6 +853,185 @@ class SelfLearningLedger:
         columns = {row[1] for row in conn.execute(f"PRAGMA table_info({table})")}
         if name not in columns:
             conn.execute(f"ALTER TABLE {table} ADD COLUMN {ddl}")
+
+    @staticmethod
+    def _v5_pending_add_hash_repair_required(conn: sqlite3.Connection) -> bool:
+        revision = conn.execute(
+            "SELECT value FROM maintenance WHERE key = ?",
+            (_V5_PENDING_ADD_HASH_REVISION_KEY,),
+        ).fetchone()
+        if (
+            revision is None
+            or str(revision["value"] or "") != _V5_PENDING_ADD_HASH_REVISION
+        ):
+            return True
+        columns = {
+            str(row[1])
+            for row in conn.execute("PRAGMA table_info(memory_pending_writes)")
+        }
+        if "content_hash" not in columns:
+            return True
+        index = conn.execute(
+            "SELECT 1 FROM sqlite_master "
+            "WHERE type='index' AND name='idx_memory_pending_add_dedup'",
+        ).fetchone()
+        if index is None:
+            return True
+        placeholders = ", ".join("?" for _ in _V5_PENDING_HASH_TRIGGERS)
+        triggers = {
+            str(row["name"])
+            for row in conn.execute(
+                f"SELECT name FROM sqlite_master "
+                f"WHERE type='trigger' AND name IN ({placeholders})",
+                _V5_PENDING_HASH_TRIGGERS,
+            )
+        }
+        return triggers != set(_V5_PENDING_HASH_TRIGGERS)
+
+    @staticmethod
+    def _v5_review_key_repair_required(conn: sqlite3.Connection) -> bool:
+        revision = conn.execute(
+            "SELECT value FROM maintenance WHERE key = ?",
+            (_V5_REVIEW_KEY_REVISION_KEY,),
+        ).fetchone()
+        return (
+            revision is None
+            or str(revision["value"] or "") != _V5_REVIEW_KEY_REVISION
+        )
+
+    @staticmethod
+    def _repair_v5_review_keys(conn: sqlite3.Connection) -> None:
+        """Quarantine terminal root keys that were bound by old v5 callers."""
+        occupied = {
+            str(row["review_key"]): int(row["review_id"])
+            for row in conn.execute(
+                "SELECT review_id, review_key FROM review_runs"
+            )
+        }
+        rows = conn.execute(
+            """
+            SELECT review_id, review_key, root_run_id
+            FROM review_runs
+            WHERE status IN ('completed', 'failed', 'skipped')
+              AND review_key GLOB 'root:*'
+            ORDER BY review_id
+            """
+        ).fetchall()
+        for row in rows:
+            review_id = int(row["review_id"])
+            old_key = str(row["review_key"])
+            if old_key == f"root:{str(row['root_run_id'])}":
+                continue
+            base = f"legacy-mismatch:{review_id}"
+            candidate = base
+            suffix = 0
+            while (
+                candidate in occupied
+                and occupied[candidate] != review_id
+            ):
+                suffix += 1
+                candidate = f"{base}:{suffix}"
+            conn.execute(
+                "UPDATE review_runs SET review_key = ? WHERE review_id = ?",
+                (candidate, review_id),
+            )
+            if occupied.get(old_key) == review_id:
+                del occupied[old_key]
+            occupied[candidate] = review_id
+
+    @classmethod
+    def _repair_v5_pending_add_hashes(cls, conn: sqlite3.Connection) -> None:
+        """Make approval-add deduplication indexed and deterministic."""
+        conn.execute("DROP INDEX IF EXISTS idx_memory_pending_add_dedup")
+        cls._add_column_if_missing(
+            conn,
+            "memory_pending_writes",
+            "content_hash",
+            "content_hash TEXT",
+        )
+        active_hashes = {
+            (str(row["scope_type"]), str(row["scope_id"]), str(row["content_hash"]))
+            for row in conn.execute(
+                "SELECT scope_type, scope_id, content_hash FROM memory_items"
+            )
+        }
+        seen_pending: set[tuple[str, str, str]] = set()
+        now = _now_iso()
+        rows = conn.execute(
+            """
+            SELECT id, status, action, scope_type, scope_id, payload_json
+            FROM memory_pending_writes
+            ORDER BY id
+            """
+        ).fetchall()
+        for row in rows:
+            if str(row["action"]) != "add":
+                conn.execute(
+                    "UPDATE memory_pending_writes SET content_hash=NULL WHERE id=?",
+                    (int(row["id"]),),
+                )
+                continue
+            try:
+                payload = json.loads(str(row["payload_json"] or "{}"))
+            except (TypeError, ValueError, json.JSONDecodeError):
+                payload = {}
+            content = str(payload.get("content") or "") if isinstance(payload, dict) else ""
+            content_hash = memory_content_hash(content) if content else None
+            status = str(row["status"])
+            scope_key = (
+                str(row["scope_type"]),
+                str(row["scope_id"]),
+                str(content_hash or ""),
+            )
+            if status == "pending" and (
+                content_hash is None
+                or scope_key in active_hashes
+                or scope_key in seen_pending
+            ):
+                conn.execute(
+                    """
+                    UPDATE memory_pending_writes
+                    SET status='stale', content_hash=?, resolved_at=?
+                    WHERE id=?
+                    """,
+                    (content_hash, now, int(row["id"])),
+                )
+                continue
+            conn.execute(
+                "UPDATE memory_pending_writes SET content_hash=? WHERE id=?",
+                (content_hash, int(row["id"])),
+            )
+            if status == "pending":
+                seen_pending.add(scope_key)
+        conn.execute(
+            """
+            CREATE UNIQUE INDEX IF NOT EXISTS idx_memory_pending_add_dedup
+            ON memory_pending_writes(scope_type, scope_id, content_hash)
+            WHERE status='pending' AND action='add' AND content_hash IS NOT NULL
+            """
+        )
+        conn.execute(
+            """
+            CREATE TRIGGER IF NOT EXISTS trg_memory_pending_add_require_hash_insert
+            BEFORE INSERT ON memory_pending_writes
+            WHEN NEW.status='pending' AND NEW.action='add'
+                 AND NEW.content_hash IS NULL
+            BEGIN
+                SELECT RAISE(ABORT, 'pending add content hash required');
+            END
+            """
+        )
+        conn.execute(
+            """
+            CREATE TRIGGER IF NOT EXISTS trg_memory_pending_add_require_hash_update
+            BEFORE UPDATE OF status, action, content_hash ON memory_pending_writes
+            WHEN NEW.status='pending' AND NEW.action='add'
+                 AND NEW.content_hash IS NULL
+            BEGIN
+                SELECT RAISE(ABORT, 'pending add content hash required');
+            END
+            """
+        )
 
     @staticmethod
     def _migrate_v2_memory_hash(conn: sqlite3.Connection) -> None:
@@ -3126,13 +3343,45 @@ class SelfLearningLedger:
             row = conn.execute(
                 """
                 SELECT application_id FROM runs
-                WHERE run_id = ? OR root_run_id = ?
-                ORDER BY CASE WHEN run_id = ? THEN 0 ELSE 1 END, rowid
+                WHERE run_id = ?
                 LIMIT 1
                 """,
-                (root_run_id, root_run_id, root_run_id),
+                (root_run_id,),
             ).fetchone()
         return str(row["application_id"] or "") if row is not None else ""
+
+    @staticmethod
+    def completed_root_run_in_transaction(
+        conn: sqlite3.Connection,
+        root_run_id: str,
+    ) -> sqlite3.Row | None:
+        """Return the root row only when its own SessionEnd is persisted."""
+        run_row = conn.execute(
+            """
+            SELECT status, final_answer, application_id FROM runs
+            WHERE run_id = ?
+            LIMIT 1
+            """,
+            (root_run_id,),
+        ).fetchone()
+        completion_row = conn.execute(
+            """
+            SELECT 1 FROM events
+            WHERE run_id = ?
+              AND COALESCE(NULLIF(root_run_id, ''), run_id) = ?
+              AND event_type = 'run_completed'
+              AND status = 'completed'
+            LIMIT 1
+            """,
+            (root_run_id, root_run_id),
+        ).fetchone()
+        if (
+            run_row is None
+            or completion_row is None
+            or str(run_row["status"] or "").casefold() != "completed"
+        ):
+            return None
+        return run_row
 
     def completed_review_context(
         self,
@@ -3146,25 +3395,10 @@ class SelfLearningLedger:
             return None
         limit = max(0, min(int(tool_result_limit), 100))
         with self._connect() as conn:
-            run_row = conn.execute(
-                """
-                SELECT status, final_answer FROM runs
-                WHERE run_id = ? OR root_run_id = ?
-                ORDER BY CASE WHEN run_id = ? THEN 0 ELSE 1 END, rowid
-                LIMIT 1
-                """,
-                (root_run_id, root_run_id, root_run_id),
-            ).fetchone()
-            completion_row = conn.execute(
-                """
-                SELECT 1 FROM events
-                WHERE COALESCE(NULLIF(root_run_id, ''), run_id) = ?
-                    AND event_type = 'run_completed'
-                    AND status = 'completed'
-                LIMIT 1
-                """,
-                (root_run_id,),
-            ).fetchone()
+            run_row = self.completed_root_run_in_transaction(conn, root_run_id)
+            if run_row is None:
+                return None
+            root_application_id = str(run_row["application_id"] or "")
             event_rows = conn.execute(
                 """
                 SELECT event_id, tool_name, output_json FROM events
@@ -3193,16 +3427,23 @@ class SelfLearningLedger:
                     (root_run_id, TRUSTED_MEMORY_EVIDENCE_KIND, *event_ids),
                 ).fetchall()
                 for evidence_row in evidence_rows:
+                    evidence_scope_type = str(
+                        evidence_row["scope_type"] or ""
+                    )
+                    evidence_scope_id = str(evidence_row["scope_id"] or "")
+                    if evidence_scope_type == "application" and (
+                        not root_application_id
+                        or evidence_scope_id != root_application_id
+                    ):
+                        continue
                     evidence_by_event.setdefault(
                         str(evidence_row["event_id"]),
                         [],
                     ).append(
                         {
                             "kind": str(evidence_row["kind"] or ""),
-                            "scope_type": str(
-                                evidence_row["scope_type"] or ""
-                            ),
-                            "scope_id": str(evidence_row["scope_id"] or ""),
+                            "scope_type": evidence_scope_type,
+                            "scope_id": evidence_scope_id,
                             "source": str(evidence_row["source"] or ""),
                             "text": str(evidence_row["text"] or ""),
                         }
@@ -3212,12 +3453,6 @@ class SelfLearningLedger:
                     str(event_record["event_id"]),
                     [],
                 )
-        if (
-            run_row is None
-            or completion_row is None
-            or str(run_row["status"] or "").casefold() != "completed"
-        ):
-            return None
         return {
             "final_answer": str(run_row["final_answer"] or ""),
             "tool_results": event_records,
@@ -3323,6 +3558,8 @@ class SelfLearningLedger:
         root_run_id = safe_run_id(
             require_safe_identity(root_run_id, field="review root run id")
         )
+        if review_key != f"root:{root_run_id}":
+            raise ValueError("review key must match the root run id")
         with self._connect() as conn:
             row = conn.execute(
                 "SELECT root_run_id, status FROM review_runs WHERE review_key = ?",
@@ -3346,12 +3583,14 @@ class SelfLearningLedger:
         result: dict[str, Any] | None = None,
         created_at: str | None = None,
         finished_at: str | None = None,
-    ) -> tuple[int, bool]:
+    ) -> tuple[int | None, bool]:
         """Insert one terminal audit using the caller's active transaction."""
         review_key = require_safe_identity(review_key, field="review key")
         root_run_id = safe_run_id(
             require_safe_identity(root_run_id, field="review root run id")
         )
+        if review_key != f"root:{root_run_id}":
+            raise ValueError("review key must match the root run id")
         application_id = require_safe_identity(
             application_id,
             field="review application id",
@@ -3374,6 +3613,15 @@ class SelfLearningLedger:
             field="review finished timestamp",
         )
         result_json = _json_dumps(sanitize_value_fragments(result or {}))
+
+        if (
+            SelfLearningLedger.completed_root_run_in_transaction(
+                conn,
+                root_run_id,
+            )
+            is None
+        ):
+            return None, False
 
         existing = conn.execute(
             "SELECT review_id, root_run_id FROM review_runs WHERE review_key = ?",
@@ -3414,7 +3662,7 @@ class SelfLearningLedger:
         result: dict[str, Any] | None = None,
         created_at: str | None = None,
         finished_at: str | None = None,
-    ) -> int:
+    ) -> int | None:
         """Insert one terminal audit; an existing review is immutable."""
         with serialized_write_transaction(self.db_path, self._connect) as conn:
             review_id, _inserted = self.record_review_in_transaction(

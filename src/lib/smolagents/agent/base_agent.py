@@ -1484,13 +1484,17 @@ class RoleDrivenAgent(BaseAgent):
                         # the successful task result.
                         try:
                             from src.extensions.self_learning.paths import (
+                                memory_review_model,
                                 self_learning_enabled,
                             )
 
                             effective_config = (
                                 self._effective_agent_config or self._config
                             )
-                            if self_learning_enabled(effective_config):
+                            if (
+                                self_learning_enabled(effective_config)
+                                and memory_review_model(effective_config)
+                            ):
                                 from src.extensions.self_learning.reviewer import (
                                     review_finished_run,
                                 )

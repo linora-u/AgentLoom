@@ -4,7 +4,10 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
 import re
+import shutil
+import subprocess
 from collections import Counter
 from dataclasses import asdict, dataclass
 from pathlib import Path
@@ -14,6 +17,9 @@ REPO_ROOT = Path(__file__).resolve().parents[3]
 APP_ROOT = REPO_ROOT / "applications" / "memory_feature_validation"
 CASES_PATH = APP_ROOT / "data" / "cases.jsonl"
 ORACLE_PATH = APP_ROOT / "oracle" / "cases.jsonl"
+GLOBAL_SUMMARY_FIXTURE_ROOT = (
+    "applications/memory_feature_validation/variants/global_summary_fixture"
+)
 
 SCENARIO_QUOTAS = {
     "review_off_durable": 10,
@@ -29,7 +35,10 @@ SCENARIO_QUOTAS = {
 }
 
 WORKFLOWS = {
-    "off_review": "applications/memory_feature_validation/variants/off/workflows/analyze_without_memory.yaml",
+    "off_review": (
+        f"{GLOBAL_SUMMARY_FIXTURE_ROOT}/applications/review_opt_out/"
+        "workflows/analyze_without_memory.yaml"
+    ),
     "off_write": "applications/memory_feature_validation/variants/off/workflows/analyze_with_memory.yaml",
     "off_recall": "applications/memory_feature_validation/variants/off/workflows/recall.yaml",
     "on_review": "applications/memory_feature_validation/variants/on/workflows/analyze_without_memory.yaml",
@@ -43,6 +52,57 @@ WORKFLOWS = {
     "app_b_recall": "applications/memory_feature_validation/variants/app_b/workflows/recall.yaml",
 }
 
+_RELEASE_SOURCE_PATHS = (
+    "applications/memory_feature_validation",
+    "src",
+    "config/system.yaml",
+    "pyproject.toml",
+    "uv.lock",
+)
+
+
+def _trusted_git() -> str:
+    candidate = shutil.which("git", path=os.defpath)
+    if not candidate:
+        raise FileNotFoundError("system git executable not found")
+    return str(Path(candidate).resolve())
+
+
+def _git_env() -> dict[str, str]:
+    inherited = {
+        key: value
+        for key, value in os.environ.items()
+        if key in {"LANG", "LC_ALL", "LC_CTYPE", "TMPDIR", "TZ"}
+    }
+    inherited.update(
+        {
+            "PATH": os.defpath,
+            "GIT_CONFIG_NOSYSTEM": "1",
+            "GIT_CONFIG_GLOBAL": os.devnull,
+            "GIT_ATTR_NOSYSTEM": "1",
+            "GIT_NO_REPLACE_OBJECTS": "1",
+            "GIT_OPTIONAL_LOCKS": "0",
+            "GIT_TERMINAL_PROMPT": "0",
+        }
+    )
+    return inherited
+
+
+def _git_command(*args: str) -> list[str]:
+    return [
+        _trusted_git(),
+        "--no-replace-objects",
+        "-c",
+        "core.hooksPath=/dev/null",
+        "-c",
+        "core.fsmonitor=false",
+        "-c",
+        "core.untrackedCache=false",
+        "-c",
+        "diff.external=",
+        *args,
+    ]
+
 
 @dataclass(frozen=True)
 class RunSpec:
@@ -55,6 +115,7 @@ class RunSpec:
     state_key: str
     review_expected: bool
     canary_rank: int = 0
+    agent_root: str = "."
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)
@@ -102,6 +163,122 @@ def dataset_manifest() -> dict[str, Any]:
     }
 
 
+def _git_release_paths(*, commit: str = "") -> list[str]:
+    if commit:
+        command = _git_command(
+            "ls-tree",
+            "-r",
+            "--name-only",
+            commit,
+            "--",
+            *_RELEASE_SOURCE_PATHS,
+        )
+    else:
+        command = _git_command(
+            "ls-files",
+            "--cached",
+            "--others",
+            "--exclude-standard",
+            "--",
+            *_RELEASE_SOURCE_PATHS,
+        )
+    result = subprocess.run(
+        command,
+        cwd=REPO_ROOT,
+        env=_git_env(),
+        check=True,
+        capture_output=True,
+        text=True,
+        timeout=30,
+    )
+    return sorted({line for line in result.stdout.splitlines() if line})
+
+
+def _worktree_source_manifest(paths: list[str]) -> list[dict[str, Any]]:
+    rows: list[dict[str, Any]] = []
+    for relative in paths:
+        path = REPO_ROOT / relative
+        if not path.is_file():
+            return []
+        rows.append(
+            {
+                "path": relative,
+                "sha256": sha256_file(path),
+                "bytes": path.stat().st_size,
+            }
+        )
+    return rows
+
+
+def release_source_manifest() -> list[dict[str, Any]]:
+    """Hash the full tracked runtime plus the real campaign application."""
+    return _worktree_source_manifest(_git_release_paths())
+
+
+def release_source_manifest_at_commit(commit: str) -> list[dict[str, Any]]:
+    if not re.fullmatch(r"[0-9a-f]{40}", str(commit or "")):
+        return []
+    try:
+        paths = _git_release_paths(commit=commit)
+    except (OSError, subprocess.SubprocessError):
+        return []
+    rows: list[dict[str, Any]] = []
+    for relative in paths:
+        try:
+            result = subprocess.run(
+                _git_command("show", f"{commit}:{relative}"),
+                cwd=REPO_ROOT,
+                env=_git_env(),
+                check=True,
+                capture_output=True,
+                timeout=30,
+            )
+        except (OSError, subprocess.SubprocessError):
+            return []
+        rows.append(
+            {
+                "path": relative,
+                "sha256": hashlib.sha256(result.stdout).hexdigest(),
+                "bytes": len(result.stdout),
+            }
+        )
+    return rows
+
+
+def release_git_source_state() -> dict[str, Any]:
+    """Bind release evidence to committed feature inputs, not unrelated dirt."""
+    try:
+        result = subprocess.run(
+            _git_command("rev-parse", "HEAD"),
+            cwd=REPO_ROOT,
+            env=_git_env(),
+            check=True,
+            capture_output=True,
+            text=True,
+            timeout=30,
+        )
+        commit = result.stdout.strip()
+        commit_paths = _git_release_paths(commit=commit)
+        current_paths = _git_release_paths()
+        current = _worktree_source_manifest(
+            sorted(set(commit_paths) | set(current_paths))
+        )
+        committed = release_source_manifest_at_commit(commit)
+    except (OSError, subprocess.SubprocessError):
+        return {
+            "available": False,
+            "commit": "",
+            "dirty": True,
+            "files": [],
+        }
+    return {
+        "available": bool(re.fullmatch(r"[0-9a-f]{40}", commit)),
+        "commit": commit,
+        "dirty": not committed or current != committed,
+        "files": current,
+    }
+
+
 def _ids(prefix: str, count: int) -> list[str]:
     return [f"{prefix}-{index:02d}" for index in range(count)]
 
@@ -115,6 +292,7 @@ def build_full_plan() -> list[RunSpec]:
                 f"{case_id}-writer", case_id, "review_off_durable", "writer", 1,
                 WORKFLOWS["off_review"], case_id, False,
                 canary_rank=1 if index == 0 else 0,
+                agent_root=GLOBAL_SUMMARY_FIXTURE_ROOT,
             )
         )
 

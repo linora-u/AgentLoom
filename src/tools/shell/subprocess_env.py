@@ -12,7 +12,6 @@ Two scrubbing strategies:
 """
 
 import os
-from typing import Dict, Set, Tuple
 
 from src.lib.logging import get_logger
 
@@ -58,11 +57,14 @@ _SCRUB_EXACT: frozenset[str] = frozenset({
     "DB_PASSWORD",
     "SECRET_KEY",
     "PRIVATE_KEY",
+    # Internal release-campaign config transports (legacy and one-shot FD).
+    "AGENTLOOM_MEMORY_CAMPAIGN_LLM_CONFIG_SECRET",
+    "AGENTLOOM_MEMORY_CAMPAIGN_LLM_CONFIG_FD",
 })
 
 # Variables removed by prefix match.  Any env var whose name starts with
 # one of these prefixes is scrubbed.
-_SCRUB_PREFIXES: Tuple[str, ...] = (
+_SCRUB_PREFIXES: tuple[str, ...] = (
     "ANTHROPIC_FOUNDRY_",
     "GOOGLE_CLOUD_",
 )
@@ -72,7 +74,7 @@ _SCRUB_PREFIXES: Tuple[str, ...] = (
 # ---------------------------------------------------------------------------
 
 # Variables injected into every subprocess.
-_INJECT: Dict[str, str] = {
+_INJECT: dict[str, str] = {
     # Prevent git from opening an interactive editor (e.g. during rebase)
     "GIT_EDITOR": "true",
     # Detection flag so scripts can detect they run inside AgentLoom
@@ -84,7 +86,7 @@ _INJECT: Dict[str, str] = {
 # Public API
 # ---------------------------------------------------------------------------
 
-def build_subprocess_env() -> Dict[str, str]:
+def build_subprocess_env() -> dict[str, str]:
     """Build a sanitised environment dict for child processes.
 
     Returns:

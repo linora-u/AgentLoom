@@ -8,7 +8,9 @@ workflow: |
   Load the case with `validation_memory_case`, investigate it, and return a
   concise JSON answer. Use available tools according to their descriptions.
   Preserve the distinction between facts limited to this Application and
-  repository-wide project facts.
+  repository-wide project facts. When the case establishes a verified durable
+  repository-wide fact that another Application will need, use the
+  persistent-memory capability before returning the answer.
 
 tools:
   - name: "validation_memory_case"

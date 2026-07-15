@@ -470,38 +470,74 @@ class MemoryStore:
             content=content,
             target=target,
         )
+        pending_content_hash: str | None = None
+        if action == "add":
+            pending_content_hash = memory_content_hash(str(payload["content"]))
+            active = self._fetch_by_hash(
+                conn,
+                scope_type,
+                scope_id,
+                pending_content_hash,
+            )
+            if active is not None:
+                return {
+                    "ok": True,
+                    "pending": False,
+                    "duplicate": True,
+                    "id": int(active["id"]),
+                    "item": self._row_to_dict(active),
+                }
+            duplicate_pending = conn.execute(
+                """
+                SELECT id FROM memory_pending_writes
+                WHERE status='pending' AND action='add'
+                  AND scope_type=? AND scope_id=? AND content_hash=?
+                ORDER BY id DESC LIMIT 1
+                """,
+                (scope_type, scope_id, pending_content_hash),
+            ).fetchone()
+            if duplicate_pending is not None:
+                return {
+                    "ok": True,
+                    "pending": True,
+                    "duplicate": True,
+                    "id": int(duplicate_pending["id"]),
+                }
         payload_json = json.dumps(
             payload,
             ensure_ascii=False,
             sort_keys=True,
             separators=(",", ":"),
         )
-        duplicate = conn.execute(
-            """
-            SELECT * FROM memory_pending_writes
-            WHERE status='pending' AND action=? AND scope_type=? AND scope_id=? AND payload_json=?
-            ORDER BY id DESC LIMIT 1
-            """,
-            (action, scope_type, scope_id, payload_json),
-        ).fetchone()
-        if duplicate is not None:
-            return {
-                "ok": True,
-                "pending": True,
-                "duplicate": True,
-                "id": int(duplicate["id"]),
-            }
+        if action != "add":
+            duplicate = conn.execute(
+                """
+                SELECT * FROM memory_pending_writes
+                WHERE status='pending' AND action=? AND scope_type=? AND scope_id=? AND payload_json=?
+                ORDER BY id DESC LIMIT 1
+                """,
+                (action, scope_type, scope_id, payload_json),
+            ).fetchone()
+            if duplicate is not None:
+                return {
+                    "ok": True,
+                    "pending": True,
+                    "duplicate": True,
+                    "id": int(duplicate["id"]),
+                }
         cursor = conn.execute(
             """
             INSERT INTO memory_pending_writes(
-                status,action,scope_type,scope_id,payload_json,source_run_id,created_at,resolved_at
-            ) VALUES('pending',?,?,?,?,?,?,NULL)
+                status,action,scope_type,scope_id,payload_json,content_hash,
+                source_run_id,created_at,resolved_at
+            ) VALUES('pending',?,?,?,?,?,?,?,NULL)
             """,
             (
                 action,
                 scope_type,
                 scope_id,
                 payload_json,
+                pending_content_hash,
                 source_run_id,
                 self._now(),
             ),
@@ -680,7 +716,6 @@ class MemoryStore:
     def finalize_completed_review(
         self,
         *,
-        review_key: str,
         root_run_id: str,
         model_type: str,
         telemetry: dict[str, Any],
@@ -695,6 +730,7 @@ class MemoryStore:
         run_id = self._validate_source_run_id(root_run_id)
         if not run_id:
             raise ValueError("missing_run_context")
+        review_key = f"root:{run_id}"
 
         scope_type: str | None = None
         scope_id = ""
@@ -720,33 +756,19 @@ class MemoryStore:
             normalized_content = self._normalize_content(add_content)
 
         with self._connect_for_write() as conn:
-            run_row = conn.execute(
-                """
-                SELECT status, application_id FROM runs
-                WHERE run_id = ? OR root_run_id = ?
-                ORDER BY CASE WHEN run_id = ? THEN 0 ELSE 1 END, rowid
-                LIMIT 1
-                """,
-                (run_id, run_id, run_id),
-            ).fetchone()
-            completion = conn.execute(
-                """
-                SELECT 1 FROM events
-                WHERE COALESCE(NULLIF(root_run_id, ''), run_id) = ?
-                  AND event_type = 'run_completed'
-                  AND status = 'completed'
-                LIMIT 1
-                """,
-                (run_id,),
-            ).fetchone()
-            if (
-                run_row is None
-                or str(run_row["status"] or "").casefold() != "completed"
-                or completion is None
-            ):
+            run_row = SelfLearningLedger.completed_root_run_in_transaction(
+                conn,
+                run_id,
+            )
+            if run_row is None:
                 raise ValueError("review_root_not_completed")
+            root_application_id = str(run_row["application_id"] or "")
 
             if scope_type is not None:
+                if scope_type == "application" and (
+                    not root_application_id or scope_id != root_application_id
+                ):
+                    raise ValueError("review_scope_mismatch")
                 evidence = conn.execute(
                     """
                     SELECT events.application_id
@@ -772,32 +794,26 @@ class MemoryStore:
                         run_id,
                     ),
                 ).fetchone()
-                expected_scope_id = (
-                    "project"
-                    if scope_type == "project"
-                    else str(evidence["application_id"] or "")
-                    if evidence is not None
-                    else ""
-                )
-                if evidence is None or expected_scope_id != scope_id:
+                if evidence is None:
                     raise ValueError("review_evidence_stale")
+                if (
+                    scope_type == "application"
+                    and str(evidence["application_id"] or "")
+                    != root_application_id
+                ):
+                    raise ValueError("review_scope_mismatch")
 
-            review_id, inserted = SelfLearningLedger.record_review_in_transaction(
-                conn,
-                review_key=review_key,
-                root_run_id=run_id,
-                application_id=str(run_row["application_id"] or ""),
-                model_type=model_type,
-                status="completed",
-                result=telemetry,
-                created_at=created_at,
-                finished_at=finished_at,
-            )
-            if not inserted:
+            existing_review = conn.execute(
+                "SELECT review_id, root_run_id FROM review_runs WHERE review_key = ?",
+                (review_key,),
+            ).fetchone()
+            if existing_review is not None:
+                if str(existing_review["root_run_id"]) != run_id:
+                    raise ValueError("review key is already bound to another root run")
                 return {
                     "ok": True,
                     "already_reviewed": True,
-                    "review_id": review_id,
+                    "review_id": int(existing_review["review_id"]),
                     "effect": None,
                 }
 
@@ -823,11 +839,34 @@ class MemoryStore:
                 if effect.get("ok") is not True:
                     raise RuntimeError("review memory commit failed")
 
+            committed_telemetry = {
+                **telemetry,
+                "actions": int(
+                    effect is not None and not bool(effect.get("duplicate"))
+                ),
+            }
+            review_id, inserted = SelfLearningLedger.record_review_in_transaction(
+                conn,
+                review_key=review_key,
+                root_run_id=run_id,
+                application_id=str(run_row["application_id"] or ""),
+                model_type=model_type,
+                status="completed",
+                result=committed_telemetry,
+                created_at=created_at,
+                finished_at=finished_at,
+            )
+            if review_id is None:
+                raise ValueError("review_root_not_completed")
+            if not inserted:
+                raise RuntimeError("review audit insert lost its transaction race")
+
             return {
                 "ok": True,
                 "already_reviewed": False,
                 "review_id": review_id,
                 "effect": effect,
+                "telemetry": committed_telemetry,
             }
 
     # -- Model-facing common path -------------------------------------------
