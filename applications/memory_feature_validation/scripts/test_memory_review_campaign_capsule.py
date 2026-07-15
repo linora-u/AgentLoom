@@ -907,6 +907,35 @@ def test_runtime_guard_denies_writes_to_capsule(tmp_path: Path) -> None:
     assert not target.exists()
 
 
+@pytest.mark.skipif(sys.platform != "darwin", reason="macOS release guard")
+def test_runtime_guard_allows_system_dns_socket(tmp_path: Path) -> None:
+    protected = tmp_path / "capsule"
+    protected.mkdir()
+    mdns_socket = Path("/private/var/run/mDNSResponder")
+    assert stat.S_ISSOCK(mdns_socket.stat().st_mode)
+
+    completed = subprocess.run(
+        guarded_runtime_command(
+            [
+                sys.executable,
+                "-c",
+                (
+                    "import socket,sys;"
+                    "s=socket.socket(socket.AF_UNIX);"
+                    "s.connect(sys.argv[1]);s.close()"
+                ),
+                str(mdns_socket),
+            ],
+            repo_root=protected,
+        ),
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+
+    assert completed.returncode == 0, completed.stderr
+
+
 def test_raw_materialization_ignores_replace_refs_and_detects_tampering(
     tmp_path: Path,
 ) -> None:

@@ -39,6 +39,7 @@ _LEGACY_CAMPAIGN_LLM_CONFIG_SECRET_ENV = (
 )
 _TOKEN_FILE = ".agentloom-memory-capsule-token"
 _PYCACHE_PREFIX_RELATIVE = Path(".venv") / ".agentloom-pycache"
+_MDNS_RESPONDER_SOCKET = "/private/var/run/mDNSResponder"
 _TRUSTED_EXECUTION_PREFIXES = (
     "applications/memory_feature_validation",
     "src",
@@ -963,6 +964,10 @@ def _require_isolated_git_metadata(repo_root: Path) -> list[Path]:
 def _sandbox_profile(protected_paths: list[Path]) -> str:
     rules = [
         "(deny network-outbound (remote unix-socket))",
+        (
+            "(allow network-outbound "
+            f'(remote unix-socket (literal "{_MDNS_RESPONDER_SOCKET}")))'
+        ),
         "(deny file-link)",
         "(deny file-write-mode)",
         "(deny file-write-owner)",
