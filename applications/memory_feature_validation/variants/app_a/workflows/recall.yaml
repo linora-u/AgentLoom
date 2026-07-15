@@ -5,14 +5,13 @@ tool_call_type: "tool_call"
 max_steps: 5
 
 workflow: |
-  Load the follow-up with `validation_memory_case`. Answer only from the
-  run-start persistent snapshot. Return exactly one JSON object with key
-  `answer`; use `MISSING` when the fact is absent.
+  Read only the curated persistent-memory snapshot supplied at run start. Do
+  not infer from the task, history, or world knowledge. If the snapshot
+  contains a fact, return exactly one JSON object with key `answer` whose value
+  is the complete persistent memory fact. If it contains no fact, use the
+  literal string `MISSING`.
 
-tools:
-  - name: "validation_memory_case"
-    module: "applications.memory_feature_validation.agent_tools.validation_probes"
-    function: "validation_memory_case"
+tools: []
 
 toolsets: []
 skills: []
