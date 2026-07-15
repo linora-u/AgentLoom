@@ -390,9 +390,162 @@ def test_campaign_scripts_do_not_import_self_learning_implementation() -> None:
 
 
 def test_only_structured_transport_failures_receive_campaign_retry() -> None:
-    assert _retryable("HTTP 503 service unavailable") is True
+    for status_code in (429, 502, 503, 504):
+        assert _retryable(f"HTTP {status_code} provider failure") is True
+    assert _retryable("error code 503 service unavailable") is True
     assert _retryable("APIConnectionError: connection reset") is True
+    assert _retryable("[ERROR] HTTP 503 service unavailable") is True
+    assert _retryable("[WARNING] APIConnectionError: connection reset") is True
+    assert _retryable("[ERROR] APITimeoutError: Request timed out") is True
+    assert _retryable("httpx.ReadTimeout: timed out") is True
+    assert _retryable("httpx.ConnectTimeout: timed out") is True
+    assert _retryable("ConnectionError: socket closed unexpectedly") is True
+    assert (
+        _retryable(
+            "[ERROR] litellm.BadGatewayError: BadGatewayError: "
+            "provider - upstream bad gateway"
+        )
+        is True
+    )
+    assert (
+        _retryable(
+            "[ERROR] litellm.Timeout: Timeout Error: "
+            "provider - upstream deadline exceeded"
+        )
+        is True
+    )
+    assert (
+        _retryable("[WARNING] litellm.RateLimitError: provider quota exhausted")
+        is True
+    )
+    assert (
+        _retryable(
+            "[ERROR] litellm.ServiceUnavailableError: provider unavailable"
+        )
+        is True
+    )
+    assert _retryable("NameResolutionError: DNS lookup failed") is True
+    assert _retryable("ServiceUnavailableError: upstream unhealthy") is True
+    assert _retryable("GatewayTimeoutError: upstream deadline exceeded") is True
+    assert (
+        _retryable(
+            "[INFO] fixture ValueError: sample\n"
+            "[ERROR] APITimeoutError: Request timed out"
+        )
+        is True
+    )
+    assert (
+        _retryable(
+            "[2026-07-15][ERROR] Error while generating output:\n"
+            "litellm.Timeout: APITimeoutError - Request timed \n"
+            "out."
+        )
+        is True
+    )
+    assert (
+        _retryable(
+            "Execution failed: Error while generating output:\n"
+            "litellm.Timeout:\n"
+            "APITimeoutError -\n"
+            "Request timed out."
+        )
+        is True
+    )
     assert _retryable('[INFO] evidence={"noise":"temporary 502"}') is False
+    assert (
+        _retryable(
+            '[INFO] evidence={"noise":"litellm.Timeout: APITimeoutError - '
+            'Request timed out"}'
+        )
+        is False
+    )
+    assert (
+        _retryable(
+            "[INFO] evidence follows:\n"
+            "litellm.Timeout: APITimeoutError - Request timed out"
+        )
+        is False
+    )
+    assert (
+        _retryable(
+            "litellm.Timeout: APITimeoutError - Request timed out is sample text"
+        )
+        is False
+    )
+    assert (
+        _retryable(
+            "[ERROR] synthetic assertion failed:\n"
+            "litellm.Timeout: APITimeoutError - Request timed out"
+        )
+        is False
+    )
+    assert (
+        _retryable(
+            "[ERROR] synthetic assertion failed: litellm.Timeout: "
+            "APITimeoutError - Request timed out"
+        )
+        is False
+    )
+    assert (
+        _retryable(
+            "[ERROR] Execution failed: semantic mismatch; observed="
+            "litellm.Timeout: APITimeoutError - Request timed out"
+        )
+        is False
+    )
+    assert (
+        _retryable(
+            "[ERROR] semantic mismatch: expected HTTP 503 service unavailable, "
+            "observed 200"
+        )
+        is False
+    )
+    assert (
+        _retryable(
+            "[WARNING] fixture text contained gateway timeout but assertion failed"
+        )
+        is False
+    )
+    assert (
+        _retryable("[CRITICAL] semantic output should not say connection reset")
+        is False
+    )
+    assert _retryable("[INFO] APITimeoutError: Request timed out") is False
+    assert (
+        _retryable("[INFO] litellm.Timeout: Timeout Error: sample fixture")
+        is False
+    )
+    assert _retryable("[DEBUG] HTTP 503 service unavailable") is False
+    assert (
+        _retryable(
+            "[ERROR] semantic parse failure\n"
+            "[INFO] evidence follows:\n"
+            "litellm.Timeout: APITimeoutError - Request timed out"
+        )
+        is False
+    )
+    assert (
+        _retryable(
+            '[INFO] evidence={"noise":"Execution failed: litellm.Timeout: '
+            'APITimeoutError - Request timed out"}'
+        )
+        is False
+    )
+    assert (
+        _retryable(
+            "[INFO] evidence follows:\n"
+            "Execution failed: sample transcript\n"
+            "litellm.Timeout: APITimeoutError - Request timed out"
+        )
+        is False
+    )
+    assert (
+        _retryable(
+            "[ERROR] synthetic assertion failed:\n"
+            "litellm.Timeout: APITimeoutError - Request timed out is sample text"
+        )
+        is False
+    )
     assert _retryable("ValueError: fixture said HTTP 503") is False
 
 
