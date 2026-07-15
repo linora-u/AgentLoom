@@ -1784,27 +1784,74 @@ def _initialize_active_capsule() -> list[str]:
 
     try:
         _consume_active_model_config()
-    except RuntimeError:
-        return ["capsule model configuration pipe was invalid"]
-    source = release_git_source_state()
-    model_contract = _safe_model_contract(config_bytes=_ACTIVE_MODEL_CONFIG_BYTES)
-    dataset = dataset_manifest()
-    issues = active_capsule_bootstrap_issues(REPO_ROOT)
+    except Exception:
+        return ["model_config_invalid"]
+
+    issue_codes: list[str] = []
+    try:
+        bootstrap_issues = active_capsule_bootstrap_issues(REPO_ROOT)
+    except Exception:
+        bootstrap_issues = ["invalid"]
+    if bootstrap_issues:
+        issue_codes.append("bootstrap_invalid")
+
+    try:
+        source = release_git_source_state()
+    except Exception:
+        source = {}
     if source.get("available") is not True or source.get("dirty") is not False:
-        issues.append("capsule source did not match its fixed commit")
-    issues.extend(_model_contract_issues(model_contract))
-    descriptor = build_capsule_descriptor(
-        repo_root=REPO_ROOT,
-        runner_file=Path(__file__),
-        source=source,
-        dataset=dataset,
-        model_contract=model_contract,
-        model_config_memory_only=_ACTIVE_MODEL_CONFIG_BYTES is not None,
+        issue_codes.append("source_invalid")
+
+    try:
+        model_contract = _safe_model_contract(
+            config_bytes=_ACTIVE_MODEL_CONFIG_BYTES
+        )
+        model_contract_issues = _model_contract_issues(model_contract)
+    except Exception:
+        model_contract = {}
+        model_contract_issues = ["invalid"]
+    if model_contract_issues:
+        issue_codes.append("model_contract_invalid")
+
+    try:
+        dataset = dataset_manifest()
+    except Exception:
+        dataset = {}
+        issue_codes.append("dataset_invalid")
+
+    if issue_codes:
+        return list(dict.fromkeys(issue_codes))
+    try:
+        descriptor = build_capsule_descriptor(
+            repo_root=REPO_ROOT,
+            runner_file=Path(__file__),
+            source=source,
+            dataset=dataset,
+            model_contract=model_contract,
+            model_config_memory_only=_ACTIVE_MODEL_CONFIG_BYTES is not None,
+        )
+        if descriptor.get("lock_sync_ok") is not True:
+            return ["dependency_environment_invalid"]
+        descriptor_issues = capsule_descriptor_issues(descriptor)
+    except Exception:
+        return ["capsule_descriptor_invalid"]
+    if descriptor_issues:
+        return ["capsule_descriptor_invalid"]
+    _ACTIVE_CAPSULE_DESCRIPTOR = descriptor
+    return []
+
+
+def _print_active_capsule_preflight_failure(issue_codes: list[str]) -> None:
+    """Expose stable failure classes without echoing sensitive diagnostics."""
+    print(
+        json.dumps(
+            {
+                "status": "CAPSULE_PREFLIGHT_FAIL",
+                "issue_codes": list(dict.fromkeys(issue_codes)),
+            },
+            sort_keys=True,
+        )
     )
-    issues.extend(capsule_descriptor_issues(descriptor))
-    if not issues:
-        _ACTIVE_CAPSULE_DESCRIPTOR = descriptor
-    return list(dict.fromkeys(issues))
 
 
 def _run_in_capsule(
@@ -2042,13 +2089,19 @@ def main() -> int:
     try:
         _require_isolated_git_metadata(REPO_ROOT)
     except (OSError, RuntimeError):
-        print("status=CAPSULE_PREFLIGHT_FAIL")
+        if capsule_is_active():
+            _print_active_capsule_preflight_failure(["git_metadata_invalid"])
+        else:
+            print("status=CAPSULE_PREFLIGHT_FAIL")
         return 1
     if not args.dry_run:
         if capsule_is_active():
-            capsule_issues = _initialize_active_capsule()
+            try:
+                capsule_issues = _initialize_active_capsule()
+            except Exception:
+                capsule_issues = ["capsule_preflight_internal_error"]
             if capsule_issues:
-                print("status=CAPSULE_PREFLIGHT_FAIL")
+                _print_active_capsule_preflight_failure(capsule_issues)
                 return 1
         else:
             if args.reproduce_campaign:
