@@ -22,6 +22,7 @@ import subprocess
 import sys
 import sysconfig
 import tempfile
+import tomllib
 from collections.abc import Iterator
 from contextlib import contextmanager
 from dataclasses import dataclass
@@ -263,6 +264,85 @@ def _clean_python_env(root: Path, *, token: str, uv: Path) -> dict[str, str]:
         }
     )
     return env
+
+
+def _write_trusted_loom_launcher(root: Path, python: Path) -> Path:
+    """Create the capsule CLI without installing mutable project metadata."""
+    root = root.resolve()
+    python = Path(os.path.abspath(python))
+    private_venv = root / ".venv"
+    if not python.is_absolute() or not python.is_file() or not _lexically_inside(
+        python, private_venv
+    ):
+        raise RuntimeError("capsule launcher Python was outside its private venv")
+    launcher = private_venv / "bin" / "loom"
+    payload = (
+        f"#!{python}\n"
+        "from importlib.util import find_spec\n"
+        "from pathlib import Path\n"
+        "import sys\n\n"
+        "_CAPSULE_ROOT = Path(__file__).resolve().parents[2]\n"
+        "sys.path.append(str(_CAPSULE_ROOT))\n"
+        "_SRC_SPEC = find_spec(\"src\")\n"
+        "if (\n"
+        "    _SRC_SPEC is None\n"
+        "    or _SRC_SPEC.origin is None\n"
+        "    or Path(_SRC_SPEC.origin).resolve()\n"
+        "    != (_CAPSULE_ROOT / \"src\" / \"__init__.py\").resolve()\n"
+        "):\n"
+        "    raise RuntimeError(\"capsule src import origin was invalid\")\n"
+        "from src.__main__ import main\n\n"
+        "if __name__ == \"__main__\":\n"
+        "    sys.exit(main())\n"
+    ).encode()
+    flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL
+    if hasattr(os, "O_NOFOLLOW"):
+        flags |= os.O_NOFOLLOW
+    try:
+        descriptor = os.open(launcher, flags, 0o755)
+    except FileExistsError as exc:
+        raise RuntimeError("capsule loom launcher already existed") from exc
+    created_identity: tuple[int, int] | None = None
+    try:
+        initial = os.fstat(descriptor)
+        created_identity = (initial.st_dev, initial.st_ino)
+        if not stat.S_ISREG(initial.st_mode) or initial.st_nlink != 1:
+            raise RuntimeError("capsule loom launcher was not a new regular file")
+        try:
+            with (root / "pyproject.toml").open("rb") as handle:
+                project_config = tomllib.load(handle)
+            configured_entrypoint = project_config["project"]["scripts"]["loom"]
+        except (KeyError, OSError, TypeError, tomllib.TOMLDecodeError) as exc:
+            raise RuntimeError(
+                "capsule loom entrypoint contract was invalid"
+            ) from exc
+        if configured_entrypoint != "src.__main__:main":
+            raise RuntimeError("capsule loom entrypoint contract was invalid")
+        with os.fdopen(descriptor, "wb", closefd=True) as handle:
+            descriptor = -1
+            handle.write(payload)
+            handle.flush()
+            os.fsync(handle.fileno())
+            os.fchmod(handle.fileno(), 0o755)
+        final = launcher.lstat()
+        if (
+            not stat.S_ISREG(final.st_mode)
+            or final.st_nlink != 1
+            or final.st_mode & 0o111 != 0o111
+            or (final.st_dev, final.st_ino) != created_identity
+        ):
+            raise RuntimeError("capsule loom launcher identity was invalid")
+        return launcher
+    except Exception:
+        if descriptor >= 0:
+            os.close(descriptor)
+        try:
+            current = launcher.lstat()
+            if created_identity == (current.st_dev, current.st_ino):
+                launcher.unlink()
+        except OSError:
+            pass
+        raise
 
 
 @dataclass(frozen=True)
@@ -1078,6 +1158,7 @@ def provision_capsule(
                 "--locked",
                 "--all-groups",
                 "--quiet",
+                "--no-install-project",
                 "--python",
                 str(Path(sys.executable).resolve()),
             ],
@@ -1091,10 +1172,6 @@ def provision_capsule(
             env=env,
             timeout=120,
         )
-        for build_metadata in capsule_root.glob("*.egg-info"):
-            if build_metadata.is_dir():
-                shutil.rmtree(build_metadata)
-        _detach_hardlinked_files(capsule_root)
         python = capsule_root / ".venv" / "bin" / "python"
         runner = (
             capsule_root
@@ -1105,6 +1182,21 @@ def provision_capsule(
         )
         if not python.is_file() or not runner.is_file():
             raise RuntimeError("capsule runtime entrypoints are missing")
+        _write_trusted_loom_launcher(capsule_root, python)
+        _run_checked(
+            [
+                str(uv),
+                "sync",
+                "--locked",
+                "--all-groups",
+                "--no-install-project",
+                "--check",
+            ],
+            cwd=capsule_root,
+            env=env,
+            timeout=300,
+        )
+        _detach_hardlinked_files(capsule_root)
 
         # Verify the exact checkout without importing campaign code; this also
         # keeps provisioning valid while the parent is testing a previous
@@ -1166,7 +1258,14 @@ def build_capsule_descriptor(
                 [str(uv), "lock", "--check"], cwd=repo_root, timeout=120
             )
             _run_checked(
-                [str(uv), "sync", "--locked", "--all-groups", "--check"],
+                [
+                    str(uv),
+                    "sync",
+                    "--locked",
+                    "--all-groups",
+                    "--no-install-project",
+                    "--check",
+                ],
                 cwd=repo_root,
                 timeout=300,
             )

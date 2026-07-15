@@ -262,6 +262,237 @@ def test_provision_rejects_aliased_metadata_before_any_git_or_uv(
             pytest.fail("aliased metadata reached capsule provisioning")
 
 
+def test_provision_installs_dependencies_without_the_project_and_writes_launcher(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    repo = tmp_path / "repo"
+    model_config = repo / "config" / "llm.yaml"
+    model_config.parent.mkdir(parents=True)
+    model_config.write_text("summary: {}\n", encoding="utf-8")
+    uv = tmp_path / "trusted" / "uv"
+    uv.parent.mkdir()
+    uv.write_text("trusted uv\n", encoding="utf-8")
+    expected_commit = "a" * 40
+    temporary_root = tmp_path / "private"
+    commands: list[list[str]] = []
+    checkout_checks: list[str] = []
+
+    def materialize(root: Path, _commit: str) -> None:
+        runner = (
+            root
+            / "applications"
+            / "memory_feature_validation"
+            / "scripts"
+            / "run_memory_review_campaign.py"
+        )
+        runner.parent.mkdir(parents=True)
+        runner.write_text("pass\n", encoding="utf-8")
+        package = root / "src"
+        package.mkdir()
+        (package / "__init__.py").write_text("", encoding="utf-8")
+        (package / "__main__.py").write_text(
+            "def main():\n"
+            "    print('NESTED_LAUNCH_OK')\n"
+            "    return 0\n",
+            encoding="utf-8",
+        )
+        (root / "pyproject.toml").write_text(
+            '[project.scripts]\nloom = "src.__main__:main"\n',
+            encoding="utf-8",
+        )
+        (root / "nested" / "cwd").mkdir(parents=True)
+
+    def run_checked(command, *, cwd, **_kwargs):
+        command = [str(value) for value in command]
+        commands.append(command)
+        if len(command) > 1 and command[1] == "sync":
+            if "--check" in command:
+                assert (cwd / ".venv" / "bin" / "loom").is_file()
+                return subprocess.CompletedProcess(command, 0, stdout="", stderr="")
+            bin_dir = cwd / ".venv" / "bin"
+            bin_dir.mkdir(parents=True)
+            (bin_dir / "python").symlink_to(Path(sys.executable).resolve())
+            if "--no-install-project" not in command:
+                (cwd / "AgentLoom.egg-info").mkdir()
+        stdout = expected_commit + "\n" if "rev-parse" in command else ""
+        return subprocess.CompletedProcess(command, 0, stdout=stdout, stderr="")
+
+    def cleanup(_repo_root: Path, private: Path, _capsule: Path) -> None:
+        capsule_module._thaw_tree(private)
+        capsule_module.shutil.rmtree(private)
+
+    def make_private_root(**_kwargs) -> str:
+        temporary_root.mkdir()
+        return str(temporary_root)
+
+    def checkout_state(root: Path, commit: str) -> tuple[bool, str]:
+        assert (root / ".venv" / "bin" / "loom").is_file()
+        assert not list(root.glob("*.egg-info"))
+        checkout_checks.append(commit)
+        return True, "b" * 64
+
+    monkeypatch.setattr(capsule_module, "_require_isolated_git_metadata", lambda _: [])
+    monkeypatch.setattr(capsule_module, "_trusted_uv", lambda: uv)
+    monkeypatch.setattr(capsule_module, "_unsafe_git_customization_issues", lambda _: [])
+    monkeypatch.setattr(capsule_module.tempfile, "mkdtemp", make_private_root)
+    monkeypatch.setattr(capsule_module, "_materialize_commit_tree", materialize)
+    monkeypatch.setattr(capsule_module, "_run_checked", run_checked)
+    monkeypatch.setattr(capsule_module, "_checkout_state", checkout_state)
+    monkeypatch.setattr(capsule_module, "_verify_write_guard", lambda _: None)
+    monkeypatch.setattr(capsule_module, "_secure_cleanup", cleanup)
+
+    with capsule_module.provision_capsule(
+        repo,
+        expected_commit=expected_commit,
+    ) as capsule:
+        sync_commands = [command for command in commands if "sync" in command]
+        assert sync_commands == [
+            [
+                str(uv),
+                "sync",
+                "--locked",
+                "--all-groups",
+                "--quiet",
+                "--no-install-project",
+                "--python",
+                str(Path(sys.executable).resolve()),
+            ],
+            [
+                str(uv),
+                "sync",
+                "--locked",
+                "--all-groups",
+                "--no-install-project",
+                "--check",
+            ],
+        ]
+        assert not list(capsule.root.glob("*.egg-info"))
+        loom = capsule.root / ".venv" / "bin" / "loom"
+        assert loom.is_file() and not loom.is_symlink()
+        assert loom.read_text(encoding="utf-8") == (
+            f"#!{capsule.python}\n"
+            "from importlib.util import find_spec\n"
+            "from pathlib import Path\n"
+            "import sys\n\n"
+            "_CAPSULE_ROOT = Path(__file__).resolve().parents[2]\n"
+            "sys.path.append(str(_CAPSULE_ROOT))\n"
+            "_SRC_SPEC = find_spec(\"src\")\n"
+            "if (\n"
+            "    _SRC_SPEC is None\n"
+            "    or _SRC_SPEC.origin is None\n"
+            "    or Path(_SRC_SPEC.origin).resolve()\n"
+            "    != (_CAPSULE_ROOT / \"src\" / \"__init__.py\").resolve()\n"
+            "):\n"
+            "    raise RuntimeError(\"capsule src import origin was invalid\")\n"
+            "from src.__main__ import main\n\n"
+            "if __name__ == \"__main__\":\n"
+            "    sys.exit(main())\n"
+        )
+        mode = loom.stat().st_mode
+        assert mode & 0o111 == 0o111
+        assert mode & 0o222 == 0
+        assert loom.stat().st_nlink == 1
+        completed = subprocess.run(
+            [str(loom)],
+            cwd=capsule.root / "nested" / "cwd",
+            env=capsule.env,
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        assert completed.returncode == 0, completed.stderr
+        assert completed.stdout.strip() == "NESTED_LAUNCH_OK"
+        assert checkout_checks == [expected_commit]
+
+
+def test_trusted_launcher_creation_is_exclusive(tmp_path: Path) -> None:
+    root = tmp_path / "capsule"
+    python = root / ".venv" / "bin" / "python"
+    python.parent.mkdir(parents=True)
+    python.write_text("python\n", encoding="utf-8")
+    loom = python.parent / "loom"
+    loom.write_text("untrusted launcher\n", encoding="utf-8")
+    original_inode = loom.stat().st_ino
+
+    with pytest.raises(RuntimeError, match="already existed"):
+        capsule_module._write_trusted_loom_launcher(root, python)
+
+    assert loom.read_text(encoding="utf-8") == "untrusted launcher\n"
+    assert loom.stat().st_ino == original_inode
+
+
+def test_trusted_launcher_rejects_drifted_project_entrypoint(tmp_path: Path) -> None:
+    root = tmp_path / "capsule"
+    python = root / ".venv" / "bin" / "python"
+    python.parent.mkdir(parents=True)
+    python.write_text("python\n", encoding="utf-8")
+    (root / "pyproject.toml").write_text(
+        '[project.scripts]\nloom = "unexpected.module:main"\n',
+        encoding="utf-8",
+    )
+
+    with pytest.raises(RuntimeError, match="entrypoint contract"):
+        capsule_module._write_trusted_loom_launcher(root, python)
+
+    assert not (python.parent / "loom").exists()
+
+
+def test_descriptor_checks_the_locked_dependency_only_environment(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    uv = tmp_path / "uv"
+    uv.write_text("trusted uv\n", encoding="utf-8")
+    commands: list[list[str]] = []
+
+    def run_checked(command, **_kwargs):
+        command = [str(value) for value in command]
+        commands.append(command)
+        stdout = "uv 0.test\n" if command[-1] == "--version" else "ok\n"
+        return subprocess.CompletedProcess(command, 0, stdout=stdout, stderr="")
+
+    monkeypatch.setenv(capsule_module.CAPSULE_UV_BINARY_ENV, str(uv))
+    monkeypatch.setattr(capsule_module, "_run_checked", run_checked)
+    monkeypatch.setattr(capsule_module, "_tree_manifest_hash", lambda *_args, **_kwargs: "c" * 64)
+    monkeypatch.setattr(capsule_module, "_checkout_state", lambda *_args: (True, "d" * 64))
+    monkeypatch.setattr(capsule_module, "_tree_is_read_only", lambda _: True)
+    monkeypatch.setattr(capsule_module, "_regular_files_unshared", lambda _: True)
+    monkeypatch.setattr(capsule_module, "_git_metadata_paths", lambda _: [tmp_path])
+    monkeypatch.setattr(capsule_module, "_git_metadata_is_isolated", lambda _: True)
+    monkeypatch.setattr(capsule_module, "active_capsule_bootstrap_issues", lambda _: [])
+
+    descriptor = capsule_module.build_capsule_descriptor(
+        repo_root=REPO_ROOT,
+        runner_file=REPO_ROOT
+        / "applications"
+        / "memory_feature_validation"
+        / "scripts"
+        / "run_memory_review_campaign.py",
+        source={"commit": "a" * 40, "files": []},
+        dataset={"files": []},
+        model_contract={"configured": True},
+        model_config_memory_only=True,
+    )
+
+    assert descriptor["lock_sync_ok"] is True
+    assert descriptor["checkout_exact"] is True
+    assert descriptor["loom_is_capsule"] is True
+    assert descriptor["loom_shebang_is_capsule"] is True
+    assert descriptor["loom_shebang_matches_python"] is True
+    assert descriptor["src_origin_is_capsule"] is True
+    assert [command for command in commands if "sync" in command] == [
+        [
+            str(uv),
+            "sync",
+            "--locked",
+            "--all-groups",
+            "--no-install-project",
+            "--check",
+        ]
+    ]
+
+
 def test_public_environment_flags_cannot_mark_main_checkout_as_capsule(
     monkeypatch,
 ) -> None:

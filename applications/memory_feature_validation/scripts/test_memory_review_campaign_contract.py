@@ -1106,6 +1106,96 @@ def test_main_checks_git_metadata_before_source_inspection(
     assert campaign_runner.main() == 1
 
 
+def test_active_capsule_preflight_outputs_only_safe_issue_codes(
+    monkeypatch,
+    capsys,
+) -> None:
+    sensitive_failure = (
+        "failed to parse /private/alice/config/llm.yaml "
+        "with api_key=campaign-secret"
+    )
+
+    def reject_model_config() -> None:
+        raise RuntimeError(sensitive_failure)
+
+    monkeypatch.setattr(
+        campaign_runner,
+        "_require_isolated_git_metadata",
+        lambda _root: [],
+    )
+    monkeypatch.setattr(campaign_runner, "capsule_is_active", lambda: True)
+    monkeypatch.setattr(
+        campaign_runner,
+        "_consume_active_model_config",
+        reject_model_config,
+    )
+    monkeypatch.setattr(sys, "argv", ["memory-campaign", "--runs", "1"])
+
+    assert campaign_runner.main() == 1
+    output = capsys.readouterr().out
+    assert json.loads(output) == {
+        "issue_codes": ["model_config_invalid"],
+        "status": "CAPSULE_PREFLIGHT_FAIL",
+    }
+    assert sensitive_failure not in output
+    assert "/private/alice" not in output
+    assert "campaign-secret" not in output
+
+
+def test_active_capsule_preflight_identifies_invalid_dependency_environment(
+    monkeypatch,
+    capsys,
+) -> None:
+    sensitive_failure = (
+        "uv failed under /private/alice/capsule with Authorization: secret-token"
+    )
+    monkeypatch.setattr(
+        campaign_runner,
+        "_require_isolated_git_metadata",
+        lambda _root: [],
+    )
+    monkeypatch.setattr(campaign_runner, "capsule_is_active", lambda: True)
+    monkeypatch.setattr(campaign_runner, "_consume_active_model_config", lambda: None)
+    monkeypatch.setattr(
+        campaign_runner,
+        "active_capsule_bootstrap_issues",
+        lambda _root: [],
+    )
+    monkeypatch.setattr(
+        campaign_runner,
+        "release_git_source_state",
+        lambda: {"available": True, "dirty": False},
+    )
+    monkeypatch.setattr(
+        campaign_runner,
+        "_safe_model_contract",
+        lambda **_kwargs: {"configured": True},
+    )
+    monkeypatch.setattr(campaign_runner, "_model_contract_issues", lambda _: [])
+    monkeypatch.setattr(campaign_runner, "dataset_manifest", lambda: {"files": []})
+    monkeypatch.setattr(
+        campaign_runner,
+        "build_capsule_descriptor",
+        lambda **_kwargs: {"lock_sync_ok": False},
+    )
+    monkeypatch.setattr(
+        campaign_runner,
+        "capsule_descriptor_issues",
+        lambda _descriptor: [sensitive_failure],
+    )
+    monkeypatch.setattr(sys, "argv", ["memory-campaign", "--runs", "1"])
+
+    assert campaign_runner.main() == 1
+    output = capsys.readouterr().out
+    assert json.loads(output) == {
+        "issue_codes": ["dependency_environment_invalid"],
+        "status": "CAPSULE_PREFLIGHT_FAIL",
+    }
+    assert sensitive_failure not in output
+    assert "/private/alice" not in output
+    assert "secret-token" not in output
+
+
 def test_reproduction_provisions_the_recorded_historical_commit(
     tmp_path: Path,
     monkeypatch,
