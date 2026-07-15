@@ -120,6 +120,20 @@ def _make_agent(*, logger=None) -> DummyAgent:
     return agent
 
 
+def _make_review_agent(*, logger=None) -> DummyAgent:
+    return DummyAgent(
+        config={
+            "name": "runtime_dummy_memory_review",
+            "self_learning": {
+                "enabled": True,
+                "memory": {"review_model": "summary"},
+            },
+        },
+        model=object(),
+        logger=logger,
+    )
+
+
 def _make_tool_call_agent(*, logger=None) -> DummyToolCallingAgent:
     agent = DummyToolCallingAgent(
         config={"name": "runtime_dummy_tool_call"},
@@ -389,7 +403,7 @@ def test_root_memory_review_runs_after_session_end_inside_owned_root(monkeypatch
     from src.extensions.self_learning import reviewer
     from src.trace import bind_root_run, require_root_run_id
 
-    agent = _make_agent(logger=DummyLoggerBackend())
+    agent = _make_review_agent(logger=DummyLoggerBackend())
     runtime_agent = DummyRuntimeRunner(result="ok")
     order = []
 
@@ -426,7 +440,7 @@ def test_root_memory_review_runs_after_session_end_inside_owned_root(monkeypatch
 def test_memory_review_failure_does_not_change_root_run_result(monkeypatch):
     from src.extensions.self_learning import reviewer
 
-    agent = _make_agent(logger=DummyLoggerBackend())
+    agent = _make_review_agent(logger=DummyLoggerBackend())
     runtime_agent = DummyRuntimeRunner(result="main-result")
     session_events = []
 
@@ -690,7 +704,7 @@ def test_successful_root_review_waits_for_session_end_recorder_commit(monkeypatc
     from src.extensions.self_learning import reviewer
     from src.extensions.self_learning.ledger import SelfLearningLedger
 
-    agent = _make_agent(logger=DummyLoggerBackend())
+    agent = _make_review_agent(logger=DummyLoggerBackend())
     runtime_agent = DummyRuntimeRunner(result="main-result")
     recorder_committed = threading.Event()
     observations = []
@@ -737,6 +751,198 @@ def test_successful_root_review_waits_for_session_end_recorder_commit(monkeypatc
     assert len(observations) == 1
     assert observations[0]["recorder_committed"] is True
     assert observations[0]["completed_context"] is not None
+
+
+def test_custom_session_end_telemetry_cannot_disable_persisted_review(monkeypatch):
+    """The completed ledger projection, not shared telemetry, authorizes review."""
+    from src.extensions.self_learning import reviewer
+    from src.extensions.self_learning.ledger import SelfLearningLedger
+
+    agent = _make_review_agent(logger=DummyLoggerBackend())
+    runtime_agent = DummyRuntimeRunner(result="main-result")
+    reviewed_roots = []
+
+    monkeypatch.setattr(agent, "build_runtime_agent", lambda: runtime_agent)
+    monkeypatch.setattr(agent, "_inject_memory_snapshot", lambda tasks: tasks)
+
+    def _overwrite_shared_telemetry(_context):
+        return HookResult(
+            success=True,
+            decision="allow",
+            telemetry={
+                "self_learning_session_end_persisted_root_run_id": "other-root",
+            },
+        )
+
+    def _capture_review(*, root_run_id, **_kwargs):
+        assert (
+            SelfLearningLedger().completed_review_context(
+                root_run_id,
+                tool_result_limit=0,
+            )
+            is not None
+        )
+        reviewed_roots.append(root_run_id)
+        return {"status": "skipped"}
+
+    agent._hook_manager.register_hook(
+        HookEvent.SESSION_END,
+        "*",
+        _overwrite_shared_telemetry,
+        source="test:custom_session_end",
+    )
+    monkeypatch.setattr(reviewer, "review_finished_run", _capture_review)
+
+    assert agent.run("top-level") == "main-result"
+    assert len(reviewed_roots) == 1
+
+
+def test_session_end_persistence_failure_never_builds_completed_run_review(
+    monkeypatch,
+):
+    """A successful task is not reviewable until its SessionEnd is durable."""
+    from src.extensions.self_learning import reviewer
+    from src.extensions.self_learning.ledger import SelfLearningLedger
+    from src.extensions.self_learning.session_recorder import SessionRecorder
+
+    agent = DummyAgent(
+        config={
+            "name": "runtime_dummy_failed_session_end",
+            "self_learning": {
+                "enabled": True,
+                "memory": {"review_model": "summary"},
+            },
+        },
+        model=object(),
+        logger=DummyLoggerBackend(),
+    )
+    runtime_agent = DummyRuntimeRunner(result="main-result")
+    failed_root_ids = []
+    review_calls = []
+    digest_calls = []
+
+    monkeypatch.setattr(agent, "build_runtime_agent", lambda: runtime_agent)
+    monkeypatch.setattr(agent, "_inject_memory_snapshot", lambda tasks: tasks)
+
+    original_append = SessionRecorder.append
+
+    def _fail_only_session_end(self, event, *, trusted_evidence=()):
+        if event.event_type == "run_completed":
+            failed_root_ids.append(event.root_run_id)
+            raise OSError("simulated SessionEnd persistence failure")
+        return original_append(
+            self,
+            event,
+            trusted_evidence=trusted_evidence,
+        )
+
+    original_review = reviewer.review_finished_run
+
+    def _capture_review(**kwargs):
+        review_calls.append(kwargs)
+        return original_review(**kwargs)
+
+    def _capture_digest(root_run_id, **_kwargs):
+        digest_calls.append(root_run_id)
+        return None
+
+    monkeypatch.setattr(SessionRecorder, "append", _fail_only_session_end)
+    monkeypatch.setattr(reviewer, "review_finished_run", _capture_review)
+    monkeypatch.setattr(reviewer, "_review_digest", _capture_digest)
+
+    assert agent.run("top-level") == "main-result"
+    assert len(failed_root_ids) == 1
+    assert len(review_calls) == 1
+    assert digest_calls == []
+
+    root_run_id = failed_root_ids[0]
+    ledger = SelfLearningLedger()
+    assert ledger.completed_review_context(root_run_id, tool_result_limit=1) is None
+    assert (
+        ledger.review_status(
+            review_key=f"root:{root_run_id}",
+            root_run_id=root_run_id,
+        )
+        is None
+    )
+
+
+def test_custom_session_end_telemetry_cannot_create_orphan_review_audit(
+    monkeypatch,
+):
+    """Reviewer independently requires the persisted completed-run projection."""
+    from src.extensions.self_learning import reviewer
+    from src.extensions.self_learning.ledger import SelfLearningLedger
+    from src.extensions.self_learning.session_recorder import (
+        SessionRecorder,
+    )
+
+    agent = DummyAgent(
+        config={
+            "name": "runtime_dummy_forged_session_end_receipt",
+            "self_learning": {
+                "enabled": True,
+                "memory": {"review_model": "summary"},
+            },
+        },
+        model=object(),
+        logger=DummyLoggerBackend(),
+    )
+    runtime_agent = DummyRuntimeRunner(result="main-result")
+    failed_root_ids = []
+    digest_calls = []
+
+    monkeypatch.setattr(agent, "build_runtime_agent", lambda: runtime_agent)
+    monkeypatch.setattr(agent, "_inject_memory_snapshot", lambda tasks: tasks)
+
+    original_append = SessionRecorder.append
+
+    def _fail_only_session_end(self, event, *, trusted_evidence=()):
+        if event.event_type == "run_completed":
+            failed_root_ids.append(event.root_run_id)
+            raise OSError("simulated SessionEnd persistence failure")
+        return original_append(
+            self,
+            event,
+            trusted_evidence=trusted_evidence,
+        )
+
+    def _forge_shared_telemetry(context):
+        return HookResult(
+            success=True,
+            decision="allow",
+            telemetry={
+                "self_learning_session_end_persisted_root_run_id": (
+                    context.root_run_id
+                ),
+            },
+        )
+
+    def _capture_digest(root_run_id, **_kwargs):
+        digest_calls.append(root_run_id)
+        return None
+
+    monkeypatch.setattr(SessionRecorder, "append", _fail_only_session_end)
+    monkeypatch.setattr(reviewer, "_review_digest", _capture_digest)
+    agent._hook_manager.register_hook(
+        HookEvent.SESSION_END,
+        "*",
+        _forge_shared_telemetry,
+        source="test:forged_shared_telemetry",
+    )
+
+    assert agent.run("top-level") == "main-result"
+    assert len(failed_root_ids) == 1
+    assert digest_calls == []
+
+    root_run_id = failed_root_ids[0]
+    assert (
+        SelfLearningLedger().review_status(
+            review_key=f"root:{root_run_id}",
+            root_run_id=root_run_id,
+        )
+        is None
+    )
 
 
 def test_same_base_agent_concurrent_top_level_runs_do_not_cross_context(monkeypatch):

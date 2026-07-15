@@ -7,6 +7,7 @@ from pathlib import Path
 
 import pytest
 
+from src.extensions.self_learning.event_schema import CanonicalSessionEvent
 from src.extensions.self_learning.ledger import (
     SelfLearningLedger,
     memory_content_hash,
@@ -28,6 +29,7 @@ EXPECTED_PENDING_COLUMNS = [
     "scope_type",
     "scope_id",
     "payload_json",
+    "content_hash",
     "source_run_id",
     "created_at",
     "resolved_at",
@@ -321,6 +323,10 @@ def test_fresh_database_has_only_the_v5_memory_schema_and_reinitializes_cleanly(
         assert _table_columns(conn, "memory_items") == EXPECTED_MEMORY_COLUMNS
         assert _table_columns(conn, "memory_pending_writes") == EXPECTED_PENDING_COLUMNS
         assert _table_columns(conn, "review_runs") == EXPECTED_REVIEW_COLUMNS
+        pending_indexes = {
+            str(row[1]) for row in conn.execute("PRAGMA index_list(memory_pending_writes)")
+        }
+        assert "idx_memory_pending_add_dedup" in pending_indexes
         assert _table_columns(
             conn,
             "trusted_review_evidence",
@@ -340,6 +346,184 @@ def test_fresh_database_has_only_the_v5_memory_schema_and_reinitializes_cleanly(
             5,
         ]
         assert conn.execute("PRAGMA integrity_check").fetchone()[0] == "ok"
+
+
+def test_existing_v5_pending_adds_gain_indexed_normalized_dedup(tmp_path: Path) -> None:
+    db = tmp_path / "pre-dedup-v5.db"
+    SelfLearningLedger(db)
+    with sqlite3.connect(db) as conn:
+        conn.execute("DROP INDEX idx_memory_pending_add_dedup")
+        conn.execute(
+            "ALTER TABLE memory_pending_writes RENAME TO pending_with_hash"
+        )
+        conn.execute(
+            """
+            CREATE TABLE memory_pending_writes (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                status TEXT NOT NULL,
+                action TEXT NOT NULL,
+                scope_type TEXT NOT NULL,
+                scope_id TEXT NOT NULL,
+                payload_json TEXT NOT NULL,
+                source_run_id TEXT NOT NULL,
+                created_at TEXT NOT NULL,
+                resolved_at TEXT
+            )
+            """
+        )
+        conn.executemany(
+            """
+            INSERT INTO memory_pending_writes(
+                status, action, scope_type, scope_id, payload_json,
+                source_run_id, created_at
+            ) VALUES('pending', 'add', 'project', 'project', ?, ?, 't')
+            """,
+            [
+                (json.dumps({"content": "A durable fact."}), "root-1"),
+                (json.dumps({"content": "  a  durable FACT.  "}), "root-2"),
+            ],
+        )
+        conn.execute("DROP TABLE pending_with_hash")
+
+    SelfLearningLedger._initialized_paths.discard(str(db.resolve()))
+    SelfLearningLedger(db)
+
+    with sqlite3.connect(db) as conn:
+        rows = conn.execute(
+            "SELECT status, content_hash FROM memory_pending_writes ORDER BY id"
+        ).fetchall()
+        indexes = {
+            str(row[1]) for row in conn.execute("PRAGMA index_list(memory_pending_writes)")
+        }
+
+    assert rows == [
+        ("pending", memory_content_hash("A durable fact.")),
+        ("stale", memory_content_hash("A durable fact.")),
+    ]
+    assert "idx_memory_pending_add_dedup" in indexes
+
+
+def test_pending_add_hash_repair_resolves_null_and_hashed_collision(
+    tmp_path: Path,
+) -> None:
+    db = tmp_path / "pre-revision-pending-collision.db"
+    expected_hash = "95552113f78a3ac71173c66839c0958b6034387b8a8d154d480de603828cb3ca"
+    SelfLearningLedger(db)
+    with sqlite3.connect(db) as conn:
+        conn.execute("DROP TRIGGER trg_memory_pending_add_require_hash_insert")
+        conn.execute("DROP TRIGGER trg_memory_pending_add_require_hash_update")
+        conn.execute(
+            """
+            INSERT INTO memory_pending_writes(
+                id, status, action, scope_type, scope_id, payload_json,
+                content_hash, source_run_id, created_at
+            ) VALUES(1, 'pending', 'add', 'project', 'project', ?, NULL, 'old-root', 't')
+            """,
+            (json.dumps({"content": "A durable fact."}),),
+        )
+        conn.execute(
+            """
+            INSERT INTO memory_pending_writes(
+                id, status, action, scope_type, scope_id, payload_json,
+                content_hash, source_run_id, created_at
+            ) VALUES(2, 'pending', 'add', 'project', 'project', ?, ?, 'new-root', 't')
+            """,
+            (json.dumps({"content": "  a durable FACT.  "}), expected_hash),
+        )
+        conn.execute(
+            "DELETE FROM maintenance "
+            "WHERE key='schema_v5_pending_add_hash_revision'"
+        )
+
+    SelfLearningLedger._initialized_paths.discard(str(db.resolve()))
+    SelfLearningLedger(db)
+
+    with sqlite3.connect(db) as conn:
+        rows = conn.execute(
+            "SELECT id, status, content_hash FROM memory_pending_writes ORDER BY id"
+        ).fetchall()
+
+    assert rows == [
+        (1, "pending", expected_hash),
+        (2, "stale", expected_hash),
+    ]
+
+
+def test_current_pending_hash_revision_does_not_rewrite_history_on_restart(
+    tmp_path: Path,
+) -> None:
+    db = tmp_path / "current-pending-hash-revision.db"
+    expected_hash = "95552113f78a3ac71173c66839c0958b6034387b8a8d154d480de603828cb3ca"
+    SelfLearningLedger(db)
+    with sqlite3.connect(db) as conn:
+        conn.execute(
+            """
+            INSERT INTO memory_pending_writes(
+                status, action, scope_type, scope_id, payload_json,
+                content_hash, source_run_id, created_at
+            ) VALUES('pending', 'add', 'project', 'project', ?, ?, 'root', 't')
+            """,
+            (json.dumps({"content": "A durable fact."}), expected_hash),
+        )
+        conn.execute(
+            """
+            CREATE TRIGGER reject_pending_history_rewrite
+            BEFORE UPDATE ON memory_pending_writes
+            BEGIN
+                SELECT RAISE(ABORT, 'pending history was rewritten');
+            END
+            """
+        )
+
+    SelfLearningLedger._initialized_paths.discard(str(db.resolve()))
+    SelfLearningLedger(db)
+
+    with sqlite3.connect(db) as conn:
+        revision = conn.execute(
+            "SELECT value FROM maintenance "
+            "WHERE key='schema_v5_pending_add_hash_revision'"
+        ).fetchone()
+        row = conn.execute(
+            "SELECT status, content_hash FROM memory_pending_writes"
+        ).fetchone()
+
+    assert revision == ("2",)
+    assert row == ("pending", expected_hash)
+
+
+def test_upgraded_schema_rejects_old_process_pending_add_without_hash(
+    tmp_path: Path,
+) -> None:
+    db = tmp_path / "mixed-version-pending-add.db"
+    SelfLearningLedger(db)
+    with sqlite3.connect(db) as conn:
+        conn.execute("DROP TRIGGER trg_memory_pending_add_require_hash_insert")
+        conn.execute("DROP TRIGGER trg_memory_pending_add_require_hash_update")
+        conn.execute(
+            "UPDATE maintenance SET value='1' "
+            "WHERE key='schema_v5_pending_add_hash_revision'"
+        )
+
+    legacy_connection = sqlite3.connect(db)
+    try:
+        SelfLearningLedger._initialized_paths.discard(str(db.resolve()))
+        SelfLearningLedger(db)
+
+        with pytest.raises(
+            sqlite3.IntegrityError,
+            match="pending add content hash required",
+        ):
+            legacy_connection.execute(
+                """
+                INSERT INTO memory_pending_writes(
+                    status, action, scope_type, scope_id, payload_json,
+                    source_run_id, created_at
+                ) VALUES('pending', 'add', 'project', 'project', ?, 'old-root', 't')
+                """,
+                (json.dumps({"content": "A durable fact."}),),
+            )
+    finally:
+        legacy_connection.close()
 
 
 def test_v4_upgrade_preserves_history_and_keeps_legacy_proposals_non_active(
@@ -712,6 +896,8 @@ def test_v5_sanitizer_revision_cleans_memory_tables_and_repairs_collisions(
     safe_content = 'Deployment uses api_key="[REDACTED]".'
     now = "2026-07-15T01:30:00+08:00"
     with sqlite3.connect(db) as conn:
+        conn.execute("DROP TRIGGER trg_memory_pending_add_require_hash_insert")
+        conn.execute("DROP TRIGGER trg_memory_pending_add_require_hash_update")
         for item_id, content in (
             (1, raw_a),
             (2, raw_b),
@@ -800,7 +986,7 @@ def test_v5_sanitizer_revision_cleans_memory_tables_and_repairs_collisions(
         }
     ]
     assert len(pending) == 4
-    assert pending[10]["status"] == "pending"
+    assert pending[10]["status"] == "stale"
     assert json.loads(pending[10]["payload_json"]) == {"content": safe_content}
     assert pending[11]["status"] == "stale"
     assert json.loads(pending[11]["payload_json"]) == {"content": safe_content}
@@ -904,6 +1090,15 @@ def test_v5_ledger_does_not_expose_the_removed_job_finalizer(tmp_path: Path) -> 
 
 def test_terminal_review_audit_is_insert_only(tmp_path: Path) -> None:
     ledger = SelfLearningLedger(tmp_path / "review-audit.db")
+    ledger.append_runtime_event(
+        CanonicalSessionEvent(
+            event_id="immutable-review-completed",
+            run_id="immutable-review",
+            root_run_id="immutable-review",
+            event_type="run_completed",
+            status="completed",
+        )
+    )
     first_id = ledger.record_review(
         review_key="root:immutable-review",
         root_run_id="immutable-review",
@@ -933,6 +1128,67 @@ def test_terminal_review_audit_is_insert_only(tmp_path: Path) -> None:
             ensure_ascii=False,
             sort_keys=True,
         ),
+    )
+
+
+def test_terminal_review_key_is_derived_from_its_root(tmp_path: Path) -> None:
+    ledger = SelfLearningLedger(tmp_path / "review-root-key.db")
+
+    with pytest.raises(ValueError, match="must match the root run id"):
+        ledger.record_review(
+            review_key="root:some-other-run",
+            root_run_id="canonical-root",
+            status="completed",
+        )
+
+    with sqlite3.connect(ledger.db_path) as conn:
+        assert conn.execute("SELECT COUNT(*) FROM review_runs").fetchone()[0] == 0
+
+
+def test_restart_quarantines_terminal_review_keys_bound_to_another_root(
+    tmp_path: Path,
+) -> None:
+    db = tmp_path / "mismatched-review-root-key.db"
+    ledger = SelfLearningLedger(db)
+    with sqlite3.connect(db) as conn:
+        conn.executemany(
+            """
+            INSERT INTO review_runs(
+                review_id, review_key, root_run_id, application_id, model_type,
+                status, result_json, created_at, finished_at
+            ) VALUES (?, ?, ?, '', 'summary', ?, '{}', 't', 't')
+            """,
+            [
+                (1, "root:target-root", "different-root", "completed"),
+                (2, "legacy-mismatch:1", "legacy-owner", "skipped"),
+                (3, "legacy:keep-byte-for-byte", "legacy-root", "skipped"),
+                (4, "root:second-target", "another-root", "failed"),
+            ],
+        )
+        conn.execute(
+            "DELETE FROM maintenance WHERE key='schema_v5_review_key_revision'"
+        )
+
+    SelfLearningLedger._initialized_paths.discard(str(db.resolve()))
+    ledger = SelfLearningLedger(db)
+
+    with sqlite3.connect(db) as conn:
+        rows = conn.execute(
+            "SELECT review_id, review_key, root_run_id FROM review_runs ORDER BY review_id"
+        ).fetchall()
+
+    assert rows == [
+        (1, "legacy-mismatch:1:1", "different-root"),
+        (2, "legacy-mismatch:1", "legacy-owner"),
+        (3, "legacy:keep-byte-for-byte", "legacy-root"),
+        (4, "legacy-mismatch:4", "another-root"),
+    ]
+    assert (
+        ledger.review_status(
+            review_key="root:target-root",
+            root_run_id="target-root",
+        )
+        is None
     )
 
 

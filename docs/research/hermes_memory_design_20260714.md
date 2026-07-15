@@ -144,6 +144,9 @@ self_learning:
     review_model: summary
 ```
 
+该值遵循配置深度合并：全局未配置时默认不 review；Application 未写该 key
+时继承全局值；Application 显式写 `review_model: ""` 时只关闭自己。
+
 root owner 在 SessionEnd history 已提交后、`loom run` 返回前运行一次 reviewer：
 
 - reviewer 使用独立执行上下文，不继承父 Agent 的工具集合；

@@ -4,6 +4,7 @@ system.yaml 中写入的 LLM 配置不会影响最终的 LLMConfig，
 所有 model/langfuse 配置必须且只能通过 config/llm.yaml 提供。
 """
 
+import os
 from pathlib import Path
 
 import pytest
@@ -157,3 +158,63 @@ def test_llm_yaml_missing_fields_use_defaults(tmp_path, monkeypatch):
     assert cfg.llm.langfuse.host == "https://cloud.langfuse.com"
     assert cfg.llm.langfuse.public_key == ""
     assert cfg.llm.langfuse.private_key == ""
+
+
+def test_campaign_capsule_reads_llm_config_from_memory_without_a_file(
+    tmp_path,
+    monkeypatch,
+):
+    config_dir = _setup_config_dir(
+        tmp_path,
+        system_yaml_data={},
+        llm_yaml_data={
+            "model": {
+                "summary": {"model": "openai/wrong-disk-model"},
+            }
+        },
+    )
+    payload = yaml.safe_dump(
+        {
+            "model": {
+                "summary": {
+                    "model": "openai/capsule-summary",
+                    "api_key": "memory-only-secret",
+                }
+            }
+        }
+    ).encode()
+    read_fd, write_fd = os.pipe()
+    os.write(write_fd, payload)
+    os.close(write_fd)
+    monkeypatch.setenv("AGENTLOOM_MEMORY_CAMPAIGN_CAPSULE_ACTIVE", "1")
+    monkeypatch.setenv("AGENTLOOM_MEMORY_CAMPAIGN_LLM_CONFIG_FD", str(read_fd))
+    (config_dir / "llm.yaml").unlink()
+
+    cfg = config_module._load_merged_config(config_dir=config_dir)
+
+    assert cfg.llm.for_type("summary").model == "openai/capsule-summary"
+    assert cfg.llm.for_type("summary").api_key == "memory-only-secret"
+    assert "AGENTLOOM_MEMORY_CAMPAIGN_LLM_CONFIG_FD" not in os.environ
+    with pytest.raises(OSError):
+        os.fstat(read_fd)
+    assert not (config_dir / "llm.yaml").exists()
+
+
+def test_campaign_capsule_does_not_accept_config_payload_from_environment(
+    tmp_path,
+    monkeypatch,
+):
+    config_dir = _setup_config_dir(
+        tmp_path,
+        system_yaml_data={},
+        llm_yaml_data={"model": {"summary": {"model": "openai/disk-summary"}}},
+    )
+    monkeypatch.setenv("AGENTLOOM_MEMORY_CAMPAIGN_CAPSULE_ACTIVE", "1")
+    monkeypatch.setenv(
+        "AGENTLOOM_MEMORY_CAMPAIGN_LLM_CONFIG_SECRET",
+        "bW9kZWw6IHt9",
+    )
+
+    cfg = config_module._load_merged_config(config_dir=config_dir)
+
+    assert cfg.llm.for_type("summary").model == "openai/disk-summary"

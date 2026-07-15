@@ -6,6 +6,7 @@ LLM 相关键同样应被 _filter_llm_only_top_level_keys 过滤。
 应用级覆盖通过 build_effective_agent_config 自动从 _yaml_file_path 发现。
 """
 
+import sqlite3
 from pathlib import Path
 
 import pytest
@@ -82,7 +83,6 @@ def test_app_system_yaml_model_key_filtered(tmp_path):
                 "default_model_type": "fast",
                 "common": {"base_url": "https://wrong.test/v1"},
                 "model": "openai/test-common",
-                "model": "openai/test-common",
                 "powerful": {"model": "openai/should-be-ignored"},
                 "summary": {"model": "openai/test-summary"},
             },
@@ -139,3 +139,67 @@ def test_app_override_preserves_workspace(tmp_path):
     assert "build" in merged.get("tool_access_control", {}).get("exclude_paths", [])
     assert merged.get("system", {}).get("name") == "app-system"
     assert config_module.C.llm.for_type("powerful").model == "openai/test-model"
+
+
+def test_application_inherits_or_explicitly_disables_global_memory_review(
+    tmp_path,
+    monkeypatch,
+):
+    """Missing app key inherits global review; an explicit empty value opts out."""
+    config_dir, yaml_file = _setup_with_app_override(
+        tmp_path,
+        system_yaml_data={
+            "self_learning": {
+                "enabled": True,
+                "memory": {"review_model": "summary"},
+            }
+        },
+        app_system_yaml_data={},
+    )
+
+    inherited = _build_effective(config_dir, yaml_file)
+
+    assert inherited["self_learning"]["memory"]["review_model"] == "summary"
+
+    _write_yaml(
+        yaml_file.parent.parent / "config" / "system.yaml",
+        {"self_learning": {"memory": {"review_model": ""}}},
+    )
+    opted_out = _build_effective(config_dir, yaml_file)
+
+    assert opted_out["self_learning"]["memory"]["review_model"] == ""
+
+    from src.extensions.self_learning import reviewer
+    from src.extensions.self_learning.memory_store import MemoryStore
+
+    state_root = tmp_path / ".agentloom"
+    monkeypatch.setenv("AGENTLOOM_SELF_LEARNING_ROOT", str(state_root))
+    monkeypatch.setattr(
+        reviewer,
+        "_resolve_review_model",
+        lambda _model_type: pytest.fail("opted-out Application resolved a model"),
+    )
+
+    review = reviewer.review_finished_run(
+        root_run_id="root-app-opt-out",
+        agent_config=opted_out,
+    )
+
+    assert review["reason"] == "review_model_not_configured"
+    assert not (state_root / "self_learning.db").exists()
+
+    store = MemoryStore(agent_config=opted_out)
+    write = store.handle_tool_action(
+        "add",
+        scope="project",
+        content="Foreground memory remains available after review opt-out.",
+        root_run_id="root-app-opt-out",
+        agent_config=opted_out,
+    )
+
+    assert write["ok"] is True
+    assert [item["content"] for item in store.list("project")] == [
+        "Foreground memory remains available after review opt-out."
+    ]
+    with sqlite3.connect(state_root / "self_learning.db") as conn:
+        assert conn.execute("SELECT COUNT(*) FROM review_runs").fetchone()[0] == 0
