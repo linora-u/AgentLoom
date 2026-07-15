@@ -780,8 +780,12 @@ class YamlConfiguredSupervisorAgent(RoleDrivenAgent):
         self._mcp_manager = mcp_manager
         tools.extend(standard_tools)
 
-        worker_agents_folder = get_worker_agent_yaml_path(self.workflow_category)
         expected_agents = self._config.get('worker_agents', [])
+        if not expected_agents:
+            log.info("[YamlConfiguredSupervisorAgent] Successfully loaded all tools for supervisor agent.")
+            return tools
+
+        worker_agents_folder = get_worker_agent_yaml_path(self.workflow_category)
 
         resolved_worker_agents = AgentConfigNormalizer.precheck_worker_agent_paths(
             expected_agents,
