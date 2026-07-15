@@ -11,6 +11,8 @@ from __future__ import annotations
 
 import json
 import sqlite3
+from collections.abc import Iterator
+from contextlib import contextmanager
 from datetime import datetime
 from html import escape as escape_html
 from pathlib import Path
@@ -18,7 +20,7 @@ from typing import Any
 
 from .application_scope import resolve_application_scope, safe_application_id
 from .event_schema import safe_run_id
-from .ledger import SelfLearningLedger, memory_content_hash
+from .ledger import SelfLearningLedger, memory_content_hash, serialized_write_transaction
 from .paths import memory_config, memory_db, self_learning_enabled
 from .redaction import BLOCKED_TEXT, redact_text, require_safe_identity, scan_injection_patterns
 
@@ -63,10 +65,10 @@ class MemoryStore:
         conn.execute("PRAGMA foreign_keys=ON")
         return conn
 
-    def _connect_for_write(self) -> sqlite3.Connection:
-        conn = self._connect()
-        conn.execute("BEGIN IMMEDIATE")
-        return conn
+    @contextmanager
+    def _connect_for_write(self) -> Iterator[sqlite3.Connection]:
+        with serialized_write_transaction(self.db_path, self._connect) as conn:
+            yield conn
 
     @staticmethod
     def _now() -> str:

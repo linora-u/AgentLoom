@@ -8,6 +8,8 @@ import re
 import sqlite3
 import threading
 import time
+from collections.abc import Callable, Iterator
+from contextlib import contextmanager
 from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any
@@ -82,6 +84,53 @@ _V4_PRIVACY_BASE_TABLES = (
 LEGACY_SANITIZER_DEAD_ERROR = (
     "legacy_v4_identity_sanitizer_changed_frozen_job_input"
 )
+
+_DATABASE_WRITER_LOCKS: dict[str, threading.Lock] = {}
+_DATABASE_WRITER_LOCKS_GUARD = threading.Lock()
+
+
+def _database_writer_lock(db_path: str | Path) -> threading.Lock:
+    """Return the one process-local writer gate for a SQLite database."""
+    key = str(Path(db_path).resolve())
+    with _DATABASE_WRITER_LOCKS_GUARD:
+        lock = _DATABASE_WRITER_LOCKS.get(key)
+        if lock is None:
+            lock = threading.Lock()
+            _DATABASE_WRITER_LOCKS[key] = lock
+        return lock
+
+
+@contextmanager
+def serialized_database_writer(db_path: str | Path) -> Iterator[None]:
+    """Serialize one process-local SQLite writer for the given database."""
+    with _database_writer_lock(db_path):
+        yield
+
+
+@contextmanager
+def serialized_write_transaction(
+    db_path: str | Path,
+    connect: Callable[[], sqlite3.Connection],
+) -> Iterator[sqlite3.Connection]:
+    """Run one short SQLite write transaction behind a per-database gate.
+
+    SQLite still arbitrates writers across processes.  Inside this process we
+    can avoid timeout-based competition entirely: all Ledger and MemoryStore
+    instances that target the same database take this lock before BEGIN and
+    release it only after commit or rollback.
+    """
+    with serialized_database_writer(db_path):
+        conn = connect()
+        try:
+            conn.execute("BEGIN IMMEDIATE")
+            yield conn
+            conn.commit()
+        except BaseException:
+            if conn.in_transaction:
+                conn.rollback()
+            raise
+        finally:
+            conn.close()
 
 
 def memory_content_hash(content: str) -> str:
@@ -204,9 +253,10 @@ class SelfLearningLedger:
         return conn
 
     def _init_db(self) -> None:
-        with self._connect() as conn:
-            self._enable_wal_mode(conn)
-            self._run_migrations(conn)
+        with serialized_database_writer(self.db_path):
+            with self._connect() as conn:
+                self._enable_wal_mode(conn)
+                self._run_migrations(conn)
         self._remove_legacy_memory_artifacts()
 
     def _remove_legacy_memory_artifacts(self) -> None:
@@ -2545,7 +2595,7 @@ class SelfLearningLedger:
             field="maintenance value",
             allow_empty=True,
         )
-        with self._connect() as conn:
+        with serialized_write_transaction(self.db_path, self._connect) as conn:
             conn.execute(
                 """
                 INSERT INTO maintenance (key, value) VALUES (?, ?)
@@ -2572,7 +2622,7 @@ class SelfLearningLedger:
             field="new maintenance value",
             allow_empty=True,
         )
-        with self._connect() as conn:
+        with serialized_write_transaction(self.db_path, self._connect) as conn:
             if expected:
                 claimed = conn.execute(
                     "UPDATE maintenance SET value = ? WHERE key = ? AND value = ?",
@@ -2868,11 +2918,10 @@ class SelfLearningLedger:
 
     def append_event(self, event: CanonicalSessionEvent, *, root_run_id: str = "") -> dict[str, Any]:
         """Append one redacted canonical event to the ledger."""
-        with self._connect() as conn:
+        with serialized_write_transaction(self.db_path, self._connect) as conn:
             # Serialize the idempotency read with the run/event writes. Without
             # this boundary two processes could both miss the same event before
             # either writer creates it.
-            conn.execute("BEGIN IMMEDIATE")
             return self._append_event_in_conn(conn, event, root_run_id=root_run_id)
 
     def append_runtime_event(
@@ -2883,8 +2932,7 @@ class SelfLearningLedger:
     ) -> dict[str, Any]:
         """Atomically append a live event and non-importable review evidence."""
 
-        with self._connect() as conn:
-            conn.execute("BEGIN IMMEDIATE")
+        with serialized_write_transaction(self.db_path, self._connect) as conn:
             result = self._append_event_in_conn(conn, event)
             result["trusted_evidence_indexed"] = 0
             if not result.get("indexed") or not trusted_evidence:
@@ -3204,7 +3252,7 @@ class SelfLearningLedger:
         return {"runs_indexed": int(runs), "events_indexed": int(events), "db_path": str(self.db_path)}
 
     def delete_run(self, run_id: str) -> None:
-        with self._connect() as conn:
+        with serialized_write_transaction(self.db_path, self._connect) as conn:
             conn.execute(
                 "DELETE FROM trusted_review_evidence WHERE event_id IN "
                 "(SELECT event_id FROM events WHERE run_id = ?)",
@@ -3219,8 +3267,8 @@ class SelfLearningLedger:
         """Delete runs (and their events) whose last activity is older than the cutoff.
 
         Deletes commit in small chunks: each removed events row fires the FTS
-        triggers, so one big transaction over a large backlog would hold the
-        writer lock past every concurrent writer's busy_timeout.
+        triggers, so one big transaction over a large backlog would block live
+        writers for the entire cleanup.
         """
         if retention_days < 0:
             raise ValueError("retention_days must be non-negative")
@@ -3233,25 +3281,34 @@ class SelfLearningLedger:
                     (cutoff,),
                 )
             ]
-            events_deleted = 0
-            for run_id in stale_runs:
-                conn.execute(
-                    "DELETE FROM trusted_review_evidence WHERE event_id IN "
-                    "(SELECT event_id FROM events WHERE run_id = ?)",
-                    (run_id,),
-                )
-                while True:
+        events_deleted = 0
+        for run_id in stale_runs:
+            first_chunk = True
+            while True:
+                with serialized_write_transaction(self.db_path, self._connect) as conn:
+                    if first_chunk:
+                        conn.execute(
+                            "DELETE FROM trusted_review_evidence WHERE event_id IN "
+                            "(SELECT event_id FROM events WHERE run_id = ?)",
+                            (run_id,),
+                        )
+                        first_chunk = False
                     deleted = conn.execute(
-                        "DELETE FROM events WHERE id IN (SELECT id FROM events WHERE run_id = ? LIMIT ?)",
+                        "DELETE FROM events WHERE id IN "
+                        "(SELECT id FROM events WHERE run_id = ? LIMIT ?)",
                         (run_id, self._PRUNE_CHUNK_ROWS),
                     ).rowcount
                     events_deleted += deleted
-                    conn.commit()
-                    if deleted < self._PRUNE_CHUNK_ROWS:
-                        break
-                conn.execute("DELETE FROM runs WHERE run_id = ?", (run_id,))
-                conn.commit()
-            reviews_deleted = conn.execute("DELETE FROM review_runs WHERE created_at < ?", (cutoff,)).rowcount
+                    finished = deleted < self._PRUNE_CHUNK_ROWS
+                    if finished:
+                        conn.execute("DELETE FROM runs WHERE run_id = ?", (run_id,))
+                if finished:
+                    break
+        with serialized_write_transaction(self.db_path, self._connect) as conn:
+            reviews_deleted = conn.execute(
+                "DELETE FROM review_runs WHERE created_at < ?",
+                (cutoff,),
+            ).rowcount
         return {
             "ok": True,
             "runs_pruned": len(stale_runs),
@@ -3359,8 +3416,7 @@ class SelfLearningLedger:
         finished_at: str | None = None,
     ) -> int:
         """Insert one terminal audit; an existing review is immutable."""
-        with self._connect() as conn:
-            conn.execute("BEGIN IMMEDIATE")
+        with serialized_write_transaction(self.db_path, self._connect) as conn:
             review_id, _inserted = self.record_review_in_transaction(
                 conn,
                 review_key=review_key,
@@ -3411,7 +3467,7 @@ class SelfLearningLedger:
         status = sanitize_text_fragment(status)
         proposal_path = sanitize_text_fragment(proposal_path)
         now = _now_iso()
-        with self._connect() as conn:
+        with serialized_write_transaction(self.db_path, self._connect) as conn:
             conn.execute(
                 """
                 INSERT INTO skill_proposals (
@@ -3452,7 +3508,7 @@ class SelfLearningLedger:
         status = require_safe_identity(status, field="skill proposal status")
         column = "promoted_at" if status == "promoted" else "archived_at" if status == "archived" else ""
         now = _now_iso()
-        with self._connect() as conn:
+        with serialized_write_transaction(self.db_path, self._connect) as conn:
             if column:
                 conn.execute(
                     f"UPDATE skill_proposals SET status = ?, updated_at = ?, {column} = ? WHERE proposal_id = ?",
