@@ -43,6 +43,7 @@ from applications.memory_feature_validation.scripts.memory_review_campaign_capsu
     CAMPAIGN_LLM_CONFIG_FD_ENV,
     CAPSULE_TOKEN_ENV,
     _git_env,
+    _private_pycache_prefix,
     _require_isolated_git_metadata,
     _trusted_git,
     active_capsule_bootstrap_issues,
@@ -1830,8 +1831,11 @@ def _initialize_active_capsule() -> list[str]:
             model_contract=model_contract,
             model_config_memory_only=_ACTIVE_MODEL_CONFIG_BYTES is not None,
         )
-        if descriptor.get("lock_sync_ok") is not True:
-            return ["dependency_environment_invalid"]
+    except Exception:
+        return ["capsule_descriptor_build_failed"]
+    if descriptor.get("lock_sync_ok") is not True:
+        return ["dependency_environment_invalid"]
+    try:
         descriptor_issues = capsule_descriptor_issues(descriptor)
     except Exception:
         return ["capsule_descriptor_invalid"]
@@ -1875,6 +1879,8 @@ def _run_in_capsule(
                 "-I",
                 "-P",
                 "-B",
+                "-X",
+                f"pycache_prefix={_private_pycache_prefix(capsule.root)}",
                 str(capsule.runner),
             ]
             if args.reproduce_campaign:
