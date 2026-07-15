@@ -237,13 +237,13 @@ def test_full_plan_is_exactly_100_real_applications_with_fixed_quotas() -> None:
     assert all((Path(__file__).resolve().parents[3] / spec.workflow).is_file() for spec in plan)
 
 
-def test_five_canaries_cover_off_on_application_scope_progress_and_security() -> None:
+def test_five_canaries_cover_off_on_recall_progress_and_security() -> None:
     canaries = select_runs(5)
 
     assert [(spec.case_id, spec.phase) for spec in canaries] == [
         ("off-durable-00", "writer"),
         ("on-durable-00", "writer"),
-        ("app-scope-00", "writer"),
+        ("on-durable-00", "recall"),
         ("progress-00", "writer"),
         ("security-00", "writer"),
     ]
@@ -320,6 +320,14 @@ def test_application_scope_is_learned_only_by_reviewer_and_isolated_by_app() -> 
 
 
 def test_workflows_are_natural_and_do_not_script_memory_calls() -> None:
+    recall_workflows = {
+        WORKFLOWS["off_recall"],
+        WORKFLOWS["on_recall"],
+        WORKFLOWS["approval_recall"],
+        WORKFLOWS["app_review_recall"],
+        WORKFLOWS["app_a_recall"],
+        WORKFLOWS["app_b_recall"],
+    }
     for relative in WORKFLOWS.values():
         payload = yaml.safe_load((Path(__file__).resolve().parents[3] / relative).read_text(encoding="utf-8"))
         workflow = str(payload.get("workflow") or "")
@@ -327,7 +335,14 @@ def test_workflows_are_natural_and_do_not_script_memory_calls() -> None:
         assert "EXACTLY this" not in workflow
         assert payload.get("model_type") == "summary"
         assert payload.get("tool_call_type") == "tool_call"
-        assert any(tool.get("name") == "validation_memory_case" for tool in payload.get("tools") or [])
+        tools = payload.get("tools") or []
+        if relative in recall_workflows:
+            assert tools == []
+            assert "validation_memory_case" not in workflow
+            assert "complete persistent memory fact" in workflow
+            assert "MISSING" in workflow
+        else:
+            assert any(tool.get("name") == "validation_memory_case" for tool in tools)
 
     review_workflow = str(
         yaml.safe_load(
