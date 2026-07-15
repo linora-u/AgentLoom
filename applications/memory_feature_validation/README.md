@@ -124,6 +124,18 @@ Re-audit repeats the frozen probe with a 20% reproducibility bound. Reduced and
 `--only-case` runs report only a smoke result. Uncommitted changes to a bound
 source file prevent a baseline candidate; unrelated user-owned worktree changes
 are recorded as `worktree_dirty` but do not change release eligibility.
+
+The 30-minute release gate applies to the current candidate's complete
+100,000-event campaign. Time spent re-auditing and independently replaying the
+accepted baseline is excluded from that candidate budget, because it is a
+separate 100,000-event workload. Metrics still retain and audit all three
+values: `candidate_duration_seconds`, `baseline_validation_duration_seconds`,
+and their sum in `duration_seconds`. The measured boundary includes the final
+privacy scan of the newly written audit/metrics/report artifacts; the large
+databases and prior artifacts were already scanned immediately before those
+files were created. Only the last content-free metrics/report rewrite falls
+after the measured boundary.
+
 Re-audit an existing campaign without executing production writes:
 
 ```bash

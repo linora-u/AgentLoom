@@ -6,9 +6,11 @@ import ast
 import gzip
 import inspect
 import json
+import math
 import sqlite3
 import subprocess
 import sys
+import threading
 from collections import Counter
 from pathlib import Path
 
@@ -77,11 +79,7 @@ def test_release_plan_is_exactly_100k_v5_events_with_fixed_seed() -> None:
 def test_memory_state_cohort_is_not_cut_off_by_runtime_prompt_budget(
     tmp_path: Path,
 ) -> None:
-    cases = [
-        case
-        for case in build_case_plan(5_000, DEFAULT_SEED)
-        if case.category == "active_pending_memory"
-    ]
+    cases = [case for case in build_case_plan(5_000, DEFAULT_SEED) if case.category == "active_pending_memory"]
     failures: list[dict[str, object]] = []
 
     metrics = offline_runner._validate_memory_cases(
@@ -343,7 +341,8 @@ def test_independent_baseline_probe_executes_the_fixed_workload(
     assert probe["ok"] is True
     assert probe["status"] == "PROBE_PASS"
     assert probe["events"] == 100
-    assert probe["duration_seconds"] > 0
+    assert probe["append_duration_seconds"] > 0
+    assert probe["wall_duration_seconds"] >= probe["append_duration_seconds"]
 
 
 def test_baseline_refresh_rejects_non_reproducible_probe_latency() -> None:
@@ -351,23 +350,224 @@ def test_baseline_refresh_rejects_non_reproducible_probe_latency() -> None:
         "valid": True,
         "status": "accepted",
         "probe_events": DEFAULT_EVENTS,
-        "probe_duration_seconds": 100.0,
+        "probe_append_duration_seconds": 100.0,
+        "probe_wall_duration_seconds": 120.0,
         "append_seconds_per_event": 0.001,
         "bytes_per_event": 2_000.0,
     }
     close = {
         **stored,
-        "probe_duration_seconds": 110.0,
+        "probe_append_duration_seconds": 110.0,
+        "probe_wall_duration_seconds": 130.0,
         "append_seconds_per_event": 0.0011,
     }
     inflated = {
         **stored,
-        "probe_duration_seconds": 200.0,
+        "probe_append_duration_seconds": 200.0,
+        "probe_wall_duration_seconds": 220.0,
         "append_seconds_per_event": 0.002,
     }
 
     assert offline_runner._baseline_refresh_matches(stored, close) is True
     assert offline_runner._baseline_refresh_matches(stored, inflated) is False
+
+
+def test_baseline_validation_wall_time_is_not_charged_to_candidate_budget(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    class FakeClock:
+        def __init__(self) -> None:
+            self._lock = threading.Lock()
+            self._value = 0.0
+
+        def perf_counter(self) -> float:
+            with self._lock:
+                self._value += 0.001
+                return self._value
+
+        def advance(self, seconds: float) -> None:
+            with self._lock:
+                self._value += seconds
+
+    clock = FakeClock()
+
+    baseline_path = tmp_path / "accepted-baseline" / "metrics.json"
+    accepted_baseline: dict[str, object] = {
+        "valid": True,
+        "status": "accepted",
+        "evidence_audit": "AUDIT_PASS",
+        "probe_status": "PROBE_PASS",
+        "probe_events": 100,
+        "probe_append_duration_seconds": 100.0,
+        "probe_wall_duration_seconds": 120.0,
+        "probe_performance_artifact_bytes": 100_000,
+        "metrics_path": str(baseline_path),
+        "metrics_sha256": "a" * 64,
+        "manifest_sha256": "b" * 64,
+        "reported_append_seconds_per_event": 1.0,
+        "reported_bytes_per_event": 1_000_000_000.0,
+        "append_seconds_per_event": 1.0,
+        "bytes_per_event": 1_000_000_000.0,
+    }
+
+    def slow_accepted_baseline(_path: Path | None) -> dict[str, object]:
+        clock.advance(1_801.0)
+        return dict(accepted_baseline)
+
+    monkeypatch.setattr(offline_runner, "time", clock)
+    monkeypatch.setattr(offline_runner, "_load_baseline_metrics", slow_accepted_baseline)
+    monkeypatch.setattr(offline_runner, "_timing_evidence_ok", lambda *_args, **_kwargs: True)
+
+    campaign_dir = run_campaign(
+        events=100,
+        seed=DEFAULT_SEED,
+        output_root=tmp_path,
+        campaign_id="offline-baseline-timing-contract",
+        only_case=None,
+        migration_events=100,
+        baseline_metrics=baseline_path,
+    )
+
+    metrics = json.loads((campaign_dir / "metrics.json").read_text(encoding="utf-8"))
+    total = float(metrics["duration_seconds"])
+    candidate = float(metrics["candidate_duration_seconds"])
+    baseline_validation = float(metrics["baseline_validation_duration_seconds"])
+
+    assert total > offline_runner._MAX_DURATION_SECONDS
+    assert baseline_validation > offline_runner._MAX_DURATION_SECONDS
+    assert 0 < candidate < offline_runner._MAX_DURATION_SECONDS
+    assert math.isclose(total, candidate + baseline_validation, rel_tol=1e-12, abs_tol=1e-9)
+    assert metrics["gates"]["duration"] is True
+    assert metrics["gates"]["wall_timing_evidence"] is True
+    assert metrics["status"] == "smoke_passed"
+    manifest = json.loads((campaign_dir / "manifest.json").read_text(encoding="utf-8"))
+    assert manifest["baseline_validation_requested"] is True
+    assert manifest["performance_baseline"]["valid"] is True
+    assert audit_campaign(campaign_dir)["ok"] is True
+
+
+def test_wall_timing_evidence_covers_the_baseline_probe() -> None:
+    assert offline_runner._wall_timing_evidence_ok(
+        total_duration_seconds=220.0,
+        candidate_duration_seconds=100.0,
+        baseline_validation_duration_seconds=120.0,
+        baseline_probe_wall_duration_seconds=120.0,
+        baseline_validation_expected=True,
+    )
+    assert not offline_runner._wall_timing_evidence_ok(
+        total_duration_seconds=219.0,
+        candidate_duration_seconds=100.0,
+        baseline_validation_duration_seconds=119.0,
+        baseline_probe_wall_duration_seconds=120.0,
+        baseline_validation_expected=True,
+    )
+    assert not offline_runner._wall_timing_evidence_ok(
+        total_duration_seconds=221.0,
+        candidate_duration_seconds=100.0,
+        baseline_validation_duration_seconds=120.0,
+        baseline_probe_wall_duration_seconds=120.0,
+        baseline_validation_expected=True,
+    )
+    assert not offline_runner._wall_timing_evidence_ok(
+        total_duration_seconds=2_000.0,
+        candidate_duration_seconds=100.0,
+        baseline_validation_duration_seconds=1_900.0,
+        baseline_probe_wall_duration_seconds=0.0,
+        baseline_validation_expected=False,
+    )
+
+
+def test_final_artifact_scan_is_inside_the_candidate_duration_gate(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    class FakeClock:
+        def __init__(self) -> None:
+            self._lock = threading.Lock()
+            self._value = 0.0
+
+        def perf_counter(self) -> float:
+            with self._lock:
+                self._value += 0.001
+                return self._value
+
+        def advance(self, seconds: float) -> None:
+            with self._lock:
+                self._value += seconds
+
+    clock = FakeClock()
+    original_privacy_scan = offline_runner._privacy_scan
+    delayed = False
+    final_scan_names: set[str] = set()
+
+    def slow_final_privacy_scan(paths: list[Path]) -> list[dict[str, str]]:
+        nonlocal delayed, final_scan_names
+        names = {path.name for path in paths}
+        if not delayed and {"metrics.json", "report.md"} <= names:
+            delayed = True
+            final_scan_names = names
+            clock.advance(1_801.0)
+        return original_privacy_scan(paths)
+
+    monkeypatch.setattr(offline_runner, "time", clock)
+    monkeypatch.setattr(offline_runner, "_privacy_scan", slow_final_privacy_scan)
+    monkeypatch.setattr(offline_runner, "_timing_evidence_ok", lambda *_args, **_kwargs: True)
+
+    campaign_dir = run_campaign(
+        events=100,
+        seed=DEFAULT_SEED,
+        output_root=tmp_path,
+        campaign_id="offline-final-scan-timing-contract",
+        only_case=None,
+        migration_events=100,
+    )
+
+    metrics = json.loads((campaign_dir / "metrics.json").read_text(encoding="utf-8"))
+
+    assert metrics["candidate_duration_seconds"] > offline_runner._MAX_DURATION_SECONDS
+    assert final_scan_names == {"metrics.json", "privacy_audit.json", "report.md"}
+    assert metrics["gates"]["duration"] is False
+    assert metrics["status"] == "smoke_failed"
+    audit = audit_campaign(campaign_dir)
+    assert audit["ok"] is False
+    assert "duration_gate_failed" in audit["issues"]
+
+
+def test_final_privacy_scan_does_not_erase_an_earlier_wal_hit(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    original_privacy_scan = offline_runner._privacy_scan
+    injected = False
+
+    def inject_first_wal_hit(paths: list[Path]) -> list[dict[str, str]]:
+        nonlocal injected
+        hits = original_privacy_scan(paths)
+        if not injected and any(path.name == "self_learning.db-wal" for path in paths):
+            injected = True
+            return [*hits, {"path": "self_learning.db-wal", "pattern": "injected-test-hit"}]
+        return hits
+
+    monkeypatch.setattr(offline_runner, "_privacy_scan", inject_first_wal_hit)
+
+    campaign_dir = run_campaign(
+        events=100,
+        seed=DEFAULT_SEED,
+        output_root=tmp_path,
+        campaign_id="offline-earlier-privacy-hit-contract",
+        only_case=None,
+        migration_events=100,
+    )
+
+    metrics = json.loads((campaign_dir / "metrics.json").read_text(encoding="utf-8"))
+    privacy = json.loads((campaign_dir / "privacy_audit.json").read_text(encoding="utf-8"))
+
+    assert injected is True
+    assert metrics["status"] == "smoke_failed"
+    assert metrics["gates"]["privacy"] is False
+    assert metrics["privacy"]["raw_hit_count"] >= 1
+    assert {"path": "self_learning.db-wal", "pattern": "injected-test-hit"} in privacy["raw_sensitive_hits"]
 
 
 def test_baseline_probe_rejects_an_untrusted_commit_driver(
@@ -480,6 +680,7 @@ def test_100_event_smoke_uses_real_v5_apis_and_is_not_a_release_pass(
         case_rows = [json.loads(line) for line in handle if line.strip()]
 
     assert manifest["release_eligible"] is False
+    assert manifest["baseline_validation_requested"] is False
     assert metrics["status"] == "smoke_passed"
     assert metrics["semantic_failures"] == 0
     assert metrics["semantic_audit"]["ok"] is True
@@ -487,6 +688,15 @@ def test_100_event_smoke_uses_real_v5_apis_and_is_not_a_release_pass(
     assert metrics["security"]["structured_path_failures"] == 0
     assert metrics["root_isolation"]["concurrent_read_workers"] == 4
     assert metrics["migration"]["ok"] is True
+    assert metrics["candidate_duration_seconds"] > 0
+    assert metrics["baseline_validation_duration_seconds"] == 0
+    assert math.isclose(
+        metrics["duration_seconds"],
+        metrics["candidate_duration_seconds"] + metrics["baseline_validation_duration_seconds"],
+        rel_tol=1e-12,
+        abs_tol=1e-9,
+    )
+    assert metrics["gates"]["wall_timing_evidence"] is True
     assert privacy["ok"] is True
     assert privacy["raw_sensitive_hits"] == []
     assert event_count == 100
@@ -511,11 +721,41 @@ def test_100_event_smoke_uses_real_v5_apis_and_is_not_a_release_pass(
     metrics_path.write_text(original_metrics, encoding="utf-8")
 
     tampered_metrics = json.loads(original_metrics)
-    tampered_metrics["append"]["duration_seconds"] = tampered_metrics["duration_seconds"] * 2
+    tampered_metrics["append"]["duration_seconds"] = tampered_metrics["candidate_duration_seconds"] * 2
     metrics_path.write_text(json.dumps(tampered_metrics), encoding="utf-8")
     timing_audit = audit_campaign(campaign_dir)
     assert timing_audit["ok"] is False
     assert "stored_gate_mismatch:timing_evidence" in timing_audit["issues"]
+    metrics_path.write_text(original_metrics, encoding="utf-8")
+
+    tampered_metrics = json.loads(original_metrics)
+    tampered_metrics["baseline_validation_duration_seconds"] += 1
+    metrics_path.write_text(json.dumps(tampered_metrics), encoding="utf-8")
+    wall_timing_audit = audit_campaign(campaign_dir)
+    assert wall_timing_audit["ok"] is False
+    assert "stored_gate_mismatch:wall_timing_evidence" in wall_timing_audit["issues"]
+    metrics_path.write_text(original_metrics, encoding="utf-8")
+
+    tampered_metrics = json.loads(original_metrics)
+    tampered_metrics["duration_seconds"] = 2_000
+    tampered_metrics["candidate_duration_seconds"] = 100
+    tampered_metrics["baseline_validation_duration_seconds"] = 1_900
+    metrics_path.write_text(json.dumps(tampered_metrics), encoding="utf-8")
+    coupled_timing_audit = audit_campaign(campaign_dir)
+    assert coupled_timing_audit["ok"] is False
+    assert "stored_gate_mismatch:wall_timing_evidence" in coupled_timing_audit["issues"]
+    metrics_path.write_text(original_metrics, encoding="utf-8")
+
+    manifest_path = campaign_dir / "manifest.json"
+    original_manifest = manifest_path.read_text(encoding="utf-8")
+    tampered_manifest = json.loads(original_manifest)
+    tampered_manifest["baseline_validation_requested"] = True
+    manifest_path.write_text(json.dumps(tampered_manifest), encoding="utf-8")
+    metrics_path.write_text(json.dumps(tampered_metrics), encoding="utf-8")
+    manifest_coupled_timing_audit = audit_campaign(campaign_dir)
+    assert manifest_coupled_timing_audit["ok"] is False
+    assert "stored_gate_mismatch:wall_timing_evidence" in manifest_coupled_timing_audit["issues"]
+    manifest_path.write_text(original_manifest, encoding="utf-8")
     metrics_path.write_text(original_metrics, encoding="utf-8")
 
     tampered_metrics = json.loads(original_metrics)

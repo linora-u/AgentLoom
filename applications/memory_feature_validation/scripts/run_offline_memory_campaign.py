@@ -79,6 +79,7 @@ _REQUIRED_CORE_GATES = {
     "artifact_size",
     "performance_artifact_bytes_exact",
     "timing_evidence",
+    "wall_timing_evidence",
     "source_shape_replay",
     "source_event_distribution_replayed",
     "concurrent_root_writes",
@@ -247,9 +248,7 @@ def _load_baseline_metrics(path: Path | None) -> dict[str, Any]:
         source_commit = str(manifest.get("source_git_commit") or "")
         source_git_dirty = bool(manifest.get("source_git_dirty"))
         committed_source_files = _source_manifest_at_commit(source_commit)
-        trusted_driver_bound = _driver_manifest(
-            committed_source_files
-        ) == _driver_manifest(_source_manifest())
+        trusted_driver_bound = _driver_manifest(committed_source_files) == _driver_manifest(_source_manifest())
         core_gates_pass = (
             isinstance(gates, dict)
             and _REQUIRED_CORE_GATES <= set(gates)
@@ -306,14 +305,15 @@ def _load_baseline_metrics(path: Path | None) -> dict[str, Any]:
             "evidence_audit": str(evidence_audit.get("status") or "AUDIT_FAIL"),
             "probe_status": str(independent_probe.get("status") or "PROBE_FAIL"),
             "probe_events": int(independent_probe.get("events") or 0),
-            "probe_duration_seconds": float(independent_probe.get("duration_seconds") or 0),
+            "probe_append_duration_seconds": float(independent_probe.get("append_duration_seconds") or 0),
+            "probe_wall_duration_seconds": float(independent_probe.get("wall_duration_seconds") or 0),
             "probe_performance_artifact_bytes": int(independent_probe.get("performance_artifact_bytes") or 0),
             "metrics_path": str(metrics_path),
             "metrics_sha256": _sha256_file(metrics_path),
             "manifest_sha256": _sha256_file(manifest_path),
             "reported_append_seconds_per_event": append_seconds / max(1, events),
             "reported_bytes_per_event": bytes_per_event,
-            "append_seconds_per_event": float(independent_probe.get("duration_seconds") or 0)
+            "append_seconds_per_event": float(independent_probe.get("append_duration_seconds") or 0)
             / max(1, int(independent_probe.get("events") or 0)),
             "bytes_per_event": float(independent_probe.get("bytes_per_event") or 0),
         }
@@ -338,7 +338,8 @@ def _baseline_refresh_matches(
 ) -> bool:
     volatile = {
         "append_seconds_per_event",
-        "probe_duration_seconds",
+        "probe_append_duration_seconds",
+        "probe_wall_duration_seconds",
         "bytes_per_event",
         "probe_performance_artifact_bytes",
     }
@@ -673,6 +674,7 @@ def _run_independent_baseline_probe(
     source_shape: dict[str, Any] | None,
 ) -> dict[str, Any]:
     """Rerun the fixed full append workload; never trust reported latency."""
+    probe_started = time.perf_counter()
     cases = build_case_plan(DEFAULT_EVENTS, DEFAULT_SEED)
     try:
         with tempfile.TemporaryDirectory(prefix="agentloom-offline-baseline-") as root:
@@ -721,15 +723,18 @@ def _run_independent_baseline_probe(
             "status": "PROBE_FAIL",
             "error": type(exc).__name__,
             "events": 0,
-            "duration_seconds": 0.0,
+            "append_duration_seconds": 0.0,
+            "wall_duration_seconds": time.perf_counter() - probe_started,
             "performance_artifact_bytes": 0,
             "bytes_per_event": 0.0,
         }
+    wall_duration_seconds = time.perf_counter() - probe_started
     return {
         "ok": all(checks.values()),
         "status": "PROBE_PASS" if all(checks.values()) else "PROBE_FAIL",
         "events": DEFAULT_EVENTS,
-        "duration_seconds": float(append_metrics["duration_seconds"]),
+        "append_duration_seconds": float(append_metrics["duration_seconds"]),
+        "wall_duration_seconds": wall_duration_seconds,
         "performance_artifact_bytes": performance_bytes,
         "bytes_per_event": performance_bytes / max(1, DEFAULT_EVENTS),
         "checks": checks,
@@ -1653,6 +1658,44 @@ def _timing_evidence_ok(
     return accounted <= append_duration and accounted >= append_duration * 0.8
 
 
+def _wall_timing_evidence_ok(
+    *,
+    total_duration_seconds: float,
+    candidate_duration_seconds: float,
+    baseline_validation_duration_seconds: float,
+    baseline_probe_wall_duration_seconds: float,
+    baseline_validation_expected: bool,
+) -> bool:
+    """Prove that the candidate budget excludes only audited baseline work."""
+    try:
+        total = float(total_duration_seconds)
+        candidate = float(candidate_duration_seconds)
+        baseline_validation = float(baseline_validation_duration_seconds)
+        baseline_probe_wall = float(baseline_probe_wall_duration_seconds)
+    except (TypeError, ValueError):
+        return False
+    if (
+        not all(math.isfinite(value) for value in (total, candidate, baseline_validation, baseline_probe_wall))
+        or total <= 0
+        or candidate <= 0
+        or baseline_validation < 0
+        or baseline_probe_wall < 0
+        or baseline_validation + 1e-6 < baseline_probe_wall
+    ):
+        return False
+    if baseline_validation_expected:
+        if baseline_validation <= 0:
+            return False
+    elif baseline_validation != 0 or baseline_probe_wall != 0:
+        return False
+    return math.isclose(
+        total,
+        candidate + baseline_validation,
+        rel_tol=1e-12,
+        abs_tol=1e-6,
+    )
+
+
 def _write_cases(path: Path, cases: list[OfflineCase]) -> None:
     temporary = path.with_suffix(path.suffix + ".tmp")
     with gzip.open(temporary, "wt", encoding="utf-8") as handle:
@@ -1702,7 +1745,9 @@ def _render_report(metrics: dict[str, Any], manifest: dict[str, Any]) -> str:
             f"- Privacy hits: `{metrics['privacy']['raw_hit_count']}`",
             f"- FTS p95: `{metrics['ledger']['fts_query_p95_ms']:.3f} ms`",
             f"- Migration: `{'pass' if metrics['migration']['ok'] else 'fail'}`",
-            f"- Duration: `{metrics['duration_seconds']:.3f} s`",
+            f"- Candidate duration: `{metrics['candidate_duration_seconds']:.3f} s`",
+            f"- Baseline validation duration: `{metrics['baseline_validation_duration_seconds']:.3f} s`",
+            f"- Measured wall duration: `{metrics['duration_seconds']:.3f} s`",
             f"- Peak RSS: `{metrics['rss_mb']:.3f} MiB`",
             "",
         )
@@ -2056,9 +2101,7 @@ def audit_campaign(campaign_dir: Path) -> dict[str, Any]:
         source_commit = str(manifest.get("source_git_commit") or "")
         source_git_dirty = bool(manifest.get("source_git_dirty"))
         committed_source_files = _source_manifest_at_commit(source_commit)
-        trusted_driver_bound = _driver_manifest(
-            committed_source_files
-        ) == _driver_manifest(_source_manifest())
+        trusted_driver_bound = _driver_manifest(committed_source_files) == _driver_manifest(_source_manifest())
         source_commit_bound = (
             not source_git_dirty
             and bool(committed_source_files)
@@ -2092,6 +2135,12 @@ def audit_campaign(campaign_dir: Path) -> dict[str, Any]:
             issues.append("release_shape_mismatch")
         baseline_reference = manifest.get("performance_baseline")
         baseline_valid = isinstance(baseline_reference, dict) and bool(baseline_reference.get("valid"))
+        if not isinstance(manifest.get("baseline_validation_requested"), bool):
+            issues.append("baseline_validation_request_invalid")
+        elif bool(manifest.get("baseline_validation_requested")) != (
+            isinstance(baseline_reference, dict) and baseline_reference.get("status") != "missing"
+        ):
+            issues.append("baseline_validation_request_mismatch")
         expected_release = expected_release_shape and baseline_valid
         if bool(manifest.get("release_eligible")) != expected_release:
             issues.append("release_eligibility_mismatch")
@@ -2169,6 +2218,8 @@ def audit_campaign(campaign_dir: Path) -> dict[str, Any]:
         metric_gates = {}
     try:
         stored_duration = float(metrics.get("duration_seconds") or 0)
+        stored_candidate_duration = float(metrics.get("candidate_duration_seconds") or 0)
+        stored_baseline_validation_duration = float(metrics.get("baseline_validation_duration_seconds") or 0)
         stored_rss = float(metrics.get("rss_mb") or 0)
         stored_artifact_bytes = int(metrics.get("artifact_bytes") or 0)
         stored_performance_bytes = int(metrics.get("performance_artifact_bytes") or 0)
@@ -2178,9 +2229,14 @@ def audit_campaign(campaign_dir: Path) -> dict[str, Any]:
         stored_fts_p95 = float((metrics.get("ledger") or {}).get("fts_query_p95_ms") or 0)
         stored_concurrent_root_events = int((metrics.get("append") or {}).get("concurrent_root_events") or 0)
         stored_source_replayed = int((metrics.get("append") or {}).get("source_replayed_ledger_events") or 0)
+        stored_probe_wall_duration = float(
+            (metrics.get("baseline_comparison") or {}).get("probe_wall_duration_seconds") or 0
+        )
     except (TypeError, ValueError):
         issues.append("stored_metric_type_error")
         stored_duration = math.inf
+        stored_candidate_duration = math.inf
+        stored_baseline_validation_duration = math.inf
         stored_rss = math.inf
         stored_artifact_bytes = _MAX_ARTIFACT_BYTES + 1
         stored_performance_bytes = -1
@@ -2190,6 +2246,7 @@ def audit_campaign(campaign_dir: Path) -> dict[str, Any]:
         stored_fts_p95 = math.inf
         stored_concurrent_root_events = -1
         stored_source_replayed = -1
+        stored_probe_wall_duration = math.inf
     expected_ledger_events = sum(case.category == "ledger_fts_search_scroll" for case in expected_cases)
     expected_source_distribution = True
     if isinstance(source_shape, dict) and source_shape.get("available"):
@@ -2206,14 +2263,21 @@ def audit_campaign(campaign_dir: Path) -> dict[str, Any]:
         "safe_negative_false_positive_rate": stored_safe_fp_rate <= 0.001,
         "fts_p95": stored_fts_p95 <= 250.0,
         "migration": bool(migration.get("ok")),
-        "duration": 0 < stored_duration <= _MAX_DURATION_SECONDS,
+        "duration": 0 < stored_candidate_duration <= _MAX_DURATION_SECONDS,
         "rss": 0 < stored_rss <= _MAX_RSS_MB,
         "artifact_size": 0 < max(stored_artifact_bytes, actual_artifact_bytes) <= _MAX_ARTIFACT_BYTES,
         "performance_artifact_bytes_exact": stored_performance_bytes == _performance_artifact_bytes(campaign_dir),
         "timing_evidence": _timing_evidence_ok(
             metrics.get("append") or {},
-            campaign_duration_seconds=stored_duration,
+            campaign_duration_seconds=stored_candidate_duration,
             cases=expected_cases,
+        ),
+        "wall_timing_evidence": _wall_timing_evidence_ok(
+            total_duration_seconds=stored_duration,
+            candidate_duration_seconds=stored_candidate_duration,
+            baseline_validation_duration_seconds=stored_baseline_validation_duration,
+            baseline_probe_wall_duration_seconds=stored_probe_wall_duration,
+            baseline_validation_expected=baseline_valid,
         ),
         "source_shape_replay": source_shape_exact if expected_release else True,
         "source_event_distribution_replayed": expected_source_distribution,
@@ -2293,7 +2357,7 @@ def audit_campaign(campaign_dir: Path) -> dict[str, Any]:
         issues.append("stored_status_mismatch")
     if int(metrics.get("semantic_failures") or 0) != len(failures):
         issues.append("stored_failure_count_mismatch")
-    if stored_duration > _MAX_DURATION_SECONDS:
+    if stored_candidate_duration > _MAX_DURATION_SECONDS:
         issues.append("duration_gate_failed")
     if stored_rss > _MAX_RSS_MB:
         issues.append("rss_gate_failed")
@@ -2363,7 +2427,16 @@ def run_campaign(
     )
     source_files = _source_manifest()
     git_source = _git_source_state()
-    baseline_reference = _load_baseline_metrics(baseline_metrics)
+    if baseline_metrics is None:
+        baseline_reference = _load_baseline_metrics(None)
+        baseline_validation_duration_seconds = 0.0
+    else:
+        baseline_validation_started = time.perf_counter()
+        baseline_reference = _load_baseline_metrics(baseline_metrics)
+        measured_baseline_validation_duration = time.perf_counter() - baseline_validation_started
+        baseline_validation_duration_seconds = (
+            measured_baseline_validation_duration if baseline_reference.get("valid") else 0.0
+        )
     release_shape = (
         events == DEFAULT_EVENTS
         and seed == DEFAULT_SEED
@@ -2388,6 +2461,7 @@ def run_campaign(
         "migration_events": migration_events,
         "release_eligible": release_eligible,
         "release_shape": release_shape,
+        "baseline_validation_requested": baseline_metrics is not None,
         "dry_run": bool(dry_run),
         "only_case": only_case,
         "started_at": _now(),
@@ -2473,6 +2547,7 @@ def run_campaign(
     _write_json(campaign_dir / "privacy_audit.json", privacy)
 
     duration_seconds = time.perf_counter() - campaign_started
+    candidate_duration_seconds = duration_seconds - baseline_validation_duration_seconds
     rss_mb = _rss_mb()
     artifact_bytes = _directory_bytes(campaign_dir)
     performance_artifact_bytes = _performance_artifact_bytes(campaign_dir)
@@ -2509,14 +2584,21 @@ def run_campaign(
         "safe_negative_false_positive_rate": security_metrics["safe_negative_false_positive_rate"] <= 0.001,
         "fts_p95": ledger_metrics["fts_query_p95_ms"] <= 250.0,
         "migration": bool(migration["ok"]),
-        "duration": duration_seconds <= _MAX_DURATION_SECONDS,
+        "duration": 0 < candidate_duration_seconds <= _MAX_DURATION_SECONDS,
         "rss": rss_mb <= _MAX_RSS_MB,
         "artifact_size": artifact_bytes <= _MAX_ARTIFACT_BYTES,
         "performance_artifact_bytes_exact": performance_artifact_bytes > 0,
         "timing_evidence": _timing_evidence_ok(
             append_metrics,
-            campaign_duration_seconds=duration_seconds,
+            campaign_duration_seconds=candidate_duration_seconds,
             cases=cases,
+        ),
+        "wall_timing_evidence": _wall_timing_evidence_ok(
+            total_duration_seconds=duration_seconds,
+            candidate_duration_seconds=candidate_duration_seconds,
+            baseline_validation_duration_seconds=baseline_validation_duration_seconds,
+            baseline_probe_wall_duration_seconds=float(baseline_reference.get("probe_wall_duration_seconds") or 0),
+            baseline_validation_expected=bool(baseline_reference.get("valid")),
         ),
         "source_shape_replay": source_shape_exact if release_eligible else True,
         "source_event_distribution_replayed": (
@@ -2556,6 +2638,8 @@ def run_campaign(
         "immutable_counts": immutable_counts,
         "privacy": {"ok": privacy["ok"], "raw_hit_count": len(all_hits)},
         "duration_seconds": duration_seconds,
+        "candidate_duration_seconds": candidate_duration_seconds,
+        "baseline_validation_duration_seconds": baseline_validation_duration_seconds,
         "rss_mb": rss_mb,
         "artifact_bytes": artifact_bytes,
         "performance_artifact_bytes": performance_artifact_bytes,
@@ -2565,21 +2649,80 @@ def run_campaign(
     _write_json(campaign_dir / "metrics.json", metrics)
     _write_text(campaign_dir / "report.md", _render_report(metrics, manifest))
 
-    # Metrics/report are content-free; scan them too and fail closed if future
-    # edits accidentally copy a raw marker into the final artifacts.
-    final_hits = _privacy_scan([item for item in campaign_dir.rglob("*") if item.is_file()])
-    if final_hits:
-        privacy["ok"] = False
-        privacy["raw_sensitive_hits"] = final_hits
-        _write_json(campaign_dir / "privacy_audit.json", privacy)
-        if release_shape and not baseline_reference.get("valid"):
-            metrics["status"] = "baseline_candidate_failed"
-        else:
-            metrics["status"] = "release_failed" if release_eligible else "smoke_failed"
-        metrics["gates"]["privacy"] = False
-        metrics["privacy"] = {"ok": False, "raw_hit_count": len(final_hits)}
-        _write_json(campaign_dir / "metrics.json", metrics)
-        _write_text(campaign_dir / "report.md", _render_report(metrics, manifest))
+    # The full artifact set was scanned immediately before these three files
+    # were created. Scan only that delta as part of the measured candidate
+    # workload instead of rereading the large databases a second time.
+    final_artifact_paths = [
+        campaign_dir / "privacy_audit.json",
+        campaign_dir / "metrics.json",
+        campaign_dir / "report.md",
+    ]
+    final_hits = _privacy_scan(final_artifact_paths)
+    combined_hits: list[dict[str, str]] = []
+    seen_hits: set[str] = set()
+    for hit in [*all_hits, *final_hits]:
+        fingerprint = json.dumps(hit, sort_keys=True)
+        if fingerprint in seen_hits:
+            continue
+        seen_hits.add(fingerprint)
+        combined_hits.append(hit)
+    privacy = {
+        "ok": not combined_hits,
+        "raw_sensitive_hits": combined_hits,
+        "files_scanned": len({path.resolve() for path in [*live_paths, *artifact_paths, *final_artifact_paths]}),
+    }
+    _write_json(campaign_dir / "privacy_audit.json", privacy)
+
+    rss_mb = _rss_mb()
+    artifact_bytes = _directory_bytes(campaign_dir)
+    performance_artifact_bytes = _performance_artifact_bytes(campaign_dir)
+    duration_seconds = time.perf_counter() - campaign_started
+    candidate_duration_seconds = duration_seconds - baseline_validation_duration_seconds
+    gates.update(
+        {
+            "privacy": privacy["ok"],
+            "duration": 0 < candidate_duration_seconds <= _MAX_DURATION_SECONDS,
+            "rss": rss_mb <= _MAX_RSS_MB,
+            "artifact_size": artifact_bytes <= _MAX_ARTIFACT_BYTES,
+            "performance_artifact_bytes_exact": performance_artifact_bytes > 0,
+            "timing_evidence": _timing_evidence_ok(
+                append_metrics,
+                campaign_duration_seconds=candidate_duration_seconds,
+                cases=cases,
+            ),
+            "wall_timing_evidence": _wall_timing_evidence_ok(
+                total_duration_seconds=duration_seconds,
+                candidate_duration_seconds=candidate_duration_seconds,
+                baseline_validation_duration_seconds=baseline_validation_duration_seconds,
+                baseline_probe_wall_duration_seconds=float(baseline_reference.get("probe_wall_duration_seconds") or 0),
+                baseline_validation_expected=bool(baseline_reference.get("valid")),
+            ),
+        }
+    )
+    passed = all(gates.values())
+    core_passed = all(value for name, value in gates.items() if name != "baseline_regression")
+    if release_shape and not baseline_reference.get("valid"):
+        status = "baseline_candidate_passed" if core_passed else "baseline_candidate_failed"
+    elif release_eligible:
+        status = "release_passed" if passed else "release_failed"
+    else:
+        status = "smoke_passed" if passed else "smoke_failed"
+    metrics.update(
+        {
+            "status": status,
+            "privacy": {"ok": privacy["ok"], "raw_hit_count": len(combined_hits)},
+            "duration_seconds": duration_seconds,
+            "candidate_duration_seconds": candidate_duration_seconds,
+            "baseline_validation_duration_seconds": baseline_validation_duration_seconds,
+            "rss_mb": rss_mb,
+            "artifact_bytes": artifact_bytes,
+            "performance_artifact_bytes": performance_artifact_bytes,
+            "bytes_per_event": performance_artifact_bytes / max(1, len(cases)),
+            "gates": gates,
+        }
+    )
+    _write_json(campaign_dir / "metrics.json", metrics)
+    _write_text(campaign_dir / "report.md", _render_report(metrics, manifest))
     return campaign_dir
 
 
