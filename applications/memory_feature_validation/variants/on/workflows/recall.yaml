@@ -1,0 +1,20 @@
+name: "memory_review_on_recall"
+description: "Answer a follow-up using only the run-start persistent-memory snapshot."
+model_type: "summary"
+tool_call_type: "tool_call"
+max_steps: 5
+
+workflow: |
+  Load the follow-up with `validation_memory_case`. Do not reconstruct or
+  inspect the original evidence. Answer only from the persistent snapshot
+  supplied at run start. Return exactly one JSON object with key `answer`; use
+  the literal string `MISSING` when the fact is absent.
+
+tools:
+  - name: "validation_memory_case"
+    module: "applications.memory_feature_validation.agent_tools.validation_probes"
+    function: "validation_memory_case"
+
+toolsets: []
+skills: []
+worker_agents: []

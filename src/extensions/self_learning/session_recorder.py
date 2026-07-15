@@ -8,13 +8,17 @@ from threading import RLock
 from typing import TYPE_CHECKING, Any
 
 from src.lib.logging import get_logger
+from src.lib.trusted_memory_evidence import (
+    TRUSTED_MEMORY_EVIDENCE_RESPONSE_KEY,
+    TrustedMemoryEvidenceEnvelope,
+)
 
 if TYPE_CHECKING:
     from src.lib.smolagents.hooks.types import HookContext, HookResult
 
 from .application_scope import resolve_application_scope
 from .event_schema import CanonicalSessionEvent, compact_content, now_iso, safe_run_id
-from .paths import config_bool, session_events_dir
+from .paths import self_learning_enabled, session_events_dir
 from .redaction import redact_mapping, sanitize_text_fragment
 from .session_index import SessionIndex
 
@@ -118,6 +122,28 @@ def _metadata(context: HookContext) -> dict[str, Any]:
     )
 
 
+def _public_tool_response(context: HookContext) -> dict[str, Any] | None:
+    if not isinstance(context.tool_response, dict):
+        return context.tool_response
+    response = dict(context.tool_response)
+    response.pop(TRUSTED_MEMORY_EVIDENCE_RESPONSE_KEY, None)
+    return response
+
+
+def _trusted_runtime_evidence(
+    context: HookContext,
+) -> tuple[dict[str, str], ...]:
+    if context.hook_event_name != "PostToolUse":
+        return ()
+    response = context.tool_response
+    if not isinstance(response, dict):
+        return ()
+    envelope = response.get(TRUSTED_MEMORY_EVIDENCE_RESPONSE_KEY)
+    if not isinstance(envelope, TrustedMemoryEvidenceEnvelope):
+        return ()
+    return tuple(dict(entry) for entry in envelope if isinstance(entry, dict))
+
+
 def _content(context: HookContext, event_type: str) -> str:
     payload: dict[str, Any] = {
         "event_type": event_type,
@@ -132,13 +158,14 @@ def _content(context: HookContext, event_type: str) -> str:
         for key in ("task_text", "task", "final_answer", "error", "error_type", "success"):
             if key in context.tool_input:
                 payload[key] = context.tool_input[key]
-    if context.tool_response is not None:
-        payload["tool_response"] = context.tool_response
-        if isinstance(context.tool_response, dict):
-            if "result" in context.tool_response:
-                payload["result"] = context.tool_response["result"]
-            if "error" in context.tool_response:
-                payload["error"] = context.tool_response["error"]
+    public_response = _public_tool_response(context)
+    if public_response is not None:
+        payload["tool_response"] = public_response
+        if isinstance(public_response, dict):
+            if "result" in public_response:
+                payload["result"] = public_response["result"]
+            if "error" in public_response:
+                payload["error"] = public_response["error"]
     return compact_content(payload)
 
 
@@ -158,7 +185,8 @@ def event_from_hook_context(context: HookContext) -> CanonicalSessionEvent | Non
     task_id = _task_id(context)
     metadata = _metadata(context)
     input_data = context.tool_input if isinstance(context.tool_input, dict) else {}
-    output_data = context.tool_response if isinstance(context.tool_response, dict) else {}
+    public_response = _public_tool_response(context)
+    output_data = public_response if isinstance(public_response, dict) else {}
     event = CanonicalSessionEvent(
         event_id=uuid.uuid4().hex,
         run_id=run_id,
@@ -191,20 +219,36 @@ def event_from_hook_context(context: HookContext) -> CanonicalSessionEvent | Non
 class SessionRecorder:
     """Append canonical events and keep the SQLite index warm."""
 
-    def append(self, event: CanonicalSessionEvent) -> dict[str, Any]:
+    def append(
+        self,
+        event: CanonicalSessionEvent,
+        *,
+        trusted_evidence: tuple[dict[str, str], ...] = (),
+    ) -> dict[str, Any]:
         with _LOCK:
-            indexed = SessionIndex().record_event(event)
+            indexed = SessionIndex().record_runtime_event(
+                event,
+                trusted_evidence=trusted_evidence,
+            )
         return indexed
 
     def record_hook(self, context: HookContext) -> HookResult:
         from src.lib.smolagents.hooks.types import HookResult
 
-        if not config_bool("enabled", True):
+        agent_config = (
+            context.agent_config
+            if isinstance(context.agent_config, dict) and context.agent_config
+            else None
+        )
+        if not self_learning_enabled(agent_config):
             return HookResult(success=True, decision="allow")
         try:
             event = event_from_hook_context(context)
             if event is not None:
-                self.append(event)
+                self.append(
+                    event,
+                    trusted_evidence=_trusted_runtime_evidence(context),
+                )
         except Exception as exc:
             safe_error = sanitize_text_fragment(str(exc), max_chars=1000)
             logger.warning(

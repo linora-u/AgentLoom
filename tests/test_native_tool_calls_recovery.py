@@ -67,6 +67,35 @@ class NativeToolCallModel:
         return ChatMessage(role=MessageRole.ASSISTANT, content="", tool_calls=[self.tool_call])
 
 
+class UnknownToolThenFinalModel:
+    model_id = "fake-unknown-then-final"
+
+    def __init__(self):
+        self.calls = 0
+
+    def generate(self, _messages, stop_sequences=None, tools_to_call_from=None, **_kwargs):
+        self.calls += 1
+        if self.calls == 1:
+            raise ToolCallParseError(
+                "Tool 'tool_name' not found in registered tools "
+                "['echo', 'final_answer']"
+            )
+        return ChatMessage(
+            role=MessageRole.ASSISTANT,
+            content="",
+            tool_calls=[
+                ChatMessageToolCall(
+                    id="call-final-after-unknown",
+                    type="function",
+                    function=ChatMessageToolCallFunction(
+                        name="final_answer",
+                        arguments={"answer": "recovered"},
+                    ),
+                )
+            ],
+        )
+
+
 def _make_agent(model, tools):
     return ToolCallingAgentV2(
         tools=tools,
@@ -108,6 +137,20 @@ def test_tool_calling_agent_executes_native_tool_call():
     assert model.seen_tools[0].name == "echo"
     assert memory_step.tool_calls[0].id == "call_native"
     assert memory_step.observations.strip() == "echo:native"
+
+
+def test_tool_calling_agent_recovers_when_model_emits_an_unknown_tool() -> None:
+    model = UnknownToolThenFinalModel()
+    agent = ToolCallingAgentV2(
+        tools=[EchoTool()],
+        model=model,
+        max_steps=2,
+        max_tokens=4096,
+        verbosity_level=0,
+    )
+
+    assert agent.run("Return a final answer.") == "recovered"
+    assert model.calls == 2
 
 
 def test_tool_calling_agent_executes_native_tool_call_with_json_string_arguments():
@@ -165,6 +208,44 @@ def test_litellm_model_keeps_tools_schema_and_tool_choice():
 
     assert completion_kwargs["tools"][0]["function"]["name"] == "echo"
     assert completion_kwargs["tool_choice"] == "auto"
+
+
+def test_tool_calling_agent_requires_a_tool_call_even_when_model_default_is_auto(
+    monkeypatch,
+):
+    model = LiteLLMModelV2(model_id="test/model", tool_choice="auto")
+    observed_choices: list[str] = []
+
+    def generate(_messages, stop_sequences=None, tools_to_call_from=None, **_kwargs):
+        completion_kwargs = model._prepare_completion_kwargs(
+            messages=[{"role": "user", "content": "hi"}],
+            stop_sequences=stop_sequences,
+            tools_to_call_from=tools_to_call_from,
+        )
+        observed_choices.append(completion_kwargs["tool_choice"])
+        return ChatMessage(
+            role=MessageRole.ASSISTANT,
+            content="",
+            tool_calls=[
+                ChatMessageToolCall(
+                    id="call-required",
+                    type="function",
+                    function=ChatMessageToolCallFunction(
+                        name="echo",
+                        arguments={"text": "required"},
+                    ),
+                )
+            ],
+        )
+
+    monkeypatch.setattr(model, "generate", generate)
+    agent = _make_agent(model, [EchoTool()])
+
+    memory_step = _action_step()
+    agent.step(memory_step)
+
+    assert observed_choices == ["required"]
+    assert memory_step.observations.strip() == "echo:required"
 
 
 def test_shared_litellm_model_keeps_concurrent_tool_schemas_isolated(monkeypatch):

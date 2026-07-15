@@ -12,18 +12,19 @@ All tests use mocks (no real LLM calls).
 from __future__ import annotations
 
 import time
-from unittest.mock import MagicMock, patch, call
+from unittest.mock import MagicMock
 
 import pytest
 from litellm.exceptions import RateLimitError, Timeout
 
+from src.lib.concurrency.rate_limiter import GlobalRateLimiterRegistry
 from src.lib.smolagents.models.litellm_retry import (
+    ProviderCallBudgetExceeded,
     _is_rate_limit_error,
     _parse_retry_after,
     create_retry_wrapper,
-    is_retryable_litellm_error,
+    limit_provider_calls,
 )
-from src.lib.concurrency.rate_limiter import GlobalRateLimiterRegistry
 
 
 @pytest.fixture(autouse=True)
@@ -108,6 +109,78 @@ class TestIsRateLimitError:
 # ═══════════════════════════════════════════════════════════════════ #
 
 class TestRetryWrapperGlobalRateLimit:
+    def test_provider_budget_stops_tenacity_before_a_fifth_request(self):
+        """One review budget fences retry attempts at the provider boundary."""
+        provider_calls = 0
+
+        def failing_completion(**kwargs):
+            nonlocal provider_calls
+            provider_calls += 1
+            assert kwargs["num_retries"] == 0
+            raise Timeout(message="timeout", model="test", llm_provider="test")
+
+        wrapper = create_retry_wrapper(
+            failing_completion,
+            default_num_retries=10,
+            default_retry_delay=0.0,
+            default_max_retry_delay=0.0,
+        )
+
+        with limit_provider_calls(4) as budget:
+            with pytest.raises(ProviderCallBudgetExceeded):
+                wrapper(model="test")
+
+        assert provider_calls == 4
+        assert budget.calls == 4
+
+    def test_zero_retries_is_forwarded_to_litellm(self):
+        """The direct path must disable LiteLLM's own hidden retry loop."""
+        received = {}
+
+        def fake_completion(**kwargs):
+            received.update(kwargs)
+            return "ok"
+
+        wrapper = create_retry_wrapper(fake_completion)
+
+        with limit_provider_calls(4) as budget:
+            assert wrapper(model="test", num_retries=0) == "ok"
+
+        assert received["num_retries"] == 0
+        assert budget.calls == 1
+
+    def test_retry_delay_none_without_budget_preserves_direct_call_semantics(self):
+        """The review fence must not change unrelated direct model calls."""
+        received = {}
+
+        def fake_completion(**kwargs):
+            received.update(kwargs)
+            return "ok"
+
+        wrapper = create_retry_wrapper(fake_completion)
+
+        assert wrapper(model="test", num_retries=7, retry_delay=None) == "ok"
+
+        assert "num_retries" not in received
+
+    def test_active_budget_disables_hidden_retry_on_direct_call(self):
+        received = {}
+
+        def fake_completion(**kwargs):
+            received.update(kwargs)
+            return "ok"
+
+        wrapper = create_retry_wrapper(fake_completion)
+
+        with limit_provider_calls(4):
+            assert wrapper(
+                model="test",
+                num_retries=7,
+                retry_delay=None,
+            ) == "ok"
+
+        assert received["num_retries"] == 0
+
     def test_model_type_popped_from_kwargs(self):
         """_agent_loom_model_type should be removed before calling litellm."""
         received = {}

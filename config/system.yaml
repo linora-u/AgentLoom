@@ -188,41 +188,33 @@ checkpoint:
 self_learning:
   enabled: true
   root_dir: ".agentloom"
-  reviewer_enabled: true
-  # Runs/events older than this are pruned by a date-deduplicated durable
-  # retention job enqueued after SessionEnd. 0 disables event pruning.
+  # Runs/events are history only. They remain searchable but are never promoted
+  # to memory by a deterministic fallback.
   events_retention_days: 90
-  # Durable memory (session / application / project scopes)
+  # Curated durable memory (project / current-application scopes only).
   memory:
     # Total char budget for the run-start prompt snapshot.
     prompt_max_chars: 12000
     # Per-item content cap; oversized writes are rejected with guidance.
     max_item_chars: 4000
     # Active-memory char capacity per scope bucket. When a direct write or an
-    # applied proposal would overflow, the write is rejected with the current
-    # entries so the caller can consolidate in one atomic batch.
+    # approved pending write would overflow, the write is rejected with the
+    # current entries so the caller can consolidate deliberately.
     scope_budgets:
       project: 8000
       application: 6000
-      session: 4000
-    # Session-scope notes older than this are deleted by `loom memory prune`.
-    session_ttl_days: 14
-    # Turn explicit session notes and safe run evidence into pending proposals
-    # through the durable post-SessionEnd worker.
-    distill_enabled: true
-    # Model type (from config/llm.yaml) used for semantic session distillation:
-    # the run digest goes through this model to become a few declarative,
-    # deduplicated fact proposals. Empty string = deterministic distillation
-    # of explicit session notes only, with no LLM cost. The model itself never
-    # retries; the durable job retries twice before the same frozen digest
-    # falls back to explicit notes on its third attempt.
-    distill_model: "summary"
-    # off  = proposals wait for `loom memory apply` (human review only).
-    # safe = add-proposals that pass every gate (injection scan, no conflicts
-    #        with active memory, exact-corroborated by >=2 distinct root runs,
-    #        capacity check, max 5 per session) auto-apply with an
-    #        applied_by=auto audit trail; replace/remove stay human-only.
-    auto_apply: "safe"
+    # Empty/absent means no completed-run model review or distillation; the
+    # foreground Agent can still use memory explicitly. Set to a model type
+    # from config/llm.yaml (for example "summary") to run one isolated,
+    # synchronous reviewer after a successful SessionEnd is persisted.
+    # Reviewer may copy exactly one complete fact that tool code explicitly
+    # classified as kind="durable_fact" with scope="project" or
+    # scope="application". Content and scope changes, final-answer claims, and
+    # replace/remove calls are rejected; memory plus audit commit atomically.
+    review_model: ""
+    # false: accepted memory writes become active immediately.
+    # true: exact writes stay pending for `loom memory approve` or `reject`.
+    write_approval: false
 
 # ============================================
 # Tool Metadata Configuration

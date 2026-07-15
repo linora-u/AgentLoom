@@ -1,127 +1,137 @@
 # Memory Feature Validation
 
-This application validates self-learning memory with the `summary` model for
-both the Application agent and asynchronous SessionEnd distiller.
+This application validates the optional completed-run memory review contract
+with real `loom run` subprocesses and the configured `summary` model.
 
-## Offline 100k campaign
+The campaign proves the two supported modes:
 
-Reduced runs are explicitly smoke-only; they report `smoke_passed` and can
-never be mistaken for a release result:
+- absent or empty `memory.review_model` makes no completed-run model call or
+  distillation; foreground `memory` calls still work;
+- `memory.review_model: summary` synchronously reviews a successfully
+  completed run after SessionEnd is persisted and before `loom run` returns;
+- reviewer may copy at most one complete fact exactly from an unblocked, tool-bound
+  trusted-evidence envelope whose extractor explicitly classified it as
+  `kind="durable_fact"` with an exact `project` or `application` scope;
+  shortening, scope changes, ordinary result fields, paraphrases, unsupported
+  claims, `replace`, and `remove` are rejected;
+- a final summary by itself cannot authorize a write; the add is staged in
+  process, a validated add terminates the review, and memory plus its terminal
+  audit commit atomically once per root run; result data cannot make itself
+  eligible by choosing a field name or by spoofing the internal envelope key;
+- `memory.write_approval: false` writes active memory, while `true` stages a
+  pending memory for `loom memory pending`, `approve`, or `reject`;
+- only active memory appears in a later run's frozen snapshot, with project and
+  Application scope isolation.
+
+The model-visible dataset is [`data/cases.jsonl`](data/cases.jsonl) plus the
+de-identified fixtures under `data/fixtures/`. Expected status, scope, recall,
+and security markers live in the separate model-invisible
+[`oracle/cases.jsonl`](oracle/cases.jsonl). Natural tasks never script a
+`memory(...)` call.
+
+The 100 real Applications cover disabled review, durable review and recall,
+temporary progress, ordinary unverified claims, mixed durable/transient input,
+secret and injection payloads, foreground writes, approval/rejection, and
+project/Application scope isolation. Application-scope writers use a
+reviewer-enabled Application with no foreground `memory` tool: only its
+trusted `durable_fact` evidence can create the scoped item, the same
+Application must recall it, and a distinct Application must not. Configured final-only runs still execute
+the reviewer, but repeating an unsupported claim in the final answer must
+produce zero memory writes. Raw progress and completion claims remain history:
+they cannot qualify through ordinary event/JSONL data, and the framework does
+not use a progress keyword list or semantic regex to reclassify them.
+
+Validate the fixed five-canary and 100-run plans without a model call:
 
 ```bash
-.venv/bin/python applications/memory_feature_validation/scripts/run_offline_mass_validation.py \
-  --cases 1000 --seed 20260711 --workers 2
+uv run python applications/memory_feature_validation/scripts/run_memory_review_campaign.py \
+  --runs 5 --dry-run
+uv run python applications/memory_feature_validation/scripts/run_memory_review_campaign.py \
+  --runs 100 --dry-run
 ```
 
-The 100,000-case release does not accept a user-supplied baseline JSON or hash.
-It creates a temporary clean Git worktree at the fixed reference commit
-`5ca02b552e3edd271ccedb0e930abf5a0a9f9993`, then runs the same 10,000-event
-benchmark driver against that worktree and the current implementation. The
-generated manifest binds the reference commit and full tree, driver and
-benchmark-spec hashes, environment, current self-learning source hashes, and
-the de-identified source shape. The benchmark subprocess also reports hashes
-for the self-learning modules it actually imported; release requires those
-hashes to match a stable pre/post working-tree manifest.
-
-The old commit does not need to contain the new harness: the current
-orchestrator executes its standalone benchmark driver with the clean worktree
-as the import root. Therefore the reference is executable, while there is no
-hand-authored performance artifact that can be substituted.
-
-Run the release against the frozen source ledger whose read-only shape is
-exactly 82 runs and 1,706 events:
+Run five real canaries, then the full campaign with at most two independent
+cohorts in parallel. The fixed canary includes the reviewer-driven
+Application-scope writer:
 
 ```bash
-.venv/bin/python applications/memory_feature_validation/scripts/run_offline_mass_validation.py \
-  --cases 100000 --seed 20260711 --workers 4 \
-  --source-db /path/to/frozen-source.db
+uv run python applications/memory_feature_validation/scripts/run_memory_review_campaign.py \
+  --runs 5 --max-workers 1
+uv run python applications/memory_feature_validation/scripts/run_memory_review_campaign.py \
+  --runs 100 --max-workers 2
 ```
 
-The run hard-fails release status unless all 100,000 cases execute with the
-literal seven category quotas and the source shape is exactly 82/1,706.
-`fixed_point_benchmark/manifest.json`, `reference.json`, and `current.json`
-contain the paired benchmark evidence.
-
-The release status enforces the semantic, privacy, SQLite integrity, FTS,
-ranking, SessionEnd latency, duration, RSS, artifact-size, and relative
-regression gates. The source ledger is opened read-only and immutable; only
-schema, counts, text lengths, and aggregate event-type distribution are read.
-
-## Real summary campaign
-
-Plan-only smoke checks (no model call):
+Re-audit captured evidence without another provider call:
 
 ```bash
-uv run python applications/memory_feature_validation/scripts/run_summary_campaign.py --runs 1 --dry-run
-uv run python applications/memory_feature_validation/scripts/run_summary_campaign.py --runs 5 --dry-run
-uv run python applications/memory_feature_validation/scripts/run_summary_campaign.py --runs 100 --dry-run
-```
-
-Real 100-run campaign:
-
-```bash
-uv run python applications/memory_feature_validation/scripts/run_summary_campaign.py --runs 100
-```
-
-The runner executes five canaries first, then runs at most two independent
-case/cohort groups concurrently. Every Application is a real
-`loom run <workflow> --log-to-file` subprocess with a unique runtime root.
-Self-learning state is unique except for the exact two-run corroboration and
-high-overlap conflict cohorts. The runner refuses the live
-`.agentloom/self_learning.db` path and records its before/after SHA-256.
-
-Only explicit transient transport failures (429, 502/503/504, connection reset
-or refusal, name-resolution failure, service unavailable) receive one
-clean-state retry. Model/configuration, code, and semantic failures are never
-retried. After `loom run` exits, the runner waits for every newly committed
-learning job to reach `succeeded` or `dead`. If the best-effort detached worker
-does not claim the outbox within ten seconds, the runner exercises the hidden
-internal recovery path with an explicit isolated `_memory-worker`; this is counted
-separately and does not count toward the 95/100 first-completion gate.
-
-The real campaign has a non-extendable eight-hour deadline. It proves the
-Application model from runtime resolution logs and the distiller from the
-resolved global config plus the committed job result. SessionEnd hook durations
-are measured from runtime logs and gated at p95 <100ms and p99 <250ms.
-
-The 9/10 scenario allowance never masks a hard-zero violation: cross-scope or
-cross-run leakage, false/contradictory evidence activation, revision lineage
-contamination, batch atomicity damage, raw injection/secret persistence,
-duplicate or stale-worker effects, SQLite damage, and SessionEnd latency/model
-work fail the whole campaign immediately. Ordinary model-format or recall
-misses still count against the overall 95/100 and per-scenario 9/10 gates. The
-five conflict pairs cover number, path, version, negation, unit, and
-punctuation changes.
-
-The subprocess stream stays in memory until model/timing evidence is extracted;
-it is then redacted and injection-blocked before the first atomic campaign-log
-write. Process file logging and checkpoints are disabled only for this isolated
-validation app, and command-hook payloads cross the same boundary before temp
-files, environment variables, or visualization artifacts can observe them.
-The audit is read-only: it scans every generated file (including runtime logs,
-SQLite/WAL/SHM, snapshots, digests, proposals, and learning artifacts) for raw
-secret or injection probes. Any hit, or evidence of legacy post-hoc rewriting,
-is an immediate privacy failure.
-
-The runner waits for the corresponding outbox job, then immediately scans the
-live SQLite DB/WAL/SHM and generated artifacts without resetting a shared WAL
-generation. Transient insert-delete-checkpoint forensics run against one-shot
-isolated databases in the offline campaign and deterministic contract tests;
-a long-lived read snapshot is never held on a live two-phase cohort database
-because it would hide the next phase's outbox frames from the runner.
-
-Artifacts land under
-`.agentloom/validation/memory_feature_validation/<campaign_id>/`:
-
-- `plan.json` and `results.json`
-- `canary_audit.json` for a real run
-- `privacy_audit.json` and `failure_cases.jsonl`
-- `campaign_timing.json` and resolved model evidence in `environment.json`
-- `report.md` and `reproduce_commands.txt`
-
-Re-audit without a model call:
-
-```bash
-uv run python applications/memory_feature_validation/scripts/audit_campaign.py \
+uv run python applications/memory_feature_validation/scripts/audit_memory_review_campaign.py \
   .agentloom/validation/memory_feature_validation/<campaign_id>
 ```
+
+Every real run uses an isolated runtime root; each logical case uses an
+isolated self-learning root. Multi-phase cohorts deliberately share only their
+writer and recall/decision state. The report separates Application and
+reviewer model calls and token usage, records SQLite and CLI evidence, and
+fails closed if it cannot prove whether review ran or if a completed-run
+reviewer exceeds four provider requests.
+
+The runtime telemetry contract is one stable line beginning with
+`Memory review:` and containing at least `enabled`, `requested`, `resolved`,
+`calls`, `input_tokens`, `output_tokens`, and `actions` as `key=value` fields.
+
+Artifacts are written under
+`.agentloom/validation/memory_feature_validation/<campaign_id>/` and include
+the plan, environment, results, usage, privacy audit, failures, report, and
+`reproduction_commands.json` for any failed runs.
+
+## Offline v5 campaign
+
+The deterministic offline campaign validates the current v5 surface without
+calling a model. It writes exactly 100,000 canonical events with seed
+`20260711`: 50,000 ledger/FTS/search/scroll events, 20,000
+redaction/injection events, 20,000 root-isolation events, and 10,000 events
+paired with active/pending memory operations. A separate literal v4 fixture
+validates migration to v5; the campaign does not restore the removed outbox,
+evidence-voting, revision/trust, or ranking state machines.
+
+The default release run also opens the current `.agentloom/self_learning.db`
+with SQLite `mode=ro&immutable=1`. It records only run/event counts, byte-length
+percentiles, and hashed event-type distribution; event/task/final text is
+never selected or copied into the campaign.
+
+Run a small smoke first. The first release-sized run establishes a candidate
+baseline; a second run compares append latency and bytes/event against it:
+
+```bash
+uv run python applications/memory_feature_validation/scripts/run_offline_memory_campaign.py \
+  --events 100 --migration-events 100
+uv run python applications/memory_feature_validation/scripts/run_offline_memory_campaign.py
+uv run python applications/memory_feature_validation/scripts/run_offline_memory_campaign.py \
+  --baseline-metrics \
+  .agentloom/validation/memory_feature_validation/<baseline-campaign>/metrics.json
+```
+
+Only the default 100,000-event, 10,000-migration-event shape can become a
+baseline candidate. It reports `release_passed` only on the comparison run,
+when append latency/event and bytes/event are each no more than 20% above the
+accepted candidate. Candidate loading first re-audits its immutable databases
+and requires every bound harness/production file in its source manifest to
+match a frozen Git commit. It then checks out that commit in a detached
+temporary worktree and independently reruns the fixed 100,000-event append and
+migration workload; the candidate's reported latency and physical bytes are
+not used as baseline operands.
+Re-audit repeats the frozen probe with a 20% reproducibility bound. Reduced and
+`--only-case` runs report only a smoke result. Uncommitted changes to a bound
+source file prevent a baseline candidate; unrelated user-owned worktree changes
+are recorded as `worktree_dirty` but do not change release eligibility.
+Re-audit an existing campaign without executing production writes:
+
+```bash
+uv run python applications/memory_feature_validation/scripts/run_offline_memory_campaign.py \
+  --audit .agentloom/validation/memory_feature_validation/<campaign_id>
+```
+
+Offline artifacts include `cases.jsonl.gz`, the central `self_learning.db`,
+`migration_v4_to_v5.db`, metrics, privacy audit, content-free failures, report,
+and single-case reproduction commands. Raw generated secret and injection
+markers are never written to case, failure, or report artifacts.
