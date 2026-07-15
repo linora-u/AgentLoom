@@ -136,6 +136,32 @@ def test_get_tools_precheck_failure_aborts_loading(tmp_path, monkeypatch):
     assert create_calls["count"] == 0
 
 
+@pytest.mark.parametrize("worker_agents_configured", [True, False])
+def test_get_tools_without_workers_does_not_resolve_worker_folder(
+    monkeypatch,
+    worker_agents_configured,
+):
+    supervisor = _build_supervisor_for_get_tools([])
+    if not worker_agents_configured:
+        supervisor._config.pop("worker_agents")
+
+    def _unexpected_worker_folder_lookup(_category):
+        raise AssertionError("worker folder must not be resolved without workers")
+
+    monkeypatch.setattr(
+        yaml_factory_module,
+        "get_worker_agent_yaml_path",
+        _unexpected_worker_folder_lookup,
+    )
+    monkeypatch.setattr(
+        YamlAgentFactory,
+        "get_tools_from_config",
+        lambda *_args, **_kwargs: (["standard_tool"], None),
+    )
+
+    assert supervisor._get_tools() == ["standard_tool"]
+
+
 def test_get_tools_loads_all_workers_after_precheck(tmp_path, monkeypatch):
     worker_folder = tmp_path / "applications" / "demo" / "workflows" / "worker_agents"
     shorthand_file = worker_folder / "alpha.yaml"
