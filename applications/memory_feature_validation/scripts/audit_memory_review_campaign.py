@@ -57,6 +57,8 @@ _HARD_CODES = {
     "unverified_claim_persisted",
     "unexpected_memory_write",
 }
+_PROVIDER_TEMPFAIL_RETURN_CODE = 75
+_SUBPROCESS_TIMEOUT_RETURN_CODE = 124
 
 
 def _write_text(path: Path, value: str) -> None:
@@ -359,12 +361,27 @@ def _attempt_contract_issues(result: dict[str, Any]) -> list[str]:
             return [f"Application attempt {index} timeout evidence was missing"]
         if not isinstance(attempt.get("retryable_transport"), bool):
             return [f"Application attempt {index} retry evidence was missing"]
-        if attempt["retryable_transport"] is not attempt["timed_out"]:
-            return [f"Application attempt {index} retry evidence contradicted timeout"]
-        if attempt["timed_out"] is True and (
-            returncode != 124 or attempt["completion_marker_seen"] is not False
+        if "transport_failure_reason" not in attempt:
+            return [f"Application attempt {index} transport reason was missing"]
+        reason = attempt.get("transport_failure_reason")
+        timed_out = attempt["timed_out"]
+        if timed_out is True and returncode == _SUBPROCESS_TIMEOUT_RETURN_CODE:
+            expected_reason = "subprocess_timeout"
+        elif returncode == _PROVIDER_TEMPFAIL_RETURN_CODE:
+            expected_reason = "provider_tempfail" if timed_out is False else None
+        else:
+            expected_reason = None
+        if (
+            (
+                timed_out is True
+                and returncode != _SUBPROCESS_TIMEOUT_RETURN_CODE
+            )
+            or attempt["retryable_transport"] is not (expected_reason is not None)
+            or reason != expected_reason
         ):
-            return [f"Application attempt {index} timeout contradicted process completion"]
+            return [
+                f"Application attempt {index} transport evidence contradicted process status"
+            ]
     final = attempts[-1]
     returncode = final["returncode"]
     completed = returncode == 0 and final["completion_marker_seen"] is True
@@ -378,9 +395,10 @@ def _attempt_contract_issues(result: dict[str, Any]) -> list[str]:
             return ["a retry was used after a successful Application attempt"]
         if (
             first.get("retryable_transport") is not True
-            or first.get("timed_out") is not True
+            or first.get("transport_failure_reason")
+            not in {"subprocess_timeout", "provider_tempfail"}
         ):
-            return ["a retry was used after a non-timeout failure"]
+            return ["a retry was used after a non-transport failure"]
     return []
 
 

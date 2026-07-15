@@ -108,6 +108,7 @@ _SENSITIVE_NORMALIZED_KEYS = (
     "awssecretaccesskey",
 )
 _COMPLETION_MARKER = "Execution completed successfully."
+_PROVIDER_TEMPFAIL_RETURN_CODE = 75
 _ACTIVE_CAPSULE_DESCRIPTOR: dict[str, Any] | None = None
 _ACTIVE_MODEL_CONFIG_BYTES: bytes | None = None
 _ACTIVE_MODEL_PRIVACY_MARKERS: tuple[tuple[str, bytes], ...] = ()
@@ -1296,6 +1297,15 @@ def _run_attempt(
         timed_out = True
     elapsed = time.monotonic() - started
     finished_at = _now()
+    transport_failure_reason = (
+        "subprocess_timeout"
+        if timed_out
+        else (
+            "provider_tempfail"
+            if returncode == _PROVIDER_TEMPFAIL_RETURN_CODE
+            else None
+        )
+    )
 
     model = _model_evidence(raw_output)
     after = _db_snapshot(db_path, markers)
@@ -1363,9 +1373,10 @@ def _run_attempt(
         "provider_protocol_empty_responses": (
             _provider_protocol_empty_response_count(raw_output)
         ),
-        # Only the subprocess timeout is a typed infrastructure signal. Log
-        # text is model-visible and therefore cannot authorize a retry.
-        "retryable_transport": timed_out,
+        # Only process status is trusted. Model-visible output never
+        # authorizes an infrastructure retry.
+        "retryable_transport": transport_failure_reason is not None,
+        "transport_failure_reason": transport_failure_reason,
     }
 
 

@@ -2482,12 +2482,14 @@ def test_campaign_audit_rejects_non_transport_retry_and_more_than_two_attempts()
                 "returncode": 1,
                 "completion_marker_seen": False,
                 "retryable_transport": False,
+                "transport_failure_reason": None,
                 "timed_out": False,
             },
             {
                 "returncode": 0,
                 "completion_marker_seen": True,
                 "retryable_transport": False,
+                "transport_failure_reason": None,
                 "timed_out": False,
             },
         ]
@@ -2503,7 +2505,7 @@ def test_campaign_audit_rejects_non_transport_retry_and_more_than_two_attempts()
     excessive_retry["final"] = excessive_retry["attempts"][-1]
 
     assert audit_module._attempt_contract_issues(semantic_retry) == [
-        "a retry was used after a non-timeout failure"
+        "a retry was used after a non-transport failure"
     ]
     assert audit_module._attempt_contract_issues(excessive_retry) == [
         "Application used more than one infrastructure retry"
@@ -2517,10 +2519,14 @@ def test_campaign_audit_rejects_non_transport_retry_and_more_than_two_attempts()
 
     forged_retry = json.loads(json.dumps(semantic_retry))
     forged_retry["attempts"][0].update(
-        {"retryable_transport": True, "timed_out": False}
+        {
+            "retryable_transport": True,
+            "transport_failure_reason": "provider_tempfail",
+            "timed_out": False,
+        }
     )
     assert audit_module._attempt_contract_issues(forged_retry) == [
-        "Application attempt 1 retry evidence contradicted timeout"
+        "Application attempt 1 transport evidence contradicted process status"
     ]
 
     impossible_success = {
@@ -2530,14 +2536,274 @@ def test_campaign_audit_rejects_non_transport_retry_and_more_than_two_attempts()
                 "returncode": 0,
                 "completion_marker_seen": True,
                 "retryable_transport": True,
+                "transport_failure_reason": "subprocess_timeout",
                 "timed_out": True,
             }
         ],
     }
     impossible_success["final"] = impossible_success["attempts"][0]
     assert audit_module._attempt_contract_issues(impossible_success) == [
-        "Application attempt 1 timeout contradicted process completion"
+        "Application attempt 1 transport evidence contradicted process status"
     ]
+
+    provider_tempfail = {
+        "status": "failed",
+        "attempts": [
+            {
+                "returncode": 75,
+                "completion_marker_seen": False,
+                "retryable_transport": True,
+                "transport_failure_reason": "provider_tempfail",
+                "timed_out": False,
+            }
+        ],
+    }
+    provider_tempfail["final"] = provider_tempfail["attempts"][0]
+    assert audit_module._attempt_contract_issues(provider_tempfail) == []
+
+    missing_reason = json.loads(json.dumps(provider_tempfail))
+    del missing_reason["attempts"][0]["transport_failure_reason"]
+    missing_reason["final"] = missing_reason["attempts"][0]
+    assert audit_module._attempt_contract_issues(missing_reason) == [
+        "Application attempt 1 transport reason was missing"
+    ]
+
+    forged_log_authorization = {
+        "status": "failed",
+        "attempts": [
+            {
+                "returncode": 1,
+                "completion_marker_seen": False,
+                "retryable_transport": True,
+                "transport_failure_reason": "provider_tempfail",
+                "timed_out": False,
+                "stdout": "APITimeout",
+            }
+        ],
+    }
+    forged_log_authorization["final"] = forged_log_authorization["attempts"][0]
+    assert audit_module._attempt_contract_issues(forged_log_authorization) == [
+        "Application attempt 1 transport evidence contradicted process status"
+    ]
+
+
+def test_campaign_retries_once_for_typed_provider_tempfail(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    spec = build_full_plan()[0]
+    outputs = [
+        SimpleNamespace(returncode=75, stdout="provider unavailable"),
+        SimpleNamespace(
+            returncode=0,
+            stdout="Execution completed successfully.\n{'answer': 'ok'}",
+        ),
+    ]
+    restores: list[Path] = []
+
+    monkeypatch.setattr(campaign_runner, "capsule_is_active", lambda: False)
+    monkeypatch.setattr(campaign_runner, "_loom", lambda: "loom")
+    monkeypatch.setattr(campaign_runner, "_db_snapshot", lambda *_args: {})
+    monkeypatch.setattr(campaign_runner, "_privacy_findings", lambda *_args: [])
+    monkeypatch.setattr(campaign_runner, "_run_cli", lambda *_args: {})
+    monkeypatch.setattr(campaign_runner, "_snapshot_state", lambda *_args: None)
+    monkeypatch.setattr(
+        campaign_runner,
+        "_restore_state",
+        lambda _state, backup: restores.append(backup),
+    )
+    monkeypatch.setattr(
+        campaign_runner.subprocess,
+        "run",
+        lambda *_args, **_kwargs: outputs.pop(0),
+    )
+    state_root = tmp_path / "state"
+    state_root.mkdir()
+
+    result = campaign_runner._run_spec(
+        spec,
+        campaign_dir=tmp_path,
+        state_root=state_root,
+        timeout_seconds=30,
+        oracle={},
+        markers=[],
+    )
+
+    assert [attempt["returncode"] for attempt in result["attempts"]] == [75, 0]
+    assert result["attempts"][0]["retryable_transport"] is True
+    assert (
+        result["attempts"][0]["transport_failure_reason"]
+        == "provider_tempfail"
+    )
+    assert len(restores) == 1
+    assert outputs == []
+
+
+def test_campaign_does_not_parse_model_logs_to_authorize_retry(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    spec = build_full_plan()[0]
+    process_calls = 0
+
+    def semantic_failure(*_args, **_kwargs):
+        nonlocal process_calls
+        process_calls += 1
+        return SimpleNamespace(
+            returncode=1,
+            stdout="APITimeout RateLimitError ServiceUnavailableError",
+        )
+
+    monkeypatch.setattr(campaign_runner, "capsule_is_active", lambda: False)
+    monkeypatch.setattr(campaign_runner, "_loom", lambda: "loom")
+    monkeypatch.setattr(campaign_runner, "_db_snapshot", lambda *_args: {})
+    monkeypatch.setattr(campaign_runner, "_privacy_findings", lambda *_args: [])
+    monkeypatch.setattr(campaign_runner, "_run_cli", lambda *_args: {})
+    monkeypatch.setattr(campaign_runner, "_snapshot_state", lambda *_args: None)
+    monkeypatch.setattr(campaign_runner.subprocess, "run", semantic_failure)
+    state_root = tmp_path / "state"
+    state_root.mkdir()
+
+    result = campaign_runner._run_spec(
+        spec,
+        campaign_dir=tmp_path,
+        state_root=state_root,
+        timeout_seconds=30,
+        oracle={},
+        markers=[],
+    )
+
+    assert len(result["attempts"]) == 1
+    assert result["final"]["retryable_transport"] is False
+    assert result["final"]["transport_failure_reason"] is None
+    assert process_calls == 1
+
+
+def test_campaign_does_not_retry_successful_root_when_review_log_reports_failure(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    spec = build_full_plan()[0]
+    process_calls = 0
+
+    def successful_root(*_args, **_kwargs):
+        nonlocal process_calls
+        process_calls += 1
+        return SimpleNamespace(
+            returncode=0,
+            stdout=(
+                "review failed: provider unavailable\n"
+                "Execution completed successfully.\n{'answer': 'ok'}"
+            ),
+        )
+
+    monkeypatch.setattr(campaign_runner, "capsule_is_active", lambda: False)
+    monkeypatch.setattr(campaign_runner, "_loom", lambda: "loom")
+    monkeypatch.setattr(campaign_runner, "_db_snapshot", lambda *_args: {})
+    monkeypatch.setattr(campaign_runner, "_privacy_findings", lambda *_args: [])
+    monkeypatch.setattr(campaign_runner, "_run_cli", lambda *_args: {})
+    monkeypatch.setattr(campaign_runner, "_snapshot_state", lambda *_args: None)
+    monkeypatch.setattr(campaign_runner.subprocess, "run", successful_root)
+    state_root = tmp_path / "state"
+    state_root.mkdir()
+
+    result = campaign_runner._run_spec(
+        spec,
+        campaign_dir=tmp_path,
+        state_root=state_root,
+        timeout_seconds=30,
+        oracle={},
+        markers=[],
+    )
+
+    assert result["status"] == "completed"
+    assert len(result["attempts"]) == 1
+    assert result["final"]["retryable_transport"] is False
+    assert result["final"]["transport_failure_reason"] is None
+    assert process_calls == 1
+
+
+@pytest.mark.parametrize(
+    "attempt",
+    [
+        {
+            "returncode": 75,
+            "completion_marker_seen": False,
+            "timed_out": True,
+            "retryable_transport": True,
+            "transport_failure_reason": "provider_tempfail",
+        },
+        {
+            "returncode": 76,
+            "completion_marker_seen": False,
+            "timed_out": False,
+            "retryable_transport": True,
+            "transport_failure_reason": "provider_tempfail",
+        },
+        {
+            "returncode": 124,
+            "completion_marker_seen": False,
+            "timed_out": True,
+            "retryable_transport": True,
+            "transport_failure_reason": "provider_tempfail",
+        },
+        {
+            "returncode": 124,
+            "completion_marker_seen": False,
+            "timed_out": False,
+            "retryable_transport": True,
+            "transport_failure_reason": "subprocess_timeout",
+        },
+        {
+            "returncode": 75,
+            "completion_marker_seen": False,
+            "timed_out": False,
+            "retryable_transport": False,
+            "transport_failure_reason": None,
+        },
+    ],
+    ids=[
+        "tempfail-plus-timeout",
+        "untrusted-return-code",
+        "timeout-wrong-reason",
+        "return-124-without-timeout",
+        "tempfail-not-retryable",
+    ],
+)
+def test_campaign_audit_rejects_forged_transport_combinations(
+    attempt: dict[str, object],
+) -> None:
+    result = {"status": "failed", "attempts": [attempt], "final": attempt}
+
+    assert audit_module._attempt_contract_issues(result) == [
+        "Application attempt 1 transport evidence contradicted process status"
+    ]
+
+
+def test_campaign_audit_accepts_typed_subprocess_timeout() -> None:
+    attempt = {
+        "returncode": 124,
+        "completion_marker_seen": False,
+        "timed_out": True,
+        "retryable_transport": True,
+        "transport_failure_reason": "subprocess_timeout",
+    }
+    result = {"status": "failed", "attempts": [attempt], "final": attempt}
+
+    assert audit_module._attempt_contract_issues(result) == []
+
+
+def test_campaign_audit_does_not_use_model_completion_marker_for_retry() -> None:
+    attempt = {
+        "returncode": 75,
+        "completion_marker_seen": True,
+        "timed_out": False,
+        "retryable_transport": True,
+        "transport_failure_reason": "provider_tempfail",
+    }
+    result = {"status": "failed", "attempts": [attempt], "final": attempt}
+
+    assert audit_module._attempt_contract_issues(result) == []
 
 
 def test_completed_application_is_bound_to_one_matching_persisted_root() -> None:
@@ -3505,6 +3771,9 @@ def test_successful_retry_still_audits_failed_writer_exact_bytes_and_scope() -> 
             "completion_marker_seen": returncode == 0,
             "timed_out": timed_out,
             "retryable_transport": timed_out,
+            "transport_failure_reason": (
+                "subprocess_timeout" if timed_out else None
+            ),
             "provider_protocol_empty_responses": 0,
             "privacy_findings": [],
             "model_evidence": {
@@ -3777,6 +4046,7 @@ def test_failed_post_recall_still_audits_approval_exact_bytes_and_scope() -> Non
         "completion_marker_seen": False,
         "timed_out": False,
         "retryable_transport": False,
+        "transport_failure_reason": None,
         "privacy_findings": [],
         "model_evidence": {
             "review_call_count": None,
