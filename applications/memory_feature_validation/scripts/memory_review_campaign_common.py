@@ -307,6 +307,7 @@ def build_full_plan() -> list[RunSpec]:
                 RunSpec(
                     f"{case_id}-recall", case_id, "review_on_durable", "recall", 2,
                     WORKFLOWS["on_recall"], case_id, True,
+                    canary_rank=3 if index == 0 else 0,
                 ),
             ]
         )
@@ -383,7 +384,6 @@ def build_full_plan() -> list[RunSpec]:
                 RunSpec(
                     f"{case_id}-writer", case_id, "application_scope", "writer", 1,
                     WORKFLOWS["app_review"], case_id, True,
-                    canary_rank=3 if case_id == "app-scope-00" else 0,
                 ),
                 RunSpec(
                     f"{case_id}-same-recall", case_id, "application_scope", "same_recall", 2,
