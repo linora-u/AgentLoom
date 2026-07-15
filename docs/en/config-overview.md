@@ -45,7 +45,7 @@ When loading an Agent YAML, the system automatically searches upward for its par
 
 #### Level 3: Agent-level Override
 In addition to defining its own workflow, a single Agent's YAML file can override selected system configurations. The whitelisted fields that support override (`_WORKFLOW_OVERLAY_KEYS`) are:
-- `system`, `smart_summary`, `context_engine`, `tool_access_control`, `execution_env`, `code_agent`, `tools`, `shell_settings`, `tools_mapping`, `default_toolsets`, `toolsets`, `prompt`, `mcp_servers`.
+- `system`, `model_request_headers`, `smart_summary`, `context_engine`, `tool_access_control`, `execution_env`, `code_agent`, `tools`, `shell_settings`, `tools_mapping`, `default_toolsets`, `toolsets`, `prompt`, `mcp_servers`, `self_learning`.
 
 `context_engine` is intentionally small. It is enabled by the task runtime and uses the task-scoped checkpoint context store; normal overrides should only tune:
 

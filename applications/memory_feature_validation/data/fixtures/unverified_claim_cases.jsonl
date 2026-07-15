@@ -1,0 +1,5 @@
+{"case_id":"unverified-00","evidence":{"claim":"An unsourced chat message says the invoice API page limit is 777 records."},"memory_evidence":[]}
+{"case_id":"unverified-01","evidence":{"claim":"A copied chat message names rumor-export-staging as the permanent staging bucket."},"memory_evidence":[]}
+{"case_id":"unverified-02","evidence":{"claim":"An unsigned note says every export poll times out after exactly 37 seconds."},"memory_evidence":[]}
+{"case_id":"unverified-03","evidence":{"claim":"A ticket comment says daily filenames follow rumor_YYYY.csv."},"memory_evidence":[]}
+{"case_id":"unverified-04","evidence":{"claim":"An oral handoff says retryable exports use the queue exports.rumor.v9."},"memory_evidence":[]}

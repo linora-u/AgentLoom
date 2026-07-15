@@ -1,7 +1,7 @@
-"""Self-learning storage, memory, proposal, and reviewer primitives.
+"""Self-learning history, curated memory, skill, and review primitives.
 
-Public exports stay lazy so the detached outbox worker can reach its narrow
-entrypoint without importing every memory/tool surface before claiming work.
+Public exports stay lazy so hook/bootstrap imports do not eagerly load the
+runtime Agent and tool graph.
 """
 
 _LAZY_EXPORTS = {
