@@ -59,7 +59,6 @@ DEFAULT_SOURCE_DB = REPO_ROOT / ".agentloom" / "self_learning.db"
 RELEASE_MIGRATION_EVENTS = 10_000
 EXPECTED_SOURCE_RUNS = 82
 EXPECTED_SOURCE_EVENTS = 1_706
-_PUBLIC_APPEND_EVENTS = 100
 _MAX_DURATION_SECONDS = 30 * 60
 _MAX_RSS_MB = 2_048.0
 _MAX_ARTIFACT_BYTES = 3 * 1024**3
@@ -605,67 +604,30 @@ def _append_cases(
     ledger: SelfLearningLedger,
     cases: list[OfflineCase],
     *,
-    batch_size: int,
     source_shape: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     started = time.perf_counter()
     timing_segments: dict[str, dict[str, Any]] = {}
-    public_cases = [case for case in cases if case.category == "ledger_fts_search_scroll"][:_PUBLIC_APPEND_EVENTS]
-    public_ids = {case.case_id for case in public_cases}
-    segment_started = time.perf_counter()
-    for case in public_cases:
-        event, root_run_id = _event_for_case(case, source_shape=source_shape)
-        ledger.append_event(event, root_run_id=root_run_id)
-    timing_segments["public_api"] = {
-        "events": len(public_cases),
-        "duration_seconds": time.perf_counter() - segment_started,
-    }
-
     root_cases = [case for case in cases if case.category == "root_isolation"]
-    core_cases = [case for case in cases if case.case_id not in public_ids and case.category != "root_isolation"]
-    segment_started = time.perf_counter()
-    if core_cases:
-        conn = ledger._connect()
-        try:
-            conn.execute("PRAGMA wal_autocheckpoint=0")
-            cursor = 0
-            while cursor < len(core_cases):
-                conn.execute("BEGIN IMMEDIATE")
-                upper = min(len(core_cases), cursor + batch_size)
-                for case in core_cases[cursor:upper]:
-                    event, root_run_id = _event_for_case(case, source_shape=source_shape)
-                    ledger._append_event_in_conn(
-                        conn,
-                        event,
-                        root_run_id=root_run_id,
-                    )
-                conn.commit()
-                cursor = upper
-        finally:
-            conn.close()
-    timing_segments["batched_core"] = {
-        "events": len(core_cases),
-        "duration_seconds": time.perf_counter() - segment_started,
-    }
-
+    sequential_cases = [case for case in cases if case.category != "root_isolation"]
     concurrent_workers = min(4, max(1, len(root_cases)))
 
     def append_partition(partition: list[OfflineCase]) -> int:
-        conn = ledger._connect()
         written = 0
-        try:
-            conn.execute("PRAGMA wal_autocheckpoint=0")
-            chunk_size = min(64, batch_size)
-            for start in range(0, len(partition), chunk_size):
-                conn.execute("BEGIN IMMEDIATE")
-                for case in partition[start : start + chunk_size]:
-                    event, root_run_id = _event_for_case(case, source_shape=source_shape)
-                    result = ledger._append_event_in_conn(conn, event, root_run_id=root_run_id)
-                    written += int(bool(result.get("indexed")))
-                conn.commit()
-        finally:
-            conn.close()
+        for case in partition:
+            event, root_run_id = _event_for_case(case, source_shape=source_shape)
+            # Every release event uses the same transaction boundary as a live
+            # hook. Private batch writes would hide writer-coordination bugs.
+            result = ledger.append_event(event, root_run_id=root_run_id)
+            written += int(bool(result.get("indexed")))
         return written
+
+    segment_started = time.perf_counter()
+    sequential_events = append_partition(sequential_cases)
+    timing_segments["sequential_api"] = {
+        "events": len(sequential_cases),
+        "duration_seconds": time.perf_counter() - segment_started,
+    }
 
     concurrent_root_events = 0
     if root_cases:
@@ -697,8 +659,8 @@ def _append_cases(
     duration_seconds = time.perf_counter() - started
     return {
         "events": len(cases),
-        "public_api_events": len(public_cases),
-        "batched_core_events": len(core_cases),
+        "public_api_events": sequential_events + concurrent_root_events,
+        "sequential_api_events": sequential_events,
         "concurrent_root_events": concurrent_root_events,
         "concurrent_root_writers": concurrent_workers if root_cases else 0,
         "source_replayed_ledger_events": source_replayed,
@@ -721,7 +683,6 @@ def _run_independent_baseline_probe(
             append_metrics = _append_cases(
                 ledger,
                 cases,
-                batch_size=1_000,
                 source_shape=source_shape,
             )
             with ledger._connect() as conn:
@@ -1289,7 +1250,14 @@ def _validate_memory_cases(
     cases: list[OfflineCase],
     failures: list[dict[str, Any]],
 ) -> dict[str, Any]:
-    store = MemoryStore(db_path)
+    # This cohort validates state transitions, not the user-facing capacity
+    # policy. Its deterministic 10k operations intentionally share project
+    # scope, so bind the explicit unlimited campaign config at construction;
+    # per-case configs still select approval and Application identity.
+    store = MemoryStore(
+        db_path,
+        agent_config=_memory_config("offline_validation", approval=False),
+    )
     counts: Counter[str] = Counter()
     persistent_failures = 0
     for case in cases:
@@ -1647,13 +1615,9 @@ def _timing_evidence_ok(
     campaign_duration_seconds: float,
     cases: list[OfflineCase],
 ) -> bool:
-    expected_ledger = sum(case.category == "ledger_fts_search_scroll" for case in cases)
     expected_root_positions = Counter(case.category_index % 4 for case in cases if case.category == "root_isolation")
     expected_segments = {
-        "public_api": min(_PUBLIC_APPEND_EVENTS, expected_ledger),
-        "batched_core": len(cases)
-        - min(_PUBLIC_APPEND_EVENTS, expected_ledger)
-        - sum(expected_root_positions.values()),
+        "sequential_api": len(cases) - sum(expected_root_positions.values()),
         "root_safe": expected_root_positions[0],
         "root_taint": expected_root_positions[1],
         "root_completion": expected_root_positions[2] + expected_root_positions[3],
@@ -2376,7 +2340,6 @@ def run_campaign(
     seed: int,
     output_root: Path,
     campaign_id: str,
-    batch_size: int,
     only_case: str | None,
     migration_events: int,
     source_db: Path | None = None,
@@ -2386,10 +2349,9 @@ def run_campaign(
     campaign_started = time.perf_counter()
     events = int(events)
     seed = int(seed)
-    batch_size = int(batch_size)
     migration_events = int(migration_events)
-    if events < 1 or batch_size < 1 or migration_events < 1:
-        raise ValueError("events, batch_size, and migration_events must be positive")
+    if events < 1 or migration_events < 1:
+        raise ValueError("events and migration_events must be positive")
     campaign_dir = _campaign_dir(output_root, campaign_id)
     full_plan = build_case_plan(events, seed)
     cases = _select_cases(full_plan, only_case)
@@ -2423,7 +2385,6 @@ def run_campaign(
         "selected_events": len(cases),
         "category_quotas": allocate_quotas(events),
         "category_weights": dict(CATEGORY_WEIGHTS),
-        "batch_size": batch_size,
         "migration_events": migration_events,
         "release_eligible": release_eligible,
         "release_shape": release_shape,
@@ -2469,7 +2430,6 @@ def run_campaign(
     append_metrics = _append_cases(
         ledger,
         cases,
-        batch_size=batch_size,
         source_shape=source_shape,
     )
 
@@ -2627,7 +2587,6 @@ def _parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--events", type=int, default=DEFAULT_EVENTS)
     parser.add_argument("--seed", type=int, default=DEFAULT_SEED)
-    parser.add_argument("--batch-size", type=int, default=1_000)
     parser.add_argument("--migration-events", type=int, default=RELEASE_MIGRATION_EVENTS)
     parser.add_argument("--only-case")
     parser.add_argument("--dry-run", action="store_true")
@@ -2667,7 +2626,6 @@ def main(argv: list[str] | None = None) -> int:
         seed=args.seed,
         output_root=args.output_root,
         campaign_id=campaign_id,
-        batch_size=args.batch_size,
         only_case=args.only_case,
         migration_events=args.migration_events,
         source_db=args.source_db,

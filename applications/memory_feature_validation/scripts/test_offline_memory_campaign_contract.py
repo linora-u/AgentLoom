@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import ast
 import gzip
+import inspect
 import json
 import sqlite3
 import subprocess
@@ -71,6 +72,34 @@ def test_release_plan_is_exactly_100k_v5_events_with_fixed_seed() -> None:
         "outbox_crash_lease_migration",
         "ranking_snapshot_retention",
     } & {case.category for case in plan}
+
+
+def test_memory_state_cohort_is_not_cut_off_by_runtime_prompt_budget(
+    tmp_path: Path,
+) -> None:
+    cases = [
+        case
+        for case in build_case_plan(5_000, DEFAULT_SEED)
+        if case.category == "active_pending_memory"
+    ]
+    failures: list[dict[str, object]] = []
+
+    metrics = offline_runner._validate_memory_cases(
+        tmp_path / "self_learning.db",
+        cases,
+        failures,
+    )
+
+    assert len(cases) == 500
+    assert metrics["persistent_failures"] == 0
+    assert failures == []
+
+
+def test_all_offline_events_use_the_public_ledger_append_boundary() -> None:
+    source = inspect.getsource(offline_runner._append_cases)
+
+    assert "_append_event_in_conn" not in source
+    assert "ledger._connect" not in source
 
 
 def test_case_plan_is_reproducible_and_seed_bound() -> None:
@@ -148,7 +177,6 @@ def test_cli_defaults_are_the_only_release_eligible_shape() -> None:
 
     assert args.events == DEFAULT_EVENTS
     assert args.seed == DEFAULT_SEED
-    assert args.batch_size == 1_000
     assert args.only_case is None
     assert args.source_db == REPO_ROOT / ".agentloom" / "self_learning.db"
     assert args.baseline_metrics is None
@@ -438,7 +466,6 @@ def test_100_event_smoke_uses_real_v5_apis_and_is_not_a_release_pass(
         seed=DEFAULT_SEED,
         output_root=tmp_path,
         campaign_id="offline-contract-smoke",
-        batch_size=25,
         only_case=None,
         migration_events=100,
     )
