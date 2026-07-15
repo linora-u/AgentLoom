@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 import os
+import py_compile
 import socket
+import stat
 import subprocess
 import sys
 import tempfile
@@ -109,6 +111,12 @@ def _valid_descriptor() -> dict[str, object]:
         ),
         "user_site_disabled": True,
         "bytecode_writes_disabled": True,
+        "python_dont_write_bytecode": True,
+        "pycache_prefix_exact": True,
+        "pycache_prefix_inside_capsule": True,
+        "pycache_prefix_empty": True,
+        "pycache_prefix_read_only": True,
+        "pycache_prefix_not_symlink": True,
         "capsule_tree_read_only": True,
         "capsule_files_unshared": True,
         "git_metadata_write_guarded": True,
@@ -161,6 +169,105 @@ def test_capsule_lock_and_runner_origin_are_required() -> None:
     ]
 
 
+@pytest.mark.parametrize(
+    "field",
+    [
+        "python_dont_write_bytecode",
+        "pycache_prefix_exact",
+        "pycache_prefix_inside_capsule",
+        "pycache_prefix_empty",
+        "pycache_prefix_read_only",
+        "pycache_prefix_not_symlink",
+    ],
+)
+def test_capsule_descriptor_rejects_invalid_pycache_isolation(field: str) -> None:
+    descriptor = _valid_descriptor()
+    descriptor[field] = False
+
+    assert capsule_descriptor_issues(_reseal(descriptor)) == [
+        "capsule runtime escaped its isolated locked environment"
+    ]
+
+
+def test_pycache_contract_detects_missing_dirty_linked_writable_and_external_prefixes(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    root = tmp_path / "capsule"
+    (root / ".venv").mkdir(parents=True)
+    prefix = root / ".venv" / ".agentloom-pycache"
+    monkeypatch.setattr(sys, "pycache_prefix", str(prefix))
+    monkeypatch.setattr(sys, "_xoptions", {"pycache_prefix": str(prefix)})
+    monkeypatch.setenv("PYTHONPYCACHEPREFIX", str(prefix))
+
+    missing = capsule_module._pycache_prefix_contract(root)
+    assert missing["pycache_prefix_empty"] is False
+    assert missing["pycache_prefix_not_symlink"] is False
+
+    prefix.mkdir(mode=0o700)
+    writable = capsule_module._pycache_prefix_contract(root)
+    assert writable["pycache_prefix_read_only"] is False
+
+    (prefix / "derived.pyc").write_bytes(b"dirty")
+    prefix.chmod(0o500)
+    dirty = capsule_module._pycache_prefix_contract(root)
+    assert dirty["pycache_prefix_empty"] is False
+    prefix.chmod(0o700)
+    (prefix / "derived.pyc").unlink()
+    prefix.chmod(0o500)
+    valid = capsule_module._pycache_prefix_contract(root)
+    assert all(valid.values())
+    wrong = str(root / ".venv" / "wrong-cache")
+    for mismatched_layer in ("runtime", "xoption", "environment"):
+        monkeypatch.setattr(
+            sys,
+            "pycache_prefix",
+            wrong if mismatched_layer == "runtime" else str(prefix),
+        )
+        monkeypatch.setattr(
+            sys,
+            "_xoptions",
+            {
+                "pycache_prefix": (
+                    wrong if mismatched_layer == "xoption" else str(prefix)
+                )
+            },
+        )
+        monkeypatch.setenv(
+            "PYTHONPYCACHEPREFIX",
+            wrong if mismatched_layer == "environment" else str(prefix),
+        )
+        assert (
+            capsule_module._pycache_prefix_contract(root)[
+                "pycache_prefix_exact"
+            ]
+            is False
+        )
+    monkeypatch.setattr(sys, "pycache_prefix", str(prefix))
+    monkeypatch.setattr(sys, "_xoptions", {"pycache_prefix": str(prefix)})
+    monkeypatch.setenv("PYTHONPYCACHEPREFIX", str(prefix))
+    prefix.chmod(0o700)
+    prefix.rmdir()
+
+    target = root / ".venv" / "linked-cache"
+    target.mkdir(mode=0o500)
+    prefix.symlink_to(target, target_is_directory=True)
+    linked = capsule_module._pycache_prefix_contract(root)
+    assert linked["pycache_prefix_not_symlink"] is False
+    prefix.unlink()
+
+    external = tmp_path / "external-cache"
+    external.mkdir(mode=0o500)
+    monkeypatch.setattr(sys, "pycache_prefix", str(external))
+    monkeypatch.setattr(sys, "_xoptions", {"pycache_prefix": str(external)})
+    monkeypatch.setenv("PYTHONPYCACHEPREFIX", str(external))
+    escaped = capsule_module._pycache_prefix_contract(root)
+    assert escaped["pycache_prefix_exact"] is False
+    assert escaped["pycache_prefix_inside_capsule"] is False
+    target.chmod(0o700)
+    external.chmod(0o700)
+
+
 def test_resolved_origin_rejects_symlink_escape(tmp_path: Path) -> None:
     root = tmp_path / "capsule"
     root.mkdir()
@@ -181,6 +288,65 @@ def test_venv_manifest_detects_same_version_code_replacement(tmp_path: Path) -> 
     package.write_text("VERSION = '1.0'\nVALUE = 2\n", encoding="utf-8")
 
     assert _tree_manifest_hash(venv) != before
+
+
+def test_tree_manifest_ignores_concurrently_mutating_derived_bytecode(
+    tmp_path: Path,
+) -> None:
+    root = tmp_path / "runtime"
+    source = root / "package" / "module.py"
+    source.parent.mkdir(parents=True)
+    source.write_text("VALUE = 1\n", encoding="utf-8")
+    expected = _tree_manifest_hash(root)
+
+    cache = source.parent / "__pycache__"
+    cache.mkdir()
+    cached = cache / "module.cpython-312.pyc"
+    cached_optimized = cache / "module.cpython-312.opt-1.pyc"
+    legacy_cached = cache / "module.pyo"
+    started = threading.Event()
+    stop = threading.Event()
+
+    def mutate_bytecode() -> None:
+        generation = 0
+        started.set()
+        while not stop.is_set():
+            payload = f"derived-{generation}".encode()
+            cached.write_bytes(payload)
+            cached_optimized.write_bytes(payload)
+            legacy_cached.write_bytes(payload)
+            cached.unlink(missing_ok=True)
+            cached_optimized.unlink(missing_ok=True)
+            legacy_cached.unlink(missing_ok=True)
+            generation += 1
+
+    worker = threading.Thread(target=mutate_bytecode)
+    worker.start()
+    assert started.wait(timeout=1)
+    try:
+        observed = {_tree_manifest_hash(root) for _ in range(20)}
+    finally:
+        stop.set()
+        worker.join(timeout=1)
+
+    assert not worker.is_alive()
+    assert observed == {expected}
+
+
+@pytest.mark.parametrize("suffix", [".pyc", ".pyo"])
+def test_tree_manifest_tracks_sourceless_bytecode_outside_cache(
+    tmp_path: Path,
+    suffix: str,
+) -> None:
+    root = tmp_path / "runtime"
+    bytecode = root / f"plugin{suffix}"
+    bytecode.parent.mkdir()
+    bytecode.write_bytes(b"executable-bytecode-v1")
+    before = _tree_manifest_hash(root)
+
+    bytecode.write_bytes(b"executable-bytecode-v2")
+
+    assert _tree_manifest_hash(root) != before
 
 
 def test_venv_manifest_is_path_free_without_sentinel_collisions(
@@ -277,6 +443,7 @@ def test_provision_installs_dependencies_without_the_project_and_writes_launcher
     temporary_root = tmp_path / "private"
     commands: list[list[str]] = []
     checkout_checks: list[str] = []
+    prefix_before_freeze: dict[str, object] = {}
 
     def materialize(root: Path, _commit: str) -> None:
         runner = (
@@ -292,7 +459,17 @@ def test_provision_installs_dependencies_without_the_project_and_writes_launcher
         package.mkdir()
         (package / "__init__.py").write_text("", encoding="utf-8")
         (package / "__main__.py").write_text(
+            "import sys\n"
+            "from pathlib import Path\n\n"
             "def main():\n"
+            "    root = Path(__file__).resolve().parents[1]\n"
+            "    prefix = root / '.venv' / '.agentloom-pycache'\n"
+            "    if sys.pycache_prefix != str(prefix):\n"
+            "        return 91\n"
+            "    if sys.dont_write_bytecode is not True:\n"
+            "        return 92\n"
+            "    if any(prefix.iterdir()):\n"
+            "        return 93\n"
             "    print('NESTED_LAUNCH_OK')\n"
             "    return 0\n",
             encoding="utf-8",
@@ -332,6 +509,18 @@ def test_provision_installs_dependencies_without_the_project_and_writes_launcher
         checkout_checks.append(commit)
         return True, "b" * 64
 
+    real_freeze_capsule = capsule_module._freeze_capsule
+
+    def freeze_capsule(root: Path) -> None:
+        prefix = root / ".venv" / ".agentloom-pycache"
+        metadata = prefix.lstat()
+        prefix_before_freeze.update(
+            mode=stat.S_IMODE(metadata.st_mode),
+            is_symlink=prefix.is_symlink(),
+            empty=not any(prefix.iterdir()),
+        )
+        real_freeze_capsule(root)
+
     monkeypatch.setattr(capsule_module, "_require_isolated_git_metadata", lambda _: [])
     monkeypatch.setattr(capsule_module, "_trusted_uv", lambda: uv)
     monkeypatch.setattr(capsule_module, "_unsafe_git_customization_issues", lambda _: [])
@@ -340,6 +529,7 @@ def test_provision_installs_dependencies_without_the_project_and_writes_launcher
     monkeypatch.setattr(capsule_module, "_run_checked", run_checked)
     monkeypatch.setattr(capsule_module, "_checkout_state", checkout_state)
     monkeypatch.setattr(capsule_module, "_verify_write_guard", lambda _: None)
+    monkeypatch.setattr(capsule_module, "_freeze_capsule", freeze_capsule)
     monkeypatch.setattr(capsule_module, "_secure_cleanup", cleanup)
 
     with capsule_module.provision_capsule(
@@ -369,12 +559,29 @@ def test_provision_installs_dependencies_without_the_project_and_writes_launcher
         ]
         assert not list(capsule.root.glob("*.egg-info"))
         loom = capsule.root / ".venv" / "bin" / "loom"
+        pycache_prefix = capsule.root / ".venv" / ".agentloom-pycache"
+        assert prefix_before_freeze == {
+            "mode": 0o700,
+            "is_symlink": False,
+            "empty": True,
+        }
+        assert capsule.env["PYTHONPYCACHEPREFIX"] == str(pycache_prefix)
+        assert pycache_prefix.is_dir() and not pycache_prefix.is_symlink()
+        assert pycache_prefix.stat().st_mode & 0o222 == 0
+        assert not any(pycache_prefix.iterdir())
         assert loom.is_file() and not loom.is_symlink()
         assert loom.read_text(encoding="utf-8") == (
             f"#!{capsule.python}\n"
+            "import sys\n\n"
+            f"_EXPECTED_PYCACHE_PREFIX = {str(pycache_prefix)!r}\n"
+            "if (\n"
+            "    sys.pycache_prefix != _EXPECTED_PYCACHE_PREFIX\n"
+            "    or sys.dont_write_bytecode is not True\n"
+            "):\n"
+            "    raise RuntimeError(\"capsule bytecode isolation was invalid\")\n"
             "from importlib.util import find_spec\n"
             "from pathlib import Path\n"
-            "import sys\n\n"
+            "\n"
             "_CAPSULE_ROOT = Path(__file__).resolve().parents[2]\n"
             "sys.path.append(str(_CAPSULE_ROOT))\n"
             "_SRC_SPEC = find_spec(\"src\")\n"
@@ -403,6 +610,7 @@ def test_provision_installs_dependencies_without_the_project_and_writes_launcher
         )
         assert completed.returncode == 0, completed.stderr
         assert completed.stdout.strip() == "NESTED_LAUNCH_OK"
+        assert not any(pycache_prefix.iterdir())
         assert checkout_checks == [expected_commit]
 
 
@@ -420,6 +628,51 @@ def test_trusted_launcher_creation_is_exclusive(tmp_path: Path) -> None:
 
     assert loom.read_text(encoding="utf-8") == "untrusted launcher\n"
     assert loom.stat().st_ino == original_inode
+
+
+def test_trusted_launcher_checks_exact_pycache_prefix_before_other_imports(
+    tmp_path: Path,
+) -> None:
+    root = tmp_path / "capsule"
+    python = root / ".venv" / "bin" / "python"
+    python.parent.mkdir(parents=True)
+    python.symlink_to(Path(sys.executable).resolve())
+    (root / "pyproject.toml").write_text(
+        '[project.scripts]\nloom = "src.__main__:main"\n',
+        encoding="utf-8",
+    )
+    imported = root / "src-imported"
+    package = root / "src"
+    package.mkdir()
+    (package / "__init__.py").write_text(
+        f"from pathlib import Path\nPath({str(imported)!r}).touch()\n",
+        encoding="utf-8",
+    )
+    (package / "__main__.py").write_text(
+        "def main():\n    return 0\n",
+        encoding="utf-8",
+    )
+    launcher = capsule_module._write_trusted_loom_launcher(root, python)
+    payload = launcher.read_text(encoding="utf-8")
+
+    assert payload.splitlines()[1] == "import sys"
+    prefix_check = payload.index("sys.pycache_prefix")
+    assert prefix_check < payload.index("from importlib.util import find_spec")
+    assert prefix_check < payload.index("from pathlib import Path")
+
+    env = os.environ.copy()
+    env.pop("PYTHONPYCACHEPREFIX", None)
+    rejected = subprocess.run(
+        [str(launcher)],
+        cwd=root,
+        env=env,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+    assert rejected.returncode != 0
+    assert not imported.exists()
 
 
 def test_trusted_launcher_rejects_drifted_project_entrypoint(tmp_path: Path) -> None:
@@ -461,8 +714,29 @@ def test_descriptor_checks_the_locked_dependency_only_environment(
     monkeypatch.setattr(capsule_module, "_git_metadata_paths", lambda _: [tmp_path])
     monkeypatch.setattr(capsule_module, "_git_metadata_is_isolated", lambda _: True)
     monkeypatch.setattr(capsule_module, "active_capsule_bootstrap_issues", lambda _: [])
+    monkeypatch.setenv(
+        "PYTHONPYCACHEPREFIX",
+        "/private/ephemeral-capsule-a/.venv/.agentloom-pycache",
+    )
 
     descriptor = capsule_module.build_capsule_descriptor(
+        repo_root=REPO_ROOT,
+        runner_file=REPO_ROOT
+        / "applications"
+        / "memory_feature_validation"
+        / "scripts"
+        / "run_memory_review_campaign.py",
+        source={"commit": "a" * 40, "files": []},
+        dataset={"files": []},
+        model_contract={"configured": True},
+        model_config_memory_only=True,
+    )
+    commands.clear()
+    monkeypatch.setenv(
+        "PYTHONPYCACHEPREFIX",
+        "/private/ephemeral-capsule-b/.venv/.agentloom-pycache",
+    )
+    relocated_descriptor = capsule_module.build_capsule_descriptor(
         repo_root=REPO_ROOT,
         runner_file=REPO_ROOT
         / "applications"
@@ -481,6 +755,10 @@ def test_descriptor_checks_the_locked_dependency_only_environment(
     assert descriptor["loom_shebang_is_capsule"] is True
     assert descriptor["loom_shebang_matches_python"] is True
     assert descriptor["src_origin_is_capsule"] is True
+    assert (
+        descriptor["runtime_env_contract_hash"]
+        == relocated_descriptor["runtime_env_contract_hash"]
+    )
     assert [command for command in commands if "sync" in command] == [
         [
             str(uv),
@@ -523,6 +801,94 @@ def test_capsule_environment_is_an_allowlist(monkeypatch, tmp_path: Path) -> Non
     assert "AGENTLOOM_MEMORY_CAMPAIGN_LLM_CONFIG_SECRET" not in env
     assert env["HTTPS_PROXY"] == "https://proxy.example"
     assert env["PATH"].split(":")[0].endswith("capsule/.venv/bin")
+    assert env["PYTHONPYCACHEPREFIX"] == str(
+        tmp_path / "capsule" / ".venv" / ".agentloom-pycache"
+    )
+
+
+def test_private_prefix_prevents_poisoned_in_tree_bytecode_execution(
+    tmp_path: Path,
+) -> None:
+    source = tmp_path / "poisoned_module.py"
+    source.write_text("print('EVIL_BYTECODE')\n", encoding="utf-8")
+    cached = Path(py_compile.compile(
+        str(source),
+        doraise=True,
+        invalidation_mode=py_compile.PycInvalidationMode.UNCHECKED_HASH,
+    ))
+    assert "__pycache__" in cached.parts
+    source.write_text("print('SAFE_SOURCE')\n", encoding="utf-8")
+    env = os.environ.copy()
+    env.pop("PYTHONPYCACHEPREFIX", None)
+
+    poisoned = subprocess.run(
+        [sys.executable, "-B", "-c", "import poisoned_module"],
+        cwd=tmp_path,
+        env=env,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    private_prefix = tmp_path / "private-pycache"
+    private_prefix.mkdir()
+    isolated = subprocess.run(
+        [
+            sys.executable,
+            "-B",
+            "-X",
+            f"pycache_prefix={private_prefix}",
+            "-c",
+            "import poisoned_module",
+        ],
+        cwd=tmp_path,
+        env=env,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+    assert poisoned.returncode == 0, poisoned.stderr
+    assert poisoned.stdout.strip() == "EVIL_BYTECODE"
+    assert isolated.returncode == 0, isolated.stderr
+    assert isolated.stdout.strip() == "SAFE_SOURCE"
+    assert not any(private_prefix.iterdir())
+
+
+def test_isolated_python_ignores_env_pycache_prefix_without_xoption(
+    tmp_path: Path,
+) -> None:
+    env_prefix = tmp_path / "ignored-env-prefix"
+    exact_prefix = tmp_path / "explicit-xoption-prefix"
+    env = {**os.environ, "PYTHONPYCACHEPREFIX": str(env_prefix)}
+    probe = "import sys; print(repr(sys.pycache_prefix))"
+
+    ignored = subprocess.run(
+        [sys.executable, "-I", "-B", "-c", probe],
+        env=env,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    explicit = subprocess.run(
+        [
+            sys.executable,
+            "-I",
+            "-B",
+            "-X",
+            f"pycache_prefix={exact_prefix}",
+            "-c",
+            probe,
+        ],
+        env=env,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+    assert ignored.returncode == 0, ignored.stderr
+    assert ignored.stdout.strip() == "None"
+    assert explicit.returncode == 0, explicit.stderr
+    assert explicit.stdout.strip() == repr(str(exact_prefix))
 
 
 @pytest.mark.skipif(sys.platform != "darwin", reason="macOS release guard")

@@ -10,6 +10,7 @@ import subprocess
 import sys
 from collections import Counter
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 import yaml
@@ -117,6 +118,12 @@ def _valid_capsule_descriptor(
         ),
         "user_site_disabled": True,
         "bytecode_writes_disabled": True,
+        "python_dont_write_bytecode": True,
+        "pycache_prefix_exact": True,
+        "pycache_prefix_inside_capsule": True,
+        "pycache_prefix_empty": True,
+        "pycache_prefix_read_only": True,
+        "pycache_prefix_not_symlink": True,
         "capsule_tree_read_only": True,
         "capsule_files_unshared": True,
         "git_metadata_write_guarded": True,
@@ -1142,6 +1149,60 @@ def test_active_capsule_preflight_outputs_only_safe_issue_codes(
     assert "campaign-secret" not in output
 
 
+def test_active_capsule_preflight_safely_classifies_descriptor_build_failure(
+    monkeypatch,
+    capsys,
+) -> None:
+    sensitive_failure = (
+        "manifest race under /private/alice/stdlib "
+        "with Authorization: campaign-secret"
+    )
+
+    def reject_descriptor(**_kwargs):
+        raise FileNotFoundError(sensitive_failure)
+
+    monkeypatch.setattr(
+        campaign_runner,
+        "_require_isolated_git_metadata",
+        lambda _root: [],
+    )
+    monkeypatch.setattr(campaign_runner, "capsule_is_active", lambda: True)
+    monkeypatch.setattr(campaign_runner, "_consume_active_model_config", lambda: None)
+    monkeypatch.setattr(
+        campaign_runner,
+        "active_capsule_bootstrap_issues",
+        lambda _root: [],
+    )
+    monkeypatch.setattr(
+        campaign_runner,
+        "release_git_source_state",
+        lambda: {"available": True, "dirty": False},
+    )
+    monkeypatch.setattr(
+        campaign_runner,
+        "_safe_model_contract",
+        lambda **_kwargs: {"configured": True},
+    )
+    monkeypatch.setattr(campaign_runner, "_model_contract_issues", lambda _: [])
+    monkeypatch.setattr(campaign_runner, "dataset_manifest", lambda: {"files": []})
+    monkeypatch.setattr(
+        campaign_runner,
+        "build_capsule_descriptor",
+        reject_descriptor,
+    )
+    monkeypatch.setattr(sys, "argv", ["memory-campaign", "--runs", "1"])
+
+    assert campaign_runner.main() == 1
+    output = capsys.readouterr().out
+    assert json.loads(output) == {
+        "issue_codes": ["capsule_descriptor_build_failed"],
+        "status": "CAPSULE_PREFLIGHT_FAIL",
+    }
+    assert sensitive_failure not in output
+    assert "/private/alice" not in output
+    assert "campaign-secret" not in output
+
+
 def test_active_capsule_preflight_identifies_invalid_dependency_environment(
     monkeypatch,
     capsys,
@@ -1260,6 +1321,80 @@ def test_current_launcher_rejects_historical_runner_before_provision(
         expected_commit="a" * 40,
     ) == 1
     assert calls == ["metadata", "control-plane"]
+
+
+def test_root_capsule_python_sets_exact_pycache_prefix_despite_isolation(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    root = tmp_path / "private" / "checkout"
+    root.mkdir(parents=True)
+    python = root / ".venv" / "bin" / "python"
+    runner = root / "applications" / "runner.py"
+    prefix = root / ".venv" / ".agentloom-pycache"
+    capsule = SimpleNamespace(
+        root=root,
+        python=python,
+        runner=runner,
+        env={
+            "PYTHONPYCACHEPREFIX": str(prefix),
+            "PYTHONDONTWRITEBYTECODE": "1",
+        },
+        model_config_bytes=b"summary: {}\n",
+    )
+    captured: dict[str, object] = {}
+
+    class CapsuleContext:
+        def __enter__(self):
+            return capsule
+
+        def __exit__(self, *_args):
+            return False
+
+    def run(command, **kwargs):
+        captured["command"] = command
+        captured["env"] = kwargs["env"]
+        return subprocess.CompletedProcess(command, 0)
+
+    monkeypatch.setattr(
+        campaign_runner,
+        "_require_isolated_git_metadata",
+        lambda _root: [],
+    )
+    monkeypatch.setattr(
+        campaign_runner,
+        "trusted_control_plane_matches",
+        lambda *_args: True,
+    )
+    monkeypatch.setattr(
+        campaign_runner,
+        "provision_capsule",
+        lambda *_args, **_kwargs: CapsuleContext(),
+    )
+    monkeypatch.setattr(campaign_runner.subprocess, "run", run)
+    args = SimpleNamespace(
+        reproduce_campaign=None,
+        runs=5,
+        max_workers=1,
+        timeout_seconds=600,
+        output_root=tmp_path / "output",
+    )
+
+    assert campaign_runner._run_in_capsule(
+        args,
+        campaign_id="test-campaign",
+        expected_commit="a" * 40,
+    ) == 0
+    assert captured["command"][:7] == [
+        str(python),
+        "-I",
+        "-P",
+        "-B",
+        "-X",
+        f"pycache_prefix={prefix}",
+        str(runner),
+    ]
+    assert captured["env"]["PYTHONPYCACHEPREFIX"] == str(prefix)
 
 
 def test_plan_audit_rejects_dataset_manifest_substitution() -> None:

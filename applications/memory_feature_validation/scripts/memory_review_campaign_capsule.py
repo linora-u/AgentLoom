@@ -38,6 +38,7 @@ _LEGACY_CAMPAIGN_LLM_CONFIG_SECRET_ENV = (
     "AGENTLOOM_MEMORY_CAMPAIGN_LLM_CONFIG_SECRET"
 )
 _TOKEN_FILE = ".agentloom-memory-capsule-token"
+_PYCACHE_PREFIX_RELATIVE = Path(".venv") / ".agentloom-pycache"
 _TRUSTED_EXECUTION_PREFIXES = (
     "applications/memory_feature_validation",
     "src",
@@ -219,6 +220,10 @@ def _relative_origin(path: Path, root: Path) -> str:
         return ""
 
 
+def _private_pycache_prefix(root: Path) -> Path:
+    return Path(os.path.abspath(root)) / _PYCACHE_PREFIX_RELATIVE
+
+
 def _run_checked(
     command: list[str],
     *,
@@ -253,6 +258,7 @@ def _clean_python_env(root: Path, *, token: str, uv: Path) -> dict[str, str]:
         {
             "PYTHONNOUSERSITE": "1",
             "PYTHONDONTWRITEBYTECODE": "1",
+            "PYTHONPYCACHEPREFIX": str(_private_pycache_prefix(root)),
             "VIRTUAL_ENV": str(root / ".venv"),
             "PATH": os.pathsep.join(
                 (str(root / ".venv" / "bin"), str(uv.parent), os.defpath)
@@ -276,11 +282,19 @@ def _write_trusted_loom_launcher(root: Path, python: Path) -> Path:
     ):
         raise RuntimeError("capsule launcher Python was outside its private venv")
     launcher = private_venv / "bin" / "loom"
+    expected_pycache_prefix = str(_private_pycache_prefix(root))
     payload = (
         f"#!{python}\n"
+        "import sys\n\n"
+        f"_EXPECTED_PYCACHE_PREFIX = {expected_pycache_prefix!r}\n"
+        "if (\n"
+        "    sys.pycache_prefix != _EXPECTED_PYCACHE_PREFIX\n"
+        "    or sys.dont_write_bytecode is not True\n"
+        "):\n"
+        "    raise RuntimeError(\"capsule bytecode isolation was invalid\")\n"
         "from importlib.util import find_spec\n"
         "from pathlib import Path\n"
-        "import sys\n\n"
+        "\n"
         "_CAPSULE_ROOT = Path(__file__).resolve().parents[2]\n"
         "sys.path.append(str(_CAPSULE_ROOT))\n"
         "_SRC_SPEC = find_spec(\"src\")\n"
@@ -343,6 +357,63 @@ def _write_trusted_loom_launcher(root: Path, python: Path) -> Path:
         except OSError:
             pass
         raise
+
+
+def _create_private_pycache_prefix(root: Path) -> Path:
+    """Create one empty private cache root without accepting existing objects."""
+    prefix = _private_pycache_prefix(root)
+    try:
+        prefix.mkdir(mode=0o700, parents=False, exist_ok=False)
+        prefix.chmod(0o700)
+        metadata = prefix.lstat()
+        if (
+            not stat.S_ISDIR(metadata.st_mode)
+            or stat.S_IMODE(metadata.st_mode) != 0o700
+            or prefix.is_symlink()
+            or any(prefix.iterdir())
+        ):
+            raise RuntimeError("capsule pycache prefix was invalid")
+    except OSError as exc:
+        raise RuntimeError("capsule pycache prefix was invalid") from exc
+    return prefix
+
+
+def _pycache_prefix_contract(root: Path) -> dict[str, bool]:
+    """Return path-free evidence for the interpreter's private cache root."""
+    root = Path(os.path.abspath(root))
+    expected = _private_pycache_prefix(root)
+    configured_value = sys.pycache_prefix
+    configured = (
+        Path(configured_value)
+        if isinstance(configured_value, str) and configured_value
+        else None
+    )
+    expected_text = str(expected)
+    exact = bool(
+        configured_value == expected_text
+        and sys._xoptions.get("pycache_prefix") == expected_text
+        and os.environ.get("PYTHONPYCACHEPREFIX") == expected_text
+    )
+    inside = bool(configured is not None and _resolved_inside(configured, root))
+    empty = False
+    read_only = False
+    not_symlink = False
+    if configured is not None:
+        try:
+            metadata = configured.lstat()
+            not_symlink = not stat.S_ISLNK(metadata.st_mode)
+            if stat.S_ISDIR(metadata.st_mode) and not_symlink:
+                empty = not any(configured.iterdir())
+                read_only = metadata.st_mode & 0o222 == 0
+        except OSError:
+            pass
+    return {
+        "pycache_prefix_exact": exact,
+        "pycache_prefix_inside_capsule": inside,
+        "pycache_prefix_empty": empty,
+        "pycache_prefix_read_only": read_only,
+        "pycache_prefix_not_symlink": not_symlink,
+    }
 
 
 @dataclass(frozen=True)
@@ -415,7 +486,13 @@ def _tree_manifest_hash(
     rows: list[dict[str, Any]] = []
     for path in sorted(root.rglob("*"), key=lambda item: item.as_posix()):
         relative_path = path.relative_to(root)
-        if excluded_parts.intersection(relative_path.parts):
+        # __pycache__ is derived mutable state, not locked dependency evidence.
+        # Skip it before any stat/read so concurrent cache cleanup cannot race us.
+        # Loose bytecode stays covered because Python can execute sourceless .pyc.
+        if (
+            "__pycache__" in relative_path.parts
+            or excluded_parts.intersection(relative_path.parts)
+        ):
             continue
         relative = relative_path.as_posix()
         if path.is_symlink():
@@ -1211,6 +1288,7 @@ def provision_capsule(
         if actual_commit != expected_commit or not checkout_exact:
             raise RuntimeError("capsule source does not match its detached commit")
         _verify_write_guard(capsule_root)
+        _create_private_pycache_prefix(capsule_root)
         _freeze_capsule(capsule_root)
         yield CampaignCapsule(
             capsule_root,
@@ -1326,10 +1404,12 @@ def build_capsule_descriptor(
             _LEGACY_CAMPAIGN_LLM_CONFIG_SECRET_ENV,
             CAPSULE_ROOT_ENV,
             "PATH",
+            "PYTHONPYCACHEPREFIX",
             "VIRTUAL_ENV",
         }
     }
     stdlib_root = Path(sysconfig.get_path("stdlib"))
+    pycache_contract = _pycache_prefix_contract(repo_root)
     descriptor: dict[str, Any] = {
         "schema_version": 1,
         "git_commit": str(source.get("commit") or ""),
@@ -1386,6 +1466,8 @@ def build_capsule_descriptor(
         "runner_origin_relative": _relative_origin(runner_file, repo_root),
         "user_site_disabled": os.environ.get("PYTHONNOUSERSITE") == "1",
         "bytecode_writes_disabled": os.environ.get("PYTHONDONTWRITEBYTECODE") == "1",
+        "python_dont_write_bytecode": sys.dont_write_bytecode is True,
+        **pycache_contract,
         "capsule_tree_read_only": _tree_is_read_only(repo_root),
         "capsule_files_unshared": _regular_files_unshared(repo_root),
         "git_metadata_write_guarded": git_metadata_write_guarded,
@@ -1450,6 +1532,12 @@ def capsule_descriptor_issues(descriptor: dict[str, Any]) -> list[str]:
         "runner_origin_is_capsule",
         "user_site_disabled",
         "bytecode_writes_disabled",
+        "python_dont_write_bytecode",
+        "pycache_prefix_exact",
+        "pycache_prefix_inside_capsule",
+        "pycache_prefix_empty",
+        "pycache_prefix_read_only",
+        "pycache_prefix_not_symlink",
         "capsule_tree_read_only",
         "capsule_files_unshared",
         "git_metadata_write_guarded",
