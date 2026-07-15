@@ -17,7 +17,6 @@ import sys
 
 import click
 
-
 _MAIN_EPILOG = """\
 \b
 Examples:
@@ -28,6 +27,7 @@ Examples:
 
 Use 'loom <command> -h' for more details on each command.
 """
+_EX_TEMPFAIL = 75
 
 
 @click.group(context_settings={"help_option_names": ["-h", "--help"]}, epilog=_MAIN_EPILOG)
@@ -44,6 +44,66 @@ def main():
             os.chdir(agent_root)
     except Exception:
         pass  # discovery may fail here; let sub-commands report the real error
+
+
+def _has_transient_provider_error(error: BaseException) -> bool:
+    """Return true only for a trusted transient LiteLLM exception chain."""
+    from litellm.exceptions import (
+        APIConnectionError,
+        AuthenticationError,
+        BadRequestError,
+        InternalServerError,
+        PermissionDeniedError,
+        RateLimitError,
+        ServiceUnavailableError,
+        Timeout,
+    )
+    from smolagents import AgentMaxStepsError, AgentParsingError
+
+    from src.lib.smolagents.models.litellm_retry import (
+        ProviderCallBudgetExceeded,
+    )
+    from src.lib.smolagents.models.tool_call_parser import ToolCallParseError
+
+    transient_types = (
+        Timeout,
+        APIConnectionError,
+        InternalServerError,
+        ServiceUnavailableError,
+        RateLimitError,
+    )
+    denied_types = (
+        SystemExit,
+        KeyboardInterrupt,
+        click.ClickException,
+        click.exceptions.Exit,
+        AuthenticationError,
+        PermissionDeniedError,
+        BadRequestError,
+        ProviderCallBudgetExceeded,
+        AgentParsingError,
+        AgentMaxStepsError,
+        ToolCallParseError,
+    )
+    current: BaseException | None = error
+    visited: set[int] = set()
+    transient_seen = False
+    while current is not None:
+        identity = id(current)
+        if identity in visited:
+            return False
+        visited.add(identity)
+        if isinstance(current, denied_types):
+            return False
+        if isinstance(current, transient_types):
+            transient_seen = True
+        if current.__cause__ is not None:
+            current = current.__cause__
+        elif not current.__suppress_context__:
+            current = current.__context__
+        else:
+            current = None
+    return transient_seen
 
 
 _RUN_EPILOG = """\
@@ -66,12 +126,17 @@ def run(yaml_path: str, log_to_file: bool, resume_task_id: str | None):
     try:
         result = run_app(yaml_path, log_to_file=log_to_file, resume_task_id=resume_task_id)
         click.echo(result)
-    except KeyboardInterrupt:
+    except KeyboardInterrupt as exc:
         click.echo("\nInterrupted. Use --resume to continue.", err=True)
-        sys.exit(130)
+        raise click.exceptions.Exit(130) from exc
+    except SystemExit as exc:
+        click.echo("\n Execution failed: nested process exit", err=True)
+        raise click.exceptions.Exit(1) from exc
     except Exception as exc:
         click.echo(f"\n Execution failed: {exc}", err=True)
-        sys.exit(1)
+        raise click.exceptions.Exit(
+            _EX_TEMPFAIL if _has_transient_provider_error(exc) else 1
+        ) from exc
 
 
 # ─────────────────────────────────────────────
