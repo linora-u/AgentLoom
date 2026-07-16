@@ -1,0 +1,21 @@
+name: "memory_foreground_analysis"
+description: "Analyze one operational case with the normal persistent-memory tool available."
+model_type: "summary"
+tool_call_type: "tool_call"
+max_steps: 8
+
+workflow: |
+  Load the assigned case with `validation_memory_case`, investigate it, and
+  return a concise JSON answer with keys `answer` and `basis`. Use the tools
+  according to their descriptions. Preserve only verified durable knowledge;
+  never treat task progress, one-run failures, or raw evidence as permanent.
+
+tools:
+  - name: "validation_memory_case"
+    module: "applications.memory_feature_validation.agent_tools.validation_probes"
+    function: "validation_memory_case"
+  - name: "memory"
+
+toolsets: []
+skills: []
+worker_agents: []

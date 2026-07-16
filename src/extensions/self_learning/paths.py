@@ -63,22 +63,68 @@ def config_int(name: str, default: int = 0) -> int:
         return default
 
 
+def _strict_bool(value: Any, *, default: bool = False) -> bool:
+    """Parse a configuration boolean without treating ``"false"`` as true."""
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, str):
+        normalized = value.strip().casefold()
+        if normalized in {"1", "true", "yes", "on"}:
+            return True
+        if normalized in {"0", "false", "no", "off", ""}:
+            return False
+        return default
+    if value is None:
+        return default
+    return bool(value)
+
+
+def self_learning_config(agent_config: dict[str, Any] | None = None) -> dict[str, Any]:
+    """Return the effective top-level self-learning section.
+
+    A running Application must use its already-layered agent configuration.
+    Falling back to process-global ``C`` is reserved for CLI/non-runtime use.
+    """
+    if isinstance(agent_config, dict):
+        section = agent_config.get("self_learning", {})
+        return section if isinstance(section, dict) else {}
+    return _config_section()
+
+
+def self_learning_enabled(agent_config: dict[str, Any] | None = None) -> bool:
+    return _strict_bool(self_learning_config(agent_config).get("enabled", True), default=True)
+
+
 _MEMORY_CONFIG_DEFAULTS: dict[str, Any] = {
+    "enabled": True,
     "prompt_max_chars": 12000,
     "max_item_chars": 4000,
-    "scope_budgets": {"project": 8000, "application": 6000, "session": 4000},
-    "session_ttl_days": 14,
-    "distill_enabled": True,
-    # Code defaults stay conservative (no LLM calls, no auto-apply) so tests
-    # and minimal configs are inert; config/system.yaml ships the active values.
-    "distill_model": "",
-    "auto_apply": "off",
+    "scope_budgets": {"project": 8000, "application": 6000},
+    # Completed-run review is opt-in. An absent/empty model means the completed
+    # run performs no extra LLM call; foreground memory writes remain usable.
+    "review_model": "",
+    "write_approval": False,
 }
 
 
-def memory_config() -> dict[str, Any]:
-    """Return the ``self_learning.memory`` section merged over defaults."""
-    section = _config_section().get("memory", {})
+def memory_review_model(agent_config: dict[str, Any] | None = None) -> str:
+    """Read only the opt-in review switch without parsing unrelated fields."""
+    section = self_learning_config(agent_config).get("memory", {})
+    if not isinstance(section, dict):
+        return ""
+    return str(section.get("review_model") or "").strip()
+
+
+def memory_config(agent_config: dict[str, Any] | None = None) -> dict[str, Any]:
+    """Return effective ``self_learning.memory`` settings.
+
+    ``agent_config`` is the root owner's fully layered Application config.
+    Runtime paths must pass it explicitly instead of falling back to the
+    process-global config, otherwise concurrent Applications can inherit one
+    another's review/approval policy.
+    """
+    source = self_learning_config(agent_config)
+    section = source.get("memory", {})
     if not isinstance(section, dict):
         section = {}
     merged = dict(_MEMORY_CONFIG_DEFAULTS)
@@ -87,6 +133,9 @@ def memory_config() -> dict[str, Any]:
     if isinstance(section.get("scope_budgets"), dict):
         budgets.update({k: int(v) for k, v in section["scope_budgets"].items() if v is not None})
     merged["scope_budgets"] = budgets
+    merged["enabled"] = _strict_bool(merged.get("enabled", True), default=True)
+    merged["write_approval"] = _strict_bool(merged.get("write_approval", False), default=False)
+    merged["review_model"] = memory_review_model(agent_config)
     return merged
 
 
@@ -106,21 +155,8 @@ def self_learning_db(root: str | Path | None = None) -> Path:
     return self_learning_root(root) / "self_learning.db"
 
 
-def memory_dir(root: str | Path | None = None) -> Path:
-    return self_learning_root(root) / "memory"
-
-
 def memory_db(root: str | Path | None = None) -> Path:
     return self_learning_db(root)
-
-
-def learning_runs_dir(root: str | Path | None = None) -> Path:
-    return self_learning_root(root) / "learning" / "runs"
-
-
-def application_learning_runs_dir(application_id: str, root: str | Path | None = None) -> Path:
-    safe = "".join(ch if ch.isalnum() or ch in "._-" else "_" for ch in str(application_id or "default"))
-    return self_learning_root(root) / "learning" / "applications" / safe / "runs"
 
 
 def skill_proposals_dir(root: str | Path | None = None) -> Path:

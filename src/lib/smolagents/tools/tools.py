@@ -1,12 +1,14 @@
 import ast
-import json
 import inspect
+import json
 import textwrap
 import warnings
 from collections.abc import Callable
 from functools import wraps
 
 from smolagents.tools import Tool, TypeHintParsingException, get_json_schema
+from src.lib.trusted_memory_evidence import TRUSTED_MEMORY_EVIDENCE_ATTR
+
 
 def tool(tool_function: Callable) -> Tool:
     """
@@ -77,7 +79,8 @@ def tool(tool_function: Callable) -> Tool:
         if len(tool_decorators) < len(func_node.decorator_list):
             warnings.warn(
                 f"Function '{func_node.name}' has decorators other than @tool. "
-                "This may cause issues with serialization in the remote executor. See issue #1626."
+                "This may cause issues with serialization in the remote executor. See issue #1626.",
+                stacklevel=2,
             )
         decorator_start = tool_decorators[0].end_lineno if tool_decorators else 0
         decorator_end = func_node.decorator_list[-1].end_lineno
@@ -109,6 +112,17 @@ def tool(tool_function: Callable) -> Tool:
     SimpleTool.forward.__source__ = forward_method_source
 
     simple_tool = SimpleTool()
+    evidence_extractor = getattr(
+        tool_function,
+        TRUSTED_MEMORY_EVIDENCE_ATTR,
+        None,
+    )
+    if callable(evidence_extractor):
+        setattr(
+            simple_tool,
+            TRUSTED_MEMORY_EVIDENCE_ATTR,
+            evidence_extractor,
+        )
     return simple_tool
 
 

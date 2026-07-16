@@ -8,34 +8,66 @@ import re
 import sqlite3
 import threading
 import time
+from collections.abc import Callable, Iterator
+from contextlib import contextmanager
 from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any
 
 from src.lib.logging import get_logger
+from src.lib.trusted_memory_evidence import (
+    TRUSTED_MEMORY_EVIDENCE_KIND,
+    TRUSTED_MEMORY_EVIDENCE_RESPONSE_KEY,
+)
 
 from .event_schema import (
     CanonicalSessionEvent,
-    require_optional_strict_int,
     safe_run_id,
 )
 from .paths import self_learning_db
 from .redaction import (
+    BLOCKED_TEXT,
     redact_text,
     require_safe_identity,
+    safe_storage_identity,
     sanitize_text_fragment,
+    sanitize_text_fragment_with_taint,
     sanitize_value_fragments,
+    sanitize_value_fragments_with_taint,
 )
 
 logger = get_logger(__name__)
 
-_SCHEMA_VERSION = 4
+_SCHEMA_VERSION = 5
 _BUSY_TIMEOUT_MS = 5000
+_SAFETY_TAINT_KEY = "_safety_tainted"
 _V4_PHYSICAL_CLEANUP_KEY = "schema_v4_physical_cleanup"
 _V4_CLEANUP_PENDING = "pending"
 _V4_CLEANUP_COMPLETE = "complete"
 _V4_SANITIZER_REVISION_KEY = "schema_v4_sanitizer_revision"
 _V4_SANITIZER_REVISION = "5"
+_V5_MIGRATION_REPORT_KEY = "schema_v5_simplified_memory_migration"
+_V5_SANITIZER_REVISION_KEY = "schema_v5_sanitizer_revision"
+_V5_SANITIZER_REVISION = "4"
+_V5_PENDING_ADD_HASH_REVISION_KEY = "schema_v5_pending_add_hash_revision"
+_V5_PENDING_ADD_HASH_REVISION = "2"
+_V5_REVIEW_KEY_REVISION_KEY = "schema_v5_review_key_revision"
+_V5_REVIEW_KEY_REVISION = "1"
+_V5_PENDING_HASH_TRIGGERS = (
+    "trg_memory_pending_add_require_hash_insert",
+    "trg_memory_pending_add_require_hash_update",
+)
+_V5_REMOVED_TABLES = (
+    "learning_job_effects",
+    "learning_jobs",
+    "memory_evidence",
+    "memory_injections",
+    "artifacts",
+)
+_V5_REMOVED_MAINTENANCE_KEYS = (
+    "learning_worker_lease",
+    "learning_worker_kick_lease",
+)
 _FTS_TRIGGER_NAMES = (
     "events_fts_insert",
     "events_fts_delete",
@@ -61,6 +93,53 @@ LEGACY_SANITIZER_DEAD_ERROR = (
     "legacy_v4_identity_sanitizer_changed_frozen_job_input"
 )
 
+_DATABASE_WRITER_LOCKS: dict[str, threading.Lock] = {}
+_DATABASE_WRITER_LOCKS_GUARD = threading.Lock()
+
+
+def _database_writer_lock(db_path: str | Path) -> threading.Lock:
+    """Return the one process-local writer gate for a SQLite database."""
+    key = str(Path(db_path).resolve())
+    with _DATABASE_WRITER_LOCKS_GUARD:
+        lock = _DATABASE_WRITER_LOCKS.get(key)
+        if lock is None:
+            lock = threading.Lock()
+            _DATABASE_WRITER_LOCKS[key] = lock
+        return lock
+
+
+@contextmanager
+def serialized_database_writer(db_path: str | Path) -> Iterator[None]:
+    """Serialize one process-local SQLite writer for the given database."""
+    with _database_writer_lock(db_path):
+        yield
+
+
+@contextmanager
+def serialized_write_transaction(
+    db_path: str | Path,
+    connect: Callable[[], sqlite3.Connection],
+) -> Iterator[sqlite3.Connection]:
+    """Run one short SQLite write transaction behind a per-database gate.
+
+    SQLite still arbitrates writers across processes.  Inside this process we
+    can avoid timeout-based competition entirely: all Ledger and MemoryStore
+    instances that target the same database take this lock before BEGIN and
+    release it only after commit or rollback.
+    """
+    with serialized_database_writer(db_path):
+        conn = connect()
+        try:
+            conn.execute("BEGIN IMMEDIATE")
+            yield conn
+            conn.commit()
+        except BaseException:
+            if conn.in_transaction:
+                conn.rollback()
+            raise
+        finally:
+            conn.close()
+
 
 def memory_content_hash(content: str) -> str:
     """Stable dedup hash: whitespace-collapsed, case-folded content."""
@@ -76,8 +155,80 @@ def _now_iso() -> str:
     return datetime.now().astimezone().isoformat()
 
 
+def _v5_memory_tables_sql(
+    items_table: str,
+    pending_table: str,
+    *,
+    if_not_exists: bool = False,
+) -> str:
+    """Build the canonical v5 curated-memory tables under internal names."""
+    for table_name in (items_table, pending_table):
+        if re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", table_name) is None:
+            raise ValueError(f"invalid internal table name: {table_name!r}")
+    create_modifier = " IF NOT EXISTS" if if_not_exists else ""
+    return f"""
+CREATE TABLE{create_modifier} {items_table} (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    scope_type TEXT NOT NULL
+        CHECK (scope_type IN ('project', 'application')),
+    scope_id TEXT NOT NULL,
+    content TEXT NOT NULL,
+    content_hash TEXT NOT NULL,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    UNIQUE (scope_type, scope_id, content_hash)
+);
+
+CREATE TABLE{create_modifier} {pending_table} (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    status TEXT NOT NULL
+        CHECK (status IN ('pending', 'approved', 'rejected', 'stale')),
+    action TEXT NOT NULL
+        CHECK (action IN ('add', 'replace', 'remove')),
+    scope_type TEXT NOT NULL
+        CHECK (scope_type IN ('project', 'application')),
+    scope_id TEXT NOT NULL,
+    payload_json TEXT NOT NULL,
+    content_hash TEXT,
+    source_run_id TEXT NOT NULL,
+    created_at TEXT NOT NULL,
+    resolved_at TEXT
+);
+"""
+
+
+def _trusted_review_evidence_table_sql(
+    table_name: str,
+    *,
+    if_not_exists: bool = False,
+) -> str:
+    """Build the canonical non-importable reviewer-evidence table."""
+    if re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", table_name) is None:
+        raise ValueError(f"invalid internal table name: {table_name!r}")
+    create_modifier = " IF NOT EXISTS" if if_not_exists else ""
+    return f"""
+CREATE TABLE{create_modifier} {table_name} (
+    event_id TEXT NOT NULL,
+    root_run_id TEXT NOT NULL,
+    tool_name TEXT NOT NULL,
+    kind TEXT NOT NULL CHECK (kind = 'durable_fact'),
+    scope_type TEXT NOT NULL
+        CHECK (scope_type IN ('project', 'application')),
+    scope_id TEXT NOT NULL,
+    source TEXT NOT NULL,
+    text TEXT NOT NULL,
+    created_at TEXT NOT NULL,
+    CHECK (
+        (scope_type = 'project' AND scope_id = 'project')
+        OR (scope_type = 'application' AND length(scope_id) > 0)
+    ),
+    PRIMARY KEY (event_id, kind, scope_type, scope_id, source, text)
+);
+"""
+
+
 class SelfLearningLedger:
-    """DB-first source of truth for sessions, memory, proposals, and reviews."""
+    """DB-first source of truth for history, curated memory, and reviews."""
 
     # DDL + migrations run once per (process, db_path); the recorder constructs
     # a ledger on every hook event, so re-running schema bootstrap there would
@@ -94,6 +245,16 @@ class SelfLearningLedger:
                 if key not in self._initialized_paths:
                     self._init_db()
                     self._initialized_paths.add(key)
+        else:
+            # Process-local initialization cannot prove that a stale v4
+            # process did not recreate removed state afterwards.  The hot path
+            # performs one narrow read and only re-enters the locked migration
+            # when the v5 invariant was actually violated.
+            self._remove_legacy_memory_artifacts()
+            if self._has_removed_v5_state():
+                with self._init_lock:
+                    if self._has_removed_v5_state():
+                        self._init_db()
 
     def _connect(self) -> sqlite3.Connection:
         conn = sqlite3.connect(str(self.db_path), timeout=_BUSY_TIMEOUT_MS / 1000)
@@ -101,9 +262,78 @@ class SelfLearningLedger:
         return conn
 
     def _init_db(self) -> None:
-        with self._connect() as conn:
-            self._enable_wal_mode(conn)
-            self._run_migrations(conn)
+        with serialized_database_writer(self.db_path):
+            with self._connect() as conn:
+                self._enable_wal_mode(conn)
+                self._run_migrations(conn)
+        self._remove_legacy_memory_artifacts()
+
+    def _remove_legacy_memory_artifacts(self) -> None:
+        """Delete pre-v5 memory mirrors after the database is authoritative.
+
+        Keeping a second mutable copy creates stale-fact, cross-process, and
+        secret-retention races.  ``loom memory export`` is the supported human
+        view in v5, so the known generated mirror filenames are obsolete.
+        """
+        memory_root = self.db_path.parent / "memory"
+        if not memory_root.exists() or memory_root.is_symlink():
+            return
+        candidates = [memory_root / "MEMORY.md"]
+        applications_root = memory_root / "applications"
+        if applications_root.is_dir() and not applications_root.is_symlink():
+            candidates.extend(applications_root.glob("*.md"))
+        candidates.extend(
+            memory_root / name
+            for name in ("memory.db", "memory.db-wal", "memory.db-shm")
+        )
+        for path in candidates:
+            # Never follow a link out of the state directory.  These exact
+            # filenames are the only mirrors generated by pre-v5 code.
+            if path.is_file() and not path.is_symlink():
+                path.unlink()
+
+    def _has_removed_v5_state(self) -> bool:
+        """Return whether cached initialization has been invalidated."""
+        if not self.db_path.exists():
+            return True
+        try:
+            with self._connect() as conn:
+                forbidden_tables = conn.execute(
+                    "SELECT 1 FROM sqlite_master "
+                    "WHERE type='table' AND name IN (?, ?, ?, ?, ?) LIMIT 1",
+                    _V5_REMOVED_TABLES,
+                ).fetchone()
+                if forbidden_tables is not None:
+                    return True
+                maintenance_exists = conn.execute(
+                    "SELECT 1 FROM sqlite_master "
+                    "WHERE type='table' AND name='maintenance'"
+                ).fetchone()
+                if maintenance_exists is None:
+                    return True
+                sanitizer_revision = conn.execute(
+                    "SELECT value FROM maintenance WHERE key = ?",
+                    (_V5_SANITIZER_REVISION_KEY,),
+                ).fetchone()
+                if (
+                    sanitizer_revision is None
+                    or str(sanitizer_revision["value"] or "")
+                    != _V5_SANITIZER_REVISION
+                ):
+                    return True
+                if self._v5_pending_add_hash_repair_required(conn):
+                    return True
+                if self._v5_review_key_repair_required(conn):
+                    return True
+                placeholders = ", ".join(
+                    "?" for _ in _V5_REMOVED_MAINTENANCE_KEYS
+                )
+                return conn.execute(
+                    f"SELECT 1 FROM maintenance WHERE key IN ({placeholders}) LIMIT 1",
+                    _V5_REMOVED_MAINTENANCE_KEYS,
+                ).fetchone() is not None
+        except sqlite3.Error:
+            return True
 
     @staticmethod
     def _execute_script_in_transaction(
@@ -145,6 +375,93 @@ class SelfLearningLedger:
                     raise
                 sleep(0.01)
 
+    @staticmethod
+    def _trusted_review_evidence_schema_is_canonical(
+        conn: sqlite3.Connection,
+    ) -> bool:
+        expected_columns = [
+            ("event_id", "TEXT", 1, None, 1),
+            ("root_run_id", "TEXT", 1, None, 0),
+            ("tool_name", "TEXT", 1, None, 0),
+            ("kind", "TEXT", 1, None, 2),
+            ("scope_type", "TEXT", 1, None, 3),
+            ("scope_id", "TEXT", 1, None, 4),
+            ("source", "TEXT", 1, None, 5),
+            ("text", "TEXT", 1, None, 6),
+            ("created_at", "TEXT", 1, None, 0),
+        ]
+        actual_columns = [
+            (str(row[1]), str(row[2]).upper(), int(row[3]), row[4], int(row[5]))
+            for row in conn.execute(
+                "PRAGMA table_info(trusted_review_evidence)"
+            )
+        ]
+        if actual_columns != expected_columns:
+            return False
+        schema_row = conn.execute(
+            "SELECT sql FROM sqlite_master "
+            "WHERE type = 'table' AND name = 'trusted_review_evidence'"
+        ).fetchone()
+        if schema_row is None:
+            return False
+        kind_constraint = re.search(
+            r"CHECK\s*\(\s*kind\s*=\s*'durable_fact'\s*\)",
+            str(schema_row[0] or ""),
+            flags=re.IGNORECASE,
+        ) is not None
+        scope_constraint = re.search(
+            r"scope_type\s+IN\s*\(\s*'project'\s*,\s*'application'\s*\)",
+            str(schema_row[0] or ""),
+            flags=re.IGNORECASE,
+        ) is not None
+        project_binding = re.search(
+            r"scope_type\s*=\s*'project'\s+AND\s+scope_id\s*=\s*'project'",
+            str(schema_row[0] or ""),
+            flags=re.IGNORECASE,
+        ) is not None
+        return kind_constraint and scope_constraint and project_binding
+
+    @classmethod
+    def _rebuild_trusted_review_evidence_schema(
+        cls,
+        conn: sqlite3.Connection,
+    ) -> None:
+        """Replace a development-era table without trusting its rows."""
+        cls._replace_trusted_review_evidence_table(conn, ())
+
+    @classmethod
+    def _replace_trusted_review_evidence_table(
+        cls,
+        conn: sqlite3.Connection,
+        rows: tuple[
+            tuple[str, str, str, str, str, str, str, str, str], ...
+        ],
+    ) -> None:
+        """Install the canonical evidence table from already-validated rows."""
+        replacement = "trusted_review_evidence_v5_canonical"
+        conn.execute(f"DROP TABLE IF EXISTS {replacement}")
+        cls._execute_script_in_transaction(
+            conn,
+            _trusted_review_evidence_table_sql(replacement),
+        )
+        conn.executemany(
+            f"""
+            INSERT OR IGNORE INTO {replacement} (
+                event_id, root_run_id, tool_name, kind, scope_type, scope_id,
+                source, text, created_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            rows,
+        )
+        conn.execute("DROP TABLE trusted_review_evidence")
+        conn.execute(
+            f"ALTER TABLE {replacement} RENAME TO trusted_review_evidence"
+        )
+        conn.execute(
+            "CREATE INDEX idx_trusted_review_evidence_root "
+            "ON trusted_review_evidence(root_run_id, event_id)"
+        )
+
     def _run_migrations(self, conn: sqlite3.Connection) -> None:
         # Schema upgrades are process-safe as well as thread-safe.  In
         # particular, two short-lived ``loom run`` processes may discover the
@@ -172,19 +489,45 @@ class SelfLearningLedger:
             )
         conn.execute("BEGIN IMMEDIATE")
         migrated_v4 = False
+        migrated_v5 = False
         refreshed_v4_sanitizer = False
+        refreshed_v5_sanitizer = False
+        rebuilt_trusted_evidence_schema = False
         requires_v4_physical_cleanup = False
         try:
-            # ``sqlite3.Connection.executescript`` commits an open transaction
-            # before executing. Run every bootstrap/repair statement through
-            # ``execute`` so fresh-schema DDL, FTS objects, and versioned data
-            # migration are all fenced by the same process-wide write lock.
-            self._execute_script_in_transaction(conn, _SCHEMA_SQL)
-            available_fts_scripts: list[str] = []
             existing_schema_objects = {
                 str(row[0])
                 for row in conn.execute("SELECT name FROM sqlite_master")
             }
+            if "schema_version" in existing_schema_objects:
+                current = int(
+                    conn.execute(
+                        "SELECT COALESCE(MAX(version), 0) FROM schema_version"
+                    ).fetchone()[0]
+                )
+            else:
+                current = 0
+            if current > _SCHEMA_VERSION:
+                raise RuntimeError(
+                    "unsupported self-learning schema version "
+                    f"{current}; this binary supports up to {_SCHEMA_VERSION}"
+                )
+            # ``sqlite3.Connection.executescript`` commits an open transaction
+            # before executing. Run every bootstrap/repair statement through
+            # ``execute`` so fresh-schema DDL, FTS objects, and versioned data
+            # migration are all fenced by the same process-wide write lock.
+            self._execute_script_in_transaction(
+                conn,
+                _SCHEMA_V5_SQL if current >= 5 else _SCHEMA_SQL,
+            )
+            if current >= 5 and not self._trusted_review_evidence_schema_is_canonical(
+                conn
+            ):
+                # Development-era rows without the canonical kind constraint
+                # cannot prove that tool code classified them as durable.
+                self._rebuild_trusted_review_evidence_schema(conn)
+                rebuilt_trusted_evidence_schema = True
+            available_fts_scripts: list[str] = []
             for group_index, (fts_script, fts_label, fts_table) in enumerate(
                 (
                     (_FTS_SQL, "fts5", "events_fts"),
@@ -228,27 +571,38 @@ class SelfLearningLedger:
                         fts_label,
                         sanitize_text_fragment(str(exc), max_chars=1000),
                     )
-            current = int(conn.execute("SELECT COALESCE(MAX(version), 0) FROM schema_version").fetchone()[0])
             cleanup_row = conn.execute(
                 "SELECT value FROM maintenance WHERE key = ?",
                 (_V4_PHYSICAL_CLEANUP_KEY,),
             ).fetchone()
             cleanup_state = str(cleanup_row["value"] or "") if cleanup_row else ""
-            sanitizer_row = conn.execute(
+            v5_sanitizer_row = conn.execute(
                 "SELECT value FROM maintenance WHERE key = ?",
-                (_V4_SANITIZER_REVISION_KEY,),
+                (_V5_SANITIZER_REVISION_KEY,),
             ).fetchone()
-            sanitizer_revision = (
-                str(sanitizer_row["value"] or "") if sanitizer_row else ""
+            v5_sanitizer_revision = (
+                str(v5_sanitizer_row["value"] or "")
+                if v5_sanitizer_row
+                else ""
             )
-            sanitizing_legacy = (
-                current < 4 or sanitizer_revision != _V4_SANITIZER_REVISION
+            # A legacy sanitizer marker is mutable input, not a privacy proof.
+            # Every v4 -> v5 upgrade therefore re-sanitizes retained rows and
+            # rebuilds FTS even when the old database claims the latest marker.
+            sanitizing_legacy = current < 5
+            requires_v5_sanitizer = (
+                current < 5
+                or v5_sanitizer_revision != _V5_SANITIZER_REVISION
             )
-            if sanitizing_legacy:
+            sanitizing_storage = sanitizing_legacy or requires_v5_sanitizer
+            if sanitizing_storage:
                 # UPDATE triggers would mirror intermediate event rows into
                 # FTS. Rebuild the indexes from final sanitized base rows and
                 # only then restore trigger maintenance.
                 for trigger_name in _FTS_TRIGGER_NAMES:
+                    conn.execute(
+                        f'DROP TRIGGER IF EXISTS main."{trigger_name}"'
+                    )
+                for trigger_name in _V5_PENDING_HASH_TRIGGERS:
                     conn.execute(
                         f'DROP TRIGGER IF EXISTS main."{trigger_name}"'
                     )
@@ -265,11 +619,10 @@ class SelfLearningLedger:
                 self._migrate_v4_identity_and_jobs(conn)
                 conn.execute("INSERT INTO schema_version (version) VALUES (4)")
                 migrated_v4 = True
-            elif sanitizer_revision != _V4_SANITIZER_REVISION:
-                # Development builds may already carry a v4 marker from before
-                # identity rekeying joined the privacy boundary. Keep the public
-                # schema version stable while making that cleanup resumable and
-                # forcing the same post-commit physical rewrite.
+            if current < 5:
+                # Do not trust the legacy marker checked above.  This second
+                # boundary is intentionally unconditional after the v4 shape
+                # exists, including for databases just migrated from v1-v3.
                 self._sanitize_v4_identities(conn)
                 self._sanitize_v4_rows(conn)
                 refreshed_v4_sanitizer = True
@@ -282,12 +635,56 @@ class SelfLearningLedger:
                 # images can reach the migration WAL at commit.
                 self._rewrite_v4_base_tables(conn)
                 conn.execute("REINDEX")
+            if current < 5:
+                self._migrate_v5_simplified_memory(conn)
+                conn.execute("INSERT INTO schema_version (version) VALUES (5)")
+                migrated_v5 = True
+            if requires_v5_sanitizer:
+                self._sanitize_v5_event_sequences(conn)
+                self._sanitize_v5_trusted_review_evidence(conn)
+                self._sanitize_v5_memory_state(conn)
+                refreshed_v5_sanitizer = True
+            if self._v5_pending_add_hash_repair_required(conn):
+                self._repair_v5_pending_add_hashes(conn)
+                conn.execute(
+                    """
+                    INSERT INTO maintenance (key, value) VALUES (?, ?)
+                    ON CONFLICT(key) DO UPDATE SET value = excluded.value
+                    """,
+                    (
+                        _V5_PENDING_ADD_HASH_REVISION_KEY,
+                        _V5_PENDING_ADD_HASH_REVISION,
+                    ),
+                )
+            if sanitizing_storage:
                 # These scripts succeeded before trigger removal. A restore
                 # failure is therefore corruption of an available index path,
                 # not an optional-capability miss: let the outer transaction
                 # roll back both the trigger drops and sanitizer marker.
                 for fts_script in available_fts_scripts:
                     self._execute_script_in_transaction(conn, fts_script)
+            removed_v5_legacy_state = self._drop_v5_removed_state(conn)
+            # Pre-release v5 builds persisted a ``running`` claim before the
+            # model call. A process crash made that row permanent. Reviews now
+            # use an OS lock and persist only terminal audits, so no durable
+            # non-terminal state may survive migration or initialization.
+            conn.execute(
+                "UPDATE review_runs SET status = 'skipped' "
+                "WHERE model_type = 'legacy' AND status = 'legacy'"
+            )
+            conn.execute(
+                "DELETE FROM review_runs "
+                "WHERE status NOT IN ('completed', 'failed', 'skipped')"
+            )
+            if self._v5_review_key_repair_required(conn):
+                self._repair_v5_review_keys(conn)
+                conn.execute(
+                    """
+                    INSERT INTO maintenance (key, value) VALUES (?, ?)
+                    ON CONFLICT(key) DO UPDATE SET value = excluded.value
+                    """,
+                    (_V5_REVIEW_KEY_REVISION_KEY, _V5_REVIEW_KEY_REVISION),
+                )
             conn.execute(
                 """
                 INSERT INTO maintenance (key, value) VALUES (?, ?)
@@ -295,20 +692,31 @@ class SelfLearningLedger:
                 """,
                 (_V4_SANITIZER_REVISION_KEY, _V4_SANITIZER_REVISION),
             )
+            conn.execute(
+                """
+                INSERT INTO maintenance (key, value) VALUES (?, ?)
+                ON CONFLICT(key) DO UPDATE SET value = excluded.value
+                """,
+                (_V5_SANITIZER_REVISION_KEY, _V5_SANITIZER_REVISION),
+            )
             # ``schema_version=4`` proves only that logical redaction committed.
             # A checkpoint can still fail afterwards while an older reader pins
             # pre-redaction WAL frames. Persist the physical-cleanup obligation
             # in the same transaction so every later process retries it.
             requires_v4_physical_cleanup = (
                 migrated_v4
+                or migrated_v5
                 or refreshed_v4_sanitizer
+                or refreshed_v5_sanitizer
+                or rebuilt_trusted_evidence_schema
+                or removed_v5_legacy_state
                 or cleanup_state != _V4_CLEANUP_COMPLETE
             )
             if requires_v4_physical_cleanup:
                 self._set_v4_cleanup_state(conn, _V4_CLEANUP_PENDING)
-            # Root-scoped distillation is a real query path; no event query is
-            # keyed by task_id. Replace the obsolete write-amplifying index on
-            # existing v4 databases as well as fresh schemas.
+            # Root-scoped review/history is the real query path; no event query
+            # is keyed by task_id. Replace the obsolete write-amplifying index
+            # on existing databases as well as fresh schemas.
             conn.execute("DROP INDEX IF EXISTS idx_events_task_id")
             conn.execute("DROP INDEX IF EXISTS idx_events_root_run")
             conn.execute(
@@ -349,6 +757,32 @@ class SelfLearningLedger:
             conn.execute("PRAGMA cache_spill=ON")
         if requires_v4_physical_cleanup:
             self._complete_v4_physical_cleanup(conn)
+
+    @staticmethod
+    def _drop_v5_removed_state(conn: sqlite3.Connection) -> bool:
+        """Keep deleted outbox state absent even after a stale v4 writer.
+
+        Mixed-version processes can recreate an old table after the v5
+        transition.  Enforce the v5 shape on every initialization and report
+        whether physical cleanup is required for the discarded pages.
+        """
+        changed = False
+        existing = {
+            str(row[0])
+            for row in conn.execute(
+                "SELECT name FROM sqlite_master WHERE type = 'table'"
+            )
+        }
+        for table in _V5_REMOVED_TABLES:
+            if table in existing:
+                conn.execute(f'DROP TABLE "{table}"')
+                changed = True
+        placeholders = ", ".join("?" for _ in _V5_REMOVED_MAINTENANCE_KEYS)
+        cursor = conn.execute(
+            f"DELETE FROM maintenance WHERE key IN ({placeholders})",
+            _V5_REMOVED_MAINTENANCE_KEYS,
+        )
+        return changed or cursor.rowcount > 0
 
     @staticmethod
     def _set_v4_cleanup_state(conn: sqlite3.Connection, state: str) -> None:
@@ -419,6 +853,185 @@ class SelfLearningLedger:
         columns = {row[1] for row in conn.execute(f"PRAGMA table_info({table})")}
         if name not in columns:
             conn.execute(f"ALTER TABLE {table} ADD COLUMN {ddl}")
+
+    @staticmethod
+    def _v5_pending_add_hash_repair_required(conn: sqlite3.Connection) -> bool:
+        revision = conn.execute(
+            "SELECT value FROM maintenance WHERE key = ?",
+            (_V5_PENDING_ADD_HASH_REVISION_KEY,),
+        ).fetchone()
+        if (
+            revision is None
+            or str(revision["value"] or "") != _V5_PENDING_ADD_HASH_REVISION
+        ):
+            return True
+        columns = {
+            str(row[1])
+            for row in conn.execute("PRAGMA table_info(memory_pending_writes)")
+        }
+        if "content_hash" not in columns:
+            return True
+        index = conn.execute(
+            "SELECT 1 FROM sqlite_master "
+            "WHERE type='index' AND name='idx_memory_pending_add_dedup'",
+        ).fetchone()
+        if index is None:
+            return True
+        placeholders = ", ".join("?" for _ in _V5_PENDING_HASH_TRIGGERS)
+        triggers = {
+            str(row["name"])
+            for row in conn.execute(
+                f"SELECT name FROM sqlite_master "
+                f"WHERE type='trigger' AND name IN ({placeholders})",
+                _V5_PENDING_HASH_TRIGGERS,
+            )
+        }
+        return triggers != set(_V5_PENDING_HASH_TRIGGERS)
+
+    @staticmethod
+    def _v5_review_key_repair_required(conn: sqlite3.Connection) -> bool:
+        revision = conn.execute(
+            "SELECT value FROM maintenance WHERE key = ?",
+            (_V5_REVIEW_KEY_REVISION_KEY,),
+        ).fetchone()
+        return (
+            revision is None
+            or str(revision["value"] or "") != _V5_REVIEW_KEY_REVISION
+        )
+
+    @staticmethod
+    def _repair_v5_review_keys(conn: sqlite3.Connection) -> None:
+        """Quarantine terminal root keys that were bound by old v5 callers."""
+        occupied = {
+            str(row["review_key"]): int(row["review_id"])
+            for row in conn.execute(
+                "SELECT review_id, review_key FROM review_runs"
+            )
+        }
+        rows = conn.execute(
+            """
+            SELECT review_id, review_key, root_run_id
+            FROM review_runs
+            WHERE status IN ('completed', 'failed', 'skipped')
+              AND review_key GLOB 'root:*'
+            ORDER BY review_id
+            """
+        ).fetchall()
+        for row in rows:
+            review_id = int(row["review_id"])
+            old_key = str(row["review_key"])
+            if old_key == f"root:{str(row['root_run_id'])}":
+                continue
+            base = f"legacy-mismatch:{review_id}"
+            candidate = base
+            suffix = 0
+            while (
+                candidate in occupied
+                and occupied[candidate] != review_id
+            ):
+                suffix += 1
+                candidate = f"{base}:{suffix}"
+            conn.execute(
+                "UPDATE review_runs SET review_key = ? WHERE review_id = ?",
+                (candidate, review_id),
+            )
+            if occupied.get(old_key) == review_id:
+                del occupied[old_key]
+            occupied[candidate] = review_id
+
+    @classmethod
+    def _repair_v5_pending_add_hashes(cls, conn: sqlite3.Connection) -> None:
+        """Make approval-add deduplication indexed and deterministic."""
+        conn.execute("DROP INDEX IF EXISTS idx_memory_pending_add_dedup")
+        cls._add_column_if_missing(
+            conn,
+            "memory_pending_writes",
+            "content_hash",
+            "content_hash TEXT",
+        )
+        active_hashes = {
+            (str(row["scope_type"]), str(row["scope_id"]), str(row["content_hash"]))
+            for row in conn.execute(
+                "SELECT scope_type, scope_id, content_hash FROM memory_items"
+            )
+        }
+        seen_pending: set[tuple[str, str, str]] = set()
+        now = _now_iso()
+        rows = conn.execute(
+            """
+            SELECT id, status, action, scope_type, scope_id, payload_json
+            FROM memory_pending_writes
+            ORDER BY id
+            """
+        ).fetchall()
+        for row in rows:
+            if str(row["action"]) != "add":
+                conn.execute(
+                    "UPDATE memory_pending_writes SET content_hash=NULL WHERE id=?",
+                    (int(row["id"]),),
+                )
+                continue
+            try:
+                payload = json.loads(str(row["payload_json"] or "{}"))
+            except (TypeError, ValueError, json.JSONDecodeError):
+                payload = {}
+            content = str(payload.get("content") or "") if isinstance(payload, dict) else ""
+            content_hash = memory_content_hash(content) if content else None
+            status = str(row["status"])
+            scope_key = (
+                str(row["scope_type"]),
+                str(row["scope_id"]),
+                str(content_hash or ""),
+            )
+            if status == "pending" and (
+                content_hash is None
+                or scope_key in active_hashes
+                or scope_key in seen_pending
+            ):
+                conn.execute(
+                    """
+                    UPDATE memory_pending_writes
+                    SET status='stale', content_hash=?, resolved_at=?
+                    WHERE id=?
+                    """,
+                    (content_hash, now, int(row["id"])),
+                )
+                continue
+            conn.execute(
+                "UPDATE memory_pending_writes SET content_hash=? WHERE id=?",
+                (content_hash, int(row["id"])),
+            )
+            if status == "pending":
+                seen_pending.add(scope_key)
+        conn.execute(
+            """
+            CREATE UNIQUE INDEX IF NOT EXISTS idx_memory_pending_add_dedup
+            ON memory_pending_writes(scope_type, scope_id, content_hash)
+            WHERE status='pending' AND action='add' AND content_hash IS NOT NULL
+            """
+        )
+        conn.execute(
+            """
+            CREATE TRIGGER IF NOT EXISTS trg_memory_pending_add_require_hash_insert
+            BEFORE INSERT ON memory_pending_writes
+            WHEN NEW.status='pending' AND NEW.action='add'
+                 AND NEW.content_hash IS NULL
+            BEGIN
+                SELECT RAISE(ABORT, 'pending add content hash required');
+            END
+            """
+        )
+        conn.execute(
+            """
+            CREATE TRIGGER IF NOT EXISTS trg_memory_pending_add_require_hash_update
+            BEFORE UPDATE OF status, action, content_hash ON memory_pending_writes
+            WHEN NEW.status='pending' AND NEW.action='add'
+                 AND NEW.content_hash IS NULL
+            BEGIN
+                SELECT RAISE(ABORT, 'pending add content hash required');
+            END
+            """
+        )
 
     @staticmethod
     def _migrate_v2_memory_hash(conn: sqlite3.Connection) -> None:
@@ -1090,6 +1703,771 @@ class SelfLearningLedger:
 
         cls._sanitize_v4_rows(conn)
 
+    @classmethod
+    def _migrate_v5_simplified_memory(cls, conn: sqlite3.Connection) -> None:
+        """Replace the learning state machine with curated active memory.
+
+        Session history remains in ``runs``/``events``.  Only explicitly active
+        project/application facts enter ``memory_items``; every legacy pending
+        operation remains non-active in ``memory_pending_writes``.  No model is
+        invoked during migration.
+        """
+        now = _now_iso()
+        conn.execute("DROP TABLE IF EXISTS memory_items_v5")
+        conn.execute("DROP TABLE IF EXISTS memory_pending_writes_v5")
+        conn.execute("DROP TABLE IF EXISTS review_runs_v5")
+        conn.execute("DROP TABLE IF EXISTS runs_v5")
+        cls._execute_script_in_transaction(
+            conn,
+            _v5_memory_tables_sql(
+                "memory_items_v5",
+                "memory_pending_writes_v5",
+            )
+            + """
+            CREATE TABLE review_runs_v5 (
+                review_id INTEGER PRIMARY KEY AUTOINCREMENT,
+                review_key TEXT NOT NULL UNIQUE,
+                root_run_id TEXT NOT NULL,
+                application_id TEXT,
+                model_type TEXT NOT NULL,
+                status TEXT NOT NULL,
+                result_json TEXT NOT NULL DEFAULT '{}',
+                created_at TEXT NOT NULL,
+                finished_at TEXT
+            );
+            CREATE TABLE runs_v5 (
+                run_id TEXT PRIMARY KEY,
+                root_run_id TEXT,
+                task_id TEXT,
+                agent_name TEXT,
+                application_id TEXT,
+                application_name TEXT,
+                application_path TEXT,
+                workflow_path TEXT,
+                yaml_path TEXT,
+                run_dir TEXT,
+                status TEXT,
+                started_at TEXT,
+                ended_at TEXT,
+                task_text TEXT,
+                final_answer TEXT,
+                indexed_at TEXT NOT NULL,
+                metadata_json TEXT
+            );
+            """,
+        )
+
+        run_columns = (
+            "run_id, root_run_id, task_id, agent_name, application_id, "
+            "application_name, application_path, workflow_path, yaml_path, "
+            "run_dir, status, started_at, ended_at, task_text, final_answer, "
+            "indexed_at, metadata_json"
+        )
+        conn.execute(
+            f"INSERT INTO runs_v5 ({run_columns}) SELECT {run_columns} FROM runs"
+        )
+
+        legacy_rows = conn.execute(
+            "SELECT * FROM memory_items ORDER BY id"
+        ).fetchall()
+        skipped_session = 0
+        active_copied = 0
+        pending_copied = 0
+        stale_copied = 0
+
+        for row in legacy_rows:
+            scope_type = str(row["scope_type"] or "").strip().casefold()
+            if scope_type == "app":
+                scope_type = "application"
+            if scope_type not in {"project", "application"}:
+                skipped_session += 1
+                continue
+            status = str(row["status"] or "").strip().casefold()
+            applied_by = str(row["applied_by"] or "").strip().casefold()
+            if status != "active" or applied_by == "auto":
+                continue
+            content = sanitize_text_fragment(str(row["content"] or "")).strip()
+            if not content or content == BLOCKED_TEXT:
+                continue
+            item_id = int(row["id"])
+            content_hash = memory_content_hash(content)
+            cursor = conn.execute(
+                """
+                INSERT OR IGNORE INTO memory_items_v5 (
+                    id, scope_type, scope_id, content, content_hash,
+                    created_at, updated_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    item_id,
+                    scope_type,
+                    str(row["scope_id"] or ""),
+                    content,
+                    content_hash,
+                    str(row["created_at"] or now),
+                    str(row["updated_at"] or now),
+                ),
+            )
+            if cursor.rowcount:
+                active_copied += 1
+
+        for row in legacy_rows:
+            scope_type = str(row["scope_type"] or "").strip().casefold()
+            if scope_type == "app":
+                scope_type = "application"
+            if scope_type not in {"project", "application"}:
+                continue
+            old_status = str(row["status"] or "").strip().casefold()
+            applied_by = str(row["applied_by"] or "").strip().casefold()
+            if old_status != "pending" and not (
+                old_status == "active" and applied_by == "auto"
+            ):
+                continue
+
+            action = (
+                "add"
+                if old_status == "active"
+                else str(row["action"] or "add").strip().casefold()
+            )
+            pending_status = "pending"
+            resolved_at: str | None = None
+            payload: dict[str, Any]
+            content = sanitize_text_fragment(str(row["content"] or "")).strip()
+            if action == "add" and content and content != BLOCKED_TEXT:
+                payload = {"content": content}
+            elif action in {"replace", "remove"}:
+                target_id = int(row["target_item_id"] or 0)
+                target = conn.execute(
+                    """
+                    SELECT scope_type, scope_id, content_hash
+                    FROM memory_items_v5 WHERE id = ?
+                    """,
+                    (target_id,),
+                ).fetchone()
+                target_valid = (
+                    target is not None
+                    and str(target["scope_type"] or "") == scope_type
+                    and str(target["scope_id"] or "") == str(row["scope_id"] or "")
+                )
+                if target_valid:
+                    payload = {
+                        "target_id": target_id,
+                        "target_content_hash": str(target["content_hash"]),
+                    }
+                    if action == "replace" and content and content != BLOCKED_TEXT:
+                        payload["content"] = content
+                    elif action == "replace":
+                        target_valid = False
+                else:
+                    payload = {}
+                if not target_valid:
+                    pending_status = "stale"
+                    resolved_at = now
+            else:
+                action = "add"
+                payload = (
+                    {"content": content}
+                    if content and content != BLOCKED_TEXT
+                    else {}
+                )
+                pending_status = "stale"
+                resolved_at = now
+
+            conn.execute(
+                """
+                INSERT INTO memory_pending_writes_v5 (
+                    id, status, action, scope_type, scope_id, payload_json,
+                    source_run_id, created_at, resolved_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    int(row["id"]),
+                    pending_status,
+                    action,
+                    scope_type,
+                    str(row["scope_id"] or ""),
+                    _json_dumps(payload),
+                    str(row["source_run_id"] or ""),
+                    str(row["created_at"] or now),
+                    resolved_at,
+                ),
+            )
+            if pending_status == "pending":
+                pending_copied += 1
+            else:
+                stale_copied += 1
+
+        for row in conn.execute("SELECT * FROM review_runs ORDER BY review_id"):
+            created_at = str(row["created_at"] or now)
+            conn.execute(
+                """
+                INSERT INTO review_runs_v5 (
+                    review_id, review_key, root_run_id, application_id,
+                    model_type, status, result_json, created_at, finished_at
+                ) VALUES (?, ?, ?, ?, 'legacy', ?, ?, ?, ?)
+                """,
+                (
+                    int(row["review_id"]),
+                    f"legacy:{int(row['review_id'])}",
+                    str(row["source_run_id"] or ""),
+                    str(row["application_id"] or ""),
+                    "legacy",
+                    "{}",
+                    created_at,
+                    created_at,
+                ),
+            )
+
+        for table in _V5_REMOVED_TABLES:
+            conn.execute(f'DROP TABLE IF EXISTS "{table}"')
+        conn.execute("DROP TABLE memory_items")
+        conn.execute("DROP TABLE review_runs")
+        conn.execute("DROP TABLE runs")
+        conn.execute("ALTER TABLE memory_items_v5 RENAME TO memory_items")
+        conn.execute(
+            "ALTER TABLE memory_pending_writes_v5 RENAME TO memory_pending_writes"
+        )
+        conn.execute("ALTER TABLE review_runs_v5 RENAME TO review_runs")
+        conn.execute("ALTER TABLE runs_v5 RENAME TO runs")
+        cls._execute_script_in_transaction(conn, _SCHEMA_V5_SQL)
+        conn.execute(
+            """
+            INSERT INTO maintenance (key, value) VALUES (?, ?)
+            ON CONFLICT(key) DO UPDATE SET value = excluded.value
+            """,
+            (
+                _V5_MIGRATION_REPORT_KEY,
+                _json_dumps(
+                    {
+                        "active_copied": active_copied,
+                        "pending_copied": pending_copied,
+                        "stale_copied": stale_copied,
+                        "session_rows_skipped": skipped_session,
+                    }
+                ),
+            ),
+        )
+
+    @staticmethod
+    def _sanitize_json_cell_with_taint(
+        value: Any,
+    ) -> tuple[Any, str, bool]:
+        raw = "" if value is None else str(value)
+        if not raw:
+            return {}, "{}", False
+        try:
+            parsed = json.loads(raw)
+        except (TypeError, json.JSONDecodeError):
+            sanitized, tainted = sanitize_text_fragment_with_taint(raw)
+            return sanitized, sanitized, tainted
+        sanitized, tainted = sanitize_value_fragments_with_taint(
+            parsed,
+            legacy_redaction_provenance=True,
+        )
+        return sanitized, _json_dumps(sanitized), tainted
+
+    @classmethod
+    def _sanitize_v5_event_sequences(cls, conn: sqlite3.Connection) -> None:
+        """Apply the current sanitizer while preserving root event order.
+
+        A later event can contain an arbitrary secret echo that has no remaining
+        key shape. The preceding event's content-free taint flag is therefore
+        the only safe evidence needed to block every subsequent event.
+        """
+        before_runs = int(conn.execute("SELECT COUNT(*) FROM runs").fetchone()[0])
+        before_events = int(
+            conn.execute("SELECT COUNT(*) FROM events").fetchone()[0]
+        )
+        tainted_roots: set[str] = set()
+        rows = conn.execute(
+            """
+            SELECT id, run_id, root_run_id, event_type, input_json,
+                   output_json, content_text, metadata_json
+            FROM events
+            ORDER BY COALESCE(NULLIF(root_run_id, ''), run_id), id
+            """
+        ).fetchall()
+        for row in rows:
+            root_run_id = str(row["root_run_id"] or row["run_id"] or "")
+            content_text, content_tainted = sanitize_text_fragment_with_taint(
+                row["content_text"] or ""
+            )
+            _input_value, input_json, input_tainted = (
+                cls._sanitize_json_cell_with_taint(row["input_json"])
+            )
+            output_value, output_json, output_tainted = (
+                cls._sanitize_json_cell_with_taint(row["output_json"])
+            )
+            if isinstance(output_value, dict):
+                output_value.pop(TRUSTED_MEMORY_EVIDENCE_RESPONSE_KEY, None)
+                output_json = _json_dumps(output_value)
+            metadata_value, metadata_json, metadata_tainted = (
+                cls._sanitize_json_cell_with_taint(row["metadata_json"])
+            )
+            persisted_taint = (
+                isinstance(metadata_value, dict)
+                and metadata_value.get(_SAFETY_TAINT_KEY) is True
+            )
+            root_was_tainted = root_run_id in tainted_roots
+            event_tainted = (
+                content_tainted
+                or input_tainted
+                or output_tainted
+                or metadata_tainted
+                or persisted_taint
+            )
+            if root_was_tainted:
+                content_text = BLOCKED_TEXT
+                input_json = _json_dumps({"input": BLOCKED_TEXT})
+                output_json = _json_dumps({"result": BLOCKED_TEXT})
+                metadata_value = {}
+                metadata_json = "{}"
+                event_tainted = True
+            if event_tainted:
+                metadata = (
+                    dict(metadata_value)
+                    if isinstance(metadata_value, dict)
+                    else {"value": metadata_value}
+                )
+                metadata[_SAFETY_TAINT_KEY] = True
+                metadata_json = _json_dumps(metadata)
+                tainted_roots.add(root_run_id)
+            conn.execute(
+                """
+                UPDATE events
+                SET input_json = ?, output_json = ?, content_text = ?,
+                    metadata_json = ?
+                WHERE id = ?
+                """,
+                (
+                    input_json,
+                    output_json,
+                    content_text,
+                    metadata_json,
+                    int(row["id"]),
+                ),
+            )
+
+        for row in conn.execute(
+            "SELECT run_id, root_run_id, task_text, final_answer, metadata_json "
+            "FROM runs"
+        ).fetchall():
+            task_text, _task_tainted = sanitize_text_fragment_with_taint(
+                row["task_text"] or ""
+            )
+            final_answer, _final_tainted = sanitize_text_fragment_with_taint(
+                row["final_answer"] or ""
+            )
+            metadata_value, metadata_json, _metadata_tainted = (
+                cls._sanitize_json_cell_with_taint(row["metadata_json"])
+            )
+            run_root_id = str(row["root_run_id"] or row["run_id"] or "")
+            if run_root_id in tainted_roots:
+                final_answer = BLOCKED_TEXT
+                metadata = (
+                    dict(metadata_value)
+                    if isinstance(metadata_value, dict)
+                    else {"value": metadata_value}
+                )
+                metadata[_SAFETY_TAINT_KEY] = True
+                metadata_json = _json_dumps(metadata)
+            conn.execute(
+                """
+                UPDATE runs
+                SET task_text = ?, final_answer = ?, metadata_json = ?
+                WHERE run_id = ?
+                """,
+                (
+                    task_text,
+                    final_answer,
+                    metadata_json,
+                    str(row["run_id"]),
+                ),
+            )
+
+        cls._rebuild_v5_event_fts(conn)
+        after_runs = int(conn.execute("SELECT COUNT(*) FROM runs").fetchone()[0])
+        after_events = int(
+            conn.execute("SELECT COUNT(*) FROM events").fetchone()[0]
+        )
+        if (after_runs, after_events) != (before_runs, before_events):
+            raise RuntimeError("v5 sanitizer changed run/event row counts")
+
+    @classmethod
+    def _sanitize_v5_trusted_review_evidence(
+        cls,
+        conn: sqlite3.Connection,
+    ) -> None:
+        """Keep only losslessly safe evidence from its original live event."""
+
+        safe_rows: list[
+            tuple[str, str, str, str, str, str, str, str, str]
+        ] = []
+        rows = conn.execute(
+            """
+            SELECT evidence.event_id, evidence.root_run_id, evidence.tool_name,
+                   evidence.kind, evidence.scope_type, evidence.scope_id,
+                   evidence.source, evidence.text, evidence.created_at,
+                   events.run_id AS event_run_id,
+                   events.root_run_id AS event_root_run_id,
+                   events.tool_name AS event_tool_name,
+                   events.application_id AS event_application_id,
+                   events.event_type AS event_type,
+                   events.status AS event_status,
+                   events.created_at AS event_created_at,
+                   events.metadata_json AS event_metadata_json
+            FROM trusted_review_evidence AS evidence
+            LEFT JOIN events ON events.event_id = evidence.event_id
+            ORDER BY evidence.event_id, evidence.kind, evidence.scope_type,
+                     evidence.scope_id, evidence.source, evidence.text
+            """
+        ).fetchall()
+        for row in rows:
+            if str(row["kind"] or "") != TRUSTED_MEMORY_EVIDENCE_KIND:
+                continue
+            if (
+                str(row["event_type"] or "") != "tool_result"
+                or str(row["event_status"] or "") != "completed"
+            ):
+                continue
+            try:
+                event_metadata = json.loads(
+                    str(row["event_metadata_json"] or "{}")
+                )
+            except (TypeError, ValueError, json.JSONDecodeError):
+                continue
+            if not isinstance(event_metadata, dict) or event_metadata.get(
+                _SAFETY_TAINT_KEY
+            ) is True:
+                continue
+
+            values = {
+                "event_id": str(row["event_id"] or ""),
+                "root_run_id": str(row["root_run_id"] or ""),
+                "tool_name": str(row["tool_name"] or ""),
+                "scope_type": str(row["scope_type"] or ""),
+                "scope_id": str(row["scope_id"] or ""),
+                "source": str(row["source"] or ""),
+                "text": str(row["text"] or ""),
+                "created_at": str(row["created_at"] or ""),
+            }
+            sanitized_values: dict[str, str] = {}
+            changed_or_tainted = False
+            for name, value in values.items():
+                sanitized, tainted = sanitize_text_fragment_with_taint(value)
+                sanitized_values[name] = sanitized
+                changed_or_tainted = changed_or_tainted or tainted or sanitized != value
+            if changed_or_tainted or any(
+                not value or value == BLOCKED_TEXT
+                for value in sanitized_values.values()
+            ):
+                continue
+            if values["source"] != values["source"].strip():
+                continue
+
+            expected_scope_id = (
+                "project"
+                if values["scope_type"] == "project"
+                else str(row["event_application_id"] or "")
+                if values["scope_type"] == "application"
+                else ""
+            )
+            if not expected_scope_id or values["scope_id"] != expected_scope_id:
+                continue
+
+            event_root_run_id = str(
+                row["event_root_run_id"] or row["event_run_id"] or ""
+            )
+            if (
+                values["root_run_id"] != event_root_run_id
+                or values["tool_name"] != str(row["event_tool_name"] or "")
+                or values["created_at"] != str(row["event_created_at"] or "")
+            ):
+                continue
+            safe_rows.append(
+                (
+                    values["event_id"],
+                    values["root_run_id"],
+                    values["tool_name"],
+                    TRUSTED_MEMORY_EVIDENCE_KIND,
+                    values["scope_type"],
+                    values["scope_id"],
+                    values["source"],
+                    values["text"],
+                    values["created_at"],
+                )
+            )
+
+        cls._replace_trusted_review_evidence_table(conn, tuple(safe_rows))
+
+    @classmethod
+    def _sanitize_v5_memory_state(cls, conn: sqlite3.Connection) -> None:
+        """Rebuild curated memory from sanitized, internally consistent rows.
+
+        Redaction can collapse distinct legacy content hashes. Rebuilding under
+        the final v5 uniqueness constraint makes that collision explicit and
+        records an id map so pending replace/remove operations still target the
+        retained row. Pending rows are never silently executed during repair.
+        """
+        before_items = int(
+            conn.execute("SELECT COUNT(*) FROM memory_items").fetchone()[0]
+        )
+        before_pending = int(
+            conn.execute(
+                "SELECT COUNT(*) FROM memory_pending_writes"
+            ).fetchone()[0]
+        )
+        now = _now_iso()
+        conn.execute("DROP TABLE IF EXISTS memory_items_v5_sanitized")
+        conn.execute("DROP TABLE IF EXISTS memory_pending_writes_v5_sanitized")
+        cls._execute_script_in_transaction(
+            conn,
+            _v5_memory_tables_sql(
+                "memory_items_v5_sanitized",
+                "memory_pending_writes_v5_sanitized",
+            ),
+        )
+
+        def safe_scope_id(scope_type: str, value: Any) -> str:
+            if scope_type == "project":
+                return "project"
+            return safe_storage_identity(
+                value,
+                namespace="application",
+                allow_empty=True,
+            )
+
+        item_id_map: dict[int, int] = {}
+        for row in conn.execute(
+            "SELECT * FROM memory_items ORDER BY id"
+        ).fetchall():
+            old_id = int(row["id"])
+            scope_type = str(row["scope_type"])
+            scope_id = safe_scope_id(scope_type, row["scope_id"])
+            content = sanitize_text_fragment(row["content"] or "").strip()
+            if not content or content == BLOCKED_TEXT:
+                continue
+            content_hash = memory_content_hash(content)
+            created_at = sanitize_text_fragment(row["created_at"] or "").strip()
+            updated_at = sanitize_text_fragment(row["updated_at"] or "").strip()
+            if not created_at or created_at == BLOCKED_TEXT:
+                created_at = now
+            if not updated_at or updated_at == BLOCKED_TEXT:
+                updated_at = now
+            cursor = conn.execute(
+                """
+                INSERT OR IGNORE INTO memory_items_v5_sanitized(
+                    id, scope_type, scope_id, content, content_hash,
+                    created_at, updated_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    old_id,
+                    scope_type,
+                    scope_id,
+                    content,
+                    content_hash,
+                    created_at,
+                    updated_at,
+                ),
+            )
+            if cursor.rowcount:
+                item_id_map[old_id] = old_id
+                continue
+            retained = conn.execute(
+                """
+                SELECT id FROM memory_items_v5_sanitized
+                WHERE scope_type = ? AND scope_id = ? AND content_hash = ?
+                """,
+                (scope_type, scope_id, content_hash),
+            ).fetchone()
+            if retained is None:
+                raise RuntimeError("v5 memory sanitizer lost a safe memory row")
+            item_id_map[old_id] = int(retained["id"])
+
+        seen_pending: set[tuple[str, str, str, str]] = set()
+        for row in conn.execute(
+            "SELECT * FROM memory_pending_writes ORDER BY id"
+        ).fetchall():
+            pending_id = int(row["id"])
+            status = str(row["status"])
+            action = str(row["action"])
+            scope_type = str(row["scope_type"])
+            scope_id = safe_scope_id(scope_type, row["scope_id"])
+            raw_payload = str(row["payload_json"] or "{}")
+            parse_failed = False
+            try:
+                payload_value = json.loads(raw_payload)
+            except (TypeError, json.JSONDecodeError):
+                payload_value = {}
+                parse_failed = True
+            payload_value = sanitize_value_fragments(payload_value)
+            payload = payload_value if isinstance(payload_value, dict) else {}
+            valid = not parse_failed and isinstance(payload_value, dict)
+            canonical_payload: dict[str, Any] = {}
+
+            if action == "add":
+                content = sanitize_text_fragment(payload.get("content") or "").strip()
+                valid = valid and bool(content) and content != BLOCKED_TEXT
+                if valid:
+                    canonical_payload = {"content": content}
+            else:
+                try:
+                    old_target_id = int(payload.get("target_id"))
+                except (TypeError, ValueError):
+                    old_target_id = 0
+                target_id = item_id_map.get(old_target_id, 0)
+                target = (
+                    conn.execute(
+                        "SELECT * FROM memory_items_v5_sanitized WHERE id = ?",
+                        (target_id,),
+                    ).fetchone()
+                    if target_id
+                    else None
+                )
+                valid = (
+                    valid
+                    and target is not None
+                    and str(target["scope_type"]) == scope_type
+                    and str(target["scope_id"]) == scope_id
+                )
+                if valid and target is not None:
+                    canonical_payload = {
+                        "target_id": int(target["id"]),
+                        "target_content_hash": str(target["content_hash"]),
+                    }
+                    if action == "replace":
+                        content = sanitize_text_fragment(
+                            payload.get("content") or ""
+                        ).strip()
+                        valid = bool(content) and content != BLOCKED_TEXT
+                        if valid:
+                            canonical_payload["content"] = content
+                        else:
+                            canonical_payload = {}
+
+            payload_json = _json_dumps(canonical_payload)
+            resolved_at_raw = row["resolved_at"]
+            resolved_at = (
+                sanitize_text_fragment(resolved_at_raw).strip()
+                if resolved_at_raw is not None
+                else None
+            )
+            if resolved_at == BLOCKED_TEXT:
+                resolved_at = now
+            if status == "pending":
+                dedupe_key = (action, scope_type, scope_id, payload_json)
+                if not valid or dedupe_key in seen_pending:
+                    status = "stale"
+                    resolved_at = now
+                else:
+                    seen_pending.add(dedupe_key)
+            source_run_id = safe_storage_identity(
+                row["source_run_id"],
+                namespace="run",
+                allow_empty=True,
+            )
+            created_at = sanitize_text_fragment(row["created_at"] or "").strip()
+            if not created_at or created_at == BLOCKED_TEXT:
+                created_at = now
+            conn.execute(
+                """
+                INSERT INTO memory_pending_writes_v5_sanitized(
+                    id, status, action, scope_type, scope_id, payload_json,
+                    source_run_id, created_at, resolved_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    pending_id,
+                    status,
+                    action,
+                    scope_type,
+                    scope_id,
+                    payload_json,
+                    source_run_id,
+                    created_at,
+                    resolved_at,
+                ),
+            )
+
+        conn.execute("DROP TABLE memory_items")
+        conn.execute("DROP TABLE memory_pending_writes")
+        conn.execute(
+            "ALTER TABLE memory_items_v5_sanitized RENAME TO memory_items"
+        )
+        conn.execute(
+            "ALTER TABLE memory_pending_writes_v5_sanitized "
+            "RENAME TO memory_pending_writes"
+        )
+        cls._execute_script_in_transaction(conn, _SCHEMA_V5_SQL)
+
+        after_items = int(
+            conn.execute("SELECT COUNT(*) FROM memory_items").fetchone()[0]
+        )
+        after_pending = int(
+            conn.execute(
+                "SELECT COUNT(*) FROM memory_pending_writes"
+            ).fetchone()[0]
+        )
+        if after_items != len(set(item_id_map.values())):
+            raise RuntimeError("v5 sanitizer changed safe memory row identity")
+        if after_items > before_items or after_pending != before_pending:
+            raise RuntimeError("v5 sanitizer changed pending memory row counts")
+
+    @staticmethod
+    def _rebuild_v5_event_fts(conn: sqlite3.Connection) -> None:
+        existing_fts_tables = {
+            str(row[0])
+            for row in conn.execute(
+                "SELECT name FROM sqlite_master "
+                "WHERE type = 'table' "
+                "AND name IN ('events_fts', 'events_fts_trigram')"
+            )
+        }
+        if "events_fts" in existing_fts_tables:
+            conn.execute(
+                "INSERT INTO events_fts(events_fts, rank) "
+                "VALUES('secure-delete', 1)"
+            )
+            conn.execute("DELETE FROM events_fts")
+            conn.execute(
+                """
+                INSERT INTO events_fts (
+                    rowid, content_text, tool_name, agent_name, worker_name,
+                    event_type, source, role, status, application_id, run_id
+                )
+                SELECT id,
+                    COALESCE(content_text, '') || ' ' || COALESCE(tool_name, '') ||
+                    ' ' || COALESCE(input_json, '') || ' ' || COALESCE(output_json, ''),
+                    COALESCE(tool_name, ''), COALESCE(agent_name, ''),
+                    COALESCE(worker_name, ''), COALESCE(event_type, ''),
+                    COALESCE(source, ''), COALESCE(role, ''), COALESCE(status, ''),
+                    COALESCE(application_id, ''), COALESCE(run_id, '')
+                FROM events
+                """
+            )
+            conn.execute("INSERT INTO events_fts(events_fts) VALUES('optimize')")
+
+        if "events_fts_trigram" in existing_fts_tables:
+            conn.execute(
+                "INSERT INTO events_fts_trigram(events_fts_trigram, rank) "
+                "VALUES('secure-delete', 1)"
+            )
+            conn.execute("DELETE FROM events_fts_trigram")
+            conn.execute(
+                """
+                INSERT INTO events_fts_trigram (rowid, content_text)
+                SELECT id,
+                    COALESCE(content_text, '') || ' ' || COALESCE(tool_name, '') ||
+                    ' ' || COALESCE(input_json, '') || ' ' || COALESCE(output_json, '')
+                FROM events
+                """
+            )
+            conn.execute(
+                "INSERT INTO events_fts_trigram(events_fts_trigram) "
+                "VALUES('optimize')"
+            )
+
     @staticmethod
     def _redact_legacy_cell(value: Any, *, json_value: bool) -> str | None:
         if value is None:
@@ -1434,7 +2812,7 @@ class SelfLearningLedger:
             field="maintenance value",
             allow_empty=True,
         )
-        with self._connect() as conn:
+        with serialized_write_transaction(self.db_path, self._connect) as conn:
             conn.execute(
                 """
                 INSERT INTO maintenance (key, value) VALUES (?, ?)
@@ -1461,7 +2839,7 @@ class SelfLearningLedger:
             field="new maintenance value",
             allow_empty=True,
         )
-        with self._connect() as conn:
+        with serialized_write_transaction(self.db_path, self._connect) as conn:
             if expected:
                 claimed = conn.execute(
                     "UPDATE maintenance SET value = ? WHERE key = ? AND value = ?",
@@ -1569,6 +2947,42 @@ class SelfLearningLedger:
             "metadata_json": _json_dumps(metadata),
         }
 
+    @staticmethod
+    def _root_has_safety_taint(
+        conn: sqlite3.Connection,
+        root_run_id: str,
+    ) -> bool:
+        return (
+            conn.execute(
+                """
+                SELECT 1
+                FROM events
+                WHERE COALESCE(NULLIF(root_run_id, ''), run_id) = ?
+                  AND instr(metadata_json, '"_safety_tainted": true') > 0
+                LIMIT 1
+                """,
+                (root_run_id,),
+            ).fetchone()
+            is not None
+        )
+
+    @staticmethod
+    def _mark_record_safety_taint(record: dict[str, Any]) -> None:
+        metadata = dict(record.get("metadata") or {})
+        metadata[_SAFETY_TAINT_KEY] = True
+        record["metadata"] = metadata
+
+    @classmethod
+    def _block_event_after_safety_taint(
+        cls,
+        record: dict[str, Any],
+    ) -> None:
+        record["content"] = BLOCKED_TEXT
+        record["content_text"] = BLOCKED_TEXT
+        record["input_data"] = {"input": BLOCKED_TEXT}
+        record["output_data"] = {"result": BLOCKED_TEXT}
+        record["metadata"] = {_SAFETY_TAINT_KEY: True}
+
     def _append_event_in_conn(
         self,
         conn: sqlite3.Connection,
@@ -1581,7 +2995,12 @@ class SelfLearningLedger:
                 root_run_id,
                 field="event root run id",
             )
-        record = event.to_record()
+        record, safety_tainted = event.to_record_with_safety()
+        persisted_taint = (record.get("metadata") or {}).get(
+            _SAFETY_TAINT_KEY
+        ) is True
+        if safety_tainted or persisted_taint:
+            self._mark_record_safety_taint(record)
         # ``to_record`` owns the event safety boundary. Reusing that immutable
         # snapshot avoids redacting and injection-scanning every field twice on
         # the synchronous append path.
@@ -1602,6 +3021,9 @@ class SelfLearningLedger:
                 "indexed": False,
                 "db_path": str(self.db_path),
             }
+        if self._root_has_safety_taint(conn, run_meta["root_run_id"]):
+            self._block_event_after_safety_taint(record)
+            run_meta = self._run_metadata(record, root_run_id=root_run_id)
         # INSERT first, merge on miss: SELECT-then-INSERT races when two
         # writers hit a brand-new run_id concurrently.
         created = conn.execute(
@@ -1713,130 +3135,109 @@ class SelfLearningLedger:
 
     def append_event(self, event: CanonicalSessionEvent, *, root_run_id: str = "") -> dict[str, Any]:
         """Append one redacted canonical event to the ledger."""
-        with self._connect() as conn:
+        with serialized_write_transaction(self.db_path, self._connect) as conn:
             # Serialize the idempotency read with the run/event writes. Without
             # this boundary two processes could both miss the same event before
             # either writer creates it.
-            conn.execute("BEGIN IMMEDIATE")
             return self._append_event_in_conn(conn, event, root_run_id=root_run_id)
 
-    @staticmethod
-    def _enqueue_job_in_conn(
-        conn: sqlite3.Connection,
-        *,
-        kind: str,
-        dedupe_key: str,
-        root_run_id: str,
-        payload: dict[str, Any],
-        now: str,
-    ) -> bool:
-        kind = require_safe_identity(kind, field="job kind")
-        dedupe_key = require_safe_identity(dedupe_key, field="job dedupe key")
-        root_run_id = require_safe_identity(root_run_id, field="job root run id")
-        return bool(
-            conn.execute(
-                """
-                INSERT OR IGNORE INTO learning_jobs (
-                    kind, dedupe_key, root_run_id, payload_json, status, attempts,
-                    available_at, created_at, updated_at
-                ) VALUES (?, ?, ?, ?, 'pending', 0, ?, ?, ?)
-                """,
-                (
-                    kind,
-                    dedupe_key,
-                    root_run_id,
-                    _json_dumps(sanitize_value_fragments(payload)),
-                    now,
-                    now,
-                    now,
-                ),
-            ).rowcount
-        )
-
-    def finalize_session(
+    def append_runtime_event(
         self,
         event: CanonicalSessionEvent,
         *,
-        root_run_id: str,
-        succeeded: bool,
-        review_payload: dict[str, Any],
-        enqueue_review: bool = True,
-        retention_dedupe_key: str = "",
+        trusted_evidence: tuple[dict[str, str], ...] = (),
     ) -> dict[str, Any]:
-        """Atomically record SessionEnd, score memory once, and enqueue work."""
-        root_run_id = require_safe_identity(
-            root_run_id,
-            field="SessionEnd root run id",
-        )
-        now = _now_iso()
-        with self._connect() as conn:
-            conn.execute("BEGIN IMMEDIATE")
-            event_result = self._append_event_in_conn(conn, event, root_run_id=root_run_id)
-            # Root and leaf run ids are normally identical for the owner.  The
-            # extra row makes the CAS fail-closed even if a malformed leaf
-            # SessionEnd arrives before its root's first event.
-            conn.execute(
+        """Atomically append a live event and non-importable review evidence."""
+
+        with serialized_write_transaction(self.db_path, self._connect) as conn:
+            result = self._append_event_in_conn(conn, event)
+            result["trusted_evidence_indexed"] = 0
+            if not result.get("indexed") or not trusted_evidence:
+                return result
+
+            row = conn.execute(
                 """
-                INSERT OR IGNORE INTO runs (
-                    run_id, root_run_id, status, indexed_at, metadata_json
-                ) VALUES (?, ?, 'indexed', ?, '{}')
+                SELECT event_id, root_run_id, tool_name, application_id,
+                       event_type, status, created_at, metadata_json
+                FROM events WHERE event_id = ?
                 """,
-                (root_run_id, root_run_id, now),
-            )
-            outcome_claimed = bool(
-                conn.execute(
-                    """
-                    UPDATE runs SET memory_outcome_recorded_at = ?
-                    WHERE run_id = ? AND memory_outcome_recorded_at IS NULL
-                    """,
-                    (now, root_run_id),
-                ).rowcount
-            )
-            trust_bumped = 0
-            if outcome_claimed and succeeded:
-                trust_bumped = int(
-                    conn.execute(
-                        """
-                        UPDATE memory_items
-                        SET trust_score = MIN(1.0, trust_score + 0.02),
-                            updated_at = ?
-                        WHERE id IN (
-                            SELECT item_id FROM memory_injections WHERE run_id = ?
-                        )
-                        """,
-                        (now, root_run_id),
-                    ).rowcount
+                (result["event_id"],),
+            ).fetchone()
+            if (
+                row is None
+                or str(row["event_type"] or "") != "tool_result"
+                or str(row["status"] or "") != "completed"
+            ):
+                return result
+            try:
+                metadata = json.loads(str(row["metadata_json"] or "{}"))
+            except (TypeError, ValueError, json.JSONDecodeError):
+                return result
+            if isinstance(metadata, dict) and metadata.get(_SAFETY_TAINT_KEY) is True:
+                return result
+
+            normalized: list[tuple[str, str, str, str]] = []
+            for entry in trusted_evidence:
+                if not isinstance(entry, dict):
+                    return result
+                if entry.get("kind") != TRUSTED_MEMORY_EVIDENCE_KIND:
+                    return result
+                scope_type = entry.get("scope")
+                if scope_type not in {"project", "application"}:
+                    return result
+                scope_id = (
+                    "project"
+                    if scope_type == "project"
+                    else str(row["application_id"] or "")
+                )
+                safe_scope_id, scope_id_tainted = sanitize_text_fragment_with_taint(
+                    scope_id
+                )
+                source, source_tainted = sanitize_text_fragment_with_taint(
+                    entry.get("source") or ""
+                )
+                text, text_tainted = sanitize_text_fragment_with_taint(
+                    entry.get("text") or ""
+                )
+                if (
+                    scope_id_tainted
+                    or safe_scope_id != scope_id
+                    or not safe_scope_id
+                    or source_tainted
+                    or text_tainted
+                    or not source.strip()
+                    or not text
+                    or source == BLOCKED_TEXT
+                    or text == BLOCKED_TEXT
+                ):
+                    return result
+                normalized.append(
+                    (scope_type, safe_scope_id, source.strip(), text)
                 )
 
-            jobs_enqueued: list[str] = []
-            if enqueue_review and self._enqueue_job_in_conn(
-                conn,
-                kind="session_review",
-                dedupe_key=root_run_id,
-                root_run_id=root_run_id,
-                payload=review_payload,
-                now=now,
-            ):
-                jobs_enqueued.append("session_review")
-            if retention_dedupe_key and self._enqueue_job_in_conn(
-                conn,
-                kind="retention",
-                dedupe_key=retention_dedupe_key,
-                root_run_id=root_run_id,
-                payload={
-                    "root_run_id": root_run_id,
-                    "run_dir": review_payload.get("run_dir", ""),
-                    "retention_date": retention_dedupe_key,
-                },
-                now=now,
-            ):
-                jobs_enqueued.append("retention")
-        return {
-            **event_result,
-            "outcome_recorded": outcome_claimed,
-            "trust_bumped": trust_bumped,
-            "jobs_enqueued": jobs_enqueued,
-        }
+            inserted = 0
+            for scope_type, scope_id, source, text in normalized:
+                inserted += conn.execute(
+                    """
+                    INSERT OR IGNORE INTO trusted_review_evidence (
+                        event_id, root_run_id, tool_name, kind, scope_type,
+                        scope_id, source, text, created_at
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    """,
+                    (
+                        str(row["event_id"]),
+                        str(row["root_run_id"] or result["root_run_id"]),
+                        str(row["tool_name"] or ""),
+                        TRUSTED_MEMORY_EVIDENCE_KIND,
+                        scope_type,
+                        scope_id,
+                        source,
+                        text,
+                        str(row["created_at"] or _now_iso()),
+                    ),
+                ).rowcount
+            result["trusted_evidence_indexed"] = inserted
+            return result
 
     @staticmethod
     def _fts_query(query: str) -> str:
@@ -1933,6 +3334,130 @@ class SelfLearningLedger:
             return ""
         return str(row["root_run_id"] or run_id)
 
+    def review_application_id(self, root_run_id: str) -> str:
+        """Return the Application identity bound to a persisted root run."""
+        root_run_id = safe_run_id(root_run_id)
+        if not root_run_id:
+            return ""
+        with self._connect() as conn:
+            row = conn.execute(
+                """
+                SELECT application_id FROM runs
+                WHERE run_id = ?
+                LIMIT 1
+                """,
+                (root_run_id,),
+            ).fetchone()
+        return str(row["application_id"] or "") if row is not None else ""
+
+    @staticmethod
+    def completed_root_run_in_transaction(
+        conn: sqlite3.Connection,
+        root_run_id: str,
+    ) -> sqlite3.Row | None:
+        """Return the root row only when its own SessionEnd is persisted."""
+        run_row = conn.execute(
+            """
+            SELECT status, final_answer, application_id FROM runs
+            WHERE run_id = ?
+            LIMIT 1
+            """,
+            (root_run_id,),
+        ).fetchone()
+        completion_row = conn.execute(
+            """
+            SELECT 1 FROM events
+            WHERE run_id = ?
+              AND COALESCE(NULLIF(root_run_id, ''), run_id) = ?
+              AND event_type = 'run_completed'
+              AND status = 'completed'
+            LIMIT 1
+            """,
+            (root_run_id, root_run_id),
+        ).fetchone()
+        if (
+            run_row is None
+            or completion_row is None
+            or str(run_row["status"] or "").casefold() != "completed"
+        ):
+            return None
+        return run_row
+
+    def completed_review_context(
+        self,
+        root_run_id: str,
+        *,
+        tool_result_limit: int,
+    ) -> dict[str, Any] | None:
+        """Read the bounded persisted facts eligible for completed-run review."""
+        root_run_id = safe_run_id(root_run_id)
+        if not root_run_id:
+            return None
+        limit = max(0, min(int(tool_result_limit), 100))
+        with self._connect() as conn:
+            run_row = self.completed_root_run_in_transaction(conn, root_run_id)
+            if run_row is None:
+                return None
+            root_application_id = str(run_row["application_id"] or "")
+            event_rows = conn.execute(
+                """
+                SELECT event_id, tool_name, output_json FROM events
+                WHERE COALESCE(NULLIF(root_run_id, ''), run_id) = ?
+                    AND event_type = 'tool_result'
+                    AND status = 'completed'
+                ORDER BY id DESC
+                LIMIT ?
+                """,
+                (root_run_id, limit),
+            ).fetchall()
+            event_records = [dict(row) for row in event_rows]
+            evidence_by_event: dict[str, list[dict[str, str]]] = {}
+            event_ids = [str(row["event_id"]) for row in event_records]
+            if event_ids:
+                placeholders = ", ".join("?" for _ in event_ids)
+                evidence_rows = conn.execute(
+                    f"""
+                    SELECT event_id, kind, scope_type, scope_id, source, text
+                    FROM trusted_review_evidence
+                    WHERE root_run_id = ?
+                      AND kind = ?
+                      AND event_id IN ({placeholders})
+                    ORDER BY event_id, kind, source, text
+                    """,
+                    (root_run_id, TRUSTED_MEMORY_EVIDENCE_KIND, *event_ids),
+                ).fetchall()
+                for evidence_row in evidence_rows:
+                    evidence_scope_type = str(
+                        evidence_row["scope_type"] or ""
+                    )
+                    evidence_scope_id = str(evidence_row["scope_id"] or "")
+                    if evidence_scope_type == "application" and (
+                        not root_application_id
+                        or evidence_scope_id != root_application_id
+                    ):
+                        continue
+                    evidence_by_event.setdefault(
+                        str(evidence_row["event_id"]),
+                        [],
+                    ).append(
+                        {
+                            "kind": str(evidence_row["kind"] or ""),
+                            "scope_type": evidence_scope_type,
+                            "scope_id": evidence_scope_id,
+                            "source": str(evidence_row["source"] or ""),
+                            "text": str(evidence_row["text"] or ""),
+                        }
+                    )
+            for event_record in event_records:
+                event_record["trusted_evidence"] = evidence_by_event.get(
+                    str(event_record["event_id"]),
+                    [],
+                )
+        return {
+            "final_answer": str(run_row["final_answer"] or ""),
+            "tool_results": event_records,
+        }
+
     def scroll_events(
         self, run_id: str, event_id: int, *, direction: str = "after", window: int = 5
     ) -> list[dict[str, Any]]:
@@ -1962,7 +3487,12 @@ class SelfLearningLedger:
         return {"runs_indexed": int(runs), "events_indexed": int(events), "db_path": str(self.db_path)}
 
     def delete_run(self, run_id: str) -> None:
-        with self._connect() as conn:
+        with serialized_write_transaction(self.db_path, self._connect) as conn:
+            conn.execute(
+                "DELETE FROM trusted_review_evidence WHERE event_id IN "
+                "(SELECT event_id FROM events WHERE run_id = ?)",
+                (run_id,),
+            )
             conn.execute("DELETE FROM events WHERE run_id = ?", (run_id,))
             conn.execute("DELETE FROM runs WHERE run_id = ?", (run_id,))
 
@@ -1972,9 +3502,11 @@ class SelfLearningLedger:
         """Delete runs (and their events) whose last activity is older than the cutoff.
 
         Deletes commit in small chunks: each removed events row fires the FTS
-        triggers, so one big transaction over a large backlog would hold the
-        writer lock past every concurrent writer's busy_timeout.
+        triggers, so one big transaction over a large backlog would block live
+        writers for the entire cleanup.
         """
+        if retention_days < 0:
+            raise ValueError("retention_days must be non-negative")
         cutoff = (datetime.now().astimezone() - timedelta(days=retention_days)).isoformat()
         with self._connect() as conn:
             stale_runs = [
@@ -1984,20 +3516,34 @@ class SelfLearningLedger:
                     (cutoff,),
                 )
             ]
-            events_deleted = 0
-            for run_id in stale_runs:
-                while True:
+        events_deleted = 0
+        for run_id in stale_runs:
+            first_chunk = True
+            while True:
+                with serialized_write_transaction(self.db_path, self._connect) as conn:
+                    if first_chunk:
+                        conn.execute(
+                            "DELETE FROM trusted_review_evidence WHERE event_id IN "
+                            "(SELECT event_id FROM events WHERE run_id = ?)",
+                            (run_id,),
+                        )
+                        first_chunk = False
                     deleted = conn.execute(
-                        "DELETE FROM events WHERE id IN (SELECT id FROM events WHERE run_id = ? LIMIT ?)",
+                        "DELETE FROM events WHERE id IN "
+                        "(SELECT id FROM events WHERE run_id = ? LIMIT ?)",
                         (run_id, self._PRUNE_CHUNK_ROWS),
                     ).rowcount
                     events_deleted += deleted
-                    conn.commit()
-                    if deleted < self._PRUNE_CHUNK_ROWS:
-                        break
-                conn.execute("DELETE FROM runs WHERE run_id = ?", (run_id,))
-                conn.commit()
-            reviews_deleted = conn.execute("DELETE FROM review_runs WHERE created_at < ?", (cutoff,)).rowcount
+                    finished = deleted < self._PRUNE_CHUNK_ROWS
+                    if finished:
+                        conn.execute("DELETE FROM runs WHERE run_id = ?", (run_id,))
+                if finished:
+                    break
+        with serialized_write_transaction(self.db_path, self._connect) as conn:
+            reviews_deleted = conn.execute(
+                "DELETE FROM review_runs WHERE created_at < ?",
+                (cutoff,),
+            ).rowcount
         return {
             "ok": True,
             "runs_pruned": len(stale_runs),
@@ -2006,67 +3552,131 @@ class SelfLearningLedger:
             "cutoff": cutoff,
         }
 
-    def record_review(
-        self,
+    def review_status(self, *, review_key: str, root_run_id: str) -> str | None:
+        """Return one root's terminal review status without claiming it."""
+        review_key = require_safe_identity(review_key, field="review key")
+        root_run_id = safe_run_id(
+            require_safe_identity(root_run_id, field="review root run id")
+        )
+        if review_key != f"root:{root_run_id}":
+            raise ValueError("review key must match the root run id")
+        with self._connect() as conn:
+            row = conn.execute(
+                "SELECT root_run_id, status FROM review_runs WHERE review_key = ?",
+                (review_key,),
+            ).fetchone()
+        if row is None:
+            return None
+        if str(row["root_run_id"]) != root_run_id:
+            raise ValueError("review key is already bound to another root run")
+        return str(row["status"] or "")
+
+    @staticmethod
+    def record_review_in_transaction(
+        conn: sqlite3.Connection,
         *,
-        source_run_id: str,
-        hook_event: str,
+        review_key: str,
+        root_run_id: str,
         application_id: str = "",
-        trigger_event_id: str = "",
-        output: dict[str, Any] | None = None,
-        status: str = "proposal",
-        learning_job_id: int | None = None,
-    ) -> int:
-        learning_job_id = require_optional_strict_int(
-            learning_job_id,
-            field="review learning_job_id",
+        model_type: str = "",
+        status: str,
+        result: dict[str, Any] | None = None,
+        created_at: str | None = None,
+        finished_at: str | None = None,
+    ) -> tuple[int | None, bool]:
+        """Insert one terminal audit using the caller's active transaction."""
+        review_key = require_safe_identity(review_key, field="review key")
+        root_run_id = safe_run_id(
+            require_safe_identity(root_run_id, field="review root run id")
         )
-        source_run_id = require_safe_identity(
-            source_run_id,
-            field="review source run id",
-        )
-        hook_event = require_safe_identity(hook_event, field="review hook event")
+        if review_key != f"root:{root_run_id}":
+            raise ValueError("review key must match the root run id")
         application_id = require_safe_identity(
             application_id,
             field="review application id",
             allow_empty=True,
         )
-        trigger_event_id = require_safe_identity(
-            trigger_event_id,
-            field="review trigger event id",
+        model_type = require_safe_identity(
+            model_type,
+            field="review model type",
             allow_empty=True,
         )
         status = require_safe_identity(status, field="review status")
-        with self._connect() as conn:
-            cursor = conn.execute(
-                """
-                INSERT OR IGNORE INTO review_runs (
-                    source_run_id, trigger_event_id, hook_event, application_id,
-                    status, output_json, created_at, learning_job_id
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-                """,
-                (
-                    source_run_id,
-                    trigger_event_id,
-                    hook_event,
-                    application_id,
-                    status,
-                    _json_dumps(sanitize_value_fragments(output or {})),
-                    _now_iso(),
-                    learning_job_id,
-                ),
+        if status not in {"completed", "failed", "skipped"}:
+            raise ValueError("review status must be terminal")
+        created = require_safe_identity(
+            created_at or _now_iso(),
+            field="review created timestamp",
+        )
+        finished = require_safe_identity(
+            finished_at or _now_iso(),
+            field="review finished timestamp",
+        )
+        result_json = _json_dumps(sanitize_value_fragments(result or {}))
+
+        if (
+            SelfLearningLedger.completed_root_run_in_transaction(
+                conn,
+                root_run_id,
             )
-            if cursor.rowcount:
-                return int(cursor.lastrowid)
-            if learning_job_id is None:
-                raise RuntimeError("Review insert was ignored without a job id")
-            row = conn.execute(
-                "SELECT review_id FROM review_runs WHERE learning_job_id = ?",
-                (learning_job_id,),
-            ).fetchone()
-            if row is None:
-                raise RuntimeError("Review insert lost its idempotency row")
-            return int(row["review_id"])
+            is None
+        ):
+            return None, False
+
+        existing = conn.execute(
+            "SELECT review_id, root_run_id FROM review_runs WHERE review_key = ?",
+            (review_key,),
+        ).fetchone()
+        if existing is not None:
+            if str(existing["root_run_id"]) != root_run_id:
+                raise ValueError("review key is already bound to another root run")
+            return int(existing["review_id"]), False
+        cursor = conn.execute(
+            """
+            INSERT INTO review_runs (
+                review_key, root_run_id, application_id, model_type,
+                status, result_json, created_at, finished_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                review_key,
+                root_run_id,
+                application_id,
+                model_type,
+                status,
+                result_json,
+                created,
+                finished,
+            ),
+        )
+        return int(cursor.lastrowid), True
+
+    def record_review(
+        self,
+        *,
+        review_key: str,
+        root_run_id: str,
+        application_id: str = "",
+        model_type: str = "",
+        status: str,
+        result: dict[str, Any] | None = None,
+        created_at: str | None = None,
+        finished_at: str | None = None,
+    ) -> int | None:
+        """Insert one terminal audit; an existing review is immutable."""
+        with serialized_write_transaction(self.db_path, self._connect) as conn:
+            review_id, _inserted = self.record_review_in_transaction(
+                conn,
+                review_key=review_key,
+                root_run_id=root_run_id,
+                application_id=application_id,
+                model_type=model_type,
+                status=status,
+                result=result,
+                created_at=created_at,
+                finished_at=finished_at,
+            )
+            return review_id
 
     def upsert_skill_proposal(
         self,
@@ -2105,7 +3715,7 @@ class SelfLearningLedger:
         status = sanitize_text_fragment(status)
         proposal_path = sanitize_text_fragment(proposal_path)
         now = _now_iso()
-        with self._connect() as conn:
+        with serialized_write_transaction(self.db_path, self._connect) as conn:
             conn.execute(
                 """
                 INSERT INTO skill_proposals (
@@ -2146,7 +3756,7 @@ class SelfLearningLedger:
         status = require_safe_identity(status, field="skill proposal status")
         column = "promoted_at" if status == "promoted" else "archived_at" if status == "archived" else ""
         now = _now_iso()
-        with self._connect() as conn:
+        with serialized_write_transaction(self.db_path, self._connect) as conn:
             if column:
                 conn.execute(
                     f"UPDATE skill_proposals SET status = ?, updated_at = ?, {column} = ? WHERE proposal_id = ?",
@@ -2159,6 +3769,130 @@ class SelfLearningLedger:
                 )
 
 
+_SCHEMA_V5_SQL = (
+    """
+CREATE TABLE IF NOT EXISTS schema_version (
+    version INTEGER NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS runs (
+    run_id TEXT PRIMARY KEY,
+    root_run_id TEXT,
+    task_id TEXT,
+    agent_name TEXT,
+    application_id TEXT,
+    application_name TEXT,
+    application_path TEXT,
+    workflow_path TEXT,
+    yaml_path TEXT,
+    run_dir TEXT,
+    status TEXT,
+    started_at TEXT,
+    ended_at TEXT,
+    task_text TEXT,
+    final_answer TEXT,
+    indexed_at TEXT NOT NULL,
+    metadata_json TEXT
+);
+
+CREATE TABLE IF NOT EXISTS events (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    event_id TEXT NOT NULL UNIQUE,
+    run_id TEXT NOT NULL,
+    root_run_id TEXT,
+    task_id TEXT,
+    parent_task_id TEXT,
+    parent_event_id TEXT,
+    application_id TEXT,
+    application_name TEXT,
+    application_path TEXT,
+    workflow_path TEXT,
+    agent_name TEXT,
+    worker_name TEXT,
+    tool_name TEXT,
+    event_type TEXT,
+    phase TEXT,
+    source TEXT,
+    role TEXT,
+    status TEXT,
+    step_number INTEGER,
+    input_json TEXT,
+    output_json TEXT,
+    content_text TEXT NOT NULL,
+    content_ref TEXT,
+    source_path TEXT,
+    created_at TEXT,
+    ordinal INTEGER NOT NULL DEFAULT 0,
+    metadata_json TEXT
+);
+"""
+    + _v5_memory_tables_sql(
+        "memory_items",
+        "memory_pending_writes",
+        if_not_exists=True,
+    )
+    + """
+CREATE TABLE IF NOT EXISTS maintenance (
+    key TEXT PRIMARY KEY,
+    value TEXT
+);
+
+CREATE TABLE IF NOT EXISTS skill_proposals (
+    proposal_id TEXT PRIMARY KEY,
+    name TEXT NOT NULL,
+    action TEXT NOT NULL,
+    status TEXT NOT NULL,
+    proposal_path TEXT NOT NULL,
+    application_id TEXT,
+    source_run_id TEXT,
+    source_event_id TEXT,
+    manifest_json TEXT,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    promoted_at TEXT,
+    archived_at TEXT
+);
+
+CREATE TABLE IF NOT EXISTS review_runs (
+    review_id INTEGER PRIMARY KEY AUTOINCREMENT,
+    review_key TEXT NOT NULL UNIQUE,
+    root_run_id TEXT NOT NULL,
+    application_id TEXT,
+    model_type TEXT NOT NULL,
+    status TEXT NOT NULL,
+    result_json TEXT NOT NULL DEFAULT '{}',
+    created_at TEXT NOT NULL,
+    finished_at TEXT
+);
+"""
+    + _trusted_review_evidence_table_sql(
+        "trusted_review_evidence",
+        if_not_exists=True,
+    )
+    + """
+CREATE INDEX IF NOT EXISTS idx_runs_application ON runs(application_id);
+CREATE INDEX IF NOT EXISTS idx_runs_started ON runs(started_at);
+CREATE INDEX IF NOT EXISTS idx_events_run_id ON events(run_id);
+CREATE INDEX IF NOT EXISTS idx_events_agent ON events(agent_name);
+CREATE INDEX IF NOT EXISTS idx_events_application ON events(application_id);
+CREATE INDEX IF NOT EXISTS idx_events_created ON events(created_at);
+CREATE INDEX IF NOT EXISTS idx_memory_scope ON memory_items(scope_type, scope_id);
+CREATE INDEX IF NOT EXISTS idx_memory_updated ON memory_items(updated_at);
+CREATE INDEX IF NOT EXISTS idx_memory_pending_status
+    ON memory_pending_writes(status, created_at, id);
+CREATE INDEX IF NOT EXISTS idx_memory_pending_scope
+    ON memory_pending_writes(scope_type, scope_id, status, id);
+CREATE INDEX IF NOT EXISTS idx_skill_proposals_status ON skill_proposals(status);
+CREATE INDEX IF NOT EXISTS idx_review_runs_root ON review_runs(root_run_id);
+CREATE INDEX IF NOT EXISTS idx_trusted_review_evidence_root
+    ON trusted_review_evidence(root_run_id, event_id);
+"""
+)
+
+
+# Legacy bootstrap shape used only while upgrading databases older than v5.
+# A v5 database never executes this script, so removed learning tables cannot
+# silently reappear during repeated initialization.
 _SCHEMA_SQL = """
 CREATE TABLE IF NOT EXISTS schema_version (
     version INTEGER NOT NULL

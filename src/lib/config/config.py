@@ -10,6 +10,7 @@ Configuration precedence (low -> high):
 from __future__ import annotations
 
 import builtins
+import os
 from copy import deepcopy
 from pathlib import Path
 from typing import Any
@@ -30,6 +31,8 @@ from .llm_config import LLMConfig
 
 SYSTEM_CONFIG_NAME = "system.yaml"
 LLM_CONFIG_NAME = "llm.yaml"
+_CAMPAIGN_LLM_CONFIG_FD_ENV = "AGENTLOOM_MEMORY_CAMPAIGN_LLM_CONFIG_FD"
+_MAX_CAMPAIGN_LLM_CONFIG_BYTES = 1024 * 1024
 APP_CONFIG_RELATIVE_PATH = Path("config") / SYSTEM_CONFIG_NAME
 _PROJECT_NAME = "AgentLoom"
 _WORKFLOW_OVERLAY_KEYS = {
@@ -47,6 +50,7 @@ _WORKFLOW_OVERLAY_KEYS = {
     "toolsets",
     "prompt",
     "mcp_servers",
+    "self_learning",
 }
 _LLM_ONLY_TOP_LEVEL_KEYS = {"model", "llm", "langfuse"}
 
@@ -61,6 +65,37 @@ def _load_yaml(path: Path) -> dict[str, Any]:
     if not isinstance(loaded, dict):
         raise ValueError(f"Configuration file must contain a mapping: {path}")
     return loaded
+
+
+def _load_llm_config(path: Path) -> LLMConfig:
+    """Load one capsule-only config pipe, otherwise use the normal disk file.
+
+    Only the numeric descriptor is transported in the environment.  The
+    credential-bearing payload is consumed exactly once and the descriptor is
+    closed before any tool or provider subprocess can inherit it.
+    """
+    fd_value = ""
+    if os.environ.get("AGENTLOOM_MEMORY_CAMPAIGN_CAPSULE_ACTIVE") == "1":
+        fd_value = str(os.environ.pop(_CAMPAIGN_LLM_CONFIG_FD_ENV, "") or "")
+    if not fd_value:
+        return LLMConfig.load_from_yaml(path)
+    try:
+        fd = int(fd_value)
+        if fd < 0:
+            raise ValueError
+    except ValueError as exc:
+        raise ValueError("invalid in-memory campaign LLM configuration") from exc
+    try:
+        with os.fdopen(fd, "rb", closefd=True) as stream:
+            raw_bytes = stream.read(_MAX_CAMPAIGN_LLM_CONFIG_BYTES + 1)
+        if len(raw_bytes) > _MAX_CAMPAIGN_LLM_CONFIG_BYTES:
+            raise ValueError("in-memory campaign LLM configuration is too large")
+        raw = yaml.safe_load(raw_bytes.decode("utf-8")) or {}
+    except (OSError, UnicodeDecodeError, yaml.YAMLError) as exc:
+        raise ValueError("invalid in-memory campaign LLM configuration") from exc
+    if not isinstance(raw, dict):
+        raise ValueError("in-memory campaign LLM configuration must be a mapping")
+    return LLMConfig.from_dict(raw)
 
 
 def _filter_llm_only_top_level_keys(
@@ -296,7 +331,7 @@ def _load_merged_config(config_dir: Path | str | None = None) -> UnifiedConfig:
         _load_yaml(config_root / SYSTEM_CONFIG_NAME),
         source_name="config/system.yaml",
     )
-    llm_config = LLMConfig.load_from_yaml(config_root / LLM_CONFIG_NAME)
+    llm_config = _load_llm_config(config_root / LLM_CONFIG_NAME)
 
     layered_builder.apply_mapping("config/system.yaml", system_yaml)
 

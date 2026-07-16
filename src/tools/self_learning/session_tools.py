@@ -28,9 +28,16 @@ _TOOL_RESULT_FIELDS = (
 
 
 def _disabled_response() -> str | None:
-    from src.extensions.self_learning.paths import config_bool
+    from src.extensions.self_learning.paths import self_learning_enabled
+    from src.trace import capture_explicit_execution_context
 
-    if config_bool("enabled", True):
+    context = capture_explicit_execution_context()
+    agent_config = (
+        context.agent_config
+        if isinstance(context.agent_config, dict) and context.agent_config
+        else None
+    )
+    if self_learning_enabled(agent_config):
         return None
     return json.dumps(
         {"ok": False, "error": "self_learning is disabled in config"},
