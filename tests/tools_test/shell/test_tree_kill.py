@@ -17,12 +17,11 @@ import time
 import pytest
 
 from src.tools.shell.tree_kill import (
-    tree_kill,
-    graceful_kill,
-    _is_alive,
     SizeWatchdog,
+    _is_alive,
+    graceful_kill,
+    tree_kill,
 )
-
 
 pytestmark = pytest.mark.skipif(
     not sys.platform.startswith(("linux", "darwin")),
@@ -33,6 +32,7 @@ pytestmark = pytest.mark.skipif(
 # ---------------------------------------------------------------------------
 # Normal path: tree_kill
 # ---------------------------------------------------------------------------
+
 
 class TestTreeKill:
     """Direct process killing."""
@@ -73,6 +73,7 @@ class TestTreeKill:
 # Normal path: graceful_kill
 # ---------------------------------------------------------------------------
 
+
 class TestGracefulKill:
     """SIGTERM → SIGKILL escalation."""
 
@@ -103,6 +104,7 @@ class TestGracefulKill:
 # Normal path: _is_alive
 # ---------------------------------------------------------------------------
 
+
 class TestIsAlive:
     """Process existence checking."""
 
@@ -131,6 +133,7 @@ class TestIsAlive:
 # ---------------------------------------------------------------------------
 # SizeWatchdog
 # ---------------------------------------------------------------------------
+
 
 class TestSizeWatchdog:
     """File size watchdog for background processes."""
@@ -220,3 +223,37 @@ class TestSizeWatchdog:
         time.sleep(0.3)
         watchdog.stop()
         # Should not raise any exceptions
+
+    def test_watchdog_does_not_follow_a_replaced_output_directory(self, tmp_path):
+        first = tmp_path / "first"
+        second = tmp_path / "second"
+        first.mkdir()
+        second.mkdir()
+        output_path = first / "output.txt"
+        output_fd = os.open(output_path, os.O_RDWR | os.O_CREAT, 0o600)
+        os.write(output_fd, b"small\n")
+        proc = subprocess.Popen(["sleep", "60"], start_new_session=True)
+        watchdog = SizeWatchdog(
+            proc.pid,
+            str(output_path),
+            max_bytes=100,
+            poll_interval_s=0.05,
+            output_fd=output_fd,
+        )
+
+        try:
+            detached = tmp_path / "first-detached"
+            first.rename(detached)
+            first.symlink_to(second, target_is_directory=True)
+            (second / "output.txt").write_bytes(b"SECOND-RUN" * 100)
+
+            watchdog.start()
+            time.sleep(0.3)
+
+            assert proc.poll() is None
+        finally:
+            watchdog.stop()
+            os.close(output_fd)
+            if proc.poll() is None:
+                proc.kill()
+            proc.wait(timeout=5)

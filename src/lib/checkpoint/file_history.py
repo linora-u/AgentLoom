@@ -9,7 +9,7 @@ reversed when resuming from a checkpoint.
 
 Storage layout::
 
-    .runtime/{agent_name}/file-history/{task_id}/
+    {runtime.root_dir}/checkpoints/{application_id}/{task_id}/file-history/
         {hash}@v1          # Pre-edit backup of original file
         {hash}@v2          # Post-step snapshot
         snapshots.json     # Persistent index for resume
@@ -25,10 +25,7 @@ Usage::
 from __future__ import annotations
 
 import hashlib
-import json
 import os
-import shutil
-import tempfile
 import threading
 import time
 from dataclasses import dataclass, field
@@ -36,6 +33,7 @@ from pathlib import Path
 from typing import Optional
 
 from src.lib.logging import get_logger
+from src.lib.runtime import SecureDirectory
 
 _logger = get_logger(__name__)
 
@@ -83,9 +81,14 @@ class FileHistoryManager:
     the expensive I/O (file copy) happens outside the critical section.
     """
 
-    def __init__(self, backup_dir: Path | str) -> None:
+    def __init__(
+        self,
+        backup_dir: Path | str,
+        *,
+        storage: SecureDirectory | None = None,
+    ) -> None:
         self._backup_dir = Path(backup_dir)
-        self._backup_dir.mkdir(parents=True, exist_ok=True)
+        self._storage = storage or SecureDirectory(self._backup_dir, create=True)
         self._lock = threading.Lock()
         self._snapshots: list[FileHistorySnapshot] = []
         self._tracked_files: set[str] = set()
@@ -169,8 +172,7 @@ class FileHistoryManager:
 
                 # Check if file changed since last backup.
                 if prev_backup and prev_backup.backup_filename is not None:
-                    backup_path = self._backup_dir / prev_backup.backup_filename
-                    if backup_path.exists() and not self._file_changed(abs_path, str(backup_path)):
+                    if not self._file_changed(abs_path, prev_backup.backup_filename):
                         # Unchanged — reuse previous backup.
                         new_backups[abs_path] = prev_backup
                         continue
@@ -236,13 +238,17 @@ class FileHistoryManager:
                         restored.append(abs_path)
                         _logger.info("FileHistory: deleted %s (didn't exist at step %d)", abs_path, step_number)
                 else:
-                    backup_path = self._backup_dir / backup.backup_filename
-                    if not backup_path.exists():
-                        _logger.warning("FileHistory: backup file missing: %s", backup_path)
+                    try:
+                        self._storage.stat_file(backup.backup_filename)
+                    except (FileNotFoundError, OSError, RuntimeError):
+                        _logger.warning(
+                            "FileHistory: backup file missing: %s",
+                            self._backup_dir / backup.backup_filename,
+                        )
                         continue
                     # Ensure parent directory exists (file may have been deleted).
                     os.makedirs(os.path.dirname(abs_path), exist_ok=True)
-                    shutil.copy2(str(backup_path), abs_path)
+                    self._storage.copy_to(backup.backup_filename, abs_path)
                     restored.append(abs_path)
                     _logger.info("FileHistory: restored %s to step %d (v%d)", abs_path, step_number, backup.version)
             except Exception as exc:
@@ -281,6 +287,18 @@ class FileHistoryManager:
                     tracked_file_backups=backups,
                     timestamp=snap_data.get("timestamp", 0.0),
                 ))
+
+    def restore_persisted_index(self) -> bool:
+        """Restore ``snapshots.json`` through the anchored storage handle."""
+
+        try:
+            data = self._storage.read_json("snapshots.json")
+        except FileNotFoundError:
+            return False
+        if not isinstance(data, dict):
+            raise ValueError("file-history snapshots.json must contain an object")
+        self.restore_from_index(data)
+        return True
 
     @property
     def snapshot_count(self) -> int:
@@ -356,21 +374,7 @@ class FileHistoryManager:
 
         phash = _path_hash(file_path)
         filename = f"{phash}@v{version}"
-        dest = self._backup_dir / filename
-
-        # Atomic copy via temp file.
-        fd, tmp_path = tempfile.mkstemp(dir=str(self._backup_dir), prefix=f".bk_{phash}_")
-        try:
-            os.close(fd)
-            shutil.copy2(file_path, tmp_path)
-            os.replace(tmp_path, str(dest))
-        except Exception:
-            # Clean up temp file on failure.
-            try:
-                os.unlink(tmp_path)
-            except OSError:
-                pass
-            raise
+        self._storage.copy_from(file_path, filename)
 
         return FileHistoryBackup(
             backup_filename=filename,
@@ -378,23 +382,15 @@ class FileHistoryManager:
             backup_time=time.time(),
         )
 
-    def _file_changed(self, original: str, backup: str) -> bool:
+    def _file_changed(self, original: str, backup_filename: str) -> bool:
         """Check if *original* differs from *backup* by comparing content."""
         try:
-            orig_stat = os.stat(original)
-            bk_stat = os.stat(backup)
-            # Quick size check.
-            if orig_stat.st_size != bk_stat.st_size:
-                return True
-            # Content comparison.
-            with open(original, "rb") as f1, open(backup, "rb") as f2:
-                return f1.read() != f2.read()
-        except OSError:
+            return not self._storage.same_content_as(backup_filename, original)
+        except (OSError, RuntimeError):
             return True
 
     def _persist_index(self) -> None:
         """Atomically write ``snapshots.json`` to the backup directory."""
-        index_path = self._backup_dir / "snapshots.json"
         with self._lock:
             data = {
                 "first_tracked_backups": {
@@ -422,14 +418,13 @@ class FileHistoryManager:
                 ],
             }
 
-        fd, tmp_path = tempfile.mkstemp(dir=str(self._backup_dir), prefix=".idx_")
+        self._storage.atomic_write_json("snapshots.json", data)
+
+    def close(self) -> None:
+        self._storage.close()
+
+    def __del__(self) -> None:
         try:
-            with os.fdopen(fd, "w", encoding="utf-8") as f:
-                json.dump(data, f, indent=2)
-            os.replace(tmp_path, str(index_path))
+            self.close()
         except Exception:
-            try:
-                os.unlink(tmp_path)
-            except OSError:
-                pass
-            raise
+            pass

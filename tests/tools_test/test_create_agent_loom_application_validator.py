@@ -8,7 +8,6 @@ from pathlib import Path
 import pytest
 import yaml
 
-
 SCRIPT_PATH = (
     Path(__file__).resolve().parents[2]
     / "agentloom-framework-skill"
@@ -135,6 +134,61 @@ def test_validator_rejects_invalid_list_workflow_item(tmp_path: Path) -> None:
         err["field"] == "workflow[1]" and err["rule"] == "required_non_empty_string"
         for err in payload["errors"]
     )
+
+
+@pytest.mark.parametrize(
+    ("field", "value"),
+    [
+        ("runtime", {"root_dir": "/tmp/split-runtime"}),
+        ("logging", {"file_enabled": False}),
+        ("logging", {"enabled": True, "dir": ".logs"}),
+    ],
+)
+def test_agent_yaml_rejects_global_only_runtime_and_logging(
+    tmp_path: Path,
+    field: str,
+    value: dict,
+) -> None:
+    app_root = _create_min_project(tmp_path)
+    workflow_file = app_root / "workflows" / "demo_agent.yaml"
+    config = yaml.safe_load(workflow_file.read_text(encoding="utf-8"))
+    config[field] = value
+    _write_yaml(workflow_file, config)
+
+    completed, payload = _run_validator(tmp_path)
+
+    assert completed.returncode == 1
+    assert payload["summary"]["valid"] is False
+    matching = [error for error in payload["errors"] if error["field"] == field]
+    assert matching
+    assert all(error["rule"] == "global_only_top_level_key" for error in matching)
+    assert all("enabled: true" not in error["suggestion"] for error in matching)
+
+
+@pytest.mark.parametrize(
+    ("field", "value"),
+    [
+        ("runtime", {"root_dir": "/tmp/split-runtime"}),
+        ("logging", {"file_enabled": False}),
+        ("logging", {"enabled": True, "dir": ".logs"}),
+    ],
+)
+def test_application_system_yaml_rejects_global_only_runtime_and_logging(
+    tmp_path: Path,
+    field: str,
+    value: dict,
+) -> None:
+    app_root = _create_min_project(tmp_path)
+    _write_yaml(app_root / "config" / "system.yaml", {field: value})
+
+    completed, payload = _run_validator(tmp_path)
+
+    assert completed.returncode == 1
+    assert payload["summary"]["valid"] is False
+    matching = [error for error in payload["errors"] if error["field"] == field]
+    assert matching
+    assert all(error["rule"] == "global_only_top_level_key" for error in matching)
+    assert all("enabled: true" not in error["suggestion"] for error in matching)
 
 
 def test_worker_path_must_point_to_file(tmp_path: Path) -> None:

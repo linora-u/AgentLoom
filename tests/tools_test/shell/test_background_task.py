@@ -26,6 +26,7 @@ def _reset_registry():
 # BackgroundTaskState unit tests
 # ---------------------------------------------------------------------------
 
+
 class TestBackgroundTaskState:
     """Unit tests for the BackgroundTaskState dataclass."""
 
@@ -145,6 +146,7 @@ class TestBackgroundTaskState:
 # BackgroundTaskRegistry tests
 # ---------------------------------------------------------------------------
 
+
 class TestBackgroundTaskRegistry:
     """Tests for the registry lifecycle and thread safety."""
 
@@ -206,11 +208,54 @@ class TestBackgroundTaskRegistry:
         proc, out = self._spawn_sleeper()
         try:
             tid = registry.register(proc, "sleep 60", out)
+            output_reader = registry.get(tid)._output_reader
+            assert output_reader is not None
+            assert output_reader.closed is False
             assert registry.remove(tid) is True
+            assert output_reader.closed is True
             assert registry.get(tid) is None
             assert registry.remove(tid) is False
         finally:
             self._cleanup_proc(proc)
+
+    def test_reset_closes_retained_output_reader(self):
+        registry = BackgroundTaskRegistry.get_instance()
+        proc, out = self._spawn_sleeper()
+        tid = registry.register(proc, "sleep 60", out)
+        output_reader = registry.get(tid)._output_reader
+        assert output_reader is not None
+
+        BackgroundTaskRegistry._reset_instance()
+
+        assert output_reader.closed is True
+        proc.wait(timeout=5)
+
+    def test_register_rejects_a_write_fd_whose_path_now_points_to_another_inode(
+        self,
+        tmp_path,
+    ):
+        registry = BackgroundTaskRegistry.get_instance()
+        output_path = tmp_path / "output.txt"
+        output_path.write_text("FIRST", encoding="utf-8")
+        output_fd = os.open(output_path, os.O_WRONLY)
+        output_path.rename(tmp_path / "detached.txt")
+        output_path.write_text("SECOND-SECRET", encoding="utf-8")
+
+        class Process:
+            pid = 12345
+
+        try:
+            with pytest.raises(RuntimeError, match="writer inode"):
+                registry.register(
+                    Process(),
+                    "test",
+                    str(output_path),
+                    output_fd=output_fd,
+                )
+        finally:
+            os.close(output_fd)
+
+        assert registry.list_all() == []
 
     def test_kill_task(self):
         registry = BackgroundTaskRegistry.get_instance()

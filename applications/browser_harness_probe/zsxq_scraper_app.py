@@ -34,7 +34,7 @@ DEFAULT_TASK = (
 
 def main(
     user_request: str = DEFAULT_TASK,
-    log_to_file: bool = False,
+    file_logging: bool | None = None,
     resume: str | None = None,
 ) -> str:
     """Run the zsxq owner-post scraper Agent."""
@@ -49,7 +49,7 @@ def main(
     result = run_app(
         "applications/browser_harness_probe/workflows/zsxq_scraper_agent.yaml",
         task_override=task,
-        log_to_file=log_to_file,
+        file_logging=file_logging,
         resume_task_id=resume,
     )
     print(result)

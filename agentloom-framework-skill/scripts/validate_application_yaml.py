@@ -19,6 +19,7 @@ import yaml
 
 REQUIRED_FIELDS = ("name", "description", "workflow")
 FORBIDDEN_TOP_LEVEL = {"model", "llm", "langfuse"}
+GLOBAL_ONLY_TOP_LEVEL = {"runtime", "logging"}
 ALLOWED_TOOL_CALL_TYPES = {"code_act", "tool_call"}
 ALLOWED_EXECUTION_ENV_TYPES = {"local", "docker", "e2b", "wasm"}
 ALLOWED_WORKER_EXTENSIONS = {".yaml", ".yml", ".md"}
@@ -289,6 +290,18 @@ def _validate_common_rules(
                 rule="forbidden_top_level_key",
                 message=f"禁止在 Agent YAML 顶层使用 '{field}'",
                 suggestion="删除该字段，并改为在 config/llm.yaml 中配置模型参数",
+                project_root=project_root,
+            )
+
+    for field in GLOBAL_ONLY_TOP_LEVEL:
+        if field in config:
+            _add_error(
+                errors,
+                file_path=file_path,
+                field=field,
+                rule="global_only_top_level_key",
+                message=f"禁止在 Agent YAML 顶层使用全局配置 '{field}'",
+                suggestion=f"删除该字段；'{field}' 只能配置在项目根 config/system.yaml",
                 project_root=project_root,
             )
 
@@ -829,6 +842,18 @@ def _validate_system_config_map(
                 project_root=project_root,
             )
 
+    for field in GLOBAL_ONLY_TOP_LEVEL:
+        if field in config:
+            _add_error(
+                errors,
+                file_path=file_path,
+                field=field,
+                rule="global_only_top_level_key",
+                message=f"禁止在 Application system.yaml 中使用全局配置 '{field}'",
+                suggestion=f"删除该字段；'{field}' 只能配置在项目根 config/system.yaml",
+                project_root=project_root,
+            )
+
     _validate_skills_config(config, file_path, errors, project_root)
     _validate_overlay_config_types(config, file_path, errors, project_root)
     _validate_mcp_servers_config(config, file_path, errors, project_root)
@@ -878,18 +903,6 @@ def _validate_system_config_map(
             rule="type_dict",
             message="lsp_servers 必须是字典",
             suggestion="删除该字段，或使用 lsp_servers: {enabled: true, servers: ['python']}",
-            project_root=project_root,
-        )
-
-    logging_cfg = config.get("logging")
-    if logging_cfg is not None and not isinstance(logging_cfg, dict):
-        _add_error(
-            errors,
-            file_path=file_path,
-            field="logging",
-            rule="type_dict",
-            message="logging 必须是字典",
-            suggestion="删除该字段，或使用 logging: {enabled: true, level: INFO}",
             project_root=project_root,
         )
 

@@ -3,14 +3,19 @@
 from __future__ import annotations
 
 import json
-import time
+import os
 import threading
+import time
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 import pytest
 
-from src.lib.checkpoint.checkpoint_manager import CheckpointManager, list_all_tasks
-
+from src.lib.checkpoint.checkpoint_manager import (
+    CheckpointManager,
+    cleanup_expired_tasks,
+    list_all_tasks,
+)
 
 # ── fixtures ─────────────────────────────────────────────────────────────
 
@@ -18,7 +23,11 @@ from src.lib.checkpoint.checkpoint_manager import CheckpointManager, list_all_ta
 @pytest.fixture()
 def cm(tmp_path: Path) -> CheckpointManager:
     """A CheckpointManager rooted in a temp directory."""
-    return CheckpointManager("test_supervisor", base_dir=tmp_path)
+    return CheckpointManager(
+        "test_supervisor",
+        checkpoints_root=tmp_path,
+        run_id="run_test",
+    )
 
 
 @pytest.fixture()
@@ -166,6 +175,43 @@ class TestTaskEvents:
         assert loaded["task_id"] == task_id
         assert loaded["agent_name"] == "test_supervisor"
 
+    def test_invalid_utf8_event_tail_preserves_complete_events(self, cm: CheckpointManager):
+        task_id = "task_invalid_utf8_tail"
+        cm.record_task_created(
+            task_id,
+            yaml_path="app.yaml",
+            agent_name="test_supervisor",
+            task_text="中文任务",
+            created_at="2026-06-15T12:00:00+08:00",
+        )
+        event_path = cm._task_events_path(task_id)
+        with event_path.open("ab") as stream:
+            stream.write(b'{"type":"task_status_changed","result":"\xe4')
+
+        loaded = cm.load_task_tree(task_id)
+
+        assert loaded is not None
+        assert loaded["task_id"] == task_id
+        assert loaded["task_text"] == "中文任务"
+
+    def test_valid_event_after_invalid_utf8_tail_is_recovered(self, cm: CheckpointManager):
+        task_id = "task_invalid_utf8_then_append"
+        event_path = cm._task_events_path(task_id)
+        event_path.parent.mkdir(parents=True, exist_ok=True)
+        event_path.write_bytes(b'{"type":"task_created","task_id":"broken\xe4')
+
+        cm.record_task_created(
+            task_id,
+            yaml_path="app.yaml",
+            agent_name="test_supervisor",
+            task_text="recovered",
+            created_at="2026-06-15T12:00:00+08:00",
+        )
+
+        loaded = cm.load_task_tree(task_id)
+        assert loaded is not None
+        assert loaded["task_text"] == "recovered"
+
 
 # ── supervisor checkpoint ────────────────────────────────────────────────
 
@@ -173,7 +219,7 @@ class TestTaskEvents:
 class TestSupervisorCheckpoint:
 
     def test_save_load(self, cm: CheckpointManager, task_id: str):
-        from smolagents.memory import TaskStep, ActionStep
+        from smolagents.memory import ActionStep, TaskStep
         from smolagents.monitoring import Timing
         steps = [
             TaskStep(task="test task"),
@@ -194,17 +240,16 @@ class TestSupervisorCheckpoint:
     def test_load_nonexistent(self, cm: CheckpointManager, task_id: str):
         assert cm.load_supervisor_checkpoint(task_id) is None
 
-    def test_env_runtime_root_rebases_external_run_log_dir(self, monkeypatch, tmp_path):
-        runtime_root = tmp_path / "runtime"
-        external_log_dir = tmp_path / "project" / ".logs" / "test_supervisor" / "20260621_120000"
-        monkeypatch.setenv("AGENT_LOOM_RUNTIME_ROOT", str(runtime_root))
+    def test_bound_manager_rejects_a_different_task(self, tmp_path):
+        task_dir = tmp_path / "checkpoints" / "app" / "task_bound"
+        cm = CheckpointManager(
+            "test_supervisor",
+            checkpoint_dir=task_dir,
+            run_id="run_test",
+        )
 
-        cm = CheckpointManager("test_supervisor", run_log_dir=external_log_dir)
-        cm.save_task_tree("task_env_root", {"task_id": "task_env_root", "status": "running"})
-
-        expected = runtime_root / "test_supervisor" / "20260621_120000" / "checkpoints" / "task_env_root" / "task_tree.json"
-        assert expected.exists()
-        assert not (external_log_dir / "checkpoints" / "task_env_root" / "task_tree.json").exists()
+        with pytest.raises(ValueError, match="bound to task"):
+            cm.save_task_tree("task_other", {"status": "running"})
 
 
 # ── worker checkpoint ────────────────────────────────────────────────────
@@ -269,7 +314,12 @@ class TestWorkerCheckpoint:
             input_hash="same",
             task_input="normal retry",
         )
-        reused = cm.record_worker_started(
+        resumed_cm = CheckpointManager(
+            "test_supervisor",
+            checkpoint_dir=cm._task_dir(task_id),
+            run_id="run_resume",
+        )
+        reused = resumed_cm.record_worker_started(
             task_id,
             "resume_worker",
             input_hash="same",
@@ -280,7 +330,7 @@ class TestWorkerCheckpoint:
         assert c0 == 0
         assert c1 == 1
         assert reused == 0
-        calls = cm.load_task_tree(task_id)["workers"]["resume_worker"]
+        calls = resumed_cm.load_task_tree(task_id)["workers"]["resume_worker"]
         assert [c["call_index"] for c in calls] == [0, 1]
 
 
@@ -309,16 +359,29 @@ class TestListAndCleanup:
     def test_cleanup_old(self, cm: CheckpointManager):
         old_tid = "task_old"
         new_tid = "task_new"
-        cm.save_task_tree(old_tid, {"task_id": old_tid, "status": "interrupted"})
-        cm.save_task_tree(new_tid, {"task_id": new_tid, "status": "interrupted"})
+        now = datetime.now(UTC)
+        cm.save_task_tree(
+            old_tid,
+            {
+                "task_id": old_tid,
+                "status": "interrupted",
+                "created_at": (now - timedelta(seconds=100)).isoformat(),
+            },
+        )
+        cm.save_task_tree(
+            new_tid,
+            {
+                "task_id": new_tid,
+                "status": "interrupted",
+                "created_at": now.isoformat(),
+            },
+        )
 
-        # Backdate the old task directory's mtime.
-        import os
-        old_dir = cm._task_dir(old_tid)
-        old_time = time.time() - 100
-        os.utime(old_dir, (old_time, old_time))
-
-        removed = cm.cleanup_old_tasks(max_age_seconds=50)
+        removed = cleanup_expired_tasks(
+            checkpoints_root=cm._checkpoints_root,
+            max_age_seconds=50,
+            now=now,
+        )
         assert removed == 1
         assert cm.load_task_tree(old_tid) is None
         assert cm.load_task_tree(new_tid) is not None
@@ -330,12 +393,14 @@ class TestListAndCleanup:
 class TestListAllTasks:
 
     def test_scans_all_supervisors(self, tmp_path: Path):
-        cm1 = CheckpointManager("sup_a", base_dir=tmp_path)
-        cm2 = CheckpointManager("sup_b", base_dir=tmp_path)
+        app_a = tmp_path / "sup_a"
+        app_b = tmp_path / "sup_b"
+        cm1 = CheckpointManager("sup_a", checkpoints_root=app_a)
+        cm2 = CheckpointManager("sup_b", checkpoints_root=app_b)
         cm1.save_task_tree("t1", {"task_id": "t1", "agent_name": "sup_a", "status": "interrupted"})
         cm2.save_task_tree("t2", {"task_id": "t2", "agent_name": "sup_b", "status": "failed"})
 
-        all_tasks = list_all_tasks(base_dir=tmp_path)
+        all_tasks = list_all_tasks(checkpoints_root=tmp_path)
         assert len(all_tasks) == 2
         names = {t["agent_name"] for t in all_tasks}
         assert names == {"sup_a", "sup_b"}
@@ -345,6 +410,19 @@ class TestListAllTasks:
 
 
 class TestAtomicWrite:
+
+    def test_failed_replace_does_not_leave_temporary_file(self, tmp_path, monkeypatch):
+        target = tmp_path / "task_tree.json"
+
+        def fail_replace(*_args, **_kwargs):
+            raise OSError("replace failed")
+
+        monkeypatch.setattr(os, "replace", fail_replace)
+
+        with pytest.raises(OSError, match="replace failed"):
+            CheckpointManager._atomic_write(target, {"status": "running"})
+
+        assert list(tmp_path.glob("*.tmp")) == []
 
     def test_concurrent_writes(self, cm: CheckpointManager, task_id: str):
         """Multiple threads writing the same tree should not corrupt the file."""

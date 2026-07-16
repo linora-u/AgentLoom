@@ -17,7 +17,7 @@
 
 | 配置面 | 写在哪里 | 用途 | 关键规则 |
 |---|---|---|---|
-| 全局系统配置 | `config/system.yaml` | 工具、权限、shell、prompt、skills、checkpoint 等系统行为 | 参与 deep merge；列表整段替换 |
+| 全局系统配置 | `config/system.yaml` | runtime root、日志、工具、权限、shell、prompt、skills、checkpoint 等系统行为 | `runtime`/`logging` 只在此处生效；其他字段参与 deep merge；列表整段替换 |
 | 本地模型配置 | `config/llm.yaml` | 模型类型、密钥、网关、推理参数、限流、重试 | 独立加载，不被 app/Agent YAML 覆盖；通常被 `.gitignore` 忽略 |
 | 应用级系统覆盖 | `applications/<app>/config/system.yaml` | 当前应用专属的系统行为覆盖 | 从 Agent YAML 路径向上找到最近 `workflows/`，其父目录即 app root |
 | Agent YAML | `applications/<app>/workflows/*.yaml` | 单个 Agent 的角色、workflow、工具、模型类型、运行模式 | 只有白名单字段会 overlay 到系统配置，其余是 Agent 自身属性 |
@@ -28,6 +28,10 @@
 合并顺序：框架默认值 -> `config/system.yaml` -> `applications/<app>/config/system.yaml` -> Agent YAML 白名单字段。字典递归合并；列表和标量整体替换。
 
 LLM 配置不参与这个链条。`model`、`llm`、`langfuse` 写进 `system.yaml` 或 Agent YAML 会被过滤并警告。
+
+`runtime` 与 `logging` 是 global-only：Application 级 `config/system.yaml` 和 Agent YAML 一旦包含任一顶层字段就会校验失败；必须删除并改到项目根 `config/system.yaml`。这样错误位置的配置不会被静默忽略。`checkpoint` 仍可由 Application 级 system overlay 调整，但不在 Agent YAML 白名单中。
+
+需要隔离子进程时只允许使用 `AGENTLOOM_RUNTIME_ROOT` 覆盖整套 canonical runtime home；禁止恢复 self-learning 专用 root 或让日志/checkpoint/session 分根。
 
 ## Agent YAML 可配置字段
 
@@ -98,6 +102,7 @@ tools_mapping, default_toolsets, toolsets, prompt, mcp_servers, self_learning
 - `context_engine` 可以在 Agent YAML 覆盖，用于按应用或 Agent 调整可逆上下文压缩。
 - `self_learning` 可以在应用或 Agent YAML 覆盖；memory reviewer 必须从当前 root 的最终生效配置读取，不能使用进程全局回退。
 - `mcp_servers` 可以在 Agent YAML 覆盖，并支持 string/list/dict。
+- `runtime`、`logging`、`checkpoint` 不在 Agent YAML 白名单；不要把存储 root、日志策略或 resume 生命周期塞进 Agent workflow。
 - Worker 的有效配置由全局、应用级、Worker YAML 自己重建；不会继承 Supervisor 的运行时覆盖。Worker 需要同样权限时必须自己写。
 
 ## system.yaml 配置面
@@ -114,7 +119,8 @@ tools_mapping, default_toolsets, toolsets, prompt, mcp_servers, self_learning
 | `lsp_servers` | LSP 服务开关、重启次数、语言列表 |
 | `execution_env` | 默认执行环境 |
 | `code_agent` | `code_act` 可 import 模块和可调用内置函数 |
-| `logging` | 日志开关、级别、文件路径和目录；以全局配置为准 |
+| `runtime` | 唯一 `.agentloom` root、run/artifact 保留天数和自动清理间隔；只允许全局配置 |
+| `logging` | `level/console_enabled/file_enabled/max_file_bytes/backup_count`；run-scoped 且只允许全局配置 |
 | `default_toolsets` | 默认加载 toolset 名列表 |
 | `toolsets` | Agent 级内置 toolset 覆盖，空列表表示无内置工具 |
 | `shell_settings` | shell 命令白名单、安全检查、sandbox、后台任务、audit log |
@@ -151,7 +157,6 @@ context_engine:
 ```yaml
 self_learning:
   enabled: true
-  root_dir: ".agentloom"
   events_retention_days: 90
   memory:
     prompt_max_chars: 12000
@@ -212,7 +217,7 @@ code_agent:
 - `background_tasks`：`enabled/max_concurrent/auto_background_on_timeout/max_output_bytes/stall_detection/stall_threshold_seconds`。
 - `audit_log`：`enabled/log_policy_snapshot/log_success`。
 
-如果用户不确定 shell 权限怎么配，先按 `shell-security-audit.md` 跑真实 workflow，读 `shell_audit.log` 的 `[POLICY_SNAPSHOT]` 和拦截事件，再收敛 `allowed_commands`、`allowed_operators`、路径规则或 sandbox。
+如果用户不确定 shell 权限怎么配，先按 `shell-security-audit.md` 跑真实 workflow，读当前 run 的 `audit/shell.jsonl` 中 `[POLICY_SNAPSHOT]` 和拦截事件，再收敛 `allowed_commands`、`allowed_operators`、路径规则或 sandbox。
 
 ### tool_access_control
 
@@ -424,6 +429,24 @@ Setup, ConfigChange, Notification
 
 ## checkpoint 配置
 
+Runtime 与 checkpoint 的身份边界：`run_id` 表示一次 attempt，resume 时改变；`task_id` 表示同一逻辑任务，resume 时保持不变。
+
+```yaml
+runtime:
+  root_dir: ".agentloom"
+  successful_run_retention_days: 7
+  failed_run_retention_days: 30
+  artifact_retention_days: 3
+  cleanup_interval_hours: 24
+
+logging:
+  level: "INFO"
+  console_enabled: true
+  file_enabled: true
+  max_file_bytes: 26214400
+  backup_count: 3
+```
+
 ```yaml
 checkpoint:
   enabled: true
@@ -432,7 +455,9 @@ checkpoint:
   heartbeat_interval: 5
 ```
 
-checkpoint 存在于每次运行的日志时间戳目录下，包含 `task_events.jsonl`、`task_tree.json`、Supervisor `checkpoint.json`、heartbeat、file-history，以及 Worker per-call checkpoint。`loom list-tasks`、`loom clean-tasks`、`loom run --resume <task_id>` 是验证入口。
+每次 attempt 写入 `.agentloom/runs/<application_id>/<run_id>/`，其中包含 `manifest.json`、`logs/runtime.log`、`audit/shell.jsonl` 和 `artifacts/{shell,background,skills}`。逻辑任务状态独立写入 `.agentloom/checkpoints/<application_id>/<task_id>/`，包含 `task_events.jsonl`、`task_tree.json`、Supervisor `checkpoint.json`、heartbeat、ContextStore、file-history 和 Worker per-call checkpoint。日志关闭、轮转和 run 清理不能影响 checkpoint；`.runtime/` 与 Application outputs 也不属于 runtime cleaner。
+
+CLI 契约：文件日志默认按配置落盘，单次关闭用 `loom run --no-file-log`；不存在 `--log-to-file`。`loom list-tasks`、`loom clean-tasks`、`loom run --resume <task_id>` 验证 checkpoint；`loom clean-runtime` 应用 run retention；`loom migrate-runtime --dry-run|--apply` 迁移/归档旧 `.logs`。真实运行必须读 manifest、runtime.log 与 shell.jsonl，不能只看退出码。
 
 ## MCP 配置
 

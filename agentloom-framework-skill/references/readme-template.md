@@ -56,6 +56,7 @@ applications/<app_name>/
 | `scan_app_structure(...)` | 通过/失败 |
 | `py_compile ...` | 通过/失败 |
 | 运行验证 | 通过/失败/未执行，原因 |
+| Run 证据 | `manifest.json`、`logs/runtime.log`、`audit/shell.jsonl` 的真实路径与关键结论 |
 
 ## 已知问题
 
@@ -68,3 +69,5 @@ applications/<app_name>/
 - 不把“未执行”写成“通过”。
 - 如果运行失败，记录根因和下一步。
 - 如果是多 Agent，必须写清每个 Worker 的输入输出。
+- 运行验证必须记录 manifest 中的 `application_id`、`task_id`、`run_id`，并读同一 run 的 runtime log/audit；不要只记录退出码或 final answer。
+- Application 用户交付物写自身 `output_dir`；`.agentloom/runs/.../artifacts` 只放 raw runtime artifacts，`.runtime/` 仍是独立的 Agent 可见工作区。

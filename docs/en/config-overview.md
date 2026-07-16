@@ -57,6 +57,32 @@ context_engine:
 
 Do not add a second retrieval path or a disable switch around ContextEngine. Large tool/worker output should be restored through `loom_retrieve_context` and `ContextRef`.
 
+### Runtime storage ownership
+
+`runtime` and `logging` are global-only sections in `config/system.yaml`; Application-level `config/system.yaml` files and Agent YAML cannot move the runtime root or replace the logging policy. This preserves one task-discovery and retention boundary per process.
+
+Isolated subprocesses may override the complete runtime home with `AGENTLOOM_RUNTIME_ROOT`; the override never moves self-learning alone.
+
+```yaml
+runtime:
+  root_dir: ".agentloom"
+  successful_run_retention_days: 7
+  failed_run_retention_days: 30
+  artifact_retention_days: 3
+  cleanup_interval_hours: 24
+
+logging:
+  level: "INFO"
+  console_enabled: true
+  file_enabled: true
+  max_file_bytes: 26214400
+  backup_count: 3
+```
+
+Every attempt writes `.agentloom/runs/<application_id>/<run_id>/{manifest.json,logs,audit,artifacts}`. Resume creates a new `run_id` but keeps the logical task's `task_id` and `.agentloom/checkpoints/<application_id>/<task_id>/`. The Agent-visible `.runtime/` workspace and Application-owned `output_dir` are separate storage domains.
+
+File logging follows `logging.file_enabled` and is bounded by size/backup count. `loom run --no-file-log` disables only the current attempt's file log; it does not disable checkpoints or Shell audit. `loom clean-runtime` applies run retention, while `loom migrate-runtime --dry-run|--apply` handles one-time legacy `.logs` migration.
+
 ## 3. Complete Isolation of LLM Configuration
 
 In AgentLoom, **LLM configuration (`llm.yaml`) is physically isolated from system configuration (`system.yaml`)**.

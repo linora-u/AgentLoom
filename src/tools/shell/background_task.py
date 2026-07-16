@@ -12,7 +12,6 @@ Design aligned with Claude Code's LocalShellTask + ShellCommand
 state machine (LocalShellTask.tsx, ShellCommand.ts).
 """
 
-import os
 import threading
 import time
 import uuid
@@ -21,6 +20,8 @@ from typing import Dict, List, Literal, Optional
 
 from src.lib.config import C
 from src.lib.logging import get_logger
+from src.lib.runtime import copy_runtime_context, get_current_run_context
+from src.tools.shell.output_reader import AnchoredOutputReader
 from src.tools.shell.tree_kill import SizeWatchdog, graceful_kill
 
 logger = get_logger(__name__)
@@ -29,11 +30,13 @@ logger = get_logger(__name__)
 _DEFAULT_MAX_CONCURRENT = 10
 _DEFAULT_MAX_OUTPUT_BYTES = 100_000_000  # 100 MB
 _DEFAULT_STALL_THRESHOLD = 45  # seconds
+RuntimeKey = tuple[str, str, str, str] | None
 
 
 # ---------------------------------------------------------------------------
 # Background task state
 # ---------------------------------------------------------------------------
+
 
 @dataclass
 class BackgroundTaskState:
@@ -66,6 +69,18 @@ class BackgroundTaskState:
     _process: Optional[object] = field(default=None, repr=False)
     _size_watchdog: Optional[SizeWatchdog] = field(default=None, repr=False)
     _stall_watchdog: Optional[object] = field(default=None, repr=False)
+    _runtime_key: RuntimeKey = field(default=None, repr=False)
+    _output_reader: Optional[AnchoredOutputReader] = field(default=None, repr=False)
+
+    def __post_init__(self) -> None:
+        # Directly-created states are supported by a few local callers.  Anchor
+        # once here; all later reads are descriptor-based.  The registry passes
+        # a reader derived from the writer FD and does not take this fallback.
+        if self._output_reader is None:
+            try:
+                self._output_reader = AnchoredOutputReader.from_path(self.output_path)
+            except OSError:
+                self._output_reader = None
 
     @property
     def elapsed_seconds(self) -> float:
@@ -81,34 +96,30 @@ class BackgroundTaskState:
     @property
     def output_size(self) -> int:
         """Current size of the output file in bytes."""
-        try:
-            return os.path.getsize(self.output_path)
-        except OSError:
-            return 0
+        reader = self._output_reader
+        return reader.size() if reader is not None else 0
 
     def read_output_tail(self, n_lines: int = 20) -> str:
         """Read the last *n_lines* lines from the output file."""
-        try:
-            if not os.path.exists(self.output_path):
-                return ""
-            with open(self.output_path, "r", errors="replace") as f:
-                # Seek to the last 64 KB for efficiency.
-                try:
-                    f.seek(0, 2)
-                    size = f.tell()
-                    f.seek(max(0, size - 65536))
-                except OSError:
-                    f.seek(0)
-                tail_text = f.read()
-            lines = tail_text.splitlines()
-            return "\n".join(lines[-n_lines:])
-        except (OSError, IOError):
+        reader = self._output_reader
+        if reader is None:
             return ""
+        tail_text = reader.read_tail(65536).decode("utf-8", errors="replace")
+        lines = tail_text.splitlines()
+        return "\n".join(lines[-n_lines:])
+
+    def close_output_reader(self) -> None:
+        """Release the retained output inode capability."""
+
+        reader, self._output_reader = self._output_reader, None
+        if reader is not None:
+            reader.close()
 
 
 # ---------------------------------------------------------------------------
 # Background task registry (singleton)
 # ---------------------------------------------------------------------------
+
 
 class BackgroundTaskRegistry:
     """Thread-safe singleton registry for background shell tasks.
@@ -124,7 +135,7 @@ class BackgroundTaskRegistry:
         with cls._instance_lock:
             if cls._instance is None:
                 inst = super().__new__(cls)
-                inst._tasks: Dict[str, BackgroundTaskState] = {}
+                inst._tasks: Dict[tuple[RuntimeKey, str], BackgroundTaskState] = {}
                 inst._lock = threading.Lock()
                 cls._instance = inst
         return cls._instance
@@ -152,6 +163,7 @@ class BackgroundTaskRegistry:
                             task._size_watchdog.stop()
                         if task._stall_watchdog:
                             task._stall_watchdog.stop()
+                        task.close_output_reader()
                     inst._tasks.clear()
             cls._instance = None
 
@@ -162,48 +174,69 @@ class BackgroundTaskRegistry:
     @staticmethod
     def _cfg_max_concurrent() -> int:
         return C.get_nested(
-            "shell_settings", "background_tasks", "max_concurrent",
+            "shell_settings",
+            "background_tasks",
+            "max_concurrent",
             default=_DEFAULT_MAX_CONCURRENT,
         )
 
     @staticmethod
     def _cfg_enabled() -> bool:
         return C.get_nested(
-            "shell_settings", "background_tasks", "enabled",
+            "shell_settings",
+            "background_tasks",
+            "enabled",
             default=True,
         )
 
     @staticmethod
     def _cfg_auto_background() -> bool:
         return C.get_nested(
-            "shell_settings", "background_tasks", "auto_background_on_timeout",
+            "shell_settings",
+            "background_tasks",
+            "auto_background_on_timeout",
             default=True,
         )
 
     @staticmethod
     def _cfg_max_output_bytes() -> int:
         return C.get_nested(
-            "shell_settings", "background_tasks", "max_output_bytes",
+            "shell_settings",
+            "background_tasks",
+            "max_output_bytes",
             default=_DEFAULT_MAX_OUTPUT_BYTES,
         )
 
     @staticmethod
     def _cfg_stall_detection() -> bool:
         return C.get_nested(
-            "shell_settings", "background_tasks", "stall_detection",
+            "shell_settings",
+            "background_tasks",
+            "stall_detection",
             default=True,
         )
 
     @staticmethod
     def _cfg_stall_threshold() -> int:
         return C.get_nested(
-            "shell_settings", "background_tasks", "stall_threshold_seconds",
+            "shell_settings",
+            "background_tasks",
+            "stall_threshold_seconds",
             default=_DEFAULT_STALL_THRESHOLD,
         )
 
     # ------------------------------------------------------------------
     # Public API
     # ------------------------------------------------------------------
+
+    @staticmethod
+    def _current_runtime_key() -> RuntimeKey:
+        context = get_current_run_context()
+        return context.runtime_key if context is not None else None
+
+    @staticmethod
+    def _task_key(task_id: str, runtime_key: RuntimeKey) -> tuple[RuntimeKey, str]:
+        return runtime_key, task_id
 
     def register(
         self,
@@ -212,6 +245,7 @@ class BackgroundTaskRegistry:
         output_path: str,
         description: str = "",
         size_watchdog: Optional[SizeWatchdog] = None,
+        output_fd: Optional[int] = None,
     ) -> str:
         """Register a running process as a background task.
 
@@ -221,6 +255,8 @@ class BackgroundTaskRegistry:
             output_path: Path to the output file being written by the process.
             description: Human-readable description (defaults to command).
             size_watchdog: An existing SizeWatchdog instance to transfer.
+            output_fd: Original output descriptor.  When supplied, registry
+                reads stay attached to its inode even if the path is replaced.
 
         Returns:
             The task_id assigned to this background task.
@@ -228,35 +264,44 @@ class BackgroundTaskRegistry:
         Raises:
             RuntimeError: If the max-concurrent limit is reached.
         """
-        with self._lock:
-            running = sum(1 for t in self._tasks.values() if not t.is_terminal)
-            max_c = self._cfg_max_concurrent()
-            if running >= max_c:
-                raise RuntimeError(
-                    f"Maximum concurrent background tasks reached ({max_c}). "
-                    "Kill or wait for existing tasks before starting new ones."
-                )
-
-            task_id = uuid.uuid4().hex[:12]
-            task = BackgroundTaskState(
-                task_id=task_id,
-                command=command,
-                description=description or command[:80],
-                pid=process.pid,
-                output_path=output_path,
-                _process=process,
-                _size_watchdog=size_watchdog,
+        runtime_key = self._current_runtime_key()
+        if output_fd is None:
+            output_reader = AnchoredOutputReader.from_path(output_path)
+        else:
+            output_reader = AnchoredOutputReader.from_fd(
+                output_fd,
+                path=output_path,
             )
-            self._tasks[task_id] = task
+        try:
+            with self._lock:
+                running = sum(
+                    1 for (owner, _), task in self._tasks.items() if owner == runtime_key and not task.is_terminal
+                )
+                task_id = uuid.uuid4().hex[:12]
+                max_c = self._cfg_max_concurrent()
+                if running >= max_c:
+                    raise RuntimeError(
+                        f"Maximum concurrent background tasks reached ({max_c}). "
+                        "Kill or wait for existing tasks before starting new ones."
+                    )
 
-        # Start monitoring thread (outside lock).
-        monitor = threading.Thread(
-            target=self._monitor_task,
-            args=(task_id,),
-            daemon=True,
-            name=f"bg-monitor-{task_id}",
-        )
-        monitor.start()
+                while self._task_key(task_id, runtime_key) in self._tasks:
+                    task_id = uuid.uuid4().hex[:12]
+                task = BackgroundTaskState(
+                    task_id=task_id,
+                    command=command,
+                    description=description or command[:80],
+                    pid=process.pid,
+                    output_path=output_path,
+                    _process=process,
+                    _size_watchdog=size_watchdog,
+                    _runtime_key=runtime_key,
+                    _output_reader=output_reader,
+                )
+                self._tasks[self._task_key(task_id, runtime_key)] = task
+        except BaseException:
+            output_reader.close()
+            raise
 
         # Start stall watchdog if enabled.
         if self._cfg_stall_detection():
@@ -264,7 +309,7 @@ class BackgroundTaskRegistry:
 
             def _record_stall(message: str) -> None:
                 with self._lock:
-                    current = self._tasks.get(task_id)
+                    current = self._tasks.get(self._task_key(task_id, runtime_key))
                     if current is not None and not current.is_terminal:
                         current.stall_message = message
 
@@ -273,6 +318,7 @@ class BackgroundTaskRegistry:
             sw = StallWatchdog(
                 task_id=task_id,
                 output_path=output_path,
+                output_reader=output_reader,
                 poll_interval=max(0.2, min(5.0, stall_threshold / 2.0)),
                 stall_threshold=stall_threshold,
                 on_stall=_record_stall,
@@ -280,21 +326,37 @@ class BackgroundTaskRegistry:
             task._stall_watchdog = sw
             sw.start()
 
+        # Start monitoring only after every watchdog is attached.  Otherwise a
+        # fast child can exit between monitor start and stall-watchdog setup,
+        # leaving the late watchdog alive forever.
+        monitor_context = copy_runtime_context()
+        monitor = threading.Thread(
+            target=monitor_context.run,
+            args=(self._monitor_task, task_id, runtime_key),
+            daemon=True,
+            name=f"bg-monitor-{task_id}",
+        )
+        monitor.start()
+
         logger.info(
             "Background task %s registered: pid=%d, command=%s",
-            task_id, process.pid, command[:120],
+            task_id,
+            process.pid,
+            command[:120],
         )
         return task_id
 
     def get(self, task_id: str) -> Optional[BackgroundTaskState]:
         """Return the task state, or None if not found."""
+        runtime_key = self._current_runtime_key()
         with self._lock:
-            return self._tasks.get(task_id)
+            return self._tasks.get(self._task_key(task_id, runtime_key))
 
     def remove(self, task_id: str) -> bool:
         """Remove a task from the registry. Returns True if found."""
+        runtime_key = self._current_runtime_key()
         with self._lock:
-            task = self._tasks.pop(task_id, None)
+            task = self._tasks.pop(self._task_key(task_id, runtime_key), None)
         if task is None:
             return False
         # Clean up watchdogs.
@@ -302,17 +364,22 @@ class BackgroundTaskRegistry:
             task._size_watchdog.stop()
         if task._stall_watchdog:
             task._stall_watchdog.stop()
+        task.close_output_reader()
         return True
 
     def list_all(self) -> List[BackgroundTaskState]:
         """Return a snapshot of all tracked tasks."""
+        runtime_key = self._current_runtime_key()
         with self._lock:
-            return list(self._tasks.values())
+            return [task for (owner, _), task in self._tasks.items() if owner == runtime_key]
 
     def list_running(self) -> List[BackgroundTaskState]:
         """Return only tasks that are still running."""
+        runtime_key = self._current_runtime_key()
         with self._lock:
-            return [t for t in self._tasks.values() if t.status == "running"]
+            return [
+                task for (owner, _), task in self._tasks.items() if owner == runtime_key and task.status == "running"
+            ]
 
     def cleanup_completed(self, max_age_seconds: float = 3600) -> int:
         """Remove completed/failed/killed tasks older than *max_age_seconds*.
@@ -321,8 +388,11 @@ class BackgroundTaskRegistry:
         """
         now = time.monotonic()
         to_remove: List[str] = []
+        runtime_key = self._current_runtime_key()
         with self._lock:
-            for tid, task in self._tasks.items():
+            for (owner, tid), task in self._tasks.items():
+                if owner != runtime_key:
+                    continue
                 if task.is_terminal and task.end_time is not None:
                     if (now - task.end_time) > max_age_seconds:
                         to_remove.append(tid)
@@ -337,8 +407,7 @@ class BackgroundTaskRegistry:
 
         Returns the updated task state, or None if not found.
         """
-        with self._lock:
-            task = self._tasks.get(task_id)
+        task = self.get(task_id)
         if task is None:
             return None
         if task.is_terminal:
@@ -360,14 +429,60 @@ class BackgroundTaskRegistry:
 
         return task
 
+    def terminate_current_run(self) -> int:
+        """Kill and forget every background task owned by the bound run.
+
+        The registry is process-global, so teardown must select by the full
+        runtime key.  A caller without an explicit ``RuntimeContext`` is not
+        allowed to touch any task, including legacy no-context entries.
+        """
+        runtime_key = self._current_runtime_key()
+        if runtime_key is None:
+            return 0
+
+        with self._lock:
+            owned_keys = [key for key in self._tasks if key[0] == runtime_key]
+            tasks = [self._tasks.pop(key) for key in owned_keys]
+            now = time.monotonic()
+            for task in tasks:
+                if not task.is_terminal:
+                    task.status = "killed"
+                    task.end_time = now
+                    task.exit_code = -15
+
+        for task in tasks:
+            if task._size_watchdog:
+                try:
+                    task._size_watchdog.stop()
+                except Exception:
+                    pass
+            if task._stall_watchdog:
+                try:
+                    task._stall_watchdog.stop()
+                except Exception:
+                    pass
+            process = task._process
+            if process is not None and process.poll() is None:
+                try:
+                    graceful_kill(task.pid, grace_ms=500)
+                except Exception as exc:
+                    logger.warning(
+                        "Failed to terminate background task %s for run teardown: %s",
+                        task.task_id,
+                        exc,
+                    )
+            task.close_output_reader()
+
+        return len(tasks)
+
     # ------------------------------------------------------------------
     # Background monitoring
     # ------------------------------------------------------------------
 
-    def _monitor_task(self, task_id: str) -> None:
+    def _monitor_task(self, task_id: str, runtime_key: RuntimeKey) -> None:
         """Daemon thread: poll the process until it exits."""
         with self._lock:
-            task = self._tasks.get(task_id)
+            task = self._tasks.get(self._task_key(task_id, runtime_key))
         if task is None or task._process is None:
             return
 
@@ -376,9 +491,10 @@ class BackgroundTaskRegistry:
             ret = proc.poll()
             if ret is not None:
                 # Process exited.
-                task.exit_code = ret
-                task.end_time = time.monotonic()
-                task.status = "completed" if ret == 0 else "failed"
+                if not task.is_terminal:
+                    task.exit_code = ret
+                    task.end_time = time.monotonic()
+                    task.status = "completed" if ret == 0 else "failed"
 
                 # Stop watchdogs.
                 if task._size_watchdog:
@@ -388,7 +504,9 @@ class BackgroundTaskRegistry:
 
                 logger.info(
                     "Background task %s finished: exit_code=%d, elapsed=%.1fs",
-                    task_id, ret, task.elapsed_seconds,
+                    task_id,
+                    ret,
+                    task.elapsed_seconds,
                 )
                 break
             time.sleep(0.5)

@@ -226,30 +226,41 @@ def test_zsh_load_profile_isolation(clean_registry, monkeypatch):
             assert "/bin" in output_true or "/usr" in output_true, \
                 "load_profile=True should provide a proper PATH"
 
-def test_cross_agent_cwd_isolation(bypass_shell_security):
+def test_cross_agent_cwd_isolation(bypass_shell_security, tmp_path):
     """
     Test that changing the current working directory in Agent A does not
     affect the current working directory in Agent B.
     """
+    from src.lib.runtime import RuntimeHome, bind_run_context
     from src.trace.task_context import task_context, sub_task_context, set_current_agent_id
-    with task_context("test_task_cwd_isolation"):
-        # Agent A changes directory
-        with sub_task_context("agent_A_cwd"):
-            set_current_agent_id("agent_A_cwd_id")
-            original_dir_a = shell_tool("pwd", load_profile=False).strip()
-            shell_tool("cd /tmp", load_profile=False)
-            new_dir_a = shell_tool("pwd", load_profile=False).strip()
-            assert new_dir_a == os.path.normpath("/tmp"), (
-                "Agent A failed to change directory"
-            )
 
-        # Agent B should still be in its original directory
-        with sub_task_context("agent_B_cwd"):
-            set_current_agent_id("agent_B_cwd_id")
-            dir_b = shell_tool("pwd", load_profile=False).strip()
-            assert dir_b != os.path.normpath("/tmp"), (
-                "Agent B's working directory was polluted by Agent A"
-            )
+    run_context = RuntimeHome(tmp_path / ".agentloom").context(
+        application_id="cwd-isolation-test",
+        task_id="task-cwd",
+        run_id="run-cwd",
+    )
+    with bind_run_context(run_context):
+        try:
+            with task_context("test_task_cwd_isolation"):
+                # Agent A changes directory
+                with sub_task_context("agent_A_cwd"):
+                    set_current_agent_id("agent_A_cwd_id")
+                    original_dir_a = shell_tool("pwd", load_profile=False).strip()
+                    shell_tool("cd /tmp", load_profile=False)
+                    new_dir_a = shell_tool("pwd", load_profile=False).strip()
+                    assert new_dir_a == os.path.normpath("/tmp"), (
+                        "Agent A failed to change directory"
+                    )
+
+                # Agent B should still be in its original directory
+                with sub_task_context("agent_B_cwd"):
+                    set_current_agent_id("agent_B_cwd_id")
+                    dir_b = shell_tool("pwd", load_profile=False).strip()
+                    assert dir_b != os.path.normpath("/tmp"), (
+                        "Agent B's working directory was polluted by Agent A"
+                    )
+        finally:
+            ShellProcessRegistry.get_instance().release_current_run()
 
 if __name__ == "__main__":
     pytest.main(["-v", __file__])

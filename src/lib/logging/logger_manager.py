@@ -1,30 +1,41 @@
 from __future__ import annotations
 
+import contextvars
 import logging
 import os
-import re
+from collections.abc import Iterator
+from contextlib import contextmanager
 from dataclasses import dataclass
-from datetime import datetime
 from pathlib import Path
-from threading import Lock, RLock
 from typing import Any, Protocol, runtime_checkable
 
-from src.lib.config.config_validation import BoolParser, LogLevelParser
+from src.lib.config.config_validation import BoolParser
+from src.lib.runtime import RuntimeContext, get_current_run_context
 
 DEFAULT_LEVEL = "INFO"
-DEFAULT_LOG_DIR = ".logs"
-_ALLOWED_LOGGING_KEYS = {"enabled", "level", "file_path", "dir"}
-
-
-_INIT_LOCK = Lock()
-_INITIALIZED = False
-_ACTIVE_LOG_FILE_PATH: Path | None = None
-_PROCESS_LOG_FILE_PATH: Path | None = None
-_PROCESS_LOG_PATH_LOCK = RLock()
-_GLOBAL_LOGGER_LOCK = RLock()
-_GLOBAL_LOGGER: Any | None = None
-_SAFE_COMPONENT_PATTERN = re.compile(r"[^A-Za-z0-9._-]+")
+DEFAULT_CONSOLE_ENABLED = True
+DEFAULT_FILE_ENABLED = True
+DEFAULT_MAX_FILE_BYTES = 25 * 1024 * 1024
+DEFAULT_BACKUP_COUNT = 3
+_ALLOWED_LOGGING_KEYS = {
+    "level",
+    "console_enabled",
+    "file_enabled",
+    "max_file_bytes",
+    "backup_count",
+}
 _MEMORY_CAMPAIGN_SAFE_ARTIFACTS_ENV = "AGENTLOOM_MEMORY_CAMPAIGN_SAFE_ARTIFACTS"
+
+
+@dataclass(frozen=True)
+class _LoggerBinding:
+    backend: Any
+    runtime_key: tuple[str, str, str, str] | None
+
+
+_CURRENT_LOGGER_BINDING: contextvars.ContextVar[_LoggerBinding | None] = (
+    contextvars.ContextVar("agentloom_logger_backend", default=None)
+)
 
 
 def _memory_campaign_safe_artifacts_enabled() -> bool:
@@ -46,50 +57,6 @@ def _get_config_value(*keys: str, default: Any = None) -> Any:
         return default
 
 
-def _get_agent_root() -> Path:
-    try:
-        from src.lib.config import C
-
-        return Path(C.agent_root).resolve()
-    except Exception:
-        return Path.cwd().resolve()
-
-
-def _sanitize_path_component(value: str | None, *, fallback: str = "unknown") -> str:
-    if value is None:
-        return fallback
-    normalized = _SAFE_COMPONENT_PATTERN.sub("_", value.strip())
-    normalized = normalized.strip("._")
-    return normalized or fallback
-
-
-def build_default_log_filename(app_name: str, now: datetime | None = None) -> str:
-    """Build ``<app_name>.log`` — the per-run log filename.
-
-    The timestamp is now encoded in the **parent directory** name
-    (``{base}/{agent}/{timestamp}/``) so the filename itself is stable.
-
-    Args:
-        app_name: Application name from the YAML ``name`` field.
-        now: Accepted for backward compatibility but no longer used.
-    """
-    stem = _sanitize_path_component(app_name, fallback="session")
-    return f"{stem}.log"
-
-
-def build_run_timestamp_dirname(now: datetime | None = None) -> str:
-    """Build the per-run timestamp directory name ``YYYYMMDD_HHMMSS``.
-
-    Args:
-        now: Optional fixed datetime for deterministic names in tests.
-    """
-    return (now or datetime.now()).strftime("%Y%m%d_%H%M%S")
-
-
-def _candidate_with_suffix(path: Path, suffix_index: int) -> Path:
-    return path.with_name(f"{path.stem}_{suffix_index}{path.suffix}")
-
-
 def _resolve_config_logging_section() -> dict[str, Any]:
     cfg = _get_config_value("logging", default={})
     if isinstance(cfg, dict):
@@ -108,31 +75,33 @@ def validate_logging_config(
         raise ValueError(f"{source} must be a mapping")
     unknown = sorted(set(logging_config.keys()) - _ALLOWED_LOGGING_KEYS)
     if unknown:
-        logging.getLogger(__name__).warning(
-            "%s contains unsupported keys and they will be ignored: %s",
-            source,
-            ", ".join(unknown),
+        raise ValueError(
+            f"{source} contains unsupported logging key(s): "
+            f"{', '.join(unknown)}"
         )
-    return {key: value for key, value in logging_config.items() if key in _ALLOWED_LOGGING_KEYS}
+    return dict(logging_config)
 
 
 @dataclass(frozen=True)
 class LoggingConfigOverlay:
-    enabled: Any = None
     level: Any = None
-    file_path: Any = None
-    dir: Any = None
+    console_enabled: Any = None
+    file_enabled: Any = None
+    max_file_bytes: Any = None
+    backup_count: Any = None
 
     def to_mapping(self) -> dict[str, Any]:
         mapping: dict[str, Any] = {}
-        if self.enabled is not None:
-            mapping["enabled"] = self.enabled
         if self.level is not None:
             mapping["level"] = self.level
-        if self.file_path is not None:
-            mapping["file_path"] = self.file_path
-        if self.dir is not None:
-            mapping["dir"] = self.dir
+        if self.console_enabled is not None:
+            mapping["console_enabled"] = self.console_enabled
+        if self.file_enabled is not None:
+            mapping["file_enabled"] = self.file_enabled
+        if self.max_file_bytes is not None:
+            mapping["max_file_bytes"] = self.max_file_bytes
+        if self.backup_count is not None:
+            mapping["backup_count"] = self.backup_count
         return mapping
 
 
@@ -147,7 +116,7 @@ class LoggingConfigBuilder:
         overlay: LoggingConfigOverlay,
         *,
         source: str = "overlay",
-    ) -> "LoggingConfigBuilder":
+    ) -> LoggingConfigBuilder:
         self._layers.append((source, overlay.to_mapping()))
         return self
 
@@ -156,13 +125,13 @@ class LoggingConfigBuilder:
         mapping: dict[str, Any] | None,
         *,
         source: str = "overlay",
-    ) -> "LoggingConfigBuilder":
+    ) -> LoggingConfigBuilder:
         normalized = validate_logging_config(mapping, source=source)
         if normalized:
             self._layers.append((source, normalized))
         return self
 
-    def extend(self, other: "LoggingConfigBuilder") -> "LoggingConfigBuilder":
+    def extend(self, other: LoggingConfigBuilder) -> LoggingConfigBuilder:
         self._layers.extend(other._layers)
         return self
 
@@ -181,185 +150,6 @@ def merge_logging_config(logging_builder: LoggingConfigBuilder | None = None) ->
     if logging_builder is None:
         logging_builder = LoggingConfigBuilder()
     return logging_builder.build(include_system_defaults=True)
-
-
-def _resolve_explicit_path(path_value: str | Path, ensure_parent: bool = True) -> Path:
-    path_obj = Path(path_value).expanduser()
-    if not path_obj.is_absolute():
-        path_obj = _get_agent_root() / path_obj
-    resolved = path_obj.resolve()
-    if ensure_parent:
-        resolved.parent.mkdir(parents=True, exist_ok=True)
-    return resolved
-
-
-def resolve_log_file_path(
-    app_name: str,
-    *,
-    log_file_path: str | Path | None = None,
-    now: datetime | None = None,
-    logging_builder: LoggingConfigBuilder | None = None,
-    ensure_parent: bool = True,
-) -> Path:
-    """Resolve final log file path.
-
-    Priority:
-      1) explicit *log_file_path* argument
-      2) merged ``logging.file_path`` from config + override
-      3) default layered path: ``{logging.dir}/{app_name}/{app_name}_{ts}.log``
-
-    Args:
-        app_name: Application name from the YAML ``name`` field.  Used both as
-            the sub-directory under the log root **and** the filename stem.
-    """
-    if log_file_path:
-        return _resolve_explicit_path(log_file_path, ensure_parent=ensure_parent)
-
-    effective_logging = merge_logging_config(logging_builder)
-    configured_path = effective_logging.get("file_path")
-    if isinstance(configured_path, str) and configured_path.strip():
-        return _resolve_explicit_path(configured_path.strip(), ensure_parent=ensure_parent)
-
-    configured_dir = effective_logging.get("dir", DEFAULT_LOG_DIR)
-    if isinstance(configured_dir, str) and configured_dir.strip():
-        base_dir = Path(configured_dir.strip()).expanduser()
-    else:
-        base_dir = Path(DEFAULT_LOG_DIR)
-    if not base_dir.is_absolute():
-        base_dir = _get_agent_root() / base_dir
-    base_dir = base_dir.resolve()
-
-    sanitized_name = _sanitize_path_component(app_name, fallback="session")
-    ts_dir_name = build_run_timestamp_dirname(now=now)
-    # Layout: {base_dir}/{agent_name}/{timestamp}/{agent_name}.log
-    target_dir = (base_dir / sanitized_name / ts_dir_name).resolve()
-    filename = build_default_log_filename(app_name, now=now)
-
-    # Handle collision: if the timestamp dir already exists (same-second run),
-    # append a numeric suffix to the directory name.
-    suffix_index = 1
-    while target_dir.exists():
-        target_dir = (base_dir / sanitized_name / f"{ts_dir_name}_{suffix_index}").resolve()
-        suffix_index += 1
-
-    if ensure_parent:
-        target_dir.mkdir(parents=True, exist_ok=True)
-
-    return (target_dir / filename).resolve()
-
-
-def get_or_create_process_log_path(
-    app_name: str,
-    *,
-    log_file_path: str | Path | None = None,
-    now: datetime | None = None,
-    logging_builder: LoggingConfigBuilder | None = None,
-    ensure_parent: bool = True,
-) -> Path:
-    """Return process-scoped log file path, creating and caching it on first access.
-
-    Args:
-        app_name: Application name from the YAML ``name`` field.
-    """
-    global _PROCESS_LOG_FILE_PATH
-
-    with _PROCESS_LOG_PATH_LOCK:
-        if log_file_path:
-            resolved = resolve_log_file_path(
-                app_name,
-                log_file_path=log_file_path,
-                now=now,
-                logging_builder=logging_builder,
-                ensure_parent=ensure_parent,
-            )
-            _PROCESS_LOG_FILE_PATH = resolved
-            return resolved
-
-        if _PROCESS_LOG_FILE_PATH is not None:
-            if ensure_parent:
-                _PROCESS_LOG_FILE_PATH.parent.mkdir(parents=True, exist_ok=True)
-            return _PROCESS_LOG_FILE_PATH
-
-        resolved = resolve_log_file_path(
-            app_name,
-            log_file_path=None,
-            now=now,
-            logging_builder=logging_builder,
-            ensure_parent=ensure_parent,
-        )
-        _PROCESS_LOG_FILE_PATH = resolved
-        return resolved
-
-
-def _configure_noisy_loggers() -> None:
-    for lib in ("httpx", "litellm", "openai"):
-        logging.getLogger(lib).setLevel(logging.WARNING)
-
-
-def initialize_logging(
-    app_name: str,
-    *,
-    force_reconfigure: bool = False,
-    log_file_path: str | Path | None = None,
-) -> Path | None:
-    """Initialize root logging exactly once (unless forced).
-
-    Args:
-        app_name: Application name from the YAML ``name`` field.
-    """
-    global _INITIALIZED, _ACTIVE_LOG_FILE_PATH
-
-    with _INIT_LOCK:
-        if _INITIALIZED and not force_reconfigure and log_file_path is None:
-            return _ACTIVE_LOG_FILE_PATH
-
-        root_logger = logging.getLogger()
-        if force_reconfigure or not _INITIALIZED:
-            for handler in list(root_logger.handlers):
-                root_logger.removeHandler(handler)
-                try:
-                    handler.close()
-                except Exception:
-                    pass
-
-        enabled = BoolParser.parse(_get_config_value("logging", "enabled", default=True), default=True)
-        level = LogLevelParser.parse(_get_config_value("logging", "level", default=DEFAULT_LEVEL))
-
-        if not enabled or level >= LogLevelParser.OFF_LEVEL:
-            logging.disable(LogLevelParser.OFF_LEVEL)
-            root_logger.setLevel(LogLevelParser.OFF_LEVEL)
-            _ACTIVE_LOG_FILE_PATH = None
-            _INITIALIZED = True
-            return None
-
-        logging.disable(logging.NOTSET)
-        resolved_log_file = get_or_create_process_log_path(app_name, log_file_path=log_file_path)
-        formatter = logging.Formatter(
-            "[%(asctime)s] [%(levelname)s] %(message)s",
-            datefmt="%Y-%m-%d %H:%M:%S",
-        )
-
-        stream_handler = logging.StreamHandler()
-        stream_handler.setLevel(level)
-        stream_handler.setFormatter(formatter)
-
-        file_handler = logging.FileHandler(resolved_log_file, mode="a", encoding="utf-8", delay=True)
-        file_handler.setLevel(level)
-        file_handler.setFormatter(formatter)
-
-        root_logger.addHandler(stream_handler)
-        root_logger.addHandler(file_handler)
-        root_logger.setLevel(level)
-
-        _configure_noisy_loggers()
-
-        _ACTIVE_LOG_FILE_PATH = resolved_log_file
-        _INITIALIZED = True
-        return resolved_log_file
-
-
-def get_active_log_file_path() -> Path | None:
-    return _ACTIVE_LOG_FILE_PATH
 
 
 def _extract_backend_log_file_path(logger_backend: Any | None) -> Path | None:
@@ -413,17 +203,60 @@ def _resolve_agent_log_level(level_value: Any):
     return AgentLoomLogLevel.INFO
 
 
+def _positive_int(value: Any, *, default: int, minimum: int = 0) -> int:
+    try:
+        parsed = int(value)
+    except (TypeError, ValueError):
+        return default
+    return parsed if parsed >= minimum else default
+
+
+def _runtime_key(context: RuntimeContext | None) -> tuple[str, str, str, str] | None:
+    if context is None:
+        return None
+    return (
+        str(context.root_dir),
+        context.application_id,
+        context.task_id,
+        context.run_id,
+    )
+
+
+def _backend_runtime_tag(backend: Any) -> tuple[str, str, str, str] | None:
+    try:
+        attributes = vars(backend)
+    except TypeError:
+        attributes = {}
+    value = attributes.get("_agentloom_runtime_key")
+    return value if isinstance(value, tuple) and len(value) == 4 else None
+
+
+def _tag_backend_runtime(backend: Any, context: RuntimeContext | None) -> Any:
+    """Attach immutable run ownership to a backend when the object permits it."""
+    runtime_key = _runtime_key(context)
+    if runtime_key is None:
+        return backend
+    existing = _backend_runtime_tag(backend)
+    if existing is not None and existing != runtime_key:
+        raise ValueError("logger backend is already owned by a different RuntimeContext")
+    try:
+        setattr(backend, "_agentloom_runtime_key", runtime_key)
+    except Exception:
+        pass
+    return backend
+
+
 def build_logger_backend_from_config(
-    app_name: str,
+    app_name: str = "AgentLoom",
     *,
     logging_builder: LoggingConfigBuilder | None = None,
-    log_file_path: str | Path | None = None,
-    now: datetime | None = None,
+    runtime_context: RuntimeContext | None = None,
+    file_logging: bool | None = None,
 ) -> Any:
-    """Build an :class:`EnhancedAgentLogger` from merged logging config.
+    """Build a logger without deriving any filesystem path.
 
-    Args:
-        app_name: Application name from the YAML ``name`` field.
+    File output is only possible when a canonical ``RuntimeContext`` is
+    supplied.  Standalone callers receive a console-only backend.
     """
     # Lazy import to keep logging core lightweight and avoid import cycles.
     from rich.console import Console
@@ -432,28 +265,49 @@ def build_logger_backend_from_config(
     from src.lib.logging.rich_console import DualConsole
 
     effective_logging = merge_logging_config(logging_builder)
-    enabled = BoolParser.parse(effective_logging.get("enabled", True), default=True)
     level = _resolve_agent_log_level(effective_logging.get("level", DEFAULT_LEVEL))
-    if not enabled or level == AgentLoomLogLevel.OFF:
-        return NullLoggerBackend()
-
+    console_enabled = BoolParser.parse(
+        effective_logging.get("console_enabled", DEFAULT_CONSOLE_ENABLED),
+        default=DEFAULT_CONSOLE_ENABLED,
+    )
+    file_enabled = BoolParser.parse(
+        effective_logging.get("file_enabled", DEFAULT_FILE_ENABLED),
+        default=DEFAULT_FILE_ENABLED,
+    )
+    if file_logging is not None:
+        file_enabled = bool(file_logging)
     if _memory_campaign_safe_artifacts_enabled():
-        # The campaign captures terminal output through a pipe and sanitizes it
-        # before its own atomic write. Creating a second process file sink would
-        # persist the unsanitized task/tool stream outside that boundary.
+        file_enabled = False
+    if runtime_context is None:
+        file_enabled = False
+
+    if level == AgentLoomLogLevel.OFF or not (console_enabled or file_enabled):
+        return _tag_backend_runtime(NullLoggerBackend(), runtime_context)
+
+    if file_enabled and runtime_context is not None:
+        max_file_bytes = _positive_int(
+            effective_logging.get("max_file_bytes"),
+            default=DEFAULT_MAX_FILE_BYTES,
+            minimum=1,
+        )
+        backup_count = _positive_int(
+            effective_logging.get("backup_count"),
+            default=DEFAULT_BACKUP_COUNT,
+            minimum=0,
+        )
+        console = DualConsole(
+            log_file_path=str(runtime_context.log_path),
+            max_file_bytes=max_file_bytes,
+            backup_count=backup_count,
+            console_enabled=console_enabled,
+            runtime_context=runtime_context,
+            highlight=False,
+        )
+    elif console_enabled:
         console = Console(highlight=False)
     else:
-        resolved_path = get_or_create_process_log_path(
-            app_name,
-            log_file_path=log_file_path,
-            now=now,
-            logging_builder=LoggingConfigBuilder().apply_mapping(
-                effective_logging,
-                source="effective_logging",
-            ),
-        )
-        console = DualConsole(log_file_path=str(resolved_path))
-    return EnhancedAgentLogger(
+        return _tag_backend_runtime(NullLoggerBackend(), runtime_context)
+    backend = EnhancedAgentLogger(
         level=level,
         console=console,
         show_timestamp=True,
@@ -461,55 +315,30 @@ def build_logger_backend_from_config(
         show_trace_info=True,
         truncate_id_length=8,
     )
+    return _tag_backend_runtime(backend, runtime_context)
 
 
-def get_current_run_log_dir() -> Path | None:
-    """Return the per-run timestamp log directory for the current process.
+def initialize_run_logger(
+    context: RuntimeContext,
+    *,
+    logging_builder: LoggingConfigBuilder | None = None,
+    file_logging: bool | None = None,
+) -> Any:
+    """Create the backend for one execution attempt.
 
-    Shell audit loggers and other subsystems call this to share the same
-    run directory as the main agent log, producing a layout like::
-
-        .logs/{agent_name}/{timestamp}/
-            {agent_name}.log
-            shell_audit.log
-
-    Returns ``None`` if no process log path has been established yet.
+    Binding is deliberately separate so callers can establish the complete
+    run context before constructing agents and can deterministically close it.
     """
-    if _PROCESS_LOG_FILE_PATH is not None:
-        return _PROCESS_LOG_FILE_PATH.parent
-    return None
+    return build_logger_backend_from_config(
+        context.application_id,
+        logging_builder=logging_builder,
+        runtime_context=context,
+        file_logging=file_logging,
+    )
 
 
-def initialize_global_logger_once(app_name: str) -> Any | None:
-    """Initialize process-global logger backend exactly once.
-
-    Must be called with the YAML ``name`` field **before** any agent
-    construction.  Subsequent calls return the cached backend.
-
-    Args:
-        app_name: Application name from the YAML ``name`` field.  Determines
-            the log directory: ``{logging.dir}/{app_name}/{timestamp}/{app_name}.log``.
-    """
-    if _GLOBAL_LOGGER is not None:
-        return _GLOBAL_LOGGER
-
-    backend = build_logger_backend_from_config(app_name)
-    set_global_logger(backend)
-    return backend
-
-
-def set_global_logger(logger_backend: Any | None) -> None:
-    """Set or clear process-wide default logger backend."""
-    global _GLOBAL_LOGGER
-    previous_backend: Any | None = None
-    with _GLOBAL_LOGGER_LOCK:
-        previous_backend = _GLOBAL_LOGGER
-        _GLOBAL_LOGGER = logger_backend
-    if previous_backend is not None and previous_backend is not logger_backend:
-        _close_logger_backend_sink(previous_backend)
-
-
-def _close_logger_backend_sink(logger_backend: Any | None) -> None:
+def close_run_logger(logger_backend: Any | None) -> None:
+    """Close a run logger's file sink without changing any context binding."""
     if logger_backend is None:
         return
     try:
@@ -518,27 +347,95 @@ def _close_logger_backend_sink(logger_backend: Any | None) -> None:
         if callable(close_log_file):
             close_log_file()
     except Exception:
-        # Logger cleanup should never break caller flow.
+        # Logging cleanup must never replace the application's real outcome.
         return
 
 
-def get_global_logger(*, create_if_missing: bool = False) -> Any | None:
-    """Get process-wide default logger backend.
+@contextmanager
+def bind_logger_backend(
+    logger_backend: Any,
+    *,
+    context: RuntimeContext | None = None,
+) -> Iterator[Any]:
+    """Bind a backend to exactly one RuntimeContext and close it on exit."""
+    effective_context = context or get_current_run_context()
+    _tag_backend_runtime(logger_backend, effective_context)
+    token = _CURRENT_LOGGER_BINDING.set(
+        _LoggerBinding(logger_backend, _runtime_key(effective_context))
+    )
+    try:
+        if effective_context is not None:
+            from src.tools.shell.shell_audit_log import (
+                initialize_shell_audit_scope,
+            )
 
-    Returns the backend previously created by :func:`initialize_global_logger_once`.
-    If ``create_if_missing`` is *False* (default) and no backend has been
-    registered yet, returns *None* instead of attempting lazy creation.
+            initialize_shell_audit_scope(effective_context)
+        yield logger_backend
+    finally:
+        try:
+            from src.tools.shell.shell_audit_log import (
+                close_current_shell_audit_loggers,
+            )
+
+            close_current_shell_audit_loggers()
+        except Exception:
+            # Audit cleanup is best-effort and must not mask run failures.
+            pass
+        _CURRENT_LOGGER_BINDING.reset(token)
+        close_run_logger(logger_backend)
+
+
+def initialize_global_logger_once(app_name: str) -> Any | None:
+    """Legacy helper for tests and standalone construction.
+
+    It never invents a file path.  When called under a RuntimeContext the
+    canonical run path is used; otherwise the backend is console-only.
     """
-    if _GLOBAL_LOGGER is not None:
-        return _GLOBAL_LOGGER
+    existing = get_global_logger(create_if_missing=False)
+    if existing is not None:
+        return existing
+    runtime_context = get_current_run_context()
+    backend = build_logger_backend_from_config(
+        app_name,
+        runtime_context=runtime_context,
+    )
+    set_global_logger(backend)
+    return backend
 
-    if not create_if_missing:
+
+def set_global_logger(logger_backend: Any | None) -> None:
+    """Set or clear the backend in the current execution context only."""
+    previous = _CURRENT_LOGGER_BINDING.get()
+    if logger_backend is None:
+        _CURRENT_LOGGER_BINDING.set(None)
+    else:
+        context = get_current_run_context()
+        _tag_backend_runtime(logger_backend, context)
+        _CURRENT_LOGGER_BINDING.set(
+            _LoggerBinding(logger_backend, _runtime_key(context))
+        )
+    if previous is not None and previous.backend is not logger_backend:
+        close_run_logger(previous.backend)
+
+
+def get_global_logger(*, create_if_missing: bool = False) -> Any | None:
+    """Get the backend bound to the current execution context.
+
+    A backend tied to another (or already-ended) run is deliberately ignored.
+    ``create_if_missing`` remains accepted for call-site stability but never
+    creates a backend implicitly.
+    """
+    binding = _CURRENT_LOGGER_BINDING.get()
+    if binding is None:
         return None
+    if binding.runtime_key != _runtime_key(get_current_run_context()):
+        return None
+    return binding.backend
 
-    return _GLOBAL_LOGGER
 
-
-_FALLBACK_APP_NAME = "AgentLoom"
+def get_active_log_file_path() -> Path | None:
+    """Return the current run backend's canonical file path, if enabled."""
+    return _extract_backend_log_file_path(get_global_logger())
 
 
 @runtime_checkable
@@ -602,7 +499,7 @@ class LoggerAdapter:
     *Lazy mode* (``backend=None``): created by ``get_logger(__name__)``.
     Safe at **import time** — never triggers ``initialize_global_logger_once``
     or any other side-effecting initialisation.  On each log call it
-    dynamically looks up the process-global backend via
+    dynamically looks up the run-scoped backend via
     :func:`get_global_logger`; if none exists yet, it falls back to the
     stdlib ``logging`` hierarchy.
 
@@ -611,9 +508,8 @@ class LoggerAdapter:
     and dispatches directly to it.  If the backend method is missing or fails,
     applies the same global → stdlib fallback chain as lazy mode.
 
-    After ``initialize_global_logger_once(app_name)`` is called (typically by
-    :func:`src.runner.run_app`), **all** lazy-mode instances automatically
-    pick up the correct backend on subsequent calls.
+    After a backend is bound with :func:`bind_logger_backend`, **all** lazy-mode
+    instances in that context automatically pick it up on subsequent calls.
 
     Usage::
 
@@ -626,11 +522,16 @@ class LoggerAdapter:
             log.info("building...")
     """
 
-    __slots__ = ("_backend", "_name")
+    __slots__ = ("_backend", "_name", "_runtime_key")
 
     def __init__(self, backend: Any = None, name: str | None = None):
         self._backend = backend
         self._name = name or __name__
+        self._runtime_key = _backend_runtime_tag(backend)
+        if backend is not None and self._runtime_key is None:
+            binding = _CURRENT_LOGGER_BINDING.get()
+            if binding is not None and binding.backend is backend:
+                self._runtime_key = binding.runtime_key
 
     # -- internal helpers ---------------------------------------------------
 
@@ -655,6 +556,12 @@ class LoggerAdapter:
 
         # Bound mode: try the explicit backend first.
         if self._backend is not None:
+            if (
+                self._runtime_key is not None
+                and self._runtime_key != _runtime_key(get_current_run_context())
+            ):
+                _stdlib_emit(self._name, method_name, rendered)
+                return
             if isinstance(self._backend, logging.Logger):
                 used_stdlib = True
             if _call_log_method(self._backend, method_name, rendered, **kwargs):
@@ -699,7 +606,7 @@ LazyLoggerAdapter = LoggerAdapter
 # ---------------------------------------------------------------------------
 
 def get_logger(
-    name_or_backend: "str | Any | None" = None,
+    name_or_backend: str | Any | None = None,
     name: str | None = None,
 ) -> LoggerAdapter:
     """Obtain a logger — the **single unified API** for all logging needs.

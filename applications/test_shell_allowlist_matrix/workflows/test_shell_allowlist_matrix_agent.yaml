@@ -6,7 +6,6 @@ tool_call_type: "code_act"
 
 tools:
   - name: "shell_tool"
-  - name: "read_file"
 
 shell_settings:
   allowed_commands:
@@ -27,10 +26,11 @@ workflow: |
   cat, echo, grep, ls, printf, pwd, wc. It allows only the "|" and "&&"
   operators.
 
-  The test only passes if the real shell outputs and real shell_audit.log
+  The test only passes if the real shell outputs and current run's audit/shell.jsonl
   contain the expected evidence. Do not mark PASS from expectation alone.
 
   ```python
+  import json
   import os
 
   rows = {}
@@ -72,67 +72,88 @@ workflow: |
 
   # Use ls only (no head) so the audit lookup obeys this workflow's allow-list.
   ls_output = shell_tool(
-      command="ls -dt .logs/test_shell_allowlist_matrix/*/shell_audit.log",
+      command="ls -dt .agentloom/runs/test_shell_allowlist_matrix/run_*/audit/shell.jsonl",
       timeout=10,
   )
   audit_path = ls_output.strip().splitlines()[0]
-  audit_content = read_file(file_path=audit_path)
+  audit_content = shell_tool(command=f"cat {audit_path}", timeout=10)
+  audit_events = []
+  for line in audit_content.splitlines():
+      try:
+          event = json.loads(line)
+      except json.JSONDecodeError:
+          continue
+      if isinstance(event, dict):
+          audit_events.append(event)
   print("AUDIT_PATH", audit_path)
   print(audit_content)
 
-  agent_ls_output = shell_tool(
-      command="ls -dt .logs/test_shell_allowlist_matrix/*/test_shell_allowlist_matrix.log",
-      timeout=10,
-  )
-  agent_log_path = agent_ls_output.strip().splitlines()[0]
-  same_parent = os.path.dirname(audit_path) == os.path.dirname(agent_log_path)
+  audit_run_dir = os.path.dirname(os.path.dirname(audit_path))
+  agent_log_path = os.path.join(audit_run_dir, "logs", "runtime.log")
+  same_parent = os.path.isfile(agent_log_path)
   record(
       "CO_LOCATION",
       "PASS" if same_parent else "FAIL",
       f"audit={audit_path}; agent={agent_log_path}",
   )
 
-  audit_checks = {
-      "POLICY_SNAPSHOT": [
-          "[POLICY_SNAPSHOT]",
-          "allowed_commands: cat, echo, grep, ls, printf, pwd, wc",
-          "allowed_operators: |, &&",
-          "command_success_logging: false",
-      ],
-      "AUDIT_DATE": ["[WHITELIST_REJECT]", "command: date", "allowed_commands"],
-      "AUDIT_WHOAMI": ["[WHITELIST_REJECT]", "command: whoami", "allowed_commands"],
-      "AUDIT_UNAME": ["[WHITELIST_REJECT]", "command: uname -a", "allowed_commands"],
-      "AUDIT_SEMICOLON": [
-          "[WHITELIST_REJECT]",
-          "command: echo first ; echo second",
-          "allowed_operators",
-      ],
-      "NO_OPERATOR_COMMAND_SUGGESTION": [],
-      "NO_SUCCESS_SPAM": [],
-  }
+  policy_event = next(
+      (event for event in audit_events if event.get("event_type") == "POLICY_SNAPSHOT"),
+      None,
+  )
+  policy_details = policy_event.get("details", {}) if policy_event else {}
+  policy_ok = (
+      policy_details.get("allowed_commands") == "cat, echo, grep, ls, printf, pwd, wc"
+      and policy_details.get("allowed_operators") == "|, &&"
+      and policy_details.get("command_success_logging") == "false"
+  )
+  record(
+      "POLICY_SNAPSHOT",
+      "PASS" if policy_ok else "FAIL",
+      json.dumps(policy_event, ensure_ascii=False) if policy_event else "missing event",
+  )
 
-  for name, required in audit_checks.items():
-      if name == "NO_OPERATOR_COMMAND_SUGGESTION":
-          forbidden = 'allowed_commands: [";", ...]'
-          record(
-              name,
-              "PASS" if forbidden not in audit_content else "FAIL",
-              f"{forbidden} absent",
-          )
-          continue
-      if name == "NO_SUCCESS_SPAM":
-          record(
-              name,
-              "PASS" if "[COMMAND_SUCCESS]" not in audit_content else "FAIL",
-              "COMMAND_SUCCESS absent because log_success=false",
-          )
-          continue
-      missing = [item for item in required if item not in audit_content]
+  def rejection(command):
+      return next(
+          (
+              event
+              for event in audit_events
+              if event.get("event_type") == "WHITELIST_REJECT"
+              and event.get("command") == command
+          ),
+          None,
+      )
+
+  for name, command, suggestion_key in [
+      ("AUDIT_DATE", "date", "allowed_commands"),
+      ("AUDIT_WHOAMI", "whoami", "allowed_commands"),
+      ("AUDIT_UNAME", "uname -a", "allowed_commands"),
+      ("AUDIT_SEMICOLON", "echo first ; echo second", "allowed_operators"),
+  ]:
+      event = rejection(command)
+      suggestion = str((event or {}).get("suggestion", ""))
       record(
           name,
-          "PASS" if not missing else "FAIL",
-          "missing=" + ", ".join(missing) if missing else "all required fields present",
+          "PASS" if event and suggestion_key in suggestion else "FAIL",
+          json.dumps(event, ensure_ascii=False) if event else "missing event",
       )
+
+  semicolon_event = rejection("echo first ; echo second")
+  semicolon_suggestion = str((semicolon_event or {}).get("suggestion", ""))
+  record(
+      "NO_OPERATOR_COMMAND_SUGGESTION",
+      "PASS"
+      if semicolon_event and "allowed_commands" not in semicolon_suggestion
+      else "FAIL",
+      semicolon_suggestion or "missing event",
+  )
+  record(
+      "NO_SUCCESS_SPAM",
+      "PASS"
+      if not any(event.get("event_type") == "COMMAND_SUCCESS" for event in audit_events)
+      else "FAIL",
+      "COMMAND_SUCCESS absent because log_success=false",
+  )
 
   ordered = [
       "ALLOW_ECHO",
@@ -156,8 +177,8 @@ workflow: |
 
   summary_lines = [
       f"Overall: {overall}",
-      f"shell_audit.log: {audit_path}",
-      f"agent log: {agent_log_path}",
+      f"shell.jsonl: {audit_path}",
+      f"runtime.log: {agent_log_path}",
       f"allowed commands evidence: {allowed_commands_text}",
       f"allowed operators evidence: {allowed_operators_text}",
       "",

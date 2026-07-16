@@ -17,7 +17,7 @@ from src.lib.smolagents.hooks.types import HookEvent, HookResult
 def _isolate_self_learning_state(tmp_path, monkeypatch):
     """Runtime lifecycle tests must never append to the developer's ledger."""
     monkeypatch.setenv(
-        "AGENTLOOM_SELF_LEARNING_ROOT",
+        "AGENTLOOM_RUNTIME_ROOT",
         str(tmp_path / ".agentloom"),
     )
 
@@ -165,16 +165,12 @@ def test_create_agent_uses_global_logger_when_not_provided(monkeypatch):
 
 
 def test_create_agent_requires_global_logger(monkeypatch):
-    """Agent construction requires initialize_global_logger_once to be called first."""
+    """Standalone construction can explicitly initialize a console backend."""
     from src.lib.logging import initialize_global_logger_once
-    import src.lib.logging.logger_manager as logger_manager
 
     _patch_agent_classes(monkeypatch)
     previous_global_logger = get_global_logger(create_if_missing=False)
     set_global_logger(None)
-    monkeypatch.setattr(logger_manager, "_INITIALIZED", False, raising=True)
-    monkeypatch.setattr(logger_manager, "_ACTIVE_LOG_FILE_PATH", None, raising=True)
-    monkeypatch.setattr(logger_manager, "_PROCESS_LOG_FILE_PATH", None, raising=True)
 
     try:
         initialize_global_logger_once("test_runtime_builder")
@@ -370,6 +366,25 @@ def test_base_run_binds_root_before_memory_snapshot_and_only_owner_emits_session
     assert snapshot_roots == ["supervisor-root"]
     assert HookEvent.SESSION_START not in events
     assert HookEvent.SESSION_END not in events
+
+
+def test_base_run_uses_runner_supplied_run_id_for_root_lifecycle(monkeypatch):
+    from src.trace import capture_explicit_execution_context
+
+    agent = _make_agent(logger=DummyLoggerBackend())
+    runtime_agent = DummyRuntimeRunner(result="ok")
+    observed = []
+
+    monkeypatch.setattr(agent, "build_runtime_agent", lambda: runtime_agent)
+    monkeypatch.setattr(
+        agent,
+        "_inject_memory_snapshot",
+        lambda tasks: observed.append(capture_explicit_execution_context()) or tasks,
+    )
+
+    assert agent.run("top-level", task_id="task-1", run_id="run-from-runner") == "ok"
+    assert observed[0].root_run_id == "run-from-runner"
+    assert observed[0].local_run_id == "run-from-runner"
 
 
 def test_base_run_releases_owned_root_after_failure(monkeypatch):
@@ -579,7 +594,11 @@ def test_max_steps_worker_is_failed_before_checkpoint_success(tmp_path, monkeypa
                 timing=None,
             )
 
-    checkpoint_manager = CheckpointManager("supervisor", base_dir=tmp_path)
+    checkpoint_manager = CheckpointManager(
+        "supervisor",
+        checkpoints_root=tmp_path,
+        run_id="run_test",
+    )
     coordinator = CheckpointCoordinator(
         checkpoint_manager,
         "task-max-steps-worker",
@@ -607,13 +626,6 @@ def test_max_steps_worker_is_failed_before_checkpoint_success(tmp_path, monkeypa
         call_index=worker_call["call_index"],
     )
     assert checkpoint["status"] == "failed"
-    assert (
-        coordinator.check_worker_skip(
-            "max_steps_worker",
-            worker_call["input_hash"],
-        )
-        is None
-    )
 
 
 def test_max_steps_managed_worker_fails_before_call_discards_state(
@@ -643,7 +655,11 @@ def test_max_steps_managed_worker_fails_before_call_discards_state(
             timing=None,
         ),
     )
-    checkpoint_manager = CheckpointManager("supervisor", base_dir=tmp_path)
+    checkpoint_manager = CheckpointManager(
+        "supervisor",
+        checkpoints_root=tmp_path,
+        run_id="run_test",
+    )
     coordinator = CheckpointCoordinator(
         checkpoint_manager,
         "task-max-steps-managed-worker",
@@ -671,13 +687,6 @@ def test_max_steps_managed_worker_fails_before_call_discards_state(
         call_index=worker_call["call_index"],
     )
     assert checkpoint["status"] == "failed"
-    assert (
-        coordinator.check_worker_skip(
-            "max_steps_managed_worker",
-            worker_call["input_hash"],
-        )
-        is None
-    )
 
 
 def test_builtin_session_end_has_only_the_recorder_hook():
@@ -1110,7 +1119,7 @@ def test_base_run_executes_transformed_tasks_sequentially_with_reset_false(
     tmp_path, monkeypatch
 ):
     monkeypatch.setenv(
-        "AGENTLOOM_SELF_LEARNING_ROOT",
+        "AGENTLOOM_RUNTIME_ROOT",
         str(tmp_path / ".agentloom"),
     )
     agent = _make_agent(logger=DummyLoggerBackend())

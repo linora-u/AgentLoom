@@ -77,11 +77,14 @@ class _RecordingCheckpointCoordinator:
         self.success_memory_steps = None
         self.interrupted_memory_steps = None
 
-    def check_worker_skip(self, agent_name, input_hash):
-        return None
-
-    def record_worker_start(self, agent_name, input_hash, task_input):
-        return 0
+    def prepare_worker_call(
+        self, agent_name, input_hash, task_input, *, runtime_agent=None
+    ):
+        return type(
+            "_Preparation",
+            (),
+            {"call_index": 0, "should_execute": True, "cached_result": None},
+        )()
 
     def restore_worker(self, runtime_agent, agent_name, call_index):
         return False
@@ -514,6 +517,35 @@ class TestTaskLifecycleHooks(unittest.TestCase):
 
         self.assertEqual(result, "ok:do work")
         self.assertEqual(coord.success_memory_steps, ["prompt", "tool", "final"])
+
+    def test_subtask_cached_falsey_result_does_not_execute_runtime(self):
+        class _CachedCoordinator:
+            def __init__(self, result):
+                self.result = result
+
+            def prepare_worker_call(self, *args, **kwargs):
+                return type(
+                    "_Preparation",
+                    (),
+                    {
+                        "call_index": 0,
+                        "should_execute": False,
+                        "cached_result": self.result,
+                    },
+                )()
+
+        class _MustNotRun(_SubtaskRunner):
+            def run(self, task: str, *args, **kwargs):
+                raise AssertionError("cached worker runtime executed")
+
+        for cached_result in ("", None):
+            with self.subTest(cached_result=cached_result):
+                wrapped = SubTaskTrackedAgent(_MustNotRun(), "worker_agent")
+                with patch(
+                    "src.lib.checkpoint.coordinator.CheckpointCoordinator.current",
+                    return_value=_CachedCoordinator(cached_result),
+                ):
+                    self.assertEqual(wrapped.run("do work"), cached_result)
 
     def test_subtask_checkpoint_records_interrupted_runtime_memory(self):
         coord = _RecordingCheckpointCoordinator()

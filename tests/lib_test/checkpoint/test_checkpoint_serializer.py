@@ -11,7 +11,6 @@ from smolagents.monitoring import Timing, TokenUsage
 
 from src.lib.checkpoint.serializer import CheckpointSerializer
 
-
 # ── helpers ──────────────────────────────────────────────────────────────
 
 def _make_timing(dur: float = 1.0) -> Timing:

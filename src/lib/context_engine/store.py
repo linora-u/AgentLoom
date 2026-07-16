@@ -11,9 +11,9 @@ from pathlib import Path
 from typing import Iterable
 
 from src.lib.logging import get_logger
+from src.lib.runtime import SecureDirectory
 
 from .models import ContextEntry
-
 
 _logger = get_logger(__name__)
 _REF_RE = re.compile(r"^ctx_[0-9a-f]{16}$")
@@ -27,6 +27,7 @@ class ContextStore:
         *,
         max_entries: int = 1000,
         ttl_seconds: int | None = None,
+        storage: SecureDirectory | None = None,
     ) -> None:
         self.root_dir = Path(root_dir)
         self.entries_dir = self.root_dir / "entries"
@@ -34,18 +35,18 @@ class ContextStore:
         self.max_entries = max_entries
         self.ttl_seconds = ttl_seconds
         self._lock = threading.RLock()
-        self.entries_dir.mkdir(parents=True, exist_ok=True)
+        self._storage = storage or SecureDirectory(self.root_dir, create=True)
+        self._storage.ensure_dir("entries")
 
     def put(self, entry: ContextEntry) -> ContextEntry:
         if not _REF_RE.match(entry.ref):
             raise ValueError(f"Invalid context ref: {entry.ref}")
         with self._lock:
-            self.entries_dir.mkdir(parents=True, exist_ok=True)
             self._evict_if_needed()
-            path = self._entry_path(entry.ref)
-            tmp = path.with_suffix(".json.tmp")
-            tmp.write_text(json.dumps(entry.to_json(), ensure_ascii=False, indent=2), encoding="utf-8")
-            tmp.replace(path)
+            self._storage.atomic_write_json(
+                f"entries/{entry.ref}.json",
+                entry.to_json(),
+            )
             self._append_event(
                 {
                     "type": "compressed",
@@ -63,11 +64,8 @@ class ContextStore:
     def get(self, ref: str) -> ContextEntry | None:
         if not _REF_RE.match(ref):
             return None
-        path = self._entry_path(ref)
-        if not path.exists():
-            return None
         try:
-            data = json.loads(path.read_text(encoding="utf-8"))
+            data = self._storage.read_json(f"entries/{ref}.json")
             entry = ContextEntry.from_json(data)
         except Exception as exc:
             _logger.warning("Failed to read context entry %s: %s", ref, exc)
@@ -132,9 +130,15 @@ class ContextStore:
         }
 
     def refs(self) -> list[str]:
-        if not self.entries_dir.exists():
+        try:
+            names = self._storage.regular_file_names("entries")
+        except (FileNotFoundError, OSError, RuntimeError):
             return []
-        return sorted(path.stem for path in self.entries_dir.glob("ctx_*.json"))
+        return sorted(
+            Path(name).stem
+            for name in names
+            if name.startswith("ctx_") and name.endswith(".json")
+        )
 
     def _entry_path(self, ref: str) -> Path:
         return self.entries_dir / f"{ref}.json"
@@ -167,21 +171,38 @@ class ContextStore:
     def _evict_if_needed(self) -> None:
         if self.max_entries <= 0:
             return
-        entries = sorted(self.entries_dir.glob("ctx_*.json"), key=lambda p: p.stat().st_mtime)
+        entries = [
+            name
+            for name in self._storage.regular_file_names("entries")
+            if name.startswith("ctx_") and name.endswith(".json")
+        ]
+        entries.sort(
+            key=lambda name: self._storage.stat_file(f"entries/{name}").st_mtime
+        )
         overflow = len(entries) - max(0, self.max_entries - 1)
-        for path in entries[:max(0, overflow)]:
+        for name in entries[:max(0, overflow)]:
             try:
-                path.unlink()
+                self._storage.unlink(f"entries/{name}")
             except OSError:
                 pass
 
     def _append_event(self, event: dict) -> None:
         try:
-            self.root_dir.mkdir(parents=True, exist_ok=True)
-            with self.events_path.open("a", encoding="utf-8") as fp:
-                fp.write(json.dumps(event, ensure_ascii=False, default=str) + "\n")
+            self._storage.append_text(
+                "events.jsonl",
+                json.dumps(event, ensure_ascii=False, default=str) + "\n",
+            )
         except Exception as exc:
             _logger.debug("Failed to write context store event: %s", exc)
+
+    def close(self) -> None:
+        self._storage.close()
+
+    def __del__(self) -> None:
+        try:
+            self.close()
+        except Exception:
+            pass
 
 
 def make_context_ref(original: str, *, tool_name: str, source: str = "") -> str:
