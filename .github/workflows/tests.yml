@@ -42,4 +42,8 @@ jobs:
       - name: Run tests
         env:
           PYTHONPATH: .
-        run: uv run pytest tests/ -v --tb=short --color=yes
+        run: >-
+          uv run pytest tests/
+          applications/memory_feature_validation/scripts/test_memory_review_campaign_capsule.py
+          applications/memory_feature_validation/scripts/test_memory_review_campaign_contract.py
+          -v --tb=short --color=yes

@@ -1424,17 +1424,24 @@ Effective config
 
 ### 9.2 Overridable Field Whitelist
 
-The following **7** top-level fields in Agent YAML can override system configuration (source: `_WORKFLOW_OVERLAY_KEYS`):
+The following top-level fields in Agent YAML can override system configuration (source: `_WORKFLOW_OVERLAY_KEYS`):
 
 | Field | Type Constraint | Description |
 |------|----------|------|
 | `system` | `dict` | System metadata (name, version, user_agent) |
+| `model_request_headers` | `dict` | Model request header profiles |
 | `smart_summary` | `any` | Context compression strategy |
+| `context_engine` | `dict` | Reversible context compression limits |
 | `tool_access_control` | `dict` | Working directory and path filtering |
 | `execution_env` | `dict` | Execution environment type and Shell path |
 | `code_agent` | `dict` | CodeAgent code execution permissions |
-| `tools` | `dict` | Tool configuration (default, shell, tools_mapping). Note: dict format here, different from Agent `tools` list |
+| `tools` | `list` | Agent tool list and its effective-config overlay |
+| `shell_settings` | `any` | Shell safety settings |
+| `tools_mapping` | `any` | Tool mapping override |
+| `default_toolsets` / `toolsets` | `any` | Toolset defaults or replacement |
 | `prompt` | `str`/`dict` | Custom System Prompt template path |
+| `mcp_servers` | `str`/`list`/`dict` | MCP server configuration |
+| `self_learning` | `dict` | History and optional memory-review policy |
 
 > ⚠️ **Important**: The whitelist above is evaluated **per Agent YAML**, not per call chain. When a Supervisor invokes a Worker, the Worker's `tool_access_control`, `execution_env`, `prompt`, and other whitelisted overrides are rebuilt from the Worker YAML instead of being inherited from the Supervisor.
 >

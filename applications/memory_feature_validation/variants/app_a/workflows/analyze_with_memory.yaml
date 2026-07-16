@@ -1,0 +1,23 @@
+name: "memory_scope_app_a_analysis"
+description: "Analyze a scoped operational case in validation Application A."
+model_type: "summary"
+tool_call_type: "tool_call"
+max_steps: 8
+
+workflow: |
+  Load the case with `validation_memory_case`, investigate it, and return a
+  concise JSON answer. Use available tools according to their descriptions.
+  Preserve the distinction between facts limited to this Application and
+  repository-wide project facts. When the case establishes a verified durable
+  repository-wide fact that another Application will need, use the
+  persistent-memory capability before returning the answer.
+
+tools:
+  - name: "validation_memory_case"
+    module: "applications.memory_feature_validation.agent_tools.validation_probes"
+    function: "validation_memory_case"
+  - name: "memory"
+
+toolsets: []
+skills: []
+worker_agents: []

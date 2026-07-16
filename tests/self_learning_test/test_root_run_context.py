@@ -416,6 +416,33 @@ def test_canonical_event_v3_carries_explicit_root_run_id():
     assert event.to_record()["root_run_id"] == "supervisor-root-run"
 
 
+def test_application_disable_prevents_session_recorder_write(monkeypatch):
+    from src.extensions.self_learning.session_recorder import SessionRecorder
+
+    recorder = SessionRecorder()
+    monkeypatch.setattr(
+        recorder,
+        "append",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(
+            AssertionError("disabled Application must not record history")
+        ),
+    )
+
+    result = recorder.record_hook(
+        HookContext(
+            session_id="disabled-run",
+            root_run_id="disabled-run",
+            cwd="/tmp",
+            hook_event_name="SessionStart",
+            tool_name="",
+            tool_input={},
+            agent_config={"self_learning": {"enabled": False}},
+        )
+    )
+
+    assert result.success is True
+
+
 def test_session_tools_fail_closed_before_reading_without_root_context(monkeypatch):
     from src.tools.self_learning.session_tools import session_scroll, session_search
 
@@ -444,6 +471,10 @@ def test_disabled_session_tools_fail_closed_before_runtime_or_state_access(
         "src.extensions.self_learning.paths.config_bool",
         lambda name, default=True: False if name == "enabled" else default,
     )
+    monkeypatch.setattr(
+        "src.extensions.self_learning.paths.self_learning_enabled",
+        lambda _agent_config=None: False,
+    )
 
     from src.tools.self_learning import memory_tool, session_tools
 
@@ -454,13 +485,18 @@ def test_disabled_session_tools_fail_closed_before_runtime_or_state_access(
     monkeypatch.setattr(session_tools, "SessionIndex", _must_not_initialize)
     monkeypatch.setattr(memory_tool, "current_session_run_id", _must_not_initialize)
     monkeypatch.setattr(memory_tool, "MemoryStore", _must_not_initialize)
+    monkeypatch.setattr(
+        memory_tool,
+        "_current_agent_config",
+        lambda: {"self_learning": {"enabled": False}},
+    )
 
-    expected = {"ok": False, "error": "self_learning is disabled in config"}
-    assert json.loads(session_tools.session_search("historical secret")) == expected
-    assert json.loads(session_tools.session_scroll("historical-run", 1)) == expected
+    session_expected = {"ok": False, "error": "self_learning is disabled in config"}
+    assert json.loads(session_tools.session_search("historical secret")) == session_expected
+    assert json.loads(session_tools.session_scroll("historical-run", 1)) == session_expected
     assert json.loads(
-        memory_tool.memory(action="add", scope="session", content="must not persist")
-    ) == expected
+        memory_tool.memory(action="add", scope="project", content="must not persist")
+    ) == {"ok": False, "error": "self_learning_disabled"}
     assert not root.exists()
 
 
@@ -486,6 +522,7 @@ def test_tool_wrapper_propagates_and_refreshes_root_across_executor_thread(
     from src.extensions.self_learning.memory_store import MemoryStore
     from src.lib.smolagents.hooks.tool_shim import inject_hooks
     from src.lib.smolagents.tools.tools import ensure_tool_wrapped
+    from src.tools.self_learning import memory_tool
     from src.tools.self_learning.memory_tool import memory
 
     class _AllowHooks:
@@ -499,6 +536,14 @@ def test_tool_wrapper_propagates_and_refreshes_root_across_executor_thread(
         "src.lib.smolagents.hooks.tool_shim._resolve_hook_manager",
         lambda: _AllowHooks(),
     )
+    monkeypatch.setattr(
+        memory_tool,
+        "_current_agent_config",
+        lambda: {
+            "application_id": "root_context_test",
+            "self_learning": {"enabled": True, "memory": {"write_approval": False}},
+        },
+    )
     wrapped = ensure_tool_wrapped([memory])[0]
     with bind_root_run("root-tool-a"):
         inject_hooks(wrapped)
@@ -507,8 +552,8 @@ def test_tool_wrapper_propagates_and_refreshes_root_across_executor_thread(
             executor.submit(
                 wrapped.forward,
                 action="add",
-                scope="session",
-                content="first threaded note",
+                scope="project",
+                content="first threaded durable fact",
             ).result()
         )
     assert first["ok"] is True
@@ -522,19 +567,17 @@ def test_tool_wrapper_propagates_and_refreshes_root_across_executor_thread(
             executor.submit(
                 wrapped.forward,
                 action="add",
-                scope="session",
-                content="second threaded note",
+                scope="project",
+                content="second threaded durable fact",
             ).result()
         )
     assert second["ok"] is True
 
     store = MemoryStore()
-    assert [
-        item["content"] for item in store.list("session", scope_id="root-tool-a")
-    ] == ["first threaded note"]
-    assert [
-        item["content"] for item in store.list("session", scope_id="root-tool-b")
-    ] == ["second threaded note"]
+    assert [item["content"] for item in store.list("project")] == [
+        "first threaded durable fact",
+        "second threaded durable fact",
+    ]
 
     # Preparing the same cached tool without a binding must clear, rather than
     # retain, root B.  The executor thread then fails closed and writes nothing.
@@ -544,14 +587,15 @@ def test_tool_wrapper_propagates_and_refreshes_root_across_executor_thread(
             executor.submit(
                 wrapped.forward,
                 action="add",
-                scope="session",
+                scope="project",
                 content="must not inherit a stale root",
             ).result()
         )
     assert missing["error"] == "missing_run_context"
-    assert [
-        item["content"] for item in store.list("session", scope_id="root-tool-b")
-    ] == ["second threaded note"]
+    assert [item["content"] for item in store.list("project")] == [
+        "first threaded durable fact",
+        "second threaded durable fact",
+    ]
 
 
 def test_session_tools_exclude_every_leaf_of_current_root(

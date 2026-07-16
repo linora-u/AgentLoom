@@ -1,0 +1,10 @@
+checkpoint:
+  enabled: false
+
+skills: []
+
+self_learning:
+  enabled: true
+  memory:
+    review_model: "summary"
+    write_approval: false

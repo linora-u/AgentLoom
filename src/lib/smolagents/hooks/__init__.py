@@ -82,42 +82,21 @@ def register_builtin_hooks(manager: HookManager) -> HookManager:
                 allow_duplicates=False,
                 source="builtin:self_learning_recorder",
             )
-    except Exception as e:
-        logger.warning("Failed to auto-register self-learning recorder: %s", e)
-
-    try:
-        from src.extensions.self_learning.reviewer import learning_review_hook
-
-        for event in (
-            HookEvent.TASK_COMPLETED,
-            HookEvent.STOP_FAILURE,
-            HookEvent.POST_TOOL_USE_FAILURE,
-        ):
-            manager.register_hook(
-                event,
-                "*",
-                learning_review_hook,
-                allow_duplicates=False,
-                source="builtin:self_learning_reviewer",
-            )
-    except Exception as e:
-        logger.warning("Failed to auto-register self-learning reviewer: %s", e)
-
-    try:
-        from src.extensions.self_learning.finalizer import session_finalize_hook
-
-        # SessionEnd has exactly one synchronous owner: it atomically records
-        # the final event/outcome and inserts durable outbox rows.  Model calls,
-        # auto-apply, retention, and artifact delivery run in the worker.
+        # The root owner starts completed-run review immediately after
+        # SessionEnd dispatch. This final recorder call therefore cannot use
+        # the raw-hook daemon timeout path: review must only observe a
+        # committed run projection. Custom SessionEnd hooks retain their
+        # ordinary timeout behavior.
         manager.register_hook(
             HookEvent.SESSION_END,
             "*",
-            session_finalize_hook,
+            session_recorder_hook,
             allow_duplicates=False,
-            source="builtin:self_learning_finalizer",
+            source="builtin:self_learning_recorder",
+            must_complete=True,
         )
     except Exception as e:
-        logger.warning("Failed to auto-register self-learning finalizer: %s", e)
+        logger.warning("Failed to auto-register self-learning recorder: %s", e)
 
     setattr(manager, _BUILTIN_HOOKS_REGISTERED_ATTR, True)
     return manager

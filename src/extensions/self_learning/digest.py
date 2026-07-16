@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import json
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, replace
 from typing import Any
 
 from .redaction import (
@@ -11,6 +11,7 @@ from .redaction import (
     redact_value,
     require_safe_identity,
     scan_injection_patterns,
+    scan_structured_injection_patterns,
 )
 
 BLOCKED_TEXT = "[BLOCKED]"
@@ -61,24 +62,6 @@ def _redact_to_fixed_point(text: str, *, max_chars: int | None = None) -> str | 
     return None
 
 
-def _is_distiller_existing_memory_ref(ref: str) -> bool:
-    prefix, separator, item_id = ref.partition(":")
-    return prefix == "existing_memory" and bool(separator) and item_id.isdigit()
-
-
-def _valid_existing_memory_fragment(text: str) -> bool:
-    """Match the persisted digest validator's structured target contract."""
-    try:
-        value = json.loads(text)
-    except (TypeError, ValueError, json.JSONDecodeError):
-        return False
-    return bool(
-        isinstance(value, dict)
-        and str(value.get("id") or "").strip()
-        and value.get("status") in {"active", "pending"}
-    )
-
-
 @dataclass(frozen=True)
 class DigestFragment:
     ref: str
@@ -93,7 +76,7 @@ class DigestBuilder:
     The order is intentional: secrets are removed recursively first, then the
     redacted representation is scanned for prompt injection. A finding blocks
     the whole fragment, so partially malicious text can never be spliced into
-    model context. Only unblocked fragments are valid evidence references.
+    model context.
     """
 
     def __init__(
@@ -122,7 +105,11 @@ class DigestBuilder:
 
         redacted = redact_value(value)
         serialized = _redact_to_fixed_point(_as_text(redacted))
-        blocked = serialized is None or bool(scan_injection_patterns(serialized))
+        blocked = (
+            serialized is None
+            or bool(scan_injection_patterns(serialized))
+            or bool(scan_structured_injection_patterns(redacted))
+        )
         if blocked:
             text = BLOCKED_TEXT
         else:
@@ -133,13 +120,6 @@ class DigestBuilder:
                 or redact_text(bounded) != bounded
                 or bool(scan_injection_patterns(bounded))
             )
-            if (
-                not blocked
-                and kind == "existing_memory"
-                and _is_distiller_existing_memory_ref(ref)
-                and not _valid_existing_memory_fragment(bounded)
-            ):
-                blocked = True
             text = BLOCKED_TEXT if blocked else bounded
         self._fragments.append(DigestFragment(ref=ref, kind=kind, text=text, blocked=blocked))
         self._refs.add(ref)
@@ -153,11 +133,22 @@ class DigestBuilder:
             encoded = json.dumps(payload, ensure_ascii=False, separators=(",", ":"))
             if len(encoded) <= self.max_chars:
                 included.append(fragment)
+        # A model sees the complete fragment array, so the safety boundary must
+        # scan that same view. Two individually harmless strings can otherwise
+        # join into one instruction across JSON elements. When the collection
+        # is tainted there is no trustworthy way to assign the continuation to
+        # only one element, so fail closed for the whole included collection.
+        visible_texts = [
+            fragment.text
+            for fragment in included
+            if not fragment.blocked and fragment.text != BLOCKED_TEXT
+        ]
+        if scan_structured_injection_patterns(visible_texts):
+            return [
+                replace(fragment, text=BLOCKED_TEXT, blocked=True)
+                for fragment in included
+            ]
         return included
-
-    @property
-    def evidence_refs(self) -> set[str]:
-        return {fragment.ref for fragment in self._bounded_fragments() if not fragment.blocked}
 
     @property
     def fragments(self) -> tuple[DigestFragment, ...]:

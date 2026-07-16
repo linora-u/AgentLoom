@@ -1,16 +1,17 @@
 import logging
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
 import src.lib.smolagents.agent.base_agent as base_agent_module
 import src.lib.smolagents.prompts.prompt_builder as prompt_builder_module
+from src.lib.smolagents.hooks.hook_manager import HookManager
+from src.lib.smolagents.skills.skills import SkillsManager
 from src.trace import (
     get_current_hook_manager,
     get_current_skills_manager,
 )
-from src.lib.smolagents.hooks.hook_manager import HookManager
-from src.lib.smolagents.skills.skills import SkillsManager
 
 
 class _DummyConfig:
@@ -35,14 +36,17 @@ class _DummyConfig:
 
 
 class _DummyRuntimeAgent:
-    def run(self, task: str):
+    def run(self, task: str, **kwargs):
         skills_manager = get_current_skills_manager()
         hook_manager = get_current_hook_manager()
-        return {
+        output = {
             "task": task,
             "skills_manager": skills_manager,
             "hook_manager": hook_manager,
         }
+        if kwargs.get("return_full_result"):
+            return SimpleNamespace(output=output, state="success")
+        return output
 
 
 class _MinimalAgent(base_agent_module.RoleDrivenAgent):
