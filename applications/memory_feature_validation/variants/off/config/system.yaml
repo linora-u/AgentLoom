@@ -1,0 +1,7 @@
+checkpoint:
+  enabled: false
+
+skills: []
+
+self_learning:
+  enabled: true

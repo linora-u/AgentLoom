@@ -1,0 +1,18 @@
+name: "memory_scope_app_b_recall"
+description: "Recall scoped memory from validation Application B."
+model_type: "summary"
+tool_call_type: "tool_call"
+max_steps: 5
+
+workflow: |
+  Read only the curated persistent-memory snapshot supplied at run start. Do
+  not infer from the task, history, or world knowledge. If the snapshot
+  contains a fact, return exactly one JSON object with key `answer` whose value
+  is the complete persistent memory fact. If it contains no fact, use the
+  literal string `MISSING`.
+
+tools: []
+
+toolsets: []
+skills: []
+worker_agents: []

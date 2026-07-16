@@ -163,10 +163,15 @@ class HookManager:
         allow_duplicates: bool = True,
         once: bool = False,
         source: str = "",
+        must_complete: bool = False,
     ) -> None:
         """Register a Python function as a hook.
 
-        Raises ``TypeError`` if *func* is not callable.
+        The must_complete flag is reserved for framework lifecycle effects
+        whose caller cannot safely continue after a timeout. Ordinary hooks
+        should retain the bounded timeout default.
+
+        Raises TypeError if func is not callable.
         """
         if not callable(func):
             logger.error(
@@ -183,6 +188,7 @@ class HookManager:
             "timeout": timeout,
             "once": once,
             "source": source,
+            "must_complete": bool(must_complete),
         }
 
         with self._data_lock:
@@ -388,11 +394,14 @@ class HookManager:
         """Execute a single hook with timeout enforcement.
 
         Config-sourced hooks (command/prompt/http/agent executors) handle
-        their own timeouts internally. Raw Python function hooks run in
-        a daemon thread with a bounded wait as a safety net.
+        their own timeouts internally. Raw Python function hooks normally run
+        in a daemon thread with a bounded wait as a safety net. A framework
+        lifecycle hook may declare must_complete when returning before its
+        side effect commits would violate a caller invariant.
         """
         func = hook_info["func"]
         timeout = hook_info.get("timeout", _DEFAULT_HOOK_TIMEOUT)
+        must_complete = bool(hook_info.get("must_complete", False))
         func_name = getattr(func, "__name__", repr(func))
         source = hook_info.get("source", "")
 
@@ -421,8 +430,9 @@ class HookManager:
         # timeout, Popen Timer, httpx timeout). Raw Python function
         # hooks have no internal timeout mechanism, so we enforce one via
         # a daemon worker thread plus a bounded wait.
-        if source.startswith("config:"):
-            # Executor handles its own timeout -- call directly.
+        if source.startswith("config:") or must_complete:
+            # Config executors own their timeout. A must-complete framework
+            # hook intentionally has no detached timeout boundary.
             res = _invoke()
         else:
             # Python function hook -- run in a daemon thread so timed-out

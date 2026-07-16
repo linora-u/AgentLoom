@@ -15,8 +15,10 @@ Automatic prompt caching:
 """
 
 import uuid
+from collections.abc import Iterator
+from contextlib import contextmanager
 from contextvars import ContextVar
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 from smolagents import AgentLogger, LiteLLMModel
 from smolagents.models import ChatMessage, ChatMessageToolCall, ChatMessageToolCallFunction, MessageRole
@@ -46,8 +48,8 @@ class LiteLLMModelV2(LiteLLMModel):
     The custom headers are preserved and passed through to all completion
     requests made by this model instance.
     """
-    def __init__(self, *args, logger: Optional[AgentLogger] = None,
-                 context_cache=False, system_prompt_boundary: Optional[str] = None,
+    def __init__(self, *args, logger: AgentLogger | None = None,
+                 context_cache=False, system_prompt_boundary: str | None = None,
                  supports_structured_output: str = "false",
                  **kwargs):
         if "supports_native_tool_calls" in kwargs:
@@ -77,7 +79,21 @@ class LiteLLMModelV2(LiteLLMModel):
             f"agentloom_model_tools_{id(self)}",
             default=(),
         )
+        self._require_tool_choice_context: ContextVar[bool] = ContextVar(
+            f"agentloom_require_tool_choice_{id(self)}",
+            default=False,
+        )
         super().__init__(*args, **kwargs)
+
+    @contextmanager
+    def require_tool_calls(self) -> Iterator[None]:
+        """Force native tool choice only for the current Agent action context."""
+        context = self._require_tool_choice_context
+        token = context.set(True)
+        try:
+            yield
+        finally:
+            context.reset(token)
 
     @property
     def agent_id(self) -> Any | None:
@@ -237,6 +253,19 @@ class LiteLLMModelV2(LiteLLMModel):
     def _prepare_completion_kwargs(self, *args, **kwargs):
         completion_kwargs = super()._prepare_completion_kwargs(*args, **kwargs)
 
+        # ToolCallingAgent cannot consume a plain assistant response: every
+        # action step must invoke a registered tool or final_answer. Preserve a
+        # user's model-level ``tool_choice=auto`` for direct model calls, but do
+        # not let that default violate the Agent protocol. ContextVar keeps a
+        # cached model safe when concurrent Agents use different protocols.
+        context = getattr(self, "_require_tool_choice_context", None)
+        if (
+            completion_kwargs.get("tools")
+            and context is not None
+            and context.get()
+        ):
+            completion_kwargs["tool_choice"] = "required"
+
         # Remove </code> from stop sequences. smolagents adds it as a stop token,
         # but some APIs (e.g. ARK) return partial residue ("</cod") when given
         # multiple stops. Removing it is safe: parse_code_blobs uses regex to
@@ -258,7 +287,7 @@ class LiteLLMModelV2(LiteLLMModel):
 
         return None
 
-    def _apply_automatic_caching(self, completion_kwargs: Dict[str, Any]):
+    def _apply_automatic_caching(self, completion_kwargs: dict[str, Any]):
         """
         Apply universal prompt caching by injecting cache_control into system
         message content blocks. Works for ALL models — litellm handles
@@ -276,7 +305,7 @@ class LiteLLMModelV2(LiteLLMModel):
         except Exception as e:
             self.logger.warning(f"Failed to apply automatic caching: {e}")
 
-    def _inject_cache_control(self, messages: List[Dict[str, Any]]):
+    def _inject_cache_control(self, messages: list[dict[str, Any]]):
         """
         Inject cache_control: {"type": "ephemeral"} into system message content blocks.
 

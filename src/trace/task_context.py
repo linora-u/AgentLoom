@@ -50,7 +50,7 @@ _global_hook_manager_fallback: Optional[Any] = None
 # NOTE: the session run id deliberately has NO global fallback. Worker threads
 # inherit it via contextvars.copy_context() (see ParallelAgentExecutor), and a
 # process-wide scalar would leak run A's identity into a concurrently running
-# run B — session memory and injection records would land on the wrong run.
+# run B — history and curated-memory writes would be attributed to the wrong root.
 
 
 class MissingRunContextError(RuntimeError):
@@ -367,7 +367,7 @@ def clear_current_hook_manager() -> None:
 # Session run id — the TOP-LEVEL run's session identity, set only by the
 # session-owning (supervisor) agent.  Workers keep their own hook managers
 # (event attribution stays per-worker) but share this id, so run-scoped
-# state like session memory accrues to the run that gets the SessionEnd.
+# run-owned history/review state accrues to the root that gets the SessionEnd.
 # Pure ContextVar: worker threads see it through copy_context() propagation
 # at the spawn site, and concurrent runs in one process stay isolated.
 # ---------------------------------------------------------------------------

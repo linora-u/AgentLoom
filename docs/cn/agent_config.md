@@ -1459,17 +1459,24 @@ Agent YAML 白名单字段
 
 ### 9.2 可覆盖字段白名单
 
-Agent YAML 中以下 **7 个**顶层字段能覆盖系统配置（源码 `_WORKFLOW_OVERLAY_KEYS`）：
+Agent YAML 中以下顶层字段能覆盖系统配置（源码 `_WORKFLOW_OVERLAY_KEYS`）：
 
 | 字段 | 类型约束 | 说明 |
 |------|----------|------|
 | `system` | `dict` | 系统元数据（name, version, user_agent） |
+| `model_request_headers` | `dict` | 模型请求头 profile |
 | `smart_summary` | `any` | 上下文压缩策略 |
+| `context_engine` | `dict` | 可逆上下文压缩限制 |
 | `tool_access_control` | `dict` | 工作目录和路径过滤 |
 | `execution_env` | `dict` | 执行环境类型和 Shell 路径 |
 | `code_agent` | `dict` | CodeAgent 代码执行权限 |
-| `tools` | `dict` | 工具配置（default, shell, tools_mapping）。注意：这里是 dict 格式，不同于 Agent `tools` list |
+| `tools` | `list` | Agent 工具列表及其最终配置覆盖 |
+| `shell_settings` | `any` | Shell 安全配置 |
+| `tools_mapping` | `any` | 工具映射覆盖 |
+| `default_toolsets` / `toolsets` | `any` | 默认工具集或工具集替换 |
 | `prompt` | `str`/`dict` | 自定义 System Prompt 模板路径 |
+| `mcp_servers` | `str`/`list`/`dict` | MCP server 配置 |
+| `self_learning` | `dict` | History 与可选 memory review 策略 |
 
 > ⚠️ **重要**：上面的白名单是按 **每个 Agent YAML 独立计算** 的，不是按调用链传递。Supervisor 调用 Worker 时，Worker 的 `tool_access_control`、`execution_env`、`prompt` 等覆盖项会从 Worker YAML 重新构建，而不是自动继承 Supervisor。
 >

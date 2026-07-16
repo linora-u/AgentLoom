@@ -1,0 +1,4 @@
+self_learning:
+  memory:
+    review_model: ""
+    write_approval: false

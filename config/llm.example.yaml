@@ -49,5 +49,9 @@ model:
     temperature: 0.2
     max_tokens: 128000
     timeout: 300
+    # Completed-run memory review owns its four-call budget and does not use
+    # SDK retries. One action step must not duplicate a side-effecting tool.
+    num_retries: 0
+    parallel_tool_calls: false
     requests_per_minute: 10
     context_cache: true

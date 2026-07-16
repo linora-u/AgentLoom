@@ -8,7 +8,18 @@ from dataclasses import asdict, dataclass, field
 from datetime import datetime
 from typing import Any
 
-from .redaction import redact_mapping, require_safe_identity, sanitize_text_fragment
+from src.lib.trusted_memory_evidence import (
+    TRUSTED_MEMORY_EVIDENCE_RESPONSE_KEY,
+)
+
+from .redaction import (
+    BLOCKED_TEXT,
+    redact_mapping,
+    require_safe_identity,
+    sanitize_text_fragment,
+    sanitize_text_fragment_with_taint,
+    sanitize_value_fragments_with_taint,
+)
 
 _MAX_CONTENT_CHARS = 60000
 _IDENTITY_FIELDS = (
@@ -111,8 +122,9 @@ class CanonicalSessionEvent:
             field="event step_number",
         )
 
-    def to_record(self) -> dict[str, Any]:
+    def to_record_with_safety(self) -> tuple[dict[str, Any], bool]:
         record = asdict(self)
+        safety_tainted = False
         # Revalidate at the storage boundary as well as construction time.  A
         # frozen dataclass can still be altered through low-level Python APIs;
         # no such value may reach SQLite's permissive INTEGER affinity.
@@ -124,18 +136,46 @@ class CanonicalSessionEvent:
         for key in _IDENTITY_FIELDS:
             record[key] = safe_run_id(record.get(key, ""))
         for key in _TEXT_FIELDS:
-            record[key] = sanitize_text_fragment(record.get(key, ""))
-        record["content"] = sanitize_text_fragment(
+            record[key], field_tainted = sanitize_text_fragment_with_taint(
+                record.get(key, "")
+            )
+            safety_tainted = safety_tainted or field_tainted
+        record["content"], field_tainted = sanitize_text_fragment_with_taint(
             record.get("content", ""), max_chars=_MAX_CONTENT_CHARS
         )
-        record["content_text"] = sanitize_text_fragment(
+        safety_tainted = safety_tainted or field_tainted
+        record["content_text"], field_tainted = sanitize_text_fragment_with_taint(
             record.get("content_text", "") or record.get("content", ""),
             max_chars=_MAX_CONTENT_CHARS,
         )
-        record["input_data"] = redact_mapping(record.get("input_data") or {})
-        record["output_data"] = redact_mapping(record.get("output_data") or {})
-        record["metadata"] = redact_mapping(record.get("metadata") or {})
-        return record
+        safety_tainted = safety_tainted or field_tainted
+        for key in ("input_data", "output_data", "metadata"):
+            sanitized_value, field_tainted = sanitize_value_fragments_with_taint(
+                record.get(key) or {}
+            )
+            if sanitized_value == BLOCKED_TEXT:
+                marker_key = (
+                    "input"
+                    if key == "input_data"
+                    else "result"
+                    if key == "output_data"
+                    else "value"
+                )
+                sanitized_value = {marker_key: BLOCKED_TEXT}
+            record[key] = sanitized_value
+            safety_tainted = safety_tainted or field_tainted
+        # This process-internal handoff is persisted in a separate table by
+        # SessionRecorder. Ordinary events and imported JSONL can never mint
+        # reviewer evidence by carrying the reserved response key.
+        if isinstance(record["output_data"], dict):
+            record["output_data"].pop(
+                TRUSTED_MEMORY_EVIDENCE_RESPONSE_KEY,
+                None,
+            )
+        return record, safety_tainted
+
+    def to_record(self) -> dict[str, Any]:
+        return self.to_record_with_safety()[0]
 
     @classmethod
     def from_record(cls, record: dict[str, Any]) -> CanonicalSessionEvent:
@@ -161,6 +201,9 @@ class CanonicalSessionEvent:
             data_value = values.get(data_key)
             if not isinstance(data_value, dict):
                 data_value = {}
+            if data_key == "output_data":
+                data_value = dict(data_value)
+                data_value.pop(TRUSTED_MEMORY_EVIDENCE_RESPONSE_KEY, None)
             values[data_key] = redact_mapping(data_value)
         metadata = values.get("metadata")
         if not isinstance(metadata, dict):

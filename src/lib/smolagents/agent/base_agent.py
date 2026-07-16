@@ -8,6 +8,7 @@ Provides shared capabilities such as model management and execution environment 
 import os
 import uuid
 from abc import ABC, abstractmethod
+from contextlib import nullcontext
 from copy import deepcopy
 from dataclasses import dataclass, replace
 from enum import Enum
@@ -17,10 +18,13 @@ from typing import Any, Callable, List, Optional
 
 from smolagents import (
     AgentLogger,
+    AgentGenerationError,
+    AgentParsingError,
     AgentToolCallError,
     AgentToolExecutionError,
     CodeAgent,
     LogLevel,
+    RunResult,
     Tool,
     ToolCallingAgent,
     validate_tool_arguments,
@@ -34,7 +38,10 @@ from src.lib.smolagents.models.model_manager import (
 from src.lib.smolagents.memory.context_compression import ConversationHistoryManager
 from src.lib.smolagents.monkey_patch import install_agentloom_runtime_adapters
 from src.lib.smolagents.agent.tool_argument_coercion import coerce_tool_arguments
-from src.lib.smolagents.models.tool_call_parser import parse_json_with_repair
+from src.lib.smolagents.models.tool_call_parser import (
+    ToolCallParseError,
+    parse_json_with_repair,
+)
 from src.lib.smolagents.skills.skills import SkillsManager
 from src.lib.logging import (
     get_global_logger,
@@ -101,9 +108,63 @@ def _normalize_tool_arguments_object(arguments: dict[str, Any] | str) -> dict[st
     return parsed if isinstance(parsed, dict) else arguments
 
 
+def _require_successful_runtime_result(run_result: Any) -> None:
+    """Reject structured runtime results that did not finish successfully."""
+    run_state = str(getattr(run_result, "state", "") or "")
+    if run_state != "success":
+        state_label = run_state or "missing_run_state"
+        raise RuntimeError(
+            "Agent run did not complete successfully: "
+            f"{state_label}"
+        )
 
 
-class CodeAgentV2(LoomAgentMixin, CodeAgent):
+class _SuccessfulRunStateMixin:
+    """Preserve the runtime return shape while rejecting failed run states."""
+
+    def run(
+        self,
+        task: str,
+        stream: bool = False,
+        reset: bool = True,
+        images: Any = None,
+        additional_args: dict | None = None,
+        max_steps: int | None = None,
+        return_full_result: bool | None = None,
+        **kwargs,
+    ) -> Any:
+        if stream:
+            return super().run(
+                task,
+                stream=stream,
+                reset=reset,
+                images=images,
+                additional_args=additional_args,
+                max_steps=max_steps,
+                return_full_result=return_full_result,
+                **kwargs,
+            )
+
+        wants_full_result = (
+            bool(getattr(self, "return_full_result", False))
+            if return_full_result is None
+            else return_full_result
+        )
+        run_result = super().run(
+            task,
+            stream=False,
+            reset=reset,
+            images=images,
+            additional_args=additional_args,
+            max_steps=max_steps,
+            return_full_result=True,
+            **kwargs,
+        )
+        _require_successful_runtime_result(run_result)
+        return run_result if wants_full_result else run_result.output
+
+
+class CodeAgentV2(_SuccessfulRunStateMixin, LoomAgentMixin, CodeAgent):
     def __init__(
         self,
         *args,
@@ -120,7 +181,7 @@ class CodeAgentV2(LoomAgentMixin, CodeAgent):
         super().__init__(*args, **kwargs)
 
 
-class ToolCallingAgentV2(LoomAgentMixin, ToolCallingAgent):
+class ToolCallingAgentV2(_SuccessfulRunStateMixin, LoomAgentMixin, ToolCallingAgent):
     def __init__(
         self,
         *args,
@@ -131,7 +192,7 @@ class ToolCallingAgentV2(LoomAgentMixin, ToolCallingAgent):
         # ToolCallingAgent does not support these parameters
         kwargs.pop("executor_type", None)
         kwargs.pop("executor_kwargs", None)
-        
+
         max_tokens = kwargs.pop("max_tokens", None)
         smart_summary = kwargs.pop("smart_summary", True)
         self._init_loom_agent(
@@ -140,6 +201,28 @@ class ToolCallingAgentV2(LoomAgentMixin, ToolCallingAgent):
             smart_summary=smart_summary,
         )
         super().__init__(*args, **kwargs)
+
+    def _step_stream(self, memory_step):
+        """Keep each tool-calling action step inside its required-call protocol."""
+        require_tool_calls = getattr(self.model, "require_tool_calls", None)
+        required_call_context = (
+            require_tool_calls() if callable(require_tool_calls) else nullcontext()
+        )
+        try:
+            with required_call_context:
+                yield from super()._step_stream(memory_step)
+        except AgentGenerationError as exc:
+            # LiteLLMModelV2 validates native tool calls at the provider
+            # boundary. A bad tool name is model output, not an infrastructure
+            # or implementation failure, so feed it back as a recoverable
+            # parsing error and let the next ReAct step correct itself.
+            cause = exc.__cause__
+            if isinstance(cause, ToolCallParseError):
+                raise AgentParsingError(
+                    f"Error while parsing tool call from model output: {cause}",
+                    self.logger,
+                ) from cause
+            raise
 
     def execute_tool_call(self, tool_name: str, arguments: dict[str, str] | str) -> Any:
         """Execute a tool with AgentLoom-local schema-bound argument coercion."""
@@ -440,18 +523,13 @@ class BaseAgent(ABC):
             return tasks
         try:
             from src.extensions.self_learning.memory_store import MemoryStore
-            from src.extensions.self_learning.paths import config_bool
+            from src.extensions.self_learning.paths import self_learning_enabled
 
-            if not config_bool("enabled", True):
+            effective_config = getattr(self, "_effective_agent_config", None) or self._config
+            if not self_learning_enabled(effective_config):
                 return tasks
             snapshot = MemoryStore().snapshot_for_prompt(
-                agent_config=getattr(self, "_effective_agent_config", None) or self._config,
-                # Workers share the supervisor's session run id so they see the
-                # run's shared session notes and injections attribute to the
-                # run that SessionEnd will score.
-                session_run_id=require_root_run_id(),
-                task_text=str(tasks[0])[:2000],
-                record_usage=True,
+                agent_config=effective_config,
             )
         except Exception as exc:
             if self._logger:
@@ -1333,10 +1411,16 @@ class RoleDrivenAgent(BaseAgent):
 
                 # Pass reset=False when resuming (preserves injected memory) and
                 # for later workflow items (preserves memory from previous runs).
-                # Use **kwargs to stay compatible with mock agents in tests.
+                # Always request the structured result.  smolagents otherwise
+                # returns only its fallback output for a max-steps termination,
+                # which is indistinguishable from a successful final answer and
+                # would incorrectly emit TaskCompleted and run memory review.
                 result = None
                 for task_index, current_task in enumerate(transformed_tasks):
-                    run_kwargs: dict = {"task": current_task}
+                    run_kwargs: dict = {
+                        "task": current_task,
+                        "return_full_result": True,
+                    }
                     if additional_args:
                         run_kwargs["additional_args"] = dict(additional_args)
                     if resume or task_index > 0:
@@ -1346,7 +1430,9 @@ class RoleDrivenAgent(BaseAgent):
                         and getattr(runtime_agent, "_agent_loom_supports_reset_false_task_step_control", False)
                     ):
                         run_kwargs["_skip_task_step_on_reset_false"] = False
-                    result = runtime_agent.run(**run_kwargs)
+                    run_result = runtime_agent.run(**run_kwargs)
+                    _require_successful_runtime_result(run_result)
+                    result = getattr(run_result, "output", None)
 
                 # Compatibility fallback for wrapper paths that cannot read
                 # memory directly from the runtime agent.
@@ -1389,6 +1475,39 @@ class RoleDrivenAgent(BaseAgent):
                         result=session_result,
                         error=session_error,
                     )
+                    if session_error is None:
+                        # SessionEnd owns only the short, deterministic ledger
+                        # write. Once a successful run is recorded, the root
+                        # owner may perform the optional synchronous review
+                        # while its trusted binding is still alive. Workers do
+                        # not enter this block, and review failure cannot change
+                        # the successful task result.
+                        try:
+                            from src.extensions.self_learning.paths import (
+                                memory_review_model,
+                                self_learning_enabled,
+                            )
+
+                            effective_config = (
+                                self._effective_agent_config or self._config
+                            )
+                            if (
+                                self_learning_enabled(effective_config)
+                                and memory_review_model(effective_config)
+                            ):
+                                from src.extensions.self_learning.reviewer import (
+                                    review_finished_run,
+                                )
+
+                                review_finished_run(
+                                    root_run_id=require_root_run_id(),
+                                    agent_config=effective_config,
+                                )
+                        except Exception:
+                            if self._logger:
+                                self._logger.warning(
+                                    "Completed-run memory review failed unexpectedly"
+                                )
                 if previous_model_agent_id is not ...:
                     self._model.agent_id = previous_model_agent_id
 
@@ -1517,6 +1636,13 @@ class SubTaskTrackedAgent:
 
             try:
                 result = callable_fn(task, *args, **kwargs)
+                # RoleDrivenAgent requests a structured RunResult from its
+                # smolagents runtime.  Validate that result before crossing
+                # the checkpoint success boundary; the outer RoleDrivenAgent
+                # check is intentionally too late to prevent a completed
+                # worker checkpoint from being reused on resume.
+                if isinstance(result, RunResult):
+                    _require_successful_runtime_result(result)
             except KeyboardInterrupt:
                 if coord is not None:
                     coord.record_worker_interrupted(
