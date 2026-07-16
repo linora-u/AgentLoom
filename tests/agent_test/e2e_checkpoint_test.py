@@ -61,9 +61,12 @@ def phase_interrupt():
 def phase_check():
     """List all saved checkpoints."""
     print("[E2E] Phase 2: Checking saved checkpoints...")
+    from src.lib.config import C
     from src.lib.checkpoint.checkpoint_manager import list_all_tasks
+    from src.lib.runtime import resolve_runtime_home
 
-    tasks = list_all_tasks()
+    checkpoints_root = resolve_runtime_home(C.raw, agent_root=C.agent_root).root_dir / "checkpoints"
+    tasks = list_all_tasks(checkpoints_root=checkpoints_root)
     if not tasks:
         print("[E2E] No checkpoints found!")
         return
@@ -77,7 +80,7 @@ def phase_check():
     import json
     from pathlib import Path
     for t in tasks:
-        base = Path(f".runtime/{t['agent_name']}/checkpoints/{t['task_id']}")
+        base = Path(t["checkpoint_dir"])
         ckpt = base / "checkpoint.json"
         hb = base / "heartbeat.json"
         if ckpt.exists():

@@ -24,7 +24,7 @@ The configuration loading order is `config/system.yaml` → `config/llm.yaml` �
 - [5. lsp_servers — LSP Language Server Configuration](#5-lsp_servers--lsp-language-server-configuration)
 - [6. execution_env — Execution Environment Configuration](#6-execution_env--execution-environment-configuration)
 - [6. code_agent — CodeAgent Code Execution Permissions](#6-code_agent--codeagent-code-execution-permissions)
-- [7. logging — Logging Configuration](#7-logging--logging-configuration)
+- [7. runtime and logging — Runtime Storage and Logging](#7-runtime-and-logging--runtime-storage-and-logging)
 - [8. tools — Tool System Configuration](#8-tools--tool-system-configuration)
 - [9. tool_access_control — Tool Access Control](#9-tool_access_control--tool-access-control)
 - [10. tool_metadata — Tool Metadata Configuration](#10-tool_metadata--tool-metadata-configuration)
@@ -92,13 +92,24 @@ code_agent:
   additional_functions: "*"
 
 # ============================================
+# Runtime Storage and Retention
+# ============================================
+runtime:
+  root_dir: ".agentloom"
+  successful_run_retention_days: 7
+  failed_run_retention_days: 30
+  artifact_retention_days: 3
+  cleanup_interval_hours: 24
+
+# ============================================
 # Logging Configuration
 # ============================================
 logging:
-  enabled: true
   level: "INFO"
-  file_path: null
-  dir: ".logs"
+  console_enabled: true
+  file_enabled: true
+  max_file_bytes: 26214400
+  backup_count: 3
 
 # ============================================
 # Default Toolsets
@@ -752,65 +763,55 @@ code_agent:
 
 ---
 
-## 7. logging — Logging Configuration
+## 7. runtime and logging — Runtime Storage and Logging
 
-Controls the verbosity and output destination of system logs. The unified logging entry point is `src.lib.logging`, managed as "one log file per Python process lifecycle".
+`runtime` defines the single framework-owned storage root and bounded retention. `logging` controls the console and the run-scoped file backend. Logger state is bound to the current run; it is not shared as a process-global output path.
 
-**YAML path**: `logging.*`
+Both sections are global-only. Application-level `config/system.yaml` and Agent YAML containing either section are rejected, so a typo or misplaced override cannot silently fragment—or pretend to move—task discovery across runtime roots.
+
+An isolated subprocess or validation harness may set `AGENTLOOM_RUNTIME_ROOT`. It overrides the complete canonical runtime home—runs, checkpoints, sessions, learning, and `self_learning.db` move together; there is no self-learning-only root override.
+
+**YAML paths**: `runtime.*`, `logging.*`
 
 | Parameter | Type | Default | Required | Description |
 |------|------|--------|------|------|
-| `logging.enabled` | `bool` | `true` | ❌ No | Whether to enable the logging system |
-| `logging.level` | `str` | `"INFO"` | ❌ No | Log filtering level (case-insensitive) |
-| `logging.file_path` | `str` \| `null` | `null` | ❌ No | Specify log file path. Auto-generated when `null` |
-| `logging.dir` | `str` | `".logs"` | ❌ No | Root directory for auto-generated logs |
+| `runtime.root_dir` | `str` | `".agentloom"` | ❌ No | Only root for framework runtime state. Relative paths resolve from the project root; absolute paths are accepted |
+| `runtime.successful_run_retention_days` | `int` | `7` | ❌ No | Retention for completed run directories |
+| `runtime.failed_run_retention_days` | `int` | `30` | ❌ No | Retention for failed/interrupted run directories |
+| `runtime.artifact_retention_days` | `int` | `3` | ❌ No | Retention for raw `artifacts/` inside a retained run |
+| `runtime.cleanup_interval_hours` | `int` | `24` | ❌ No | Minimum interval between automatic cleanup attempts |
+| `logging.level` | `str` \| `int` | `"INFO"` | ❌ No | Log filtering level (case-insensitive) |
+| `logging.console_enabled` | `bool` | `true` | ❌ No | Write formatted runtime messages to the console |
+| `logging.file_enabled` | `bool` | `true` | ❌ No | Write the current attempt to `logs/runtime.log` |
+| `logging.max_file_bytes` | `int` | `26214400` | ❌ No | Maximum bytes per runtime log segment (25 MiB) |
+| `logging.backup_count` | `int` | `3` | ❌ No | Number of rotated runtime log segments |
 
-### 7.1 logging.level Details
+### 7.1 Canonical paths and lifecycle
 
-The framework uses `LogLevelParser` to read `logging.level`, supporting standard `logging` levels and the special value `OFF`:
+Each attempt writes under `.agentloom/runs/<application_id>/<run_id>/`:
 
-| Value | Meaning | Use Case |
-|----|------|----------|
-| `"DEBUG"` | Pass through all framework internal flow details | Troubleshooting, inspecting underlying requests |
-| `"INFO"` | **(Default)** Display core runtime status and step prompts | Daily use |
-| `"WARNING"` / `"WARN"` | Suppress normal flow, only expose warnings and alerts | Simplified output |
-| `"ERROR"` | Only capture exceptions and errors | Production environments |
-| `"CRITICAL"` | Only capture severe exceptions | Extremely minimal |
-| `"OFF"` | Completely disable logging (actually sets to `CRITICAL + 10`) | Silent mode |
-
-Integer values are also supported (e.g., `10` = DEBUG, `20` = INFO, `30` = WARNING).
-
-### 7.2 logging.file_path and logging.dir
-
-- When `file_path` specifies a concrete path, the current process writes to that file throughout its lifetime
-- When `file_path` is `null`, the framework auto-generates log files under the `dir` directory, with naming convention:
-  - `{logging.dir}/{app_name}/{timestamp}/{app_name}.log`
-  - Shell audit logs from the same run are co-located in the same timestamp directory: `{logging.dir}/{app_name}/{timestamp}/shell_audit.log`
-  - If multiple runs start within the same second, the timestamp directory name automatically appends a suffix `_1`, `_2` to avoid overwriting
-
-**Examples**:
-
-```yaml
-# Default configuration (auto log file)
-logging:
-  enabled: true
-  level: "INFO"
-  file_path: null
-  dir: ".logs"
-
-# Debug mode (specified log file)
-logging:
-  enabled: true
-  level: "DEBUG"
-  file_path: "/tmp/agent_loom_debug.log"
-
-# Silent mode
-logging:
-  enabled: true
-  level: "OFF"
+```text
+manifest.json
+logs/runtime.log[.1-.3]
+audit/shell.jsonl[.1-.2]
+artifacts/{shell,background,skills}/
 ```
 
-> **Note**: Due to security and configuration isolation mechanisms, configuring `logging` in Agent YAML or application-level `system.yaml` is ineffective (it will be filtered and ignored by the system). All logging policies must be configured uniformly in the top-level global `config/system.yaml`.
+The Shell audit uses its own fixed 10 MiB segments and two backups. A resumed task receives a new `run_id` and run directory while keeping its original `task_id` and `.agentloom/checkpoints/<application_id>/<task_id>/` state. File logging can be disabled without disabling the checkpoint or Shell audit:
+
+```bash
+loom run applications/<app>/workflows/<agent>.yaml --no-file-log
+```
+
+There is no `--log-to-file`, `logging.enabled`, `logging.dir`, or `logging.file_path` compatibility path.
+
+### 7.2 Retention and storage boundaries
+
+Automatic cleanup runs at most once per configured interval. `loom clean-runtime` applies the policy explicitly. It only deletes eligible run directories or their raw artifacts; it never traverses checkpoints, `.agentloom/legacy/`, `.runtime/`, or Application-owned output directories.
+
+`.runtime/` remains the Agent-visible recall/todo workspace and is semantically independent from `.agentloom/`. `loom migrate-runtime --dry-run` previews valid legacy checkpoint candidates; `loom migrate-runtime --apply` migrates them and archives the complete old `.logs` tree under `.agentloom/legacy/`.
+
+To verify a real attempt, read `manifest.json`, `logs/runtime.log`, and `audit/shell.jsonl`; an exit code alone is not sufficient.
 
 ---
 
@@ -1197,7 +1198,7 @@ tool_output_limits:
 
 ---
 
-## 10. checkpoint — Checkpoint, Resume & Heartbeat
+## 12. checkpoint — Checkpoint, Resume & Heartbeat
 
 Controls Agent task **checkpoint/resume**, **heartbeat monitoring**, and **crash detection**. Enabled globally by default — every application built on AgentLoom gains this capability automatically with no extra configuration required.
 
@@ -1210,44 +1211,44 @@ Controls Agent task **checkpoint/resume**, **heartbeat monitoring**, and **crash
 | `checkpoint.max_resume_age` | `int` (sec) | `604800` | ❌ No | Maximum checkpoint retention period (7 days). Checkpoints older than this are treated as expired and cannot be resumed |
 | `checkpoint.heartbeat_interval` | `int` (sec) | `5` | ❌ No | Heartbeat file write interval. A daemon thread writes process state (PID, step count, timestamp) to disk at this frequency for crash detection |
 
-### 10.1 Runtime Directory Structure
+### 12.1 Runtime Directory Structure
 
-Checkpoint data is written inside each run's timestamp log directory, co-located with the run log:
+Run evidence and task recovery state have independent lifecycles under the same runtime root:
 
-```
-.logs/{supervisor_name}/
-├── .task_index.json                        # Index: task_id → timestamp mapping (for fast --resume lookup)
-├── 20260413_104447/                        # Per-run timestamp directory
-│   ├── {supervisor_name}.log               # Run log
-│   └── checkpoints/{task_id}/              # Checkpoint data for this run
-│       ├── task_tree.json                  # Task metadata (status, worker call records, created_at)
-│       ├── checkpoint.json                 # Supervisor Agent memory steps snapshot
-│       ├── heartbeat.json                  # Supervisor heartbeat (pid, timestamp, step, status)
-│       ├── file-history/                   # File edit history backups
-│       └── workers/{worker_name}/
-│           ├── checkpoint.json             # Worker Agent memory snapshot per call
-│           └── heartbeat.json              # Worker heartbeat (aggregated across concurrent calls)
-└── 20260413_104837/
-    ├── {supervisor_name}.log
-    └── checkpoints/{task_id}/
-        └── ...
+```text
+.agentloom/
+├── runs/<application_id>/<run_id>/
+│   ├── manifest.json
+│   ├── logs/runtime.log[.1-.3]
+│   ├── audit/shell.jsonl[.1-.2]
+│   └── artifacts/{shell,background,skills}/
+└── checkpoints/<application_id>/<task_id>/
+    ├── task_events.jsonl
+    ├── task_tree.json
+    ├── checkpoint.json
+    ├── heartbeat.json
+    ├── workers/<worker_name>/calls/<call_index>/checkpoint.json
+    ├── context_store/
+    └── file-history/
 ```
 
 **Key design decisions**:
-- Checkpoints always remain in the timestamp directory where they were first created; they are not migrated on resume
-- `.task_index.json` records the `task_id → timestamp` mapping for O(1) lookup during `--resume`
-- If the index is lost, the system automatically scans all timestamp directories as a degraded fallback
+- `run_id` changes for every attempt; `task_id` remains stable across resume
+- The run manifest records `task_id`; checkpoint run events and heartbeat record the current `run_id`
+- Checkpoint lookup uses the canonical Application/task path and never depends on logs, `.task_index.json`, or a legacy scan
+- Log closing, rotation, and runtime retention cannot remove checkpoint state
+- `.runtime/` remains a separate Agent-visible workspace; Application `output_dir` remains Application-owned
 
 > For the full Checkpoint & Resume reference, see [Checkpoint & Resume](checkpoint.md).
 
-### 10.2 Heartbeat Mechanism & Crash Detection
+### 12.2 Heartbeat Mechanism & Crash Detection
 
 The framework maintains two levels of heartbeat:
 
 | Level | File Location | Payload Fields |
 |-------|--------------|----------------|
-| **Supervisor** | `{task_id}/heartbeat.json` | `pid`, `timestamp`, `timestamp_iso`, `status`, `step`, `agent_name` |
-| **Worker** | `{task_id}/workers/{name}/heartbeat.json` | `agent_name`, `pid`, `timestamp`, `calls` (per concurrent call: `status`, `step`, `started_at`, `finished_at`) |
+| **Supervisor** | `{task_id}/heartbeat.json` | `pid`, `run_id`, `timestamp`, `timestamp_iso`, `status`, `step`, `agent_name` |
+| **Worker** | `{task_id}/workers/{name}/heartbeat.json` | `agent_name`, `run_id`, `pid`, `timestamp`, `calls` (per concurrent call: `status`, `step`, `started_at`, `finished_at`) |
 
 **Crash detection logic** (`HEARTBEAT_STALE_THRESHOLD = 30` seconds):
 
@@ -1257,15 +1258,16 @@ The framework maintains two levels of heartbeat:
 4. Heartbeat timestamp older than 30 seconds → `crashed`
 5. None of the above → `running`
 
-### 10.3 Resume Flow
+### 12.3 Resume Flow
 
 When a checkpoint for a `task_id` is found within `max_resume_age` and its status is non-normal (`crashed`/`interrupted`), the framework automatically:
 
 1. Restores Supervisor memory steps from `checkpoint.json` (skipping already-completed reasoning steps)
-2. For each Worker call, checks the `input_hash` cache in `task_tree.json` — if the input matches and the call completed, returns the cached result (skips re-execution)
-3. Continues execution from the interruption point until the task completes
+2. Restores the task-scoped ContextStore and file-history index
+3. For each Worker call, resumes incomplete memory under the same `call_index`, or returns a completed cached result when `input_hash` matches
+4. Creates a new run directory and continues with a new `run_id` until the task completes
 
-### 10.4 Configuration Examples
+### 12.4 Configuration Examples
 
 ```yaml
 # Debug scenario: retain checkpoints, shorten resume window
@@ -1295,6 +1297,8 @@ The framework uses Pydantic to validate system configuration. The following show
 | `system.*` | `SystemSettings` | `src/lib/config/config_validation.py` |
 | `model_request_headers.*` | `ModelRequestHeadersSettings` | `src/lib/config/config_validation.py` |
 | `tool_access_control.*` | `ToolAccessControlSettings` | `src/lib/config/config_validation.py` |
+| `runtime.*` | `RuntimeSettings` | `src/lib/config/config_validation.py` |
+| `logging.*` | `LoggingSettings` | `src/lib/config/config_validation.py` |
 
 **`RootSettings` complete field definitions**:
 
@@ -1303,6 +1307,8 @@ The framework uses Pydantic to validate system configuration. The following show
 | `system` | `SystemSettings` | `SystemSettings()` |
 | `model_request_headers` | `ModelRequestHeadersSettings` | `ModelRequestHeadersSettings()` |
 | `tool_access_control` | `ToolAccessControlSettings` | `ToolAccessControlSettings()` |
+| `runtime` | `RuntimeSettings` | `RuntimeSettings()` |
+| `logging` | `LoggingSettings` | `LoggingSettings()` |
 | `smart_summary` | `bool` | `True` |
 | `model` | `dict[str, Any]` | `{}` |
 | `execution_env` | `dict[str, Any]` | `{}` |
@@ -1311,13 +1317,13 @@ The framework uses Pydantic to validate system configuration. The following show
 | `tool_metadata` | `dict[str, Any]` | `{}` |
 | `tool_output_limits` | `dict[str, Any]` | `{}` |
 
-> All models are set with `extra="allow"`, allowing extension fields. `prompt` is one such top-level extra key, passed through via overlay merging to the final configuration, but not as an explicit `RootSettings` field.
+> `RootSettings` allows extension fields, so top-level fields such as `prompt` can participate in overlay merging. `RuntimeSettings` and `LoggingSettings` deliberately use `extra="forbid"`; removed runtime/logging keys fail validation instead of silently selecting a second storage path.
 
 **Fault-tolerant parsing tool set**:
 
 | Parser | Purpose | Located in |
 |--------|------|------|
-| `BoolParser` | Compatible boolean input normalization, used for `logging.enabled`, Skill `allow-scripts` / `allow-network` parsing, and some LLM config switches | `config_validation.py` / `src/lib/logging/logger_manager.py` / `src/lib/smolagents/agent/base_agent.py` / `src/lib/config/llm_config.py` |
+| `BoolParser` | Compatible boolean input normalization, used for `logging.console_enabled` / `logging.file_enabled`, Skill `allow-scripts` / `allow-network`, and some LLM config switches | `config_validation.py` / `src/lib/logging/logger_manager.py` / `src/lib/smolagents/agent/base_agent.py` / `src/lib/config/llm_config.py` |
 | `IntParser` | Compatible integer and bypass string input, used for `max_tokens` in model config (supports `"max"`) | `config_validation.py` / `src/lib/config/llm_config.py` |
 | `FloatParser` | Compatible float and integer string input, used for `temperature`, `retry_delay`, `max_retry_delay` in model config | `config_validation.py` / `src/lib/config/llm_config.py` |
 | `EnumParser` | General-purpose enum normalization helper, not currently consumed directly in the system.yaml main pipeline | `config_validation.py` |
@@ -1375,7 +1381,9 @@ The following table shows the support status of each configuration key at differ
 | `system` | ✅ Supported | ✅ Supported | ✅ Supported |
 | `smart_summary` | ✅ Supported | ✅ Supported | ✅ Supported |
 | `skills` | ✅ Supported | ✅ Supported | ✅ Supported (Agent private) |
-| `logging` | ✅ Supported | ❌ Ignored | ❌ Ignored |
+| `runtime` | ✅ Supported | ❌ Rejected | ❌ Rejected |
+| `logging` | ✅ Supported | ❌ Rejected | ❌ Rejected |
+| `checkpoint` | ✅ Supported | ✅ Supported | ❌ Ignored |
 | `tool_access_control` | ✅ Supported | ✅ Supported | ✅ Supported |
 | `execution_env` | ✅ Supported | ✅ Supported | ✅ Supported |
 | `code_agent` | ✅ Supported | ✅ Supported | ✅ Supported |
@@ -1401,28 +1409,3 @@ tool_access_control:
 - `system.name`: Remains `"AgentLoom"` ✅ Inherited from global
 - `logging.level`: Remains `"INFO"` ✅ Inherited from global
 - All other fields: Remain at global configuration values ✅
-
----
-
-## 12. checkpoint — Checkpoint, Resume & Heartbeat
-
-Controls task checkpoint/resume and heartbeat monitoring behavior. See [checkpoint.md](../cn/checkpoint.md) for detailed documentation.
-
-**YAML path**: `checkpoint.*`
-
-| Parameter | Type | Default | Required | Description |
-|------|------|--------|------|------|
-| `checkpoint.enabled` | `bool` | `true` | ❌ No | Global switch: enable/disable checkpoint & resume |
-| `checkpoint.cleanup_on_success` | `bool` | `true` | ❌ No | Auto-delete checkpoint directory after successful completion |
-| `checkpoint.max_resume_age` | `int` | `604800` | ❌ No | Max checkpoint retention in seconds (default 7 days) |
-| `checkpoint.heartbeat_interval` | `float` | `5.0` | ❌ No | Heartbeat write interval (seconds) for crash detection |
-
-**Example**:
-
-```yaml
-checkpoint:
-  enabled: true
-  cleanup_on_success: true
-  max_resume_age: 604800
-  heartbeat_interval: 5
-```

@@ -1620,7 +1620,9 @@ The `security_checks` dictionary supports 10 independent toggles. Undeclared key
 
 When an agent executes shell commands, security-related events (blocks, path violations, stall detection, timeouts, etc.) are automatically written to a dedicated audit log file:
 
-**File location**: `.logs/{agent_name}/{timestamp}/shell_audit.log`
+**File location**: `.agentloom/runs/<application_id>/<run_id>/audit/shell.jsonl`
+
+The same attempt's manifest and main log are `manifest.json` and `logs/runtime.log`. The audit file rotates at 10 MiB with two backups and remains available even when this run uses `--no-file-log`.
 
 Configuration (in `config/system.yaml` or agent YAML `shell_settings`):
 
@@ -1631,31 +1633,26 @@ shell_settings:
     log_success: false    # Also log successful executions (default: false)
 ```
 
-Each audit entry includes timestamp, event type, agent name, command, details, and an **actionable suggestion** that tells you exactly which YAML setting to change:
+Each line is one JSON object with a timestamp, event type, agent name, command, details, and an **actionable suggestion** that tells you exactly which YAML setting to change:
 
-```
-[2026-04-08 13:41:46] [SECURITY_BLOCK] agent=code_reviewer
-  command: $(cat /etc/passwd)
-  check: command_substitution
-  message: Blocked: $() command substitution detected
-  suggestion: To disable this check for a specific agent, add the following
-    to the agent YAML:
-      shell_settings:
-        security_checks:
-          command_substitution: false
+```json
+{"timestamp":"2026-04-08T13:41:46+00:00","event_type":"SECURITY_BLOCK","agent":"code_reviewer","command":"$(cat /etc/passwd)","check_id":"command_substitution","message":"Blocked: $() command substitution detected","suggestion":"Review shell_settings.security_checks.command_substitution"}
 ```
 
 When troubleshooting shell permission issues, checking the audit log is much more efficient than searching through the main application log:
 
 ```bash
-# Find all audit logs
-find .logs/ -name 'shell_audit_*.log' | sort
+# Find all run manifests and audit logs
+find .agentloom/runs -name manifest.json -o -name shell.jsonl
 
-# View the latest audit log for an agent
-ls -t .logs/my_agent/shell_audit_*.log | head -1 | xargs cat
+# Read the latest attempt's identity and audit
+manifest=$(find .agentloom/runs -name manifest.json -type f -print | sort | tail -1)
+run_dir=$(dirname "$manifest")
+sed -n '1,160p' "$manifest"
+tail -n 100 "$run_dir/audit/shell.jsonl"
 
 # Search by event type
-grep 'SECURITY_BLOCK\|WHITELIST_REJECT\|PATH_VIOLATION' .logs/my_agent/shell_audit_*.log
+rg 'SECURITY_BLOCK|WHITELIST_REJECT|PATH_VIOLATION' "$run_dir/audit/shell.jsonl"
 ```
 
 ---

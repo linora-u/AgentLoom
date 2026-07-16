@@ -8,11 +8,11 @@ write) and optionally :meth:`_on_stopping` (cleanup before the final write).
 from __future__ import annotations
 
 import atexit
-import json
-import os
 import threading
 import time
 from pathlib import Path
+
+from src.lib.runtime import SecureDirectory
 
 
 class BaseHeartbeatWriter:
@@ -30,9 +30,20 @@ class BaseHeartbeatWriter:
       final write (e.g. set ``status = "stopped"``).
     """
 
-    def __init__(self, path: Path, agent_name: str, interval: float = 5.0):
+    def __init__(
+        self,
+        path: Path,
+        agent_name: str,
+        run_id: str,
+        interval: float = 5.0,
+        storage: SecureDirectory | None = None,
+    ):
+        if not str(run_id).strip():
+            raise ValueError("run_id is required for heartbeat writers")
         self._path = Path(path)
+        self._storage = storage or SecureDirectory(self._path.parent, create=True)
         self._agent_name = agent_name
+        self._run_id = str(run_id)
         self._interval = interval
 
         self._stop_event = threading.Event()
@@ -94,9 +105,15 @@ class BaseHeartbeatWriter:
         try:
             with self._write_lock:
                 data = self._build_payload()
-                self._path.parent.mkdir(parents=True, exist_ok=True)
-                tmp = self._path.with_suffix(".tmp")
-                tmp.write_text(json.dumps(data, indent=2), encoding="utf-8")
-                tmp.replace(self._path)
+                self._storage.atomic_write_json(self._path.name, data)
         except Exception:
             pass  # heartbeat must never crash the host process
+
+    def close(self) -> None:
+        self._storage.close()
+
+    def __del__(self) -> None:
+        try:
+            self.close()
+        except Exception:
+            pass

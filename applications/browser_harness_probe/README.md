@@ -77,7 +77,7 @@ command -v browser-harness
 
 `loom run` 会使用 YAML 的 `description` 作为任务；本 Application 的默认任务是先跑 doctor，再按 isolated -> real 的顺序验证两个 demo。
 
-`browser_harness_probe_app.py` 不是运行所必需。当前保留它只做便利 wrapper：当需要传入自定义自然语言请求、`log_to_file` 或 `resume` 时，它会调用 `run_app(..., task_override=...)`。
+`browser_harness_probe_app.py` 不是运行所必需。当前保留它只做便利 wrapper：当需要传入自定义自然语言请求、`file_logging` 或 `resume` 时，它会调用 `run_app(..., task_override=...)`。`file_logging=None` 遵循全局配置，`False` 只关闭当前 attempt 的文件 runtime log。
 
 通过 wrapper 默认同时验证 isolated Chrome 和 real Chrome：
 

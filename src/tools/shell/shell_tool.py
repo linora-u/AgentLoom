@@ -1,26 +1,20 @@
 from src.lib.logging import get_logger
-from src.tools.shell.command_semantics import interpret_exit_code
+from src.lib.runtime import get_current_run_context
 from src.tools.shell.output_interceptor import OutputInterceptor
 from src.tools.shell.process import ShellProcess, ShellProcessRegistry
 from src.tools.shell.should_use_sandbox import get_sandbox_manager, should_use_sandbox
 from src.tools.shell.validator import validate_command
-from src.trace import get_current_agent_id
+from src.trace import capture_explicit_execution_context
 
 logger = get_logger(__name__)
 
 
 def _no_command_message() -> str:
-    return (
-        "No shell command was provided; nothing was executed. "
-        "Please provide a non-empty shell command string."
-    )
+    return "No shell command was provided; nothing was executed. Please provide a non-empty shell command string."
 
 
 def _no_output_message(command: str) -> str:
-    return (
-        "Shell command executed successfully but produced no output.\n"
-        f"Executed command: {command}"
-    )
+    return f"Shell command executed successfully but produced no output.\nExecuted command: {command}"
 
 
 def shell_tool(
@@ -118,6 +112,7 @@ def shell_tool(
 
     try:
         from src.tools.shell.shell_audit_log import get_shell_audit_logger
+
         get_shell_audit_logger().log_effective_policy()
     except Exception:
         pass
@@ -136,7 +131,9 @@ def shell_tool(
     # Resolve agent context early so we can pass the shell session's
     # actual CWD to the path validator.  This closes a security gap
     # where the session CWD diverges from os.getcwd().
-    agent_id = get_current_agent_id()
+    runtime_context = get_current_run_context()
+    execution_context = capture_explicit_execution_context()
+    agent_id = execution_context.agent_id if runtime_context is not None else None
     session_cwd = None
     if agent_id:
         registry = ShellProcessRegistry.get_instance()
@@ -153,8 +150,10 @@ def shell_tool(
             logger.info("Command sandboxed via %s", sandbox_mgr.config.mode)
             try:
                 from src.tools.shell.shell_audit_log import get_shell_audit_logger
+
                 get_shell_audit_logger().log_sandbox_wrap(
-                    command, sandbox_mgr.config.mode,
+                    command,
+                    sandbox_mgr.config.mode,
                 )
             except Exception:
                 pass
@@ -163,8 +162,11 @@ def shell_tool(
             logger.warning("Sandbox requested but unavailable: %s", reason)
             try:
                 from src.tools.shell.shell_audit_log import get_shell_audit_logger
+
                 get_shell_audit_logger().log_sandbox_unavailable(
-                    command, sandbox_mgr.config.mode, reason or "unknown",
+                    command,
+                    sandbox_mgr.config.mode,
+                    reason or "unknown",
                 )
             except Exception:
                 pass
@@ -218,12 +220,12 @@ def _run_in_background(
     """
     import os
     import subprocess
-    import tempfile
 
+    from src.lib.runtime import get_current_run_context
     from src.tools.shell.background_task import BackgroundTaskRegistry
-    from src.tools.shell.process import find_suitable_shell, _MAX_OUTPUT_BYTES
+    from src.tools.shell.process import _MAX_OUTPUT_BYTES, find_suitable_shell
     from src.tools.shell.subprocess_env import build_subprocess_env
-    from src.tools.shell.tree_kill import SizeWatchdog
+    from src.tools.shell.tree_kill import SizeWatchdog, graceful_kill
 
     shell_path = find_suitable_shell()
     env = build_subprocess_env()
@@ -233,11 +235,14 @@ def _run_in_background(
     shell_args = [shell_path, "-c", f"eval '{escaped}'"]
 
     # Create durable output file.
-    fd, output_path = tempfile.mkstemp(
-        prefix="agentloom_bg_", suffix=".txt",
+    runtime_context = get_current_run_context(required=True)
+    assert runtime_context is not None
+    out_fd, output_path_obj = runtime_context.allocate_artifact(
+        "background",
+        prefix="background-",
+        suffix=".txt",
     )
-    os.close(fd)
-    out_fd = os.open(output_path, os.O_WRONLY | os.O_APPEND)
+    output_path = str(output_path_obj)
 
     try:
         proc = subprocess.Popen(
@@ -248,22 +253,45 @@ def _run_in_background(
             env=env,
             start_new_session=True,
         )
-    finally:
+    except BaseException:
         os.close(out_fd)
+        try:
+            runtime_context.remove_run_file(output_path_obj)
+        except FileNotFoundError:
+            pass
+        raise
 
-    # Start size watchdog.
-    watchdog = SizeWatchdog(proc.pid, output_path, max_bytes=_MAX_OUTPUT_BYTES)
-    watchdog.start()
-
-    # Register as background task.
-    registry = BackgroundTaskRegistry.get_instance()
-    task_id = registry.register(
-        process=proc,
-        command=original_command,
-        output_path=output_path,
-        description=original_command[:80],
-        size_watchdog=watchdog,
-    )
+    watchdog = None
+    try:
+        # Start size watchdog and transfer ownership to the registry.
+        watchdog = SizeWatchdog(
+            proc.pid,
+            output_path,
+            max_bytes=_MAX_OUTPUT_BYTES,
+            output_fd=out_fd,
+        )
+        watchdog.start()
+        registry = BackgroundTaskRegistry.get_instance()
+        task_id = registry.register(
+            process=proc,
+            command=original_command,
+            output_path=output_path,
+            description=original_command[:80],
+            size_watchdog=watchdog,
+            output_fd=out_fd,
+        )
+    except BaseException:
+        os.close(out_fd)
+        if watchdog is not None:
+            watchdog.stop()
+        graceful_kill(proc.pid, grace_ms=500)
+        try:
+            runtime_context.remove_run_file(output_path_obj)
+        except FileNotFoundError:
+            pass
+        raise
+    else:
+        os.close(out_fd)
 
     logger.info("Background task %s started: pid=%d", task_id, proc.pid)
     return (

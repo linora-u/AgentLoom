@@ -8,22 +8,207 @@ from __future__ import annotations
 
 import json
 import os
-import re
 import shutil
 import subprocess
 import sys
 import tempfile
+import time
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Callable, Dict, Optional
 
 from src.lib.logging import get_logger
-from ..hooks.types import HookContext, HookEvent, HookResult
+
+from ..hooks.types import HookContext, HookResult
 
 # ---------------------------------------------------------------------------
 # Constants
 # ---------------------------------------------------------------------------
 
 SUPPORTED_HOOK_ACTION_TYPE = "command"
+HOOK_STDOUT_MAX_BYTES = 1024 * 1024
+OUTPUT_PREVIEW_MAX_BYTES = 4000
+
+
+@dataclass(frozen=True, slots=True)
+class SkillOutputSnapshot:
+    stdout: str
+    stderr: str
+    stdout_bytes: int
+    stderr_bytes: int
+    stdout_truncated: bool
+    stderr_truncated: bool
+
+
+@dataclass(frozen=True, slots=True)
+class SkillProcessResult:
+    returncode: int | None
+    timed_out: bool
+
+
+class SkillSubprocessCapture:
+    """Redirect a skill subprocess directly to run-owned output files.
+
+    Outside a bound run, anonymous temporary files preserve the same bounded
+    memory behavior without creating a persistent artifact in an unrelated
+    runtime directory.
+    """
+
+    def __init__(self, audit_dir: Path | None = None) -> None:
+        from src.lib.runtime import get_current_run_context
+
+        self.runtime_context = get_current_run_context()
+        self.audit_dir = audit_dir
+        self.stdout_path: Path | None = None
+        self.stderr_path: Path | None = None
+        self._temporary_files: list[Any] = []
+        self._closed = False
+
+        if audit_dir is not None:
+            if self.runtime_context is None:
+                raise RuntimeError("skill audit directory requires a bound run context")
+            self.stdout_path = audit_dir / "stdout.txt"
+            self.stderr_path = audit_dir / "stderr.txt"
+            self.stdout_fd = self.runtime_context.create_run_file(self.stdout_path)
+            try:
+                self.stderr_fd = self.runtime_context.create_run_file(self.stderr_path)
+            except BaseException:
+                os.close(self.stdout_fd)
+                raise
+        else:
+            stdout_file = tempfile.TemporaryFile(mode="w+b", buffering=0)
+            try:
+                stderr_file = tempfile.TemporaryFile(mode="w+b", buffering=0)
+            except BaseException:
+                stdout_file.close()
+                raise
+            self._temporary_files = [stdout_file, stderr_file]
+            self.stdout_fd = stdout_file.fileno()
+            self.stderr_fd = stderr_file.fileno()
+
+    def snapshot(
+        self,
+        *,
+        stdout_limit: int,
+        stderr_limit: int,
+    ) -> SkillOutputSnapshot:
+        stdout, stdout_size, stdout_truncated = _read_fd_preview(
+            self.stdout_fd,
+            stdout_limit,
+        )
+        stderr, stderr_size, stderr_truncated = _read_fd_preview(
+            self.stderr_fd,
+            stderr_limit,
+        )
+        return SkillOutputSnapshot(
+            stdout=stdout,
+            stderr=stderr,
+            stdout_bytes=stdout_size,
+            stderr_bytes=stderr_size,
+            stdout_truncated=stdout_truncated,
+            stderr_truncated=stderr_truncated,
+        )
+
+    def close(self) -> None:
+        if self._closed:
+            return
+        self._closed = True
+        if self._temporary_files:
+            for stream in self._temporary_files:
+                stream.close()
+            self._temporary_files.clear()
+            return
+        first_error: OSError | None = None
+        for fd in (self.stdout_fd, self.stderr_fd):
+            try:
+                os.close(fd)
+            except OSError as exc:
+                first_error = first_error or exc
+        if first_error is not None:
+            raise first_error
+
+    def __enter__(self) -> SkillSubprocessCapture:
+        return self
+
+    def __exit__(self, exc_type: Any, exc: Any, traceback: Any) -> None:
+        self.close()
+
+
+def _read_fd_preview(fd: int, limit: int) -> tuple[str, int, bool]:
+    limit = max(0, int(limit))
+    size = os.fstat(fd).st_size
+    remaining = min(size, limit)
+    chunks: list[bytes] = []
+    offset = 0
+    while remaining:
+        try:
+            chunk = os.pread(fd, remaining, offset)
+        except InterruptedError:
+            continue
+        if not chunk:
+            break
+        chunks.append(chunk)
+        offset += len(chunk)
+        remaining -= len(chunk)
+    payload = b"".join(chunks)
+    return payload.decode("utf-8", errors="replace"), size, size > limit
+
+
+def run_skill_subprocess(
+    command: str,
+    *,
+    cwd: str,
+    env: dict[str, str],
+    stdout_fd: int,
+    stderr_fd: int,
+    timeout: float | None,
+) -> SkillProcessResult:
+    """Run one shell command and terminate its entire process group on timeout."""
+
+    process = subprocess.Popen(
+        command,
+        shell=True,
+        cwd=cwd,
+        env=env,
+        stdout=stdout_fd,
+        stderr=stderr_fd,
+        start_new_session=os.name == "posix",
+    )
+    try:
+        return SkillProcessResult(
+            returncode=process.wait(timeout=timeout),
+            timed_out=False,
+        )
+    except subprocess.TimeoutExpired:
+        _terminate_skill_process(process)
+        return SkillProcessResult(returncode=None, timed_out=True)
+    except BaseException:
+        if process.poll() is None:
+            _terminate_skill_process(process)
+        raise
+
+
+def _terminate_skill_process(process: subprocess.Popen[Any]) -> None:
+    if os.name == "posix":
+        import signal
+
+        from src.tools.shell.tree_kill import tree_kill
+
+        tree_kill(process.pid, signal.SIGTERM)
+        try:
+            process.wait(timeout=0.2)
+        except subprocess.TimeoutExpired:
+            pass
+        # The group may outlive its shell leader, so always issue SIGKILL to
+        # the original process-group id before declaring the capture stable.
+        tree_kill(process.pid, signal.SIGKILL)
+    else:
+        process.kill()
+    try:
+        process.wait(timeout=1)
+    except subprocess.TimeoutExpired:
+        process.kill()
+        process.wait()
 
 
 # ---------------------------------------------------------------------------
@@ -438,19 +623,103 @@ def _create_shell_executor(
                 truncated_payload, ensure_ascii=False, default=str,
             )
 
+        from src.lib.runtime import get_current_run_context
+
+        runtime_context = get_current_run_context()
+        audit_dir: Path | None = None
+        capture: SkillSubprocessCapture | None = None
+        process_result: SkillProcessResult | None = None
+        timed_out = False
+        execution_error: Exception | None = None
+        started = time.monotonic()
+        snapshot = SkillOutputSnapshot("", "", 0, 0, False, False)
         try:
+            if runtime_context is not None:
+                audit_dir = runtime_context.new_skill_execution_dir(skill_name)
+            capture = SkillSubprocessCapture(audit_dir)
             if runtime_logger:
                 runtime_logger.debug(f"Executing shell hook from skill {skill_name}")
-            completed = subprocess.run(
+            process_result = run_skill_subprocess(
                 command,
-                shell=True,
                 cwd=execution_cwd,
                 env=env,
-                capture_output=True,
-                text=True,
+                stdout_fd=capture.stdout_fd,
+                stderr_fd=capture.stderr_fd,
                 timeout=timeout,
             )
-        except subprocess.TimeoutExpired:
+        except Exception as exc:
+            execution_error = exc
+        finally:
+            if capture is not None:
+                try:
+                    snapshot = capture.snapshot(
+                        stdout_limit=HOOK_STDOUT_MAX_BYTES,
+                        stderr_limit=OUTPUT_PREVIEW_MAX_BYTES,
+                    )
+                finally:
+                    capture.close()
+            # Clean up the context payload regardless of execution outcome.
+            if context_tmp_path:
+                try:
+                    os.remove(context_tmp_path)
+                except OSError:
+                    pass
+
+        duration = round(time.monotonic() - started, 3)
+        timed_out = process_result.timed_out if process_result is not None else False
+        returncode = process_result.returncode if process_result is not None else None
+        stdout_path = str(capture.stdout_path) if capture and capture.stdout_path else None
+        stderr_path = str(capture.stderr_path) if capture and capture.stderr_path else None
+        audit = {
+            "skill": skill_name,
+            "hook_event_name": context.hook_event_name,
+            "command": command,
+            "cwd": execution_cwd,
+            "timeout": timeout,
+            "timed_out": timed_out,
+            "returncode": returncode,
+            "duration_seconds": duration,
+            "stdout_path": stdout_path,
+            "stderr_path": stderr_path,
+            "stdout_bytes": snapshot.stdout_bytes,
+            "stderr_bytes": snapshot.stderr_bytes,
+            "stdout_contract_truncated": snapshot.stdout_truncated,
+            "stderr_preview_truncated": snapshot.stderr_truncated,
+        }
+        if execution_error is not None:
+            audit["execution_error"] = type(execution_error).__name__
+        if runtime_context is not None and audit_dir is not None:
+            try:
+                runtime_context.atomic_write_run_file(
+                    audit_dir / "audit.json",
+                    json.dumps(audit, ensure_ascii=False, indent=2),
+                )
+            except Exception as audit_error:
+                if runtime_logger:
+                    runtime_logger.error(
+                        "Failed to persist shell hook audit for skill %s: %s",
+                        skill_name,
+                        audit_error,
+                    )
+                return invalid_hook_contract(
+                    "Shell hook audit persistence failed.",
+                    skill_name=skill_name,
+                    hook_event_name=context.hook_event_name,
+                    telemetry={"exception": type(audit_error).__name__},
+                )
+
+        telemetry: Dict[str, Any] = {
+            "returncode": returncode,
+            "duration_seconds": duration,
+            "stdout_bytes": snapshot.stdout_bytes,
+            "stderr_bytes": snapshot.stderr_bytes,
+        }
+        if stdout_path:
+            telemetry["stdout_path"] = stdout_path
+        if stderr_path:
+            telemetry["stderr_path"] = stderr_path
+
+        if timed_out:
             if runtime_logger:
                 runtime_logger.error(
                     f"Shell hook from skill {skill_name} timed out after {timeout}s"
@@ -459,28 +728,31 @@ def _create_shell_executor(
                 f"Shell hook timed out after {timeout}s",
                 skill_name=skill_name,
                 hook_event_name=context.hook_event_name,
-                telemetry={"exception": "TimeoutExpired", "timeout": timeout},
+                telemetry={**telemetry, "exception": "TimeoutExpired", "timeout": timeout},
             )
-        except Exception as e:
+        if execution_error is not None:
             if runtime_logger:
-                runtime_logger.error(f"Error executing shell hook in skill {skill_name}: {e}")
+                runtime_logger.error(
+                    f"Error executing shell hook in skill {skill_name}: {execution_error}"
+                )
             return invalid_hook_contract(
-                f"Shell hook execution failed: {e}",
+                f"Shell hook execution failed: {execution_error}",
                 skill_name=skill_name,
                 hook_event_name=context.hook_event_name,
-                telemetry={"exception": type(e).__name__},
+                telemetry={**telemetry, "exception": type(execution_error).__name__},
             )
-        finally:
-            # Clean up the temp file (mirrors process.py cleanup pattern).
-            if context_tmp_path:
-                try:
-                    os.remove(context_tmp_path)
-                except OSError:
-                    pass
+        if snapshot.stdout_truncated:
+            return invalid_hook_contract(
+                f"Shell hook JSON output exceeds {HOOK_STDOUT_MAX_BYTES} bytes.",
+                skill_name=skill_name,
+                hook_event_name=context.hook_event_name,
+                telemetry={**telemetry, "stdout_truncated": True},
+            )
 
-        stdout_text = completed.stdout.rstrip()
-        stderr_text = completed.stderr.rstrip()
-        telemetry: Dict[str, Any] = {"returncode": completed.returncode}
+        assert process_result is not None
+        assert returncode is not None
+        stdout_text = snapshot.stdout.rstrip()
+        stderr_text = snapshot.stderr.rstrip()
         if stderr_text:
             telemetry["stderr"] = stderr_text
 
@@ -488,8 +760,8 @@ def _create_shell_executor(
         #   0   = success
         #   2   = blocking error (hard block, always prevents continuation)
         #   1/3+ = non-blocking error (logged as warning, does not halt)
-        is_blocking = completed.returncode == 2
-        is_success = completed.returncode == 0
+        is_blocking = returncode == 2
+        is_success = returncode == 0
         is_non_blocking_error = (not is_success) and (not is_blocking)
 
         if not stdout_text:
@@ -513,12 +785,12 @@ def _create_shell_executor(
             if runtime_logger:
                 runtime_logger.warning(
                     "Shell hook from skill %s exited with code %d (non-blocking)",
-                    skill_name, completed.returncode,
+                    skill_name, returncode,
                 )
             return HookResult(
                 success=False,
                 decision="allow",
-                reason=stderr_text or f"Shell hook exited with code {completed.returncode} (non-blocking)",
+                reason=stderr_text or f"Shell hook exited with code {returncode} (non-blocking)",
                 telemetry={
                     **telemetry,
                     "skill_name": skill_name,
@@ -534,7 +806,7 @@ def _create_shell_executor(
                 "Shell hook output must be structured JSON.",
                 skill_name=skill_name,
                 hook_event_name=context.hook_event_name,
-                telemetry={**telemetry, "stdout": stdout_text},
+                telemetry={**telemetry, "stdout_preview": stdout_text[:OUTPUT_PREVIEW_MAX_BYTES]},
             )
 
         if not isinstance(payload, dict):
@@ -542,12 +814,12 @@ def _create_shell_executor(
                 "Shell hook output must be a JSON object.",
                 skill_name=skill_name,
                 hook_event_name=context.hook_event_name,
-                telemetry={**telemetry, "stdout": stdout_text},
+                telemetry={**telemetry, "stdout_preview": stdout_text[:OUTPUT_PREVIEW_MAX_BYTES]},
             )
 
         fallback_reason = None
         if not is_success:
-            fallback_reason = stderr_text or f"Shell hook exited with code {completed.returncode}"
+            fallback_reason = stderr_text or f"Shell hook exited with code {returncode}"
 
         telemetry["exit_code_class"] = (
             "success" if is_success

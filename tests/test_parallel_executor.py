@@ -349,7 +349,11 @@ class TestParallelExecutorContextPropagation:
         from src.lib.checkpoint.checkpoint_manager import CheckpointManager
         from src.lib.checkpoint.coordinator import CheckpointCoordinator, _current_coordinator
 
-        cm = CheckpointManager("parallel_context", base_dir=tmp_path)
+        cm = CheckpointManager(
+            "parallel_context",
+            checkpoints_root=tmp_path,
+            run_id="run_test",
+        )
         coord = CheckpointCoordinator.activate(cm, "task_ctx", "task")
 
         def tool(task_id, **kw):

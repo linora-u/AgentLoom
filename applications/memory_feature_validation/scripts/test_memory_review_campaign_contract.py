@@ -1417,7 +1417,7 @@ def test_plan_audit_rejects_dataset_manifest_substitution() -> None:
     plan = {
         "requested_runs": 5,
         "max_concurrency": 1,
-        "cli_contract": "loom run <workflow> --log-to-file",
+        "cli_contract": "loom run <workflow>",
         "memory_cli_contract": ["list", "pending", "approve", "reject"],
         "dataset": {"files": []},
         "runs": [spec.to_dict() for spec in specs],
@@ -1774,7 +1774,7 @@ def test_dry_run_artifacts_reaudit_without_model_calls(tmp_path: Path) -> None:
         "requested_runs": 5,
         "selected_runs": 5,
         "max_concurrency": 2,
-        "cli_contract": "loom run <workflow> --log-to-file",
+        "cli_contract": "loom run <workflow>",
         "memory_cli_contract": ["list", "pending", "approve", "reject"],
         "dataset": dataset_manifest(),
         "runs": [spec.to_dict() for spec in specs],
@@ -1795,10 +1795,12 @@ def test_dry_run_artifacts_reaudit_without_model_calls(tmp_path: Path) -> None:
 
 
 def test_campaign_scripts_do_not_import_self_learning_implementation() -> None:
+    removed_file_logging_flag = "--log" + "-to-file"
     for name in ("run_memory_review_campaign.py", "audit_memory_review_campaign.py"):
         source = (APP_ROOT / "scripts" / name).read_text(encoding="utf-8")
         assert "from src." not in source
         assert "import src." not in source
+        assert removed_file_logging_flag not in source
 
 
 def test_canary_continues_past_soft_semantic_misses_but_not_hard_failures() -> None:
@@ -2615,6 +2617,11 @@ def test_campaign_retries_once_for_typed_provider_tempfail(
         ),
     ]
     restores: list[Path] = []
+    commands: list[list[str]] = []
+
+    def run(command, **_kwargs):
+        commands.append(command)
+        return outputs.pop(0)
 
     monkeypatch.setattr(campaign_runner, "capsule_is_active", lambda: False)
     monkeypatch.setattr(campaign_runner, "_loom", lambda: "loom")
@@ -2630,7 +2637,7 @@ def test_campaign_retries_once_for_typed_provider_tempfail(
     monkeypatch.setattr(
         campaign_runner.subprocess,
         "run",
-        lambda *_args, **_kwargs: outputs.pop(0),
+        run,
     )
     state_root = tmp_path / "state"
     state_root.mkdir()
@@ -2652,6 +2659,16 @@ def test_campaign_retries_once_for_typed_provider_tempfail(
     )
     assert len(restores) == 1
     assert outputs == []
+    expected_command = [
+        "loom",
+        "run",
+        str((REPO_ROOT / spec.workflow).resolve()),
+    ]
+    assert commands == [expected_command, expected_command]
+    assert [attempt["command"] for attempt in result["attempts"]] == [
+        ["loom", "run", spec.workflow],
+        ["loom", "run", spec.workflow],
+    ]
 
 
 def test_campaign_does_not_parse_model_logs_to_authorize_retry(

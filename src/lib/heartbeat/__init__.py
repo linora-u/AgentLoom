@@ -15,13 +15,13 @@ Backward-compatible alias:
 """
 
 from src.lib.heartbeat._base import BaseHeartbeatWriter
-from src.lib.heartbeat.supervisor_heartbeat import SupervisorHeartbeat
-from src.lib.heartbeat.worker_heartbeat import WorkerHeartbeat
 from src.lib.heartbeat.status import (
     HEARTBEAT_STALE_THRESHOLD,
     detect_crashed_status,
     detect_worker_call_crashed,
 )
+from src.lib.heartbeat.supervisor_heartbeat import SupervisorHeartbeat
+from src.lib.heartbeat.worker_heartbeat import WorkerHeartbeat
 
 # Backward-compatible alias — existing code that imports HeartbeatWriter
 # continues to work without changes.

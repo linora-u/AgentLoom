@@ -8,8 +8,9 @@ is blocked on a long-running LLM call with no log output.
 Usage::
 
     hb = SupervisorHeartbeat(
-        path=Path(".runtime/agent/checkpoints/task_xxx/heartbeat.json"),
+        path=runtime_context.heartbeat_path,
         agent_name="code_review_agent",
+        run_id=runtime_context.run_id,
     )
     hb.start()
     ...
@@ -25,6 +26,7 @@ import time
 from pathlib import Path
 
 from src.lib.heartbeat._base import BaseHeartbeatWriter
+from src.lib.runtime import SecureDirectory
 
 
 class SupervisorHeartbeat(BaseHeartbeatWriter):
@@ -42,9 +44,17 @@ class SupervisorHeartbeat(BaseHeartbeatWriter):
         self,
         path: Path,
         agent_name: str,
+        run_id: str,
         interval: float = 5.0,
+        storage: SecureDirectory | None = None,
     ):
-        super().__init__(path=path, agent_name=agent_name, interval=interval)
+        super().__init__(
+            path=path,
+            agent_name=agent_name,
+            run_id=run_id,
+            interval=interval,
+            storage=storage,
+        )
         self._step: int = 0
         self._status: str = "running"
 
@@ -66,6 +76,7 @@ class SupervisorHeartbeat(BaseHeartbeatWriter):
             "status": self._status,
             "step": self._step,
             "agent_name": self._agent_name,
+            "run_id": self._run_id,
         }
 
     def _on_stopping(self) -> None:

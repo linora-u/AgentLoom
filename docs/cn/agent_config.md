@@ -1655,7 +1655,9 @@ workflow: |
 
 每个 Agent 执行 Shell 命令时，安全相关事件（拦截、路径违规、停滞检测、超时等）会自动写入独立的审计日志文件：
 
-**文件位置**：`.logs/{agent_name}/{timestamp}/shell_audit.log`（与 Agent 运行日志同目录）
+**文件位置**：`.agentloom/runs/<application_id>/<run_id>/audit/shell.jsonl`
+
+同一 attempt 的 manifest 和主日志分别是 `manifest.json` 与 `logs/runtime.log`。Audit 每段 10 MiB、保留 2 个备份；即使本次运行使用 `--no-file-log`，Shell audit 仍会写入。
 
 配置项（在 `config/system.yaml` 或 agent YAML 的 `shell_settings` 中）：
 
@@ -1666,31 +1668,26 @@ shell_settings:
     log_success: false    # 是否记录成功执行的命令（默认 false）
 ```
 
-每条审计记录包含时间戳、事件类型、Agent 名称、命令、详情，以及**可操作的修复建议**——直接告诉你该改哪个 YAML 配置项：
+每一行都是一个 JSON 对象，包含时间戳、事件类型、Agent 名称、命令、详情，以及**可操作的修复建议**：
 
-```
-[2026-04-08 13:41:46] [SECURITY_BLOCK] agent=code_reviewer
-  command: $(cat /etc/passwd)
-  check: command_substitution
-  message: Blocked: $() command substitution detected
-  suggestion: To disable this check for a specific agent, add the following
-    to the agent YAML:
-      shell_settings:
-        security_checks:
-          command_substitution: false
+```json
+{"timestamp":"2026-04-08T13:41:46+00:00","event_type":"SECURITY_BLOCK","agent":"code_reviewer","command":"$(cat /etc/passwd)","check_id":"command_substitution","message":"Blocked: $() command substitution detected","suggestion":"Review shell_settings.security_checks.command_substitution"}
 ```
 
 排查 Shell 权限问题时，先查看审计日志文件比翻阅主日志效率高得多：
 
 ```bash
-# 查找所有审计日志
-find .logs/ -name 'shell_audit.log' | sort
+# 查找所有 run manifest 与审计日志
+find .agentloom/runs -name manifest.json -o -name shell.jsonl
 
-# 查看某个 Agent 最新一次运行的审计日志
-ls -td .logs/my_agent/*/ | head -1 | xargs -I{} cat {}/shell_audit.log
+# 读取最新 attempt 的身份与审计
+manifest=$(find .agentloom/runs -name manifest.json -type f -print | sort | tail -1)
+run_dir=$(dirname "$manifest")
+sed -n '1,160p' "$manifest"
+tail -n 100 "$run_dir/audit/shell.jsonl"
 
 # 按事件类型搜索
-grep -r 'SECURITY_BLOCK\|WHITELIST_REJECT\|PATH_VIOLATION' .logs/my_agent/
+rg 'SECURITY_BLOCK|WHITELIST_REJECT|PATH_VIOLATION' "$run_dir/audit/shell.jsonl"
 ```
 
 ---

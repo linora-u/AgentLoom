@@ -47,6 +47,32 @@ flowchart TD
 单个 Agent 的 YAML 文件除了定义自身的工作流外，还可以覆盖系统的部分配置。支持覆盖的白名单字段（`_WORKFLOW_OVERLAY_KEYS`）包含：
 - `system`, `model_request_headers`, `smart_summary`, `context_engine`, `tool_access_control`, `execution_env`, `code_agent`, `tools`, `prompt`, `shell_settings`, `tools_mapping`, `default_toolsets`, `toolsets`, `mcp_servers`, `self_learning`。
 
+### Runtime 存储归属
+
+`runtime` 与 `logging` 只能写在全局 `config/system.yaml`；Application 级 `config/system.yaml` 和 Agent YAML 不能移动 runtime root 或替换日志策略。这样，一个进程只有一套任务发现与保留边界。
+
+隔离子进程可用 `AGENTLOOM_RUNTIME_ROOT` 覆盖整套 runtime home；该覆盖不会只移动 self-learning。
+
+```yaml
+runtime:
+  root_dir: ".agentloom"
+  successful_run_retention_days: 7
+  failed_run_retention_days: 30
+  artifact_retention_days: 3
+  cleanup_interval_hours: 24
+
+logging:
+  level: "INFO"
+  console_enabled: true
+  file_enabled: true
+  max_file_bytes: 26214400
+  backup_count: 3
+```
+
+每次 attempt 写入 `.agentloom/runs/<application_id>/<run_id>/{manifest.json,logs,audit,artifacts}`。Resume 会创建新的 `run_id`，但保持逻辑任务的 `task_id` 和 `.agentloom/checkpoints/<application_id>/<task_id>/` 不变。Agent 可见的 `.runtime/` 工作区与 Application 自有 `output_dir` 属于独立存储域。
+
+文件日志由 `logging.file_enabled` 控制，并按大小和备份数有界轮转。`loom run --no-file-log` 只关闭本次 attempt 的文件日志，不会关闭 checkpoint 或 Shell audit。`loom clean-runtime` 应用 run retention；`loom migrate-runtime --dry-run|--apply` 用于一次性迁移旧 `.logs`。
+
 ## 3. LLM 配置的完全隔离
 
 在 AgentLoom 中，**LLM 配置（`llm.yaml`）与系统配置（`system.yaml`）是物理隔离的**。

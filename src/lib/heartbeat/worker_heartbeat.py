@@ -7,7 +7,7 @@ tracks all concurrent calls.  This avoids file-per-call proliferation when
 
 File layout::
 
-    .runtime/{supervisor}/checkpoints/{task_id}/workers/{worker_name}/heartbeat.json
+    {runtime.root_dir}/checkpoints/{application_id}/{task_id}/workers/{worker_name}/heartbeat.json
 
 JSON payload::
 
@@ -34,6 +34,7 @@ import time
 from pathlib import Path
 
 from src.lib.heartbeat._base import BaseHeartbeatWriter
+from src.lib.runtime import SecureDirectory
 
 
 class WorkerHeartbeat(BaseHeartbeatWriter):
@@ -48,9 +49,17 @@ class WorkerHeartbeat(BaseHeartbeatWriter):
         self,
         path: Path,
         agent_name: str,
+        run_id: str,
         interval: float = 5.0,
+        storage: SecureDirectory | None = None,
     ):
-        super().__init__(path=path, agent_name=agent_name, interval=interval)
+        super().__init__(
+            path=path,
+            agent_name=agent_name,
+            run_id=run_id,
+            interval=interval,
+            storage=storage,
+        )
         self._lock = threading.Lock()
         self._calls: dict[str, dict] = {}
 
@@ -102,6 +111,7 @@ class WorkerHeartbeat(BaseHeartbeatWriter):
             calls_snapshot = {k: dict(v) for k, v in self._calls.items()}
         return {
             "agent_name": self._agent_name,
+            "run_id": self._run_id,
             "pid": os.getpid(),
             "timestamp": time.time(),
             "timestamp_iso": time.strftime("%Y-%m-%dT%H:%M:%S%z", time.localtime()),
