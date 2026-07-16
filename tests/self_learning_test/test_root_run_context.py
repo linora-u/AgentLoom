@@ -128,7 +128,7 @@ def test_unbound_builtin_recorder_does_not_create_persistent_state(
     from src.lib.smolagents.hooks import register_builtin_hooks
 
     state_root = tmp_path / ".agentloom"
-    monkeypatch.setenv("AGENTLOOM_SELF_LEARNING_ROOT", str(state_root))
+    monkeypatch.setenv("AGENTLOOM_RUNTIME_ROOT", str(state_root))
     manager = register_builtin_hooks(HookManager())
     seen: list[HookContext] = []
     manager.register_hook(
@@ -466,7 +466,7 @@ def test_disabled_session_tools_fail_closed_before_runtime_or_state_access(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     root = tmp_path / ".agentloom"
-    monkeypatch.setenv("AGENTLOOM_SELF_LEARNING_ROOT", str(root))
+    monkeypatch.setenv("AGENTLOOM_RUNTIME_ROOT", str(root))
     monkeypatch.setattr(
         "src.extensions.self_learning.paths.config_bool",
         lambda name, default=True: False if name == "enabled" else default,
@@ -504,7 +504,7 @@ def test_memory_tool_fails_before_creating_state_without_root_context(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ):
     root = tmp_path / ".agentloom"
-    monkeypatch.setenv("AGENTLOOM_SELF_LEARNING_ROOT", str(root))
+    monkeypatch.setenv("AGENTLOOM_RUNTIME_ROOT", str(root))
     from src.tools.self_learning.memory_tool import memory
 
     result = json.loads(memory("list", scope="project"))
@@ -517,7 +517,7 @@ def test_tool_wrapper_propagates_and_refreshes_root_across_executor_thread(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ):
     monkeypatch.setenv(
-        "AGENTLOOM_SELF_LEARNING_ROOT", str(tmp_path / ".agentloom")
+        "AGENTLOOM_RUNTIME_ROOT", str(tmp_path / ".agentloom")
     )
     from src.extensions.self_learning.memory_store import MemoryStore
     from src.lib.smolagents.hooks.tool_shim import inject_hooks
@@ -601,7 +601,7 @@ def test_tool_wrapper_propagates_and_refreshes_root_across_executor_thread(
 def test_session_tools_exclude_every_leaf_of_current_root(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ):
-    monkeypatch.setenv("AGENTLOOM_SELF_LEARNING_ROOT", str(tmp_path / ".agentloom"))
+    monkeypatch.setenv("AGENTLOOM_RUNTIME_ROOT", str(tmp_path / ".agentloom"))
     from src.extensions.self_learning.event_schema import CanonicalSessionEvent, now_iso
     from src.extensions.self_learning.ledger import SelfLearningLedger
     from src.tools.self_learning.session_tools import session_scroll, session_search

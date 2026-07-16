@@ -63,7 +63,11 @@ class TestCheckpointSaveAndResume:
 
     def test_save_then_resume_filters_incomplete_steps(self, tmp_path):
         """Save checkpoint with mixed steps, resume filters bad ones."""
-        cm = CheckpointManager("e2e_agent", base_dir=tmp_path)
+        cm = CheckpointManager(
+            "e2e_agent",
+            checkpoints_root=tmp_path,
+            run_id="run_test",
+        )
         task_id = "task_e2e_001"
 
         # Simulate: agent completed 2 steps, then was interrupted mid-step-3.
@@ -130,7 +134,11 @@ class TestCheckpointSaveAndResume:
 
     def test_worker_skip_on_resume(self, tmp_path):
         """Completed worker is skipped on resume via input_hash match."""
-        cm = CheckpointManager("e2e_sup", base_dir=tmp_path)
+        cm = CheckpointManager(
+            "e2e_sup",
+            checkpoints_root=tmp_path,
+            run_id="run_test",
+        )
         task_id = "task_e2e_worker_skip"
 
         # Save task tree with a completed worker
@@ -158,7 +166,11 @@ class TestCheckpointSaveAndResume:
 
     def test_context_store_metadata_and_resume_retrieval(self, tmp_path):
         """ContextEngine store is task-scoped and survives coordinator resume."""
-        cm = CheckpointManager("ctx_sup", base_dir=tmp_path)
+        cm = CheckpointManager(
+            "ctx_sup",
+            checkpoints_root=tmp_path,
+            run_id="run_test",
+        )
         task_id = "task_context_store"
 
         class RuntimeAgent:
@@ -210,7 +222,11 @@ class TestFileHistoryWithCoordinator:
     def test_step_callback_triggers_file_history_snapshot(self, tmp_path):
         """Coordinator step callback creates file history post-step snapshot."""
         # Setup
-        cm = CheckpointManager("fh_test", base_dir=tmp_path)
+        cm = CheckpointManager(
+            "fh_test",
+            checkpoints_root=tmp_path,
+            run_id="run_test",
+        )
         task_id = "task_fh_001"
         cm.save_task_tree(task_id, {
             "task_id": task_id,
@@ -218,7 +234,7 @@ class TestFileHistoryWithCoordinator:
             "status": "running",
         })
 
-        fh_dir = tmp_path / "fh_test" / "checkpoints" / task_id / "file-history"
+        fh_dir = tmp_path / task_id / "file-history"
         fh = FileHistoryManager(fh_dir)
 
         # Track a file edit

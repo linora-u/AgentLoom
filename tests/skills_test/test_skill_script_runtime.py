@@ -1,10 +1,14 @@
 import json
 import logging
 import os
+import shlex
+import sys
 import tempfile
+import time
 import unittest
 from pathlib import Path
 
+from src.lib.runtime import RuntimeHome, bind_run_context
 from src.lib.smolagents.hooks.hook_manager import HookManager
 from src.lib.smolagents.skills.skills import SkillsManager
 from src.tools.skills import run_skill_script as run_skill_script_tool
@@ -21,6 +25,13 @@ class TestSkillScriptRuntime(unittest.TestCase):
         _reset_singletons()
         self.temp_dir = tempfile.TemporaryDirectory()
         self.root = Path(self.temp_dir.name)
+        self.runtime_context = RuntimeHome(self.root / ".agentloom").context(
+            application_id="skill-tests",
+            task_id="task",
+            run_id="run",
+        )
+        self._runtime_binding = bind_run_context(self.runtime_context)
+        self._runtime_binding.__enter__()
         self.skills_manager = SkillsManager(
             logger=logging.getLogger(__name__),
             hook_manager=HookManager(),
@@ -29,6 +40,7 @@ class TestSkillScriptRuntime(unittest.TestCase):
 
     def tearDown(self):
         clear_current_skills_manager()
+        self._runtime_binding.__exit__(None, None, None)
         self.temp_dir.cleanup()
 
     def _write_skill(self, name: str = "script-skill") -> Path:
@@ -65,6 +77,7 @@ class TestSkillScriptRuntime(unittest.TestCase):
         self.assertEqual(result["returncode"], 0)
         self.assertIn("skill-dir=", result["stdout_preview"])
         audit_dir = Path(result["audit_dir"])
+        self.assertTrue(audit_dir.is_relative_to(self.runtime_context.skill_artifacts_dir))
         self.assertTrue((audit_dir / "audit.json").is_file())
         self.assertTrue((audit_dir / "stdout.txt").is_file())
         self.assertEqual((audit_dir.parent.parent / "result.txt").read_text(encoding="utf-8"), "artifact")
@@ -128,6 +141,56 @@ class TestSkillScriptRuntime(unittest.TestCase):
         self.assertIn("env-ok", result["stdout_preview"])
         self.assertIn("AGENTLOOM_TEST_VISIBLE", result["env_names"])
         self.assertNotIn("AGENTLOOM_TEST_HIDDEN", result["env_names"])
+
+    def test_large_output_is_streamed_to_artifact_with_bounded_preview(self):
+        skill_path = self._write_skill("large-output")
+        script = skill_path.parent / "scripts" / "large.py"
+        output_size = 2 * 1024 * 1024
+        script.write_text(
+            f'import sys\nsys.stdout.write("x" * {output_size})\n',
+            encoding="utf-8",
+        )
+        self.skills_manager.load_skill_metadata(str(skill_path))
+
+        result = self.skills_manager.run_skill_script(
+            "large-output",
+            f"{shlex.quote(sys.executable)} scripts/large.py",
+            timeout=10,
+        )
+
+        stdout_path = Path(result["stdout_path"])
+        self.assertEqual(result["stdout_bytes"], output_size)
+        self.assertTrue(result["stdout_preview_truncated"])
+        self.assertEqual(len(result["stdout_preview"].encode("utf-8")), 4000)
+        self.assertEqual(stdout_path.stat().st_size, output_size)
+
+    def test_timeout_keeps_output_in_current_run_artifact(self):
+        skill_path = self._write_skill("timeout-output")
+        script = skill_path.parent / "scripts" / "timeout.py"
+        child_code = "import time; time.sleep(1.5); print('late-child', flush=True)"
+        script.write_text(
+            "import subprocess, sys, time\n"
+            f"subprocess.Popen([{sys.executable!r}, '-c', {child_code!r}])\n"
+            'sys.stdout.write("before-timeout\\n")\n'
+            "sys.stdout.flush()\n"
+            "time.sleep(5)\n",
+            encoding="utf-8",
+        )
+        self.skills_manager.load_skill_metadata(str(skill_path))
+
+        result = self.skills_manager.run_skill_script(
+            "timeout-output",
+            f"{shlex.quote(sys.executable)} scripts/timeout.py",
+            timeout=1,
+        )
+
+        self.assertTrue(result["timed_out"])
+        self.assertEqual(result["stdout_preview"], "before-timeout\n")
+        stdout_path = Path(result["stdout_path"])
+        self.assertEqual(stdout_path.read_text(encoding="utf-8"), "before-timeout\n")
+        stable_size = stdout_path.stat().st_size
+        time.sleep(0.8)
+        self.assertEqual(stdout_path.stat().st_size, stable_size)
 
 
 if __name__ == "__main__":

@@ -19,8 +19,22 @@ def hb_path(tmp_path: Path) -> Path:
 
 class TestWorkerHeartbeat:
 
+    def test_records_current_run_id(self, hb_path: Path):
+        heartbeat = WorkerHeartbeat(
+            path=hb_path,
+            agent_name="scan_code",
+            run_id="run_current",
+            interval=0.2,
+        )
+        heartbeat.register_call(0)
+        heartbeat.start()
+        time.sleep(0.3)
+        heartbeat.stop()
+
+        assert json.loads(hb_path.read_text())["run_id"] == "run_current"
+
     def test_register_and_write(self, hb_path: Path):
-        whb = WorkerHeartbeat(path=hb_path, agent_name="scan_code", interval=0.2)
+        whb = WorkerHeartbeat(path=hb_path, agent_name="scan_code", run_id="run_test", interval=0.2)
         whb.register_call(0)
         whb.start()
         time.sleep(0.5)
@@ -32,7 +46,7 @@ class TestWorkerHeartbeat:
         assert data["calls"]["0"]["status"] in ("running", "stopped")
 
     def test_multiple_calls(self, hb_path: Path):
-        whb = WorkerHeartbeat(path=hb_path, agent_name="scan_code", interval=0.2)
+        whb = WorkerHeartbeat(path=hb_path, agent_name="scan_code", run_id="run_test", interval=0.2)
         whb.register_call(0)
         whb.register_call(1)
         whb.start()
@@ -47,7 +61,7 @@ class TestWorkerHeartbeat:
         assert "finished_at" in calls["0"]
 
     def test_update_step(self, hb_path: Path):
-        whb = WorkerHeartbeat(path=hb_path, agent_name="scan_code", interval=0.2)
+        whb = WorkerHeartbeat(path=hb_path, agent_name="scan_code", run_id="run_test", interval=0.2)
         whb.register_call(0)
         whb.update_call_step(0, 5)
         whb.start()
@@ -57,7 +71,7 @@ class TestWorkerHeartbeat:
         assert data["calls"]["0"]["step"] == 5
 
     def test_all_calls_terminal(self, hb_path: Path):
-        whb = WorkerHeartbeat(path=hb_path, agent_name="scan_code", interval=0.2)
+        whb = WorkerHeartbeat(path=hb_path, agent_name="scan_code", run_id="run_test", interval=0.2)
         whb.register_call(0)
         whb.register_call(1)
         assert not whb.all_calls_terminal()
@@ -68,7 +82,7 @@ class TestWorkerHeartbeat:
 
     def test_thread_safety(self, hb_path: Path):
         """Multiple threads register and update calls concurrently."""
-        whb = WorkerHeartbeat(path=hb_path, agent_name="scan_code", interval=0.1)
+        whb = WorkerHeartbeat(path=hb_path, agent_name="scan_code", run_id="run_test", interval=0.1)
         whb.start()
 
         errors: list[Exception] = []
@@ -97,14 +111,14 @@ class TestWorkerHeartbeat:
             assert data["calls"][str(ci)]["status"] == "completed"
 
     def test_daemon_thread(self, hb_path: Path):
-        whb = WorkerHeartbeat(path=hb_path, agent_name="scan_code", interval=0.2)
+        whb = WorkerHeartbeat(path=hb_path, agent_name="scan_code", run_id="run_test", interval=0.2)
         whb.start()
         assert whb._thread is not None
         assert whb._thread.daemon is True
         whb.stop()
 
     def test_on_stopping_marks_running_as_stopped(self, hb_path: Path):
-        whb = WorkerHeartbeat(path=hb_path, agent_name="scan_code", interval=0.2)
+        whb = WorkerHeartbeat(path=hb_path, agent_name="scan_code", run_id="run_test", interval=0.2)
         whb.register_call(0)
         whb.register_call(1)
         whb.update_call_status(0, "completed")

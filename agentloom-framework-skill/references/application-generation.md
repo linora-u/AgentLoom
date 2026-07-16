@@ -43,7 +43,7 @@ applications/<app_name>/
 .venv/bin/loom run applications/<app_name>/workflows/<app_name>_agent.yaml
 ```
 
-`<app_name>_app.py` 不是 Application 必需文件。只有当应用需要自定义自然语言请求、预处理/后处理、批量循环、`log_to_file`/`resume` 包装，或需要通过 `run_app(..., task_override=...)` 嵌入到别的 Python 流程时，才创建入口脚本。
+`<app_name>_app.py` 不是 Application 必需文件。只有当应用需要自定义自然语言请求、预处理/后处理、批量循环、`file_logging`/`resume` 包装，或需要通过 `run_app(..., task_override=...)` 嵌入到别的 Python 流程时，才创建入口脚本。
 
 ```python
 #!/usr/bin/env python3
@@ -61,7 +61,7 @@ if project_root not in sys.path:
 from src.runner import run_app
 
 
-def main(user_request: str, log_to_file: bool = False, resume: str | None = None) -> str:
+def main(user_request: str, file_logging: bool | None = None, resume: str | None = None) -> str:
     if not user_request or not user_request.strip():
         raise ValueError("user_request must be non-empty")
 
@@ -69,7 +69,7 @@ def main(user_request: str, log_to_file: bool = False, resume: str | None = None
     result = run_app(
         "applications/<app_name>/workflows/<app_name>_agent.yaml",
         task_override=task,
-        log_to_file=log_to_file,
+        file_logging=file_logging,
         resume_task_id=resume,
     )
     print(result)
@@ -79,6 +79,8 @@ def main(user_request: str, log_to_file: bool = False, resume: str | None = None
 if __name__ == "__main__":
     fire.Fire(main)
 ```
+
+`file_logging=None` 表示遵循全局 `logging.file_enabled`，`False` 表示仅关闭当前 attempt 的文件 runtime log；checkpoint 和 Shell audit 不受影响。不要保留旧 `log_to_file` 参数兼容。
 
 ## Tool 生成原则
 
@@ -121,7 +123,7 @@ mcp_servers:
 
 列表是整体替换，不是追加；写 Agent 级 `toolsets`、`skills` 这类列表时要表达完整意图。完整配置面见 `configuration-surface.md`。
 
-`allowed_commands: "*"` 与 `allowed_operators: "*"` 是全放开，只适合可信开发环境或先观察 audit 的探索阶段。用户不确定权限时，先运行真实 workflow，读取 `shell_audit.log` 的 `[POLICY_SNAPSHOT]` 和拦截事件，再收敛命令、操作符、路径或 sandbox 配置。
+`allowed_commands: "*"` 与 `allowed_operators: "*"` 是全放开，只适合可信开发环境或先观察 audit 的探索阶段。用户不确定权限时，先运行真实 workflow，读取当前 run 的 `manifest.json` 和 `audit/shell.jsonl`，再根据 `[POLICY_SNAPSHOT]` 与拦截事件收敛命令、操作符、路径或 sandbox 配置。
 
 ## README 必写内容
 

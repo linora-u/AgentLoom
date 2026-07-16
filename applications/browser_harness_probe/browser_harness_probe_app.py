@@ -15,7 +15,7 @@ from src.runner import run_app
 
 def main(
     user_request: str = "Run browser-harness doctor, then verify both isolated Chrome and real Chrome demo probes.",
-    log_to_file: bool = False,
+    file_logging: bool | None = None,
     resume: str | None = None,
 ) -> str:
     """Run the browser-harness AgentLoom probe application."""
@@ -32,7 +32,7 @@ def main(
     result = run_app(
         "applications/browser_harness_probe/workflows/browser_harness_probe_agent.yaml",
         task_override=task,
-        log_to_file=log_to_file,
+        file_logging=file_logging,
         resume_task_id=resume,
     )
     print(result)

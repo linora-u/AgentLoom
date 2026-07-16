@@ -385,7 +385,11 @@ def test_model_memory_never_uses_another_threads_global_application_fallback(
     from src.tools.self_learning.memory_tool import memory
     from src.trace import bind_root_run, clear_current_agent_config, set_current_agent_config
 
-    monkeypatch.setenv("AGENTLOOM_SELF_LEARNING_ROOT", str(tmp_path / ".agentloom"))
+    runtime_root = tmp_path / ".agentloom"
+    monkeypatch.setattr(
+        "src.extensions.self_learning.paths._runtime_config_section",
+        lambda: {"root_dir": str(runtime_root)},
+    )
     set_current_agent_config(
         {
             "application_id": "app_from_other_thread",
@@ -410,7 +414,7 @@ def test_model_memory_never_uses_another_threads_global_application_fallback(
         clear_current_agent_config()
 
     assert result == {"ok": False, "error": "missing_agent_context"}
-    assert MemoryStore().list() == []
+    assert MemoryStore(runtime_root / "self_learning.db").list() == []
 
 
 def test_removed_legacy_memory_arguments_fail_loudly(tmp_path: Path) -> None:

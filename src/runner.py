@@ -17,22 +17,50 @@ Usage (CLI)::
 
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import UTC, datetime
 from pathlib import Path
+from typing import Any
 
 from src.lib.checkpoint import CheckpointManager
 from src.lib.checkpoint.file_history import FileHistoryManager
 from src.lib.config import C, build_effective_agent_config
 from src.lib.heartbeat import SupervisorHeartbeat
-from src.lib.logging import get_logger, initialize_global_logger_once
+from src.lib.logging import (
+    LoggingConfigBuilder,
+    bind_logger_backend,
+    get_logger,
+    initialize_run_logger,
+)
+from src.lib.runtime import (
+    bind_run_context,
+    generate_runtime_id,
+    resolve_application_id,
+    resolve_runtime_home,
+)
 from src.lib.smolagents.agent.yaml_agent_factory import (
     YamlAgentFactory,
     YamlConfiguredSupervisorAgent,
 )
-from src.trace import generate_id
 
 #: 启动 agent 时 YAML 中必须提供的字段。
 _REQUIRED_YAML_FIELDS = ("name", "workflow", "description")
+
+
+def _checkpoint_age_seconds(created_at: Any) -> float:
+    """Return checkpoint age in UTC, rejecting ambiguous lifecycle anchors."""
+
+    if not isinstance(created_at, str) or not created_at.strip():
+        raise ValueError("checkpoint created_at is missing")
+    try:
+        parsed = datetime.fromisoformat(created_at.strip().replace("Z", "+00:00"))
+    except ValueError as exc:
+        raise ValueError("checkpoint created_at is invalid") from exc
+    # Legacy migration interprets naive timestamps as UTC. Resume must use the
+    # same rule so a migrated task is not selected and then rejected solely
+    # because its original timestamp omitted an offset.
+    if parsed.tzinfo is None or parsed.utcoffset() is None:
+        parsed = parsed.replace(tzinfo=UTC)
+    return (datetime.now(UTC) - parsed.astimezone(UTC)).total_seconds()
 
 
 def _resolve_yaml_path(yaml_path: str | Path) -> Path:
@@ -101,7 +129,7 @@ def run_app(
     yaml_path: str | Path,
     resume_task_id: str | None = None,
     task_override: str | None = None,
-    log_to_file: bool = False,
+    file_logging: bool | None = None,
 ) -> str:
     """Run a supervisor agent from a YAML configuration file.
 
@@ -120,6 +148,8 @@ def run_app(
             starting fresh.
         task_override: If provided, use this string as the task instead
             of the YAML ``description`` field.
+        file_logging: Optional per-invocation override for
+            ``logging.file_enabled``. ``None`` uses configuration.
 
     Returns:
         The string result produced by the supervisor agent.
@@ -129,7 +159,7 @@ def run_app(
         ValueError: If required YAML fields are missing.
         RuntimeError: If the agent execution fails.
     """
-    # 1. Resolve config path and load config first (needed for logger init).
+    # Resolve configuration before any runtime component is constructed.
     resolved_path = _resolve_yaml_path(yaml_path)
     config = YamlAgentFactory._load_config_from_file(resolved_path)
     validate_required_yaml_fields(config, resolved_path)
@@ -138,210 +168,295 @@ def run_app(
         source_name=str(config.get("_yaml_file_path") or resolved_path),
     )
 
-    # 2. Initialise logging with the YAML app name.
     agent_name = config["name"]
-    global_logger = initialize_global_logger_once(agent_name)
-    log = get_logger(global_logger, __name__)
-    log.info("Loading supervisor config: %s", resolved_path)
-
-    # 3. Extract task from description.
     effective_task = task_override.strip() if task_override else config["description"].strip()
-
-    # 4. Pre-warm LSP servers (long-lived, aligned with Claude Code).
-    try:
-        from src.services.lsp import LSPServerManager
-        from src.services.lsp.config import LSPConfig
-
-        lsp_yaml = C.get("lsp_servers", {})
-        lsp_config = LSPConfig.from_yaml(lsp_yaml)
-        lsp_manager = LSPServerManager.get_instance()
-        lsp_manager.initialize(lsp_config, project_root=str(C.agent_root))
-    except Exception as exc:
-        log.debug("LSP pre-warm skipped: %s", exc)
-
-    # 5. Create supervisor agent.
-    supervisor = YamlConfiguredSupervisorAgent(
-        config=config,
-        logger=global_logger,
+    application_id = resolve_application_id(
+        config,
+        resolved_path,
+        agent_root=C.agent_root,
     )
-
-    # 5. Checkpoint & heartbeat setup. Application-level system.yaml is part of
-    # the effective configuration, so isolated validation apps can disable raw
-    # checkpoint artifacts without changing the global project setting.
-    checkpoint_config = effective_config.get("checkpoint", {})
-    if not isinstance(checkpoint_config, dict):
-        checkpoint_config = {}
-    ckpt_enabled = checkpoint_config.get("enabled", True)
-    heartbeat_interval = checkpoint_config.get("heartbeat_interval", 5.0)
-    cleanup_on_success = checkpoint_config.get("cleanup_on_success", True)
-    max_resume_age = checkpoint_config.get("max_resume_age", 604800)
-
-    # Obtain the current per-run log directory (already created by logger init).
-    from src.lib.logging.logger_manager import get_current_run_log_dir as _get_run_dir
-    _current_run_log_dir = _get_run_dir()
-
+    runtime_home = resolve_runtime_home(effective_config, agent_root=C.agent_root)
     is_resume = resume_task_id is not None
-
-    if ckpt_enabled:
-        if is_resume:
-            # Resume: create a scan-only manager first to locate the task,
-            # then re-create with the resolved run_log_dir.
-            _scan_mgr = CheckpointManager(agent_name)
-            _resolved_dir = _scan_mgr._resolve_task_run_dir(resume_task_id)
-            if _resolved_dir is None:
-                raise FileNotFoundError(
-                    f"No checkpoint found for task_id={resume_task_id} "
-                    f"under .logs/{agent_name}/*/checkpoints/"
-                )
-            checkpoint_mgr: CheckpointManager | None = CheckpointManager(
-                agent_name, run_log_dir=_resolved_dir,
-            )
-        else:
-            checkpoint_mgr = CheckpointManager(
-                agent_name, run_log_dir=_current_run_log_dir,
-            )
-    else:
-        checkpoint_mgr = None
-
-    if is_resume and checkpoint_mgr is not None:
-        task_id = resume_task_id
-        tree = checkpoint_mgr.load_task_tree(task_id)
-        if tree is None:
-            raise FileNotFoundError(
-                f"No checkpoint found for task_id={task_id} "
-                f"under .logs/{agent_name}/*/checkpoints/"
-            )
-        # Check expiry
-        created_at = tree.get("created_at", "")
-        if created_at and max_resume_age > 0:
-            try:
-                from datetime import datetime as _dt
-                age = (datetime.now().astimezone() - _dt.fromisoformat(created_at)).total_seconds()
-                if age > max_resume_age:
-                    raise FileNotFoundError(
-                        f"Checkpoint {task_id} expired ({age:.0f}s > {max_resume_age}s)"
-                    )
-            except (ValueError, TypeError):
-                pass
-        tree_status = tree.get("status", "unknown")
-        # Detect crashed: if status is still "running" but process is dead
-        if tree_status == "running":
-            from src.lib.heartbeat.status import detect_crashed_status as _detect_crashed_status
-            hb = checkpoint_mgr._read_json(checkpoint_mgr._heartbeat_path(task_id))
-            detected = _detect_crashed_status(hb)
-            if detected == "crashed":
-                tree_status = "crashed"
-                log.info("Detected crashed task (process dead, heartbeat stale)")
-        log.info("Resuming task %s (status=%s)", task_id, tree_status)
-    elif is_resume and checkpoint_mgr is None:
-        raise RuntimeError("Cannot resume: checkpoint is disabled in system.yaml")
-    else:
-        task_id = generate_id(f"supervisor_{agent_name}", prefix="task")
-        if checkpoint_mgr is not None:
-            checkpoint_mgr.record_task_created(
-                task_id,
-                yaml_path=str(yaml_path),
-                agent_name=agent_name,
-                task_text=effective_task,
-                created_at=datetime.now().astimezone().isoformat(),
-            )
-            # Record task_id → run_log_dir mapping in index for resume lookup.
-            checkpoint_mgr.save_task_to_index(task_id)
-
-    # 6. File history manager (pre-edit backups for rewind).
-    file_history = None
-    if ckpt_enabled and checkpoint_mgr is not None:
-        fh_dir = checkpoint_mgr._task_dir(task_id) / "file-history"
-        file_history = FileHistoryManager(fh_dir)
-        if is_resume:
-            # Restore file history state from persisted index.
-            try:
-                import json as _json
-                idx_path = fh_dir / "snapshots.json"
-                if idx_path.exists():
-                    data = _json.loads(idx_path.read_text(encoding="utf-8"))
-                    file_history.restore_from_index(data)
-                    log.info("Restored file history: %d snapshots, %d tracked files",
-                             file_history.snapshot_count, file_history.tracked_file_count)
-            except Exception as exc:
-                log.warning("Failed to restore file history: %s", exc)
-
-    heartbeat = SupervisorHeartbeat(
-        path=checkpoint_mgr._heartbeat_path(task_id) if checkpoint_mgr else Path(f"/tmp/heartbeat_{task_id}.json"),
-        agent_name=agent_name,
-        interval=heartbeat_interval,
+    task_id = resume_task_id or generate_runtime_id("task")
+    run_id = generate_runtime_id("run")
+    runtime_context = runtime_home.context(
+        application_id=application_id,
+        task_id=task_id,
+        run_id=run_id,
     )
-    heartbeat.start()
-
-    # Register heartbeat + file history so coordinator.activate() can inject them.
+    runtime_context.prepare_run()
+    run_attempt_lease = runtime_context.run_lease()
+    run_attempt_lease.acquire()
     try:
-        from src.lib.checkpoint.coordinator import CheckpointCoordinator as _CC
-        _CC.set_pending_heartbeat(heartbeat)
-        if file_history is not None:
-            _CC.set_pending_file_history(file_history)
-    except Exception:
-        pass
-
-    # File-history hooks are registered on each agent's own HookManager inside
-    # the agent run lifecycle. Registering on the global singleton would miss
-    # the per-agent tool shim path.
-    if file_history is not None:
-        log.info("File history manager prepared for pre-edit backups")
-
-    log.info("=" * 70)
-    log.info("Application: %s", agent_name)
-    log.info("Task ID:     %s", task_id)
-    log.info("Mode:        %s", "RESUME" if is_resume else "NEW")
-    log.info("Task: %s", effective_task[:200])
-    log.info("=" * 70)
-
-    # 6. Execute.
-    try:
-        result = supervisor.run(
-            effective_task,
-            task_id=task_id,
-            checkpoint_manager=checkpoint_mgr,
-            resume=is_resume,
+        runtime_context.write_manifest(
+            yaml_path=str(resolved_path),
+            agent_name=agent_name,
+            mode="resume" if is_resume else "new",
         )
-        result_str = "" if result is None else str(result)
-        log.info("=" * 70)
-        log.info("Execution completed successfully.")
-        log.info("=" * 70)
-        return result_str
-    except KeyboardInterrupt:
-        # P4: checkpoint is already saved by base_agent — only log here.
-        log.warning("Interrupted by user. Checkpoint saved for task_id=%s", task_id)
-        log.warning("Resume with:  loom run %s --resume %s", yaml_path, task_id)
+
+        checkpoint_config = effective_config.get("checkpoint", {})
+        if not isinstance(checkpoint_config, dict):
+            checkpoint_config = {}
+        ckpt_enabled = checkpoint_config.get("enabled", True)
+        heartbeat_interval = checkpoint_config.get("heartbeat_interval", 5.0)
+        cleanup_on_success = checkpoint_config.get("cleanup_on_success", True)
+        max_resume_age = checkpoint_config.get("max_resume_age", 604800)
+        logging_builder = LoggingConfigBuilder().apply_mapping(
+            effective_config.get("logging", {}),
+            source="effective logging config",
+        )
+    except BaseException:
+        run_attempt_lease.release()
         raise
-    except Exception as exc:
-        log.error("Execution failed: %s", exc)
-        raise RuntimeError(f"Agent execution failed: {exc}") from exc
-    finally:
-        heartbeat.stop()
-        # Stop worker heartbeat writers (managed by coordinator).
+
+    outcome = "failed"
+    outcome_error: str | None = None
+    checkpoint_mgr: CheckpointManager | None = None
+    task_lease: Any | None = None
+    heartbeat: SupervisorHeartbeat | None = None
+    file_history: FileHistoryManager | None = None
+    supervisor: YamlConfiguredSupervisorAgent | None = None
+
+    with run_attempt_lease, bind_run_context(runtime_context):
         try:
-            from src.lib.checkpoint.coordinator import CheckpointCoordinator
-            coord = CheckpointCoordinator.current()
-            if coord is not None:
-                coord.stop_all_worker_heartbeats()
-        except Exception:
-            pass
-        # Disconnect MCP clients (if any).
-        try:
-            mcp_mgr = getattr(supervisor, "_mcp_manager", None)
-            if mcp_mgr is not None:
-                mcp_mgr.disconnect_all()
-        except Exception:
-            pass
-        # Self-learning history is recorded live by canonical lifecycle hooks
-        # under .agentloom/sessions/events and indexed independently of
-        # checkpoint retention.
-        # M1: cleanup_on_success — remove checkpoint after successful completion.
-        if cleanup_on_success and checkpoint_mgr is not None:
+            logger_backend = initialize_run_logger(
+                runtime_context,
+                logging_builder=logging_builder,
+                file_logging=file_logging,
+            )
+        except Exception as exc:
+            runtime_context.update_manifest(
+                status="failed",
+                ended_at=datetime.now().astimezone().isoformat(),
+                error=str(exc),
+            )
+            raise
+        with bind_logger_backend(logger_backend, context=runtime_context):
+            log = get_logger(logger_backend, __name__)
             try:
-                tree = checkpoint_mgr.load_task_tree(task_id)
-                if tree and tree.get("status") == "completed":
-                    checkpoint_mgr.delete_task(task_id)
-                    log.info("Cleaned up checkpoint for completed task %s", task_id)
-            except Exception:
-                pass
+                log.info("Loading supervisor config: %s", resolved_path)
+
+                try:
+                    from src.lib.runtime.retention import prune_runtime_if_due
+
+                    prune_runtime_if_due(
+                        runtime_home.root_dir,
+                        effective_config.get("runtime", {}),
+                    )
+                except Exception as exc:
+                    log.debug("Runtime cleanup skipped: %s", exc)
+
+                if is_resume and not ckpt_enabled:
+                    raise RuntimeError("Cannot resume: checkpoint is disabled in system.yaml")
+                if ckpt_enabled:
+                    if is_resume:
+                        try:
+                            runtime_context.validate_checkpoint_path(
+                                require_exists=True,
+                            )
+                        except FileNotFoundError as exc:
+                            raise FileNotFoundError(
+                                f"No checkpoint found for application={application_id}, task_id={task_id}"
+                            ) from exc
+                    else:
+                        runtime_context.prepare_checkpoint()
+                    checkpoint_mgr = CheckpointManager(
+                        agent_name,
+                        checkpoint_dir=runtime_context.checkpoint_dir,
+                        run_id=run_id,
+                    )
+                    task_lease = checkpoint_mgr.task_lease(
+                        require_exists=is_resume,
+                    )
+                    task_lease.acquire()
+                    if is_resume:
+                        # Validate again under the lease: the pre-lease check
+                        # rejects symlinked ancestors, while require_exists
+                        # prevents a cleanup race from recreating an empty task.
+                        runtime_context.validate_checkpoint_path(
+                            require_exists=True,
+                        )
+
+                if is_resume and checkpoint_mgr is not None:
+                    tree = checkpoint_mgr.load_task_tree(task_id)
+                    if tree is None:
+                        raise FileNotFoundError(
+                            f"No checkpoint found for application={application_id}, task_id={task_id}"
+                        )
+                    if max_resume_age > 0:
+                        try:
+                            age = _checkpoint_age_seconds(tree.get("created_at"))
+                        except (ValueError, TypeError) as exc:
+                            raise FileNotFoundError(
+                                f"Checkpoint {task_id} has invalid created_at"
+                            ) from exc
+                        if age > max_resume_age:
+                            raise FileNotFoundError(
+                                f"Checkpoint {task_id} expired ({age:.0f}s > {max_resume_age}s)"
+                            )
+                    tree_status = tree.get("status", "unknown")
+                    if tree_status == "running":
+                        from src.lib.heartbeat.status import detect_crashed_status
+
+                        heartbeat_payload = checkpoint_mgr._read_json(runtime_context.heartbeat_path)
+                        if detect_crashed_status(heartbeat_payload) == "crashed":
+                            tree_status = "crashed"
+                            log.info("Detected crashed task (process dead, heartbeat stale)")
+                    resumable_statuses = {"interrupted", "failed", "crashed"}
+                    if tree_status not in resumable_statuses:
+                        raise ValueError(
+                            f"Checkpoint {task_id} is not resumable "
+                            f"(status={tree_status}); start a new task instead"
+                        )
+                    checkpoint_mgr.record_run_resumed(task_id)
+                    log.info("Resuming task %s (status=%s)", task_id, tree_status)
+                elif checkpoint_mgr is not None:
+                    checkpoint_mgr.record_task_created(
+                        task_id,
+                        yaml_path=str(resolved_path),
+                        agent_name=agent_name,
+                        task_text=effective_task,
+                        created_at=datetime.now().astimezone().isoformat(),
+                    )
+                    checkpoint_mgr.record_run_started(task_id)
+
+                file_history = None
+                if checkpoint_mgr is not None:
+                    file_history = FileHistoryManager(
+                        runtime_context.file_history_dir,
+                        storage=checkpoint_mgr.directory_storage(
+                            task_id,
+                            runtime_context.file_history_dir,
+                        ),
+                    )
+                    if is_resume:
+                        try:
+                            if file_history.restore_persisted_index():
+                                log.info(
+                                    "Restored file history: %d snapshots, %d tracked files",
+                                    file_history.snapshot_count,
+                                    file_history.tracked_file_count,
+                                )
+                        except Exception as exc:
+                            log.warning("Failed to restore file history: %s", exc)
+
+                    heartbeat = SupervisorHeartbeat(
+                        path=runtime_context.heartbeat_path,
+                        agent_name=agent_name,
+                        run_id=run_id,
+                        interval=heartbeat_interval,
+                        storage=checkpoint_mgr.task_storage(task_id),
+                    )
+                    heartbeat.start()
+
+                    from src.lib.checkpoint.coordinator import CheckpointCoordinator as _CC
+
+                    _CC.set_pending_heartbeat(heartbeat)
+                    _CC.set_pending_file_history(file_history)
+                    log.info("File history manager prepared for pre-edit backups")
+
+                # Pre-warm LSP servers after the run logger is bound.
+                try:
+                    from src.services.lsp import LSPServerManager
+                    from src.services.lsp.config import LSPConfig
+
+                    lsp_config = LSPConfig.from_yaml(C.get("lsp_servers", {}))
+                    LSPServerManager.get_instance().initialize(
+                        lsp_config,
+                        project_root=str(C.agent_root),
+                    )
+                except Exception as exc:
+                    log.debug("LSP pre-warm skipped: %s", exc)
+
+                supervisor = YamlConfiguredSupervisorAgent(
+                    config=config,
+                    logger=logger_backend,
+                )
+
+                log.info("=" * 70)
+                log.info("Application: %s", application_id)
+                log.info("Task ID:     %s", task_id)
+                log.info("Run ID:      %s", run_id)
+                log.info("Mode:        %s", "RESUME" if is_resume else "NEW")
+                log.info("Task: %s", effective_task[:200])
+                log.info("=" * 70)
+
+                result = supervisor.run(
+                    effective_task,
+                    task_id=task_id,
+                    run_id=run_id,
+                    checkpoint_manager=checkpoint_mgr,
+                    resume=is_resume,
+                )
+                result_str = "" if result is None else str(result)
+                outcome = "completed"
+                log.info("=" * 70)
+                log.info("Execution completed successfully.")
+                log.info("=" * 70)
+                return result_str
+            except KeyboardInterrupt:
+                outcome = "interrupted"
+                log.warning("Interrupted by user. Checkpoint saved for task_id=%s", task_id)
+                log.warning("Resume with: loom run %s --resume %s", yaml_path, task_id)
+                raise
+            except (FileNotFoundError, ValueError) as exc:
+                outcome_error = str(exc)
+                raise
+            except Exception as exc:
+                outcome_error = str(exc)
+                log.error("Execution failed: %s", exc)
+                raise RuntimeError(f"Agent execution failed: {exc}") from exc
+            finally:
+                try:
+                    from src.tools.shell.background_task import BackgroundTaskRegistry
+
+                    BackgroundTaskRegistry.get_instance().terminate_current_run()
+                except Exception as exc:
+                    log.debug("Background task teardown skipped: %s", exc)
+                try:
+                    from src.tools.shell.process import ShellProcessRegistry
+
+                    ShellProcessRegistry.get_instance().release_current_run()
+                except Exception as exc:
+                    log.debug("Shell session teardown skipped: %s", exc)
+                if heartbeat is not None:
+                    try:
+                        heartbeat.stop()
+                    except Exception:
+                        pass
+                    try:
+                        heartbeat.close()
+                    except Exception:
+                        pass
+                try:
+                    mcp_manager = getattr(supervisor, "_mcp_manager", None)
+                    if mcp_manager is not None:
+                        mcp_manager.disconnect_all()
+                except Exception:
+                    pass
+                if file_history is not None:
+                    try:
+                        file_history.close()
+                    except Exception:
+                        pass
+                if outcome == "completed" and cleanup_on_success and checkpoint_mgr is not None:
+                    try:
+                        tree = checkpoint_mgr.load_task_tree(task_id)
+                        if tree and tree.get("status") == "completed":
+                            checkpoint_mgr.delete_task(task_id)
+                            log.info("Cleaned up checkpoint for completed task %s", task_id)
+                    except Exception:
+                        pass
+                manifest_updates = {
+                    "status": outcome,
+                    "ended_at": datetime.now().astimezone().isoformat(),
+                }
+                if outcome_error:
+                    manifest_updates["error"] = outcome_error
+                try:
+                    runtime_context.update_manifest(**manifest_updates)
+                finally:
+                    if task_lease is not None:
+                        task_lease.release()
+                    if checkpoint_mgr is not None:
+                        checkpoint_mgr.close()

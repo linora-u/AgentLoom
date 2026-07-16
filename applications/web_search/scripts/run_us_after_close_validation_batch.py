@@ -104,7 +104,7 @@ def _run_one(now_utc: str, timeout_seconds: int, skip_existing_ok: bool) -> dict
 
     code = (
         "from src.runner import run_app\n"
-        f"print(run_app({WORKFLOW!r}, task_override={TASK!r}, log_to_file=True))\n"
+        f"print(run_app({WORKFLOW!r}, task_override={TASK!r}, file_logging=True))\n"
     )
     started_at = datetime.now().astimezone().isoformat()
     timed_out = False

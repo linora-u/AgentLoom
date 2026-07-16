@@ -6,7 +6,6 @@ tool_call_type: "code_act"
 
 tools:
   - name: "shell_tool"
-  - name: "read_file"
 
 workflow: |
   # Shell Policy Snapshot Audit Validation
@@ -16,10 +15,11 @@ workflow: |
   `allowed_commands` and `allowed_operators` are both `"*"`.
 
   The test only passes if a successful, fully allowed shell run still creates a
-  real `shell_audit.log` containing a `POLICY_SNAPSHOT` entry. Do not mark PASS
+  real `audit/shell.jsonl` containing a `POLICY_SNAPSHOT` event. Do not mark PASS
   from expectation alone.
 
   ```python
+  import json
   import os
 
   rows = {}
@@ -44,32 +44,47 @@ workflow: |
   )
 
   audit_path = shell_tool(
-      command="ls -dt .logs/test_shell_policy_snapshot/*/shell_audit.log | head -1",
+      command="ls -dt .agentloom/runs/test_shell_audit/run_*/audit/shell.jsonl | head -1",
       timeout=10,
   ).strip().splitlines()[0]
-  audit_content = read_file(file_path=audit_path)
+  audit_content = shell_tool(command=f"cat {audit_path}", timeout=10)
+  audit_events = []
+  for line in audit_content.splitlines():
+      try:
+          event = json.loads(line)
+      except json.JSONDecodeError:
+          continue
+      if isinstance(event, dict):
+          audit_events.append(event)
   print("AUDIT_PATH", audit_path)
   print(audit_content)
 
-  agent_log_path = shell_tool(
-      command="ls -dt .logs/test_shell_policy_snapshot/*/test_shell_policy_snapshot.log | head -1",
-      timeout=10,
-  ).strip().splitlines()[0]
-  same_parent = os.path.dirname(audit_path) == os.path.dirname(agent_log_path)
+  audit_run_dir = os.path.dirname(os.path.dirname(audit_path))
+  agent_log_path = os.path.join(audit_run_dir, "logs", "runtime.log")
+  same_parent = os.path.isfile(agent_log_path)
   record(
       "CO_LOCATION",
       "PASS" if same_parent else "FAIL",
       f"audit={audit_path}; agent={agent_log_path}",
   )
 
-  required = [
-      "[POLICY_SNAPSHOT]",
-      "allowed_commands: * (all command names allowed)",
-      "allowed_operators: * (all shell operators allowed)",
-      "command_success_logging: false",
-      "sandbox_enabled:",
+  policy_event = next(
+      (event for event in audit_events if event.get("event_type") == "POLICY_SNAPSHOT"),
+      None,
+  )
+  details = policy_event.get("details", {}) if policy_event else {}
+  required = {
+      "allowed_commands": "* (all command names allowed)",
+      "allowed_operators": "* (all shell operators allowed)",
+      "command_success_logging": "false",
+  }
+  missing = [
+      f"{key}={value}"
+      for key, value in required.items()
+      if details.get(key) != value
   ]
-  missing = [item for item in required if item not in audit_content]
+  if "sandbox_enabled" not in details:
+      missing.append("sandbox_enabled")
   record(
       "POLICY_SNAPSHOT",
       "PASS" if not missing else "FAIL",
@@ -78,7 +93,9 @@ workflow: |
 
   record(
       "NO_SUCCESS_SPAM",
-      "PASS" if "[COMMAND_SUCCESS]" not in audit_content else "FAIL",
+      "PASS"
+      if not any(event.get("event_type") == "COMMAND_SUCCESS" for event in audit_events)
+      else "FAIL",
       "COMMAND_SUCCESS absent because log_success=false",
   )
 
@@ -93,8 +110,8 @@ workflow: |
 
   summary_lines = [
       f"Overall: {overall}",
-      f"shell_audit.log: {audit_path}",
-      f"agent log: {agent_log_path}",
+      f"shell.jsonl: {audit_path}",
+      f"runtime.log: {agent_log_path}",
       "",
       "| Check | Status | Evidence |",
       "|---|---|---|",

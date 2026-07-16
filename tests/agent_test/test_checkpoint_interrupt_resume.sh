@@ -18,11 +18,10 @@ SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 PROJECT_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
 cd "$PROJECT_ROOT"
 
-PYTHON=".venv/bin/python"
-LRUN="$PYTHON -m src"
+LRUN=".venv/bin/loom"
 TEST_DIR="/tmp/agentloom_checkpoint_test"
 MULTI_DIR="/tmp/agentloom_ckpt_multi"
-RUNTIME_DIR=".runtime"
+RUNTIME_DIR=".agentloom"
 
 RED='\033[0;31m'
 GREEN='\033[0;32m'
@@ -34,16 +33,33 @@ fail_count=0
 
 log_pass() {
     echo -e "${GREEN}✓ PASS${NC}: $1"
-    ((pass_count++))
+    pass_count=$((pass_count + 1))
 }
 
 log_fail() {
     echo -e "${RED}✗ FAIL${NC}: $1"
-    ((fail_count++))
+    fail_count=$((fail_count + 1))
 }
 
 log_info() {
     echo -e "${YELLOW}→${NC} $1"
+}
+
+run_with_deadline() {
+    local seconds="$1"
+    shift
+    "$@" &
+    local pid=$!
+    local deadline=$((SECONDS + seconds))
+    while kill -0 "$pid" 2>/dev/null; do
+        if [ "$SECONDS" -ge "$deadline" ]; then
+            kill -TERM "$pid" 2>/dev/null || true
+            wait "$pid" 2>/dev/null || true
+            return 124
+        fi
+        sleep 1
+    done
+    wait "$pid"
 }
 
 cleanup() {
@@ -60,7 +76,7 @@ test_single_agent_interrupt() {
 
     # Run the checkpoint test agent in background
     log_info "Starting agent (will interrupt after 30s)..."
-    $LRUN run applications/test_demo/workflows/test_checkpoint_agent.yaml --log-to-file &
+    $LRUN run applications/test_demo/workflows/test_checkpoint_agent.yaml &
     AGENT_PID=$!
 
     # Wait up to 30 seconds, then send SIGINT (Ctrl-C)
@@ -74,11 +90,11 @@ test_single_agent_interrupt() {
     fi
 
     # Check checkpoint was saved
-    CKPT_DIR=$(find "$RUNTIME_DIR/test_checkpoint/checkpoints" -maxdepth 1 -type d -name "task_*" 2>/dev/null | head -1)
+    CKPT_DIR=$(ls -dt "$RUNTIME_DIR/checkpoints/test_demo"/task_* 2>/dev/null | head -1 || true)
     if [ -n "$CKPT_DIR" ]; then
         log_pass "Checkpoint directory created: $CKPT_DIR"
     else
-        log_fail "No checkpoint directory found under $RUNTIME_DIR/test_checkpoint/"
+        log_fail "No checkpoint directory found under $RUNTIME_DIR/checkpoints/test_demo/"
         return
     fi
 
@@ -129,8 +145,13 @@ test_single_agent_resume() {
     fi
 
     log_info "Resuming task $TASK_ID..."
-    # Run with timeout — should complete faster since some steps are already done
-    timeout 120 $LRUN run applications/test_demo/workflows/test_checkpoint_agent.yaml --resume "$TASK_ID" --log-to-file || true
+    # Resume must actually exit successfully; a timeout or CLI error is a test failure.
+    if run_with_deadline 120 "$LRUN" run applications/test_demo/workflows/test_checkpoint_agent.yaml --resume "$TASK_ID"; then
+        log_pass "Resume command completed successfully"
+    else
+        log_fail "Resume command failed or timed out"
+        return
+    fi
 
     # Check that the agent produced output files
     if [ -f "$TEST_DIR/step1.txt" ]; then
@@ -168,7 +189,7 @@ test_multi_agent_interrupt_resume() {
 
     # Run supervisor in background
     log_info "Starting supervisor agent (will interrupt after 45s)..."
-    $LRUN run applications/test_demo/workflows/test_checkpoint_supervisor.yaml --log-to-file &
+    $LRUN run applications/test_demo/workflows/test_checkpoint_supervisor.yaml &
     AGENT_PID=$!
 
     # Wait longer for multi-agent (worker needs time too)
@@ -182,7 +203,7 @@ test_multi_agent_interrupt_resume() {
     fi
 
     # Check checkpoint
-    SUP_CKPT_DIR=$(find "$RUNTIME_DIR/test_checkpoint_supervisor/checkpoints" -maxdepth 1 -type d -name "task_*" 2>/dev/null | head -1)
+    SUP_CKPT_DIR=$(ls -dt "$RUNTIME_DIR/checkpoints/test_demo"/task_* 2>/dev/null | head -1 || true)
     if [ -n "$SUP_CKPT_DIR" ]; then
         log_pass "Supervisor checkpoint directory created: $SUP_CKPT_DIR"
         SUP_TASK_ID=$(basename "$SUP_CKPT_DIR")
@@ -202,7 +223,12 @@ test_multi_agent_interrupt_resume() {
 
     # Resume
     log_info "Resuming supervisor task $SUP_TASK_ID..."
-    timeout 120 $LRUN run applications/test_demo/workflows/test_checkpoint_supervisor.yaml --resume "$SUP_TASK_ID" --log-to-file || true
+    if run_with_deadline 120 "$LRUN" run applications/test_demo/workflows/test_checkpoint_supervisor.yaml --resume "$SUP_TASK_ID"; then
+        log_pass "Supervisor resume completed successfully"
+    else
+        log_fail "Supervisor resume failed or timed out"
+        return
+    fi
 
     # Check final output
     if [ -f "$MULTI_DIR/output.txt" ]; then

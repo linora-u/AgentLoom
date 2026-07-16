@@ -3,16 +3,13 @@
 
 from datetime import datetime
 from enum import IntEnum
+
 from rich.console import Console
 from rich.text import Text
 from smolagents import AgentLogger
 from smolagents import LogLevel as SmolaLogLevel
 
-from src.trace import (
-    get_current_task_id,
-    get_current_sub_task_id,
-    get_current_agent_name,
-)
+from src.trace import capture_explicit_execution_context
 
 
 class AgentLoomLogLevel(IntEnum):
@@ -150,9 +147,10 @@ class EnhancedAgentLogger(AgentLogger):
             ts = datetime.now().strftime(self.timestamp_format)
             prefix.append(f"[{ts}]", style=TIMESTAMP_STYLE)
         if self.show_trace_info:
-            task_id    = get_current_task_id()
-            sub_id     = get_current_sub_task_id()
-            agent_name = get_current_agent_name()
+            execution_context = capture_explicit_execution_context()
+            task_id = execution_context.task_id
+            sub_id = execution_context.sub_task_id
+            agent_name = execution_context.agent_name
             if task_id:
                 prefix.append(f"[task:{self._truncate_id(task_id)}]", style=TASK_ID_STYLE)
             if sub_id:

@@ -14,11 +14,14 @@ workflow: |
 
   1. Use shell_tool once to run:
        mkdir -p /tmp/agentloom_ckpt_complex/worker_progress &&
+       printf 'worker_step_1\n' >> /tmp/agentloom_ckpt_side_effects.log &&
        printf 'worker:started\n' > /tmp/agentloom_ckpt_complex/worker_progress/started.txt &&
        cat /tmp/agentloom_ckpt_complex/items/a.txt /tmp/agentloom_ckpt_complex/items/b.txt /tmp/agentloom_ckpt_complex/items/c.txt /tmp/agentloom_ckpt_complex/supervisor_manifest.txt > /tmp/agentloom_ckpt_complex/worker_progress/combined.txt
   2. Use shell_tool once to run:
+       printf 'worker_step_2\n' >> /tmp/agentloom_ckpt_side_effects.log &&
        printf 'worker_status=complete\nalpha=11\nbeta=22\ngamma=33\nmanifest_status=ready\n' > /tmp/agentloom_ckpt_complex/worker_report.txt
   3. Use shell_tool once to run:
+       printf 'worker_step_3\n' >> /tmp/agentloom_ckpt_side_effects.log &&
        grep -q 'worker_status=complete' /tmp/agentloom_ckpt_complex/worker_report.txt &&
        grep -q 'alpha=11' /tmp/agentloom_ckpt_complex/worker_report.txt &&
        grep -q 'beta=22' /tmp/agentloom_ckpt_complex/worker_report.txt &&

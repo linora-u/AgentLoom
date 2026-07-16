@@ -173,7 +173,7 @@ def test_application_inherits_or_explicitly_disables_global_memory_review(
     from src.extensions.self_learning.memory_store import MemoryStore
 
     state_root = tmp_path / ".agentloom"
-    monkeypatch.setenv("AGENTLOOM_SELF_LEARNING_ROOT", str(state_root))
+    monkeypatch.setenv("AGENTLOOM_RUNTIME_ROOT", str(state_root))
     monkeypatch.setattr(
         reviewer,
         "_resolve_review_model",

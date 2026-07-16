@@ -437,7 +437,11 @@ class TestShellToolCwdPlumbing:
         """shell_tool should call validate_command with session CWD."""
         from unittest.mock import patch as mp
 
-        with mp("src.tools.shell.shell_tool.get_current_agent_id", return_value="agent-1"), \
+        with mp(
+                 "src.tools.shell.shell_tool.capture_explicit_execution_context",
+                 return_value=MagicMock(agent_id="agent-1"),
+             ), \
+             mp("src.tools.shell.shell_tool.get_current_run_context", return_value=MagicMock()), \
              mp("src.tools.shell.shell_tool.ShellProcessRegistry") as mock_registry_cls:
 
             mock_registry = MagicMock()
@@ -462,7 +466,11 @@ class TestShellToolCwdPlumbing:
         """When no agent context, cwd=None is passed (falls back to os.getcwd)."""
         from unittest.mock import patch as mp
 
-        with mp("src.tools.shell.shell_tool.get_current_agent_id", return_value=None), \
+        with mp(
+                 "src.tools.shell.shell_tool.capture_explicit_execution_context",
+                 return_value=MagicMock(agent_id="fallback-must-not-be-used"),
+             ), \
+             mp("src.tools.shell.shell_tool.get_current_run_context", return_value=None), \
              mp("src.tools.shell.shell_tool.validate_command") as mock_validate:
 
             mock_validate.side_effect = ValueError("blocked for test")

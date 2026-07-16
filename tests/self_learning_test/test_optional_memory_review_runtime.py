@@ -436,7 +436,7 @@ def test_completed_run_review_skips_without_a_configured_model(
     from src.extensions.self_learning import reviewer
 
     state_root = tmp_path / ".agentloom"
-    monkeypatch.setenv("AGENTLOOM_SELF_LEARNING_ROOT", str(state_root))
+    monkeypatch.setenv("AGENTLOOM_RUNTIME_ROOT", str(state_root))
 
     def model_must_not_be_resolved(*_args, **_kwargs):
         raise AssertionError("an empty review_model must not resolve or call a model")
@@ -490,7 +490,7 @@ def test_unconfigured_review_is_inert_before_other_memory_config_validation(
     from src.extensions.self_learning import reviewer
 
     state_root = tmp_path / ".agentloom"
-    monkeypatch.setenv("AGENTLOOM_SELF_LEARNING_ROOT", str(state_root))
+    monkeypatch.setenv("AGENTLOOM_RUNTIME_ROOT", str(state_root))
 
     def model_must_not_be_resolved(*_args, **_kwargs):
         raise AssertionError("an unconfigured review must not resolve a model")
@@ -515,7 +515,7 @@ def test_disabled_self_learning_never_resolves_a_configured_review_model(
     from src.extensions.self_learning import reviewer
 
     state_root = tmp_path / ".agentloom"
-    monkeypatch.setenv("AGENTLOOM_SELF_LEARNING_ROOT", str(state_root))
+    monkeypatch.setenv("AGENTLOOM_RUNTIME_ROOT", str(state_root))
 
     def model_must_not_be_resolved(*_args, **_kwargs):
         raise AssertionError("disabled self-learning must not resolve a model")
@@ -548,7 +548,7 @@ def test_failed_run_history_is_never_reviewed_into_memory(
     from src.extensions.self_learning.ledger import SelfLearningLedger
 
     state_root = tmp_path / ".agentloom"
-    monkeypatch.setenv("AGENTLOOM_SELF_LEARNING_ROOT", str(state_root))
+    monkeypatch.setenv("AGENTLOOM_RUNTIME_ROOT", str(state_root))
     SelfLearningLedger(state_root / "self_learning.db").append_event(
         CanonicalSessionEvent(
             event_id="event-failed-review",
@@ -590,7 +590,7 @@ def test_task_completion_alone_cannot_start_completed_run_review(
     from src.extensions.self_learning.ledger import SelfLearningLedger
 
     state_root = tmp_path / ".agentloom"
-    monkeypatch.setenv("AGENTLOOM_SELF_LEARNING_ROOT", str(state_root))
+    monkeypatch.setenv("AGENTLOOM_RUNTIME_ROOT", str(state_root))
     ledger = SelfLearningLedger(state_root / "self_learning.db")
     ledger.append_event(
         CanonicalSessionEvent(
@@ -632,7 +632,7 @@ def test_worker_completion_cannot_authorize_root_review(
     from src.extensions.self_learning.ledger import SelfLearningLedger
 
     state_root = tmp_path / ".agentloom"
-    monkeypatch.setenv("AGENTLOOM_SELF_LEARNING_ROOT", str(state_root))
+    monkeypatch.setenv("AGENTLOOM_RUNTIME_ROOT", str(state_root))
     ledger = SelfLearningLedger(state_root / "self_learning.db")
     ledger.append_event(
         CanonicalSessionEvent(
@@ -678,7 +678,7 @@ def test_terminal_audit_rechecks_root_completion_in_its_write_transaction(
     from src.extensions.self_learning.ledger import SelfLearningLedger
 
     state_root = tmp_path / ".agentloom"
-    monkeypatch.setenv("AGENTLOOM_SELF_LEARNING_ROOT", str(state_root))
+    monkeypatch.setenv("AGENTLOOM_RUNTIME_ROOT", str(state_root))
     root_run_id = "root-deleted-after-review-preflight"
     _record_completed_run(state_root, root_run_id)
     ledger = SelfLearningLedger(state_root / "self_learning.db")
@@ -720,7 +720,7 @@ def test_final_summary_without_observed_evidence_is_reviewed_but_cannot_write(
     from src.extensions.self_learning.memory_store import MemoryStore
 
     state_root = tmp_path / ".agentloom"
-    monkeypatch.setenv("AGENTLOOM_SELF_LEARNING_ROOT", str(state_root))
+    monkeypatch.setenv("AGENTLOOM_RUNTIME_ROOT", str(state_root))
     SelfLearningLedger(state_root / "self_learning.db").append_event(
         CanonicalSessionEvent(
             event_id="event-final-only",
@@ -756,7 +756,7 @@ def test_configured_review_uses_only_memory_and_persists_its_action(
     from src.extensions.self_learning.memory_store import MemoryStore
 
     state_root = tmp_path / ".agentloom"
-    monkeypatch.setenv("AGENTLOOM_SELF_LEARNING_ROOT", str(state_root))
+    monkeypatch.setenv("AGENTLOOM_RUNTIME_ROOT", str(state_root))
     durable_fact = "The verified page size is 100 rows."
     _record_completed_run(
         state_root,
@@ -825,7 +825,7 @@ def test_duplicate_review_add_records_zero_committed_actions(
     from src.extensions.self_learning.memory_store import MemoryStore
 
     state_root = tmp_path / ".agentloom"
-    monkeypatch.setenv("AGENTLOOM_SELF_LEARNING_ROOT", str(state_root))
+    monkeypatch.setenv("AGENTLOOM_RUNTIME_ROOT", str(state_root))
     durable_fact = "The verified page size is 100 rows."
     store = MemoryStore()
     assert store.add("project", durable_fact)["duplicate"] is False
@@ -878,7 +878,7 @@ def test_reviewer_cannot_change_the_scope_authorized_by_tool_code(
     from src.extensions.self_learning.memory_store import MemoryStore
 
     state_root = tmp_path / ".agentloom"
-    monkeypatch.setenv("AGENTLOOM_SELF_LEARNING_ROOT", str(state_root))
+    monkeypatch.setenv("AGENTLOOM_RUNTIME_ROOT", str(state_root))
     durable_fact = "Only this evidence scope may authorize the memory write."
     _record_completed_run(
         state_root,
@@ -916,7 +916,7 @@ def test_application_evidence_uses_the_persisted_event_application_id(
     from src.extensions.self_learning.memory_store import MemoryStore
 
     state_root = tmp_path / ".agentloom"
-    monkeypatch.setenv("AGENTLOOM_SELF_LEARNING_ROOT", str(state_root))
+    monkeypatch.setenv("AGENTLOOM_RUNTIME_ROOT", str(state_root))
     durable_fact = "Only the memory_validation Application uses this format."
     _record_completed_run(
         state_root,
@@ -960,7 +960,7 @@ def test_cross_application_worker_evidence_cannot_authorize_root_review(
     from src.extensions.self_learning.memory_store import MemoryStore
 
     state_root = tmp_path / ".agentloom"
-    monkeypatch.setenv("AGENTLOOM_SELF_LEARNING_ROOT", str(state_root))
+    monkeypatch.setenv("AGENTLOOM_RUNTIME_ROOT", str(state_root))
     durable_fact = "Only worker Application B uses port 9443."
     root_run_id = "root-app-a-with-worker-app-b"
     _record_completed_root_with_worker_evidence(
@@ -1019,7 +1019,7 @@ def test_root_review_accepts_authorized_worker_evidence_without_scope_regression
     from src.extensions.self_learning.memory_store import MemoryStore
 
     state_root = tmp_path / ".agentloom"
-    monkeypatch.setenv("AGENTLOOM_SELF_LEARNING_ROOT", str(state_root))
+    monkeypatch.setenv("AGENTLOOM_RUNTIME_ROOT", str(state_root))
     durable_fact = f"Worker evidence remains valid for {trusted_scope} scope."
     root_run_id = f"root-worker-valid-{trusted_scope}"
     _record_completed_root_with_worker_evidence(
@@ -1064,7 +1064,7 @@ def test_completed_review_transaction_rejects_cross_application_worker_evidence(
     from src.extensions.self_learning.memory_store import MemoryStore
 
     state_root = tmp_path / ".agentloom"
-    monkeypatch.setenv("AGENTLOOM_SELF_LEARNING_ROOT", str(state_root))
+    monkeypatch.setenv("AGENTLOOM_RUNTIME_ROOT", str(state_root))
     durable_fact = "Only worker Application B uses this serializer."
     root_run_id = "root-app-a-transaction-guard"
     _record_completed_root_with_worker_evidence(
@@ -1117,7 +1117,7 @@ def test_completed_audit_failure_rolls_back_active_memory_effect(
     from src.extensions.self_learning.memory_store import MemoryStore
 
     state_root = tmp_path / ".agentloom"
-    monkeypatch.setenv("AGENTLOOM_SELF_LEARNING_ROOT", str(state_root))
+    monkeypatch.setenv("AGENTLOOM_RUNTIME_ROOT", str(state_root))
     durable_fact = "The verified page size is 100 rows."
     _record_completed_run(
         state_root,
@@ -1172,7 +1172,7 @@ def test_evidence_deleted_after_digest_cannot_commit_memory(
 
     state_root = tmp_path / ".agentloom"
     db_path = state_root / "self_learning.db"
-    monkeypatch.setenv("AGENTLOOM_SELF_LEARNING_ROOT", str(state_root))
+    monkeypatch.setenv("AGENTLOOM_RUNTIME_ROOT", str(state_root))
     durable_fact = "The verified page size is 100 rows."
     _record_completed_run(
         state_root,
@@ -1226,7 +1226,7 @@ def test_completed_audit_failure_rolls_back_pending_memory_effect(
     from src.extensions.self_learning.memory_store import MemoryStore
 
     state_root = tmp_path / ".agentloom"
-    monkeypatch.setenv("AGENTLOOM_SELF_LEARNING_ROOT", str(state_root))
+    monkeypatch.setenv("AGENTLOOM_RUNTIME_ROOT", str(state_root))
     durable_fact = "The verified page size is 100 rows."
     _record_completed_run(
         state_root,
@@ -1280,7 +1280,7 @@ def test_configured_review_preserves_the_complete_evidence_bytes(
     from src.extensions.self_learning.memory_store import MemoryStore
 
     state_root = tmp_path / ".agentloom"
-    monkeypatch.setenv("AGENTLOOM_SELF_LEARNING_ROOT", str(state_root))
+    monkeypatch.setenv("AGENTLOOM_RUNTIME_ROOT", str(state_root))
     durable_fact = "  The checksum format is SHA-256.  "
     _record_completed_run(
         state_root,
@@ -1314,7 +1314,7 @@ def test_completed_run_review_cannot_write_a_fact_absent_from_its_evidence(
     from src.extensions.self_learning.memory_store import MemoryStore
 
     state_root = tmp_path / ".agentloom"
-    monkeypatch.setenv("AGENTLOOM_SELF_LEARNING_ROOT", str(state_root))
+    monkeypatch.setenv("AGENTLOOM_RUNTIME_ROOT", str(state_root))
     _record_completed_run(
         state_root,
         "root-mismatched-evidence",
@@ -1354,7 +1354,7 @@ def test_completed_run_review_requires_a_literal_evidence_quote(
     from src.extensions.self_learning.memory_store import MemoryStore
 
     state_root = tmp_path / ".agentloom"
-    monkeypatch.setenv("AGENTLOOM_SELF_LEARNING_ROOT", str(state_root))
+    monkeypatch.setenv("AGENTLOOM_RUNTIME_ROOT", str(state_root))
     _record_completed_run(
         state_root,
         "root-transformed-evidence",
@@ -1384,7 +1384,7 @@ def test_completed_run_review_is_at_most_once_per_root(
     from src.extensions.self_learning.memory_store import MemoryStore
 
     state_root = tmp_path / ".agentloom"
-    monkeypatch.setenv("AGENTLOOM_SELF_LEARNING_ROOT", str(state_root))
+    monkeypatch.setenv("AGENTLOOM_RUNTIME_ROOT", str(state_root))
     _record_completed_run(
         state_root,
         "root-reviewed-once",
@@ -1427,7 +1427,7 @@ def test_completed_run_review_never_persists_a_running_claim(
     from src.extensions.self_learning import reviewer
 
     state_root = tmp_path / ".agentloom"
-    monkeypatch.setenv("AGENTLOOM_SELF_LEARNING_ROOT", str(state_root))
+    monkeypatch.setenv("AGENTLOOM_RUNTIME_ROOT", str(state_root))
     durable_fact = "The verified page size is 100 rows."
     _record_completed_run(
         state_root,
@@ -1472,7 +1472,7 @@ def test_concurrent_completed_run_review_claims_only_one_model(
     from src.extensions.self_learning.memory_store import MemoryStore
 
     state_root = tmp_path / ".agentloom"
-    monkeypatch.setenv("AGENTLOOM_SELF_LEARNING_ROOT", str(state_root))
+    monkeypatch.setenv("AGENTLOOM_RUNTIME_ROOT", str(state_root))
     _record_completed_run(
         state_root,
         "root-concurrent-review",
@@ -1515,7 +1515,7 @@ def test_valid_staged_add_terminates_before_another_provider_call(
     from src.extensions.self_learning.memory_store import MemoryStore
 
     state_root = tmp_path / ".agentloom"
-    monkeypatch.setenv("AGENTLOOM_SELF_LEARNING_ROOT", str(state_root))
+    monkeypatch.setenv("AGENTLOOM_RUNTIME_ROOT", str(state_root))
     _record_completed_run(
         state_root,
         "root-failed-after-memory",
@@ -1545,7 +1545,7 @@ def test_multi_tool_turn_cannot_commit_a_staged_add(
     from src.extensions.self_learning.memory_store import MemoryStore
 
     state_root = tmp_path / ".agentloom"
-    monkeypatch.setenv("AGENTLOOM_SELF_LEARNING_ROOT", str(state_root))
+    monkeypatch.setenv("AGENTLOOM_RUNTIME_ROOT", str(state_root))
     _record_completed_run(
         state_root,
         "root-multi-tool-review",
@@ -1573,7 +1573,7 @@ def test_provider_failure_before_a_memory_call_has_no_effect(
     from src.extensions.self_learning.memory_store import MemoryStore
 
     state_root = tmp_path / ".agentloom"
-    monkeypatch.setenv("AGENTLOOM_SELF_LEARNING_ROOT", str(state_root))
+    monkeypatch.setenv("AGENTLOOM_RUNTIME_ROOT", str(state_root))
     _record_completed_run(state_root, "root-provider-failure")
     model = _ImmediateProviderFailureModel("unused")
     monkeypatch.setattr(reviewer, "_resolve_review_model", lambda _model_type: model)
@@ -1596,7 +1596,7 @@ def test_review_budget_counts_and_fences_internal_provider_retries(
     from src.extensions.self_learning import reviewer
 
     state_root = tmp_path / ".agentloom"
-    monkeypatch.setenv("AGENTLOOM_SELF_LEARNING_ROOT", str(state_root))
+    monkeypatch.setenv("AGENTLOOM_RUNTIME_ROOT", str(state_root))
     _record_completed_run(state_root, "root-provider-retry-budget")
     model = _InternallyRetryingProviderModel()
     monkeypatch.setattr(reviewer, "_resolve_review_model", lambda _model_type: model)
@@ -1620,7 +1620,7 @@ def test_max_steps_review_does_not_commit_rejected_memory_calls(
     from src.extensions.self_learning.memory_store import MemoryStore
 
     state_root = tmp_path / ".agentloom"
-    monkeypatch.setenv("AGENTLOOM_SELF_LEARNING_ROOT", str(state_root))
+    monkeypatch.setenv("AGENTLOOM_RUNTIME_ROOT", str(state_root))
     _record_completed_run(state_root, "root-max-steps-review")
     model = _NeverFinishingMemoryReviewModel(
         "This sentence is absent from every observed result."
@@ -1663,7 +1663,7 @@ def test_arbitrary_tool_result_fields_cannot_become_review_evidence(
     from src.extensions.self_learning.memory_store import MemoryStore
 
     state_root = tmp_path / ".agentloom"
-    monkeypatch.setenv("AGENTLOOM_SELF_LEARNING_ROOT", str(state_root))
+    monkeypatch.setenv("AGENTLOOM_RUNTIME_ROOT", str(state_root))
     claim = "An unsourced message says the page limit is 777 records."
     durable = "The verified page size is 100 rows."
     _record_completed_run(
@@ -1703,7 +1703,7 @@ def test_raw_tool_result_cannot_spoof_the_internal_evidence_envelope(
     )
 
     state_root = tmp_path / ".agentloom"
-    monkeypatch.setenv("AGENTLOOM_SELF_LEARNING_ROOT", str(state_root))
+    monkeypatch.setenv("AGENTLOOM_RUNTIME_ROOT", str(state_root))
     claim = "An unsourced message says the page limit is 777 records."
     _record_completed_run(
         state_root,
@@ -1749,7 +1749,7 @@ def test_session_jsonl_import_cannot_mint_trusted_review_evidence(
     )
 
     state_root = tmp_path / ".agentloom"
-    monkeypatch.setenv("AGENTLOOM_SELF_LEARNING_ROOT", str(state_root))
+    monkeypatch.setenv("AGENTLOOM_RUNTIME_ROOT", str(state_root))
     claim = "An imported JSONL file claims the page limit is 999 records."
     imported = tmp_path / "spoofed-events.jsonl"
     records = [
@@ -1829,7 +1829,7 @@ def test_session_recorder_accepts_only_the_live_envelope_marker(
     )
 
     state_root = tmp_path / ".agentloom"
-    monkeypatch.setenv("AGENTLOOM_SELF_LEARNING_ROOT", str(state_root))
+    monkeypatch.setenv("AGENTLOOM_RUNTIME_ROOT", str(state_root))
     fact = "The contract page size is 250 records."
     base = {
         "cwd": str(tmp_path),
@@ -2031,7 +2031,7 @@ def test_raw_only_progress_cannot_be_written_as_durable_memory(
     from src.extensions.self_learning.memory_store import MemoryStore
 
     state_root = tmp_path / ".agentloom"
-    monkeypatch.setenv("AGENTLOOM_SELF_LEARNING_ROOT", str(state_root))
+    monkeypatch.setenv("AGENTLOOM_RUNTIME_ROOT", str(state_root))
     _record_completed_run(
         state_root,
         "root-transient-review",
@@ -2063,7 +2063,7 @@ def test_review_digest_contains_only_completed_tool_results_and_final_summary(
     from src.lib.trusted_memory_evidence import TRUSTED_MEMORY_EVIDENCE_KIND
 
     state_root = tmp_path / ".agentloom"
-    monkeypatch.setenv("AGENTLOOM_SELF_LEARNING_ROOT", str(state_root))
+    monkeypatch.setenv("AGENTLOOM_RUNTIME_ROOT", str(state_root))
     ledger = SelfLearningLedger(state_root / "self_learning.db")
     ledger.append_event(
         CanonicalSessionEvent(
@@ -2166,7 +2166,7 @@ def test_review_digest_keeps_trusted_evidence_when_raw_output_is_truncated(
     from src.extensions.self_learning import reviewer
 
     state_root = tmp_path / ".agentloom"
-    monkeypatch.setenv("AGENTLOOM_SELF_LEARNING_ROOT", str(state_root))
+    monkeypatch.setenv("AGENTLOOM_RUNTIME_ROOT", str(state_root))
     fact = "The checksum algorithm is SHA-256."
     _record_completed_run(
         state_root,
@@ -2190,7 +2190,7 @@ def test_review_digest_blocks_an_injection_bearing_tool_result(
     from src.extensions.self_learning.ledger import SelfLearningLedger
 
     state_root = tmp_path / ".agentloom"
-    monkeypatch.setenv("AGENTLOOM_SELF_LEARNING_ROOT", str(state_root))
+    monkeypatch.setenv("AGENTLOOM_RUNTIME_ROOT", str(state_root))
     marker = "review-secret-marker"
     ledger = SelfLearningLedger(state_root / "self_learning.db")
     ledger.append_event(
@@ -2243,7 +2243,7 @@ def test_blocked_tool_result_cannot_authorize_a_review_memory_write(
     from src.extensions.self_learning.memory_store import MemoryStore
 
     state_root = tmp_path / ".agentloom"
-    monkeypatch.setenv("AGENTLOOM_SELF_LEARNING_ROOT", str(state_root))
+    monkeypatch.setenv("AGENTLOOM_RUNTIME_ROOT", str(state_root))
     ledger = SelfLearningLedger(state_root / "self_learning.db")
     ledger.append_event(
         CanonicalSessionEvent(
@@ -2299,7 +2299,7 @@ def test_review_failure_telemetry_never_logs_provider_error_content(
     from src.extensions.self_learning import reviewer
 
     state_root = tmp_path / ".agentloom"
-    monkeypatch.setenv("AGENTLOOM_SELF_LEARNING_ROOT", str(state_root))
+    monkeypatch.setenv("AGENTLOOM_RUNTIME_ROOT", str(state_root))
     _record_completed_run(
         state_root,
         "root-review-error",

@@ -18,19 +18,15 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-
 # ---------------------------------------------------------------------------
 # Helpers to reset module-level globals between tests
 # ---------------------------------------------------------------------------
 
 def _reset_global_logger():
-    """Reset global logger state to simulate a fresh process."""
+    """Reset the logger binding in this execution context."""
     import src.lib.logging.logger_manager as lm
 
-    lm._GLOBAL_LOGGER = None
-    lm._PROCESS_LOG_FILE_PATH = None
-    lm._INITIALIZED = False
-    lm._ACTIVE_LOG_FILE_PATH = None
+    lm.set_global_logger(None)
 
 
 @pytest.fixture(autouse=True)
@@ -50,33 +46,23 @@ class TestModuleLevelSafety:
 
     def test_get_logger_str_does_not_init_global(self):
         """Calling get_logger with a string must not initialise the global backend."""
-        from src.lib.logging.logger_manager import (
-            LazyLoggerAdapter,
-            _GLOBAL_LOGGER,
-            get_logger,
-        )
+        from src.lib.logging.logger_manager import LazyLoggerAdapter, get_global_logger, get_logger
 
         logger = get_logger("my.module")
         assert isinstance(logger, LazyLoggerAdapter)
-        # Global logger must still be None
-        from src.lib.logging.logger_manager import _GLOBAL_LOGGER as gl
-        assert gl is None, "get_logger(str) must not initialise _GLOBAL_LOGGER"
+        assert get_global_logger() is None
 
     def test_get_logger_none_does_not_init_global(self):
         """Calling get_logger(None) must not initialise the global backend."""
-        from src.lib.logging.logger_manager import (
-            LazyLoggerAdapter,
-            get_logger,
-        )
+        from src.lib.logging.logger_manager import LazyLoggerAdapter, get_global_logger, get_logger
 
         logger = get_logger(None)
         assert isinstance(logger, LazyLoggerAdapter)
-        from src.lib.logging.logger_manager import _GLOBAL_LOGGER as gl
-        assert gl is None
+        assert get_global_logger() is None
 
     def test_lazy_logger_log_call_does_not_init_global(self):
         """Logging through a lazy logger must NOT trigger global init."""
-        from src.lib.logging.logger_manager import get_logger
+        from src.lib.logging.logger_manager import get_global_logger, get_logger
 
         logger = get_logger("test.lazy")
 
@@ -86,9 +72,7 @@ class TestModuleLevelSafety:
             mock_get.return_value = mock_stdlib
             logger.info("hello %s", "world")
 
-        # _GLOBAL_LOGGER must still be None
-        from src.lib.logging.logger_manager import _GLOBAL_LOGGER as gl
-        assert gl is None, "Lazy log call must not initialise _GLOBAL_LOGGER"
+        assert get_global_logger() is None
 
 
 # ---------------------------------------------------------------------------
@@ -119,43 +103,29 @@ class TestRuntimeBinding:
         )
 
     def test_log_dir_follows_app_name(self, tmp_path: Path):
-        """Log directory must be named after the app, not 'AgentLoom'."""
-        from src.lib.logging.logger_manager import (
-            resolve_log_file_path,
-            _get_agent_root,
-        )
+        """The file path comes only from the canonical RuntimeContext."""
+        from src.lib.runtime import RuntimeHome
 
-        log_path = resolve_log_file_path(
-            "my_custom_app",
-            ensure_parent=False,
+        context = RuntimeHome(tmp_path / ".agentloom").context(
+            application_id="my_custom_app", task_id="task", run_id="run"
         )
-        # The path should contain the app name
-        assert "my_custom_app" in str(log_path), (
-            f"Log path should contain app name: {log_path}"
-        )
-        # The log file and its parent directories (relative to agent_root)
-        # must use the app name, not the fallback "AgentLoom".
-        # We only check the relative portion to avoid false positives when
-        # the project itself is located in a directory named "AgentLoom".
-        agent_root = _get_agent_root()
-        try:
-            relative_path = str(log_path.relative_to(agent_root))
-        except ValueError:
-            relative_path = str(log_path)
-        assert "AgentLoom" not in relative_path, (
-            f"Log path (relative to agent_root) must NOT contain fallback name: {relative_path}"
+        assert context.log_path == (
+            tmp_path
+            / ".agentloom"
+            / "runs"
+            / "my_custom_app"
+            / "run"
+            / "logs"
+            / "runtime.log"
         )
 
     def test_global_init_not_called_before_run_app(self):
         """Importing runner must not trigger global logger initialisation."""
         # The import itself was tested above; this test ensures the contract
         # holds for the full import chain.
-        from src.lib.logging.logger_manager import _GLOBAL_LOGGER as gl
+        from src.lib.logging.logger_manager import get_global_logger
 
-        # After _clean_global_state fixture reset, importing runner should
-        # not have re-initialised the global logger (it's a cached import).
-        # We just verify the state is clean.
-        assert gl is None
+        assert get_global_logger() is None
 
 
 # ---------------------------------------------------------------------------
@@ -225,9 +195,8 @@ class TestDispatchFallbackSafety:
             "_dispatch must never call initialize_global_logger_once"
         )
 
-        # Verify _GLOBAL_LOGGER is still None
-        from src.lib.logging.logger_manager import _GLOBAL_LOGGER as gl
-        assert gl is None
+        from src.lib.logging.logger_manager import get_global_logger
+        assert get_global_logger() is None
 
     def test_dispatch_uses_global_when_available(self):
         """When global backend exists, _dispatch falls back to it."""

@@ -280,11 +280,43 @@ class ToolAccessControlSettings(BaseModel):
     path_validation: list[PathValidationRule] = Field(default_factory=list)
 
 
+class RuntimeSettings(BaseModel):
+    """Canonical runtime-home and retention settings."""
+
+    model_config = ConfigDict(extra="forbid")
+    root_dir: str = ".agentloom"
+    successful_run_retention_days: int = Field(default=7, ge=0)
+    failed_run_retention_days: int = Field(default=30, ge=0)
+    artifact_retention_days: int = Field(default=3, ge=0)
+    cleanup_interval_hours: int = Field(default=24, ge=24)
+
+    @field_validator("root_dir")
+    @classmethod
+    def _validate_root_dir(cls, value: str) -> str:
+        cleaned = value.strip()
+        if not cleaned:
+            raise ValueError("runtime.root_dir must not be empty")
+        return cleaned
+
+
+class LoggingSettings(BaseModel):
+    """Run-scoped logging settings with bounded file retention."""
+
+    model_config = ConfigDict(extra="forbid")
+    level: str | int = "INFO"
+    console_enabled: bool = True
+    file_enabled: bool = True
+    max_file_bytes: int = Field(default=25 * 1024 * 1024, ge=1)
+    backup_count: int = Field(default=3, ge=0)
+
+
 class RootSettings(BaseModel):
     model_config = ConfigDict(extra="allow")
     system: SystemSettings = Field(default_factory=SystemSettings)
     model_request_headers: ModelRequestHeadersSettings = Field(default_factory=ModelRequestHeadersSettings)
     tool_access_control: ToolAccessControlSettings = Field(default_factory=ToolAccessControlSettings)
+    runtime: RuntimeSettings = Field(default_factory=RuntimeSettings)
+    logging: LoggingSettings = Field(default_factory=LoggingSettings)
     smart_summary: bool = True
     context_engine: dict[str, Any] = Field(default_factory=dict)
     model: dict[str, Any] = Field(default_factory=dict)
@@ -314,6 +346,12 @@ def validate_system_snapshot(snapshot: dict[str, Any], source: str) -> None:
         raise ValueError(
             f"Unsupported top-level key 'default_loaded_tools' in {source}. "
             "Use 'default_toolsets' in system config or 'toolsets' in Agent YAML."
+        )
+    self_learning = snapshot.get("self_learning")
+    if isinstance(self_learning, dict) and "root_dir" in self_learning:
+        raise ValueError(
+            f"Unsupported key 'self_learning.root_dir' in {source}. "
+            "Use the single canonical 'runtime.root_dir'."
         )
     tools_mapping = snapshot.get("tools_mapping")
     if isinstance(tools_mapping, dict) and "mapping" in tools_mapping:

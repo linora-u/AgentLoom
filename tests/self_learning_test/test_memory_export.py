@@ -13,7 +13,11 @@ from src.extensions.self_learning.memory_store import MemoryStore
 
 @pytest.fixture()
 def seeded_store(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> MemoryStore:
-    monkeypatch.setenv("AGENTLOOM_SELF_LEARNING_ROOT", str(tmp_path / ".agentloom"))
+    runtime_root = tmp_path / ".agentloom"
+    monkeypatch.setattr(
+        "src.extensions.self_learning.paths._runtime_config_section",
+        lambda: {"root_dir": str(runtime_root)},
+    )
     config = {
         "application_id": "export_app",
         "self_learning": {"memory": {"write_approval": True}},

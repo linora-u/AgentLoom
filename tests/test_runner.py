@@ -6,11 +6,13 @@ instantiating real LLM-backed agents.
 """
 
 import textwrap
+import threading
+from concurrent.futures import ThreadPoolExecutor
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
-import click
 import pytest
 
 # ---------------------------------------------------------------------------
@@ -173,6 +175,461 @@ class TestRunApp:
         called_task = mock_agent.run.call_args[0][0]
         assert "测试 agent 的描述" in called_task
         assert result == "ok"
+
+    @patch("src.runner.YamlConfiguredSupervisorAgent")
+    def test_binds_canonical_run_context_before_agent_execution(self, mock_cls, fake_yaml: Path):
+        from src.lib.runtime import get_current_run_context
+        from src.runner import run_app
+
+        observed = {}
+        mock_agent = MagicMock()
+
+        def _run(_task, **kwargs):
+            context = get_current_run_context(required=True)
+            observed["context"] = context
+            observed["kwargs"] = kwargs
+            observed["manifest_exists"] = context.manifest_path.exists()
+            return "ok"
+
+        mock_agent.run.side_effect = _run
+        mock_cls.return_value = mock_agent
+
+        assert run_app(str(fake_yaml), file_logging=False) == "ok"
+
+        context = observed["context"]
+        assert context.application_id == "test_app"
+        assert observed["manifest_exists"] is True
+        assert observed["kwargs"]["task_id"] == context.task_id
+        assert observed["kwargs"]["run_id"] == context.run_id
+        assert context.manifest_path.parent == context.run_dir
+        assert not context.log_path.exists()
+        assert context.task_tree_path.exists()
+        assert not (fake_yaml.parents[3] / ".logs").exists()
+
+    @patch("src.runner.YamlConfiguredSupervisorAgent")
+    def test_run_finally_releases_shell_sessions_and_background_tasks(
+        self,
+        mock_cls,
+        fake_yaml: Path,
+    ):
+        import os
+        import subprocess
+
+        from src.lib.runtime import bind_run_context, get_current_run_context
+        from src.tools.shell.background_task import BackgroundTaskRegistry
+        from src.tools.shell.process import ShellProcessRegistry
+        from src.trace import clear_current_agent_id, set_current_agent_id
+        from src.runner import run_app
+
+        BackgroundTaskRegistry._reset_instance()
+        observed = {}
+        mock_agent = MagicMock()
+
+        def _run(_task, **_kwargs):
+            context = get_current_run_context(required=True)
+            set_current_agent_id("runner-cleanup-agent")
+            ShellProcessRegistry.get_instance().get_or_create(
+                "runner-cleanup-agent",
+                session_scoped=False,
+            )
+            context.background_artifacts_dir.mkdir(parents=True, exist_ok=True)
+            output_path = context.background_artifacts_dir / "runner-cleanup.txt"
+            output_fd = os.open(output_path, os.O_WRONLY | os.O_CREAT | os.O_APPEND)
+            process = subprocess.Popen(
+                ["sleep", "60"],
+                stdout=output_fd,
+                stderr=output_fd,
+                stdin=subprocess.DEVNULL,
+                start_new_session=True,
+            )
+            os.close(output_fd)
+            task_id = BackgroundTaskRegistry.get_instance().register(
+                process,
+                "sleep 60",
+                str(output_path),
+            )
+            observed.update(context=context, process=process, task_id=task_id)
+            return "ok"
+
+        mock_agent.run.side_effect = _run
+        mock_cls.return_value = mock_agent
+
+        try:
+            assert run_app(str(fake_yaml), file_logging=False) == "ok"
+            observed["process"].wait(timeout=5)
+
+            with bind_run_context(observed["context"]):
+                set_current_agent_id("runner-cleanup-agent")
+                assert ShellProcessRegistry.get_instance().registered_agent_ids() == []
+                assert BackgroundTaskRegistry.get_instance().list_all() == []
+        finally:
+            clear_current_agent_id()
+            process = observed.get("process")
+            if process is not None and process.poll() is None:
+                process.kill()
+                process.wait(timeout=2)
+            BackgroundTaskRegistry._reset_instance()
+
+    @patch("src.runner.YamlConfiguredSupervisorAgent")
+    def test_automatic_run_cleanup_never_traverses_checkpoints(
+        self,
+        mock_cls,
+        fake_yaml: Path,
+        monkeypatch,
+    ) -> None:
+        from src.runner import run_app
+
+        mock_cls.return_value.run.return_value = "ok"
+        monkeypatch.setattr(
+            "src.lib.runtime.retention.prune_runtime_if_due",
+            lambda *_args, **_kwargs: SimpleNamespace(skipped=False),
+        )
+        monkeypatch.setattr(
+            "src.lib.checkpoint.cleanup_expired_tasks",
+            lambda **_kwargs: pytest.fail("run retention touched checkpoints"),
+        )
+
+        assert run_app(str(fake_yaml), file_logging=False) == "ok"
+
+    @patch("src.runner.YamlConfiguredSupervisorAgent")
+    def test_run_lease_covers_manifest_and_logging_configuration(
+        self,
+        mock_cls,
+        fake_yaml: Path,
+        monkeypatch,
+    ) -> None:
+        from src.lib.logging import LoggingConfigBuilder
+        from src.lib.runtime.retention import RetentionPolicy, clean_runtime
+        from src.runner import run_app
+
+        mock_cls.return_value.run.return_value = "ok"
+        original_apply = LoggingConfigBuilder.apply_mapping
+        observed = {}
+
+        def apply_while_cleaning(builder, *args, **kwargs):
+            runtime_root = fake_yaml.parents[3] / ".agentloom"
+            result = clean_runtime(
+                runtime_root,
+                policy=RetentionPolicy(
+                    successful_runs=timedelta(0),
+                    failed_runs=timedelta(0),
+                    raw_artifacts=timedelta(0),
+                ),
+                now=datetime.now(UTC) + timedelta(seconds=1),
+            )
+            observed["removed"] = result.removed_run_count
+            return original_apply(builder, *args, **kwargs)
+
+        monkeypatch.setattr(LoggingConfigBuilder, "apply_mapping", apply_while_cleaning)
+
+        assert run_app(str(fake_yaml), file_logging=False) == "ok"
+        assert observed["removed"] == 0
+
+    def test_concurrent_applications_and_same_application_tasks_keep_logs_isolated(
+        self,
+        tmp_path: Path,
+        monkeypatch,
+    ) -> None:
+        from src.lib.logging import get_logger
+        from src.lib.runtime import get_current_run_context
+        from src.runner import run_app
+
+        workflows = []
+        for application in ("alpha", "beta"):
+            workflow_dir = tmp_path / "applications" / application / "workflows"
+            workflow_dir.mkdir(parents=True)
+            workflow = workflow_dir / "agent.yaml"
+            workflow.write_text(
+                _SAMPLE_YAML.replace('name: "test_agent"', f'name: "{application}_agent"'),
+                encoding="utf-8",
+            )
+            workflows.extend([workflow, workflow])
+
+        monkeypatch.setattr("src.runner.C", _fake_c(tmp_path))
+        barrier = threading.Barrier(len(workflows))
+        contexts = []
+        contexts_lock = threading.Lock()
+        lazy_logger = get_logger("tests.concurrent_runner")
+
+        class FakeSupervisor:
+            def __init__(self, config, logger):
+                self.config = config
+
+            def run(self, _task, **_kwargs):
+                context = get_current_run_context(required=True)
+                marker = f"only-{context.task_id}"
+                barrier.wait(timeout=10)
+                lazy_logger.info(marker)
+                with contexts_lock:
+                    contexts.append((context, marker))
+                return marker
+
+        monkeypatch.setattr("src.runner.YamlConfiguredSupervisorAgent", FakeSupervisor)
+        with ThreadPoolExecutor(max_workers=len(workflows)) as executor:
+            results = list(executor.map(lambda path: run_app(path), workflows))
+
+        assert len(results) == len(workflows)
+        assert len({context.task_id for context, _marker in contexts}) == len(workflows)
+        assert len({context.run_id for context, _marker in contexts}) == len(workflows)
+        assert {context.application_id for context, _marker in contexts} == {"alpha", "beta"}
+        for context, marker in contexts:
+            log_text = context.log_path.read_text(encoding="utf-8")
+            assert marker in log_text
+            assert all(
+                other_marker not in log_text
+                for _other_context, other_marker in contexts
+                if other_marker != marker
+            )
+
+    @patch("src.runner.YamlConfiguredSupervisorAgent")
+    def test_resume_creates_new_run_but_reuses_task_checkpoint(self, mock_cls, fake_yaml: Path):
+        from src.lib.runtime import get_current_run_context
+        from src.runner import run_app
+
+        attempts = []
+        mock_agent = MagicMock()
+
+        def _run(_task, **kwargs):
+            attempts.append((get_current_run_context(required=True), kwargs))
+            return "ok"
+
+        mock_agent.run.side_effect = _run
+        mock_cls.return_value = mock_agent
+
+        run_app(str(fake_yaml), file_logging=False)
+        first_context, first_kwargs = attempts[0]
+        run_app(
+            str(fake_yaml),
+            resume_task_id=first_context.task_id,
+            file_logging=False,
+        )
+        second_context, second_kwargs = attempts[1]
+
+        assert second_context.task_id == first_context.task_id
+        assert second_context.run_id != first_context.run_id
+        assert second_context.run_dir != first_context.run_dir
+        assert second_context.checkpoint_dir == first_context.checkpoint_dir
+        assert first_kwargs["resume"] is False
+        assert second_kwargs["resume"] is True
+
+    @pytest.mark.parametrize(
+        ("created_at", "error"),
+        [
+            ("not-a-timestamp", "invalid created_at"),
+            ("", "invalid created_at"),
+            (
+                (datetime.now(UTC) - timedelta(days=30))
+                .replace(tzinfo=None)
+                .isoformat(),
+                "expired",
+            ),
+        ],
+    )
+    @patch("src.runner.YamlConfiguredSupervisorAgent")
+    def test_resume_rejects_invalid_or_expired_naive_created_at(
+        self,
+        mock_cls,
+        fake_yaml: Path,
+        created_at: str,
+        error: str,
+    ) -> None:
+        from src.lib.checkpoint import CheckpointManager
+        from src.lib.runtime import RuntimeHome
+        from src.runner import run_app
+
+        context = RuntimeHome(fake_yaml.parents[3] / ".agentloom").context(
+            application_id="test_app",
+            task_id="invalid_created_at",
+            run_id="old_run",
+        )
+        manager = CheckpointManager(
+            "supervisor",
+            checkpoint_dir=context.checkpoint_dir,
+            run_id="old_run",
+        )
+        manager.save_task_tree(
+            context.task_id,
+            {
+                "task_id": context.task_id,
+                "status": "interrupted",
+                "created_at": created_at,
+                "workers": {},
+            },
+        )
+        manager.close()
+
+        with pytest.raises(FileNotFoundError, match=error):
+            run_app(
+                str(fake_yaml),
+                resume_task_id=context.task_id,
+                file_logging=False,
+            )
+
+        mock_cls.assert_not_called()
+
+    @patch("src.runner.YamlConfiguredSupervisorAgent")
+    def test_resume_rejects_completed_checkpoint(
+        self,
+        mock_cls,
+        fake_yaml: Path,
+    ) -> None:
+        from src.lib.checkpoint import CheckpointManager
+        from src.lib.runtime import RuntimeHome
+        from src.runner import run_app
+
+        context = RuntimeHome(fake_yaml.parents[3] / ".agentloom").context(
+            application_id="test_app",
+            task_id="completed_task",
+            run_id="old_run",
+        )
+        manager = CheckpointManager(
+            "supervisor",
+            checkpoint_dir=context.checkpoint_dir,
+            run_id="old_run",
+        )
+        manager.save_task_tree(
+            context.task_id,
+            {
+                "task_id": context.task_id,
+                "status": "completed",
+                "created_at": datetime.now(UTC).isoformat(),
+                "workers": {},
+            },
+        )
+        manager.close()
+
+        with pytest.raises(ValueError, match="not resumable.*completed"):
+            run_app(
+                str(fake_yaml),
+                resume_task_id=context.task_id,
+                file_logging=False,
+            )
+
+        mock_cls.assert_not_called()
+
+    @patch("src.runner.YamlConfiguredSupervisorAgent")
+    def test_concurrent_resume_of_same_task_is_rejected(
+        self,
+        mock_cls,
+        fake_yaml: Path,
+    ) -> None:
+        from src.runner import run_app
+
+        mock_agent = MagicMock()
+        mock_agent.run.return_value = "initial"
+        mock_cls.return_value = mock_agent
+        run_app(str(fake_yaml), file_logging=False)
+        checkpoint_root = fake_yaml.parents[3] / ".agentloom" / "checkpoints" / "test_app"
+        logical_task_id = next(checkpoint_root.iterdir()).name
+
+        entered = threading.Event()
+        release = threading.Event()
+
+        def blocking_resume(_task, **_kwargs):
+            entered.set()
+            assert release.wait(timeout=10)
+            return "resumed"
+
+        mock_agent.run.side_effect = blocking_resume
+        with ThreadPoolExecutor(max_workers=1) as executor:
+            first_resume = executor.submit(
+                run_app,
+                str(fake_yaml),
+                resume_task_id=logical_task_id,
+                file_logging=False,
+            )
+            assert entered.wait(timeout=10)
+            try:
+                with pytest.raises(RuntimeError, match="already active"):
+                    run_app(
+                        str(fake_yaml),
+                        resume_task_id=logical_task_id,
+                        file_logging=False,
+                    )
+            finally:
+                release.set()
+            assert first_resume.result(timeout=10) == "resumed"
+
+    @patch("src.runner.YamlConfiguredSupervisorAgent")
+    def test_automatic_run_cleanup_preserves_expired_checkpoints(
+        self,
+        mock_cls,
+        fake_yaml: Path,
+    ) -> None:
+        from src.lib.checkpoint import CheckpointManager
+        from src.lib.runtime import RuntimeHome
+        from src.runner import run_app
+
+        home = RuntimeHome(fake_yaml.parents[3] / ".agentloom")
+
+        def make_expired(task_id: str):
+            context = home.context(
+                application_id="test_app",
+                task_id=task_id,
+                run_id=f"run_{task_id}",
+            )
+            manager = CheckpointManager("supervisor", checkpoint_dir=context.checkpoint_dir)
+            manager.save_task_tree(
+                context.task_id,
+                {
+                    "task_id": context.task_id,
+                    "status": "failed",
+                    "created_at": (
+                        datetime.now(UTC) - timedelta(days=8)
+                    ).isoformat(),
+                    "workers": {},
+                },
+            )
+            return context
+
+        mock_cls.return_value.run.return_value = "ok"
+        first_expired = make_expired("expired_first")
+
+        run_app(str(fake_yaml), file_logging=False)
+
+        assert first_expired.checkpoint_dir.exists()
+
+    @patch("src.runner.YamlConfiguredSupervisorAgent")
+    def test_resume_rejects_symlinked_application_checkpoint_directory(
+        self,
+        mock_cls,
+        fake_yaml: Path,
+    ) -> None:
+        from src.lib.checkpoint import CheckpointManager
+        from src.runner import run_app
+
+        runtime_root = fake_yaml.parents[3] / ".agentloom"
+        external_app = fake_yaml.parents[3] / "external-checkpoints"
+        manager = CheckpointManager(
+            "supervisor",
+            checkpoint_dir=external_app / "outside_task",
+            run_id="old_run",
+        )
+        manager.save_task_tree(
+            "outside_task",
+            {
+                "task_id": "outside_task",
+                "status": "interrupted",
+                "created_at": datetime.now(UTC).isoformat(),
+                "workers": {},
+            },
+        )
+        checkpoints = runtime_root / "checkpoints"
+        checkpoints.mkdir(parents=True, exist_ok=True)
+        (checkpoints / "test_app").symlink_to(
+            external_app,
+            target_is_directory=True,
+        )
+
+        with pytest.raises(RuntimeError, match="symlink"):
+            run_app(
+                str(fake_yaml),
+                resume_task_id="outside_task",
+                file_logging=False,
+            )
+
+        assert (external_app / "outside_task" / "task_tree.json").exists()
+        mock_cls.assert_not_called()
 
     @patch("src.runner.YamlConfiguredSupervisorAgent")
     def test_relative_path(self, mock_cls, fake_yaml: Path):
