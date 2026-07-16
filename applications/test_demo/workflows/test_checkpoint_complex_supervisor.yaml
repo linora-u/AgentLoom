@@ -20,6 +20,7 @@ workflow: |
   Use shell_tool once to run this exact command:
     rm -rf /tmp/agentloom_ckpt_complex &&
     mkdir -p /tmp/agentloom_ckpt_complex/items &&
+    printf 'supervisor_setup\n' >> /tmp/agentloom_ckpt_side_effects.log &&
     printf 'alpha=11\n' > /tmp/agentloom_ckpt_complex/items/a.txt &&
     printf 'beta=22\n' > /tmp/agentloom_ckpt_complex/items/b.txt &&
     printf 'gamma=33\n' > /tmp/agentloom_ckpt_complex/items/c.txt &&
@@ -42,6 +43,7 @@ workflow: |
     grep -q 'beta=22' /tmp/agentloom_ckpt_complex/worker_report.txt &&
     grep -q 'gamma=33' /tmp/agentloom_ckpt_complex/worker_report.txt &&
     grep -q 'manifest_status=ready' /tmp/agentloom_ckpt_complex/worker_report.txt &&
+    printf 'supervisor_finalize\n' >> /tmp/agentloom_ckpt_side_effects.log &&
     printf 'checkpoint_complex=complete\nalpha=11\nbeta=22\ngamma=33\nworker_status=complete\n' > /tmp/agentloom_ckpt_complex/final_manifest.txt &&
     printf 'supervisor:complete\n' >> /tmp/agentloom_ckpt_complex/ledger.txt &&
     test -s /tmp/agentloom_ckpt_complex/final_manifest.txt

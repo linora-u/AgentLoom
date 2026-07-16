@@ -1,10 +1,46 @@
 from __future__ import annotations
 
+import contextvars
+import threading
+
 from src.lib.context_engine import ContextEngine, ContextEngineConfig
 from src.lib.context_engine.compressors import compress_content
 from src.lib.context_engine.config import ContextStoreConfig
 from src.lib.context_engine.models import ContentKind
 from src.lib.context_engine.router import route_content
+from src.lib.runtime import RuntimeHome
+
+
+def test_context_engine_requires_explicit_thread_context_propagation(tmp_path):
+    from src.lib.context_engine.runtime import (
+        clear_current_context_engine,
+        get_current_context_engine,
+        set_current_context_engine,
+    )
+
+    engine = ContextEngine(tmp_path / "context_store")
+    set_current_context_engine(engine)
+    try:
+        unpropagated = []
+        thread = threading.Thread(
+            target=lambda: unpropagated.append(get_current_context_engine())
+        )
+        thread.start()
+        thread.join(timeout=5)
+
+        propagated_context = contextvars.copy_context()
+        propagated = []
+        thread = threading.Thread(
+            target=propagated_context.run,
+            args=(lambda: propagated.append(get_current_context_engine()),),
+        )
+        thread.start()
+        thread.join(timeout=5)
+
+        assert unpropagated == [None]
+        assert propagated == [engine]
+    finally:
+        clear_current_context_engine(engine)
 
 
 def test_context_engine_stores_preview_and_retrieves_original(tmp_path):
@@ -25,6 +61,30 @@ def test_context_engine_stores_preview_and_retrieves_original(tmp_path):
     ref = preview.split()[1]
     assert engine.retrieve(ref, offset=2, limit=3).splitlines()[0].startswith("line 2 ")
     assert engine.retrieve(ref, query="line 11").startswith("12: line 11 ")
+
+
+def test_context_store_stays_on_original_task_inode_after_path_replacement(
+    tmp_path,
+) -> None:
+    home = RuntimeHome(tmp_path / ".agentloom")
+    first = home.context(application_id="app", task_id="first", run_id="run-a")
+    second = home.context(application_id="app", task_id="second", run_id="run-b")
+    first.prepare_checkpoint()
+    second.prepare_checkpoint()
+    engine = ContextEngine(
+        first.context_store_dir,
+        config=ContextEngineConfig(min_chars=10, preview_max_chars=120),
+    )
+    detached = first.checkpoint_dir.parent / "first-detached"
+    first.checkpoint_dir.rename(detached)
+    first.checkpoint_dir.symlink_to(second.checkpoint_dir, target_is_directory=True)
+    original = "\n".join(f"FIRST secret line {index}" for index in range(100))
+
+    preview = engine.compress_tool_result(original, tool_name="shell_tool")
+
+    assert preview is not None
+    assert list((second.checkpoint_dir / "context_store").glob("**/ctx_*.json")) == []
+    assert len(list((detached / "context_store" / "entries").glob("ctx_*.json"))) == 1
 
 
 def test_context_router_detects_core_content_kinds():

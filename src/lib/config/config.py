@@ -53,6 +53,7 @@ _WORKFLOW_OVERLAY_KEYS = {
     "self_learning",
 }
 _LLM_ONLY_TOP_LEVEL_KEYS = {"model", "llm", "langfuse"}
+_GLOBAL_ONLY_TOP_LEVEL_KEYS = {"runtime", "logging"}
 
 logger = get_logger(__name__)
 
@@ -117,6 +118,31 @@ def _filter_llm_only_top_level_keys(
             )
             continue
         filtered[key] = value
+    return filtered
+
+
+def _reject_application_global_only_keys(
+    config_map: dict[str, Any] | None,
+    *,
+    source_name: str,
+) -> dict[str, Any]:
+    """Reject configuration that would pretend to override global storage.
+
+    Application config may tune checkpoint behavior, but allowing it to move
+    ``runtime.root_dir`` would fragment task discovery and retention across
+    unrelated roots in the same process.  Silently dropping these keys is also
+    unsafe because the caller would reasonably believe the override applied.
+    """
+
+    filtered = dict(config_map or {})
+    disallowed = sorted(_GLOBAL_ONLY_TOP_LEVEL_KEYS.intersection(filtered))
+    if disallowed:
+        keys = ", ".join(disallowed)
+        raise ValueError(
+            f"Unsupported global-only key(s) in {source_name}: {keys}. "
+            "Configure runtime and logging only in the project root "
+            "config/system.yaml."
+        )
     return filtered
 
 
@@ -424,7 +450,14 @@ def extract_workflow_overlay(
         source = str(config_map.get("_yaml_file_path") or config_map.get("name") or "workflow config")
         raise raise_project_key_error(source)
 
-    filtered_map = _filter_llm_only_top_level_keys(config_map, source_name=source_name)
+    filtered_map = _reject_application_global_only_keys(
+        config_map,
+        source_name=source_name,
+    )
+    filtered_map = _filter_llm_only_top_level_keys(
+        filtered_map,
+        source_name=source_name,
+    )
     overlay: dict[str, Any] = {}
     for key in _WORKFLOW_OVERLAY_KEYS:
         if key not in filtered_map:
@@ -489,21 +522,26 @@ def build_effective_agent_config(
                 app_root = _resolve_app_root_from_yaml(
                     base.agent_root, Path(yaml_file_path)
                 )
-                app_config_path = app_root / APP_CONFIG_RELATIVE_PATH
-                if app_root != base.agent_root and app_config_path.exists():
-                    app_system_yaml = _filter_llm_only_top_level_keys(
-                        _load_yaml(app_config_path),
-                        source_name=str(app_config_path),
-                    )
-                    layered_builder.apply_mapping(
-                        str(app_config_path), app_system_yaml
-                    )
             except ValueError:
                 logger.warning(
                     "Skipped application config discovery for '%s': "
                     "no workflows/ directory found.",
                     yaml_file_path,
                 )
+            else:
+                app_config_path = app_root / APP_CONFIG_RELATIVE_PATH
+                if app_root != base.agent_root and app_config_path.exists():
+                    app_system_yaml = _filter_llm_only_top_level_keys(
+                        _load_yaml(app_config_path),
+                        source_name=str(app_config_path),
+                    )
+                    app_system_yaml = _reject_application_global_only_keys(
+                        app_system_yaml,
+                        source_name=str(app_config_path),
+                    )
+                    layered_builder.apply_mapping(
+                        str(app_config_path), app_system_yaml
+                    )
 
     # --- Agent YAML overlay ---
     if isinstance(agent_config, dict):

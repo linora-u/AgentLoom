@@ -12,6 +12,7 @@ import os
 import shutil
 import sys
 import tempfile
+import time
 import unittest
 from pathlib import Path
 from unittest.mock import patch
@@ -21,10 +22,11 @@ AGENT_LOOM_ROOT = SCRIPT_DIR.parents[1]
 if str(AGENT_LOOM_ROOT) not in sys.path:
     sys.path.insert(0, str(AGENT_LOOM_ROOT))
 
-from src.lib.smolagents.hooks.types import HookContext, HookEvent
-from src.lib.smolagents.skills.executors import create_hook_executor
-from src.lib.smolagents.skills.skills import SkillsManager
+from src.lib.runtime import RuntimeHome, bind_run_context
 from src.lib.smolagents.hooks.hook_manager import HookManager
+from src.lib.smolagents.hooks.types import HookContext, HookEvent
+from src.lib.smolagents.skills.executors import HOOK_STDOUT_MAX_BYTES, create_hook_executor
+from src.lib.smolagents.skills.skills import SkillsManager
 
 
 def _reset_singletons():
@@ -158,6 +160,86 @@ class TestShellExecutorTempFile(unittest.TestCase):
             len(leaked), 0,
             f"Temp files leaked after hook execution: {leaked}"
         )
+
+
+class TestHookRunArtifacts(unittest.TestCase):
+    def setUp(self):
+        self.temp_dir = tempfile.TemporaryDirectory()
+        self.root = Path(self.temp_dir.name)
+        self.runtime_context = RuntimeHome(self.root / ".agentloom").context(
+            application_id="hook-tests",
+            task_id="task",
+            run_id="run",
+        )
+        self.binding = bind_run_context(self.runtime_context)
+        self.binding.__enter__()
+
+    def tearDown(self):
+        self.binding.__exit__(None, None, None)
+        self.temp_dir.cleanup()
+
+    def _run_script(self, source: str, *, timeout: float = 10):
+        script = self.root / "hook.py"
+        script.write_text(source, encoding="utf-8")
+        executor = create_hook_executor(
+            code=f'"{sys.executable}" "{script}"',
+            skill_name="artifact-skill",
+            skill_dir=str(self.root),
+            logger=logging.getLogger(__name__),
+            timeout=timeout,
+        )
+        return executor(_make_context({"file": "test.txt"}))
+
+    def test_stdout_stderr_and_audit_are_written_to_bound_run(self):
+        result = self._run_script(
+            "import json, sys\n"
+            "sys.stderr.write('diagnostic\\n')\n"
+            "print(json.dumps({'decision': 'allow'}))\n"
+        )
+
+        self.assertTrue(result.success)
+        stdout_path = Path(result.telemetry["stdout_path"])
+        stderr_path = Path(result.telemetry["stderr_path"])
+        audit_dir = stdout_path.parent
+        self.assertTrue(stdout_path.is_relative_to(self.runtime_context.skill_artifacts_dir))
+        self.assertEqual(stderr_path.read_text(encoding="utf-8"), "diagnostic\n")
+        self.assertTrue((audit_dir / "audit.json").is_file())
+        audit = json.loads((audit_dir / "audit.json").read_text(encoding="utf-8"))
+        self.assertEqual(audit["stdout_path"], str(stdout_path))
+        self.assertEqual(audit["stderr_path"], str(stderr_path))
+
+    def test_oversized_hook_json_is_not_buffered_or_copied_into_telemetry(self):
+        output_size = HOOK_STDOUT_MAX_BYTES + 1
+        result = self._run_script(
+            f'import sys\nsys.stdout.write("x" * {output_size})\n'
+        )
+
+        self.assertFalse(result.success)
+        self.assertEqual(result.decision, "block")
+        self.assertIn("exceeds", result.reason)
+        stdout_path = Path(result.telemetry["stdout_path"])
+        self.assertEqual(stdout_path.stat().st_size, output_size)
+        self.assertEqual(result.telemetry["stdout_bytes"], output_size)
+        self.assertNotIn("stdout", result.telemetry)
+        self.assertNotIn("stdout_preview", result.telemetry)
+
+    def test_timeout_kills_descendants_before_audit_is_finalized(self):
+        child_code = "import time; time.sleep(0.5); print('late-child', flush=True)"
+        result = self._run_script(
+            "import json, subprocess, sys, time\n"
+            f"subprocess.Popen([{sys.executable!r}, '-c', {child_code!r}])\n"
+            "print(json.dumps({'decision': 'allow'}), flush=True)\n"
+            "time.sleep(5)\n",
+            timeout=0.2,
+        )
+
+        self.assertFalse(result.success)
+        self.assertIn("timed out", result.reason)
+        stdout_path = Path(result.telemetry["stdout_path"])
+        stable = stdout_path.read_bytes()
+        time.sleep(0.7)
+        self.assertEqual(stdout_path.read_bytes(), stable)
+        self.assertNotIn(b"late-child", stable)
 
 
 class TestCommonGetHookContext(unittest.TestCase):

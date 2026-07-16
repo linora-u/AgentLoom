@@ -33,7 +33,8 @@ workflow: |
     - HAS_LATE_12000=True.
     - HAS_BYTES_OMITTED=True.
     - HAS_SYSTEM_NOTICE=True.
-    - ARTIFACT_PATH is a real path under .logs/shell_outputs.
+    - ARTIFACT_PATH is a real path under
+      .agentloom/runs/test_shell_output_stress/<run_id>/artifacts/shell/.
   Verify: extract the saved full-output file path from the response.
 
   ## Step 2: Inspect the saved full-output artifact

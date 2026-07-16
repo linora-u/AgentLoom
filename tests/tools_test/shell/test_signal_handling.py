@@ -1,8 +1,5 @@
 """Tests for signal handling and partial output preservation."""
 
-import os
-import subprocess
-import tempfile
 import time
 from unittest.mock import patch
 
@@ -113,6 +110,34 @@ class TestAutoBackgroundOnTimeout:
             assert "Timeout" in result
 
         proc.cleanup()
+
+    @patch("src.lib.config.C.get_nested")
+    def test_timeout_without_runtime_context_is_never_promoted(self, mock_get_nested):
+        mock_get_nested.side_effect = lambda *args, default=None: {
+            ("shell_settings", "background_tasks", "enabled"): True,
+            (
+                "shell_settings",
+                "background_tasks",
+                "auto_background_on_timeout",
+            ): True,
+            (
+                "shell_settings",
+                "background_tasks",
+                "stall_threshold_seconds",
+            ): 45,
+        }.get(args, default)
+        proc = ShellProcess(
+            timeout=1,
+            session_scoped=False,
+            return_err_output=True,
+            load_profile=False,
+        )
+
+        result = proc.run("echo no-runtime-promotion; sleep 300")
+
+        assert "Timeout Error" in result
+        assert "Background Task" not in result
+        assert BackgroundTaskRegistry.get_instance().list_all() == []
 
     @patch("src.lib.config.C.get_nested")
     def test_auto_background_disabled(self, mock_get_nested):

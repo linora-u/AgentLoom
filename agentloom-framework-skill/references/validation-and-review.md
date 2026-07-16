@@ -71,7 +71,7 @@ find applications/<app_name>/agent_tools -name '*.py' -print0 2>/dev/null | xarg
 
 日志审计要求：
 
-- 保存或记录 `loom run ... --log-to-file` 的 log 路径；如果未使用 `--log-to-file`，至少把 stdout/stderr 落到 `/tmp/agentloom_<case>.log`。
+- 文件日志默认按 `logging.file_enabled` 写入当前 run 的 `logs/runtime.log`；不存在 `--log-to-file`。记录 `manifest.json` 给出的 `application_id`、`task_id`、`run_id` 与真实 run 路径；需要验证关闭文件日志时才使用 `--no-file-log`。
 - 检查日志里实际出现了预期 tool 调用、worker 调用、hook 拦截/放行、checkpoint/context/audit 写入等证据。
 - 检查日志中的 `ERROR`、`Traceback`、`Exception`、`WARNING`、`parse failure`、`stale`、`blocked`；非阻塞警告也要判断是否符合预期。
 - 对写文件、ContextRef、checkpoint、shell audit 这类功能，必须检查落地产物内容，而不是只相信模型总结。
@@ -99,22 +99,26 @@ find applications/<app_name>/agent_tools -name '*.py' -print0 2>/dev/null | xarg
 
 修改 ContextEngine/CCR、checkpoint、resume、日志/维测、并发 Worker、文件回滚、任务列表或任务清理时，不能只跑单测；至少选 2 个真实 Application 或已有真实 workflow 跑功能路径。优先使用仓库里的 `applications/test_demo/*checkpoint*`、`applications/test_demo/*file_rewind*`、`applications/feature_planner_demo` 这类覆盖面明确的应用。
 
-建议用隔离运行根，避免污染用户已有 checkpoint：
+建议用隔离运行根，避免污染用户已有 checkpoint。隔离子进程优先用 `AGENTLOOM_RUNTIME_ROOT` 覆盖整个 canonical runtime home；它会同时移动 runs、checkpoints、sessions、learning 和 `self_learning.db`，不会只改某一类存储：
 
 ```bash
-export AGENT_LOOM_RUNTIME_ROOT=/tmp/agentloom-runtime-checkpoint
-rm -rf "$AGENT_LOOM_RUNTIME_ROOT"
+export AGENTLOOM_RUNTIME_ROOT=/tmp/agentloom-runtime-checkpoint
 ```
+
+只有在专门验证配置解析时，才在隔离 checkout 的项目根 `config/system.yaml` 修改 `runtime.root_dir`。`runtime`/`logging` 仍是 global-only，Application overlay 不能替代全局配置。执行前清理 `/tmp/agentloom-runtime-checkpoint`，验收结束后取消环境变量或恢复隔离 checkout 的配置。
 
 必须验证的证据：
 
-- `loom run <workflow.yaml> "<task>"` 能创建 checkpoint 目录。
+- `loom run <workflow.yaml> "<task>"` 能同时创建 `.agentloom/runs/<application_id>/<run_id>/manifest.json` 与 `.agentloom/checkpoints/<application_id>/<task_id>/`（使用自定义 root 时替换 `.agentloom`）。
+- Manifest 必须记录 `application_id`、`task_id`、`run_id` 和最终状态；`logs/runtime.log`、`audit/shell.jsonl`、`artifacts/{shell,background,skills}` 只能写进当前 run。
 - 新 checkpoint 有 `task_events.jsonl`；`task_tree.json` 只是投影且能被 `loom list-tasks --detail` 展示。
 - 多 Worker 或重复 Worker 调用场景下，`workers/<worker>/calls/<call_index>/checkpoint.json` 存在，`call_index` 不互相覆盖。
 - resume 场景要实际执行 `loom run <workflow.yaml> --resume <task_id>`；若为了制造中断而提前停止，记录中断方式和恢复结果。
+- Resume 后必须证明 `task_id` 不变、`run_id` 改变，新旧 attempt 分属两个 run 目录，但都关联同一个 task checkpoint；heartbeat 和 run event 使用新 `run_id`。
 - 涉及 subagent/Worker checkpoint 时，要分别验证 Supervisor 中断恢复和 Worker 半路中断恢复；Worker 恢复必须证明没有新开重复 `call_index`，且能从 per-call memory checkpoint 继续。
 - file-history 场景要检查 `file-history/snapshots.json` 和备份文件，确认早期备份没有被后续 snapshot 覆盖。
-- 清理场景要实际跑 `loom clean-tasks --all`，确认新旧 worker checkpoint 布局都会被删除。
+- Checkpoint 清理场景要实际跑 `loom clean-tasks --all`；run retention 要跑 `loom clean-runtime`，证明不会删除 checkpoint、`.runtime/`、`.agentloom/legacy/` 或 Application outputs。
+- 迁移要先跑 `loom migrate-runtime --dry-run`，再在隔离副本跑 `--apply`，证明忽略坏 `.task_index.json`、幂等/失败回滚、checksum 校验、有效 task resume、旧 ContextRef retrieve 与 file-history 恢复；最后确认旧 `.logs` 整体进入 `.agentloom/legacy/logs-v1-<timestamp>/`，新运行不再写 `.logs`。
 
 ContextEngine/CCR 额外必须验证：
 
@@ -143,34 +147,30 @@ PYTHONPATH=/Users/bytedance/code/data_clear/AgentLoom-checkpoint \
 
 修改 shell 权限、审计、sandbox、路径安全、后台任务或 stall 检测时，不能只跑单测。按 `shell-security-audit.md` 先确认 audit log 能记录有效策略，再用真实 Application 验证该允许的允许、该拒绝的拒绝。
 
-建议使用隔离 runtime：
-
-```bash
-export AGENT_LOOM_RUNTIME_ROOT=/tmp/agentloom-runtime-shell-security
-```
+建议在隔离 checkout 的全局 `config/system.yaml` 中把 `runtime.root_dir` 设为 `/tmp/agentloom-runtime-shell-security`，并在执行前清理该目录。
 
 核心真实 LLM 验证：
 
 ```bash
-.venv/bin/loom run applications/test_shell_audit/workflows/test_shell_policy_snapshot_agent.yaml --log-to-file
-.venv/bin/loom run applications/test_shell_audit/workflows/test_shell_audit_log_agent.yaml --log-to-file
-.venv/bin/loom run applications/test_shell_audit/workflows/test_shell_audit_signals_agent.yaml --log-to-file
-.venv/bin/loom run applications/test_shell_allowlist_matrix/workflows/test_shell_allowlist_matrix_agent.yaml --log-to-file
+.venv/bin/loom run applications/test_shell_audit/workflows/test_shell_policy_snapshot_agent.yaml
+.venv/bin/loom run applications/test_shell_audit/workflows/test_shell_audit_log_agent.yaml
+.venv/bin/loom run applications/test_shell_audit/workflows/test_shell_audit_signals_agent.yaml
+.venv/bin/loom run applications/test_shell_allowlist_matrix/workflows/test_shell_allowlist_matrix_agent.yaml
 ```
 
 补充验证：
 
 ```bash
-.venv/bin/loom run applications/test_demo/workflows/test_security_transparency_agent.yaml --log-to-file
-.venv/bin/loom run applications/test_demo/workflows/test_background_task_agent.yaml --log-to-file
-.venv/bin/loom run applications/test_demo/workflows/test_shell_stall_detection_agent.yaml --log-to-file
-.venv/bin/loom run applications/test_demo/workflows/test_shell_session_isolation_supervisor.yaml --log-to-file
+.venv/bin/loom run applications/test_demo/workflows/test_security_transparency_agent.yaml
+.venv/bin/loom run applications/test_demo/workflows/test_background_task_agent.yaml
+.venv/bin/loom run applications/test_demo/workflows/test_shell_stall_detection_agent.yaml
+.venv/bin/loom run applications/test_demo/workflows/test_shell_session_isolation_supervisor.yaml
 ```
 
 通过标准：
 
-- LLM final 不能只写 PASS，必须列出实际 `shell_audit.log` 路径和关键证据行。
-- agent log 与 shell audit log 父目录一致。
+- LLM final 不能只写 PASS，必须列出当前 run 的 `manifest.json`、`logs/runtime.log`、`audit/shell.jsonl` 路径和关键证据行。
+- runtime log 与 Shell audit 必须属于同一个 `<application_id>/<run_id>` run 目录，不能借用其他 run。
 - 全允许场景必须有 `[POLICY_SNAPSHOT]`，且记录 `allowed_commands: *` / `allowed_operators: *`。
 - 白名单场景必须证明允许命令成功、未允许命令被拒绝、未允许操作符被拒绝。
 - `;` 等操作符拒绝的 suggestion 必须指向 `allowed_operators`，不得建议放进 `allowed_commands`。

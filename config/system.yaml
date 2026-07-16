@@ -100,11 +100,19 @@ code_agent:
   # Additional built-in functions allowed during Python code execution; "*" means all callable builtins are allowed
   additional_functions: "*"
 
+runtime:
+  root_dir: ".agentloom"
+  successful_run_retention_days: 7
+  failed_run_retention_days: 30
+  artifact_retention_days: 3
+  cleanup_interval_hours: 24
+
 logging:
-  enabled: true
   level: "INFO"
-  file_path: null
-  dir: ".logs"
+  console_enabled: true
+  file_enabled: true
+  max_file_bytes: 26214400  # 25 MiB per segment
+  backup_count: 3
 
 # ============================================
 # Tool Access Control
@@ -187,7 +195,6 @@ checkpoint:
 # ============================================
 self_learning:
   enabled: true
-  root_dir: ".agentloom"
   # Runs/events are history only. They remain searchable but are never promoted
   # to memory by a deterministic fallback.
   events_retention_days: 90
@@ -376,9 +383,7 @@ shell_settings:
 
   # Per-agent shell security audit log.
   # Writes structured events (blocks, stalls, timeouts, path violations)
-  # to .logs/{agent_name}/{timestamp}/shell_audit.log (co-located with
-  # the agent run log) so users can quickly diagnose shell permissions.
-  # Log directory is controlled by the top-level logging.dir setting.
+  # to the active run's audit/shell.jsonl (10 MiB, 2 backups).
   audit_log:
     enabled: true           # Master switch (default: true)
     log_policy_snapshot: true  # Log effective shell policy once per run

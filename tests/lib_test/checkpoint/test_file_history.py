@@ -17,10 +17,11 @@ import time
 import pytest
 
 from src.lib.checkpoint.file_history import (
+    MAX_SNAPSHOTS,
     FileHistoryManager,
     FileHistorySnapshot,
-    MAX_SNAPSHOTS,
 )
+from src.lib.runtime import RuntimeHome
 
 
 @pytest.fixture
@@ -119,6 +120,28 @@ class TestTrackEdit:
         backups = [f for f in os.listdir(backup_dir) if "@v1" in f]
         assert len(backups) == 1
         assert (backup_dir / backups[0]).read_bytes() == original_bytes
+
+    def test_backup_stays_on_original_task_inode_after_path_replacement(
+        self,
+        tmp_path,
+    ) -> None:
+        home = RuntimeHome(tmp_path / ".agentloom")
+        first = home.context(application_id="app", task_id="first", run_id="run-a")
+        second = home.context(application_id="app", task_id="second", run_id="run-b")
+        first.prepare_checkpoint()
+        second.prepare_checkpoint()
+        history = FileHistoryManager(first.file_history_dir)
+        (second.file_history_dir).mkdir()
+        source = tmp_path / "source.txt"
+        source.write_text("FIRST secret", encoding="utf-8")
+        detached = first.checkpoint_dir.parent / "first-detached"
+        first.checkpoint_dir.rename(detached)
+        first.checkpoint_dir.symlink_to(second.checkpoint_dir, target_is_directory=True)
+
+        history.track_edit(str(source), step_number=1)
+
+        assert list(second.file_history_dir.iterdir()) == []
+        assert any("@v1" in path.name for path in (detached / "file-history").iterdir())
 
     def test_different_steps_create_separate_entries(self, fh, sample_file):
         """Normal: Same file in different steps gets separate snapshot entries."""
@@ -299,6 +322,21 @@ class TestRewindToStep:
         assert os.path.exists(sample_file)
         assert open(sample_file, "rb").read() == original
 
+    def test_deleted_executable_restores_mode_and_mtime(self, fh, tmp_path):
+        executable = tmp_path / "tool.sh"
+        executable.write_text("#!/bin/sh\nprintf restored\n", encoding="utf-8")
+        executable.chmod(0o755)
+        expected_mtime_ns = 1_700_000_000_987_654_321
+        os.utime(executable, ns=(expected_mtime_ns, expected_mtime_ns))
+        fh.track_edit(str(executable), step_number=1)
+
+        executable.unlink()
+        fh.rewind_to_step(step_number=1)
+
+        restored = executable.stat()
+        assert restored.st_mode & 0o777 == 0o755
+        assert restored.st_mtime_ns == expected_mtime_ns
+
     def test_rewind_to_earlier_step_deletes_file_created_later(self, fh, sample_file, tmp_path):
         """Files first tracked as non-existent after target step are deleted on rewind."""
         fh.track_edit(sample_file, step_number=1)
@@ -399,6 +437,34 @@ class TestRestoreFromIndex:
 
         assert fh2.snapshot_count == fh.snapshot_count
         assert fh2.tracked_file_count == fh.tracked_file_count
+
+    def test_persisted_restore_stays_on_original_task_inode_after_replacement(
+        self,
+        tmp_path,
+    ) -> None:
+        home = RuntimeHome(tmp_path / ".agentloom")
+        first = home.context(application_id="app", task_id="first", run_id="run-a")
+        second = home.context(application_id="app", task_id="second", run_id="run-b")
+        first.prepare_checkpoint()
+        second.prepare_checkpoint()
+        source = tmp_path / "source.txt"
+        source.write_text("FIRST", encoding="utf-8")
+        original = FileHistoryManager(first.file_history_dir)
+        original.track_edit(str(source), step_number=1)
+        restored = FileHistoryManager(first.file_history_dir)
+        detached = first.checkpoint_dir.parent / "first-detached"
+        first.checkpoint_dir.rename(detached)
+        first.checkpoint_dir.symlink_to(second.checkpoint_dir, target_is_directory=True)
+        (second.file_history_dir).mkdir()
+        (second.file_history_dir / "snapshots.json").write_text(
+            '{"snapshots": [{"step_number": 99}], "first_tracked_backups": {}}',
+            encoding="utf-8",
+        )
+
+        assert restored.restore_persisted_index() is True
+        assert restored.snapshot_count == 1
+        with pytest.raises(ValueError, match="step_number=99"):
+            restored.rewind_to_step(99)
 
     def test_restore_empty_index(self, backup_dir):
         """Boundary: Restore from empty data."""

@@ -5,12 +5,13 @@ from __future__ import annotations
 import time
 from pathlib import Path
 
+from src.lib.runtime import SecureDirectory
+
 from .compressors import compress_content
 from .config import ContextEngineConfig
 from .models import CompressionResult, ContextEntry
 from .router import route_content
 from .store import ContextStore, make_context_ref
-
 
 CONTEXT_REF_PREFIX = "[ContextRef "
 
@@ -21,12 +22,14 @@ class ContextEngine:
         store_dir: Path,
         *,
         config: ContextEngineConfig | None = None,
+        storage: SecureDirectory | None = None,
     ) -> None:
         self.config = config or ContextEngineConfig.from_runtime()
         self.store = ContextStore(
             store_dir,
             max_entries=self.config.store.max_entries,
             ttl_seconds=self.config.store.ttl_seconds,
+            storage=storage,
         )
 
     def should_compress_tool_result(self, text: str, tool_name: str = "default") -> bool:
@@ -87,6 +90,9 @@ class ContextEngine:
 
     def stats_snapshot(self) -> dict:
         return self.store.stats_snapshot()
+
+    def close(self) -> None:
+        self.store.close()
 
     def format_preview(self, entry: ContextEntry, compressed: CompressionResult | None = None) -> str:
         preview = compressed.preview if compressed else entry.preview

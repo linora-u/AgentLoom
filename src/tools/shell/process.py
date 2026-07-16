@@ -28,16 +28,16 @@ import functools
 import os
 import re
 import shutil
-import signal
 import subprocess
 import sys
 import tempfile
 import threading
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import Dict, List, Optional
 
 from src.lib.config import C
 from src.lib.logging import get_logger
+from src.lib.runtime import get_current_run_context
 from src.tools.shell.ansi_stripper import strip_ansi
 from src.tools.shell.pipe_redirect import rearrange_pipe_command
 from src.tools.shell.shell_session import ShellSession
@@ -52,6 +52,7 @@ logger = get_logger(__name__)
 # ---------------------------------------------------------------------------
 # Execution result
 # ---------------------------------------------------------------------------
+
 
 @dataclass
 class ExecResult:
@@ -106,10 +107,14 @@ def _foreground_stall_threshold(timeout: int) -> float:
     than the command timeout; otherwise it is promoted to background and leaves
     the interactive process alive.
     """
-    configured = float(C.get_nested(
-        "shell_settings", "background_tasks",
-        "stall_threshold_seconds", default=45,
-    ))
+    configured = float(
+        C.get_nested(
+            "shell_settings",
+            "background_tasks",
+            "stall_threshold_seconds",
+            default=45,
+        )
+    )
     half_timeout = max(float(timeout) * 0.5, 1.0)
     return max(1.0, min(configured, half_timeout, 15.0))
 
@@ -222,20 +227,18 @@ def _resolve_shell_path_windows() -> str:
 
     for path in WINDOWS_SHELL_FALLBACK_PATHS:
         if os.path.isfile(path) and os.access(path, os.X_OK):
-            logger.warning(
-                "Windows shell not found via $COMSPEC. Falling back to: %s", path
-            )
+            logger.warning("Windows shell not found via $COMSPEC. Falling back to: %s", path)
             return path
 
     raise FileNotFoundError(
-        "No suitable Windows shell found. Tried $COMSPEC and standard "
-        "PowerShell/cmd.exe locations."
+        "No suitable Windows shell found. Tried $COMSPEC and standard PowerShell/cmd.exe locations."
     )
 
 
 # ---------------------------------------------------------------------------
 # ShellProcess — the main execution engine
 # ---------------------------------------------------------------------------
+
 
 class ShellProcess:
     """Execute shell commands via stateless subprocesses.
@@ -350,9 +353,7 @@ class ShellProcess:
                 if isinstance(partial, bytes):
                     partial = partial.decode(errors="replace")
                 return self._format_output(
-                    f"{partial}\n\n"
-                    f"[Timeout Error: Command took longer than "
-                    f"{self.timeout} seconds]"
+                    f"{partial}\n\n[Timeout Error: Command took longer than {self.timeout} seconds]"
                 )
             except Exception as e:
                 return self._format_output(f"Execution failed: {str(e)}")
@@ -361,10 +362,7 @@ class ShellProcess:
         is_zsh = "zsh" in os.path.basename(self._shell_path).lower()
         composite = command
         if not self.load_profile and is_zsh:
-            composite = (
-                "setopt NO_EXTENDED_GLOB 2>/dev/null || true ; "
-                f"{command}"
-            )
+            composite = f"setopt NO_EXTENDED_GLOB 2>/dev/null || true ; {command}"
 
         if self.load_profile:
             shell_args = [self._shell_path, "-l", "-c", composite]
@@ -381,7 +379,10 @@ class ShellProcess:
 
         try:
             result = self._exec_subprocess(
-                shell_args, env, self.timeout, command=command,
+                shell_args,
+                env,
+                self.timeout,
+                command=command,
             )
         except Exception as e:
             result = ExecResult(output=f"Execution failed: {str(e)}")
@@ -427,10 +428,7 @@ class ShellProcess:
         # aliases, shell options, and PATH captured from the login shell
         # at session start.  Re-sourcing ~/.bashrc on every call is
         # unnecessary overhead (100-300ms).
-        has_snapshot = (
-            self._snapshot_path
-            and os.path.exists(self._snapshot_path)
-        )
+        has_snapshot = self._snapshot_path and os.path.exists(self._snapshot_path)
         is_zsh = "zsh" in os.path.basename(self._shell_path).lower()
 
         if has_snapshot:
@@ -494,7 +492,10 @@ class ShellProcess:
         # Execute as a new subprocess
         try:
             result = self._exec_subprocess(
-                shell_args, env, self.timeout, command=command,
+                shell_args,
+                env,
+                self.timeout,
+                command=command,
             )
         except Exception as e:
             result = ExecResult(output=f"Execution failed: {str(e)}")
@@ -514,11 +515,7 @@ class ShellProcess:
                 f"Use check_background_task('{result.background_task_id}') to monitor."
             )
         elif result.timed_out:
-            output = (
-                f"{output}\n\n"
-                f"[Timeout Error: Command took longer than "
-                f"{self.timeout} seconds]"
-            )
+            output = f"{output}\n\n[Timeout Error: Command took longer than {self.timeout} seconds]"
         return self._format_output(output)
 
     def _exec_subprocess(
@@ -546,15 +543,28 @@ class ShellProcess:
         watchdog = None
         fg_stall = None
         out_fd = -1
+        read_fd = -1
+        runtime_context = None
+        runtime_output_path = None
         promoted = False  # True if promoted to background
 
         try:
-            fd, output_file = tempfile.mkstemp(
-                prefix="agentloom_output_", suffix=".txt"
-            )
-            # Close the fd from mkstemp and open with O_WRONLY | O_APPEND
-            os.close(fd)
-            out_fd = os.open(output_file, os.O_WRONLY | os.O_APPEND)
+            from src.lib.runtime import get_current_run_context
+
+            runtime_context = get_current_run_context()
+            if runtime_context is not None:
+                out_fd, runtime_output_path = runtime_context.allocate_artifact(
+                    "background",
+                    prefix="shell-process-",
+                    suffix=".txt",
+                )
+                output_file = str(runtime_output_path)
+            else:
+                out_fd, output_file = tempfile.mkstemp(
+                    prefix="shell-process-",
+                    suffix=".txt",
+                )
+            read_fd = os.dup(out_fd)
 
             proc = subprocess.Popen(
                 args,
@@ -569,9 +579,31 @@ class ShellProcess:
             os.close(out_fd)
             out_fd = -1
 
+            def read_output() -> str:
+                try:
+                    size = os.fstat(read_fd).st_size
+                    chunks: list[bytes] = []
+                    offset = 0
+                    while offset < size:
+                        chunk = os.pread(
+                            read_fd,
+                            min(1024 * 1024, size - offset),
+                            offset,
+                        )
+                        if not chunk:
+                            break
+                        chunks.append(chunk)
+                        offset += len(chunk)
+                    return b"".join(chunks).decode("utf-8", errors="replace")
+                except OSError:
+                    return ""
+
             # Start size watchdog for long-running commands.
             watchdog = SizeWatchdog(
-                proc.pid, output_file, max_bytes=_MAX_OUTPUT_BYTES
+                proc.pid,
+                output_file,
+                max_bytes=_MAX_OUTPUT_BYTES,
+                output_fd=read_fd,
             )
             watchdog.start()
 
@@ -584,6 +616,7 @@ class ShellProcess:
             fg_stall = StallWatchdog(
                 task_id=f"fg-{proc.pid}",
                 output_path=output_file,
+                output_fd=read_fd,
                 poll_interval=_foreground_stall_poll_interval(stall_threshold),
                 stall_threshold=stall_threshold,
             )
@@ -610,21 +643,18 @@ class ShellProcess:
                     # running.  The proc.poll() guard prevents a
                     # race condition where the process exits at the
                     # exact moment the watchdog sets stall_message.
-                    if (
-                        fg_stall
-                        and fg_stall.stall_message
-                        and proc.poll() is None
-                    ):
+                    if fg_stall and fg_stall.stall_message and proc.poll() is None:
                         logger.info(
-                            "Foreground stall detected for pid %d "
-                            "after %.0fs — killing process",
-                            proc.pid, elapsed,
+                            "Foreground stall detected for pid %d after %.0fs — killing process",
+                            proc.pid,
+                            elapsed,
                         )
                         # Write to per-agent shell audit log
                         try:
                             from src.tools.shell.shell_audit_log import (
                                 get_shell_audit_logger,
                             )
+
                             audit = get_shell_audit_logger()
                             audit.log_stall_detected(
                                 command=command,
@@ -647,22 +677,25 @@ class ShellProcess:
                 # kill).
                 partial = ""
                 try:
-                    with open(output_file, "r", errors="replace") as f:
-                        partial = f.read()
+                    partial = read_output()
                 except Exception:
                     pass
 
-                prompt_message = detect_stall_prompt(f"fg-{proc.pid}", output_file)
+                prompt_message = detect_stall_prompt(
+                    f"fg-{proc.pid}",
+                    output_file,
+                    output_fd=read_fd,
+                )
                 if prompt_message and proc.poll() is None:
                     logger.info(
-                        "Foreground prompt detected at timeout for pid %d — "
-                        "killing instead of promoting",
+                        "Foreground prompt detected at timeout for pid %d — killing instead of promoting",
                         proc.pid,
                     )
                     try:
                         from src.tools.shell.shell_audit_log import (
                             get_shell_audit_logger,
                         )
+
                         audit = get_shell_audit_logger()
                         audit.log_stall_detected(
                             command=command,
@@ -678,28 +711,33 @@ class ShellProcess:
                     except subprocess.TimeoutExpired:
                         pass
                     return ExecResult(
-                        output=(
-                            f"{partial}\n\n"
-                            f"[Stall Warning: {prompt_message}]"
-                        ),
+                        output=(f"{partial}\n\n[Stall Warning: {prompt_message}]"),
                         interrupted=True,
                         exit_code=-9,
                     )
 
                 # Check if auto-background is enabled.
                 bg_enabled = C.get_nested(
-                    "shell_settings", "background_tasks", "enabled",
+                    "shell_settings",
+                    "background_tasks",
+                    "enabled",
                     default=True,
                 )
                 auto_bg = C.get_nested(
-                    "shell_settings", "background_tasks",
-                    "auto_background_on_timeout", default=True,
+                    "shell_settings",
+                    "background_tasks",
+                    "auto_background_on_timeout",
+                    default=True,
                 )
 
-                if bg_enabled and auto_bg:
+                if bg_enabled and auto_bg and runtime_context is not None:
                     # Promote to background instead of killing.
                     task_id = self._promote_to_background(
-                        proc, output_file, command, watchdog,
+                        proc,
+                        output_file,
+                        command,
+                        watchdog,
+                        output_fd=read_fd,
                     )
                     promoted = True
                     # Audit the background promotion
@@ -707,6 +745,7 @@ class ShellProcess:
                         from src.tools.shell.shell_audit_log import (
                             get_shell_audit_logger,
                         )
+
                         audit = get_shell_audit_logger()
                         audit.log_timeout(
                             command=command,
@@ -728,9 +767,12 @@ class ShellProcess:
                     from src.tools.shell.shell_audit_log import (
                         get_shell_audit_logger,
                     )
+
                     audit = get_shell_audit_logger()
                     audit.log_timeout(
-                        command=command, timeout=timeout, promoted=False,
+                        command=command,
+                        timeout=timeout,
+                        promoted=False,
                     )
                 except Exception:
                     pass
@@ -745,15 +787,11 @@ class ShellProcess:
             if stall_killed:
                 partial = ""
                 try:
-                    with open(output_file, "r", errors="replace") as f:
-                        partial = f.read()
+                    partial = read_output()
                 except Exception:
                     pass
                 return ExecResult(
-                    output=(
-                        f"{partial}\n\n"
-                        f"[Stall Warning: {fg_stall.stall_message}]"
-                    ),
+                    output=(f"{partial}\n\n[Stall Warning: {fg_stall.stall_message}]"),
                     interrupted=True,
                     exit_code=-9,
                 )
@@ -761,8 +799,7 @@ class ShellProcess:
             # ---- Process completed normally ----
             exit_code = proc.returncode
             try:
-                with open(output_file, "r", errors="replace") as f:
-                    output = f.read()
+                output = read_output()
             except Exception:
                 output = ""
 
@@ -770,13 +807,12 @@ class ShellProcess:
             # a prompt but the process still exited on its own (e.g.
             # a timeout built into the command itself).
             if fg_stall.stall_message:
-                output = (
-                    f"{output}\n\n"
-                    f"[Stall Warning: {fg_stall.stall_message}]"
-                )
+                output = f"{output}\n\n[Stall Warning: {fg_stall.stall_message}]"
 
             return ExecResult(
-                output=output, timed_out=False, exit_code=exit_code,
+                output=output,
+                timed_out=False,
+                exit_code=exit_code,
             )
 
         finally:
@@ -798,7 +834,18 @@ class ShellProcess:
                         os.close(out_fd)
                     except OSError:
                         pass
-                if output_file and os.path.exists(output_file):
+                if read_fd >= 0:
+                    try:
+                        os.close(read_fd)
+                    except OSError:
+                        pass
+                    read_fd = -1
+                if runtime_context is not None and runtime_output_path is not None:
+                    try:
+                        runtime_context.remove_run_file(runtime_output_path)
+                    except (FileNotFoundError, RuntimeError):
+                        pass
+                elif output_file and os.path.exists(output_file):
                     try:
                         os.remove(output_file)
                     except OSError:
@@ -810,6 +857,11 @@ class ShellProcess:
                         os.close(out_fd)
                     except OSError:
                         pass
+                if read_fd >= 0:
+                    try:
+                        os.close(read_fd)
+                    except OSError:
+                        pass
 
     def _promote_to_background(
         self,
@@ -817,6 +869,7 @@ class ShellProcess:
         output_path: str,
         command: str,
         watchdog: Optional[SizeWatchdog] = None,
+        output_fd: int | None = None,
     ) -> str:
         """Register a running process as a background task.
 
@@ -828,16 +881,22 @@ class ShellProcess:
         from src.tools.shell.background_task import BackgroundTaskRegistry
 
         registry = BackgroundTaskRegistry.get_instance()
-        task_id = registry.register(
-            process=proc,
-            command=command,
-            output_path=output_path,
-            description=command[:80],
-            size_watchdog=watchdog,
-        )
+        try:
+            task_id = registry.register(
+                process=proc,
+                command=command,
+                output_path=output_path,
+                description=command[:80],
+                size_watchdog=watchdog,
+                output_fd=output_fd,
+            )
+        except BaseException:
+            graceful_kill(proc.pid, grace_ms=500)
+            raise
         logger.info(
             "Command promoted to background task %s: pid=%d",
-            task_id, proc.pid,
+            task_id,
+            proc.pid,
         )
         return task_id
 
@@ -851,7 +910,7 @@ class ShellProcess:
         output = output.strip()
 
         # Clean up terminal-style artifacts at the end (prompt chars).
-        output = re.sub(r'[%$#>]\s*$', '', output).strip()
+        output = re.sub(r"[%$#>]\s*$", "", output).strip()
         return output
 
     # ------------------------------------------------------------------
@@ -878,14 +937,19 @@ class ShellProcess:
 # ShellProcessRegistry — per-agent process management (singleton)
 # ---------------------------------------------------------------------------
 
-class ShellProcessRegistry:
-    """Thread-safe singleton registry for per-agent ShellProcess instances.
+RuntimeKey = tuple[str, str, str, str]
+ShellProcessOwner = tuple[RuntimeKey, str]
 
-    Each agent (identified by agent_id) gets its own dedicated
+
+class ShellProcessRegistry:
+    """Thread-safe singleton registry for run-and-agent shell sessions.
+
+    Each explicit ``RuntimeContext`` + ``agent_id`` pair gets its own dedicated
     ShellProcess, which is created on first use and reused on subsequent
     calls.  This allows the shell session to maintain CWD across multiple
-    tool invocations within the same agent run. Environment variable exports
-    remain per-command and do not persist.
+    tool invocations within one run.  Calls without a bound runtime are
+    intentionally one-shot and are never added to this process-wide registry.
+    Environment variable exports remain per-command and do not persist.
     """
 
     _instance: Optional["ShellProcessRegistry"] = None
@@ -895,7 +959,7 @@ class ShellProcessRegistry:
         with cls._instance_lock:
             if cls._instance is None:
                 cls._instance = super().__new__(cls)
-                cls._instance._registry: Dict[str, ShellProcess] = {}
+                cls._instance._registry: Dict[ShellProcessOwner, ShellProcess] = {}
                 cls._instance._registry_lock = threading.Lock()
         return cls._instance
 
@@ -913,17 +977,32 @@ class ShellProcessRegistry:
         return_err_output: bool = True,
         load_profile: bool = True,
     ) -> ShellProcess:
-        """Return the ShellProcess bound to *agent_id*, creating if needed."""
+        """Return the shell bound to the current run and ``agent_id``.
+
+        Without a bound runtime, return a fresh one-shot process instead of
+        consulting shared state.  Missing context must never cause a caller to
+        inherit another run's CWD or shell snapshot.
+        """
+        context = get_current_run_context()
+        if context is None:
+            return ShellProcess(
+                timeout=timeout,
+                session_scoped=False,
+                strip_newlines=strip_newlines,
+                return_err_output=return_err_output,
+                load_profile=load_profile,
+            )
+        owner = (context.runtime_key, agent_id)
         with self._registry_lock:
-            if agent_id not in self._registry:
-                self._registry[agent_id] = ShellProcess(
+            if owner not in self._registry:
+                self._registry[owner] = ShellProcess(
                     timeout=timeout,
                     session_scoped=session_scoped,
                     strip_newlines=strip_newlines,
                     return_err_output=return_err_output,
                     load_profile=load_profile,
                 )
-            process = self._registry[agent_id]
+            process = self._registry[owner]
             process.timeout = timeout
             process.strip_newlines = strip_newlines
             process.return_err_output = return_err_output
@@ -931,14 +1010,38 @@ class ShellProcessRegistry:
             return process
 
     def release(self, agent_id: str) -> None:
-        """Release and destroy the ShellProcess associated with *agent_id*."""
+        """Release ``agent_id`` only within the current run."""
+        context = get_current_run_context()
+        if context is None:
+            return
+        owner = (context.runtime_key, agent_id)
         with self._registry_lock:
-            process = self._registry.pop(agent_id, None)
-            if process is not None:
-                try:
-                    process.cleanup()
-                except Exception:
-                    pass
+            process = self._registry.pop(owner, None)
+        if process is not None:
+            try:
+                process.cleanup()
+            except Exception:
+                pass
+
+    def release_current_run(self) -> int:
+        """Release every shell session owned by the bound run.
+
+        Returns the number of removed sessions.  With no bound runtime this is
+        a no-op, which prevents teardown code from touching another run.
+        """
+        context = get_current_run_context()
+        if context is None:
+            return 0
+        runtime_key = context.runtime_key
+        with self._registry_lock:
+            owners = [owner for owner in self._registry if owner[0] == runtime_key]
+            processes = [self._registry.pop(owner) for owner in owners]
+        for process in processes:
+            try:
+                process.cleanup()
+            except Exception:
+                pass
+        return len(processes)
 
     def get_session_cwd(self, agent_id: str) -> Optional[str]:
         """Return the current working directory of the shell session for *agent_id*.
@@ -948,13 +1051,21 @@ class ShellProcessRegistry:
         path validation to resolve relative paths against the shell
         session's actual CWD rather than the Python process's CWD.
         """
+        context = get_current_run_context()
+        if context is None:
+            return None
+        owner = (context.runtime_key, agent_id)
         with self._registry_lock:
-            process = self._registry.get(agent_id)
+            process = self._registry.get(owner)
             if process is not None:
                 return process.cwd
         return None
 
     def registered_agent_ids(self) -> List[str]:
-        """Return a snapshot of all currently registered agent IDs."""
+        """Return agent IDs registered only within the current run."""
+        context = get_current_run_context()
+        if context is None:
+            return []
+        runtime_key = context.runtime_key
         with self._registry_lock:
-            return list(self._registry.keys())
+            return [agent_id for (owner, agent_id) in self._registry if owner == runtime_key]

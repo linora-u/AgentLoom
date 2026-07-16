@@ -110,21 +110,30 @@ _RUN_EPILOG = """\
 \b
 Examples:
   loom run applications/test_demo/workflows/test_agent.yaml
-  loom run applications/test_demo/workflows/test_agent.yaml --log-to-file
+  loom run applications/test_demo/workflows/test_agent.yaml --no-file-log
   loom run applications/test_demo/workflows/test_agent.yaml --resume task_xxx
 """
 
 
 @main.command(epilog=_RUN_EPILOG)
 @click.argument("yaml_path")
-@click.option("--log-to-file", is_flag=True, default=False, help="Persist logs to a file.")
+@click.option(
+    "--no-file-log",
+    is_flag=True,
+    default=False,
+    help="Disable this run's file log (configuration is used by default).",
+)
 @click.option("--resume", "resume_task_id", default=None, help="Resume from a checkpoint task ID.")
-def run(yaml_path: str, log_to_file: bool, resume_task_id: str | None):
+def run(yaml_path: str, no_file_log: bool, resume_task_id: str | None):
     """Run a supervisor agent from a YAML configuration."""
     from src.runner import run_app
 
     try:
-        result = run_app(yaml_path, log_to_file=log_to_file, resume_task_id=resume_task_id)
+        result = run_app(
+            yaml_path,
+            file_logging=False if no_file_log else None,
+            resume_task_id=resume_task_id,
+        )
         click.echo(result)
     except KeyboardInterrupt as exc:
         click.echo("\nInterrupted. Use --resume to continue.", err=True)
@@ -143,15 +152,31 @@ def run(yaml_path: str, log_to_file: bool, resume_task_id: str | None):
 # loom list-tasks
 # ─────────────────────────────────────────────
 
+def _configured_runtime_home():
+    from src.lib.config import C
+    from src.lib.runtime import resolve_runtime_home
+
+    return resolve_runtime_home(C.raw, agent_root=C.agent_root)
+
+
+def _configured_checkpoints_root():
+    try:
+        return _configured_runtime_home().checkpoints_root
+    except RuntimeError as exc:
+        raise click.ClickException(str(exc)) from exc
+
+
 @main.command("list-tasks")
 @click.option("--detail", is_flag=True, default=False, help="Show worker-level details.")
 def list_tasks(detail: bool):
-    """List all resumable checkpoint tasks."""
+    """List all retained checkpoint tasks."""
     from src.lib.checkpoint.checkpoint_manager import list_all_tasks
 
-    tasks = list_all_tasks()
+    tasks = list_all_tasks(
+        checkpoints_root=_configured_checkpoints_root()
+    )
     if not tasks:
-        click.echo("No resumable tasks found.")
+        click.echo("No checkpoint tasks found.")
         return
 
     _ICONS = {"interrupted": "⏸", "failed": "❌", "running": "🔄", "completed": "✅", "crashed": "💥"}
@@ -193,39 +218,121 @@ def list_tasks(detail: bool):
 @click.option("--before", "before_days", type=int, default=None, help="Remove checkpoints older than N days.")
 def clean_tasks(clean_all: bool, before_days: int | None):
     """Clean old checkpoint data."""
-    from src.lib.checkpoint.checkpoint_manager import _resolve_checkpoint_base_dir
+    from pathlib import Path as _Path
 
-    base_dir = _resolve_checkpoint_base_dir()
-    if not base_dir.exists():
+    from src.lib.checkpoint import (
+        cleanup_expired_tasks,
+        delete_checkpoint_task_if_inactive,
+    )
+    from src.lib.checkpoint.checkpoint_manager import list_all_tasks
+
+    checkpoints_root = _configured_checkpoints_root()
+    tasks = list_all_tasks(checkpoints_root=checkpoints_root)
+    if not tasks:
         click.echo("No checkpoints to clean.")
         return
 
-    total_removed = 0
-    for agent_dir in base_dir.iterdir():
-        if not agent_dir.is_dir():
-            continue
-        # Check if any child contains checkpoint data (v2 or legacy layout).
-        has_ckpt = False
-        for child in agent_dir.iterdir():
-            if not child.is_dir() or child.name.startswith("."):
-                continue
-            if child.name == "checkpoints":
-                has_ckpt = True
-                break
-            if (child / "checkpoints").is_dir():
-                has_ckpt = True
-                break
-        if not has_ckpt:
-            continue
-        from src.lib.checkpoint import CheckpointManager
-        cm = CheckpointManager(agent_dir.name, base_dir=base_dir)
-        if clean_all:
-            total_removed += cm.cleanup_old_tasks(max_age_seconds=0)
-        elif before_days is not None:
-            total_removed += cm.cleanup_old_tasks(max_age_seconds=before_days * 86400)
-        else:
-            total_removed += cm.cleanup_old_tasks()  # default: 7 days
+    max_age_seconds = (before_days if before_days is not None else 7) * 86400
+    if clean_all:
+        total_removed = sum(
+            int(delete_checkpoint_task_if_inactive(_Path(str(task["checkpoint_dir"]))))
+            for task in tasks
+        )
+    else:
+        total_removed = cleanup_expired_tasks(
+            checkpoints_root=checkpoints_root,
+            max_age_seconds=max_age_seconds,
+        )
     click.echo(f"Cleaned {total_removed} checkpoint(s).")
+
+
+# ─────────────────────────────────────────────
+# loom clean-runtime / migrate-runtime
+# ─────────────────────────────────────────────
+
+@main.command("clean-runtime")
+def clean_runtime_command() -> None:
+    """Apply bounded retention to run directories and raw artifacts."""
+    from src.lib.config import C
+    from src.lib.runtime.retention import clean_runtime
+
+    runtime_config = C.get("runtime", {})
+    if not isinstance(runtime_config, dict):
+        runtime_config = {}
+    home = _configured_runtime_home()
+    try:
+        home.validate_root()
+    except RuntimeError as exc:
+        raise click.ClickException(str(exc)) from exc
+    result = clean_runtime(
+        home.root_dir,
+        config=runtime_config,
+    )
+    if result.skipped:
+        reason = result.skip_reason or "runtime cleanup did not run"
+        raise click.ClickException(f"runtime cleanup skipped: {reason}")
+    click.echo(
+        "Cleaned runtime: "
+        f"runs={result.removed_run_count}, "
+        f"artifacts={result.removed_artifact_count}, "
+        f"reclaimed_bytes={result.reclaimed_bytes}."
+    )
+    for error in result.errors:
+        click.echo(f"warning: {error}", err=True)
+
+
+@main.command("migrate-runtime")
+@click.option(
+    "--dry-run/--apply",
+    default=True,
+    show_default=True,
+    help="Preview candidates or atomically migrate and archive legacy .logs.",
+)
+def migrate_runtime_command(dry_run: bool) -> None:
+    """One-time migration of valid legacy checkpoints into runtime home."""
+    from datetime import timedelta as _timedelta
+    from pathlib import Path as _Path
+
+    from src.lib.config import C
+    from src.lib.runtime.migration import migrate_runtime
+
+    max_age = _timedelta(days=7)
+
+    home = _configured_runtime_home()
+    try:
+        home.validate_root()
+    except RuntimeError as exc:
+        raise click.ClickException(str(exc)) from exc
+    legacy_logs = _Path(C.agent_root) / ".logs"
+    try:
+        result = migrate_runtime(
+            legacy_logs,
+            home.root_dir,
+            dry_run=dry_run,
+            archive_legacy=not dry_run,
+            agent_root=C.agent_root,
+            max_age=max_age,
+        )
+    except Exception as exc:
+        raise click.ClickException(str(exc)) from exc
+
+    click.echo(
+        f"Runtime migration ({'dry-run' if dry_run else 'apply'}): "
+        f"candidates={result.plan.candidate_count}, "
+        f"skipped={result.plan.skipped_count}, "
+        f"migrated={result.migrated_count}, "
+        f"already_migrated={result.already_migrated_count}."
+    )
+    for candidate in result.plan.candidates:
+        progress = ",".join(candidate.progress_kinds)
+        click.echo(
+            f"  migrate {candidate.task_id} -> {candidate.application_id} "
+            f"[{progress}]"
+        )
+    for skipped in result.plan.skipped:
+        click.echo(f"  skip {skipped.task_id}: {skipped.reason}")
+    if result.archive_dir is not None:
+        click.echo(f"Archived legacy logs: {result.archive_dir}")
 
 
 # ─────────────────────────────────────────────
@@ -514,7 +621,7 @@ def skill_proposals_archive(proposal_id: str):
 @main.command("dashboard")
 def dashboard():
     """Launch the terminal TUI task monitoring dashboard (Textual)."""
-    from src.framework.ui.dashboard import run_dashboard
+    from src.ui.dashboard import run_dashboard
 
     run_dashboard()
 

@@ -9,63 +9,32 @@ Covers:
 from __future__ import annotations
 
 import re
-import sys
 from pathlib import Path
 
-import src.lib.config.config as config_module
 import pytest
-
 
 # ---------------------------------------------------------------------------
 # Helpers (mirrors conventions in test_logging_v4.py)
 # ---------------------------------------------------------------------------
 
-def _patch_config(monkeypatch, raw: dict, root: Path) -> None:
-    monkeypatch.setattr(
-        config_module,
-        "_ACTIVE_CONFIG",
-        config_module.UnifiedConfig(
-            raw,
-            agent_root=root,
-            llm_config=config_module.LLMConfig(),
-        ),
-        raising=True,
-    )
-
-
-def _make_script(path: Path) -> Path:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    if not path.exists():
-        path.write_text("#!/usr/bin/env python3\n", encoding="utf-8")
-    return path
-
-
-def _patch_main_script(monkeypatch, script: Path | None) -> None:
-    main_module = sys.modules.get("__main__")
-    if main_module is not None:
-        monkeypatch.setattr(
-            main_module,
-            "__file__",
-            str(script) if script is not None else None,
-            raising=False,
-        )
-
-
 def _build_backend(monkeypatch, tmp_path: Path, level: str):
     """Build an EnhancedAgentLogger backend with the given level string."""
-    from src.lib.logging import LoggingConfigBuilder, build_logger_backend_from_config
-    import src.lib.logging.logger_manager as logger_manager
+    from src.lib.logging import LoggingConfigBuilder, initialize_run_logger
+    from src.lib.runtime import RuntimeHome
 
-    _patch_config(
-        monkeypatch,
-        {"logging": {"enabled": True, "level": level, "dir": ".logs"}},
-        tmp_path,
+    context = RuntimeHome(tmp_path / ".agentloom").context(
+        application_id="test-log-levels", task_id="task", run_id="run"
     )
-    monkeypatch.setattr(logger_manager, "_PROCESS_LOG_FILE_PATH", None, raising=True)
-
-    return build_logger_backend_from_config(
-        "test_log_levels",
-        logging_builder=LoggingConfigBuilder().apply_mapping({"level": level}, source="test"),
+    return initialize_run_logger(
+        context,
+        logging_builder=LoggingConfigBuilder().apply_mapping(
+            {
+                "level": level,
+                "console_enabled": False,
+                "file_enabled": True,
+            },
+            source="test",
+        ),
     )
 
 
@@ -240,6 +209,7 @@ def test_agent_loom_log_level_from_str_invalid():
 
 def test_agent_loom_log_level_from_int():
     import logging as _logging
+
     from src.lib.logging.agent_logger import AgentLoomLogLevel
 
     assert AgentLoomLogLevel.from_int(_logging.DEBUG)   == AgentLoomLogLevel.DEBUG

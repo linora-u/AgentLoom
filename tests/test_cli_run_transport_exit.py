@@ -44,6 +44,35 @@ def _invoke_failure(monkeypatch: pytest.MonkeyPatch, error: BaseException):
     return CliRunner().invoke(main, ["run", "unused.yaml"])
 
 
+def test_run_no_file_log_is_a_real_python_override(monkeypatch: pytest.MonkeyPatch) -> None:
+    observed = {}
+
+    def succeed(*_args, **kwargs):
+        observed.update(kwargs)
+        return "ok"
+
+    monkeypatch.setattr("src.runner.run_app", succeed)
+    result = CliRunner().invoke(main, ["run", "unused.yaml", "--no-file-log"])
+
+    assert result.exit_code == 0
+    assert observed["file_logging"] is False
+    assert "log_to_file" not in observed
+
+
+def test_run_uses_configured_file_logging_by_default(monkeypatch: pytest.MonkeyPatch) -> None:
+    observed = {}
+
+    def succeed(*_args, **kwargs):
+        observed.update(kwargs)
+        return "ok"
+
+    monkeypatch.setattr("src.runner.run_app", succeed)
+    result = CliRunner().invoke(main, ["run", "unused.yaml"])
+
+    assert result.exit_code == 0
+    assert observed["file_logging"] is None
+
+
 @pytest.mark.parametrize(
     "error_factory",
     [

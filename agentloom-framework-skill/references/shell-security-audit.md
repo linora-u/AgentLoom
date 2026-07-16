@@ -5,11 +5,12 @@
 当用户不确定 `shell_settings` 应该怎么配时，不要先猜一份白名单。最短路径是：
 
 1. 用隔离 runtime 跑一次真实 workflow。
-2. 打开同目录的 `.logs/<agent>/<timestamp>/shell_audit.log`。
-3. 先读 `[POLICY_SNAPSHOT]`，确认本次有效策略：`allowed_commands`、`allowed_operators`、`security_checks`、`dangerous_paths`、`sandbox_enabled`。
-4. 再读拦截事件：`WHITELIST_REJECT`、`PATH_VIOLATION`、`SECURITY_BLOCK`、`STALL_DETECTED`、`TIMEOUT`、`BACKGROUND_PROMOTION`、`SANDBOX_UNAVAILABLE`。
-5. 只把真实需要的命令、操作符、路径或 sandbox 例外写进 Agent YAML / Worker YAML / 应用级 `config/system.yaml`。
-6. 用收敛后的策略重跑真实 workflow，确认该允许的允许、该拒绝的拒绝。
+2. 先读 `.agentloom/runs/<application_id>/<run_id>/manifest.json`，确认本次 `application_id`、`task_id`、`run_id`。
+3. 打开同一 run 下的 `audit/shell.jsonl`；主日志位于 `logs/runtime.log`。
+4. 先读 `[POLICY_SNAPSHOT]`，确认本次有效策略：`allowed_commands`、`allowed_operators`、`security_checks`、`dangerous_paths`、`sandbox_enabled`。
+5. 再读拦截事件：`WHITELIST_REJECT`、`PATH_VIOLATION`、`SECURITY_BLOCK`、`STALL_DETECTED`、`TIMEOUT`、`BACKGROUND_PROMOTION`、`SANDBOX_UNAVAILABLE`。
+6. 只把真实需要的命令、操作符、路径或 sandbox 例外写进 Agent YAML / Worker YAML / 应用级 `config/system.yaml`。
+7. 用收敛后的策略重跑真实 workflow，确认该允许的允许、该拒绝的拒绝。
 
 默认 `allowed_commands: "*"` 与 `allowed_operators: "*"` 是全放行。即使没有任何命令被拦截，也必须能在 audit log 里看到 `[POLICY_SNAPSHOT]`，否则无法证明“没拦截”是因为策略全允许，而不是审计缺失。
 
@@ -82,29 +83,27 @@ shell_settings:
 
 ## 必跑真实验证
 
-修改 shell 权限、审计、sandbox、路径安全、后台任务或 stall 逻辑时，不能只跑单测。至少选择相关真实 Application，使用隔离 runtime：
+修改 shell 权限、审计、sandbox、路径安全、后台任务或 stall 逻辑时，不能只跑单测。至少选择相关真实 Application；在隔离 checkout 的全局 `config/system.yaml` 中把 `runtime.root_dir` 指向临时目录，例如 `/tmp/agentloom-runtime-shell-security`。`runtime` 是 global-only，不能用 Application overlay 代替。
 
-```bash
-export AGENT_LOOM_RUNTIME_ROOT=/tmp/agentloom-runtime-shell-security
-```
+文件日志默认开启且有界；只有验证关闭文件日志时才加 `--no-file-log`，不存在 `--log-to-file`。
 
 建议矩阵：
 
 ```bash
-.venv/bin/loom run applications/test_shell_audit/workflows/test_shell_policy_snapshot_agent.yaml --log-to-file
-.venv/bin/loom run applications/test_shell_audit/workflows/test_shell_audit_log_agent.yaml --log-to-file
-.venv/bin/loom run applications/test_shell_audit/workflows/test_shell_audit_signals_agent.yaml --log-to-file
-.venv/bin/loom run applications/test_shell_allowlist_matrix/workflows/test_shell_allowlist_matrix_agent.yaml --log-to-file
-.venv/bin/loom run applications/test_demo/workflows/test_path_access_control_agent.yaml --log-to-file
-.venv/bin/loom run applications/test_demo/workflows/test_security_transparency_agent.yaml --log-to-file
-.venv/bin/loom run applications/test_demo/workflows/test_background_task_agent.yaml --log-to-file
-.venv/bin/loom run applications/test_demo/workflows/test_shell_stall_detection_agent.yaml --log-to-file
+.venv/bin/loom run applications/test_shell_audit/workflows/test_shell_policy_snapshot_agent.yaml
+.venv/bin/loom run applications/test_shell_audit/workflows/test_shell_audit_log_agent.yaml
+.venv/bin/loom run applications/test_shell_audit/workflows/test_shell_audit_signals_agent.yaml
+.venv/bin/loom run applications/test_shell_allowlist_matrix/workflows/test_shell_allowlist_matrix_agent.yaml
+.venv/bin/loom run applications/test_demo/workflows/test_path_access_control_agent.yaml
+.venv/bin/loom run applications/test_demo/workflows/test_security_transparency_agent.yaml
+.venv/bin/loom run applications/test_demo/workflows/test_background_task_agent.yaml
+.venv/bin/loom run applications/test_demo/workflows/test_shell_stall_detection_agent.yaml
 ```
 
 通过标准：
 
-- LLM final 不能只说 PASS，必须列出实际 `shell_audit.log` 路径和关键证据行。
-- agent log 与 shell audit log 父目录一致。
+- LLM final 不能只说 PASS，必须列出实际 `manifest.json`、`logs/runtime.log`、`audit/shell.jsonl` 路径和关键证据行。
+- Runtime log 与 Shell audit 必须归属同一个 `<application_id>/<run_id>` run 目录，不能借用其他 run。
 - 全允许场景必须有 `[POLICY_SNAPSHOT]`，且显示 `allowed_commands: *` / `allowed_operators: *`。
 - 收敛白名单场景必须证明允许命令成功、未允许命令被拒绝、未允许操作符被拒绝。
 - `;` 等操作符被拒绝时 suggestion 必须是 `allowed_operators`，不得建议放进 `allowed_commands`。

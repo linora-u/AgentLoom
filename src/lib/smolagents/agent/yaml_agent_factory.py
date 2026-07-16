@@ -18,7 +18,7 @@ from src.lib.smolagents.agent.agent_validation import AgentConfigNormalizer, Nor
 from src.lib.utils.dynamic_import import load_function
 from src.workflows.workflow_manager import get_worker_agent_yaml_path, infer_category_from_yaml_path
 from src.lib.config import C, get_code_agent_config, get_default_toolsets
-from src.tools import resolve_tool_function, resolve_toolsets
+from src.tools.tool_meta import resolve_tool_function, resolve_toolsets
 
 # Keep module-level symbol for legacy tests that monkeypatch this path root.
 AGENT_ROOT = C.agent_root

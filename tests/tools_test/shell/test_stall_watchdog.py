@@ -1,50 +1,51 @@
 """Tests for the stall watchdog — interactive prompt detection."""
 
 import os
-import tempfile
 import time
 
 import pytest
 
-from src.tools.shell.stall_watchdog import StallWatchdog, PROMPT_PATTERNS
+from src.tools.shell.stall_watchdog import PROMPT_PATTERNS, StallWatchdog
 
 
 class TestPromptPatterns:
     """Verify the prompt detection patterns match expected inputs."""
 
-    @pytest.mark.parametrize("line", [
-        "(y/n)",
-        "[y/n]",
-        "(yes/no)",
-        "Do you want to continue? ",
-        "Would you like to proceed?",
-        "Are you sure? ",
-        "Press Enter to continue",
-        "Press any key",
-        "Continue?",
-        "Overwrite?",
-        "Proceed?",
-        "[Y/n]",
-        "[yes/No]",
-    ])
+    @pytest.mark.parametrize(
+        "line",
+        [
+            "(y/n)",
+            "[y/n]",
+            "(yes/no)",
+            "Do you want to continue? ",
+            "Would you like to proceed?",
+            "Are you sure? ",
+            "Press Enter to continue",
+            "Press any key",
+            "Continue?",
+            "Overwrite?",
+            "Proceed?",
+            "[Y/n]",
+            "[yes/No]",
+        ],
+    )
     def test_matches_known_prompts(self, line):
-        assert any(p.search(line) for p in PROMPT_PATTERNS), (
-            f"Pattern should match: {line!r}"
-        )
+        assert any(p.search(line) for p in PROMPT_PATTERNS), f"Pattern should match: {line!r}"
 
-    @pytest.mark.parametrize("line", [
-        "Building module 3/10...",
-        "Compiling source.c",
-        "100% complete",
-        "WARNING: something happened",
-        "ERROR: build failed",
-        "running tests...",
-        "",
-    ])
+    @pytest.mark.parametrize(
+        "line",
+        [
+            "Building module 3/10...",
+            "Compiling source.c",
+            "100% complete",
+            "WARNING: something happened",
+            "ERROR: build failed",
+            "running tests...",
+            "",
+        ],
+    )
     def test_does_not_match_non_prompts(self, line):
-        assert not any(p.search(line) for p in PROMPT_PATTERNS), (
-            f"Pattern should NOT match: {line!r}"
-        )
+        assert not any(p.search(line) for p in PROMPT_PATTERNS), f"Pattern should NOT match: {line!r}"
 
 
 class TestStallWatchdog:
@@ -183,3 +184,36 @@ class TestStallWatchdog:
         assert sw.stall_message is not None
         # The internal _stopped flag should be True.
         assert sw._stopped is True
+
+    def test_does_not_follow_a_replaced_output_directory(self, tmp_path):
+        first = tmp_path / "first"
+        second = tmp_path / "second"
+        first.mkdir()
+        second.mkdir()
+        output_path = first / "output.txt"
+        output_fd = os.open(output_path, os.O_RDWR | os.O_CREAT, 0o600)
+        os.write(output_fd, b"ordinary output\n")
+        sw = StallWatchdog(
+            task_id="first-run",
+            output_path=str(output_path),
+            output_fd=output_fd,
+            poll_interval=0.1,
+            stall_threshold=0.2,
+        )
+
+        try:
+            detached = tmp_path / "first-detached"
+            first.rename(detached)
+            first.symlink_to(second, target_is_directory=True)
+            (second / "output.txt").write_text(
+                "SECOND-RUN-SECRET Continue? (y/n) ",
+                encoding="utf-8",
+            )
+
+            sw.start()
+            time.sleep(0.8)
+
+            assert sw.stall_message is None
+        finally:
+            sw.stop()
+            os.close(output_fd)

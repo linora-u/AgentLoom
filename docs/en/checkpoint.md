@@ -1,180 +1,203 @@
-# Checkpoint & Resume
+# Checkpoint, Resume, and Runtime Storage
 
 ## Overview
 
-AgentLoom supports **Checkpoint & Resume** for multi-Agent tasks. When a long-running task is interrupted (user Ctrl-C, process crash, machine restart, etc.), it can continue from where it left off without starting over.
+AgentLoom separates one execution attempt from the logical task being recovered:
 
-Core components:
+- `run_id` identifies one execution attempt. Every normal run and every resume gets a new `run_id` and a new run directory.
+- `task_id` identifies one logical task. Resume keeps the same `task_id` and continues the same checkpoint directory.
 
-| Component | Description |
-|-----------|-------------|
-| **CheckpointManager** | Persistence layer: append-only task events, task tree projection, checkpoint file organization |
-| **CheckpointCoordinator** | Coordination layer: ContextVar singleton, manages checkpoint lifecycle |
-| **CheckpointSerializer** | Serialization layer: smolagents MemoryStep serialization/deserialization |
-| **ConversationRecovery** | Recovery pipeline: filters unresolved tool calls, orphaned thinking steps, empty steps |
-| **FileHistoryManager** | File history: pre-edit backup, step snapshots, rewind to any step |
-| **SupervisorHeartbeat** | Heartbeat monitor: Supervisor process liveness detection |
-| **WorkerHeartbeat** | Worker heartbeat: per-call liveness detection |
+This boundary prevents log rotation or run cleanup from damaging resumable state. It also keeps concurrent Applications and tasks from sharing logger or artifact paths.
 
 ## Storage Layout
 
-Checkpoint data is written inside each run's timestamp log directory, co-located with the run log:
+`runtime.root_dir` is the only framework runtime root. Its default is `.agentloom`:
 
-```
-.logs/{agent_name}/
-├── .task_index.json                        # Index: task_id → timestamp mapping (for fast --resume lookup)
-├── 20260413_104447/                        # Per-run timestamp directory
-│   ├── {agent_name}.log                    # Run log
-│   └── checkpoints/{task_id}/              # Checkpoint data for this run
-│       ├── task_events.jsonl               # Source of truth: append-only task/worker events
-│       ├── task_tree.json                  # Compatibility projection rebuilt from events
-│       ├── checkpoint.json                 # Supervisor Agent memory snapshot
-│       ├── heartbeat.json                  # Supervisor heartbeat (PID, timestamp)
-│       ├── file-history/                   # File edit history backups
-│       └── workers/{worker_name}/
-│           ├── calls/{call_index}/
-│           │   └── checkpoint.json         # Worker Agent memory snapshot for one call
-│           ├── checkpoint.json             # Legacy worker checkpoint path, still readable
-│           └── heartbeat.json              # Worker heartbeat
-└── 20260413_104837/
-    ├── {agent_name}.log
-    └── checkpoints/{task_id}/
-        └── ...
+```text
+.agentloom/
+├── runs/<application_id>/<run_id>/
+│   ├── manifest.json
+│   ├── logs/
+│   │   ├── runtime.log
+│   │   └── runtime.log.1 ... runtime.log.3
+│   ├── audit/
+│   │   ├── shell.jsonl
+│   │   └── shell.jsonl.1 ... shell.jsonl.2
+│   └── artifacts/
+│       ├── shell/
+│       ├── background/
+│       └── skills/
+├── checkpoints/<application_id>/<task_id>/
+│   ├── task_events.jsonl
+│   ├── task_tree.json
+│   ├── checkpoint.json
+│   ├── heartbeat.json
+│   ├── workers/<worker_name>/
+│   │   ├── calls/<call_index>/checkpoint.json
+│   │   └── heartbeat.json
+│   ├── context_store/
+│   └── file-history/
+├── sessions/
+├── learning/
+├── self_learning.db
+└── legacy/logs-v1-<timestamp>/
 ```
 
-**Key design decisions**:
-- Checkpoints always remain in the timestamp directory where they were first created; they are not migrated on resume
-- `.task_index.json` records the `task_id → timestamp` mapping for O(1) lookup during `--resume`
-- If the index is lost, the system automatically scans all timestamp directories as a degraded fallback
-- `task_events.jsonl` is the durable state source. `task_tree.json` is a compatibility projection for older tools and quick inspection
-- Malformed or half-written JSONL event lines are skipped during replay, so a crash-tail line does not make the whole checkpoint unreadable
-- Old checkpoints without `task_events.jsonl` continue to load from legacy `task_tree.json`
+Important boundaries:
+
+- `manifest.json` links the attempt back to its `task_id`; checkpoint run events and heartbeat records include the current `run_id`.
+- `task_events.jsonl` is the durable task/Worker event source. `task_tree.json` is its inspectable projection.
+- Checkpoint lookup uses the canonical `<application_id>/<task_id>` path. It does not depend on a log directory, `.task_index.json`, or a scan of historical runs.
+- User deliverables remain under the Application's configured `output_dir`. Runtime cleanup never traverses Application output directories.
+- `.runtime/` is an Agent-visible workspace for recall/todo state. It is intentionally independent from `.agentloom/` and is not moved into run artifacts.
 
 ## Configuration
 
-Configure in `config/system.yaml`:
+Configure runtime storage, bounded logs, and resume behavior in `config/system.yaml`:
 
 ```yaml
+runtime:
+  root_dir: ".agentloom"
+  successful_run_retention_days: 7
+  failed_run_retention_days: 30
+  artifact_retention_days: 3
+  cleanup_interval_hours: 24
+
+logging:
+  level: "INFO"
+  console_enabled: true
+  file_enabled: true
+  max_file_bytes: 26214400  # 25 MiB per runtime.log segment
+  backup_count: 3
+
 checkpoint:
-  enabled: true              # Global switch
-  cleanup_on_success: true   # Auto-delete checkpoint after successful task completion
-  max_resume_age: 604800     # Max checkpoint retention (seconds), default 7 days
-  heartbeat_interval: 5      # Heartbeat write interval (seconds)
+  enabled: true
+  cleanup_on_success: true
+  max_resume_age: 604800
+  heartbeat_interval: 5
 ```
 
-## CLI Commands
+File logging is enabled by default and bounded. The runtime log keeps the active 25 MiB segment plus three backups. Shell audit uses an independent 10 MiB segment with two backups.
 
-### Running Tasks
+`runtime.root_dir` may be absolute or relative. A relative value resolves from the AgentLoom project root. For isolated validation, point this global key at a temporary absolute directory in the validation checkout.
+
+## Running and Resuming
 
 ```bash
-# Normal run
+# New logical task and new execution attempt
 loom run applications/<app>/workflows/<agent>.yaml
 
-# Enable log file writing
-loom run applications/<app>/workflows/<agent>.yaml --log-to-file
+# Disable only the file runtime log for this attempt; checkpoint remains available
+loom run applications/<app>/workflows/<agent>.yaml --no-file-log
 
-# Resume from checkpoint
+# New execution attempt, same logical task/checkpoint
 loom run applications/<app>/workflows/<agent>.yaml --resume task_xxx
 ```
 
-### Listing Resumable Tasks
+There is no `--log-to-file` flag. File logging follows `logging.file_enabled` by default, and `--no-file-log` is the per-run opt-out.
+
+To list or remove checkpoint state:
 
 ```bash
 loom list-tasks
 loom list-tasks --detail
+loom clean-tasks
+loom clean-tasks --before 3
+loom clean-tasks --all
 ```
 
-### Cleaning Old Checkpoints
+When `cleanup_on_success: true`, a successfully completed task's entire checkpoint directory is removed. With cleanup disabled, a completed checkpoint remains visible for inspection but is terminal and cannot be resumed. Failed, interrupted, or crashed tasks remain recoverable until `max_resume_age`; their ContextStore and file history share the same task directory and lifecycle. `loom list-tasks` lists every retained checkpoint and its status.
+
+## Recovery Behavior
+
+Resume performs this recovery pipeline:
+
+```text
+load persisted MemorySteps
+  -> remove unresolved tool uses and orphaned/empty steps
+  -> restore task-scoped ContextStore and file history
+  -> restore incomplete Worker call memory under the existing call_index
+  -> reuse completed Worker results with matching input hashes
+  -> continue execution under a new run_id
+```
+
+Each Worker call has its own `workers/<worker>/calls/<call_index>/checkpoint.json`, so concurrent calls do not overwrite one another. Resume reuses the incomplete call index; it does not create a duplicate call for the same interrupted work.
+
+The Supervisor and Worker heartbeat payloads include the active `run_id`. Crash detection considers missing/stopped heartbeats, dead PIDs, and stale timestamps. Resume writes the next heartbeat to the same task checkpoint with the new attempt's `run_id`.
+
+Malformed or half-written trailing JSONL lines are skipped during replay, so a crash-tail record does not make the earlier durable task events unreadable.
+
+## Runtime Retention
+
+Automatic runtime cleanup is throttled to at most once per `runtime.cleanup_interval_hours` (24 hours by default). It only traverses `.agentloom/runs`:
+
+- completed runs: 7 days by default;
+- failed/interrupted runs: 30 days by default;
+- raw `artifacts/`: 3 days by default;
+- running or unknown-status manifests: preserved;
+- `.agentloom/legacy/`, checkpoints, `.runtime/`, and Application outputs: never deleted by run cleanup.
+
+Run the same policy explicitly with:
 
 ```bash
-loom clean-tasks          # Clean expired checkpoints
-loom clean-tasks --all    # Clean all checkpoints
+loom clean-runtime
 ```
 
-## Recovery Pipeline
+Checkpoint expiry and deletion remain task-scoped: `max_resume_age` controls whether a task may resume, `cleanup_on_success` removes completed task state, and `loom clean-tasks` provides explicit checkpoint cleanup.
 
-When resuming with `--resume`, the system executes the following pipeline (ported from reference implementation):
+## One-Time Migration from `.logs`
 
-```
-Load persisted MemorySteps
-  → filter_unresolved_tool_uses()    # Remove incomplete tool calls
-  → filter_orphaned_thinking()       # Remove orphaned thinking steps
-  → filter_empty_steps()             # Remove completely blank steps
-  → detect_turn_interruption()       # Detect interruption type
-  → Inject cleaned steps into Agent memory
-  → Continue execution
+Preview the migration first:
+
+```bash
+loom migrate-runtime --dry-run
 ```
 
-### Interruption Detection
+The scan ignores every legacy `.task_index.json`. It reads real checkpoint directories and their task events/tree, excludes tests and expired tasks, and selects only tasks with resumable memory, ContextStore, or file-history progress.
 
-| Interruption Type | Description |
-|-------------------|-------------|
-| `none` | Task completed normally (has final_answer or completed tool calls) |
-| `interrupted_turn` | Task was interrupted mid-execution (has tool_calls but no observations) |
+Apply after reviewing the candidates:
 
-## File History
-
-The file history feature automatically creates backups before Agent edits files, supporting rewind to any step:
-
-- **Auto-triggered**: Intercepted via `PRE_TOOL_USE` hook for `edit_file`, `write_file`, `create_file`, etc.
-- **Three-phase lock safety**: Check → I/O → Commit, minimizing lock hold time
-- **Snapshot management**: Up to 100 snapshots retained; oldest are automatically evicted
-- **Null-backup**: Non-existent files get a null backup; on rewind the file is deleted
-- **Immutable original backup**: later snapshots inherit or append versions; they must never overwrite an earlier `@v1` original backup
-
-Storage structure:
-
-```
-.logs/{agent_name}/{timestamp}/checkpoints/{task_id}/file-history/
-    {sha256_hash}@v1    # Pre-edit backup
-    {sha256_hash}@v2    # Post-step snapshot
-    snapshots.json       # Persisted index
+```bash
+loom migrate-runtime --apply
 ```
 
-## Worker Resume / Skip Mechanism
+Apply copies each candidate through staging, verifies checksums and resumable progress, and atomically renames it into `.agentloom/checkpoints/<application_id>/<task_id>/`. After all candidates validate, the complete old `.logs` tree is atomically archived under `.agentloom/legacy/logs-v1-<timestamp>/`. New runtime code does not dual-read that archive.
 
-In multi-Agent tasks, Worker calls are checkpointed per call:
+After migration, run a real resume for each important task and verify both an old ContextRef retrieval and file-history state before treating the migration as accepted.
 
-1. Worker computes SHA256 hash of input at startup
-2. Worker calls are atomically assigned a per-worker `call_index`
-3. During execution, the Worker memory is saved to the per-call checkpoint after each Worker step
-4. On interruption, incomplete Worker calls can be resumed by reusing the same `call_index` and restoring Worker memory with `reset=False`
-5. On completion, result and hash are stored in both `task_events.jsonl` and the per-call Worker checkpoint
-6. On resume, completed calls with the same hash are skipped and the cached result is returned directly
+## Inspecting Real Run Evidence
 
-Incomplete Worker call reuse is enabled only during `--resume`; normal concurrent Worker calls still receive unique call indexes.
+Do not treat an exit code or final answer alone as proof. Read the attempt manifest, runtime log, and Shell audit:
 
-Worker checkpoint layout:
+```bash
+manifest=$(find .agentloom/runs -name manifest.json -type f -print | sort | tail -1)
+run_dir=$(dirname "$manifest")
 
-```
-.logs/{agent_name}/{timestamp}/checkpoints/{task_id}/workers/{worker_name}/
-    calls/{call_index}/checkpoint.json
-    heartbeat.json
+sed -n '1,160p' "$manifest"
+tail -n 100 "$run_dir/logs/runtime.log"
+tail -n 100 "$run_dir/audit/shell.jsonl"
 ```
 
-The legacy path `workers/{worker_name}/checkpoint.json` is still readable for old checkpoint data.
+For a resumed task, confirm that the new manifest has a new `run_id` and the original `task_id`, then inspect:
 
-## Crash Detection
-
-Crash detection is implemented via heartbeat files:
-
-- Supervisor and Worker write heartbeat files every 5 seconds (PID + timestamp)
-- On resume, the following checks are performed:
-  - Heartbeat file missing → crashed
-  - Heartbeat status is stopped/exited → crashed
-  - PID no longer exists → crashed
-  - Timestamp older than 30 seconds → crashed
+```bash
+find .agentloom/checkpoints/<application_id>/<task_id> -maxdepth 5 -type f -print
+```
 
 ## Troubleshooting
 
-### Resume fails: "No checkpoint found"
+### Resume fails: `No checkpoint found`
 
-Confirm that a `task_id` directory exists under `.logs/{agent_name}/{timestamp}/checkpoints/`. Use `loom list-tasks` to see available tasks.
+Run `loom list-tasks --detail` and confirm the task is under the same `application_id` as the workflow being resumed. Checkpoint lookup is Application-scoped.
 
-### Resume fails: "Checkpoint expired"
+### Resume fails: `Checkpoint expired`
 
-The checkpoint has exceeded the `max_resume_age` retention period (default 7 days).
+The logical task's original `created_at` exceeds `checkpoint.max_resume_age`. Migration and resume do not rewrite `created_at` to revive expired work.
 
-### Resume fails: "checkpoint is disabled"
+### `runtime.log` is absent
 
-Check that `checkpoint.enabled` is set to `true` in `config/system.yaml`.
+Check `logging.file_enabled` and whether the attempt used `--no-file-log`. A missing file log does not disable checkpoints or the Shell audit.
+
+### `.logs` still exists
+
+New runs do not write `.logs`. Use `loom migrate-runtime --dry-run`, review the result, then `--apply` to archive the legacy tree. Do not delete it before validating resumable tasks.
