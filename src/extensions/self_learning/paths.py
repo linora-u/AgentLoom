@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import os
 from pathlib import Path
 from typing import Any
 
@@ -31,20 +30,39 @@ def _config_section() -> dict[str, Any]:
         return {}
 
 
+def _runtime_config_section() -> dict[str, Any]:
+    try:
+        from src.lib.config import C
+
+        section = C.get("runtime", {})
+        return section if isinstance(section, dict) else {}
+    except Exception:
+        return {}
+
+
 def self_learning_root(root: str | Path | None = None) -> Path:
     """Return the durable state root, defaulting to ``.agentloom``."""
     if root is not None:
         return Path(root).expanduser().resolve()
 
-    env_root = os.environ.get("AGENTLOOM_SELF_LEARNING_ROOT", "").strip()
-    if env_root:
-        return Path(env_root).expanduser().resolve()
+    # A running Application has one canonical runtime home.  Do not let a
+    # legacy standalone/test override split sessions or memory from that run's
+    # logs and checkpoints.
+    try:
+        from src.lib.runtime import get_current_run_context
 
-    configured = _config_section().get("root_dir", ".agentloom")
-    path = Path(str(configured)).expanduser()
-    if not path.is_absolute():
-        path = project_root() / path
-    return path.resolve()
+        runtime_context = get_current_run_context()
+        if runtime_context is not None:
+            return runtime_context.root_dir
+    except Exception:
+        pass
+
+    from src.lib.runtime import resolve_runtime_home
+
+    return resolve_runtime_home(
+        {"runtime": _runtime_config_section()},
+        agent_root=project_root(),
+    ).root_dir
 
 
 def config_bool(name: str, default: bool = True) -> bool:

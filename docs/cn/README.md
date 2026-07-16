@@ -45,14 +45,16 @@ uv run loom run applications/ai_quality_analysis/workflows/code_review_agent.yam
 第一次运行后，你应该能看到：
 
 - 带 Agent 名称、Task ID、Step 耗时和 Token 统计的结构化终端日志；
-- `.logs/<agent>/<timestamp>/` 下归档的运行文件；
-- 开启 checkpoint 后可恢复的任务状态；
+- `.agentloom/runs/<application_id>/<run_id>/` 下本次执行 attempt 的 manifest、有界 runtime log、Shell audit 和原始 artifacts；
+- 开启 checkpoint 后位于 `.agentloom/checkpoints/<application_id>/<task_id>/` 的可恢复任务状态；
 - 可通过 `uv run loom ui` 打开的 Web 可视化面板；
 - 可通过 `uv run loom dashboard` 打开的终端任务监控面板。
 
+`run_id` 标识一次执行 attempt，resume 时会改变；`task_id` 标识同一个逻辑任务，resume 时保持不变。因此 resume 会写入新的 run 目录，同时继续使用原 checkpoint。Agent 可见的 `.runtime/` 工作区与框架 runtime 存储刻意保持独立。
+
 ## 以 Codex 为例快速创建多 Agent 应用
 
-最快的方式是让 Codex 使用仓库自带的 framework skill。Codex 不只是生成 YAML：它也可以直接运行 AgentLoom 应用，观察终端输出和 `.logs/`，查看 checkpoint 状态，并在 Worker 卡住或配置出错时继续修改应用。
+最快的方式是让 Codex 使用仓库自带的 framework skill。Codex 不只是生成 YAML：它也可以直接运行 AgentLoom 应用，检查 `.agentloom/` 下的 run 与 checkpoint 证据，并在 Worker 卡住或配置出错时继续修改应用。
 
 可以这样对 Codex 说：
 
@@ -83,7 +85,12 @@ uv run loom run applications/<app_name>/workflows/<app_name>_agent.yaml
 ```bash
 uv run loom list-tasks
 uv run loom dashboard
-ls .logs/
+
+manifest=$(find .agentloom/runs -name manifest.json -type f -print | sort | tail -1)
+run_dir=$(dirname "$manifest")
+sed -n '1,160p' "$manifest"
+tail -n 80 "$run_dir/logs/runtime.log"
+tail -n 80 "$run_dir/audit/shell.jsonl"
 ```
 
 如果你更习惯 Claude Code，也可以用同样的思路：先读 `agentloom-framework-skill/SKILL.md`，在 `applications/<app_name>/` 下创建应用，运行它，并总结成功和失败的地方。
@@ -111,7 +118,7 @@ ls .logs/
 | 复用编程助手知识 | 加载 Claude-style `SKILL.md` 包，支持按需加载或全文预加载。 |
 | 接入外部工具 | 注册本地 Python 工具、本地 `codex exec`，并通过 `mcp_servers` 接入 MCP servers。 |
 | 处理重复性工作 | 用 Worker `concurrency` 和 `tool.batch(tasks)` 并发处理独立输入。 |
-| 理解长任务状态 | 使用结构化日志、`.logs/` 归档、checkpoint、`loom ui` 和 `loom dashboard`。 |
+| 理解长任务状态 | 读取 run manifest、有界 runtime log、Shell audit、task checkpoint，并使用 `loom ui` 和 `loom dashboard`。 |
 
 ## 架构
 
@@ -135,7 +142,7 @@ ls .logs/
 | Agent-as-Tool 协作 | Worker 通过 `agent_function_schema` 导出为可调用工具，包含必填输入校验和字符串输出。 |
 | Skills、MCP 与工具 | Agent 可加载 `SKILL.md` 包、本地 Python 函数、内置文件/Shell/搜索/Git 工具、本地 Codex 工具，并通过 `mcp_servers` 接入 MCP Client 工具。 |
 | 并发重复任务 | Worker `concurrency: auto` 或固定并发配合 `.batch(tasks)` 处理大量独立输入。 |
-| 状态与可观测性 | Rich 终端日志、纯文本文件日志、每步耗时、Token 统计、`.logs/` 归档、checkpoint resume、Web UI 和 TUI dashboard。 |
+| 状态与可观测性 | Rich 终端日志、有界的 per-run 文件日志、每步耗时、Token 统计、run manifest、checkpoint resume、Web UI 和 TUI dashboard。 |
 
 ## 示例应用
 
@@ -208,6 +215,9 @@ AgentLoom 内置 `src.tools.codex.codex_tool.codex`，用于把本机 `codex exe
 | `uv run loom dashboard` | 打开终端任务监控面板。 |
 | `uv run loom list-tasks` | 列出可恢复的 checkpoint 任务。 |
 | `uv run loom clean-tasks` | 清理旧 checkpoint 数据。 |
+| `uv run loom clean-runtime` | 按配置的 retention 清理已结束 run 与 raw artifacts。 |
+| `uv run loom migrate-runtime --dry-run` | 只预览有效的旧 checkpoint 候选，不改磁盘状态。 |
+| `uv run loom migrate-runtime --apply` | 迁移有效 checkpoint，并归档整个旧 `.logs`。 |
 
 ## 文档
 

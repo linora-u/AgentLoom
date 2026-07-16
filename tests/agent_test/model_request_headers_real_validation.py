@@ -153,10 +153,17 @@ def _install_temp_config(
         "model_request_headers": system_header_config,
         "lsp_servers": {"enabled": False},
         "checkpoint": {"enabled": False},
+        "runtime": {"root_dir": str(runtime_root / ".agentloom")},
         "self_learning": {"enabled": False},
         "skills": [],
         "default_toolsets": [],
-        "logging": {"enabled": True, "level": "ERROR", "dir": str(runtime_root / "logs")},
+        "logging": {
+            "level": "ERROR",
+            "console_enabled": True,
+            "file_enabled": True,
+            "max_file_bytes": 25 * 1024 * 1024,
+            "backup_count": 3,
+        },
     }
     model_config = {
         "model": {

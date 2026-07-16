@@ -17,6 +17,7 @@ import time
 from typing import Optional
 
 from src.lib.logging import get_logger
+from src.tools.shell.output_reader import AnchoredOutputReader
 
 logger = get_logger(__name__)
 
@@ -24,6 +25,8 @@ logger = get_logger(__name__)
 _KILL_GRACE_MS = 200
 
 DEFAULT_KILL_SIGNAL = getattr(signal, "SIGKILL", signal.SIGTERM)
+
+
 def tree_kill(pid: int, sig: int = DEFAULT_KILL_SIGNAL) -> bool:
     """Kill a process tree rooted at *pid*.
 
@@ -97,9 +100,7 @@ def graceful_kill(pid: int, grace_ms: int = _KILL_GRACE_MS) -> bool:
 
     # Phase 3: SIGKILL
     if _is_alive(pid):
-        logger.debug(
-            "Process %d still alive after %dms grace — sending SIGKILL", pid, grace_ms
-        )
+        logger.debug("Process %d still alive after %dms grace — sending SIGKILL", pid, grace_ms)
         tree_kill(pid, signal.SIGKILL)
 
     return True
@@ -142,6 +143,8 @@ class SizeWatchdog:
         output_path: str,
         max_bytes: int = 100_000_000,  # 100 MB
         poll_interval_s: float = 5.0,
+        output_reader: AnchoredOutputReader | None = None,
+        output_fd: int | None = None,
     ):
         self._pid = pid
         self._output_path = output_path
@@ -149,13 +152,30 @@ class SizeWatchdog:
         self._poll_interval = poll_interval_s
         self._stopped = False
         self._thread: Optional["threading.Thread"] = None
+        self._owns_output_reader = output_reader is None
+        if output_reader is not None:
+            self._output_reader = output_reader
+        else:
+            try:
+                if output_fd is None:
+                    self._output_reader = AnchoredOutputReader.from_path(output_path)
+                else:
+                    self._output_reader = AnchoredOutputReader.from_fd(
+                        output_fd,
+                        path=output_path,
+                    )
+            except OSError:
+                self._output_reader = None
 
     def start(self) -> None:
         """Start the watchdog polling thread."""
-        import threading
+        from src.lib.runtime import copy_runtime_context
+
         self._stopped = False
+        runtime_context = copy_runtime_context()
         self._thread = threading.Thread(
-            target=self._poll_loop,
+            target=runtime_context.run,
+            args=(self._poll_loop,),
             daemon=True,
             name=f"size-watchdog-{self._pid}",
         )
@@ -164,23 +184,26 @@ class SizeWatchdog:
     def stop(self) -> None:
         """Stop the watchdog (idempotent)."""
         self._stopped = True
+        if self._owns_output_reader and self._output_reader is not None:
+            self._output_reader.close()
 
     def _poll_loop(self) -> None:
         while not self._stopped:
-            try:
-                if os.path.exists(self._output_path):
-                    size = os.path.getsize(self._output_path)
-                    if size > self._max_bytes:
-                        logger.warning(
-                            "Output file %s exceeded %d bytes (size=%d) — "
-                            "killing process %d",
-                            self._output_path, self._max_bytes, size, self._pid,
-                        )
-                        tree_kill(self._pid, signal.SIGKILL)
-                        self._stopped = True
-                        return
-            except OSError:
-                pass
+            reader = self._output_reader
+            size = reader.size() if reader is not None else 0
+            if size > self._max_bytes:
+                logger.warning(
+                    "Output file %s exceeded %d bytes (size=%d) — killing process %d",
+                    self._output_path,
+                    self._max_bytes,
+                    size,
+                    self._pid,
+                )
+                tree_kill(self._pid, signal.SIGKILL)
+                self._stopped = True
+                if self._owns_output_reader and reader is not None:
+                    reader.close()
+                return
 
             # Sleep in small increments so stop() takes effect quickly.
             elapsed = 0.0

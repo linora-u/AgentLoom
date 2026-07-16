@@ -60,7 +60,7 @@ from src.lib.config.defaults import DEFAULT_MAX_TOKENS
 from src.lib.config import C, build_effective_agent_config, get_code_agent_config, get_default_toolsets
 from src.lib.config.config_validation import BoolParser  # noqa: F401 — used elsewhere
 from src.lib.utils.workspace import ensure_workspace_mounted_once
-from src.tools import resolve_toolsets
+from src.tools.tool_meta import resolve_toolsets
 from src.trace import (
     bind_explicit_execution_context,
     capture_explicit_execution_context,
@@ -569,13 +569,13 @@ class BaseAgent(ABC):
     def _resolve_runtime_logger_backend(provided_logger: Any) -> Any:
         if provided_logger is not None:
             return provided_logger
-        global_backend = get_global_logger(create_if_missing=False)
-        if global_backend is None:
+        current_backend = get_global_logger(create_if_missing=False)
+        if current_backend is None:
             raise RuntimeError(
                 "No logger available for runtime agent construction. "
-                "Call initialize_global_logger_once(app_name) before creating agents."
+                "Pass a logger or bind a run-scoped logger backend first."
             )
-        return global_backend
+        return current_backend
 
     @staticmethod
     def _deduplicate_tools(tools: List[Any]) -> List[Any]:
@@ -812,13 +812,13 @@ class RoleDrivenAgent(BaseAgent):
         if provided_logger is not None:
             return provided_logger
 
-        global_backend = get_global_logger(create_if_missing=False)
-        if global_backend is None:
+        current_backend = get_global_logger(create_if_missing=False)
+        if current_backend is None:
             raise RuntimeError(
                 "No logger available for role-driven agent initialization. "
-                "Call initialize_global_logger_once(app_name) before creating agents."
+                "Pass a logger or bind a run-scoped logger backend first."
             )
-        return global_backend
+        return current_backend
 
     @staticmethod
     def _normalize_skills_config_items(skills_conf: Any) -> list[Any]:
@@ -1264,6 +1264,7 @@ class RoleDrivenAgent(BaseAgent):
         self,
         task: str,
         task_id: Optional[str] = None,
+        run_id: Optional[str] = None,
         checkpoint_manager: Optional[Any] = None,
         resume: bool = False,
         additional_args: Optional[dict[str, Any]] = None,
@@ -1280,7 +1281,7 @@ class RoleDrivenAgent(BaseAgent):
             # invocation gets a fresh local id. The outermost invocation also
             # owns that id as the root, while delegated workers retain the
             # parent's root and use their fresh id only for leaf attribution.
-            local_run_id = str(uuid.uuid4())
+            local_run_id = run_id or str(uuid.uuid4())
             with bind_local_run(local_run_id):
                 with bind_root_run(local_run_id) as owns_root_run:
                     return self._run_with_root_context(
@@ -1334,6 +1335,7 @@ class RoleDrivenAgent(BaseAgent):
                 final_task_id,
                 transformed_task,
                 resume=resume,
+                effective_config=self._effective_agent_config or self._config,
             )
         else:
             coord = CheckpointCoordinator.current()
@@ -1402,9 +1404,9 @@ class RoleDrivenAgent(BaseAgent):
                         # Supervisor: register and store callback for workers.
                         coord.register_supervisor_step_callback(runtime_agent)
                     else:
-                        # Worker: inherit the supervisor's callback and store
-                        # runtime_agent for later step-tracker registration in
-                        # record_worker_start() (which knows call_index).
+                        # Worker: inherit the supervisor's callback.  The
+                        # invocation later passes that runtime explicitly when
+                        # atomic preparation allocates its call_index.
                         coord.register_worker_step_callback(
                             runtime_agent, agent_name=self.name
                         )
@@ -1582,9 +1584,9 @@ class SubTaskTrackedAgent:
         these events via its frontmatter ``hooks:`` — the framework does not
         know which skills are listening.
 
-        **P1 skip-on-resume**: if a previous checkpoint shows this worker
-        completed with the same ``input_hash``, return the cached result
-        immediately without re-executing.
+        Worker preparation is atomic: a resumed invocation claims unfinished
+        work first, otherwise claims one completed result, or allocates a new
+        call.  Fresh runs always allocate and execute.
         """
         from src.lib.checkpoint.coordinator import CheckpointCoordinator
 
@@ -1594,15 +1596,25 @@ class SubTaskTrackedAgent:
             coord = CheckpointCoordinator.current()
             input_hash = self._compute_input_hash(task)
 
-            # ── P1: Skip completed worker on resume ──
+            # Claim/allocate exactly one logical call before side effects.  The
+            # explicit outcome distinguishes a cached ``None``/empty result
+            # from an invocation that still needs execution.
             if coord is not None:
-                cached = coord.check_worker_skip(self._agent_name, input_hash)
-                if cached is not None:
+                preparation = coord.prepare_worker_call(
+                    self._agent_name,
+                    input_hash,
+                    str(task),
+                    runtime_agent=self._agent,
+                )
+                if not preparation.should_execute:
                     self._log.info(
                         "Skipping completed worker %s (input_hash=%s)",
                         self._agent_name, input_hash[:8],
                     )
-                    return cached
+                    return preparation.cached_result
+                call_index = preparation.call_index
+            else:
+                call_index = 0
 
             hook_manager = get_current_hook_manager()
             event_payload = {
@@ -1620,12 +1632,6 @@ class SubTaskTrackedAgent:
                 except Exception as hook_err:
                     self._log.warning("SubagentStart hook error: %s", hook_err)
 
-            # ── Worker checkpoint: record start ──
-            # Note: record_worker_start() also triggers register_worker_step_tracker()
-            # using the runtime_agent stored by register_worker_step_callback().
-            call_index = coord.record_worker_start(
-                self._agent_name, input_hash, str(task)
-            ) if coord is not None else 0
             worker_restored = (
                 coord.restore_worker(self._agent, self._agent_name, call_index)
                 if coord is not None

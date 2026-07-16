@@ -16,7 +16,7 @@ cd /Users/bytedance/code/data_clear/AgentLoom-main-skill
 .venv/bin/loom run applications/browser_harness_probe/workflows/browser_harness_probe_agent.yaml
 ```
 
-`browser_harness_probe_app.py` is optional. Use it only when you need a custom natural-language request, `log_to_file`, or `resume`; direct YAML execution is the shorter default path.
+`browser_harness_probe_app.py` is optional. Use it only when you need a custom natural-language request, a `file_logging` override, or `resume`; direct YAML execution is the shorter default path.
 
 ## Setup
 

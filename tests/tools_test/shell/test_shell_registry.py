@@ -5,15 +5,17 @@ ShellProcessRegistry 与 shell_tool per-agent 绑定集成测试。
 
 背景
 ─────
-将 ShellProcess 与 agent 实例通过 agent_id 绑定在注册表中，
+将 ShellProcess 与 run 内的 agent 实例通过 runtime_key + agent_id 绑定在注册表中，
 使同一 Agent 的多次工具调用之间共享同一个 session-scoped shell 会话，从而保留：
   - 工作目录（cd 跨调用生效）
   - shell snapshot（aliases/functions/options/PATH）
 
 环境变量 export 只在单条命令内生效，不跨工具调用持久化。
 
-注册表 key = agent_id（如 "supervisor_001"、"worker_001"）
+注册表 key = RuntimeContext.runtime_key + agent_id
   - supervisor 和 worker 各有独立的 shell session，互不干扰
+  - 同一 agent_id 在不同 run 中也必须完全隔离
+  - 没有显式 RuntimeContext 时不写入进程全局注册表
 
 测试分四组
 ──────────
@@ -42,6 +44,7 @@ import os
 import threading
 from contextvars import copy_context
 
+from src.lib.runtime import RuntimeHome, bind_run_context
 from src.tools.shell.process import ShellProcess, ShellProcessRegistry
 from src.tools.shell import shell_tool
 from src.trace import (
@@ -87,8 +90,20 @@ def _logical(path: str) -> str:
 # Fixtures
 # ---------------------------------------------------------------------------
 
+@pytest.fixture
+def runtime_scope(tmp_path):
+    """Bind the canonical run identity required by persistent shell sessions."""
+    context = RuntimeHome(tmp_path / ".agentloom").context(
+        application_id="shell-registry-tests",
+        task_id="task-default",
+        run_id="run-default",
+    )
+    with bind_run_context(context):
+        yield context
+
+
 @pytest.fixture(autouse=True)
-def clean_registry():
+def clean_registry(runtime_scope):
     """
     在每个测试前后自动清空 ShellProcessRegistry。
 
@@ -131,6 +146,35 @@ def test_same_agent_id_returns_same_process(registry):
     p1 = registry.get_or_create("supervisor_001", session_scoped=False)
     p2 = registry.get_or_create("supervisor_001", session_scoped=False)
     assert p1 is p2, "相同 agent_id 必须返回同一 ShellProcess 对象"
+
+
+def test_same_agent_id_is_partitioned_by_run_and_release_is_run_scoped(
+    registry,
+    runtime_scope,
+):
+    second_run = RuntimeHome(runtime_scope.root_dir).context(
+        application_id=runtime_scope.application_id,
+        task_id=runtime_scope.task_id,
+        run_id="run-second",
+    )
+
+    set_current_agent_id("shared-agent")
+    first_process = registry.get_or_create("shared-agent", session_scoped=False)
+
+    with bind_run_context(second_run):
+        set_current_agent_id("shared-agent")
+        second_process = registry.get_or_create("shared-agent", session_scoped=False)
+        assert second_process is not first_process
+        assert registry.registered_agent_ids() == ["shared-agent"]
+
+    set_current_agent_id("shared-agent")
+    assert registry.release_current_run() == 1
+    assert registry.registered_agent_ids() == []
+
+    with bind_run_context(second_run):
+        set_current_agent_id("shared-agent")
+        assert registry.get_or_create("shared-agent", session_scoped=False) is second_process
+        assert registry.release_current_run() == 1
 
 
 def test_existing_agent_process_refreshes_runtime_options(registry):
@@ -276,24 +320,26 @@ def test_same_agent_reuses_process_across_calls(registry):
         "同一 agent 的两次 shell_tool 调用必须复用相同的 ShellProcess 实例"
 
 
-def test_agent_id_fallback_preserves_cwd_from_executor_thread(bypass_shell_security):
+def test_raw_thread_without_propagated_run_context_never_borrows_session(
+    bypass_shell_security,
+):
     """
     【真实执行】模拟 code executor 在线程中直接调用 shell_tool。
 
-    ContextVar 不会自动传播到新线程；shell_tool 必须能通过 task_context
-    的 agent_id fallback 绑定到同一个 session-scoped ShellProcess。
+    ContextVar 不会自动传播到新线程。即使进程全局 fallback 中还有
+    agent_id，没有显式 RuntimeContext 的线程也不得借用父 run 的 shell 会话。
     """
     results = {}
 
     def _worker_thread():
         try:
-            shell_tool("cd /tmp")
             results["pwd"] = shell_tool("pwd")
         except Exception as exc:
             results["error"] = str(exc)
 
     set_current_agent_id("executor_thread_agent")
     try:
+        shell_tool("cd /tmp")
         thread = threading.Thread(target=_worker_thread)
         thread.start()
         thread.join(timeout=10)
@@ -302,7 +348,7 @@ def test_agent_id_fallback_preserves_cwd_from_executor_thread(bypass_shell_secur
 
     assert not thread.is_alive(), "executor thread should finish"
     assert "error" not in results, results.get("error")
-    assert _path_output(results["pwd"]) == _logical("/tmp")
+    assert _path_output(results["pwd"]) == _logical(os.getcwd())
 
 
 # ---------------------------------------------------------------------------

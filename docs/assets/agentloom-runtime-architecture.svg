@@ -1,6 +1,6 @@
 <svg width="1200" height="640" viewBox="0 0 1200 640" fill="none" xmlns="http://www.w3.org/2000/svg" role="img" aria-labelledby="title desc">
   <title id="title">AgentLoom runtime architecture</title>
-  <desc id="desc">A layered architecture diagram showing Codex and the framework skill creating YAML application specs, AgentLoom running a Supervisor and Worker Agents, shared capabilities, and runtime state.</desc>
+  <desc id="desc">A layered architecture diagram showing Codex and the framework skill creating YAML application specs, AgentLoom running a Supervisor and Worker Agents, and runtime state separated into run evidence and task checkpoints.</desc>
   <defs>
     <linearGradient id="bg" x1="90" y1="36" x2="1104" y2="610" gradientUnits="userSpaceOnUse">
       <stop stop-color="#06172A"/>
@@ -76,10 +76,10 @@
 
   <g filter="url(#softShadow)">
     <rect x="864" y="132" width="260" height="132" rx="24" fill="#F8FAFC" stroke="#C7DDEC"/>
-    <text x="896" y="170" class="text label">Run State</text>
-    <text x="896" y="200" class="text small">terminal output</text>
-    <text x="896" y="226" class="text small">.logs archive</text>
-    <text x="896" y="252" class="text small">checkpoints + UI</text>
+    <text x="896" y="170" class="text label">Runtime State</text>
+    <text x="896" y="200" class="text small">manifest + logs</text>
+    <text x="896" y="226" class="text small">audit + artifacts</text>
+    <text x="896" y="252" class="text small">task checkpoints</text>
   </g>
 
   <g filter="url(#shadow)">
@@ -126,7 +126,7 @@
   </g>
   <g filter="url(#softShadow)">
     <rect x="836" y="526" width="272" height="58" rx="19" fill="#F8FAFC" stroke="#C7DDEC"/>
-    <text x="972" y="562" text-anchor="middle" class="text label">Logs / Checkpoints</text>
+    <text x="972" y="562" text-anchor="middle" class="text label">Runs / Checkpoints</text>
   </g>
 
 </svg>

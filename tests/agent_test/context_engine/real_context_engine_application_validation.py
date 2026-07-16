@@ -138,8 +138,11 @@ def run_case(case: ValidationCase, *, runtime_root: Path) -> dict[str, object]:
         shutil.rmtree(runtime_root)
     runtime_root.mkdir(parents=True, exist_ok=True)
 
-    previous_runtime_root = os.environ.get("AGENT_LOOM_RUNTIME_ROOT")
-    os.environ["AGENT_LOOM_RUNTIME_ROOT"] = str(runtime_root)
+    previous_runtime_config = dict(C.raw.get("runtime", {}))
+    C.raw["runtime"] = {
+        **previous_runtime_config,
+        "root_dir": str(runtime_root),
+    }
     C.raw.setdefault("checkpoint", {})["cleanup_on_success"] = False
     C.raw.setdefault("lsp_servers", {})["enabled"] = False
 
@@ -148,14 +151,11 @@ def run_case(case: ValidationCase, *, runtime_root: Path) -> dict[str, object]:
             run_app(
                 case.workflow,
                 task_override=case.task,
-                log_to_file=True,
+                file_logging=True,
             )
         )
     finally:
-        if previous_runtime_root is None:
-            os.environ.pop("AGENT_LOOM_RUNTIME_ROOT", None)
-        else:
-            os.environ["AGENT_LOOM_RUNTIME_ROOT"] = previous_runtime_root
+        C.raw["runtime"] = previous_runtime_config
 
     missing = [fragment for fragment in case.expected_fragments if fragment not in result]
     entry_paths = list(_iter_context_entries(runtime_root))

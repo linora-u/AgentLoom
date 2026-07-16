@@ -1016,7 +1016,7 @@ def _run_cli(state_root: Path, args: list[str], markers: list[str]) -> dict[str,
     env = os.environ.copy()
     env.pop(CAPSULE_TOKEN_ENV, None)
     env.pop(CAMPAIGN_LLM_CONFIG_FD_ENV, None)
-    env["AGENTLOOM_SELF_LEARNING_ROOT"] = str(state_root)
+    env["AGENTLOOM_RUNTIME_ROOT"] = str(state_root)
     command = [_loom(), "memory", *args]
     if capsule_is_active():
         command = guarded_runtime_command(command, repo_root=REPO_ROOT)
@@ -1256,14 +1256,14 @@ def _run_attempt(
     env.update(
         {
             "AGENT_LOOM_RUNTIME_ROOT": str(runtime_root),
-            "AGENTLOOM_SELF_LEARNING_ROOT": str(state_root),
+            "AGENTLOOM_RUNTIME_ROOT": str(state_root),
             "AGENTLOOM_MEMORY_CASE_ID": spec.case_id,
             "AGENTLOOM_MEMORY_CASE_PHASE": spec.phase,
             "AGENTLOOM_MEMORY_CAMPAIGN_SAFE_ARTIFACTS": "1",
             "PYTHONUNBUFFERED": "1",
         }
     )
-    command = [_loom(), "run", str(workflow_path), "--log-to-file"]
+    command = [_loom(), "run", str(workflow_path)]
     if capsule_is_active():
         if _ACTIVE_MODEL_CONFIG_BYTES is None:
             raise RuntimeError("capsule model configuration was not initialized")
@@ -1352,7 +1352,7 @@ def _run_attempt(
         "started_at": started_at,
         "finished_at": finished_at,
         "duration_seconds": elapsed,
-        "command": ["loom", "run", spec.workflow, "--log-to-file"],
+        "command": ["loom", "run", spec.workflow],
         "agent_root": spec.agent_root,
         "runtime_root": runtime_root.relative_to(execution_root).as_posix(),
         "state_root": state_root.relative_to(execution_root).as_posix(),
@@ -2183,7 +2183,7 @@ def main() -> int:
         "canary_count": min(5, len(specs)),
         "max_concurrency": args.max_workers,
         "infrastructure_retries": 1,
-        "cli_contract": "loom run <workflow> --log-to-file",
+        "cli_contract": "loom run <workflow>",
         "memory_cli_contract": ["list", "pending", "approve", "reject"],
         "dataset": dataset_manifest(),
         "scenario_quotas": dict(Counter(spec.scenario for spec in specs)),

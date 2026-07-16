@@ -1127,7 +1127,7 @@ def _plan_issues(plan: dict[str, Any]) -> list[str]:
         issues.append("plan does not match the canonical committed dataset plan")
     if plan.get("dataset") != dataset_manifest():
         issues.append("dataset manifest does not match the canonical campaign dataset")
-    if plan.get("cli_contract") != "loom run <workflow> --log-to-file":
+    if plan.get("cli_contract") != "loom run <workflow>":
         issues.append("campaign bypassed the production loom run CLI")
     if plan.get("memory_cli_contract") != ["list", "pending", "approve", "reject"]:
         issues.append("memory CLI contract is not list/pending/approve/reject")
