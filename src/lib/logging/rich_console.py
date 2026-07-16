@@ -1,75 +1,108 @@
-from rich.console import Console
+from __future__ import annotations
+
+import threading
+from io import StringIO
 from pathlib import Path
+from typing import Any, TextIO
+
+from rich.console import Console
+
+from src.lib.runtime import RuntimeContext, RuntimeRotatingTextSink
+
 
 class DualConsole(Console):
-    """Dual-output console: output to terminal and file at the same time."""
-    
-    def __init__(self, log_file_path, *args, **kwargs):
-        # Initialize parent Console (for terminal output).
+    """Rich console with an optional bounded, rotating plain-text file sink."""
+
+    def __init__(
+        self,
+        log_file_path: str | None,
+        *args: Any,
+        max_file_bytes: int = 25 * 1024 * 1024,
+        backup_count: int = 3,
+        console_enabled: bool = True,
+        runtime_context: RuntimeContext | None = None,
+        **kwargs: Any,
+    ) -> None:
         super().__init__(*args, **kwargs)
-        # Do not reuse Console internals like `_closed`; keep our own file sink state.
+        self.console_enabled = bool(console_enabled)
+        self.max_file_bytes = max(1, int(max_file_bytes))
+        self.backup_count = max(0, int(backup_count))
+        self.log_file_path = (
+            str(Path(log_file_path).expanduser().absolute()) if log_file_path else None
+        )
+        self.log_file: TextIO | None = None
+        self.file_console: Console | None = None
         self._file_sink_closed = False
         self._file_sink_disabled = False
+        self._file_lock = threading.RLock()
+        self._runtime_sink = None
+        if self.log_file_path:
+            if runtime_context is None:
+                raise ValueError("file logging requires a RuntimeContext")
+            self._runtime_sink = RuntimeRotatingTextSink(
+                runtime_context,
+                Path(self.log_file_path),
+                max_file_bytes=self.max_file_bytes,
+                backup_count=self.backup_count,
+            )
 
-        # File sink is lazily opened on first write to avoid eager empty-file creation.
-        self.log_file = None
-        self.file_console = None
-        if log_file_path:
-            resolved_path = Path(log_file_path).expanduser()
-            self.log_file_path = str(resolved_path.resolve())
-        else:
-            self.log_file_path = None
-
-    def _ensure_file_sink_open(self) -> bool:
-        if self._file_sink_closed or self._file_sink_disabled:
+    def _open_file_sink(self) -> bool:
+        if self._file_sink_closed or self._file_sink_disabled or not self.log_file_path:
             return False
-        if self.log_file and self.file_console:
-            return True
-        if not self.log_file_path:
-            return False
+        return self._runtime_sink is not None
 
-        try:
-            resolved_path = Path(self.log_file_path).expanduser()
-            resolved_path.parent.mkdir(parents=True, exist_ok=True)
-            self.log_file = open(resolved_path, "a", encoding="utf-8")
-            self.file_console = Console(file=self.log_file, width=self.width, no_color=True, highlight=False)
-            return True
-        except Exception:
-            # Keep terminal logging healthy even when file sink is not writable.
-            self._file_sink_disabled = True
-            self.log_file = None
-            self.file_console = None
-            return False
+    def _render_plain(self, *args: Any, **kwargs: Any) -> str:
+        buffer = StringIO()
+        file_console = Console(
+            file=buffer,
+            width=self.width,
+            no_color=True,
+            highlight=False,
+            force_terminal=False,
+        )
+        file_console.print(*args, **kwargs)
+        return buffer.getvalue()
 
-    def print(self, *args, **kwargs):
-        # Output to terminal (call parent method).
-        super().print(*args, **kwargs)
-        # Output to file.
-        if not self._ensure_file_sink_open():
+    def _rollover(self) -> None:
+        # Rotation is owned by RuntimeRotatingTextSink so every rename remains
+        # anchored to the validated run directory descriptor.
+        return None
+
+    def _write_file(self, rendered: str) -> None:
+        if not rendered or not self.log_file_path:
             return
-        try:
-            self.file_console.print(*args, **kwargs)
-            # Force flush buffer.
-            self.log_file.flush()
-        except Exception:
-            self._file_sink_disabled = True
-            if self.log_file:
-                try:
-                    self.log_file.close()
-                except Exception:
-                    pass
-            self.log_file = None
-            self.file_console = None
-
-    def close_log_file(self):
-        """Close file sink explicitly when caller needs deterministic cleanup."""
-        if self._file_sink_closed:
-            return
-        if self.log_file:
+        with self._file_lock:
             try:
-                self.log_file.close()
-            except Exception:
-                pass
-        self.log_file = None
-        self.file_console = None
-        self._file_sink_closed = True
+                if not self._open_file_sink() or self._runtime_sink is None:
+                    return
+                self._runtime_sink.write(rendered)
+                self.log_file = self._runtime_sink.stream
+            except (OSError, RuntimeError):
+                self._file_sink_disabled = True
+                if self._runtime_sink is not None:
+                    self._runtime_sink.close()
+                    self._runtime_sink = None
+                self.log_file = None
+                return
+
+    def print(self, *args: Any, **kwargs: Any) -> None:
+        if self.console_enabled:
+            super().print(*args, **kwargs)
+        if self.log_file_path:
+            self._write_file(self._render_plain(*args, **kwargs))
+
+    def close_log_file(self) -> None:
+        with self._file_lock:
+            if self._file_sink_closed:
+                return
+            if self.log_file is not None:
+                self.log_file = None
+            if self._runtime_sink is not None:
+                try:
+                    self._runtime_sink.close()
+                except OSError:
+                    pass
+                self._runtime_sink = None
+            self.log_file = None
+            self.file_console = None
+            self._file_sink_closed = True

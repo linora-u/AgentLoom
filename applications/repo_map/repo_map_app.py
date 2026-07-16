@@ -156,7 +156,6 @@ def main(
     output_dir: str = None,
     skill_output_dir: str = None,
     exclude_dirs: list[str] = None,
-    log_to_file: bool = False,
     resume: str | None = None,
 ) -> None:
     """
@@ -179,7 +178,6 @@ def main(
         exclude_dirs: Directory names/paths to exclude (relative to project_path).
                       Can be specified multiple times:
                         --exclude_dirs vendor --exclude_dirs third_party
-        log_to_file:  Deprecated. Kept for CLI compatibility.
         resume:       Deprecated. Incremental progress is driven by
                       analysis_progress.json in output_dir.
 
@@ -217,8 +215,6 @@ def main(
     if excl:
         print(f"[repo_map] Exclude: {excl}")
 
-    if log_to_file:
-        print("[repo_map] Note: log_to_file is deprecated in direct orchestration mode.")
     if resume:
         print("[repo_map] Note: --resume is ignored; rerun uses analysis_progress.json.")
 

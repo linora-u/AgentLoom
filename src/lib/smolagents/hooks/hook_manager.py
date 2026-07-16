@@ -17,6 +17,7 @@ import os
 import time
 import uuid
 from concurrent.futures import ThreadPoolExecutor, as_completed
+from contextvars import copy_context
 from threading import Event, RLock, Thread
 from typing import Any, Callable, Dict, List, Optional
 
@@ -455,8 +456,10 @@ class HookManager:
                 finally:
                     completed.set()
 
+            worker_context = copy_context()
             worker = Thread(
-                target=_run_in_worker,
+                target=worker_context.run,
+                args=(_run_in_worker,),
                 name=f"hook-timeout-{func_name}-{uuid.uuid4().hex[:8]}",
                 daemon=True,
             )
@@ -738,6 +741,7 @@ class HookManager:
             with ThreadPoolExecutor(max_workers=worker_count) as pool:
                 future_map = {
                     pool.submit(
+                        copy_context().run,
                         self._execute_single_hook_in_context,
                         h,
                         context,

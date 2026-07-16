@@ -1,158 +1,203 @@
-# 断点续跑与会话恢复
+# 断点续跑与运行时存储
 
 ## 概述
 
-AgentLoom 支持多 Agent 任务的**断点续跑**（Checkpoint & Resume）能力。当长时间运行的任务被中断（用户 Ctrl-C、进程崩溃、机器重启等）时，可以从上次中断处继续执行，而无需从头开始。
+AgentLoom 将“一次执行尝试”和“需要恢复的逻辑任务”分开管理：
 
-核心组件：
+- `run_id` 标识一次执行 attempt。正常运行和每次 resume 都生成新的 `run_id` 与 run 目录。
+- `task_id` 标识同一个逻辑任务。resume 保持 `task_id` 不变，继续使用原 checkpoint 目录。
 
-| 组件 | 说明 |
-|------|------|
-| **CheckpointManager** | 持久化层：原子 JSON 写入、任务树管理、checkpoint 文件组织 |
-| **CheckpointCoordinator** | 协调层：ContextVar 单例，管理 checkpoint 生命周期 |
-| **CheckpointSerializer** | 序列化层：smolagents MemoryStep 的序列化/反序列化 |
-| **ConversationRecovery** | 恢复管道：过滤未完成的 tool 调用、孤立思考步骤、空步骤 |
-| **FileHistoryManager** | 文件历史：编辑前备份、步骤快照、回滚到指定步骤 |
-| **SupervisorHeartbeat** | 心跳监控：Supervisor 进程存活检测 |
-| **WorkerHeartbeat** | 工作心跳：Worker 调用级别的存活检测 |
+因此，日志轮转或 run 清理不会破坏任务恢复状态；并发 Application 和任务也不会共用日志或 artifact 路径。
 
 ## 存储布局
 
-Checkpoint 数据写入每次运行的时间戳日志目录，与运行日志共存：
+`runtime.root_dir` 是框架运行时的唯一根目录，默认值为 `.agentloom`：
 
-```
-.logs/{agent_name}/
-├── .task_index.json                        # 索引：task_id → timestamp 映射（用于 --resume 快速查找）
-├── 20260413_104447/                        # 每次运行的时间戳目录
-│   ├── {agent_name}.log                    # 运行日志
-│   └── checkpoints/{task_id}/              # 该次运行的 checkpoint 数据
-│       ├── task_tree.json                  # 任务元数据（状态、worker 调用记录）
-│       ├── checkpoint.json                 # Supervisor Agent memory 快照
-│       ├── heartbeat.json                  # Supervisor 心跳（PID、时间戳）
-│       ├── file-history/                   # 文件编辑历史备份
-│       └── workers/{worker_name}/
-│           ├── checkpoint.json             # Worker Agent memory 快照
-│           └── heartbeat.json              # Worker 心跳
-└── 20260413_104837/
-    ├── {agent_name}.log
-    └── checkpoints/{task_id}/
-        └── ...
+```text
+.agentloom/
+├── runs/<application_id>/<run_id>/
+│   ├── manifest.json
+│   ├── logs/
+│   │   ├── runtime.log
+│   │   └── runtime.log.1 ... runtime.log.3
+│   ├── audit/
+│   │   ├── shell.jsonl
+│   │   └── shell.jsonl.1 ... shell.jsonl.2
+│   └── artifacts/
+│       ├── shell/
+│       ├── background/
+│       └── skills/
+├── checkpoints/<application_id>/<task_id>/
+│   ├── task_events.jsonl
+│   ├── task_tree.json
+│   ├── checkpoint.json
+│   ├── heartbeat.json
+│   ├── workers/<worker_name>/
+│   │   ├── calls/<call_index>/checkpoint.json
+│   │   └── heartbeat.json
+│   ├── context_store/
+│   └── file-history/
+├── sessions/
+├── learning/
+├── self_learning.db
+└── legacy/logs-v1-<timestamp>/
 ```
 
-**关键设计**：
-- Checkpoint 始终在首次创建时的时间戳目录下，resume 时不会迁移到新目录
-- `.task_index.json` 记录 `task_id → timestamp` 的映射，`--resume` 时 O(1) 定位
-- 如果索引丢失，系统会自动扫描所有时间戳目录作为降级回退
+关键边界：
+
+- `manifest.json` 用 `task_id` 反向关联逻辑任务；checkpoint 的 run 事件和 heartbeat 记录当前 `run_id`。
+- `task_events.jsonl` 是持久化的任务/Worker 事件源，`task_tree.json` 是便于查看的投影。
+- Checkpoint 直接按 `<application_id>/<task_id>` 定位，不依赖日志目录、`.task_index.json` 或历史 run 扫描。
+- 用户交付物仍由 Application 的 `output_dir` 管理，runtime 清理不会遍历 Application output 目录。
+- `.runtime/` 是 Agent 可见的 recall/todo 工作区，与 `.agentloom/` 刻意保持独立，不会被搬进 run artifacts。
 
 ## 配置
 
-在 `config/system.yaml` 中配置：
+在 `config/system.yaml` 中配置运行时存储、有界日志和 resume：
 
 ```yaml
+runtime:
+  root_dir: ".agentloom"
+  successful_run_retention_days: 7
+  failed_run_retention_days: 30
+  artifact_retention_days: 3
+  cleanup_interval_hours: 24
+
+logging:
+  level: "INFO"
+  console_enabled: true
+  file_enabled: true
+  max_file_bytes: 26214400  # runtime.log 每段 25 MiB
+  backup_count: 3
+
 checkpoint:
-  enabled: true              # 全局开关
-  cleanup_on_success: true   # 任务成功后自动清理 checkpoint
-  max_resume_age: 604800     # checkpoint 最大保留时间（秒），默认 7 天
-  heartbeat_interval: 5      # 心跳写入间隔（秒）
+  enabled: true
+  cleanup_on_success: true
+  max_resume_age: 604800
+  heartbeat_interval: 5
 ```
 
-## CLI 命令
+文件日志默认开启且有界：runtime log 保留当前 25 MiB 文件和 3 个备份；Shell audit 独立按每段 10 MiB、2 个备份轮转。
 
-### 运行任务
+`runtime.root_dir` 支持绝对路径和相对路径；相对路径从 AgentLoom 项目根目录解析。隔离验证时，在验证 checkout 的全局配置里把该字段指向临时绝对目录。
+
+## 运行与恢复
 
 ```bash
-# 正常运行
+# 新逻辑任务 + 新执行 attempt
 loom run applications/<app>/workflows/<agent>.yaml
 
-# 开启日志文件写入
-loom run applications/<app>/workflows/<agent>.yaml --log-to-file
+# 仅关闭本次执行的文件 runtime log；checkpoint 仍正常工作
+loom run applications/<app>/workflows/<agent>.yaml --no-file-log
 
-# 从 checkpoint 恢复
+# 新执行 attempt + 原逻辑任务/checkpoint
 loom run applications/<app>/workflows/<agent>.yaml --resume task_xxx
 ```
 
-### 查看可恢复的任务
+CLI 不再提供 `--log-to-file`。默认是否写文件由 `logging.file_enabled` 决定，`--no-file-log` 是单次运行的关闭开关。
+
+查看或清理 checkpoint：
 
 ```bash
 loom list-tasks
 loom list-tasks --detail
+loom clean-tasks
+loom clean-tasks --before 3
+loom clean-tasks --all
 ```
 
-### 清理旧 checkpoint
+`cleanup_on_success: true` 时，成功任务的整个 checkpoint 目录会被删除。关闭该清理时，completed checkpoint 会保留供检查，但它是终态，不能 resume。failed、interrupted 或 crashed 任务在 `max_resume_age` 内可恢复；其 ContextStore 和 file-history 与 task checkpoint 位于同一目录并共享生命周期。`loom list-tasks` 会列出所有仍保留的 checkpoint 及其状态。
+
+## 恢复行为
+
+Resume 的恢复链路为：
+
+```text
+加载已持久化的 MemorySteps
+  -> 移除未完成 tool use、孤立步骤和空步骤
+  -> 恢复 task-scoped ContextStore 与 file-history
+  -> 在原 call_index 下恢复未完成的 Worker memory
+  -> 输入哈希一致时复用已完成 Worker 结果
+  -> 使用新的 run_id 继续执行
+```
+
+每次 Worker 调用拥有独立的 `workers/<worker>/calls/<call_index>/checkpoint.json`，并发调用不会互相覆盖。Resume 会复用未完成的 call index，不会为同一段中断工作再创建一个重复调用。
+
+Supervisor 与 Worker heartbeat 都记录当前 `run_id`。崩溃检测会检查 heartbeat 是否缺失/停止、PID 是否存活以及时间戳是否过期。Resume 后会在同一个 task checkpoint 中写入新 attempt 的 `run_id`。
+
+回放会跳过损坏或只写了一半的 JSONL 尾行，避免一次异常退出让前面的有效 task events 全部不可读。
+
+## Runtime 保留策略
+
+自动 runtime 清理最多每 `runtime.cleanup_interval_hours` 执行一次（默认 24 小时），且只遍历 `.agentloom/runs`：
+
+- 成功 run：默认保留 7 天；
+- 失败/中断 run：默认保留 30 天；
+- 原始 `artifacts/`：默认保留 3 天；
+- manifest 状态为 running 或未知：保留；
+- `.agentloom/legacy/`、checkpoints、`.runtime/` 和 Application outputs：run 清理永不删除。
+
+也可以显式执行同一策略：
 
 ```bash
-loom clean-tasks          # 清理过期的 checkpoint
-loom clean-tasks --all    # 清理所有 checkpoint
+loom clean-runtime
 ```
 
-## 恢复管道
+Checkpoint 过期与删除保持 task-scoped：`max_resume_age` 决定任务是否还能 resume，`cleanup_on_success` 删除成功任务状态，`loom clean-tasks` 提供显式 checkpoint 清理。
 
-当使用 `--resume` 恢复时，系统执行以下管道（移植自参考实现）：
+## 从 `.logs` 一次性迁移
 
-```
-加载已持久化的 MemoryStep
-  → filter_unresolved_tool_uses()    # 移除未完成的 tool 调用
-  → filter_orphaned_thinking()       # 移除孤立的思考步骤
-  → filter_empty_steps()             # 移除完全空白的步骤
-  → detect_turn_interruption()       # 检测中断类型
-  → 注入已清理的步骤到 Agent 内存
-  → 继续执行
+先预览：
+
+```bash
+loom migrate-runtime --dry-run
 ```
 
-### 中断检测
+扫描会完全忽略旧 `.task_index.json`，直接读取真实 checkpoint 目录及 task events/tree；测试任务、过期任务会被排除，只选择仍有可恢复 memory、ContextStore 或 file-history 进度的任务。
 
-| 中断类型 | 说明 |
-|---------|------|
-| `none` | 任务正常完成（有 final_answer 或已完成的 tool 调用） |
-| `interrupted_turn` | 任务在执行中被中断（有 tool_calls 但无 observations） |
+确认候选后应用：
 
-## 文件历史（File History）
-
-文件历史功能自动在 Agent 编辑文件之前创建备份，支持回滚到任意步骤：
-
-- **自动触发**：通过 `PRE_TOOL_USE` hook 自动拦截 `edit_file`、`write_file`、`create_file` 等工具
-- **三阶段锁安全**：检查 → I/O → 提交，最小化锁持有时间
-- **快照管理**：最多保留 100 个快照，超出自动淘汰最旧的
-- **Null-backup**：文件不存在时记录空备份，回滚时自动删除
-
-存储结构：
-
-```
-.logs/{agent_name}/{timestamp}/checkpoints/{task_id}/file-history/
-    {sha256_hash}@v1    # 编辑前备份
-    {sha256_hash}@v2    # 步骤后快照
-    snapshots.json       # 持久化索引
+```bash
+loom migrate-runtime --apply
 ```
 
-## Worker 跳过机制
+Apply 会经过 staging，校验 checksum 和可恢复进度，再原子 rename 到 `.agentloom/checkpoints/<application_id>/<task_id>/`。全部候选验证成功后，整个旧 `.logs` 会被原子归档到 `.agentloom/legacy/logs-v1-<timestamp>/`；新运行时不会双读该归档。
 
-多 Agent 任务中，已完成的 Worker 在恢复时会被自动跳过：
+迁移完成后，应对每个重要任务执行真实 resume，并验证旧 ContextRef retrieve 与 file-history 状态，再把迁移判定为通过。
 
-1. Worker 启动时计算输入的 SHA256 哈希
-2. 完成后将结果和哈希存入 checkpoint
-3. 恢复时检查哈希匹配，命中则直接返回缓存结果
+## 检查真实运行证据
 
-## 崩溃检测
+不要只看退出码或 final answer。必须读取该 attempt 的 manifest、runtime log 和 Shell audit：
 
-通过心跳文件实现崩溃检测：
+```bash
+manifest=$(find .agentloom/runs -name manifest.json -type f -print | sort | tail -1)
+run_dir=$(dirname "$manifest")
 
-- Supervisor 和 Worker 每 5 秒写入心跳文件（PID + 时间戳）
-- 恢复时检查：
-  - 心跳文件不存在 → 崩溃
-  - 心跳状态为 stopped/exited → 崩溃
-  - PID 不存在 → 崩溃
-  - 时间戳超过 30 秒未更新 → 崩溃
+sed -n '1,160p' "$manifest"
+tail -n 100 "$run_dir/logs/runtime.log"
+tail -n 100 "$run_dir/audit/shell.jsonl"
+```
+
+对 resume 任务，确认新 manifest 使用新的 `run_id`、原来的 `task_id`，再检查：
+
+```bash
+find .agentloom/checkpoints/<application_id>/<task_id> -maxdepth 5 -type f -print
+```
 
 ## 故障排除
 
-### 恢复失败："No checkpoint found"
+### Resume 失败：`No checkpoint found`
 
-确认 `.logs/{agent_name}/{timestamp}/checkpoints/` 目录下存在对应的 task_id 目录。使用 `loom list-tasks` 查看可用任务。
+运行 `loom list-tasks --detail`，确认 task 位于本次 workflow 对应的同一 `application_id` 下。Checkpoint 查找具有 Application scope。
 
-### 恢复失败："Checkpoint expired"
+### Resume 失败：`Checkpoint expired`
 
-checkpoint 超过了 `max_resume_age` 配置的保留时间（默认 7 天）。
+该逻辑任务原始 `created_at` 已超过 `checkpoint.max_resume_age`。迁移和 resume 不会重写 `created_at` 来复活过期任务。
 
-### 恢复失败："checkpoint is disabled"
+### 没有 `runtime.log`
 
-检查 `config/system.yaml` 中 `checkpoint.enabled` 是否为 `true`。
+检查 `logging.file_enabled`，以及本次运行是否使用了 `--no-file-log`。关闭文件日志不会关闭 checkpoint 或 Shell audit。
+
+### `.logs` 仍然存在
+
+新运行不会再写 `.logs`。先用 `loom migrate-runtime --dry-run` 检查，再用 `--apply` 归档旧目录；验证可恢复任务之前不要直接删除它。

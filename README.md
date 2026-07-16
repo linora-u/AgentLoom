@@ -45,14 +45,16 @@ uv run loom run applications/ai_quality_analysis/workflows/code_review_agent.yam
 After the first run, you should see:
 
 - structured terminal logs with agent names, task IDs, step duration, and token usage;
-- archived run files under `.logs/<agent>/<timestamp>/`;
-- resumable task state when checkpointing is enabled;
+- one execution attempt under `.agentloom/runs/<application_id>/<run_id>/`, with a manifest, bounded runtime log, Shell audit, and raw artifacts;
+- resumable task state under `.agentloom/checkpoints/<application_id>/<task_id>/` when checkpointing is enabled;
 - optional visualization through `uv run loom ui`;
 - optional terminal monitoring through `uv run loom dashboard`.
 
+`run_id` identifies one execution attempt and changes on resume. `task_id` identifies the logical task and remains stable, so a resumed attempt writes a new run directory while continuing the same checkpoint. The agent-visible `.runtime/` workspace is intentionally separate from framework runtime storage.
+
 ## Create a Multi-Agent App with Codex
 
-The fastest path is to let Codex use the framework skill that ships with this repository. Codex can create the YAML files, run the AgentLoom app, watch terminal output and `.logs/`, inspect checkpoint state, and revise the app when a Worker gets stuck or a config is wrong.
+The fastest path is to let Codex use the framework skill that ships with this repository. Codex can create the YAML files, run the AgentLoom app, inspect `.agentloom/` run and checkpoint evidence, and revise the app when a Worker gets stuck or a config is wrong.
 
 Use a prompt like this:
 
@@ -83,7 +85,12 @@ Useful runtime checks while the app is running:
 ```bash
 uv run loom list-tasks
 uv run loom dashboard
-ls .logs/
+
+manifest=$(find .agentloom/runs -name manifest.json -type f -print | sort | tail -1)
+run_dir=$(dirname "$manifest")
+sed -n '1,160p' "$manifest"
+tail -n 80 "$run_dir/logs/runtime.log"
+tail -n 80 "$run_dir/audit/shell.jsonl"
 ```
 
 If you prefer Claude Code, give it the same request: read `agentloom-framework-skill/SKILL.md`, create the app under `applications/<app_name>/`, run it, and summarize what worked or failed.
@@ -111,7 +118,7 @@ The practical result:
 | Reuse coding-assistant knowledge | Load Claude-style `SKILL.md` packages on demand or eagerly. |
 | Connect external tools | Register local Python tools, local `codex exec`, and MCP servers through `mcp_servers`. |
 | Handle repeated work | Use Worker `concurrency` and `tool.batch(tasks)` for independent repeated inputs. |
-| Understand long runs | Use structured logs, `.logs/` archives, checkpoints, `loom ui`, and `loom dashboard`. |
+| Understand long runs | Read the run manifest, bounded runtime log, Shell audit, task checkpoint, `loom ui`, and `loom dashboard`. |
 
 ## Architecture
 
@@ -135,7 +142,7 @@ The important boundary is:
 | Agent-as-Tool coordination | Worker Agents export as callable tools through `agent_function_schema`, including required-input validation and string outputs. |
 | Skills, MCP, and tools | Agents can load `SKILL.md` packages, local Python functions, built-in file/shell/search/git tools, local Codex tools, and MCP client tools through `mcp_servers`. |
 | Concurrent repeated work | Worker `concurrency: auto` or fixed concurrency works with `.batch(tasks)` for many independent inputs. |
-| State and observability | Rich terminal logs, plain text file logs, per-step timing, token usage, `.logs/` archives, checkpoint resume, Web UI, and TUI dashboard. |
+| State and observability | Rich terminal logs, bounded per-run file logs, per-step timing, token usage, run manifests, checkpoint resume, Web UI, and TUI dashboard. |
 
 ## Example Applications
 
@@ -208,6 +215,9 @@ Before running the tool, make sure `codex` is on `PATH` and `codex login status`
 | `uv run loom dashboard` | Open the terminal task dashboard. |
 | `uv run loom list-tasks` | List resumable checkpoint tasks. |
 | `uv run loom clean-tasks` | Clean old checkpoint data. |
+| `uv run loom clean-runtime` | Apply configured retention to completed run directories and raw artifacts. |
+| `uv run loom migrate-runtime --dry-run` | Preview valid legacy checkpoint candidates without changing disk state. |
+| `uv run loom migrate-runtime --apply` | Migrate valid legacy checkpoints and archive the old `.logs` tree. |
 
 ## Documentation
 

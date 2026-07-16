@@ -1,13 +1,8 @@
-"""Per-agent shell security audit logger.
+"""Run-scoped shell security audit logger.
 
-Writes structured, human-readable audit entries to a dedicated log file
-that shares the same per-run timestamp directory as the main agent log::
-
-    .logs/{agent_name}/{timestamp}/shell_audit.log
-
-When no main agent log context is available (standalone usage), it
-falls back to creating its own timestamp directory under the configured
-log base directory.
+Every entry is one JSON object in ``RuntimeContext.shell_audit_path``.  The
+logger never derives a storage location from cwd, logger state, timestamps, or
+agent names.  Without a RuntimeContext it has no file sink.
 
 Each entry records a shell security event (blocked command, path
 violation, stall detection, timeout, etc.) together with an actionable
@@ -38,22 +33,40 @@ Usage::
 
 from __future__ import annotations
 
-import os
+import contextvars
+import json
+import logging
 import threading
-from datetime import datetime
+from dataclasses import dataclass, field
+from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any
 
 from src.lib.config import C
 from src.lib.logging import get_logger
+from src.lib.runtime import (
+    RuntimeContext,
+    RuntimeRotatingTextSink,
+    get_current_run_context,
+)
 
 logger = get_logger(__name__)
 
 # ---------------------------------------------------------------------------
-# Module-level cache
+# Run-scoped cache
 # ---------------------------------------------------------------------------
-_AUDIT_LOGGERS: dict[str, "ShellAuditLogger"] = {}
-_CACHE_LOCK = threading.Lock()
+
+
+@dataclass
+class _AuditScope:
+    runtime_key: tuple[str, str, str, str]
+    sink: _AuditSink | None = None
+    loggers: dict[str, ShellAuditLogger] = field(default_factory=dict)
+
+
+_CURRENT_AUDIT_SCOPE: contextvars.ContextVar[_AuditScope | None] = (
+    contextvars.ContextVar("agentloom_shell_audit_scope", default=None)
+)
 
 # ---------------------------------------------------------------------------
 # Event type constants
@@ -128,12 +141,132 @@ _SUGGESTIONS: dict[str, str] = {
 }
 
 
-def _sanitize_component(value: str) -> str:
-    """Sanitize a string for use as a filesystem path component."""
-    import re
-    normalized = re.sub(r"[^A-Za-z0-9._-]+", "_", value.strip())
-    normalized = normalized.strip("._")
-    return normalized or "unknown"
+def _context_key(
+    context: RuntimeContext | None,
+) -> tuple[str, str, str, str] | None:
+    if context is None:
+        return None
+    return (
+        str(context.root_dir),
+        context.application_id,
+        context.task_id,
+        context.run_id,
+    )
+
+
+class _SecureAuditHandler(logging.Handler):
+    """Logging handler backed by a no-follow run-scoped rotating sink."""
+
+    def __init__(
+        self,
+        runtime_context: RuntimeContext,
+        *,
+        max_file_bytes: int,
+        backup_count: int,
+    ) -> None:
+        super().__init__()
+        self._sink = RuntimeRotatingTextSink(
+            runtime_context,
+            runtime_context.shell_audit_path,
+            max_file_bytes=max_file_bytes,
+            backup_count=backup_count,
+        )
+
+    @property
+    def stream(self):
+        return self._sink.stream
+
+    def emit(self, record: logging.LogRecord) -> None:
+        self._sink.write(self.format(record) + "\n")
+
+    def close(self) -> None:
+        try:
+            self._sink.close()
+        finally:
+            super().close()
+
+
+class _AuditSink:
+    """One rotating file handler and lock shared by every agent in a run."""
+
+    def __init__(
+        self,
+        runtime_context: RuntimeContext,
+        *,
+        max_file_bytes: int,
+        backup_count: int,
+    ) -> None:
+        self.runtime_key = _context_key(runtime_context)
+        self.file_path = runtime_context.shell_audit_path
+        self.max_file_bytes = max(1, int(max_file_bytes))
+        self.backup_count = max(0, int(backup_count))
+        self._lock = threading.RLock()
+        self._handler: logging.Handler | None = None
+        self._closed = False
+        try:
+            self._handler = _SecureAuditHandler(
+                runtime_context,
+                max_file_bytes=self.max_file_bytes,
+                backup_count=self.backup_count,
+            )
+            self._handler.setFormatter(logging.Formatter("%(message)s"))
+        except (OSError, RuntimeError):
+            self._handler = None
+
+    def _get_handler_unlocked(self) -> logging.Handler | None:
+        if self._closed:
+            return None
+        return self._handler
+
+    def emit(self, record: logging.LogRecord) -> None:
+        if _context_key(get_current_run_context()) != self.runtime_key:
+            return
+        with self._lock:
+            handler = self._get_handler_unlocked()
+            if handler is not None:
+                handler.emit(record)
+
+    def close(self) -> None:
+        with self._lock:
+            self._closed = True
+            if self._handler is not None:
+                self._handler.close()
+                self._handler = None
+
+
+def _scope_for_context(
+    runtime_context: RuntimeContext,
+    *,
+    max_file_bytes: int = 10 * 1024 * 1024,
+    backup_count: int = 2,
+) -> _AuditScope:
+    runtime_key = _context_key(runtime_context)
+    assert runtime_key is not None
+    scope = _CURRENT_AUDIT_SCOPE.get()
+    if scope is None or scope.runtime_key != runtime_key:
+        if scope is not None:
+            _close_scope(scope)
+        scope = _AuditScope(runtime_key=runtime_key)
+        _CURRENT_AUDIT_SCOPE.set(scope)
+    if scope.sink is None:
+        scope.sink = _AuditSink(
+            runtime_context,
+            max_file_bytes=max_file_bytes,
+            backup_count=backup_count,
+        )
+    return scope
+
+
+def _close_scope(scope: _AuditScope) -> None:
+    for audit_logger in scope.loggers.values():
+        audit_logger.close()
+    if scope.sink is not None:
+        scope.sink.close()
+
+
+def initialize_shell_audit_scope(runtime_context: RuntimeContext) -> None:
+    """Bind the run sink before worker contexts are copied to threads."""
+    _scope_for_context(runtime_context)
 
 
 def _coerce_bool(value: Any) -> bool:
@@ -197,24 +330,36 @@ def _format_list(value: Any) -> str:
 # ---------------------------------------------------------------------------
 
 class ShellAuditLogger:
-    """Writes structured shell security events to a per-agent audit file.
+    """Writes structured shell security events to one run's audit file."""
 
-    Each instance is bound to a specific agent name and writes to a
-    single audit log file for the lifetime of the process.  Instances
-    are cached by agent name via :func:`get_shell_audit_logger`.
-
-    Thread-safe: all writes are serialized through an internal lock.
-    """
-
-    def __init__(self, agent_name: str, log_dir: Optional[str] = None):
+    def __init__(
+        self,
+        agent_name: str,
+        *,
+        runtime_context: RuntimeContext | None = None,
+        max_file_bytes: int = 10 * 1024 * 1024,
+        backup_count: int = 2,
+    ):
         self._agent_name = agent_name
         self._lock = threading.Lock()
-        self._file_path: Optional[Path] = None
-        self._enabled: Optional[bool] = None
-        self._log_success: Optional[bool] = None
-        self._log_policy_snapshot: Optional[bool] = None
+        self._file_path: Path | None = None
+        self._enabled: bool | None = None
+        self._log_success: bool | None = None
+        self._log_policy_snapshot: bool | None = None
         self._policy_snapshot_logged = False
-        self._log_dir = log_dir
+        self._runtime_context = runtime_context or get_current_run_context()
+        self._runtime_key = _context_key(self._runtime_context)
+        self._max_file_bytes = max(1, int(max_file_bytes))
+        self._backup_count = max(0, int(backup_count))
+        self._sink: _AuditSink | None = None
+        if self._runtime_context is not None:
+            scope = _scope_for_context(
+                self._runtime_context,
+                max_file_bytes=self._max_file_bytes,
+                backup_count=self._backup_count,
+            )
+            self._sink = scope.sink
+        self._closed = False
 
     # -- lazy initialization ------------------------------------------------
 
@@ -263,59 +408,23 @@ class ShellAuditLogger:
     def file_path(self) -> Path:
         """Lazily resolve and create the audit log file path."""
         if self._file_path is None:
-            self._file_path = self._resolve_path()
+            path = self._resolve_path()
+            if path is None:
+                raise RuntimeError("shell audit file logging requires a RuntimeContext")
+            self._file_path = path
         return self._file_path
 
-    def _resolve_path(self) -> Path:
-        """Resolve the audit log file path.
+    def _resolve_path(self) -> Path | None:
+        if self._runtime_context is not None:
+            return self._runtime_context.shell_audit_path
+        return None
 
-        Strategy:
-        1. If a process-level run directory already exists (set by the
-           main logger), place ``shell_audit.log`` in that same directory
-           so that agent log and audit log live side-by-side::
+    def _is_current_run(self) -> bool:
+        return _context_key(get_current_run_context()) == self._runtime_key
 
-               .logs/{agent_name}/{timestamp}/shell_audit.log
-
-        2. Otherwise (standalone usage / tests with explicit *log_dir*),
-           create our own timestamp sub-directory under
-           ``{log_dir}/{agent_name}/{timestamp}/shell_audit.log``.
-        """
-        # -- try to share the run directory created by the main logger ------
-        if not self._log_dir:
-            try:
-                from src.lib.logging.logger_manager import get_current_run_log_dir
-                run_dir = get_current_run_log_dir()
-                if run_dir is not None:
-                    run_dir.mkdir(parents=True, exist_ok=True)
-                    return run_dir / "shell_audit.log"
-            except Exception:
-                pass
-
-        # -- fallback: build our own timestamp directory --------------------
-        base_dir_str = self._log_dir or C.get_nested(
-            "logging", "dir", default=".logs",
-        )
-        base_dir = Path(base_dir_str).expanduser()
-        if not base_dir.is_absolute():
-            try:
-                agent_root = Path(C.agent_root).resolve()
-            except Exception:
-                agent_root = Path.cwd().resolve()
-            base_dir = agent_root / base_dir
-        base_dir = base_dir.resolve()
-
-        safe_name = _sanitize_component(self._agent_name)
-        now = datetime.now()
-        ts = now.strftime("%Y%m%d_%H%M%S")
-
-        target_dir = base_dir / safe_name / ts
-        suffix = 1
-        while target_dir.exists():
-            target_dir = base_dir / safe_name / f"{ts}_{suffix}"
-            suffix += 1
-        target_dir.mkdir(parents=True, exist_ok=True)
-
-        return target_dir / "shell_audit.log"
+    def close(self) -> None:
+        with self._lock:
+            self._closed = True
 
     # -- core write ---------------------------------------------------------
 
@@ -327,7 +436,7 @@ class ShellAuditLogger:
         check_id: str = "",
         message: str = "",
         suggestion: str = "",
-        extra: Optional[dict] = None,
+        extra: dict | None = None,
     ) -> None:
         """Write a single structured entry to the audit log file."""
         if not self.enabled:
@@ -335,31 +444,37 @@ class ShellAuditLogger:
         if event_type != EVENT_POLICY_SNAPSHOT:
             self.log_effective_policy()
 
-        now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-        lines = [
-            f"[{now}] [{event_type}] agent={self._agent_name}",
-        ]
-        # Truncate very long commands for readability
         cmd_display = command if len(command) <= 500 else command[:497] + "..."
-        lines.append(f"  command: {cmd_display}")
-
+        event: dict[str, Any] = {
+            "timestamp": datetime.now(UTC).isoformat(),
+            "event_type": event_type,
+            "agent": self._agent_name,
+            "command": cmd_display,
+        }
         if check_id:
-            lines.append(f"  check: {check_id}")
+            event["check_id"] = check_id
         if message:
-            lines.append(f"  message: {message}")
+            event["message"] = message
         if suggestion:
-            lines.append(f"  suggestion: {suggestion}")
+            event["suggestion"] = suggestion
         if extra:
-            for k, v in extra.items():
-                lines.append(f"  {k}: {v}")
-
-        lines.append("")  # blank separator between entries
-        entry = "\n".join(lines) + "\n"
+            event["details"] = extra
+        entry = json.dumps(event, ensure_ascii=False, separators=(",", ":"))
 
         with self._lock:
             try:
-                with open(self.file_path, "a", encoding="utf-8") as f:
-                    f.write(entry)
+                if self._closed or not self._is_current_run() or self._sink is None:
+                    return
+                record = logging.LogRecord(
+                    name="agentloom.shell.audit",
+                    level=logging.INFO,
+                    pathname=__file__,
+                    lineno=0,
+                    msg=entry,
+                    args=(),
+                    exc_info=None,
+                )
+                self._sink.emit(record)
             except OSError as exc:
                 # Never let audit logging crash the shell pipeline
                 logger.debug(
@@ -621,11 +736,12 @@ class ShellAuditLogger:
             message=f"exit_code={exit_code}, duration={duration:.2f}s",
         )
 
-    def get_log_path(self) -> Optional[str]:
+    def get_log_path(self) -> str | None:
         """Return the audit log file path, or None if audit is disabled."""
-        if not self.enabled:
+        if not self.enabled or not self._is_current_run():
             return None
-        return str(self.file_path)
+        path = self._resolve_path()
+        return str(path) if path is not None else None
 
 
 # ---------------------------------------------------------------------------
@@ -633,39 +749,58 @@ class ShellAuditLogger:
 # ---------------------------------------------------------------------------
 
 def get_shell_audit_logger(
-    agent_name: Optional[str] = None,
-    log_dir: Optional[str] = None,
+    agent_name: str | None = None,
 ) -> ShellAuditLogger:
     """Get or create the audit logger for the current agent.
 
-    If *agent_name* is not provided, it is resolved from the current
-    task context (``get_current_agent_name()``).  Falls back to
-    ``"_global"`` when no agent context is available.
+    If *agent_name* is not provided, it is resolved from the explicit
+    execution ContextVar snapshot. Falls back to ``"_global"`` when no
+    agent context is bound; process-global trace fallbacks are never used.
 
-    Instances are cached per agent name for the lifetime of the process.
+    Instances are cached per agent name only inside the current run context
+    and are closed when that run's logger scope exits.
 
     Args:
         agent_name: Override the agent name (useful for testing).
-        log_dir: Override the base log directory (useful for testing).
-
     Returns:
         A :class:`ShellAuditLogger` bound to the resolved agent name.
     """
     if agent_name is None:
         try:
-            from src.trace import get_current_agent_name
-            agent_name = get_current_agent_name() or "_global"
+            from src.trace import capture_explicit_execution_context
+
+            agent_name = capture_explicit_execution_context().agent_name or "_global"
         except Exception:
             agent_name = "_global"
 
-    with _CACHE_LOCK:
-        key = f"{agent_name}:{log_dir or ''}"
-        if key not in _AUDIT_LOGGERS:
-            _AUDIT_LOGGERS[key] = ShellAuditLogger(agent_name, log_dir=log_dir)
-        return _AUDIT_LOGGERS[key]
+    runtime_context = get_current_run_context()
+    runtime_key = _context_key(runtime_context)
+    if runtime_key is None:
+        # A no-sink logger preserves the public API for standalone validation
+        # while guaranteeing that no file descriptor or path is created.
+        return ShellAuditLogger(agent_name, runtime_context=None)
+
+    assert runtime_context is not None
+    scope = _scope_for_context(runtime_context)
+
+    audit_logger = scope.loggers.get(agent_name)
+    if audit_logger is None:
+        audit_logger = ShellAuditLogger(
+            agent_name,
+            runtime_context=runtime_context,
+        )
+        scope.loggers[agent_name] = audit_logger
+    return audit_logger
+
+
+def close_current_shell_audit_loggers() -> None:
+    """Close and forget all audit sinks owned by the current run context."""
+    scope = _CURRENT_AUDIT_SCOPE.get()
+    if scope is not None:
+        _close_scope(scope)
+    _CURRENT_AUDIT_SCOPE.set(None)
 
 
 def reset_audit_loggers() -> None:
-    """Clear the cached audit logger instances (for testing only)."""
-    with _CACHE_LOCK:
-        _AUDIT_LOGGERS.clear()
+    """Testing alias for closing the current run-scoped audit cache."""
+    close_current_shell_audit_loggers()

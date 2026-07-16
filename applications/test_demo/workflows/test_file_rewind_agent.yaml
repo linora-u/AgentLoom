@@ -12,7 +12,8 @@ description: |
   - Step 3: Edit original.txt again (second modification)
   - Step 4: Verify the file contains the third version of content
   - Step 5: Report that all edits completed — the test harness will
-            verify that file-history backups exist in .logs/
+            verify that file-history backups exist under
+            .agentloom/checkpoints/test_demo/<task_id>/file-history/
 
 model_type: "powerful"
 tool_call_type: "code_act"

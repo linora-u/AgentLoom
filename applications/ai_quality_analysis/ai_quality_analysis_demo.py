@@ -23,7 +23,7 @@ from src.workflows.workflow_manager import get_supervisor_agent_yaml_path
 
 def run_ai_quality_analysis(
     project_path: str = ".",
-    log_to_file: bool = False,
+    file_logging: bool | None = None,
     resume: str | None = None,
 ):
     """
@@ -31,7 +31,7 @@ def run_ai_quality_analysis(
 
     Args:
         project_path: Path to the project directory to analyze.
-        log_to_file:  Whether to write logs to a file.
+        file_logging: Per-run file logging override. ``None`` follows global config.
         resume:       Resume from a checkpoint task ID.
     """
     from src.runner import run_app
@@ -61,7 +61,7 @@ def run_ai_quality_analysis(
     try:
         run_app(
             str(yaml_path),
-            log_to_file=log_to_file,
+            file_logging=file_logging,
             resume_task_id=resume,
         )
         return True
@@ -79,7 +79,7 @@ def run_ai_quality_analysis(
 
 def cli_run_ai_quality_analysis(
     project_path: str = ".",
-    log_to_file: bool = False,
+    file_logging: bool | None = None,
     resume: str | None = None,
 ):
     """
@@ -87,20 +87,24 @@ def cli_run_ai_quality_analysis(
 
     Args:
         project_path: Path to the project directory to analyze.
-        log_to_file:  Whether to log to file (e.g., --log-to-file).
+        file_logging: Per-run file logging override. ``None`` follows global config.
         resume:       Resume from a checkpoint task ID (e.g., --resume task_xxx).
 
     Examples:
         # Analyze a specific project
         python ai_quality_analysis_demo.py /path/to/project
 
-        # With logging
-        python ai_quality_analysis_demo.py /path/to/project --log-to-file
+        # Disable this attempt's file runtime log
+        python ai_quality_analysis_demo.py /path/to/project --file-logging=false
 
         # Resume after interruption
         python ai_quality_analysis_demo.py /path/to/project --resume task_xxx
     """
-    success = run_ai_quality_analysis(project_path, log_to_file=log_to_file, resume=resume)
+    success = run_ai_quality_analysis(
+        project_path,
+        file_logging=file_logging,
+        resume=resume,
+    )
     if not success:
         print("\n❌ Code review execution failed")
         sys.exit(1)

@@ -8,6 +8,8 @@ _LAZY_EXPORTS = {
     "get_default_toolsets": (".config", "get_default_toolsets"),
     "get_model_config": (".config", "get_model_config"),
     "RootSettings": (".config_validation", "RootSettings"),
+    "LoggingSettings": (".config_validation", "LoggingSettings"),
+    "RuntimeSettings": (".config_validation", "RuntimeSettings"),
     "normalize_tool_access_control_section": (
         ".config_validation",
         "normalize_tool_access_control_section",
@@ -37,8 +39,10 @@ def __dir__() -> list[str]:
 __all__ = [
     "C",
     "LayeredConfigBuilder",
+    "LoggingSettings",
     "OverlaySpec",
     "RootSettings",
+    "RuntimeSettings",
     "build_effective_agent_config",
     "get_code_agent_config",
     "get_config",

@@ -6,6 +6,8 @@ from multiple worker threads do not cause data loss or corruption.
 """
 from __future__ import annotations
 
+import contextvars
+import json
 import threading
 
 import pytest
@@ -20,14 +22,22 @@ from src.lib.smolagents.hooks.types import HookEvent
 @pytest.fixture
 def cm(tmp_path):
     """Create a CheckpointManager with a temp base dir."""
-    return CheckpointManager("test_supervisor", base_dir=tmp_path)
+    return CheckpointManager(
+        "test_supervisor",
+        checkpoints_root=tmp_path,
+        run_id="run_test",
+    )
 
 
-class TestCoordinatorFallback:
-    """Tests for tool-executor contexts that do not inherit ContextVar state."""
+class TestCoordinatorContext:
+    """The coordinator is visible only through explicit ContextVar propagation."""
 
-    def test_current_visible_without_context_copy_until_deactivated(self, tmp_path):
-        cm = CheckpointManager("test_supervisor", base_dir=tmp_path)
+    def test_current_requires_context_copy_and_clears_on_deactivate(self, tmp_path):
+        cm = CheckpointManager(
+            "test_supervisor",
+            checkpoints_root=tmp_path,
+            run_id="run_test",
+        )
         coord = CheckpointCoordinator.activate(cm, "task_ctx", "task text")
 
         try:
@@ -40,7 +50,18 @@ class TestCoordinatorFallback:
             thread.start()
             thread.join(timeout=5)
 
-            assert seen == [coord]
+            assert seen == [None]
+
+            propagated_context = contextvars.copy_context()
+            seen_with_context = []
+            thread = threading.Thread(
+                target=propagated_context.run,
+                args=(lambda: seen_with_context.append(CheckpointCoordinator.current()),),
+            )
+            thread.start()
+            thread.join(timeout=5)
+
+            assert seen_with_context == [coord]
 
             CheckpointCoordinator.deactivate(coord)
             seen_after = []
@@ -55,7 +76,11 @@ class TestCoordinatorFallback:
             CheckpointCoordinator.deactivate(coord)
 
     def test_register_file_history_hook_uses_agent_hook_manager(self, tmp_path):
-        cm = CheckpointManager("test_supervisor", base_dir=tmp_path)
+        cm = CheckpointManager(
+            "test_supervisor",
+            checkpoints_root=tmp_path,
+            run_id="run_test",
+        )
         coord = CheckpointCoordinator.activate(cm, "task_ctx", "task text")
         fh = FileHistoryManager(tmp_path / "fh")
         hook_manager = HookManager()
@@ -171,6 +196,277 @@ class TestTreeLock:
         assert sorted(indexes) == list(range(worker_count))
         calls = cm.load_task_tree(task_id)["workers"]["same_worker"]
         assert [c["call_index"] for c in calls] == list(range(worker_count))
+
+    def test_concurrent_resume_claims_are_unique_across_managers(self, tmp_path):
+        """One run attempt claims each matching unfinished call at most once."""
+        task_id = "task_worker_resume_claim_race"
+        initial = CheckpointManager(
+            "test_supervisor",
+            checkpoints_root=tmp_path,
+            run_id="run_initial",
+        )
+        assert initial.record_worker_started(
+            task_id,
+            "same_worker",
+            input_hash="same-hash",
+            task_input="first",
+        ) == 0
+        assert initial.record_worker_started(
+            task_id,
+            "same_worker",
+            input_hash="same-hash",
+            task_input="second",
+        ) == 1
+
+        task_dir = tmp_path / task_id
+        managers = [
+            CheckpointManager(
+                "test_supervisor",
+                checkpoint_dir=task_dir,
+                run_id="run_resume",
+            )
+            for _ in range(2)
+        ]
+        barrier = threading.Barrier(2)
+        indexes: list[int] = []
+        errors: list[Exception] = []
+        result_lock = threading.Lock()
+
+        def claim(manager: CheckpointManager) -> None:
+            try:
+                barrier.wait(timeout=5)
+                index = manager.record_worker_started(
+                    task_id,
+                    "same_worker",
+                    input_hash="same-hash",
+                    task_input="resumed",
+                    reuse_incomplete=True,
+                )
+                with result_lock:
+                    indexes.append(index)
+            except Exception as exc:
+                with result_lock:
+                    errors.append(exc)
+
+        threads = [threading.Thread(target=claim, args=(manager,)) for manager in managers]
+        for thread in threads:
+            thread.start()
+        for thread in threads:
+            thread.join(timeout=10)
+
+        assert not errors
+        assert sorted(indexes) == [0, 1]
+        tree = managers[0].load_task_tree(task_id)
+        assert [
+            call["attempt_run_id"] for call in tree["workers"]["same_worker"]
+        ] == ["run_resume", "run_resume"]
+        events = [
+            json.loads(line)
+            for line in (task_dir / "task_events.jsonl")
+            .read_text(encoding="utf-8")
+            .splitlines()
+        ]
+        claim_events = [
+            event for event in events if event.get("type") == "worker_call_resume_claimed"
+        ]
+        assert [event["call_index"] for event in claim_events] == [0, 1]
+        assert {event["run_id"] for event in claim_events} == {"run_resume"}
+
+        # Claims belong to one attempt only.  A later resume can reclaim both
+        # calls in the original call_index order after the previous run dies.
+        later = CheckpointManager(
+            "test_supervisor",
+            checkpoint_dir=task_dir,
+            run_id="run_later",
+        )
+        assert [
+            later.record_worker_started(
+                task_id,
+                "same_worker",
+                input_hash="same-hash",
+                task_input="resumed again",
+                reuse_incomplete=True,
+            )
+            for _ in range(2)
+        ] == [0, 1]
+
+    def test_fresh_prepare_never_reuses_completed_result(self, tmp_path):
+        task_id = "task_fresh_does_not_cache"
+        initial = CheckpointManager(
+            "test_supervisor",
+            checkpoints_root=tmp_path,
+            run_id="run_initial",
+        )
+        call_index = initial.record_worker_started(
+            task_id,
+            "worker",
+            input_hash="same",
+            task_input="first",
+        )
+        initial.record_worker_finished(
+            task_id,
+            "worker",
+            call_index=call_index,
+            status="completed",
+            result="old-result",
+        )
+        fresh = CheckpointManager(
+            "test_supervisor",
+            checkpoint_dir=tmp_path / task_id,
+            run_id="run_fresh",
+        )
+
+        preparation = fresh.prepare_worker_call(
+            task_id,
+            "worker",
+            input_hash="same",
+            task_input="second",
+            resume=False,
+        )
+
+        assert preparation.should_execute is True
+        assert preparation.call_index == 1
+
+    @pytest.mark.parametrize("cached_result", ["", None])
+    def test_resume_prioritizes_incomplete_then_claims_falsey_cache(
+        self,
+        tmp_path,
+        cached_result,
+    ):
+        task_id = f"task_mixed_{'none' if cached_result is None else 'empty'}"
+        initial = CheckpointManager(
+            "test_supervisor",
+            checkpoints_root=tmp_path,
+            run_id="run_initial",
+        )
+        completed = initial.record_worker_started(
+            task_id,
+            "worker",
+            input_hash="same",
+            task_input="completed",
+        )
+        initial.record_worker_finished(
+            task_id,
+            "worker",
+            call_index=completed,
+            status="completed",
+            result=cached_result,
+        )
+        interrupted = initial.record_worker_started(
+            task_id,
+            "worker",
+            input_hash="same",
+            task_input="interrupted",
+        )
+        initial.record_worker_finished(
+            task_id,
+            "worker",
+            call_index=interrupted,
+            status="interrupted",
+        )
+        resumed = CheckpointManager(
+            "test_supervisor",
+            checkpoint_dir=tmp_path / task_id,
+            run_id="run_resume",
+        )
+
+        execute = resumed.prepare_worker_call(
+            task_id,
+            "worker",
+            input_hash="same",
+            task_input="retry",
+            resume=True,
+        )
+        cached = resumed.prepare_worker_call(
+            task_id,
+            "worker",
+            input_hash="same",
+            task_input="replay",
+            resume=True,
+        )
+
+        assert (execute.call_index, execute.should_execute) == (1, True)
+        assert (cached.call_index, cached.should_execute) == (0, False)
+        assert cached.cached_result == cached_result
+        calls = resumed.load_task_tree(task_id)["workers"]["worker"]
+        assert calls[0]["status"] == "completed"
+        assert calls[0]["cached_claim_run_id"] == "run_resume"
+        assert calls[1]["attempt_run_id"] == "run_resume"
+
+    def test_concurrent_mixed_same_hash_prepare_is_one_to_one(self, tmp_path):
+        task_id = "task_atomic_mixed_prepare"
+        initial = CheckpointManager(
+            "test_supervisor",
+            checkpoints_root=tmp_path,
+            run_id="run_initial",
+        )
+        completed = initial.record_worker_started(
+            task_id,
+            "worker",
+            input_hash="same",
+            task_input="completed",
+        )
+        initial.record_worker_finished(
+            task_id,
+            "worker",
+            call_index=completed,
+            status="completed",
+            result="cached",
+        )
+        interrupted = initial.record_worker_started(
+            task_id,
+            "worker",
+            input_hash="same",
+            task_input="interrupted",
+        )
+        initial.record_worker_finished(
+            task_id,
+            "worker",
+            call_index=interrupted,
+            status="interrupted",
+        )
+        managers = [
+            CheckpointManager(
+                "test_supervisor",
+                checkpoint_dir=tmp_path / task_id,
+                run_id="run_resume",
+            )
+            for _ in range(2)
+        ]
+        barrier = threading.Barrier(2)
+        preparations = []
+        errors = []
+        result_lock = threading.Lock()
+
+        def prepare(manager):
+            try:
+                barrier.wait(timeout=5)
+                result = manager.prepare_worker_call(
+                    task_id,
+                    "worker",
+                    input_hash="same",
+                    task_input="resume",
+                    resume=True,
+                )
+                with result_lock:
+                    preparations.append(result)
+            except Exception as exc:
+                with result_lock:
+                    errors.append(exc)
+
+        threads = [threading.Thread(target=prepare, args=(manager,)) for manager in managers]
+        for thread in threads:
+            thread.start()
+        for thread in threads:
+            thread.join(timeout=10)
+
+        assert not errors
+        assert sorted(
+            (item.call_index, item.should_execute, item.cached_result)
+            for item in preparations
+        ) == [(0, False, "cached"), (1, True, None)]
+        calls = managers[0].load_task_tree(task_id)["workers"]["worker"]
+        assert len(calls) == 2
 
     def test_worker_finish_updates_only_matching_call(self, cm):
         """Finishing one worker call does not overwrite sibling calls."""

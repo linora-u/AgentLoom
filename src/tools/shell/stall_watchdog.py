@@ -9,13 +9,14 @@ Design aligned with Claude Code's startStallWatchdog() in
 LocalShellTask.tsx (5s poll, 45s threshold, pattern-based detection).
 """
 
-import os
 import re
 import threading
 import time
 from typing import Callable, Optional
 
 from src.lib.logging import get_logger
+from src.lib.runtime import copy_runtime_context
+from src.tools.shell.output_reader import AnchoredOutputReader
 
 logger = get_logger(__name__)
 
@@ -50,29 +51,57 @@ def _build_stall_message(task_id: str, last_line: str) -> str:
     )
 
 
-def detect_stall_prompt(task_id: str, output_path: str) -> Optional[str]:
+def detect_stall_prompt(
+    task_id: str,
+    output_path: str,
+    *,
+    output_fd: int | None = None,
+    output_reader: AnchoredOutputReader | None = None,
+) -> Optional[str]:
     """Return a stall warning if the current output tail ends in a prompt."""
-    tail = _read_tail(output_path)
-    if not tail:
-        return None
+    owned_reader = None
+    reader = output_reader
+    if reader is None:
+        try:
+            if output_fd is None:
+                owned_reader = AnchoredOutputReader.from_path(output_path)
+            else:
+                owned_reader = AnchoredOutputReader.from_fd(
+                    output_fd,
+                    path=output_path,
+                )
+        except OSError:
+            return None
+        reader = owned_reader
 
-    last_line = tail.rstrip().rsplit("\n", 1)[-1]
-    if _matches_prompt(last_line):
-        return _build_stall_message(task_id, last_line)
-    return None
+    try:
+        tail = _read_tail_from_reader(reader)
+        if not tail:
+            return None
+
+        last_line = tail.rstrip().rsplit("\n", 1)[-1]
+        if _matches_prompt(last_line):
+            return _build_stall_message(task_id, last_line)
+        return None
+    finally:
+        if owned_reader is not None:
+            owned_reader.close()
 
 
 def _read_tail(output_path: str) -> str:
     """Read the last _TAIL_BYTES from the output file."""
     try:
-        with open(output_path, "rb") as f:
-            f.seek(0, 2)
-            size = f.tell()
-            f.seek(max(0, size - _TAIL_BYTES))
-            data = f.read()
-        return data.decode(errors="replace")
-    except (OSError, IOError):
+        reader = AnchoredOutputReader.from_path(output_path)
+    except OSError:
         return ""
+    try:
+        return _read_tail_from_reader(reader)
+    finally:
+        reader.close()
+
+
+def _read_tail_from_reader(reader: AnchoredOutputReader) -> str:
+    return reader.read_tail(_TAIL_BYTES).decode(errors="replace")
 
 
 def _matches_prompt(line: str) -> bool:
@@ -103,12 +132,28 @@ class StallWatchdog:
         poll_interval: float = 5.0,
         stall_threshold: float = 45.0,
         on_stall: Optional[Callable[[str], None]] = None,
+        output_reader: AnchoredOutputReader | None = None,
+        output_fd: int | None = None,
     ):
         self._task_id = task_id
         self._output_path = output_path
         self._poll_interval = poll_interval
         self._stall_threshold = stall_threshold
         self._on_stall = on_stall
+        self._owns_output_reader = output_reader is None
+        if output_reader is not None:
+            self._output_reader = output_reader
+        else:
+            try:
+                if output_fd is None:
+                    self._output_reader = AnchoredOutputReader.from_path(output_path)
+                else:
+                    self._output_reader = AnchoredOutputReader.from_fd(
+                        output_fd,
+                        path=output_path,
+                    )
+            except OSError:
+                self._output_reader = None
 
         self._stopped = False
         self._thread: Optional[threading.Thread] = None
@@ -117,8 +162,10 @@ class StallWatchdog:
     def start(self) -> None:
         """Start the polling thread."""
         self._stopped = False
+        runtime_context = copy_runtime_context()
         self._thread = threading.Thread(
-            target=self._poll_loop,
+            target=runtime_context.run,
+            args=(self._poll_loop,),
             daemon=True,
             name=f"stall-watchdog-{self._task_id}",
         )
@@ -127,6 +174,8 @@ class StallWatchdog:
     def stop(self) -> None:
         """Stop the watchdog (idempotent)."""
         self._stopped = True
+        if self._owns_output_reader and self._output_reader is not None:
+            self._output_reader.close()
 
     def _poll_loop(self) -> None:
         """Main polling loop — runs on a daemon thread."""
@@ -135,10 +184,11 @@ class StallWatchdog:
 
         while not self._stopped:
             try:
-                if os.path.exists(self._output_path):
-                    current_size = os.path.getsize(self._output_path)
-                else:
-                    current_size = 0
+                reader = self._output_reader
+                if reader is None:
+                    self._sleep(self._poll_interval)
+                    continue
+                current_size = reader.size() if reader is not None else 0
 
                 if current_size > last_size:
                     last_size = current_size
@@ -153,9 +203,13 @@ class StallWatchdog:
                     continue
 
                 # Output has been stalled long enough — check for prompt.
-                message = detect_stall_prompt(self._task_id, self._output_path)
+                message = detect_stall_prompt(
+                    self._task_id,
+                    self._output_path,
+                    output_reader=reader,
+                )
                 if not message:
-                    tail = _read_tail(self._output_path)
+                    tail = _read_tail_from_reader(reader) if reader is not None else ""
                     if not tail:
                         # No output yet — reset and keep watching.
                         last_growth = time.monotonic()
@@ -167,7 +221,7 @@ class StallWatchdog:
                     self._sleep(self._poll_interval)
                     continue
 
-                last_line = _read_tail(self._output_path).rstrip().rsplit("\n", 1)[-1]
+                last_line = _read_tail_from_reader(reader).rstrip().rsplit("\n", 1)[-1] if reader is not None else ""
                 self.stall_message = message
                 if self._on_stall is not None:
                     try:
@@ -181,6 +235,8 @@ class StallWatchdog:
                 )
                 # One-shot: stop after detection.
                 self._stopped = True
+                if self._owns_output_reader and reader is not None:
+                    reader.close()
                 return
 
             except Exception:

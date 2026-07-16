@@ -11,17 +11,25 @@ import os
 import re
 import shlex
 import shutil
-import subprocess
 import time
 from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 from smolagents import AgentLogger
-
 from src.lib.logging import get_logger
+
 from ..hooks.hook_manager import HookManager
 from ..hooks.types import HookEvent
+from .executors import (  # noqa: F401
+    OUTPUT_PREVIEW_MAX_BYTES,
+    SUPPORTED_HOOK_ACTION_TYPE,
+    SkillOutputSnapshot,
+    SkillSubprocessCapture,
+    create_hook_executor,
+    run_skill_subprocess,
+    validate_hook,
+)
 
 # Re-export data classes so existing ``from .skills import ...`` still works.
 from .parser import (  # noqa: F401
@@ -31,11 +39,6 @@ from .parser import (  # noqa: F401
     SkillMetadata,
     build_skills_prompt,
     parse_skill_file,
-)
-from .executors import (  # noqa: F401
-    SUPPORTED_HOOK_ACTION_TYPE,
-    create_hook_executor,
-    validate_hook,
 )
 
 SKILL_INLINE_MAX_CHARS = 18000
@@ -393,7 +396,6 @@ class SkillsManager:
 
         base_dir = Path(skill.file_path).resolve().parent
         workspace_dir = _skill_workspace_dir(name)
-        workspace_dir.mkdir(parents=True, exist_ok=True)
 
         cwd_normalized = (cwd or "skill").strip().lower()
         if cwd_normalized == "skill":
@@ -412,9 +414,7 @@ class SkillsManager:
         if args:
             final_command = f"{final_command} {args}"
 
-        run_id = datetime.now().strftime("%Y%m%d_%H%M%S_%f")
-        audit_dir = workspace_dir / "runs" / run_id
-        audit_dir.mkdir(parents=True, exist_ok=True)
+        audit_dir = _new_skill_execution_dir(name)
 
         effective_allow_network = bool(allow_network) and bool(skill.metadata.allow_network)
         blocked_reason = None
@@ -447,53 +447,60 @@ class SkillsManager:
             return audit
 
         started = time.monotonic()
+        capture: SkillSubprocessCapture | None = None
+        process_result = None
+        execution_error: Exception | None = None
+        snapshot = SkillOutputSnapshot("", "", 0, 0, False, False)
         try:
-            completed = subprocess.run(
+            capture = SkillSubprocessCapture(audit_dir)
+            process_result = run_skill_subprocess(
                 final_command,
                 cwd=str(run_cwd),
                 env=env,
-                shell=True,
-                text=True,
-                capture_output=True,
+                stdout_fd=capture.stdout_fd,
+                stderr_fd=capture.stderr_fd,
                 timeout=timeout,
             )
-            stdout = completed.stdout or ""
-            stderr = completed.stderr or ""
+        except Exception as exc:
+            execution_error = exc
+        finally:
+            if capture is not None:
+                try:
+                    snapshot = capture.snapshot(
+                        stdout_limit=OUTPUT_PREVIEW_MAX_BYTES,
+                        stderr_limit=OUTPUT_PREVIEW_MAX_BYTES,
+                    )
+                finally:
+                    capture.close()
+
+        timed_out = process_result.timed_out if process_result is not None else False
+        audit.update(
+            {
+                "blocked": False,
+                "timed_out": timed_out,
+                "returncode": process_result.returncode if process_result is not None else None,
+                "duration_seconds": round(time.monotonic() - started, 3),
+                "stdout_path": str(audit_dir / "stdout.txt"),
+                "stderr_path": str(audit_dir / "stderr.txt"),
+                "stdout_bytes": snapshot.stdout_bytes,
+                "stderr_bytes": snapshot.stderr_bytes,
+                "stdout_preview_truncated": snapshot.stdout_truncated,
+                "stderr_preview_truncated": snapshot.stderr_truncated,
+                "stdout_preview": snapshot.stdout,
+                "stderr_preview": snapshot.stderr,
+            }
+        )
+        if execution_error is not None:
             audit.update(
                 {
-                    "blocked": False,
-                    "timed_out": False,
-                    "returncode": completed.returncode,
-                    "duration_seconds": round(time.monotonic() - started, 3),
-                    "stdout_path": str(audit_dir / "stdout.txt"),
-                    "stderr_path": str(audit_dir / "stderr.txt"),
-                    "stdout_preview": stdout[:4000],
-                    "stderr_preview": stderr[:4000],
+                    "execution_error": type(execution_error).__name__,
+                    "execution_error_message": str(execution_error),
                 }
             )
-            _write_audit(audit_dir, audit, stdout, stderr)
-            return audit
-        except subprocess.TimeoutExpired as exc:
-            stdout = exc.stdout or ""
-            stderr = exc.stderr or ""
-            if isinstance(stdout, bytes):
-                stdout = stdout.decode("utf-8", errors="replace")
-            if isinstance(stderr, bytes):
-                stderr = stderr.decode("utf-8", errors="replace")
-            audit.update(
-                {
-                    "blocked": False,
-                    "timed_out": True,
-                    "returncode": None,
-                    "duration_seconds": round(time.monotonic() - started, 3),
-                    "stdout_path": str(audit_dir / "stdout.txt"),
-                    "stderr_path": str(audit_dir / "stderr.txt"),
-                    "stdout_preview": stdout[:4000],
-                    "stderr_preview": stderr[:4000],
-                }
-            )
-            _write_audit(audit_dir, audit, stdout, stderr)
-            return audit
+        _write_audit_record(audit_dir, audit)
+        if execution_error is not None:
+            raise execution_error
+        return audit
 
     # -- Eager support ------------------------------------------------------
 
@@ -766,24 +773,19 @@ def _needs_shell(base_dir: Path) -> bool:
 
 
 def _skill_workspace_dir(skill_name: str) -> Path:
-    safe = "".join(ch if ch.isalnum() or ch in "._-" else "_" for ch in skill_name).strip("._")
-    if not safe:
-        safe = "skill"
-    try:
-        from src.lib.logging.logger_manager import get_current_run_log_dir
+    from src.lib.runtime import get_current_run_context
 
-        run_dir = get_current_run_log_dir()
-    except Exception:
-        run_dir = None
-    if run_dir is not None:
-        return Path(run_dir) / "skill_runs" / safe
-    try:
-        from src.lib.config import C
+    runtime_context = get_current_run_context(required=True)
+    assert runtime_context is not None
+    return runtime_context.prepare_skill_workspace(skill_name)
 
-        root = Path(C.agent_root).resolve()
-    except Exception:
-        root = Path.cwd().resolve()
-    return root / ".runtime" / "skill_runs" / safe
+
+def _new_skill_execution_dir(skill_name: str) -> Path:
+    from src.lib.runtime import get_current_run_context
+
+    runtime_context = get_current_run_context(required=True)
+    assert runtime_context is not None
+    return runtime_context.new_skill_execution_dir(skill_name)
 
 
 def _substitute_skill_placeholders(command: str, *, skill_dir: Path, workspace_dir: Path) -> str:
@@ -870,9 +872,24 @@ def _blocked_network_reason(command: str) -> Optional[str]:
 
 
 def _write_audit(audit_dir: Path, audit: Dict[str, Any], stdout: str, stderr: str) -> None:
-    (audit_dir / "stdout.txt").write_text(stdout, encoding="utf-8")
-    (audit_dir / "stderr.txt").write_text(stderr, encoding="utf-8")
-    (audit_dir / "audit.json").write_text(
+    from src.lib.runtime import get_current_run_context
+
+    runtime_context = get_current_run_context(required=True)
+    assert runtime_context is not None
+    runtime_context.atomic_write_run_file(audit_dir / "stdout.txt", stdout)
+    runtime_context.atomic_write_run_file(audit_dir / "stderr.txt", stderr)
+    runtime_context.atomic_write_run_file(
+        audit_dir / "audit.json",
         json.dumps(audit, ensure_ascii=False, indent=2),
-        encoding="utf-8",
+    )
+
+
+def _write_audit_record(audit_dir: Path, audit: Dict[str, Any]) -> None:
+    from src.lib.runtime import get_current_run_context
+
+    runtime_context = get_current_run_context(required=True)
+    assert runtime_context is not None
+    runtime_context.atomic_write_run_file(
+        audit_dir / "audit.json",
+        json.dumps(audit, ensure_ascii=False, indent=2),
     )

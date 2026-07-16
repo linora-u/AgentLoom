@@ -1,6 +1,6 @@
 """Unified logging helpers for AgentLoom."""
 
-from .agent_logger import EnhancedAgentLogger, AgentLoomLogLevel
+from .agent_logger import AgentLoomLogLevel, EnhancedAgentLogger
 from .logger_manager import (
     LazyLoggerAdapter,
     LoggerAdapter,
@@ -8,18 +8,15 @@ from .logger_manager import (
     LoggingConfigOverlay,
     NullLoggerBackend,
     UnifiedLogger,
-    build_default_log_filename,
-    build_run_timestamp_dirname,
+    bind_logger_backend,
     build_logger_backend_from_config,
-    get_current_run_log_dir,
-    get_global_logger,
-    get_or_create_process_log_path,
+    close_run_logger,
     get_active_log_file_path,
+    get_global_logger,
     get_logger,
-    initialize_logging,
     initialize_global_logger_once,
+    initialize_run_logger,
     merge_logging_config,
-    resolve_log_file_path,
     resolve_logger,
     set_global_logger,
     validate_logging_config,
@@ -34,19 +31,16 @@ __all__ = [
     "LoggingConfigBuilder",
     "LoggingConfigOverlay",
     "NullLoggerBackend",
-    "initialize_logging",
+    "bind_logger_backend",
+    "close_run_logger",
     "initialize_global_logger_once",
+    "initialize_run_logger",
     "get_logger",
     "resolve_logger",  # backward-compatible alias for get_logger
     "set_global_logger",
     "get_global_logger",
-    "get_or_create_process_log_path",
-    "build_default_log_filename",
-    "build_run_timestamp_dirname",
     "build_logger_backend_from_config",
-    "get_current_run_log_dir",
     "merge_logging_config",
     "validate_logging_config",
-    "resolve_log_file_path",
     "get_active_log_file_path",
 ]

@@ -2,12 +2,17 @@
 
 import pytest
 
+from src.lib.config.config import (
+    _reject_application_global_only_keys,
+    extract_workflow_overlay,
+)
 from src.lib.config.config_validation import (
+    LoggingSettings,
     RootSettings,
+    RuntimeSettings,
     ToolAccessControlSettings,
     validate_system_snapshot,
 )
-
 
 # ===========================================================================
 # tool_metadata field
@@ -113,6 +118,37 @@ class TestMissingFieldsDefault:
         assert settings.context_engine == {}
         assert settings.tools == []
 
+    def test_runtime_storage_defaults_are_bounded(self):
+        settings = RootSettings()
+        assert settings.runtime == RuntimeSettings(root_dir=".agentloom")
+        assert settings.logging == LoggingSettings()
+        assert settings.logging.max_file_bytes == 25 * 1024 * 1024
+        assert settings.logging.backup_count == 3
+
+    def test_runtime_and_logging_accept_only_canonical_keys(self):
+        settings = RootSettings(
+            runtime={"root_dir": "/var/lib/agentloom"},
+            logging={
+                "level": "DEBUG",
+                "console_enabled": False,
+                "file_enabled": False,
+                "max_file_bytes": 1024,
+                "backup_count": 1,
+            },
+        )
+        assert settings.runtime.root_dir == "/var/lib/agentloom"
+        assert settings.logging.level == "DEBUG"
+        assert settings.logging.file_enabled is False
+
+    @pytest.mark.parametrize("legacy_key", ["enabled", "dir", "file_path"])
+    def test_legacy_logging_keys_are_rejected(self, legacy_key: str):
+        with pytest.raises(ValueError, match=legacy_key):
+            RootSettings(logging={legacy_key: True})
+
+    def test_automatic_runtime_cleanup_cannot_run_more_often_than_daily(self):
+        with pytest.raises(ValueError, match="greater than or equal to 24"):
+            RootSettings(runtime={"cleanup_interval_hours": 23})
+
     def test_smart_summary_defaults_true(self):
         settings = RootSettings()
         assert settings.smart_summary is True
@@ -201,3 +237,31 @@ class TestValidateSystemSnapshot:
     def test_snapshot_empty_passes(self):
         """An empty snapshot should be valid."""
         validate_system_snapshot({}, "test")
+
+    def test_snapshot_rejects_legacy_self_learning_root(self):
+        with pytest.raises(ValueError, match="self_learning.root_dir"):
+            validate_system_snapshot(
+                {"self_learning": {"root_dir": "/tmp/split-runtime"}},
+                "test",
+            )
+
+
+@pytest.mark.parametrize("key", ["runtime", "logging"])
+def test_application_config_rejects_global_only_runtime_and_logging(key: str) -> None:
+    with pytest.raises(ValueError, match=rf"global-only.*{key}"):
+        _reject_application_global_only_keys(
+            {
+                key: {"root_dir": "other"},
+                "checkpoint": {"enabled": False},
+            },
+            source_name="app/config/system.yaml",
+        )
+
+
+@pytest.mark.parametrize("key", ["runtime", "logging"])
+def test_agent_yaml_rejects_global_only_runtime_and_logging(key: str) -> None:
+    with pytest.raises(ValueError, match=rf"global-only.*{key}"):
+        extract_workflow_overlay(
+            {key: {"file_enabled": False}},
+            source_name="agent.yaml",
+        )

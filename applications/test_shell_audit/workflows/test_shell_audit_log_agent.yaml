@@ -1,5 +1,5 @@
 name: "test_shell_audit_log"
-description: "Validate shell security audit log — verify that blocked commands produce audit entries in .logs/{agent_name}/{timestamp}/shell_audit.log"
+description: "Validate shell security audit log — verify that blocked commands produce JSONL events in the current .agentloom run"
 
 model_type: "powerful"
 tool_call_type: "code_act"
@@ -7,7 +7,6 @@ tool_call_type: "code_act"
 # Tools list declares which tools this agent uses.
 tools:
   - name: "shell_tool"
-  - name: "read_file"
   - name: "glob_search"
   - name: "grep_search"
 
@@ -21,10 +20,11 @@ workflow: |
 
   You are a testing agent. Execute the harness below in one Python code block.
   Do not replace the shell commands with alternatives. The harness catches
-  expected blocked shell_tool calls, reads the real shell_audit.log, and only
+  expected blocked shell_tool calls, reads the real audit/shell.jsonl, and only
   marks rows PASS when the audit file contains the expected evidence.
 
   ```python
+  import json
   import os
 
   rows = {}
@@ -53,69 +53,71 @@ workflow: |
   expect_block("OPERATOR_REJECT", "echo hello ; echo world", "Operator not allowed: ;")
 
   audit_path = shell_tool(
-      command="ls -dt .logs/test_shell_audit_log/*/shell_audit.log | head -1",
+      command="ls -dt .agentloom/runs/test_shell_audit/run_*/audit/shell.jsonl | head -1",
       timeout=10,
   ).strip().splitlines()[0]
-  audit_content = read_file(file_path=audit_path)
+  audit_content = shell_tool(command=f"cat {audit_path}", timeout=10)
+  audit_events = []
+  for line in audit_content.splitlines():
+      try:
+          event = json.loads(line)
+      except json.JSONDecodeError:
+          continue
+      if isinstance(event, dict):
+          audit_events.append(event)
   print("AUDIT_PATH", audit_path)
   print(audit_content)
 
-  agent_log_path = shell_tool(
-      command="ls -dt .logs/test_shell_audit_log/*/test_shell_audit_log.log | head -1",
-      timeout=10,
-  ).strip().splitlines()[0]
-  same_parent = os.path.dirname(audit_path) == os.path.dirname(agent_log_path)
+  audit_run_dir = os.path.dirname(os.path.dirname(audit_path))
+  agent_log_path = os.path.join(audit_run_dir, "logs", "runtime.log")
+  same_parent = os.path.isfile(agent_log_path)
   record(
       "CO_LOCATION",
       "PASS" if same_parent else "FAIL",
       f"audit={audit_path}; agent={agent_log_path}",
   )
 
-  def find_block(command_substr):
-      lines = audit_content.splitlines()
-      for index, line in enumerate(lines):
-          if "[WHITELIST_REJECT]" not in line:
-              continue
-          end = len(lines)
-          for next_index in range(index + 1, len(lines)):
-              if "[WHITELIST_REJECT]" in lines[next_index] and "agent=test_shell_audit_log" in lines[next_index]:
-                  end = next_index
-                  break
-          block = lines[index:end]
-          text = "\n".join(block)
-          if command_substr in text:
-              return index + 1, block, text
-      return 0, [], ""
+  def find_event(command_substr):
+      for event in audit_events:
+          if (
+              event.get("event_type") == "WHITELIST_REJECT"
+              and command_substr in str(event.get("command", ""))
+          ):
+              return event
+      return None
 
-  wget_line, wget_block, wget_text = find_block("wget http://example.com")
-  operator_line, operator_block, operator_text = find_block("echo hello ; echo world")
+  wget_event = find_event("wget http://example.com")
+  operator_event = find_event("echo hello ; echo world")
 
-  wget_required = [
-      "message: Command not allowed: wget.",
-      "Allowed commands: cat, echo, find, grep, head, ls, pwd, tail, wc",
-      "allowed_commands",
-  ]
-  operator_required = [
-      "message: Operator not allowed: ;.",
-      "Allowed operators: &&, |",
-      "allowed_operators",
-  ]
+  wget_message = str((wget_event or {}).get("message", ""))
+  wget_suggestion = str((wget_event or {}).get("suggestion", ""))
+  operator_message = str((operator_event or {}).get("message", ""))
+  operator_suggestion = str((operator_event or {}).get("suggestion", ""))
 
   record(
       "WGET_AUDIT_ENTRY",
-      "PASS" if wget_text and all(item in wget_text for item in wget_required) else "FAIL",
-      f"line={wget_line}; " + " | ".join(wget_block[:8]),
+      "PASS"
+      if (
+          wget_event
+          and "Command not allowed: wget." in wget_message
+          and "Allowed commands: cat, echo, find, grep, head, ls, pwd, tail, wc" in wget_message
+          and "allowed_commands" in wget_suggestion
+      )
+      else "FAIL",
+      json.dumps(wget_event, ensure_ascii=False) if wget_event else "missing event",
   )
   record(
       "OPERATOR_AUDIT_ENTRY",
       "PASS"
       if (
-          operator_text
-          and all(item in operator_text for item in operator_required)
-          and 'allowed_commands: [";", ...]' not in operator_text
+          operator_event
+          and "Operator not allowed: ;." in operator_message
+          and "Allowed operators: &&, |" in operator_message
+          and "allowed_operators" in operator_suggestion
+          and "allowed_commands" not in operator_suggestion
       )
       else "FAIL",
-      f"line={operator_line}; " + " | ".join(operator_block[:8]),
+      json.dumps(operator_event, ensure_ascii=False) if operator_event else "missing event",
   )
 
   ordered = [
@@ -129,8 +131,8 @@ workflow: |
   overall = "PASS" if all(rows.get(name) == "PASS" for name in ordered) else "FAIL"
   summary_lines = [
       f"Overall: {overall}",
-      f"shell_audit.log: {audit_path}",
-      f"agent log: {agent_log_path}",
+      f"shell.jsonl: {audit_path}",
+      f"runtime.log: {agent_log_path}",
       "",
       "| Step | Status | Evidence |",
       "|---|---|---|",

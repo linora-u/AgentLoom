@@ -178,3 +178,24 @@ def test_build_effective_merges_app_overlay(tmp_path):
 
     # 全局基础保留
     assert config_module.C.llm.for_type("powerful").model == "openai/test-model"
+
+
+@pytest.mark.parametrize("key", ["runtime", "logging"])
+def test_build_effective_rejects_global_only_app_overlay(tmp_path, key):
+    agent_root = tmp_path / "agent"
+    config_dir = agent_root / "config"
+    app_root = agent_root / "applications" / "my_app"
+    _write_yaml(config_dir / "system.yaml", {"system": {"name": "base"}})
+    _write_yaml(config_dir / "llm.yaml", _minimal_llm_yaml())
+    _write_yaml(app_root / "config" / "system.yaml", {key: {"root_dir": "other"}})
+    yaml_file = app_root / "workflows" / "agent.yaml"
+    _write_yaml(yaml_file, {"name": "test"})
+    config_module._ACTIVE_CONFIG = config_module._load_merged_config(
+        config_dir=config_dir
+    )
+
+    with pytest.raises(ValueError, match=rf"global-only.*{key}"):
+        config_module.build_effective_agent_config(
+            {"_yaml_file_path": str(yaml_file)},
+            source_name="test",
+        )

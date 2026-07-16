@@ -25,7 +25,7 @@
 - [5.5 mcp_servers — MCP 外部工具集成](#55-mcp_servers--mcp-外部工具集成)
 - [6. execution_env — 执行环境配置](#6-execution_env--执行环境配置)
 - [6. code_agent — CodeAgent 代码执行权限](#6-code_agent--codeagent-代码执行权限)
-- [7. logging — 日志配置](#7-logging--日志配置)
+- [7. runtime 与 logging — 运行时存储与日志](#7-runtime-与-logging--运行时存储与日志)
 - [8. tools — 工具系统配置](#8-tools--工具系统配置)
 - [9. tool_access_control — 工具访问控制](#9-tool_access_control--工具访问控制)
 - [10. tool_metadata — 工具元数据配置](#10-tool_metadata--工具元数据配置)
@@ -92,13 +92,24 @@ code_agent:
   additional_functions: "*"
 
 # ============================================
+# 运行时存储与保留策略
+# ============================================
+runtime:
+  root_dir: ".agentloom"
+  successful_run_retention_days: 7
+  failed_run_retention_days: 30
+  artifact_retention_days: 3
+  cleanup_interval_hours: 24
+
+# ============================================
 # 日志配置
 # ============================================
 logging:
-  enabled: true
   level: "INFO"
-  file_path: null
-  dir: ".logs"
+  console_enabled: true
+  file_enabled: true
+  max_file_bytes: 26214400
+  backup_count: 3
 
 # ============================================
 # 默认加载 Toolsets
@@ -776,65 +787,55 @@ code_agent:
 
 ---
 
-## 7. logging — 日志配置
+## 7. runtime 与 logging — 运行时存储与日志
 
-控制系统日志的详细程度和输出位置。日志公共入口统一为 `src.lib.logging`，按"每个 Python 进程生命周期一个日志文件"管理。
+`runtime` 定义框架唯一的存储根目录和有界保留策略；`logging` 控制控制台与 run-scoped 文件 backend。Logger 状态绑定当前 run，不再复用进程全局输出路径。
 
-**YAML 路径**：`logging.*`
+这两个配置段只能写在全局 `config/system.yaml`。Application 级 `config/system.yaml` 或 Agent YAML 一旦包含任一配置段就会校验失败，避免错误位置的配置被静默忽略，让用户误以为任务发现已经移动到另一个 runtime root。
+
+隔离子进程或验证任务可设置 `AGENTLOOM_RUNTIME_ROOT`；它覆盖的是整个 canonical runtime home（runs、checkpoints、sessions、learning 与 `self_learning.db` 一起移动），不存在 self-learning 专用 root 覆盖。
+
+**YAML 路径**：`runtime.*`、`logging.*`
 
 | 参数 | 类型 | 默认值 | 必选 | 说明 |
 |------|------|--------|------|------|
-| `logging.enabled` | `bool` | `true` | ❌ 否 | 是否开启日志系统 |
-| `logging.level` | `str` | `"INFO"` | ❌ 否 | 日志过滤等级（不区分大小写） |
-| `logging.file_path` | `str` \| `null` | `null` | ❌ 否 | 指定日志文件路径。`null` 时自动生成 |
-| `logging.dir` | `str` | `".logs"` | ❌ 否 | 自动生成日志时的根目录 |
+| `runtime.root_dir` | `str` | `".agentloom"` | ❌ 否 | 框架运行时唯一根目录；相对路径从项目根解析，也支持绝对路径 |
+| `runtime.successful_run_retention_days` | `int` | `7` | ❌ 否 | 成功 run 目录保留天数 |
+| `runtime.failed_run_retention_days` | `int` | `30` | ❌ 否 | 失败/中断 run 目录保留天数 |
+| `runtime.artifact_retention_days` | `int` | `3` | ❌ 否 | 已保留 run 内原始 `artifacts/` 的保留天数 |
+| `runtime.cleanup_interval_hours` | `int` | `24` | ❌ 否 | 两次自动清理之间的最小间隔 |
+| `logging.level` | `str` \| `int` | `"INFO"` | ❌ 否 | 日志过滤等级（不区分大小写） |
+| `logging.console_enabled` | `bool` | `true` | ❌ 否 | 是否向控制台输出格式化运行日志 |
+| `logging.file_enabled` | `bool` | `true` | ❌ 否 | 是否把当前 attempt 写入 `logs/runtime.log` |
+| `logging.max_file_bytes` | `int` | `26214400` | ❌ 否 | 每个 runtime log 分段的最大字节数（25 MiB） |
+| `logging.backup_count` | `int` | `3` | ❌ 否 | runtime log 轮转备份数 |
 
-### 7.1 logging.level 详解
+### 7.1 Canonical 路径与生命周期
 
-框架使用 `LogLevelParser` 读取 `logging.level`，支持标准 `logging` 级别以及特殊值 `OFF`：
+每个 attempt 写入 `.agentloom/runs/<application_id>/<run_id>/`：
 
-| 值 | 含义 | 适用场景 |
-|----|------|----------|
-| `"DEBUG"` | 放行所有框架底层流转细节 | 排查错误、查看底层请求 |
-| `"INFO"` | **(默认)** 显示核心运行状态和 Step 提示 | 日常使用 |
-| `"WARNING"` / `"WARN"` | 屏蔽普通流转，仅暴露危险项与告警 | 简化输出 |
-| `"ERROR"` | 仅捕捉异常和错误 | 生产环境 |
-| `"CRITICAL"` | 仅捕捉严重异常 | 极度精简 |
-| `"OFF"` | 彻底关闭日志（实际设置为 `CRITICAL + 10`） | 静默模式 |
-
-此外也支持**整数值**（如 `10` = DEBUG, `20` = INFO, `30` = WARNING）。
-
-### 7.2 logging.file_path 与 logging.dir
-
-- 当 `file_path` 指定了具体路径时，当前进程全程写入该文件
-- 当 `file_path` 为 `null` 时，框架自动在 `dir` 目录下生成日志文件，命名规则为：
-  - `{logging.dir}/{app_name}/{timestamp}/{app_name}.log`
-  - 同一运行的 Shell 审计日志也会放在同一时间戳目录下：`{logging.dir}/{app_name}/{timestamp}/shell_audit.log`
-  - 若同一秒内启动多次，时间戳目录名会自动追加后缀 `_1`、`_2` 以避免覆盖
-
-**示例**：
-
-```yaml
-# 默认配置（自动日志文件）
-logging:
-  enabled: true
-  level: "INFO"
-  file_path: null
-  dir: ".logs"
-
-# 调试模式（指定日志文件）
-logging:
-  enabled: true
-  level: "DEBUG"
-  file_path: "/tmp/agent_loom_debug.log"
-
-# 静默模式
-logging:
-  enabled: true
-  level: "OFF"
+```text
+manifest.json
+logs/runtime.log[.1-.3]
+audit/shell.jsonl[.1-.2]
+artifacts/{shell,background,skills}/
 ```
 
-> **注意**：由于安全和配置隔离机制，在 Agent YAML 或应用级的 `system.yaml` 中配置 `logging` 都是无效的（会被系统过滤忽略）。所有的日志策略必须在顶层全局的 `config/system.yaml` 中统一配置。
+Shell audit 独立按每段 10 MiB、2 个备份轮转。Resume 为同一任务创建新的 `run_id` 和 run 目录，同时继续使用原 `task_id` 与 `.agentloom/checkpoints/<application_id>/<task_id>/`。可以只关闭文件日志，而不关闭 checkpoint 或 Shell audit：
+
+```bash
+loom run applications/<app>/workflows/<agent>.yaml --no-file-log
+```
+
+框架不再保留 `--log-to-file`、`logging.enabled`、`logging.dir` 或 `logging.file_path` 兼容路径。
+
+### 7.2 保留策略与存储边界
+
+自动清理最多按配置间隔执行一次；`loom clean-runtime` 可显式应用同一策略。它只删除符合条件的 run 目录或其中的 raw artifacts，永不遍历 checkpoints、`.agentloom/legacy/`、`.runtime/` 或 Application 自有 output 目录。
+
+`.runtime/` 仍是 Agent 可见的 recall/todo 工作区，与 `.agentloom/` 语义独立。`loom migrate-runtime --dry-run` 预览有效的旧 checkpoint 候选；`loom migrate-runtime --apply` 完成迁移，并把整个旧 `.logs` 归档到 `.agentloom/legacy/`。
+
+验证真实 attempt 时必须读取 `manifest.json`、`logs/runtime.log` 与 `audit/shell.jsonl`，不能只看退出码。
 
 ---
 
@@ -1224,7 +1225,7 @@ tool_output_limits:
 
 ---
 
-## 10. checkpoint — 断点续跑与心跳配置
+## 12. checkpoint — 断点续跑与心跳配置
 
 控制 Agent 任务的**断点续跑**、**心跳监控**与**崩溃检测**能力。框架默认全局开启，任何基于 AgentLoom 创建的应用均自动享有该能力，无需额外配置。
 
@@ -1237,32 +1238,43 @@ tool_output_limits:
 | `checkpoint.max_resume_age` | `int`（秒） | `604800` | ❌ 否 | checkpoint 最大保留时长（7 天）。超过该时长的 checkpoint 被视为过期，不可恢复 |
 | `checkpoint.heartbeat_interval` | `int`（秒） | `5` | ❌ 否 | 心跳文件写入频率。框架守护线程每隔该间隔将进程状态（PID、步骤数、时间戳）写入磁盘 |
 
-### 10.1 运行时目录结构
+### 12.1 运行时目录结构
 
-checkpoint 数据写入每次运行的时间戳日志目录下，与运行日志共存：
+Run 证据与 task 恢复状态在同一个 runtime root 下保持独立生命周期：
 
+```text
+.agentloom/
+├── runs/<application_id>/<run_id>/
+│   ├── manifest.json
+│   ├── logs/runtime.log[.1-.3]
+│   ├── audit/shell.jsonl[.1-.2]
+│   └── artifacts/{shell,background,skills}/
+└── checkpoints/<application_id>/<task_id>/
+    ├── task_events.jsonl
+    ├── task_tree.json
+    ├── checkpoint.json
+    ├── heartbeat.json
+    ├── workers/<worker_name>/calls/<call_index>/checkpoint.json
+    ├── context_store/
+    └── file-history/
 ```
-.logs/{supervisor_name}/{timestamp}/
-├── {supervisor_name}.log     # 运行日志
-└── checkpoints/{task_id}/
-    ├── task_tree.json        # 任务元数据（状态、worker 调用记录、创建时间）
-    ├── checkpoint.json       # Supervisor Agent 的 memory steps 快照
-    ├── heartbeat.json        # Supervisor 心跳（PID、时间戳、步骤数、状态）
-    └── workers/{worker_name}/
-        ├── checkpoint.json   # Worker Agent 每次调用的 memory 快照
-        └── heartbeat.json    # Worker 心跳（聚合所有并发调用的状态）
-```
 
-此外，在 agent 根目录下维护一个轻量索引文件 `.task_index.json`，记录 `task_id → timestamp` 的映射关系，便于 `--resume` 时快速定位 checkpoint 所在的时间戳目录。
+关键设计：
 
-### 10.2 心跳机制与崩溃检测
+- 每个 attempt 都更换 `run_id`，resume 时 `task_id` 保持不变
+- Run manifest 记录 `task_id`；checkpoint run event 和 heartbeat 记录当前 `run_id`
+- Checkpoint 直接按 Application/task canonical 路径定位，不依赖日志、`.task_index.json` 或 legacy 扫描
+- 日志关闭、轮转和 runtime retention 不会删除 checkpoint
+- `.runtime/` 仍是独立的 Agent 可见工作区；Application `output_dir` 仍由 Application 管理
+
+### 12.2 心跳机制与崩溃检测
 
 框架维护两级心跳：
 
 | 级别 | 文件位置 | Payload 字段 |
 |------|----------|--------------|
-| **Supervisor 心跳** | `{task_id}/heartbeat.json` | `pid`, `timestamp`, `timestamp_iso`, `status`, `step`, `agent_name` |
-| **Worker 心跳** | `{task_id}/workers/{name}/heartbeat.json` | `agent_name`, `pid`, `timestamp`, `calls`（各并发调用的 `status`、`step`、`started_at`、`finished_at`） |
+| **Supervisor 心跳** | `{task_id}/heartbeat.json` | `pid`, `run_id`, `timestamp`, `timestamp_iso`, `status`, `step`, `agent_name` |
+| **Worker 心跳** | `{task_id}/workers/{name}/heartbeat.json` | `agent_name`, `run_id`, `pid`, `timestamp`, `calls`（各并发调用的 `status`、`step`、`started_at`、`finished_at`） |
 
 **崩溃检测逻辑**（`HEARTBEAT_STALE_THRESHOLD = 30` 秒）：
 
@@ -1272,15 +1284,16 @@ checkpoint 数据写入每次运行的时间戳日志目录下，与运行日志
 4. 心跳时间戳超过 30 秒未刷新 → `crashed`
 5. 以上均不满足 → `running`
 
-### 10.3 断点续跑流程
+### 12.3 断点续跑流程
 
 当检测到某 `task_id` 的 checkpoint 未超过 `max_resume_age`，且状态为非正常结束（`crashed`/`interrupted`）时，框架自动：
 
 1. 从 `checkpoint.json` 恢复 Supervisor 的 memory steps（跳过已完成的思考步骤）
-2. 对每个 Worker 调用，检查 `task_tree.json` 中的 `input_hash` 缓存——若输入一致且已完成，直接返回缓存结果（跳过重复执行）
-3. 从中断点继续运行，直到任务完成
+2. 恢复 task-scoped ContextStore 与 file-history index
+3. 对每个 Worker 调用，在原 `call_index` 下恢复未完成 memory；已完成且 `input_hash` 一致时直接返回缓存结果
+4. 创建新 run 目录，使用新的 `run_id` 从中断点继续执行
 
-### 10.4 配置示例
+### 12.4 配置示例
 
 ```yaml
 # 调试场景：保留 checkpoint、缩短 resume 窗口
@@ -1310,6 +1323,8 @@ checkpoint:
 | `system.*` | `SystemSettings` | `src/lib/config/config_validation.py` |
 | `model_request_headers.*` | `ModelRequestHeadersSettings` | `src/lib/config/config_validation.py` |
 | `tool_access_control.*` | `ToolAccessControlSettings` | `src/lib/config/config_validation.py` |
+| `runtime.*` | `RuntimeSettings` | `src/lib/config/config_validation.py` |
+| `logging.*` | `LoggingSettings` | `src/lib/config/config_validation.py` |
 
 **`RootSettings` 完整字段定义**：
 
@@ -1318,6 +1333,8 @@ checkpoint:
 | `system` | `SystemSettings` | `SystemSettings()` |
 | `model_request_headers` | `ModelRequestHeadersSettings` | `ModelRequestHeadersSettings()` |
 | `tool_access_control` | `ToolAccessControlSettings` | `ToolAccessControlSettings()` |
+| `runtime` | `RuntimeSettings` | `RuntimeSettings()` |
+| `logging` | `LoggingSettings` | `LoggingSettings()` |
 | `smart_summary` | `bool` | `True` |
 | `model` | `dict[str, Any]` | `{}` |
 | `execution_env` | `dict[str, Any]` | `{}` |
@@ -1326,13 +1343,13 @@ checkpoint:
 | `tool_metadata` | `dict[str, Any]` | `{}` |
 | `tool_output_limits` | `dict[str, Any]` | `{}` |
 
-> 所有模型均设置 `extra="allow"`，允许扩展字段。`prompt` 就是这类顶层 extra key 之一，会通过 overlay 合并透传到最终配置，但不作为 `RootSettings` 的显式字段。
+> `RootSettings` 允许扩展字段，因此 `prompt` 等顶层字段仍可参与 overlay 合并。`RuntimeSettings` 与 `LoggingSettings` 刻意使用 `extra="forbid"`；已删除的 runtime/logging key 会直接校验失败，不会静默启用第二套存储路径。
 
 **容错解析工具集**：
 
 | 解析器 | 用途 | 位于 |
 |--------|------|------|
-| `BoolParser` | 兼容布尔输入归一化，实际用于 `logging.enabled`、Skill 的 `allow-scripts` / `allow-network` 解析、以及部分 LLM 配置开关 | `config_validation.py` / `src/lib/logging/logger_manager.py` / `src/lib/smolagents/agent/base_agent.py` / `src/lib/config/llm_config.py` |
+| `BoolParser` | 兼容布尔输入归一化，实际用于 `logging.console_enabled` / `logging.file_enabled`、Skill 的 `allow-scripts` / `allow-network` 解析，以及部分 LLM 配置开关 | `config_validation.py` / `src/lib/logging/logger_manager.py` / `src/lib/smolagents/agent/base_agent.py` / `src/lib/config/llm_config.py` |
 | `IntParser` | 兼容整数与旁路字符串输入，实际用于模型配置里的 `max_tokens`（支持 `"max"`） | `config_validation.py` / `src/lib/config/llm_config.py` |
 | `FloatParser` | 兼容浮点与整数字符串输入，实际用于模型配置里的 `temperature`、`retry_delay`、`max_retry_delay` | `config_validation.py` / `src/lib/config/llm_config.py` |
 | `EnumParser` | 通用枚举归一化辅助函数，当前未在 system.yaml 主链路中直接消费 | `config_validation.py` |
@@ -1390,7 +1407,9 @@ applications/my_app/
 | `system` | ✅ 支持 | ✅ 支持 | ✅ 支持 |
 | `smart_summary` | ✅ 支持 | ✅ 支持 | ✅ 支持 |
 | `skills` | ✅ 支持 | ✅ 支持 | ✅ 支持 (Agent私有) |
-| `logging` | ✅ 支持 | ❌ 忽略 | ❌ 忽略 |
+| `runtime` | ✅ 支持 | ❌ 拒绝 | ❌ 拒绝 |
+| `logging` | ✅ 支持 | ❌ 拒绝 | ❌ 拒绝 |
+| `checkpoint` | ✅ 支持 | ✅ 支持 | ❌ 忽略 |
 | `tool_access_control` | ✅ 支持 | ✅ 支持 | ✅ 支持 |
 | `execution_env` | ✅ 支持 | ✅ 支持 | ✅ 支持 |
 | `code_agent` | ✅ 支持 | ✅ 支持 | ✅ 支持 |
@@ -1416,28 +1435,3 @@ tool_access_control:
 - `system.name`：保持 `"AgentLoom"` ✅ 继承全局
 - `logging.level`：保持 `"INFO"` ✅ 继承全局
 - 所有其他字段：保持全局配置值 ✅
-
----
-
-## 12. checkpoint — 断点续跑与心跳配置
-
-控制任务的断点续跑和心跳监控行为。详细说明请参考 [checkpoint.md](checkpoint.md)。
-
-**YAML 路径**：`checkpoint.*`
-
-| 参数 | 类型 | 默认值 | 必选 | 说明 |
-|------|------|--------|------|------|
-| `checkpoint.enabled` | `bool` | `true` | ❌ 否 | 全局开关：是否启用断点续跑 |
-| `checkpoint.cleanup_on_success` | `bool` | `true` | ❌ 否 | 任务成功完成后自动删除 checkpoint 目录 |
-| `checkpoint.max_resume_age` | `int` | `604800` | ❌ 否 | checkpoint 最大保留时长（秒），默认 7 天 |
-| `checkpoint.heartbeat_interval` | `float` | `5.0` | ❌ 否 | 心跳写入频率（秒），用于崩溃检测 |
-
-**示例**：
-
-```yaml
-checkpoint:
-  enabled: true
-  cleanup_on_success: true
-  max_resume_age: 604800
-  heartbeat_interval: 5
-```

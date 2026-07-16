@@ -6,7 +6,6 @@ tool_call_type: "code_act"
 
 tools:
   - name: "shell_tool"
-  - name: "read_file"
   - name: "check_background_task"
   - name: "kill_background_task"
   - name: "list_background_tasks"
@@ -35,11 +34,12 @@ workflow: |
 
   You are a testing agent. Execute the harness below in one Python code block.
   The harness intentionally catches blocked shell_tool calls, reads the real
-  shell_audit.log, and only marks rows PASS when the audit file contains the
+  audit/shell.jsonl, and only marks rows PASS when the audit file contains the
   expected evidence. After the harness returns, use its printed summary as your
   final answer. Do not invent PASS rows.
 
   ```python
+  import json
   import os
   import re
 
@@ -114,18 +114,24 @@ workflow: |
       sandbox_reasons.append(f"sandbox inspection failed: {exc}")
 
   audit_path = shell_tool(
-      command="ls -dt .logs/test_shell_audit_signals/*/shell_audit.log | head -1",
+      command="ls -dt .agentloom/runs/test_shell_audit/run_*/audit/shell.jsonl | head -1",
       timeout=10,
   ).strip().splitlines()[0]
-  audit_content = read_file(file_path=audit_path)
+  audit_content = shell_tool(command=f"cat {audit_path}", timeout=10)
+  audit_events = []
+  for line in audit_content.splitlines():
+      try:
+          event = json.loads(line)
+      except json.JSONDecodeError:
+          continue
+      if isinstance(event, dict):
+          audit_events.append(event)
   print("AUDIT_PATH", audit_path)
   print(audit_content)
 
-  agent_log_path = shell_tool(
-      command="ls -dt .logs/test_shell_audit_signals/*/test_shell_audit_signals.log | head -1",
-      timeout=10,
-  ).strip().splitlines()[0]
-  same_parent = os.path.dirname(audit_path) == os.path.dirname(agent_log_path)
+  audit_run_dir = os.path.dirname(os.path.dirname(audit_path))
+  agent_log_path = os.path.join(audit_run_dir, "logs", "runtime.log")
+  same_parent = os.path.isfile(agent_log_path)
   record(
       "CO_LOCATION",
       "PASS" if same_parent else "FAIL",
@@ -146,27 +152,20 @@ workflow: |
   def find_evidence(event, command_substr, required=None, forbidden=None):
       required = required or []
       forbidden = forbidden or []
-      lines = audit_content.splitlines()
-      for index, line in enumerate(lines):
-          if f"[{event}]" not in line:
+      for index, candidate in enumerate(audit_events):
+          if candidate.get("event_type") != event:
               continue
-          end = len(lines)
-          for next_index in range(index + 1, len(lines)):
-              if f"agent=test_shell_audit_signals" in lines[next_index] and "] [" in lines[next_index]:
-                  end = next_index
-                  break
-          block = lines[index:end]
-          text = "\n".join(block)
+          text = json.dumps(candidate, ensure_ascii=False, sort_keys=True)
           if command_substr not in text:
               continue
           if all(item in text for item in required) and not any(item in text for item in forbidden):
-              return "PASS", f"lines {index + 1}-{index + len(block)}: " + " | ".join(block[:8])
-          return "FAIL", f"lines {index + 1}-{index + len(block)} missing required/forbidden check: " + text
-      return "FAIL", f"No [{event}] block for {command_substr}"
+              return "PASS", f"event {index + 1}: {text}"
+          return "FAIL", f"event {index + 1} missing required/forbidden check: {text}"
+      return "FAIL", f"No {event} event for {command_substr}"
 
   for name, event, command_substr, required, forbidden in [
       ("WHITELIST_COMMAND", "WHITELIST_REJECT", "wget http://example.com", ["allowed_commands"], []),
-      ("WHITELIST_OPERATOR", "WHITELIST_REJECT", "echo hello ; echo world", ["allowed_operators"], ['allowed_commands: [";", ...]']),
+      ("WHITELIST_OPERATOR", "WHITELIST_REJECT", "echo hello ; echo world", ["allowed_operators"], ["allowed_commands"]),
       ("PATH_VIOLATION", "PATH_VIOLATION", "cat /etc/passwd", ["path_validation", "include_paths"], []),
       ("SECURITY_BLOCK", "SECURITY_BLOCK", "echo $(whoami)", ["command_substitution", "command_substitution: false"], []),
       ("BACKGROUND_PROMOTION", "BACKGROUND_PROMOTION", "audit_bg_started", ["timeout_seconds", "task_id"], []),
@@ -175,7 +174,7 @@ workflow: |
       status, evidence = find_evidence(event, command_substr, required, forbidden)
       record(name, status, evidence)
 
-  if "[SANDBOX_WRAP]" in audit_content:
+  if any(event.get("event_type") == "SANDBOX_WRAP" for event in audit_events):
       status, evidence = find_evidence("SANDBOX_WRAP", "", [], [])
       record("SANDBOX_WRAP", status, evidence)
   else:
@@ -198,8 +197,8 @@ workflow: |
 
   summary_lines = [
       f"Overall: {overall}",
-      f"shell_audit.log: {audit_path}",
-      f"agent log: {agent_log_path}",
+      f"shell.jsonl: {audit_path}",
+      f"runtime.log: {agent_log_path}",
       "",
       "| Signal | Status | Evidence |",
       "|---|---|---|",

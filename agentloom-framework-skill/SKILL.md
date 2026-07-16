@@ -26,7 +26,7 @@ argument-hint: "<AgentLoom task or application path>"
 - 需要为 Application 配置或创建私有 Skill：读 [`references/configuration-surface.md`](references/configuration-surface.md) 的 Skills/Hook 配置，再读 [`references/application-generation.md`](references/application-generation.md) 的目录规范。
 - 需要配置或验证 shell 权限、allowlist、audit log、sandbox、路径安全、后台任务或 stall 检测：先读 [`references/shell-security-audit.md`](references/shell-security-audit.md)，再按需要读配置面和验证评审。
 - 需要验证是否真是多 Agent、是否能运行、问题怎么记录：读 [`references/validation-and-review.md`](references/validation-and-review.md)。
-- 修改 ContextEngine/压缩、checkpoint、resume、日志/维测、并发 Worker、文件回滚、`loom list-tasks` 或 `loom clean-tasks` 这类框架运行时能力：读 [`references/validation-and-review.md`](references/validation-and-review.md) 的“框架运行时功能验证”，并用真实 Application 跑功能路径。
+- 修改 ContextEngine/压缩、checkpoint、resume、run-scoped 日志/维测、并发 Worker、文件回滚、`loom list-tasks`、`loom clean-tasks`、`loom clean-runtime` 或 `loom migrate-runtime` 这类框架运行时能力：读 [`references/validation-and-review.md`](references/validation-and-review.md) 的“框架运行时功能验证”，并用真实 Application 跑功能路径。
 - 需要写 README 或验证记录：读 [`references/readme-template.md`](references/readme-template.md)。
 - 需要看一个按本 Skill 创建的简单多 Agent 示例：参考 `applications/feature_planner_demo/README.md`。
 - 只有当规则会跨多个 Application 复用、需要 Hook、或必须长期注入领域协议时，才创建新的私有 Skill；否则不要创建 Skill。
@@ -54,8 +54,8 @@ argument-hint: "<AgentLoom task or application path>"
 8. 框架功能不要新增兼容桥、旧字段回退或第二套路径；如果契约需要变化，直接改主路径、配置白名单、文档和验证。
 9. 设计或修改框架功能时必须先写验证矩阵：单测证明局部规则，真实 Application 证明完整运行链路；涉及上下文压缩时必须验证压缩后能按 `ContextRef` retrieve 原文，涉及 resume 时必须验证恢复后旧 ref 仍可 retrieve。
 10. 代码编写完成后不能只跑单测或 YAML 校验。必须按改动风险选择多条真实 Application 跑功能验证；现有 Application 覆盖不足时，新增最小验证 Application，保留在 `applications/<validation_app>/`，让后续 Agent 可复跑。
-11. 每个真实 Application 跑完后都要读运行日志和关键产物，再判断是否符合预期；不要只看进程退出码或 LLM final answer。验证记录至少包含：命令、退出码、final answer、关键 tool 调用/worker 调用、日志里的错误/警告、产物文件或 checkpoint/context/audit 证据。
-12. 如果用户不确定 shell 权限怎么配，先用隔离 runtime 跑真实 workflow，读取 `shell_audit.log` 里的 `[POLICY_SNAPSHOT]` 和拦截事件，再收敛 `allowed_commands`、`allowed_operators`、路径规则或 sandbox。
+11. 每个真实 Application 跑完后都要读 `.agentloom/runs/<application_id>/<run_id>/manifest.json`、`logs/runtime.log`、`audit/shell.jsonl` 和关键产物，再判断是否符合预期；不要只看进程退出码或 LLM final answer。验证记录至少包含：命令、退出码、`task_id`/`run_id`、final answer、关键 tool/worker 调用、日志错误/警告、产物或 checkpoint/context/audit 证据。
+12. 如果用户不确定 shell 权限怎么配，先用隔离 runtime 跑真实 workflow，读取当前 run 的 `audit/shell.jsonl` 里的 `[POLICY_SNAPSHOT]` 和拦截事件，再收敛 `allowed_commands`、`allowed_operators`、路径规则或 sandbox。
 13. 最后必须运行验证命令。能跑到哪一步就记录到哪一步，不把“未执行”说成“通过”。
 
 ## 命令速查
@@ -84,6 +84,13 @@ print(scan_app_structure('applications/<app_name>'))
 
 # 直接运行 YAML（首选运行入口；会触发真实模型调用和外部工具）
 .venv/bin/loom run applications/<app_name>/workflows/<app_name>_agent.yaml
+
+# 查看真实 run 证据；file logging 默认开启，单次关闭用 --no-file-log
+manifest=$(find .agentloom/runs -name manifest.json -type f -print | sort | tail -1)
+run_dir=$(dirname "$manifest")
+sed -n '1,160p' "$manifest"
+tail -n 100 "$run_dir/logs/runtime.log"
+tail -n 100 "$run_dir/audit/shell.jsonl"
 
 # 入口脚本生成链路校验
 .venv/bin/loom create applications/<app_name>/workflows/<app_name>_agent.yaml \

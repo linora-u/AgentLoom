@@ -24,7 +24,6 @@ from src.lib.checkpoint.conversation_recovery import (
     prepare_steps_for_resume,
 )
 
-
 # ---------------------------------------------------------------------------
 # Lightweight step stubs — avoid heavy smolagents import for unit tests.
 # Duck-typed to match ActionStep / TaskStep / PlanningStep attributes.

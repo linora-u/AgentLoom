@@ -1,7 +1,8 @@
 import os
 import uuid
-import tempfile
-from typing import Optional
+from pathlib import Path
+
+from src.lib.runtime import get_current_run_context
 
 
 class OutputInterceptor:
@@ -15,7 +16,11 @@ class OutputInterceptor:
     If output exceeds the preview threshold, it spills the entire unbroken output to disk.
     """
 
-    def __init__(self, preview_bytes: int = 30000, storage_dir: Optional[str] = None):
+    def __init__(
+        self,
+        preview_bytes: int = 30000,
+        storage_dir: str | Path | None = None,
+    ):
         """
         Initializes the output interceptor for shell commands.
         """
@@ -30,13 +35,17 @@ class OutputInterceptor:
 
         self.pending_chunks = []
         self.spilled_to_disk = False
+        self._disk_spill_unavailable = False
 
+        self._runtime_context = None
         if storage_dir is None:
-            storage_dir = os.path.join(os.getcwd(), ".logs", "shell_outputs")
-        self.storage_dir = storage_dir
+            runtime_context = get_current_run_context()
+            self._runtime_context = runtime_context
+            storage_dir = runtime_context.shell_artifacts_dir if runtime_context else None
+        self.storage_dir = str(Path(storage_dir).resolve()) if storage_dir else None
         # artifact_path is assigned lazily in _spill_to_disk() — only when we
         # actually need to write to disk. No UUID is generated for small outputs.
-        self.artifact_path: Optional[str] = None
+        self.artifact_path: str | None = None
         self.file_stream = None
 
     def write(self, chunk: str) -> None:
@@ -54,7 +63,7 @@ class OutputInterceptor:
 
         if not self.spilled_to_disk:
             self.pending_chunks.append(chunk_bytes)
-            if self.total_bytes > self.preview_bytes:
+            if self.total_bytes > self.preview_bytes and not self._disk_spill_unavailable:
                 self._spill_to_disk()
         else:
             if self.file_stream:
@@ -98,10 +107,35 @@ class OutputInterceptor:
             self.tail_buffer = self.tail_buffer[excess:]
 
     def _spill_to_disk(self) -> None:
-        os.makedirs(self.storage_dir, exist_ok=True)
-        # Generate UUID filename only now — when we know we actually need it.
-        self.artifact_path = os.path.join(self.storage_dir, f"cmd-{uuid.uuid4().hex}.txt")
-        self.file_stream = open(self.artifact_path, "wb")
+        if self.storage_dir is None:
+            # Standalone shell helpers have no canonical owner for a raw
+            # artifact. Keep the bounded preview and discard the full buffer.
+            self.pending_chunks = []
+            self._disk_spill_unavailable = True
+            return
+        try:
+            if self._runtime_context is not None:
+                fd, artifact_path = self._runtime_context.allocate_artifact(
+                    "shell",
+                    prefix="cmd-",
+                    suffix=".txt",
+                )
+                self.artifact_path = str(artifact_path)
+                self.file_stream = os.fdopen(fd, "wb")
+            else:
+                os.makedirs(self.storage_dir, exist_ok=True)
+                # Explicit standalone storage remains available to low-level callers.
+                self.artifact_path = os.path.join(
+                    self.storage_dir,
+                    f"cmd-{uuid.uuid4().hex}.txt",
+                )
+                self.file_stream = open(self.artifact_path, "xb")
+        except (OSError, RuntimeError):
+            self.pending_chunks = []
+            self._disk_spill_unavailable = True
+            self.artifact_path = None
+            self.file_stream = None
+            return
         for chunk in self.pending_chunks:
             self.file_stream.write(chunk)
         self.pending_chunks = []
@@ -121,7 +155,7 @@ class OutputInterceptor:
 
         if self.omitted_bytes > 0:
             omission = f"\n\n[...{self.omitted_bytes} bytes omitted...]\n"
-            if self.spilled_to_disk:
+            if self.spilled_to_disk and self.artifact_path is not None:
                 abs_path = os.path.abspath(self.artifact_path)
                 omission += (
                     f"<system_notice>\n"

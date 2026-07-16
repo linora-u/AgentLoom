@@ -8,7 +8,11 @@ Provides:
 """
 
 from src.lib.checkpoint.serializer import CheckpointSerializer
-from src.lib.checkpoint.checkpoint_manager import CheckpointManager
+from src.lib.checkpoint.checkpoint_manager import (
+    CheckpointManager,
+    cleanup_expired_tasks,
+    delete_checkpoint_task_if_inactive,
+)
 from src.lib.checkpoint.coordinator import CheckpointCoordinator
 from src.lib.checkpoint.conversation_recovery import (
     TurnInterruptionState,
@@ -17,6 +21,8 @@ from src.lib.checkpoint.conversation_recovery import (
 
 __all__ = [
     "CheckpointManager",
+    "cleanup_expired_tasks",
+    "delete_checkpoint_task_if_inactive",
     "CheckpointSerializer",
     "CheckpointCoordinator",
     "TurnInterruptionState",
