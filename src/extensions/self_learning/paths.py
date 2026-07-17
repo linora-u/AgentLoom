@@ -118,19 +118,76 @@ _MEMORY_CONFIG_DEFAULTS: dict[str, Any] = {
     "prompt_max_chars": 12000,
     "max_item_chars": 4000,
     "scope_budgets": {"project": 8000, "application": 6000},
-    # Completed-run review is opt-in. An absent/empty model means the completed
-    # run performs no extra LLM call; foreground memory writes remain usable.
-    "review_model": "",
-    "write_approval": False,
 }
 
 
-def memory_review_model(agent_config: dict[str, Any] | None = None) -> str:
-    """Read only the opt-in review switch without parsing unrelated fields."""
-    section = self_learning_config(agent_config).get("memory", {})
-    if not isinstance(section, dict):
-        return ""
-    return str(section.get("review_model") or "").strip()
+_REVIEW_SCOPE_DEFAULTS: dict[str, dict[str, Any]] = {
+    "application": {
+        "review_model": "",
+        "trigger": {"mode": "batch", "min_completed_runs": 5},
+        "approval": {"fact": "auto", "experience": "manual"},
+    },
+    "project": {
+        "review_model": "",
+        "trigger": {"mode": "batch", "min_candidates": 5},
+        "approval": {"fact": "manual", "experience": "manual"},
+    },
+}
+_REVIEW_ARTIFACT_DEFAULTS: dict[str, bool] = {
+    "markdown": True,
+    "review_auto_applied": True,
+}
+
+
+def review_config(
+    agent_config: dict[str, Any] | None = None,
+    *,
+    scope: str = "application",
+) -> dict[str, Any]:
+    """Return one scope's effective v6 review policy.
+
+    Runtime callers pass the already-layered Application configuration. The
+    configuration builder protects the project policy before it reaches this
+    accessor; legacy ``self_learning.memory`` review keys are never read.
+    """
+
+    if scope not in _REVIEW_SCOPE_DEFAULTS:
+        raise ValueError("review scope must be 'application' or 'project'")
+
+    review = self_learning_config(agent_config).get("review", {})
+    if not isinstance(review, dict):
+        review = {}
+    raw_scope = review.get(scope, {})
+    if not isinstance(raw_scope, dict):
+        raw_scope = {}
+
+    defaults = _REVIEW_SCOPE_DEFAULTS[scope]
+    trigger = dict(defaults["trigger"])
+    if isinstance(raw_scope.get("trigger"), dict):
+        trigger.update(raw_scope["trigger"])
+    approval = dict(defaults["approval"])
+    if isinstance(raw_scope.get("approval"), dict):
+        approval.update(raw_scope["approval"])
+    artifacts = dict(_REVIEW_ARTIFACT_DEFAULTS)
+    if isinstance(review.get("artifacts"), dict):
+        artifacts.update(review["artifacts"])
+
+    return {
+        "enabled": _strict_bool(review.get("enabled", False), default=False),
+        "review_model": str(raw_scope.get("review_model") or "").strip(),
+        "trigger": trigger,
+        "approval": approval,
+        "artifacts": artifacts,
+    }
+
+
+def review_model(
+    agent_config: dict[str, Any] | None = None,
+    *,
+    scope: str = "application",
+) -> str:
+    policy = review_config(agent_config, scope=scope)
+    return policy["review_model"] if policy["enabled"] else ""
 
 
 def memory_config(agent_config: dict[str, Any] | None = None) -> dict[str, Any]:
@@ -152,8 +209,6 @@ def memory_config(agent_config: dict[str, Any] | None = None) -> dict[str, Any]:
         budgets.update({k: int(v) for k, v in section["scope_budgets"].items() if v is not None})
     merged["scope_budgets"] = budgets
     merged["enabled"] = _strict_bool(merged.get("enabled", True), default=True)
-    merged["write_approval"] = _strict_bool(merged.get("write_approval", False), default=False)
-    merged["review_model"] = memory_review_model(agent_config)
     return merged
 
 

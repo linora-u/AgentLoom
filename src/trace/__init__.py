@@ -50,6 +50,7 @@ from .task_context import (
     bind_root_run,
     require_local_run_id,
     require_root_run_id,
+    require_root_run_state,
     # Context managers
     task_context,
     sub_task_context,
@@ -95,6 +96,7 @@ __all__ = [
     'bind_root_run',
     'require_local_run_id',
     'require_root_run_id',
+    'require_root_run_state',
     'task_context',
     'sub_task_context',
 ]

@@ -126,12 +126,68 @@ def _make_review_agent(*, logger=None) -> DummyAgent:
             "name": "runtime_dummy_memory_review",
             "self_learning": {
                 "enabled": True,
-                "memory": {"review_model": "summary"},
+                "review": {
+                    "application": {
+                        "review_model": "summary",
+                        "trigger": {"mode": "after_run"},
+                    },
+                },
             },
         },
         model=object(),
         logger=logger,
     )
+
+
+def test_manual_review_policy_never_enters_run_end_reviewer(monkeypatch):
+    from src.extensions.self_learning import reviewer
+
+    agent = DummyAgent(
+        config={
+            "name": "runtime_dummy_manual_review",
+            "self_learning": {
+                "enabled": True,
+                "review": {
+                    "application": {
+                        "review_model": "summary",
+                        "trigger": {"mode": "manual"},
+                    },
+                },
+            },
+        },
+        model=object(),
+        logger=DummyLoggerBackend(),
+    )
+    agent._effective_agent_config = {
+        "self_learning": {
+            "enabled": True,
+            "review": {
+                "enabled": True,
+                "application": {
+                    "review_model": "summary",
+                    "trigger": {"mode": "manual"},
+                },
+                "project": {
+                    "review_model": "summary",
+                    "trigger": {"mode": "manual"},
+                },
+            },
+        }
+    }
+    runtime_agent = DummyRuntimeRunner(result="main-result")
+    calls = []
+    monkeypatch.setattr(agent, "build_runtime_agent", lambda: runtime_agent)
+    monkeypatch.setattr(agent, "_inject_memory_snapshot", lambda tasks: tasks)
+    monkeypatch.setattr(agent, "_emit_task_lifecycle_event", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(agent, "_emit_session_lifecycle_event", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(
+        reviewer,
+        "review_finished_run",
+        lambda **kwargs: calls.append(kwargs),
+    )
+
+    assert agent.run("top-level") == "main-result"
+    assert calls == []
 
 
 def _make_tool_call_agent(*, logger=None) -> DummyToolCallingAgent:
@@ -366,6 +422,79 @@ def test_base_run_binds_root_before_memory_snapshot_and_only_owner_emits_session
     assert snapshot_roots == ["supervisor-root"]
     assert HookEvent.SESSION_START not in events
     assert HookEvent.SESSION_END not in events
+
+
+def test_main_agent_and_worker_inject_the_same_frozen_root_memory_snapshot() -> None:
+    from src.extensions.self_learning.memory_store import MemoryStore
+    from src.trace import bind_root_run
+
+    config = {
+        "application_id": "runtime_snapshot_app",
+        "self_learning": {"enabled": True},
+    }
+    main_agent = _make_agent(logger=DummyLoggerBackend())
+    worker_agent = _make_agent(logger=DummyLoggerBackend())
+    main_agent._effective_agent_config = config
+    worker_agent._effective_agent_config = config
+    store = MemoryStore(agent_config=config)
+    original = store.add(
+        "project",
+        "The root task sees the original memory.",
+        memory_key="runtime:frozen-memory",
+    )
+
+    with bind_root_run("root-main-worker-a"):
+        main_task = main_agent._inject_memory_snapshot(["main task"])[0]
+        store.replace(
+            "project",
+            str(original["id"]),
+            "A mid-run review activated replacement memory.",
+        )
+        worker_task = worker_agent._inject_memory_snapshot(["worker task"])[0]
+
+    with bind_root_run("root-main-worker-b"):
+        next_task = main_agent._inject_memory_snapshot(["next task"])[0]
+
+    assert "original memory" in main_task
+    assert "original memory" in worker_task
+    assert "replacement memory" not in worker_task
+    assert "replacement memory" in next_task
+    assert "original memory" not in next_task
+
+
+def test_failed_initial_memory_store_open_freezes_empty_for_workers(
+    monkeypatch,
+) -> None:
+    from src.extensions.self_learning import memory_store as memory_store_module
+    from src.extensions.self_learning.memory_store import MemoryStore
+    from src.trace import bind_root_run
+
+    config = {
+        "application_id": "runtime_snapshot_failure_app",
+        "self_learning": {"enabled": True},
+    }
+    main_agent = _make_agent(logger=DummyLoggerBackend())
+    worker_agent = _make_agent(logger=DummyLoggerBackend())
+    main_agent._effective_agent_config = config
+    worker_agent._effective_agent_config = config
+
+    class _FailingMemoryStore:
+        def __init__(self):
+            raise OSError("memory database unavailable")
+
+    with bind_root_run("root-failed-memory-open"):
+        monkeypatch.setattr(memory_store_module, "MemoryStore", _FailingMemoryStore)
+        main_task = main_agent._inject_memory_snapshot(["main task"])[0]
+
+        monkeypatch.setattr(memory_store_module, "MemoryStore", MemoryStore)
+        MemoryStore(agent_config=config).add(
+            "project",
+            "This memory appeared after the failed root-start read.",
+        )
+        worker_task = worker_agent._inject_memory_snapshot(["worker task"])[0]
+
+    assert main_task == "main task"
+    assert worker_task == "worker task"
 
 
 def test_base_run_uses_runner_supplied_run_id_for_root_lifecycle(monkeypatch):
@@ -814,21 +943,10 @@ def test_session_end_persistence_failure_never_builds_completed_run_review(
     from src.extensions.self_learning.ledger import SelfLearningLedger
     from src.extensions.self_learning.session_recorder import SessionRecorder
 
-    agent = DummyAgent(
-        config={
-            "name": "runtime_dummy_failed_session_end",
-            "self_learning": {
-                "enabled": True,
-                "memory": {"review_model": "summary"},
-            },
-        },
-        model=object(),
-        logger=DummyLoggerBackend(),
-    )
+    agent = _make_review_agent(logger=DummyLoggerBackend())
     runtime_agent = DummyRuntimeRunner(result="main-result")
     failed_root_ids = []
     review_calls = []
-    digest_calls = []
 
     monkeypatch.setattr(agent, "build_runtime_agent", lambda: runtime_agent)
     monkeypatch.setattr(agent, "_inject_memory_snapshot", lambda tasks: tasks)
@@ -851,29 +969,23 @@ def test_session_end_persistence_failure_never_builds_completed_run_review(
         review_calls.append(kwargs)
         return original_review(**kwargs)
 
-    def _capture_digest(root_run_id, **_kwargs):
-        digest_calls.append(root_run_id)
-        return None
-
     monkeypatch.setattr(SessionRecorder, "append", _fail_only_session_end)
     monkeypatch.setattr(reviewer, "review_finished_run", _capture_review)
-    monkeypatch.setattr(reviewer, "_review_digest", _capture_digest)
+    monkeypatch.setattr(
+        reviewer,
+        "_resolve_review_model",
+        lambda _model_type: pytest.fail("incomplete root resolved a review model"),
+    )
 
     assert agent.run("top-level") == "main-result"
     assert len(failed_root_ids) == 1
     assert len(review_calls) == 1
-    assert digest_calls == []
 
     root_run_id = failed_root_ids[0]
     ledger = SelfLearningLedger()
     assert ledger.completed_review_context(root_run_id, tool_result_limit=1) is None
-    assert (
-        ledger.review_status(
-            review_key=f"root:{root_run_id}",
-            root_run_id=root_run_id,
-        )
-        is None
-    )
+    with ledger._connect() as conn:
+        assert conn.execute("SELECT COUNT(*) FROM review_batches").fetchone()[0] == 0
 
 
 def test_custom_session_end_telemetry_cannot_create_orphan_review_audit(
@@ -886,20 +998,9 @@ def test_custom_session_end_telemetry_cannot_create_orphan_review_audit(
         SessionRecorder,
     )
 
-    agent = DummyAgent(
-        config={
-            "name": "runtime_dummy_forged_session_end_receipt",
-            "self_learning": {
-                "enabled": True,
-                "memory": {"review_model": "summary"},
-            },
-        },
-        model=object(),
-        logger=DummyLoggerBackend(),
-    )
+    agent = _make_review_agent(logger=DummyLoggerBackend())
     runtime_agent = DummyRuntimeRunner(result="main-result")
     failed_root_ids = []
-    digest_calls = []
 
     monkeypatch.setattr(agent, "build_runtime_agent", lambda: runtime_agent)
     monkeypatch.setattr(agent, "_inject_memory_snapshot", lambda tasks: tasks)
@@ -927,12 +1028,12 @@ def test_custom_session_end_telemetry_cannot_create_orphan_review_audit(
             },
         )
 
-    def _capture_digest(root_run_id, **_kwargs):
-        digest_calls.append(root_run_id)
-        return None
-
     monkeypatch.setattr(SessionRecorder, "append", _fail_only_session_end)
-    monkeypatch.setattr(reviewer, "_review_digest", _capture_digest)
+    monkeypatch.setattr(
+        reviewer,
+        "_resolve_review_model",
+        lambda _model_type: pytest.fail("forged receipt resolved a review model"),
+    )
     agent._hook_manager.register_hook(
         HookEvent.SESSION_END,
         "*",
@@ -942,16 +1043,12 @@ def test_custom_session_end_telemetry_cannot_create_orphan_review_audit(
 
     assert agent.run("top-level") == "main-result"
     assert len(failed_root_ids) == 1
-    assert digest_calls == []
 
     root_run_id = failed_root_ids[0]
-    assert (
-        SelfLearningLedger().review_status(
-            review_key=f"root:{root_run_id}",
-            root_run_id=root_run_id,
-        )
-        is None
-    )
+    ledger = SelfLearningLedger()
+    assert ledger.completed_review_context(root_run_id, tool_result_limit=1) is None
+    with ledger._connect() as conn:
+        assert conn.execute("SELECT COUNT(*) FROM review_batches").fetchone()[0] == 0
 
 
 def test_same_base_agent_concurrent_top_level_runs_do_not_cross_context(monkeypatch):

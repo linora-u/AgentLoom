@@ -17,7 +17,7 @@ import re
 import stat
 import threading
 import uuid
-from collections.abc import Iterator
+from collections.abc import Callable, Iterator
 from contextlib import contextmanager
 from dataclasses import asdict, dataclass
 from datetime import UTC, datetime
@@ -35,6 +35,51 @@ _DIRECTORY_OPEN_FLAGS = (
 )
 _FILE_NOFOLLOW = getattr(os, "O_NOFOLLOW", 0)
 RUNTIME_ROOT_ENV = "AGENTLOOM_RUNTIME_ROOT"
+_UNSET_ROOT_MEMORY_SNAPSHOT = object()
+
+
+class RootRunState:
+    """Mutable state shared by every execution context in one root task.
+
+    ContextVars copy values, so the shared value must itself own the lock and
+    cached snapshot. Main agents and workers can then cross thread/context
+    boundaries without independently re-reading memory that changed mid-run.
+    """
+
+    __slots__ = (
+        "root_run_id",
+        "_memory_snapshot",
+        "_memory_snapshot_lock",
+    )
+
+    def __init__(self, root_run_id: str) -> None:
+        normalized = str(root_run_id or "").strip()
+        if not normalized:
+            raise ValueError("root run id must be a non-empty string")
+        self.root_run_id = normalized
+        self._memory_snapshot: object = _UNSET_ROOT_MEMORY_SNAPSHOT
+        self._memory_snapshot_lock = threading.RLock()
+
+    def get_or_create_memory_snapshot(self, loader: Callable[[], str]) -> str:
+        """Return the snapshot fixed by this root task's first read attempt.
+
+        A failed initial read freezes an empty snapshot before propagating the
+        error. A later worker must not observe memory that was activated after
+        its root task had already started.
+        """
+
+        with self._memory_snapshot_lock:
+            if self._memory_snapshot is _UNSET_ROOT_MEMORY_SNAPSHOT:
+                try:
+                    snapshot = loader()
+                except Exception:
+                    self._memory_snapshot = ""
+                    raise
+                if not isinstance(snapshot, str):
+                    self._memory_snapshot = ""
+                    raise TypeError("root memory snapshot loader must return a string")
+                self._memory_snapshot = snapshot
+            return str(self._memory_snapshot)
 
 
 def _absolute_path_without_resolving_symlinks(path: str | Path) -> Path:
