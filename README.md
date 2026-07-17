@@ -49,8 +49,31 @@ After the first run, you should see:
 - resumable task state under `.agentloom/checkpoints/<application_id>/<task_id>/` when checkpointing is enabled;
 - optional visualization through `uv run loom ui`;
 - optional terminal monitoring through `uv run loom dashboard`.
+- the interactive Agent Builder and project-wide Run directory through the
+  TypeScript TUI in [`agentloom-tui/`](agentloom-tui/README.md).
 
 `run_id` identifies one execution attempt and changes on resume. `task_id` identifies the logical task and remains stable, so a resumed attempt writes a new run directory while continuing the same checkpoint. The agent-visible `.runtime/` workspace is intentionally separate from framework runtime storage.
+
+### Open the AgentLoom TUI
+
+```bash
+./install
+# Open a new shell once, then run from an AgentLoom project:
+agentloom
+```
+
+The source installer follows OpenCode's native-binary installation pattern. It
+builds the current-platform TypeScript/OpenTUI application, installs it under
+`~/.agentloom/bin`, and creates an isolated locked Python environment under
+`~/.agentloom/venv`. It finds or installs `uv` and Bun during setup; running
+`agentloom` needs neither environment activation nor `uv run`. Use
+`./install --no-modify-path` to leave shell configuration untouched, or set
+`AGENTLOOM_INSTALL_DIR` to choose another installation root.
+
+The Builder only inspects, stages, and validates Agent YAML; `/apply` is the
+explicit write action. The right-side directory shows every Agent System and
+Run, including definitions that have never run, live state, Workers, events,
+logs, artifacts, and retained results.
 
 ## Create a Multi-Agent App with Codex
 

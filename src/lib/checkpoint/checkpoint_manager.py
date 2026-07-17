@@ -89,17 +89,13 @@ class CheckpointTaskLease:
             raise RuntimeError(f"checkpoint task directory is a symlink: {self._task_dir}")
         if self._require_exists:
             if not self._task_dir.is_dir():
-                raise FileNotFoundError(
-                    f"checkpoint task directory does not exist: {self._task_dir}"
-                )
+                raise FileNotFoundError(f"checkpoint task directory does not exist: {self._task_dir}")
         else:
             self._task_dir.mkdir(parents=True, exist_ok=True)
         try:
             fd = os.open(
                 self._task_dir,
-                os.O_RDONLY
-                | getattr(os, "O_DIRECTORY", 0)
-                | getattr(os, "O_NOFOLLOW", 0),
+                os.O_RDONLY | getattr(os, "O_DIRECTORY", 0) | getattr(os, "O_NOFOLLOW", 0),
             )
         except FileNotFoundError:
             # A concurrent cleaner may win between the existence check and
@@ -109,9 +105,7 @@ class CheckpointTaskLease:
             fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
         except (BlockingIOError, OSError) as exc:
             os.close(fd)
-            raise RuntimeError(
-                f"checkpoint task is already active: {self._task_dir.name}"
-            ) from exc
+            raise RuntimeError(f"checkpoint task is already active: {self._task_dir.name}") from exc
         self._fd = fd
         return self
 
@@ -369,9 +363,6 @@ def _project_task_tree_from_events(events: list[dict], fallback_task_id: str = "
     return _migrate_task_tree_workers(tree)
 
 
-
-
-
 # =========================================================================
 # CheckpointManager
 # =========================================================================
@@ -411,25 +402,20 @@ class CheckpointManager:
         run_id: str | None = None,
     ) -> None:
         if (checkpoint_dir is None) == (checkpoints_root is None):
-            raise ValueError(
-                "pass exactly one of checkpoint_dir or checkpoints_root"
-            )
+            raise ValueError("pass exactly one of checkpoint_dir or checkpoints_root")
         self._supervisor_name = supervisor_name
         self._run_id = run_id
         if checkpoint_dir is not None:
-            self._checkpoint_dir = Path(
-                os.path.abspath(os.fspath(Path(checkpoint_dir).expanduser()))
-            )
+            self._checkpoint_dir = Path(os.path.abspath(os.fspath(Path(checkpoint_dir).expanduser())))
             self._checkpoints_root = self._checkpoint_dir.parent
             self._bound_task_id: str | None = self._checkpoint_dir.name
         else:
-            self._checkpoints_root = Path(
-                os.path.abspath(os.fspath(Path(checkpoints_root).expanduser()))
-            )
+            self._checkpoints_root = Path(os.path.abspath(os.fspath(Path(checkpoints_root).expanduser())))
             self._checkpoint_dir = None
             self._bound_task_id = None
 
         import threading
+
         self._tree_lock = threading.Lock()
         self._task_storages: dict[Path, SecureDirectory] = {}
         if self._checkpoint_dir is not None and self._checkpoint_dir.is_dir():
@@ -462,9 +448,7 @@ class CheckpointManager:
         task_id = _require_safe_path_component(task_id, field="task_id")
         if self._bound_task_id is not None:
             if task_id != self._bound_task_id:
-                raise ValueError(
-                    f"manager is bound to task {self._bound_task_id}, got {task_id}"
-                )
+                raise ValueError(f"manager is bound to task {self._bound_task_id}, got {task_id}")
             assert self._checkpoint_dir is not None
             return self._checkpoint_dir
         return self._checkpoints_root / task_id
@@ -659,10 +643,13 @@ class CheckpointManager:
     def _append_event_and_refresh_projection_unlocked(self, task_id: str, event: dict) -> dict:
         """Append an event and refresh ``task_tree.json`` from the event log."""
         self._append_task_event_unlocked(task_id, event)
-        tree = _project_task_tree_from_events(
-            self._read_task_events_from_path(self._task_events_path(task_id)),
-            fallback_task_id=task_id,
-        ) or {}
+        tree = (
+            _project_task_tree_from_events(
+                self._read_task_events_from_path(self._task_events_path(task_id)),
+                fallback_task_id=task_id,
+            )
+            or {}
+        )
         self._write_task_tree_projection_unlocked(task_id, tree)
         return tree
 
@@ -686,6 +673,42 @@ class CheckpointManager:
     def load_task_tree(self, task_id: str) -> dict | None:
         with self._tree_lock:
             return self._load_task_tree_unlocked(task_id)
+
+    def load_task_tree_projection(
+        self,
+        task_id: str,
+        *,
+        max_bytes: int,
+    ) -> dict | None:
+        """Read a bounded maintained projection without replaying events."""
+
+        if max_bytes <= 0:
+            raise ValueError("max_bytes must be positive")
+        with self._tree_lock:
+            try:
+                storage, relative = self._task_storage_for_path(
+                    self._task_tree_path(task_id),
+                    create=False,
+                )
+                payload, truncated = storage.read_bytes_up_to(relative, max_bytes)
+                if truncated:
+                    return None
+                tree = json.loads(payload.decode("utf-8"))
+            except (
+                FileNotFoundError,
+                UnicodeError,
+                json.JSONDecodeError,
+                OSError,
+                RuntimeError,
+            ):
+                return None
+            return _migrate_task_tree_workers(tree) if isinstance(tree, dict) else None
+
+    def load_task_events(self, task_id: str) -> list[dict]:
+        """Return a stable copy of the append-only events for one task."""
+
+        with self._tree_lock:
+            return list(self._read_task_events_from_path(self._task_events_path(task_id)))
 
     def update_task_tree(self, task_id: str, updater) -> dict:
         """Atomically read-modify-write the task tree (thread-safe).
@@ -900,9 +923,7 @@ class CheckpointManager:
                                         "call_index": call_index,
                                         "input_hash": input_hash,
                                         "run_id": self._run_id,
-                                        "claimed_at": datetime.now()
-                                        .astimezone()
-                                        .isoformat(),
+                                        "claimed_at": datetime.now().astimezone().isoformat(),
                                     },
                                 )
                                 return WorkerCallPreparation(
@@ -1054,9 +1075,7 @@ class CheckpointManager:
         *call_index* is omitted, the latest call for the worker is returned.
         """
         if call_index is not None:
-            return self._read_json(
-                self._worker_call_ckpt(task_id, worker_name, call_index)
-            )
+            return self._read_json(self._worker_call_ckpt(task_id, worker_name, call_index))
 
         latest_index: int | None = None
         try:
@@ -1078,19 +1097,14 @@ class CheckpointManager:
                     calls_dir / ".placeholder",
                     create=False,
                 )
-                indexes = [
-                    _coerce_call_index(name, -1)
-                    for name in storage.directory_names(relative.parent)
-                ]
+                indexes = [_coerce_call_index(name, -1) for name in storage.directory_names(relative.parent)]
                 indexes = [idx for idx in indexes if idx >= 0]
                 latest_index = max(indexes) if indexes else None
             except (FileNotFoundError, OSError, RuntimeError):
                 latest_index = None
 
         if latest_index is not None:
-            return self._read_json(
-                self._worker_call_ckpt(task_id, worker_name, latest_index)
-            )
+            return self._read_json(self._worker_call_ckpt(task_id, worker_name, latest_index))
 
         return None
 
@@ -1102,11 +1116,7 @@ class CheckpointManager:
             return [self._checkpoint_dir] if self._checkpoint_dir.is_dir() else []
         if not self._checkpoints_root.is_dir():
             return []
-        return [
-            child
-            for child in sorted(self._checkpoints_root.iterdir())
-            if _is_checkpoint_task_dir(child)
-        ]
+        return [child for child in sorted(self._checkpoints_root.iterdir()) if _is_checkpoint_task_dir(child)]
 
     def list_tasks(self) -> list[dict]:
         """Return metadata for every checkpoint under this supervisor.
@@ -1159,9 +1169,7 @@ class CheckpointManager:
                 entry["pid"] = hb.get("pid")
                 hb_ts = hb.get("timestamp")
                 entry["heartbeat_ts"] = hb_ts
-                entry["heartbeat_age"] = (
-                    round(time.time() - hb_ts, 1) if hb_ts else None
-                )
+                entry["heartbeat_age"] = round(time.time() - hb_ts, 1) if hb_ts else None
             else:
                 entry["step"] = None
                 entry["pid"] = None
@@ -1218,9 +1226,7 @@ class CheckpointManager:
                         w_detail["started_at"] = hb_call.get("started_at")
                         w_detail["finished_at"] = hb_call.get("finished_at")
                         w_hb_ts = w_hb.get("timestamp")
-                        w_detail["heartbeat_age"] = (
-                            round(time.time() - w_hb_ts, 1) if w_hb_ts else None
-                        )
+                        w_detail["heartbeat_age"] = round(time.time() - w_hb_ts, 1) if w_hb_ts else None
                     else:
                         w_detail["step"] = None
                         w_detail["heartbeat_age"] = None
@@ -1262,6 +1268,7 @@ class CheckpointManager:
             self.close()
         except Exception:
             pass
+
 
 # =========================================================================
 # Cross-supervisor listing (for CLI ``list-tasks``)
@@ -1332,9 +1339,7 @@ def _iter_direct_checkpoint_task_dirs(checkpoints_root: Path) -> list[Path]:
         return []
     try:
         return sorted(
-            child
-            for child in checkpoints_root.iterdir()
-            if not child.is_symlink() and _is_checkpoint_task_dir(child)
+            child for child in checkpoints_root.iterdir() if not child.is_symlink() and _is_checkpoint_task_dir(child)
         )
     except OSError:
         return []
@@ -1446,10 +1451,7 @@ def _task_heartbeat_state(task_dir: Path) -> str:
         calls = worker_payload.get("calls")
         if not isinstance(calls, dict):
             return "unknown"
-        if any(
-            isinstance(call, dict) and call.get("status") == "running"
-            for call in calls.values()
-        ):
+        if any(isinstance(call, dict) and call.get("status") == "running" for call in calls.values()):
             process_state = _heartbeat_process_state(worker_payload)
             if process_state != "inactive":
                 return process_state
@@ -1539,9 +1541,7 @@ def _cleanup_expired_task(
         if not isinstance(raw_created_at, str) or not raw_created_at.strip():
             return False
         try:
-            created_at = datetime.fromisoformat(
-                raw_created_at.strip().replace("Z", "+00:00")
-            )
+            created_at = datetime.fromisoformat(raw_created_at.strip().replace("Z", "+00:00"))
         except ValueError:
             return False
         if created_at.tzinfo is None:
@@ -1637,11 +1637,7 @@ def cleanup_expired_tasks(
         lock_acquired = True
 
         removed = 0
-        task_dirs = (
-            iter_checkpoint_task_dirs(root)
-            if recursive
-            else _iter_direct_checkpoint_task_dirs(root)
-        )
+        task_dirs = iter_checkpoint_task_dirs(root) if recursive else _iter_direct_checkpoint_task_dirs(root)
         for task_dir in task_dirs:
             if _cleanup_expired_task(task_dir, current=current, ttl=ttl):
                 removed += 1

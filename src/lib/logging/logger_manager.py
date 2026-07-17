@@ -170,6 +170,7 @@ class NullLoggerBackend:
 
     level = "OFF"
     console = None
+    mirror_to_stdlib = False
 
     def log(self, *args: Any, **kwargs: Any) -> None:
         return None
@@ -240,7 +241,7 @@ def _tag_backend_runtime(backend: Any, context: RuntimeContext | None) -> Any:
     if existing is not None and existing != runtime_key:
         raise ValueError("logger backend is already owned by a different RuntimeContext")
     try:
-        setattr(backend, "_agentloom_runtime_key", runtime_key)
+        backend._agentloom_runtime_key = runtime_key
     except Exception:
         pass
     return backend
@@ -566,7 +567,7 @@ class LoggerAdapter:
                 used_stdlib = True
             if _call_log_method(self._backend, method_name, rendered, **kwargs):
                 # Also mirror to stdlib so caplog / third-party handlers work.
-                if not used_stdlib:
+                if not used_stdlib and getattr(self._backend, "mirror_to_stdlib", True):
                     _stdlib_emit(self._name, method_name, rendered)
                 return
             # Backend method missing/failed — fall through to global/stdlib.
@@ -578,7 +579,7 @@ class LoggerAdapter:
         _call_log_method(backend, method_name, rendered, **kwargs)
 
         # Mirror to stdlib if the backend was not stdlib itself.
-        if not used_stdlib:
+        if not used_stdlib and getattr(backend, "mirror_to_stdlib", True):
             _stdlib_emit(self._name, method_name, rendered)
 
     # -- public API (only four methods, nothing else) -----------------------

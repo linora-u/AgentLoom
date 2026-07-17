@@ -818,10 +818,13 @@ code_agent:
 manifest.json
 logs/runtime.log[.1-.3]
 audit/shell.jsonl[.1-.2]
+audit/task_tree.json
+audit/task_events.jsonl
+artifacts/result.txt
 artifacts/{shell,background,skills}/
 ```
 
-Shell audit 独立按每段 10 MiB、2 个备份轮转。Resume 为同一任务创建新的 `run_id` 和 run 目录，同时继续使用原 `task_id` 与 `.agentloom/checkpoints/<application_id>/<task_id>/`。可以只关闭文件日志，而不关闭 checkpoint 或 Shell audit：
+任务树、任务事件与结果文件仅在对应证据存在时写入；成功清理 checkpoint 前，它们的路径会先记录到 `manifest.json`，因此 Run 详情不依赖仍然存活的 checkpoint。Shell audit 独立按每段 10 MiB、2 个备份轮转。Resume 为同一任务创建新的 `run_id` 和 run 目录，同时继续使用原 `task_id` 与 `.agentloom/checkpoints/<application_id>/<task_id>/`。可以只关闭文件日志，而不关闭 checkpoint 或 Shell audit：
 
 ```bash
 loom run applications/<app>/workflows/<agent>.yaml --no-file-log
@@ -835,7 +838,7 @@ loom run applications/<app>/workflows/<agent>.yaml --no-file-log
 
 `.runtime/` 仍是 Agent 可见的 recall/todo 工作区，与 `.agentloom/` 语义独立。`loom migrate-runtime --dry-run` 预览有效的旧 checkpoint 候选；`loom migrate-runtime --apply` 完成迁移，并把整个旧 `.logs` 归档到 `.agentloom/legacy/`。
 
-验证真实 attempt 时必须读取 `manifest.json`、`logs/runtime.log` 与 `audit/shell.jsonl`，不能只看退出码。
+验证真实 attempt 时必须读取 `manifest.json` 及其引用的日志、审计与产物，不能只看退出码。
 
 ---
 

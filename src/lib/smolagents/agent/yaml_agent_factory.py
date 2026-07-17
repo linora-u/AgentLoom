@@ -72,18 +72,9 @@ def _bind_fixed_tool_args(tool_func: Callable, tool_name: str, fixed_args: dict[
     if not fixed_args:
         return tool_func
 
+    AgentConfigNormalizer.validate_fixed_tool_args(tool_func, tool_name, fixed_args)
     signature = inspect.signature(tool_func)
     parameters = signature.parameters
-    accepts_var_kwargs = any(
-        param.kind == inspect.Parameter.VAR_KEYWORD for param in parameters.values()
-    )
-    unknown_args = [
-        arg_name for arg_name in fixed_args
-        if arg_name not in parameters and not accepts_var_kwargs
-    ]
-    if unknown_args:
-        joined_args = ", ".join(sorted(unknown_args))
-        raise ValueError(f"Unknown fixed_args for tool '{tool_name}': {joined_args}")
 
     visible_parameters = [
         parameter for arg_name, parameter in parameters.items()
