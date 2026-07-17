@@ -210,18 +210,29 @@ self_learning:
     scope_budgets:
       project: 8000
       application: 6000
-    # Empty/absent means no completed-run model review or distillation; the
-    # foreground Agent can still use memory explicitly. Set to a model type
-    # from config/llm.yaml (for example "summary") to run one isolated,
-    # synchronous reviewer after a successful SessionEnd is persisted.
-    # Reviewer may copy exactly one complete fact that tool code explicitly
-    # classified as kind="durable_fact" with scope="project" or
-    # scope="application". Content and scope changes, final-answer claims, and
-    # replace/remove calls are rejected; memory plus audit commit atomically.
-    review_model: ""
-    # false: accepted memory writes become active immediately.
-    # true: exact writes stay pending for `loom memory approve` or `reject`.
-    write_approval: false
+  # Review timing and approval are separate. The reviewer only emits typed
+  # candidates; code-enforced evidence gates remain mandatory in every mode.
+  review:
+    enabled: true
+    application:
+      review_model: summary
+      trigger:
+        mode: batch
+        min_completed_runs: 5
+      approval:
+        fact: auto
+        experience: manual
+    project:
+      review_model: summary
+      trigger:
+        mode: batch
+        min_candidates: 5
+      approval:
+        fact: manual
+        experience: manual
+    artifacts:
+      markdown: true
+      review_auto_applied: true
 
 # ============================================
 # Tool Metadata Configuration

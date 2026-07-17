@@ -404,6 +404,169 @@ def sessions_prune(retention_days: int):
 
 
 # ─────────────────────────────────────────────
+# loom learn / reviews / feedback
+# ─────────────────────────────────────────────
+
+def _review_scope_selection(
+    *,
+    application_id: str | None,
+    project_scope: bool,
+    all_scopes: bool,
+) -> tuple[str, str]:
+    selections = int(bool(application_id)) + int(project_scope) + int(all_scopes)
+    if selections != 1:
+        raise click.UsageError(
+            "Choose exactly one scope: --application, --project, or the command's --all option."
+        )
+    if application_id:
+        return "application", application_id
+    if project_scope:
+        return "project", "project"
+    return "all", ""
+
+
+def _echo_json(value) -> None:
+    import json as _json
+
+    if hasattr(value, "to_dict") and callable(value.to_dict):
+        value = value.to_dict()
+    click.echo(_json.dumps(value, ensure_ascii=False, indent=2, default=str))
+
+
+def _review_cli_service():
+    root_context = click.get_current_context().find_root()
+    if isinstance(root_context.obj, dict) and "review_service" in root_context.obj:
+        return root_context.obj["review_service"]
+    from src.extensions.self_learning.review_artifacts import ReviewCLIService
+
+    return ReviewCLIService()
+
+
+def _review_cli_call(operation):
+    try:
+        return operation()
+    except click.ClickException:
+        raise
+    except (KeyError, OSError, RuntimeError, ValueError) as exc:
+        raise click.ClickException(str(exc)) from exc
+
+@main.group()
+def learn():
+    """Extract and review self-learning candidates."""
+
+
+@learn.command("review")
+@click.option("--application", "application_id", default=None, help="Review one Application.")
+@click.option("--project", "project_scope", is_flag=True, help="Review Project candidates.")
+@click.option("--all-unreviewed", is_flag=True, help="Review each Application, then Project.")
+@click.option("--dry-run", is_flag=True, help="Render decisions without activating candidates.")
+def learn_review_command(
+    application_id: str | None,
+    project_scope: bool,
+    all_unreviewed: bool,
+    dry_run: bool,
+) -> None:
+    """Review exactly one scope, or every unreviewed scope in isolation."""
+
+    selection = _review_scope_selection(
+        application_id=application_id,
+        project_scope=project_scope,
+        all_scopes=all_unreviewed,
+    )
+    service = _review_cli_call(_review_cli_service)
+    if selection[0] == "all":
+        result = _review_cli_call(lambda: service.review_all(dry_run=dry_run))
+    else:
+        result = _review_cli_call(
+            lambda: service.review_one(selection[0], selection[1], dry_run=dry_run)
+        )
+    _echo_json(result)
+
+
+@main.group()
+def reviews():
+    """Inspect, apply, or roll back scoped review decisions."""
+
+
+@reviews.command("status")
+@click.option("--application", "application_id", default=None, help="Show one Application.")
+@click.option("--project", "project_scope", is_flag=True, help="Show Project status.")
+@click.option("--all", "all_scopes", is_flag=True, help="Show all review scopes.")
+def reviews_status_command(
+    application_id: str | None,
+    project_scope: bool,
+    all_scopes: bool,
+) -> None:
+    """Show review state for exactly one scope or for all scopes."""
+
+    scope_type, scope_id = _review_scope_selection(
+        application_id=application_id,
+        project_scope=project_scope,
+        all_scopes=all_scopes,
+    )
+    service = _review_cli_call(_review_cli_service)
+    _echo_json(_review_cli_call(lambda: service.status(scope_type, scope_id)))
+
+
+@reviews.command("apply")
+@click.option("--application", "application_id", default=None, help="Apply one Application INBOX.")
+@click.option("--project", "project_scope", is_flag=True, help="Apply the Project INBOX.")
+def reviews_apply_command(application_id: str | None, project_scope: bool) -> None:
+    """Apply decisions from exactly one scoped INBOX."""
+
+    scope_type, scope_id = _review_scope_selection(
+        application_id=application_id,
+        project_scope=project_scope,
+        all_scopes=False,
+    )
+    service = _review_cli_call(_review_cli_service)
+    _echo_json(_review_cli_call(lambda: service.apply(scope_type, scope_id)))
+
+
+@reviews.command("rollback")
+@click.argument("review_id")
+def reviews_rollback_command(review_id: str) -> None:
+    """Roll back mutations created by one immutable review batch."""
+
+    service = _review_cli_call(_review_cli_service)
+    _echo_json(_review_cli_call(lambda: service.rollback(review_id)))
+
+
+@main.group()
+def feedback():
+    """Submit outcome feedback for a completed run."""
+
+
+@feedback.command("submit")
+@click.argument("run_id")
+@click.option(
+    "--verdict",
+    required=True,
+    type=click.Choice(["accepted", "rejected", "corrected"]),
+)
+@click.option(
+    "--item",
+    "item_id",
+    default=None,
+    type=click.IntRange(min=1),
+    help="Optional affected memory item id.",
+)
+def feedback_submit_command(run_id: str, verdict: str, item_id: int | None) -> None:
+    """Record accepted, rejected, or corrected run feedback."""
+
+    service = _review_cli_call(_review_cli_service)
+    _echo_json(
+        _review_cli_call(
+            lambda: service.submit_feedback(
+                run_id=run_id,
+                verdict=verdict,
+                item_id=item_id,
+            )
+        )
+    )
+
+
+# ─────────────────────────────────────────────
 # loom memory
 # ─────────────────────────────────────────────
 
@@ -480,29 +643,6 @@ def memory_pending(status: str):
     from src.extensions.self_learning.memory_store import MemoryStore
 
     result = MemoryStore().list_pending(status=None if status == "all" else status)
-    click.echo(_json.dumps(result, ensure_ascii=False, indent=2, default=str))
-
-
-@memory.command("approve")
-@click.argument("target")
-def memory_approve(target: str):
-    """Approve one exact pending write by id, or approve all."""
-    import json as _json
-    from src.extensions.self_learning.memory_store import MemoryStore
-
-    result = MemoryStore().approve_pending(target)
-    click.echo(_json.dumps(result, ensure_ascii=False, indent=2, default=str))
-
-
-@memory.command("reject")
-@click.argument("target")
-def memory_reject(target: str):
-    """Reject one exact pending write by id, or reject all."""
-    import json as _json
-
-    from src.extensions.self_learning.memory_store import MemoryStore
-
-    result = MemoryStore().reject_pending(target)
     click.echo(_json.dumps(result, ensure_ascii=False, indent=2, default=str))
 
 

@@ -2,6 +2,7 @@
 
 from .context import (
     RUNTIME_ROOT_ENV,
+    RootRunState,
     RuntimeContext,
     RuntimeHome,
     RuntimeRotatingTextSink,
@@ -23,6 +24,7 @@ from .storage import SecureDirectory
 __all__ = [
     "RuntimeContext",
     "RUNTIME_ROOT_ENV",
+    "RootRunState",
     "RuntimeHome",
     "RuntimeRotatingTextSink",
     "RuntimeRunLease",

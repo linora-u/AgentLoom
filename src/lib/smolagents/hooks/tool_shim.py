@@ -1,5 +1,6 @@
 import inspect
 import json
+import uuid
 from copy import copy
 from functools import wraps
 from typing import Any
@@ -220,6 +221,10 @@ def inject_hooks(tool_instance: Tool) -> Tool:
             return original_forward(*args, **kwargs)
 
         tool_input = _build_tool_input(original_forward, args, kwargs)
+        # One invocation id is created before any hook runs and reused for its
+        # call/result or call/error pair. Evidence consumers must never infer
+        # this relationship from event order.
+        tool_call_id = uuid.uuid4().hex
 
         # --- Type coercion: convert LLM string values to declared types ---
         if tool_inputs_schema:
@@ -236,6 +241,7 @@ def inject_hooks(tool_instance: Tool) -> Tool:
                 tool_input,
                 tool_response=None,
                 tool_inputs_schema=tool_inputs_schema,
+                tool_call_id=tool_call_id,
             )
             hook_manager.flush_user_messages()
 
@@ -291,6 +297,7 @@ def inject_hooks(tool_instance: Tool) -> Tool:
                     effective_tool_input,
                     tool_response=tool_response,
                     tool_inputs_schema=tool_inputs_schema,
+                    tool_call_id=tool_call_id,
                 )
                 hook_manager.flush_user_messages()
                 if post_result.should_block():
@@ -312,6 +319,7 @@ def inject_hooks(tool_instance: Tool) -> Tool:
                     effective_tool_input,
                     tool_response={"error": str(tool_error), "error_type": type(tool_error).__name__},
                     tool_inputs_schema=tool_inputs_schema,
+                    tool_call_id=tool_call_id,
                 )
                 hook_manager.flush_user_messages()
             except Exception as post_error_hook_error:

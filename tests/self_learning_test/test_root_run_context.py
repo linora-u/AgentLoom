@@ -50,6 +50,20 @@ def test_require_root_run_id_fails_closed_without_binding():
 def test_bind_root_run_owns_outer_binding_and_nested_calls_inherit_it():
     assert get_current_session_run_id() is None
 
+
+def test_bind_root_run_reuses_one_state_and_next_root_gets_a_fresh_state():
+    from src.trace import require_root_run_state
+
+    with bind_root_run("shared-root-state"):
+        first = require_root_run_state()
+        assert require_root_run_state() is first
+        with bind_root_run("nested-worker-id") as owns_nested:
+            assert owns_nested is False
+            assert require_root_run_state() is first
+
+    with bind_root_run("next-root-state"):
+        assert require_root_run_state() is not first
+
     with bind_root_run("supervisor-run") as outer_owner:
         assert outer_owner is True
         assert require_root_run_id() == "supervisor-run"
@@ -495,7 +509,12 @@ def test_disabled_session_tools_fail_closed_before_runtime_or_state_access(
     assert json.loads(session_tools.session_search("historical secret")) == session_expected
     assert json.loads(session_tools.session_scroll("historical-run", 1)) == session_expected
     assert json.loads(
-        memory_tool.memory(action="add", scope="project", content="must not persist")
+        memory_tool.memory(
+            action="propose",
+            scope="app",
+            memory_key="disabled:must-not-persist",
+            text="must not persist",
+        )
     ) == {"ok": False, "error": "self_learning_disabled"}
     assert not root.exists()
 
@@ -541,7 +560,20 @@ def test_tool_wrapper_propagates_and_refreshes_root_across_executor_thread(
         "_current_agent_config",
         lambda: {
             "application_id": "root_context_test",
-            "self_learning": {"enabled": True, "memory": {"write_approval": False}},
+            "self_learning": {
+                "enabled": True,
+                "review": {
+                    "enabled": True,
+                    "application": {
+                        "review_model": "summary",
+                        "approval": {"fact": "manual", "experience": "manual"},
+                    },
+                    "project": {
+                        "review_model": "summary",
+                        "approval": {"fact": "manual", "experience": "manual"},
+                    },
+                },
+            },
         },
     )
     wrapped = ensure_tool_wrapped([memory])[0]
@@ -551,9 +583,10 @@ def test_tool_wrapper_propagates_and_refreshes_root_across_executor_thread(
         first = json.loads(
             executor.submit(
                 wrapped.forward,
-                action="add",
-                scope="project",
-                content="first threaded durable fact",
+                action="propose",
+                scope="app",
+                memory_key="threaded:first",
+                text="first threaded durable fact",
             ).result()
         )
     assert first["ok"] is True
@@ -566,17 +599,24 @@ def test_tool_wrapper_propagates_and_refreshes_root_across_executor_thread(
         second = json.loads(
             executor.submit(
                 wrapped.forward,
-                action="add",
-                scope="project",
-                content="second threaded durable fact",
+                action="propose",
+                scope="app",
+                memory_key="threaded:second",
+                text="second threaded durable fact",
             ).result()
         )
     assert second["ok"] is True
 
     store = MemoryStore()
-    assert [item["content"] for item in store.list("project")] == [
-        "first threaded durable fact",
-        "second threaded durable fact",
+    assert store.list("app", scope_id="root_context_test") == []
+    candidates = store.list_pending()
+    assert [candidate["memory_key"] for candidate in candidates] == [
+        "threaded:first",
+        "threaded:second",
+    ]
+    assert [json.loads(candidate["source_run_ids_json"]) for candidate in candidates] == [
+        ["root-tool-a"],
+        ["root-tool-b"],
     ]
 
     # Preparing the same cached tool without a binding must clear, rather than
@@ -586,16 +626,14 @@ def test_tool_wrapper_propagates_and_refreshes_root_across_executor_thread(
         missing = json.loads(
             executor.submit(
                 wrapped.forward,
-                action="add",
-                scope="project",
-                content="must not inherit a stale root",
+                action="propose",
+                scope="app",
+                memory_key="threaded:stale-root",
+                text="must not inherit a stale root",
             ).result()
         )
     assert missing["error"] == "missing_run_context"
-    assert [item["content"] for item in store.list("project")] == [
-        "first threaded durable fact",
-        "second threaded durable fact",
-    ]
+    assert len(store.list_pending()) == 2
 
 
 def test_session_tools_exclude_every_leaf_of_current_root(
