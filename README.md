@@ -50,7 +50,7 @@ After the first run, you should see:
 - optional visualization through `uv run loom ui`;
 - optional terminal monitoring through `uv run loom dashboard`.
 
-`run_id` identifies one execution attempt and changes on resume. `task_id` identifies the logical task and remains stable, so a resumed attempt writes a new run directory while continuing the same checkpoint. The agent-visible `.runtime/` workspace is intentionally separate from framework runtime storage.
+`run_id` identifies one execution attempt and changes on resume. `task_id` identifies the logical task and remains stable, so a resumed attempt writes a new run directory while continuing the same checkpoint. Agent workspaces live under `.agentloom/workspaces/agents/<application_id>/<agent_path>/`: `insights.md` is shared across tasks, while task state lives under `tasks/<task_id>/`.
 
 ## Create a Multi-Agent App with Codex
 
@@ -216,8 +216,8 @@ Before running the tool, make sure `codex` is on `PATH` and `codex login status`
 | `uv run loom list-tasks` | List resumable checkpoint tasks. |
 | `uv run loom clean-tasks` | Clean old checkpoint data. |
 | `uv run loom clean-runtime` | Apply configured retention to completed run directories and raw artifacts. |
-| `uv run loom migrate-runtime --dry-run` | Preview valid legacy checkpoint candidates without changing disk state. |
-| `uv run loom migrate-runtime --apply` | Migrate valid legacy checkpoints and archive the old `.logs` tree. |
+| `uv run loom migrate-runtime --dry-run` | Preview legacy checkpoint candidates plus the unscoped `.runtime` workspace without changing disk state. |
+| `uv run loom migrate-runtime --apply` | Migrate checkpoints, archive `.logs`, and atomically preserve `.runtime` under `.agentloom/workspaces/legacy-unscoped/`. |
 
 ## Documentation
 

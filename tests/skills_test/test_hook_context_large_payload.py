@@ -178,7 +178,13 @@ class TestHookRunArtifacts(unittest.TestCase):
         self.binding.__exit__(None, None, None)
         self.temp_dir.cleanup()
 
-    def _run_script(self, source: str, *, timeout: float = 10):
+    def _run_script(
+        self,
+        source: str,
+        *,
+        timeout: float = 10,
+        context: HookContext | None = None,
+    ):
         script = self.root / "hook.py"
         script.write_text(source, encoding="utf-8")
         executor = create_hook_executor(
@@ -188,7 +194,7 @@ class TestHookRunArtifacts(unittest.TestCase):
             logger=logging.getLogger(__name__),
             timeout=timeout,
         )
-        return executor(_make_context({"file": "test.txt"}))
+        return executor(context or _make_context({"file": "test.txt"}))
 
     def test_stdout_stderr_and_audit_are_written_to_bound_run(self):
         result = self._run_script(
@@ -207,6 +213,68 @@ class TestHookRunArtifacts(unittest.TestCase):
         audit = json.loads((audit_dir / "audit.json").read_text(encoding="utf-8"))
         self.assertEqual(audit["stdout_path"], str(stdout_path))
         self.assertEqual(audit["stderr_path"], str(stderr_path))
+
+    def test_hook_receives_paths_from_bound_runtime_context(self):
+        result = self._run_script(
+            "import json, os\n"
+            "keys = [\n"
+            "    'AGENTLOOM_RUNTIME_ROOT', 'APPLICATION_ID', 'TASK_ID',\n"
+            "    'RUNTIME_AGENT_PATH', 'AGENTLOOM_AGENT_TASK_WORKSPACE',\n"
+            "    'AGENTLOOM_AGENT_INSIGHTS_PATH',\n"
+            "    'AGENTLOOM_VISUALIZATION_PATH',\n"
+            "]\n"
+            "print(json.dumps({'decision': 'allow', 'telemetry': {k: os.environ[k] for k in keys}}))\n"
+        )
+
+        self.assertTrue(result.success)
+        agent_path = result.telemetry["RUNTIME_AGENT_PATH"]
+        self.assertEqual(
+            result.telemetry["AGENTLOOM_AGENT_TASK_WORKSPACE"],
+            str(self.runtime_context.agent_task_workspace_dir(agent_path)),
+        )
+        self.assertEqual(
+            result.telemetry["AGENTLOOM_AGENT_INSIGHTS_PATH"],
+            str(self.runtime_context.agent_insights_path(agent_path)),
+        )
+        root_agent_path = agent_path.split("/", 1)[0]
+        self.assertEqual(
+            result.telemetry["AGENTLOOM_VISUALIZATION_PATH"],
+            str(self.runtime_context.agent_visualization_path(root_agent_path)),
+        )
+        self.assertEqual(result.telemetry["APPLICATION_ID"], "hook-tests")
+        self.assertEqual(result.telemetry["TASK_ID"], "task")
+
+    def test_nested_same_name_subagent_keeps_distinct_workspace(self):
+        from src.trace import (
+            clear_current_runtime_agent_path,
+            set_current_runtime_agent_path,
+        )
+
+        set_current_runtime_agent_path("supervisor/worker")
+        try:
+            context = HookContext(
+                session_id="test-session",
+                cwd=str(self.root),
+                hook_event_name="SubagentStart",
+                tool_name="worker",
+                tool_input={"agent_name": "worker"},
+            )
+            result = self._run_script(
+                "import json, os\n"
+                "print(json.dumps({'decision': 'allow', 'telemetry': "
+                "{'runtime_path': os.environ['RUNTIME_AGENT_PATH'], "
+                "'workspace': os.environ['AGENTLOOM_AGENT_TASK_WORKSPACE']}}))\n",
+                context=context,
+            )
+        finally:
+            clear_current_runtime_agent_path()
+
+        expected_path = "supervisor/worker/worker"
+        self.assertEqual(result.telemetry["runtime_path"], expected_path)
+        self.assertEqual(
+            result.telemetry["workspace"],
+            str(self.runtime_context.agent_task_workspace_dir(expected_path)),
+        )
 
     def test_oversized_hook_json_is_not_buffered_or_copied_into_telemetry(self):
         output_size = HOOK_STDOUT_MAX_BYTES + 1
@@ -358,20 +426,28 @@ class TestLargePayloadIntegration(unittest.TestCase):
         self.temp_dir = tempfile.TemporaryDirectory()
         self.old_cwd = os.getcwd()
         os.chdir(self.temp_dir.name)
-        os.environ["AGENT_LOOM_RUNTIME_ROOT"] = self.temp_dir.name
+        self.runtime_root = Path(self.temp_dir.name) / ".agentloom"
+        os.environ["AGENTLOOM_RUNTIME_ROOT"] = str(self.runtime_root)
+        os.environ["APPLICATION_ID"] = "test-app"
+        os.environ["TASK_ID"] = "test-task"
 
         self.skill_dir = Path(self.temp_dir.name) / "agent-recall-with-files"
         shutil.copytree(source_skill_dir, self.skill_dir)
         self.skill_path = self.skill_dir / "SKILL.md"
 
-        self.runtime_dir = Path(self.temp_dir.name) / ".runtime" / "default"
+        self.agent_root = (
+            self.runtime_root / "workspaces" / "agents" / "test-app" / "default"
+        )
+        self.runtime_dir = self.agent_root / "tasks" / "test-task"
         self.runtime_dir.mkdir(parents=True, exist_ok=True)
         (self.runtime_dir / "trace.md").write_text("# Trace\n", encoding="utf-8")
-        (self.runtime_dir / "insights.md").write_text("# Insights\n", encoding="utf-8")
+        (self.agent_root / "insights.md").write_text("# Insights\n", encoding="utf-8")
         (self.runtime_dir / "context.md").write_text("# Context\n", encoding="utf-8")
 
     def tearDown(self):
-        os.environ.pop("AGENT_LOOM_RUNTIME_ROOT", None)
+        os.environ.pop("AGENTLOOM_RUNTIME_ROOT", None)
+        os.environ.pop("APPLICATION_ID", None)
+        os.environ.pop("TASK_ID", None)
         os.chdir(self.old_cwd)
         self.temp_dir.cleanup()
 
