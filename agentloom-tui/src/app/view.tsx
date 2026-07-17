@@ -10,7 +10,12 @@
  * terminal renderer, conversation center, and responsive detail directory.
  */
 
-import { RGBA, TextAttributes, type TextareaRenderable } from "@opentui/core"
+import {
+  RGBA,
+  TextAttributes,
+  type ScrollBoxRenderable,
+  type TextareaRenderable,
+} from "@opentui/core"
 import { useKeyboard, useRenderer, useTerminalDimensions } from "@opentui/solid"
 import {
   For,
@@ -33,6 +38,7 @@ import {
 import {
   AGENTLOOM_LOGO,
   SIDEBAR_WIDTH,
+  createDefaultScrollAcceleration,
   resolveSidebarLayout,
   statusColor,
   statusPresentation,
@@ -71,10 +77,8 @@ export function AgentLoomApp(props: AgentLoomAppProps) {
     preference: "auto",
     open: state().sidebarOpen,
   }))
-  const groups = createMemo(() => {
-    state()
-    return buildSidebarGroups(props.session.state.snapshot)
-  })
+  const snapshot = createMemo(() => state().snapshot)
+  const groups = createMemo(() => buildSidebarGroups(snapshot()))
   onMount(() => {
     setTimeout(() => {
       if (input?.isDestroyed) return
@@ -376,10 +380,17 @@ function BuilderView(props: {
           backgroundColor={props.theme.element}
           focusedBackgroundColor={props.theme.element}
           cursorColor={props.state.busy ? props.theme.element : props.theme.primary}
+          keyBindings={[
+            { name: "return", action: "submit" },
+            { name: "kpenter", action: "submit" },
+            { name: "linefeed", action: "submit" },
+            { name: "return", shift: true, action: "newline" },
+            { name: "kpenter", shift: true, action: "newline" },
+          ]}
           onKeyDown={(event) => {
             if (props.state.busy) event.preventDefault()
           }}
-          onSubmit={() => setTimeout(() => setTimeout(submit, 0), 0)}
+          onSubmit={submit}
           onMouseDown={() => textarea?.focus()}
         />
       </box>
@@ -461,6 +472,15 @@ function Sidebar(props: {
   onSelect: (entry: SidebarEntry, index: number) => void
   onHover: (index: number) => void
 }) {
+  let scrollbox: ScrollBoxRenderable | undefined
+  const scrollAcceleration = createDefaultScrollAcceleration()
+
+  createEffect(() => {
+    const selected = props.selected
+    if (!scrollbox || selected < 0) return
+    scrollbox.scrollChildIntoView(sidebarEntryID(selected))
+  })
+
   return (
     <box
       width={SIDEBAR_WIDTH}
@@ -475,8 +495,11 @@ function Sidebar(props: {
       borderColor={props.theme.border}
     >
       <scrollbox
+        id="agentloom-sidebar-scrollbox"
+        ref={(value: ScrollBoxRenderable) => (scrollbox = value)}
         flexGrow={1}
         minHeight={0}
+        scrollAcceleration={scrollAcceleration}
         verticalScrollbarOptions={{
           trackOptions: {
             backgroundColor: props.theme.panel,
@@ -538,6 +561,7 @@ function SidebarGroup(props: {
             const presentation = () => statusPresentation(entry.status)
             return (
               <box
+                id={sidebarEntryID(index())}
                 flexShrink={0}
                 paddingLeft={1}
                 paddingRight={1}
@@ -562,6 +586,10 @@ function SidebarGroup(props: {
       </Show>
     </box>
   )
+}
+
+function sidebarEntryID(index: number): string {
+  return `agentloom-sidebar-entry-${index}`
 }
 
 function Footer(props: { theme: AgentLoomPalette }) {
