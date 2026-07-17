@@ -34,11 +34,18 @@ def reset_todo_state():
 
 @pytest.fixture
 def tmp_runtime(tmp_path, monkeypatch):
-    """Provide a temporary project root with .runtime/ directory."""
+    """Provide a bound canonical runtime context."""
+    from src.lib.runtime import RuntimeHome, bind_run_context
+
     mod = _get_todo_module()
-    monkeypatch.setattr(mod, "_get_project_root", lambda: tmp_path)
     monkeypatch.setattr(mod, "_get_agent_name", lambda: "test_agent")
-    return tmp_path
+    context = RuntimeHome(tmp_path / ".agentloom").context(
+        application_id="test-app",
+        task_id="task",
+        run_id="run",
+    )
+    with bind_run_context(context):
+        yield context
 
 
 # ---------------------------------------------------------------------------
@@ -245,7 +252,7 @@ class TestPersistence:
         _call_todo_write([
             {"content": "My Task", "status": "pending"},
         ])
-        todos_file = tmp_runtime / ".runtime" / "test_agent" / "todos.md"
+        todos_file = tmp_runtime.agent_task_workspace_dir("test_agent") / "todos.md"
         assert todos_file.exists()
         content = todos_file.read_text()
         assert "My Task" in content
@@ -255,7 +262,7 @@ class TestPersistence:
             {"content": "Done task", "status": "completed"},
             {"content": "Other", "status": "pending"},
         ])
-        todos_file = tmp_runtime / ".runtime" / "test_agent" / "todos.md"
+        todos_file = tmp_runtime.agent_task_workspace_dir("test_agent") / "todos.md"
         content = todos_file.read_text()
         assert "- [x] Done task" in content
 
@@ -263,7 +270,7 @@ class TestPersistence:
         _call_todo_write([
             {"content": "Active task", "status": "in_progress"},
         ])
-        todos_file = tmp_runtime / ".runtime" / "test_agent" / "todos.md"
+        todos_file = tmp_runtime.agent_task_workspace_dir("test_agent") / "todos.md"
         content = todos_file.read_text()
         assert "- [ ] **IN PROGRESS** Active task" in content
 
@@ -271,7 +278,7 @@ class TestPersistence:
         _call_todo_write([
             {"content": "Future task", "status": "pending"},
         ])
-        todos_file = tmp_runtime / ".runtime" / "test_agent" / "todos.md"
+        todos_file = tmp_runtime.agent_task_workspace_dir("test_agent") / "todos.md"
         content = todos_file.read_text()
         assert "- [ ] Future task" in content
 
@@ -280,7 +287,7 @@ class TestPersistence:
             {"content": "Task A", "status": "completed"},
             {"content": "Task B", "status": "completed"},
         ])
-        todos_file = tmp_runtime / ".runtime" / "test_agent" / "todos.md"
+        todos_file = tmp_runtime.agent_task_workspace_dir("test_agent") / "todos.md"
         content = todos_file.read_text()
         assert "# Task Progress" in content
         # Completed items should be preserved
@@ -291,7 +298,7 @@ class TestPersistence:
         _call_todo_write([
             {"content": "Task", "status": "pending"},
         ])
-        runtime_dir = tmp_runtime / ".runtime" / "test_agent"
+        runtime_dir = tmp_runtime.agent_task_workspace_dir("test_agent")
         assert runtime_dir.is_dir()
 
 
@@ -302,29 +309,44 @@ class TestPersistence:
 class TestAgentKeyAndState:
     def test_agent_key_from_context_var(self, tmp_path, monkeypatch):
         """Verify agent name is read from ContextVar."""
+        from src.lib.runtime import RuntimeHome, bind_run_context
+
         mod = _get_todo_module()
-        monkeypatch.setattr(mod, "_get_project_root", lambda: tmp_path)
         monkeypatch.setattr(mod, "_get_agent_name", lambda: "my_agent")
-        _call_todo_write([{"content": "Test", "status": "pending"}])
-        todos_file = tmp_path / ".runtime" / "my_agent" / "todos.md"
+        context = RuntimeHome(tmp_path / ".agentloom").context(
+            application_id="app", task_id="task", run_id="run"
+        )
+        with bind_run_context(context):
+            _call_todo_write([{"content": "Test", "status": "pending"}])
+        todos_file = context.agent_task_workspace_dir("my_agent") / "todos.md"
         assert todos_file.exists()
 
     def test_agent_key_fallback(self, tmp_path, monkeypatch):
         """When ContextVar returns None, fallback to 'default'."""
+        from src.lib.runtime import RuntimeHome, bind_run_context
+
         mod = _get_todo_module()
-        monkeypatch.setattr(mod, "_get_project_root", lambda: tmp_path)
         monkeypatch.setattr(mod, "_get_agent_name", lambda: "default")
-        _call_todo_write([{"content": "Test", "status": "pending"}])
-        todos_file = tmp_path / ".runtime" / "default" / "todos.md"
+        context = RuntimeHome(tmp_path / ".agentloom").context(
+            application_id="app", task_id="task", run_id="run"
+        )
+        with bind_run_context(context):
+            _call_todo_write([{"content": "Test", "status": "pending"}])
+        todos_file = context.agent_task_workspace_dir("default") / "todos.md"
         assert todos_file.exists()
 
     def test_agent_key_empty_string(self, tmp_path, monkeypatch):
         """When ContextVar returns empty string, fallback to 'default'."""
+        from src.lib.runtime import RuntimeHome, bind_run_context
+
         mod = _get_todo_module()
-        monkeypatch.setattr(mod, "_get_project_root", lambda: tmp_path)
         monkeypatch.setattr(mod, "_get_agent_name", lambda: "default")
-        _call_todo_write([{"content": "Test", "status": "pending"}])
-        todos_file = tmp_path / ".runtime" / "default" / "todos.md"
+        context = RuntimeHome(tmp_path / ".agentloom").context(
+            application_id="app", task_id="task", run_id="run"
+        )
+        with bind_run_context(context):
+            _call_todo_write([{"content": "Test", "status": "pending"}])
+        todos_file = context.agent_task_workspace_dir("default") / "todos.md"
         assert todos_file.exists()
 
     def test_reset_clears_all(self, tmp_runtime):

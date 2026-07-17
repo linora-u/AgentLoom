@@ -390,7 +390,7 @@ class LoomAgentMixin(TodoSyncMixin):
     def _generate_planning_step(self, task, is_first_step: bool, step: int):
         """Override: inject current todo state into planning context.
 
-        Reads .runtime/<agent>/todos.md and appends its content to
+        Reads the current task's canonical agent workspace todos.md and appends its content to
         update_plan_pre_messages BEFORE Jinja2 rendering.  The LLM sees
         the current task list in the SYSTEM message during planning.
         """

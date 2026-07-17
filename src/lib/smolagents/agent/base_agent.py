@@ -1353,7 +1353,7 @@ class RoleDrivenAgent(BaseAgent):
 
             active_context = capture_explicit_execution_context()
             previous_runtime_path = active_context.runtime_agent_path
-            if previous_runtime_path and previous_runtime_path != self.name:
+            if previous_runtime_path:
                 runtime_path = f"{previous_runtime_path}/{self.name}"
             else:
                 runtime_path = self.name

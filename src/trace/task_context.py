@@ -237,9 +237,9 @@ def clear_current_agent_name() -> None:
 
 
 # ---------------------------------------------------------------------------
-# Runtime agent path — hierarchical path used ONLY for .runtime directory
-# nesting.  Separate from agent_name so that logs, checkpoints, and other
-# consumers keep the original flat name.
+# Runtime agent path — hierarchical identity used only for agent workspace
+# nesting. Separate from agent_name so logs, checkpoints, and other consumers
+# keep the original flat name.
 # ---------------------------------------------------------------------------
 
 def set_current_runtime_agent_path(path: str) -> None:

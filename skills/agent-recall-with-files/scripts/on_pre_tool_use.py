@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Hook: PreToolUse — inject recent runtime context and normalize paths.
+"""Hook: PreToolUse — inject recent canonical workspace context.
 
 Injects runtime file contents into the agent context so the LLM can
 see its own notes.  Empty-template files get a brief "(empty)" marker
@@ -7,41 +7,38 @@ instead of the full template text to reduce noise.
 """
 
 from common import (
-    CONTEXT_FILE, TRACE_FILE, INSIGHTS_FILE,
-    PRE_TOOL_TRACE_LINES, PRE_TOOL_INSIGHTS_LINES, SKILL_TAG,
-    runtime_dir, tail, read_full, normalize_tool_input,
-    get_runtime_agent_path, get_tool_input, output,
+    CONTEXT_FILE,
+    INSIGHTS_FILE,
+    PRE_TOOL_INSIGHTS_LINES,
+    PRE_TOOL_TRACE_LINES,
+    SKILL_TAG,
+    TRACE_FILE,
     is_template_only,
+    output,
+    persistent_insights_path,
+    read_full,
+    tail,
+    task_workspace_dir,
 )
 
 
 def main() -> None:
-    agent = get_runtime_agent_path()
-    rd = runtime_dir(agent)
-    ti = get_tool_input()
-
-    # Normalize runtime path aliases in tool_input.
-    modified_input = normalize_tool_input(agent, ti)
+    workspace = task_workspace_dir()
+    persistent_insights = persistent_insights_path()
 
     # Read recent context from runtime files, with template-awareness.
-    context_full = "" if is_template_only(rd / CONTEXT_FILE, CONTEXT_FILE) else read_full(rd / CONTEXT_FILE)
-    trace_tail = "" if is_template_only(rd / TRACE_FILE, TRACE_FILE) else tail(rd / TRACE_FILE, PRE_TOOL_TRACE_LINES)
-    insights_tail = "" if is_template_only(rd / INSIGHTS_FILE, INSIGHTS_FILE) else tail(rd / INSIGHTS_FILE, PRE_TOOL_INSIGHTS_LINES)
-
-    prefix = ""
-    if modified_input is not None:
-        prefix = (
-            f"{SKILL_TAG} Normalized runtime paths to {rd}. "
-            f"Use the exact current agent directory and do not invent aliases.\n\n"
-        )
+    context_full = "" if is_template_only(workspace / CONTEXT_FILE, CONTEXT_FILE) else read_full(workspace / CONTEXT_FILE)
+    trace_tail = "" if is_template_only(workspace / TRACE_FILE, TRACE_FILE) else tail(workspace / TRACE_FILE, PRE_TOOL_TRACE_LINES)
+    insights_tail = "" if is_template_only(persistent_insights, INSIGHTS_FILE) else tail(persistent_insights, PRE_TOOL_INSIGHTS_LINES)
 
     if not context_full and not trace_tail and not insights_tail:
         context_text = (
-            f"{SKILL_TAG} No runtime notes yet under {rd}. "
-            f"Keep {CONTEXT_FILE}, {TRACE_FILE} and {INSIGHTS_FILE} current as you work."
+            f"{SKILL_TAG} No runtime notes yet under {workspace}. "
+            f"Keep {workspace / CONTEXT_FILE}, {workspace / TRACE_FILE}, and "
+            f"{persistent_insights} current as you work."
         )
     else:
-        parts = [f"{SKILL_TAG} Runtime context from {rd}:"]
+        parts = [f"{SKILL_TAG} Runtime context from {workspace}:"]
         if context_full:
             parts.append(f"[{CONTEXT_FILE}]\n{context_full}")
         if trace_tail:
@@ -51,12 +48,10 @@ def main() -> None:
         context_text = "\n\n".join(parts)
 
     result: dict = {
-        "decision": "modify" if modified_input is not None else "allow",
-        "agent_context": prefix + context_text,
-        "telemetry": {"runtime_dir": str(rd)},
+        "decision": "allow",
+        "agent_context": context_text,
+        "telemetry": {"task_workspace": str(workspace)},
     }
-    if modified_input is not None:
-        result["modified_input"] = modified_input
 
     output(result)
 

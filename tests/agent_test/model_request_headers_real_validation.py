@@ -400,7 +400,7 @@ def _cases() -> tuple[HeaderValidationCase, ...]:
 
 def main() -> None:
     previous_config = config_module._ACTIVE_CONFIG
-    previous_runtime_root = os.environ.get("AGENT_LOOM_RUNTIME_ROOT")
+    previous_runtime_root = os.environ.get("AGENTLOOM_RUNTIME_ROOT")
     state = CaptureState()
     server = ThreadingHTTPServer(("127.0.0.1", 0), _make_handler(state))
     thread = threading.Thread(target=server.serve_forever, daemon=True)
@@ -411,7 +411,7 @@ def main() -> None:
     reports: list[dict[str, Any]] = []
 
     try:
-        os.environ["AGENT_LOOM_RUNTIME_ROOT"] = str(tmp_root / "runtime")
+        os.environ["AGENTLOOM_RUNTIME_ROOT"] = str(tmp_root / "runtime")
         for case in _cases():
             before = len(state.requests)
             result = run_case(case, base_url=base_url, runtime_root=tmp_root / case.name)
@@ -429,9 +429,9 @@ def main() -> None:
             config_module._ACTIVE_CONFIG = previous_config
         model_manager_module.model_manager.clear_cache()
         if previous_runtime_root is None:
-            os.environ.pop("AGENT_LOOM_RUNTIME_ROOT", None)
+            os.environ.pop("AGENTLOOM_RUNTIME_ROOT", None)
         else:
-            os.environ["AGENT_LOOM_RUNTIME_ROOT"] = previous_runtime_root
+            os.environ["AGENTLOOM_RUNTIME_ROOT"] = previous_runtime_root
         shutil.rmtree(tmp_root, ignore_errors=True)
 
     print(json.dumps({"status": "passed", "base_url": base_url, "cases": reports}, ensure_ascii=False, indent=2))

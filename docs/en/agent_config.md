@@ -661,8 +661,8 @@ When `planning_interval` is configured, the framework automatically injects the 
 `todo_write` tool behavior:
 - **Input**: JSON array, each item with `content` (task description) and `status` (`pending` / `in_progress` / `completed`)
 - **Semantics**: Full replacement (each call replaces the entire list)
-- **Auto-clear**: When all tasks marked `completed`, the list is automatically cleared
-- **Persistence**: Writes to `.runtime/<agent_name>/todos.md` (Markdown checkbox format)
+- **Completed records**: When all tasks are marked `completed`, the records remain visible
+- **Persistence**: Writes to `.agentloom/workspaces/agents/<application_id>/<agent_path>/tasks/<task_id>/todos.md` (Markdown checkbox format)
 - **Verification nudge**: When 3+ tasks all completed without a verification step, the return value's first line reminds the LLM to consider running verification
 
 ---

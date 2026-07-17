@@ -2,18 +2,19 @@
 
 from __future__ import annotations
 
+import fcntl
 import json
 import os
+import uuid
+from contextlib import contextmanager
 from pathlib import Path
-from typing import Any, Dict, List, Optional
-
+from typing import Any
 
 # ---------------------------------------------------------------------------
 # Constants
 # ---------------------------------------------------------------------------
 
 SKILL_TAG = "[agent-visualization]"
-VIZ_FILENAME = "visualization.json"
 
 # Tools whose PreToolUse/PostToolUse events should NOT generate timeline
 # events (internal framework hooks, not user-visible actions).
@@ -27,59 +28,22 @@ FILTERED_TOOLS = frozenset({
 # Path helpers
 # ---------------------------------------------------------------------------
 
-def _find_agent_loom_root() -> Path:
-    """Derive the AgentLoom project root directory.
+def visualization_path() -> Path:
+    """Return the exact root timeline path injected by RuntimeContext."""
 
-    Resolution order:
-    1. ``$AGENT_LOOM_RUNTIME_ROOT`` env var (for tests with temp dirs).
-    2. Walk upward from this file's location and look for
-       ``config/llm.yaml`` — the globally unique AgentLoom root marker.
-       This works regardless of how deeply the skill is nested.
-    3. Fall back to ``pyproject.toml`` detection (backward compatibility).
-    4. Fall back to CWD.
-    """
-    env_root = os.environ.get("AGENT_LOOM_RUNTIME_ROOT", "").strip()
-    if env_root:
-        return Path(env_root)
-
-    # Walk upward looking for config/llm.yaml (globally unique marker).
-    current = Path(__file__).resolve().parent
-    while current != current.parent:
-        if (current / "config" / "llm.yaml").exists():
-            return current
-        current = current.parent
-
-    # Backward compatibility: fixed 4-level walk + pyproject.toml.
-    candidate = Path(__file__).resolve().parent.parent.parent.parent
-    if (candidate / "pyproject.toml").exists():
-        return candidate
-
-    return Path.cwd()
-
-
-def get_runtime_agent_path() -> str:
-    """Resolve hierarchical runtime path from ``$RUNTIME_AGENT_PATH``.
-
-    Falls back to ``$AGENT_NAME`` then ``"default"``.  The runtime path
-    may contain ``/`` separators (e.g. ``parent/child``) so that .runtime
-    directories nest under the parent agent.
-    """
-    return os.environ.get("RUNTIME_AGENT_PATH", "").strip() or get_agent_name()
-
-
-def viz_output_path(agent_name: str) -> Path:
-    """Return the visualization JSON output path for an agent.
-
-    ``<agent_loom_root>/.runtime/<agent_name>/visualization.json``
-    """
-    return _find_agent_loom_root() / ".runtime" / agent_name / VIZ_FILENAME
+    injected = os.environ.get("AGENTLOOM_VISUALIZATION_PATH", "").strip()
+    if not injected:
+        raise RuntimeError(
+            "AGENTLOOM_VISUALIZATION_PATH was not injected by AgentLoom RuntimeContext"
+        )
+    return Path(injected)
 
 
 # ---------------------------------------------------------------------------
 # Atomic JSON read/write
 # ---------------------------------------------------------------------------
 
-def read_viz_state(path: Path) -> Dict[str, Any]:
+def read_viz_state(path: Path) -> dict[str, Any]:
     """Read the visualization JSON state, returning empty structure on error."""
     if not path.exists():
         return {"config": {"title": "", "agents": []}, "timeline": []}
@@ -92,12 +56,35 @@ def read_viz_state(path: Path) -> Dict[str, Any]:
     return {"config": {"title": "", "agents": []}, "timeline": []}
 
 
-def write_viz_state(path: Path, data: Dict[str, Any]) -> None:
-    """Atomically write visualization JSON (tmp + rename)."""
+@contextmanager
+def _viz_lock(path: Path):
     path.parent.mkdir(parents=True, exist_ok=True)
-    tmp = path.with_suffix(".tmp")
-    tmp.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
-    tmp.replace(path)
+    lock_path = path.parent / f".{path.name}.lock"
+    with lock_path.open("a+", encoding="utf-8") as lock_stream:
+        fcntl.flock(lock_stream.fileno(), fcntl.LOCK_EX)
+        try:
+            yield
+        finally:
+            fcntl.flock(lock_stream.fileno(), fcntl.LOCK_UN)
+
+
+def _write_viz_state_unlocked(path: Path, data: dict[str, Any]) -> None:
+    tmp = path.parent / f".{path.name}.{uuid.uuid4().hex}.tmp"
+    try:
+        tmp.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
+        tmp.replace(path)
+    finally:
+        try:
+            tmp.unlink()
+        except FileNotFoundError:
+            pass
+
+
+def write_viz_state(path: Path, data: dict[str, Any]) -> None:
+    """Atomically write visualization JSON under an inter-process lock."""
+
+    with _viz_lock(path):
+        _write_viz_state_unlocked(path, data)
 
 
 # ---------------------------------------------------------------------------
@@ -105,12 +92,12 @@ def write_viz_state(path: Path, data: Dict[str, Any]) -> None:
 # ---------------------------------------------------------------------------
 
 def ensure_agent_in_config(
-    data: Dict[str, Any],
+    data: dict[str, Any],
     agent_name: str,
     agent_type: str = "worker",
 ) -> bool:
     """Add an agent to config.agents if not already present. Returns True if added."""
-    agents: List[Dict[str, str]] = data.get("config", {}).get("agents", [])
+    agents: list[dict[str, str]] = data.get("config", {}).get("agents", [])
     for a in agents:
         if a.get("name") == agent_name:
             return False
@@ -118,9 +105,61 @@ def ensure_agent_in_config(
     return True
 
 
-def get_next_step(data: Dict[str, Any]) -> int:
+def register_agent_in_config(
+    path: Path,
+    agent_name: str,
+    agent_type: str = "worker",
+) -> bool:
+    """Atomically register an agent without losing concurrent registrations."""
+
+    with _viz_lock(path):
+        data = read_viz_state(path)
+        added = ensure_agent_in_config(data, agent_name, agent_type)
+        if added:
+            _write_viz_state_unlocked(path, data)
+        return added
+
+
+def update_latest_tool_event(
+    path: Path,
+    *,
+    agent_name: str,
+    tool_name: str,
+    description: str,
+    status: str | None = None,
+    result: str | None = None,
+    error: str | None = None,
+) -> bool:
+    """Atomically update the latest matching tool event for one agent."""
+
+    with _viz_lock(path):
+        data = read_viz_state(path)
+        event = next(
+            (
+                item
+                for item in reversed(data.get("timeline", []))
+                if item.get("event_type") == "tool_call"
+                and item.get("agent_name") == agent_name
+                and item.get("tool_name") == tool_name
+            ),
+            None,
+        )
+        if event is None:
+            return False
+        event["description"] = description
+        if status is not None:
+            event["status"] = status
+        if result is not None and "result" not in event:
+            event["result"] = result
+        if error is not None and "error" not in event:
+            event["error"] = error
+        _write_viz_state_unlocked(path, data)
+        return True
+
+
+def get_next_step(data: dict[str, Any]) -> int:
     """Return the next step number (max existing step + 1, or 1)."""
-    timeline: List[Dict] = data.get("timeline", [])
+    timeline: list[dict] = data.get("timeline", [])
     if not timeline:
         return 1
     return max(ev.get("step", 0) for ev in timeline) + 1
@@ -137,40 +176,41 @@ def append_event(
     event_type: str,
     status: str,
     description: str = "",
-    tool_name: Optional[str] = None,
-    tool_args: Optional[Dict[str, Any]] = None,
-    target_agent: Optional[str] = None,
-    result: Optional[str] = None,
-    progress: Optional[str] = None,
-) -> Dict[str, Any]:
+    tool_name: str | None = None,
+    tool_args: dict[str, Any] | None = None,
+    target_agent: str | None = None,
+    result: str | None = None,
+    progress: str | None = None,
+) -> dict[str, Any]:
     """Append a timeline event to the visualization JSON and write it back.
 
     Returns the event dict that was appended.
     """
-    data = read_viz_state(path)
-    step = get_next_step(data)
+    with _viz_lock(path):
+        data = read_viz_state(path)
+        step = get_next_step(data)
 
-    event: Dict[str, Any] = {
-        "step": step,
-        "agent_name": agent_name,
-        "agent_type": agent_type,
-        "event_type": event_type,
-        "status": status,
-        "description": description,
-    }
-    if tool_name is not None:
-        event["tool_name"] = tool_name
-    if tool_args is not None:
-        event["tool_args"] = tool_args
-    if target_agent is not None:
-        event["target_agent"] = target_agent
-    if result is not None:
-        event["result"] = result
-    if progress is not None:
-        event["progress"] = progress
+        event: dict[str, Any] = {
+            "step": step,
+            "agent_name": agent_name,
+            "agent_type": agent_type,
+            "event_type": event_type,
+            "status": status,
+            "description": description,
+        }
+        if tool_name is not None:
+            event["tool_name"] = tool_name
+        if tool_args is not None:
+            event["tool_args"] = tool_args
+        if target_agent is not None:
+            event["target_agent"] = target_agent
+        if result is not None:
+            event["result"] = result
+        if progress is not None:
+            event["progress"] = progress
 
-    data["timeline"].append(event)
-    write_viz_state(path, data)
+        data["timeline"].append(event)
+        _write_viz_state_unlocked(path, data)
     return event
 
 
@@ -188,7 +228,7 @@ def get_tool_name() -> str:
     return os.environ.get("TOOL_NAME", "") or "unknown"
 
 
-def get_hook_context() -> Dict[str, Any]:
+def get_hook_context() -> dict[str, Any]:
     """Parse ``$HOOK_CONTEXT_JSON`` into a dict."""
     raw = os.environ.get("HOOK_CONTEXT_JSON", "").strip()
     if not raw:
@@ -200,20 +240,20 @@ def get_hook_context() -> Dict[str, Any]:
     return payload if isinstance(payload, dict) else {}
 
 
-def get_tool_input() -> Dict[str, Any]:
+def get_tool_input() -> dict[str, Any]:
     """Extract ``tool_input`` from the hook context."""
     ti = get_hook_context().get("tool_input")
     return ti if isinstance(ti, dict) else {}
 
 
-def output(result: Dict[str, Any]) -> None:
+def output(result: dict[str, Any]) -> None:
     """Print a JSON result to stdout (consumed by the shell executor)."""
     print(json.dumps(result, ensure_ascii=False))
 
 
-def find_supervisor_name(data: Dict[str, Any]) -> Optional[str]:
+def find_supervisor_name(data: dict[str, Any]) -> str | None:
     """Find the supervisor agent name from config, if any."""
-    agents: List[Dict[str, str]] = data.get("config", {}).get("agents", [])
+    agents: list[dict[str, str]] = data.get("config", {}).get("agents", [])
     for a in agents:
         if a.get("type") == "supervisor":
             return a.get("name")
@@ -221,31 +261,9 @@ def find_supervisor_name(data: Dict[str, Any]) -> Optional[str]:
 
 
 def find_supervisor_viz_path() -> Path:
-    """Locate the supervisor's visualization.json.
+    """Return the root supervisor timeline selected by RuntimeContext."""
 
-    Searches all ``.runtime/*/visualization.json`` files and returns the one
-    whose ``config.agents`` list contains an agent with ``type == "supervisor"``.
-    Falls back to the first found file, or creates a path from ``$AGENT_NAME``.
-    """
-    env_root = os.environ.get("AGENT_LOOM_RUNTIME_ROOT", "").strip()
-    if env_root:
-        runtime_root = Path(env_root) / ".runtime"
-    else:
-        runtime_root = _find_agent_loom_root() / ".runtime"
-
-    fallback: Optional[Path] = None
-    if runtime_root.exists():
-        for viz_file in runtime_root.glob("*/" + VIZ_FILENAME):
-            data = read_viz_state(viz_file)
-            if find_supervisor_name(data) is not None:
-                return viz_file
-            if fallback is None:
-                fallback = viz_file
-
-    if fallback is not None:
-        return fallback
-
-    return viz_output_path(get_runtime_agent_path())
+    return visualization_path()
 
 
 def is_filtered_tool(tool_name: str) -> bool:
