@@ -117,6 +117,7 @@ def _metadata(context: HookContext) -> dict[str, Any]:
             "yaml_path": app_scope.workflow_path or config.get("yaml_path") or config.get("_yaml_path") or "",
             "run_dir": config.get("run_dir") or "",
             "hook_event": context.hook_event_name,
+            "tool_call_id": context.tool_call_id or "",
             "sub_task_id": context.sub_task_id or _payload_value(context, "sub_task_id"),
         }
     )
@@ -193,6 +194,7 @@ def event_from_hook_context(context: HookContext) -> CanonicalSessionEvent | Non
         root_run_id=root_run_id,
         task_id=task_id,
         parent_task_id=context.task_id or "",
+        tool_call_id=context.tool_call_id or "",
         application_id=str(metadata.get("application_id") or ""),
         application_name=str(metadata.get("application_name") or ""),
         application_path=str(metadata.get("application_path") or ""),

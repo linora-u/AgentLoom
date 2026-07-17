@@ -65,6 +65,7 @@ def _context_to_dict(ctx: HookContext) -> Dict[str, Any]:
         "cwd": ctx.cwd,
         "hook_event_name": ctx.hook_event_name,
         "tool_name": ctx.tool_name,
+        "tool_call_id": ctx.tool_call_id,
         "tool_input": ctx.tool_input or {},
         "tool_response": ctx.tool_response,
         "tool_inputs_schema": ctx.tool_inputs_schema,
@@ -640,6 +641,7 @@ class HookManager:
         tool_input: Dict[str, Any],
         tool_response: Optional[Dict[str, Any]] = None,
         tool_inputs_schema: Optional[Dict[str, Any]] = None,
+        tool_call_id: Optional[str] = None,
     ) -> HookResult:
         """Trigger all matching hooks for an event.
 
@@ -683,6 +685,7 @@ class HookManager:
             hook_event_name=event.value,
             tool_name=tool_name,
             tool_input=tool_input,
+            tool_call_id=tool_call_id,
             root_run_id=root_run_id,
             tool_response=tool_response,
             tool_inputs_schema=tool_inputs_schema,
