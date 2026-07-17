@@ -17,6 +17,7 @@ Usage (CLI)::
 
 from __future__ import annotations
 
+import os
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
@@ -37,6 +38,11 @@ from src.lib.runtime import (
     resolve_application_id,
     resolve_runtime_home,
 )
+from src.lib.smolagents.agent.agent_validation import (
+    AgentConfigNormalizer,
+    build_normalized_execution_config,
+    validate_execution_config_payload,
+)
 from src.lib.smolagents.agent.yaml_agent_factory import (
     YamlAgentFactory,
     YamlConfiguredSupervisorAgent,
@@ -44,6 +50,163 @@ from src.lib.smolagents.agent.yaml_agent_factory import (
 
 #: 启动 agent 时 YAML 中必须提供的字段。
 _REQUIRED_YAML_FIELDS = ("name", "workflow", "description")
+_RUN_ARTIFACT_COPY_CHUNK_BYTES = 1024 * 1024
+_TASK_TREE_CLEANUP_MAX_BYTES = 1024 * 1024
+
+
+def _events_for_run(events: list[dict[str, Any]], run_id: str) -> list[dict[str, Any]]:
+    """Project a cumulative checkpoint log onto one concrete Run attempt."""
+
+    projected: list[dict[str, Any]] = []
+    preamble: list[dict[str, Any]] = []
+    current_run_id: str | None = None
+    saw_run_marker = False
+    selected_started = False
+    for event in events:
+        event_type = event.get("type")
+        if event_type in {"run_started", "run_resumed"}:
+            marker_run_id = event.get("run_id") if isinstance(event.get("run_id"), str) else None
+            if selected_started and marker_run_id != run_id:
+                break
+            if marker_run_id == run_id:
+                if not saw_run_marker and event_type == "run_started":
+                    projected.extend(preamble)
+                projected.append(event)
+                selected_started = True
+            current_run_id = marker_run_id
+            saw_run_marker = True
+            continue
+
+        explicit_run_id = event.get("run_id") if isinstance(event.get("run_id"), str) else None
+        tree = event.get("tree")
+        if explicit_run_id is None and isinstance(tree, dict) and isinstance(tree.get("run_id"), str):
+            explicit_run_id = tree["run_id"]
+        if selected_started:
+            if current_run_id == run_id and explicit_run_id in {None, run_id}:
+                projected.append(event)
+            continue
+        if not saw_run_marker:
+            if explicit_run_id == run_id:
+                projected.append(event)
+            elif explicit_run_id is None:
+                preamble.append(event)
+    return projected
+
+
+def _persist_run_observability(
+    runtime_context: Any,
+    checkpoint_mgr: CheckpointManager | None,
+    task_id: str,
+    *,
+    result: str | None,
+    event_start_offset: int | None,
+) -> dict[str, Any]:
+    """Copy durable result and task evidence into the canonical Run record."""
+
+    manifest_updates: dict[str, Any] = {}
+    if result is not None:
+        result_artifact = runtime_context.artifacts_dir / "result.txt"
+        runtime_context.atomic_write_run_file(result_artifact, result)
+        manifest_updates.update(
+            result_artifact="artifacts/result.txt",
+            result_size=len(result.encode("utf-8")),
+        )
+
+    if checkpoint_mgr is None:
+        return manifest_updates
+
+    try:
+        runtime_context.atomic_write_run_file_chunks(
+            runtime_context.audit_dir / "task_tree.json",
+            _checkpoint_file_chunks(
+                checkpoint_mgr,
+                task_id,
+                relative_path="task_tree.json",
+            ),
+        )
+    except FileNotFoundError:
+        pass
+    else:
+        manifest_updates["task_tree_artifact"] = "audit/task_tree.json"
+
+    if event_start_offset is not None:
+        event_stats = {"count": 0, "complete": True}
+        event_size = runtime_context.atomic_write_run_file_chunks(
+            runtime_context.audit_dir / "task_events.jsonl",
+            _run_event_chunks(
+                checkpoint_mgr,
+                task_id,
+                start_offset=event_start_offset,
+                stats=event_stats,
+            ),
+        )
+        manifest_updates.update(
+            task_events_artifact="audit/task_events.jsonl",
+            task_events_run_id=runtime_context.run_id,
+            task_events_count=event_stats["count"],
+            task_events_size=event_size,
+            task_events_complete=event_stats["complete"],
+        )
+    return manifest_updates
+
+
+def _task_events_size(checkpoint_mgr: CheckpointManager, task_id: str) -> int:
+    try:
+        with checkpoint_mgr.task_storage(task_id) as storage:
+            return storage.stat_file("task_events.jsonl").st_size
+    except (FileNotFoundError, OSError, RuntimeError):
+        return 0
+
+
+def _run_event_chunks(
+    checkpoint_mgr: CheckpointManager,
+    task_id: str,
+    *,
+    start_offset: int,
+    stats: dict[str, Any],
+):
+    with checkpoint_mgr.task_storage(task_id) as storage:
+        try:
+            with storage.open_binary_reader("task_events.jsonl") as stream:
+                size = os.fstat(stream.fileno()).st_size
+                if start_offset > size:
+                    stats["complete"] = False
+                    return
+                stream.seek(start_offset)
+                line_has_content = False
+                while True:
+                    chunk = stream.read(_RUN_ARTIFACT_COPY_CHUNK_BYTES)
+                    if not chunk:
+                        break
+                    segments = chunk.split(b"\n")
+                    for segment in segments[:-1]:
+                        if line_has_content or segment.strip():
+                            stats["count"] += 1
+                        line_has_content = False
+                    if segments[-1].strip():
+                        line_has_content = True
+                    yield chunk
+                if line_has_content:
+                    stats["count"] += 1
+        except FileNotFoundError:
+            stats["complete"] = False
+
+
+def _checkpoint_file_chunks(
+    checkpoint_mgr: CheckpointManager,
+    task_id: str,
+    *,
+    relative_path: str,
+):
+    """Stream one maintained checkpoint projection without replaying events."""
+
+    with checkpoint_mgr.task_storage(task_id) as storage:
+        with storage.open_binary_reader(relative_path) as stream:
+            while True:
+                chunk = stream.read(_RUN_ARTIFACT_COPY_CHUNK_BYTES)
+                if not chunk:
+                    return
+                yield chunk
 
 
 def _checkpoint_age_seconds(created_at: Any) -> float:
@@ -100,29 +263,88 @@ def validate_required_yaml_fields(
         ValueError: 当存在缺失或为空的必填字段时。
     """
     missing: list[str] = []
+    invalid: list[str] = []
     for field in ("name", "description"):
         value = config.get(field)
         if value is None or (isinstance(value, str) and not value.strip()):
             missing.append(field)
+        elif not isinstance(value, str):
+            invalid.append(f"{field} must be a non-empty string")
 
     workflow = config.get("workflow")
     workflow_valid = False
     if isinstance(workflow, str):
         workflow_valid = bool(workflow.strip())
     elif isinstance(workflow, list):
-        workflow_valid = bool(workflow) and all(
-            isinstance(item, str) and item.strip()
-            for item in workflow
-        )
+        workflow_valid = bool(workflow) and all(isinstance(item, str) and item.strip() for item in workflow)
     if not workflow_valid:
         missing.append("workflow")
 
-    if missing:
-        missing_str = ", ".join(missing)
+    if invalid:
+        problems: list[str] = []
+        if missing:
+            problems.append(f"missing: {', '.join(missing)}")
+        problems.extend(invalid)
         raise ValueError(
-            f"YAML 配置文件 {yaml_path} 缺少必填字段: {missing_str}\n"
+            f"YAML 配置文件 {yaml_path} 必填字段无效: {'; '.join(problems)}\n"
             f"请确保 YAML 中包含以下字段: {', '.join(_REQUIRED_YAML_FIELDS)}"
         )
+    if missing:
+        raise ValueError(
+            f"YAML 配置文件 {yaml_path} 缺少必填字段: {', '.join(missing)}\n"
+            f"请确保 YAML 中包含以下字段: {', '.join(_REQUIRED_YAML_FIELDS)}"
+        )
+
+
+def validate_runtime_agent_config(
+    config: dict,
+    yaml_path: Path | str,
+    *,
+    agent_root: Path | str,
+) -> None:
+    """Pure preflight for the Agent YAML contract consumed by ``run_app``.
+
+    This deliberately validates the raw Agent overlay before
+    ``build_effective_agent_config`` filters and merges it.  Otherwise malformed
+    overlay values such as ``execution_env: []`` can be silently discarded and
+    only fail (or change meaning) deeper in Agent construction.
+    """
+
+    validate_required_yaml_fields(config, yaml_path)
+    AgentConfigNormalizer.validate_runtime_tool_references(config)
+    AgentConfigNormalizer.validate_workflow_config(config)
+    AgentConfigNormalizer.validate_skills_config(config)
+    AgentConfigNormalizer.validate_max_steps_config(config)
+    AgentConfigNormalizer.validate_tool_call_type_config(
+        config,
+        default_tool_call_type="tool_call",
+        allowed_tool_call_types=("tool_call", "code_act"),
+    )
+    AgentConfigNormalizer.validate_agent_function_schema(config)
+    AgentConfigNormalizer.validate_worker_agents_config(config.get("worker_agents", []))
+    normalized_execution = build_normalized_execution_config(
+        config,
+        source_name=str(yaml_path),
+        agent_root=agent_root,
+    )
+    validate_execution_config_payload(normalized_execution)
+
+
+def validate_runtime_worker_config(
+    config: dict,
+    yaml_path: Path | str,
+    *,
+    agent_root: Path | str,
+) -> None:
+    """Pure preflight for a definition referenced as a supervisor worker."""
+
+    validate_runtime_agent_config(
+        config,
+        yaml_path,
+        agent_root=agent_root,
+    )
+    if AgentConfigNormalizer.validate_agent_function_schema(config) is None:
+        raise ValueError(f"Worker Agent configuration {yaml_path} agent_function_schema is required")
 
 
 def run_app(
@@ -162,7 +384,11 @@ def run_app(
     # Resolve configuration before any runtime component is constructed.
     resolved_path = _resolve_yaml_path(yaml_path)
     config = YamlAgentFactory._load_config_from_file(resolved_path)
-    validate_required_yaml_fields(config, resolved_path)
+    validate_runtime_agent_config(
+        config,
+        resolved_path,
+        agent_root=C.agent_root,
+    )
     effective_config = build_effective_agent_config(
         config,
         source_name=str(config.get("_yaml_file_path") or resolved_path),
@@ -216,6 +442,8 @@ def run_app(
     heartbeat: SupervisorHeartbeat | None = None
     file_history: FileHistoryManager | None = None
     supervisor: YamlConfiguredSupervisorAgent | None = None
+    result_str: str | None = None
+    event_start_offset: int | None = None
 
     with run_attempt_lease, bind_run_context(runtime_context):
         try:
@@ -277,6 +505,9 @@ def run_app(
                             require_exists=True,
                         )
 
+                if checkpoint_mgr is not None:
+                    event_start_offset = _task_events_size(checkpoint_mgr, task_id)
+
                 if is_resume and checkpoint_mgr is not None:
                     tree = checkpoint_mgr.load_task_tree(task_id)
                     if tree is None:
@@ -287,13 +518,9 @@ def run_app(
                         try:
                             age = _checkpoint_age_seconds(tree.get("created_at"))
                         except (ValueError, TypeError) as exc:
-                            raise FileNotFoundError(
-                                f"Checkpoint {task_id} has invalid created_at"
-                            ) from exc
+                            raise FileNotFoundError(f"Checkpoint {task_id} has invalid created_at") from exc
                         if age > max_resume_age:
-                            raise FileNotFoundError(
-                                f"Checkpoint {task_id} expired ({age:.0f}s > {max_resume_age}s)"
-                            )
+                            raise FileNotFoundError(f"Checkpoint {task_id} expired ({age:.0f}s > {max_resume_age}s)")
                     tree_status = tree.get("status", "unknown")
                     if tree_status == "running":
                         from src.lib.heartbeat.status import detect_crashed_status
@@ -305,8 +532,7 @@ def run_app(
                     resumable_statuses = {"interrupted", "failed", "crashed"}
                     if tree_status not in resumable_statuses:
                         raise ValueError(
-                            f"Checkpoint {task_id} is not resumable "
-                            f"(status={tree_status}); start a new task instead"
+                            f"Checkpoint {task_id} is not resumable (status={tree_status}); start a new task instead"
                         )
                     checkpoint_mgr.record_run_resumed(task_id)
                     log.info("Resuming task %s (status=%s)", task_id, tree_status)
@@ -439,22 +665,48 @@ def run_app(
                         file_history.close()
                     except Exception:
                         pass
-                if outcome == "completed" and cleanup_on_success and checkpoint_mgr is not None:
-                    try:
-                        tree = checkpoint_mgr.load_task_tree(task_id)
-                        if tree and tree.get("status") == "completed":
-                            checkpoint_mgr.delete_task(task_id)
-                            log.info("Cleaned up checkpoint for completed task %s", task_id)
-                    except Exception:
-                        pass
-                manifest_updates = {
-                    "status": outcome,
-                    "ended_at": datetime.now().astimezone().isoformat(),
-                }
-                if outcome_error:
-                    manifest_updates["error"] = outcome_error
                 try:
+                    durable_updates: dict[str, Any] = {}
+                    if outcome == "completed":
+                        durable_updates = _persist_run_observability(
+                            runtime_context,
+                            checkpoint_mgr,
+                            task_id,
+                            result=result_str,
+                            event_start_offset=event_start_offset,
+                        )
+                    else:
+                        try:
+                            durable_updates = _persist_run_observability(
+                                runtime_context,
+                                checkpoint_mgr,
+                                task_id,
+                                result=None,
+                                event_start_offset=event_start_offset,
+                            )
+                        except Exception as exc:
+                            log.warning("Failed to persist Run observability: %s", exc)
+                    manifest_updates = {
+                        "status": outcome,
+                        "ended_at": datetime.now().astimezone().isoformat(),
+                        **durable_updates,
+                    }
+                    if outcome_error:
+                        manifest_updates["error"] = outcome_error
                     runtime_context.update_manifest(**manifest_updates)
+                    if outcome == "completed" and cleanup_on_success and checkpoint_mgr is not None:
+                        try:
+                            tree = checkpoint_mgr.load_task_tree_projection(
+                                task_id,
+                                max_bytes=_TASK_TREE_CLEANUP_MAX_BYTES,
+                            )
+                            if tree and tree.get("status") == "completed" and checkpoint_mgr.delete_task(task_id):
+                                log.info(
+                                    "Cleaned up checkpoint for completed task %s",
+                                    task_id,
+                                )
+                        except Exception:
+                            pass
                 finally:
                     if task_lease is not None:
                         task_lease.release()
