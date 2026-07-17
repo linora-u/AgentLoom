@@ -1,0 +1,7 @@
+#!/usr/bin/env bun
+
+import "@opentui/solid/preload"
+
+const { main } = await import("../src/cli/main")
+
+process.exitCode = await main()
