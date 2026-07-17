@@ -80,6 +80,7 @@ class LangfuseSettings(BaseModel):
     def get_actual_private_key(self) -> str:
         return self.private_key or self.secret_key or ""
 
+
 class LlmModelTypeSettings(BaseModel):
     model_config = ConfigDict(extra="allow", arbitrary_types_allowed=True, frozen=True)
     model: str = ""
@@ -110,22 +111,31 @@ class LlmModelTypeSettings(BaseModel):
             )
         return values
 
+
+class LLMConfigCheckIssue(BaseModel):
+    model_config = ConfigDict(frozen=True)
+
+    level: str
+    field: str
+    message: str
+
+
 class LLMConfig(BaseModel):
     model_config = ConfigDict(extra="allow")
-    
+
     # Internal representation from yaml
     langfuse: LangfuseSettings = Field(default_factory=LangfuseSettings)
     # the entire "model" block gets split into its pieces
     default_model_type: str = ""
     models: Dict[str, LlmModelTypeSettings] = Field(default_factory=dict)
-    
+
     @classmethod
     def load_from_yaml(cls, path: Path) -> "LLMConfig":
         if not path.exists():
             return cls()
         with path.open("r", encoding="utf-8") as f:
             raw = yaml.safe_load(f) or {}
-            
+
         return cls.from_dict(raw)
 
     @classmethod
@@ -133,7 +143,7 @@ class LLMConfig(BaseModel):
         langfuse_raw = raw.get("langfuse", {})
         model_raw = raw.get("model", {})
         default_type = model_raw.get("default_model_type", "")
-        
+
         # Build models dict
         models: Dict[str, LlmModelTypeSettings] = {}
         for k, v in model_raw.items():
@@ -183,15 +193,24 @@ class LLMConfig(BaseModel):
                 base_url=resolved_base_url,
                 api_key=resolved_api_key,
                 temperature=float(resolved_temp),
-                max_tokens=IntParser.parse(resolved_max_tokens, default=DEFAULT_MAX_TOKENS, allow_bypass_strings=("max",)),
+                max_tokens=IntParser.parse(
+                    resolved_max_tokens,
+                    default=DEFAULT_MAX_TOKENS,
+                    allow_bypass_strings=("max",),
+                ),
                 timeout=int(resolved_timeout),
                 num_retries=int(resolved_num_retries),
                 retry_delay=float(resolved_retry_delay),
                 max_retry_delay=float(resolved_max_retry_delay),
                 extra_headers=resolved_extra_headers,
-                context_cache=BoolParser.parse(v.get("context_cache", DEFAULT_MODEL_CONTEXT_CACHE), default=DEFAULT_MODEL_CONTEXT_CACHE),
+                context_cache=BoolParser.parse(
+                    v.get("context_cache", DEFAULT_MODEL_CONTEXT_CACHE),
+                    default=DEFAULT_MODEL_CONTEXT_CACHE,
+                ),
                 system_prompt_boundary=v.get("system_prompt_boundary", None),
-                description=str(v.get("description", f"Model type '{k}' loaded from YAML config")),
+                description=str(
+                    v.get("description", f"Model type '{k}' loaded from YAML config")
+                ),
                 requests_per_minute=int(resolved_rpm),
                 extra_completion_params=extra_completion_params,
             )
@@ -209,9 +228,9 @@ class LLMConfig(BaseModel):
         return cls(
             langfuse=LangfuseSettings(**langfuse_raw),
             default_model_type=str(default_type or ""),
-            models=models
+            models=models,
         )
-        
+
     def to_legacy_dict(self) -> Dict[str, Any]:
         """
         Export back to the nested dict structure expected by the rest of the application
@@ -222,11 +241,42 @@ class LLMConfig(BaseModel):
         }
         for k, v in self.models.items():
             model_dict[k] = v.model_dump()
-            
+
         return {
             "langfuse": self.langfuse.model_dump(),
-            "model": model_dict
+            "model": model_dict,
         }
+
+    def check_runtime_readiness(self) -> list[LLMConfigCheckIssue]:
+        """Check whether configured model profiles have runtime-required fields."""
+        issues: list[LLMConfigCheckIssue] = []
+
+        for profile_name, profile in self.models.items():
+            if not profile.base_url:
+                issues.append(
+                    LLMConfigCheckIssue(
+                        level="error",
+                        field=f"model.{profile_name}.base_url",
+                        message=(
+                            f"Model profile '{profile_name}' is missing required "
+                            "base_url for runtime model calls."
+                        ),
+                    )
+                )
+
+            if not profile.api_key:
+                issues.append(
+                    LLMConfigCheckIssue(
+                        level="error",
+                        field=f"model.{profile_name}.api_key",
+                        message=(
+                            f"Model profile '{profile_name}' is missing required "
+                            "api_key for runtime model calls. The secret value is not printed."
+                        ),
+                    )
+                )
+
+        return issues
 
     def for_type(self, model_type: Optional[str]) -> LlmModelTypeSettings:
         desired = (model_type or "").strip().lower()
