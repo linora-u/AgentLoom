@@ -6,6 +6,11 @@ export {
   resolveSidebarLayout,
 } from "./layout"
 export { sortByStatus, statusColor, statusPresentation } from "./status"
+export {
+  DEFAULT_SCROLL_SPEED,
+  FixedSpeedScroll,
+  createDefaultScrollAcceleration,
+} from "./scroll"
 export { AGENTLOOM_THEME, themeFor, toneColor } from "./theme"
 
 export type { SidebarLayout, SidebarMode, SidebarPreference } from "./layout"
