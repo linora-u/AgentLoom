@@ -664,7 +664,7 @@ planning_interval: 3    # 每 3 步强制规划一次
 - **输入**：JSON 数组，每项包含 `content`（任务描述）和 `status`（`pending` / `in_progress` / `completed`）
 - **语义**：全量替换（每次调用替换整个列表）
 - **自动清除**：全部标记为 `completed` 时自动清空列表
-- **持久化**：写入 `.runtime/<agent_name>/todos.md`（Markdown checkbox 格式）
+- **持久化**：写入 `.agentloom/workspaces/agents/<application_id>/<agent_path>/tasks/<task_id>/todos.md`（Markdown checkbox 格式）
 - **验证提醒**：3+ 任务全部完成且无验证步骤时，返回值首行提醒 LLM 考虑执行验证
 
 ---

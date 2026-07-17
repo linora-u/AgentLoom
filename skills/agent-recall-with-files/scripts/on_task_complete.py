@@ -2,14 +2,17 @@
 """Hook: TaskCompleted — remind agent to record a completion note."""
 
 from common import (
-    CONTEXT_FILE, TRACE_FILE, SKILL_TAG,
-    runtime_dir, get_runtime_agent_path, get_tool_input, output,
+    CONTEXT_FILE,
+    SKILL_TAG,
+    TRACE_FILE,
+    get_tool_input,
+    output,
+    task_workspace_dir,
 )
 
 
 def main() -> None:
-    agent = get_runtime_agent_path()
-    rd = runtime_dir(agent)
+    workspace = task_workspace_dir()
     ti = get_tool_input()
     task_id = (ti.get("task_id") or "") or "current-task"
 
@@ -17,9 +20,9 @@ def main() -> None:
         "decision": "allow",
         "user_message": (
             f"{SKILL_TAG} Task '{task_id}' completed. "
-            f"Finalize {rd / TRACE_FILE} and {rd / CONTEXT_FILE}."
+            f"Finalize {workspace / TRACE_FILE} and {workspace / CONTEXT_FILE}."
         ),
-        "telemetry": {"runtime_dir": str(rd)},
+        "telemetry": {"task_workspace": str(workspace)},
     })
 
 

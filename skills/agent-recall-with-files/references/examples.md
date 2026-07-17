@@ -69,7 +69,7 @@ Replace template placeholders immediately. Do not leave them while you start wor
 On the second run, the agent sees prior insights injected by `PreToolUse`:
 
 ```
-[agent-recall-with-files] Runtime context from .runtime/auth_refactor_agent/:
+[agent-recall-with-files] Runtime context from .agentloom/workspaces/agents/example/auth_refactor_agent/tasks/task_123/:
 
 [context.md]
 # Context

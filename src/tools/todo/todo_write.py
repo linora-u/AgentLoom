@@ -1,12 +1,11 @@
 """
 TodoWrite tool — session task tracking for planning-driven agents.
 
-Provides a lightweight todo list that persists to .runtime/<agent>/todos.md.
+Provides a lightweight todo list in the current task's canonical agent workspace.
 Automatically injected when planning_interval is configured.
 """
 
 import json
-from pathlib import Path
 from typing import Any, Dict, List, Optional, Union
 
 from src.lib.logging import get_logger
@@ -44,7 +43,7 @@ def _get_agent_name() -> str:
 
 
 def _get_runtime_agent_path() -> str:
-    """Return hierarchical runtime path for .runtime dir nesting.
+    """Return the hierarchical identity used by the agent workspace.
 
     Prefers the dedicated ``runtime_agent_path`` ContextVar (e.g.
     ``parent/child``).  Falls back to the flat ``agent_name``.
@@ -59,22 +58,14 @@ def _get_runtime_agent_path() -> str:
     return _get_agent_name()
 
 
-def _get_project_root() -> Path:
-    """Return project root via C.agent_root, fallback to cwd."""
-    try:
-        from src.lib.config import C
-        return Path(C.agent_root).resolve()
-    except Exception:
-        return Path.cwd().resolve()
-
-
 def _persist_todos(todos: List[Dict[str, str]], agent_name: str) -> None:
-    """Write todos to .runtime/<agent>/todos.md in Markdown checkbox format."""
+    """Write todos to the current task's canonical agent workspace."""
     try:
-        root = _get_project_root()
-        runtime_dir = root / ".runtime" / agent_name
-        runtime_dir.mkdir(parents=True, exist_ok=True)
-        todos_file = runtime_dir / "todos.md"
+        from src.lib.runtime import get_current_run_context
+
+        runtime_context = get_current_run_context(required=True)
+        runtime_context.prepare_agent_workspace(agent_name)
+        todos_file = runtime_context.agent_todos_path(agent_name)
 
         logger.debug(
             "Persisting %d todos to %s",

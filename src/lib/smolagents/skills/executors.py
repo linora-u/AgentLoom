@@ -541,15 +541,64 @@ def _create_shell_executor(
         _ti_agent = (context.tool_input or {}).get("agent_name")
         _resolved = _ctx_agent or _ti_agent or "default"
         env["AGENT_NAME"] = _resolved
-        # Hierarchical path for .runtime directory nesting (e.g. "parent/child").
-        # Hook scripts use this to place their runtime files under the correct
-        # nested directory.  Falls back to AGENT_NAME if not set.
-        env["RUNTIME_AGENT_PATH"] = get_current_runtime_agent_path() or _resolved
-        env["TASK_ID"] = (
+        # Hierarchical identity used by the canonical agent workspace.  Agent
+        # lifecycle hooks run while the parent is still active, so their
+        # explicit target must be appended to the parent's path.
+        active_runtime_path = get_current_runtime_agent_path()
+        if (
+            context.hook_event_name in {"SubagentStart", "SubagentStop"}
+            and isinstance(_ti_agent, str)
+            and _ti_agent.strip()
+        ):
+            parent_runtime_path = active_runtime_path or ""
+            runtime_agent_path = (
+                f"{parent_runtime_path}/{_ti_agent}"
+                if parent_runtime_path
+                else parent_runtime_path or _ti_agent
+            )
+        else:
+            runtime_agent_path = active_runtime_path or _resolved
+        env["RUNTIME_AGENT_PATH"] = runtime_agent_path
+        from src.lib.runtime import RuntimeContext, get_current_run_context
+
+        runtime_context = get_current_run_context()
+        task_id = (
             get_current_task_id()
             or (context.tool_input or {}).get("task_id")
+            or env.get("TASK_ID")
             or ""
         )
+        if runtime_context is None:
+            runtime_root = env.get("AGENTLOOM_RUNTIME_ROOT", "").strip()
+            application_id = env.get("APPLICATION_ID", "").strip()
+            if runtime_root and application_id and task_id:
+                # Embedded HookManager users may not own a run attempt, but
+                # they still provide the canonical runtime identity. Build a
+                # RuntimeContext so path construction never leaks into skills.
+                runtime_context = RuntimeContext(
+                    root_dir=Path(runtime_root),
+                    application_id=application_id,
+                    task_id=task_id,
+                    run_id="unbound_hook",
+                )
+        if runtime_context is not None:
+            task_workspace = runtime_context.prepare_agent_workspace(runtime_agent_path)
+            env["AGENTLOOM_RUNTIME_ROOT"] = str(runtime_context.root_dir)
+            env["APPLICATION_ID"] = runtime_context.application_id
+            env["TASK_ID"] = runtime_context.task_id
+            env["AGENTLOOM_AGENT_TASK_WORKSPACE"] = str(task_workspace)
+            env["AGENTLOOM_AGENT_INSIGHTS_PATH"] = str(
+                runtime_context.agent_insights_path(runtime_agent_path)
+            )
+            # Visualization is one task-level timeline owned by the root
+            # supervisor. Runtime paths use '/' exclusively for agent nesting,
+            # so the first component is the root agent identity.
+            root_agent_path = runtime_agent_path.split("/", 1)[0]
+            env["AGENTLOOM_VISUALIZATION_PATH"] = str(
+                runtime_context.agent_visualization_path(root_agent_path)
+            )
+        else:
+            env["TASK_ID"] = task_id
         env["TOOL_NAME"] = context.tool_name or ""
         env["HOOK_EVENT"] = context.hook_event_name or ""
         # Propagate step_number so hook scripts can detect staleness.

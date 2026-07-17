@@ -5,9 +5,12 @@ import sys
 
 from common import (
     SKILL_TAG,
-    read_viz_state, append_event, find_supervisor_name,
+    append_event,
+    find_supervisor_name,
     find_supervisor_viz_path,
-    get_tool_input, output,
+    get_tool_input,
+    output,
+    read_viz_state,
 )
 
 
@@ -18,7 +21,6 @@ def main() -> None:
     error_msg = tool_input.get("error", "")
 
     path = find_supervisor_viz_path()
-    data = read_viz_state(path)
 
     # Emit worker → completed or error
     if success:
