@@ -264,6 +264,123 @@ def test_failed_run_detail_exposes_the_manifest_failure_reason(tmp_path: Path) -
     assert detail["error"] == "provider timed out after 30 seconds"
 
 
+@pytest.mark.parametrize("manifest_status", ["interrupted", "cancelled", "canceled"])
+def test_interrupted_run_status_is_preserved_in_summary_and_detail(
+    tmp_path: Path,
+    manifest_status: str,
+) -> None:
+    _run(tmp_path, status=manifest_status)
+    bridge = TuiBridge(tmp_path)
+
+    bootstrap = bridge.bootstrap()
+    detail = bridge.dispatch(
+        "run.detail",
+        {"run_id": "run-1", "application_id": "reports"},
+    )
+
+    assert bootstrap["runs"][0]["status"] == "interrupted"
+    assert detail["summary"]["status"] == "interrupted"
+    assert detail["error"] == "Execution was interrupted before completion."
+
+
+@pytest.mark.parametrize("manifest_status", ["", "not-a-runtime-status", "unknown"])
+def test_unclassified_run_status_is_not_misreported_as_failed(
+    tmp_path: Path,
+    manifest_status: str,
+) -> None:
+    _run(tmp_path, status=manifest_status)
+    bridge = TuiBridge(tmp_path)
+
+    bootstrap = bridge.bootstrap()
+    detail = bridge.dispatch(
+        "run.detail",
+        {"run_id": "run-1", "application_id": "reports"},
+    )
+
+    assert bootstrap["runs"][0]["status"] == "unknown"
+    assert detail["summary"]["status"] == "unknown"
+    assert detail["error"] == "Run status could not be determined from stored metadata."
+
+
+def test_active_manifest_preserves_interrupted_task_projection(tmp_path: Path) -> None:
+    run_dir = _run(tmp_path, status="running")
+    _write(
+        tmp_path / ".agentloom/checkpoints/reports/task-1/task_tree.json",
+        json.dumps(
+            {
+                "task_id": "task-1",
+                "run_id": "run-1",
+                "status": "interrupted",
+                "workers": {},
+            }
+        ),
+    )
+
+    summary = TuiBridge(tmp_path)._run_record_from_manifest(
+        run_dir / "manifest.json",
+        runtime_root=tmp_path / ".agentloom",
+        runs_root=tmp_path / ".agentloom/runs",
+        paths_by_id={},
+        systems_by_application={},
+        task_cache={},
+    )
+
+    assert summary is not None
+    assert summary[1]["summary"]["status"] == "interrupted"
+
+
+def test_structured_run_error_precedes_interruption_diagnostic(tmp_path: Path) -> None:
+    _run(
+        tmp_path,
+        status="interrupted",
+        manifest_extra={"error": "operator stopped the provider migration"},
+    )
+    _write(
+        tmp_path / ".agentloom/checkpoints/reports/task-1/task_tree.json",
+        json.dumps(
+            {
+                "task_id": "task-1",
+                "run_id": "run-1",
+                "status": "interrupted",
+                "error": "task projection fallback",
+                "workers": {},
+            }
+        ),
+    )
+    _events(
+        tmp_path,
+        "reports",
+        "task-1",
+        [
+            {"type": "run_started", "run_id": "run-1"},
+            {
+                "type": "task_status_changed",
+                "status": "interrupted",
+                "error": "event fallback",
+            },
+        ],
+    )
+
+    detail = TuiBridge(tmp_path).dispatch(
+        "run.detail",
+        {"run_id": "run-1", "application_id": "reports"},
+    )
+
+    assert detail["error"] == "operator stopped the provider migration"
+
+
+def test_crashed_run_without_structured_error_has_readable_diagnostic(tmp_path: Path) -> None:
+    _run(tmp_path, status="crashed")
+
+    detail = TuiBridge(tmp_path).dispatch(
+        "run.detail",
+        {"run_id": "run-1", "application_id": "reports"},
+    )
+
+    assert detail["summary"]["status"] == "crashed"
+    assert detail["error"] == "Execution stopped unexpectedly before completion."
+
+
 def test_nonterminal_task_tree_result_is_not_a_final_result(tmp_path: Path) -> None:
     _run(tmp_path, status="completed")
     _events(

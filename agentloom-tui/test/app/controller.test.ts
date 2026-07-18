@@ -5,6 +5,7 @@ import {
   buildPaletteItems,
   nextSelection,
   parseBuilderInput,
+  recentRunEntries,
   routeForEntry,
 } from "../../src/app/controller"
 
@@ -204,6 +205,7 @@ describe("TUI controller", () => {
 
   test("projects Applications, worker Agents, Skills, and Schedules into clickable routes", () => {
     const items = buildPaletteItems(catalogBootstrap)
+    const groups = buildSidebarGroups(catalogBootstrap)
 
     expect(items.filter((item) => item.category === "Applications")).toHaveLength(1)
     expect(items.filter((item) => item.category === "Agents").map((item) => item.title)).toEqual([
@@ -212,6 +214,9 @@ describe("TUI controller", () => {
       "new_agent",
     ])
     expect(items.filter((item) => item.category === "Skills")).toHaveLength(1)
+    expect(groups.skills.map((entry) => [entry.title, entry.subtitle])).toEqual([
+      ["research", "live"],
+    ])
     expect(items.filter((item) => item.category === "Schedules")).toHaveLength(1)
     expect(items.find((item) => item.title === "researcher")?.description).toContain("worker · running")
 
@@ -234,6 +239,57 @@ describe("TUI controller", () => {
     })
     expect(routes.research).toEqual({ type: "skill", skillID: "live:research" })
     expect(routes["daily-live"]).toEqual({ type: "schedule", scheduleID: "daily-live" })
+    expect(routeForEntry(groups.skills[0]!)).toEqual({ type: "skill", skillID: "live:research" })
+  })
+
+  test("keeps the severity-sorted directory separate from genuinely recent runs", () => {
+    const groups = buildSidebarGroups({
+      ...bootstrap,
+      systems: [],
+      runs: [
+        {
+          run_id: "run-old-failed",
+          system_id: null,
+          application_id: "old",
+          task_id: "task-old",
+          agent_name: "old_agent",
+          status: "failed",
+          started_at: "2026-07-17T08:00:00Z",
+          ended_at: "2026-07-17T08:01:00Z",
+        },
+        {
+          run_id: "run-new-completed",
+          system_id: null,
+          application_id: "new",
+          task_id: "task-new",
+          agent_name: "new_agent",
+          status: "completed",
+          started_at: "2026-07-18T02:00:00Z",
+          ended_at: "2026-07-18T02:01:00Z",
+        },
+        {
+          run_id: "run-middle-interrupted",
+          system_id: null,
+          application_id: "middle",
+          task_id: "task-middle",
+          agent_name: "middle_agent",
+          status: "interrupted",
+          started_at: "2026-07-18T09:00:00+08:00",
+          ended_at: "2026-07-18T09:01:00+08:00",
+        },
+      ],
+    })
+
+    expect(groups.runs.map((entry) => entry.runID)).toEqual([
+      "run-old-failed",
+      "run-middle-interrupted",
+      "run-new-completed",
+    ])
+    expect(recentRunEntries(groups.runs).map((entry) => entry.runID)).toEqual([
+      "run-new-completed",
+      "run-middle-interrupted",
+      "run-old-failed",
+    ])
   })
 
   test("marks missing Worker status incomplete when the runtime projection was truncated", () => {

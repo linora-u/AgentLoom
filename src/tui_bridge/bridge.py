@@ -47,6 +47,18 @@ RUNTIME_LIVE_TASK_PROJECTION_MAX_BYTES = 64 * 1024
 RUNTIME_LIVE_PENDING_RETRY_MAX_COUNT = 2
 
 _UNSCANNED_DIRECTORY_VERSION = (-1, -1, -1, -1)
+_TERMINAL_RUN_STATUS_ALIASES = {
+    "completed": "completed",
+    "success": "completed",
+    "succeeded": "completed",
+    "failed": "failed",
+    "error": "failed",
+    "interrupted": "interrupted",
+    "cancelled": "interrupted",
+    "canceled": "interrupted",
+    "crashed": "crashed",
+    "unknown": "unknown",
+}
 
 
 @dataclass
@@ -802,7 +814,16 @@ class TuiBridge:
                     return event_error
         task = record.get("task")
         if isinstance(task, dict):
-            return self._optional_string(task.get("error"))
+            task_error = self._optional_string(task.get("error"))
+            if task_error is not None:
+                return task_error
+        status = str(record["summary"].get("status") or "").strip().lower()
+        if status == "interrupted":
+            return "Execution was interrupted before completion."
+        if status == "crashed":
+            return "Execution stopped unexpectedly before completion."
+        if status == "unknown":
+            return "Run status could not be determined from stored metadata."
         return None
 
     def _snapshot(
@@ -911,7 +932,7 @@ class TuiBridge:
                 worker = self._checkpoint_worker_summary(raw_worker)
                 parent_status = str(candidate_run.get("status") or "")
                 worker_status = str(worker.get("status") or "").strip().lower()
-                if parent_status in {"completed", "failed", "crashed"} and worker_status in {
+                if parent_status in {"completed", "failed", "interrupted", "crashed"} and worker_status in {
                     "running",
                     "claimed",
                     "in_progress",
@@ -1887,12 +1908,9 @@ class TuiBridge:
         run_dir: Path,
     ) -> str:
         status = str(manifest.get("status") or "").strip().lower()
-        if status in {"completed", "success", "succeeded"}:
-            return "completed"
-        if status in {"failed", "error", "interrupted", "cancelled"}:
-            return "failed"
-        if status == "crashed":
-            return "crashed"
+        terminal_status = _TERMINAL_RUN_STATUS_ALIASES.get(status)
+        if terminal_status is not None:
+            return terminal_status
         if status == "running":
             lease = RuntimeRunLease(run_dir)
             try:
@@ -1903,15 +1921,12 @@ class TuiBridge:
 
         if status == "running" and task is not None:
             task_status = str(task.get("status") or "").strip().lower()
-            if task_status in {"completed", "success", "succeeded"}:
-                return "completed"
-            if task_status in {"failed", "error", "interrupted", "cancelled"}:
-                return "failed"
-            if task_status == "crashed":
-                return "crashed"
+            terminal_status = _TERMINAL_RUN_STATUS_ALIASES.get(task_status)
+            if terminal_status is not None:
+                return terminal_status
         if status == "running":
             return "crashed"
-        return "failed"
+        return "unknown"
 
     def _task_events(
         self,

@@ -234,10 +234,74 @@ describe("AgentLoom TUI view", () => {
     expect(frame).toContain("AgentLoom Chat")
     expect(frame).toContain("普通对话")
     expect(frame).toContain("Models: powerful* · fast")
-    expect(frame).toContain("Workspace")
-    expect(frame).toContain("1 Agents")
+    expect(frame).toContain("项目总览")
+    expect(frame).toContain("0 Applications · 1 Agents")
     expect(frame).toContain("Ctrl+P")
     expect(frame).toContain("/apply")
+  })
+
+  test("Workspace makes discovered Skills visible and directly clickable", async () => {
+    const client: TuiClient = {
+      async request<Method extends RpcMethod>() {
+        return catalogSnapshot as RpcResult<Method>
+      },
+      close() {},
+    }
+    const session = new AgentLoomSession({ client, snapshot: catalogSnapshot, sessionID: "skill-list-test" })
+    const setup = await testRender(
+      () => <AgentLoomApp session={session} projectRoot="/repo" onExit={() => {}} refreshIntervalMs={0} />,
+      { width: 140, height: 32, useMouse: true, enableMouseMovement: true },
+    )
+    renderers.push(setup.renderer)
+    await setup.renderOnce()
+
+    const frame = setup.captureCharFrame()
+    expect(frame).toContain("已发现 1 个 Skill")
+    expect(frame).toContain("helper-skill")
+    expect(frame).toContain("new · 点击查看")
+
+    const rows = frame.split("\n")
+    const y = rows.findIndex((row) => row.includes("helper-skill"))
+    const x = y < 0 ? -1 : rows[y]!.indexOf("helper-skill")
+    expect({ x, y }).not.toEqual({ x: -1, y: -1 })
+    await setup.mockMouse.click(x + 2, y)
+    await Bun.sleep(20)
+    await setup.renderOnce()
+
+    expect(session.state.route).toEqual({ type: "skill", skillID: "new:helper-skill" })
+    expect(setup.captureCharFrame()).toContain("helper-skill/SKILL.md")
+  })
+
+  test("Workspace separates explicit Run outcomes instead of combining or inferring them", async () => {
+    const statuses = ["completed", "failed", "crashed", "interrupted", "running", "unknown"] as const
+    const runs = statuses.map((status, index) => ({
+      ...clickableRun,
+      run_id: `run-${status}`,
+      task_id: `task-${status}`,
+      status,
+      started_at: `2026-07-18T10:0${index}:00Z`,
+      ended_at: status === "running" ? null : `2026-07-18T10:0${index}:05Z`,
+    }))
+    const statusSnapshot: BootstrapResultDto = { ...snapshot, systems: [], runs }
+    const client: TuiClient = {
+      async request<Method extends RpcMethod>() {
+        return statusSnapshot as RpcResult<Method>
+      },
+      close() {},
+    }
+    const session = new AgentLoomSession({ client, snapshot: statusSnapshot, sessionID: "status-test" })
+    const setup = await testRender(
+      () => <AgentLoomApp session={session} projectRoot="/repo" onExit={() => {}} refreshIntervalMs={0} />,
+      { width: 140, height: 32 },
+    )
+    renderers.push(setup.renderer)
+    await setup.renderOnce()
+
+    const frame = setup.captureCharFrame()
+    expect(frame).toContain("6 次 · 1 成功 · 1 失败")
+    expect(frame).toContain("1 崩溃 · 1 中断 · 1 运行中")
+    expect(frame).toContain("1 状态未知")
+    expect(frame).not.toContain("failed/crashed")
   })
 
   test("Workspace reports when Worker invocation history is incomplete", async () => {
@@ -404,7 +468,7 @@ describe("AgentLoom TUI view", () => {
     expect(setup.captureCharFrame()).toContain("helper (worker)")
   })
 
-  test("Recent runs are clickable and detail keyboard navigation scrolls", async () => {
+  test("Recent runs are clickable and open a compact detail instead of raw events", async () => {
     const runSnapshot: BootstrapResultDto = {
       ...catalogSnapshot,
       systems: [{ ...catalogSnapshot.systems[0]!, state: "completed", latest_run: clickableRun }],
@@ -421,31 +485,87 @@ describe("AgentLoom TUI view", () => {
     const session = new AgentLoomSession({ client, snapshot: runSnapshot, sessionID: "run-test" })
     const setup = await testRender(
       () => <AgentLoomApp session={session} projectRoot="/repo" onExit={() => {}} refreshIntervalMs={0} />,
-      { width: 140, height: 28, useMouse: true, enableMouseMovement: true },
+      { width: 140, height: 36, useMouse: true, enableMouseMovement: true },
     )
     renderers.push(setup.renderer)
     await setup.renderOnce()
 
     const frame = setup.captureCharFrame().split("\n")
-    const y = frame.findIndex((row) => row.includes("run-click"))
-    const x = y < 0 ? -1 : frame[y]!.indexOf("run-click")
+    const y = frame.findIndex((row) => row.includes("new_agent"))
+    const x = y < 0 ? -1 : frame[y]!.indexOf("new_agent")
     expect({ x, y }).not.toEqual({ x: -1, y: -1 })
     await setup.mockMouse.click(x + 2, y)
     await Bun.sleep(20)
     await setup.renderOnce()
 
     expect(session.state.route.type).toBe("run")
-    const before = setup.captureCharFrame()
-    setup.renderer.currentFocusedEditor?.blur()
-    setup.mockInput.pressKey(PAGE_DOWN_KEY)
-    await Bun.sleep(10)
-    await setup.renderOnce()
-    expect(setup.captureCharFrame()).not.toBe(before)
+    expect(setup.captureCharFrame()).toContain("done")
+    expect(setup.captureCharFrame()).not.toContain('"index"')
+    expect(setup.captureCharFrame()).not.toContain("Events")
 
     setup.mockInput.pressEscape()
     await Bun.sleep(50)
     await setup.renderOnce()
     expect(session.state.route).toEqual({ type: "builder" })
+  })
+
+  test("failed Run offers a working keyboard AI diagnosis action", async () => {
+    const failedRun = { ...clickableRun, run_id: "run-failed", task_id: "task-failed", status: "failed" as const }
+    const failedDetail: RunDetailResultDto = {
+      ...runDetail,
+      summary: failedRun,
+      error: "provider timed out",
+      events: [{ type: "internal", secret: "EVENT_SECRET" }],
+      logs: [{
+        path: "logs/run.log",
+        size: 32,
+        tail: "[ERROR] provider timed out",
+        tail_truncated: false,
+      }],
+      result_state: "unavailable",
+      result: null,
+    }
+    const messages: string[] = []
+    const failedSnapshot: BootstrapResultDto = { ...snapshot, systems: [], runs: [failedRun] }
+    const client: TuiClient = {
+      async request<Method extends RpcMethod>(method: Method, params: RpcParams<Method>) {
+        if (method === "run.detail") return failedDetail as RpcResult<Method>
+        if (method === "assistant.send") {
+          messages.push(String((params as RpcParams<"assistant.send">).message))
+          return {
+            session_id: "diagnose-view-test",
+            assistant: "根因可能是模型服务超时。",
+            model_type: "powerful",
+            draft: { revision: 0, valid: false, errors: [], files: [] },
+          } as RpcResult<Method>
+        }
+        return failedSnapshot as RpcResult<Method>
+      },
+      close() {},
+    }
+    const session = new AgentLoomSession({
+      client,
+      snapshot: failedSnapshot,
+      sessionID: "diagnose-view-test",
+    })
+    const setup = await testRender(
+      () => <AgentLoomApp session={session} projectRoot="/repo" onExit={() => {}} refreshIntervalMs={0} />,
+      { width: 140, height: 32 },
+    )
+    renderers.push(setup.renderer)
+    await session.openEntry(session.entries[0]!)
+    await setup.renderOnce()
+    expect(setup.captureCharFrame()).toContain("[ a AI 分析原因 ]")
+
+    setup.mockInput.pressKey("a")
+    await Bun.sleep(30)
+    await setup.renderOnce()
+
+    expect(messages).toHaveLength(1)
+    expect(messages[0]).toContain("provider timed out")
+    expect(messages[0]).not.toContain("EVENT_SECRET")
+    expect(session.state.route).toEqual({ type: "builder" })
+    expect(setup.captureCharFrame()).toContain("根因可能是模型服务超时。")
   })
 
   test("PageDown and the mouse wheel scroll Workspace while chat remains open", async () => {

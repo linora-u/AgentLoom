@@ -5,6 +5,7 @@ describe("AgentLoom status presentation", () => {
   test("maps runtime and result states to semantic colors", () => {
     expect(statusPresentation("failed").tone).toBe("error")
     expect(statusPresentation("crashed").tone).toBe("error")
+    expect(statusPresentation("unknown").tone).toBe("warning")
     expect(statusPresentation("running").tone).toBe("info")
     expect(statusPresentation("completed").tone).toBe("success")
     expect(statusPresentation("available").tone).toBe("success")
@@ -23,6 +24,7 @@ describe("AgentLoom status presentation", () => {
       { id: "failed", status: "failed" },
       { id: "available", status: "available" },
       { id: "crashed", status: "crashed" },
+      { id: "unknown", status: "unknown" },
       { id: "active-b", status: "running" },
       { id: "unavailable", status: "unavailable" },
     ] as const
@@ -30,6 +32,7 @@ describe("AgentLoom status presentation", () => {
     expect(sortByStatus(input, (item) => item.status).map((item) => item.id)).toEqual([
       "crashed",
       "failed",
+      "unknown",
       "active-a",
       "active-b",
       "unavailable",
@@ -44,6 +47,7 @@ describe("AgentLoom status presentation", () => {
       "failed",
       "available",
       "crashed",
+      "unknown",
       "active-b",
       "unavailable",
     ])

@@ -29,13 +29,16 @@ import {
   onCleanup,
   onMount,
 } from "solid-js"
+import { isProblemRuntimeStatus } from "../domain"
 import {
   buildPaletteItems,
   buildModelPaletteItems,
   buildSidebarGroups,
   flattenAgentCatalog,
+  recentRunEntries,
   type PaletteItem,
   type SidebarEntry,
+  type SidebarRunEntry,
 } from "./controller"
 import {
   runDetailSections,
@@ -195,6 +198,21 @@ export function AgentLoomApp(props: AgentLoomAppProps) {
     }
 
     if (
+      state().route.type === "run"
+      && event.name === "a"
+      && !event.ctrl
+      && !event.meta
+      && !event.option
+      && !event.shift
+    ) {
+      event.preventDefault()
+      setFocus("builder")
+      void props.session.analyzeCurrentRun()
+      setTimeout(() => input?.focus(), 1)
+      return
+    }
+
+    if (
       state().route.type !== "builder"
       && (event.name === "escape" || (event.name === "b" && !event.ctrl && !event.meta && !event.option))
     ) {
@@ -340,6 +358,12 @@ export function AgentLoomApp(props: AgentLoomAppProps) {
     setFocus("builder")
   }
 
+  function analyzeCurrentRun() {
+    setFocus("builder")
+    void props.session.analyzeCurrentRun()
+    setTimeout(() => input?.focus(), 1)
+  }
+
   return (
     <box width="100%" height="100%" backgroundColor={theme().background} flexDirection="row">
       <box flexGrow={1} minWidth={0} height="100%">
@@ -385,6 +409,7 @@ export function AgentLoomApp(props: AgentLoomAppProps) {
               spinner={SPINNER_FRAMES[animationFrame()]!}
               bindScrollbox={(value) => (contextScrollbox = value)}
               onOpenEntry={openContextEntry}
+              onAnalyzeRun={analyzeCurrentRun}
               onClose={closeContext}
               onFocus={() => {
                 setFocus("context")
@@ -411,6 +436,7 @@ export function AgentLoomApp(props: AgentLoomAppProps) {
                 spinner={SPINNER_FRAMES[animationFrame()]!}
                 bindScrollbox={(value) => (contextScrollbox = value)}
                 onOpenEntry={openContextEntry}
+                onAnalyzeRun={analyzeCurrentRun}
                 onClose={closeContext}
                 onFocus={() => {
                   setFocus("context")
@@ -713,6 +739,7 @@ function ContextSidebar(props: {
   spinner: string
   bindScrollbox: (value: ScrollBoxRenderable) => void
   onOpenEntry: (entry: SidebarEntry) => void
+  onAnalyzeRun: () => void
   onClose: () => void
   onFocus: () => void
 }) {
@@ -779,6 +806,19 @@ function ContextSidebar(props: {
         </Match>
       </Switch>
       <box flexShrink={0} paddingTop={1} gap={0}>
+        <Show when={
+          props.state.route.type === "run"
+          && props.state.runDetail
+          && isProblemRuntimeStatus(props.state.runDetail.summary.status)
+        }>
+          <text
+            fg={props.theme.primary}
+            attributes={TextAttributes.BOLD}
+            onMouseDown={props.onAnalyzeRun}
+          >
+            [ a AI 分析原因 ]
+          </text>
+        </Show>
         <Show when={props.state.route.type !== "builder"}>
           <text fg={props.theme.secondary} onMouseDown={props.onClose}>Esc / b 返回工作区概览</text>
         </Show>
@@ -797,8 +837,11 @@ function WorkspaceOverview(props: {
   onOpenEntry: (entry: SidebarEntry) => void
 }) {
   const active = () => props.groups.runs.filter((entry) => entry.status === "running")
-  const failed = () => props.groups.runs.filter((entry) => ["failed", "crashed"].includes(entry.status))
-  const recent = () => props.groups.runs.slice(0, 5)
+  const count = (status: SidebarRunEntry["status"]) => (
+    props.groups.runs.filter((entry) => entry.status === status).length
+  )
+  const recent = () => recentRunEntries(props.groups.runs)
+  const visibleSkills = () => props.groups.skills.slice(0, 5)
   const agentCount = () => {
     const catalogCount = flattenAgentCatalog(props.state.snapshot).length
     return catalogCount || props.groups.systems.length
@@ -819,19 +862,31 @@ function WorkspaceOverview(props: {
     >
       <box gap={1} paddingRight={1}>
         <box flexShrink={0}>
-          <text fg={props.theme.text} attributes={TextAttributes.BOLD}>Workspace</text>
+          <text fg={props.theme.text} attributes={TextAttributes.BOLD}>项目总览</text>
           <text fg={props.theme.muted}>{props.state.snapshot.project.name}</text>
         </box>
+        <text fg={props.theme.primary} attributes={TextAttributes.BOLD}>定义</text>
         <box flexShrink={0} border={["left"]} borderColor={props.theme.primary} paddingLeft={1}>
-          <text fg={props.theme.text}>{props.state.snapshot.applications.length} Applications</text>
-          <text fg={props.theme.text}>{agentCount()} Agents</text>
-          <text fg={props.theme.text}>{props.state.snapshot.skills.length} Skills</text>
-          <text fg={props.theme.text}>{props.state.snapshot.schedules.items.length} Schedules</text>
-          <text fg={props.theme.text}>{props.groups.runs.length} Runs</text>
-          <text fg={active().length ? props.theme.warning : props.theme.muted}>{active().length} running</text>
-          <text fg={failed().length ? props.theme.error : props.theme.muted}>{failed().length} failed/crashed</text>
+          <text fg={props.theme.text}>
+            {props.state.snapshot.applications.length} Applications · {agentCount()} Agents
+          </text>
+          <text fg={props.theme.text}>
+            已发现 {props.state.snapshot.skills.length} 个 Skill · {props.state.snapshot.schedules.items.length} 个定时任务
+          </text>
+        </box>
+        <text fg={props.theme.primary} attributes={TextAttributes.BOLD}>运行记录</text>
+        <box flexShrink={0} border={["left"]} borderColor={props.theme.primary} paddingLeft={1}>
+          <text fg={props.theme.text}>
+            {props.groups.runs.length} 次 · {count("completed")} 成功 · {count("failed")} 失败
+          </text>
+          <text fg={props.theme.text}>
+            {count("crashed")} 崩溃 · {count("interrupted")} 中断 · {active().length} 运行中
+          </text>
+          <Show when={count("unknown") > 0}>
+            <text fg={props.theme.warning}>{count("unknown")} 状态未知</text>
+          </Show>
           <text fg={props.state.snapshot.schedules.service.state === "error" ? props.theme.error : props.theme.muted}>
-            Scheduler: {props.state.snapshot.schedules.service.state}
+            调度服务: {schedulerStateLabel(props.state.snapshot.schedules.service.state)}
           </text>
         </box>
         <Show when={props.state.snapshot.worker_invocations_incomplete}>
@@ -846,7 +901,25 @@ function WorkspaceOverview(props: {
             <text fg={props.theme.muted}>当前是有界增量窗口；后续刷新会继续对账新增与删除。</text>
           </box>
         </Show>
-        <text fg={props.theme.primary} attributes={TextAttributes.BOLD}>Recent runs</text>
+        <Show when={visibleSkills().length > 0}>
+          <text fg={props.theme.primary} attributes={TextAttributes.BOLD}>
+            Skills ({props.groups.skills.length})
+          </text>
+          <For each={visibleSkills()}>
+            {(entry) => (
+              <box flexShrink={0} paddingBottom={1} onMouseDown={() => props.onOpenEntry(entry)}>
+                <text fg={props.theme.text} wrapMode="none" truncate>{entry.title}</text>
+                <text fg={props.theme.muted} wrapMode="none" truncate>{entry.subtitle} · 点击查看</text>
+              </box>
+            )}
+          </For>
+          <Show when={props.groups.skills.length > visibleSkills().length}>
+            <text fg={props.theme.muted}>
+              还有 {props.groups.skills.length - visibleSkills().length} 个 · Ctrl+P 查看全部
+            </text>
+          </Show>
+        </Show>
+        <text fg={props.theme.primary} attributes={TextAttributes.BOLD}>最近执行</text>
         <Show when={recent().length > 0} fallback={<text fg={props.theme.muted}>暂无运行记录</text>}>
           <For each={recent()}>
             {(entry) => {
@@ -861,7 +934,9 @@ function WorkspaceOverview(props: {
                   <text fg={statusColor(entry.status, props.mode)}>{presentation().symbol}</text>
                   <text fg={props.theme.text} wrapMode="none" truncate>{entry.title}</text>
                 </box>
-                <text fg={props.theme.muted} wrapMode="none" truncate>{entry.subtitle} · 点击查看</text>
+                <text fg={props.theme.muted} wrapMode="none" truncate>
+                  {workspaceRunStatusLabel(entry.status)} · {entry.startedAt ?? "时间未知"} · 点击查看
+                </text>
               </box>
             )
             }}
@@ -870,6 +945,26 @@ function WorkspaceOverview(props: {
       </box>
     </scrollbox>
   )
+}
+
+function schedulerStateLabel(state: AgentLoomSessionState["snapshot"]["schedules"]["service"]["state"]): string {
+  return {
+    running: "运行中",
+    stopped: "未启动",
+    stale: "状态过期",
+    error: "异常",
+  }[state]
+}
+
+function workspaceRunStatusLabel(status: SidebarRunEntry["status"]): string {
+  return {
+    running: "运行中",
+    completed: "成功",
+    interrupted: "已中断",
+    failed: "失败",
+    crashed: "崩溃",
+    unknown: "未知",
+  }[status]
 }
 
 function CommandPalette(props: {
