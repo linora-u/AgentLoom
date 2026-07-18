@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Run the deterministic v5 self-learning campaign without model calls.
+"""Run the deterministic v6 self-learning campaign without model calls.
 
 The release shape writes exactly 100,000 canonical events to one SQLite
 ledger.  Reduced runs are smoke/reproduction runs and can never report a
@@ -52,6 +52,12 @@ from applications.memory_feature_validation.scripts.offline_memory_campaign_comm
 from src.extensions.self_learning.event_schema import CanonicalSessionEvent  # noqa: E402
 from src.extensions.self_learning.ledger import SelfLearningLedger  # noqa: E402
 from src.extensions.self_learning.memory_store import MemoryStore  # noqa: E402
+from src.extensions.self_learning.review_engine import ReviewEngine  # noqa: E402
+from src.extensions.self_learning.review_types import (  # noqa: E402
+    CandidateInput,
+    EvidenceGateResult,
+    ReviewConflictError,
+)
 
 REPO_ROOT = _BOOTSTRAP_ROOT
 DEFAULT_OUTPUT_ROOT = REPO_ROOT / ".agentloom" / "validation" / "memory_feature_validation"
@@ -101,12 +107,24 @@ _SOURCE_FILES = (
     "src/extensions/self_learning/ledger.py",
     "src/extensions/self_learning/memory_store.py",
     "src/extensions/self_learning/redaction.py",
+    "src/extensions/self_learning/application_scope.py",
+    "src/extensions/self_learning/paths.py",
+    "src/extensions/self_learning/review_engine.py",
+    "src/extensions/self_learning/review_types.py",
+    "src/lib/runtime/__init__.py",
+    "src/lib/runtime/context.py",
+    "src/lib/runtime/storage.py",
+    "src/lib/config/config_validation.py",
+    "src/lib/config/model_request_header_profiles.py",
+    "src/lib/logging/__init__.py",
+    "src/lib/logging/logger_manager.py",
+    "src/lib/trusted_memory_evidence.py",
 )
 _TRUSTED_DRIVER_FILES = frozenset(_SOURCE_FILES[:3])
 _PERFORMANCE_ARTIFACT_NAMES = (
     "cases.jsonl.gz",
     "self_learning.db",
-    "migration_v4_to_v5.db",
+    "migration_v4_to_v6.db",
 )
 
 
@@ -260,7 +278,7 @@ def _load_baseline_metrics(path: Path | None) -> dict[str, Any]:
         )
         structurally_valid = (
             metrics_path.name == "metrics.json"
-            and manifest.get("campaign_kind") == "offline_memory_v5"
+            and manifest.get("campaign_kind") == "offline_memory_v6"
             and bool(manifest.get("release_shape"))
             and int(manifest.get("seed") or 0) == DEFAULT_SEED
             and int(manifest.get("requested_events") or 0) == DEFAULT_EVENTS
@@ -508,9 +526,10 @@ def _event_for_case(
     source_shape: dict[str, Any] | None = None,
 ) -> tuple[CanonicalSessionEvent, str]:
     event_type = "tool_result"
+    event_status = ""
     content_text = ""
     input_data: dict[str, Any] = {}
-    application_id = "offline_v5"
+    application_id = "offline_v6"
     if case.category == "ledger_fts_search_scroll":
         group = case.category_index // 5
         run_id = f"ledger-run-{group:05d}"
@@ -561,6 +580,8 @@ def _event_for_case(
     else:
         run_id = f"memory-run-{case.category_index:05d}"
         root_run_id = run_id
+        event_type = "run_completed"
+        event_status = "completed"
         content_text = _fit_payload(
             f"{safe_marker(case)} memory operation {case.variant} ",
             case.payload_bytes,
@@ -578,6 +599,7 @@ def _event_for_case(
         source="offline_campaign",
         role="tool",
         tool_name="offline_probe",
+        status=event_status,
         content_text=content_text,
         input_data=input_data,
         created_at=_FIXED_CREATED_AT,
@@ -691,7 +713,7 @@ def _run_independent_baseline_probe(
                 conn.execute("PRAGMA wal_checkpoint(TRUNCATE)")
             migration_events = RELEASE_MIGRATION_EVENTS if DEFAULT_EVENTS == 100_000 else max(1, DEFAULT_EVENTS // 10)
             migration = _run_migration_probe(
-                root_path / "migration_v4_to_v5.db",
+                root_path / "migration_v4_to_v6.db",
                 event_count=migration_events,
             )
             counts = _immutable_counts(db_path)
@@ -1049,17 +1071,139 @@ def _validate_root_groups(
 
 
 def _memory_config(application_id: str, *, approval: bool) -> dict[str, Any]:
+    approval_policy = "manual" if approval else "auto"
     return {
         "application_id": application_id,
         "self_learning": {
             "enabled": True,
             "memory": {
-                "write_approval": approval,
                 "max_item_chars": 4_000,
                 "scope_budgets": {"project": 0, "application": 0},
             },
+            "review": {
+                "enabled": False,
+                "application": {
+                    "approval": {
+                        "fact": approval_policy,
+                        "experience": approval_policy,
+                    }
+                },
+                "project": {
+                    "approval": {
+                        "fact": approval_policy,
+                        "experience": approval_policy,
+                    }
+                },
+            },
         },
     }
+
+
+class _OfflineEvidenceGate:
+    """Authorize only candidates bound to a completed root in this ledger."""
+
+    def __init__(self, db_path: Path) -> None:
+        self.db_path = Path(db_path).resolve()
+
+    def evaluate(
+        self,
+        scope_type: str,
+        scope_id: str,
+        candidate: CandidateInput,
+    ) -> EvidenceGateResult:
+        source_runs = set(candidate.source_run_ids)
+        provenance_runs = {
+            str(entry.get("root_run_id") or "")
+            for entry in candidate.provenance
+        }
+        provenance_sources = {
+            str(entry.get("source") or "")
+            for entry in candidate.provenance
+        }
+        if not (
+            candidate.kind == "fact"
+            and candidate.action == "add"
+            and len(source_runs) == 1
+            and source_runs == provenance_runs
+            and provenance_sources == {"runtime_memory_tool"}
+        ):
+            return EvidenceGateResult(reasons=("offline_evidence_binding_invalid",))
+        candidate_tokens = set(
+            _MEMORY_TOKEN_RE.findall(str(candidate.payload.get("text") or ""))
+        )
+        if len(candidate_tokens) != 1:
+            return EvidenceGateResult(reasons=("offline_evidence_binding_invalid",))
+
+        root_run_id = next(iter(source_runs))
+        try:
+            with sqlite3.connect(
+                f"{self.db_path.as_uri()}?mode=ro",
+                uri=True,
+                timeout=5.0,
+            ) as conn:
+                conn.row_factory = sqlite3.Row
+                conn.execute("PRAGMA query_only=ON")
+                root = SelfLearningLedger.completed_root_run_in_transaction(
+                    conn,
+                    root_run_id,
+                )
+                completion = conn.execute(
+                    "SELECT application_id,phase,source,tool_name,content_text "
+                    "FROM events WHERE run_id=? AND root_run_id=? "
+                    "AND event_type='run_completed' AND status='completed' "
+                    "ORDER BY id DESC LIMIT 1",
+                    (root_run_id, root_run_id),
+                ).fetchone()
+        except sqlite3.Error:
+            return EvidenceGateResult(reasons=("offline_evidence_ledger_unreadable",))
+        if root is None or completion is None:
+            return EvidenceGateResult(reasons=("offline_evidence_root_not_completed",))
+
+        application_id = str(root["application_id"] or "")
+        claimed_applications = {
+            str(entry.get("application_id") or "")
+            for entry in candidate.provenance
+            if str(entry.get("application_id") or "")
+        }
+        scope_matches = (
+            (scope_type == "project" and scope_id == "project")
+            or (scope_type == "application" and scope_id == application_id)
+        )
+        token = next(iter(candidate_tokens))
+        completion_matches = bool(
+            str(completion["application_id"] or "") == application_id
+            and str(completion["phase"] or "") == "offline_validation"
+            and str(completion["source"] or "") == "offline_campaign"
+            and str(completion["tool_name"] or "") == "offline_probe"
+            and f"MVSAFE_{token}" in str(completion["content_text"] or "")
+        )
+        if (
+            application_id != "offline_v6"
+            or claimed_applications not in (set(), {application_id})
+            or not scope_matches
+            or not completion_matches
+        ):
+            return EvidenceGateResult(reasons=("offline_evidence_scope_mismatch",))
+        return EvidenceGateResult(eligible_for_auto=True)
+
+
+def _offline_review_engine(store: MemoryStore) -> ReviewEngine:
+    return ReviewEngine(
+        store.db_path,
+        evidence_gate=_OfflineEvidenceGate(store.db_path),
+        capacity_policy={
+            "max_item_chars": 4_000,
+            "scope_budgets": {"project": 0, "application": 0},
+        },
+    )
+
+
+def _payload_text(value: Any) -> str:
+    try:
+        payload = json.loads(str(value or "{}"))
+    except (TypeError, ValueError, json.JSONDecodeError):
+        return ""
+    return str(payload.get("text") or "") if isinstance(payload, dict) else ""
 
 
 def _active_memory_matches(store: MemoryStore, *, item_id: Any, content: str) -> bool:
@@ -1068,13 +1212,21 @@ def _active_memory_matches(store: MemoryStore, *, item_id: Any, content: str) ->
     except (TypeError, ValueError):
         return False
     with store._connect() as conn:
-        row = conn.execute("SELECT content FROM memory_items WHERE id=?", (expected_id,)).fetchone()
-    return row is not None and str(row[0]) == content
+        row = conn.execute(
+            "SELECT payload_json FROM memory_items "
+            "WHERE id=? AND state='active_confirmed'",
+            (expected_id,),
+        ).fetchone()
+    return row is not None and _payload_text(row[0]) == content
 
 
 def _active_content_exists(store: MemoryStore, content: str) -> bool:
     with store._connect() as conn:
-        return conn.execute("SELECT 1 FROM memory_items WHERE content=? LIMIT 1", (content,)).fetchone() is not None
+        rows = conn.execute(
+            "SELECT payload_json FROM memory_items "
+            "WHERE state IN ('active_confirmed','active_unreviewed')"
+        ).fetchall()
+    return any(_payload_text(row[0]) == content for row in rows)
 
 
 def _active_id_exists(store: MemoryStore, item_id: Any) -> bool:
@@ -1083,170 +1235,233 @@ def _active_id_exists(store: MemoryStore, item_id: Any) -> bool:
     except (TypeError, ValueError):
         return False
     with store._connect() as conn:
-        return conn.execute("SELECT 1 FROM memory_items WHERE id=?", (expected_id,)).fetchone() is not None
+        return (
+            conn.execute(
+                "SELECT 1 FROM memory_items "
+                "WHERE id=? AND state IN ('active_confirmed','active_unreviewed')",
+                (expected_id,),
+            ).fetchone()
+            is not None
+        )
 
 
 def _active_count(store: MemoryStore) -> int:
     with store._connect() as conn:
-        return int(conn.execute("SELECT COUNT(*) FROM memory_items").fetchone()[0])
+        return int(
+            conn.execute(
+                "SELECT COUNT(*) FROM memory_items "
+                "WHERE state IN ('active_confirmed','active_unreviewed')"
+            ).fetchone()[0]
+        )
 
 
-def _pending_count(store: MemoryStore) -> int:
+def _candidate_count(store: MemoryStore) -> int:
     with store._connect() as conn:
-        return int(conn.execute("SELECT COUNT(*) FROM memory_pending_writes").fetchone()[0])
+        return int(conn.execute("SELECT COUNT(*) FROM review_candidates").fetchone()[0])
 
 
-def _pending_status(store: MemoryStore, item_id: Any) -> str:
-    try:
-        expected_id = int(item_id)
-    except (TypeError, ValueError):
-        return ""
+def _candidate_state(store: MemoryStore, candidate_id: Any) -> tuple[str, str, int]:
+    expected_id = str(candidate_id or "").strip()
+    if not expected_id:
+        return "", "", 0
     with store._connect() as conn:
-        row = conn.execute("SELECT status FROM memory_pending_writes WHERE id=?", (expected_id,)).fetchone()
-    return str(row[0] or "") if row is not None else ""
+        row = conn.execute(
+            "SELECT state,outcome,revision FROM review_candidates WHERE candidate_id=?",
+            (expected_id,),
+        ).fetchone()
+    if row is None:
+        return "", "", 0
+    return str(row[0] or ""), str(row[1] or ""), int(row[2] or 0)
+
+
+def _apply_review_decision(
+    store: MemoryStore,
+    candidate: dict[str, Any],
+    action: str,
+) -> dict[str, Any]:
+    return _offline_review_engine(store).apply_decisions(
+        "project",
+        "project",
+        [
+            {
+                "candidate_id": candidate.get("candidate_id"),
+                "revision": candidate.get("revision"),
+                "action": action,
+            }
+        ],
+    )
 
 
 def _exercise_memory_case(store: MemoryStore, case: OfflineCase) -> tuple[str, bool]:
     token = case.private_token
-    root = f"memory-root-{case.category_index:05d}"
+    root = f"memory-run-{case.category_index:05d}"
     direct = _memory_config(f"offline_app_{token}", approval=False)
     approval = _memory_config(f"offline_app_{token}", approval=True)
     content = f"Offline durable fact {token}."
     if case.variant == "active_project_add":
-        result = store.handle_tool_action(
-            "add", scope="project", content=content, root_run_id=root, agent_config=direct
-        )
-        observed = "active" if result.get("ok") and not result.get("pending") else "failed"
+        result = store.add("project", content, agent_config=direct)
+        observed = "active" if result.get("ok") else "failed"
         return observed, _active_memory_matches(store, item_id=result.get("id"), content=content)
     if case.variant == "active_application_add":
-        result = store.handle_tool_action("add", scope="app", content=content, root_run_id=root, agent_config=direct)
-        observed = "active" if result.get("ok") and not result.get("pending") else "failed"
+        result = store.add(
+            "app",
+            content,
+            scope_id=str(direct["application_id"]),
+            agent_config=direct,
+        )
+        observed = "active" if result.get("ok") else "failed"
         return observed, _active_memory_matches(store, item_id=result.get("id"), content=content)
     if case.variant == "pending_add":
         result = store.handle_tool_action(
-            "add", scope="project", content=content, root_run_id=root, agent_config=approval
+            "propose", scope="project", content=content, root_run_id=root, agent_config=approval
         )
         observed = "pending" if result.get("pending") else "failed"
-        persistent = _pending_status(store, result.get("id")) == "pending" and not _active_content_exists(
-            store, content
+        state, outcome, revision = _candidate_state(store, result.get("candidate_id"))
+        persistent = (
+            state == "pending_pre_review"
+            and outcome == "pending"
+            and revision == 1
+            and not _active_content_exists(store, content)
         )
         return observed, persistent
     if case.variant == "approve_pending":
         staged = store.handle_tool_action(
-            "add", scope="project", content=content, root_run_id=root, agent_config=approval
+            "propose", scope="project", content=content, root_run_id=root, agent_config=approval
         )
-        resolved = store.approve_pending(str(staged.get("id") or ""))
-        observed = str(resolved.get("status") or "failed")
-        active_id = (resolved.get("result") or {}).get("id")
-        persistent = _pending_status(store, staged.get("id")) == "approved" and _active_memory_matches(
-            store, item_id=active_id, content=content
+        resolved = _apply_review_decision(store, staged, "approve")
+        decision = (resolved.get("results") or [{}])[0]
+        observed = str(decision.get("outcome") or "failed")
+        state, outcome, revision = _candidate_state(store, staged.get("candidate_id"))
+        persistent = (
+            state == "active_confirmed"
+            and outcome == "approved"
+            and revision == 2
+            and _active_memory_matches(store, item_id=decision.get("item_id"), content=content)
         )
         return observed, persistent
     if case.variant == "reject_pending":
         staged = store.handle_tool_action(
-            "add", scope="project", content=content, root_run_id=root, agent_config=approval
+            "propose", scope="project", content=content, root_run_id=root, agent_config=approval
         )
-        resolved = store.reject_pending(str(staged.get("id") or ""))
-        observed = str(resolved.get("status") or "failed")
-        persistent = _pending_status(store, staged.get("id")) == "rejected" and not _active_content_exists(
-            store, content
+        resolved = _apply_review_decision(store, staged, "reject")
+        decision = (resolved.get("results") or [{}])[0]
+        observed = str(decision.get("outcome") or "failed")
+        state, outcome, revision = _candidate_state(store, staged.get("candidate_id"))
+        persistent = (
+            state == "rejected"
+            and outcome == "rejected"
+            and revision == 2
+            and not _active_content_exists(store, content)
         )
         return observed, persistent
-    if case.variant == "stale_replace":
-        active = store.handle_tool_action(
-            "add", scope="project", content=content, root_run_id=root, agent_config=direct
-        )
+    if case.variant == "stale_revision_decision":
+        approved_content = f"Stale revision decision {token}."
         staged = store.handle_tool_action(
-            "replace",
+            "propose",
             scope="project",
-            target=str(active.get("id") or ""),
-            content=f"Pending replacement {token}.",
+            content=approved_content,
             root_run_id=root,
             agent_config=approval,
         )
-        store.handle_tool_action(
-            "replace",
-            scope="project",
-            target=str(active.get("id") or ""),
-            content=f"Direct replacement {token}.",
-            root_run_id=root,
-            agent_config=direct,
-        )
-        resolved = store.approve_pending(str(staged.get("id") or ""))
-        observed = str(resolved.get("status") or "failed")
-        persistent = _pending_status(store, staged.get("id")) == "stale" and _active_memory_matches(
-            store,
-            item_id=active.get("id"),
-            content=f"Direct replacement {token}.",
+        resolved = _apply_review_decision(store, staged, "approve")
+        decision = (resolved.get("results") or [{}])[0]
+        try:
+            _apply_review_decision(store, staged, "reject")
+        except ReviewConflictError:
+            observed = "stale"
+        else:
+            observed = "failed"
+        state, outcome, revision = _candidate_state(store, staged.get("candidate_id"))
+        persistent = (
+            state == "active_confirmed"
+            and outcome == "approved"
+            and revision == 2
+            and _active_memory_matches(
+                store,
+                item_id=decision.get("item_id"),
+                content=approved_content,
+            )
         )
         return observed, persistent
-    if case.variant == "normalized_duplicate":
-        first = store.handle_tool_action(
-            "add",
-            scope="project",
-            content=f"Normalized duplicate {token}.",
-            root_run_id=root,
-            agent_config=direct,
-        )
-        second = store.handle_tool_action(
-            "add",
-            scope="project",
-            content=f"  NORMALIZED   DUPLICATE {token}.  ",
-            root_run_id=root,
-            agent_config=direct,
-        )
+    if case.variant == "exact_duplicate":
+        duplicate = f"Exact duplicate {token}."
+        first = store.add("project", duplicate, agent_config=direct)
+        second = store.add("project", duplicate, agent_config=direct)
         observed = "duplicate" if first.get("id") == second.get("id") and second.get("duplicate") else "failed"
         persistent = _active_memory_matches(
             store,
             item_id=first.get("id"),
-            content=f"Normalized duplicate {token}.",
+            content=duplicate,
         )
         return observed, persistent
     if case.variant == "missing_root":
-        before = (_active_count(store), _pending_count(store))
-        result = store.handle_tool_action("add", scope="project", content=content, root_run_id="", agent_config=direct)
-        after = (_active_count(store), _pending_count(store))
+        before = (_active_count(store), _candidate_count(store))
+        result = store.handle_tool_action(
+            "propose",
+            scope="project",
+            content=content,
+            root_run_id="",
+            agent_config=direct,
+        )
+        after = (_active_count(store), _candidate_count(store))
         observed = (
             "missing_run_context" if result.get("error") == "missing_run_context" and before == after else "failed"
         )
         return observed, before == after
     if case.variant == "application_isolation":
-        store.handle_tool_action("add", scope="app", content=content, root_run_id=root, agent_config=direct)
+        store.add(
+            "app",
+            content,
+            scope_id=str(direct["application_id"]),
+            agent_config=direct,
+        )
         other = _memory_config(f"other_app_{token}", approval=False)
-        listed = store.handle_tool_action("list", scope="app", root_run_id=root, agent_config=other)
+        listed = store.handle_tool_action(
+            "list",
+            scope="app",
+            scope_id=str(other["application_id"]),
+            root_run_id=root,
+            agent_config=other,
+        )
         observed = (
             "isolated"
             if listed.get("ok") and all(item.get("content") != content for item in listed.get("items", []))
             else "failed"
         )
-        own = store.handle_tool_action("list", scope="app", root_run_id=root, agent_config=direct)
+        own = store.handle_tool_action(
+            "list",
+            scope="app",
+            scope_id=str(direct["application_id"]),
+            root_run_id=root,
+            agent_config=direct,
+        )
         persistent = any(item.get("content") == content for item in own.get("items", [])) and all(
             item.get("content") != content for item in listed.get("items", [])
         )
         return observed, persistent
-    active = store.handle_tool_action("add", scope="project", content=content, root_run_id=root, agent_config=direct)
-    replaced = store.handle_tool_action(
-        "replace",
-        scope="project",
-        target=str(active.get("id") or ""),
-        content=f"Replaced then removed {token}.",
-        root_run_id=root,
+    active = store.add("project", content, agent_config=direct)
+    replaced = store.replace(
+        "project",
+        str(active.get("id") or ""),
+        f"Replaced then removed {token}.",
         agent_config=direct,
     )
     replace_persisted = _active_memory_matches(
         store,
-        item_id=active.get("id"),
+        item_id=replaced.get("id"),
         content=f"Replaced then removed {token}.",
     )
-    removed = store.handle_tool_action(
-        "remove",
-        scope="project",
-        target=str(active.get("id") or ""),
-        root_run_id=root,
+    removed = store.remove(
+        "project",
+        str(replaced.get("id") or ""),
         agent_config=direct,
     )
     observed = "removed" if replaced.get("ok") and removed.get("ok") else "failed"
-    persistent = replace_persisted and not _active_id_exists(store, active.get("id"))
+    persistent = (
+        replace_persisted
+        and not _active_id_exists(store, active.get("id"))
+        and not _active_id_exists(store, replaced.get("id"))
+    )
     return observed, persistent
 
 
@@ -1505,14 +1720,39 @@ def _run_migration_probe(db_path: Path, *, event_count: int) -> dict[str, Any]:
             else True
         )
         integrity = str(conn.execute("PRAGMA integrity_check").fetchone()[0])
-        active = {str(row[0]) for row in conn.execute("SELECT content FROM memory_items")}
-        pending_auto = int(
+        confirmed = [
+            (_payload_text(row[0]), str(row[1] or ""))
+            for row in conn.execute(
+                "SELECT payload_json,activation_source FROM memory_items "
+                "WHERE state='active_confirmed' ORDER BY id"
+            )
+        ]
+        active_unreviewed = int(
             conn.execute(
-                "SELECT COUNT(*) FROM memory_pending_writes WHERE payload_json LIKE '%old auto fact%'"
+                "SELECT COUNT(*) FROM memory_items WHERE state='active_unreviewed'"
             ).fetchone()[0]
         )
-        stale = int(
-            conn.execute("SELECT COUNT(*) FROM memory_pending_writes WHERE id=20 AND status='stale'").fetchone()[0]
+        memory_item_count = int(
+            conn.execute("SELECT COUNT(*) FROM memory_items").fetchone()[0]
+        )
+        pending_auto = int(
+            conn.execute(
+                "SELECT COUNT(*) FROM review_candidates "
+                "WHERE candidate_id='migration_v5_pending_3' "
+                "AND state='pending_pre_review' AND outcome='pending' "
+                "AND approval='manual' AND payload_json LIKE '%old auto fact%'"
+            ).fetchone()[0]
+        )
+        quarantined = int(
+            conn.execute(
+                "SELECT COUNT(*) FROM review_candidates "
+                "WHERE candidate_id='migration_v5_pending_20' "
+                "AND state='quarantined' AND outcome='quarantined' "
+                "AND gate_reasons_json LIKE '%legacy_payload_unreconstructable%'"
+            ).fetchone()[0]
+        )
+        schema_v6 = int(
+            conn.execute("SELECT COUNT(*) FROM schema_version WHERE version=6").fetchone()[0]
         )
         conn.execute("PRAGMA wal_checkpoint(TRUNCATE)")
     post_hits = _privacy_scan(before_paths)
@@ -1522,6 +1762,7 @@ def _run_migration_probe(db_path: Path, *, event_count: int) -> dict[str, Any]:
         "learning_jobs",
         "learning_job_effects",
         "artifacts",
+        "memory_pending_writes",
     }
     checks = {
         "fixture_contained_raw_sensitive_value": had_raw_fixture,
@@ -1529,10 +1770,19 @@ def _run_migration_probe(db_path: Path, *, event_count: int) -> dict[str, Any]:
         "event_count_preserved": event_count_after == expected["events"],
         "fts_rebuilt": fts_count == expected["events"],
         "fts_unique_marker_search": fts_unique_marker,
-        "manual_active_preserved": active == {"manual project fact", "manual app fact"},
+        "manual_active_preserved": confirmed
+        == [
+            ("manual project fact", "migration"),
+            ("manual app fact", "migration"),
+        ],
+        "memory_item_count_exact": memory_item_count == 2,
+        "active_unreviewed_absent": active_unreviewed == 0,
         "legacy_auto_staged": pending_auto == 1,
-        "session_memory_removed": "progress: step 3 of 5" not in active,
-        "invalid_replace_stale": stale == 1,
+        "session_memory_removed": all(
+            content != "progress: step 3 of 5" for content, _source in confirmed
+        ),
+        "invalid_replace_quarantined": quarantined == 1,
+        "schema_v6": schema_v6 == 1,
         "removed_tables_absent": not (removed & tables),
         "integrity_ok": integrity == "ok",
         "post_migration_private_hits_zero": not post_hits,
@@ -1736,7 +1986,7 @@ def _reproduction_commands(
 def _render_report(metrics: dict[str, Any], manifest: dict[str, Any]) -> str:
     return "\n".join(
         (
-            "# Offline v5 memory validation",
+            "# Offline v6 memory validation",
             "",
             f"- Status: `{metrics['status']}`",
             f"- Release eligible: `{manifest['release_eligible']}`",
@@ -1763,27 +2013,54 @@ def _audit_migration_db(path: Path, expected_events: int) -> dict[str, Any]:
         "learning_jobs",
         "learning_job_effects",
         "artifacts",
+        "memory_pending_writes",
     }
     try:
         uri = f"file:{quote(str(path.resolve()))}?mode=ro&immutable=1"
         with sqlite3.connect(uri, uri=True) as conn:
             tables = {str(row[0]) for row in conn.execute("SELECT name FROM sqlite_master WHERE type='table'")}
-            active = {str(row[0]) for row in conn.execute("SELECT content FROM memory_items")}
+            confirmed = [
+                (_payload_text(row[0]), str(row[1] or ""))
+                for row in conn.execute(
+                    "SELECT payload_json,activation_source FROM memory_items "
+                    "WHERE state='active_confirmed' ORDER BY id"
+                )
+            ]
+            active_unreviewed = int(
+                conn.execute(
+                    "SELECT COUNT(*) FROM memory_items WHERE state='active_unreviewed'"
+                ).fetchone()[0]
+            )
+            memory_item_count = int(
+                conn.execute("SELECT COUNT(*) FROM memory_items").fetchone()[0]
+            )
             checks = {
-                "schema_v5": int(conn.execute("SELECT COUNT(*) FROM schema_version WHERE version=5").fetchone()[0])
+                "schema_v6": int(conn.execute("SELECT COUNT(*) FROM schema_version WHERE version=6").fetchone()[0])
                 == 1,
                 "event_count": int(conn.execute("SELECT COUNT(*) FROM events").fetchone()[0]) == expected_events,
                 "fts_count": int(conn.execute("SELECT COUNT(*) FROM events_fts").fetchone()[0]) == expected_events,
-                "manual_active": active == {"manual project fact", "manual app fact"},
+                "manual_active": confirmed
+                == [
+                    ("manual project fact", "migration"),
+                    ("manual app fact", "migration"),
+                ],
+                "memory_item_count_exact": memory_item_count == 2,
+                "active_unreviewed_absent": active_unreviewed == 0,
                 "legacy_auto_staged": int(
                     conn.execute(
-                        "SELECT COUNT(*) FROM memory_pending_writes WHERE payload_json LIKE '%old auto fact%'"
+                        "SELECT COUNT(*) FROM review_candidates "
+                        "WHERE candidate_id='migration_v5_pending_3' "
+                        "AND state='pending_pre_review' AND outcome='pending' "
+                        "AND approval='manual' AND payload_json LIKE '%old auto fact%'"
                     ).fetchone()[0]
                 )
                 == 1,
-                "invalid_replace_stale": int(
+                "invalid_replace_quarantined": int(
                     conn.execute(
-                        "SELECT COUNT(*) FROM memory_pending_writes WHERE id=20 AND status='stale'"
+                        "SELECT COUNT(*) FROM review_candidates "
+                        "WHERE candidate_id='migration_v5_pending_20' "
+                        "AND state='quarantined' AND outcome='quarantined' "
+                        "AND gate_reasons_json LIKE '%legacy_payload_unreconstructable%'"
                     ).fetchone()[0]
                 )
                 == 1,
@@ -1811,85 +2088,117 @@ def _memory_rows_by_token(
     conn: sqlite3.Connection,
 ) -> tuple[dict[str, list[dict[str, Any]]], dict[str, list[dict[str, Any]]], int]:
     active: dict[str, list[dict[str, Any]]] = {}
-    pending: dict[str, list[dict[str, Any]]] = {}
+    candidates: dict[str, list[dict[str, Any]]] = {}
     unmapped = 0
-    for row in conn.execute("SELECT scope_type,scope_id,content FROM memory_items ORDER BY id"):
+    for row in conn.execute(
+        "SELECT scope_type,scope_id,payload_json,state,activation_source "
+        "FROM memory_items "
+        "WHERE state IN ('active_confirmed','active_unreviewed') ORDER BY id"
+    ):
         item = dict(row)
+        item["content"] = _payload_text(item.pop("payload_json", "{}"))
         matches = _MEMORY_TOKEN_RE.findall(str(item.get("content") or ""))
         if len(set(matches)) != 1:
             unmapped += 1
             continue
         active.setdefault(matches[0], []).append(item)
     for row in conn.execute(
-        "SELECT status,action,scope_type,scope_id,payload_json,source_run_id FROM memory_pending_writes ORDER BY id"
+        "SELECT state,outcome,proposed_action,scope_type,scope_id,payload_json,"
+        "source_run_ids_json,revision FROM review_candidates ORDER BY created_at,candidate_id"
     ):
         item = dict(row)
         try:
             payload = json.loads(str(item.get("payload_json") or "{}"))
         except (TypeError, ValueError, json.JSONDecodeError):
             payload = {}
+        try:
+            source_run_ids = json.loads(str(item.get("source_run_ids_json") or "[]"))
+        except (TypeError, ValueError, json.JSONDecodeError):
+            source_run_ids = []
         item["payload"] = payload if isinstance(payload, dict) else {}
-        matches = _MEMORY_TOKEN_RE.findall(str(item.get("payload_json") or ""))
+        item["source_run_ids"] = source_run_ids if isinstance(source_run_ids, list) else []
+        item.pop("payload_json", None)
+        item.pop("source_run_ids_json", None)
+        matches = _MEMORY_TOKEN_RE.findall(json.dumps(item["payload"], sort_keys=True))
         if len(set(matches)) != 1:
             unmapped += 1
             continue
-        pending.setdefault(matches[0], []).append(item)
-    return active, pending, unmapped
+        candidates.setdefault(matches[0], []).append(item)
+    return active, candidates, unmapped
 
 
 def _memory_persistent_oracle_ok(
     case: OfflineCase,
     active: list[dict[str, Any]],
-    pending: list[dict[str, Any]],
+    candidates: list[dict[str, Any]],
 ) -> bool:
     token = case.private_token
     content = f"Offline durable fact {token}."
-    root = f"memory-root-{case.category_index:05d}"
+    root = f"memory-run-{case.category_index:05d}"
     app_scope = f"offline_app_{token}"
 
-    def active_is(expected_content: str, scope_type: str, scope_id: str) -> bool:
+    def active_is(
+        expected_content: str,
+        scope_type: str,
+        scope_id: str,
+        activation_source: str,
+    ) -> bool:
         return len(active) == 1 and active[0] == {
             "scope_type": scope_type,
             "scope_id": scope_id,
             "content": expected_content,
+            "state": "active_confirmed",
+            "activation_source": activation_source,
         }
 
-    def pending_is(status: str, action: str, expected_content: str) -> bool:
-        if len(pending) != 1:
+    def candidate_is(
+        state: str,
+        outcome: str,
+        action: str,
+        expected_content: str,
+        revision: int,
+    ) -> bool:
+        if len(candidates) != 1:
             return False
-        row = pending[0]
+        row = candidates[0]
         payload = row.get("payload")
         return (
-            row.get("status") == status
-            and row.get("action") == action
+            row.get("state") == state
+            and row.get("outcome") == outcome
+            and row.get("proposed_action") == action
             and row.get("scope_type") == "project"
             and row.get("scope_id") == "project"
-            and row.get("source_run_id") == root
+            and row.get("source_run_ids") == [root]
+            and row.get("revision") == revision
             and isinstance(payload, dict)
-            and payload.get("content") == expected_content
+            and payload.get("text") == expected_content
         )
 
     if case.variant == "active_project_add":
-        return active_is(content, "project", "project") and not pending
+        return active_is(content, "project", "project", "admin") and not candidates
     if case.variant == "active_application_add":
-        return active_is(content, "application", app_scope) and not pending
+        return active_is(content, "application", app_scope, "admin") and not candidates
     if case.variant == "pending_add":
-        return not active and pending_is("pending", "add", content)
+        return not active and candidate_is("pending_pre_review", "pending", "add", content, 1)
     if case.variant == "approve_pending":
-        return active_is(content, "project", "project") and pending_is("approved", "add", content)
-    if case.variant == "reject_pending":
-        return not active and pending_is("rejected", "add", content)
-    if case.variant == "stale_replace":
-        replacement = f"Pending replacement {token}."
-        return active_is(f"Direct replacement {token}.", "project", "project") and pending_is(
-            "stale", "replace", replacement
+        return active_is(content, "project", "project", "manual") and candidate_is(
+            "active_confirmed", "approved", "add", content, 2
         )
-    if case.variant == "normalized_duplicate":
-        return active_is(f"Normalized duplicate {token}.", "project", "project") and not pending
+    if case.variant == "reject_pending":
+        return not active and candidate_is("rejected", "rejected", "add", content, 2)
+    if case.variant == "stale_revision_decision":
+        approved_content = f"Stale revision decision {token}."
+        return active_is(approved_content, "project", "project", "manual") and candidate_is(
+            "active_confirmed", "approved", "add", approved_content, 2
+        )
+    if case.variant == "exact_duplicate":
+        return active_is(
+            f"Exact duplicate {token}.", "project", "project", "admin"
+        ) and not candidates
     if case.variant in {"missing_root", "direct_replace_remove"}:
-        return not active and not pending
+        return not active and not candidates
     if case.variant == "application_isolation":
-        return active_is(content, "application", app_scope) and not pending
+        return active_is(content, "application", app_scope, "admin") and not candidates
     return False
 
 
@@ -2039,15 +2348,19 @@ def _audit_semantic_oracle(
                         if safe_marker(case) not in content:
                             fail("root_isolation", "safe_root_content")
 
-            active_by_token, pending_by_token, unmapped = _memory_rows_by_token(conn)
+            active_by_token, candidates_by_token, unmapped = _memory_rows_by_token(conn)
             if unmapped:
                 fail("active_pending_memory", "unmapped_rows")
             memory_tokens = {case.private_token for case in categories["active_pending_memory"]}
-            if set(active_by_token) - memory_tokens or set(pending_by_token) - memory_tokens:
+            if set(active_by_token) - memory_tokens or set(candidates_by_token) - memory_tokens:
                 fail("active_pending_memory", "unexpected_tokens")
             for case in categories["active_pending_memory"]:
                 event = conn.execute(
-                    "SELECT run_id,root_run_id,content_text FROM events WHERE event_id=?",
+                    "SELECT event.run_id,event.root_run_id,event.content_text,"
+                    "event.event_type,event.status,run.status AS run_status,"
+                    "run.application_id AS run_application_id "
+                    "FROM events AS event JOIN runs AS run ON run.run_id=event.run_id "
+                    "WHERE event.event_id=?",
                     (_event_id(case),),
                 ).fetchone()
                 checked["active_pending_memory"] += 1
@@ -2056,13 +2369,17 @@ def _audit_semantic_oracle(
                     event is None
                     or event["run_id"] != expected_root
                     or event["root_run_id"] != expected_root
+                    or event["event_type"] != "run_completed"
+                    or event["status"] != "completed"
+                    or event["run_status"] != "completed"
+                    or event["run_application_id"] != "offline_v6"
                     or safe_marker(case) not in str(event["content_text"] or "")
                 ):
                     fail("active_pending_memory", "event_projection")
                 if not _memory_persistent_oracle_ok(
                     case,
                     active_by_token.get(case.private_token, []),
-                    pending_by_token.get(case.private_token, []),
+                    candidates_by_token.get(case.private_token, []),
                 ):
                     fail("active_pending_memory", "persistent_state")
     except (OSError, sqlite3.Error) as exc:
@@ -2090,6 +2407,10 @@ def audit_campaign(campaign_dir: Path) -> dict[str, Any]:
     try:
         manifest = json.loads((campaign_dir / "manifest.json").read_text(encoding="utf-8"))
         metrics = json.loads((campaign_dir / "metrics.json").read_text(encoding="utf-8"))
+        if manifest.get("schema_version") != 1:
+            issues.append("manifest_schema_version_invalid")
+        if manifest.get("campaign_kind") != "offline_memory_v6":
+            issues.append("campaign_kind_invalid")
         requested_events = int(manifest["requested_events"])
         seed = int(manifest["seed"])
         migration_events = int(manifest["migration_events"])
@@ -2191,7 +2512,7 @@ def audit_campaign(campaign_dir: Path) -> dict[str, Any]:
         ]
     except (OSError, json.JSONDecodeError):
         failures = [{"error": "failure_artifact_invalid"}]
-    migration = _audit_migration_db(campaign_dir / "migration_v4_to_v5.db", migration_events)
+    migration = _audit_migration_db(campaign_dir / "migration_v4_to_v6.db", migration_events)
     if counts["integrity"] != "ok":
         issues.append("central_integrity_failed")
     if (
@@ -2452,7 +2773,7 @@ def run_campaign(
     manifest = {
         "schema_version": 1,
         "campaign_id": campaign_id,
-        "campaign_kind": "offline_memory_v5",
+        "campaign_kind": "offline_memory_v6",
         "seed": seed,
         "requested_events": events,
         "selected_events": len(cases),
@@ -2496,7 +2817,7 @@ def run_campaign(
         _write_text(campaign_dir / "failures.jsonl", "")
         _write_json(campaign_dir / "privacy_audit.json", {"ok": True, "raw_sensitive_hits": []})
         _write_json(campaign_dir / "reproduction_commands.json", {"commands": []})
-        _write_text(campaign_dir / "report.md", "# Offline v5 memory validation\n\nStatus: planned\n")
+        _write_text(campaign_dir / "report.md", "# Offline v6 memory validation\n\nStatus: planned\n")
         return campaign_dir
 
     db_path = campaign_dir / "self_learning.db"
@@ -2522,7 +2843,7 @@ def run_campaign(
         conn.execute("PRAGMA wal_checkpoint(TRUNCATE)")
 
     migration = _run_migration_probe(
-        campaign_dir / "migration_v4_to_v5.db",
+        campaign_dir / "migration_v4_to_v6.db",
         event_count=migration_events,
     )
     immutable_counts = _immutable_counts(db_path)
@@ -2763,7 +3084,7 @@ def main(argv: list[str] | None = None) -> int:
         result = audit_campaign(args.audit)
         print(json.dumps(result, indent=2, sort_keys=True))
         return 0 if result["ok"] else 1
-    campaign_id = args.campaign_id or _default_campaign_id("offline-v5")
+    campaign_id = args.campaign_id or _default_campaign_id("offline-v6")
     campaign_dir = run_campaign(
         events=args.events,
         seed=args.seed,
