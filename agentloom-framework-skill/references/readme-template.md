@@ -70,4 +70,4 @@ applications/<app_name>/
 - 如果运行失败，记录根因和下一步。
 - 如果是多 Agent，必须写清每个 Worker 的输入输出。
 - 运行验证必须记录 manifest 中的 `application_id`、`task_id`、`run_id`，并读同一 run 的 runtime log/audit；不要只记录退出码或 final answer。
-- Application 用户交付物写自身 `output_dir`；`.agentloom/runs/.../artifacts` 只放 raw runtime artifacts，`.runtime/` 仍是独立的 Agent 可见工作区。
+- Application 用户交付物写自身 `output_dir`；`.agentloom/runs/.../artifacts` 只放运行证据；Agent 可见工作区位于 `.agentloom/workspaces/agents/<application_id>/<agent_path>/`，任务状态继续隔离在 `tasks/<task_id>/`。

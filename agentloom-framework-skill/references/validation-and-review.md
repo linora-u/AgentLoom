@@ -117,7 +117,7 @@ export AGENTLOOM_RUNTIME_ROOT=/tmp/agentloom-runtime-checkpoint
 - Resume 后必须证明 `task_id` 不变、`run_id` 改变，新旧 attempt 分属两个 run 目录，但都关联同一个 task checkpoint；heartbeat 和 run event 使用新 `run_id`。
 - 涉及 subagent/Worker checkpoint 时，要分别验证 Supervisor 中断恢复和 Worker 半路中断恢复；Worker 恢复必须证明没有新开重复 `call_index`，且能从 per-call memory checkpoint 继续。
 - file-history 场景要检查 `file-history/snapshots.json` 和备份文件，确认早期备份没有被后续 snapshot 覆盖。
-- Checkpoint 清理场景要实际跑 `loom clean-tasks --all`；run retention 要跑 `loom clean-runtime`，证明不会删除 checkpoint、`.runtime/`、`.agentloom/legacy/` 或 Application outputs。
+- Checkpoint 清理场景要实际跑 `loom clean-tasks --all`；run retention 要跑 `loom clean-runtime`，证明不会删除 checkpoint、`.agentloom/workspaces/`、`.agentloom/legacy/` 或 Application outputs。
 - 迁移要先跑 `loom migrate-runtime --dry-run`，再在隔离副本跑 `--apply`，证明忽略坏 `.task_index.json`、幂等/失败回滚、checksum 校验、有效 task resume、旧 ContextRef retrieve 与 file-history 恢复；最后确认旧 `.logs` 整体进入 `.agentloom/legacy/logs-v1-<timestamp>/`，新运行不再写 `.logs`。
 
 ContextEngine/CCR 额外必须验证：

@@ -92,7 +92,7 @@ agent_function_schema:
 ```text
 system, model_request_headers, smart_summary, context_engine,
 tool_access_control, execution_env, code_agent, tools, shell_settings,
-tools_mapping, default_toolsets, toolsets, prompt, mcp_servers, self_learning
+tools_mapping, default_toolsets, toolsets, prompt, mcp_servers, self_learning, hooks
 ```
 
 注意：
@@ -101,7 +101,7 @@ tools_mapping, default_toolsets, toolsets, prompt, mcp_servers, self_learning
 - `tools` 在白名单里只有当它是 `list` 时才进入 overlay；它同时也是 Agent 的工具列表。
 - `shell_settings`、`tools_mapping`、`toolsets` 可以在 Agent YAML 覆盖；`toolsets` 会整体替换全局 `default_toolsets`。
 - `context_engine` 可以在 Agent YAML 覆盖，用于按应用或 Agent 调整可逆上下文压缩。
-- `self_learning` 可以在应用或 Agent YAML 覆盖；memory reviewer 必须从当前 root 的最终生效配置读取，不能使用进程全局回退。
+- `self_learning` 和显式 `hooks` bundle 可以在应用或 Agent YAML 覆盖；reviewer 必须从当前 root 的最终生效配置读取，不能使用进程全局回退。
 - `mcp_servers` 可以在 Agent YAML 覆盖，并支持 string/list/dict。
 - `runtime`、`logging`、`checkpoint` 不在 Agent YAML 白名单；不要把存储 root、日志策略或 resume 生命周期塞进 Agent workflow。
 - Worker 的有效配置由全局、应用级、Worker YAML 自己重建；不会继承 Supervisor 的运行时覆盖。Worker 需要同样权限时必须自己写。
@@ -154,34 +154,45 @@ context_engine:
 
 ### self_learning
 
-自学习分成两件互不混淆的事：所有 run/event 进入可搜索 History；project/application Curated Memory 只能通过生产 `memory` 工具写入。前台 Agent 始终可以显式使用该工具，完成后评审默认关闭。
+自学习分成三层：可搜索 History、Application 候选与记忆、Project 记忆。数据库是权威来源；Markdown review artifacts 是人类工作面，不是第二份状态。
 
 ```yaml
 self_learning:
   enabled: true
-  events_retention_days: 90
+  events_retention_days: 90  # 兼容性保留；prune 必须显式传 --retention-days
   memory:
     prompt_max_chars: 12000
     max_item_chars: 4000
     scope_budgets:
       project: 8000
       application: 6000
-    review_model: ""          # 空/缺失 = 无 completed-run LLM/蒸馏
-                              # 例如 "summary" = 返回前运行一次隔离 reviewer
-    write_approval: false     # false 直接生效；true 等待 CLI approve/reject
+  review:
+    enabled: true
+    application:
+      review_model: summary
+      trigger: {mode: batch, min_completed_runs: 5}
+      approval: {fact: auto, experience: manual}
+    project:
+      review_model: summary
+      trigger: {mode: batch, min_candidates: 5}
+      approval: {fact: manual, experience: manual}
+    artifacts:
+      markdown: true
+      review_auto_applied: true
 ```
 
 运行契约：
 
-- `runs/events` 是 History；progress、TODO、临时报错只留在这里，可用 `loom sessions search/scroll` 查询，不会被模板或 fallback 变成 memory。
-- `memory_items` 只含已生效的 `project` / 当前 `application` 事实。前台模型有 `list/add/replace/remove` 四个动作；不能指定其他 Application，也没有 session note、feedback、trust、evidence、revision 或 auto-apply。
-- `review_model` 为空或缺失时，任务结束只记录 SessionEnd，不构造 completed-run digest，也不调用蒸馏/reviewer 模型；前台 `memory` 不受影响。配置后，root owner 在成功的 root run 回答完成、SessionEnd 已落库之后同步运行一个隔离的 memory-only reviewer；`loom run` 返回前等待它结束，worker 不重复运行。
-- reviewer 只读当前 root 的有界 ledger digest。所有 fragment 先递归脱敏，再扫描 Unicode/prompt injection；命中整段为 `[BLOCKED]`。普通工具返回值默认不是写入证据；只有工具实现通过 `trusted_memory_evidence` 绑定的代码侧 extractor，显式产出原文并标注 `kind="durable_fact"` 与 `scope="project"|"application"`，该原文才会进入带进程内标记的 envelope，并由 SessionRecorder 与事件原子写入独立的 `trusted_review_evidence` 表。application 的具体 ID 只取自落库 event，不能由 extractor、模型或调用配置指定；无 scope 的旧证据直接丢弃。原始 progress/完成声明、普通 event JSON、JSONL 导入和返回值伪造同名字段均无法获得这个资格；框架也不使用 progress 关键词或语义正则反向猜测。reviewer 最多完整照抄其中一条未阻断证据及其原 scope；截短、paraphrase、跨证据拼接、改 scope 和 final summary 独立声明都不能授权写入。
-- reviewer 的唯一写动作是 `add`；`replace/remove` 在代码边界直接拒绝，也不能输出 proposal JSON 绕过 memory 工具。模型调用阶段只在进程内暂存，最终写入会重新核对原 event/evidence；active 或 pending memory 与 completed audit 在同一个 `BEGIN IMMEDIATE` 事务提交。同一 root 由进程锁和 OS 文件锁串行化，不持久化 `running` claim，进程崩溃不会留下半状态。前台 Agent 仍可显式 `replace/remove`。
-- `write_approval=false` 时写入直接 active；`true` 时精确操作进入 `memory_pending_writes`，不会出现在快照中，之后由 `loom memory approve/reject` 人工处理。`approve` 对 replace/remove 再校验创建时固定的目标 id/content hash；目标变化则标为 `stale`。
-- run 开始只注入 project 与当前 Application 的 active memory；pending/rejected/stale 永不可见。secret 或 injection 内容在 active/pending 落库前直接拒绝。
-- root run 由顶层 owner 显式绑定，worker 继承；无上下文的模型 memory 调用返回 `missing_run_context`。
-- CLI：`loom memory list/add/replace/remove/pending/approve/reject/stats/export`；History 清理由 `loom sessions prune --retention-days N` 负责。
+- History 只用于 `loom sessions search/scroll`，不会被确定性 fallback 变成 memory。
+- 模型面对的 `memory` 工具只有 `list|propose`。`propose` 只能为当前 Application 提交 `fact: {text}` 或 `experience: {trigger, symptom, action, verification}`；模型不能写 Project scope，也不能 replace/remove/promote。
+- reviewer 只做有界、结构化抽取，不能选择 scope 或审批策略，也不能直接改文件、Skill 或既有记忆。Application review 读取该应用已完成的 root runs 与可信证据；Project review 只读取代码标记的 Project 证据，以及至少两个不同 Application 对同一 typed memory 的交叉印证，不读取原始 Application transcript。
+- trigger `manual` 只由 CLI 触发；`after_run` 在成功 root run 且存在上下文时触发；`batch` 分别按 `min_completed_runs` 或 `min_candidates` 阈值触发。
+- `approval.*: auto` 仍须通过代码证据门与容量检查，写为 `active_unreviewed`，之后由人类 `acknowledge` 或 `revoke`；`manual` 写为 `pending_pre_review`，由人类编辑 scoped INBOX 后应用。
+- review artifacts 位于 `.agentloom/reviews/applications/<app>/` 或 `.agentloom/reviews/project/`：`batches/<review_id>/` 不可变；`markdown: true` 编辑 `INBOX.md`，`false` 编辑 `INBOX.json`。命令是 `loom learn review`、`loom reviews status/apply/rollback`，不存在 `loom memory approve/reject`。
+- Project promotion 只能由人类对 Application candidate 执行 `promote_project`；需要 activation evidence。成功后 Project 项为 `active_confirmed`，Application 项变为 `shadowed`，冲突 payload 会被拒绝。
+- `loom memory list/add/replace/remove/pending/stats/export` 是管理员直接维护 active memory 的 CLI，与模型 proposal 工具不同；History 保留由 `loom sessions prune --retention-days N` 管理。
+- 在 `self_learning.review` 内，Application/Agent overlay 只能改变 `application`；`review.enabled`、Project policy 与 artifact policy 必须来自项目根配置。其他 `self_learning` 字段仍按普通 overlay 合并。
+- v5 字段 `self_learning.memory.review_model`、`write_approval` 会被校验器拒绝。迁移到 `review.application|project.review_model` 和各 scope 的 `approval.fact|experience`。
 
 ### execution_env
 
@@ -446,7 +457,7 @@ checkpoint:
   heartbeat_interval: 5
 ```
 
-每次 attempt 写入 `.agentloom/runs/<application_id>/<run_id>/`，其中包含 `manifest.json`、`logs/runtime.log`、`audit/shell.jsonl` 和 `artifacts/{shell,background,skills}`。逻辑任务状态独立写入 `.agentloom/checkpoints/<application_id>/<task_id>/`，包含 `task_events.jsonl`、`task_tree.json`、Supervisor `checkpoint.json`、heartbeat、ContextStore、file-history 和 Worker per-call checkpoint。日志关闭、轮转和 run 清理不能影响 checkpoint；`.runtime/` 与 Application outputs 也不属于 runtime cleaner。
+每次 attempt 都写入 `.agentloom/runs/<application_id>/<run_id>/manifest.json`。启用 file log 时才有 `logs/runtime.log`；有 shell/tool 证据时才有对应 artifacts；成功结果存在时才写 `artifacts/result.txt`；checkpoint 证据存在时才复制 `audit/{task_tree.json,task_events.jsonl}`。Manifest 只指向真实存在的文件。逻辑任务状态独立写入 `.agentloom/checkpoints/<application_id>/<task_id>/`，包含 Supervisor checkpoint、heartbeat、ContextStore、file-history 和 Worker per-call checkpoint。Agent 工作区位于 `.agentloom/workspaces/agents/<application_id>/<agent_path>/`，任务状态隔离在 `tasks/<task_id>/`。日志关闭、轮转和 run 清理不能影响 checkpoint、workspace 或 Application outputs。
 
 CLI 契约：文件日志默认按配置落盘，单次关闭用 `loom run --no-file-log`；不存在 `--log-to-file`。`loom list-tasks`、`loom clean-tasks`、`loom run --resume <task_id>` 验证 checkpoint；`loom clean-runtime` 应用 run retention；`loom migrate-runtime --dry-run|--apply` 迁移/归档旧 `.logs`。真实运行必须读 manifest、runtime.log 与 shell.jsonl，不能只看退出码。
 
