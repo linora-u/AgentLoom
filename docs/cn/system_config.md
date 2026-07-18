@@ -831,9 +831,9 @@ loom run applications/<app>/workflows/<agent>.yaml --no-file-log
 
 ### 7.2 保留策略与存储边界
 
-自动清理最多按配置间隔执行一次；`loom clean-runtime` 可显式应用同一策略。它只删除符合条件的 run 目录或其中的 raw artifacts，永不遍历 checkpoints、`.agentloom/legacy/`、`.runtime/` 或 Application 自有 output 目录。
+自动清理最多按配置间隔执行一次；`loom clean-runtime` 可显式应用同一策略。它只删除符合条件的 run 目录或其中的 raw artifacts，永不遍历 checkpoints、`.agentloom/legacy/`、`.agentloom/workspaces/` 或 Application 自有 output 目录。
 
-`.runtime/` 仍是 Agent 可见的 recall/todo 工作区，与 `.agentloom/` 语义独立。`loom migrate-runtime --dry-run` 预览有效的旧 checkpoint 候选；`loom migrate-runtime --apply` 完成迁移，并把整个旧 `.logs` 归档到 `.agentloom/legacy/`。
+Agent 的 recall/todo 文件统一位于 `.agentloom/workspaces/agents/<application_id>/<agent_path>/`。`loom migrate-runtime --dry-run` 会预览旧 checkpoint 候选和未分域的 `.runtime`；`loom migrate-runtime --apply` 会迁移 checkpoints、把 `.logs` 归档到 `.agentloom/legacy/`，并将缺少 Application/task 来源信息的 `.runtime` 原子归档到 `.agentloom/workspaces/legacy-unscoped/`。
 
 验证真实 attempt 时必须读取 `manifest.json`、`logs/runtime.log` 与 `audit/shell.jsonl`，不能只看退出码。
 
@@ -1265,7 +1265,7 @@ Run 证据与 task 恢复状态在同一个 runtime root 下保持独立生命�
 - Run manifest 记录 `task_id`；checkpoint run event 和 heartbeat 记录当前 `run_id`
 - Checkpoint 直接按 Application/task canonical 路径定位，不依赖日志、`.task_index.json` 或 legacy 扫描
 - 日志关闭、轮转和 runtime retention 不会删除 checkpoint
-- `.runtime/` 仍是独立的 Agent 可见工作区；Application `output_dir` 仍由 Application 管理
+- Agent workspace 与 run artifacts 保持独立；Application `output_dir` 仍由 Application 管理
 
 ### 12.2 心跳机制与崩溃检测
 

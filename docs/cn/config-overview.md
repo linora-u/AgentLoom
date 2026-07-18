@@ -69,7 +69,7 @@ logging:
   backup_count: 3
 ```
 
-每次 attempt 写入 `.agentloom/runs/<application_id>/<run_id>/{manifest.json,logs,audit,artifacts}`。Resume 会创建新的 `run_id`，但保持逻辑任务的 `task_id` 和 `.agentloom/checkpoints/<application_id>/<task_id>/` 不变。Agent 可见的 `.runtime/` 工作区与 Application 自有 `output_dir` 属于独立存储域。
+每次 attempt 写入 `.agentloom/runs/<application_id>/<run_id>/{manifest.json,logs,audit,artifacts}`。Resume 会创建新的 `run_id`，但保持逻辑任务的 `task_id`、`.agentloom/checkpoints/<application_id>/<task_id>/` 和 `.agentloom/workspaces/agents/<application_id>/<agent_path>/tasks/<task_id>/` 不变。Application 自有 `output_dir` 仍属于独立存储域。
 
 文件日志由 `logging.file_enabled` 控制，并按大小和备份数有界轮转。`loom run --no-file-log` 只关闭本次 attempt 的文件日志，不会关闭 checkpoint 或 Shell audit。`loom clean-runtime` 应用 run retention；`loom migrate-runtime --dry-run|--apply` 用于一次性迁移旧 `.logs`。
 

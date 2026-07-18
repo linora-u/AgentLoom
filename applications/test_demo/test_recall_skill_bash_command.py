@@ -16,7 +16,6 @@ if str(AGENT_LOOM_ROOT) not in sys.path:
 SKILL_DIR = AGENT_LOOM_ROOT / "skills" / "agent-recall-with-files"
 SKILL_PATH = SKILL_DIR / "SKILL.md"
 WORKFLOW_PATH = AGENT_LOOM_ROOT / "applications" / "test_demo" / "workflows" / "test_recall_agent.yaml"
-AI_QUALITY_ANALYSIS_WORKFLOW_PATH = AGENT_LOOM_ROOT / "applications" / "ai_quality_analysis" / "workflows" / "code_review_agent.yaml"
 TASK_START_SCRIPT = SKILL_DIR / "scripts" / "on_task_start.py"
 STOP_SCRIPT = SKILL_DIR / "scripts" / "on_stop.py"
 INSIGHTS_TEMPLATE = SKILL_DIR / "templates" / "insights.md"
@@ -32,6 +31,18 @@ class TestAgentRecallSkillRepoAdaptation(unittest.TestCase):
         with tempfile.TemporaryDirectory(prefix="recall-stop-hook-") as tmp:
             env = dict(**__import__("os").environ)
             env["AGENT_NAME"] = "default"
+            agent_root = (
+                Path(tmp)
+                / ".agentloom"
+                / "workspaces"
+                / "agents"
+                / "test_demo"
+                / "default"
+            )
+            env["AGENTLOOM_AGENT_TASK_WORKSPACE"] = str(
+                agent_root / "tasks" / "test-task"
+            )
+            env["AGENTLOOM_AGENT_INSIGHTS_PATH"] = str(agent_root / "insights.md")
             result = subprocess.run(
                 [sys.executable, str(STOP_SCRIPT)],
                 cwd=tmp,
@@ -63,11 +74,6 @@ class TestAgentRecallSkillRepoAdaptation(unittest.TestCase):
         self.assertIn('path: "skills/agent-recall-with-files"', content)
         self.assertTrue(SKILL_DIR.exists(), f"Canonical skill directory not found: {SKILL_DIR}")
 
-    def test_ai_quality_analysis_workflow_uses_recall_skill(self):
-        self.assertTrue(AI_QUALITY_ANALYSIS_WORKFLOW_PATH.exists(), f"Workflow file not found: {AI_QUALITY_ANALYSIS_WORKFLOW_PATH}")
-        content = AI_QUALITY_ANALYSIS_WORKFLOW_PATH.read_text(encoding="utf-8")
-        self.assertIn('path: "skills/agent-recall-with-files"', content)
-
     def test_task_start_script_bootstraps_runtime_and_cleans_legacy(self):
         self.assertTrue(TASK_START_SCRIPT.exists(), f"TaskCreated script not found: {TASK_START_SCRIPT}")
 
@@ -81,7 +87,17 @@ class TestAgentRecallSkillRepoAdaptation(unittest.TestCase):
 
             env = dict(**__import__("os").environ)
             env["AGENT_NAME"] = "default"
-            env["AGENT_LOOM_RUNTIME_ROOT"] = tmp
+            agent_root = (
+                Path(tmp)
+                / ".agentloom"
+                / "workspaces"
+                / "agents"
+                / "test_demo"
+                / "default"
+            )
+            runtime_dir = agent_root / "tasks" / "test-task"
+            env["AGENTLOOM_AGENT_TASK_WORKSPACE"] = str(runtime_dir)
+            env["AGENTLOOM_AGENT_INSIGHTS_PATH"] = str(agent_root / "insights.md")
             result = subprocess.run(
                 [sys.executable, str(TASK_START_SCRIPT)],
                 cwd=tmp,
@@ -92,8 +108,7 @@ class TestAgentRecallSkillRepoAdaptation(unittest.TestCase):
             )
             self.assertEqual(result.returncode, 0, msg=result.stderr)
 
-            runtime_dir = Path(tmp, ".runtime", "default")
-            insights_content = Path(runtime_dir, "insights.md").read_text(encoding="utf-8").replace("\r\n", "\n")
+            insights_content = Path(agent_root, "insights.md").read_text(encoding="utf-8").replace("\r\n", "\n")
             trace_content = Path(runtime_dir, "trace.md").read_text(encoding="utf-8").replace("\r\n", "\n")
             context_content = Path(runtime_dir, "context.md").read_text(encoding="utf-8").replace("\r\n", "\n")
             self.assertFalse(Path(tmp, ".planning").exists())

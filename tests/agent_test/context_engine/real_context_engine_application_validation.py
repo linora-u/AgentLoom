@@ -70,7 +70,7 @@ CASES: tuple[ValidationCase, ...] = (
 
 
 def _runtime_root() -> Path:
-    return Path(os.environ.get("AGENT_LOOM_RUNTIME_ROOT", "/tmp/agentloom-context-engine-apps")).resolve()
+    return Path(os.environ.get("AGENTLOOM_RUNTIME_ROOT", "/tmp/agentloom-context-engine-apps")).resolve()
 
 
 def _select_cases(selection: str) -> list[ValidationCase]:

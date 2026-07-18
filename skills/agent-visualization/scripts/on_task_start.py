@@ -3,9 +3,13 @@
 
 from common import (
     SKILL_TAG,
-    viz_output_path, read_viz_state, write_viz_state,
-    ensure_agent_in_config, append_event,
-    get_agent_name, get_runtime_agent_path, get_tool_input, output,
+    append_event,
+    ensure_agent_in_config,
+    get_agent_name,
+    get_tool_input,
+    output,
+    visualization_path,
+    write_viz_state,
 )
 
 
@@ -14,7 +18,7 @@ def main() -> None:
     agent_name = tool_input.get("agent_name") or get_agent_name()
     task_text = tool_input.get("task_text", "")
 
-    path = viz_output_path(get_runtime_agent_path())
+    path = visualization_path()
 
     # Initialize fresh state
     data = {

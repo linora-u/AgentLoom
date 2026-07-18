@@ -49,7 +49,7 @@ Important boundaries:
 - `task_events.jsonl` is the durable task/Worker event source. `task_tree.json` is its inspectable projection.
 - Checkpoint lookup uses the canonical `<application_id>/<task_id>` path. It does not depend on a log directory, `.task_index.json`, or a scan of historical runs.
 - User deliverables remain under the Application's configured `output_dir`. Runtime cleanup never traverses Application output directories.
-- `.runtime/` is an Agent-visible workspace for recall/todo state. It is intentionally independent from `.agentloom/` and is not moved into run artifacts.
+- Agent recall/todo state lives under `.agentloom/workspaces/agents/<application_id>/<agent_path>/`. Persistent `insights.md` is application-scoped; task files are isolated under `tasks/<task_id>/` and are not run artifacts.
 
 ## Configuration
 
@@ -135,7 +135,7 @@ Automatic runtime cleanup is throttled to at most once per `runtime.cleanup_inte
 - failed/interrupted runs: 30 days by default;
 - raw `artifacts/`: 3 days by default;
 - running or unknown-status manifests: preserved;
-- `.agentloom/legacy/`, checkpoints, `.runtime/`, and Application outputs: never deleted by run cleanup.
+- `.agentloom/legacy/`, checkpoints, workspaces, and Application outputs: never deleted by run cleanup.
 
 Run the same policy explicitly with:
 

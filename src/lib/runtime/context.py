@@ -178,6 +178,19 @@ def safe_application_id(value: str) -> str:
     )
 
 
+def safe_agent_path(value: str) -> str:
+    """Return a safe, possibly nested agent identity for workspace storage."""
+
+    raw = str(value).strip().replace("\\", "/")
+    path = PurePosixPath(raw)
+    if not raw or path.is_absolute() or any(part in {"", ".", ".."} for part in path.parts):
+        raise ValueError("agent_path must be a safe relative path")
+    return "/".join(
+        _safe_named_part(part, fallback="agent", include_hash_on_change=True)
+        for part in path.parts
+    )
+
+
 def fallback_application_id(
     workflow_path: str | Path | None,
     *,
@@ -315,6 +328,57 @@ class RuntimeContext:
     @property
     def skill_artifacts_dir(self) -> Path:
         return self.artifacts_dir / "skills"
+
+    @property
+    def agent_workspaces_dir(self) -> Path:
+        """Canonical root for persistent and task-scoped agent workspaces."""
+
+        return (
+            self.root_dir
+            / "workspaces"
+            / "agents"
+            / Path(*self.application_id.split("/"))
+        )
+
+    def agent_workspace_root(self, agent_path: str) -> Path:
+        """Return the application-scoped workspace root for one agent."""
+
+        canonical = safe_agent_path(agent_path)
+        return self.agent_workspaces_dir / Path(*canonical.split("/"))
+
+    def agent_insights_path(self, agent_path: str) -> Path:
+        """Return the persistent insights file shared by this agent's tasks."""
+
+        return self.agent_workspace_root(agent_path) / "insights.md"
+
+    def agent_task_workspace_dir(self, agent_path: str) -> Path:
+        """Return the workspace isolated to the current task and agent."""
+
+        return self.agent_workspace_root(agent_path) / "tasks" / self.task_id
+
+    def agent_task_file(self, agent_path: str, filename: str) -> Path:
+        """Return one validated file inside an agent's task workspace."""
+
+        safe_filename = _safe_part(filename, field="agent task filename")
+        return self.agent_task_workspace_dir(agent_path) / safe_filename
+
+    def agent_todos_path(self, agent_path: str) -> Path:
+        """Return the canonical task-scoped todo file for one agent."""
+
+        return self.agent_task_file(agent_path, "todos.md")
+
+    def agent_visualization_path(self, agent_path: str) -> Path:
+        """Return the canonical task-scoped visualization file for one agent."""
+
+        return self.agent_task_file(agent_path, "visualization.json")
+
+    def prepare_agent_workspace(self, agent_path: str) -> Path:
+        """Create the trusted task workspace and return its canonical path."""
+
+        return _ensure_runtime_directory(
+            self.agent_task_workspace_dir(agent_path),
+            root=self.root_dir,
+        )
 
     def skill_workspace_dir(self, skill_name: str) -> Path:
         """Return the canonical workspace for one skill in this run."""
