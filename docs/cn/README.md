@@ -54,12 +54,21 @@ uv run loom run applications/ai_quality_analysis/workflows/code_review_agent.yam
 
 `run_id` 标识一次执行 attempt，resume 时会改变；`task_id` 标识同一个逻辑任务，resume 时保持不变。因此 resume 会写入新的 run 目录，同时继续使用原 checkpoint 和 `.agentloom/workspaces/agents/<application_id>/<agent_path>/tasks/<task_id>/`。`insights.md` 位于 agent workspace 根目录并跨 task 共享。
 
-### 打开 AgentLoom TUI
+### 使用 AgentLoom TUI
+
+TUI 是一个轻量的 Agent Builder 和项目状态浏览器。它可以对话、查看当前项目的
+Agent 目录，并通过受限工具生成 Agent YAML；它本身不会执行 Shell、Git 或
+Agent 任务。
+
+#### 1. 安装并打开项目
 
 ```bash
 ./install
-# 首次安装后打开一个新终端，然后在 AgentLoom 项目中直接运行：
+# 首次安装后打开一个新终端，然后在要查看的 AgentLoom 项目中运行：
 agentloom
+
+# 也可以显式指定项目：
+agentloom --project /path/to/project
 ```
 
 源码安装器沿用 OpenCode 的原生二进制安装方式：为当前平台构建
@@ -69,7 +78,67 @@ TypeScript/OpenTUI 单文件程序，安装到 `~/.agentloom/bin`，并在
 如果不希望修改 Shell 配置，可用 `./install --no-modify-path`；也可通过
 `AGENTLOOM_INSTALL_DIR` 指定其他安装根目录。
 
-Builder 只查看、暂存和校验 Agent YAML，`/apply` 才是显式写入动作。右侧目录会显示当前项目全部 Agent System 和 Run，包括仅创建但从未运行的定义、实时状态、Workers、事件、日志、产物和已保留结果。
+#### 2. 选择 TUI 对话模型
+
+TUI 从 `config/llm.yaml` 读取模型列表和默认模型。开始对话前，至少配置一个
+OpenAI-compatible 模型：包含 `model`、`api_key`，并提供 HTTPS `base_url`
+（本机地址可用 HTTP），或者使用走 OpenAI 默认端点的 `openai/...` 模型 ID。
+TUI 对话会直接请求这个 Provider；真正运行 Agent 时仍使用 AgentLoom 原有的
+运行时模型链路。要创建 YAML，模型还必须支持流式 Chat Completions 和原生
+tool/function calling，并将 `tool_choice` 保持为 `auto` 或 `required`，不能设为
+`none`。
+
+在 TUI 中输入 `/models` 打开模型选择器，或用 `/model <type>` 直接切换，
+例如 `/model summary`。
+
+#### 3. 通过对话创建或修改 Agent YAML
+
+按 `Enter` 发送需求，例如：
+
+```text
+创建一个名为 release_review 的应用。使用一个 Supervisor 和两个 Worker，
+分别负责 API 审查和测试审查。模型类型从 config/llm.yaml 中选择，先展示
+准备创建的文件，不要直接写入。
+```
+
+Builder 会按需读取已有 Agent YAML 定义、在内存中暂存草稿并进行校验。你可以
+继续对话修改，确认后再输入 `/apply`。只有当前通过校验的草稿会被写入；普通对话
+不会改文件，`/apply` 也不会启动 Agent。
+
+#### 4. 自己运行 Agent
+
+在另一个终端中，使用草稿里显示的实际路径直接运行 YAML：
+
+```bash
+uv run loom run applications/<app>/workflows/<agent>.yaml
+```
+
+如果希望通过 Python 文件启动，可以先生成入口文件再运行：
+
+```bash
+uv run loom create applications/<app>/workflows/<agent>.yaml \
+  -o applications/<app>/<app>_app.py
+uv run python applications/<app>/<app>_app.py
+```
+
+运行期间可以保持 TUI 打开。`loom run` 和调用 `src.runner.run_app` 的 Python
+入口都会发布标准运行状态；如果直接调用底层 Agent `.run()`，会绕过这套生命周期，
+TUI 因此无法展示完整 Run。
+
+#### 5. 查看项目中的全部 Agent 和 Run 状态
+
+- 按 `Ctrl+P` 或 `Tab`，输入 Application、Agent、Worker、Run、Skill 或
+  Schedule 名称，再用 `↑` / `↓` 和 `Enter` 打开；工作区中的条目也可点击。
+- Agent 详情会显示从未运行的定义、拓扑、文件和校验信息。Run 详情会区分
+  运行中、成功、失败、崩溃、中断和未知状态，并展示 Worker 状态及保留结果。
+- 失败 Run 只展示关键错误、异常 Worker、日志文件路径、产物索引和有界的结果预览，
+  不会把全部原始日志铺满界面。在该 Run 中按 `a`，可以让 TUI 助手基于经过清洗、
+  严格限长的失败上下文分析原因。
+- 用 `F6` 在对话框和详情页之间切换焦点。详情页获得焦点后支持 `PgUp` / `PgDn`、
+  `Home` / `End`、方向键和鼠标滚轮；按 `Esc` 或 `b` 返回。运行状态会自动刷新；
+  在详情页按 `r` 或输入 `/refresh` 可重新建立项目索引。
+
+更多 TUI 架构与开发说明见 [`agentloom-tui/README.md`](../../agentloom-tui/README.md)。
 
 TUI 创建的定时任务会持久保存；要让任务自动触发，需要在另一个终端显式运行前台调度服务：
 
