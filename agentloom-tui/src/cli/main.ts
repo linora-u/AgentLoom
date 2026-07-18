@@ -1,16 +1,16 @@
 import { stat } from "node:fs/promises"
 import { BridgeClient, PythonTransport } from "../bridge"
-import { runTui } from "../app"
 import { formatSnapshot, parseCliArgs } from "./args"
 
 export const VERSION = "0.1.0"
 const MAX_BRIDGE_DIAGNOSTIC_CHARS = 4_000
 
-export const HELP = `AgentLoom TUI — create Agent YAML and inspect project execution state
+export const HELP = `AgentLoom TUI — chat with AgentLoom and inspect or create Agent systems
 
 Usage:
   agentloom [--project <path>]
   agentloom --snapshot [--project <path>]
+  agentloom schedules --project <path> <command>
 
 Options:
   --project <path>  AgentLoom project root (default: current directory)
@@ -19,13 +19,20 @@ Options:
   -v, --version     Show version
 
 Inside the TUI:
-  Enter              Send a Builder message
-  /models             List configured models from config/llm.yaml
+  Enter              Send a message
+  /models             Open the model selector from config/llm.yaml
   /model <type>       Select a configured model from config/llm.yaml
-  /refresh            Refresh Agent Systems and Runs
+  /refresh            Re-index the project catalog
+  /schedule           Show durable schedule commands
   /apply              Explicitly write the validated YAML draft
-  Tab / ↑ / ↓ / Enter Browse and open Agent/Run details
+  Ctrl-P / Tab        Search Applications, Agents, Runs, Skills and Schedules
+  ↑ / ↓ / Enter       Select and open a workbench entry
+  PgUp / PgDn         Scroll the open detail view (mouse wheel also works)
+  Esc / b             Return from details to chat
   Ctrl-C              Exit
+
+Run durable schedules (separate terminal):
+  agentloom schedules --project <path> serve
 `
 
 export async function main(argv = process.argv.slice(2)): Promise<number> {
@@ -53,14 +60,18 @@ export async function main(argv = process.argv.slice(2)): Promise<number> {
       },
     })
     client = new BridgeClient(transport)
-    const snapshot = await client.bootstrap()
-
     if (args.snapshot) {
+      const snapshot = await client.bootstrap()
       process.stdout.write(formatSnapshot(snapshot) + "\n")
       return 0
     }
 
-    await runTui({ client, snapshot, projectRoot: args.projectRoot })
+    // Non-interactive --help/--version/--snapshot must not pay OpenTUI's
+    // renderer preload cost. JSX runtime hooks are installed immediately
+    // before importing the interactive app.
+    await import("@opentui/solid/preload")
+    const { runTui } = await import("../app")
+    await runTui({ client, projectRoot: args.projectRoot })
     return 0
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error)

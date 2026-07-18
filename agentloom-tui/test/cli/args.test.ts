@@ -47,6 +47,26 @@ describe("agentloom CLI", () => {
           },
         ],
         runs: [],
+        worker_invocations: [],
+        worker_invocations_incomplete: false,
+        applications: [],
+        agents: [],
+        skills: [],
+        schedules: {
+          items: [],
+          service: {
+            state: "stopped",
+            pid: null,
+            started_at: null,
+            last_tick_at: null,
+            last_success_at: null,
+            last_error: null,
+            job_count: 0,
+            due_count: 0,
+            claimed_count: 0,
+            execution_count: 0,
+          },
+        },
       }),
     )
 

@@ -7,6 +7,7 @@
 
 import { createCliRenderer, type CliRenderer } from "@opentui/core"
 import { render } from "@opentui/solid"
+import { basename } from "node:path"
 import type { BootstrapResultDto } from "../domain"
 import { formatTerminalTitle } from "../ui"
 import { AgentLoomSession, type TuiClient } from "./session"
@@ -14,7 +15,7 @@ import { AgentLoomApp } from "./view"
 
 export type RunTuiInput = {
   client: TuiClient
-  snapshot: BootstrapResultDto
+  snapshot?: BootstrapResultDto
   projectRoot: string
   refreshIntervalMs?: number
 }
@@ -30,11 +31,15 @@ export async function runTui(input: RunTuiInput): Promise<void> {
     openConsoleOnError: false,
     useMouse: true,
   })
-  const session = new AgentLoomSession({ client: input.client, snapshot: input.snapshot })
+  const session = new AgentLoomSession({
+    client: input.client,
+    snapshot: input.snapshot,
+    projectRoot: input.projectRoot,
+  })
   const destroyed = waitForDestroy(renderer)
   const onSighup = () => destroyRenderer(renderer)
   process.on("SIGHUP", onSighup)
-  renderer.setTerminalTitle(formatTerminalTitle(input.snapshot.project.name))
+  renderer.setTerminalTitle(formatTerminalTitle(input.snapshot?.project.name ?? basename(input.projectRoot)))
 
   try {
     await render(
@@ -48,9 +53,13 @@ export async function runTui(input: RunTuiInput): Promise<void> {
       ),
       renderer,
     )
+    // The renderer is live before any Python import or workspace scan. Keep
+    // the shell responsive and let the session publish loading/ready/error.
+    void session.start()
     await destroyed
   } finally {
     process.off("SIGHUP", onSighup)
+    session.dispose()
     destroyRenderer(renderer)
     await input.client.close()
   }

@@ -48,11 +48,126 @@ export interface SystemSummaryDto {
   latest_run: RunSummaryDto | null
 }
 
+export interface ApplicationSummaryDto {
+  id: string
+  name: string
+  path: string
+  system_count: number
+  worker_count: number
+  skill_count: number
+  run_count: number
+  active_run_count: number
+}
+
+export interface ConfiguredSkillsDto {
+  load_mode: string | null
+  items: string[]
+}
+
+export interface AgentCatalogDto {
+  id: string
+  application_id: string
+  name: string
+  description: string
+  path: string
+  role: "supervisor" | "worker"
+  skills: ConfiguredSkillsDto
+  workers: AgentCatalogDto[]
+}
+
+export interface SkillSummaryDto {
+  id: string
+  application_id: string
+  name: string
+  description: string
+  origin: "application"
+  path: string
+}
+
+export type ScheduleTriggerDto =
+  | { kind: "once"; at: string | null; timezone: string }
+  | { kind: "interval"; seconds: number; timezone: string }
+  | { kind: "cron"; expression: string; timezone: string }
+  | { kind: "unknown" }
+
+export interface ScheduleExecutionSummaryDto {
+  id: string
+  job_id: string
+  status: string
+  trigger: string | null
+  claimed_at: string | null
+  started_at: string | null
+  finished_at: string | null
+  exit_code: number | null
+  error: string | null
+}
+
+export interface ScheduleSummaryDto {
+  id: string
+  name: string
+  enabled: boolean
+  state: string
+  yaml_path: string | null
+  trigger: ScheduleTriggerDto
+  next_run_at: string | null
+  last_run_at: string | null
+  last_status: string | null
+  run_count: number
+  last_execution: ScheduleExecutionSummaryDto | null
+}
+
+export interface ScheduleServiceDto {
+  state: "running" | "stale" | "stopped" | "error"
+  pid: number | null
+  started_at: string | null
+  last_tick_at: string | null
+  last_success_at: string | null
+  last_error: string | null
+  job_count: number
+  due_count: number
+  claimed_count: number
+  execution_count: number
+}
+
+export type ScheduleInputDto =
+  | { kind: "once"; at: string; timezone: string }
+  | { kind: "interval"; every: string; timezone: string }
+  | { kind: "cron"; expression: string; timezone: string }
+
+export interface ScheduleMutationResultDto {
+  action: "add" | "pause" | "resume" | "remove"
+  job_id: string
+  name: string
+  state: string
+}
+
 export interface BootstrapResultDto {
   project: ProjectDto
   models: ModelsDto
   systems: SystemSummaryDto[]
   runs: RunSummaryDto[]
+  worker_invocations: WorkerInvocationSummaryDto[]
+  worker_invocations_incomplete: boolean
+  applications: ApplicationSummaryDto[]
+  agents: AgentCatalogDto[]
+  skills: SkillSummaryDto[]
+  schedules: {
+    items: ScheduleSummaryDto[]
+    service: ScheduleServiceDto
+  }
+}
+
+export interface RuntimeSummaryDto {
+  systems: SystemSummaryDto[]
+  runs: RunSummaryDto[]
+  runs_incomplete: boolean
+  removed_runs: Array<{ application_id: string; run_id: string }>
+  worker_invocations: WorkerInvocationSummaryDto[]
+  worker_invocations_incomplete: boolean
+  schedules: {
+    items: ScheduleSummaryDto[]
+    service: ScheduleServiceDto
+  }
 }
 
 export interface AgentDefinitionDto {
@@ -101,6 +216,13 @@ export interface RunWorkerDto {
   started_at: string | null
   ended_at: string | null
   error: string | null
+}
+
+export interface WorkerInvocationSummaryDto extends RunWorkerDto {
+  run_id: string
+  system_id: string
+  application_id: string
+  parent_agent_name: string
 }
 
 export interface RunLogDto {
@@ -205,6 +327,30 @@ export interface RpcMethods {
     params: { run_id: string; application_id: string; system_id?: string }
     result: RunDetailResultDto
   }
+  "runtime.summary": {
+    params: Record<string, never>
+    result: RuntimeSummaryDto
+  }
+  "schedule.add": {
+    params: { yaml_path: string; name: string; schedule: ScheduleInputDto }
+    result: ScheduleMutationResultDto
+  }
+  "schedule.pause": {
+    params: { job_id: string }
+    result: ScheduleMutationResultDto
+  }
+  "schedule.resume": {
+    params: { job_id: string }
+    result: ScheduleMutationResultDto
+  }
+  "schedule.remove": {
+    params: { job_id: string }
+    result: ScheduleMutationResultDto
+  }
+  "assistant.send": {
+    params: { session_id: string; message: string; model_type?: string }
+    result: BuilderSendResultDto
+  }
   "builder.send": {
     params: { session_id: string; message: string; model_type?: string }
     result: BuilderSendResultDto
@@ -234,8 +380,10 @@ export const rpcErrorCodes = [
   "method_not_found",
   "invalid_params",
   "not_found",
+  "not_ready",
   "builder_failed",
   "draft_conflict",
+  "schedule_failed",
   "busy",
   "internal_error",
 ] as const
@@ -250,3 +398,19 @@ export interface RpcErrorDto {
 export type RpcResponse<Result = unknown> =
   | { id: string; ok: true; result: Result }
   | { id: string; ok: false; error: RpcErrorDto }
+
+export type AssistantTurnEventDto =
+  | { request_id: string; session_id: string; type: "turn.started" }
+  | { request_id: string; session_id: string; type: "turn.delta"; text: string }
+  | {
+      request_id: string
+      session_id: string
+      type: "turn.activity"
+      state: "started" | "completed"
+      name: string
+    }
+  | { request_id: string; session_id: string; type: "turn.completed" }
+
+export interface RpcEventEnvelopeDto {
+  event: AssistantTurnEventDto
+}

@@ -36,23 +36,38 @@ agentloom --snapshot
 
 ## What it does
 
-- Builder: short conversation plus bounded ReAct tools to inspect definitions,
-  stage Agent YAML in memory, and validate it. It cannot run Shell, Git, or an
-  Agent. `/apply` is the only disk-write path and requires the current draft
-  revision.
-- Agent Systems: lists supervisor definitions under
-  `applications/**/workflows/`, including definitions that have never run.
+- Chat: real model-backed general conversation plus bounded ReAct tools to
+  inspect the project, stage Agent YAML in memory, and validate it. It cannot
+  run Shell, Git, or an Agent. `/apply` is the only Agent-definition write path
+  and requires the current draft revision.
+- Workspace: `Ctrl+P` searches Applications, supervisor/worker Agents, Skills,
+  Schedules, Runs, and commands. Entries remain observable even before their
+  first run, and opening one keeps the conversation visible.
 - Runs: merges canonical Run manifests, checkpoints, heartbeats, Workers,
   events, logs, artifacts, and durable results. Large event/log/artifact/result
   views use explicit bounded previews, so the live refresh loop cannot silently
-  present partial data as complete or grow without limit.
-- Details: click an Agent System or Run, or use `Tab`, arrow keys, and `Enter`.
+  present partial data as complete or grow without limit. A lightweight global
+  refresh updates every Agent, Run, and Schedule without reparsing Agent YAML.
+- Details: click a workspace or recent-run entry. Use arrow/Page Up/Page Down/
+  Home/End or the mouse wheel to scroll; `Esc` or `b` returns to chat.
   A never-run Agent shows its definition, topology, files, validation, and
   “尚未运行，无执行结果”; it never fabricates an execution result.
 - Models: reads the sanitized model catalog and default from `config/llm.yaml`.
   API keys, base URLs, headers, and provider configuration never cross the
-  bridge. Use `/models` to list configured choices and `/model <type>` to
-  switch the Builder model.
+  bridge. Use `/models` for a keyboard/mouse model selector, or `/model <type>`
+  for direct switching.
+- Schedules: create, pause, resume, and remove durable local schedules with
+  `/schedule ...`. Automatic firing is deliberately a separate foreground
+  service, so it survives the TUI closing and never hides a background daemon.
+  Keep it running in another terminal with:
+
+  ```bash
+  agentloom schedules --project /path/to/project serve
+  ```
+
+  The TUI reports `Scheduler: stopped` and warns after schedule creation until
+  this service is running. The same store remains available to source users
+  through `uv run loom schedules`.
 
 Python entry files remain observable when they call `src.runner.run_app`, as
 the existing `loom create` scaffold does. Calling a low-level Agent `.run()`
@@ -66,7 +81,8 @@ OpenTUI + SolidJS (TypeScript)
   └─ long-lived NDJSON RPC
        └─ python -I -u -m src.tui_bridge
             ├─ Agent definitions + config/llm.yaml
-            └─ .agentloom/runs + checkpoints + heartbeats
+            ├─ runtime runs + checkpoints + heartbeats
+            └─ .agentloom/schedules
 ```
 
 The presentation layer is a reduced adaptation of OpenCode's MIT-licensed TUI.

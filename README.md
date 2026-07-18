@@ -75,6 +75,13 @@ explicit write action. The right-side directory shows every Agent System and
 Run, including definitions that have never run, live state, Workers, events,
 logs, artifacts, and retained results.
 
+Schedules created in the TUI are durable, but automatic firing requires an
+explicit foreground service in a separate terminal:
+
+```bash
+agentloom schedules --project /path/to/project serve
+```
+
 ## Create a Multi-Agent App with Codex
 
 The fastest path is to let Codex use the framework skill that ships with this repository. Codex can create the YAML files, run the AgentLoom app, inspect `.agentloom/` run and checkpoint evidence, and revise the app when a Worker gets stuck or a config is wrong.

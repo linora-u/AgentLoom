@@ -1,6 +1,10 @@
 import { describe, expect, test } from "bun:test"
-import type { RunDetailResultDto, SystemDetailResultDto } from "../../src/domain"
-import { runDetailSections, systemDetailSections } from "../../src/app/presentation"
+import type { BootstrapResultDto, RunDetailResultDto, SystemDetailResultDto } from "../../src/domain"
+import {
+  runDetailSections,
+  systemDetailSections,
+  workspaceEntityDetail,
+} from "../../src/app/presentation"
 
 const completeLimits: RunDetailResultDto["limits"] = {
   workers: { truncated: false, returned_count: 1, max_count: 256 },
@@ -32,6 +36,145 @@ const completeLimits: RunDetailResultDto["limits"] = {
 }
 
 describe("detail presentation", () => {
+  test("workspace entity details preserve application, worker, skill, and schedule context", () => {
+    const snapshot: BootstrapResultDto = {
+      project: { root: "/repo", name: "repo" },
+      models: { default: null, configured: false, items: [] },
+      systems: [{
+        id: "applications/digest/workflows/digest.yaml",
+        path: "applications/digest/workflows/digest.yaml",
+        application_id: "digest",
+        name: "digest_agent",
+        description: "Summarize",
+        state: "running",
+        validation: { valid: true, errors: [] },
+        latest_run: {
+          run_id: "run-1",
+          system_id: "applications/digest/workflows/digest.yaml",
+          application_id: "digest",
+          task_id: "task-1",
+          agent_name: "digest_agent",
+          status: "running",
+          started_at: "2026-07-18T10:00:00Z",
+          ended_at: null,
+        },
+      }],
+      runs: [],
+      worker_invocations: [{
+        run_id: "run-1",
+        system_id: "applications/digest/workflows/digest.yaml",
+        application_id: "digest",
+        parent_agent_name: "digest_agent",
+        agent_name: "reader",
+        call_index: 3,
+        status: "failed",
+        step: 4,
+        started_at: "2026-07-18T10:00:10Z",
+        ended_at: "2026-07-18T10:00:20Z",
+        error: "source unavailable",
+      }],
+      worker_invocations_incomplete: false,
+      applications: [{
+        id: "digest",
+        name: "digest",
+        path: "applications/digest",
+        system_count: 1,
+        worker_count: 1,
+        skill_count: 1,
+        run_count: 1,
+        active_run_count: 1,
+      }],
+      agents: [{
+        id: "applications/digest/workflows/digest.yaml",
+        application_id: "digest",
+        name: "digest_agent",
+        description: "Summarize",
+        path: "applications/digest/workflows/digest.yaml",
+        role: "supervisor",
+        skills: { load_mode: "all", items: [] },
+        workers: [{
+          id: "applications/digest/workflows/worker_agents/reader.yaml",
+          application_id: "digest",
+          name: "reader",
+          description: "Read source files",
+          path: "applications/digest/workflows/worker_agents/reader.yaml",
+          role: "worker",
+          skills: { load_mode: "selected", items: ["pdf"] },
+          workers: [],
+        }],
+      }],
+      skills: [{
+        id: "digest:pdf",
+        application_id: "digest",
+        name: "pdf",
+        description: "Read PDFs",
+        origin: "application",
+        path: "applications/digest/skills/pdf/SKILL.md",
+      }],
+      schedules: {
+        items: [{
+          id: "daily-digest",
+          name: "daily-digest",
+          enabled: true,
+          state: "scheduled",
+          yaml_path: "applications/digest/workflows/digest.yaml",
+          trigger: { kind: "cron", expression: "0 9 * * *", timezone: "Asia/Shanghai" },
+          next_run_at: "2026-07-19T01:00:00Z",
+          last_run_at: "2026-07-18T01:00:00Z",
+          last_status: "completed",
+          run_count: 3,
+          last_execution: null,
+        }],
+        service: {
+          state: "running",
+          pid: 42,
+          started_at: "2026-07-18T00:00:00Z",
+          last_tick_at: "2026-07-18T10:00:00Z",
+          last_success_at: "2026-07-18T10:00:00Z",
+          last_error: null,
+          job_count: 1,
+          due_count: 0,
+          claimed_count: 0,
+          execution_count: 3,
+        },
+      },
+    }
+
+    const application = workspaceEntityDetail(snapshot, { type: "application", applicationID: "digest" })!
+    const worker = workspaceEntityDetail(snapshot, {
+      type: "agent",
+      agentID: "applications/digest/workflows/worker_agents/reader.yaml",
+      systemID: "applications/digest/workflows/digest.yaml",
+    })!
+    const skill = workspaceEntityDetail(snapshot, { type: "skill", skillID: "digest:pdf" })!
+    const schedule = workspaceEntityDetail(snapshot, { type: "schedule", scheduleID: "daily-digest" })!
+
+    expect(application.sections.flatMap((section) => section.lines).join("\n")).toContain("reader (worker)")
+    const workerText = worker.sections.flatMap((section) => section.lines).join("\n")
+    expect(workerText).toContain("Agent 状态: failed")
+    expect(workerText).toContain("Run: run-1")
+    expect(workerText).toContain("调用: #3")
+    expect(workerText).toContain("Step: 4")
+    expect(workerText).toContain("错误: source unavailable")
+    expect(skill.sections.flatMap((section) => section.lines).join("\n")).toContain("applications/digest/skills/pdf/SKILL.md")
+    expect(schedule.sections.flatMap((section) => section.lines).join("\n")).toContain("cron 0 9 * * *")
+    expect(schedule.sections.flatMap((section) => section.lines).join("\n")).toContain("调度服务: running")
+
+    const incompleteSnapshot = {
+      ...snapshot,
+      worker_invocations: [],
+      worker_invocations_incomplete: true,
+    }
+    const incompleteWorker = workspaceEntityDetail(incompleteSnapshot, {
+      type: "agent",
+      agentID: "applications/digest/workflows/worker_agents/reader.yaml",
+      systemID: "applications/digest/workflows/digest.yaml",
+    })!
+    const incompleteText = incompleteWorker.sections.flatMap((section) => section.lines).join("\n")
+    expect(incompleteText).toContain("Agent 状态: incomplete")
+    expect(incompleteText).not.toContain("Agent 状态: never_run")
+  })
+
   test("never-run systems show definitions without inventing execution results", () => {
     const detail: SystemDetailResultDto = {
       summary: {

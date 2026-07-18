@@ -38,6 +38,48 @@ def test_response_writer_replaces_an_oversized_ndjson_line_with_a_bounded_error(
     }
 
 
+def test_bridge_can_emit_ordered_turn_events_before_the_rpc_result(monkeypatch) -> None:
+    class EventBridge:
+        def dispatch_with_events(self, method: str, params: dict, emit) -> dict:
+            assert method == "assistant.send"
+            emit({"type": "turn.started"})
+            emit({"type": "turn.delta", "text": "hello"})
+            return {"assistant": "hello", "session_id": params["session_id"]}
+
+    output = _run_main(
+        monkeypatch,
+        EventBridge(),
+        {
+            "id": "turn-1",
+            "method": "assistant.send",
+            "params": {"session_id": "chat-1", "message": "hi"},
+        },
+    )
+
+    assert output == [
+        {
+            "event": {
+                "request_id": "turn-1",
+                "session_id": "chat-1",
+                "type": "turn.started",
+            }
+        },
+        {
+            "event": {
+                "request_id": "turn-1",
+                "session_id": "chat-1",
+                "type": "turn.delta",
+                "text": "hello",
+            }
+        },
+        {
+            "id": "turn-1",
+            "ok": True,
+            "result": {"assistant": "hello", "session_id": "chat-1"},
+        },
+    ]
+
+
 def test_oversized_response_drops_an_unbounded_id_to_preserve_the_hard_cap(monkeypatch) -> None:
     stream = io.StringIO()
     monkeypatch.setattr(bridge_main, "_MAX_RESPONSE_BYTES", 128)

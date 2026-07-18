@@ -1,8 +1,9 @@
-"""Bounded Agent YAML builder used by the AgentLoom TUI.
+"""Bounded conversational assistant used by the AgentLoom TUI.
 
-The model can inspect Agent definitions and edit an in-memory draft.  It cannot
-run commands, execute an Agent, or write files.  Applying a validated draft is
-an explicit RPC operation performed by the user.
+The configured model answers ordinary questions and can optionally inspect
+Agent definitions or edit an in-memory YAML proposal. It cannot run commands,
+execute an Agent, or write files. Applying a validated proposal is always an
+explicit user operation.
 """
 
 from __future__ import annotations
@@ -12,17 +13,15 @@ import json
 import os
 import stat
 import uuid
-from collections.abc import Callable, Mapping, Sequence
+from collections.abc import Callable, Iterator, Mapping, Sequence
 from dataclasses import dataclass, field
 from pathlib import Path, PurePosixPath
-from typing import Protocol
+from typing import Any, Protocol
 
 import yaml
 from smolagents import Tool
 
-from src.lib.smolagents.agent.agent_validation import AgentConfigNormalizer
-from src.lib.smolagents.agent.yaml_agent_factory import YamlAgentFactory
-from src.runner import validate_runtime_agent_config, validate_runtime_worker_config
+from src.tui_bridge.definition import validate_agent_definition
 
 _MAX_TRANSCRIPT_MESSAGES = 16
 _MAX_BUILDER_MESSAGE_CHARS = 32_000
@@ -30,6 +29,7 @@ _MAX_TRANSCRIPT_CHARS = 64_000
 _MAX_ASSISTANT_MESSAGE_CHARS = 32_000
 _MAX_INSPECTION_BYTES = 80_000
 _TRUNCATION_MARKER = "… [truncated]"
+_TUI_MODEL_TIMEOUT_SECONDS = 45
 
 
 class DraftConflictError(ValueError):
@@ -37,7 +37,7 @@ class DraftConflictError(ValueError):
 
 
 class _BuilderAgent(Protocol):
-    def run(self, prompt: str) -> object: ...
+    def run(self, prompt: str, **kwargs: Any) -> object: ...
 
 
 AgentFactory = Callable[[Sequence[Tool], str | None], _BuilderAgent]
@@ -146,6 +146,12 @@ def _directory_flags() -> int:
     return _open_flags(os.O_RDONLY | getattr(os, "O_DIRECTORY", 0) | getattr(os, "O_CLOEXEC", 0))
 
 
+def _fsync_directory(directory_fd: int) -> None:
+    """Make the preceding directory-entry mutation durable before continuing."""
+
+    os.fsync(directory_fd)
+
+
 def _open_relative_directory(root_fd: int, parts: Sequence[str], *, create: bool) -> int:
     """Open a directory below ``root_fd`` without following replaceable parents."""
 
@@ -159,10 +165,14 @@ def _open_relative_directory(root_fd: int, parts: Sequence[str], *, create: bool
             except FileNotFoundError:
                 if not create:
                     raise
+                created = False
                 try:
                     os.mkdir(part, dir_fd=directory_fd)
+                    created = True
                 except FileExistsError:
                     pass
+                if created:
+                    _fsync_directory(directory_fd)
                 child_fd = os.open(part, _directory_flags(), dir_fd=directory_fd)
             os.close(directory_fd)
             directory_fd = child_fd
@@ -259,7 +269,9 @@ def _write_exclusive(
             if mode is not None:
                 os.fchmod(descriptor, mode)
             os.fsync(stream.fileno())
-        return _fingerprint_descriptor(descriptor, name)
+        fingerprint = _fingerprint_descriptor(descriptor, name)
+        _fsync_directory(directory_fd)
+        return fingerprint
     finally:
         os.close(descriptor)
 
@@ -301,6 +313,7 @@ def _backup_file(directory_fd: int, source_name: str, backup_name: str) -> _File
             _write_all(backup_descriptor, chunk)
         os.fchmod(backup_descriptor, stat.S_IMODE(before.st_mode))
         os.fsync(backup_descriptor)
+        _fsync_directory(directory_fd)
         after = os.fstat(source_descriptor)
         if _stable_file_metadata(before) != _stable_file_metadata(after) or size != after.st_size:
             raise DraftConflictError(f"Agent YAML target changed while being backed up: {source_name}")
@@ -333,7 +346,8 @@ def _unlink_entry(directory_fd: int, name: str) -> None:
     try:
         os.unlink(name, dir_fd=directory_fd)
     except FileNotFoundError:
-        pass
+        return
+    _fsync_directory(directory_fd)
 
 
 def _assert_prepared_write_unchanged(item: _PreparedWrite) -> None:
@@ -409,163 +423,6 @@ def _read_bounded_regular_file(root: Path, path: Path, max_bytes: int) -> tuple[
     raw = b"".join(chunks)
     payload = raw[:max_bytes]
     return payload.decode("utf-8", errors="ignore"), len(raw) > max_bytes, len(payload)
-
-
-def _model_types(project_root: Path) -> tuple[str, dict[str, object]]:
-    path = project_root / "config" / "llm.yaml"
-    try:
-        raw = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
-    except (OSError, UnicodeError, yaml.YAMLError):
-        return "", {}
-    model = raw.get("model", {}) if isinstance(raw, dict) else {}
-    if not isinstance(model, dict):
-        return "", {}
-    default = model.get("default_model_type")
-    return (default.strip() if isinstance(default, str) else ""), model
-
-
-def _validate_model_reference(
-    project_root: Path,
-    source_path: Path | str,
-    parsed: dict[str, object],
-) -> list[str]:
-    default_model, models = _model_types(project_root)
-    selected_model = parsed.get("model_type", default_model)
-    if not isinstance(selected_model, str) or not selected_model.strip():
-        return [f"{source_path}: no model_type and no configured default model"]
-    selected_model = selected_model.strip()
-    model_settings = models.get(selected_model)
-    if not isinstance(model_settings, dict) or not model_settings.get("model"):
-        return [f"{source_path}: model_type '{selected_model}' is not configured"]
-    return []
-
-
-def _validate_worker_references(
-    project_root: Path,
-    relative_path: str,
-    parsed: dict[str, object],
-    draft_paths: set[str],
-    draft_configs: Mapping[str, dict[str, object]],
-) -> list[str]:
-    raw_workers = parsed.get("worker_agents", [])
-    try:
-        AgentConfigNormalizer.validate_worker_agents_config(raw_workers)
-    except ValueError as exc:
-        return [str(exc)]
-    if not raw_workers:
-        return []
-
-    supervisor = project_root.joinpath(*PurePosixPath(relative_path).parts)
-    worker_folder = supervisor.parent / "worker_agents"
-    errors: list[str] = []
-    folder_is_staged = any(
-        project_root.joinpath(*PurePosixPath(path).parts).parent == worker_folder for path in draft_paths
-    )
-    if not worker_folder.is_dir() and not folder_is_staged:
-        errors.append(f"worker_agents folder not found: {worker_folder}")
-    for item in raw_workers:
-        configured_path = str(item["path"]).strip()
-        try:
-            candidate = AgentConfigNormalizer.resolve_worker_agent_config_path(
-                configured_path,
-                worker_folder,
-                agent_root=project_root,
-            )
-        except ValueError as exc:
-            errors.append(str(exc))
-            continue
-        if candidate.suffix.lower() not in {".yaml", ".yml", ".md"}:
-            errors.append(f"worker_agents path '{configured_path}' resolved to '{candidate}' has unsupported extension")
-            continue
-        try:
-            candidate_relative = candidate.relative_to(project_root).as_posix()
-        except ValueError:
-            candidate_relative = None
-        if candidate_relative in draft_paths:
-            worker_config = draft_configs.get(candidate_relative)
-            if worker_config is None:
-                # The staged file's own YAML/mapping validation reports the
-                # parse error.  Do not fall back to an older on-disk worker.
-                continue
-            try:
-                validate_runtime_worker_config(
-                    worker_config,
-                    candidate_relative,
-                    agent_root=project_root,
-                )
-                errors.extend(
-                    _validate_model_reference(
-                        project_root,
-                        candidate_relative,
-                        worker_config,
-                    )
-                )
-            except (TypeError, ValueError) as exc:
-                errors.append(
-                    f"worker_agents path '{configured_path}' resolved to '{candidate_relative}' is invalid: {exc}"
-                )
-            continue
-        try:
-            if candidate_relative is not None:
-                _reject_symlink_components(project_root, project_root / candidate_relative)
-            if not candidate.is_file():
-                errors.append(
-                    f"worker_agents path '{configured_path}' resolved to '{candidate}' does not exist or is not a file"
-                )
-                continue
-            worker_config = YamlAgentFactory._load_config_from_file(candidate)
-            validate_runtime_worker_config(
-                worker_config,
-                candidate,
-                agent_root=project_root,
-            )
-            errors.extend(
-                _validate_model_reference(
-                    project_root,
-                    candidate,
-                    worker_config,
-                )
-            )
-        except (OSError, UnicodeError, yaml.YAMLError, TypeError, ValueError) as exc:
-            errors.append(f"worker_agents path '{configured_path}' resolved to '{candidate}' is invalid: {exc}")
-    return errors
-
-
-def validate_agent_definition(
-    project_root: Path,
-    relative_path: str,
-    parsed: dict[str, object],
-    *,
-    draft_paths: set[str] | None = None,
-    draft_configs: Mapping[str, dict[str, object]] | None = None,
-) -> list[str]:
-    """Validate one parsed Agent definition against Builder and runtime contracts."""
-
-    errors: list[str] = []
-    try:
-        validate_runtime_agent_config(
-            parsed,
-            relative_path,
-            agent_root=project_root,
-        )
-    except ValueError as exc:
-        errors.append(str(exc))
-    for key in ("runtime", "logging"):
-        if key in parsed:
-            errors.append(f"{relative_path}: '{key}' is global-only and is not allowed in Agent YAML")
-
-    errors.extend(_validate_model_reference(project_root, relative_path, parsed))
-    errors.extend(
-        f"{relative_path}: {error}"
-        for error in _validate_worker_references(
-            project_root,
-            relative_path,
-            parsed,
-            draft_paths or set(),
-            draft_configs or {},
-        )
-    )
-    return errors
 
 
 def _validate_yaml(
@@ -747,24 +604,45 @@ class _ValidateAgentDraftTool(Tool):
         return json.dumps(_draft_summary(self._project_root, self._draft), ensure_ascii=False)
 
 
+def _tui_model_config_builder():
+    """Keep an interactive TUI turn bounded independently of Agent runs."""
+
+    from src.lib.smolagents.models.model_manager import ModelConfigBuilder, ModelConfigOverlay
+
+    return ModelConfigBuilder().apply_overlay(
+        ModelConfigOverlay(
+            timeout=_TUI_MODEL_TIMEOUT_SECONDS,
+            num_retries=0,
+            retry_delay=0,
+            max_retry_delay=0,
+        ),
+        source="AgentLoom TUI short conversation",
+    )
+
+
 def _default_agent_factory(tools: Sequence[Tool], model_type: str | None) -> _BuilderAgent:
     from src.lib.config import C
     from src.lib.smolagents.agent.base_agent import ToolCallingAgentV2
     from src.lib.smolagents.models.model_manager import get_model
 
     selected_model = (model_type or C.default_model_type or "").strip()
-    model = get_model(selected_model, framework="smolagents")
+    model = get_model(
+        selected_model,
+        framework="smolagents",
+        model_builder=_tui_model_config_builder(),
+    )
     return ToolCallingAgentV2(
         tools=list(tools),
         model=model,
-        max_steps=4,
+        max_steps=6,
         max_tokens=4096,
         verbosity_level=0,
+        stream_outputs=True,
     )
 
 
 class BuilderService:
-    """In-process sessions for the TUI's short Agent Builder conversations."""
+    """In-process sessions for short, general AgentLoom conversations."""
 
     def __init__(self, project_root: Path | str, *, agent_factory: AgentFactory | None = None):
         self._project_root = Path(project_root).expanduser().resolve()
@@ -787,6 +665,7 @@ class BuilderService:
         session_id: str,
         message: str,
         model_type: str | None = None,
+        on_event: Callable[[dict[str, object]], None] | None = None,
     ) -> dict[str, object]:
         session_id = session_id.strip()
         message = message.strip()
@@ -810,14 +689,16 @@ class BuilderService:
         agent = self._agent_factory(tools, model_type)
         transcript = json.dumps(history, ensure_ascii=False)
         prompt = (
-            "You are AgentLoom Builder. Help the user design Agent System YAML through a short conversation.\n"
-            "You may only inspect existing Agent definitions, stage complete YAML files in memory, and validate the draft.\n"
+            "You are AgentLoom, a general conversational assistant inside an AgentLoom project.\n"
+            "Answer ordinary questions directly using the configured model. Do not force ordinary questions into Agent YAML work.\n"
+            "When the user asks to create or modify an Agent, you may inspect existing definitions, stage complete YAML files in memory, and validate the proposal.\n"
+            "Only stage YAML when the user actually requests an Agent definition change; an empty draft is normal for general conversation.\n"
             "Never claim that you ran an Agent. Never use shell, git, edit arbitrary project files, or perform a long task.\n"
-            "Do not claim files were saved: only the user-facing Apply action can write a valid draft.\n"
+            "Do not claim files were saved: only the user-facing Apply action can write a valid proposal.\n"
             "Ask a concise clarification when the requested behavior is materially ambiguous.\n"
             f"Conversation (including the latest user message): {transcript}"
         )
-        output = agent.run(prompt)
+        output = self._run_agent(agent, prompt, on_event=on_event)
         assistant = _bounded_assistant_message(str(output))
         history.append({"role": "assistant", "content": assistant})
         _trim_history(history)
@@ -827,6 +708,65 @@ class BuilderService:
             "model_type": model_type,
             "draft": _draft_summary(self._project_root, draft),
         }
+
+    @staticmethod
+    def _run_agent(
+        agent: _BuilderAgent,
+        prompt: str,
+        *,
+        on_event: Callable[[dict[str, object]], None] | None,
+    ) -> object:
+        if on_event is None:
+            return agent.run(prompt)
+
+        on_event({"type": "turn.started"})
+        try:
+            stream = agent.run(prompt, stream=True)
+        except TypeError as error:
+            # Small test/embedding agents may intentionally implement only the
+            # one-argument protocol. The production ToolCallingAgent supports
+            # streaming; preserve the narrow compatibility surface.
+            if "stream" not in str(error):
+                raise
+            output = agent.run(prompt)
+            on_event({"type": "turn.completed"})
+            return output
+
+        if not isinstance(stream, Iterator):
+            on_event({"type": "turn.completed"})
+            return stream
+
+        final_output: object | None = None
+        for item in stream:
+            item_type = type(item).__name__
+            if item_type == "ChatMessageStreamDelta":
+                content = getattr(item, "content", None)
+                if isinstance(content, str) and content:
+                    on_event({"type": "turn.delta", "text": content})
+                continue
+            if item_type == "ToolCall":
+                on_event(
+                    {
+                        "type": "turn.activity",
+                        "state": "started",
+                        "name": str(getattr(item, "name", "tool")),
+                    }
+                )
+                continue
+            if item_type == "ToolOutput":
+                tool_call = getattr(item, "tool_call", None)
+                on_event(
+                    {
+                        "type": "turn.activity",
+                        "state": "completed",
+                        "name": str(getattr(tool_call, "name", "tool")),
+                    }
+                )
+                continue
+            if item_type == "FinalAnswerStep":
+                final_output = getattr(item, "output", None)
+        on_event({"type": "turn.completed"})
+        return "" if final_output is None else final_output
 
     def apply_draft(self, *, session_id: str, expected_revision: int) -> dict[str, object]:
         draft = self._draft(session_id)
@@ -907,6 +847,7 @@ class BuilderService:
                             dst_dir_fd=item.parent_fd,
                         )
                         attempted.append(item)
+                        _fsync_directory(item.parent_fd)
                     else:
                         try:
                             os.link(
@@ -921,8 +862,16 @@ class BuilderService:
                                 f"Agent YAML target was created before commit: {item.relative_path}"
                             ) from exc
                         attempted.append(item)
+                        _fsync_directory(item.parent_fd)
                         _unlink_entry(item.parent_fd, item.temporary_name)
                     applied.append(item.relative_path)
+
+                # A rename can detach the final held parent immediately after
+                # the last target mutation.  Revalidate every canonical parent
+                # before reporting success so a single-file apply cannot claim
+                # a write that only exists in a displaced directory.
+                for item in prepared:
+                    _assert_prepared_parent_unchanged(project_fd, item)
             except Exception as apply_error:
                 recovery_details: list[str] = []
                 for item in reversed(attempted):
@@ -950,6 +899,7 @@ class BuilderService:
                                 src_dir_fd=item.parent_fd,
                                 dst_dir_fd=item.parent_fd,
                             )
+                            _fsync_directory(item.parent_fd)
                         else:
                             _unlink_entry(item.parent_fd, item.target_name)
                     except Exception as rollback_error:

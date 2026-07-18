@@ -105,7 +105,12 @@ if ! BUN_BIN=$(find_bun); then
 fi
 
 printf '%b\n' "${MUTED}Creating the locked AgentLoom Python environment...${NC}"
-UV_PROJECT_ENVIRONMENT="$VENV_DIR" "$UV_BIN" sync --frozen --no-editable --no-dev --project "$REPO_ROOT"
+UV_PROJECT_ENVIRONMENT="$VENV_DIR" "$UV_BIN" sync \
+  --frozen \
+  --no-editable \
+  --no-dev \
+  --reinstall-package agentloom \
+  --project "$REPO_ROOT"
 
 BUILD_DIR=$(mktemp -d "${TMPDIR:-/tmp}/agentloom-install.XXXXXX")
 cleanup() {
@@ -137,6 +142,10 @@ if [ -z "${AGENTLOOM_PYTHON:-}" ]; then
     AGENTLOOM_PYTHON="$install_root/venv/Scripts/python.exe"
   fi
   export AGENTLOOM_PYTHON
+fi
+if [ "${1:-}" = "schedules" ]; then
+  shift
+  exec "$AGENTLOOM_PYTHON" -I -m src schedules "$@"
 fi
 exec "$install_root/bin/agentloom-tui" "$@"
 EOF
@@ -199,4 +208,5 @@ fi
 
 printf '\n%s installed successfully.\n' "$APP"
 printf 'Run now: %s/agentloom\n' "$BIN_DIR"
+printf 'Run schedules: %s/agentloom schedules --project /path/to/project serve\n' "$BIN_DIR"
 printf 'After opening a new shell: agentloom\n'

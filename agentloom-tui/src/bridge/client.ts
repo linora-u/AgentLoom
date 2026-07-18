@@ -1,5 +1,6 @@
 import {
   rpcErrorCodes,
+  type AssistantTurnEventDto,
   type BootstrapResultDto,
   type RpcErrorCode,
   type RpcMethod,
@@ -56,6 +57,7 @@ export class BridgeClient {
     { resolve: (result: unknown) => void; reject: (error: Error) => void }
   >()
   private readonly createID: () => string
+  private readonly eventListeners = new Set<(event: AssistantTurnEventDto) => void>()
   private startPromise?: Promise<void>
   private closePromise?: Promise<void>
   private closed = false
@@ -89,6 +91,19 @@ export class BridgeClient {
       message,
       ...(modelType ? { model_type: modelType } : {}),
     })
+  }
+
+  assistantSend(sessionID: string, message: string, modelType?: string) {
+    return this.request("assistant.send", {
+      session_id: sessionID,
+      message,
+      ...(modelType ? { model_type: modelType } : {}),
+    })
+  }
+
+  subscribeEvents(listener: (event: AssistantTurnEventDto) => void) {
+    this.eventListeners.add(listener)
+    return () => this.eventListeners.delete(listener)
   }
 
   builderDraft(sessionID: string) {
@@ -144,6 +159,15 @@ export class BridgeClient {
   }
 
   private receive(line: string) {
+    const event = parseEvent(line)
+    if (event instanceof Error) {
+      this.fail(event)
+      return
+    }
+    if (event) {
+      for (const listener of this.eventListeners) listener(event)
+      return
+    }
     const response = parseResponse(line)
     if (response instanceof Error) {
       this.fail(response)
@@ -173,6 +197,42 @@ export class BridgeClient {
     for (const pending of this.pending.values()) pending.reject(error)
     this.pending.clear()
   }
+}
+
+function parseEvent(line: string): AssistantTurnEventDto | BridgeProtocolError | null {
+  const value = (() => {
+    try {
+      return JSON.parse(line) as unknown
+    } catch {
+      return undefined
+    }
+  })()
+  if (!isRecord(value) || !("event" in value)) return null
+  if (!isRecord(value.event)) {
+    return new BridgeProtocolError("bridge event must contain an event object")
+  }
+  const event = value.event
+  if (
+    typeof event.request_id !== "string"
+    || typeof event.session_id !== "string"
+    || typeof event.type !== "string"
+  ) {
+    return new BridgeProtocolError("bridge event has invalid identity")
+  }
+  if (event.type === "turn.started" || event.type === "turn.completed") {
+    return event as unknown as AssistantTurnEventDto
+  }
+  if (event.type === "turn.delta" && typeof event.text === "string") {
+    return event as unknown as AssistantTurnEventDto
+  }
+  if (
+    event.type === "turn.activity"
+    && (event.state === "started" || event.state === "completed")
+    && typeof event.name === "string"
+  ) {
+    return event as unknown as AssistantTurnEventDto
+  }
+  return new BridgeProtocolError(`bridge event has unknown shape: ${event.type}`)
 }
 
 type ParsedResponse =

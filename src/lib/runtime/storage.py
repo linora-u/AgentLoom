@@ -182,6 +182,10 @@ class SecureDirectory:
                 src_dir_fd=parent_fd,
                 dst_dir_fd=parent_fd,
             )
+            # Persist the directory entry as well as the temporary file contents.
+            # Without this fsync, a crash can lose the completed rename and make a
+            # durable claim appear unclaimed after restart.
+            os.fsync(parent_fd)
         finally:
             if file_fd >= 0:
                 os.close(file_fd)
@@ -251,8 +255,10 @@ class SecureDirectory:
         relative: str | Path,
         *,
         create: bool = False,
+        exclusive: bool = True,
+        blocking: bool = True,
     ) -> Iterator[None]:
-        """Hold an exclusive advisory lock on one anchored regular file."""
+        """Hold an advisory lock on one anchored regular file."""
 
         parent_fd, name = self._open_parent(relative, create=create)
         fd = -1
@@ -264,7 +270,10 @@ class SecureDirectory:
             fd = os.open(name, flags, 0o600, dir_fd=parent_fd)
             if not stat.S_ISREG(os.fstat(fd).st_mode):
                 raise RuntimeError(f"storage lock target is not regular: {self.path / str(relative)}")
-            fcntl.flock(fd, fcntl.LOCK_EX)
+            operation = fcntl.LOCK_EX if exclusive else fcntl.LOCK_SH
+            if not blocking:
+                operation |= fcntl.LOCK_NB
+            fcntl.flock(fd, operation)
             locked = True
             yield
         finally:
@@ -291,6 +300,38 @@ class SecureDirectory:
                 chunks.append(chunk)
             return b"".join(chunks)
         finally:
+            if fd >= 0:
+                os.close(fd)
+            os.close(parent_fd)
+
+    @contextmanager
+    def open_binary_writer(
+        self,
+        relative: str | Path,
+        *,
+        exclusive: bool = False,
+    ) -> Iterator[BinaryIO]:
+        """Open one anchored regular file for writing without following links."""
+
+        parent_fd, name = self._open_parent(relative, create=True)
+        fd = -1
+        stream: BinaryIO | None = None
+        try:
+            flags = os.O_WRONLY | os.O_CREAT | os.O_NONBLOCK | _NOFOLLOW
+            if exclusive:
+                flags |= os.O_EXCL
+            fd = os.open(name, flags, 0o600, dir_fd=parent_fd)
+            if not stat.S_ISREG(os.fstat(fd).st_mode):
+                raise RuntimeError(f"storage target is not regular: {self.path / str(relative)}")
+            os.set_blocking(fd, True)
+            if not exclusive:
+                os.ftruncate(fd, 0)
+            stream = os.fdopen(fd, "wb", buffering=0, closefd=True)
+            fd = -1
+            yield stream
+        finally:
+            if stream is not None:
+                stream.close()
             if fd >= 0:
                 os.close(fd)
             os.close(parent_fd)

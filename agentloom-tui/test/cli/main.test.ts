@@ -1,7 +1,21 @@
 import { describe, expect, test } from "bun:test"
+import { join } from "node:path"
 import { formatBridgeFailure } from "../../src/cli/main"
 
 describe("AgentLoom CLI diagnostics", () => {
+  test("non-interactive CLI modes do not preload the terminal renderer", async () => {
+    const repositoryRoot = join(import.meta.dir, "../..")
+    const entry = await Bun.file(join(repositoryRoot, "bin/agentloom")).text()
+    const main = await Bun.file(join(repositoryRoot, "src/cli/main.ts")).text()
+
+    expect(entry).not.toContain("@opentui/solid/preload")
+    expect(main).not.toMatch(/^import .*runTui/m)
+    expect(main).toContain('await import("@opentui/solid/preload")')
+    expect(main.indexOf('if (args.snapshot)')).toBeLessThan(
+      main.indexOf('await import("@opentui/solid/preload")'),
+    )
+  })
+
   test("keeps the concise error when the Python bridge has no stderr", () => {
     expect(formatBridgeFailure("Python bridge exited with code 1", [])).toBe(
       "agentloom: Python bridge exited with code 1\n",
