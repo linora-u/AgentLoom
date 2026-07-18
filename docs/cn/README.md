@@ -304,6 +304,7 @@ AgentLoom 内置 `src.tools.codex.codex_tool.codex`，用于把本机 `codex exe
 | 命令 | 用途 |
 |---|---|
 | `uv run loom run <workflow>` | 运行一个 AgentLoom 应用。 |
+| `uv run loom run <workflow> --output-format jsonl` | 为程序调用方输出有版本的生命周期事件流。 |
 | `uv run loom create <workflow>` | 为应用生成 Python 入口脚本。 |
 | `uv run loom ui` | 打开 Web 可视化面板。 |
 | `uv run loom dashboard` | 打开终端任务监控面板。 |
@@ -312,6 +313,12 @@ AgentLoom 内置 `src.tools.codex.codex_tool.codex`，用于把本机 `codex exe
 | `uv run loom clean-runtime` | 按配置的 retention 清理已结束 run 与 raw artifacts。 |
 | `uv run loom migrate-runtime --dry-run` | 只预览旧 checkpoint 候选和未分域的 `.runtime`，不改磁盘状态。 |
 | `uv run loom migrate-runtime --apply` | 迁移 checkpoint、归档 `.logs`，并将 `.runtime` 原子保存在 `.agentloom/workspaces/legacy-unscoped/`。 |
+| `uv run loom schedules ...` | 新增、列出、暂停、恢复、删除、运行、服务或查看调度。 |
+| `uv run loom sessions search\|scroll\|index\|prune ...` | 搜索和维护执行历史。 |
+| `uv run loom learn review ...` | 触发 Application 或 Project review。 |
+| `uv run loom reviews status\|apply\|rollback ...` | 查看并应用 scoped review inbox，或回滚一次 review。 |
+| `uv run loom memory list\|add\|replace\|remove\|pending\|stats\|export ...` | 管理 Curated Memory 和 pending-write 审计记录。 |
+| `uv run loom feedback submit <run_id> ...` | 为 run 提交 accepted、rejected 或 corrected 反馈。 |
 
 ## 文档
 
@@ -324,6 +331,8 @@ AgentLoom 内置 `src.tools.codex.codex_tool.codex`，用于把本机 `codex exe
 | [Skills 配置](skills_config.md) | Skill 包格式、加载方式、运行时策略和内置 Skills。 |
 | [Hooks 参考](hooks.md) | 直接 Hook、Bundle、生命周期事件、匹配规则和执行行为。 |
 | [Checkpoint 断点恢复](checkpoint.md) | Checkpoint 布局、恢复行为和长任务恢复机制。 |
+| [Self-learning v6](self_learning.md) | History、typed candidates、review trigger、审批和 Project promotion。 |
+| [结构化 Run API](run_observability.md) | Python receipt、typed errors、生命周期事件和 JSONL CLI 输出。 |
 
 ## AgentLoom Framework Skill
 

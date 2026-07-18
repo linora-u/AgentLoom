@@ -317,6 +317,7 @@ Before running the tool, make sure `codex` is on `PATH` and `codex login status`
 | Command | Purpose |
 |---|---|
 | `uv run loom run <workflow>` | Run an AgentLoom application. |
+| `uv run loom run <workflow> --output-format jsonl` | Stream versioned lifecycle events for programmatic consumers. |
 | `uv run loom create <workflow>` | Generate a Python entry script for an application. |
 | `uv run loom ui` | Open the Web visualization panel. |
 | `uv run loom dashboard` | Open the terminal task dashboard. |
@@ -325,6 +326,12 @@ Before running the tool, make sure `codex` is on `PATH` and `codex login status`
 | `uv run loom clean-runtime` | Apply configured retention to completed run directories and raw artifacts. |
 | `uv run loom migrate-runtime --dry-run` | Preview legacy checkpoint candidates plus the unscoped `.runtime` workspace without changing disk state. |
 | `uv run loom migrate-runtime --apply` | Migrate checkpoints, archive `.logs`, and atomically preserve `.runtime` under `.agentloom/workspaces/legacy-unscoped/`. |
+| `uv run loom schedules ...` | Add, list, pause, resume, remove, run, serve, or inspect schedules. |
+| `uv run loom sessions search\|scroll\|index\|prune ...` | Search and maintain execution history. |
+| `uv run loom learn review ...` | Trigger Application or Project review. |
+| `uv run loom reviews status\|apply\|rollback ...` | Inspect and apply scoped review inboxes, or roll back a review. |
+| `uv run loom memory list\|add\|replace\|remove\|pending\|stats\|export ...` | Administer curated memory and pending-write audit records. |
+| `uv run loom feedback submit <run_id> ...` | Attach an accepted, rejected, or corrected verdict to a run. |
 
 ## Documentation
 
@@ -337,6 +344,8 @@ Before running the tool, make sure `codex` is on `PATH` and `codex login status`
 | [Skills Configuration](docs/en/skills_config.md) | Skill package format, loading, runtime policy, and built-in skills. |
 | [Hooks Reference](docs/en/hooks.md) | Direct Hooks, Bundles, lifecycle events, matching, and execution behavior. |
 | [Checkpoint Resume](docs/en/checkpoint.md) | Checkpoint layout, resume behavior, and long-task recovery. |
+| [Self-Learning v6](docs/en/self_learning.md) | History, typed candidates, review triggers, approval, and Project promotion. |
+| [Structured Run API](docs/en/run_observability.md) | Python receipts, typed errors, lifecycle events, and JSONL CLI output. |
 
 ## AgentLoom Framework Skill
 
