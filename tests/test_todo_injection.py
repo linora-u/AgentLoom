@@ -36,7 +36,6 @@ def _make_mixin(**overrides):
     obj.planning_interval = overrides.get("planning_interval", 5)
     obj.step_number = overrides.get("step_number", 0)
     obj.prompt_templates = overrides.get("prompt_templates", {"planning": {}})
-    obj._hook_manager = overrides.get("hook_manager", MagicMock())
     obj.model = overrides.get("model", MagicMock())
 
     # Use a real list for memory.steps by default
@@ -308,19 +307,15 @@ class TestInjectTodoActionStep:
         elements = list(obj._inject_todo_action_step(todo_state="update"))
         assert elements == []
 
-    def test_no_hook_manager_still_works(self):
-        """Injection proceeds when hook_manager is None."""
+    def test_injection_does_not_depend_on_hook_runtime(self):
         obj = _make_mixin(
             tools={"todo_write": _make_todo_tool()},
             prompt_templates=_make_planning_templates(),
-            hook_manager=None,
         )
         obj._step_stream = MagicMock(return_value=iter([]))
         obj._finalize_step = MagicMock()
 
-        with patch("src.lib.smolagents.agent.todo_sync.get_current_hook_manager", return_value=None):
-            # Should not raise
-            list(obj._inject_todo_action_step())
+        list(obj._inject_todo_action_step())
 
     def test_managed_agents_cleared_during_injection(self):
         """managed_agents should be empty during injection."""
@@ -813,17 +808,21 @@ class TestReadTodoStateLabel:
 
     def test_read_only_label_in_output(self, tmp_path, monkeypatch):
         """Output should contain 'read-only reference' label."""
+        from src.lib.runtime import RuntimeHome, bind_run_context
+
         obj = _make_mixin()
 
         # Create a fake todos.md
-        agent_dir = tmp_path / ".runtime" / "test_agent"
+        runtime_context = RuntimeHome(tmp_path / ".agentloom").context(
+            application_id="app", task_id="task", run_id="run"
+        )
+        agent_dir = runtime_context.agent_task_workspace_dir("test_agent")
         agent_dir.mkdir(parents=True)
         (agent_dir / "todos.md").write_text(
             "# Task Progress\n- [ ] Task 1\n- [x] Task 2\n"
         )
 
-        with patch("src.lib.smolagents.agent.todo_sync.C") as mock_c:
-            mock_c.agent_root = str(tmp_path)
+        with bind_run_context(runtime_context):
             with patch(
                 "src.lib.smolagents.agent.todo_sync.get_current_agent_name",
                 return_value="test_agent",

@@ -3,40 +3,46 @@
 This application validates the optional completed-run memory review contract
 with real `loom run` subprocesses and the configured `summary` model.
 
-The campaign proves the two supported modes:
+The campaign proves the v6 boundaries:
 
-- absent or empty `memory.review_model` makes no completed-run model call or
-  distillation; foreground `memory` calls still work;
-- `memory.review_model: summary` synchronously reviews a successfully
-  completed run after SessionEnd is persisted and before `loom run` returns;
-- reviewer may copy at most one complete fact exactly from an unblocked, tool-bound
-  trusted-evidence envelope whose extractor explicitly classified it as
-  `kind="durable_fact"` with an exact `project` or `application` scope;
-  shortening, scope changes, ordinary result fields, paraphrases, unsupported
-  claims, `replace`, and `remove` are rejected;
-- a final summary by itself cannot authorize a write; the add is staged in
-  process, a validated add terminates the review, and memory plus its terminal
-  audit commit atomically once per root run; result data cannot make itself
-  eligible by choosing a field name or by spoofing the internal envelope key;
-- `memory.write_approval: false` writes active memory, while `true` stages a
-  pending memory for `loom memory pending`, `approve`, or `reject`;
-- only active memory appears in a later run's frozen snapshot, with project and
-  Application scope isolation.
+- `self_learning.review.enabled: true` plus an Application `after_run` trigger
+  synchronously reviews one completed root before `loom run` returns; a
+  `manual` trigger performs no provider call;
+- the reviewer consumes only code-owned, tool-bound `durable_fact` evidence
+  scoped to the current Application. Unsupported claims, progress, unsafe
+  payloads, scope changes, replacement, removal, and Project promotion cannot
+  be authorized by model output;
+- auto-approved verified facts become Application `active_unreviewed` memory;
+  manual facts remain `review_candidates.state=pending_pre_review` and are
+  decided by editing the scoped `INBOX.md`, then running
+  `loom reviews apply --application <application-id>`;
+- a foreground model `memory propose` call is add-only, Application-scoped,
+  and remains pending because model output is not trusted evidence;
+- models cannot write or promote Project memory directly. Project promotion is
+  a separate human review decision;
+- only `active_unreviewed` and `active_confirmed` items appear in the frozen
+  prompt snapshot. Pending candidates never appear in recall.
 
-`review_model` follows the normal deep-merge rules. A global value is inherited
-when an Application omits the key; an Application can explicitly opt out with
-an empty value:
+Review policy follows normal deep-merge rules. An Application can inherit both
+configured models while overriding only its Application trigger to `manual`:
 
 ```yaml
-# config/system.yaml: enable completed-run review globally
+# config/system.yaml
 self_learning:
-  memory:
-    review_model: summary
+  review:
+    enabled: true
+    application:
+      review_model: summary
+      trigger: {mode: after_run}
+    project:
+      review_model: summary
+      trigger: {mode: manual}
 
-# applications/<app>/config/system.yaml: disable it for one Application
+# applications/<app>/config/system.yaml
 self_learning:
-  memory:
-    review_model: ""
+  review:
+    application:
+      trigger: {mode: manual}
 ```
 
 The model-visible dataset is [`data/cases.jsonl`](data/cases.jsonl) plus the
@@ -47,8 +53,8 @@ and security markers live in the separate model-invisible
 
 The 100 real Applications cover disabled review, durable review and recall,
 temporary progress, ordinary unverified claims, mixed durable/transient input,
-secret and injection payloads, foreground writes, approval/rejection, and
-project/Application scope isolation. Application-scope writers use a
+secret and injection payloads, foreground proposals, INBOX approval/rejection,
+Project-promotion guards, and Application isolation. Application-scope writers use a
 reviewer-enabled Application with no foreground `memory` tool: only its
 trusted `durable_fact` evidence can create the scoped item, the same
 Application must recall it, and a distinct Application must not. Configured final-only runs still execute
@@ -58,12 +64,10 @@ they cannot qualify through ordinary event/JSONL data, and the framework does
 not use a progress keyword list or semantic regex to reclassify them.
 
 The ten `review_off_durable` Applications run from a committed nested
-AgentLoom fixture whose global `config/system.yaml` enables `summary` review
-and whose Application `config/system.yaml` explicitly sets `review_model: ""`.
-This exercises the real configuration discovery and deep-merge path: the
-Application must make zero review calls even though its global base enables
-review. The model-invisible oracle labels all ten rows with this layering
-contract.
+AgentLoom fixture whose global config supplies both `summary` models and whose
+Application config overrides only the Application trigger to `manual`. This
+exercises real configuration discovery and deep merge: the Application makes
+zero review calls without creating an invalid empty-model configuration.
 
 Validate the fixed five-canary and 100-run plans without a model call:
 
@@ -98,7 +102,7 @@ The capsule performs `uv sync --locked --all-groups` into a fresh venv. The
 ignored credential-bearing model config crosses each parent/runner and
 runner/Application boundary through a one-shot inherited pipe; only the file
 descriptor number is in the environment, the loader consumes and closes it,
-and memory CLI/tool children never receive it. No second plaintext config file
+and review CLI/tool children never receive it. No second plaintext config file
 is created. Real credential values, each value's standard and URL-safe Base64
 forms (padded and unpadded), and the raw/base64 transport blob remain in-memory
 privacy markers; findings persist only their kind and location, never the
@@ -154,13 +158,14 @@ uv run python applications/memory_feature_validation/scripts/audit_memory_review
 
 Every real run uses an isolated runtime root; each logical case uses an
 isolated self-learning root. Multi-phase cohorts deliberately share only their
-writer and recall/decision state. The report separates Application and
-reviewer model calls and token usage, records SQLite and CLI evidence, and
-fails closed if it cannot prove whether review ran or if a completed-run
-reviewer exceeds four provider requests. The end-of-campaign source, dataset,
+writer and recall/decision state. The report records aggregate model tokens,
+the explicit reviewer call count, canonical SQLite v6 state, and scoped
+INBOX/CLI decision evidence. It fails closed unless one due after-run review
+produces exactly one batch, one matching root binding, and one provider
+request. The end-of-campaign source, dataset,
 and model fingerprints must equal their preflight values. At most one retry is
-accepted, and only when the `loom run` subprocess itself reaches the campaign
-timeout. Model-visible log text never authorizes a retry.
+accepted, and only for a typed subprocess timeout or the dedicated provider
+temporary-failure return code. Model-visible log text never authorizes a retry.
 
 The outer launcher records `campaign_started_at` before capsule provisioning;
 the committed runner records an independent timestamp window for every
@@ -175,8 +180,10 @@ failures and do not by themselves fail memory semantics: an unrecovered miss
 already fails the Application or reviewer completion gates.
 
 The runtime telemetry contract is one stable line beginning with
-`Memory review:` and containing at least `enabled`, `requested`, `resolved`,
-`calls`, `input_tokens`, `output_tokens`, and `actions` as `key=value` fields.
+`Self-learning review:` and containing `enabled`, `requested`, `resolved`,
+`calls`, `actions`, and `status` as `key=value` fields. Provider-call evidence
+comes from this line; durable effects come independently from `memory_items`,
+`review_candidates`, `review_batches`, and `review_batch_runs`.
 
 Artifacts are written under
 `.agentloom/validation/memory_feature_validation/<campaign_id>/` and include
@@ -189,15 +196,17 @@ root, executes the same production workflow, scans and deletes that root, and
 publishes only sanitized result, audit, and log artifacts. It never publishes
 a second state database, runtime tree, or retry snapshot.
 
-## Offline v5 campaign
+## Offline v6 campaign
 
-The deterministic offline campaign validates the current v5 surface without
-calling a model. It writes exactly 100,000 canonical events with seed
-`20260711`: 50,000 ledger/FTS/search/scroll events, 20,000
+The deterministic offline campaign validates the v6 ledger and typed-memory
+surface without calling a model. It writes exactly 100,000 canonical events
+with seed `20260711`: 50,000 ledger/FTS/search/scroll events, 20,000
 redaction/injection events, 20,000 root-isolation events, and 10,000 events
-paired with active/pending memory operations. A separate literal v4 fixture
-validates migration to v5; the campaign does not restore the removed outbox,
-evidence-voting, revision/trust, or ranking state machines.
+paired with typed memory and `review_candidates`. Candidate outcomes are
+applied through real `ReviewEngine` decisions, so pending, activated, rejected,
+and scoped state transitions exercise production invariants. A separate
+literal v4 fixture validates migration directly to v6; removed v5 tables are
+migration inputs, never compatibility surfaces.
 
 The default release run also opens the current `.agentloom/self_learning.db`
 with SQLite `mode=ro&immutable=1`. It records only run/event counts, byte-length
@@ -249,6 +258,6 @@ uv run python applications/memory_feature_validation/scripts/run_offline_memory_
 ```
 
 Offline artifacts include `cases.jsonl.gz`, the central `self_learning.db`,
-`migration_v4_to_v5.db`, metrics, privacy audit, content-free failures, report,
+`migration_v4_to_v6.db`, metrics, privacy audit, content-free failures, report,
 and single-case reproduction commands. Raw generated secret and injection
 markers are never written to case, failure, or report artifacts.

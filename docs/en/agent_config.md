@@ -379,6 +379,7 @@ workflow: |
 | `planning_interval` | `int` | Not set | Force re-planning every N steps. See [3.10](#310-planning_interval--planning-interval) |
 | `concurrency` | `int`/`str` | Not set | Concurrency level when this Agent is batch-invoked. See [3.11](#311-concurrency--concurrency-configuration) |
 | `skills` | `list`/`dict`/`str` | Not set | Private skill package configuration. See [3.8](#38-skills--skill-package-configuration) |
+| `hooks` | `dict` | Not set | Independent direct Hooks and explicit Hook Bundles. See [Hooks](hooks.md) |
 | `max_steps` | `int` | `80` | Maximum execution steps. Agent is forcefully terminated when exceeded |
 
 ---
@@ -528,7 +529,6 @@ skills: []   # Explicit opt-out: skip all global skills including AGENT_ROOT/ski
 skills:
   - path: "skills/agent-recall-with-files"
     load-mode: "eager"
-  - path: "skills/agent-visualization"
   - "skills/another-skill"              # Plain strings work as list items too
 ```
 
@@ -570,6 +570,8 @@ skills: "skills/agent-recall-with-files"
 | `load-mode` | `str` | `on-demand` | ❌ Optional | `on-demand` puts only the catalogue in the prompt; `eager` injects the full skill body |
 | `allow-scripts` | `bool` | `true` | ❌ Optional | Set to `false` to block `run_skill_script` for this skill |
 | `allow-network` | `bool` | `true` | ❌ Optional | Set to `false` to block common network commands inside `run_skill_script` |
+
+The group-level policy is inherited by `items`; an item-level field overrides it. Skill discovery and loading never declare, enable, or execute Hooks. A `hooks` field in `SKILL.md` or `enable-hooks` in Skill configuration is a migration error; configure the independent top-level [`hooks`](hooks.md) interface instead.
 
 **Validation**: `skills` overall must be `list`, `dict`, or `str`; otherwise raises `skills must be a list, dict, or string path`.
 
@@ -661,8 +663,8 @@ When `planning_interval` is configured, the framework automatically injects the 
 `todo_write` tool behavior:
 - **Input**: JSON array, each item with `content` (task description) and `status` (`pending` / `in_progress` / `completed`)
 - **Semantics**: Full replacement (each call replaces the entire list)
-- **Auto-clear**: When all tasks marked `completed`, the list is automatically cleared
-- **Persistence**: Writes to `.runtime/<agent_name>/todos.md` (Markdown checkbox format)
+- **Completed records**: When all tasks are marked `completed`, the records remain visible
+- **Persistence**: Writes to `.agentloom/workspaces/agents/<application_id>/<agent_path>/tasks/<task_id>/todos.md` (Markdown checkbox format)
 - **Verification nudge**: When 3+ tasks all completed without a verification step, the return value's first line reminds the LLM to consider running verification
 
 ---

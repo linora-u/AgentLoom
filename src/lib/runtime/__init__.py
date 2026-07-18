@@ -2,6 +2,7 @@
 
 from .context import (
     RUNTIME_ROOT_ENV,
+    RootRunState,
     RuntimeContext,
     RuntimeHome,
     RuntimeRotatingTextSink,
@@ -14,6 +15,7 @@ from .context import (
     portable_runtime_component,
     resolve_application_id,
     resolve_runtime_home,
+    safe_agent_path,
     safe_application_id,
     validate_runtime_id,
     validate_runtime_owned_path,
@@ -23,6 +25,7 @@ from .storage import SecureDirectory
 __all__ = [
     "RuntimeContext",
     "RUNTIME_ROOT_ENV",
+    "RootRunState",
     "RuntimeHome",
     "RuntimeRotatingTextSink",
     "RuntimeRunLease",
@@ -35,6 +38,7 @@ __all__ = [
     "portable_runtime_component",
     "resolve_application_id",
     "resolve_runtime_home",
+    "safe_agent_path",
     "safe_application_id",
     "validate_runtime_id",
     "validate_runtime_owned_path",

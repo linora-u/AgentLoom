@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import re
-import sqlite3
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
@@ -11,12 +10,11 @@ from click.testing import CliRunner
 from src.extensions.self_learning.memory_store import MemoryStore
 
 
-def _config(*, approval: object = False, project_budget: int = 8000) -> dict:
+def _config(*, project_budget: int = 8000) -> dict:
     return {
         "application_id": "curated_store_test",
         "self_learning": {
             "memory": {
-                "write_approval": approval,
                 "scope_budgets": {
                     "project": project_budget,
                     "application": 6000,
@@ -34,13 +32,33 @@ def test_model_facing_memory_schema_has_one_canonical_write_contract() -> None:
     description = " ".join(model_tool.description.split())
     properties = model_tool.inputs
 
-    assert properties["action"]["enum"] == ["list", "add", "replace", "remove"]
+    assert properties["action"]["enum"] == ["list", "propose"]
     assert properties["scope"]["enum"] == ["project", "app"]
-    assert 'memory(action="add", scope="project", content="<standalone fact>")' in description
-    assert 'Never use action="store"' in description
-    assert "not ``fact``, ``key``, or ``value``" in description
-    assert "Repository-wide or checkout-wide facts must use ``project``" in description
-    assert "Use ``app`` only when the source explicitly limits the fact" in description
+    assert properties["kind"]["enum"] == ["fact", "experience"]
+    assert "A model candidate cannot activate, replace, remove, promote" in description
+    assert "Project promotion is a separate human review action" in description
+    assert "Multi-step procedures, scripts, assets" in description
+
+
+def test_model_facing_memory_rejects_project_proposals(monkeypatch: pytest.MonkeyPatch) -> None:
+    import json
+
+    from src.tools.self_learning import memory_tool
+
+    monkeypatch.setattr(memory_tool, "current_session_run_id", lambda: "root-project-proposal")
+    monkeypatch.setattr(memory_tool, "_current_agent_config", lambda: _config())
+
+    result = json.loads(
+        memory_tool.memory(
+            action="propose",
+            scope="project",
+            memory_key="project:must-be-reviewed",
+            text="A model must not publish this Project fact directly.",
+        )
+    )
+
+    assert result["ok"] is False
+    assert result["error"] == "project_promotion_requires_review"
 
 
 def test_concurrent_exact_adds_create_one_active_row(tmp_path: Path) -> None:
@@ -55,6 +73,35 @@ def test_concurrent_exact_adds_create_one_active_row(tmp_path: Path) -> None:
     assert all(result["ok"] is True for result in results)
     assert len({int(result["id"]) for result in results}) == 1
     assert len(store.list("project")) == 1
+
+
+def test_administrator_add_replace_and_remove_are_direct_confirmed_mutations(
+    tmp_path: Path,
+) -> None:
+    store = MemoryStore(tmp_path / "self_learning.db")
+
+    created = store.add(
+        "project",
+        "The export limit is 100 rows.",
+        memory_key="export:limit",
+    )
+    assert created["pending"] is False
+    assert created["state"] == "active_confirmed"
+
+    replaced = store.replace(
+        "project",
+        str(created["id"]),
+        "The export limit is 200 rows.",
+    )
+    assert replaced["pending"] is False
+    active = store.list("project")
+    assert [(item["content"], item["state"], item["activation_source"]) for item in active] == [
+        ("The export limit is 200 rows.", "active_confirmed", "admin")
+    ]
+
+    removed = store.remove("project", str(replaced["id"]))
+    assert removed == {"ok": True, "pending": False, "removed_id": replaced["id"]}
+    assert store.list("project") == []
 
 
 def test_parallel_adds_cannot_jointly_exceed_scope_capacity(tmp_path: Path) -> None:
@@ -92,31 +139,28 @@ def test_ambiguous_substring_target_requires_an_exact_id(tmp_path: Path) -> None
         ("replace", "_"),
     ],
 )
-@pytest.mark.parametrize("approval", [False, True], ids=["direct", "approval-staging"])
 def test_memory_target_wildcards_are_literal_not_sql_patterns(
     tmp_path: Path,
     *,
     action: str,
     target: str,
-    approval: bool,
 ) -> None:
-    config = _config(approval=approval)
+    config = _config()
     store = MemoryStore(tmp_path / "self_learning.db", agent_config=config)
     original = "The only stored fact has ordinary punctuation."
     store.add("project", original)
 
     with pytest.raises(KeyError, match="Memory target not found"):
-        store.handle_tool_action(
-            action,
-            scope="project",
-            target=target,
-            content="A replacement must not reach the unrelated row.",
-            root_run_id="literal-target-root",
-            agent_config=config,
-        )
+        if action == "remove":
+            store.remove("project", target)
+        else:
+            store.replace(
+                "project",
+                target,
+                "A replacement must not reach the unrelated row.",
+            )
 
     assert [item["content"] for item in store.list("project")] == [original]
-    assert store.list_pending() == []
 
 
 @pytest.mark.parametrize(
@@ -142,131 +186,25 @@ def test_memory_target_special_characters_still_match_their_literal_text(
     assert store.list("project") == []
 
 
-def test_string_false_does_not_enable_write_approval(tmp_path: Path) -> None:
-    config = _config(approval="false")
-    store = MemoryStore(tmp_path / "self_learning.db", agent_config=config)
-
-    result = store.handle_tool_action(
-        "add",
-        scope="project",
-        content="String false keeps direct writes direct.",
-        root_run_id="root-string-false",
-        agent_config=config,
-    )
-
-    assert result["ok"] is True
-    assert result["pending"] is False
-    assert store.list_pending() == []
-
-
-def test_approval_add_does_not_stage_an_already_active_fact(tmp_path: Path) -> None:
-    config = _config(approval=True)
-    store = MemoryStore(tmp_path / "self_learning.db", agent_config=config)
-    active = store.add("project", "The API limit is 100 rows.")
-
-    result = store.handle_tool_action(
-        "add",
-        scope="project",
-        content="  the api limit is 100 rows.  ",
-        root_run_id="root-active-duplicate",
-        agent_config=config,
-    )
-
-    assert result["duplicate"] is True
-    assert result["pending"] is False
-    assert result["id"] == active["id"]
-    assert store.list_pending() == []
-
-
-def test_approval_add_deduplicates_normalized_pending_facts(tmp_path: Path) -> None:
-    config = _config(approval=True)
-    store = MemoryStore(tmp_path / "self_learning.db", agent_config=config)
-
-    first = store.handle_tool_action(
-        "add",
-        scope="project",
-        content="A durable fact.",
-        root_run_id="root-pending-first",
-        agent_config=config,
-    )
-    normalized_duplicate = store.handle_tool_action(
-        "add",
-        scope="project",
-        content="  a  durable FACT.  ",
-        root_run_id="root-pending-second",
-        agent_config=config,
-    )
-    exact_duplicate = store.handle_tool_action(
-        "add",
-        scope="project",
-        content="A durable fact.",
-        root_run_id="root-pending-third",
-        agent_config=config,
-    )
-
-    assert first["duplicate"] is False
-    assert normalized_duplicate == {
-        "ok": True,
-        "pending": True,
-        "duplicate": True,
-        "id": first["id"],
-    }
-    assert exact_duplicate == normalized_duplicate
-    assert len(store.list_pending()) == 1
-
-
-def test_approval_add_does_not_read_pending_payloads_for_dedup(
-    tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    config = _config(approval=True)
-    store = MemoryStore(tmp_path / "self_learning.db", agent_config=config)
-    original_connect = store._connect
-
-    def connect_without_pending_payload_reads() -> sqlite3.Connection:
-        conn = original_connect()
-
-        def authorize(
-            action: int,
-            table: str | None,
-            column: str | None,
-            _database: str | None,
-            _trigger: str | None,
-        ) -> int:
-            if (
-                action == sqlite3.SQLITE_READ
-                and table == "memory_pending_writes"
-                and column == "payload_json"
-            ):
-                return sqlite3.SQLITE_DENY
-            return sqlite3.SQLITE_OK
-
-        conn.set_authorizer(authorize)
-        return conn
-
-    monkeypatch.setattr(store, "_connect", connect_without_pending_payload_reads)
-
-    result = store.handle_tool_action(
-        "add",
-        scope="project",
-        content="A new durable fact.",
-        root_run_id="root-no-payload-scan",
-        agent_config=config,
-    )
-
-    assert result["ok"] is True
-    assert result["duplicate"] is False
-
-
 def test_memory_cli_exposes_only_the_simplified_public_commands() -> None:
     from src.__main__ import memory
 
     result = CliRunner().invoke(memory, ["--help"])
     assert result.exit_code == 0
     commands = set(re.findall(r"^  ([a-z][a-z-]+)\s{2,}", result.output, flags=re.MULTILINE))
-    for command in ("list", "add", "replace", "remove", "pending", "approve", "reject", "stats", "export"):
+    for command in ("list", "add", "replace", "remove", "pending", "stats", "export"):
         assert command in commands
-    for removed in ("distill", "curate", "feedback", "conflicts", "jobs", "retry-job", "apply"):
+    for removed in (
+        "approve",
+        "reject",
+        "distill",
+        "curate",
+        "feedback",
+        "conflicts",
+        "jobs",
+        "retry-job",
+        "apply",
+    ):
         assert removed not in commands
 
 
@@ -358,20 +296,22 @@ def test_unresolved_application_scope_fails_closed_instead_of_sharing_default(tm
     config = {
         "self_learning": {
             "enabled": True,
-            "memory": {"write_approval": False},
+            "memory": {},
         }
     }
     store = MemoryStore(tmp_path / "self_learning.db", agent_config=config)
 
-    result = store.handle_tool_action(
-        "add",
-        scope="app",
-        content="This anonymous app fact must not be shared.",
-        root_run_id="anonymous-root",
-        agent_config=config,
-    )
+    with pytest.raises(ValueError, match="missing_application_context"):
+        store.handle_tool_action(
+            "propose",
+            scope="app",
+            kind="fact",
+            memory_key="anonymous-app-fact",
+            payload={"text": "This anonymous app fact must not be shared."},
+            root_run_id="anonymous-root",
+            agent_config=config,
+        )
 
-    assert result == {"ok": False, "error": "missing_application_context"}
     assert store.list() == []
 
 
@@ -381,7 +321,6 @@ def test_model_memory_never_uses_another_threads_global_application_fallback(
 ) -> None:
     import json
 
-    from src.lib.smolagents.hooks.hook_manager import HookManager as _HookManager  # noqa: F401
     from src.tools.self_learning.memory_tool import memory
     from src.trace import bind_root_run, clear_current_agent_config, set_current_agent_config
 
@@ -401,9 +340,10 @@ def test_model_memory_never_uses_another_threads_global_application_fallback(
         with bind_root_run("thread-root"):
             return json.loads(
                 memory(
-                    action="add",
+                    action="propose",
                     scope="app",
-                    content="This must not leak into the other thread's app.",
+                    memory_key="thread-local-app-fact",
+                    text="This must not leak into the other thread's app.",
                 )
             )
 

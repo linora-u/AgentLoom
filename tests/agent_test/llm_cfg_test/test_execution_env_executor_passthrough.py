@@ -6,11 +6,11 @@ from src.lib.smolagents.agent.agent_validation import NormalizedExecutionConfig
 from smolagents.models import ChatMessage, MessageRole
 
 from src.trace.task_context import (
-    clear_current_hook_manager,
-    set_current_hook_manager,
+    clear_current_hook_run,
+    set_current_hook_run,
 )
 from src.lib.smolagents.agent.loom_mixin import LoomAgentMixin
-from src.lib.smolagents.hooks.hook_manager import HookManager
+from src.lib.smolagents.hooks import HookPlan, HookRun
 from src.lib.smolagents.agent.yaml_agent_factory import (
     YamlConfiguredAgent,
     YamlConfiguredSupervisorAgent,
@@ -279,21 +279,21 @@ def test_hooked_memory_injects_pending_agent_context_and_logs_user_messages():
     dummy.step_number = 1
     dummy.logger = _RecordingLogger()
 
-    manager = HookManager()
-    manager.queue_agent_context("phase-1 still active")
-    manager.queue_user_message("[agent-recall-with-files] File updated.")
-    set_current_hook_manager(manager)
+    hook_run = HookRun(HookPlan(), local_run_id="local", root_run_id="root")
+    hook_run.queue_agent_context("phase-1 still active")
+    hook_run.queue_user_message("[agent-recall-with-files] File updated.")
+    set_current_hook_run(hook_run)
 
     try:
         messages = dummy.write_memory_to_messages(summary_mode=False)
     finally:
-        clear_current_hook_manager()
+        clear_current_hook_run()
 
     assert messages[-1].role == MessageRole.SYSTEM
     assert "phase-1 still active" in str(messages[-1].content)
     assert dummy.logger.entries == [("[hook] [agent-recall-with-files] File updated.", 1)]
-    assert manager.consume_pending_agent_context() == []
-    assert manager.consume_pending_user_messages() == []
+    assert hook_run.consume_pending_agent_context() == []
+    assert hook_run.consume_pending_user_messages() == []
 
 
 def test_worker_execution_builder_uses_effective_smart_summary_override(monkeypatch):

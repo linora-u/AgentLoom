@@ -5,6 +5,15 @@ skills: []
 
 self_learning:
   enabled: true
-  memory:
-    review_model: ""
-    write_approval: false
+  review:
+    enabled: false
+    application:
+      review_model: ""
+      approval:
+        fact: auto
+        experience: auto
+    project:
+      review_model: ""
+      approval:
+        fact: auto
+        experience: auto

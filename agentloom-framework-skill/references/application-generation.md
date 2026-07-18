@@ -11,6 +11,10 @@ applications/<app_name>/
 ├── skills/
 │   └── <skill_name>/
 │       └── SKILL.md
+├── hooks/
+│   └── <hook_name>/
+│       ├── HOOK.yaml
+│       └── scripts/
 ├── config/
 │   └── system.yaml
 └── workflows/
@@ -19,7 +23,7 @@ applications/<app_name>/
         └── <worker>.yaml
 ```
 
-`workflows/` 是 Application 标识；`agent_tools/` 只在需要确定性工具时创建；`skills/` 只在需要应用私有 Skill 或 Hook 时创建；`config/` 只在需要应用级系统配置时创建，例如关闭全局 skills、限制 shell、增加 path allowlist、配置默认工具、注册 MCP 或设置应用级 prompt。
+`workflows/` 是 Application 标识；`agent_tools/` 只在需要确定性工具时创建；`skills/` 只存放应用私有 Skill；`hooks/` 只存放显式引用的独立 Hook Bundle；`config/` 只在需要应用级系统配置时创建。
 
 不要在 Application 目录里新建 `llm.yaml`。模型路由、密钥、温度、重试、限流等只写全局本地 `config/llm.yaml`，Agent 通过 `model_type` 选择。
 
@@ -27,13 +31,14 @@ applications/<app_name>/
 
 1. `workflows/<app_name>_agent.yaml`
 2. `workflows/worker_agents/*.yaml`
-3. `skills/<skill_name>/SKILL.md` 与必要的 `references/`、`scripts/`、`assets/`
-4. `agent_tools/*.py`
-5. `config/system.yaml`
-6. `<app_name>_app.py`（可选；只有需要自定义 CLI 参数、预处理/后处理、批处理或 `task_override` 时创建）
-7. `README.md`
+3. `skills/<skill_name>/SKILL.md` 与必要资源
+4. `hooks/<hook_name>/HOOK.yaml` 与脚本（仅需要 Hook 时）
+5. `agent_tools/*.py`
+6. `config/system.yaml`
+7. `<app_name>_app.py`（可选；只有需要自定义 CLI 参数、预处理/后处理、批处理或 `task_override` 时创建）
+8. `README.md`
 
-没有对应需求时不要创建空目录。应用专属的 skill、hook 和 skill 运行目标应放在 Application 下面，不要放到全局 `skills/` 或额外的孤立配置文件里。
+没有对应需求时不要创建空目录。应用专属 Skill 与 Hook Bundle 分别放在 Application 的 `skills/`、`hooks/` 下，并在配置中分别启用。
 
 ## 入口脚本模板
 
@@ -97,7 +102,7 @@ if __name__ == "__main__":
 - Agent YAML 只配置要注册的 skill 路径和加载策略；不要在 YAML 里维护 source、commit、hash、license 这类审计元数据。
 - 第三方脚本默认允许执行；只有用户明确要求限制时，才配置 `allow-scripts: false` 或 `allow-network: false`。
 - 如果某个 skill 只服务当前 Application，放在 `applications/<app_name>/skills/`；确实跨应用复用时，再考虑全局 runtime skill。
-- 如果需要 Hook，把 `hooks:` 写在应用私有 Skill 的 frontmatter，并通过 `skills:` 注册该 Skill；不要把 `hooks:` 直接写进 Agent YAML。
+- `SKILL.md` 不得包含 `hooks`；确定性事件行为使用独立 `hooks/<name>/HOOK.yaml` Bundle，并通过 system/Agent YAML 顶层 `hooks.bundles` 显式引用。
 
 ## 应用级 config/system.yaml 原则
 
@@ -105,6 +110,10 @@ if __name__ == "__main__":
 
 ```yaml
 skills: []                 # 关闭全局 skill 列表和 AGENT_ROOT/skills 自动发现
+hooks:
+  bundles:
+    my-hook:
+      path: applications/<app_name>/hooks/my-hook
 toolsets: []   # 纯规划 Agent 可显式关闭内置工具
 tool_access_control:
   path_validation:

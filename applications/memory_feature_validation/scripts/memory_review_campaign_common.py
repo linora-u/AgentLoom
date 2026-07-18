@@ -28,10 +28,10 @@ SCENARIO_QUOTAS = {
     "review_on_unverified_claim": 5,
     "review_on_mixed_noise": 10,
     "review_on_security": 10,
-    "foreground_direct": 10,
+    "foreground_proposal": 10,
     "approval_pending": 15,
     "application_scope": 9,
-    "project_scope": 6,
+    "project_promotion_guard": 6,
 }
 
 WORKFLOWS = {
@@ -119,6 +119,19 @@ class RunSpec:
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)
+
+
+def workflow_application_id(spec: RunSpec) -> str:
+    """Return the canonical Application id owned by one workflow path."""
+
+    workflow = (REPO_ROOT / spec.workflow).resolve()
+    applications = (REPO_ROOT / spec.agent_root / "applications").resolve()
+    if workflow.parent.name != "workflows":
+        return ""
+    try:
+        return workflow.parent.parent.relative_to(applications).as_posix()
+    except ValueError:
+        return ""
 
 
 def read_jsonl(path: Path) -> list[dict[str, Any]]:
@@ -350,11 +363,11 @@ def build_full_plan() -> list[RunSpec]:
         specs.extend(
             [
                 RunSpec(
-                    f"{case_id}-writer", case_id, "foreground_direct", "writer", 1,
+                    f"{case_id}-writer", case_id, "foreground_proposal", "writer", 1,
                     WORKFLOWS["off_write"], case_id, False,
                 ),
                 RunSpec(
-                    f"{case_id}-recall", case_id, "foreground_direct", "recall", 2,
+                    f"{case_id}-recall", case_id, "foreground_proposal", "recall", 2,
                     WORKFLOWS["off_recall"], case_id, False,
                 ),
             ]
@@ -400,11 +413,11 @@ def build_full_plan() -> list[RunSpec]:
         specs.extend(
             [
                 RunSpec(
-                    f"{case_id}-writer", case_id, "project_scope", "writer", 1,
+                    f"{case_id}-writer", case_id, "project_promotion_guard", "writer", 1,
                     WORKFLOWS["app_a_write"], case_id, False,
                 ),
                 RunSpec(
-                    f"{case_id}-cross-recall", case_id, "project_scope", "cross_recall", 2,
+                    f"{case_id}-cross-recall", case_id, "project_promotion_guard", "cross_recall", 2,
                     WORKFLOWS["app_b_recall"], case_id, False,
                 ),
             ]

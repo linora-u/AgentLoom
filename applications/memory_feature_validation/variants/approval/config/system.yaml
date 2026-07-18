@@ -5,6 +5,19 @@ skills: []
 
 self_learning:
   enabled: true
-  memory:
-    review_model: "summary"
-    write_approval: true
+  review:
+    enabled: true
+    application:
+      review_model: "summary"
+      trigger:
+        mode: after_run
+      approval:
+        fact: manual
+        experience: manual
+    project:
+      review_model: "summary"
+      trigger:
+        mode: manual
+      approval:
+        fact: manual
+        experience: manual
