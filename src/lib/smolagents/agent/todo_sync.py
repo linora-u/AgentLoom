@@ -6,9 +6,9 @@ YAML prompt validation, and PlanningStep result annotation.
 
 from typing import Optional
 
-from src.lib.logging import get_logger
-from src.trace import get_current_hook_manager, get_current_agent_name
 from src.lib.runtime import get_current_run_context
+from src.lib.logging import get_logger
+from src.trace import get_current_agent_name
 
 
 class TodoSyncMixin:
@@ -23,7 +23,6 @@ class TodoSyncMixin:
     - self.planning_interval: int | None
     - self._step_stream(step): generator
     - self._finalize_step(step): method
-    - self._hook_manager: HookManager | None
     """
 
     # Maximum number of retries for todo sync LLM calls.
@@ -235,8 +234,6 @@ class TodoSyncMixin:
         try:
             success = False
             for attempt in range(1, self.MAX_TODO_RETRIES + 1):
-                hook_manager = getattr(self, "_hook_manager", None) or get_current_hook_manager()
-
                 # Use the todo prompt as the system prompt override
                 # so the LLM only sees todo_write instructions (not the
                 # full system prompt with 20+ tool descriptions).

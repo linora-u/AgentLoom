@@ -13,7 +13,7 @@ def patch_local_python_executor_context() -> None:
     execution with the module-level ``timeout`` function.  Upstream submits the
     callable directly to a fresh ThreadPoolExecutor, which drops ContextVars.
     Wrapping the callable with ``copy_context().run`` at submission time keeps
-    the hook manager, root/local run ids, task/subtask and agent metadata tied
+    the Hook Run, root/local run ids, task/subtask and agent metadata tied
     to the invocation that actually scheduled the code.
     """
 

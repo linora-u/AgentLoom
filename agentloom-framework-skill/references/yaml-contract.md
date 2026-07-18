@@ -200,7 +200,6 @@ context: fork
 agent: reviewer
 effort: high
 shell: bash
-hooks: {}
 ---
 ```
 
@@ -212,4 +211,5 @@ hooks: {}
 - 未识别 frontmatter 字段静默忽略，不映射旧字段。
 - `when-to-use` 不等于 `when_to_use`，`argument-names` 不等于 `arguments`。
 - skill 需要脚本时，把脚本放在 `scripts/`，由 `run_skill_script` 执行并保留审计日志。
-- Hook 只写在 `SKILL.md` frontmatter 的 `hooks:`；不要直接写 Agent YAML 顶层 `hooks:`。
+- Skill 与 Hook 是独立模块；`SKILL.md` 中出现 `hooks` 会明确报迁移错误。
+- Hook 通过 Agent YAML 顶层 `hooks:` 直接声明，或显式引用带 `HOOK.yaml` 的独立 Bundle。

@@ -34,10 +34,9 @@ context: fork
 agent: reviewer
 effort: high
 shell: bash
-hooks: {}
 ```
 
-未知 frontmatter 字段会被静默忽略。旧字段 `when-to-use`、`argument-names`、`requires`、`disable-model-invocation`、`user-invocable` 不会被映射到新字段。
+未知 frontmatter 字段会被静默忽略。`hooks` 会明确报迁移错误，因为 Hook 使用独立的顶层 [`hooks`](hooks.md) 配置。旧字段 `when-to-use`、`argument-names`、`requires`、`disable-model-invocation`、`user-invocable` 不会被映射到新字段。
 
 非法 YAML、缺 `name`、缺 `description`、非法 skill 名、重复 skill name 都会报错。
 

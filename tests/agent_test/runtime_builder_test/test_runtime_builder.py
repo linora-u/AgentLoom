@@ -3,14 +3,26 @@ from __future__ import annotations
 import threading
 import time
 from concurrent.futures import ThreadPoolExecutor
+from dataclasses import replace
+from pathlib import Path
 
 import pytest
+import yaml
 
 import src.lib.smolagents.agent.base_agent as base_agent_module
 import src.lib.smolagents.prompts.prompt_builder as prompt_builder_module
 from src.lib.logging import get_global_logger, set_global_logger
 from src.lib.smolagents.agent.loom_mixin import LoomAgentMixin
-from src.lib.smolagents.hooks.types import HookEvent, HookResult
+from src.lib.smolagents.hooks import HookEvent, HookHandler, HookPlan, HookResult, HookRun
+from src.lib.smolagents.hooks.tool_shim import inject_hooks
+from src.lib.smolagents.tools.tools import tool
+from src.trace import (
+    bind_explicit_execution_context,
+    capture_explicit_execution_context,
+    clear_current_hook_run,
+    get_current_hook_run,
+    set_current_hook_run,
+)
 
 
 @pytest.fixture(autouse=True)
@@ -20,6 +32,9 @@ def _isolate_self_learning_state(tmp_path, monkeypatch):
         "AGENTLOOM_RUNTIME_ROOT",
         str(tmp_path / ".agentloom"),
     )
+    set_current_hook_run(HookRun(HookPlan(), local_run_id="test-local", root_run_id="test-root"))
+    yield
+    clear_current_hook_run()
 
 
 class DummyLoggerBackend:
@@ -199,6 +214,10 @@ def _make_tool_call_agent(*, logger=None) -> DummyToolCallingAgent:
     return agent
 
 
+def _append_hook_handler(agent, event, callback, *, source="test"):
+    agent._hook_plan = HookPlan((*agent._hook_plan.handlers, HookHandler(event, "*", callback, source=source)))
+
+
 def _patch_agent_classes(monkeypatch):
     monkeypatch.setattr(base_agent_module, "CodeAgentV2", DummyCodeAgent)
     monkeypatch.setattr(base_agent_module, "ToolCallingAgentV2", DummyCodeAgent)
@@ -273,6 +292,7 @@ def test_create_agent_deduplicates_tools_injects_hooks_and_prompt(monkeypatch):
         return f"hooked:{tool}"
 
     monkeypatch.setattr(base_agent_module, "ensure_tool_wrapped", _fake_wrap)
+    monkeypatch.setattr(base_agent_module, "clone_tool_for_runtime", lambda tool: tool)
     monkeypatch.setattr(base_agent_module, "inject_hooks", _fake_hook)
     monkeypatch.setattr(
         base_agent_module.RoleDrivenAgent,
@@ -338,9 +358,12 @@ def test_create_agent_final_answer_checks_contains_hook_stop(monkeypatch):
 
     try:
         agent = _make_agent(logger=None)
-        hook_check = object()
 
-        monkeypatch.setattr(agent._hook_manager, "build_stop_check", lambda: hook_check)
+        def hook_check(*_args, **_kwargs):
+            return True
+
+        hook_run = get_current_hook_run(required=True)
+        monkeypatch.setattr(hook_run, "build_stop_check", lambda: hook_check)
 
         runtime_agent = agent._create_agent(
             tools=[],
@@ -348,9 +371,78 @@ def test_create_agent_final_answer_checks_contains_hook_stop(monkeypatch):
         )
         checks = runtime_agent.kwargs["final_answer_checks"]
         assert len(checks) == 1
-        assert checks[0] is hook_check
+        assert checks[0]("answer", object()) is True
     finally:
         set_global_logger(previous_global_logger)
+
+
+def test_cached_runtime_stop_check_resolves_current_hook_run_per_call():
+    agent = _make_agent(logger=DummyLoggerBackend())
+    observed: list[str] = []
+
+    def stop(context):
+        observed.append(context.local_run_id)
+        return HookResult()
+
+    shared_check = agent._build_runtime_final_answer_checks()[0]
+    memory = type("Memory", (), {"steps": []})()
+    for label in ("first", "second"):
+        run = HookRun(
+            HookPlan((HookHandler(HookEvent.STOP, "*", stop),)),
+            local_run_id=label,
+            root_run_id=label,
+        )
+        current = capture_explicit_execution_context()
+        with bind_explicit_execution_context(replace(current, hook_run=run)):
+            assert shared_check("answer", memory) is True
+
+    assert observed == ["first", "second"]
+
+
+def test_cached_runtime_refreshes_stateful_tool_instance_for_each_run(monkeypatch):
+    from smolagents import Tool
+
+    class StatefulTool(Tool):
+        name = "stateful_cached_tool"
+        description = "Retains calls on its instance."
+        inputs = {"value": {"type": "integer", "description": "Value"}}
+        output_type = "integer"
+
+        def __init__(self):
+            self.is_initialized = True
+            self.calls: list[int] = []
+
+        def forward(self, value: int) -> int:
+            self.calls.append(value)
+            return value
+
+    agent = _make_agent(logger=DummyLoggerBackend())
+    base_profile = agent._role_profile()
+    monkeypatch.setattr(
+        agent,
+        "_role_profile",
+        lambda: base_agent_module.AgentRoleProfile(
+            agent_type=base_profile.agent_type,
+            tool_call_type=base_profile.tool_call_type,
+            cache_runtime_agent=True,
+        ),
+    )
+    definition = StatefulTool()
+    runtime = type("CachedRuntime", (), {"tools": {}})()
+    agent._runtime_agent = runtime
+    monkeypatch.setattr(agent, "_build_runtime_tools", lambda _profile: [definition])
+
+    first_runtime = agent.build_runtime_agent()
+    first_tool = first_runtime.tools["stateful_cached_tool"]
+    first_tool.calls.append(1)
+    second_runtime = agent.build_runtime_agent()
+    second_tool = second_runtime.tools["stateful_cached_tool"]
+
+    assert first_runtime is second_runtime
+    assert first_tool is not second_tool
+    assert first_tool.calls == [1]
+    assert second_tool.calls == []
+    assert definition.calls == []
 
 
 def test_base_run_emits_task_complete_on_success(monkeypatch):
@@ -360,11 +452,13 @@ def test_base_run_emits_task_complete_on_success(monkeypatch):
 
     monkeypatch.setattr(agent, "build_runtime_agent", lambda: runtime_agent)
 
-    def _record(event, tool_name, tool_input, tool_response=None):
-        events.append((event, tool_name, dict(tool_input), tool_response))
-        return HookResult(success=True, decision="allow")
+    def _record(context):
+        events.append(
+            (HookEvent(context.hook_event_name), context.tool_name, dict(context.tool_input), context.tool_response)
+        )
+        return HookResult()
 
-    monkeypatch.setattr(agent._hook_manager, "trigger_hooks", _record)
+    _append_hook_handler(agent, HookEvent.TASK_COMPLETED, _record)
 
     result = agent.run("do work", task_id="task-complete")
 
@@ -373,9 +467,7 @@ def test_base_run_emits_task_complete_on_success(monkeypatch):
     complete_event = next(item for item in events if item[0] is HookEvent.TASK_COMPLETED)
     assert complete_event[2]["task_id"] == "task-complete"
     assert complete_event[2]["agent_name"] == agent.name
-    assert runtime_agent.calls == [
-        {"task": "do work", "return_full_result": True}
-    ]
+    assert runtime_agent.calls == [{"task": "do work", "return_full_result": True}]
 
 
 def test_base_run_binds_root_before_memory_snapshot_and_only_owner_emits_session(monkeypatch):
@@ -393,15 +485,16 @@ def test_base_run_binds_root_before_memory_snapshot_and_only_owner_emits_session
         lambda tasks: snapshot_roots.append(require_root_run_id()) or tasks,
     )
 
-    def _record(event, tool_name, tool_input, tool_response=None):
-        events.append(event)
-        return HookResult(success=True, decision="allow")
+    def _record(context):
+        events.append(HookEvent(context.hook_event_name))
+        return HookResult()
 
-    monkeypatch.setattr(agent._hook_manager, "trigger_hooks", _record)
+    _append_hook_handler(agent, HookEvent.SESSION_START, _record)
+    _append_hook_handler(agent, HookEvent.SESSION_END, _record)
 
     assert agent.run("top-level") == "ok"
     first_root = snapshot_roots[0]
-    assert first_root != agent._hook_manager._session_id
+    assert first_root
     assert events.count(HookEvent.SESSION_START) == 1
     assert events.count(HookEvent.SESSION_END) == 1
     assert get_current_session_run_id() is None
@@ -529,17 +622,11 @@ def test_base_run_releases_owned_root_after_failure(monkeypatch):
         "_inject_memory_snapshot",
         lambda tasks: snapshot_roots.append(require_root_run_id()) or tasks,
     )
-    monkeypatch.setattr(
-        agent._hook_manager,
-        "trigger_hooks",
-        lambda *args, **kwargs: HookResult(success=True, decision="allow"),
-    )
-
     with pytest.raises(RuntimeError, match="boom-root"):
         agent.run("top-level-failure")
 
     assert len(snapshot_roots) == 1
-    assert snapshot_roots[0] != agent._hook_manager._session_id
+    assert snapshot_roots[0]
     assert get_current_session_run_id() is None
 
 
@@ -652,9 +739,7 @@ def test_failed_root_records_session_end_without_running_memory_review(monkeypat
     monkeypatch.setattr(
         reviewer,
         "review_finished_run",
-        lambda **_kwargs: (_ for _ in ()).throw(
-            AssertionError("failed runs must not be reviewed")
-        ),
+        lambda **_kwargs: (_ for _ in ()).throw(AssertionError("failed runs must not be reviewed")),
     )
 
     with pytest.raises(RuntimeError, match="main failed"):
@@ -690,9 +775,7 @@ def test_max_steps_root_is_a_failure_and_never_runs_memory_review(monkeypatch):
     monkeypatch.setattr(
         reviewer,
         "review_finished_run",
-        lambda **_kwargs: (_ for _ in ()).throw(
-            AssertionError("max-steps runs must not be reviewed")
-        ),
+        lambda **_kwargs: (_ for _ in ()).throw(AssertionError("max-steps runs must not be reviewed")),
     )
 
     with pytest.raises(RuntimeError, match="max_steps_error"):
@@ -819,22 +902,95 @@ def test_max_steps_managed_worker_fails_before_call_discards_state(
 
 
 def test_builtin_session_end_has_only_the_recorder_hook():
-    from src.lib.smolagents.hooks import HookManager, register_builtin_hooks
-
-    manager = register_builtin_hooks(HookManager())
-    session_end_hooks = manager.get_registered_hooks(HookEvent.SESSION_END)
-    assert [hook["source"] for hook in session_end_hooks] == [
-        "builtin:self_learning_recorder"
-    ]
-    assert session_end_hooks[0]["must_complete"] is True
-
-    all_sources = {
-        hook["source"]
-        for event in HookEvent
-        for hook in manager.get_registered_hooks(event)
-    }
+    agent = _make_agent(logger=DummyLoggerBackend())
+    session_end_hooks = [handler for handler in agent._hook_plan.handlers if handler.event is HookEvent.SESSION_END]
+    assert [handler.source for handler in session_end_hooks] == ["builtin:self_learning_recorder"]
+    all_sources = {handler.source for handler in agent._hook_plan.handlers}
     assert "builtin:self_learning_reviewer" not in all_sources
     assert "builtin:self_learning_finalizer" not in all_sources
+
+
+def test_default_system_config_enables_visualization_bundle_but_not_recall():
+    agent = _make_agent(logger=DummyLoggerBackend())
+    hook_ids = {handler.hook_id for handler in agent._hook_plan.handlers if handler.hook_id is not None}
+
+    assert any(hook_id.startswith("agent-visualization.") for hook_id in hook_ids)
+    assert not any(hook_id.startswith("agent-recall-with-files.") for hook_id in hook_ids)
+    assert len(agent._hook_plan.fingerprint) == 64
+
+
+def test_real_config_builder_compiles_global_application_and_agent_hook_layers(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import src.lib.config.config as config_module
+
+    agent_root = tmp_path / "AgentLoom"
+    config_dir = agent_root / "config"
+    app_root = agent_root / "applications" / "demo"
+    workflow_path = app_root / "workflows" / "agent.yaml"
+
+    def write_yaml(path: Path, payload: dict) -> None:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(
+            yaml.safe_dump(payload, sort_keys=False),
+            encoding="utf-8",
+        )
+
+    write_yaml(
+        config_dir / "system.yaml",
+        {
+            "system": {"name": "AgentLoom"},
+            "hooks": {"SessionStart": [{"id": "layer.global", "command": "python global.py"}]},
+        },
+    )
+    write_yaml(
+        config_dir / "llm.yaml",
+        {
+            "model": {
+                "default_model_type": "powerful",
+                "common": {
+                    "model": "openai/test-common",
+                    "base_url": "https://example.test/v1",
+                    "api_key": "test-key",
+                },
+                "powerful": {"model": "openai/test-model"},
+                "summary": {"model": "openai/test-summary"},
+            }
+        },
+    )
+    write_yaml(
+        app_root / "config" / "system.yaml",
+        {"hooks": {"SessionStart": [{"id": "layer.application", "command": "python app.py"}]}},
+    )
+    write_yaml(workflow_path, {"name": "layered-agent"})
+    monkeypatch.setattr(
+        config_module,
+        "_ACTIVE_CONFIG",
+        config_module._load_merged_config(config_dir=config_dir),
+    )
+
+    agent = DummyAgent(
+        config={
+            "name": "layered-agent",
+            "_yaml_file_path": str(workflow_path),
+            "hooks": {"SessionStart": [{"id": "layer.agent", "command": "python agent.py"}]},
+        },
+        model=object(),
+        logger=DummyLoggerBackend(),
+    )
+    configured = [handler for handler in agent._hook_plan.handlers if handler.hook_id]
+
+    assert [handler.hook_id for handler in configured] == [
+        "layer.global",
+        "layer.application",
+        "layer.agent",
+    ]
+    assert [handler.cwd for handler in configured] == [
+        str(agent_root.resolve()),
+        str(app_root.resolve()),
+        str(app_root.resolve()),
+    ]
 
 
 def test_successful_root_review_waits_for_session_end_recorder_commit(monkeypatch):
@@ -850,23 +1006,30 @@ def test_successful_root_review_waits_for_session_end_recorder_commit(monkeypatc
     monkeypatch.setattr(agent, "build_runtime_agent", lambda: runtime_agent)
     monkeypatch.setattr(agent, "_inject_memory_snapshot", lambda tasks: tasks)
 
-    session_end_hook = next(
-        hook
-        for hook in agent._hook_manager.get_registered_hooks(HookEvent.SESSION_END)
-        if hook["source"] == "builtin:self_learning_recorder"
+    session_end_handler = next(
+        handler
+        for handler in agent._hook_plan.handlers
+        if handler.event is HookEvent.SESSION_END and handler.source == "builtin:self_learning_recorder"
     )
-    original_recorder = session_end_hook["func"]
+    original_recorder = session_end_handler.callback
 
     def _delayed_recorder(context):
-        # Stay beyond the raw Python hook timeout.  The old implementation
-        # returns from trigger_hooks while this daemon thread is still asleep.
+        # Trusted Python handlers are synchronous, so review cannot overtake
+        # this recorder commit.
         time.sleep(0.05)
         result = original_recorder(context)
         recorder_committed.set()
         return result
 
-    session_end_hook["func"] = _delayed_recorder
-    session_end_hook["timeout"] = 0.005
+    agent._hook_plan = HookPlan(
+        HookHandler(
+            handler.event,
+            handler.pattern,
+            _delayed_recorder if handler is session_end_handler else handler.callback,
+            source=handler.source,
+        )
+        for handler in agent._hook_plan.handlers
+    )
 
     def _capture_review(*, root_run_id, **_kwargs):
         observations.append(
@@ -905,7 +1068,6 @@ def test_custom_session_end_telemetry_cannot_disable_persisted_review(monkeypatc
 
     def _overwrite_shared_telemetry(_context):
         return HookResult(
-            success=True,
             decision="allow",
             telemetry={
                 "self_learning_session_end_persisted_root_run_id": "other-root",
@@ -923,9 +1085,9 @@ def test_custom_session_end_telemetry_cannot_disable_persisted_review(monkeypatc
         reviewed_roots.append(root_run_id)
         return {"status": "skipped"}
 
-    agent._hook_manager.register_hook(
+    _append_hook_handler(
+        agent,
         HookEvent.SESSION_END,
-        "*",
         _overwrite_shared_telemetry,
         source="test:custom_session_end",
     )
@@ -1019,12 +1181,9 @@ def test_custom_session_end_telemetry_cannot_create_orphan_review_audit(
 
     def _forge_shared_telemetry(context):
         return HookResult(
-            success=True,
             decision="allow",
             telemetry={
-                "self_learning_session_end_persisted_root_run_id": (
-                    context.root_run_id
-                ),
+                "self_learning_session_end_persisted_root_run_id": (context.root_run_id),
             },
         )
 
@@ -1034,9 +1193,9 @@ def test_custom_session_end_telemetry_cannot_create_orphan_review_audit(
         "_resolve_review_model",
         lambda _model_type: pytest.fail("forged receipt resolved a review model"),
     )
-    agent._hook_manager.register_hook(
+    _append_hook_handler(
+        agent,
         HookEvent.SESSION_END,
-        "*",
         _forge_shared_telemetry,
         source="test:forged_shared_telemetry",
     )
@@ -1071,7 +1230,7 @@ def test_same_base_agent_concurrent_top_level_runs_do_not_cross_context(monkeypa
                 "task_id": current.task_id,
                 "root_run_id": current.root_run_id,
                 "local_run_id": current.local_run_id,
-                "hook_manager": current.hook_manager,
+                "hook_run": current.hook_run,
                 "agent_name": current.agent_name,
                 "agent_config": current.agent_config,
             }
@@ -1080,30 +1239,27 @@ def test_same_base_agent_concurrent_top_level_runs_do_not_cross_context(monkeypa
     monkeypatch.setattr(agent, "build_runtime_agent", _InterleavedRuntime)
     monkeypatch.setattr(agent, "_inject_memory_snapshot", lambda tasks: tasks)
 
-    def _record(event, *_args, **_kwargs):
-        if event in (HookEvent.SESSION_START, HookEvent.SESSION_END):
-            current = capture_explicit_execution_context()
-            lifecycle_observations.append(
-                (
-                    event,
-                    current.task_id,
-                    current.local_run_id,
-                    current.root_run_id,
-                )
+    def _record(context):
+        current = capture_explicit_execution_context()
+        lifecycle_observations.append(
+            (
+                HookEvent(context.hook_event_name),
+                current.task_id,
+                current.local_run_id,
+                current.root_run_id,
             )
-        return HookResult(success=True, decision="allow")
+        )
+        return HookResult()
 
-    monkeypatch.setattr(agent._hook_manager, "trigger_hooks", _record)
+    _append_hook_handler(agent, HookEvent.SESSION_START, _record)
+    _append_hook_handler(agent, HookEvent.SESSION_END, _record)
 
     # Poison only the legacy process-wide fallback. Fresh worker threads have
     # no task ContextVar and must still use their explicit task_id arguments.
     set_current_task_id("wrong-global-task")
     try:
         with ThreadPoolExecutor(max_workers=2) as pool:
-            futures = {
-                label: pool.submit(agent.run, label, task_id=f"task-{label}")
-                for label in ("A", "B")
-            }
+            futures = {label: pool.submit(agent.run, label, task_id=f"task-{label}") for label in ("A", "B")}
             assert {label: future.result() for label, future in futures.items()} == {
                 "A": "A",
                 "B": "B",
@@ -1116,7 +1272,8 @@ def test_same_base_agent_concurrent_top_level_runs_do_not_cross_context(monkeypa
         observed = runtime_observations[label]
         assert observed["task_id"] == f"task-{label}"
         assert observed["root_run_id"] == observed["local_run_id"]
-        assert observed["hook_manager"] is agent._hook_manager
+        assert isinstance(observed["hook_run"], HookRun)
+        assert observed["hook_run"].plan is agent._hook_plan
         assert observed["agent_name"] == agent.name
         assert observed["agent_config"] == agent._effective_agent_config
         roots.add(observed["root_run_id"])
@@ -1129,6 +1286,234 @@ def test_same_base_agent_concurrent_top_level_runs_do_not_cross_context(monkeypa
             HookEvent.SESSION_END,
         ]
         assert all(item[2] == item[3] == runtime_observations[label]["root_run_id"] for item in events)
+
+
+def test_subagent_lifecycle_belongs_to_parent_while_worker_tools_belong_to_child():
+    root_events: list[str] = []
+    child_events: list[str] = []
+
+    def record_root(context):
+        root_events.append(context.hook_event_name)
+        return HookResult()
+
+    def record_child(context):
+        child_events.append(context.hook_event_name)
+        return HookResult()
+
+    root_run = HookRun(
+        HookPlan(
+            (
+                HookHandler(HookEvent.SUBAGENT_START, "*", record_root),
+                HookHandler(HookEvent.SUBAGENT_STOP, "*", record_root),
+            )
+        ),
+        local_run_id="root",
+        root_run_id="root",
+    )
+    child_run = HookRun(
+        HookPlan(
+            (
+                HookHandler(HookEvent.PRE_TOOL_USE, "add", record_child),
+                HookHandler(HookEvent.POST_TOOL_USE, "add", record_child),
+                HookHandler(HookEvent.SUBAGENT_START, "*", record_child),
+                HookHandler(HookEvent.SUBAGENT_STOP, "*", record_child),
+            )
+        ),
+        local_run_id="worker",
+        root_run_id="root",
+        parent=root_run,
+    )
+
+    @tool
+    def add(a: int, b: int) -> int:
+        """Add two numbers.
+
+        Args:
+            a: First number.
+            b: Second number.
+        """
+
+        return a + b
+
+    hooked_add = inject_hooks(add)
+
+    class _WorkerRuntime:
+        logger = DummyLoggerBackend()
+
+        def run(self, _task):
+            current = capture_explicit_execution_context()
+            with bind_explicit_execution_context(
+                replace(
+                    current,
+                    hook_run=child_run,
+                    local_run_id="worker",
+                    root_run_id="root",
+                )
+            ):
+                return hooked_add(a=1, b=2)
+
+    set_current_hook_run(root_run)
+    worker = base_agent_module.SubTaskTrackedAgent(_WorkerRuntime(), "worker-agent")
+
+    assert worker.run("delegated") == 3
+    assert root_events == ["SubagentStart", "SubagentStop"]
+    assert child_events == ["PreToolUse", "PostToolUse"]
+
+    class _NestedRuntime:
+        logger = DummyLoggerBackend()
+
+        def run(self, _task):
+            return "nested"
+
+    set_current_hook_run(child_run)
+    grandchild = base_agent_module.SubTaskTrackedAgent(
+        _NestedRuntime(),
+        "grandchild-agent",
+    )
+    assert grandchild.run("nested delegated") == "nested"
+    assert root_events == ["SubagentStart", "SubagentStop"]
+    assert child_events == [
+        "PreToolUse",
+        "PostToolUse",
+        "SubagentStart",
+        "SubagentStop",
+    ]
+
+    # A managed-agent adapter may pre-bind the callee run before entering the
+    # lifecycle wrapper. The wrapper must still emit on its parent run.
+    current = capture_explicit_execution_context()
+    with bind_explicit_execution_context(
+        replace(
+            current,
+            agent_name="worker-agent",
+            runtime_agent_path="parent/worker-agent",
+            hook_run=child_run,
+            local_run_id="worker",
+            root_run_id="root",
+        )
+    ):
+        prebound_worker = base_agent_module.SubTaskTrackedAgent(
+            _NestedRuntime(),
+            "worker-agent",
+        )
+        assert prebound_worker.run("prebound") == "nested"
+
+    assert root_events == [
+        "SubagentStart",
+        "SubagentStop",
+        "SubagentStart",
+        "SubagentStop",
+    ]
+    assert child_events == [
+        "PreToolUse",
+        "PostToolUse",
+        "SubagentStart",
+        "SubagentStop",
+    ]
+
+
+def test_worker_subtask_cannot_emit_root_task_lifecycle() -> None:
+    from src.trace import sub_task_context
+
+    events: list[HookEvent] = []
+    agent = _make_agent(logger=DummyLoggerBackend())
+    agent._task_id = "worker-task"
+
+    def record(context):
+        events.append(HookEvent(context.hook_event_name))
+        return HookResult()
+
+    _append_hook_handler(agent, HookEvent.TASK_COMPLETED, record)
+    _append_hook_handler(agent, HookEvent.STOP_FAILURE, record)
+    run = HookRun(
+        agent._hook_plan,
+        local_run_id="worker-run",
+        root_run_id="root-run",
+    )
+
+    with bind_explicit_execution_context(replace(capture_explicit_execution_context(), hook_run=run)):
+        with sub_task_context("worker"):
+            agent._emit_task_lifecycle_event(
+                HookEvent.TASK_COMPLETED,
+                "delegated",
+                result="done",
+            )
+            agent._emit_task_lifecycle_event(
+                HookEvent.STOP_FAILURE,
+                "delegated",
+                error=RuntimeError("failed"),
+            )
+
+    assert events == []
+
+
+def test_root_task_lifecycle_never_reads_legacy_subtask_fallback() -> None:
+    from src.trace import clear_current_sub_task_id, set_current_sub_task_id
+
+    events: list[HookEvent] = []
+    agent = _make_agent(logger=DummyLoggerBackend())
+
+    def record(context):
+        events.append(HookEvent(context.hook_event_name))
+        return HookResult()
+
+    _append_hook_handler(agent, HookEvent.TASK_COMPLETED, record)
+    run = HookRun(
+        agent._hook_plan,
+        local_run_id="root-local",
+        root_run_id="root-local",
+    )
+    explicit_root = replace(
+        capture_explicit_execution_context(),
+        task_id="root-task",
+        sub_task_id=None,
+        hook_run=run,
+    )
+
+    # Poison the legacy process-wide fallback. A fresh executor thread has no
+    # subtask ContextVar and must still treat its explicit context as root.
+    set_current_sub_task_id("other-run-worker")
+    try:
+
+        def emit_from_root_thread() -> None:
+            with bind_explicit_execution_context(explicit_root):
+                agent._emit_task_lifecycle_event(
+                    HookEvent.TASK_COMPLETED,
+                    "root task",
+                    result="done",
+                )
+
+        with ThreadPoolExecutor(max_workers=1) as pool:
+            pool.submit(emit_from_root_thread).result()
+    finally:
+        clear_current_sub_task_id()
+
+    assert events == [HookEvent.TASK_COMPLETED]
+
+
+def test_each_run_rebinds_message_sink_for_cached_runtime(monkeypatch):
+    agent = _make_agent(logger=DummyLoggerBackend())
+    runtime = DummyRuntimeRunner(result="ok")
+    delivered: list[str] = []
+
+    monkeypatch.setattr(agent, "build_runtime_agent", lambda: runtime)
+    monkeypatch.setattr(agent, "_inject_memory_snapshot", lambda tasks: tasks)
+    monkeypatch.setattr(
+        agent,
+        "_emit_hook_user_message",
+        lambda _runtime, _logger, message: delivered.append(message),
+    )
+    _append_hook_handler(
+        agent,
+        HookEvent.SESSION_START,
+        lambda context: HookResult(user_message=context.local_run_id),
+    )
+
+    assert agent.run("first") == "ok"
+    assert agent.run("second") == "ok"
+
+    assert len(delivered) == 2
+    assert delivered[0] != delivered[1]
 
 
 def test_same_base_agent_serializes_real_cached_runtime_runs(monkeypatch):
@@ -1212,9 +1597,7 @@ def test_same_base_agent_serializes_real_cached_runtime_runs(monkeypatch):
     assert len({root for _task, _result, root in session_ends}) == 2
 
 
-def test_base_run_executes_transformed_tasks_sequentially_with_reset_false(
-    tmp_path, monkeypatch
-):
+def test_base_run_executes_transformed_tasks_sequentially_with_reset_false(tmp_path, monkeypatch):
     monkeypatch.setenv(
         "AGENTLOOM_RUNTIME_ROOT",
         str(tmp_path / ".agentloom"),
@@ -1277,11 +1660,13 @@ def test_base_run_emits_task_fail_on_exception(monkeypatch):
 
     monkeypatch.setattr(agent, "build_runtime_agent", lambda: runtime_agent)
 
-    def _record(event, tool_name, tool_input, tool_response=None):
-        events.append((event, tool_name, dict(tool_input), tool_response))
-        return HookResult(success=True, decision="allow")
+    def _record(context):
+        events.append(
+            (HookEvent(context.hook_event_name), context.tool_name, dict(context.tool_input), context.tool_response)
+        )
+        return HookResult()
 
-    monkeypatch.setattr(agent._hook_manager, "trigger_hooks", _record)
+    _append_hook_handler(agent, HookEvent.STOP_FAILURE, _record)
 
     with pytest.raises(RuntimeError, match="boom-run"):
         agent.run("do work", task_id="task-fail")
@@ -1448,8 +1833,8 @@ def test_build_prompt_templates_uses_default_when_not_configured(monkeypatch, tm
 
     agent = _make_agent(logger=DummyLoggerBackend())
     from src.lib.smolagents.skills.skills import SkillsManager as _SM
-    from src.lib.smolagents.hooks.hook_manager import HookManager as _HM
-    agent._skills_manager = _SM(logger=DummyLoggerBackend(), hook_manager=_HM())
+
+    agent._skills_manager = _SM(logger=DummyLoggerBackend())
 
     monkeypatch.setattr(base_agent_module, "C", _DummyConfig())
     monkeypatch.setattr(prompt_builder_module, "get_agent_environment_prompt", lambda: "")
