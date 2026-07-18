@@ -184,6 +184,24 @@ def test_generated_attempt_ids_do_not_collide_within_the_same_clock_tick() -> No
     assert len(generated) == 100
 
 
+def test_failed_root_memory_read_freezes_an_empty_snapshot() -> None:
+    from src.lib.runtime import RootRunState
+
+    state = RootRunState("root-memory-read-failed")
+    calls = 0
+
+    def fail_initial_read() -> str:
+        nonlocal calls
+        calls += 1
+        raise RuntimeError("database unavailable")
+
+    with pytest.raises(RuntimeError, match="database unavailable"):
+        state.get_or_create_memory_snapshot(fail_initial_read)
+
+    assert state.get_or_create_memory_snapshot(lambda: "late memory") == ""
+    assert calls == 1
+
+
 def test_runtime_context_allocates_safe_unique_skill_execution_dirs(tmp_path: Path) -> None:
     from src.lib.runtime import RuntimeHome
 

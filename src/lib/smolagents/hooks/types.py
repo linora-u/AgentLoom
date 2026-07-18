@@ -205,6 +205,7 @@ class HookContext:
     hook_event_name: str
     tool_name: str
     tool_input: Dict[str, Any]
+    tool_call_id: Optional[str] = None
     root_run_id: Optional[str] = None
     tool_response: Optional[Dict[str, Any]] = None
     tool_inputs_schema: Optional[Dict[str, Any]] = None
