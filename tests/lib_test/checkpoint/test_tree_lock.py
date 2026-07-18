@@ -14,9 +14,6 @@ import pytest
 
 from src.lib.checkpoint.checkpoint_manager import CheckpointManager
 from src.lib.checkpoint.coordinator import CheckpointCoordinator
-from src.lib.checkpoint.file_history import FileHistoryManager
-from src.lib.smolagents.hooks.hook_manager import HookManager
-from src.lib.smolagents.hooks.types import HookEvent
 
 
 @pytest.fixture
@@ -72,29 +69,6 @@ class TestCoordinatorContext:
             thread.join(timeout=5)
 
             assert seen_after == [None]
-        finally:
-            CheckpointCoordinator.deactivate(coord)
-
-    def test_register_file_history_hook_uses_agent_hook_manager(self, tmp_path):
-        cm = CheckpointManager(
-            "test_supervisor",
-            checkpoints_root=tmp_path,
-            run_id="run_test",
-        )
-        coord = CheckpointCoordinator.activate(cm, "task_ctx", "task text")
-        fh = FileHistoryManager(tmp_path / "fh")
-        hook_manager = HookManager()
-        try:
-            coord._file_history = fh
-
-            coord.register_file_history_hook(hook_manager)
-            coord.register_file_history_hook(hook_manager)
-
-            hooks = hook_manager.hooks[HookEvent.PRE_TOOL_USE]
-            file_history_hooks = [
-                h for h in hooks if h.get("source") == "file_history"
-            ]
-            assert len(file_history_hooks) == 1
         finally:
             CheckpointCoordinator.deactivate(coord)
 

@@ -1,9 +1,24 @@
 from __future__ import annotations
 
+import logging
 import threading
 from pathlib import Path
 
 from src.lib.runtime import RuntimeHome, bind_run_context, copy_runtime_context
+
+
+def test_null_backend_suppresses_only_the_bound_context(caplog) -> None:
+    from src.lib.logging import NullLoggerBackend, bind_logger_backend, get_logger
+
+    muted = get_logger("tests.context_muted")
+    visible = logging.getLogger("tests.context_visible")
+    with caplog.at_level(logging.WARNING):
+        with bind_logger_backend(NullLoggerBackend()):
+            muted.warning("checkpoint compatibility warning")
+            visible.warning("builder audit remains visible")
+
+    assert "checkpoint compatibility warning" not in caplog.messages
+    assert "builder audit remains visible" in caplog.messages
 
 
 def test_lazy_logger_is_bound_to_each_run_without_cross_writes(tmp_path: Path) -> None:

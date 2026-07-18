@@ -183,9 +183,14 @@ skills/generated/proposals/
 
 .agent/
 
+# Generated application outputs
+output/
+outputs/
+
 # Local/runtime-only content (must not be tracked)
 config/llm.yaml
 .agent/
 
 # Keep generic legacy ignore for compatibility
 llm.yaml
+applications/web_search/config/.mcp.anysearch.json

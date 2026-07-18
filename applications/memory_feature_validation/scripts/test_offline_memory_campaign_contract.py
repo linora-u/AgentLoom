@@ -1,4 +1,4 @@
-"""Contract tests for the deterministic v5 offline memory campaign."""
+"""Contract tests for the deterministic v6 offline memory campaign."""
 
 from __future__ import annotations
 
@@ -47,13 +47,13 @@ from applications.memory_feature_validation.scripts.run_offline_memory_campaign 
 
 
 def test_default_offline_campaign_ids_are_collision_resistant_path_components() -> None:
-    campaign_ids = {_default_campaign_id("offline-v5") for _ in range(64)}
+    campaign_ids = {_default_campaign_id("offline-v6") for _ in range(64)}
 
     assert len(campaign_ids) == 64
     assert all(Path(value).name == value for value in campaign_ids)
 
 
-def test_release_plan_is_exactly_100k_v5_events_with_fixed_seed() -> None:
+def test_release_plan_is_exactly_100k_v6_events_with_fixed_seed() -> None:
     assert DEFAULT_EVENTS == 100_000
     assert DEFAULT_SEED == 20_260_711
     assert allocate_quotas(DEFAULT_EVENTS) == {
@@ -81,9 +81,12 @@ def test_memory_state_cohort_is_not_cut_off_by_runtime_prompt_budget(
 ) -> None:
     cases = [case for case in build_case_plan(5_000, DEFAULT_SEED) if case.category == "active_pending_memory"]
     failures: list[dict[str, object]] = []
+    db_path = tmp_path / "self_learning.db"
+    ledger = offline_runner.SelfLearningLedger(db_path)
+    offline_runner._append_cases(ledger, cases)
 
     metrics = offline_runner._validate_memory_cases(
-        tmp_path / "self_learning.db",
+        db_path,
         cases,
         failures,
     )
@@ -91,6 +94,44 @@ def test_memory_state_cohort_is_not_cut_off_by_runtime_prompt_budget(
     assert len(cases) == 500
     assert metrics["persistent_failures"] == 0
     assert failures == []
+
+    approval_case = next(case for case in cases if case.variant == "approve_pending")
+    tampered_db = tmp_path / "uncompleted-root.db"
+    tampered_ledger = offline_runner.SelfLearningLedger(tampered_db)
+    offline_runner._append_cases(tampered_ledger, [approval_case])
+    with tampered_ledger._connect() as conn:
+        conn.execute(
+            "UPDATE runs SET status='indexed' WHERE run_id=?",
+            (f"memory-run-{approval_case.category_index:05d}",),
+        )
+    store = offline_runner.MemoryStore(
+        tampered_db,
+        agent_config=offline_runner._memory_config(
+            "offline_validation",
+            approval=False,
+        ),
+    )
+    with pytest.raises(
+        offline_runner.ReviewConflictError,
+        match="offline_evidence_root_not_completed",
+    ):
+        offline_runner._exercise_memory_case(store, approval_case)
+
+    with tampered_ledger._connect() as conn:
+        conn.execute(
+            "UPDATE runs SET status='completed' WHERE run_id=?",
+            (f"memory-run-{approval_case.category_index:05d}",),
+        )
+        conn.execute(
+            "UPDATE events SET content_text='tampered completion evidence' "
+            "WHERE run_id=? AND event_type='run_completed'",
+            (f"memory-run-{approval_case.category_index:05d}",),
+        )
+    with pytest.raises(
+        offline_runner.ReviewConflictError,
+        match="offline_evidence_scope_mismatch",
+    ):
+        offline_runner._exercise_memory_case(store, approval_case)
 
 
 def test_all_offline_events_use_the_public_ledger_append_boundary() -> None:
@@ -137,7 +178,7 @@ def test_payload_profile_has_literal_percentile_boundaries() -> None:
     assert payload_size_for_position(999, 1_000) == 60_000
 
 
-def test_every_v5_category_gets_the_full_payload_profile() -> None:
+def test_every_v6_category_gets_the_full_payload_profile() -> None:
     plan = build_case_plan(DEFAULT_EVENTS, DEFAULT_SEED)
     by_category = {
         category: [case.payload_bytes for case in plan if case.category == category] for category in CATEGORY_WEIGHTS
@@ -184,6 +225,15 @@ def test_release_source_gate_ignores_unrelated_worktree_changes(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    assert {
+        "src/extensions/self_learning/application_scope.py",
+        "src/extensions/self_learning/paths.py",
+        "src/extensions/self_learning/review_engine.py",
+        "src/extensions/self_learning/review_types.py",
+        "src/lib/runtime/context.py",
+        "src/lib/trusted_memory_evidence.py",
+    } <= set(offline_runner._SOURCE_FILES)
+
     repo = tmp_path / "repo"
     repo.mkdir()
     for relative in offline_runner._SOURCE_FILES:
@@ -272,7 +322,7 @@ def test_performance_baseline_requires_auditable_campaign_evidence(
     (campaign / "manifest.json").write_text(
         json.dumps(
             {
-                "campaign_kind": "offline_memory_v5",
+                "campaign_kind": "offline_memory_v6",
                 "release_shape": True,
                 "seed": DEFAULT_SEED,
                 "requested_events": DEFAULT_EVENTS,
@@ -658,7 +708,7 @@ def test_privacy_scan_fails_closed_on_invalid_gzip(tmp_path: Path) -> None:
     assert _privacy_scan([artifact]) == [{"path": "cases.jsonl.gz", "pattern": "scan-error"}]
 
 
-def test_100_event_smoke_uses_real_v5_apis_and_is_not_a_release_pass(
+def test_100_event_smoke_uses_real_v6_apis_and_is_not_a_release_pass(
     tmp_path: Path,
 ) -> None:
     campaign_dir = run_campaign(
@@ -710,6 +760,20 @@ def test_100_event_smoke_uses_real_v5_apis_and_is_not_a_release_pass(
     assert clean_audit["ok"] is True
     assert clean_audit["semantic_oracle"]["ok"] is True
 
+    manifest_path = campaign_dir / "manifest.json"
+    original_manifest = manifest_path.read_text(encoding="utf-8")
+    for field, value, issue in (
+        ("schema_version", 99, "manifest_schema_version_invalid"),
+        ("campaign_kind", "offline_memory_v5", "campaign_kind_invalid"),
+    ):
+        tampered_manifest = json.loads(original_manifest)
+        tampered_manifest[field] = value
+        manifest_path.write_text(json.dumps(tampered_manifest), encoding="utf-8")
+        manifest_audit = audit_campaign(campaign_dir)
+        assert manifest_audit["ok"] is False
+        assert issue in manifest_audit["issues"]
+        manifest_path.write_text(original_manifest, encoding="utf-8")
+
     metrics_path = campaign_dir / "metrics.json"
     original_metrics = metrics_path.read_text(encoding="utf-8")
     tampered_metrics = json.loads(original_metrics)
@@ -746,8 +810,6 @@ def test_100_event_smoke_uses_real_v5_apis_and_is_not_a_release_pass(
     assert "stored_gate_mismatch:wall_timing_evidence" in coupled_timing_audit["issues"]
     metrics_path.write_text(original_metrics, encoding="utf-8")
 
-    manifest_path = campaign_dir / "manifest.json"
-    original_manifest = manifest_path.read_text(encoding="utf-8")
     tampered_manifest = json.loads(original_manifest)
     tampered_manifest["baseline_validation_requested"] = True
     manifest_path.write_text(json.dumps(tampered_manifest), encoding="utf-8")
@@ -769,7 +831,84 @@ def test_100_event_smoke_uses_real_v5_apis_and_is_not_a_release_pass(
     assert "stored_gate_mismatch:performance_artifact_bytes_exact" in bytes_audit["issues"]
     metrics_path.write_text(original_metrics, encoding="utf-8")
 
-    with sqlite3.connect(campaign_dir / "self_learning.db") as conn:
+    central_db = campaign_dir / "self_learning.db"
+    with sqlite3.connect(central_db) as conn:
+        active_id, activation_source = conn.execute(
+            "SELECT id,activation_source FROM memory_items "
+            "WHERE state='active_confirmed' ORDER BY id LIMIT 1"
+        ).fetchone()
+        conn.execute(
+            "UPDATE memory_items SET state='active_unreviewed' WHERE id=?",
+            (active_id,),
+        )
+        conn.commit()
+        conn.execute("PRAGMA wal_checkpoint(TRUNCATE)")
+    unreviewed_audit = audit_campaign(campaign_dir)
+    assert unreviewed_audit["ok"] is False
+    assert unreviewed_audit["semantic_oracle"]["failure_codes"] == {
+        "active_pending_memory:persistent_state": 1
+    }
+    with sqlite3.connect(central_db) as conn:
+        conn.execute(
+            "UPDATE memory_items SET state='active_confirmed' WHERE id=?",
+            (active_id,),
+        )
+        conn.execute(
+            "UPDATE memory_items SET activation_source=? WHERE id=?",
+            ("auto" if activation_source != "auto" else "admin", active_id),
+        )
+        conn.commit()
+        conn.execute("PRAGMA wal_checkpoint(TRUNCATE)")
+    activation_audit = audit_campaign(campaign_dir)
+    assert activation_audit["ok"] is False
+    assert activation_audit["semantic_oracle"]["failure_codes"] == {
+        "active_pending_memory:persistent_state": 1
+    }
+    with sqlite3.connect(central_db) as conn:
+        conn.execute(
+            "UPDATE memory_items SET activation_source=? WHERE id=?",
+            (activation_source, active_id),
+        )
+        conn.commit()
+        conn.execute("PRAGMA wal_checkpoint(TRUNCATE)")
+
+    migration_db = campaign_dir / "migration_v4_to_v6.db"
+    with sqlite3.connect(migration_db) as conn:
+        migrated_id = int(
+            conn.execute(
+                "SELECT id FROM memory_items WHERE state='active_confirmed' "
+                "ORDER BY id LIMIT 1"
+            ).fetchone()[0]
+        )
+        conn.execute(
+            "UPDATE memory_items SET state='active_unreviewed' WHERE id=?",
+            (migrated_id,),
+        )
+        conn.commit()
+        conn.execute("PRAGMA wal_checkpoint(TRUNCATE)")
+    migration_state_audit = audit_campaign(campaign_dir)
+    assert migration_state_audit["ok"] is False
+    assert "migration_audit_failed" in migration_state_audit["issues"]
+    with sqlite3.connect(migration_db) as conn:
+        conn.execute(
+            "UPDATE memory_items SET state='active_confirmed',"
+            "activation_source='admin' WHERE id=?",
+            (migrated_id,),
+        )
+        conn.commit()
+        conn.execute("PRAGMA wal_checkpoint(TRUNCATE)")
+    migration_source_audit = audit_campaign(campaign_dir)
+    assert migration_source_audit["ok"] is False
+    assert "migration_audit_failed" in migration_source_audit["issues"]
+    with sqlite3.connect(migration_db) as conn:
+        conn.execute(
+            "UPDATE memory_items SET activation_source='migration' WHERE id=?",
+            (migrated_id,),
+        )
+        conn.commit()
+        conn.execute("PRAGMA wal_checkpoint(TRUNCATE)")
+
+    with sqlite3.connect(central_db) as conn:
         short_secret = str(
             conn.execute("SELECT input_json FROM events WHERE event_id='security-event-000001'").fetchone()[0]
         )
@@ -779,7 +918,7 @@ def test_100_event_smoke_uses_real_v5_apis_and_is_not_a_release_pass(
     assert "𐍈" not in short_secret and "[REDACTED]" in short_secret
     assert "value with spaces" not in nested_secret and "[REDACTED]" in nested_secret
 
-    with sqlite3.connect(campaign_dir / "self_learning.db") as conn:
+    with sqlite3.connect(central_db) as conn:
         conn.execute("UPDATE events SET event_type='wrong_type' WHERE event_id='ledger-event-000000'")
         conn.commit()
         conn.execute("PRAGMA wal_checkpoint(TRUNCATE)")
@@ -787,12 +926,12 @@ def test_100_event_smoke_uses_real_v5_apis_and_is_not_a_release_pass(
     assert replay_audit["ok"] is False
     assert replay_audit["semantic_oracle"]["failure_codes"] == {"ledger_fts_search_scroll:event_type_replay": 1}
 
-    with sqlite3.connect(campaign_dir / "self_learning.db") as conn:
+    with sqlite3.connect(central_db) as conn:
         conn.execute("UPDATE events SET event_type='task' WHERE event_id='ledger-event-000000'")
         conn.commit()
         conn.execute("PRAGMA wal_checkpoint(TRUNCATE)")
 
-    with sqlite3.connect(campaign_dir / "self_learning.db") as conn:
+    with sqlite3.connect(central_db) as conn:
         conn.execute("UPDATE events SET content_text='tampered' WHERE event_id='security-event-000006'")
         conn.commit()
         conn.execute("PRAGMA wal_checkpoint(TRUNCATE)")
@@ -800,7 +939,7 @@ def test_100_event_smoke_uses_real_v5_apis_and_is_not_a_release_pass(
     assert semantic_audit["ok"] is False
     assert "semantic_oracle_audit_failed" in semantic_audit["issues"]
 
-    (campaign_dir / "migration_v4_to_v5.db").unlink()
+    (campaign_dir / "migration_v4_to_v6.db").unlink()
     assert audit_campaign(campaign_dir)["ok"] is False
 
 

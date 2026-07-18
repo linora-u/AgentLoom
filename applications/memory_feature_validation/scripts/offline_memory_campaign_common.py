@@ -1,4 +1,4 @@
-"""Independent oracle and case plan for the v5 offline memory campaign.
+"""Independent oracle and case plan for the v6 offline memory campaign.
 
 This module is deliberately stdlib-only.  Expected classifications are fixed
 here instead of being derived through the self-learning implementation under
@@ -66,8 +66,8 @@ _VARIANTS: dict[str, tuple[tuple[str, str], ...]] = {
         ("pending_add", "pending"),
         ("approve_pending", "approved"),
         ("reject_pending", "rejected"),
-        ("stale_replace", "stale"),
-        ("normalized_duplicate", "duplicate"),
+        ("stale_revision_decision", "stale"),
+        ("exact_duplicate", "duplicate"),
         ("missing_root", "missing_run_context"),
         ("application_isolation", "isolated"),
         ("direct_replace_remove", "removed"),
@@ -127,7 +127,7 @@ def payload_size_for_position(index: int, total: int) -> int:
 
 
 def _token(seed: int, category: str, category_index: int) -> str:
-    value = f"offline-v5:{seed}:{category}:{category_index}"
+    value = f"offline-v6:{seed}:{category}:{category_index}"
     return hashlib.sha256(value.encode("utf-8")).hexdigest()[:20]
 
 

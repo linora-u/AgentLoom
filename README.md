@@ -49,8 +49,38 @@ After the first run, you should see:
 - resumable task state under `.agentloom/checkpoints/<application_id>/<task_id>/` when checkpointing is enabled;
 - optional visualization through `uv run loom ui`;
 - optional terminal monitoring through `uv run loom dashboard`.
+- the interactive Agent Builder and project-wide Run directory through the
+  TypeScript TUI in [`agentloom-tui/`](agentloom-tui/README.md).
 
-`run_id` identifies one execution attempt and changes on resume. `task_id` identifies the logical task and remains stable, so a resumed attempt writes a new run directory while continuing the same checkpoint. The agent-visible `.runtime/` workspace is intentionally separate from framework runtime storage.
+`run_id` identifies one execution attempt and changes on resume. `task_id` identifies the logical task and remains stable, so a resumed attempt writes a new run directory while continuing the same checkpoint. Agent workspaces live under `.agentloom/workspaces/agents/<application_id>/<agent_path>/`: `insights.md` is shared across tasks, while task state lives under `tasks/<task_id>/`.
+
+### Open the AgentLoom TUI
+
+```bash
+./install
+# Open a new shell once, then run from an AgentLoom project:
+agentloom
+```
+
+The source installer follows OpenCode's native-binary installation pattern. It
+builds the current-platform TypeScript/OpenTUI application, installs it under
+`~/.agentloom/bin`, and creates an isolated locked Python environment under
+`~/.agentloom/venv`. It finds or installs `uv` and Bun during setup; running
+`agentloom` needs neither environment activation nor `uv run`. Use
+`./install --no-modify-path` to leave shell configuration untouched, or set
+`AGENTLOOM_INSTALL_DIR` to choose another installation root.
+
+The Builder only inspects, stages, and validates Agent YAML; `/apply` is the
+explicit write action. The right-side directory shows every Agent System and
+Run, including definitions that have never run, live state, Workers, events,
+logs, artifacts, and retained results.
+
+Schedules created in the TUI are durable, but automatic firing requires an
+explicit foreground service in a separate terminal:
+
+```bash
+agentloom schedules --project /path/to/project serve
+```
 
 ## Create a Multi-Agent App with Codex
 
@@ -197,7 +227,7 @@ Worker Agents can be exported as callable tools. AgentLoom generates function si
 
 ### Skills and Hooks
 
-Skills provide reusable knowledge or behavior through Claude-style `SKILL.md` packages. Hooks attach logic around task lifecycle, sub-agent lifecycle, tool calls, sessions, compaction, setup, and config changes.
+Skills provide reusable knowledge through Claude-style `SKILL.md` packages. Hooks are independent, explicitly configured Shell extensions for the eleven supported tool, task, Agent, and session events. A Skill cannot declare or register a Hook; reusable Hooks live in explicitly referenced `HOOK.yaml` Bundles. See [Hook configuration](docs/en/hooks.md).
 
 ### Local Codex Tool
 
@@ -216,8 +246,8 @@ Before running the tool, make sure `codex` is on `PATH` and `codex login status`
 | `uv run loom list-tasks` | List resumable checkpoint tasks. |
 | `uv run loom clean-tasks` | Clean old checkpoint data. |
 | `uv run loom clean-runtime` | Apply configured retention to completed run directories and raw artifacts. |
-| `uv run loom migrate-runtime --dry-run` | Preview valid legacy checkpoint candidates without changing disk state. |
-| `uv run loom migrate-runtime --apply` | Migrate valid legacy checkpoints and archive the old `.logs` tree. |
+| `uv run loom migrate-runtime --dry-run` | Preview legacy checkpoint candidates plus the unscoped `.runtime` workspace without changing disk state. |
+| `uv run loom migrate-runtime --apply` | Migrate checkpoints, archive `.logs`, and atomically preserve `.runtime` under `.agentloom/workspaces/legacy-unscoped/`. |
 
 ## Documentation
 
@@ -228,7 +258,7 @@ Before running the tool, make sure `codex` is on `PATH` and `codex login status`
 | [LLM Configuration](docs/en/llm_config.md) | Model types, provider settings, inheritance, retries, and prompt cache settings. |
 | [System Configuration](docs/en/system_config.md) | Runtime settings, permissions, logging, execution environments, and tools. |
 | [Skills Configuration](docs/en/skills_config.md) | Skill package format, loading, runtime policy, and built-in skills. |
-| [Hooks Reference](docs/en/hooks.md) | Lifecycle events, hook types, matching, and execution behavior. |
+| [Hooks Reference](docs/en/hooks.md) | Direct Hooks, Bundles, lifecycle events, matching, and execution behavior. |
 | [Checkpoint Resume](docs/en/checkpoint.md) | Checkpoint layout, resume behavior, and long-task recovery. |
 
 ## AgentLoom Framework Skill

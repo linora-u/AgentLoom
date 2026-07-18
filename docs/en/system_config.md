@@ -21,6 +21,7 @@ The configuration loading order is `config/system.yaml` → `config/llm.yaml` �
 - [2. smart_summary — Context Compression Strategy](#2-smart_summary--context-compression-strategy)
 - [3. prompt — Top-Level System Prompt Override](#3-prompt--top-level-system-prompt-override)
 - [4. skills — Global Skills Configuration](#4-skills--global-skills-configuration)
+- [4.5 hooks — Independent Hook Runtime](#45-hooks--independent-hook-runtime)
 - [5. lsp_servers — LSP Language Server Configuration](#5-lsp_servers--lsp-language-server-configuration)
 - [6. execution_env — Execution Environment Configuration](#6-execution_env--execution-environment-configuration)
 - [6. code_agent — CodeAgent Code Execution Permissions](#6-code_agent--codeagent-code-execution-permissions)
@@ -71,11 +72,19 @@ prompt:
 # ============================================
 skills:
   # NOTE: agent-recall-with-files is disabled by default.
-  # This skill appends recall prompts at the end of tool results via hooks.
-  # Weak LLMs suffer from attention sparsity — appended instructions are ignored.
-  # Enable manually for strong LLMs only.
+  # Enable its prompt/resource package independently when needed.
   # - path: "skills/agent-recall-with-files"
-  - path: "skills/agent-visualization"
+
+# ============================================
+# Explicit Hook Configuration
+# ============================================
+hooks:
+  bundles:
+    agent-visualization:
+      path: hooks/agent-visualization
+    # Recall Hooks are independent from the Recall Skill and disabled by default.
+    # agent-recall-with-files:
+    #   path: hooks/agent-recall-with-files
 
 # ============================================
 # Execution Environment Global Configuration
@@ -308,7 +317,7 @@ prompt:
 Defines global Skill packages inherited by all Agents by default. Skills are reusable Claude-style `SKILL.md` packages. Loading is controlled by `load-mode`: `on-demand` (catalogue only) or `eager` (full body injected into the system prompt).
 
 **YAML path**: `skills` (top-level field)
-**Type**: `list[dict | str]`
+**Type**: `list[dict | str] | dict`
 
 ### 4.1 Skills Entry Format
 
@@ -329,6 +338,15 @@ skills:
   - "skills/agent-recall-with-files"
 ```
 
+#### Shared Policy Format
+
+```yaml
+skills:
+  items:
+    - path: "skills/agent-recall-with-files"
+    - path: "skills/safe-review"
+```
+
 ### 4.2 Skills Entry Parameters
 
 | Parameter | Type | Default | Required | Description |
@@ -338,6 +356,8 @@ skills:
 | `load-mode` | `str` | `on-demand` | ❌ No | `on-demand` catalogue loading or `eager` full-body injection |
 | `allow-scripts` | `bool` | `true` | ❌ No | Set to `false` to block `run_skill_script` |
 | `allow-network` | `bool` | `true` | ❌ No | Set to `false` to block common network commands in `run_skill_script` |
+
+Skill discovery and loading never enable Hooks. `SKILL.md` `hooks` and Skill `enable-hooks` are rejected migration fields. Configure direct Hooks or explicit Bundles through the independent top-level [`hooks`](hooks.md) mapping.
 
 ### 4.3 Skills Loading Order
 
@@ -372,12 +392,26 @@ skills:
   - path: "skills/agent-recall-with-files"
     load-mode: "eager"
 
-  - path: "skills/agent-visualization"
-    allow-scripts: false
-
-  # Shorthand format (defaults: load-mode=on-demand, scripts/network allowed)
+  # Shorthand format (defaults: on-demand, scripts/network allowed)
   - "skills/my-custom-skill"
 ```
+
+## 4.5 hooks — Independent Hook Runtime
+
+Hooks are configured independently from Skills. The following explicitly
+authorizes the visualization Bundle while leaving recall disabled:
+
+```yaml
+hooks:
+  bundles:
+    agent-visualization:
+      path: hooks/agent-visualization
+    # agent-recall-with-files:
+    #   path: hooks/agent-recall-with-files
+```
+
+See the [Hooks reference](hooks.md) for direct declarations, Bundle manifests,
+layer replacement, tombstones, event semantics, and the Shell protocol.
 
 ---
 
@@ -794,10 +828,13 @@ Each attempt writes under `.agentloom/runs/<application_id>/<run_id>/`:
 manifest.json
 logs/runtime.log[.1-.3]
 audit/shell.jsonl[.1-.2]
+audit/task_tree.json
+audit/task_events.jsonl
+artifacts/result.txt
 artifacts/{shell,background,skills}/
 ```
 
-The Shell audit uses its own fixed 10 MiB segments and two backups. A resumed task receives a new `run_id` and run directory while keeping its original `task_id` and `.agentloom/checkpoints/<application_id>/<task_id>/` state. File logging can be disabled without disabling the checkpoint or Shell audit:
+The task tree, task events, and result files are written when the corresponding evidence exists. Their paths are recorded in `manifest.json` before successful checkpoint cleanup, so Run inspection does not depend on a live checkpoint. The Shell audit uses its own fixed 10 MiB segments and two backups. A resumed task receives a new `run_id` and run directory while keeping its original `task_id` and `.agentloom/checkpoints/<application_id>/<task_id>/` state. File logging can be disabled without disabling the checkpoint or Shell audit:
 
 ```bash
 loom run applications/<app>/workflows/<agent>.yaml --no-file-log
@@ -807,11 +844,11 @@ There is no `--log-to-file`, `logging.enabled`, `logging.dir`, or `logging.file_
 
 ### 7.2 Retention and storage boundaries
 
-Automatic cleanup runs at most once per configured interval. `loom clean-runtime` applies the policy explicitly. It only deletes eligible run directories or their raw artifacts; it never traverses checkpoints, `.agentloom/legacy/`, `.runtime/`, or Application-owned output directories.
+Automatic cleanup runs at most once per configured interval. `loom clean-runtime` applies the policy explicitly. It only deletes eligible run directories or their raw artifacts; it never traverses checkpoints, `.agentloom/legacy/`, `.agentloom/workspaces/`, or Application-owned output directories.
 
-`.runtime/` remains the Agent-visible recall/todo workspace and is semantically independent from `.agentloom/`. `loom migrate-runtime --dry-run` previews valid legacy checkpoint candidates; `loom migrate-runtime --apply` migrates them and archives the complete old `.logs` tree under `.agentloom/legacy/`.
+Agent recall/todo files use `.agentloom/workspaces/agents/<application_id>/<agent_path>/`. `loom migrate-runtime --dry-run` previews valid legacy checkpoint candidates and the old unscoped `.runtime` tree; `loom migrate-runtime --apply` migrates checkpoints, archives `.logs` under `.agentloom/legacy/`, and atomically moves `.runtime` under `.agentloom/workspaces/legacy-unscoped/` because the old files do not contain reliable application/task provenance.
 
-To verify a real attempt, read `manifest.json`, `logs/runtime.log`, and `audit/shell.jsonl`; an exit code alone is not sufficient.
+To verify a real attempt, read `manifest.json` and its referenced logs, audits, and artifacts; an exit code alone is not sufficient.
 
 ---
 
@@ -1237,7 +1274,7 @@ Run evidence and task recovery state have independent lifecycles under the same 
 - The run manifest records `task_id`; checkpoint run events and heartbeat record the current `run_id`
 - Checkpoint lookup uses the canonical Application/task path and never depends on logs, `.task_index.json`, or a legacy scan
 - Log closing, rotation, and runtime retention cannot remove checkpoint state
-- `.runtime/` remains a separate Agent-visible workspace; Application `output_dir` remains Application-owned
+- Agent workspaces remain separate from run artifacts; Application `output_dir` remains Application-owned
 
 > For the full Checkpoint & Resume reference, see [Checkpoint & Resume](checkpoint.md).
 

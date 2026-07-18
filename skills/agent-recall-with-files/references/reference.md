@@ -2,7 +2,7 @@
 
 ## Intent
 
-This skill gives each agent a small, durable workspace under `.runtime/<agent_name>/`.
+This skill gives each agent a small, durable workspace under `.agentloom/workspaces/agents/<application_id>/<agent_path>/`.
 
 It enables cross-session experience recall — agents learn from past pitfalls and decisions.
 
@@ -10,9 +10,9 @@ It enables cross-session experience recall — agents learn from past pitfalls a
 
 | File | Lifecycle | Role |
 |------|-----------|------|
-| `context.md` | Cleared per task | Task goal, current status, remaining items. Recovery snapshot. |
-| `trace.md` | Cleared per task | Chronological execution log. Append-only within a session. |
-| `insights.md` | **Permanent** | Cross-session experience: pitfalls, decisions, facts. Tagged and dated. |
+| `tasks/<task_id>/context.md` | Per task | Task goal, current status, remaining items. Recovery snapshot. |
+| `tasks/<task_id>/trace.md` | Per task | Chronological execution log. Preserved when the task resumes. |
+| `insights.md` | **Cross-task** | Application/agent-scoped experience: pitfalls, decisions, facts. Tagged and dated. |
 
 ## Template State Does Not Count
 
@@ -51,11 +51,11 @@ Tags: `[pitfall]` `[decision]` `[fact]` `[dependency]` `[perf]` `[config]`
 - `trace.md` contains at least one task-specific action entry.
 - `trace.md` mentions the latest meaningful step or produced artifact.
 - `insights.md` contains either a dated insight entry or an explicit "no new insights" note.
-- All files use the exact current agent directory under `.runtime/<agent_name>/`.
+- All files use the exact canonical paths injected by the framework.
 
 ## Hook Summary
 
-- `TaskCreated` bootstraps the runtime directory. Preserves `insights.md`, recreates others.
+- `TaskCreated` bootstraps missing task files and preserves `insights.md` plus resume state.
 - `PreToolUse` injects full `context.md`, recent `trace.md` (20 lines), recent `insights.md` (30 lines).
 - `PostToolUse` reminds the agent to record meaningful changes.
 - `SubagentStop` on failure emphasises logging pitfalls in `insights.md`.

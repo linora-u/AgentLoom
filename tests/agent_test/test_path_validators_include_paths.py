@@ -7,16 +7,14 @@ include_paths + exclude_paths conflict, and symlink + include_paths combination.
 import os
 from pathlib import Path
 
-import pytest
-
 import src.lib.config.config as config_module
 from src.lib.smolagents.hooks.path_validators import validate_workspace_path
 from src.lib.smolagents.hooks.types import HookContext
 
-
 # ---------------------------------------------------------------------------
 # Helpers (same conventions as test_path_validators_security.py)
 # ---------------------------------------------------------------------------
+
 
 def _patch_config(monkeypatch, raw: dict, root: Path) -> None:
     monkeypatch.setattr(
@@ -42,7 +40,7 @@ def _patch_no_agent(monkeypatch) -> None:
 
 def _make_context(tool_name, tool_input, tool_inputs_schema=None):
     return HookContext(
-        session_id="test",
+        local_run_id="test",
         cwd=os.getcwd(),
         hook_event_name="PreToolUse",
         tool_name=tool_name,
@@ -60,6 +58,7 @@ def _tac(pv_list):
 # include_paths: absolute path outside workspace
 # ===========================================================================
 
+
 class TestIncludePathsAbsolute:
     """Absolute path outside workspace but listed in include_paths -> allow."""
 
@@ -74,11 +73,15 @@ class TestIncludePathsAbsolute:
 
         _patch_config(
             monkeypatch,
-            _tac([{
-                "tools": ["read_file"],
-                "exclude_paths": [],
-                "include_paths": [str(external)],
-            }]),
+            _tac(
+                [
+                    {
+                        "tools": ["read_file"],
+                        "exclude_paths": [],
+                        "include_paths": [str(external)],
+                    }
+                ]
+            ),
             ws,
         )
         _patch_no_agent(monkeypatch)
@@ -102,11 +105,15 @@ class TestIncludePathsAbsolute:
 
         _patch_config(
             monkeypatch,
-            _tac([{
-                "tools": ["read_file"],
-                "exclude_paths": [],
-                "include_paths": [],  # empty
-            }]),
+            _tac(
+                [
+                    {
+                        "tools": ["read_file"],
+                        "exclude_paths": [],
+                        "include_paths": [],  # empty
+                    }
+                ]
+            ),
             ws,
         )
         _patch_no_agent(monkeypatch)
@@ -125,6 +132,7 @@ class TestIncludePathsAbsolute:
 # include_paths: tilde expansion
 # ===========================================================================
 
+
 class TestIncludePathsTilde:
     """include_paths with ~ are expanded to the user's home directory."""
 
@@ -133,7 +141,6 @@ class TestIncludePathsTilde:
         ws = tmp_path / "ws"
         ws.mkdir()
         # Create a directory under the real home to simulate
-        home_dir = Path.home()
         # Use a non-existent but realistic path pattern for testing
         # We test the expansion logic by creating a temp dir and using its absolute path
         external = tmp_path / "fake_home" / "external-proj"
@@ -146,11 +153,15 @@ class TestIncludePathsTilde:
 
         _patch_config(
             monkeypatch,
-            _tac([{
-                "tools": ["read_file"],
-                "exclude_paths": [],
-                "include_paths": ["~/external-proj"],
-            }]),
+            _tac(
+                [
+                    {
+                        "tools": ["read_file"],
+                        "exclude_paths": [],
+                        "include_paths": ["~/external-proj"],
+                    }
+                ]
+            ),
             ws,
         )
         _patch_no_agent(monkeypatch)
@@ -168,6 +179,7 @@ class TestIncludePathsTilde:
 # include_paths + exclude_paths conflict
 # ===========================================================================
 
+
 class TestIncludeExcludeConflict:
     """When a path is in both include_paths and exclude_paths, exclude wins."""
 
@@ -182,11 +194,15 @@ class TestIncludeExcludeConflict:
 
         _patch_config(
             monkeypatch,
-            _tac([{
-                "tools": ["read_file"],
-                "exclude_paths": ["shared"],
-                "include_paths": [str(shared)],
-            }]),
+            _tac(
+                [
+                    {
+                        "tools": ["read_file"],
+                        "exclude_paths": ["shared"],
+                        "include_paths": [str(shared)],
+                    }
+                ]
+            ),
             ws,
         )
         _patch_no_agent(monkeypatch)
@@ -205,6 +221,7 @@ class TestIncludeExcludeConflict:
 # include_paths: empty list
 # ===========================================================================
 
+
 class TestIncludePathsEmpty:
     """Empty include_paths means only workspace files are allowed."""
 
@@ -217,11 +234,15 @@ class TestIncludePathsEmpty:
 
         _patch_config(
             monkeypatch,
-            _tac([{
-                "tools": ["read_file"],
-                "exclude_paths": [],
-                "include_paths": [],
-            }]),
+            _tac(
+                [
+                    {
+                        "tools": ["read_file"],
+                        "exclude_paths": [],
+                        "include_paths": [],
+                    }
+                ]
+            ),
             ws,
         )
         _patch_no_agent(monkeypatch)
@@ -238,6 +259,7 @@ class TestIncludePathsEmpty:
 # ===========================================================================
 # include_paths: multiple directories
 # ===========================================================================
+
 
 class TestIncludePathsMultiple:
     """Multiple include_paths directories are all honored."""
@@ -256,11 +278,15 @@ class TestIncludePathsMultiple:
 
         _patch_config(
             monkeypatch,
-            _tac([{
-                "tools": ["read_file"],
-                "exclude_paths": [],
-                "include_paths": [str(ext1), str(ext2)],
-            }]),
+            _tac(
+                [
+                    {
+                        "tools": ["read_file"],
+                        "exclude_paths": [],
+                        "include_paths": [str(ext1), str(ext2)],
+                    }
+                ]
+            ),
             ws,
         )
         _patch_no_agent(monkeypatch)
@@ -286,6 +312,7 @@ class TestIncludePathsMultiple:
 # Symlink + include_paths combination
 # ===========================================================================
 
+
 class TestSymlinkIncludePaths:
     """Symlinks resolving into include_paths directories should be allowed."""
 
@@ -303,11 +330,15 @@ class TestSymlinkIncludePaths:
 
         _patch_config(
             monkeypatch,
-            _tac([{
-                "tools": ["read_file"],
-                "exclude_paths": [],
-                "include_paths": [str(external)],
-            }]),
+            _tac(
+                [
+                    {
+                        "tools": ["read_file"],
+                        "exclude_paths": [],
+                        "include_paths": [str(external)],
+                    }
+                ]
+            ),
             ws,
         )
         _patch_no_agent(monkeypatch)
@@ -334,11 +365,15 @@ class TestSymlinkIncludePaths:
 
         _patch_config(
             monkeypatch,
-            _tac([{
-                "tools": ["read_file"],
-                "exclude_paths": [],
-                "include_paths": [],  # no external dirs allowed
-            }]),
+            _tac(
+                [
+                    {
+                        "tools": ["read_file"],
+                        "exclude_paths": [],
+                        "include_paths": [],  # no external dirs allowed
+                    }
+                ]
+            ),
             ws,
         )
         _patch_no_agent(monkeypatch)

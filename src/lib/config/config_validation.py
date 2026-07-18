@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import logging
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
@@ -310,6 +310,90 @@ class LoggingSettings(BaseModel):
     backup_count: int = Field(default=3, ge=0)
 
 
+class ApplicationReviewTriggerSettings(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    mode: Literal["manual", "batch", "after_run"] = "batch"
+    min_completed_runs: int = Field(default=5, ge=1)
+
+
+class ProjectReviewTriggerSettings(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    mode: Literal["manual", "batch", "after_run"] = "batch"
+    min_candidates: int = Field(default=5, ge=1)
+
+
+class ReviewApprovalSettings(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    fact: Literal["auto", "manual"] = "manual"
+    experience: Literal["auto", "manual"] = "manual"
+
+
+class ApplicationReviewSettings(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    review_model: str = ""
+    trigger: ApplicationReviewTriggerSettings = Field(
+        default_factory=ApplicationReviewTriggerSettings
+    )
+    approval: ReviewApprovalSettings = Field(default_factory=ReviewApprovalSettings)
+
+    @field_validator("review_model")
+    @classmethod
+    def _normalize_review_model(cls, value: str) -> str:
+        return str(value or "").strip()
+
+
+class ProjectReviewSettings(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    review_model: str = ""
+    trigger: ProjectReviewTriggerSettings = Field(
+        default_factory=ProjectReviewTriggerSettings
+    )
+    approval: ReviewApprovalSettings = Field(default_factory=ReviewApprovalSettings)
+
+    @field_validator("review_model")
+    @classmethod
+    def _normalize_review_model(cls, value: str) -> str:
+        return str(value or "").strip()
+
+
+class ReviewArtifactsSettings(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    markdown: bool = True
+    review_auto_applied: bool = True
+
+
+class SelfLearningReviewSettings(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    enabled: bool = False
+    application: ApplicationReviewSettings = Field(
+        default_factory=ApplicationReviewSettings
+    )
+    project: ProjectReviewSettings = Field(default_factory=ProjectReviewSettings)
+    artifacts: ReviewArtifactsSettings = Field(default_factory=ReviewArtifactsSettings)
+
+    @model_validator(mode="after")
+    def _require_models_when_enabled(self) -> SelfLearningReviewSettings:
+        if not self.enabled:
+            return self
+        missing = [
+            scope
+            for scope in ("application", "project")
+            if not getattr(self, scope).review_model
+        ]
+        if missing:
+            fields = ", ".join(
+                f"self_learning.review.{scope}.review_model" for scope in missing
+            )
+            raise ValueError(f"review.enabled=true requires non-empty {fields}")
+        return self
+
+
+class SelfLearningSettings(BaseModel):
+    model_config = ConfigDict(extra="allow")
+    enabled: bool = True
+    review: SelfLearningReviewSettings = Field(default_factory=SelfLearningReviewSettings)
+
+
 class RootSettings(BaseModel):
     model_config = ConfigDict(extra="allow")
     system: SystemSettings = Field(default_factory=SystemSettings)
@@ -329,7 +413,8 @@ class RootSettings(BaseModel):
     tools_mapping: dict[str, Any] = Field(default_factory=dict)
     tool_metadata: dict[str, Any] = Field(default_factory=dict)
     tool_output_limits: dict[str, Any] = Field(default_factory=dict)
-    self_learning: dict[str, Any] = Field(default_factory=dict)
+    self_learning: SelfLearningSettings = Field(default_factory=SelfLearningSettings)
+    hooks: dict[str, Any] = Field(default_factory=dict)
 
 
 def raise_project_key_error(source: str) -> ValueError:
@@ -353,6 +438,22 @@ def validate_system_snapshot(snapshot: dict[str, Any], source: str) -> None:
             f"Unsupported key 'self_learning.root_dir' in {source}. "
             "Use the single canonical 'runtime.root_dir'."
         )
+    memory = self_learning.get("memory") if isinstance(self_learning, dict) else None
+    if isinstance(memory, dict):
+        legacy_review_keys = sorted(
+            key for key in ("review_model", "write_approval") if key in memory
+        )
+        if legacy_review_keys:
+            qualified = ", ".join(
+                f"self_learning.memory.{key}" for key in legacy_review_keys
+            )
+            raise ValueError(
+                f"Unsupported legacy review key(s) in {source}: {qualified}. "
+                "Move review_model to self_learning.review.application.review_model "
+                "and self_learning.review.project.review_model; replace "
+                "write_approval with the per-scope approval.fact and "
+                "approval.experience policies."
+            )
     tools_mapping = snapshot.get("tools_mapping")
     if isinstance(tools_mapping, dict) and "mapping" in tools_mapping:
         raise ValueError(

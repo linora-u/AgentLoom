@@ -24,6 +24,86 @@ def test_runtime_home_builds_run_and_checkpoint_paths(tmp_path: Path) -> None:
     assert not context.checkpoint_dir.exists()
 
 
+def test_runtime_context_builds_canonical_agent_workspace_paths(tmp_path: Path) -> None:
+    from src.lib.runtime import RuntimeHome
+
+    context = RuntimeHome(tmp_path / ".agentloom").context(
+        application_id="web/search",
+        task_id="task_123",
+        run_id="run_abc",
+    )
+
+    agent_root = (
+        tmp_path
+        / ".agentloom"
+        / "workspaces"
+        / "agents"
+        / "web"
+        / "search"
+        / "supervisor"
+        / "researcher"
+    )
+    assert context.agent_workspace_root("supervisor/researcher") == agent_root
+    assert context.agent_insights_path("supervisor/researcher") == agent_root / "insights.md"
+    assert context.agent_task_workspace_dir("supervisor/researcher") == (
+        agent_root / "tasks" / "task_123"
+    )
+    assert context.agent_todos_path("supervisor/researcher") == (
+        agent_root / "tasks" / "task_123" / "todos.md"
+    )
+    assert context.agent_visualization_path("supervisor/researcher") == (
+        agent_root / "tasks" / "task_123" / "visualization.json"
+    )
+
+
+def test_agent_insights_are_shared_but_task_workspace_is_isolated(tmp_path: Path) -> None:
+    from src.lib.runtime import RuntimeHome
+
+    home = RuntimeHome(tmp_path / ".agentloom")
+    first = home.context(application_id="app", task_id="task_1", run_id="run_1")
+    second = home.context(application_id="app", task_id="task_2", run_id="run_2")
+
+    assert first.agent_insights_path("supervisor/worker") == second.agent_insights_path(
+        "supervisor/worker"
+    )
+    assert first.agent_task_workspace_dir(
+        "supervisor/worker"
+    ) != second.agent_task_workspace_dir("supervisor/worker")
+
+
+def test_agent_workspace_rejects_absolute_and_traversal_paths(tmp_path: Path) -> None:
+    from src.lib.runtime import RuntimeHome
+
+    context = RuntimeHome(tmp_path / ".agentloom").context(
+        application_id="app",
+        task_id="task",
+        run_id="run",
+    )
+
+    for agent_path in ("", "/supervisor", "../worker", "supervisor/../worker"):
+        with pytest.raises(ValueError, match="agent_path"):
+            context.agent_workspace_root(agent_path)
+
+
+def test_prepare_agent_workspace_creates_only_canonical_runtime_directories(
+    tmp_path: Path,
+) -> None:
+    from src.lib.runtime import RuntimeHome
+
+    context = RuntimeHome(tmp_path / ".agentloom").context(
+        application_id="app",
+        task_id="task",
+        run_id="run",
+    )
+
+    task_dir = context.prepare_agent_workspace("supervisor/worker")
+
+    assert task_dir == context.agent_task_workspace_dir("supervisor/worker")
+    assert task_dir.is_dir()
+    assert context.agent_workspace_root("supervisor/worker").is_dir()
+    assert not (tmp_path / ".runtime").exists()
+
+
 def test_runtime_home_resolves_relative_root_against_agent_root(tmp_path: Path) -> None:
     from src.lib.runtime import resolve_runtime_home
 
@@ -102,6 +182,24 @@ def test_generated_attempt_ids_do_not_collide_within_the_same_clock_tick() -> No
     generated = {generate_runtime_id("run") for _ in range(100)}
 
     assert len(generated) == 100
+
+
+def test_failed_root_memory_read_freezes_an_empty_snapshot() -> None:
+    from src.lib.runtime import RootRunState
+
+    state = RootRunState("root-memory-read-failed")
+    calls = 0
+
+    def fail_initial_read() -> str:
+        nonlocal calls
+        calls += 1
+        raise RuntimeError("database unavailable")
+
+    with pytest.raises(RuntimeError, match="database unavailable"):
+        state.get_or_create_memory_snapshot(fail_initial_read)
+
+    assert state.get_or_create_memory_snapshot(lambda: "late memory") == ""
+    assert calls == 1
 
 
 def test_runtime_context_allocates_safe_unique_skill_execution_dirs(tmp_path: Path) -> None:

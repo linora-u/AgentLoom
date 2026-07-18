@@ -1,0 +1,212 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+APP="AgentLoom"
+MUTED='\033[0;2m'
+RED='\033[0;31m'
+NC='\033[0m'
+NO_MODIFY_PATH=false
+
+usage() {
+  cat <<'EOF'
+AgentLoom source installer
+
+Usage: ./install [options]
+
+Options:
+  --no-modify-path  Do not update the current shell configuration
+  -h, --help        Show this help
+
+Environment:
+  AGENTLOOM_INSTALL_DIR  Installation root (default: ~/.agentloom)
+EOF
+}
+
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --no-modify-path)
+      NO_MODIFY_PATH=true
+      shift
+      ;;
+    -h|--help)
+      usage
+      exit 0
+      ;;
+    *)
+      printf '%b\n' "${RED}Error: unknown option: $1${NC}" >&2
+      usage >&2
+      exit 2
+      ;;
+  esac
+done
+
+REPO_ROOT=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)
+TUI_ROOT="$REPO_ROOT/agentloom-tui"
+INSTALL_ROOT=${AGENTLOOM_INSTALL_DIR:-"$HOME/.agentloom"}
+mkdir -p "$INSTALL_ROOT"
+INSTALL_ROOT=$(cd -- "$INSTALL_ROOT" && pwd -P)
+VENV_DIR="$INSTALL_ROOT/venv"
+BIN_DIR="$INSTALL_ROOT/bin"
+mkdir -p "$BIN_DIR"
+
+require_curl() {
+  if ! command -v curl >/dev/null 2>&1; then
+    printf '%b\n' "${RED}Error: curl is required to install missing build tools.${NC}" >&2
+    exit 1
+  fi
+}
+
+find_uv() {
+  if command -v uv >/dev/null 2>&1; then
+    command -v uv
+  elif [[ -x "$HOME/.local/bin/uv" ]]; then
+    printf '%s\n' "$HOME/.local/bin/uv"
+  elif [[ -x "$HOME/.cargo/bin/uv" ]]; then
+    printf '%s\n' "$HOME/.cargo/bin/uv"
+  else
+    return 1
+  fi
+}
+
+find_bun() {
+  if command -v bun >/dev/null 2>&1; then
+    command -v bun
+  elif [[ -x "$HOME/.bun/bin/bun" ]]; then
+    printf '%s\n' "$HOME/.bun/bin/bun"
+  else
+    return 1
+  fi
+}
+
+if ! UV_BIN=$(find_uv); then
+  require_curl
+  printf '%b\n' "${MUTED}uv not found; installing it with Astral's official installer...${NC}"
+  if ! curl -LsSf https://astral.sh/uv/install.sh | sh; then
+    printf '%b\n' "${RED}Error: the official uv installer failed.${NC}" >&2
+    exit 1
+  fi
+  if ! UV_BIN=$(find_uv); then
+    printf '%b\n' "${RED}Error: uv was installed but its executable could not be found.${NC}" >&2
+    exit 1
+  fi
+fi
+
+if ! BUN_BIN=$(find_bun); then
+  require_curl
+  printf '%b\n' "${MUTED}Bun not found; installing it with Bun's official installer...${NC}"
+  if ! curl -fsSL https://bun.sh/install | bash; then
+    printf '%b\n' "${RED}Error: the official Bun installer failed.${NC}" >&2
+    exit 1
+  fi
+  if ! BUN_BIN=$(find_bun); then
+    printf '%b\n' "${RED}Error: Bun was installed but its executable could not be found.${NC}" >&2
+    exit 1
+  fi
+fi
+
+printf '%b\n' "${MUTED}Creating the locked AgentLoom Python environment...${NC}"
+UV_PROJECT_ENVIRONMENT="$VENV_DIR" "$UV_BIN" sync \
+  --frozen \
+  --no-editable \
+  --no-dev \
+  --reinstall-package agentloom \
+  --project "$REPO_ROOT"
+
+BUILD_DIR=$(mktemp -d "${TMPDIR:-/tmp}/agentloom-install.XXXXXX")
+cleanup() {
+  rm -rf "$BUILD_DIR"
+}
+trap cleanup EXIT
+BUILD_BINARY="$BUILD_DIR/agentloom-tui"
+
+printf '%b\n' "${MUTED}Building the native AgentLoom TUI...${NC}"
+(
+  cd -- "$TUI_ROOT"
+  "$BUN_BIN" install --frozen-lockfile
+  "$BUN_BIN" run build -- --outfile "$BUILD_BINARY"
+)
+"$BUILD_BINARY" --version >/dev/null
+
+install -m 755 "$BUILD_BINARY" "$BIN_DIR/.agentloom-tui.$$.tmp"
+mv -f "$BIN_DIR/.agentloom-tui.$$.tmp" "$BIN_DIR/agentloom-tui"
+
+WRAPPER_TMP="$BIN_DIR/.agentloom.$$.tmp"
+cat > "$WRAPPER_TMP" <<'EOF'
+#!/bin/sh
+set -eu
+install_root=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd -P)
+if [ -z "${AGENTLOOM_PYTHON:-}" ]; then
+  if [ -x "$install_root/venv/bin/python" ]; then
+    AGENTLOOM_PYTHON="$install_root/venv/bin/python"
+  else
+    AGENTLOOM_PYTHON="$install_root/venv/Scripts/python.exe"
+  fi
+  export AGENTLOOM_PYTHON
+fi
+if [ "${1:-}" = "schedules" ]; then
+  shift
+  exec "$AGENTLOOM_PYTHON" -I -m src schedules "$@"
+fi
+exec "$install_root/bin/agentloom-tui" "$@"
+EOF
+chmod 755 "$WRAPPER_TMP"
+mv -f "$WRAPPER_TMP" "$BIN_DIR/agentloom"
+
+add_to_path() {
+  local config_file=$1
+  local escaped_bin=${BIN_DIR//\\/\\\\}
+  escaped_bin=${escaped_bin//\"/\\\"}
+  local command="export PATH=\"$escaped_bin:\$PATH\""
+  if grep -Fqx "$command" "$config_file"; then
+    return
+  fi
+  {
+    printf '\n# AgentLoom\n'
+    printf '%s\n' "$command"
+  } >> "$config_file"
+  printf '%b\n' "${MUTED}Added AgentLoom to PATH in $config_file.${NC}"
+}
+
+if [[ "$NO_MODIFY_PATH" != true ]] && [[ ":$PATH:" != *":$BIN_DIR:"* ]]; then
+  XDG_CONFIG_HOME=${XDG_CONFIG_HOME:-"$HOME/.config"}
+  current_shell=$(basename "${SHELL:-sh}")
+  config_file=""
+  case "$current_shell" in
+    fish)
+      candidates=("$HOME/.config/fish/config.fish")
+      ;;
+    zsh)
+      candidates=("${ZDOTDIR:-$HOME}/.zshrc" "${ZDOTDIR:-$HOME}/.zshenv" "$XDG_CONFIG_HOME/zsh/.zshrc")
+      ;;
+    bash)
+      candidates=("$HOME/.bashrc" "$HOME/.bash_profile" "$HOME/.profile" "$XDG_CONFIG_HOME/bash/.bashrc")
+      ;;
+    *)
+      candidates=("$HOME/.profile" "$HOME/.bashrc")
+      ;;
+  esac
+  for candidate in "${candidates[@]}"; do
+    if [[ -f "$candidate" && -w "$candidate" ]]; then
+      config_file=$candidate
+      break
+    fi
+  done
+  if [[ -n "$config_file" ]]; then
+    if [[ "$current_shell" == fish ]]; then
+      fish_command="fish_add_path \"$BIN_DIR\""
+      if ! grep -Fqx "$fish_command" "$config_file"; then
+        printf '\n# AgentLoom\n%s\n' "$fish_command" >> "$config_file"
+      fi
+    else
+      add_to_path "$config_file"
+    fi
+  else
+    printf '%b\n' "${MUTED}No writable shell config found. Add this directory to PATH:${NC}"
+    printf '  export PATH="%s:%s"\n' "$BIN_DIR" '$PATH'
+  fi
+fi
+
+printf '\n%s installed successfully.\n' "$APP"
+printf 'Run now: %s/agentloom\n' "$BIN_DIR"
+printf 'Run schedules: %s/agentloom schedules --project /path/to/project serve\n' "$BIN_DIR"
+printf 'After opening a new shell: agentloom\n'

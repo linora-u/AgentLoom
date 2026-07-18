@@ -12,6 +12,7 @@ from __future__ import annotations
 import builtins
 import os
 from copy import deepcopy
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
@@ -28,6 +29,7 @@ from .config_validation import (
 from .defaults import DEFAULT_MODEL_REQUESTS_PER_MINUTE
 from .layered_builder import LayeredConfigBuilder
 from .llm_config import LLMConfig
+from .yaml_loader import load_unique_yaml
 
 SYSTEM_CONFIG_NAME = "system.yaml"
 LLM_CONFIG_NAME = "llm.yaml"
@@ -51,6 +53,7 @@ _WORKFLOW_OVERLAY_KEYS = {
     "prompt",
     "mcp_servers",
     "self_learning",
+    "hooks",
 }
 _LLM_ONLY_TOP_LEVEL_KEYS = {"model", "llm", "langfuse"}
 _GLOBAL_ONLY_TOP_LEVEL_KEYS = {"runtime", "logging"}
@@ -58,11 +61,54 @@ _GLOBAL_ONLY_TOP_LEVEL_KEYS = {"runtime", "logging"}
 logger = get_logger(__name__)
 
 
+def _validate_review_model_references(
+    config_map: dict[str, Any],
+    llm_config: LLMConfig,
+    *,
+    source_name: str,
+) -> None:
+    """Require enabled review scopes to reference configured model types."""
+
+    self_learning = config_map.get("self_learning")
+    review = self_learning.get("review") if isinstance(self_learning, dict) else None
+    if not isinstance(review, dict) or review.get("enabled") is not True:
+        return
+    configured = set(llm_config.models)
+    for scope in ("application", "project"):
+        scope_config = review.get(scope)
+        if not isinstance(scope_config, dict):
+            continue
+        model_type = str(scope_config.get("review_model") or "").strip()
+        if model_type and model_type not in configured:
+            raise ValueError(
+                f"self_learning.review.{scope}.review_model '{model_type}' in "
+                f"{source_name} is not configured in config/llm.yaml."
+            )
+
+
+@dataclass(frozen=True, slots=True)
+class ConfigLayerSnapshot:
+    """One immutable-by-convention configuration source with path provenance."""
+
+    name: str
+    data: dict[str, Any]
+    root: Path
+    source_path: Path
+
+
+@dataclass(frozen=True, slots=True)
+class EffectiveAgentConfigSnapshot:
+    """Merged values plus the unmerged sources used to produce them."""
+
+    values: dict[str, Any]
+    layers: tuple[ConfigLayerSnapshot, ...]
+
+
 def _load_yaml(path: Path) -> dict[str, Any]:
     if not path.exists():
         return {}
     with path.open("r", encoding="utf-8") as f:
-        loaded = yaml.safe_load(f) or {}
+        loaded = load_unique_yaml(f) or {}
     if not isinstance(loaded, dict):
         raise ValueError(f"Configuration file must contain a mapping: {path}")
     return loaded
@@ -91,8 +137,8 @@ def _load_llm_config(path: Path) -> LLMConfig:
             raw_bytes = stream.read(_MAX_CAMPAIGN_LLM_CONFIG_BYTES + 1)
         if len(raw_bytes) > _MAX_CAMPAIGN_LLM_CONFIG_BYTES:
             raise ValueError("in-memory campaign LLM configuration is too large")
-        raw = yaml.safe_load(raw_bytes.decode("utf-8")) or {}
-    except (OSError, UnicodeDecodeError, yaml.YAMLError) as exc:
+        raw = load_unique_yaml(raw_bytes.decode("utf-8")) or {}
+    except (OSError, UnicodeDecodeError, ValueError, yaml.YAMLError) as exc:
         raise ValueError("invalid in-memory campaign LLM configuration") from exc
     if not isinstance(raw, dict):
         raise ValueError("in-memory campaign LLM configuration must be a mapping")
@@ -142,6 +188,19 @@ def _reject_application_global_only_keys(
             f"Unsupported global-only key(s) in {source_name}: {keys}. "
             "Configure runtime and logging only in the project root "
             "config/system.yaml."
+        )
+    self_learning = filtered.get("self_learning")
+    review = self_learning.get("review") if isinstance(self_learning, dict) else None
+    disallowed_review_keys = (
+        sorted(set(review) - {"application"}) if isinstance(review, dict) else []
+    )
+    if disallowed_review_keys:
+        raise ValueError(
+            "Application config may configure only "
+            "self_learning.review.application.*. The project review policy and "
+            "all review-wide settings belong in the project root "
+            f"config/system.yaml. Unsupported key(s) in {source_name}: "
+            + ", ".join(f"self_learning.review.{key}" for key in disallowed_review_keys)
         )
     return filtered
 
@@ -251,6 +310,11 @@ class UnifiedConfig:
 
         self._raw = normalized
         self._settings = RootSettings.model_validate(self._raw)
+        _validate_review_model_references(
+            self._raw,
+            llm_config,
+            source_name="project root config/system.yaml",
+        )
         self._agent_root = agent_root
         self._llm_config = llm_config
 
@@ -482,6 +546,14 @@ def extract_workflow_overlay(
             overlay[key] = value
             continue
 
+        # Preserve invalid values as well as valid mappings. Hook validation
+        # needs the actual Agent-layer declaration; silently dropping
+        # ``hooks: null`` or ``hooks: []`` would turn a configuration error
+        # into an unintended fallback to lower-precedence Hooks.
+        if key == "hooks":
+            overlay[key] = value
+            continue
+
         # mcp_servers: pass through as-is (string, list, or dict all valid)
         if key == "mcp_servers":
             overlay[key] = value
@@ -492,12 +564,12 @@ def extract_workflow_overlay(
     return overlay
 
 
-def build_effective_agent_config(
+def build_effective_agent_config_snapshot(
     agent_config: dict[str, Any] | None,
     *,
     source_name: str = "agent",
-) -> dict[str, Any]:
-    """Build the final merged config for a single Agent.
+) -> EffectiveAgentConfigSnapshot:
+    """Build merged Agent values while retaining every unmerged source.
 
     Merge order (low → high):
     1. Global base (``config/system.yaml`` + ``config/llm.yaml``)
@@ -509,15 +581,28 @@ def build_effective_agent_config(
     ``workflows/`` directory is found.
     """
     base = get_config()
+    layers: list[ConfigLayerSnapshot] = []
     layered_builder = LayeredConfigBuilder(
         validate_hook=lambda snapshot, overlay: validate_system_snapshot(snapshot, overlay.name)
     )
-    layered_builder.apply_mapping("base_config", deepcopy(base.raw))
+    base_data = deepcopy(base.raw)
+    layered_builder.apply_mapping("base_config", base_data)
+    layers.append(
+        ConfigLayerSnapshot(
+            name="global_system",
+            data=deepcopy(base_data),
+            root=base.agent_root.resolve(),
+            source_path=(base.agent_root / "config" / SYSTEM_CONFIG_NAME).resolve(),
+        )
+    )
 
     # --- Application-level overlay (resolved from _yaml_file_path) ---
+    agent_layer_root = base.agent_root.resolve()
+    agent_source_path = Path(source_name).expanduser()
     if isinstance(agent_config, dict):
         yaml_file_path = agent_config.get("_yaml_file_path")
         if yaml_file_path:
+            agent_source_path = Path(str(yaml_file_path)).expanduser().resolve()
             try:
                 app_root = _resolve_app_root_from_yaml(
                     base.agent_root, Path(yaml_file_path)
@@ -529,6 +614,7 @@ def build_effective_agent_config(
                     yaml_file_path,
                 )
             else:
+                agent_layer_root = app_root.resolve()
                 app_config_path = app_root / APP_CONFIG_RELATIVE_PATH
                 if app_root != base.agent_root and app_config_path.exists():
                     app_system_yaml = _filter_llm_only_top_level_keys(
@@ -542,22 +628,62 @@ def build_effective_agent_config(
                     layered_builder.apply_mapping(
                         str(app_config_path), app_system_yaml
                     )
+                    layers.append(
+                        ConfigLayerSnapshot(
+                            name="application_system",
+                            data=deepcopy(app_system_yaml),
+                            root=app_root.resolve(),
+                            source_path=app_config_path.resolve(),
+                        )
+                    )
 
     # --- Agent YAML overlay ---
     if isinstance(agent_config, dict):
+        agent_overlay = extract_workflow_overlay(
+            deepcopy(agent_config), source_name=source_name
+        )
         layered_builder.apply_mapping(
             source_name,
-            extract_workflow_overlay(deepcopy(agent_config), source_name=source_name),
+            agent_overlay,
         )
+        if agent_overlay:
+            if not agent_source_path.is_absolute():
+                agent_source_path = (agent_layer_root / agent_source_path).resolve()
+            layers.append(
+                ConfigLayerSnapshot(
+                    name="agent",
+                    data=deepcopy(agent_overlay),
+                    root=agent_layer_root,
+                    source_path=agent_source_path,
+                )
+            )
     merged = layered_builder.build()
     normalize_tool_access_control_section(merged, base.agent_root)
     validate_system_snapshot(merged, source_name)
+    _validate_review_model_references(
+        merged,
+        base.llm,
+        source_name=source_name,
+    )
     if isinstance(agent_config, dict) and agent_config.get("_yaml_file_path"):
         # Identity metadata, not configuration: application-scope resolution
         # (self-learning memory layering, learning artifacts) reads the workflow
         # path from the effective config at hook time.
         merged["_yaml_file_path"] = str(agent_config["_yaml_file_path"])
-    return merged
+    return EffectiveAgentConfigSnapshot(values=merged, layers=tuple(layers))
+
+
+def build_effective_agent_config(
+    agent_config: dict[str, Any] | None,
+    *,
+    source_name: str = "agent",
+) -> dict[str, Any]:
+    """Build the final merged config for a single Agent."""
+
+    return build_effective_agent_config_snapshot(
+        agent_config,
+        source_name=source_name,
+    ).values
 
 
 def get_model_config(model_type: str, key: str, default: Any = None) -> Any:

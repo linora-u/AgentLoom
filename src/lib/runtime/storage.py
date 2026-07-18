@@ -11,13 +11,9 @@ import uuid
 from collections.abc import Iterator
 from contextlib import contextmanager
 from pathlib import Path, PurePosixPath
-from typing import Any
+from typing import Any, BinaryIO
 
-_DIRECTORY_FLAGS = (
-    os.O_RDONLY
-    | getattr(os, "O_DIRECTORY", 0)
-    | getattr(os, "O_NOFOLLOW", 0)
-)
+_DIRECTORY_FLAGS = os.O_RDONLY | getattr(os, "O_DIRECTORY", 0) | getattr(os, "O_NOFOLLOW", 0)
 _NOFOLLOW = getattr(os, "O_NOFOLLOW", 0)
 _COPY_CHUNK_BYTES = 1024 * 1024
 
@@ -115,9 +111,7 @@ class SecureDirectory:
 
     def _parts(self, relative: str | Path) -> tuple[str, ...]:
         path = PurePosixPath(str(relative).replace("\\", "/"))
-        if path.is_absolute() or not path.parts or any(
-            part in {"", ".", ".."} for part in path.parts
-        ):
+        if path.is_absolute() or not path.parts or any(part in {"", ".", ".."} for part in path.parts):
             raise ValueError(f"unsafe relative storage path: {relative}")
         return path.parts
 
@@ -188,6 +182,10 @@ class SecureDirectory:
                 src_dir_fd=parent_fd,
                 dst_dir_fd=parent_fd,
             )
+            # Persist the directory entry as well as the temporary file contents.
+            # Without this fsync, a crash can lose the completed rename and make a
+            # durable claim appear unclaimed after restart.
+            os.fsync(parent_fd)
         finally:
             if file_fd >= 0:
                 os.close(file_fd)
@@ -257,8 +255,10 @@ class SecureDirectory:
         relative: str | Path,
         *,
         create: bool = False,
+        exclusive: bool = True,
+        blocking: bool = True,
     ) -> Iterator[None]:
-        """Hold an exclusive advisory lock on one anchored regular file."""
+        """Hold an advisory lock on one anchored regular file."""
 
         parent_fd, name = self._open_parent(relative, create=create)
         fd = -1
@@ -269,10 +269,11 @@ class SecureDirectory:
                 flags |= os.O_CREAT
             fd = os.open(name, flags, 0o600, dir_fd=parent_fd)
             if not stat.S_ISREG(os.fstat(fd).st_mode):
-                raise RuntimeError(
-                    f"storage lock target is not regular: {self.path / str(relative)}"
-                )
-            fcntl.flock(fd, fcntl.LOCK_EX)
+                raise RuntimeError(f"storage lock target is not regular: {self.path / str(relative)}")
+            operation = fcntl.LOCK_EX if exclusive else fcntl.LOCK_SH
+            if not blocking:
+                operation |= fcntl.LOCK_NB
+            fcntl.flock(fd, operation)
             locked = True
             yield
         finally:
@@ -302,6 +303,120 @@ class SecureDirectory:
             if fd >= 0:
                 os.close(fd)
             os.close(parent_fd)
+
+    @contextmanager
+    def open_binary_writer(
+        self,
+        relative: str | Path,
+        *,
+        exclusive: bool = False,
+    ) -> Iterator[BinaryIO]:
+        """Open one anchored regular file for writing without following links."""
+
+        parent_fd, name = self._open_parent(relative, create=True)
+        fd = -1
+        stream: BinaryIO | None = None
+        try:
+            flags = os.O_WRONLY | os.O_CREAT | os.O_NONBLOCK | _NOFOLLOW
+            if exclusive:
+                flags |= os.O_EXCL
+            fd = os.open(name, flags, 0o600, dir_fd=parent_fd)
+            if not stat.S_ISREG(os.fstat(fd).st_mode):
+                raise RuntimeError(f"storage target is not regular: {self.path / str(relative)}")
+            os.set_blocking(fd, True)
+            if not exclusive:
+                os.ftruncate(fd, 0)
+            stream = os.fdopen(fd, "wb", buffering=0, closefd=True)
+            fd = -1
+            yield stream
+        finally:
+            if stream is not None:
+                stream.close()
+            if fd >= 0:
+                os.close(fd)
+            os.close(parent_fd)
+
+    @contextmanager
+    def open_binary_reader(self, relative: str | Path) -> Iterator[BinaryIO]:
+        """Open one regular file through anchored, no-follow descriptors."""
+
+        parent_fd, name = self._open_parent(relative, create=False)
+        fd = -1
+        stream: BinaryIO | None = None
+        try:
+            fd = os.open(name, os.O_RDONLY | _NOFOLLOW, dir_fd=parent_fd)
+            if not stat.S_ISREG(os.fstat(fd).st_mode):
+                raise RuntimeError(f"storage source is not regular: {self.path / str(relative)}")
+            stream = os.fdopen(fd, "rb", closefd=True)
+            fd = -1
+            yield stream
+        finally:
+            if stream is not None:
+                stream.close()
+            if fd >= 0:
+                os.close(fd)
+            os.close(parent_fd)
+
+    def read_bytes_up_to(self, relative: str | Path, limit: int) -> tuple[bytes, bool]:
+        """Read at most *limit* bytes and report whether more data exists."""
+
+        if limit < 0:
+            raise ValueError("read limit must be non-negative")
+        with self.open_binary_reader(relative) as stream:
+            payload = stream.read(limit + 1)
+        return payload[:limit], len(payload) > limit
+
+    def bounded_regular_files(
+        self,
+        *,
+        max_files: int,
+        max_entries: int,
+    ) -> tuple[list[Path], bool]:
+        """Walk regular descendants with hard entry and result budgets."""
+
+        if max_files <= 0 or max_entries <= 0:
+            raise ValueError("filesystem walk budgets must be positive")
+        with self._lock:
+            if self._fd < 0:
+                raise RuntimeError(f"secure directory is closed: {self.path}")
+            root_fd = os.dup(self._fd)
+        pending: list[tuple[int, tuple[str, ...]]] = [(root_fd, ())]
+        files: list[Path] = []
+        scanned_entries = 0
+        try:
+            while pending:
+                directory_fd, parts = pending.pop()
+                try:
+                    with os.scandir(directory_fd) as entries:
+                        for entry in entries:
+                            if scanned_entries >= max_entries:
+                                return sorted(files), True
+                            scanned_entries += 1
+                            try:
+                                metadata = entry.stat(follow_symlinks=False)
+                            except OSError:
+                                continue
+                            relative = Path(*parts) / entry.name
+                            if stat.S_ISREG(metadata.st_mode):
+                                files.append(relative)
+                                if len(files) >= max_files:
+                                    return sorted(files), True
+                            elif stat.S_ISDIR(metadata.st_mode):
+                                try:
+                                    child_fd = os.open(
+                                        entry.name,
+                                        _DIRECTORY_FLAGS,
+                                        dir_fd=directory_fd,
+                                    )
+                                except OSError:
+                                    continue
+                                pending.append((child_fd, (*parts, entry.name)))
+                finally:
+                    os.close(directory_fd)
+            return sorted(files), False
+        finally:
+            for directory_fd, _ in pending:
+                os.close(directory_fd)
 
     def read_text(self, relative: str | Path, *, encoding: str = "utf-8") -> str:
         return self.read_bytes(relative).decode(encoding)

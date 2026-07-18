@@ -773,11 +773,16 @@ def test_descriptor_checks_the_locked_dependency_only_environment(
 
 def test_public_environment_flags_cannot_mark_main_checkout_as_capsule(
     monkeypatch,
+    tmp_path: Path,
 ) -> None:
-    monkeypatch.setenv(CAPSULE_ACTIVE_ENV, "1")
-    monkeypatch.setenv(CAPSULE_ROOT_ENV, str(REPO_ROOT))
+    checkout = _new_repo(tmp_path / "main-checkout")
+    (checkout / "README.md").write_text("fixture\n", encoding="utf-8")
+    _commit_all(checkout, "fixture")
 
-    issues = active_capsule_bootstrap_issues(REPO_ROOT)
+    monkeypatch.setenv(CAPSULE_ACTIVE_ENV, "1")
+    monkeypatch.setenv(CAPSULE_ROOT_ENV, str(checkout))
+
+    issues = active_capsule_bootstrap_issues(checkout)
 
     assert "capsule private bootstrap token was invalid" in issues
     assert "capsule repository was not a linked worktree" in issues

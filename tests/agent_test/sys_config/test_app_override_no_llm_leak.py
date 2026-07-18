@@ -6,7 +6,6 @@ LLM 相关键同样应被 _filter_llm_only_top_level_keys 过滤。
 应用级覆盖通过 build_effective_agent_config 自动从 _yaml_file_path 发现。
 """
 
-import sqlite3
 from pathlib import Path
 
 import pytest
@@ -141,17 +140,30 @@ def test_app_override_preserves_workspace(tmp_path):
     assert config_module.C.llm.for_type("powerful").model == "openai/test-model"
 
 
-def test_application_inherits_or_explicitly_disables_global_memory_review(
-    tmp_path,
-    monkeypatch,
-):
-    """Missing app key inherits global review; an explicit empty value opts out."""
+def test_application_inherits_and_can_only_override_its_own_review_policy(tmp_path):
+    """Application config cannot disable or relax the Project review policy."""
     config_dir, yaml_file = _setup_with_app_override(
         tmp_path,
         system_yaml_data={
             "self_learning": {
                 "enabled": True,
-                "memory": {"review_model": "summary"},
+                "review": {
+                    "enabled": True,
+                    "application": {
+                        "review_model": "summary",
+                        "trigger": {"mode": "after_run", "min_completed_runs": 1},
+                        "approval": {"fact": "auto", "experience": "manual"},
+                    },
+                    "project": {
+                        "review_model": "summary",
+                        "trigger": {"mode": "batch", "min_candidates": 5},
+                        "approval": {"fact": "manual", "experience": "manual"},
+                    },
+                    "artifacts": {
+                        "markdown": True,
+                        "review_auto_applied": True,
+                    },
+                },
             }
         },
         app_system_yaml_data={},
@@ -159,47 +171,45 @@ def test_application_inherits_or_explicitly_disables_global_memory_review(
 
     inherited = _build_effective(config_dir, yaml_file)
 
-    assert inherited["self_learning"]["memory"]["review_model"] == "summary"
+    assert inherited["self_learning"]["review"]["application"]["trigger"]["mode"] == "after_run"
+    assert inherited["self_learning"]["review"]["project"]["trigger"] == {
+        "mode": "batch",
+        "min_candidates": 5,
+    }
 
     _write_yaml(
         yaml_file.parent.parent / "config" / "system.yaml",
-        {"self_learning": {"memory": {"review_model": ""}}},
+        {
+            "self_learning": {
+                "review": {
+                    "application": {
+                        "trigger": {"mode": "manual"},
+                        "approval": {"fact": "manual", "experience": "manual"},
+                    }
+                }
+            }
+        },
     )
-    opted_out = _build_effective(config_dir, yaml_file)
+    overridden = _build_effective(config_dir, yaml_file)
 
-    assert opted_out["self_learning"]["memory"]["review_model"] == ""
+    assert overridden["self_learning"]["review"]["application"]["trigger"]["mode"] == "manual"
+    assert overridden["self_learning"]["review"]["application"]["review_model"] == "summary"
+    assert overridden["self_learning"]["review"]["project"] == inherited["self_learning"]["review"]["project"]
 
-    from src.extensions.self_learning import reviewer
-    from src.extensions.self_learning.memory_store import MemoryStore
-
-    state_root = tmp_path / ".agentloom"
-    monkeypatch.setenv("AGENTLOOM_RUNTIME_ROOT", str(state_root))
-    monkeypatch.setattr(
-        reviewer,
-        "_resolve_review_model",
-        lambda _model_type: pytest.fail("opted-out Application resolved a model"),
+    _write_yaml(
+        yaml_file.parent.parent / "config" / "system.yaml",
+        {
+            "self_learning": {
+                "review": {
+                    "project": {
+                        "approval": {"fact": "auto", "experience": "auto"}
+                    }
+                }
+            }
+        },
     )
-
-    review = reviewer.review_finished_run(
-        root_run_id="root-app-opt-out",
-        agent_config=opted_out,
-    )
-
-    assert review["reason"] == "review_model_not_configured"
-    assert not (state_root / "self_learning.db").exists()
-
-    store = MemoryStore(agent_config=opted_out)
-    write = store.handle_tool_action(
-        "add",
-        scope="project",
-        content="Foreground memory remains available after review opt-out.",
-        root_run_id="root-app-opt-out",
-        agent_config=opted_out,
-    )
-
-    assert write["ok"] is True
-    assert [item["content"] for item in store.list("project")] == [
-        "Foreground memory remains available after review opt-out."
-    ]
-    with sqlite3.connect(state_root / "self_learning.db") as conn:
-        assert conn.execute("SELECT COUNT(*) FROM review_runs").fetchone()[0] == 0
+    with pytest.raises(
+        ValueError,
+        match=r"configure only self_learning\.review\.application",
+    ):
+        _build_effective(config_dir, yaml_file)

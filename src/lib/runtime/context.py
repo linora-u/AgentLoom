@@ -17,7 +17,7 @@ import re
 import stat
 import threading
 import uuid
-from collections.abc import Iterator
+from collections.abc import Callable, Iterable, Iterator
 from contextlib import contextmanager
 from dataclasses import asdict, dataclass
 from datetime import UTC, datetime
@@ -28,13 +28,54 @@ _SAFE_PART = re.compile(r"[^A-Za-z0-9._-]+")
 _CURRENT_RUN_CONTEXT: contextvars.ContextVar[RuntimeContext | None] = contextvars.ContextVar(
     "agentloom_run_context", default=None
 )
-_DIRECTORY_OPEN_FLAGS = (
-    os.O_RDONLY
-    | getattr(os, "O_DIRECTORY", 0)
-    | getattr(os, "O_NOFOLLOW", 0)
-)
+_DIRECTORY_OPEN_FLAGS = os.O_RDONLY | getattr(os, "O_DIRECTORY", 0) | getattr(os, "O_NOFOLLOW", 0)
 _FILE_NOFOLLOW = getattr(os, "O_NOFOLLOW", 0)
 RUNTIME_ROOT_ENV = "AGENTLOOM_RUNTIME_ROOT"
+_UNSET_ROOT_MEMORY_SNAPSHOT = object()
+
+
+class RootRunState:
+    """Mutable state shared by every execution context in one root task.
+
+    ContextVars copy values, so the shared value must itself own the lock and
+    cached snapshot. Main agents and workers can then cross thread/context
+    boundaries without independently re-reading memory that changed mid-run.
+    """
+
+    __slots__ = (
+        "root_run_id",
+        "_memory_snapshot",
+        "_memory_snapshot_lock",
+    )
+
+    def __init__(self, root_run_id: str) -> None:
+        normalized = str(root_run_id or "").strip()
+        if not normalized:
+            raise ValueError("root run id must be a non-empty string")
+        self.root_run_id = normalized
+        self._memory_snapshot: object = _UNSET_ROOT_MEMORY_SNAPSHOT
+        self._memory_snapshot_lock = threading.RLock()
+
+    def get_or_create_memory_snapshot(self, loader: Callable[[], str]) -> str:
+        """Return the snapshot fixed by this root task's first read attempt.
+
+        A failed initial read freezes an empty snapshot before propagating the
+        error. A later worker must not observe memory that was activated after
+        its root task had already started.
+        """
+
+        with self._memory_snapshot_lock:
+            if self._memory_snapshot is _UNSET_ROOT_MEMORY_SNAPSHOT:
+                try:
+                    snapshot = loader()
+                except Exception:
+                    self._memory_snapshot = ""
+                    raise
+                if not isinstance(snapshot, str):
+                    self._memory_snapshot = ""
+                    raise TypeError("root memory snapshot loader must return a string")
+                self._memory_snapshot = snapshot
+            return str(self._memory_snapshot)
 
 
 def _absolute_path_without_resolving_symlinks(path: str | Path) -> Path:
@@ -121,9 +162,7 @@ def _open_runtime_directory(
                     pass
                 next_fd = os.open(part, _DIRECTORY_OPEN_FLAGS, dir_fd=current_fd)
             except OSError as exc:
-                raise RuntimeError(
-                    f"runtime path component is not a safe directory: {directory}"
-                ) from exc
+                raise RuntimeError(f"runtime path component is not a safe directory: {directory}") from exc
             os.close(current_fd)
             current_fd = next_fd
         return current_fd
@@ -172,8 +211,18 @@ def safe_application_id(value: str) -> str:
     path = PurePosixPath(raw)
     if not raw or path.is_absolute() or any(part in {"", ".", ".."} for part in path.parts):
         raise ValueError("application_id must be a safe relative path")
+    return "/".join(_safe_named_part(part, fallback="app", include_hash_on_change=True) for part in path.parts)
+
+
+def safe_agent_path(value: str) -> str:
+    """Return a safe, possibly nested agent identity for workspace storage."""
+
+    raw = str(value).strip().replace("\\", "/")
+    path = PurePosixPath(raw)
+    if not raw or path.is_absolute() or any(part in {"", ".", ".."} for part in path.parts):
+        raise ValueError("agent_path must be a safe relative path")
     return "/".join(
-        _safe_named_part(part, fallback="app", include_hash_on_change=True)
+        _safe_named_part(part, fallback="agent", include_hash_on_change=True)
         for part in path.parts
     )
 
@@ -233,6 +282,25 @@ class RuntimeRunLease:
             os.close(fd)
             raise
         self._fd = fd
+
+    def is_held(self) -> bool:
+        """Return whether a writer owns this run without excluding other readers."""
+
+        if self.run_dir.is_symlink() or not self.run_dir.is_dir():
+            raise RuntimeError(f"run directory is unavailable: {self.run_dir}")
+        fd = os.open(self.run_dir, _DIRECTORY_OPEN_FLAGS)
+        shared = False
+        try:
+            try:
+                fcntl.flock(fd, fcntl.LOCK_SH | fcntl.LOCK_NB)
+                shared = True
+            except BlockingIOError:
+                return True
+            return False
+        finally:
+            if shared:
+                fcntl.flock(fd, fcntl.LOCK_UN)
+            os.close(fd)
 
     def release(self) -> None:
         if self._fd is None:
@@ -315,6 +383,57 @@ class RuntimeContext:
     @property
     def skill_artifacts_dir(self) -> Path:
         return self.artifacts_dir / "skills"
+
+    @property
+    def agent_workspaces_dir(self) -> Path:
+        """Canonical root for persistent and task-scoped agent workspaces."""
+
+        return (
+            self.root_dir
+            / "workspaces"
+            / "agents"
+            / Path(*self.application_id.split("/"))
+        )
+
+    def agent_workspace_root(self, agent_path: str) -> Path:
+        """Return the application-scoped workspace root for one agent."""
+
+        canonical = safe_agent_path(agent_path)
+        return self.agent_workspaces_dir / Path(*canonical.split("/"))
+
+    def agent_insights_path(self, agent_path: str) -> Path:
+        """Return the persistent insights file shared by this agent's tasks."""
+
+        return self.agent_workspace_root(agent_path) / "insights.md"
+
+    def agent_task_workspace_dir(self, agent_path: str) -> Path:
+        """Return the workspace isolated to the current task and agent."""
+
+        return self.agent_workspace_root(agent_path) / "tasks" / self.task_id
+
+    def agent_task_file(self, agent_path: str, filename: str) -> Path:
+        """Return one validated file inside an agent's task workspace."""
+
+        safe_filename = _safe_part(filename, field="agent task filename")
+        return self.agent_task_workspace_dir(agent_path) / safe_filename
+
+    def agent_todos_path(self, agent_path: str) -> Path:
+        """Return the canonical task-scoped todo file for one agent."""
+
+        return self.agent_task_file(agent_path, "todos.md")
+
+    def agent_visualization_path(self, agent_path: str) -> Path:
+        """Return the canonical task-scoped visualization file for one agent."""
+
+        return self.agent_task_file(agent_path, "visualization.json")
+
+    def prepare_agent_workspace(self, agent_path: str) -> Path:
+        """Create the trusted task workspace and return its canonical path."""
+
+        return _ensure_runtime_directory(
+            self.agent_task_workspace_dir(agent_path),
+            root=self.root_dir,
+        )
 
     def skill_workspace_dir(self, skill_name: str) -> Path:
         """Return the canonical workspace for one skill in this run."""
@@ -483,6 +602,65 @@ class RuntimeContext:
                 pass
             os.close(parent_fd)
 
+    def atomic_write_run_file_chunks(
+        self,
+        path: Path,
+        chunks: Iterable[str | bytes],
+        *,
+        encoding: str = "utf-8",
+    ) -> int:
+        """Atomically replace a run file while streaming bounded chunks."""
+
+        target = _absolute_path_without_resolving_symlinks(path)
+        try:
+            target.relative_to(self.run_dir)
+        except ValueError as exc:
+            raise RuntimeError(f"run artifact escapes run directory: {target}") from exc
+        parent_fd = _open_runtime_directory(
+            target.parent,
+            root=self.root_dir,
+            create=False,
+        )
+        temporary = f".{target.name}.{uuid.uuid4().hex}.tmp"
+        fd = -1
+        bytes_written = 0
+        try:
+            try:
+                existing = os.stat(target.name, dir_fd=parent_fd, follow_symlinks=False)
+            except FileNotFoundError:
+                existing = None
+            if existing is not None and not stat.S_ISREG(existing.st_mode):
+                raise RuntimeError(f"run file is not a regular file: {target}")
+            fd = os.open(
+                temporary,
+                os.O_WRONLY | os.O_CREAT | os.O_EXCL | _FILE_NOFOLLOW,
+                0o600,
+                dir_fd=parent_fd,
+            )
+            with os.fdopen(fd, "wb", closefd=True) as stream:
+                fd = -1
+                for chunk in chunks:
+                    payload = chunk.encode(encoding) if isinstance(chunk, str) else chunk
+                    stream.write(payload)
+                    bytes_written += len(payload)
+                stream.flush()
+                os.fsync(stream.fileno())
+            os.replace(
+                temporary,
+                target.name,
+                src_dir_fd=parent_fd,
+                dst_dir_fd=parent_fd,
+            )
+            return bytes_written
+        finally:
+            if fd >= 0:
+                os.close(fd)
+            try:
+                os.unlink(temporary, dir_fd=parent_fd)
+            except FileNotFoundError:
+                pass
+            os.close(parent_fd)
+
     def read_run_file(self, path: Path, *, encoding: str = "utf-8") -> str:
         """Read one regular file below this run through a trusted directory fd."""
 
@@ -585,9 +763,7 @@ class RuntimeContext:
 
         path = validate_runtime_owned_path(self.checkpoint_dir, root=self.root_dir)
         if require_exists and not path.is_dir():
-            raise FileNotFoundError(
-                f"checkpoint directory does not exist: {self.checkpoint_dir}"
-            )
+            raise FileNotFoundError(f"checkpoint directory does not exist: {self.checkpoint_dir}")
         return path
 
     def write_manifest(self, **extra: Any) -> None:
@@ -691,9 +867,7 @@ def resolve_runtime_home(
     # override applies to every runtime consumer.  There is deliberately no
     # self-learning-only environment variable.
     root_override = os.environ.get(RUNTIME_ROOT_ENV, "").strip()
-    configured = Path(
-        root_override or str(section.get("root_dir", ".agentloom"))
-    ).expanduser()
+    configured = Path(root_override or str(section.get("root_dir", ".agentloom"))).expanduser()
     if not configured.is_absolute():
         configured = Path(agent_root).expanduser() / configured
     return RuntimeHome(configured)

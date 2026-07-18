@@ -64,7 +64,7 @@ def _run_validator(project_root: Path, app_root: str = "applications/demo") -> t
         [
             "skills/agent-recall-with-files",
             {
-                "path": "skills/agent-visualization",
+                "path": "skills/demo-eager",
                 "load-mode": "eager",
                 "allow-scripts": False,
             },
@@ -74,7 +74,7 @@ def _run_validator(project_root: Path, app_root: str = "applications/demo") -> t
             "allow-network": False,
             "items": [
                 "skills/agent-recall-with-files",
-                {"path": "skills/agent-visualization", "load-mode": "eager"},
+                {"path": "skills/demo-eager", "load-mode": "eager"},
             ],
         },
     ],

@@ -13,9 +13,17 @@ After ``pip install -e .``, the ``loom`` command is available::
 
 from __future__ import annotations
 
+import json
+import os
 import sys
+from collections.abc import Iterator
+from contextlib import contextmanager, nullcontext, redirect_stdout
+from datetime import UTC, datetime
+from typing import Any, TextIO
 
 import click
+
+from src.schedules.cli import schedules as _schedules_command
 
 _MAIN_EPILOG = """\
 \b
@@ -23,11 +31,123 @@ Examples:
   loom run applications/<app>/workflows/<agent>.yaml
   loom create applications/<app>/workflows/<agent>.yaml
   loom create applications/<app>/workflows/<agent>.yaml -o my_app.py
+  loom schedules add applications/<app>/workflows/<agent>.yaml --every 1h
+  loom schedules serve
   loom ui
 
 Use 'loom <command> -h' for more details on each command.
 """
 _EX_TEMPFAIL = 75
+
+
+def _run_info_payload(run_info: Any) -> dict[str, object]:
+    return {
+        "application_id": run_info.application_id,
+        "task_id": run_info.task_id,
+        "run_id": run_info.run_id,
+        "run_dir": str(run_info.run_dir),
+        "manifest_path": str(run_info.manifest_path),
+        "log_path": str(run_info.log_path) if run_info.log_path is not None else None,
+    }
+
+
+def _run_event_payload(event: Any) -> dict[str, object]:
+    occurred_at = event.occurred_at
+    if event.event == "run.rejected":
+        return {
+            "schema_version": event.schema_version,
+            "event": event.event,
+            "occurred_at": occurred_at.isoformat(),
+            "phase": event.phase,
+            "error": {
+                "kind": event.error.kind,
+                "message": event.error.message,
+                "retryable": event.error.retryable,
+            },
+        }
+    payload: dict[str, object] = {
+        "schema_version": event.schema_version,
+        "event": event.event,
+        "occurred_at": occurred_at.isoformat(),
+        "run": _run_info_payload(event.run),
+    }
+    for field in ("output", "error", "phase"):
+        value = getattr(event, field, None)
+        if value is not None:
+            payload[field] = value
+    return payload
+
+
+def _emit_jsonl_record(payload: dict[str, object], stream: TextIO) -> None:
+    click.echo(
+        json.dumps(payload, ensure_ascii=False, separators=(",", ":")),
+        file=stream,
+    )
+    stream.flush()
+
+
+@contextmanager
+def _isolated_jsonl_stdout() -> Iterator[TextIO]:
+    """Reserve the original fd 1 for JSONL and route all other fd 1 writes to stderr."""
+
+    protocol_stream = click.get_text_stream("stdout")
+    try:
+        protocol_fd = protocol_stream.fileno()
+    except (AttributeError, OSError, ValueError):
+        # Click's in-process test runner exposes an in-memory stream without a
+        # file descriptor. Python-level redirection is the strongest isolation
+        # available there; real CLI processes always take the fd-level branch.
+        with redirect_stdout(sys.stderr):
+            yield protocol_stream
+        return
+
+    if protocol_fd != 1:
+        with redirect_stdout(sys.stderr):
+            yield protocol_stream
+        return
+
+    protocol_stream.flush()
+    sys.stderr.flush()
+    saved_stdout_fd = os.dup(protocol_fd)
+    lifecycle_stream: TextIO | None = None
+    try:
+        lifecycle_fd = os.dup(saved_stdout_fd)
+        lifecycle_stream = os.fdopen(
+            lifecycle_fd,
+            "w",
+            encoding=protocol_stream.encoding or "utf-8",
+            errors=protocol_stream.errors or "replace",
+            buffering=1,
+        )
+        os.dup2(2, protocol_fd)
+        with redirect_stdout(sys.stderr):
+            yield lifecycle_stream
+    finally:
+        if lifecycle_stream is not None:
+            lifecycle_stream.flush()
+        os.dup2(saved_stdout_fd, protocol_fd)
+        os.close(saved_stdout_fd)
+        if lifecycle_stream is not None:
+            lifecycle_stream.close()
+
+
+def _run_rejected_payload(
+    error: BaseException,
+    *,
+    message: str | None = None,
+    retryable: bool = False,
+) -> dict[str, object]:
+    return {
+        "schema_version": 1,
+        "event": "run.rejected",
+        "occurred_at": datetime.now(UTC).isoformat(),
+        "phase": "preflight",
+        "error": {
+            "kind": type(error).__name__,
+            "message": str(error) if message is None else message,
+            "retryable": retryable,
+        },
+    }
 
 
 @click.group(context_settings={"help_option_names": ["-h", "--help"]}, epilog=_MAIN_EPILOG)
@@ -112,6 +232,8 @@ Examples:
   loom run applications/test_demo/workflows/test_agent.yaml
   loom run applications/test_demo/workflows/test_agent.yaml --no-file-log
   loom run applications/test_demo/workflows/test_agent.yaml --resume task_xxx
+  loom run applications/test_demo/workflows/test_agent.yaml --task "Inspect this repository"
+  loom run applications/test_demo/workflows/test_agent.yaml --output-format jsonl
 """
 
 
@@ -124,28 +246,94 @@ Examples:
     help="Disable this run's file log (configuration is used by default).",
 )
 @click.option("--resume", "resume_task_id", default=None, help="Resume from a checkpoint task ID.")
-def run(yaml_path: str, no_file_log: bool, resume_task_id: str | None):
+@click.option("--task", "task_override", default=None, help="Override the task from the application YAML.")
+@click.option(
+    "--output-format",
+    type=click.Choice(("text", "jsonl"), case_sensitive=False),
+    default="text",
+    show_default=True,
+    help="Choose human-readable output or lifecycle JSON Lines.",
+)
+def run(
+    yaml_path: str,
+    no_file_log: bool,
+    resume_task_id: str | None,
+    task_override: str | None,
+    output_format: str,
+):
     """Run a supervisor agent from a YAML configuration."""
-    from src.runner import run_app
+    emitted_events: set[str] = set()
+    event_stream: TextIO | None = None
 
-    try:
-        result = run_app(
-            yaml_path,
-            file_logging=False if no_file_log else None,
-            resume_task_id=resume_task_id,
+    def emit_rejected(
+        error: BaseException,
+        *,
+        message: str | None = None,
+        retryable: bool = False,
+    ) -> None:
+        if event_stream is None or emitted_events:
+            return
+        _emit_jsonl_record(
+            _run_rejected_payload(
+                error,
+                message=message,
+                retryable=retryable,
+            ),
+            event_stream,
         )
-        click.echo(result)
-    except KeyboardInterrupt as exc:
-        click.echo("\nInterrupted. Use --resume to continue.", err=True)
-        raise click.exceptions.Exit(130) from exc
-    except SystemExit as exc:
-        click.echo("\n Execution failed: nested process exit", err=True)
-        raise click.exceptions.Exit(1) from exc
-    except Exception as exc:
-        click.echo(f"\n Execution failed: {exc}", err=True)
-        raise click.exceptions.Exit(
-            _EX_TEMPFAIL if _has_transient_provider_error(exc) else 1
-        ) from exc
+
+    output_context = _isolated_jsonl_stdout() if output_format == "jsonl" else nullcontext(None)
+    with output_context as active_event_stream:
+        event_stream = active_event_stream
+        try:
+            if output_format == "jsonl":
+                from src.runner import execute_app
+
+                def emit_event(event: Any) -> None:
+                    assert event_stream is not None
+                    _emit_jsonl_record(_run_event_payload(event), event_stream)
+                    emitted_events.add(event.event)
+
+                execute_app(
+                    yaml_path,
+                    file_logging=False if no_file_log else None,
+                    resume_task_id=resume_task_id,
+                    task_override=task_override,
+                    event_sink=emit_event,
+                )
+            else:
+                from src.runner import execute_app
+
+                result = execute_app(
+                    yaml_path,
+                    file_logging=False if no_file_log else None,
+                    resume_task_id=resume_task_id,
+                    task_override=task_override,
+                ).output
+                click.echo(result)
+        except KeyboardInterrupt as exc:
+            if not emitted_events:
+                emit_rejected(exc, message="interrupted before run started")
+            from src.application_run import ApplicationRunInterrupted
+
+            if isinstance(exc, ApplicationRunInterrupted) and exc.resumable:
+                click.echo("\nInterrupted. Use --resume to continue.", err=True)
+            else:
+                click.echo(
+                    "\nInterrupted; no resumable checkpoint is available.",
+                    err=True,
+                )
+            raise click.exceptions.Exit(130) from exc
+        except SystemExit as exc:
+            emit_rejected(exc, message="nested process exit")
+            click.echo("\n Execution failed: nested process exit", err=True)
+            raise click.exceptions.Exit(1) from exc
+        except Exception as exc:
+            retryable = _has_transient_provider_error(exc)
+            if not emitted_events:
+                emit_rejected(exc, retryable=retryable)
+            click.echo(f"\n Execution failed: {exc}", err=True)
+            raise click.exceptions.Exit(_EX_TEMPFAIL if retryable else 1) from exc
 
 
 # ─────────────────────────────────────────────
@@ -286,15 +474,19 @@ def clean_runtime_command() -> None:
     "--dry-run/--apply",
     default=True,
     show_default=True,
-    help="Preview candidates or atomically migrate and archive legacy .logs.",
+    help="Preview or migrate legacy checkpoints, .logs, and .runtime workspaces.",
 )
 def migrate_runtime_command(dry_run: bool) -> None:
-    """One-time migration of valid legacy checkpoints into runtime home."""
+    """Migrate legacy checkpoints and archive the unscoped agent workspace."""
     from datetime import timedelta as _timedelta
     from pathlib import Path as _Path
 
     from src.lib.config import C
     from src.lib.runtime.migration import migrate_runtime
+    from src.lib.runtime.workspace_migration import (
+        archive_legacy_agent_workspaces,
+        preview_legacy_agent_workspaces,
+    )
 
     max_age = _timedelta(days=7)
 
@@ -304,6 +496,7 @@ def migrate_runtime_command(dry_run: bool) -> None:
     except RuntimeError as exc:
         raise click.ClickException(str(exc)) from exc
     legacy_logs = _Path(C.agent_root) / ".logs"
+    legacy_workspace = _Path(C.agent_root) / ".runtime"
     try:
         result = migrate_runtime(
             legacy_logs,
@@ -312,6 +505,11 @@ def migrate_runtime_command(dry_run: bool) -> None:
             archive_legacy=not dry_run,
             agent_root=C.agent_root,
             max_age=max_age,
+        )
+        workspace_result = (
+            preview_legacy_agent_workspaces(legacy_workspace)
+            if dry_run
+            else archive_legacy_agent_workspaces(legacy_workspace, home.root_dir)
         )
     except Exception as exc:
         raise click.ClickException(str(exc)) from exc
@@ -333,6 +531,12 @@ def migrate_runtime_command(dry_run: bool) -> None:
         click.echo(f"  skip {skipped.task_id}: {skipped.reason}")
     if result.archive_dir is not None:
         click.echo(f"Archived legacy logs: {result.archive_dir}")
+    click.echo(
+        "Legacy agent workspace: "
+        f"files={workspace_result.file_count}, "
+        f"bytes={workspace_result.total_bytes}, "
+        f"archived={workspace_result.archive_dir or 'no'}."
+    )
 
 
 # ─────────────────────────────────────────────
@@ -401,6 +605,169 @@ def sessions_prune(retention_days: int):
 
     result = SelfLearningLedger().prune_events(retention_days=retention_days)
     click.echo(_json.dumps(result, ensure_ascii=False, indent=2, default=str))
+
+
+# ─────────────────────────────────────────────
+# loom learn / reviews / feedback
+# ─────────────────────────────────────────────
+
+def _review_scope_selection(
+    *,
+    application_id: str | None,
+    project_scope: bool,
+    all_scopes: bool,
+) -> tuple[str, str]:
+    selections = int(bool(application_id)) + int(project_scope) + int(all_scopes)
+    if selections != 1:
+        raise click.UsageError(
+            "Choose exactly one scope: --application, --project, or the command's --all option."
+        )
+    if application_id:
+        return "application", application_id
+    if project_scope:
+        return "project", "project"
+    return "all", ""
+
+
+def _echo_json(value) -> None:
+    import json as _json
+
+    if hasattr(value, "to_dict") and callable(value.to_dict):
+        value = value.to_dict()
+    click.echo(_json.dumps(value, ensure_ascii=False, indent=2, default=str))
+
+
+def _review_cli_service():
+    root_context = click.get_current_context().find_root()
+    if isinstance(root_context.obj, dict) and "review_service" in root_context.obj:
+        return root_context.obj["review_service"]
+    from src.extensions.self_learning.review_artifacts import ReviewCLIService
+
+    return ReviewCLIService()
+
+
+def _review_cli_call(operation):
+    try:
+        return operation()
+    except click.ClickException:
+        raise
+    except (KeyError, OSError, RuntimeError, ValueError) as exc:
+        raise click.ClickException(str(exc)) from exc
+
+@main.group()
+def learn():
+    """Extract and review self-learning candidates."""
+
+
+@learn.command("review")
+@click.option("--application", "application_id", default=None, help="Review one Application.")
+@click.option("--project", "project_scope", is_flag=True, help="Review Project candidates.")
+@click.option("--all-unreviewed", is_flag=True, help="Review each Application, then Project.")
+@click.option("--dry-run", is_flag=True, help="Render decisions without activating candidates.")
+def learn_review_command(
+    application_id: str | None,
+    project_scope: bool,
+    all_unreviewed: bool,
+    dry_run: bool,
+) -> None:
+    """Review exactly one scope, or every unreviewed scope in isolation."""
+
+    selection = _review_scope_selection(
+        application_id=application_id,
+        project_scope=project_scope,
+        all_scopes=all_unreviewed,
+    )
+    service = _review_cli_call(_review_cli_service)
+    if selection[0] == "all":
+        result = _review_cli_call(lambda: service.review_all(dry_run=dry_run))
+    else:
+        result = _review_cli_call(
+            lambda: service.review_one(selection[0], selection[1], dry_run=dry_run)
+        )
+    _echo_json(result)
+
+
+@main.group()
+def reviews():
+    """Inspect, apply, or roll back scoped review decisions."""
+
+
+@reviews.command("status")
+@click.option("--application", "application_id", default=None, help="Show one Application.")
+@click.option("--project", "project_scope", is_flag=True, help="Show Project status.")
+@click.option("--all", "all_scopes", is_flag=True, help="Show all review scopes.")
+def reviews_status_command(
+    application_id: str | None,
+    project_scope: bool,
+    all_scopes: bool,
+) -> None:
+    """Show review state for exactly one scope or for all scopes."""
+
+    scope_type, scope_id = _review_scope_selection(
+        application_id=application_id,
+        project_scope=project_scope,
+        all_scopes=all_scopes,
+    )
+    service = _review_cli_call(_review_cli_service)
+    _echo_json(_review_cli_call(lambda: service.status(scope_type, scope_id)))
+
+
+@reviews.command("apply")
+@click.option("--application", "application_id", default=None, help="Apply one Application INBOX.")
+@click.option("--project", "project_scope", is_flag=True, help="Apply the Project INBOX.")
+def reviews_apply_command(application_id: str | None, project_scope: bool) -> None:
+    """Apply decisions from exactly one scoped INBOX."""
+
+    scope_type, scope_id = _review_scope_selection(
+        application_id=application_id,
+        project_scope=project_scope,
+        all_scopes=False,
+    )
+    service = _review_cli_call(_review_cli_service)
+    _echo_json(_review_cli_call(lambda: service.apply(scope_type, scope_id)))
+
+
+@reviews.command("rollback")
+@click.argument("review_id")
+def reviews_rollback_command(review_id: str) -> None:
+    """Roll back mutations created by one immutable review batch."""
+
+    service = _review_cli_call(_review_cli_service)
+    _echo_json(_review_cli_call(lambda: service.rollback(review_id)))
+
+
+@main.group()
+def feedback():
+    """Submit outcome feedback for a completed run."""
+
+
+@feedback.command("submit")
+@click.argument("run_id")
+@click.option(
+    "--verdict",
+    required=True,
+    type=click.Choice(["accepted", "rejected", "corrected"]),
+)
+@click.option(
+    "--item",
+    "item_id",
+    default=None,
+    type=click.IntRange(min=1),
+    help="Optional affected memory item id.",
+)
+def feedback_submit_command(run_id: str, verdict: str, item_id: int | None) -> None:
+    """Record accepted, rejected, or corrected run feedback."""
+
+    service = _review_cli_call(_review_cli_service)
+    _echo_json(
+        _review_cli_call(
+            lambda: service.submit_feedback(
+                run_id=run_id,
+                verdict=verdict,
+                item_id=item_id,
+            )
+        )
+    )
 
 
 # ─────────────────────────────────────────────
@@ -480,29 +847,6 @@ def memory_pending(status: str):
     from src.extensions.self_learning.memory_store import MemoryStore
 
     result = MemoryStore().list_pending(status=None if status == "all" else status)
-    click.echo(_json.dumps(result, ensure_ascii=False, indent=2, default=str))
-
-
-@memory.command("approve")
-@click.argument("target")
-def memory_approve(target: str):
-    """Approve one exact pending write by id, or approve all."""
-    import json as _json
-    from src.extensions.self_learning.memory_store import MemoryStore
-
-    result = MemoryStore().approve_pending(target)
-    click.echo(_json.dumps(result, ensure_ascii=False, indent=2, default=str))
-
-
-@memory.command("reject")
-@click.argument("target")
-def memory_reject(target: str):
-    """Reject one exact pending write by id, or reject all."""
-    import json as _json
-
-    from src.extensions.self_learning.memory_store import MemoryStore
-
-    result = MemoryStore().reject_pending(target)
     click.echo(_json.dumps(result, ensure_ascii=False, indent=2, default=str))
 
 
@@ -816,3 +1160,12 @@ def ui(port: int | None, no_browser: bool):
     except Exception as exc:
         click.echo(f"\n  Server failed: {exc}", err=True)
         sys.exit(1)
+
+
+# Keep the durable scheduler in its own lightweight package so TUI and CLI
+# share one backend without importing the Agent/model runtime for list/status.
+main.add_command(_schedules_command)
+
+
+if __name__ == "__main__":
+    main()
