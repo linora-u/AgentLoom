@@ -79,6 +79,31 @@ describe("BridgeClient", () => {
     await client.close()
   })
 
+  test("surfaces classified assistant provider errors without degrading to a protocol error", async () => {
+    const transport = new FakeTransport()
+    const client = new BridgeClient(transport, { createID: () => "chat-timeout" })
+    const request = client.assistantSend("chat-1", "hello", "powerful")
+    await waitForRequests(transport, 1)
+
+    transport.receive({
+      id: "chat-timeout",
+      ok: false,
+      error: {
+        code: "assistant_timeout",
+        message: "模型请求超时；请重试，或切换到响应更快的已配置模型。",
+      },
+    })
+
+    await expect(request).rejects.toEqual(
+      expect.objectContaining({
+        name: "BridgeRpcError",
+        code: "assistant_timeout",
+        message: "模型请求超时；请重试，或切换到响应更快的已配置模型。",
+      }),
+    )
+    await client.close()
+  })
+
   test("delivers assistant stream events without consuming the pending response", async () => {
     const transport = new FakeTransport()
     const client = new BridgeClient(transport, { createID: () => "turn-1" })

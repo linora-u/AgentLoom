@@ -99,58 +99,6 @@ def test_assistant_answers_general_questions_without_forcing_a_yaml_draft(
     assert "Do not force ordinary questions into Agent YAML work" in prompts[0]
 
 
-def test_tui_model_policy_does_not_inherit_long_agent_retry_settings() -> None:
-    from src.lib.smolagents.models.model_types import ModelConfig
-
-    long_running_agent_config = ModelConfig(
-        timeout=300,
-        num_retries=10_000,
-        retry_delay=30,
-        max_retry_delay=30,
-    )
-
-    effective = builder_module._tui_model_config_builder().build(long_running_agent_config)
-
-    assert effective.timeout == 45
-    assert effective.num_retries == 0
-    assert effective.retry_delay == 0
-    assert effective.max_retry_delay == 0
-
-
-def test_default_agent_factory_wires_the_tui_model_policy(monkeypatch: pytest.MonkeyPatch) -> None:
-    from src.lib.smolagents.agent import base_agent
-    from src.lib.smolagents.models import model_manager
-    from src.lib.smolagents.models.model_types import ModelConfig
-
-    captured: dict[str, object] = {}
-
-    def fake_get_model(model_type: str, **kwargs):
-        captured["model_type"] = model_type
-        captured.update(kwargs)
-        return object()
-
-    class FakeAgent:
-        def __init__(self, **kwargs):
-            captured["agent_kwargs"] = kwargs
-
-    monkeypatch.setattr(model_manager, "get_model", fake_get_model)
-    monkeypatch.setattr(base_agent, "ToolCallingAgentV2", FakeAgent)
-
-    builder_module._default_agent_factory([], "fast")
-
-    assert captured["model_type"] == "fast"
-    assert captured["framework"] == "smolagents"
-    effective = captured["model_builder"].build(
-        ModelConfig(timeout=300, num_retries=10_000, retry_delay=30, max_retry_delay=30)
-    )
-    assert (effective.timeout, effective.num_retries, effective.retry_delay, effective.max_retry_delay) == (
-        45,
-        0,
-        0,
-        0,
-    )
-
-
 def test_assistant_stream_reports_model_deltas_and_tool_activity(tmp_path: Path) -> None:
     ChatMessageStreamDelta = type("ChatMessageStreamDelta", (), {})
     ToolCall = type("ToolCall", (), {})

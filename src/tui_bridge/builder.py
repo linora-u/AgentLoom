@@ -8,6 +8,7 @@ explicit user operation.
 
 from __future__ import annotations
 
+import copy
 import hashlib
 import json
 import os
@@ -19,7 +20,6 @@ from pathlib import Path, PurePosixPath
 from typing import Any, Protocol
 
 import yaml
-from smolagents import Tool
 
 from src.tui_bridge.definition import validate_agent_definition
 
@@ -29,7 +29,6 @@ _MAX_TRANSCRIPT_CHARS = 64_000
 _MAX_ASSISTANT_MESSAGE_CHARS = 32_000
 _MAX_INSPECTION_BYTES = 80_000
 _TRUNCATION_MARKER = "… [truncated]"
-_TUI_MODEL_TIMEOUT_SECONDS = 45
 
 
 class DraftConflictError(ValueError):
@@ -40,7 +39,7 @@ class _BuilderAgent(Protocol):
     def run(self, prompt: str, **kwargs: Any) -> object: ...
 
 
-AgentFactory = Callable[[Sequence[Tool], str | None], _BuilderAgent]
+AgentFactory = Callable[[Sequence[Any], str | None], _BuilderAgent]
 
 
 def _bounded_assistant_message(content: str) -> str:
@@ -492,7 +491,7 @@ def _draft_summary(project_root: Path, draft: _Draft) -> dict[str, object]:
     }
 
 
-class _InspectAgentSystemTool(Tool):
+class _InspectAgentSystemTool:
     name = "inspect_agent_system"
     description = (
         "Read existing YAML definitions for one Agent System before proposing changes. "
@@ -507,7 +506,6 @@ class _InspectAgentSystemTool(Tool):
     output_type = "string"
 
     def __init__(self, project_root: Path):
-        super().__init__()
         self._project_root = project_root
 
     def forward(self, application_id: str) -> str:
@@ -553,10 +551,12 @@ class _InspectAgentSystemTool(Tool):
         )
 
 
-class _StageAgentYamlTool(Tool):
+class _StageAgentYamlTool:
     name = "stage_agent_yaml"
     description = (
         "Create or replace one Agent YAML file in the in-memory draft. "
+        "The complete YAML must contain non-empty top-level name, description, workflow, "
+        "model_type, and tool_call_type fields. Behavioral instructions belong in workflow. "
         "This never writes to disk; the user must explicitly apply the draft."
     )
     inputs = {
@@ -569,7 +569,6 @@ class _StageAgentYamlTool(Tool):
     output_type = "string"
 
     def __init__(self, project_root: Path, draft: _Draft):
-        super().__init__()
         self._project_root = project_root
         self._draft = draft
 
@@ -589,14 +588,13 @@ class _StageAgentYamlTool(Tool):
         return json.dumps(_draft_summary(self._project_root, self._draft), ensure_ascii=False)
 
 
-class _ValidateAgentDraftTool(Tool):
+class _ValidateAgentDraftTool:
     name = "validate_agent_draft"
     description = "Validate all staged Agent YAML files and return concrete errors."
     inputs = {}
     output_type = "string"
 
     def __init__(self, project_root: Path, draft: _Draft):
-        super().__init__()
         self._project_root = project_root
         self._draft = draft
 
@@ -604,49 +602,27 @@ class _ValidateAgentDraftTool(Tool):
         return json.dumps(_draft_summary(self._project_root, self._draft), ensure_ascii=False)
 
 
-def _tui_model_config_builder():
-    """Keep an interactive TUI turn bounded independently of Agent runs."""
-
-    from src.lib.smolagents.models.model_manager import ModelConfigBuilder, ModelConfigOverlay
-
-    return ModelConfigBuilder().apply_overlay(
-        ModelConfigOverlay(
-            timeout=_TUI_MODEL_TIMEOUT_SECONDS,
-            num_retries=0,
-            retry_delay=0,
-            max_retry_delay=0,
-        ),
-        source="AgentLoom TUI short conversation",
-    )
-
-
-def _default_agent_factory(tools: Sequence[Tool], model_type: str | None) -> _BuilderAgent:
-    from src.lib.config import C
-    from src.lib.smolagents.agent.base_agent import ToolCallingAgentV2
-    from src.lib.smolagents.models.model_manager import get_model
-
-    selected_model = (model_type or C.default_model_type or "").strip()
-    model = get_model(
-        selected_model,
-        framework="smolagents",
-        model_builder=_tui_model_config_builder(),
-    )
-    return ToolCallingAgentV2(
-        tools=list(tools),
-        model=model,
-        max_steps=6,
-        max_tokens=4096,
-        verbosity_level=0,
-        stream_outputs=True,
-    )
-
-
 class BuilderService:
-    """In-process sessions for short, general AgentLoom conversations."""
+    """Secure draft state plus the independent short-session TUI agent.
 
-    def __init__(self, project_root: Path | str, *, agent_factory: AgentFactory | None = None):
+    ``agent_factory`` remains only as a narrow test/embedding seam. Production
+    conversation uses :class:`TuiChatAgent` and never constructs an AgentLoom
+    execution Agent.
+    """
+
+    def __init__(
+        self,
+        project_root: Path | str,
+        *,
+        agent_factory: AgentFactory | None = None,
+        chat_client_factory: Any | None = None,
+        retry_sleep: Callable[[float], None] | None = None,
+    ):
         self._project_root = Path(project_root).expanduser().resolve()
-        self._agent_factory = agent_factory or _default_agent_factory
+        self._agent_factory = agent_factory
+        self._chat_client_factory = chat_client_factory
+        self._retry_sleep = retry_sleep
+        self._chat_agent: Any | None = None
         self._drafts: dict[str, _Draft] = {}
         self._histories: dict[str, list[dict[str, str]]] = {}
 
@@ -676,16 +652,81 @@ class BuilderService:
         if len(message) > _MAX_BUILDER_MESSAGE_CHARS:
             raise ValueError(f"message must not exceed {_MAX_BUILDER_MESSAGE_CHARS:,} characters")
 
+        if self._agent_factory is None:
+            return self._send_with_tui_chat_agent(
+                session_id=session_id,
+                message=message,
+                model_type=model_type,
+                on_event=on_event,
+            )
+
+        return self._send_with_injected_agent(
+            session_id=session_id,
+            message=message,
+            model_type=model_type,
+            on_event=on_event,
+        )
+
+    def _send_with_tui_chat_agent(
+        self,
+        *,
+        session_id: str,
+        message: str,
+        model_type: str | None,
+        on_event: Callable[[dict[str, object]], None] | None,
+    ) -> dict[str, object]:
+        # A provider or protocol failure must not poison either the transcript
+        # or the staged proposal. Commit the complete turn atomically.
+        working_draft = copy.deepcopy(self._draft(session_id))
+        candidate_history = [dict(item) for item in self._histories.get(session_id, [])]
+        candidate_history.append({"role": "user", "content": message})
+        _trim_history(candidate_history)
+        tools = self._tools(working_draft)
+
+        if self._chat_agent is None:
+            from src.tui_bridge.chat_agent import TuiChatAgent
+
+            kwargs: dict[str, object] = {}
+            if self._chat_client_factory is not None:
+                kwargs["client_factory"] = self._chat_client_factory
+            if self._retry_sleep is not None:
+                kwargs["retry_sleep"] = self._retry_sleep
+            self._chat_agent = TuiChatAgent(self._project_root, **kwargs)
+
+        result = self._chat_agent.run(
+            history=candidate_history,
+            model_type=model_type,
+            tools=tools,
+            on_event=on_event,
+        )
+        assistant = _bounded_assistant_message(result.assistant)
+        candidate_history.append({"role": "assistant", "content": assistant})
+        _trim_history(candidate_history)
+        self._drafts[session_id] = working_draft
+        self._histories[session_id] = candidate_history
+        return {
+            "session_id": session_id,
+            "assistant": assistant,
+            "model_type": result.model_type,
+            "draft": _draft_summary(self._project_root, working_draft),
+        }
+
+    def _send_with_injected_agent(
+        self,
+        *,
+        session_id: str,
+        message: str,
+        model_type: str | None,
+        on_event: Callable[[dict[str, object]], None] | None,
+    ) -> dict[str, object]:
+        assert self._agent_factory is not None
+
         draft = self._draft(session_id)
         history = self._histories.setdefault(session_id, [])
         history.append({"role": "user", "content": message})
         _trim_history(history)
 
-        tools: list[Tool] = [
-            _InspectAgentSystemTool(self._project_root),
-            _StageAgentYamlTool(self._project_root, draft),
-            _ValidateAgentDraftTool(self._project_root, draft),
-        ]
+        tools = self._tools(draft)
         agent = self._agent_factory(tools, model_type)
         transcript = json.dumps(history, ensure_ascii=False)
         prompt = (
@@ -708,6 +749,13 @@ class BuilderService:
             "model_type": model_type,
             "draft": _draft_summary(self._project_root, draft),
         }
+
+    def _tools(self, draft: _Draft) -> list[Any]:
+        return [
+            _InspectAgentSystemTool(self._project_root),
+            _StageAgentYamlTool(self._project_root, draft),
+            _ValidateAgentDraftTool(self._project_root, draft),
+        ]
 
     @staticmethod
     def _run_agent(
