@@ -5,8 +5,13 @@ import sys
 
 from common import (
     SKILL_TAG,
-    find_supervisor_viz_path, read_viz_state, write_viz_state,
-    is_filtered_tool, get_tool_name, get_hook_context, output,
+    find_supervisor_viz_path,
+    get_agent_name,
+    get_hook_context,
+    get_tool_name,
+    is_filtered_tool,
+    output,
+    update_latest_tool_event,
 )
 
 
@@ -25,23 +30,17 @@ def main() -> None:
         return
 
     path = find_supervisor_viz_path()
-    data = read_viz_state(path)
-    timeline = data.get("timeline", [])
-
-    if not timeline:
-        output({"decision": "allow"})
-        return
-
-    # Update the last event's description with error
-    last_event = timeline[-1]
     error_str = str(tool_response.get("error", "Unknown error"))
     if error_str:
         summary = error_str[:200]
-        last_event["description"] = f"{tool_name} error: {summary}"
-        last_event["status"] = "error"
-        if "error" not in last_event:
-            last_event["error"] = summary
-        write_viz_state(path, data)
+        update_latest_tool_event(
+            path,
+            agent_name=get_agent_name(),
+            tool_name=tool_name,
+            description=f"{tool_name} error: {summary}",
+            status="error",
+            error=summary,
+        )
 
     output({"decision": "allow"})
 

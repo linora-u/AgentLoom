@@ -4,11 +4,9 @@ from __future__ import annotations
 
 import json
 import os
-import re
 import shutil
 from pathlib import Path
-from typing import Any, Optional
-
+from typing import Any
 
 # ---------------------------------------------------------------------------
 # Runtime file names
@@ -48,56 +46,23 @@ def templates_dir() -> Path:
     return Path(__file__).resolve().parent.parent / "templates"
 
 
-def _find_agent_loom_root() -> Path:
-    """Derive the AgentLoom project root directory.
-
-    Resolution order:
-    1. ``$AGENT_LOOM_RUNTIME_ROOT`` environment variable (for tests that use
-       temporary directories).
-    2. Walk upward from ``common.py``'s own location and look for
-       ``config/llm.yaml`` — the globally unique AgentLoom root marker.
-       This works regardless of how deeply the skill is nested.
-    3. Fall back to ``pyproject.toml`` detection (backward compatibility).
-    4. Fall back to the current working directory (legacy behaviour).
-    """
-    env_root = os.environ.get("AGENT_LOOM_RUNTIME_ROOT", "").strip()
-    if env_root:
-        return Path(env_root)
-
-    # Walk upward looking for config/llm.yaml (globally unique marker).
-    current = Path(__file__).resolve().parent
-    while current != current.parent:
-        if (current / "config" / "llm.yaml").exists():
-            return current
-        current = current.parent
-
-    # Backward compatibility: fixed 4-level walk + pyproject.toml.
-    candidate = Path(__file__).resolve().parent.parent.parent.parent
-    if (candidate / "pyproject.toml").exists():
-        return candidate
-
-    # Fall back: CWD (keeps backward compatibility for subprocess tests).
-    return Path.cwd()
+def _required_injected_path(variable: str) -> Path:
+    value = os.environ.get(variable, "").strip()
+    if not value:
+        raise RuntimeError(f"{variable} was not injected by AgentLoom RuntimeContext")
+    return Path(value)
 
 
-def get_runtime_agent_path() -> str:
-    """Resolve hierarchical runtime path from ``$RUNTIME_AGENT_PATH``.
+def task_workspace_dir() -> Path:
+    """Return the exact task workspace injected by RuntimeContext."""
 
-    Falls back to ``$AGENT_NAME`` then ``"default"``.  The runtime path
-    may contain ``/`` separators (e.g. ``parent/child``) so that .runtime
-    directories nest under the parent agent.
-    """
-    return os.environ.get("RUNTIME_AGENT_PATH", "").strip() or get_agent_name()
+    return _required_injected_path("AGENTLOOM_AGENT_TASK_WORKSPACE")
 
 
-def runtime_dir(agent_name: str) -> Path:
-    """Return ``<agent_loom_root>/.runtime/<agent_name>`` as an absolute path.
+def persistent_insights_path() -> Path:
+    """Return the exact cross-task insights path injected by RuntimeContext."""
 
-    The runtime directory is always located under the AgentLoom project root,
-    regardless of the current working directory.  This prevents ``.runtime/``
-    from being accidentally created inside the skill definition directory.
-    """
-    return _find_agent_loom_root() / ".runtime" / agent_name
+    return _required_injected_path("AGENTLOOM_AGENT_INSIGHTS_PATH")
 
 
 def read_template(name: str, title: str) -> str:
@@ -215,60 +180,6 @@ def summarize_insights(path: Path) -> None:
 
 
 # ---------------------------------------------------------------------------
-# Runtime path normalization
-# ---------------------------------------------------------------------------
-
-def normalize_runtime_aliases(agent_name: str, value: str) -> str:
-    """Rewrite ``.runtime/<any>/`` references to use *agent_name*."""
-    root = f".runtime/{agent_name}"
-    value = re.sub(r"\.runtime/[^/\s\"']+/trace\.md", f"{root}/trace.md", value)
-    value = re.sub(r"\.runtime/[^/\s\"']+/insights\.md", f"{root}/insights.md", value)
-    value = re.sub(r"\.runtime/[^/\s\"']+/context\.md", f"{root}/context.md", value)
-    # Legacy file names — rewrite to new names.
-    value = re.sub(r"\.runtime/[^/\s\"']+/progress\.md", f"{root}/trace.md", value)
-    value = re.sub(r"\.runtime/[^/\s\"']+/findings\.md", f"{root}/insights.md", value)
-    # Generic directory reference.
-    value = re.sub(r"\.runtime/[^/\s\"']+/", f"{root}/", value)
-    value = re.sub(r"\.runtime/[^/\s\"']+(?=(?:[\s\"']|$|&&|;|\|\|))", root, value)
-    return value
-
-
-def normalize_tool_input(agent_name: str, tool_input: dict[str, Any]) -> Optional[dict[str, Any]]:
-    """Return a modified copy of *tool_input* if any runtime paths were rewritten, else ``None``."""
-    if not tool_input:
-        return None
-
-    updated = dict(tool_input)
-    changed = False
-
-    for key in ("file_path", "file", "path"):
-        raw = updated.get(key)
-        if not isinstance(raw, str) or ".runtime/" not in raw:
-            continue
-        norm = normalize_runtime_aliases(agent_name, raw)
-        if norm != raw:
-            updated[key] = norm
-            changed = True
-
-    commands = updated.get("commands")
-    if isinstance(commands, list):
-        new_cmds: list[Any] = []
-        cmds_changed = False
-        for cmd in commands:
-            if isinstance(cmd, str) and ".runtime/" in cmd:
-                norm_cmd = normalize_runtime_aliases(agent_name, cmd)
-                new_cmds.append(norm_cmd)
-                cmds_changed = cmds_changed or norm_cmd != cmd
-            else:
-                new_cmds.append(cmd)
-        if cmds_changed:
-            updated["commands"] = new_cmds
-            changed = True
-
-    return updated if changed else None
-
-
-# ---------------------------------------------------------------------------
 # Environment helpers  (shell executor injects these env-vars)
 # ---------------------------------------------------------------------------
 
@@ -295,7 +206,7 @@ def get_hook_context() -> dict[str, Any]:
     json_file = os.environ.get("HOOK_CONTEXT_JSON_FILE", "").strip()
     if json_file:
         try:
-            with open(json_file, "r", encoding="utf-8") as fh:
+            with open(json_file, encoding="utf-8") as fh:
                 payload = json.load(fh)
             if isinstance(payload, dict):
                 return payload
@@ -405,9 +316,9 @@ STALENESS_CONFIG = {
 TURNS_BETWEEN_REMINDERS = 3
 
 
-def load_write_tracker(rd: Path) -> dict:
+def load_write_tracker(task_workspace: Path) -> dict:
     """Load the write tracker JSON, or create default."""
-    tracker_file = rd / ".write_tracker.json"
+    tracker_file = task_workspace / ".write_tracker.json"
     if tracker_file.exists():
         try:
             return json.loads(tracker_file.read_text(encoding="utf-8"))
@@ -419,19 +330,25 @@ def load_write_tracker(rd: Path) -> dict:
     return tracker
 
 
-def save_write_tracker(rd: Path, tracker: dict) -> None:
+def save_write_tracker(task_workspace: Path, tracker: dict) -> None:
     """Persist the write tracker JSON."""
-    tracker_file = rd / ".write_tracker.json"
+    tracker_file = task_workspace / ".write_tracker.json"
     tracker_file.write_text(
         json.dumps(tracker, indent=2), encoding="utf-8",
     )
 
 
-def detect_writes_and_update(rd: Path, tracker: dict, step: int) -> dict:
+def detect_writes_and_update(
+    task_workspace: Path,
+    tracker: dict,
+    step: int,
+    *,
+    persistent_insights: Path,
+) -> dict:
     """Compare current file mtimes against tracker; update if changed.
 
     Args:
-        rd: Runtime directory path.
+        task_workspace: Current agent's task-scoped workspace.
         tracker: Write tracker dict (mutated in-place on detection).
         step: Current step_number from smolagents framework.
 
@@ -443,7 +360,11 @@ def detect_writes_and_update(rd: Path, tracker: dict, step: int) -> dict:
     """
     staleness: dict[str, int] = {}
     for fname in TRACKED_FILES:
-        fpath = rd / fname
+        fpath = (
+            persistent_insights
+            if fname == INSIGHTS_FILE
+            else task_workspace / fname
+        )
         entry = tracker.get(fname, {"last_mtime": 0, "last_written_at_step": 0})
 
         if not fpath.exists():

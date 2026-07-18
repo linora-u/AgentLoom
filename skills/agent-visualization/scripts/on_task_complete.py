@@ -1,13 +1,17 @@
 #!/usr/bin/env python3
 """Hook: TaskCompleted / StopFailure — Emit final completed or error event."""
 
-import os
 import sys
 from pathlib import Path
 
 from common import (
-    viz_output_path, read_viz_state, append_event, find_supervisor_name,
-    get_agent_name, get_runtime_agent_path, get_tool_input, output,
+    append_event,
+    find_supervisor_name,
+    get_agent_name,
+    get_tool_input,
+    output,
+    read_viz_state,
+    visualization_path,
 )
 
 
@@ -19,7 +23,7 @@ def main() -> None:
     script_name = Path(sys.argv[0]).stem if sys.argv else ""
     is_fail = "fail" in script_name
 
-    path = viz_output_path(get_runtime_agent_path())
+    path = visualization_path()
     data = read_viz_state(path)
 
     # Find supervisor from config, or use agent_name

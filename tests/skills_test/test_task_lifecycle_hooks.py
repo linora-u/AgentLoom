@@ -113,13 +113,15 @@ class TestTaskLifecycleHooks(unittest.TestCase):
         self.temp_dir = tempfile.TemporaryDirectory()
         self.old_cwd = os.getcwd()
         os.chdir(self.temp_dir.name)
-        # Point hook scripts to the temp dir as project root so that
-        # _find_agent_loom_root() resolves correctly in subprocess hooks.
         self.project_root = Path(self.temp_dir.name)
-        os.environ["AGENT_LOOM_RUNTIME_ROOT"] = self.temp_dir.name
+        self.runtime_root = self.project_root / ".agentloom"
+        self.application_id = "test-app"
+        os.environ["AGENTLOOM_RUNTIME_ROOT"] = str(self.runtime_root)
+        os.environ["APPLICATION_ID"] = self.application_id
+        os.environ["TASK_ID"] = "test-task"
 
         # Copy skill into temp dir so hook scripts run with temp dir as cwd
-        # and .runtime/ is created under project_root (AGENT_LOOM_RUNTIME_ROOT).
+        # while runtime files stay under the canonical runtime home.
         source_skill = AGENT_LOOM_ROOT / "skills" / "agent-recall-with-files"
         self.skill_dir = Path(self.temp_dir.name) / "agent-recall-with-files"
         shutil.copytree(source_skill, self.skill_dir)
@@ -139,12 +141,20 @@ class TestTaskLifecycleHooks(unittest.TestCase):
     def tearDown(self):
         clear_current_skills_manager()
         clear_current_hook_manager()
-        os.environ.pop("AGENT_LOOM_RUNTIME_ROOT", None)
+        os.environ.pop("AGENTLOOM_RUNTIME_ROOT", None)
+        os.environ.pop("APPLICATION_ID", None)
+        os.environ.pop("TASK_ID", None)
         os.chdir(self.old_cwd)
         self.temp_dir.cleanup()
 
+    def _agent_root(self, agent_name: str) -> Path:
+        return self.runtime_root / "workspaces" / "agents" / self.application_id / agent_name
+
+    def _task_workspace(self, agent_name: str, task_id: str) -> Path:
+        return self._agent_root(agent_name) / "tasks" / task_id
+
     def test_task_start_event_bootstraps_runtime_and_cleans_legacy_state(self):
-        """TaskCreated should create .runtime/<agent>/ and remove legacy planning files."""
+        """TaskCreated should create a canonical task workspace and clean legacy root files."""
         self.skills_manager.get_skill_content("agent-recall-with-files")
 
         # Create legacy files inside the skill dir (hooks run with cwd=skill_dir).
@@ -168,10 +178,9 @@ class TestTaskLifecycleHooks(unittest.TestCase):
                 },
             )
 
-        # .runtime/ is created under project root (AGENT_LOOM_RUNTIME_ROOT).
-        runtime_dir = self.project_root / ".runtime" / "test_agent"
+        runtime_dir = self._task_workspace("test_agent", "lifecycle-init")
         self.assertTrue(runtime_dir.exists(), f"Expected {runtime_dir} to exist")
-        self.assertTrue((runtime_dir / "insights.md").exists())
+        self.assertTrue((self._agent_root("test_agent") / "insights.md").exists())
         self.assertTrue((runtime_dir / "trace.md").exists())
         self.assertTrue((runtime_dir / "context.md").exists())
         self.assertFalse((runtime_dir / "task_plan.md").exists())
@@ -179,7 +188,7 @@ class TestTaskLifecycleHooks(unittest.TestCase):
         self.assertFalse((sd / "task_plan.md").exists())
         self.assertFalse((sd / "findings.md").exists())
         self.assertFalse((sd / "progress.md").exists())
-        self.assertIn(".runtime/test_agent", result.agent_context or "")
+        self.assertIn(str(runtime_dir), result.agent_context or "")
 
     def test_task_start_uses_default_agent_name(self):
         """TaskCreated with no agent_name falls back to 'default'."""
@@ -196,10 +205,10 @@ class TestTaskLifecycleHooks(unittest.TestCase):
                 },
             )
 
-        runtime_dir = self.project_root / ".runtime" / "default"
+        runtime_dir = self._task_workspace("default", "lifecycle-default")
         self.assertTrue(runtime_dir.exists(), f"Expected {runtime_dir} to exist")
         self.assertTrue((runtime_dir / "trace.md").exists())
-        self.assertTrue((runtime_dir / "insights.md").exists())
+        self.assertTrue((self._agent_root("default") / "insights.md").exists())
         self.assertTrue((runtime_dir / "context.md").exists())
 
     def test_subtask_events_return_guidance_without_mutating_runtime_files(self):
@@ -207,10 +216,11 @@ class TestTaskLifecycleHooks(unittest.TestCase):
         self.skills_manager.get_skill_content("agent-recall-with-files")
 
         agent_name = "worker_agent"
-        runtime_dir = self.project_root / ".runtime" / agent_name
+        runtime_dir = self._task_workspace(agent_name, "lifecycle-subtask")
         runtime_dir.mkdir(parents=True, exist_ok=True)
         (runtime_dir / "trace.md").write_text("# Trace\n\nexisting-trace\n", encoding="utf-8")
-        (runtime_dir / "insights.md").write_text("# Insights\n\nexisting-insight\n", encoding="utf-8")
+        insights_file = self._agent_root(agent_name) / "insights.md"
+        insights_file.write_text("# Insights\n\nexisting-insight\n", encoding="utf-8")
 
         with task_context("lifecycle-subtask"):
             set_current_agent_name(agent_name)
@@ -229,7 +239,7 @@ class TestTaskLifecycleHooks(unittest.TestCase):
                 clear_current_agent_name()
 
         trace_content = (runtime_dir / "trace.md").read_text(encoding="utf-8")
-        insights_content = (runtime_dir / "insights.md").read_text(encoding="utf-8")
+        insights_content = insights_file.read_text(encoding="utf-8")
         self.assertEqual(trace_content, "# Trace\n\nexisting-trace\n")
         self.assertEqual(insights_content, "# Insights\n\nexisting-insight\n")
         self.assertIn("trace.md", start_result.user_message or "")
@@ -242,9 +252,10 @@ class TestTaskLifecycleHooks(unittest.TestCase):
         self.skills_manager.get_skill_content("agent-recall-with-files")
 
         agent_name = "worker_agent"
-        runtime_dir = self.project_root / ".runtime" / agent_name
+        runtime_dir = self._task_workspace(agent_name, "lifecycle-subtask-fail")
         runtime_dir.mkdir(parents=True, exist_ok=True)
-        (runtime_dir / "insights.md").write_text("# Insights\n\n", encoding="utf-8")
+        insights_file = self._agent_root(agent_name) / "insights.md"
+        insights_file.write_text("# Insights\n\n", encoding="utf-8")
         (runtime_dir / "trace.md").write_text("# Trace\n\n", encoding="utf-8")
 
         with task_context("lifecycle-subtask-fail"):
@@ -269,7 +280,7 @@ class TestTaskLifecycleHooks(unittest.TestCase):
                 clear_current_agent_name()
 
         trace_content = (runtime_dir / "trace.md").read_text(encoding="utf-8")
-        insights_content = (runtime_dir / "insights.md").read_text(encoding="utf-8")
+        insights_content = insights_file.read_text(encoding="utf-8")
         self.assertEqual(trace_content, "# Trace\n\n")
         self.assertEqual(insights_content, "# Insights\n\n")
         self.assertIsNone(result.user_message)
@@ -368,7 +379,7 @@ class TestTaskLifecycleHooks(unittest.TestCase):
         self.skills_manager.get_skill_content("agent-recall-with-files")
 
         agent_name = "checker_agent"
-        runtime_dir = self.project_root / ".runtime" / agent_name
+        runtime_dir = self._task_workspace(agent_name, "test-task")
         runtime_dir.mkdir(parents=True, exist_ok=True)
         (runtime_dir / "trace.md").write_text("# Trace\n\nsomething\n", encoding="utf-8")
         (self.skill_dir / "task_plan.md").write_text("# invalid legacy plan\n", encoding="utf-8")
@@ -391,9 +402,10 @@ class TestTaskLifecycleHooks(unittest.TestCase):
         self.skills_manager.get_skill_content("agent-recall-with-files")
 
         agent_name = "checker_agent"
-        runtime_dir = self.project_root / ".runtime" / agent_name
+        runtime_dir = self._task_workspace(agent_name, "complete-task")
         runtime_dir.mkdir(parents=True, exist_ok=True)
-        (runtime_dir / "insights.md").write_text("# Insights\n\n", encoding="utf-8")
+        insights_file = self._agent_root(agent_name) / "insights.md"
+        insights_file.write_text("# Insights\n\n", encoding="utf-8")
         (runtime_dir / "trace.md").write_text("# Trace\n\n", encoding="utf-8")
 
         set_current_agent_name(agent_name)
@@ -407,7 +419,7 @@ class TestTaskLifecycleHooks(unittest.TestCase):
             clear_current_agent_name()
 
         self.assertEqual((runtime_dir / "trace.md").read_text(encoding="utf-8"), "# Trace\n\n")
-        self.assertEqual((runtime_dir / "insights.md").read_text(encoding="utf-8"), "# Insights\n\n")
+        self.assertEqual(insights_file.read_text(encoding="utf-8"), "# Insights\n\n")
         self.assertIn("trace.md", result.user_message or "")
         self.assertIn("complete-task", result.user_message or "")
 
@@ -568,15 +580,16 @@ class TestTaskLifecycleHooks(unittest.TestCase):
         self.skills_manager.get_skill_content("agent-recall-with-files")
 
         agent_name = "persist_agent"
-        runtime_dir = self.project_root / ".runtime" / agent_name
-        runtime_dir.mkdir(parents=True, exist_ok=True)
+        agent_root = self._agent_root(agent_name)
+        prior_task_dir = self._task_workspace(agent_name, "prior-task")
+        prior_task_dir.mkdir(parents=True, exist_ok=True)
         prior_insights = (
             "# Insights\n\n## Log\n"
             "- [2026-03-12] [pitfall] Do not call CanIf_Init from task context.\n"
             "- [2026-03-12] [decision] Use CanIf_SetControllerMode instead.\n"
         )
-        (runtime_dir / "insights.md").write_text(prior_insights, encoding="utf-8")
-        (runtime_dir / "trace.md").write_text("# old trace\n", encoding="utf-8")
+        (agent_root / "insights.md").write_text(prior_insights, encoding="utf-8")
+        (prior_task_dir / "trace.md").write_text("# old trace\n", encoding="utf-8")
 
         with task_context("lifecycle-persist"):
             set_current_agent_name(agent_name)
@@ -595,7 +608,8 @@ class TestTaskLifecycleHooks(unittest.TestCase):
                 clear_current_agent_name()
 
         # insights.md should be preserved with prior content.
-        insights_content = (runtime_dir / "insights.md").read_text(encoding="utf-8")
+        runtime_dir = self._task_workspace(agent_name, "lifecycle-persist")
+        insights_content = (agent_root / "insights.md").read_text(encoding="utf-8")
         self.assertIn("CanIf_Init", insights_content)
         self.assertIn("[pitfall]", insights_content)
 
@@ -608,14 +622,14 @@ class TestTaskLifecycleHooks(unittest.TestCase):
         self.assertTrue((runtime_dir / "context.md").exists())
 
         # Agent context should mention prior insights.
-        self.assertIn("previous sessions", result.agent_context or "")
+        self.assertIn("previous tasks", result.agent_context or "")
 
-    def test_task_start_resets_trace_and_context(self):
-        """TaskStart always recreates trace.md and context.md from templates."""
+    def test_task_start_preserves_trace_and_context_when_resuming_same_task(self):
+        """TaskStart keeps task-scoped state when the same task id resumes."""
         self.skills_manager.get_skill_content("agent-recall-with-files")
 
         agent_name = "reset_agent"
-        runtime_dir = self.project_root / ".runtime" / agent_name
+        runtime_dir = self._task_workspace(agent_name, "lifecycle-reset")
         runtime_dir.mkdir(parents=True, exist_ok=True)
         (runtime_dir / "trace.md").write_text("# Old Trace\n\nstale entry\n", encoding="utf-8")
         (runtime_dir / "context.md").write_text("# Old Context\n\nstale goal\n", encoding="utf-8")
@@ -638,8 +652,8 @@ class TestTaskLifecycleHooks(unittest.TestCase):
 
         trace_content = (runtime_dir / "trace.md").read_text(encoding="utf-8")
         context_content = (runtime_dir / "context.md").read_text(encoding="utf-8")
-        self.assertNotIn("stale entry", trace_content)
-        self.assertNotIn("stale goal", context_content)
+        self.assertIn("stale entry", trace_content)
+        self.assertIn("stale goal", context_content)
 
 
 if __name__ == "__main__":

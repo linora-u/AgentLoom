@@ -13,44 +13,49 @@ are left untouched.
 """
 
 from common import (
-    CONTEXT_FILE, TRACE_FILE, INSIGHTS_FILE, SKILL_TAG,
-    runtime_dir, read_template, get_runtime_agent_path, get_tool_name, output,
+    CONTEXT_FILE,
+    INSIGHTS_FILE,
+    SKILL_TAG,
+    TRACE_FILE,
+    get_tool_name,
+    output,
+    persistent_insights_path,
+    read_template,
+    task_workspace_dir,
 )
 
 
-def _bootstrap_runtime(rd):
-    """Create the runtime directory and seed template files if missing."""
-    rd.mkdir(parents=True, exist_ok=True)
+def _bootstrap_workspace(task_workspace, persistent_insights):
+    """Create the task workspace and seed template files if missing."""
+    task_workspace.mkdir(parents=True, exist_ok=True)
 
     # Ephemeral files — only create if absent (do not overwrite).
     for fname, title in ((CONTEXT_FILE, "Context"), (TRACE_FILE, "Trace")):
-        path = rd / fname
+        path = task_workspace / fname
         if not path.exists():
             path.write_text(read_template(fname, title), encoding="utf-8")
 
     # Persistent file — only create if absent or trivially small.
-    insights_path = rd / INSIGHTS_FILE
-    if not insights_path.exists() or insights_path.stat().st_size <= 100:
-        if not insights_path.exists():
-            insights_path.write_text(
+    if not persistent_insights.exists() or persistent_insights.stat().st_size <= 100:
+        if not persistent_insights.exists():
+            persistent_insights.write_text(
                 read_template(INSIGHTS_FILE, "Insights"), encoding="utf-8",
             )
 
 
 def main() -> None:
-    agent = get_runtime_agent_path()
-    rd = runtime_dir(agent)
+    workspace = task_workspace_dir()
     tool = get_tool_name()
 
-    _bootstrap_runtime(rd)
+    _bootstrap_workspace(workspace, persistent_insights_path())
 
     output({
         "decision": "allow",
         "user_message": (
             f"{SKILL_TAG} Subtask '{tool}' started. "
-            f"Record meaningful progress in {rd / TRACE_FILE}."
+            f"Record meaningful progress in {workspace / TRACE_FILE}."
         ),
-        "telemetry": {"runtime_dir": str(rd)},
+        "telemetry": {"task_workspace": str(workspace)},
     })
 
 

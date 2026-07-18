@@ -1,20 +1,19 @@
 #!/usr/bin/env python3
 """Hook: Stop — default-allow with a reminder to keep runtime files current."""
 
-from common import CONTEXT_FILE, TRACE_FILE, SKILL_TAG, runtime_dir, get_runtime_agent_path, output
+from common import CONTEXT_FILE, SKILL_TAG, TRACE_FILE, output, task_workspace_dir
 
 
 def main() -> None:
-    agent = get_runtime_agent_path()
-    rd = runtime_dir(agent)
+    workspace = task_workspace_dir()
 
     output({
         "decision": "allow",
         "reason": (
             f"{SKILL_TAG} Stop default-allow. "
-            f"Ensure {rd / CONTEXT_FILE} and {rd / TRACE_FILE} reflect final state."
+            f"Ensure {workspace / CONTEXT_FILE} and {workspace / TRACE_FILE} reflect final state."
         ),
-        "telemetry": {"status": "disabled", "runtime_dir": str(rd)},
+        "telemetry": {"status": "disabled", "task_workspace": str(workspace)},
     })
 
 

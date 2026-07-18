@@ -189,3 +189,4 @@ config/llm.yaml
 
 # Keep generic legacy ignore for compatibility
 llm.yaml
+applications/web_search/config/.mcp.anysearch.json

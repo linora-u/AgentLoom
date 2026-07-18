@@ -1,7 +1,7 @@
 """Tests for hierarchical runtime agent path in task context.
 
 When a worker agent runs inside a parent agent, the runtime agent path
-is built as ``parent/child`` so that .runtime directories nest correctly.
+is built as ``parent/child`` so canonical workspaces nest correctly.
 This path is separate from the agent_name (used in logs, checkpoints) which
 remains flat.
 
@@ -131,7 +131,7 @@ class TestHierarchicalPathConstruction:
     @staticmethod
     def _build_runtime_path(previous_path, child_name):
         """Replicate the logic from _execute_agent()."""
-        if previous_path and previous_path != child_name:
+        if previous_path:
             return f"{previous_path}/{child_name}"
         return child_name
 
@@ -150,10 +150,10 @@ class TestHierarchicalPathConstruction:
         path = self._build_runtime_path("", "child")
         assert path == "child"
 
-    def test_same_name_no_duplication(self):
-        """If parent == child, no duplication should occur."""
+    def test_same_name_still_creates_a_distinct_child_identity(self):
+        """A same-named child remains isolated from its parent workspace."""
         path = self._build_runtime_path("agent_x", "agent_x")
-        assert path == "agent_x"
+        assert path == "agent_x/agent_x"
 
     def test_three_level_nesting(self):
         """Simulate grandparent->parent->child nesting."""
@@ -253,27 +253,27 @@ class TestFullFlowSimulation:
         assert get_current_agent_name() == "supervisor"
         assert get_current_runtime_agent_path() == "supervisor"
 
-    def test_runtime_dir_path_with_hierarchical_name(self):
-        """Verify that Path handles hierarchical names correctly for runtime dirs."""
+    def test_workspace_path_with_hierarchical_name(self):
+        """Verify that Path handles hierarchical agent workspace names."""
         from pathlib import Path
         import tempfile
 
         agent_path = "ai_check_agent/step0_preparation"
 
         with tempfile.TemporaryDirectory() as tmpdir:
-            runtime_base = Path(tmpdir) / ".runtime"
-            rd = runtime_base / agent_path
+            workspace_base = Path(tmpdir) / ".agentloom" / "workspaces" / "agents" / "app"
+            rd = workspace_base / agent_path
             rd.mkdir(parents=True, exist_ok=True)
 
             assert rd.exists()
-            assert (runtime_base / "ai_check_agent").is_dir()
-            assert (runtime_base / "ai_check_agent" / "step0_preparation").is_dir()
+            assert (workspace_base / "ai_check_agent").is_dir()
+            assert (workspace_base / "ai_check_agent" / "step0_preparation").is_dir()
 
             # Verify nested structure, not flat
-            flat_path = runtime_base / "ai_check_agent_step0_preparation"
+            flat_path = workspace_base / "ai_check_agent_step0_preparation"
             assert not flat_path.exists()
 
-    def test_deeply_nested_runtime_dir(self):
+    def test_deeply_nested_workspace_dir(self):
         """Three-level nesting should create proper directory hierarchy."""
         from pathlib import Path
         import tempfile
@@ -281,12 +281,13 @@ class TestFullFlowSimulation:
         agent_path = "root/parent/child"
 
         with tempfile.TemporaryDirectory() as tmpdir:
-            rd = Path(tmpdir) / ".runtime" / agent_path
+            workspace_base = Path(tmpdir) / ".agentloom" / "workspaces" / "agents" / "app"
+            rd = workspace_base / agent_path
             rd.mkdir(parents=True, exist_ok=True)
 
-            assert (Path(tmpdir) / ".runtime" / "root").is_dir()
-            assert (Path(tmpdir) / ".runtime" / "root" / "parent").is_dir()
-            assert (Path(tmpdir) / ".runtime" / "root" / "parent" / "child").is_dir()
+            assert (workspace_base / "root").is_dir()
+            assert (workspace_base / "root" / "parent").is_dir()
+            assert (workspace_base / "root" / "parent" / "child").is_dir()
 
 
 # ---------------------------------------------------------------------------

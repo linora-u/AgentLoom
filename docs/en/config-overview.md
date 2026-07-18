@@ -79,7 +79,7 @@ logging:
   backup_count: 3
 ```
 
-Every attempt writes `.agentloom/runs/<application_id>/<run_id>/{manifest.json,logs,audit,artifacts}`. Resume creates a new `run_id` but keeps the logical task's `task_id` and `.agentloom/checkpoints/<application_id>/<task_id>/`. The Agent-visible `.runtime/` workspace and Application-owned `output_dir` are separate storage domains.
+Every attempt writes `.agentloom/runs/<application_id>/<run_id>/{manifest.json,logs,audit,artifacts}`. Resume creates a new `run_id` but keeps the logical task's `task_id`, `.agentloom/checkpoints/<application_id>/<task_id>/`, and `.agentloom/workspaces/agents/<application_id>/<agent_path>/tasks/<task_id>/`. Application-owned `output_dir` remains a separate storage domain.
 
 File logging follows `logging.file_enabled` and is bounded by size/backup count. `loom run --no-file-log` disables only the current attempt's file log; it does not disable checkpoints or Shell audit. `loom clean-runtime` applies run retention, while `loom migrate-runtime --dry-run|--apply` handles one-time legacy `.logs` migration.
 
