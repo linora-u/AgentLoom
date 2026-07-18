@@ -79,6 +79,45 @@ describe("BridgeClient", () => {
     await client.close()
   })
 
+  test("delivers assistant stream events without consuming the pending response", async () => {
+    const transport = new FakeTransport()
+    const client = new BridgeClient(transport, { createID: () => "turn-1" })
+    const events: string[] = []
+    client.subscribeEvents((event) => events.push(event.type))
+
+    const turn = client.assistantSend("chat-1", "hello", "powerful")
+    await waitForRequests(transport, 1)
+    transport.receive({
+      event: {
+        request_id: "turn-1",
+        session_id: "chat-1",
+        type: "turn.started",
+      },
+    })
+    transport.receive({
+      event: {
+        request_id: "turn-1",
+        session_id: "chat-1",
+        type: "turn.delta",
+        text: "hel",
+      },
+    })
+    transport.receive({
+      id: "turn-1",
+      ok: true,
+      result: { session_id: "chat-1", assistant: "hello" },
+    })
+
+    expect(JSON.parse(transport.sent[0]!)).toEqual({
+      id: "turn-1",
+      method: "assistant.send",
+      params: { session_id: "chat-1", message: "hello", model_type: "powerful" },
+    })
+    expect(events).toEqual(["turn.started", "turn.delta"])
+    expect((await turn).assistant).toBe("hello")
+    await client.close()
+  })
+
   test("surfaces bridge saturation without permanently closing the client", async () => {
     const transport = new FakeTransport()
     const client = new BridgeClient(transport, { createID: sequentialIDs("busy", "next") })
@@ -100,6 +139,37 @@ describe("BridgeClient", () => {
 
     const next = client.bootstrap()
     await waitForRequests(transport, 2)
+    transport.receive({ id: "next", ok: true, result: { systems: [], runs: [] } })
+    expect((await next).systems).toEqual([])
+    await client.close()
+  })
+
+  test("keeps the bridge usable after runtime and schedule domain errors", async () => {
+    const transport = new FakeTransport()
+    const client = new BridgeClient(transport, {
+      createID: sequentialIDs("not-ready", "schedule-failed", "next"),
+    })
+
+    const runtime = client.request("runtime.summary", {})
+    await waitForRequests(transport, 1)
+    transport.receive({
+      id: "not-ready",
+      ok: false,
+      error: { code: "not_ready", message: "bootstrap first" },
+    })
+    await expect(runtime).rejects.toEqual(expect.objectContaining({ code: "not_ready" }))
+
+    const schedule = client.request("schedule.pause", { job_id: "job-1" })
+    await waitForRequests(transport, 2)
+    transport.receive({
+      id: "schedule-failed",
+      ok: false,
+      error: { code: "schedule_failed", message: "job is busy" },
+    })
+    await expect(schedule).rejects.toEqual(expect.objectContaining({ code: "schedule_failed" }))
+
+    const next = client.bootstrap()
+    await waitForRequests(transport, 3)
     transport.receive({ id: "next", ok: true, result: { systems: [], runs: [] } })
     expect((await next).systems).toEqual([])
     await client.close()

@@ -252,6 +252,48 @@ class TestRunApp:
         assert not (fake_yaml.parents[3] / ".logs").exists()
 
     @patch("src.runner.YamlConfiguredSupervisorAgent")
+    def test_manifest_declares_when_task_tree_observation_is_disabled(
+        self,
+        mock_cls,
+        fake_yaml: Path,
+        monkeypatch,
+    ) -> None:
+        from src.lib.runtime import get_current_run_context
+        from src.runner import run_app
+
+        observed: dict[str, object] = {}
+
+        def effective_config(config, *, source_name):
+            del source_name
+            return {
+                **config,
+                "checkpoint": {"enabled": False},
+                "logging": {},
+            }
+
+        monkeypatch.setattr(
+            "src.runner.build_effective_agent_config",
+            effective_config,
+        )
+
+        def run_without_checkpoint(_task, **kwargs):
+            observed["context"] = get_current_run_context(required=True)
+            assert kwargs["checkpoint_manager"] is None
+            return "ok"
+
+        mock_cls.return_value.run.side_effect = run_without_checkpoint
+
+        assert run_app(str(fake_yaml), file_logging=False) == "ok"
+
+        context = observed["context"]
+        manifest = json.loads(context.manifest_path.read_text(encoding="utf-8"))
+        assert manifest["task_tree_observation"] == {
+            "enabled": False,
+            "worker_agents_configured": False,
+        }
+        assert "task_tree_artifact" not in manifest
+
+    @patch("src.runner.YamlConfiguredSupervisorAgent")
     def test_completed_run_keeps_result_and_observability_after_checkpoint_cleanup(
         self,
         mock_cls,

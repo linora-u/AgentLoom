@@ -88,6 +88,26 @@ def test_run_scan_does_not_suppress_unrelated_process_logs(
     assert "builder tool audit remains visible" in caplog.messages
 
 
+def test_bounded_json_read_distinguishes_missing_from_invalid_source(
+    tmp_path: Path,
+) -> None:
+    runtime_root = tmp_path / "runtime"
+    runtime_root.mkdir()
+
+    assert TuiBridge._read_json_object_bounded_secure_with_status(
+        runtime_root,
+        Path("missing.json"),
+        max_bytes=128,
+    ) == (None, False)
+
+    _write(runtime_root / "invalid.json", "{not-json")
+    assert TuiBridge._read_json_object_bounded_secure_with_status(
+        runtime_root,
+        Path("invalid.json"),
+        max_bytes=128,
+    ) == (None, True)
+
+
 def test_run_scan_never_replays_the_unbounded_checkpoint_event_catalog(
     tmp_path: Path,
     monkeypatch,
@@ -167,6 +187,23 @@ def test_run_detail_directly_addresses_one_run_without_scanning_the_catalog(
     )
 
     assert detail["summary"]["run_id"] == "run-1"
+
+
+def test_system_detail_directly_addresses_one_definition_without_full_snapshot(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    workflow = _workflow(tmp_path)
+    bridge = TuiBridge(tmp_path)
+
+    def fail_if_snapshot_is_scanned() -> None:
+        raise AssertionError("system.detail must not rescan the project catalog")
+
+    monkeypatch.setattr(bridge, "_snapshot", fail_if_snapshot_is_scanned)
+
+    detail = bridge.system_detail(workflow.relative_to(tmp_path).as_posix())
+
+    assert detail["definition"]["name"] == "report"
 
 
 def test_run_detail_rejects_an_oversized_manifest_without_parsing_it(
@@ -870,9 +907,12 @@ def test_system_state_is_running_when_any_linked_run_is_active(tmp_path: Path) -
         started_at="2026-07-17T11:00:00+00:00",
     )
     lease = RuntimeRunLease(active_run_dir)
+    bridge = TuiBridge(tmp_path)
     lease.acquire()
     try:
-        bootstrap = TuiBridge(tmp_path).bootstrap()
+        bootstrap = bridge.bootstrap()
+        system_id = bootstrap["systems"][0]["id"]
+        detail = bridge.system_detail(system_id)
     finally:
         lease.release()
 
@@ -880,6 +920,8 @@ def test_system_state_is_running_when_any_linked_run_is_active(tmp_path: Path) -
     assert system["state"] == "running"
     assert system["latest_run"]["run_id"] == "run-latest"
     assert system["latest_run"]["status"] == "completed"
+    assert detail["summary"]["state"] == system["state"]
+    assert detail["summary"]["latest_run"] == system["latest_run"]
 
 
 def test_system_catalog_rejects_symlinked_yaml_files(tmp_path: Path) -> None:

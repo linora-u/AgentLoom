@@ -71,6 +71,12 @@ TypeScript/OpenTUI 单文件程序，安装到 `~/.agentloom/bin`，并在
 
 Builder 只查看、暂存和校验 Agent YAML，`/apply` 才是显式写入动作。右侧目录会显示当前项目全部 Agent System 和 Run，包括仅创建但从未运行的定义、实时状态、Workers、事件、日志、产物和已保留结果。
 
+TUI 创建的定时任务会持久保存；要让任务自动触发，需要在另一个终端显式运行前台调度服务：
+
+```bash
+agentloom schedules --project /path/to/project serve
+```
+
 ## 以 Codex 为例快速创建多 Agent 应用
 
 最快的方式是让 Codex 使用仓库自带的 framework skill。Codex 不只是生成 YAML：它也可以直接运行 AgentLoom 应用，检查 `.agentloom/` 下的 run 与 checkpoint 证据，并在 Worker 卡住或配置出错时继续修改应用。

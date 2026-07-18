@@ -38,18 +38,17 @@ from src.lib.runtime import (
     resolve_application_id,
     resolve_runtime_home,
 )
-from src.lib.smolagents.agent.agent_validation import (
-    AgentConfigNormalizer,
-    build_normalized_execution_config,
-    validate_execution_config_payload,
+from src.lib.smolagents.agent.runtime_validation import (
+    validate_required_yaml_fields as validate_required_yaml_fields,
+)
+from src.lib.smolagents.agent.runtime_validation import (
+    validate_runtime_agent_config,
 )
 from src.lib.smolagents.agent.yaml_agent_factory import (
     YamlAgentFactory,
     YamlConfiguredSupervisorAgent,
 )
 
-#: 启动 agent 时 YAML 中必须提供的字段。
-_REQUIRED_YAML_FIELDS = ("name", "workflow", "description")
 _RUN_ARTIFACT_COPY_CHUNK_BYTES = 1024 * 1024
 _TASK_TREE_CLEANUP_MAX_BYTES = 1024 * 1024
 
@@ -247,106 +246,6 @@ def _resolve_yaml_path(yaml_path: str | Path) -> Path:
     return path
 
 
-def validate_required_yaml_fields(
-    config: dict,
-    yaml_path: Path | str,
-) -> None:
-    """校验 YAML 配置中必须包含的关键字段。
-
-    检查 ``name``、``workflow``、``description`` 三个字段是否存在且非空。
-
-    Args:
-        config: 已解析的 YAML 配置字典。
-        yaml_path: YAML 文件路径，用于错误提示。
-
-    Raises:
-        ValueError: 当存在缺失或为空的必填字段时。
-    """
-    missing: list[str] = []
-    invalid: list[str] = []
-    for field in ("name", "description"):
-        value = config.get(field)
-        if value is None or (isinstance(value, str) and not value.strip()):
-            missing.append(field)
-        elif not isinstance(value, str):
-            invalid.append(f"{field} must be a non-empty string")
-
-    workflow = config.get("workflow")
-    workflow_valid = False
-    if isinstance(workflow, str):
-        workflow_valid = bool(workflow.strip())
-    elif isinstance(workflow, list):
-        workflow_valid = bool(workflow) and all(isinstance(item, str) and item.strip() for item in workflow)
-    if not workflow_valid:
-        missing.append("workflow")
-
-    if invalid:
-        problems: list[str] = []
-        if missing:
-            problems.append(f"missing: {', '.join(missing)}")
-        problems.extend(invalid)
-        raise ValueError(
-            f"YAML 配置文件 {yaml_path} 必填字段无效: {'; '.join(problems)}\n"
-            f"请确保 YAML 中包含以下字段: {', '.join(_REQUIRED_YAML_FIELDS)}"
-        )
-    if missing:
-        raise ValueError(
-            f"YAML 配置文件 {yaml_path} 缺少必填字段: {', '.join(missing)}\n"
-            f"请确保 YAML 中包含以下字段: {', '.join(_REQUIRED_YAML_FIELDS)}"
-        )
-
-
-def validate_runtime_agent_config(
-    config: dict,
-    yaml_path: Path | str,
-    *,
-    agent_root: Path | str,
-) -> None:
-    """Pure preflight for the Agent YAML contract consumed by ``run_app``.
-
-    This deliberately validates the raw Agent overlay before
-    ``build_effective_agent_config`` filters and merges it.  Otherwise malformed
-    overlay values such as ``execution_env: []`` can be silently discarded and
-    only fail (or change meaning) deeper in Agent construction.
-    """
-
-    validate_required_yaml_fields(config, yaml_path)
-    AgentConfigNormalizer.validate_runtime_tool_references(config)
-    AgentConfigNormalizer.validate_workflow_config(config)
-    AgentConfigNormalizer.validate_skills_config(config)
-    AgentConfigNormalizer.validate_max_steps_config(config)
-    AgentConfigNormalizer.validate_tool_call_type_config(
-        config,
-        default_tool_call_type="tool_call",
-        allowed_tool_call_types=("tool_call", "code_act"),
-    )
-    AgentConfigNormalizer.validate_agent_function_schema(config)
-    AgentConfigNormalizer.validate_worker_agents_config(config.get("worker_agents", []))
-    normalized_execution = build_normalized_execution_config(
-        config,
-        source_name=str(yaml_path),
-        agent_root=agent_root,
-    )
-    validate_execution_config_payload(normalized_execution)
-
-
-def validate_runtime_worker_config(
-    config: dict,
-    yaml_path: Path | str,
-    *,
-    agent_root: Path | str,
-) -> None:
-    """Pure preflight for a definition referenced as a supervisor worker."""
-
-    validate_runtime_agent_config(
-        config,
-        yaml_path,
-        agent_root=agent_root,
-    )
-    if AgentConfigNormalizer.validate_agent_function_schema(config) is None:
-        raise ValueError(f"Worker Agent configuration {yaml_path} agent_function_schema is required")
-
-
 def run_app(
     yaml_path: str | Path,
     resume_task_id: str | None = None,
@@ -414,12 +313,6 @@ def run_app(
     run_attempt_lease = runtime_context.run_lease()
     run_attempt_lease.acquire()
     try:
-        runtime_context.write_manifest(
-            yaml_path=str(resolved_path),
-            agent_name=agent_name,
-            mode="resume" if is_resume else "new",
-        )
-
         checkpoint_config = effective_config.get("checkpoint", {})
         if not isinstance(checkpoint_config, dict):
             checkpoint_config = {}
@@ -427,6 +320,15 @@ def run_app(
         heartbeat_interval = checkpoint_config.get("heartbeat_interval", 5.0)
         cleanup_on_success = checkpoint_config.get("cleanup_on_success", True)
         max_resume_age = checkpoint_config.get("max_resume_age", 604800)
+        runtime_context.write_manifest(
+            yaml_path=str(resolved_path),
+            agent_name=agent_name,
+            mode="resume" if is_resume else "new",
+            task_tree_observation={
+                "enabled": bool(ckpt_enabled),
+                "worker_agents_configured": bool(config.get("worker_agents")),
+            },
+        )
         logging_builder = LoggingConfigBuilder().apply_mapping(
             effective_config.get("logging", {}),
             source="effective logging config",

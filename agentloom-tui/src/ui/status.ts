@@ -1,6 +1,6 @@
 import { toneColor, type ThemeMode, type ThemeTone } from "./theme"
 
-export type ExecutionStatus = "never_run" | "running" | "completed" | "failed" | "crashed"
+export type ExecutionStatus = "never_run" | "running" | "completed" | "failed" | "crashed" | "incomplete"
 export type ResultStatus = "never_run" | "running" | "available" | "unavailable"
 export type AgentLoomStatus = ExecutionStatus | ResultStatus
 
@@ -16,6 +16,7 @@ const presentations = {
   failed: { label: "Failed", symbol: "×", tone: "error", priority: 1 },
   running: { label: "Running", symbol: "●", tone: "info", priority: 2 },
   unavailable: { label: "Unavailable", symbol: "–", tone: "warning", priority: 3 },
+  incomplete: { label: "Incomplete", symbol: "?", tone: "warning", priority: 3 },
   completed: { label: "Completed", symbol: "✓", tone: "success", priority: 4 },
   available: { label: "Available", symbol: "✓", tone: "success", priority: 4 },
   never_run: { label: "Never run", symbol: "○", tone: "muted", priority: 5 },

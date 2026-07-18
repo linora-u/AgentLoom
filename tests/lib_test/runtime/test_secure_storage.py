@@ -1,11 +1,34 @@
 from __future__ import annotations
 
 import os
+import stat
 from pathlib import Path
 
 import pytest
 
 from src.lib.runtime import SecureDirectory
+
+
+def test_atomic_write_fsyncs_file_and_parent_directory(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    storage = SecureDirectory(tmp_path / "state")
+    real_fsync = os.fsync
+    synced_kinds: list[str] = []
+
+    def record_fsync(fd: int) -> None:
+        mode = os.fstat(fd).st_mode
+        synced_kinds.append("directory" if stat.S_ISDIR(mode) else "file")
+        real_fsync(fd)
+
+    monkeypatch.setattr(os, "fsync", record_fsync)
+    try:
+        storage.atomic_write_text("jobs.json", '{"version": 1}\n')
+    finally:
+        storage.close()
+
+    assert synced_kinds == ["file", "directory"]
 
 
 def test_append_text_retries_regular_file_short_writes(
@@ -86,3 +109,40 @@ def test_copy_rejects_zero_byte_write_without_publishing_partial_file(
         assert not list((tmp_path / "state").glob(".*.tmp"))
     finally:
         storage.close()
+
+
+def test_advisory_file_lock_supports_nonblocking_lock_modes(tmp_path: Path) -> None:
+    first = SecureDirectory(tmp_path / "state")
+    second = SecureDirectory(tmp_path / "state")
+    try:
+        with first.advisory_file_lock("state.lock", create=True):
+            with pytest.raises(BlockingIOError):
+                with second.advisory_file_lock(
+                    "state.lock",
+                    exclusive=True,
+                    blocking=False,
+                ):
+                    pass
+    finally:
+        first.close()
+        second.close()
+
+
+def test_open_binary_writer_exclusively_creates_and_rejects_symlink_target(
+    tmp_path: Path,
+) -> None:
+    storage = SecureDirectory(tmp_path / "state")
+    outside = tmp_path / "outside.log"
+    outside.write_bytes(b"sentinel")
+    (tmp_path / "state" / "unsafe.log").symlink_to(outside)
+    try:
+        with storage.open_binary_writer("safe.log", exclusive=True) as handle:
+            handle.write(b"safe")
+        with pytest.raises(OSError):
+            with storage.open_binary_writer("unsafe.log", exclusive=True):
+                pass
+    finally:
+        storage.close()
+
+    assert (tmp_path / "state" / "safe.log").read_bytes() == b"safe"
+    assert outside.read_bytes() == b"sentinel"

@@ -14,7 +14,7 @@ from typing import Any
 
 from .bridge import BridgeError, TuiBridge
 
-_BUILDER_METHODS = frozenset({"builder.send", "builder.draft", "draft.apply"})
+_BUILDER_METHODS = frozenset({"assistant.send", "builder.send", "builder.draft", "draft.apply"})
 _MAX_REQUEST_BYTES = 8 * 1024 * 1024
 _MAX_RESPONSE_BYTES = 8 * 1024 * 1024
 
@@ -95,7 +95,23 @@ def _dispatch_request(
     params: dict[str, Any],
 ) -> None:
     try:
-        result = bridge.dispatch(method, params)
+        dispatch_with_events = getattr(bridge, "dispatch_with_events", None)
+        if callable(dispatch_with_events):
+            result = dispatch_with_events(
+                method,
+                params,
+                lambda event: writer.write(
+                    {
+                        "event": {
+                            "request_id": request_id,
+                            "session_id": str(params.get("session_id") or ""),
+                            **event,
+                        }
+                    }
+                ),
+            )
+        else:
+            result = bridge.dispatch(method, params)
         response = {"id": request_id, "ok": True, "result": result}
     except BridgeError as error:
         response = _error_response(request_id, error)
