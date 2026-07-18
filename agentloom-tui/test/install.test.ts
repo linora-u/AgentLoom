@@ -33,7 +33,9 @@ describe("source installer", () => {
     expect(result.exitCode, new TextDecoder().decode(result.stderr)).toBe(0)
     const installedRoot = await realpath(installRoot)
     const calls = await readFile(fixture.log, "utf8")
-    expect(calls).toContain(`uv|sync --frozen --no-editable --no-dev --project ${repositoryRoot}`)
+    expect(calls).toContain(
+      `uv|sync --frozen --no-editable --no-dev --reinstall-package agentloom --project ${repositoryRoot}`,
+    )
     expect(calls).toContain("bun|install --frozen-lockfile")
     expect(calls).toContain("bun|run build -- --outfile")
 
@@ -45,6 +47,12 @@ describe("source installer", () => {
     const invocation = Bun.spawnSync({ cmd: [wrapper, "--version"], env: { ...process.env, AGENTLOOM_PYTHON: undefined } })
     expect(invocation.exitCode).toBe(0)
     expect(new TextDecoder().decode(invocation.stdout).trim()).toBe(`python=${join(installedRoot, "venv", "bin", "python")}`)
+    const schedulerInvocation = Bun.spawnSync({
+      cmd: [wrapper, "schedules", "--help"],
+      env: { ...process.env, AGENTLOOM_PYTHON: undefined, AGENTLOOM_TEST_LOG: fixture.log },
+    })
+    expect(schedulerInvocation.exitCode).toBe(0)
+    expect(await readFile(fixture.log, "utf8")).toContain("python|-I -m src schedules --help")
     expect(await Bun.file(join(fixture.home, ".zshrc")).exists()).toBe(false)
   })
 
@@ -89,7 +97,7 @@ async function createFixture() {
 set -eu
 printf 'uv|%s\\n' "$*" >> "$AGENTLOOM_TEST_LOG"
 mkdir -p "$UV_PROJECT_ENVIRONMENT/bin"
-printf '#!/bin/sh\\n' > "$UV_PROJECT_ENVIRONMENT/bin/python"
+printf '%s\\n' '#!/bin/sh' 'printf "python|%s\\\\n" "$*" >> "$AGENTLOOM_TEST_LOG"' > "$UV_PROJECT_ENVIRONMENT/bin/python"
 chmod +x "$UV_PROJECT_ENVIRONMENT/bin/python"
 `,
   )

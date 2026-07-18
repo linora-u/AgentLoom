@@ -1,10 +1,13 @@
+import { basename, resolve } from "node:path"
 import type {
   BootstrapResultDto,
+  AssistantTurnEventDto,
   RpcMethod,
   RpcParams,
   RpcResult,
   RunDetailResultDto,
   RunSummaryDto,
+  RuntimeSummaryDto,
   SystemDetailResultDto,
   SystemSummaryDto,
 } from "../domain"
@@ -23,6 +26,7 @@ export interface TuiClient {
     params: RpcParams<Method>,
   ): Promise<RpcResult<Method>>
   close(): Promise<void> | void
+  subscribeEvents?(listener: (event: AssistantTurnEventDto) => void): () => void
 }
 
 export type BuilderDraftFile = {
@@ -46,14 +50,20 @@ export type BuilderMessage = {
 
 export type AgentLoomSessionState = {
   snapshot: BootstrapResultDto
+  runsIncomplete: boolean
+  workspacePhase: "idle" | "loading" | "ready" | "error"
   route: AppRoute
   selectedIndex: number
   sidebarOpen: boolean
   modelType: string | null
   messages: BuilderMessage[]
+  streamingText: string
+  activities: Array<{ name: string; state: "started" | "completed" }>
   draft: BuilderDraft | null
   systemDetail: SystemDetailResultDto | null
   runDetail: RunDetailResultDto | null
+  assistantBusy: boolean
+  detailBusy: boolean
   busy: boolean
   notice: string | null
 }
@@ -64,42 +74,60 @@ export class AgentLoomSession {
   private current: AgentLoomSessionState
   private readonly listeners = new Set<Listener>()
   private refreshPromise: Promise<void> | null = null
+  private startPromise: Promise<void> | null = null
   private liveRefreshPromise: Promise<void> | null = null
   private routeLoadGeneration = 0
   private builderBusy = false
   private routeBusy = false
   private messageID = 0
+  private readonly unsubscribeEvents: () => void
 
   constructor(
     private readonly input: {
       client: TuiClient
-      snapshot: BootstrapResultDto
+      snapshot?: BootstrapResultDto
+      projectRoot?: string
       sessionID?: string
     },
   ) {
+    if (!input.snapshot && !input.projectRoot) {
+      throw new Error("AgentLoomSession requires a snapshot or projectRoot")
+    }
     this.sessionID = input.sessionID ?? crypto.randomUUID()
+    const snapshot = input.snapshot ?? createWorkspaceShell(input.projectRoot!)
     this.current = {
-      snapshot: input.snapshot,
+      snapshot,
+      runsIncomplete: false,
+      workspacePhase: input.snapshot ? "ready" : "idle",
       route: { type: "builder" },
       selectedIndex: 0,
       sidebarOpen: false,
-      modelType: input.snapshot.models.default,
+      modelType: snapshot.models.default,
       messages: [
         {
           id: this.nextMessageID(),
           role: "assistant",
-          content: "描述你要创建或修改的 Agent。草稿校验通过后，输入 /apply 才会写入项目。",
+          content: "我是 AgentLoom 助手。你可以问普通问题，也可以让我查看项目、分析 Agent 状态或创建 Agent YAML。任何写入都会先给出草稿，由你显式 /apply。",
         },
       ],
+      streamingText: "",
+      activities: [],
       draft: null,
       systemDetail: null,
       runDetail: null,
+      assistantBusy: false,
+      detailBusy: false,
       busy: false,
       notice: null,
     }
+    this.unsubscribeEvents = input.client.subscribeEvents?.((event) => this.handleEvent(event)) ?? (() => {})
   }
 
   readonly sessionID: string
+
+  dispose(): void {
+    this.unsubscribeEvents()
+  }
 
   get state(): AgentLoomSessionState {
     return this.current
@@ -108,6 +136,16 @@ export class AgentLoomSession {
   get entries(): SidebarEntry[] {
     const groups = buildSidebarGroups(this.current.snapshot)
     return [...groups.systems, ...groups.runs]
+  }
+
+  start(): Promise<void> {
+    if (this.current.workspacePhase === "ready") return Promise.resolve()
+    if (this.startPromise) return this.startPromise
+    this.patch({ workspacePhase: "loading", notice: null })
+    this.startPromise = this.performRefresh(true).finally(() => {
+      this.startPromise = null
+    })
+    return this.startPromise
   }
 
   subscribe(listener: Listener): () => void {
@@ -153,11 +191,11 @@ export class AgentLoomSession {
 
   async openEntry(entry: SidebarEntry): Promise<void> {
     const index = this.entries.findIndex((candidate) => candidate.key === entry.key)
-    this.routeBusy = true
+    this.routeBusy = entry.kind === "system" || entry.kind === "run"
     this.patch({
       route: routeForEntry(entry),
       selectedIndex: index < 0 ? this.current.selectedIndex : index,
-      sidebarOpen: false,
+      sidebarOpen: true,
       systemDetail: null,
       runDetail: null,
       notice: null,
@@ -167,19 +205,64 @@ export class AgentLoomSession {
 
   refresh(): Promise<void> {
     if (this.refreshPromise) return this.refreshPromise
-    this.refreshPromise = this.performRefresh().finally(() => {
+    this.refreshPromise = this.performRefresh(false).finally(() => {
       this.refreshPromise = null
     })
     return this.refreshPromise
   }
 
   refreshLive(): Promise<void> {
-    if (this.current.route.type !== "run") return Promise.resolve()
+    if (this.current.workspacePhase !== "ready" || this.startPromise || this.refreshPromise) {
+      return Promise.resolve()
+    }
     if (this.liveRefreshPromise) return this.liveRefreshPromise
-    this.liveRefreshPromise = this.loadCurrentRoute().finally(() => {
+    this.liveRefreshPromise = this.performLiveRefresh().finally(() => {
       this.liveRefreshPromise = null
     })
     return this.liveRefreshPromise
+  }
+
+  private async performLiveRefresh(): Promise<void> {
+    try {
+      const routeWasRunning = this.current.route.type === "run"
+        && this.current.runDetail?.summary.status === "running"
+      const result = asRuntimeSummary(
+        await this.input.client.request("runtime.summary", {}),
+      )
+
+      // Status changes reorder the context entries. Preserve the user's logical
+      // selection by identity instead of keeping a now-stale numeric index.
+      const selectedKey = this.entries[this.current.selectedIndex]?.key
+      const snapshot = mergeRuntimeSummary(this.current.snapshot, result)
+      const groups = buildSidebarGroups(snapshot)
+      const entries = [...groups.systems, ...groups.runs]
+      const selectedIndex = selectedKey
+        ? entries.findIndex((entry) => entry.key === selectedKey)
+        : this.current.selectedIndex
+      const currentRoute = this.current.route
+      const removedCurrentRun = currentRoute.type === "run"
+        && !snapshot.runs.some((run) =>
+          run.run_id === currentRoute.runID
+          && run.application_id === currentRoute.applicationID)
+      this.patch({
+        snapshot,
+        runsIncomplete: result.runs_incomplete,
+        ...(removedCurrentRun
+          ? { route: { type: "builder" as const }, runDetail: null }
+          : {}),
+        selectedIndex: selectedIndex >= 0
+          ? selectedIndex
+          : Math.min(this.current.selectedIndex, Math.max(0, entries.length - 1)),
+      })
+
+      // The lightweight summary updates the whole project. Only fetch the
+      // heavier event/log payload when the currently open run was still live.
+      if (routeWasRunning && !removedCurrentRun && this.current.route.type === "run") {
+        await this.loadCurrentRoute()
+      }
+    } catch (error) {
+      this.patch({ notice: errorMessage(error) })
+    }
   }
 
   async submit(raw: string): Promise<void> {
@@ -217,10 +300,32 @@ export class AgentLoomSession {
       await this.applyDraft()
       return
     }
+    if (command.type === "invalid") {
+      this.patch({ notice: command.message })
+      return
+    }
+    if (command.type === "schedule.help") {
+      this.patch({
+        messages: [
+          ...this.current.messages,
+          {
+            id: this.nextMessageID(),
+            role: "assistant",
+            content: scheduleHelpMessage(this.current.snapshot),
+          },
+        ],
+        notice: null,
+      })
+      return
+    }
+    if (command.type === "schedule.add" || command.type === "schedule.mutate") {
+      await this.mutateSchedule(command)
+      return
+    }
     await this.sendBuilderMessage(command.message)
   }
 
-  private async performRefresh(): Promise<void> {
+  private async performRefresh(initial: boolean): Promise<void> {
     try {
       const result = asBootstrap(await this.input.client.request("bootstrap", {}))
       const entriesBefore = this.entries
@@ -231,19 +336,25 @@ export class AgentLoomSession {
         ? entriesAfter.findIndex((entry) => entry.key === selectedKey)
         : this.current.selectedIndex
       this.patch({
+        workspacePhase: "ready",
+        runsIncomplete: false,
+        modelType: initial ? result.models.default : this.current.modelType,
         selectedIndex: selectedIndex >= 0
           ? selectedIndex
           : Math.min(this.current.selectedIndex, Math.max(0, entriesAfter.length - 1)),
       })
       await this.loadCurrentRoute()
     } catch (error) {
-      this.patch({ notice: errorMessage(error) })
+      this.patch({
+        workspacePhase: initial ? "error" : this.current.workspacePhase,
+        notice: errorMessage(error),
+      })
     }
   }
 
   private async loadCurrentRoute(): Promise<void> {
     const route = this.current.route
-    if (route.type === "builder") return
+    if (route.type !== "system" && route.type !== "run") return
 
     const generation = ++this.routeLoadGeneration
     const managesRouteBusy = this.routeBusy
@@ -303,7 +414,7 @@ export class AgentLoomSession {
         && this.current.route.applicationID === route.applicationID
         && this.current.route.systemID === route.systemID
     }
-    return this.current.route.type === "builder"
+    return false
   }
 
   private async sendBuilderMessage(message: string): Promise<void> {
@@ -311,6 +422,8 @@ export class AgentLoomSession {
     this.patch({
       route: { type: "builder" },
       notice: null,
+      streamingText: "",
+      activities: [],
       messages: [
         ...this.current.messages,
         { id: this.nextMessageID(), role: "user", content: message },
@@ -318,7 +431,7 @@ export class AgentLoomSession {
     })
     try {
       const result = asBuilderSend(
-        await this.input.client.request("builder.send", {
+        await this.input.client.request("assistant.send", {
           session_id: this.sessionID,
           message,
           ...(this.current.modelType ? { model_type: this.current.modelType } : {}),
@@ -331,12 +444,14 @@ export class AgentLoomSession {
           ...this.current.messages,
           { id: this.nextMessageID(), role: "assistant", content: result.assistant },
         ],
+        streamingText: "",
+        activities: [],
       })
     } catch (error) {
       await this.syncBuilderDraft(errorMessage(error))
     } finally {
       this.builderBusy = false
-      this.patch({})
+      this.patch({ streamingText: "", activities: [] })
     }
   }
 
@@ -379,6 +494,58 @@ export class AgentLoomSession {
     }
   }
 
+  private async mutateSchedule(
+    command: Extract<ReturnType<typeof parseBuilderInput>, { type: "schedule.add" | "schedule.mutate" }>,
+  ): Promise<void> {
+    if (
+      command.type === "schedule.add"
+      && !this.current.snapshot.systems.some((system) => system.path === command.yamlPath)
+    ) {
+      this.patch({ notice: `Agent YAML 不在当前项目目录中: ${command.yamlPath}` })
+      return
+    }
+    this.builderBusy = true
+    this.patch({ route: { type: "builder" }, notice: null })
+    try {
+      const result = command.type === "schedule.add"
+        ? asScheduleMutation(await this.input.client.request("schedule.add", {
+            yaml_path: command.yamlPath,
+            name: command.name,
+            schedule: command.schedule,
+          }))
+        : asScheduleMutation(await this.input.client.request(
+            command.action === "pause"
+              ? "schedule.pause"
+              : command.action === "resume"
+                ? "schedule.resume"
+                : "schedule.remove",
+            { job_id: command.jobID },
+          ))
+      this.patch({
+        messages: [
+          ...this.current.messages,
+          {
+            id: this.nextMessageID(),
+            role: "assistant",
+            content: [
+              `Schedule ${result.action}: ${result.name} (${result.job_id}) · ${result.state}`,
+              command.type === "schedule.add"
+                && this.current.snapshot.schedules.service.state !== "running"
+                ? `调度服务当前未运行；任务不会自动触发。请另开终端运行：${schedulerServeCommand(this.current.snapshot)}`
+                : "",
+            ].filter(Boolean).join("\n"),
+          },
+        ],
+      })
+      await this.refresh()
+    } catch (error) {
+      this.patch({ notice: errorMessage(error) })
+    } finally {
+      this.builderBusy = false
+      this.patch({})
+    }
+  }
+
   private async syncBuilderDraft(notice: string): Promise<void> {
     try {
       const draft = asBuilderDraft(
@@ -394,14 +561,71 @@ export class AgentLoomSession {
     this.current = {
       ...this.current,
       ...patch,
+      assistantBusy: this.builderBusy,
+      detailBusy: this.routeBusy,
       busy: this.builderBusy || this.routeBusy,
     }
     for (const listener of this.listeners) listener(this.current)
   }
 
+  private handleEvent(event: AssistantTurnEventDto): void {
+    if (event.session_id !== this.sessionID) return
+    if (event.type === "turn.started") {
+      this.patch({ streamingText: "", activities: [] })
+      return
+    }
+    if (event.type === "turn.delta") {
+      this.patch({ streamingText: (this.current.streamingText + event.text).slice(-32_000) })
+      return
+    }
+    if (event.type === "turn.activity") {
+      const activities = [...this.current.activities]
+      if (event.state === "started") {
+        activities.push({ name: event.name, state: "started" })
+      } else {
+        const index = activities.findLastIndex(
+          (activity) => activity.name === event.name && activity.state === "started",
+        )
+        if (index >= 0) activities[index] = { name: event.name, state: "completed" }
+        else activities.push({ name: event.name, state: "completed" })
+      }
+      this.patch({ activities: activities.slice(-8) })
+    }
+  }
+
   private nextMessageID(): number {
     this.messageID += 1
     return this.messageID
+  }
+}
+
+export function createWorkspaceShell(projectRoot: string): BootstrapResultDto {
+  const root = resolve(projectRoot)
+  return {
+    project: { root, name: basename(root) },
+    models: { default: null, configured: false, items: [] },
+    systems: [],
+    runs: [],
+    worker_invocations: [],
+    worker_invocations_incomplete: false,
+    applications: [],
+    agents: [],
+    skills: [],
+    schedules: {
+      items: [],
+      service: {
+        state: "stopped",
+        pid: null,
+        started_at: null,
+        last_tick_at: null,
+        last_success_at: null,
+        last_error: null,
+        job_count: 0,
+        due_count: 0,
+        claimed_count: 0,
+        execution_count: 0,
+      },
+    },
   }
 }
 
@@ -428,6 +652,63 @@ function mergeRunSummary(
   return { ...snapshot, systems, runs }
 }
 
+function mergeRuntimeSummary(
+  snapshot: BootstrapResultDto,
+  summary: RuntimeSummaryDto,
+): BootstrapResultDto {
+  const removed = new Set(
+    summary.removed_runs.map(({ application_id, run_id }) => `${application_id}\0${run_id}`),
+  )
+  const retained = snapshot.runs.filter(
+    (run) => !removed.has(`${run.application_id}\0${run.run_id}`),
+  )
+  const live = summary.runs.filter(
+    (run) => !removed.has(`${run.application_id}\0${run.run_id}`),
+  )
+  const runs = summary.runs_incomplete
+    ? mergeRuntimeRunWindow(retained, live)
+    : live
+  const runCounts = new Map<string, { total: number; active: number }>()
+  for (const run of runs) {
+    const counts = runCounts.get(run.application_id) ?? { total: 0, active: 0 }
+    counts.total += 1
+    if (run.status === "running") counts.active += 1
+    runCounts.set(run.application_id, counts)
+  }
+  return {
+    ...snapshot,
+    systems: summary.systems,
+    runs,
+    worker_invocations: summary.worker_invocations,
+    worker_invocations_incomplete: summary.worker_invocations_incomplete,
+    applications: snapshot.applications.map((application) => {
+      const counts = runCounts.get(application.id) ?? { total: 0, active: 0 }
+      return {
+        ...application,
+        run_count: counts.total,
+        active_run_count: counts.active,
+      }
+    }),
+    schedules: summary.schedules,
+  }
+}
+
+function mergeRuntimeRunWindow(
+  cached: RunSummaryDto[],
+  liveWindow: RunSummaryDto[],
+): RunSummaryDto[] {
+  const byIdentity = new Map(
+    cached.map((run) => [`${run.application_id}\0${run.run_id}`, run]),
+  )
+  for (const run of liveWindow) {
+    byIdentity.set(`${run.application_id}\0${run.run_id}`, run)
+  }
+  return [...byIdentity.values()].sort((left, right) => {
+    const byStartedAt = (right.started_at ?? "").localeCompare(left.started_at ?? "")
+    return byStartedAt || right.run_id.localeCompare(left.run_id)
+  })
+}
+
 function modelCatalogMessage(snapshot: BootstrapResultDto): string {
   const configured = snapshot.models.items.filter((item) => item.configured)
   if (configured.length === 0) return "当前没有已配置的模型。"
@@ -441,11 +722,61 @@ function modelCatalogMessage(snapshot: BootstrapResultDto): string {
   ].join("\n")
 }
 
+function scheduleHelpMessage(snapshot: BootstrapResultDto): string {
+  return [
+    "定时任务命令：",
+    "- /schedule add <agent.yaml> --every 2h [--timezone Asia/Shanghai] [--name \"名称\"]",
+    "- /schedule add <agent.yaml> --cron \"0 9 * * *\" [--timezone Asia/Shanghai]",
+    "- /schedule add <agent.yaml> --at \"2026-07-19T09:00:00+08:00\"",
+    "- /schedule pause <job-id>",
+    "- /schedule resume <job-id>",
+    "- /schedule remove <job-id>",
+    `自动触发需要保持调度服务运行：${schedulerServeCommand(snapshot)}`,
+    "输入 Ctrl+P 搜索 Schedules，可查看下一次/上一次运行与服务状态。",
+  ].join("\n")
+}
+
+function schedulerServeCommand(snapshot: BootstrapResultDto): string {
+  return `agentloom schedules --project ${shellQuote(snapshot.project.root)} serve`
+}
+
+function shellQuote(value: string): string {
+  return `'${value.replaceAll("'", `'"'"'`)}'`
+}
+
 function asBootstrap(value: unknown): BootstrapResultDto {
-  if (!isRecord(value) || !Array.isArray(value.systems) || !Array.isArray(value.runs)) {
+  if (
+    !isRecord(value)
+    || !Array.isArray(value.systems)
+    || !Array.isArray(value.runs)
+    || !Array.isArray(value.worker_invocations)
+    || typeof value.worker_invocations_incomplete !== "boolean"
+  ) {
     throw new Error("bootstrap 返回格式无效")
   }
   return value as unknown as BootstrapResultDto
+}
+
+function asRuntimeSummary(value: unknown): RuntimeSummaryDto {
+  if (
+    !isRecord(value)
+    || !Array.isArray(value.systems)
+    || !Array.isArray(value.runs)
+    || typeof value.runs_incomplete !== "boolean"
+    || !Array.isArray(value.removed_runs)
+    || !value.removed_runs.every((removed) =>
+      isRecord(removed)
+      && typeof removed.application_id === "string"
+      && typeof removed.run_id === "string")
+    || !Array.isArray(value.worker_invocations)
+    || typeof value.worker_invocations_incomplete !== "boolean"
+    || !isRecord(value.schedules)
+    || !Array.isArray(value.schedules.items)
+    || !isRecord(value.schedules.service)
+  ) {
+    throw new Error("runtime.summary 返回格式无效")
+  }
+  return value as unknown as RuntimeSummaryDto
 }
 
 function asSystemDetail(value: unknown): SystemDetailResultDto {
@@ -475,7 +806,7 @@ function asBuilderSend(value: unknown): {
     || (value.model_type !== null && typeof value.model_type !== "string")
     || !isDraft(value.draft)
   ) {
-    throw new Error("builder.send 返回格式无效")
+    throw new Error("assistant.send 返回格式无效")
   }
   return value as {
     session_id: string
@@ -503,6 +834,29 @@ function asApplyResult(value: unknown): { applied: boolean; revision: number; fi
     applied: value.applied,
     revision: value.revision,
     files: value.files.map(String),
+  }
+}
+
+function asScheduleMutation(value: unknown): {
+  action: "add" | "pause" | "resume" | "remove"
+  job_id: string
+  name: string
+  state: string
+} {
+  if (
+    !isRecord(value)
+    || !["add", "pause", "resume", "remove"].includes(String(value.action))
+    || typeof value.job_id !== "string"
+    || typeof value.name !== "string"
+    || typeof value.state !== "string"
+  ) {
+    throw new Error("Schedule 操作返回格式无效")
+  }
+  return value as {
+    action: "add" | "pause" | "resume" | "remove"
+    job_id: string
+    name: string
+    state: string
   }
 }
 

@@ -38,7 +38,8 @@ class _FakeBuilderAgent:
 
     def run(self, prompt: str) -> str:
         self._captured_prompts.append(prompt)
-        if "create" in prompt.lower() or "创建" in prompt:
+        transcript = prompt.rsplit("Conversation (including the latest user message): ", 1)[-1]
+        if "create" in transcript.lower() or "创建" in transcript:
             self._tools["stage_agent_yaml"].forward(
                 "applications/reports/workflows/report_agent.yaml",
                 VALID_AGENT_YAML,
@@ -79,6 +80,123 @@ def test_builder_can_only_inspect_stage_and_validate_yaml(tmp_path: Path) -> Non
     assert response["draft"]["revision"] == 1
     assert response["draft"]["files"][0]["path"] == "applications/reports/workflows/report_agent.yaml"
     assert not (tmp_path / "applications/reports/workflows/report_agent.yaml").exists()
+
+
+def test_assistant_answers_general_questions_without_forcing_a_yaml_draft(
+    tmp_path: Path,
+) -> None:
+    service, _, prompts = _service(tmp_path, replies=["The configured model can answer that directly."])
+
+    response = service.send(
+        session_id="chat-1",
+        message="What is the difference between a process and a thread?",
+        model_type="powerful",
+    )
+
+    assert response["assistant"] == "The configured model can answer that directly."
+    assert response["draft"]["files"] == []
+    assert "general conversational assistant" in prompts[0]
+    assert "Do not force ordinary questions into Agent YAML work" in prompts[0]
+
+
+def test_tui_model_policy_does_not_inherit_long_agent_retry_settings() -> None:
+    from src.lib.smolagents.models.model_types import ModelConfig
+
+    long_running_agent_config = ModelConfig(
+        timeout=300,
+        num_retries=10_000,
+        retry_delay=30,
+        max_retry_delay=30,
+    )
+
+    effective = builder_module._tui_model_config_builder().build(long_running_agent_config)
+
+    assert effective.timeout == 45
+    assert effective.num_retries == 0
+    assert effective.retry_delay == 0
+    assert effective.max_retry_delay == 0
+
+
+def test_default_agent_factory_wires_the_tui_model_policy(monkeypatch: pytest.MonkeyPatch) -> None:
+    from src.lib.smolagents.agent import base_agent
+    from src.lib.smolagents.models import model_manager
+    from src.lib.smolagents.models.model_types import ModelConfig
+
+    captured: dict[str, object] = {}
+
+    def fake_get_model(model_type: str, **kwargs):
+        captured["model_type"] = model_type
+        captured.update(kwargs)
+        return object()
+
+    class FakeAgent:
+        def __init__(self, **kwargs):
+            captured["agent_kwargs"] = kwargs
+
+    monkeypatch.setattr(model_manager, "get_model", fake_get_model)
+    monkeypatch.setattr(base_agent, "ToolCallingAgentV2", FakeAgent)
+
+    builder_module._default_agent_factory([], "fast")
+
+    assert captured["model_type"] == "fast"
+    assert captured["framework"] == "smolagents"
+    effective = captured["model_builder"].build(
+        ModelConfig(timeout=300, num_retries=10_000, retry_delay=30, max_retry_delay=30)
+    )
+    assert (effective.timeout, effective.num_retries, effective.retry_delay, effective.max_retry_delay) == (
+        45,
+        0,
+        0,
+        0,
+    )
+
+
+def test_assistant_stream_reports_model_deltas_and_tool_activity(tmp_path: Path) -> None:
+    ChatMessageStreamDelta = type("ChatMessageStreamDelta", (), {})
+    ToolCall = type("ToolCall", (), {})
+    ToolOutput = type("ToolOutput", (), {})
+    FinalAnswerStep = type("FinalAnswerStep", (), {})
+
+    class _StreamingAgent:
+        def run(self, _prompt: str, **kwargs):
+            assert kwargs == {"stream": True}
+
+            def events():
+                delta = ChatMessageStreamDelta()
+                delta.content = "正在查看项目"
+                yield delta
+                call = ToolCall()
+                call.name = "inspect_agent_system"
+                yield call
+                output = ToolOutput()
+                output.tool_call = call
+                yield output
+                final = FinalAnswerStep()
+                final.output = "项目状态正常。"
+                yield final
+
+            return events()
+
+    service = BuilderService(
+        tmp_path,
+        agent_factory=lambda _tools, _model: _StreamingAgent(),
+    )
+    observed: list[dict[str, object]] = []
+
+    response = service.send(
+        session_id="chat-1",
+        message="看看项目状态",
+        on_event=observed.append,
+    )
+
+    assert response["assistant"] == "项目状态正常。"
+    assert observed == [
+        {"type": "turn.started"},
+        {"type": "turn.delta", "text": "正在查看项目"},
+        {"type": "turn.activity", "state": "started", "name": "inspect_agent_system"},
+        {"type": "turn.activity", "state": "completed", "name": "inspect_agent_system"},
+        {"type": "turn.completed"},
+    ]
 
 
 def test_draft_is_written_only_after_explicit_apply_with_matching_revision(tmp_path: Path) -> None:
@@ -523,6 +641,110 @@ def test_parent_replacement_conflict_rolls_back_in_opened_parent(
     assert (displaced_workflows / "second.yaml").read_text(encoding="utf-8") == "old second\n"
     assert list(displaced_workflows.glob(".*.agentloom-*")) == []
     assert list(outside.iterdir()) == []
+
+
+def test_single_file_apply_revalidates_parent_after_the_final_commit(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    workflows = tmp_path / "applications/reports/workflows"
+    displaced_workflows = workflows.with_name("workflows-original")
+    service, _, _ = _service(tmp_path)
+    service.send(session_id="builder-1", message="Create a report agent")
+    target_name = "report_agent.yaml"
+    real_link = os.link
+    swapped = False
+
+    def swap_parent_after_link(
+        source: str | bytes | os.PathLike[str] | os.PathLike[bytes],
+        destination: str | bytes | os.PathLike[str] | os.PathLike[bytes],
+        *,
+        src_dir_fd: int | None = None,
+        dst_dir_fd: int | None = None,
+        follow_symlinks: bool = True,
+    ) -> None:
+        nonlocal swapped
+        real_link(
+            source,
+            destination,
+            src_dir_fd=src_dir_fd,
+            dst_dir_fd=dst_dir_fd,
+            follow_symlinks=follow_symlinks,
+        )
+        if not swapped and os.fsdecode(destination) == target_name:
+            workflows.rename(displaced_workflows)
+            workflows.mkdir()
+            swapped = True
+
+    monkeypatch.setattr(os, "link", swap_parent_after_link)
+
+    with pytest.raises(DraftConflictError, match="parent changed before commit"):
+        service.apply_draft(session_id="builder-1", expected_revision=1)
+
+    assert swapped is True
+    assert not (workflows / target_name).exists()
+    assert not (displaced_workflows / target_name).exists()
+    assert list(displaced_workflows.glob(".*.agentloom-*")) == []
+
+
+def test_apply_fsyncs_parent_directory_after_commit_and_rollback_mutations(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    first_path = "applications/reports/workflows/first.yaml"
+    second_path = "applications/reports/workflows/second.yaml"
+    first = tmp_path / first_path
+    second = tmp_path / second_path
+    first.parent.mkdir(parents=True)
+    first.write_text("old first\n", encoding="utf-8")
+    second.write_text("old second\n", encoding="utf-8")
+
+    class _TwoFileAgent:
+        def __init__(self, tools):
+            self._tools = {tool.name: tool for tool in tools}
+
+        def run(self, _prompt: str) -> str:
+            self._tools["stage_agent_yaml"].forward(first_path, VALID_AGENT_YAML)
+            self._tools["stage_agent_yaml"].forward(
+                second_path,
+                VALID_AGENT_YAML.replace("report_agent", "second_agent"),
+            )
+            return "ready"
+
+    service = BuilderService(tmp_path, agent_factory=lambda tools, _model: _TwoFileAgent(tools))
+    service.send(session_id="builder-1", message="create two")
+    real_replace = os.replace
+    real_fsync = os.fsync
+    events: list[str] = []
+
+    def record_replace(
+        source: str | bytes | os.PathLike[str] | os.PathLike[bytes],
+        target: str | bytes | os.PathLike[str] | os.PathLike[bytes],
+        *,
+        src_dir_fd: int | None = None,
+        dst_dir_fd: int | None = None,
+    ) -> None:
+        source_name = os.fsdecode(source)
+        target_name = os.fsdecode(target)
+        if Path(source_name).suffix == ".tmp" and target_name == second.name:
+            raise OSError("second replace failed")
+        events.append(f"replace:{Path(source_name).suffix}->{target_name}")
+        real_replace(source, target, src_dir_fd=src_dir_fd, dst_dir_fd=dst_dir_fd)
+
+    def record_fsync(descriptor: int) -> None:
+        events.append("fsync:directory" if stat.S_ISDIR(os.fstat(descriptor).st_mode) else "fsync:file")
+        real_fsync(descriptor)
+
+    monkeypatch.setattr(os, "replace", record_replace)
+    monkeypatch.setattr(os, "fsync", record_fsync)
+
+    with pytest.raises(OSError, match="second replace failed"):
+        service.apply_draft(session_id="builder-1", expected_revision=2)
+
+    first_commit = events.index("replace:.tmp->first.yaml")
+    first_rollback = events.index("replace:.bak->first.yaml")
+    assert events[first_commit + 1] == "fsync:directory"
+    assert events[first_rollback + 1] == "fsync:directory"
+    assert first.read_text(encoding="utf-8") == "old first\n"
+    assert second.read_text(encoding="utf-8") == "old second\n"
 
 
 def test_prepare_failure_removes_partial_temporary_and_backup_files(

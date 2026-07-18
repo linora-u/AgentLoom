@@ -58,6 +58,7 @@ dependencies = [
     "pathspec>=0.12.0",
     # CLI
     "click>=8.1.0",
+    "croniter>=6.0.0,<7.0.0",
     # Visualization server
     "flask>=3.0.0",
     # Misc tools

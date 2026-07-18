@@ -1,8 +1,241 @@
-import type { RunDetailResultDto, SystemDetailResultDto } from "../domain"
+import type {
+  AgentCatalogDto,
+  BootstrapResultDto,
+  RunDetailResultDto,
+  ScheduleTriggerDto,
+  SystemDetailResultDto,
+} from "../domain"
+import type { AppRoute } from "./controller"
 
 export type DetailSection = {
   title: string
   lines: string[]
+}
+
+export type WorkspaceEntityDetail = {
+  title: string
+  subtitle: string
+  sections: DetailSection[]
+}
+
+export function workspaceEntityDetail(
+  snapshot: BootstrapResultDto,
+  route: AppRoute,
+): WorkspaceEntityDetail | null {
+  if (route.type === "application") {
+    const application = snapshot.applications.find((item) => item.id === route.applicationID)
+    if (!application) return null
+    const agents = flattenAgents(snapshot.agents).filter(
+      (item) => item.agent.application_id === application.id,
+    )
+    const skills = snapshot.skills.filter((item) => item.application_id === application.id)
+    const runs = snapshot.runs.filter((item) => item.application_id === application.id)
+    return {
+      title: "Application",
+      subtitle: application.name,
+      sections: compactSections([
+        {
+          title: "概览",
+          lines: [
+            `路径: ${application.path}`,
+            `Supervisors: ${application.system_count}`,
+            `Workers: ${application.worker_count}`,
+            `Skills: ${application.skill_count}`,
+            `Runs: ${application.run_count}`,
+            `当前运行: ${application.active_run_count}`,
+          ],
+        },
+        {
+          title: "Agents",
+          lines: agents.map(({ agent, depth }) => `${"  ".repeat(depth)}${agent.name} (${agent.role})`),
+        },
+        {
+          title: "Skills",
+          lines: skills.map((skill) => `${skill.name} — ${skill.description || skill.path}`),
+        },
+        {
+          title: "最近运行",
+          lines: runs.slice(0, 20).map((run) => `${run.run_id} — ${run.status}`),
+        },
+      ]),
+    }
+  }
+
+  if (route.type === "agent") {
+    const node = flattenAgents(snapshot.agents).find((item) => item.agent.id === route.agentID)
+    if (!node) return null
+    const agent = node.agent
+    const system = snapshot.systems.find((item) => item.id === route.systemID)
+    const parent = node.parentID
+      ? flattenAgents(snapshot.agents).find((item) => item.agent.id === node.parentID)?.agent
+      : null
+    const invocation = agent.role === "worker"
+      ? snapshot.worker_invocations.find(
+          (item) => item.system_id === route.systemID && item.agent_name === agent.name,
+        )
+      : undefined
+    const runtime = agent.role === "worker"
+      ? invocation
+        ? [
+            "运行范围: 由 Supervisor Run 调用，不存在独立的项目级 Run",
+            `Agent 状态: ${invocation.status}`,
+            `父 Agent 状态: ${system?.state ?? "unknown"}`,
+            `Run: ${invocation.run_id}`,
+            `调用: #${invocation.call_index}`,
+            `Step: ${invocation.step ?? "—"}`,
+            `开始: ${invocation.started_at ?? "—"}`,
+            `结束: ${invocation.ended_at ?? "—"}`,
+            `错误: ${invocation.error ?? "—"}`,
+          ]
+        : [
+            "运行范围: 由 Supervisor Run 调用，不存在独立的项目级 Run",
+            `Agent 状态: ${snapshot.worker_invocations_incomplete ? "incomplete" : "never_run"}`,
+            `父 Agent 状态: ${system?.state ?? "unknown"}`,
+            snapshot.worker_invocations_incomplete
+              ? "Worker 状态投影不完整，无法判断该 Agent 是否运行过"
+              : "尚无 Worker 调用记录",
+          ]
+      : [
+          `Agent 状态: ${system?.state ?? "unknown"}`,
+          `最近 Run: ${system?.latest_run?.run_id ?? "—"}`,
+        ]
+    return {
+      title: agent.role === "worker" ? "Worker Agent" : "Agent",
+      subtitle: agent.name,
+      sections: compactSections([
+        {
+          title: "定义",
+          lines: [
+            `角色: ${agent.role}`,
+            `Application: ${agent.application_id}`,
+            `说明: ${agent.description || "—"}`,
+            `路径: ${agent.path}`,
+            `父 Agent: ${parent?.name ?? "—"}`,
+          ],
+        },
+        {
+          title: "Skills",
+          lines: [
+            `加载模式: ${agent.skills.load_mode ?? "未指定"}`,
+            ...agent.skills.items,
+          ],
+        },
+        {
+          title: "子 Agents",
+          lines: agent.workers.map((worker) => `${worker.name} — ${worker.description || worker.path}`),
+        },
+        { title: "运行", lines: runtime },
+      ]),
+    }
+  }
+
+  if (route.type === "skill") {
+    const skill = snapshot.skills.find((item) => item.id === route.skillID)
+    if (!skill) return null
+    const configuredBy = flattenAgents(snapshot.agents)
+      .filter(({ agent }) => agent.skills.items.includes(skill.name) || agent.skills.items.includes(skill.path))
+      .map(({ agent }) => agent.name)
+    return {
+      title: "Skill",
+      subtitle: skill.name,
+      sections: compactSections([
+        {
+          title: "定义",
+          lines: [
+            `Application: ${skill.application_id}`,
+            `来源: ${skill.origin}`,
+            `说明: ${skill.description || "—"}`,
+            `路径: ${skill.path}`,
+          ],
+        },
+        { title: "配置到 Agents", lines: configuredBy },
+      ]),
+    }
+  }
+
+  if (route.type === "schedule") {
+    const schedule = snapshot.schedules.items.find((item) => item.id === route.scheduleID)
+    if (!schedule) return null
+    const execution = schedule.last_execution
+    const service = snapshot.schedules.service
+    return {
+      title: "Schedule",
+      subtitle: schedule.name,
+      sections: compactSections([
+        {
+          title: "计划",
+          lines: [
+            `状态: ${schedule.state}`,
+            `启用: ${schedule.enabled ? "是" : "否"}`,
+            `触发: ${scheduleTriggerText(schedule.trigger)}`,
+            `Agent YAML: ${schedule.yaml_path ?? "—"}`,
+            `下次运行: ${schedule.next_run_at ?? "—"}`,
+          ],
+        },
+        {
+          title: "历史",
+          lines: [
+            `运行次数: ${schedule.run_count}`,
+            `上次运行: ${schedule.last_run_at ?? "—"}`,
+            `上次状态: ${schedule.last_status ?? "—"}`,
+            ...(execution
+              ? [
+                  `Execution: ${execution.id}`,
+                  `开始: ${execution.started_at ?? "—"}`,
+                  `结束: ${execution.finished_at ?? "—"}`,
+                  ...(execution.error ? [`错误: ${execution.error}`] : []),
+                ]
+              : []),
+          ],
+        },
+        {
+          title: "服务",
+          lines: [
+            `调度服务: ${service.state}`,
+            `PID: ${service.pid ?? "—"}`,
+            `上次 tick: ${service.last_tick_at ?? "—"}`,
+            `执行总数: ${service.execution_count}`,
+            ...(service.last_error ? [`服务错误: ${service.last_error}`] : []),
+          ],
+        },
+        {
+          title: "操作",
+          lines: [
+            schedule.enabled
+              ? `/schedule pause ${schedule.id}`
+              : `/schedule resume ${schedule.id}`,
+            `/schedule remove ${schedule.id}`,
+            "输入 /schedule 查看创建命令",
+          ],
+        },
+      ]),
+    }
+  }
+
+  return null
+}
+
+type FlatAgent = {
+  agent: AgentCatalogDto
+  parentID: string | null
+  depth: number
+}
+
+function flattenAgents(roots: AgentCatalogDto[]): FlatAgent[] {
+  const result: FlatAgent[] = []
+  const visit = (agent: AgentCatalogDto, parentID: string | null, depth: number) => {
+    result.push({ agent, parentID, depth })
+    for (const worker of agent.workers) visit(worker, agent.id, depth + 1)
+  }
+  for (const root of roots) visit(root, null, 0)
+  return result
+}
+
+function scheduleTriggerText(trigger: ScheduleTriggerDto): string {
+  if (trigger.kind === "cron") return `cron ${trigger.expression} (${trigger.timezone})`
+  if (trigger.kind === "interval") return `every ${trigger.seconds}s (${trigger.timezone})`
+  if (trigger.kind === "once") return `once ${trigger.at ?? "—"} (${trigger.timezone})`
+  return "unknown"
 }
 
 export function systemDetailSections(detail: SystemDetailResultDto): DetailSection[] {

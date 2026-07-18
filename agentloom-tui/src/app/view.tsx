@@ -13,6 +13,7 @@
 import {
   RGBA,
   TextAttributes,
+  type InputRenderable,
   type ScrollBoxRenderable,
   type TextareaRenderable,
 } from "@opentui/core"
@@ -28,8 +29,20 @@ import {
   onCleanup,
   onMount,
 } from "solid-js"
-import { buildSidebarGroups, type SidebarEntry } from "./controller"
-import { runDetailSections, systemDetailSections, type DetailSection } from "./presentation"
+import {
+  buildPaletteItems,
+  buildModelPaletteItems,
+  buildSidebarGroups,
+  flattenAgentCatalog,
+  type PaletteItem,
+  type SidebarEntry,
+} from "./controller"
+import {
+  runDetailSections,
+  systemDetailSections,
+  workspaceEntityDetail,
+  type DetailSection,
+} from "./presentation"
 import {
   type AgentLoomSession,
   type AgentLoomSessionState,
@@ -54,17 +67,42 @@ export type AgentLoomAppProps = {
   refreshIntervalMs?: number
 }
 
+// Braille sequence and cadence follow OpenCode's spinner primitive at the
+// pinned MIT-licensed upstream commit documented above.
+const SPINNER_FRAMES = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"] as const
+
 export function AgentLoomApp(props: AgentLoomAppProps) {
   const renderer = useRenderer()
   const dimensions = useTerminalDimensions()
   const mode = createMemo<ThemeMode>(() => renderer.themeMode === "light" ? "light" : "dark")
   const theme = createMemo(() => themeFor(mode()))
   const [state, setState] = createSignal(props.session.state)
-  const [focus, setFocus] = createSignal<"builder" | "sidebar">("builder")
+  const [focus, setFocus] = createSignal<"builder" | "context">("builder")
+  const [animationFrame, setAnimationFrame] = createSignal(0)
+  const [paletteOpen, setPaletteOpen] = createSignal(false)
+  const [paletteQuery, setPaletteQuery] = createSignal("")
+  const [paletteSelected, setPaletteSelected] = createSignal(0)
+  const [paletteScope, setPaletteScope] = createSignal<"all" | "models">("all")
   let input: TextareaRenderable | undefined
+  let paletteInput: InputRenderable | undefined
+  let contextScrollbox: ScrollBoxRenderable | undefined
 
   const unsubscribe = props.session.subscribe(setState)
   onCleanup(unsubscribe)
+  createEffect(() => {
+    const active = state().workspacePhase === "loading"
+      || state().assistantBusy
+      || state().detailBusy
+    if (!active) {
+      setAnimationFrame(0)
+      return
+    }
+    const animation = setInterval(
+      () => setAnimationFrame((value) => (value + 1) % SPINNER_FRAMES.length),
+      80,
+    )
+    onCleanup(() => clearInterval(animation))
+  })
 
   const refreshEvery = props.refreshIntervalMs ?? 2_000
   if (refreshEvery > 0) {
@@ -79,6 +117,10 @@ export function AgentLoomApp(props: AgentLoomAppProps) {
   }))
   const snapshot = createMemo(() => state().snapshot)
   const groups = createMemo(() => buildSidebarGroups(snapshot()))
+  const paletteItems = createMemo(() => paletteScope() === "models"
+    ? buildModelPaletteItems(snapshot(), state().modelType)
+    : buildPaletteItems(snapshot()))
+  const filteredPaletteItems = createMemo(() => filterPaletteItems(paletteItems(), paletteQuery()))
   onMount(() => {
     setTimeout(() => {
       if (input?.isDestroyed) return
@@ -88,7 +130,12 @@ export function AgentLoomApp(props: AgentLoomAppProps) {
 
   createEffect(() => {
     if (!input || input.isDestroyed) return
-    if (focus() === "builder" && state().route.type === "builder" && !state().busy) {
+    if (
+      !paletteOpen()
+      && focus() === "builder"
+      && state().route.type === "builder"
+      && !state().assistantBusy
+    ) {
       input.focus()
       return
     }
@@ -101,39 +148,92 @@ export function AgentLoomApp(props: AgentLoomAppProps) {
       props.onExit()
       return
     }
+    if (event.ctrl && event.name === "p") {
+      event.preventDefault()
+      if (paletteOpen()) closePalette()
+      else openPalette()
+      return
+    }
+    if (paletteOpen()) {
+      if (event.name === "escape") {
+        event.preventDefault()
+        closePalette()
+        return
+      }
+      if (event.name === "up") {
+        event.preventDefault()
+        movePalette(-1)
+        return
+      }
+      if (event.name === "down") {
+        event.preventDefault()
+        movePalette(1)
+        return
+      }
+      if (event.name === "return" || event.name === "enter") {
+        event.preventDefault()
+        activatePaletteItem()
+        return
+      }
+      return
+    }
+    if (event.name === "f6" && layout().visible) {
+      event.preventDefault()
+      if (focus() === "context") {
+        setFocus("builder")
+        setTimeout(() => input?.focus(), 1)
+      } else {
+        setFocus("context")
+        input?.blur()
+      }
+      return
+    }
     if (event.name === "tab") {
       event.preventDefault()
-      if (focus() === "builder") {
-        setFocus("sidebar")
-        props.session.setSidebarOpen(true)
-      } else {
-        setFocus("builder")
-        if (layout().mode === "overlay") props.session.setSidebarOpen(false)
-      }
+      openPalette()
+      return
+    }
+
+    if (
+      state().route.type !== "builder"
+      && (event.name === "escape" || (event.name === "b" && !event.ctrl && !event.meta && !event.option))
+    ) {
+      event.preventDefault()
+      props.session.goBuilder()
+      if (layout().mode === "overlay") props.session.setSidebarOpen(false)
+      setFocus("builder")
+      return
+    }
+
+    const contextNavigation = ["pageup", "pagedown"].includes(event.name)
+      || (focus() === "context" && ["up", "down", "home", "end"].includes(event.name))
+    if (layout().visible && contextNavigation) {
+      navigateContext(event)
       return
     }
 
     const editing = renderer.currentFocusedEditor === input
     if (editing) return
 
+    if (
+      focus() === "builder"
+      && !state().assistantBusy
+      && !event.shift
+      && !event.ctrl
+      && !event.meta
+      && !event.option
+      && !event.super
+      && !event.hyper
+      && ["return", "enter", "kpenter", "linefeed"].includes(event.name)
+    ) {
+      event.preventDefault()
+      input?.submit()
+      return
+    }
+
     if (event.name === "q") {
       event.preventDefault()
       props.onExit()
-      return
-    }
-    if (event.name === "up") {
-      event.preventDefault()
-      props.session.select(-1)
-      return
-    }
-    if (event.name === "down") {
-      event.preventDefault()
-      props.session.select(1)
-      return
-    }
-    if (event.name === "return" || event.name === "enter") {
-      event.preventDefault()
-      void props.session.openSelected()
       return
     }
     if (event.name === "r") {
@@ -163,6 +263,83 @@ export function AgentLoomApp(props: AgentLoomAppProps) {
     }
   })
 
+  function openPalette(scope: "all" | "models" = "all") {
+    setPaletteScope(scope)
+    setPaletteQuery("")
+    setPaletteSelected(0)
+    setPaletteOpen(true)
+    input?.blur()
+    setTimeout(() => paletteInput?.focus(), 1)
+  }
+
+  function closePalette(restoreBuilderFocus = true) {
+    setPaletteOpen(false)
+    paletteInput?.blur()
+    if (restoreBuilderFocus) {
+      setFocus("builder")
+      setTimeout(() => input?.focus(), 1)
+    } else {
+      setFocus("context")
+      input?.blur()
+    }
+  }
+
+  function movePalette(delta: number) {
+    const count = filteredPaletteItems().length
+    if (count === 0) return
+    setPaletteSelected((current) => (current + delta + count) % count)
+  }
+
+  function navigateContext(event: Parameters<ScrollBoxRenderable["handleKeyPress"]>[0]) {
+    if (!layout().visible || !contextScrollbox || contextScrollbox.isDestroyed) return
+    event.preventDefault()
+    contextScrollbox.handleKeyPress(event)
+  }
+
+  function activatePaletteItem(index = paletteSelected()) {
+    const item = filteredPaletteItems()[index]
+    if (!item) return
+    if ("modelType" in item) {
+      closePalette()
+      void props.session.submit(`/model ${item.modelType}`)
+      return
+    }
+    if ("entry" in item) {
+      closePalette(false)
+      void props.session.openEntry(item.entry)
+      return
+    }
+    if (item.action === "models") {
+      openPalette("models")
+      return
+    }
+    closePalette()
+    if (item.action === "chat") props.session.goBuilder()
+    if (item.action === "refresh") void props.session.refresh()
+    if (item.action === "apply") void props.session.submit("/apply")
+    if (item.action === "schedules") void props.session.submit("/schedule")
+  }
+
+  function submitBuilder(value: string) {
+    if (value.trim() === "/models") {
+      openPalette("models")
+      return
+    }
+    void props.session.submit(value)
+  }
+
+  function openContextEntry(entry: SidebarEntry) {
+    setFocus("context")
+    input?.blur()
+    void props.session.openEntry(entry)
+  }
+
+  function closeContext() {
+    props.session.goBuilder()
+    if (layout().mode === "overlay") props.session.setSidebarOpen(false)
+    setFocus("builder")
+  }
+
   return (
     <box width="100%" height="100%" backgroundColor={theme().background} flexDirection="row">
       <box flexGrow={1} minWidth={0} height="100%">
@@ -170,38 +347,24 @@ export function AgentLoomApp(props: AgentLoomAppProps) {
           theme={theme()}
           project={state().snapshot.project.name || props.projectRoot}
           model={state().modelType}
-          busy={state().busy}
+          workspacePhase={state().workspacePhase}
+          assistantBusy={state().assistantBusy}
+          spinner={SPINNER_FRAMES[animationFrame()]!}
         />
         <box flexGrow={1} minHeight={0} paddingLeft={2} paddingRight={2} paddingBottom={1}>
-          <Switch>
-            <Match when={state().route.type === "builder"}>
-              <BuilderView
-                state={state()}
-                theme={theme()}
-                focus={focus() === "builder"}
-                bindInput={(value) => (input = value)}
-                submit={(value) => void props.session.submit(value)}
-              />
-            </Match>
-            <Match when={state().route.type === "system"}>
-              <DetailView
-                title="Agent System"
-                subtitle={state().systemDetail?.summary.application_id ?? "加载中…"}
-                sections={state().systemDetail ? systemDetailSections(state().systemDetail!) : []}
-                busy={state().busy}
-                theme={theme()}
-              />
-            </Match>
-            <Match when={state().route.type === "run"}>
-              <DetailView
-                title="Agent Run"
-                subtitle={state().runDetail?.summary.run_id ?? "加载中…"}
-                sections={state().runDetail ? runDetailSections(state().runDetail!) : []}
-                busy={state().busy}
-                theme={theme()}
-              />
-            </Match>
-          </Switch>
+          <BuilderView
+            state={state()}
+            theme={theme()}
+            focus={focus() === "builder" && !paletteOpen()}
+            bindInput={(value) => (input = value)}
+            submit={submitBuilder}
+            navigateContext={navigateContext}
+            focusContext={() => {
+              setFocus("context")
+              input?.blur()
+            }}
+            spinner={SPINNER_FRAMES[animationFrame()]!}
+          />
           <Show when={state().notice}>
             <box flexShrink={0} marginTop={1} paddingLeft={1} border={["left"]} borderColor={theme().warning}>
               <text fg={theme().warning} wrapMode="word">{state().notice}</text>
@@ -214,16 +377,19 @@ export function AgentLoomApp(props: AgentLoomAppProps) {
       <Show when={layout().visible}>
         <Switch>
           <Match when={layout().mode === "inline"}>
-            <Sidebar
+            <ContextSidebar
+              state={state()}
               groups={groups()}
-              selected={state().selectedIndex}
               theme={theme()}
               mode={mode()}
-              onSelect={(entry, index) => {
-                props.session.setSelected(index)
-                void props.session.openEntry(entry)
+              spinner={SPINNER_FRAMES[animationFrame()]!}
+              bindScrollbox={(value) => (contextScrollbox = value)}
+              onOpenEntry={openContextEntry}
+              onClose={closeContext}
+              onFocus={() => {
+                setFocus("context")
+                input?.blur()
               }}
-              onHover={(index) => props.session.setSelected(index)}
             />
           </Match>
           <Match when={layout().mode === "overlay"}>
@@ -237,20 +403,40 @@ export function AgentLoomApp(props: AgentLoomAppProps) {
               alignItems="flex-end"
               backgroundColor={RGBA.fromInts(0, 0, 0, 90)}
             >
-              <Sidebar
+              <ContextSidebar
+                state={state()}
                 groups={groups()}
-                selected={state().selectedIndex}
                 theme={theme()}
                 mode={mode()}
-                onSelect={(entry, index) => {
-                  props.session.setSelected(index)
-                  void props.session.openEntry(entry)
+                spinner={SPINNER_FRAMES[animationFrame()]!}
+                bindScrollbox={(value) => (contextScrollbox = value)}
+                onOpenEntry={openContextEntry}
+                onClose={closeContext}
+                onFocus={() => {
+                  setFocus("context")
+                  input?.blur()
                 }}
-                onHover={(index) => props.session.setSelected(index)}
               />
             </box>
           </Match>
         </Switch>
+      </Show>
+      <Show when={paletteOpen()}>
+        <CommandPalette
+          items={filteredPaletteItems()}
+          selected={paletteSelected()}
+          query={paletteQuery()}
+          scope={paletteScope()}
+          theme={theme()}
+          bindInput={(value) => (paletteInput = value)}
+          onQuery={(value) => {
+            setPaletteQuery(value)
+            setPaletteSelected(0)
+          }}
+          onHover={setPaletteSelected}
+          onSelect={activatePaletteItem}
+          onClose={closePalette}
+        />
       </Show>
     </box>
   )
@@ -260,8 +446,16 @@ function Header(props: {
   theme: AgentLoomPalette
   project: string
   model: string | null
-  busy: boolean
+  workspacePhase: AgentLoomSessionState["workspacePhase"]
+  assistantBusy: boolean
+  spinner: string
 }) {
+  const activity = () => {
+    if (props.workspacePhase === "loading") return `${props.spinner} 正在索引项目…`
+    if (props.workspacePhase === "error") return "索引失败 · /refresh 重试"
+    if (props.assistantBusy) return `${props.spinner} AgentLoom 正在思考…`
+    return `model: ${props.model ?? "未配置"}`
+  }
   return (
     <box flexShrink={0} paddingLeft={2} paddingRight={2} paddingTop={1} paddingBottom={1}>
       <For each={AGENTLOOM_LOGO}>
@@ -269,8 +463,8 @@ function Header(props: {
       </For>
       <box flexDirection="row" justifyContent="space-between" marginTop={1}>
         <text fg={props.theme.text} attributes={TextAttributes.BOLD}>{props.project}</text>
-        <text fg={props.busy ? props.theme.warning : props.theme.muted}>
-          {props.busy ? "处理中…" : `model: ${props.model ?? "未配置"}`}
+        <text fg={props.workspacePhase === "error" ? props.theme.error : props.workspacePhase === "loading" || props.assistantBusy ? props.theme.warning : props.theme.muted}>
+          {activity()}
         </text>
       </box>
     </box>
@@ -283,6 +477,9 @@ function BuilderView(props: {
   focus: boolean
   bindInput: (input: TextareaRenderable) => void
   submit: (value: string) => void
+  navigateContext: (event: Parameters<ScrollBoxRenderable["handleKeyPress"]>[0]) => void
+  focusContext: () => void
+  spinner: string
 }) {
   let textarea: TextareaRenderable | undefined
   const modelSummary = () => props.state.snapshot.models.items
@@ -292,16 +489,22 @@ function BuilderView(props: {
 
   function submit() {
     const value = textarea?.plainText.trim() ?? ""
-    if (!value || props.state.busy) return
+    if (!value || props.state.assistantBusy) return
     textarea?.clear()
     props.submit(value)
+  }
+
+  function requestSubmit() {
+    // Match OpenCode's IME handling: Return can arrive before the final CJK
+    // composition is flushed into plainText, so read the buffer two tasks later.
+    setTimeout(() => setTimeout(submit, 0), 0)
   }
 
   return (
     <box flexGrow={1} minHeight={0}>
       <box flexDirection="row" justifyContent="space-between" flexShrink={0} marginBottom={1}>
-        <text fg={props.theme.text} attributes={TextAttributes.BOLD}>Agent Builder</text>
-        <text fg={props.theme.muted}>只生成与校验 YAML，不执行 Agent</text>
+        <text fg={props.theme.text} attributes={TextAttributes.BOLD}>AgentLoom Chat</text>
+        <text fg={props.theme.muted}>普通对话 · 项目观察 · Agent YAML 提案</text>
       </box>
       <text flexShrink={0} fg={props.theme.muted} marginBottom={1}>
         {`Models: ${modelSummary()}`}
@@ -322,7 +525,25 @@ function BuilderView(props: {
           <For each={props.state.messages}>
             {(message) => <ChatMessageView message={message} theme={props.theme} />}
           </For>
-          <Show when={props.state.draft}>
+          <Show when={props.state.streamingText}>
+            <box flexShrink={0} border={["left"]} borderColor={props.theme.secondary} paddingLeft={1} paddingTop={1} paddingBottom={1}>
+              <text fg={props.theme.secondary} attributes={TextAttributes.BOLD}>AgentLoom · streaming</text>
+              <text fg={props.theme.text} wrapMode="word">{props.state.streamingText}</text>
+            </box>
+          </Show>
+          <For each={props.state.activities}>
+            {(activity) => (
+              <text fg={activity.state === "completed" ? props.theme.success : props.theme.warning}>
+                {activity.state === "completed" ? "✓" : props.spinner} {activity.name}
+              </text>
+            )}
+          </For>
+          <Show when={props.state.assistantBusy}>
+            <box flexShrink={0} border={["left"]} borderColor={props.theme.warning} paddingLeft={1} paddingTop={1} paddingBottom={1}>
+              <text fg={props.theme.warning}>{props.spinner} AgentLoom 正在思考并调用所需能力…</text>
+            </box>
+          </Show>
+          <Show when={props.state.draft?.files.length ? props.state.draft : undefined}>
             {(draft) => (
               <box
                 flexShrink={0}
@@ -370,16 +591,16 @@ function BuilderView(props: {
             textarea = value
             props.bindInput(value)
           }}
-          focused={props.focus && !props.state.busy}
+          focused={props.focus && !props.state.assistantBusy}
           minHeight={1}
           maxHeight={5}
-          placeholder="描述要创建的 Agent，或输入 /models、/model <type>、/refresh、/apply"
+          placeholder="问任何问题，或让我查看/创建 Agent；输入 /models、/refresh、/apply"
           placeholderColor={props.theme.muted}
           textColor={props.theme.text}
           focusedTextColor={props.theme.text}
           backgroundColor={props.theme.element}
           focusedBackgroundColor={props.theme.element}
-          cursorColor={props.state.busy ? props.theme.element : props.theme.primary}
+          cursorColor={props.state.assistantBusy ? props.theme.element : props.theme.primary}
           keyBindings={[
             { name: "return", action: "submit" },
             { name: "kpenter", action: "submit" },
@@ -388,16 +609,32 @@ function BuilderView(props: {
             { name: "kpenter", shift: true, action: "newline" },
           ]}
           onKeyDown={(event) => {
-            if (props.state.busy) event.preventDefault()
+            if (event.name === "f6") {
+              event.preventDefault()
+              props.focusContext()
+              return
+            }
+            if (["pageup", "pagedown"].includes(event.name)) {
+              props.navigateContext(event)
+              return
+            }
+            if (props.state.assistantBusy) event.preventDefault()
           }}
-          onSubmit={submit}
+          onSubmit={requestSubmit}
           onMouseDown={() => textarea?.focus()}
         />
       </box>
       <box flexShrink={0} flexDirection="row" gap={2} paddingTop={1}>
-        <text fg={props.theme.muted}>Enter 发送</text>
+        <text
+          id="agentloom-send-control"
+          fg={props.state.assistantBusy ? props.theme.muted : props.theme.primary}
+          attributes={props.state.assistantBusy ? undefined : TextAttributes.BOLD}
+          onMouseDown={requestSubmit}
+        >
+          [ Enter 发送 ]
+        </text>
         <text fg={props.theme.muted}>/apply 显式写入</text>
-        <text fg={props.theme.muted}>Tab 浏览状态</text>
+        <text fg={props.theme.muted}>Ctrl+P 浏览工作台</text>
       </box>
     </box>
   )
@@ -427,7 +664,9 @@ function DetailView(props: {
   subtitle: string
   sections: DetailSection[]
   busy: boolean
+  spinner: string
   theme: AgentLoomPalette
+  bindScrollbox?: (value: ScrollBoxRenderable) => void
 }) {
   return (
     <box flexGrow={1} minHeight={0}>
@@ -435,8 +674,10 @@ function DetailView(props: {
         <text fg={props.theme.text} attributes={TextAttributes.BOLD}>{props.title}</text>
         <text fg={props.theme.muted}>{props.subtitle}</text>
       </box>
-      <Show when={props.sections.length > 0} fallback={<text fg={props.theme.muted}>{props.busy ? "加载中…" : "没有详情"}</text>}>
+      <Show when={props.sections.length > 0} fallback={<text fg={props.busy ? props.theme.warning : props.theme.muted}>{props.busy ? `${props.spinner} 正在读取详情…` : "没有详情"}</text>}>
         <scrollbox
+          id="agentloom-context-detail-scrollbox"
+          ref={(value: ScrollBoxRenderable) => props.bindScrollbox?.(value)}
           flexGrow={1}
           minHeight={0}
           verticalScrollbarOptions={{
@@ -464,23 +705,18 @@ function DetailView(props: {
   )
 }
 
-function Sidebar(props: {
+function ContextSidebar(props: {
+  state: AgentLoomSessionState
   groups: ReturnType<typeof buildSidebarGroups>
-  selected: number
   theme: AgentLoomPalette
   mode: ThemeMode
-  onSelect: (entry: SidebarEntry, index: number) => void
-  onHover: (index: number) => void
+  spinner: string
+  bindScrollbox: (value: ScrollBoxRenderable) => void
+  onOpenEntry: (entry: SidebarEntry) => void
+  onClose: () => void
+  onFocus: () => void
 }) {
-  let scrollbox: ScrollBoxRenderable | undefined
-  const scrollAcceleration = createDefaultScrollAcceleration()
-
-  createEffect(() => {
-    const selected = props.selected
-    if (!scrollbox || selected < 0) return
-    scrollbox.scrollChildIntoView(sidebarEntryID(selected))
-  })
-
+  const catalogDetail = createMemo(() => workspaceEntityDetail(props.state.snapshot, props.state.route))
   return (
     <box
       width={SIDEBAR_WIDTH}
@@ -493,103 +729,279 @@ function Sidebar(props: {
       backgroundColor={props.theme.panel}
       border={["left"]}
       borderColor={props.theme.border}
+      onMouseDown={props.onFocus}
     >
-      <scrollbox
-        id="agentloom-sidebar-scrollbox"
-        ref={(value: ScrollBoxRenderable) => (scrollbox = value)}
-        flexGrow={1}
-        minHeight={0}
-        scrollAcceleration={scrollAcceleration}
-        verticalScrollbarOptions={{
-          trackOptions: {
-            backgroundColor: props.theme.panel,
-            foregroundColor: props.theme.borderActive,
-          },
-        }}
-      >
-        <box gap={1} paddingRight={1}>
-          <SidebarGroup
-            title="Agent Systems"
-            entries={props.groups.systems}
-            offset={0}
-            selected={props.selected}
+      <Switch>
+        <Match when={props.state.route.type === "system"}>
+          <DetailView
+            title="Agent"
+            subtitle={props.state.systemDetail?.summary.application_id ?? "正在读取"}
+            sections={props.state.systemDetail ? systemDetailSections(props.state.systemDetail) : []}
+            busy={props.state.detailBusy}
+            spinner={props.spinner}
+            theme={props.theme}
+            bindScrollbox={props.bindScrollbox}
+          />
+        </Match>
+        <Match when={props.state.route.type === "run"}>
+          <DetailView
+            title="Run"
+            subtitle={props.state.runDetail?.summary.run_id ?? "正在读取"}
+            sections={props.state.runDetail ? runDetailSections(props.state.runDetail) : []}
+            busy={props.state.detailBusy}
+            spinner={props.spinner}
+            theme={props.theme}
+            bindScrollbox={props.bindScrollbox}
+          />
+        </Match>
+        <Match when={catalogDetail()}>
+          {(detail) => (
+            <DetailView
+              title={detail().title}
+              subtitle={detail().subtitle}
+              sections={detail().sections}
+              busy={false}
+              spinner={props.spinner}
+              theme={props.theme}
+              bindScrollbox={props.bindScrollbox}
+            />
+          )}
+        </Match>
+        <Match when={props.state.route.type === "builder"}>
+          <WorkspaceOverview
+            state={props.state}
+            groups={props.groups}
             theme={props.theme}
             mode={props.mode}
-            onSelect={props.onSelect}
-            onHover={props.onHover}
+            bindScrollbox={props.bindScrollbox}
+            onOpenEntry={props.onOpenEntry}
           />
-          <SidebarGroup
-            title="Runs"
-            entries={props.groups.runs}
-            offset={props.groups.systems.length}
-            selected={props.selected}
-            theme={props.theme}
-            mode={props.mode}
-            onSelect={props.onSelect}
-            onHover={props.onHover}
-          />
-        </box>
-      </scrollbox>
-      <box flexShrink={0} paddingTop={1}>
-        <text fg={props.theme.muted}>↑↓ 选择 · Enter 查看 · b Builder</text>
-        <text fg={props.theme.muted}>r 刷新 · q 退出</text>
+        </Match>
+      </Switch>
+      <box flexShrink={0} paddingTop={1} gap={0}>
+        <Show when={props.state.route.type !== "builder"}>
+          <text fg={props.theme.secondary} onMouseDown={props.onClose}>Esc / b 返回工作区概览</text>
+        </Show>
+        <text fg={props.theme.muted}>F6 切换面板 · Ctrl+P 搜索所有实体与命令</text>
       </box>
     </box>
   )
 }
 
-function SidebarGroup(props: {
-  title: string
-  entries: SidebarEntry[]
-  offset: number
-  selected: number
+function WorkspaceOverview(props: {
+  state: AgentLoomSessionState
+  groups: ReturnType<typeof buildSidebarGroups>
   theme: AgentLoomPalette
   mode: ThemeMode
-  onSelect: (entry: SidebarEntry, index: number) => void
-  onHover: (index: number) => void
+  bindScrollbox: (value: ScrollBoxRenderable) => void
+  onOpenEntry: (entry: SidebarEntry) => void
 }) {
+  const active = () => props.groups.runs.filter((entry) => entry.status === "running")
+  const failed = () => props.groups.runs.filter((entry) => ["failed", "crashed"].includes(entry.status))
+  const recent = () => props.groups.runs.slice(0, 5)
+  const agentCount = () => {
+    const catalogCount = flattenAgentCatalog(props.state.snapshot).length
+    return catalogCount || props.groups.systems.length
+  }
   return (
-    <box flexShrink={0} gap={0}>
-      <text fg={props.theme.text} attributes={TextAttributes.BOLD}>
-        {props.title} ({props.entries.length})
-      </text>
-      <Show when={props.entries.length > 0} fallback={<text fg={props.theme.muted}>  暂无</text>}>
-        <For each={props.entries}>
-          {(entry, localIndex) => {
-            const index = () => props.offset + localIndex()
-            const selected = () => props.selected === index()
-            const presentation = () => statusPresentation(entry.status)
+    <scrollbox
+      id="agentloom-workspace-scrollbox"
+      ref={(value: ScrollBoxRenderable) => props.bindScrollbox(value)}
+      flexGrow={1}
+      minHeight={0}
+      scrollAcceleration={createDefaultScrollAcceleration()}
+      verticalScrollbarOptions={{
+        trackOptions: {
+          backgroundColor: props.theme.panel,
+          foregroundColor: props.theme.borderActive,
+        },
+      }}
+    >
+      <box gap={1} paddingRight={1}>
+        <box flexShrink={0}>
+          <text fg={props.theme.text} attributes={TextAttributes.BOLD}>Workspace</text>
+          <text fg={props.theme.muted}>{props.state.snapshot.project.name}</text>
+        </box>
+        <box flexShrink={0} border={["left"]} borderColor={props.theme.primary} paddingLeft={1}>
+          <text fg={props.theme.text}>{props.state.snapshot.applications.length} Applications</text>
+          <text fg={props.theme.text}>{agentCount()} Agents</text>
+          <text fg={props.theme.text}>{props.state.snapshot.skills.length} Skills</text>
+          <text fg={props.theme.text}>{props.state.snapshot.schedules.items.length} Schedules</text>
+          <text fg={props.theme.text}>{props.groups.runs.length} Runs</text>
+          <text fg={active().length ? props.theme.warning : props.theme.muted}>{active().length} running</text>
+          <text fg={failed().length ? props.theme.error : props.theme.muted}>{failed().length} failed/crashed</text>
+          <text fg={props.state.snapshot.schedules.service.state === "error" ? props.theme.error : props.theme.muted}>
+            Scheduler: {props.state.snapshot.schedules.service.state}
+          </text>
+        </box>
+        <Show when={props.state.snapshot.worker_invocations_incomplete}>
+          <box flexShrink={0} border={["left"]} borderColor={props.theme.warning} paddingLeft={1}>
+            <text fg={props.theme.warning}>Worker 状态索引不完整</text>
+            <text fg={props.theme.muted}>部分历史调用无法确认；不会把它们误报为 Never run。</text>
+          </box>
+        </Show>
+        <Show when={props.state.runsIncomplete}>
+          <box flexShrink={0} border={["left"]} borderColor={props.theme.warning} paddingLeft={1}>
+            <text fg={props.theme.warning}>Run 状态索引正在收敛</text>
+            <text fg={props.theme.muted}>当前是有界增量窗口；后续刷新会继续对账新增与删除。</text>
+          </box>
+        </Show>
+        <text fg={props.theme.primary} attributes={TextAttributes.BOLD}>Recent runs</text>
+        <Show when={recent().length > 0} fallback={<text fg={props.theme.muted}>暂无运行记录</text>}>
+          <For each={recent()}>
+            {(entry) => {
+              const presentation = () => statusPresentation(entry.status)
             return (
               <box
-                id={sidebarEntryID(index())}
                 flexShrink={0}
-                paddingLeft={1}
-                paddingRight={1}
-                paddingTop={1}
                 paddingBottom={1}
-                backgroundColor={selected() ? props.theme.element : props.theme.panel}
-                onMouseDown={() => props.onSelect(entry, index())}
-                onMouseOver={() => props.onHover(index())}
+                onMouseDown={() => props.onOpenEntry(entry)}
               >
                 <box flexDirection="row" gap={1}>
                   <text fg={statusColor(entry.status, props.mode)}>{presentation().symbol}</text>
-                  <text fg={selected() ? props.theme.text : props.theme.muted} wrapMode="none" truncate>
-                    {entry.title}
-                  </text>
+                  <text fg={props.theme.text} wrapMode="none" truncate>{entry.title}</text>
                 </box>
-                <text fg={props.theme.muted} wrapMode="none" truncate>{entry.subtitle}</text>
-                <text fg={statusColor(entry.status, props.mode)}>{presentation().label}</text>
+                <text fg={props.theme.muted} wrapMode="none" truncate>{entry.subtitle} · 点击查看</text>
               </box>
             )
-          }}
-        </For>
-      </Show>
+            }}
+          </For>
+        </Show>
+      </box>
+    </scrollbox>
+  )
+}
+
+function CommandPalette(props: {
+  items: PaletteItem[]
+  selected: number
+  query: string
+  scope: "all" | "models"
+  theme: AgentLoomPalette
+  bindInput: (value: InputRenderable) => void
+  onQuery: (value: string) => void
+  onHover: (index: number) => void
+  onSelect: (index: number) => void
+  onClose: () => void
+}) {
+  const dimensions = useTerminalDimensions()
+  let scrollbox: ScrollBoxRenderable | undefined
+  createEffect(() => {
+    if (!scrollbox || props.selected < 0) return
+    scrollbox.scrollChildIntoView(`agentloom-palette-entry-${props.selected}`)
+  })
+  return (
+    <box
+      position="absolute"
+      top={0}
+      left={0}
+      right={0}
+      bottom={0}
+      zIndex={3000}
+      alignItems="center"
+      paddingTop={Math.max(1, Math.floor(dimensions().height / 6))}
+      backgroundColor={RGBA.fromInts(0, 0, 0, 150)}
+      onMouseDown={props.onClose}
+    >
+      <box
+        width={Math.min(88, Math.max(36, dimensions().width - 4))}
+        maxHeight={Math.max(12, dimensions().height - 6)}
+        paddingTop={1}
+        paddingBottom={1}
+        paddingLeft={2}
+        paddingRight={2}
+        backgroundColor={props.theme.panel}
+        border
+        borderColor={props.theme.borderActive}
+        onMouseDown={(event: { stopPropagation(): void }) => event.stopPropagation()}
+      >
+        <box flexDirection="row" justifyContent="space-between" flexShrink={0}>
+          <text fg={props.theme.text} attributes={TextAttributes.BOLD}>
+            {props.scope === "models"
+              ? "模型选择 · config/llm.yaml"
+              : "Commands · Models · Applications · Agents · Skills · Schedules · Runs"}
+          </text>
+          <text fg={props.theme.muted}>esc</text>
+        </box>
+        <box flexShrink={0} marginTop={1} marginBottom={1} border={["bottom"]} borderColor={props.theme.border}>
+          <input
+            ref={(value: InputRenderable) => props.bindInput(value)}
+            value={props.query}
+            onInput={props.onQuery}
+            placeholder={props.scope === "models"
+              ? "搜索并选择模型"
+              : "搜索 Model、Application、Agent、Skill、Schedule、Run 或命令"}
+            placeholderColor={props.theme.muted}
+            textColor={props.theme.text}
+            focusedTextColor={props.theme.text}
+            backgroundColor={props.theme.panel}
+            focusedBackgroundColor={props.theme.panel}
+            cursorColor={props.theme.primary}
+          />
+        </box>
+        <Show when={props.items.length > 0} fallback={<text fg={props.theme.muted}>没有匹配项</text>}>
+          <scrollbox
+            id="agentloom-palette-scrollbox"
+            ref={(value: ScrollBoxRenderable) => (scrollbox = value)}
+            flexGrow={1}
+            minHeight={0}
+            maxHeight={Math.max(6, dimensions().height - 14)}
+            scrollAcceleration={createDefaultScrollAcceleration()}
+            verticalScrollbarOptions={{
+              trackOptions: {
+                backgroundColor: props.theme.panel,
+                foregroundColor: props.theme.borderActive,
+              },
+            }}
+          >
+            <box paddingRight={1}>
+              <For each={props.items}>
+                {(item, index) => {
+                  const selected = () => props.selected === index()
+                  return (
+                    <box
+                      id={`agentloom-palette-entry-${index()}`}
+                      flexShrink={0}
+                      paddingLeft={1}
+                      paddingRight={1}
+                      backgroundColor={selected() ? props.theme.element : props.theme.panel}
+                      onMouseOver={() => props.onHover(index())}
+                      onMouseDown={() => props.onSelect(index())}
+                    >
+                      <box flexDirection="row" justifyContent="space-between">
+                        <text fg={selected() ? props.theme.text : props.theme.muted} wrapMode="none" truncate>{item.title}</text>
+                        <text fg={props.theme.primary}>{item.category}</text>
+                      </box>
+                      <text fg={props.theme.muted} wrapMode="none" truncate>{item.description}</text>
+                    </box>
+                  )
+                }}
+              </For>
+            </box>
+          </scrollbox>
+        </Show>
+        <text flexShrink={0} marginTop={1} fg={props.theme.muted}>↑↓ 选择 · Enter 打开 · 输入筛选</text>
+      </box>
     </box>
   )
 }
 
-function sidebarEntryID(index: number): string {
-  return `agentloom-sidebar-entry-${index}`
+function filterPaletteItems(items: PaletteItem[], rawQuery: string): PaletteItem[] {
+  const query = rawQuery.trim().toLowerCase()
+  if (!query) return items.slice(0, 200)
+  const tokens = query.split(/\s+/).filter(Boolean)
+  return items
+    .map((item, index) => {
+      const title = item.title.toLowerCase()
+      const haystack = `${title} ${item.description.toLowerCase()} ${item.category.toLowerCase()}`
+      if (!tokens.every((token) => haystack.includes(token))) return null
+      const score = title === query ? 0 : title.startsWith(query) ? 1 : title.includes(query) ? 2 : 3
+      return { item, score, index }
+    })
+    .filter((value): value is { item: PaletteItem; score: number; index: number } => value !== null)
+    .sort((left, right) => left.score - right.score || left.index - right.index)
+    .slice(0, 200)
+    .map((value) => value.item)
 }
 
 function Footer(props: { theme: AgentLoomPalette }) {
@@ -603,7 +1015,7 @@ function Footer(props: { theme: AgentLoomPalette }) {
       justifyContent="space-between"
       backgroundColor={props.theme.panel}
     >
-      <text fg={props.theme.muted}>AgentLoom · Run 每 2 秒刷新 · r 刷新目录</text>
+      <text fg={props.theme.muted}>AgentLoom · 全局运行状态自动刷新 · r 重新索引</text>
       <text fg={props.theme.muted}>Ctrl-C 退出</text>
     </box>
   )
