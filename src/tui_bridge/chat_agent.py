@@ -15,6 +15,7 @@ from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Protocol
+from urllib.parse import urlsplit
 
 from openai import (
     APIConnectionError,
@@ -116,6 +117,15 @@ def _load_profile(project_root: Path, requested_model_type: str | None) -> ChatM
     # actual model/deployment id.
     model_id = raw_model_id.removeprefix("openai/")
 
+    base_url = settings.base_url.strip()
+    if base_url:
+        parsed_base_url = urlsplit(base_url)
+        if parsed_base_url.scheme not in {"http", "https"} or not parsed_base_url.netloc:
+            raise ChatAgentError(
+                "assistant_config",
+                f"模型类型 {model_type!r} 的 base_url 无效；请检查 config/llm.yaml。",
+            )
+
     api_key = settings.api_key.strip() or os.environ.get("OPENAI_API_KEY", "").strip()
     if not api_key:
         raise ChatAgentError(
@@ -141,7 +151,7 @@ def _load_profile(project_root: Path, requested_model_type: str | None) -> ChatM
     return ChatModelProfile(
         model_type=model_type,
         model_id=model_id,
-        base_url=settings.base_url.strip() or None,
+        base_url=base_url or None,
         api_key=api_key,
         request_timeout_seconds=min(max(float(settings.timeout), 1.0), _REQUEST_TIMEOUT_SECONDS),
         max_output_tokens=max_output_tokens,

@@ -305,6 +305,39 @@ def test_auth_error_is_not_retried_and_is_safe_for_the_rpc(tmp_path: Path) -> No
     assert "secret credential detail" not in str(error.value)
 
 
+def test_invalid_openai_compatible_base_url_is_a_local_config_error(tmp_path: Path) -> None:
+    _write_catalog(tmp_path)
+    config_path = tmp_path / "config" / "llm.yaml"
+    config_path.write_text(
+        config_path.read_text(encoding="utf-8").replace(
+            "https://models.example.test/api/v3",
+            "not-a-url",
+        ),
+        encoding="utf-8",
+    )
+    client_created = False
+
+    def create_client(_profile: ChatModelProfile) -> OpenAI:
+        nonlocal client_created
+        client_created = True
+        raise AssertionError("invalid configuration must fail before client construction")
+
+    bridge = TuiBridge(
+        tmp_path,
+        builder_service=BuilderService(tmp_path, chat_client_factory=create_client),
+    )
+
+    with pytest.raises(BridgeError) as error:
+        bridge.dispatch(
+            "assistant.send",
+            {"session_id": "chat-1", "message": "hello", "model_type": "powerful"},
+        )
+
+    assert client_created is False
+    assert error.value.code == "assistant_config"
+    assert "base_url" in str(error.value)
+
+
 def test_importing_tui_chat_does_not_import_litellm_or_smolagents() -> None:
     script = """
 import sys
