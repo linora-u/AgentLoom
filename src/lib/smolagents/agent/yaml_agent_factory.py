@@ -1,24 +1,24 @@
-import yaml
-import re
-import json
-import inspect
-import hashlib
 import copy
+import hashlib
+import inspect
+import json
+import re
 import threading
 from functools import wraps
-from typing import Callable, List, Dict, Union, Optional, Any
 from pathlib import Path
+from typing import Any, Callable, Dict, List, Optional, Union
 
-from src.lib.smolagents import AgentLogger
-from src.lib.smolagents.agent.base_agent import AgentRoleProfile, AgentType, RoleDrivenAgent
+from src.lib.config import C, get_code_agent_config, get_default_toolsets
+from src.lib.config.yaml_loader import load_unique_yaml
 from src.lib.logging import (
     get_logger,
 )
+from src.lib.smolagents import AgentLogger
 from src.lib.smolagents.agent.agent_validation import AgentConfigNormalizer, NormalizedAgentConfig
+from src.lib.smolagents.agent.base_agent import AgentRoleProfile, AgentType, RoleDrivenAgent
 from src.lib.utils.dynamic_import import load_function
-from src.workflows.workflow_manager import get_worker_agent_yaml_path, infer_category_from_yaml_path
-from src.lib.config import C, get_code_agent_config, get_default_toolsets
 from src.tools.tool_meta import resolve_tool_function, resolve_toolsets
+from src.workflows.workflow_manager import get_worker_agent_yaml_path, infer_category_from_yaml_path
 
 # Keep module-level symbol for legacy tests that monkeypatch this path root.
 AGENT_ROOT = C.agent_root
@@ -154,7 +154,7 @@ def _load_prompt_protocol_config(path: Optional[Path] = None) -> dict[str, Any]:
 
     try:
         with config_path.open("r", encoding="utf-8") as fp:
-            raw = yaml.safe_load(fp)
+            raw = load_unique_yaml(fp)
     except Exception as exc:
         raise RuntimeError(f"Failed to load prompt protocol config from {config_path}: {exc}") from exc
 
@@ -826,7 +826,7 @@ def _load_mcp_tools(
         return None
 
     try:
-        from src.mcp.config import parse_mcp_yaml_value, merge_mcp_configs
+        from src.mcp.config import merge_mcp_configs, parse_mcp_yaml_value
         from src.mcp.manager import McpManager
 
         global_settings = parse_mcp_yaml_value(global_raw, agent_root) if global_raw is not None else None
@@ -994,7 +994,7 @@ class YamlAgentFactory:
             raise ValueError("No YAML code block found in markdown file")
 
         yaml_content = match.group(1)
-        yaml_config = yaml.safe_load(yaml_content)
+        yaml_config = load_unique_yaml(yaml_content)
 
         # Remove YAML code block; remaining content is workflow
         workflow_content = re.sub(yaml_pattern, '', content, flags=re.DOTALL).strip()
@@ -1039,10 +1039,10 @@ class YamlAgentFactory:
         if config_path.suffix.lower() == '.md':
             config, _ = YamlAgentFactory._extract_yaml_from_markdown(content)
         elif config_path.suffix.lower() in ['.yaml', '.yml']:
-            config = yaml.safe_load(content)
+            config = load_unique_yaml(content)
         else:
             raise ValueError(f"Unsupported file format: {config_path.suffix}")
-        
+
         return YamlAgentFactory._prepare_agent_config(config, source_path=config_path)
 
     @staticmethod

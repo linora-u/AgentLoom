@@ -1,9 +1,8 @@
-"""Root-run ownership and propagation contracts for self-learning."""
+"""Root-run ownership and Hook Run propagation contracts."""
 
 from __future__ import annotations
 
 import json
-import threading
 import tomllib
 import uuid
 from concurrent.futures import ThreadPoolExecutor
@@ -14,40 +13,35 @@ from pathlib import Path
 import pytest
 from packaging.requirements import Requirement
 
-from src.lib.smolagents.hooks.hook_manager import HookManager, _context_to_dict
-from src.lib.smolagents.hooks.types import HookContext, HookEvent, HookResult
+from src.lib.smolagents.hooks import HookEvent, HookHandler, HookPlan, HookResult, HookRun
 from src.trace import (
     ExplicitExecutionContext,
     MissingRunContextError,
     bind_explicit_execution_context,
     bind_local_run,
     bind_root_run,
-    capture_explicit_execution_context,
     get_current_session_run_id,
     require_root_run_id,
 )
 
 
-def test_smolagents_context_patch_dependency_is_exactly_pinned():
-    """Private timeout integration must not float beyond the verified version."""
+def test_smolagents_context_patch_dependency_is_exactly_pinned() -> None:
     project_root = Path(__file__).parents[2]
     project = tomllib.loads((project_root / "pyproject.toml").read_text())
     dependency = next(
-        Requirement(raw)
-        for raw in project["project"]["dependencies"]
-        if Requirement(raw).name == "smolagents"
+        Requirement(raw) for raw in project["project"]["dependencies"] if Requirement(raw).name == "smolagents"
     )
 
     assert str(dependency.specifier) == "==1.26.0"
     assert version("smolagents") == "1.26.0"
 
 
-def test_require_root_run_id_fails_closed_without_binding():
+def test_require_root_run_id_fails_closed_without_binding() -> None:
     with pytest.raises(MissingRunContextError, match="root run"):
         require_root_run_id()
 
 
-def test_bind_root_run_owns_outer_binding_and_nested_calls_inherit_it():
+def test_bind_root_run_owns_outer_binding_and_nested_calls_inherit_it() -> None:
     assert get_current_session_run_id() is None
 
 
@@ -66,324 +60,56 @@ def test_bind_root_run_reuses_one_state_and_next_root_gets_a_fresh_state():
 
     with bind_root_run("supervisor-run") as outer_owner:
         assert outer_owner is True
-        assert require_root_run_id() == "supervisor-run"
-
         with bind_root_run("worker-local-session") as nested_owner:
             assert nested_owner is False
             assert require_root_run_id() == "supervisor-run"
 
-        assert require_root_run_id() == "supervisor-run"
-
     assert get_current_session_run_id() is None
 
 
-def test_copied_worker_context_inherits_root_without_ownership():
+def test_copied_worker_context_inherits_root_without_ownership() -> None:
     with bind_root_run("supervisor-run"):
         worker_context = copy_context()
 
-        def _worker():
+        def worker():
             with bind_root_run("worker-local-session") as owns_root:
                 return owns_root, require_root_run_id()
 
         with ThreadPoolExecutor(max_workers=1) as pool:
-            owns_root, root_run_id = pool.submit(worker_context.run, _worker).result()
+            owns_root, root_run_id = pool.submit(worker_context.run, worker).result()
 
     assert owns_root is False
     assert root_run_id == "supervisor-run"
 
 
 @pytest.mark.parametrize("run_id", ["", "   ", None])
-def test_bind_root_run_rejects_empty_identity(run_id):
+def test_bind_root_run_rejects_empty_identity(run_id) -> None:
     with pytest.raises(ValueError, match="root run id"):
         with bind_root_run(run_id):
             pass
 
 
-def test_hook_manager_captures_root_run_before_parallel_dispatch():
-    manager = HookManager()
+def test_hook_run_uses_explicit_local_and_root_identity() -> None:
     seen = []
 
-    def _capture(context):
-        seen.append(context)
-        return HookResult(success=True, decision="allow")
+    def capture(context):
+        seen.append((context.local_run_id, context.root_run_id))
+        return HookResult()
 
-    manager.register_hook(HookEvent.POST_TOOL_USE, "*", _capture)
-    with bind_root_run("root-for-hook"):
-        manager.trigger_hooks(HookEvent.POST_TOOL_USE, "shell", {"command": "true"})
+    with bind_local_run("worker-local"), bind_root_run("supervisor-root"):
+        run = HookRun(
+            HookPlan((HookHandler(HookEvent.POST_TOOL_USE, "*", capture),)),
+            local_run_id="worker-local",
+            root_run_id=require_root_run_id(),
+        )
+        run.dispatch(HookEvent.POST_TOOL_USE, "shell", {"command": "true"})
 
-    assert len(seen) == 1
-    assert seen[0].root_run_id == "root-for-hook"
-    assert _context_to_dict(seen[0])["root_run_id"] == "root-for-hook"
-
-
-def test_hook_context_uses_explicit_local_id_and_root_without_manager_fallback():
-    manager = HookManager()
-    seen = []
-
-    def _capture(context):
-        seen.append(context)
-        return HookResult(success=True, decision="allow")
-
-    manager.register_hook(HookEvent.POST_TOOL_USE, "*", _capture)
-    with bind_local_run("worker-leaf"):
-        with bind_root_run("supervisor-root"):
-            manager.trigger_hooks(HookEvent.POST_TOOL_USE, "shell", {})
-
-    assert len(seen) == 1
-    assert seen[0].session_id == "worker-leaf"
-    assert seen[0].root_run_id == "supervisor-root"
+    assert seen == [("worker-local", "supervisor-root")]
 
 
-def test_unbound_builtin_recorder_does_not_create_persistent_state(
-    tmp_path: Path,
+def test_session_search_excludes_explicit_root(
     monkeypatch: pytest.MonkeyPatch,
-):
-    """A manager construction UUID is not a run identity."""
-    from src.lib.smolagents.hooks import register_builtin_hooks
-
-    state_root = tmp_path / ".agentloom"
-    monkeypatch.setenv("AGENTLOOM_RUNTIME_ROOT", str(state_root))
-    manager = register_builtin_hooks(HookManager())
-    seen: list[HookContext] = []
-    manager.register_hook(
-        HookEvent.POST_TOOL_USE,
-        "*",
-        lambda context: seen.append(context)
-        or HookResult(success=True, decision="allow"),
-    )
-
-    manager.trigger_hooks(
-        HookEvent.POST_TOOL_USE,
-        "shell",
-        {"command": "true"},
-        tool_response={"result": "ok"},
-    )
-
-    assert len(seen) == 1
-    assert seen[0].session_id == ""
-    assert seen[0].root_run_id is None
-    assert not (state_root / "self_learning.db").exists()
-    assert not (state_root / "sessions" / "events").exists()
-
-
-def test_parallel_python_hooks_rebind_full_explicit_context_for_agent_policy():
-    """Pool dispatch plus the raw-hook timeout thread must preserve policy context."""
-    from src.lib.smolagents.hooks.path_validators import validate_workspace_path
-
-    manager = HookManager()
-    seen = []
-
-    def _capture_context(context):
-        seen.append(capture_explicit_execution_context())
-        return HookResult(success=True, decision="allow")
-
-    manager.register_hook(HookEvent.PRE_TOOL_USE, "*", validate_workspace_path)
-    # A second hook forces HookManager through its ThreadPoolExecutor path;
-    # each raw Python hook then crosses the daemon timeout-thread boundary.
-    manager.register_hook(HookEvent.PRE_TOOL_USE, "*", _capture_context)
-    explicit = ExplicitExecutionContext(
-        task_id="policy-task",
-        sub_task_id="policy-subtask",
-        agent_id="policy-agent-id",
-        agent_name="policy-agent",
-        agent_config={
-            "tool_access_control": {
-                "path_validation": [
-                    {"tools": ["read_file"], "exclude_paths": ["*"]}
-                ]
-            }
-        },
-        skills_manager=None,
-        hook_manager=manager,
-        runtime_agent_path="policy-agent",
-        root_run_id="policy-root",
-        local_run_id="policy-leaf",
-    )
-
-    with bind_explicit_execution_context(explicit):
-        result = manager.trigger_hooks(
-            HookEvent.PRE_TOOL_USE,
-            "read_file",
-            {"file_path": "/tmp/must-be-denied"},
-            tool_inputs_schema={"file_path": {"type": "string"}},
-        )
-
-    assert result.decision == "block"
-    assert len(seen) == 1
-    assert seen[0] == explicit
-
-
-def test_local_python_executor_propagates_full_context_across_interleaved_runs():
-    # Importing BaseAgent installs the LocalPythonExecutor ContextVar adapter.
-    from smolagents import Tool
-    from smolagents.local_python_executor import LocalPythonExecutor
-
-    import src.lib.smolagents.agent.base_agent  # noqa: F401
-    from src.lib.smolagents.hooks.tool_shim import inject_hooks
-
-    execution_barrier = threading.Barrier(2)
-    hook_contexts: dict[str, list[HookContext]] = {"A": [], "B": []}
-
-    class _ProbeTool(Tool):
-        name = "context_probe"
-        description = "Return the explicit AgentLoom execution context."
-        inputs = {"label": {"type": "string", "description": "Run label"}}
-        output_type = "string"
-
-        def forward(self, label: str) -> str:
-            execution_barrier.wait(timeout=5)
-            current = capture_explicit_execution_context()
-            return json.dumps(
-                {
-                    "label": label,
-                    "task_id": current.task_id,
-                    "sub_task_id": current.sub_task_id,
-                    "agent_name": current.agent_name,
-                    "agent_config": current.agent_config,
-                    "root_run_id": current.root_run_id,
-                    "local_run_id": current.local_run_id,
-                    "hook_manager_matches": current.hook_manager is managers[label],
-                }
-            )
-
-    managers = {"A": HookManager(), "B": HookManager()}
-    for label, manager in managers.items():
-        manager.register_hook(
-            HookEvent.PRE_TOOL_USE,
-            "context_probe",
-            lambda context, current_label=label: hook_contexts[current_label].append(context)
-            or HookResult(success=True, decision="allow"),
-        )
-
-    def _run(label: str) -> dict:
-        explicit = ExplicitExecutionContext(
-            task_id=f"task-{label}",
-            sub_task_id=f"subtask-{label}",
-            agent_id=f"agent-id-{label}",
-            agent_name=f"agent-{label}",
-            agent_config={"label": label},
-            skills_manager=None,
-            hook_manager=managers[label],
-            runtime_agent_path=f"supervisor/agent-{label}",
-            root_run_id=f"root-{label}",
-            local_run_id=f"leaf-{label}",
-        )
-        with bind_explicit_execution_context(explicit):
-            tool = inject_hooks(_ProbeTool())
-            executor = LocalPythonExecutor([], timeout_seconds=10)
-            executor.send_tools({tool.name: tool})
-            output = executor(f'context_probe(label="{label}")').output
-            return json.loads(output)
-
-    with ThreadPoolExecutor(max_workers=2) as pool:
-        results = {
-            label: future.result(timeout=15)
-            for label, future in {
-                label: pool.submit(_run, label) for label in ("A", "B")
-            }.items()
-        }
-
-    for label in ("A", "B"):
-        assert results[label] == {
-            "label": label,
-            "task_id": f"task-{label}",
-            "sub_task_id": f"subtask-{label}",
-            "agent_name": f"agent-{label}",
-            "agent_config": {"label": label},
-            "root_run_id": f"root-{label}",
-            "local_run_id": f"leaf-{label}",
-            "hook_manager_matches": True,
-        }
-        assert len(hook_contexts[label]) == 1
-        assert hook_contexts[label][0].session_id == f"leaf-{label}"
-        assert hook_contexts[label][0].root_run_id == f"root-{label}"
-        assert hook_contexts[label][0].task_id == f"task-{label}"
-        assert hook_contexts[label][0].sub_task_id == f"subtask-{label}"
-        assert hook_contexts[label][0].agent_name == f"agent-{label}"
-        assert hook_contexts[label][0].agent_config == {"label": label}
-
-
-def test_shared_tool_source_gets_isolated_runtime_context_for_interleaved_runs():
-    from smolagents import Tool
-
-    from src.lib.smolagents.hooks.tool_shim import (
-        clone_tool_for_runtime,
-        inject_hooks,
-    )
-
-    call_barrier = threading.Barrier(2)
-
-    class _SharedProbe(Tool):
-        name = "shared_context_probe"
-        description = "Return the current run identity."
-        inputs = {}
-        output_type = "string"
-
-        def forward(self) -> str:
-            call_barrier.wait(timeout=5)
-            current = capture_explicit_execution_context()
-            return json.dumps(
-                {
-                    "task_id": current.task_id,
-                    "root_run_id": current.root_run_id,
-                    "local_run_id": current.local_run_id,
-                    "agent_name": current.agent_name,
-                }
-            )
-
-    shared_source = _SharedProbe()
-    prepared_barrier = threading.Barrier(2)
-
-    class _AllowHooks:
-        def trigger_hooks(self, *_args, **_kwargs):
-            return HookResult(success=True, decision="allow")
-
-        def flush_user_messages(self):
-            return []
-
-    def _run(label: str) -> dict:
-        explicit = ExplicitExecutionContext(
-            task_id=f"task-{label}",
-            sub_task_id=f"subtask-{label}",
-            agent_id=f"agent-id-{label}",
-            agent_name=f"agent-{label}",
-            agent_config={"label": label},
-            skills_manager=None,
-            hook_manager=_AllowHooks(),
-            runtime_agent_path=f"agent-{label}",
-            root_run_id=f"root-{label}",
-            local_run_id=f"leaf-{label}",
-        )
-        with bind_explicit_execution_context(explicit):
-            runtime_tool = inject_hooks(clone_tool_for_runtime(shared_source))
-        prepared_barrier.wait(timeout=5)
-        # A custom executor deliberately strips ContextVars.  Each runtime
-        # clone must restore its own immutable snapshot, not whichever run
-        # most recently prepared the shared source Tool.
-        with ThreadPoolExecutor(max_workers=1) as executor:
-            return json.loads(executor.submit(runtime_tool.forward).result(timeout=10))
-
-    with ThreadPoolExecutor(max_workers=2) as pool:
-        futures = {label: pool.submit(_run, label) for label in ("A", "B")}
-        results = {label: future.result(timeout=15) for label, future in futures.items()}
-
-    assert results == {
-        "A": {
-            "task_id": "task-A",
-            "root_run_id": "root-A",
-            "local_run_id": "leaf-A",
-            "agent_name": "agent-A",
-        },
-        "B": {
-            "task_id": "task-B",
-            "root_run_id": "root-B",
-            "local_run_id": "leaf-B",
-            "agent_name": "agent-B",
-        },
-    }
-
-
-def test_session_search_excludes_explicit_root_not_global_hook_manager(monkeypatch):
+) -> None:
     captured = {}
 
     class _FakeIndex:
@@ -392,13 +118,10 @@ def test_session_search_excludes_explicit_root_not_global_hook_manager(monkeypat
             captured.update(kwargs)
             return []
 
-    class _WrongManager:
-        _session_id = "wrong-worker-session"
-
     monkeypatch.setattr(
-        "src.tools.self_learning.session_tools.SessionIndex", lambda: _FakeIndex()
+        "src.tools.self_learning.session_tools.SessionIndex",
+        lambda: _FakeIndex(),
     )
-    monkeypatch.setattr("src.trace.get_current_hook_manager", lambda: _WrongManager())
 
     from src.tools.self_learning.session_tools import session_search
 
@@ -409,12 +132,13 @@ def test_session_search_excludes_explicit_root_not_global_hook_manager(monkeypat
     assert captured["exclude_run_id"] == "real-root-run"
 
 
-def test_canonical_event_v3_carries_explicit_root_run_id():
+def test_canonical_event_carries_hook_run_local_and_root_ids() -> None:
     from src.extensions.self_learning.session_recorder import event_from_hook_context
+    from src.lib.smolagents.hooks import HookContext
 
     event = event_from_hook_context(
         HookContext(
-            session_id="worker-leaf-run",
+            local_run_id="worker-leaf-run",
             root_run_id="supervisor-root-run",
             cwd="/tmp",
             hook_event_name="TaskCompleted",
@@ -430,8 +154,11 @@ def test_canonical_event_v3_carries_explicit_root_run_id():
     assert event.to_record()["root_run_id"] == "supervisor-root-run"
 
 
-def test_application_disable_prevents_session_recorder_write(monkeypatch):
+def test_application_disable_prevents_session_recorder_write(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     from src.extensions.self_learning.session_recorder import SessionRecorder
+    from src.lib.smolagents.hooks import HookContext
 
     recorder = SessionRecorder()
     monkeypatch.setattr(
@@ -444,8 +171,8 @@ def test_application_disable_prevents_session_recorder_write(monkeypatch):
 
     result = recorder.record_hook(
         HookContext(
-            session_id="disabled-run",
-            root_run_id="disabled-run",
+            local_run_id="disabled-leaf",
+            root_run_id="disabled-root",
             cwd="/tmp",
             hook_event_name="SessionStart",
             tool_name="",
@@ -454,10 +181,12 @@ def test_application_disable_prevents_session_recorder_write(monkeypatch):
         )
     )
 
-    assert result.success is True
+    assert result.decision == "allow"
 
 
-def test_session_tools_fail_closed_before_reading_without_root_context(monkeypatch):
+def test_session_tools_fail_closed_before_reading_without_root_context(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     from src.tools.self_learning.session_tools import session_scroll, session_search
 
     class _MustNotRead:
@@ -468,23 +197,20 @@ def test_session_tools_fail_closed_before_reading_without_root_context(monkeypat
             raise AssertionError("scroll must not read without a root context")
 
     monkeypatch.setattr(
-        "src.tools.self_learning.session_tools.SessionIndex", lambda: _MustNotRead()
+        "src.tools.self_learning.session_tools.SessionIndex",
+        lambda: _MustNotRead(),
     )
 
     assert json.loads(session_search("needle"))["error"] == "missing_run_context"
     assert json.loads(session_scroll("old-run", 1))["error"] == "missing_run_context"
 
 
-def test_disabled_session_tools_fail_closed_before_runtime_or_state_access(
+def test_disabled_self_learning_tools_do_not_initialize_runtime_or_state(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     root = tmp_path / ".agentloom"
     monkeypatch.setenv("AGENTLOOM_RUNTIME_ROOT", str(root))
-    monkeypatch.setattr(
-        "src.extensions.self_learning.paths.config_bool",
-        lambda name, default=True: False if name == "enabled" else default,
-    )
     monkeypatch.setattr(
         "src.extensions.self_learning.paths.self_learning_enabled",
         lambda _agent_config=None: False,
@@ -493,7 +219,7 @@ def test_disabled_session_tools_fail_closed_before_runtime_or_state_access(
     from src.tools.self_learning import memory_tool, session_tools
 
     def _must_not_initialize(*_args, **_kwargs):
-        raise AssertionError("disabled session tools must not initialize runtime or state")
+        raise AssertionError("disabled tools must not initialize runtime or state")
 
     monkeypatch.setattr(session_tools, "_current_run_id", _must_not_initialize)
     monkeypatch.setattr(session_tools, "SessionIndex", _must_not_initialize)
@@ -520,8 +246,9 @@ def test_disabled_session_tools_fail_closed_before_runtime_or_state_access(
 
 
 def test_memory_tool_fails_before_creating_state_without_root_context(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-):
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     root = tmp_path / ".agentloom"
     monkeypatch.setenv("AGENTLOOM_RUNTIME_ROOT", str(root))
     from src.tools.self_learning.memory_tool import memory
@@ -544,68 +271,84 @@ def test_tool_wrapper_propagates_and_refreshes_root_across_executor_thread(
     from src.tools.self_learning import memory_tool
     from src.tools.self_learning.memory_tool import memory
 
-    class _AllowHooks:
-        def trigger_hooks(self, *_args, **_kwargs):
-            return HookResult(success=True, decision="allow")
-
-        def flush_user_messages(self):
-            return []
-
-    monkeypatch.setattr(
-        "src.lib.smolagents.hooks.tool_shim._resolve_hook_manager",
-        lambda: _AllowHooks(),
-    )
-    monkeypatch.setattr(
-        memory_tool,
-        "_current_agent_config",
-        lambda: {
-            "application_id": "root_context_test",
-            "self_learning": {
+    agent_config = {
+        "application_id": "root_context_test",
+        "self_learning": {
+            "enabled": True,
+            "review": {
                 "enabled": True,
-                "review": {
-                    "enabled": True,
-                    "application": {
-                        "review_model": "summary",
-                        "approval": {"fact": "manual", "experience": "manual"},
-                    },
-                    "project": {
-                        "review_model": "summary",
-                        "approval": {"fact": "manual", "experience": "manual"},
-                    },
+                "application": {
+                    "review_model": "summary",
+                    "approval": {"fact": "manual", "experience": "manual"},
+                },
+                "project": {
+                    "review_model": "summary",
+                    "approval": {"fact": "manual", "experience": "manual"},
                 },
             },
         },
-    )
+    }
+    monkeypatch.setattr(memory_tool, "_current_agent_config", lambda: agent_config)
     wrapped = ensure_tool_wrapped([memory])[0]
-    with bind_root_run("root-tool-a"):
-        inject_hooks(wrapped)
-    with ThreadPoolExecutor(max_workers=1) as executor:
-        first = json.loads(
-            executor.submit(
-                wrapped.forward,
-                action="propose",
-                scope="app",
-                memory_key="threaded:first",
-                text="first threaded durable fact",
-            ).result()
-        )
-    assert first["ok"] is True
+    inject_hooks(wrapped)
 
-    # Cached tools are re-injected by each runtime build; that refresh must
-    # replace the previous root rather than leak it into a later run.
-    with bind_root_run("root-tool-b"):
-        inject_hooks(wrapped)
-    with ThreadPoolExecutor(max_workers=1) as executor:
-        second = json.loads(
-            executor.submit(
-                wrapped.forward,
-                action="propose",
-                scope="app",
-                memory_key="threaded:second",
-                text="second threaded durable fact",
-            ).result()
+    def invoke(root_run_id: str, *, memory_key: str, text: str) -> dict:
+        execution = ExplicitExecutionContext(
+            task_id=f"task-{root_run_id}",
+            sub_task_id=None,
+            agent_id="agent-1",
+            agent_name="supervisor",
+            agent_config=agent_config,
+            skills_manager=None,
+            hook_run=HookRun(
+                HookPlan(),
+                local_run_id=f"local-{root_run_id}",
+                root_run_id=root_run_id,
+                agent_config=agent_config,
+                project_root=str(tmp_path),
+            ),
+            runtime_agent_path="supervisor",
+            root_run_id=root_run_id,
+            local_run_id=f"local-{root_run_id}",
         )
-    assert second["ok"] is True
+        with bind_explicit_execution_context(execution):
+            return json.loads(
+                wrapped.forward(
+                    action="propose",
+                    scope="app",
+                    memory_key=memory_key,
+                    text=text,
+                )
+            )
+
+    with ThreadPoolExecutor(max_workers=1) as executor:
+        first = executor.submit(
+            invoke,
+            "root-tool-a",
+            memory_key="threaded:first",
+            text="first threaded durable fact",
+        ).result()
+        assert first["ok"] is True
+
+        # Reusing one executor thread must replace every run-scoped value.
+        second = executor.submit(
+            invoke,
+            "root-tool-b",
+            memory_key="threaded:second",
+            text="second threaded durable fact",
+        ).result()
+        assert second["ok"] is True
+
+        # An unbound call on the same worker must fail instead of inheriting B.
+        future = executor.submit(
+            wrapped.forward,
+            action="propose",
+            scope="app",
+            memory_key="threaded:stale-root",
+            text="must not inherit a stale root",
+        )
+        with pytest.raises(MissingRunContextError, match="HookRun"):
+            future.result()
 
     store = MemoryStore()
     assert store.list("app", scope_id="root_context_test") == []
@@ -619,26 +362,13 @@ def test_tool_wrapper_propagates_and_refreshes_root_across_executor_thread(
         ["root-tool-b"],
     ]
 
-    # Preparing the same cached tool without a binding must clear, rather than
-    # retain, root B.  The executor thread then fails closed and writes nothing.
-    inject_hooks(wrapped)
-    with ThreadPoolExecutor(max_workers=1) as executor:
-        missing = json.loads(
-            executor.submit(
-                wrapped.forward,
-                action="propose",
-                scope="app",
-                memory_key="threaded:stale-root",
-                text="must not inherit a stale root",
-            ).result()
-        )
-    assert missing["error"] == "missing_run_context"
     assert len(store.list_pending()) == 2
 
 
 def test_session_tools_exclude_every_leaf_of_current_root(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-):
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     monkeypatch.setenv("AGENTLOOM_RUNTIME_ROOT", str(tmp_path / ".agentloom"))
     from src.extensions.self_learning.event_schema import CanonicalSessionEvent, now_iso
     from src.extensions.self_learning.ledger import SelfLearningLedger

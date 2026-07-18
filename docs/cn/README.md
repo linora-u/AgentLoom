@@ -222,7 +222,7 @@ Worker Agent 可以导出为可调用工具。AgentLoom 会生成函数签名、
 
 ### Skills 与 Hooks
 
-Skills 通过 Claude-style `SKILL.md` 包提供可复用知识或行为。Hooks 可以挂载在任务生命周期、子 Agent 生命周期、工具调用、会话、压缩、安装和配置变更等运行时事件上。
+Skills 通过 Claude-style `SKILL.md` 包提供可复用知识。Hooks 是独立、显式配置的 Shell 扩展，只覆盖 11 个真实的工具、任务、Agent 和会话事件。Skill 不能声明或注册 Hook；可复用 Hook 位于显式引用的 `HOOK.yaml` Bundle。详见 [Hook 配置](hooks.md)。
 
 ### 本地 Codex 工具
 
@@ -253,7 +253,7 @@ AgentLoom 内置 `src.tools.codex.codex_tool.codex`，用于把本机 `codex exe
 | [LLM 配置](llm_config.md) | 模型类型、Provider 设置、继承、重试和 Prompt 缓存。 |
 | [系统配置](system_config.md) | 运行时设置、权限、日志、执行环境和工具系统。 |
 | [Skills 配置](skills_config.md) | Skill 包格式、加载方式、运行时策略和内置 Skills。 |
-| [Hooks 参考](hooks.md) | 生命周期事件、Hook 类型、匹配规则和执行行为。 |
+| [Hooks 参考](hooks.md) | 直接 Hook、Bundle、生命周期事件、匹配规则和执行行为。 |
 | [Checkpoint 断点恢复](checkpoint.md) | Checkpoint 布局、恢复行为和长任务恢复机制。 |
 
 ## AgentLoom Framework Skill

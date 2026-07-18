@@ -4,8 +4,6 @@ detection, symlink chain resolution, and integration with validate_workspace_pat
 import os
 from pathlib import Path
 
-import pytest
-
 import src.lib.config.config as config_module
 from src.lib.smolagents.hooks.path_validators import (
     has_suspicious_windows_pattern,
@@ -15,10 +13,10 @@ from src.lib.smolagents.hooks.path_validators import (
 )
 from src.lib.smolagents.hooks.types import HookContext
 
-
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
+
 
 def _patch_config(monkeypatch, raw: dict, root: Path) -> None:
     monkeypatch.setattr(
@@ -38,7 +36,7 @@ def _patch_no_agent(monkeypatch) -> None:
 
 def _make_context(tool_name, tool_input, tool_inputs_schema=None):
     return HookContext(
-        session_id="test",
+        local_run_id="test",
         cwd=os.getcwd(),
         hook_event_name="PreToolUse",
         tool_name=tool_name,
@@ -55,6 +53,7 @@ def _tac(pv_list):
 # ===========================================================================
 # is_vulnerable_unc_path
 # ===========================================================================
+
 
 class TestIsVulnerableUncPath:
     """Cover all 8 UNC regex patterns defined in _UNC_PATTERNS."""
@@ -110,6 +109,7 @@ class TestIsVulnerableUncPath:
 # ===========================================================================
 # has_suspicious_windows_pattern
 # ===========================================================================
+
 
 class TestHasSuspiciousWindowsPattern:
     """Cover all 6 categories of suspicious Windows patterns."""
@@ -196,6 +196,7 @@ class TestHasSuspiciousWindowsPattern:
 # resolve_symlink_chain
 # ===========================================================================
 
+
 class TestResolveSymlinkChain:
     """Test symlink chain resolution with real filesystem objects."""
 
@@ -257,6 +258,7 @@ class TestResolveSymlinkChain:
 # ===========================================================================
 # Integration: validate_workspace_path blocks UNC paths
 # ===========================================================================
+
 
 class TestValidateWorkspacePathSecurityIntegration:
     """Integration tests: validate_workspace_path must block UNC paths."""

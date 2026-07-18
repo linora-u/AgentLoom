@@ -11,9 +11,8 @@ from __future__ import annotations
 import os
 import re
 import stat
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from pathlib import Path
-from typing import List, Optional
 
 from src.lib.logging import get_logger
 
@@ -43,9 +42,10 @@ _UNC_PATTERNS = [
 @dataclass
 class PathValidationResult:
     """Result of a path validation check."""
+
     allowed: bool
     reason: str = ""
-    resolved_path: Optional[Path] = None
+    resolved_path: Path | None = None
 
 
 # ---------------------------------------------------------------------------
@@ -98,13 +98,13 @@ def has_suspicious_windows_pattern(path_str: str) -> bool:
     return False
 
 
-def resolve_symlink_chain(path_str: str) -> List[str]:
+def resolve_symlink_chain(path_str: str) -> list[str]:
     """Follow the symlink chain and return all intermediate target paths.
 
     Stops at real files, dangling links, circular links, or special files
     (FIFO, socket, device).  Max depth = ``_SYMLINK_MAX_DEPTH``.
     """
-    paths: List[str] = [path_str]
+    paths: list[str] = [path_str]
     visited: set = set()
     current = path_str
 
@@ -142,9 +142,13 @@ def resolve_symlink_chain(path_str: str) -> List[str]:
 def validate_path(
     path_str: str,
     operation: str = "read",
-    tool_name: Optional[str] = None,
-    extra_include: Optional[List[str]] = None,
-    extra_exclude: Optional[List[str]] = None,
+    tool_name: str | None = None,
+    extra_include: list[str] | None = None,
+    extra_exclude: list[str] | None = None,
+    *,
+    explicit_include_paths: list[str] | None = None,
+    explicit_exclude_paths: list[str] | None = None,
+    explicit_workspace_root: str | Path | None = None,
 ) -> PathValidationResult:
     """Validate a file path against workspace boundaries and security rules.
 
@@ -170,6 +174,11 @@ def validate_path(
         tool_name: Canonical tool name used to look up path_validation rules.
         extra_include: Additional allowed directories from caller context.
         extra_exclude: Additional excluded directories from caller context.
+        explicit_include_paths: Authoritative per-run includes. When supplied,
+            global/ContextVar rule lookup is skipped.
+        explicit_exclude_paths: Authoritative per-run excludes.
+        explicit_workspace_root: Authoritative per-run workspace root. Required
+            together with explicit policy paths by the CoreToolGuard.
 
     Returns:
         PathValidationResult with ``allowed=True/False`` and reason.
@@ -225,21 +234,38 @@ def validate_path(
     # Step 6: Symlink chain resolution
     all_paths_to_verify = resolve_symlink_chain(str(path_obj))
 
-    # Build allowed directories list from rules
-    allowed_dirs = get_allowed_directories(
-        tool_name=tool_name,
-        extra_include=extra_include,
-    )
-
-    # Build exclude paths list from rules
-    rule_excludes: List[str] = []
-    if tool_name:
-        rule_excludes = get_rule_exclude_paths(tool_name)
-    all_excludes = list(rule_excludes)
-    if extra_exclude:
-        all_excludes.extend([str(e) for e in extra_exclude if e])
-
-    workspace_root = get_workspace_root()
+    uses_explicit_policy = explicit_workspace_root is not None
+    if uses_explicit_policy:
+        workspace_root = Path(str(explicit_workspace_root)).expanduser().resolve()
+        allowed_dirs: list[Path] = [workspace_root]
+        for include in explicit_include_paths or []:
+            text = os.path.expanduser(str(include).strip())
+            if not text:
+                continue
+            if text == "*":
+                allowed_dirs = [Path("*")]
+                break
+            include_path = Path(text)
+            if not include_path.is_absolute():
+                include_path = workspace_root / include_path
+            allowed_dirs.append(
+                include_path if any(char in str(include_path) for char in ("*", "?", "[")) else include_path.resolve()
+            )
+        all_excludes = [str(value) for value in explicit_exclude_paths or [] if str(value).strip()]
+    else:
+        # Legacy callers use the shared config resolver. The production
+        # CoreToolGuard always takes the explicit branch above.
+        allowed_dirs = get_allowed_directories(
+            tool_name=tool_name,
+            extra_include=extra_include,
+        )
+        rule_excludes: list[str] = []
+        if tool_name:
+            rule_excludes = get_rule_exclude_paths(tool_name)
+        all_excludes = list(rule_excludes)
+        if extra_exclude:
+            all_excludes.extend([str(e) for e in extra_exclude if e])
+        workspace_root = get_workspace_root()
 
     # Step 8 (pre-check): If exclude is "*", deny everything immediately
     if "*" in all_excludes:
@@ -292,8 +318,7 @@ def validate_path(
             return PathValidationResult(
                 allowed=False,
                 reason=(
-                    f"Access denied: Path '{path_str}' resolves to "
-                    f"'{check_path}' which is outside allowed directories"
+                    f"Access denied: Path '{path_str}' resolves to '{check_path}' which is outside allowed directories"
                 ),
                 resolved_path=check_path,
             )
