@@ -291,27 +291,6 @@ class CheckpointCoordinator:
         # Store for workers to inherit.
         self._step_cb = _on_step_complete
 
-    def register_file_history_hook(self, hook_manager: Any) -> None:
-        """Register file-history pre-edit backups on an agent's hook manager."""
-        if self._file_history is None or hook_manager is None:
-            return
-        if getattr(hook_manager, "_agentloom_file_history_hook_registered", False):
-            return
-        try:
-            from src.lib.checkpoint.file_history_hook import FileHistoryHook
-            from src.lib.smolagents.hooks.types import HookEvent
-
-            hook_manager.register_hook(
-                HookEvent.PRE_TOOL_USE,
-                "*",
-                FileHistoryHook(self._file_history),
-                source="file_history",
-                allow_duplicates=False,
-            )
-            setattr(hook_manager, "_agentloom_file_history_hook_registered", True)
-        except Exception as exc:
-            _logger.warning("Failed to register file history hook: %s", exc)
-
     def save_supervisor(
         self,
         runtime_agent: Any,

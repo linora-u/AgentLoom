@@ -48,7 +48,7 @@ applications/browser_harness_probe/
 | `scrape_zsxq_owner_posts` Tool | 在用户真实 Chrome 中定位/激活 zsxq 标签，从最新滚到 `since_date`，展开折叠内容，按楼主过滤并写 CSV |
 | `browser-harness-agentloom` Skill | 沉淀后续 Agent 做 browser-harness + AgentLoom 集成/排障时应复用的执行经验 |
 
-`config/system.yaml` 写 `skills: []`，用于关闭全局自动发现 Skills，避免 probe 运行时被无关 Skill Hook 或缺失工具校验干扰。
+`config/system.yaml` 写 `skills: []`，用于关闭全局 Skill 发现，避免 probe 运行时被无关 Skill 或缺失工具校验干扰。Hook 是独立顶层配置，不由 Skill 发现触发。
 
 README 记录本次验收事实；`skills/browser-harness-agentloom/SKILL.md` 记录后续执行手册。后续遇到 browser-harness doctor、isolated/real Chrome、`config/llm.yaml`、Tool 注册等问题时，优先读取该 Skill。
 

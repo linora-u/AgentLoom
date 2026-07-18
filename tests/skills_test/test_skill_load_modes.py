@@ -10,7 +10,6 @@ AGENT_LOOM_ROOT = SCRIPT_DIR.parents[1]
 if str(AGENT_LOOM_ROOT) not in sys.path:
     sys.path.insert(0, str(AGENT_LOOM_ROOT))
 
-from src.lib.smolagents.hooks.hook_manager import HookManager
 from src.lib.smolagents.skills.skills import SkillsManager
 from src.tools.skills import list_skills, load_skill
 from src.trace.task_context import clear_current_skills_manager, set_current_skills_manager
@@ -18,16 +17,12 @@ from src.trace.task_context import clear_current_skills_manager, set_current_ski
 
 def _reset_singletons():
     SkillsManager._instance = None
-    HookManager._instance = None
 
 
 class TestSkillLoadModes(unittest.TestCase):
     def setUp(self):
         _reset_singletons()
-        self.skills_manager = SkillsManager(
-            logger=logging.getLogger(__name__),
-            hook_manager=HookManager(),
-        )
+        self.skills_manager = SkillsManager(logger=logging.getLogger(__name__))
         self._temp_dirs = []
         set_current_skills_manager(self.skills_manager)
 

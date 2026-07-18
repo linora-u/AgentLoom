@@ -381,7 +381,6 @@ def test_model_memory_never_uses_another_threads_global_application_fallback(
 ) -> None:
     import json
 
-    from src.lib.smolagents.hooks.hook_manager import HookManager as _HookManager  # noqa: F401
     from src.tools.self_learning.memory_tool import memory
     from src.trace import bind_root_run, clear_current_agent_config, set_current_agent_config
 

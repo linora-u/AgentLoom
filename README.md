@@ -197,7 +197,7 @@ Worker Agents can be exported as callable tools. AgentLoom generates function si
 
 ### Skills and Hooks
 
-Skills provide reusable knowledge or behavior through Claude-style `SKILL.md` packages. Hooks attach logic around task lifecycle, sub-agent lifecycle, tool calls, sessions, compaction, setup, and config changes.
+Skills provide reusable knowledge through Claude-style `SKILL.md` packages. Hooks are independent, explicitly configured Shell extensions for the eleven supported tool, task, Agent, and session events. A Skill cannot declare or register a Hook; reusable Hooks live in explicitly referenced `HOOK.yaml` Bundles. See [Hook configuration](docs/en/hooks.md).
 
 ### Local Codex Tool
 
@@ -228,7 +228,7 @@ Before running the tool, make sure `codex` is on `PATH` and `codex login status`
 | [LLM Configuration](docs/en/llm_config.md) | Model types, provider settings, inheritance, retries, and prompt cache settings. |
 | [System Configuration](docs/en/system_config.md) | Runtime settings, permissions, logging, execution environments, and tools. |
 | [Skills Configuration](docs/en/skills_config.md) | Skill package format, loading, runtime policy, and built-in skills. |
-| [Hooks Reference](docs/en/hooks.md) | Lifecycle events, hook types, matching, and execution behavior. |
+| [Hooks Reference](docs/en/hooks.md) | Direct Hooks, Bundles, lifecycle events, matching, and execution behavior. |
 | [Checkpoint Resume](docs/en/checkpoint.md) | Checkpoint layout, resume behavior, and long-task recovery. |
 
 ## AgentLoom Framework Skill

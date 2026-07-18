@@ -38,12 +38,6 @@ class TestSkillConfigValidator(unittest.TestCase):
                 "agent: reviewer\n"
                 "effort: high\n"
                 "shell: bash\n"
-                "hooks:\n"
-                "  PreToolUse:\n"
-                "    - matcher: \"Read|Write\"\n"
-                "      hooks:\n"
-                "        - type: command\n"
-                "          command: \"echo hi\"\n"
                 "platform: Claude\n"
                 "custom-field: ignored\n"
                 "when-to-use: legacy ignored\n"
@@ -66,8 +60,9 @@ class TestSkillConfigValidator(unittest.TestCase):
             self.assertEqual(skill.metadata.context, "fork")
             self.assertEqual(skill.metadata.agent, "reviewer")
             self.assertEqual(skill.metadata.effort, "high")
-            self.assertEqual(skill.metadata.shell, "bash")
-            self.assertIn("PreToolUse", skill.metadata.hooks)
+            self.assertFalse(hasattr(skill.metadata, "shell"))
+            self.assertFalse(hasattr(skill.metadata, "hooks"))
+            self.assertFalse(hasattr(skill.metadata, "enable_hooks"))
             self.assertIsNone(skill.metadata.platform)
             self.assertFalse(hasattr(skill.metadata, "argument_names"))
             self.assertFalse(hasattr(skill.metadata, "runtime"))

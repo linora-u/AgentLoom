@@ -21,6 +21,7 @@
 - [2. smart_summary — 上下文压缩策略](#2-smart_summary--上下文压缩策略)
 - [3. prompt — 顶层 System Prompt 覆盖](#3-prompt--顶层-system-prompt-覆盖)
 - [4. skills — 全局 Skills 配置](#4-skills--全局-skills-配置)
+- [4.5 hooks — 独立 Hook Runtime](#45-hooks--独立-hook-runtime)
 - [5. lsp_servers — LSP 语言服务器配置](#5-lsp_servers--lsp-语言服务器配置)
 - [5.5 mcp_servers — MCP 外部工具集成](#55-mcp_servers--mcp-外部工具集成)
 - [6. execution_env — 执行环境配置](#6-execution_env--执行环境配置)
@@ -72,10 +73,19 @@ prompt:
 # ============================================
 skills:
   # NOTE: agent-recall-with-files 默认禁用。
-  # 该 Skill 通过 PreToolUse/PostToolUse Hook 在工具结果末尾追加 recall 提示，
-  # 弱 LLM 存在注意力稀疏问题导致指令被忽略。仅在使用强 LLM 时手动启用。
+  # 需要时独立启用其提示词/资源包。
   # - path: "skills/agent-recall-with-files"
-  - path: "skills/agent-visualization"
+
+# ============================================
+# 显式 Hook 配置
+# ============================================
+hooks:
+  bundles:
+    agent-visualization:
+      path: hooks/agent-visualization
+    # Recall Hook 与 Recall Skill 独立，默认禁用。
+    # agent-recall-with-files:
+    #   path: hooks/agent-recall-with-files
 
 # ============================================
 # 执行环境全局配置
@@ -305,7 +315,7 @@ prompt:
 定义所有 Agent 默认继承的全局 Skill 包。Skills 是可复用的 Claude 风格 `SKILL.md` 包。加载策略由 `load-mode` 控制：`on-demand`（只放 catalogue）或 `eager`（完整正文注入 system prompt）。
 
 **YAML 路径**：`skills` (顶层字段)
-**类型**：`list[dict | str]`
+**类型**：`list[dict | str] | dict`
 
 ### 4.1 Skills 条目格式
 
@@ -326,6 +336,15 @@ skills:
   - "skills/agent-recall-with-files"
 ```
 
+#### 共享策略格式
+
+```yaml
+skills:
+  items:
+    - path: "skills/agent-recall-with-files"
+    - path: "skills/safe-review"
+```
+
 ### 4.2 Skills 条目参数
 
 | 参数 | 类型 | 默认值 | 必选 | 说明 |
@@ -335,6 +354,8 @@ skills:
 | `load-mode` | `str` | `on-demand` | ❌ 否 | `on-demand` catalogue 加载，或 `eager` 完整正文注入 |
 | `allow-scripts` | `bool` | `true` | ❌ 否 | 设为 `false` 时阻断 `run_skill_script` |
 | `allow-network` | `bool` | `true` | ❌ 否 | 设为 `false` 时阻断 `run_skill_script` 中常见网络命令 |
+
+Skill 发现和加载都不会启用 Hook。`SKILL.md` 中的 `hooks` 与 Skill 配置中的 `enable-hooks` 都会作为迁移字段被拒绝；请通过独立顶层 [`hooks`](hooks.md) 配置直接 Hook 或显式 Bundle。
 
 ### 4.3 Skills 加载顺序
 
@@ -369,12 +390,24 @@ skills:
   - path: "skills/agent-recall-with-files"
     load-mode: "eager"
 
-  - path: "skills/agent-visualization"
-    allow-scripts: false
-
-  # 简写格式（默认 load-mode=on-demand，允许脚本和网络）
+  # 简写格式（默认 on-demand，允许脚本和网络）
   - "skills/my-custom-skill"
 ```
+
+## 4.5 hooks — 独立 Hook Runtime
+
+Hook 与 Skill 分开配置。下面的声明会显式授权 visualization Bundle，同时保持 recall 禁用：
+
+```yaml
+hooks:
+  bundles:
+    agent-visualization:
+      path: hooks/agent-visualization
+    # agent-recall-with-files:
+    #   path: hooks/agent-recall-with-files
+```
+
+直接声明、Bundle manifest、分层替换、tombstone、事件语义和 Shell 协议详见 [Hook 参考](hooks.md)。
 
 ---
 
