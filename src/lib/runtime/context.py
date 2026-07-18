@@ -17,7 +17,7 @@ import re
 import stat
 import threading
 import uuid
-from collections.abc import Callable, Iterator
+from collections.abc import Callable, Iterable, Iterator
 from contextlib import contextmanager
 from dataclasses import asdict, dataclass
 from datetime import UTC, datetime
@@ -28,11 +28,7 @@ _SAFE_PART = re.compile(r"[^A-Za-z0-9._-]+")
 _CURRENT_RUN_CONTEXT: contextvars.ContextVar[RuntimeContext | None] = contextvars.ContextVar(
     "agentloom_run_context", default=None
 )
-_DIRECTORY_OPEN_FLAGS = (
-    os.O_RDONLY
-    | getattr(os, "O_DIRECTORY", 0)
-    | getattr(os, "O_NOFOLLOW", 0)
-)
+_DIRECTORY_OPEN_FLAGS = os.O_RDONLY | getattr(os, "O_DIRECTORY", 0) | getattr(os, "O_NOFOLLOW", 0)
 _FILE_NOFOLLOW = getattr(os, "O_NOFOLLOW", 0)
 RUNTIME_ROOT_ENV = "AGENTLOOM_RUNTIME_ROOT"
 _UNSET_ROOT_MEMORY_SNAPSHOT = object()
@@ -166,9 +162,7 @@ def _open_runtime_directory(
                     pass
                 next_fd = os.open(part, _DIRECTORY_OPEN_FLAGS, dir_fd=current_fd)
             except OSError as exc:
-                raise RuntimeError(
-                    f"runtime path component is not a safe directory: {directory}"
-                ) from exc
+                raise RuntimeError(f"runtime path component is not a safe directory: {directory}") from exc
             os.close(current_fd)
             current_fd = next_fd
         return current_fd
@@ -217,10 +211,7 @@ def safe_application_id(value: str) -> str:
     path = PurePosixPath(raw)
     if not raw or path.is_absolute() or any(part in {"", ".", ".."} for part in path.parts):
         raise ValueError("application_id must be a safe relative path")
-    return "/".join(
-        _safe_named_part(part, fallback="app", include_hash_on_change=True)
-        for part in path.parts
-    )
+    return "/".join(_safe_named_part(part, fallback="app", include_hash_on_change=True) for part in path.parts)
 
 
 def safe_agent_path(value: str) -> str:
@@ -291,6 +282,25 @@ class RuntimeRunLease:
             os.close(fd)
             raise
         self._fd = fd
+
+    def is_held(self) -> bool:
+        """Return whether a writer owns this run without excluding other readers."""
+
+        if self.run_dir.is_symlink() or not self.run_dir.is_dir():
+            raise RuntimeError(f"run directory is unavailable: {self.run_dir}")
+        fd = os.open(self.run_dir, _DIRECTORY_OPEN_FLAGS)
+        shared = False
+        try:
+            try:
+                fcntl.flock(fd, fcntl.LOCK_SH | fcntl.LOCK_NB)
+                shared = True
+            except BlockingIOError:
+                return True
+            return False
+        finally:
+            if shared:
+                fcntl.flock(fd, fcntl.LOCK_UN)
+            os.close(fd)
 
     def release(self) -> None:
         if self._fd is None:
@@ -592,6 +602,65 @@ class RuntimeContext:
                 pass
             os.close(parent_fd)
 
+    def atomic_write_run_file_chunks(
+        self,
+        path: Path,
+        chunks: Iterable[str | bytes],
+        *,
+        encoding: str = "utf-8",
+    ) -> int:
+        """Atomically replace a run file while streaming bounded chunks."""
+
+        target = _absolute_path_without_resolving_symlinks(path)
+        try:
+            target.relative_to(self.run_dir)
+        except ValueError as exc:
+            raise RuntimeError(f"run artifact escapes run directory: {target}") from exc
+        parent_fd = _open_runtime_directory(
+            target.parent,
+            root=self.root_dir,
+            create=False,
+        )
+        temporary = f".{target.name}.{uuid.uuid4().hex}.tmp"
+        fd = -1
+        bytes_written = 0
+        try:
+            try:
+                existing = os.stat(target.name, dir_fd=parent_fd, follow_symlinks=False)
+            except FileNotFoundError:
+                existing = None
+            if existing is not None and not stat.S_ISREG(existing.st_mode):
+                raise RuntimeError(f"run file is not a regular file: {target}")
+            fd = os.open(
+                temporary,
+                os.O_WRONLY | os.O_CREAT | os.O_EXCL | _FILE_NOFOLLOW,
+                0o600,
+                dir_fd=parent_fd,
+            )
+            with os.fdopen(fd, "wb", closefd=True) as stream:
+                fd = -1
+                for chunk in chunks:
+                    payload = chunk.encode(encoding) if isinstance(chunk, str) else chunk
+                    stream.write(payload)
+                    bytes_written += len(payload)
+                stream.flush()
+                os.fsync(stream.fileno())
+            os.replace(
+                temporary,
+                target.name,
+                src_dir_fd=parent_fd,
+                dst_dir_fd=parent_fd,
+            )
+            return bytes_written
+        finally:
+            if fd >= 0:
+                os.close(fd)
+            try:
+                os.unlink(temporary, dir_fd=parent_fd)
+            except FileNotFoundError:
+                pass
+            os.close(parent_fd)
+
     def read_run_file(self, path: Path, *, encoding: str = "utf-8") -> str:
         """Read one regular file below this run through a trusted directory fd."""
 
@@ -694,9 +763,7 @@ class RuntimeContext:
 
         path = validate_runtime_owned_path(self.checkpoint_dir, root=self.root_dir)
         if require_exists and not path.is_dir():
-            raise FileNotFoundError(
-                f"checkpoint directory does not exist: {self.checkpoint_dir}"
-            )
+            raise FileNotFoundError(f"checkpoint directory does not exist: {self.checkpoint_dir}")
         return path
 
     def write_manifest(self, **extra: Any) -> None:
@@ -800,9 +867,7 @@ def resolve_runtime_home(
     # override applies to every runtime consumer.  There is deliberately no
     # self-learning-only environment variable.
     root_override = os.environ.get(RUNTIME_ROOT_ENV, "").strip()
-    configured = Path(
-        root_override or str(section.get("root_dir", ".agentloom"))
-    ).expanduser()
+    configured = Path(root_override or str(section.get("root_dir", ".agentloom"))).expanduser()
     if not configured.is_absolute():
         configured = Path(agent_root).expanduser() / configured
     return RuntimeHome(configured)
