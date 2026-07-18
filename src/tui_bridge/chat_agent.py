@@ -9,10 +9,10 @@ provided by :mod:`src.tui_bridge.builder`.
 from __future__ import annotations
 
 import json
-import os
 import time
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, field
+from email.utils import parsedate_to_datetime
 from pathlib import Path
 from typing import Any, Protocol
 from urllib.parse import urlsplit
@@ -34,9 +34,11 @@ from src.lib.config.llm_config import LLMConfig
 _MAX_PROVIDER_TURNS = 6
 _MAX_PROVIDER_ATTEMPTS = 2
 _MAX_OUTPUT_TOKENS = 4096
-_REQUEST_TIMEOUT_SECONDS = 60.0
-_WHOLE_TURN_TIMEOUT_SECONDS = 90.0
+_REQUEST_TIMEOUT_SECONDS = 120.0
+_WHOLE_TURN_TIMEOUT_SECONDS = 300.0
 _RETRY_DELAY_SECONDS = 1.0
+_MAX_RETRY_DELAY_SECONDS = 10.0
+_ALLOWED_TOOL_CHOICES = frozenset({"auto", "none", "required"})
 
 
 class _ChatTool(Protocol):
@@ -62,6 +64,7 @@ class ChatModelProfile:
     extra_body: Mapping[str, object] | None = None
     reasoning_effort: str | None = None
     parallel_tool_calls: bool | None = None
+    tool_choice: str = "auto"
 
 
 @dataclass(frozen=True, slots=True)
@@ -120,13 +123,35 @@ def _load_profile(project_root: Path, requested_model_type: str | None) -> ChatM
     base_url = settings.base_url.strip()
     if base_url:
         parsed_base_url = urlsplit(base_url)
-        if parsed_base_url.scheme not in {"http", "https"} or not parsed_base_url.netloc:
+        hostname = (parsed_base_url.hostname or "").lower()
+        local_http = parsed_base_url.scheme == "http" and (
+            hostname == "localhost"
+            or hostname.endswith(".localhost")
+            or hostname in {"127.0.0.1", "::1"}
+        )
+        invalid_base_url = (
+            not parsed_base_url.netloc
+            or (parsed_base_url.scheme != "https" and not local_http)
+            or parsed_base_url.username is not None
+            or parsed_base_url.password is not None
+            or bool(parsed_base_url.query)
+            or bool(parsed_base_url.fragment)
+        )
+        if invalid_base_url:
             raise ChatAgentError(
                 "assistant_config",
                 f"模型类型 {model_type!r} 的 base_url 无效；请检查 config/llm.yaml。",
             )
+    elif not raw_model_id.startswith("openai/"):
+        raise ChatAgentError(
+            "assistant_config",
+            f"模型类型 {model_type!r} 不是可确认的 OpenAI-compatible 配置；"
+            "请配置 HTTPS base_url 或使用 openai/ 模型前缀。",
+        )
 
-    api_key = settings.api_key.strip() or os.environ.get("OPENAI_API_KEY", "").strip()
+    # Project-selected endpoints may be controlled by the project. Never fall
+    # back to an ambient credential that was meant for another provider.
+    api_key = settings.api_key.strip()
     if not api_key:
         raise ChatAgentError(
             "assistant_config",
@@ -144,6 +169,12 @@ def _load_profile(project_root: Path, requested_model_type: str | None) -> ChatM
     reasoning_effort = raw_reasoning_effort if isinstance(raw_reasoning_effort, str) else None
     raw_parallel_tool_calls = extras.get("parallel_tool_calls")
     parallel_tool_calls = raw_parallel_tool_calls if isinstance(raw_parallel_tool_calls, bool) else None
+    raw_tool_choice = extras.get("tool_choice", "auto")
+    if not isinstance(raw_tool_choice, str) or raw_tool_choice not in _ALLOWED_TOOL_CHOICES:
+        raise ChatAgentError(
+            "assistant_config",
+            f"模型类型 {model_type!r} 的 tool_choice 必须是 auto、none 或 required。",
+        )
     extra_headers = None
     if settings.extra_headers:
         extra_headers = {str(key): str(value) for key, value in settings.extra_headers.items()}
@@ -160,6 +191,7 @@ def _load_profile(project_root: Path, requested_model_type: str | None) -> ChatM
         extra_body=extra_body,
         reasoning_effort=reasoning_effort,
         parallel_tool_calls=parallel_tool_calls,
+        tool_choice=raw_tool_choice,
     )
 
 
@@ -219,6 +251,26 @@ def _classify_provider_error(error: BaseException) -> ChatAgentError:
         "assistant_failed",
         "模型对话失败；请重试，或切换其他已配置模型。",
     )
+
+
+def _retry_delay_seconds(error: BaseException) -> float | None:
+    """Return a safe retry delay, or ``None`` when the provider asks for too long."""
+
+    response = getattr(error, "response", None)
+    headers = getattr(response, "headers", None)
+    raw_retry_after = headers.get("retry-after") if headers is not None else None
+    if raw_retry_after is None:
+        return _RETRY_DELAY_SECONDS
+    try:
+        delay = float(raw_retry_after)
+    except (TypeError, ValueError):
+        try:
+            retry_at = parsedate_to_datetime(str(raw_retry_after))
+            delay = retry_at.timestamp() - time.time()
+        except (TypeError, ValueError, OverflowError):
+            return _RETRY_DELAY_SECONDS
+    delay = max(delay, 0.0)
+    return delay if delay <= _MAX_RETRY_DELAY_SECONDS else None
 
 
 def _tool_schema(tool: _ChatTool) -> dict[str, object]:
@@ -304,16 +356,30 @@ class TuiChatAgent:
             on_event({"type": "turn.started"})
         try:
             for _provider_turn in range(_MAX_PROVIDER_TURNS):
+                tool_choice = profile.tool_choice
+                if tool_choice == "required" and any(
+                    message.get("role") == "tool" for message in messages
+                ):
+                    # ``required`` is an entry policy: after the requested tool
+                    # has run, the model must be allowed to finish in text.
+                    tool_choice = "auto"
                 turn = self._provider_turn_with_retry(
                     client=client,
                     profile=profile,
                     messages=messages,
                     schemas=schemas,
+                    tool_choice=tool_choice,
                     deadline=deadline,
                     on_delta=(
                         lambda text: self._record_delta(text, visible_parts, on_event)
                     ),
+                    on_event=on_event,
                 )
+                if profile.tool_choice == "none" and turn.tool_calls:
+                    raise ChatAgentError(
+                        "assistant_protocol",
+                        "模型在禁用工具时仍返回了工具调用；已拒绝执行，请切换其他已配置模型。",
+                    )
                 if not turn.tool_calls:
                     assistant = "".join(visible_parts)
                     if on_event is not None:
@@ -383,8 +449,10 @@ class TuiChatAgent:
         profile: ChatModelProfile,
         messages: Sequence[Mapping[str, object]],
         schemas: Sequence[Mapping[str, object]],
+        tool_choice: str,
         deadline: float,
         on_delta: Callable[[str], None],
+        on_event: EventSink | None,
     ) -> _ProviderTurn:
         last_error: ChatAgentError | None = None
         for attempt in range(_MAX_PROVIDER_ATTEMPTS):
@@ -408,6 +476,7 @@ class TuiChatAgent:
                     profile=profile,
                     messages=messages,
                     schemas=schemas,
+                    tool_choice=tool_choice,
                     timeout=min(profile.request_timeout_seconds, remaining),
                     deadline=deadline,
                     monotonic=self._monotonic,
@@ -416,15 +485,35 @@ class TuiChatAgent:
             except Exception as error:
                 classified = _classify_provider_error(error)
                 last_error = classified
+                retry_delay = _retry_delay_seconds(error)
                 can_retry = (
                     classified.retryable
                     and not emitted_text
                     and attempt + 1 < _MAX_PROVIDER_ATTEMPTS
-                    and self._monotonic() + _RETRY_DELAY_SECONDS < deadline
+                    and retry_delay is not None
+                    and self._monotonic() + retry_delay < deadline
                 )
                 if not can_retry:
                     raise classified from error
-                self._retry_sleep(_RETRY_DELAY_SECONDS)
+                activity_name = f"模型重试 {attempt + 2}/{_MAX_PROVIDER_ATTEMPTS}"
+                if on_event is not None:
+                    on_event(
+                        {
+                            "type": "turn.activity",
+                            "state": "started",
+                            "name": activity_name,
+                        }
+                    )
+                assert retry_delay is not None
+                self._retry_sleep(retry_delay)
+                if on_event is not None:
+                    on_event(
+                        {
+                            "type": "turn.activity",
+                            "state": "completed",
+                            "name": activity_name,
+                        }
+                    )
         assert last_error is not None
         raise last_error
 
@@ -435,6 +524,7 @@ class TuiChatAgent:
         profile: ChatModelProfile,
         messages: Sequence[Mapping[str, object]],
         schemas: Sequence[Mapping[str, object]],
+        tool_choice: str,
         timeout: float,
         deadline: float,
         monotonic: Callable[[], float],
@@ -443,12 +533,13 @@ class TuiChatAgent:
         request: dict[str, object] = {
             "model": profile.model_id,
             "messages": list(messages),
-            "tools": list(schemas),
-            "tool_choice": "auto",
+            "tool_choice": tool_choice,
             "stream": True,
             "max_tokens": profile.max_output_tokens,
             "timeout": timeout,
         }
+        if tool_choice != "none":
+            request["tools"] = list(schemas)
         if profile.temperature is not None:
             request["temperature"] = profile.temperature
         if profile.extra_body:

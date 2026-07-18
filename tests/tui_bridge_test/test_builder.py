@@ -4,6 +4,7 @@ import json
 import os
 import stat
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
@@ -18,6 +19,7 @@ tool_call_type: tool_call
 workflow: |
   Ask for the report topic, collect the required facts, and return a concise report.
 """
+REPORT_AGENT_PATH = "applications/reports/workflows/report_agent.yaml"
 
 
 @pytest.fixture(autouse=True)
@@ -30,126 +32,68 @@ def _configured_model_catalog(tmp_path: Path) -> None:
     )
 
 
-class _FakeBuilderAgent:
-    def __init__(self, tools, replies: list[str], captured_prompts: list[str]):
-        self._tools = {tool.name: tool for tool in tools}
+class _StubChatAgent:
+    def __init__(self, replies: list[str]):
         self._replies = replies
-        self._captured_prompts = captured_prompts
+        self.histories: list[list[dict[str, str]]] = []
 
-    def run(self, prompt: str) -> str:
-        self._captured_prompts.append(prompt)
-        transcript = prompt.rsplit("Conversation (including the latest user message): ", 1)[-1]
-        if "create" in transcript.lower() or "创建" in transcript:
-            self._tools["stage_agent_yaml"].forward(
-                "applications/reports/workflows/report_agent.yaml",
-                VALID_AGENT_YAML,
-            )
-        return self._replies.pop(0)
+    def run(self, *, history, model_type, tools, on_event):
+        del tools, on_event
+        self.histories.append([dict(item) for item in history])
+        return SimpleNamespace(
+            assistant=self._replies.pop(0),
+            model_type=model_type or "powerful",
+        )
 
 
-def _service(project_root: Path, replies: list[str] | None = None):
-    observed: dict[str, object] = {}
-    prompts: list[str] = []
-    reply_queue = list(replies or ["Draft ready."])
-
-    def factory(tools, model_type):
-        observed["tool_names"] = {tool.name for tool in tools}
-        observed["model_type"] = model_type
-        return _FakeBuilderAgent(tools, reply_queue, prompts)
-
-    return BuilderService(project_root, agent_factory=factory), observed, prompts
+def _stubbed_service(
+    project_root: Path,
+    replies: list[str] | None = None,
+) -> tuple[BuilderService, _StubChatAgent]:
+    service = BuilderService(project_root)
+    chat_agent = _StubChatAgent(list(replies or ["Draft ready."]))
+    service._chat_agent = chat_agent
+    return service, chat_agent
 
 
-def test_builder_can_only_inspect_stage_and_validate_yaml(tmp_path: Path) -> None:
-    service, observed, _ = _service(tmp_path)
-
-    response = service.send(
-        session_id="builder-1",
-        message="Create a report agent",
-        model_type="powerful",
+def _stage_yaml(
+    service: BuilderService,
+    path: str = REPORT_AGENT_PATH,
+    content: str = VALID_AGENT_YAML,
+    *,
+    session_id: str = "builder-1",
+) -> dict[str, object]:
+    tool = builder_module._StageAgentYamlTool(
+        service._project_root,
+        service._draft(session_id),
     )
-
-    assert observed["tool_names"] == {
-        "inspect_agent_system",
-        "stage_agent_yaml",
-        "validate_agent_draft",
-    }
-    assert observed["model_type"] == "powerful"
-    assert response["assistant"] == "Draft ready."
-    assert response["draft"]["valid"] is True
-    assert response["draft"]["revision"] == 1
-    assert response["draft"]["files"][0]["path"] == "applications/reports/workflows/report_agent.yaml"
-    assert not (tmp_path / "applications/reports/workflows/report_agent.yaml").exists()
+    return json.loads(tool.forward(path, content))
 
 
-def test_assistant_answers_general_questions_without_forcing_a_yaml_draft(
-    tmp_path: Path,
-) -> None:
-    service, _, prompts = _service(tmp_path, replies=["The configured model can answer that directly."])
-
-    response = service.send(
-        session_id="chat-1",
-        message="What is the difference between a process and a thread?",
-        model_type="powerful",
+def _validate_draft(
+    service: BuilderService,
+    *,
+    session_id: str = "builder-1",
+) -> dict[str, object]:
+    tool = builder_module._ValidateAgentDraftTool(
+        service._project_root,
+        service._draft(session_id),
     )
-
-    assert response["assistant"] == "The configured model can answer that directly."
-    assert response["draft"]["files"] == []
-    assert "general conversational assistant" in prompts[0]
-    assert "Do not force ordinary questions into Agent YAML work" in prompts[0]
+    return json.loads(tool.forward())
 
 
-def test_assistant_stream_reports_model_deltas_and_tool_activity(tmp_path: Path) -> None:
-    ChatMessageStreamDelta = type("ChatMessageStreamDelta", (), {})
-    ToolCall = type("ToolCall", (), {})
-    ToolOutput = type("ToolOutput", (), {})
-    FinalAnswerStep = type("FinalAnswerStep", (), {})
-
-    class _StreamingAgent:
-        def run(self, _prompt: str, **kwargs):
-            assert kwargs == {"stream": True}
-
-            def events():
-                delta = ChatMessageStreamDelta()
-                delta.content = "正在查看项目"
-                yield delta
-                call = ToolCall()
-                call.name = "inspect_agent_system"
-                yield call
-                output = ToolOutput()
-                output.tool_call = call
-                yield output
-                final = FinalAnswerStep()
-                final.output = "项目状态正常。"
-                yield final
-
-            return events()
-
-    service = BuilderService(
-        tmp_path,
-        agent_factory=lambda _tools, _model: _StreamingAgent(),
-    )
-    observed: list[dict[str, object]] = []
-
-    response = service.send(
-        session_id="chat-1",
-        message="看看项目状态",
-        on_event=observed.append,
-    )
-
-    assert response["assistant"] == "项目状态正常。"
-    assert observed == [
-        {"type": "turn.started"},
-        {"type": "turn.delta", "text": "正在查看项目"},
-        {"type": "turn.activity", "state": "started", "name": "inspect_agent_system"},
-        {"type": "turn.activity", "state": "completed", "name": "inspect_agent_system"},
-        {"type": "turn.completed"},
-    ]
+def _staged_service(
+    project_root: Path,
+    files: dict[str, str] | None = None,
+) -> BuilderService:
+    service = BuilderService(project_root)
+    for path, content in (files or {REPORT_AGENT_PATH: VALID_AGENT_YAML}).items():
+        _stage_yaml(service, path, content)
+    return service
 
 
 def test_draft_is_written_only_after_explicit_apply_with_matching_revision(tmp_path: Path) -> None:
-    service, _, _ = _service(tmp_path)
-    service.send(session_id="builder-1", message="Create a report agent")
+    service = _staged_service(tmp_path)
 
     with pytest.raises(DraftConflictError, match="revision"):
         service.apply_draft(session_id="builder-1", expected_revision=0)
@@ -170,8 +114,7 @@ def test_apply_preserves_existing_target_permissions(tmp_path: Path) -> None:
     target.parent.mkdir(parents=True)
     target.write_text("old\n", encoding="utf-8")
     target.chmod(0o600)
-    service, _, _ = _service(tmp_path)
-    service.send(session_id="builder-1", message="Create a report agent")
+    service = _staged_service(tmp_path)
 
     service.apply_draft(session_id="builder-1", expected_revision=1)
 
@@ -186,24 +129,10 @@ def test_apply_rejects_existing_target_changed_after_first_stage(
     target.parent.mkdir(parents=True)
     target.write_text("old\n", encoding="utf-8")
     original_stat = target.stat()
-    calls = 0
-
-    class _RestagingAgent:
-        def __init__(self, tools):
-            self._tools = {tool.name: tool for tool in tools}
-
-        def run(self, _prompt: str) -> str:
-            nonlocal calls
-            calls += 1
-            content = VALID_AGENT_YAML if calls == 1 else VALID_AGENT_YAML.replace("concise", "detailed")
-            self._tools["stage_agent_yaml"].forward(target_path, content)
-            return "ready"
-
-    service = BuilderService(tmp_path, agent_factory=lambda tools, _model: _RestagingAgent(tools))
-    service.send(session_id="builder-1", message="create")
+    service = _staged_service(tmp_path)
     target.write_text("new\n", encoding="utf-8")
     os.utime(target, ns=(original_stat.st_atime_ns, original_stat.st_mtime_ns))
-    service.send(session_id="builder-1", message="revise")
+    _stage_yaml(service, target_path, VALID_AGENT_YAML.replace("concise", "detailed"))
 
     with pytest.raises(DraftConflictError, match="changed since it was first staged"):
         service.apply_draft(session_id="builder-1", expected_revision=2)
@@ -213,8 +142,7 @@ def test_apply_rejects_existing_target_changed_after_first_stage(
 
 
 def test_apply_rejects_target_created_after_first_stage(tmp_path: Path) -> None:
-    service, _, _ = _service(tmp_path)
-    service.send(session_id="builder-1", message="Create a report agent")
+    service = _staged_service(tmp_path)
     target = tmp_path / "applications/reports/workflows/report_agent.yaml"
     target.parent.mkdir(parents=True)
     target.write_text("concurrent create\n", encoding="utf-8")
@@ -227,31 +155,13 @@ def test_apply_rejects_target_created_after_first_stage(tmp_path: Path) -> None:
 
 
 def test_successful_apply_consumes_the_backend_draft(tmp_path: Path) -> None:
-    calls = 0
-
-    class _ApplyOnceAgent:
-        def __init__(self, tools):
-            self._tools = {tool.name: tool for tool in tools}
-
-        def run(self, _prompt: str) -> str:
-            nonlocal calls
-            calls += 1
-            if calls == 1:
-                self._tools["stage_agent_yaml"].forward(
-                    "applications/reports/workflows/report_agent.yaml",
-                    VALID_AGENT_YAML,
-                )
-            return "ready"
-
-    service = BuilderService(tmp_path, agent_factory=lambda tools, _model: _ApplyOnceAgent(tools))
-    service.send(session_id="builder-1", message="Create a report agent")
+    service = _staged_service(tmp_path)
 
     service.apply_draft(session_id="builder-1", expected_revision=1)
 
     target = tmp_path / "applications/reports/workflows/report_agent.yaml"
     target.write_text("external edit\n", encoding="utf-8")
     draft = service.get_draft("builder-1")
-    response = service.send(session_id="builder-1", message="inspect only")
 
     assert draft == {
         "revision": 1,
@@ -259,15 +169,13 @@ def test_successful_apply_consumes_the_backend_draft(tmp_path: Path) -> None:
         "errors": ["No Agent YAML files are staged"],
         "files": [],
     }
-    assert response["draft"]["files"] == []
     assert target.read_text(encoding="utf-8") == "external edit\n"
 
 
 def test_apply_removes_temporary_file_when_atomic_replace_fails(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    service, _, _ = _service(tmp_path)
-    service.send(session_id="builder-1", message="Create a report agent")
+    service = _staged_service(tmp_path)
 
     def fail_link(
         _source: str | bytes | os.PathLike[str] | os.PathLike[bytes],
@@ -296,8 +204,7 @@ def test_apply_rejects_parent_replaced_after_it_was_opened(tmp_path: Path, monke
     displaced_workflows = workflows.with_name("workflows-original")
     outside = tmp_path / "outside"
     outside.mkdir()
-    service, _, _ = _service(tmp_path)
-    service.send(session_id="builder-1", message="Create a report agent")
+    service = _staged_service(tmp_path)
     real_open = os.open
     swapped = False
 
@@ -336,21 +243,13 @@ def test_multi_file_apply_rolls_back_every_target_when_one_replace_fails(
     first.parent.mkdir(parents=True)
     first.write_text("old first\n", encoding="utf-8")
     second.write_text("old second\n", encoding="utf-8")
-
-    class _TwoFileAgent:
-        def __init__(self, tools):
-            self._tools = {tool.name: tool for tool in tools}
-
-        def run(self, _prompt: str) -> str:
-            self._tools["stage_agent_yaml"].forward(first_path, VALID_AGENT_YAML)
-            self._tools["stage_agent_yaml"].forward(
-                second_path,
-                VALID_AGENT_YAML.replace("report_agent", "second_agent"),
-            )
-            return "ready"
-
-    service = BuilderService(tmp_path, agent_factory=lambda tools, _model: _TwoFileAgent(tools))
-    service.send(session_id="builder-1", message="create two")
+    service = _staged_service(
+        tmp_path,
+        {
+            first_path: VALID_AGENT_YAML,
+            second_path: VALID_AGENT_YAML.replace("report_agent", "second_agent"),
+        },
+    )
     real_replace = os.replace
 
     def fail_second_temporary(
@@ -384,21 +283,13 @@ def test_apply_preflights_every_original_fingerprint_before_committing(
     first.parent.mkdir(parents=True)
     first.write_text("old first\n", encoding="utf-8")
     second.write_text("old second\n", encoding="utf-8")
-
-    class _TwoFileAgent:
-        def __init__(self, tools):
-            self._tools = {tool.name: tool for tool in tools}
-
-        def run(self, _prompt: str) -> str:
-            self._tools["stage_agent_yaml"].forward(first_path, VALID_AGENT_YAML)
-            self._tools["stage_agent_yaml"].forward(
-                second_path,
-                VALID_AGENT_YAML.replace("report_agent", "second_agent"),
-            )
-            return "ready"
-
-    service = BuilderService(tmp_path, agent_factory=lambda tools, _model: _TwoFileAgent(tools))
-    service.send(session_id="builder-1", message="create two")
+    service = _staged_service(
+        tmp_path,
+        {
+            first_path: VALID_AGENT_YAML,
+            second_path: VALID_AGENT_YAML.replace("report_agent", "second_agent"),
+        },
+    )
     original_stat = first.stat()
     real_open = os.open
     changed = False
@@ -439,21 +330,13 @@ def test_apply_rechecks_each_target_immediately_before_its_commit(
     first.parent.mkdir(parents=True)
     first.write_text("old first\n", encoding="utf-8")
     second.write_text("old second\n", encoding="utf-8")
-
-    class _TwoFileAgent:
-        def __init__(self, tools):
-            self._tools = {tool.name: tool for tool in tools}
-
-        def run(self, _prompt: str) -> str:
-            self._tools["stage_agent_yaml"].forward(first_path, VALID_AGENT_YAML)
-            self._tools["stage_agent_yaml"].forward(
-                second_path,
-                VALID_AGENT_YAML.replace("report_agent", "second_agent"),
-            )
-            return "ready"
-
-    service = BuilderService(tmp_path, agent_factory=lambda tools, _model: _TwoFileAgent(tools))
-    service.send(session_id="builder-1", message="create two")
+    service = _staged_service(
+        tmp_path,
+        {
+            first_path: VALID_AGENT_YAML,
+            second_path: VALID_AGENT_YAML.replace("report_agent", "second_agent"),
+        },
+    )
     second_stat = second.stat()
     real_replace = os.replace
     changed = False
@@ -486,8 +369,7 @@ def test_apply_rechecks_each_target_immediately_before_its_commit(
 def test_apply_never_clobbers_target_created_after_absence_preflight(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    service, _, _ = _service(tmp_path)
-    service.send(session_id="builder-1", message="Create a report agent")
+    service = _staged_service(tmp_path)
     target = tmp_path / "applications/reports/workflows/report_agent.yaml"
     real_link = os.link
     raced = False
@@ -546,21 +428,13 @@ def test_parent_replacement_conflict_rolls_back_in_opened_parent(
     second = workflows / "second.yaml"
     first.write_text("old first\n", encoding="utf-8")
     second.write_text("old second\n", encoding="utf-8")
-
-    class _TwoFileAgent:
-        def __init__(self, tools):
-            self._tools = {tool.name: tool for tool in tools}
-
-        def run(self, _prompt: str) -> str:
-            self._tools["stage_agent_yaml"].forward(first_path, VALID_AGENT_YAML)
-            self._tools["stage_agent_yaml"].forward(
-                second_path,
-                VALID_AGENT_YAML.replace("report_agent", "second_agent"),
-            )
-            return "ready"
-
-    service = BuilderService(tmp_path, agent_factory=lambda tools, _model: _TwoFileAgent(tools))
-    service.send(session_id="builder-1", message="create two")
+    service = _staged_service(
+        tmp_path,
+        {
+            first_path: VALID_AGENT_YAML,
+            second_path: VALID_AGENT_YAML.replace("report_agent", "second_agent"),
+        },
+    )
     real_replace = os.replace
     temporary_replaces = 0
 
@@ -596,8 +470,7 @@ def test_single_file_apply_revalidates_parent_after_the_final_commit(
 ) -> None:
     workflows = tmp_path / "applications/reports/workflows"
     displaced_workflows = workflows.with_name("workflows-original")
-    service, _, _ = _service(tmp_path)
-    service.send(session_id="builder-1", message="Create a report agent")
+    service = _staged_service(tmp_path)
     target_name = "report_agent.yaml"
     real_link = os.link
     swapped = False
@@ -644,21 +517,13 @@ def test_apply_fsyncs_parent_directory_after_commit_and_rollback_mutations(
     first.parent.mkdir(parents=True)
     first.write_text("old first\n", encoding="utf-8")
     second.write_text("old second\n", encoding="utf-8")
-
-    class _TwoFileAgent:
-        def __init__(self, tools):
-            self._tools = {tool.name: tool for tool in tools}
-
-        def run(self, _prompt: str) -> str:
-            self._tools["stage_agent_yaml"].forward(first_path, VALID_AGENT_YAML)
-            self._tools["stage_agent_yaml"].forward(
-                second_path,
-                VALID_AGENT_YAML.replace("report_agent", "second_agent"),
-            )
-            return "ready"
-
-    service = BuilderService(tmp_path, agent_factory=lambda tools, _model: _TwoFileAgent(tools))
-    service.send(session_id="builder-1", message="create two")
+    service = _staged_service(
+        tmp_path,
+        {
+            first_path: VALID_AGENT_YAML,
+            second_path: VALID_AGENT_YAML.replace("report_agent", "second_agent"),
+        },
+    )
     real_replace = os.replace
     real_fsync = os.fsync
     events: list[str] = []
@@ -701,8 +566,7 @@ def test_prepare_failure_removes_partial_temporary_and_backup_files(
     target = tmp_path / "applications/reports/workflows/report_agent.yaml"
     target.parent.mkdir(parents=True)
     target.write_text("old content\n", encoding="utf-8")
-    service, _, _ = _service(tmp_path)
-    service.send(session_id="builder-1", message="Create a report agent")
+    service = _staged_service(tmp_path)
 
     def fail_after_partial_backup(directory_fd: int, _source_name: str, backup_name: str) -> None:
         descriptor = os.open(
@@ -737,21 +601,13 @@ def test_incomplete_rollback_preserves_recovery_backup_and_reports_its_path(
     first.parent.mkdir(parents=True)
     first.write_text("old first\n", encoding="utf-8")
     second.write_text("old second\n", encoding="utf-8")
-
-    class _TwoFileAgent:
-        def __init__(self, tools):
-            self._tools = {tool.name: tool for tool in tools}
-
-        def run(self, _prompt: str) -> str:
-            self._tools["stage_agent_yaml"].forward(first_path, VALID_AGENT_YAML)
-            self._tools["stage_agent_yaml"].forward(
-                second_path,
-                VALID_AGENT_YAML.replace("report_agent", "second_agent"),
-            )
-            return "ready"
-
-    service = BuilderService(tmp_path, agent_factory=lambda tools, _model: _TwoFileAgent(tools))
-    service.send(session_id="builder-1", message="create two")
+    service = _staged_service(
+        tmp_path,
+        {
+            first_path: VALID_AGENT_YAML,
+            second_path: VALID_AGENT_YAML.replace("report_agent", "second_agent"),
+        },
+    )
     real_replace = os.replace
 
     def fail_apply_then_rollback(
@@ -793,21 +649,13 @@ def test_rollback_does_not_overwrite_target_changed_after_transaction_commit(
     first.parent.mkdir(parents=True)
     first.write_text("old first\n", encoding="utf-8")
     second.write_text("old second\n", encoding="utf-8")
-
-    class _TwoFileAgent:
-        def __init__(self, tools):
-            self._tools = {tool.name: tool for tool in tools}
-
-        def run(self, _prompt: str) -> str:
-            self._tools["stage_agent_yaml"].forward(first_path, VALID_AGENT_YAML)
-            self._tools["stage_agent_yaml"].forward(
-                second_path,
-                VALID_AGENT_YAML.replace("report_agent", "second_agent"),
-            )
-            return "ready"
-
-    service = BuilderService(tmp_path, agent_factory=lambda tools, _model: _TwoFileAgent(tools))
-    service.send(session_id="builder-1", message="create two")
+    service = _staged_service(
+        tmp_path,
+        {
+            first_path: VALID_AGENT_YAML,
+            second_path: VALID_AGENT_YAML.replace("report_agent", "second_agent"),
+        },
+    )
     real_replace = os.replace
     concurrent_content = "X" * len(VALID_AGENT_YAML.encode())
     changed_after_commit = False
@@ -857,40 +705,21 @@ def test_rollback_does_not_overwrite_target_changed_after_transaction_commit(
 
 
 def test_stage_tool_rejects_paths_outside_application_workflows(tmp_path: Path) -> None:
-    captured_tools = {}
-
-    class _PathProbeAgent:
-        def __init__(self, tools):
-            captured_tools.update({tool.name: tool for tool in tools})
-
-        def run(self, _prompt: str) -> str:
-            return "ok"
-
-    service = BuilderService(tmp_path, agent_factory=lambda tools, _model: _PathProbeAgent(tools))
-    service.send(session_id="builder-1", message="inspect")
+    service = BuilderService(tmp_path)
 
     with pytest.raises(ValueError, match="applications/.+/workflows"):
-        captured_tools["stage_agent_yaml"].forward("../../config/llm.yaml", VALID_AGENT_YAML)
+        _stage_yaml(service, "../../config/llm.yaml", VALID_AGENT_YAML)
 
 
 def test_stage_tool_rejects_symlinked_application_parent(tmp_path: Path) -> None:
     applications = tmp_path / "applications"
     applications.mkdir()
     (applications / "evil").symlink_to(tmp_path, target_is_directory=True)
-    captured_tools = {}
-
-    class _PathProbeAgent:
-        def __init__(self, tools):
-            captured_tools.update({tool.name: tool for tool in tools})
-
-        def run(self, _prompt: str) -> str:
-            return "ok"
-
-    service = BuilderService(tmp_path, agent_factory=lambda tools, _model: _PathProbeAgent(tools))
-    service.send(session_id="builder-1", message="inspect")
+    service = BuilderService(tmp_path)
 
     with pytest.raises(ValueError, match="symlink"):
-        captured_tools["stage_agent_yaml"].forward(
+        _stage_yaml(
+            service,
             "applications/evil/workflows/escaped.yaml",
             VALID_AGENT_YAML,
         )
@@ -904,20 +733,11 @@ def test_stage_tool_rejects_existing_file_symlink(tmp_path: Path) -> None:
     real.write_text("do not overwrite\n", encoding="utf-8")
     link = workflows / "linked.yaml"
     link.symlink_to(real)
-    captured_tools = {}
-
-    class _PathProbeAgent:
-        def __init__(self, tools):
-            captured_tools.update({tool.name: tool for tool in tools})
-
-        def run(self, _prompt: str) -> str:
-            return "ok"
-
-    service = BuilderService(tmp_path, agent_factory=lambda tools, _model: _PathProbeAgent(tools))
-    service.send(session_id="builder-1", message="inspect")
+    service = BuilderService(tmp_path)
 
     with pytest.raises(ValueError, match="symlink"):
-        captured_tools["stage_agent_yaml"].forward(
+        _stage_yaml(
+            service,
             "applications/reports/workflows/linked.yaml",
             VALID_AGENT_YAML,
         )
@@ -931,86 +751,56 @@ def test_inspect_tool_skips_yaml_symlinks_outside_the_project(tmp_path: Path) ->
     secret = tmp_path.parent / f"{tmp_path.name}-secret.yaml"
     secret.write_text("api_key: must-not-leak\n", encoding="utf-8")
     (workflows / "linked.yaml").symlink_to(secret)
-    captured_tools = {}
+    tool = builder_module._InspectAgentSystemTool(tmp_path.resolve())
 
-    class _InspectProbeAgent:
-        def __init__(self, tools):
-            captured_tools.update({tool.name: tool for tool in tools})
-
-        def run(self, _prompt: str) -> str:
-            return "ok"
-
-    service = BuilderService(tmp_path, agent_factory=lambda tools, _model: _InspectProbeAgent(tools))
-    service.send(session_id="builder-1", message="inspect")
-
-    result = json.loads(captured_tools["inspect_agent_system"].forward("reports"))
+    result = json.loads(tool.forward("reports"))
 
     assert [item["path"] for item in result["files"]] == ["applications/reports/workflows/real.yaml"]
     assert "must-not-leak" not in json.dumps(result)
 
 
 def test_validation_reports_missing_required_agent_fields(tmp_path: Path) -> None:
-    captured_tools = {}
+    service = BuilderService(tmp_path)
+    _stage_yaml(
+        service,
+        "applications/reports/workflows/broken.yaml",
+        "name: broken\n",
+    )
 
-    class _ValidationProbeAgent:
-        def __init__(self, tools):
-            captured_tools.update({tool.name: tool for tool in tools})
+    result = _validate_draft(service)
 
-        def run(self, _prompt: str) -> str:
-            captured_tools["stage_agent_yaml"].forward(
-                "applications/reports/workflows/broken.yaml",
-                "name: broken\n",
-            )
-            return "Needs fixes."
-
-    service = BuilderService(tmp_path, agent_factory=lambda tools, _model: _ValidationProbeAgent(tools))
-
-    result = service.send(session_id="builder-1", message="Create a broken draft")
-
-    assert result["draft"]["valid"] is False
-    assert "description" in result["draft"]["errors"][0]
-    assert "workflow" in result["draft"]["errors"][0]
+    assert result["valid"] is False
+    assert "description" in result["errors"][0]
+    assert "workflow" in result["errors"][0]
 
 
 def test_validation_rejects_numeric_description_before_runtime(tmp_path: Path) -> None:
-    class _InvalidDraftAgent:
-        def __init__(self, tools):
-            self._tools = {tool.name: tool for tool in tools}
+    service = BuilderService(tmp_path)
+    _stage_yaml(
+        service,
+        "applications/reports/workflows/broken.yaml",
+        "name: broken\ndescription: 123\nworkflow: do the task\n",
+    )
 
-        def run(self, _prompt: str) -> str:
-            self._tools["stage_agent_yaml"].forward(
-                "applications/reports/workflows/broken.yaml",
-                "name: broken\ndescription: 123\nworkflow: do the task\n",
-            )
-            return "invalid"
+    result = _validate_draft(service)
 
-    service = BuilderService(tmp_path, agent_factory=lambda tools, _model: _InvalidDraftAgent(tools))
-
-    result = service.send(session_id="builder-1", message="create invalid")
-
-    errors = "\n".join(result["draft"]["errors"])
-    assert result["draft"]["valid"] is False
+    errors = "\n".join(result["errors"])
+    assert result["valid"] is False
     assert "description must be a non-empty string" in errors
 
 
 def test_validation_rejects_invalid_execution_environment_before_runtime(tmp_path: Path) -> None:
-    class _InvalidDraftAgent:
-        def __init__(self, tools):
-            self._tools = {tool.name: tool for tool in tools}
+    service = BuilderService(tmp_path)
+    _stage_yaml(
+        service,
+        "applications/reports/workflows/broken.yaml",
+        VALID_AGENT_YAML + "execution_env: []\n",
+    )
 
-        def run(self, _prompt: str) -> str:
-            self._tools["stage_agent_yaml"].forward(
-                "applications/reports/workflows/broken.yaml",
-                VALID_AGENT_YAML + "execution_env: []\n",
-            )
-            return "invalid"
+    result = _validate_draft(service)
 
-    service = BuilderService(tmp_path, agent_factory=lambda tools, _model: _InvalidDraftAgent(tools))
-
-    result = service.send(session_id="builder-1", message="create invalid")
-
-    errors = "\n".join(result["draft"]["errors"])
-    assert result["draft"]["valid"] is False
+    errors = "\n".join(result["errors"])
+    assert result["valid"] is False
     assert "execution_env must be a dictionary" in errors
 
 
@@ -1023,25 +813,19 @@ def test_validation_rejects_runtime_invalid_structure_model_and_worker_reference
         encoding="utf-8",
     )
 
-    class _InvalidDraftAgent:
-        def __init__(self, tools):
-            self._tools = {tool.name: tool for tool in tools}
+    service = BuilderService(tmp_path)
+    _stage_yaml(
+        service,
+        "applications/reports/workflows/broken.yaml",
+        VALID_AGENT_YAML
+        + "tool_call_type: unsupported\n"
+        + "model_type: missing-model\n"
+        + "worker_agents:\n  - path: missing_worker.yaml\n",
+    )
+    result = _validate_draft(service)
 
-        def run(self, _prompt: str) -> str:
-            self._tools["stage_agent_yaml"].forward(
-                "applications/reports/workflows/broken.yaml",
-                VALID_AGENT_YAML
-                + "tool_call_type: unsupported\n"
-                + "model_type: missing-model\n"
-                + "worker_agents:\n  - path: missing_worker.yaml\n",
-            )
-            return "invalid"
-
-    service = BuilderService(tmp_path, agent_factory=lambda tools, _model: _InvalidDraftAgent(tools))
-    result = service.send(session_id="builder-1", message="create invalid")
-
-    errors = "\n".join(result["draft"]["errors"])
-    assert result["draft"]["valid"] is False
+    errors = "\n".join(result["errors"])
+    assert result["valid"] is False
     assert "tool_call_type" in errors
     assert "missing-model" in errors
     assert "missing_worker.yaml" in errors
@@ -1067,29 +851,23 @@ agent_function_schema:
         encoding="utf-8",
     )
 
-    class _SupervisorDraftAgent:
-        def __init__(self, tools):
-            self._tools = {tool.name: tool for tool in tools}
-
-        def run(self, _prompt: str) -> str:
-            self._tools["stage_agent_yaml"].forward(
-                "applications/reports/workflows/supervisor.yaml",
-                """\
+    service = BuilderService(tmp_path)
+    _stage_yaml(
+        service,
+        "applications/reports/workflows/supervisor.yaml",
+        """\
 name: supervisor
 description: delegate
 workflow: delegate the task
 worker_agents:
   - path: broken_worker.yaml
 """,
-            )
-            return "invalid"
+    )
 
-    service = BuilderService(tmp_path, agent_factory=lambda tools, _model: _SupervisorDraftAgent(tools))
+    result = _validate_draft(service)
 
-    result = service.send(session_id="builder-1", message="create supervisor")
-
-    errors = "\n".join(result["draft"]["errors"])
-    assert result["draft"]["valid"] is False
+    errors = "\n".join(result["errors"])
+    assert result["valid"] is False
     assert "broken_worker.yaml" in errors
     assert "max_steps must be a positive integer" in errors
 
@@ -1115,79 +893,66 @@ def test_draft_validation_rejects_invalid_staged_referenced_worker_definition(
     worker_schema: str,
     expected_error: str,
 ) -> None:
-    class _SupervisorAndWorkerDraftAgent:
-        def __init__(self, tools):
-            self._tools = {tool.name: tool for tool in tools}
-
-        def run(self, _prompt: str) -> str:
-            self._tools["stage_agent_yaml"].forward(
-                "applications/reports/workflows/supervisor.yaml",
-                """\
+    service = BuilderService(tmp_path)
+    _stage_yaml(
+        service,
+        "applications/reports/workflows/supervisor.yaml",
+        """\
 name: supervisor
 description: delegate
 workflow: delegate the task
 worker_agents:
   - path: staged_worker.yaml
 """,
-            )
-            self._tools["stage_agent_yaml"].forward(
-                "applications/reports/workflows/worker_agents/staged_worker.yaml",
-                """\
+    )
+    _stage_yaml(
+        service,
+        "applications/reports/workflows/worker_agents/staged_worker.yaml",
+        """\
 name: staged_worker
 description: staged worker
 workflow: do the task
 """
-                + worker_schema,
-            )
-            return "invalid"
-
-    service = BuilderService(
-        tmp_path,
-        agent_factory=lambda tools, _model: _SupervisorAndWorkerDraftAgent(tools),
+        + worker_schema,
     )
 
-    result = service.send(session_id="builder-1", message="create supervisor and worker")
+    result = _validate_draft(service)
 
-    errors = "\n".join(result["draft"]["errors"])
-    assert result["draft"]["valid"] is False
+    errors = "\n".join(result["errors"])
+    assert result["valid"] is False
     assert "staged_worker.yaml" in errors
     assert expected_error in errors
 
 
 def test_builder_keeps_a_bounded_conversation_transcript(tmp_path: Path) -> None:
     replies = ["What should it produce?", "Draft ready."]
-    service, _, prompts = _service(tmp_path, replies=replies)
+    service, chat_agent = _stubbed_service(tmp_path, replies=replies)
 
     first = service.send(session_id="builder-1", message="I need an agent")
     second = service.send(session_id="builder-1", message="Create a daily report")
 
     assert first["assistant"] == "What should it produce?"
     assert second["assistant"] == "Draft ready."
-    assert "I need an agent" in prompts[1]
-    assert "What should it produce?" in prompts[1]
-    assert "Create a daily report" in prompts[1]
+    assert [item["content"] for item in chat_agent.histories[1]] == [
+        "I need an agent",
+        "What should it produce?",
+        "Create a daily report",
+    ]
     assert len(service.history("builder-1")) == 4
 
 
 def test_builder_rejects_an_oversized_user_message_before_calling_the_model(tmp_path: Path) -> None:
-    service, observed, _ = _service(tmp_path)
+    service, chat_agent = _stubbed_service(tmp_path)
 
     with pytest.raises(ValueError, match="32,000 characters"):
         service.send(session_id="builder-1", message="x" * 32_001)
 
-    assert observed == {}
+    assert chat_agent.histories == []
     assert service.history("builder-1") == []
 
 
 def test_builder_bounds_assistant_output_and_total_transcript_size(tmp_path: Path) -> None:
-    class _VerboseAgent:
-        def run(self, _prompt: str) -> str:
-            return "a" * 40_000
-
-    service = BuilderService(
-        tmp_path,
-        agent_factory=lambda _tools, _model: _VerboseAgent(),
-    )
+    service, _ = _stubbed_service(tmp_path, replies=["a" * 40_000] * 10)
 
     for index in range(10):
         result = service.send(session_id="builder-1", message=f"turn-{index}-" + "u" * 1_000)
@@ -1200,7 +965,8 @@ def test_builder_bounds_assistant_output_and_total_transcript_size(tmp_path: Pat
 
 
 def test_builder_result_is_json_serializable(tmp_path: Path) -> None:
-    service, _, _ = _service(tmp_path)
+    service, _ = _stubbed_service(tmp_path)
+    _stage_yaml(service)
 
     result = service.send(session_id="builder-1", message="Create a report agent")
 
