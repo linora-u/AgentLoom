@@ -13,7 +13,13 @@ After ``pip install -e .``, the ``loom`` command is available::
 
 from __future__ import annotations
 
+import json
+import os
 import sys
+from collections.abc import Iterator
+from contextlib import contextmanager, nullcontext, redirect_stdout
+from datetime import UTC, datetime
+from typing import Any, TextIO
 
 import click
 
@@ -28,6 +34,116 @@ Examples:
 Use 'loom <command> -h' for more details on each command.
 """
 _EX_TEMPFAIL = 75
+
+
+def _run_info_payload(run_info: Any) -> dict[str, object]:
+    return {
+        "application_id": run_info.application_id,
+        "task_id": run_info.task_id,
+        "run_id": run_info.run_id,
+        "run_dir": str(run_info.run_dir),
+        "manifest_path": str(run_info.manifest_path),
+        "log_path": str(run_info.log_path) if run_info.log_path is not None else None,
+    }
+
+
+def _run_event_payload(event: Any) -> dict[str, object]:
+    occurred_at = event.occurred_at
+    if event.event == "run.rejected":
+        return {
+            "schema_version": event.schema_version,
+            "event": event.event,
+            "occurred_at": occurred_at.isoformat(),
+            "phase": event.phase,
+            "error": {
+                "kind": event.error.kind,
+                "message": event.error.message,
+                "retryable": event.error.retryable,
+            },
+        }
+    payload: dict[str, object] = {
+        "schema_version": event.schema_version,
+        "event": event.event,
+        "occurred_at": occurred_at.isoformat(),
+        "run": _run_info_payload(event.run),
+    }
+    for field in ("output", "error", "phase"):
+        value = getattr(event, field, None)
+        if value is not None:
+            payload[field] = value
+    return payload
+
+
+def _emit_jsonl_record(payload: dict[str, object], stream: TextIO) -> None:
+    click.echo(
+        json.dumps(payload, ensure_ascii=False, separators=(",", ":")),
+        file=stream,
+    )
+    stream.flush()
+
+
+@contextmanager
+def _isolated_jsonl_stdout() -> Iterator[TextIO]:
+    """Reserve the original fd 1 for JSONL and route all other fd 1 writes to stderr."""
+
+    protocol_stream = click.get_text_stream("stdout")
+    try:
+        protocol_fd = protocol_stream.fileno()
+    except (AttributeError, OSError, ValueError):
+        # Click's in-process test runner exposes an in-memory stream without a
+        # file descriptor. Python-level redirection is the strongest isolation
+        # available there; real CLI processes always take the fd-level branch.
+        with redirect_stdout(sys.stderr):
+            yield protocol_stream
+        return
+
+    if protocol_fd != 1:
+        with redirect_stdout(sys.stderr):
+            yield protocol_stream
+        return
+
+    protocol_stream.flush()
+    sys.stderr.flush()
+    saved_stdout_fd = os.dup(protocol_fd)
+    lifecycle_stream: TextIO | None = None
+    try:
+        lifecycle_fd = os.dup(saved_stdout_fd)
+        lifecycle_stream = os.fdopen(
+            lifecycle_fd,
+            "w",
+            encoding=protocol_stream.encoding or "utf-8",
+            errors=protocol_stream.errors or "replace",
+            buffering=1,
+        )
+        os.dup2(2, protocol_fd)
+        with redirect_stdout(sys.stderr):
+            yield lifecycle_stream
+    finally:
+        if lifecycle_stream is not None:
+            lifecycle_stream.flush()
+        os.dup2(saved_stdout_fd, protocol_fd)
+        os.close(saved_stdout_fd)
+        if lifecycle_stream is not None:
+            lifecycle_stream.close()
+
+
+def _run_rejected_payload(
+    error: BaseException,
+    *,
+    message: str | None = None,
+    retryable: bool = False,
+) -> dict[str, object]:
+    return {
+        "schema_version": 1,
+        "event": "run.rejected",
+        "occurred_at": datetime.now(UTC).isoformat(),
+        "phase": "preflight",
+        "error": {
+            "kind": type(error).__name__,
+            "message": str(error) if message is None else message,
+            "retryable": retryable,
+        },
+    }
 
 
 @click.group(context_settings={"help_option_names": ["-h", "--help"]}, epilog=_MAIN_EPILOG)
@@ -112,6 +228,8 @@ Examples:
   loom run applications/test_demo/workflows/test_agent.yaml
   loom run applications/test_demo/workflows/test_agent.yaml --no-file-log
   loom run applications/test_demo/workflows/test_agent.yaml --resume task_xxx
+  loom run applications/test_demo/workflows/test_agent.yaml --task "Inspect this repository"
+  loom run applications/test_demo/workflows/test_agent.yaml --output-format jsonl
 """
 
 
@@ -124,28 +242,94 @@ Examples:
     help="Disable this run's file log (configuration is used by default).",
 )
 @click.option("--resume", "resume_task_id", default=None, help="Resume from a checkpoint task ID.")
-def run(yaml_path: str, no_file_log: bool, resume_task_id: str | None):
+@click.option("--task", "task_override", default=None, help="Override the task from the application YAML.")
+@click.option(
+    "--output-format",
+    type=click.Choice(("text", "jsonl"), case_sensitive=False),
+    default="text",
+    show_default=True,
+    help="Choose human-readable output or lifecycle JSON Lines.",
+)
+def run(
+    yaml_path: str,
+    no_file_log: bool,
+    resume_task_id: str | None,
+    task_override: str | None,
+    output_format: str,
+):
     """Run a supervisor agent from a YAML configuration."""
-    from src.runner import run_app
+    emitted_events: set[str] = set()
+    event_stream: TextIO | None = None
 
-    try:
-        result = run_app(
-            yaml_path,
-            file_logging=False if no_file_log else None,
-            resume_task_id=resume_task_id,
+    def emit_rejected(
+        error: BaseException,
+        *,
+        message: str | None = None,
+        retryable: bool = False,
+    ) -> None:
+        if event_stream is None or emitted_events:
+            return
+        _emit_jsonl_record(
+            _run_rejected_payload(
+                error,
+                message=message,
+                retryable=retryable,
+            ),
+            event_stream,
         )
-        click.echo(result)
-    except KeyboardInterrupt as exc:
-        click.echo("\nInterrupted. Use --resume to continue.", err=True)
-        raise click.exceptions.Exit(130) from exc
-    except SystemExit as exc:
-        click.echo("\n Execution failed: nested process exit", err=True)
-        raise click.exceptions.Exit(1) from exc
-    except Exception as exc:
-        click.echo(f"\n Execution failed: {exc}", err=True)
-        raise click.exceptions.Exit(
-            _EX_TEMPFAIL if _has_transient_provider_error(exc) else 1
-        ) from exc
+
+    output_context = _isolated_jsonl_stdout() if output_format == "jsonl" else nullcontext(None)
+    with output_context as active_event_stream:
+        event_stream = active_event_stream
+        try:
+            if output_format == "jsonl":
+                from src.runner import execute_app
+
+                def emit_event(event: Any) -> None:
+                    assert event_stream is not None
+                    _emit_jsonl_record(_run_event_payload(event), event_stream)
+                    emitted_events.add(event.event)
+
+                execute_app(
+                    yaml_path,
+                    file_logging=False if no_file_log else None,
+                    resume_task_id=resume_task_id,
+                    task_override=task_override,
+                    event_sink=emit_event,
+                )
+            else:
+                from src.runner import execute_app
+
+                result = execute_app(
+                    yaml_path,
+                    file_logging=False if no_file_log else None,
+                    resume_task_id=resume_task_id,
+                    task_override=task_override,
+                ).output
+                click.echo(result)
+        except KeyboardInterrupt as exc:
+            if not emitted_events:
+                emit_rejected(exc, message="interrupted before run started")
+            from src.application_run import ApplicationRunInterrupted
+
+            if isinstance(exc, ApplicationRunInterrupted) and exc.resumable:
+                click.echo("\nInterrupted. Use --resume to continue.", err=True)
+            else:
+                click.echo(
+                    "\nInterrupted; no resumable checkpoint is available.",
+                    err=True,
+                )
+            raise click.exceptions.Exit(130) from exc
+        except SystemExit as exc:
+            emit_rejected(exc, message="nested process exit")
+            click.echo("\n Execution failed: nested process exit", err=True)
+            raise click.exceptions.Exit(1) from exc
+        except Exception as exc:
+            retryable = _has_transient_provider_error(exc)
+            if not emitted_events:
+                emit_rejected(exc, retryable=retryable)
+            click.echo(f"\n Execution failed: {exc}", err=True)
+            raise click.exceptions.Exit(_EX_TEMPFAIL if retryable else 1) from exc
 
 
 # ─────────────────────────────────────────────
@@ -816,3 +1000,7 @@ def ui(port: int | None, no_browser: bool):
     except Exception as exc:
         click.echo(f"\n  Server failed: {exc}", err=True)
         sys.exit(1)
+
+
+if __name__ == "__main__":
+    main()

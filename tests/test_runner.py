@@ -773,3 +773,374 @@ def test_run_app_is_exported():
     from src import run_app
 
     assert callable(run_app)
+
+
+def test_structured_run_api_is_publicly_exported():
+    from src import (
+        ApplicationRunError,
+        ApplicationRunInterrupted,
+        ApplicationRunResult,
+        RunInfo,
+        RunPhase,
+        RunRejectedEvent,
+        RunRejection,
+        execute_app,
+    )
+
+    assert callable(execute_app)
+    assert all(
+        value is not None
+        for value in (
+            ApplicationRunError,
+            ApplicationRunInterrupted,
+            ApplicationRunResult,
+            RunInfo,
+            RunPhase,
+            RunRejectedEvent,
+            RunRejection,
+        )
+    )
+
+
+class TestExecuteApp:
+    @patch("src.runner.YamlConfiguredSupervisorAgent")
+    def test_returns_canonical_receipt_after_durable_finalization(
+        self,
+        mock_cls,
+        fake_yaml: Path,
+    ) -> None:
+        import json
+
+        from src.runner import execute_app
+
+        mock_cls.return_value.run.return_value = "structured-output"
+
+        result = execute_app(str(fake_yaml), file_logging=False)
+
+        assert result.output == "structured-output"
+        assert result.started_at <= result.ended_at
+        assert result.run.application_id == "test_app"
+        assert result.run.run_dir.is_absolute()
+        assert result.run.manifest_path == result.run.run_dir / "manifest.json"
+        assert result.run.log_path is None
+        manifest = json.loads(result.run.manifest_path.read_text(encoding="utf-8"))
+        assert manifest["status"] == "completed"
+        assert manifest["application_id"] == result.run.application_id
+        assert manifest["task_id"] == result.run.task_id
+        assert manifest["run_id"] == result.run.run_id
+        assert "result_artifact" not in manifest
+        assert not (result.run.run_dir / "artifacts" / "result.txt").exists()
+
+    @patch("src.runner.YamlConfiguredSupervisorAgent")
+    def test_emits_started_then_completed_and_ignores_sink_errors(
+        self,
+        mock_cls,
+        fake_yaml: Path,
+    ) -> None:
+        from src.runner import execute_app
+
+        mock_cls.return_value.run.return_value = "ok"
+        observed = []
+
+        def sink(event):
+            observed.append(event)
+            raise RuntimeError("observer failed")
+
+        result = execute_app(
+            str(fake_yaml),
+            file_logging=False,
+            event_sink=sink,
+        )
+
+        assert result.output == "ok"
+        assert [event.event for event in observed] == [
+            "run.started",
+            "run.completed",
+        ]
+        assert observed[0].run == observed[1].run == result.run
+        assert observed[1].output == "ok"
+
+    @patch("src.runner.YamlConfiguredSupervisorAgent")
+    def test_failure_carries_run_info_and_terminal_event(
+        self,
+        mock_cls,
+        fake_yaml: Path,
+    ) -> None:
+        import json
+
+        from src.application_run import ApplicationRunError
+        from src.runner import execute_app
+
+        mock_cls.return_value.run.side_effect = RuntimeError("boom")
+        events = []
+
+        with pytest.raises(ApplicationRunError, match="Agent execution failed") as caught:
+            execute_app(
+                str(fake_yaml),
+                file_logging=False,
+                event_sink=events.append,
+            )
+
+        assert caught.value.phase == "execution"
+        assert [event.event for event in events] == ["run.started", "run.failed"]
+        assert events[0].run == events[1].run == caught.value.run
+        manifest = json.loads(
+            caught.value.run.manifest_path.read_text(encoding="utf-8")
+        )
+        assert manifest["status"] == "failed"
+
+    @patch("src.runner.YamlConfiguredSupervisorAgent")
+    def test_interruption_carries_run_info(
+        self,
+        mock_cls,
+        fake_yaml: Path,
+    ) -> None:
+        from src.application_run import ApplicationRunInterrupted
+        from src.runner import execute_app
+
+        mock_cls.return_value.run.side_effect = KeyboardInterrupt()
+        events = []
+
+        with pytest.raises(ApplicationRunInterrupted) as caught:
+            execute_app(
+                str(fake_yaml),
+                file_logging=False,
+                event_sink=events.append,
+            )
+
+        assert caught.value.phase == "execution"
+        assert [event.event for event in events] == [
+            "run.started",
+            "run.interrupted",
+        ]
+        assert events[-1].run == caught.value.run
+
+    def test_preflight_failure_emits_rejected_without_allocating(
+        self,
+        fake_yaml_no_desc: Path,
+    ) -> None:
+        from src.application_run import RunRejectedEvent
+        from src.runner import execute_app
+
+        events = []
+        with pytest.raises(ValueError, match="缺少必填字段.*description"):
+            execute_app(str(fake_yaml_no_desc), event_sink=events.append)
+
+        assert len(events) == 1
+        assert isinstance(events[0], RunRejectedEvent)
+        assert events[0].event == "run.rejected"
+        assert events[0].phase == "preflight"
+        assert events[0].error.kind == "ValueError"
+        assert "description" in events[0].error.message
+        assert events[0].error.retryable is False
+        assert not (fake_yaml_no_desc.parents[3] / ".agentloom").exists()
+
+    @patch("src.runner.YamlConfiguredSupervisorAgent")
+    def test_manifest_cleanup_failure_still_persists_terminal_status(
+        self,
+        mock_cls,
+        fake_yaml: Path,
+        monkeypatch,
+    ) -> None:
+        import json
+
+        from src.application_run import ApplicationRunError
+        from src.lib.runtime.context import RuntimeContext
+        from src.runner import execute_app
+
+        mock_cls.return_value.run.return_value = "ok"
+        original_remove = RuntimeContext.remove_run_file
+
+        def fail_starting_marker_cleanup(self, path):
+            if Path(path).name == ".run-starting.json":
+                raise OSError("starting marker cleanup failed")
+            return original_remove(self, path)
+
+        monkeypatch.setattr(
+            RuntimeContext,
+            "remove_run_file",
+            fail_starting_marker_cleanup,
+        )
+        events = []
+
+        with pytest.raises(ApplicationRunError) as caught:
+            execute_app(
+                str(fake_yaml),
+                file_logging=False,
+                event_sink=events.append,
+            )
+
+        manifest = json.loads(
+            caught.value.run.manifest_path.read_text(encoding="utf-8")
+        )
+        assert caught.value.phase == "initialization"
+        assert manifest["status"] == "failed"
+        assert [event.event for event in events] == ["run.started", "run.failed"]
+
+    @patch("src.runner.YamlConfiguredSupervisorAgent")
+    def test_file_logging_receipt_points_to_closed_canonical_log(
+        self,
+        mock_cls,
+        fake_yaml: Path,
+    ) -> None:
+        from src.runner import execute_app
+
+        mock_cls.return_value.run.return_value = "ok"
+
+        result = execute_app(str(fake_yaml), file_logging=True)
+
+        assert result.run.log_path == result.run.run_dir / "logs" / "runtime.log"
+        assert result.run.log_path.is_file()
+        assert "Execution completed successfully" in result.run.log_path.read_text(
+            encoding="utf-8"
+        )
+
+    @patch("src.runner.YamlConfiguredSupervisorAgent")
+    def test_task_lease_release_failure_is_typed_cleanup_failure(
+        self,
+        mock_cls,
+        fake_yaml: Path,
+        monkeypatch,
+    ) -> None:
+        from src.application_run import ApplicationRunError
+        from src.lib.checkpoint.checkpoint_manager import CheckpointTaskLease
+        from src.runner import execute_app
+
+        mock_cls.return_value.run.return_value = "ok"
+        original_release = CheckpointTaskLease.release
+        marker = OSError("task lease release failed")
+
+        def release_then_fail(lease):
+            original_release(lease)
+            raise marker
+
+        monkeypatch.setattr(CheckpointTaskLease, "release", release_then_fail)
+        events = []
+
+        with pytest.raises(ApplicationRunError) as caught:
+            execute_app(
+                str(fake_yaml),
+                file_logging=False,
+                event_sink=events.append,
+            )
+
+        assert caught.value.phase == "cleanup"
+        assert caught.value.original_error is marker
+        assert [event.event for event in events] == ["run.started", "run.failed"]
+
+    @patch("src.runner.YamlConfiguredSupervisorAgent")
+    def test_run_app_preserves_run_lease_release_error(
+        self,
+        mock_cls,
+        fake_yaml: Path,
+        monkeypatch,
+    ) -> None:
+        from src.lib.runtime.context import RuntimeRunLease
+        from src.runner import run_app
+
+        mock_cls.return_value.run.return_value = "ok"
+        original_release = RuntimeRunLease.release
+        marker = OSError("run lease release failed")
+
+        def release_then_fail(lease):
+            original_release(lease)
+            raise marker
+
+        monkeypatch.setattr(RuntimeRunLease, "release", release_then_fail)
+
+        with pytest.raises(OSError) as caught:
+            run_app(str(fake_yaml), file_logging=False)
+
+        assert caught.value is marker
+
+    @patch("src.runner.YamlConfiguredSupervisorAgent")
+    def test_finalization_interrupt_reopens_checkpoint_for_resume(
+        self,
+        mock_cls,
+        fake_yaml: Path,
+        monkeypatch,
+    ) -> None:
+        import json
+
+        from src.application_run import ApplicationRunInterrupted
+        from src.lib.runtime.context import RuntimeContext
+        from src.runner import execute_app
+
+        mock_cls.return_value.run.return_value = "ok"
+        original_update = RuntimeContext.update_manifest
+
+        def interrupt_completed_manifest(self, **updates):
+            if updates.get("status") == "completed":
+                raise KeyboardInterrupt()
+            return original_update(self, **updates)
+
+        monkeypatch.setattr(
+            RuntimeContext,
+            "update_manifest",
+            interrupt_completed_manifest,
+        )
+
+        with pytest.raises(ApplicationRunInterrupted) as caught:
+            execute_app(str(fake_yaml), file_logging=False)
+
+        assert caught.value.phase == "finalization"
+        assert caught.value.resumable is True
+        checkpoint_path = (
+            caught.value.run.run_dir.parents[2]
+            / "checkpoints"
+            / caught.value.run.application_id
+            / caught.value.run.task_id
+            / "task_tree.json"
+        )
+        checkpoint = json.loads(checkpoint_path.read_text(encoding="utf-8"))
+        assert checkpoint["status"] == "interrupted"
+
+    @patch("src.runner.YamlConfiguredSupervisorAgent")
+    def test_execute_app_wraps_system_exit_and_run_app_preserves_compatibility(
+        self,
+        mock_cls,
+        fake_yaml: Path,
+    ) -> None:
+        from src.application_run import ApplicationRunError
+        from src.runner import execute_app, run_app
+
+        mock_cls.return_value.run.side_effect = SystemExit(7)
+        events = []
+
+        with pytest.raises(ApplicationRunError) as caught:
+            execute_app(
+                str(fake_yaml),
+                file_logging=False,
+                event_sink=events.append,
+            )
+
+        assert isinstance(caught.value.original_error, SystemExit)
+        assert caught.value.original_error.code == 7
+        assert caught.value.run.run_id
+        assert [event.event for event in events] == ["run.started", "run.failed"]
+
+        with pytest.raises(SystemExit) as compatibility:
+            run_app(str(fake_yaml), file_logging=False)
+
+        assert compatibility.value.code == 7
+
+    @patch("src.runner.YamlConfiguredSupervisorAgent")
+    def test_execute_app_wraps_generator_exit_and_run_app_preserves_compatibility(
+        self,
+        mock_cls,
+        fake_yaml: Path,
+    ) -> None:
+        from src.application_run import ApplicationRunError
+        from src.runner import execute_app, run_app
+
+        mock_cls.return_value.run.side_effect = GeneratorExit()
+
+        with pytest.raises(ApplicationRunError) as caught:
+            execute_app(str(fake_yaml), file_logging=False)
+
+        assert isinstance(caught.value.original_error, GeneratorExit)
+        assert str(caught.value) == "GeneratorExit"
+        assert caught.value.run.run_id
+
+        with pytest.raises(GeneratorExit):
+            run_app(str(fake_yaml), file_logging=False)
