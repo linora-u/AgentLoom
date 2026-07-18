@@ -1183,4 +1183,92 @@ describe("AgentLoom TUI session", () => {
     })
     expect(session.state.runDetail?.summary.system_id).toBe("system-b")
   })
+
+  test("analyzes the loaded failed Run with redacted evidence but a compact visible message", async () => {
+    const failedRun = {
+      run_id: "run-diagnose",
+      system_id: null,
+      application_id: "new",
+      task_id: "task-diagnose",
+      agent_name: "new_agent",
+      status: "failed" as const,
+      started_at: "2026-07-18T10:00:00Z",
+      ended_at: "2026-07-18T10:00:05Z",
+    }
+    const detail: RunDetailResultDto = {
+      summary: failedRun,
+      error: "HTTP 401 from provider",
+      workers: [],
+      events: [{ type: "provider.response", raw: "EVENT_SECRET" }],
+      logs: [{
+        path: "logs/runtime.log",
+        size: 128,
+        tail: "Authorization: Bearer super-secret\n[ERROR] HTTP 401 request failed",
+        tail_truncated: false,
+      }],
+      artifacts: [],
+      result_state: "unavailable",
+      result: null,
+      limits: {
+        workers: { truncated: false, returned_count: 0, max_count: 256 },
+        events: {
+          truncated: false,
+          source_incomplete: false,
+          returned_count: 1,
+          returned_bytes: 64,
+          max_count: 256,
+          max_bytes: 262_144,
+          max_scan_bytes: 1_048_576,
+        },
+        logs: {
+          truncated: false,
+          returned_count: 1,
+          returned_bytes: 128,
+          max_count: 16,
+          max_bytes: 131_072,
+          max_bytes_per_file: 16_384,
+          max_scanned_entries: 4_096,
+        },
+        artifacts: {
+          truncated: false,
+          returned_count: 0,
+          max_count: 256,
+          max_scanned_entries: 4_096,
+        },
+        result: {
+          truncated: false,
+          source_incomplete: false,
+          returned_bytes: 0,
+          max_bytes: 262_144,
+        },
+      },
+    }
+    const client = new FakeClient()
+    client.responses.set("run.detail", detail)
+    client.responses.set("assistant.send", {
+      session_id: "builder-1",
+      assistant: "可能根因是模型凭据无效。",
+      model_type: "powerful",
+      draft: { revision: 0, valid: false, errors: [], files: [] },
+    })
+    const session = new AgentLoomSession({
+      client,
+      snapshot: { ...snapshot, systems: [], runs: [failedRun] },
+      sessionID: "builder-1",
+    })
+
+    await session.openEntry(session.entries[0]!)
+    await session.analyzeCurrentRun()
+
+    const send = client.calls.find((call) => call.method === "assistant.send")!
+    const providerMessage = String(send.params.message)
+    expect(providerMessage).toContain("HTTP 401 from provider")
+    expect(providerMessage).toContain("logs/runtime.log")
+    expect(providerMessage).not.toContain("super-secret")
+    expect(providerMessage).not.toContain("EVENT_SECRET")
+    expect(session.state.route).toEqual({ type: "builder" })
+    expect(session.state.messages.at(-2)?.content).toBe("分析 Run run-diagnose 的异常原因")
+    expect(session.state.messages.at(-1)?.content).toBe("可能根因是模型凭据无效。")
+    expect(session.state.messages.map((message) => message.content).join("\n")).not.toContain("logs/runtime.log")
+  })
 })

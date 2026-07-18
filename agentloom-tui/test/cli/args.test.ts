@@ -73,8 +73,17 @@ describe("agentloom CLI", () => {
     expect(output).toEqual({
       project: { root: "/repo", name: "repo" },
       default_model: "powerful",
-      systems: { total: 1, never_run: 1, running: 0, completed: 0, failed: 0, crashed: 0 },
-      runs: { total: 0, running: 0, completed: 0, failed: 0, crashed: 0 },
+      systems: {
+        total: 1,
+        never_run: 1,
+        running: 0,
+        completed: 0,
+        interrupted: 0,
+        failed: 0,
+        crashed: 0,
+        unknown: 0,
+      },
+      runs: { total: 0, running: 0, completed: 0, interrupted: 0, failed: 0, crashed: 0, unknown: 0 },
     })
   })
 })
