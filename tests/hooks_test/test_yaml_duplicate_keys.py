@@ -34,3 +34,20 @@ def test_agent_yaml_rejects_duplicate_hook_event_keys(tmp_path: Path) -> None:
 
     with pytest.raises(ValueError, match="Duplicate YAML mapping key: 'PreToolUse'"):
         YamlAgentFactory._load_config_from_file(path)
+
+
+def test_yaml_merge_defaults_allow_explicit_overrides() -> None:
+    from src.lib.config.yaml_loader import load_unique_yaml
+
+    loaded = load_unique_yaml(
+        """\
+defaults: &defaults
+  timeout: 30
+  retries: 2
+model:
+  <<: *defaults
+  timeout: 60
+"""
+    )
+
+    assert loaded["model"] == {"timeout": 60, "retries": 2}
