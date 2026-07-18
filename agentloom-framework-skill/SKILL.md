@@ -23,13 +23,13 @@ argument-hint: "<AgentLoom task or application path>"
 - 用户说“有哪些配置 / 这个配置能不能写 / skill 漏了配置 / system.yaml、llm.yaml、Agent YAML 怎么配”：先读 [`references/configuration-surface.md`](references/configuration-surface.md)，再按需要读 `docs/en/*.md` 和对应代码交叉验证。
 - 需要生成或修改 `applications/<app_name>/`：读 [`references/application-generation.md`](references/application-generation.md)。
 - 需要写 Agent YAML / Worker YAML / `agent_function_schema` / `worker_agents`：读 [`references/yaml-contract.md`](references/yaml-contract.md)。
-- 需要为 Application 配置或创建私有 Skill：读 [`references/configuration-surface.md`](references/configuration-surface.md) 的 Skills/Hook 配置，再读 [`references/application-generation.md`](references/application-generation.md) 的目录规范。
+- 需要为 Application 配置私有 Skill 或独立 Hook Bundle：读 [`references/configuration-surface.md`](references/configuration-surface.md) 的 Skills/Hook 配置，再读 [`references/application-generation.md`](references/application-generation.md) 的目录规范。
 - 需要配置或验证 shell 权限、allowlist、audit log、sandbox、路径安全、后台任务或 stall 检测：先读 [`references/shell-security-audit.md`](references/shell-security-audit.md)，再按需要读配置面和验证评审。
 - 需要验证是否真是多 Agent、是否能运行、问题怎么记录：读 [`references/validation-and-review.md`](references/validation-and-review.md)。
 - 修改 ContextEngine/压缩、checkpoint、resume、run-scoped 日志/维测、并发 Worker、文件回滚、`loom list-tasks`、`loom clean-tasks`、`loom clean-runtime` 或 `loom migrate-runtime` 这类框架运行时能力：读 [`references/validation-and-review.md`](references/validation-and-review.md) 的“框架运行时功能验证”，并用真实 Application 跑功能路径。
 - 需要写 README 或验证记录：读 [`references/readme-template.md`](references/readme-template.md)。
 - 需要看一个按本 Skill 创建的简单多 Agent 示例：参考 `applications/feature_planner_demo/README.md`。
-- 只有当规则会跨多个 Application 复用、需要 Hook、或必须长期注入领域协议时，才创建新的私有 Skill；否则不要创建 Skill。
+- 只有当规则必须长期注入领域协议时才创建 Skill；确定性事件行为应创建独立 Hook Bundle，不要用 Skill 承载 Hook。
 
 ## 模块地图
 
@@ -49,7 +49,7 @@ argument-hint: "<AgentLoom task or application path>"
 3. 能用 Python 确定性完成的放进 `agent_tools/*.py`；需要推理、判断、写作的放进 Agent workflow。
 4. 单职责用单 Agent；多个可独立验收阶段才用 Supervisor + N Worker。
 5. Application 内容必须落到 `applications/<app_name>/`；框架级 Skill/Hook 扩展按真实加载路径落盘；README 必须同步写验证记录。
-6. 写配置前先确认配置归属：LLM 参数只进 `config/llm.yaml`；应用行为优先用 `applications/<app>/config/system.yaml` 或 Agent YAML 白名单字段；Skill hooks 只写在 `SKILL.md` frontmatter。
+6. 写配置前先确认配置归属：LLM 参数只进 `config/llm.yaml`；应用行为优先用 `applications/<app>/config/system.yaml` 或 Agent YAML 白名单字段；Skill 不得声明 Hook，Hook 只通过顶层 `hooks:` 或显式 `HOOK.yaml` Bundle 接入。
 7. 新增或改变任何可配置字段时，必须同步更新 `references/configuration-surface.md` 和相关 YAML 契约；优先精简配置，只暴露用户确实需要调的字段，不为了“完整”增加开关。
 8. 框架功能不要新增兼容桥、旧字段回退或第二套路径；如果契约需要变化，直接改主路径、配置白名单、文档和验证。
 9. 设计或修改框架功能时必须先写验证矩阵：单测证明局部规则，真实 Application 证明完整运行链路；涉及上下文压缩时必须验证压缩后能按 `ContextRef` retrieve 原文，涉及 resume 时必须验证恢复后旧 ref 仍可 retrieve。

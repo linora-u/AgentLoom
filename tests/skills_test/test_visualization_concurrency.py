@@ -6,7 +6,7 @@ from pathlib import Path
 def _load_common():
     path = (
         Path(__file__).resolve().parents[2]
-        / "skills"
+        / "hooks"
         / "agent-visualization"
         / "scripts"
         / "common.py"
@@ -21,10 +21,6 @@ def _load_common():
 def test_concurrent_visualization_events_are_not_lost(tmp_path: Path) -> None:
     common = _load_common()
     path = tmp_path / "visualization.json"
-    common.write_viz_state(
-        path,
-        {"config": {"title": "test", "agents": []}, "timeline": []},
-    )
 
     def append(index: int) -> None:
         common.append_event(

@@ -3,7 +3,7 @@ from __future__ import annotations
 
 def test_wrapped_tool_reuses_one_call_id_for_call_and_result_events() -> None:
     from src.extensions.self_learning.session_recorder import event_from_hook_context
-    from src.lib.smolagents.hooks.hook_manager import HookManager
+    from src.lib.smolagents.hooks import HookHandler, HookPlan, HookRun
     from src.lib.smolagents.hooks.tool_shim import inject_hooks
     from src.lib.smolagents.hooks.types import HookEvent, HookResult
     from src.trace import ExplicitExecutionContext, bind_explicit_execution_context
@@ -12,15 +12,24 @@ def test_wrapped_tool_reuses_one_call_id_for_call_and_result_events() -> None:
 
     def capture(context):
         observed.append(context)
-        return HookResult(success=True, decision="allow")
+        return HookResult()
 
-    manager = HookManager()
-    manager.register_hook(HookEvent.PRE_TOOL_USE, "echo", capture)
-    manager.register_hook(HookEvent.POST_TOOL_USE, "echo", capture)
+    run = HookRun(
+        HookPlan(
+            (
+                HookHandler(HookEvent.PRE_TOOL_USE, "echo", capture),
+                HookHandler(HookEvent.POST_TOOL_USE, "echo", capture),
+            )
+        ),
+        local_run_id="local_1",
+        root_run_id="root_1",
+        agent_config={"application_id": "app"},
+        project_root="/tmp",
+    )
 
     class EchoTool:
         name = "echo"
-        inputs = {}
+        inputs = {"text": {"type": "string", "required": True}}
 
         def forward(self, text: str) -> str:
             return text
@@ -32,7 +41,7 @@ def test_wrapped_tool_reuses_one_call_id_for_call_and_result_events() -> None:
         agent_name="agent",
         agent_config={"application_id": "app"},
         skills_manager=None,
-        hook_manager=manager,
+        hook_run=run,
         runtime_agent_path="agent",
         root_run_id="root_1",
         local_run_id="local_1",

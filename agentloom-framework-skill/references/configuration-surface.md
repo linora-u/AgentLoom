@@ -22,7 +22,8 @@
 | 应用级系统覆盖 | `applications/<app>/config/system.yaml` | 当前应用专属的系统行为覆盖 | 从 Agent YAML 路径向上找到最近 `workflows/`，其父目录即 app root |
 | Agent YAML | `applications/<app>/workflows/*.yaml` | 单个 Agent 的角色、workflow、工具、模型类型、运行模式 | 只有白名单字段会 overlay 到系统配置，其余是 Agent 自身属性 |
 | Worker YAML | `applications/<app>/workflows/worker_agents/*.yaml` | 被 Supervisor 调用的 Agent 工具 | 有 `agent_function_schema` 才能导出为 callable tool |
-| Skill 包 | `applications/<app>/skills/<name>/SKILL.md` 或 `skills/<name>/SKILL.md` | 可按需加载的长期能力、hooks、脚本和资源 | `SKILL.md`/`skill.md` 入口；散落 `.md` 和 `skills.md` 不加载 |
+| Skill 包 | `applications/<app>/skills/<name>/SKILL.md` 或 `skills/<name>/SKILL.md` | 可按需加载的长期能力、脚本和资源 | `SKILL.md`/`skill.md` 入口；不得声明 Hook |
+| Hook Bundle | `applications/<app>/hooks/<name>/HOOK.yaml` 或 `hooks/<name>/HOOK.yaml` | 显式授权的确定性事件行为 | 只由顶层 `hooks.bundles` 引用；永不自动发现 |
 | MCP 配置 | `mcp_servers` 指向的 JSON 文件 | 外部 MCP server 工具 | `mcp_servers` 支持 string/list/dict 三种 YAML 形式 |
 
 合并顺序：框架默认值 -> `config/system.yaml` -> `applications/<app>/config/system.yaml` -> Agent YAML 白名单字段。字典递归合并；列表和标量整体替换。
@@ -116,6 +117,7 @@ tools_mapping, default_toolsets, toolsets, prompt, mcp_servers, self_learning
 | `context_engine` | 可逆上下文压缩：工具原文进本地 store，模型可见压缩预览和 `ContextRef` |
 | `prompt` | 顶层系统 prompt 覆盖，字符串或 `{path: ...}` |
 | `skills` | 全局 Skill 列表或共享策略 |
+| `hooks` | 独立直接 Shell Hook 与显式 `HOOK.yaml` Bundle |
 | `lsp_servers` | LSP 服务开关、重启次数、语言列表 |
 | `execution_env` | 默认执行环境 |
 | `code_agent` | `code_act` 可 import 模块和可调用内置函数 |
@@ -124,7 +126,7 @@ tools_mapping, default_toolsets, toolsets, prompt, mcp_servers, self_learning
 | `default_toolsets` | 默认加载 toolset 名列表 |
 | `toolsets` | Agent 级内置 toolset 覆盖，空列表表示无内置工具 |
 | `shell_settings` | shell 命令白名单、安全检查、sandbox、后台任务、audit log |
-| `tools_mapping` | Skill `allowed-tools` 和 Hook matcher 的平台别名映射 |
+| `tools_mapping` | Skill `allowed-tools` 的平台别名映射 |
 | `tool_access_control` | 工具路径访问控制 |
 | `tool_metadata` | 工具输出截断、并发安全、分类、类型转换 |
 | `tool_output_limits` | 上下文压缩阶段的工具输出保留上限 |
@@ -341,7 +343,6 @@ context: fork       # inline | fork
 agent: reviewer
 effort: high
 shell: bash
-hooks: {}
 ```
 
 规则：
@@ -381,30 +382,27 @@ skills:
 2. `AGENT_ROOT/skills/` 自动发现，除非有效系统配置显式 `skills: []`。
 3. 当前 Agent YAML 的 `skills`。
 
-`load-mode` 只控制 prompt 注入：`on-demand` 进 catalogue，`eager` 注入全文。Hooks 在 skill metadata 加载时注册，不需要模型先调用 `load_skill()`。
+`load-mode` 只控制 prompt 注入：`on-demand` 进 catalogue，`eager` 注入全文。Skill 发现和加载都不触碰 Hook。`SKILL.md` 中的 `hooks` 与 Skill 配置中的 `enable-hooks` 会明确报迁移错误。
 
 `read_skill_resource(skill, path, offset, limit)` 读取包内资源，拒绝目录逃逸。`run_skill_script(skill, command, ...)` 在 skill 目录下运行脚本并写审计日志；`allow-scripts: false` 禁止脚本；`allow-network: false` 禁止常见网络命令。
 
 ## Hooks 配置
 
-当前推荐且生效的声明位置是 Skill frontmatter：
+Hook 只能由全局 system、应用 system 或 Agent YAML 的顶层 `hooks:` 显式声明：
 
 ```yaml
----
-name: security-checker
-description: Pre-tool security validation.
 hooks:
+  bundles:
+    agent-visualization:
+      path: hooks/agent-visualization
   PreToolUse:
-    - matcher: "Write|Edit|Bash"
-      hooks:
-        - type: command
-          command: python ./scripts/check.py
-          timeout: 10
-          once: false
----
+    - id: security-checker.pre-tool
+      matcher: "Write|Edit|Bash"
+      command: python hooks/security-checker/scripts/check.py
+      timeout: 10
 ```
 
-不要把 `hooks:` 直接写在 Agent YAML 顶层；配置桥存在，但没有接入 Agent 初始化主路径。
+Bundle 目录必须包含 `HOOK.yaml`，其 `name` 与配置 key 一致；Bundle 不自动发现且不能递归引用 Bundle。直接条目与 Bundle 条目使用同一个事件映射 schema。
 
 事件名：
 
@@ -414,18 +412,11 @@ SessionStart, SessionEnd,
 Stop, StopFailure,
 SubagentStart, SubagentStop,
 TaskCreated, TaskCompleted,
-PreCompact, PostCompact,
-Setup, ConfigChange, Notification
 ```
 
-类型：
+条目只允许 `id`、`matcher`、`command`、`timeout`、`enabled`。Shell stdin 是版本化 JSON，stdout 统一为 `decision`、`modified_input`、`agent_context`、`user_message`、`reason`、`telemetry`。`PreToolUse` 和 `Stop` 是 fail-closed gate；其余事件是 fail-open observer。
 
-- `command`：shell 命令；退出码 2 阻断 PreToolUse，其他非 0 记录为非阻断错误。
-- `prompt`：单轮 LLM 校验，返回 `{ok, reason}`。
-- `http`：HTTP POST，可白名单展开 env vars。
-- `agent`：多轮 verifier agent。
-
-`matcher` 支持省略或 `"*"`、精确/竖线分隔、正则。多个匹配 hook 并发执行；权限结果按 deny > allow > passthrough 聚合。
+配置层级为 global system、application system、Agent；高层同事件同 ID 完整替换或用 `enabled:false` 删除，禁止字段级合并和跨事件复用 ID。`matcher` 省略或 `"*"` 表示全部，否则按完整匹配正则。所有匹配 Hook 顺序执行；`PreToolUse` 转换逐个传递，阻断后立即短路。
 
 ## checkpoint 配置
 
@@ -491,4 +482,4 @@ dict 形式也支持 `paths: [...]`。无效类型会跳过并 warning。
 - Worker 需要权限就写在 Worker YAML 或 app-level system；不要指望 Supervisor 传下去。
 - 列表是替换，不是追加。Agent YAML 覆盖 `toolsets` 或 `skills` 时要写完整意图。
 - 确定性逻辑放 `agent_tools/*.py`，推理协议放 workflow，长期领域协议才放 Skill。
-- 需要 Hook 时优先做应用私有 Skill，通过 Skill `hooks:` 注册。
+- 需要 Hook 时创建应用私有 Hook Bundle，通过顶层 `hooks.bundles` 显式引用；不要创建承载 Hook 的 Skill。

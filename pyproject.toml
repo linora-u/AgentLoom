@@ -35,6 +35,7 @@ dependencies = [
     "openinference-instrumentation>=0.1.42",
     "openinference-instrumentation-smolagents>=0.1.4",
     "sentry-sdk>=2.35.1",
+    "psutil>=7.0.0",
     # Config and logging
     "pyyaml>=6.0.0",
     "pydantic>=2.7.0",

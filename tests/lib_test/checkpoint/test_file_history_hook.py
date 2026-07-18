@@ -5,15 +5,19 @@ Covers:
 - Hook intercepts file-modifying tools (edit_file, write_file, etc.)
 - Hook ignores non-file-modifying tools (read_file, grep_search, etc.)
 - Hook handles missing file_path argument gracefully
-- Hook handles track_edit exceptions gracefully
+- Hook propagates track_edit exceptions to the fail-closed boundary
 """
+
 from __future__ import annotations
 
 from unittest.mock import MagicMock, patch
 
 import pytest
 
-from src.lib.checkpoint.file_history_hook import FileHistoryHook
+from src.lib.checkpoint.file_history_hook import (
+    FileHistoryHook,
+    record_active_file_history,
+)
 from src.lib.smolagents.hooks.types import HookContext
 from src.tools import list_tool_specs
 
@@ -89,16 +93,26 @@ class TestFileHistoryHook:
         )
         mock_fh.track_edit.assert_not_called()
 
-    def test_track_edit_exception_does_not_propagate(self, hook, mock_fh):
-        """Error: track_edit raises but hook does not propagate."""
-        mock_fh.track_edit.side_effect = IOError("disk full")
-        # Should not raise.
-        result = hook(
-            event_type="PRE_TOOL_USE",
-            tool_name="edit_file",
-            tool_input={"file_path": "/tmp/test.py"},
-        )
-        assert result is None
+    def test_track_edit_exception_propagates_to_gate_policy(self, hook, mock_fh):
+        """PreToolUse failures must reach HookRun so it can fail closed."""
+        mock_fh.track_edit.side_effect = OSError("disk full")
+        with pytest.raises(IOError, match="disk full"):
+            hook(
+                event_type="PRE_TOOL_USE",
+                tool_name="edit_file",
+                tool_input={"file_path": "/tmp/test.py"},
+            )
+
+    def test_destructive_tool_registry_failure_propagates_to_gate_policy(self, hook):
+        with (
+            patch("src.tools.list_tool_specs", side_effect=RuntimeError("registry unavailable")),
+            pytest.raises(RuntimeError, match="registry unavailable"),
+        ):
+            hook(
+                event_type="PRE_TOOL_USE",
+                tool_name="write_file",
+                tool_input={"file_path": "/tmp/test.py"},
+            )
 
     def test_undeclared_path_param_ignored(self, mock_fh):
         """ToolSpec path_params are authoritative."""
@@ -122,10 +136,10 @@ class TestFileHistoryHook:
         mock_fh.track_edit.assert_called_once_with("/tmp/test.py", 5)
 
     def test_step_number_from_hook_context(self, mock_fh):
-        """Normal: HookManager context step number is used by default."""
+        """Normal: HookContext step number is used by default."""
         hook = FileHistoryHook(mock_fh)
         context = HookContext(
-            session_id="session",
+            local_run_id="session",
             cwd="/tmp",
             hook_event_name="PreToolUse",
             tool_name="edit_file",
@@ -140,11 +154,7 @@ class TestFileHistoryHook:
     def test_all_file_modifying_tools_recognized(self, mock_fh):
         """Verify destructive registry tools with path params trigger backup."""
         hook = FileHistoryHook(mock_fh)
-        tool_names = [
-            spec.name
-            for spec in list_tool_specs()
-            if spec.is_destructive and spec.path_params
-        ]
+        tool_names = [spec.name for spec in list_tool_specs() if spec.is_destructive and spec.path_params]
         assert tool_names
         for tool_name in tool_names:
             mock_fh.reset_mock()
@@ -154,3 +164,19 @@ class TestFileHistoryHook:
                 tool_input={"file_path": "/tmp/test.py"},
             )
             assert mock_fh.track_edit.called, f"{tool_name} did not trigger backup"
+
+    def test_active_runtime_entry_records_supplied_final_input(self, mock_fh):
+        coordinator = MagicMock()
+        coordinator._file_history = mock_fh
+
+        with patch(
+            "src.lib.checkpoint.coordinator.CheckpointCoordinator.current",
+            return_value=coordinator,
+        ):
+            record_active_file_history(
+                tool_name="write_file",
+                tool_input={"file_path": "/tmp/final.txt", "content": "final"},
+                step_number=9,
+            )
+
+        mock_fh.track_edit.assert_called_once_with("/tmp/final.txt", 9)

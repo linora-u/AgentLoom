@@ -5,20 +5,24 @@ Defines common interfaces and behavior patterns for all agents.
 Provides shared capabilities such as model management and execution environment integration.
 """
 
+# Checkpoint / Resume support
+import hashlib as _hashlib
 import os
 import uuid
 from abc import ABC, abstractmethod
+from collections.abc import Callable
 from contextlib import nullcontext
+from contextvars import ContextVar
 from copy import deepcopy
 from dataclasses import dataclass, replace
 from enum import Enum
 from pathlib import Path
 from threading import RLock
-from typing import Any, Callable, List, Optional
+from typing import Any
 
 from smolagents import (
-    AgentLogger,
     AgentGenerationError,
+    AgentLogger,
     AgentParsingError,
     AgentToolCallError,
     AgentToolExecutionError,
@@ -29,20 +33,14 @@ from smolagents import (
     ToolCallingAgent,
     validate_tool_arguments,
 )
-from smolagents.models import ChatMessage, MessageRole
-
-from src.lib.smolagents.models.model_manager import (
-    ModelConfigBuilder,
-    get_model,
+from src.lib.config import (
+    C,
+    build_effective_agent_config_snapshot,
+    get_code_agent_config,
+    get_default_toolsets,
 )
-from src.lib.smolagents.memory.context_compression import ConversationHistoryManager
-from src.lib.smolagents.monkey_patch import install_agentloom_runtime_adapters
-from src.lib.smolagents.agent.tool_argument_coercion import coerce_tool_arguments
-from src.lib.smolagents.models.tool_call_parser import (
-    ToolCallParseError,
-    parse_json_with_repair,
-)
-from src.lib.smolagents.skills.skills import SkillsManager
+from src.lib.config.config_validation import BoolParser  # noqa: F401 — used elsewhere
+from src.lib.config.defaults import DEFAULT_MAX_TOKENS
 from src.lib.logging import (
     get_global_logger,
     get_logger,
@@ -53,44 +51,50 @@ from src.lib.smolagents.agent.agent_validation import (
     build_normalized_execution_config,
     normalize_execution_prompt_template_path_value,
     normalize_positive_int_value,
-    resolve_execution_prompt_template_path,
     validate_execution_config_payload,
 )
-from src.lib.config.defaults import DEFAULT_MAX_TOKENS
-from src.lib.config import C, build_effective_agent_config, get_code_agent_config, get_default_toolsets
-from src.lib.config.config_validation import BoolParser  # noqa: F401 — used elsewhere
+from src.lib.smolagents.agent.tool_argument_coercion import coerce_tool_arguments
+from src.lib.smolagents.hooks import (
+    HookConfigLayer,
+    HookEvent,
+    HookPlan,
+    HookPlanCompiler,
+    HookRun,
+    builtin_hook_handlers,
+)
+from src.lib.smolagents.hooks.tool_shim import clone_tool_for_runtime, inject_hooks
+from src.lib.smolagents.models.model_manager import (
+    ModelConfigBuilder,
+    get_model,
+)
+from src.lib.smolagents.models.tool_call_parser import (
+    ToolCallParseError,
+    parse_json_with_repair,
+)
+from src.lib.smolagents.monkey_patch import install_agentloom_runtime_adapters
+from src.lib.smolagents.prompts.prompt_builder import build_prompt_templates
+from src.lib.smolagents.skills.skills import SkillsManager
+from src.lib.smolagents.tools.tools import ensure_tool_wrapped
 from src.lib.utils.workspace import ensure_workspace_mounted_once
 from src.tools.tool_meta import resolve_toolsets
 from src.trace import (
     bind_explicit_execution_context,
-    capture_explicit_execution_context,
-    generate_id,
-    get_current_hook_manager,
-    get_current_task_id,
-    get_current_sub_task_id,
-    sub_task_context,
     bind_local_run,
     bind_root_run,
+    capture_explicit_execution_context,
+    generate_id,
+    get_current_hook_run,
     require_root_run_id,
     require_root_run_state,
+    sub_task_context,
 )
-from src.lib.smolagents.hooks import HookEvent, HookManager, register_builtin_hooks
-from src.lib.smolagents.hooks.hook_manager import wrap_in_system_reminder
-from src.lib.smolagents.hooks.tool_shim import clone_tool_for_runtime, inject_hooks
-from src.lib.smolagents.tools.tools import ensure_tool_wrapped
-from src.lib.smolagents.prompts.prompt_builder import build_prompt_templates
-
-# Checkpoint / Resume support
-import hashlib as _hashlib
-from contextvars import ContextVar
-from typing import Any as _Any
 
 _current_worker_memory: ContextVar[list | None] = ContextVar("_current_worker_memory", default=None)
 
 install_agentloom_runtime_adapters()
 
 
-from src.lib.smolagents.agent.loom_mixin import LoomAgentMixin
+from src.lib.smolagents.agent.loom_mixin import LoomAgentMixin  # noqa: E402
 
 
 def _normalize_tool_arguments_object(arguments: dict[str, Any] | str) -> dict[str, Any] | str:
@@ -114,10 +118,7 @@ def _require_successful_runtime_result(run_result: Any) -> None:
     run_state = str(getattr(run_result, "state", "") or "")
     if run_state != "success":
         state_label = run_state or "missing_run_state"
-        raise RuntimeError(
-            "Agent run did not complete successfully: "
-            f"{state_label}"
-        )
+        raise RuntimeError(f"Agent run did not complete successfully: {state_label}")
 
 
 class _SuccessfulRunStateMixin:
@@ -147,9 +148,7 @@ class _SuccessfulRunStateMixin:
             )
 
         wants_full_result = (
-            bool(getattr(self, "return_full_result", False))
-            if return_full_result is None
-            else return_full_result
+            bool(getattr(self, "return_full_result", False)) if return_full_result is None else return_full_result
         )
         run_result = super().run(
             task,
@@ -169,7 +168,7 @@ class CodeAgentV2(_SuccessfulRunStateMixin, LoomAgentMixin, CodeAgent):
     def __init__(
         self,
         *args,
-        before_run_callbacks: Optional[list] = None,
+        before_run_callbacks: list | None = None,
         **kwargs,
     ):
         max_tokens = kwargs.pop("max_tokens", None)
@@ -186,7 +185,7 @@ class ToolCallingAgentV2(_SuccessfulRunStateMixin, LoomAgentMixin, ToolCallingAg
     def __init__(
         self,
         *args,
-        before_run_callbacks: Optional[list] = None,
+        before_run_callbacks: list | None = None,
         **kwargs,
     ):
         # Remove all code_act specific kwargs before calling ToolCallingAgent.__init__
@@ -206,9 +205,7 @@ class ToolCallingAgentV2(_SuccessfulRunStateMixin, LoomAgentMixin, ToolCallingAg
     def _step_stream(self, memory_step):
         """Keep each tool-calling action step inside its required-call protocol."""
         require_tool_calls = getattr(self.model, "require_tool_calls", None)
-        required_call_context = (
-            require_tool_calls() if callable(require_tool_calls) else nullcontext()
-        )
+        required_call_context = require_tool_calls() if callable(require_tool_calls) else nullcontext()
         try:
             with required_call_context:
                 yield from super()._step_stream(memory_step)
@@ -266,8 +263,10 @@ class ToolCallingAgentV2(_SuccessfulRunStateMixin, LoomAgentMixin, ToolCallingAg
                 )
             raise AgentToolExecutionError(error_msg, self.logger) from e
 
+
 class AgentType(Enum):
     """Type of agent in the system."""
+
     SUPERVISOR = "supervisor"
     WORKER = "worker"
     TOOL_CALLING = "tool_calling"
@@ -294,7 +293,7 @@ class BaseAgent(ABC):
 
     @property
     @abstractmethod
-    def default_model_type(self) -> Optional[str]:
+    def default_model_type(self) -> str | None:
         """
         Default model type used for model selection.
 
@@ -305,15 +304,13 @@ class BaseAgent(ABC):
         pass
 
     @abstractmethod
-    def _get_tools(self) -> List:
+    def _get_tools(self) -> list:
         """Get the list of tools used by the agent."""
         pass
 
-    def __init__(self,
-                 model=None,
-                 execution_env: Optional[Any] = None,
-                 logger: Optional[AgentLogger] = None,
-                 model_cache: bool = True):
+    def __init__(
+        self, model=None, execution_env: Any | None = None, logger: AgentLogger | None = None, model_cache: bool = True
+    ):
         """
         Initialize agent.
 
@@ -331,13 +328,13 @@ class BaseAgent(ABC):
                 "smolagents",
                 model_builder=model_builder,
                 model_cache=model_cache,
-                logger=logger
+                logger=logger,
             )
         else:
             self._model = model
 
         # Initialize execution environment
-        self._execution_env: Optional[Any] = execution_env
+        self._execution_env: Any | None = execution_env
 
         # Initialize logger
         self._logger = logger
@@ -359,8 +356,7 @@ class BaseAgent(ABC):
         self._agent_id = self._generate_agent_id()
 
         self._final_answer_checks = []
-        self._hook_manager = HookManager()
-        register_builtin_hooks(self._hook_manager)
+        self._hook_plan = HookPlan(builtin_hook_handlers())
 
     def _generate_agent_id(self) -> str:
         """
@@ -393,10 +389,9 @@ class BaseAgent(ABC):
         self._final_answer_checks = check_func_list
 
     def _emit_task_start(self, runtime_agent: Any, task: str, *args, **kwargs):
-        """Broadcast a generic TaskCreated lifecycle event via HookManager.
+        """Broadcast a generic TaskCreated lifecycle event via the active Hook Run.
 
-        Any skill that has registered a ``TaskCreated`` hook will be notified.
-        The framework does not know or care which skills are listening.
+        Every explicitly configured ``TaskCreated`` Hook will be notified.
 
         Worker agents running inside a ``sub_task_context`` skip this event
         because they should only emit SubagentStart/SubagentStop — not
@@ -405,12 +400,13 @@ class BaseAgent(ABC):
         _ = runtime_agent
         _ = args
         _ = kwargs
-        task_id = get_current_task_id()
+        execution = capture_explicit_execution_context()
+        task_id = execution.task_id
         if task_id is None:
             return task
 
         # Workers run inside sub_task_context; only supervisors fire TaskCreated.
-        if get_current_sub_task_id() is not None:
+        if execution.sub_task_id is not None:
             return task
 
         # Collect worker agent names from config (if this is a supervisor)
@@ -424,7 +420,8 @@ class BaseAgent(ABC):
                     worker_names.append(w)
 
         try:
-            self._hook_manager.trigger_hooks(
+            hook_run = get_current_hook_run(required=True)
+            hook_run.dispatch(
                 HookEvent.TASK_CREATED,
                 "task",
                 {
@@ -435,7 +432,7 @@ class BaseAgent(ABC):
                     "worker_agents": worker_names,
                 },
             )
-            self._hook_manager.flush_user_messages()
+            hook_run.flush_user_messages()
         except Exception as exc:
             if self._logger:
                 self._logger.warning("TaskCreated hook error: %s", exc)
@@ -447,9 +444,14 @@ class BaseAgent(ABC):
         task: str,
         *,
         result: Any = None,
-        error: Optional[BaseException] = None,
+        error: BaseException | None = None,
     ) -> None:
-        task_id = get_current_task_id() or self._task_id
+        # A delegated Worker is represented by the parent's Subagent lifecycle.
+        # TaskCreated/TaskCompleted/StopFailure belong only to the root run.
+        execution = capture_explicit_execution_context()
+        if execution.sub_task_id is not None:
+            return
+        task_id = execution.task_id or self._task_id
         if task_id is None:
             return
 
@@ -473,13 +475,14 @@ class BaseAgent(ABC):
             }
 
         try:
-            self._hook_manager.trigger_hooks(
+            hook_run = get_current_hook_run(required=True)
+            hook_run.dispatch(
                 event,
                 "task",
                 payload,
                 tool_response=tool_response,
             )
-            self._hook_manager.flush_user_messages()
+            hook_run.flush_user_messages()
         except Exception as exc:
             if self._logger:
                 self._logger.warning("%s hook error: %s", event.value, exc)
@@ -490,9 +493,9 @@ class BaseAgent(ABC):
         task: str,
         *,
         result: Any = None,
-        error: Optional[BaseException] = None,
+        error: BaseException | None = None,
     ) -> None:
-        task_id = get_current_task_id() or self._task_id
+        task_id = capture_explicit_execution_context().task_id or self._task_id
         payload = {
             "task_id": task_id,
             "cwd": os.getcwd(),
@@ -508,13 +511,14 @@ class BaseAgent(ABC):
             tool_response = {"error": str(error), "error_type": type(error).__name__}
 
         try:
-            self._hook_manager.trigger_hooks(
+            hook_run = get_current_hook_run(required=True)
+            hook_run.dispatch(
                 event,
                 "session",
                 payload,
                 tool_response=tool_response,
             )
-            self._hook_manager.flush_user_messages()
+            hook_run.flush_user_messages()
         except Exception as exc:
             if self._logger:
                 self._logger.warning("%s hook error: %s", event.value, exc)
@@ -546,7 +550,7 @@ class BaseAgent(ABC):
             return tasks
         return [f"{snapshot}\n\n{tasks[0]}", *tasks[1:]]
 
-    def get_execution_tools(self) -> List:
+    def get_execution_tools(self) -> list:
         """
         Get tool list from execution environment.
 
@@ -557,7 +561,7 @@ class BaseAgent(ABC):
             return self._execution_env.tools()
         return []
 
-    def get_all_tools(self, agent_type: str = "worker") -> List:
+    def get_all_tools(self, agent_type: str = "worker") -> list:
         """
         Get all available tools.
 
@@ -585,8 +589,8 @@ class BaseAgent(ABC):
         return current_backend
 
     @staticmethod
-    def _deduplicate_tools(tools: List[Any]) -> List[Any]:
-        uniq_tools: List[Any] = []
+    def _deduplicate_tools(tools: list[Any]) -> list[Any]:
+        uniq_tools: list[Any] = []
         seen = set()
         for tool_item in tools:
             key = tool_item.name if isinstance(tool_item, Tool) else tool_item
@@ -607,8 +611,12 @@ class BaseAgent(ABC):
 
     def _build_runtime_final_answer_checks(self) -> list[Callable]:
         checks = list(self._final_answer_checks)
-        if self._hook_manager is not None:
-            checks.insert(0, self._hook_manager.build_stop_check())
+
+        def _run_scoped_stop_check(final_answer: Any, memory: Any, **kwargs: Any) -> bool:
+            hook_run = get_current_hook_run(required=True)
+            return hook_run.build_stop_check()(final_answer, memory, **kwargs)
+
+        checks.insert(0, _run_scoped_stop_check)
         return checks
 
     def _validate_model(self) -> bool:
@@ -630,7 +638,7 @@ class BaseAgent(ABC):
         """
         return AgentType.WORKER  # Default to worker agent
 
-    def _build_model_config_builder(self) -> Optional[ModelConfigBuilder]:
+    def _build_model_config_builder(self) -> ModelConfigBuilder | None:
         """Model-config overlay hook. Subclasses can return a typed builder."""
         return None
 
@@ -641,7 +649,7 @@ class AgentRoleProfile:
     tool_call_type: str
     cache_runtime_agent: bool = False
     enable_sub_task_tracking: bool = False
-    additional_authorized_imports: Optional[list[str]] = None
+    additional_authorized_imports: list[str] | None = None
     inject_default_file_tools: bool = False
 
 
@@ -657,14 +665,16 @@ class RoleDrivenAgent(BaseAgent):
     ALLOWED_TOOL_CALL_TYPES: tuple[str, ...] = ("tool_call", "code_act")
     DEFAULT_TOOL_CALL_TYPE: str = "tool_call"
 
-    def __init__(self,
-                 config: Optional[dict] = None,
-                 project_path: str = "",
-                 model=None,
-                 execution_env: Optional[Any] = None,
-                 logger: Optional[AgentLogger] = None,
-                 model_cache: bool = True,
-                 **kwargs):
+    def __init__(
+        self,
+        config: dict | None = None,
+        project_path: str = "",
+        model=None,
+        execution_env: Any | None = None,
+        logger: AgentLogger | None = None,
+        model_cache: bool = True,
+        **kwargs,
+    ):
         ensure_workspace_mounted_once()
 
         self._project_path = project_path
@@ -676,38 +686,44 @@ class RoleDrivenAgent(BaseAgent):
         else:
             raise ValueError(f"Agent config must be a dictionary, got {type(config).__name__}")
         self._normalized = None
-        self._execution_normalized: Optional[NormalizedExecutionConfig] = None
-        self._effective_agent_config = build_effective_agent_config(
+        self._execution_normalized: NormalizedExecutionConfig | None = None
+        effective_snapshot = build_effective_agent_config_snapshot(
             self._config,
             source_name=str(self._config.get("_yaml_file_path") or self._config.get("name") or self.__class__.__name__),
         )
+        self._effective_agent_config_snapshot = effective_snapshot
+        self._effective_agent_config = effective_snapshot.values
 
         self._before_config_validation(**kwargs)
         normalized: Any | None = self._validate_config()
         if normalized is not None:
             self._normalized = normalized
-        
+
         resolved_logger = self.resolve_agent_logger_from_config(
             self._config,
             provided_logger=logger,
         )
 
-        super().__init__(
-            model=model,
-            execution_env=execution_env,
-            logger=resolved_logger,
-            model_cache=model_cache
-        )
+        super().__init__(model=model, execution_env=execution_env, logger=resolved_logger, model_cache=model_cache)
         self.tool_call_type = self._role_profile().tool_call_type
 
         runtime_logger = self._effective_logger()
-        self._hook_manager = HookManager()
-        register_builtin_hooks(self._hook_manager)
-        self._skills_manager = SkillsManager(
-            logger=runtime_logger,
-            hook_manager=self._hook_manager,
-        )
+        self._skills_manager = SkillsManager(logger=runtime_logger)
         self.initialize_skills_manager(self._config, logger=runtime_logger)
+        hook_layers = tuple(
+            HookConfigLayer(
+                name=layer.name,
+                config=layer.data,
+                agent_root=layer.root,
+                source_path=layer.source_path,
+                priority=priority,
+            )
+            for priority, layer in enumerate(effective_snapshot.layers)
+        )
+        self._hook_plan = HookPlanCompiler().compile(
+            hook_layers,
+            internal_handlers=builtin_hook_handlers(),
+        )
         try:
             default_toolsets = (
                 self._config.get("toolsets")
@@ -737,13 +753,13 @@ class RoleDrivenAgent(BaseAgent):
         return str(self._config.get("description", ""))
 
     @property
-    def default_model_type(self) -> Optional[str]:
+    def default_model_type(self) -> str | None:
         model_type = self._config.get("model_type")
         if model_type is None:
             return None
         return str(model_type)
 
-    def _effective_logger(self) -> Optional[AgentLogger]:
+    def _effective_logger(self) -> AgentLogger | None:
         return getattr(self, "logger", None) or getattr(self, "_logger", None)
 
     def _before_config_validation(self, **kwargs) -> None:
@@ -751,8 +767,8 @@ class RoleDrivenAgent(BaseAgent):
 
     def _after_role_init(self, **kwargs) -> None:
         """Hook: run after role-driven initialization."""
-        if 'max_steps' in self._config:
-            self.max_steps = self._config['max_steps']
+        if "max_steps" in self._config:
+            self.max_steps = self._config["max_steps"]
 
     def _required_config_fields(self) -> tuple[str, ...]:
         return tuple(self.REQUIRED_CONFIG_FIELDS)
@@ -797,7 +813,7 @@ class RoleDrivenAgent(BaseAgent):
         effective = getattr(self, "_effective_agent_config", None)
         if effective and "execution_env" in effective:
             cfg["execution_env"] = effective["execution_env"]
-            
+
         return build_normalized_execution_config(
             cfg,
             source_name=self.__class__.__name__,
@@ -813,8 +829,8 @@ class RoleDrivenAgent(BaseAgent):
     def resolve_agent_logger_from_config(
         config: dict,
         *,
-        provided_logger: Optional[AgentLogger] = None,
-    ) -> Optional[AgentLogger]:
+        provided_logger: AgentLogger | None = None,
+    ) -> AgentLogger | None:
         _ = config
         if provided_logger is not None:
             return provided_logger
@@ -853,22 +869,33 @@ class RoleDrivenAgent(BaseAgent):
             "load_mode": "on-demand",
             "allow_scripts": True,
             "allow_network": True,
+            "policy_fields": set(),
         }
         if not isinstance(skills_conf, dict) or "items" not in skills_conf:
             return defaults
+        if "enable-hooks" in skills_conf:
+            raise ValueError(
+                "skills.enable-hooks is not supported; configure a direct Hook or standalone Hook Bundle instead"
+            )
         defaults["load_mode"] = str(skills_conf.get("load-mode", "on-demand")).strip().lower()
+        if "load-mode" in skills_conf:
+            defaults["policy_fields"].add("load_mode")
         defaults["allow_scripts"] = BoolParser.parse(
             skills_conf.get("allow-scripts", True),
             default=True,
             field_name="skills.allow-scripts",
             logger=log,
         )
+        if "allow-scripts" in skills_conf:
+            defaults["policy_fields"].add("allow_scripts")
         defaults["allow_network"] = BoolParser.parse(
             skills_conf.get("allow-network", True),
             default=True,
             field_name="skills.allow-network",
             logger=log,
         )
+        if "allow-network" in skills_conf:
+            defaults["policy_fields"].add("allow_network")
         return defaults
 
     def _load_skills_from_config_entries(
@@ -877,6 +904,7 @@ class RoleDrivenAgent(BaseAgent):
         skills_conf: Any,
         *,
         logger: Any,
+        policy_priority: int,
     ) -> None:
         log = get_logger(logger, __name__)
         defaults = self._skills_config_defaults(skills_conf, logger=log)
@@ -886,12 +914,19 @@ class RoleDrivenAgent(BaseAgent):
             sk_load_mode = defaults["load_mode"]
             sk_allow_scripts = defaults["allow_scripts"]
             sk_allow_network = defaults["allow_network"]
+            sk_policy_fields = set(defaults["policy_fields"])
 
             if isinstance(sk, dict):
-                sk_path = sk.get('path')
-                sk_platform = sk.get('platform')
+                if "enable-hooks" in sk:
+                    raise ValueError(
+                        "skills.items.enable-hooks is not supported; configure a "
+                        "direct Hook or standalone Hook Bundle instead"
+                    )
+                sk_path = sk.get("path")
+                sk_platform = sk.get("platform")
                 if "load-mode" in sk:
                     sk_load_mode = str(sk.get("load-mode", sk_load_mode)).strip().lower()
+                    sk_policy_fields.add("load_mode")
                 if "allow-scripts" in sk:
                     sk_allow_scripts = BoolParser.parse(
                         sk.get("allow-scripts"),
@@ -899,6 +934,7 @@ class RoleDrivenAgent(BaseAgent):
                         field_name="skills.items.allow-scripts",
                         logger=log,
                     )
+                    sk_policy_fields.add("allow_scripts")
                 if "allow-network" in sk:
                     sk_allow_network = BoolParser.parse(
                         sk.get("allow-network"),
@@ -906,6 +942,7 @@ class RoleDrivenAgent(BaseAgent):
                         field_name="skills.items.allow-network",
                         logger=log,
                     )
+                    sk_policy_fields.add("allow_network")
                 if not sk_path:
                     msg = f"Skill configuration error: dictionary item is missing required 'path' field: {sk}"
                     log.warning(msg)
@@ -922,13 +959,16 @@ class RoleDrivenAgent(BaseAgent):
 
             # Load skills from the directory and keep track of loaded skill names
             skills_manager.load_skills_from_directory(
-                str(path_obj), platform=sk_platform,
+                str(path_obj),
+                platform=sk_platform,
                 load_mode=sk_load_mode,
                 allow_scripts=sk_allow_scripts,
                 allow_network=sk_allow_network,
+                policy_priority=policy_priority,
+                policy_fields=sk_policy_fields,
             )
 
-    def initialize_skills_manager(self, config: dict, logger: Optional[AgentLogger] = None):
+    def initialize_skills_manager(self, config: dict, logger: AgentLogger | None = None):
         """
         Initialize the current agent's SkillsManager in a unified way.
 
@@ -943,7 +983,7 @@ class RoleDrivenAgent(BaseAgent):
         if skills_manager is None:
             skills_manager = SkillsManager.get_instance(logger=log)
 
-        skills_manager.set_tools_mapping(C.get('tools_mapping', {}))
+        skills_manager.set_tools_mapping(C.get("tools_mapping", {}))
 
         # Load skills from effective agent config (app-level system.yaml overlay).
         # skills: []                         → explicit opt-out, skip default directory.
@@ -957,21 +997,26 @@ class RoleDrivenAgent(BaseAgent):
                 skills_manager,
                 global_skills_conf,
                 logger=log,
+                policy_priority=1,
             )
 
         if global_skills_conf != []:
-            skills_manager.load_skills_from_directory(str(Path(C.agent_root) / "skills"))
+            skills_manager.load_skills_from_directory(
+                str(Path(C.agent_root) / "skills"),
+                policy_priority=0,
+            )
 
-        if 'skills' in config:
+        if "skills" in config:
             self._load_skills_from_config_entries(
                 skills_manager,
-                config['skills'],
+                config["skills"],
                 logger=log,
+                policy_priority=2,
             )
 
         # Log skills loading summary
-        loaded_skills = list(skills_manager.skills.keys()) if hasattr(skills_manager, 'skills') else []
-        agent_name = config.get('name', 'unknown')
+        loaded_skills = list(skills_manager.skills.keys()) if hasattr(skills_manager, "skills") else []
+        agent_name = config.get("name", "unknown")
         if loaded_skills:
             log.info(f"Agent '{agent_name}' loaded skills: {loaded_skills}")
         else:
@@ -982,15 +1027,15 @@ class RoleDrivenAgent(BaseAgent):
         """Return role profile."""
         raise NotImplementedError
 
-    def _runtime_agent_name(self) -> Optional[str]:
+    def _runtime_agent_name(self) -> str | None:
         """Optional runtime-level name passed to smolagents."""
         return None
 
-    def _runtime_agent_description(self) -> Optional[str]:
+    def _runtime_agent_description(self) -> str | None:
         """Optional runtime-level description passed to smolagents."""
         return None
 
-    def _build_model_config_builder(self) -> Optional[ModelConfigBuilder]:
+    def _build_model_config_builder(self) -> ModelConfigBuilder | None:
         return None
 
     def _resolve_max_tokens_from_config(self) -> int:
@@ -1048,21 +1093,17 @@ class RoleDrivenAgent(BaseAgent):
     def _get_agent_type(self) -> AgentType:
         return self._role_profile().agent_type
 
-    def _build_runtime_tools(self, profile: AgentRoleProfile) -> List:
+    def _build_runtime_tools(self, profile: AgentRoleProfile) -> list:
         tools = self.get_all_tools(agent_type=profile.agent_type.value.lower())
 
         # Auto-inject todo_write when planning_interval is configured.
-        planning_interval = normalize_positive_int_value(
-            self._config.get("planning_interval")
-        )
+        planning_interval = normalize_positive_int_value(self._config.get("planning_interval"))
         if planning_interval is not None and planning_interval > 0:
             try:
                 from src.tools.todo import todo_write as todo_write_tool
-                tool_names = {
-                    getattr(t, 'name', getattr(t, '__name__', None))
-                    for t in tools
-                }
-                if 'todo_write' not in tool_names:
+
+                tool_names = {getattr(t, "name", getattr(t, "__name__", None)) for t in tools}
+                if "todo_write" not in tool_names:
                     tools = tools + [todo_write_tool]
             except ImportError:
                 pass
@@ -1073,6 +1114,11 @@ class RoleDrivenAgent(BaseAgent):
         profile = self._role_profile()
 
         if profile.cache_runtime_agent and self._runtime_agent is not None:
+            # The smolagents runtime may be cached, but Tool instances are
+            # run-owned. Refresh them from shared definitions so mutable Tool
+            # state cannot survive into the next invocation.
+            fresh_tools = self._prepare_runtime_tools(self._build_runtime_tools(profile))
+            self._runtime_agent.tools = {tool.name: tool for tool in fresh_tools}
             return self._runtime_agent
 
         runtime_agent = self._create_agent(
@@ -1085,7 +1131,11 @@ class RoleDrivenAgent(BaseAgent):
 
         return runtime_agent
 
-    def _resolve_effective_prompt_template_path(self) -> Optional[str]:
+    def _prepare_runtime_tools(self, tools: list[Any]) -> list[Tool]:
+        wrapped = ensure_tool_wrapped(self._deduplicate_tools(tools))
+        return [inject_hooks(clone_tool_for_runtime(tool)) for tool in wrapped]
+
+    def _resolve_effective_prompt_template_path(self) -> str | None:
         # Priority: current agent effective config -> global system baseline.
         effective_cfg = self._effective_agent_config
         if isinstance(effective_cfg, dict):
@@ -1111,7 +1161,7 @@ class RoleDrivenAgent(BaseAgent):
         *,
         runtime_logger: Any,
         use_customized_prompt: bool,
-        prompt_template_path: Optional[str],
+        prompt_template_path: str | None,
     ) -> Any:
         if not use_customized_prompt:
             return None
@@ -1124,26 +1174,26 @@ class RoleDrivenAgent(BaseAgent):
             skills_manager=self._skills_manager,
             logger=runtime_logger,
             tool_call_type=self.tool_call_type,
-            use_structured_output=getattr(self._model, 'supports_structured_output', 'false') == 'true',
+            use_structured_output=getattr(self._model, "supports_structured_output", "false") == "true",
         )
 
     def _create_agent(
         self,
-        tools: List | None = None,
+        tools: list | None = None,
         *,
-        additional_authorized_imports: Optional[List[str]] = None,
-        additional_functions: Optional[dict[str, Any]] = None,
+        additional_authorized_imports: list[str] | None = None,
+        additional_functions: dict[str, Any] | None = None,
         enable_sub_task_tracking: bool = False,
-        agent_name: Optional[str] = None,
+        agent_name: str | None = None,
         use_customized_prompt: bool = True,
-        prompt_template_path: Optional[str] = None,
-        executor_type: Optional[str] = None,
-        executor_kwargs: Optional[dict[str, Any]] = None,
-        planning_interval: Optional[int] = None,
-        max_tokens: Optional[int] = None,
-        smart_summary: Optional[bool] = None,
-        runtime_name: Optional[str] = None,
-        runtime_description: Optional[str] = None,
+        prompt_template_path: str | None = None,
+        executor_type: str | None = None,
+        executor_kwargs: dict[str, Any] | None = None,
+        planning_interval: int | None = None,
+        max_tokens: int | None = None,
+        smart_summary: bool | None = None,
+        runtime_name: str | None = None,
+        runtime_description: str | None = None,
     ) -> CodeAgent:
         """
         Create configured agent instance.
@@ -1160,10 +1210,7 @@ class RoleDrivenAgent(BaseAgent):
         resolved_logger_backend = self._resolve_runtime_logger_backend(self._logger)
         runtime_logger = get_logger(resolved_logger_backend, __name__)
 
-        wrapped_tools = ensure_tool_wrapped(self._deduplicate_tools(tools))
-        hooked_tools = [
-            inject_hooks(clone_tool_for_runtime(tool)) for tool in wrapped_tools
-        ]
+        hooked_tools = self._prepare_runtime_tools(tools)
 
         normalized_planning_interval = normalize_positive_int_value(planning_interval)
         if planning_interval is not None and normalized_planning_interval is None:
@@ -1238,7 +1285,7 @@ class RoleDrivenAgent(BaseAgent):
                 **agent_kwargs,
             )
         else:
-            use_structured = getattr(self._model, 'supports_structured_output', 'false') == 'true'
+            use_structured = getattr(self._model, "supports_structured_output", "false") == "true"
             agent = CodeAgentV2(
                 tools=hooked_tools,
                 stream_outputs=False,
@@ -1256,25 +1303,32 @@ class RoleDrivenAgent(BaseAgent):
             resolved_agent_name = agent_name or self.name
             agent = SubTaskTrackedAgent(agent, resolved_agent_name)
 
-        if self._hook_manager is not None:
-            setattr(agent, "_hook_manager", self._hook_manager)
-            self._hook_manager.set_user_message_sink(
-                lambda message, runtime_agent=agent, current_logger=runtime_logger: self._emit_hook_user_message(
-                    runtime_agent,
-                    current_logger,
-                    message,
-                )
-            )
         return agent
+
+    def _bind_hook_message_sink(self, runtime_agent: Any) -> None:
+        """Bind delivery to the current run, including cached runtimes."""
+
+        hook_run = get_current_hook_run(required=True)
+        runtime_logger = get_logger(
+            getattr(runtime_agent, "logger", None) or self._effective_logger(),
+            __name__,
+        )
+        hook_run.set_user_message_sink(
+            lambda message: self._emit_hook_user_message(
+                runtime_agent,
+                runtime_logger,
+                message,
+            )
+        )
 
     def run(
         self,
         task: str,
-        task_id: Optional[str] = None,
-        run_id: Optional[str] = None,
-        checkpoint_manager: Optional[Any] = None,
+        task_id: str | None = None,
+        run_id: str | None = None,
+        checkpoint_manager: Any | None = None,
         resume: bool = False,
-        additional_args: Optional[dict[str, Any]] = None,
+        additional_args: dict[str, Any] | None = None,
     ) -> str:
         """Run inside one explicit root-run binding.
 
@@ -1282,12 +1336,10 @@ class RoleDrivenAgent(BaseAgent):
         lifecycle. Delegated agents inherit the root through ``ContextVar``
         propagation and therefore cannot emit duplicate SessionStart/End.
         """
+
         def _run_once() -> str:
-            # A HookManager belongs to an agent instance and can outlive many
-            # runs; its construction id is therefore not a run identity. Every
-            # invocation gets a fresh local id. The outermost invocation also
-            # owns that id as the root, while delegated workers retain the
-            # parent's root and use their fresh id only for leaf attribution.
+            # Every invocation gets a fresh local id. The outermost invocation
+            # also owns it as the root; delegated workers keep their own local id.
             local_run_id = run_id or str(uuid.uuid4())
             with bind_local_run(local_run_id):
                 with bind_root_run(local_run_id) as owns_root_run:
@@ -1302,9 +1354,7 @@ class RoleDrivenAgent(BaseAgent):
 
         role_profile_resolver = getattr(self, "_role_profile", None)
         cache_runtime_agent = bool(
-            role_profile_resolver().cache_runtime_agent
-            if callable(role_profile_resolver)
-            else False
+            role_profile_resolver().cache_runtime_agent if callable(role_profile_resolver) else False
         )
         if cache_runtime_agent:
             with self._cached_runtime_run_lock:
@@ -1314,10 +1364,10 @@ class RoleDrivenAgent(BaseAgent):
     def _run_with_root_context(
         self,
         task: str,
-        task_id: Optional[str] = None,
-        checkpoint_manager: Optional[Any] = None,
+        task_id: str | None = None,
+        checkpoint_manager: Any | None = None,
         resume: bool = False,
-        additional_args: Optional[dict[str, Any]] = None,
+        additional_args: dict[str, Any] | None = None,
         *,
         owns_root_run: bool,
     ) -> str:
@@ -1332,7 +1382,11 @@ class RoleDrivenAgent(BaseAgent):
         # Determine ID
         parent_execution_context = capture_explicit_execution_context()
         current_task_id = parent_execution_context.task_id
-        final_task_id = current_task_id or task_id or generate_id(f"{self._get_agent_type().value.lower()}_{self.name}", prefix="task")
+        final_task_id = (
+            current_task_id
+            or task_id
+            or generate_id(f"{self._get_agent_type().value.lower()}_{self.name}", prefix="task")
+        )
         self._task_id = final_task_id
 
         # Supervisor activates a new coordinator; workers inherit via ContextVar.
@@ -1350,15 +1404,23 @@ class RoleDrivenAgent(BaseAgent):
         def _execute_agent():
             session_started = False
             session_result = None
-            session_error: Optional[BaseException] = None
+            session_error: BaseException | None = None
             runtime_agent = None
             # Inject agent_id into model (for LiteLLM/Langfuse tracing)
             agent_id = self.get_agent_id()
-            previous_model_agent_id = getattr(self._model, 'agent_id', ...) if hasattr(self._model, 'agent_id') else ...
+            previous_model_agent_id = getattr(self._model, "agent_id", ...) if hasattr(self._model, "agent_id") else ...
             if previous_model_agent_id is not ...:
                 self._model.agent_id = agent_id
 
             active_context = capture_explicit_execution_context()
+            hook_run = HookRun(
+                self._hook_plan,
+                local_run_id=active_context.local_run_id or "",
+                root_run_id=active_context.root_run_id or "",
+                parent=active_context.hook_run,
+                agent_config=self._effective_agent_config or self._config,
+                project_root=str(C.agent_root),
+            )
             previous_runtime_path = active_context.runtime_agent_path
             if previous_runtime_path:
                 runtime_path = f"{previous_runtime_path}/{self.name}"
@@ -1371,19 +1433,18 @@ class RoleDrivenAgent(BaseAgent):
                     agent_name=self.name,
                     agent_config=self._effective_agent_config or self._config,
                     skills_manager=self._skills_manager,
-                    hook_manager=self._hook_manager,
+                    hook_run=hook_run,
                     runtime_agent_path=runtime_path,
                 )
             )
             execution_binding.__enter__()
 
             try:
-                if coord is not None:
-                    coord.register_file_history_hook(self._hook_manager)
                 # Build tools only after the complete explicit context has
                 # been bound.  LocalPythonExecutor/tool wrappers capture this
                 # context before crossing their timeout thread boundary.
                 runtime_agent = self.build_runtime_agent()
+                self._bind_hook_message_sink(runtime_agent)
                 ensure_workspace_mounted_once()
                 if owns_root_run:
                     self._emit_session_lifecycle_event(
@@ -1400,9 +1461,7 @@ class RoleDrivenAgent(BaseAgent):
                         # shows the correct value immediately (not 0).
                         if coord._supervisor_heartbeat is not None:
                             try:
-                                coord._supervisor_heartbeat.update_step(
-                                    len(runtime_agent.memory.steps)
-                                )
+                                coord._supervisor_heartbeat.update_step(len(runtime_agent.memory.steps))
                             except Exception:
                                 pass
 
@@ -1414,9 +1473,7 @@ class RoleDrivenAgent(BaseAgent):
                         # Worker: inherit the supervisor's callback.  The
                         # invocation later passes that runtime explicitly when
                         # atomic preparation allocates its call_index.
-                        coord.register_worker_step_callback(
-                            runtime_agent, agent_name=self.name
-                        )
+                        coord.register_worker_step_callback(runtime_agent, agent_name=self.name)
 
                 # Pass reset=False when resuming (preserves injected memory) and
                 # for later workflow items (preserves memory from previous runs).
@@ -1434,9 +1491,8 @@ class RoleDrivenAgent(BaseAgent):
                         run_kwargs["additional_args"] = dict(additional_args)
                     if resume or task_index > 0:
                         run_kwargs["reset"] = False
-                    if (
-                        task_index > 0
-                        and getattr(runtime_agent, "_agent_loom_supports_reset_false_task_step_control", False)
+                    if task_index > 0 and getattr(
+                        runtime_agent, "_agent_loom_supports_reset_false_task_step_control", False
                     ):
                         run_kwargs["_skip_task_step_on_reset_false"] = False
                     run_result = runtime_agent.run(**run_kwargs)
@@ -1523,9 +1579,7 @@ class RoleDrivenAgent(BaseAgent):
                                 )
                         except Exception:
                             if self._logger:
-                                self._logger.warning(
-                                    "Completed-run memory review failed unexpectedly"
-                                )
+                                self._logger.warning("Completed-run memory review failed unexpectedly")
                 if previous_model_agent_id is not ...:
                     self._model.agent_id = previous_model_agent_id
 
@@ -1540,9 +1594,7 @@ class RoleDrivenAgent(BaseAgent):
 
         # Bind a fresh task id without mutating the legacy process-global
         # fallback, which can belong to another concurrent top-level run.
-        with bind_explicit_execution_context(
-            replace(parent_execution_context, task_id=final_task_id)
-        ):
+        with bind_explicit_execution_context(replace(parent_execution_context, task_id=final_task_id)):
             return _execute_agent()
 
 
@@ -1568,12 +1620,14 @@ class SubTaskTrackedAgent:
         self._log = get_logger(getattr(agent, "logger", None), __name__)
 
         # Proxy all attributes to original agent (except overridden methods)
-        excluded_attrs = {'run', '__call__'}
+        excluded_attrs = {"run", "__call__"}
         for attr in dir(self._agent):
-            if (not attr.startswith('_') and
-                attr not in excluded_attrs and
-                hasattr(self._agent, attr) and
-                not callable(getattr(self._agent, attr, None))):
+            if (
+                not attr.startswith("_")
+                and attr not in excluded_attrs
+                and hasattr(self._agent, attr)
+                and not callable(getattr(self._agent, attr, None))
+            ):
                 setattr(self, attr, getattr(self._agent, attr))
 
     @staticmethod
@@ -1596,9 +1650,8 @@ class SubTaskTrackedAgent:
         """Run callable within sub-task context, broadcasting lifecycle events.
 
         Emits ``SubagentStart`` before execution and ``SubagentStop`` after
-        (with ``success`` / ``error`` fields).  Any skill can subscribe to
-        these events via its frontmatter ``hooks:`` — the framework does not
-        know which skills are listening.
+        (with ``success`` / ``error`` fields). Explicitly configured Hooks may
+        observe these parent-owned lifecycle events.
 
         Worker preparation is atomic: a resumed invocation claims unfinished
         work first, otherwise claims one completed result, or allocates a new
@@ -1625,33 +1678,41 @@ class SubTaskTrackedAgent:
                 if not preparation.should_execute:
                     self._log.info(
                         "Skipping completed worker %s (input_hash=%s)",
-                        self._agent_name, input_hash[:8],
+                        self._agent_name,
+                        input_hash[:8],
                     )
                     return preparation.cached_result
                 call_index = preparation.call_index
             else:
                 call_index = 0
 
-            hook_manager = get_current_hook_manager()
+            lifecycle_run = get_current_hook_run(required=True)
+            lifecycle_context = capture_explicit_execution_context()
+            # Some managed-agent adapters enter the callee's HookRun before
+            # invoking this wrapper. Subagent lifecycle belongs to the caller;
+            # tool events inside the worker remain on the child run.
+            if (
+                lifecycle_context.agent_name == self._agent_name
+                and (lifecycle_context.runtime_agent_path or "").split("/")[-1] == self._agent_name
+                and lifecycle_run.parent is not None
+            ):
+                lifecycle_run = lifecycle_run.parent
             event_payload = {
                 "agent_name": self._agent_name,
                 "sub_task_id": sub_task_id,
             }
-            if hook_manager is not None:
-                try:
-                    hook_manager.trigger_hooks(
-                        HookEvent.SUBAGENT_START,
-                        self._agent_name,
-                        event_payload,
-                    )
-                    hook_manager.flush_user_messages()
-                except Exception as hook_err:
-                    self._log.warning("SubagentStart hook error: %s", hook_err)
+            try:
+                lifecycle_run.dispatch(
+                    HookEvent.SUBAGENT_START,
+                    self._agent_name,
+                    event_payload,
+                )
+                lifecycle_run.flush_user_messages()
+            except Exception as hook_err:
+                self._log.warning("SubagentStart hook error: %s", hook_err)
 
             worker_restored = (
-                coord.restore_worker(self._agent, self._agent_name, call_index)
-                if coord is not None
-                else False
+                coord.restore_worker(self._agent, self._agent_name, call_index) if coord is not None else False
             )
             if worker_restored:
                 kwargs.setdefault("reset", False)
@@ -1668,45 +1729,54 @@ class SubTaskTrackedAgent:
             except KeyboardInterrupt:
                 if coord is not None:
                     coord.record_worker_interrupted(
-                        self._agent_name, call_index, input_hash, str(task),
+                        self._agent_name,
+                        call_index,
+                        input_hash,
+                        str(task),
                         self._snapshot_worker_memory(),
                     )
                 raise
             except Exception as exc:
                 if coord is not None:
                     coord.record_worker_failure(
-                        self._agent_name, call_index, input_hash, str(task),
-                        str(exc), self._snapshot_worker_memory(),
+                        self._agent_name,
+                        call_index,
+                        input_hash,
+                        str(task),
+                        str(exc),
+                        self._snapshot_worker_memory(),
                     )
-                if hook_manager is not None:
-                    try:
-                        hook_manager.trigger_hooks(
-                            HookEvent.SUBAGENT_STOP,
-                            self._agent_name,
-                            {**event_payload, "success": False, "error": str(exc)},
-                        )
-                        hook_manager.flush_user_messages()
-                    except Exception as hook_err:
-                        self._log.warning("SubagentStop hook error: %s", hook_err)
+                try:
+                    lifecycle_run.dispatch(
+                        HookEvent.SUBAGENT_STOP,
+                        self._agent_name,
+                        {**event_payload, "success": False, "error": str(exc)},
+                    )
+                    lifecycle_run.flush_user_messages()
+                except Exception as hook_err:
+                    self._log.warning("SubagentStop hook error: %s", hook_err)
                 raise
 
             # ── Worker checkpoint: record success ──
             if coord is not None:
                 coord.record_worker_success(
-                    self._agent_name, call_index, input_hash, str(task),
-                    result, self._snapshot_worker_memory(),
+                    self._agent_name,
+                    call_index,
+                    input_hash,
+                    str(task),
+                    result,
+                    self._snapshot_worker_memory(),
                 )
 
-            if hook_manager is not None:
-                try:
-                    hook_manager.trigger_hooks(
-                        HookEvent.SUBAGENT_STOP,
-                        self._agent_name,
-                        {**event_payload, "success": True},
-                    )
-                    hook_manager.flush_user_messages()
-                except Exception as hook_err:
-                    self._log.warning("SubagentStop hook error: %s", hook_err)
+            try:
+                lifecycle_run.dispatch(
+                    HookEvent.SUBAGENT_STOP,
+                    self._agent_name,
+                    {**event_payload, "success": True},
+                )
+                lifecycle_run.flush_user_messages()
+            except Exception as hook_err:
+                self._log.warning("SubagentStop hook error: %s", hook_err)
 
             self._log.debug(f"Finished sub-task {sub_task_id}")
             return result
@@ -1740,6 +1810,6 @@ class SubTaskTrackedAgent:
     def __getattr__(self, name):
         """Proxy undefined attributes to the original agent."""
         # Do not proxy methods already overridden here
-        if name in ('run', '__call__'):
+        if name in ("run", "__call__"):
             raise AttributeError(f"'{self.__class__.__name__}' object has no attribute '{name}'")
         return getattr(self._agent, name)

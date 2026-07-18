@@ -199,8 +199,8 @@ rg -n "mcp_servers|parse_mcp_servers_yaml_value" src tests docs/en agentloom-fra
 - `supports_native_tool_calls` 是否仍只作为 removed-field 拒绝逻辑存在；不要在 skill/docs/example 里重新教用户配置它。
 - `tool_choice` 是否仍只是模型请求透传参数；不要把它写成 native tool-call 能力探测开关。
 - `tool_call` 模式是否仍只接受结构化 native/tool-call block；不要恢复自由文本猜测、fuzzy tool-name repair 或坏参数 `{}` 兜底。
-- `skills` 的格式、默认值、同名处理、hook 注册时机是否与 `SkillsManager` 一致。
-- `hooks` 是否仍只通过 Skill frontmatter 接入 Agent 初始化。
+- `skills` 的格式、默认值、同名处理以及 `SKILL.md` 禁止 `hooks` 是否与 `SkillsManager` 一致。
+- `hooks` 是否只通过顶层直接声明或显式 `HOOK.yaml` Bundle 编译，且保留三层来源顺序。
 - `mcp_servers` 的 string/list/dict 三种形式是否仍被 parser 支持。
 - `docs/en/config-overview.md`、`agent_config.md`、`system_config.md` 如果和代码冲突，最终 skill 先写代码真相，并在交付里说明文档漂移。
 

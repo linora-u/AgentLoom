@@ -4,10 +4,10 @@ Independent Parsing for LLM Configuration (llm.yaml)
 
 from __future__ import annotations
 
-from typing import Any, Dict, Optional
-from pydantic import BaseModel, ConfigDict, Field, model_validator
 from pathlib import Path
-import yaml
+from typing import Any, Dict, Optional
+
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from src.lib.config.config_validation import BoolParser, IntParser
 from src.lib.config.defaults import (
@@ -20,6 +20,7 @@ from src.lib.config.defaults import (
     DEFAULT_MODEL_TEMPERATURE,
     DEFAULT_MODEL_TIMEOUT,
 )
+from src.lib.config.yaml_loader import load_unique_yaml
 
 _RESERVED_MODEL_KEYS = {"default_model_type", "common"}
 
@@ -112,20 +113,20 @@ class LlmModelTypeSettings(BaseModel):
 
 class LLMConfig(BaseModel):
     model_config = ConfigDict(extra="allow")
-    
+
     # Internal representation from yaml
     langfuse: LangfuseSettings = Field(default_factory=LangfuseSettings)
     # the entire "model" block gets split into its pieces
     default_model_type: str = ""
     models: Dict[str, LlmModelTypeSettings] = Field(default_factory=dict)
-    
+
     @classmethod
     def load_from_yaml(cls, path: Path) -> "LLMConfig":
         if not path.exists():
             return cls()
         with path.open("r", encoding="utf-8") as f:
-            raw = yaml.safe_load(f) or {}
-            
+            raw = load_unique_yaml(f) or {}
+
         return cls.from_dict(raw)
 
     @classmethod
@@ -133,7 +134,7 @@ class LLMConfig(BaseModel):
         langfuse_raw = raw.get("langfuse", {})
         model_raw = raw.get("model", {})
         default_type = model_raw.get("default_model_type", "")
-        
+
         # Build models dict
         models: Dict[str, LlmModelTypeSettings] = {}
         for k, v in model_raw.items():
@@ -211,7 +212,7 @@ class LLMConfig(BaseModel):
             default_model_type=str(default_type or ""),
             models=models
         )
-        
+
     def to_legacy_dict(self) -> Dict[str, Any]:
         """
         Export back to the nested dict structure expected by the rest of the application
@@ -222,7 +223,7 @@ class LLMConfig(BaseModel):
         }
         for k, v in self.models.items():
             model_dict[k] = v.model_dump()
-            
+
         return {
             "langfuse": self.langfuse.model_dump(),
             "model": model_dict
