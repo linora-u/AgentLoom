@@ -37,7 +37,7 @@ _current_hook_manager: ContextVar[Optional[Any]] = ContextVar('current_hook_mana
 _current_runtime_agent_path: ContextVar[Optional[str]] = ContextVar('current_runtime_agent_path', default=None)
 _current_session_run_id: ContextVar[Optional[str]] = ContextVar('current_session_run_id', default=None)
 _current_local_run_id: ContextVar[Optional[str]] = ContextVar('current_local_run_id', default=None)
-_current_root_run_state: ContextVar[Optional[RootRunState]] = ContextVar(
+_current_root_run_state: ContextVar[RootRunState | None] = ContextVar(
     'current_root_run_state', default=None
 )
 
@@ -83,7 +83,7 @@ class ExplicitExecutionContext:
     runtime_agent_path: Optional[str]
     root_run_id: Optional[str]
     local_run_id: Optional[str]
-    root_run_state: Optional[RootRunState] = field(
+    root_run_state: RootRunState | None = field(
         default=None,
         compare=False,
         repr=False,
