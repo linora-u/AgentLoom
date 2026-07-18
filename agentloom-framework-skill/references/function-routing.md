@@ -22,7 +22,7 @@
 | “批量处理很多项，每项要 Agent 判断” | Python 包装 Agent Tool | `agent_tools/` 调 `YamlAgentFactory.create_agent_as_tool()` |
 | “这个规则只服务当前应用/验证场景” | 应用私有 Skill | `applications/<app_name>/skills/<skill_name>/SKILL.md` |
 | “这个规则以后很多应用都要用” | 全局 Skill | 确实通用再放全局 runtime skill |
-| “要在工具调用/任务生命周期前后做统一处理” | 新增或扩展 Hook Skill | 优先应用私有 Skill，确实通用再全局 |
+| “要在工具调用/任务生命周期前后做统一处理” | 新增或扩展独立 Hook Bundle | 优先应用私有 `hooks/` Bundle，并在顶层 `hooks.bundles` 显式启用；确实通用再放根目录 `hooks/` |
 | “要改框架能力/运行时/工具加载机制” | 框架源码修改 | `src/`、`config/`、`docs/`，先定位真实调用链 |
 | “只要说明怎么用/补文档” | README/docs 修改 | 不创建 Agent |
 | “现有应用跑不通/架构不合理” | 验证评审 | 先扫描，再修根因 |

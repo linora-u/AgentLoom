@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import inspect
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Callable, Optional
@@ -222,15 +223,25 @@ class AgentConfigNormalizer:
                 raise ValueError("Tool configuration must be a dictionary")
             if "name" not in tool_config:
                 raise ValueError("Tool configuration is missing required 'name' field")
+            tool_name = tool_config["name"]
+            if not isinstance(tool_name, str) or not tool_name.strip():
+                raise ValueError("Tool configuration 'name' must be a non-empty string")
             if "module" in tool_config or "function" in tool_config:
                 if "module" not in tool_config or "function" not in tool_config:
                     raise ValueError(
-                        f"Dynamically loaded tool '{tool_config['name']}' must include both 'module' and 'function' fields"
+                        f"Dynamically loaded tool '{tool_name}' must include both 'module' and 'function' fields"
                     )
+                for field_name in ("module", "function"):
+                    value = tool_config[field_name]
+                    if not isinstance(value, str) or not value.strip():
+                        raise ValueError(
+                            f"Dynamically loaded tool '{tool_name}' {field_name} "
+                            "must be a non-empty string"
+                        )
             if "fixed_args" in tool_config and tool_config["fixed_args"] is not None:
                 if not isinstance(tool_config["fixed_args"], dict):
                     raise ValueError(
-                        f"Tool '{tool_config['name']}' fixed_args must be a dictionary when provided"
+                        f"Tool '{tool_name}' fixed_args must be a dictionary when provided"
                     )
 
     @staticmethod
@@ -242,6 +253,65 @@ class AgentConfigNormalizer:
     @staticmethod
     def validate_tools_config(config: dict) -> None:
         AgentConfigNormalizer.validate_tools_config_entries(config.get("tools"))
+
+    @staticmethod
+    def validate_runtime_tool_references(config: dict) -> None:
+        """Resolve declarative built-ins without constructing or running tools.
+
+        Dynamic tools are intentionally limited to structural validation here:
+        importing their configured module can execute arbitrary application
+        code, so that remains part of actual Agent construction.
+        """
+
+        from src.tools.tool_meta import resolve_tool_function, resolve_toolsets
+
+        AgentConfigNormalizer.validate_tools_config(config)
+
+        if "toolsets" in config:
+            raw_toolsets = config["toolsets"]
+            if not isinstance(raw_toolsets, list):
+                raise ValueError("toolsets must be a list of toolset names when provided")
+            resolve_toolsets(raw_toolsets)
+
+        for tool_config in config.get("tools", []):
+            if "module" in tool_config and "function" in tool_config:
+                continue
+            tool_function = resolve_tool_function(tool_config["name"])
+            AgentConfigNormalizer.validate_fixed_tool_args(
+                tool_function,
+                tool_config["name"],
+                dict(tool_config.get("fixed_args") or {}),
+            )
+
+    @staticmethod
+    def validate_fixed_tool_args(
+        tool_function: Callable[..., Any],
+        tool_name: str,
+        fixed_args: dict[str, Any],
+    ) -> None:
+        """Validate the keyword binding contract without invoking the tool."""
+
+        parameters = inspect.signature(tool_function).parameters
+        accepts_var_kwargs = any(
+            parameter.kind == inspect.Parameter.VAR_KEYWORD
+            for parameter in parameters.values()
+        )
+        unknown_args = [
+            argument
+            for argument in fixed_args
+            if argument not in parameters and not accepts_var_kwargs
+        ]
+        if unknown_args:
+            joined_args = ", ".join(sorted(unknown_args))
+            raise ValueError(f"Unknown fixed_args for tool '{tool_name}': {joined_args}")
+
+    @staticmethod
+    def validate_max_steps_config(config: dict) -> None:
+        if "max_steps" not in config:
+            return
+        max_steps = config["max_steps"]
+        if isinstance(max_steps, bool) or not isinstance(max_steps, int) or max_steps <= 0:
+            raise ValueError("max_steps must be a positive integer when provided")
 
     @staticmethod
     def validate_workflow_config(config: dict) -> None:

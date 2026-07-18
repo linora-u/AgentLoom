@@ -14,6 +14,15 @@ _MEMORY_PHASE_ENV = "AGENTLOOM_MEMORY_CASE_PHASE"
 _APP_ROOT = Path(__file__).resolve().parents[1]
 _CASES_PATH = _APP_ROOT / "data" / "cases.jsonl"
 _FIXTURE_ROOT = (_APP_ROOT / "data" / "fixtures").resolve()
+_APPLICATION_REVIEW_SCENARIOS = {
+    "review_on_durable",
+    "review_on_progress",
+    "review_on_unverified_claim",
+    "review_on_mixed_noise",
+    "review_on_security",
+    "approval_pending",
+    "application_scope",
+}
 
 
 def _jsonl_row(path: Path, case_id: str) -> dict:
@@ -94,7 +103,7 @@ def validation_memory_case() -> str:
         fixture = _jsonl_row(fixture_path, case_id)
         evidence_scope = (
             "application"
-            if str(case.get("scenario") or "") == "application_scope"
+            if str(case.get("scenario") or "") in _APPLICATION_REVIEW_SCENARIOS
             else "project"
         )
         raw_memory_evidence = fixture.get("memory_evidence", [])

@@ -75,9 +75,7 @@ def hook_context_failed(context: HookContext) -> bool:
     signal. Presence of the error contract is.
     """
     response = context.tool_response
-    if isinstance(response, dict) and (
-        "error" in response or "error_type" in response
-    ):
+    if isinstance(response, dict) and ("error" in response or "error_type" in response):
         return True
     tool_input = context.tool_input
     return bool(
@@ -117,6 +115,7 @@ def _metadata(context: HookContext) -> dict[str, Any]:
             "yaml_path": app_scope.workflow_path or config.get("yaml_path") or config.get("_yaml_path") or "",
             "run_dir": config.get("run_dir") or "",
             "hook_event": context.hook_event_name,
+            "tool_call_id": context.tool_call_id or "",
             "sub_task_id": context.sub_task_id or _payload_value(context, "sub_task_id"),
         }
     )
@@ -175,10 +174,14 @@ def event_from_hook_context(context: HookContext) -> CanonicalSessionEvent | Non
         return None
     if context.hook_event_name == "SessionEnd" and hook_context_failed(context):
         event_type = "run_failed"
-    if context.hook_event_name == "SubagentStop" and isinstance(context.tool_input, dict) and context.tool_input.get("success") is False:
+    if (
+        context.hook_event_name == "SubagentStop"
+        and isinstance(context.tool_input, dict)
+        and context.tool_input.get("success") is False
+    ):
         event_type = "subagent_failed"
 
-    run_id = safe_run_id(context.session_id)
+    run_id = safe_run_id(context.local_run_id)
     root_run_id = safe_run_id(context.root_run_id or "")
     if not run_id or not root_run_id:
         return None
@@ -193,6 +196,7 @@ def event_from_hook_context(context: HookContext) -> CanonicalSessionEvent | Non
         root_run_id=root_run_id,
         task_id=task_id,
         parent_task_id=context.task_id or "",
+        tool_call_id=context.tool_call_id or "",
         application_id=str(metadata.get("application_id") or ""),
         application_name=str(metadata.get("application_name") or ""),
         application_path=str(metadata.get("application_path") or ""),
@@ -235,13 +239,9 @@ class SessionRecorder:
     def record_hook(self, context: HookContext) -> HookResult:
         from src.lib.smolagents.hooks.types import HookResult
 
-        agent_config = (
-            context.agent_config
-            if isinstance(context.agent_config, dict) and context.agent_config
-            else None
-        )
+        agent_config = context.agent_config if isinstance(context.agent_config, dict) and context.agent_config else None
         if not self_learning_enabled(agent_config):
-            return HookResult(success=True, decision="allow")
+            return HookResult(decision="allow")
         try:
             event = event_from_hook_context(context)
             if event is not None:
@@ -255,13 +255,8 @@ class SessionRecorder:
                 "Self-learning session recorder skipped event: %s",
                 safe_error,
             )
-            return HookResult(
-                success=False,
-                decision="allow",
-                outcome="non_blocking_error",
-                reason=f"Self-learning recorder skipped: {safe_error}",
-            )
-        return HookResult(success=True, decision="allow")
+            raise RuntimeError(f"Self-learning recorder skipped: {safe_error}") from exc
+        return HookResult(decision="allow")
 
 
 def session_recorder_hook(context: HookContext) -> HookResult:

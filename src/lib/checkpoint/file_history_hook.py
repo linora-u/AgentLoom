@@ -1,16 +1,13 @@
-"""
-PRE_TOOL_USE hook that triggers file history backup before file-modifying tools.
+"""Non-configurable file-history protection at the tool execution boundary.
 
-Registered on the HookManager so that ``track_edit()`` is called
-automatically before any tool that might write or modify a file.
-
-The hook accepts either a ``HookContext`` (used by the real HookManager)
-or raw ``(event_type, tool_name, tool_input)`` args (for unit-test convenience).
+``record_active_file_history`` is the production entry point. ``FileHistoryHook``
+is the local backup primitive it invokes; neither is a configurable
+``HookPlan`` handler.
 """
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Any, Optional
+from typing import TYPE_CHECKING, Any
 
 from src.lib.logging import get_logger
 
@@ -19,27 +16,17 @@ if TYPE_CHECKING:
 
 _logger = get_logger(__name__)
 
-def _file_modifying_specs() -> dict[str, tuple[str, ...]]:
-    try:
-        from src.tools import list_tool_specs
 
-        return {
-            spec.name: spec.path_params
-            for spec in list_tool_specs()
-            if spec.is_destructive and spec.path_params
-        }
-    except Exception:
-        return {
-            "edit_file": ("file_path",),
-            "write_file": ("file_path",),
-            "write_markdown_file": ("file_path",),
-            "write_markdown_file_raw": ("file_path",),
-            "append_markdown_sections": ("file_path",),
-        }
+def _file_modifying_specs() -> dict[str, tuple[str, ...]]:
+    from src.tools import list_tool_specs
+
+    # This registry is the security contract for destructive tools. Falling
+    # back to a hand-maintained subset would silently skip newly added tools.
+    return {spec.name: spec.path_params for spec in list_tool_specs() if spec.is_destructive and spec.path_params}
 
 
 class FileHistoryHook:
-    """PRE_TOOL_USE hook for automatic file backup.
+    """Compatibility adapter for automatic pre-write backup.
 
     When a file-modifying tool is about to run, this hook extracts
     the target file path and calls ``track_edit()`` on the
@@ -47,19 +34,19 @@ class FileHistoryHook:
 
     Supports two calling conventions:
 
-    1. **HookManager integration** (``context`` kwarg or single positional
+    1. **Hook Runtime integration** (``context`` kwarg or single positional
        ``HookContext``): the manager passes a ``HookContext`` with
        ``.tool_name`` and ``.tool_input``.
     2. **Direct / test invocation** (keyword args ``tool_name`` +
        ``tool_input``): allows easy unit-testing without constructing a
        full ``HookContext``.
 
-    Registration example::
+    Direct invocation example::
 
         from src.lib.checkpoint.file_history_hook import FileHistoryHook
 
         hook = FileHistoryHook(file_history_manager, step_counter_fn)
-        hook_manager.register_hook(HookEvent.PRE_TOOL_USE, "*", hook, source="file_history")
+        hook(tool_name="write_file", tool_input={"file_path": "notes.md"})
     """
 
     def __init__(
@@ -78,7 +65,7 @@ class FileHistoryHook:
         tool_name: str | None = None,
         tool_input: dict[str, Any] | None = None,
         **kwargs: Any,
-    ) -> Optional[Any]:
+    ) -> Any | None:
         """Intercept file-modifying tools and trigger backup.
 
         Accepts either ``context=HookContext(...)`` or explicit kwargs.
@@ -144,7 +131,34 @@ class FileHistoryHook:
         except Exception as exc:
             _logger.warning(
                 "FileHistoryHook: track_edit failed for %s: %s",
-                file_path, exc,
+                file_path,
+                exc,
             )
+            raise
 
         return None
+
+
+def record_active_file_history(
+    *,
+    tool_name: str,
+    tool_input: dict[str, Any],
+    step_number: int,
+) -> None:
+    """Record the final validated input at the non-configurable tool boundary.
+
+    This entry point is called directly by the tool runtime after configurable
+    ``PreToolUse`` transforms and the core path guard. It deliberately does not
+    participate in ``HookPlan`` discovery or ordering.
+    """
+
+    from src.lib.checkpoint.coordinator import CheckpointCoordinator
+
+    coordinator = CheckpointCoordinator.current()
+    file_history = getattr(coordinator, "_file_history", None) if coordinator else None
+    if file_history is None:
+        return
+    FileHistoryHook(file_history, get_step_number=lambda: step_number)(
+        tool_name=tool_name,
+        tool_input=dict(tool_input),
+    )

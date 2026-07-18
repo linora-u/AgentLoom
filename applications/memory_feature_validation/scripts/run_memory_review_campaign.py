@@ -66,6 +66,7 @@ from applications.memory_feature_validation.scripts.memory_review_campaign_commo
     normalize,
     release_git_source_state,
     select_runs,
+    workflow_application_id,
 )
 
 _LOG_RECORD_RE = re.compile(r"^\s*(?:\[[^\]\r\n]*\])+\s*")
@@ -108,6 +109,11 @@ _SENSITIVE_NORMALIZED_KEYS = (
     "awssecretaccesskey",
 )
 _COMPLETION_MARKER = "Execution completed successfully."
+_INBOX_DECISION_BLOCK_RE = re.compile(
+    r"(<!-- agentloom-decisions:start -->\s*```json\s*)(.*?)(\s*```\s*"
+    r"<!-- agentloom-decisions:end -->)",
+    flags=re.DOTALL,
+)
 _PROVIDER_TEMPFAIL_RETURN_CODE = 75
 _ACTIVE_CAPSULE_DESCRIPTOR: dict[str, Any] | None = None
 _ACTIVE_MODEL_CONFIG_BYTES: bytes | None = None
@@ -579,12 +585,12 @@ def _parse_key_values(value: str) -> dict[str, str]:
 
 
 def _review_telemetry_records(raw_output: str) -> list[dict[str, str]]:
-    """Parse logger-wrapped telemetry without mistaking an audit row for a call."""
+    """Parse the v6 run-end reviewer telemetry emitted by production."""
     plain = _ANSI_RE.sub("", str(raw_output or ""))
     lines = plain.splitlines()
     records: list[dict[str, str]] = []
     for index, line in enumerate(lines):
-        marker = "Memory review:"
+        marker = "Self-learning review:"
         if marker not in line:
             continue
         fragments = [line.split(marker, 1)[1].strip()]
@@ -610,27 +616,47 @@ def _model_evidence(raw_output: str) -> dict[str, Any]:
         except (KeyError, TypeError, ValueError):
             continue
     return {
-        "application_completion_calls": len(input_tokens),
-        "application_input_tokens": sum(input_tokens),
-        "application_output_tokens": sum(output_tokens),
+        "model_generation_count": len(input_tokens),
+        "model_input_tokens": sum(input_tokens),
+        "model_output_tokens": sum(output_tokens),
         "summary_model_ids": sorted(set(_MODEL_ID_RE.findall(raw_output))),
         "review_records": review_records,
         "review_call_count": sum(explicit_calls) if explicit_calls else None,
-        "review_input_tokens": sum(
-            int(record.get("input_tokens") or 0)
+        "review_action_count": sum(
+            int(record.get("actions") or 0)
             for record in review_records
-            if str(record.get("input_tokens") or "").isdigit()
-        ),
-        "review_output_tokens": sum(
-            int(record.get("output_tokens") or 0)
-            for record in review_records
-            if str(record.get("output_tokens") or "").isdigit()
+            if str(record.get("actions") or "").isdigit()
         ),
     }
 
 
 def _table_columns(conn: sqlite3.Connection, table: str) -> list[str]:
     return [str(row[1]) for row in conn.execute(f'PRAGMA table_info("{table}")')]
+
+
+def _typed_payload_content(kind: Any, payload: Any) -> str:
+    if not isinstance(payload, dict):
+        return ""
+    if normalize(kind) == "fact":
+        return str(payload.get("text") or "")
+    return " | ".join(
+        (
+            f"Trigger: {payload.get('trigger', '')}",
+            f"Symptom: {payload.get('symptom', '')}",
+            f"Action: {payload.get('action', '')}",
+            f"Verification: {payload.get('verification', '')}",
+        )
+    )
+
+
+def _decoded_json_field(
+    row: dict[str, Any],
+    source: str,
+    target: str,
+    default: Any,
+) -> None:
+    decoded = _decode_json(str(row.pop(source, "") or ""))
+    row[target] = decoded if isinstance(decoded, type(default)) else default
 
 
 def _read_fixed_db_snapshot(
@@ -649,9 +675,10 @@ def _read_fixed_db_snapshot(
         wanted = [
             name
             for name in (
-                "id", "scope", "scope_type", "scope_id", "application_id",
-                "status", "action", "content", "source", "source_run_id",
-                "created_at", "updated_at",
+                "id", "scope_type", "scope_id", "kind", "memory_key",
+                "payload_json", "payload_hash", "state", "activation_source",
+                "provenance_json", "revision", "source_review_id",
+                "supersedes_id", "created_at", "updated_at",
             )
             if name in available
         ]
@@ -659,70 +686,102 @@ def _read_fixed_db_snapshot(
             quoted = ", ".join(f'"{name}"' for name in wanted)
             for row in conn.execute(f"SELECT {quoted} FROM memory_items ORDER BY id"):
                 item = dict(zip(wanted, row, strict=True))
-                # In v5 every memory_items row is active; status is no longer
-                # stored redundantly in the source table.
-                item.setdefault("status", "active")
+                _decoded_json_field(item, "payload_json", "payload", {})
+                _decoded_json_field(item, "provenance_json", "provenance", [])
+                item["content"] = _typed_payload_content(
+                    item.get("kind"), item.get("payload")
+                )
                 items.append(_sanitize_value(item, markers))
 
-    pending_writes: list[dict[str, Any]] = []
-    if "memory_pending_writes" in tables:
-        available = _table_columns(conn, "memory_pending_writes")
+    review_candidates: list[dict[str, Any]] = []
+    if "review_candidates" in tables:
+        available = _table_columns(conn, "review_candidates")
         wanted = [
             name
             for name in (
-                "id", "status", "action", "scope_type", "scope_id",
-                "payload_json", "source_run_id", "created_at", "resolved_at",
+                "candidate_id", "review_id", "scope_type", "scope_id", "kind",
+                "memory_key", "payload_json", "payload_hash", "proposed_action",
+                "approval", "state", "outcome", "revision", "target_item_id",
+                "provenance_json", "source_run_ids_json", "gate_reasons_json",
+                "reason", "created_at", "resolved_at",
             )
             if name in available
         ]
         if wanted:
             quoted = ", ".join(f'"{name}"' for name in wanted)
             for row in conn.execute(
-                f"SELECT {quoted} FROM memory_pending_writes ORDER BY id"
+                f"SELECT {quoted} FROM review_candidates ORDER BY candidate_id"
             ):
                 item = dict(zip(wanted, row, strict=True))
-                payload = _decode_json(str(item.pop("payload_json", "") or ""))
-                if isinstance(payload, dict):
-                    item.update(
-                        {
-                            key: payload[key]
-                            for key in (
-                                "content", "target_id", "target_content_hash",
-                            )
-                            if key in payload
-                        }
-                    )
-                pending_writes.append(_sanitize_value(item, markers))
-
-    review_count: int | None = None
-    review_audits: list[dict[str, Any]] = []
-    for review_table in ("memory_review_runs", "review_runs"):
-        if review_table in tables:
-            review_count = int(
-                conn.execute(f'SELECT COUNT(*) FROM "{review_table}"').fetchone()[0]
-            )
-            available = _table_columns(conn, review_table)
-            wanted = [
-                name
-                for name in (
-                    "review_id", "review_key", "root_run_id", "model_type",
-                    "status", "result_json", "created_at", "finished_at",
+                _decoded_json_field(item, "payload_json", "payload", {})
+                _decoded_json_field(item, "provenance_json", "provenance", [])
+                _decoded_json_field(
+                    item, "source_run_ids_json", "source_run_ids", []
                 )
-                if name in available
-            ]
-            if wanted:
-                quoted = ", ".join(f'"{name}"' for name in wanted)
+                _decoded_json_field(
+                    item, "gate_reasons_json", "gate_reasons", []
+                )
+                item["content"] = _typed_payload_content(
+                    item.get("kind"), item.get("payload")
+                )
+                review_candidates.append(_sanitize_value(item, markers))
+
+    review_batch_runs: list[dict[str, Any]] = []
+    if "review_batch_runs" in tables:
+        available = _table_columns(conn, "review_batch_runs")
+        wanted = [
+            name
+            for name in ("review_id", "root_run_id", "application_id")
+            if name in available
+        ]
+        if wanted:
+            quoted = ", ".join(f'"{name}"' for name in wanted)
+            review_batch_runs = [
+                _sanitize_value(dict(zip(wanted, row, strict=True)), markers)
                 for row in conn.execute(
-                    f'SELECT {quoted} FROM "{review_table}" ORDER BY 1'
-                ):
-                    audit = dict(zip(wanted, row, strict=True))
-                    result = _decode_json(str(audit.pop("result_json", "") or ""))
-                    audit["result"] = result if isinstance(result, dict) else {}
-                    review_audits.append(_sanitize_value(audit, markers))
-            break
+                    f"SELECT {quoted} FROM review_batch_runs "
+                    "ORDER BY review_id,root_run_id,application_id"
+                )
+            ]
+
+    runs_by_batch: dict[str, list[dict[str, Any]]] = {}
+    for row in review_batch_runs:
+        runs_by_batch.setdefault(str(row.get("review_id") or ""), []).append(
+            {
+                "root_run_id": str(row.get("root_run_id") or ""),
+                "application_id": str(row.get("application_id") or ""),
+            }
+        )
+
+    review_batches: list[dict[str, Any]] = []
+    if "review_batches" in tables:
+        available = _table_columns(conn, "review_batches")
+        wanted = [
+            name
+            for name in (
+                "review_id", "scope_type", "scope_id", "status", "dry_run",
+                "result_json", "created_at", "finished_at",
+            )
+            if name in available
+        ]
+        if wanted:
+            quoted = ", ".join(f'"{name}"' for name in wanted)
+            for row in conn.execute(
+                f"SELECT {quoted} FROM review_batches ORDER BY review_id"
+            ):
+                batch = dict(zip(wanted, row, strict=True))
+                _decoded_json_field(batch, "result_json", "result", {})
+                batch["source_runs"] = runs_by_batch.get(
+                    str(batch.get("review_id") or ""), []
+                )
+                review_batches.append(_sanitize_value(batch, markers))
+
     counts = {
         table: int(conn.execute(f'SELECT COUNT(*) FROM "{table}"').fetchone()[0])
-        for table in ("runs", "events")
+        for table in (
+            "runs", "events", "memory_items", "review_candidates",
+            "review_batches", "review_batch_runs",
+        )
         if table in tables
     }
     run_status_counts = (
@@ -774,9 +833,9 @@ def _read_fixed_db_snapshot(
         "root_identity_valid": root_identity_valid,
         "completed_root_run_ids": completed_root_run_ids,
         "memory_items": items,
-        "memory_pending_writes": pending_writes,
-        "review_audits": review_audits,
-        "review_audit_count": review_count,
+        "review_candidates": review_candidates,
+        "review_batches": review_batches,
+        "review_batch_runs": review_batch_runs,
     }
 
 
@@ -787,9 +846,9 @@ def _db_snapshot_once(db_path: Path, markers: list[str]) -> dict[str, Any]:
             "integrity": "missing",
             "tables": [],
             "memory_items": [],
-            "memory_pending_writes": [],
-            "review_audits": [],
-            "review_audit_count": None,
+            "review_candidates": [],
+            "review_batches": [],
+            "review_batch_runs": [],
             "run_status_counts": {},
             "root_identity_valid": None,
             "completed_root_run_ids": [],
@@ -825,9 +884,9 @@ def _db_snapshot_once(db_path: Path, markers: list[str]) -> dict[str, Any]:
             "error_message": _sanitize_text(str(exc), markers),
             "tables": [],
             "memory_items": [],
-            "memory_pending_writes": [],
-            "review_audits": [],
-            "review_audit_count": None,
+            "review_candidates": [],
+            "review_batches": [],
+            "review_batch_runs": [],
             "run_status_counts": {},
             "root_identity_valid": False,
             "completed_root_run_ids": [],
@@ -846,59 +905,39 @@ def _db_snapshot(db_path: Path, markers: list[str]) -> dict[str, Any]:
     return result
 
 
-def _review_audit_delta(
+def _review_batch_delta(
     before: dict[str, Any],
     after: dict[str, Any],
 ) -> list[dict[str, Any]]:
-    """Return the new/changed content-free audit rows for one Application."""
+    """Return new or changed immutable v6 review batches."""
     before_rows = {
-        str(row.get("review_key") or row.get("review_id") or ""): row
-        for row in before.get("review_audits") or []
+        str(row.get("review_id") or ""): row
+        for row in before.get("review_batches") or []
         if isinstance(row, dict)
     }
     return [
         row
-        for row in after.get("review_audits") or []
+        for row in after.get("review_batches") or []
         if isinstance(row, dict)
-        and before_rows.get(
-            str(row.get("review_key") or row.get("review_id") or "")
-        ) != row
+        and before_rows.get(str(row.get("review_id") or "")) != row
     ]
 
 
-def _review_calls_from_audit_delta(
+def _table_effect_count(
     before: dict[str, Any],
     after: dict[str, Any],
-) -> int | None:
-    """Read provider-call counts from new/changed content-free audit rows."""
-    changed = _review_audit_delta(before, after)
-    if not changed:
-        return None
-    calls: list[int] = []
-    for row in changed:
-        result = row.get("result")
-        value = result.get("calls") if isinstance(result, dict) else None
-        if isinstance(value, bool) or not isinstance(value, int) or value < 0:
-            return None
-        calls.append(value)
-    return sum(calls)
-
-
-def _memory_effect_count(
-    before: dict[str, Any],
-    after: dict[str, Any],
+    *,
+    table: str,
+    identity_field: str,
 ) -> int:
-    """Count added, removed, or changed durable/pending memory rows."""
+    """Count added, removed, or changed rows in one canonical v6 table."""
 
-    def indexed(snapshot: dict[str, Any]) -> dict[tuple[str, str], dict[str, Any]]:
-        rows: dict[tuple[str, str], dict[str, Any]] = {}
-        for table in ("memory_items", "memory_pending_writes"):
-            for index, row in enumerate(snapshot.get(table) or []):
-                if not isinstance(row, dict):
-                    continue
-                identity = str(row.get("id") or f"row:{index}")
-                rows[(table, identity)] = row
-        return rows
+    def indexed(snapshot: dict[str, Any]) -> dict[str, dict[str, Any]]:
+        return {
+            str(row.get(identity_field) or f"row:{index}"): row
+            for index, row in enumerate(snapshot.get(table) or [])
+            if isinstance(row, dict)
+        }
 
     old = indexed(before)
     new = indexed(after)
@@ -1012,12 +1051,16 @@ def _private_finding_paths(
     return normalized
 
 
-def _run_cli(state_root: Path, args: list[str], markers: list[str]) -> dict[str, Any]:
+def _run_loom_cli(
+    state_root: Path,
+    args: list[str],
+    markers: list[str],
+) -> dict[str, Any]:
     env = os.environ.copy()
     env.pop(CAPSULE_TOKEN_ENV, None)
     env.pop(CAMPAIGN_LLM_CONFIG_FD_ENV, None)
     env["AGENTLOOM_RUNTIME_ROOT"] = str(state_root)
-    command = [_loom(), "memory", *args]
+    command = [_loom(), *args]
     if capsule_is_active():
         command = guarded_runtime_command(command, repo_root=REPO_ROOT)
     completed = subprocess.run(
@@ -1033,109 +1076,170 @@ def _run_cli(state_root: Path, args: list[str], markers: list[str]) -> dict[str,
     )
     raw = str(completed.stdout or "")
     return {
-        "command": ["loom", "memory", *args],
+        "command": ["loom", *args],
         "returncode": int(completed.returncode),
         "payload": _sanitize_value(_last_json(raw), markers),
         "output": _sanitize_text(raw, markers)[-4000:],
     }
 
 
-def _candidate_ids(value: Any, expected_content: str) -> list[str]:
-    found: list[str] = []
-    if isinstance(value, dict):
-        payload = value.get("payload")
-        payload = payload if isinstance(payload, dict) else {}
-        content = str(
-            value.get("content")
-            or value.get("text")
-            or payload.get("content")
-            or ""
-        )
-        status = normalize(value.get("status") or "")
-        if status == "pending" and content == expected_content:
-            identifier = value.get("id")
-            if identifier not in (None, ""):
-                found.append(str(identifier))
-        for nested in value.values():
-            found.extend(_candidate_ids(nested, expected_content))
-    elif isinstance(value, list):
-        for nested in value:
-            found.extend(_candidate_ids(nested, expected_content))
-    return found
+def _application_inbox(state_root: Path, application_id: str) -> Path:
+    parts = application_id.split("/")
+    if not parts or any(
+        not part or part in {".", ".."} or not re.fullmatch(r"[A-Za-z0-9._-]+", part)
+        for part in parts
+    ):
+        raise ValueError("invalid Application id for review INBOX")
+    return state_root / "reviews" / "applications" / Path(*parts) / "INBOX.md"
+
+
+def _write_inbox_decision(
+    inbox: Path,
+    *,
+    application_id: str,
+    candidate_id: str,
+    revision: int,
+    decision: str,
+) -> None:
+    raw = inbox.read_text(encoding="utf-8")
+    match = _INBOX_DECISION_BLOCK_RE.search(raw)
+    if match is None:
+        raise ValueError("review INBOX decision block was missing")
+    document = json.loads(match.group(2))
+    if (
+        not isinstance(document, dict)
+        or document.get("scope_type") != "application"
+        or document.get("scope_id") != application_id
+    ):
+        raise ValueError("review INBOX scope did not match the target Application")
+    rows = document.get("decisions")
+    if not isinstance(rows, list) or not all(isinstance(row, dict) for row in rows):
+        raise ValueError("review INBOX decisions were malformed")
+    targets = [
+        row
+        for row in rows
+        if str(row.get("candidate_id") or "") == candidate_id
+        and row.get("revision") == revision
+    ]
+    if len(targets) != 1 or str(targets[0].get("decision") or "") != "pending":
+        raise ValueError("review INBOX did not contain one pending target revision")
+    targets[0]["decision"] = decision
+    rendered = json.dumps(document, ensure_ascii=False, indent=2, sort_keys=True)
+    _write_text(
+        inbox,
+        raw[: match.start()]
+        + match.group(1)
+        + rendered
+        + match.group(3)
+        + raw[match.end() :],
+    )
 
 
 def _approval_transition(
     state_root: Path,
     oracle_row: dict[str, Any],
     markers: list[str],
+    *,
+    application_id: str,
 ) -> dict[str, Any]:
-    pending = _run_cli(state_root, ["pending"], markers)
+    before = _db_snapshot(state_root / "self_learning.db", markers)
     expected_content = str(oracle_row.get("expected_content") or "")
-    candidates = _candidate_ids(pending.get("payload"), expected_content)
-    if len(set(candidates)) != 1:
+    candidates = [
+        row
+        for row in before.get("review_candidates") or []
+        if isinstance(row, dict)
+        and normalize(row.get("state")) == "pending_pre_review"
+        and str(row.get("content") or "") == expected_content
+        and normalize(row.get("scope_type")) == "application"
+        and str(row.get("scope_id") or "") == application_id
+    ]
+    if len(candidates) != 1:
         return {
             "ok": False,
             "decision": str(oracle_row.get("decision") or ""),
-            "pending": pending,
-            "candidate_count": len(set(candidates)),
+            "candidate_count": len(candidates),
         }
-    target = candidates[0]
+    target_row = candidates[0]
+    target = str(target_row.get("candidate_id") or "")
+    revision = target_row.get("revision")
+    if isinstance(revision, bool) or not isinstance(revision, int):
+        return {
+            "ok": False,
+            "decision": str(oracle_row.get("decision") or ""),
+            "target": target,
+            "error": "candidate revision was invalid",
+        }
     decision = str(oracle_row.get("decision") or "")
-    applied = _run_cli(state_root, [decision, target], markers)
+    inbox = _application_inbox(state_root, application_id)
+    try:
+        _write_inbox_decision(
+            inbox,
+            application_id=application_id,
+            candidate_id=target,
+            revision=revision,
+            decision=decision,
+        )
+    except (OSError, TypeError, ValueError, json.JSONDecodeError) as exc:
+        return {
+            "ok": False,
+            "decision": decision,
+            "target": target,
+            "revision": revision,
+            "inbox": inbox.relative_to(state_root).as_posix(),
+            "error": f"{type(exc).__name__}: {exc}",
+        }
+    applied = _run_loom_cli(
+        state_root,
+        ["reviews", "apply", "--application", application_id],
+        markers,
+    )
     payload = applied.get("payload")
-    business_ok = isinstance(payload, dict) and payload.get("ok") is True
+    results = payload.get("results") if isinstance(payload, dict) else None
+    first_result = results[0] if isinstance(results, list) and len(results) == 1 else None
+    business_ok = (
+        isinstance(payload, dict)
+        and payload.get("applied") == 1
+        and isinstance(first_result, dict)
+        and str(first_result.get("candidate_id") or "") == target
+    )
     if not business_ok:
         return {
             "ok": False,
             "decision": decision,
             "target": target,
-            "pending": pending,
+            "revision": revision,
+            "inbox": inbox.relative_to(state_root).as_posix(),
             "result": applied,
         }
 
     readback = _db_snapshot(state_root / "self_learning.db", markers)
-    pending_rows = [
+    target_rows = [
         row
-        for row in readback.get("memory_pending_writes") or []
-        if isinstance(row, dict) and str(row.get("id")) == target
+        for row in readback.get("review_candidates") or []
+        if isinstance(row, dict) and str(row.get("candidate_id")) == target
     ]
-    expected_status = "approved" if decision == "approve" else "rejected"
-    expected_scope = normalize(oracle_row.get("expected_scope"))
+    expected_state = "active_confirmed" if decision == "approve" else "rejected"
     resolved = (
-        len(readback.get("memory_pending_writes") or []) == 1
-        and len(pending_rows) == 1
-        and normalize(pending_rows[0].get("status")) == expected_status
-        and bool(pending_rows[0].get("resolved_at"))
-        and str(pending_rows[0].get("content") or "") == expected_content
-        and (
-            not expected_scope
-            or normalize(
-                pending_rows[0].get("scope_type")
-                or pending_rows[0].get("scope")
-                or ""
-            )
-            in (
-                {"application", "app"}
-                if expected_scope == "application"
-                else {expected_scope}
-            )
-        )
+        len(target_rows) == 1
+        and normalize(target_rows[0].get("state")) == expected_state
+        and target_rows[0].get("revision") == revision + 1
+        and bool(target_rows[0].get("resolved_at"))
+        and str(target_rows[0].get("content") or "") == expected_content
+        and normalize(target_rows[0].get("scope_type")) == "application"
+        and str(target_rows[0].get("scope_id") or "") == application_id
     )
     active_rows = [
         row
         for row in readback.get("memory_items") or []
         if isinstance(row, dict)
+        and normalize(row.get("state")) in {"active_confirmed", "active_unreviewed"}
     ]
     matching_active = [
         row
         for row in active_rows
-        if normalize(row.get("status") or "active") == "active"
-        and str(row.get("content") or "") == expected_content
-        and (
-            not expected_scope
-            or normalize(row.get("scope_type") or row.get("scope") or "")
-            in ({"application", "app"} if expected_scope == "application" else {expected_scope})
-        )
+        if str(row.get("content") or "") == expected_content
+        and normalize(row.get("scope_type")) == "application"
+        and str(row.get("scope_id") or "") == application_id
     ]
     readback_ok = bool(
         readback.get("integrity") == "ok"
@@ -1150,7 +1254,10 @@ def _approval_transition(
         "ok": applied.get("returncode") == 0 and readback_ok,
         "decision": decision,
         "target": target,
-        "pending": pending,
+        "revision": revision,
+        "application_id": application_id,
+        "inbox": inbox.relative_to(state_root).as_posix(),
+        "inbox_removed": not inbox.exists(),
         "result": applied,
         "readback": readback,
         "readback_ok": readback_ok,
@@ -1309,19 +1416,24 @@ def _run_attempt(
 
     model = _model_evidence(raw_output)
     after = _db_snapshot(db_path, markers)
-    model["memory_effect_count"] = _memory_effect_count(before, after)
+    model["memory_item_effect_count"] = _table_effect_count(
+        before,
+        after,
+        table="memory_items",
+        identity_field="id",
+    )
+    model["review_candidate_effect_count"] = _table_effect_count(
+        before,
+        after,
+        table="review_candidates",
+        identity_field="candidate_id",
+    )
     completed_root_run_ids = _completed_root_run_ids_delta(before, after)
     model["completed_root_run_ids"] = completed_root_run_ids
     model["completed_run_count_delta"] = len(completed_root_run_ids)
     model["root_identity_required"] = after.get("exists") is True
     model["root_identity_valid"] = after.get("root_identity_valid") is True
-    review_audit_delta = _review_audit_delta(before, after)
-    model["review_audit_delta"] = review_audit_delta
-    if model["review_call_count"] is None:
-        audit_calls = _review_calls_from_audit_delta(before, after)
-        if audit_calls is not None:
-            model["review_call_count"] = audit_calls
-            model["review_evidence_source"] = "sqlite_review_audit"
+    model["review_batch_delta"] = _review_batch_delta(before, after)
 
     private_findings = _privacy_findings([state_root, runtime_root], oracle)
     if execution_root != campaign_dir:
@@ -1339,10 +1451,6 @@ def _run_attempt(
     safe_output = _sanitize_text(raw_output, markers)
     log_path = campaign_dir / "logs" / spec.run_id / f"attempt-{attempt_number}.log"
     _write_text(log_path, safe_output + ("\n" if safe_output else ""))
-    cli = {
-        "list": _run_cli(state_root, ["list"], markers),
-        "pending": _run_cli(state_root, ["pending"], markers),
-    }
     return {
         "attempt": attempt_number,
         "capsule_id": _active_capsule_id(),
@@ -1368,7 +1476,6 @@ def _run_attempt(
         ),
         "model_evidence": model,
         "database": after,
-        "cli": cli,
         "privacy_findings": privacy,
         "provider_protocol_empty_responses": (
             _provider_protocol_empty_response_count(raw_output)
@@ -1453,7 +1560,12 @@ def _run_group(
                 execution_root / "reproduction_state" / spec.run_id
             )
             _snapshot_state(state_root, reproduction_snapshot)
-            transition = _approval_transition(state_root, oracle[spec.case_id], markers)
+            transition = _approval_transition(
+                state_root,
+                oracle[spec.case_id],
+                markers,
+                application_id=workflow_application_id(spec),
+            )
         result = _run_spec(
             spec,
             campaign_dir=campaign_dir,
@@ -1697,6 +1809,7 @@ def _run_reproduction_in_private_scratch(
                 state_root,
                 oracle[spec.case_id],
                 markers,
+                application_id=workflow_application_id(spec),
             )
         result = _run_spec(
             spec,
@@ -1729,17 +1842,15 @@ def _usage(results: list[dict[str, Any]]) -> dict[str, int]:
                 continue
             evidence = attempt.get("model_evidence") or {}
             for key in (
-                "application_completion_calls",
-                "application_input_tokens",
-                "application_output_tokens",
-                "review_input_tokens",
-                "review_output_tokens",
+                "model_generation_count",
+                "model_input_tokens",
+                "model_output_tokens",
             ):
                 totals[key] += int(evidence.get(key) or 0)
             calls = evidence.get("review_call_count")
             if isinstance(calls, int) and not isinstance(calls, bool):
-                totals["review_completion_calls"] += calls
-            else:
+                totals["review_model_calls"] += calls
+            elif result.get("review_expected") is not False:
                 totals["unverifiable_review_attempts"] += 1
     return dict(totals)
 
@@ -2173,7 +2284,7 @@ def main() -> int:
     oracle = indexed_rows(ORACLE_PATH)
     markers = [*all_probe_markers(oracle), *_active_marker_texts()]
     plan = {
-        "schema_version": 1,
+        "schema_version": 2,
         "campaign_id": campaign_id,
         "created_at": _now(),
         "campaign_started_at": campaign_started_at,
@@ -2184,7 +2295,9 @@ def main() -> int:
         "max_concurrency": args.max_workers,
         "infrastructure_retries": 1,
         "cli_contract": "loom run <workflow>",
-        "memory_cli_contract": ["list", "pending", "approve", "reject"],
+        "review_approval_contract": (
+            "edit scoped INBOX.md then loom reviews apply --application <application-id>"
+        ),
         "dataset": dataset_manifest(),
         "scenario_quotas": dict(Counter(spec.scenario for spec in specs)),
         "runs": [spec.to_dict() for spec in specs],

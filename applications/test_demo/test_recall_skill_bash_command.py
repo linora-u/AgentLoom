@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Regression tests for the repo-local agent-recall-with-files skill package."""
+"""Regression tests for independent Recall Skill and Hook Bundle packages."""
 
 import json
 import subprocess
@@ -15,13 +15,14 @@ if str(AGENT_LOOM_ROOT) not in sys.path:
 
 SKILL_DIR = AGENT_LOOM_ROOT / "skills" / "agent-recall-with-files"
 SKILL_PATH = SKILL_DIR / "SKILL.md"
+HOOK_DIR = AGENT_LOOM_ROOT / "hooks" / "agent-recall-with-files"
+HOOK_MANIFEST = HOOK_DIR / "HOOK.yaml"
 WORKFLOW_PATH = AGENT_LOOM_ROOT / "applications" / "test_demo" / "workflows" / "test_recall_agent.yaml"
-AI_QUALITY_ANALYSIS_WORKFLOW_PATH = AGENT_LOOM_ROOT / "applications" / "ai_quality_analysis" / "workflows" / "code_review_agent.yaml"
-TASK_START_SCRIPT = SKILL_DIR / "scripts" / "on_task_start.py"
-STOP_SCRIPT = SKILL_DIR / "scripts" / "on_stop.py"
-INSIGHTS_TEMPLATE = SKILL_DIR / "templates" / "insights.md"
-TRACE_TEMPLATE = SKILL_DIR / "templates" / "trace.md"
-CONTEXT_TEMPLATE = SKILL_DIR / "templates" / "context.md"
+TASK_START_SCRIPT = HOOK_DIR / "scripts" / "on_task_start.py"
+STOP_SCRIPT = HOOK_DIR / "scripts" / "on_stop.py"
+INSIGHTS_TEMPLATE = HOOK_DIR / "templates" / "insights.md"
+TRACE_TEMPLATE = HOOK_DIR / "templates" / "trace.md"
+CONTEXT_TEMPLATE = HOOK_DIR / "templates" / "context.md"
 
 
 class TestAgentRecallSkillRepoAdaptation(unittest.TestCase):
@@ -30,15 +31,35 @@ class TestAgentRecallSkillRepoAdaptation(unittest.TestCase):
         self.assertTrue(STOP_SCRIPT.exists(), f"Stop script not found: {STOP_SCRIPT}")
 
         with tempfile.TemporaryDirectory(prefix="recall-stop-hook-") as tmp:
-            env = dict(**__import__("os").environ)
-            env["AGENT_NAME"] = "default"
+            agent_root = (
+                Path(tmp)
+                / ".agentloom"
+                / "workspaces"
+                / "agents"
+                / "test_demo"
+                / "default"
+            )
+            task_workspace = agent_root / "tasks" / "test-task"
             result = subprocess.run(
                 [sys.executable, str(STOP_SCRIPT)],
-                cwd=tmp,
+                cwd=HOOK_DIR,
+                input=json.dumps(
+                    {
+                        "schema_version": 1,
+                        "hook_event_name": "Stop",
+                        "agent_name": "default",
+                        "runtime_agent_path": "default",
+                        "project_root": tmp,
+                        "agent_task_workspace": str(task_workspace),
+                        "agent_insights_path": str(agent_root / "insights.md"),
+                        "agent_visualization_path": str(task_workspace / "visualization.json"),
+                        "tool_name": "final_answer",
+                        "tool_input": {},
+                    }
+                ),
                 capture_output=True,
                 text=True,
                 check=False,
-                env=env,
             )
             self.assertEqual(result.returncode, 0, msg=result.stderr)
             self.assertTrue(result.stdout.strip(), "Expected JSON output from on_stop.py")
@@ -52,8 +73,14 @@ class TestAgentRecallSkillRepoAdaptation(unittest.TestCase):
         self.assertNotIn("CODEX_SKILL_ROOT", content)
         self.assertNotIn("session-catchup.py", content)
         self.assertNotIn("/clear", content)
-        self.assertIn("python ./scripts/on_task_start.py", content)
+        self.assertNotIn("hooks:", content)
+        self.assertNotIn("python ./scripts/", content)
         self.assertIn("skills/agent-recall-with-files", content)
+        self.assertIn("hooks/agent-recall-with-files", content)
+        self.assertTrue(HOOK_MANIFEST.exists())
+        manifest = HOOK_MANIFEST.read_text(encoding="utf-8")
+        self.assertIn("name: agent-recall-with-files", manifest)
+        self.assertIn("python ./scripts/on_task_start.py", manifest)
         self.assertNotIn("task_plan.md", content)
         self.assertNotIn(".planning/", content)
 
@@ -62,11 +89,6 @@ class TestAgentRecallSkillRepoAdaptation(unittest.TestCase):
         content = WORKFLOW_PATH.read_text(encoding="utf-8")
         self.assertIn('path: "skills/agent-recall-with-files"', content)
         self.assertTrue(SKILL_DIR.exists(), f"Canonical skill directory not found: {SKILL_DIR}")
-
-    def test_ai_quality_analysis_workflow_uses_recall_skill(self):
-        self.assertTrue(AI_QUALITY_ANALYSIS_WORKFLOW_PATH.exists(), f"Workflow file not found: {AI_QUALITY_ANALYSIS_WORKFLOW_PATH}")
-        content = AI_QUALITY_ANALYSIS_WORKFLOW_PATH.read_text(encoding="utf-8")
-        self.assertIn('path: "skills/agent-recall-with-files"', content)
 
     def test_task_start_script_bootstraps_runtime_and_cleans_legacy(self):
         self.assertTrue(TASK_START_SCRIPT.exists(), f"TaskCreated script not found: {TASK_START_SCRIPT}")
@@ -79,21 +101,39 @@ class TestAgentRecallSkillRepoAdaptation(unittest.TestCase):
             legacy_planning_dir.mkdir(parents=True, exist_ok=True)
             Path(legacy_planning_dir, "task_plan.md").write_text("legacy planning file\n", encoding="utf-8")
 
-            env = dict(**__import__("os").environ)
-            env["AGENT_NAME"] = "default"
-            env["AGENT_LOOM_RUNTIME_ROOT"] = tmp
+            agent_root = (
+                Path(tmp)
+                / ".agentloom"
+                / "workspaces"
+                / "agents"
+                / "test_demo"
+                / "default"
+            )
+            runtime_dir = agent_root / "tasks" / "test-task"
             result = subprocess.run(
                 [sys.executable, str(TASK_START_SCRIPT)],
-                cwd=tmp,
+                cwd=HOOK_DIR,
+                input=json.dumps(
+                    {
+                        "schema_version": 1,
+                        "hook_event_name": "TaskCreated",
+                        "agent_name": "default",
+                        "runtime_agent_path": "default",
+                        "project_root": tmp,
+                        "agent_task_workspace": str(runtime_dir),
+                        "agent_insights_path": str(agent_root / "insights.md"),
+                        "agent_visualization_path": str(runtime_dir / "visualization.json"),
+                        "tool_name": "task",
+                        "tool_input": {},
+                    }
+                ),
                 capture_output=True,
                 text=True,
                 check=False,
-                env=env,
             )
             self.assertEqual(result.returncode, 0, msg=result.stderr)
 
-            runtime_dir = Path(tmp, ".runtime", "default")
-            insights_content = Path(runtime_dir, "insights.md").read_text(encoding="utf-8").replace("\r\n", "\n")
+            insights_content = Path(agent_root, "insights.md").read_text(encoding="utf-8").replace("\r\n", "\n")
             trace_content = Path(runtime_dir, "trace.md").read_text(encoding="utf-8").replace("\r\n", "\n")
             context_content = Path(runtime_dir, "context.md").read_text(encoding="utf-8").replace("\r\n", "\n")
             self.assertFalse(Path(tmp, ".planning").exists())

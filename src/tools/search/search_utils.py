@@ -8,8 +8,9 @@ results from excluded directories are never returned to the LLM.
 
 Architecture overview — two-layer exclude enforcement:
 
-  Layer 1 (hook):  ``path_validators.validate_workspace_path`` blocks *direct*
-      access to excluded paths (e.g. ``read_file("secrets/key.pem")``).
+  Layer 1 (core guard): the non-configurable tool boundary blocks *direct*
+      access to excluded paths after Hook transformations (for example,
+      ``read_file("secrets/key.pem")``).
 
   Layer 2 (search-result filter):  This module provides patterns so that
       *directory-scanning* tools (grep, glob) silently omit results from

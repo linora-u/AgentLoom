@@ -2,33 +2,37 @@
 
 Validates:
 - Template detection: empty file, template content, real content
-- Step number reading: from env var, from JSON, fallback to 0
+- Step number reading from the versioned Hook stdin contract
 - Write tracker: mtime change detection, staleness growth, reset on write
 - PostToolUse behavior: grace period, gentle/urgent thresholds, cooldown
 - Re-remind after stale: write once then stop → gets reminded again
 """
 
 import json
-import os
 import sys
 import time
 import unittest
 from pathlib import Path
-from unittest.mock import patch
 
-# Add the skill scripts directory to sys.path for importing common.py
+# Add the standalone Hook Bundle scripts directory to sys.path.
 _SCRIPTS_DIR = str(
     Path(__file__).resolve().parent.parent.parent
-    / "skills" / "agent-recall-with-files" / "scripts"
+    / "hooks" / "agent-recall-with-files" / "scripts"
 )
 if _SCRIPTS_DIR not in sys.path:
     sys.path.insert(0, _SCRIPTS_DIR)
 
-from common import (
-    CONTEXT_FILE, TRACE_FILE, INSIGHTS_FILE,
-    TEMPLATE_SIGNATURES, STALENESS_CONFIG, TURNS_BETWEEN_REMINDERS,
-    is_template_only, get_step_number,
-    load_write_tracker, save_write_tracker, detect_writes_and_update,
+import common as recall_common  # noqa: E402
+from common import (  # noqa: E402
+    CONTEXT_FILE,
+    INSIGHTS_FILE,
+    TEMPLATE_SIGNATURES,
+    TRACE_FILE,
+    detect_writes_and_update,
+    get_step_number,
+    is_template_only,
+    load_write_tracker,
+    save_write_tracker,
 )
 
 
@@ -102,33 +106,21 @@ class TestIsTemplateOnly(unittest.TestCase):
 class TestGetStepNumber(unittest.TestCase):
     """Tests for get_step_number()."""
 
-    def test_from_env_var(self):
-        """Should read step_number from $STEP_NUMBER env var."""
-        with patch.dict(os.environ, {"STEP_NUMBER": "7"}, clear=False):
-            self.assertEqual(get_step_number(), 7)
+    def tearDown(self):
+        recall_common._set_hook_context_for_testing(None)
 
-    def test_from_hook_context_json(self):
-        """Should read step_number from $HOOK_CONTEXT_JSON."""
-        ctx = json.dumps({"step_number": 12, "tool_name": "grep"})
-        with patch.dict(os.environ, {"STEP_NUMBER": "", "HOOK_CONTEXT_JSON": ctx}, clear=False):
-            self.assertEqual(get_step_number(), 12)
+    def test_from_hook_stdin_payload(self):
+        recall_common._set_hook_context_for_testing({"schema_version": 1, "step_number": 12})
+        self.assertEqual(get_step_number(), 12)
 
     def test_fallback_zero(self):
-        """Should return 0 when no step info available."""
-        with patch.dict(os.environ, {"STEP_NUMBER": "", "HOOK_CONTEXT_JSON": ""}, clear=False):
-            self.assertEqual(get_step_number(), 0)
+        """Should return zero when lifecycle payload has no step."""
+        recall_common._set_hook_context_for_testing({"schema_version": 1})
+        self.assertEqual(get_step_number(), 0)
 
-    def test_env_var_takes_priority(self):
-        """$STEP_NUMBER should take priority over JSON."""
-        ctx = json.dumps({"step_number": 99})
-        with patch.dict(os.environ, {"STEP_NUMBER": "5", "HOOK_CONTEXT_JSON": ctx}, clear=False):
-            self.assertEqual(get_step_number(), 5)
-
-    def test_non_numeric_env_var(self):
-        """Non-numeric $STEP_NUMBER should fall through to JSON."""
-        ctx = json.dumps({"step_number": 3})
-        with patch.dict(os.environ, {"STEP_NUMBER": "abc", "HOOK_CONTEXT_JSON": ctx}, clear=False):
-            self.assertEqual(get_step_number(), 3)
+    def test_invalid_step_type_falls_back_zero(self):
+        recall_common._set_hook_context_for_testing({"schema_version": 1, "step_number": "3"})
+        self.assertEqual(get_step_number(), 0)
 
 
 class TestWriteTracker(unittest.TestCase):
@@ -164,7 +156,9 @@ class TestWriteTracker(unittest.TestCase):
     def test_template_files_detected_as_never_written(self):
         """Template-only files should have stale_steps = -1."""
         tracker = load_write_tracker(self.tmpdir)
-        staleness = detect_writes_and_update(self.tmpdir, tracker, step=5)
+        staleness = detect_writes_and_update(
+            self.tmpdir, tracker, step=5, persistent_insights=self.tmpdir / INSIGHTS_FILE
+        )
         self.assertEqual(staleness[TRACE_FILE], -1)
         self.assertEqual(staleness[CONTEXT_FILE], -1)
 
@@ -172,7 +166,9 @@ class TestWriteTracker(unittest.TestCase):
         """Writing real content should be detected via mtime change."""
         tracker = load_write_tracker(self.tmpdir)
         # First check at step 1 — template only.
-        detect_writes_and_update(self.tmpdir, tracker, step=1)
+        detect_writes_and_update(
+            self.tmpdir, tracker, step=1, persistent_insights=self.tmpdir / INSIGHTS_FILE
+        )
 
         # Write real content to trace.md.
         time.sleep(0.05)  # Ensure mtime difference.
@@ -180,7 +176,9 @@ class TestWriteTracker(unittest.TestCase):
             "# Trace\n\n## Log\n- Real entry here\n" + "x" * 500,
             encoding="utf-8",
         )
-        staleness = detect_writes_and_update(self.tmpdir, tracker, step=3)
+        staleness = detect_writes_and_update(
+            self.tmpdir, tracker, step=3, persistent_insights=self.tmpdir / INSIGHTS_FILE
+        )
         self.assertEqual(staleness[TRACE_FILE], 0)  # Fresh.
 
     def test_staleness_grows_over_steps(self):
@@ -192,11 +190,15 @@ class TestWriteTracker(unittest.TestCase):
             "# Trace\n\n## Log\n- Entry\n" + "x" * 500,
             encoding="utf-8",
         )
-        detect_writes_and_update(self.tmpdir, tracker, step=2)
+        detect_writes_and_update(
+            self.tmpdir, tracker, step=2, persistent_insights=self.tmpdir / INSIGHTS_FILE
+        )
         self.assertEqual(tracker[TRACE_FILE]["last_written_at_step"], 2)
 
         # Check at step 6 without modifying.
-        staleness = detect_writes_and_update(self.tmpdir, tracker, step=6)
+        staleness = detect_writes_and_update(
+            self.tmpdir, tracker, step=6, persistent_insights=self.tmpdir / INSIGHTS_FILE
+        )
         self.assertEqual(staleness[TRACE_FILE], 4)  # 6 - 2 = 4.
 
     def test_staleness_resets_on_new_write(self):
@@ -205,16 +207,22 @@ class TestWriteTracker(unittest.TestCase):
         # Initial write at step 2.
         time.sleep(0.05)
         (self.tmpdir / TRACE_FILE).write_text("# Trace\nEntry1\n" + "x" * 500, encoding="utf-8")
-        detect_writes_and_update(self.tmpdir, tracker, step=2)
+        detect_writes_and_update(
+            self.tmpdir, tracker, step=2, persistent_insights=self.tmpdir / INSIGHTS_FILE
+        )
 
         # Stale at step 8.
-        staleness = detect_writes_and_update(self.tmpdir, tracker, step=8)
+        staleness = detect_writes_and_update(
+            self.tmpdir, tracker, step=8, persistent_insights=self.tmpdir / INSIGHTS_FILE
+        )
         self.assertEqual(staleness[TRACE_FILE], 6)
 
         # Write again at step 9.
         time.sleep(0.05)
         (self.tmpdir / TRACE_FILE).write_text("# Trace\nEntry2\n" + "x" * 500, encoding="utf-8")
-        staleness = detect_writes_and_update(self.tmpdir, tracker, step=9)
+        staleness = detect_writes_and_update(
+            self.tmpdir, tracker, step=9, persistent_insights=self.tmpdir / INSIGHTS_FILE
+        )
         self.assertEqual(staleness[TRACE_FILE], 0)  # Fresh again.
 
 
@@ -242,31 +250,33 @@ class TestPostToolUseBehavior(unittest.TestCase):
         """Run on_post_tool_use.main() and return the JSON output."""
         import io
         from contextlib import redirect_stdout
-        from unittest.mock import patch as mock_patch
 
-        env = {
-            "AGENT_NAME": "test_agent",
-            "STEP_NUMBER": str(step),
-            "AGENT_LOOM_RUNTIME_ROOT": str(self.tmpdir.parent),
-            "HOOK_CONTEXT_JSON": "",
-            "TOOL_NAME": "test_tool",
-            "HOOK_EVENT": "PostToolUse",
-        }
-        with mock_patch.dict(os.environ, env, clear=False):
-            import importlib
-            if "on_post_tool_use" in sys.modules:
-                del sys.modules["on_post_tool_use"]
-            import on_post_tool_use
-            with mock_patch.object(
-                on_post_tool_use, "runtime_dir", return_value=self.tmpdir
-            ), mock_patch.object(
-                on_post_tool_use, "get_runtime_agent_path", return_value="test_agent"
-            ):
-                buf = io.StringIO()
-                with redirect_stdout(buf):
-                    on_post_tool_use.main()
-                raw = buf.getvalue().strip()
-                return json.loads(raw) if raw else {}
+        recall_common._set_hook_context_for_testing(
+            {
+                "schema_version": 1,
+                "hook_event_name": "PostToolUse",
+                "agent_name": "test_agent",
+                "runtime_agent_path": "test_agent",
+                "step_number": step,
+                "project_root": str(self.tmpdir.parent),
+                "agent_task_workspace": str(self.tmpdir),
+                "agent_insights_path": str(self.tmpdir / INSIGHTS_FILE),
+                "agent_visualization_path": str(self.tmpdir / "visualization.json"),
+                "tool_name": "test_tool",
+                "tool_input": {},
+            }
+        )
+        if "on_post_tool_use" in sys.modules:
+            del sys.modules["on_post_tool_use"]
+        import on_post_tool_use
+        try:
+            buf = io.StringIO()
+            with redirect_stdout(buf):
+                on_post_tool_use.main()
+            raw = buf.getvalue().strip()
+            return json.loads(raw) if raw else {}
+        finally:
+            recall_common._set_hook_context_for_testing(None)
 
     def test_grace_period_silent(self):
         """Steps 1-3 should produce no reminder (grace period)."""

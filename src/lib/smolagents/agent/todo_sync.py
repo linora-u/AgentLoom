@@ -4,12 +4,11 @@ Provides isolated todo_write injection with retry logic,
 YAML prompt validation, and PlanningStep result annotation.
 """
 
-from pathlib import Path
 from typing import Optional
 
+from src.lib.runtime import get_current_run_context
 from src.lib.logging import get_logger
-from src.trace import get_current_hook_manager, get_current_agent_name
-from src.lib.config import C
+from src.trace import get_current_agent_name
 
 
 class TodoSyncMixin:
@@ -24,7 +23,6 @@ class TodoSyncMixin:
     - self.planning_interval: int | None
     - self._step_stream(step): generator
     - self._finalize_step(step): method
-    - self._hook_manager: HookManager | None
     """
 
     # Maximum number of retries for todo sync LLM calls.
@@ -102,25 +100,31 @@ class TodoSyncMixin:
     # Todo state helpers
     # ------------------------------------------------------------------
 
-    def _reset_todo_file(self) -> None:
-        """Reset todos.md to empty state at the start of a new run.
+    def _todo_path(self):
+        """Resolve this agent's task-scoped todo file from RuntimeContext."""
 
-        Clears old todo content so each run starts fresh.
-        Only called when todo_write is available.
+        from src.trace.task_context import get_current_runtime_agent_path
+
+        agent_path = (
+            get_current_runtime_agent_path()
+            or get_current_agent_name()
+            or getattr(self, "name", None)
+            or "default"
+        )
+        runtime_context = get_current_run_context(required=True)
+        runtime_context.prepare_agent_workspace(agent_path)
+        return runtime_context.agent_todos_path(agent_path)
+
+    def _reset_todo_file(self) -> None:
+        """Create todos.md for the current task if it does not exist.
+
+        The task id, rather than the run id, defines todo isolation.  A resume
+        therefore keeps the same todo state while a new task starts clean.
         """
         try:
-            from src.trace.task_context import get_current_runtime_agent_path
-            agent_path = (
-                get_current_runtime_agent_path()
-                or get_current_agent_name()
-                or getattr(self, "name", None)
-                or "default"
-            )
-            root = Path(C.agent_root).resolve()
-            runtime_dir = root / ".runtime" / agent_path
-            runtime_dir.mkdir(parents=True, exist_ok=True)
-            todos_file = runtime_dir / "todos.md"
-            todos_file.write_text("# Task Progress\n", encoding="utf-8")
+            todos_file = self._todo_path()
+            if not todos_file.exists():
+                todos_file.write_text("# Task Progress\n", encoding="utf-8")
             _log = get_logger(__name__)
             _log.debug("Reset todo file: %s", todos_file)
         except Exception as exc:
@@ -130,10 +134,7 @@ class TodoSyncMixin:
     def _has_incomplete_todos(self) -> bool:
         """Check if there are any pending or in_progress todos on disk."""
         try:
-            from src.trace.task_context import get_current_runtime_agent_path
-            agent_path = get_current_runtime_agent_path() or get_current_agent_name() or getattr(self, "name", None) or "default"
-            root = Path(C.agent_root).resolve()
-            todos_file = root / ".runtime" / agent_path / "todos.md"
+            todos_file = self._todo_path()
             if not todos_file.exists():
                 return False
             content = todos_file.read_text(encoding="utf-8")
@@ -147,18 +148,13 @@ class TodoSyncMixin:
             return False
 
     def _read_todo_state_for_planning(self) -> str:
-        """Read .runtime/<agent>/todos.md for planning context injection.
+        """Read the current task's todos.md for planning context injection.
 
         Uses runtime_agent_path (hierarchical) for path resolution,
         consistent with todo_write tool's persistence path.
-        Uses C.agent_root for project root discovery (shared config mechanism).
         """
         try:
-            from src.trace.task_context import get_current_runtime_agent_path
-            agent_path = get_current_runtime_agent_path() or get_current_agent_name() or getattr(self, 'name', None) or "default"
-            root = Path(C.agent_root).resolve()
-
-            todos_file = root / ".runtime" / agent_path / "todos.md"
+            todos_file = self._todo_path()
             if not todos_file.exists():
                 return ""
             content = todos_file.read_text(encoding="utf-8").strip()
@@ -238,8 +234,6 @@ class TodoSyncMixin:
         try:
             success = False
             for attempt in range(1, self.MAX_TODO_RETRIES + 1):
-                hook_manager = getattr(self, "_hook_manager", None) or get_current_hook_manager()
-
                 # Use the todo prompt as the system prompt override
                 # so the LLM only sees todo_write instructions (not the
                 # full system prompt with 20+ tool descriptions).

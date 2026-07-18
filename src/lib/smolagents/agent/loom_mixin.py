@@ -11,8 +11,8 @@ from smolagents.models import ChatMessage, MessageRole
 
 from src.lib.smolagents.memory.context_compression import ConversationHistoryManager
 from src.lib.logging import get_logger
-from src.trace import get_current_hook_manager
-from src.lib.smolagents.hooks.hook_manager import wrap_in_system_reminder
+from src.trace import get_current_hook_run
+from src.lib.smolagents.hooks import wrap_in_system_reminder
 from src.lib.smolagents.agent.todo_sync import TodoSyncMixin
 
 
@@ -106,13 +106,10 @@ class LoomAgentMixin(TodoSyncMixin):
                     )
                     break
 
-        hook_manager = getattr(self, "_hook_manager", None) or get_current_hook_manager()
-        # Sync step_number to hook_manager so hook scripts can read it
-        # via $STEP_NUMBER env var.  Per-agent instance — no lock needed.
-        if hook_manager is not None:
-            hook_manager.step_number = getattr(self, "step_number", 0) or 0
-        if hook_manager is not None:
-            pending_user_messages = hook_manager.consume_pending_user_messages()
+        hook_run = get_current_hook_run()
+        if hook_run is not None:
+            hook_run.step_number = getattr(self, "step_number", 0) or 0
+            pending_user_messages = hook_run.consume_pending_user_messages()
             if pending_user_messages:
                 agent_logger = getattr(self, "logger", None)
                 for message in pending_user_messages:
@@ -128,8 +125,8 @@ class LoomAgentMixin(TodoSyncMixin):
             step=getattr(self, 'step_number', None),
         )
 
-        if hook_manager is not None:
-            pending_context = hook_manager.consume_pending_agent_context()
+        if hook_run is not None:
+            pending_context = hook_run.consume_pending_agent_context()
             if pending_context:
                 combined_context = "\n\n".join(item for item in pending_context if item)
                 if combined_context:
@@ -390,7 +387,7 @@ class LoomAgentMixin(TodoSyncMixin):
     def _generate_planning_step(self, task, is_first_step: bool, step: int):
         """Override: inject current todo state into planning context.
 
-        Reads .runtime/<agent>/todos.md and appends its content to
+        Reads the current task's canonical agent workspace todos.md and appends its content to
         update_plan_pre_messages BEFORE Jinja2 rendering.  The LLM sees
         the current task list in the SYSTEM message during planning.
         """

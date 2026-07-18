@@ -50,36 +50,42 @@ def _compact_list_result(result: dict[str, Any]) -> dict[str, Any]:
 
 
 def memory(
-    action: Literal["list", "add", "replace", "remove"],
-    scope: Literal["project", "app"] = "project",
-    content: str = "",
-    target: str = "",
+    action: Literal["list", "propose"],
+    scope: Literal["project", "app"] = "app",
+    kind: Literal["fact", "experience"] = "fact",
+    memory_key: str = "",
+    text: str = "",
+    trigger: str = "",
+    symptom: str = "",
+    learned_action: str = "",
+    verification: str = "",
 ) -> str:
-    """Read or change durable facts that should help future AgentLoom runs.
+    """List active memory or submit one typed Application candidate.
 
-    Call this only for a compact fact that is expected to remain useful after
-    the current task ends: a verified project/application convention, a
-    corrected assumption, or a reusable solution whose success was observed.
+    A model candidate cannot activate, replace, remove, promote, or otherwise
+    mutate durable memory. Code-owned evidence gates and the configured scoped
+    approval policy decide what happens after submission. Project promotion is
+    a separate human review action; ``propose`` therefore accepts only ``app``.
+    ``scope="project"`` remains available for read-only ``list``.
 
-    Never store task progress, TODOs, plans, raw transcripts, run ids, current
-    counts, temporary failures, guesses, secrets, credentials, or instructions
-    aimed at a future model. History already records the run; memory is only the
-    small curated subset worth showing to later runs.
-
-    The canonical write is
-    ``memory(action="add", scope="project", content="<standalone fact>")``.
-    Never use action="store" or argument names other than this schema: the fact
-    belongs in ``content``, not ``fact``, ``key``, or ``value``.
-
-    Repository-wide or checkout-wide facts must use ``project``. Use ``app``
-    only when the source explicitly limits the fact to the current Application.
-    The tool cannot write another Application's scope.
+    Propose a compact durable fact with ``kind="fact"``, ``memory_key`` and
+    ``text``. Propose a short reusable heuristic with ``kind="experience"`` and
+    all four fields: ``trigger``, ``symptom``, ``learned_action``, and
+    ``verification``. Multi-step procedures, scripts, assets, plans, raw
+    transcripts, transient failures, guesses, secrets, credentials, and prompt
+    instructions are not memory; complex workflows belong in a separately
+    reviewed Skill candidate.
 
     Args:
-        action: One of ``list``, ``add``, ``replace``, or ``remove``.
-        scope: ``project`` or ``app``.
-        content: Standalone declarative fact for add/replace.
-        target: Exact memory id or a unique content substring for replace/remove.
+        action: ``list`` or add-only ``propose``.
+        scope: Current ``app`` for proposals; ``project`` is read-only here.
+        kind: ``fact`` or the compact ``experience`` schema.
+        memory_key: Stable semantic key used for conflict and override checks.
+        text: Standalone fact text.
+        trigger: Condition under which an experience applies.
+        symptom: Observable failure or situation.
+        learned_action: Compact corrective action.
+        verification: How success was verified.
     """
     from src.extensions.self_learning.paths import self_learning_enabled
 
@@ -103,17 +109,38 @@ def memory(
             ensure_ascii=False,
             separators=(",", ":"),
         )
+    if action == "propose" and scope == "project":
+        return json.dumps(
+            {
+                "ok": False,
+                "error": "project_promotion_requires_review",
+                "message": "Submit an Application candidate; Project promotion is human-reviewed.",
+            },
+            ensure_ascii=False,
+            separators=(",", ":"),
+        )
+    payload = (
+        {"text": text}
+        if kind == "fact"
+        else {
+            "trigger": trigger,
+            "symptom": symptom,
+            "action": learned_action,
+            "verification": verification,
+        }
+    )
     try:
         result = MemoryStore(agent_config=agent_config).handle_tool_action(
             action,
             scope=scope,
-            content=content,
-            target=target,
+            kind=kind,
+            memory_key=memory_key,
+            payload=payload,
             root_run_id=root_run_id,
             agent_config=agent_config,
         )
     except (KeyError, ValueError) as exc:
         result = {"ok": False, "error": type(exc).__name__, "message": str(exc)}
-    if (action or "").strip().casefold() == "list" and isinstance(result, dict):
+    if action == "list" and isinstance(result, dict):
         result = _compact_list_result(result)
     return json.dumps(result, ensure_ascii=False, separators=(",", ":"), default=str)
