@@ -29,6 +29,7 @@ _IDENTITY_FIELDS = (
     "task_id",
     "parent_task_id",
     "parent_event_id",
+    "tool_call_id",
 )
 _TEXT_FIELDS = (
     "application_id",
@@ -94,6 +95,7 @@ class CanonicalSessionEvent:
     task_id: str = ""
     parent_task_id: str = ""
     parent_event_id: str = ""
+    tool_call_id: str = ""
     application_id: str = ""
     application_name: str = ""
     application_path: str = ""

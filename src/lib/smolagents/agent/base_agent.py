@@ -72,6 +72,7 @@ from src.trace import (
     bind_local_run,
     bind_root_run,
     require_root_run_id,
+    require_root_run_state,
 )
 from src.lib.smolagents.hooks import HookEvent, HookManager, register_builtin_hooks
 from src.lib.smolagents.hooks.hook_manager import wrap_in_system_reminder
@@ -521,17 +522,23 @@ class BaseAgent(ABC):
     def _inject_memory_snapshot(self, tasks: list[str]) -> list[str]:
         if not tasks:
             return tasks
+        root_state = None
         try:
             from src.extensions.self_learning.memory_store import MemoryStore
             from src.extensions.self_learning.paths import self_learning_enabled
 
+            root_state = require_root_run_state()
             effective_config = getattr(self, "_effective_agent_config", None) or self._config
             if not self_learning_enabled(effective_config):
+                root_state.get_or_create_memory_snapshot(lambda: "")
                 return tasks
             snapshot = MemoryStore().snapshot_for_prompt(
                 agent_config=effective_config,
+                root_state=root_state,
             )
         except Exception as exc:
+            if root_state is not None:
+                root_state.get_or_create_memory_snapshot(lambda: "")
             if self._logger:
                 self._logger.warning("Memory snapshot injection skipped: %s", exc)
             return tasks
@@ -1486,16 +1493,25 @@ class RoleDrivenAgent(BaseAgent):
                         # the successful task result.
                         try:
                             from src.extensions.self_learning.paths import (
-                                memory_review_model,
+                                review_config,
                                 self_learning_enabled,
                             )
 
                             effective_config = (
                                 self._effective_agent_config or self._config
                             )
+                            review_policies = (
+                                review_config(effective_config, scope="application"),
+                                review_config(effective_config, scope="project"),
+                            )
                             if (
                                 self_learning_enabled(effective_config)
-                                and memory_review_model(effective_config)
+                                and any(
+                                    policy.get("enabled")
+                                    and str((policy.get("trigger") or {}).get("mode") or "manual")
+                                    != "manual"
+                                    for policy in review_policies
+                                )
                             ):
                                 from src.extensions.self_learning.reviewer import (
                                     review_finished_run,

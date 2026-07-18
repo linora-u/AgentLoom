@@ -20,16 +20,36 @@ def seeded_store(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> MemoryStore
     )
     config = {
         "application_id": "export_app",
-        "self_learning": {"memory": {"write_approval": True}},
+        "self_learning": {
+            "review": {
+                "enabled": True,
+                "application": {"review_model": "summary"},
+                "project": {"review_model": "summary"},
+            }
+        },
     }
     store = MemoryStore(agent_config=config)
-    store.add("project", "active project fact")
-    store.handle_tool_action(
-        "add",
-        scope="project",
-        content="pending exact write",
-        root_run_id="export-root",
-        agent_config=config,
+    store.add(
+        "project",
+        "active project fact",
+        memory_key="export:active-project-fact",
+    )
+    from src.extensions.self_learning.review_engine import ReviewEngine
+
+    ReviewEngine(store.db_path).review(
+        "project",
+        "project",
+        [
+            {
+                "kind": "fact",
+                "memory_key": "export:pending-project-fact",
+                "payload": {"text": "pending exact write"},
+                "approval": "manual",
+                "provenance": [{"root_run_id": "export-root"}],
+                "source_run_ids": ["export-root"],
+            }
+        ],
+        source_runs=[("export-root", "export_app")],
     )
     return store
 
@@ -38,9 +58,11 @@ def test_export_items_returns_active_only(seeded_store: MemoryStore) -> None:
     assert [item["content"] for item in seeded_store.export_items()] == [
         "active project fact"
     ]
-    assert [item["payload"]["content"] for item in seeded_store.list_pending()] == [
+    assert [json.loads(item["payload_json"])["text"] for item in seeded_store.list_pending()] == [
         "pending exact write"
     ]
+    assert seeded_store.export_items()[0]["state"] == "active_confirmed"
+    assert seeded_store.export_items()[0]["kind"] == "fact"
 
 
 def test_export_json_payload_separates_active_and_pending(seeded_store: MemoryStore) -> None:
@@ -57,7 +79,12 @@ def test_export_json_payload_separates_active_and_pending(seeded_store: MemorySt
         "pending_writes",
     }
     assert [item["content"] for item in payload["items"]] == ["active project fact"]
-    assert payload["pending_writes"][0]["status"] == "pending"
+    assert payload["items"][0]["scope_type"] == "project"
+    assert payload["items"][0]["state"] == "active_confirmed"
+    assert payload["pending_writes"][0]["state"] == "pending_pre_review"
+    assert json.loads(payload["pending_writes"][0]["payload_json"]) == {
+        "text": "pending exact write"
+    }
 
 
 def test_export_markdown_contains_only_active_memory(seeded_store: MemoryStore) -> None:
