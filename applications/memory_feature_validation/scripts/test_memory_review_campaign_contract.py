@@ -64,12 +64,35 @@ from applications.memory_feature_validation.scripts.run_memory_review_campaign i
     _default_campaign_id,
     _last_json,
     _model_evidence,
-    _review_calls_from_audit_delta,
     _sanitize_text,
+    _write_inbox_decision,
 )
 from src.lib.trusted_memory_evidence import (  # noqa: E402
     extract_trusted_memory_evidence,
 )
+
+
+def _empty_v6_database() -> dict:
+    return {
+        "integrity": "ok",
+        "memory_items": [],
+        "review_candidates": [],
+        "review_batches": [],
+        "review_batch_runs": [],
+    }
+
+
+def _review_off_evidence(*, memory_effects: int = 0, candidate_effects: int = 0) -> dict:
+    return {
+        "review_call_count": None,
+        "review_action_count": 0,
+        "review_records": [],
+        "review_batch_delta": [],
+        "memory_item_effect_count": memory_effects,
+        "review_candidate_effect_count": candidate_effects,
+        "completed_root_run_ids": [],
+        "completed_run_count_delta": 0,
+    }
 
 
 def _valid_capsule_descriptor(
@@ -251,25 +274,34 @@ def test_five_canaries_cover_off_on_recall_progress_and_security() -> None:
 
 def test_variant_configs_express_only_new_review_and_approval_switches() -> None:
     expected = {
-        "off": (None, False),
-        "on": ("summary", False),
-        "approval": ("summary", True),
-        "app_review": ("summary", False),
-        "app_a": ("", False),
-        "app_b": ("", False),
+        "off": None,
+        "on": (True, "summary", "auto", "after_run", "manual"),
+        "approval": (True, "summary", "manual", "after_run", "manual"),
+        "app_review": (True, "summary", "auto", "after_run", "manual"),
+        "app_a": (False, "", "auto", None, None),
+        "app_b": (False, "", "auto", None, None),
     }
-    for variant, (review_model, write_approval) in expected.items():
+    for variant, expected_policy in expected.items():
         payload = yaml.safe_load(
             (APP_ROOT / "variants" / variant / "config" / "system.yaml").read_text(encoding="utf-8")
         )
-        memory = payload["self_learning"].get("memory") or {}
-        if variant == "off":
-            assert memory == {}
-        else:
-            assert memory == {
+        review = payload["self_learning"].get("review")
+        if expected_policy is None:
+            assert review is None
+            continue
+        enabled, review_model, approval, app_trigger, project_trigger = expected_policy
+        assert review["enabled"] is enabled
+        for scope in ("application", "project"):
+            expected_scope = {
                 "review_model": review_model,
-                "write_approval": write_approval,
+                "approval": {"fact": approval, "experience": approval},
             }
+            trigger = app_trigger if scope == "application" else project_trigger
+            if trigger is not None:
+                expected_scope["trigger"] = {"mode": trigger}
+            assert review[scope] == expected_scope
+        assert "review_model" not in (payload["self_learning"].get("memory") or {})
+        assert "write_approval" not in (payload["self_learning"].get("memory") or {})
         assert "distill_model" not in str(payload)
         assert "auto_apply" not in str(payload)
 
@@ -884,20 +916,31 @@ def test_review_off_cohort_uses_real_global_summary_application_opt_out(
                 encoding="utf-8"
             )
         )
-        assert global_config["self_learning"]["memory"]["review_model"] == "summary"
-        assert app_config["self_learning"]["memory"]["review_model"] == ""
+        assert global_config["self_learning"]["review"]["application"]["review_model"] == "summary"
+        assert global_config["self_learning"]["review"]["application"]["trigger"]["mode"] == "after_run"
+        assert global_config["self_learning"]["review"]["project"]["review_model"] == "summary"
+        assert global_config["self_learning"]["review"]["project"]["trigger"]["mode"] == "manual"
+        assert "review_model" not in app_config["self_learning"]["review"]["application"]
+        assert app_config["self_learning"]["review"]["application"]["trigger"]["mode"] == "manual"
         assert workflow.is_relative_to(agent_root / "applications")
 
     agent_root = REPO_ROOT / specs[0].agent_root
     workflow = REPO_ROOT / specs[0].workflow
+    fixture_llm = config_module.LLMConfig.load_from_yaml(
+        REPO_ROOT / "config" / "llm.example.yaml"
+    )
+    monkeypatch.setattr(config_module, "_load_llm_config", lambda _path: fixture_llm)
     base = config_module._load_merged_config(config_dir=agent_root / "config")
     monkeypatch.setattr(config_module, "_ACTIVE_CONFIG", base)
     effective = config_module.build_effective_agent_config(
         {"_yaml_file_path": str(workflow)},
         source_name="real campaign opt-out workflow",
     )
-    assert base.raw["self_learning"]["memory"]["review_model"] == "summary"
-    assert effective["self_learning"]["memory"]["review_model"] == ""
+    assert base.raw["self_learning"]["review"]["application"]["review_model"] == "summary"
+    assert effective["self_learning"]["review"]["application"]["review_model"] == "summary"
+    assert effective["self_learning"]["review"]["application"]["trigger"]["mode"] == "manual"
+    assert effective["self_learning"]["review"]["project"]["review_model"] == "summary"
+    assert effective["self_learning"]["review"]["project"]["trigger"]["mode"] == "manual"
 
     spec = specs[0]
     assert audit_module._agent_root_attempt_issues(
@@ -1415,10 +1458,13 @@ def test_root_capsule_python_sets_exact_pycache_prefix_despite_isolation(
 def test_plan_audit_rejects_dataset_manifest_substitution() -> None:
     specs = select_runs(5)
     plan = {
+        "schema_version": 2,
         "requested_runs": 5,
         "max_concurrency": 1,
         "cli_contract": "loom run <workflow>",
-        "memory_cli_contract": ["list", "pending", "approve", "reject"],
+        "review_approval_contract": (
+            "edit scoped INBOX.md then loom reviews apply --application <application-id>"
+        ),
         "dataset": {"files": []},
         "runs": [spec.to_dict() for spec in specs],
     }
@@ -1468,15 +1514,8 @@ def test_recovered_provider_empty_responses_are_counted_without_failing_memory_s
         "returncode": 0,
         "privacy_findings": [],
         "provider_protocol_empty_responses": 0,
-        "model_evidence": {
-            "review_call_count": 0,
-            "review_audit_delta": [],
-        },
-        "database": {
-            "integrity": "ok",
-            "memory_items": [],
-            "memory_pending_writes": [],
-        },
+        "model_evidence": _review_off_evidence(),
+        "database": _empty_v6_database(),
     }
     result = {
         **spec.to_dict(),
@@ -1614,7 +1653,7 @@ def test_reviewer_completion_gate_requires_95_percent_of_eligible_runs() -> None
                 "returncode": 0,
                 "completion_marker_seen": True,
                 "model_evidence": {
-                    "review_audit_delta": [
+                    "review_batch_delta": [
                         {"status": status, "result": {"status": status}}
                     ],
                 }
@@ -1676,7 +1715,7 @@ def test_case_loader_never_exposes_hidden_oracle(monkeypatch) -> None:
     assert payload["memory_evidence"] == [
         {
             "kind": "durable_fact",
-            "scope": "project",
+            "scope": "application",
             "source": "stable_rule",
             "text": (
                 "The maximum page size is 250 records and every additional page "
@@ -1768,14 +1807,16 @@ def test_validation_memory_evidence_extractor_fails_closed_on_malformed_annotati
 def test_dry_run_artifacts_reaudit_without_model_calls(tmp_path: Path) -> None:
     specs = select_runs(5)
     plan = {
-        "schema_version": 1,
+        "schema_version": 2,
         "campaign_id": "contract",
         "dry_run": True,
         "requested_runs": 5,
         "selected_runs": 5,
         "max_concurrency": 2,
         "cli_contract": "loom run <workflow>",
-        "memory_cli_contract": ["list", "pending", "approve", "reject"],
+        "review_approval_contract": (
+            "edit scoped INBOX.md then loom reviews apply --application <application-id>"
+        ),
         "dataset": dataset_manifest(),
         "runs": [spec.to_dict() for spec in specs],
     }
@@ -1981,18 +2022,66 @@ def test_privacy_audit_collects_every_retry_attempt() -> None:
 
 def test_review_telemetry_parser_joins_terminal_wrapped_lines() -> None:
     evidence = _model_evidence(
-        "[2026-07-14][INFO] Memory review: enabled=true requested=summary\n"
-        "resolved=fake/summary calls=2 input_tokens=11\n"
-        "output_tokens=7 actions=1 status=completed\n"
+        "[2026-07-14][INFO] Self-learning review: enabled=true requested=summary\n"
+        "resolved=fake/summary calls=1 actions=1\n"
+        "status=completed\n"
         "[2026-07-14][INFO] done\n"
     )
 
-    assert evidence["review_call_count"] == 2
-    assert evidence["review_input_tokens"] == 11
-    assert evidence["review_output_tokens"] == 7
+    assert evidence["review_call_count"] == 1
+    assert evidence["review_action_count"] == 1
+    assert evidence["review_records"] == [
+        {
+            "enabled": "true",
+            "requested": "summary",
+            "resolved": "fake/summary",
+            "calls": "1",
+            "actions": "1",
+            "status": "completed",
+        }
+    ]
 
 
-def test_black_box_snapshot_maps_v5_active_pending_and_review_telemetry(
+def test_inbox_decision_writer_updates_one_real_v6_document(tmp_path: Path) -> None:
+    inbox = tmp_path / "INBOX.md"
+    document = {
+        "scope_type": "application",
+        "scope_id": "memory_feature_validation/variants/approval",
+        "decisions": [
+            {"candidate_id": "candidate-target", "revision": 3, "decision": "pending"},
+            {"candidate_id": "candidate-other", "revision": 1, "decision": "pending"},
+        ],
+    }
+    inbox.write_text(
+        "# Application review inbox\n\n"
+        "<!-- agentloom-decisions:start -->\n```json\n"
+        + json.dumps(document, indent=2)
+        + "\n```\n<!-- agentloom-decisions:end -->\n",
+        encoding="utf-8",
+    )
+
+    _write_inbox_decision(
+        inbox,
+        application_id="memory_feature_validation/variants/approval",
+        candidate_id="candidate-target",
+        revision=3,
+        decision="approve",
+    )
+
+    match = campaign_runner._INBOX_DECISION_BLOCK_RE.search(
+        inbox.read_text(encoding="utf-8")
+    )
+    assert match is not None
+    updated = json.loads(match.group(2))
+    assert updated["scope_type"] == "application"
+    assert updated["scope_id"] == "memory_feature_validation/variants/approval"
+    assert [row["decision"] for row in updated["decisions"]] == [
+        "approve",
+        "pending",
+    ]
+
+
+def test_black_box_snapshot_reads_canonical_v6_memory_and_review_state(
     tmp_path: Path,
 ) -> None:
     db = tmp_path / "self_learning.db"
@@ -2001,17 +2090,27 @@ def test_black_box_snapshot_maps_v5_active_pending_and_review_telemetry(
             """
             CREATE TABLE memory_items(
                 id INTEGER PRIMARY KEY, scope_type TEXT, scope_id TEXT,
-                content TEXT, content_hash TEXT, created_at TEXT, updated_at TEXT
+                kind TEXT, memory_key TEXT, payload_json TEXT, payload_hash TEXT,
+                state TEXT, activation_source TEXT, provenance_json TEXT,
+                revision INTEGER, source_review_id TEXT, supersedes_id INTEGER,
+                created_at TEXT, updated_at TEXT
             );
-            CREATE TABLE memory_pending_writes(
-                id INTEGER PRIMARY KEY, status TEXT, action TEXT,
-                scope_type TEXT, scope_id TEXT, payload_json TEXT,
-                source_run_id TEXT, created_at TEXT, resolved_at TEXT
+            CREATE TABLE review_candidates(
+                candidate_id TEXT PRIMARY KEY, review_id TEXT, scope_type TEXT,
+                scope_id TEXT, kind TEXT, memory_key TEXT, payload_json TEXT,
+                payload_hash TEXT, proposed_action TEXT, approval TEXT, state TEXT,
+                outcome TEXT, revision INTEGER, target_item_id INTEGER,
+                provenance_json TEXT, source_run_ids_json TEXT,
+                gate_reasons_json TEXT, reason TEXT, created_at TEXT,
+                resolved_at TEXT
             );
-            CREATE TABLE review_runs(
-                review_id INTEGER PRIMARY KEY, review_key TEXT, root_run_id TEXT,
-                model_type TEXT, status TEXT, result_json TEXT,
+            CREATE TABLE review_batches(
+                review_id TEXT PRIMARY KEY, scope_type TEXT, scope_id TEXT,
+                status TEXT, dry_run INTEGER, result_json TEXT,
                 created_at TEXT, finished_at TEXT
+            );
+            CREATE TABLE review_batch_runs(
+                review_id TEXT, root_run_id TEXT, application_id TEXT
             );
             CREATE TABLE runs(
                 run_id TEXT PRIMARY KEY, root_run_id TEXT, status TEXT
@@ -2019,15 +2118,32 @@ def test_black_box_snapshot_maps_v5_active_pending_and_review_telemetry(
             """
         )
         conn.execute(
-            "INSERT INTO memory_items VALUES(1,'project','project','active fact','h','t','t')"
+            "INSERT INTO memory_items VALUES(1,'application','app','fact','limit',?,"
+            "'h','active_unreviewed','auto','[]',1,'review-1',NULL,'t','t')",
+            (json.dumps({"text": "active fact"}),),
         )
         conn.execute(
-            "INSERT INTO memory_pending_writes VALUES(2,'pending','add','application','app',?,'root','t',NULL)",
-            (json.dumps({"content": "pending fact"}),),
+            "INSERT INTO review_candidates VALUES('candidate-1','review-1',"
+            "'application','app','fact','pending',?,'hp','add','manual',"
+            "'pending_pre_review','pending',1,NULL,'[]','[\"completed-root\"]',"
+            "'[]','manual_approval_required','t',NULL)",
+            (json.dumps({"text": "pending fact"}),),
         )
         conn.execute(
-            "INSERT INTO review_runs VALUES(3,'root:r','r','', 'skipped', ?, 't', 't')",
-            (json.dumps({"calls": 0, "status": "skipped"}),),
+            "INSERT INTO review_batches VALUES('review-1','application','app',"
+            "'completed',0,?,'t','t')",
+            (
+                json.dumps(
+                    {
+                        "review_id": "review-1",
+                        "status": "completed",
+                        "candidates": [{"candidate_id": "candidate-1"}],
+                    }
+                ),
+            ),
+        )
+        conn.execute(
+            "INSERT INTO review_batch_runs VALUES('review-1','completed-root','app')"
         )
         conn.executemany(
             "INSERT INTO runs VALUES(?, ?, ?)",
@@ -2039,10 +2155,13 @@ def test_black_box_snapshot_maps_v5_active_pending_and_review_telemetry(
 
     snapshot = _db_snapshot(db, [])
 
-    assert snapshot["memory_items"][0]["status"] == "active"
-    assert snapshot["memory_pending_writes"][0]["status"] == "pending"
-    assert snapshot["memory_pending_writes"][0]["content"] == "pending fact"
-    assert snapshot["review_audits"][0]["result"]["calls"] == 0
+    assert snapshot["memory_items"][0]["state"] == "active_unreviewed"
+    assert snapshot["memory_items"][0]["content"] == "active fact"
+    assert snapshot["review_candidates"][0]["state"] == "pending_pre_review"
+    assert snapshot["review_candidates"][0]["content"] == "pending fact"
+    assert snapshot["review_batches"][0]["source_runs"] == [
+        {"root_run_id": "completed-root", "application_id": "app"}
+    ]
     assert snapshot["run_status_counts"] == {"completed": 1, "failed": 1}
     assert snapshot["root_identity_valid"] is True
     assert snapshot["completed_root_run_ids"] == ["completed-root"]
@@ -2084,10 +2203,12 @@ def test_black_box_snapshot_reads_committed_wal_state(tmp_path: Path) -> None:
         writer.execute(
             "CREATE TABLE memory_items("
             "id INTEGER PRIMARY KEY, scope_type TEXT, scope_id TEXT, "
-            "content TEXT, content_hash TEXT, created_at TEXT, updated_at TEXT)"
+            "kind TEXT, memory_key TEXT, payload_json TEXT, state TEXT)"
         )
         writer.execute(
-            "INSERT INTO memory_items VALUES(1,'project','project','wal fact','h','t','t')"
+            "INSERT INTO memory_items VALUES(1,'project','project','fact','wal',?,"
+            "'active_confirmed')",
+            (json.dumps({"text": "wal fact"}),),
         )
         writer.commit()
 
@@ -2102,6 +2223,7 @@ def test_black_box_snapshot_recovers_wal_after_abrupt_writer_exit(
 ) -> None:
     db = tmp_path / "self_learning.db"
     script = """
+import json
 import os
 import sqlite3
 import sys
@@ -2112,10 +2234,12 @@ conn.execute("PRAGMA wal_autocheckpoint = 0")
 conn.execute(
     "CREATE TABLE memory_items("
     "id INTEGER PRIMARY KEY, scope_type TEXT, scope_id TEXT, "
-    "content TEXT, content_hash TEXT, created_at TEXT, updated_at TEXT)"
+    "kind TEXT, memory_key TEXT, payload_json TEXT, state TEXT)"
 )
 conn.execute(
-    "INSERT INTO memory_items VALUES(1,'project','project','recovered fact','h','t','t')"
+    "INSERT INTO memory_items VALUES(1,'project','project','fact','recovered',?,"
+    "'active_confirmed')",
+    (json.dumps({"text": "recovered fact"}),),
 )
 conn.commit()
 os._exit(0)
@@ -2138,32 +2262,28 @@ os._exit(0)
     assert not wal.exists() or wal.stat().st_size == 0
 
 
-def test_review_audit_fallback_uses_calls_not_row_count() -> None:
-    before = {"review_audits": []}
-    skipped = {
-        "review_audits": [
-            {"review_key": "root:off", "result": {"calls": 0, "status": "skipped"}}
-        ]
-    }
-    completed = {
-        "review_audits": [
-            {"review_key": "root:on", "result": {"calls": 2, "status": "completed"}}
+def test_review_batch_delta_uses_immutable_review_id() -> None:
+    before = {"review_batches": [{"review_id": "review-old", "status": "completed"}]}
+    after = {
+        "review_batches": [
+            {"review_id": "review-old", "status": "completed"},
+            {"review_id": "review-new", "status": "completed"},
         ]
     }
 
-    assert _review_calls_from_audit_delta(before, skipped) == 0
-    assert _review_calls_from_audit_delta(before, completed) == 2
-    assert _review_calls_from_audit_delta(before, before) is None
+    assert campaign_runner._review_batch_delta(before, after) == [
+        {"review_id": "review-new", "status": "completed"}
+    ]
+    assert campaign_runner._review_batch_delta(before, before) == []
 
 
-def test_memory_effect_count_detects_add_update_and_delete() -> None:
+def test_table_effect_count_detects_add_update_and_delete() -> None:
     before = {
         "memory_items": [
             {"id": 1, "content": "unchanged"},
             {"id": 2, "content": "old"},
             {"id": 3, "content": "deleted"},
         ],
-        "memory_pending_writes": [],
     }
     after = {
         "memory_items": [
@@ -2171,10 +2291,14 @@ def test_memory_effect_count_detects_add_update_and_delete() -> None:
             {"id": 2, "content": "new"},
             {"id": 4, "content": "added"},
         ],
-        "memory_pending_writes": [],
     }
 
-    assert campaign_runner._memory_effect_count(before, after) == 3
+    assert campaign_runner._table_effect_count(
+        before,
+        after,
+        table="memory_items",
+        identity_field="id",
+    ) == 3
 
 
 def test_review_off_requires_zero_calls_and_zero_persisted_audit() -> None:
@@ -2188,22 +2312,15 @@ def test_review_off_requires_zero_calls_and_zero_persisted_audit() -> None:
         "final": {
             "returncode": 0,
             "privacy_findings": [],
-            "model_evidence": {
-                "review_call_count": 0,
-                "review_audit_delta": [],
-            },
-            "database": {
-                "integrity": "ok",
-                "memory_items": [],
-                "memory_pending_writes": [],
-            },
+            "model_evidence": _review_off_evidence(),
+            "database": _empty_v6_database(),
         },
     }
 
     assert evaluate_results([spec], [result], oracle, require_complete=True)["ok"] is True
 
-    result["final"]["model_evidence"]["review_audit_delta"] = [
-        {"status": "skipped", "result": {"status": "skipped", "calls": 0}}
+    result["final"]["model_evidence"]["review_batch_delta"] = [
+        {"review_id": "should-not-exist", "status": "completed"}
     ]
     audit = evaluate_results([spec], [result], oracle, require_complete=True)
     assert audit["ok"] is False
@@ -2222,16 +2339,8 @@ def test_review_off_treats_absent_reviewer_entry_as_zero_calls() -> None:
         "final": {
             "returncode": 0,
             "privacy_findings": [],
-            "model_evidence": {
-                "review_call_count": None,
-                "memory_effect_count": 0,
-                "review_audit_delta": [],
-            },
-            "database": {
-                "integrity": "ok",
-                "memory_items": [],
-                "memory_pending_writes": [],
-            },
+            "model_evidence": _review_off_evidence(),
+            "database": _empty_v6_database(),
         },
     }
 
@@ -2254,14 +2363,13 @@ def test_review_on_still_rejects_absent_reviewer_evidence() -> None:
             "privacy_findings": [],
             "model_evidence": {
                 "review_call_count": None,
-                "memory_effect_count": 0,
-                "review_audit_delta": [],
+                "review_action_count": 0,
+                "review_records": [],
+                "memory_item_effect_count": 0,
+                "review_candidate_effect_count": 0,
+                "review_batch_delta": [],
             },
-            "database": {
-                "integrity": "ok",
-                "memory_items": [],
-                "memory_pending_writes": [],
-            },
+            "database": _empty_v6_database(),
         },
     }
 
@@ -2272,7 +2380,7 @@ def test_review_on_still_rejects_absent_reviewer_evidence() -> None:
     ]
 
 
-def test_release_audit_rejects_more_than_four_reviewer_provider_calls() -> None:
+def test_release_audit_requires_exactly_one_after_run_reviewer_call() -> None:
     oracle = indexed_rows(ORACLE_PATH)
     spec = next(
         item for item in build_full_plan()
@@ -2285,15 +2393,37 @@ def test_release_audit_rejects_more_than_four_reviewer_provider_calls() -> None:
             "returncode": 0,
             "privacy_findings": [],
             "model_evidence": {
-                "review_call_count": 5,
-                "memory_effect_count": 1,
-                "review_audit_delta": [
+                "review_call_count": 2,
+                "review_action_count": 1,
+                "review_records": [
                     {
+                        "status": "completed", "calls": "2", "actions": "1"
+                    }
+                ],
+                "memory_item_effect_count": 1,
+                "review_candidate_effect_count": 1,
+                "completed_root_run_ids": ["root-1"],
+                "completed_run_count_delta": 1,
+                "review_batch_delta": [
+                    {
+                        "review_id": "review-1",
+                        "scope_type": "application",
+                        "scope_id": "memory_feature_validation/variants/on",
                         "status": "completed",
+                        "source_runs": [
+                            {
+                                "root_run_id": "root-1",
+                                "application_id": "memory_feature_validation/variants/on",
+                            }
+                        ],
                         "result": {
                             "status": "completed",
-                            "calls": 5,
-                            "actions": 1,
+                            "candidates": [
+                                {
+                                    "candidate_id": "candidate-1",
+                                    "state": "active_unreviewed",
+                                }
+                            ],
                         },
                     }
                 ],
@@ -2302,15 +2432,23 @@ def test_release_audit_rejects_more_than_four_reviewer_provider_calls() -> None:
                 "integrity": "ok",
                 "memory_items": [
                     {
-                        "status": "active",
-                        "scope_type": "project",
+                        "state": "active_unreviewed",
+                        "scope_type": "application",
+                        "scope_id": "memory_feature_validation/variants/on",
                         "content": (
                             "The maximum page size is 250 records and every "
                             "additional page uses next_page_token."
                         ),
                     }
                 ],
-                "memory_pending_writes": [],
+                "review_candidates": [
+                    {
+                        "candidate_id": "candidate-1",
+                        "state": "active_unreviewed",
+                    }
+                ],
+                "review_batches": [],
+                "review_batch_runs": [],
             },
         },
     }
@@ -2339,42 +2477,22 @@ def test_writer_audit_requires_exact_oracle_evidence_bytes() -> None:
         item for item in build_full_plan()
         if item.run_id == "on-durable-00-writer"
     )
-    result = {
-        **spec.to_dict(),
-        "status": "completed",
-        "final": {
-            "returncode": 0,
-            "model_evidence": {
-                "review_call_count": 1,
-                "memory_effect_count": 1,
-                "review_audit_delta": [
-                    {
-                        "root_run_id": "root",
-                        "status": "completed",
-                        "result": {
-                            "status": "completed",
-                            "calls": 1,
-                            "actions": 1,
-                        },
-                    }
-                ],
-            },
-            "privacy_findings": [],
-            "database": {
-                "integrity": "ok",
-                "memory_items": [
-                    {
-                        "status": "active",
-                        "scope_type": "project",
-                        "content": (
-                            "Page limit: 250. THIS IS NOT THE EXACT TRUSTED EVIDENCE."
-                        ),
-                    }
-                ],
-                "memory_pending_writes": [],
-            },
-        },
-    }
+    application_id = campaign_common.workflow_application_id(spec)
+    wrong = "Page limit: 250. THIS IS NOT THE EXACT TRUSTED EVIDENCE."
+    candidate = _candidate_row(
+        wrong,
+        application_id=application_id,
+        state="active_unreviewed",
+    )
+    result = _v6_result(
+        spec,
+        memory_items=[_fact_row(wrong, application_id=application_id)],
+        candidates=[candidate],
+        review_candidates=[candidate],
+        actions=1,
+        memory_effects=1,
+        candidate_effects=1,
+    )
 
     evaluated = evaluate_results(
         [spec], [result], oracle, require_complete=True
@@ -2627,7 +2745,6 @@ def test_campaign_retries_once_for_typed_provider_tempfail(
     monkeypatch.setattr(campaign_runner, "_loom", lambda: "loom")
     monkeypatch.setattr(campaign_runner, "_db_snapshot", lambda *_args: {})
     monkeypatch.setattr(campaign_runner, "_privacy_findings", lambda *_args: [])
-    monkeypatch.setattr(campaign_runner, "_run_cli", lambda *_args: {})
     monkeypatch.setattr(campaign_runner, "_snapshot_state", lambda *_args: None)
     monkeypatch.setattr(
         campaign_runner,
@@ -2690,7 +2807,6 @@ def test_campaign_does_not_parse_model_logs_to_authorize_retry(
     monkeypatch.setattr(campaign_runner, "_loom", lambda: "loom")
     monkeypatch.setattr(campaign_runner, "_db_snapshot", lambda *_args: {})
     monkeypatch.setattr(campaign_runner, "_privacy_findings", lambda *_args: [])
-    monkeypatch.setattr(campaign_runner, "_run_cli", lambda *_args: {})
     monkeypatch.setattr(campaign_runner, "_snapshot_state", lambda *_args: None)
     monkeypatch.setattr(campaign_runner.subprocess, "run", semantic_failure)
     state_root = tmp_path / "state"
@@ -2733,7 +2849,6 @@ def test_campaign_does_not_retry_successful_root_when_review_log_reports_failure
     monkeypatch.setattr(campaign_runner, "_loom", lambda: "loom")
     monkeypatch.setattr(campaign_runner, "_db_snapshot", lambda *_args: {})
     monkeypatch.setattr(campaign_runner, "_privacy_findings", lambda *_args: [])
-    monkeypatch.setattr(campaign_runner, "_run_cli", lambda *_args: {})
     monkeypatch.setattr(campaign_runner, "_snapshot_state", lambda *_args: None)
     monkeypatch.setattr(campaign_runner.subprocess, "run", successful_root)
     state_root = tmp_path / "state"
@@ -2838,1372 +2953,622 @@ def test_campaign_audit_does_not_use_model_completion_marker_for_retry() -> None
     assert audit_module._attempt_contract_issues(result) == []
 
 
-def test_completed_application_is_bound_to_one_matching_persisted_root() -> None:
+def _v6_result(
+    spec: RunSpec,
+    *,
+    memory_items: list[dict] | None = None,
+    candidates: list[dict] | None = None,
+    final_answer: object = None,
+    review_candidates: list[dict] | None = None,
+    actions: int = 0,
+    memory_effects: int = 0,
+    candidate_effects: int = 0,
+) -> dict:
+    memory_items = list(memory_items or [])
+    candidates = list(candidates or [])
+    application_id = campaign_common.workflow_application_id(spec)
+    root_run_id = f"root-{spec.run_id}"
+    if spec.review_expected:
+        review_candidates = list(review_candidates or [])
+        batch = {
+            "review_id": f"review-{spec.run_id}",
+            "scope_type": "application",
+            "scope_id": application_id,
+            "status": "completed",
+            "source_runs": [
+                {
+                    "root_run_id": root_run_id,
+                    "application_id": application_id,
+                }
+            ],
+            "result": {
+                "status": "completed",
+                "candidates": review_candidates,
+            },
+        }
+        evidence = {
+            "review_call_count": 1,
+            "review_action_count": actions,
+            "review_records": [
+                {"calls": "1", "actions": str(actions), "status": "completed"}
+            ],
+            "review_batch_delta": [batch],
+            "memory_item_effect_count": memory_effects,
+            "review_candidate_effect_count": candidate_effects,
+            "completed_root_run_ids": [root_run_id],
+            "completed_run_count_delta": 1,
+        }
+    else:
+        evidence = _review_off_evidence(
+            memory_effects=memory_effects,
+            candidate_effects=candidate_effects,
+        )
+        if spec.scenario == "foreground_proposal" and spec.phase == "writer":
+            evidence.update(
+                {
+                    "completed_root_run_ids": [root_run_id],
+                    "completed_run_count_delta": 1,
+                    "review_batch_delta": [
+                        {
+                            "review_id": f"proposal-{spec.run_id}",
+                            "scope_type": "application",
+                            "scope_id": application_id,
+                            "status": "completed",
+                            "source_runs": [
+                                {
+                                    "root_run_id": root_run_id,
+                                    "application_id": application_id,
+                                }
+                            ],
+                            "result": {
+                                "status": "completed",
+                                "candidates": candidates,
+                            },
+                        }
+                    ],
+                }
+            )
     attempt = {
         "returncode": 0,
         "completion_marker_seen": True,
-        "model_evidence": {
-            "root_identity_valid": True,
-            "completed_run_count_delta": 0,
-            "completed_root_run_ids": [],
-            "review_audit_delta": [],
+        "privacy_findings": [],
+        "final_answer": final_answer,
+        "model_evidence": evidence,
+        "database": {
+            **_empty_v6_database(),
+            "memory_items": memory_items,
+            "review_candidates": candidates,
         },
+    }
+    return {
+        **spec.to_dict(),
+        "status": "completed",
+        "attempts": [attempt],
+        "final": attempt,
+    }
+
+
+def _fact_row(
+    content: str,
+    *,
+    application_id: str,
+    state: str = "active_unreviewed",
+) -> dict:
+    return {
+        "id": 1,
+        "scope_type": "application",
+        "scope_id": application_id,
+        "kind": "fact",
+        "memory_key": "campaign-fact",
+        "payload": {"text": content},
+        "content": content,
+        "state": state,
+    }
+
+
+def _candidate_row(
+    content: str,
+    *,
+    application_id: str,
+    state: str = "pending_pre_review",
+    candidate_id: str = "candidate-1",
+    revision: int = 1,
+) -> dict:
+    return {
+        "candidate_id": candidate_id,
+        "review_id": "review-1",
+        "scope_type": "application",
+        "scope_id": application_id,
+        "kind": "fact",
+        "memory_key": "campaign-fact",
+        "payload": {"text": content},
+        "content": content,
+        "state": state,
+        "revision": revision,
+        "resolved_at": "2026-07-18T00:00:00+00:00" if state != "pending_pre_review" else None,
+    }
+
+
+def _approval_post_result(case_id: str, decision: str) -> tuple[RunSpec, dict]:
+    oracle = indexed_rows(ORACLE_PATH)
+    spec = next(
+        item
+        for item in build_full_plan()
+        if item.case_id == case_id and item.phase == "post_recall"
+    )
+    application_id = campaign_common.workflow_application_id(spec)
+    content = oracle[case_id]["expected_content"]
+    candidate_state = "active_confirmed" if decision == "approve" else "rejected"
+    candidate = _candidate_row(
+        content,
+        application_id=application_id,
+        state=candidate_state,
+        revision=2,
+    )
+    memory = (
+        [_fact_row(content, application_id=application_id, state="active_confirmed")]
+        if decision == "approve"
+        else []
+    )
+    result = _v6_result(
+        spec,
+        memory_items=memory,
+        candidates=[candidate],
+        final_answer=(oracle[case_id]["recall_value"] if decision == "approve" else "MISSING"),
+    )
+    result["approval_transition"] = {
+        "ok": True,
+        "readback_ok": True,
+        "inbox_removed": True,
+        "application_id": application_id,
+        "decision": decision,
+        "target": "candidate-1",
+        "revision": 1,
+        "result": {
+            "command": ["loom", "reviews", "apply", "--application", application_id],
+            "returncode": 0,
+            "payload": {
+                "applied": 1,
+                "results": [{"candidate_id": "candidate-1"}],
+            },
+        },
+    }
+    return spec, result
+
+
+def test_v6_reviewer_writer_activates_only_application_memory() -> None:
+    oracle = indexed_rows(ORACLE_PATH)
+    spec = next(
+        item for item in build_full_plan() if item.run_id == "on-durable-00-writer"
+    )
+    application_id = campaign_common.workflow_application_id(spec)
+    content = oracle[spec.case_id]["expected_content"]
+    candidate = _candidate_row(
+        content,
+        application_id=application_id,
+        state="active_unreviewed",
+    )
+    result = _v6_result(
+        spec,
+        memory_items=[_fact_row(content, application_id=application_id)],
+        candidates=[candidate],
+        review_candidates=[candidate],
+        actions=1,
+        memory_effects=1,
+        candidate_effects=1,
+    )
+
+    assert evaluate_results([spec], [result], oracle, require_complete=True)["ok"] is True
+
+    result["final"]["database"]["memory_items"][0]["scope_id"] = "sibling"
+    result["final"]["database"]["review_candidates"][0]["scope_id"] = "sibling"
+    issues = evaluate_results([spec], [result], oracle, require_complete=True)["issues"]
+    assert "scope_mismatch" in {issue["code"] for issue in issues}
+
+
+def test_foreground_proposal_stays_pending_and_is_not_recalled() -> None:
+    oracle = indexed_rows(ORACLE_PATH)
+    specs = {
+        item.phase: item
+        for item in build_full_plan()
+        if item.case_id == "foreground-00"
+    }
+    writer = specs["writer"]
+    recall = specs["recall"]
+    application_id = campaign_common.workflow_application_id(writer)
+    content = oracle[writer.case_id]["expected_content"]
+    candidate = _candidate_row(content, application_id=application_id)
+    writer_result = _v6_result(
+        writer,
+        candidates=[candidate],
+        candidate_effects=1,
+    )
+    recall_result = _v6_result(
+        recall,
+        candidates=[candidate],
+        final_answer="MISSING",
+    )
+
+    audit = evaluate_results(
+        [writer, recall],
+        [writer_result, recall_result],
+        oracle,
+        require_complete=True,
+    )
+    assert audit["ok"] is True
+
+
+def test_project_promotion_guard_leaves_no_memory_and_cross_recall_missing() -> None:
+    oracle = indexed_rows(ORACLE_PATH)
+    specs = [
+        item for item in build_full_plan() if item.case_id == "project-scope-00"
+    ]
+    results = [
+        _v6_result(
+            spec,
+            final_answer="MISSING" if spec.phase == "cross_recall" else None,
+        )
+        for spec in specs
+    ]
+
+    audit = evaluate_results(specs, results, oracle, require_complete=True)
+    assert audit["ok"] is True
+
+
+@pytest.mark.parametrize(
+    ("case_id", "decision", "candidate_state", "answer"),
+    [
+        ("approval-00", "approve", "active_confirmed", "export.completed.v3"),
+        ("approval-03", "reject", "rejected", "MISSING"),
+    ],
+)
+def test_approval_audit_uses_scoped_inbox_and_reviews_apply(
+    case_id: str,
+    decision: str,
+    candidate_state: str,
+    answer: str,
+) -> None:
+    oracle = indexed_rows(ORACLE_PATH)
+    spec, result = _approval_post_result(case_id, decision)
+    assert result["final"]["database"]["review_candidates"][0]["state"] == candidate_state
+    assert audit_module._answer(result["final"]["final_answer"]) == answer
+
+    audit = evaluate_results([spec], [result], oracle, require_complete=True)
+    assert audit["ok"] is True
+
+
+def test_approval_transition_edits_real_inbox_before_running_cli(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    application_id = "memory_feature_validation/variants/approval"
+    content = "Completed exports publish to export.completed.v3."
+    state_root = tmp_path / "state"
+    inbox = (
+        state_root
+        / "reviews"
+        / "applications"
+        / "memory_feature_validation"
+        / "variants"
+        / "approval"
+        / "INBOX.md"
+    )
+    inbox.parent.mkdir(parents=True)
+    document = {
+        "scope_type": "application",
+        "scope_id": application_id,
+        "decisions": [
+            {"candidate_id": "candidate-1", "revision": 1, "decision": "pending"}
+        ],
+    }
+    inbox.write_text(
+        "<!-- agentloom-decisions:start -->\n```json\n"
+        + json.dumps(document)
+        + "\n```\n<!-- agentloom-decisions:end -->\n",
+        encoding="utf-8",
+    )
+    before_candidate = _candidate_row(content, application_id=application_id)
+    after_candidate = _candidate_row(
+        content,
+        application_id=application_id,
+        state="active_confirmed",
+        revision=2,
+    )
+    snapshots = iter(
+        [
+            {**_empty_v6_database(), "review_candidates": [before_candidate]},
+            {
+                **_empty_v6_database(),
+                "review_candidates": [after_candidate],
+                "memory_items": [
+                    _fact_row(
+                        content,
+                        application_id=application_id,
+                        state="active_confirmed",
+                    )
+                ],
+            },
+        ]
+    )
+    monkeypatch.setattr(campaign_runner, "_db_snapshot", lambda *_args: next(snapshots))
+
+    def apply_cli(_state_root: Path, args: list[str], _markers: list[str]) -> dict:
+        match = campaign_runner._INBOX_DECISION_BLOCK_RE.search(
+            inbox.read_text(encoding="utf-8")
+        )
+        assert match is not None
+        assert json.loads(match.group(2))["decisions"][0]["decision"] == "approve"
+        inbox.unlink()
+        return {
+            "command": ["loom", *args],
+            "returncode": 0,
+            "payload": {
+                "applied": 1,
+                "results": [{"candidate_id": "candidate-1"}],
+            },
+        }
+
+    monkeypatch.setattr(campaign_runner, "_run_loom_cli", apply_cli)
+
+    transition = _approval_transition(
+        state_root,
+        {
+            "expected_content": content,
+            "expected_scope": "application",
+            "decision": "approve",
+        },
+        [],
+        application_id=application_id,
+    )
+
+    assert transition["ok"] is True
+    assert transition["inbox_removed"] is True
+    assert transition["result"]["command"] == [
+        "loom", "reviews", "apply", "--application", application_id
+    ]
+
+
+def test_review_batch_identity_must_match_completed_root() -> None:
+    evidence = {
+        "root_identity_required": False,
+        "completed_root_run_ids": ["root-1"],
+        "completed_run_count_delta": 1,
+        "review_batch_delta": [
+            {"source_runs": [{"root_run_id": "root-2", "application_id": "app"}]}
+        ],
+    }
+    attempt = {
+        "returncode": 0,
+        "completion_marker_seen": True,
+        "model_evidence": evidence,
     }
     result = {"status": "completed", "attempts": [attempt], "final": attempt}
 
     assert audit_module._run_identity_contract_issues(result) == [
-        "Application did not persist exactly one unique completed root run"
-    ]
-
-    attempt["model_evidence"].update(
-        {
-            "completed_run_count_delta": 1,
-            "completed_root_run_ids": ["root-1"],
-            "review_audit_delta": [{"root_run_id": "root-1"}],
-        }
-    )
-    assert audit_module._run_identity_contract_issues(result) == []
-
-    attempt["model_evidence"]["review_audit_delta"][0]["root_run_id"] = "root-2"
-    assert audit_module._run_identity_contract_issues(result) == [
-        "review audit root did not match the completed Application root"
+        "review batch root did not match the completed Application root"
     ]
 
 
 def test_evaluate_results_rejects_duplicate_result_ids() -> None:
-    specs = select_runs(5)
-    results = [
-        {**spec.to_dict(), "status": "planned"}
-        for spec in specs
-    ]
-    results.append(dict(results[0]))
-
-    evaluated = evaluate_results(
-        specs,
-        results,
+    spec = build_full_plan()[0]
+    result = _v6_result(spec)
+    audit = evaluate_results(
+        [spec],
+        [result, json.loads(json.dumps(result))],
         indexed_rows(ORACLE_PATH),
         require_complete=True,
     )
 
-    assert evaluated["complete"] is False
-    assert [(issue["code"], issue["hard"]) for issue in evaluated["issues"]] == [
-        ("duplicate_result", True)
-    ]
+    assert "duplicate_result" in {issue["code"] for issue in audit["issues"]}
 
 
-def test_semantic_audit_reads_v5_active_and_pending_tables() -> None:
-    oracle = indexed_rows(ORACLE_PATH)
-    specs = {spec.run_id: spec for spec in build_full_plan()}
-    active_spec = specs["on-durable-00-writer"]
-    active_result = {
-        **active_spec.to_dict(),
-        "status": "completed",
-        "final": {
-            "returncode": 0,
-            "privacy_findings": [],
-            "model_evidence": {
-                "review_call_count": 2,
-                "memory_effect_count": 1,
-                "review_audit_delta": [
-                    {
-                        "status": "completed",
-                        "result": {"status": "completed", "calls": 2, "actions": 1},
-                    }
-                ],
-            },
-            "database": {
-                "integrity": "ok",
-                "memory_items": [
-                    {
-                        "status": "active",
-                        "scope_type": "project",
-                        "content": oracle[active_spec.case_id]["expected_content"],
-                    }
-                ],
-                "memory_pending_writes": [],
-            },
-        },
-    }
-    pending_spec = specs["approval-00-writer"]
-    pending_result = {
-        **pending_spec.to_dict(),
-        "status": "completed",
-        "final": {
-            "returncode": 0,
-            "privacy_findings": [],
-            "model_evidence": {
-                "review_call_count": 2,
-                "memory_effect_count": 1,
-                "review_audit_delta": [
-                    {
-                        "status": "completed",
-                        "result": {"status": "completed", "calls": 2, "actions": 1},
-                    }
-                ],
-            },
-            "database": {
-                "integrity": "ok",
-                "memory_items": [],
-                "memory_pending_writes": [
-                    {
-                        "status": "pending",
-                        "scope_type": oracle[pending_spec.case_id]["expected_scope"],
-                        "content": oracle[pending_spec.case_id]["expected_content"],
-                    }
-                ],
-            },
-        },
-    }
-
-    assert evaluate_results(
-        [active_spec], [active_result], oracle, require_complete=True
-    )["ok"] is True
-    assert evaluate_results(
-        [pending_spec], [pending_result], oracle, require_complete=True
-    )["ok"] is True
-
-
-def test_application_scope_writer_requires_the_workflow_owned_scope_id() -> None:
-    oracle = indexed_rows(ORACLE_PATH)
-    spec = next(
-        item for item in build_full_plan()
-        if item.run_id == "app-scope-00-writer"
-    )
-    result = {
-        **spec.to_dict(),
-        "status": "completed",
-        "final": {
-            "returncode": 0,
-            "privacy_findings": [],
-            "model_evidence": {
-                "review_call_count": 1,
-                "memory_effect_count": 1,
-                "review_audit_delta": [
-                    {
-                        "status": "completed",
-                        "result": {
-                            "status": "completed",
-                            "calls": 1,
-                            "actions": 1,
-                        },
-                    }
-                ],
-            },
-            "database": {
-                "integrity": "ok",
-                "memory_items": [
-                    {
-                        "status": "active",
-                        "scope_type": "application",
-                        "scope_id": "memory_feature_validation/variants/app_b",
-                        "content": oracle[spec.case_id]["expected_content"],
-                    }
-                ],
-                "memory_pending_writes": [],
-            },
-        },
-    }
-
-    audit = evaluate_results([spec], [result], oracle, require_complete=True)
-
-    assert audit["ok"] is False
-    assert {issue["code"] for issue in audit["issues"]} == {"scope_mismatch"}
-
-    result["final"]["database"]["memory_items"][0]["scope_id"] = (
-        "memory_feature_validation/variants/app_review"
-    )
-    assert evaluate_results(
-        [spec], [result], oracle, require_complete=True
-    )["ok"] is True
-
-
-def test_recall_oracle_is_independent_from_memory_content_terms() -> None:
-    oracle = indexed_rows(ORACLE_PATH)
+def test_recall_uses_independent_recall_terms_not_writer_terms() -> None:
     spec = next(
         item for item in build_full_plan() if item.run_id == "on-durable-00-recall"
     )
-    result = {
-        **spec.to_dict(),
-        "status": "completed",
-        "final": {
-            "returncode": 0,
-            "final_answer": 250,
-            "privacy_findings": [],
-            "model_evidence": {
-                "review_call_count": 1,
-                "memory_effect_count": 0,
-                "review_audit_delta": [
-                    {
-                        "status": "completed",
-                        "result": {"status": "completed", "calls": 1, "actions": 0},
-                    }
-                ],
-            },
-            "database": {
-                "integrity": "ok",
-                "memory_items": [
-                    {
-                        "status": "active",
-                        "scope_type": "project",
-                        "content": "The page limit is 250; paginate with next_page_token.",
-                    }
-                ],
-                "memory_pending_writes": [],
-            },
-        },
+    result = _v6_result(spec, final_answer={"answer": "250 records"})
+    independent_oracle = {
+        spec.case_id: {
+            "expected_writer_status": "active",
+            "required_terms": ["writer-only-term"],
+            "recall_terms": ["250"],
+            "recall_value": "250 records",
+        }
     }
 
-    assert oracle[spec.case_id]["required_terms"] == ["250", "page"]
-    assert oracle[spec.case_id]["recall_terms"] == ["250"]
-    assert evaluate_results([spec], [result], oracle, require_complete=True)["ok"] is True
+    assert evaluate_results(
+        [spec], [result], independent_oracle, require_complete=True
+    )["ok"] is True
 
 
-def test_approval_transition_requires_business_success(monkeypatch) -> None:
-    responses = iter(
-        [
-            {
-                "returncode": 0,
-                "payload": [
-                    {
-                        "id": 7,
-                        "status": "pending",
-                        "payload": {"content": "stable fact"},
-                    }
-                ],
-            },
-            {"returncode": 0, "payload": {"ok": False, "error": "not_found"}},
-        ]
+@pytest.mark.parametrize(
+    ("mutation", "expected_code"),
+    [
+        ("business", "approval_transition"),
+        ("readback", "approval_transition"),
+        ("exact", "exact_evidence_mismatch"),
+        ("extra_active", "unexpected_memory_write"),
+    ],
+)
+def test_approval_gate_fails_closed_for_business_readback_and_state_mismatch(
+    mutation: str,
+    expected_code: str,
+) -> None:
+    oracle = indexed_rows(ORACLE_PATH)
+    spec, result = _approval_post_result("approval-00", "approve")
+    if mutation == "business":
+        result["approval_transition"]["result"]["payload"]["applied"] = 0
+    elif mutation == "readback":
+        result["approval_transition"]["readback_ok"] = False
+    elif mutation == "exact":
+        result["final"]["database"]["review_candidates"][0]["content"] = "wrong"
+        result["final"]["database"]["review_candidates"][0]["payload"] = {
+            "text": "wrong"
+        }
+        result["final"]["database"]["memory_items"][0]["content"] = "wrong"
+        result["final"]["database"]["memory_items"][0]["payload"] = {
+            "text": "wrong"
+        }
+    else:
+        application_id = campaign_common.workflow_application_id(spec)
+        result["final"]["database"]["memory_items"].append(
+            _fact_row("unrelated", application_id=application_id)
+        )
+
+    issues = evaluate_results([spec], [result], oracle, require_complete=True)["issues"]
+    assert expected_code in {issue["code"] for issue in issues}
+
+
+@pytest.mark.parametrize(
+    ("memory_effects", "candidate_effects", "expected_codes"),
+    [
+        (0, 0, {"review_failed"}),
+        (1, 1, {"review_failed", "review_atomicity"}),
+    ],
+)
+def test_failed_reviewer_is_soft_only_when_it_commits_no_v6_effect(
+    memory_effects: int,
+    candidate_effects: int,
+    expected_codes: set[str],
+) -> None:
+    spec = next(
+        item for item in build_full_plan() if item.run_id == "progress-00-writer"
     )
-    monkeypatch.setattr(
-        "applications.memory_feature_validation.scripts.run_memory_review_campaign._run_cli",
-        lambda *_args, **_kwargs: next(responses),
-    )
-
-    result = _approval_transition(
-        Path("/unused"),
-        {
-            "expected_content": "stable fact",
-            "expected_scope": "project",
-            "decision": "reject",
-        },
-        [],
-    )
-
-    assert result["ok"] is False
-
-
-def test_approval_transition_requires_persisted_status_readback(monkeypatch) -> None:
-    responses = iter(
-        [
-            {
-                "returncode": 0,
-                "payload": [
-                    {
-                        "id": 7,
-                        "status": "pending",
-                        "payload": {"content": "stable fact"},
-                    }
-                ],
-            },
-            {"returncode": 0, "payload": {"ok": True, "status": "rejected"}},
-        ]
-    )
-    monkeypatch.setattr(
-        "applications.memory_feature_validation.scripts.run_memory_review_campaign._run_cli",
-        lambda *_args, **_kwargs: next(responses),
-    )
-    monkeypatch.setattr(
-        "applications.memory_feature_validation.scripts.run_memory_review_campaign._db_snapshot",
-        lambda *_args, **_kwargs: {
-            "integrity": "ok",
-            "memory_items": [],
-            "memory_pending_writes": [
-                {
-                    "id": 7,
-                    "status": "pending",
-                    "content": "stable fact",
-                    "resolved_at": None,
-                }
+    attempt = {
+        "model_evidence": {
+            "review_call_count": 1,
+            "review_action_count": 0,
+            "review_records": [
+                {"calls": "1", "actions": "0", "status": "failed"}
             ],
-        },
+            "review_batch_delta": [],
+            "memory_item_effect_count": memory_effects,
+            "review_candidate_effect_count": candidate_effects,
+        }
+    }
+
+    issues = audit_module._review_audit_contract(
+        spec,
+        {"final": attempt},
+        indexed_rows(ORACLE_PATH)[spec.case_id],
+    )
+    assert {issue["code"] for issue in issues} == expected_codes
+    if memory_effects == 0:
+        assert all(issue["hard"] is False for issue in issues)
+    else:
+        assert any(issue["hard"] is True for issue in issues)
+
+
+@pytest.mark.parametrize(
+    ("memory_effects", "candidate_effects"),
+    [(1, 0), (0, 1)],
+)
+def test_review_off_non_writer_cannot_change_v6_state(
+    memory_effects: int,
+    candidate_effects: int,
+) -> None:
+    oracle = indexed_rows(ORACLE_PATH)
+    spec = next(
+        item for item in build_full_plan() if item.run_id == "foreground-00-recall"
+    )
+    result = _v6_result(
+        spec,
+        final_answer="MISSING",
+        memory_effects=memory_effects,
+        candidate_effects=candidate_effects,
     )
 
-    result = _approval_transition(
-        Path("/unused"),
-        {
-            "expected_content": "stable fact",
-            "expected_scope": "project",
-            "decision": "reject",
-        },
-        [],
+    issues = evaluate_results([spec], [result], oracle, require_complete=True)["issues"]
+    assert "unexpected_memory_write" in {issue["code"] for issue in issues}
+
+
+def test_reviewer_writer_rejects_extra_unrelated_memory_and_action_drift() -> None:
+    oracle = indexed_rows(ORACLE_PATH)
+    spec = next(
+        item for item in build_full_plan() if item.run_id == "on-durable-00-writer"
+    )
+    application_id = campaign_common.workflow_application_id(spec)
+    content = oracle[spec.case_id]["expected_content"]
+    candidate = _candidate_row(
+        content,
+        application_id=application_id,
+        state="active_unreviewed",
+    )
+    extra = _candidate_row(
+        "unrelated",
+        application_id=application_id,
+        state="active_unreviewed",
+        candidate_id="candidate-2",
+    )
+    result = _v6_result(
+        spec,
+        memory_items=[
+            _fact_row(content, application_id=application_id),
+            {**_fact_row("unrelated", application_id=application_id), "id": 2},
+        ],
+        candidates=[candidate, extra],
+        review_candidates=[candidate, extra],
+        actions=1,
+        memory_effects=2,
+        candidate_effects=2,
     )
 
-    assert result["ok"] is False
-    assert result["readback_ok"] is False
+    issues = evaluate_results([spec], [result], oracle, require_complete=True)["issues"]
+    codes = {issue["code"] for issue in issues}
+    assert {"unexpected_memory_write", "review_atomicity"} <= codes
 
 
-def test_approval_transition_readback_rejects_extra_active_memory(monkeypatch) -> None:
-    responses = iter(
-        [
-            {
-                "returncode": 0,
-                "payload": [
-                    {
-                        "id": 7,
-                        "status": "pending",
-                        "payload": {"content": "stable fact"},
-                    }
-                ],
-            },
-            {"returncode": 0, "payload": {"ok": True, "status": "approved"}},
-        ]
-    )
-    monkeypatch.setattr(
-        "applications.memory_feature_validation.scripts.run_memory_review_campaign._run_cli",
-        lambda *_args, **_kwargs: next(responses),
-    )
-    monkeypatch.setattr(
-        "applications.memory_feature_validation.scripts.run_memory_review_campaign._db_snapshot",
-        lambda *_args, **_kwargs: {
-            "integrity": "ok",
-            "memory_items": [
-                {
-                    "status": "active",
-                    "scope_type": "project",
-                    "content": "stable fact",
-                },
-                {
-                    "status": "active",
-                    "scope_type": "project",
-                    "content": "unrelated side effect",
-                },
-            ],
-            "memory_pending_writes": [
-                {
-                    "id": 7,
-                    "status": "approved",
-                    "scope_type": "project",
-                    "content": "stable fact",
-                    "resolved_at": "2026-07-15T00:00:00+08:00",
-                }
-            ],
-        },
-    )
-
-    result = _approval_transition(
-        Path("/unused"),
-        {
-            "expected_content": "stable fact",
-            "expected_scope": "project",
-            "decision": "approve",
-        },
-        [],
-    )
-
-    assert result["ok"] is False
-    assert result["readback_ok"] is False
-
-
-def test_failed_reviewer_audit_is_a_soft_quality_failure_for_negative_cases() -> None:
+def test_successful_retry_still_fails_closed_on_malformed_first_attempt_telemetry() -> None:
     oracle = indexed_rows(ORACLE_PATH)
     spec = next(
         item for item in build_full_plan() if item.run_id == "progress-00-writer"
     )
-    result = {
-        **spec.to_dict(),
-        "status": "completed",
-        "final": {
-            "returncode": 0,
-            "privacy_findings": [],
-            "model_evidence": {
-                "review_call_count": 1,
-                "memory_effect_count": 0,
-                "review_audit_delta": [
-                    {
-                        "status": "failed",
-                        "result": {"status": "failed", "calls": 1, "actions": 0},
-                    }
-                ],
-            },
-            "database": {
-                "integrity": "ok",
-                "memory_items": [],
-                "memory_pending_writes": [],
-            },
-        },
-    }
-
-    audit = evaluate_results([spec], [result], oracle, require_complete=True)
-
-    assert audit["ok"] is False
-    assert [(issue["code"], issue["hard"]) for issue in audit["issues"]] == [
-        ("review_failed", False)
-    ]
-
-
-def test_failed_reviewer_with_a_memory_effect_is_a_hard_atomicity_failure() -> None:
-    oracle = indexed_rows(ORACLE_PATH)
-    spec = next(
-        item for item in build_full_plan()
-        if item.run_id == "on-durable-00-writer"
-    )
-    result = {
-        **spec.to_dict(),
-        "status": "completed",
-        "final": {
-            "returncode": 0,
-            "privacy_findings": [],
-            "model_evidence": {
-                "review_call_count": 1,
-                "memory_effect_count": 1,
-                "review_audit_delta": [
-                    {
-                        "status": "failed",
-                        "result": {"status": "failed", "calls": 1, "actions": 1},
-                    }
-                ],
-            },
-            "database": {
-                "integrity": "ok",
-                "memory_items": [
-                    {
-                        "status": "active",
-                        "scope_type": "project",
-                        "content": (
-                            "The maximum page size is 250 records and every "
-                            "additional page uses next_page_token."
-                        ),
-                    }
-                ],
-                "memory_pending_writes": [],
-            },
-        },
-    }
-
-    audit = evaluate_results([spec], [result], oracle, require_complete=True)
-
-    assert [(issue["code"], issue["hard"]) for issue in audit["issues"]] == [
-        ("review_failed", False),
-        ("review_atomicity", True),
-    ]
-
-
-def test_completed_non_writer_review_cannot_hide_a_memory_effect() -> None:
-    oracle = indexed_rows(ORACLE_PATH)
-    spec = next(
-        item for item in build_full_plan()
-        if item.run_id == "on-durable-00-recall"
-    )
-    result = {
-        **spec.to_dict(),
-        "status": "completed",
-        "final": {
-            "returncode": 0,
-            "final_answer": 250,
-            "privacy_findings": [],
-            "model_evidence": {
-                "review_call_count": 1,
-                "memory_effect_count": 1,
-                "review_audit_delta": [
-                    {
-                        "status": "completed",
-                        "result": {
-                            "status": "completed",
-                            "calls": 1,
-                            "actions": 0,
-                        },
-                    }
-                ],
-            },
-            "database": {
-                "integrity": "ok",
-                "memory_items": [
-                    {
-                        "status": "active",
-                        "scope_type": "project",
-                        "content": "The page limit is 250 records.",
-                    }
-                ],
-                "memory_pending_writes": [],
-            },
-        },
-    }
-
-    audit = evaluate_results([spec], [result], oracle, require_complete=True)
-
-    assert [(issue["code"], issue["hard"]) for issue in audit["issues"]] == [
-        ("review_atomicity", True)
-    ]
-
-
-def test_review_off_non_writer_cannot_change_memory() -> None:
-    oracle = indexed_rows(ORACLE_PATH)
-    spec = next(
-        item for item in build_full_plan()
-        if item.run_id == "foreground-00-recall"
-    )
-    result = {
-        **spec.to_dict(),
-        "status": "completed",
-        "final": {
-            "returncode": 0,
-            "final_answer": "X-Export-Signature",
-            "privacy_findings": [],
-            "model_evidence": {
-                "review_call_count": 0,
-                "memory_effect_count": 1,
-                "review_audit_delta": [],
-            },
-            "database": {
-                "integrity": "ok",
-                "memory_items": [
-                    {
-                        "status": "active",
-                        "scope_type": "project",
-                        "content": (
-                            "The hex-encoded SHA-256 signature is carried in "
-                            "X-Export-Signature."
-                        ),
-                    }
-                ],
-                "memory_pending_writes": [],
-            },
-        },
-    }
-
-    audit = evaluate_results([spec], [result], oracle, require_complete=True)
-
-    assert [(issue["code"], issue["hard"]) for issue in audit["issues"]] == [
-        ("unexpected_memory_write", True)
-    ]
-
-
-def test_fresh_writer_cannot_persist_extra_unrelated_memory() -> None:
-    oracle = indexed_rows(ORACLE_PATH)
-    spec = next(
-        item for item in build_full_plan()
-        if item.run_id == "foreground-00-writer"
-    )
-    result = {
-        **spec.to_dict(),
-        "status": "completed",
-        "final": {
-            "returncode": 0,
-            "privacy_findings": [],
-            "model_evidence": {
-                "review_call_count": 0,
-                "memory_effect_count": 2,
-                "review_audit_delta": [],
-            },
-            "database": {
-                "integrity": "ok",
-                "memory_items": [
-                    {
-                        "status": "active",
-                        "scope_type": "project",
-                        "content": (
-                            "The hex-encoded SHA-256 signature is carried in "
-                            "X-Export-Signature."
-                        ),
-                    },
-                    {
-                        "status": "active",
-                        "scope_type": "project",
-                        "content": "progress: unrelated temporary task",
-                    },
-                ],
-                "memory_pending_writes": [],
-            },
-        },
-    }
-
-    audit = evaluate_results([spec], [result], oracle, require_complete=True)
-
-    assert [(issue["code"], issue["hard"]) for issue in audit["issues"]] == [
-        ("unexpected_memory_write", True)
-    ]
-
-
-def test_writer_that_saves_nothing_remains_a_soft_quality_failure() -> None:
-    oracle = indexed_rows(ORACLE_PATH)
-    spec = next(
-        item for item in build_full_plan()
-        if item.run_id == "foreground-00-writer"
-    )
-    result = {
-        **spec.to_dict(),
-        "status": "completed",
-        "final": {
-            "returncode": 0,
-            "privacy_findings": [],
-            "model_evidence": {
-                "review_call_count": 0,
-                "memory_effect_count": 0,
-                "review_audit_delta": [],
-            },
-            "database": {
-                "integrity": "ok",
-                "memory_items": [],
-                "memory_pending_writes": [],
-            },
-        },
-    }
-
-    audit = evaluate_results([spec], [result], oracle, require_complete=True)
-
-    assert [(issue["code"], issue["hard"]) for issue in audit["issues"]] == [
-        ("expected_memory_missing", False)
-    ]
-
-
-def test_completed_review_action_count_must_equal_memory_effect_count() -> None:
-    oracle = indexed_rows(ORACLE_PATH)
-    spec = next(
-        item for item in build_full_plan()
-        if item.run_id == "on-durable-00-writer"
-    )
-    result = {
-        **spec.to_dict(),
-        "status": "completed",
-        "final": {
-            "returncode": 0,
-            "privacy_findings": [],
-            "model_evidence": {
-                "review_call_count": 1,
-                "memory_effect_count": 2,
-                "review_audit_delta": [
-                    {
-                        "status": "completed",
-                        "result": {"status": "completed", "calls": 1, "actions": 1},
-                    }
-                ],
-            },
-            "database": {
-                "integrity": "ok",
-                "memory_items": [
-                    {
-                        "status": "active",
-                        "scope_type": "project",
-                        "content": (
-                            "The maximum page size is 250 records and every "
-                            "additional page uses next_page_token."
-                        ),
-                    }
-                ],
-                "memory_pending_writes": [],
-            },
-        },
-    }
-
-    audit = evaluate_results([spec], [result], oracle, require_complete=True)
-
-    assert [(issue["code"], issue["hard"]) for issue in audit["issues"]] == [
-        ("review_atomicity", True)
-    ]
-
-
-def test_review_call_and_atomicity_gates_include_failed_retry_attempts() -> None:
-    oracle = indexed_rows(ORACLE_PATH)
-    spec = next(
-        item for item in build_full_plan()
-        if item.run_id == "on-durable-00-recall"
-    )
-    first = {
-        "returncode": 1,
-        "provider_protocol_empty_responses": 0,
-        "privacy_findings": [],
-        "model_evidence": {
-            "review_call_count": 5,
-            "memory_effect_count": 1,
-            "review_audit_delta": [
-                {
-                    "status": "failed",
-                    "result": {"status": "failed", "calls": 5, "actions": 1},
-                }
-            ],
-        },
-        "database": {
-            "integrity": "ok",
-            "memory_items": [],
-            "memory_pending_writes": [],
-        },
-    }
-    final = {
-        "returncode": 0,
-        "provider_protocol_empty_responses": 0,
-        "final_answer": 250,
-        "privacy_findings": [],
-        "model_evidence": {
-            "review_call_count": 1,
-            "memory_effect_count": 0,
-            "review_audit_delta": [
-                {
-                    "status": "completed",
-                    "result": {"status": "completed", "calls": 1, "actions": 0},
-                }
-            ],
-        },
-        "database": {
-            "integrity": "ok",
-            "memory_items": [
-                {
-                    "status": "active",
-                    "scope_type": "project",
-                    "content": "The page limit is 250 records.",
-                }
-            ],
-            "memory_pending_writes": [],
-        },
-    }
-    result = {
-        **spec.to_dict(),
-        "status": "completed",
-        "attempts": [first, final],
-        "final": final,
-    }
-
-    audit = evaluate_results([spec], [result], oracle, require_complete=True)
-
-    assert [(issue["code"], issue["hard"]) for issue in audit["issues"]] == [
-        ("review_call_limit_exceeded", True),
-        ("review_failed", False),
-        ("review_atomicity", True),
-    ]
-
-
-def test_failed_attempt_with_malformed_review_telemetry_fails_closed() -> None:
-    oracle = indexed_rows(ORACLE_PATH)
-    spec = next(
-        item for item in build_full_plan()
-        if item.run_id == "on-durable-00-writer"
-    )
-    failed = {
-        "returncode": 1,
-        "provider_protocol_empty_responses": 0,
-        "privacy_findings": [],
-        "model_evidence": {
-            "review_call_count": [],
-            "memory_effect_count": 0,
-            "review_audit_delta": [],
-        },
-        "database": {
-            "integrity": "ok",
-            "memory_items": [],
-            "memory_pending_writes": [],
-        },
-    }
-    result = {
-        **spec.to_dict(),
-        "status": "failed",
-        "attempts": [failed],
-        "final": failed,
-    }
-
-    audit = evaluate_results([spec], [result], oracle, require_complete=True)
-
-    assert [(issue["code"], issue["hard"]) for issue in audit["issues"]] == [
-        ("review_evidence_missing", True),
-        ("application_failed", False),
-    ]
-
-
-def test_retry_attempt_without_review_audit_requires_persisted_pre_session_end_proof() -> None:
-    oracle = indexed_rows(ORACLE_PATH)
-    spec = next(
-        item for item in build_full_plan()
-        if item.run_id == "on-durable-00-recall"
-    )
-    failed = {
-        "returncode": 1,
+    result = _v6_result(spec)
+    malformed = {
+        "returncode": 75,
         "completion_marker_seen": False,
-        "retryable_transport": True,
-        "provider_protocol_empty_responses": 0,
         "privacy_findings": [],
         "model_evidence": {
             "review_call_count": None,
-            "memory_effect_count": 0,
-            "review_audit_delta": [],
+            "review_records": [],
+            "review_batch_delta": [],
         },
-        "database": {
-            "integrity": "ok",
-            "memory_items": [],
-            "memory_pending_writes": [],
-        },
+        "database": _empty_v6_database(),
     }
-    final = {
-        "returncode": 0,
-        "completion_marker_seen": True,
-        "final_answer": 250,
-        "provider_protocol_empty_responses": 0,
-        "privacy_findings": [],
-        "model_evidence": {
-            "review_call_count": 1,
-            "memory_effect_count": 0,
-            "completed_run_count_delta": 1,
-            "review_audit_delta": [
+    result["attempts"] = [malformed, result["final"]]
+
+    issues = evaluate_results([spec], [result], oracle, require_complete=True)["issues"]
+    assert "review_evidence_missing" in {issue["code"] for issue in issues}
+
+
+def test_usage_counts_every_actual_v6_attempt() -> None:
+    results = [
+        {
+            "status": "completed",
+            "attempts": [
                 {
-                    "status": "completed",
-                    "result": {"status": "completed", "calls": 1, "actions": 0},
-                }
-            ],
-        },
-        "database": {
-            "integrity": "ok",
-            "memory_items": [
-                {
-                    "status": "active",
-                    "scope_type": "project",
-                    "content": "The page limit is 250 records.",
-                }
-            ],
-            "memory_pending_writes": [],
-        },
-    }
-    result = {
-        **spec.to_dict(),
-        "status": "completed",
-        "attempts": [failed, final],
-        "final": final,
-    }
-
-    missing_proof = evaluate_results(
-        [spec], [result], oracle, require_complete=True
-    )
-    assert [(issue["code"], issue["hard"]) for issue in missing_proof["issues"]] == [
-        ("review_evidence_missing", True)
-    ]
-
-    failed["model_evidence"]["completed_run_count_delta"] = 0
-    proven_pre_session_end = evaluate_results(
-        [spec], [result], oracle, require_complete=True
-    )
-    assert proven_pre_session_end["issues"] == []
-
-
-def test_failed_foreground_writer_cannot_leave_extra_memory() -> None:
-    oracle = indexed_rows(ORACLE_PATH)
-    spec = next(
-        item for item in build_full_plan()
-        if item.run_id == "foreground-00-writer"
-    )
-    failed = {
-        "returncode": 1,
-        "provider_protocol_empty_responses": 0,
-        "privacy_findings": [],
-        "model_evidence": {
-            "review_call_count": 0,
-            "memory_effect_count": 2,
-            "review_audit_delta": [],
-        },
-        "database": {
-            "integrity": "ok",
-            "memory_items": [
-                {
-                    "status": "active",
-                    "scope_type": "project",
-                    "content": "X-Export-Signature is the signature header.",
+                    "model_evidence": {
+                        "model_generation_count": 2,
+                        "model_input_tokens": 10,
+                        "model_output_tokens": 4,
+                        "review_call_count": 1,
+                    }
                 },
                 {
-                    "status": "active",
-                    "scope_type": "project",
-                    "content": "unrelated temporary note",
+                    "model_evidence": {
+                        "model_generation_count": 3,
+                        "model_input_tokens": 20,
+                        "model_output_tokens": 6,
+                        "review_call_count": 1,
+                    }
                 },
             ],
-            "memory_pending_writes": [],
-        },
-    }
-    result = {
-        **spec.to_dict(),
-        "status": "failed",
-        "attempts": [failed],
-        "final": failed,
-    }
-
-    audit = evaluate_results([spec], [result], oracle, require_complete=True)
-
-    assert [(issue["code"], issue["hard"]) for issue in audit["issues"]] == [
-        ("exact_evidence_mismatch", True),
-        ("unexpected_memory_write", True),
-        ("application_failed", False),
+        }
     ]
 
-
-def test_failed_writer_still_requires_exact_evidence_bytes_and_scope_id() -> None:
-    oracle = indexed_rows(ORACLE_PATH)
-    specs = {spec.run_id: spec for spec in build_full_plan()}
-
-    for spec, scope_id in (
-        (specs["foreground-00-writer"], "project"),
-        (specs["app-scope-00-writer"], "wrong/application"),
-    ):
-        expected = oracle[spec.case_id]
-        failed = {
-            "returncode": 1,
-            "provider_protocol_empty_responses": 0,
-            "privacy_findings": [],
-            "model_evidence": {
-                "review_call_count": 0,
-                "memory_effect_count": 1,
-                "review_audit_delta": [],
-            },
-            "database": {
-                "integrity": "ok",
-                "memory_items": [
-                    {
-                        "status": "active",
-                        "scope_type": expected["expected_scope"],
-                        "scope_id": scope_id,
-                        "content": f" {expected['expected_content']} ",
-                    }
-                ],
-                "memory_pending_writes": [],
-            },
-        }
-        result = {
-            **spec.to_dict(),
-            "status": "failed",
-            "attempts": [failed],
-            "final": failed,
-        }
-
-        codes = {
-            issue["code"]
-            for issue in evaluate_results(
-                [spec],
-                [result],
-                oracle,
-                require_complete=True,
-            )["issues"]
-        }
-
-        assert "exact_evidence_mismatch" in codes
-        if expected["expected_scope"] == "application":
-            assert "scope_mismatch" in codes
-
-
-def test_successful_retry_still_audits_failed_writer_exact_bytes_and_scope() -> None:
-    oracle = indexed_rows(ORACLE_PATH)
-    spec = next(
-        item
-        for item in build_full_plan()
-        if item.run_id == "app-scope-00-writer"
-    )
-    expected = oracle[spec.case_id]
-
-    def attempt(
-        *,
-        root_run_id: str,
-        content: str,
-        scope_id: str,
-        returncode: int,
-        timed_out: bool,
-    ) -> dict:
-        return {
-            "returncode": returncode,
-            "completion_marker_seen": returncode == 0,
-            "timed_out": timed_out,
-            "retryable_transport": timed_out,
-            "transport_failure_reason": (
-                "subprocess_timeout" if timed_out else None
-            ),
-            "provider_protocol_empty_responses": 0,
-            "privacy_findings": [],
-            "model_evidence": {
-                "review_call_count": 1,
-                "memory_effect_count": 1,
-                "completed_run_count_delta": 1,
-                "completed_root_run_ids": [root_run_id],
-                "root_identity_valid": True,
-                "review_audit_delta": [
-                    {
-                        "root_run_id": root_run_id,
-                        "status": "completed",
-                        "result": {
-                            "status": "completed",
-                            "calls": 1,
-                            "actions": 1,
-                        },
-                    }
-                ],
-            },
-            "database": {
-                "exists": True,
-                "integrity": "ok",
-                "memory_items": [
-                    {
-                        "status": "active",
-                        "scope_type": "application",
-                        "scope_id": scope_id,
-                        "content": content,
-                    }
-                ],
-                "memory_pending_writes": [],
-            },
-        }
-
-    first = attempt(
-        root_run_id="failed-root",
-        content=f" {expected['expected_content']} ",
-        scope_id="wrong/application",
-        returncode=124,
-        timed_out=True,
-    )
-    final = attempt(
-        root_run_id="successful-root",
-        content=expected["expected_content"],
-        scope_id="memory_feature_validation/variants/app_review",
-        returncode=0,
-        timed_out=False,
-    )
-    result = {
-        **spec.to_dict(),
-        "status": "completed",
-        "attempts": [first, final],
-        "final": final,
-    }
-
-    audit = evaluate_results(
-        [spec],
-        [result],
-        oracle,
-        require_complete=True,
-        require_attempt_contract=True,
-    )
-
-    assert {issue["code"] for issue in audit["issues"]} >= {
-        "exact_evidence_mismatch",
-        "scope_mismatch",
-    }
-
-
-def test_usage_counts_every_actual_attempt() -> None:
-    def attempt(calls: int, input_tokens: int) -> dict:
-        return {
-            "model_evidence": {
-                "application_completion_calls": calls,
-                "application_input_tokens": input_tokens,
-                "application_output_tokens": 10,
-                "review_input_tokens": 20,
-                "review_output_tokens": 5,
-                "review_call_count": 1,
-            }
-        }
-
-    first = attempt(2, 100)
-    final = attempt(3, 200)
-    usage = campaign_runner._usage(
-        [{"status": "completed", "attempts": [first, final], "final": final}]
-    )
-
-    assert usage == {
-        "application_completion_calls": 5,
-        "application_input_tokens": 300,
-        "application_output_tokens": 20,
-        "review_completion_calls": 2,
-        "review_input_tokens": 40,
-        "review_output_tokens": 10,
-    }
-
-
-def test_failed_application_still_audits_database_and_unsafe_memory_effects() -> None:
-    oracle = indexed_rows(ORACLE_PATH)
-    spec = next(
-        item for item in build_full_plan() if item.run_id == "progress-00-writer"
-    )
-    failed_attempt = {
-        "returncode": 1,
-        "provider_protocol_empty_responses": 0,
-        "privacy_findings": [],
-        "database": {
-            "integrity": "error",
-            "memory_items": [
-                {
-                    "status": "active",
-                    "scope_type": "project",
-                    "content": "progress: finished step 3 of 5",
-                }
-            ],
-            "memory_pending_writes": [],
-        },
-        "model_evidence": {
-            "review_call_count": None,
-            "memory_effect_count": 1,
-            "completed_run_count_delta": 0,
-            "review_audit_delta": [],
-        },
-    }
-    result = {
-        **spec.to_dict(),
-        "status": "failed",
-        "attempts": [failed_attempt],
-        "final": failed_attempt,
-    }
-
-    audit = evaluate_results([spec], [result], oracle, require_complete=True)
-
-    assert [(issue["code"], issue["hard"]) for issue in audit["issues"]] == [
-        ("database_integrity", True),
-        ("review_atomicity", True),
-        ("progress_persisted", True),
-        ("application_failed", False),
-    ]
-
-
-def test_approval_audit_rejects_fabricated_success_when_target_stays_pending() -> None:
-    oracle = indexed_rows(ORACLE_PATH)
-    spec = next(
-        item for item in build_full_plan() if item.run_id == "approval-03-post-recall"
-    )
-    expected = oracle[spec.case_id]
-    result = {
-        **spec.to_dict(),
-        "status": "completed",
-        "approval_transition": {
-            "ok": True,
-            "readback_ok": True,
-            "decision": "reject",
-            "target": "7",
-        },
-        "final": {
-            "returncode": 0,
-            "final_answer": "MISSING",
-            "privacy_findings": [],
-            "model_evidence": {
-                "review_call_count": 1,
-                "memory_effect_count": 0,
-                "review_audit_delta": [
-                    {
-                        "status": "completed",
-                        "result": {"status": "completed", "calls": 1, "actions": 0},
-                    }
-                ],
-            },
-            "database": {
-                "integrity": "ok",
-                "memory_items": [],
-                "memory_pending_writes": [
-                    {
-                        "id": 7,
-                        "status": "pending",
-                        "scope_type": expected["expected_scope"],
-                        "scope_id": "project",
-                        "content": expected["expected_content"],
-                        "resolved_at": None,
-                    }
-                ],
-            },
-        },
-    }
-
-    audit = evaluate_results([spec], [result], oracle, require_complete=True)
-
-    assert audit["ok"] is False
-    assert [(issue["code"], issue["hard"]) for issue in audit["issues"]] == [
-        ("approval_transition", True)
-    ]
-
-
-def test_approval_audit_requires_exact_active_bytes_after_approval() -> None:
-    oracle = indexed_rows(ORACLE_PATH)
-    spec = next(
-        item for item in build_full_plan() if item.run_id == "approval-00-post-recall"
-    )
-    expected = oracle[spec.case_id]
-    result = {
-        **spec.to_dict(),
-        "status": "completed",
-        "approval_transition": {
-            "ok": True,
-            "readback_ok": True,
-            "decision": "approve",
-            "target": "7",
-        },
-        "final": {
-            "returncode": 0,
-            "final_answer": expected["expected_content"],
-            "privacy_findings": [],
-            "model_evidence": {
-                "review_call_count": 1,
-                "memory_effect_count": 0,
-                "review_audit_delta": [
-                    {
-                        "status": "completed",
-                        "result": {
-                            "status": "completed",
-                            "calls": 1,
-                            "actions": 0,
-                        },
-                    }
-                ],
-            },
-            "database": {
-                "integrity": "ok",
-                "memory_items": [
-                    {
-                        "status": "active",
-                        "scope_type": "project",
-                        "scope_id": "project",
-                        "content": f" {expected['expected_content']} ",
-                    }
-                ],
-                "memory_pending_writes": [
-                    {
-                        "id": 7,
-                        "status": "approved",
-                        "content": expected["expected_content"],
-                        "resolved_at": "2026-07-15T00:00:00+08:00",
-                    }
-                ],
-            },
-        },
-    }
-
-    audit = evaluate_results([spec], [result], oracle, require_complete=True)
-
-    assert "exact_evidence_mismatch" in {
-        issue["code"] for issue in audit["issues"]
-    }
-
-
-def test_failed_post_recall_still_audits_approval_exact_bytes_and_scope() -> None:
-    oracle = indexed_rows(ORACLE_PATH)
-    spec = next(
-        item
-        for item in build_full_plan()
-        if item.run_id == "approval-00-post-recall"
-    )
-    expected = oracle[spec.case_id]
-    failed = {
-        "returncode": 1,
-        "completion_marker_seen": False,
-        "timed_out": False,
-        "retryable_transport": False,
-        "transport_failure_reason": None,
-        "privacy_findings": [],
-        "model_evidence": {
-            "review_call_count": None,
-            "memory_effect_count": 0,
-            "completed_run_count_delta": 0,
-            "completed_root_run_ids": [],
-            "root_identity_valid": True,
-            "review_audit_delta": [],
-        },
-        "database": {
-            "exists": True,
-            "integrity": "ok",
-            "memory_items": [
-                {
-                    "status": "active",
-                    "scope_type": "application",
-                    "scope_id": "wrong/application",
-                    "content": f" {expected['expected_content']} ",
-                }
-            ],
-            "memory_pending_writes": [
-                {
-                    "id": 7,
-                    "status": "approved",
-                    "scope_type": "project",
-                    "scope_id": "project",
-                    "content": expected["expected_content"],
-                    "resolved_at": "2026-07-15T00:00:00+08:00",
-                }
-            ],
-        },
-    }
-    result = {
-        **spec.to_dict(),
-        "status": "failed",
-        "approval_transition": {
-            "ok": True,
-            "readback_ok": True,
-            "decision": "approve",
-            "target": "7",
-        },
-        "attempts": [failed],
-        "final": failed,
-    }
-
-    audit = evaluate_results(
-        [spec],
-        [result],
-        oracle,
-        require_complete=True,
-        require_attempt_contract=True,
-    )
-
-    assert {issue["code"] for issue in audit["issues"]} >= {
-        "exact_evidence_mismatch",
-        "scope_mismatch",
-        "approval_transition",
-    }
-
-
-def test_approval_audit_rejects_unrelated_extra_active_memory() -> None:
-    oracle = indexed_rows(ORACLE_PATH)
-    spec = next(
-        item
-        for item in build_full_plan()
-        if item.run_id == "approval-00-post-recall"
-    )
-    expected = oracle[spec.case_id]
-    final = {
-        "returncode": 0,
-        "final_answer": expected["expected_content"],
-        "privacy_findings": [],
-        "model_evidence": {
-            "review_call_count": 1,
-            "memory_effect_count": 0,
-            "review_audit_delta": [
-                {
-                    "status": "completed",
-                    "result": {"status": "completed", "calls": 1, "actions": 0},
-                }
-            ],
-        },
-        "database": {
-            "integrity": "ok",
-            "memory_items": [
-                {
-                    "status": "active",
-                    "scope_type": "project",
-                    "scope_id": "project",
-                    "content": expected["expected_content"],
-                },
-                {
-                    "status": "active",
-                    "scope_type": "project",
-                    "scope_id": "project",
-                    "content": "unrelated approval side effect",
-                },
-            ],
-            "memory_pending_writes": [
-                {
-                    "id": 7,
-                    "status": "approved",
-                    "scope_type": "project",
-                    "scope_id": "project",
-                    "content": expected["expected_content"],
-                    "resolved_at": "2026-07-15T00:00:00+08:00",
-                }
-            ],
-        },
-    }
-    result = {
-        **spec.to_dict(),
-        "status": "completed",
-        "approval_transition": {
-            "ok": True,
-            "readback_ok": True,
-            "decision": "approve",
-            "target": "7",
-        },
-        "final": final,
-    }
-
-    audit = evaluate_results([spec], [result], oracle, require_complete=True)
-
-    assert {issue["code"] for issue in audit["issues"]} >= {
-        "unexpected_memory_write",
-        "approval_transition",
+    assert campaign_runner._usage(results) == {
+        "model_generation_count": 5,
+        "model_input_tokens": 30,
+        "model_output_tokens": 10,
+        "review_model_calls": 2,
     }

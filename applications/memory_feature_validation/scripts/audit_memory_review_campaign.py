@@ -33,6 +33,7 @@ from applications.memory_feature_validation.scripts.memory_review_campaign_commo
     release_source_manifest_at_commit,
     select_runs,
     terms_match,
+    workflow_application_id,
 )
 
 _HARD_CODES = {
@@ -88,13 +89,23 @@ def _memory_rows(result: dict[str, Any]) -> list[dict[str, Any]]:
     database = (result.get("final") or {}).get("database") or {}
     value = [
         *(database.get("memory_items") or []),
-        *(database.get("memory_pending_writes") or []),
+        *[
+            row
+            for row in database.get("review_candidates") or []
+            if isinstance(row, dict)
+            and normalize(row.get("state")) == "pending_pre_review"
+        ],
     ]
     return [row for row in value if isinstance(row, dict)]
 
 
 def _status(row: dict[str, Any]) -> str:
-    return normalize(row.get("status"))
+    state = normalize(row.get("state") or row.get("status") or "")
+    if state in {"active_confirmed", "active_unreviewed"}:
+        return "active"
+    if state == "pending_pre_review":
+        return "pending"
+    return state
 
 
 def _scope(row: dict[str, Any]) -> str:
@@ -103,22 +114,24 @@ def _scope(row: dict[str, Any]) -> str:
 
 
 def _content(row: dict[str, Any]) -> str:
-    return normalize(row.get("content") or "")
+    return normalize(_raw_content(row))
 
 
 def _raw_content(row: dict[str, Any]) -> str:
-    return str(row.get("content") or "")
-
-
-def _workflow_application_id(spec: RunSpec) -> str:
-    workflow = (REPO_ROOT / spec.workflow).resolve()
-    applications = (REPO_ROOT / "applications").resolve()
-    if workflow.parent.name != "workflows":
-        return ""
-    try:
-        return workflow.parent.parent.relative_to(applications).as_posix()
-    except ValueError:
-        return ""
+    content = str(row.get("content") or "")
+    if content:
+        return content
+    payload = row.get("payload") if isinstance(row.get("payload"), dict) else {}
+    if normalize(row.get("kind")) == "fact":
+        return str(payload.get("text") or "")
+    return " | ".join(
+        (
+            f"Trigger: {payload.get('trigger', '')}",
+            f"Symptom: {payload.get('symptom', '')}",
+            f"Action: {payload.get('action', '')}",
+            f"Verification: {payload.get('verification', '')}",
+        )
+    )
 
 
 def _matching_rows(rows: list[dict[str, Any]], required_terms: list[str]) -> list[dict[str, Any]]:
@@ -152,6 +165,10 @@ def _expected_missing(spec: RunSpec, oracle: dict[str, Any]) -> bool:
         return str(oracle.get("decision") or "") == "reject"
     if spec.phase == "cross_recall" and spec.scenario == "application_scope":
         return True
+    if spec.phase == "recall" and spec.scenario == "foreground_proposal":
+        return True
+    if spec.phase == "cross_recall" and spec.scenario == "project_promotion_guard":
+        return True
     return False
 
 
@@ -162,68 +179,196 @@ def _review_audit_contract(
     *,
     require_audit: bool = True,
 ) -> list[dict[str, Any]]:
+    """Cross-check v6 telemetry against batches, candidates, and memory items."""
+
     evidence = ((result.get("final") or {}).get("model_evidence") or {})
-    audits = evidence.get("review_audit_delta") or []
+    batches = evidence.get("review_batch_delta") or []
+    records = evidence.get("review_records") or []
     logged_calls = evidence.get("review_call_count")
+    memory_effects = evidence.get("memory_item_effect_count")
+    candidate_effects = evidence.get("review_candidate_effect_count")
+
+    if not all(
+        isinstance(value, int) and not isinstance(value, bool) and value >= 0
+        for value in (memory_effects, candidate_effects)
+    ):
+        return [
+            _issue(
+                spec.run_id,
+                spec.scenario,
+                "review_evidence_missing",
+                "v6 memory/candidate effect counts were missing or malformed",
+            )
+        ]
+
     if not spec.review_expected:
         issues: list[dict[str, Any]] = []
-        if audits:
+        foreground_batch = (
+            spec.scenario == "foreground_proposal"
+            and spec.phase == "writer"
+            and len(batches) == 1
+            and isinstance(batches[0], dict)
+        )
+        if batches and not foreground_batch:
             issues.append(
                 _issue(
                     spec.run_id,
                     spec.scenario,
                     "review_off_called",
-                    "review_model was empty but the run persisted review audit state",
+                    "review-disabled/manual-trigger run persisted a review batch",
                 )
             )
-        # An opted-out Application never enters the reviewer, so the correct
-        # observable is no reviewer telemetry and no review audit.  Do not
-        # require a synthetic zero-call record from code that must stay inert.
-        calls_are_absent = logged_calls is None
-        if not calls_are_absent and (
-            isinstance(logged_calls, bool) or logged_calls != 0
+        elif foreground_batch:
+            batch = batches[0]
+            batch_result = (
+                batch.get("result") if isinstance(batch.get("result"), dict) else {}
+            )
+            batch_candidates = batch_result.get("candidates")
+            batch_candidates = (
+                batch_candidates if isinstance(batch_candidates, list) else []
+            )
+            application_id = workflow_application_id(spec)
+            completed_roots = evidence.get("completed_root_run_ids") or []
+            if (
+                normalize(batch.get("scope_type")) != "application"
+                or str(batch.get("scope_id") or "") != application_id
+                or normalize(batch.get("status")) != "completed"
+                or len(batch_candidates) != 1
+                or not isinstance(batch_candidates[0], dict)
+                or normalize(batch_candidates[0].get("state"))
+                != "pending_pre_review"
+                or memory_effects != 0
+                or candidate_effects != 1
+                or len(completed_roots) != 1
+                or batch.get("source_runs")
+                != [
+                    {
+                        "root_run_id": completed_roots[0],
+                        "application_id": application_id,
+                    }
+                ]
+            ):
+                issues.append(
+                    _issue(
+                        spec.run_id,
+                        spec.scenario,
+                        "review_evidence_missing",
+                        "foreground proposal was not one scoped pending v6 batch",
+                    )
+                )
+        elif spec.scenario == "foreground_proposal" and spec.phase == "writer" and require_audit:
+            issues.append(
+                _issue(
+                    spec.run_id,
+                    spec.scenario,
+                    "review_evidence_missing",
+                    "foreground proposal did not persist its v6 review batch",
+                )
+            )
+        if not foreground_batch and (memory_effects != 0 or candidate_effects != 0):
+            issues.append(
+                _issue(
+                    spec.run_id,
+                    spec.scenario,
+                    "unexpected_memory_write",
+                    "review-off run changed v6 memory or candidate state",
+                )
+            )
+        if isinstance(logged_calls, bool) or logged_calls not in {0, None}:
+            issues.append(
+                _issue(
+                    spec.run_id,
+                    spec.scenario,
+                    "review_off_called",
+                    "review-disabled/manual-trigger run did not prove zero reviewer calls",
+                )
+            )
+        if records and (
+            len(records) != 1
+            or not isinstance(records[0], dict)
+            or normalize(records[0].get("status")) != "skipped"
         ):
             issues.append(
                 _issue(
                     spec.run_id,
                     spec.scenario,
-                    "review_off_called",
-                    "review_model was empty but zero provider calls were not proven",
+                    "review_evidence_missing",
+                    "review-off v6 telemetry was not one skipped run-end record",
                 )
             )
         return issues
 
-    if not isinstance(audits, list) or len(audits) != 1 or not isinstance(audits[0], dict):
-        memory_effect_count = evidence.get("memory_effect_count")
+    failed_record = (
+        records[0]
+        if len(records) == 1
+        and isinstance(records[0], dict)
+        and normalize(records[0].get("status")) == "failed"
+        else None
+    )
+    if not batches and failed_record is not None:
+        try:
+            failed_calls = int(failed_record["calls"])
+            failed_actions = int(failed_record["actions"])
+        except (KeyError, TypeError, ValueError):
+            failed_calls = failed_actions = -1
+        if (
+            failed_calls < 0
+            or failed_actions < 0
+            or logged_calls != failed_calls
+            or evidence.get("review_action_count") != failed_actions
+        ):
+            return [
+                _issue(
+                    spec.run_id,
+                    spec.scenario,
+                    "review_evidence_missing",
+                    "failed Self-learning review telemetry was malformed",
+                )
+            ]
+        issues = [
+            _issue(
+                spec.run_id,
+                spec.scenario,
+                "review_failed",
+                "configured after-run reviewer failed before committing a batch",
+            )
+        ]
+        if failed_actions or memory_effects or candidate_effects:
+            issues.append(
+                _issue(
+                    spec.run_id,
+                    spec.scenario,
+                    "review_atomicity",
+                    "failed reviewer reported or committed a v6 state effect",
+                )
+            )
+        return issues
+
+    if not isinstance(batches, list) or len(batches) != 1 or not isinstance(batches[0], dict):
         completed_run_count_delta = evidence.get("completed_run_count_delta")
         no_review_calls = logged_calls is None or (
             isinstance(logged_calls, int)
             and not isinstance(logged_calls, bool)
             and logged_calls == 0
         )
-        if not require_audit and no_review_calls and not audits:
-            valid_effect = (
-                isinstance(memory_effect_count, int)
-                and not isinstance(memory_effect_count, bool)
-                and memory_effect_count >= 0
-            )
+        if not require_audit and no_review_calls and not batches:
             valid_completed_delta = (
                 isinstance(completed_run_count_delta, int)
                 and not isinstance(completed_run_count_delta, bool)
                 and completed_run_count_delta >= 0
             )
-            if valid_effect and memory_effect_count > 0:
+            if memory_effects > 0 or candidate_effects > 0:
                 return [
                     _issue(
                         spec.run_id,
                         spec.scenario,
                         "review_atomicity",
-                        "failed configured run changed memory without a review audit",
+                        "failed configured run changed v6 review state without a batch",
                     )
                 ]
             if (
-                valid_effect
-                and memory_effect_count == 0
+                memory_effects == 0
+                and candidate_effects == 0
                 and valid_completed_delta
                 and completed_run_count_delta == 0
             ):
@@ -233,108 +378,136 @@ def _review_audit_contract(
                 spec.run_id,
                 spec.scenario,
                 "review_evidence_missing",
-                "Application did not persist exactly one review audit",
+                "Application did not persist exactly one v6 review batch",
             )
         ]
 
-    audit = audits[0]
-    audit_result = audit.get("result") if isinstance(audit.get("result"), dict) else {}
-    status = normalize(audit_result.get("status") or audit.get("status") or "")
-    calls = audit_result.get("calls")
-    actions = audit_result.get("actions")
-    memory_effect_count = evidence.get("memory_effect_count")
+    batch = batches[0]
+    batch_result = batch.get("result") if isinstance(batch.get("result"), dict) else {}
+    candidates = batch_result.get("candidates")
+    candidates = candidates if isinstance(candidates, list) else []
+    record = records[0] if len(records) == 1 and isinstance(records[0], dict) else {}
+    try:
+        calls = int(record["calls"])
+        actions = int(record["actions"])
+    except (KeyError, TypeError, ValueError):
+        calls = actions = -1
+    batch_status = normalize(batch.get("status") or batch_result.get("status") or "")
+    telemetry_status = normalize(record.get("status") or "")
     if (
-        isinstance(calls, bool)
-        or not isinstance(calls, int)
+        len(records) != 1
         or calls < 0
-        or isinstance(actions, bool)
-        or not isinstance(actions, int)
         or actions < 0
         or isinstance(logged_calls, bool)
         or not isinstance(logged_calls, int)
         or logged_calls != calls
-        or isinstance(memory_effect_count, bool)
-        or not isinstance(memory_effect_count, int)
-        or memory_effect_count < 0
+        or evidence.get("review_action_count") != actions
     ):
         return [
             _issue(
                 spec.run_id,
                 spec.scenario,
                 "review_evidence_missing",
-                "review audit and runtime telemetry did not agree",
+                "Self-learning review telemetry was missing or internally inconsistent",
             )
         ]
 
     issues: list[dict[str, Any]] = []
-    if calls > 4:
+    if calls != 1:
         issues.append(
             _issue(
                 spec.run_id,
                 spec.scenario,
                 "review_call_limit_exceeded",
-                "completed-run reviewer exceeded four provider requests",
+                "one after-run Application review must use exactly one provider request",
             )
         )
-    if status != "completed":
+    if batch_status != "completed" or telemetry_status != "completed":
         issues.append(
             _issue(
                 spec.run_id,
                 spec.scenario,
                 "review_failed",
-                "configured reviewer did not finish successfully",
+                "v6 batch or Self-learning review telemetry did not complete",
             )
         )
-        if actions != 0 or memory_effect_count != 0:
+        if actions != 0 or memory_effects != 0 or candidate_effects != 0:
             issues.append(
                 _issue(
                     spec.run_id,
                     spec.scenario,
                     "review_atomicity",
-                    "failed reviewer committed or reported a memory effect",
+                    "failed reviewer committed or reported a v6 state effect",
                 )
             )
         return issues
-    elif calls < 1:
+
+    application_id = workflow_application_id(spec)
+    completed_roots = evidence.get("completed_root_run_ids") or []
+    source_runs = batch.get("source_runs") or []
+    if (
+        normalize(batch.get("scope_type")) != "application"
+        or str(batch.get("scope_id") or "") != application_id
+        or len(completed_roots) != 1
+        or source_runs
+        != [
+            {
+                "root_run_id": completed_roots[0],
+                "application_id": application_id,
+            }
+        ]
+    ):
         issues.append(
             _issue(
                 spec.run_id,
                 spec.scenario,
-                "review_on_not_called",
-                "review_model was configured but reviewer did not call the model",
+                "scope_mismatch",
+                "review batch did not consume exactly this Application root",
             )
         )
 
     expected_writer_status = normalize(oracle_row.get("expected_writer_status"))
-    must_not_mutate = (
-        spec.phase != "writer"
-        or expected_writer_status == "absent"
+    expected_candidates = (
+        1
+        if spec.phase == "writer" and expected_writer_status in {"active", "pending"}
+        else 0
     )
-    if actions != memory_effect_count:
+    expected_actions = (
+        1
+        if spec.phase == "writer" and expected_writer_status == "active"
+        else 0
+    )
+    if candidate_effects != len(candidates) or candidate_effects != expected_candidates:
+        issues.append(
+            _issue(
+                spec.run_id,
+                spec.scenario,
+                "review_action_mismatch",
+                "review batch candidate effects did not match the scenario contract",
+            )
+        )
+    if actions != memory_effects or actions != expected_actions:
         issues.append(
             _issue(
                 spec.run_id,
                 spec.scenario,
                 "review_atomicity",
-                "completed review audit actions did not equal durable memory effects",
+                "telemetry actions did not equal v6 memory item effects",
             )
         )
-    if must_not_mutate and actions != 0:
+    expected_candidate_state = (
+        "active_unreviewed" if expected_writer_status == "active" else "pending_pre_review"
+    )
+    if expected_candidates and (
+        len(candidates) != 1
+        or normalize(candidates[0].get("state")) != expected_candidate_state
+    ):
         issues.append(
             _issue(
                 spec.run_id,
                 spec.scenario,
                 "review_action_mismatch",
-                "review audit recorded an unexpected memory mutation",
-            )
-        )
-    if not must_not_mutate and actions < 1:
-        issues.append(
-            _issue(
-                spec.run_id,
-                spec.scenario,
-                "review_action_mismatch",
-                "eligible reviewer writer did not record a memory mutation",
+                "review candidate did not reach the expected v6 state",
             )
         )
     return issues
@@ -449,27 +622,29 @@ def _run_identity_contract_issues(result: dict[str, Any]) -> list[str]:
         ):
             issues.append("completed root-run identity evidence was malformed")
             continue
-        audits = evidence.get("review_audit_delta")
-        audits = audits if isinstance(audits, list) else []
+        batches = evidence.get("review_batch_delta")
+        batches = batches if isinstance(batches, list) else []
         completed = (
             attempt.get("returncode") == 0
             and attempt.get("completion_marker_seen") is True
         )
-        expected_count = 1 if completed or audits else 0
+        expected_count = 1 if completed or batches else 0
         if count != expected_count:
             issues.append(
                 "Application did not persist exactly one unique completed root run"
             )
             continue
-        if audits and count == 1:
-            audit_root_ids = {
-                str(audit.get("root_run_id") or "")
-                for audit in audits
-                if isinstance(audit, dict)
+        if batches and count == 1:
+            batch_root_ids = {
+                str(source.get("root_run_id") or "")
+                for batch in batches
+                if isinstance(batch, dict)
+                for source in batch.get("source_runs") or []
+                if isinstance(source, dict)
             }
-            if audit_root_ids != {root_ids[0]}:
+            if batch_root_ids != {root_ids[0]}:
                 issues.append(
-                    "review audit root did not match the completed Application root"
+                    "review batch root did not match the completed Application root"
                 )
     return issues
 
@@ -593,7 +768,7 @@ def _failed_writer_snapshot_issues(
         scope_candidates
         and expected_scope == "application"
         and not all(
-            str(row.get("scope_id") or "") == _workflow_application_id(spec)
+            str(row.get("scope_id") or "") == workflow_application_id(spec)
             for row in scope_candidates
         )
         and "scope_mismatch" not in seen_codes
@@ -615,7 +790,7 @@ def _approval_transition_contract(
     result: dict[str, Any],
     oracle_row: dict[str, Any],
 ) -> list[dict[str, Any]]:
-    """Validate the complete isolated state produced by one approval decision."""
+    """Validate one scoped INBOX decision applied through the v6 reviews CLI."""
     if spec.phase != "post_recall":
         return []
 
@@ -628,47 +803,68 @@ def _approval_transition_contract(
         if isinstance(result.get("approval_transition"), dict)
         else {}
     )
+    transition_result = (
+        transition.get("result")
+        if isinstance(transition.get("result"), dict)
+        else {}
+    )
+    cli_payload = (
+        transition_result.get("payload")
+        if isinstance(transition_result.get("payload"), dict)
+        else {}
+    )
+    cli_results = cli_payload.get("results")
+    cli_result = (
+        cli_results[0]
+        if isinstance(cli_results, list)
+        and len(cli_results) == 1
+        and isinstance(cli_results[0], dict)
+        else {}
+    )
     decision = str(oracle_row.get("decision") or "")
     target = str(transition.get("target") or "")
-    expected_status = "approved" if decision == "approve" else "rejected"
+    expected_state = "active_confirmed" if decision == "approve" else "rejected"
     expected_content = str(oracle_row.get("expected_content") or "")
-    expected_scope = normalize(oracle_row.get("expected_scope"))
+    expected_application_id = workflow_application_id(spec)
 
-    pending_rows = [
+    candidate_rows = [
         row
-        for row in database.get("memory_pending_writes") or []
+        for row in database.get("review_candidates") or []
         if isinstance(row, dict)
     ]
-    target_rows = [row for row in pending_rows if str(row.get("id") or "") == target]
+    target_rows = [
+        row
+        for row in candidate_rows
+        if str(row.get("candidate_id") or "") == target
+    ]
     target_row = target_rows[0] if len(target_rows) == 1 else {}
+    original_revision = transition.get("revision")
     persisted_transition = bool(
-        len(pending_rows) == 1
+        len(candidate_rows) == 1
         and len(target_rows) == 1
-        and normalize(target_row.get("status")) == expected_status
+        and normalize(target_row.get("state")) == expected_state
+        and isinstance(original_revision, int)
+        and not isinstance(original_revision, bool)
+        and target_row.get("revision") == original_revision + 1
         and target_row.get("resolved_at")
+        and _raw_content(target_row) == expected_content
+        and _scope(target_row) == "application"
+        and str(target_row.get("scope_id") or "") == expected_application_id
     )
 
     active_rows = [
         row
         for row in database.get("memory_items") or []
         if isinstance(row, dict)
+        and _status(row) == "active"
     ]
     exact_active = [
         row for row in active_rows if _raw_content(row) == expected_content
     ]
-    scope_active = [
-        row
-        for row in exact_active
-        if not expected_scope or _scope(row) == expected_scope
-    ]
-    expected_application_id = (
-        _workflow_application_id(spec) if expected_scope == "application" else ""
-    )
     application_active = [
-        row
-        for row in scope_active
-        if not expected_application_id
-        or str(row.get("scope_id") or "") == expected_application_id
+        row for row in exact_active
+        if _scope(row) == "application"
+        and str(row.get("scope_id") or "") == expected_application_id
     ]
 
     issues: list[dict[str, Any]] = []
@@ -687,14 +883,10 @@ def _approval_transition_contract(
         )
     if (
         target_row
-        and expected_scope
-        and _scope(target_row) != expected_scope
-    ):
-        add("scope_mismatch", "resolved pending memory used the wrong scope")
-    if (
-        target_row
-        and expected_application_id
-        and str(target_row.get("scope_id") or "") != expected_application_id
+        and (
+            _scope(target_row) != "application"
+            or str(target_row.get("scope_id") or "") != expected_application_id
+        )
     ):
         add(
             "scope_mismatch",
@@ -707,12 +899,9 @@ def _approval_transition_contract(
                 "exact_evidence_mismatch",
                 "approved memory did not preserve the exact evidence bytes",
             )
-        if expected_scope and active_rows and not all(
-            _scope(row) == expected_scope for row in active_rows
-        ):
-            add("scope_mismatch", "approved memory landed in the wrong scope")
-        if expected_application_id and active_rows and not all(
-            str(row.get("scope_id") or "") == expected_application_id
+        if active_rows and not all(
+            _scope(row) == "application"
+            and str(row.get("scope_id") or "") == expected_application_id
             for row in active_rows
         ):
             add(
@@ -736,7 +925,20 @@ def _approval_transition_contract(
     transition_valid = bool(
         transition.get("ok") is True
         and transition.get("readback_ok") is True
+        and transition.get("inbox_removed") is True
+        and transition.get("application_id") == expected_application_id
         and str(transition.get("decision") or "") == decision
+        and transition_result.get("returncode") == 0
+        and cli_payload.get("applied") == 1
+        and str(cli_result.get("candidate_id") or "") == target
+        and transition_result.get("command")
+        == [
+            "loom",
+            "reviews",
+            "apply",
+            "--application",
+            expected_application_id,
+        ]
         and persisted_transition
         and target_has_content
         and active_transition
@@ -744,7 +946,7 @@ def _approval_transition_contract(
     if not transition_valid or issues:
         add(
             "approval_transition",
-            "pending item was not approved or rejected through exactly one target CLI effect",
+            "candidate was not decided through its scoped INBOX and reviews apply CLI",
         )
     return issues
 
@@ -785,7 +987,7 @@ def _evaluate_one(
     )
     for index, attempt in enumerate(attempts):
         memory_effect_count = (attempt.get("model_evidence") or {}).get(
-            "memory_effect_count"
+            "memory_item_effect_count"
         )
         if not spec.review_expected and spec.phase != "writer":
             if (
@@ -907,7 +1109,7 @@ def _evaluate_one(
             if matches and expected_scope and not scope_matches:
                 issues.append(_issue(run_id, scenario, "scope_mismatch", "memory landed in the wrong scope"))
             elif expected_scope == "application":
-                expected_application_id = _workflow_application_id(spec)
+                expected_application_id = workflow_application_id(spec)
                 if not expected_application_id or not any(
                     str(row.get("scope_id") or "") == expected_application_id
                     for row in scope_matches
@@ -1129,8 +1331,12 @@ def _plan_issues(plan: dict[str, Any]) -> list[str]:
         issues.append("dataset manifest does not match the canonical campaign dataset")
     if plan.get("cli_contract") != "loom run <workflow>":
         issues.append("campaign bypassed the production loom run CLI")
-    if plan.get("memory_cli_contract") != ["list", "pending", "approve", "reject"]:
-        issues.append("memory CLI contract is not list/pending/approve/reject")
+    if plan.get("schema_version") != 2:
+        issues.append("campaign plan is not the v6 review schema")
+    if plan.get("review_approval_contract") != (
+        "edit scoped INBOX.md then loom reviews apply --application <application-id>"
+    ):
+        issues.append("approval contract did not use scoped INBOX plus reviews apply")
     if requested == 100 and int(plan.get("max_concurrency") or 0) > 2:
         issues.append("release concurrency exceeded 2")
     issues.extend(_global_opt_out_plan_issues(canonical))
@@ -1140,7 +1346,7 @@ def _plan_issues(plan: dict[str, Any]) -> list[str]:
 def _global_opt_out_plan_issues(
     canonical_rows: list[dict[str, Any]],
 ) -> list[str]:
-    """Independently verify the real global-summary/Application-empty cohort."""
+    """Independently verify the global summary/Application manual cohort."""
     try:
         specs = [RunSpec(**row) for row in canonical_rows]
         off_specs = [
@@ -1175,19 +1381,48 @@ def _global_opt_out_plan_issues(
             ) or {}
             global_review = (
                 global_payload.get("self_learning", {})
-                .get("memory", {})
+                .get("review", {})
+                .get("application", {})
                 .get("review_model")
             )
-            app_memory = app_payload.get("self_learning", {}).get("memory", {})
-            if global_review != "summary" or (
-                "review_model" not in app_memory
-                or app_memory.get("review_model") != ""
+            global_project_review = (
+                global_payload.get("self_learning", {})
+                .get("review", {})
+                .get("project", {})
+                .get("review_model")
+            )
+            global_application_trigger = (
+                global_payload.get("self_learning", {})
+                .get("review", {})
+                .get("application", {})
+                .get("trigger", {})
+                .get("mode")
+            )
+            global_project_trigger = (
+                global_payload.get("self_learning", {})
+                .get("review", {})
+                .get("project", {})
+                .get("trigger", {})
+                .get("mode")
+            )
+            app_review = (
+                app_payload.get("self_learning", {})
+                .get("review", {})
+                .get("application", {})
+            )
+            if (
+                global_review != "summary"
+                or global_project_review != "summary"
+                or global_application_trigger != "after_run"
+                or global_project_trigger != "manual"
+                or "review_model" in app_review
+                or (app_review.get("trigger") or {}).get("mode") != "manual"
             ):
                 raise ValueError
     except (AttributeError, OSError, TypeError, ValueError, yaml.YAMLError):
         return [
             "review-off cohort did not use global summary with an explicit "
-            "Application opt-out"
+            "Application manual trigger"
         ]
     return []
 
@@ -1339,20 +1574,20 @@ def _review_completion_counts(
         if not spec.review_expected or result is None or not _application_completed(result):
             continue
         eligible += 1
-        audits = (
+        batches = (
             ((result.get("final") or {}).get("model_evidence") or {}).get(
-                "review_audit_delta"
+                "review_batch_delta"
             )
             or []
         )
         if (
-            len(audits) == 1
-            and isinstance(audits[0], dict)
+            len(batches) == 1
+            and isinstance(batches[0], dict)
             and normalize(
                 (
-                    audits[0].get("result")
-                    if isinstance(audits[0].get("result"), dict)
-                    else audits[0]
+                    batches[0].get("result")
+                    if isinstance(batches[0].get("result"), dict)
+                    else batches[0]
                 ).get("status")
             )
             == "completed"
