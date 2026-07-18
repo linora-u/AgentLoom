@@ -1,5 +1,5 @@
 import type { AgentCatalogDto, BootstrapResultDto, RuntimeStatus } from "../domain"
-import { selectionKey } from "../domain"
+import { runtimeStatus, selectionKey } from "../domain"
 import { sortByStatus } from "../ui"
 
 type WorkerDisplayStatus = RuntimeStatus | "incomplete"
@@ -22,6 +22,8 @@ export type SidebarRunEntry = {
   systemID: string | null
   runID: string
   applicationID: string
+  startedAt: string | null
+  endedAt: string | null
 }
 
 export type SidebarApplicationEntry = {
@@ -124,6 +126,7 @@ export type BuilderCommand =
 export function buildSidebarGroups(snapshot: BootstrapResultDto): {
   systems: SidebarSystemEntry[]
   runs: SidebarRunEntry[]
+  skills: SidebarSkillEntry[]
 } {
   const systems = sortByStatus(
     snapshot.systems.map((system) => ({
@@ -150,10 +153,29 @@ export function buildSidebarGroups(snapshot: BootstrapResultDto): {
       systemID: run.system_id,
       runID: run.run_id,
       applicationID: run.application_id,
+      startedAt: run.started_at,
+      endedAt: run.ended_at,
     })),
     (entry) => entry.status,
   )
-  return { systems, runs }
+  const skills = snapshot.skills.map((skill) => ({
+    kind: "skill" as const,
+    key: catalogKey("skill", skill.id),
+    title: skill.name,
+    subtitle: skill.application_id,
+    skillID: skill.id,
+    applicationID: skill.application_id,
+  }))
+  return { systems, runs, skills }
+}
+
+export function recentRunEntries(entries: readonly SidebarRunEntry[], limit = 5): SidebarRunEntry[] {
+  return entries
+    .toSorted((left, right) => {
+      const byStartedAt = timestamp(right.startedAt) - timestamp(left.startedAt)
+      return byStartedAt || right.runID.localeCompare(left.runID)
+    })
+    .slice(0, Math.max(0, limit))
 }
 
 export function routeForEntry(entry: SidebarEntry): AppRoute {
@@ -192,20 +214,17 @@ export function buildPaletteItems(snapshot: BootstrapResultDto): PaletteItem[] {
     },
   }))
   const agentItems = buildAgentPaletteItems(snapshot, groups.systems)
-  const skillItems: PaletteItem[] = snapshot.skills.map((skill) => ({
-    key: catalogKey("skill", skill.id),
-    category: "Skills",
-    title: skill.name,
-    description: `${skill.application_id} · ${skill.description || skill.path}`,
-    entry: {
-      kind: "skill",
-      key: catalogKey("skill", skill.id),
-      title: skill.name,
-      subtitle: skill.application_id,
-      skillID: skill.id,
-      applicationID: skill.application_id,
-    },
-  }))
+  const skillByID = new Map(snapshot.skills.map((skill) => [skill.id, skill]))
+  const skillItems: PaletteItem[] = groups.skills.map((entry) => {
+    const skill = skillByID.get(entry.skillID)!
+    return {
+      key: entry.key,
+      category: "Skills",
+      title: entry.title,
+      description: `${skill.application_id} · ${skill.description || skill.path}`,
+      entry,
+    }
+  })
   const scheduleItems: PaletteItem[] = snapshot.schedules.items.map((schedule) => ({
     key: catalogKey("schedule", schedule.id),
     category: "Schedules",
@@ -394,14 +413,13 @@ function workerInvocationKey(systemID: string, agentName: string): string {
 }
 
 function workerRuntimeStatus(status: string): RuntimeStatus {
-  const normalized = status.trim().toLowerCase()
-  if (["running", "claimed", "in_progress"].includes(normalized)) return "running"
-  if (["crashed", "crash"].includes(normalized)) return "crashed"
-  if (["failed", "error", "cancelled", "canceled", "interrupted"].includes(normalized)) {
-    return "failed"
-  }
-  if (["completed", "succeeded", "success", "cached"].includes(normalized)) return "completed"
-  return "never_run"
+  return runtimeStatus(status)
+}
+
+function timestamp(value: string | null): number {
+  if (!value) return Number.NEGATIVE_INFINITY
+  const parsed = Date.parse(value)
+  return Number.isFinite(parsed) ? parsed : Number.NEGATIVE_INFINITY
 }
 
 function catalogKey(kind: string, id: string): string {

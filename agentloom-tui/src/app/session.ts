@@ -11,6 +11,7 @@ import type {
   SystemDetailResultDto,
   SystemSummaryDto,
 } from "../domain"
+import { isProblemRuntimeStatus } from "../domain"
 import {
   buildSidebarGroups,
   nextSelection,
@@ -19,6 +20,7 @@ import {
   type AppRoute,
   type SidebarEntry,
 } from "./controller"
+import { runDiagnosisPrompt } from "./presentation"
 
 export interface TuiClient {
   request<Method extends RpcMethod>(
@@ -201,6 +203,22 @@ export class AgentLoomSession {
       notice: null,
     })
     await this.loadCurrentRoute()
+  }
+
+  async analyzeCurrentRun(): Promise<void> {
+    const route = this.current.route
+    const detail = this.current.runDetail
+    if (route.type !== "run" || !detail) {
+      this.patch({ notice: "请先打开一条 Run 详情" })
+      return
+    }
+    if (!isProblemRuntimeStatus(detail.summary.status)) {
+      this.patch({ notice: "只有失败、崩溃、中断或状态未知的 Run 需要故障分析" })
+      return
+    }
+    if (this.builderBusy) return
+    const visibleMessage = `分析 Run ${detail.summary.run_id} 的异常原因`
+    await this.sendBuilderMessage(runDiagnosisPrompt(detail), visibleMessage)
   }
 
   refresh(): Promise<void> {
@@ -417,7 +435,7 @@ export class AgentLoomSession {
     return false
   }
 
-  private async sendBuilderMessage(message: string): Promise<void> {
+  private async sendBuilderMessage(message: string, visibleMessage = message): Promise<void> {
     this.builderBusy = true
     this.patch({
       route: { type: "builder" },
@@ -426,7 +444,7 @@ export class AgentLoomSession {
       activities: [],
       messages: [
         ...this.current.messages,
-        { id: this.nextMessageID(), role: "user", content: message },
+        { id: this.nextMessageID(), role: "user", content: visibleMessage },
       ],
     })
     try {

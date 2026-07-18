@@ -221,6 +221,7 @@ def test_runtime_summary_requires_bootstrap_and_strict_empty_params(tmp_path: Pa
     [
         ("completed", "completed", "running", "completed"),
         ("failed", "failed", "claimed", "failed"),
+        ("interrupted", "interrupted", "claimed", "interrupted"),
         ("running", "running", "in_progress", "crashed"),
     ],
 )
