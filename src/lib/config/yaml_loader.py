@@ -16,13 +16,27 @@ def _construct_unique_mapping(
     node: yaml.MappingNode,
     deep: bool = False,
 ) -> dict[Any, Any]:
-    mapping: dict[Any, Any] = {}
+    # Detect duplicate keys in the source mapping before resolving YAML merge
+    # keys. Flattening first would incorrectly reject ordinary ``<<`` defaults
+    # whenever the receiving mapping intentionally overrides one field.
+    seen: set[tuple[str, Any]] = set()
     for key_node, value_node in node.value:
-        key = loader.construct_object(key_node, deep=deep)
-        if key in mapping:
-            raise ValueError(f"Duplicate YAML mapping key: {key!r}")
-        mapping[key] = loader.construct_object(value_node, deep=deep)
-    return mapping
+        if key_node.tag == "tag:yaml.org,2002:merge":
+            identity: tuple[str, Any] = ("merge", "<<")
+            display_key: Any = "<<"
+        else:
+            display_key = loader.construct_object(key_node, deep=deep)
+            identity = ("key", display_key)
+        if identity in seen:
+            raise ValueError(f"Duplicate YAML mapping key: {display_key!r}")
+        seen.add(identity)
+
+    loader.flatten_mapping(node)
+    return yaml.constructor.BaseConstructor.construct_mapping(
+        loader,
+        node,
+        deep=deep,
+    )
 
 
 UniqueKeySafeLoader.add_constructor(
