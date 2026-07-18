@@ -172,9 +172,16 @@ class TuiBridge:
                 return self._builder_service().send(
                     **send_params,
                 )
-            except ValueError as error:
-                raise BridgeError("builder_failed", str(error)) from error
             except Exception as error:
+                # ChatAgentError is the only provider failure whose code and
+                # message are explicitly safe for the UI. Keep the import lazy
+                # so read-only workspace observation does not load an SDK.
+                from src.tui_bridge.chat_agent import ChatAgentError
+
+                if isinstance(error, ChatAgentError):
+                    raise BridgeError(error.code, str(error)) from error
+                if isinstance(error, ValueError):
+                    raise BridgeError("builder_failed", str(error)) from error
                 raise BridgeError(
                     "builder_failed",
                     "Builder model call failed; retry or select another configured model.",
