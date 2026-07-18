@@ -15,7 +15,7 @@ The configuration loading order is `config/system.yaml` → `config/llm.yaml` �
 
 ## Table of Contents
 
-- [Quick Reference: Complete YAML Structure](#quick-reference-complete-yaml-structure)
+- [Quick Reference: Representative YAML Structure](#quick-reference-representative-yaml-structure)
 - [1. system — System Metadata](#1-system--system-metadata)
 - [1.5 model_request_headers — Model Request Header Privacy](#15-model_request_headers--model-request-header-privacy)
 - [2. smart_summary — Context Compression Strategy](#2-smart_summary--context-compression-strategy)
@@ -31,14 +31,15 @@ The configuration loading order is `config/system.yaml` → `config/llm.yaml` �
 - [10. tool_metadata — Tool Metadata Configuration](#10-tool_metadata--tool-metadata-configuration)
 - [11. tool_output_limits — Tool Output Limits](#11-tool_output_limits--tool-output-limits)
 - [12. checkpoint — Checkpoint, Resume & Heartbeat](#12-checkpoint--checkpoint-resume--heartbeat)
+- [13. self_learning — History, Review, and Curated Memory](#13-self_learning--history-review-and-curated-memory)
 - [Appendix A: Pydantic Model Reference Table](#appendix-a-pydantic-model-reference-table)
 - [Appendix B: Application-Level Override and Directory Structure](#appendix-b-application-level-override-and-directory-structure)
 
 ---
 
-## Quick Reference: Complete YAML Structure
+## Quick Reference: Representative YAML Structure
 
-The following shows the **complete structure and repository example values** for `config/system.yaml` (with framework fallback defaults annotated at key points):
+The following shows the **major public sections and representative repository values** for `config/system.yaml` (with framework fallback defaults annotated at key points). Consult the detailed sections below and the checked-in file for less common extension mappings.
 
 ```yaml
 # ============================================
@@ -153,20 +154,6 @@ tools_mapping:
 # Tool Access Control Configuration (optional, Pydantic defaults below apply even if omitted)
 # ============================================
 tool_access_control:
-  include_paths: []
-  exclude_paths: []
-  path_param_patterns:
-    - "file_path"
-    - "filePath"
-    - "directory_path"
-    - "directory"
-    - "dirPath"
-    - "repo_path"
-    - "path"
-    - "path_str"
-    - "file_paths"
-    - "filePaths"
-    - "fileUri"
   path_validation: []
 
 # ============================================
@@ -177,6 +164,28 @@ checkpoint:
   cleanup_on_success: true # Auto-delete checkpoint directory after successful completion
   max_resume_age: 604800   # Max checkpoint retention in seconds (default 7 days); expired = non-resumable
   heartbeat_interval: 5    # Heartbeat write interval (seconds) for crash detection
+
+# ============================================
+# Self-Learning v6
+# ============================================
+self_learning:
+  enabled: true
+  events_retention_days: 90
+  memory:
+    prompt_max_chars: 12000
+    max_item_chars: 4000
+    scope_budgets: {project: 8000, application: 6000}
+  review:
+    enabled: true
+    application:
+      review_model: summary
+      trigger: {mode: batch, min_completed_runs: 5}
+      approval: {fact: auto, experience: manual}
+    project:
+      review_model: summary
+      trigger: {mode: batch, min_candidates: 5}
+      approval: {fact: manual, experience: manual}
+    artifacts: {markdown: true, review_auto_applied: true}
 
 ```
 
@@ -1257,8 +1266,8 @@ Run evidence and task recovery state have independent lifecycles under the same 
 ├── runs/<application_id>/<run_id>/
 │   ├── manifest.json
 │   ├── logs/runtime.log[.1-.3]
-│   ├── audit/shell.jsonl[.1-.2]
-│   └── artifacts/{shell,background,skills}/
+│   ├── audit/{shell.jsonl[.1-.2],task_tree.json,task_events.jsonl}
+│   └── artifacts/{result.txt,shell,background,skills}/
 └── checkpoints/<application_id>/<task_id>/
     ├── task_events.jsonl
     ├── task_tree.json
@@ -1268,6 +1277,8 @@ Run evidence and task recovery state have independent lifecycles under the same 
     ├── context_store/
     └── file-history/
 ```
+
+Except for `manifest.json`, these run entries are conditional on logging being enabled or the corresponding evidence existing.
 
 **Key design decisions**:
 - `run_id` changes for every attempt; `task_id` remains stable across resume
@@ -1324,6 +1335,34 @@ checkpoint:
 
 ---
 
+## 13. self_learning — History, Review, and Curated Memory
+
+Controls searchable history and the review pipeline that turns typed candidates into curated Application or Project memory.
+
+**YAML path**: `self_learning.*`
+
+| Parameter | Type / Values | Default | Description |
+|---|---|---|---|
+| `enabled` | `bool` | `true` | Enables self-learning storage and model-facing memory access. |
+| `events_retention_days` | `int` | `90` in repository config | Reserved compatibility value. Current history pruning requires explicit `loom sessions prune --retention-days N`. |
+| `memory.prompt_max_chars` | `int` | repository-configured | Maximum memory prompt budget. |
+| `memory.max_item_chars` | `int` | repository-configured | Maximum size of one curated item. |
+| `memory.scope_budgets.project/application` | `int` | repository-configured | Per-scope injection budgets. |
+| `review.enabled` | `bool` | `false` | Enables reviewer execution; both scope models must then be non-empty. |
+| `review.application.review_model` | model type | `""` | Model used for Application candidate extraction. |
+| `review.application.trigger.mode` | `manual\|batch\|after_run` | `batch` | Application review trigger. |
+| `review.application.trigger.min_completed_runs` | `int >= 1` | `5` | Batch threshold for completed root runs. |
+| `review.project.review_model` | model type | `""` | Model used for Project candidate extraction. |
+| `review.project.trigger.mode` | `manual\|batch\|after_run` | `batch` | Project review trigger. |
+| `review.project.trigger.min_candidates` | `int >= 1` | `5` | Batch threshold for Project context. |
+| `review.<scope>.approval.fact/experience` | `auto\|manual` | `manual` | Per-type approval policy. Auto still requires the code evidence gate. |
+| `review.artifacts.markdown` | `bool` | `true` | Selects Markdown artifacts (`REPORT.md`, `INBOX.md`, `INDEX.md`); `false` selects JSON batch/inbox/index files. |
+| `review.artifacts.review_auto_applied` | `bool` | `true` | Includes auto-applied additions in review artifacts. |
+
+Within `self_learning.review`, Application/Agent overlays may change only `application`; `review.enabled`, Project policy, and artifact settings remain project-root owned. Other `self_learning` fields follow normal overlay merging. The v5 fields `memory.review_model` and `write_approval` are invalid. For candidate schemas, review commands, approval states, and the human-only Project promotion boundary, see [Self-Learning v6](self_learning.md).
+
+---
+
 ## Appendix A: Pydantic Model Reference Table
 
 The framework uses Pydantic to validate system configuration. The following shows the mapping between configuration fields and Pydantic models:
@@ -1336,6 +1375,7 @@ The framework uses Pydantic to validate system configuration. The following show
 | `tool_access_control.*` | `ToolAccessControlSettings` | `src/lib/config/config_validation.py` |
 | `runtime.*` | `RuntimeSettings` | `src/lib/config/config_validation.py` |
 | `logging.*` | `LoggingSettings` | `src/lib/config/config_validation.py` |
+| `self_learning.*` | `SelfLearningSettings` / `SelfLearningReviewSettings` | `src/lib/config/config_validation.py` |
 
 **`RootSettings` complete field definitions**:
 
@@ -1347,12 +1387,19 @@ The framework uses Pydantic to validate system configuration. The following show
 | `runtime` | `RuntimeSettings` | `RuntimeSettings()` |
 | `logging` | `LoggingSettings` | `LoggingSettings()` |
 | `smart_summary` | `bool` | `True` |
+| `context_engine` | `dict[str, Any]` | `{}` |
 | `model` | `dict[str, Any]` | `{}` |
 | `execution_env` | `dict[str, Any]` | `{}` |
 | `code_agent` | `dict[str, Any]` | `{}` |
-| `tools` | `dict[str, Any]` | `{}` |
+| `tools` | `list[Any]` | `[]` |
+| `default_toolsets` | `list[str]` | `[]` |
+| `toolsets` | `list[str]` | `[]` |
+| `shell_settings` | `dict[str, Any]` | `{}` |
+| `tools_mapping` | `dict[str, Any]` | `{}` |
 | `tool_metadata` | `dict[str, Any]` | `{}` |
 | `tool_output_limits` | `dict[str, Any]` | `{}` |
+| `self_learning` | `SelfLearningSettings` | `SelfLearningSettings()` |
+| `hooks` | `dict[str, Any]` | `{}` |
 
 > `RootSettings` allows extension fields, so top-level fields such as `prompt` can participate in overlay merging. `RuntimeSettings` and `LoggingSettings` deliberately use `extra="forbid"`; removed runtime/logging keys fail validation instead of silently selecting a second storage path.
 

@@ -22,8 +22,11 @@ AgentLoom 将“一次执行尝试”和“需要恢复的逻辑任务”分开�
 │   │   └── runtime.log.1 ... runtime.log.3
 │   ├── audit/
 │   │   ├── shell.jsonl
-│   │   └── shell.jsonl.1 ... shell.jsonl.2
+│   │   ├── shell.jsonl.1 ... shell.jsonl.2
+│   │   ├── task_tree.json
+│   │   └── task_events.jsonl
 │   └── artifacts/
+│       ├── result.txt
 │       ├── shell/
 │       ├── background/
 │       └── skills/
@@ -47,6 +50,8 @@ AgentLoom 将“一次执行尝试”和“需要恢复的逻辑任务”分开�
 
 - `manifest.json` 用 `task_id` 反向关联逻辑任务；checkpoint 的 run 事件和 heartbeat 记录当前 `run_id`。
 - `task_events.jsonl` 是持久化的任务/Worker 事件源，`task_tree.json` 是便于查看的投影。
+- 成功结果会复制到 `artifacts/result.txt`。存在 checkpoint 证据时，run 还会保存 `audit/task_tree.json` 与 `audit/task_events.jsonl`。Manifest 只在相应证据真实存在时写入 `result_artifact`、`task_tree_artifact`、`task_events_artifact` 和 `task_events_complete`。
+- 即使 `cleanup_on_success` 删除了可恢复 checkpoint，这些紧凑证据仍可检查；raw artifact retention 仍可清理体积较大的 shell/background/skill artifacts。
 - Checkpoint 直接按 `<application_id>/<task_id>` 定位，不依赖日志目录、`.task_index.json` 或历史 run 扫描。
 - 用户交付物仍由 Application 的 `output_dir` 管理，runtime 清理不会遍历 Application output 目录。
 - Agent 的 recall/todo 状态位于 `.agentloom/workspaces/agents/<application_id>/<agent_path>/`。持久化的 `insights.md` 归 Application 所有；task 文件隔离在 `tasks/<task_id>/`，不属于 run artifacts。

@@ -54,12 +54,22 @@ After the first run, you should see:
 
 `run_id` identifies one execution attempt and changes on resume. `task_id` identifies the logical task and remains stable, so a resumed attempt writes a new run directory while continuing the same checkpoint. Agent workspaces live under `.agentloom/workspaces/agents/<application_id>/<agent_path>/`: `insights.md` is shared across tasks, while task state lives under `tasks/<task_id>/`.
 
-### Open the AgentLoom TUI
+### Use the AgentLoom TUI
+
+The TUI is a small Agent Builder and project status browser. It can chat,
+inspect the current project's Agent catalog, and prepare Agent YAML through
+bounded tools. It does not run Shell commands, Git operations, or Agent
+workloads itself.
+
+#### 1. Install it and open a project
 
 ```bash
 ./install
-# Open a new shell once, then run from an AgentLoom project:
+# Open a new shell once, then run from the AgentLoom project to inspect:
 agentloom
+
+# Or point it at a project explicitly:
+agentloom --project /path/to/project
 ```
 
 The source installer follows OpenCode's native-binary installation pattern. It
@@ -70,10 +80,77 @@ builds the current-platform TypeScript/OpenTUI application, installs it under
 `./install --no-modify-path` to leave shell configuration untouched, or set
 `AGENTLOOM_INSTALL_DIR` to choose another installation root.
 
-The Builder only inspects, stages, and validates Agent YAML; `/apply` is the
-explicit write action. The right-side directory shows every Agent System and
-Run, including definitions that have never run, live state, Workers, events,
-logs, artifacts, and retained results.
+#### 2. Select the chat model
+
+The TUI reads the model catalog and default from `config/llm.yaml`. Before
+chatting, configure at least one OpenAI-compatible profile with a `model`, an
+`api_key`, and either an HTTPS `base_url` (local HTTP is allowed) or an
+`openai/...` model ID that uses the default OpenAI endpoint. The TUI
+conversation calls that provider directly; Agent workloads continue to use the
+normal AgentLoom runtime model path. Creating YAML also requires streaming
+Chat Completions with native tool/function calling; leave `tool_choice` as
+`auto` or `required`, rather than `none`.
+
+Inside the TUI, enter `/models` to open the model selector or `/model <type>`
+to switch directly, for example `/model summary`.
+
+#### 3. Create or update Agent YAML through chat
+
+Press `Enter` to send a request. For example:
+
+```text
+Create an application named release_review. Use one Supervisor and two Workers
+for API review and test review. Choose model types from config/llm.yaml, then
+show me the proposed files without writing them yet.
+```
+
+The Builder reads existing Agent YAML definitions as needed, stages the
+proposed YAML in memory, and validates it. Ask for revisions until the draft is
+correct, then enter `/apply`. Only the current validated draft is written;
+sending a chat message does not modify files, and `/apply` does not start the
+Agent.
+
+#### 4. Run the Agent yourself
+
+Run the YAML directly in another terminal, using the actual path shown in the
+draft:
+
+```bash
+uv run loom run applications/<app>/workflows/<agent>.yaml
+```
+
+If you prefer a Python entry file, generate and run one:
+
+```bash
+uv run loom create applications/<app>/workflows/<agent>.yaml \
+  -o applications/<app>/<app>_app.py
+uv run python applications/<app>/<app>_app.py
+```
+
+Keep the TUI open while the process runs. Both `loom run` and Python entry
+files that call `src.runner.run_app` publish canonical status. Calling a
+low-level Agent `.run()` directly bypasses that lifecycle, so the TUI cannot
+show a complete Run for it.
+
+#### 5. Inspect every Agent and Run in the project
+
+- Press `Ctrl+P` or `Tab`, type an Application, Agent, Worker, Run, Skill, or
+  Schedule name, then use `↑` / `↓` and `Enter`; workspace entries are also
+  clickable.
+- Agent details show definitions that have never run, topology, files, and
+  validation. Run details distinguish running, completed, failed, crashed,
+  interrupted, and unknown states, and show Worker status and retained result.
+- A failed Run shows the key error, abnormal Workers, log file paths, and
+  the artifact index plus a bounded result preview instead of dumping the
+  complete raw log. Press `a` in that Run to ask the TUI assistant to analyze
+  a sanitized, bounded failure context.
+- Use `F6` to switch focus between chat and details. A focused detail view
+  supports `PgUp` / `PgDn`, `Home` / `End`, arrow keys, and the mouse wheel;
+  press `Esc` or `b` to return. Runtime state refreshes automatically; press
+  `r` from the detail panel or enter `/refresh` to rebuild the project index.
+
+See [`agentloom-tui/README.md`](agentloom-tui/README.md) for additional TUI
+architecture and contributor details.
 
 Schedules created in the TUI are durable, but automatic firing requires an
 explicit foreground service in a separate terminal:
@@ -240,6 +317,7 @@ Before running the tool, make sure `codex` is on `PATH` and `codex login status`
 | Command | Purpose |
 |---|---|
 | `uv run loom run <workflow>` | Run an AgentLoom application. |
+| `uv run loom run <workflow> --output-format jsonl` | Stream versioned lifecycle events for programmatic consumers. |
 | `uv run loom create <workflow>` | Generate a Python entry script for an application. |
 | `uv run loom ui` | Open the Web visualization panel. |
 | `uv run loom dashboard` | Open the terminal task dashboard. |
@@ -248,6 +326,12 @@ Before running the tool, make sure `codex` is on `PATH` and `codex login status`
 | `uv run loom clean-runtime` | Apply configured retention to completed run directories and raw artifacts. |
 | `uv run loom migrate-runtime --dry-run` | Preview legacy checkpoint candidates plus the unscoped `.runtime` workspace without changing disk state. |
 | `uv run loom migrate-runtime --apply` | Migrate checkpoints, archive `.logs`, and atomically preserve `.runtime` under `.agentloom/workspaces/legacy-unscoped/`. |
+| `uv run loom schedules ...` | Add, list, pause, resume, remove, run, serve, or inspect schedules. |
+| `uv run loom sessions search\|scroll\|index\|prune ...` | Search and maintain execution history. |
+| `uv run loom learn review ...` | Trigger Application or Project review. |
+| `uv run loom reviews status\|apply\|rollback ...` | Inspect and apply scoped review inboxes, or roll back a review. |
+| `uv run loom memory list\|add\|replace\|remove\|pending\|stats\|export ...` | Administer curated memory and pending-write audit records. |
+| `uv run loom feedback submit <run_id> ...` | Attach an accepted, rejected, or corrected verdict to a run. |
 
 ## Documentation
 
@@ -260,6 +344,8 @@ Before running the tool, make sure `codex` is on `PATH` and `codex login status`
 | [Skills Configuration](docs/en/skills_config.md) | Skill package format, loading, runtime policy, and built-in skills. |
 | [Hooks Reference](docs/en/hooks.md) | Direct Hooks, Bundles, lifecycle events, matching, and execution behavior. |
 | [Checkpoint Resume](docs/en/checkpoint.md) | Checkpoint layout, resume behavior, and long-task recovery. |
+| [Self-Learning v6](docs/en/self_learning.md) | History, typed candidates, review triggers, approval, and Project promotion. |
+| [Structured Run API](docs/en/run_observability.md) | Python receipts, typed errors, lifecycle events, and JSONL CLI output. |
 
 ## AgentLoom Framework Skill
 
