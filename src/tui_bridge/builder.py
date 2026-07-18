@@ -14,10 +14,10 @@ import json
 import os
 import stat
 import uuid
-from collections.abc import Callable, Iterator, Mapping, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, field
 from pathlib import Path, PurePosixPath
-from typing import Any, Protocol
+from typing import Any
 
 import yaml
 
@@ -33,13 +33,6 @@ _TRUNCATION_MARKER = "… [truncated]"
 
 class DraftConflictError(ValueError):
     """Raised when the UI tries to apply a stale draft revision."""
-
-
-class _BuilderAgent(Protocol):
-    def run(self, prompt: str, **kwargs: Any) -> object: ...
-
-
-AgentFactory = Callable[[Sequence[Any], str | None], _BuilderAgent]
 
 
 def _bounded_assistant_message(content: str) -> str:
@@ -603,23 +596,16 @@ class _ValidateAgentDraftTool:
 
 
 class BuilderService:
-    """Secure draft state plus the independent short-session TUI agent.
-
-    ``agent_factory`` remains only as a narrow test/embedding seam. Production
-    conversation uses :class:`TuiChatAgent` and never constructs an AgentLoom
-    execution Agent.
-    """
+    """Secure draft state plus the independent short-session TUI agent."""
 
     def __init__(
         self,
         project_root: Path | str,
         *,
-        agent_factory: AgentFactory | None = None,
         chat_client_factory: Any | None = None,
         retry_sleep: Callable[[float], None] | None = None,
     ):
         self._project_root = Path(project_root).expanduser().resolve()
-        self._agent_factory = agent_factory
         self._chat_client_factory = chat_client_factory
         self._retry_sleep = retry_sleep
         self._chat_agent: Any | None = None
@@ -652,15 +638,7 @@ class BuilderService:
         if len(message) > _MAX_BUILDER_MESSAGE_CHARS:
             raise ValueError(f"message must not exceed {_MAX_BUILDER_MESSAGE_CHARS:,} characters")
 
-        if self._agent_factory is None:
-            return self._send_with_tui_chat_agent(
-                session_id=session_id,
-                message=message,
-                model_type=model_type,
-                on_event=on_event,
-            )
-
-        return self._send_with_injected_agent(
+        return self._send_with_tui_chat_agent(
             session_id=session_id,
             message=message,
             model_type=model_type,
@@ -711,110 +689,12 @@ class BuilderService:
             "draft": _draft_summary(self._project_root, working_draft),
         }
 
-    def _send_with_injected_agent(
-        self,
-        *,
-        session_id: str,
-        message: str,
-        model_type: str | None,
-        on_event: Callable[[dict[str, object]], None] | None,
-    ) -> dict[str, object]:
-        assert self._agent_factory is not None
-
-        draft = self._draft(session_id)
-        history = self._histories.setdefault(session_id, [])
-        history.append({"role": "user", "content": message})
-        _trim_history(history)
-
-        tools = self._tools(draft)
-        agent = self._agent_factory(tools, model_type)
-        transcript = json.dumps(history, ensure_ascii=False)
-        prompt = (
-            "You are AgentLoom, a general conversational assistant inside an AgentLoom project.\n"
-            "Answer ordinary questions directly using the configured model. Do not force ordinary questions into Agent YAML work.\n"
-            "When the user asks to create or modify an Agent, you may inspect existing definitions, stage complete YAML files in memory, and validate the proposal.\n"
-            "Only stage YAML when the user actually requests an Agent definition change; an empty draft is normal for general conversation.\n"
-            "Never claim that you ran an Agent. Never use shell, git, edit arbitrary project files, or perform a long task.\n"
-            "Do not claim files were saved: only the user-facing Apply action can write a valid proposal.\n"
-            "Ask a concise clarification when the requested behavior is materially ambiguous.\n"
-            f"Conversation (including the latest user message): {transcript}"
-        )
-        output = self._run_agent(agent, prompt, on_event=on_event)
-        assistant = _bounded_assistant_message(str(output))
-        history.append({"role": "assistant", "content": assistant})
-        _trim_history(history)
-        return {
-            "session_id": session_id,
-            "assistant": assistant,
-            "model_type": model_type,
-            "draft": _draft_summary(self._project_root, draft),
-        }
-
     def _tools(self, draft: _Draft) -> list[Any]:
         return [
             _InspectAgentSystemTool(self._project_root),
             _StageAgentYamlTool(self._project_root, draft),
             _ValidateAgentDraftTool(self._project_root, draft),
         ]
-
-    @staticmethod
-    def _run_agent(
-        agent: _BuilderAgent,
-        prompt: str,
-        *,
-        on_event: Callable[[dict[str, object]], None] | None,
-    ) -> object:
-        if on_event is None:
-            return agent.run(prompt)
-
-        on_event({"type": "turn.started"})
-        try:
-            stream = agent.run(prompt, stream=True)
-        except TypeError as error:
-            # Small test/embedding agents may intentionally implement only the
-            # one-argument protocol. The production ToolCallingAgent supports
-            # streaming; preserve the narrow compatibility surface.
-            if "stream" not in str(error):
-                raise
-            output = agent.run(prompt)
-            on_event({"type": "turn.completed"})
-            return output
-
-        if not isinstance(stream, Iterator):
-            on_event({"type": "turn.completed"})
-            return stream
-
-        final_output: object | None = None
-        for item in stream:
-            item_type = type(item).__name__
-            if item_type == "ChatMessageStreamDelta":
-                content = getattr(item, "content", None)
-                if isinstance(content, str) and content:
-                    on_event({"type": "turn.delta", "text": content})
-                continue
-            if item_type == "ToolCall":
-                on_event(
-                    {
-                        "type": "turn.activity",
-                        "state": "started",
-                        "name": str(getattr(item, "name", "tool")),
-                    }
-                )
-                continue
-            if item_type == "ToolOutput":
-                tool_call = getattr(item, "tool_call", None)
-                on_event(
-                    {
-                        "type": "turn.activity",
-                        "state": "completed",
-                        "name": str(getattr(tool_call, "name", "tool")),
-                    }
-                )
-                continue
-            if item_type == "FinalAnswerStep":
-                final_output = getattr(item, "output", None)
-        on_event({"type": "turn.completed"})
-        return "" if final_output is None else final_output
 
     def apply_draft(self, *, session_id: str, expected_revision: int) -> dict[str, object]:
         draft = self._draft(session_id)

@@ -130,6 +130,166 @@ def test_plain_chat_uses_one_openai_compatible_stream_without_litellm_agent(
     ]
 
 
+def test_configured_tool_choice_none_disables_tool_schemas(tmp_path: Path) -> None:
+    _write_catalog(tmp_path)
+    config_path = tmp_path / "config" / "llm.yaml"
+    config_path.write_text(
+        config_path.read_text(encoding="utf-8").replace("tool_choice: auto", "tool_choice: none"),
+        encoding="utf-8",
+    )
+    requests: list[dict[str, object]] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        requests.append(json.loads(request.content))
+        return _sse(
+            {"delta": {"role": "assistant", "content": "只对话"}, "finish_reason": None},
+            {"delta": {}, "finish_reason": "stop"},
+        )
+
+    service = BuilderService(tmp_path, chat_client_factory=_client_factory(handler))
+
+    result = service.send(session_id="chat-1", message="hello", model_type="powerful")
+
+    assert result["assistant"] == "只对话"
+    assert requests[0]["tool_choice"] == "none"
+    assert "tools" not in requests[0]
+
+
+def test_tool_choice_none_rejects_forged_provider_tool_calls_locally(tmp_path: Path) -> None:
+    _write_catalog(tmp_path)
+    config_path = tmp_path / "config" / "llm.yaml"
+    config_path.write_text(
+        config_path.read_text(encoding="utf-8").replace("tool_choice: auto", "tool_choice: none"),
+        encoding="utf-8",
+    )
+    relative = "applications/reports/workflows/forged.yaml"
+    target = tmp_path / relative
+    arguments = json.dumps(
+        {
+            "path": relative,
+            "content": "name: forged\ndescription: forged\nworkflow: forged\n",
+        }
+    )
+
+    def handler(_request: httpx.Request) -> httpx.Response:
+        return _sse(
+            {
+                "delta": {
+                    "role": "assistant",
+                    "tool_calls": [
+                        {
+                            "index": 0,
+                            "id": "call-forged",
+                            "type": "function",
+                            "function": {
+                                "name": "stage_agent_yaml",
+                                "arguments": arguments,
+                            },
+                        }
+                    ],
+                },
+                "finish_reason": None,
+            },
+            {"delta": {}, "finish_reason": "tool_calls"},
+        )
+
+    service = BuilderService(tmp_path, chat_client_factory=_client_factory(handler))
+    bridge = TuiBridge(tmp_path, builder_service=service)
+
+    with pytest.raises(BridgeError) as error:
+        bridge.dispatch(
+            "assistant.send",
+            {"session_id": "chat-1", "message": "hello", "model_type": "powerful"},
+        )
+
+    assert error.value.code == "assistant_protocol"
+    assert service.get_draft("chat-1")["files"] == []
+    assert service.history("chat-1") == []
+    assert not target.exists()
+
+
+def test_invalid_tool_choice_fails_before_client_construction(tmp_path: Path) -> None:
+    _write_catalog(tmp_path)
+    config_path = tmp_path / "config" / "llm.yaml"
+    config_path.write_text(
+        config_path.read_text(encoding="utf-8").replace(
+            "tool_choice: auto",
+            "tool_choice: arbitrary",
+        ),
+        encoding="utf-8",
+    )
+    client_created = False
+
+    def create_client(_profile: ChatModelProfile) -> OpenAI:
+        nonlocal client_created
+        client_created = True
+        raise AssertionError("invalid tool policy must fail before client construction")
+
+    bridge = TuiBridge(
+        tmp_path,
+        builder_service=BuilderService(tmp_path, chat_client_factory=create_client),
+    )
+
+    with pytest.raises(BridgeError) as error:
+        bridge.dispatch(
+            "assistant.send",
+            {"session_id": "chat-1", "message": "hello", "model_type": "powerful"},
+        )
+
+    assert client_created is False
+    assert error.value.code == "assistant_config"
+    assert "tool_choice" in str(error.value)
+
+
+def test_required_tool_choice_becomes_auto_after_the_first_tool_result(tmp_path: Path) -> None:
+    _write_catalog(tmp_path)
+    config_path = tmp_path / "config" / "llm.yaml"
+    config_path.write_text(
+        config_path.read_text(encoding="utf-8").replace(
+            "tool_choice: auto",
+            "tool_choice: required",
+        ),
+        encoding="utf-8",
+    )
+    requests: list[dict[str, object]] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        body = json.loads(request.content)
+        requests.append(body)
+        if len(requests) == 1:
+            return _sse(
+                {
+                    "delta": {
+                        "role": "assistant",
+                        "tool_calls": [
+                            {
+                                "index": 0,
+                                "id": "call-validate",
+                                "type": "function",
+                                "function": {
+                                    "name": "validate_agent_draft",
+                                    "arguments": "{}",
+                                },
+                            }
+                        ],
+                    },
+                    "finish_reason": None,
+                },
+                {"delta": {}, "finish_reason": "tool_calls"},
+            )
+        return _sse(
+            {"delta": {"role": "assistant", "content": "检查完成"}, "finish_reason": None},
+            {"delta": {}, "finish_reason": "stop"},
+        )
+
+    service = BuilderService(tmp_path, chat_client_factory=_client_factory(handler))
+
+    result = service.send(session_id="chat-1", message="检查草稿", model_type="powerful")
+
+    assert result["assistant"] == "检查完成"
+    assert [request["tool_choice"] for request in requests] == ["required", "auto"]
+
+
 def test_fragmented_tool_call_stages_only_in_memory_then_returns_plain_text(
     tmp_path: Path,
 ) -> None:
@@ -281,6 +441,81 @@ def test_empty_provider_stream_is_retried_once_before_failing_the_turn(tmp_path:
     assert result["assistant"] == "第二次有内容"
 
 
+def test_short_retry_after_is_respected_and_retry_is_visible(tmp_path: Path) -> None:
+    _write_catalog(tmp_path)
+    calls = 0
+    delays: list[float] = []
+    events: list[dict[str, object]] = []
+
+    def handler(_request: httpx.Request) -> httpx.Response:
+        nonlocal calls
+        calls += 1
+        if calls == 1:
+            return httpx.Response(
+                429,
+                headers={"retry-after": "3"},
+                json={"error": {"message": "rate limited"}},
+            )
+        return _sse(
+            {"delta": {"role": "assistant", "content": "已恢复"}, "finish_reason": None},
+            {"delta": {}, "finish_reason": "stop"},
+        )
+
+    service = BuilderService(
+        tmp_path,
+        chat_client_factory=_client_factory(handler),
+        retry_sleep=delays.append,
+    )
+
+    result = service.send(
+        session_id="chat-1",
+        message="hello",
+        model_type="powerful",
+        on_event=events.append,
+    )
+
+    assert result["assistant"] == "已恢复"
+    assert delays == [3.0]
+    assert {event.get("state") for event in events if event.get("name") == "模型重试 2/2"} == {
+        "started",
+        "completed",
+    }
+
+
+def test_long_retry_after_returns_rate_limit_without_retrying_early(tmp_path: Path) -> None:
+    _write_catalog(tmp_path)
+    calls = 0
+    delays: list[float] = []
+
+    def handler(_request: httpx.Request) -> httpx.Response:
+        nonlocal calls
+        calls += 1
+        return httpx.Response(
+            429,
+            headers={"retry-after": "30"},
+            json={"error": {"message": "rate limited"}},
+        )
+
+    bridge = TuiBridge(
+        tmp_path,
+        builder_service=BuilderService(
+            tmp_path,
+            chat_client_factory=_client_factory(handler),
+            retry_sleep=delays.append,
+        ),
+    )
+
+    with pytest.raises(BridgeError) as error:
+        bridge.dispatch(
+            "assistant.send",
+            {"session_id": "chat-1", "message": "hello", "model_type": "powerful"},
+        )
+
+    assert error.value.code == "assistant_rate_limit"
+    assert calls == 1
+    assert delays == []
+
+
 def test_auth_error_is_not_retried_and_is_safe_for_the_rpc(tmp_path: Path) -> None:
     _write_catalog(tmp_path)
     calls = 0
@@ -305,13 +540,17 @@ def test_auth_error_is_not_retried_and_is_safe_for_the_rpc(tmp_path: Path) -> No
     assert "secret credential detail" not in str(error.value)
 
 
-def test_invalid_openai_compatible_base_url_is_a_local_config_error(tmp_path: Path) -> None:
+@pytest.mark.parametrize("invalid_base_url", ["not-a-url", "http://models.example.test/api/v3"])
+def test_invalid_openai_compatible_base_url_is_a_local_config_error(
+    tmp_path: Path,
+    invalid_base_url: str,
+) -> None:
     _write_catalog(tmp_path)
     config_path = tmp_path / "config" / "llm.yaml"
     config_path.write_text(
         config_path.read_text(encoding="utf-8").replace(
             "https://models.example.test/api/v3",
-            "not-a-url",
+            invalid_base_url,
         ),
         encoding="utf-8",
     )
@@ -336,6 +575,76 @@ def test_invalid_openai_compatible_base_url_is_a_local_config_error(tmp_path: Pa
     assert client_created is False
     assert error.value.code == "assistant_config"
     assert "base_url" in str(error.value)
+
+
+def test_custom_endpoint_never_receives_an_ambient_openai_api_key(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _write_catalog(tmp_path)
+    config_path = tmp_path / "config" / "llm.yaml"
+    config_path.write_text(
+        config_path.read_text(encoding="utf-8").replace(
+            "api_key: test-key",
+            'api_key: ""',
+        ),
+        encoding="utf-8",
+    )
+    monkeypatch.setenv("OPENAI_API_KEY", "ambient-secret-must-not-be-used")
+    client_created = False
+
+    def create_client(_profile: ChatModelProfile) -> OpenAI:
+        nonlocal client_created
+        client_created = True
+        raise AssertionError("missing project credentials must fail before client construction")
+
+    bridge = TuiBridge(
+        tmp_path,
+        builder_service=BuilderService(tmp_path, chat_client_factory=create_client),
+    )
+
+    with pytest.raises(BridgeError) as error:
+        bridge.dispatch(
+            "assistant.send",
+            {"session_id": "chat-1", "message": "hello", "model_type": "powerful"},
+        )
+
+    assert client_created is False
+    assert error.value.code == "assistant_config"
+    assert "凭据" in str(error.value)
+    assert "ambient-secret-must-not-be-used" not in str(error.value)
+
+
+def test_default_openai_endpoint_rejects_non_openai_litellm_model_prefix(tmp_path: Path) -> None:
+    _write_catalog(tmp_path)
+    config_path = tmp_path / "config" / "llm.yaml"
+    config_path.write_text(
+        config_path.read_text(encoding="utf-8")
+        .replace("    base_url: https://models.example.test/api/v3\n", "")
+        .replace("model: openai/ep-test", "model: anthropic/claude-test"),
+        encoding="utf-8",
+    )
+    client_created = False
+
+    def create_client(_profile: ChatModelProfile) -> OpenAI:
+        nonlocal client_created
+        client_created = True
+        raise AssertionError("unsupported provider must fail before client construction")
+
+    bridge = TuiBridge(
+        tmp_path,
+        builder_service=BuilderService(tmp_path, chat_client_factory=create_client),
+    )
+
+    with pytest.raises(BridgeError) as error:
+        bridge.dispatch(
+            "assistant.send",
+            {"session_id": "chat-1", "message": "hello", "model_type": "powerful"},
+        )
+
+    assert client_created is False
+    assert error.value.code == "assistant_config"
+    assert "OpenAI-compatible" in str(error.value)
 
 
 def test_importing_tui_chat_does_not_import_litellm_or_smolagents() -> None:

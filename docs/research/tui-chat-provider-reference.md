@@ -9,14 +9,14 @@
 - TUI 对话已拆成独立、短回合的 `TuiChatAgent`，直接使用 OpenAI Python SDK 的 OpenAI-compatible transport；不再经过 LiteLLM、smolagents 或 AgentLoom runtime Agent。
 - 复用 OpenCode 的 provider / session / 受限 tool dispatch / 有界 retry 分层，以及 Hermes 的 Python Provider Profile 与原生 OpenAI 工具循环思路；不嵌入任一完整 runtime。
 - `config/llm.yaml` 仍是唯一模型目录；`openai/ep-*` 在 wire boundary 映射成 `ep-*`，`extra_body` 成员合并到请求顶层。
-- 当前实现最多 6 个 provider turn、每次最多 4096 输出 token、单次请求最多 60 秒、整轮最多 90 秒；空流和可重试网络错误只额外尝试一次。
+- 当前实现最多 6 个 provider turn、每次最多 4096 输出 token、单次请求最多 120 秒、整轮最多 300 秒；空流和可重试网络错误只额外尝试一次。这个边界给已实测的慢响应留出余量，也保证第一次超时后仍有完整的一次重试预算。
 - API key、base URL 和 provider client 只存在于 Python sidecar。现有 NDJSON、内存 draft、校验、revision fingerprint 和显式 `/apply` 边界保持不变。
 
 选择 Python 而不是下面的 TypeScript 候选，原因不是 SDK 能力差异，而是当前仓库的 Python bridge 已拥有配置、校验和原子写入信任边界。迁到 TypeScript 会让密钥进入 TUI 进程，并新增一套 tool RPC 和会话状态；对当前需求没有增加用户能力。下面保留 TypeScript 候选和上游源码依据，作为后续若彻底移除 Python sidecar 时的替代设计，而不是当前实现说明。
 
 ## 研究候选：TypeScript + Vercel AI SDK
 
-TUI 应实现为一个独立、短回合的 TypeScript Agent：直接使用 Vercel AI SDK 的 OpenAI-compatible provider，运行在现有 `agentloom-tui` 进程内；读取项目的 `config/llm.yaml` 选择模型；通过受限工具调用现有 Python bridge 来查看项目、Agent 和运行状态、校验草稿；只有用户执行 `/apply` 才允许落盘。
+若未来彻底移除 Python sidecar，候选方案是一个独立、短回合的 TypeScript Agent：直接使用 Vercel AI SDK 的 OpenAI-compatible provider，运行在现有 `agentloom-tui` 进程内；读取项目的 `config/llm.yaml` 选择模型；通过受限工具调用 bridge 来查看项目、Agent 和运行状态、校验草稿；只有用户执行 `/apply` 才允许落盘。
 
 不要把完整 OpenCode 或 Hermes 当作子进程/服务嵌入，也不要继续让 TUI 对话经过 LiteLLM。最短路径是复用 OpenCode 已验证的底层 SDK 和架构边界，而不是复用其完整 coding-agent 产品。
 
@@ -37,7 +37,7 @@ TUI 应实现为一个独立、短回合的 TypeScript Agent：直接使用 Verc
 |---|---|---|---|
 | 完整 OpenCode | Provider、session、流式事件、工具循环 | 编码工具、权限系统、无限会话循环、压缩、服务端、持久化和动态安装 provider | 不嵌入；复用其 provider/stream/session 设计和同一底层 SDK |
 | 完整 Hermes | Provider Profile、transport、工具循环、重试与 session | 第二套 Python Agent runtime、默认 90 次工具迭代、复杂 fallback/重试、CLI/gateway 和大量 Python 依赖 | 不嵌入；只借鉴 Provider Profile、归一化事件和有界循环 |
-| 小型 TS Agent | 正好覆盖对话、项目观察和 Agent YAML 草稿 | 只需一个 provider adapter 和少量受限工具 | 采用 |
+| 小型 TS Agent | 正好覆盖对话、项目观察和 Agent YAML 草稿 | 需要把密钥、配置和工具 RPC 迁入 TUI | 原候选；当前采用更短的 Python sidecar 直连方案 |
 
 这里的“复用 OpenCode”不能理解为安装一个独立 `ChatAgent` 类。OpenCode 官方 JS SDK 的 `createOpencode()` 会先创建 server，再返回连接该 server 的 client，见 [`packages/sdk/js/src/index.ts`](https://github.com/anomalyco/opencode/blob/fab213312927ea64cf968832c527206e8c944f9e/packages/sdk/js/src/index.ts#L1-L21)；创建 server 的实现实际启动的是 `opencode serve` 子进程，见 [`packages/sdk/js/src/server.ts`](https://github.com/anomalyco/opencode/blob/fab213312927ea64cf968832c527206e8c944f9e/packages/sdk/js/src/server.ts#L22-L67)。因此直接用 OpenCode SDK 等于把完整 OpenCode runtime 带进来，并不会比 AgentLoom 所需的四个工具更简单。
 
@@ -45,7 +45,7 @@ OpenCode 的默认执行路径本身就是 `streamText(...)`：传入 model、me
 
 Hermes 的 `ProviderProfile` 明确是声明式配置，不负责构造 client、stream 或 retry，见 [`providers/base.py`](https://github.com/NousResearch/hermes-agent/blob/3d9be2789552a495c7adf30148e867e7614a4bdc/providers/base.py#L1-L9)。其完整 conversation loop 则默认执行到文本完成或迭代预算耗尽，见 [`conversation_loop.py`](https://github.com/NousResearch/hermes-agent/blob/3d9be2789552a495c7adf30148e867e7614a4bdc/agent/conversation_loop.py#L570-L596) 和 [`conversation_loop.py`](https://github.com/NousResearch/hermes-agent/blob/3d9be2789552a495c7adf30148e867e7614a4bdc/agent/conversation_loop.py#L684-L698)；`AIAgent` 默认上限是 90 次，见 [`run_agent.py`](https://github.com/NousResearch/hermes-agent/blob/3d9be2789552a495c7adf30148e867e7614a4bdc/run_agent.py#L418-L435)。把它作为 TUI 后端会把一个短对话问题重新变成一套重型 Python Agent 系统。
 
-## 目标架构
+## 原候选架构（当前未采用）
 
 ```mermaid
 flowchart LR
