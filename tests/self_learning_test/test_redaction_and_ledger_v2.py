@@ -6,6 +6,7 @@ import json
 import sqlite3
 import threading
 import uuid
+from contextlib import contextmanager
 from pathlib import Path
 from time import perf_counter, sleep
 
@@ -20,6 +21,8 @@ from src.extensions.self_learning.redaction import (
     redact_text,
     scan_injection_patterns,
 )
+from src.extensions.self_learning.review_engine import ReviewEngine
+from src.extensions.self_learning.review_types import CandidateInput
 
 # -- Redaction ------------------------------------------------------------------
 
@@ -420,8 +423,6 @@ def test_non_final_event_output_cannot_be_promoted_to_run_final_answer(
 def test_tainted_root_blocks_every_later_event_echo_from_persistence_surfaces(
     tmp_path: Path,
 ) -> None:
-    from src.extensions.self_learning import reviewer
-
     db_path = tmp_path / "self_learning.db"
     ledger = SelfLearningLedger(db_path)
     root_run_id = "root_echo_boundary"
@@ -513,10 +514,14 @@ def test_tainted_root_blocks_every_later_event_echo_from_persistence_surfaces(
     assert stored_run["final_answer"] == "[BLOCKED]"
     assert ledger.search_events(marker) == []
 
-    digest = reviewer._review_digest(root_run_id, db_path=db_path)
-    assert digest is not None
-    assert marker not in digest
-    assert "[BLOCKED]" in digest
+    review_context = ledger.completed_review_context(
+        root_run_id,
+        tool_result_limit=50,
+    )
+    assert review_context is not None
+    serialized_context = json.dumps(review_context, ensure_ascii=False, sort_keys=True)
+    assert marker not in serialized_context
+    assert "[BLOCKED]" in serialized_context
     for path in (db_path, db_path.with_name(f"{db_path.name}-wal")):
         if path.exists():
             assert marker.encode() not in path.read_bytes()
@@ -728,13 +733,16 @@ def test_ledger_and_memory_store_share_the_same_writer_gate(
     ledger = SelfLearningLedger(db_path)
     memory_transaction_started = threading.Event()
     memory_errors: list[BaseException] = []
-    original_add = store._add_tx
+    import src.extensions.self_learning.memory_store as memory_store_module
 
-    def slow_add(*args, **kwargs):
-        result = original_add(*args, **kwargs)
-        memory_transaction_started.set()
-        sleep(0.03)
-        return result
+    original_transaction = memory_store_module.serialized_write_transaction
+
+    @contextmanager
+    def slow_memory_transaction(*args, **kwargs):
+        with original_transaction(*args, **kwargs) as conn:
+            memory_transaction_started.set()
+            sleep(0.03)
+            yield conn
 
     def impatient_ledger_connect() -> sqlite3.Connection:
         conn = sqlite3.connect(str(db_path), timeout=0.005)
@@ -742,7 +750,11 @@ def test_ledger_and_memory_store_share_the_same_writer_gate(
         conn.execute("PRAGMA busy_timeout=5")
         return conn
 
-    monkeypatch.setattr(store, "_add_tx", slow_add)
+    monkeypatch.setattr(
+        memory_store_module,
+        "serialized_write_transaction",
+        slow_memory_transaction,
+    )
     monkeypatch.setattr(ledger, "_connect", impatient_ledger_connect)
 
     def write_memory() -> None:
@@ -770,7 +782,7 @@ def test_runtime_event_and_review_writes_share_the_writer_gate(
 ):
     db_path = tmp_path / "self_learning.db"
     runtime_ledger = SelfLearningLedger(db_path)
-    review_ledger = SelfLearningLedger(db_path)
+    review_engine = ReviewEngine(db_path)
     runtime_ledger.append_runtime_event(
         CanonicalSessionEvent(
             event_id=uuid.uuid4().hex,
@@ -799,7 +811,7 @@ def test_runtime_event_and_review_writes_share_the_writer_gate(
         return conn
 
     monkeypatch.setattr(runtime_ledger, "_append_event_in_conn", slow_runtime_append)
-    monkeypatch.setattr(review_ledger, "_connect", impatient_review_connect)
+    monkeypatch.setattr(review_engine, "_connect", impatient_review_connect)
 
     def write_runtime_event() -> None:
         try:
@@ -813,20 +825,30 @@ def test_runtime_event_and_review_writes_share_the_writer_gate(
     runtime_thread.start()
     assert runtime_transaction_started.wait(timeout=1)
 
-    review_id = review_ledger.record_review(
-        review_key="root:run_runtime_review_gate",
-        root_run_id="run_runtime_review_gate",
-        status="completed",
+    review = review_engine.review(
+        "application",
+        "app_writer_gate",
+        [],
+        source_runs=[
+            {
+                "root_run_id": "run_runtime_review_gate",
+                "application_id": "app_writer_gate",
+            }
+        ],
     )
     runtime_thread.join(timeout=1)
 
     assert not runtime_thread.is_alive()
     assert runtime_errors == []
-    assert review_id > 0
-    assert review_ledger.review_status(
-        review_key="root:run_runtime_review_gate",
-        root_run_id="run_runtime_review_gate",
-    ) == "completed"
+    status = review_engine.status("application", "app_writer_gate")
+    assert review.review_id.startswith("review_")
+    assert status["counts"]["batches"] == {"completed": 1}
+    assert status["batches"][0]["source_runs"] == [
+        {
+            "application_id": "app_writer_gate",
+            "root_run_id": "run_runtime_review_gate",
+        }
+    ]
 
 
 @pytest.mark.parametrize(
@@ -843,13 +865,16 @@ def test_all_ledger_writers_share_the_memory_store_gate(
     ledger = SelfLearningLedger(db_path)
     memory_transaction_started = threading.Event()
     memory_errors: list[BaseException] = []
-    original_add = store._add_tx
+    import src.extensions.self_learning.memory_store as memory_store_module
 
-    def slow_add(*args, **kwargs):
-        result = original_add(*args, **kwargs)
-        memory_transaction_started.set()
-        sleep(0.03)
-        return result
+    original_transaction = memory_store_module.serialized_write_transaction
+
+    @contextmanager
+    def slow_memory_transaction(*args, **kwargs):
+        with original_transaction(*args, **kwargs) as conn:
+            memory_transaction_started.set()
+            sleep(0.03)
+            yield conn
 
     def impatient_ledger_connect() -> sqlite3.Connection:
         conn = sqlite3.connect(str(db_path), timeout=0.005)
@@ -857,7 +882,11 @@ def test_all_ledger_writers_share_the_memory_store_gate(
         conn.execute("PRAGMA busy_timeout=5")
         return conn
 
-    monkeypatch.setattr(store, "_add_tx", slow_add)
+    monkeypatch.setattr(
+        memory_store_module,
+        "serialized_write_transaction",
+        slow_memory_transaction,
+    )
     monkeypatch.setattr(ledger, "_connect", impatient_ledger_connect)
 
     def write_memory() -> None:
@@ -903,10 +932,53 @@ def test_prune_events_removes_old_runs_only(tmp_path: Path):
         conn.commit()
     result = ledger.prune_events(retention_days=90)
     assert result["runs_pruned"] == 1
+    assert result["reviews_pruned"] == 0
     counts = ledger.count_events()
     assert counts["runs_indexed"] == 1
     assert ledger.search_events("ancient", limit=5) == []
     assert ledger.search_events("fresh", limit=5)
+
+
+def test_prune_events_preserves_v6_review_audit(tmp_path: Path):
+    db_path = tmp_path / "self_learning.db"
+    ledger = SelfLearningLedger(db_path)
+    ledger.append_event(_event("run_review_audit", "ancient source event"))
+    review = ReviewEngine(db_path).review(
+        "project",
+        "project",
+        [
+            CandidateInput(
+                kind="fact",
+                memory_key="audit:immutable",
+                payload={"text": "Review decisions remain auditable."},
+                approval="manual",
+                source_run_ids=("run_review_audit",),
+            )
+        ],
+        source_runs=[{"root_run_id": "run_review_audit"}],
+    )
+    with sqlite3.connect(db_path) as conn:
+        conn.execute(
+            "UPDATE runs SET started_at = '2020-01-01T00:00:00+00:00', "
+            "ended_at = '2020-01-01T00:00:00+00:00', "
+            "indexed_at = '2020-01-01T00:00:00+00:00' "
+            "WHERE run_id = 'run_review_audit'"
+        )
+        conn.execute(
+            "UPDATE review_batches SET created_at = '2020-01-01T00:00:00+00:00', "
+            "finished_at = '2020-01-01T00:00:00+00:00' WHERE review_id = ?",
+            (review.review_id,),
+        )
+        conn.commit()
+
+    result = ledger.prune_events(retention_days=90)
+
+    assert result["runs_pruned"] == 1
+    assert result["reviews_pruned"] == 0
+    status = ReviewEngine(db_path).status("project", "project")
+    assert status["counts"]["batches"] == {"completed": 1}
+    assert status["counts"]["candidates"] == {"pending_pre_review": 1}
+    assert status["batches"][0]["review_id"] == review.review_id
 
 
 def test_ledger_init_runs_once_per_process(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):

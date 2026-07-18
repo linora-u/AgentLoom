@@ -20,6 +20,7 @@ from src.lib.trusted_memory_evidence import (
     TRUSTED_MEMORY_EVIDENCE_RESPONSE_KEY,
 )
 
+from .application_scope import resolve_legacy_application_id
 from .event_schema import (
     CanonicalSessionEvent,
     safe_run_id,
@@ -35,10 +36,11 @@ from .redaction import (
     sanitize_value_fragments,
     sanitize_value_fragments_with_taint,
 )
+from .review_types import payload_hash
 
 logger = get_logger(__name__)
 
-_SCHEMA_VERSION = 5
+_SCHEMA_VERSION = 6
 _BUSY_TIMEOUT_MS = 5000
 _SAFETY_TAINT_KEY = "_safety_tainted"
 _V4_PHYSICAL_CLEANUP_KEY = "schema_v4_physical_cleanup"
@@ -53,6 +55,7 @@ _V5_PENDING_ADD_HASH_REVISION_KEY = "schema_v5_pending_add_hash_revision"
 _V5_PENDING_ADD_HASH_REVISION = "2"
 _V5_REVIEW_KEY_REVISION_KEY = "schema_v5_review_key_revision"
 _V5_REVIEW_KEY_REVISION = "1"
+_V6_MIGRATION_REPORT_KEY = "schema_v6_typed_review_migration"
 _V5_PENDING_HASH_TRIGGERS = (
     "trg_memory_pending_add_require_hash_insert",
     "trg_memory_pending_add_require_hash_update",
@@ -63,6 +66,15 @@ _V5_REMOVED_TABLES = (
     "memory_evidence",
     "memory_injections",
     "artifacts",
+)
+_V6_REMOVED_TABLES = (*_V5_REMOVED_TABLES, "memory_pending_writes", "review_runs")
+_V6_REQUIRED_TABLES = (
+    "memory_items",
+    "review_batches",
+    "review_batch_runs",
+    "review_candidates",
+    "review_mutations",
+    "run_feedback",
 )
 _V5_REMOVED_MAINTENANCE_KEYS = (
     "learning_worker_lease",
@@ -227,6 +239,135 @@ CREATE TABLE{create_modifier} {table_name} (
 """
 
 
+def _v6_review_tables_sql(
+    *,
+    memory_items: str = "memory_items",
+    review_batches: str = "review_batches",
+    review_batch_runs: str = "review_batch_runs",
+    review_candidates: str = "review_candidates",
+    review_mutations: str = "review_mutations",
+    run_feedback: str = "run_feedback",
+    if_not_exists: bool = False,
+) -> str:
+    """Build the canonical typed-memory and review tables."""
+    table_names = (
+        memory_items,
+        review_batches,
+        review_batch_runs,
+        review_candidates,
+        review_mutations,
+        run_feedback,
+    )
+    for table_name in table_names:
+        if re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", table_name) is None:
+            raise ValueError(f"invalid internal table name: {table_name!r}")
+    create_modifier = " IF NOT EXISTS" if if_not_exists else ""
+    return f"""
+CREATE TABLE{create_modifier} {memory_items} (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    scope_type TEXT NOT NULL CHECK (scope_type IN ('project', 'application')),
+    scope_id TEXT NOT NULL,
+    kind TEXT NOT NULL CHECK (kind IN ('fact', 'experience')),
+    memory_key TEXT NOT NULL,
+    payload_json TEXT NOT NULL,
+    payload_hash TEXT NOT NULL,
+    state TEXT NOT NULL CHECK (
+        state IN ('active_unreviewed', 'active_confirmed', 'retracted', 'shadowed')
+    ),
+    activation_source TEXT NOT NULL CHECK (
+        activation_source IN ('auto', 'manual', 'migration', 'admin')
+    ),
+    provenance_json TEXT NOT NULL DEFAULT '[]',
+    revision INTEGER NOT NULL DEFAULT 1 CHECK (revision > 0),
+    source_review_id TEXT,
+    supersedes_id INTEGER,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    CHECK (
+        (scope_type = 'project' AND scope_id = 'project')
+        OR (scope_type = 'application' AND length(scope_id) > 0)
+    ),
+    UNIQUE (scope_type, scope_id, kind, memory_key, revision)
+);
+
+CREATE TABLE{create_modifier} {review_batches} (
+    review_id TEXT PRIMARY KEY,
+    scope_type TEXT NOT NULL CHECK (scope_type IN ('project', 'application')),
+    scope_id TEXT NOT NULL,
+    status TEXT NOT NULL CHECK (
+        status IN ('completed', 'failed', 'rolled_back', 'dry_run')
+    ),
+    dry_run INTEGER NOT NULL DEFAULT 0 CHECK (dry_run IN (0, 1)),
+    result_json TEXT NOT NULL DEFAULT '{{}}',
+    created_at TEXT NOT NULL,
+    finished_at TEXT NOT NULL,
+    CHECK (
+        (scope_type = 'project' AND scope_id = 'project')
+        OR (scope_type = 'application' AND length(scope_id) > 0)
+    )
+);
+
+CREATE TABLE{create_modifier} {review_batch_runs} (
+    review_id TEXT NOT NULL,
+    root_run_id TEXT NOT NULL,
+    application_id TEXT NOT NULL DEFAULT '',
+    PRIMARY KEY (review_id, root_run_id, application_id)
+);
+
+CREATE TABLE{create_modifier} {review_candidates} (
+    candidate_id TEXT PRIMARY KEY,
+    review_id TEXT NOT NULL,
+    scope_type TEXT NOT NULL CHECK (scope_type IN ('project', 'application')),
+    scope_id TEXT NOT NULL,
+    kind TEXT NOT NULL CHECK (kind IN ('fact', 'experience')),
+    memory_key TEXT NOT NULL,
+    payload_json TEXT NOT NULL,
+    payload_hash TEXT NOT NULL,
+    proposed_action TEXT NOT NULL CHECK (
+        proposed_action IN ('add', 'replace', 'remove', 'promote_project')
+    ),
+    approval TEXT NOT NULL CHECK (approval IN ('auto', 'manual')),
+    state TEXT NOT NULL CHECK (
+        state IN (
+            'quarantined', 'pending_pre_review', 'active_unreviewed',
+            'active_confirmed', 'rejected', 'retracted', 'dry_run'
+        )
+    ),
+    outcome TEXT NOT NULL,
+    revision INTEGER NOT NULL DEFAULT 1 CHECK (revision > 0),
+    target_item_id INTEGER,
+    provenance_json TEXT NOT NULL DEFAULT '[]',
+    source_run_ids_json TEXT NOT NULL DEFAULT '[]',
+    gate_reasons_json TEXT NOT NULL DEFAULT '[]',
+    reason TEXT NOT NULL DEFAULT '',
+    created_at TEXT NOT NULL,
+    resolved_at TEXT
+);
+
+CREATE TABLE{create_modifier} {review_mutations} (
+    mutation_id TEXT PRIMARY KEY,
+    review_id TEXT NOT NULL,
+    candidate_id TEXT,
+    memory_item_id INTEGER NOT NULL,
+    operation TEXT NOT NULL CHECK (operation IN ('insert', 'state', 'provenance')),
+    before_json TEXT,
+    after_json TEXT NOT NULL,
+    created_at TEXT NOT NULL,
+    rolled_back_at TEXT
+);
+
+CREATE TABLE{create_modifier} {run_feedback} (
+    feedback_id TEXT PRIMARY KEY,
+    run_id TEXT NOT NULL,
+    verdict TEXT NOT NULL CHECK (verdict IN ('accepted', 'rejected', 'corrected')),
+    item_id INTEGER,
+    application_id TEXT NOT NULL DEFAULT '',
+    correction_json TEXT,
+    created_at TEXT NOT NULL
+);
+"""
+
+
 class SelfLearningLedger:
     """DB-first source of truth for history, curated memory, and reviews."""
 
@@ -249,7 +390,7 @@ class SelfLearningLedger:
             # Process-local initialization cannot prove that a stale v4
             # process did not recreate removed state afterwards.  The hot path
             # performs one narrow read and only re-enters the locked migration
-            # when the v5 invariant was actually violated.
+            # when the latest schema invariant was actually violated.
             self._remove_legacy_memory_artifacts()
             if self._has_removed_v5_state():
                 with self._init_lock:
@@ -298,10 +439,25 @@ class SelfLearningLedger:
             return True
         try:
             with self._connect() as conn:
+                current = int(
+                    conn.execute(
+                        "SELECT COALESCE(MAX(version), 0) FROM schema_version"
+                    ).fetchone()[0]
+                )
+                if current != _SCHEMA_VERSION:
+                    return True
+                existing_tables = {
+                    str(row[0])
+                    for row in conn.execute(
+                        "SELECT name FROM sqlite_master WHERE type='table'"
+                    )
+                }
+                if not set(_V6_REQUIRED_TABLES).issubset(existing_tables):
+                    return True
                 forbidden_tables = conn.execute(
                     "SELECT 1 FROM sqlite_master "
-                    "WHERE type='table' AND name IN (?, ?, ?, ?, ?) LIMIT 1",
-                    _V5_REMOVED_TABLES,
+                    "WHERE type='table' AND name IN (?, ?, ?, ?, ?, ?, ?) LIMIT 1",
+                    _V6_REMOVED_TABLES,
                 ).fetchone()
                 if forbidden_tables is not None:
                     return True
@@ -320,10 +476,6 @@ class SelfLearningLedger:
                     or str(sanitizer_revision["value"] or "")
                     != _V5_SANITIZER_REVISION
                 ):
-                    return True
-                if self._v5_pending_add_hash_repair_required(conn):
-                    return True
-                if self._v5_review_key_repair_required(conn):
                     return True
                 placeholders = ", ".join(
                     "?" for _ in _V5_REMOVED_MAINTENANCE_KEYS
@@ -490,6 +642,7 @@ class SelfLearningLedger:
         conn.execute("BEGIN IMMEDIATE")
         migrated_v4 = False
         migrated_v5 = False
+        migrated_v6 = False
         refreshed_v4_sanitizer = False
         refreshed_v5_sanitizer = False
         rebuilt_trusted_evidence_schema = False
@@ -518,7 +671,13 @@ class SelfLearningLedger:
             # migration are all fenced by the same process-wide write lock.
             self._execute_script_in_transaction(
                 conn,
-                _SCHEMA_V5_SQL if current >= 5 else _SCHEMA_SQL,
+                (
+                    _SCHEMA_V6_SQL
+                    if current >= 6
+                    else _SCHEMA_V5_SQL
+                    if current >= 5
+                    else _SCHEMA_SQL
+                ),
             )
             if current >= 5 and not self._trusted_review_evidence_schema_is_canonical(
                 conn
@@ -589,11 +748,14 @@ class SelfLearningLedger:
             # Every v4 -> v5 upgrade therefore re-sanitizes retained rows and
             # rebuilds FTS even when the old database claims the latest marker.
             sanitizing_legacy = current < 5
-            requires_v5_sanitizer = (
+            requires_v5_event_sanitizer = (
                 current < 5
                 or v5_sanitizer_revision != _V5_SANITIZER_REVISION
             )
-            sanitizing_storage = sanitizing_legacy or requires_v5_sanitizer
+            requires_v5_memory_sanitizer = (
+                current < 6 and requires_v5_event_sanitizer
+            )
+            sanitizing_storage = sanitizing_legacy or requires_v5_event_sanitizer
             if sanitizing_storage:
                 # UPDATE triggers would mirror intermediate event rows into
                 # FTS. Rebuild the indexes from final sanitized base rows and
@@ -639,12 +801,13 @@ class SelfLearningLedger:
                 self._migrate_v5_simplified_memory(conn)
                 conn.execute("INSERT INTO schema_version (version) VALUES (5)")
                 migrated_v5 = True
-            if requires_v5_sanitizer:
+            if requires_v5_event_sanitizer:
                 self._sanitize_v5_event_sequences(conn)
                 self._sanitize_v5_trusted_review_evidence(conn)
-                self._sanitize_v5_memory_state(conn)
                 refreshed_v5_sanitizer = True
-            if self._v5_pending_add_hash_repair_required(conn):
+            if requires_v5_memory_sanitizer:
+                self._sanitize_v5_memory_state(conn)
+            if current < 6 and self._v5_pending_add_hash_repair_required(conn):
                 self._repair_v5_pending_add_hashes(conn)
                 conn.execute(
                     """
@@ -663,28 +826,32 @@ class SelfLearningLedger:
                 # roll back both the trigger drops and sanitizer marker.
                 for fts_script in available_fts_scripts:
                     self._execute_script_in_transaction(conn, fts_script)
-            removed_v5_legacy_state = self._drop_v5_removed_state(conn)
+            removed_v5_legacy_state = self._drop_v5_removed_state(
+                conn,
+                include_v6_removed=current >= 6,
+            )
             # Pre-release v5 builds persisted a ``running`` claim before the
             # model call. A process crash made that row permanent. Reviews now
             # use an OS lock and persist only terminal audits, so no durable
             # non-terminal state may survive migration or initialization.
-            conn.execute(
-                "UPDATE review_runs SET status = 'skipped' "
-                "WHERE model_type = 'legacy' AND status = 'legacy'"
-            )
-            conn.execute(
-                "DELETE FROM review_runs "
-                "WHERE status NOT IN ('completed', 'failed', 'skipped')"
-            )
-            if self._v5_review_key_repair_required(conn):
-                self._repair_v5_review_keys(conn)
+            if current < 6:
                 conn.execute(
-                    """
-                    INSERT INTO maintenance (key, value) VALUES (?, ?)
-                    ON CONFLICT(key) DO UPDATE SET value = excluded.value
-                    """,
-                    (_V5_REVIEW_KEY_REVISION_KEY, _V5_REVIEW_KEY_REVISION),
+                    "UPDATE review_runs SET status = 'skipped' "
+                    "WHERE model_type = 'legacy' AND status = 'legacy'"
                 )
+                conn.execute(
+                    "DELETE FROM review_runs "
+                    "WHERE status NOT IN ('completed', 'failed', 'skipped')"
+                )
+                if self._v5_review_key_repair_required(conn):
+                    self._repair_v5_review_keys(conn)
+                    conn.execute(
+                        """
+                        INSERT INTO maintenance (key, value) VALUES (?, ?)
+                        ON CONFLICT(key) DO UPDATE SET value = excluded.value
+                        """,
+                        (_V5_REVIEW_KEY_REVISION_KEY, _V5_REVIEW_KEY_REVISION),
+                    )
             conn.execute(
                 """
                 INSERT INTO maintenance (key, value) VALUES (?, ?)
@@ -699,6 +866,10 @@ class SelfLearningLedger:
                 """,
                 (_V5_SANITIZER_REVISION_KEY, _V5_SANITIZER_REVISION),
             )
+            if current < 6:
+                self._migrate_v6_typed_review(conn)
+                conn.execute("INSERT INTO schema_version (version) VALUES (6)")
+                migrated_v6 = True
             # ``schema_version=4`` proves only that logical redaction committed.
             # A checkpoint can still fail afterwards while an older reader pins
             # pre-redaction WAL frames. Persist the physical-cleanup obligation
@@ -706,6 +877,7 @@ class SelfLearningLedger:
             requires_v4_physical_cleanup = (
                 migrated_v4
                 or migrated_v5
+                or migrated_v6
                 or refreshed_v4_sanitizer
                 or refreshed_v5_sanitizer
                 or rebuilt_trusted_evidence_schema
@@ -759,7 +931,11 @@ class SelfLearningLedger:
             self._complete_v4_physical_cleanup(conn)
 
     @staticmethod
-    def _drop_v5_removed_state(conn: sqlite3.Connection) -> bool:
+    def _drop_v5_removed_state(
+        conn: sqlite3.Connection,
+        *,
+        include_v6_removed: bool = False,
+    ) -> bool:
         """Keep deleted outbox state absent even after a stale v4 writer.
 
         Mixed-version processes can recreate an old table after the v5
@@ -773,7 +949,8 @@ class SelfLearningLedger:
                 "SELECT name FROM sqlite_master WHERE type = 'table'"
             )
         }
-        for table in _V5_REMOVED_TABLES:
+        removed_tables = _V6_REMOVED_TABLES if include_v6_removed else _V5_REMOVED_TABLES
+        for table in removed_tables:
             if table in existing:
                 conn.execute(f'DROP TABLE "{table}"')
                 changed = True
@@ -1943,6 +2120,547 @@ class SelfLearningLedger:
                         "pending_copied": pending_copied,
                         "stale_copied": stale_copied,
                         "session_rows_skipped": skipped_session,
+                    }
+                ),
+            ),
+        )
+
+    @classmethod
+    def _migrate_v6_typed_review(cls, conn: sqlite3.Connection) -> None:
+        """Migrate curated v5 facts and pending writes without invoking a model.
+
+        Active v5 rows are confirmed migration facts. Pending operations become
+        manual review candidates, never active memory. The entire replacement
+        runs inside the outer schema transaction.
+        """
+        now = _now_iso()
+        internal_tables = {
+            "memory_items": "memory_items_v6",
+            "review_batches": "review_batches_v6",
+            "review_batch_runs": "review_batch_runs_v6",
+            "review_candidates": "review_candidates_v6",
+            "review_mutations": "review_mutations_v6",
+            "run_feedback": "run_feedback_v6",
+        }
+        for table_name in internal_tables.values():
+            conn.execute(f'DROP TABLE IF EXISTS "{table_name}"')
+        cls._execute_script_in_transaction(
+            conn,
+            _v6_review_tables_sql(**internal_tables),
+        )
+
+        identity_paths: dict[str, dict[str, set[str]]] = {}
+
+        def remember_identity(
+            application_id: Any,
+            *,
+            application_path: Any = "",
+            workflow_path: Any = "",
+            yaml_path: Any = "",
+        ) -> None:
+            legacy_id = str(application_id or "").strip()
+            if not legacy_id:
+                return
+            bucket = identity_paths.setdefault(
+                legacy_id,
+                {"application_paths": set(), "workflow_paths": set()},
+            )
+            if str(application_path or "").strip():
+                bucket["application_paths"].add(str(application_path).strip())
+            for path in (workflow_path, yaml_path):
+                if str(path or "").strip():
+                    bucket["workflow_paths"].add(str(path).strip())
+
+        for table in ("runs", "events"):
+            if not cls._has_column(conn, table, "application_id"):
+                continue
+            columns = {
+                str(row[1])
+                for row in conn.execute(f'PRAGMA table_info("{table}")').fetchall()
+            }
+            if "application_id" not in columns:
+                continue
+            selected = ["application_id"]
+            for column in ("application_path", "workflow_path", "yaml_path"):
+                selected.append(column if column in columns else f"'' AS {column}")
+            for identity_row in conn.execute(
+                f'SELECT {", ".join(selected)} FROM "{table}"'
+            ).fetchall():
+                remember_identity(
+                    identity_row["application_id"],
+                    application_path=identity_row["application_path"],
+                    workflow_path=identity_row["workflow_path"],
+                    yaml_path=identity_row["yaml_path"],
+                )
+
+        for row in conn.execute(
+            "SELECT scope_type,scope_id FROM memory_items "
+            "UNION SELECT scope_type,scope_id FROM memory_pending_writes"
+        ).fetchall():
+            if str(row["scope_type"] or "") == "application":
+                remember_identity(row["scope_id"])
+        for row in conn.execute(
+            "SELECT application_id FROM review_runs WHERE application_id IS NOT NULL"
+        ).fetchall():
+            remember_identity(row["application_id"])
+        if cls._has_column(conn, "skill_proposals", "application_id"):
+            for row in conn.execute(
+                "SELECT DISTINCT application_id FROM skill_proposals "
+                "WHERE application_id IS NOT NULL"
+            ).fetchall():
+                remember_identity(row["application_id"])
+        if cls._has_column(conn, "trusted_review_evidence", "scope_id"):
+            for row in conn.execute(
+                "SELECT DISTINCT scope_id FROM trusted_review_evidence "
+                "WHERE scope_type='application'"
+            ).fetchall():
+                remember_identity(row["scope_id"])
+
+        resolutions = {
+            legacy_id: resolve_legacy_application_id(
+                legacy_id,
+                application_paths=tuple(sorted(paths["application_paths"])),
+                workflow_paths=tuple(sorted(paths["workflow_paths"])),
+            )
+            for legacy_id, paths in identity_paths.items()
+        }
+
+        def application_resolution(legacy_id: Any) -> tuple[str, bool, str]:
+            raw = str(legacy_id or "").strip()
+            resolution = resolutions.get(raw)
+            if resolution is None:
+                resolution = resolve_legacy_application_id(raw)
+                resolutions[raw] = resolution
+            if resolution.canonical_id:
+                return resolution.canonical_id, True, resolution.reason
+            return resolution.quarantine_id, False, resolution.reason
+
+        def legacy_scope_resolution(
+            legacy_scope_type: Any,
+            legacy_scope_id: Any,
+        ) -> tuple[str, str, bool, str]:
+            scope_type = str(legacy_scope_type or "").strip().casefold()
+            scope_id = str(legacy_scope_id or "").strip()
+            if scope_type == "project" and scope_id == "project":
+                return "project", "project", True, "project_scope"
+            if scope_type == "application":
+                target_id, resolved, reason = application_resolution(scope_id)
+                return "application", target_id, resolved, reason
+            digest = hashlib.sha256(
+                f"{scope_type}:{scope_id}".encode("utf-8", errors="surrogatepass")
+            ).hexdigest()[:24]
+            reason = (
+                "invalid_project_scope_binding"
+                if scope_type == "project"
+                else "invalid_legacy_scope_type"
+            )
+            return (
+                "application",
+                f"migration-unresolved/{digest}",
+                False,
+                reason,
+            )
+
+        # Historical rows retain their provenance but use either the one proven
+        # canonical identity or an isolated migration namespace. They can never
+        # accidentally bind to a different live Application after the upgrade.
+        for legacy_id, resolution in resolutions.items():
+            target_id = resolution.canonical_id or resolution.quarantine_id
+            if not target_id or target_id == legacy_id:
+                continue
+            for table in ("runs", "events", "skill_proposals"):
+                if cls._has_column(conn, table, "application_id"):
+                    conn.execute(
+                        f'UPDATE "{table}" SET application_id=? WHERE application_id=?',
+                        (target_id, legacy_id),
+                    )
+            if cls._has_column(conn, "trusted_review_evidence", "scope_id"):
+                # Avoid uniqueness collisions when two proven historical aliases
+                # refer to the same canonical Application.
+                conn.execute(
+                    """
+                    INSERT OR IGNORE INTO trusted_review_evidence(
+                        event_id,root_run_id,tool_name,kind,scope_type,scope_id,
+                        source,text,created_at
+                    )
+                    SELECT event_id,root_run_id,tool_name,kind,scope_type,?,
+                           source,text,created_at
+                    FROM trusted_review_evidence
+                    WHERE scope_type='application' AND scope_id=?
+                    """,
+                    (target_id, legacy_id),
+                )
+                conn.execute(
+                    "DELETE FROM trusted_review_evidence "
+                    "WHERE scope_type='application' AND scope_id=?",
+                    (legacy_id,),
+                )
+
+        migration_batches: set[tuple[str, str]] = set()
+
+        def ensure_migration_batch(
+            scope_type: str,
+            scope_id: str,
+            *,
+            created_at: str,
+        ) -> str:
+            scope_pair = (scope_type, scope_id)
+            scope_digest = hashlib.sha256(
+                f"{scope_type}:{scope_id}".encode()
+            ).hexdigest()[:16]
+            review_id = f"migration_v5_{scope_digest}"
+            if scope_pair not in migration_batches:
+                conn.execute(
+                    """
+                    INSERT INTO review_batches_v6(
+                        review_id, scope_type, scope_id, status, dry_run,
+                        result_json, created_at, finished_at
+                    ) VALUES (?, ?, ?, 'completed', 0, ?, ?, ?)
+                    """,
+                    (
+                        review_id,
+                        scope_type,
+                        scope_id,
+                        _json_dumps({"migration_schema": 5}),
+                        created_at,
+                        now,
+                    ),
+                )
+                migration_batches.add(scope_pair)
+            return review_id
+
+        pending_count = 0
+        quarantined_count = 0
+
+        active_rows = conn.execute(
+            "SELECT * FROM memory_items ORDER BY id"
+        ).fetchall()
+        active_payloads: dict[int, dict[str, str]] = {}
+        active_slots: set[tuple[str, str, str, str]] = set()
+        for row in active_rows:
+            content = sanitize_text_fragment(str(row["content"] or "")).strip()
+            if not content or content == BLOCKED_TEXT:
+                continue
+            item_id = int(row["id"])
+            content_digest = str(row["content_hash"] or memory_content_hash(content))
+            typed_payload = {"text": content}
+            memory_key = f"legacy:{content_digest}"
+            legacy_scope_type = str(row["scope_type"] or "")
+            legacy_scope_id = str(row["scope_id"] or "")
+            scope_type, scope_id, scope_resolved, scope_reason = (
+                legacy_scope_resolution(legacy_scope_type, legacy_scope_id)
+            )
+            provenance = [
+                {
+                    "migration_schema": 5,
+                    "legacy_item_id": item_id,
+                    "legacy_scope_type": legacy_scope_type,
+                    "legacy_scope_id": legacy_scope_id,
+                    "canonical_scope_type": scope_type,
+                    "canonical_scope_id": scope_id,
+                    "scope_resolution": scope_reason,
+                }
+            ]
+            slot = (scope_type, scope_id, "fact", memory_key)
+            collision = scope_resolved and slot in active_slots
+            if not scope_resolved or collision:
+                reason = (
+                    "legacy_application_scope_collision"
+                    if collision
+                    else "legacy_application_scope_unresolved"
+                )
+                gate_reasons = [reason]
+                if scope_reason and scope_reason != reason:
+                    gate_reasons.append(scope_reason)
+                review_id = ensure_migration_batch(
+                    scope_type,
+                    scope_id,
+                    created_at=str(row["created_at"] or now),
+                )
+                conn.execute(
+                    """
+                    INSERT INTO review_candidates_v6(
+                        candidate_id, review_id, scope_type, scope_id, kind,
+                        memory_key, payload_json, payload_hash, proposed_action,
+                        approval, state, outcome, revision, target_item_id,
+                        provenance_json, source_run_ids_json, gate_reasons_json,
+                        reason, created_at, resolved_at
+                    ) VALUES (?, ?, ?, ?, 'fact', ?, ?, ?, 'add', 'manual',
+                        'quarantined', 'quarantined', 1, NULL, ?, '[]', ?, ?, ?, ?)
+                    """,
+                    (
+                        f"migration_v5_active_{item_id}",
+                        review_id,
+                        scope_type,
+                        scope_id,
+                        memory_key,
+                        _json_dumps(typed_payload),
+                        payload_hash(typed_payload),
+                        _json_dumps(provenance),
+                        _json_dumps(gate_reasons),
+                        reason,
+                        str(row["created_at"] or now),
+                        now,
+                    ),
+                )
+                quarantined_count += 1
+                continue
+            conn.execute(
+                """
+                INSERT INTO memory_items_v6(
+                    id, scope_type, scope_id, kind, memory_key, payload_json,
+                    payload_hash, state, activation_source, provenance_json,
+                    revision, created_at, updated_at
+                ) VALUES (?, ?, ?, 'fact', ?, ?, ?, 'active_confirmed',
+                    'migration', ?, 1, ?, ?)
+                """,
+                (
+                    item_id,
+                    scope_type,
+                    scope_id,
+                    memory_key,
+                    _json_dumps(typed_payload),
+                    payload_hash(typed_payload),
+                    _json_dumps(provenance),
+                    str(row["created_at"] or now),
+                    str(row["updated_at"] or now),
+                ),
+            )
+            active_slots.add(slot)
+            active_payloads[item_id] = typed_payload
+
+        for row in conn.execute(
+            "SELECT * FROM memory_pending_writes ORDER BY id"
+        ).fetchall():
+            pending_id = int(row["id"])
+            legacy_scope_type = str(row["scope_type"] or "")
+            legacy_scope_id = str(row["scope_id"] or "")
+            scope_type, scope_id, scope_resolved, scope_reason = (
+                legacy_scope_resolution(legacy_scope_type, legacy_scope_id)
+            )
+            review_id = ensure_migration_batch(
+                scope_type,
+                scope_id,
+                created_at=str(row["created_at"] or now),
+            )
+
+            try:
+                legacy_payload_value = json.loads(str(row["payload_json"] or "{}"))
+            except (TypeError, json.JSONDecodeError):
+                legacy_payload_value = {}
+            legacy_payload = (
+                legacy_payload_value
+                if isinstance(legacy_payload_value, dict)
+                else {}
+            )
+            action = str(row["action"] or "add").strip().casefold()
+            action_valid = action in {"add", "replace", "remove"}
+            if not action_valid:
+                action = "add"
+            target_id = 0
+            try:
+                target_id = int(legacy_payload.get("target_id") or 0)
+            except (TypeError, ValueError):
+                target_id = 0
+            content = sanitize_text_fragment(
+                str(legacy_payload.get("content") or "")
+            ).strip()
+            if not content and target_id in active_payloads:
+                content = active_payloads[target_id]["text"]
+            reconstructable = bool(content) and content != BLOCKED_TEXT
+            if not reconstructable:
+                content = "Legacy pending operation could not be reconstructed safely."
+            typed_payload = {"text": content}
+            typed_payload_hash = payload_hash(typed_payload)
+            content_digest = memory_content_hash(content)
+            memory_key = (
+                f"legacy:{str(legacy_payload.get('target_content_hash') or content_digest)}"
+            )
+            source_run_id = str(row["source_run_id"] or "")
+            provenance = [
+                {
+                    "migration_schema": 5,
+                    "migration_evidence": "v5_pending_write",
+                    "legacy_pending_id": pending_id,
+                    "legacy_scope_type": legacy_scope_type,
+                    "legacy_scope_id": legacy_scope_id,
+                    "canonical_scope_type": scope_type,
+                    "canonical_scope_id": scope_id,
+                    "scope_resolution": scope_reason,
+                    "proposed_action": action,
+                    "memory_key": memory_key,
+                    "payload_hash": typed_payload_hash,
+                    "source_run_id": source_run_id,
+                    "root_run_id": source_run_id,
+                    "target_item_id": target_id or None,
+                    "legacy_payload": sanitize_value_fragments(legacy_payload),
+                }
+            ]
+            old_status = str(row["status"] or "stale")
+            pending = (
+                old_status == "pending"
+                and reconstructable
+                and scope_resolved
+                and action_valid
+            )
+            state = "pending_pre_review" if pending else "quarantined"
+            outcome = "pending" if pending else "quarantined"
+            gate_reasons = ["migrated_v5_pending"]
+            if not scope_resolved:
+                gate_reasons.append("legacy_application_scope_unresolved")
+                if scope_reason:
+                    gate_reasons.append(scope_reason)
+            if not reconstructable:
+                gate_reasons.append("legacy_payload_unreconstructable")
+            if not action_valid:
+                gate_reasons.append("legacy_action_invalid")
+            reason = (
+                "migrated_from_v5_without_model"
+                if pending
+                else (
+                    "legacy_application_scope_unresolved"
+                    if not scope_resolved
+                    else "migrated_v5_pending_quarantined"
+                )
+            )
+            conn.execute(
+                """
+                INSERT INTO review_candidates_v6(
+                    candidate_id, review_id, scope_type, scope_id, kind,
+                    memory_key, payload_json, payload_hash, proposed_action,
+                    approval, state, outcome, revision, target_item_id,
+                    provenance_json, source_run_ids_json, gate_reasons_json,
+                    reason, created_at, resolved_at
+                ) VALUES (?, ?, ?, ?, 'fact', ?, ?, ?, ?, 'manual', ?, ?, 1,
+                    ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    f"migration_v5_pending_{pending_id}",
+                    review_id,
+                    scope_type,
+                    scope_id,
+                    memory_key,
+                    _json_dumps(typed_payload),
+                    typed_payload_hash,
+                    action,
+                    state,
+                    outcome,
+                    target_id or None,
+                    _json_dumps(provenance),
+                    _json_dumps([source_run_id] if source_run_id else []),
+                    _json_dumps(gate_reasons),
+                    reason,
+                    str(row["created_at"] or now),
+                    None if pending else str(row["resolved_at"] or now),
+                ),
+            )
+            if source_run_id:
+                conn.execute(
+                    """
+                    INSERT OR IGNORE INTO review_batch_runs_v6(
+                        review_id, root_run_id, application_id
+                    ) VALUES (?, ?, ?)
+                    """,
+                    (
+                        review_id,
+                        source_run_id,
+                        scope_id if scope_type == "application" else "",
+                    ),
+                )
+            if pending:
+                pending_count += 1
+            else:
+                quarantined_count += 1
+
+        legacy_review_count = 0
+        for row in conn.execute("SELECT * FROM review_runs ORDER BY review_id"):
+            legacy_id = int(row["review_id"])
+            review_id = f"legacy_review_{legacy_id}"
+            application_id = str(row["application_id"] or "")
+            scope_resolved = True
+            scope_reason = "project_scope"
+            if application_id:
+                scope_type = "application"
+                scope_id, scope_resolved, scope_reason = application_resolution(
+                    application_id
+                )
+            else:
+                scope_type = "project"
+                scope_id = "project"
+            status = str(row["status"] or "completed")
+            if status not in {"completed", "failed"}:
+                status = "completed"
+            result_json = str(row["result_json"] or "{}")
+            if not scope_resolved:
+                status = "failed"
+                try:
+                    legacy_result = json.loads(result_json)
+                except (TypeError, json.JSONDecodeError):
+                    legacy_result = {}
+                result_json = _json_dumps(
+                    {
+                        "migration_schema": 5,
+                        "migration_quarantined": True,
+                        "reason": "legacy_application_scope_unresolved",
+                        "scope_resolution": scope_reason,
+                        "legacy_application_id": application_id,
+                        "legacy_review_key": str(row["review_key"] or ""),
+                        "legacy_result": sanitize_value_fragments(legacy_result),
+                    }
+                )
+            created_at = str(row["created_at"] or now)
+            conn.execute(
+                """
+                INSERT OR IGNORE INTO review_batches_v6(
+                    review_id, scope_type, scope_id, status, dry_run,
+                    result_json, created_at, finished_at
+                ) VALUES (?, ?, ?, ?, 0, ?, ?, ?)
+                """,
+                (
+                    review_id,
+                    scope_type,
+                    scope_id,
+                    status,
+                    result_json,
+                    created_at,
+                    str(row["finished_at"] or created_at),
+                ),
+            )
+            root_run_id = str(row["root_run_id"] or "")
+            if root_run_id:
+                conn.execute(
+                    """
+                    INSERT OR IGNORE INTO review_batch_runs_v6(
+                        review_id, root_run_id, application_id
+                    ) VALUES (?, ?, ?)
+                    """,
+                    (
+                        review_id,
+                        root_run_id,
+                        scope_id if scope_type == "application" else "",
+                    ),
+                )
+            legacy_review_count += 1
+
+        conn.execute("DROP TABLE memory_items")
+        conn.execute("DROP TABLE memory_pending_writes")
+        conn.execute("DROP TABLE review_runs")
+        for canonical, internal in internal_tables.items():
+            conn.execute(f'ALTER TABLE "{internal}" RENAME TO "{canonical}"')
+        cls._execute_script_in_transaction(conn, _SCHEMA_V6_SQL)
+        conn.execute(
+            """
+            INSERT INTO maintenance(key, value) VALUES (?, ?)
+            ON CONFLICT(key) DO UPDATE SET value=excluded.value
+            """,
+            (
+                _V6_MIGRATION_REPORT_KEY,
+                _json_dumps(
+                    {
+                        "active_facts": len(active_payloads),
+                        "pending_candidates": pending_count,
+                        "quarantined_candidates": quarantined_count,
+                        "legacy_review_batches": legacy_review_count,
                     }
                 ),
             ),
@@ -3401,7 +4119,9 @@ class SelfLearningLedger:
             root_application_id = str(run_row["application_id"] or "")
             event_rows = conn.execute(
                 """
-                SELECT event_id, tool_name, output_json FROM events
+                SELECT event_id, tool_name, event_type, status, input_json,
+                       output_json, metadata_json
+                FROM events
                 WHERE COALESCE(NULLIF(root_run_id, ''), run_id) = ?
                     AND event_type = 'tool_result'
                     AND status = 'completed'
@@ -3411,6 +4131,18 @@ class SelfLearningLedger:
                 (root_run_id, limit),
             ).fetchall()
             event_records = [dict(row) for row in event_rows]
+            for event_record in event_records:
+                try:
+                    metadata = json.loads(
+                        str(event_record.get("metadata_json") or "{}")
+                    )
+                except (TypeError, ValueError, json.JSONDecodeError):
+                    metadata = {}
+                event_record["tool_call_id"] = (
+                    str(metadata.get("tool_call_id") or "")
+                    if isinstance(metadata, dict)
+                    else ""
+                )
             evidence_by_event: dict[str, list[dict[str, str]]] = {}
             event_ids = [str(row["event_id"]) for row in event_records]
             if event_ids:
@@ -3539,11 +4271,11 @@ class SelfLearningLedger:
                         conn.execute("DELETE FROM runs WHERE run_id = ?", (run_id,))
                 if finished:
                     break
-        with serialized_write_transaction(self.db_path, self._connect) as conn:
-            reviews_deleted = conn.execute(
-                "DELETE FROM review_runs WHERE created_at < ?",
-                (cutoff,),
-            ).rowcount
+        # v6 review batches are immutable decision audit, not disposable
+        # session transcripts.  A batch can still own pending candidates or
+        # provenance for active memory after its source run is pruned, so the
+        # session-retention command must never delete it.
+        reviews_deleted = 0
         return {
             "ok": True,
             "runs_pruned": len(stale_runs),
@@ -3767,6 +4499,118 @@ class SelfLearningLedger:
                     "UPDATE skill_proposals SET status = ?, updated_at = ? WHERE proposal_id = ?",
                     (status, now, proposal_id),
                 )
+
+
+_SCHEMA_V6_SQL = (
+    """
+CREATE TABLE IF NOT EXISTS schema_version (
+    version INTEGER NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS runs (
+    run_id TEXT PRIMARY KEY,
+    root_run_id TEXT,
+    task_id TEXT,
+    agent_name TEXT,
+    application_id TEXT,
+    application_name TEXT,
+    application_path TEXT,
+    workflow_path TEXT,
+    yaml_path TEXT,
+    run_dir TEXT,
+    status TEXT,
+    started_at TEXT,
+    ended_at TEXT,
+    task_text TEXT,
+    final_answer TEXT,
+    indexed_at TEXT NOT NULL,
+    metadata_json TEXT
+);
+
+CREATE TABLE IF NOT EXISTS events (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    event_id TEXT NOT NULL UNIQUE,
+    run_id TEXT NOT NULL,
+    root_run_id TEXT,
+    task_id TEXT,
+    parent_task_id TEXT,
+    parent_event_id TEXT,
+    application_id TEXT,
+    application_name TEXT,
+    application_path TEXT,
+    workflow_path TEXT,
+    agent_name TEXT,
+    worker_name TEXT,
+    tool_name TEXT,
+    event_type TEXT,
+    phase TEXT,
+    source TEXT,
+    role TEXT,
+    status TEXT,
+    step_number INTEGER,
+    input_json TEXT,
+    output_json TEXT,
+    content_text TEXT NOT NULL,
+    content_ref TEXT,
+    source_path TEXT,
+    created_at TEXT,
+    ordinal INTEGER NOT NULL DEFAULT 0,
+    metadata_json TEXT
+);
+"""
+    + _v6_review_tables_sql(if_not_exists=True)
+    + """
+CREATE TABLE IF NOT EXISTS maintenance (
+    key TEXT PRIMARY KEY,
+    value TEXT
+);
+
+CREATE TABLE IF NOT EXISTS skill_proposals (
+    proposal_id TEXT PRIMARY KEY,
+    name TEXT NOT NULL,
+    action TEXT NOT NULL,
+    status TEXT NOT NULL,
+    proposal_path TEXT NOT NULL,
+    application_id TEXT,
+    source_run_id TEXT,
+    source_event_id TEXT,
+    manifest_json TEXT,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    promoted_at TEXT,
+    archived_at TEXT
+);
+"""
+    + _trusted_review_evidence_table_sql(
+        "trusted_review_evidence",
+        if_not_exists=True,
+    )
+    + """
+CREATE INDEX IF NOT EXISTS idx_runs_application ON runs(application_id);
+CREATE INDEX IF NOT EXISTS idx_runs_started ON runs(started_at);
+CREATE INDEX IF NOT EXISTS idx_events_run_id ON events(run_id);
+CREATE INDEX IF NOT EXISTS idx_events_agent ON events(agent_name);
+CREATE INDEX IF NOT EXISTS idx_events_application ON events(application_id);
+CREATE INDEX IF NOT EXISTS idx_events_created ON events(created_at);
+CREATE INDEX IF NOT EXISTS idx_memory_scope_state
+    ON memory_items(scope_type, scope_id, state, kind, memory_key);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_memory_active_key
+    ON memory_items(scope_type, scope_id, kind, memory_key)
+    WHERE state IN ('active_unreviewed', 'active_confirmed');
+CREATE INDEX IF NOT EXISTS idx_review_batches_scope
+    ON review_batches(scope_type, scope_id, created_at);
+CREATE INDEX IF NOT EXISTS idx_review_candidates_batch
+    ON review_candidates(review_id, state, candidate_id);
+CREATE INDEX IF NOT EXISTS idx_review_candidates_scope
+    ON review_candidates(scope_type, scope_id, state, candidate_id);
+CREATE INDEX IF NOT EXISTS idx_review_mutations_batch
+    ON review_mutations(review_id, mutation_id);
+CREATE INDEX IF NOT EXISTS idx_run_feedback_run ON run_feedback(run_id, created_at);
+CREATE INDEX IF NOT EXISTS idx_skill_proposals_status ON skill_proposals(status);
+CREATE INDEX IF NOT EXISTS idx_trusted_review_evidence_root
+    ON trusted_review_evidence(root_run_id, event_id);
+"""
+)
 
 
 _SCHEMA_V5_SQL = (

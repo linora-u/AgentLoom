@@ -17,8 +17,10 @@ import logging
 import threading
 from contextlib import contextmanager
 from contextvars import ContextVar
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any, Generator, Optional
+
+from src.lib.runtime.context import RootRunState
 
 from .id_generator import generate_id
 
@@ -35,6 +37,9 @@ _current_hook_manager: ContextVar[Optional[Any]] = ContextVar('current_hook_mana
 _current_runtime_agent_path: ContextVar[Optional[str]] = ContextVar('current_runtime_agent_path', default=None)
 _current_session_run_id: ContextVar[Optional[str]] = ContextVar('current_session_run_id', default=None)
 _current_local_run_id: ContextVar[Optional[str]] = ContextVar('current_local_run_id', default=None)
+_current_root_run_state: ContextVar[Optional[RootRunState]] = ContextVar(
+    'current_root_run_state', default=None
+)
 
 # Thread-safe global fallbacks for values that must be accessible from
 # ThreadPoolExecutor worker threads where ContextVar is not propagated.
@@ -78,6 +83,19 @@ class ExplicitExecutionContext:
     runtime_agent_path: Optional[str]
     root_run_id: Optional[str]
     local_run_id: Optional[str]
+    root_run_state: Optional[RootRunState] = field(
+        default=None,
+        compare=False,
+        repr=False,
+    )
+
+    def __post_init__(self) -> None:
+        root_run_id = str(self.root_run_id or "").strip()
+        state = self.root_run_state
+        if root_run_id and (state is None or state.root_run_id != root_run_id):
+            object.__setattr__(self, "root_run_state", RootRunState(root_run_id))
+        elif not root_run_id and state is not None:
+            object.__setattr__(self, "root_run_state", None)
 
 
 def capture_explicit_execution_context() -> ExplicitExecutionContext:
@@ -94,6 +112,7 @@ def capture_explicit_execution_context() -> ExplicitExecutionContext:
         runtime_agent_path=_current_runtime_agent_path.get(),
         root_run_id=_current_session_run_id.get(),
         local_run_id=_current_local_run_id.get(),
+        root_run_state=_current_root_run_state.get(),
     )
 
 
@@ -108,6 +127,14 @@ def bind_explicit_execution_context(
     process-wide value shared by another run.
     """
 
+    root_run_id = str(context.root_run_id or "").strip()
+    root_run_state = context.root_run_state
+    if root_run_id:
+        if root_run_state is None or root_run_state.root_run_id != root_run_id:
+            root_run_state = RootRunState(root_run_id)
+    else:
+        root_run_state = None
+
     bindings = (
         (_current_task_id, context.task_id),
         (_current_sub_task_id, context.sub_task_id),
@@ -119,6 +146,7 @@ def bind_explicit_execution_context(
         (_current_runtime_agent_path, context.runtime_agent_path),
         (_current_session_run_id, context.root_run_id),
         (_current_local_run_id, context.local_run_id),
+        (_current_root_run_state, root_run_state),
     )
     tokens = [(variable, variable.set(value)) for variable, value in bindings]
     try:
@@ -374,8 +402,12 @@ def clear_current_hook_manager() -> None:
 
 def set_current_session_run_id(run_id: str) -> None:
     """Set the top-level session run id for the active run."""
-    _current_session_run_id.set(run_id)
-    logger.debug(f"Set session run id: {run_id}")
+    normalized = str(run_id or "").strip()
+    if not normalized:
+        raise ValueError("root run id must be a non-empty string")
+    _current_session_run_id.set(normalized)
+    _current_root_run_state.set(RootRunState(normalized))
+    logger.debug(f"Set session run id: {normalized}")
 
 
 def get_current_session_run_id() -> Optional[str]:
@@ -386,6 +418,7 @@ def get_current_session_run_id() -> Optional[str]:
 def clear_current_session_run_id() -> None:
     """Clear the top-level session run id."""
     _current_session_run_id.set(None)
+    _current_root_run_state.set(None)
     logger.debug("Cleared session run id")
 
 
@@ -430,6 +463,17 @@ def require_root_run_id() -> str:
     return run_id.strip()
 
 
+def require_root_run_state() -> RootRunState:
+    """Return the state object shared by the current root and its workers."""
+
+    root_run_id = require_root_run_id()
+    state = _current_root_run_state.get()
+    if state is None or state.root_run_id != root_run_id:
+        state = RootRunState(root_run_id)
+        _current_root_run_state.set(state)
+    return state
+
+
 @contextmanager
 def bind_root_run(run_id: str) -> Generator[bool, None, None]:
     """Bind the first run id in a call tree and report whether this call owns it.
@@ -443,13 +487,24 @@ def bind_root_run(run_id: str) -> Generator[bool, None, None]:
 
     current = _current_session_run_id.get()
     if isinstance(current, str) and current.strip():
-        yield False
+        state = _current_root_run_state.get()
+        if state is not None and state.root_run_id == current.strip():
+            yield False
+            return
+        state_token = _current_root_run_state.set(RootRunState(current.strip()))
+        try:
+            yield False
+        finally:
+            _current_root_run_state.reset(state_token)
         return
 
-    token = _current_session_run_id.set(run_id.strip())
+    normalized = run_id.strip()
+    token = _current_session_run_id.set(normalized)
+    state_token = _current_root_run_state.set(RootRunState(normalized))
     try:
         yield True
     finally:
+        _current_root_run_state.reset(state_token)
         _current_session_run_id.reset(token)
 
 

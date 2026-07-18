@@ -58,6 +58,31 @@ _GLOBAL_ONLY_TOP_LEVEL_KEYS = {"runtime", "logging"}
 logger = get_logger(__name__)
 
 
+def _validate_review_model_references(
+    config_map: dict[str, Any],
+    llm_config: LLMConfig,
+    *,
+    source_name: str,
+) -> None:
+    """Require enabled review scopes to reference configured model types."""
+
+    self_learning = config_map.get("self_learning")
+    review = self_learning.get("review") if isinstance(self_learning, dict) else None
+    if not isinstance(review, dict) or review.get("enabled") is not True:
+        return
+    configured = set(llm_config.models)
+    for scope in ("application", "project"):
+        scope_config = review.get(scope)
+        if not isinstance(scope_config, dict):
+            continue
+        model_type = str(scope_config.get("review_model") or "").strip()
+        if model_type and model_type not in configured:
+            raise ValueError(
+                f"self_learning.review.{scope}.review_model '{model_type}' in "
+                f"{source_name} is not configured in config/llm.yaml."
+            )
+
+
 def _load_yaml(path: Path) -> dict[str, Any]:
     if not path.exists():
         return {}
@@ -142,6 +167,19 @@ def _reject_application_global_only_keys(
             f"Unsupported global-only key(s) in {source_name}: {keys}. "
             "Configure runtime and logging only in the project root "
             "config/system.yaml."
+        )
+    self_learning = filtered.get("self_learning")
+    review = self_learning.get("review") if isinstance(self_learning, dict) else None
+    disallowed_review_keys = (
+        sorted(set(review) - {"application"}) if isinstance(review, dict) else []
+    )
+    if disallowed_review_keys:
+        raise ValueError(
+            "Application config may configure only "
+            "self_learning.review.application.*. The project review policy and "
+            "all review-wide settings belong in the project root "
+            f"config/system.yaml. Unsupported key(s) in {source_name}: "
+            + ", ".join(f"self_learning.review.{key}" for key in disallowed_review_keys)
         )
     return filtered
 
@@ -251,6 +289,11 @@ class UnifiedConfig:
 
         self._raw = normalized
         self._settings = RootSettings.model_validate(self._raw)
+        _validate_review_model_references(
+            self._raw,
+            llm_config,
+            source_name="project root config/system.yaml",
+        )
         self._agent_root = agent_root
         self._llm_config = llm_config
 
@@ -552,6 +595,11 @@ def build_effective_agent_config(
     merged = layered_builder.build()
     normalize_tool_access_control_section(merged, base.agent_root)
     validate_system_snapshot(merged, source_name)
+    _validate_review_model_references(
+        merged,
+        base.llm,
+        source_name=source_name,
+    )
     if isinstance(agent_config, dict) and agent_config.get("_yaml_file_path"):
         # Identity metadata, not configuration: application-scope resolution
         # (self-learning memory layering, learning artifacts) reads the workflow
