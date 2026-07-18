@@ -5,6 +5,7 @@ These tests validate the one-liner application launcher without
 instantiating real LLM-backed agents.
 """
 
+import json
 import textwrap
 import threading
 from concurrent.futures import ThreadPoolExecutor
@@ -134,6 +135,50 @@ def fake_yaml_no_workflow(tmp_path: Path, monkeypatch) -> Path:
 # ===================================================================
 
 
+def test_per_run_event_projection_never_inherits_legacy_preamble_on_resume() -> None:
+    from src.runner import _events_for_run
+
+    old_events = [
+        {"type": "worker_call_finished", "agent_name": "old", "call_index": 0},
+        {"type": "task_status_changed", "status": "completed", "result": "old result"},
+    ]
+    resumed = [
+        {"type": "run_resumed", "run_id": "run-2"},
+        {"type": "worker_call_started", "agent_name": "new", "call_index": 0},
+    ]
+
+    assert _events_for_run([*old_events, *resumed], "run-2") == resumed
+
+
+def test_streamed_run_event_count_ignores_a_legacy_boundary_newline(tmp_path: Path) -> None:
+    from src.lib.runtime.storage import SecureDirectory
+    from src.runner import _run_event_chunks
+
+    task_dir = tmp_path / "task"
+    task_dir.mkdir()
+    legacy_tail = b'{"type":"legacy_crash_tail"}'
+    current = b'\n{"type":"run_resumed","run_id":"run-2"}\n{"type":"task_status_changed","status":"completed"}\n'
+    (task_dir / "task_events.jsonl").write_bytes(legacy_tail + current)
+
+    class FakeCheckpointManager:
+        @staticmethod
+        def task_storage(_task_id: str) -> SecureDirectory:
+            return SecureDirectory(task_dir, create=False)
+
+    stats = {"count": 0, "complete": True}
+    copied = b"".join(
+        _run_event_chunks(
+            FakeCheckpointManager(),
+            "task-1",
+            start_offset=len(legacy_tail),
+            stats=stats,
+        )
+    )
+
+    assert copied == current
+    assert stats == {"count": 2, "complete": True}
+
+
 class TestResolveYamlPath:
     """Tests for _resolve_yaml_path."""
 
@@ -207,6 +252,280 @@ class TestRunApp:
         assert not (fake_yaml.parents[3] / ".logs").exists()
 
     @patch("src.runner.YamlConfiguredSupervisorAgent")
+    def test_manifest_declares_when_task_tree_observation_is_disabled(
+        self,
+        mock_cls,
+        fake_yaml: Path,
+        monkeypatch,
+    ) -> None:
+        from src.lib.runtime import get_current_run_context
+        from src.runner import run_app
+
+        observed: dict[str, object] = {}
+
+        def effective_config(config, *, source_name):
+            del source_name
+            return {
+                **config,
+                "checkpoint": {"enabled": False},
+                "logging": {},
+            }
+
+        monkeypatch.setattr(
+            "src.runner.build_effective_agent_config",
+            effective_config,
+        )
+
+        def run_without_checkpoint(_task, **kwargs):
+            observed["context"] = get_current_run_context(required=True)
+            assert kwargs["checkpoint_manager"] is None
+            return "ok"
+
+        mock_cls.return_value.run.side_effect = run_without_checkpoint
+
+        assert run_app(str(fake_yaml), file_logging=False) == "ok"
+
+        context = observed["context"]
+        manifest = json.loads(context.manifest_path.read_text(encoding="utf-8"))
+        assert manifest["task_tree_observation"] == {
+            "enabled": False,
+            "worker_agents_configured": False,
+        }
+        assert "task_tree_artifact" not in manifest
+
+    @patch("src.runner.YamlConfiguredSupervisorAgent")
+    def test_completed_run_keeps_result_and_observability_after_checkpoint_cleanup(
+        self,
+        mock_cls,
+        fake_yaml: Path,
+        monkeypatch,
+    ) -> None:
+        from src.lib.checkpoint import CheckpointManager
+        from src.lib.runtime import get_current_run_context
+        from src.runner import run_app
+
+        observed = {}
+
+        def _run(_task, **kwargs):
+            context = get_current_run_context(required=True)
+            manager = kwargs["checkpoint_manager"]
+            with manager._tree_lock:
+                manager._append_task_event_unlocked(
+                    context.task_id,
+                    {
+                        "type": "worker_call_finished",
+                        "agent_name": "large-worker",
+                        "payload": "x" * (1024 * 1024 + 128),
+                    },
+                )
+            manager.record_task_status_changed(
+                context.task_id,
+                "completed",
+                result="final answer",
+            )
+            observed["context"] = context
+            return "final answer"
+
+        mock_cls.return_value.run.side_effect = _run
+
+        def reject_cumulative_tree_replay(*_args, **_kwargs):
+            raise AssertionError("completed Run persistence must copy the maintained projection")
+
+        monkeypatch.setattr(CheckpointManager, "load_task_tree", reject_cumulative_tree_replay)
+
+        assert run_app(str(fake_yaml), file_logging=False) == "final answer"
+
+        context = observed["context"]
+        manifest = json.loads(context.manifest_path.read_text(encoding="utf-8"))
+        assert manifest["result_artifact"] == "artifacts/result.txt"
+        assert manifest["result_size"] == len(b"final answer")
+        assert (context.run_dir / manifest["result_artifact"]).read_text(encoding="utf-8") == "final answer"
+        assert json.loads((context.audit_dir / "task_tree.json").read_text(encoding="utf-8"))["status"] == "completed"
+        events = [
+            json.loads(line)
+            for line in (context.audit_dir / "task_events.jsonl").read_text(encoding="utf-8").splitlines()
+        ]
+        assert events[-1]["type"] == "task_status_changed"
+        assert events[-1]["result"] == "final answer"
+        assert next(event for event in events if event.get("agent_name") == "large-worker")["payload"] == (
+            "x" * (1024 * 1024 + 128)
+        )
+        assert manifest["task_events_count"] == len(events)
+        assert manifest["task_events_complete"] is True
+        assert not context.checkpoint_dir.exists()
+
+    @patch("src.runner.YamlConfiguredSupervisorAgent")
+    def test_completed_run_commits_manifest_before_checkpoint_cleanup(
+        self,
+        mock_cls,
+        fake_yaml: Path,
+        monkeypatch,
+    ) -> None:
+        from src.lib.checkpoint import CheckpointManager
+        from src.lib.runtime import get_current_run_context
+        from src.runner import run_app
+
+        observed = {}
+
+        def _run(_task, **kwargs):
+            context = get_current_run_context(required=True)
+            kwargs["checkpoint_manager"].record_task_status_changed(
+                context.task_id,
+                "completed",
+                result="final answer",
+            )
+            observed["context"] = context
+            return "final answer"
+
+        original_delete_task = CheckpointManager.delete_task
+
+        def delete_after_manifest_commit(manager, task_id):
+            context = observed["context"]
+            manifest = json.loads(context.manifest_path.read_text(encoding="utf-8"))
+            observed["manifest_at_delete"] = manifest
+            return original_delete_task(manager, task_id)
+
+        mock_cls.return_value.run.side_effect = _run
+        monkeypatch.setattr(CheckpointManager, "delete_task", delete_after_manifest_commit)
+
+        assert run_app(str(fake_yaml), file_logging=False) == "final answer"
+
+        manifest = observed["manifest_at_delete"]
+        assert manifest["status"] == "completed"
+        assert manifest["result_artifact"] == "artifacts/result.txt"
+        assert manifest["task_tree_artifact"] == "audit/task_tree.json"
+        assert manifest["task_events_artifact"] == "audit/task_events.jsonl"
+
+    @patch("src.runner.YamlConfiguredSupervisorAgent")
+    def test_completed_run_keeps_checkpoint_when_tree_exceeds_cleanup_budget(
+        self,
+        mock_cls,
+        fake_yaml: Path,
+        monkeypatch,
+    ) -> None:
+        from src.lib.runtime import get_current_run_context
+        from src.runner import run_app
+
+        observed = {}
+
+        def _run(_task, **kwargs):
+            context = get_current_run_context(required=True)
+            kwargs["checkpoint_manager"].save_task_tree(
+                context.task_id,
+                {
+                    "task_id": context.task_id,
+                    "run_id": context.run_id,
+                    "status": "completed",
+                    "workers": {},
+                    "padding": "x" * 512,
+                },
+            )
+            observed["context"] = context
+            return "final answer"
+
+        mock_cls.return_value.run.side_effect = _run
+        monkeypatch.setattr("src.runner._TASK_TREE_CLEANUP_MAX_BYTES", 128)
+
+        assert run_app(str(fake_yaml), file_logging=False) == "final answer"
+
+        context = observed["context"]
+        manifest = json.loads(context.manifest_path.read_text(encoding="utf-8"))
+        assert manifest["status"] == "completed"
+        assert (context.run_dir / manifest["task_tree_artifact"]).stat().st_size > 128
+        assert context.checkpoint_dir.exists()
+
+    @patch("src.runner.YamlConfiguredSupervisorAgent")
+    def test_completed_run_keeps_checkpoint_when_observability_persistence_fails(
+        self,
+        mock_cls,
+        fake_yaml: Path,
+        monkeypatch,
+    ) -> None:
+        from src.lib.checkpoint.checkpoint_manager import CheckpointTaskLease
+        from src.lib.runtime import RuntimeContext, get_current_run_context
+        from src.runner import run_app
+
+        observed = {"manifest_updates": 0}
+
+        def _run(_task, **kwargs):
+            context = get_current_run_context(required=True)
+            kwargs["checkpoint_manager"].record_task_status_changed(
+                context.task_id,
+                "completed",
+                result="final answer",
+            )
+            observed["context"] = context
+            return "final answer"
+
+        original_atomic_write = RuntimeContext.atomic_write_run_file
+        original_update_manifest = RuntimeContext.update_manifest
+
+        def fail_result_write(context, path, content, **kwargs):
+            if path == context.artifacts_dir / "result.txt":
+                raise OSError("result persistence failed")
+            return original_atomic_write(context, path, content, **kwargs)
+
+        def record_manifest_update(context, **updates):
+            observed["manifest_updates"] += 1
+            return original_update_manifest(context, **updates)
+
+        mock_cls.return_value.run.side_effect = _run
+        monkeypatch.setattr(RuntimeContext, "atomic_write_run_file", fail_result_write)
+        monkeypatch.setattr(RuntimeContext, "update_manifest", record_manifest_update)
+
+        with pytest.raises(OSError, match="result persistence failed"):
+            run_app(str(fake_yaml), file_logging=False)
+
+        context = observed["context"]
+        manifest = json.loads(context.manifest_path.read_text(encoding="utf-8"))
+        assert manifest["status"] == "running"
+        assert observed["manifest_updates"] == 0
+        assert context.checkpoint_dir.exists()
+        with CheckpointTaskLease(context.checkpoint_dir, require_exists=True):
+            pass
+
+    @patch("src.runner.YamlConfiguredSupervisorAgent")
+    def test_completed_run_keeps_checkpoint_when_manifest_commit_fails(
+        self,
+        mock_cls,
+        fake_yaml: Path,
+        monkeypatch,
+    ) -> None:
+        from src.lib.checkpoint.checkpoint_manager import CheckpointTaskLease
+        from src.lib.runtime import RuntimeContext, get_current_run_context
+        from src.runner import run_app
+
+        observed = {"manifest_updates": 0}
+
+        def _run(_task, **kwargs):
+            context = get_current_run_context(required=True)
+            kwargs["checkpoint_manager"].record_task_status_changed(
+                context.task_id,
+                "completed",
+                result="final answer",
+            )
+            observed["context"] = context
+            return "final answer"
+
+        def fail_manifest_commit(_context, **_updates):
+            observed["manifest_updates"] += 1
+            raise OSError("manifest commit failed")
+
+        mock_cls.return_value.run.side_effect = _run
+        monkeypatch.setattr(RuntimeContext, "update_manifest", fail_manifest_commit)
+
+        with pytest.raises(OSError, match="manifest commit failed"):
+            run_app(str(fake_yaml), file_logging=False)
+
+        context = observed["context"]
+        manifest = json.loads(context.manifest_path.read_text(encoding="utf-8"))
+        assert manifest["status"] == "running"
+        assert observed["manifest_updates"] == 1
+        assert context.checkpoint_dir.exists()
+        with CheckpointTaskLease(context.checkpoint_dir, require_exists=True):
+            pass
+
+    @patch("src.runner.YamlConfiguredSupervisorAgent")
     def test_run_finally_releases_shell_sessions_and_background_tasks(
         self,
         mock_cls,
@@ -216,10 +535,10 @@ class TestRunApp:
         import subprocess
 
         from src.lib.runtime import bind_run_context, get_current_run_context
+        from src.runner import run_app
         from src.tools.shell.background_task import BackgroundTaskRegistry
         from src.tools.shell.process import ShellProcessRegistry
         from src.trace import clear_current_agent_id, set_current_agent_id
-        from src.runner import run_app
 
         BackgroundTaskRegistry._reset_instance()
         observed = {}
@@ -376,13 +695,17 @@ class TestRunApp:
             log_text = context.log_path.read_text(encoding="utf-8")
             assert marker in log_text
             assert all(
-                other_marker not in log_text
-                for _other_context, other_marker in contexts
-                if other_marker != marker
+                other_marker not in log_text for _other_context, other_marker in contexts if other_marker != marker
             )
 
     @patch("src.runner.YamlConfiguredSupervisorAgent")
-    def test_resume_creates_new_run_but_reuses_task_checkpoint(self, mock_cls, fake_yaml: Path):
+    def test_resume_creates_new_run_but_reuses_task_checkpoint(
+        self,
+        mock_cls,
+        fake_yaml: Path,
+        monkeypatch,
+    ):
+        from src.lib.checkpoint import CheckpointManager
         from src.lib.runtime import get_current_run_context
         from src.runner import run_app
 
@@ -395,6 +718,15 @@ class TestRunApp:
 
         mock_agent.run.side_effect = _run
         mock_cls.return_value = mock_agent
+
+        def reject_cumulative_event_load(*_args, **_kwargs):
+            raise AssertionError("Run persistence must not materialize cumulative events")
+
+        monkeypatch.setattr(
+            CheckpointManager,
+            "load_task_events",
+            reject_cumulative_event_load,
+        )
 
         run_app(str(fake_yaml), file_logging=False)
         first_context, first_kwargs = attempts[0]
@@ -411,6 +743,13 @@ class TestRunApp:
         assert second_context.checkpoint_dir == first_context.checkpoint_dir
         assert first_kwargs["resume"] is False
         assert second_kwargs["resume"] is True
+        second_events = [
+            json.loads(line)
+            for line in (second_context.audit_dir / "task_events.jsonl").read_text(encoding="utf-8").splitlines()
+        ]
+        assert second_events[0]["type"] == "run_resumed"
+        assert second_events[0]["run_id"] == second_context.run_id
+        assert all(event.get("run_id") != first_context.run_id for event in second_events)
 
     @pytest.mark.parametrize(
         ("created_at", "error"),
@@ -418,9 +757,7 @@ class TestRunApp:
             ("not-a-timestamp", "invalid created_at"),
             ("", "invalid created_at"),
             (
-                (datetime.now(UTC) - timedelta(days=30))
-                .replace(tzinfo=None)
-                .isoformat(),
+                (datetime.now(UTC) - timedelta(days=30)).replace(tzinfo=None).isoformat(),
                 "expired",
             ),
         ],
@@ -574,9 +911,7 @@ class TestRunApp:
                 {
                     "task_id": context.task_id,
                     "status": "failed",
-                    "created_at": (
-                        datetime.now(UTC) - timedelta(days=8)
-                    ).isoformat(),
+                    "created_at": (datetime.now(UTC) - timedelta(days=8)).isoformat(),
                     "workers": {},
                 },
             )
@@ -659,6 +994,100 @@ class TestRunApp:
 
         with pytest.raises(ValueError, match="缺少必填字段.*workflow"):
             run_app(str(fake_yaml_no_workflow))
+
+    @patch("src.runner.YamlConfiguredSupervisorAgent")
+    def test_numeric_description_is_rejected_before_agent_construction(
+        self,
+        mock_cls,
+        fake_yaml: Path,
+    ) -> None:
+        from src.runner import run_app
+
+        fake_yaml.write_text(
+            "name: test_agent\ndescription: 123\nworkflow: do the task\n",
+            encoding="utf-8",
+        )
+
+        with pytest.raises(ValueError, match="description must be a non-empty string"):
+            run_app(str(fake_yaml))
+
+        mock_cls.assert_not_called()
+
+    @patch("src.runner.YamlConfiguredSupervisorAgent")
+    def test_invalid_execution_environment_is_rejected_before_agent_construction(
+        self,
+        mock_cls,
+        fake_yaml: Path,
+    ) -> None:
+        from src.runner import run_app
+
+        fake_yaml.write_text(_SAMPLE_YAML + "execution_env: []\n", encoding="utf-8")
+
+        with pytest.raises(ValueError, match="execution_env must be a dictionary"):
+            run_app(str(fake_yaml))
+
+        mock_cls.assert_not_called()
+
+    @pytest.mark.parametrize(
+        ("invalid_config", "error_pattern"),
+        [
+            ("toolsets: core_shell\n", "toolsets must be a list"),
+            ("toolsets:\n  - missing_toolset\n", "Unknown toolset 'missing_toolset'"),
+            ("tools:\n  - name: missing_registered_tool\n", "missing_registered_tool"),
+            (
+                "tools:\n  - name: read_file\n    fixed_args:\n      definitely_unknown: 1\n",
+                "Unknown fixed_args for tool 'read_file': definitely_unknown",
+            ),
+            ("max_steps: 0\n", "max_steps must be a positive integer"),
+            ("max_steps: true\n", "max_steps must be a positive integer"),
+        ],
+    )
+    @patch("src.runner.YamlConfiguredSupervisorAgent")
+    def test_runtime_preflight_rejects_unresolvable_tools_and_invalid_step_budget(
+        self,
+        mock_cls,
+        invalid_config: str,
+        error_pattern: str,
+        fake_yaml: Path,
+    ) -> None:
+        from src.runner import run_app
+
+        fake_yaml.write_text(
+            "name: test_agent\ndescription: test\nworkflow: do the task\n" + invalid_config,
+            encoding="utf-8",
+        )
+
+        with pytest.raises(ValueError, match=error_pattern):
+            run_app(str(fake_yaml))
+
+        mock_cls.assert_not_called()
+
+    @patch("src.runner.YamlConfiguredSupervisorAgent")
+    def test_runtime_preflight_only_structurally_validates_dynamic_tools(
+        self,
+        mock_cls,
+        fake_yaml: Path,
+    ) -> None:
+        from src.runner import run_app
+
+        fake_yaml.write_text(
+            """\
+name: test_agent
+description: test
+workflow: do the task
+tools:
+  - name: external_tool
+    module: package_that_does_not_exist
+    function: external_tool
+""",
+            encoding="utf-8",
+        )
+        mock_agent = MagicMock()
+        mock_agent.run.return_value = "done"
+        mock_cls.return_value = mock_agent
+
+        assert run_app(str(fake_yaml), file_logging=False) == "done"
+        mock_cls.assert_called_once()
 
     @patch("src.runner.YamlConfiguredSupervisorAgent")
     def test_agent_exception_raises_runtime_error(self, mock_cls, fake_yaml: Path):

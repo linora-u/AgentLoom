@@ -794,10 +794,13 @@ Each attempt writes under `.agentloom/runs/<application_id>/<run_id>/`:
 manifest.json
 logs/runtime.log[.1-.3]
 audit/shell.jsonl[.1-.2]
+audit/task_tree.json
+audit/task_events.jsonl
+artifacts/result.txt
 artifacts/{shell,background,skills}/
 ```
 
-The Shell audit uses its own fixed 10 MiB segments and two backups. A resumed task receives a new `run_id` and run directory while keeping its original `task_id` and `.agentloom/checkpoints/<application_id>/<task_id>/` state. File logging can be disabled without disabling the checkpoint or Shell audit:
+The task tree, task events, and result files are written when the corresponding evidence exists. Their paths are recorded in `manifest.json` before successful checkpoint cleanup, so Run inspection does not depend on a live checkpoint. The Shell audit uses its own fixed 10 MiB segments and two backups. A resumed task receives a new `run_id` and run directory while keeping its original `task_id` and `.agentloom/checkpoints/<application_id>/<task_id>/` state. File logging can be disabled without disabling the checkpoint or Shell audit:
 
 ```bash
 loom run applications/<app>/workflows/<agent>.yaml --no-file-log
@@ -811,7 +814,7 @@ Automatic cleanup runs at most once per configured interval. `loom clean-runtime
 
 Agent recall/todo files use `.agentloom/workspaces/agents/<application_id>/<agent_path>/`. `loom migrate-runtime --dry-run` previews valid legacy checkpoint candidates and the old unscoped `.runtime` tree; `loom migrate-runtime --apply` migrates checkpoints, archives `.logs` under `.agentloom/legacy/`, and atomically moves `.runtime` under `.agentloom/workspaces/legacy-unscoped/` because the old files do not contain reliable application/task provenance.
 
-To verify a real attempt, read `manifest.json`, `logs/runtime.log`, and `audit/shell.jsonl`; an exit code alone is not sufficient.
+To verify a real attempt, read `manifest.json` and its referenced logs, audits, and artifacts; an exit code alone is not sufficient.
 
 ---
 

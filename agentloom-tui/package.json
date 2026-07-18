@@ -1,0 +1,35 @@
+{
+  "$schema": "https://json.schemastore.org/package.json",
+  "name": "@agentloom/tui",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "license": "UNLICENSED",
+  "packageManager": "bun@1.3.14",
+  "bin": {
+    "agentloom": "./bin/agentloom"
+  },
+  "exports": {
+    ".": "./src/index.ts",
+    "./app": "./src/app/index.ts",
+    "./cli": "./src/cli/index.ts",
+    "./domain": "./src/domain/index.ts",
+    "./bridge": "./src/bridge/index.ts",
+    "./ui": "./src/ui/index.ts"
+  },
+  "scripts": {
+    "build": "bun run script/build.ts",
+    "test": "bun test --timeout 30000",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@opentui/core": "0.4.3",
+    "@opentui/solid": "0.4.3",
+    "solid-js": "1.9.10"
+  },
+  "devDependencies": {
+    "@tsconfig/bun": "1.0.9",
+    "@types/bun": "1.3.13",
+    "typescript": "5.8.2"
+  }
+}
