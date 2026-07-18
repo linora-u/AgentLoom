@@ -17,12 +17,16 @@ import sys
 
 import click
 
+from src.schedules.cli import schedules as _schedules_command
+
 _MAIN_EPILOG = """\
 \b
 Examples:
   loom run applications/<app>/workflows/<agent>.yaml
   loom create applications/<app>/workflows/<agent>.yaml
   loom create applications/<app>/workflows/<agent>.yaml -o my_app.py
+  loom schedules add applications/<app>/workflows/<agent>.yaml --every 1h
+  loom schedules serve
   loom ui
 
 Use 'loom <command> -h' for more details on each command.
@@ -972,3 +976,12 @@ def ui(port: int | None, no_browser: bool):
     except Exception as exc:
         click.echo(f"\n  Server failed: {exc}", err=True)
         sys.exit(1)
+
+
+# Keep the durable scheduler in its own lightweight package so TUI and CLI
+# share one backend without importing the Agent/model runtime for list/status.
+main.add_command(_schedules_command)
+
+
+if __name__ == "__main__":
+    main()

@@ -49,8 +49,33 @@ uv run loom run applications/ai_quality_analysis/workflows/code_review_agent.yam
 - 开启 checkpoint 后位于 `.agentloom/checkpoints/<application_id>/<task_id>/` 的可恢复任务状态；
 - 可通过 `uv run loom ui` 打开的 Web 可视化面板；
 - 可通过 `uv run loom dashboard` 打开的终端任务监控面板。
+- 可通过 [`agentloom-tui/`](../../agentloom-tui/README.md) 打开的交互式 Agent
+  Builder 和全项目 Run 目录。
 
 `run_id` 标识一次执行 attempt，resume 时会改变；`task_id` 标识同一个逻辑任务，resume 时保持不变。因此 resume 会写入新的 run 目录，同时继续使用原 checkpoint 和 `.agentloom/workspaces/agents/<application_id>/<agent_path>/tasks/<task_id>/`。`insights.md` 位于 agent workspace 根目录并跨 task 共享。
+
+### 打开 AgentLoom TUI
+
+```bash
+./install
+# 首次安装后打开一个新终端，然后在 AgentLoom 项目中直接运行：
+agentloom
+```
+
+源码安装器沿用 OpenCode 的原生二进制安装方式：为当前平台构建
+TypeScript/OpenTUI 单文件程序，安装到 `~/.agentloom/bin`，并在
+`~/.agentloom/venv` 创建隔离、锁定的 Python 环境。安装阶段会自动查找或安装
+`uv` 和 Bun；之后运行 `agentloom` 不需要激活 venv，也不用输入 `uv run`。
+如果不希望修改 Shell 配置，可用 `./install --no-modify-path`；也可通过
+`AGENTLOOM_INSTALL_DIR` 指定其他安装根目录。
+
+Builder 只查看、暂存和校验 Agent YAML，`/apply` 才是显式写入动作。右侧目录会显示当前项目全部 Agent System 和 Run，包括仅创建但从未运行的定义、实时状态、Workers、事件、日志、产物和已保留结果。
+
+TUI 创建的定时任务会持久保存；要让任务自动触发，需要在另一个终端显式运行前台调度服务：
+
+```bash
+agentloom schedules --project /path/to/project serve
+```
 
 ## 以 Codex 为例快速创建多 Agent 应用
 
