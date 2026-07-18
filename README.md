@@ -5,11 +5,11 @@ English | <a href="docs/cn/README.md">简体中文</a>
 <h1 align="center">AgentLoom</h1>
 
 <p align="center">
-  <strong>Application-level framework for building multi-agent systems from YAML.</strong>
+  <strong>Create, run, and inspect YAML-defined multi-agent applications.</strong>
 </p>
 
 <p align="center">
-  Build multi-agent apps by writing YAML, route each sub-agent to the right model, load Skills / MCP / tools, run repeated work in parallel, and resume long runs from saved state.
+  Use the terminal Builder to design Agent systems through conversation, then run them with AgentLoom's Python runtime and inspect every Agent, Worker, and Run from one project view.
 </p>
 
 <p align="center">
@@ -22,104 +22,112 @@ English | <a href="docs/cn/README.md">简体中文</a>
   <img alt="AgentLoom application flow" src="docs/assets/agentloom-application-flow.svg">
 </p>
 
----
+## Install
 
-## 3-Minute Quick Start
-
-AgentLoom is for developers who want ready-to-run agent apps: YAML-defined agents, explicit Worker contracts, model routing, runtime logs, checkpoint state, and optional UI monitoring.
+The source installer is the recommended starting point. It prepares the TUI, the Python runtime, and their dependencies together, so you do not need to build environments by hand.
 
 ```bash
-git clone <repo-url> AgentLoom
+git clone https://github.com/linora-u/AgentLoom.git
 cd AgentLoom
-
-uv sync
-# If PyPI is slow or unavailable on your network:
-# UV_DEFAULT_INDEX=https://mirrors.aliyun.com/pypi/simple uv sync
-
-cp config/llm.example.yaml config/llm.yaml
-# Edit config/llm.yaml and add your model credentials.
-
-uv run loom run applications/ai_quality_analysis/workflows/code_review_agent.yaml
+./install
 ```
 
-After the first run, you should see:
-
-- structured terminal logs with agent names, task IDs, step duration, and token usage;
-- one execution attempt under `.agentloom/runs/<application_id>/<run_id>/`, with a manifest, bounded runtime log, Shell audit, and raw artifacts;
-- resumable task state under `.agentloom/checkpoints/<application_id>/<task_id>/` when checkpointing is enabled;
-- optional visualization through `uv run loom ui`;
-- optional terminal monitoring through `uv run loom dashboard`.
-- the interactive Agent Builder and project-wide Run directory through the
-  TypeScript TUI in [`agentloom-tui/`](agentloom-tui/README.md).
-
-`run_id` identifies one execution attempt and changes on resume. `task_id` identifies the logical task and remains stable, so a resumed attempt writes a new run directory while continuing the same checkpoint. Agent workspaces live under `.agentloom/workspaces/agents/<application_id>/<agent_path>/`: `insights.md` is shared across tasks, while task state lives under `tasks/<task_id>/`.
-
-### Use the AgentLoom TUI
-
-The TUI is a small Agent Builder and project status browser. It can chat,
-inspect the current project's Agent catalog, and prepare Agent YAML through
-bounded tools. It does not run Shell commands, Git operations, or Agent
-workloads itself.
-
-#### 1. Install it and open a project
+Open a new terminal after installation, then verify the command from the repository root:
 
 ```bash
-./install
-# Open a new shell once, then run from the AgentLoom project to inspect:
+agentloom --version
+agentloom --snapshot
+```
+
+The installer:
+
+- installs missing `uv` and Bun with their official installers;
+- creates a locked Python environment under `~/.agentloom/venv`;
+- builds the current-platform TypeScript/OpenTUI binary;
+- installs `agentloom` and `agentloom-tui` under `~/.agentloom/bin`;
+- adds that directory to your shell `PATH` when a writable shell config exists.
+
+The source installer currently targets macOS and Linux shells. It requires Git and Bash; `curl` is required only when `uv` or Bun must be installed.
+
+Use a custom install location or leave `PATH` unchanged when needed:
+
+```bash
+AGENTLOOM_INSTALL_DIR="$HOME/tools/agentloom" ./install
+./install --no-modify-path
+```
+
+### Configure a model
+
+Copy the model template before using TUI chat or running an Agent:
+
+```bash
+cp config/llm.example.yaml config/llm.yaml
+```
+
+Edit `config/llm.yaml` and replace the placeholders. Do not commit this file; it is ignored because it contains credentials.
+
+```yaml
+model:
+  default_model_type: powerful
+  powerful:
+    model: "openai/<model-id>"
+    api_key: "<api-key>"
+    base_url: "https://<openai-compatible-endpoint>"  # optional for OpenAI
+    tool_choice: "auto"
+```
+
+Agent workloads use AgentLoom's normal model runtime. TUI chat currently requires an OpenAI-compatible Chat Completions endpoint; YAML creation also requires streaming and native tool/function calling.
+
+## Start with the TUI
+
+Run `agentloom` inside the project you want to inspect, or pass the project explicitly:
+
+```bash
+cd /path/to/AgentLoom
 agentloom
 
-# Or point it at a project explicitly:
+# Inspect another AgentLoom project
 agentloom --project /path/to/project
 ```
 
-The source installer follows OpenCode's native-binary installation pattern. It
-builds the current-platform TypeScript/OpenTUI application, installs it under
-`~/.agentloom/bin`, and creates an isolated locked Python environment under
-`~/.agentloom/venv`. It finds or installs `uv` and Bun during setup; running
-`agentloom` needs neither environment activation nor `uv run`. Use
-`./install --no-modify-path` to leave shell configuration untouched, or set
-`AGENTLOOM_INSTALL_DIR` to choose another installation root.
+The TUI is an Agent Builder and project control surface. It can discuss your design, inspect existing definitions, stage and validate Agent YAML, and read canonical runtime status.
 
-#### 2. Select the chat model
+It does not execute Shell commands, Git operations, or Agent workloads. You decide when YAML is written and run the Agent in a separate terminal.
 
-The TUI reads the model catalog and default from `config/llm.yaml`. Before
-chatting, configure at least one OpenAI-compatible profile with a `model`, an
-`api_key`, and either an HTTPS `base_url` (local HTTP is allowed) or an
-`openai/...` model ID that uses the default OpenAI endpoint. The TUI
-conversation calls that provider directly; Agent workloads continue to use the
-normal AgentLoom runtime model path. Creating YAML also requires streaming
-Chat Completions with native tool/function calling; leave `tool_choice` as
-`auto` or `required`, rather than `none`.
+### 1. Describe the Agent system
 
-Inside the TUI, enter `/models` to open the model selector or `/model <type>`
-to switch directly, for example `/model summary`.
-
-#### 3. Create or update Agent YAML through chat
-
-Press `Enter` to send a request. For example:
+Press `Enter` to send a request. A useful first prompt states the application, roles, inputs, outputs, and acceptance criteria:
 
 ```text
-Create an application named release_review. Use one Supervisor and two Workers
-for API review and test review. Choose model types from config/llm.yaml, then
-show me the proposed files without writing them yet.
+Create an application named release_review.
+Use one Supervisor and two Workers for API review and test review.
+Choose model types from config/llm.yaml.
+Show the proposed files and contracts before writing anything.
 ```
 
-The Builder reads existing Agent YAML definitions as needed, stages the
-proposed YAML in memory, and validates it. Ask for revisions until the draft is
-correct, then enter `/apply`. Only the current validated draft is written;
-sending a chat message does not modify files, and `/apply` does not start the
-Agent.
+The Builder reads only the project context it needs, stages a draft in memory, and validates the proposed YAML. Continue chatting until the topology and contracts are correct.
 
-#### 4. Run the Agent yourself
+### 2. Review and write the YAML
 
-Run the YAML directly in another terminal, using the actual path shown in the
-draft:
+Normal chat never changes files. Enter `/apply` to write the current validated draft. The command writes YAML only; it does not start an Agent.
+
+Use `/models` for the model picker or `/model <type>` to switch directly:
+
+```text
+/models
+/model summary
+/apply
+```
+
+### 3. Run the Agent
+
+Open another terminal and run the Supervisor path shown by the Builder:
 
 ```bash
 uv run loom run applications/<app>/workflows/<agent>.yaml
 ```
 
-If you prefer a Python entry file, generate and run one:
+You can also generate a Python entrypoint:
 
 ```bash
 uv run loom create applications/<app>/workflows/<agent>.yaml \
@@ -127,105 +135,166 @@ uv run loom create applications/<app>/workflows/<agent>.yaml \
 uv run python applications/<app>/<app>_app.py
 ```
 
-Keep the TUI open while the process runs. Both `loom run` and Python entry
-files that call `src.runner.run_app` publish canonical status. Calling a
-low-level Agent `.run()` directly bypasses that lifecycle, so the TUI cannot
-show a complete Run for it.
+Keep the TUI open while the Agent runs. `loom run` and generated entrypoints publish the canonical lifecycle that powers project-wide status.
 
-#### 5. Inspect every Agent and Run in the project
+Calling a low-level Agent `.run()` directly bypasses that lifecycle, so no UI can reconstruct a complete Run from it.
 
-- Press `Ctrl+P` or `Tab`, type an Application, Agent, Worker, Run, Skill, or
-  Schedule name, then use `↑` / `↓` and `Enter`; workspace entries are also
-  clickable.
-- Agent details show definitions that have never run, topology, files, and
-  validation. Run details distinguish running, completed, failed, crashed,
-  interrupted, and unknown states, and show Worker status and retained result.
-- A failed Run shows the key error, abnormal Workers, log file paths, and
-  the artifact index plus a bounded result preview instead of dumping the
-  complete raw log. Press `a` in that Run to ask the TUI assistant to analyze
-  a sanitized, bounded failure context.
-- Use `F6` to switch focus between chat and details. A focused detail view
-  supports `PgUp` / `PgDn`, `Home` / `End`, arrow keys, and the mouse wheel;
-  press `Esc` or `b` to return. Runtime state refreshes automatically; press
-  `r` from the detail panel or enter `/refresh` to rebuild the project index.
+### 4. Inspect Agents and Runs
 
-See [`agentloom-tui/README.md`](agentloom-tui/README.md) for additional TUI
-architecture and contributor details.
+Press `Ctrl+P` or `Tab` to search Applications, Agents, Workers, Runs, Skills, Schedules, and commands. Select entries with the keyboard or mouse.
 
-Schedules created in the TUI are durable, but automatic firing requires an
-explicit foreground service in a separate terminal:
+The detail view distinguishes never-run, running, completed, failed, crashed, interrupted, and unknown states. It shows topology, validation, Worker status, results, and artifact locations without dumping entire logs.
+
+For a failed Run, press `a` to ask the TUI assistant to analyze a sanitized and bounded failure context. The full log remains on disk and the detail view shows its path.
+
+Use `F6` to switch focus. A focused detail view supports arrow keys, `PgUp` / `PgDn`, `Home` / `End`, and the mouse wheel. Press `Esc` or `b` to return.
+
+| Action | Command / key |
+|---|---|
+| Send chat | `Enter` |
+| Browse the project | `Ctrl+P` or `Tab` |
+| Select a model | `/models` or `/model <type>` |
+| Write the validated draft | `/apply` |
+| Refresh the full index | `/refresh` or `r` in details |
+| Switch chat/details focus | `F6` |
+| Analyze the selected failed Run | `a` |
+
+See [agentloom-tui/README.md](agentloom-tui/README.md) for TUI architecture and contributor details.
+
+### 5. Run schedules explicitly
+
+The TUI can create and manage durable schedules. Automatic firing is a separate foreground service, so closing the TUI never leaves a hidden daemon behind.
 
 ```bash
 agentloom schedules --project /path/to/project serve
 ```
 
-## Create a Multi-Agent App with Codex
+## Run an existing Agent
 
-The fastest path is to let Codex use the framework skill that ships with this repository. Codex can create the YAML files, run the AgentLoom app, inspect `.agentloom/` run and checkpoint evidence, and revise the app when a Worker gets stuck or a config is wrong.
+To verify the framework without creating a new application, run the included code review example:
 
-Use a prompt like this:
+```bash
+uv run loom run applications/ai_quality_analysis/workflows/code_review_agent.yaml
+```
+
+One run creates a receipt under `.agentloom/runs/<application_id>/<run_id>/`. When checkpointing is enabled, resumable task state lives under `.agentloom/checkpoints/<application_id>/<task_id>/`.
+
+`run_id` identifies one attempt and changes after resume. `task_id` identifies the logical task and remains stable.
+
+## How AgentLoom works
+
+AgentLoom treats a multi-agent system as an application, not a loose collection of prompts.
+
+| Concept | Responsibility |
+|---|---|
+| Supervisor | Decomposes the application task and coordinates Workers and tools. |
+| Worker | Owns one specialized role and exposes a typed callable contract. |
+| Agent YAML | Defines role, workflow, model type, tools, Skills, Workers, and runtime policy. |
+| Python runtime | Handles model routing, generated Worker tools, concurrency, logs, checkpoints, and artifacts. |
+
+This keeps orchestration reusable while leaving deterministic preprocessing, validation, caching, and output writing in normal Python code.
+
+### Core capabilities
+
+| Need | AgentLoom provides |
+|---|---|
+| Build an application from configuration | Direct YAML execution with `loom run` and optional Python entrypoint generation. |
+| Route roles to different models | Per-Agent `model_type` with credentials isolated in `config/llm.yaml`. |
+| Call an Agent like a tool | Worker `agent_function_schema` becomes a validated callable function. |
+| Process repeated inputs | Fixed or automatic Worker concurrency with `.batch(tasks)`. |
+| Extend an Agent | Built-in tools, local Python functions, MCP servers, Claude-style Skills, and explicit Hooks. |
+| Recover and inspect work | Run receipts, bounded logs, Shell audit, checkpoint resume, structured events, Web UI, dashboard, and TUI. |
+
+## Create an application manually
+
+An application keeps its Supervisor, Workers, prompts, optional tools, and outputs together:
+
+```text
+applications/release_review/
+├── workflows/
+│   ├── release_review_agent.yaml
+│   └── worker_agents/
+│       ├── api_reviewer.yaml
+│       └── test_reviewer.yaml
+├── config/system.yaml          # optional application overlay
+├── sysprompt/                  # optional prompt templates
+└── README.md
+```
+
+A minimal Supervisor references Worker YAML files:
+
+```yaml
+name: "release_review"
+description: "Review an API release and its test evidence."
+model_type: "powerful"
+tool_call_type: "tool_call"
+
+worker_agents:
+  - path: "applications/release_review/workflows/worker_agents/api_reviewer.yaml"
+  - path: "applications/release_review/workflows/worker_agents/test_reviewer.yaml"
+
+workflow: |
+  Ask both Workers for evidence, reconcile conflicts, and return one release decision.
+
+tools: []
+skills: []
+max_steps: 12
+```
+
+Each Worker defines the contract that the Supervisor sees:
+
+```yaml
+name: "api_reviewer"
+description: "Review API compatibility risks."
+model_type: "fast"
+tool_call_type: "tool_call"
+
+agent_function_schema:
+  description: "Review one release request."
+  inputs:
+    request:
+      description: "Release scope and API diff."
+      required: true
+  output:
+    description: "Evidence-backed compatibility findings."
+
+workflow: |
+  Review the request, cite evidence, and return prioritized findings.
+
+tools: []
+worker_agents: []
+skills: []
+max_steps: 8
+```
+
+Validate the real model types against `config/llm.yaml`, then run the Supervisor:
+
+```bash
+uv run loom run applications/release_review/workflows/release_review_agent.yaml
+```
+
+For the complete schema, use the [Agent Configuration Reference](docs/en/agent_config.md).
+
+## Create an application with a coding assistant
+
+The repository includes `agentloom-framework-skill/` for Codex, Claude Code, and other Skill-aware coding assistants.
+
+Ask the assistant to read the Skill before creating files:
 
 ```text
 Read agentloom-framework-skill/SKILL.md first.
 
 Create an AgentLoom application named <app_name> for this goal:
-<describe the user-facing task, input, output, and acceptance criteria>
+<task, inputs, outputs, and acceptance criteria>
 
-Requirements:
-- Create files under applications/<app_name>/.
-- Use a Supervisor YAML plus at least two Worker YAML files.
-- Each Worker must define agent_function_schema with clear inputs and output.
-- Choose model_type values only from config/llm.yaml.
-- Add Skills or MCP config only if they are useful for this app.
-- Write an application README with run commands, Worker responsibilities, validation records, and known limits.
-- Run the app, watch the logs/checkpoints, and fix any YAML or tool issues you find.
+Create one Supervisor and the necessary Workers under applications/<app_name>/.
+Use only model types from config/llm.yaml.
+Define every Worker input/output with agent_function_schema.
+Validate the YAML, run the application, inspect .agentloom evidence,
+and report what passed, failed, or remains limited.
 ```
 
-You can let Codex run and monitor the app for you, or run it yourself:
-
-```bash
-uv run loom run applications/<app_name>/workflows/<app_name>_agent.yaml
-```
-
-Useful runtime checks while the app is running:
-
-```bash
-uv run loom list-tasks
-uv run loom dashboard
-
-manifest=$(find .agentloom/runs -name manifest.json -type f -print | sort | tail -1)
-run_dir=$(dirname "$manifest")
-sed -n '1,160p' "$manifest"
-tail -n 80 "$run_dir/logs/runtime.log"
-tail -n 80 "$run_dir/audit/shell.jsonl"
-```
-
-If you prefer Claude Code, give it the same request: read `agentloom-framework-skill/SKILL.md`, create the app under `applications/<app_name>/`, run it, and summarize what worked or failed.
-
-The main config ideas are simple:
-
-- `model_type`: which configured model category this Agent uses.
-- `worker_agents`: which Worker YAML files the Supervisor can call.
-- `agent_function_schema`: the input and output contract for a Worker.
-- `skills` / `mcp_servers`: optional extra knowledge and external tools.
-
-## Why AgentLoom
-
-Many agent frameworks expose components. AgentLoom gives you a complete app structure.
-
-Complex agent applications often repeat the same setup code: Worker registration, parameter adapters, runtime entrypoints, batch execution, logging, checkpointing, and safety controls. AgentLoom moves those reusable parts into YAML and the runtime. Your application code stays focused on domain work: preprocessing, validation, artifact writing, and the actual Agent roles.
-
-The practical result:
-
-| Need | AgentLoom approach |
-|---|---|
-| Build a full multi-agent app | Define a Supervisor, Workers, tools, Skills, and runtime behavior in YAML. |
-| Route roles to different models | Set `model_type` per Agent and keep credentials isolated in `config/llm.yaml`. |
-| Turn sub-agents into tools | Give Workers `agent_function_schema`; the Supervisor calls them like normal tools. |
-| Reuse coding-assistant knowledge | Load Claude-style `SKILL.md` packages on demand or eagerly. |
-| Connect external tools | Register local Python tools, local `codex exec`, and MCP servers through `mcp_servers`. |
-| Handle repeated work | Use Worker `concurrency` and `tool.batch(tasks)` for independent repeated inputs. |
-| Understand long runs | Read the run manifest, bounded runtime log, Shell audit, task checkpoint, `loom ui`, and `loom dashboard`. |
+The Framework Skill is development guidance for coding assistants. It is not a runtime Skill and is not auto-loaded by Agent applications.
 
 ## Architecture
 
@@ -233,132 +302,83 @@ The practical result:
   <img alt="AgentLoom runtime architecture" src="docs/assets/agentloom-runtime-architecture.svg">
 </p>
 
-The important boundary is:
+Worker Agents become generated tools. The Supervisor calls them together with normal Python, MCP, file, Shell, search, Git, Codex, or Skill tools.
 
-- Worker Agents define their role, tools, inputs, and output contract.
-- AgentLoom turns Workers into callable tools with generated function signatures.
-- The Supervisor coordinates Workers and normal tools to complete the application task.
-- Python remains available for deterministic preprocessing, validation, caching, and artifact writing.
+The runtime owns execution identity and evidence. TUI and other observers read that canonical state instead of guessing status from process output.
 
-## Capabilities
+## Example applications
 
-| Capability | What is already implemented |
+| Application | Demonstrates |
 |---|---|
-| Application-first YAML | `loom run` executes an Agent YAML directly; `loom create` generates a Python entry script; `run_app()` embeds the app in Python. |
-| Per-Agent model routing | Each Agent selects a `model_type`; the actual provider, key, endpoint, retries, and parameters live in `config/llm.yaml`. |
-| Agent-as-Tool coordination | Worker Agents export as callable tools through `agent_function_schema`, including required-input validation and string outputs. |
-| Skills, MCP, and tools | Agents can load `SKILL.md` packages, local Python functions, built-in file/shell/search/git tools, local Codex tools, and MCP client tools through `mcp_servers`. |
-| Concurrent repeated work | Worker `concurrency: auto` or fixed concurrency works with `.batch(tasks)` for many independent inputs. |
-| State and observability | Rich terminal logs, bounded per-run file logs, per-step timing, token usage, run manifests, checkpoint resume, Web UI, and TUI dashboard. |
-
-## Example Applications
-
-The `applications/` directory contains working apps that show the intended usage patterns.
-
-| Application | What it builds | What it demonstrates |
-|---|---|---|
-| `ai_quality_analysis` | Multi-dimensional code review application. | 12 Worker Agents, staged review, direct `loom run`, long-running codebase analysis. |
-| `unit_test_studio` | Python pytest generation workflow. | Strict multi-step pipeline, custom entry script, function intake, scenario planning, test generation, refinement, delivery report. |
-| `repo_map` | Repository architecture map generator. | Deterministic Python preprocessing plus Agent analysis, bottom-up directory processing, `tool.batch(tasks)`, progress persistence. |
-| `codex_exec_demo` | Local Codex Exec tool-call example. | Direct `loom run`, normal function tool registration, `fixed_args` for Codex parameters, structured `tool_call` sequencing. |
-
-Run the default code review example:
+| `ai_quality_analysis` | Twelve specialized Workers coordinated into a staged code review. |
+| `unit_test_studio` | A strict pytest generation pipeline with a custom Python entrypoint. |
+| `repo_map` | Deterministic preprocessing, bottom-up Agent analysis, batching, and progress persistence. |
+| `codex_exec_demo` | Local `codex exec` registered as normal Agent tools with fixed arguments. |
 
 ```bash
-uv run loom run applications/ai_quality_analysis/workflows/code_review_agent.yaml
-```
-
-Run Repo Map with a custom Python entrypoint:
-
-```bash
+# Repository architecture map
 uv run python applications/repo_map/repo_map_app.py /path/to/project \
-  --output_dir /tmp/repo-map-output \
-  --exclude_dirs vendor \
-  --exclude_dirs build
-```
+  --output_dir /tmp/repo-map-output
 
-Generate pytest tests for selected functions:
-
-```bash
+# Pytest generation for selected functions
 uv run python applications/unit_test_studio/studio_runner.py \
-  /path/to/your/project \
-  "src/utils.py:parse_config,src/core.py:run_pipeline" \
+  /path/to/project "src/utils.py:parse_config" \
   --output_dir tests/generated
-```
 
-Run the local Codex Exec tool example:
-
-```bash
+# Local Codex tool example
 uv run loom run applications/codex_exec_demo/workflows/use_codex_exec_demo.yaml
 ```
 
-## Core Concepts
-
-### Supervisor / Worker
-
-A Supervisor Agent coordinates the task. Worker Agents specialize in one part of the job. In multi-agent apps, the Supervisor references Workers through `worker_agents`, and Workers expose callable contracts through `agent_function_schema`.
-
-### Agent as Tool
-
-Worker Agents can be exported as callable tools. AgentLoom generates function signatures, validates required inputs, builds the task payload, and returns a string result. The same Worker can expose `.batch(tasks)` for parallel execution.
-
-### Skills and Hooks
-
-Skills provide reusable knowledge through Claude-style `SKILL.md` packages. Hooks are independent, explicitly configured Shell extensions for the eleven supported tool, task, Agent, and session events. A Skill cannot declare or register a Hook; reusable Hooks live in explicitly referenced `HOOK.yaml` Bundles. See [Hook configuration](docs/en/hooks.md).
-
-### Local Codex Tool
-
-AgentLoom includes `src.tools.codex.codex_tool.codex`, which exposes local `codex exec` as a normal function tool. Register it in Agent YAML with `module/function`. Use `fixed_args` to lock inputs such as `prompt`, `cwd`, `sandbox`, and `search`; fixed inputs are removed from the LLM-visible tool schema.
-
-Before running the tool, make sure `codex` is on `PATH` and `codex login status` succeeds.
-
-## CLI Reference
+## CLI reference
 
 | Command | Purpose |
 |---|---|
-| `uv run loom run <workflow>` | Run an AgentLoom application. |
-| `uv run loom run <workflow> --output-format jsonl` | Stream versioned lifecycle events for programmatic consumers. |
-| `uv run loom create <workflow>` | Generate a Python entry script for an application. |
-| `uv run loom ui` | Open the Web visualization panel. |
+| `uv run loom run <workflow>` | Run an application. |
+| `uv run loom run <workflow> --output-format jsonl` | Stream versioned lifecycle events. |
+| `uv run loom create <workflow>` | Generate a Python entrypoint. |
+| `uv run loom list-tasks` | List resumable tasks. |
 | `uv run loom dashboard` | Open the terminal task dashboard. |
-| `uv run loom list-tasks` | List resumable checkpoint tasks. |
-| `uv run loom clean-tasks` | Clean old checkpoint data. |
-| `uv run loom clean-runtime` | Apply configured retention to completed run directories and raw artifacts. |
-| `uv run loom migrate-runtime --dry-run` | Preview legacy checkpoint candidates plus the unscoped `.runtime` workspace without changing disk state. |
-| `uv run loom migrate-runtime --apply` | Migrate checkpoints, archive `.logs`, and atomically preserve `.runtime` under `.agentloom/workspaces/legacy-unscoped/`. |
-| `uv run loom schedules ...` | Add, list, pause, resume, remove, run, serve, or inspect schedules. |
-| `uv run loom sessions search\|scroll\|index\|prune ...` | Search and maintain execution history. |
+| `uv run loom ui` | Open the Web visualization panel. |
+| `uv run loom schedules ...` | Manage durable schedules. |
+| `uv run loom sessions ...` | Search and maintain execution history. |
 | `uv run loom learn review ...` | Trigger Application or Project review. |
-| `uv run loom reviews status\|apply\|rollback ...` | Inspect and apply scoped review inboxes, or roll back a review. |
-| `uv run loom memory list\|add\|replace\|remove\|pending\|stats\|export ...` | Administer curated memory and pending-write audit records. |
-| `uv run loom feedback submit <run_id> ...` | Attach an accepted, rejected, or corrected verdict to a run. |
+| `uv run loom reviews ...` | Inspect, apply, or roll back review decisions. |
+| `uv run loom memory ...` | Administer curated memory. |
+| `uv run loom feedback submit <run_id> ...` | Attach outcome feedback to a Run. |
+| `uv run loom clean-tasks` | Remove retained checkpoint tasks. |
+| `uv run loom clean-runtime` | Apply configured Run and artifact retention. |
+| `uv run loom migrate-runtime --dry-run\|--apply` | Preview or apply legacy runtime migration. |
+
+Run `uv run loom <command> --help` for the full command contract.
 
 ## Documentation
 
-| Document | Description |
+| Document | Covers |
 |---|---|
-| [Configuration Overview](docs/en/config-overview.md) | Configuration layers, merge rules, and model configuration isolation. |
-| [Agent Configuration](docs/en/agent_config.md) | Supervisor/Worker fields, tools, model selection, workflows, and skills. |
-| [LLM Configuration](docs/en/llm_config.md) | Model types, provider settings, inheritance, retries, and prompt cache settings. |
-| [System Configuration](docs/en/system_config.md) | Runtime settings, permissions, logging, execution environments, and tools. |
-| [Skills Configuration](docs/en/skills_config.md) | Skill package format, loading, runtime policy, and built-in skills. |
-| [Hooks Reference](docs/en/hooks.md) | Direct Hooks, Bundles, lifecycle events, matching, and execution behavior. |
-| [Checkpoint Resume](docs/en/checkpoint.md) | Checkpoint layout, resume behavior, and long-task recovery. |
-| [Self-Learning v6](docs/en/self_learning.md) | History, typed candidates, review triggers, approval, and Project promotion. |
-| [Structured Run API](docs/en/run_observability.md) | Python receipts, typed errors, lifecycle events, and JSONL CLI output. |
+| [Configuration Overview](docs/en/config-overview.md) | Configuration layers, merging, and isolation. |
+| [Agent Configuration](docs/en/agent_config.md) | Supervisor and Worker YAML fields. |
+| [LLM Configuration](docs/en/llm_config.md) | Model types, providers, retries, and caching. |
+| [System Configuration](docs/en/system_config.md) | Runtime, permissions, execution environments, and tools. |
+| [Skills Configuration](docs/en/skills_config.md) | Skill packages, loading, and policy. |
+| [Hooks Reference](docs/en/hooks.md) | Direct Hooks, Bundles, events, and execution. |
+| [Checkpoint Resume](docs/en/checkpoint.md) | Run evidence, checkpoint layout, and recovery. |
+| [Self-Learning v6](docs/en/self_learning.md) | History, candidates, review, approval, and promotion. |
+| [Structured Run API](docs/en/run_observability.md) | Python receipts, typed errors, event sinks, and JSONL. |
 
-## AgentLoom Framework Skill
+## Development and support
 
-The repository includes one root-level Agent Skill for AI coding assistants: `agentloom-framework-skill/`.
+```bash
+# Framework tests
+uv run pytest tests -q
 
-Use it when you want Codex, Claude Code, or another coding assistant to develop with AgentLoom instead of guessing the required files and fields from scratch. Ask the assistant to read `agentloom-framework-skill/SKILL.md`, then describe the application capability you want to build.
+# TUI tests
+cd agentloom-tui
+bun test
+bun run typecheck
+```
 
-This Skill is a development aid for coding assistants. It is not stored under `skills/`, so AgentLoom runtime applications do not auto-load it as a normal runtime Skill.
-
-## Support and Contributing
-
-AgentLoom is built as a practical framework for complex agent automation. Issues, feature ideas, documentation improvements, and example applications are welcome.
-
-- Open an issue: [GitHub Issues](https://github.com/linora-u/AgentLoom/issues)
+- Issues: [github.com/linora-u/AgentLoom/issues](https://github.com/linora-u/AgentLoom/issues)
 - Contact: [raine_walker@163.com](mailto:raine_walker@163.com?subject=AgentLoom%20Collaboration)
-- If the project helps you, a GitHub star makes it easier for others to find.
+- TUI upstream provenance and license: [agentloom-tui/upstream/README.md](agentloom-tui/upstream/README.md)
+
+If AgentLoom helps your project, consider starring the repository or contributing a focused example, fix, or documentation improvement.
