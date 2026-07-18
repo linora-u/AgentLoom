@@ -372,7 +372,7 @@ class SelfLearningReviewSettings(BaseModel):
     artifacts: ReviewArtifactsSettings = Field(default_factory=ReviewArtifactsSettings)
 
     @model_validator(mode="after")
-    def _require_models_when_enabled(self) -> "SelfLearningReviewSettings":
+    def _require_models_when_enabled(self) -> SelfLearningReviewSettings:
         if not self.enabled:
             return self
         missing = [
