@@ -2,7 +2,13 @@
 
 _LAZY_EXPORTS = {
     "C": (".config", "C"),
+    "ConfigLayerSnapshot": (".config", "ConfigLayerSnapshot"),
+    "EffectiveAgentConfigSnapshot": (".config", "EffectiveAgentConfigSnapshot"),
     "build_effective_agent_config": (".config", "build_effective_agent_config"),
+    "build_effective_agent_config_snapshot": (
+        ".config",
+        "build_effective_agent_config_snapshot",
+    ),
     "get_code_agent_config": (".config", "get_code_agent_config"),
     "get_config": (".config", "get_config"),
     "get_default_toolsets": (".config", "get_default_toolsets"),
@@ -38,12 +44,15 @@ def __dir__() -> list[str]:
 
 __all__ = [
     "C",
+    "ConfigLayerSnapshot",
+    "EffectiveAgentConfigSnapshot",
     "LayeredConfigBuilder",
     "LoggingSettings",
     "OverlaySpec",
     "RootSettings",
     "RuntimeSettings",
     "build_effective_agent_config",
+    "build_effective_agent_config_snapshot",
     "get_code_agent_config",
     "get_config",
     "get_default_toolsets",

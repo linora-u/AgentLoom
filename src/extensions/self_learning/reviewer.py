@@ -715,7 +715,7 @@ def review_finished_run(
                 resolved = str(getattr(model, "model_id", "") or "")
                 meter = _ReviewModelMeter(model, max_calls=_REVIEW_MAX_STEPS)
 
-                # Imports stay lazy: HookManager bootstrap imports this module
+                # Imports stay lazy: Hook Runtime bootstrap imports this module
                 # while the agent/model packages import the hook package.
                 from src.lib.smolagents.agent.base_agent import ToolCallingAgentV2
                 from src.lib.smolagents.models.litellm_retry import (
@@ -772,7 +772,7 @@ def review_finished_run(
                     agent_name="memory_reviewer",
                     agent_config=dict(agent_config or {}),
                     skills_manager=None,
-                    hook_manager=None,
+                    hook_run=None,
                     runtime_agent_path="memory_reviewer",
                     root_run_id=run_id,
                     local_run_id=f"memory-review-{uuid.uuid4().hex}",

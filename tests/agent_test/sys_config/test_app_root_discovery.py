@@ -180,6 +180,68 @@ def test_build_effective_merges_app_overlay(tmp_path):
     assert config_module.C.llm.for_type("powerful").model == "openai/test-model"
 
 
+def test_effective_snapshot_preserves_hook_layers_and_roots(tmp_path):
+    """Hook compilation sees every source layer instead of the deep-merged list."""
+    agent_root = tmp_path / "agent"
+    config_dir = agent_root / "config"
+    app_root = agent_root / "applications" / "my_app"
+
+    _write_yaml(
+        config_dir / "system.yaml",
+        {
+            "system": {"name": "base"},
+            "hooks": {
+                "PreToolUse": [
+                    {"id": "base", "command": "python base.py"}
+                ]
+            },
+        },
+    )
+    _write_yaml(config_dir / "llm.yaml", _minimal_llm_yaml())
+    _write_yaml(
+        app_root / "config" / "system.yaml",
+        {
+            "hooks": {
+                "PreToolUse": [
+                    {"id": "app", "command": "python app.py"}
+                ]
+            }
+        },
+    )
+    yaml_file = app_root / "workflows" / "agent.yaml"
+    _write_yaml(yaml_file, {"name": "test"})
+    config_module._ACTIVE_CONFIG = config_module._load_merged_config(
+        config_dir=config_dir
+    )
+
+    snapshot = config_module.build_effective_agent_config_snapshot(
+        {
+            "_yaml_file_path": str(yaml_file),
+            "hooks": {
+                "PreToolUse": [
+                    {"id": "agent", "command": "python agent.py"}
+                ]
+            },
+        },
+        source_name=str(yaml_file),
+    )
+
+    assert [layer.name for layer in snapshot.layers] == [
+        "global_system",
+        "application_system",
+        "agent",
+    ]
+    assert [layer.data["hooks"]["PreToolUse"][0]["id"] for layer in snapshot.layers] == [
+        "base",
+        "app",
+        "agent",
+    ]
+    assert snapshot.layers[0].root == agent_root.resolve()
+    assert snapshot.layers[1].root == app_root.resolve()
+    assert snapshot.layers[2].root == app_root.resolve()
+    assert snapshot.values["hooks"]["PreToolUse"][0]["id"] == "agent"
+
+
 @pytest.mark.parametrize("key", ["runtime", "logging"])
 def test_build_effective_rejects_global_only_app_overlay(tmp_path, key):
     agent_root = tmp_path / "agent"

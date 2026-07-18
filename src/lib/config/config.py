@@ -12,6 +12,7 @@ from __future__ import annotations
 import builtins
 import os
 from copy import deepcopy
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
@@ -51,11 +52,30 @@ _WORKFLOW_OVERLAY_KEYS = {
     "prompt",
     "mcp_servers",
     "self_learning",
+    "hooks",
 }
 _LLM_ONLY_TOP_LEVEL_KEYS = {"model", "llm", "langfuse"}
 _GLOBAL_ONLY_TOP_LEVEL_KEYS = {"runtime", "logging"}
 
 logger = get_logger(__name__)
+
+
+@dataclass(frozen=True, slots=True)
+class ConfigLayerSnapshot:
+    """One immutable-by-convention configuration source with path provenance."""
+
+    name: str
+    data: dict[str, Any]
+    root: Path
+    source_path: Path
+
+
+@dataclass(frozen=True, slots=True)
+class EffectiveAgentConfigSnapshot:
+    """Merged values plus the unmerged sources used to produce them."""
+
+    values: dict[str, Any]
+    layers: tuple[ConfigLayerSnapshot, ...]
 
 
 def _load_yaml(path: Path) -> dict[str, Any]:
@@ -482,6 +502,14 @@ def extract_workflow_overlay(
             overlay[key] = value
             continue
 
+        # Preserve invalid values as well as valid mappings. Hook validation
+        # needs the actual Agent-layer declaration; silently dropping
+        # ``hooks: null`` or ``hooks: []`` would turn a configuration error
+        # into an unintended fallback to lower-precedence Hooks.
+        if key == "hooks":
+            overlay[key] = value
+            continue
+
         # mcp_servers: pass through as-is (string, list, or dict all valid)
         if key == "mcp_servers":
             overlay[key] = value
@@ -492,12 +520,12 @@ def extract_workflow_overlay(
     return overlay
 
 
-def build_effective_agent_config(
+def build_effective_agent_config_snapshot(
     agent_config: dict[str, Any] | None,
     *,
     source_name: str = "agent",
-) -> dict[str, Any]:
-    """Build the final merged config for a single Agent.
+) -> EffectiveAgentConfigSnapshot:
+    """Build merged Agent values while retaining every unmerged source.
 
     Merge order (low → high):
     1. Global base (``config/system.yaml`` + ``config/llm.yaml``)
@@ -509,15 +537,28 @@ def build_effective_agent_config(
     ``workflows/`` directory is found.
     """
     base = get_config()
+    layers: list[ConfigLayerSnapshot] = []
     layered_builder = LayeredConfigBuilder(
         validate_hook=lambda snapshot, overlay: validate_system_snapshot(snapshot, overlay.name)
     )
-    layered_builder.apply_mapping("base_config", deepcopy(base.raw))
+    base_data = deepcopy(base.raw)
+    layered_builder.apply_mapping("base_config", base_data)
+    layers.append(
+        ConfigLayerSnapshot(
+            name="global_system",
+            data=deepcopy(base_data),
+            root=base.agent_root.resolve(),
+            source_path=(base.agent_root / "config" / SYSTEM_CONFIG_NAME).resolve(),
+        )
+    )
 
     # --- Application-level overlay (resolved from _yaml_file_path) ---
+    agent_layer_root = base.agent_root.resolve()
+    agent_source_path = Path(source_name).expanduser()
     if isinstance(agent_config, dict):
         yaml_file_path = agent_config.get("_yaml_file_path")
         if yaml_file_path:
+            agent_source_path = Path(str(yaml_file_path)).expanduser().resolve()
             try:
                 app_root = _resolve_app_root_from_yaml(
                     base.agent_root, Path(yaml_file_path)
@@ -529,6 +570,7 @@ def build_effective_agent_config(
                     yaml_file_path,
                 )
             else:
+                agent_layer_root = app_root.resolve()
                 app_config_path = app_root / APP_CONFIG_RELATIVE_PATH
                 if app_root != base.agent_root and app_config_path.exists():
                     app_system_yaml = _filter_llm_only_top_level_keys(
@@ -542,13 +584,35 @@ def build_effective_agent_config(
                     layered_builder.apply_mapping(
                         str(app_config_path), app_system_yaml
                     )
+                    layers.append(
+                        ConfigLayerSnapshot(
+                            name="application_system",
+                            data=deepcopy(app_system_yaml),
+                            root=app_root.resolve(),
+                            source_path=app_config_path.resolve(),
+                        )
+                    )
 
     # --- Agent YAML overlay ---
     if isinstance(agent_config, dict):
+        agent_overlay = extract_workflow_overlay(
+            deepcopy(agent_config), source_name=source_name
+        )
         layered_builder.apply_mapping(
             source_name,
-            extract_workflow_overlay(deepcopy(agent_config), source_name=source_name),
+            agent_overlay,
         )
+        if agent_overlay:
+            if not agent_source_path.is_absolute():
+                agent_source_path = (agent_layer_root / agent_source_path).resolve()
+            layers.append(
+                ConfigLayerSnapshot(
+                    name="agent",
+                    data=deepcopy(agent_overlay),
+                    root=agent_layer_root,
+                    source_path=agent_source_path,
+                )
+            )
     merged = layered_builder.build()
     normalize_tool_access_control_section(merged, base.agent_root)
     validate_system_snapshot(merged, source_name)
@@ -557,7 +621,20 @@ def build_effective_agent_config(
         # (self-learning memory layering, learning artifacts) reads the workflow
         # path from the effective config at hook time.
         merged["_yaml_file_path"] = str(agent_config["_yaml_file_path"])
-    return merged
+    return EffectiveAgentConfigSnapshot(values=merged, layers=tuple(layers))
+
+
+def build_effective_agent_config(
+    agent_config: dict[str, Any] | None,
+    *,
+    source_name: str = "agent",
+) -> dict[str, Any]:
+    """Build the final merged config for a single Agent."""
+
+    return build_effective_agent_config_snapshot(
+        agent_config,
+        source_name=source_name,
+    ).values
 
 
 def get_model_config(model_type: str, key: str, default: Any = None) -> Any:

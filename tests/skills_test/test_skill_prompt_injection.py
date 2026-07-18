@@ -17,7 +17,6 @@ if str(AGENT_LOOM_ROOT) not in sys.path:
     sys.path.insert(0, str(AGENT_LOOM_ROOT))
 
 import src.lib.smolagents.prompts.prompt_builder as pb_module
-from src.lib.smolagents.hooks.hook_manager import HookManager
 from src.lib.smolagents.prompts.prompt_builder import build_prompt_templates
 from src.lib.smolagents.skills.skills import SkillsManager
 
@@ -60,11 +59,7 @@ def _make_skill(
 
 def _fresh_skills_manager() -> SkillsManager:
     SkillsManager._instance = None
-    HookManager._instance = None
-    return SkillsManager(
-        logger=logging.getLogger(__name__),
-        hook_manager=HookManager(),
-    )
+    return SkillsManager(logger=logging.getLogger(__name__))
 
 
 def _build_system_prompt(monkeypatch, tmp_path: Path, sm: SkillsManager) -> str:

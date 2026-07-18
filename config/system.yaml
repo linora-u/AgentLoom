@@ -33,25 +33,28 @@ context_engine:
 # Notes:
 # - A skill with the same name will raise an error within the final view of the same agent
 # - The examples below are commented out by default to avoid conflicts with existing agent-private skills
-# - The loading strategy is controlled by invocation-control.allow-model:
-#   true (load on demand) | false (hidden) | "force-inject" (force injection into the system prompt)
 skills:
-  # NOTE: agent-recall-with-files is disabled by default.
-  # This skill appends recall prompts (context.md, trace.md, insights.md) at the
-  # end of tool result messages via PreToolUse/PostToolUse hooks. Weak LLMs suffer
-  # from attention sparsity on long contexts — the appended instructions are often
-  # ignored or interfere with subsequent tool result parsing.
-  # Enable manually for strong LLMs only (e.g. Claude Sonnet/Opus, GPT-4o).
+  # The recall instructions are independent from the similarly named Hook
+  # Bundle below. Enable either interface explicitly; loading the Skill never
+  # executes Hook code.
   # - path: "skills/agent-recall-with-files"
   #   invocation-control:
   #     allow-model: "force-inject"
-  #     allow-hook: true
 
+# ============================================
+# Global Hook Configuration
+# ============================================
+# Bundle references are explicit execution authorization. Hook directories are
+# never auto-discovered, including when a Skill has the same name.
+hooks:
+  bundles:
+    agent-visualization:
+      path: "hooks/agent-visualization"
 
-  - path: "skills/agent-visualization"
-    invocation-control:
-      allow-model: false
-      allow-hook: true
+    # Recall Hooks remain disabled by default because their injected context is
+    # intentionally high-volume. Enable separately from the recall Skill.
+    # agent-recall-with-files:
+    #   path: "hooks/agent-recall-with-files"
 
 # ============================================
 # Global Execution Environment Configuration

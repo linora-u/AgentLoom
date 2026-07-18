@@ -9,13 +9,11 @@ AGENT_LOOM_ROOT = SCRIPT_DIR.parents[1]
 if str(AGENT_LOOM_ROOT) not in sys.path:
     sys.path.insert(0, str(AGENT_LOOM_ROOT))
 
-from src.lib.smolagents.hooks.hook_manager import HookManager
 from src.lib.smolagents.skills.skills import SkillsManager
 
 
 def _reset_singletons():
     SkillsManager._instance = None
-    HookManager._instance = None
 
 
 class TestSkillsLoading(unittest.TestCase):
@@ -98,10 +96,10 @@ class TestSkillsLoading(unittest.TestCase):
                 str(self._write_temp_skill("---\nname: sample-skill\ndescription: Sample\nallowed-tools: 123\n---\n# Body\n"))
             )
 
-    def test_invalid_hooks_type_raises(self):
-        with self.assertRaisesRegex(ValueError, "hooks"):
+    def test_any_skill_hook_declaration_raises_migration_error(self):
+        with self.assertRaisesRegex(ValueError, "standalone Hook Bundle"):
             self.skills_manager.load_skill_metadata(
-                str(self._write_temp_skill("---\nname: sample-skill\ndescription: Sample\nhooks:\n  - 1\n---\n# Body\n"))
+                str(self._write_temp_skill("---\nname: sample-skill\ndescription: Sample\nhooks: {}\n---\n# Body\n"))
             )
 
     def test_unknown_and_legacy_frontmatter_fields_are_ignored(self):
@@ -192,8 +190,8 @@ class TestSkillsLoading(unittest.TestCase):
         path_a = self._write_temp_skill("---\nname: same-name\ndescription: A\n---\n# A\n")
         path_b = self._write_temp_skill("---\nname: same-name\ndescription: B\n---\n# B\n")
 
-        manager_a = SkillsManager(logger=logging.getLogger(__name__), hook_manager=HookManager())
-        manager_b = SkillsManager(logger=logging.getLogger(__name__), hook_manager=HookManager())
+        manager_a = SkillsManager(logger=logging.getLogger(__name__))
+        manager_b = SkillsManager(logger=logging.getLogger(__name__))
 
         skill_a = manager_a.load_skill_metadata(str(path_a))
         skill_b = manager_b.load_skill_metadata(str(path_b))

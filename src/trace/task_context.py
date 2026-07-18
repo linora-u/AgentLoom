@@ -6,11 +6,10 @@ sub-task ID, and agent ID handling.
 
 Note on threading:
     ContextVar values do NOT propagate automatically to child threads spawned
-    by ``concurrent.futures.ThreadPoolExecutor``.  To ensure hooks and tools
-    can still read the active agent identity/config when running inside a
-    thread-pool worker, we maintain **thread-safe global fallbacks** that are
-    updated by the matching ``set_current_*`` helpers.  Getters first check
-    their ContextVar; if it is ``None``, they return the fallback.
+    by ``concurrent.futures.ThreadPoolExecutor``. Legacy identity/config
+    getters retain thread-safe global fallbacks. Run-scoped values, including
+    HookRun and root/local run ids, never fall back globally and must cross
+    thread boundaries through an explicit context snapshot.
 """
 
 import logging
@@ -31,7 +30,7 @@ _current_agent_id: ContextVar[Optional[str]] = ContextVar('current_agent_id', de
 _current_agent_name: ContextVar[Optional[str]] = ContextVar('current_agent_name', default=None)
 _current_agent_config: ContextVar[Optional[dict]] = ContextVar('current_agent_config', default=None)
 _current_skills_manager: ContextVar[Optional[Any]] = ContextVar('current_skills_manager', default=None)
-_current_hook_manager: ContextVar[Optional[Any]] = ContextVar('current_hook_manager', default=None)
+_current_hook_run: ContextVar[Any | None] = ContextVar('current_hook_run', default=None)
 _current_runtime_agent_path: ContextVar[Optional[str]] = ContextVar('current_runtime_agent_path', default=None)
 _current_session_run_id: ContextVar[Optional[str]] = ContextVar('current_session_run_id', default=None)
 _current_local_run_id: ContextVar[Optional[str]] = ContextVar('current_local_run_id', default=None)
@@ -46,7 +45,6 @@ _global_agent_config_fallback: Optional[dict] = None
 _global_agent_name_fallback: Optional[str] = None
 _global_runtime_agent_path_fallback: Optional[str] = None
 _global_skills_manager_fallback: Optional[Any] = None
-_global_hook_manager_fallback: Optional[Any] = None
 # NOTE: the session run id deliberately has NO global fallback. Worker threads
 # inherit it via contextvars.copy_context() (see ParallelAgentExecutor), and a
 # process-wide scalar would leak run A's identity into a concurrently running
@@ -74,7 +72,7 @@ class ExplicitExecutionContext:
     agent_name: Optional[str]
     agent_config: Optional[dict]
     skills_manager: Optional[Any]
-    hook_manager: Optional[Any]
+    hook_run: Any | None
     runtime_agent_path: Optional[str]
     root_run_id: Optional[str]
     local_run_id: Optional[str]
@@ -90,7 +88,7 @@ def capture_explicit_execution_context() -> ExplicitExecutionContext:
         agent_name=_current_agent_name.get(),
         agent_config=_current_agent_config.get(),
         skills_manager=_current_skills_manager.get(),
-        hook_manager=_current_hook_manager.get(),
+        hook_run=_current_hook_run.get(),
         runtime_agent_path=_current_runtime_agent_path.get(),
         root_run_id=_current_session_run_id.get(),
         local_run_id=_current_local_run_id.get(),
@@ -115,7 +113,7 @@ def bind_explicit_execution_context(
         (_current_agent_name, context.agent_name),
         (_current_agent_config, context.agent_config),
         (_current_skills_manager, context.skills_manager),
-        (_current_hook_manager, context.hook_manager),
+        (_current_hook_run, context.hook_run),
         (_current_runtime_agent_path, context.runtime_agent_path),
         (_current_session_run_id, context.root_run_id),
         (_current_local_run_id, context.local_run_id),
@@ -336,37 +334,29 @@ def clear_current_skills_manager() -> None:
     logger.debug("Cleared current skills manager")
 
 
-def set_current_hook_manager(hook_manager: Any) -> None:
-    """Set the current hook manager for the active agent context."""
-    global _global_hook_manager_fallback
-    _current_hook_manager.set(hook_manager)
-    with _global_lock:
-        _global_hook_manager_fallback = hook_manager
-    logger.debug("Set current hook manager")
+def set_current_hook_run(hook_run: Any) -> None:
+    """Bind a Hook Run to the current explicit execution context only."""
+    _current_hook_run.set(hook_run)
+    logger.debug("Set current Hook Run")
 
 
-def get_current_hook_manager() -> Optional[Any]:
-    """Get the current hook manager for the active agent context."""
-    value = _current_hook_manager.get()
-    if value is not None:
-        return value
-    with _global_lock:
-        return _global_hook_manager_fallback
+def get_current_hook_run(*, required: bool = False) -> Any | None:
+    """Return the active Hook Run without consulting process-global state."""
+    value = _current_hook_run.get()
+    if value is None and required:
+        raise MissingRunContextError("missing explicit HookRun context")
+    return value
 
 
-def clear_current_hook_manager() -> None:
-    """Clear the current hook manager."""
-    global _global_hook_manager_fallback
-    _current_hook_manager.set(None)
-    with _global_lock:
-        _global_hook_manager_fallback = None
-    logger.debug("Cleared current hook manager")
+def clear_current_hook_run() -> None:
+    _current_hook_run.set(None)
+    logger.debug("Cleared current Hook Run")
 
 
 # ---------------------------------------------------------------------------
 # Session run id — the TOP-LEVEL run's session identity, set only by the
-# session-owning (supervisor) agent.  Workers keep their own hook managers
-# (event attribution stays per-worker) but share this id, so run-scoped
+# session-owning (supervisor) agent. Workers keep isolated Hook Runs but share
+# this id, so run-scoped
 # run-owned history/review state accrues to the root that gets the SessionEnd.
 # Pure ContextVar: worker threads see it through copy_context() propagation
 # at the spawn site, and concurrent runs in one process stay isolated.
@@ -434,8 +424,8 @@ def require_root_run_id() -> str:
 def bind_root_run(run_id: str) -> Generator[bool, None, None]:
     """Bind the first run id in a call tree and report whether this call owns it.
 
-    Nested agents inherit the existing root even when their local hook manager
-    has a different session id.  Only the outer owner resets the binding, using
+    Nested agents inherit the existing root while keeping a distinct local run
+    id. Only the outer owner resets the binding, using
     the ``ContextVar`` token so sibling/concurrent contexts remain isolated.
     """
     if not isinstance(run_id, str) or not run_id.strip():
