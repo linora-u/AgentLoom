@@ -112,6 +112,12 @@ def test_migrate_runtime_command_defaults_to_dry_run(
 
     monkeypatch.setattr("src.__main__._configured_runtime_home", lambda: home)
     monkeypatch.setattr("src.lib.runtime.migration.migrate_runtime", _migrate)
+    monkeypatch.setattr(
+        "src.lib.runtime.workspace_migration.preview_legacy_agent_workspaces",
+        lambda source: SimpleNamespace(
+            source_dir=Path(source), file_count=3, total_bytes=42, archive_dir=None
+        ),
+    )
 
     result = CliRunner().invoke(main, ["migrate-runtime", "--dry-run"])
 
@@ -119,6 +125,8 @@ def test_migrate_runtime_command_defaults_to_dry_run(
     assert observed["dry_run"] is True
     assert observed["archive_legacy"] is False
     assert "candidates=0" in result.output
+    assert "files=3" in result.output
+    assert "archived=no" in result.output
 
 
 def test_migrate_runtime_apply_requests_atomic_legacy_archive(
@@ -140,6 +148,16 @@ def test_migrate_runtime_apply_requests_atomic_legacy_archive(
 
     monkeypatch.setattr("src.__main__._configured_runtime_home", lambda: home)
     monkeypatch.setattr("src.lib.runtime.migration.migrate_runtime", _migrate)
+    archived_workspace = home.root_dir / "workspaces" / "legacy-unscoped" / "workspace-v1-now"
+    monkeypatch.setattr(
+        "src.lib.runtime.workspace_migration.archive_legacy_agent_workspaces",
+        lambda source, runtime_root: SimpleNamespace(
+            source_dir=Path(source),
+            file_count=4,
+            total_bytes=84,
+            archive_dir=archived_workspace,
+        ),
+    )
 
     result = CliRunner().invoke(main, ["migrate-runtime", "--apply"])
 
@@ -147,3 +165,4 @@ def test_migrate_runtime_apply_requests_atomic_legacy_archive(
     assert observed["dry_run"] is False
     assert observed["archive_legacy"] is True
     assert "migrated=1" in result.output
+    assert f"archived={archived_workspace}" in result.output

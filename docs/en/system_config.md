@@ -807,9 +807,9 @@ There is no `--log-to-file`, `logging.enabled`, `logging.dir`, or `logging.file_
 
 ### 7.2 Retention and storage boundaries
 
-Automatic cleanup runs at most once per configured interval. `loom clean-runtime` applies the policy explicitly. It only deletes eligible run directories or their raw artifacts; it never traverses checkpoints, `.agentloom/legacy/`, `.runtime/`, or Application-owned output directories.
+Automatic cleanup runs at most once per configured interval. `loom clean-runtime` applies the policy explicitly. It only deletes eligible run directories or their raw artifacts; it never traverses checkpoints, `.agentloom/legacy/`, `.agentloom/workspaces/`, or Application-owned output directories.
 
-`.runtime/` remains the Agent-visible recall/todo workspace and is semantically independent from `.agentloom/`. `loom migrate-runtime --dry-run` previews valid legacy checkpoint candidates; `loom migrate-runtime --apply` migrates them and archives the complete old `.logs` tree under `.agentloom/legacy/`.
+Agent recall/todo files use `.agentloom/workspaces/agents/<application_id>/<agent_path>/`. `loom migrate-runtime --dry-run` previews valid legacy checkpoint candidates and the old unscoped `.runtime` tree; `loom migrate-runtime --apply` migrates checkpoints, archives `.logs` under `.agentloom/legacy/`, and atomically moves `.runtime` under `.agentloom/workspaces/legacy-unscoped/` because the old files do not contain reliable application/task provenance.
 
 To verify a real attempt, read `manifest.json`, `logs/runtime.log`, and `audit/shell.jsonl`; an exit code alone is not sufficient.
 
@@ -1237,7 +1237,7 @@ Run evidence and task recovery state have independent lifecycles under the same 
 - The run manifest records `task_id`; checkpoint run events and heartbeat record the current `run_id`
 - Checkpoint lookup uses the canonical Application/task path and never depends on logs, `.task_index.json`, or a legacy scan
 - Log closing, rotation, and runtime retention cannot remove checkpoint state
-- `.runtime/` remains a separate Agent-visible workspace; Application `output_dir` remains Application-owned
+- Agent workspaces remain separate from run artifacts; Application `output_dir` remains Application-owned
 
 > For the full Checkpoint & Resume reference, see [Checkpoint & Resume](checkpoint.md).
 

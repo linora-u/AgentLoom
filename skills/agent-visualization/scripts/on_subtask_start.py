@@ -5,10 +5,13 @@ import sys
 
 from common import (
     SKILL_TAG,
-    viz_output_path, read_viz_state, write_viz_state,
-    ensure_agent_in_config, append_event, find_supervisor_name,
+    append_event,
+    find_supervisor_name,
     find_supervisor_viz_path,
-    get_tool_input, output,
+    get_tool_input,
+    output,
+    read_viz_state,
+    register_agent_in_config,
 )
 
 
@@ -16,18 +19,12 @@ def main() -> None:
     tool_input = get_tool_input()
     worker_name = tool_input.get("agent_name", "unknown_worker")
 
-    # Locate the supervisor's visualization.json (created by on_task_start).
-    parent_agent = tool_input.get("parent_agent_name", "")
-    if parent_agent:
-        path = viz_output_path(parent_agent)
-    else:
-        path = find_supervisor_viz_path()
+    # RuntimeContext injects the root supervisor timeline for every agent.
+    path = find_supervisor_viz_path()
 
+    # Dynamically add worker to config without losing concurrent workers.
+    register_agent_in_config(path, worker_name, "worker")
     data = read_viz_state(path)
-
-    # Dynamically add worker to config
-    ensure_agent_in_config(data, worker_name, "worker")
-    write_viz_state(path, data)
 
     # Emit supervisor → waiting (agent_call)
     sup_name = find_supervisor_name(data)

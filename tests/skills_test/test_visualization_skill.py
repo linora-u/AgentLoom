@@ -21,9 +21,11 @@ if str(AGENT_LOOM_ROOT) not in sys.path:
 from src.trace.task_context import (
     clear_current_agent_name,
     clear_current_hook_manager,
+    clear_current_runtime_agent_path,
     clear_current_skills_manager,
     set_current_agent_name,
     set_current_hook_manager,
+    set_current_runtime_agent_path,
     set_current_skills_manager,
     task_context,
 )
@@ -125,8 +127,10 @@ class TestVisualizationTaskStart(unittest.TestCase):
         self.old_cwd = os.getcwd()
         os.chdir(self.temp_dir.name)
 
-        # Set AGENT_LOOM_RUNTIME_ROOT so hooks write to temp dir
-        os.environ["AGENT_LOOM_RUNTIME_ROOT"] = self.temp_dir.name
+        self.runtime_root = Path(self.temp_dir.name) / ".agentloom"
+        os.environ["AGENTLOOM_RUNTIME_ROOT"] = str(self.runtime_root)
+        os.environ["APPLICATION_ID"] = "test-app"
+        os.environ["TASK_ID"] = "test-task"
 
         source_skill = AGENT_LOOM_ROOT / "skills" / "agent-visualization"
         self.skill_dir = Path(self.temp_dir.name) / "agent-visualization"
@@ -148,12 +152,16 @@ class TestVisualizationTaskStart(unittest.TestCase):
     def tearDown(self):
         clear_current_skills_manager()
         clear_current_hook_manager()
-        os.environ.pop("AGENT_LOOM_RUNTIME_ROOT", None)
+        os.environ.pop("AGENTLOOM_RUNTIME_ROOT", None)
+        os.environ.pop("APPLICATION_ID", None)
+        os.environ.pop("TASK_ID", None)
         os.chdir(self.old_cwd)
         self.temp_dir.cleanup()
 
     def _viz_path(self, agent_name):
-        return Path(self.temp_dir.name) / ".runtime" / agent_name / "visualization.json"
+        agent_root = self.runtime_root / "workspaces" / "agents" / "test-app" / agent_name
+        matches = list(agent_root.glob("tasks/*/visualization.json"))
+        return matches[0] if matches else agent_root / "tasks" / "missing" / "visualization.json"
 
     def _read_viz(self, agent_name):
         path = self._viz_path(agent_name)
@@ -220,7 +228,10 @@ class TestVisualizationSubtasks(unittest.TestCase):
         self.old_cwd = os.getcwd()
         os.chdir(self.temp_dir.name)
 
-        os.environ["AGENT_LOOM_RUNTIME_ROOT"] = self.temp_dir.name
+        self.runtime_root = Path(self.temp_dir.name) / ".agentloom"
+        os.environ["AGENTLOOM_RUNTIME_ROOT"] = str(self.runtime_root)
+        os.environ["APPLICATION_ID"] = "test-app"
+        os.environ["TASK_ID"] = "test-task"
 
         source_skill = AGENT_LOOM_ROOT / "skills" / "agent-visualization"
         self.skill_dir = Path(self.temp_dir.name) / "agent-visualization"
@@ -238,6 +249,8 @@ class TestVisualizationSubtasks(unittest.TestCase):
 
         set_current_skills_manager(self.skills_manager)
         set_current_hook_manager(self.hook_manager)
+        set_current_agent_name("main_supervisor")
+        set_current_runtime_agent_path("main_supervisor")
 
         # Bootstrap supervisor first
         with task_context("viz-subtask-test"):
@@ -255,12 +268,17 @@ class TestVisualizationSubtasks(unittest.TestCase):
     def tearDown(self):
         clear_current_skills_manager()
         clear_current_hook_manager()
-        os.environ.pop("AGENT_LOOM_RUNTIME_ROOT", None)
+        clear_current_agent_name()
+        clear_current_runtime_agent_path()
+        os.environ.pop("AGENTLOOM_RUNTIME_ROOT", None)
+        os.environ.pop("APPLICATION_ID", None)
+        os.environ.pop("TASK_ID", None)
         os.chdir(self.old_cwd)
         self.temp_dir.cleanup()
 
     def _read_viz(self):
-        path = Path(self.temp_dir.name) / ".runtime" / "main_supervisor" / "visualization.json"
+        agent_root = self.runtime_root / "workspaces" / "agents" / "test-app" / "main_supervisor"
+        path = next(agent_root.glob("tasks/*/visualization.json"))
         return json.loads(path.read_text(encoding="utf-8"))
 
     def test_06_subtask_start_adds_worker_and_events(self):
@@ -392,7 +410,10 @@ class TestVisualizationToolUse(unittest.TestCase):
         self.old_cwd = os.getcwd()
         os.chdir(self.temp_dir.name)
 
-        os.environ["AGENT_LOOM_RUNTIME_ROOT"] = self.temp_dir.name
+        self.runtime_root = Path(self.temp_dir.name) / ".agentloom"
+        os.environ["AGENTLOOM_RUNTIME_ROOT"] = str(self.runtime_root)
+        os.environ["APPLICATION_ID"] = "test-app"
+        os.environ["TASK_ID"] = "test-task"
 
         source_skill = AGENT_LOOM_ROOT / "skills" / "agent-visualization"
         self.skill_dir = Path(self.temp_dir.name) / "agent-visualization"
@@ -427,12 +448,15 @@ class TestVisualizationToolUse(unittest.TestCase):
     def tearDown(self):
         clear_current_skills_manager()
         clear_current_hook_manager()
-        os.environ.pop("AGENT_LOOM_RUNTIME_ROOT", None)
+        os.environ.pop("AGENTLOOM_RUNTIME_ROOT", None)
+        os.environ.pop("APPLICATION_ID", None)
+        os.environ.pop("TASK_ID", None)
         os.chdir(self.old_cwd)
         self.temp_dir.cleanup()
 
     def _read_viz(self):
-        path = Path(self.temp_dir.name) / ".runtime" / "test_sup" / "visualization.json"
+        agent_root = self.runtime_root / "workspaces" / "agents" / "test-app" / "test_sup"
+        path = next(agent_root.glob("tasks/*/visualization.json"))
         return json.loads(path.read_text(encoding="utf-8"))
 
     def test_09_pre_tool_use_emits_tool_call_event(self):
@@ -489,7 +513,10 @@ class TestVisualizationTaskComplete(unittest.TestCase):
         self.old_cwd = os.getcwd()
         os.chdir(self.temp_dir.name)
 
-        os.environ["AGENT_LOOM_RUNTIME_ROOT"] = self.temp_dir.name
+        self.runtime_root = Path(self.temp_dir.name) / ".agentloom"
+        os.environ["AGENTLOOM_RUNTIME_ROOT"] = str(self.runtime_root)
+        os.environ["APPLICATION_ID"] = "test-app"
+        os.environ["TASK_ID"] = "test-task"
 
         source_skill = AGENT_LOOM_ROOT / "skills" / "agent-visualization"
         self.skill_dir = Path(self.temp_dir.name) / "agent-visualization"
@@ -511,12 +538,15 @@ class TestVisualizationTaskComplete(unittest.TestCase):
     def tearDown(self):
         clear_current_skills_manager()
         clear_current_hook_manager()
-        os.environ.pop("AGENT_LOOM_RUNTIME_ROOT", None)
+        os.environ.pop("AGENTLOOM_RUNTIME_ROOT", None)
+        os.environ.pop("APPLICATION_ID", None)
+        os.environ.pop("TASK_ID", None)
         os.chdir(self.old_cwd)
         self.temp_dir.cleanup()
 
     def _read_viz(self, agent_name):
-        path = Path(self.temp_dir.name) / ".runtime" / agent_name / "visualization.json"
+        agent_root = self.runtime_root / "workspaces" / "agents" / "test-app" / agent_name
+        path = next(agent_root.glob("tasks/*/visualization.json"))
         return json.loads(path.read_text(encoding="utf-8"))
 
     def test_11_task_complete_emits_final_event(self):
@@ -593,7 +623,10 @@ class TestVisualizationEndToEnd(unittest.TestCase):
         self.old_cwd = os.getcwd()
         os.chdir(self.temp_dir.name)
 
-        os.environ["AGENT_LOOM_RUNTIME_ROOT"] = self.temp_dir.name
+        self.runtime_root = Path(self.temp_dir.name) / ".agentloom"
+        os.environ["AGENTLOOM_RUNTIME_ROOT"] = str(self.runtime_root)
+        os.environ["APPLICATION_ID"] = "test-app"
+        os.environ["TASK_ID"] = "test-task"
 
         source_skill = AGENT_LOOM_ROOT / "skills" / "agent-visualization"
         self.skill_dir = Path(self.temp_dir.name) / "agent-visualization"
@@ -615,18 +648,24 @@ class TestVisualizationEndToEnd(unittest.TestCase):
     def tearDown(self):
         clear_current_skills_manager()
         clear_current_hook_manager()
-        os.environ.pop("AGENT_LOOM_RUNTIME_ROOT", None)
+        clear_current_agent_name()
+        clear_current_runtime_agent_path()
+        os.environ.pop("AGENTLOOM_RUNTIME_ROOT", None)
+        os.environ.pop("APPLICATION_ID", None)
+        os.environ.pop("TASK_ID", None)
         os.chdir(self.old_cwd)
         self.temp_dir.cleanup()
 
     def _read_viz(self, agent_name):
-        path = Path(self.temp_dir.name) / ".runtime" / agent_name / "visualization.json"
+        agent_root = self.runtime_root / "workspaces" / "agents" / "test-app" / agent_name
+        path = next(agent_root.glob("tasks/*/visualization.json"))
         return json.loads(path.read_text(encoding="utf-8"))
 
     def test_13_full_lifecycle_sequence(self):
         """Simulate full flow: TaskStart → SubtaskStart → tool → SubtaskFinish → TaskComplete."""
         sup = "code_review_agent"
         workers = ["project_scan", "coding_standards"]
+        set_current_runtime_agent_path(sup)
 
         # 1. TaskStart
         with task_context("e2e-test"):
@@ -704,6 +743,7 @@ class TestVisualizationEndToEnd(unittest.TestCase):
     def test_14_json_format_compatible_with_frontend(self):
         """Output JSON matches the schema expected by the frontend visualizer."""
         sup = "format_test_agent"
+        set_current_runtime_agent_path(sup)
 
         with task_context("fmt-test"):
             self.hook_manager.trigger_hooks(
@@ -768,7 +808,10 @@ class TestVisualizationRobustness(unittest.TestCase):
         self.old_cwd = os.getcwd()
         os.chdir(self.temp_dir.name)
 
-        os.environ["AGENT_LOOM_RUNTIME_ROOT"] = self.temp_dir.name
+        self.runtime_root = Path(self.temp_dir.name) / ".agentloom"
+        os.environ["AGENTLOOM_RUNTIME_ROOT"] = str(self.runtime_root)
+        os.environ["APPLICATION_ID"] = "test-app"
+        os.environ["TASK_ID"] = "test-task"
 
         source_skill = AGENT_LOOM_ROOT / "skills" / "agent-visualization"
         self.skill_dir = Path(self.temp_dir.name) / "agent-visualization"
@@ -790,7 +833,9 @@ class TestVisualizationRobustness(unittest.TestCase):
     def tearDown(self):
         clear_current_skills_manager()
         clear_current_hook_manager()
-        os.environ.pop("AGENT_LOOM_RUNTIME_ROOT", None)
+        os.environ.pop("AGENTLOOM_RUNTIME_ROOT", None)
+        os.environ.pop("APPLICATION_ID", None)
+        os.environ.pop("TASK_ID", None)
         os.chdir(self.old_cwd)
         self.temp_dir.cleanup()
 
@@ -805,7 +850,8 @@ class TestVisualizationRobustness(unittest.TestCase):
                             "task_text": "Rapid test", "agent_name": sup},
             )
 
-        path = Path(self.temp_dir.name) / ".runtime" / sup / "visualization.json"
+        agent_root = self.runtime_root / "workspaces" / "agents" / "test-app" / sup
+        path = next(agent_root.glob("tasks/*/visualization.json"))
 
         # Fire 10 tool use events rapidly
         for i in range(10):

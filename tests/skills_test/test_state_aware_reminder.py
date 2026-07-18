@@ -164,7 +164,9 @@ class TestWriteTracker(unittest.TestCase):
     def test_template_files_detected_as_never_written(self):
         """Template-only files should have stale_steps = -1."""
         tracker = load_write_tracker(self.tmpdir)
-        staleness = detect_writes_and_update(self.tmpdir, tracker, step=5)
+        staleness = detect_writes_and_update(
+            self.tmpdir, tracker, step=5, persistent_insights=self.tmpdir / INSIGHTS_FILE
+        )
         self.assertEqual(staleness[TRACE_FILE], -1)
         self.assertEqual(staleness[CONTEXT_FILE], -1)
 
@@ -172,7 +174,9 @@ class TestWriteTracker(unittest.TestCase):
         """Writing real content should be detected via mtime change."""
         tracker = load_write_tracker(self.tmpdir)
         # First check at step 1 — template only.
-        detect_writes_and_update(self.tmpdir, tracker, step=1)
+        detect_writes_and_update(
+            self.tmpdir, tracker, step=1, persistent_insights=self.tmpdir / INSIGHTS_FILE
+        )
 
         # Write real content to trace.md.
         time.sleep(0.05)  # Ensure mtime difference.
@@ -180,7 +184,9 @@ class TestWriteTracker(unittest.TestCase):
             "# Trace\n\n## Log\n- Real entry here\n" + "x" * 500,
             encoding="utf-8",
         )
-        staleness = detect_writes_and_update(self.tmpdir, tracker, step=3)
+        staleness = detect_writes_and_update(
+            self.tmpdir, tracker, step=3, persistent_insights=self.tmpdir / INSIGHTS_FILE
+        )
         self.assertEqual(staleness[TRACE_FILE], 0)  # Fresh.
 
     def test_staleness_grows_over_steps(self):
@@ -192,11 +198,15 @@ class TestWriteTracker(unittest.TestCase):
             "# Trace\n\n## Log\n- Entry\n" + "x" * 500,
             encoding="utf-8",
         )
-        detect_writes_and_update(self.tmpdir, tracker, step=2)
+        detect_writes_and_update(
+            self.tmpdir, tracker, step=2, persistent_insights=self.tmpdir / INSIGHTS_FILE
+        )
         self.assertEqual(tracker[TRACE_FILE]["last_written_at_step"], 2)
 
         # Check at step 6 without modifying.
-        staleness = detect_writes_and_update(self.tmpdir, tracker, step=6)
+        staleness = detect_writes_and_update(
+            self.tmpdir, tracker, step=6, persistent_insights=self.tmpdir / INSIGHTS_FILE
+        )
         self.assertEqual(staleness[TRACE_FILE], 4)  # 6 - 2 = 4.
 
     def test_staleness_resets_on_new_write(self):
@@ -205,16 +215,22 @@ class TestWriteTracker(unittest.TestCase):
         # Initial write at step 2.
         time.sleep(0.05)
         (self.tmpdir / TRACE_FILE).write_text("# Trace\nEntry1\n" + "x" * 500, encoding="utf-8")
-        detect_writes_and_update(self.tmpdir, tracker, step=2)
+        detect_writes_and_update(
+            self.tmpdir, tracker, step=2, persistent_insights=self.tmpdir / INSIGHTS_FILE
+        )
 
         # Stale at step 8.
-        staleness = detect_writes_and_update(self.tmpdir, tracker, step=8)
+        staleness = detect_writes_and_update(
+            self.tmpdir, tracker, step=8, persistent_insights=self.tmpdir / INSIGHTS_FILE
+        )
         self.assertEqual(staleness[TRACE_FILE], 6)
 
         # Write again at step 9.
         time.sleep(0.05)
         (self.tmpdir / TRACE_FILE).write_text("# Trace\nEntry2\n" + "x" * 500, encoding="utf-8")
-        staleness = detect_writes_and_update(self.tmpdir, tracker, step=9)
+        staleness = detect_writes_and_update(
+            self.tmpdir, tracker, step=9, persistent_insights=self.tmpdir / INSIGHTS_FILE
+        )
         self.assertEqual(staleness[TRACE_FILE], 0)  # Fresh again.
 
 
@@ -247,7 +263,9 @@ class TestPostToolUseBehavior(unittest.TestCase):
         env = {
             "AGENT_NAME": "test_agent",
             "STEP_NUMBER": str(step),
-            "AGENT_LOOM_RUNTIME_ROOT": str(self.tmpdir.parent),
+            "AGENTLOOM_RUNTIME_ROOT": str(self.tmpdir.parent / ".agentloom"),
+            "AGENTLOOM_AGENT_TASK_WORKSPACE": str(self.tmpdir),
+            "AGENTLOOM_AGENT_INSIGHTS_PATH": str(self.tmpdir / INSIGHTS_FILE),
             "HOOK_CONTEXT_JSON": "",
             "TOOL_NAME": "test_tool",
             "HOOK_EVENT": "PostToolUse",
@@ -257,16 +275,11 @@ class TestPostToolUseBehavior(unittest.TestCase):
             if "on_post_tool_use" in sys.modules:
                 del sys.modules["on_post_tool_use"]
             import on_post_tool_use
-            with mock_patch.object(
-                on_post_tool_use, "runtime_dir", return_value=self.tmpdir
-            ), mock_patch.object(
-                on_post_tool_use, "get_runtime_agent_path", return_value="test_agent"
-            ):
-                buf = io.StringIO()
-                with redirect_stdout(buf):
-                    on_post_tool_use.main()
-                raw = buf.getvalue().strip()
-                return json.loads(raw) if raw else {}
+            buf = io.StringIO()
+            with redirect_stdout(buf):
+                on_post_tool_use.main()
+            raw = buf.getvalue().strip()
+            return json.loads(raw) if raw else {}
 
     def test_grace_period_silent(self):
         """Steps 1-3 should produce no reminder (grace period)."""

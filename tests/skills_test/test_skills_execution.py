@@ -31,9 +31,10 @@ class TestSkillsIntegration(unittest.TestCase):
         self.temp_dir = tempfile.TemporaryDirectory()
         self.old_cwd = os.getcwd()
         os.chdir(self.temp_dir.name)
-        # Point hook scripts to the temp dir as project root so that
-        # _find_agent_loom_root() resolves correctly in subprocess hooks.
-        os.environ["AGENT_LOOM_RUNTIME_ROOT"] = self.temp_dir.name
+        self.runtime_root = Path(self.temp_dir.name) / ".agentloom"
+        os.environ["AGENTLOOM_RUNTIME_ROOT"] = str(self.runtime_root)
+        os.environ["APPLICATION_ID"] = "test-app"
+        os.environ["TASK_ID"] = "test-task"
 
         if not source_skill_dir.exists():
             self.fail(f"Skill directory not found at {source_skill_dir}")
@@ -42,9 +43,10 @@ class TestSkillsIntegration(unittest.TestCase):
         shutil.copytree(source_skill_dir, self.skill_dir)
         self.skill_path = self.skill_dir / "SKILL.md"
 
-        # Create agent-scoped runtime directory under the project root
-        # (AGENT_LOOM_RUNTIME_ROOT points to temp_dir, so .runtime/ resolves there).
-        self.runtime_dir = Path(self.temp_dir.name) / ".runtime" / "default"
+        self.agent_root = (
+            self.runtime_root / "workspaces" / "agents" / "test-app" / "default"
+        )
+        self.runtime_dir = self.agent_root / "tasks" / "test-task"
         self.runtime_dir.mkdir(parents=True, exist_ok=True)
         # Set STEP_NUMBER high enough to bypass the PostToolUse grace period
         # (the freshness-driven reminder engine is silent for steps <= 3).
@@ -55,7 +57,7 @@ class TestSkillsIntegration(unittest.TestCase):
             "recent-trace-note\n",
             encoding="utf-8",
         )
-        (self.runtime_dir / "insights.md").write_text(
+        (self.agent_root / "insights.md").write_text(
             "# Insights\n\n"
             "important-insight-note\n",
             encoding="utf-8",
@@ -67,7 +69,9 @@ class TestSkillsIntegration(unittest.TestCase):
         )
 
     def tearDown(self):
-        os.environ.pop("AGENT_LOOM_RUNTIME_ROOT", None)
+        os.environ.pop("AGENTLOOM_RUNTIME_ROOT", None)
+        os.environ.pop("APPLICATION_ID", None)
+        os.environ.pop("TASK_ID", None)
         os.environ.pop("STEP_NUMBER", None)
         os.chdir(self.old_cwd)
         self.temp_dir.cleanup()
@@ -138,7 +142,7 @@ class TestSkillsIntegration(unittest.TestCase):
         self.assertEqual(stop_result.decision, "allow")
         self.assertIn("allow", (stop_result.reason or "").lower())
 
-    def test_pre_tool_rewrites_runtime_alias_to_current_agent(self):
+    def test_pre_tool_does_not_rewrite_legacy_runtime_aliases(self):
         skill = self.skills_manager.load_skill_metadata(str(self.skill_path))
         self.assertIsNotNone(skill, "Failed to load SKILL.md")
 
@@ -154,14 +158,11 @@ class TestSkillsIntegration(unittest.TestCase):
             },
         )
 
-        self.assertEqual(pre_result.decision, "modify")
-        self.assertEqual(
-            pre_result.modified_input["file_path"],
-            ".runtime/default/trace.md",
-        )
-        self.assertIn("exact current agent directory", pre_result.agent_context or "")
+        self.assertEqual(pre_result.decision, "allow")
+        self.assertIsNone(pre_result.modified_input)
+        self.assertIn(str(self.runtime_dir), pre_result.agent_context or "")
 
-    def test_pre_tool_rewrites_runtime_alias_inside_shell_commands(self):
+    def test_pre_tool_does_not_mutate_shell_commands(self):
         skill = self.skills_manager.load_skill_metadata(str(self.skill_path))
         self.assertIsNotNone(skill, "Failed to load SKILL.md")
 
@@ -180,14 +181,8 @@ class TestSkillsIntegration(unittest.TestCase):
             },
         )
 
-        self.assertEqual(pre_result.decision, "modify")
-        self.assertEqual(
-            pre_result.modified_input["commands"],
-            [
-                "rm -rf .runtime/project_scan/",
-                "mkdir -p .runtime/project_scan/",
-            ],
-        )
+        self.assertEqual(pre_result.decision, "allow")
+        self.assertIsNone(pre_result.modified_input)
 
 
 if __name__ == "__main__":

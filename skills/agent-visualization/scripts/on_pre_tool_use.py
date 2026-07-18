@@ -5,9 +5,14 @@ import sys
 
 from common import (
     SKILL_TAG,
-    find_supervisor_viz_path, append_event,
-    is_filtered_tool, read_viz_state,
-    get_agent_name, get_tool_name, get_tool_input, output,
+    append_event,
+    find_supervisor_viz_path,
+    get_agent_name,
+    get_tool_input,
+    get_tool_name,
+    is_filtered_tool,
+    output,
+    read_viz_state,
 )
 
 

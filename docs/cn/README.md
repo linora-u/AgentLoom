@@ -50,7 +50,7 @@ uv run loom run applications/ai_quality_analysis/workflows/code_review_agent.yam
 - 可通过 `uv run loom ui` 打开的 Web 可视化面板；
 - 可通过 `uv run loom dashboard` 打开的终端任务监控面板。
 
-`run_id` 标识一次执行 attempt，resume 时会改变；`task_id` 标识同一个逻辑任务，resume 时保持不变。因此 resume 会写入新的 run 目录，同时继续使用原 checkpoint。Agent 可见的 `.runtime/` 工作区与框架 runtime 存储刻意保持独立。
+`run_id` 标识一次执行 attempt，resume 时会改变；`task_id` 标识同一个逻辑任务，resume 时保持不变。因此 resume 会写入新的 run 目录，同时继续使用原 checkpoint 和 `.agentloom/workspaces/agents/<application_id>/<agent_path>/tasks/<task_id>/`。`insights.md` 位于 agent workspace 根目录并跨 task 共享。
 
 ## 以 Codex 为例快速创建多 Agent 应用
 
@@ -216,8 +216,8 @@ AgentLoom 内置 `src.tools.codex.codex_tool.codex`，用于把本机 `codex exe
 | `uv run loom list-tasks` | 列出可恢复的 checkpoint 任务。 |
 | `uv run loom clean-tasks` | 清理旧 checkpoint 数据。 |
 | `uv run loom clean-runtime` | 按配置的 retention 清理已结束 run 与 raw artifacts。 |
-| `uv run loom migrate-runtime --dry-run` | 只预览有效的旧 checkpoint 候选，不改磁盘状态。 |
-| `uv run loom migrate-runtime --apply` | 迁移有效 checkpoint，并归档整个旧 `.logs`。 |
+| `uv run loom migrate-runtime --dry-run` | 只预览旧 checkpoint 候选和未分域的 `.runtime`，不改磁盘状态。 |
+| `uv run loom migrate-runtime --apply` | 迁移 checkpoint、归档 `.logs`，并将 `.runtime` 原子保存在 `.agentloom/workspaces/legacy-unscoped/`。 |
 
 ## 文档
 

@@ -46,7 +46,7 @@ hooks:
 
 File-based memory that lets agents recall experience from previous sessions.
 
-Hooks remind, normalize paths, and surface recent context. They do not write the runtime files for you.
+Hooks bootstrap missing templates, remind, and surface recent context. They do not record task-specific content for you.
 
 ## When to Use
 
@@ -55,7 +55,7 @@ Use this skill when:
 - The task has multiple steps or phases and can drift out of short-term context.
 - You want agents to learn from past runs — avoid repeated pitfalls, remember key decisions.
 - The agent might be interrupted or restarted mid-task and needs fast context recovery.
-- You need a durable execution trace under `.runtime/<agent_name>/`.
+- You need a durable execution trace in the canonical AgentLoom workspace.
 
 Skip this skill when:
 
@@ -64,15 +64,15 @@ Skip this skill when:
 
 ## Runtime Files
 
-Three files per agent under `AgentLoom/.runtime/<agent_name>/`:
+Files are split by lifecycle under `.agentloom/workspaces/agents/<application_id>/<agent_path>/`:
 
 | File | Lifecycle | Purpose |
 |------|-----------|---------|
-| `context.md` | Cleared per task | Task goal, current status snapshot, remaining items. Fast recovery on restart. |
-| `trace.md` | Cleared per task | Chronological action log. Append-only within a session. |
-| `insights.md` | **Permanent** | Cross-session experience: pitfalls, decisions, facts. Never cleared automatically. |
+| `tasks/<task_id>/context.md` | Per task | Task goal, current status snapshot, remaining items. Preserved on resume. |
+| `tasks/<task_id>/trace.md` | Per task | Chronological action log. Preserved on resume. |
+| `insights.md` | **Cross-task** | Application/agent-scoped experience: pitfalls, decisions, facts. Never cleared automatically. |
 
-The `.runtime/` directory is always created under the **AgentLoom project root** (the directory containing `pyproject.toml`), not inside the skill package directory. This ensures the skill definition remains read-only and runtime state is isolated at the project level.
+The framework injects the exact canonical workspace paths into hook processes. Skill code never discovers a project root or creates a second runtime root.
 
 In this repository the skill package lives at `AgentLoom/skills/agent-recall-with-files/`.
 
@@ -152,16 +152,16 @@ That tells the next session the file was reviewed intentionally rather than forg
 At task start the runtime bootstrap:
 
 1. Removes legacy planning artifacts from the workspace root.
-2. Ensures `.runtime/<agent_name>/` exists.
-3. Recreates `context.md` and `trace.md` from templates (ephemeral — always fresh).
-4. **Preserves `insights.md`** if it already has content (cross-session persistence).
+2. Ensures the current `tasks/<task_id>/` workspace exists.
+3. Creates `context.md` and `trace.md` only when missing, so resume keeps task state.
+4. **Preserves `insights.md`** if it already has content (cross-task persistence).
 5. If `insights.md` exceeds the line threshold, compresses it via summarization.
 
 ## Hook Behavior
 
-- `TaskStart` creates ephemeral files and preserves insights. Returns prior-session notice if applicable.
+- `TaskStart` creates missing task files and preserves task state on resume plus cross-task insights.
 - `SubtaskStart` bootstraps the runtime directory and template files for sub-agents (creates context.md, trace.md, insights.md if missing), then returns a progress-recording reminder. Existing files are never overwritten.
-- `SubtaskFinish` returns reminders **and** auto-fills trace.md/context.md with minimal fallback content if the LLM never wrote to them (marked with "auto-recorded by runtime fallback"). insights.md is never auto-filled.
+- `SubtaskFinish` only returns a reminder. It does not mutate `trace.md`, `context.md`, or `insights.md`.
 - `TaskComplete` and `TaskFail` only return reminders. They do not write runtime files.
 - `PreToolUse` injects the full `context.md`, tail of `trace.md` (20 lines), and tail of `insights.md` (30 lines) into agent context. Empty-template files produce a brief "(no notes yet)" marker instead of the full template text.
 - `PostToolUse` uses a **freshness-driven reminder engine**: it tracks file modification times and only reminds when files become stale (not updated for N steps). Steps 1-3 are silent (grace period). Reminders have a cooldown to prevent spamming. The agent's current step_number is passed from the framework via `$STEP_NUMBER` env var.

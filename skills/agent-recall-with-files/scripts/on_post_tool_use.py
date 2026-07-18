@@ -9,16 +9,23 @@ Instead of sending the same reminder every tool call, this hook:
 """
 
 from common import (
-    CONTEXT_FILE, TRACE_FILE, SKILL_TAG, STALENESS_CONFIG,
+    CONTEXT_FILE,
+    SKILL_TAG,
+    STALENESS_CONFIG,
+    TRACE_FILE,
     TURNS_BETWEEN_REMINDERS,
-    runtime_dir, get_runtime_agent_path, get_step_number, output,
-    load_write_tracker, save_write_tracker, detect_writes_and_update,
+    detect_writes_and_update,
+    get_step_number,
+    load_write_tracker,
+    output,
+    persistent_insights_path,
+    save_write_tracker,
+    task_workspace_dir,
 )
 
 
 def main() -> None:
-    agent = get_runtime_agent_path()
-    rd = runtime_dir(agent)
+    workspace = task_workspace_dir()
     step = get_step_number()
 
     # Grace period: let agent focus in early steps, don't nag.
@@ -27,13 +34,18 @@ def main() -> None:
         return
 
     # Load tracker and detect writes via mtime comparison.
-    tracker = load_write_tracker(rd)
-    staleness = detect_writes_and_update(rd, tracker, step)
+    tracker = load_write_tracker(workspace)
+    staleness = detect_writes_and_update(
+        workspace,
+        tracker,
+        step,
+        persistent_insights=persistent_insights_path(),
+    )
 
     # Reminder cooldown: avoid spamming after a recent reminder.
     last_reminded = tracker.get("last_reminded_at_step", 0)
     if step - last_reminded < TURNS_BETWEEN_REMINDERS:
-        save_write_tracker(rd, tracker)
+        save_write_tracker(workspace, tracker)
         output({"decision": "allow"})
         return
 
@@ -71,7 +83,7 @@ def main() -> None:
             "current understanding of the task."
         )
         tracker["last_reminded_at_step"] = step
-        save_write_tracker(rd, tracker)
+        save_write_tracker(workspace, tracker)
         output({"decision": "allow", "agent_context": msg})
 
     elif gentle_files:
@@ -81,12 +93,12 @@ def main() -> None:
             + "\n".join(f"  - {f}" for f in gentle_files)
         )
         tracker["last_reminded_at_step"] = step
-        save_write_tracker(rd, tracker)
+        save_write_tracker(workspace, tracker)
         output({"decision": "allow", "agent_context": msg})
 
     else:
         # All files are fresh — stay silent.
-        save_write_tracker(rd, tracker)
+        save_write_tracker(workspace, tracker)
         output({"decision": "allow"})
 
 

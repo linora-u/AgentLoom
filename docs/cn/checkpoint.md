@@ -49,7 +49,7 @@ AgentLoom 将“一次执行尝试”和“需要恢复的逻辑任务”分开�
 - `task_events.jsonl` 是持久化的任务/Worker 事件源，`task_tree.json` 是便于查看的投影。
 - Checkpoint 直接按 `<application_id>/<task_id>` 定位，不依赖日志目录、`.task_index.json` 或历史 run 扫描。
 - 用户交付物仍由 Application 的 `output_dir` 管理，runtime 清理不会遍历 Application output 目录。
-- `.runtime/` 是 Agent 可见的 recall/todo 工作区，与 `.agentloom/` 刻意保持独立，不会被搬进 run artifacts。
+- Agent 的 recall/todo 状态位于 `.agentloom/workspaces/agents/<application_id>/<agent_path>/`。持久化的 `insights.md` 归 Application 所有；task 文件隔离在 `tasks/<task_id>/`，不属于 run artifacts。
 
 ## 配置
 
@@ -135,7 +135,7 @@ Supervisor 与 Worker heartbeat 都记录当前 `run_id`。崩溃检测会检查
 - 失败/中断 run：默认保留 30 天；
 - 原始 `artifacts/`：默认保留 3 天；
 - manifest 状态为 running 或未知：保留；
-- `.agentloom/legacy/`、checkpoints、`.runtime/` 和 Application outputs：run 清理永不删除。
+- `.agentloom/legacy/`、checkpoints、workspaces 和 Application outputs：run 清理永不删除。
 
 也可以显式执行同一策略：
 
