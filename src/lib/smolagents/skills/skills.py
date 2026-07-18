@@ -1,6 +1,6 @@
-"""Skills manager — loads skills, registers hooks, builds prompts.
+"""Skills manager — loads Skill metadata, resources, prompts, and scripts.
 
-Data classes, parsing logic, and hook executors live in sibling modules
+Data classes, parsing logic, and script execution live in sibling modules
 (``parser`` and ``executors``) to keep this file focused on orchestration.
 """
 
@@ -14,21 +14,16 @@ import shutil
 import time
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 from smolagents import AgentLogger
 from src.lib.logging import get_logger
 
-from ..hooks.hook_manager import HookManager
-from ..hooks.types import HookEvent
 from .executors import (  # noqa: F401
     OUTPUT_PREVIEW_MAX_BYTES,
-    SUPPORTED_HOOK_ACTION_TYPE,
     SkillOutputSnapshot,
     SkillSubprocessCapture,
-    create_hook_executor,
     run_skill_subprocess,
-    validate_hook,
 )
 
 # Re-export data classes so existing ``from .skills import ...`` still works.
@@ -44,6 +39,7 @@ from .parser import (  # noqa: F401
 SKILL_INLINE_MAX_CHARS = 18000
 SKILL_INLINE_PREVIEW_LINES = 180
 SKILL_RESOURCE_TEXT_MAX_CHARS = 120000
+_UNSET = object()
 _RESOURCE_DIR_EXCLUDES = {
     ".git",
     ".mypy_cache",
@@ -60,38 +56,33 @@ _RESOURCE_DIR_EXCLUDES = {
 class SkillsManager:
     """Manages loading and activation of skills."""
 
-    _instance: Optional["SkillsManager"] = None
+    _instance: SkillsManager | None = None
 
-    def __init__(
-        self,
-        logger: Optional[AgentLogger] = None,
-        hook_manager: Optional[HookManager] = None,
-    ):
-        self.skills: Dict[str, Skill] = {}
-        self.hook_manager = hook_manager if hook_manager is not None else HookManager.get_instance()
+    def __init__(self, logger: AgentLogger | None = None):
+        self.skills: dict[str, Skill] = {}
         self._logger = get_logger(logger, __name__)
-        self._tools_mapping: Dict[str, Dict[str, str]] = {}
+        self._tools_mapping: dict[str, dict[str, str]] = {}
 
     # -- Logger / mapping helpers -------------------------------------------
 
-    def set_logger(self, logger: Optional[AgentLogger]):
+    def set_logger(self, logger: AgentLogger | None):
         self._logger = get_logger(logger, __name__)
 
-    def set_tools_mapping(self, mapping: Dict[str, Dict[str, str]]):
+    def set_tools_mapping(self, mapping: dict[str, dict[str, str]]):
         self._tools_mapping = mapping
 
-    def get_tool_mapping_for_skill(self, skill_name: str) -> Dict[str, str]:
+    def get_tool_mapping_for_skill(self, skill_name: str) -> dict[str, str]:
         skill = self.skills.get(skill_name)
         if not skill:
             return {}
         platform = skill.metadata.platform or "Claude"
         return self._tools_mapping.get(platform, {})
 
-    def get_skill(self, skill_name: str) -> Optional[Skill]:
+    def get_skill(self, skill_name: str) -> Skill | None:
         return self.skills.get(skill_name)
 
     @classmethod
-    def get_instance(cls, logger: Optional[AgentLogger] = None):
+    def get_instance(cls, logger: AgentLogger | None = None):
         if cls._instance is None:
             cls._instance = cls(logger=logger)
         elif logger is not None:
@@ -103,18 +94,22 @@ class SkillsManager:
     def load_skills_from_directory(
         self,
         directory: str,
-        platform: Optional[str] = None,
+        platform: str | None = None,
         *,
         load_mode: str = "on-demand",
         allow_scripts: bool = True,
         allow_network: bool = True,
-    ) -> List[str]:
+        enable_hooks: object = _UNSET,
+        policy_priority: int = 0,
+        policy_fields: set[str] | None = None,
+    ) -> list[str]:
         """Load Claude-style skill packages from a directory tree.
 
         A skill package is a directory containing a ``SKILL.md`` entrypoint,
         matched case-insensitively for filesystem portability. Loose markdown
         files and plural aliases are intentionally not loaded.
         """
+        _reject_legacy_hook_policy(enable_hooks, policy_fields)
         path = Path(directory)
         if not path.exists():
             self._logger.warning(f"Skills directory not found: {directory}")
@@ -128,12 +123,14 @@ class SkillsManager:
                 load_mode=load_mode,
                 allow_scripts=allow_scripts,
                 allow_network=allow_network,
+                policy_priority=policy_priority,
+                policy_fields=policy_fields,
             )
             if skill:
                 loaded_names.append(skill.metadata.name)
         return loaded_names
 
-    def discover_skill_files(self, path: Path) -> List[Path]:
+    def discover_skill_files(self, path: Path) -> list[Path]:
         """Return skill entrypoint files for *path* in deterministic order."""
         path = path.resolve()
         if path.is_file():
@@ -181,14 +178,18 @@ class SkillsManager:
     def load_skill_metadata(
         self,
         file_path: str,
-        platform: Optional[str] = None,
+        platform: str | None = None,
         *,
         load_mode: str = "on-demand",
         allow_scripts: bool = True,
         allow_network: bool = True,
-    ) -> Optional[Skill]:
+        enable_hooks: object = _UNSET,
+        policy_priority: int = 0,
+        policy_fields: set[str] | None = None,
+    ) -> Skill | None:
         """Load skill metadata only (no body content)."""
         try:
+            _reject_legacy_hook_policy(enable_hooks, policy_fields)
             path = Path(file_path)
             if not _is_skill_entrypoint(path):
                 raise ValueError(f"AgentLoom skills must be loaded from SKILL.md entrypoint files: {file_path}")
@@ -204,6 +205,8 @@ class SkillsManager:
                 load_mode=load_mode,
                 allow_scripts=allow_scripts,
                 allow_network=allow_network,
+                policy_priority=policy_priority,
+                policy_fields=policy_fields,
             )
             self._apply_tools_mapping(metadata)
 
@@ -211,14 +214,22 @@ class SkillsManager:
             if existing is not None:
                 existing_path = str(Path(existing.file_path).resolve())
                 if existing_path == resolved_file_path:
-                    self._apply_runtime_options(
-                        existing.metadata,
-                        load_mode=load_mode,
-                        allow_scripts=allow_scripts,
-                        allow_network=allow_network,
-                    )
-                    if platform:
-                        existing.metadata.platform = platform
+                    if policy_priority >= existing.metadata.policy_priority:
+                        self._apply_runtime_options(
+                            existing.metadata,
+                            load_mode=load_mode,
+                            allow_scripts=allow_scripts,
+                            allow_network=allow_network,
+                            policy_priority=policy_priority,
+                            policy_fields=policy_fields,
+                        )
+                        if platform:
+                            existing.metadata.platform = platform
+                        # A later effective-config occurrence owns both policy
+                        # and order. Lower-priority directory discovery cannot
+                        # move an explicitly configured Skill.
+                        self.skills.pop(metadata.name)
+                        self.skills[metadata.name] = existing
                     return existing
                 raise ValueError(
                     f"Duplicate skill name '{metadata.name}' loaded from '{existing_path}' and '{resolved_file_path}'"
@@ -227,7 +238,6 @@ class SkillsManager:
             skill = Skill(metadata=metadata, content=None, file_path=absolute_file_path)
             self.skills[metadata.name] = skill
 
-            self._register_eager_hooks(skill)
             self._logger.info(f"Loaded skill metadata: {metadata.name} (Platform: {metadata.platform})")
             return skill
         except ValueError:
@@ -238,8 +248,8 @@ class SkillsManager:
 
     # -- Content loading ----------------------------------------------------
 
-    def get_skill_content(self, name: str) -> Optional[SkillContent]:
-        """Load full skill content on demand and register hooks lazily."""
+    def get_skill_content(self, name: str) -> SkillContent | None:
+        """Load full skill content on demand without changing Hook Plan."""
         skill = self.skills.get(name)
         if skill is None:
             return None
@@ -253,21 +263,17 @@ class SkillsManager:
                 self._logger.error(f"Error loading skill content for {name}: {e}")
                 return None
 
-        if not skill.hooks_registered:
-            self._register_eager_hooks(skill)
-            self._logger.info("Registered skill hooks (lazily): %s", name)
-
         return SkillContent(metadata=skill.metadata, instructions=skill.content)
 
     # -- Resource helpers ---------------------------------------------------
 
-    def get_skill_base_dir(self, name: str) -> Optional[Path]:
+    def get_skill_base_dir(self, name: str) -> Path | None:
         skill = self.skills.get(name)
         if skill is None:
             return None
         return Path(skill.file_path).resolve().parent
 
-    def list_skill_resources(self, name: str) -> List[Dict[str, Any]]:
+    def list_skill_resources(self, name: str) -> list[dict[str, Any]]:
         """List files bundled with a skill, relative to the skill directory."""
         base_dir = self.get_skill_base_dir(name)
         if base_dir is None or not base_dir.exists():
@@ -298,7 +304,7 @@ class SkillsManager:
         *,
         offset: int = 1,
         limit: int = 200,
-    ) -> Dict[str, Any]:
+    ) -> dict[str, Any]:
         """Read a text resource from inside a skill package."""
         base_dir = self.get_skill_base_dir(name)
         if base_dir is None:
@@ -340,7 +346,7 @@ class SkillsManager:
 
     # -- Dependency and script execution -----------------------------------
 
-    def check_skill_dependencies(self, name: str) -> Dict[str, Any]:
+    def check_skill_dependencies(self, name: str) -> dict[str, Any]:
         skill = self.skills.get(name)
         if skill is None:
             raise ValueError(f"Skill '{name}' not found")
@@ -386,7 +392,7 @@ class SkillsManager:
         timeout: int = 60,
         env_allowlist: str = "",
         allow_network: bool = True,
-    ) -> Dict[str, Any]:
+    ) -> dict[str, Any]:
         """Run a command for a skill with an audit trail."""
         skill = self.skills.get(name)
         if skill is None:
@@ -566,16 +572,27 @@ class SkillsManager:
         load_mode: str,
         allow_scripts: bool,
         allow_network: bool,
+        policy_priority: int,
+        policy_fields: set[str] | None = None,
     ) -> None:
         normalized_mode = (load_mode or "on-demand").strip().lower()
         if normalized_mode not in {"on-demand", "eager"}:
             raise ValueError("skills.load-mode must be 'on-demand' or 'eager'")
-        metadata.load_mode = normalized_mode
-        metadata.allow_scripts = bool(allow_scripts)
-        metadata.allow_network = bool(allow_network)
+        fields = (
+            set(policy_fields)
+            if policy_fields is not None
+            else {"load_mode", "allow_scripts", "allow_network"}
+        )
+        if "load_mode" in fields:
+            metadata.load_mode = normalized_mode
+        if "allow_scripts" in fields:
+            metadata.allow_scripts = bool(allow_scripts)
+        if "allow_network" in fields:
+            metadata.allow_network = bool(allow_network)
+        metadata.policy_priority = int(policy_priority)
 
     def _apply_tools_mapping(self, metadata: SkillMetadata) -> None:
-        """Remap tool names / hook matchers for the target platform."""
+        """Remap allowed tool names for the target platform."""
         target_platform = metadata.platform or "Claude"
         if target_platform not in self._tools_mapping:
             return
@@ -587,91 +604,18 @@ class SkillsManager:
                 mapping.get(tool, tool) for tool in metadata.allowed_tools
             ]
 
-        if metadata.hooks:
-            for _event, hooks_list in metadata.hooks.items():
-                if isinstance(hooks_list, list):
-                    for hook_def in hooks_list:
-                        if isinstance(hook_def, dict) and "matcher" in hook_def:
-                            matcher = hook_def["matcher"]
-                            parts = [p.strip() for p in matcher.split("|")]
-                            mapped_parts = [str(mapping.get(p, p)) for p in parts]
-                            hook_def["matcher"] = "|".join(mapped_parts)
-                            self._logger.debug(
-                                f"Mapped hook matcher '{matcher}' -> '{hook_def['matcher']}' "
-                                f"for skill {metadata.name}"
-                            )
 
-    # -- Hook registration --------------------------------------------------
-
-    def _register_eager_hooks(self, skill: Skill):
-        """Register all hooks eagerly during metadata loading."""
-        if skill.hooks_registered:
-            return
-        if not skill.metadata.hooks:
-            skill.hooks_registered = True
-            return
-
-        registered_any = False
-        for event_name, hooks_config in skill.metadata.hooks.items():
-            try:
-                event = HookEvent(event_name)
-            except ValueError:
-                self._logger.warning(
-                    "Unsupported hook event '%s' in skill %s; skipping registration",
-                    event_name,
-                    skill.metadata.name,
-                )
-                continue
-            if isinstance(hooks_config, list):
-                for hook_def in hooks_config:
-                    self._register_single_hook(skill, event, hook_def)
-                    registered_any = True
-
-        skill.hooks_registered = True
-        if registered_any:
-            self._logger.info("Eagerly registered all hooks for skill: %s", skill.metadata.name)
-
-    def _register_single_hook(self, skill: Skill, event: HookEvent, hook_def: Dict[str, Any]):
-        matcher = hook_def.get("matcher", "*")
-        if matcher is None:
-            matcher = "*"
-        if not isinstance(matcher, str):
-            raise ValueError(
-                f"Skill '{skill.metadata.name}' hook {event.value} has a non-string matcher: {matcher!r}"
-            )
-        actions = hook_def.get("hooks", [])
-
-        for action in actions:
-            if not isinstance(action, dict):
-                raise ValueError(
-                    f"Skill '{skill.metadata.name}' hook {event.value} has a non-mapping action: {action!r}"
-                )
-
-            action_type = action.get("type")
-            if action_type != SUPPORTED_HOOK_ACTION_TYPE:
-                raise ValueError(
-                    f"Skill '{skill.metadata.name}' hook {event.value} uses unsupported action type "
-                    f"{action_type!r}; expected '{SUPPORTED_HOOK_ACTION_TYPE}'."
-                )
-
-            command_code = action.get("command")
-            if not isinstance(command_code, str) or not command_code.strip():
-                raise ValueError(
-                    f"Skill '{skill.metadata.name}' hook {event.value} must provide a non-empty string command."
-                )
-
-            skill_dir = os.path.dirname(skill.file_path)
-            validate_hook(command_code, skill.metadata.name, event.value, logger=self._logger)
-            hook_timeout = action.get("timeout", 20)
-            hook_func = create_hook_executor(
-                command_code,
-                skill.metadata.name,
-                skill_dir,
-                self._logger,
-                timeout=hook_timeout,
-            )
-
-            self.hook_manager.register_hook(event=event, pattern=matcher, func=hook_func)
+def _reject_legacy_hook_policy(
+    enable_hooks: object,
+    policy_fields: set[str] | None,
+) -> None:
+    """Fail loudly when old Skill-owned Hook authorization is requested."""
+    fields = policy_fields or set()
+    if enable_hooks is not _UNSET or {"enable_hooks", "enable-hooks"} & fields:
+        raise ValueError(
+            "skills.enable-hooks is not supported; configure a direct Hook or "
+            "standalone Hook Bundle instead"
+        )
 
 
 def _is_skill_entrypoint(path: Path) -> bool:
@@ -812,7 +756,7 @@ def _skill_script_env(
     skill_dir: Path,
     workspace_dir: Path,
     env_allowlist: str = "",
-) -> Dict[str, str]:
+) -> dict[str, str]:
     names = _parse_env_allowlist(env_allowlist)
     env = (
         {name: os.environ[name] for name in names if name in os.environ}
@@ -845,7 +789,7 @@ def _parse_env_allowlist(value: str) -> set[str]:
     }
 
 
-def _blocked_network_reason(command: str) -> Optional[str]:
+def _blocked_network_reason(command: str) -> str | None:
     network_words = {
         "curl",
         "wget",
@@ -871,7 +815,7 @@ def _blocked_network_reason(command: str) -> Optional[str]:
     return None
 
 
-def _write_audit(audit_dir: Path, audit: Dict[str, Any], stdout: str, stderr: str) -> None:
+def _write_audit(audit_dir: Path, audit: dict[str, Any], stdout: str, stderr: str) -> None:
     from src.lib.runtime import get_current_run_context
 
     runtime_context = get_current_run_context(required=True)
@@ -884,7 +828,7 @@ def _write_audit(audit_dir: Path, audit: Dict[str, Any], stdout: str, stderr: st
     )
 
 
-def _write_audit_record(audit_dir: Path, audit: Dict[str, Any]) -> None:
+def _write_audit_record(audit_dir: Path, audit: dict[str, Any]) -> None:
     from src.lib.runtime import get_current_run_context
 
     runtime_context = get_current_run_context(required=True)

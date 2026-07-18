@@ -1,82 +1,85 @@
+"""Tool adapter for the active run-scoped Hook Runtime."""
+
+from __future__ import annotations
+
 import inspect
-import json
-from copy import copy
+import math
+import os
+from copy import deepcopy
 from functools import wraps
 from typing import Any
 
 from smolagents.tools import Tool
+from src.lib.checkpoint.file_history_hook import record_active_file_history
 from src.lib.logging import get_logger
 from src.lib.trusted_memory_evidence import (
     TRUSTED_MEMORY_EVIDENCE_RESPONSE_KEY,
     TrustedMemoryEvidenceEnvelope,
     extract_trusted_memory_evidence,
 )
-from src.trace import (
-    bind_explicit_execution_context,
-    capture_explicit_execution_context,
+from src.trace import get_current_hook_run
+
+from .path_validators import enforce_core_tool_guard
+from .type_coercion import coerce_tool_parameters
+from .types import (
+    Blocked,
+    Executed,
+    Failed,
+    HookContext,
+    HookEvent,
+    HookResult,
+    ToolExecutionOutcome,
 )
 
-from .type_coercion import coerce_tool_parameters
-from .types import HookEvent
-
-logger = get_logger(__name__)
 HOOKS_INJECTED_ATTR = "_hooks_injected"
-EXECUTION_CONTEXT_ATTR = "_agentloom_execution_context"
 ORIGINAL_FORWARD_ATTR = "_agentloom_original_forward"
+logger = get_logger(__name__)
+
+
+class _ToolInputContractError(ValueError):
+    """The effective tool input does not satisfy the executable contract."""
 
 
 def _trusted_evidence_payload(tool_instance: Tool, raw_result: Any) -> list[dict[str, str]]:
-    """Extract trusted provenance without exposing payload-bearing failures."""
-
     try:
         return list(extract_trusted_memory_evidence(tool_instance, raw_result))
-    except Exception as exc:
-        logger.warning(
-            "Trusted memory evidence ignored for tool %s: %s",
-            getattr(tool_instance, "name", "") or "-",
-            type(exc).__name__,
-        )
+    except Exception:
         return []
 
 
 def clone_tool_for_runtime(tool_instance: Tool) -> Tool:
-    """Return an invocation-local Tool object with no captured run state.
+    """Create an isolated runtime tool through a factory or safe deep clone.
 
-    Decorated Tool instances may be shared by an execution environment across
-    builds.  Hook context cannot live on that shared object: concurrent run B
-    could overwrite run A before A's executor thread starts.  A shallow clone
-    preserves intentional tool state references while isolating the wrapper
-    and its immutable execution snapshot per runtime build.
+    Stateful tools that cannot be deep-copied must implement
+    ``clone_for_runtime() -> Tool``. Silently sharing their mutable fields
+    would leak state between cached/concurrent Agent runs.
     """
 
-    cloned = copy(tool_instance)
+    factory = getattr(tool_instance, "clone_for_runtime", None)
+    if callable(factory):
+        cloned = factory()
+    else:
+        try:
+            cloned = deepcopy(tool_instance)
+        except Exception as exc:
+            raise RuntimeError(
+                f"Tool {getattr(tool_instance, 'name', type(tool_instance).__name__)!r} cannot be isolated; "
+                "implement clone_for_runtime()"
+            ) from exc
+    if not isinstance(cloned, Tool) or cloned is tool_instance:
+        raise RuntimeError("clone_for_runtime() must return a distinct Tool instance")
     original_forward = getattr(tool_instance, ORIGINAL_FORWARD_ATTR, None)
     if original_forward is not None:
         if inspect.ismethod(original_forward) and original_forward.__self__ is tool_instance:
             original_forward = original_forward.__func__.__get__(cloned, type(cloned))
         cloned.forward = original_forward
-    for attribute in (
-        HOOKS_INJECTED_ATTR,
-        EXECUTION_CONTEXT_ATTR,
-        ORIGINAL_FORWARD_ATTR,
-    ):
+    for attribute in (HOOKS_INJECTED_ATTR, ORIGINAL_FORWARD_ATTR):
         if attribute in getattr(cloned, "__dict__", {}):
             delattr(cloned, attribute)
     return cloned
 
 
-def _capture_execution_context(tool_instance: Tool) -> None:
-    """Refresh the explicit context carried across an executor thread hop."""
-
-    setattr(
-        tool_instance,
-        EXECUTION_CONTEXT_ATTR,
-        capture_explicit_execution_context(),
-    )
-
-
 def _try_context_engine_compress(tool_name: str, result: str) -> str | None:
-    """Compress a tool result through the active task-scoped ContextEngine."""
     from src.lib.context_engine.runtime import get_active_context_engine
 
     engine = get_active_context_engine()
@@ -89,246 +92,459 @@ def _try_context_engine_compress(tool_name: str, result: str) -> str | None:
     )
 
 
-def _resolve_hook_manager():
-    """Resolve only the manager explicitly bound to this invocation."""
-
-    current_manager = capture_explicit_execution_context().hook_manager
-    if current_manager is None:
-        raise RuntimeError("missing explicit hook manager context")
-    return current_manager
-
-
 def _get_effective_signature(forward_callable):
-    """
-    Return a signature suitable for runtime argument binding.
-
-    Some dynamically generated tools expose a synthetic `self` parameter in
-    `__signature__` even though their runtime callable is effectively static.
-    Remove that synthetic leading `self` for binding.
-    """
     signature = inspect.signature(forward_callable)
     parameters = list(signature.parameters.values())
     if parameters and parameters[0].name == "self":
-        signature = signature.replace(parameters=parameters[1:])
+        return signature.replace(parameters=parameters[1:])
     return signature
 
 
 def _build_tool_input(forward_callable, args, kwargs) -> dict[str, Any]:
-    """Build a normalized hook input payload from mixed args/kwargs."""
-    tool_input: dict[str, Any] = dict(kwargs)
+    """Decode Python call syntax into the canonical named input mapping."""
+
+    signature = _get_effective_signature(forward_callable)
     try:
-        signature = _get_effective_signature(forward_callable)
         bound = signature.bind_partial(*args, **kwargs)
-        tool_input.update(bound.arguments)
-    except Exception:
-        if args:
-            tool_input["_args"] = args
+    except TypeError as exc:
+        raise _ToolInputContractError(f"Invalid tool call syntax: {exc}") from exc
 
-    query_value = tool_input.get("query")
-    if isinstance(query_value, str):
-        try:
-            query_data = json.loads(query_value)
-            if isinstance(query_data, dict):
-                merged_input = dict(tool_input)
-                merged_input.pop("query", None)
-                merged_input.update(query_data)
-                tool_input = merged_input
-        except (json.JSONDecodeError, ValueError):
-            pass
-
+    tool_input: dict[str, Any] = {}
+    for name, value in bound.arguments.items():
+        parameter = signature.parameters[name]
+        if parameter.kind == inspect.Parameter.VAR_KEYWORD:
+            if not isinstance(value, dict):
+                raise _ToolInputContractError(f"Invalid variadic keyword input for {name!r}")
+            tool_input.update(value)
+            continue
+        if parameter.kind == inspect.Parameter.VAR_POSITIONAL:
+            if value:
+                raise _ToolInputContractError("Variadic positional tool arguments are not supported")
+            continue
+        tool_input[name] = value
     return tool_input
 
 
-def _build_call_kwargs_from_input(forward_callable, tool_input: dict[str, Any]) -> dict[str, Any]:
-    """
-    Convert normalized input dict back to callable kwargs.
+def _schema_type_names(schema: dict[str, Any]) -> tuple[str, ...]:
+    raw = schema.get("type")
+    if isinstance(raw, str):
+        names = (raw,)
+    elif isinstance(raw, list) and all(isinstance(item, str) for item in raw):
+        names = tuple(raw)
+    else:
+        names = ()
+    if schema.get("nullable") is True and "null" not in names:
+        names = (*names, "null")
+    return names
 
-    Raises a binding exception if modified input cannot be applied.
-    """
+
+def _matches_schema_type(value: Any, expected: str) -> bool:
+    if expected == "null":
+        return value is None
+    if expected == "boolean":
+        return isinstance(value, bool)
+    if expected == "integer":
+        return isinstance(value, int) and not isinstance(value, bool)
+    if expected == "number":
+        if isinstance(value, bool):
+            return False
+        if isinstance(value, int):
+            return True
+        return isinstance(value, float) and math.isfinite(value)
+    if expected == "string":
+        return isinstance(value, str)
+    if expected == "array":
+        return isinstance(value, list)
+    if expected == "object":
+        return isinstance(value, dict)
+    return True
+
+
+def _validate_schema_value(value: Any, schema: dict[str, Any], path: str) -> None:
+    expected = _schema_type_names(schema)
+    if expected and not any(_matches_schema_type(value, name) for name in expected):
+        rendered = " | ".join(expected)
+        raise _ToolInputContractError(f"Tool input {path!r} must be {rendered}, got {type(value).__name__}")
+
+    if "enum" in schema:
+        choices = schema.get("enum")
+        if isinstance(choices, list) and not any(type(value) is type(choice) and value == choice for choice in choices):
+            raise _ToolInputContractError(f"Tool input {path!r} must be one of {choices!r}")
+
+    if isinstance(value, list) and isinstance(schema.get("items"), dict):
+        item_schema = schema["items"]
+        for index, item in enumerate(value):
+            _validate_schema_value(item, item_schema, f"{path}[{index}]")
+
+    if not isinstance(value, dict):
+        return
+
+    properties = schema.get("properties")
+    if isinstance(properties, dict):
+        required = schema.get("required", [])
+        if isinstance(required, list):
+            missing = [name for name in required if name not in value]
+            if missing:
+                raise _ToolInputContractError(
+                    f"Tool input {path!r} is missing required field(s): " + ", ".join(sorted(missing))
+                )
+        for name, child in properties.items():
+            if name in value and isinstance(child, dict):
+                _validate_schema_value(value[name], child, f"{path}.{name}")
+
+        additional = schema.get("additionalProperties", True)
+        unknown = sorted(set(value) - set(properties))
+        if additional is False and unknown:
+            raise _ToolInputContractError(f"Tool input {path!r} contains undeclared field(s): " + ", ".join(unknown))
+        if isinstance(additional, dict):
+            for name in unknown:
+                _validate_schema_value(value[name], additional, f"{path}.{name}")
+    elif isinstance(schema.get("additionalProperties"), dict):
+        additional = schema["additionalProperties"]
+        for name, child_value in value.items():
+            _validate_schema_value(child_value, additional, f"{path}.{name}")
+
+
+def _strict_decode_tool_input(
+    forward_callable,
+    tool_input: dict[str, Any],
+    tool_inputs_schema: dict[str, Any] | None,
+) -> tuple[dict[str, Any], dict[str, Any]]:
+    """Coerce once more, reject schema drift, and bind the executable call."""
+
+    decoded = dict(tool_input)
+    if isinstance(tool_inputs_schema, dict):
+        coerce_tool_parameters(decoded, tool_inputs_schema)
+        unknown = sorted(set(decoded) - set(tool_inputs_schema))
+        if unknown:
+            raise _ToolInputContractError("Tool input field(s) not declared by schema: " + ", ".join(unknown))
+        missing = [
+            name
+            for name, schema in tool_inputs_schema.items()
+            if name not in decoded
+            and isinstance(schema, dict)
+            and schema.get("required", schema.get("nullable") is not True) is True
+        ]
+        if missing:
+            raise _ToolInputContractError("Tool input is missing required field(s): " + ", ".join(sorted(missing)))
+        for name, value in decoded.items():
+            schema = tool_inputs_schema.get(name)
+            if isinstance(schema, dict):
+                _validate_schema_value(value, schema, name)
+
+    call_kwargs = _build_call_kwargs_from_input(forward_callable, decoded)
+    return decoded, call_kwargs
+
+
+def _build_call_kwargs_from_input(
+    forward_callable,
+    tool_input: dict[str, Any],
+) -> dict[str, Any]:
     signature = _get_effective_signature(forward_callable)
     parameters = signature.parameters
-    accepts_var_kwargs = any(p.kind == inspect.Parameter.VAR_KEYWORD for p in parameters.values())
-
+    accepts_kwargs = any(parameter.kind == inspect.Parameter.VAR_KEYWORD for parameter in parameters.values())
     call_kwargs: dict[str, Any] = {}
     for key, value in tool_input.items():
         if key in parameters:
-            param = parameters[key]
-            if param.kind in (inspect.Parameter.POSITIONAL_ONLY, inspect.Parameter.VAR_POSITIONAL):
-                continue
+            kind = parameters[key].kind
+            if kind in (
+                inspect.Parameter.POSITIONAL_ONLY,
+                inspect.Parameter.VAR_POSITIONAL,
+            ):
+                raise _ToolInputContractError(f"Tool input {key!r} cannot be bound as a keyword argument")
             call_kwargs[key] = value
-        elif accepts_var_kwargs:
+        elif accepts_kwargs:
             call_kwargs[key] = value
-
-    signature.bind_partial(**call_kwargs)
+        else:
+            raise _ToolInputContractError(f"Tool input field {key!r} is not accepted by the callable")
+    try:
+        signature.bind(**call_kwargs)
+    except TypeError as exc:
+        raise _ToolInputContractError(f"Tool input does not match callable signature: {exc}") from exc
     return call_kwargs
 
 
-def _log_failed_hook_result(event_name: str, tool_name: str, result: Any) -> None:
-    telemetry = getattr(result, "telemetry", {}) or {}
-    details: list[str] = []
-    skill_name = telemetry.get("skill_name")
-    invalid_contract = telemetry.get("invalid_contract")
-    hook_event_name = telemetry.get("hook_event_name") or event_name
+def _build_runtime_context(
+    hook_run,
+    *,
+    event: HookEvent,
+    tool_name: str,
+    tool_input: dict[str, Any],
+    tool_inputs_schema: dict[str, Any] | None,
+    tool_response: dict[str, Any] | None = None,
+) -> HookContext:
+    try:
+        from src.trace import capture_explicit_execution_context
 
-    if skill_name:
-        details.append(f"skill={skill_name}")
-    if invalid_contract:
-        details.append(f"invalid_contract={invalid_contract}")
+        execution = capture_explicit_execution_context()
+    except Exception:
+        execution = None
 
-    details_text = f" ({', '.join(details)})" if details else ""
-    logger.warning(
-        "Ignoring failed %s hook for tool %s%s: %s",
-        hook_event_name,
-        tool_name,
-        details_text,
-        getattr(result, "reason", None) or "hook returned success=False",
+    return HookContext(
+        local_run_id=hook_run.local_run_id,
+        root_run_id=hook_run.root_run_id,
+        cwd=os.getcwd(),
+        hook_event_name=event.value,
+        tool_name=tool_name,
+        tool_input=dict(tool_input),
+        tool_response=tool_response,
+        tool_inputs_schema=tool_inputs_schema,
+        step_number=hook_run.step_number,
+        task_id=getattr(execution, "task_id", None),
+        sub_task_id=getattr(execution, "sub_task_id", None),
+        agent_name=getattr(execution, "agent_name", None),
+        agent_config=deepcopy(hook_run.agent_config),
+        runtime_agent_path=getattr(execution, "runtime_agent_path", None),
+        project_root=hook_run.project_root,
     )
 
 
+def _observe_final_tool_input(context: HookContext) -> None:
+    """Send final input to self-learning as a fail-open observer exactly once."""
+
+    from src.extensions.self_learning.session_recorder import session_recorder_hook
+
+    try:
+        session_recorder_hook(context)
+    except Exception as exc:
+        logger.warning("Final tool-input observer failed: %s", exc)
+
+
+def _dispatch_tool_failure(
+    hook_run,
+    *,
+    tool_name: str,
+    tool_input: dict[str, Any],
+    tool_inputs_schema: dict[str, Any] | None,
+    error: Exception,
+) -> None:
+    try:
+        hook_run.dispatch(
+            HookEvent.POST_TOOL_USE_FAILURE,
+            tool_name,
+            tool_input,
+            tool_response={
+                "error": str(error),
+                "error_type": type(error).__name__,
+            },
+            tool_inputs_schema=tool_inputs_schema,
+        )
+        hook_run.flush_user_messages()
+    except Exception as exc:
+        logger.warning("PostToolUseFailure observer dispatch failed open: %s", exc)
+
+
+def _record_tool_outcome(hook_run, outcome: ToolExecutionOutcome) -> ToolExecutionOutcome:
+    """Persist the typed state before any configurable observer can stall."""
+
+    hook_run.record_tool_outcome(outcome)
+    return outcome
+
+
+def _execute_tool_pipeline(
+    tool_instance: Tool,
+    original_forward,
+    hook_run,
+    *,
+    args: tuple[Any, ...],
+    kwargs: dict[str, Any],
+) -> ToolExecutionOutcome:
+    """Execute one invocation through the complete immutable safety boundary."""
+
+    tool_name = tool_instance.name
+    tool_inputs_schema = getattr(tool_instance, "inputs", None)
+    if not isinstance(tool_inputs_schema, dict):
+        tool_inputs_schema = None
+
+    try:
+        tool_input = _build_tool_input(original_forward, args, kwargs)
+        if tool_inputs_schema is not None:
+            coerce_tool_parameters(tool_input, tool_inputs_schema)
+    except Exception as exc:
+        return _record_tool_outcome(
+            hook_run,
+            Blocked({}, str(exc), "initial_decode", tool_name=tool_name),
+        )
+
+    try:
+        pre_result = hook_run.dispatch(
+            HookEvent.PRE_TOOL_USE,
+            tool_name,
+            tool_input,
+            tool_inputs_schema=tool_inputs_schema,
+        )
+        hook_run.flush_user_messages()
+    except Exception as exc:
+        return _record_tool_outcome(
+            hook_run,
+            Blocked(
+                tool_input,
+                f"PreToolUse failed closed: {exc}",
+                "pre_tool_use",
+                tool_name=tool_name,
+            ),
+        )
+    candidate_input = (
+        dict(pre_result.modified_input) if isinstance(pre_result.modified_input, dict) else dict(tool_input)
+    )
+    if pre_result.should_block():
+        return _record_tool_outcome(
+            hook_run,
+            Blocked(
+                candidate_input,
+                pre_result.get_blocked_response(),
+                "pre_tool_use",
+                tool_name=tool_name,
+            ),
+        )
+
+    try:
+        effective_input, call_kwargs = _strict_decode_tool_input(
+            original_forward,
+            candidate_input,
+            tool_inputs_schema,
+        )
+    except Exception as exc:
+        return _record_tool_outcome(
+            hook_run,
+            Blocked(candidate_input, str(exc), "final_decode", tool_name=tool_name),
+        )
+
+    final_context = _build_runtime_context(
+        hook_run,
+        event=HookEvent.PRE_TOOL_USE,
+        tool_name=tool_name,
+        tool_input=effective_input,
+        tool_inputs_schema=tool_inputs_schema,
+    )
+    try:
+        guard_result = enforce_core_tool_guard(final_context)
+        if not isinstance(guard_result, HookResult):
+            raise TypeError("CoreToolGuard returned an invalid result")
+        if guard_result.decision not in {"allow", "block"}:
+            raise ValueError("CoreToolGuard may only allow or block")
+        if guard_result.modified_input is not None:
+            raise ValueError("CoreToolGuard may not transform tool input")
+    except Exception as exc:
+        return _record_tool_outcome(
+            hook_run,
+            Blocked(
+                effective_input,
+                f"Core tool guard failed closed: {exc}",
+                "core_tool_guard",
+                tool_name=tool_name,
+            ),
+        )
+    if guard_result.should_block():
+        return _record_tool_outcome(
+            hook_run,
+            Blocked(
+                effective_input,
+                guard_result.get_blocked_response(),
+                "core_tool_guard",
+                tool_name=tool_name,
+            ),
+        )
+
+    try:
+        record_active_file_history(
+            tool_name=tool_name,
+            tool_input=effective_input,
+            step_number=hook_run.step_number,
+        )
+    except Exception as exc:
+        return _record_tool_outcome(
+            hook_run,
+            Blocked(
+                effective_input,
+                f"File history protection failed closed: {exc}",
+                "file_history",
+                tool_name=tool_name,
+            ),
+        )
+
+    _observe_final_tool_input(final_context)
+
+    try:
+        raw_result = original_forward(**call_kwargs)
+    except Exception as tool_error:
+        outcome = Failed(effective_input, tool_error, "tool_execution", tool_name=tool_name)
+        _record_tool_outcome(hook_run, outcome)
+        _dispatch_tool_failure(
+            hook_run,
+            tool_name=tool_name,
+            tool_input=effective_input,
+            tool_inputs_schema=tool_inputs_schema,
+            error=tool_error,
+        )
+        return outcome
+
+    try:
+        trusted_evidence = _trusted_evidence_payload(tool_instance, raw_result)
+        result = raw_result
+        if result is None or (isinstance(result, str) and not result.strip()):
+            result = f"({tool_name} completed with no output)"
+        if isinstance(result, str):
+            compressed = _try_context_engine_compress(tool_name, result)
+            if compressed is not None:
+                result = compressed
+    except Exception as processing_error:
+        outcome = Failed(effective_input, processing_error, "result_processing", tool_name=tool_name)
+        _record_tool_outcome(hook_run, outcome)
+        _dispatch_tool_failure(
+            hook_run,
+            tool_name=tool_name,
+            tool_input=effective_input,
+            tool_inputs_schema=tool_inputs_schema,
+            error=processing_error,
+        )
+        return outcome
+
+    tool_response: dict[str, Any] = {"result": result}
+    if trusted_evidence:
+        tool_response[TRUSTED_MEMORY_EVIDENCE_RESPONSE_KEY] = TrustedMemoryEvidenceEnvelope(trusted_evidence)
+    outcome = Executed(effective_input, result, tool_name=tool_name)
+    _record_tool_outcome(hook_run, outcome)
+    try:
+        hook_run.dispatch(
+            HookEvent.POST_TOOL_USE,
+            tool_name,
+            effective_input,
+            tool_response=tool_response,
+            tool_inputs_schema=tool_inputs_schema,
+        )
+        hook_run.flush_user_messages()
+    except Exception as exc:
+        logger.warning("PostToolUse observer dispatch failed open: %s", exc)
+    return outcome
+
+
 def inject_hooks(tool_instance: Tool) -> Tool:
-    """
-    Inject hook execution logic into a Tool instance.
-    Modifies the tool.forward method to trigger ToolStart and ToolEnd hooks.
+    """Wrap a tool so every call requires and uses the active Hook Run."""
 
-    Args:
-        tool_instance: The Tool instance to modify.
-
-    Returns:
-        The modified Tool instance.
-    """
-    # LocalPythonExecutor enforces its timeout in a fresh thread.  The runtime
-    # adapter propagates ContextVars directly; this immutable snapshot is a
-    # fail-safe for custom executors that still strip them.  It contains the
-    # complete invocation identity, never a process-global inferred manager.
-    _capture_execution_context(tool_instance)
     if bool(getattr(tool_instance, HOOKS_INJECTED_ATTR, False)):
         return tool_instance
-
-    if not hasattr(tool_instance, 'forward'):
+    if not hasattr(tool_instance, "forward"):
         return tool_instance
 
     original_forward = tool_instance.forward
     setattr(tool_instance, ORIGINAL_FORWARD_ATTR, original_forward)
-    tool_name = tool_instance.name
-    tool_inputs_schema = getattr(tool_instance, 'inputs', None)
-
-    def _forward_with_hooks(*args, **kwargs):
-        try:
-            hook_manager = _resolve_hook_manager()
-        except Exception as hook_manager_error:
-            logger.warning("Hook manager unavailable for tool %s: %s", tool_name, hook_manager_error)
-            return original_forward(*args, **kwargs)
-
-        tool_input = _build_tool_input(original_forward, args, kwargs)
-
-        # --- Type coercion: convert LLM string values to declared types ---
-        if tool_inputs_schema:
-            coerce_tool_parameters(tool_input, tool_inputs_schema)
-
-        call_args = args
-        call_kwargs = kwargs
-        effective_tool_input = tool_input
-
-        try:
-            pre_result = hook_manager.trigger_hooks(
-                HookEvent.PRE_TOOL_USE,
-                tool_name,
-                tool_input,
-                tool_response=None,
-                tool_inputs_schema=tool_inputs_schema,
-            )
-            hook_manager.flush_user_messages()
-
-            if pre_result.should_block():
-                return pre_result.get_blocked_response()
-            if not pre_result.success:
-                _log_failed_hook_result(HookEvent.PRE_TOOL_USE.value, tool_name, pre_result)
-            elif pre_result.decision == "modify" and isinstance(pre_result.modified_input, dict):
-                candidate_input = dict(tool_input)
-                candidate_input.update(pre_result.modified_input)
-                try:
-                    call_kwargs = _build_call_kwargs_from_input(original_forward, candidate_input)
-                    call_args = ()
-                    effective_tool_input = candidate_input
-                except Exception as bind_error:
-                    logger.warning(
-                        "Failed to apply modified_input for tool %s: %s. Falling back to original call arguments.",
-                        tool_name,
-                        bind_error,
-                    )
-
-        except Exception as pre_hook_error:
-            logger.warning("Pre-execution hook error for tool %s: %s", tool_name, pre_hook_error)
-
-        try:
-            raw_result = original_forward(*call_args, **call_kwargs)
-            trusted_evidence = _trusted_evidence_payload(tool_instance, raw_result)
-            result = raw_result
-
-            # Empty-result protection: empty tool_result content can trigger
-            # LLM stop sequences causing the model to end its turn with zero
-            # output.  Inject a short marker so it always has something to
-            # react to.
-            if result is None or (isinstance(result, str) and not result.strip()):
-                result = f"({tool_name} completed with no output)"
-
-            # Reversible CCR stores original tool output in the task-scoped
-            # ContextStore and returns a visible ContextRef preview.
-            if isinstance(result, str):
-                compressed_result = _try_context_engine_compress(tool_name, result)
-                if compressed_result is not None:
-                    result = compressed_result
-
-            try:
-                tool_response = {"result": result} if result is not None else {}
-                if trusted_evidence:
-                    tool_response[TRUSTED_MEMORY_EVIDENCE_RESPONSE_KEY] = (
-                        TrustedMemoryEvidenceEnvelope(trusted_evidence)
-                    )
-                post_result = hook_manager.trigger_hooks(
-                    HookEvent.POST_TOOL_USE,
-                    tool_name,
-                    effective_tool_input,
-                    tool_response=tool_response,
-                    tool_inputs_schema=tool_inputs_schema,
-                )
-                hook_manager.flush_user_messages()
-                if post_result.should_block():
-                    return post_result.get_blocked_response()
-                if not post_result.success:
-                    _log_failed_hook_result(HookEvent.POST_TOOL_USE.value, tool_name, post_result)
-                    return result
-                return post_result.merge_with_tool_result(result)
-
-            except Exception as post_hook_error:
-                logger.warning("Post-execution hook error for tool %s: %s", tool_name, post_hook_error)
-                return result
-
-        except Exception as tool_error:
-            try:
-                hook_manager.trigger_hooks(
-                    HookEvent.POST_TOOL_USE_FAILURE,
-                    tool_name,
-                    effective_tool_input,
-                    tool_response={"error": str(tool_error), "error_type": type(tool_error).__name__},
-                    tool_inputs_schema=tool_inputs_schema,
-                )
-                hook_manager.flush_user_messages()
-            except Exception as post_error_hook_error:
-                logger.warning("Post-error hook error for tool %s: %s", tool_name, post_error_hook_error)
-
-            raise
 
     @wraps(original_forward)
     def wrapped_forward(*args, **kwargs):
-        current_context = capture_explicit_execution_context()
-        if current_context.hook_manager is not None:
-            return _forward_with_hooks(*args, **kwargs)
-        captured_context = getattr(tool_instance, EXECUTION_CONTEXT_ATTR, None)
-        if captured_context is None:
-            return _forward_with_hooks(*args, **kwargs)
-        with bind_explicit_execution_context(captured_context):
-            return _forward_with_hooks(*args, **kwargs)
+        hook_run = get_current_hook_run(required=True)
+        outcome = _execute_tool_pipeline(
+            tool_instance,
+            original_forward,
+            hook_run,
+            args=args,
+            kwargs=dict(kwargs),
+        )
+        if isinstance(outcome, Blocked):
+            return outcome.model_response()
+        if isinstance(outcome, Failed):
+            raise outcome.error
+        return outcome.value
 
     tool_instance.forward = wrapped_forward
     setattr(tool_instance, HOOKS_INJECTED_ATTR, True)

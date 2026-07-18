@@ -9,7 +9,6 @@ import unittest
 from pathlib import Path
 
 from src.lib.runtime import RuntimeHome, bind_run_context
-from src.lib.smolagents.hooks.hook_manager import HookManager
 from src.lib.smolagents.skills.skills import SkillsManager
 from src.tools.skills import run_skill_script as run_skill_script_tool
 from src.trace.task_context import clear_current_skills_manager, set_current_skills_manager
@@ -17,7 +16,6 @@ from src.trace.task_context import clear_current_skills_manager, set_current_ski
 
 def _reset_singletons():
     SkillsManager._instance = None
-    HookManager._instance = None
 
 
 class TestSkillScriptRuntime(unittest.TestCase):
@@ -32,10 +30,7 @@ class TestSkillScriptRuntime(unittest.TestCase):
         )
         self._runtime_binding = bind_run_context(self.runtime_context)
         self._runtime_binding.__enter__()
-        self.skills_manager = SkillsManager(
-            logger=logging.getLogger(__name__),
-            hook_manager=HookManager(),
-        )
+        self.skills_manager = SkillsManager(logger=logging.getLogger(__name__))
         set_current_skills_manager(self.skills_manager)
 
     def tearDown(self):

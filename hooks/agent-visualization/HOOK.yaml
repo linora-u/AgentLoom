@@ -1,0 +1,38 @@
+name: agent-visualization
+description: Passive observer that records Agent runtime events in visualization.json.
+hooks:
+  TaskCreated:
+    - id: agent-visualization.task-created
+      command: python ./scripts/on_task_start.py
+      timeout: 20
+  TaskCompleted:
+    - id: agent-visualization.task-completed
+      command: python ./scripts/on_task_complete.py
+      timeout: 20
+  StopFailure:
+    - id: agent-visualization.stop-failure
+      command: python ./scripts/on_task_fail.py
+      timeout: 20
+  SubagentStart:
+    - id: agent-visualization.subagent-start
+      command: python ./scripts/on_subtask_start.py
+      timeout: 20
+  SubagentStop:
+    - id: agent-visualization.subagent-stop
+      command: python ./scripts/on_subtask_finish.py
+      timeout: 20
+  PreToolUse:
+    - id: agent-visualization.pre-tool-use
+      matcher: "*"
+      command: python ./scripts/on_pre_tool_use.py
+      timeout: 20
+  PostToolUse:
+    - id: agent-visualization.post-tool-use
+      matcher: "*"
+      command: python ./scripts/on_post_tool_use.py
+      timeout: 20
+  PostToolUseFailure:
+    - id: agent-visualization.post-tool-use-failure
+      matcher: "*"
+      command: python ./scripts/on_post_tool_error.py
+      timeout: 20

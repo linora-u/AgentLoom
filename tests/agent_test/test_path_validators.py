@@ -3,26 +3,26 @@
 import os
 from pathlib import Path
 
-import pytest
-
 import src.lib.config.config as config_module
 from src.lib.smolagents.hooks.path_validators import (
     DEFAULT_PATH_PARAM_PATTERNS,
     _find_rule_for_tool,
     _normalize_str_list,
     _resolve_path_params,
+    enforce_core_tool_guard,
     validate_workspace_path,
 )
 from src.lib.smolagents.hooks.types import HookContext
-
 
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
 
+
 def _patch_config(monkeypatch, raw: dict, root: Path) -> None:
     monkeypatch.setattr(
-        config_module, "_ACTIVE_CONFIG",
+        config_module,
+        "_ACTIVE_CONFIG",
         config_module.UnifiedConfig(raw, agent_root=root, llm_config=config_module.LLMConfig()),
         raising=True,
     )
@@ -33,17 +33,24 @@ def _patch_config(monkeypatch, raw: dict, root: Path) -> None:
         lambda: tac,
     )
 
+
 def _patch_no_agent(monkeypatch) -> None:
     monkeypatch.setattr(
         "src.lib.smolagents.hooks.path_validators.get_current_agent_config",
         lambda: None,
     )
 
+
 def _make_context(tool_name, tool_input, tool_inputs_schema=None):
     return HookContext(
-        session_id="test", cwd=os.getcwd(), hook_event_name="PreToolUse",
-        tool_name=tool_name, tool_input=tool_input, tool_inputs_schema=tool_inputs_schema,
+        local_run_id="test",
+        cwd=os.getcwd(),
+        hook_event_name="PreToolUse",
+        tool_name=tool_name,
+        tool_input=tool_input,
+        tool_inputs_schema=tool_inputs_schema,
     )
+
 
 def _tac(pv_list):
     """Shorthand: build tool_access_control config."""
@@ -54,69 +61,130 @@ def _tac(pv_list):
 # TestConfigLoading
 # ===========================================================================
 
+
 class TestConfigLoading:
     def test_empty_list_allows_all(self, monkeypatch, tmp_path):
         _patch_config(monkeypatch, _tac([]), tmp_path)
         _patch_no_agent(monkeypatch)
-        assert validate_workspace_path(_make_context("read_file", {"file_path": "/etc/passwd"}, {"file_path": {"type": "string"}})).decision == "allow"
+        assert (
+            validate_workspace_path(
+                _make_context("read_file", {"file_path": "/etc/passwd"}, {"file_path": {"type": "string"}})
+            ).decision
+            == "allow"
+        )
 
     def test_no_path_validation_section_allows_all(self, monkeypatch, tmp_path):
         _patch_config(monkeypatch, {"tool_access_control": {}}, tmp_path)
         _patch_no_agent(monkeypatch)
-        assert validate_workspace_path(_make_context("read_file", {"file_path": "/etc/passwd"}, {"file_path": {"type": "string"}})).decision == "allow"
+        assert (
+            validate_workspace_path(
+                _make_context("read_file", {"file_path": "/etc/passwd"}, {"file_path": {"type": "string"}})
+            ).decision
+            == "allow"
+        )
 
     def test_no_tool_access_control_allows_all(self, monkeypatch, tmp_path):
         _patch_config(monkeypatch, {}, tmp_path)
         _patch_no_agent(monkeypatch)
-        assert validate_workspace_path(_make_context("read_file", {"file_path": "/etc/passwd"}, {"file_path": {"type": "string"}})).decision == "allow"
+        assert (
+            validate_workspace_path(
+                _make_context("read_file", {"file_path": "/etc/passwd"}, {"file_path": {"type": "string"}})
+            ).decision
+            == "allow"
+        )
 
     def test_exclude_paths_in_entry(self, monkeypatch, tmp_path):
-        ws = tmp_path / "ws"; secrets = ws / "secrets"; secrets.mkdir(parents=True)
-        target = secrets / "key.pem"; target.touch()
+        ws = tmp_path / "ws"
+        secrets = ws / "secrets"
+        secrets.mkdir(parents=True)
+        target = secrets / "key.pem"
+        target.touch()
         _patch_config(monkeypatch, _tac([{"tools": ["read_file"], "exclude_paths": ["secrets"]}]), ws)
         _patch_no_agent(monkeypatch)
-        result = validate_workspace_path(_make_context("read_file", {"file_path": str(target)}, {"file_path": {"type": "string"}}))
+        result = validate_workspace_path(
+            _make_context("read_file", {"file_path": str(target)}, {"file_path": {"type": "string"}})
+        )
         assert result.decision == "block"
         assert "excluded directory" in result.reason
 
     def test_path_param_patterns_in_entry(self, monkeypatch, tmp_path):
         _patch_config(monkeypatch, _tac([{"tools": ["custom_tool"], "path_param_patterns": ["my_path"]}]), tmp_path)
         _patch_no_agent(monkeypatch)
-        assert validate_workspace_path(_make_context("custom_tool", {"my_path": "/etc/passwd"}, {"my_path": {"type": "string"}})).decision == "block"
+        assert (
+            validate_workspace_path(
+                _make_context("custom_tool", {"my_path": "/etc/passwd"}, {"my_path": {"type": "string"}})
+            ).decision
+            == "block"
+        )
 
     def test_default_path_param_patterns_fallback(self, monkeypatch, tmp_path):
         _patch_config(monkeypatch, _tac([{"tools": ["read_file"]}]), tmp_path)
         _patch_no_agent(monkeypatch)
-        assert validate_workspace_path(_make_context("read_file", {"file_path": "/etc/passwd"}, {"file_path": {"type": "string"}})).decision == "block"
+        assert (
+            validate_workspace_path(
+                _make_context("read_file", {"file_path": "/etc/passwd"}, {"file_path": {"type": "string"}})
+            ).decision
+            == "block"
+        )
 
     def test_tools_list_loaded(self, monkeypatch, tmp_path):
         _patch_config(monkeypatch, _tac([{"tools": ["tool_a", "tool_b"]}]), tmp_path)
         _patch_no_agent(monkeypatch)
-        assert validate_workspace_path(_make_context("tool_a", {"file_path": "/etc/passwd"}, {"file_path": {"type": "string"}})).decision == "block"
-        assert validate_workspace_path(_make_context("tool_c", {"file_path": "/etc/passwd"}, {"file_path": {"type": "string"}})).decision == "allow"
+        assert (
+            validate_workspace_path(
+                _make_context("tool_a", {"file_path": "/etc/passwd"}, {"file_path": {"type": "string"}})
+            ).decision
+            == "block"
+        )
+        assert (
+            validate_workspace_path(
+                _make_context("tool_c", {"file_path": "/etc/passwd"}, {"file_path": {"type": "string"}})
+            ).decision
+            == "allow"
+        )
 
     def test_entry_exclude_paths_loaded(self, monkeypatch, tmp_path):
-        ws = tmp_path / "ws"; build = ws / "build"; build.mkdir(parents=True)
-        target = build / "output.js"; target.touch()
+        ws = tmp_path / "ws"
+        build = ws / "build"
+        build.mkdir(parents=True)
+        target = build / "output.js"
+        target.touch()
         _patch_config(monkeypatch, _tac([{"tools": ["edit_file"], "exclude_paths": ["build"]}]), ws)
         _patch_no_agent(monkeypatch)
-        result = validate_workspace_path(_make_context("edit_file", {"file_path": str(target)}, {"file_path": {"type": "string"}}))
+        result = validate_workspace_path(
+            _make_context("edit_file", {"file_path": str(target)}, {"file_path": {"type": "string"}})
+        )
         assert result.decision == "block"
         assert "excluded directory" in result.reason
 
     def test_entry_path_param_patterns_overrides_default(self, monkeypatch, tmp_path):
         """When entry has path_param_patterns, only those are used (not defaults)."""
-        _patch_config(monkeypatch, _tac([{"tools": ["custom_move_tool"], "path_param_patterns": ["source", "destination"]}]), tmp_path)
+        _patch_config(
+            monkeypatch,
+            _tac([{"tools": ["custom_move_tool"], "path_param_patterns": ["source", "destination"]}]),
+            tmp_path,
+        )
         _patch_no_agent(monkeypatch)
         # "source" is in entry patterns -> detected
-        assert validate_workspace_path(_make_context("custom_move_tool", {"source": "/etc/passwd"}, {"source": {"type": "string"}})).decision == "block"
+        assert (
+            validate_workspace_path(
+                _make_context("custom_move_tool", {"source": "/etc/passwd"}, {"source": {"type": "string"}})
+            ).decision
+            == "block"
+        )
         # "file_path" is NOT in entry patterns (defaults not used) -> not detected -> allow
-        assert validate_workspace_path(_make_context("custom_move_tool", {"file_path": "/etc/passwd"}, {"file_path": {"type": "string"}})).decision == "allow"
+        assert (
+            validate_workspace_path(
+                _make_context("custom_move_tool", {"file_path": "/etc/passwd"}, {"file_path": {"type": "string"}})
+            ).decision
+            == "allow"
+        )
 
 
 # ===========================================================================
 # TestRuleMatching
 # ===========================================================================
+
 
 class TestRuleMatching:
     def test_tool_in_entry(self):
@@ -143,61 +211,150 @@ class TestRuleMatching:
     def test_empty_list(self):
         assert _find_rule_for_tool("any_tool", []) is None
 
+    def test_wildcard_tool_rule_matches(self):
+        rule = {"tools": ["*"], "exclude_paths": ["blocked"]}
+        assert _find_rule_for_tool("read_file", [rule]) is rule
+
+
+class TestExplicitCoreToolGuard:
+    def test_uses_explicit_policy_and_root_without_global_lookup(self, tmp_path):
+        root = tmp_path / "run-root"
+        blocked = root / "blocked"
+        blocked.mkdir(parents=True)
+        target = blocked / "secret.txt"
+        target.touch()
+        context = _make_context(
+            "read_file",
+            {"file_path": str(target)},
+            {"file_path": {"type": "string"}},
+        )
+        context.agent_config = {
+            "tool_access_control": {
+                "path_validation": [
+                    {"tools": ["*"], "exclude_paths": ["blocked"]},
+                ]
+            }
+        }
+        context.project_root = str(root)
+
+        result = enforce_core_tool_guard(context)
+
+        assert result.decision == "block"
+        assert "blocked" in (result.reason or "")
+
+    def test_missing_explicit_policy_fails_closed_for_path_tool(self, tmp_path):
+        context = _make_context(
+            "read_file",
+            {"file_path": str(tmp_path / "value.txt")},
+            {"file_path": {"type": "string"}},
+        )
+
+        result = enforce_core_tool_guard(context)
+
+        assert result.decision == "block"
+        assert "missing explicit Agent config" in (result.reason or "")
+
 
 # ===========================================================================
 # TestExcludePaths
 # ===========================================================================
 
+
 class TestExcludePaths:
     def test_entry_exclude_blocks(self, monkeypatch, tmp_path):
-        ws = tmp_path / "ws"; git = ws / ".git"; git.mkdir(parents=True)
-        target = git / "config"; target.touch()
+        ws = tmp_path / "ws"
+        git = ws / ".git"
+        git.mkdir(parents=True)
+        target = git / "config"
+        target.touch()
         _patch_config(monkeypatch, _tac([{"tools": ["read_file"], "exclude_paths": [".git"]}]), ws)
         _patch_no_agent(monkeypatch)
-        result = validate_workspace_path(_make_context("read_file", {"file_path": str(target)}, {"file_path": {"type": "string"}}))
+        result = validate_workspace_path(
+            _make_context("read_file", {"file_path": str(target)}, {"file_path": {"type": "string"}})
+        )
         assert result.decision == "block"
         assert ".git" in result.reason
 
     def test_no_exclude_allows_within_workspace(self, monkeypatch, tmp_path):
-        ws = tmp_path / "ws"; ws.mkdir()
-        target = ws / "test.txt"; target.touch()
+        ws = tmp_path / "ws"
+        ws.mkdir()
+        target = ws / "test.txt"
+        target.touch()
         _patch_config(monkeypatch, _tac([{"tools": ["read_file"]}]), ws)
         _patch_no_agent(monkeypatch)
-        assert validate_workspace_path(_make_context("read_file", {"file_path": str(target)}, {"file_path": {"type": "string"}})).decision == "allow"
+        assert (
+            validate_workspace_path(
+                _make_context("read_file", {"file_path": str(target)}, {"file_path": {"type": "string"}})
+            ).decision
+            == "allow"
+        )
 
     def test_slash_exclude_blocks_everything(self, monkeypatch, tmp_path):
-        ws = tmp_path / "ws"; ws.mkdir(parents=True)
-        target = ws / "test.txt"; target.touch()
+        ws = tmp_path / "ws"
+        ws.mkdir(parents=True)
+        target = ws / "test.txt"
+        target.touch()
         _patch_config(monkeypatch, _tac([{"tools": ["read_file"], "exclude_paths": ["/"]}]), ws)
         _patch_no_agent(monkeypatch)
-        assert validate_workspace_path(_make_context("read_file", {"file_path": str(target)}, {"file_path": {"type": "string"}})).decision == "block"
+        assert (
+            validate_workspace_path(
+                _make_context("read_file", {"file_path": str(target)}, {"file_path": {"type": "string"}})
+            ).decision
+            == "block"
+        )
 
     def test_different_entries_different_excludes(self, monkeypatch, tmp_path):
-        ws = tmp_path / "ws"; build = ws / "build"; build.mkdir(parents=True)
-        target = build / "out.js"; target.touch()
-        _patch_config(monkeypatch, _tac([
-            {"tools": ["read_file"], "exclude_paths": [".git"]},
-            {"tools": ["edit_file"], "exclude_paths": ["build"]},
-        ]), ws)
+        ws = tmp_path / "ws"
+        build = ws / "build"
+        build.mkdir(parents=True)
+        target = build / "out.js"
+        target.touch()
+        _patch_config(
+            monkeypatch,
+            _tac(
+                [
+                    {"tools": ["read_file"], "exclude_paths": [".git"]},
+                    {"tools": ["edit_file"], "exclude_paths": ["build"]},
+                ]
+            ),
+            ws,
+        )
         _patch_no_agent(monkeypatch)
         # read_file_content excludes .git but NOT build -> allow
-        assert validate_workspace_path(_make_context("read_file", {"file_path": str(target)}, {"file_path": {"type": "string"}})).decision == "allow"
+        assert (
+            validate_workspace_path(
+                _make_context("read_file", {"file_path": str(target)}, {"file_path": {"type": "string"}})
+            ).decision
+            == "allow"
+        )
         # edit_file_content excludes build -> block
-        assert validate_workspace_path(_make_context("edit_file", {"file_path": str(target)}, {"file_path": {"type": "string"}})).decision == "block"
+        assert (
+            validate_workspace_path(
+                _make_context("edit_file", {"file_path": str(target)}, {"file_path": {"type": "string"}})
+            ).decision
+            == "block"
+        )
 
 
 # ===========================================================================
 # TestPathParamPatterns
 # ===========================================================================
 
+
 class TestPathParamPatterns:
     def test_default_fallback(self):
-        result = _resolve_path_params("custom_tool", {"file_path": {"type": "string"}, "encoding": {"type": "string"}}, DEFAULT_PATH_PARAM_PATTERNS)
+        result = _resolve_path_params(
+            "custom_tool",
+            {"file_path": {"type": "string"}, "encoding": {"type": "string"}},
+            DEFAULT_PATH_PARAM_PATTERNS,
+        )
         assert "file_path" in result
         assert "encoding" not in result
 
     def test_custom_patterns(self):
-        result = _resolve_path_params("custom_tool", {"source": {"type": "string"}, "dest": {"type": "string"}}, ["source", "dest"])
+        result = _resolve_path_params(
+            "custom_tool", {"source": {"type": "string"}, "dest": {"type": "string"}}, ["source", "dest"]
+        )
         assert result == ["source", "dest"]
 
     def test_no_schema_uses_registry_params_for_registered_tools(self):
@@ -210,28 +367,45 @@ class TestPathParamPatterns:
         _patch_config(monkeypatch, _tac([{"tools": ["custom_move_tool"], "path_param_patterns": ["source"]}]), tmp_path)
         _patch_no_agent(monkeypatch)
         # "source" detected -> block
-        assert validate_workspace_path(_make_context("custom_move_tool", {"source": "/etc/passwd"}, {"source": {"type": "string"}})).decision == "block"
+        assert (
+            validate_workspace_path(
+                _make_context("custom_move_tool", {"source": "/etc/passwd"}, {"source": {"type": "string"}})
+            ).decision
+            == "block"
+        )
         # "file_path" NOT detected (not in entry's patterns) -> allow
-        assert validate_workspace_path(_make_context("custom_move_tool", {"file_path": "/etc/passwd"}, {"file_path": {"type": "string"}})).decision == "allow"
+        assert (
+            validate_workspace_path(
+                _make_context("custom_move_tool", {"file_path": "/etc/passwd"}, {"file_path": {"type": "string"}})
+            ).decision
+            == "allow"
+        )
 
 
 # ===========================================================================
 # TestNormalizeStrList
 # ===========================================================================
 
+
 class TestNormalizeStrList:
     def test_list_input(self):
         assert _normalize_str_list(["a", "b"]) == ["a", "b"]
+
     def test_string_input(self):
         assert _normalize_str_list("single") == ["single"]
+
     def test_empty_string(self):
         assert _normalize_str_list("  ") == []
+
     def test_none_with_default(self):
         assert _normalize_str_list(None, default=["x"]) == ["x"]
+
     def test_none_without_default(self):
         assert _normalize_str_list(None) == []
+
     def test_filters_non_strings(self):
         assert _normalize_str_list(["a", 123, "b", None]) == ["a", "b"]
+
     def test_filters_empty_strings(self):
         assert _normalize_str_list(["a", "", "  ", "b"]) == ["a", "b"]
 
@@ -240,57 +414,96 @@ class TestNormalizeStrList:
 # TestValidateWorkspacePath — end-to-end
 # ===========================================================================
 
+
 class TestValidateWorkspacePath:
     def test_path_inside_workspace_allowed(self, monkeypatch, tmp_path):
-        ws = tmp_path / "ws"; ws.mkdir()
-        target = ws / "test.txt"; target.touch()
+        ws = tmp_path / "ws"
+        ws.mkdir()
+        target = ws / "test.txt"
+        target.touch()
         _patch_config(monkeypatch, _tac([{"tools": ["read_file"]}]), ws)
         _patch_no_agent(monkeypatch)
-        assert validate_workspace_path(_make_context("read_file", {"file_path": str(target)}, {"file_path": {"type": "string"}})).decision == "allow"
+        assert (
+            validate_workspace_path(
+                _make_context("read_file", {"file_path": str(target)}, {"file_path": {"type": "string"}})
+            ).decision
+            == "allow"
+        )
 
     def test_path_outside_workspace_blocked(self, monkeypatch, tmp_path):
-        ws = tmp_path / "ws"; ws.mkdir()
+        ws = tmp_path / "ws"
+        ws.mkdir()
         _patch_config(monkeypatch, _tac([{"tools": ["read_file"]}]), ws)
         _patch_no_agent(monkeypatch)
-        result = validate_workspace_path(_make_context("read_file", {"file_path": "/etc/passwd"}, {"file_path": {"type": "string"}}))
+        result = validate_workspace_path(
+            _make_context("read_file", {"file_path": "/etc/passwd"}, {"file_path": {"type": "string"}})
+        )
         assert result.decision == "block"
         assert "outside" in result.reason.lower()
 
     def test_file_uri_prefix_stripped(self, monkeypatch, tmp_path):
-        ws = tmp_path / "ws"; ws.mkdir()
-        target = ws / "test.txt"; target.touch()
+        ws = tmp_path / "ws"
+        ws.mkdir()
+        target = ws / "test.txt"
+        target.touch()
         _patch_config(monkeypatch, _tac([{"tools": ["read_file"]}]), ws)
         _patch_no_agent(monkeypatch)
-        assert validate_workspace_path(_make_context("read_file", {"file_path": f"file://{target}"}, {"file_path": {"type": "string"}})).decision == "allow"
+        assert (
+            validate_workspace_path(
+                _make_context("read_file", {"file_path": f"file://{target}"}, {"file_path": {"type": "string"}})
+            ).decision
+            == "allow"
+        )
 
     def test_relative_path_resolved(self, monkeypatch, tmp_path):
-        ws = tmp_path / "ws"; ws.mkdir()
+        ws = tmp_path / "ws"
+        ws.mkdir()
         _patch_config(monkeypatch, _tac([{"tools": ["read_file"]}]), ws)
         _patch_no_agent(monkeypatch)
-        assert validate_workspace_path(_make_context("read_file", {"file_path": "../../etc/passwd"}, {"file_path": {"type": "string"}})).decision == "block"
+        assert (
+            validate_workspace_path(
+                _make_context("read_file", {"file_path": "../../etc/passwd"}, {"file_path": {"type": "string"}})
+            ).decision
+            == "block"
+        )
 
     def test_list_type_path_param(self, monkeypatch, tmp_path):
-        ws = tmp_path / "ws"; ws.mkdir()
-        good = ws / "ok.txt"; good.touch()
+        ws = tmp_path / "ws"
+        ws.mkdir()
+        good = ws / "ok.txt"
+        good.touch()
         _patch_config(monkeypatch, _tac([{"tools": ["batch_tool"]}]), ws)
         _patch_no_agent(monkeypatch)
-        result = validate_workspace_path(_make_context("batch_tool", {"file_paths": [str(good), "/etc/passwd"]}, {"file_paths": {"type": "array"}}))
+        result = validate_workspace_path(
+            _make_context("batch_tool", {"file_paths": [str(good), "/etc/passwd"]}, {"file_paths": {"type": "array"}})
+        )
         assert result.decision == "block"
 
     def test_tool_not_in_entries_allows(self, monkeypatch, tmp_path):
         _patch_config(monkeypatch, _tac([{"tools": ["edit_file"]}]), tmp_path)
         _patch_no_agent(monkeypatch)
-        assert validate_workspace_path(_make_context("shell_tool", {"file_path": "/etc/passwd"}, {"file_path": {"type": "string"}})).decision == "allow"
+        assert (
+            validate_workspace_path(
+                _make_context("shell_tool", {"file_path": "/etc/passwd"}, {"file_path": {"type": "string"}})
+            ).decision
+            == "allow"
+        )
 
     def test_no_path_values_in_input_allows(self, monkeypatch, tmp_path):
         _patch_config(monkeypatch, _tac([{"tools": ["shell_tool"]}]), tmp_path)
         _patch_no_agent(monkeypatch)
-        assert validate_workspace_path(_make_context("shell_tool", {"command": "echo hi"}, {"command": {"type": "string"}})).decision == "allow"
+        assert (
+            validate_workspace_path(
+                _make_context("shell_tool", {"command": "echo hi"}, {"command": {"type": "string"}})
+            ).decision
+            == "allow"
+        )
 
 
 # ===========================================================================
 # T7: Multi-rule precedence — first matching rule wins
 # ===========================================================================
+
 
 class TestMultiRulePrecedence:
     """When a tool matches multiple rules, the first match is used."""
@@ -306,17 +519,25 @@ class TestMultiRulePrecedence:
 
         # Rule 1: read_file_content with exclude "secrets"
         # Rule 2: read_file_content with no excludes
-        _patch_config(monkeypatch, _tac([
-            {"tools": ["read_file"], "exclude_paths": ["secrets"]},
-            {"tools": ["read_file"], "exclude_paths": []},
-        ]), ws)
+        _patch_config(
+            monkeypatch,
+            _tac(
+                [
+                    {"tools": ["read_file"], "exclude_paths": ["secrets"]},
+                    {"tools": ["read_file"], "exclude_paths": []},
+                ]
+            ),
+            ws,
+        )
         _patch_no_agent(monkeypatch)
 
-        result = validate_workspace_path(_make_context(
-            "read_file",
-            {"file_path": str(secret)},
-            {"file_path": {"type": "string"}},
-        ))
+        result = validate_workspace_path(
+            _make_context(
+                "read_file",
+                {"file_path": str(secret)},
+                {"file_path": {"type": "string"}},
+            )
+        )
         assert result.decision == "block"
         assert "excluded" in result.reason.lower()
 
@@ -331,17 +552,25 @@ class TestMultiRulePrecedence:
         # Rule 1: broad rule without "build" in excludes
         # Rule 2: specific rule with "build" in excludes
         # Union semantics: exclude_paths = [] + ["build"] = ["build"]
-        _patch_config(monkeypatch, _tac([
-            {"tools": ["read_file"], "exclude_paths": []},
-            {"tools": ["read_file"], "exclude_paths": ["build"]},
-        ]), ws)
+        _patch_config(
+            monkeypatch,
+            _tac(
+                [
+                    {"tools": ["read_file"], "exclude_paths": []},
+                    {"tools": ["read_file"], "exclude_paths": ["build"]},
+                ]
+            ),
+            ws,
+        )
         _patch_no_agent(monkeypatch)
 
-        result = validate_workspace_path(_make_context(
-            "read_file",
-            {"file_path": str(build_file)},
-            {"file_path": {"type": "string"}},
-        ))
+        result = validate_workspace_path(
+            _make_context(
+                "read_file",
+                {"file_path": str(build_file)},
+                {"file_path": {"type": "string"}},
+            )
+        )
         # Union: "build" is excluded across all matching rules → block
         assert result.decision == "block"
         assert "excluded" in result.reason.lower()
@@ -351,6 +580,7 @@ class TestMultiRulePrecedence:
 # T13: Relative path escape with ../
 # ===========================================================================
 
+
 class TestRelativePathEscape:
     """Paths using ../ to escape workspace boundary should be blocked."""
 
@@ -359,11 +589,13 @@ class TestRelativePathEscape:
         ws.mkdir()
         _patch_config(monkeypatch, _tac([{"tools": ["read_file"]}]), ws)
         _patch_no_agent(monkeypatch)
-        result = validate_workspace_path(_make_context(
-            "read_file",
-            {"file_path": "../../../etc/passwd"},
-            {"file_path": {"type": "string"}},
-        ))
+        result = validate_workspace_path(
+            _make_context(
+                "read_file",
+                {"file_path": "../../../etc/passwd"},
+                {"file_path": {"type": "string"}},
+            )
+        )
         assert result.decision == "block"
 
     def test_single_dot_dot_escape_blocked(self, monkeypatch, tmp_path):
@@ -371,11 +603,13 @@ class TestRelativePathEscape:
         ws.mkdir()
         _patch_config(monkeypatch, _tac([{"tools": ["read_file"]}]), ws)
         _patch_no_agent(monkeypatch)
-        result = validate_workspace_path(_make_context(
-            "read_file",
-            {"file_path": "../sibling/file.txt"},
-            {"file_path": {"type": "string"}},
-        ))
+        result = validate_workspace_path(
+            _make_context(
+                "read_file",
+                {"file_path": "../sibling/file.txt"},
+                {"file_path": {"type": "string"}},
+            )
+        )
         assert result.decision == "block"
 
     def test_dot_dot_within_workspace_allowed(self, monkeypatch, tmp_path):
@@ -388,9 +622,11 @@ class TestRelativePathEscape:
         _patch_config(monkeypatch, _tac([{"tools": ["read_file"]}]), ws)
         _patch_no_agent(monkeypatch)
         # "src/sub/../main.py" resolves to "src/main.py" which is inside workspace
-        result = validate_workspace_path(_make_context(
-            "read_file",
-            {"file_path": str(ws / "src" / "sub" / ".." / "main.py")},
-            {"file_path": {"type": "string"}},
-        ))
+        result = validate_workspace_path(
+            _make_context(
+                "read_file",
+                {"file_path": str(ws / "src" / "sub" / ".." / "main.py")},
+                {"file_path": {"type": "string"}},
+            )
+        )
         assert result.decision == "allow"

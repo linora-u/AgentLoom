@@ -11,7 +11,7 @@ from __future__ import annotations
 import re
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 import frontmatter
 
@@ -30,29 +30,27 @@ _MAX_SKILL_DESCRIPTION_LENGTH = 1024
 class SkillMetadata:
     name: str
     description: str
-    version: Optional[str] = None
-    allowed_tools: Optional[List[str]] = None
-    hooks: Optional[Dict[str, Any]] = None
-    platform: Optional[str] = None
-    argument_hint: Optional[str] = None
-    arguments: Optional[List[str]] = None
-    when_to_use: Optional[str] = None
-    model: Optional[str] = None
-    context: Optional[str] = None
-    agent: Optional[str] = None
-    effort: Optional[str] = None
-    shell: Optional[str] = None
+    version: str | None = None
+    allowed_tools: list[str] | None = None
+    platform: str | None = None
+    argument_hint: str | None = None
+    arguments: list[str] | None = None
+    when_to_use: str | None = None
+    model: str | None = None
+    context: str | None = None
+    agent: str | None = None
+    effort: str | None = None
     load_mode: str = "on-demand"
     allow_scripts: bool = True
     allow_network: bool = True
+    policy_priority: int = -1
 
 
 @dataclass
 class Skill:
     metadata: SkillMetadata
-    content: Optional[str]
+    content: str | None
     file_path: str
-    hooks_registered: bool = False
 
     @property
     def base_dir(self) -> str:
@@ -138,7 +136,7 @@ def parse_skill_file(file_path: str, logger=None) -> tuple[SkillMetadata, str]:
     """Parse a skill file and return ``(SkillMetadata, markdown_body)``."""
     logger = get_logger(logger, __name__)
 
-    with open(file_path, "r", encoding="utf-8") as f:
+    with open(file_path, encoding="utf-8") as f:
         content = f.read()
 
     try:
@@ -174,17 +172,22 @@ def parse_skill_file(file_path: str, logger=None) -> tuple[SkillMetadata, str]:
 
     allowed_tools = _parse_string_list(data.get("allowed-tools"), field_name="allowed-tools")
 
-    hooks_raw = data.get("hooks")
-    if hooks_raw is not None and not isinstance(hooks_raw, dict):
-        raise ValueError(f"Skill field 'hooks' must be a mapping: {file_path}")
-    hooks = hooks_raw if isinstance(hooks_raw, dict) else None
+    if "hooks" in data:
+        raise ValueError(
+            "SKILL.md field 'hooks' is not supported; configure a direct Hook "
+            f"or standalone Hook Bundle instead: {file_path}"
+        )
+    if "enable-hooks" in data:
+        raise ValueError(
+            "SKILL.md field 'enable-hooks' is not supported; Skills never authorize "
+            f"Hook execution: {file_path}"
+        )
 
     metadata = SkillMetadata(
         name=name,
         description=description,
         version=version,
         allowed_tools=allowed_tools,
-        hooks=hooks,
         argument_hint=_optional_str(data.get("argument-hint")),
         arguments=_parse_string_list(data.get("arguments"), field_name="arguments"),
         when_to_use=_optional_str(data.get("when_to_use")),
@@ -192,7 +195,6 @@ def parse_skill_file(file_path: str, logger=None) -> tuple[SkillMetadata, str]:
         context=_parse_context(data.get("context")),
         agent=_optional_str(data.get("agent")),
         effort=_optional_str(data.get("effort")),
-        shell=_optional_str(data.get("shell")),
     )
 
     return metadata, markdown_body
@@ -208,13 +210,13 @@ def _validate_skill_name(name: str, file_path: str) -> None:
         )
 
 
-def _optional_str(value: Any) -> Optional[str]:
+def _optional_str(value: Any) -> str | None:
     if isinstance(value, str) and value.strip():
         return value.strip()
     return None
 
 
-def _parse_string_list(value: Any, *, field_name: str) -> Optional[List[str]]:
+def _parse_string_list(value: Any, *, field_name: str) -> list[str] | None:
     if value is None:
         return None
     if isinstance(value, list):
@@ -227,7 +229,7 @@ def _parse_string_list(value: Any, *, field_name: str) -> Optional[List[str]]:
     raise ValueError(f"Skill field '{field_name}' must be a string or list of strings")
 
 
-def _parse_context(value: Any) -> Optional[str]:
+def _parse_context(value: Any) -> str | None:
     if isinstance(value, str) and value.strip():
         parsed = value.strip()
         if parsed not in {"inline", "fork"}:
@@ -241,7 +243,7 @@ def _parse_context(value: Any) -> Optional[str]:
 # ---------------------------------------------------------------------------
 
 def build_skills_prompt(
-    skills: Dict[str, Skill],
+    skills: dict[str, Skill],
 ) -> str:
     """Build the skills catalogue section for the system prompt.
 

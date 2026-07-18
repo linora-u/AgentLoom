@@ -1,10 +1,9 @@
-"""
-Rules-driven tool access control hook (PRE_TOOL_USE).
+"""Rules-driven, non-configurable CoreToolGuard path enforcement.
 
 Delegates all security checks (UNC, Windows, symlink, workspace boundary)
 to the shared permissions library at ``src.lib.permissions``.
 This module only handles:
-  - Rule matching (which tools need hook-level validation)
+  - Rule matching (which tools need final-boundary validation)
   - Path parameter extraction from tool input
   - Delegating to the shared ``validate_path()``
 
@@ -12,14 +11,10 @@ For backward-compatibility, the security functions are re-exported so that
 existing test imports continue to work.
 """
 
-import os
-from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any
 
-from .types import HookContext, HookResult
 from src.lib.config import C
 from src.lib.logging import get_logger
-from src.trace.task_context import get_current_agent_config
 
 # Re-export from shared library for backward-compatibility with tests
 from src.lib.permissions.path_validation import (  # noqa: F401
@@ -27,13 +22,16 @@ from src.lib.permissions.path_validation import (  # noqa: F401
     is_vulnerable_unc_path,
     resolve_symlink_chain,
 )
+from src.trace.task_context import get_current_agent_config
+
+from .types import HookContext, HookResult
 
 logger = get_logger(__name__)
 
 # ============================================
 # Default path param patterns (fallback when not configured)
 # ============================================
-DEFAULT_PATH_PARAM_PATTERNS: List[str] = [
+DEFAULT_PATH_PARAM_PATTERNS: list[str] = [
     "file_path",
     "filePath",
     "directory_path",
@@ -61,22 +59,22 @@ def _resolve_tool_access_control_config() -> dict:
     return {}
 
 
-def _find_rule_for_tool(tool_name: str, rules: list) -> Optional[dict]:
+def _find_rule_for_tool(tool_name: str, rules: list) -> dict | None:
     """Find the first rule whose 'tools' list contains the given tool_name."""
     for rule in rules:
         if not isinstance(rule, dict):
             continue
         tools_list = rule.get("tools", [])
-        if isinstance(tools_list, list) and tool_name in tools_list:
+        if isinstance(tools_list, list) and (tool_name in tools_list or "*" in tools_list):
             return rule
     return None
 
 
 def _resolve_path_params(
     tool_name: str,
-    tool_inputs_schema: Optional[Dict[str, Any]],
-    path_param_patterns: List[str],
-) -> List[str]:
+    tool_inputs_schema: dict[str, Any] | None,
+    path_param_patterns: list[str],
+) -> list[str]:
     """Match tool parameter names against path_param_patterns."""
     try:
         from src.tools import get_tool_spec
@@ -96,7 +94,7 @@ def _resolve_path_params(
     return merged
 
 
-def _normalize_str_list(raw: Any, default: list | None = None) -> List[str]:
+def _normalize_str_list(raw: Any, default: list | None = None) -> list[str]:
     """Normalize a value to a list of non-empty strings."""
     if isinstance(raw, str):
         return [raw] if raw.strip() else []
@@ -105,8 +103,12 @@ def _normalize_str_list(raw: Any, default: list | None = None) -> List[str]:
     return list(default) if default else []
 
 
-def validate_workspace_path(context: HookContext) -> HookResult:
-    """Rules-driven tool access control hook.
+def _evaluate_workspace_path(
+    context: HookContext,
+    *,
+    explicit_runtime_policy: bool = False,
+) -> HookResult:
+    """Evaluate rules-driven tool access control for one final tool input.
 
     Delegates to the shared permissions library for all security checks.
 
@@ -118,33 +120,50 @@ def validate_workspace_path(context: HookContext) -> HookResult:
     """
     from src.lib.permissions import validate_path
 
-    tac_cfg = _resolve_tool_access_control_config()
+    tool_name = context.tool_name
+    tool_inputs_schema = getattr(context, "tool_inputs_schema", None)
+    potential_path_params = _resolve_path_params(
+        tool_name,
+        tool_inputs_schema,
+        list(DEFAULT_PATH_PARAM_PATTERNS),
+    )
+    if explicit_runtime_policy:
+        if not isinstance(context.agent_config, dict):
+            if not potential_path_params:
+                return HookResult(decision="allow")
+            return HookResult(decision="block", reason="Core tool guard is missing explicit Agent config")
+        if not isinstance(context.project_root, str) or not context.project_root.strip():
+            if not potential_path_params:
+                return HookResult(decision="allow")
+            return HookResult(decision="block", reason="Core tool guard is missing explicit project root")
+        tac_cfg = context.agent_config.get("tool_access_control", {})
+        if not isinstance(tac_cfg, dict):
+            return HookResult(decision="block", reason="Invalid explicit tool_access_control config")
+    else:
+        tac_cfg = _resolve_tool_access_control_config()
 
     # Read path_validation list
     rules = tac_cfg.get("path_validation")
     if not isinstance(rules, list) or not rules:
-        return HookResult(success=True, decision="allow")
-
-    tool_name = context.tool_name
+        return HookResult(decision="allow")
 
     # Find entry for this tool
     rule = _find_rule_for_tool(tool_name, rules)
     if rule is None:
-        return HookResult(success=True, decision="allow")
+        return HookResult(decision="allow")
 
     # path_param_patterns: use entry's if present, otherwise DEFAULT
     entry_patterns = _normalize_str_list(rule.get("path_param_patterns"))
     effective_patterns = entry_patterns if entry_patterns else list(DEFAULT_PATH_PARAM_PATTERNS)
 
     # Resolve path params from tool schema
-    tool_inputs_schema = getattr(context, "tool_inputs_schema", None)
     path_params = _resolve_path_params(tool_name, tool_inputs_schema, effective_patterns)
     if not path_params:
-        return HookResult(success=True, decision="allow")
+        return HookResult(decision="allow")
 
     # Extract path values from tool_input
     tool_input = context.tool_input
-    paths_to_check: List[str] = []
+    paths_to_check: list[str] = []
     for param in path_params:
         if param in tool_input:
             val = tool_input[param]
@@ -154,7 +173,7 @@ def validate_workspace_path(context: HookContext) -> HookResult:
                 paths_to_check.extend([str(v) for v in val if isinstance(v, str)])
 
     if not paths_to_check:
-        return HookResult(success=True, decision="allow")
+        return HookResult(decision="allow")
 
     # Validate each path via shared library.
     # include_paths / exclude_paths are resolved from path_validation rules
@@ -163,20 +182,43 @@ def validate_workspace_path(context: HookContext) -> HookResult:
         try:
             result = validate_path(
                 p_str,
-                tool_name=tool_name,
+                tool_name=None if explicit_runtime_policy else tool_name,
+                explicit_include_paths=(
+                    _normalize_str_list(rule.get("include_paths")) if explicit_runtime_policy else None
+                ),
+                explicit_exclude_paths=(
+                    _normalize_str_list(rule.get("exclude_paths")) if explicit_runtime_policy else None
+                ),
+                explicit_workspace_root=(context.project_root if explicit_runtime_policy else None),
             )
             if not result.allowed:
                 return HookResult(
-                    success=True,
                     decision="block",
                     reason=result.reason,
                 )
         except Exception as e:
             logger.error("Error validating path %s: %s", p_str, e)
             return HookResult(
-                success=True,
                 decision="block",
                 reason=f"Path validation error: {e}",
             )
 
-    return HookResult(success=True, decision="allow")
+    return HookResult(decision="allow")
+
+
+def enforce_core_tool_guard(context: HookContext) -> HookResult:
+    """Run the non-configurable final path guard.
+
+    The tool runtime calls this function directly after all configurable
+    ``PreToolUse`` transformations. It is intentionally not registered as a
+    ``HookHandler`` and therefore cannot be removed, reordered, or replaced by
+    configured Hook declarations.
+    """
+
+    return _evaluate_workspace_path(context, explicit_runtime_policy=True)
+
+
+def validate_workspace_path(context: HookContext) -> HookResult:
+    """Compatibility API for direct validation tests and legacy callers."""
+
+    return _evaluate_workspace_path(context)

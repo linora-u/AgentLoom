@@ -381,6 +381,7 @@ workflow: |
 | `planning_interval` | `int` | 不设置 | 每 N 步强制规划。详见 [3.10](#310-planning_interval--规划间隔) |
 | `concurrency` | `int`/`str` | 不设置 | 并发度：此 Agent 被批量调用时的最大并发数。详见 [3.11](#311-concurrency--并发度配置) |
 | `skills` | `list`/`dict`/`str` | 不设置 | 私有技能包配置。详见 [3.8](#38-skills--技能包配置) |
+| `hooks` | `dict` | 不设置 | 独立直接 Hook 与显式 Hook Bundle。详见 [Hooks](hooks.md) |
 | `max_steps` | `int` | `80` | 最大执行步数。超过后 Agent 强制终止 |
 
 ---
@@ -530,7 +531,6 @@ skills: []   # 显式 opt-out：跳过所有全局 skills，包括 AGENT_ROOT/sk
 skills:
   - path: "skills/agent-recall-with-files"
     load-mode: "eager"
-  - path: "skills/agent-visualization"
   - "skills/another-skill"              # 纯字符串也可以作为列表项
 ```
 
@@ -572,6 +572,8 @@ skills: "skills/agent-recall-with-files"
 | `load-mode` | `str` | `on-demand` | ❌ 可选 | `on-demand` 只在 prompt 放 catalogue；`eager` 注入完整 skill 正文 |
 | `allow-scripts` | `bool` | `true` | ❌ 可选 | 设为 `false` 时阻断该 skill 的 `run_skill_script` |
 | `allow-network` | `bool` | `true` | ❌ 可选 | 设为 `false` 时阻断 `run_skill_script` 中常见网络命令 |
+
+组级策略由 `items` 继承，条目级字段可覆盖。Skill 发现和加载都不会声明、启用或执行 Hook。`SKILL.md` 中出现 `hooks` 或 Skill 配置出现 `enable-hooks` 属于迁移错误；请改用独立顶层 [`hooks`](hooks.md) 接口。
 
 **校验**：`skills` 整体必须是 `list`、`dict` 或 `str`，否则报错 `skills must be a list, dict, or string path`。
 

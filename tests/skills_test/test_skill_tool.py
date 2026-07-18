@@ -16,13 +16,11 @@ from src.trace.task_context import (
     clear_current_skills_manager,
     set_current_skills_manager,
 )
-from src.lib.smolagents.hooks.hook_manager import HookManager
 from src.lib.smolagents.skills.skills import SkillsManager
 
 
 def _reset_singletons():
     SkillsManager._instance = None
-    HookManager._instance = None
 
 
 class TestSkillTool(unittest.TestCase):
@@ -65,12 +63,6 @@ class TestSkillTool(unittest.TestCase):
             "---\n"
             "name: lazy-skill\n"
             "description: Lazy demo\n"
-            "hooks:\n"
-            "  PreToolUse:\n"
-            "    - matcher: \"*\"\n"
-            "      hooks:\n"
-            "        - type: command\n"
-            "          command: \"true\"\n"
             "---\n"
             "# Body\n"
         )
@@ -79,14 +71,14 @@ class TestSkillTool(unittest.TestCase):
 
         stored_skill = self.skills_manager.skills["lazy-skill"]
         self.assertIsNone(stored_skill.content)
-        self.assertTrue(stored_skill.hooks_registered)
+        self.assertFalse(hasattr(self.skills_manager, "build_hook_handlers"))
         self.assertFalse(hasattr(self.skills_manager, "active_skills"))
 
         result = skill_tool("lazy-skill")
 
         self.assertIn("# Body", result)
         self.assertEqual(stored_skill.content, "# Body\n")
-        self.assertTrue(stored_skill.hooks_registered)
+        self.assertFalse(hasattr(stored_skill.metadata, "hooks"))
         self.assertFalse(hasattr(self.skills_manager, "active_skills"))
 
     def test_skill_tool_unknown_skill(self):
@@ -116,14 +108,8 @@ class TestSkillTool(unittest.TestCase):
         skill_a_path = self._write_temp_skill("---\nname: skill-a\ndescription: A\n---\n# Body A\n")
         skill_b_path = self._write_temp_skill("---\nname: skill-b\ndescription: B\n---\n# Body B\n")
 
-        manager_a = SkillsManager(
-            logger=logging.getLogger(__name__),
-            hook_manager=HookManager(),
-        )
-        manager_b = SkillsManager(
-            logger=logging.getLogger(__name__),
-            hook_manager=HookManager(),
-        )
+        manager_a = SkillsManager(logger=logging.getLogger(__name__))
+        manager_b = SkillsManager(logger=logging.getLogger(__name__))
         manager_a.load_skill_metadata(str(skill_a_path))
         manager_b.load_skill_metadata(str(skill_b_path))
 
@@ -143,14 +129,8 @@ class TestSkillTool(unittest.TestCase):
         skill_a_path = self._write_temp_skill("---\nname: ctx-a\ndescription: A\n---\n# A\n")
         skill_b_path = self._write_temp_skill("---\nname: ctx-b\ndescription: B\n---\n# B\n")
 
-        manager_a = SkillsManager(
-            logger=logging.getLogger(__name__),
-            hook_manager=HookManager(),
-        )
-        manager_b = SkillsManager(
-            logger=logging.getLogger(__name__),
-            hook_manager=HookManager(),
-        )
+        manager_a = SkillsManager(logger=logging.getLogger(__name__))
+        manager_b = SkillsManager(logger=logging.getLogger(__name__))
         manager_a.load_skill_metadata(str(skill_a_path))
         manager_b.load_skill_metadata(str(skill_b_path))
 

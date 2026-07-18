@@ -330,6 +330,7 @@ class RootSettings(BaseModel):
     tool_metadata: dict[str, Any] = Field(default_factory=dict)
     tool_output_limits: dict[str, Any] = Field(default_factory=dict)
     self_learning: dict[str, Any] = Field(default_factory=dict)
+    hooks: dict[str, Any] = Field(default_factory=dict)
 
 
 def raise_project_key_error(source: str) -> ValueError:

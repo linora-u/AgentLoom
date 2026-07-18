@@ -34,10 +34,9 @@ context: fork
 agent: reviewer
 effort: high
 shell: bash
-hooks: {}
 ```
 
-Unknown frontmatter fields are ignored. Legacy fields such as `when-to-use`, `argument-names`, `requires`, `disable-model-invocation`, and `user-invocable` are not mapped.
+Unknown frontmatter fields are ignored. `hooks` is rejected with a migration error because Hooks use the independent top-level [`hooks`](hooks.md) configuration. Legacy fields such as `when-to-use`, `argument-names`, `requires`, `disable-model-invocation`, and `user-invocable` are not mapped.
 
 Invalid YAML, missing `name`, missing `description`, invalid names, and duplicate skill names are errors.
 
