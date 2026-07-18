@@ -529,6 +529,61 @@ class TestRunApp:
             pass
 
     @patch("src.runner.YamlConfiguredSupervisorAgent")
+    def test_transient_manifest_failure_keeps_written_artifact_references(
+        self,
+        mock_cls,
+        fake_yaml: Path,
+        monkeypatch,
+    ) -> None:
+        from src.application_run import ApplicationRunError
+        from src.lib.runtime import RuntimeContext, get_current_run_context
+        from src.runner import execute_app
+
+        observed: dict[str, object] = {"failed_once": False}
+        marker = OSError("manifest commit failed once")
+
+        def _run(_task, **kwargs):
+            context = get_current_run_context(required=True)
+            kwargs["checkpoint_manager"].record_task_status_changed(
+                context.task_id,
+                "completed",
+                result="final answer",
+            )
+            observed["context"] = context
+            return "final answer"
+
+        original_update_manifest = RuntimeContext.update_manifest
+
+        def fail_completed_manifest_once(context, **updates):
+            if updates.get("status") == "completed" and not observed["failed_once"]:
+                observed["failed_once"] = True
+                raise marker
+            return original_update_manifest(context, **updates)
+
+        mock_cls.return_value.run.side_effect = _run
+        monkeypatch.setattr(
+            RuntimeContext,
+            "update_manifest",
+            fail_completed_manifest_once,
+        )
+
+        with pytest.raises(ApplicationRunError) as caught:
+            execute_app(str(fake_yaml), file_logging=False)
+
+        assert caught.value.phase == "finalization"
+        assert caught.value.original_error is marker
+        context = observed["context"]
+        manifest = json.loads(context.manifest_path.read_text(encoding="utf-8"))
+        assert manifest["status"] == "failed"
+        assert manifest["result_artifact"] == "artifacts/result.txt"
+        assert manifest["task_tree_artifact"] == "audit/task_tree.json"
+        assert manifest["task_events_artifact"] == "audit/task_events.jsonl"
+        assert (context.run_dir / manifest["result_artifact"]).read_text(encoding="utf-8") == "final answer"
+        assert (context.run_dir / manifest["task_tree_artifact"]).is_file()
+        assert (context.run_dir / manifest["task_events_artifact"]).is_file()
+        assert context.checkpoint_dir.is_dir()
+
+    @patch("src.runner.YamlConfiguredSupervisorAgent")
     def test_run_finally_releases_shell_sessions_and_background_tasks(
         self,
         mock_cls,
@@ -1437,18 +1492,26 @@ class TestExecuteApp:
         monkeypatch,
     ) -> None:
         from src.application_run import ApplicationRunError
+        from src.lib.checkpoint import CheckpointManager
         from src.lib.checkpoint.checkpoint_manager import CheckpointTaskLease
         from src.runner import execute_app
 
         mock_cls.return_value.run.return_value = "ok"
         original_release = CheckpointTaskLease.release
+        original_close = CheckpointManager.close
         marker = OSError("task lease release failed")
+        closed_managers = []
 
         def release_then_fail(lease):
             original_release(lease)
             raise marker
 
+        def record_close(manager):
+            closed_managers.append(manager)
+            original_close(manager)
+
         monkeypatch.setattr(CheckpointTaskLease, "release", release_then_fail)
+        monkeypatch.setattr(CheckpointManager, "close", record_close)
         events = []
 
         with pytest.raises(ApplicationRunError) as caught:
@@ -1461,6 +1524,8 @@ class TestExecuteApp:
         assert caught.value.phase == "cleanup"
         assert caught.value.original_error is marker
         assert [event.event for event in events] == ["run.started", "run.failed"]
+        assert len(closed_managers) == 1
+        assert closed_managers[0]._task_storages == {}
 
     @patch("src.runner.YamlConfiguredSupervisorAgent")
     def test_run_app_preserves_run_lease_release_error(
@@ -1528,6 +1593,55 @@ class TestExecuteApp:
         )
         checkpoint = json.loads(checkpoint_path.read_text(encoding="utf-8"))
         assert checkpoint["status"] == "interrupted"
+
+    @patch("src.runner.YamlConfiguredSupervisorAgent")
+    def test_interrupt_after_checkpoint_deletion_is_not_resumable(
+        self,
+        mock_cls,
+        fake_yaml: Path,
+        monkeypatch,
+    ) -> None:
+        from src.application_run import ApplicationRunInterrupted
+        from src.lib.checkpoint import CheckpointManager
+        from src.lib.runtime import get_current_run_context
+        from src.runner import execute_app
+
+        observed = {}
+
+        def _run(_task, **kwargs):
+            context = get_current_run_context(required=True)
+            kwargs["checkpoint_manager"].record_task_status_changed(
+                context.task_id,
+                "completed",
+                result="final answer",
+            )
+            observed["context"] = context
+            return "final answer"
+
+        original_delete_task = CheckpointManager.delete_task
+
+        def delete_then_interrupt(manager, task_id):
+            assert original_delete_task(manager, task_id) is True
+            raise KeyboardInterrupt("interrupted after checkpoint deletion")
+
+        mock_cls.return_value.run.side_effect = _run
+        monkeypatch.setattr(
+            CheckpointManager,
+            "delete_task",
+            delete_then_interrupt,
+        )
+
+        with pytest.raises(ApplicationRunInterrupted) as caught:
+            execute_app(str(fake_yaml), file_logging=False)
+
+        assert caught.value.phase == "finalization"
+        assert caught.value.resumable is False
+        context = observed["context"]
+        assert not context.checkpoint_dir.exists()
+        manifest = json.loads(context.manifest_path.read_text(encoding="utf-8"))
+        assert manifest["status"] == "interrupted"
+        assert manifest["result_artifact"] == "artifacts/result.txt"
+        assert (context.run_dir / manifest["result_artifact"]).read_text(encoding="utf-8") == "final answer"
 
     @patch("src.runner.YamlConfiguredSupervisorAgent")
     def test_execute_app_wraps_system_exit_and_run_app_preserves_compatibility(
