@@ -51,7 +51,7 @@ from src.lib.runtime import (
     resolve_runtime_home,
 )
 from src.lib.smolagents.agent.runtime_validation import (
-    validate_required_yaml_fields,
+    validate_required_yaml_fields,  # noqa: F401 - public compatibility re-export
     validate_runtime_agent_config,
 )
 from src.lib.smolagents.agent.yaml_agent_factory import (
@@ -170,10 +170,16 @@ def _persist_run_observability(
     *,
     result: str | None,
     event_start_offset: int | None,
+    manifest_updates: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
-    """Copy durable result and task evidence into the canonical Run record."""
+    """Copy durable evidence and retain references to every completed write.
 
-    manifest_updates: dict[str, Any] = {}
+    ``manifest_updates`` is caller-owned so a later finalization failure can
+    still publish artifacts that were already committed to the Run directory.
+    """
+
+    if manifest_updates is None:
+        manifest_updates = {}
     if result is not None:
         result_artifact = runtime_context.artifacts_dir / "result.txt"
         runtime_context.atomic_write_run_file(result_artifact, result)
@@ -383,6 +389,7 @@ def execute_app(
     manifest_initialized = False
     phase: RunPhase = "initialization"
     log = None
+    durable_manifest_updates: dict[str, Any] = {}
 
     def emit_started() -> None:
         nonlocal started_emitted
@@ -403,6 +410,7 @@ def execute_app(
             return
         try:
             runtime_context.update_manifest(
+                **durable_manifest_updates,
                 status="interrupted" if isinstance(exc, KeyboardInterrupt) else "failed",
                 ended_at=datetime.now().astimezone().isoformat(),
                 error=str(exc),
@@ -419,6 +427,7 @@ def execute_app(
     result_str = ""
     interrupt_resumable = False
     event_start_offset: int | None = None
+    checkpoint_deletion_started = False
 
     try:
         runtime_context.prepare_run()
@@ -647,6 +656,9 @@ def execute_app(
                     outcome_error = str(exc)
                     if checkpoint_mgr is not None:
                         try:
+                            runtime_context.validate_checkpoint_path(
+                                require_exists=True,
+                            )
                             checkpoint_mgr.record_task_status_changed(
                                 task_id,
                                 "interrupted",
@@ -717,23 +729,24 @@ def execute_app(
                         except Exception:
                             pass
                     try:
-                        durable_updates: dict[str, Any] = {}
                         if outcome == "completed":
-                            durable_updates = _persist_run_observability(
+                            _persist_run_observability(
                                 runtime_context,
                                 checkpoint_mgr,
                                 task_id,
                                 result=result_str,
                                 event_start_offset=event_start_offset,
+                                manifest_updates=durable_manifest_updates,
                             )
                         else:
                             try:
-                                durable_updates = _persist_run_observability(
+                                _persist_run_observability(
                                     runtime_context,
                                     checkpoint_mgr,
                                     task_id,
                                     result=None,
                                     event_start_offset=event_start_offset,
+                                    manifest_updates=durable_manifest_updates,
                                 )
                             except Exception as exc:
                                 log.warning(
@@ -743,7 +756,7 @@ def execute_app(
                         manifest_updates = {
                             "status": outcome,
                             "ended_at": datetime.now().astimezone().isoformat(),
-                            **durable_updates,
+                            **durable_manifest_updates,
                         }
                         if outcome_error:
                             manifest_updates["error"] = outcome_error
@@ -756,32 +769,32 @@ def execute_app(
                                 "Failed to persist terminal manifest: %s",
                                 exc,
                             )
-                        if (
-                            outcome == "completed"
-                            and cleanup_on_success
-                            and checkpoint_mgr is not None
-                        ):
+                        if outcome == "completed" and cleanup_on_success and checkpoint_mgr is not None:
                             try:
                                 tree = checkpoint_mgr.load_task_tree_projection(
                                     task_id,
                                     max_bytes=_TASK_TREE_CLEANUP_MAX_BYTES,
                                 )
-                                if (
-                                    tree
-                                    and tree.get("status") == "completed"
-                                    and checkpoint_mgr.delete_task(task_id)
-                                ):
-                                    log.info(
-                                        "Cleaned up checkpoint for completed task %s",
-                                        task_id,
-                                    )
+                                if tree and tree.get("status") == "completed":
+                                    # Deletion is an irreversible commit point. If
+                                    # it is interrupted, never recreate a skeletal
+                                    # checkpoint and advertise it as resumable.
+                                    checkpoint_deletion_started = True
+                                    if checkpoint_mgr.delete_task(task_id):
+                                        log.info(
+                                            "Cleaned up checkpoint for completed task %s",
+                                            task_id,
+                                        )
                             except Exception:
                                 pass
                     except KeyboardInterrupt as exc:
                         outcome = "interrupted"
                         outcome_error = str(exc)
-                        if checkpoint_mgr is not None:
+                        if checkpoint_mgr is not None and not checkpoint_deletion_started:
                             try:
+                                runtime_context.validate_checkpoint_path(
+                                    require_exists=True,
+                                )
                                 checkpoint_mgr.record_task_status_changed(
                                     task_id,
                                     "interrupted",
@@ -795,18 +808,23 @@ def execute_app(
                                 )
                         raise
                     finally:
+                        task_lease_error: BaseException | None = None
                         if task_lease is not None:
                             try:
                                 task_lease.release()
-                            except BaseException:
+                            except BaseException as exc:
                                 phase = "cleanup"
-                                raise
+                                task_lease_error = exc
                         if checkpoint_mgr is not None:
                             try:
                                 checkpoint_mgr.close()
-                            except BaseException:
+                            except BaseException as exc:
                                 phase = "cleanup"
-                                raise
+                                if task_lease_error is None:
+                                    raise
+                                task_lease_error.add_note(f"Checkpoint manager close also failed: {exc}")
+                        if task_lease_error is not None:
+                            raise task_lease_error
         if run_attempt_lease is not None:
             try:
                 run_attempt_lease.release()

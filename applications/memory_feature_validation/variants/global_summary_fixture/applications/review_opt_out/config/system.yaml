@@ -1,4 +1,8 @@
 self_learning:
-  memory:
-    review_model: ""
-    write_approval: false
+  review:
+    application:
+      trigger:
+        mode: manual
+      approval:
+        fact: auto
+        experience: auto
