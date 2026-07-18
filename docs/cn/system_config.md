@@ -15,7 +15,7 @@
 
 ## 目录
 
-- [快速参考：完整 YAML 结构](#快速参考完整-yaml-结构)
+- [快速参考：代表性 YAML 结构](#快速参考代表性-yaml-结构)
 - [1. system — 系统元数据](#1-system--系统元数据)
 - [1.5 model_request_headers — 模型请求头隐私配置](#15-model_request_headers--模型请求头隐私配置)
 - [2. smart_summary — 上下文压缩策略](#2-smart_summary--上下文压缩策略)
@@ -32,14 +32,15 @@
 - [10. tool_metadata — 工具元数据配置](#10-tool_metadata--工具元数据配置)
 - [11. tool_output_limits — 工具输出限制](#11-tool_output_limits--工具输出限制)
 - [12. checkpoint — 断点续跑与心跳配置](#12-checkpoint--断点续跑与心跳配置)
+- [13. self_learning — History、评审与 Curated Memory](#13-self_learning--history评审与-curated-memory)
 - [附录 A：Pydantic 模型对照表](#附录-apydantic-模型对照表)
 - [附录 B：应用级覆盖与目录结构](#附录-b应用级覆盖与目录结构)
 
 ---
 
-## 快速参考：完整 YAML 结构
+## 快速参考：代表性 YAML 结构
 
-以下展示 `config/system.yaml` 的**完整结构与仓库示例值**（并在关键处标注框架 fallback 默认值）：
+以下展示 `config/system.yaml` 的**主要公开配置段与代表性仓库值**（并在关键处标注框架 fallback 默认值）。不常用的扩展 mapping 请继续查阅下方详细章节和仓库中的真实配置文件。
 
 ```yaml
 # ============================================
@@ -154,21 +155,7 @@ tools_mapping:
 # 工作空间配置（可选，以下为 Pydantic 默认值，不写也生效）
 # ============================================
 tool_access_control:
-  include_paths: []
-  exclude_paths: []
-  path_param_patterns:
-    - "file_path"
-    - "filePath"
-    - "directory_path"
-    - "directory"
-    - "dirPath"
-    - "repo_path"
-    - "path"
-    - "path_str"
-    - "file_paths"
-    - "filePaths"
-    - "fileUri"
-  tool_access_control: []
+  path_validation: []
 
 # ============================================
 # 断点续跑与心跳配置（可选，以下为框架默认值）
@@ -178,6 +165,28 @@ checkpoint:
   cleanup_on_success: true # 任务成功完成后自动删除 checkpoint 目录
   max_resume_age: 604800   # checkpoint 最大保留时长（秒），超出后不可恢复，默认 7 天
   heartbeat_interval: 5    # 心跳写入频率（秒），用于崩溃检测
+
+# ============================================
+# Self-learning v6
+# ============================================
+self_learning:
+  enabled: true
+  events_retention_days: 90
+  memory:
+    prompt_max_chars: 12000
+    max_item_chars: 4000
+    scope_budgets: {project: 8000, application: 6000}
+  review:
+    enabled: true
+    application:
+      review_model: summary
+      trigger: {mode: batch, min_completed_runs: 5}
+      approval: {fact: auto, experience: manual}
+    project:
+      review_model: summary
+      trigger: {mode: batch, min_candidates: 5}
+      approval: {fact: manual, experience: manual}
+    artifacts: {markdown: true, review_auto_applied: true}
 
 ```
 
@@ -1283,8 +1292,8 @@ Run 证据与 task 恢复状态在同一个 runtime root 下保持独立生命�
 ├── runs/<application_id>/<run_id>/
 │   ├── manifest.json
 │   ├── logs/runtime.log[.1-.3]
-│   ├── audit/shell.jsonl[.1-.2]
-│   └── artifacts/{shell,background,skills}/
+│   ├── audit/{shell.jsonl[.1-.2],task_tree.json,task_events.jsonl}
+│   └── artifacts/{result.txt,shell,background,skills}/
 └── checkpoints/<application_id>/<task_id>/
     ├── task_events.jsonl
     ├── task_tree.json
@@ -1294,6 +1303,8 @@ Run 证据与 task 恢复状态在同一个 runtime root 下保持独立生命�
     ├── context_store/
     └── file-history/
 ```
+
+除 `manifest.json` 外，这些 run 条目只会在启用对应日志或真实证据存在时生成。
 
 关键设计：
 
@@ -1349,6 +1360,34 @@ checkpoint:
 
 ---
 
+## 13. self_learning — History、评审与 Curated Memory
+
+控制可搜索 History，以及将 typed candidates 转换成 Application 或 Project Curated Memory 的评审链路。
+
+**YAML 路径**：`self_learning.*`
+
+| 参数 | 类型 / 可选值 | 默认值 | 说明 |
+|---|---|---|---|
+| `enabled` | `bool` | `true` | 启用 self-learning 存储和模型侧 memory 访问。 |
+| `events_retention_days` | `int` | 仓库配置为 `90` | 兼容性保留值；当前 History 清理必须显式执行 `loom sessions prune --retention-days N`。 |
+| `memory.prompt_max_chars` | `int` | 由仓库配置 | 注入 Memory 的总字符预算。 |
+| `memory.max_item_chars` | `int` | 由仓库配置 | 单条 Curated Memory 的最大长度。 |
+| `memory.scope_budgets.project/application` | `int` | 由仓库配置 | 每个 scope 的注入预算。 |
+| `review.enabled` | `bool` | `false` | 开启 reviewer；开启后两个 scope 的 model 都必须非空。 |
+| `review.application.review_model` | model type | `""` | 抽取 Application candidate 的模型。 |
+| `review.application.trigger.mode` | `manual\|batch\|after_run` | `batch` | Application review 触发方式。 |
+| `review.application.trigger.min_completed_runs` | `int >= 1` | `5` | Batch 模式已完成 root run 阈值。 |
+| `review.project.review_model` | model type | `""` | 抽取 Project candidate 的模型。 |
+| `review.project.trigger.mode` | `manual\|batch\|after_run` | `batch` | Project review 触发方式。 |
+| `review.project.trigger.min_candidates` | `int >= 1` | `5` | Project batch context 阈值。 |
+| `review.<scope>.approval.fact/experience` | `auto\|manual` | `manual` | 按类型设置审批策略；auto 仍须通过代码证据门。 |
+| `review.artifacts.markdown` | `bool` | `true` | 选择 Markdown artifacts（`REPORT.md`、`INBOX.md`、`INDEX.md`）；`false` 时使用 JSON batch/inbox/index 文件。 |
+| `review.artifacts.review_auto_applied` | `bool` | `true` | 在 artifacts 中记录 auto-applied additions。 |
+
+在 `self_learning.review` 内，Application/Agent overlay 只能修改 `application`；`review.enabled`、Project policy 和 artifact 设置归项目根所有。其他 `self_learning` 字段仍按普通 overlay 规则合并。v5 字段 `memory.review_model`、`write_approval` 已无效。Candidate schema、review 命令、审批状态和仅限人工的 Project promotion 边界见 [Self-learning v6](self_learning.md)。
+
+---
+
 ## 附录 A：Pydantic 模型对照表
 
 框架使用 Pydantic 对系统配置进行校验。以下是配置字段与 Pydantic 模型的映射关系：
@@ -1361,6 +1400,7 @@ checkpoint:
 | `tool_access_control.*` | `ToolAccessControlSettings` | `src/lib/config/config_validation.py` |
 | `runtime.*` | `RuntimeSettings` | `src/lib/config/config_validation.py` |
 | `logging.*` | `LoggingSettings` | `src/lib/config/config_validation.py` |
+| `self_learning.*` | `SelfLearningSettings` / `SelfLearningReviewSettings` | `src/lib/config/config_validation.py` |
 
 **`RootSettings` 完整字段定义**：
 
@@ -1372,12 +1412,19 @@ checkpoint:
 | `runtime` | `RuntimeSettings` | `RuntimeSettings()` |
 | `logging` | `LoggingSettings` | `LoggingSettings()` |
 | `smart_summary` | `bool` | `True` |
+| `context_engine` | `dict[str, Any]` | `{}` |
 | `model` | `dict[str, Any]` | `{}` |
 | `execution_env` | `dict[str, Any]` | `{}` |
 | `code_agent` | `dict[str, Any]` | `{}` |
-| `tools` | `dict[str, Any]` | `{}` |
+| `tools` | `list[Any]` | `[]` |
+| `default_toolsets` | `list[str]` | `[]` |
+| `toolsets` | `list[str]` | `[]` |
+| `shell_settings` | `dict[str, Any]` | `{}` |
+| `tools_mapping` | `dict[str, Any]` | `{}` |
 | `tool_metadata` | `dict[str, Any]` | `{}` |
 | `tool_output_limits` | `dict[str, Any]` | `{}` |
+| `self_learning` | `SelfLearningSettings` | `SelfLearningSettings()` |
+| `hooks` | `dict[str, Any]` | `{}` |
 
 > `RootSettings` 允许扩展字段，因此 `prompt` 等顶层字段仍可参与 overlay 合并。`RuntimeSettings` 与 `LoggingSettings` 刻意使用 `extra="forbid"`；已删除的 runtime/logging key 会直接校验失败，不会静默启用第二套存储路径。
 

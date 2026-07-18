@@ -22,8 +22,11 @@ This boundary prevents log rotation or run cleanup from damaging resumable state
 │   │   └── runtime.log.1 ... runtime.log.3
 │   ├── audit/
 │   │   ├── shell.jsonl
-│   │   └── shell.jsonl.1 ... shell.jsonl.2
+│   │   ├── shell.jsonl.1 ... shell.jsonl.2
+│   │   ├── task_tree.json
+│   │   └── task_events.jsonl
 │   └── artifacts/
+│       ├── result.txt
 │       ├── shell/
 │       ├── background/
 │       └── skills/
@@ -47,6 +50,8 @@ Important boundaries:
 
 - `manifest.json` links the attempt back to its `task_id`; checkpoint run events and heartbeat records include the current `run_id`.
 - `task_events.jsonl` is the durable task/Worker event source. `task_tree.json` is its inspectable projection.
+- A successful result is copied to `artifacts/result.txt`. When checkpoint evidence exists, the run also receives `audit/task_tree.json` and `audit/task_events.jsonl`. The manifest records `result_artifact`, `task_tree_artifact`, `task_events_artifact`, and `task_events_complete` only when the corresponding evidence exists.
+- These compact evidence files remain inspectable after `cleanup_on_success` removes the resumable checkpoint. Raw artifact retention can still clean bulk shell/background/skill artifacts.
 - Checkpoint lookup uses the canonical `<application_id>/<task_id>` path. It does not depend on a log directory, `.task_index.json`, or a scan of historical runs.
 - User deliverables remain under the Application's configured `output_dir`. Runtime cleanup never traverses Application output directories.
 - Agent recall/todo state lives under `.agentloom/workspaces/agents/<application_id>/<agent_path>/`. Persistent `insights.md` is application-scoped; task files are isolated under `tasks/<task_id>/` and are not run artifacts.
