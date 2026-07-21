@@ -1,12 +1,13 @@
 import type {
   AgentCatalogDto,
+  ApplicationDetailResultDto,
   BootstrapResultDto,
   RunDetailResultDto,
   ScheduleTriggerDto,
   SystemDetailResultDto,
 } from "../domain"
 import { isProblemRuntimeStatus, runtimeStatus } from "../domain"
-import type { AppRoute } from "./controller"
+import { applicationHealthLabel, type AppRoute } from "./controller"
 
 export type DetailSection = {
   title: string
@@ -17,6 +18,282 @@ export type WorkspaceEntityDetail = {
   title: string
   subtitle: string
   sections: DetailSection[]
+}
+
+export function applicationDetailSections(detail: ApplicationDetailResultDto): DetailSection[] {
+  const agents = flattenEffectiveAgents(detail.agents)
+  const supervisors = agents.filter(({ agent }) => agent.role === "supervisor").length
+  const workers = agents.length - supervisors
+  const invalid = agents.filter(({ agent }) => !agent.validation.valid).length
+  const tools = uniqueBy(
+    agents.flatMap(({ agent }) => agent.tools),
+    (tool) => tool.name,
+  )
+  const skills = uniqueBy(
+    agents.flatMap(({ agent }) => agent.skills),
+    (skill) => skill.path,
+  )
+
+  return compactSections([
+    {
+      title: "概览",
+      lines: [
+        `配置: ${applicationHealthLabel(detail.application.health)}${invalid ? ` · ${invalid} 个 Agent 校验失败` : ""}`,
+        `Agents: ${agents.length} · ${supervisors} Supervisor · ${workers} Worker`,
+        `Tools: ${tools.length} · Skills: ${skills.length}`,
+        `Working Revision: ${shortRevision(detail.working_revision)}`,
+        `Running Revision: ${detail.running_revision ? shortRevision(detail.running_revision) : "— (未运行)"}`,
+        `路径: ${detail.application.path}`,
+      ],
+    },
+    {
+      title: `Agents · ${agents.length}`,
+      lines: limitedLines(
+        agents.map(({ agent, depth }) => (
+          `${"  ".repeat(depth)}${agent.role === "supervisor" ? "Supervisor" : "Worker"} · ${agent.name}`
+          + ` · ${agent.model.type || "未配置"} · ${agent.validation.valid ? "有效" : "无效"}`
+        )),
+        12,
+        "通过 Ctrl+X 打开主 Agent；子 Agent 在主 Agent 详情查看",
+      ),
+    },
+    {
+      title: `Tools · ${tools.length}`,
+      lines: limitedLines(
+        tools.map((tool) => `${tool.name} · ${tool.source}`),
+        10,
+        "打开具体 Agent 查看加载来源",
+      ),
+    },
+    {
+      title: `Skills · ${skills.length}`,
+      lines: limitedLines(
+        skills.map((skill) => `${skill.name} · ${skill.source} · ${skill.load_mode}`),
+        10,
+        "打开具体 Agent 查看加载来源",
+      ),
+    },
+    {
+      title: "配置来源",
+      lines: [
+        `权限: ${sourceCounts(agents.map(({ agent }) => agent.permissions.source))}`,
+        `Hooks: ${sourceCounts(agents.map(({ agent }) => agent.hooks.source))}`,
+        `MCP: ${sourceCounts(agents.map(({ agent }) => agent.mcp.source))}`,
+        "通过 Ctrl+X 打开主 Agent 查看 Effective Config",
+      ],
+    },
+  ])
+}
+
+export function effectiveAgentDetail(
+  detail: ApplicationDetailResultDto,
+  agentID: string,
+): WorkspaceEntityDetail | null {
+  const entry = flattenEffectiveAgents(detail.agents).find(({ agent }) => agent.id === agentID)
+  if (!entry) return null
+  const { agent } = entry
+  return {
+    title: agent.role === "supervisor" ? "Supervisor Agent" : "Worker Agent",
+    subtitle: agent.name,
+    sections: compactSections([
+      {
+        title: "Effective Config",
+        lines: [
+          `角色: ${agent.role}`,
+          `说明: ${summarizeText(agent.description, 180) || "—"}`,
+          `模型: ${agent.model.type || "未配置"} · ${agent.model.source}`,
+          `校验: ${agent.validation.valid ? "通过" : "失败"}`,
+          ...agent.validation.errors.slice(0, 5).map((error) => `  ${summarizeText(error, 180)}`),
+          `文件: ${agent.source_path}`,
+        ],
+      },
+      {
+        title: "Workflow 摘要",
+        lines: [summarizeText(agent.workflow, 240) || "—"],
+      },
+      {
+        title: `Tools · ${agent.tools.length}`,
+        lines: limitedLines(agent.tools.map((tool) => `${tool.name} · ${tool.source}`), 12),
+      },
+      {
+        title: `Skills · ${agent.skills.length}`,
+        lines: limitedLines(
+          agent.skills.map((skill) => `${skill.name} · ${skill.source} · ${skill.load_mode}`),
+          12,
+        ),
+      },
+      {
+        title: "权限与扩展",
+        lines: [
+          sourcedCapability("权限", agent.permissions),
+          sourcedCapability("Hooks", agent.hooks),
+          sourcedCapability("MCP", agent.mcp),
+        ],
+      },
+      {
+        title: `子 Agents · ${agent.workers.length}`,
+        lines: limitedLines(agent.workers.map((worker) => worker.name), 12),
+      },
+    ]),
+  }
+}
+
+type ToolPresentation = {
+  name: string
+  status: "pending" | "running" | "completed" | "error"
+  input?: Record<string, unknown>
+  output?: string
+}
+
+/** Keep domain JSON available to the Agent Loop while presenting only decision-ready facts to people. */
+export function studioToolOutput(tool: ToolPresentation): string | null {
+  if (!tool.output) return null
+  if (tool.name !== "agentloom_domain") return boundedTextBlock(tool.output)
+  const action = typeof tool.input?.action === "string" ? tool.input.action : "AgentLoom operation"
+  const envelope = parseRecord(tool.output)
+  if (!envelope) return tool.status === "error" ? summarizeText(tool.output, 240) : `${action} 已完成`
+  if (envelope.ok === false) {
+    const error = isRecord(envelope.error) ? envelope.error : {}
+    return `失败: ${summarizeText(String(error.message ?? error.code ?? "未知错误"), 240)}`
+  }
+  const result = isRecord(envelope.result) ? envelope.result : {}
+  if (action === "application.detail") {
+    const application = isRecord(result.application) ? result.application : {}
+    const overview = isRecord(result.overview) ? result.overview : {}
+    const capabilities = isRecord(result.effective_capabilities) ? result.effective_capabilities : {}
+    const supervisorCount = numberValue(overview.supervisor_count)
+    const workerCount = numberValue(overview.worker_count)
+    return [
+      `${String(application.id ?? "Application")} · ${applicationHealthSummary(application.health)}`,
+      `Agents ${supervisorCount + workerCount} · Tools ${numberValue(capabilities.tool_count)} · Skills ${numberValue(capabilities.skill_count)}`,
+      "完整配置可从 Ctrl+X 打开 Application 或主 Agent 查看",
+    ].join("\n")
+  }
+  if (action === "application.validate") {
+    const errors = Array.isArray(result.errors) ? result.errors : []
+    return `${String(result.application_id ?? "Application")} · ${result.valid === true ? "校验通过" : `校验失败 · ${errors.length} 个错误`}`
+  }
+  if (action === "application.impact") {
+    return `${String(result.scope ?? "application")} 范围 · 影响 ${numberValue(result.count)} 个 Application`
+  }
+  if (action === "catalog") {
+    const applications = Array.isArray(result.applications) ? result.applications.length : 0
+    const skills = Array.isArray(result.skills)
+      ? result.skills.filter((skill) => isRecord(skill) && skill.application_id == null).length
+      : 0
+    return `${applications} Applications · ${skills} Global Skills`
+  }
+  if (action.startsWith("run.")) {
+    const run = isRecord(result.summary) ? result.summary : result
+    const runID = String(run.run_id ?? result.run_id ?? "Run")
+    return `${runID} · ${String(run.status ?? result.status ?? "操作完成")}`
+  }
+  return `${action} 已完成`
+}
+
+function applicationHealthSummary(value: unknown): string {
+  if (value === "healthy" || value === "invalid") return applicationHealthLabel(value)
+  return "状态未知"
+}
+
+type FlatEffectiveAgent = {
+  agent: ApplicationDetailResultDto["agents"][number]
+  depth: number
+}
+
+function flattenEffectiveAgents(
+  roots: ApplicationDetailResultDto["agents"],
+): FlatEffectiveAgent[] {
+  const result: FlatEffectiveAgent[] = []
+  const visit = (agent: ApplicationDetailResultDto["agents"][number], depth: number) => {
+    result.push({ agent, depth })
+    for (const worker of agent.workers) visit(worker, depth + 1)
+  }
+  for (const root of roots) visit(root, 0)
+  return result
+}
+
+function uniqueBy<Item>(items: Item[], key: (item: Item) => string): Item[] {
+  const seen = new Set<string>()
+  return items.filter((item) => {
+    const value = key(item)
+    if (seen.has(value)) return false
+    seen.add(value)
+    return true
+  })
+}
+
+function limitedLines(lines: string[], limit: number, hint?: string): string[] {
+  if (lines.length === 0) return ["—"]
+  if (lines.length <= limit) return lines
+  const remainder = lines.length - limit
+  return [...lines.slice(0, limit), `… 还有 ${remainder} 个${hint ? `；${hint}` : ""}`]
+}
+
+function sourceCounts(sources: string[]): string {
+  if (sources.length === 0) return "—"
+  const counts = new Map<string, number>()
+  for (const source of sources) counts.set(source, (counts.get(source) ?? 0) + 1)
+  return [...counts.entries()].map(([source, count]) => `${source} ${count}`).join(" · ")
+}
+
+function sourcedCapability(
+  label: string,
+  capability: ApplicationDetailResultDto["agents"][number]["permissions"],
+): string {
+  const value = summarizeText(capabilitySummary(capability.value), 180)
+  return `${label} · ${capability.source}: ${value}${capability.source_path ? ` · ${capability.source_path}` : ""}`
+}
+
+function summarizeText(value: string, limit: number): string {
+  const text = singleLine(value)
+  if (text.length <= limit) return text
+  return `${text.slice(0, Math.max(0, limit - 1)).trimEnd()}…`
+}
+
+function boundedTextBlock(output: string): string {
+  const lines = output.split("\n")
+  const text = lines.slice(0, 8).join("\n")
+  return `${text.slice(0, 2_000)}${lines.length > 8 || text.length > 2_000 ? "\n…" : ""}`
+}
+
+function parseRecord(value: string): Record<string, unknown> | null {
+  try {
+    const parsed: unknown = JSON.parse(value)
+    return isRecord(parsed) ? parsed : null
+  } catch {
+    return null
+  }
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return Boolean(value) && typeof value === "object" && !Array.isArray(value)
+}
+
+function numberValue(value: unknown): number {
+  return typeof value === "number" && Number.isFinite(value) ? value : 0
+}
+
+function shortRevision(revision: string): string {
+  const value = revision.startsWith("sha256:") ? revision.slice("sha256:".length) : revision
+  return value.slice(0, 12)
+}
+
+function capabilitySummary(value: unknown): string {
+  if (value === null || value === undefined) return "—"
+  if (Array.isArray(value)) return value.length ? value.map(String).join(", ") : "—"
+  if (typeof value === "object") {
+    const entries = Object.entries(value as Record<string, unknown>)
+    if (entries.length === 0) return "—"
+    return entries.slice(0, 6).map(([key, item]) => `${key}=${scalarSummary(item)}`).join(", ")
+  }
+  return String(value)
+}
+
+function scalarSummary(value: unknown): string {
+  if (Array.isArray(value)) return `[${value.length}]`
+  if (value && typeof value === "object") return "{…}"
+  return String(value)
 }
 
 export function workspaceEntityDetail(
@@ -262,7 +539,7 @@ export function systemDetailSections(detail: SystemDetailResultDto): DetailSecti
         `名称: ${detail.definition.name}`,
         `说明: ${detail.definition.description || "—"}`,
         `模型: ${detail.definition.model_type ?? "未指定"}`,
-        `工作流: ${workflow || "—"}`,
+        `工作流摘要: ${summarizeText(workflow || "", 240) || "—"}`,
         `路径: ${detail.definition.path}`,
         ...validation,
       ],

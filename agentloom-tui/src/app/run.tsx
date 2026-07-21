@@ -10,17 +10,22 @@ import { render } from "@opentui/solid"
 import { basename } from "node:path"
 import type { BootstrapResultDto } from "../domain"
 import { formatTerminalTitle } from "../ui"
-import { AgentLoomSession, type TuiClient } from "./session"
+import { AgentLoomSession, type StudioClient, type TuiClient } from "./session"
 import { AgentLoomApp } from "./view"
+import { createSourceUpdateClient, type UpdateClient } from "../update/source-updater"
 
 export type RunTuiInput = {
   client: TuiClient
+  studio: StudioClient
   snapshot?: BootstrapResultDto
   projectRoot: string
   refreshIntervalMs?: number
+  updater?: UpdateClient
 }
 
-export async function runTui(input: RunTuiInput): Promise<void> {
+export type TuiExitReason = "exit" | "restart"
+
+export async function runTui(input: RunTuiInput): Promise<TuiExitReason> {
   const renderer = await createCliRenderer({
     externalOutputMode: "passthrough",
     targetFps: 60,
@@ -33,9 +38,12 @@ export async function runTui(input: RunTuiInput): Promise<void> {
   })
   const session = new AgentLoomSession({
     client: input.client,
+    studio: input.studio,
     snapshot: input.snapshot,
     projectRoot: input.projectRoot,
+    updater: input.updater ?? createSourceUpdateClient(),
   })
+  let exitReason: TuiExitReason = "exit"
   const destroyed = waitForDestroy(renderer)
   const onSighup = () => destroyRenderer(renderer)
   process.on("SIGHUP", onSighup)
@@ -48,7 +56,14 @@ export async function runTui(input: RunTuiInput): Promise<void> {
           session={session}
           projectRoot={input.projectRoot}
           refreshIntervalMs={input.refreshIntervalMs}
-          onExit={() => destroyRenderer(renderer)}
+          onExit={() => {
+            exitReason = "exit"
+            destroyRenderer(renderer)
+          }}
+          onRestart={() => {
+            exitReason = "restart"
+            destroyRenderer(renderer)
+          }}
         />
       ),
       renderer,
@@ -57,6 +72,7 @@ export async function runTui(input: RunTuiInput): Promise<void> {
     // the shell responsive and let the session publish loading/ready/error.
     void session.start()
     await destroyed
+    return exitReason
   } finally {
     process.off("SIGHUP", onSighup)
     session.dispose()

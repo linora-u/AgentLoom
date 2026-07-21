@@ -1,8 +1,6 @@
 import type { AgentCatalogDto, BootstrapResultDto, RuntimeStatus } from "../domain"
-import { runtimeStatus, selectionKey } from "../domain"
+import { selectionKey } from "../domain"
 import { sortByStatus } from "../ui"
-
-type WorkerDisplayStatus = RuntimeStatus | "incomplete"
 
 export type SidebarSystemEntry = {
   kind: "system"
@@ -32,6 +30,8 @@ export type SidebarApplicationEntry = {
   title: string
   subtitle: string
   applicationID: string
+  health: "healthy" | "invalid"
+  runState: "never_run" | "running" | "idle"
 }
 
 export type SidebarAgentEntry = {
@@ -39,7 +39,7 @@ export type SidebarAgentEntry = {
   key: string
   title: string
   subtitle: string
-  status: WorkerDisplayStatus
+  status: RuntimeStatus
   agentID: string
   systemID: string
   applicationID: string
@@ -52,7 +52,7 @@ export type SidebarSkillEntry = {
   title: string
   subtitle: string
   skillID: string
-  applicationID: string
+  applicationID: string | null
 }
 
 export type SidebarScheduleEntry = {
@@ -77,7 +77,15 @@ export type PaletteItem =
       category: "Commands"
       title: string
       description: string
-      action: "chat" | "refresh" | "models" | "apply" | "schedules"
+      action:
+        | "chat"
+        | "refresh"
+        | "models"
+        | "apply"
+        | "schedules"
+        | "permission-full"
+        | "permission-application"
+        | "update"
     }
   | {
       key: string
@@ -104,6 +112,7 @@ export type AppRoute =
   | { type: "schedule"; scheduleID: string }
 
 export type BuilderCommand =
+  | { type: "help" }
   | { type: "apply" }
   | { type: "refresh" }
   | { type: "models" }
@@ -123,11 +132,47 @@ export type BuilderCommand =
   | { type: "send"; message: string }
   | { type: "empty" }
 
+export function applicationHealthLabel(health: SidebarApplicationEntry["health"]): string {
+  return {
+    healthy: "配置有效",
+    invalid: "配置有错误",
+  }[health]
+}
+
+export function applicationRunStateLabel(state: SidebarApplicationEntry["runState"]): string {
+  return {
+    never_run: "尚未运行",
+    running: "运行中",
+    idle: "当前未运行",
+  }[state]
+}
+
 export function buildSidebarGroups(snapshot: BootstrapResultDto): {
+  applications: SidebarApplicationEntry[]
   systems: SidebarSystemEntry[]
   runs: SidebarRunEntry[]
   skills: SidebarSkillEntry[]
 } {
+  const applications: SidebarApplicationEntry[] = snapshot.applications.map((application) => {
+    const systems = snapshot.systems.filter((system) => system.application_id === application.id)
+    const health: SidebarApplicationEntry["health"] = systems.some((system) => !system.validation.valid)
+      ? "invalid"
+      : "healthy"
+    const runState: SidebarApplicationEntry["runState"] = application.active_run_count > 0
+      ? "running"
+      : application.run_count === 0
+        ? "never_run"
+        : "idle"
+    return {
+      kind: "application" as const,
+      key: catalogKey("application", application.id),
+      title: application.id,
+      subtitle: `${applicationHealthLabel(health)} · ${applicationRunStateLabel(runState)}`,
+      applicationID: application.id,
+      health,
+      runState,
+    }
+  })
   const systems = sortByStatus(
     snapshot.systems.map((system) => ({
       kind: "system" as const,
@@ -162,11 +207,11 @@ export function buildSidebarGroups(snapshot: BootstrapResultDto): {
     kind: "skill" as const,
     key: catalogKey("skill", skill.id),
     title: skill.name,
-    subtitle: skill.application_id,
+    subtitle: skill.application_id ?? "Global",
     skillID: skill.id,
     applicationID: skill.application_id,
   }))
-  return { systems, runs, skills }
+  return { applications, systems, runs, skills }
 }
 
 export function recentRunEntries(entries: readonly SidebarRunEntry[], limit = 5): SidebarRunEntry[] {
@@ -200,18 +245,12 @@ export function routeForEntry(entry: SidebarEntry): AppRoute {
 
 export function buildPaletteItems(snapshot: BootstrapResultDto): PaletteItem[] {
   const groups = buildSidebarGroups(snapshot)
-  const applicationItems: PaletteItem[] = snapshot.applications.map((application) => ({
-    key: catalogKey("application", application.id),
+  const applicationItems: PaletteItem[] = groups.applications.map((application) => ({
+    key: application.key,
     category: "Applications",
-    title: application.name,
-    description: `${application.system_count} supervisors · ${application.worker_count} workers · ${application.active_run_count} running`,
-    entry: {
-      kind: "application",
-      key: catalogKey("application", application.id),
-      title: application.name,
-      subtitle: application.path,
-      applicationID: application.id,
-    },
+    title: application.title,
+    description: application.subtitle,
+    entry: application,
   }))
   const agentItems = buildAgentPaletteItems(snapshot, groups.systems)
   const skillByID = new Map(snapshot.skills.map((skill) => [skill.id, skill]))
@@ -221,7 +260,7 @@ export function buildPaletteItems(snapshot: BootstrapResultDto): PaletteItem[] {
       key: entry.key,
       category: "Skills",
       title: entry.title,
-      description: `${skill.application_id} · ${skill.description || skill.path}`,
+      description: `${skill.application_id ?? "Global"} · ${skill.description || skill.path}`,
       entry,
     }
   })
@@ -254,18 +293,25 @@ export function buildPaletteItems(snapshot: BootstrapResultDto): PaletteItem[] {
       action: "refresh",
     },
     {
-      key: "command:models",
+      key: "command:permission-full",
       category: "Commands",
-      title: "选择模型",
-      description: "从 config/llm.yaml 的可用模型中切换",
-      action: "models",
+      title: "启用 Full Access",
+      description: "仅当前 TUI 会话；允许 Studio 修改整个项目",
+      action: "permission-full",
     },
     {
-      key: "command:apply",
+      key: "command:permission-application",
       category: "Commands",
-      title: "应用 YAML 提案",
-      description: "仅写入当前已验证 revision",
-      action: "apply",
+      title: "恢复 Application Only",
+      description: "只直接修改当前 Application",
+      action: "permission-application",
+    },
+    {
+      key: "command:models",
+      category: "Commands",
+      title: "从 llm.yaml 选择 Studio 模型",
+      description: "模型类型、Provider 与认证统一读取项目 config/llm.yaml",
+      action: "models",
     },
     {
       key: "command:schedules",
@@ -274,7 +320,6 @@ export function buildPaletteItems(snapshot: BootstrapResultDto): PaletteItem[] {
       description: "创建、暂停、恢复或删除 Schedule",
       action: "schedules",
     },
-    ...buildModelPaletteItems(snapshot),
     ...applicationItems,
     ...agentItems,
     ...skillItems,
@@ -333,67 +378,41 @@ function buildAgentPaletteItems(
   snapshot: BootstrapResultDto,
   systems: SidebarSystemEntry[],
 ): PaletteItem[] {
-  const flattened = flattenAgentCatalog(snapshot)
-  const nodesBySystem = new Map<string, FlatAgentCatalogEntry[]>()
-  for (const node of flattened) {
-    const siblings = nodesBySystem.get(node.systemID) ?? []
-    siblings.push(node)
-    nodesBySystem.set(node.systemID, siblings)
-  }
+  const supervisors = flattenAgentCatalog(snapshot).filter((node) => node.depth === 0)
+  const supervisorBySystem = new Map(supervisors.map((node) => [node.systemID, node]))
   const systemStatus = new Map(systems.map((entry) => [entry.systemID, entry.status]))
-  const workerStatuses = new Map(
-    snapshot.worker_invocations.map((invocation) => [
-      workerInvocationKey(invocation.system_id, invocation.agent_name),
-      workerRuntimeStatus(invocation.status),
-    ]),
-  )
-  const missingWorkerStatus: WorkerDisplayStatus = snapshot.worker_invocations_incomplete
-    ? "incomplete"
-    : "never_run"
   const result: PaletteItem[] = []
   const seen = new Set<string>()
 
   for (const system of systems) {
-    result.push({
-      key: system.key,
-      category: "Agents",
-      title: system.title,
-      description: `${system.subtitle} · supervisor · ${system.status}`,
-      entry: system,
-    })
+    const supervisor = supervisorBySystem.get(system.systemID)
+    result.push(supervisor
+      ? agentPaletteItem(supervisor, system.status)
+      : {
+          key: system.key,
+          category: "Agents",
+          title: system.title,
+          description: `${system.subtitle} · 主 Agent · ${agentRuntimeStatusLabel(system.status)}`,
+          entry: system,
+        })
     seen.add(system.systemID)
-    for (const node of nodesBySystem.get(system.systemID) ?? []) {
-      if (node.depth === 0) continue
-      result.push(agentPaletteItem(
-        node,
-        workerStatuses.get(workerInvocationKey(node.systemID, node.agent.name)) ?? missingWorkerStatus,
-      ))
-    }
   }
 
-  for (const node of flattened) {
-    if (node.depth !== 0 || seen.has(node.systemID)) continue
+  for (const node of supervisors) {
+    if (seen.has(node.systemID)) continue
     const status = systemStatus.get(node.systemID) ?? "never_run"
     result.push(agentPaletteItem(node, status))
-    for (const worker of nodesBySystem.get(node.systemID) ?? []) {
-      if (worker.depth > 0) {
-        result.push(agentPaletteItem(
-          worker,
-          workerStatuses.get(workerInvocationKey(worker.systemID, worker.agent.name)) ?? missingWorkerStatus,
-        ))
-      }
-    }
   }
   return result
 }
 
-function agentPaletteItem(node: FlatAgentCatalogEntry, status: WorkerDisplayStatus): PaletteItem {
+function agentPaletteItem(node: FlatAgentCatalogEntry, status: RuntimeStatus): PaletteItem {
   const key = catalogKey("agent", node.agent.id)
   return {
     key,
     category: "Agents",
     title: node.agent.name,
-    description: `${node.agent.application_id} · ${node.agent.role} · ${status}`,
+    description: `${node.agent.application_id} · 主 Agent · ${agentRuntimeStatusLabel(status)}`,
     entry: {
       kind: "agent",
       key,
@@ -408,12 +427,16 @@ function agentPaletteItem(node: FlatAgentCatalogEntry, status: WorkerDisplayStat
   }
 }
 
-function workerInvocationKey(systemID: string, agentName: string): string {
-  return `${systemID}\0${agentName}`
-}
-
-function workerRuntimeStatus(status: string): RuntimeStatus {
-  return runtimeStatus(status)
+function agentRuntimeStatusLabel(status: RuntimeStatus): string {
+  return {
+    never_run: "尚未运行",
+    running: "运行中",
+    completed: "已完成",
+    interrupted: "已中断",
+    failed: "失败",
+    crashed: "崩溃",
+    unknown: "状态未知",
+  }[status]
 }
 
 function timestamp(value: string | null): number {
@@ -441,6 +464,7 @@ export function nextSelection(current: number, delta: number, count: number): nu
 export function parseBuilderInput(raw: string): BuilderCommand {
   const input = raw.trim()
   if (!input) return { type: "empty" }
+  if (input === "/help") return { type: "help" }
   if (input === "/apply") return { type: "apply" }
   if (input === "/refresh") return { type: "refresh" }
   if (input === "/models") return { type: "models" }

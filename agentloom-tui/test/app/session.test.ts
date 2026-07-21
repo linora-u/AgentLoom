@@ -7,8 +7,9 @@ import type {
   RunDetailResultDto,
   SystemDetailResultDto,
 } from "../../src/domain"
-import { AgentLoomSession, type TuiClient } from "../../src/app/session"
+import { AgentLoomSession, type StudioClient, type TuiClient } from "../../src/app/session"
 import { buildPaletteItems } from "../../src/app/controller"
+import type { UpdateClient } from "../../src/update/source-updater"
 
 const snapshot: BootstrapResultDto = {
   project: { root: "/repo", name: "repo" },
@@ -184,8 +185,285 @@ function deferredSystemDetailClient(requests: Deferred<SystemDetailResultDto>[])
 }
 
 describe("AgentLoom TUI session", () => {
-  test("opens catalog-only workspace entities without an unnecessary backend request", async () => {
+  test("checks for source updates in the background and installs only after user action", async () => {
+    const actions: string[] = []
+    const updater: UpdateClient = {
+      async check() {
+        actions.push("check")
+        return { available: true, sourceRoot: "/trusted/source", installedAt: 1_000, latestSourceMtime: 2_000 }
+      },
+      async install() { actions.push("install") },
+    }
+    const session = new AgentLoomSession({
+      client: new FakeClient(),
+      snapshot: catalogSnapshot,
+      updater,
+    })
+
+    await session.start()
+    await Bun.sleep(0)
+    expect(session.state.updatePhase).toBe("available")
+
+    expect(await session.installUpdate()).toBe(true)
+    expect(actions).toEqual(["check", "install"])
+    expect(session.state.updatePhase).toBe("installed")
+  })
+
+  test("opening an Application loads its effective domain detail", async () => {
     const client = new FakeClient()
+    client.responses.set("application.detail", {
+      schema_version: 1,
+      application: {
+        id: "new",
+        name: "new",
+        path: "applications/new",
+        health: "healthy",
+        updated_at: "2026-07-20T10:00:00Z",
+      },
+      working_revision: "sha256:working",
+      running_revision: null,
+      agents: [],
+    })
+    const session = new AgentLoomSession({ client, snapshot: catalogSnapshot, sessionID: "application-detail" })
+    const application = buildPaletteItems(catalogSnapshot).find((item) => item.category === "Applications")
+    if (!application || !("entry" in application)) throw new Error("missing Application")
+
+    await session.openEntry(application.entry)
+
+    expect(client.calls).toContainEqual({
+      method: "application.detail",
+      params: { application_id: "new" },
+    })
+    expect((session.state as unknown as { applicationDetail: { working_revision: string } }).applicationDetail)
+      .toMatchObject({ working_revision: "sha256:working" })
+  })
+
+  test("selected Applications chat through their persistent OpenCode session", async () => {
+    const domain = new FakeClient()
+    const studioCalls: string[] = []
+    const studio: StudioClient = {
+      async openNewApplication() { throw new Error("not expected") },
+      async openApplication(applicationID) {
+        studioCalls.push(`open:${applicationID}`)
+        return {
+          sessionID: `opencode-${applicationID}`,
+          messages: [{ id: 1, role: "assistant", content: `resumed ${applicationID}` }],
+        }
+      },
+      async send(sessionID, message) {
+        studioCalls.push(`send:${sessionID}:${message}`)
+        return {
+          messages: [
+            { id: 1, role: "assistant", content: "resumed new" },
+            { id: 2, role: "user", content: message },
+            { id: 3, role: "assistant", content: "configuration updated" },
+          ],
+        }
+      },
+    }
+    const session = new AgentLoomSession({
+      client: domain,
+      studio,
+      snapshot: catalogSnapshot,
+      sessionID: "studio-session-test",
+    })
+    const application = buildPaletteItems(catalogSnapshot).find((item) => item.category === "Applications")
+    if (!application || !("entry" in application)) throw new Error("missing Application")
+
+    await session.openEntry(application.entry)
+    await session.submit("add a reviewer Worker")
+
+    expect(session.state.studioSessionID).toBe("opencode-new")
+    expect(session.state.messages.at(-1)?.content).toBe("configuration updated")
+    expect(studioCalls).toEqual([
+      "open:new",
+      "send:opencode-new:add a reviewer Worker",
+    ])
+    expect(domain.calls.some((call) => call.method === "builder.send")).toBe(false)
+  })
+
+  test("an interrupted Studio turn cannot overwrite the immediate follow-up", async () => {
+    const first = deferred<{ messages: Array<{ id: string; role: "assistant"; content: string }> }>()
+    const second = deferred<{ messages: Array<{ id: string; role: "assistant"; content: string }> }>()
+    let sendCount = 0
+    const studio: StudioClient = {
+      async openNewApplication() { throw new Error("not expected") },
+      async openApplication() { return { sessionID: "ses_interrupt", messages: [] } },
+      send() {
+        sendCount += 1
+        return sendCount === 1 ? first.promise : second.promise
+      },
+      async interrupt() {},
+    }
+    const session = new AgentLoomSession({ client: new FakeClient(), studio, snapshot: catalogSnapshot })
+    const application = buildPaletteItems(catalogSnapshot).find((item) => item.category === "Applications")
+    if (!application || !("entry" in application)) throw new Error("missing Application")
+    await session.openEntry(application.entry)
+
+    const interrupted = session.submit("inspect everything")
+    await Bun.sleep(0)
+    await session.interruptStudio()
+    const followUp = session.submit("只回答：中止恢复成功")
+    second.resolve({ messages: [{ id: "new", role: "assistant", content: "中止恢复成功" }] })
+    await followUp
+    first.resolve({ messages: [{ id: "stale", role: "assistant", content: "OLD TURN" }] })
+    await interrupted
+
+    expect(session.state.messages).toEqual([{ id: "new", role: "assistant", content: "中止恢复成功" }])
+    expect(session.state.assistantBusy).toBe(false)
+    expect(session.state.notice ?? "").not.toContain("OLD TURN")
+  })
+
+  test("New Application binds a fresh OpenCode session before accepting its first request", async () => {
+    const calls: string[] = []
+    const studio: StudioClient = {
+      async openNewApplication() {
+        calls.push("open-new")
+        return { sessionID: "ses_create", messages: [] }
+      },
+      async openApplication() { throw new Error("not expected") },
+      async send(sessionID, message) {
+        calls.push(`send:${sessionID}:${message}`)
+        return { messages: [{ id: "created", role: "assistant", content: "created" }] }
+      },
+    }
+    const session = new AgentLoomSession({ client: new FakeClient(), studio, snapshot: catalogSnapshot })
+
+    await session.beginApplicationCreation()
+    await session.submit("创建一个内容审核 Application")
+
+    expect(session.state.studioTarget).toEqual({ type: "new" })
+    expect(session.state.studioSessionID).toBe("ses_create")
+    expect(calls).toEqual([
+      "open-new",
+      "send:ses_create:创建一个内容审核 Application",
+    ])
+  })
+
+  test("surfaces OpenCode permission requests and sends once/always/reject replies", async () => {
+    const domain = new FakeClient()
+    domain.responses.set("application.detail", {
+      schema_version: 1,
+      application: { id: "new", name: "new", path: "applications/new", health: "healthy", updated_at: null },
+      working_revision: "sha256:one",
+      running_revision: null,
+      agents: [],
+    })
+    let listener: ((event: import("../../src/app/session").StudioEvent) => void) | undefined
+    const replies: string[] = []
+    const studio: StudioClient = {
+      async openNewApplication() { throw new Error("not expected") },
+      async openApplication() { return { sessionID: "ses_new", messages: [] } },
+      async send(_sessionID, message) {
+        return { messages: [{ id: "done", role: "assistant", content: `done ${message}` }] }
+      },
+      subscribe(next) {
+        listener = next
+        return () => { listener = undefined }
+      },
+      async replyPermission(requestID, reply) { replies.push(`${requestID}:${reply}`) },
+    }
+    const session = new AgentLoomSession({ client: domain, studio, snapshot: catalogSnapshot })
+    const application = buildPaletteItems(catalogSnapshot).find((item) => item.category === "Applications")
+    if (!application || !("entry" in application)) throw new Error("missing Application")
+    await session.openEntry(application.entry)
+
+    listener?.({
+      type: "permission",
+      sessionID: "ses_new",
+      requestID: "per_run",
+      permission: "bash",
+      patterns: ["loom run *"],
+      metadata: { command: "loom run applications/new/workflows/new.yaml" },
+    })
+
+    expect((session.state as any).loopState).toBe("waiting_permission")
+    expect((session.state as any).permissionRequest).toMatchObject({ requestID: "per_run", permission: "bash" })
+    await (session as any).respondPermission("always")
+    expect(replies).toEqual(["per_run:always"])
+    expect((session.state as any).permissionRequest).toBeNull()
+  })
+
+  test("surfaces OpenCode questions and sends one answer per question", async () => {
+    const domain = new FakeClient()
+    domain.responses.set("application.detail", {
+      schema_version: 1,
+      application: { id: "new", name: "new", path: "applications/new", health: "healthy", updated_at: null },
+      working_revision: "sha256:one",
+      running_revision: null,
+      agents: [],
+    })
+    let listener: ((event: import("../../src/app/session").StudioEvent) => void) | undefined
+    const replies: Array<{ requestID: string; answers?: string[][] }> = []
+    const studio: StudioClient = {
+      async openNewApplication() { throw new Error("not expected") },
+      async openApplication() { return { sessionID: "ses_question", messages: [] } },
+      async send() { return { messages: [] } },
+      subscribe(next) {
+        listener = next
+        return () => { listener = undefined }
+      },
+      async replyQuestion(requestID, answers) { replies.push({ requestID, answers }) },
+      async rejectQuestion(requestID) { replies.push({ requestID }) },
+    }
+    const session = new AgentLoomSession({ client: domain, studio, snapshot: catalogSnapshot })
+    const application = buildPaletteItems(catalogSnapshot).find((item) => item.category === "Applications")
+    if (!application || !("entry" in application)) throw new Error("missing Application")
+    await session.openEntry(application.entry)
+
+    listener?.({
+      type: "question",
+      sessionID: "ses_question",
+      requestID: "que_design",
+      questions: [
+        { header: "Topology", question: "How many Workers?", options: [], multiple: false, custom: true },
+        { header: "Output", question: "Which format?", options: [], multiple: false, custom: true },
+      ],
+    })
+
+    expect(session.state.questionRequest?.requestID).toBe("que_design")
+    await session.respondQuestion("3 | JSON")
+    expect(replies).toEqual([{ requestID: "que_design", answers: [["3"], ["JSON"]] }])
+    expect(session.state.questionRequest).toBeNull()
+
+    listener?.({
+      type: "question",
+      sessionID: "ses_question",
+      requestID: "que_reject",
+      questions: [{ header: "Scope", question: "Expand scope?", options: [], multiple: false, custom: true }],
+    })
+    await session.rejectQuestion()
+    expect(replies.at(-1)).toEqual({ requestID: "que_reject" })
+  })
+
+  test("switches Full Access only on the currently bound Studio session", async () => {
+    const modes: string[] = []
+    const studio: StudioClient = {
+      async openNewApplication() { throw new Error("not expected") },
+      async openApplication() { return { sessionID: "ses_scope", messages: [] } },
+      async send() { return { messages: [] } },
+      async setPermissionMode(sessionID, mode) { modes.push(`${sessionID}:${mode}`) },
+    }
+    const session = new AgentLoomSession({ client: new FakeClient(), studio, snapshot: catalogSnapshot })
+    const application = buildPaletteItems(catalogSnapshot).find((item) => item.category === "Applications")
+    if (!application || !("entry" in application)) throw new Error("missing Application")
+    await session.openEntry(application.entry)
+
+    await session.setPermissionMode("full_access")
+
+    expect(session.state.permissionMode).toBe("full_access")
+    expect(modes).toEqual(["ses_scope:full_access"])
+  })
+
+  test("loads effective detail for Applications and main Agents while Workers stay out of the catalog", async () => {
+    const client = new FakeClient()
+    client.responses.set("application.detail", {
+      schema_version: 1,
+      application: { id: "new", name: "new", path: "applications/new", health: "healthy", updated_at: null },
+      working_revision: "sha256:catalog",
+      running_revision: null,
+      agents: [],
+    })
     const session = new AgentLoomSession({ client, snapshot: catalogSnapshot, sessionID: "catalog-1" })
     const items = buildPaletteItems(catalogSnapshot)
     const byCategory = (category: string) => {
@@ -201,17 +479,28 @@ describe("AgentLoom TUI session", () => {
 
     await session.openEntry(byCategory("Applications"))
     expect(session.state.route).toEqual({ type: "application", applicationID: "new" })
-    await session.openEntry(byTitle("helper"))
+    expect(items.find((item) => item.title === "helper")).toBeUndefined()
+    await session.openEntry(byTitle("new_agent"))
     expect(session.state.route).toEqual({
       type: "agent",
-      agentID: "applications/new/workflows/worker_agents/helper.yaml",
+      agentID: "applications/new/workflows/new.yaml",
       systemID: "applications/new/workflows/new.yaml",
     })
+    expect(session.state.applicationDetail?.application.id).toBe("new")
     await session.openEntry(byCategory("Skills"))
     expect(session.state.route).toEqual({ type: "skill", skillID: "new:helper-skill" })
     await session.openEntry(byCategory("Schedules"))
     expect(session.state.route).toEqual({ type: "schedule", scheduleID: "new-hourly" })
-    expect(client.calls).toEqual([])
+    expect(client.calls).toEqual([
+      {
+        method: "application.detail",
+        params: { application_id: "new" },
+      },
+      {
+        method: "application.detail",
+        params: { application_id: "new" },
+      },
+    ])
     expect(session.state.detailBusy).toBe(false)
   })
 
@@ -235,7 +524,7 @@ describe("AgentLoom TUI session", () => {
     expect(session.state.workspacePhase).toBe("loading")
     expect(session.state.runsIncomplete).toBe(false)
     expect(session.state.snapshot.project).toEqual({ root: "/repo", name: "repo" })
-    expect(session.state.messages[0]?.content).toContain("普通问题")
+    expect(session.state.messages[0]?.content).toContain("新建或选择一个 Application")
     expect(session.state.busy).toBe(false)
 
     bootstrap.resolve(snapshot)
@@ -257,6 +546,21 @@ describe("AgentLoom TUI session", () => {
     expect(session.state.messages.at(-1)?.content).toContain("powerful (默认) — Best quality")
     expect(session.state.messages.at(-1)?.content).toContain("fast — Lower latency")
     expect(session.state.messages.at(-1)?.content).not.toContain("api_key")
+  })
+
+  test("shows deterministic Studio help without asking the model", async () => {
+    const client = new FakeClient()
+    const session = new AgentLoomSession({ client, snapshot: catalogSnapshot })
+
+    await session.submit("/help")
+
+    const help = session.state.messages.at(-1)?.content ?? ""
+    expect(help).toContain("Ctrl+X")
+    expect(help).toContain("Application Only")
+    expect(help).toContain("/models")
+    expect(help).not.toContain("F6")
+    expect(help).not.toContain("/apply")
+    expect(client.calls).toEqual([])
   })
 
   test("manages durable schedules through explicit local commands", async () => {

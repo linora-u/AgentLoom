@@ -1,8 +1,11 @@
 import { describe, expect, test } from "bun:test"
-import type { BootstrapResultDto, RunDetailResultDto, SystemDetailResultDto } from "../../src/domain"
+import type { ApplicationDetailResultDto, BootstrapResultDto, RunDetailResultDto, SystemDetailResultDto } from "../../src/domain"
 import {
+  applicationDetailSections,
+  effectiveAgentDetail,
   runDiagnosisPrompt,
   runDetailSections,
+  studioToolOutput,
   systemDetailSections,
   workspaceEntityDetail,
 } from "../../src/app/presentation"
@@ -37,6 +40,81 @@ const completeLimits: RunDetailResultDto["limits"] = {
 }
 
 describe("detail presentation", () => {
+  test("Application overview stays compact while a selected Agent exposes its effective config", () => {
+    const longWorkflow = `coordinate ${"every internal implementation step ".repeat(30)}`
+    const capability = { value: { mode: "denylist", shell: false }, source: "application" as const, source_path: "applications/demo/config/system.yaml" }
+    const detail: ApplicationDetailResultDto = {
+      schema_version: 1,
+      application: { id: "demo", name: "demo", path: "applications/demo", health: "healthy", updated_at: null },
+      working_revision: "sha256:1234567890abcdef",
+      running_revision: null,
+      agents: [{
+        id: "applications/demo/workflows/demo.yaml",
+        name: "demo_agent",
+        description: "Coordinates the Application",
+        role: "supervisor",
+        workflow: longWorkflow,
+        model: { type: "powerful", source: "global" },
+        tools: [{ name: "read_file", source: "agent" }],
+        skills: [{
+          name: "demo-skill",
+          description: "Demo",
+          source: "application",
+          load_mode: "eager",
+          path: "applications/demo/skills/demo-skill/SKILL.md",
+        }],
+        permissions: capability,
+        hooks: { value: {}, source: "global", source_path: "config/system.yaml" },
+        mcp: { value: ["demo-db"], source: "agent", source_path: "applications/demo/workflows/demo.yaml" },
+        source_path: "applications/demo/workflows/demo.yaml",
+        validation: { valid: true, errors: [] },
+        workers: [],
+      }],
+    }
+
+    const overview = applicationDetailSections(detail).flatMap((section) => section.lines).join("\n")
+    const agent = effectiveAgentDetail(detail, "applications/demo/workflows/demo.yaml")!
+    const agentText = agent.sections.flatMap((section) => section.lines).join("\n")
+
+    expect(overview).toContain("Agents: 1 · 1 Supervisor · 0 Worker")
+    expect(overview).toContain("Tools: 1 · Skills: 1")
+    expect(overview).not.toContain(longWorkflow)
+    expect(agentText).toContain("read_file · agent")
+    expect(agentText).toContain("demo-skill · application · eager")
+    expect(agentText).toContain("权限 · application: mode=denylist, shell=false")
+    expect(agent.sections.some((section) => section.title === "Workflow 摘要")).toBeTrue()
+    expect(agentText).not.toContain(longWorkflow)
+  })
+
+  test("domain tool cards summarize structured results without exposing raw JSON", () => {
+    const output = JSON.stringify({
+      contract_version: 1,
+      ok: true,
+      result: {
+        application: { id: "demo", health: "healthy" },
+        overview: { supervisor_count: 1, worker_count: 4 },
+        effective_capabilities: {
+          tool_count: 7,
+          skill_count: 3,
+          skills: [{ name: "secretly-noisy", path: "/very/long/internal/path/SKILL.md" }],
+        },
+      },
+    })
+
+    const summary = studioToolOutput({
+      name: "agentloom_domain",
+      status: "completed",
+      input: { action: "application.detail" },
+      output,
+    })
+
+    expect(summary).toContain("demo · 配置有效")
+    expect(summary).toContain("Agents 5 · Tools 7 · Skills 3")
+    expect(summary).not.toContain("secretly-noisy")
+    expect(summary).not.toContain("SKILL.md")
+    expect(summary).not.toContain("contract_version")
+  })
+
   test("workspace entity details preserve application, worker, skill, and schedule context", () => {
     const snapshot: BootstrapResultDto = {
       project: { root: "/repo", name: "repo" },
@@ -211,7 +289,7 @@ describe("detail presentation", () => {
 
     expect(text).toContain("尚未运行，无执行结果")
     expect(text).toContain("模型: powerful")
-    expect(text).toContain("工作流: collect → summarize")
+    expect(text).toContain("工作流摘要: collect → summarize")
     expect(text).toContain("reader — Reads")
     expect(text).toContain("applications/digest/workflows/digest.yaml (workflow, 320 B)")
     expect(text).not.toContain("undefined")

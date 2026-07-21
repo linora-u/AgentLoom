@@ -1315,6 +1315,7 @@ class TestExecuteApp:
         assert manifest["application_id"] == result.run.application_id
         assert manifest["task_id"] == result.run.task_id
         assert manifest["run_id"] == result.run.run_id
+        assert manifest["application_revision"].startswith("sha256:")
         assert manifest["result_artifact"] == "artifacts/result.txt"
         assert (result.run.run_dir / manifest["result_artifact"]).read_text(
             encoding="utf-8"

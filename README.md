@@ -9,7 +9,7 @@ English | <a href="docs/cn/README.md">简体中文</a>
 </p>
 
 <p align="center">
-  Use the terminal Builder to design Agent systems through conversation, then run them with AgentLoom's Python runtime and inspect every Agent, Worker, and Run from one project view.
+  Use the OpenCode-powered Application Studio to create, modify, validate, run, and inspect AgentLoom Applications from one terminal.
 </p>
 
 <p align="center">
@@ -49,6 +49,16 @@ The installer:
 
 The source installer currently targets macOS and Linux shells. It requires Git and Bash; `curl` is required only when `uv` or Bun must be installed.
 
+Rerun `./install` to update from source. Once installed, `agentloom update`
+rebuilds from the recorded trusted checkout. `--no-modify-path` is only an
+optional switch that leaves shell configuration unchanged; it is not an update
+requirement.
+
+The installed TUI checks that trusted checkout in the background. If relevant
+source files are newer than the installed compatible unit, `Ctrl+X` offers an
+explicit whole-product update and safe restart. It never pulls Git or replaces
+an active Session silently.
+
 Use a custom install location or leave `PATH` unchanged when needed:
 
 ```bash
@@ -56,7 +66,7 @@ AGENTLOOM_INSTALL_DIR="$HOME/tools/agentloom" ./install
 ./install --no-modify-path
 ```
 
-### Configure a model
+### Configure Application models
 
 Copy the model template before using TUI chat or running an Agent:
 
@@ -76,7 +86,13 @@ model:
     tool_choice: "auto"
 ```
 
-Agent workloads use AgentLoom's normal model runtime. TUI chat currently requires an OpenAI-compatible Chat Completions endpoint; YAML creation also requires streaming and native tool/function calling.
+This file is the single model configuration source for both runtimes.
+Application Agents resolve it through Python and their YAML `model_type`; the
+TypeScript Studio adapter maps the same profiles, endpoints, credentials, and
+compatible request options into the bundled OpenCode Runtime. `/models` and
+`Ctrl+X` select a Studio profile from `config/llm.yaml` without changing any
+Application's `model_type`. Studio startup fails clearly instead of falling
+back to an ambient OpenCode model when this configuration is missing or invalid.
 
 ## Start with the TUI
 
@@ -90,74 +106,66 @@ agentloom
 agentloom --project /path/to/project
 ```
 
-The TUI is an Agent Builder and project control surface. It can discuss your design, inspect existing definitions, stage and validate Agent YAML, and read canonical runtime status.
+The TUI is an Applications-first control plane. Its independent Studio Agent
+can inspect the whole project, directly edit the selected Application, show
+OpenCode Tool and Diff blocks, validate configuration, request permission to
+run it, inspect structured evidence, and continue repairing failures.
 
-It does not execute Shell commands, Git operations, or Agent workloads. You decide when YAML is written and run the Agent in a separate terminal.
-
-### 1. Describe the Agent system
+### 1. Create or select an Application
 
 Press `Enter` to send a request. A useful first prompt states the application, roles, inputs, outputs, and acceptance criteria:
 
 ```text
-Create an application named release_review.
+Create an Application named release_review.
 Use one Supervisor and two Workers for API review and test review.
 Choose model types from config/llm.yaml.
-Show the proposed files and contracts before writing anything.
+Validate it and ask before the first real Run.
 ```
 
-The Builder reads only the project context it needs, stages a draft in memory, and validates the proposed YAML. Continue chatting until the topology and contracts are correct.
+The Studio edits files directly in the selected scope and shows the resulting
+Diff. It loops through Effective Config, YAML/reference validation, an approved
+smoke Run, and structured Run evidence. If real execution is not approved it
+must report “configuration validated, not run” rather than claiming completion.
+Large model-facing Application detail is deduplicated and paginated at ten
+Agents per call. A turn with no text, Tool, Diff, or status progress for 60
+seconds automatically aborts its parent and active Task sub-sessions; `Esc`
+remains the immediate manual interrupt.
 
-### 2. Review and write the YAML
+### 2. Understand the workspace numbers
 
-Normal chat never changes files. Enter `/apply` to write the current validated draft. The command writes YAML only; it does not start an Agent.
+The homepage counts directories under `applications/`, not every expanded
+Supervisor and Worker YAML. `Global Skills` counts root runtime Skills; an
+Application's private Skills appear when that Application or Agent is opened.
+Use `Ctrl+X` to search Applications, main Supervisor Agents, Skills,
+Schedules, Runs, permissions, models, and commands.
+Worker Agents remain inside their Application and main-Agent details instead
+of appearing as independent global-search entries.
 
-Use `/models` for the model picker or `/model <type>` to switch directly:
+Application detail shows Effective Config and source attribution for Agent
+topology, model type, Tools, Skills, permissions, Hooks, MCP, workflow files,
+validation, Working Revision, and Running Revision. Run detail defaults to an
+actionable summary rather than raw Events.
 
-```text
-/models
-/model summary
-/apply
-```
+### 3. Permissions and revisions
 
-### 3. Run the Agent
+`Application Only` is the default. Reads are project-wide, direct writes are
+limited to the current Application, and OpenCode asks for Shell, global, other
+Application, or new-path access. Choose `1` once, `2` for this Session, or `3`
+reject. `Full Access` is available in `Ctrl+X` and resets on exit.
+When the Agent needs a business decision, choose a visible option or type an
+answer; separate multiple answers with `|`.
 
-Open another terminal and run the Supervisor path shown by the Builder:
-
-```bash
-uv run loom run applications/<app>/workflows/<agent>.yaml
-```
-
-You can also generate a Python entrypoint:
-
-```bash
-uv run loom create applications/<app>/workflows/<agent>.yaml \
-  -o applications/<app>/<app>_app.py
-uv run python applications/<app>/<app>_app.py
-```
-
-Keep the TUI open while the Agent runs. `loom run` and generated entrypoints publish the canonical lifecycle that powers project-wide status.
-
-Calling a low-level Agent `.run()` directly bypasses that lifecycle, so no UI can reconstruct a complete Run from it.
-
-### 4. Inspect Agents and Runs
-
-Press `Ctrl+P` or `Tab` to search Applications, Agents, Workers, Runs, Skills, Schedules, and commands. Select entries with the keyboard or mouse.
-
-The detail view distinguishes never-run, running, completed, failed, crashed, interrupted, and unknown states. It shows topology, validation, Worker status, results, and artifact locations without dumping entire logs.
-
-For a failed Run, press `a` to ask the TUI assistant to analyze a sanitized and bounded failure context. The full log remains on disk and the detail view shows its path.
-
-Use `F6` to switch focus. A focused detail view supports arrow keys, `PgUp` / `PgDn`, `Home` / `End`, and the mouse wheel. Press `Esc` or `b` to return.
+Each Run pins an `application_revision` in its manifest. Later edits change the
+Working Revision but do not hot-switch a running Agent.
 
 | Action | Command / key |
 |---|---|
 | Send chat | `Enter` |
-| Browse the project | `Ctrl+P` or `Tab` |
-| Select a model | `/models` or `/model <type>` |
-| Write the validated draft | `/apply` |
+| Browse commands and global entities | `Ctrl+X` |
+| Select a Studio model from `config/llm.yaml` | `/models` or `Ctrl+X` |
 | Refresh the full index | `/refresh` or `r` in details |
-| Switch chat/details focus | `F6` |
 | Analyze the selected failed Run | `a` |
+| Close detail, reject permission/question, or interrupt the loop | `Esc` |
 
 See [agentloom-tui/README.md](agentloom-tui/README.md) for TUI architecture and contributor details.
 
