@@ -10,7 +10,7 @@ import type {
   RuntimeSummaryDto,
   SystemDetailResultDto,
 } from "../../src/domain"
-import { AgentLoomApp } from "../../src/app/view"
+import { AgentLoomApp, copySelectedText } from "../../src/app/view"
 import {
   AgentLoomSession,
   type StudioClient,
@@ -222,6 +222,22 @@ afterEach(() => {
 })
 
 describe("AgentLoom TUI view", () => {
+  test("copies the current OpenTUI selection with the OpenCode Ctrl+Y behavior", () => {
+    let copied = ""
+    let cleared = false
+    const renderer = {
+      getSelection: () => ({ getSelectedText: () => "visible execution context" }),
+      copyToClipboardOSC52: (text: string) => {
+        copied = text
+        return true
+      },
+      clearSelection: () => { cleared = true },
+    }
+
+    expect(copySelectedText(renderer as never)).toBe(true)
+    expect(copied).toBe("visible execution context")
+    expect(cleared).toBe(true)
+  })
   test("offers an explicit whole-product update and requests a safe restart", async () => {
     const actions: string[] = []
     const updater: UpdateClient = {

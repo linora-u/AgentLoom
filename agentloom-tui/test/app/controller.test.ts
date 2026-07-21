@@ -190,8 +190,7 @@ describe("TUI controller", () => {
     const items = buildPaletteItems(bootstrap)
     expect(items).toEqual(expect.arrayContaining([
       expect.objectContaining({ action: "new-application", title: "新建 Application" }),
-      expect.objectContaining({ action: "permission-full", title: "启用 Full Access" }),
-      expect.objectContaining({ action: "permission-application", title: "恢复 Application Only" }),
+      expect.objectContaining({ action: "permission-toggle", title: "切换 Full Access" }),
       expect.objectContaining({
         action: "models",
         title: "从 llm.yaml 选择 Studio 模型",
@@ -203,8 +202,7 @@ describe("TUI controller", () => {
       "新建 Application",
       "返回对话",
       "刷新工作区",
-      "启用 Full Access",
-      "恢复 Application Only",
+      "切换 Full Access",
       "从 llm.yaml 选择 Studio 模型",
       "管理定时任务",
     ])
@@ -365,6 +363,8 @@ describe("TUI controller", () => {
 
   test("keeps apply and model selection explicit instead of sending them to the model", () => {
     expect(parseBuilderInput("/help")).toEqual({ type: "help" })
+    expect(parseBuilderInput("/new")).toEqual({ type: "new" })
+    expect(parseBuilderInput("/compact")).toEqual({ type: "compact" })
     expect(parseBuilderInput("/apply")).toEqual({ type: "apply" })
     expect(parseBuilderInput("/models")).toEqual({ type: "models" })
     expect(parseBuilderInput("/model fast")).toEqual({ type: "model", modelType: "fast" })
