@@ -5,6 +5,9 @@ import type { OpenCodeSessionInfo } from "./application-sessions"
 import type { OpenCodeStoredMessage, OpenCodeStudioApi } from "./opencode-studio"
 import type { StudioEvent, StudioModel } from "../app/session"
 
+const MAX_ROOT_SESSIONS = 100_000
+const ROOT_SESSION_QUERY_LIMIT = MAX_ROOT_SESSIONS + 1
+
 export function createOpenCodeSessionApi(input: {
   baseUrl: string
   directory: string
@@ -42,8 +45,14 @@ export function createOpenCodeSessionApi(input: {
         directory: input.directory,
         scope: "project",
         roots: true,
+        limit: ROOT_SESSION_QUERY_LIMIT,
       })
       if (!result.data) throw sdkError("list OpenCode sessions", result.error)
+      if (result.data.length > MAX_ROOT_SESSIONS) {
+        throw new Error(
+          `OpenCode returned more than ${MAX_ROOT_SESSIONS} root sessions; refusing to use a possibly truncated Application history`,
+        )
+      }
       return result.data.map(toSessionInfo)
     },
 
@@ -82,9 +91,7 @@ export function createOpenCodeSessionApi(input: {
           role: message.info.role,
           errorName: message.info.role === "assistant" ? message.info.error?.name : undefined,
         },
-        parts: message.parts.map((part) => part.type === "text"
-          ? { type: "text" as const, text: part.text }
-          : { type: part.type }),
+        parts: message.parts.map(storedOpenCodePart),
       }))
     },
 
@@ -387,6 +394,25 @@ function isToolStatus(value: unknown): value is "pending" | "running" | "complet
   return value === "pending" || value === "running" || value === "completed" || value === "error"
 }
 
+function storedOpenCodePart(part: { type: string; [key: string]: unknown }): OpenCodeStoredMessage["parts"][number] {
+  if (part.type === "text" && typeof part.text === "string") {
+    return { type: "text", text: part.text }
+  }
+  if (part.type !== "tool" || typeof part.tool !== "string") return { type: part.type }
+  const state = isRecord(part.state) ? part.state : {}
+  return {
+    type: "tool",
+    tool: part.tool,
+    state: {
+      ...(typeof state.status === "string" ? { status: state.status } : {}),
+      ...(typeof state.title === "string" ? { title: state.title } : {}),
+      ...(state.input !== undefined ? { input: state.input } : {}),
+      ...(typeof state.output === "string" ? { output: state.output } : {}),
+      ...(state.error !== undefined ? { error: state.error } : {}),
+    },
+  }
+}
+
 function errorText(value: unknown): string {
   if (isRecord(value) && isRecord(value.data) && typeof value.data.message === "string") return value.data.message
   return typeof value === "string" ? value : "OpenCode session failed"
@@ -396,12 +422,16 @@ function toSessionInfo(session: {
   id: string
   title: string
   directory: string
+  parentID?: string
+  time?: { created: number; updated: number }
   metadata?: Record<string, unknown>
 }): OpenCodeSessionInfo {
   return {
     id: session.id,
     title: session.title,
     directory: session.directory,
+    parentID: session.parentID,
+    time: session.time,
     metadata: session.metadata,
   }
 }

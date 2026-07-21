@@ -45,11 +45,6 @@ export interface StudioClient {
     sessionID: string
     messages: BuilderMessage[]
   }>
-  switchTarget?(
-    sessionID: string,
-    target: { type: "new" } | { type: "application"; applicationID: string },
-    permissionMode?: "application_only" | "full_access",
-  ): Promise<void>
   newSession?(
     target: { type: "new" } | { type: "application"; applicationID: string },
     permissionMode?: "application_only" | "full_access",
@@ -69,6 +64,12 @@ export interface StudioClient {
     sessionID: string,
     mode: "application_only" | "full_access",
   ): Promise<void>
+  claimApplication?(
+    sessionID: string,
+    applicationID: string,
+    permissionMode?: "application_only" | "full_access",
+  ): Promise<void>
+  changedFiles?(sessionID: string): Promise<Extract<StudioEvent, { type: "diff" }>["files"]>
   listModels?(): Promise<StudioModel[]>
   setModel?(sessionID: string, modelID: string): Promise<void>
 }
@@ -200,6 +201,9 @@ export class AgentLoomSession {
   private streamingStudioSource: string | null = null
   private turnSubagentText = ""
   private readonly studioModelBySession = new Map<string, string>()
+  private creationBaselineApplicationIDs: Set<string> | null = null
+  private readonly creationWrittenFiles = new Set<string>()
+  private creationReconcilePending = false
   private builderBusy = false
   private routeBusy = false
   private messageID = 0
@@ -346,8 +350,14 @@ export class AgentLoomSession {
     }
     this.routeLoadGeneration += 1
     this.routeBusy = false
+    this.creationBaselineApplicationIDs = new Set(
+      this.current.snapshot.applications.map((application) => application.id),
+    )
+    this.creationWrittenFiles.clear()
+    this.creationReconcilePending = false
     this.patch({
       studioTarget: { type: "new" },
+      studioSessionID: null,
       route: { type: "builder" },
       systemDetail: null,
       applicationDetail: null,
@@ -358,7 +368,6 @@ export class AgentLoomSession {
       permissionRequest: null,
       questionRequest: null,
       messages: [
-        ...this.current.messages,
         {
           id: this.nextMessageID(),
           role: "assistant",
@@ -371,17 +380,6 @@ export class AgentLoomSession {
     this.builderBusy = true
     this.patch({ loopState: "thinking" })
     try {
-      const activeSessionID = this.current.studioSessionID
-      if (activeSessionID && this.input.studio.switchTarget) {
-        await this.input.studio.switchTarget(
-          activeSessionID,
-          { type: "new" },
-          this.current.permissionMode,
-        )
-        if (this.current.studioTarget?.type !== "new") return
-        this.patch({ loopState: "idle" })
-        return
-      }
       const conversation = await this.input.studio.openNewApplication(this.current.permissionMode)
       if (this.current.studioTarget?.type !== "new") return
       this.patch({
@@ -430,6 +428,11 @@ export class AgentLoomSession {
     if (this.builderBusy && studioApplicationID) {
       this.patch({ notice: "当前 Agent Loop 仍在运行；请等待完成，或按 Esc 中止后再切换 Application。" })
       return
+    }
+    if (studioApplicationID) {
+      this.creationBaselineApplicationIDs = null
+      this.creationWrittenFiles.clear()
+      this.creationReconcilePending = false
     }
     this.routeBusy = entry.kind === "application" || entry.kind === "agent" || entry.kind === "system" || entry.kind === "run"
     this.patch({
@@ -616,27 +619,6 @@ export class AgentLoomSession {
     this.builderBusy = true
     this.patch({ notice: null })
     try {
-      const activeSessionID = this.current.studioSessionID
-      if (activeSessionID && this.input.studio!.switchTarget) {
-        await this.input.studio!.switchTarget(
-          activeSessionID,
-          { type: "application", applicationID },
-          this.current.permissionMode,
-        )
-        if (
-          this.current.studioTarget?.type !== "application"
-          || this.current.studioTarget.applicationID !== applicationID
-        ) return
-        this.patch({
-          loopState: "idle",
-          studioTools: [],
-          studioDiffs: [],
-          permissionRequest: null,
-          questionRequest: null,
-          notice: `已切换到 ${applicationID}；当前对话记忆保持不变。输入 /new 可开始新对话。`,
-        })
-        return
-      }
       const conversation = await this.input.studio!.openApplication(
         applicationID,
         this.current.permissionMode,
@@ -657,8 +639,11 @@ export class AgentLoomSession {
           : [{
               id: this.nextMessageID(),
               role: "assistant",
-              content: `已打开 ${applicationID}。告诉我需要检查、修改、验证或运行什么。`,
+              content: `已打开 ${applicationID}。当前会话暂无可见消息；该 Application 的旧会话仍已持久保存，Agent 可按需读取。`,
             }],
+        notice: conversation.messages.length > 0
+          ? `已恢复 ${applicationID} 最近一次对话；输入 /new 可在同一 Application 中开始空白新对话。`
+          : `已打开 ${applicationID} 最近一次持久会话；当前暂无可见消息。`,
       })
       await this.loadStudioModels()
     } catch (error) {
@@ -676,9 +661,23 @@ export class AgentLoomSession {
       return
     }
     this.builderBusy = true
-    this.patch({ loopState: "thinking", notice: null })
+    if (target.type === "new") {
+      this.creationBaselineApplicationIDs = new Set(
+        this.current.snapshot.applications.map((application) => application.id),
+      )
+      this.creationWrittenFiles.clear()
+      this.creationReconcilePending = false
+    }
+    this.patch({
+      loopState: "thinking",
+      notice: null,
+      ...(target.type === "new" ? { studioSessionID: null } : {}),
+    })
     try {
-      const conversation = await this.input.studio.newSession(target, this.current.permissionMode)
+      const conversation = await this.input.studio.newSession(
+        target,
+        this.current.permissionMode,
+      )
       if (this.current.studioTarget !== target) return
       this.streamingStudioSource = null
       this.turnSubagentText = ""
@@ -700,7 +699,7 @@ export class AgentLoomSession {
         studioDiffs: [],
         permissionRequest: null,
         questionRequest: null,
-        notice: "已开始新的 Studio 对话；旧记忆未带入。",
+        notice: "已开始新对话；旧会话仍持久保存，Agent 可读取当前 Application 的历史记忆。",
       })
       await this.loadStudioModels()
     } catch (error) {
@@ -744,12 +743,14 @@ export class AgentLoomSession {
         activities: [],
         loopState: "idle",
       })
+      await this.reconcileNewApplicationSession(sessionID)
     } catch (error) {
       if (
         this.current.studioSessionID !== sessionID
         || this.studioTurnGeneration !== turnGeneration
       ) return
       this.patch({ notice: errorMessage(error), loopState: "failed" })
+      await this.reconcileNewApplicationSession(sessionID)
     } finally {
       if (
         this.current.studioSessionID !== sessionID
@@ -757,6 +758,10 @@ export class AgentLoomSession {
       ) return
       this.builderBusy = false
       this.patch({ streamingText: this.turnSubagentText, activities: [] })
+      if (this.creationReconcilePending && this.current.studioTarget?.type === "new") {
+        this.creationReconcilePending = false
+        void this.reconcileNewApplicationSession(sessionID)
+      }
     }
   }
 
@@ -1095,6 +1100,14 @@ export class AgentLoomSession {
       return
     }
     if (event.type === "diff") {
+      if (this.current.studioTarget?.type === "new") {
+        for (const file of event.files) {
+          const normalized = file.file ? normalizedWorkspacePath(file.file) : null
+          if (normalized) this.creationWrittenFiles.add(normalized)
+        }
+        if (this.builderBusy) this.creationReconcilePending = true
+        else void this.reconcileNewApplicationSession(sessionID!)
+      }
       this.patch({ studioDiffs: mergeStudioDiffs(this.current.studioDiffs, event.files) })
       return
     }
@@ -1120,6 +1133,65 @@ export class AgentLoomSession {
     if (!request || !this.input.studio?.replyPermission) return
     await this.input.studio.replyPermission(request.requestID, reply)
     this.patch({ permissionRequest: null, loopState: reply === "reject" ? "idle" : "thinking" })
+  }
+
+  private async reconcileNewApplicationSession(sessionID: string): Promise<void> {
+    const baseline = this.creationBaselineApplicationIDs
+    if (
+      !baseline
+      || this.current.studioSessionID !== sessionID
+      || this.current.studioTarget?.type !== "new"
+      || !this.input.studio?.claimApplication
+    ) return
+    if (this.input.studio.changedFiles) {
+      try {
+        for (const file of await this.input.studio.changedFiles(sessionID)) {
+          const normalized = file.file ? normalizedWorkspacePath(file.file) : null
+          if (normalized) this.creationWrittenFiles.add(normalized)
+        }
+      } catch (error) {
+        if (this.creationWrittenFiles.size === 0) {
+          this.patch({ notice: `读取当前创建会话的写入证据失败，因此未自动绑定: ${errorMessage(error)}` })
+        }
+      }
+    }
+    await this.refresh()
+    if (this.current.studioSessionID !== sessionID || this.current.studioTarget?.type !== "new") return
+    const created = this.current.snapshot.applications
+      .filter((application) => !baseline.has(application.id))
+    if (created.length === 0) return
+    const attributed = created.filter((application) => [...this.creationWrittenFiles].some(
+      (file) => workspaceFileBelongsTo(file, application.path),
+    ))
+    if (attributed.length === 0) {
+      this.patch({
+        notice: `检测到新 Application（${created.map((application) => application.id).join("、")}），但当前创建会话没有对应写入证据，因此未自动绑定。`,
+      })
+      return
+    }
+    if (attributed.length > 1) {
+      this.patch({ notice: `当前创建会话写入了多个新 Application（${attributed.map((application) => application.id).join("、")}），无法自动绑定。` })
+      return
+    }
+    const applicationID = attributed[0]!.id
+    try {
+      await this.input.studio!.claimApplication!(
+        sessionID,
+        applicationID,
+        this.current.permissionMode,
+      )
+      if (this.current.studioSessionID !== sessionID || this.current.studioTarget?.type !== "new") return
+      this.patch({
+        studioTarget: { type: "application", applicationID },
+        notice: `创建对话已归属到 ${applicationID}；后续切换会恢复此会话。`,
+      })
+      this.creationBaselineApplicationIDs = null
+      this.creationWrittenFiles.clear()
+      this.creationReconcilePending = false
+    } catch (error) {
+      if (this.current.studioSessionID !== sessionID) return
+      this.patch({ notice: `保存 Application 会话归属失败: ${errorMessage(error)}` })
+    }
   }
 
   async respondQuestion(raw: string): Promise<void> {
@@ -1191,6 +1263,7 @@ export class AgentLoomSession {
       permissionRequest: null,
       questionRequest: null,
     })
+    await this.reconcileNewApplicationSession(sessionID)
   }
 
   async setPermissionMode(mode: "application_only" | "full_access"): Promise<void> {
@@ -1285,6 +1358,22 @@ function mergeStudioDiffs(
     merged.set(key, file)
   }
   return [...merged.values()].slice(-64)
+}
+
+function workspaceFileBelongsTo(file: string, applicationPath: string): boolean {
+  const normalizedFile = normalizedWorkspacePath(file)
+  const normalizedApplication = normalizedWorkspacePath(applicationPath)
+  return Boolean(
+    normalizedFile
+    && normalizedApplication
+    && (normalizedFile === normalizedApplication || normalizedFile.startsWith(`${normalizedApplication}/`)),
+  )
+}
+
+function normalizedWorkspacePath(path: string): string | null {
+  const normalized = path.replaceAll("\\", "/").replace(/^\.\/+/, "").replace(/\/+$/, "")
+  if (!normalized || normalized.startsWith("/") || normalized.split("/").includes("..")) return null
+  return normalized
 }
 
 function findAgentApplicationID(
@@ -1425,8 +1514,9 @@ function modelCatalogMessage(snapshot: BootstrapResultDto): string {
 function studioHelpMessage(): string {
   return [
     "Application Studio 帮助",
-    "- + New Application：切换到新建目标并保留当前对话记忆；/new 才开始新对话",
-    "- /new：开始新的 OpenCode Studio Session，不带入旧对话记忆",
+    "- 切换 Application：自动恢复该 Application 最近更新的持久会话",
+    "- + New Application：创建独立的新建会话，不改写任何已有 Application 会话",
+    "- /new：在当前 Application 中开始空白新对话；旧会话仍持久保存，Agent 可按需读取",
     "- Ctrl+X：搜索命令、权限、Applications、主 Agents、Skills、Schedules 与 Runs",
     "- /models：从 config/llm.yaml 选择 Studio 模型；不会修改 Application model_type",
     "- /refresh：重新索引 AgentLoom 项目状态",
