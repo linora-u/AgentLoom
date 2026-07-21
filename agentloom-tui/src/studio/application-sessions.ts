@@ -20,43 +20,103 @@ export interface OpenCodeSessionApi {
     metadata: Record<string, unknown>
     permission: OpenCodePermissionRule[]
   }): Promise<OpenCodeSessionInfo>
+  update(
+    sessionID: string,
+    input: {
+      title: string
+      metadata: Record<string, unknown>
+      permission: OpenCodePermissionRule[]
+    },
+  ): Promise<OpenCodeSessionInfo>
 }
+
+export type StudioSessionTarget =
+  | { type: "new" }
+  | { type: "application"; applicationID: string }
+
+export type StudioPermissionMode = "application_only" | "full_access"
 
 export class ApplicationStudioSessions {
   constructor(private readonly api: OpenCodeSessionApi) {}
 
-  async open(applicationID: string): Promise<OpenCodeSessionInfo> {
+  async open(
+    applicationID: string,
+    permissionMode: StudioPermissionMode = "application_only",
+  ): Promise<OpenCodeSessionInfo> {
     const existing = (await this.api.list()).find((session) => (
       applicationIDFromMetadata(session.metadata) === applicationID
       && belongsToWorkspace(session, this.api.workspaceKey)
     ))
-    if (existing) return existing
+    if (existing) {
+      return this.retarget(
+        existing.id,
+        { type: "application", applicationID },
+        permissionMode,
+      )
+    }
 
-    return this.api.create({
-      title: `AgentLoom · ${applicationID}`,
-      metadata: {
-        agentloom: {
-          kind: "application-studio",
-          application_id: applicationID,
-          ...(this.api.workspaceKey ? { workspace: this.api.workspaceKey } : {}),
-        },
-      },
-      permission: applicationOnlyPermissions(applicationID, this.api.workspaceKey),
-    })
+    return this.createFresh({ type: "application", applicationID }, permissionMode)
   }
 
-  async openNew(): Promise<OpenCodeSessionInfo> {
-    return this.api.create({
+  openNew(permissionMode: StudioPermissionMode = "application_only"): Promise<OpenCodeSessionInfo> {
+    return this.createFresh({ type: "new" }, permissionMode)
+  }
+
+  createFresh(
+    target: StudioSessionTarget,
+    permissionMode: StudioPermissionMode = "application_only",
+  ): Promise<OpenCodeSessionInfo> {
+    return this.api.create(sessionProperties(target, permissionMode, this.api.workspaceKey))
+  }
+
+  retarget(
+    sessionID: string,
+    target: StudioSessionTarget,
+    permissionMode: StudioPermissionMode = "application_only",
+  ): Promise<OpenCodeSessionInfo> {
+    return this.api.update(
+      sessionID,
+      sessionProperties(target, permissionMode, this.api.workspaceKey),
+    )
+  }
+}
+
+function sessionProperties(
+  target: StudioSessionTarget,
+  permissionMode: StudioPermissionMode,
+  workspaceKey?: string,
+): {
+  title: string
+  metadata: Record<string, unknown>
+  permission: OpenCodePermissionRule[]
+} {
+  if (target.type === "new") {
+    return {
       title: "AgentLoom · New Application",
       metadata: {
         agentloom: {
           kind: "application-studio-new",
           creation_id: crypto.randomUUID(),
-          ...(this.api.workspaceKey ? { workspace: this.api.workspaceKey } : {}),
+          ...(workspaceKey ? { workspace: workspaceKey } : {}),
         },
       },
-      permission: newApplicationPermissions(),
-    })
+      permission: permissionMode === "full_access"
+        ? fullAccessPermissions()
+        : newApplicationPermissions(),
+    }
+  }
+  return {
+    title: `AgentLoom · ${target.applicationID}`,
+    metadata: {
+      agentloom: {
+        kind: "application-studio",
+        application_id: target.applicationID,
+        ...(workspaceKey ? { workspace: workspaceKey } : {}),
+      },
+    },
+    permission: permissionMode === "full_access"
+      ? fullAccessPermissions()
+      : applicationOnlyPermissions(target.applicationID, workspaceKey),
   }
 }
 
@@ -111,6 +171,10 @@ export function newApplicationPermissions(): OpenCodePermissionRule[] {
     { permission: "external_directory", pattern: "*", action: "ask" },
     { permission: "agentloom_run", pattern: "*", action: "ask" },
   ]
+}
+
+export function fullAccessPermissions(): OpenCodePermissionRule[] {
+  return [{ permission: "*", pattern: "*", action: "allow" }]
 }
 
 function applicationIDFromMetadata(metadata: Record<string, unknown> | undefined): string | null {

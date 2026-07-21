@@ -58,6 +58,18 @@ export function createOpenCodeSessionApi(input: {
       return toSessionInfo(result.data)
     },
 
+    async update(sessionID, request): Promise<OpenCodeSessionInfo> {
+      const result = await client.session.update({
+        sessionID,
+        directory: input.directory,
+        title: request.title,
+        metadata: request.metadata,
+        permission: request.permission,
+      })
+      if (!result.data) throw sdkError("update OpenCode session", result.error)
+      return toSessionInfo(result.data)
+    },
+
     async messages(sessionID): Promise<OpenCodeStoredMessage[]> {
       const result = await client.session.messages({
         sessionID,
@@ -215,8 +227,18 @@ function abortableDelay(durationMs: number, signal: AbortSignal): Promise<void> 
 }
 
 function studioEvent(raw: unknown, partTypes: Map<string, string>): StudioEvent | null {
-  if (!isRecord(raw) || typeof raw.type !== "string" || !isRecord(raw.properties)) return null
-  const properties = raw.properties
+  if (!isRecord(raw) || typeof raw.type !== "string") return null
+  // OpenCode 1.18 emits both its legacy in-process event shape
+  // (`properties`) and the durable event-log shape (`data`) from /event.
+  // The bundled runtime currently uses the latter for Session, Tool and
+  // permission progress, so accepting only `properties` makes an active turn
+  // look silent and hides the real Session lifecycle from Studio.
+  const properties = isRecord(raw.properties)
+    ? raw.properties
+    : isRecord(raw.data)
+      ? raw.data
+      : null
+  if (!properties) return null
   const sessionID = typeof properties.sessionID === "string" ? properties.sessionID : undefined
   if (raw.type === "message.part.removed" && sessionID && typeof properties.partID === "string") {
     partTypes.delete(studioPartKey(sessionID, properties.partID))

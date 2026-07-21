@@ -32,6 +32,14 @@ class MemoryStudioApi implements OpenCodeStudioApi {
     return session
   }
 
+  async update(sessionID: string, input: Parameters<OpenCodeStudioApi["update"]>[1]) {
+    const index = this.sessions.findIndex((session) => session.id === sessionID)
+    if (index < 0) throw new Error(`unknown session ${sessionID}`)
+    const updated = { ...this.sessions[index]!, ...input }
+    this.sessions[index] = updated
+    return updated
+  }
+
   async messages() {
     return [...this.history]
   }
@@ -123,6 +131,54 @@ describe("OpenCode Studio client", () => {
     expect(api.aborts.sort()).toEqual(["ses_child", "ses_reports"])
     expect(api.deletedMessages).toEqual(["msg-3", "msg-2"])
     expect((await api.messages()).map((message) => message.info.id)).toEqual(["msg-1"])
+  })
+
+  test("projects Task subagent progress into the visible parent Studio session", async () => {
+    const api = new MemoryStudioApi()
+    api.hangPrompts = true
+    const studio = new OpenCodeStudioClient(api, { stallTimeoutMs: 500 })
+    const opened = await studio.openApplication("reports")
+    const observed: unknown[] = []
+    studio.subscribe?.((event) => observed.push(event))
+    const pending = studio.send(opened.sessionID, "review every dataset row")
+
+    api.emit({
+      type: "tool",
+      sessionID: opened.sessionID,
+      callID: "task-1",
+      name: "task",
+      status: "running",
+      title: "Review row 1",
+      metadata: { sessionId: "ses_child" },
+    })
+    api.emit({
+      type: "tool",
+      sessionID: "ses_child",
+      callID: "read-1",
+      name: "read",
+      status: "completed",
+      title: "dataset row 1",
+    })
+    api.emit({ type: "text.delta", sessionID: "ses_child", text: "row 1 is correct" })
+
+    expect(observed).toContainEqual({
+      type: "tool",
+      sessionID: opened.sessionID,
+      callID: "read-1",
+      name: "read",
+      status: "completed",
+      title: "dataset row 1",
+      source: { kind: "subagent", sessionID: "ses_child" },
+    })
+    expect(observed).toContainEqual({
+      type: "text.delta",
+      sessionID: opened.sessionID,
+      text: "row 1 is correct",
+      source: { kind: "subagent", sessionID: "ses_child" },
+    })
+
+    await studio.interrupt?.(opened.sessionID)
+    await pending.catch(() => undefined)
   })
 
   test("manual interrupt discards unfinished model context and settles the turn", async () => {

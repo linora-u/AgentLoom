@@ -34,11 +34,26 @@ export interface TuiClient {
 }
 
 export interface StudioClient {
-  openNewApplication(): Promise<{
+  openNewApplication(permissionMode?: "application_only" | "full_access"): Promise<{
     sessionID: string
     messages: BuilderMessage[]
   }>
-  openApplication(applicationID: string): Promise<{
+  openApplication(
+    applicationID: string,
+    permissionMode?: "application_only" | "full_access",
+  ): Promise<{
+    sessionID: string
+    messages: BuilderMessage[]
+  }>
+  switchTarget?(
+    sessionID: string,
+    target: { type: "new" } | { type: "application"; applicationID: string },
+    permissionMode?: "application_only" | "full_access",
+  ): Promise<void>
+  newSession?(
+    target: { type: "new" } | { type: "application"; applicationID: string },
+    permissionMode?: "application_only" | "full_access",
+  ): Promise<{
     sessionID: string
     messages: BuilderMessage[]
   }>
@@ -75,7 +90,9 @@ export type StudioQuestion = {
   custom: boolean
 }
 
-export type StudioEvent =
+export type StudioEvent = {
+  source?: { kind: "subagent"; sessionID: string }
+} & (
   | { type: "text.delta"; sessionID: string; text: string }
   | {
       type: "tool"
@@ -104,6 +121,7 @@ export type StudioEvent =
   | { type: "status"; sessionID: string; status: "busy" | "idle" | "retry" }
   | { type: "question"; sessionID: string; requestID: string; questions: StudioQuestion[] }
   | { type: "error"; sessionID?: string; message: string }
+)
 
 export type BuilderDraftFile = {
   path: string
@@ -179,6 +197,7 @@ export class AgentLoomSession {
   private liveRefreshPromise: Promise<void> | null = null
   private routeLoadGeneration = 0
   private studioTurnGeneration = 0
+  private streamingStudioSource: string | null = null
   private readonly studioModelBySession = new Map<string, string>()
   private builderBusy = false
   private routeBusy = false
@@ -324,9 +343,6 @@ export class AgentLoomSession {
     this.routeBusy = false
     this.patch({
       studioTarget: { type: "new" },
-      studioSessionID: null,
-      permissionMode: "application_only",
-      studioModel: null,
       route: { type: "builder" },
       systemDetail: null,
       applicationDetail: null,
@@ -350,7 +366,18 @@ export class AgentLoomSession {
     this.builderBusy = true
     this.patch({ loopState: "thinking" })
     try {
-      const conversation = await this.input.studio.openNewApplication()
+      const activeSessionID = this.current.studioSessionID
+      if (activeSessionID && this.input.studio.switchTarget) {
+        await this.input.studio.switchTarget(
+          activeSessionID,
+          { type: "new" },
+          this.current.permissionMode,
+        )
+        if (this.current.studioTarget?.type !== "new") return
+        this.patch({ loopState: "idle" })
+        return
+      }
+      const conversation = await this.input.studio.openNewApplication(this.current.permissionMode)
       if (this.current.studioTarget?.type !== "new") return
       this.patch({
         studioSessionID: conversation.sessionID,
@@ -400,7 +427,6 @@ export class AgentLoomSession {
       ...(studioApplicationID
         ? {
             studioTarget: { type: "application" as const, applicationID: studioApplicationID },
-            permissionMode: "application_only" as const,
           }
         : {}),
       route: routeForEntry(entry),
@@ -509,6 +535,10 @@ export class AgentLoomSession {
       })
       return
     }
+    if (command.type === "new") {
+      await this.startNewStudioSession()
+      return
+    }
     if (command.type === "models") {
       this.patch({
         messages: [
@@ -577,7 +607,31 @@ export class AgentLoomSession {
     this.builderBusy = true
     this.patch({ notice: null })
     try {
-      const conversation = await this.input.studio!.openApplication(applicationID)
+      const activeSessionID = this.current.studioSessionID
+      if (activeSessionID && this.input.studio!.switchTarget) {
+        await this.input.studio!.switchTarget(
+          activeSessionID,
+          { type: "application", applicationID },
+          this.current.permissionMode,
+        )
+        if (
+          this.current.studioTarget?.type !== "application"
+          || this.current.studioTarget.applicationID !== applicationID
+        ) return
+        this.patch({
+          loopState: "idle",
+          studioTools: [],
+          studioDiffs: [],
+          permissionRequest: null,
+          questionRequest: null,
+          notice: `已切换到 ${applicationID}；当前对话记忆保持不变。输入 /new 可开始新对话。`,
+        })
+        return
+      }
+      const conversation = await this.input.studio!.openApplication(
+        applicationID,
+        this.current.permissionMode,
+      )
       if (
         this.current.studioTarget?.type !== "application"
         || this.current.studioTarget.applicationID !== applicationID
@@ -606,10 +660,52 @@ export class AgentLoomSession {
     }
   }
 
+  private async startNewStudioSession(): Promise<void> {
+    const target = this.current.studioTarget
+    if (!target || !this.input.studio?.newSession) {
+      this.patch({ notice: "请先新建或选择一个 Application" })
+      return
+    }
+    this.builderBusy = true
+    this.patch({ loopState: "thinking", notice: null })
+    try {
+      const conversation = await this.input.studio.newSession(target, this.current.permissionMode)
+      if (this.current.studioTarget !== target) return
+      this.streamingStudioSource = null
+      this.patch({
+        studioSessionID: conversation.sessionID,
+        messages: conversation.messages.length > 0
+          ? conversation.messages
+          : [{
+              id: this.nextMessageID(),
+              role: "assistant",
+              content: target.type === "new"
+                ? "已开始新对话。请描述要创建的 Application。"
+                : `已为 ${target.applicationID} 开始新对话。`,
+            }],
+        streamingText: "",
+        activities: [],
+        loopState: "idle",
+        studioTools: [],
+        studioDiffs: [],
+        permissionRequest: null,
+        questionRequest: null,
+        notice: "已开始新的 Studio 对话；旧记忆未带入。",
+      })
+      await this.loadStudioModels()
+    } catch (error) {
+      this.patch({ notice: errorMessage(error), loopState: "failed" })
+    } finally {
+      this.builderBusy = false
+      this.patch({})
+    }
+  }
+
   private async sendStudioMessage(message: string): Promise<void> {
     const sessionID = this.current.studioSessionID
     if (!sessionID) return
     const turnGeneration = ++this.studioTurnGeneration
+    this.streamingStudioSource = null
     this.builderBusy = true
     this.patch({
       notice: null,
@@ -955,8 +1051,16 @@ export class AgentLoomSession {
     if (event.type === "error" && event.sessionID && event.sessionID !== sessionID) return
 
     if (event.type === "text.delta") {
+      const source = event.source?.sessionID ?? null
+      const sourceChanged = source !== this.streamingStudioSource
+      this.streamingStudioSource = source
+      const sourceLabel = sourceChanged && source
+        ? `\n[子 Agent ${shortSessionID(source)}]\n`
+        : sourceChanged
+          ? "\n[主 Agent]\n"
+          : ""
       this.patch({
-        streamingText: (this.current.streamingText + event.text).slice(-32_000),
+        streamingText: (this.current.streamingText + sourceLabel + event.text).slice(-32_000),
         loopState: "thinking",
       })
       return
@@ -1073,8 +1177,17 @@ export class AgentLoomSession {
 
   async setPermissionMode(mode: "application_only" | "full_access"): Promise<void> {
     const sessionID = this.current.studioSessionID
-    if (!sessionID || !this.input.studio?.setPermissionMode) {
-      this.patch({ notice: "请先新建或选择一个 Application" })
+    if (!sessionID) {
+      this.patch({
+        permissionMode: mode,
+        notice: mode === "full_access"
+          ? "已预设 Full Access；之后选择的 Application 都沿用此权限，直到再次关闭。"
+          : "已关闭 Full Access；之后选择的 Application 使用 Application Only。",
+      })
+      return
+    }
+    if (!this.input.studio?.setPermissionMode) {
+      this.patch({ notice: "当前 Studio Runtime 不支持权限切换" })
       return
     }
     try {
@@ -1082,12 +1195,18 @@ export class AgentLoomSession {
       this.patch({
         permissionMode: mode,
         notice: mode === "full_access"
-          ? "已为当前 TUI 会话启用 Full Access；退出后不会保留"
-          : "已恢复 Application Only",
+          ? "已为当前 Studio 对话启用 Full Access；切换 Application 后继续生效。"
+          : "已关闭 Full Access，恢复 Application Only。",
       })
     } catch (error) {
       this.patch({ notice: errorMessage(error) })
     }
+  }
+
+  async togglePermissionMode(): Promise<void> {
+    await this.setPermissionMode(
+      this.current.permissionMode === "full_access" ? "application_only" : "full_access",
+    )
   }
 
   async setStudioModel(modelID: string): Promise<void> {
@@ -1288,16 +1407,18 @@ function modelCatalogMessage(snapshot: BootstrapResultDto): string {
 function studioHelpMessage(): string {
   return [
     "Application Studio 帮助",
-    "- + New Application：创建并绑定一个新的 OpenCode Studio Session",
+    "- + New Application：切换到新建目标并保留当前对话记忆；/new 才开始新对话",
+    "- /new：开始新的 OpenCode Studio Session，不带入旧对话记忆",
     "- Ctrl+X：搜索命令、权限、Applications、主 Agents、Skills、Schedules 与 Runs",
     "- /models：从 config/llm.yaml 选择 Studio 模型；不会修改 Application model_type",
     "- /refresh：重新索引 AgentLoom 项目状态",
     "- Application Only：默认只直接写当前 Application；权限卡 1 仅本次、2 本次会话、3 拒绝",
-    "- Full Access：从 Ctrl+X 显式启用，只在当前 TUI 会话有效",
+    "- Full Access：从 Ctrl+X 开关；未选择 Application 时可预设，切换 Application 后继续生效",
     "- Agent 问题：点击选项或在输入框回答；多个问题用 | 分隔，Esc 拒绝",
     "- 更新：后台检查可信源码目录；从 Ctrl+X 确认整体更新并安全重启",
     "- Esc：按上下文关闭详情、拒绝权限/问题或中止当前 Agent Loop",
-    "- 卡住保护：连续 60 秒没有文本、Tool、Diff 或状态进展时，自动中止当前 Loop 及其 Task 子会话",
+    "- Agent Loop：遵循 OpenCode Session 状态；只有 Esc 会显式中止当前回合",
+    "- Ctrl+Y：复制当前鼠标/键盘选中的 TUI 文本",
     "- PgUp / PgDn：滚动当前焦点中的聊天或详情；鼠标滚轮滚动指针所在区域",
     "- Ctrl+C：退出",
   ].join("\n")
@@ -1462,4 +1583,8 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 
 function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error)
+}
+
+function shortSessionID(sessionID: string): string {
+  return sessionID.length <= 14 ? sessionID : `${sessionID.slice(0, 10)}…`
 }
