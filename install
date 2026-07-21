@@ -6,6 +6,7 @@ MUTED='\033[0;2m'
 RED='\033[0;31m'
 NC='\033[0m'
 NO_MODIFY_PATH=false
+EXPECTED_OPENCODE_VERSION="1.18.3"
 
 usage() {
   cat <<'EOF'
@@ -127,8 +128,23 @@ printf '%b\n' "${MUTED}Building the native AgentLoom TUI...${NC}"
 )
 "$BUILD_BINARY" --version >/dev/null
 
+OPENCODE_SOURCE=${AGENTLOOM_OPENCODE_SOURCE:-"$TUI_ROOT/node_modules/.bin/opencode"}
+if [[ ! -x "$OPENCODE_SOURCE" ]]; then
+  printf '%b\n' "${RED}Error: bundled OpenCode Runtime was not installed at $OPENCODE_SOURCE.${NC}" >&2
+  exit 1
+fi
+OPENCODE_VERSION=$($OPENCODE_SOURCE --version | tr -d '[:space:]')
+if [[ "$OPENCODE_VERSION" != "$EXPECTED_OPENCODE_VERSION" ]]; then
+  printf '%b\n' "${RED}Error: expected OpenCode Runtime $EXPECTED_OPENCODE_VERSION, found $OPENCODE_VERSION.${NC}" >&2
+  exit 1
+fi
+
 install -m 755 "$BUILD_BINARY" "$BIN_DIR/.agentloom-tui.$$.tmp"
 mv -f "$BIN_DIR/.agentloom-tui.$$.tmp" "$BIN_DIR/agentloom-tui"
+install -m 755 "$OPENCODE_SOURCE" "$BIN_DIR/.agentloom-opencode.$$.tmp"
+mv -f "$BIN_DIR/.agentloom-opencode.$$.tmp" "$BIN_DIR/agentloom-opencode"
+printf '%s\n' "$REPO_ROOT" > "$INSTALL_ROOT/.source-root.$$.tmp"
+mv -f "$INSTALL_ROOT/.source-root.$$.tmp" "$INSTALL_ROOT/source-root"
 
 WRAPPER_TMP="$BIN_DIR/.agentloom.$$.tmp"
 cat > "$WRAPPER_TMP" <<'EOF'
@@ -143,6 +159,30 @@ if [ -z "${AGENTLOOM_PYTHON:-}" ]; then
   fi
   export AGENTLOOM_PYTHON
 fi
+if [ -z "${AGENTLOOM_OPENCODE_BIN:-}" ]; then
+  AGENTLOOM_OPENCODE_BIN="$install_root/bin/agentloom-opencode"
+  export AGENTLOOM_OPENCODE_BIN
+fi
+if [ -z "${AGENTLOOM_INSTALL_ROOT:-}" ]; then
+  AGENTLOOM_INSTALL_ROOT="$install_root"
+  export AGENTLOOM_INSTALL_ROOT
+fi
+if [ -z "${AGENTLOOM_COMMAND:-}" ]; then
+  AGENTLOOM_COMMAND="$install_root/bin/agentloom"
+  export AGENTLOOM_COMMAND
+fi
+if [ -z "${AGENTLOOM_SOURCE_ROOT:-}" ] && [ -f "$install_root/source-root" ]; then
+  AGENTLOOM_SOURCE_ROOT=$(sed -n '1p' "$install_root/source-root")
+  export AGENTLOOM_SOURCE_ROOT
+fi
+if [ "${1:-}" = "update" ]; then
+  shift
+  if [ -z "${AGENTLOOM_SOURCE_ROOT:-}" ] || [ ! -x "$AGENTLOOM_SOURCE_ROOT/install" ]; then
+    printf '%s\n' 'agentloom: the trusted source directory is unavailable; update from a checkout with ./install' >&2
+    exit 1
+  fi
+  exec "$AGENTLOOM_SOURCE_ROOT/install" --no-modify-path "$@"
+fi
 if [ "${1:-}" = "schedules" ]; then
   shift
   exec "$AGENTLOOM_PYTHON" -I -m src schedules "$@"
@@ -151,6 +191,8 @@ exec "$install_root/bin/agentloom-tui" "$@"
 EOF
 chmod 755 "$WRAPPER_TMP"
 mv -f "$WRAPPER_TMP" "$BIN_DIR/agentloom"
+date +%s > "$INSTALL_ROOT/.installed-at.$$.tmp"
+mv -f "$INSTALL_ROOT/.installed-at.$$.tmp" "$INSTALL_ROOT/installed-at"
 
 add_to_path() {
   local config_file=$1

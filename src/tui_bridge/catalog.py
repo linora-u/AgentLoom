@@ -54,7 +54,7 @@ def project_catalog(
 
     application_ids = _discover_application_ids(root)
     application_ids.update(agent["application_id"] for agent in agents)
-    skills = _application_skills(root, application_ids)
+    skills = _global_skills(root) + _application_skills(root, application_ids)
 
     skills_by_application: dict[str, list[dict[str, Any]]] = {}
     for skill in skills:
@@ -348,6 +348,82 @@ def _application_skills(root: Path, application_ids: Iterable[str]) -> list[dict
             )
     skills.sort(key=lambda item: (item["application_id"], item["name"], item["path"]))
     return skills
+
+
+def _global_skills(root: Path) -> list[dict[str, Any]]:
+    """Project-global Skills available to AgentLoom runtime Agents.
+
+    This intentionally follows AgentLoom's global discovery boundary only:
+    explicit ``config/system.yaml`` entries plus the root ``skills/`` default
+    directory.  Framework/Codex Skills and Application packages are outside
+    this count.
+    """
+
+    configured: Any = None
+    config_path = root / "config" / "system.yaml"
+    text = _read_text_bounded(root, config_path, max_bytes=1024 * 1024)
+    if text is not None:
+        try:
+            document = yaml.safe_load(text) or {}
+        except (TypeError, ValueError, yaml.YAMLError):
+            document = {}
+        if isinstance(document, Mapping):
+            configured = document.get("skills")
+
+    sources: list[Path] = []
+    if configured != []:
+        sources.append(root / "skills")
+    sources.extend(_configured_global_skill_sources(root, configured))
+
+    manifests: dict[Path, Path] = {}
+    for source in sources:
+        safe_file = _safe_project_file(root, source, suffixes={".md"})
+        if safe_file is not None and safe_file.name.lower() == "skill.md":
+            manifests[safe_file.resolve()] = safe_file
+            continue
+        if not _safe_project_directory(root, source):
+            continue
+        for manifest in _skill_manifests(root, source):
+            manifests[manifest.resolve()] = manifest
+
+    skills: list[dict[str, Any]] = []
+    ids: set[str] = set()
+    for manifest in sorted(manifests.values(), key=lambda path: path.relative_to(root).as_posix()):
+        metadata = _skill_metadata(root, manifest)
+        name = _display_text(metadata.get("name")) or manifest.parent.name
+        skill_id = f"global:{name}"
+        if skill_id in ids:
+            skill_id = f"{skill_id}:{manifest.parent.relative_to(root).as_posix()}"
+        ids.add(skill_id)
+        skills.append(
+            {
+                "id": skill_id,
+                "application_id": None,
+                "name": name,
+                "description": _display_text(metadata.get("description")),
+                "origin": "global",
+                "path": manifest.relative_to(root).as_posix(),
+            }
+        )
+    return skills
+
+
+def _configured_global_skill_sources(root: Path, configured: Any) -> list[Path]:
+    items = configured.get("items") if isinstance(configured, Mapping) else configured
+    if isinstance(items, (str, Mapping)):
+        items = [items]
+    if not isinstance(items, list):
+        return []
+    sources: list[Path] = []
+    for item in items:
+        raw_path = item.get("path") if isinstance(item, Mapping) else item
+        if not isinstance(raw_path, str) or not raw_path.strip() or "\\" in raw_path:
+            continue
+        path = Path(raw_path.strip())
+        if path.is_absolute() or ".." in path.parts:
+            continue
+        sources.append(root / path)
+    return sources
 
 
 def _skill_manifests(root: Path, skills_root: Path) -> list[Path]:

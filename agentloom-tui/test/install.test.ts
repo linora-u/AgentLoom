@@ -24,6 +24,7 @@ describe("source installer", () => {
         PATH: `${fixture.tools}:${process.env.PATH ?? ""}`,
         AGENTLOOM_INSTALL_DIR: installRoot,
         AGENTLOOM_TEST_LOG: fixture.log,
+        AGENTLOOM_OPENCODE_SOURCE: fixture.opencode,
         SHELL: "/bin/zsh",
       },
       stdout: "pipe",
@@ -41,8 +42,16 @@ describe("source installer", () => {
 
     const wrapper = join(installedRoot, "bin", "agentloom")
     const runtime = join(installedRoot, "bin", "agentloom-tui")
+    const opencodeRuntime = join(installedRoot, "bin", "agentloom-opencode")
     expect((await readFile(wrapper, "utf8"))).toContain("AGENTLOOM_PYTHON")
+    expect((await readFile(wrapper, "utf8"))).toContain("AGENTLOOM_OPENCODE_BIN")
+    expect((await readFile(wrapper, "utf8"))).toContain("AGENTLOOM_INSTALL_ROOT")
+    expect((await readFile(wrapper, "utf8"))).toContain("AGENTLOOM_COMMAND")
+    expect((await readFile(wrapper, "utf8"))).toContain('= "update"')
+    expect((await readFile(join(installedRoot, "source-root"), "utf8")).trim()).toBe(repositoryRoot)
+    expect(Number((await readFile(join(installedRoot, "installed-at"), "utf8")).trim())).toBeGreaterThan(0)
     expect(await Bun.file(runtime).exists()).toBe(true)
+    expect(await Bun.file(opencodeRuntime).exists()).toBe(true)
 
     const invocation = Bun.spawnSync({ cmd: [wrapper, "--version"], env: { ...process.env, AGENTLOOM_PYTHON: undefined } })
     expect(invocation.exitCode).toBe(0)
@@ -53,6 +62,20 @@ describe("source installer", () => {
     })
     expect(schedulerInvocation.exitCode).toBe(0)
     expect(await readFile(fixture.log, "utf8")).toContain("python|-I -m src schedules --help")
+    const updateInvocation = Bun.spawnSync({
+      cmd: [wrapper, "update"],
+      cwd: repositoryRoot,
+      env: {
+        ...process.env,
+        HOME: fixture.home,
+        PATH: `${fixture.tools}:${process.env.PATH ?? ""}`,
+        AGENTLOOM_INSTALL_DIR: installRoot,
+        AGENTLOOM_TEST_LOG: fixture.log,
+        AGENTLOOM_OPENCODE_SOURCE: fixture.opencode,
+      },
+      stderr: "pipe",
+    })
+    expect(updateInvocation.exitCode, new TextDecoder().decode(updateInvocation.stderr)).toBe(0)
     expect(await Bun.file(join(fixture.home, ".zshrc")).exists()).toBe(false)
   })
 
@@ -67,6 +90,7 @@ describe("source installer", () => {
       PATH: `${fixture.tools}:${process.env.PATH ?? ""}`,
       AGENTLOOM_INSTALL_DIR: installRoot,
       AGENTLOOM_TEST_LOG: fixture.log,
+      AGENTLOOM_OPENCODE_SOURCE: fixture.opencode,
       SHELL: "/bin/zsh",
     }
 
@@ -117,7 +141,9 @@ if [ "\${1:-}" = "run" ] && [ "\${2:-}" = "build" ]; then
 fi
 `,
   )
-  return { root, home, tools, log }
+  const opencode = join(tools, "opencode-runtime")
+  await writeExecutable(opencode, "#!/bin/sh\nprintf '%s\\n' '1.18.3'\n")
+  return { root, home, tools, log, opencode }
 }
 
 async function writeExecutable(path: string, content: string) {
