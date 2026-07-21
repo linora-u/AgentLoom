@@ -9,7 +9,7 @@
 </p>
 
 <p align="center">
-  在终端 Builder 中通过对话设计 Agent 系统，使用 AgentLoom Python Runtime 运行，并在同一个项目视图里查看每个 Agent、Worker 和 Run。
+  使用 OpenCode 驱动的 Application Studio 创建、修改、校验、运行并查看 AgentLoom Application。
 </p>
 
 <p align="center">
@@ -49,6 +49,14 @@ agentloom --snapshot
 
 源码安装脚本目前面向 macOS 和 Linux Shell。它需要 Git 和 Bash；仅在缺少 `uv` 或 Bun 时需要 `curl`。
 
+源码更新只需在仓库中重新运行 `./install`。首次安装后也可执行
+`agentloom update`，它会从安装时记录的可信源码目录重新构建。参数
+`--no-modify-path` 仅表示“不修改 Shell PATH 配置”，不是更新必需参数。
+
+安装版 TUI 会在后台检查这个可信源码目录。如果与产品相关的源码比当前安装
+更新，`Ctrl+X` 会提供“整体更新并安全重启”。它不会擅自执行 Git 拉取，也不
+会在活跃 Session 中静默替换程序。
+
 需要自定义安装目录或不修改 `PATH` 时，可以使用：
 
 ```bash
@@ -56,7 +64,7 @@ AGENTLOOM_INSTALL_DIR="$HOME/tools/agentloom" ./install
 ./install --no-modify-path
 ```
 
-### 配置模型
+### 配置 Application 模型
 
 使用 TUI 对话或运行 Agent 前，先复制模型配置模板：
 
@@ -76,7 +84,12 @@ model:
     tool_choice: "auto"
 ```
 
-Agent 任务使用 AgentLoom 原有模型运行时。TUI 对话目前要求 OpenAI-compatible Chat Completions 接口；创建 YAML 还要求模型支持流式响应和原生 tool/function calling。
+这份文件是 Studio 与 Application Agent 唯一共享的模型配置源。
+Application Agent 由 Python Runtime 按 YAML `model_type` 解析；TypeScript
+Studio 适配器把同一批 Profile、端点、凭证和兼容请求参数安全映射给内置
+OpenCode Runtime。`/models` 或 `Ctrl+X` 只切换当前 Studio Session 使用的
+`llm.yaml` 模型类型，不修改任何 Application YAML 的 `model_type`。配置缺失
+或无效时 Studio 会明确启动失败，不会回退到 OpenCode 环境默认模型。
 
 ## 从 TUI 开始
 
@@ -90,11 +103,11 @@ agentloom
 agentloom --project /path/to/project
 ```
 
-TUI 是 Agent Builder 和项目控制面。它可以讨论设计、检查已有定义、暂存并校验 Agent YAML，以及读取标准运行状态。
+TUI 是 Applications-first 控制面。独立的 Studio Agent 可以读取项目、
+直接修改当前 Application、展示 OpenCode Tool 与 Diff、校验配置、请求
+真实运行授权、读取结构化 Run 证据，并在失败后继续修复。
 
-它不会执行 Shell、Git 或 Agent 任务。是否写入 YAML 由你决定，Agent 也需要在另一个终端中运行。
-
-### 1. 描述 Agent 系统
+### 1. 新建或选择 Application
 
 按 `Enter` 发送需求。一个有效的初始描述应写清应用、角色、输入、输出和验收标准：
 
@@ -102,62 +115,53 @@ TUI 是 Agent Builder 和项目控制面。它可以讨论设计、检查已有�
 创建一个名为 release_review 的应用。
 使用一个 Supervisor 和两个 Worker，分别负责 API 审查和测试审查。
 模型类型从 config/llm.yaml 中选择。
-写入前先展示准备创建的文件和调用契约。
+校验完成后，在首次真实运行前向我申请权限。
 ```
 
-Builder 只读取需要的项目上下文，在内存中暂存草稿并校验 YAML。可以继续对话，直到拓扑和调用契约符合预期。
+Studio 在授权范围内直接改文件，并显示产生的 Diff。自治 Loop 会检查
+Effective Config、YAML/引用、Tools、Skills、权限、拓扑与相关测试；行为
+变化还会在获准后真实冒烟运行。未获运行授权时只能报告“配置已验证，
+尚未运行”，不能宣称完全完成。
 
-### 2. 检查并写入 YAML
+大型 Application 的模型侧详情会去重并按每页最多 10 个 Agent 返回，避免
+把完整配置塞进一次 Tool 输出。若连续 60 秒没有文本、Tool、Diff 或状态
+进展，Studio 会自动中止父 Loop 及其 Task 子会话并显示错误；需要立即中止
+时仍可按 `Esc`。
 
-普通对话不会修改文件。输入 `/apply` 才会写入当前通过校验的草稿。这个命令只写 YAML，不会启动 Agent。
+### 2. 首页数字与详情
 
-使用 `/models` 打开模型选择器，或用 `/model <type>` 直接切换：
+首页只统计 `applications/` 下的 Application 数量，不统计展开后的
+Supervisor/Worker YAML 数量。`Global Skills` 只统计根目录运行时全局
+Skills；Application 私有 Skills 在对应 Application 和 Agent 详情中查看。
+Studio 使用的框架 Skill 不计入业务 Application Skills。
 
-```text
-/models
-/model summary
-/apply
-```
+`Ctrl+X` 搜索命令、权限、Application、主 Supervisor Agent、Skill、
+Schedule 和 Run。Worker 子 Agent 只在所属 Application 和主 Agent 详情中
+展示，不作为独立的全局搜索条目。Application 详情展示带来源的 Effective Config，包括
+模型、Tools、Skills、子 Agent、权限、Hooks、MCP、配置文件、校验、
+Working Revision 和 Running Revision。Run 默认只展示可行动摘要，不铺开
+原始 Events 和完整日志。
 
-### 3. 运行 Agent
+### 3. 权限与 Revision
 
-打开另一个终端，运行 Builder 显示的 Supervisor 路径：
+默认 `Application Only`：可读整个项目，可直接写当前 Application；Shell、
+全局文件、其他 Application 和新建时未知目录由 OpenCode 弹出权限卡。
+按 `1` 仅本次、`2` 本次会话、`3` 拒绝。`Ctrl+X` 可启用 Full Access，
+但它只在当前 TUI 会话有效，退出后恢复默认。
+Studio Agent 需要业务决定时，可点击选项或在输入框回答；一次出现多个问题时
+用 `|` 分隔答案。
 
-```bash
-uv run loom run applications/<app>/workflows/<agent>.yaml
-```
-
-也可以生成 Python 入口：
-
-```bash
-uv run loom create applications/<app>/workflows/<agent>.yaml \
-  -o applications/<app>/<app>_app.py
-uv run python applications/<app>/<app>_app.py
-```
-
-Agent 运行时可以保持 TUI 打开。`loom run` 和自动生成的入口都会发布标准生命周期，供整个项目查看状态。
-
-直接调用底层 Agent `.run()` 会绕过该生命周期，任何 UI 都无法从中还原完整 Run。
-
-### 4. 查看 Agent 与 Run
-
-按 `Ctrl+P` 或 `Tab` 搜索 Application、Agent、Worker、Run、Skill、Schedule 和命令。可以使用键盘或鼠标选择条目。
-
-详情页会区分从未运行、运行中、完成、失败、崩溃、中断和未知状态。它展示拓扑、校验、Worker 状态、结果和产物路径，不会把完整日志铺满界面。
-
-选择失败 Run 后按 `a`，TUI 助手会分析经过清洗且严格限长的失败上下文。完整日志仍保存在磁盘，详情页会显示路径。
-
-使用 `F6` 切换焦点。详情页聚焦后支持方向键、`PgUp` / `PgDn`、`Home` / `End` 和鼠标滚轮。按 `Esc` 或 `b` 返回。
+Run 启动时把 Application 内容哈希写入 manifest。之后继续修改只会改变
+Working Revision，不会热切换正在运行的 Agent；新配置需新 Run 或重启。
 
 | 操作 | 命令 / 按键 |
 |---|---|
 | 发送对话 | `Enter` |
-| 浏览项目 | `Ctrl+P` 或 `Tab` |
-| 选择模型 | `/models` 或 `/model <type>` |
-| 写入已校验草稿 | `/apply` |
+| 搜索命令和全局实体 | `Ctrl+X` |
+| 从 `config/llm.yaml` 选择 Studio 模型 | `/models` 或 `Ctrl+X` |
 | 刷新完整索引 | `/refresh` 或在详情页按 `r` |
-| 切换对话/详情焦点 | `F6` |
 | 分析选中的失败 Run | `a` |
+| 关闭详情、拒绝权限/问题或中止当前 Loop | `Esc` |
 
 TUI 架构与开发说明见 [agentloom-tui/README.md](../../agentloom-tui/README.md)。
 

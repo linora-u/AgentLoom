@@ -144,6 +144,27 @@ class TuiBridge:
             if not isinstance(system_id, str) or not system_id:
                 raise BridgeError("invalid_params", "system_id must be a non-empty string")
             return self.system_detail(system_id)
+        if method == "application.detail":
+            self._exact_params(params, {"application_id"}, method="application.detail")
+            application_id = self._required_wire_string(
+                params.get("application_id"), field="application_id"
+            )
+            try:
+                canonical = safe_application_id(application_id)
+            except ValueError as error:
+                raise BridgeError("invalid_params", str(error)) from error
+            if canonical != application_id:
+                raise BridgeError("invalid_params", "application_id is not canonical")
+            from src.tui_bridge.application_studio import application_detail
+
+            try:
+                return application_detail(
+                    self.project_root,
+                    application_id,
+                    systems=self._scan_systems(),
+                )
+            except FileNotFoundError as error:
+                raise BridgeError("not_found", f"application not found: {application_id}") from error
         if method == "run.detail":
             run_id = params.get("run_id")
             application_id = params.get("application_id")

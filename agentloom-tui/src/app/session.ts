@@ -1,6 +1,7 @@
 import { basename, resolve } from "node:path"
 import type {
   BootstrapResultDto,
+  ApplicationDetailResultDto,
   AssistantTurnEventDto,
   RpcMethod,
   RpcParams,
@@ -21,6 +22,7 @@ import {
   type SidebarEntry,
 } from "./controller"
 import { runDiagnosisPrompt } from "./presentation"
+import type { UpdateClient } from "../update/source-updater"
 
 export interface TuiClient {
   request<Method extends RpcMethod>(
@@ -30,6 +32,78 @@ export interface TuiClient {
   close(): Promise<void> | void
   subscribeEvents?(listener: (event: AssistantTurnEventDto) => void): () => void
 }
+
+export interface StudioClient {
+  openNewApplication(): Promise<{
+    sessionID: string
+    messages: BuilderMessage[]
+  }>
+  openApplication(applicationID: string): Promise<{
+    sessionID: string
+    messages: BuilderMessage[]
+  }>
+  send(sessionID: string, message: string): Promise<{
+    messages: BuilderMessage[]
+  }>
+  subscribe?(listener: (event: StudioEvent) => void): () => void
+  replyPermission?(requestID: string, reply: "once" | "always" | "reject"): Promise<void>
+  replyQuestion?(requestID: string, answers: string[][]): Promise<void>
+  rejectQuestion?(requestID: string): Promise<void>
+  interrupt?(sessionID: string): Promise<void>
+  setPermissionMode?(
+    sessionID: string,
+    mode: "application_only" | "full_access",
+  ): Promise<void>
+  listModels?(): Promise<StudioModel[]>
+  setModel?(sessionID: string, modelID: string): Promise<void>
+}
+
+export type StudioModel = {
+  id: string
+  providerID: string
+  modelID: string
+  name: string
+  providerName: string
+  default?: boolean
+}
+
+export type StudioQuestion = {
+  header: string
+  question: string
+  options: Array<{ label: string; description: string }>
+  multiple: boolean
+  custom: boolean
+}
+
+export type StudioEvent =
+  | { type: "text.delta"; sessionID: string; text: string }
+  | {
+      type: "tool"
+      sessionID: string
+      callID: string
+      name: string
+      status: "pending" | "running" | "completed" | "error"
+      title?: string
+      input?: Record<string, unknown>
+      output?: string
+      metadata?: Record<string, unknown>
+    }
+  | {
+      type: "diff"
+      sessionID: string
+      files: Array<{ file?: string; patch?: string; additions: number; deletions: number; status?: string }>
+    }
+  | {
+      type: "permission"
+      sessionID: string
+      requestID: string
+      permission: string
+      patterns: string[]
+      metadata: Record<string, unknown>
+    }
+  | { type: "status"; sessionID: string; status: "busy" | "idle" | "retry" }
+  | { type: "question"; sessionID: string; requestID: string; questions: StudioQuestion[] }
+  | { type: "error"; sessionID?: string; message: string }
 
 export type BuilderDraftFile = {
   path: string
@@ -45,15 +119,33 @@ export type BuilderDraft = {
 }
 
 export type BuilderMessage = {
-  id: number
+  id: number | string
   role: "user" | "assistant"
   content: string
 }
+
+export type StudioLoopState =
+  | "idle"
+  | "thinking"
+  | "tool"
+  | "validating"
+  | "running"
+  | "waiting_permission"
+  | "failed"
+
+export type StudioToolCall = Extract<StudioEvent, { type: "tool" }>
+export type StudioPermissionRequest = Extract<StudioEvent, { type: "permission" }>
 
 export type AgentLoomSessionState = {
   snapshot: BootstrapResultDto
   runsIncomplete: boolean
   workspacePhase: "idle" | "loading" | "ready" | "error"
+  studioEnabled: boolean
+  studioTarget: { type: "new" } | { type: "application"; applicationID: string } | null
+  studioSessionID: string | null
+  permissionMode: "application_only" | "full_access"
+  studioModels: StudioModel[]
+  studioModel: StudioModel | null
   route: AppRoute
   selectedIndex: number
   sidebarOpen: boolean
@@ -61,13 +153,20 @@ export type AgentLoomSessionState = {
   messages: BuilderMessage[]
   streamingText: string
   activities: Array<{ name: string; state: "started" | "completed" }>
+  loopState: StudioLoopState
+  studioTools: StudioToolCall[]
+  studioDiffs: Extract<StudioEvent, { type: "diff" }>["files"]
+  permissionRequest: StudioPermissionRequest | null
+  questionRequest: Extract<StudioEvent, { type: "question" }> | null
   draft: BuilderDraft | null
+  applicationDetail: ApplicationDetailResultDto | null
   systemDetail: SystemDetailResultDto | null
   runDetail: RunDetailResultDto | null
   assistantBusy: boolean
   detailBusy: boolean
   busy: boolean
   notice: string | null
+  updatePhase: "idle" | "checking" | "current" | "available" | "installing" | "installed" | "failed"
 }
 
 type Listener = (state: AgentLoomSessionState) => void
@@ -79,17 +178,22 @@ export class AgentLoomSession {
   private startPromise: Promise<void> | null = null
   private liveRefreshPromise: Promise<void> | null = null
   private routeLoadGeneration = 0
+  private studioTurnGeneration = 0
+  private readonly studioModelBySession = new Map<string, string>()
   private builderBusy = false
   private routeBusy = false
   private messageID = 0
   private readonly unsubscribeEvents: () => void
+  private readonly unsubscribeStudioEvents: () => void
 
   constructor(
     private readonly input: {
       client: TuiClient
+      studio?: StudioClient
       snapshot?: BootstrapResultDto
       projectRoot?: string
       sessionID?: string
+      updater?: UpdateClient
     },
   ) {
     if (!input.snapshot && !input.projectRoot) {
@@ -101,6 +205,12 @@ export class AgentLoomSession {
       snapshot,
       runsIncomplete: false,
       workspacePhase: input.snapshot ? "ready" : "idle",
+      studioEnabled: Boolean(input.studio),
+      studioTarget: null,
+      studioSessionID: null,
+      permissionMode: "application_only",
+      studioModels: [],
+      studioModel: null,
       route: { type: "builder" },
       selectedIndex: 0,
       sidebarOpen: false,
@@ -109,26 +219,35 @@ export class AgentLoomSession {
         {
           id: this.nextMessageID(),
           role: "assistant",
-          content: "我是 AgentLoom 助手。你可以问普通问题，也可以让我查看项目、分析 Agent 状态或创建 Agent YAML。任何写入都会先给出草稿，由你显式 /apply。",
+          content: "我是 AgentLoom Studio Agent。请新建或选择一个 Application；之后可以直接让我检查、修改、验证和运行它。",
         },
       ],
       streamingText: "",
       activities: [],
+      loopState: "idle",
+      studioTools: [],
+      studioDiffs: [],
+      permissionRequest: null,
+      questionRequest: null,
       draft: null,
+      applicationDetail: null,
       systemDetail: null,
       runDetail: null,
       assistantBusy: false,
       detailBusy: false,
       busy: false,
       notice: null,
+      updatePhase: "idle",
     }
     this.unsubscribeEvents = input.client.subscribeEvents?.((event) => this.handleEvent(event)) ?? (() => {})
+    this.unsubscribeStudioEvents = input.studio?.subscribe?.((event) => this.handleStudioEvent(event)) ?? (() => {})
   }
 
   readonly sessionID: string
 
   dispose(): void {
     this.unsubscribeEvents()
+    this.unsubscribeStudioEvents()
   }
 
   get state(): AgentLoomSessionState {
@@ -141,6 +260,7 @@ export class AgentLoomSession {
   }
 
   start(): Promise<void> {
+    if (this.current.updatePhase === "idle") void this.checkForUpdates()
     if (this.current.workspacePhase === "ready") return Promise.resolve()
     if (this.startPromise) return this.startPromise
     this.patch({ workspacePhase: "loading", notice: null })
@@ -148,6 +268,35 @@ export class AgentLoomSession {
       this.startPromise = null
     })
     return this.startPromise
+  }
+
+  async checkForUpdates(): Promise<void> {
+    if (!this.input.updater || this.current.updatePhase !== "idle") return
+    this.patch({ updatePhase: "checking" })
+    try {
+      const result = await this.input.updater.check()
+      this.patch({ updatePhase: result.available ? "available" : "current" })
+    } catch {
+      // Update discovery must never block or obscure the Application workspace.
+      this.patch({ updatePhase: "failed" })
+    }
+  }
+
+  async installUpdate(): Promise<boolean> {
+    if (!this.input.updater || this.current.updatePhase !== "available") return false
+    if (this.builderBusy || this.routeBusy) {
+      this.patch({ notice: "请先等待当前 Agent Loop 或详情加载完成" })
+      return false
+    }
+    this.patch({ updatePhase: "installing", notice: "正在整体更新 TUI、OpenCode Runtime 与 Python Runtime…" })
+    try {
+      await this.input.updater.install()
+      this.patch({ updatePhase: "installed", notice: "更新完成，正在安全重启…" })
+      return true
+    } catch (error) {
+      this.patch({ updatePhase: "available", notice: errorMessage(error) })
+      return false
+    }
   }
 
   subscribe(listener: Listener): () => void {
@@ -170,6 +319,55 @@ export class AgentLoomSession {
     this.patch({ sidebarOpen: open })
   }
 
+  async beginApplicationCreation(): Promise<void> {
+    this.routeLoadGeneration += 1
+    this.routeBusy = false
+    this.patch({
+      studioTarget: { type: "new" },
+      studioSessionID: null,
+      permissionMode: "application_only",
+      studioModel: null,
+      route: { type: "builder" },
+      systemDetail: null,
+      applicationDetail: null,
+      runDetail: null,
+      loopState: "idle",
+      studioTools: [],
+      studioDiffs: [],
+      permissionRequest: null,
+      questionRequest: null,
+      messages: [
+        ...this.current.messages,
+        {
+          id: this.nextMessageID(),
+          role: "assistant",
+          content: "请描述这个 Application 的目标、输入、输出和验收标准；我会在信息足够后直接创建、校验并验证它。",
+        },
+      ],
+      notice: null,
+    })
+    if (!this.input.studio) return
+    this.builderBusy = true
+    this.patch({ loopState: "thinking" })
+    try {
+      const conversation = await this.input.studio.openNewApplication()
+      if (this.current.studioTarget?.type !== "new") return
+      this.patch({
+        studioSessionID: conversation.sessionID,
+        loopState: "idle",
+        messages: conversation.messages.length > 0
+          ? conversation.messages
+          : this.current.messages,
+      })
+      await this.loadStudioModels()
+    } catch (error) {
+      this.patch({ notice: errorMessage(error), studioSessionID: null, loopState: "failed" })
+    } finally {
+      this.builderBusy = false
+      this.patch({})
+    }
+  }
+
   goBuilder(): void {
     if (this.current.route.type === "builder") {
       if (!this.builderBusy) this.patch({ notice: null })
@@ -180,6 +378,7 @@ export class AgentLoomSession {
     this.patch({
       route: { type: "builder" },
       systemDetail: null,
+      applicationDetail: null,
       runDetail: null,
       notice: null,
     })
@@ -193,15 +392,28 @@ export class AgentLoomSession {
 
   async openEntry(entry: SidebarEntry): Promise<void> {
     const index = this.entries.findIndex((candidate) => candidate.key === entry.key)
-    this.routeBusy = entry.kind === "system" || entry.kind === "run"
+    this.routeBusy = entry.kind === "application" || entry.kind === "agent" || entry.kind === "system" || entry.kind === "run"
+    const studioApplicationID = entry.kind === "application" || entry.kind === "agent"
+      ? entry.applicationID
+      : null
     this.patch({
+      ...(studioApplicationID
+        ? {
+            studioTarget: { type: "application" as const, applicationID: studioApplicationID },
+            permissionMode: "application_only" as const,
+          }
+        : {}),
       route: routeForEntry(entry),
       selectedIndex: index < 0 ? this.current.selectedIndex : index,
       sidebarOpen: true,
       systemDetail: null,
+      applicationDetail: null,
       runDetail: null,
       notice: null,
     })
+    if (studioApplicationID && this.input.studio) {
+      await this.openStudioApplication(studioApplicationID)
+    }
     await this.loadCurrentRoute()
   }
 
@@ -287,6 +499,16 @@ export class AgentLoomSession {
     if (this.builderBusy) return
     const command = parseBuilderInput(raw)
     if (command.type === "empty") return
+    if (command.type === "help") {
+      this.patch({
+        messages: [
+          ...this.current.messages,
+          { id: this.nextMessageID(), role: "assistant", content: studioHelpMessage() },
+        ],
+        notice: null,
+      })
+      return
+    }
     if (command.type === "models") {
       this.patch({
         messages: [
@@ -340,7 +562,95 @@ export class AgentLoomSession {
       await this.mutateSchedule(command)
       return
     }
+    if (this.input.studio) {
+      if (!this.current.studioSessionID) {
+        this.patch({ notice: "请先新建或选择一个 Application" })
+        return
+      }
+      await this.sendStudioMessage(command.message)
+      return
+    }
     await this.sendBuilderMessage(command.message)
+  }
+
+  private async openStudioApplication(applicationID: string): Promise<void> {
+    this.builderBusy = true
+    this.patch({ notice: null })
+    try {
+      const conversation = await this.input.studio!.openApplication(applicationID)
+      if (
+        this.current.studioTarget?.type !== "application"
+        || this.current.studioTarget.applicationID !== applicationID
+      ) return
+      this.patch({
+        studioSessionID: conversation.sessionID,
+        loopState: "idle",
+        studioTools: [],
+        studioDiffs: [],
+        permissionRequest: null,
+        questionRequest: null,
+        messages: conversation.messages.length > 0
+          ? conversation.messages
+          : [{
+              id: this.nextMessageID(),
+              role: "assistant",
+              content: `已打开 ${applicationID}。告诉我需要检查、修改、验证或运行什么。`,
+            }],
+      })
+      await this.loadStudioModels()
+    } catch (error) {
+      this.patch({ notice: errorMessage(error), studioSessionID: null })
+    } finally {
+      this.builderBusy = false
+      this.patch({})
+    }
+  }
+
+  private async sendStudioMessage(message: string): Promise<void> {
+    const sessionID = this.current.studioSessionID
+    if (!sessionID) return
+    const turnGeneration = ++this.studioTurnGeneration
+    this.builderBusy = true
+    this.patch({
+      notice: null,
+      streamingText: "",
+      activities: [],
+      loopState: "thinking",
+      studioTools: [],
+      studioDiffs: [],
+      permissionRequest: null,
+      questionRequest: null,
+      messages: [
+        ...this.current.messages,
+        { id: this.nextMessageID(), role: "user", content: message },
+      ],
+    })
+    try {
+      const conversation = await this.input.studio!.send(sessionID, message)
+      if (
+        this.current.studioSessionID !== sessionID
+        || this.studioTurnGeneration !== turnGeneration
+      ) return
+      this.patch({
+        messages: conversation.messages,
+        streamingText: "",
+        activities: [],
+        loopState: "idle",
+      })
+    } catch (error) {
+      if (
+        this.current.studioSessionID !== sessionID
+        || this.studioTurnGeneration !== turnGeneration
+      ) return
+      this.patch({ notice: errorMessage(error), loopState: "failed" })
+    } finally {
+      if (
+        this.current.studioSessionID !== sessionID
+        || this.studioTurnGeneration !== turnGeneration
+      ) return
+      this.builderBusy = false
+      this.patch({ streamingText: "", activities: [] })
+    }
   }
 
   private async performRefresh(initial: boolean): Promise<void> {
@@ -372,17 +682,35 @@ export class AgentLoomSession {
 
   private async loadCurrentRoute(): Promise<void> {
     const route = this.current.route
-    if (route.type !== "system" && route.type !== "run") return
+    if (route.type !== "application" && route.type !== "agent" && route.type !== "system" && route.type !== "run") return
 
     const generation = ++this.routeLoadGeneration
     const managesRouteBusy = this.routeBusy
     try {
+      if (route.type === "application") {
+        const detail = await this.input.client.request("application.detail", {
+          application_id: route.applicationID,
+        })
+        if (!this.isCurrentRouteLoad(generation, route)) return
+        this.patch({ applicationDetail: detail, systemDetail: null, runDetail: null })
+        return
+      }
+      if (route.type === "agent") {
+        const applicationID = findAgentApplicationID(this.current.snapshot.agents, route.agentID)
+        if (!applicationID) throw new Error(`找不到 Agent: ${route.agentID}`)
+        const detail = await this.input.client.request("application.detail", {
+          application_id: applicationID,
+        })
+        if (!this.isCurrentRouteLoad(generation, route)) return
+        this.patch({ applicationDetail: detail, systemDetail: null, runDetail: null })
+        return
+      }
       if (route.type === "system") {
         const detail = asSystemDetail(
           await this.input.client.request("system.detail", { system_id: route.systemID }),
         )
         if (!this.isCurrentRouteLoad(generation, route)) return
-        this.patch({ systemDetail: detail, runDetail: null })
+        this.patch({ applicationDetail: null, systemDetail: detail, runDetail: null })
         return
       }
 
@@ -407,6 +735,7 @@ export class AgentLoomSession {
           ? selectedIndex
           : Math.min(this.current.selectedIndex, Math.max(0, entries.length - 1)),
         runDetail: detail,
+        applicationDetail: null,
         systemDetail: null,
       })
     } catch (error) {
@@ -422,8 +751,17 @@ export class AgentLoomSession {
 
   private isCurrentRouteLoad(generation: number, route: AppRoute): boolean {
     if (generation !== this.routeLoadGeneration) return false
+    if (route.type === "application") {
+      return this.current.route.type === "application"
+        && this.current.route.applicationID === route.applicationID
+    }
     if (route.type === "system") {
       return this.current.route.type === "system"
+        && this.current.route.systemID === route.systemID
+    }
+    if (route.type === "agent") {
+      return this.current.route.type === "agent"
+        && this.current.route.agentID === route.agentID
         && this.current.route.systemID === route.systemID
     }
     if (route.type === "run") {
@@ -611,10 +949,217 @@ export class AgentLoomSession {
     }
   }
 
+  private handleStudioEvent(event: StudioEvent): void {
+    const sessionID = this.current.studioSessionID
+    if (event.type !== "error" && event.sessionID !== sessionID) return
+    if (event.type === "error" && event.sessionID && event.sessionID !== sessionID) return
+
+    if (event.type === "text.delta") {
+      this.patch({
+        streamingText: (this.current.streamingText + event.text).slice(-32_000),
+        loopState: "thinking",
+      })
+      return
+    }
+    if (event.type === "tool") {
+      const studioTools = [...this.current.studioTools]
+      const index = studioTools.findIndex((tool) => tool.callID === event.callID)
+      if (index >= 0) studioTools[index] = event
+      else studioTools.push(event)
+      this.patch({
+        studioTools: studioTools.slice(-16),
+        loopState: studioLoopStateForTool(event),
+      })
+      return
+    }
+    if (event.type === "diff") {
+      this.patch({ studioDiffs: mergeStudioDiffs(this.current.studioDiffs, event.files) })
+      return
+    }
+    if (event.type === "permission") {
+      this.patch({ permissionRequest: event, loopState: "waiting_permission" })
+      return
+    }
+    if (event.type === "question") {
+      this.patch({ questionRequest: event, loopState: "waiting_permission" })
+      return
+    }
+    if (event.type === "status") {
+      this.patch({
+        loopState: event.status === "idle" ? "idle" : "thinking",
+      })
+      return
+    }
+    this.patch({ notice: event.message, loopState: "failed" })
+  }
+
+  async respondPermission(reply: "once" | "always" | "reject"): Promise<void> {
+    const request = this.current.permissionRequest
+    if (!request || !this.input.studio?.replyPermission) return
+    await this.input.studio.replyPermission(request.requestID, reply)
+    this.patch({ permissionRequest: null, loopState: reply === "reject" ? "idle" : "thinking" })
+  }
+
+  async respondQuestion(raw: string): Promise<void> {
+    const request = this.current.questionRequest
+    if (!request || !this.input.studio?.replyQuestion) return
+    const answers = raw.split("|").map((answer) => answer.trim())
+    if (answers.length !== request.questions.length || answers.some((answer) => !answer)) {
+      this.patch({
+        notice: request.questions.length === 1
+          ? "请输入一个答案"
+          : `请用 | 分隔 ${request.questions.length} 个答案`,
+      })
+      return
+    }
+    try {
+      await this.input.studio.replyQuestion(
+        request.requestID,
+        answers.map((answer) => [answer]),
+      )
+      this.patch({ questionRequest: null, loopState: "thinking", notice: null })
+    } catch (error) {
+      this.patch({ notice: errorMessage(error) })
+    }
+  }
+
+  async respondQuestionOption(label: string): Promise<void> {
+    const request = this.current.questionRequest
+    if (!request) return
+    if (request.questions.length !== 1) {
+      this.patch({ notice: `请在输入框用 | 分隔 ${request.questions.length} 个答案` })
+      return
+    }
+    await this.respondQuestion(label)
+  }
+
+  async rejectQuestion(): Promise<void> {
+    const request = this.current.questionRequest
+    if (!request || !this.input.studio?.rejectQuestion) return
+    try {
+      await this.input.studio.rejectQuestion(request.requestID)
+      this.patch({ questionRequest: null, loopState: "idle", notice: null })
+    } catch (error) {
+      this.patch({ notice: errorMessage(error) })
+    }
+  }
+
+  async interruptStudio(): Promise<void> {
+    const sessionID = this.current.studioSessionID
+    if (!sessionID || !this.input.studio?.interrupt) return
+    const turnGeneration = ++this.studioTurnGeneration
+    try {
+      await this.input.studio.interrupt(sessionID)
+    } catch (error) {
+      if (
+        this.current.studioSessionID === sessionID
+        && this.studioTurnGeneration === turnGeneration
+      ) this.patch({ notice: errorMessage(error) })
+      return
+    }
+    if (
+      this.current.studioSessionID !== sessionID
+      || this.studioTurnGeneration !== turnGeneration
+    ) return
+    this.builderBusy = false
+    this.patch({
+      streamingText: "",
+      activities: [],
+      loopState: "idle",
+      permissionRequest: null,
+      questionRequest: null,
+    })
+  }
+
+  async setPermissionMode(mode: "application_only" | "full_access"): Promise<void> {
+    const sessionID = this.current.studioSessionID
+    if (!sessionID || !this.input.studio?.setPermissionMode) {
+      this.patch({ notice: "请先新建或选择一个 Application" })
+      return
+    }
+    try {
+      await this.input.studio.setPermissionMode(sessionID, mode)
+      this.patch({
+        permissionMode: mode,
+        notice: mode === "full_access"
+          ? "已为当前 TUI 会话启用 Full Access；退出后不会保留"
+          : "已恢复 Application Only",
+      })
+    } catch (error) {
+      this.patch({ notice: errorMessage(error) })
+    }
+  }
+
+  async setStudioModel(modelID: string): Promise<void> {
+    const sessionID = this.current.studioSessionID
+    const model = this.current.studioModels.find((candidate) => candidate.id === modelID)
+    if (!sessionID || !model || !this.input.studio?.setModel) {
+      this.patch({ notice: "请先选择 Application 和可用的 Studio 模型" })
+      return
+    }
+    try {
+      await this.input.studio.setModel(sessionID, modelID)
+      this.studioModelBySession.set(sessionID, modelID)
+      this.patch({ studioModel: model, notice: `Studio 模型已切换为 ${model.providerName} · ${model.name}` })
+    } catch (error) {
+      this.patch({ notice: errorMessage(error) })
+    }
+  }
+
+  private async loadStudioModels(): Promise<void> {
+    if (!this.input.studio?.listModels) return
+    try {
+      const studioModels = await this.input.studio.listModels()
+      const selectedModelID = this.current.studioSessionID
+        ? this.studioModelBySession.get(this.current.studioSessionID)
+        : undefined
+      const selected = studioModels.find((model) => model.id === selectedModelID)
+        ?? studioModels.find((model) => model.default)
+        ?? null
+      this.patch({ studioModels, studioModel: selected })
+    } catch (error) {
+      this.patch({ notice: `读取 config/llm.yaml Studio 模型失败: ${errorMessage(error)}` })
+    }
+  }
+
   private nextMessageID(): number {
     this.messageID += 1
     return this.messageID
   }
+}
+
+function studioLoopStateForTool(event: StudioToolCall): StudioLoopState {
+  if (event.status === "error") return "failed"
+  if (event.status === "completed") return "thinking"
+  if (event.name !== "agentloom_domain") return "tool"
+  const action = typeof event.input?.action === "string" ? event.input.action : ""
+  if (action === "application.validate") return "validating"
+  if (action.startsWith("run.")) return "running"
+  return "tool"
+}
+
+function mergeStudioDiffs(
+  current: AgentLoomSessionState["studioDiffs"],
+  incoming: AgentLoomSessionState["studioDiffs"],
+): AgentLoomSessionState["studioDiffs"] {
+  const merged = new Map<string, AgentLoomSessionState["studioDiffs"][number]>()
+  for (const file of [...current, ...incoming]) {
+    const key = file.file ?? file.patch ?? `anonymous-${merged.size}`
+    merged.set(key, file)
+  }
+  return [...merged.values()].slice(-64)
+}
+
+function findAgentApplicationID(
+  agents: BootstrapResultDto["agents"],
+  agentID: string,
+): string | null {
+  for (const agent of agents) {
+    if (agent.id === agentID) return agent.application_id
+    const nested = findAgentApplicationID(agent.workers, agentID)
+    if (nested) return nested
+  }
+  return null
 }
 
 export function createWorkspaceShell(projectRoot: string): BootstrapResultDto {
@@ -740,6 +1285,24 @@ function modelCatalogMessage(snapshot: BootstrapResultDto): string {
   ].join("\n")
 }
 
+function studioHelpMessage(): string {
+  return [
+    "Application Studio 帮助",
+    "- + New Application：创建并绑定一个新的 OpenCode Studio Session",
+    "- Ctrl+X：搜索命令、权限、Applications、主 Agents、Skills、Schedules 与 Runs",
+    "- /models：从 config/llm.yaml 选择 Studio 模型；不会修改 Application model_type",
+    "- /refresh：重新索引 AgentLoom 项目状态",
+    "- Application Only：默认只直接写当前 Application；权限卡 1 仅本次、2 本次会话、3 拒绝",
+    "- Full Access：从 Ctrl+X 显式启用，只在当前 TUI 会话有效",
+    "- Agent 问题：点击选项或在输入框回答；多个问题用 | 分隔，Esc 拒绝",
+    "- 更新：后台检查可信源码目录；从 Ctrl+X 确认整体更新并安全重启",
+    "- Esc：按上下文关闭详情、拒绝权限/问题或中止当前 Agent Loop",
+    "- 卡住保护：连续 60 秒没有文本、Tool、Diff 或状态进展时，自动中止当前 Loop 及其 Task 子会话",
+    "- PgUp / PgDn：滚动当前焦点中的聊天或详情；鼠标滚轮滚动指针所在区域",
+    "- Ctrl+C：退出",
+  ].join("\n")
+}
+
 function scheduleHelpMessage(snapshot: BootstrapResultDto): string {
   return [
     "定时任务命令：",
@@ -750,7 +1313,7 @@ function scheduleHelpMessage(snapshot: BootstrapResultDto): string {
     "- /schedule resume <job-id>",
     "- /schedule remove <job-id>",
     `自动触发需要保持调度服务运行：${schedulerServeCommand(snapshot)}`,
-    "输入 Ctrl+P 搜索 Schedules，可查看下一次/上一次运行与服务状态。",
+    "输入 Ctrl+X 搜索 Schedules，可查看下一次/上一次运行与服务状态。",
   ].join("\n")
 }
 
