@@ -189,6 +189,7 @@ describe("TUI controller", () => {
   test("builds one searchable command and entity catalog instead of a permanent list", () => {
     const items = buildPaletteItems(bootstrap)
     expect(items).toEqual(expect.arrayContaining([
+      expect.objectContaining({ action: "new-application", title: "新建 Application" }),
       expect.objectContaining({ action: "permission-full", title: "启用 Full Access" }),
       expect.objectContaining({ action: "permission-application", title: "恢复 Application Only" }),
       expect.objectContaining({
@@ -199,6 +200,7 @@ describe("TUI controller", () => {
     ]))
 
     expect(items.filter((item) => item.category === "Commands").map((item) => item.title)).toEqual([
+      "新建 Application",
       "返回对话",
       "刷新工作区",
       "启用 Full Access",
