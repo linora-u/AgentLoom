@@ -32,6 +32,8 @@ environment. `agentloom --snapshot` is the non-interactive health check.
 - The first entry is `+ New Application`, followed by every directory under
   `applications/`. Choosing another Application retargets the current Studio
   Session and keeps its conversation memory; only `/new` starts a fresh Session.
+  `/compact` summarizes the active context in place, retaining Session identity,
+  durable history, and completed file changes.
   A target switch is blocked while an Agent Loop is active; wait or press `Esc`
   before switching so an old turn cannot finish against the new Application.
 - The workspace summary counts Applications, not expanded Supervisor/Worker
@@ -73,7 +75,8 @@ Model-facing Application detail is deduplicated and paginated instead of
 placing a complete large Application in one Tool result. Studio persists the
 Session lifecycle for status, retry, permission, question, and Task
 sub-session progress; quiet model latency is not treated as a cancellation
-signal. `Esc` is the explicit manual interrupt. An interrupted unfinished turn is
+signal. Context-limit compaction is performed by the Runtime and shown in the
+TUI; `/compact` invokes the same Session compaction explicitly. `Esc` is the explicit manual interrupt. An interrupted unfinished turn is
 removed from future model context, while file changes already completed by its
 tools are retained; the next message therefore starts a new task instead of
 silently resuming the cancelled one.
@@ -94,6 +97,8 @@ configuration is an explicit startup error, not an ambient default fallback.
 | Action | Key / command |
 |---|---|
 | Send a Studio message | `Enter` |
+| Start a blank conversation while retaining Application history | `/new` |
+| Compact the current Session without starting over | `/compact` |
 | Search commands and global entities | `Ctrl+X` |
 | Select a Studio model from `config/llm.yaml` | `/models` or `Ctrl+X` |
 | Re-index project state | `/refresh` |

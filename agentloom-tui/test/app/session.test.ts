@@ -309,6 +309,13 @@ describe("AgentLoom TUI session", () => {
         calls.push(`new:${target.type === "new" ? "new" : target.applicationID}:${permissionMode}`)
         return { sessionID: "ses_fresh", messages: [] }
       },
+      async compact(sessionID) {
+        calls.push(`compact:${sessionID}`)
+        return {
+          sessionID,
+          messages: [{ id: "compacted", role: "assistant", content: "压缩后仍在当前会话" }],
+        }
+      },
       async send() { return { messages: [] } },
       async setPermissionMode(sessionID, mode) { calls.push(`permission:${sessionID}:${mode}`) },
     }
@@ -336,12 +343,20 @@ describe("AgentLoom TUI session", () => {
     expect(session.state.messages).toEqual([
       { id: "memory-second", role: "assistant", content: "second 的已有记忆" },
     ])
+    await session.submit("/compact")
+
+    expect(session.state.studioSessionID).toBe("ses_second")
+    expect(session.state.messages).toEqual([
+      { id: "compacted", role: "assistant", content: "压缩后仍在当前会话" },
+    ])
+    expect(session.state.notice).toContain("上下文已压缩")
     await session.submit("/new")
 
     expect(session.state.studioSessionID).toBe("ses_fresh")
     expect(calls).toEqual([
       "open:new:full_access",
       "open:second:full_access",
+      "compact:ses_second",
       "new:second:full_access",
     ])
 
@@ -394,6 +409,100 @@ describe("AgentLoom TUI session", () => {
     expect(session.state.notice).toContain("Agent Loop")
     turn.resolve({ messages: [{ id: "done", role: "assistant", content: "done" }] })
     await running
+  })
+
+  test("keeps the current Session and messages when manual compaction fails", async () => {
+    const studio: StudioClient = {
+      async openNewApplication() { throw new Error("not expected") },
+      async openApplication() {
+        return {
+          sessionID: "ses_preserved",
+          messages: [{ id: "before", role: "assistant", content: "重要上下文" }],
+        }
+      },
+      async compact() { throw new Error("summary provider unavailable") },
+      async send() { throw new Error("not expected") },
+    }
+    const session = new AgentLoomSession({ client: new FakeClient(), studio, snapshot: catalogSnapshot })
+    const application = buildPaletteItems(catalogSnapshot).find((item) => item.category === "Applications")
+    if (!application || !("entry" in application)) throw new Error("missing Application")
+    await session.openEntry(application.entry)
+
+    await session.submit("/compact")
+
+    expect(session.state.studioSessionID).toBe("ses_preserved")
+    expect(session.state.messages).toEqual([
+      { id: "before", role: "assistant", content: "重要上下文" },
+    ])
+    expect(session.state.loopState).toBe("failed")
+    expect(session.state.notice).toContain("原 Session 未切换")
+  })
+
+  test("keeps compaction successful when only the visible history refresh fails", async () => {
+    const studio: StudioClient = {
+      async openNewApplication() { throw new Error("not expected") },
+      async openApplication() {
+        return {
+          sessionID: "ses_compacted",
+          messages: [{ id: "before", role: "assistant", content: "压缩前可见消息" }],
+        }
+      },
+      async compact(sessionID) {
+        return { sessionID, messages: [], historyRefreshFailed: true }
+      },
+      async send() { throw new Error("not expected") },
+    }
+    const session = new AgentLoomSession({ client: new FakeClient(), studio, snapshot: catalogSnapshot })
+    const application = buildPaletteItems(catalogSnapshot).find((item) => item.category === "Applications")
+    if (!application || !("entry" in application)) throw new Error("missing Application")
+    await session.openEntry(application.entry)
+
+    await session.submit("/compact")
+
+    expect(session.state.messages).toEqual([
+      { id: "before", role: "assistant", content: "压缩前可见消息" },
+    ])
+    expect(session.state.loopState).toBe("idle")
+    expect(session.state.notice).toContain("上下文已压缩")
+    expect(session.state.notice).toContain("聊天视图暂未刷新")
+  })
+
+  test("does not fake-interrupt a pending manual compaction or admit a concurrent turn", async () => {
+    const compaction = deferred<{
+      sessionID: string
+      messages: Array<{ id: string; role: "assistant"; content: string }>
+    }>()
+    const sends: string[] = []
+    const interrupts: string[] = []
+    const studio: StudioClient = {
+      async openNewApplication() { throw new Error("not expected") },
+      async openApplication() { return { sessionID: "ses_compacting", messages: [] } },
+      compact() { return compaction.promise },
+      async send(_sessionID, message) {
+        sends.push(message)
+        return { messages: [] }
+      },
+      async interrupt(sessionID) { interrupts.push(sessionID) },
+    }
+    const session = new AgentLoomSession({ client: new FakeClient(), studio, snapshot: catalogSnapshot })
+    const application = buildPaletteItems(catalogSnapshot).find((item) => item.category === "Applications")
+    if (!application || !("entry" in application)) throw new Error("missing Application")
+    await session.openEntry(application.entry)
+    const pending = session.submit("/compact")
+    await Bun.sleep(0)
+
+    await session.interruptStudio()
+    await session.submit("must wait")
+
+    expect(interrupts).toEqual([])
+    expect(sends).toEqual([])
+    expect(session.state.assistantBusy).toBeTrue()
+    expect(session.state.loopState).toBe("compacting")
+    expect(session.state.notice).toContain("压缩不能安全中止")
+
+    compaction.resolve({ sessionID: "ses_compacting", messages: [] })
+    await pending
+    expect(session.state.assistantBusy).toBeFalse()
   })
 
   test("keeps completed subagent text visible for selection and copy", async () => {
@@ -810,6 +919,81 @@ describe("AgentLoom TUI session", () => {
     expect(replies.at(-1)).toEqual({ requestID: "que_reject" })
   })
 
+  test("shows automatic context compaction without starting a new Session", async () => {
+    let listener: ((event: import("../../src/app/session").StudioEvent) => void) | undefined
+    const studio: StudioClient = {
+      async openNewApplication() { throw new Error("not expected") },
+      async openApplication() { return { sessionID: "ses_compaction", messages: [] } },
+      async send() { return { messages: [] } },
+      subscribe(next) {
+        listener = next
+        return () => { listener = undefined }
+      },
+    }
+    const session = new AgentLoomSession({ client: new FakeClient(), studio, snapshot: catalogSnapshot })
+    const application = buildPaletteItems(catalogSnapshot).find((item) => item.category === "Applications")
+    if (!application || !("entry" in application)) throw new Error("missing Application")
+    await session.openEntry(application.entry)
+
+    listener?.({
+      type: "compaction",
+      sessionID: "ses_compaction",
+      phase: "started",
+      reason: "auto",
+    })
+    expect(session.state.loopState).toBe("compacting")
+    expect(session.state.notice).toContain("自动压缩")
+
+    listener?.({
+      type: "compaction",
+      sessionID: "ses_compaction",
+      phase: "completed",
+      reason: "auto",
+    })
+    expect(session.state.studioSessionID).toBe("ses_compaction")
+    expect(session.state.loopState).toBe("idle")
+    expect(session.state.notice).toContain("已自动压缩")
+  })
+
+  test("returns to thinking after automatic compaction inside an active Agent Loop", async () => {
+    let listener: ((event: import("../../src/app/session").StudioEvent) => void) | undefined
+    const turn = deferred<{ messages: Array<{ id: string; role: "assistant"; content: string }> }>()
+    const studio: StudioClient = {
+      async openNewApplication() { throw new Error("not expected") },
+      async openApplication() { return { sessionID: "ses_auto_compaction", messages: [] } },
+      send() { return turn.promise },
+      subscribe(next) {
+        listener = next
+        return () => { listener = undefined }
+      },
+    }
+    const session = new AgentLoomSession({ client: new FakeClient(), studio, snapshot: catalogSnapshot })
+    const application = buildPaletteItems(catalogSnapshot).find((item) => item.category === "Applications")
+    if (!application || !("entry" in application)) throw new Error("missing Application")
+    await session.openEntry(application.entry)
+    const pending = session.submit("continue the long task")
+    await Bun.sleep(0)
+
+    listener?.({
+      type: "compaction",
+      sessionID: "ses_auto_compaction",
+      phase: "started",
+      reason: "auto",
+    })
+    listener?.({
+      type: "compaction",
+      sessionID: "ses_auto_compaction",
+      phase: "completed",
+      reason: "auto",
+    })
+
+    expect(session.state.assistantBusy).toBeTrue()
+    expect(session.state.loopState).toBe("thinking")
+    turn.resolve({ messages: [{ id: "done", role: "assistant", content: "finished" }] })
+    await pending
+    expect(session.state.loopState).toBe("idle")
+  })
+
   test("switches Full Access only on the currently bound Studio session", async () => {
     const modes: string[] = []
     const studio: StudioClient = {
@@ -932,6 +1116,7 @@ describe("AgentLoom TUI session", () => {
     expect(help).toContain("Ctrl+X")
     expect(help).toContain("Application Only")
     expect(help).toContain("/models")
+    expect(help).toContain("/compact")
     expect(help).not.toContain("F6")
     expect(help).not.toContain("/apply")
     expect(client.calls).toEqual([])
