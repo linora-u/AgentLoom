@@ -22,17 +22,21 @@ Options:
 Inside the TUI:
   Enter              Send a message
   /help               Show context-aware Studio help
+  /new                Start a blank conversation; retain Application history for Agent retrieval
+  /compact            Compact the current Session context without starting a new conversation
   /models             Select a Studio model from config/llm.yaml
   /refresh            Re-index the project catalog
   /schedule           Show durable schedule commands
   Ctrl-X              Commands, permissions, Applications, main Agents, Runs and Skills
   ↑ / ↓ / Enter       Select and open a workbench entry
   PgUp / PgDn         Scroll the open detail view (mouse wheel also works)
+  Ctrl-Y              Copy selected TUI text through OSC52
   Esc                 Close details, reject a permission/question, or interrupt the active Agent Loop
   Ctrl-C              Exit
 
 Permissions:
-  Application Only is the default. Use Ctrl-X to enable Full Access for this TUI session only.
+  Application Only is the default. Ctrl-X toggles Full Access; it can be preset before selection
+  and remains active while switching Applications until toggled off or the TUI exits.
 
 Updates:
   TUI checks the recorded trusted checkout in the background. Confirm update/restart in Ctrl-X.

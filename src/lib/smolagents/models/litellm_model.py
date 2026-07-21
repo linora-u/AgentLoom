@@ -248,7 +248,12 @@ class LiteLLMModelV2(LiteLLMModel):
                 raise ToolCallParseError(
                     f"Tool '{tool_name}' not found in registered tools {sorted(available_tool_names)}"
                 )
-            tool_call.function.arguments = LiteLLMModelV2._normalize_tool_arguments(tool_call.function.arguments)
+            arguments = LiteLLMModelV2._normalize_tool_arguments(tool_call.function.arguments)
+            if not isinstance(arguments, dict):
+                raise ToolCallParseError(
+                    f"Malformed tool_call for '{tool_name}': arguments must be a JSON object"
+                )
+            tool_call.function.arguments = arguments
 
     def _prepare_completion_kwargs(self, *args, **kwargs):
         completion_kwargs = super()._prepare_completion_kwargs(*args, **kwargs)

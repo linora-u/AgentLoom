@@ -10,6 +10,7 @@ from smolagents.memory import ActionStep
 from smolagents.models import ChatMessage, ChatMessageToolCall, ChatMessageToolCallFunction, MessageRole
 from smolagents.monitoring import Timing
 
+from src.lib.logging import NullLoggerBackend
 from src.lib.smolagents.agent.base_agent import ToolCallingAgentV2
 from src.lib.smolagents.models.litellm_model import LiteLLMModelV2
 from src.lib.smolagents.models.tool_call_parser import ToolCallParseError
@@ -96,6 +97,53 @@ class UnknownToolThenFinalModel:
         )
 
 
+class MalformedArgumentsThenFinalModel:
+    model_id = "fake-malformed-then-final"
+
+    def __init__(self):
+        self.calls = 0
+
+    def generate(self, _messages, stop_sequences=None, tools_to_call_from=None, **_kwargs):
+        self.calls += 1
+        if self.calls == 1:
+            message = ChatMessage(
+                role=MessageRole.ASSISTANT,
+                content="",
+                tool_calls=[
+                    ChatMessageToolCall(
+                        id="call-malformed",
+                        type="function",
+                        function=ChatMessageToolCallFunction(
+                            name="final_answer",
+                            arguments=(
+                                '{"answer":{"summary":"returned '
+                                '{"enabled": true}"}}'
+                            ),
+                        ),
+                    )
+                ],
+            )
+            LiteLLMModelV2._normalize_and_validate_tool_calls(
+                message,
+                list(tools_to_call_from or []),
+            )
+            return message
+        return ChatMessage(
+            role=MessageRole.ASSISTANT,
+            content="",
+            tool_calls=[
+                ChatMessageToolCall(
+                    id="call-final-after-malformed",
+                    type="function",
+                    function=ChatMessageToolCallFunction(
+                        name="final_answer",
+                        arguments={"answer": {"summary": 'returned {"enabled": true}'}},
+                    ),
+                )
+            ],
+        )
+
+
 def _make_agent(model, tools):
     return ToolCallingAgentV2(
         tools=tools,
@@ -151,6 +199,36 @@ def test_tool_calling_agent_recovers_when_model_emits_an_unknown_tool() -> None:
 
     assert agent.run("Return a final answer.") == "recovered"
     assert model.calls == 2
+
+
+def test_tool_calling_agent_rejects_malformed_native_arguments_and_recovers() -> None:
+    model = MalformedArgumentsThenFinalModel()
+    agent = ToolCallingAgentV2(
+        tools=[],
+        model=model,
+        max_steps=2,
+        max_tokens=4096,
+        verbosity_level=0,
+    )
+
+    assert agent.run("Return a structured final answer.") == {
+        "summary": 'returned {"enabled": true}'
+    }
+    assert model.calls == 2
+
+
+def test_tool_calling_agent_runs_with_logging_explicitly_disabled() -> None:
+    model = UnknownToolThenFinalModel()
+    agent = ToolCallingAgentV2(
+        tools=[EchoTool()],
+        model=model,
+        logger=NullLoggerBackend(),
+        max_steps=2,
+        max_tokens=4096,
+        verbosity_level=0,
+    )
+
+    assert agent.run("Return a final answer.") == "recovered"
 
 
 def test_tool_calling_agent_executes_native_tool_call_with_json_string_arguments():

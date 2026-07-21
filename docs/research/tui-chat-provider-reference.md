@@ -165,7 +165,7 @@ V1 使用现有 TUI session 内存保存消息、tool parts、usage 和 draft �
 - AI SDK `maxRetries: 0`，由 TUI 外层负责一次可见重试，即总共最多 2 次请求。
 - 只重试网络中断、408、429 和 5xx；不重试 400、401、403、404、配置错误、schema/tool 参数错误和上下文溢出。
 - 尊重 `Retry-After`，但 TUI 单次等待最多 10 秒；超过就直接给出可操作错误。
-- 单次 provider call 最长 60 秒，stream chunk 空闲最长 30 秒，整个用户 turn（含一次 retry）最长 90 秒；以后允许专门的 `tui.timeout_*` 配置覆盖。
+- 不在 TUI 外层按“无文本输出”计时中止 turn；tool、permission、question、retry 与子 Agent 都可能长时间没有文本 token。由 OpenCode Session 的 status/retry/permission/question 生命周期负责运行状态与恢复，用户用 Esc 显式中断。
 - UI 在重试等待期间显示 attempt、原因和下一次时间，不能表现成冻结。
 
 Hermes 在外层控制复杂 retry 时会显式关闭 OpenAI SDK 自带 retry，防止内外重试相乘，见 [`run_agent.py`](https://github.com/NousResearch/hermes-agent/blob/3d9be2789552a495c7adf30148e867e7614a4bdc/run_agent.py#L4197-L4223)。OpenCode 同样把 AI SDK retry 设为外部传入或 0，并在 processor 层发布 retry 状态，见 [`session/llm.ts`](https://github.com/anomalyco/opencode/blob/fab213312927ea64cf968832c527206e8c944f9e/packages/opencode/src/session/llm.ts#L313-L324) 和 [`session/processor.ts`](https://github.com/anomalyco/opencode/blob/fab213312927ea64cf968832c527206e8c944f9e/packages/opencode/src/session/processor.ts#L635-L676)。其重试分类会跳过 context overflow、重试 transient/5xx 并读取 `Retry-After`，见 [`session/retry.ts`](https://github.com/anomalyco/opencode/blob/fab213312927ea64cf968832c527206e8c944f9e/packages/opencode/src/session/retry.ts#L26-L75)。

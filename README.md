@@ -9,7 +9,7 @@ English | <a href="docs/cn/README.md">简体中文</a>
 </p>
 
 <p align="center">
-  Use the OpenCode-powered Application Studio to create, modify, validate, run, and inspect AgentLoom Applications from one terminal.
+  Use Application Studio to create, modify, validate, run, and inspect AgentLoom Applications from one terminal.
 </p>
 
 <p align="center">
@@ -89,10 +89,10 @@ model:
 This file is the single model configuration source for both runtimes.
 Application Agents resolve it through Python and their YAML `model_type`; the
 TypeScript Studio adapter maps the same profiles, endpoints, credentials, and
-compatible request options into the bundled OpenCode Runtime. `/models` and
+compatible request options into the bundled Studio runtime. `/models` and
 `Ctrl+X` select a Studio profile from `config/llm.yaml` without changing any
 Application's `model_type`. Studio startup fails clearly instead of falling
-back to an ambient OpenCode model when this configuration is missing or invalid.
+back to an unconfigured ambient model when this configuration is missing or invalid.
 
 ## Start with the TUI
 
@@ -108,7 +108,7 @@ agentloom --project /path/to/project
 
 The TUI is an Applications-first control plane. Its independent Studio Agent
 can inspect the whole project, directly edit the selected Application, show
-OpenCode Tool and Diff blocks, validate configuration, request permission to
+Tool and Diff blocks, validate configuration, request permission to
 run it, inspect structured evidence, and continue repairing failures.
 
 ### 1. Create or select an Application
@@ -127,9 +127,9 @@ Diff. It loops through Effective Config, YAML/reference validation, an approved
 smoke Run, and structured Run evidence. If real execution is not approved it
 must report “configuration validated, not run” rather than claiming completion.
 Large model-facing Application detail is deduplicated and paginated at ten
-Agents per call. A turn with no text, Tool, Diff, or status progress for 60
-seconds automatically aborts its parent and active Task sub-sessions; `Esc`
-remains the immediate manual interrupt.
+Agents per call. Studio persists Session status, retry, permission,
+question, and Task sub-session events; quiet model latency is not treated as a
+cancellation signal. `Esc` remains the explicit manual interrupt.
 
 ### 2. Understand the workspace numbers
 
@@ -149,9 +149,17 @@ actionable summary rather than raw Events.
 ### 3. Permissions and revisions
 
 `Application Only` is the default. Reads are project-wide, direct writes are
-limited to the current Application, and OpenCode asks for Shell, global, other
+limited to the current Application, and Studio asks for Shell, global, other
 Application, or new-path access. Choose `1` once, `2` for this Session, or `3`
-reject. `Full Access` is available in `Ctrl+X` and resets on exit.
+reject. `Full Access` is one on/off toggle in `Ctrl+X`: it can be preset before
+selecting an Application and remains active while switching Applications; it
+resets on exit. Switching Applications keeps the current Studio memory, while
+`/new` starts a fresh Session. `/compact` compresses the current Session with
+the selected Studio model while preserving task continuity, durable history,
+and completed file changes; the Runtime also reports automatic compaction when
+the context approaches its limit. Switching is blocked during an active Agent Loop;
+wait or press `Esc` first. Sub-agent execution text remains visible until the
+next turn; select TUI text and press `Ctrl+Y` to copy it.
 When the Agent needs a business decision, choose a visible option or type an
 answer; separate multiple answers with `|`.
 
@@ -161,6 +169,9 @@ Working Revision but do not hot-switch a running Agent.
 | Action | Command / key |
 |---|---|
 | Send chat | `Enter` |
+| Start a fresh Studio conversation | `/new` |
+| Compact the current conversation without starting over | `/compact` |
+| Copy selected TUI text | `Ctrl+Y` |
 | Browse commands and global entities | `Ctrl+X` |
 | Select a Studio model from `config/llm.yaml` | `/models` or `Ctrl+X` |
 | Refresh the full index | `/refresh` or `r` in details |

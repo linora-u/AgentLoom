@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, test } from "bun:test"
 import { createOpencodeClient } from "@opencode-ai/sdk/v2"
-import { chmod, mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises"
+import { chmod, mkdir, mkdtemp, readFile, readdir, rm, symlink, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join, resolve } from "node:path"
 import { ApplicationStudioSessions } from "../../src/studio/application-sessions"
@@ -8,6 +8,7 @@ import { domainToolSource, OpenCodeRuntime } from "../../src/studio/opencode-run
 import { createOpenCodeSessionApi } from "../../src/studio/opencode-sdk"
 import { OpenCodeStudioClient } from "../../src/studio/opencode-studio"
 import { startOpenCodeStudio } from "../../src/studio/start"
+import { ApplicationMemoryArchive } from "../../src/studio/application-memory"
 
 const cleanups: Array<() => Promise<void> | void> = []
 
@@ -16,6 +17,119 @@ afterEach(async () => {
 })
 
 describe("bundled OpenCode Runtime", () => {
+  test("refuses a symlinked private-memory ancestor before writing archive data", async () => {
+    const projectRoot = await mkdtemp(join(tmpdir(), "agentloom-memory-symlink-"))
+    const redirected = await mkdtemp(join(tmpdir(), "agentloom-memory-redirected-"))
+    cleanups.push(() => rm(projectRoot, { recursive: true, force: true }))
+    cleanups.push(() => rm(redirected, { recursive: true, force: true }))
+    await symlink(redirected, join(projectRoot, "state"), "dir")
+    const archive = new ApplicationMemoryArchive({
+      workspaceKey: projectRoot,
+      async listApplicationSessions() { return [] },
+      async messages() { return [] },
+    }, join(projectRoot, "state", "studio-memory"))
+
+    await expect(archive.sync("reports")).rejects.toThrow("Unsafe Studio memory")
+    expect(await readdir(redirected)).toEqual([])
+  })
+
+  test("reads only the Application history authorized by an opaque memory capability", async () => {
+    const projectRoot = await mkdtemp(join(tmpdir(), "agentloom-memory-tool-"))
+    cleanups.push(() => rm(projectRoot, { recursive: true, force: true }))
+    const memoryRoot = join(projectRoot, "private-memory")
+    const sessions = [
+      {
+        id: "ses_reports",
+        title: "AgentLoom · reports",
+        time: { created: 1, updated: 2 },
+        metadata: { agentloom: { kind: "application-studio", application_id: "reports" } },
+      },
+      {
+        id: "ses_other",
+        title: "AgentLoom · other",
+        time: { created: 1, updated: 3 },
+        metadata: { agentloom: { kind: "application-studio", application_id: "other" } },
+      },
+    ]
+    const histories = new Map([
+      ["ses_reports", [{
+        info: { id: "msg_reports", role: "assistant" as const },
+        parts: [
+          { type: "text" as const, text: "reports-only decision" },
+          {
+            type: "tool" as const,
+            tool: "agentloom_domain",
+            state: {
+              status: "completed",
+              input: { payload: `${"i".repeat(5_000)}input-final-marker` },
+              output: `${"o".repeat(300_000)}output-final-marker`,
+            },
+          },
+          {
+            type: "tool" as const,
+            tool: "agentloom_domain",
+            state: { status: "error", input: { action: "run.start" }, error: "run-error-marker" },
+          },
+          { type: "text" as const, text: "latest-session-decision" },
+        ],
+      }]],
+      ["ses_other", [{
+        info: { id: "msg_other", role: "assistant" as const },
+        parts: [{ type: "text" as const, text: "other-private decision" }],
+      }]],
+    ])
+    const archive = new ApplicationMemoryArchive({
+      workspaceKey: projectRoot,
+      async listApplicationSessions(applicationID) {
+        return sessions.filter((session) => (
+          (session.metadata.agentloom as { application_id: string }).application_id === applicationID
+        ))
+      },
+      async messages(sessionID) { return histories.get(sessionID) ?? [] },
+    }, memoryRoot)
+    const reports = await archive.sync("reports")
+    const other = await archive.sync("other")
+    if (!reports || !other) throw new Error("missing memory capabilities")
+
+    const pluginPath = join(projectRoot, "agentloom-memory-plugin.mjs")
+    await writeFile(pluginPath, domainToolSource(projectRoot, {}, memoryRoot), "utf8")
+    const pluginModule = await import(`${pluginPath}?test=${crypto.randomUUID()}`)
+    const plugin = await pluginModule.AgentLoomPlugin()
+    const listed = await plugin.tool.agentloom_memory.execute({
+      action: "list",
+      capability: reports.capability,
+    })
+    const list = JSON.parse(listed.output) as {
+      conversations: Array<{ session_id: string; updated_at: number }>
+    }
+    const read = await plugin.tool.agentloom_memory.execute({
+      action: "read",
+      capability: reports.capability,
+      session_id: list.conversations[0]!.session_id,
+    })
+
+    expect(reports.capability).not.toBe(other.capability)
+    expect(list.conversations).toEqual([{ session_id: "ses_reports", updated_at: 2 }])
+    expect(read.output).toContain("reports-only decision")
+    expect(read.output).toContain("input-final-marker")
+    expect(read.output).not.toContain("other-private decision")
+    expect(read.metadata.total_chars).toBeGreaterThan(256_000)
+    const tail = await plugin.tool.agentloom_memory.execute({
+      action: "read",
+      capability: reports.capability,
+      session_id: "ses_reports",
+      offset: read.metadata.total_chars - 512,
+    })
+    expect(tail.output).toContain("output-final-marker")
+    expect(tail.output).toContain("run-error-marker")
+    expect(tail.output).toContain("latest-session-decision")
+    await expect(plugin.tool.agentloom_memory.execute({
+      action: "read",
+      capability: reports.capability,
+      session_id: "ses_other",
+    })).rejects.toThrow("not available through this capability")
+  })
+
   test("rejects oversized domain output before OpenCode can persist it as a managed file", async () => {
     const projectRoot = await mkdtemp(join(tmpdir(), "agentloom-opencode-bounded-output-"))
     cleanups.push(() => rm(projectRoot, { recursive: true, force: true }))
@@ -131,6 +245,7 @@ describe("bundled OpenCode Runtime", () => {
     const runtime = new OpenCodeRuntime({
       command: resolve(import.meta.dir, "../../node_modules/.bin/opencode"),
       projectRoot,
+      memoryRoot: join(projectRoot, ".private-memory"),
       startupTimeoutMs: 15_000,
     })
     const server = await runtime.start()
@@ -141,6 +256,7 @@ describe("bundled OpenCode Runtime", () => {
 
     expect(tools.error).toBeUndefined()
     expect(tools.data).toContain("agentloom_domain")
+    expect(tools.data).toContain("agentloom_memory")
   }, 20_000)
 
   test("serves persistent Application sessions through the real SDK", async () => {
@@ -160,9 +276,49 @@ describe("bundled OpenCode Runtime", () => {
 
     const created = await sessions.open("runtime-smoke")
     const resumed = await sessions.open("runtime-smoke")
+    const branched = await sessions.createFresh({
+      type: "application",
+      applicationID: "runtime-smoke",
+    })
+    const latest = await sessions.open("runtime-smoke")
 
     expect(created.id).toStartWith("ses_")
     expect(resumed.id).toBe(created.id)
+    expect(branched.id).not.toBe(created.id)
+    expect(latest.id).toBe(branched.id)
+  }, 20_000)
+
+  test("compacts a real persistent Session in place through the bundled Runtime", async () => {
+    const projectRoot = await mkdtemp(join(tmpdir(), "agentloom-opencode-compact-"))
+    cleanups.push(() => rm(projectRoot, { recursive: true, force: true }))
+    const llm = new ProfileCaptureServer()
+    cleanups.push(() => llm.close())
+    const runtime = new OpenCodeRuntime({
+      command: resolve(import.meta.dir, "../../node_modules/.bin/opencode"),
+      projectRoot,
+      memoryRoot: join(projectRoot, ".private-memory"),
+      startupTimeoutMs: 15_000,
+      config: deterministicProviderConfig(llm.url),
+    })
+    const server = await runtime.start()
+    cleanups.push(() => server.close())
+    const studio = new OpenCodeStudioClient(
+      createOpenCodeSessionApi({ baseUrl: server.url, directory: projectRoot }),
+      { memoryRoot: join(projectRoot, ".private-memory") },
+    )
+    cleanups.push(() => studio.close())
+    const opened = await studio.openApplication("compact_demo")
+    await studio.setModel(opened.sessionID, "test/test-model")
+    await studio.send(opened.sessionID, "Remember that the acceptance threshold is 0.9.")
+    const requestsBeforeCompaction = llm.requests.length
+
+    const compacted = await studio.compact(opened.sessionID)
+    const reopened = await studio.openApplication("compact_demo")
+
+    expect(llm.requests.length).toBeGreaterThan(requestsBeforeCompaction)
+    expect(compacted.sessionID).toBe(opened.sessionID)
+    expect(reopened.sessionID).toBe(opened.sessionID)
+    expect(compacted.messages.length).toBeGreaterThan(0)
   }, 20_000)
 
   test("runs a deterministic LLM tool loop through the real OpenCode Runtime and Python domain", async () => {
@@ -195,10 +351,10 @@ describe("bundled OpenCode Runtime", () => {
     })
     const server = await runtime.start()
     cleanups.push(() => server.close())
-    const studio = new OpenCodeStudioClient(createOpenCodeSessionApi({
-      baseUrl: server.url,
-      directory: projectRoot,
-    }))
+    const studio = new OpenCodeStudioClient(
+      createOpenCodeSessionApi({ baseUrl: server.url, directory: projectRoot }),
+      { memoryRoot: join(projectRoot, ".private-memory") },
+    )
     cleanups.push(() => studio.close())
     const events: Array<{ type: string; [key: string]: unknown }> = []
     studio.subscribe((event) => events.push(event))
@@ -236,15 +392,16 @@ describe("bundled OpenCode Runtime", () => {
     const runtime = new OpenCodeRuntime({
       command: resolve(import.meta.dir, "../../node_modules/.bin/opencode"),
       projectRoot,
+      memoryRoot: join(projectRoot, ".private-memory"),
       startupTimeoutMs: 15_000,
       config: deterministicProviderConfig(llm.url),
     })
     const server = await runtime.start()
     cleanups.push(() => server.close())
-    const studio = new OpenCodeStudioClient(createOpenCodeSessionApi({
-      baseUrl: server.url,
-      directory: projectRoot,
-    }))
+    const studio = new OpenCodeStudioClient(
+      createOpenCodeSessionApi({ baseUrl: server.url, directory: projectRoot }),
+      { memoryRoot: join(projectRoot, ".private-memory") },
+    )
     cleanups.push(() => studio.close())
     const events: Array<{ type: string; [key: string]: unknown }> = []
     studio.subscribe((event) => events.push(event))
@@ -286,16 +443,17 @@ describe("bundled OpenCode Runtime", () => {
     const runtime = new OpenCodeRuntime({
       command: resolve(import.meta.dir, "../../node_modules/.bin/opencode"),
       projectRoot,
+      memoryRoot: join(projectRoot, ".private-memory"),
       startupTimeoutMs: 15_000,
       environment: { AGENTLOOM_PYTHON: fakePython },
       config: deterministicProviderConfig(llm.url),
     })
     const server = await runtime.start()
     cleanups.push(() => server.close())
-    const studio = new OpenCodeStudioClient(createOpenCodeSessionApi({
-      baseUrl: server.url,
-      directory: projectRoot,
-    }))
+    const studio = new OpenCodeStudioClient(
+      createOpenCodeSessionApi({ baseUrl: server.url, directory: projectRoot }),
+      { memoryRoot: join(projectRoot, ".private-memory") },
+    )
     cleanups.push(() => studio.close())
     const events: Array<{ type: string; [key: string]: unknown }> = []
     studio.subscribe((event) => events.push(event))
@@ -337,15 +495,16 @@ describe("bundled OpenCode Runtime", () => {
     const runtime = new OpenCodeRuntime({
       command: resolve(import.meta.dir, "../../node_modules/.bin/opencode"),
       projectRoot,
+      memoryRoot: join(projectRoot, ".private-memory"),
       startupTimeoutMs: 15_000,
       config: deterministicProviderConfig(llm.url),
     })
     const server = await runtime.start()
     cleanups.push(() => server.close())
-    const studio = new OpenCodeStudioClient(createOpenCodeSessionApi({
-      baseUrl: server.url,
-      directory: projectRoot,
-    }))
+    const studio = new OpenCodeStudioClient(
+      createOpenCodeSessionApi({ baseUrl: server.url, directory: projectRoot }),
+      { memoryRoot: join(projectRoot, ".private-memory") },
+    )
     cleanups.push(() => studio.close())
     const events: Array<{ type: string; [key: string]: unknown }> = []
     studio.subscribe((event) => events.push(event))
@@ -380,6 +539,9 @@ describe("bundled OpenCode Runtime", () => {
       ))
     ))
     if (!emittedDiff) throw new Error(`Missing edited file in session.diff events: ${JSON.stringify(events)}`)
+    expect((await studio.changedFiles(opened.sessionID)).some((file) => (
+      file.file?.endsWith("applications/edit_demo/workflows/demo.yaml")
+    ))).toBeTrue()
   }, 30_000)
 
   test("production Studio composition owns the Runtime lifecycle", async () => {
@@ -397,6 +559,7 @@ describe("bundled OpenCode Runtime", () => {
     const studio = await startOpenCodeStudio({
       command: resolve(import.meta.dir, "../../node_modules/.bin/opencode"),
       projectRoot,
+      memoryRoot: join(projectRoot, ".private-memory"),
       startupTimeoutMs: 15_000,
     })
     cleanups.push(() => studio.close())
@@ -425,6 +588,7 @@ describe("bundled OpenCode Runtime", () => {
     const studio = await startOpenCodeStudio({
       command: resolve(import.meta.dir, "../../node_modules/.bin/opencode"),
       projectRoot,
+      memoryRoot: join(projectRoot, ".private-memory"),
       startupTimeoutMs: 15_000,
     })
     cleanups.push(() => studio.close())
@@ -478,6 +642,7 @@ describe("bundled OpenCode Runtime", () => {
     const studio = await startOpenCodeStudio({
       command: resolve(import.meta.dir, "../../node_modules/.bin/opencode"),
       projectRoot,
+      memoryRoot: join(projectRoot, ".private-memory"),
       startupTimeoutMs: 15_000,
     })
     cleanups.push(() => studio.close())
@@ -530,6 +695,7 @@ describe("bundled OpenCode Runtime", () => {
     const studio = await startOpenCodeStudio({
       command: resolve(import.meta.dir, "../../node_modules/.bin/opencode"),
       projectRoot,
+      memoryRoot: join(projectRoot, ".private-memory"),
       startupTimeoutMs: 15_000,
     })
     cleanups.push(() => studio.close())

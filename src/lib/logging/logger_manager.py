@@ -175,6 +175,27 @@ class NullLoggerBackend:
     def log(self, *args: Any, **kwargs: Any) -> None:
         return None
 
+    def log_error(self, *args: Any, **kwargs: Any) -> None:
+        return None
+
+    def log_markdown(self, *args: Any, **kwargs: Any) -> None:
+        return None
+
+    def log_code(self, *args: Any, **kwargs: Any) -> None:
+        return None
+
+    def log_rule(self, *args: Any, **kwargs: Any) -> None:
+        return None
+
+    def log_task(self, *args: Any, **kwargs: Any) -> None:
+        return None
+
+    def log_messages(self, *args: Any, **kwargs: Any) -> None:
+        return None
+
+    def visualize_agent_tree(self, *args: Any, **kwargs: Any) -> None:
+        return None
+
     def debug(self, *args: Any, **kwargs: Any) -> None:
         return None
 
