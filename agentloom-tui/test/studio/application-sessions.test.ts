@@ -6,7 +6,11 @@ import {
 } from "../../src/studio/application-sessions"
 
 class MemoryOpenCodeSessions implements OpenCodeSessionApi {
-  private readonly sessions: OpenCodeSessionInfo[] = []
+  private readonly sessions: OpenCodeSessionInfo[]
+
+  constructor(initial: OpenCodeSessionInfo[] = []) {
+    this.sessions = [...initial]
+  }
 
   async list() {
     return [...this.sessions]
@@ -35,6 +39,24 @@ class MemoryOpenCodeSessions implements OpenCodeSessionApi {
 }
 
 describe("Application Studio sessions", () => {
+  test("resumes the most recently updated conversation for an Application", async () => {
+    const older = {
+      id: "session-older",
+      title: "AgentLoom · reports",
+      metadata: { agentloom: { kind: "application-studio", application_id: "reports" } },
+      time: { created: 10, updated: 20 },
+    } as OpenCodeSessionInfo
+    const latest = {
+      id: "session-latest",
+      title: "AgentLoom · reports",
+      metadata: { agentloom: { kind: "application-studio", application_id: "reports" } },
+      time: { created: 30, updated: 40 },
+    } as OpenCodeSessionInfo
+    const sessions = new ApplicationStudioSessions(new MemoryOpenCodeSessions([older, latest]))
+
+    expect((await sessions.open("reports")).id).toBe("session-latest")
+  })
+
   test("each Application resumes its own persistent OpenCode session", async () => {
     const api = new MemoryOpenCodeSessions()
     const sessions = new ApplicationStudioSessions(api)
@@ -93,26 +115,29 @@ describe("Application Studio sessions", () => {
     ])
   })
 
-  test("retargets one conversation without losing its Session identity or Full Access mode", async () => {
+  test("claims the New Application conversation as the created Application", async () => {
     const api = new MemoryOpenCodeSessions()
     const sessions = new ApplicationStudioSessions(api)
-    const opened = await sessions.open("alpha")
+    const opened = await sessions.openNew()
 
-    const switched = await sessions.retarget(
+    const claimed = await sessions.claim(
       opened.id,
-      { type: "application", applicationID: "beta" },
+      "beta",
       "full_access",
     )
 
-    expect(switched.id).toBe(opened.id)
-    expect(switched.title).toBe("AgentLoom · beta")
-    expect(switched.metadata).toEqual({
-      agentloom: { kind: "application-studio", application_id: "beta" },
+    expect(claimed.id).toBe(opened.id)
+    expect(claimed.title).toBe("AgentLoom · beta")
+    expect(claimed.metadata).toEqual({
+      agentloom: {
+        kind: "application-studio",
+        application_id: "beta",
+      },
     })
-    expect(switched.permission).toEqual([
+    expect(claimed.permission).toEqual([
       { permission: "*", pattern: "*", action: "allow" },
     ])
-    expect(await api.all()).toHaveLength(1)
+    expect((await sessions.open("beta")).id).toBe(opened.id)
   })
 
   test("does not resume a same-named Application session from another workspace", async () => {

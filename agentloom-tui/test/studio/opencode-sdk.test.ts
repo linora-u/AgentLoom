@@ -1,12 +1,19 @@
 import { afterEach, describe, expect, test } from "bun:test"
+import { mkdtemp, realpath, rm } from "node:fs/promises"
+import { tmpdir } from "node:os"
+import { join } from "node:path"
 import { ApplicationStudioSessions } from "../../src/studio/application-sessions"
 import { createOpenCodeSessionApi } from "../../src/studio/opencode-sdk"
 import { OpenCodeStudioClient, type OpenCodeStoredMessage } from "../../src/studio/opencode-studio"
 
 const servers: Array<{ stop(closeActiveConnections?: boolean): void }> = []
+const temporaryDirectories: string[] = []
 
-afterEach(() => {
+afterEach(async () => {
   for (const server of servers.splice(0)) server.stop(true)
+  for (const directory of temporaryDirectories.splice(0)) {
+    await rm(directory, { recursive: true, force: true })
+  }
 })
 
 describe("OpenCode SDK boundary", () => {
@@ -248,15 +255,28 @@ describe("OpenCode SDK boundary", () => {
   })
 
   test("Application sessions are persisted through the OpenCode Session API", async () => {
-    const stored: Array<{ id: string; title: string; metadata: Record<string, unknown>; permission?: unknown[] }> = []
+    const stored: Array<{
+      id: string
+      title: string
+      metadata: Record<string, unknown>
+      permission?: unknown[]
+      parentID?: string
+      time?: { created: number; updated: number }
+    }> = []
     const directories: string[] = []
+    const roots: string[] = []
+    const limits: string[] = []
     const server = Bun.serve({
       port: 0,
       async fetch(request) {
         const url = new URL(request.url)
         if (!url.pathname.startsWith("/session")) return new Response("not found", { status: 404 })
         directories.push(url.searchParams.get("directory") ?? "")
-        if (url.pathname === "/session" && request.method === "GET") return Response.json(stored)
+        if (url.pathname === "/session" && request.method === "GET") {
+          roots.push(url.searchParams.get("roots") ?? "")
+          limits.push(url.searchParams.get("limit") ?? "")
+          return Response.json(stored)
+        }
         if (url.pathname === "/session" && request.method === "POST") {
           const body = await request.json() as { title: string; metadata: Record<string, unknown> }
           const session = { id: `sdk-${stored.length + 1}`, ...body }
@@ -281,9 +301,14 @@ describe("OpenCode SDK boundary", () => {
 
     const first = await sessions.open("reports")
     const resumed = await sessions.open("reports")
+    const branched = await sessions.createFresh(
+      { type: "application", applicationID: "reports" },
+      "full_access",
+    )
 
     expect(resumed.id).toBe(first.id)
-    expect(stored).toEqual([{
+    expect(branched).toMatchObject({ id: "sdk-2" })
+    expect(stored[0]).toEqual({
       id: "sdk-1",
       title: "AgentLoom · reports",
       metadata: {
@@ -305,15 +330,68 @@ describe("OpenCode SDK boundary", () => {
         { permission: "external_directory", pattern: "*", action: "ask" },
         { permission: "agentloom_run", pattern: "*", action: "ask" },
       ],
-    }])
-    expect(directories).toEqual(["/repo", "/repo", "/repo", "/repo"])
+    })
+    expect(stored[1]).toMatchObject({
+      id: "sdk-2",
+      metadata: {
+        agentloom: {
+          kind: "application-studio",
+          application_id: "reports",
+          workspace: "/repo",
+        },
+      },
+      permission: [{ permission: "*", pattern: "*", action: "allow" }],
+    })
+    expect(roots).toEqual(["true", "true"])
+    expect(limits).toEqual(["100001", "100001"])
+    expect(directories).toEqual(["/repo", "/repo", "/repo", "/repo", "/repo"])
+  })
+
+  test("restores an Application even when more than 100 newer root sessions exist", async () => {
+    const target = {
+      id: "ses_target",
+      title: "AgentLoom · reports",
+      directory: "/repo",
+      time: { created: 1, updated: 1 },
+      metadata: { agentloom: { kind: "application-studio", application_id: "reports" } },
+    }
+    const newer = Array.from({ length: 125 }, (_, index) => ({
+      id: `ses_unrelated_${index}`,
+      title: `Unrelated ${index}`,
+      directory: "/repo",
+      time: { created: index + 2, updated: index + 2 },
+      metadata: { agentloom: { kind: "application-studio", application_id: `other_${index}` } },
+    }))
+    const server = Bun.serve({
+      port: 0,
+      async fetch(request) {
+        const url = new URL(request.url)
+        if (url.pathname === "/session" && request.method === "GET") {
+          const limit = Number(url.searchParams.get("limit") ?? 100)
+          return Response.json([...newer.toReversed(), target].slice(0, limit))
+        }
+        if (url.pathname === "/session/ses_target" && request.method === "PATCH") {
+          return Response.json({ ...target, ...(await request.json() as object) })
+        }
+        return new Response("not found", { status: 404 })
+      },
+    })
+    servers.push(server)
+    const sessions = new ApplicationStudioSessions(createOpenCodeSessionApi({
+      baseUrl: `http://127.0.0.1:${server.port}`,
+      directory: "/repo",
+    }))
+
+    expect((await sessions.open("reports")).id).toBe("ses_target")
   })
 
   test("Studio prompts and reloads messages through the OpenCode SDK", async () => {
+    const projectRoot = await realpath(await mkdtemp(join(tmpdir(), "agentloom-sdk-memory-")))
+    temporaryDirectories.push(projectRoot)
     const session = {
       id: "ses_reports",
       title: "AgentLoom · reports",
-      directory: "/repo",
+      directory: projectRoot,
       metadata: { agentloom: { kind: "application-studio", application_id: "reports" } },
     }
     const history: OpenCodeStoredMessage[] = [{
@@ -344,24 +422,100 @@ describe("OpenCode SDK boundary", () => {
       },
     })
     servers.push(server)
-    const studio = new OpenCodeStudioClient(createOpenCodeSessionApi({
-      baseUrl: `http://127.0.0.1:${server.port}`,
-      directory: "/repo",
-      models: [{
-        id: "configured",
-        modelID: "configured",
-        providerID: "agentloom-cG93ZXJmdWw",
-        providerName: "powerful",
-        name: "powerful",
-        default: true,
-      }],
-    }))
+    const studio = new OpenCodeStudioClient(
+      createOpenCodeSessionApi({
+        baseUrl: `http://127.0.0.1:${server.port}`,
+        directory: projectRoot,
+        models: [{
+          id: "configured",
+          modelID: "configured",
+          providerID: "agentloom-cG93ZXJmdWw",
+          providerName: "powerful",
+          name: "powerful",
+          default: true,
+        }],
+      }),
+      { memoryRoot: join(projectRoot, "private-memory") },
+    )
 
     const opened = await studio.openApplication("reports")
     const updated = await studio.send(opened.sessionID, "change config")
 
     expect(updated.messages.at(-2)).toEqual({ id: "msg-2", role: "user", content: "change config" })
     expect(updated.messages.at(-1)).toEqual({ id: "msg-3", role: "assistant", content: "done" })
+  })
+
+  test("preserves tool inputs, results, and errors for the Application memory archive", async () => {
+    const server = Bun.serve({
+      port: 0,
+      fetch(request) {
+        if (new URL(request.url).pathname !== "/session/ses_tools/message") {
+          return new Response("not found", { status: 404 })
+        }
+        return Response.json([{
+          info: { id: "msg_tools", role: "assistant" },
+          parts: [
+            {
+              id: "part_tool",
+              sessionID: "ses_tools",
+              messageID: "msg_tools",
+              type: "tool",
+              callID: "call_validate",
+              tool: "agentloom_domain",
+              state: {
+                status: "completed",
+                input: { action: "application.validate" },
+                output: '{"valid":true}',
+                title: "validate reports",
+              },
+            },
+            {
+              id: "part_error",
+              sessionID: "ses_tools",
+              messageID: "msg_tools",
+              type: "tool",
+              callID: "call_run",
+              tool: "agentloom_domain",
+              state: {
+                status: "error",
+                input: { action: "run.start" },
+                error: "run failed",
+              },
+            },
+          ],
+        }])
+      },
+    })
+    servers.push(server)
+    const api = createOpenCodeSessionApi({
+      baseUrl: `http://127.0.0.1:${server.port}`,
+      directory: "/repo",
+    })
+
+    expect(await api.messages("ses_tools")).toEqual([{
+      info: { id: "msg_tools", role: "assistant" },
+      parts: [
+        {
+          type: "tool",
+          tool: "agentloom_domain",
+          state: {
+            status: "completed",
+            title: "validate reports",
+            input: { action: "application.validate" },
+            output: '{"valid":true}',
+          },
+        },
+        {
+          type: "tool",
+          tool: "agentloom_domain",
+          state: {
+            status: "error",
+            input: { action: "run.start" },
+            error: "run failed",
+          },
+        },
+      ],
+    }])
   })
 
   test("discarding an interrupted turn uses OpenCode message deletion without a file revert", async () => {
