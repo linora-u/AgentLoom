@@ -407,6 +407,7 @@ export function AgentLoomApp(props: AgentLoomAppProps) {
       return
     }
     closePalette()
+    if (item.action === "new-application") void props.session.beginApplicationCreation()
     if (item.action === "chat") props.session.goBuilder()
     if (item.action === "refresh") void props.session.refresh()
     if (item.action === "permission-full") void props.session.setPermissionMode("full_access")
