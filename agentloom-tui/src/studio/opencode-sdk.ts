@@ -107,6 +107,17 @@ export function createOpenCodeSessionApi(input: {
       if (!result.data) throw sdkError("prompt OpenCode session", result.error)
     },
 
+    async summarize(sessionID, model): Promise<void> {
+      const result = await client.session.summarize({
+        sessionID,
+        directory: input.directory,
+        providerID: model.providerID,
+        modelID: model.modelID,
+        auto: false,
+      })
+      if (result.data !== true) throw sdkError("compact Studio session", result.error)
+    },
+
     async replyPermission(requestID, reply): Promise<void> {
       const result = await client.permission.reply({
         requestID,
@@ -315,6 +326,22 @@ function studioEvent(raw: unknown, partTypes: Map<string, string>): StudioEvent 
         ? properties.status.type as "busy" | "idle" | "retry"
         : "busy"
     return { type: "status", sessionID, status }
+  }
+  if (
+    (raw.type === "session.next.compaction.started" || raw.type === "session.next.compaction.ended")
+    && sessionID
+  ) {
+    return {
+      type: "compaction",
+      sessionID,
+      phase: raw.type.endsWith("started") ? "started" : "completed",
+      reason: properties.reason === "manual" || properties.reason === "auto"
+        ? properties.reason
+        : "unknown",
+    }
+  }
+  if (raw.type === "session.compacted" && sessionID) {
+    return { type: "compaction", sessionID, phase: "completed", reason: "unknown" }
   }
   if (raw.type === "question.asked" && sessionID && typeof properties.id === "string") {
     return {

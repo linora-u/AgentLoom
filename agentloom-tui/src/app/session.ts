@@ -52,6 +52,11 @@ export interface StudioClient {
     sessionID: string
     messages: BuilderMessage[]
   }>
+  compact?(sessionID: string): Promise<{
+    sessionID: string
+    messages: BuilderMessage[]
+    historyRefreshFailed?: boolean
+  }>
   send(sessionID: string, message: string): Promise<{
     messages: BuilderMessage[]
   }>
@@ -120,6 +125,12 @@ export type StudioEvent = {
       metadata: Record<string, unknown>
     }
   | { type: "status"; sessionID: string; status: "busy" | "idle" | "retry" }
+  | {
+      type: "compaction"
+      sessionID: string
+      phase: "started" | "completed"
+      reason: "manual" | "auto" | "unknown"
+    }
   | { type: "question"; sessionID: string; requestID: string; questions: StudioQuestion[] }
   | { type: "error"; sessionID?: string; message: string }
 )
@@ -146,6 +157,7 @@ export type BuilderMessage = {
 export type StudioLoopState =
   | "idle"
   | "thinking"
+  | "compacting"
   | "tool"
   | "validating"
   | "running"
@@ -204,6 +216,7 @@ export class AgentLoomSession {
   private creationBaselineApplicationIDs: Set<string> | null = null
   private readonly creationWrittenFiles = new Set<string>()
   private creationReconcilePending = false
+  private manualCompactionSessionID: string | null = null
   private builderBusy = false
   private routeBusy = false
   private messageID = 0
@@ -551,6 +564,10 @@ export class AgentLoomSession {
       await this.startNewStudioSession()
       return
     }
+    if (command.type === "compact") {
+      await this.compactStudioSession()
+      return
+    }
     if (command.type === "models") {
       this.patch({
         messages: [
@@ -705,6 +722,49 @@ export class AgentLoomSession {
     } catch (error) {
       this.patch({ notice: errorMessage(error), loopState: "failed" })
     } finally {
+      this.builderBusy = false
+      this.patch({})
+    }
+  }
+
+  private async compactStudioSession(): Promise<void> {
+    const sessionID = this.current.studioSessionID
+    if (!sessionID || !this.input.studio?.compact) {
+      this.patch({ notice: "请先新建或选择一个支持上下文压缩的 Application Session" })
+      return
+    }
+    this.builderBusy = true
+    this.manualCompactionSessionID = sessionID
+    this.patch({
+      loopState: "compacting",
+      notice: "正在压缩当前 Session 上下文；会话、历史记忆和文件修改都会保留…",
+    })
+    try {
+      const conversation = await this.input.studio.compact(sessionID)
+      if (this.current.studioSessionID !== sessionID) return
+      this.streamingStudioSource = null
+      this.turnSubagentText = ""
+      this.patch({
+        messages: conversation.messages.length > 0
+          ? conversation.messages
+          : this.current.messages,
+        streamingText: "",
+        activities: [],
+        loopState: "idle",
+        studioTools: [],
+        permissionRequest: null,
+        questionRequest: null,
+        notice: conversation.historyRefreshFailed
+          ? "当前 Session 上下文已压缩；聊天视图暂未刷新，下次打开该 Application 时会重新读取。"
+          : "当前 Session 上下文已压缩；任务连续性、历史记忆和文件修改均已保留。",
+      })
+    } catch (error) {
+      this.patch({
+        notice: `上下文压缩失败，原 Session 未切换：${errorMessage(error)}`,
+        loopState: "failed",
+      })
+    } finally {
+      if (this.manualCompactionSessionID === sessionID) this.manualCompactionSessionID = null
       this.builderBusy = false
       this.patch({})
     }
@@ -1125,6 +1185,25 @@ export class AgentLoomSession {
       })
       return
     }
+    if (event.type === "compaction") {
+      const automatic = event.reason === "auto"
+      const completedState = this.manualCompactionSessionID === event.sessionID
+        ? "compacting"
+        : this.builderBusy
+          ? "thinking"
+          : "idle"
+      this.patch({
+        loopState: event.phase === "started" ? "compacting" : completedState,
+        notice: event.phase === "started"
+          ? automatic
+            ? "上下文接近上限，Runtime 正在自动压缩当前 Session…"
+            : "Runtime 正在压缩当前 Session 上下文…"
+          : automatic
+            ? "当前 Session 上下文已自动压缩；任务连续性保持不变。"
+            : "当前 Session 上下文已压缩；任务连续性保持不变。",
+      })
+      return
+    }
     this.patch({ notice: event.message, loopState: "failed" })
   }
 
@@ -1240,7 +1319,14 @@ export class AgentLoomSession {
 
   async interruptStudio(): Promise<void> {
     const sessionID = this.current.studioSessionID
-    if (!sessionID || !this.input.studio?.interrupt) return
+    if (!sessionID) return
+    if (this.manualCompactionSessionID === sessionID) {
+      this.patch({
+        notice: "当前 Session 正在持久化压缩，压缩不能安全中止；完成后可继续发送消息。",
+      })
+      return
+    }
+    if (!this.input.studio?.interrupt) return
     const turnGeneration = ++this.studioTurnGeneration
     try {
       await this.input.studio.interrupt(sessionID)
@@ -1517,6 +1603,7 @@ function studioHelpMessage(): string {
     "- 切换 Application：自动恢复该 Application 最近更新的持久会话",
     "- + New Application：创建独立的新建会话，不改写任何已有 Application 会话",
     "- /new：在当前 Application 中开始空白新对话；旧会话仍持久保存，Agent 可按需读取",
+    "- /compact：压缩当前 Session 上下文，保留任务连续性、历史记忆和文件修改",
     "- Ctrl+X：搜索命令、权限、Applications、主 Agents、Skills、Schedules 与 Runs",
     "- /models：从 config/llm.yaml 选择 Studio 模型；不会修改 Application model_type",
     "- /refresh：重新索引 AgentLoom 项目状态",

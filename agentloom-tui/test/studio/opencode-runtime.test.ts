@@ -288,6 +288,39 @@ describe("bundled OpenCode Runtime", () => {
     expect(latest.id).toBe(branched.id)
   }, 20_000)
 
+  test("compacts a real persistent Session in place through the bundled Runtime", async () => {
+    const projectRoot = await mkdtemp(join(tmpdir(), "agentloom-opencode-compact-"))
+    cleanups.push(() => rm(projectRoot, { recursive: true, force: true }))
+    const llm = new ProfileCaptureServer()
+    cleanups.push(() => llm.close())
+    const runtime = new OpenCodeRuntime({
+      command: resolve(import.meta.dir, "../../node_modules/.bin/opencode"),
+      projectRoot,
+      memoryRoot: join(projectRoot, ".private-memory"),
+      startupTimeoutMs: 15_000,
+      config: deterministicProviderConfig(llm.url),
+    })
+    const server = await runtime.start()
+    cleanups.push(() => server.close())
+    const studio = new OpenCodeStudioClient(
+      createOpenCodeSessionApi({ baseUrl: server.url, directory: projectRoot }),
+      { memoryRoot: join(projectRoot, ".private-memory") },
+    )
+    cleanups.push(() => studio.close())
+    const opened = await studio.openApplication("compact_demo")
+    await studio.setModel(opened.sessionID, "test/test-model")
+    await studio.send(opened.sessionID, "Remember that the acceptance threshold is 0.9.")
+    const requestsBeforeCompaction = llm.requests.length
+
+    const compacted = await studio.compact(opened.sessionID)
+    const reopened = await studio.openApplication("compact_demo")
+
+    expect(llm.requests.length).toBeGreaterThan(requestsBeforeCompaction)
+    expect(compacted.sessionID).toBe(opened.sessionID)
+    expect(reopened.sessionID).toBe(opened.sessionID)
+    expect(compacted.messages.length).toBeGreaterThan(0)
+  }, 20_000)
+
   test("runs a deterministic LLM tool loop through the real OpenCode Runtime and Python domain", async () => {
     const projectRoot = await mkdtemp(join(tmpdir(), "agentloom-opencode-llm-e2e-"))
     cleanups.push(() => rm(projectRoot, { recursive: true, force: true }))

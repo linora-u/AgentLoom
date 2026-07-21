@@ -114,6 +114,7 @@ export type AppRoute =
 export type BuilderCommand =
   | { type: "help" }
   | { type: "new" }
+  | { type: "compact" }
   | { type: "apply" }
   | { type: "refresh" }
   | { type: "models" }
@@ -467,6 +468,7 @@ export function parseBuilderInput(raw: string): BuilderCommand {
   if (!input) return { type: "empty" }
   if (input === "/help") return { type: "help" }
   if (input === "/new") return { type: "new" }
+  if (input === "/compact") return { type: "compact" }
   if (input === "/apply") return { type: "apply" }
   if (input === "/refresh") return { type: "refresh" }
   if (input === "/models") return { type: "models" }

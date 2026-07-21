@@ -32,6 +32,10 @@ export interface OpenCodeStudioApi extends OpenCodeSessionApi {
     system?: string,
     model?: { providerID: string; modelID: string },
   ): Promise<void>
+  summarize(
+    sessionID: string,
+    model: { providerID: string; modelID: string },
+  ): Promise<void>
   subscribe(listener: (event: StudioEvent) => void): () => void
   replyPermission(requestID: string, reply: "once" | "always" | "reject"): Promise<void>
   replyQuestion(requestID: string, answers: string[][]): Promise<void>
@@ -186,6 +190,28 @@ export class OpenCodeStudioClient implements StudioClient {
     this.rememberMessages(sessionID, messages)
     return {
       messages: mapMessages(messages),
+    }
+  }
+
+  async compact(sessionID: string) {
+    const applicationID = this.applicationBySession.get(sessionID)
+    if (!applicationID) throw new Error("Open the Application before compacting its Studio Session")
+    if (this.activeTurns.has(sessionID)) {
+      throw new Error("Wait for or interrupt the active Agent Loop before compacting its Session")
+    }
+    const selected = await this.selectedModel(sessionID)
+    await this.api.summarize(sessionID, {
+      providerID: selected.providerID,
+      modelID: selected.modelID,
+    })
+    try {
+      const messages = await this.loadCleanHistory(sessionID)
+      return { sessionID, messages: mapMessages(messages) }
+    } catch {
+      // Runtime compaction is already durable at this point. A transient
+      // history reload failure must not turn a successful context mutation
+      // into a false failure or force the UI onto a different Session.
+      return { sessionID, messages: [], historyRefreshFailed: true }
     }
   }
 
