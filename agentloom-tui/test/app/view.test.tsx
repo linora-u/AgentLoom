@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, test } from "bun:test"
-import type { ScrollBoxRenderable } from "@opentui/core"
+import type { ScrollBoxRenderable, TextRenderable } from "@opentui/core"
 import { testRender } from "@opentui/solid"
 import type {
   BootstrapResultDto,
@@ -11,10 +11,17 @@ import type {
   SystemDetailResultDto,
 } from "../../src/domain"
 import { AgentLoomApp } from "../../src/app/view"
-import { AgentLoomSession, type TuiClient } from "../../src/app/session"
+import {
+  AgentLoomSession,
+  type StudioClient,
+  type StudioEvent,
+  type TuiClient,
+} from "../../src/app/session"
 import { buildPaletteItems } from "../../src/app/controller"
+import type { UpdateClient } from "../../src/update/source-updater"
 
 const PAGE_DOWN_KEY = "\x1B[6~"
+const PAGE_UP_KEY = "\x1B[5~"
 
 const snapshot: BootstrapResultDto = {
   project: { root: "/repo", name: "repo" },
@@ -215,7 +222,422 @@ afterEach(() => {
 })
 
 describe("AgentLoom TUI view", () => {
-  test("wide terminals show general chat and the clickable system directory together", async () => {
+  test("offers an explicit whole-product update and requests a safe restart", async () => {
+    const actions: string[] = []
+    const updater: UpdateClient = {
+      async check() {
+        return { available: true, sourceRoot: "/trusted/source", installedAt: 1_000, latestSourceMtime: 2_000 }
+      },
+      async install() { actions.push("install") },
+    }
+    const session = new AgentLoomSession({
+      client: { async request() { return catalogSnapshot as never }, close() {} },
+      snapshot: catalogSnapshot,
+      updater,
+    })
+    await session.start()
+    await Bun.sleep(0)
+    const setup = await testRender(
+      () => (
+        <AgentLoomApp
+          session={session}
+          projectRoot="/repo"
+          onExit={() => {}}
+          onRestart={() => actions.push("restart")}
+          refreshIntervalMs={0}
+        />
+      ),
+      { width: 140, height: 32 },
+    )
+    renderers.push(setup.renderer)
+    await setup.renderOnce()
+    expect(setup.captureCharFrame()).toContain("发现可用更新 · Ctrl+X")
+
+    setup.mockInput.pressKey("x", { ctrl: true })
+    await Bun.sleep(5)
+    await setup.mockInput.typeText("update")
+    await setup.renderOnce()
+    expect(setup.captureCharFrame()).toContain("更新 AgentLoom 并安全重启")
+    setup.mockInput.pressEnter()
+    await Bun.sleep(20)
+
+    expect(actions).toEqual(["install", "restart"])
+  })
+
+  test("renders a blocking OpenCode permission card and handles its keyboard choices", async () => {
+    const replies: string[] = []
+    let studioListener: ((event: StudioEvent) => void) | undefined
+    const studio: StudioClient = {
+      async openNewApplication() { throw new Error("not expected") },
+      async openApplication() { return { sessionID: "ses_permission", messages: [] } },
+      async send() { return { messages: [] } },
+      subscribe(listener) {
+        studioListener = listener
+        return () => { studioListener = undefined }
+      },
+      async replyPermission(requestID, reply) { replies.push(`${requestID}:${reply}`) },
+    }
+    const client: TuiClient = {
+      async request<Method extends RpcMethod>(method: Method) {
+        if (method !== "application.detail") throw new Error(`unexpected ${method}`)
+        return {
+          schema_version: 1,
+          application: { id: "new", name: "new", path: "applications/new", health: "healthy", updated_at: null },
+          working_revision: "sha256:working",
+          running_revision: null,
+          agents: [],
+        } as RpcResult<Method>
+      },
+      close() {},
+    }
+    const session = new AgentLoomSession({ client, studio, snapshot: catalogSnapshot })
+    const application = buildPaletteItems(catalogSnapshot).find((item) => item.category === "Applications")
+    if (!application || !("entry" in application)) throw new Error("missing Application")
+    await session.openEntry(application.entry)
+    const setup = await testRender(
+      () => <AgentLoomApp session={session} projectRoot="/repo" onExit={() => {}} refreshIntervalMs={0} />,
+      { width: 140, height: 36, useMouse: true, enableMouseMovement: true },
+    )
+    renderers.push(setup.renderer)
+
+    studioListener?.({
+      type: "permission",
+      sessionID: "ses_permission",
+      requestID: "per_bash",
+      permission: "bash",
+      patterns: ["loom run applications/new/workflows/new.yaml"],
+      metadata: {},
+    })
+    await setup.renderOnce()
+    expect(setup.captureCharFrame()).toContain("需要授权 · bash")
+    expect(setup.captureCharFrame()).toContain("1 仅本次")
+    expect(setup.captureCharFrame()).toContain("2 本次会话")
+    expect(setup.captureCharFrame()).toContain("3 拒绝")
+
+    setup.mockInput.pressKey("2")
+    await Bun.sleep(10)
+    expect(replies).toEqual(["per_bash:always"])
+    expect(session.state.permissionRequest).toBeNull()
+  })
+
+  test("renders completed Studio tools before the final assistant answer", async () => {
+    let studioListener: ((event: StudioEvent) => void) | undefined
+    const studio: StudioClient = {
+      async openNewApplication() { throw new Error("not expected") },
+      async openApplication() { return { sessionID: "ses_order", messages: [] } },
+      async send() {
+        studioListener?.({
+          type: "tool",
+          sessionID: "ses_order",
+          callID: "call_detail",
+          name: "agentloom_domain",
+          title: "AgentLoom application.detail",
+          status: "completed",
+          output: "browser_harness_probe · healthy",
+        })
+        return {
+          messages: [
+            { id: "msg_user", role: "user", content: "inspect the Application" },
+            { id: "msg_assistant", role: "assistant", content: "FINAL_ANSWER_AFTER_TOOL" },
+          ],
+        }
+      },
+      subscribe(listener) {
+        studioListener = listener
+        return () => { studioListener = undefined }
+      },
+    }
+    const client: TuiClient = {
+      async request<Method extends RpcMethod>(method: Method) {
+        if (method !== "application.detail") throw new Error(`unexpected ${method}`)
+        return {
+          schema_version: 1,
+          application: { id: "new", name: "new", path: "applications/new", health: "healthy", updated_at: null },
+          working_revision: "sha256:working",
+          running_revision: null,
+          agents: [],
+        } as RpcResult<Method>
+      },
+      close() {},
+    }
+    const session = new AgentLoomSession({ client, studio, snapshot: catalogSnapshot })
+    const application = buildPaletteItems(catalogSnapshot).find((item) => item.category === "Applications")
+    if (!application || !("entry" in application)) throw new Error("missing Application")
+    await session.openEntry(application.entry)
+    await session.submit("inspect the Application")
+    const setup = await testRender(
+      () => <AgentLoomApp session={session} projectRoot="/repo" onExit={() => {}} refreshIntervalMs={0} />,
+      { width: 140, height: 40 },
+    )
+    renderers.push(setup.renderer)
+    await setup.renderOnce()
+
+    const frame = setup.captureCharFrame()
+    expect(frame).toContain("AgentLoom application.detail")
+    expect(frame).toContain("FINAL_ANSWER_AFTER_TOOL")
+    expect(frame.indexOf("AgentLoom application.detail")).toBeLessThan(frame.indexOf("FINAL_ANSWER_AFTER_TOOL"))
+  })
+
+  test("renders an OpenCode question card and answers an option by click", async () => {
+    const replies: Array<{ requestID: string; answers: string[][] }> = []
+    let studioListener: ((event: StudioEvent) => void) | undefined
+    const studio: StudioClient = {
+      async openNewApplication() { throw new Error("not expected") },
+      async openApplication() { return { sessionID: "ses_question", messages: [] } },
+      async send() { return { messages: [] } },
+      subscribe(listener) {
+        studioListener = listener
+        return () => { studioListener = undefined }
+      },
+      async replyQuestion(requestID, answers) { replies.push({ requestID, answers }) },
+      async rejectQuestion() {},
+    }
+    const client: TuiClient = {
+      async request<Method extends RpcMethod>(method: Method) {
+        if (method !== "application.detail") throw new Error(`unexpected ${method}`)
+        return {
+          schema_version: 1,
+          application: { id: "new", name: "new", path: "applications/new", health: "healthy", updated_at: null },
+          working_revision: "sha256:working",
+          running_revision: null,
+          agents: [],
+        } as RpcResult<Method>
+      },
+      close() {},
+    }
+    const session = new AgentLoomSession({ client, studio, snapshot: catalogSnapshot })
+    const application = buildPaletteItems(catalogSnapshot).find((item) => item.category === "Applications")
+    if (!application || !("entry" in application)) throw new Error("missing Application")
+    await session.openEntry(application.entry)
+    const setup = await testRender(
+      () => <AgentLoomApp session={session} projectRoot="/repo" onExit={() => {}} refreshIntervalMs={0} />,
+      { width: 140, height: 36, useMouse: true, enableMouseMovement: true },
+    )
+    renderers.push(setup.renderer)
+
+    studioListener?.({
+      type: "question",
+      sessionID: "ses_question",
+      requestID: "que_topology",
+      questions: [{
+        header: "Topology",
+        question: "Choose a topology",
+        options: [
+          { label: "Supervisor + Workers", description: "Delegate work" },
+          { label: "Single Agent", description: "Keep it simple" },
+        ],
+        multiple: false,
+        custom: true,
+      }],
+    })
+    await setup.renderOnce()
+    expect(setup.captureCharFrame()).toContain("需要你的决定 · Topology")
+    expect(setup.captureCharFrame()).toContain("Supervisor + Workers")
+    expect(setup.captureCharFrame()).toContain("输入自定义答案")
+
+    const rows = setup.captureCharFrame().split("\n")
+    const y = rows.findIndex((row) => row.includes("Supervisor + Workers"))
+    const x = y >= 0 ? rows[y]!.indexOf("Supervisor + Workers") : -1
+    expect({ x, y }).not.toEqual({ x: -1, y: -1 })
+    await setup.mockMouse.click(x + 3, y)
+    await Bun.sleep(10)
+    expect(replies).toEqual([{ requestID: "que_topology", answers: [["Supervisor + Workers"]] }])
+  })
+
+  test("Application detail shows effective capabilities and keeps chat visible", async () => {
+    const client: TuiClient = {
+      async request<Method extends RpcMethod>(method: Method) {
+        if (method !== "application.detail") throw new Error(`unexpected ${method}`)
+        return {
+          schema_version: 1,
+          application: {
+            id: "new",
+            name: "new",
+            path: "applications/new",
+            health: "healthy",
+            updated_at: "2026-07-20T10:00:00Z",
+          },
+          working_revision: "sha256:working123",
+          running_revision: null,
+          agents: [{
+            id: "applications/new/workflows/new.yaml",
+            name: "new_agent",
+            description: "not run",
+            role: "supervisor",
+            workflow: "coordinate research",
+            model: { type: "powerful", source: "agent" },
+            tools: [{ name: "web_search", source: "agent" }],
+            skills: [{
+              name: "local-writer",
+              description: "Writes reports",
+              source: "agent",
+              load_mode: "eager",
+              path: "applications/new/skills/local-writer/SKILL.md",
+            }],
+            permissions: { value: { mode: "denylist" }, source: "application", source_path: "applications/new/config/system.yaml" },
+            hooks: { value: {}, source: "global", source_path: "config/system.yaml" },
+            mcp: { value: ["reports-db"], source: "application", source_path: "applications/new/config/system.yaml" },
+            source_path: "applications/new/workflows/new.yaml",
+            validation: { valid: true, errors: [] },
+            workers: [{
+              id: "applications/new/workflows/worker_agents/researcher.yaml",
+              name: "researcher",
+              description: "Finds facts",
+              role: "worker",
+              workflow: "research",
+              model: { type: "powerful", source: "global" },
+              tools: [],
+              skills: [],
+              permissions: { value: { mode: "denylist" }, source: "application", source_path: "applications/new/config/system.yaml" },
+              hooks: { value: {}, source: "global", source_path: "config/system.yaml" },
+              mcp: { value: ["reports-db"], source: "application", source_path: "applications/new/config/system.yaml" },
+              source_path: "applications/new/workflows/worker_agents/researcher.yaml",
+              validation: { valid: true, errors: [] },
+              workers: [],
+            }],
+          }],
+        } as RpcResult<Method>
+      },
+      close() {},
+    }
+    const session = new AgentLoomSession({ client, snapshot: catalogSnapshot, sessionID: "effective-detail" })
+    const application = buildPaletteItems(catalogSnapshot).find((item) => item.category === "Applications")
+    if (!application || !("entry" in application)) throw new Error("missing Application")
+    await session.openEntry(application.entry)
+    const setup = await testRender(
+      () => <AgentLoomApp session={session} projectRoot="/repo" onExit={() => {}} refreshIntervalMs={0} />,
+      { width: 150, height: 38, useMouse: true, enableMouseMovement: true },
+    )
+    renderers.push(setup.renderer)
+    await setup.renderOnce()
+
+    const frame = setup.captureCharFrame()
+    expect(frame).toContain("Working Revision")
+    expect(frame).toContain("working123")
+    expect(frame).toContain("local-writer · agent · eager")
+    expect(frame).toContain("权限: application 2")
+    expect(frame).toContain("Agents: 2 · 1 Supervisor · 1 Worker")
+    expect(frame).not.toContain("coordinate research")
+    expect(frame).toContain("描述你要创建或修改的 Application")
+    expect(setup.renderer.currentFocusedEditor).not.toBeNull()
+  })
+
+  test("startup is Application-first instead of Run-first", async () => {
+    const client: TuiClient = {
+      async request<Method extends RpcMethod>() {
+        return catalogSnapshot as RpcResult<Method>
+      },
+      close() {},
+    }
+    const session = new AgentLoomSession({
+      client,
+      snapshot: catalogSnapshot,
+      sessionID: "application-first-test",
+    })
+    const setup = await testRender(
+      () => <AgentLoomApp session={session} projectRoot="/repo" onExit={() => {}} refreshIntervalMs={0} />,
+      { width: 140, height: 32, useMouse: true, enableMouseMovement: true },
+    )
+    renderers.push(setup.renderer)
+    await setup.renderOnce()
+
+    const frame = setup.captureCharFrame()
+    expect(frame).toContain("Application Studio")
+    expect(frame).toContain("+ New Application")
+    expect(frame).toContain("1 Application · 0 Global Skills")
+    expect(frame).toContain("new")
+    expect(frame).toContain("配置有效 · 尚未运行 · 点击打开")
+    expect(frame).not.toContain("never run")
+    expect(frame).not.toContain("1 Agents")
+    expect(frame).not.toContain("/apply")
+    expect(frame).not.toContain("F6")
+  })
+
+  test("shows the full nested Application ID on the homepage and in Ctrl+X", async () => {
+    const applicationID = "memory_feature_validation/variants/on"
+    const nestedSnapshot: BootstrapResultDto = {
+      ...catalogSnapshot,
+      systems: [{
+        ...catalogSnapshot.systems[0]!,
+        id: `applications/${applicationID}/workflows/recall.yaml`,
+        path: `applications/${applicationID}/workflows/recall.yaml`,
+        application_id: applicationID,
+        name: "recall",
+      }],
+      applications: [{
+        ...catalogSnapshot.applications[0]!,
+        id: applicationID,
+        name: "on",
+        path: `applications/${applicationID}`,
+      }],
+      agents: [],
+      skills: [],
+      worker_invocations: [],
+    }
+    const client: TuiClient = {
+      async request<Method extends RpcMethod>() {
+        return nestedSnapshot as RpcResult<Method>
+      },
+      close() {},
+    }
+    const session = new AgentLoomSession({ client, snapshot: nestedSnapshot, sessionID: "nested-application-test" })
+    const setup = await testRender(
+      () => <AgentLoomApp session={session} projectRoot="/repo" onExit={() => {}} refreshIntervalMs={0} />,
+      { width: 140, height: 32 },
+    )
+    renderers.push(setup.renderer)
+    await setup.renderOnce()
+
+    const applicationLabel = setup.renderer.root.findDescendantById(
+      "agentloom-application-entry-0",
+    ) as TextRenderable
+    expect(applicationLabel.plainText).toBe(applicationID)
+    expect(setup.captureCharFrame()).toContain("配置有效 · 尚未运行")
+
+    setup.mockInput.pressKey("x", { ctrl: true })
+    await Bun.sleep(5)
+    await setup.mockInput.typeText("variants/on")
+    await setup.renderOnce()
+
+    const frame = setup.captureCharFrame()
+    expect(frame).toContain(applicationID)
+    expect(frame).toContain("配置有效 · 尚未运行")
+    expect(frame).not.toContain("never run")
+  })
+
+  test("New Application starts a bound creation conversation", async () => {
+    const client: TuiClient = {
+      async request<Method extends RpcMethod>() {
+        return catalogSnapshot as RpcResult<Method>
+      },
+      close() {},
+    }
+    const session = new AgentLoomSession({
+      client,
+      snapshot: catalogSnapshot,
+      sessionID: "new-application-test",
+    })
+    const setup = await testRender(
+      () => <AgentLoomApp session={session} projectRoot="/repo" onExit={() => {}} refreshIntervalMs={0} />,
+      { width: 140, height: 32, useMouse: true, enableMouseMovement: true },
+    )
+    renderers.push(setup.renderer)
+    await setup.renderOnce()
+
+    const rows = setup.captureCharFrame().split("\n")
+    const y = rows.findIndex((row) => row.includes("+ New Application"))
+    const x = y < 0 ? -1 : rows[y]!.indexOf("+ New Application")
+    expect({ x, y }).not.toEqual({ x: -1, y: -1 })
+    await setup.mockMouse.click(x + 2, y)
+    await Bun.sleep(20)
+    await setup.renderOnce()
+
+    expect(session.state.studioTarget).toEqual({ type: "new" })
+    expect(session.state.messages.at(-1)?.content).toContain("目标、输入、输出和验收标准")
+    expect(setup.captureCharFrame()).toContain("New Application · Application Only")
+  })
+
+  test("wide terminals keep Studio chat and the Application directory together", async () => {
     const client: TuiClient = {
       async request<Method extends RpcMethod>() {
         return snapshot as RpcResult<Method>
@@ -231,16 +653,17 @@ describe("AgentLoom TUI view", () => {
     await setup.renderOnce()
 
     const frame = setup.captureCharFrame()
-    expect(frame).toContain("AgentLoom Chat")
-    expect(frame).toContain("普通对话")
+    expect(frame).toContain("AgentLoom Application Studio")
+    expect(frame).toContain("创建 · 修改 · 验证 · 运行")
     expect(frame).toContain("Models: powerful* · fast")
-    expect(frame).toContain("项目总览")
-    expect(frame).toContain("0 Applications · 1 Agents")
-    expect(frame).toContain("Ctrl+P")
-    expect(frame).toContain("/apply")
+    expect(frame).toContain("Application Studio")
+    expect(frame).toContain("0 Applications · 0 Global Skills")
+    expect(frame).toContain("+ New Application")
+    expect(frame).toContain("Ctrl+X")
+    expect(frame).toContain("/help")
   })
 
-  test("Workspace makes discovered Skills visible and directly clickable", async () => {
+  test("Workspace does not present Application-local Skills as Global Skills", async () => {
     const client: TuiClient = {
       async request<Method extends RpcMethod>() {
         return catalogSnapshot as RpcResult<Method>
@@ -256,20 +679,14 @@ describe("AgentLoom TUI view", () => {
     await setup.renderOnce()
 
     const frame = setup.captureCharFrame()
-    expect(frame).toContain("已发现 1 个 Skill")
-    expect(frame).toContain("helper-skill")
-    expect(frame).toContain("new · 点击查看")
+    expect(frame).toContain("1 Application · 0 Global Skills")
+    expect(frame).not.toContain("已发现 1 个 Skill")
 
-    const rows = frame.split("\n")
-    const y = rows.findIndex((row) => row.includes("helper-skill"))
-    const x = y < 0 ? -1 : rows[y]!.indexOf("helper-skill")
-    expect({ x, y }).not.toEqual({ x: -1, y: -1 })
-    await setup.mockMouse.click(x + 2, y)
-    await Bun.sleep(20)
+    setup.mockInput.pressKey("x", { ctrl: true })
+    await Bun.sleep(10)
+    await setup.mockInput.typeText("helper-skill")
     await setup.renderOnce()
-
-    expect(session.state.route).toEqual({ type: "skill", skillID: "new:helper-skill" })
-    expect(setup.captureCharFrame()).toContain("helper-skill/SKILL.md")
+    expect(setup.captureCharFrame()).toContain("helper-skill")
   })
 
   test("Workspace separates explicit Run outcomes instead of combining or inferring them", async () => {
@@ -382,7 +799,7 @@ describe("AgentLoom TUI view", () => {
     await setup.renderOnce()
 
     expect(setup.captureCharFrame()).toContain("正在索引项目")
-    expect(setup.captureCharFrame()).toContain("AgentLoom Chat")
+    expect(setup.captureCharFrame()).toContain("AgentLoom Application Studio")
   })
 
   test("command palette opens one Agent in the context panel without replacing chat", async () => {
@@ -405,7 +822,7 @@ describe("AgentLoom TUI view", () => {
     renderers.push(setup.renderer)
     await setup.renderOnce()
 
-    setup.mockInput.pressKey("p", { ctrl: true })
+    setup.mockInput.pressKey("x", { ctrl: true })
     await Bun.sleep(5)
     await setup.mockInput.typeText("new_agent")
     setup.mockInput.pressEnter()
@@ -417,13 +834,53 @@ describe("AgentLoom TUI view", () => {
       systemID: "applications/new/workflows/new.yaml",
     })
     expect(detailCalls).toBe(1)
-    expect(setup.captureCharFrame()).toContain("AgentLoom Chat")
+    expect(setup.captureCharFrame()).toContain("AgentLoom Application Studio")
     expect(setup.captureCharFrame()).toContain("Agent")
   })
 
-  test("catalog palette opens Application, Worker, Skill, and Schedule details", async () => {
+  test("catalog palette opens main Agents while Worker Agents stay inside their detail", async () => {
     const client: TuiClient = {
-      async request<Method extends RpcMethod>() {
+      async request<Method extends RpcMethod>(method: Method) {
+        if (method === "application.detail") {
+          const capability = { value: {}, source: "global", source_path: "config/system.yaml" }
+          return {
+            schema_version: 1,
+            application: { id: "new", name: "new", path: "applications/new", health: "healthy", updated_at: null },
+            working_revision: "sha256:catalog",
+            running_revision: null,
+            agents: [{
+              id: "applications/new/workflows/new.yaml",
+              name: "new_agent",
+              description: "not run",
+              role: "supervisor",
+              workflow: "coordinate",
+              model: { type: "powerful", source: "global" },
+              tools: [],
+              skills: [],
+              permissions: capability,
+              hooks: capability,
+              mcp: capability,
+              source_path: "applications/new/workflows/new.yaml",
+              validation: { valid: true, errors: [] },
+              workers: [{
+                id: "applications/new/workflows/worker_agents/helper.yaml",
+                name: "helper",
+                description: "assist the supervisor",
+                role: "worker",
+                workflow: "help",
+                model: { type: "powerful", source: "global" },
+                tools: [],
+                skills: [],
+                permissions: capability,
+                hooks: capability,
+                mcp: capability,
+                source_path: "applications/new/workflows/worker_agents/helper.yaml",
+                validation: { valid: true, errors: [] },
+                workers: [],
+              }],
+            }],
+          } as RpcResult<Method>
+        }
         return catalogSnapshot as RpcResult<Method>
       },
       close() {},
@@ -437,7 +894,7 @@ describe("AgentLoom TUI view", () => {
     await setup.renderOnce()
 
     const open = async (query: string) => {
-      setup.mockInput.pressKey("p", { ctrl: true })
+      setup.mockInput.pressKey("x", { ctrl: true })
       await Bun.sleep(5)
       await setup.mockInput.typeText(query)
       setup.mockInput.pressEnter()
@@ -446,8 +903,25 @@ describe("AgentLoom TUI view", () => {
       return setup.captureCharFrame()
     }
 
-    expect(await open("helper")).toContain("Worker Agent")
-    expect(setup.captureCharFrame()).toContain("Agent 状态: failed")
+    const supervisorFrame = await open("new_agent")
+    expect(session.state.route).toEqual({
+      type: "agent",
+      agentID: "applications/new/workflows/new.yaml",
+      systemID: "applications/new/workflows/new.yaml",
+    })
+    expect(session.state.applicationDetail?.agents[0]?.id).toBe("applications/new/workflows/new.yaml")
+    expect(supervisorFrame).toContain("Supervisor Agent")
+    expect(setup.captureCharFrame()).toContain("Effective Config")
+    setup.mockInput.pressEscape()
+    await Bun.sleep(50)
+    await setup.renderOnce()
+
+    setup.mockInput.pressKey("x", { ctrl: true })
+    await Bun.sleep(5)
+    await setup.mockInput.typeText("helper")
+    await setup.renderOnce()
+    expect(setup.captureCharFrame()).not.toContain("Worker Agent")
+    setup.mockInput.pressEscape()
     setup.mockInput.pressEscape()
     await Bun.sleep(50)
     await setup.renderOnce()
@@ -465,7 +939,7 @@ describe("AgentLoom TUI view", () => {
     await setup.renderOnce()
 
     expect(await open("new")).toContain("Application")
-    expect(setup.captureCharFrame()).toContain("helper (worker)")
+    expect(setup.captureCharFrame()).toContain("Worker · helper")
   })
 
   test("Recent runs are clickable and open a compact detail instead of raw events", async () => {
@@ -604,6 +1078,7 @@ describe("AgentLoom TUI view", () => {
     expect(overview.scrollTop).toBe(0)
     expect(overview.scrollHeight).toBeGreaterThan(overview.height)
 
+    await setup.mockMouse.click(120, 8)
     setup.mockInput.pressKey(PAGE_DOWN_KEY)
     await Bun.sleep(10)
     await setup.renderOnce()
@@ -619,6 +1094,84 @@ describe("AgentLoom TUI view", () => {
     }
     await setup.renderOnce()
     expect(overview.scrollTop).toBeGreaterThan(0)
+  })
+
+  test("PageUp scrolls long Studio help in a narrow terminal", async () => {
+    const client: TuiClient = {
+      async request<Method extends RpcMethod>() {
+        return snapshot as RpcResult<Method>
+      },
+      close() {},
+    }
+    const session = new AgentLoomSession({ client, snapshot, sessionID: "chat-scroll-test" })
+    await session.submit("/help")
+    const setup = await testRender(
+      () => <AgentLoomApp session={session} projectRoot="/repo" onExit={() => {}} refreshIntervalMs={0} />,
+      { width: 80, height: 24 },
+    )
+    renderers.push(setup.renderer)
+    await setup.renderOnce()
+
+    const chat = setup.renderer.root.findDescendantById(
+      "agentloom-chat-scrollbox",
+    ) as ScrollBoxRenderable
+    expect(chat.scrollHeight).toBeGreaterThan(chat.height)
+    expect(chat.scrollTop).toBeGreaterThan(0)
+    expect(setup.captureCharFrame()).not.toContain("Application Studio 帮助")
+
+    let frame = ""
+    for (let index = 0; index < 8; index += 1) {
+      setup.mockInput.pressKey(PAGE_UP_KEY)
+      await setup.renderOnce()
+      frame = setup.captureCharFrame()
+      if (frame.includes("Application Studio 帮助")) break
+    }
+
+    expect(chat.scrollTop).toBeLessThan(chat.scrollHeight - chat.height)
+    expect(frame).toContain("Application Studio 帮助")
+  })
+
+  test("submitting after reading old chat returns to the newest turn", async () => {
+    const messages: string[] = []
+    const client: TuiClient = {
+      async request<Method extends RpcMethod>(method: Method, params: RpcParams<Method>) {
+        if (method === "assistant.send") {
+          messages.push(String((params as RpcParams<"assistant.send">).message))
+          return {
+            session_id: "chat-submit-scroll-test",
+            assistant: "LATEST_RESPONSE_VISIBLE",
+            model_type: "powerful",
+            draft: { revision: 0, valid: false, errors: [], files: [] },
+          } as RpcResult<Method>
+        }
+        return snapshot as RpcResult<Method>
+      },
+      close() {},
+    }
+    const session = new AgentLoomSession({ client, snapshot, sessionID: "chat-submit-scroll-test" })
+    await session.submit("/help")
+    const setup = await testRender(
+      () => <AgentLoomApp session={session} projectRoot="/repo" onExit={() => {}} refreshIntervalMs={0} />,
+      { width: 80, height: 24 },
+    )
+    renderers.push(setup.renderer)
+    await setup.renderOnce()
+
+    const chat = setup.renderer.root.findDescendantById(
+      "agentloom-chat-scrollbox",
+    ) as ScrollBoxRenderable
+    chat.scrollTo(0)
+    await setup.renderOnce()
+    expect(chat.scrollTop).toBe(0)
+
+    await setup.mockInput.typeText("newest turn")
+    setup.mockInput.pressEnter()
+    await Bun.sleep(100)
+    await setup.renderOnce()
+
+    expect(messages).toEqual(["newest turn"])
+    expect(chat.scrollTop).toBeGreaterThan(0)
+    expect(setup.captureCharFrame()).toContain("LATEST_RESPONSE_VISIBLE")
   })
 
   test("plain Enter captures and submits the focused Builder input", async () => {
@@ -679,7 +1232,7 @@ describe("AgentLoom TUI view", () => {
     await Bun.sleep(20)
     await setup.renderOnce()
 
-    expect(setup.captureCharFrame()).toContain("模型选择")
+    expect(setup.captureCharFrame()).toContain("Studio 模型 · OpenCode Providers")
     expect(setup.captureCharFrame()).toContain("powerful")
     expect(setup.captureCharFrame()).toContain("fast")
 
@@ -878,7 +1431,7 @@ describe("AgentLoom TUI view", () => {
     renderers.push(setup.renderer)
     await setup.renderOnce()
 
-    setup.mockInput.pressKey("p", { ctrl: true })
+    setup.mockInput.pressKey("x", { ctrl: true })
     await Bun.sleep(5)
     await setup.renderOnce()
     expect(setup.captureCharFrame()).toContain("返回对话")
@@ -908,7 +1461,7 @@ describe("AgentLoom TUI view", () => {
     renderers.push(setup.renderer)
     await setup.renderOnce()
 
-    setup.mockInput.pressKey("p", { ctrl: true })
+    setup.mockInput.pressKey("x", { ctrl: true })
     await Bun.sleep(5)
     const targetIndex = buildPaletteItems(longSnapshot).findIndex((item) => item.title === "agent_23")
     expect(targetIndex).toBeGreaterThan(0)
