@@ -30,7 +30,8 @@ environment. `agentloom --snapshot` is the non-interactive health check.
 ## Product model
 
 - The first entry is `+ New Application`, followed by every directory under
-  `applications/`. Choosing one opens or resumes its persistent Studio Session.
+  `applications/`. Choosing another Application retargets the current Studio
+  Session and keeps its conversation memory; only `/new` starts a fresh Session.
 - The workspace summary counts Applications, not expanded Supervisor/Worker
   YAML definitions. Main Supervisor Agents are searchable through `Ctrl+X`;
   Worker Agents remain inspectable inside Application and main-Agent details.
@@ -55,7 +56,9 @@ met. There is no separate draft-write command in the normal workflow.
 Application are allowed; Shell, global files, other Applications, and unknown
 new-Application paths require OpenCode permission. Permission cards support
 `1` once, `2` for this Session, and `3` reject. `Full Access` is available from
-`Ctrl+X` and is reset when the TUI exits.
+`Ctrl+X` as one on/off toggle. It can be preset before selecting an Application,
+remains active while switching Applications, and resets when the TUI exits.
+Select terminal text and press `Ctrl+Y` to copy it through OSC52.
 
 OpenCode question requests are shown as decision cards. A user can click one
 choice or type an answer; multiple answers are separated with `|`, and `Esc`
@@ -63,10 +66,10 @@ rejects the request. Set `AGENTLOOM_REDUCED_MOTION=1` to use static status
 symbols; dumb and CI terminals select this mode automatically.
 
 Model-facing Application detail is deduplicated and paginated instead of
-placing a complete large Application in one Tool result. If a Studio turn has
-no text, Tool, Diff, or status progress for 60 seconds, the TUI aborts the
-parent turn and its active Task sub-sessions with an explicit error. `Esc`
-remains the immediate manual interrupt. An interrupted unfinished turn is
+placing a complete large Application in one Tool result. Studio follows the
+OpenCode Session lifecycle for status, retry, permission, question, and Task
+sub-session progress; quiet model latency is not treated as a cancellation
+signal. `Esc` is the explicit manual interrupt. An interrupted unfinished turn is
 removed from future model context, while file changes already completed by its
 tools are retained; the next message therefore starts a new task instead of
 silently resuming the cancelled one.

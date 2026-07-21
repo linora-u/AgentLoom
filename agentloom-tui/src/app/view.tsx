@@ -77,6 +77,19 @@ export type AgentLoomAppProps = {
   reducedMotion?: boolean
 }
 
+type SelectionClipboardRenderer = Pick<
+  ReturnType<typeof useRenderer>,
+  "getSelection" | "copyToClipboardOSC52" | "clearSelection"
+>
+
+export function copySelectedText(renderer: SelectionClipboardRenderer): boolean {
+  const text = renderer.getSelection()?.getSelectedText()
+  if (!text) return false
+  const copied = renderer.copyToClipboardOSC52(text)
+  if (copied) renderer.clearSelection()
+  return copied
+}
+
 // Braille sequence and cadence follow OpenCode's spinner primitive at the
 // pinned MIT-licensed upstream commit documented above.
 const SPINNER_FRAMES = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"] as const
@@ -184,6 +197,12 @@ export function AgentLoomApp(props: AgentLoomAppProps) {
   })
 
   useKeyboard((event) => {
+    // Match OpenCode's selection-first copy behavior. Ctrl+Y reaches the TUI
+    // consistently even in terminals that reserve Ctrl+C for interrupts.
+    if (event.ctrl && event.name === "y") {
+      if (copySelectedText(renderer)) event.preventDefault()
+      return
+    }
     if (event.ctrl && event.name === "c") {
       event.preventDefault()
       props.onExit()
@@ -410,8 +429,7 @@ export function AgentLoomApp(props: AgentLoomAppProps) {
     if (item.action === "new-application") void props.session.beginApplicationCreation()
     if (item.action === "chat") props.session.goBuilder()
     if (item.action === "refresh") void props.session.refresh()
-    if (item.action === "permission-full") void props.session.setPermissionMode("full_access")
-    if (item.action === "permission-application") void props.session.setPermissionMode("application_only")
+    if (item.action === "permission-toggle") void props.session.togglePermissionMode()
     if (item.action === "update") {
       void props.session.installUpdate().then((installed) => {
         if (installed) props.onRestart?.()
@@ -697,7 +715,7 @@ function BuilderView(props: {
               return (
                 <box flexShrink={0} border={["left"]} borderColor={tool.status === "error" ? props.theme.error : props.theme.borderActive} paddingLeft={1}>
                   <text fg={tool.status === "completed" ? props.theme.success : tool.status === "error" ? props.theme.error : props.theme.warning} attributes={TextAttributes.BOLD}>
-                    {tool.status === "completed" ? "✓" : tool.status === "error" ? "×" : props.spinner} {tool.title ?? tool.name}
+                    {tool.status === "completed" ? "✓" : tool.status === "error" ? "×" : props.spinner} {tool.source ? "子 Agent · " : ""}{tool.title ?? tool.name}
                   </text>
                   <Show when={summary()}>
                     {(output) => <text fg={props.theme.muted} wrapMode="word">{output()}</text>}
@@ -730,7 +748,7 @@ function BuilderView(props: {
           <Show when={props.state.permissionRequest}>
             {(request) => (
               <box flexShrink={0} border borderColor={props.theme.warning} paddingLeft={1} paddingRight={1} paddingTop={1} paddingBottom={1} gap={1}>
-                <text fg={props.theme.warning} attributes={TextAttributes.BOLD}>需要授权 · {request().permission}</text>
+                <text fg={props.theme.warning} attributes={TextAttributes.BOLD}>{request().source ? "子 Agent 需要授权" : "需要授权"} · {request().permission}</text>
                 <For each={request().patterns.slice(0, 4)}>
                   {(pattern) => <text fg={props.theme.text} wrapMode="word">{pattern}</text>}
                 </For>
@@ -881,6 +899,7 @@ function BuilderView(props: {
           {props.state.questionRequest ? "[ Enter 回复问题 ]" : "[ Enter 发送 ]"}
         </text>
         <text fg={props.theme.muted}>Ctrl+X Commands</text>
+        <text fg={props.theme.muted}>Ctrl+Y 复制选中</text>
         <text fg={props.theme.muted}>/help 帮助</text>
       </box>
     </box>
@@ -1428,7 +1447,7 @@ function Footer(props: { theme: AgentLoomPalette }) {
       backgroundColor={props.theme.panel}
     >
       <text fg={props.theme.muted}>AgentLoom · 全局运行状态自动刷新 · r 重新索引</text>
-      <text fg={props.theme.muted}>Ctrl-C 退出</text>
+      <text fg={props.theme.muted}>Ctrl+Y 复制选中 · Ctrl-C 退出</text>
     </box>
   )
 }

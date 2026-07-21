@@ -114,6 +114,102 @@ describe("OpenCode SDK boundary", () => {
     expect(received).toEqual(["public answer"])
   })
 
+  test("maps durable OpenCode event envelopes used by the bundled runtime", async () => {
+    let markSubscribed!: () => void
+    const subscribed = new Promise<void>((resolve) => { markSubscribed = resolve })
+    const events = [
+      {
+        id: "evt_part",
+        type: "message.part.updated",
+        data: {
+          sessionID: "ses_parent",
+          time: 1,
+          part: { id: "part_text", type: "text", sessionID: "ses_parent", messageID: "msg_1", text: "" },
+        },
+      },
+      {
+        id: "evt_delta",
+        type: "message.part.delta",
+        data: {
+          sessionID: "ses_parent",
+          messageID: "msg_1",
+          partID: "part_text",
+          field: "text",
+          delta: "visible progress",
+        },
+      },
+      {
+        id: "evt_permission",
+        type: "permission.asked",
+        data: {
+          id: "per_1",
+          sessionID: "ses_parent",
+          permission: "bash",
+          patterns: ["head dataset.csv"],
+          metadata: {},
+          always: [],
+        },
+      },
+      {
+        id: "evt_task",
+        type: "message.part.updated",
+        data: {
+          sessionID: "ses_parent",
+          time: 2,
+          part: {
+            id: "part_task",
+            type: "tool",
+            sessionID: "ses_parent",
+            messageID: "msg_1",
+            callID: "call_task",
+            tool: "task",
+            state: { status: "running", metadata: { sessionId: "ses_child" } },
+          },
+        },
+      },
+    ]
+    const payload = events.map((event) => `data: ${JSON.stringify(event)}\n\n`).join("")
+    const server = Bun.serve({
+      port: 0,
+      fetch(request) {
+        if (new URL(request.url).pathname !== "/event") return new Response("not found", { status: 404 })
+        markSubscribed()
+        return new Response(payload, { headers: { "content-type": "text/event-stream" } })
+      },
+    })
+    servers.push(server)
+    const api = createOpenCodeSessionApi({
+      baseUrl: `http://127.0.0.1:${server.port}`,
+      directory: "/repo",
+    })
+    const received: unknown[] = []
+    api.subscribe((event) => received.push(event))
+
+    await subscribed
+    for (let index = 0; index < 20 && received.length < 3; index += 1) await Bun.sleep(5)
+    await api.close()
+
+    expect(received).toEqual([
+      { type: "text.delta", sessionID: "ses_parent", text: "visible progress" },
+      {
+        type: "permission",
+        sessionID: "ses_parent",
+        requestID: "per_1",
+        permission: "bash",
+        patterns: ["head dataset.csv"],
+        metadata: {},
+      },
+      {
+        type: "tool",
+        sessionID: "ses_parent",
+        callID: "call_task",
+        name: "task",
+        status: "running",
+        metadata: { sessionId: "ses_child" },
+      },
+    ])
+  })
+
   test("question answers and rejection use the official OpenCode endpoints", async () => {
     const requests: Array<{ path: string; method: string; body: unknown }> = []
     const server = Bun.serve({
@@ -158,14 +254,21 @@ describe("OpenCode SDK boundary", () => {
       port: 0,
       async fetch(request) {
         const url = new URL(request.url)
-        if (url.pathname !== "/session") return new Response("not found", { status: 404 })
+        if (!url.pathname.startsWith("/session")) return new Response("not found", { status: 404 })
         directories.push(url.searchParams.get("directory") ?? "")
-        if (request.method === "GET") return Response.json(stored)
-        if (request.method === "POST") {
+        if (url.pathname === "/session" && request.method === "GET") return Response.json(stored)
+        if (url.pathname === "/session" && request.method === "POST") {
           const body = await request.json() as { title: string; metadata: Record<string, unknown> }
           const session = { id: `sdk-${stored.length + 1}`, ...body }
           stored.push(session)
           return Response.json(session)
+        }
+        if (request.method === "PATCH") {
+          const body = await request.json() as Omit<(typeof stored)[number], "id">
+          const index = stored.findIndex((session) => url.pathname === `/session/${session.id}`)
+          if (index < 0) return new Response("not found", { status: 404 })
+          stored[index] = { ...stored[index]!, ...body }
+          return Response.json(stored[index])
         }
         return new Response("method not allowed", { status: 405 })
       },
@@ -203,7 +306,7 @@ describe("OpenCode SDK boundary", () => {
         { permission: "agentloom_run", pattern: "*", action: "ask" },
       ],
     }])
-    expect(directories).toEqual(["/repo", "/repo", "/repo"])
+    expect(directories).toEqual(["/repo", "/repo", "/repo", "/repo"])
   })
 
   test("Studio prompts and reloads messages through the OpenCode SDK", async () => {
@@ -222,6 +325,9 @@ describe("OpenCode SDK boundary", () => {
       async fetch(request) {
         const url = new URL(request.url)
         if (url.pathname === "/session" && request.method === "GET") return Response.json([session])
+        if (url.pathname === "/session/ses_reports" && request.method === "PATCH") {
+          return Response.json({ ...session, ...(await request.json() as object) })
+        }
         if (url.pathname === "/session/ses_reports/message" && request.method === "GET") {
           return Response.json(history)
         }

@@ -124,9 +124,9 @@ Effective Config、YAML/引用、Tools、Skills、权限、拓扑与相关测试
 尚未运行”，不能宣称完全完成。
 
 大型 Application 的模型侧详情会去重并按每页最多 10 个 Agent 返回，避免
-把完整配置塞进一次 Tool 输出。若连续 60 秒没有文本、Tool、Diff 或状态
-进展，Studio 会自动中止父 Loop 及其 Task 子会话并显示错误；需要立即中止
-时仍可按 `Esc`。
+把完整配置塞进一次 Tool 输出。Studio 直接遵循 OpenCode Session 的状态、重试、
+权限、问题和 Task 子会话事件；模型安静思考不会被误判成需要自动中止。需要立即
+中止时按 `Esc`。
 
 ### 2. 首页数字与详情
 
@@ -146,8 +146,10 @@ Working Revision 和 Running Revision。Run 默认只展示可行动摘要，不
 
 默认 `Application Only`：可读整个项目，可直接写当前 Application；Shell、
 全局文件、其他 Application 和新建时未知目录由 OpenCode 弹出权限卡。
-按 `1` 仅本次、`2` 本次会话、`3` 拒绝。`Ctrl+X` 可启用 Full Access，
-但它只在当前 TUI 会话有效，退出后恢复默认。
+按 `1` 仅本次、`2` 本次会话、`3` 拒绝。`Ctrl+X` 中的 Full Access 是同一个
+开关：未选择 Application 时也可预设，切换 Application 后继续生效，退出 TUI
+后恢复默认。切换 Application 会保留当前 Studio 对话记忆，只有 `/new` 才开始
+不带旧记忆的新 Session。选中 TUI 文本后按 `Ctrl+Y` 可复制。
 Studio Agent 需要业务决定时，可点击选项或在输入框回答；一次出现多个问题时
 用 `|` 分隔答案。
 
@@ -157,6 +159,8 @@ Working Revision，不会热切换正在运行的 Agent；新配置需新 Run �
 | 操作 | 命令 / 按键 |
 |---|---|
 | 发送对话 | `Enter` |
+| 开始新的 Studio 对话 | `/new` |
+| 复制选中的 TUI 文本 | `Ctrl+Y` |
 | 搜索命令和全局实体 | `Ctrl+X` |
 | 从 `config/llm.yaml` 选择 Studio 模型 | `/models` 或 `Ctrl+X` |
 | 刷新完整索引 | `/refresh` 或在详情页按 `r` |
