@@ -5,6 +5,9 @@ import type { OpenCodeSessionInfo } from "./application-sessions"
 import type { OpenCodeStoredMessage, OpenCodeStudioApi } from "./opencode-studio"
 import type { StudioEvent, StudioModel } from "../app/session"
 
+const MAX_ROOT_SESSIONS = 100_000
+const ROOT_SESSION_QUERY_LIMIT = MAX_ROOT_SESSIONS + 1
+
 export function createOpenCodeSessionApi(input: {
   baseUrl: string
   directory: string
@@ -42,8 +45,14 @@ export function createOpenCodeSessionApi(input: {
         directory: input.directory,
         scope: "project",
         roots: true,
+        limit: ROOT_SESSION_QUERY_LIMIT,
       })
       if (!result.data) throw sdkError("list OpenCode sessions", result.error)
+      if (result.data.length > MAX_ROOT_SESSIONS) {
+        throw new Error(
+          `OpenCode returned more than ${MAX_ROOT_SESSIONS} root sessions; refusing to use a possibly truncated Application history`,
+        )
+      }
       return result.data.map(toSessionInfo)
     },
 
@@ -55,6 +64,18 @@ export function createOpenCodeSessionApi(input: {
         permission: request.permission,
       })
       if (!result.data) throw sdkError("create OpenCode session", result.error)
+      return toSessionInfo(result.data)
+    },
+
+    async update(sessionID, request): Promise<OpenCodeSessionInfo> {
+      const result = await client.session.update({
+        sessionID,
+        directory: input.directory,
+        title: request.title,
+        metadata: request.metadata,
+        permission: request.permission,
+      })
+      if (!result.data) throw sdkError("update OpenCode session", result.error)
       return toSessionInfo(result.data)
     },
 
@@ -70,9 +91,7 @@ export function createOpenCodeSessionApi(input: {
           role: message.info.role,
           errorName: message.info.role === "assistant" ? message.info.error?.name : undefined,
         },
-        parts: message.parts.map((part) => part.type === "text"
-          ? { type: "text" as const, text: part.text }
-          : { type: part.type }),
+        parts: message.parts.map(storedOpenCodePart),
       }))
     },
 
@@ -86,6 +105,17 @@ export function createOpenCodeSessionApi(input: {
         parts: [{ type: "text", text: message }],
       })
       if (!result.data) throw sdkError("prompt OpenCode session", result.error)
+    },
+
+    async summarize(sessionID, model): Promise<void> {
+      const result = await client.session.summarize({
+        sessionID,
+        directory: input.directory,
+        providerID: model.providerID,
+        modelID: model.modelID,
+        auto: false,
+      })
+      if (result.data !== true) throw sdkError("compact Studio session", result.error)
     },
 
     async replyPermission(requestID, reply): Promise<void> {
@@ -215,8 +245,18 @@ function abortableDelay(durationMs: number, signal: AbortSignal): Promise<void> 
 }
 
 function studioEvent(raw: unknown, partTypes: Map<string, string>): StudioEvent | null {
-  if (!isRecord(raw) || typeof raw.type !== "string" || !isRecord(raw.properties)) return null
-  const properties = raw.properties
+  if (!isRecord(raw) || typeof raw.type !== "string") return null
+  // OpenCode 1.18 emits both its legacy in-process event shape
+  // (`properties`) and the durable event-log shape (`data`) from /event.
+  // The bundled runtime currently uses the latter for Session, Tool and
+  // permission progress, so accepting only `properties` makes an active turn
+  // look silent and hides the real Session lifecycle from Studio.
+  const properties = isRecord(raw.properties)
+    ? raw.properties
+    : isRecord(raw.data)
+      ? raw.data
+      : null
+  if (!properties) return null
   const sessionID = typeof properties.sessionID === "string" ? properties.sessionID : undefined
   if (raw.type === "message.part.removed" && sessionID && typeof properties.partID === "string") {
     partTypes.delete(studioPartKey(sessionID, properties.partID))
@@ -286,6 +326,22 @@ function studioEvent(raw: unknown, partTypes: Map<string, string>): StudioEvent 
         ? properties.status.type as "busy" | "idle" | "retry"
         : "busy"
     return { type: "status", sessionID, status }
+  }
+  if (
+    (raw.type === "session.next.compaction.started" || raw.type === "session.next.compaction.ended")
+    && sessionID
+  ) {
+    return {
+      type: "compaction",
+      sessionID,
+      phase: raw.type.endsWith("started") ? "started" : "completed",
+      reason: properties.reason === "manual" || properties.reason === "auto"
+        ? properties.reason
+        : "unknown",
+    }
+  }
+  if (raw.type === "session.compacted" && sessionID) {
+    return { type: "compaction", sessionID, phase: "completed", reason: "unknown" }
   }
   if (raw.type === "question.asked" && sessionID && typeof properties.id === "string") {
     return {
@@ -365,6 +421,25 @@ function isToolStatus(value: unknown): value is "pending" | "running" | "complet
   return value === "pending" || value === "running" || value === "completed" || value === "error"
 }
 
+function storedOpenCodePart(part: { type: string; [key: string]: unknown }): OpenCodeStoredMessage["parts"][number] {
+  if (part.type === "text" && typeof part.text === "string") {
+    return { type: "text", text: part.text }
+  }
+  if (part.type !== "tool" || typeof part.tool !== "string") return { type: part.type }
+  const state = isRecord(part.state) ? part.state : {}
+  return {
+    type: "tool",
+    tool: part.tool,
+    state: {
+      ...(typeof state.status === "string" ? { status: state.status } : {}),
+      ...(typeof state.title === "string" ? { title: state.title } : {}),
+      ...(state.input !== undefined ? { input: state.input } : {}),
+      ...(typeof state.output === "string" ? { output: state.output } : {}),
+      ...(state.error !== undefined ? { error: state.error } : {}),
+    },
+  }
+}
+
 function errorText(value: unknown): string {
   if (isRecord(value) && isRecord(value.data) && typeof value.data.message === "string") return value.data.message
   return typeof value === "string" ? value : "OpenCode session failed"
@@ -374,12 +449,16 @@ function toSessionInfo(session: {
   id: string
   title: string
   directory: string
+  parentID?: string
+  time?: { created: number; updated: number }
   metadata?: Record<string, unknown>
 }): OpenCodeSessionInfo {
   return {
     id: session.id,
     title: session.title,
     directory: session.directory,
+    parentID: session.parentID,
+    time: session.time,
     metadata: session.metadata,
   }
 }
