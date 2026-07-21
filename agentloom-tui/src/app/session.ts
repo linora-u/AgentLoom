@@ -198,6 +198,7 @@ export class AgentLoomSession {
   private routeLoadGeneration = 0
   private studioTurnGeneration = 0
   private streamingStudioSource: string | null = null
+  private turnSubagentText = ""
   private readonly studioModelBySession = new Map<string, string>()
   private builderBusy = false
   private routeBusy = false
@@ -339,6 +340,10 @@ export class AgentLoomSession {
   }
 
   async beginApplicationCreation(): Promise<void> {
+    if (this.builderBusy) {
+      this.patch({ notice: "当前 Agent Loop 仍在运行；请等待完成，或按 Esc 中止后再切换。" })
+      return
+    }
     this.routeLoadGeneration += 1
     this.routeBusy = false
     this.patch({
@@ -419,10 +424,21 @@ export class AgentLoomSession {
 
   async openEntry(entry: SidebarEntry): Promise<void> {
     const index = this.entries.findIndex((candidate) => candidate.key === entry.key)
-    this.routeBusy = entry.kind === "application" || entry.kind === "agent" || entry.kind === "system" || entry.kind === "run"
     const studioApplicationID = entry.kind === "application" || entry.kind === "agent"
       ? entry.applicationID
       : null
+    const currentApplicationID = this.current.studioTarget?.type === "application"
+      ? this.current.studioTarget.applicationID
+      : null
+    if (
+      this.builderBusy
+      && studioApplicationID
+      && studioApplicationID !== currentApplicationID
+    ) {
+      this.patch({ notice: "当前 Agent Loop 仍在运行；请等待完成，或按 Esc 中止后再切换 Application。" })
+      return
+    }
+    this.routeBusy = entry.kind === "application" || entry.kind === "agent" || entry.kind === "system" || entry.kind === "run"
     this.patch({
       ...(studioApplicationID
         ? {
@@ -672,6 +688,7 @@ export class AgentLoomSession {
       const conversation = await this.input.studio.newSession(target, this.current.permissionMode)
       if (this.current.studioTarget !== target) return
       this.streamingStudioSource = null
+      this.turnSubagentText = ""
       this.patch({
         studioSessionID: conversation.sessionID,
         messages: conversation.messages.length > 0
@@ -706,6 +723,7 @@ export class AgentLoomSession {
     if (!sessionID) return
     const turnGeneration = ++this.studioTurnGeneration
     this.streamingStudioSource = null
+    this.turnSubagentText = ""
     this.builderBusy = true
     this.patch({
       notice: null,
@@ -729,7 +747,7 @@ export class AgentLoomSession {
       ) return
       this.patch({
         messages: conversation.messages,
-        streamingText: "",
+        streamingText: this.turnSubagentText,
         activities: [],
         loopState: "idle",
       })
@@ -745,7 +763,7 @@ export class AgentLoomSession {
         || this.studioTurnGeneration !== turnGeneration
       ) return
       this.builderBusy = false
-      this.patch({ streamingText: "", activities: [] })
+      this.patch({ streamingText: this.turnSubagentText, activities: [] })
     }
   }
 
@@ -1059,6 +1077,13 @@ export class AgentLoomSession {
         : sourceChanged
           ? "\n[主 Agent]\n"
           : ""
+      if (source) {
+        this.turnSubagentText = (
+          this.turnSubagentText
+          + (sourceChanged ? `\n[子 Agent ${shortSessionID(source)}]\n` : "")
+          + event.text
+        ).slice(-32_000)
+      }
       this.patch({
         streamingText: (this.current.streamingText + sourceLabel + event.text).slice(-32_000),
         loopState: "thinking",

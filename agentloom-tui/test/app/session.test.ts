@@ -351,6 +351,83 @@ describe("AgentLoom TUI session", () => {
     expect(calls.at(-1)).toBe("permission:ses_fresh:application_only")
   })
 
+  test("does not retarget the Studio Session while its Agent Loop is active", async () => {
+    const twoApplications: BootstrapResultDto = {
+      ...catalogSnapshot,
+      applications: [
+        catalogSnapshot.applications[0]!,
+        { ...catalogSnapshot.applications[0]!, id: "second", name: "second", path: "applications/second" },
+      ],
+    }
+    const turn = deferred<{ messages: Array<{ id: string; role: "assistant"; content: string }> }>()
+    const switches: string[] = []
+    const studio: StudioClient = {
+      async openNewApplication() { throw new Error("not expected") },
+      async openApplication() { return { sessionID: "ses_busy", messages: [] } },
+      async switchTarget(_sessionID, target) {
+        switches.push(target.type === "new" ? "new" : target.applicationID)
+      },
+      send() { return turn.promise },
+    }
+    const client = new FakeClient()
+    client.responses.set("application.detail", {
+      schema_version: 1,
+      application: { id: "new", name: "new", path: "applications/new", health: "healthy", updated_at: null },
+      working_revision: "sha256:test",
+      running_revision: null,
+      agents: [],
+    })
+    const session = new AgentLoomSession({ client, studio, snapshot: twoApplications })
+    const applications = buildPaletteItems(twoApplications)
+      .filter((item) => item.category === "Applications" && "entry" in item)
+    const first = applications.find((item) => "entry" in item && item.entry.kind === "application" && item.entry.applicationID === "new")
+    const second = applications.find((item) => "entry" in item && item.entry.kind === "application" && item.entry.applicationID === "second")
+    if (!first || !("entry" in first) || !second || !("entry" in second)) throw new Error("missing Applications")
+    await session.openEntry(first.entry)
+
+    const running = session.submit("run a long task")
+    await Bun.sleep(0)
+    await session.openEntry(second.entry)
+
+    expect(session.state.studioTarget).toEqual({ type: "application", applicationID: "new" })
+    expect(switches).toEqual([])
+    expect(session.state.notice).toContain("Agent Loop")
+    turn.resolve({ messages: [{ id: "done", role: "assistant", content: "done" }] })
+    await running
+  })
+
+  test("keeps completed subagent text visible for selection and copy", async () => {
+    let listener: ((event: import("../../src/app/session").StudioEvent) => void) | undefined
+    const turn = deferred<{ messages: Array<{ id: string; role: "assistant"; content: string }> }>()
+    const studio: StudioClient = {
+      async openNewApplication() { throw new Error("not expected") },
+      async openApplication() { return { sessionID: "ses_trace", messages: [] } },
+      send() { return turn.promise },
+      subscribe(next) {
+        listener = next
+        return () => { listener = undefined }
+      },
+    }
+    const session = new AgentLoomSession({ client: new FakeClient(), studio, snapshot: catalogSnapshot })
+    const application = buildPaletteItems(catalogSnapshot).find((item) => item.category === "Applications")
+    if (!application || !("entry" in application)) throw new Error("missing Application")
+    await session.openEntry(application.entry)
+
+    const running = session.submit("delegate")
+    await Bun.sleep(0)
+    listener?.({
+      type: "text.delta",
+      sessionID: "ses_trace",
+      text: "inspected worker output",
+      source: { kind: "subagent", sessionID: "ses_child" },
+    })
+    turn.resolve({ messages: [{ id: "done", role: "assistant", content: "final" }] })
+    await running
+
+    expect(session.state.streamingText).toContain("inspected worker output")
+    expect(session.state.loopState).toBe("idle")
+  })
+
   test("an interrupted Studio turn cannot overwrite the immediate follow-up", async () => {
     const first = deferred<{ messages: Array<{ id: string; role: "assistant"; content: string }> }>()
     const second = deferred<{ messages: Array<{ id: string; role: "assistant"; content: string }> }>()
