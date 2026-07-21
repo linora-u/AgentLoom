@@ -9,7 +9,7 @@
 </p>
 
 <p align="center">
-  使用 OpenCode 驱动的 Application Studio 创建、修改、校验、运行并查看 AgentLoom Application。
+  使用 Application Studio 创建、修改、校验、运行并查看 AgentLoom Application。
 </p>
 
 <p align="center">
@@ -87,9 +87,9 @@ model:
 这份文件是 Studio 与 Application Agent 唯一共享的模型配置源。
 Application Agent 由 Python Runtime 按 YAML `model_type` 解析；TypeScript
 Studio 适配器把同一批 Profile、端点、凭证和兼容请求参数安全映射给内置
-OpenCode Runtime。`/models` 或 `Ctrl+X` 只切换当前 Studio Session 使用的
+Studio Runtime。`/models` 或 `Ctrl+X` 只切换当前 Studio Session 使用的
 `llm.yaml` 模型类型，不修改任何 Application YAML 的 `model_type`。配置缺失
-或无效时 Studio 会明确启动失败，不会回退到 OpenCode 环境默认模型。
+或无效时 Studio 会明确启动失败，不会回退到未配置的环境默认模型。
 
 ## 从 TUI 开始
 
@@ -104,7 +104,7 @@ agentloom --project /path/to/project
 ```
 
 TUI 是 Applications-first 控制面。独立的 Studio Agent 可以读取项目、
-直接修改当前 Application、展示 OpenCode Tool 与 Diff、校验配置、请求
+直接修改当前 Application、展示 Tool 与 Diff、校验配置、请求
 真实运行授权、读取结构化 Run 证据，并在失败后继续修复。
 
 ### 1. 新建或选择 Application
@@ -124,7 +124,7 @@ Effective Config、YAML/引用、Tools、Skills、权限、拓扑与相关测试
 尚未运行”，不能宣称完全完成。
 
 大型 Application 的模型侧详情会去重并按每页最多 10 个 Agent 返回，避免
-把完整配置塞进一次 Tool 输出。Studio 直接遵循 OpenCode Session 的状态、重试、
+把完整配置塞进一次 Tool 输出。Studio 会持久化 Session 的状态、重试、
 权限、问题和 Task 子会话事件；模型安静思考不会被误判成需要自动中止。需要立即
 中止时按 `Esc`。
 
@@ -145,7 +145,7 @@ Working Revision 和 Running Revision。Run 默认只展示可行动摘要，不
 ### 3. 权限与 Revision
 
 默认 `Application Only`：可读整个项目，可直接写当前 Application；Shell、
-全局文件、其他 Application 和新建时未知目录由 OpenCode 弹出权限卡。
+全局文件、其他 Application 和新建时未知目录由 Studio 弹出权限卡。
 按 `1` 仅本次、`2` 本次会话、`3` 拒绝。`Ctrl+X` 中的 Full Access 是同一个
 开关：未选择 Application 时也可预设，切换 Application 后继续生效，退出 TUI
 后恢复默认。切换 Application 会保留当前 Studio 对话记忆，只有 `/new` 才开始
