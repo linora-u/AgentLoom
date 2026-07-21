@@ -109,6 +109,33 @@ class TestIsRateLimitError:
 # ═══════════════════════════════════════════════════════════════════ #
 
 class TestRetryWrapperGlobalRateLimit:
+    def test_exhausted_provider_budget_fails_before_global_retry_wait(self, monkeypatch):
+        provider_calls = 0
+        state = MagicMock()
+        limiter = MagicMock()
+        monkeypatch.setattr(GlobalRateLimiterRegistry, "get_state", lambda _model_type: state)
+        monkeypatch.setattr(GlobalRateLimiterRegistry, "get_limiter", lambda _model_type: limiter)
+
+        def failing_completion(**kwargs):
+            nonlocal provider_calls
+            provider_calls += 1
+            raise Timeout(message="timeout", model="test", llm_provider="test")
+
+        wrapper = create_retry_wrapper(
+            failing_completion,
+            default_num_retries=10,
+            default_retry_delay=0.0,
+            default_max_retry_delay=0.0,
+        )
+
+        with limit_provider_calls(1):
+            with pytest.raises(ProviderCallBudgetExceeded):
+                wrapper(model="test", _agent_loom_model_type="powerful")
+
+        assert provider_calls == 1
+        assert state.wait_if_limited.call_count == 1
+        assert limiter.throttle.call_count == 1
+
     def test_provider_budget_stops_tenacity_before_a_fifth_request(self):
         """One review budget fences retry attempts at the provider boundary."""
         provider_calls = 0

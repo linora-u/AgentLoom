@@ -9,7 +9,7 @@ English | <a href="docs/cn/README.md">简体中文</a>
 </p>
 
 <p align="center">
-  Use the OpenCode-powered Application Studio to create, modify, validate, run, and inspect AgentLoom Applications from one terminal.
+  Use Application Studio to create, modify, validate, run, and inspect AgentLoom Applications from one terminal.
 </p>
 
 <p align="center">
@@ -89,10 +89,10 @@ model:
 This file is the single model configuration source for both runtimes.
 Application Agents resolve it through Python and their YAML `model_type`; the
 TypeScript Studio adapter maps the same profiles, endpoints, credentials, and
-compatible request options into the bundled OpenCode Runtime. `/models` and
+compatible request options into the bundled Studio runtime. `/models` and
 `Ctrl+X` select a Studio profile from `config/llm.yaml` without changing any
 Application's `model_type`. Studio startup fails clearly instead of falling
-back to an ambient OpenCode model when this configuration is missing or invalid.
+back to an unconfigured ambient model when this configuration is missing or invalid.
 
 ## Start with the TUI
 
@@ -108,7 +108,7 @@ agentloom --project /path/to/project
 
 The TUI is an Applications-first control plane. Its independent Studio Agent
 can inspect the whole project, directly edit the selected Application, show
-OpenCode Tool and Diff blocks, validate configuration, request permission to
+Tool and Diff blocks, validate configuration, request permission to
 run it, inspect structured evidence, and continue repairing failures.
 
 ### 1. Create or select an Application
@@ -127,7 +127,7 @@ Diff. It loops through Effective Config, YAML/reference validation, an approved
 smoke Run, and structured Run evidence. If real execution is not approved it
 must report “configuration validated, not run” rather than claiming completion.
 Large model-facing Application detail is deduplicated and paginated at ten
-Agents per call. Studio follows OpenCode Session status, retry, permission,
+Agents per call. Studio persists Session status, retry, permission,
 question, and Task sub-session events; quiet model latency is not treated as a
 cancellation signal. `Esc` remains the explicit manual interrupt.
 
@@ -149,7 +149,7 @@ actionable summary rather than raw Events.
 ### 3. Permissions and revisions
 
 `Application Only` is the default. Reads are project-wide, direct writes are
-limited to the current Application, and OpenCode asks for Shell, global, other
+limited to the current Application, and Studio asks for Shell, global, other
 Application, or new-path access. Choose `1` once, `2` for this Session, or `3`
 reject. `Full Access` is one on/off toggle in `Ctrl+X`: it can be preset before
 selecting an Application and remains active while switching Applications; it
