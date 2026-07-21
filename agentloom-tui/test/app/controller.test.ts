@@ -364,6 +364,7 @@ describe("TUI controller", () => {
   test("keeps apply and model selection explicit instead of sending them to the model", () => {
     expect(parseBuilderInput("/help")).toEqual({ type: "help" })
     expect(parseBuilderInput("/new")).toEqual({ type: "new" })
+    expect(parseBuilderInput("/compact")).toEqual({ type: "compact" })
     expect(parseBuilderInput("/apply")).toEqual({ type: "apply" })
     expect(parseBuilderInput("/models")).toEqual({ type: "models" })
     expect(parseBuilderInput("/model fast")).toEqual({ type: "model", modelType: "fast" })

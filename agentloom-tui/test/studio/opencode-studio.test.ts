@@ -13,7 +13,12 @@ class MemoryStudioApi implements OpenCodeStudioApi {
   readonly permissionUpdates: Array<{ sessionID: string; permission: unknown[] }> = []
   readonly aborts: string[] = []
   readonly deletedMessages: string[] = []
+  readonly summaries: Array<{
+    sessionID: string
+    model: { providerID: string; modelID: string }
+  }> = []
   hangPrompts = false
+  failMessageReloadAfterSummary = false
   readonly workspaceKey?: string
   private clock = 1
   private readonly listeners = new Set<(event: any) => void>()
@@ -68,6 +73,9 @@ class MemoryStudioApi implements OpenCodeStudioApi {
   }
 
   async messages(sessionID = "ses_reports") {
+    if (this.failMessageReloadAfterSummary && this.summaries.length > 0) {
+      throw new Error("message reload unavailable")
+    }
     return [...(this.histories.get(sessionID) ?? [])]
   }
 
@@ -80,6 +88,10 @@ class MemoryStudioApi implements OpenCodeStudioApi {
       { info: { id: `${sessionID}-assistant-${history.length + 1}`, role: "assistant" }, parts: [{ type: "text", text: "configuration updated" }] },
     )
     if (this.hangPrompts) await new Promise<void>(() => {})
+  }
+
+  async summarize(sessionID: string, model: { providerID: string; modelID: string }) {
+    this.summaries.push({ sessionID, model })
   }
 
   subscribe(listener: (event: any) => void) {
@@ -153,6 +165,53 @@ class MemoryStudioApi implements OpenCodeStudioApi {
 }
 
 describe("OpenCode Studio client", () => {
+  test("compacts the current Session with its selected model and keeps it resumable", async () => {
+    const api = new MemoryStudioApi()
+    const studio = new OpenCodeStudioClient(api)
+    const opened = await studio.openApplication("reports")
+
+    const compacted = await studio.compact(opened.sessionID)
+    const reopened = await studio.openApplication("reports")
+
+    expect(api.summaries).toEqual([{
+      sessionID: opened.sessionID,
+      model: { providerID: "openai", modelID: "gpt-5.4" },
+    }])
+    expect(compacted).toEqual(opened)
+    expect(reopened).toEqual(opened)
+  })
+
+  test("rejects manual compaction while the current Agent Loop is active", async () => {
+    const api = new MemoryStudioApi()
+    api.hangPrompts = true
+    const studio = new OpenCodeStudioClient(api)
+    const opened = await studio.openApplication("reports")
+    const pending = studio.send(opened.sessionID, "keep working")
+    await Bun.sleep(0)
+
+    await expect(studio.compact(opened.sessionID)).rejects.toThrow("active Agent Loop")
+    expect(api.summaries).toEqual([])
+
+    await studio.interrupt(opened.sessionID)
+    await expect(pending).rejects.toThrow("已中止")
+  })
+
+  test("reports compaction success when only the post-compact message reload fails", async () => {
+    const api = new MemoryStudioApi()
+    const studio = new OpenCodeStudioClient(api)
+    const opened = await studio.openApplication("reports")
+    api.failMessageReloadAfterSummary = true
+
+    const compacted = await studio.compact(opened.sessionID)
+
+    expect(api.summaries).toHaveLength(1)
+    expect(compacted).toEqual({
+      sessionID: opened.sessionID,
+      messages: [],
+      historyRefreshFailed: true,
+    })
+  })
+
   test("/new starts blank while preserving every Application conversation in the memory index", async () => {
     const workspace = await mkdtemp(join(tmpdir(), "agentloom-studio-memory-"))
     try {

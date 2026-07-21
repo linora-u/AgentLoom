@@ -174,6 +174,28 @@ describe("OpenCode SDK boundary", () => {
           },
         },
       },
+      {
+        id: "evt_compaction_started",
+        type: "session.next.compaction.started",
+        data: {
+          sessionID: "ses_parent",
+          messageID: "msg_compaction",
+          reason: "auto",
+          timestamp: 3,
+        },
+      },
+      {
+        id: "evt_compaction_ended",
+        type: "session.next.compaction.ended",
+        data: {
+          sessionID: "ses_parent",
+          messageID: "msg_compaction",
+          reason: "auto",
+          timestamp: 4,
+          text: "summary",
+          recent: "recent",
+        },
+      },
     ]
     const payload = events.map((event) => `data: ${JSON.stringify(event)}\n\n`).join("")
     const server = Bun.serve({
@@ -193,7 +215,7 @@ describe("OpenCode SDK boundary", () => {
     api.subscribe((event) => received.push(event))
 
     await subscribed
-    for (let index = 0; index < 20 && received.length < 3; index += 1) await Bun.sleep(5)
+    for (let index = 0; index < 20 && received.length < 5; index += 1) await Bun.sleep(5)
     await api.close()
 
     expect(received).toEqual([
@@ -213,6 +235,18 @@ describe("OpenCode SDK boundary", () => {
         name: "task",
         status: "running",
         metadata: { sessionId: "ses_child" },
+      },
+      {
+        type: "compaction",
+        sessionID: "ses_parent",
+        phase: "started",
+        reason: "auto",
+      },
+      {
+        type: "compaction",
+        sessionID: "ses_parent",
+        phase: "completed",
+        reason: "auto",
       },
     ])
   })
@@ -252,6 +286,35 @@ describe("OpenCode SDK boundary", () => {
         body: null,
       },
     ])
+  })
+
+  test("manual compaction uses the official Session summarize endpoint and selected model", async () => {
+    const requests: Array<{ path: string; method: string; body: unknown }> = []
+    const server = Bun.serve({
+      port: 0,
+      async fetch(request) {
+        const url = new URL(request.url)
+        requests.push({
+          path: `${url.pathname}${url.search}`,
+          method: request.method,
+          body: await request.json().catch(() => null),
+        })
+        return Response.json(true)
+      },
+    })
+    servers.push(server)
+    const api = createOpenCodeSessionApi({
+      baseUrl: `http://127.0.0.1:${server.port}`,
+      directory: "/repo",
+    })
+
+    await api.summarize("ses_reports", { providerID: "openai", modelID: "gpt-5.4" })
+
+    expect(requests).toEqual([{
+      path: "/session/ses_reports/summarize?directory=%2Frepo",
+      method: "POST",
+      body: { providerID: "openai", modelID: "gpt-5.4", auto: false },
+    }])
   })
 
   test("Application sessions are persisted through the OpenCode Session API", async () => {

@@ -910,6 +910,7 @@ function BuilderView(props: {
 
 function loopStateLabel(state: AgentLoomSessionState["loopState"], spinner: string): string {
   if (state === "thinking") return `${spinner} 正在思考…`
+  if (state === "compacting") return `${spinner} 正在压缩上下文…`
   if (state === "tool") return `${spinner} 正在调用工具…`
   if (state === "validating") return `${spinner} 正在校验 Application…`
   if (state === "running") return `${spinner} 正在运行 Application…`

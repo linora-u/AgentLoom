@@ -154,7 +154,10 @@ Application, or new-path access. Choose `1` once, `2` for this Session, or `3`
 reject. `Full Access` is one on/off toggle in `Ctrl+X`: it can be preset before
 selecting an Application and remains active while switching Applications; it
 resets on exit. Switching Applications keeps the current Studio memory, while
-`/new` starts a fresh Session. Switching is blocked during an active Agent Loop;
+`/new` starts a fresh Session. `/compact` compresses the current Session with
+the selected Studio model while preserving task continuity, durable history,
+and completed file changes; the Runtime also reports automatic compaction when
+the context approaches its limit. Switching is blocked during an active Agent Loop;
 wait or press `Esc` first. Sub-agent execution text remains visible until the
 next turn; select TUI text and press `Ctrl+Y` to copy it.
 When the Agent needs a business decision, choose a visible option or type an
@@ -167,6 +170,7 @@ Working Revision but do not hot-switch a running Agent.
 |---|---|
 | Send chat | `Enter` |
 | Start a fresh Studio conversation | `/new` |
+| Compact the current conversation without starting over | `/compact` |
 | Copy selected TUI text | `Ctrl+Y` |
 | Browse commands and global entities | `Ctrl+X` |
 | Select a Studio model from `config/llm.yaml` | `/models` or `Ctrl+X` |
