@@ -251,6 +251,13 @@ def create_retry_wrapper(
                 pass  # graceful degradation: skip rate limiting
 
         def _rate_limited_call(*a, **kw):
+            # A caller-owned budget is also a cancellation boundary. Check it
+            # before any global Retry-After wait or token-bucket sleep so an
+            # exhausted one-call Reviewer cannot remain parked in a retry that
+            # its outer fresh-Agent loop has already forbidden.
+            budget = _PROVIDER_CALL_BUDGET.get()
+            if budget is not None and budget.calls >= budget.max_calls:
+                raise ProviderCallBudgetExceeded("provider call budget exhausted")
             # 1. Wait if another thread reported 429 (global coordination)
             if _state:
                 _state.wait_if_limited()

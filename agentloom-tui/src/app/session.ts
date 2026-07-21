@@ -312,7 +312,7 @@ export class AgentLoomSession {
       this.patch({ notice: "请先等待当前 Agent Loop 或详情加载完成" })
       return false
     }
-    this.patch({ updatePhase: "installing", notice: "正在整体更新 TUI、OpenCode Runtime 与 Python Runtime…" })
+    this.patch({ updatePhase: "installing", notice: "正在整体更新 TUI、Studio Runtime 与 Python Runtime…" })
     try {
       await this.input.updater.install()
       this.patch({ updatePhase: "installed", notice: "更新完成，正在安全重启…" })
@@ -1525,7 +1525,7 @@ function studioHelpMessage(): string {
     "- Agent 问题：点击选项或在输入框回答；多个问题用 | 分隔，Esc 拒绝",
     "- 更新：后台检查可信源码目录；从 Ctrl+X 确认整体更新并安全重启",
     "- Esc：按上下文关闭详情、拒绝权限/问题或中止当前 Agent Loop",
-    "- Agent Loop：遵循 OpenCode Session 状态；只有 Esc 会显式中止当前回合",
+    "- Agent Loop：持久化 Session 状态；只有 Esc 会显式中止当前回合",
     "- Ctrl+Y：复制当前鼠标/键盘选中的 TUI 文本",
     "- PgUp / PgDn：滚动当前焦点中的聊天或详情；鼠标滚轮滚动指针所在区域",
     "- Ctrl+C：退出",
