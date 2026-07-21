@@ -241,6 +241,14 @@ describe("OpenCode SDK boundary", () => {
     const studio = new OpenCodeStudioClient(createOpenCodeSessionApi({
       baseUrl: `http://127.0.0.1:${server.port}`,
       directory: "/repo",
+      models: [{
+        id: "configured",
+        modelID: "configured",
+        providerID: "agentloom-cG93ZXJmdWw",
+        providerName: "powerful",
+        name: "powerful",
+        default: true,
+      }],
     }))
 
     const opened = await studio.openApplication("reports")

@@ -1232,7 +1232,7 @@ describe("AgentLoom TUI view", () => {
     await Bun.sleep(20)
     await setup.renderOnce()
 
-    expect(setup.captureCharFrame()).toContain("Studio 模型 · OpenCode Providers")
+    expect(setup.captureCharFrame()).toContain("Studio 模型 · config/llm.yaml")
     expect(setup.captureCharFrame()).toContain("powerful")
     expect(setup.captureCharFrame()).toContain("fast")
 
@@ -1242,6 +1242,164 @@ describe("AgentLoom TUI view", () => {
 
     expect(session.state.modelType).toBe("fast")
     expect(session.state.notice).toBe("已切换模型: fast")
+  })
+
+  test("Ctrl+X selects the Studio model from the shared llm.yaml catalog", async () => {
+    const selections: string[] = []
+    const studio: StudioClient = {
+      async openNewApplication() { throw new Error("not expected") },
+      async openApplication() { return { sessionID: "ses_llm_yaml", messages: [] } },
+      async send() { return { messages: [] } },
+      async listModels() {
+        return [
+          {
+            id: "fast",
+            providerID: "agentloom-fast",
+            modelID: "configured",
+            name: "fast",
+            providerName: "config/llm.yaml",
+            default: true,
+          },
+          {
+            id: "powerful",
+            providerID: "agentloom-powerful",
+            modelID: "configured",
+            name: "powerful",
+            providerName: "config/llm.yaml",
+            default: false,
+          },
+        ]
+      },
+      async setModel(_sessionID, modelID) { selections.push(modelID) },
+    }
+    const client: TuiClient = {
+      async request<Method extends RpcMethod>(method: Method) {
+        if (method !== "application.detail") throw new Error(`unexpected ${method}`)
+        return {
+          schema_version: 1,
+          application: { id: "new", name: "new", path: "applications/new", health: "healthy", updated_at: null },
+          working_revision: "sha256:working",
+          running_revision: null,
+          agents: [],
+        } as RpcResult<Method>
+      },
+      close() {},
+    }
+    const session = new AgentLoomSession({ client, studio, snapshot: catalogSnapshot })
+    const application = buildPaletteItems(catalogSnapshot).find((item) => item.category === "Applications")
+    if (!application || !("entry" in application)) throw new Error("missing Application")
+    await session.openEntry(application.entry)
+    const setup = await testRender(
+      () => <AgentLoomApp session={session} projectRoot="/repo" onExit={() => {}} refreshIntervalMs={0} />,
+      { width: 140, height: 34 },
+    )
+    renderers.push(setup.renderer)
+    await setup.renderOnce()
+
+    expect(session.state.studioModel?.id).toBe("fast")
+    expect(setup.captureCharFrame()).toContain("Studio: config/llm.yaml · fast")
+
+    setup.mockInput.pressKey("x", { ctrl: true })
+    await Bun.sleep(5)
+    await setup.mockInput.typeText("从 llm.yaml 选择 Studio 模型")
+    await setup.renderOnce()
+    expect(setup.captureCharFrame()).toContain("模型类型、Provider 与认证统一读取项目 config/llm.yaml")
+    setup.mockInput.pressEnter()
+    await Bun.sleep(10)
+    await setup.renderOnce()
+
+    expect(setup.captureCharFrame()).toContain("Studio 模型 · config/llm.yaml")
+    expect(setup.captureCharFrame()).toContain("fast")
+    expect(setup.captureCharFrame()).toContain("powerful")
+    setup.mockInput.pressArrow("down")
+    setup.mockInput.pressEnter()
+    await Bun.sleep(10)
+
+    expect(selections).toEqual(["powerful"])
+    expect(session.state.notice).toBe("Studio 模型已切换为 config/llm.yaml · powerful")
+  })
+
+  test("switching Applications restores the model selected for that Studio Session", async () => {
+    const twoApplications: BootstrapResultDto = {
+      ...catalogSnapshot,
+      applications: [
+        catalogSnapshot.applications[0]!,
+        {
+          ...catalogSnapshot.applications[0]!,
+          id: "second",
+          name: "second",
+          path: "applications/second",
+        },
+      ],
+    }
+    const selections: Array<{ sessionID: string; modelID: string }> = []
+    const studio: StudioClient = {
+      async openNewApplication() { throw new Error("not expected") },
+      async openApplication(applicationID) { return { sessionID: `ses_${applicationID}`, messages: [] } },
+      async send() { return { messages: [] } },
+      async listModels() {
+        return [
+          {
+            id: "fast",
+            providerID: "agentloom-fast",
+            modelID: "configured",
+            name: "fast",
+            providerName: "config/llm.yaml",
+            default: true,
+          },
+          {
+            id: "powerful",
+            providerID: "agentloom-powerful",
+            modelID: "configured",
+            name: "powerful",
+            providerName: "config/llm.yaml",
+          },
+        ]
+      },
+      async setModel(sessionID, modelID) { selections.push({ sessionID, modelID }) },
+    }
+    const client: TuiClient = {
+      async request<Method extends RpcMethod>(method: Method, params: RpcParams<Method>) {
+        if (method !== "application.detail") throw new Error(`unexpected ${method}`)
+        const applicationID = String((params as RpcParams<"application.detail">).application_id)
+        return {
+          schema_version: 1,
+          application: {
+            id: applicationID,
+            name: applicationID,
+            path: `applications/${applicationID}`,
+            health: "healthy",
+            updated_at: null,
+          },
+          working_revision: `sha256:${applicationID}`,
+          running_revision: null,
+          agents: [],
+        } as RpcResult<Method>
+      },
+      close() {},
+    }
+    const session = new AgentLoomSession({ client, studio, snapshot: twoApplications })
+    const applications = buildPaletteItems(twoApplications)
+      .filter((item) => item.category === "Applications" && "entry" in item)
+    const first = applications.find((item) => (
+      "entry" in item && item.entry.kind === "application" && item.entry.applicationID === "new"
+    ))
+    const second = applications.find((item) => (
+      "entry" in item && item.entry.kind === "application" && item.entry.applicationID === "second"
+    ))
+    if (!first || !("entry" in first) || !second || !("entry" in second)) {
+      throw new Error("missing Applications")
+    }
+
+    await session.openEntry(first.entry)
+    expect(session.state.studioModel?.id).toBe("fast")
+    await session.setStudioModel("powerful")
+    await session.openEntry(second.entry)
+    expect(session.state.studioModel?.id).toBe("fast")
+    await session.openEntry(first.entry)
+
+    expect(session.state.studioModel?.id).toBe("powerful")
+    expect(selections).toEqual([{ sessionID: "ses_new", modelID: "powerful" }])
   })
 
   test("waits for the final CJK IME composition before submitting Enter", async () => {

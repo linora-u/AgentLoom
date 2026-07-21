@@ -75,9 +75,12 @@ Runs pin the Application content hash in `manifest.json`. Later edits change the
 Working Revision but never hot-switch the Running Revision. A new/restarted Run
 is required to use new configuration.
 
-Studio models come from connected OpenCode Providers and are selected with
-`/models`. Application Agents continue to use Python `config/llm.yaml` and their
-YAML `model_type`; selecting a Studio model never changes an Application model.
+Studio and Application Agents share the project-root `config/llm.yaml` as their
+only model catalog, Provider, authentication, and default source. The Studio
+maps those profiles into the bundled OpenCode Runtime; Application Agents keep
+resolving them through Python and YAML `model_type`. Selecting a Studio model
+with `/models` or `Ctrl+X` never changes an Application model. Missing or invalid
+configuration is an explicit startup error, not an OpenCode default fallback.
 
 ## Navigation
 
@@ -85,7 +88,7 @@ YAML `model_type`; selecting a Studio model never changes an Application model.
 |---|---|
 | Send a Studio message | `Enter` |
 | Search commands and global entities | `Ctrl+X` |
-| Select a Studio model | `/models` |
+| Select a Studio model from `config/llm.yaml` | `/models` or `Ctrl+X` |
 | Re-index project state | `/refresh` |
 | Scroll chat or the focused detail | `PgUp` / `PgDn`; mouse wheel scrolls the pointed region |
 | Diagnose a selected failed Run | `a` |

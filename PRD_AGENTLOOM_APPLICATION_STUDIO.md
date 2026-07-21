@@ -77,9 +77,9 @@ Application 详情展示最终 Effective Config 和来源，而不是只展示�
 43. 作为用户，我希望查看 Supervisor 与 Workers 的拓扑关系，从而理解任务如何分解和委派。
 44. 作为用户，我希望点击任一 Agent 查看角色、模型、Tools、Skills、子 Agent、权限、Hooks 和 MCP，从而审计它的能力边界。
 45. 作为用户，我希望原始 YAML 作为折叠的技术证据保留，从而在需要时检查实现而不让默认页面过载。
-46. 作为用户，我希望明确区分 Studio 模型和 Application 运行模型，从而不会误以为切换聊天模型会修改业务 Agent。
-47. 作为用户，我希望 Studio 模型沿用 OpenCode 的 Provider、认证和模型切换体验，从而复用熟悉的配置方式。
-48. 作为用户，我希望 Application 运行模型继续使用 AgentLoom 的模型配置和 Agent `model_type`，从而保持 Python Runtime 的配置真相。
+46. 作为用户，我希望明确区分 Studio 当前选择的模型类型和 Application Agent 的 `model_type`，从而不会误以为切换聊天模型会修改业务 Agent。
+47. 作为用户，我希望 Studio 与 Application 共用项目根 `config/llm.yaml` 这一份模型目录、Provider、认证和默认模型配置，从而不必维护两套模型配置真相。
+48. 作为用户，我希望 Studio 继续使用 OpenCode 的模型切换交互，而 TypeScript 适配器把 `llm.yaml` Profile 安全映射给 OpenCode Runtime；Application 运行模型继续由 Python Runtime 按 Agent `model_type` 解析同一文件。
 49. 作为用户，我希望模型密钥、Provider 头和敏感认证信息不进入详情或桥接 DTO，从而避免凭证泄露。
 50. 作为用户，我希望 Run 详情首先显示状态、耗时和进度，从而快速判断是否需要干预。
 51. 作为用户，我希望运行中能看到当前执行的 Agent 或步骤，从而知道系统不是卡死。
@@ -141,10 +141,10 @@ Application 详情展示最终 Effective Config 和来源，而不是只展示�
 19. **Full Access**：用户可显式选择 Full Access。它只在当前 TUI 会话有效，重启后恢复 Application Only。即使自动执行，也必须在 UI 中保留 Tool、Diff、Run 和影响范围记录。
 20. **运行授权**：查看、分析和静态校验自动执行。Application 启动、停止、重启和恢复首次询问，支持“仅本次”和“本次会话始终允许”。Full Access 下可自动执行。
 21. **全局变更授权**：Global Skills 和全局配置可自动读取。写入前必须计算并展示受影响 Applications，再请求一次或当前会话授权；Full Access 下免确认但仍展示 Diff 和影响范围。
-22. **模型隔离**：Studio Agent 使用 OpenCode Provider、认证和模型选择；Application Agents 继续使用 AgentLoom 的独立 LLM 配置和 `model_type`。Studio 模型切换不得隐式修改 Application 模型。
+22. **模型配置单一真相**：项目根 `config/llm.yaml` 是 Studio 与 Application Agents 唯一共享的模型目录、Provider、认证、默认类型和兼容请求参数来源。TypeScript 层把每个 Profile 映射成 OpenCode Runtime Provider；Python Runtime 继续按 Agent `model_type` 解析同一文件。`/models` 或 `Ctrl+X` 只改变当前 Studio Session 的模型选择，不修改任何 Application YAML；缺失或无效配置必须明确失败，禁止回退到 OpenCode 全局、免费或环境默认模型。
 23. **敏感信息边界**：Application 模型凭证、Base URL、Headers 和 Provider 私密配置不得进入 Studio DTO、日志、详情或 LLM 上下文。只暴露经过脱敏的模型类型、状态和必要诊断信息。
 24. **Application 首页**：主列表展示 Application 名称、健康状态、是否运行和最近修改时间。布局必须让键盘和鼠标都能直接进入 Application，不要求先打开 Recent Run。
-25. **Chat-first 布局**：顶部展示当前 Application、Revision、权限和 Studio 模型；中间展示会话、Tool calls、Diff、授权与 Run 进度；辅助面板展示 Application 健康、拓扑、Recent Runs 以及 Effective Tools/Skills/Permissions。窄终端下辅助面板可折叠，但信息仍可通过命令面板访问。
+25. **Chat-first 布局**：顶部展示当前 Application、Revision、权限和来自 `config/llm.yaml` 的 Studio 模型类型；中间展示会话、Tool calls、Diff、授权与 Run 进度；辅助面板展示 Application 健康、拓扑、Recent Runs 以及 Effective Tools/Skills/Permissions。窄终端下辅助面板可折叠，但信息仍可通过命令面板访问。
 26. **Application 详情**：默认展示最终 Effective Config，而非仅展示原始 YAML。每个重要字段标注 Global、Application 或 Agent 来源；原始 YAML 作为折叠技术证据。
 27. **Agent 详情**：Supervisor 和 Worker 使用统一详情模型，至少展示角色、描述、模型类型、Workflow 摘要、Tools、Skills、Workers/子 Agent、权限、Hooks、MCP、文件来源和校验状态。
 28. **统计语义**：首页不展示展开后的 Agent 定义总数。Application 数量按 Application 目录和有效 catalog 去重计算；Agent 定义只在对应 Application 拓扑中展示。
@@ -157,7 +157,7 @@ Application 详情展示最终 Effective Config 和来源，而不是只展示�
 35. **失败诊断**：Studio 可自动分析失败，但输入必须脱敏、有界并优先来自结构化证据。完整日志留在磁盘，通过路径入口访问。
 36. **导航规则**：`Ctrl+X` 是统一命令面板入口，可检索 Applications、Sessions、主 Agents、Runs、Skills 和 Commands；Worker 子 Agent 只在 Application 或主 Agent 详情中展示；Enter 或点击打开，Esc 返回或中断当前 OpenCode Session。
 37. **帮助规则**：帮助通过 `/help` 或命令面板打开。全局不绑定 `?`；`?` 仅在 OpenCode 已定义的局部视图中保留局部含义。移除 F6 焦点切换。
-38. **OpenCode 交互一致性**：模型选择、权限提示、Tool block、Diff、Subagent Session、流式消息和中断语义优先沿用内置 OpenCode Runtime 的既有行为；AgentLoom 只增加领域命令与 Application 视图。
+38. **OpenCode 交互一致性**：模型选择交互、权限提示、Tool block、Diff、Subagent Session、流式消息和中断语义优先沿用内置 OpenCode Runtime 的既有行为；模型配置来源仍固定为 `config/llm.yaml`，不得因此启用 OpenCode 自己的全局 Provider 配置。
 39. **动画规则**：动画必须由真实状态驱动，分别表达思考、工具执行、校验、运行、等待授权、完成和失败。支持 reduced-motion 或终端能力检测，降级时使用稳定的静态符号。
 40. **完成标准**：Studio 只有在 YAML/Schema、引用、Effective Config、Tools、Skills、权限、Agent 拓扑和相关测试通过，并在行为变更时完成一次获准的真实 Application 冒烟运行后，才可声明完成。
 41. **未运行状态**：如果用户没有授权真实运行，Studio 必须明确报告“配置已验证，尚未运行”，并列出未验证风险，不得宣称任务完全完成。
@@ -165,7 +165,7 @@ Application 详情展示最终 Effective Config 和来源，而不是只展示�
 43. **更新发现**：TUI 启动后后台检查兼容版本，不阻塞首屏。有更新时显示版本与关键变化，但不得在活动 Session 中静默替换二进制。
 44. **一键更新**：用户确认后，产品自动下载或构建、安装 TUI 与配套 OpenCode Runtime，并安全重启。另提供 `agentloom update` 主动入口。
 45. **源码更新**：文档将 `./install` 作为源码安装和更新的标准命令；`--no-modify-path` 只说明为“不改 Shell PATH 配置”的可选参数。
-46. **文档同步**：根文档和 TUI 文档必须删除旧的 `/apply`、F6、Run-first 和 Python Chat Agent 描述，增加 Application Studio、权限、Skills 统计、OpenCode 模型、更新和完成标准说明。
+46. **文档同步**：根文档和 TUI 文档必须删除旧的 `/apply`、F6、Run-first、Python Chat Agent 和“Studio 使用独立 OpenCode Provider”描述，增加 Application Studio、权限、Skills 统计、`llm.yaml` 单一模型配置源、更新和完成标准说明。
 47. **兼容现有 Runtime**：Python AgentLoom 的 Supervisor、Worker、Agent YAML、Runner、checkpoint、Hook Runtime 和结构化 Run 合同继续作为领域真相；本需求不改变它们的既定含义。
 48. **安装产物**：安装产物必须包含 TUI、固定版本 OpenCode Runtime、Python Runtime 和兼容的启动包装器，用户不需要单独安装 OpenCode。
 
@@ -174,7 +174,7 @@ Application 详情展示最终 Effective Config 和来源，而不是只展示�
 1. **测试原则**：优先测试用户可观察行为和跨边界合同，不断言私有函数、组件内部状态或 OpenCode 内部实现细节。只在高层测试无法准确定位协议破坏时增加窄合同测试。
 2. **主测试接缝**：建立一条 Application Studio 端到端验收接缝。它从临时 AgentLoom 项目启动真实的 TypeScript Studio 客户端、固定版本 OpenCode Runtime 和 Python 领域接口，使用确定性模型 Provider 驱动一次完整对话，验证“选择或创建 Application → 直接修改 → 展示 Diff → 生成 Revision → 静态校验 → 授权运行 → 获取结构化 Run → 展示有效摘要”的外部行为。这是首要回归门禁。
 3. **真实 Application 验收**：除确定性端到端接缝外，使用至少一个真实 Supervisor + Worker Application 完成冒烟验收，覆盖 Application overlay、Agent YAML、Tool、Skill、权限、Run receipt、Worker 状态和最终结果。需要真实模型的用例作为受控验收矩阵执行，不用脆弱文本匹配替代 Runtime 证据。
-4. **OpenCode 集成合同**：验证 Session 创建/恢复、流式事件、Tool call、Permission once/always/reject、Subagent、Diff、Interrupt 和持久化历史的用户可见行为。测试通过 SDK/API 边界进行，不复制 OpenCode 自身的单元测试。
+4. **OpenCode 集成合同**：验证 Session 创建/恢复、从 `config/llm.yaml` 映射的模型目录、默认与切换请求、流式事件、Tool call、Permission once/always/reject、Subagent、Diff、Interrupt 和持久化历史的用户可见行为。测试必须证明 wire model、端点、认证 Header 和兼容请求参数来自测试项目的 `llm.yaml`，且不存在 OpenCode 默认模型回退；通过 SDK/API 边界进行，不复制 OpenCode 自身的单元测试。
 5. **Python 领域合同**：复用现有 NDJSON RPC、catalog、definition validation、runtime truth 和 durable Run 测试模式，扩展为版本化 CLI/JSON 合同测试。必须验证错误分类、并发请求关联、有界读取、路径安全与敏感字段不跨边界。
 6. **Application catalog 测试**：验证从未运行、运行中、已完成和配置无效的 Applications 都可发现；首页数量等于去重 Application 数，而不是 Supervisor/Worker YAML 数。
 7. **Skills 测试**：验证 Global、Application、Agent 私有三层来源、load mode、重复名称、无效 Skill 和最终有效注册结果。验证 Framework Skill 不进入 Application Skills 统计，Skill 发现不会产生 Hook 副作用。
@@ -189,7 +189,7 @@ Application 详情展示最终 Effective Config 和来源，而不是只展示�
 16. **导航测试**：验证 `Ctrl+X` 打开统一命令面板、`/help` 打开帮助、Enter/点击进入、Esc 返回或中断，并确认 F6、`Ctrl+P` 与全局 `?` 不再作为产品入口。
 17. **安装测试**：复用现有隔离安装夹具，验证标准 `./install`、可选 `--no-modify-path`、TUI/OpenCode/Python 整体安装、PATH 幂等修改以及无手工虚拟环境激活。
 18. **更新测试**：使用本地伪更新源验证后台检查不阻塞启动、用户确认后整体更新、活动 Session 不被静默替换、协议不兼容时拒绝更新、失败后保留可运行旧版本。
-19. **文档验收**：通过命令与文案契约检查，确保安装、更新、Applications、Skills 统计、权限、模型边界、快捷键和完成标准与实现一致，不再出现 `/apply`、F6 或 Run-first 旧流程。
+19. **文档验收**：通过命令与文案契约检查，确保安装、更新、Applications、Skills 统计、权限、`llm.yaml` 单一模型配置源、快捷键和完成标准与实现一致，不再出现 `/apply`、F6、Run-first 或独立 OpenCode Provider 旧流程。
 20. **回归门禁**：TypeScript 类型检查与测试、Python TUI/领域接口测试、Runner/Config/Skills/Hook 相关测试、构建、隔离安装和真实 Application 冒烟验收全部通过后才能交付。
 
 ## Out of Scope
@@ -197,6 +197,7 @@ Application 详情展示最终 Effective Config 和来源，而不是只展示�
 - 将 Python AgentLoom Runtime 重写为 TypeScript。
 - 将 Studio Agent 实现成一个普通 AgentLoom Application，或让它在运行中修改并热替换自身。
 - 在 AgentLoom 内复制 OpenCode 的 Session、Permission、Agent Loop、Subagent 或 Diff 状态机。
+- 为 Studio 引入独立于项目 `config/llm.yaml` 的 OpenCode Provider、认证或默认模型配置源。
 - 首版提供 MCP Server；首版以本地版本化 CLI/JSON 作为共享专业工具边界。
 - 对运行中的 Application 进行配置热更新。
 - 首版向用户暴露 `/undo` 和 `/redo` 命令；Revision 证据仍会保留。
@@ -216,5 +217,6 @@ Application 详情展示最终 Effective Config 和来源，而不是只展示�
 - OpenCode 集成基线来自已核对的本地 OpenCode 1.18.3 源码。其核心包为私有 workspace 包且依赖多个内部 workspace package，因此应以固定 Runtime 进程和 SDK/API 为边界，不直接 import 不稳定内部 Session 源码。
 - OpenCode 的默认全局入口是 `Ctrl+P` 命令面板；AgentLoom 为避免与 VS Code Quick Open 冲突，产品入口改用单键 `Ctrl+X`。帮助可通过 `/help` 打开；`help_show` 默认没有全局按键，`?` 只在 Diff Viewer 等局部场景有意义。
 - AgentLoom 配置仍遵循现有分层规则：框架默认值、Global 系统配置、Application overlay、Agent 白名单字段共同形成 Effective Config；LLM 配置继续物理隔离。
+- Studio 与 Application 使用不同执行引擎，但共用项目根 `config/llm.yaml`；TypeScript 只做安全适配，不创建第二份模型配置真相，也不允许回退到 `opencode/big-pickle` 等环境默认模型。
 - Run 可观测性继续遵循现有结构化合同：一次 resume 产生新的 `run_id`，但保持逻辑 `task_id`；成功、失败、拒绝和中断必须由类型化事件和 receipt 表达。
 - 本 PRD 按用户要求仅生成在项目根目录，不发布到外部 Issue Tracker。
