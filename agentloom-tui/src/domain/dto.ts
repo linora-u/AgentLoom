@@ -59,6 +59,53 @@ export interface ApplicationSummaryDto {
   active_run_count: number
 }
 
+export type CapabilitySource = "global" | "application" | "agent" | "none"
+
+export interface SourcedCapabilityDto {
+  value: unknown
+  source: CapabilitySource
+  source_path: string | null
+}
+
+export interface EffectiveSkillDto {
+  name: string
+  description: string
+  source: Exclude<CapabilitySource, "none">
+  load_mode: string
+  path: string
+}
+
+export interface EffectiveAgentDetailDto {
+  id: string
+  name: string
+  description: string
+  role: "supervisor" | "worker"
+  workflow: string
+  model: { type: string; source: "global" | "agent" }
+  tools: Array<{ name: string; source: "agent" }>
+  skills: EffectiveSkillDto[]
+  permissions: SourcedCapabilityDto
+  hooks: SourcedCapabilityDto
+  mcp: SourcedCapabilityDto
+  source_path: string
+  validation: ValidationDto
+  workers: EffectiveAgentDetailDto[]
+}
+
+export interface ApplicationDetailResultDto {
+  schema_version: 1
+  application: {
+    id: string
+    name: string
+    path: string
+    health: "healthy" | "invalid"
+    updated_at: string | null
+  }
+  working_revision: string
+  running_revision: string | null
+  agents: EffectiveAgentDetailDto[]
+}
+
 export interface ConfiguredSkillsDto {
   load_mode: string | null
   items: string[]
@@ -77,10 +124,10 @@ export interface AgentCatalogDto {
 
 export interface SkillSummaryDto {
   id: string
-  application_id: string
+  application_id: string | null
   name: string
   description: string
-  origin: "application"
+  origin: "global" | "application" | "agent"
   path: string
 }
 
@@ -322,6 +369,10 @@ export interface RpcMethods {
   "system.detail": {
     params: { system_id: string }
     result: SystemDetailResultDto
+  }
+  "application.detail": {
+    params: { application_id: string }
+    result: ApplicationDetailResultDto
   }
   "run.detail": {
     params: { run_id: string; application_id: string; system_id?: string }

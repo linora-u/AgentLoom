@@ -261,6 +261,35 @@ description: Reviews a change before delivery
     assert catalog["applications"][0]["skill_count"] == 1
 
 
+def test_global_skills_are_runtime_global_and_not_application_or_framework_skills(
+    tmp_path: Path,
+) -> None:
+    supervisor = "applications/demo/workflows/demo.yaml"
+    _write(tmp_path / supervisor, "name: demo\nworker_agents: []\nskills: []\n")
+    _write(
+        tmp_path / "skills/global-review/SKILL.md",
+        "---\nname: global-review\ndescription: Shared runtime review\n---\n",
+    )
+    _write(
+        tmp_path / "applications/demo/skills/local-only/SKILL.md",
+        "---\nname: local-only\ndescription: Application package\n---\n",
+    )
+    _write(
+        tmp_path / "agentloom-framework-skill/SKILL.md",
+        "---\nname: agentloom-framework-skill\ndescription: Studio control plane\n---\n",
+    )
+
+    catalog = project_catalog(tmp_path, [_system(supervisor)], [], now=NOW)
+
+    assert [
+        (skill["name"], skill["origin"], skill["application_id"])
+        for skill in catalog["skills"]
+    ] == [
+        ("global-review", "global", None),
+        ("local-only", "application", "demo"),
+    ]
+
+
 def test_unsafe_worker_references_and_symlinked_worker_files_are_omitted(tmp_path: Path) -> None:
     supervisor = "applications/demo/workflows/demo.yaml"
     _write(

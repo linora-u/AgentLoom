@@ -5,11 +5,12 @@ import { formatSnapshot, parseCliArgs } from "./args"
 export const VERSION = "0.1.0"
 const MAX_BRIDGE_DIAGNOSTIC_CHARS = 4_000
 
-export const HELP = `AgentLoom TUI — chat with AgentLoom and inspect or create Agent systems
+export const HELP = `AgentLoom Application Studio — create, inspect, modify, validate and run Applications
 
 Usage:
   agentloom [--project <path>]
   agentloom --snapshot [--project <path>]
+  agentloom update
   agentloom schedules --project <path> <command>
 
 Options:
@@ -20,16 +21,22 @@ Options:
 
 Inside the TUI:
   Enter              Send a message
-  /models             Open the model selector from config/llm.yaml
-  /model <type>       Select a configured model from config/llm.yaml
+  /help               Show context-aware Studio help
+  /models             Select a Studio model from config/llm.yaml
   /refresh            Re-index the project catalog
   /schedule           Show durable schedule commands
-  /apply              Explicitly write the validated YAML draft
-  Ctrl-P / Tab        Search Applications, Agents, Runs, Skills and Schedules
+  Ctrl-X              Commands, permissions, Applications, main Agents, Runs and Skills
   ↑ / ↓ / Enter       Select and open a workbench entry
   PgUp / PgDn         Scroll the open detail view (mouse wheel also works)
-  Esc / b             Return from details to chat
+  Esc                 Close details, reject a permission/question, or interrupt the active Agent Loop
   Ctrl-C              Exit
+
+Permissions:
+  Application Only is the default. Use Ctrl-X to enable Full Access for this TUI session only.
+
+Updates:
+  TUI checks the recorded trusted checkout in the background. Confirm update/restart in Ctrl-X.
+  From a source checkout, rerun ./install. After installation, run agentloom update.
 
 Run durable schedules (separate terminal):
   agentloom schedules --project <path> serve
@@ -70,8 +77,8 @@ export async function main(argv = process.argv.slice(2)): Promise<number> {
     // renderer preload cost. JSX runtime hooks are installed immediately
     // before importing the interactive app.
     await import("@opentui/solid/preload")
-    const { runTui } = await import("../app")
-    await runTui({ client, projectRoot: args.projectRoot })
+    const { runInteractiveStudio } = await import("./interactive")
+    await runInteractiveStudio({ bridge: client, projectRoot: args.projectRoot })
     return 0
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error)

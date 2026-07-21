@@ -34,6 +34,7 @@ from src.application_run import (
     RunRejectedEvent,
     RunRejection,
 )
+from src.application_revision import application_revision
 from src.lib.checkpoint import CheckpointManager
 from src.lib.checkpoint.file_history import FileHistoryManager
 from src.lib.config import C, build_effective_agent_config
@@ -437,6 +438,9 @@ def execute_app(
             runtime_context.write_manifest(
                 yaml_path=str(resolved_path),
                 agent_name=agent_name,
+                application_revision=application_revision(
+                    Path(C.agent_root) / "applications" / Path(*application_id.split("/"))
+                ),
                 mode="resume" if is_resume else "new",
                 task_tree_observation={
                     "enabled": bool(ckpt_enabled),
