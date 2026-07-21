@@ -106,14 +106,16 @@ export class OpenCodeStudioClient implements StudioClient {
   async send(sessionID: string, message: string) {
     const applicationID = this.applicationBySession.get(sessionID)
     if (!applicationID) throw new Error("Open the Application before sending a Studio message")
-    const selected = this.modelsBySession.get(sessionID)
     const baselineMessageIDs = new Set(this.knownMessageIDsBySession.get(sessionID) ?? [])
-    await this.withStallWatchdog(sessionID, baselineMessageIDs, () => this.api.prompt(
+    await this.withStallWatchdog(sessionID, baselineMessageIDs, async () => {
+      const selected = await this.selectedModel(sessionID)
+      return this.api.prompt(
         sessionID,
         message,
         studioSystemPrompt(applicationID),
-        selected ? { providerID: selected.providerID, modelID: selected.modelID } : undefined,
-      ))
+        { providerID: selected.providerID, modelID: selected.modelID },
+      )
+    })
     const messages = await this.api.messages(sessionID)
     this.rememberMessages(sessionID, messages)
     return {
@@ -188,6 +190,17 @@ export class OpenCodeStudioClient implements StudioClient {
     const model = (await this.api.models()).find((candidate) => candidate.id === modelID)
     if (!model) throw new Error(`Unknown OpenCode model: ${modelID}`)
     this.modelsBySession.set(sessionID, model)
+  }
+
+  private async selectedModel(sessionID: string): Promise<StudioModel> {
+    const selected = this.modelsBySession.get(sessionID)
+    if (selected) return selected
+    const configuredDefault = (await this.api.models()).find((model) => model.default)
+    if (!configuredDefault) {
+      throw new Error("config/llm.yaml does not expose a default Studio model")
+    }
+    this.modelsBySession.set(sessionID, configuredDefault)
+    return configuredDefault
   }
 
   private withStallWatchdog<T>(

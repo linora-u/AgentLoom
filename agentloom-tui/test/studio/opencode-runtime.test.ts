@@ -385,6 +385,15 @@ describe("bundled OpenCode Runtime", () => {
   test("production Studio composition owns the Runtime lifecycle", async () => {
     const projectRoot = await mkdtemp(join(tmpdir(), "agentloom-opencode-composition-"))
     cleanups.push(() => rm(projectRoot, { recursive: true, force: true }))
+    await mkdir(join(projectRoot, "config"), { recursive: true })
+    await writeFile(join(projectRoot, "config/llm.yaml"), [
+      "model:",
+      "  default_model_type: test",
+      "  test:",
+      "    model: openai/test-model",
+      "    base_url: http://127.0.0.1:43103/v1",
+      "    api_key: test-key",
+    ].join("\n") + "\n", "utf8")
     const studio = await startOpenCodeStudio({
       command: resolve(import.meta.dir, "../../node_modules/.bin/opencode"),
       projectRoot,
@@ -396,6 +405,142 @@ describe("bundled OpenCode Runtime", () => {
 
     expect(opened.sessionID).toStartWith("ses_")
   }, 20_000)
+
+  test("production Studio exposes only the shared llm.yaml model catalog", async () => {
+    const projectRoot = await mkdtemp(join(tmpdir(), "agentloom-opencode-shared-models-"))
+    cleanups.push(() => rm(projectRoot, { recursive: true, force: true }))
+    await mkdir(join(projectRoot, "config"), { recursive: true })
+    await writeFile(join(projectRoot, "config/llm.yaml"), [
+      "model:",
+      "  default_model_type: fast",
+      "  fast:",
+      "    model: openai/fast-wire-model",
+      "    base_url: xxxxxxx",
+      "    api_key: secret-fast",
+      "  powerful:",
+      "    model: openai/powerful-wire-model",
+      "    base_url: http://127.0.0.1:43102/v1",
+      "    api_key: secret-powerful",
+    ].join("\n") + "\n", "utf8")
+    const studio = await startOpenCodeStudio({
+      command: resolve(import.meta.dir, "../../node_modules/.bin/opencode"),
+      projectRoot,
+      startupTimeoutMs: 15_000,
+    })
+    cleanups.push(() => studio.close())
+
+    const models = await studio.client.listModels?.()
+
+    expect(models?.map((model) => ({
+      id: model.id,
+      name: model.name,
+      providerName: model.providerName,
+      default: model.default,
+    }))).toEqual([
+      { id: "fast", name: "fast", providerName: "config/llm.yaml", default: true },
+      { id: "powerful", name: "powerful", providerName: "config/llm.yaml", default: false },
+    ])
+    expect(JSON.stringify(models)).not.toContain("secret-fast")
+    expect(JSON.stringify(models)).not.toContain("secret-powerful")
+  }, 20_000)
+
+  test("production Studio sends each turn through the selected llm.yaml profile", async () => {
+    const projectRoot = await mkdtemp(join(tmpdir(), "agentloom-opencode-shared-profile-"))
+    cleanups.push(() => rm(projectRoot, { recursive: true, force: true }))
+    const fast = new ProfileCaptureServer()
+    const powerful = new ProfileCaptureServer()
+    cleanups.push(() => fast.close())
+    cleanups.push(() => powerful.close())
+    await mkdir(join(projectRoot, "config"), { recursive: true })
+    await writeFile(join(projectRoot, "config/llm.yaml"), [
+      "model:",
+      "  default_model_type: fast",
+      "  fast:",
+      "    model: openai/fast-wire-model",
+      `    base_url: ${fast.url}`,
+      "    api_key: secret-fast",
+      "    temperature: 0.2",
+      "    max_tokens: 2048",
+      "    extra_headers:",
+      "      X-AgentLoom-Profile: fast",
+      "    extra_body:",
+      "      thinking:",
+      "        type: disabled",
+      "  powerful:",
+      "    model: openai/powerful-wire-model",
+      `    base_url: ${powerful.url}`,
+      "    api_key: secret-powerful",
+      "    temperature: 0.7",
+      "    max_tokens: 4096",
+      "    extra_headers:",
+      "      X-AgentLoom-Profile: powerful",
+    ].join("\n") + "\n", "utf8")
+    const studio = await startOpenCodeStudio({
+      command: resolve(import.meta.dir, "../../node_modules/.bin/opencode"),
+      projectRoot,
+      startupTimeoutMs: 15_000,
+    })
+    cleanups.push(() => studio.close())
+    const opened = await studio.client.openApplication("shared_profile")
+
+    await studio.client.send(opened.sessionID, "use the llm yaml default")
+    await studio.client.setModel?.(opened.sessionID, "powerful")
+    await studio.client.send(opened.sessionID, "use the selected powerful profile")
+
+    const fastRequest = fast.findRequest("use the llm yaml default")
+    expect(fastRequest?.body.model).toBe("fast-wire-model")
+    expect(fastRequest?.body.temperature).toBe(0.2)
+    expect(fastRequest?.body.max_tokens).toBe(2048)
+    expect(fastRequest?.body.thinking).toEqual({ type: "disabled" })
+    expect(fastRequest?.authorization).toBe("Bearer secret-fast")
+    expect(fastRequest?.profile).toBe("fast")
+    const powerfulRequest = powerful.findRequest("use the selected powerful profile")
+    expect(powerfulRequest?.body.model).toBe("powerful-wire-model")
+    expect(powerfulRequest?.body.temperature).toBe(0.7)
+    expect(powerfulRequest?.body.max_tokens).toBe(4096)
+    expect(powerfulRequest?.authorization).toBe("Bearer secret-powerful")
+    expect(powerfulRequest?.profile).toBe("powerful")
+  }, 30_000)
+
+  test("production Studio never exposes llm.yaml credentials to tool subprocesses or model context", async () => {
+    const projectRoot = await mkdtemp(join(tmpdir(), "agentloom-opencode-secret-boundary-"))
+    cleanups.push(() => rm(projectRoot, { recursive: true, force: true }))
+    const llm = new SecretBoundaryServer()
+    cleanups.push(() => llm.close())
+    await mkdir(join(projectRoot, "config"), { recursive: true })
+    await writeFile(join(projectRoot, "config/llm.yaml"), [
+      "model:",
+      "  default_model_type: secure",
+      "  secure:",
+      "    model: openai/secure-model",
+      `    base_url: ${llm.url}`,
+      "    api_key: must-never-reach-tools-or-context",
+      "    extra_headers:",
+      "      X-Private-Studio-Header: must-also-stay-private",
+    ].join("\n") + "\n", "utf8")
+    const fakePythonDirectory = join(projectRoot, ".venv/bin")
+    await mkdir(fakePythonDirectory, { recursive: true })
+    const fakePython = join(fakePythonDirectory, "python")
+    await writeFile(fakePython, [
+      "#!/bin/sh",
+      "if [ -n \"$OPENCODE_CONFIG_CONTENT\" ] || [ -n \"$AGENTLOOM_STUDIO_RUNTIME_CONFIG\" ] || { [ -n \"$OPENCODE_CONFIG\" ] && [ -r \"$OPENCODE_CONFIG\" ]; }; then present=true; else present=false; fi",
+      "printf '{\"contract_version\":1,\"ok\":true,\"config_env_present\":%s}' \"$present\"",
+    ].join("\n") + "\n", "utf8")
+    await chmod(fakePython, 0o755)
+    const studio = await startOpenCodeStudio({
+      command: resolve(import.meta.dir, "../../node_modules/.bin/opencode"),
+      projectRoot,
+      startupTimeoutMs: 15_000,
+    })
+    cleanups.push(() => studio.close())
+    const opened = await studio.client.openApplication("secret_boundary")
+
+    await studio.client.send(opened.sessionID, "inspect safely")
+
+    expect(llm.sawSafeToolEnvironment()).toBeTrue()
+    expect(JSON.stringify(llm.requests)).not.toContain("must-never-reach-tools-or-context")
+    expect(JSON.stringify(llm.requests)).not.toContain("must-also-stay-private")
+  }, 30_000)
 })
 
 async function waitFor(check: () => boolean | Promise<boolean>, timeoutMs = 5_000): Promise<void> {
@@ -625,6 +770,78 @@ class DeterministicEditServer {
       hasEditResult: JSON.stringify(body).includes("Edit applied successfully"),
       hasEditTool: requestHasTool(body, "edit"),
     }))
+  }
+}
+
+class ProfileCaptureServer {
+  readonly requests: Array<{
+    body: Record<string, unknown>
+    authorization: string | null
+    profile: string | null
+  }> = []
+  private readonly server: ReturnType<typeof Bun.serve>
+
+  constructor() {
+    this.server = Bun.serve({
+      port: 0,
+      fetch: async (request) => {
+        if (request.method !== "POST") return new Response("not found", { status: 404 })
+        this.requests.push({
+          body: await request.json() as Record<string, unknown>,
+          authorization: request.headers.get("authorization"),
+          profile: request.headers.get("x-agentloom-profile"),
+        })
+        return chatCompletionText("profile request completed")
+      },
+    })
+  }
+
+  get url(): string {
+    return `http://127.0.0.1:${this.server.port}/v1`
+  }
+
+  findRequest(text: string) {
+    return this.requests.find((request) => JSON.stringify(request.body).includes(text))
+  }
+
+  close(): void {
+    this.server.stop(true)
+  }
+}
+
+class SecretBoundaryServer {
+  readonly requests: Record<string, unknown>[] = []
+  private readonly server: ReturnType<typeof Bun.serve>
+
+  constructor() {
+    this.server = Bun.serve({
+      port: 0,
+      fetch: async (request) => {
+        if (request.method !== "POST") return new Response("not found", { status: 404 })
+        const body = await request.json() as Record<string, unknown>
+        this.requests.push(body)
+        const serialized = JSON.stringify(body)
+        if (serialized.includes("Generate a title for this conversation")) {
+          return chatCompletionText("Secret boundary")
+        }
+        if (serialized.includes("config_env_present")) {
+          return chatCompletionText("safe environment confirmed")
+        }
+        return chatCompletionTool("agentloom_domain", { action: "catalog", params: {} })
+      },
+    })
+  }
+
+  get url(): string {
+    return `http://127.0.0.1:${this.server.port}/v1`
+  }
+
+  sawSafeToolEnvironment(): boolean {
+    return this.requests.some((body) => JSON.stringify(body).includes('config_env_present\\":false'))
+  }
+
+  close(): void {
+    this.server.stop(true)
   }
 }
 

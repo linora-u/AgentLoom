@@ -3,11 +3,12 @@ import { realpathSync } from "node:fs"
 import { relative, resolve } from "node:path"
 import type { OpenCodeSessionInfo } from "./application-sessions"
 import type { OpenCodeStoredMessage, OpenCodeStudioApi } from "./opencode-studio"
-import type { StudioEvent } from "../app/session"
+import type { StudioEvent, StudioModel } from "../app/session"
 
 export function createOpenCodeSessionApi(input: {
   baseUrl: string
   directory: string
+  models?: StudioModel[]
 }): OpenCodeStudioApi {
   const workspaceKey = canonicalDirectory(input.directory)
   const client = createOpencodeClient({
@@ -137,6 +138,7 @@ export function createOpenCodeSessionApi(input: {
     },
 
     async models() {
+      if (input.models) return input.models
       const result = await client.provider.list({ directory: input.directory })
       if (!result.data) throw sdkError("list OpenCode models", result.error)
       const connected = new Set(result.data.connected)

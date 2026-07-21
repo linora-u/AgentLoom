@@ -84,9 +84,12 @@ model:
     tool_choice: "auto"
 ```
 
-Application Agent 继续使用这套 Python 模型配置。Studio Agent 使用
-OpenCode Provider 与认证；`/models` 只切换 Studio 模型，不会修改任何
-Application YAML 的 `model_type`。
+这份文件是 Studio 与 Application Agent 唯一共享的模型配置源。
+Application Agent 由 Python Runtime 按 YAML `model_type` 解析；TypeScript
+Studio 适配器把同一批 Profile、端点、凭证和兼容请求参数安全映射给内置
+OpenCode Runtime。`/models` 或 `Ctrl+X` 只切换当前 Studio Session 使用的
+`llm.yaml` 模型类型，不修改任何 Application YAML 的 `model_type`。配置缺失
+或无效时 Studio 会明确启动失败，不会回退到 OpenCode 环境默认模型。
 
 ## 从 TUI 开始
 
@@ -155,7 +158,7 @@ Working Revision，不会热切换正在运行的 Agent；新配置需新 Run �
 |---|---|
 | 发送对话 | `Enter` |
 | 搜索命令和全局实体 | `Ctrl+X` |
-| 选择 Studio 模型 | `/models` |
+| 从 `config/llm.yaml` 选择 Studio 模型 | `/models` 或 `Ctrl+X` |
 | 刷新完整索引 | `/refresh` 或在详情页按 `r` |
 | 分析选中的失败 Run | `a` |
 | 关闭详情、拒绝权限/问题或中止当前 Loop | `Esc` |

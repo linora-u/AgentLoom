@@ -64,6 +64,7 @@ export type StudioModel = {
   modelID: string
   name: string
   providerName: string
+  default?: boolean
 }
 
 export type StudioQuestion = {
@@ -178,6 +179,7 @@ export class AgentLoomSession {
   private liveRefreshPromise: Promise<void> | null = null
   private routeLoadGeneration = 0
   private studioTurnGeneration = 0
+  private readonly studioModelBySession = new Map<string, string>()
   private builderBusy = false
   private routeBusy = false
   private messageID = 0
@@ -1097,6 +1099,7 @@ export class AgentLoomSession {
     }
     try {
       await this.input.studio.setModel(sessionID, modelID)
+      this.studioModelBySession.set(sessionID, modelID)
       this.patch({ studioModel: model, notice: `Studio 模型已切换为 ${model.providerName} · ${model.name}` })
     } catch (error) {
       this.patch({ notice: errorMessage(error) })
@@ -1106,9 +1109,16 @@ export class AgentLoomSession {
   private async loadStudioModels(): Promise<void> {
     if (!this.input.studio?.listModels) return
     try {
-      this.patch({ studioModels: await this.input.studio.listModels() })
+      const studioModels = await this.input.studio.listModels()
+      const selectedModelID = this.current.studioSessionID
+        ? this.studioModelBySession.get(this.current.studioSessionID)
+        : undefined
+      const selected = studioModels.find((model) => model.id === selectedModelID)
+        ?? studioModels.find((model) => model.default)
+        ?? null
+      this.patch({ studioModels, studioModel: selected })
     } catch (error) {
-      this.patch({ notice: `读取 OpenCode 模型失败: ${errorMessage(error)}` })
+      this.patch({ notice: `读取 config/llm.yaml Studio 模型失败: ${errorMessage(error)}` })
     }
   }
 
@@ -1280,7 +1290,7 @@ function studioHelpMessage(): string {
     "Application Studio 帮助",
     "- + New Application：创建并绑定一个新的 OpenCode Studio Session",
     "- Ctrl+X：搜索命令、权限、Applications、主 Agents、Skills、Schedules 与 Runs",
-    "- /models：选择 OpenCode Studio 模型；不会修改 Application model_type",
+    "- /models：从 config/llm.yaml 选择 Studio 模型；不会修改 Application model_type",
     "- /refresh：重新索引 AgentLoom 项目状态",
     "- Application Only：默认只直接写当前 Application；权限卡 1 仅本次、2 本次会话、3 拒绝",
     "- Full Access：从 Ctrl+X 显式启用，只在当前 TUI 会话有效",
