@@ -22,7 +22,7 @@ Options:
 Inside the TUI:
   Enter              Send a message
   /help               Show context-aware Studio help
-  /new                Start a fresh Studio Session without prior conversation memory
+  /new                Start a blank conversation; retain Application history for Agent retrieval
   /models             Select a Studio model from config/llm.yaml
   /refresh            Re-index the project catalog
   /schedule           Show durable schedule commands

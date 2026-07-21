@@ -2,6 +2,11 @@ export type OpenCodeSessionInfo = {
   id: string
   title: string
   directory?: string
+  parentID?: string
+  time?: {
+    created: number
+    updated: number
+  }
   metadata?: Record<string, unknown>
   permission?: OpenCodePermissionRule[]
 }
@@ -43,15 +48,11 @@ export class ApplicationStudioSessions {
     applicationID: string,
     permissionMode: StudioPermissionMode = "application_only",
   ): Promise<OpenCodeSessionInfo> {
-    const existing = (await this.api.list()).find((session) => (
-      applicationIDFromMetadata(session.metadata) === applicationID
-      && belongsToWorkspace(session, this.api.workspaceKey)
-    ))
+    const existing = latestSession(await this.list(applicationID))
     if (existing) {
-      return this.retarget(
+      return this.api.update(
         existing.id,
-        { type: "application", applicationID },
-        permissionMode,
+        sessionProperties({ type: "application", applicationID }, permissionMode, this.api.workspaceKey),
       )
     }
 
@@ -69,14 +70,36 @@ export class ApplicationStudioSessions {
     return this.api.create(sessionProperties(target, permissionMode, this.api.workspaceKey))
   }
 
-  retarget(
+  async list(applicationID: string): Promise<OpenCodeSessionInfo[]> {
+    return (await this.api.list()).filter((session) => (
+      applicationIDFromMetadata(session.metadata) === applicationID
+      && belongsToWorkspace(session, this.api.workspaceKey)
+    ))
+  }
+
+  async claim(
     sessionID: string,
-    target: StudioSessionTarget,
+    applicationID: string,
     permissionMode: StudioPermissionMode = "application_only",
   ): Promise<OpenCodeSessionInfo> {
+    const source = (await this.api.list()).find((session) => session.id === sessionID)
+    if (!source || !belongsToWorkspace(source, this.api.workspaceKey)) {
+      throw new Error(`Cannot claim unknown Studio session: ${sessionID}`)
+    }
+    const existingApplicationID = applicationIDFromMetadata(source.metadata)
+    if (existingApplicationID && existingApplicationID !== applicationID) {
+      throw new Error(`Studio session ${sessionID} already belongs to ${existingApplicationID}`)
+    }
+    if (!existingApplicationID && !isNewApplicationSession(source.metadata)) {
+      throw new Error(`Studio session ${sessionID} is not a New Application conversation`)
+    }
     return this.api.update(
       sessionID,
-      sessionProperties(target, permissionMode, this.api.workspaceKey),
+      sessionProperties(
+        { type: "application", applicationID },
+        permissionMode,
+        this.api.workspaceKey,
+      ),
     )
   }
 }
@@ -118,6 +141,24 @@ function sessionProperties(
       ? fullAccessPermissions()
       : applicationOnlyPermissions(target.applicationID, workspaceKey),
   }
+}
+
+function latestSession(sessions: OpenCodeSessionInfo[]): OpenCodeSessionInfo | undefined {
+  let latest: OpenCodeSessionInfo | undefined
+  for (const session of sessions) {
+    if (!latest || sessionUpdatedAt(session) > sessionUpdatedAt(latest)) latest = session
+  }
+  return latest
+}
+
+function sessionUpdatedAt(session: OpenCodeSessionInfo): number {
+  return session.time?.updated ?? session.time?.created ?? 0
+}
+
+function isNewApplicationSession(metadata: Record<string, unknown> | undefined): boolean {
+  const agentloom = metadata?.agentloom
+  if (!agentloom || typeof agentloom !== "object" || Array.isArray(agentloom)) return false
+  return (agentloom as Record<string, unknown>).kind === "application-studio-new"
 }
 
 function belongsToWorkspace(session: OpenCodeSessionInfo, workspaceKey: string | undefined): boolean {

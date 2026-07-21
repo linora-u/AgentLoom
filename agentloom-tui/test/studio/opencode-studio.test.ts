@@ -1,4 +1,7 @@
 import { describe, expect, test } from "bun:test"
+import { mkdtemp, readFile, readdir, rm } from "node:fs/promises"
+import { tmpdir } from "node:os"
+import { join } from "node:path"
 import type { OpenCodeSessionInfo } from "../../src/studio/application-sessions"
 import type { OpenCodeStudioApi, OpenCodeStoredMessage } from "../../src/studio/opencode-studio"
 import { OpenCodeStudioClient } from "../../src/studio/opencode-studio"
@@ -11,44 +14,70 @@ class MemoryStudioApi implements OpenCodeStudioApi {
   readonly aborts: string[] = []
   readonly deletedMessages: string[] = []
   hangPrompts = false
+  readonly workspaceKey?: string
+  private clock = 1
   private readonly listeners = new Set<(event: any) => void>()
   private readonly sessions: OpenCodeSessionInfo[] = [{
     id: "ses_reports",
     title: "AgentLoom · reports",
+    time: { created: 1, updated: 1 },
     metadata: { agentloom: { kind: "application-studio", application_id: "reports" } },
   }]
-  private readonly history: OpenCodeStoredMessage[] = [{
-    info: { id: "msg-1", role: "assistant" },
-    parts: [{ type: "text", text: "previous analysis" }],
-  }]
+  private readonly histories = new Map<string, OpenCodeStoredMessage[]>([["ses_reports", [{
+      info: { id: "msg-1", role: "assistant" },
+      parts: [{ type: "text", text: "previous analysis" }],
+    }]]])
+
+  constructor(workspaceKey?: string) {
+    this.workspaceKey = workspaceKey
+    if (workspaceKey) {
+      for (const session of this.sessions) {
+        session.directory = workspaceKey
+        session.metadata = {
+          agentloom: {
+            ...(session.metadata?.agentloom as Record<string, unknown>),
+            workspace: workspaceKey,
+          },
+        }
+      }
+    }
+  }
 
   async list() {
     return [...this.sessions]
   }
 
   async create(input: Parameters<OpenCodeStudioApi["create"]>[0]) {
-    const session = { id: `ses_${this.sessions.length + 1}`, ...input }
+    const now = ++this.clock
+    const session = { id: `ses_${this.sessions.length + 1}`, time: { created: now, updated: now }, ...input }
     this.sessions.push(session)
+    this.histories.set(session.id, [])
     return session
   }
 
   async update(sessionID: string, input: Parameters<OpenCodeStudioApi["update"]>[1]) {
     const index = this.sessions.findIndex((session) => session.id === sessionID)
     if (index < 0) throw new Error(`unknown session ${sessionID}`)
-    const updated = { ...this.sessions[index]!, ...input }
+    const updated = {
+      ...this.sessions[index]!,
+      ...input,
+      time: { ...this.sessions[index]!.time!, updated: ++this.clock },
+    }
     this.sessions[index] = updated
     return updated
   }
 
-  async messages() {
-    return [...this.history]
+  async messages(sessionID = "ses_reports") {
+    return [...(this.histories.get(sessionID) ?? [])]
   }
 
   async prompt(sessionID: string, message: string, system?: string, model?: { providerID: string; modelID: string }) {
     this.prompts.push({ sessionID, message, system, model })
-    this.history.push(
-      { info: { id: "msg-2", role: "user" }, parts: [{ type: "text", text: message }] },
-      { info: { id: "msg-3", role: "assistant" }, parts: [{ type: "text", text: "configuration updated" }] },
+    const history = this.histories.get(sessionID)
+    if (!history) throw new Error(`unknown session ${sessionID}`)
+    history.push(
+      { info: { id: `${sessionID}-user-${history.length}`, role: "user" }, parts: [{ type: "text", text: message }] },
+      { info: { id: `${sessionID}-assistant-${history.length + 1}`, role: "assistant" }, parts: [{ type: "text", text: "configuration updated" }] },
     )
     if (this.hangPrompts) await new Promise<void>(() => {})
   }
@@ -93,26 +122,111 @@ class MemoryStudioApi implements OpenCodeStudioApi {
     this.aborts.push(sessionID)
   }
 
-  async deleteMessage(_sessionID: string, messageID: string) {
+  async deleteMessage(sessionID: string, messageID: string) {
     this.deletedMessages.push(messageID)
-    const index = this.history.findIndex((message) => message.info.id === messageID)
-    if (index >= 0) this.history.splice(index, 1)
+    const history = this.histories.get(sessionID) ?? []
+    const index = history.findIndex((message) => message.info.id === messageID)
+    if (index >= 0) history.splice(index, 1)
   }
 
   appendHistory(...messages: OpenCodeStoredMessage[]) {
-    this.history.push(...messages)
+    this.histories.get("ses_reports")!.push(...messages)
+  }
+
+  seedApplicationSession(
+    id: string,
+    applicationID: string,
+    updated: number,
+    messages: OpenCodeStoredMessage[],
+  ) {
+    this.sessions.push({
+      id,
+      title: `AgentLoom · ${applicationID}`,
+      time: { created: updated, updated },
+      metadata: { agentloom: { kind: "application-studio", application_id: applicationID } },
+      ...(this.workspaceKey ? { directory: this.workspaceKey } : {}),
+    })
+    this.histories.set(id, [...messages])
   }
 
   async close() {}
 }
 
 describe("OpenCode Studio client", () => {
+  test("/new starts blank while preserving every Application conversation in the memory index", async () => {
+    const workspace = await mkdtemp(join(tmpdir(), "agentloom-studio-memory-"))
+    try {
+      const api = new MemoryStudioApi(workspace)
+      const memoryRoot = join(workspace, "private-memory")
+      const studio = new OpenCodeStudioClient(api, { memoryRoot })
+      const opened = await studio.openApplication("reports")
+      api.seedApplicationSession("ses_prior", "reports", 2, [{
+        info: { id: "msg-prior", role: "assistant" },
+        parts: [
+          { type: "text", text: "keep the reviewer threshold at 0.9" },
+          {
+            type: "tool",
+            tool: "agentloom_domain",
+            state: {
+              status: "completed",
+              input: { action: "application.validate", params: { application_id: "reports" } },
+              output: '{"valid":true,"api_key":"do-not-archive"}',
+            },
+          },
+        ],
+      }])
+
+      const fresh = await studio.newSession(
+        { type: "application", applicationID: "reports" },
+        "application_only",
+      )
+
+      expect(fresh.sessionID).not.toBe(opened.sessionID)
+      expect(fresh.messages).toEqual([])
+      expect((await api.messages(opened.sessionID)).map((message) => message.info.id)).toEqual(["msg-1"])
+
+      const updated = await studio.send(fresh.sessionID, "use the previous decision")
+      const reopened = await studio.openApplication("reports")
+      const capability = (await readdir(memoryRoot)).find((entry) => /^[a-f0-9]{64}$/.test(entry))!
+      const applicationMemory = join(memoryRoot, capability)
+      const generation = (await readdir(applicationMemory)).toSorted().at(-1)!
+      const generationDirectory = join(applicationMemory, generation)
+      const index = JSON.parse(await readFile(join(generationDirectory, "index.json"), "utf8")) as {
+        schema_version: number
+        conversations: Array<{ session_id: string; chunks: Array<{ file: string }> }>
+      }
+      const archive = (await Promise.all(index.conversations.flatMap((entry) => (
+        entry.chunks.map((chunk) => readFile(join(generationDirectory, chunk.file), "utf8"))
+      )))).join("\n")
+
+      expect(updated.messages.map((message) => message.content)).toEqual([
+        "use the previous decision",
+        "configuration updated",
+      ])
+      expect(reopened).toEqual({ sessionID: fresh.sessionID, messages: updated.messages })
+      expect(api.prompts[0]?.system).toContain("agentloom_memory")
+      expect(api.prompts[0]?.system).toContain(`capability=${capability}`)
+      expect(api.prompts[0]?.system).not.toContain(memoryRoot)
+      expect(index.schema_version).toBe(2)
+      expect(index.conversations.map((entry) => entry.session_id)).toContain("ses_reports")
+      expect(index.conversations.map((entry) => entry.session_id)).toContain("ses_prior")
+      expect(archive).toContain("previous analysis")
+      expect(archive).toContain("keep the reviewer threshold at 0.9")
+      expect(archive).toContain("Tool: agentloom_domain · completed")
+      expect(archive).toContain('"valid":true')
+      expect(archive).not.toContain("do-not-archive")
+    } finally {
+      await rm(workspace, { recursive: true, force: true })
+    }
+  })
+
   test("aborts a stalled parent turn and its Task subagent instead of staying busy forever", async () => {
     const api = new MemoryStudioApi()
     api.hangPrompts = true
     const studio = new OpenCodeStudioClient(api, { stallTimeoutMs: 20 })
     const opened = await studio.openApplication("reports")
     const pending = studio.send(opened.sessionID, "what does this application do?")
+    await Bun.sleep(0)
     api.emit({
       type: "tool",
       sessionID: opened.sessionID,
@@ -129,8 +243,8 @@ describe("OpenCode Studio client", () => {
 
     expect(outcome).toContain("无进展")
     expect(api.aborts.sort()).toEqual(["ses_child", "ses_reports"])
-    expect(api.deletedMessages).toEqual(["msg-3", "msg-2"])
-    expect((await api.messages()).map((message) => message.info.id)).toEqual(["msg-1"])
+    expect(api.deletedMessages).toEqual(["ses_reports-assistant-2", "ses_reports-user-1"])
+    expect((await api.messages("ses_reports")).map((message) => message.info.id)).toEqual(["msg-1"])
   })
 
   test("projects Task subagent progress into the visible parent Studio session", async () => {
@@ -197,8 +311,8 @@ describe("OpenCode Studio client", () => {
 
     expect(outcome).toContain("已中止")
     expect(api.aborts).toEqual(["ses_reports"])
-    expect(api.deletedMessages).toEqual(["msg-3", "msg-2"])
-    expect((await api.messages()).map((message) => message.info.id)).toEqual(["msg-1"])
+    expect(api.deletedMessages).toEqual(["ses_reports-assistant-2", "ses_reports-user-1"])
+    expect((await api.messages("ses_reports")).map((message) => message.info.id)).toEqual(["msg-1"])
   })
 
   test("opening a persistent session removes pre-fix aborted turns", async () => {
@@ -229,8 +343,8 @@ describe("OpenCode Studio client", () => {
     })
     expect(updated.messages).toEqual([
       { id: "msg-1", role: "assistant", content: "previous analysis" },
-      { id: "msg-2", role: "user", content: "add a reviewer" },
-      { id: "msg-3", role: "assistant", content: "configuration updated" },
+      { id: "ses_reports-user-1", role: "user", content: "add a reviewer" },
+      { id: "ses_reports-assistant-2", role: "assistant", content: "configuration updated" },
     ])
     expect(api.prompts[0]?.system).toContain("applications/reports")
     expect(api.prompts[0]?.system).toContain("agentloom-framework-skill")
