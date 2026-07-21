@@ -32,6 +32,8 @@ environment. `agentloom --snapshot` is the non-interactive health check.
 - The first entry is `+ New Application`, followed by every directory under
   `applications/`. Choosing another Application retargets the current Studio
   Session and keeps its conversation memory; only `/new` starts a fresh Session.
+  A target switch is blocked while an Agent Loop is active; wait or press `Esc`
+  before switching so an old turn cannot finish against the new Application.
 - The workspace summary counts Applications, not expanded Supervisor/Worker
   YAML definitions. Main Supervisor Agents are searchable through `Ctrl+X`;
   Worker Agents remain inspectable inside Application and main-Agent details.
@@ -58,7 +60,9 @@ new-Application paths require OpenCode permission. Permission cards support
 `1` once, `2` for this Session, and `3` reject. `Full Access` is available from
 `Ctrl+X` as one on/off toggle. It can be preset before selecting an Application,
 remains active while switching Applications, and resets when the TUI exits.
-Select terminal text and press `Ctrl+Y` to copy it through OSC52.
+Task sub-agent text and Tool cards are visible in the parent Studio; completed
+sub-agent text remains until the next turn. Select it and press `Ctrl+Y` to copy
+through OSC52.
 
 OpenCode question requests are shown as decision cards. A user can click one
 choice or type an answer; multiple answers are separated with `|`, and `Esc`

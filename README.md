@@ -154,7 +154,9 @@ Application, or new-path access. Choose `1` once, `2` for this Session, or `3`
 reject. `Full Access` is one on/off toggle in `Ctrl+X`: it can be preset before
 selecting an Application and remains active while switching Applications; it
 resets on exit. Switching Applications keeps the current Studio memory, while
-`/new` starts a fresh Session. Select TUI text and press `Ctrl+Y` to copy it.
+`/new` starts a fresh Session. Switching is blocked during an active Agent Loop;
+wait or press `Esc` first. Sub-agent execution text remains visible until the
+next turn; select TUI text and press `Ctrl+Y` to copy it.
 When the Agent needs a business decision, choose a visible option or type an
 answer; separate multiple answers with `|`.
 

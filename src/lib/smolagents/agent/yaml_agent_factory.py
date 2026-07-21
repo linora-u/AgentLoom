@@ -570,7 +570,17 @@ class YamlConfiguredAgent(RoleDrivenAgent):
             # NOTE: _current_worker_memory is now set INSIDE _execute_agent()
             # (P2 fix — the old SET here was too late for GET in _execute_with_lifecycle)
 
-            result_str = "" if result is None else str(result)
+            # Agent-as-Tool crosses a text boundary. Preserve structured final
+            # answers as real JSON instead of Python repr: downstream callers
+            # can parse it without guessing, and quotation marks inside string
+            # values remain escaped correctly.
+            result_str = (
+                ""
+                if result is None
+                else json.dumps(result, ensure_ascii=False, default=str)
+                if isinstance(result, (dict, list))
+                else str(result)
+            )
             from src.lib.context_engine.runtime import get_active_context_engine
 
             engine = get_active_context_engine()

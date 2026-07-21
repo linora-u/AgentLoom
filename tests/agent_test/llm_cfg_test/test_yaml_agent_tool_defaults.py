@@ -1,4 +1,5 @@
 import copy
+import json
 from pathlib import Path
 
 import pytest
@@ -310,6 +311,25 @@ def test_generated_tool_supports_multiple_inputs_and_optional_fields():
     assert out.index("<task_spec>") < out.index("<inputs>") < out.index("<output>")
     assert "1. main task: hello" in out
     assert "2. context tag: demo" in out
+
+
+def test_generated_tool_serializes_structured_agent_results_as_json():
+    config = {
+        "name": "demo_worker",
+        "description": "worker desc",
+        "tools": [],
+        "workflow": "demo workflow",
+        "agent_function_schema": _basic_schema(),
+    }
+    worker = _make_worker(config)
+    worker.run = lambda _query, additional_args=None: {
+        "answer": '用户说"拍照"，工具返回成功。',
+    }
+    worker._validate_config()
+
+    output = worker.agent_as_tool()("hello")
+
+    assert json.loads(output) == {"answer": '用户说"拍照"，工具返回成功。'}
 
 
 def test_generated_tool_embeds_list_workflow_items_without_stage_wrappers():
