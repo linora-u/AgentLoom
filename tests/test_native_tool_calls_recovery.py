@@ -10,6 +10,7 @@ from smolagents.memory import ActionStep
 from smolagents.models import ChatMessage, ChatMessageToolCall, ChatMessageToolCallFunction, MessageRole
 from smolagents.monitoring import Timing
 
+from src.lib.logging import NullLoggerBackend
 from src.lib.smolagents.agent.base_agent import ToolCallingAgentV2
 from src.lib.smolagents.models.litellm_model import LiteLLMModelV2
 from src.lib.smolagents.models.tool_call_parser import ToolCallParseError
@@ -214,6 +215,20 @@ def test_tool_calling_agent_rejects_malformed_native_arguments_and_recovers() ->
         "summary": 'returned {"enabled": true}'
     }
     assert model.calls == 2
+
+
+def test_tool_calling_agent_runs_with_logging_explicitly_disabled() -> None:
+    model = UnknownToolThenFinalModel()
+    agent = ToolCallingAgentV2(
+        tools=[EchoTool()],
+        model=model,
+        logger=NullLoggerBackend(),
+        max_steps=2,
+        max_tokens=4096,
+        verbosity_level=0,
+    )
+
+    assert agent.run("Return a final answer.") == "recovered"
 
 
 def test_tool_calling_agent_executes_native_tool_call_with_json_string_arguments():
