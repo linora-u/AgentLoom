@@ -637,6 +637,39 @@ describe("AgentLoom TUI view", () => {
     expect(setup.captureCharFrame()).toContain("New Application · Application Only")
   })
 
+  test("Ctrl+X exposes New Application and starts creation with Enter", async () => {
+    const client: TuiClient = {
+      async request<Method extends RpcMethod>() {
+        return catalogSnapshot as RpcResult<Method>
+      },
+      close() {},
+    }
+    const session = new AgentLoomSession({
+      client,
+      snapshot: catalogSnapshot,
+      sessionID: "new-application-command-test",
+    })
+    const setup = await testRender(
+      () => <AgentLoomApp session={session} projectRoot="/repo" onExit={() => {}} refreshIntervalMs={0} />,
+      { width: 140, height: 32 },
+    )
+    renderers.push(setup.renderer)
+    await setup.renderOnce()
+
+    setup.mockInput.pressKey("x", { ctrl: true })
+    await Bun.sleep(5)
+    await setup.mockInput.typeText("新建 Application")
+    await setup.renderOnce()
+    expect(setup.captureCharFrame()).toContain("创建一个全新的 AgentLoom Application")
+
+    setup.mockInput.pressEnter()
+    await Bun.sleep(20)
+    await setup.renderOnce()
+
+    expect(session.state.studioTarget).toEqual({ type: "new" })
+    expect(setup.captureCharFrame()).toContain("New Application · Application Only")
+  })
+
   test("wide terminals keep Studio chat and the Application directory together", async () => {
     const client: TuiClient = {
       async request<Method extends RpcMethod>() {

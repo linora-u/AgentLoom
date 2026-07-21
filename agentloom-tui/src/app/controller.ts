@@ -78,6 +78,7 @@ export type PaletteItem =
       title: string
       description: string
       action:
+        | "new-application"
         | "chat"
         | "refresh"
         | "models"
@@ -278,6 +279,13 @@ export function buildPaletteItems(snapshot: BootstrapResultDto): PaletteItem[] {
     },
   }))
   return [
+    {
+      key: "command:new-application",
+      category: "Commands",
+      title: "新建 Application",
+      description: "创建一个全新的 AgentLoom Application",
+      action: "new-application",
+    },
     {
       key: "command:chat",
       category: "Commands",
