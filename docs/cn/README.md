@@ -149,7 +149,9 @@ Working Revision 和 Running Revision。Run 默认只展示可行动摘要，不
 按 `1` 仅本次、`2` 本次会话、`3` 拒绝。`Ctrl+X` 中的 Full Access 是同一个
 开关：未选择 Application 时也可预设，切换 Application 后继续生效，退出 TUI
 后恢复默认。切换 Application 会保留当前 Studio 对话记忆，只有 `/new` 才开始
-不带旧记忆的新 Session。选中 TUI 文本后按 `Ctrl+Y` 可复制。
+不带旧记忆的新 Session。Agent Loop 运行时不能切换目标；等待完成或先按 `Esc`
+中止，避免旧回合污染新 Application。子 Agent 执行文本会保留到下一回合，选中
+TUI 文本后按 `Ctrl+Y` 可复制。
 Studio Agent 需要业务决定时，可点击选项或在输入框回答；一次出现多个问题时
 用 `|` 分隔答案。
 

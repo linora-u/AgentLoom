@@ -741,7 +741,9 @@ function BuilderView(props: {
           </Show>
           <Show when={props.state.streamingText}>
             <box flexShrink={0} border={["left"]} borderColor={props.theme.secondary} paddingLeft={1} paddingTop={1} paddingBottom={1}>
-              <text fg={props.theme.secondary} attributes={TextAttributes.BOLD}>AgentLoom · streaming</text>
+              <text fg={props.theme.secondary} attributes={TextAttributes.BOLD}>
+                {props.state.loopState === "idle" ? "子 Agent · execution log" : "AgentLoom · streaming"}
+              </text>
               <text fg={props.theme.text} wrapMode="word">{props.state.streamingText}</text>
             </box>
           </Show>
