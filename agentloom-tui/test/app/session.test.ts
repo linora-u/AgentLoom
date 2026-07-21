@@ -387,6 +387,7 @@ describe("AgentLoom TUI session", () => {
 
     const running = session.submit("run a long task")
     await Bun.sleep(0)
+    await session.openEntry(first.entry)
     await session.openEntry(second.entry)
 
     expect(session.state.studioTarget).toEqual({ type: "application", applicationID: "new" })

@@ -427,14 +427,7 @@ export class AgentLoomSession {
     const studioApplicationID = entry.kind === "application" || entry.kind === "agent"
       ? entry.applicationID
       : null
-    const currentApplicationID = this.current.studioTarget?.type === "application"
-      ? this.current.studioTarget.applicationID
-      : null
-    if (
-      this.builderBusy
-      && studioApplicationID
-      && studioApplicationID !== currentApplicationID
-    ) {
+    if (this.builderBusy && studioApplicationID) {
       this.patch({ notice: "当前 Agent Loop 仍在运行；请等待完成，或按 Esc 中止后再切换 Application。" })
       return
     }
