@@ -191,6 +191,11 @@ describe("TUI controller", () => {
     expect(items).toEqual(expect.arrayContaining([
       expect.objectContaining({ action: "permission-full", title: "启用 Full Access" }),
       expect.objectContaining({ action: "permission-application", title: "恢复 Application Only" }),
+      expect.objectContaining({
+        action: "models",
+        title: "从 llm.yaml 选择 Studio 模型",
+        description: "模型类型、Provider 与认证统一读取项目 config/llm.yaml",
+      }),
     ]))
 
     expect(items.filter((item) => item.category === "Commands").map((item) => item.title)).toEqual([
@@ -198,7 +203,7 @@ describe("TUI controller", () => {
       "刷新工作区",
       "启用 Full Access",
       "恢复 Application Only",
-      "选择 Studio 模型",
+      "从 llm.yaml 选择 Studio 模型",
       "管理定时任务",
     ])
     expect(items.filter((item) => item.category === "Models")).toEqual([])

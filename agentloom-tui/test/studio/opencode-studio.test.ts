@@ -77,6 +77,7 @@ class MemoryStudioApi implements OpenCodeStudioApi {
       modelID: "gpt-5.4",
       name: "GPT-5.4",
       providerName: "OpenAI",
+      default: true,
     }]
   }
 
@@ -267,7 +268,18 @@ describe("OpenCode Studio client", () => {
       modelID: "gpt-5.4",
       name: "GPT-5.4",
       providerName: "OpenAI",
+      default: true,
     })
+    expect(api.prompts.at(-1)?.model).toEqual({ providerID: "openai", modelID: "gpt-5.4" })
+  })
+
+  test("pins the llm.yaml default on every resumed Studio Session prompt", async () => {
+    const api = new MemoryStudioApi()
+    const studio = new OpenCodeStudioClient(api)
+    const opened = await studio.openApplication("reports")
+
+    await studio.send(opened.sessionID, "ignore the model persisted by the old OpenCode session")
+
     expect(api.prompts.at(-1)?.model).toEqual({ providerID: "openai", modelID: "gpt-5.4" })
   })
 })

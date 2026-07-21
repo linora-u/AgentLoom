@@ -136,7 +136,11 @@ export function AgentLoomApp(props: AgentLoomAppProps) {
     key: `studio-model:${model.id}`,
     category: "Models",
     title: model.name,
-    description: `${model.providerName}${state().studioModel?.id === model.id ? " · selected" : ""}`,
+    description: [
+      model.providerName,
+      model.default ? "default" : "",
+      state().studioModel?.id === model.id ? "selected" : "",
+    ].filter(Boolean).join(" · "),
     modelType: model.id,
   })))
   const modelItems = createMemo(() => state().studioEnabled
@@ -334,7 +338,10 @@ export function AgentLoomApp(props: AgentLoomAppProps) {
     setPaletteSelected(0)
     setPaletteOpen(true)
     input?.blur()
-    setTimeout(() => paletteInput?.focus(), 1)
+    setTimeout(() => {
+      if (!paletteInput || paletteInput.isDestroyed) return
+      paletteInput.focus()
+    }, 1)
   }
 
   function closePalette(restoreBuilderFocus = true) {
@@ -342,7 +349,10 @@ export function AgentLoomApp(props: AgentLoomAppProps) {
     paletteInput?.blur()
     if (restoreBuilderFocus) {
       setFocus("builder")
-      setTimeout(() => input?.focus(), 1)
+      setTimeout(() => {
+        if (!input || input.isDestroyed) return
+        input.focus()
+      }, 1)
     } else {
       setFocus("context")
       input?.blur()
@@ -578,7 +588,7 @@ function Header(props: {
     if (props.assistantBusy) return `${props.spinner} AgentLoom 正在思考…`
     if (props.updatePhase === "available") return "发现可用更新 · Ctrl+X"
     return props.studioEnabled
-      ? `Studio: ${props.studioModel ?? "OpenCode default"}`
+      ? `Studio: ${props.studioModel ?? "config/llm.yaml default"}`
       : `model: ${props.model ?? "未配置"}`
   }
   return (
@@ -625,7 +635,7 @@ function BuilderView(props: {
   const modelSummary = () => props.state.studioEnabled
     ? props.state.studioModel
       ? `${props.state.studioModel.providerName} · ${props.state.studioModel.name}`
-      : "OpenCode default"
+      : "config/llm.yaml default"
     : props.state.snapshot.models.items
       .filter((item) => item.configured)
       .map((item) => `${item.type}${item.default ? "*" : ""}`)
@@ -1304,7 +1314,7 @@ function CommandPalette(props: {
         <box flexDirection="row" justifyContent="space-between" flexShrink={0}>
           <text fg={props.theme.text} attributes={TextAttributes.BOLD}>
             {props.scope === "models"
-              ? "Studio 模型 · OpenCode Providers"
+              ? "Studio 模型 · config/llm.yaml"
               : "Commands · Models · Applications · Main Agents · Skills · Schedules · Runs"}
           </text>
           <text fg={props.theme.muted}>esc</text>
@@ -1315,7 +1325,7 @@ function CommandPalette(props: {
             value={props.query}
             onInput={props.onQuery}
             placeholder={props.scope === "models"
-              ? "搜索并选择模型"
+              ? "搜索并选择 llm.yaml 模型类型"
               : "搜索 Model、Application、主 Agent、Skill、Schedule、Run 或命令"}
             placeholderColor={props.theme.muted}
             textColor={props.theme.text}

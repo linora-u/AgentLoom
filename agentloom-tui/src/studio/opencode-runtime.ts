@@ -4,6 +4,10 @@ export type OpenCodeRuntimeServer = {
   close(): Promise<void>
 }
 
+export type StudioModelRequestParameters = Record<string, {
+  temperature?: number
+}>
+
 export class OpenCodeRuntime {
   private active: Promise<OpenCodeRuntimeServer> | null = null
 
@@ -13,6 +17,8 @@ export class OpenCodeRuntime {
     startupTimeoutMs?: number
     /** Additional OpenCode config used by deterministic Runtime integration tests. */
     config?: Record<string, unknown>
+    /** Safe per-profile request parameters keyed by generated Provider ID. */
+    modelParameters?: StudioModelRequestParameters
     /** Additional Runtime environment used by hermetic integration tests. */
     environment?: Record<string, string | undefined>
   }) {}
@@ -27,7 +33,16 @@ export class OpenCodeRuntime {
   }
 
   private async startProcess(): Promise<OpenCodeRuntimeServer> {
-    const studioPlugin = await createStudioPlugin(this.input.projectRoot)
+    const studioPlugin = await createStudioPlugin(this.input.projectRoot, this.input.modelParameters)
+    const runtimeConfigPath = join(studioPlugin.directory, "opencode.json")
+    await writeFile(runtimeConfigPath, JSON.stringify({
+      ...this.input.config,
+      autoupdate: false,
+      share: "disabled",
+      skills: { paths: [join(this.input.projectRoot, "agentloom-framework-skill")] },
+      plugin: [pathToFileURL(studioPlugin.path).href],
+    }), "utf8")
+    await chmod(runtimeConfigPath, 0o600)
     const port = availablePort()
     const process = Bun.spawn({
       cmd: [
@@ -40,13 +55,8 @@ export class OpenCodeRuntime {
       env: {
         ...Bun.env,
         ...this.input.environment,
-        OPENCODE_CONFIG_CONTENT: JSON.stringify({
-          ...this.input.config,
-          autoupdate: false,
-          share: "disabled",
-          skills: { paths: [join(this.input.projectRoot, "agentloom-framework-skill")] },
-          plugin: [pathToFileURL(studioPlugin.path).href],
-        }),
+        OPENCODE_CONFIG: runtimeConfigPath,
+        AGENTLOOM_STUDIO_RUNTIME_CONFIG: runtimeConfigPath,
         OPENCODE_DISABLE_PROJECT_CONFIG: "1",
         OPENCODE_DISABLE_AUTOUPDATE: "1",
       },
@@ -108,17 +118,42 @@ export class OpenCodeRuntime {
   }
 }
 
-async function createStudioPlugin(projectRoot: string): Promise<{ directory: string; path: string }> {
+async function createStudioPlugin(
+  projectRoot: string,
+  modelParameters: StudioModelRequestParameters = {},
+): Promise<{ directory: string; path: string }> {
   const directory = await mkdtemp(join(tmpdir(), "agentloom-opencode-config-"))
   const path = join(directory, "agentloom-plugin.js")
-  await writeFile(path, domainToolSource(projectRoot), "utf8")
+  await writeFile(path, domainToolSource(projectRoot, modelParameters), "utf8")
   return { directory, path }
 }
 
-export function domainToolSource(projectRoot: string): string {
-  return `const MAX_DOMAIN_OUTPUT_BYTES = 24 * 1024
+export function domainToolSource(
+  projectRoot: string,
+  modelParameters: StudioModelRequestParameters = {},
+): string {
+  return `import { unlinkSync } from "node:fs"
 
-export const AgentLoomPlugin = async () => ({ tool: { agentloom_domain: {
+const RUNTIME_CONFIG_PATH = process.env.AGENTLOOM_STUDIO_RUNTIME_CONFIG
+if (RUNTIME_CONFIG_PATH) {
+  try { unlinkSync(RUNTIME_CONFIG_PATH) } catch (error) {
+    if (!error || typeof error !== "object" || error.code !== "ENOENT") throw error
+  }
+}
+delete process.env.AGENTLOOM_STUDIO_RUNTIME_CONFIG
+delete process.env.OPENCODE_CONFIG
+delete process.env.OPENCODE_CONFIG_CONTENT
+
+const MAX_DOMAIN_OUTPUT_BYTES = 24 * 1024
+const STUDIO_MODEL_PARAMETERS = ${JSON.stringify(modelParameters)}
+
+export const AgentLoomPlugin = async () => ({
+  "chat.params": async (input, output) => {
+    const parameters = STUDIO_MODEL_PARAMETERS[input.model.providerID]
+    if (!parameters) return
+    if (typeof parameters.temperature === "number") output.temperature = parameters.temperature
+  },
+  tool: { agentloom_domain: {
   description: "Inspect, validate, run, and diagnose AgentLoom Applications through the versioned Python domain contract.",
   args: {
     action: {
@@ -239,7 +274,7 @@ async function consume(
     reader.releaseLock()
   }
 }
-import { mkdtemp, rm, writeFile } from "node:fs/promises"
+import { chmod, mkdtemp, rm, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { pathToFileURL } from "node:url"

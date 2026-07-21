@@ -15,7 +15,7 @@ Supervisor/Worker/Tool split:
 Run:
 
 ```bash
-.venv/bin/loom run applications/context_engine_multi_worker_validation/workflows/context_engine_multi_worker_validation_agent.yaml "Run the ContextEngine multi-worker retrieval validation."
+.venv/bin/loom run applications/context_engine_multi_worker_validation/workflows/context_engine_multi_worker_validation_agent.yaml --task "Run the ContextEngine multi-worker retrieval validation."
 ```
 
 Validation:

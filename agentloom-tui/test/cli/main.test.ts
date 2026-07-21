@@ -1,8 +1,15 @@
 import { describe, expect, test } from "bun:test"
 import { join } from "node:path"
-import { formatBridgeFailure } from "../../src/cli/main"
+import { formatBridgeFailure, HELP } from "../../src/cli/main"
 
 describe("AgentLoom CLI diagnostics", () => {
+  test("help points Ctrl+X Studio model selection at config/llm.yaml", () => {
+    expect(HELP).toContain("/models             Select a Studio model from config/llm.yaml")
+    expect(HELP).toContain("Ctrl-X              Commands, permissions, Applications, main Agents, Runs and Skills")
+    expect(HELP).not.toContain("Ctrl-P")
+    expect(HELP).not.toContain("OpenCode Providers")
+  })
+
   test("non-interactive CLI modes do not preload the terminal renderer", async () => {
     const repositoryRoot = join(import.meta.dir, "../..")
     const entry = await Bun.file(join(repositoryRoot, "bin/agentloom")).text()

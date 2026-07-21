@@ -86,9 +86,13 @@ model:
     tool_choice: "auto"
 ```
 
-Application Agents use this Python model configuration. The Studio Agent uses
-OpenCode Providers and authentication instead; `/models` selects only the
-Studio model and never changes an Application's `model_type`.
+This file is the single model configuration source for both runtimes.
+Application Agents resolve it through Python and their YAML `model_type`; the
+TypeScript Studio adapter maps the same profiles, endpoints, credentials, and
+compatible request options into the bundled OpenCode Runtime. `/models` and
+`Ctrl+X` select a Studio profile from `config/llm.yaml` without changing any
+Application's `model_type`. Studio startup fails clearly instead of falling
+back to an ambient OpenCode model when this configuration is missing or invalid.
 
 ## Start with the TUI
 
@@ -158,7 +162,7 @@ Working Revision but do not hot-switch a running Agent.
 |---|---|
 | Send chat | `Enter` |
 | Browse commands and global entities | `Ctrl+X` |
-| Select the Studio model | `/models` |
+| Select a Studio model from `config/llm.yaml` | `/models` or `Ctrl+X` |
 | Refresh the full index | `/refresh` or `r` in details |
 | Analyze the selected failed Run | `a` |
 | Close detail, reject permission/question, or interrupt the loop | `Esc` |

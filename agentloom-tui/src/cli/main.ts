@@ -22,20 +22,20 @@ Options:
 Inside the TUI:
   Enter              Send a message
   /help               Show context-aware Studio help
-  /models             Open the Studio model selector (OpenCode Providers)
+  /models             Select a Studio model from config/llm.yaml
   /refresh            Re-index the project catalog
   /schedule           Show durable schedule commands
-  Ctrl-P              Commands, permissions, Applications, Agents, Runs and Skills
+  Ctrl-X              Commands, permissions, Applications, main Agents, Runs and Skills
   ↑ / ↓ / Enter       Select and open a workbench entry
   PgUp / PgDn         Scroll the open detail view (mouse wheel also works)
   Esc                 Close details, reject a permission/question, or interrupt the active Agent Loop
   Ctrl-C              Exit
 
 Permissions:
-  Application Only is the default. Use Ctrl-P to enable Full Access for this TUI session only.
+  Application Only is the default. Use Ctrl-X to enable Full Access for this TUI session only.
 
 Updates:
-  TUI checks the recorded trusted checkout in the background. Confirm update/restart in Ctrl-P.
+  TUI checks the recorded trusted checkout in the background. Confirm update/restart in Ctrl-X.
   From a source checkout, rerun ./install. After installation, run agentloom update.
 
 Run durable schedules (separate terminal):
