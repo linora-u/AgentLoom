@@ -58,6 +58,42 @@ argument-hint: "<AgentLoom task or application path>"
 12. 如果用户不确定 shell 权限怎么配，先用隔离 runtime 跑真实 workflow，读取当前 run 的 `audit/shell.jsonl` 里的 `[POLICY_SNAPSHOT]` 和拦截事件，再收敛 `allowed_commands`、`allowed_operators`、路径规则或 sandbox。
 13. 最后必须运行验证命令。能跑到哪一步就记录到哪一步，不把“未执行”说成“通过”。
 
+## AgentLoom 领域工具
+
+在 AgentLoom Application Studio 中优先调用 OpenCode Plugin 提供的
+`agentloom_domain` Tool；在 Codex、Claude Code 或 Shell 中，可调用同一
+个稳定 JSON CLI。两者共享领域真相，不要自行解析原始 Run Events 猜状态。
+
+支持的 action：
+
+- `catalog`：Applications、全局 Skills、Agents 与 Runs 的脱敏目录；
+- `application.detail`：Effective Config、来源、拓扑与 Working/Running Revision；模型侧默认每页 10 个 Agent，可用 `offset`/`limit`（最大 10）继续读取；
+- `application.validate`：YAML、引用与 Effective Config 校验摘要；
+- `application.impact`：全局或跨 Application 修改前计算影响范围；
+- `run.start` / `run.resume` / `run.restart` / `run.stop`：标准 Run 生命周期；
+- `run.detail`：结构化、限长的 Run 证据。
+
+调用格式：
+
+```bash
+.venv/bin/python -I -m src.tui_bridge.domain_cli \
+  --project "$PWD" application.detail '{"application_id":"<app>"}'
+
+# Application 很大时继续读取下一页；不要读取 OpenCode managed tool-output 全文
+.venv/bin/python -I -m src.tui_bridge.domain_cli \
+  --project "$PWD" application.detail \
+  '{"application_id":"<app>","offset":10,"limit":10}'
+
+.venv/bin/python -I -m src.tui_bridge.domain_cli \
+  --project "$PWD" application.validate '{"application_id":"<app>"}'
+```
+
+输出固定为 `contract_version=1` 的 JSON envelope。`application.detail` 的
+模型投影使用 `schema_version=2`，会聚合重复 Skills/权限配置并显式返回
+`page.next_offset`；不要为了拿完整目录而读取 OpenCode managed tool-output
+文件。模型密钥、Base URL、认证 Header 不属于该合同，不能通过其他读取
+方式补进上下文。
+
 ## 命令速查
 
 ```bash
@@ -78,6 +114,12 @@ sys.path.insert(0, 'agentloom-framework-skill')
 from scripts.scan_tools import scan_app_structure
 print(scan_app_structure('applications/<app_name>'))
 "
+
+# Studio/Codex 共用的 Effective Config 与领域校验
+.venv/bin/python -I -m src.tui_bridge.domain_cli \
+  --project "$PWD" application.detail '{"application_id":"<app_name>"}'
+.venv/bin/python -I -m src.tui_bridge.domain_cli \
+  --project "$PWD" application.validate '{"application_id":"<app_name>"}'
 
 # Python 编译校验
 .venv/bin/python -m py_compile applications/<app_name>/<app_name>_app.py
