@@ -84,8 +84,7 @@ export type PaletteItem =
         | "models"
         | "apply"
         | "schedules"
-        | "permission-full"
-        | "permission-application"
+        | "permission-toggle"
         | "update"
     }
   | {
@@ -114,6 +113,7 @@ export type AppRoute =
 
 export type BuilderCommand =
   | { type: "help" }
+  | { type: "new" }
   | { type: "apply" }
   | { type: "refresh" }
   | { type: "models" }
@@ -301,18 +301,11 @@ export function buildPaletteItems(snapshot: BootstrapResultDto): PaletteItem[] {
       action: "refresh",
     },
     {
-      key: "command:permission-full",
+      key: "command:permission-toggle",
       category: "Commands",
-      title: "启用 Full Access",
-      description: "仅当前 TUI 会话；允许 Studio 修改整个项目",
-      action: "permission-full",
-    },
-    {
-      key: "command:permission-application",
-      category: "Commands",
-      title: "恢复 Application Only",
-      description: "只直接修改当前 Application",
-      action: "permission-application",
+      title: "切换 Full Access",
+      description: "开启或关闭当前 Studio 会话的全项目写权限",
+      action: "permission-toggle",
     },
     {
       key: "command:models",
@@ -473,6 +466,7 @@ export function parseBuilderInput(raw: string): BuilderCommand {
   const input = raw.trim()
   if (!input) return { type: "empty" }
   if (input === "/help") return { type: "help" }
+  if (input === "/new") return { type: "new" }
   if (input === "/apply") return { type: "apply" }
   if (input === "/refresh") return { type: "refresh" }
   if (input === "/models") return { type: "models" }

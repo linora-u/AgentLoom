@@ -127,9 +127,9 @@ Diff. It loops through Effective Config, YAML/reference validation, an approved
 smoke Run, and structured Run evidence. If real execution is not approved it
 must report “configuration validated, not run” rather than claiming completion.
 Large model-facing Application detail is deduplicated and paginated at ten
-Agents per call. A turn with no text, Tool, Diff, or status progress for 60
-seconds automatically aborts its parent and active Task sub-sessions; `Esc`
-remains the immediate manual interrupt.
+Agents per call. Studio follows OpenCode Session status, retry, permission,
+question, and Task sub-session events; quiet model latency is not treated as a
+cancellation signal. `Esc` remains the explicit manual interrupt.
 
 ### 2. Understand the workspace numbers
 
@@ -151,7 +151,10 @@ actionable summary rather than raw Events.
 `Application Only` is the default. Reads are project-wide, direct writes are
 limited to the current Application, and OpenCode asks for Shell, global, other
 Application, or new-path access. Choose `1` once, `2` for this Session, or `3`
-reject. `Full Access` is available in `Ctrl+X` and resets on exit.
+reject. `Full Access` is one on/off toggle in `Ctrl+X`: it can be preset before
+selecting an Application and remains active while switching Applications; it
+resets on exit. Switching Applications keeps the current Studio memory, while
+`/new` starts a fresh Session. Select TUI text and press `Ctrl+Y` to copy it.
 When the Agent needs a business decision, choose a visible option or type an
 answer; separate multiple answers with `|`.
 
@@ -161,6 +164,8 @@ Working Revision but do not hot-switch a running Agent.
 | Action | Command / key |
 |---|---|
 | Send chat | `Enter` |
+| Start a fresh Studio conversation | `/new` |
+| Copy selected TUI text | `Ctrl+Y` |
 | Browse commands and global entities | `Ctrl+X` |
 | Select a Studio model from `config/llm.yaml` | `/models` or `Ctrl+X` |
 | Refresh the full index | `/refresh` or `r` in details |

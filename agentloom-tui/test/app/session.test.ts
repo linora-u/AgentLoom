@@ -282,6 +282,75 @@ describe("AgentLoom TUI session", () => {
     expect(domain.calls.some((call) => call.method === "builder.send")).toBe(false)
   })
 
+  test("switching Applications keeps the active Studio memory until /new", async () => {
+    const twoApplications: BootstrapResultDto = {
+      ...catalogSnapshot,
+      applications: [
+        catalogSnapshot.applications[0]!,
+        {
+          ...catalogSnapshot.applications[0]!,
+          id: "second",
+          name: "second",
+          path: "applications/second",
+        },
+      ],
+    }
+    const calls: string[] = []
+    const studio: StudioClient = {
+      async openNewApplication() { throw new Error("not expected") },
+      async openApplication(applicationID, permissionMode) {
+        calls.push(`open:${applicationID}:${permissionMode}`)
+        return {
+          sessionID: "ses_shared",
+          messages: [{ id: "memory", role: "assistant", content: "已有记忆" }],
+        }
+      },
+      async switchTarget(sessionID, target, permissionMode) {
+        calls.push(`switch:${sessionID}:${target.type === "new" ? "new" : target.applicationID}:${permissionMode}`)
+      },
+      async newSession(target, permissionMode) {
+        calls.push(`new:${target.type === "new" ? "new" : target.applicationID}:${permissionMode}`)
+        return { sessionID: "ses_fresh", messages: [] }
+      },
+      async send() { return { messages: [] } },
+      async setPermissionMode(sessionID, mode) { calls.push(`permission:${sessionID}:${mode}`) },
+    }
+    const client = new FakeClient()
+    client.responses.set("application.detail", {
+      schema_version: 1,
+      application: { id: "new", name: "new", path: "applications/new", health: "healthy", updated_at: null },
+      working_revision: "sha256:test",
+      running_revision: null,
+      agents: [],
+    })
+    const session = new AgentLoomSession({ client, studio, snapshot: twoApplications })
+    const applications = buildPaletteItems(twoApplications)
+      .filter((item) => item.category === "Applications" && "entry" in item)
+    const first = applications.find((item) => "entry" in item && item.entry.kind === "application" && item.entry.applicationID === "new")
+    const second = applications.find((item) => "entry" in item && item.entry.kind === "application" && item.entry.applicationID === "second")
+    if (!first || !("entry" in first) || !second || !("entry" in second)) throw new Error("missing Applications")
+
+    await session.setPermissionMode("full_access")
+    expect(session.state.permissionMode).toBe("full_access")
+    await session.openEntry(first.entry)
+    await session.openEntry(second.entry)
+
+    expect(session.state.studioSessionID).toBe("ses_shared")
+    expect(session.state.messages).toEqual([{ id: "memory", role: "assistant", content: "已有记忆" }])
+    await session.submit("/new")
+
+    expect(session.state.studioSessionID).toBe("ses_fresh")
+    expect(calls).toEqual([
+      "open:new:full_access",
+      "switch:ses_shared:second:full_access",
+      "new:second:full_access",
+    ])
+
+    await session.togglePermissionMode()
+    expect(session.state.permissionMode).toBe("application_only")
+    expect(calls.at(-1)).toBe("permission:ses_fresh:application_only")
+  })
+
   test("an interrupted Studio turn cannot overwrite the immediate follow-up", async () => {
     const first = deferred<{ messages: Array<{ id: string; role: "assistant"; content: string }> }>()
     const second = deferred<{ messages: Array<{ id: string; role: "assistant"; content: string }> }>()
