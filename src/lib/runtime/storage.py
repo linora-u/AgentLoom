@@ -267,7 +267,15 @@ class SecureDirectory:
             flags = os.O_RDWR | _NOFOLLOW
             if create:
                 flags |= os.O_CREAT
-            fd = os.open(name, flags, 0o600, dir_fd=parent_fd)
+            for attempt in range(3):
+                try:
+                    fd = os.open(name, flags, 0o600, dir_fd=parent_fd)
+                    break
+                except FileNotFoundError:
+                    # Darwin may transiently report ENOENT when two anchored
+                    # handles create the same O_NOFOLLOW lock file at once.
+                    if not create or attempt == 2:
+                        raise
             if not stat.S_ISREG(os.fstat(fd).st_mode):
                 raise RuntimeError(f"storage lock target is not regular: {self.path / str(relative)}")
             operation = fcntl.LOCK_EX if exclusive else fcntl.LOCK_SH
@@ -464,6 +472,49 @@ class SecureDirectory:
             os.unlink(name, dir_fd=parent_fd)
         finally:
             os.close(parent_fd)
+
+    def rename_file(self, source: str | Path, destination: str | Path) -> None:
+        """Rename one anchored regular file without replacing another file."""
+
+        source_parent_fd, source_name = self._open_parent(source, create=False)
+        destination_parent_fd, destination_name = self._open_parent(
+            destination,
+            create=True,
+        )
+        try:
+            source_metadata = os.stat(
+                source_name,
+                dir_fd=source_parent_fd,
+                follow_symlinks=False,
+            )
+            if not stat.S_ISREG(source_metadata.st_mode):
+                raise RuntimeError(
+                    f"storage source is not regular: {self.path / str(source)}"
+                )
+            try:
+                os.stat(
+                    destination_name,
+                    dir_fd=destination_parent_fd,
+                    follow_symlinks=False,
+                )
+            except FileNotFoundError:
+                pass
+            else:
+                raise FileExistsError(
+                    f"storage destination already exists: {self.path / str(destination)}"
+                )
+            os.rename(
+                source_name,
+                destination_name,
+                src_dir_fd=source_parent_fd,
+                dst_dir_fd=destination_parent_fd,
+            )
+            os.fsync(source_parent_fd)
+            if destination_parent_fd != source_parent_fd:
+                os.fsync(destination_parent_fd)
+        finally:
+            os.close(source_parent_fd)
+            os.close(destination_parent_fd)
 
     def copy_from(self, source: str | Path, relative: str | Path) -> None:
         parent_fd, name = self._open_parent(relative, create=True)

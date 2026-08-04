@@ -7,7 +7,6 @@ independently of BaseAgent.
 from __future__ import annotations
 
 import logging
-from pathlib import Path
 
 import pytest
 
@@ -17,7 +16,6 @@ from src.lib.smolagents.prompts.prompt_builder import (
     resolve_model_family_prompt_path,
     resolve_prompt_path,
 )
-
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -172,7 +170,7 @@ class TestBuildPromptTemplates:
         assert "system_prompt" in result
         assert "planning" in result
 
-    def test_code_act_builtin_gets_code_block_todo_prompts(self, monkeypatch, tmp_path):
+    def test_auto_mode_appends_advisory_todo_policy(self, monkeypatch, tmp_path):
         monkeypatch.setattr(pb_module, "get_agent_environment_prompt", lambda: "")
 
         result = build_prompt_templates(
@@ -183,15 +181,16 @@ class TestBuildPromptTemplates:
             skills_manager=_NoSkills(),
             logger=_LOGGER,
             tool_call_type="code_act",
+            todo_mode="auto",
         )
 
-        todo_initial = result["planning"]["todo_initial"]
-        assert "<code>" in todo_initial
-        assert "todo_write(todos=" in todo_initial
-        assert "<tool_call>" in todo_initial
-        assert "Do NOT use XML" in todo_initial
+        assert "decide whether a task list" in result["system_prompt"]
+        assert "MUST call `todo_write`" not in result["system_prompt"]
+        assert not {"todo_initial", "todo_update", "todo_final"} & set(
+            result["planning"]
+        )
 
-    def test_tool_call_builtin_keeps_tool_call_todo_prompts(self, monkeypatch, tmp_path):
+    def test_on_mode_appends_strong_todo_policy(self, monkeypatch, tmp_path):
         monkeypatch.setattr(pb_module, "get_agent_environment_prompt", lambda: "")
 
         result = build_prompt_templates(
@@ -202,10 +201,27 @@ class TestBuildPromptTemplates:
             skills_manager=_NoSkills(),
             logger=_LOGGER,
             tool_call_type="tool_call",
+            todo_mode="on",
         )
 
-        planning_text = "\n".join(str(value) for value in result["planning"].values())
-        assert "todo_write(todos=" not in planning_text
+        assert "first tool call MUST be one standalone `todo_write`" in result["system_prompt"]
+        assert "read-only discovery" in result["system_prompt"]
+
+    def test_off_mode_omits_todo_policy(self, monkeypatch, tmp_path):
+        monkeypatch.setattr(pb_module, "get_agent_environment_prompt", lambda: "")
+
+        result = build_prompt_templates(
+            prompt_template_path=None,
+            effective_prompt_path=None,
+            model_id=None,
+            agent_root=tmp_path,
+            skills_manager=_NoSkills(),
+            logger=_LOGGER,
+            todo_mode="off",
+        )
+
+        assert "Task Tracking" not in result["system_prompt"]
+        assert "todo_write" not in result["system_prompt"]
 
     def test_appends_environment_prompt(self, monkeypatch, tmp_path):
         monkeypatch.setattr(pb_module, "get_agent_environment_prompt", lambda: "\n[ENV]")
@@ -236,6 +252,7 @@ class TestBuildPromptTemplates:
         assert "[ON_DEMAND_CATALOGUE]" in system
         # Eager full instructions should come before the on-demand catalogue.
         assert system.index("[EAGER]") < system.index("[ON_DEMAND_CATALOGUE]")
+        assert system.index("[ON_DEMAND_CATALOGUE]") < system.index("## Task Tracking")
 
     def test_raises_on_missing_explicit_path(self, tmp_path):
         with pytest.raises(ValueError, match="does not exist"):

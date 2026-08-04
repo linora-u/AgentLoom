@@ -4,13 +4,26 @@ from __future__ import annotations
 
 import logging
 from pathlib import Path
-from typing import Any, Literal
+from typing import Any, Literal, get_args
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from src.lib.config.model_request_header_profiles import (
     MODEL_REQUEST_HEADER_PROFILE_NAMES,
 )
+
+TodoMode = Literal["auto", "on", "off"]
+TODO_MODES = frozenset(get_args(TodoMode))
+
+
+def normalize_todo_mode_value(value: Any) -> Any:
+    """Undo PyYAML 1.1's implicit conversion of unquoted on/off values."""
+
+    if value is True:
+        return "on"
+    if value is False:
+        return "off"
+    return value
 
 
 class BoolParser:
@@ -394,6 +407,18 @@ class SelfLearningSettings(BaseModel):
     review: SelfLearningReviewSettings = Field(default_factory=SelfLearningReviewSettings)
 
 
+class TodoSettings(BaseModel):
+    """Current-task Todo capability policy."""
+
+    model_config = ConfigDict(extra="forbid")
+    mode: TodoMode = "auto"
+
+    @field_validator("mode", mode="before")
+    @classmethod
+    def normalize_yaml_boolean_mode(cls, value: Any) -> Any:
+        return normalize_todo_mode_value(value)
+
+
 class RootSettings(BaseModel):
     model_config = ConfigDict(extra="allow")
     system: SystemSettings = Field(default_factory=SystemSettings)
@@ -415,6 +440,7 @@ class RootSettings(BaseModel):
     tool_output_limits: dict[str, Any] = Field(default_factory=dict)
     self_learning: SelfLearningSettings = Field(default_factory=SelfLearningSettings)
     hooks: dict[str, Any] = Field(default_factory=dict)
+    todo: TodoSettings = Field(default_factory=TodoSettings)
 
 
 def raise_project_key_error(source: str) -> ValueError:
