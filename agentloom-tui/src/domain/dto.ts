@@ -26,6 +26,24 @@ export interface ValidationDto {
   errors: string[]
 }
 
+export interface GoalStateDto {
+  schema_version?: number
+  goal_id?: string
+  objective?: string
+  objective_fingerprint?: string
+  status: "active" | "budget_limited" | "complete"
+  token_budget: number | null
+  prompt_tokens?: number
+  completion_tokens?: number
+  used_tokens: number
+  remaining_tokens: number | null
+  evidence?: string | null
+  goal_started?: boolean
+  created_at?: string
+  updated_at?: string
+  completed_at?: string | null
+}
+
 export interface RunSummaryDto {
   run_id: string
   system_id: string | null
@@ -35,6 +53,7 @@ export interface RunSummaryDto {
   status: RunStatus
   started_at: string | null
   ended_at: string | null
+  goal?: GoalStateDto | null
 }
 
 export interface SystemSummaryDto {

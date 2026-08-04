@@ -192,6 +192,25 @@ workflow:
     基于上一轮记忆继续执行，并输出最终结果。
 ```
 
+#### Goal Mode（仅 Supervisor）
+
+```yaml
+goal:
+  enabled: true
+  token_budget: 120000  # 可选；省略即无限制
+```
+
+也可使用 `goal: true` / `goal: false`。Mapping 必须显式包含布尔 `enabled`，只允许
+可选正整数 `token_budget`，未知字段或宽松类型会直接失败。Worker YAML 不允许出现
+任何 `goal` key。
+
+Goal 开启时，objective 由 `description + workflow + runtime task` 生成。推荐单个
+多行 workflow；如果配置 list，框架会按原顺序编号并合并成一个初始目标上下文，
+不会采用上面普通模式的逐项多 run 语义。普通 final 与 `max_steps` 只结束一个
+continuation segment；根 Supervisor 必须调用 `update_goal(complete, evidence)` 才会
+完成。Worker 模型用量计入同一可选软预算。配置、状态、恢复和可观测性详见
+[Goal Mode](goal_mode.md)。
+
 #### Workflow 书写规范与建议
 
 `workflow` 是 Agent 最核心的配置——它本质上是发送给 LLM 的**任务指令（Prompt）**。一个结构清晰的 workflow 能显著提升 Agent 的执行质量。
@@ -1778,6 +1797,7 @@ rg 'SECURITY_BLOCK|WHITELIST_REJECT|PATH_VIOLATION' "$run_dir/audit/shell.jsonl"
 | `name` | ✅ | ✅ | ✅ | `str` | — |
 | `description` | ✅ | ✅ | ✅ | `str` | — |
 | `workflow` | ✅ | ✅ | ✅ | `str`/`list[str]` | — |
+| `goal` | ❌ | ✅ | ❌ | `bool`/`dict` | `false` |
 | `tools` | ❌ | ✅ | ✅ | `list[dict]` | `[]` |
 | `model_type` | ❌ | ✅ | ✅ | `str` | `config/llm.yaml` 中的 `model.default_model_type`；无隐式默认值 |
 | `tool_call_type` | ❌ | ✅ | ✅ | `str` | `"code_act"` |

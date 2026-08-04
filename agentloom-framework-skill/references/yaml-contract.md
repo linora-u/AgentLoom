@@ -34,6 +34,19 @@ workflow: |
 - `path` 支持绝对路径、AgentLoom 根目录相对路径、`worker_agents/` 下文件名、或不带后缀的 Worker 名；生成时推荐写完整项目相对路径。
 - Supervisor 推荐 `tool_call`，因为 Worker 调用、参数和结果可结构化审计；只有需要 Python 控制流时才用 `code_act`。
 
+长期目标可在顶层 Supervisor 配置：
+
+```yaml
+goal:
+  enabled: true
+  token_budget: 120000  # 可选；省略为无限制
+```
+
+只接受 `goal: true/false` 或显式包含 `enabled: bool` 的 mapping；mapping 仅允许
+`enabled` 与正整数 `token_budget`。Goal 模式推荐单个多行 workflow；list 会按顺序
+编号并合并为一个目标上下文。Goal 的完成、预算、resume、checkpoint 和 schedule
+语义见项目 `docs/cn/goal_mode.md`。
+
 ## Worker
 
 ```yaml
@@ -65,6 +78,7 @@ workflow: |
 - runtime 会把输入类型归一为 `string`；不要依赖复杂类型声明。
 - 输出应是可被下游 Worker 或 Supervisor 直接使用的文本。
 - `todo.mode` 支持 `auto`、`on`、`off`；默认 `auto`。它与 `planning_interval` 独立，不要在 `tools` 中重复声明 `todo_write`。
+- Worker YAML 禁止配置 `goal`，包括 `goal: false`；Goal 工具与生命周期只属于根 Supervisor。
 
 ## 模型与配置
 

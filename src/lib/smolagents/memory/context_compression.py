@@ -1152,6 +1152,22 @@ def summarize_conversation(
     """
     log = get_logger(None, __name__)
 
+    # A completed Goal may owe the root exactly one final-delivery request.
+    # Smart summary runs under the same ContextVars but is only scaffolding;
+    # skip its model call so it cannot consume that ephemeral allowance.
+    from src.lib.goal import get_current_goal_provider
+    from src.trace import get_current_local_run_id
+
+    goal_provider = get_current_goal_provider()
+    if goal_provider is not None and goal_provider.completion_settlement_pending(
+        local_run_id=get_current_local_run_id(),
+    ):
+        return SummarizeResponse(
+            messages=messages,
+            summary="",
+            error="Goal completion settlement pending; smart summary skipped",
+        )
+
     messages_to_summarize = get_messages_since_last_summary(messages)
     summarizable_messages = [
         msg for msg in messages_to_summarize

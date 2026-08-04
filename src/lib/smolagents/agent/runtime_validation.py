@@ -15,6 +15,7 @@ from src.lib.smolagents.agent.agent_validation import (
     validate_execution_config_payload,
     validate_todo_config,
 )
+from src.lib.goal import normalize_goal_config
 
 REQUIRED_YAML_FIELDS = ("name", "workflow", "description")
 
@@ -73,6 +74,7 @@ def validate_runtime_agent_config(
     AgentConfigNormalizer.validate_agent_function_schema(config)
     AgentConfigNormalizer.validate_worker_agents_config(config.get("worker_agents", []))
     validate_todo_config(config, source=str(yaml_path))
+    normalize_goal_config(config, source=str(yaml_path))
     normalized_execution = build_normalized_execution_config(
         config,
         source_name=str(yaml_path),
@@ -87,6 +89,11 @@ def validate_runtime_worker_config(
     *,
     agent_root: Path | str,
 ) -> None:
+    if "goal" in config:
+        raise ValueError(
+            f"Worker Agent configuration {yaml_path} must not define goal; "
+            "Goal mode is Supervisor-only"
+        )
     validate_runtime_agent_config(config, yaml_path, agent_root=agent_root)
     if AgentConfigNormalizer.validate_agent_function_schema(config) is None:
         raise ValueError(f"Worker Agent configuration {yaml_path} agent_function_schema is required")

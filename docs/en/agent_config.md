@@ -190,6 +190,27 @@ workflow:
     Continue from the previous run's memory and produce the final answer.
 ```
 
+#### Goal Mode (Supervisor only)
+
+```yaml
+goal:
+  enabled: true
+  token_budget: 120000  # optional; omit for unlimited
+```
+
+`goal: true` and `goal: false` are also accepted. Mapping form requires an
+explicit boolean `enabled` and allows only optional positive-integer
+`token_budget`; unknown fields and permissive type coercions fail. Worker YAML
+must not contain any `goal` key.
+
+When enabled, the objective is derived from `description + workflow + runtime
+task`. Prefer one multiline workflow. A list is numbered and merged into one
+initial objective context instead of using the ordinary sequential multi-run
+semantics above. Normal final answers and `max_steps` end only one continuation
+segment; the root Supervisor must call `update_goal(complete, evidence)`. Worker
+model usage counts against the same optional soft budget. See [Goal Mode](goal_mode.md)
+for lifecycle, resume, persistence, CLI, TUI, and schedule behavior.
+
 #### Workflow Writing Guidelines and Recommendations
 
 `workflow` is the Agent's most critical configuration — it is essentially the **task instruction (Prompt)** sent to the LLM. A well-structured workflow can significantly improve Agent execution quality.
@@ -1746,6 +1767,7 @@ These tolerance mechanisms significantly reduce wasted retries caused by LLM out
 | `name` | ✅ | ✅ | ✅ | `str` | — |
 | `description` | ✅ | ✅ | ✅ | `str` | — |
 | `workflow` | ✅ | ✅ | ✅ | `str`/`list[str]` | — |
+| `goal` | ❌ | ✅ | ❌ | `bool`/`dict` | `false` |
 | `tools` | ❌ | ✅ | ✅ | `list[dict]` | `[]` |
 | `model_type` | ❌ | ✅ | ✅ | `str` | `model.default_model_type` from `config/llm.yaml`; no implicit default |
 | `tool_call_type` | ❌ | ✅ | ✅ | `str` | `"code_act"` |

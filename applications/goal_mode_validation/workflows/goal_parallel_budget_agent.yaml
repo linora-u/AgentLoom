@@ -1,0 +1,57 @@
+name: "goal_parallel_budget_agent"
+description: "Exercise shared soft-budget accounting across parallel Worker responses and resume."
+model_type: "powerful"
+tool_call_type: "code_act"
+max_steps: 16
+goal:
+  enabled: true
+  token_budget: 50000
+
+workflow: |
+  # Parallel soft-budget and resume validation
+
+  In one Python block call get_goal and inspect_parallel_goal_budget_report. Trust
+  the report only when the tool returns matches_current_goal=true; it checks all
+  four required headings and the exact current goal_id. A same-named report from
+  another Goal must be ignored. If no matching report exists, immediately call
+  run_parallel_goal_budget_probe with six distinct deep audit queries serialized
+  as JSON and concurrency=6. Each task must have task_id and
+  query. The queries must cover
+  config, state, continuation, accounting, resume, and tool permissions. Collect
+  The probe persists completed/failed status, durations, and result/error text into
+  a Markdown report with headings `# Parallel Goal Budget`, `## Batch Results`,
+  `## Accounting`, and `## Resume Instructions`, then enforces the shared Goal
+  request fence. Do not catch or replace a budget exception and do not call
+  update_goal during the bounded attempt. The host must classify the crossed
+  shared budget as budget_limited and preserve the checkpoint.
+
+  On resume after token_budget is increased or removed, do not rerun the batch.
+  Verify all four headings plus the exact current goal_id marker in the existing
+  parallel_budget report, call get_goal to confirm cumulative usage was retained
+  and the Goal is active, then call update_goal with complete status and evidence
+  naming the persisted report and retained usage.
+
+tools:
+  - name: "inspect_parallel_goal_budget_report"
+    module: "applications.goal_mode_validation.agent_tools.report_tools"
+    function: "inspect_parallel_goal_budget_report"
+  - name: "run_parallel_goal_budget_probe"
+    module: "applications.goal_mode_validation.agent_tools.report_tools"
+    function: "run_parallel_goal_budget_probe"
+  - name: "run_goal_audit_batch"
+    module: "applications.goal_mode_validation.agent_tools.report_tools"
+    function: "run_goal_audit_batch"
+  - name: "persist_goal_validation_report"
+    module: "applications.goal_mode_validation.agent_tools.report_tools"
+    function: "persist_goal_validation_report"
+  - name: "verify_goal_validation_report"
+    module: "applications.goal_mode_validation.agent_tools.report_tools"
+    function: "verify_goal_validation_report"
+
+worker_agents: []
+
+skills: []
+execution_env:
+  type: "local"
+  executor_kwargs:
+    timeout_seconds: 1200

@@ -4,6 +4,7 @@ export type ExecutionStatus =
   | "never_run"
   | "running"
   | "completed"
+  | "budget_limited"
   | "interrupted"
   | "failed"
   | "crashed"
@@ -23,6 +24,7 @@ const presentations = {
   crashed: { label: "Crashed", symbol: "×", tone: "error", priority: 0 },
   failed: { label: "Failed", symbol: "×", tone: "error", priority: 1 },
   interrupted: { label: "Interrupted", symbol: "■", tone: "warning", priority: 2 },
+  budget_limited: { label: "Budget limited", symbol: "!", tone: "warning", priority: 2 },
   unknown: { label: "Unknown", symbol: "?", tone: "warning", priority: 3 },
   running: { label: "Running", symbol: "●", tone: "info", priority: 4 },
   unavailable: { label: "Unavailable", symbol: "–", tone: "warning", priority: 4 },

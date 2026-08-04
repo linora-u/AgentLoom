@@ -78,12 +78,22 @@ describe("agentloom CLI", () => {
         never_run: 1,
         running: 0,
         completed: 0,
+        budget_limited: 0,
         interrupted: 0,
         failed: 0,
         crashed: 0,
         unknown: 0,
       },
-      runs: { total: 0, running: 0, completed: 0, interrupted: 0, failed: 0, crashed: 0, unknown: 0 },
+      runs: {
+        total: 0,
+        running: 0,
+        completed: 0,
+        budget_limited: 0,
+        interrupted: 0,
+        failed: 0,
+        crashed: 0,
+        unknown: 0,
+      },
     })
   })
 })

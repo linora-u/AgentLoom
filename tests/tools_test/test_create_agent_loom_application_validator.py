@@ -136,6 +136,67 @@ def test_validator_rejects_invalid_list_workflow_item(tmp_path: Path) -> None:
     )
 
 
+@pytest.mark.parametrize(
+    "goal",
+    [True, False, {"enabled": True}, {"enabled": False}, {"enabled": True, "token_budget": 1000}],
+)
+def test_validator_accepts_goal_supervisor_forms(tmp_path: Path, goal) -> None:
+    app_root = _create_min_project(tmp_path)
+    workflow_file = app_root / "workflows" / "demo_agent.yaml"
+    config = yaml.safe_load(workflow_file.read_text(encoding="utf-8"))
+    config["goal"] = goal
+    _write_yaml(workflow_file, config)
+
+    completed, payload = _run_validator(tmp_path)
+
+    assert completed.returncode == 0
+    assert payload["summary"]["valid"] is True
+
+
+@pytest.mark.parametrize(
+    "goal",
+    [None, {}, {"token_budget": 10}, {"enabled": True, "token_budget": "10"}, {"enabled": True, "extra": 1}],
+)
+def test_validator_rejects_invalid_goal_forms(tmp_path: Path, goal) -> None:
+    app_root = _create_min_project(tmp_path)
+    workflow_file = app_root / "workflows" / "demo_agent.yaml"
+    config = yaml.safe_load(workflow_file.read_text(encoding="utf-8"))
+    config["goal"] = goal
+    _write_yaml(workflow_file, config)
+
+    completed, payload = _run_validator(tmp_path)
+
+    assert completed.returncode == 1
+    assert any(error["field"] == "goal" for error in payload["errors"])
+
+
+def test_validator_rejects_goal_on_worker(tmp_path: Path) -> None:
+    app_root = _create_min_project(tmp_path)
+    worker_file = app_root / "workflows" / "worker_agents" / "worker.yaml"
+    _write_yaml(
+        worker_file,
+        {
+            "name": "worker",
+            "description": "worker",
+            "workflow": "work",
+            "goal": False,
+            "agent_function_schema": {
+                "description": "worker tool",
+                "inputs": {"task": {"description": "task"}},
+                "output": {"description": "result"},
+            },
+        },
+    )
+
+    completed, payload = _run_validator(tmp_path)
+
+    assert completed.returncode == 1
+    assert any(
+        error["field"] == "goal" and error["rule"] == "supervisor_only"
+        for error in payload["errors"]
+    )
+
+
 @pytest.mark.parametrize("mode", ["auto", "on", "off"])
 def test_validator_accepts_todo_modes(tmp_path: Path, mode: str) -> None:
     app_root = _create_min_project(tmp_path)
