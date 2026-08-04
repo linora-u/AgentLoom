@@ -13,6 +13,7 @@ from src.lib.smolagents.agent.agent_validation import (
     AgentConfigNormalizer,
     build_normalized_execution_config,
     validate_execution_config_payload,
+    validate_todo_config,
 )
 
 REQUIRED_YAML_FIELDS = ("name", "workflow", "description")
@@ -71,6 +72,7 @@ def validate_runtime_agent_config(
     )
     AgentConfigNormalizer.validate_agent_function_schema(config)
     AgentConfigNormalizer.validate_worker_agents_config(config.get("worker_agents", []))
+    validate_todo_config(config, source=str(yaml_path))
     normalized_execution = build_normalized_execution_config(
         config,
         source_name=str(yaml_path),

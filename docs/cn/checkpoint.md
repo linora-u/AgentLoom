@@ -35,6 +35,8 @@ AgentLoom 将“一次执行尝试”和“需要恢复的逻辑任务”分开�
 │   ├── task_tree.json
 │   ├── checkpoint.json
 │   ├── heartbeat.json
+│   ├── todos.json
+│   ├── todos.lock
 │   ├── workers/<worker_name>/
 │   │   ├── calls/<call_index>/checkpoint.json
 │   │   └── heartbeat.json
@@ -54,7 +56,7 @@ AgentLoom 将“一次执行尝试”和“需要恢复的逻辑任务”分开�
 - 即使 `cleanup_on_success` 删除了可恢复 checkpoint，这些紧凑证据仍可检查；raw artifact retention 仍可清理体积较大的 shell/background/skill artifacts。
 - Checkpoint 直接按 `<application_id>/<task_id>` 定位，不依赖日志目录、`.task_index.json` 或历史 run 扫描。
 - 用户交付物仍由 Application 的 `output_dir` 管理，runtime 清理不会遍历 Application output 目录。
-- Agent 的 recall/todo 状态位于 `.agentloom/workspaces/agents/<application_id>/<agent_path>/`。持久化的 `insights.md` 归 Application 所有；task 文件隔离在 `tasks/<task_id>/`，不属于 run artifacts。
+- Agent 的持久 recall 使用 `.agentloom/workspaces/agents/<application_id>/<agent_path>/` 下、归 Application 所有的 `insights.md`。当前任务的 Todo 在启用 checkpoint 时随 `<application_id>/<task_id>/todos.json` 共同恢复和清理；未启用 checkpoint 时只保存在本次 run 的内存中。它既不是 run artifact，也不承担长期项目管理。
 
 ## 配置
 

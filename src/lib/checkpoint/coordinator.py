@@ -133,6 +133,16 @@ class CheckpointCoordinator:
     def task_text(self) -> str:
         return self._task_text
 
+    def load_todos(self, agent_path: str) -> dict[str, Any]:
+        """Load the active task's Todo snapshot for one Agent scope."""
+
+        return self._cm.load_todos(self._task_id, agent_path)
+
+    def replace_todos(self, agent_path: str, items: Any) -> dict[str, Any]:
+        """Atomically replace the active task's Todo snapshot for one Agent."""
+
+        return self._cm.replace_todos(self._task_id, agent_path, items)
+
     # ── ContextVar lifecycle ─────────────────────────────────────────
 
     @classmethod

@@ -216,7 +216,30 @@ AgentLoom 把多 Agent 系统视为一个应用，而不是一组松散的 Promp
 | 像工具一样调用 Agent | Worker 的 `agent_function_schema` 会转换成带校验的 callable function。 |
 | 处理重复输入 | 固定或自动 Worker 并发，并支持 `.batch(tasks)`。 |
 | 扩展 Agent | 内置工具、本地 Python 函数、MCP Server、Claude-style Skill 和显式 Hook。 |
+| 跟踪复杂执行 | Agent 私有的 Todo 快照，支持自主 `auto`、强提示 `on` 和权威关闭 `off`。 |
 | 恢复并检查任务 | Run receipt、有界日志、Shell audit、checkpoint resume、结构化事件、Web UI、dashboard 和 TUI。 |
+
+### 当前任务 Todo 跟踪
+
+Todo 是当前 task、当前 Agent 的执行状态，不是长期项目管理器。它可以在全局、
+Application 或 Agent 层配置，更具体的层级优先：
+
+```yaml
+todo:
+  mode: "auto"  # auto | on | off
+```
+
+- `auto` 是默认值：工具可用，由模型自主判断有意义的多步骤任务是否值得跟踪。
+- `on` 强提示非简单 Agent 在实质执行前建立完整 Todo 快照；Runtime 不插入隐藏的
+  planning 轮次，也不阻止最终回答。
+- `off` 完全移除工具、策略与上下文状态；即使通用工具列表包含 `todo_write` 也以
+  `off` 为准。
+
+每次 `todo_write` 都会原子替换完整有序列表。开启 checkpoint 时，按 Agent path
+隔离的权威快照位于当前 task checkpoint 的 `todos.json`，共用 resume、锁、保留
+与清理生命周期；关闭 checkpoint 时只存在于本次 run 的内存中。
+`planning_interval` 仍可控制周期 replanning，但不再控制 Todo。完整说明见
+[Agent 配置参考](agent_config.md#311-todomode--任务跟踪)。
 
 ## 手工创建应用
 

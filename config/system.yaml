@@ -103,6 +103,11 @@ code_agent:
   # Additional built-in functions allowed during Python code execution; "*" means all callable builtins are allowed
   additional_functions: "*"
 
+# Current-task Todo capability: auto (model decides), on (strongly required
+# for non-trivial multi-step work), or off (tool and state are hidden).
+todo:
+  mode: "auto"
+
 runtime:
   root_dir: ".agentloom"
   successful_run_retention_days: 7

@@ -5,8 +5,8 @@ Encapsulates the full prompt resolution chain:
   explicit path → effective agent config → global config → model-family variant → smolagents built-in
 
 And the multi-section assembly:
-  base YAML → todo section injection → environment context →
-  eager skills → on-demand skills catalogue
+  base YAML → environment context → eager skills → on-demand skills catalogue →
+  mode-aware Todo policy
 
 When no explicit prompt path is configured, the module uses smolagents' native
 built-in prompt template. Users can provide custom prompt YAML files (see
@@ -29,7 +29,6 @@ from src.lib.smolagents.agent.agent_env import get_agent_environment_prompt
 from src.lib.smolagents.agent.agent_validation import resolve_execution_prompt_template_path
 from src.lib.smolagents.skills.skills import SkillsManager
 
-
 # ---------------------------------------------------------------------------
 # Paths
 # ---------------------------------------------------------------------------
@@ -40,70 +39,30 @@ _PROMPTS_DIR: Path = Path(__file__).parent.resolve()
 DEFAULT_CODE_AGENT_PROMPT_PATH: Path = _PROMPTS_DIR / "structured_code_agent.example.yaml"
 DEFAULT_TOOLCALLING_AGENT_PROMPT_PATH: Path = _PROMPTS_DIR / "toolcalling_agent.example.yaml"
 
-_CODE_ACT_TODO_PROMPTS: dict[str, str] = {
-    "todo_initial": """<tool_restriction>
-⚠️ CRITICAL: You can ONLY execute Python code that calls `todo_write`. ALL other tools are DISABLED.
-Do NOT call read_file, shell_tool, write_markdown_file, or ANY other tool.
-The ONLY action you may take is a `<code>` block containing `todo_write(todos=[...])`.
-Do NOT use XML, `<tool_call>`, `<function_calls>`, JSON tool-call wrappers, or prose-only output.
-</tool_restriction>
 
-Register your planned tasks using todo_write. Based on your plan above:
-- Set the first task as "in_progress"
-- Set remaining tasks as "pending"
-- Use clear, imperative task descriptions
+def todo_policy_for_mode(mode: str) -> str:
+    """Return one provider-independent Todo policy for the configured mode."""
 
-You MUST register your tasks every time. Do not skip this step.
-Provide the COMPLETE task list — todo_write replaces the entire list.
-Output exactly one code block:
-<code>
-todo_write(todos=[{"content": "...", "status": "in_progress"}, {"content": "...", "status": "pending"}])
-</code>""",
-    "todo_update": """<tool_restriction>
-⚠️ CRITICAL: You can ONLY execute Python code that calls `todo_write`. ALL other tools are DISABLED.
-Do NOT call read_file, shell_tool, write_markdown_file, or ANY other tool.
-The ONLY action you may take is a `<code>` block containing `todo_write(todos=[...])`.
-Do NOT use XML, `<tool_call>`, `<function_calls>`, JSON tool-call wrappers, or prose-only output.
-</tool_restriction>
+    if mode == "off":
+        return ""
+    if mode == "auto":
+        return """## Task Tracking
 
-Update your task list to reflect current progress. Based on your plan review:
-- Mark completed tasks as "completed"
-- Set your current/next task as "in_progress"
-- Add any newly discovered tasks as "pending"
-- Remove tasks that are no longer relevant
+For work with three or more meaningful execution steps, multiple deliverables, or substantial uncertainty, decide whether a task list would materially improve execution. If so, call `todo_write` before substantial execution and keep the complete list current. Call `todo_write` alone: never issue it in parallel with another Todo update, another tool, or `final_answer`. Complete the last Todo update before calling `final_answer`. Skip Todo tracking for trivial work, pure questions or answers, and casual conversation. The task list is an aid, not a prerequisite; do not add a separate planning-only turn."""
+    if mode == "on":
+        return """## Task Tracking
 
-Provide the COMPLETE updated list — todo_write replaces the entire list, not append.
-Output exactly one code block:
-<code>
-todo_write(todos=[{"content": "...", "status": "completed"}, {"content": "...", "status": "in_progress"}])
-</code>""",
-    "todo_final": """<tool_restriction>
-⚠️ CRITICAL: You can ONLY execute Python code that calls `todo_write`. ALL other tools are DISABLED.
-Do NOT call read_file, shell_tool, write_markdown_file, or ANY other tool.
-The ONLY action you may take is a `<code>` block containing `todo_write(todos=[...])`.
-Do NOT use XML, `<tool_call>`, `<function_calls>`, JSON tool-call wrappers, or prose-only output.
-</tool_restriction>
+For every non-trivial execution task with multiple steps or deliverables, you MUST establish the task list before substantial execution. When the user input already makes the scope clear, your first tool call MUST be one standalone `todo_write` call. Only when a grounded list cannot yet be written may you first perform the minimum read-only discovery needed to understand scope; call `todo_write` immediately after that discovery and before any mutation or substantive work. Keep exactly one item in progress and update the complete list whenever state changes. Call `todo_write` alone: never issue it in parallel with another Todo update, another tool, or `final_answer`. Complete the last Todo update before calling `final_answer`. Do not create a list for pure questions or answers, one-step work, or casual conversation, even when the reasoning itself has multiple steps."""
+    raise ValueError(f"unsupported todo mode: {mode}")
 
-Finalize your task list. You are about to deliver the final answer.
-- Mark all completed tasks as "completed"
-- If any tasks were skipped, mark them as "completed" with a note
-- Ensure the task list accurately reflects what was accomplished
-- Do NOT pass an empty list. Always include all tasks.
-
-Provide the COMPLETE finalized list via todo_write.
-Output exactly one code block:
-<code>
-todo_write(todos=[{"content": "...", "status": "completed"}])
-</code>""",
-}
 
 def get_prompt_filename_for_tool_call_type(tool_call_type: str, use_structured_output: bool = True) -> str:
     """Return the base prompt filename based on tool_call_type.
-    
+
     Args:
         tool_call_type: Either "tool_call" or "code_act"
         use_structured_output: Whether to use structured output (json_schema) for code_act
-    
+
     Returns:
         "toolcalling_agent.yaml" for "tool_call",
         "structured_code_agent.yaml" for code_act with structured output,
@@ -139,7 +98,7 @@ def resolve_model_family_prompt_path(
     family = model_id.split("/")[0].lower().strip()
     if not family:
         return None
-        
+
     prompt_filename = get_prompt_filename_for_tool_call_type(tool_call_type, use_structured_output)
     variant_path = (_PROMPTS_DIR / family / prompt_filename).resolve()
     if variant_path.is_file():
@@ -230,14 +189,9 @@ def _load_and_validate_yaml(path: Path) -> dict[str, Any]:
 def _append_to_system_prompt(templates: dict[str, Any], section: str) -> None:
     """Append *section* to the ``system_prompt`` key if both are non-empty."""
     if section and "system_prompt" in templates:
-        templates["system_prompt"] += section
-
-
-def _patch_code_act_todo_prompts(templates: dict[str, Any]) -> None:
-    planning = templates.get("planning")
-    if not isinstance(planning, dict):
-        return
-    planning.update(_CODE_ACT_TODO_PROMPTS)
+        current = templates["system_prompt"]
+        separator = "" if current.endswith(("\n", " ")) or section.startswith(("\n", " ")) else "\n\n"
+        templates["system_prompt"] = current + separator + section
 
 
 def _load_smolagents_builtin(tool_call_type: str, use_structured_output: bool = True) -> dict[str, Any]:
@@ -262,6 +216,7 @@ def build_prompt_templates(
     logger: Any,
     tool_call_type: str = "code_act",
     use_structured_output: bool = True,
+    todo_mode: str = "auto",
 ) -> dict[str, Any] | None:
     """Build the final prompt-templates dict ready for the runtime agent.
 
@@ -303,9 +258,6 @@ def build_prompt_templates(
             # Default: use smolagents' built-in prompt
             prompt_templates = _load_smolagents_builtin(tool_call_type, use_structured_output)
 
-        if tool_call_type == "code_act":
-            _patch_code_act_todo_prompts(prompt_templates)
-
         # 1) Environment context (workspace root, exclusions)
         _append_to_system_prompt(prompt_templates, get_agent_environment_prompt())
 
@@ -323,6 +275,12 @@ def build_prompt_templates(
         _append_to_system_prompt(
             prompt_templates, resolved_skills.get_skills_prompt()
         )
+
+        # 5) Keep the mode policy last so long environment/skill sections do
+        # not bury the current task-tracking contract.
+        todo_policy = todo_policy_for_mode(todo_mode)
+        if todo_policy:
+            _append_to_system_prompt(prompt_templates, todo_policy)
 
         return prompt_templates
 

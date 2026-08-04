@@ -26,6 +26,7 @@ Agent YAML is the configuration file in the AgentLoom framework that **defines t
   - [3.8 skills — Skill Package Configuration](#38-skills--skill-package-configuration)
   - [3.9 prompt — Custom Prompt](#39-prompt--custom-prompt)
   - [3.10 planning_interval — Planning Interval](#310-planning_interval--planning-interval)
+  - [3.11 todo.mode — Task Tracking](#311-todomode--task-tracking)
   - [3.11 concurrency — Concurrency Configuration](#311-concurrency--concurrency-configuration)
 - [4. Tool Configuration Details](#4-tool-configuration-details)
   - [4.4 Advanced Pattern: Wrapping Agent as a Python Tool Function](#44-advanced-pattern-wrapping-agent-as-a-python-tool-function)
@@ -133,6 +134,7 @@ model_type: "powerful"
 tool_call_type: "code_act"
 max_steps: 40                            # Maximum execution steps (default: 80)
 planning_interval: 3                     # Force re-planning every N steps
+todo: {mode: "auto"}                     # auto | on | off
 
 # ---- Worker-Specific: Callable Tool Contract ----
 # Note: Parameter names under inputs are customizable, as long as they are valid Python identifiers
@@ -377,6 +379,7 @@ workflow: |
 | `execution_env` | `dict` | `{type: "local"}` | Execution environment configuration. See [3.5](#35-execution_env--execution-environment) |
 | `prompt` | `str` or `dict` | Framework built-in | Custom System Prompt template. See [3.9](#39-prompt--custom-prompt) |
 | `planning_interval` | `int` | Not set | Force re-planning every N steps. See [3.10](#310-planning_interval--planning-interval) |
+| `todo` | `dict` | `{mode: "auto"}` | Current-task progress tracking. See [3.11](#311-todomode--task-tracking) |
 | `concurrency` | `int`/`str` | Not set | Concurrency level when this Agent is batch-invoked. See [3.11](#311-concurrency--concurrency-configuration) |
 | `skills` | `list`/`dict`/`str` | Not set | Private skill package configuration. See [3.8](#38-skills--skill-package-configuration) |
 | `hooks` | `dict` | Not set | Independent direct Hooks and explicit Hook Bundles. See [Hooks](hooks.md) |
@@ -647,29 +650,50 @@ When set, the Agent is forced to perform a planning step every N steps.
 planning_interval: 3    # Force re-planning every 3 steps
 ```
 
-**Automatic `todo_write` tool injection**:
-
-When `planning_interval` is configured, the framework automatically injects the `todo_write` tool (no need to declare it in the `tools` list). The LLM sees the current task list status during each planning step and is expected to update progress via `todo_write` promptly.
-
-**Planning Prompt Design Philosophy** (inspired by Claude Code):
-
-- **Get straight to the point**: Planning steps ask the LLM to output a brief numbered step list, no longer requiring verbose Facts Surveys
-- **Conditional todo**: Only register a todo list when the task has 3+ distinct steps; skip for trivial tasks
-- **Immediate updates**: Mark each task as `completed` immediately after finishing — do not batch updates
-- **Single focus**: Keep exactly ONE task as `in_progress` at any time
-- **Replan focuses on progress**: Subsequent planning steps only review todo status and output remaining steps, without repeating completed work
-- **Final review**: After the agent calls `final_answer`, if there are still incomplete todos, the framework automatically triggers one last planning step for the LLM to review task completion status (runs at most once, no loop risk)
-
-`todo_write` tool behavior:
-- **Input**: JSON array, each item with `content` (task description) and `status` (`pending` / `in_progress` / `completed`)
-- **Semantics**: Full replacement (each call replaces the entire list)
-- **Completed records**: When all tasks are marked `completed`, the records remain visible
-- **Persistence**: Writes to `.agentloom/workspaces/agents/<application_id>/<agent_path>/tasks/<task_id>/todos.md` (Markdown checkbox format)
-- **Verification nudge**: When 3+ tasks all completed without a verification step, the return value's first line reminds the LLM to consider running verification
+`planning_interval` only controls periodic model planning. It does not enable,
+disable, or schedule Todo calls. Configure Todo independently with [`todo.mode`](#311-todomode--task-tracking).
 
 ---
 
-### 3.11 `concurrency` — Concurrency Configuration
+### 3.11 `todo.mode` — Task Tracking
+
+Todo tracks the current Agent's progress for the current task. It is not a
+long-term project manager and is independent from `planning_interval` and the
+Agent's explicit `tools` list.
+
+```yaml
+todo:
+  mode: "auto"  # auto | on | off; quote on/off for YAML 1.1 loaders
+```
+
+| Mode | Behavior |
+|------|----------|
+| `auto` | Default. `todo_write` is available and the model decides whether a multi-step task benefits from tracking. |
+| `on` | `todo_write` is available. For a non-trivial multi-step task whose scope is already clear, the model is strongly instructed to make a standalone `todo_write` its first tool call. Minimal read-only discovery may happen first only when needed to ground the list. |
+| `off` | The tool, Todo prompt policy, and current Todo snapshot are hidden from the model. |
+
+The value may be set globally in `config/system.yaml`, in an Application YAML,
+or in an Agent YAML. The more specific layer wins. Only `auto`, `on`, and `off`
+are valid.
+
+`todo_write` replaces the complete list atomically. Each item contains
+`content` and one of `pending`, `in_progress`, `completed`, or `cancelled`.
+There may be at most one `in_progress` item. `cancelled` requires a
+`cancel_reason` and means the Agent has determined that the item is no longer
+needed; failure or lack of time is not cancellation. Passing an empty list
+clears the snapshot.
+
+With checkpointing enabled, state is stored in the task checkpoint directory
+as `todos.json`, isolated by Agent path and managed by the checkpoint resume,
+locking, and cleanup lifecycle. With checkpointing disabled it lives only in
+the current run's memory. A malformed file is quarantined with a warning and
+execution continues with an empty snapshot. The current canonical snapshot is
+re-injected as a system message on each model call; Todo does not add a separate
+model call and does not block the final answer.
+
+---
+
+### 3.12 `concurrency` — Concurrency Configuration
 
 Controls the maximum concurrency when this Agent is batch-invoked. Typically used for Worker Agents — when the application layer needs to batch-invoke the same Worker on multiple inputs (e.g., multiple directories, multiple files), this field determines how many Agent instances run simultaneously.
 
@@ -1444,6 +1468,7 @@ The following top-level fields in Agent YAML can override system configuration (
 | `prompt` | `str`/`dict` | Custom System Prompt template path |
 | `mcp_servers` | `str`/`list`/`dict` | MCP server configuration |
 | `self_learning` | `dict` | History and optional memory-review policy |
+| `todo` | `dict` | Todo mode (`auto`, `on`, or `off`) |
 
 > ⚠️ **Important**: The whitelist above is evaluated **per Agent YAML**, not per call chain. When a Supervisor invokes a Worker, the Worker's `tool_access_control`, `execution_env`, `prompt`, and other whitelisted overrides are rebuilt from the Worker YAML instead of being inherited from the Supervisor.
 >
@@ -1727,6 +1752,7 @@ These tolerance mechanisms significantly reduce wasted retries caused by LLM out
 | `execution_env` | ❌ | ✅ | ✅ | `dict` | `{type: "local"}` |
 | `prompt` | ❌ | ✅ | ✅ | `str`/`dict` | Framework built-in |
 | `planning_interval` | ❌ | ✅ | ✅ | `int` | Not set |
+| `todo` | ❌ | ✅ | ✅ | `dict` | `{mode: "auto"}` |
 | `concurrency` | ❌ | ✅ | ✅ | `int`/`str` | Not set (`auto`) |
 | `skills` | ❌ | ✅ | ✅ | `list`/`dict`/`str` | Auto-loaded |
 | `worker_agents` | ❌ | ✅ | ❌ | `list[dict]` | `[]` |
