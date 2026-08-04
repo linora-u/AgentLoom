@@ -133,14 +133,6 @@ system_prompt: |-
   <system-reminder> tags — they reflect the current state of your execution
   environment and guide your next actions.
 
-  ## Task Tracking
-  Break down and manage your work with the `todo_write` tool. Use it to plan
-  your work and help track progress. Mark each task as "completed" as soon as
-  you finish it — do not batch multiple updates. If you discover new sub-tasks,
-  add them with status "pending". Keep exactly one task as "in_progress" at a
-  time. `todo_write` replaces the entire task list, so always provide the
-  complete updated list.
-
   Now Begin!
 planning:
   initial_plan : |-
@@ -153,13 +145,6 @@ planning:
     - Do NOT restate facts already provided in the task description.
     - Focus only on WHAT to do and in WHAT ORDER — skip justifications unless critical.
     - After the final step, write the '<end_plan>' tag and stop.
-
-    ## Task Tracking
-    - If your plan has 3+ steps, the system will prompt you to register them
-      as a task list after this planning phase. Plan your steps clearly so they
-      can be tracked.
-    - If the task is trivial (1-2 steps), task tracking will be skipped.
-    - Do NOT write tool calls inside this plan text. Only output numbered steps here.
 
     You can leverage these tools:
     {%- for tool in tools.values() %}
@@ -200,8 +185,6 @@ planning:
     You have {remaining_steps} steps remaining.
     Do not repeat completed steps. Focus only on what remains.
 
-    After this plan, the system will give you an opportunity to update task statuses.
-
     You can leverage these tools:
     {%- for tool in tools.values() %}
     - {{ tool.to_tool_calling_prompt() }}
@@ -217,48 +200,6 @@ planning:
     {%- endif %}
 
     Write your updated plan, then '<end_plan>'.
-  todo_initial: |-
-    <tool_restriction>
-    ⚠️ CRITICAL: You can ONLY call `todo_write`. ALL other tools are DISABLED.
-    Do NOT call read_file, shell_tool, write_markdown_file, or ANY other tool.
-    The ONLY action you may take is: call `todo_write`.
-    </tool_restriction>
-
-    Register your planned tasks using todo_write. Based on your plan above:
-    - Set the first task as "in_progress"
-    - Set remaining tasks as "pending"
-    - Use clear, imperative task descriptions
-
-    You MUST register your tasks every time. Do not skip this step.
-    Provide the COMPLETE task list — todo_write replaces the entire list.
-  todo_update: |-
-    <tool_restriction>
-    ⚠️ CRITICAL: You can ONLY call `todo_write`. ALL other tools are DISABLED.
-    Do NOT call read_file, shell_tool, write_markdown_file, or ANY other tool.
-    The ONLY action you may take is: call `todo_write`.
-    </tool_restriction>
-
-    Update your task list to reflect current progress. Based on your plan review:
-    - Mark completed tasks as "completed"
-    - Set your current/next task as "in_progress"
-    - Add any newly discovered tasks as "pending"
-    - Remove tasks that are no longer relevant
-
-    Provide the COMPLETE updated list — todo_write replaces the entire list, not append.
-  todo_final: |-
-    <tool_restriction>
-    ⚠️ CRITICAL: You can ONLY call `todo_write`. ALL other tools are DISABLED.
-    Do NOT call read_file, shell_tool, write_markdown_file, or ANY other tool.
-    The ONLY action you may take is: call `todo_write`.
-    </tool_restriction>
-
-    Finalize your task list. You are about to deliver the final answer.
-    - Mark all completed tasks as "completed"
-    - If any tasks were skipped, mark them as "completed" with a note
-    - Ensure the task list accurately reflects what was accomplished
-    - Do NOT pass an empty list. Always include all tasks.
-
-    Provide the COMPLETE finalized list via todo_write.
 managed_agent:
   task: |-
       You're a helpful agent named '{{name}}'.

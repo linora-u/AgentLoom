@@ -35,7 +35,7 @@ print(scan_app_structure('applications/<app_name>'))
 - 每个 Worker 是否有 `agent_function_schema`。
 - `tools` 是否与 workflow 动作匹配。
 - `model_type`、`tool_call_type`、`max_steps` 是否合理。
-- Agent YAML 是否误写 LLM 参数、无效 `planning_interval`/`concurrency`、错误 `prompt`、错误 `fixed_args`、错误 `mcp_servers`。
+- Agent YAML 是否误写 LLM 参数、无效 `planning_interval`/`todo.mode`/`concurrency`、错误 `prompt`、错误 `fixed_args`、错误 `mcp_servers`。
 
 ```bash
 .venv/bin/python -m py_compile applications/<app_name>/<app_name>_app.py
