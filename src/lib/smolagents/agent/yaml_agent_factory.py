@@ -13,6 +13,7 @@ from src.lib.config.yaml_loader import load_unique_yaml
 from src.lib.logging import (
     get_logger,
 )
+from src.lib.goal import normalize_goal_config, normalize_workflow_for_goal
 from src.lib.smolagents import AgentLogger
 from src.lib.smolagents.agent.agent_validation import AgentConfigNormalizer, NormalizedAgentConfig
 from src.lib.smolagents.agent.base_agent import AgentRoleProfile, AgentType, RoleDrivenAgent
@@ -730,8 +731,12 @@ class YamlConfiguredSupervisorAgent(RoleDrivenAgent):
             inject_default_file_tools=False,
         )
 
-    def _transform_task(self, task: str) -> str:
-        workflow_content = _workflow_to_task_spec_source(self._config['workflow'])
+    def _transform_task(self, task: str, *, workflow_override: str | None = None) -> str:
+        workflow_content = (
+            workflow_override
+            if workflow_override is not None
+            else _workflow_to_task_spec_source(self._config['workflow'])
+        )
         description = self._config.get('description', '').strip()
         task_spec_source = workflow_content.strip()
         if description:
@@ -755,6 +760,10 @@ class YamlConfiguredSupervisorAgent(RoleDrivenAgent):
 
     def _transform_tasks(self, task: str) -> list[str]:
         workflow_content = self._config['workflow']
+        goal = normalize_goal_config(self._config, source=self._config.get("name", "supervisor"))
+        if goal.enabled:
+            merged_workflow = normalize_workflow_for_goal(workflow_content)
+            return [self._transform_task(task, workflow_override=merged_workflow)]
         if isinstance(workflow_content, list):
             # List workflows are executed sequentially: each item becomes a
             # separate runtime_agent.run() call with reset=False preserving

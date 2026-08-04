@@ -1,0 +1,61 @@
+name: "goal_unlimited_endurance_agent"
+description: |
+  Run a deep, read-only, multi-Worker acceptance audit of the AgentLoom Goal Mode
+  implementation and persist a reproducible evidence report.
+model_type: "powerful"
+tool_call_type: "code_act"
+max_steps: 30
+goal: true
+
+workflow: |
+  # Unlimited endurance validation
+
+  This is the intentionally long real-LLM validation path. Execute all work; do
+  not replace Worker calls with your own guesses. It is designed to make 16 deep
+  specialist calls sequentially plus one synthesis call and may run around 30
+  minutes. All review is read-only except the report tool under this Application's
+  ignored outputs directory.
+
+  In Python, call run_goal_audit_batch once for each specialist with four tasks,
+  concurrency=1, and a JSON array where every task object contains only task_id
+  and query.
+
+  1. goal_contract_auditor: audit strict YAML/Worker rejection; objective and list
+     normalization; Goal state schema/identity; offline/runtime validator parity.
+  2. goal_lifecycle_adversary: audit premature final/max_steps; soft boundary and
+     parallel overshoot; budget increase/removal; completion-commit crash recovery.
+  3. goal_observability_auditor: audit Python/manifest; CLI/JSONL; schedule status;
+     TUI bridge/TypeScript presentation.
+  4. goal_documentation_auditor: audit root docs; cn/en Goal docs; config/checkpoint
+     docs; framework-skill contract and validation guidance.
+
+  Each query must name its acceptance criterion and the relevant paths under src/,
+  tests/, docs/, agentloom-tui/, and agentloom-framework-skill/. Collect every
+  TaskResult. Fail if any status is not completed. Send a JSON representation of
+  all results to goal_evidence_synthesizer. Persist its Markdown using
+  persist_goal_validation_report(run_name="unlimited_endurance", report=...).
+  Verify markers ["# Goal Mode Validation", "## Lifecycle and Resume",
+  "## Token Accounting", "## Observability", "## Verdict"]. Call get_goal and
+  confirm it is still active and unlimited. Finally call
+  update_goal(status="complete", evidence=<paths, worker count, and verification>)
+  exactly once. Todo or a normal final answer is not completion.
+
+tools:
+  - name: "run_goal_audit_batch"
+    module: "applications.goal_mode_validation.agent_tools.report_tools"
+    function: "run_goal_audit_batch"
+  - name: "persist_goal_validation_report"
+    module: "applications.goal_mode_validation.agent_tools.report_tools"
+    function: "persist_goal_validation_report"
+  - name: "verify_goal_validation_report"
+    module: "applications.goal_mode_validation.agent_tools.report_tools"
+    function: "verify_goal_validation_report"
+
+worker_agents:
+  - path: "applications/goal_mode_validation/workflows/worker_agents/evidence_synthesizer.yaml"
+
+skills: []
+execution_env:
+  type: "local"
+  executor_kwargs:
+    timeout_seconds: 2400

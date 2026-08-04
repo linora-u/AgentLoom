@@ -16,7 +16,7 @@ from __future__ import annotations
 import json
 import os
 import sys
-from collections.abc import Iterator
+from collections.abc import Iterator, Mapping
 from contextlib import contextmanager, nullcontext, redirect_stdout
 from datetime import UTC, datetime
 from typing import Any, TextIO
@@ -71,11 +71,20 @@ def _run_event_payload(event: Any) -> dict[str, object]:
         "occurred_at": occurred_at.isoformat(),
         "run": _run_info_payload(event.run),
     }
-    for field in ("output", "error", "phase"):
+    for field in ("output", "error", "phase", "goal"):
         value = getattr(event, field, None)
         if value is not None:
-            payload[field] = value
+            payload[field] = dict(value) if field == "goal" else value
     return payload
+
+
+def _goal_text(goal: Mapping[str, object]) -> str:
+    budget = goal.get("token_budget")
+    budget_text = "unlimited" if budget is None else str(budget)
+    return (
+        f"Goal: {goal.get('status')} | tokens: "
+        f"{goal.get('used_tokens', 0)}/{budget_text}"
+    )
 
 
 def _emit_jsonl_record(payload: dict[str, object], stream: TextIO) -> None:
@@ -87,7 +96,7 @@ def _emit_jsonl_record(payload: dict[str, object], stream: TextIO) -> None:
 
 
 @contextmanager
-def _isolated_jsonl_stdout() -> Iterator[TextIO]:
+def _isolated_machine_stdout() -> Iterator[TextIO]:
     """Reserve the original fd 1 for JSONL and route all other fd 1 writes to stderr."""
 
     protocol_stream = click.get_text_stream("stdout")
@@ -233,6 +242,7 @@ Examples:
   loom run applications/test_demo/workflows/test_agent.yaml --no-file-log
   loom run applications/test_demo/workflows/test_agent.yaml --resume task_xxx
   loom run applications/test_demo/workflows/test_agent.yaml --task "Inspect this repository"
+  loom run applications/test_demo/workflows/test_agent.yaml --output-format json
   loom run applications/test_demo/workflows/test_agent.yaml --output-format jsonl
 """
 
@@ -249,10 +259,10 @@ Examples:
 @click.option("--task", "task_override", default=None, help="Override the task from the application YAML.")
 @click.option(
     "--output-format",
-    type=click.Choice(("text", "jsonl"), case_sensitive=False),
+    type=click.Choice(("text", "json", "jsonl"), case_sensitive=False),
     default="text",
     show_default=True,
-    help="Choose human-readable output or lifecycle JSON Lines.",
+    help="Choose human-readable output, one JSON event, or lifecycle JSON Lines.",
 )
 def run(
     yaml_path: str,
@@ -282,16 +292,18 @@ def run(
             event_stream,
         )
 
-    output_context = _isolated_jsonl_stdout() if output_format == "jsonl" else nullcontext(None)
+    machine_output = output_format in {"json", "jsonl"}
+    output_context = _isolated_machine_stdout() if machine_output else nullcontext(None)
     with output_context as active_event_stream:
         event_stream = active_event_stream
         try:
-            if output_format == "jsonl":
+            if machine_output:
                 from src.runner import execute_app
 
                 def emit_event(event: Any) -> None:
                     assert event_stream is not None
-                    _emit_jsonl_record(_run_event_payload(event), event_stream)
+                    if output_format == "jsonl" or event.event != "run.started":
+                        _emit_jsonl_record(_run_event_payload(event), event_stream)
                     emitted_events.add(event.event)
 
                 execute_app(
@@ -304,13 +316,16 @@ def run(
             else:
                 from src.runner import execute_app
 
-                result = execute_app(
+                completed = execute_app(
                     yaml_path,
                     file_logging=False if no_file_log else None,
                     resume_task_id=resume_task_id,
                     task_override=task_override,
-                ).output
-                click.echo(result)
+                )
+                click.echo(completed.output)
+                completed_goal = getattr(completed, "goal", None)
+                if isinstance(completed_goal, Mapping):
+                    click.echo(_goal_text(completed_goal))
         except KeyboardInterrupt as exc:
             if not emitted_events:
                 emit_rejected(exc, message="interrupted before run started")
@@ -324,16 +339,29 @@ def run(
                     err=True,
                 )
             raise click.exceptions.Exit(130) from exc
-        except SystemExit as exc:
-            emit_rejected(exc, message="nested process exit")
-            click.echo("\n Execution failed: nested process exit", err=True)
-            raise click.exceptions.Exit(1) from exc
         except Exception as exc:
+            from src.application_run import ApplicationRunBudgetLimited
+
+            if isinstance(exc, ApplicationRunBudgetLimited):
+                if not emitted_events:
+                    emit_rejected(exc, message=str(exc))
+                goal = exc.goal
+                click.echo(
+                    "\nGoal budget limited: "
+                    f"{goal.get('used_tokens')}/{goal.get('token_budget')} tokens used. "
+                    f"Resume task {exc.run.task_id} after increasing or removing token_budget.",
+                    err=True,
+                )
+                raise click.exceptions.Exit(1) from exc
             retryable = _has_transient_provider_error(exc)
             if not emitted_events:
                 emit_rejected(exc, retryable=retryable)
             click.echo(f"\n Execution failed: {exc}", err=True)
             raise click.exceptions.Exit(_EX_TEMPFAIL if retryable else 1) from exc
+        except SystemExit as exc:
+            emit_rejected(exc, message="nested process exit")
+            click.echo("\n Execution failed: nested process exit", err=True)
+            raise click.exceptions.Exit(1) from exc
 
 
 # ─────────────────────────────────────────────

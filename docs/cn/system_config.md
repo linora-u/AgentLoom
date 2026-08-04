@@ -4,6 +4,8 @@
 > 关于配置文件之间的覆盖关系，请参阅 [配置体系总览](config-overview.md)。
 > 关于 LLM 模型参数，请参阅 [LLM 配置文档](llm_config.md)。
 > 关于 Agent YAML 参数，请参阅 [Agent 配置文档](agent_config.md)。
+> Goal Mode 不属于全局配置，只能在顶层 Supervisor Agent YAML 启用；详见
+> [Goal Mode](goal_mode.md)。
 
 `config/system.yaml` 是 AgentLoom 框架的**核心全局配置文件**，控制系统元数据、上下文压缩策略、顶层 prompt、全局 Skills、执行环境、代码执行权限、日志、工具系统、工作空间等。
 
@@ -1292,12 +1294,13 @@ Run 证据与 task 恢复状态在同一个 runtime root 下保持独立生命�
 ├── runs/<application_id>/<run_id>/
 │   ├── manifest.json
 │   ├── logs/runtime.log[.1-.3]
-│   ├── audit/{shell.jsonl[.1-.2],task_tree.json,task_events.jsonl}
+│   ├── audit/{shell.jsonl[.1-.2],task_tree.json,task_events.jsonl,goal.json}
 │   └── artifacts/{result.txt,shell,background,skills}/
 └── checkpoints/<application_id>/<task_id>/
     ├── task_events.jsonl
     ├── task_tree.json
     ├── checkpoint.json
+    ├── goal.json
     ├── heartbeat.json
     ├── workers/<worker_name>/calls/<call_index>/checkpoint.json
     ├── context_store/
@@ -1313,6 +1316,11 @@ Run 证据与 task 恢复状态在同一个 runtime root 下保持独立生命�
 - Checkpoint 直接按 Application/task canonical 路径定位，不依赖日志、`.task_index.json` 或 legacy 扫描
 - 日志关闭、轮转和 runtime retention 不会删除 checkpoint
 - Agent workspace 与 run artifacts 保持独立；Application `output_dir` 仍由 Application 管理
+- Supervisor Goal 会增加 canonical `goal.json`；完成时先复制到 run
+  manifest/audit 再执行成功清理，`budget_limited` 则保留该文件用于 resume
+
+完整存储契约见 [Checkpoint 恢复](checkpoint.md)，Goal 生命周期规则见
+[Goal Mode](goal_mode.md)。
 
 ### 12.2 心跳机制与崩溃检测
 

@@ -23,6 +23,10 @@ argument-hint: "<AgentLoom task or application path>"
 - 用户说“有哪些配置 / 这个配置能不能写 / skill 漏了配置 / system.yaml、llm.yaml、Agent YAML 怎么配”：先读 [`references/configuration-surface.md`](references/configuration-surface.md)，再按需要读 `docs/en/*.md` 和对应代码交叉验证。
 - 需要生成或修改 `applications/<app_name>/`：读 [`references/application-generation.md`](references/application-generation.md)。
 - 需要写 Agent YAML / Worker YAML / `agent_function_schema` / `worker_agents`：读 [`references/yaml-contract.md`](references/yaml-contract.md)。
+- 需要配置或实现 Goal Mode、长期 continuation、根 Agent 树 token 预算或
+  `budget_limited` resume：读 [`references/yaml-contract.md`](references/yaml-contract.md)
+  的 Goal 契约和 [`references/validation-and-review.md`](references/validation-and-review.md)
+  的真实 Goal 验证矩阵；用户语义以 `docs/en/goal_mode.md` 为准。
 - 需要为 Application 配置私有 Skill 或独立 Hook Bundle：读 [`references/configuration-surface.md`](references/configuration-surface.md) 的 Skills/Hook 配置，再读 [`references/application-generation.md`](references/application-generation.md) 的目录规范。
 - 需要配置或验证 shell 权限、allowlist、audit log、sandbox、路径安全、后台任务或 stall 检测：先读 [`references/shell-security-audit.md`](references/shell-security-audit.md)，再按需要读配置面和验证评审。
 - 需要验证是否真是多 Agent、是否能运行、问题怎么记录：读 [`references/validation-and-review.md`](references/validation-and-review.md)。
@@ -38,7 +42,7 @@ argument-hint: "<AgentLoom task or application path>"
 | 需求路由 | 用户只说一个功能，判断 AgentLoom 应该怎么落地 | `function-routing.md` | 实现路径、需要问的问题、应用边界 |
 | 配置面 | 判断 system/llm/Agent/Skill/Hook/MCP/checkpoint 等配置写在哪里、是否可覆盖 | `configuration-surface.md` | 配置位置、字段、覆盖层级、验证来源 |
 | Application 生成 | 新建/扩展 `applications/<app_name>` | `application-generation.md` | 目录、入口脚本、workflow、README |
-| YAML 契约 | Supervisor/Worker/Tool/Skill 配置 | `yaml-contract.md` | 合法 Agent YAML 与 Worker schema |
+| YAML 契约 | Supervisor/Worker/Goal/Tool/Skill 配置 | `yaml-contract.md` | 合法 Agent YAML、Goal 生命周期与 Worker schema |
 | 验证评审 | 结构扫描、YAML 校验、运行边界、checkpoint/resume 功能、架构风险 | `validation-and-review.md` | 验证命令、结果、问题清单 |
 | README 交付 | 给用户和后续 Agent 看的使用说明 | `readme-template.md` | 可运行说明、验证记录、已知问题 |
 

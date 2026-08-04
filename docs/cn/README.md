@@ -85,6 +85,24 @@ model:
 ```
 
 这份文件是 Studio 与 Application Agent 唯一共享的模型配置源。
+
+## Goal Mode
+
+顶层 Supervisor 可以通过 `goal: true` 或
+`goal: {enabled: true, token_budget: 120000}` 开启长期目标模式。它会在普通 final
+或 `max_steps` 后继续使用同一 runtime 和记忆，Worker 用量计入同一预算，并且只有
+根 Supervisor 的 `update_goal(complete, evidence)` 能完成。预算耗尽时 run 进入
+`budget_limited`，提高或移除预算后用同一个 `task_id` resume。完整的配置、状态、
+checkpoint、CLI/JSONL/TUI 和调度说明见 [Goal Mode](goal_mode.md)。
+
+文档导航：
+
+- [配置体系总览](config-overview.md)：配置层级、overlay 与运行时目录；
+- [Agent YAML](agent_config.md)：Supervisor/Worker 的全部字段与严格校验；
+- [Goal Mode](goal_mode.md)：continuation、显式完成、预算、resume 与可观测性；
+- [Checkpoint](checkpoint.md)：task/run 身份、持久化布局和恢复；
+- [Run 可观测性](run_observability.md)：Python receipt、typed outcome 与 JSONL；
+- [系统配置](system_config.md)、[模型配置](llm_config.md)、[Skills](skills_config.md)、[Hooks](hooks.md) 和 [自学习](self_learning.md)。
 Application Agent 由 Python Runtime 按 YAML `model_type` 解析；TypeScript
 Studio 适配器把同一批 Profile、端点、凭证和兼容请求参数安全映射给内置
 Studio Runtime。`/models` 或 `Ctrl+X` 只切换当前 Studio Session 使用的
@@ -370,6 +388,7 @@ uv run loom run applications/codex_exec_demo/workflows/use_codex_exec_demo.yaml
 | 命令 | 用途 |
 |---|---|
 | `uv run loom run <workflow>` | 运行应用。 |
+| `uv run loom run <workflow> --output-format json` | 输出一个带版本的终态生命周期事件。 |
 | `uv run loom run <workflow> --output-format jsonl` | 输出带版本的生命周期事件流。 |
 | `uv run loom create <workflow>` | 生成 Python 入口。 |
 | `uv run loom list-tasks` | 列出可恢复任务。 |
@@ -397,9 +416,10 @@ uv run loom run applications/codex_exec_demo/workflows/use_codex_exec_demo.yaml
 | [系统配置](system_config.md) | Runtime、权限、执行环境和工具。 |
 | [Skill 配置](skills_config.md) | Skill 包、加载方式和策略。 |
 | [Hook 参考](hooks.md) | 直接 Hook、Bundle、事件和执行方式。 |
+| [Goal Mode](goal_mode.md) | Supervisor continuation、显式完成、预算、resume、调度、CLI 与 TUI。 |
 | [Checkpoint 恢复](checkpoint.md) | Run 证据、checkpoint 布局和恢复。 |
 | [Self-learning v6](self_learning.md) | History、candidate、review、审批和 promotion。 |
-| [结构化 Run API](run_observability.md) | Python receipt、typed error、event sink 和 JSONL。 |
+| [结构化 Run API](run_observability.md) | Python receipt、typed error、event sink、JSON 和 JSONL。 |
 
 ## 开发与支持
 

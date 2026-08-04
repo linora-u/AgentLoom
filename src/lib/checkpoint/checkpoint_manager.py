@@ -425,6 +425,7 @@ class CheckpointManager:
 
         self._tree_lock = threading.Lock()
         self._todo_lock = threading.RLock()
+        self._goal_lock = threading.RLock()
         self._todo_corrupt_scopes: set[tuple[str, str]] = set()
         self._task_storages: dict[Path, SecureDirectory] = {}
         if self._checkpoint_dir is not None and self._checkpoint_dir.is_dir():
@@ -486,6 +487,9 @@ class CheckpointManager:
 
     def _todos_path(self, task_id: str) -> Path:
         return self._task_dir(task_id) / "todos.json"
+
+    def _goal_path(self, task_id: str) -> Path:
+        return self._task_dir(task_id) / "goal.json"
 
     def context_store_dir(self, task_id: str) -> Path:
         return self._task_dir(task_id) / "context_store"
@@ -721,6 +725,49 @@ class CheckpointManager:
             "items": [dict(item) for item in canonical],
             "corrupt": False,
         }
+
+    def load_goal(self, task_id: str) -> dict[str, Any] | None:
+        """Load strict Goal state; corruption is terminal rather than fail-open."""
+
+        from src.lib.goal import validate_goal_state
+
+        task_id = _require_safe_path_component(task_id, field="task_id")
+        with self._goal_lock:
+            storage = self.task_storage(task_id)
+            try:
+                with storage.advisory_file_lock("goal.lock", create=True):
+                    try:
+                        raw = storage.read_json("goal.json")
+                    except FileNotFoundError:
+                        return None
+                    except Exception as exc:
+                        raise ValueError(
+                            f"corrupt Goal state for task {task_id}: {exc}"
+                        ) from exc
+                    try:
+                        return validate_goal_state(raw).to_dict()
+                    except (TypeError, ValueError) as exc:
+                        raise ValueError(
+                            f"corrupt Goal state for task {task_id}: {exc}"
+                        ) from exc
+            finally:
+                storage.close()
+
+    def save_goal(self, task_id: str, state: Any) -> dict[str, Any]:
+        """Validate and atomically persist the canonical Goal state."""
+
+        from src.lib.goal import validate_goal_state
+
+        task_id = _require_safe_path_component(task_id, field="task_id")
+        canonical = validate_goal_state(state).to_dict()
+        with self._goal_lock:
+            storage = self.task_storage(task_id)
+            try:
+                with storage.advisory_file_lock("goal.lock", create=True):
+                    storage.atomic_write_json("goal.json", canonical)
+            finally:
+                storage.close()
+        return canonical
 
     def _read_task_events_from_path(self, path: Path) -> list[dict]:
         """Read append-only task events, skipping malformed crash-tail lines."""

@@ -100,3 +100,26 @@ def test_transform_tasks_list_workflow_empty_task_returns_raw_items():
         "First workflow item.\nUse exactly this instruction.",
         "Second workflow item.\nContinue from previous memory.",
     ]
+
+
+def test_goal_mode_merges_list_workflow_into_one_goal_context():
+    supervisor = object.__new__(YamlConfiguredSupervisorAgent)
+    supervisor._config = {
+        "name": "goal_workflow",
+        "description": "Deliver the complete change.",
+        "workflow": [
+            "Inspect the implementation.",
+            "Implement and verify the change.",
+        ],
+        "goal": {"enabled": True},
+    }
+    supervisor._logger = None
+
+    transformed_tasks = supervisor._transform_tasks("Add Goal mode.")
+
+    assert len(transformed_tasks) == 1
+    prompt = transformed_tasks[0]
+    assert "1. Inspect the implementation." in prompt
+    assert "2. Implement and verify the change." in prompt
+    assert "Deliver the complete change." in prompt
+    assert "Add Goal mode." in prompt

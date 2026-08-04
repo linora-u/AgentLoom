@@ -114,12 +114,67 @@ def _normalize_tool_arguments_object(arguments: dict[str, Any] | str) -> dict[st
     return parsed if isinstance(parsed, dict) else arguments
 
 
+def _require_runtime_result(
+    run_result: Any,
+    *,
+    allowed_states: set[str],
+    error_prefix: str,
+) -> None:
+    run_state = str(getattr(run_result, "state", "") or "")
+    if run_state not in allowed_states:
+        state_label = run_state or "missing_run_state"
+        raise RuntimeError(f"{error_prefix}: {state_label}")
+
+
 def _require_successful_runtime_result(run_result: Any) -> None:
     """Reject structured runtime results that did not finish successfully."""
-    run_state = str(getattr(run_result, "state", "") or "")
-    if run_state != "success":
-        state_label = run_state or "missing_run_state"
-        raise RuntimeError(f"Agent run did not complete successfully: {state_label}")
+
+    _require_runtime_result(
+        run_result,
+        allowed_states={"success"},
+        error_prefix="Agent run did not complete successfully",
+    )
+
+
+def _require_goal_runtime_result(run_result: Any) -> None:
+    """Accept both ordinary finals and max-step segment boundaries in Goal mode."""
+
+    _require_runtime_result(
+        run_result,
+        allowed_states={"success", "max_steps_error"},
+        error_prefix="Agent Goal segment failed",
+    )
+
+
+def _goal_continuation_prompt(state: Any) -> str:
+    budget = "unlimited"
+    if state.token_budget is not None:
+        remaining = max(state.token_budget - state.used_tokens, 0)
+        budget = (
+            f"{state.used_tokens}/{state.token_budget} tokens used; "
+            f"{remaining} tokens remain before the next-request fence"
+        )
+    return (
+        "Continue working toward the active Goal using the existing conversation "
+        "and tool state. Do not restart or repeat completed work.\n\n"
+        f"Goal ID: {state.goal_id}\n"
+        "Objective: unchanged from the initial task context; call get_goal only "
+        "if you need to inspect the canonical objective again.\n"
+        f"Goal status: {state.status}\n"
+        f"Token budget: {budget}\n\n"
+        "A normal final answer does not complete the Goal. Only after the entire "
+        "objective is delivered and verified, call update_goal with status="
+        "'complete' and concise evidence."
+    )
+
+
+def _goal_completion_output(segment_output: Any, evidence: str | None) -> Any:
+    if (
+        isinstance(segment_output, str)
+        and segment_output.startswith("Error in generating final LLM output:")
+    ):
+        return evidence
+    return segment_output if segment_output is not None else evidence
 
 
 class _SuccessfulRunStateMixin:
@@ -1102,6 +1157,17 @@ class RoleDrivenAgent(BaseAgent):
 
     def _build_runtime_tools(self, profile: AgentRoleProfile) -> list:
         tools = self.get_all_tools(agent_type=profile.agent_type.value.lower())
+        if profile.agent_type is AgentType.SUPERVISOR:
+            from src.lib.goal import normalize_goal_config
+
+            goal = normalize_goal_config(
+                self._config,
+                source=self._config.get("name", "supervisor"),
+            )
+            if goal.enabled:
+                from src.tools.goal import get_goal, update_goal
+
+                tools = [*tools, get_goal, update_goal]
         todo_mode = self._resolve_todo_mode()
         if todo_mode == "off":
             return [
@@ -1389,6 +1455,12 @@ class RoleDrivenAgent(BaseAgent):
         owns_root_run: bool,
     ) -> str:
         from src.lib.checkpoint.coordinator import CheckpointCoordinator
+        from src.lib.goal import (
+            GoalStateProvider,
+            build_goal_objective,
+            goal_objective_fingerprint,
+            normalize_goal_config,
+        )
 
         # Transform task before passing it to the runtime agent.
         transformed_tasks = self._transform_tasks(task)
@@ -1396,6 +1468,25 @@ class RoleDrivenAgent(BaseAgent):
             raise ValueError("Agent task transformation produced no tasks")
         transformed_tasks = self._inject_memory_snapshot(transformed_tasks)
         transformed_task = "\n\n".join(transformed_tasks)
+        goal_config = normalize_goal_config(
+            self._config,
+            source=self._config.get("name", "agent"),
+        )
+        goal_objective = None
+        goal_fingerprint = None
+        if goal_config.enabled:
+            if not owns_root_run:
+                raise ValueError("Goal mode can only be configured by the root Supervisor Agent")
+            goal_objective = build_goal_objective(
+                description=str(self._config.get("description", "")),
+                workflow=self._config["workflow"],
+                task=task,
+            )
+            goal_fingerprint = goal_objective_fingerprint(
+                description=str(self._config.get("description", "")),
+                workflow=self._config["workflow"],
+                task=task,
+            )
         # Determine ID
         parent_execution_context = capture_explicit_execution_context()
         current_task_id = parent_execution_context.task_id
@@ -1418,6 +1509,21 @@ class RoleDrivenAgent(BaseAgent):
         else:
             coord = CheckpointCoordinator.current()
 
+        goal_provider = None
+        if goal_config.enabled:
+            assert goal_objective is not None and goal_fingerprint is not None
+            try:
+                goal_provider = GoalStateProvider.initialize(
+                    config=goal_config,
+                    objective=goal_objective,
+                    objective_fingerprint=goal_fingerprint,
+                    resume=resume,
+                )
+            except Exception:
+                if checkpoint_manager is not None and coord is not None:
+                    CheckpointCoordinator.deactivate(coord)
+                raise
+
         def _execute_agent():
             session_started = False
             session_result = None
@@ -1430,12 +1536,21 @@ class RoleDrivenAgent(BaseAgent):
                 self._model.agent_id = agent_id
 
             active_context = capture_explicit_execution_context()
+            hook_agent_config = self._effective_agent_config or self._config
+            if goal_config.enabled:
+                # Goal is an Agent-owned lifecycle field, not a system overlay.
+                # Preserve the raw validated value in the execution-time
+                # identity snapshot used by root-only Goal tool guards.
+                hook_agent_config = {
+                    **hook_agent_config,
+                    "goal": deepcopy(self._config["goal"]),
+                }
             hook_run = HookRun(
                 self._hook_plan,
                 local_run_id=active_context.local_run_id or "",
                 root_run_id=active_context.root_run_id or "",
                 parent=active_context.hook_run,
-                agent_config=self._effective_agent_config or self._config,
+                agent_config=hook_agent_config,
                 project_root=str(C.agent_root),
             )
             previous_runtime_path = active_context.runtime_agent_path
@@ -1455,8 +1570,15 @@ class RoleDrivenAgent(BaseAgent):
                 )
             )
             execution_binding.__enter__()
+            from src.lib.goal import bind_goal_state_provider
             from src.lib.todo import ensure_todo_state_provider
 
+            goal_provider_binding = (
+                bind_goal_state_provider(goal_provider)
+                if goal_provider is not None
+                else nullcontext(None)
+            )
+            goal_provider_binding.__enter__()
             todo_provider_binding = ensure_todo_state_provider()
             todo_provider_binding.__enter__()
 
@@ -1503,22 +1625,88 @@ class RoleDrivenAgent(BaseAgent):
                 # which is indistinguishable from a successful final answer and
                 # would incorrectly emit TaskCompleted and run memory review.
                 result = None
-                for task_index, current_task in enumerate(transformed_tasks):
-                    run_kwargs: dict = {
-                        "task": current_task,
-                        "return_full_result": True,
-                    }
-                    if additional_args:
-                        run_kwargs["additional_args"] = dict(additional_args)
-                    if resume or task_index > 0:
-                        run_kwargs["reset"] = False
-                    if task_index > 0 and getattr(
-                        runtime_agent, "_agent_loom_supports_reset_false_task_step_control", False
-                    ):
-                        run_kwargs["_skip_task_step_on_reset_false"] = False
-                    run_result = runtime_agent.run(**run_kwargs)
-                    _require_successful_runtime_result(run_result)
-                    result = getattr(run_result, "output", None)
+                if goal_provider is not None:
+                    initial_state = goal_provider.snapshot()
+                    segment_index = 0
+                    while True:
+                        state = goal_provider.snapshot()
+                        if state.status == "complete":
+                            result = state.evidence
+                            break
+                        goal_provider.assert_request_allowed()
+                        use_initial_context = segment_index == 0 and not initial_state.goal_started
+                        current_task = (
+                            transformed_tasks[0]
+                            if use_initial_context
+                            else _goal_continuation_prompt(state)
+                        )
+                        run_kwargs = {
+                            "task": current_task,
+                            "return_full_result": True,
+                        }
+                        if additional_args:
+                            run_kwargs["additional_args"] = dict(additional_args)
+                        if resume or segment_index > 0 or not use_initial_context:
+                            run_kwargs["reset"] = False
+                        if (
+                            not use_initial_context
+                            and getattr(
+                                runtime_agent,
+                                "_agent_loom_supports_reset_false_task_step_control",
+                                False,
+                            )
+                        ):
+                            run_kwargs["_skip_task_step_on_reset_false"] = False
+                        try:
+                            run_result = runtime_agent.run(**run_kwargs)
+                        except Exception as exc:
+                            from src.lib.goal import (
+                                GoalBudgetLimitedError,
+                                GoalCompleteError,
+                            )
+
+                            terminal_state = goal_provider.snapshot()
+                            if (
+                                isinstance(exc, GoalCompleteError)
+                                or terminal_state.status == "complete"
+                            ):
+                                result = terminal_state.evidence
+                                break
+                            if terminal_state.status == "budget_limited":
+                                raise GoalBudgetLimitedError(terminal_state) from exc
+                            raise
+                        _require_goal_runtime_result(run_result)
+                        segment_output = getattr(run_result, "output", None)
+                        segment_index += 1
+                        state = goal_provider.snapshot()
+                        if state.status == "complete":
+                            # A CodeAgent can commit completion and call
+                            # final_answer in the same model response. Preserve
+                            # that user-facing delivery; evidence is only the
+                            # durable fallback when no final output settled.
+                            result = _goal_completion_output(
+                                segment_output,
+                                state.evidence,
+                            )
+                            break
+                        goal_provider.assert_request_allowed()
+                else:
+                    for task_index, current_task in enumerate(transformed_tasks):
+                        run_kwargs: dict = {
+                            "task": current_task,
+                            "return_full_result": True,
+                        }
+                        if additional_args:
+                            run_kwargs["additional_args"] = dict(additional_args)
+                        if resume or task_index > 0:
+                            run_kwargs["reset"] = False
+                        if task_index > 0 and getattr(
+                            runtime_agent, "_agent_loom_supports_reset_false_task_step_control", False
+                        ):
+                            run_kwargs["_skip_task_step_on_reset_false"] = False
+                        run_result = runtime_agent.run(**run_kwargs)
+                        _require_successful_runtime_result(run_result)
+                        result = getattr(run_result, "output", None)
 
                 # Compatibility fallback for wrapper paths that cannot read
                 # memory directly from the runtime agent.
@@ -1544,7 +1732,17 @@ class RoleDrivenAgent(BaseAgent):
                     coord.save_supervisor(runtime_agent, "interrupted")
                 raise
             except Exception as exc:
+                from src.lib.goal import GoalBudgetLimitedError
+
                 session_error = exc
+                if isinstance(exc, GoalBudgetLimitedError):
+                    if coord is not None and checkpoint_manager is not None:
+                        coord.save_supervisor(
+                            runtime_agent,
+                            "budget_limited",
+                            error=str(exc),
+                        )
+                    raise
                 self._emit_task_lifecycle_event(
                     HookEvent.STOP_FAILURE,
                     transformed_task,
@@ -1554,6 +1752,8 @@ class RoleDrivenAgent(BaseAgent):
                     coord.save_supervisor(runtime_agent, "failed", error=str(exc))
                 raise
             finally:
+                if goal_provider is not None:
+                    self._last_goal_state = goal_provider.snapshot().to_dict()
                 if session_started:
                     self._emit_session_lifecycle_event(
                         HookEvent.SESSION_END,
@@ -1611,7 +1811,10 @@ class RoleDrivenAgent(BaseAgent):
                     try:
                         todo_provider_binding.__exit__(None, None, None)
                     finally:
-                        execution_binding.__exit__(None, None, None)
+                        try:
+                            goal_provider_binding.__exit__(None, None, None)
+                        finally:
+                            execution_binding.__exit__(None, None, None)
 
         if current_task_id:
             return _execute_agent()

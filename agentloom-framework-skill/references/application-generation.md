@@ -31,6 +31,10 @@ applications/<app_name>/
 
 1. `workflows/<app_name>_agent.yaml`
 2. `workflows/worker_agents/*.yaml`
+
+如果用户要求长期自动推进目标，可在第 1 个顶层 Supervisor YAML 配置 Goal Mode。
+推荐 `goal: {enabled: true, token_budget: <正整数>}`，无人值守或 schedule 场景必须
+主动讨论预算；省略预算意味着无限 continuation。Worker YAML 一律不写 `goal`。
 3. `skills/<skill_name>/SKILL.md` 与必要资源
 4. `hooks/<hook_name>/HOOK.yaml` 与脚本（仅需要 Hook 时）
 5. `agent_tools/*.py`
