@@ -22,6 +22,7 @@ from typing import Any
 
 from smolagents import AgentLogger, LiteLLMModel
 from smolagents.models import ChatMessage, ChatMessageToolCall, ChatMessageToolCallFunction, MessageRole
+from smolagents.monitoring import TokenUsage
 from src.lib.logging import get_logger
 from src.lib.smolagents.models.tool_call_parser import (
     ToolCallParseError,
@@ -145,6 +146,43 @@ class LiteLLMModelV2(LiteLLMModel):
         tools_to_call_from: list[Any] | None = None,
         **kwargs,
     ) -> ChatMessage:
+        from src.lib.goal import get_current_goal_provider
+        from src.trace import get_current_local_run_id
+
+        goal_provider = get_current_goal_provider()
+        completion_settlement = False
+        if goal_provider is not None:
+            # Soft fence: only committed usage from earlier responses can stop
+            # a request. The response currently in flight may overshoot.
+            final_answer_tools = [
+                tool
+                for tool in tools_to_call_from or []
+                if getattr(tool, "name", None) == "final_answer"
+            ]
+            local_run_id = get_current_local_run_id()
+            is_planning_request = "<end_plan>" in (stop_sequences or [])
+            if is_planning_request and goal_provider.completion_settlement_pending(
+                local_run_id=local_run_id,
+            ):
+                # Planning is host-side scaffolding, not final delivery. Skip
+                # it locally so the same action step can claim the allowance.
+                return ChatMessage(
+                    role=MessageRole.ASSISTANT,
+                    content="Goal is complete. Skip planning and deliver the final answer now.",
+                    token_usage=TokenUsage(input_tokens=0, output_tokens=0),
+                )
+            completion_settlement = goal_provider.assert_request_allowed(
+                local_run_id=local_run_id,
+                allow_completion_settlement=not is_planning_request,
+            )
+            if completion_settlement:
+                # Completion may need one more ToolCallingAgent response to
+                # deliver final_answer. Do not expose substantive tools. The
+                # max-steps final fallback has no tool schema and remains a
+                # prose-only settlement request.
+                if tools_to_call_from is not None:
+                    tools_to_call_from = final_answer_tools
+            goal_provider.mark_started()
         current_tools = self._set_current_tools(tools_to_call_from)
         try:
             message = super().generate(
@@ -154,6 +192,25 @@ class LiteLLMModelV2(LiteLLMModel):
                 tools_to_call_from=tools_to_call_from,
                 **kwargs,
             )
+            if goal_provider is not None:
+                usage = getattr(message, "token_usage", None)
+                if usage is not None:
+                    prompt_tokens = getattr(usage, "input_tokens", 0)
+                    completion_tokens = getattr(usage, "output_tokens", 0)
+                    if (
+                        isinstance(prompt_tokens, int)
+                        and not isinstance(prompt_tokens, bool)
+                        and prompt_tokens >= 0
+                        and isinstance(completion_tokens, int)
+                        and not isinstance(completion_tokens, bool)
+                        and completion_tokens >= 0
+                    ):
+                        goal_provider.record_usage(
+                            prompt_tokens=prompt_tokens,
+                            completion_tokens=completion_tokens,
+                        )
+                    else:
+                        raise ValueError("Provider returned invalid Goal token usage")
             self._normalize_and_validate_tool_calls(message, list(current_tools))
             # ToolCallingAgent invokes parse_tool_calls(message) immediately
             # after generate() returns. Keep this call's schema in its Context

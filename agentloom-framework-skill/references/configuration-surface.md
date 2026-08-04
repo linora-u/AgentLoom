@@ -6,7 +6,7 @@
 
 配置相关改动至少交叉看这几类文件：
 
-- 用户文档：`docs/en/config-overview.md`、`agent_config.md`、`system_config.md`、`llm_config.md`、`skills_config.md`、`hooks.md`、`checkpoint.md`。
+- 用户文档：`docs/en/config-overview.md`、`agent_config.md`、`goal_mode.md`、`system_config.md`、`llm_config.md`、`skills_config.md`、`hooks.md`、`checkpoint.md`。
 - 系统配置加载：`src/lib/config/config.py`、`layered_builder.py`、`config_validation.py`。
 - LLM 配置：`src/lib/config/llm_config.py`、`src/lib/smolagents/models/model_types.py`、`model_manager.py`。
 - Agent YAML 校验：`src/lib/smolagents/agent/agent_validation.py`、`yaml_agent_factory.py`、`base_agent.py`。
@@ -59,6 +59,7 @@ workflow: |
 | `execution_env` | `dict` | `code_act` 的执行环境：`local`、`docker`、`e2b`、`wasm` |
 | `prompt` | `str` 或 `{path: ...}` | 自定义系统 prompt 模板路径 |
 | `skills` | `str` / `dict` / `list` | 当前 Agent 私有 Skill 配置 |
+| `goal` | `bool` 或 `{enabled: bool, token_budget?: int}` | 仅顶层 Supervisor；开启 continuation、显式完成和根 Agent 树软 token 预算 |
 
 `tool_call` 模式的主路径是 provider/native tool calls。只要当前 Agent 有可用工具，AgentLoom 就发送结构化 tools schema；如果 provider 返回文本 fallback，也只接受明确结构化容器，例如 `{name, arguments}`、dump 出来的 native `tool_calls/function`、XML/invoke wrapper。不要设计依赖自由文本正则兜底的 workflow。
 
@@ -70,6 +71,11 @@ worker_agents:
 ```
 
 规则：`worker_agents` item 只支持 `path`，不支持 `name`。路径可以是绝对路径、项目根相对路径、`worker_agents/` 下的文件名，或不带后缀的 worker 名。
+
+Supervisor 还可配置 `goal: true/false`，或显式 mapping。Goal mapping 不做类型宽松
+转换；`token_budget` 缺失表示无限制。开启后 workflow list 合并为一个目标上下文，
+并提供仅根 Supervisor 可见的 `get_goal` / `update_goal`。Schedule 可以使用同一 YAML，
+但无人值守 Goal 强烈建议设置预算。
 
 Worker 专属：
 
@@ -85,6 +91,8 @@ agent_function_schema:
 ```
 
 规则：`inputs` 的 key 必须是合法 Python 标识符；`required` 只能是 bool；runtime 会把所有参数类型归一为 `"string"`，不要用 `Optional[...]` 或 `Union[...]` 表达可选性。
+
+Worker YAML 如果出现任何 `goal` key 必须 fail-closed；不能用 `goal: false` 占位。
 
 ## Agent YAML 白名单覆盖
 

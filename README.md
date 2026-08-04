@@ -188,6 +188,11 @@ The TUI can create and manage durable schedules. Automatic firing is a separate 
 agentloom schedules --project /path/to/project serve
 ```
 
+Scheduled YAML can enable Goal Mode, but unattended Goals should set a
+`token_budget`; an omitted budget is intentionally unlimited. Budget exhaustion
+is recorded as the resumable `budget_limited` schedule status, not as an ordinary
+execution failure.
+
 ## Run an existing Agent
 
 To verify the framework without creating a new application, run the included code review example:
@@ -200,6 +205,20 @@ One run creates a receipt under `.agentloom/runs/<application_id>/<run_id>/`. Wh
 
 `run_id` identifies one attempt and changes after resume. `task_id` identifies the logical task and remains stable.
 
+For work that must continue beyond one final answer or `max_steps` segment, a
+top-level Supervisor can enable Goal Mode. Only the root Supervisor can complete
+the Goal; Worker token usage is included in the same optional soft budget:
+
+```yaml
+goal:
+  enabled: true
+  token_budget: 120000  # omit for unlimited
+```
+
+An active Goal continues on the same runtime and memory. `budget_limited` keeps
+its checkpoint and can resume after the budget is raised or removed. See
+[Goal Mode](docs/en/goal_mode.md).
+
 ## How AgentLoom works
 
 AgentLoom treats a multi-agent system as an application, not a loose collection of prompts.
@@ -209,6 +228,7 @@ AgentLoom treats a multi-agent system as an application, not a loose collection 
 | Supervisor | Decomposes the application task and coordinates Workers and tools. |
 | Worker | Owns one specialized role and exposes a typed callable contract. |
 | Agent YAML | Defines role, workflow, model type, tools, Skills, Workers, and runtime policy. |
+| Goal Mode | Keeps one Supervisor objective active across continuation segments, Worker delegation, and resume. |
 | Python runtime | Handles model routing, generated Worker tools, concurrency, logs, checkpoints, and artifacts. |
 
 This keeps orchestration reusable while leaving deterministic preprocessing, validation, caching, and output writing in normal Python code.
@@ -285,7 +305,14 @@ workflow: |
 tools: []
 skills: []
 max_steps: 12
+goal:
+  enabled: true
+  token_budget: 120000
 ```
+
+In Goal Mode a workflow list is merged and numbered into one objective context.
+With Goal disabled, a Supervisor workflow list retains its sequential multi-run
+behavior. Worker YAML must never define `goal`.
 
 Each Worker defines the contract that the Supervisor sees:
 
@@ -380,6 +407,7 @@ uv run loom run applications/codex_exec_demo/workflows/use_codex_exec_demo.yaml
 | Command | Purpose |
 |---|---|
 | `uv run loom run <workflow>` | Run an application. |
+| `uv run loom run <workflow> --output-format json` | Emit one versioned terminal lifecycle event. |
 | `uv run loom run <workflow> --output-format jsonl` | Stream versioned lifecycle events. |
 | `uv run loom create <workflow>` | Generate a Python entrypoint. |
 | `uv run loom list-tasks` | List resumable tasks. |
@@ -407,9 +435,10 @@ Run `uv run loom <command> --help` for the full command contract.
 | [System Configuration](docs/en/system_config.md) | Runtime, permissions, execution environments, and tools. |
 | [Skills Configuration](docs/en/skills_config.md) | Skill packages, loading, and policy. |
 | [Hooks Reference](docs/en/hooks.md) | Direct Hooks, Bundles, events, and execution. |
+| [Goal Mode](docs/en/goal_mode.md) | Supervisor-owned continuation, explicit completion, budgets, resume, schedules, CLI, and TUI. |
 | [Checkpoint Resume](docs/en/checkpoint.md) | Run evidence, checkpoint layout, and recovery. |
 | [Self-Learning v6](docs/en/self_learning.md) | History, candidates, review, approval, and promotion. |
-| [Structured Run API](docs/en/run_observability.md) | Python receipts, typed errors, event sinks, and JSONL. |
+| [Structured Run API](docs/en/run_observability.md) | Python receipts, typed errors, event sinks, JSON, and JSONL. |
 
 ## Development and support
 

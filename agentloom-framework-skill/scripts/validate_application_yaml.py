@@ -17,6 +17,12 @@ from typing import Any
 
 import yaml
 
+_FRAMEWORK_ROOT = Path(__file__).resolve().parents[2]
+if str(_FRAMEWORK_ROOT) not in sys.path:
+    sys.path.insert(0, str(_FRAMEWORK_ROOT))
+
+from src.lib.goal.model import normalize_goal_config  # noqa: E402
+
 REQUIRED_FIELDS = ("name", "description", "workflow")
 FORBIDDEN_TOP_LEVEL = {"model", "llm", "langfuse"}
 GLOBAL_ONLY_TOP_LEVEL = {"runtime", "logging"}
@@ -223,6 +229,21 @@ def _validate_common_rules(
     errors: list[dict[str, str]],
     project_root: Path,
 ) -> None:
+    try:
+        normalize_goal_config(config, source=str(file_path))
+    except ValueError as exc:
+        _add_error(
+            errors,
+            file_path=file_path,
+            field="goal",
+            rule="valid_goal_config",
+            message=str(exc),
+            suggestion=(
+                "使用 goal: true/false，或 goal: {enabled: true, "
+                "token_budget: <正整数>}；mapping 必须显式配置 enabled"
+            ),
+            project_root=project_root,
+        )
     for field in ("name", "description"):
         value = config.get(field)
         if not isinstance(value, str) or not value.strip():
@@ -1058,6 +1079,16 @@ def _validate_worker_schema(
     errors: list[dict[str, str]],
     project_root: Path,
 ) -> None:
+    if "goal" in config:
+        _add_error(
+            errors,
+            file_path=worker_file,
+            field="goal",
+            rule="supervisor_only",
+            message="Worker Agent 不允许配置 goal；Goal Mode 仅属于顶层 Supervisor",
+            suggestion="从 Worker YAML 删除 goal，并在顶层 Supervisor YAML 配置",
+            project_root=project_root,
+        )
     schema = config.get("agent_function_schema")
     if not isinstance(schema, dict):
         _add_error(
