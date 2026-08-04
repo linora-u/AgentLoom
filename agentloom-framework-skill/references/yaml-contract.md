@@ -42,7 +42,8 @@ description: "<Worker 职责>"
 model_type: "powerful"
 tool_call_type: "code_act"
 max_steps: 40
-planning_interval: 3
+todo:
+  mode: "auto"
 agent_function_schema:
   description: "<作为工具被 Supervisor 调用时的说明>"
   inputs:
@@ -63,6 +64,7 @@ workflow: |
 - `inputs.<name>.required` 只能是布尔值；可选参数用 `required: false` 表达，不要在 type 里写 `Optional[...]`。
 - runtime 会把输入类型归一为 `string`；不要依赖复杂类型声明。
 - 输出应是可被下游 Worker 或 Supervisor 直接使用的文本。
+- `todo.mode` 支持 `auto`、`on`、`off`；默认 `auto`。它与 `planning_interval` 独立，不要在 `tools` 中重复声明 `todo_write`。
 
 ## 模型与配置
 

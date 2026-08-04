@@ -26,6 +26,7 @@ Agent YAML 是 AgentLoom 框架中**定义单个 Agent 行为**的配置文件�
   - [3.8 skills — 技能包配置](#38-skills--技能包配置)
   - [3.9 prompt — 自定义 Prompt](#39-prompt--自定义-prompt)
   - [3.10 planning_interval — 规划间隔](#310-planning_interval--规划间隔)
+  - [3.11 todo.mode — 任务跟踪](#311-todomode--任务跟踪)
   - [3.11 concurrency — 并发度配置](#311-concurrency--并发度配置)
   - [3.12 mcp_servers — MCP 外部工具集成](#312-mcp_servers--mcp-外部工具集成)
 - [4. 工具配置详解](#4-工具配置详解)
@@ -135,6 +136,7 @@ model_type: "powerful"
 tool_call_type: "code_act"
 max_steps: 40                            # 最大执行步数 (默认: 80)
 planning_interval: 3                     # 每 N 步强制规划
+todo: {mode: "auto"}                     # auto | on | off
 
 # ---- Worker 专属: 可调用工具契约 ----
 # 注意：inputs 下的参数名可自定义，只要是合法 Python 标识符即可
@@ -379,6 +381,7 @@ workflow: |
 | `execution_env` | `dict` | `{type: "local"}` | 执行环境配置。详见 [3.5](#35-execution_env--执行环境) |
 | `prompt` | `str` 或 `dict` | 框架内置 | 自定义 System Prompt 模板。详见 [3.9](#39-prompt--自定义-prompt) |
 | `planning_interval` | `int` | 不设置 | 每 N 步强制规划。详见 [3.10](#310-planning_interval--规划间隔) |
+| `todo` | `dict` | `{mode: "auto"}` | 当前任务进度跟踪。详见 [3.11](#311-todomode--任务跟踪) |
 | `concurrency` | `int`/`str` | 不设置 | 并发度：此 Agent 被批量调用时的最大并发数。详见 [3.11](#311-concurrency--并发度配置) |
 | `skills` | `list`/`dict`/`str` | 不设置 | 私有技能包配置。详见 [3.8](#38-skills--技能包配置) |
 | `hooks` | `dict` | 不设置 | 独立直接 Hook 与显式 Hook Bundle。详见 [Hooks](hooks.md) |
@@ -649,29 +652,44 @@ prompt:
 planning_interval: 3    # 每 3 步强制规划一次
 ```
 
-**自动注入 `todo_write` 工具**：
-
-配置 `planning_interval` 后，框架自动注入 `todo_write` 工具（无需在 `tools` 列表中手动声明）。LLM 在每次 planning step 中会看到当前任务列表状态，并被要求通过 `todo_write` 及时更新任务进度。
-
-**Planning Prompt 设计理念**（参考 Claude Code）：
-
-- **直奔主题**：planning step 要求 LLM 输出简短的编号步骤列表，不再要求冗长的 Facts Survey
-- **条件触发 todo**：仅当任务包含 3+ 个独立步骤时才注册 todo 列表，简单任务跳过
-- **及时更新**：每完成一项任务立即标记为 `completed`，不批量更新
-- **单一焦点**：始终保持恰好 ONE 个任务处于 `in_progress` 状态
-- **Replan 聚焦进度**：后续 planning step 仅回顾 todo 状态并输出剩余步骤，不重复已完成内容
-- **结束回顾**：Agent 调用 `final_answer` 后，如果仍有未完成的 todo 项，框架会自动触发一次最终 planning step 让 LLM 回顾任务完成情况（最多触发一次，不会循环）
-
-`todo_write` 工具行为：
-- **输入**：JSON 数组，每项包含 `content`（任务描述）和 `status`（`pending` / `in_progress` / `completed`）
-- **语义**：全量替换（每次调用替换整个列表）
-- **自动清除**：全部标记为 `completed` 时自动清空列表
-- **持久化**：写入 `.agentloom/workspaces/agents/<application_id>/<agent_path>/tasks/<task_id>/todos.md`（Markdown checkbox 格式）
-- **验证提醒**：3+ 任务全部完成且无验证步骤时，返回值首行提醒 LLM 考虑执行验证
+`planning_interval` 只控制模型的周期性 planning，不再启用、禁用或调度 Todo。
+Todo 由 [`todo.mode`](#311-todomode--任务跟踪) 独立配置。
 
 ---
 
-### 3.11 `concurrency` — 并发度配置
+### 3.11 `todo.mode` — 任务跟踪
+
+Todo 只跟踪当前任务中当前 Agent 的执行进度，不承担长期项目管理职责；
+它与 `planning_interval` 和 Agent 显式声明的 `tools` 列表相互独立。
+
+```yaml
+todo:
+  mode: "auto"  # auto | on | off；YAML 1.1 中 on/off 建议加引号
+```
+
+| 模式 | 行为 |
+|------|------|
+| `auto` | 默认值。提供 `todo_write`，由模型自主判断多步骤任务是否值得跟踪。 |
+| `on` | 提供 `todo_write`。范围已经清晰的非简单多步骤任务中，强提示模型把单独的 `todo_write` 作为首个工具调用；仅当可靠列表确实需要更多事实时，才允许先做最少只读调查。 |
+| `off` | 不向模型暴露工具、Todo 提示策略或当前 Todo 快照。 |
+
+该配置可写在 `config/system.yaml`、Application YAML 或 Agent YAML 中，
+更具体的层级覆盖上层；仅接受 `auto`、`on`、`off`。
+
+`todo_write` 每次原子替换完整列表。每项包含 `content`，状态只能是
+`pending`、`in_progress`、`completed` 或 `cancelled`，且最多一个
+`in_progress`。`cancelled` 必须提供 `cancel_reason`，只表示 Agent 已确认该项
+不再需要；执行失败或时间不足不能视为取消。空列表用于清除快照。
+
+开启 checkpoint 时，状态保存在任务 checkpoint 目录的 `todos.json` 中，
+按 Agent path 隔离，并复用 checkpoint 的恢复、锁和清理生命周期；关闭
+checkpoint 时仅保存在当前 run 的内存中。文件损坏时会告警并隔离证据，执行
+以空快照继续。每次模型调用都会重新注入权威快照；Todo 不增加独立模型调用，
+也不阻止 Agent 输出最终答案。
+
+---
+
+### 3.12 `concurrency` — 并发度配置
 
 控制此 Agent 被批量调用时的最大并发数。通常用于 Worker Agent —— 当应用层需要对多个输入（如多个目录、多个文件）批量调用同一个 Worker 时，该字段决定同时运行几个 Agent 实例。
 
@@ -739,7 +757,7 @@ results = tool.batch(tasks, on_progress=lambda done, total, r: print(f"{done}/{t
 
 > ⚠️ **适用场景**：`concurrency` 适用于「同一个 Worker 被多次调用处理不同输入」的批量场景（如分析 100 个目录、处理 50 个文件）。对于 Supervisor 自身的执行不产生影响。
 
-### 3.12 `mcp_servers` — MCP 外部工具集成
+### 3.13 `mcp_servers` — MCP 外部工具集成
 
 指向 `.mcp.json` 文件，加载外部 MCP Server 提供的工具。详见 [MCP 配置文档](mcp_config.md)。
 
@@ -1479,6 +1497,7 @@ Agent YAML 中以下顶层字段能覆盖系统配置（源码 `_WORKFLOW_OVERLA
 | `prompt` | `str`/`dict` | 自定义 System Prompt 模板路径 |
 | `mcp_servers` | `str`/`list`/`dict` | MCP server 配置 |
 | `self_learning` | `dict` | History 与可选 memory review 策略 |
+| `todo` | `dict` | Todo 模式（`auto`、`on` 或 `off`） |
 
 > ⚠️ **重要**：上面的白名单是按 **每个 Agent YAML 独立计算** 的，不是按调用链传递。Supervisor 调用 Worker 时，Worker 的 `tool_access_control`、`execution_env`、`prompt` 等覆盖项会从 Worker YAML 重新构建，而不是自动继承 Supervisor。
 >
@@ -1765,6 +1784,7 @@ rg 'SECURITY_BLOCK|WHITELIST_REJECT|PATH_VIOLATION' "$run_dir/audit/shell.jsonl"
 | `execution_env` | ❌ | ✅ | ✅ | `dict` | `{type: "local"}` |
 | `prompt` | ❌ | ✅ | ✅ | `str`/`dict` | 框架内置 |
 | `planning_interval` | ❌ | ✅ | ✅ | `int` | 不设置 |
+| `todo` | ❌ | ✅ | ✅ | `dict` | `{mode: "auto"}` |
 | `concurrency` | ❌ | ✅ | ✅ | `int`/`str` | 不设置 (`auto`) |
 | `skills` | ❌ | ✅ | ✅ | `list`/`dict`/`str` | 自动加载 |
 | `worker_agents` | ❌ | ✅ | ❌ | `list[dict]` | `[]` |

@@ -371,6 +371,37 @@ def _validate_runtime_options(
             project_root=project_root,
         )
 
+    if "todo" in config:
+        todo = config.get("todo")
+        if not isinstance(todo, dict):
+            _add_error(
+                errors,
+                file_path=file_path,
+                field="todo",
+                rule="type_dict",
+                message="todo 必须是字典",
+                suggestion="使用 todo: {mode: auto|on|off}",
+                project_root=project_root,
+            )
+        else:
+            todo_mode = todo.get("mode", "auto")
+            valid_todo_mode = isinstance(todo_mode, bool) or (
+                isinstance(todo_mode, str)
+                and todo_mode in {"auto", "on", "off"}
+            )
+        if isinstance(todo, dict) and (
+            set(todo) - {"mode"} or not valid_todo_mode
+        ):
+            _add_error(
+                errors,
+                file_path=file_path,
+                field="todo.mode",
+                rule="allowed_values",
+                message="todo 只能包含 mode，且 mode 必须是 auto、on 或 off",
+                suggestion="使用 todo: {mode: auto|on|off}",
+                project_root=project_root,
+            )
+
     if "concurrency" in config:
         concurrency = config.get("concurrency")
         valid = (

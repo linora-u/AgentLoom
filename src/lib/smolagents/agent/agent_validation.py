@@ -5,6 +5,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Callable, Optional
 
+from src.lib.config.config_validation import TODO_MODES, normalize_todo_mode_value
 from src.lib.logging import get_logger, validate_logging_config
 
 
@@ -124,6 +125,24 @@ def normalize_execution_prompt_template_path(
 
 def normalize_execution_planning_interval_value(raw_value: Any) -> Optional[int]:
     return normalize_positive_int_value(raw_value)
+
+
+def validate_todo_config(config: dict, *, source: str) -> str:
+    """Validate and return the effective current-task Todo mode."""
+
+    raw_todo = config.get("todo", {})
+    if not isinstance(raw_todo, dict):
+        raise ValueError(f"{source}.todo must be a mapping")
+    unexpected = sorted(set(raw_todo) - {"mode"})
+    if unexpected:
+        raise ValueError(
+            f"{source}.todo has unsupported field(s): {', '.join(unexpected)}"
+        )
+    raw_mode = normalize_todo_mode_value(raw_todo.get("mode", "auto"))
+    if not isinstance(raw_mode, str) or raw_mode not in TODO_MODES:
+        allowed = ", ".join(sorted(TODO_MODES))
+        raise ValueError(f"{source}.todo.mode must be one of: {allowed}")
+    return raw_mode
 
 
 def normalize_positive_int_value(raw_value: Any) -> Optional[int]:

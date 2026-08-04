@@ -878,7 +878,7 @@ loom run applications/<app>/workflows/<agent>.yaml --no-file-log
 
 自动清理最多按配置间隔执行一次；`loom clean-runtime` 可显式应用同一策略。它只删除符合条件的 run 目录或其中的 raw artifacts，永不遍历 checkpoints、`.agentloom/legacy/`、`.agentloom/workspaces/` 或 Application 自有 output 目录。
 
-Agent 的 recall/todo 文件统一位于 `.agentloom/workspaces/agents/<application_id>/<agent_path>/`。`loom migrate-runtime --dry-run` 会预览旧 checkpoint 候选和未分域的 `.runtime`；`loom migrate-runtime --apply` 会迁移 checkpoints、把 `.logs` 归档到 `.agentloom/legacy/`，并将缺少 Application/task 来源信息的 `.runtime` 原子归档到 `.agentloom/workspaces/legacy-unscoped/`。
+Agent 的持久 recall 使用 `.agentloom/workspaces/agents/<application_id>/<agent_path>/`。当前任务的 Todo 使用 canonical checkpoint 内的 `todos.json`，不迁移已删除的 Markdown 旧机制。`loom migrate-runtime --dry-run` 会预览旧 checkpoint 候选和未分域的 `.runtime`；`loom migrate-runtime --apply` 会迁移 checkpoints、把 `.logs` 归档到 `.agentloom/legacy/`，并将缺少 Application/task 来源信息的 `.runtime` 原子归档到 `.agentloom/workspaces/legacy-unscoped/`。
 
 验证真实 attempt 时必须读取 `manifest.json` 及其引用的日志、审计与产物，不能只看退出码。
 
