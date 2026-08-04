@@ -52,6 +52,7 @@ from src.lib.smolagents.agent.agent_validation import (
     normalize_execution_prompt_template_path_value,
     normalize_positive_int_value,
     validate_execution_config_payload,
+    validate_todo_config,
 )
 from src.lib.smolagents.agent.tool_argument_coercion import coerce_tool_arguments
 from src.lib.smolagents.hooks import (
@@ -76,7 +77,7 @@ from src.lib.smolagents.prompts.prompt_builder import build_prompt_templates
 from src.lib.smolagents.skills.skills import SkillsManager
 from src.lib.smolagents.tools.tools import ensure_tool_wrapped
 from src.lib.utils.workspace import ensure_workspace_mounted_once
-from src.tools.tool_meta import resolve_toolsets
+from src.tools.tool_meta import resolve_tool_function, resolve_toolsets
 from src.trace import (
     bind_explicit_execution_context,
     bind_local_run,
@@ -1048,6 +1049,11 @@ class RoleDrivenAgent(BaseAgent):
         effective_cfg = self._effective_agent_config
         return effective_cfg.get("smart_summary", True) if isinstance(effective_cfg, dict) else True
 
+    def _resolve_todo_mode(self) -> str:
+        effective_cfg = self._effective_agent_config
+        config = effective_cfg if isinstance(effective_cfg, dict) else self._config
+        return validate_todo_config(config, source=self.name)
+
     def _build_execution_agent_kwargs(self, profile: AgentRoleProfile) -> dict[str, Any]:
         """Build validated runtime kwargs for `_create_agent`."""
         self._ensure_normalized()
@@ -1075,6 +1081,7 @@ class RoleDrivenAgent(BaseAgent):
             "smart_summary": self._resolve_smart_summary_from_config(),
             "runtime_name": self._runtime_agent_name(),
             "runtime_description": self._runtime_agent_description(),
+            "todo_mode": self._resolve_todo_mode(),
         }
 
     def _transform_task(self, task: str) -> str:
@@ -1095,19 +1102,25 @@ class RoleDrivenAgent(BaseAgent):
 
     def _build_runtime_tools(self, profile: AgentRoleProfile) -> list:
         tools = self.get_all_tools(agent_type=profile.agent_type.value.lower())
+        todo_mode = self._resolve_todo_mode()
+        if todo_mode == "off":
+            return [
+                runtime_tool
+                for runtime_tool in tools
+                if getattr(
+                    runtime_tool,
+                    "name",
+                    getattr(runtime_tool, "__name__", None),
+                )
+                != "todo_write"
+            ]
 
-        # Auto-inject todo_write when planning_interval is configured.
-        planning_interval = normalize_positive_int_value(self._config.get("planning_interval"))
-        if planning_interval is not None and planning_interval > 0:
-            try:
-                from src.tools.todo import todo_write as todo_write_tool
-
-                tool_names = {getattr(t, "name", getattr(t, "__name__", None)) for t in tools}
-                if "todo_write" not in tool_names:
-                    tools = tools + [todo_write_tool]
-            except ImportError:
-                pass
-
+        tool_names = {
+            getattr(runtime_tool, "name", getattr(runtime_tool, "__name__", None))
+            for runtime_tool in tools
+        }
+        if "todo_write" not in tool_names:
+            tools = [*tools, resolve_tool_function("todo_write")]
         return tools
 
     def build_runtime_agent(self) -> CodeAgent:
@@ -1175,6 +1188,7 @@ class RoleDrivenAgent(BaseAgent):
             logger=runtime_logger,
             tool_call_type=self.tool_call_type,
             use_structured_output=getattr(self._model, "supports_structured_output", "false") == "true",
+            todo_mode=self._resolve_todo_mode(),
         )
 
     def _create_agent(
@@ -1194,6 +1208,7 @@ class RoleDrivenAgent(BaseAgent):
         smart_summary: bool | None = None,
         runtime_name: str | None = None,
         runtime_description: str | None = None,
+        todo_mode: str = "auto",
     ) -> CodeAgent:
         """
         Create configured agent instance.
@@ -1294,6 +1309,8 @@ class RoleDrivenAgent(BaseAgent):
                 use_structured_outputs_internally=use_structured,
                 **agent_kwargs,
             )
+
+        agent._agent_loom_todo_mode = todo_mode
 
         # Apply circuit-breaker threshold from YAML config (default: 5 consecutive parse errors)
         max_parse_errors = self._config.get("max_consecutive_parse_errors", 5)
@@ -1438,6 +1455,10 @@ class RoleDrivenAgent(BaseAgent):
                 )
             )
             execution_binding.__enter__()
+            from src.lib.todo import ensure_todo_state_provider
+
+            todo_provider_binding = ensure_todo_state_provider()
+            todo_provider_binding.__enter__()
 
             try:
                 # Build tools only after the complete explicit context has
@@ -1587,7 +1608,10 @@ class RoleDrivenAgent(BaseAgent):
                     if checkpoint_manager is not None and coord is not None:
                         CheckpointCoordinator.deactivate(coord)
                 finally:
-                    execution_binding.__exit__(None, None, None)
+                    try:
+                        todo_provider_binding.__exit__(None, None, None)
+                    finally:
+                        execution_binding.__exit__(None, None, None)
 
         if current_task_id:
             return _execute_agent()

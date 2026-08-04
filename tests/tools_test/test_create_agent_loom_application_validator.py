@@ -136,6 +136,48 @@ def test_validator_rejects_invalid_list_workflow_item(tmp_path: Path) -> None:
     )
 
 
+@pytest.mark.parametrize("mode", ["auto", "on", "off"])
+def test_validator_accepts_todo_modes(tmp_path: Path, mode: str) -> None:
+    app_root = _create_min_project(tmp_path)
+    workflow_file = app_root / "workflows" / "demo_agent.yaml"
+    config = yaml.safe_load(workflow_file.read_text(encoding="utf-8"))
+    config["todo"] = {"mode": mode}
+    _write_yaml(workflow_file, config)
+
+    completed, payload = _run_validator(tmp_path)
+
+    assert completed.returncode == 0
+    assert payload["summary"]["valid"] is True
+
+
+def test_validator_accepts_empty_todo_mapping_as_default_auto(tmp_path: Path) -> None:
+    app_root = _create_min_project(tmp_path)
+    workflow_file = app_root / "workflows" / "demo_agent.yaml"
+    config = yaml.safe_load(workflow_file.read_text(encoding="utf-8"))
+    config["todo"] = {}
+    _write_yaml(workflow_file, config)
+
+    completed, payload = _run_validator(tmp_path)
+
+    assert completed.returncode == 0
+    assert payload["summary"]["valid"] is True
+
+
+@pytest.mark.parametrize("todo", ["on", {"mode": "always"}, {"mode": "on", "extra": True}])
+def test_validator_rejects_invalid_todo_config(tmp_path: Path, todo) -> None:
+    app_root = _create_min_project(tmp_path)
+    workflow_file = app_root / "workflows" / "demo_agent.yaml"
+    config = yaml.safe_load(workflow_file.read_text(encoding="utf-8"))
+    config["todo"] = todo
+    _write_yaml(workflow_file, config)
+
+    completed, payload = _run_validator(tmp_path)
+
+    assert completed.returncode == 1
+    assert payload["summary"]["valid"] is False
+    assert any(error["field"].startswith("todo") for error in payload["errors"])
+
+
 @pytest.mark.parametrize(
     ("field", "value"),
     [

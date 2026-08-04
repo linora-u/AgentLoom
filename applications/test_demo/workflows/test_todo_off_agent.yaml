@@ -1,0 +1,18 @@
+name: "test_todo_off"
+description: "Transform a word through multiple internal steps"
+
+model_type: "powerful"
+tool_call_type: "tool_call"
+max_steps: 6
+
+todo:
+  mode: "off"
+
+workflow: |
+  Complete these steps internally: reverse the word loom, uppercase it, then
+  append the number of letters in the original word. Return exactly:
+  TODO_OFF_OK MOOL-4
+
+tools: []
+worker_agents: []
+skills: []
