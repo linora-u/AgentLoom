@@ -54,6 +54,7 @@ _WORKFLOW_OVERLAY_KEYS = {
     "mcp_servers",
     "self_learning",
     "hooks",
+    "todo",
 }
 _LLM_ONLY_TOP_LEVEL_KEYS = {"model", "llm", "langfuse"}
 _GLOBAL_ONLY_TOP_LEVEL_KEYS = {"runtime", "logging"}

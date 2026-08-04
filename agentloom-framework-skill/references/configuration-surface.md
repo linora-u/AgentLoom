@@ -53,7 +53,8 @@ workflow: |
 | `model_type` | `str` | 选择 `config/llm.yaml` 中定义的模型类型；缺失时使用 `model.default_model_type` |
 | `tool_call_type` | `code_act` 或 `tool_call` | `code_act` 让模型写 Python 调工具；`tool_call` 发送 provider/native tools schema，并只接受结构化 tool calls |
 | `max_steps` | `int` | smolagents 最大步数；默认 80 |
-| `planning_interval` | 正整数或数字字符串 | 周期性 planning；设置后自动注入 `todo_write` |
+| `planning_interval` | 正整数或数字字符串 | 仅控制周期性 planning，与 Todo 解耦 |
+| `todo` | `{mode: auto|on|off}` | 当前任务进度跟踪；默认 `auto`，`on` 强提示多步骤任务先建 Todo，`off` 完全隐藏 |
 | `concurrency` | 正整数或 `"auto"` | 仅影响同一 Worker 通过 `.batch()` 被多输入批量调用 |
 | `execution_env` | `dict` | `code_act` 的执行环境：`local`、`docker`、`e2b`、`wasm` |
 | `prompt` | `str` 或 `{path: ...}` | 自定义系统 prompt 模板路径 |

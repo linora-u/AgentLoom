@@ -1,0 +1,26 @@
+name: "test_todo_on"
+description: "Inspect three project sources and synthesize verified metadata"
+
+model_type: "powerful"
+tool_call_type: "tool_call"
+max_steps: 12
+
+todo:
+  mode: "on"
+
+workflow: |
+  This is an acceptance run for the system-defined execution-state tracking
+  policy. Follow that policy and do not skip its required initial tracking call.
+
+  Inspect these three files with the available read tool:
+
+  1. README.md: identify the project title.
+  2. pyproject.toml: identify the required Python version.
+  3. config/system.yaml: identify whether checkpointing is enabled.
+
+  Cross-check all three facts against their source text, then return exactly:
+  ON_MODE_OK project=AgentLoom python=>=3.12 checkpoint=true
+
+tools: []
+worker_agents: []
+skills: []

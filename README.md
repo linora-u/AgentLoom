@@ -222,7 +222,34 @@ This keeps orchestration reusable while leaving deterministic preprocessing, val
 | Call an Agent like a tool | Worker `agent_function_schema` becomes a validated callable function. |
 | Process repeated inputs | Fixed or automatic Worker concurrency with `.batch(tasks)`. |
 | Extend an Agent | Built-in tools, local Python functions, MCP servers, Claude-style Skills, and explicit Hooks. |
+| Track complex execution | Agent-owned Todo snapshots with `auto`, strongly prompted `on`, and authoritative `off` modes. |
 | Recover and inspect work | Run receipts, bounded logs, Shell audit, checkpoint resume, structured events, Web UI, dashboard, and TUI. |
+
+### Task-scoped Todo tracking
+
+Todo is execution state for the current task and Agent, not long-term project
+management. Configure it globally, per Application, or per Agent; the most
+specific layer wins:
+
+```yaml
+todo:
+  mode: "auto"  # auto | on | off
+```
+
+- `auto` is the default: the tool is available and the model decides whether a
+  meaningful multi-step task benefits from tracking.
+- `on` strongly instructs a non-trivial Agent to establish a full Todo snapshot
+  before substantive work. The runtime does not add a hidden planning turn or
+  block the final answer.
+- `off` removes the tool, policy, and state from model context, even if a generic
+  tool list would otherwise include `todo_write`.
+
+Each `todo_write` call atomically replaces the complete ordered list. With
+checkpointing enabled, the canonical Agent-scoped snapshot is `todos.json` in
+the current task checkpoint and follows its resume, locking, retention, and
+cleanup lifecycle. Without checkpointing it exists only in run memory.
+`planning_interval` remains available for periodic replanning but no longer
+controls Todo. See the [Agent Configuration Reference](docs/en/agent_config.md#311-todomode--task-tracking).
 
 ## Create an application manually
 

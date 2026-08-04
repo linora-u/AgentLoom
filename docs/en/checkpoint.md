@@ -35,6 +35,8 @@ This boundary prevents log rotation or run cleanup from damaging resumable state
 │   ├── task_tree.json
 │   ├── checkpoint.json
 │   ├── heartbeat.json
+│   ├── todos.json
+│   ├── todos.lock
 │   ├── workers/<worker_name>/
 │   │   ├── calls/<call_index>/checkpoint.json
 │   │   └── heartbeat.json
@@ -54,7 +56,7 @@ Important boundaries:
 - These compact evidence files remain inspectable after `cleanup_on_success` removes the resumable checkpoint. Raw artifact retention can still clean bulk shell/background/skill artifacts.
 - Checkpoint lookup uses the canonical `<application_id>/<task_id>` path. It does not depend on a log directory, `.task_index.json`, or a scan of historical runs.
 - User deliverables remain under the Application's configured `output_dir`. Runtime cleanup never traverses Application output directories.
-- Agent recall/todo state lives under `.agentloom/workspaces/agents/<application_id>/<agent_path>/`. Persistent `insights.md` is application-scoped; task files are isolated under `tasks/<task_id>/` and are not run artifacts.
+- Persistent Agent recall uses application-scoped `insights.md` under `.agentloom/workspaces/agents/<application_id>/<agent_path>/`. Current-task Todo state follows the checkpoint lifecycle in `<application_id>/<task_id>/todos.json` when checkpointing is enabled; otherwise it remains in run-scoped memory. It is neither a run artifact nor long-term project state.
 
 ## Configuration
 

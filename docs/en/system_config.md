@@ -855,7 +855,7 @@ There is no `--log-to-file`, `logging.enabled`, `logging.dir`, or `logging.file_
 
 Automatic cleanup runs at most once per configured interval. `loom clean-runtime` applies the policy explicitly. It only deletes eligible run directories or their raw artifacts; it never traverses checkpoints, `.agentloom/legacy/`, `.agentloom/workspaces/`, or Application-owned output directories.
 
-Agent recall/todo files use `.agentloom/workspaces/agents/<application_id>/<agent_path>/`. `loom migrate-runtime --dry-run` previews valid legacy checkpoint candidates and the old unscoped `.runtime` tree; `loom migrate-runtime --apply` migrates checkpoints, archives `.logs` under `.agentloom/legacy/`, and atomically moves `.runtime` under `.agentloom/workspaces/legacy-unscoped/` because the old files do not contain reliable application/task provenance.
+Persistent Agent recall uses `.agentloom/workspaces/agents/<application_id>/<agent_path>/`. Current-task Todo state uses `todos.json` inside the canonical checkpoint and is not migrated from the removed Markdown mechanism. `loom migrate-runtime --dry-run` previews valid legacy checkpoint candidates and the old unscoped `.runtime` tree; `loom migrate-runtime --apply` migrates checkpoints, archives `.logs` under `.agentloom/legacy/`, and atomically moves `.runtime` under `.agentloom/workspaces/legacy-unscoped/` because the old files do not contain reliable application/task provenance.
 
 To verify a real attempt, read `manifest.json` and its referenced logs, audits, and artifacts; an exit code alone is not sufficient.
 

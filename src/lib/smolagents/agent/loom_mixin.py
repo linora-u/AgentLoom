@@ -1,35 +1,78 @@
 """LoomAgentMixin — enhancement layer for smolagents Agents.
 
 Provides smart memory compression, progressive error recovery,
-before-run callbacks, and todo sync injection via TodoSyncMixin.
+before-run callbacks, and canonical Todo state hydration.
 """
 
-from typing import Optional
+import json
 
 from smolagents import LogLevel
 from smolagents.models import ChatMessage, MessageRole
-
-from src.lib.smolagents.memory.context_compression import ConversationHistoryManager
 from src.lib.logging import get_logger
-from src.trace import get_current_hook_run
 from src.lib.smolagents.hooks import wrap_in_system_reminder
-from src.lib.smolagents.agent.todo_sync import TodoSyncMixin
+from src.lib.smolagents.memory.context_compression import ConversationHistoryManager
+from src.trace import (
+    get_current_agent_name,
+    get_current_hook_run,
+    get_current_runtime_agent_path,
+)
 
 
-class LoomAgentMixin(TodoSyncMixin):
+def append_current_todo_state(messages: list, *, todo_mode: str) -> list:
+    """Append the canonical current snapshot to one model input when active."""
+
+    if todo_mode == "off":
+        return messages
+    from src.lib.todo import get_current_todo_provider
+
+    provider = get_current_todo_provider()
+    if provider is None:
+        return messages
+    agent_path = get_current_runtime_agent_path() or get_current_agent_name() or "default"
+    snapshot = provider.load(agent_path)
+    if not snapshot["items"]:
+        return messages
+    serialized = json.dumps(
+        snapshot["items"],
+        ensure_ascii=False,
+        separators=(",", ":"),
+    )
+    serialized = serialized.replace("<", "\\u003c").replace(">", "\\u003e").replace("&", "\\u0026")
+    reminder = (
+        f'<current-todos revision="{snapshot["revision"]}">{serialized}</current-todos>\n'
+        "This is the canonical Todo snapshot for the current task and Agent. "
+        "Keep it current with todo_write when state changes. Call todo_write "
+        "alone and finish the last update before calling final_answer."
+    )
+    hydrated = list(messages)
+    hydrated.append(
+        ChatMessage(
+            role=MessageRole.SYSTEM,
+            content=[
+                {
+                    "type": "text",
+                    "text": wrap_in_system_reminder(reminder),
+                }
+            ],
+        )
+    )
+    return hydrated
+
+
+class LoomAgentMixin:
     """Enhancement layer that turns a base smolagents Agent into a Loom Agent.
 
     Provides:
     - before_run callbacks
     - smart memory compression (ConversationHistoryManager)
     - progressive error recovery guidance
-    - todo sync injection into the planning loop (via TodoSyncMixin)
+    - canonical Todo snapshot hydration after context compression
     """
 
     def _init_loom_agent(
         self,
-        before_run_callbacks: Optional[list],
-        max_tokens: Optional[int] = None,
+        before_run_callbacks: list | None,
+        max_tokens: int | None = None,
         smart_summary: bool = True,
     ):
         self._before_run_callbacks = before_run_callbacks or []
@@ -88,23 +131,10 @@ class LoomAgentMixin(TodoSyncMixin):
         messages = super().write_memory_to_messages(summary_mode=summary_mode)
 
         if summary_mode:
-            return messages
-
-        # ── Todo injection: replace system prompt with todo-only prompt ──
-        # When _todo_sys_prompt_override is set (by TodoSyncMixin during
-        # _inject_todo_action_step), replace the first SYSTEM message so the
-        # LLM only sees todo_write instructions instead of the full system
-        # prompt with all tool descriptions.  The original
-        # self.memory.system_prompt is never modified.
-        todo_override = getattr(self, "_todo_sys_prompt_override", None)
-        if todo_override:
-            for i, msg in enumerate(messages):
-                if msg.role == MessageRole.SYSTEM:
-                    messages[i] = ChatMessage(
-                        role=MessageRole.SYSTEM,
-                        content=[{"type": "text", "text": todo_override}],
-                    )
-                    break
+            return append_current_todo_state(
+                messages,
+                todo_mode=getattr(self, "_agent_loom_todo_mode", "auto"),
+            )
 
         hook_run = get_current_hook_run()
         if hook_run is not None:
@@ -146,51 +176,10 @@ class LoomAgentMixin(TodoSyncMixin):
         # Progressive error recovery: consolidate consecutive error messages and
         # replace generic "Now let's retry…" suffixes with targeted guidance.
         compressed_messages = self._consolidate_error_messages(compressed_messages)
-
-        # ── Todo injection: strip conversation history for todo-only prompt ──
-        # When _todo_sys_prompt_override is set (by TodoSyncMixin during
-        # _inject_todo_action_step), replace the SYSTEM message AND strip ALL
-        # conversation history so the LLM only sees the todo-only system prompt.
-        # This prevents the LLM from being influenced by previous tool calls
-        # (shell_tool, read_file, glob_search, etc.) in the conversation history
-        # or the planning step text. The LLM needs ONLY the todo instructions.
-        # Applied on compressed_messages (the final output) because the history
-        # manager's sync_from_messages only appends and never re-syncs index 0.
-        # The original self.memory.system_prompt is never modified.
-        todo_override = getattr(self, "_todo_sys_prompt_override", None)
-        if todo_override:
-            # Build a context-rich user message so the LLM knows what
-            # tasks exist and what the current plan is, without exposing
-            # the full conversation history with tool call patterns.
-            user_parts = []
-
-            # 1. Include the last planning step text (plan review).
-            #    This gives context about what was accomplished and what
-            #    the current plan is.  PlanningStep messages are text-only
-            #    and don't contain tool call patterns.
-            from smolagents.memory import PlanningStep
-            for step in reversed(getattr(getattr(self, "memory", None), "steps", [])):
-                if isinstance(step, PlanningStep) and getattr(step, "model_output", None):
-                    user_parts.append("## Current Plan\n" + step.model_output.strip())
-                    break
-
-            # 2. Include current todo state from the todos.md file.
-            todo_state = self._read_todo_state_for_planning()
-            if todo_state:
-                user_parts.append(todo_state)
-
-            user_parts.append("Please call todo_write now to update the task list.")
-
-            compressed_messages = [
-                ChatMessage(
-                    role=MessageRole.SYSTEM,
-                    content=[{"type": "text", "text": todo_override}],
-                ),
-                ChatMessage(
-                    role=MessageRole.USER,
-                    content=[{"type": "text", "text": "\n\n".join(user_parts)}],
-                ),
-            ]
+        compressed_messages = append_current_todo_state(
+            compressed_messages,
+            todo_mode=getattr(self, "_agent_loom_todo_mode", "auto"),
+        )
 
         return compressed_messages
 
@@ -233,7 +222,6 @@ class LoomAgentMixin(TodoSyncMixin):
                 consolidate_error_messages,
                 extract_category_from_error,
                 extract_tool_info,
-                classify_parse_error,
             )
 
             # Extract error category from [CATEGORY:...] tag in error message
@@ -293,115 +281,3 @@ class LoomAgentMixin(TodoSyncMixin):
             _log = get_logger(__name__)
             _log.warning("Error recovery consolidation failed (safe fallback): %s", exc)
             return messages
-
-    # ------------------------------------------------------------------
-    # Final planning step: review todo completeness after final_answer
-    # ------------------------------------------------------------------
-
-    def _run_stream(self, task, max_steps, images=None):
-        """Override: inject todo sync ActionStep after each PlanningStep.
-
-        When planning_interval is configured and todo_write is available:
-        - After initial PlanningStep: inject with todo_state='initial'
-        - After update PlanningStep: inject with todo_state='update'
-        - After final planning step: inject with todo_state='final'
-
-        Also preserves the existing final planning step logic for
-        reviewing todo completeness after final_answer.
-        """
-        import time as _time
-        from smolagents.memory import PlanningStep
-
-        # Guard: ensure final planning runs at most once per run
-        self._final_planning_done = False
-
-        # Validate todo prompts at the start of a run
-        self._validate_todo_prompts()
-
-        # Reset todo file at the start of a new run (fresh start)
-        if "todo_write" in getattr(self, "tools", {}):
-            self._reset_todo_file()
-
-        _planning_step_count = 0
-        final_answer_step = None
-        for element in super()._run_stream(task, max_steps, images=images):
-            # Capture FinalAnswerStep but don't yield it yet
-            if type(element).__name__ == "FinalAnswerStep":
-                final_answer_step = element
-                continue
-            yield element
-
-            # After every PlanningStep, inject a todo sync ActionStep
-            if isinstance(element, PlanningStep) and "todo_write" in getattr(self, "tools", {}):
-                todo_state = "initial" if _planning_step_count == 0 else "update"
-                _planning_step_count += 1
-                yield from self._inject_todo_action_step(
-                    todo_state=todo_state, max_steps=max_steps
-                )
-
-        # Run ONE final planning step if:
-        # 1. planning_interval is configured
-        # 2. There are incomplete todos on disk
-        # 3. Guard flag has not been set (at-most-once)
-        if (
-            not self._final_planning_done
-            and getattr(self, "planning_interval", None) is not None
-            and self._has_incomplete_todos()
-        ):
-            self._final_planning_done = True  # Set BEFORE execution to prevent re-entry
-            _log = get_logger(__name__)
-            _log.info("Final planning step: reviewing todo completeness")
-            try:
-                planning_start = _time.time()
-                planning_step = None
-                for elem in self._generate_planning_step(
-                    task, is_first_step=False, step=getattr(self, "step_number", 0)
-                ):
-                    yield elem
-                    planning_step = elem
-                if isinstance(planning_step, PlanningStep):
-                    from smolagents.memory import Timing
-                    planning_step.timing = Timing(
-                        start_time=planning_start,
-                        end_time=_time.time(),
-                    )
-                    if hasattr(self, "_finalize_step"):
-                        self._finalize_step(planning_step)
-                    self.memory.steps.append(planning_step)
-                # Inject final todo sync after the final planning step
-                yield from self._inject_todo_action_step(
-                    todo_state="final", max_steps=max_steps
-                )
-            except Exception as exc:
-                _log = get_logger(__name__)
-                _log.warning("Final planning step failed (non-fatal): %s", exc)
-
-        # Now yield the final answer step
-        if final_answer_step is not None:
-            yield final_answer_step
-
-    # ------------------------------------------------------------------
-    # Planning step override: inject todo state into planning context
-    # ------------------------------------------------------------------
-
-    def _generate_planning_step(self, task, is_first_step: bool, step: int):
-        """Override: inject current todo state into planning context.
-
-        Reads the current task's canonical agent workspace todos.md and appends its content to
-        update_plan_pre_messages BEFORE Jinja2 rendering.  The LLM sees
-        the current task list in the SYSTEM message during planning.
-        """
-        if not is_first_step:
-            todo_state = self._read_todo_state_for_planning()
-            if todo_state:
-                original_pre = self.prompt_templates["planning"]["update_plan_pre_messages"]
-                self.prompt_templates["planning"]["update_plan_pre_messages"] = (
-                    original_pre + "\n\n" + todo_state
-                )
-                try:
-                    yield from super()._generate_planning_step(task, is_first_step, step)
-                finally:
-                    self.prompt_templates["planning"]["update_plan_pre_messages"] = original_pre
-                return
-        # Fallback: first step or no todo state — delegate to parent unchanged
-        yield from super()._generate_planning_step(task, is_first_step, step)

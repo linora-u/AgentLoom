@@ -445,6 +445,49 @@ def test_cached_runtime_refreshes_stateful_tool_instance_for_each_run(monkeypatc
     assert definition.calls == []
 
 
+@pytest.mark.parametrize("mode", ["auto", "on"])
+def test_todo_enabled_modes_expose_tool_independent_of_planning_interval(
+    monkeypatch,
+    mode: str,
+) -> None:
+    agent = DummyAgent(
+        config={"name": "runtime_dummy", "todo": {"mode": mode}},
+        model=object(),
+        logger=DummyLoggerBackend(),
+    )
+    sentinel = type("TodoTool", (), {"name": "todo_write"})()
+    monkeypatch.setattr(agent, "get_all_tools", lambda agent_type: [])
+    monkeypatch.setattr(
+        base_agent_module,
+        "resolve_tool_function",
+        lambda name: sentinel,
+    )
+
+    tools = agent._build_runtime_tools(agent._role_profile())
+
+    assert tools == [sentinel]
+    assert "planning_interval" not in agent._config
+
+
+def test_todo_off_hides_even_explicit_tool_with_planning_enabled(monkeypatch) -> None:
+    agent = DummyAgent(
+        config={
+            "name": "runtime_dummy",
+            "todo": {"mode": "off"},
+            "planning_interval": 2,
+        },
+        model=object(),
+        logger=DummyLoggerBackend(),
+    )
+    explicit = type("TodoTool", (), {"name": "todo_write"})()
+    other = type("OtherTool", (), {"name": "read_file"})()
+    monkeypatch.setattr(agent, "get_all_tools", lambda agent_type: [explicit, other])
+
+    tools = agent._build_runtime_tools(agent._role_profile())
+
+    assert tools == [other]
+
+
 def test_base_run_emits_task_complete_on_success(monkeypatch):
     agent = _make_agent(logger=DummyLoggerBackend())
     runtime_agent = DummyRuntimeRunner(result="ok")
@@ -1907,6 +1950,8 @@ def test_create_agent_prioritizes_explicit_prompt_over_system_default(monkeypatc
             use_customized_prompt=True,
             prompt_template_path=str(explicit_prompt),
         )
-        assert runtime_agent.kwargs["prompt_templates"]["system_prompt"] == "explicit"
+        system_prompt = runtime_agent.kwargs["prompt_templates"]["system_prompt"]
+        assert system_prompt.startswith("explicit")
+        assert "decide whether a task list" in system_prompt
     finally:
         set_global_logger(previous_global_logger)

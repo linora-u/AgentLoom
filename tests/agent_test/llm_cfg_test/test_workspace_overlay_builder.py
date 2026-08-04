@@ -1,5 +1,5 @@
-from pathlib import Path
 import copy
+from pathlib import Path
 
 import pytest
 
@@ -11,6 +11,7 @@ def _patch_base_config(monkeypatch, agent_root: Path) -> None:
         "tool_access_control": {"exclude_paths": ["Tools"]},
         "execution_env": {"type": "local"},
         "smart_summary": True,
+        "todo": {"mode": "auto"},
     }
     monkeypatch.setattr(
         config_module,
@@ -38,6 +39,36 @@ def test_build_effective_agent_config_applies_workflow_overlay(monkeypatch, tmp_
     assert effective["execution_env"]["executor_kwargs"]["host"] == "127.0.0.1"
     assert "name" not in effective
     assert "workflow" not in effective
+
+
+def test_todo_mode_uses_global_application_agent_precedence(
+    monkeypatch,
+    tmp_path: Path,
+) -> None:
+    agent_root = tmp_path / "agent"
+    _patch_base_config(monkeypatch, agent_root)
+    app_root = agent_root / "applications" / "demo"
+    workflow_path = app_root / "workflows" / "demo_agent.yaml"
+    workflow_path.parent.mkdir(parents=True)
+    workflow_path.write_text("name: demo_agent\n", encoding="utf-8")
+    app_config = app_root / "config" / "system.yaml"
+    app_config.parent.mkdir(parents=True)
+    app_config.write_text('todo:\n  mode: "off"\n', encoding="utf-8")
+
+    application_effective = config_module.build_effective_agent_config(
+        {"_yaml_file_path": str(workflow_path)},
+        source_name=str(workflow_path),
+    )
+    agent_effective = config_module.build_effective_agent_config(
+        {
+            "_yaml_file_path": str(workflow_path),
+            "todo": {"mode": "on"},
+        },
+        source_name=str(workflow_path),
+    )
+
+    assert application_effective["todo"]["mode"] == "off"
+    assert agent_effective["todo"]["mode"] == "on"
 
 
 def test_worker_effective_snapshot_is_independent_from_supervisor(monkeypatch, tmp_path: Path):
