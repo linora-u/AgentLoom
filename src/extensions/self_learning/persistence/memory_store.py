@@ -18,17 +18,18 @@ from typing import TYPE_CHECKING, Any
 if TYPE_CHECKING:
     from src.lib.runtime import RootRunState
 
-from .application_scope import resolve_application_scope, safe_application_id
-from .event_schema import safe_run_id
-from .ledger import SelfLearningLedger, serialized_write_transaction
-from .paths import memory_config, memory_db, review_config, self_learning_enabled
-from .redaction import (
+from ..application_scope import resolve_application_scope, safe_application_id
+from ..event_schema import safe_run_id
+from ..paths import memory_config, memory_db, review_config, self_learning_enabled
+from ..redaction import (
     BLOCKED_TEXT,
     redact_text,
     require_safe_identity,
     scan_injection_patterns,
 )
-from .review_types import CandidateInput, canonical_json, normalize_payload, payload_hash
+from ..review_types import CandidateInput, canonical_json, normalize_payload, payload_hash
+from .database import SelfLearningDatabase, serialized_write_transaction
+from .ledger import SelfLearningLedger
 
 _ACTIVE_STATES = ("active_confirmed", "active_unreviewed")
 _VALID_SCOPES = {"project", "app", "application"}
@@ -56,16 +57,13 @@ class MemoryStore:
         agent_config: dict[str, Any] | None = None,
     ) -> None:
         self.db_path = Path(db_path).resolve() if db_path else memory_db()
+        self._database = SelfLearningDatabase(self.db_path)
         self._agent_config = agent_config
         self._config = memory_config(agent_config)
         SelfLearningLedger(self.db_path)
 
     def _connect(self) -> sqlite3.Connection:
-        conn = sqlite3.connect(str(self.db_path), timeout=5.0)
-        conn.row_factory = sqlite3.Row
-        conn.execute("PRAGMA busy_timeout=5000")
-        conn.execute("PRAGMA foreign_keys=ON")
-        return conn
+        return self._database.connect(foreign_keys=True)
 
     @contextmanager
     def _connect_for_write(self) -> Iterator[sqlite3.Connection]:
@@ -74,7 +72,7 @@ class MemoryStore:
 
     @staticmethod
     def _now() -> str:
-        from .event_schema import now_iso
+        from ..event_schema import now_iso
 
         return now_iso()
 

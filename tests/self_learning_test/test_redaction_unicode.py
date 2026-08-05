@@ -8,7 +8,7 @@ from pathlib import Path
 import pytest
 
 from src.extensions.self_learning.digest import DigestBuilder
-from src.extensions.self_learning.memory_store import MemoryStore
+from src.extensions.self_learning.persistence.memory_store import MemoryStore
 from src.extensions.self_learning.redaction import (
     BLOCKED_TEXT,
     redact_text,
