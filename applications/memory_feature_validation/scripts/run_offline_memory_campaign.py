@@ -50,9 +50,18 @@ from applications.memory_feature_validation.scripts.offline_memory_campaign_comm
     safe_marker,
 )
 from src.extensions.self_learning.event_schema import CanonicalSessionEvent  # noqa: E402
-from src.extensions.self_learning.ledger import SelfLearningLedger  # noqa: E402
-from src.extensions.self_learning.memory_store import MemoryStore  # noqa: E402
-from src.extensions.self_learning.review_engine import ReviewEngine  # noqa: E402
+from src.extensions.self_learning.persistence.database import (  # noqa: E402
+    SelfLearningDatabase,
+)
+from src.extensions.self_learning.persistence.ledger import (  # noqa: E402
+    SelfLearningLedger,
+)
+from src.extensions.self_learning.persistence.memory_store import (  # noqa: E402
+    MemoryStore,
+)
+from src.extensions.self_learning.persistence.review_engine import (  # noqa: E402
+    ReviewEngine,
+)
 from src.extensions.self_learning.review_types import (  # noqa: E402
     CandidateInput,
     EvidenceGateResult,
@@ -104,12 +113,13 @@ _SOURCE_FILES = (
     "applications/memory_feature_validation/scripts/offline_memory_campaign_common.py",
     "applications/memory_feature_validation/scripts/run_offline_memory_campaign.py",
     "src/extensions/self_learning/event_schema.py",
-    "src/extensions/self_learning/ledger.py",
-    "src/extensions/self_learning/memory_store.py",
+    "src/extensions/self_learning/persistence/database.py",
+    "src/extensions/self_learning/persistence/ledger.py",
+    "src/extensions/self_learning/persistence/memory_store.py",
     "src/extensions/self_learning/redaction.py",
     "src/extensions/self_learning/application_scope.py",
     "src/extensions/self_learning/paths.py",
-    "src/extensions/self_learning/review_engine.py",
+    "src/extensions/self_learning/persistence/review_engine.py",
     "src/extensions/self_learning/review_types.py",
     "src/lib/runtime/__init__.py",
     "src/lib/runtime/context.py",
@@ -709,7 +719,7 @@ def _run_independent_baseline_probe(
                 cases,
                 source_shape=source_shape,
             )
-            with ledger._connect() as conn:
+            with SelfLearningDatabase(ledger.db_path).connect() as conn:
                 conn.execute("PRAGMA wal_checkpoint(TRUNCATE)")
             migration_events = RELEASE_MIGRATION_EVENTS if DEFAULT_EVENTS == 100_000 else max(1, DEFAULT_EVENTS // 10)
             migration = _run_migration_probe(
@@ -903,7 +913,7 @@ def _validate_security(
     false_positives = 0
     false_negatives = 0
     structured_path_failures = 0
-    with ledger._connect() as conn:
+    with SelfLearningDatabase(ledger.db_path).connect() as conn:
         for case in cases:
             row = conn.execute(
                 "SELECT content_text,input_json,output_json,metadata_json FROM events WHERE event_id=?",
@@ -1042,7 +1052,7 @@ def _validate_root_groups(
             _add_failure(local, safe_worker, "root_marker_missing", "missing")
         if any(row.get("root_run_id") == root_a for row in excluded):
             _add_failure(local, safe_worker, "exclude_root_leaked_leaf", "visible")
-        with ledger._connect() as conn:
+        with SelfLearningDatabase(ledger.db_path).connect() as conn:
             taint_row = conn.execute("SELECT content_text FROM events WHERE event_id=?", (_event_id(taint),)).fetchone()
             completion_row = conn.execute(
                 "SELECT content_text FROM events WHERE event_id=?",
@@ -1211,7 +1221,7 @@ def _active_memory_matches(store: MemoryStore, *, item_id: Any, content: str) ->
         expected_id = int(item_id)
     except (TypeError, ValueError):
         return False
-    with store._connect() as conn:
+    with SelfLearningDatabase(store.db_path).connect() as conn:
         row = conn.execute(
             "SELECT payload_json FROM memory_items "
             "WHERE id=? AND state='active_confirmed'",
@@ -1221,7 +1231,7 @@ def _active_memory_matches(store: MemoryStore, *, item_id: Any, content: str) ->
 
 
 def _active_content_exists(store: MemoryStore, content: str) -> bool:
-    with store._connect() as conn:
+    with SelfLearningDatabase(store.db_path).connect() as conn:
         rows = conn.execute(
             "SELECT payload_json FROM memory_items "
             "WHERE state IN ('active_confirmed','active_unreviewed')"
@@ -1234,7 +1244,7 @@ def _active_id_exists(store: MemoryStore, item_id: Any) -> bool:
         expected_id = int(item_id)
     except (TypeError, ValueError):
         return False
-    with store._connect() as conn:
+    with SelfLearningDatabase(store.db_path).connect() as conn:
         return (
             conn.execute(
                 "SELECT 1 FROM memory_items "
@@ -1246,7 +1256,7 @@ def _active_id_exists(store: MemoryStore, item_id: Any) -> bool:
 
 
 def _active_count(store: MemoryStore) -> int:
-    with store._connect() as conn:
+    with SelfLearningDatabase(store.db_path).connect() as conn:
         return int(
             conn.execute(
                 "SELECT COUNT(*) FROM memory_items "
@@ -1256,7 +1266,7 @@ def _active_count(store: MemoryStore) -> int:
 
 
 def _candidate_count(store: MemoryStore) -> int:
-    with store._connect() as conn:
+    with SelfLearningDatabase(store.db_path).connect() as conn:
         return int(conn.execute("SELECT COUNT(*) FROM review_candidates").fetchone()[0])
 
 
@@ -1264,7 +1274,7 @@ def _candidate_state(store: MemoryStore, candidate_id: Any) -> tuple[str, str, i
     expected_id = str(candidate_id or "").strip()
     if not expected_id:
         return "", "", 0
-    with store._connect() as conn:
+    with SelfLearningDatabase(store.db_path).connect() as conn:
         row = conn.execute(
             "SELECT state,outcome,revision FROM review_candidates WHERE candidate_id=?",
             (expected_id,),
@@ -2830,7 +2840,7 @@ def run_campaign(
 
     live_paths = [db_path, Path(f"{db_path}-wal"), Path(f"{db_path}-shm")]
     pre_checkpoint_hits = _privacy_scan(live_paths)
-    with ledger._connect() as conn:
+    with SelfLearningDatabase(ledger.db_path).connect() as conn:
         conn.execute("PRAGMA wal_checkpoint(TRUNCATE)")
 
     failures: list[dict[str, Any]] = []
@@ -2839,7 +2849,7 @@ def run_campaign(
     security_metrics = _validate_security(ledger, categories["redaction_injection"], failures)
     root_metrics = _validate_root_groups(ledger, categories["root_isolation"], failures)
     memory_metrics = _validate_memory_cases(db_path, categories["active_pending_memory"], failures)
-    with ledger._connect() as conn:
+    with SelfLearningDatabase(ledger.db_path).connect() as conn:
         conn.execute("PRAGMA wal_checkpoint(TRUNCATE)")
 
     migration = _run_migration_probe(

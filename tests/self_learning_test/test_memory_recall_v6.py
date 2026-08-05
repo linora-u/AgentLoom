@@ -4,7 +4,7 @@ import threading
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
-from src.extensions.self_learning.memory_store import MemoryStore
+from src.extensions.self_learning.persistence.memory_store import MemoryStore
 
 
 def _config(*, prompt_max_chars: int = 12_000) -> dict:
@@ -85,11 +85,11 @@ def test_snapshot_loads_only_active_states_and_renders_typed_experience(
         },
         scope_id="recall_v6_app",
     )
-    with store._connect_for_write() as conn:
-        conn.execute(
-            "UPDATE memory_items SET state='retracted' WHERE id=?",
-            (active["id"],),
-        )
+    store.remove(
+        "application",
+        str(active["id"]),
+        scope_id="recall_v6_app",
+    )
     store.add_typed(
         "application",
         kind="experience",

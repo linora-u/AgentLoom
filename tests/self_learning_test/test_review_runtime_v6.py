@@ -9,7 +9,7 @@ import pytest
 
 def _record_completed_root(db_path: Path, run_id: str, application_id: str) -> None:
     from src.extensions.self_learning.event_schema import CanonicalSessionEvent
-    from src.extensions.self_learning.ledger import SelfLearningLedger
+    from src.extensions.self_learning.persistence.ledger import SelfLearningLedger
 
     SelfLearningLedger(db_path).append_runtime_event(
         CanonicalSessionEvent(
@@ -161,7 +161,7 @@ def test_after_run_review_uses_structured_model_without_tools_and_consumes_run(
     monkeypatch,
 ) -> None:
     from src.extensions.self_learning import reviewer
-    from src.extensions.self_learning.review_engine import ReviewEngine
+    from src.extensions.self_learning.persistence.review_engine import ReviewEngine
     from src.extensions.self_learning.review_orchestration import ReviewOrchestrator
 
     db_path = tmp_path / "self_learning.db"
@@ -193,7 +193,7 @@ def test_model_failure_does_not_consume_unreviewed_run(
     monkeypatch,
 ) -> None:
     from src.extensions.self_learning import reviewer
-    from src.extensions.self_learning.review_engine import ReviewEngine
+    from src.extensions.self_learning.persistence.review_engine import ReviewEngine
     from src.extensions.self_learning.review_orchestration import ReviewOrchestrator
 
     db_path = tmp_path / "self_learning.db"

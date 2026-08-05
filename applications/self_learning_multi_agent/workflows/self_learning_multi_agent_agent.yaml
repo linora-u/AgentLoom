@@ -46,7 +46,7 @@ workflow: |
   1. Generate a fresh marker beginning with `AL_SELF_LEARNING_MULTI_`.
   2. Call `history_researcher` to search prior indexed sessions and scroll near
      one hit.
-  3. Call `memory_reviewer` to create and verify a project memory proposal.
+  3. Call `memory_reviewer` to create and verify an Application memory proposal.
   4. Call `skill_packager` to create a skill proposal package and write
      `references/evidence.json`.
   5. Call `artifact_auditor` to verify durable files and prove the generated
