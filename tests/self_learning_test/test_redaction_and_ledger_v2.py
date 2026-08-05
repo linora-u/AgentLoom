@@ -13,16 +13,28 @@ from time import perf_counter, sleep
 import pytest
 
 from src.extensions.self_learning.event_schema import CanonicalSessionEvent, now_iso
-from src.extensions.self_learning.ledger import SelfLearningLedger
-from src.extensions.self_learning.memory_store import MemoryStore
+from src.extensions.self_learning.persistence.database import SelfLearningDatabase
+from src.extensions.self_learning.persistence.ledger import SelfLearningLedger
+from src.extensions.self_learning.persistence.memory_store import MemoryStore
+from src.extensions.self_learning.persistence.review_engine import ReviewEngine
 from src.extensions.self_learning.redaction import (
     BLOCKED_TEXT,
     redact_mapping,
     redact_text,
     scan_injection_patterns,
 )
-from src.extensions.self_learning.review_engine import ReviewEngine
 from src.extensions.self_learning.review_types import CandidateInput
+
+
+@contextmanager
+def _open_ledger(ledger: SelfLearningLedger):
+    """Inspect schema invariants through the public persistence owner."""
+    conn = SelfLearningDatabase(ledger.db_path).connect()
+    try:
+        yield conn
+    finally:
+        conn.close()
+
 
 # -- Redaction ------------------------------------------------------------------
 
@@ -190,7 +202,7 @@ def test_recorded_event_never_indexes_suffix_after_escaped_secret_quote(tmp_path
 
     ledger.append_event(event)
 
-    with ledger._connect() as conn:
+    with _open_ledger(ledger) as conn:
         stored = conn.execute(
             "SELECT content_text, input_json, output_json FROM events WHERE event_id = ?",
             (event.event_id,),
@@ -227,7 +239,7 @@ def test_recorded_event_never_indexes_unquoted_or_yaml_block_secret_remainders(
 
     ledger.append_event(event)
 
-    with ledger._connect() as conn:
+    with _open_ledger(ledger) as conn:
         stored = conn.execute(
             "SELECT content_text FROM events WHERE event_id = ?",
             (event.event_id,),
@@ -270,7 +282,7 @@ def test_recorded_event_never_indexes_structured_yaml_secret_values(tmp_path: Pa
 
     ledger.append_event(event)
 
-    with ledger._connect() as conn:
+    with _open_ledger(ledger) as conn:
         stored = conn.execute(
             "SELECT content_text FROM events WHERE event_id = ?",
             (event.event_id,),
@@ -307,7 +319,7 @@ def test_recorded_event_scans_injection_after_the_storage_truncation_point(
 
     ledger.append_event(event)
 
-    with ledger._connect() as conn:
+    with _open_ledger(ledger) as conn:
         stored = conn.execute(
             "SELECT content_text FROM events WHERE event_id = ?",
             (event.event_id,),
@@ -342,7 +354,7 @@ def test_run_final_answer_uses_safe_structured_output_when_content_is_blocked(
 
     ledger.append_event(event)
 
-    with ledger._connect() as conn:
+    with _open_ledger(ledger) as conn:
         row = conn.execute(
             "SELECT final_answer FROM runs WHERE run_id = ?",
             (event.run_id,),
@@ -379,7 +391,7 @@ def test_run_final_answer_structured_fallback_remains_recursively_safe(
 
     ledger.append_event(event)
 
-    with ledger._connect() as conn:
+    with _open_ledger(ledger) as conn:
         final_answer = conn.execute(
             "SELECT final_answer FROM runs WHERE run_id = ?",
             (event.run_id,),
@@ -412,7 +424,7 @@ def test_non_final_event_output_cannot_be_promoted_to_run_final_answer(
 
     ledger.append_event(event)
 
-    with ledger._connect() as conn:
+    with _open_ledger(ledger) as conn:
         final_answer = conn.execute(
             "SELECT final_answer FROM runs WHERE run_id = ?",
             (event.run_id,),
@@ -472,7 +484,7 @@ def test_tainted_root_blocks_every_later_event_echo_from_persistence_surfaces(
             root_run_id=root_run_id,
         )
 
-    with ledger._connect() as conn:
+    with _open_ledger(ledger) as conn:
         stored_events = [
             dict(row)
             for row in conn.execute(
@@ -552,7 +564,7 @@ def test_redacted_event_metadata_also_taints_later_completion(tmp_path: Path) ->
         )
     )
 
-    with ledger._connect() as conn:
+    with _open_ledger(ledger) as conn:
         row = conn.execute(
             "SELECT final_answer FROM runs WHERE run_id = 'root_metadata_echo'"
         ).fetchone()
@@ -586,7 +598,7 @@ def test_literal_safety_placeholders_do_not_taint_a_root(tmp_path: Path) -> None
         )
     )
 
-    with ledger._connect() as conn:
+    with _open_ledger(ledger) as conn:
         source_metadata = conn.execute(
             "SELECT metadata_json FROM events WHERE event_id = ?",
             ("event_literal_safety_placeholders",),
@@ -733,7 +745,7 @@ def test_ledger_and_memory_store_share_the_same_writer_gate(
     ledger = SelfLearningLedger(db_path)
     memory_transaction_started = threading.Event()
     memory_errors: list[BaseException] = []
-    import src.extensions.self_learning.memory_store as memory_store_module
+    import src.extensions.self_learning.persistence.memory_store as memory_store_module
 
     original_transaction = memory_store_module.serialized_write_transaction
 
@@ -865,7 +877,7 @@ def test_all_ledger_writers_share_the_memory_store_gate(
     ledger = SelfLearningLedger(db_path)
     memory_transaction_started = threading.Event()
     memory_errors: list[BaseException] = []
-    import src.extensions.self_learning.memory_store as memory_store_module
+    import src.extensions.self_learning.persistence.memory_store as memory_store_module
 
     original_transaction = memory_store_module.serialized_write_transaction
 
@@ -991,7 +1003,6 @@ def test_ledger_init_runs_once_per_process(tmp_path: Path, monkeypatch: pytest.M
         original(self)
 
     monkeypatch.setattr(SelfLearningLedger, "_init_db", counting_init)
-    SelfLearningLedger._initialized_paths.discard(str(db_path.resolve()))
     SelfLearningLedger(db_path)
     SelfLearningLedger(db_path)
     SelfLearningLedger(db_path)

@@ -581,10 +581,12 @@ def sessions():
 def sessions_index(path: str):
     """Report ledger counts or import canonical self-learning event exports."""
     import json as _json
-    from src.extensions.self_learning.session_index import SessionIndex
 
-    index = SessionIndex()
-    result = index.index_all(path)
+    from src.extensions.self_learning.persistence.event_importer import (
+        SessionEventImporter,
+    )
+
+    result = SessionEventImporter().index_all(path)
     click.echo(_json.dumps(result, ensure_ascii=False, indent=2, default=str))
 
 
@@ -598,9 +600,17 @@ def sessions_index(path: str):
 def sessions_search(query: str, limit: int, agent: str | None, app: str | None, since: str | None, scope: str):
     """Search indexed session events."""
     import json as _json
-    from src.extensions.self_learning.session_index import SessionIndex
 
-    result = SessionIndex().search(query, limit=limit, agent=agent, app=app, since=since, scope=scope)
+    from src.extensions.self_learning.persistence.ledger import SelfLearningLedger
+
+    result = SelfLearningLedger().search_events(
+        query,
+        limit=limit,
+        agent=agent,
+        app=app,
+        since=since,
+        scope=scope,
+    )
     click.echo(_json.dumps(result, ensure_ascii=False, indent=2, default=str))
 
 
@@ -612,9 +622,15 @@ def sessions_search(query: str, limit: int, agent: str | None, app: str | None, 
 def sessions_scroll(run_id: str, event_id: int, direction: str, window: int):
     """Scroll before or after a session event."""
     import json as _json
-    from src.extensions.self_learning.session_index import SessionIndex
 
-    result = SessionIndex().scroll(run_id, event_id, direction=direction, window=window)
+    from src.extensions.self_learning.persistence.ledger import SelfLearningLedger
+
+    result = SelfLearningLedger().scroll_events(
+        run_id,
+        event_id,
+        direction=direction,
+        window=window,
+    )
     click.echo(_json.dumps(result, ensure_ascii=False, indent=2, default=str))
 
 
@@ -629,7 +645,7 @@ def sessions_prune(retention_days: int):
     """Prune old run/event history; curated memory is unaffected."""
     import json as _json
 
-    from src.extensions.self_learning.ledger import SelfLearningLedger
+    from src.extensions.self_learning.persistence.ledger import SelfLearningLedger
 
     result = SelfLearningLedger().prune_events(retention_days=retention_days)
     click.echo(_json.dumps(result, ensure_ascii=False, indent=2, default=str))
@@ -816,7 +832,8 @@ _MEMORY_SCOPES = ["project", "app", "application"]
 def memory_list(scope: str | None, scope_id: str):
     """List active curated memory."""
     import json as _json
-    from src.extensions.self_learning.memory_store import MemoryStore
+
+    from src.extensions.self_learning.persistence.memory_store import MemoryStore
 
     result = MemoryStore().list(scope=scope, scope_id=scope_id)
     click.echo(_json.dumps(result, ensure_ascii=False, indent=2, default=str))
@@ -829,7 +846,8 @@ def memory_list(scope: str | None, scope_id: str):
 def memory_add(scope: str, scope_id: str, content: str):
     """Add active memory directly from CLI."""
     import json as _json
-    from src.extensions.self_learning.memory_store import MemoryStore
+
+    from src.extensions.self_learning.persistence.memory_store import MemoryStore
 
     result = MemoryStore().add(scope, content, scope_id=scope_id)
     click.echo(_json.dumps(result, ensure_ascii=False, indent=2, default=str))
@@ -843,7 +861,8 @@ def memory_add(scope: str, scope_id: str, content: str):
 def memory_replace(scope: str, scope_id: str, target: str, content: str):
     """Replace active memory directly from CLI."""
     import json as _json
-    from src.extensions.self_learning.memory_store import MemoryStore
+
+    from src.extensions.self_learning.persistence.memory_store import MemoryStore
 
     result = MemoryStore().replace(scope, target, content, scope_id=scope_id)
     click.echo(_json.dumps(result, ensure_ascii=False, indent=2, default=str))
@@ -856,7 +875,8 @@ def memory_replace(scope: str, scope_id: str, target: str, content: str):
 def memory_remove(scope: str, scope_id: str, target: str):
     """Remove active memory directly from CLI."""
     import json as _json
-    from src.extensions.self_learning.memory_store import MemoryStore
+
+    from src.extensions.self_learning.persistence.memory_store import MemoryStore
 
     result = MemoryStore().remove(scope, target, scope_id=scope_id)
     click.echo(_json.dumps(result, ensure_ascii=False, indent=2, default=str))
@@ -872,7 +892,8 @@ def memory_remove(scope: str, scope_id: str, target: str):
 def memory_pending(status: str):
     """List exact writes waiting for approval (or their audit status)."""
     import json as _json
-    from src.extensions.self_learning.memory_store import MemoryStore
+
+    from src.extensions.self_learning.persistence.memory_store import MemoryStore
 
     result = MemoryStore().list_pending(status=None if status == "all" else status)
     click.echo(_json.dumps(result, ensure_ascii=False, indent=2, default=str))
@@ -882,7 +903,8 @@ def memory_pending(status: str):
 def memory_stats():
     """Show active memory capacity and pending-write status."""
     import json as _json
-    from src.extensions.self_learning.memory_store import MemoryStore
+
+    from src.extensions.self_learning.persistence.memory_store import MemoryStore
 
     result = MemoryStore().stats()
     click.echo(_json.dumps(result, ensure_ascii=False, indent=2, default=str))
@@ -896,7 +918,7 @@ def memory_export(out_path: str, fmt: str):
     import json as _json
     from datetime import datetime as _datetime
 
-    from src.extensions.self_learning.memory_store import MemoryStore
+    from src.extensions.self_learning.persistence.memory_store import MemoryStore
 
     store = MemoryStore()
     items = store.export_items()
@@ -948,6 +970,7 @@ def skill_proposals():
 def skill_proposals_list():
     """List generated skill proposals."""
     import json as _json
+
     from src.extensions.self_learning.proposal_writer import ProposalWriter
 
     click.echo(_json.dumps(ProposalWriter().list(), ensure_ascii=False, indent=2, default=str))
@@ -958,6 +981,7 @@ def skill_proposals_list():
 def skill_proposals_show(proposal_id: str):
     """Show a generated skill proposal."""
     import json as _json
+
     from src.extensions.self_learning.proposal_writer import ProposalWriter
 
     click.echo(_json.dumps(ProposalWriter().show(proposal_id), ensure_ascii=False, indent=2, default=str))
@@ -969,6 +993,7 @@ def skill_proposals_show(proposal_id: str):
 def skill_proposals_promote(proposal_id: str, destination: str):
     """Promote a proposal with SKILL.md into active skills."""
     import json as _json
+
     from src.extensions.self_learning.proposal_writer import ProposalWriter
 
     result = ProposalWriter().promote(proposal_id, destination=destination)
@@ -980,6 +1005,7 @@ def skill_proposals_promote(proposal_id: str, destination: str):
 def skill_proposals_archive(proposal_id: str):
     """Archive a generated skill proposal."""
     import json as _json
+
     from src.extensions.self_learning.proposal_writer import ProposalWriter
 
     result = ProposalWriter().archive(proposal_id)

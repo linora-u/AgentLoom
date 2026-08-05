@@ -462,9 +462,9 @@ class ReviewCLIService:
         owns_runtime = engine is None and orchestrator is None
         if engine is None:
             try:
-                from .evidence_gate import SQLiteEvidenceGate
                 from .paths import self_learning_db
-                from .review_engine import ReviewEngine
+                from .persistence.evidence_gate import SQLiteEvidenceGate
+                from .persistence.review_engine import ReviewEngine
             except ImportError as exc:  # pragma: no cover - integration guard
                 raise RuntimeError("ReviewEngine integration is unavailable") from exc
             db_path = self_learning_db()
@@ -510,9 +510,9 @@ class ReviewCLIService:
         if not self._owns_runtime:
             return self.engine, self.orchestrator
 
-        from .evidence_gate import SQLiteEvidenceGate
         from .paths import memory_config, self_learning_db
-        from .review_engine import ReviewEngine
+        from .persistence.evidence_gate import SQLiteEvidenceGate
+        from .persistence.review_engine import ReviewEngine
         from .review_orchestration import ReviewOrchestrator
 
         agent_config = self._application_config_resolver(scope_id) if scope_type == "application" else None

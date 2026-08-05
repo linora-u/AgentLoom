@@ -8,7 +8,7 @@ from pathlib import Path
 import pytest
 from click.testing import CliRunner
 
-from src.extensions.self_learning.memory_store import MemoryStore
+from src.extensions.self_learning.persistence.memory_store import MemoryStore
 
 
 @pytest.fixture()
@@ -34,7 +34,7 @@ def seeded_store(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> MemoryStore
         "active project fact",
         memory_key="export:active-project-fact",
     )
-    from src.extensions.self_learning.review_engine import ReviewEngine
+    from src.extensions.self_learning.persistence.review_engine import ReviewEngine
 
     ReviewEngine(store.db_path).review(
         "project",

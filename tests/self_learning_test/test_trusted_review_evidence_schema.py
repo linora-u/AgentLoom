@@ -5,7 +5,7 @@ from pathlib import Path
 
 import pytest
 
-from src.extensions.self_learning.ledger import SelfLearningLedger
+from src.extensions.self_learning.persistence.ledger import SelfLearningLedger
 
 EXPECTED_COLUMNS = [
     ("event_id", "TEXT", 1, None, 1),
@@ -21,7 +21,6 @@ EXPECTED_COLUMNS = [
 
 
 def _reopen(db: Path) -> SelfLearningLedger:
-    SelfLearningLedger._initialized_paths.discard(str(db.resolve()))
     return SelfLearningLedger(db)
 
 

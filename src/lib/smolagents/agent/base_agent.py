@@ -587,8 +587,8 @@ class BaseAgent(ABC):
             return tasks
         root_state = None
         try:
-            from src.extensions.self_learning.memory_store import MemoryStore
             from src.extensions.self_learning.paths import self_learning_enabled
+            from src.extensions.self_learning.persistence.memory_store import MemoryStore
 
             root_state = require_root_run_state()
             effective_config = getattr(self, "_effective_agent_config", None) or self._config
