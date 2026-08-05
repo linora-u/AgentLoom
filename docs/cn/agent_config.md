@@ -821,11 +821,10 @@ tools:
 
 ```yaml
 tools:
-  - name: "codex"
+  - name: "grep_search"
     fixed_args:
-      cwd: "."
-      sandbox: "workspace-write"
-      search: "false"
+      path: "."
+      case_insensitive: false
 ```
 
 #### 预定义工具 + 元数据覆盖
