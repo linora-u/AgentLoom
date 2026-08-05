@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import sqlite3
 import threading
 import time
 from concurrent.futures import ThreadPoolExecutor
@@ -13,6 +12,7 @@ import yaml
 
 import src.lib.smolagents.agent.base_agent as base_agent_module
 import src.lib.smolagents.prompts.prompt_builder as prompt_builder_module
+from src.extensions.self_learning.persistence.review_engine import ReviewEngine
 from src.lib.logging import get_global_logger, set_global_logger
 from src.lib.smolagents.agent.loom_mixin import LoomAgentMixin
 from src.lib.smolagents.hooks import HookEvent, HookHandler, HookPlan, HookResult, HookRun
@@ -1282,8 +1282,7 @@ def test_session_end_persistence_failure_never_builds_completed_run_review(
     root_run_id = failed_root_ids[0]
     ledger = SelfLearningLedger()
     assert ledger.completed_review_context(root_run_id, tool_result_limit=1) is None
-    with sqlite3.connect(ledger.db_path) as conn:
-        assert conn.execute("SELECT COUNT(*) FROM review_batches").fetchone()[0] == 0
+    assert ReviewEngine(ledger.db_path).status()["batches"] == []
 
 
 def test_custom_session_end_telemetry_cannot_create_orphan_review_audit(
@@ -1342,8 +1341,7 @@ def test_custom_session_end_telemetry_cannot_create_orphan_review_audit(
     root_run_id = failed_root_ids[0]
     ledger = SelfLearningLedger()
     assert ledger.completed_review_context(root_run_id, tool_result_limit=1) is None
-    with sqlite3.connect(ledger.db_path) as conn:
-        assert conn.execute("SELECT COUNT(*) FROM review_batches").fetchone()[0] == 0
+    assert ReviewEngine(ledger.db_path).status()["batches"] == []
 
 
 def test_same_base_agent_concurrent_top_level_runs_do_not_cross_context(monkeypatch):

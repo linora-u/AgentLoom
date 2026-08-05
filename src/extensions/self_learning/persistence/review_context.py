@@ -132,6 +132,8 @@ class ReviewContextStore:
         }
 
     def _unreviewed_roots(self, application_id: str) -> list[tuple[str, str]]:
+        if not self.db_path.exists():
+            return []
         try:
             with self._connect() as conn:
                 if not _table_exists(conn, "runs"):
@@ -176,6 +178,12 @@ class ReviewContextStore:
         source_runs: list[dict[str, str]] = []
         allowed: list[dict[str, Any]] = []
         context: list[dict[str, Any]] = []
+        if not self.db_path.exists():
+            return {
+                "source_runs": source_runs,
+                "allowed_provenance": allowed,
+                "context": context,
+            }
         try:
             with self._connect() as conn:
                 if _table_exists(conn, "trusted_review_evidence") and _table_exists(
