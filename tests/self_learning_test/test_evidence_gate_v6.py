@@ -358,7 +358,7 @@ def _active_memory(
 
 
 def test_application_fact_requires_exact_trusted_bound_evidence(db_path: Path) -> None:
-    from src.extensions.self_learning.evidence_gate import SQLiteEvidenceGate
+    from src.extensions.self_learning.persistence.evidence_gate import SQLiteEvidenceGate
 
     text = "The API page limit is 100 rows."
     with sqlite3.connect(db_path) as conn:
@@ -379,7 +379,7 @@ def test_application_fact_requires_exact_trusted_bound_evidence(db_path: Path) -
 
 
 def test_application_fact_quarantines_cross_application_provenance(db_path: Path) -> None:
-    from src.extensions.self_learning.evidence_gate import SQLiteEvidenceGate
+    from src.extensions.self_learning.persistence.evidence_gate import SQLiteEvidenceGate
 
     text = "The API page limit is 100 rows."
     with sqlite3.connect(db_path) as conn:
@@ -400,7 +400,7 @@ def test_application_fact_quarantines_cross_application_provenance(db_path: Path
 def test_application_fact_quarantines_a_fabricated_event_binding(
     db_path: Path,
 ) -> None:
-    from src.extensions.self_learning.evidence_gate import SQLiteEvidenceGate
+    from src.extensions.self_learning.persistence.evidence_gate import SQLiteEvidenceGate
 
     result = SQLiteEvidenceGate(db_path).evaluate(
         "application",
@@ -415,7 +415,7 @@ def test_application_fact_quarantines_a_fabricated_event_binding(
 def test_project_fact_accepts_only_direct_project_evidence_or_two_apps(
     db_path: Path,
 ) -> None:
-    from src.extensions.self_learning.evidence_gate import SQLiteEvidenceGate
+    from src.extensions.self_learning.persistence.evidence_gate import SQLiteEvidenceGate
 
     direct = "Exports use UTF-8."
     with sqlite3.connect(db_path) as conn:
@@ -453,7 +453,7 @@ def test_project_fact_accepts_only_direct_project_evidence_or_two_apps(
 
 
 def test_project_fact_quarantines_model_scope_expansion(db_path: Path) -> None:
-    from src.extensions.self_learning.evidence_gate import SQLiteEvidenceGate
+    from src.extensions.self_learning.persistence.evidence_gate import SQLiteEvidenceGate
 
     text = "The tenant is app-local."
     with sqlite3.connect(db_path) as conn:
@@ -469,7 +469,7 @@ def test_project_fact_quarantines_model_scope_expansion(db_path: Path) -> None:
 def test_application_experience_requires_one_complete_chain_with_verifier(
     db_path: Path,
 ) -> None:
-    from src.extensions.self_learning.evidence_gate import SQLiteEvidenceGate
+    from src.extensions.self_learning.persistence.evidence_gate import SQLiteEvidenceGate
 
     with sqlite3.connect(db_path) as conn:
         _experience_chain(conn, root="root-a", app="app-a", verifier=True)
@@ -520,7 +520,7 @@ def test_application_experience_requires_role_specific_content_binding(
     replacement: str,
     reason: str,
 ) -> None:
-    from src.extensions.self_learning.evidence_gate import SQLiteEvidenceGate
+    from src.extensions.self_learning.persistence.evidence_gate import SQLiteEvidenceGate
 
     with sqlite3.connect(db_path) as conn:
         _experience_chain(conn, root="root-a", app="app-a", verifier=True)
@@ -569,7 +569,7 @@ def test_application_experience_rejects_valid_fragment_with_extra_steps(
     replacement: str,
     reason: str,
 ) -> None:
-    from src.extensions.self_learning.evidence_gate import SQLiteEvidenceGate
+    from src.extensions.self_learning.persistence.evidence_gate import SQLiteEvidenceGate
 
     with sqlite3.connect(db_path) as conn:
         _experience_chain(conn, root="root-a", app="app-a", verifier=True)
@@ -588,7 +588,7 @@ def test_application_experience_rejects_valid_fragment_with_extra_steps(
 
 
 def test_two_root_experience_also_requires_content_binding(db_path: Path) -> None:
-    from src.extensions.self_learning.evidence_gate import SQLiteEvidenceGate
+    from src.extensions.self_learning.persistence.evidence_gate import SQLiteEvidenceGate
 
     with sqlite3.connect(db_path) as conn:
         _experience_chain(conn, root="root-a", app="app-a", verifier=False)
@@ -614,7 +614,7 @@ def test_two_root_experience_also_requires_content_binding(db_path: Path) -> Non
 def test_experience_content_fields_cannot_be_joined_across_roots(
     db_path: Path,
 ) -> None:
-    from src.extensions.self_learning.evidence_gate import SQLiteEvidenceGate
+    from src.extensions.self_learning.persistence.evidence_gate import SQLiteEvidenceGate
 
     with sqlite3.connect(db_path) as conn:
         _experience_chain(conn, root="root-a", app="app-a", verifier=False)
@@ -647,7 +647,7 @@ def test_experience_content_fields_cannot_be_joined_across_roots(
 def test_experience_binding_canonicalizes_benign_json_formatting(
     db_path: Path,
 ) -> None:
-    from src.extensions.self_learning.evidence_gate import SQLiteEvidenceGate
+    from src.extensions.self_learning.persistence.evidence_gate import SQLiteEvidenceGate
 
     with sqlite3.connect(db_path) as conn:
         _experience_chain(conn, root="root-a", app="app-a", verifier=True)
@@ -669,7 +669,7 @@ def test_experience_binding_canonicalizes_benign_json_formatting(
 def test_application_experience_without_verifier_requires_two_repeated_roots(
     db_path: Path,
 ) -> None:
-    from src.extensions.self_learning.evidence_gate import SQLiteEvidenceGate
+    from src.extensions.self_learning.persistence.evidence_gate import SQLiteEvidenceGate
 
     with sqlite3.connect(db_path) as conn:
         _experience_chain(conn, root="root-a", app="app-a", verifier=False)
@@ -699,7 +699,7 @@ def test_application_experience_without_verifier_requires_two_repeated_roots(
 def test_application_experience_rejects_missing_stable_tool_call_ids(
     db_path: Path,
 ) -> None:
-    from src.extensions.self_learning.evidence_gate import SQLiteEvidenceGate
+    from src.extensions.self_learning.persistence.evidence_gate import SQLiteEvidenceGate
 
     with sqlite3.connect(db_path) as conn:
         _experience_chain(
@@ -729,7 +729,7 @@ def test_application_experience_rejects_missing_stable_tool_call_ids(
 def test_application_experience_does_not_join_attempts_across_roots(
     db_path: Path,
 ) -> None:
-    from src.extensions.self_learning.evidence_gate import SQLiteEvidenceGate
+    from src.extensions.self_learning.persistence.evidence_gate import SQLiteEvidenceGate
 
     with sqlite3.connect(db_path) as conn:
         _experience_chain(conn, root="root-a", app="app-a", verifier=False)
@@ -776,7 +776,7 @@ def test_application_experience_does_not_join_attempts_across_roots(
 def test_application_experience_two_roots_must_repeat_the_same_action(
     db_path: Path,
 ) -> None:
-    from src.extensions.self_learning.evidence_gate import SQLiteEvidenceGate
+    from src.extensions.self_learning.persistence.evidence_gate import SQLiteEvidenceGate
 
     with sqlite3.connect(db_path) as conn:
         _experience_chain(
@@ -811,7 +811,7 @@ def test_application_experience_two_roots_must_repeat_the_same_action(
 def test_project_experience_revalidates_two_distinct_application_chains(
     db_path: Path,
 ) -> None:
-    from src.extensions.self_learning.evidence_gate import SQLiteEvidenceGate
+    from src.extensions.self_learning.persistence.evidence_gate import SQLiteEvidenceGate
 
     payload = _experience_payload()
     with sqlite3.connect(db_path) as conn:
@@ -844,7 +844,7 @@ def test_project_experience_revalidates_two_distinct_application_chains(
 def test_project_experience_does_not_count_an_unverified_active_item(
     db_path: Path,
 ) -> None:
-    from src.extensions.self_learning.evidence_gate import SQLiteEvidenceGate
+    from src.extensions.self_learning.persistence.evidence_gate import SQLiteEvidenceGate
 
     payload = _experience_payload()
     with sqlite3.connect(db_path) as conn:
@@ -893,7 +893,7 @@ def test_unsafe_candidate_content_is_quarantined(
     db_path: Path,
     unsafe_text: str,
 ) -> None:
-    from src.extensions.self_learning.evidence_gate import SQLiteEvidenceGate
+    from src.extensions.self_learning.persistence.evidence_gate import SQLiteEvidenceGate
 
     result = SQLiteEvidenceGate(db_path).evaluate("application", "app-a", _fact_candidate(unsafe_text))
 
@@ -903,7 +903,7 @@ def test_unsafe_candidate_content_is_quarantined(
 
 
 def test_missing_evidence_store_fails_closed_to_pending(tmp_path: Path) -> None:
-    from src.extensions.self_learning.evidence_gate import SQLiteEvidenceGate
+    from src.extensions.self_learning.persistence.evidence_gate import SQLiteEvidenceGate
 
     result = SQLiteEvidenceGate(tmp_path / "missing.db").evaluate(
         "application",

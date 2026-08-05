@@ -99,7 +99,7 @@ def test_memory_state_cohort_is_not_cut_off_by_runtime_prompt_budget(
     tampered_db = tmp_path / "uncompleted-root.db"
     tampered_ledger = offline_runner.SelfLearningLedger(tampered_db)
     offline_runner._append_cases(tampered_ledger, [approval_case])
-    with tampered_ledger._connect() as conn:
+    with offline_runner.SelfLearningDatabase(tampered_db).connect() as conn:
         conn.execute(
             "UPDATE runs SET status='indexed' WHERE run_id=?",
             (f"memory-run-{approval_case.category_index:05d}",),
@@ -117,7 +117,7 @@ def test_memory_state_cohort_is_not_cut_off_by_runtime_prompt_budget(
     ):
         offline_runner._exercise_memory_case(store, approval_case)
 
-    with tampered_ledger._connect() as conn:
+    with offline_runner.SelfLearningDatabase(tampered_db).connect() as conn:
         conn.execute(
             "UPDATE runs SET status='completed' WHERE run_id=?",
             (f"memory-run-{approval_case.category_index:05d}",),
@@ -228,7 +228,7 @@ def test_release_source_gate_ignores_unrelated_worktree_changes(
     assert {
         "src/extensions/self_learning/application_scope.py",
         "src/extensions/self_learning/paths.py",
-        "src/extensions/self_learning/review_engine.py",
+        "src/extensions/self_learning/persistence/review_engine.py",
         "src/extensions/self_learning/review_types.py",
         "src/lib/runtime/context.py",
         "src/lib/trusted_memory_evidence.py",

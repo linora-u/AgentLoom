@@ -7,7 +7,7 @@ from pathlib import Path
 import pytest
 from click.testing import CliRunner
 
-from src.extensions.self_learning.memory_store import MemoryStore
+from src.extensions.self_learning.persistence.memory_store import MemoryStore
 
 
 def _config(*, project_budget: int = 8000) -> dict:

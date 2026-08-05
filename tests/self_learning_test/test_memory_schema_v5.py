@@ -7,7 +7,7 @@ from pathlib import Path
 
 import pytest
 
-from src.extensions.self_learning.ledger import (
+from src.extensions.self_learning.persistence.ledger import (
     SelfLearningLedger,
     memory_content_hash,
 )
@@ -361,7 +361,6 @@ def test_future_schema_is_rejected_before_v6_changes_any_table_or_row(
         )
     before = _logical_database_snapshot(db)
 
-    SelfLearningLedger._initialized_paths.discard(str(db.resolve()))
     with pytest.raises(RuntimeError, match="schema version 7.*supports up to 6"):
         SelfLearningLedger(db)
 
@@ -562,7 +561,6 @@ def test_v4_to_v6_migration_is_atomic_when_typed_migration_fails(
         "_migrate_v6_typed_review",
         classmethod(fail_migration),
     )
-    SelfLearningLedger._initialized_paths.discard(str(db.resolve()))
 
     with pytest.raises(RuntimeError, match="forced v6 migration failure"):
         SelfLearningLedger(db)
