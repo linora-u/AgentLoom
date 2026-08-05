@@ -18,6 +18,14 @@ AgentLoom 将内置工具的 metadata 与 Python implementation 加载彻底分�
 代码直接依赖 `src.tools.catalog`；只测试某个具体 implementation 时，可以直接
 导入对应工具组。
 
+implementation group 的 `__init__.py` 兼容导出必须保持 lazy：只有真正请求某个
+导出名时才允许加载对应 module，不能提前导入 sibling implementation。catalog
+引用指向职责最窄的 implementation module，不指向这些 package facade。
+
+catalog 同时负责面向配置的 `fixed_args` 参数契约。只读校验直接检查 metadata，
+不导入 implementation；运行时构造再用真实 callable 复核。边界测试会比较两份
+签名，接口漂移会直接导致测试失败。
+
 依赖方向固定为：
 
 ```text
