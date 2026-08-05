@@ -10,7 +10,7 @@ The configuration of AgentLoom is primarily divided into three major categories,
 |----------|----------|------------|
 | `system.yaml` | `config/system.yaml` | **Global system configuration**. Controls execution environment, tool lists, tool access control, code execution permissions and other system-level behaviors. |
 | `llm.yaml` | `config/llm.yaml` | **Global model configuration**. Independently manages parameters for all LLM models (`api_key`, `base_url`, temperature, timeout, retry policies, etc.) and Langfuse observability configuration. |
-| `agent_xxx.yaml` | `applications/<app>/workflows/*.yaml` | **Agent configuration**. Defines a single agent's role, workflow, tools used, model type (`model_type`), etc. Worker Agents also support batch parallel invocation via the `concurrency` field (see [Agent Config 3.11](agent_config.md#311-concurrency--concurrency-configuration)). |
+| `agent_xxx.yaml` | `applications/<app>/workflows/*.yaml` | **Agent configuration**. Defines role, workflow, tools, and model type. A top-level Supervisor may also enable [Goal Mode](goal_mode.md); Workers cannot own Goals. |
 | *Application-level system configuration* | `applications/<app>/config/system.yaml` | **Optional application-level override**. Used to override default system behaviors for specific applications (e.g., modifying tool access control or replacing default tools). |
 
 > For more information, refer to:
@@ -123,3 +123,13 @@ full_dict = C.raw
 1. **Lazy loading**: On first access to `C`, it triggers finding and merging all configuration file layers from the root directory.
 2. **Global caching**: The parsed results are cached in `_ACTIVE_CONFIG`, ensuring configuration consistency throughout the lifecycle.
 3. **Dual storage**: The `UnifiedConfig` object internally maintains both the merged `_raw` dictionary and an independent `_llm_config` (Pydantic object).
+
+## 5. Goal Mode configuration boundary
+
+Goal Mode is configured only in a top-level Supervisor Agent YAML. It is not a
+global or Application `system.yaml` overlay, and Workers cannot configure it.
+Goal task checkpoints add `goal.json`; every run manifest projects the same
+structured state and terminal evidence is copied to `audit/goal.json`.
+`budget_limited` preserves the checkpoint so a YAML budget change can resume the
+same `task_id`. See [Goal Mode](goal_mode.md) for configuration, continuation,
+budget, and schedule behavior.

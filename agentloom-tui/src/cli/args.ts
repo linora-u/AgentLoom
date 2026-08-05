@@ -65,7 +65,7 @@ export function formatSnapshot(snapshot: BootstrapResultDto): string {
 function statusCounts(statuses: readonly RuntimeStatus[], includeNeverRun: boolean) {
   const counts: Record<string, number> = { total: statuses.length }
   if (includeNeverRun) counts.never_run = 0
-  for (const status of ["running", "completed", "interrupted", "failed", "crashed", "unknown"] as const) {
+  for (const status of ["running", "completed", "budget_limited", "interrupted", "failed", "crashed", "unknown"] as const) {
     counts[status] = 0
   }
   for (const status of statuses) {

@@ -1,0 +1,32 @@
+name: "goal_contract_auditor"
+description: "Audit one Goal Mode configuration or state-contract slice against code and tests."
+model_type: "summary"
+tool_call_type: "tool_call"
+max_steps: 2
+concurrency: 1
+
+workflow: |
+  Inspect the requested AgentLoom Goal Mode contract slice using only the
+  EVIDENCE_BUNDLE embedded in the query, then return a concise evidence record with
+  these exact headings: CONTRACT, EVIDENCE, TESTS, RISKS, VERDICT. Cite concrete
+  repository paths and symbols. Do not edit files. Do not infer a pass when the
+  implementation or test evidence is absent. Keep the response under 1800 words.
+  Do not call tools or request more evidence. The specification alone is not
+  implementation evidence. Your first model response must be the final verdict.
+
+agent_function_schema:
+  description: "Audit one Goal Mode configuration or persisted-state contract slice."
+  inputs:
+    task_id:
+      description: "Stable audit case identifier used by the batch ledger."
+      required: true
+    query:
+      description: "Audit lens, acceptance criteria, and exact repository paths."
+      required: true
+  output:
+    description: "Evidence-backed contract verdict with cited code and tests."
+
+tools: []
+
+skills: []
+worker_agents: []

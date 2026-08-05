@@ -48,6 +48,10 @@ environment. `agentloom --snapshot` is the non-interactive health check.
   workflow source files, and validation. It does not expose model credentials.
 - Recent Runs are secondary navigation. Their default detail is a compact,
   actionable summary; raw event objects and full log bodies are not dumped.
+- Goal-aware Runs expose `active`, `complete`, and `budget_limited` state in the
+  same list/detail projection. Run detail shows cumulative/remaining tokens,
+  objective, and completion evidence. While a Run is active the bridge reads
+  canonical checkpoint `goal.json`; terminal Runs use the manifest/audit copy.
 
 ## Studio Agent Loop
 

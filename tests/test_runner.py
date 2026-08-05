@@ -1291,6 +1291,140 @@ def test_structured_run_api_is_publicly_exported():
 
 class TestExecuteApp:
     @patch("src.runner.YamlConfiguredSupervisorAgent")
+    def test_resume_rejects_disabling_a_persisted_active_goal(
+        self,
+        mock_cls,
+        fake_yaml: Path,
+    ) -> None:
+        from src.application_run import (
+            ApplicationRunBudgetLimited,
+            ApplicationRunError,
+        )
+        from src.lib.goal import GoalBudgetLimitedError, GoalState
+        from src.runner import execute_app
+
+        fake_yaml.write_text(_SAMPLE_YAML + "\ngoal:\n  enabled: true\n  token_budget: 100\n")
+        state = GoalState.create(
+            objective="Finish the application.",
+            objective_fingerprint="fingerprint",
+            token_budget=100,
+        ).with_usage(90, 20)
+
+        def _limit(_task, **kwargs):
+            manager = kwargs["checkpoint_manager"]
+            manager.save_goal(kwargs["task_id"], state.to_dict())
+            manager.record_task_status_changed(kwargs["task_id"], "budget_limited")
+            raise GoalBudgetLimitedError(state)
+
+        mock_cls.return_value.run.side_effect = _limit
+        with pytest.raises(ApplicationRunBudgetLimited) as limited:
+            execute_app(str(fake_yaml), file_logging=False)
+
+        fake_yaml.write_text(_SAMPLE_YAML + "\ngoal: false\n", encoding="utf-8")
+        with pytest.raises(ApplicationRunError) as rejected:
+            execute_app(
+                str(fake_yaml),
+                file_logging=False,
+                resume_task_id=limited.value.run.task_id,
+            )
+
+        assert isinstance(rejected.value.original_error, ValueError)
+        assert "Goal mode is disabled" in str(rejected.value.original_error)
+
+    @patch("src.runner.YamlConfiguredSupervisorAgent")
+    def test_budget_limited_is_structured_resumable_outcome(
+        self,
+        mock_cls,
+        fake_yaml: Path,
+    ) -> None:
+        from src.application_run import ApplicationRunBudgetLimited
+        from src.lib.goal import GoalBudgetLimitedError, GoalState
+        from src.runner import execute_app
+
+        state = GoalState.create(
+            objective="Finish the application.",
+            objective_fingerprint="fingerprint",
+            token_budget=100,
+        ).with_usage(90, 20)
+
+        def _run(_task, **kwargs):
+            manager = kwargs["checkpoint_manager"]
+            manager.save_goal(kwargs["task_id"], state.to_dict())
+            manager.record_task_status_changed(kwargs["task_id"], "budget_limited")
+            raise GoalBudgetLimitedError(state)
+
+        mock_cls.return_value.run.side_effect = _run
+        events = []
+
+        with pytest.raises(ApplicationRunBudgetLimited) as caught:
+            execute_app(str(fake_yaml), file_logging=False, event_sink=events.append)
+
+        assert caught.value.resumable is True
+        assert caught.value.goal["used_tokens"] == 110
+        with pytest.raises(TypeError):
+            caught.value.goal["status"] = "active"
+        assert [event.event for event in events] == [
+            "run.started",
+            "run.budget_limited",
+        ]
+        assert events[-1].goal["status"] == "budget_limited"
+        with pytest.raises(TypeError):
+            events[-1].goal["status"] = "active"
+        manifest = json.loads(
+            caught.value.run.manifest_path.read_text(encoding="utf-8")
+        )
+        assert manifest["status"] == "budget_limited"
+        assert manifest["goal"]["used_tokens"] == 110
+        assert manifest["goal_artifact"] == "audit/goal.json"
+        assert (
+            caught.value.run.run_dir.parent.parent.parent
+            / "checkpoints"
+            / "test_app"
+            / caught.value.run.task_id
+            / "goal.json"
+        ).exists()
+
+    @patch("src.runner.YamlConfiguredSupervisorAgent")
+    def test_completed_goal_is_copied_before_checkpoint_cleanup(
+        self,
+        mock_cls,
+        fake_yaml: Path,
+    ) -> None:
+        from src.lib.goal import GoalState
+        from src.runner import execute_app
+
+        state = GoalState.create(
+            objective="Finish the application.",
+            objective_fingerprint="fingerprint",
+            token_budget=None,
+        ).with_completion("Delivered and verified.")
+
+        def _run(_task, **kwargs):
+            manager = kwargs["checkpoint_manager"]
+            manager.save_goal(kwargs["task_id"], state.to_dict())
+            manager.record_task_status_changed(
+                kwargs["task_id"],
+                "completed",
+                result=state.evidence,
+            )
+            return state.evidence
+
+        mock_cls.return_value.run.side_effect = _run
+
+        result = execute_app(str(fake_yaml), file_logging=False)
+
+        manifest = json.loads(result.run.manifest_path.read_text(encoding="utf-8"))
+        assert result.goal["status"] == "complete"
+        with pytest.raises(TypeError):
+            result.goal["status"] = "active"
+        assert manifest["goal"]["evidence"] == "Delivered and verified."
+        assert json.loads(
+            (result.run.run_dir / manifest["goal_artifact"]).read_text(
+                encoding="utf-8"
+            )
+        )["status"] == "complete"
+
+    @patch("src.runner.YamlConfiguredSupervisorAgent")
     def test_returns_canonical_receipt_after_durable_finalization(
         self,
         mock_cls,
@@ -1305,6 +1439,10 @@ class TestExecuteApp:
         result = execute_app(str(fake_yaml), file_logging=False)
 
         assert result.output == "structured-output"
+        assert result.goal is None
+        assert "goal" not in json.loads(
+            result.run.manifest_path.read_text(encoding="utf-8")
+        )
         assert result.started_at <= result.ended_at
         assert result.run.application_id == "test_app"
         assert result.run.run_dir.is_absolute()
@@ -1359,9 +1497,23 @@ class TestExecuteApp:
         import json
 
         from src.application_run import ApplicationRunError
+        from src.lib.goal import GoalState
         from src.runner import execute_app
 
-        mock_cls.return_value.run.side_effect = RuntimeError("boom")
+        fake_yaml.write_text(_SAMPLE_YAML + "\ngoal: true\n", encoding="utf-8")
+        state = GoalState.create(
+            objective="Finish the application.",
+            objective_fingerprint="fingerprint",
+            token_budget=None,
+        )
+
+        def _fail(_task, **kwargs):
+            kwargs["checkpoint_manager"].save_goal(
+                kwargs["task_id"], state.to_dict()
+            )
+            raise RuntimeError("boom")
+
+        mock_cls.return_value.run.side_effect = _fail
         events = []
 
         with pytest.raises(ApplicationRunError, match="Agent execution failed") as caught:
@@ -1374,6 +1526,7 @@ class TestExecuteApp:
         assert caught.value.phase == "execution"
         assert [event.event for event in events] == ["run.started", "run.failed"]
         assert events[0].run == events[1].run == caught.value.run
+        assert events[-1].goal["status"] == "active"
         manifest = json.loads(
             caught.value.run.manifest_path.read_text(encoding="utf-8")
         )
@@ -1386,9 +1539,23 @@ class TestExecuteApp:
         fake_yaml: Path,
     ) -> None:
         from src.application_run import ApplicationRunInterrupted
+        from src.lib.goal import GoalState
         from src.runner import execute_app
 
-        mock_cls.return_value.run.side_effect = KeyboardInterrupt()
+        fake_yaml.write_text(_SAMPLE_YAML + "\ngoal: true\n", encoding="utf-8")
+        state = GoalState.create(
+            objective="Finish the application.",
+            objective_fingerprint="fingerprint",
+            token_budget=None,
+        )
+
+        def _interrupt(_task, **kwargs):
+            kwargs["checkpoint_manager"].save_goal(
+                kwargs["task_id"], state.to_dict()
+            )
+            raise KeyboardInterrupt()
+
+        mock_cls.return_value.run.side_effect = _interrupt
         events = []
 
         with pytest.raises(ApplicationRunInterrupted) as caught:
@@ -1404,6 +1571,7 @@ class TestExecuteApp:
             "run.interrupted",
         ]
         assert events[-1].run == caught.value.run
+        assert events[-1].goal["status"] == "active"
 
     def test_preflight_failure_emits_rejected_without_allocating(
         self,

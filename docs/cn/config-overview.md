@@ -10,7 +10,7 @@ AgentLoom 的配置主要分为三大类，分别存放在不同的配置文件�
 |----------|----------|------------|
 | `system.yaml` | `config/system.yaml` | **全局系统配置**。控制执行环境、工具列表、工作区路径、代码执行权限等系统级行为。 |
 | `llm.yaml` | `config/llm.yaml` | **全局模型配置**。独立管理所有 LLM 模型的参数（`api_key`、`base_url`、温度、超时、重试策略等）以及 Langfuse 观测配置。 |
-| `agent_xxx.yaml` | `applications/<app>/workflows/*.yaml` | **Agent 配置**。定义单个智能体的角色、工作流（Workflow）、所用工具、模型类型（`model_type`）等；Worker Agent 还可通过 `concurrency` 字段支持批量并发调用（详见 [Agent 配置文档 3.11 节](agent_config.md#311-concurrency--并发度配置)）。 |
+| `agent_xxx.yaml` | `applications/<app>/workflows/*.yaml` | **Agent 配置**。定义角色、workflow、工具和模型类型；顶层 Supervisor 还可配置 [Goal Mode](goal_mode.md)，Worker 不允许配置 Goal。 |
 | *应用级系统配置* | `applications/<app>/config/system.yaml` | **可选的应用级覆盖**。用于覆盖特定应用的默认系统行为（例如修改工作区或替换默认工具）。 |
 
 > 详情参考：
@@ -113,3 +113,12 @@ full_dict = C.raw
 1. **懒加载 (Lazy Load)**：首次访问 `C` 时，触发从根目录寻找并合并所有层级的配置文件。
 2. **全局缓存**：解析结果被缓存在 `_ACTIVE_CONFIG` 中，保证全生命周期配置一致。
 3. **双轨存储**：`UnifiedConfig` 对象内部同时维护了合并后的 `_raw` 字典以及独立的 `_llm_config` (Pydantic 对象)。
+
+## 5. Goal Mode 的配置边界
+
+Goal Mode 只能配置在顶层 Supervisor Agent YAML，不属于全局或 Application
+`system.yaml` overlay，Worker 也不能配置。Goal task checkpoint 额外包含
+`goal.json`；每个 run manifest 暴露相同的结构化状态，终态复制到
+`audit/goal.json`。`budget_limited` 保留 checkpoint，修改 YAML 预算后沿用同一
+`task_id` resume。完整字段、continuation、预算和调度语义见
+[Goal Mode](goal_mode.md)。

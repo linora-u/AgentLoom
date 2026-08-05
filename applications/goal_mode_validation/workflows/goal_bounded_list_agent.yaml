@@ -1,0 +1,35 @@
+name: "goal_bounded_list_agent"
+description: "Validate bounded Goal completion and Goal-mode workflow-list merging."
+model_type: "powerful"
+tool_call_type: "code_act"
+max_steps: 20
+goal:
+  enabled: true
+  token_budget: 600000
+
+workflow:
+  - "Call run_goal_audit_batch for worker_name=contract, concurrency=1, and one task config_contract covering strict config, stable goal_id, and numbered list semantics; retain its completed result."
+  - "Call run_goal_audit_batch for worker_name=lifecycle, concurrency=1, and one task lifecycle_contract covering normal-final continuation, max_steps continuation, explicit completion, and resume budget invariants; retain its completed result."
+  - "Call run_goal_audit_batch for worker_name=observability, concurrency=1, and one task observability_contract covering manifest, JSONL, schedule budget_limited, TUI, and disabled-mode zero-impact agreement; retain its completed result."
+  - "Send the three results to goal_evidence_synthesizer, persist them as run_name bounded_list, and verify markers [\"# Goal Mode Validation\", \"## Configuration Contract\", \"## Verdict\"]."
+  - "Call get_goal, verify the configured budget is 600000 and usage includes Worker calls, then call update_goal(status=\"complete\", evidence=<report path and verification result>). Do not treat final_answer or Todo as completion."
+
+tools:
+  - name: "run_goal_audit_batch"
+    module: "applications.goal_mode_validation.agent_tools.report_tools"
+    function: "run_goal_audit_batch"
+  - name: "persist_goal_validation_report"
+    module: "applications.goal_mode_validation.agent_tools.report_tools"
+    function: "persist_goal_validation_report"
+  - name: "verify_goal_validation_report"
+    module: "applications.goal_mode_validation.agent_tools.report_tools"
+    function: "verify_goal_validation_report"
+
+worker_agents:
+  - path: "applications/goal_mode_validation/workflows/worker_agents/evidence_synthesizer.yaml"
+
+skills: []
+execution_env:
+  type: "local"
+  executor_kwargs:
+    timeout_seconds: 1200

@@ -44,7 +44,49 @@ def test_runner_uses_canonical_agentloom_command_by_default(tmp_path: Path) -> N
         "src",
         "run",
         "agent.yaml",
+        "--output-format",
+        "jsonl",
     ]
+
+
+def test_runner_persists_goal_budget_limit_as_resumable_terminal_status(
+    tmp_path: Path,
+) -> None:
+    store = ScheduleStore(tmp_path)
+    job = _job(store, tmp_path)
+    event = {
+        "schema_version": 1,
+        "event": "run.budget_limited",
+        "run": {"task_id": "task_goal", "run_id": "run_goal"},
+        "error": "Goal token budget exhausted",
+        "goal": {
+            "schema_version": 1,
+            "status": "budget_limited",
+            "objective": "finish the audit",
+            "token_budget": 100,
+            "prompt_tokens": 90,
+            "completion_tokens": 30,
+            "used_tokens": 120,
+            "remaining_tokens": 0,
+        },
+    }
+    command = [
+        sys.executable,
+        "-c",
+        f"import json, sys; print(json.dumps({event!r})); sys.exit(1)",
+    ]
+
+    execution = ScheduleRunner(
+        store,
+        command_factory=lambda _job: command,
+        poll_seconds=0.01,
+    ).run_now(job["id"], now=NOW)
+
+    assert execution["status"] == "budget_limited"
+    assert execution["exit_code"] == 1
+    assert execution["error"] == "Goal token budget exhausted"
+    assert execution["goal"]["used_tokens"] == 120
+    assert store.get_job(job["id"])["last_status"] == "budget_limited"
 
 
 def test_default_runner_isolated_mode_rejects_project_local_src_shadowing(tmp_path: Path) -> None:

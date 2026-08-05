@@ -1194,7 +1194,7 @@ function WorkspaceOverview(props: {
             {props.groups.runs.length} 次 · {count("completed")} 成功 · {count("failed")} 失败
           </text>
           <text fg={props.theme.text}>
-            {count("crashed")} 崩溃 · {count("interrupted")} 中断 · {active().length} 运行中
+            {count("budget_limited")} 预算受限 · {count("crashed")} 崩溃 · {count("interrupted")} 中断 · {active().length} 运行中
           </text>
           <Show when={count("unknown") > 0}>
             <text fg={props.theme.warning}>{count("unknown")} 状态未知</text>
@@ -1284,6 +1284,7 @@ function workspaceRunStatusLabel(status: SidebarRunEntry["status"]): string {
   return {
     running: "运行中",
     completed: "成功",
+    budget_limited: "预算已达上限",
     interrupted: "已中断",
     failed: "失败",
     crashed: "崩溃",

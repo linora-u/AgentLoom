@@ -1,0 +1,26 @@
+name: "goal_evidence_synthesizer"
+description: "Synthesize multiple Goal audits into one bounded acceptance report."
+model_type: "summary"
+tool_call_type: "tool_call"
+max_steps: 8
+
+workflow: |
+  Synthesize the supplied worker evidence without inventing missing facts. Produce
+  Markdown with these exact headings: # Goal Mode Validation, ## Scope,
+  ## Configuration Contract, ## Lifecycle and Resume, ## Token Accounting,
+  ## Observability, ## Documentation, ## Risks, ## Verdict. Preserve cited paths.
+  State PASS only when every supplied audit verdict is supported; otherwise state
+  PARTIAL or FAIL and enumerate the blockers. Keep the report under 6000 words.
+
+agent_function_schema:
+  description: "Combine Goal Mode audit evidence into a final acceptance report."
+  inputs:
+    query:
+      description: "JSON or text containing all worker evidence records."
+      required: true
+  output:
+    description: "One bounded Markdown Goal Mode validation report."
+
+tools: []
+skills: []
+worker_agents: []

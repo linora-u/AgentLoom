@@ -598,6 +598,17 @@ export function runDetailSections(detail: RunDetailResultDto): DetailSection[] {
       ],
     },
     ...(issue ? [{ title: "关键问题", lines: [issue] }] : []),
+    ...(summary.goal ? [{
+      title: "Goal",
+      lines: [
+        `状态: ${goalStatusLabel(summary.goal.status)}`,
+        ...(summary.goal.goal_id ? [`Goal ID: ${summary.goal.goal_id}`] : []),
+        `Token: ${summary.goal.used_tokens}/${summary.goal.token_budget ?? "unlimited"}`,
+        ...(summary.goal.remaining_tokens === null ? [] : [`剩余 Token: ${summary.goal.remaining_tokens}`]),
+        ...(summary.goal.objective ? [`目标: ${previewText(summary.goal.objective, 600)}`] : []),
+        ...(summary.goal.evidence ? [`完成证据: ${previewText(summary.goal.evidence, 600)}`] : []),
+      ],
+    }] : []),
     ...(["failed", "crashed", "interrupted", "unknown"].includes(summary.status)
       ? [{
           title: "AI 分析",
@@ -618,7 +629,7 @@ export function runDetailSections(detail: RunDetailResultDto): DetailSection[] {
         ...(problemWorkers.length > 5 ? [`还有 ${problemWorkers.length - 5} 个异常 Worker`] : []),
       ],
     }] : []),
-    ...((detail.logs.length || ["failed", "crashed", "interrupted", "unknown"].includes(summary.status)) ? [{
+    ...((detail.logs.length || ["failed", "crashed", "interrupted", "unknown", "budget_limited"].includes(summary.status)) ? [{
       title: "日志文件",
       lines: [
         ...(detail.limits.logs.truncated
@@ -726,6 +737,7 @@ function primaryRunIssue(detail: RunDetailResultDto): string | null {
     .findLast((line) => Boolean(line))
   if (logIssue) return previewText(redactDiagnostic(logIssue), 400)
   if (status === "interrupted") return "运行已中断；未完成。"
+  if (status === "budget_limited") return "Goal 已达到 token_budget；提高或移除预算后可 resume。"
   if (status === "crashed") return "进程异常退出；未记录正常失败终态。"
   if (status === "failed") return "运行失败，但未记录结构化错误；请查看日志文件。"
   if (status === "unknown") return "无法从存储记录判断运行终态；请检查日志文件。"
@@ -750,6 +762,7 @@ function countWorkerStatuses(detail: RunDetailResultDto): Record<string, number>
 function workerCountLine(counts: Record<string, number>): string {
   const statuses = [
     ["completed", "成功"],
+    ["budget_limited", "预算受限"],
     ["failed", "失败"],
     ["crashed", "崩溃"],
     ["interrupted", "中断"],
@@ -759,7 +772,7 @@ function workerCountLine(counts: Record<string, number>): string {
   const parts = statuses.flatMap(([status, label]) => (
     counts[status] ? [`${counts[status]} ${label}`] : []
   ))
-  const known = ["completed", "failed", "crashed", "interrupted", "running", "unknown"]
+  const known = ["completed", "budget_limited", "failed", "crashed", "interrupted", "running", "unknown"]
     .reduce((total, status) => total + (counts[status] ?? 0), 0)
   const total = Object.values(counts).reduce((sum, count) => sum + count, 0)
   if (total > known) parts.push(`${total - known} 其他`)
@@ -770,10 +783,19 @@ function runStatusLabel(status: RunDetailResultDto["summary"]["status"]): string
   return {
     running: "运行中",
     completed: "已完成",
+    budget_limited: "预算已达上限",
     interrupted: "已中断",
     failed: "运行失败",
     crashed: "进程崩溃",
     unknown: "状态未知",
+  }[status]
+}
+
+function goalStatusLabel(status: "active" | "budget_limited" | "complete"): string {
+  return {
+    active: "进行中",
+    budget_limited: "预算已达上限",
+    complete: "已完成",
   }[status]
 }
 
