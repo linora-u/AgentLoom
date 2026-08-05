@@ -3,10 +3,24 @@ from __future__ import annotations
 import ast
 from pathlib import Path
 
-_SELF_LEARNING_ROOT = (
-    Path(__file__).resolve().parents[2] / "src" / "extensions" / "self_learning"
-)
+_SOURCE_ROOT = Path(__file__).resolve().parents[2] / "src"
+_SELF_LEARNING_ROOT = _SOURCE_ROOT / "extensions" / "self_learning"
 _PERSISTENCE_ROOT = _SELF_LEARNING_ROOT / "persistence"
+_ALLOWED_SQLITE_DRIVER_MODULES = {
+    (_SOURCE_ROOT / "tools" / "file_ops" / "directory_browser.py").resolve(),
+}
+
+
+def _imports_sqlite_driver(module_path: Path) -> bool:
+    tree = ast.parse(module_path.read_text(encoding="utf-8"))
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Import) and any(
+            alias.name == "sqlite3" for alias in node.names
+        ):
+            return True
+        if isinstance(node, ast.ImportFrom) and node.module == "sqlite3":
+            return True
+    return False
 
 
 def _contains_sqlite_implementation(module_path: Path) -> bool:
@@ -33,6 +47,35 @@ def test_sqlite_implementation_is_local_to_persistence_package() -> None:
         if not path.is_relative_to(_PERSISTENCE_ROOT)
         and _contains_sqlite_implementation(path)
     ]
+
+    assert offenders == []
+
+
+def test_self_learning_sqlite_driver_is_not_imported_by_other_source_modules() -> None:
+    offenders = [
+        path.relative_to(_SOURCE_ROOT).as_posix()
+        for path in _SOURCE_ROOT.rglob("*.py")
+        if not path.is_relative_to(_PERSISTENCE_ROOT)
+        and path.resolve() not in _ALLOWED_SQLITE_DRIVER_MODULES
+        and _imports_sqlite_driver(path)
+    ]
+
+    assert offenders == []
+
+
+def test_database_owner_is_not_imported_by_production_consumers() -> None:
+    offenders: list[str] = []
+    for path in _SOURCE_ROOT.rglob("*.py"):
+        if path.is_relative_to(_PERSISTENCE_ROOT):
+            continue
+        tree = ast.parse(path.read_text(encoding="utf-8"))
+        if any(
+            isinstance(node, ast.ImportFrom)
+            and node.module
+            == "src.extensions.self_learning.persistence.database"
+            for node in ast.walk(tree)
+        ):
+            offenders.append(path.relative_to(_SOURCE_ROOT).as_posix())
 
     assert offenders == []
 
