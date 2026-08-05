@@ -62,6 +62,27 @@ Important boundaries:
 - Persistent Agent recall uses application-scoped `insights.md` under `.agentloom/workspaces/agents/<application_id>/<agent_path>/`. Current-task Todo state follows the checkpoint lifecycle in `<application_id>/<task_id>/todos.json` when checkpointing is enabled; otherwise it remains in run-scoped memory. It is neither a run artifact nor long-term project state.
 - Goal Mode stores the objective fingerprint, `goal_started`, state, cumulative tokens, budget, and evidence in task-scoped `goal.json`. `active`, `budget_limited`, interrupted, failed, and crashed work retains the checkpoint. Only explicit Goal completion enters normal success cleanup, after copying Goal state into the run manifest and `audit/goal.json`.
 
+### Terminal lifecycle ownership
+
+One Application Run owner settles the terminal outcome. The Supervisor reports
+its output, memory snapshot, error, and optional Goal projection; it does not
+independently commit a second Application-level terminal state. The owner then
+applies one ordered transaction:
+
+```text
+Supervisor report
+  -> terminal checkpoint/task event
+  -> result and audit evidence
+  -> terminal manifest
+  -> optional successful-checkpoint deletion
+  -> resource cleanup
+```
+
+If evidence or manifest finalization fails before checkpoint deletion, the same
+owner replaces provisional success with `failed` or `interrupted` and keeps the
+checkpoint. If interruption occurs after deletion has started, the run reports
+`resumable: false` and never recreates a skeletal checkpoint.
+
 ## Configuration
 
 Configure runtime storage, bounded logs, and resume behavior in `config/system.yaml`:

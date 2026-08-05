@@ -234,6 +234,7 @@ class TestRunApp:
             observed["context"] = context
             observed["kwargs"] = kwargs
             observed["manifest_exists"] = context.manifest_path.exists()
+            observed["task_tree_exists"] = context.task_tree_path.exists()
             return "ok"
 
         mock_agent.run.side_effect = _run
@@ -248,7 +249,8 @@ class TestRunApp:
         assert observed["kwargs"]["run_id"] == context.run_id
         assert context.manifest_path.parent == context.run_dir
         assert not context.log_path.exists()
-        assert context.task_tree_path.exists()
+        assert observed["task_tree_exists"] is True
+        assert not context.task_tree_path.exists()
         assert not (fake_yaml.parents[3] / ".logs").exists()
 
     @patch("src.runner.YamlConfiguredSupervisorAgent")
@@ -482,6 +484,11 @@ class TestRunApp:
         assert "result persistence failed" in manifest["error"]
         assert observed["manifest_updates"] == 1
         assert context.checkpoint_dir.exists()
+        checkpoint = json.loads(
+            context.task_tree_path.read_text(encoding="utf-8")
+        )
+        assert checkpoint["status"] == "failed"
+        assert checkpoint["error"] == "result persistence failed"
         with CheckpointTaskLease(context.checkpoint_dir, require_exists=True):
             pass
 
@@ -772,6 +779,8 @@ class TestRunApp:
 
         def _run(_task, **kwargs):
             attempts.append((get_current_run_context(required=True), kwargs))
+            if len(attempts) == 1:
+                raise RuntimeError("preserve the first attempt for resume")
             return "ok"
 
         mock_agent.run.side_effect = _run
@@ -786,7 +795,8 @@ class TestRunApp:
             reject_cumulative_event_load,
         )
 
-        run_app(str(fake_yaml), file_logging=False)
+        with pytest.raises(RuntimeError, match="preserve the first attempt"):
+            run_app(str(fake_yaml), file_logging=False)
         first_context, first_kwargs = attempts[0]
         run_app(
             str(fake_yaml),
@@ -911,9 +921,10 @@ class TestRunApp:
         from src.runner import run_app
 
         mock_agent = MagicMock()
-        mock_agent.run.return_value = "initial"
+        mock_agent.run.side_effect = RuntimeError("preserve for concurrent resume")
         mock_cls.return_value = mock_agent
-        run_app(str(fake_yaml), file_logging=False)
+        with pytest.raises(RuntimeError, match="preserve for concurrent resume"):
+            run_app(str(fake_yaml), file_logging=False)
         checkpoint_root = fake_yaml.parents[3] / ".agentloom" / "checkpoints" / "test_app"
         logical_task_id = next(checkpoint_root.iterdir()).name
 
@@ -1290,6 +1301,66 @@ def test_structured_run_api_is_publicly_exported():
 
 
 class TestExecuteApp:
+    @patch("src.runner.YamlConfiguredSupervisorAgent")
+    def test_application_run_owns_successful_checkpoint_terminal_state(
+        self,
+        mock_cls,
+        fake_yaml: Path,
+    ) -> None:
+        """A Supervisor reports output; the Application Run commits success."""
+
+        from src.runner import execute_app
+
+        mock_cls.return_value.run.return_value = "owner-settled-output"
+
+        result = execute_app(str(fake_yaml), file_logging=False)
+
+        manifest = json.loads(result.run.manifest_path.read_text(encoding="utf-8"))
+        task_tree = json.loads(
+            (result.run.run_dir / manifest["task_tree_artifact"]).read_text(
+                encoding="utf-8"
+            )
+        )
+        assert task_tree["status"] == "completed"
+        assert task_tree["result"] == "owner-settled-output"
+        assert not result.run.run_dir.parents[2].joinpath(
+            "checkpoints",
+            result.run.application_id,
+            result.run.task_id,
+        ).exists()
+
+    @patch("src.runner.YamlConfiguredSupervisorAgent")
+    def test_application_run_owns_failed_checkpoint_terminal_state(
+        self,
+        mock_cls,
+        fake_yaml: Path,
+    ) -> None:
+        """A Supervisor reports failure; the Application Run commits failure."""
+
+        from src.application_run import ApplicationRunError
+        from src.runner import execute_app
+
+        mock_cls.return_value.run.side_effect = RuntimeError("owner-settled-failure")
+
+        with pytest.raises(ApplicationRunError) as caught:
+            execute_app(str(fake_yaml), file_logging=False)
+
+        manifest = json.loads(
+            caught.value.run.manifest_path.read_text(encoding="utf-8")
+        )
+        task_tree = json.loads(
+            (caught.value.run.run_dir / manifest["task_tree_artifact"]).read_text(
+                encoding="utf-8"
+            )
+        )
+        assert task_tree["status"] == "failed"
+        assert task_tree["error"] == "owner-settled-failure"
+        assert caught.value.run.run_dir.parents[2].joinpath(
+            "checkpoints",
+            caught.value.run.application_id,
+            caught.value.run.task_id,
+        ).is_dir()
+
     @patch("src.runner.YamlConfiguredSupervisorAgent")
     def test_resume_rejects_disabling_a_persisted_active_goal(
         self,
@@ -1676,7 +1747,12 @@ class TestExecuteApp:
             raise marker
 
         def record_close(manager):
-            closed_managers.append(manager)
+            checkpoint_dir = manager.checkpoint_dir
+            if (
+                checkpoint_dir is not None
+                and fake_yaml.parents[3] in checkpoint_dir.parents
+            ):
+                closed_managers.append(manager)
             original_close(manager)
 
         monkeypatch.setattr(CheckpointTaskLease, "release", release_then_fail)
