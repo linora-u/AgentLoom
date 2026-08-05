@@ -18,7 +18,10 @@ from dataclasses import dataclass, replace
 from enum import Enum
 from pathlib import Path
 from threading import RLock
-from typing import Any
+from typing import TYPE_CHECKING, Any
+
+if TYPE_CHECKING:
+    from src.application_run_lifecycle import ApplicationRunLifecycle
 
 from smolagents import (
     AgentGenerationError,
@@ -1410,6 +1413,7 @@ class RoleDrivenAgent(BaseAgent):
         task_id: str | None = None,
         run_id: str | None = None,
         checkpoint_manager: Any | None = None,
+        application_lifecycle: "ApplicationRunLifecycle | None" = None,
         resume: bool = False,
         additional_args: dict[str, Any] | None = None,
     ) -> str:
@@ -1430,6 +1434,7 @@ class RoleDrivenAgent(BaseAgent):
                         task,
                         task_id=task_id,
                         checkpoint_manager=checkpoint_manager,
+                        application_lifecycle=application_lifecycle,
                         resume=resume,
                         additional_args=additional_args,
                         owns_root_run=owns_root_run,
@@ -1449,6 +1454,7 @@ class RoleDrivenAgent(BaseAgent):
         task: str,
         task_id: str | None = None,
         checkpoint_manager: Any | None = None,
+        application_lifecycle: "ApplicationRunLifecycle | None" = None,
         resume: bool = False,
         additional_args: dict[str, Any] | None = None,
         *,
@@ -1508,6 +1514,14 @@ class RoleDrivenAgent(BaseAgent):
             )
         else:
             coord = CheckpointCoordinator.current()
+
+        owns_application_lifecycle = False
+        if application_lifecycle is None and checkpoint_manager is not None:
+            from src.application_run_lifecycle import ApplicationRunLifecycle
+
+            application_lifecycle = ApplicationRunLifecycle()
+            application_lifecycle.enter_execution()
+            owns_application_lifecycle = True
 
         goal_provider = None
         if goal_config.enabled:
@@ -1722,99 +1736,113 @@ class RoleDrivenAgent(BaseAgent):
                 )
                 session_result = result
 
-                if coord is not None and checkpoint_manager is not None:
-                    coord.save_supervisor(runtime_agent, "completed", result=str(result) if result else None)
-
                 return result
-            except KeyboardInterrupt:
-                session_error = KeyboardInterrupt()
-                if coord is not None and checkpoint_manager is not None:
-                    coord.save_supervisor(runtime_agent, "interrupted")
-                raise
-            except Exception as exc:
+            except BaseException as exc:
                 from src.lib.goal import GoalBudgetLimitedError
 
                 session_error = exc
                 if isinstance(exc, GoalBudgetLimitedError):
-                    if coord is not None and checkpoint_manager is not None:
-                        coord.save_supervisor(
-                            runtime_agent,
-                            "budget_limited",
-                            error=str(exc),
-                        )
                     raise
-                self._emit_task_lifecycle_event(
-                    HookEvent.STOP_FAILURE,
-                    transformed_task,
-                    error=exc,
-                )
-                if coord is not None and checkpoint_manager is not None:
-                    coord.save_supervisor(runtime_agent, "failed", error=str(exc))
+                if isinstance(exc, Exception):
+                    self._emit_task_lifecycle_event(
+                        HookEvent.STOP_FAILURE,
+                        transformed_task,
+                        error=exc,
+                    )
                 raise
             finally:
-                if goal_provider is not None:
-                    self._last_goal_state = goal_provider.snapshot().to_dict()
-                if session_started:
-                    self._emit_session_lifecycle_event(
-                        HookEvent.SESSION_END,
-                        transformed_task,
-                        result=session_result,
-                        error=session_error,
-                    )
-                    if session_error is None:
-                        # SessionEnd owns only the short, deterministic ledger
-                        # write. Once a successful run is recorded, the root
-                        # owner may perform the optional synchronous review
-                        # while its trusted binding is still alive. Workers do
-                        # not enter this block, and review failure cannot change
-                        # the successful task result.
-                        try:
-                            from src.extensions.self_learning.paths import (
-                                review_config,
-                                self_learning_enabled,
-                            )
-
-                            effective_config = (
-                                self._effective_agent_config or self._config
-                            )
-                            review_policies = (
-                                review_config(effective_config, scope="application"),
-                                review_config(effective_config, scope="project"),
-                            )
-                            if (
-                                self_learning_enabled(effective_config)
-                                and any(
-                                    policy.get("enabled")
-                                    and str((policy.get("trigger") or {}).get("mode") or "manual")
-                                    != "manual"
-                                    for policy in review_policies
-                                )
-                            ):
-                                from src.extensions.self_learning.reviewer import (
-                                    review_finished_run,
-                                )
-
-                                review_finished_run(
-                                    root_run_id=require_root_run_id(),
-                                    agent_config=effective_config,
-                                )
-                        except Exception:
-                            if self._logger:
-                                self._logger.warning("Completed-run memory review failed unexpectedly")
-                if previous_model_agent_id is not ...:
-                    self._model.agent_id = previous_model_agent_id
-
+                application_lifecycle_error: BaseException | None = None
                 try:
-                    if checkpoint_manager is not None and coord is not None:
-                        CheckpointCoordinator.deactivate(coord)
+                    goal_snapshot = (
+                        goal_provider.snapshot().to_dict()
+                        if goal_provider is not None
+                        else None
+                    )
+                    if application_lifecycle is not None:
+                        try:
+                            application_lifecycle.report_agent_invocation(
+                                coordinator=coord,
+                                runtime_agent=runtime_agent,
+                                result=session_result,
+                                error=session_error,
+                                goal=goal_snapshot,
+                            )
+                            if owns_application_lifecycle:
+                                application_lifecycle.settle_reported_agent_invocation()
+                                application_lifecycle.commit_checkpoint(
+                                    checkpoint_manager=checkpoint_manager,
+                                    task_id=final_task_id,
+                                )
+                        except BaseException as exc:
+                            application_lifecycle_error = exc
+                    if session_started:
+                        self._emit_session_lifecycle_event(
+                            HookEvent.SESSION_END,
+                            transformed_task,
+                            result=session_result,
+                            error=session_error,
+                        )
+                        if session_error is None:
+                            # SessionEnd owns only the short, deterministic ledger
+                            # write. Once a successful run is recorded, the root
+                            # owner may perform the optional synchronous review
+                            # while its trusted binding is still alive. Workers do
+                            # not enter this block, and review failure cannot change
+                            # the successful task result.
+                            try:
+                                from src.extensions.self_learning.paths import (
+                                    review_config,
+                                    self_learning_enabled,
+                                )
+
+                                effective_config = (
+                                    self._effective_agent_config or self._config
+                                )
+                                review_policies = (
+                                    review_config(effective_config, scope="application"),
+                                    review_config(effective_config, scope="project"),
+                                )
+                                if (
+                                    self_learning_enabled(effective_config)
+                                    and any(
+                                        policy.get("enabled")
+                                        and str((policy.get("trigger") or {}).get("mode") or "manual")
+                                        != "manual"
+                                        for policy in review_policies
+                                    )
+                                ):
+                                    from src.extensions.self_learning.reviewer import (
+                                        review_finished_run,
+                                    )
+
+                                    review_finished_run(
+                                        root_run_id=require_root_run_id(),
+                                        agent_config=effective_config,
+                                    )
+                            except Exception:
+                                if self._logger:
+                                    self._logger.warning("Completed-run memory review failed unexpectedly")
+                    if previous_model_agent_id is not ...:
+                        self._model.agent_id = previous_model_agent_id
                 finally:
                     try:
-                        todo_provider_binding.__exit__(None, None, None)
+                        if (
+                            owns_application_lifecycle
+                            and checkpoint_manager is not None
+                            and coord is not None
+                        ):
+                            assert application_lifecycle is not None
+                            application_lifecycle.close_agent_coordinator(coord)
                     finally:
                         try:
-                            goal_provider_binding.__exit__(None, None, None)
+                            todo_provider_binding.__exit__(None, None, None)
                         finally:
-                            execution_binding.__exit__(None, None, None)
+                            try:
+                                goal_provider_binding.__exit__(None, None, None)
+                            finally:
+                                execution_binding.__exit__(None, None, None)
+                if application_lifecycle_error is not None:
+                    raise application_lifecycle_error
 
         if current_task_id:
             return _execute_agent()
