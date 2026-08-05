@@ -17,8 +17,6 @@ Usage (CLI)::
 
 from __future__ import annotations
 
-import json
-import os
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
@@ -33,9 +31,15 @@ from src.application_run import (
     RunEventSink,
     RunInfo,
     RunLifecycleEvent,
-    RunPhase,
     RunRejectedEvent,
     RunRejection,
+)
+from src.application_run_lifecycle import (
+    ApplicationRunFinalization,
+    ApplicationRunLifecycle,
+    ApplicationRunResources,
+    _run_event_chunks,  # noqa: F401 - public compatibility re-export
+    _task_events_size,
 )
 from src.lib.checkpoint import CheckpointManager
 from src.lib.checkpoint.file_history import FileHistoryManager
@@ -63,7 +67,6 @@ from src.lib.smolagents.agent.yaml_agent_factory import (
     YamlConfiguredSupervisorAgent,
 )
 
-_RUN_ARTIFACT_COPY_CHUNK_BYTES = 1024 * 1024
 _TASK_TREE_CLEANUP_MAX_BYTES = 1024 * 1024
 
 
@@ -165,144 +168,6 @@ def _events_for_run(events: list[dict[str, Any]], run_id: str) -> list[dict[str,
             elif explicit_run_id is None:
                 preamble.append(event)
     return projected
-
-
-def _persist_run_observability(
-    runtime_context: Any,
-    checkpoint_mgr: CheckpointManager | None,
-    task_id: str,
-    *,
-    result: str | None,
-    event_start_offset: int | None,
-    manifest_updates: dict[str, Any] | None = None,
-) -> dict[str, Any]:
-    """Copy durable evidence and retain references to every completed write.
-
-    ``manifest_updates`` is caller-owned so a later finalization failure can
-    still publish artifacts that were already committed to the Run directory.
-    """
-
-    if manifest_updates is None:
-        manifest_updates = {}
-    if result is not None:
-        result_artifact = runtime_context.artifacts_dir / "result.txt"
-        runtime_context.atomic_write_run_file(result_artifact, result)
-        manifest_updates.update(
-            result_artifact="artifacts/result.txt",
-            result_size=len(result.encode("utf-8")),
-        )
-
-    if checkpoint_mgr is None:
-        return manifest_updates
-
-    goal = checkpoint_mgr.load_goal(task_id)
-    if goal is not None:
-        runtime_context.atomic_write_run_file(
-            runtime_context.audit_dir / "goal.json",
-            json.dumps(
-                goal,
-                ensure_ascii=False,
-                sort_keys=True,
-                separators=(",", ":"),
-            ),
-        )
-        manifest_updates.update(
-            goal=goal,
-            goal_artifact="audit/goal.json",
-        )
-
-    try:
-        runtime_context.atomic_write_run_file_chunks(
-            runtime_context.audit_dir / "task_tree.json",
-            _checkpoint_file_chunks(
-                checkpoint_mgr,
-                task_id,
-                relative_path="task_tree.json",
-            ),
-        )
-    except FileNotFoundError:
-        pass
-    else:
-        manifest_updates["task_tree_artifact"] = "audit/task_tree.json"
-
-    if event_start_offset is not None:
-        event_stats = {"count": 0, "complete": True}
-        event_size = runtime_context.atomic_write_run_file_chunks(
-            runtime_context.audit_dir / "task_events.jsonl",
-            _run_event_chunks(
-                checkpoint_mgr,
-                task_id,
-                start_offset=event_start_offset,
-                stats=event_stats,
-            ),
-        )
-        manifest_updates.update(
-            task_events_artifact="audit/task_events.jsonl",
-            task_events_run_id=runtime_context.run_id,
-            task_events_count=event_stats["count"],
-            task_events_size=event_size,
-            task_events_complete=event_stats["complete"],
-        )
-    return manifest_updates
-
-
-def _task_events_size(checkpoint_mgr: CheckpointManager, task_id: str) -> int:
-    try:
-        with checkpoint_mgr.task_storage(task_id) as storage:
-            return storage.stat_file("task_events.jsonl").st_size
-    except (FileNotFoundError, OSError, RuntimeError):
-        return 0
-
-
-def _run_event_chunks(
-    checkpoint_mgr: CheckpointManager,
-    task_id: str,
-    *,
-    start_offset: int,
-    stats: dict[str, Any],
-):
-    with checkpoint_mgr.task_storage(task_id) as storage:
-        try:
-            with storage.open_binary_reader("task_events.jsonl") as stream:
-                size = os.fstat(stream.fileno()).st_size
-                if start_offset > size:
-                    stats["complete"] = False
-                    return
-                stream.seek(start_offset)
-                line_has_content = False
-                while True:
-                    chunk = stream.read(_RUN_ARTIFACT_COPY_CHUNK_BYTES)
-                    if not chunk:
-                        break
-                    segments = chunk.split(b"\n")
-                    for segment in segments[:-1]:
-                        if line_has_content or segment.strip():
-                            stats["count"] += 1
-                        line_has_content = False
-                    if segments[-1].strip():
-                        line_has_content = True
-                    yield chunk
-                if line_has_content:
-                    stats["count"] += 1
-        except FileNotFoundError:
-            stats["complete"] = False
-
-
-def _checkpoint_file_chunks(
-    checkpoint_mgr: CheckpointManager,
-    task_id: str,
-    *,
-    relative_path: str,
-):
-    """Stream one maintained checkpoint projection without replaying events."""
-
-    with checkpoint_mgr.task_storage(task_id) as storage:
-        with storage.open_binary_reader(relative_path) as stream:
-            while True:
-                chunk = stream.read(_RUN_ARTIFACT_COPY_CHUNK_BYTES)
-                if not chunk:
-                    return
-                yield chunk
 
 
 def _checkpoint_age_seconds(created_at: Any) -> float:
@@ -407,7 +272,7 @@ def execute_app(
         raise
     started_emitted = False
     manifest_initialized = False
-    phase: RunPhase = "initialization"
+    lifecycle = ApplicationRunLifecycle()
     log = None
     durable_manifest_updates: dict[str, Any] = {}
 
@@ -425,35 +290,13 @@ def execute_app(
             ),
         )
 
-    def update_failed_manifest(exc: BaseException) -> None:
-        if not manifest_initialized:
-            return
-        try:
-            runtime_context.update_manifest(
-                **durable_manifest_updates,
-                status=(
-                    "interrupted"
-                    if isinstance(exc, KeyboardInterrupt)
-                    else "budget_limited"
-                    if isinstance(exc, GoalBudgetLimitedError)
-                    else "failed"
-                ),
-                ended_at=datetime.now().astimezone().isoformat(),
-                error=str(exc),
-            )
-        except Exception:
-            return
-
     run_attempt_lease = None
     checkpoint_mgr: CheckpointManager | None = None
     task_lease: Any | None = None
     heartbeat: SupervisorHeartbeat | None = None
     file_history: FileHistoryManager | None = None
     supervisor: YamlConfiguredSupervisorAgent | None = None
-    result_str = ""
-    interrupt_resumable = False
     event_start_offset: int | None = None
-    checkpoint_deletion_started = False
 
     try:
         runtime_context.prepare_run()
@@ -494,10 +337,8 @@ def execute_app(
 
             with bind_logger_backend(logger_backend, context=runtime_context):
                 log = get_logger(logger_backend, __name__)
-                outcome = "failed"
-                outcome_error: str | None = None
                 try:
-                    phase = "execution"
+                    lifecycle.enter_execution()
                     log.info("Loading supervisor config: %s", resolved_path)
 
                     try:
@@ -691,225 +532,94 @@ def execute_app(
                         task_id=task_id,
                         run_id=run_id,
                         checkpoint_manager=checkpoint_mgr,
+                        application_lifecycle=lifecycle,
                         resume=is_resume,
                     )
-                    result_str = "" if agent_result is None else str(agent_result)
-                    phase = "finalization"
-                    outcome = "completed"
                     log.info("=" * 70)
                     log.info("Execution completed successfully.")
                     log.info("=" * 70)
+                    lifecycle.complete_execution(agent_result)
                 except GoalBudgetLimitedError as exc:
-                    outcome = "budget_limited"
-                    outcome_error = str(exc)
+                    lifecycle.fail_execution(exc)
                     log.warning(
                         "Goal token budget reached. Checkpoint preserved for task_id=%s",
                         task_id,
                     )
                     raise
                 except KeyboardInterrupt as exc:
-                    outcome = "interrupted"
-                    outcome_error = str(exc)
-                    if checkpoint_mgr is not None:
-                        try:
-                            runtime_context.validate_checkpoint_path(
-                                require_exists=True,
-                            )
-                            checkpoint_mgr.record_task_status_changed(
-                                task_id,
-                                "interrupted",
-                                error=outcome_error or "run interrupted",
-                            )
-                            interrupt_resumable = True
-                        except Exception as checkpoint_exc:
-                            log.warning(
-                                "Failed to persist resumable checkpoint: %s",
-                                checkpoint_exc,
-                            )
-                    if interrupt_resumable:
-                        log.warning(
-                            "Interrupted by user. Checkpoint saved for task_id=%s",
-                            task_id,
-                        )
-                        log.warning(
-                            "Resume with: loom run %s --resume %s",
-                            yaml_path,
-                            task_id,
-                        )
-                    else:
-                        log.warning(
-                            "Interrupted by user; no resumable checkpoint is available"
-                        )
+                    lifecycle.fail_execution(exc)
                     raise
                 except BaseException as exc:
-                    outcome_error = str(exc)
+                    lifecycle.fail_execution(exc)
                     if isinstance(exc, Exception):
                         log.error("Execution failed: %s", exc)
                     raise
                 finally:
                     try:
-                        from src.tools.shell.background_task import (
-                            BackgroundTaskRegistry,
-                        )
-
-                        BackgroundTaskRegistry.get_instance().terminate_current_run()
-                    except Exception as exc:
-                        log.debug(
-                            "Background task teardown skipped: %s",
-                            exc,
-                        )
-                    try:
-                        from src.tools.shell.process import ShellProcessRegistry
-
-                        ShellProcessRegistry.get_instance().release_current_run()
-                    except Exception as exc:
-                        log.debug("Shell session teardown skipped: %s", exc)
-                    if heartbeat is not None:
-                        try:
-                            heartbeat.stop()
-                        except Exception:
-                            pass
-                        try:
-                            heartbeat.close()
-                        except Exception:
-                            pass
-                    try:
-                        mcp_manager = getattr(supervisor, "_mcp_manager", None)
-                        if mcp_manager is not None:
-                            mcp_manager.disconnect_all()
-                    except Exception:
-                        pass
-                    if file_history is not None:
-                        try:
-                            file_history.close()
-                        except Exception:
-                            pass
-                    goal_snapshot = getattr(supervisor, "_last_goal_state", None)
-                    if isinstance(goal_snapshot, dict):
-                        durable_manifest_updates["goal"] = dict(goal_snapshot)
-                    try:
-                        if outcome == "completed":
-                            _persist_run_observability(
-                                runtime_context,
-                                checkpoint_mgr,
-                                task_id,
-                                result=result_str,
+                        lifecycle.finalize_run(
+                            ApplicationRunFinalization(
+                                runtime_context=runtime_context,
+                                checkpoint_manager=checkpoint_mgr,
+                                task_id=task_id,
                                 event_start_offset=event_start_offset,
                                 manifest_updates=durable_manifest_updates,
+                                cleanup_on_success=cleanup_on_success,
+                                log=log,
+                                task_tree_cleanup_max_bytes=_TASK_TREE_CLEANUP_MAX_BYTES,
                             )
-                        else:
-                            try:
-                                _persist_run_observability(
-                                    runtime_context,
-                                    checkpoint_mgr,
-                                    task_id,
-                                    result=None,
-                                    event_start_offset=event_start_offset,
-                                    manifest_updates=durable_manifest_updates,
-                                )
-                            except Exception as exc:
-                                log.warning(
-                                    "Failed to persist Run observability: %s",
-                                    exc,
-                                )
-                        manifest_updates = {
-                            "status": outcome,
-                            "ended_at": datetime.now().astimezone().isoformat(),
-                            **durable_manifest_updates,
-                        }
-                        if outcome_error:
-                            manifest_updates["error"] = outcome_error
-                        try:
-                            runtime_context.update_manifest(**manifest_updates)
-                        except Exception as exc:
-                            if outcome == "completed":
-                                raise
-                            log.warning(
-                                "Failed to persist terminal manifest: %s",
-                                exc,
-                            )
-                        if outcome == "completed" and cleanup_on_success and checkpoint_mgr is not None:
-                            try:
-                                tree = checkpoint_mgr.load_task_tree_projection(
-                                    task_id,
-                                    max_bytes=_TASK_TREE_CLEANUP_MAX_BYTES,
-                                )
-                                if tree and tree.get("status") == "completed":
-                                    # Deletion is an irreversible commit point. If
-                                    # it is interrupted, never recreate a skeletal
-                                    # checkpoint and advertise it as resumable.
-                                    checkpoint_deletion_started = True
-                                    if checkpoint_mgr.delete_task(task_id):
-                                        log.info(
-                                            "Cleaned up checkpoint for completed task %s",
-                                            task_id,
-                                        )
-                            except Exception:
-                                pass
-                    except KeyboardInterrupt as exc:
-                        outcome = "interrupted"
-                        outcome_error = str(exc)
-                        if checkpoint_mgr is not None and not checkpoint_deletion_started:
-                            try:
-                                runtime_context.validate_checkpoint_path(
-                                    require_exists=True,
-                                )
-                                checkpoint_mgr.record_task_status_changed(
-                                    task_id,
-                                    "interrupted",
-                                    error=outcome_error or "run interrupted",
-                                )
-                                interrupt_resumable = True
-                            except Exception as checkpoint_exc:
-                                log.warning(
-                                    "Failed to reopen checkpoint after finalization interruption: %s",
-                                    checkpoint_exc,
-                                )
-                        raise
+                        )
                     finally:
-                        task_lease_error: BaseException | None = None
-                        if task_lease is not None:
-                            try:
-                                task_lease.release()
-                            except BaseException as exc:
-                                phase = "cleanup"
-                                task_lease_error = exc
-                        if checkpoint_mgr is not None:
-                            try:
-                                checkpoint_mgr.close()
-                            except BaseException as exc:
-                                phase = "cleanup"
-                                if task_lease_error is None:
-                                    raise
-                                task_lease_error.add_note(f"Checkpoint manager close also failed: {exc}")
-                        if task_lease_error is not None:
-                            raise task_lease_error
+                        lifecycle.close_resources(
+                            ApplicationRunResources(
+                                supervisor=supervisor,
+                                heartbeat=heartbeat,
+                                file_history=file_history,
+                                log=log,
+                                task_lease=task_lease,
+                                checkpoint_manager=checkpoint_mgr,
+                            )
+                        )
         if run_attempt_lease is not None:
-            try:
-                run_attempt_lease.release()
-            except BaseException:
-                phase = "cleanup"
-                raise
+            lifecycle.release_run_lease(run_attempt_lease)
             run_attempt_lease = None
     except BaseException as caught:
         terminal_error = caught
         if run_attempt_lease is not None:
             try:
-                run_attempt_lease.release()
+                lifecycle.release_run_lease(run_attempt_lease)
             except BaseException as cleanup_exc:
                 terminal_error = cleanup_exc
-                phase = "cleanup"
             run_attempt_lease = None
         emit_started()
-        update_failed_manifest(terminal_error)
+        lifecycle.persist_uncaught_failure(
+            runtime_context=runtime_context,
+            manifest_initialized=manifest_initialized,
+            manifest_updates=durable_manifest_updates,
+            error=terminal_error,
+        )
         ended_at = datetime.now().astimezone()
         if isinstance(terminal_error, KeyboardInterrupt):
+            if log is not None:
+                if lifecycle.resumable:
+                    log.warning(
+                        "Interrupted by user. Checkpoint saved for task_id=%s",
+                        task_id,
+                    )
+                    log.warning(
+                        "Resume with: loom run %s --resume %s",
+                        yaml_path,
+                        task_id,
+                    )
+                else:
+                    log.warning(
+                        "Interrupted by user; no resumable checkpoint is available"
+                    )
             interrupted = ApplicationRunInterrupted(
                 "Application run interrupted",
                 run=public_run,
-                phase=phase,
+                phase=lifecycle.phase,
                 original_error=terminal_error,
-                resumable=interrupt_resumable,
+                resumable=lifecycle.resumable,
             )
             _emit_lifecycle_event(
                 event_sink,
@@ -918,7 +628,7 @@ def execute_app(
                     run=public_run,
                     occurred_at=ended_at,
                     error=str(interrupted),
-                    phase=phase,
+                    phase=lifecycle.phase,
                     goal=durable_manifest_updates.get("goal"),
                 ),
             )
@@ -929,7 +639,7 @@ def execute_app(
             limited = ApplicationRunBudgetLimited(
                 str(terminal_error),
                 run=public_run,
-                phase=phase,
+                phase=lifecycle.phase,
                 original_error=terminal_error,
                 goal=goal,
             )
@@ -940,7 +650,7 @@ def execute_app(
                     run=public_run,
                     occurred_at=ended_at,
                     error=str(limited),
-                    phase=phase,
+                    phase=lifecycle.phase,
                     goal=goal,
                 ),
             )
@@ -951,7 +661,7 @@ def execute_app(
             message = type(terminal_error).__name__
             if detail:
                 message = f"{message}: {detail}"
-        elif phase != "execution" or isinstance(
+        elif lifecycle.phase != "execution" or isinstance(
             terminal_error,
             (FileNotFoundError, ValueError),
         ):
@@ -961,7 +671,7 @@ def execute_app(
         failure = ApplicationRunError(
             message,
             run=public_run,
-            phase=phase,
+            phase=lifecycle.phase,
             original_error=terminal_error,
         )
         _emit_lifecycle_event(
@@ -971,14 +681,14 @@ def execute_app(
                 run=public_run,
                 occurred_at=ended_at,
                 error=message,
-                phase=phase,
+                phase=lifecycle.phase,
                 goal=durable_manifest_updates.get("goal"),
             ),
         )
         raise failure from terminal_error
     ended_at = datetime.now().astimezone()
     application_result = ApplicationRunResult(
-        output=result_str,
+        output=lifecycle.result,
         run=public_run,
         started_at=started_at,
         ended_at=ended_at,
@@ -990,7 +700,7 @@ def execute_app(
             event="run.completed",
             run=public_run,
             occurred_at=ended_at,
-            output=result_str,
+            output=lifecycle.result,
             goal=durable_manifest_updates.get("goal"),
         ),
     )
