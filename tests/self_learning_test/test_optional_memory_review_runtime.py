@@ -35,7 +35,7 @@ def _config(*, mode: str = "after_run") -> dict:
 
 def _record_completed_run(db_path: Path, run_id: str = "review-root") -> None:
     from src.extensions.self_learning.event_schema import CanonicalSessionEvent
-    from src.extensions.self_learning.ledger import SelfLearningLedger
+    from src.extensions.self_learning.persistence.ledger import SelfLearningLedger
 
     SelfLearningLedger(db_path).append_runtime_event(
         CanonicalSessionEvent(

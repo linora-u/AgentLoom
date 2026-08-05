@@ -112,6 +112,48 @@ class _StructuredModel:
         )
 
 
+class _ContextReader:
+    def __init__(self) -> None:
+        self.application_ids = ["app-a"]
+        self.application_context = {
+            "source_runs": [{"root_run_id": "root-1", "application_id": "app-a"}],
+            "allowed_provenance": [],
+            "context": [],
+        }
+        self.project_context = {
+            "source_runs": [],
+            "allowed_provenance": [],
+            "context": [{"kind": "cross_application_corroboration"}],
+        }
+
+    def unreviewed_application_ids(self) -> list[str]:
+        return self.application_ids
+
+    def collect_application(self, application_id: str) -> dict:
+        assert application_id == "app-a"
+        return self.application_context
+
+    def collect_project(self) -> dict:
+        return self.project_context
+
+
+def test_review_context_reader_is_an_injectable_persistence_boundary(
+    tmp_path: Path,
+) -> None:
+    from src.extensions.self_learning.review_orchestration import ReviewOrchestrator
+
+    reader = _ContextReader()
+    orchestrator = ReviewOrchestrator(
+        engine=_Engine(tmp_path / "missing.db"),
+        context_store=reader,
+        render_artifacts=False,
+    )
+
+    assert orchestrator.unreviewed_application_ids() == ["app-a"]
+    assert orchestrator.collect("application", "app-a") == reader.application_context
+    assert orchestrator.collect("project", "project") == reader.project_context
+
+
 def test_review_model_only_returns_candidates_and_cannot_choose_scope_policy_or_mutation(
     tmp_path: Path,
 ) -> None:
@@ -444,8 +486,8 @@ def test_review_trigger_modes_are_synchronous_and_threshold_driven() -> None:
 def test_project_collection_does_not_repropose_an_existing_project_candidate(
     tmp_path: Path,
 ) -> None:
-    from src.extensions.self_learning.memory_store import MemoryStore
-    from src.extensions.self_learning.review_engine import ReviewEngine
+    from src.extensions.self_learning.persistence.memory_store import MemoryStore
+    from src.extensions.self_learning.persistence.review_engine import ReviewEngine
     from src.extensions.self_learning.review_orchestration import ReviewOrchestrator
 
     db_path = tmp_path / "self_learning.db"
@@ -485,8 +527,8 @@ def test_project_collection_consumes_direct_project_evidence_once(
     tmp_path: Path,
 ) -> None:
     from src.extensions.self_learning.event_schema import CanonicalSessionEvent
-    from src.extensions.self_learning.ledger import SelfLearningLedger
-    from src.extensions.self_learning.review_engine import ReviewEngine
+    from src.extensions.self_learning.persistence.ledger import SelfLearningLedger
+    from src.extensions.self_learning.persistence.review_engine import ReviewEngine
     from src.extensions.self_learning.review_orchestration import ReviewOrchestrator
     from src.lib.trusted_memory_evidence import TRUSTED_MEMORY_EVIDENCE_KIND
 
@@ -552,10 +594,10 @@ def test_artifact_failure_rolls_back_activation_and_keeps_source_run_retryable(
     import pytest
 
     from src.extensions.self_learning.event_schema import CanonicalSessionEvent
-    from src.extensions.self_learning.evidence_gate import SQLiteEvidenceGate
-    from src.extensions.self_learning.ledger import SelfLearningLedger
+    from src.extensions.self_learning.persistence.evidence_gate import SQLiteEvidenceGate
+    from src.extensions.self_learning.persistence.ledger import SelfLearningLedger
+    from src.extensions.self_learning.persistence.review_engine import ReviewEngine
     from src.extensions.self_learning.review_artifacts import ReviewArtifactRenderer
-    from src.extensions.self_learning.review_engine import ReviewEngine
     from src.extensions.self_learning.review_orchestration import ReviewOrchestrator
     from src.lib.trusted_memory_evidence import TRUSTED_MEMORY_EVIDENCE_KIND
 

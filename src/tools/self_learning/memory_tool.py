@@ -5,7 +5,10 @@ from __future__ import annotations
 import json
 from typing import Any, Literal
 
-from src.extensions.self_learning.memory_store import MemoryStore, current_session_run_id
+from src.extensions.self_learning.persistence.memory_store import (
+    MemoryStore,
+    current_session_run_id,
+)
 
 _LIST_CONTENT_PREVIEW_CHARS = 160
 _LIST_MAX_ITEMS = 20

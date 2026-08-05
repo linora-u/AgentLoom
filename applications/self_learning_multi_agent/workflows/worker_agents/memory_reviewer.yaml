@@ -1,5 +1,5 @@
 name: "memory_reviewer"
-description: "Create and verify proposal-only project memory."
+description: "Create and verify a proposal-only Application memory candidate."
 
 model_type: "powerful"
 tool_call_type: "code_act"
@@ -19,7 +19,7 @@ tools:
   - name: "grep_search"
 
 agent_function_schema:
-  description: "Create a project memory proposal and verify it is listed as pending."
+  description: "Create an Application memory proposal and verify its pending candidate result."
   inputs:
     query:
       description: "JSON string containing marker, workspace, and history evidence."
@@ -30,16 +30,18 @@ agent_function_schema:
 workflow: |
   # Memory Reviewer Worker
 
-  Parse `query`, create one project memory proposal, list project memory, and
-  return JSON only.
+  Parse `query`, create one Application memory proposal, verify its public
+  pending-candidate result, and return JSON only.
 
   # Execution Contract
   - Emit every action as a Python `<code>...</code>` block.
   - Do not use native `<tool_call>` syntax.
   - Do not call `load_skill`.
   - Use the `memory` tool; do not inspect the SQLite DB directly.
-  - Return `ok=true` only when the add result is proposal-only and the listed
-    memory contains the marker with `status=pending`.
+  - Application proposals are review candidates, not active memory. Do not try
+    to find them through `memory(action="list")`.
+  - Return `ok=true` only when the proposal result has a candidate id and reports
+    `pending=true`, `state=pending_pre_review`, and `scope=app`.
 
   # Required Code Shape
   ```python
@@ -53,24 +55,27 @@ workflow: |
   }
   content = f"Multi-agent self-learning validation {marker}; history_counts={history_counts}"
 
-  add_raw = memory(action="add", scope="project", content=content)
+  add_raw = memory(
+      action="propose",
+      scope="app",
+      kind="fact",
+      memory_key=f"multi-agent-self-learning-{marker.lower()}",
+      text=content,
+  )
   add_result = json.loads(add_raw)
-  added_id = add_result.get("id") or add_result.get("item", {}).get("id")
-  list_result = json.loads(memory(action="list", scope="project"))
-  items = list_result["items"]
-  # list previews are truncated to 80 chars, so match by id, not by full marker.
-  matches = [
-      item for item in items
-      if item.get("id") == added_id and item.get("status") == "pending"
-  ]
+  added_id = add_result.get("candidate_id")
+  pending = add_result.get("pending") is True
+  pending_state = add_result.get("state") == "pending_pre_review"
+  application_scoped = add_result.get("scope") == "app"
 
   result = {
       "worker": "memory_reviewer",
       "marker": marker,
-      "memory_id": add_result.get("id") or add_result.get("item", {}).get("id"),
-      "proposal": bool(add_result.get("proposal")),
-      "matching_pending_count": len(matches),
-      "ok": bool(add_result.get("proposal")) and len(matches) >= 1,
+      "memory_id": added_id,
+      "proposal": pending,
+      "pending_state": pending_state,
+      "application_scoped": application_scoped,
+      "ok": bool(add_result.get("ok")) and bool(added_id) and pending and pending_state and application_scoped,
   }
   final_answer(json.dumps(result, ensure_ascii=False))
   ```
