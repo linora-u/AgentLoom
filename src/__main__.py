@@ -582,10 +582,11 @@ def sessions_index(path: str):
     """Report ledger counts or import canonical self-learning event exports."""
     import json as _json
 
-    from src.extensions.self_learning.persistence.ledger import SelfLearningLedger
+    from src.extensions.self_learning.persistence.event_importer import (
+        SessionEventImporter,
+    )
 
-    ledger = SelfLearningLedger()
-    result = ledger.index_all(path)
+    result = SessionEventImporter().index_all(path)
     click.echo(_json.dumps(result, ensure_ascii=False, indent=2, default=str))
 
 

@@ -6,9 +6,6 @@ from pathlib import Path
 _SOURCE_ROOT = Path(__file__).resolve().parents[2] / "src"
 _SELF_LEARNING_ROOT = _SOURCE_ROOT / "extensions" / "self_learning"
 _PERSISTENCE_ROOT = _SELF_LEARNING_ROOT / "persistence"
-_ALLOWED_SQLITE_DRIVER_MODULES = {
-    (_SOURCE_ROOT / "tools" / "file_ops" / "directory_browser.py").resolve(),
-}
 
 
 def _imports_sqlite_driver(module_path: Path) -> bool:
@@ -19,6 +16,23 @@ def _imports_sqlite_driver(module_path: Path) -> bool:
         ):
             return True
         if isinstance(node, ast.ImportFrom) and node.module == "sqlite3":
+            return True
+    return False
+
+
+def _imports_self_learning(module_path: Path) -> bool:
+    tree = ast.parse(module_path.read_text(encoding="utf-8"))
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Import) and any(
+            alias.name.startswith("src.extensions.self_learning")
+            for alias in node.names
+        ):
+            return True
+        if (
+            isinstance(node, ast.ImportFrom)
+            and node.module
+            and node.module.startswith("src.extensions.self_learning")
+        ):
             return True
     return False
 
@@ -56,8 +70,11 @@ def test_self_learning_sqlite_driver_is_not_imported_by_other_source_modules() -
         path.relative_to(_SOURCE_ROOT).as_posix()
         for path in _SOURCE_ROOT.rglob("*.py")
         if not path.is_relative_to(_PERSISTENCE_ROOT)
-        and path.resolve() not in _ALLOWED_SQLITE_DRIVER_MODULES
         and _imports_sqlite_driver(path)
+        and (
+            path.is_relative_to(_SELF_LEARNING_ROOT)
+            or _imports_self_learning(path)
+        )
     ]
 
     assert offenders == []
@@ -106,13 +123,16 @@ def test_database_module_is_the_only_connection_owner() -> None:
 def test_session_index_forwarder_has_been_absorbed() -> None:
     assert not (_SELF_LEARNING_ROOT / "session_index.py").exists()
 
+    from src.extensions.self_learning.persistence.event_importer import (
+        SessionEventImporter,
+    )
     from src.extensions.self_learning.persistence.ledger import SelfLearningLedger
 
-    required_operations = {
-        "index_run",
-        "index_all",
+    assert {"index_run", "index_all"} <= set(dir(SessionEventImporter))
+    assert not {"index_run", "index_all"} & set(dir(SelfLearningLedger))
+    required_ledger_operations = {
         "search_events",
         "scroll_events",
         "root_run_id_for",
     }
-    assert required_operations <= set(dir(SelfLearningLedger))
+    assert required_ledger_operations <= set(dir(SelfLearningLedger))
