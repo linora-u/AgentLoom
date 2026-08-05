@@ -12,15 +12,14 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any
 
-from .application_scope import safe_application_id
-from .ledger import SelfLearningLedger, serialized_write_transaction
-from .paths import memory_config
-from .redaction import (
+from ..application_scope import safe_application_id
+from ..paths import memory_config
+from ..redaction import (
     require_safe_identity,
     sanitize_text_fragment_with_taint,
     sanitize_value_fragments_with_taint,
 )
-from .review_types import (
+from ..review_types import (
     CandidateInput,
     CandidateResult,
     EvidenceGate,
@@ -31,6 +30,8 @@ from .review_types import (
     normalize_provenance,
     payload_hash,
 )
+from .database import SelfLearningDatabase, serialized_write_transaction
+from .ledger import SelfLearningLedger
 
 _ACTIVE_STATES = {"active_unreviewed", "active_confirmed"}
 
@@ -62,6 +63,7 @@ class ReviewEngine:
     ) -> None:
         self._ledger = SelfLearningLedger(db_path)
         self.db_path = self._ledger.db_path
+        self._database = SelfLearningDatabase(self.db_path)
         self._evidence_gate = evidence_gate
         policy = dict(capacity_policy or memory_config())
         budgets = policy.get("scope_budgets")
@@ -72,11 +74,7 @@ class ReviewEngine:
         self._max_item_chars = int(policy.get("max_item_chars") or 0)
 
     def _connect(self) -> sqlite3.Connection:
-        conn = sqlite3.connect(str(self.db_path), timeout=5.0)
-        conn.row_factory = sqlite3.Row
-        conn.execute("PRAGMA busy_timeout=5000")
-        conn.execute("PRAGMA foreign_keys=ON")
-        return conn
+        return self._database.connect(foreign_keys=True)
 
     @staticmethod
     def _validate_scope(scope_type: str, scope_id: str) -> tuple[str, str]:
