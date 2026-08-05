@@ -105,3 +105,18 @@ AGENTLOOM_RUNTIME_ROOT=/tmp/agentloom-catalog-self-learning \
 Use a different `AGENTLOOM_RUNTIME_ROOT` for concurrent runs. A successful
 process exit is not enough: inspect each `manifest.json`, `logs/runtime.log`,
 and the files or database records produced by the tools.
+
+### Validation record: 2026-08-05
+
+The runtime changes committed as `aad0daa` were exercised through isolated,
+real-model runs. Each manifest finished with `status: completed`; an audit of
+the runtime logs found no unregistered-tool, unknown-toolset, non-callable
+implementation, or circular-import error.
+
+| Application | Run ID | Audited result |
+|---|---|---|
+| Core catalog | `run_20260805T121722420197Z_c82db5eab6e6` | `CORE_TOOL_REGISTRY_VALIDATION: PASS` |
+| Markdown toolset | `run_20260805T121722420159Z_2299de139dc2` | `MARKDOWN_TOOLSET_VALIDATION: PASS` |
+| Search and LSP | `run_20260805T121722420285Z_67c9db03778a` | all seven checks passed |
+| Context retrieval | `run_20260805T121722420262Z_67f264434fcd` | `JSON-CTX-4927` retrieved from the context store |
+| Self-learning | `run_20260805T121722420417Z_496aaaa4cd2f` | memory and skill proposals, reference write, and file read all returned `ok: true` |

@@ -98,3 +98,17 @@ AGENTLOOM_RUNTIME_ROOT=/tmp/agentloom-catalog-self-learning \
 并发验证时为每个进程使用不同的 `AGENTLOOM_RUNTIME_ROOT`。进程退出码为零仍不足以
 证明通过；必须检查每个 `manifest.json`、`logs/runtime.log`，以及工具真正生成的
 文件或数据库记录。
+
+### 验证记录：2026-08-05
+
+提交为 `aad0daa` 的运行时代码已通过隔离的真实模型运行。所有 manifest 均以
+`status: completed` 结束；审计 runtime log 后，未发现工具未注册、未知 toolset、
+implementation 不可调用或循环导入错误。
+
+| Application | Run ID | 已审计结果 |
+|---|---|---|
+| Core catalog | `run_20260805T121722420197Z_c82db5eab6e6` | `CORE_TOOL_REGISTRY_VALIDATION: PASS` |
+| Markdown toolset | `run_20260805T121722420159Z_2299de139dc2` | `MARKDOWN_TOOLSET_VALIDATION: PASS` |
+| Search 与 LSP | `run_20260805T121722420285Z_67c9db03778a` | 7 项检查全部通过 |
+| Context retrieval | `run_20260805T121722420262Z_67f264434fcd` | 从 context store 取回 `JSON-CTX-4927` |
+| Self-learning | `run_20260805T121722420417Z_496aaaa4cd2f` | memory/skill proposal、reference 写入、文件读取均为 `ok: true` |
