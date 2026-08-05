@@ -23,7 +23,7 @@ from ..event_schema import (
     CanonicalSessionEvent,
     safe_run_id,
 )
-from ..paths import self_learning_db, session_events_dir
+from ..paths import self_learning_db
 from ..redaction import (
     BLOCKED_TEXT,
     redact_text,
@@ -120,11 +120,6 @@ def _json_dumps(value: Any) -> str:
 
 def _now_iso() -> str:
     return datetime.now().astimezone().isoformat()
-
-
-def event_file_for_run(run_id: str) -> Path:
-    """Return the canonical JSONL export path for one validated run id."""
-    return session_events_dir() / f"{safe_run_id(run_id)}.jsonl"
 
 
 def _v5_memory_tables_sql(
@@ -360,91 +355,6 @@ class SelfLearningLedger:
 
     def _connect(self) -> sqlite3.Connection:
         return self._database.connect()
-
-    @staticmethod
-    def _read_event_file(path: Path) -> list[CanonicalSessionEvent]:
-        events: list[CanonicalSessionEvent] = []
-        try:
-            lines = path.read_text(encoding="utf-8").splitlines()
-        except OSError:
-            return events
-        for line in lines:
-            raw = line.strip()
-            if not raw:
-                continue
-            try:
-                data = json.loads(raw)
-            except json.JSONDecodeError:
-                logger.warning(
-                    "Skipping malformed self-learning event export line in %s",
-                    path,
-                )
-                continue
-            if isinstance(data, dict):
-                events.append(CanonicalSessionEvent.from_record(data))
-        return [event for event in events if event.run_id]
-
-    @classmethod
-    def _event_files(cls, target: str | Path | None = None) -> list[Path]:
-        if target is None:
-            root = session_events_dir()
-            return sorted(root.glob("*.jsonl")) if root.exists() else []
-        path = Path(target).expanduser()
-        if not path.is_absolute():
-            path = Path.cwd() / path
-        path = path.resolve()
-        if path.is_file():
-            return [path]
-        if path.is_dir():
-            return sorted(path.glob("*.jsonl"))
-        run_file = event_file_for_run(str(target))
-        return [run_file] if run_file.exists() else []
-
-    def index_run(self, target: str | Path) -> dict[str, Any]:
-        """Import one canonical JSONL event export into this ledger."""
-        files = self._event_files(target)
-        if len(files) != 1:
-            raise FileNotFoundError(
-                "Expected one canonical event export file, "
-                f"found {len(files)} for {target}"
-            )
-        event_file = files[0]
-        events = self._read_event_file(event_file)
-        if not events:
-            return {
-                "run_id": "",
-                "events_indexed": 0,
-                "db_path": str(self.db_path),
-                "event_file": str(event_file),
-            }
-        run_id = events[0].run_id
-        self.delete_run(run_id)
-        inserted = sum(
-            1 for event in events if self.append_event(event).get("indexed")
-        )
-        return {
-            "run_id": run_id,
-            "events_indexed": inserted,
-            "db_path": str(self.db_path),
-            "event_file": str(event_file),
-        }
-
-    def index_all(self, events_root: str | Path | None = None) -> dict[str, Any]:
-        """Import JSONL exports, or report current persisted event counts."""
-        if events_root is None:
-            return self.count_events()
-        runs = 0
-        events = 0
-        for path in self._event_files(events_root):
-            stats = self.index_run(path)
-            if stats.get("run_id"):
-                runs += 1
-            events += int(stats.get("events_indexed") or 0)
-        return {
-            "runs_indexed": runs,
-            "events_indexed": events,
-            "db_path": str(self.db_path),
-        }
 
     def _init_db(self) -> None:
         with serialized_database_writer(self.db_path):
