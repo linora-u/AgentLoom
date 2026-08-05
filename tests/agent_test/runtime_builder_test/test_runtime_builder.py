@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import sqlite3
 import threading
 import time
 from concurrent.futures import ThreadPoolExecutor
@@ -651,7 +652,7 @@ def test_base_run_binds_root_before_memory_snapshot_and_only_owner_emits_session
 
 
 def test_main_agent_and_worker_inject_the_same_frozen_root_memory_snapshot() -> None:
-    from src.extensions.self_learning.memory_store import MemoryStore
+    from src.extensions.self_learning.persistence.memory_store import MemoryStore
     from src.trace import bind_root_run
 
     config = {
@@ -691,8 +692,10 @@ def test_main_agent_and_worker_inject_the_same_frozen_root_memory_snapshot() -> 
 def test_failed_initial_memory_store_open_freezes_empty_for_workers(
     monkeypatch,
 ) -> None:
-    from src.extensions.self_learning import memory_store as memory_store_module
-    from src.extensions.self_learning.memory_store import MemoryStore
+    from src.extensions.self_learning.persistence import (
+        memory_store as memory_store_module,
+    )
+    from src.extensions.self_learning.persistence.memory_store import MemoryStore
     from src.trace import bind_root_run
 
     config = {
@@ -1129,7 +1132,7 @@ def test_real_config_builder_compiles_global_application_and_agent_hook_layers(
 def test_successful_root_review_waits_for_session_end_recorder_commit(monkeypatch):
     """The public run seam must not review an incompletely finalized root."""
     from src.extensions.self_learning import reviewer
-    from src.extensions.self_learning.ledger import SelfLearningLedger
+    from src.extensions.self_learning.persistence.ledger import SelfLearningLedger
 
     agent = _make_review_agent(logger=DummyLoggerBackend())
     runtime_agent = DummyRuntimeRunner(result="main-result")
@@ -1190,7 +1193,7 @@ def test_successful_root_review_waits_for_session_end_recorder_commit(monkeypatc
 def test_custom_session_end_telemetry_cannot_disable_persisted_review(monkeypatch):
     """The completed ledger projection, not shared telemetry, authorizes review."""
     from src.extensions.self_learning import reviewer
-    from src.extensions.self_learning.ledger import SelfLearningLedger
+    from src.extensions.self_learning.persistence.ledger import SelfLearningLedger
 
     agent = _make_review_agent(logger=DummyLoggerBackend())
     runtime_agent = DummyRuntimeRunner(result="main-result")
@@ -1235,7 +1238,7 @@ def test_session_end_persistence_failure_never_builds_completed_run_review(
 ):
     """A successful task is not reviewable until its SessionEnd is durable."""
     from src.extensions.self_learning import reviewer
-    from src.extensions.self_learning.ledger import SelfLearningLedger
+    from src.extensions.self_learning.persistence.ledger import SelfLearningLedger
     from src.extensions.self_learning.session_recorder import SessionRecorder
 
     agent = _make_review_agent(logger=DummyLoggerBackend())
@@ -1279,7 +1282,7 @@ def test_session_end_persistence_failure_never_builds_completed_run_review(
     root_run_id = failed_root_ids[0]
     ledger = SelfLearningLedger()
     assert ledger.completed_review_context(root_run_id, tool_result_limit=1) is None
-    with ledger._connect() as conn:
+    with sqlite3.connect(ledger.db_path) as conn:
         assert conn.execute("SELECT COUNT(*) FROM review_batches").fetchone()[0] == 0
 
 
@@ -1288,7 +1291,7 @@ def test_custom_session_end_telemetry_cannot_create_orphan_review_audit(
 ):
     """Reviewer independently requires the persisted completed-run projection."""
     from src.extensions.self_learning import reviewer
-    from src.extensions.self_learning.ledger import SelfLearningLedger
+    from src.extensions.self_learning.persistence.ledger import SelfLearningLedger
     from src.extensions.self_learning.session_recorder import (
         SessionRecorder,
     )
@@ -1339,7 +1342,7 @@ def test_custom_session_end_telemetry_cannot_create_orphan_review_audit(
     root_run_id = failed_root_ids[0]
     ledger = SelfLearningLedger()
     assert ledger.completed_review_context(root_run_id, tool_result_limit=1) is None
-    with ledger._connect() as conn:
+    with sqlite3.connect(ledger.db_path) as conn:
         assert conn.execute("SELECT COUNT(*) FROM review_batches").fetchone()[0] == 0
 
 

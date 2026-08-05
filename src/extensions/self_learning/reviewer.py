@@ -21,10 +21,10 @@ from typing import Any
 from src.lib.logging import get_logger
 
 from .event_schema import safe_run_id
-from .ledger import SelfLearningLedger
 from .paths import memory_config, review_config, self_learning_enabled
+from .persistence.ledger import SelfLearningLedger
+from .persistence.review_engine import ReviewEngine
 from .redaction import sanitize_text_fragment
-from .review_engine import ReviewEngine
 from .review_orchestration import ReviewOrchestrator, _resolve_review_model
 
 logger = get_logger(__name__)
@@ -133,7 +133,7 @@ def _evidence_gate(db_path: Path) -> Any:
     # gate never enables auto approval; ReviewEngine safely downgrades to
     # pending_pre_review.
     try:
-        from .evidence_gate import SQLiteEvidenceGate
+        from .persistence.evidence_gate import SQLiteEvidenceGate
 
         return SQLiteEvidenceGate(db_path)
     except ImportError:

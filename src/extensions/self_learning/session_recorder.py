@@ -19,8 +19,8 @@ if TYPE_CHECKING:
 from .application_scope import resolve_application_scope
 from .event_schema import CanonicalSessionEvent, compact_content, now_iso, safe_run_id
 from .paths import self_learning_enabled, session_events_dir
+from .persistence.ledger import SelfLearningLedger
 from .redaction import redact_mapping, sanitize_text_fragment
-from .session_index import SessionIndex
 
 logger = get_logger(__name__)
 
@@ -230,7 +230,7 @@ class SessionRecorder:
         trusted_evidence: tuple[dict[str, str], ...] = (),
     ) -> dict[str, Any]:
         with _LOCK:
-            indexed = SessionIndex().record_runtime_event(
+            indexed = SelfLearningLedger().append_runtime_event(
                 event,
                 trusted_evidence=trusted_evidence,
             )

@@ -8,8 +8,6 @@ import re
 import sqlite3
 import threading
 import time
-from collections.abc import Callable, Iterator
-from contextlib import contextmanager
 from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any
@@ -20,13 +18,13 @@ from src.lib.trusted_memory_evidence import (
     TRUSTED_MEMORY_EVIDENCE_RESPONSE_KEY,
 )
 
-from .application_scope import resolve_legacy_application_id
-from .event_schema import (
+from ..application_scope import resolve_legacy_application_id
+from ..event_schema import (
     CanonicalSessionEvent,
     safe_run_id,
 )
-from .paths import self_learning_db
-from .redaction import (
+from ..paths import self_learning_db, session_events_dir
+from ..redaction import (
     BLOCKED_TEXT,
     redact_text,
     require_safe_identity,
@@ -36,7 +34,12 @@ from .redaction import (
     sanitize_value_fragments,
     sanitize_value_fragments_with_taint,
 )
-from .review_types import payload_hash
+from ..review_types import payload_hash
+from .database import (
+    SelfLearningDatabase,
+    serialized_database_writer,
+    serialized_write_transaction,
+)
 
 logger = get_logger(__name__)
 
@@ -104,54 +107,6 @@ _V4_PRIVACY_BASE_TABLES = (
 LEGACY_SANITIZER_DEAD_ERROR = (
     "legacy_v4_identity_sanitizer_changed_frozen_job_input"
 )
-
-_DATABASE_WRITER_LOCKS: dict[str, threading.Lock] = {}
-_DATABASE_WRITER_LOCKS_GUARD = threading.Lock()
-
-
-def _database_writer_lock(db_path: str | Path) -> threading.Lock:
-    """Return the one process-local writer gate for a SQLite database."""
-    key = str(Path(db_path).resolve())
-    with _DATABASE_WRITER_LOCKS_GUARD:
-        lock = _DATABASE_WRITER_LOCKS.get(key)
-        if lock is None:
-            lock = threading.Lock()
-            _DATABASE_WRITER_LOCKS[key] = lock
-        return lock
-
-
-@contextmanager
-def serialized_database_writer(db_path: str | Path) -> Iterator[None]:
-    """Serialize one process-local SQLite writer for the given database."""
-    with _database_writer_lock(db_path):
-        yield
-
-
-@contextmanager
-def serialized_write_transaction(
-    db_path: str | Path,
-    connect: Callable[[], sqlite3.Connection],
-) -> Iterator[sqlite3.Connection]:
-    """Run one short SQLite write transaction behind a per-database gate.
-
-    SQLite still arbitrates writers across processes.  Inside this process we
-    can avoid timeout-based competition entirely: all Ledger and MemoryStore
-    instances that target the same database take this lock before BEGIN and
-    release it only after commit or rollback.
-    """
-    with serialized_database_writer(db_path):
-        conn = connect()
-        try:
-            conn.execute("BEGIN IMMEDIATE")
-            yield conn
-            conn.commit()
-        except BaseException:
-            if conn.in_transaction:
-                conn.rollback()
-            raise
-        finally:
-            conn.close()
-
 
 def memory_content_hash(content: str) -> str:
     """Stable dedup hash: whitespace-collapsed, case-folded content."""
@@ -379,6 +334,7 @@ class SelfLearningLedger:
 
     def __init__(self, db_path: str | Path | None = None):
         self.db_path = Path(db_path).resolve() if db_path else self_learning_db()
+        self._database = SelfLearningDatabase(self.db_path)
         self.db_path.parent.mkdir(parents=True, exist_ok=True)
         key = str(self.db_path)
         if key not in self._initialized_paths:
@@ -398,9 +354,99 @@ class SelfLearningLedger:
                         self._init_db()
 
     def _connect(self) -> sqlite3.Connection:
-        conn = sqlite3.connect(str(self.db_path), timeout=_BUSY_TIMEOUT_MS / 1000)
-        conn.row_factory = sqlite3.Row
-        return conn
+        return self._database.connect()
+
+    @staticmethod
+    def _read_event_file(path: Path) -> list[CanonicalSessionEvent]:
+        events: list[CanonicalSessionEvent] = []
+        try:
+            lines = path.read_text(encoding="utf-8").splitlines()
+        except OSError:
+            return events
+        for line in lines:
+            raw = line.strip()
+            if not raw:
+                continue
+            try:
+                data = json.loads(raw)
+            except json.JSONDecodeError:
+                logger.warning(
+                    "Skipping malformed self-learning event export line in %s",
+                    path,
+                )
+                continue
+            if isinstance(data, dict):
+                events.append(CanonicalSessionEvent.from_record(data))
+        return [event for event in events if event.run_id]
+
+    @staticmethod
+    def _event_file_for_run(run_id: str) -> Path:
+        safe_name = "".join(
+            ch if ch.isalnum() or ch in "._-" else "_" for ch in str(run_id)
+        )
+        return session_events_dir() / f"{safe_name}.jsonl"
+
+    @classmethod
+    def _event_files(cls, target: str | Path | None = None) -> list[Path]:
+        if target is None:
+            root = session_events_dir()
+            return sorted(root.glob("*.jsonl")) if root.exists() else []
+        path = Path(target).expanduser()
+        if not path.is_absolute():
+            path = Path.cwd() / path
+        path = path.resolve()
+        if path.is_file():
+            return [path]
+        if path.is_dir():
+            return sorted(path.glob("*.jsonl"))
+        run_file = cls._event_file_for_run(str(target))
+        return [run_file] if run_file.exists() else []
+
+    def index_run(self, target: str | Path) -> dict[str, Any]:
+        """Import one canonical JSONL event export into this ledger."""
+        files = self._event_files(target)
+        if len(files) != 1:
+            raise FileNotFoundError(
+                "Expected one canonical event export file, "
+                f"found {len(files)} for {target}"
+            )
+        event_file = files[0]
+        events = self._read_event_file(event_file)
+        if not events:
+            return {
+                "run_id": "",
+                "events_indexed": 0,
+                "db_path": str(self.db_path),
+                "event_file": str(event_file),
+            }
+        run_id = events[0].run_id
+        self.delete_run(run_id)
+        inserted = sum(
+            1 for event in events if self.append_event(event).get("indexed")
+        )
+        return {
+            "run_id": run_id,
+            "events_indexed": inserted,
+            "db_path": str(self.db_path),
+            "event_file": str(event_file),
+        }
+
+    def index_all(self, events_root: str | Path | None = None) -> dict[str, Any]:
+        """Import JSONL exports, or report current persisted event counts."""
+        if events_root is None:
+            return self.count_events()
+        runs = 0
+        events = 0
+        for path in self._event_files(events_root):
+            stats = self.index_run(path)
+            if stats.get("run_id"):
+                runs += 1
+            events += int(stats.get("events_indexed") or 0)
+        return {
+            "runs_indexed": runs,
+            "events_indexed": events,
+            "db_path": str(self.db_path),
+        }
 
     def _init_db(self) -> None:
         with serialized_database_writer(self.db_path):
@@ -453,6 +499,8 @@ class SelfLearningLedger:
                     )
                 }
                 if not set(_V6_REQUIRED_TABLES).issubset(existing_tables):
+                    return True
+                if not self._trusted_review_evidence_schema_is_canonical(conn):
                     return True
                 forbidden_tables = conn.execute(
                     "SELECT 1 FROM sqlite_master "

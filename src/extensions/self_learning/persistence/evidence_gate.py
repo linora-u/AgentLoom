@@ -14,8 +14,9 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-from .redaction import BLOCKED_TEXT, sanitize_text_fragment_with_taint
-from .review_types import CandidateInput, EvidenceGateResult, payload_hash
+from ..redaction import BLOCKED_TEXT, sanitize_text_fragment_with_taint
+from ..review_types import CandidateInput, EvidenceGateResult, payload_hash
+from .database import SelfLearningDatabase
 
 _SAFETY_TAINT_KEY = "_safety_tainted"
 
@@ -125,19 +126,12 @@ class SQLiteEvidenceGate:
 
     def __init__(self, db_path: str | Path) -> None:
         self.db_path = Path(db_path).expanduser().resolve()
+        self._database = SelfLearningDatabase(self.db_path)
 
     def _connect(self) -> sqlite3.Connection:
         # ``mode=ro`` is part of the security boundary: evaluating a model
         # candidate must not create a database or repair evidence in place.
-        conn = sqlite3.connect(
-            f"{self.db_path.as_uri()}?mode=ro",
-            uri=True,
-            timeout=5.0,
-        )
-        conn.row_factory = sqlite3.Row
-        conn.execute("PRAGMA busy_timeout=5000")
-        conn.execute("PRAGMA query_only=ON")
-        return conn
+        return self._database.connect(read_only=True)
 
     @staticmethod
     def _candidate_is_unsafe(candidate: CandidateInput) -> bool:

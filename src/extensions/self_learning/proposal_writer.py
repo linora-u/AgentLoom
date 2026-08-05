@@ -12,8 +12,8 @@ from typing import Any
 from src.lib.logging import get_logger
 
 from .application_scope import current_application_scope
-from .ledger import SelfLearningLedger
 from .paths import active_skills_dir, skill_proposals_dir
+from .persistence.ledger import SelfLearningLedger
 from .redaction import (
     require_safe_identity,
     sanitize_text_fragment,

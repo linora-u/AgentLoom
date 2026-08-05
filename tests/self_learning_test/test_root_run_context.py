@@ -112,15 +112,15 @@ def test_session_search_excludes_explicit_root(
 ) -> None:
     captured = {}
 
-    class _FakeIndex:
-        def search(self, query, **kwargs):
+    class _FakeLedger:
+        def search_events(self, query, **kwargs):
             captured["query"] = query
             captured.update(kwargs)
             return []
 
     monkeypatch.setattr(
-        "src.tools.self_learning.session_tools.SessionIndex",
-        lambda: _FakeIndex(),
+        "src.tools.self_learning.session_tools.SelfLearningLedger",
+        lambda: _FakeLedger(),
     )
 
     from src.tools.self_learning.session_tools import session_search
@@ -190,14 +190,14 @@ def test_session_tools_fail_closed_before_reading_without_root_context(
     from src.tools.self_learning.session_tools import session_scroll, session_search
 
     class _MustNotRead:
-        def search(self, *_args, **_kwargs):
+        def search_events(self, *_args, **_kwargs):
             raise AssertionError("search must not read without a root context")
 
-        def scroll(self, *_args, **_kwargs):
+        def scroll_events(self, *_args, **_kwargs):
             raise AssertionError("scroll must not read without a root context")
 
     monkeypatch.setattr(
-        "src.tools.self_learning.session_tools.SessionIndex",
+        "src.tools.self_learning.session_tools.SelfLearningLedger",
         lambda: _MustNotRead(),
     )
 
@@ -222,7 +222,7 @@ def test_disabled_self_learning_tools_do_not_initialize_runtime_or_state(
         raise AssertionError("disabled tools must not initialize runtime or state")
 
     monkeypatch.setattr(session_tools, "_current_run_id", _must_not_initialize)
-    monkeypatch.setattr(session_tools, "SessionIndex", _must_not_initialize)
+    monkeypatch.setattr(session_tools, "SelfLearningLedger", _must_not_initialize)
     monkeypatch.setattr(memory_tool, "current_session_run_id", _must_not_initialize)
     monkeypatch.setattr(memory_tool, "MemoryStore", _must_not_initialize)
     monkeypatch.setattr(
@@ -265,7 +265,7 @@ def test_tool_wrapper_propagates_and_refreshes_root_across_executor_thread(
     monkeypatch.setenv(
         "AGENTLOOM_RUNTIME_ROOT", str(tmp_path / ".agentloom")
     )
-    from src.extensions.self_learning.memory_store import MemoryStore
+    from src.extensions.self_learning.persistence.memory_store import MemoryStore
     from src.lib.smolagents.hooks.tool_shim import inject_hooks
     from src.lib.smolagents.tools.tools import ensure_tool_wrapped
     from src.tools.self_learning import memory_tool
@@ -371,7 +371,7 @@ def test_session_tools_exclude_every_leaf_of_current_root(
 ) -> None:
     monkeypatch.setenv("AGENTLOOM_RUNTIME_ROOT", str(tmp_path / ".agentloom"))
     from src.extensions.self_learning.event_schema import CanonicalSessionEvent, now_iso
-    from src.extensions.self_learning.ledger import SelfLearningLedger
+    from src.extensions.self_learning.persistence.ledger import SelfLearningLedger
     from src.tools.self_learning.session_tools import session_scroll, session_search
 
     ledger = SelfLearningLedger()

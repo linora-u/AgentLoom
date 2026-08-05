@@ -228,7 +228,7 @@ def test_release_source_gate_ignores_unrelated_worktree_changes(
     assert {
         "src/extensions/self_learning/application_scope.py",
         "src/extensions/self_learning/paths.py",
-        "src/extensions/self_learning/review_engine.py",
+        "src/extensions/self_learning/persistence/review_engine.py",
         "src/extensions/self_learning/review_types.py",
         "src/lib/runtime/context.py",
         "src/lib/trusted_memory_evidence.py",

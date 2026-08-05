@@ -50,9 +50,15 @@ from applications.memory_feature_validation.scripts.offline_memory_campaign_comm
     safe_marker,
 )
 from src.extensions.self_learning.event_schema import CanonicalSessionEvent  # noqa: E402
-from src.extensions.self_learning.ledger import SelfLearningLedger  # noqa: E402
-from src.extensions.self_learning.memory_store import MemoryStore  # noqa: E402
-from src.extensions.self_learning.review_engine import ReviewEngine  # noqa: E402
+from src.extensions.self_learning.persistence.ledger import (  # noqa: E402
+    SelfLearningLedger,
+)
+from src.extensions.self_learning.persistence.memory_store import (  # noqa: E402
+    MemoryStore,
+)
+from src.extensions.self_learning.persistence.review_engine import (  # noqa: E402
+    ReviewEngine,
+)
 from src.extensions.self_learning.review_types import (  # noqa: E402
     CandidateInput,
     EvidenceGateResult,
@@ -104,12 +110,13 @@ _SOURCE_FILES = (
     "applications/memory_feature_validation/scripts/offline_memory_campaign_common.py",
     "applications/memory_feature_validation/scripts/run_offline_memory_campaign.py",
     "src/extensions/self_learning/event_schema.py",
-    "src/extensions/self_learning/ledger.py",
-    "src/extensions/self_learning/memory_store.py",
+    "src/extensions/self_learning/persistence/database.py",
+    "src/extensions/self_learning/persistence/ledger.py",
+    "src/extensions/self_learning/persistence/memory_store.py",
     "src/extensions/self_learning/redaction.py",
     "src/extensions/self_learning/application_scope.py",
     "src/extensions/self_learning/paths.py",
-    "src/extensions/self_learning/review_engine.py",
+    "src/extensions/self_learning/persistence/review_engine.py",
     "src/extensions/self_learning/review_types.py",
     "src/lib/runtime/__init__.py",
     "src/lib/runtime/context.py",

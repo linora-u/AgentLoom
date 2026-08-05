@@ -6,10 +6,9 @@ runtime Agent and tool graph.
 
 _LAZY_EXPORTS = {
     "CanonicalSessionEvent": (".event_schema", "CanonicalSessionEvent"),
-    "SelfLearningLedger": (".ledger", "SelfLearningLedger"),
-    "MemoryStore": (".memory_store", "MemoryStore"),
+    "SelfLearningLedger": (".persistence.ledger", "SelfLearningLedger"),
+    "MemoryStore": (".persistence.memory_store", "MemoryStore"),
     "ProposalWriter": (".proposal_writer", "ProposalWriter"),
-    "SessionIndex": (".session_index", "SessionIndex"),
     "SessionRecorder": (".session_recorder", "SessionRecorder"),
 }
 
@@ -35,5 +34,4 @@ __all__ = [
     "MemoryStore",
     "ProposalWriter",
     "SessionRecorder",
-    "SessionIndex",
 ]
