@@ -277,14 +277,16 @@ class AgentConfigNormalizer:
 
     @staticmethod
     def validate_runtime_tool_references(config: dict) -> None:
-        """Resolve declarative built-ins without constructing or running tools.
+        """Validate declarative built-in references without importing tools.
 
         Dynamic tools are intentionally limited to structural validation here:
         importing their configured module can execute arbitrary application
-        code, so that remains part of actual Agent construction.
+        code, so that remains part of actual Agent construction. Built-in
+        ``fixed_args`` are checked against the signature contract stored in the
+        metadata catalog, then checked against the callable again at construction.
         """
 
-        from src.tools.tool_meta import resolve_tool_function, resolve_toolsets
+        from src.tools.catalog import get_tool_spec, resolve_toolsets
 
         AgentConfigNormalizer.validate_tools_config(config)
 
@@ -297,12 +299,16 @@ class AgentConfigNormalizer:
         for tool_config in config.get("tools", []):
             if "module" in tool_config and "function" in tool_config:
                 continue
-            tool_function = resolve_tool_function(tool_config["name"])
-            AgentConfigNormalizer.validate_fixed_tool_args(
-                tool_function,
-                tool_config["name"],
-                dict(tool_config.get("fixed_args") or {}),
-            )
+            spec = get_tool_spec(tool_config["name"])
+            fixed_args = dict(tool_config.get("fixed_args") or {})
+            if spec.accepts_extra_fixed_args:
+                continue
+            unknown_args = sorted(set(fixed_args) - set(spec.fixed_arg_names))
+            if unknown_args:
+                joined_args = ", ".join(unknown_args)
+                raise ValueError(
+                    f"Unknown fixed_args for tool '{spec.name}': {joined_args}"
+                )
 
     @staticmethod
     def validate_fixed_tool_args(

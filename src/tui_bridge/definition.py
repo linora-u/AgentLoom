@@ -1,7 +1,7 @@
 """Lightweight Agent definition loading and catalog validation.
 
 The TUI index needs the same configuration truth as the runtime, but must not
-import Agent classes, model providers, or the tool registry.  This module is
+import Agent classes, model providers, or concrete tool implementations. This module is
 the shared observation boundary for YAML/Markdown definitions.
 """
 

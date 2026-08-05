@@ -898,7 +898,7 @@ Agent 的持久 recall 使用 `.agentloom/workspaces/agents/<application_id>/<ag
 |------|------|--------|------|------|
 | `default_toolsets` | `list[str]` | `[]` | ❌ 否 | 系统启动时所有 Agent 默认加载的 toolset 名称列表 |
 
-Agent YAML 中的 `toolsets:` 会整体替换全局默认；`toolsets: []` 表示不加载任何内置工具。完整 registry toolsets：
+Agent YAML 中的 `toolsets:` 会整体替换全局默认；`toolsets: []` 表示不加载任何内置工具。完整 catalog toolsets：
 
 | Toolset | 工具 |
 |--------|------|
@@ -907,6 +907,8 @@ Agent YAML 中的 `toolsets:` 会整体替换全局默认；`toolsets: []` 表�
 | `core_search` | `grep_search`, `glob_search` |
 | `context` | `loom_retrieve_context` |
 | `skills` | `load_skill`, `list_skills` |
+| `self_learning` | `session_search`, `session_scroll`, `memory`, `skill_manage` |
+| `planning` | `todo_write` |
 | `markdown_report` | `write_markdown_file`, `write_markdown_file_raw`, `append_markdown_sections` |
 | `code_nav` | `get_file_outline`, `ast_grep_search_file`, `lsp_find_definition`, `lsp_find_references`, `lsp_get_document_symbols`, `lsp_hover`, `lsp_get_workspace_symbols` |
 
@@ -930,6 +932,11 @@ Agent YAML 中的 `toolsets:` 会整体替换全局默认；`toolsets: []` 表�
 | `loom_retrieve_context` | 读取压缩上下文引用 |
 | `load_skill` | 加载指定 Skill |
 | `list_skills` | 列出可用 Skills |
+| `session_search` | 搜索历史 Run 的脱敏记录 |
+| `session_scroll` | 读取历史 Run 中某事件附近的上下文 |
+| `memory` | 读取或提议持久的 Project/Application 事实 |
+| `skill_manage` | 创建或更新生成式 Skill 提案 |
+| `todo_write` | Todo 启用时更新当前任务计划 |
 | `shell_tool` | 执行 Shell 命令（受白名单限制） |
 | `check_background_task` | 检查后台任务状态和最近输出 |
 | `kill_background_task` | 终止运行中的后台任务 |
@@ -948,6 +955,9 @@ default_toolsets:
   - "context"
   - "skills"
 ```
+
+metadata/loading seam、扩展规则和真实 Application 验收要求见
+[内置 Tool Catalog](tool_catalog.md)。
 
 ### 8.2 shell_settings — Shell 工具安全策略
 
