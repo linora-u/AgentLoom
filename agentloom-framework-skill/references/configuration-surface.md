@@ -276,7 +276,8 @@ shell_tool, check_background_task, kill_background_task, list_background_tasks,
 load_skill, list_skills, todo_write
 ```
 
-实际完整列表以 `src/tools/registry.py` 的 `ToolSpec` registry 为准。
+实际完整列表以 `src/tools/catalog.py` 的 `ToolSpec` catalog 为准。读取 metadata
+不得导入具体工具；Runtime implementation 只通过 `src/tools/loader.py` 按需加载。
 
 ## llm.yaml 配置面
 

@@ -15,7 +15,8 @@ Supervisor/Worker/Tool split:
 Run:
 
 ```bash
-.venv/bin/loom run applications/context_engine_json_retrieve_validation/workflows/context_engine_json_retrieve_validation_agent.yaml "Run the ContextEngine JSON retrieval validation."
+AGENTLOOM_RUNTIME_ROOT=/tmp/agentloom-context-engine-json \
+  .venv/bin/loom run applications/context_engine_json_retrieve_validation/workflows/context_engine_json_retrieve_validation_agent.yaml
 ```
 
 Validation:
@@ -27,5 +28,6 @@ Validation:
 Real regression:
 
 ```bash
-AGENT_LOOM_RUNTIME_ROOT=/tmp/agentloom-context-engine-apps .venv/bin/python tests/agent_test/context_engine/real_context_engine_application_validation.py --case json
+AGENTLOOM_RUNTIME_ROOT=/tmp/agentloom-context-engine-apps \
+  .venv/bin/python tests/agent_test/context_engine/real_context_engine_application_validation.py --case json
 ```

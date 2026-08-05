@@ -1,10 +1,12 @@
-"""Tests for ToolSpec metadata and registry lookup."""
+"""Tests for ToolSpec metadata and catalog lookup."""
 
 from dataclasses import FrozenInstanceError
 
 import pytest
 
-from src.tools.tool_meta import ToolSpec, get_tool_meta, resolve_tool_function
+from src.tools.catalog import ToolSpec
+from src.tools.loader import resolve_tool_function
+from src.tools.tool_meta import get_tool_meta
 
 
 class TestResolveToolFunction:

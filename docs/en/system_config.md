@@ -875,7 +875,7 @@ Controls the tool list available to Agents at initialization and the security po
 |------|------|--------|------|------|
 | `default_toolsets` | `list[str]` | `[]` | ❌ No | Toolset list loaded by default for all Agents at startup |
 
-Agent YAML `toolsets:` replaces this global list entirely. `toolsets: []` means no built-in tools. Complete registry toolsets:
+Agent YAML `toolsets:` replaces this global list entirely. `toolsets: []` means no built-in tools. Complete catalog toolsets:
 
 | Toolset | Tools |
 |--------|-------|
@@ -884,6 +884,8 @@ Agent YAML `toolsets:` replaces this global list entirely. `toolsets: []` means 
 | `core_search` | `grep_search`, `glob_search` |
 | `context` | `loom_retrieve_context` |
 | `skills` | `load_skill`, `list_skills` |
+| `self_learning` | `session_search`, `session_scroll`, `memory`, `skill_manage` |
+| `planning` | `todo_write` |
 | `markdown_report` | `write_markdown_file`, `write_markdown_file_raw`, `append_markdown_sections` |
 | `code_nav` | `get_file_outline`, `ast_grep_search_file`, `lsp_find_definition`, `lsp_find_references`, `lsp_get_document_symbols`, `lsp_hover`, `lsp_get_workspace_symbols` |
 
@@ -907,6 +909,11 @@ Complete predefined tool list:
 | `loom_retrieve_context` | Retrieve compressed context refs |
 | `load_skill` | Load specified Skill |
 | `list_skills` | List available Skills |
+| `session_search` | Search redacted records from prior Runs |
+| `session_scroll` | Read surrounding events from a prior Run |
+| `memory` | Read or propose durable Project/Application facts |
+| `skill_manage` | Create or update generated Skill proposals |
+| `todo_write` | Update the current task plan when Todo is enabled |
 | `shell_tool` | Execute Shell commands (restricted by whitelist) |
 | `check_background_task` | Check background task status and recent output |
 | `kill_background_task` | Terminate a running background task |
@@ -925,6 +932,9 @@ default_toolsets:
   - "context"
   - "skills"
 ```
+
+See [Built-in Tool Catalog](tool_catalog.md) for the metadata/loading seam,
+extension rules, and required real-Application validation.
 
 ### 8.2 shell_settings — Shell Tool Security Policy
 

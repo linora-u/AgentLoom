@@ -433,6 +433,7 @@ Run `uv run loom <command> --help` for the full command contract.
 | [Agent Configuration](docs/en/agent_config.md) | Supervisor and Worker YAML fields. |
 | [LLM Configuration](docs/en/llm_config.md) | Model types, providers, retries, and caching. |
 | [System Configuration](docs/en/system_config.md) | Runtime, permissions, execution environments, and tools. |
+| [Built-in Tool Catalog](docs/en/tool_catalog.md) | Toolsets, metadata/loading architecture, extension rules, and real validation. |
 | [Skills Configuration](docs/en/skills_config.md) | Skill packages, loading, and policy. |
 | [Hooks Reference](docs/en/hooks.md) | Direct Hooks, Bundles, events, and execution. |
 | [Goal Mode](docs/en/goal_mode.md) | Supervisor-owned continuation, explicit completion, budgets, resume, schedules, CLI, and TUI. |

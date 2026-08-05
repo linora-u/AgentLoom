@@ -284,7 +284,8 @@ class AgentConfigNormalizer:
         code, so that remains part of actual Agent construction.
         """
 
-        from src.tools.tool_meta import resolve_tool_function, resolve_toolsets
+        from src.tools.catalog import resolve_toolsets
+        from src.tools.loader import resolve_tool_function
 
         AgentConfigNormalizer.validate_tools_config(config)
 

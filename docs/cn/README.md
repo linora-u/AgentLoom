@@ -102,7 +102,7 @@ checkpoint、CLI/JSONL/TUI 和调度说明见 [Goal Mode](goal_mode.md)。
 - [Goal Mode](goal_mode.md)：continuation、显式完成、预算、resume 与可观测性；
 - [Checkpoint](checkpoint.md)：task/run 身份、持久化布局和恢复；
 - [Run 可观测性](run_observability.md)：Python receipt、typed outcome 与 JSONL；
-- [系统配置](system_config.md)、[模型配置](llm_config.md)、[Skills](skills_config.md)、[Hooks](hooks.md) 和 [自学习](self_learning.md)。
+- [系统配置](system_config.md)、[内置 Tool Catalog](tool_catalog.md)、[模型配置](llm_config.md)、[Skills](skills_config.md)、[Hooks](hooks.md) 和 [自学习](self_learning.md)。
 Application Agent 由 Python Runtime 按 YAML `model_type` 解析；TypeScript
 Studio 适配器把同一批 Profile、端点、凭证和兼容请求参数安全映射给内置
 Studio Runtime。`/models` 或 `Ctrl+X` 只切换当前 Studio Session 使用的
