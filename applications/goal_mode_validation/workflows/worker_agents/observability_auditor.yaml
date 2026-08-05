@@ -1,0 +1,32 @@
+name: "goal_observability_auditor"
+description: "Audit agreement across Python API, CLI, JSONL, schedule, bridge, and TUI."
+model_type: "summary"
+tool_call_type: "tool_call"
+max_steps: 2
+concurrency: 1
+
+workflow: |
+  Use only the EVIDENCE_BUNDLE embedded in the query. Audit one Goal observability
+  surface end to end. Compare canonical state fields,
+  statuses, errors, artifacts, and resume identity across the supplied Python and
+  TypeScript paths. Return exact headings: SURFACE, PRODUCER, TRANSPORT, CONSUMER,
+  TEST_EVIDENCE, DRIFT, VERDICT. Cite concrete paths/symbols. Do not modify files.
+  Keep the response under 1800 words. Do not call any other tool or request more
+  evidence. Do not call tools. Your first model response must be the final verdict.
+
+agent_function_schema:
+  description: "Audit one cross-surface Goal observability contract."
+  inputs:
+    task_id:
+      description: "Stable audit case identifier used by the batch ledger."
+      required: true
+    query:
+      description: "Surface boundary, invariants, and repository paths."
+      required: true
+  output:
+    description: "Cross-surface observability verdict with drift analysis."
+
+tools: []
+
+skills: []
+worker_agents: []

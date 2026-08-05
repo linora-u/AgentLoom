@@ -434,6 +434,7 @@ function agentRuntimeStatusLabel(status: RuntimeStatus): string {
     never_run: "尚未运行",
     running: "运行中",
     completed: "已完成",
+    budget_limited: "预算已达上限",
     interrupted: "已中断",
     failed: "失败",
     crashed: "崩溃",

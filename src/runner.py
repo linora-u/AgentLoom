@@ -17,12 +17,15 @@ Usage (CLI)::
 
 from __future__ import annotations
 
+import json
 import os
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
+from src.application_revision import application_revision
 from src.application_run import (
+    ApplicationRunBudgetLimited,
     ApplicationRunError,
     ApplicationRunInterrupted,
     ApplicationRunResult,
@@ -34,10 +37,10 @@ from src.application_run import (
     RunRejectedEvent,
     RunRejection,
 )
-from src.application_revision import application_revision
 from src.lib.checkpoint import CheckpointManager
 from src.lib.checkpoint.file_history import FileHistoryManager
 from src.lib.config import C, build_effective_agent_config
+from src.lib.goal import GoalBudgetLimitedError, normalize_goal_config
 from src.lib.heartbeat import SupervisorHeartbeat
 from src.lib.logging import (
     LoggingConfigBuilder,
@@ -191,6 +194,22 @@ def _persist_run_observability(
 
     if checkpoint_mgr is None:
         return manifest_updates
+
+    goal = checkpoint_mgr.load_goal(task_id)
+    if goal is not None:
+        runtime_context.atomic_write_run_file(
+            runtime_context.audit_dir / "goal.json",
+            json.dumps(
+                goal,
+                ensure_ascii=False,
+                sort_keys=True,
+                separators=(",", ":"),
+            ),
+        )
+        manifest_updates.update(
+            goal=goal,
+            goal_artifact="audit/goal.json",
+        )
 
     try:
         runtime_context.atomic_write_run_file_chunks(
@@ -412,7 +431,13 @@ def execute_app(
         try:
             runtime_context.update_manifest(
                 **durable_manifest_updates,
-                status="interrupted" if isinstance(exc, KeyboardInterrupt) else "failed",
+                status=(
+                    "interrupted"
+                    if isinstance(exc, KeyboardInterrupt)
+                    else "budget_limited"
+                    if isinstance(exc, GoalBudgetLimitedError)
+                    else "failed"
+                ),
                 ended_at=datetime.now().astimezone().isoformat(),
                 error=str(exc),
             )
@@ -551,12 +576,31 @@ def execute_app(
                                     "Detected crashed task "
                                     "(process dead, heartbeat stale)"
                                 )
-                        resumable_statuses = {"interrupted", "failed", "crashed"}
+                        resumable_statuses = {
+                            "interrupted",
+                            "failed",
+                            "crashed",
+                            "budget_limited",
+                        }
                         if tree_status not in resumable_statuses:
                             raise ValueError(
                                 f"Checkpoint {task_id} is not resumable "
                                 f"(status={tree_status}); start a new task instead"
                             )
+                        persisted_goal = checkpoint_mgr.load_goal(task_id)
+                        current_goal = normalize_goal_config(
+                            config,
+                            source=str(resolved_path),
+                        )
+                        if persisted_goal is not None and not current_goal.enabled:
+                            raise ValueError(
+                                "Cannot resume: checkpoint contains an active Goal but "
+                                "Goal mode is disabled in YAML"
+                            )
+                        if task_override is None:
+                            persisted_task = tree.get("task_text")
+                            if isinstance(persisted_task, str) and persisted_task.strip():
+                                effective_task = persisted_task
                         checkpoint_mgr.record_run_resumed(task_id)
                         log.info(
                             "Resuming task %s (status=%s)",
@@ -642,19 +686,27 @@ def execute_app(
                     log.info("Task: %s", effective_task[:200])
                     log.info("=" * 70)
 
-                    result = supervisor.run(
+                    agent_result = supervisor.run(
                         effective_task,
                         task_id=task_id,
                         run_id=run_id,
                         checkpoint_manager=checkpoint_mgr,
                         resume=is_resume,
                     )
-                    result_str = "" if result is None else str(result)
+                    result_str = "" if agent_result is None else str(agent_result)
                     phase = "finalization"
                     outcome = "completed"
                     log.info("=" * 70)
                     log.info("Execution completed successfully.")
                     log.info("=" * 70)
+                except GoalBudgetLimitedError as exc:
+                    outcome = "budget_limited"
+                    outcome_error = str(exc)
+                    log.warning(
+                        "Goal token budget reached. Checkpoint preserved for task_id=%s",
+                        task_id,
+                    )
+                    raise
                 except KeyboardInterrupt as exc:
                     outcome = "interrupted"
                     outcome_error = str(exc)
@@ -732,6 +784,9 @@ def execute_app(
                             file_history.close()
                         except Exception:
                             pass
+                    goal_snapshot = getattr(supervisor, "_last_goal_state", None)
+                    if isinstance(goal_snapshot, dict):
+                        durable_manifest_updates["goal"] = dict(goal_snapshot)
                     try:
                         if outcome == "completed":
                             _persist_run_observability(
@@ -864,9 +919,32 @@ def execute_app(
                     occurred_at=ended_at,
                     error=str(interrupted),
                     phase=phase,
+                    goal=durable_manifest_updates.get("goal"),
                 ),
             )
             raise interrupted from terminal_error
+
+        if isinstance(terminal_error, GoalBudgetLimitedError):
+            goal = dict(terminal_error.state.to_dict())
+            limited = ApplicationRunBudgetLimited(
+                str(terminal_error),
+                run=public_run,
+                phase=phase,
+                original_error=terminal_error,
+                goal=goal,
+            )
+            _emit_lifecycle_event(
+                event_sink,
+                RunLifecycleEvent(
+                    event="run.budget_limited",
+                    run=public_run,
+                    occurred_at=ended_at,
+                    error=str(limited),
+                    phase=phase,
+                    goal=goal,
+                ),
+            )
+            raise limited from terminal_error
 
         if not isinstance(terminal_error, Exception):
             detail = str(terminal_error)
@@ -894,15 +972,17 @@ def execute_app(
                 occurred_at=ended_at,
                 error=message,
                 phase=phase,
+                goal=durable_manifest_updates.get("goal"),
             ),
         )
         raise failure from terminal_error
     ended_at = datetime.now().astimezone()
-    result = ApplicationRunResult(
+    application_result = ApplicationRunResult(
         output=result_str,
         run=public_run,
         started_at=started_at,
         ended_at=ended_at,
+        goal=durable_manifest_updates.get("goal"),
     )
     _emit_lifecycle_event(
         event_sink,
@@ -911,9 +991,10 @@ def execute_app(
             run=public_run,
             occurred_at=ended_at,
             output=result_str,
+            goal=durable_manifest_updates.get("goal"),
         ),
     )
-    return result
+    return application_result
 
 
 def run_app(
@@ -936,6 +1017,8 @@ def run_app(
             file_logging=file_logging,
         ).output
     except ApplicationRunInterrupted as exc:
+        raise exc.original_error from exc
+    except ApplicationRunBudgetLimited as exc:
         raise exc.original_error from exc
     except ApplicationRunError as exc:
         if exc.phase != "execution" or isinstance(

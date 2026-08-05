@@ -57,6 +57,7 @@ _TERMINAL_RUN_STATUS_ALIASES = {
     "cancelled": "interrupted",
     "canceled": "interrupted",
     "crashed": "crashed",
+    "budget_limited": "budget_limited",
     "unknown": "unknown",
 }
 
@@ -755,6 +756,12 @@ class TuiBridge:
             application_id=application_id,
             system_id=system_id,
         )
+        goal = self._goal_projection(
+            manifest,
+            runtime_root=runtime_root,
+            application_id=application_id,
+            task_id=task_id,
+        )
         summary = {
             "run_id": run_id,
             "system_id": linked_system_id,
@@ -765,6 +772,8 @@ class TuiBridge:
             "started_at": self._optional_string(manifest.get("started_at")),
             "ended_at": self._optional_string(manifest.get("ended_at")),
         }
+        if goal is not None:
+            summary["goal"] = goal
         return {
             "summary": summary,
             "manifest": manifest,
@@ -841,6 +850,8 @@ class TuiBridge:
         status = str(record["summary"].get("status") or "").strip().lower()
         if status == "interrupted":
             return "Execution was interrupted before completion."
+        if status == "budget_limited":
+            return "Goal token budget was reached; increase or remove token_budget before resume."
         if status == "crashed":
             return "Execution stopped unexpectedly before completion."
         if status == "unknown":
@@ -953,7 +964,13 @@ class TuiBridge:
                 worker = self._checkpoint_worker_summary(raw_worker)
                 parent_status = str(candidate_run.get("status") or "")
                 worker_status = str(worker.get("status") or "").strip().lower()
-                if parent_status in {"completed", "failed", "interrupted", "crashed"} and worker_status in {
+                if parent_status in {
+                    "completed",
+                    "failed",
+                    "interrupted",
+                    "crashed",
+                    "budget_limited",
+                } and worker_status in {
                     "running",
                     "claimed",
                     "in_progress",
@@ -1599,6 +1616,12 @@ class TuiBridge:
             systems_by_application=systems_by_application,
         )
         status = self._run_status(manifest, task=task, run_dir=run_dir)
+        goal = self._goal_projection(
+            manifest,
+            runtime_root=runtime_root,
+            application_id=application_id,
+            task_id=task_id,
+        )
         summary = {
             "run_id": run_id,
             "system_id": system_id,
@@ -1609,6 +1632,8 @@ class TuiBridge:
             "started_at": self._optional_string(manifest.get("started_at")),
             "ended_at": self._optional_string(manifest.get("ended_at")),
         }
+        if goal is not None:
+            summary["goal"] = goal
         return (
             (application_id, run_id),
             {
@@ -1948,6 +1973,26 @@ class TuiBridge:
         if status == "running":
             return "crashed"
         return "unknown"
+
+    def _goal_projection(
+        self,
+        manifest: dict[str, Any],
+        *,
+        runtime_root: Path,
+        application_id: str,
+        task_id: str,
+    ) -> dict[str, Any] | None:
+        goal = manifest.get("goal")
+        if isinstance(goal, dict):
+            return copy.deepcopy(goal)
+        return self._read_json_object_bounded_secure(
+            runtime_root,
+            Path("checkpoints")
+            / Path(*application_id.split("/"))
+            / task_id
+            / "goal.json",
+            max_bytes=RUN_MANIFEST_MAX_BYTES,
+        )
 
     def _task_events(
         self,
