@@ -7,7 +7,7 @@ from pathlib import Path
 import pytest
 
 from src.extensions.self_learning.event_schema import CanonicalSessionEvent
-from src.extensions.self_learning.ledger import (
+from src.extensions.self_learning.persistence.ledger import (
     SelfLearningLedger,
     memory_content_hash,
 )
@@ -140,7 +140,6 @@ def test_v5_active_and_pending_state_migrate_without_auto_applying(tmp_path: Pat
     db = tmp_path / "v5.db"
     _create_v5_fixture(db)
 
-    SelfLearningLedger._initialized_paths.discard(str(db.resolve()))
     SelfLearningLedger(db)
 
     with sqlite3.connect(db) as conn:
@@ -166,12 +165,11 @@ def test_v5_active_and_pending_state_migrate_without_auto_applying(tmp_path: Pat
 
 
 def test_migrated_v5_pending_fact_can_only_be_manually_approved(tmp_path: Path) -> None:
-    from src.extensions.self_learning.evidence_gate import SQLiteEvidenceGate
-    from src.extensions.self_learning.review_engine import ReviewEngine
+    from src.extensions.self_learning.persistence.evidence_gate import SQLiteEvidenceGate
+    from src.extensions.self_learning.persistence.review_engine import ReviewEngine
 
     db = tmp_path / "v5-manual-approval.db"
     _create_v5_fixture(db)
-    SelfLearningLedger._initialized_paths.discard(str(db.resolve()))
     SelfLearningLedger(db)
     engine = ReviewEngine(db, evidence_gate=SQLiteEvidenceGate(db))
 
@@ -202,12 +200,11 @@ def test_migrated_v5_pending_fact_can_only_be_manually_approved(tmp_path: Path) 
 def test_migration_manual_gate_keeps_capacity_revision_scope_and_payload_safety(
     tmp_path: Path,
 ) -> None:
-    from src.extensions.self_learning.evidence_gate import SQLiteEvidenceGate
-    from src.extensions.self_learning.review_engine import ReviewConflictError, ReviewEngine
+    from src.extensions.self_learning.persistence.evidence_gate import SQLiteEvidenceGate
+    from src.extensions.self_learning.persistence.review_engine import ReviewConflictError, ReviewEngine
 
     db = tmp_path / "v5-manual-guards.db"
     _create_v5_fixture(db)
-    SelfLearningLedger._initialized_paths.discard(str(db.resolve()))
     SelfLearningLedger(db)
     engine = ReviewEngine(
         db,
@@ -300,7 +297,6 @@ def test_v6_migration_uses_one_path_bound_canonical_application_id(
             ),
         )
 
-    SelfLearningLedger._initialized_paths.discard(str(db.resolve()))
     SelfLearningLedger(db)
 
     with sqlite3.connect(db) as conn:
@@ -370,7 +366,6 @@ def test_v6_migration_quarantines_ambiguous_application_data_without_merging(
             ),
         )
 
-    SelfLearningLedger._initialized_paths.discard(str(db.resolve()))
     SelfLearningLedger(db)
 
     with sqlite3.connect(db) as conn:
@@ -496,7 +491,6 @@ def test_restart_removes_tables_resurrected_by_an_old_writer(tmp_path: Path) -> 
             """
         )
 
-    SelfLearningLedger._initialized_paths.discard(str(db.resolve()))
     SelfLearningLedger(db)
 
     with sqlite3.connect(db) as conn:

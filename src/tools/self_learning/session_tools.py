@@ -6,7 +6,7 @@ import json
 
 from src.extensions.self_learning.application_scope import current_application_scope
 from src.extensions.self_learning.event_schema import safe_run_id
-from src.extensions.self_learning.session_index import SessionIndex
+from src.extensions.self_learning.persistence.ledger import SelfLearningLedger
 
 _SEARCH_CONTENT_PREVIEW_CHARS = 80
 _SCROLL_CONTENT_PREVIEW_CHARS = 240
@@ -108,7 +108,7 @@ def session_search(
         raise ValueError("scope must be one of current_app, project, all")
     if scope == "current_app" and not app:
         app = current_application_scope().application_id or None
-    results = SessionIndex().search(
+    results = SelfLearningLedger().search_events(
         query,
         limit=limit,
         agent=agent,
@@ -156,15 +156,15 @@ def session_scroll(
         raise ValueError("run_id is required")
     if direction not in {"before", "after"}:
         raise ValueError("direction must be 'before' or 'after'")
-    index = SessionIndex()
-    requested_root = index.root_run_id_for(safe_run_id(run_id))
+    ledger = SelfLearningLedger()
+    requested_root = ledger.root_run_id_for(safe_run_id(run_id))
     if requested_root == current_run_id:
         raise ValueError(
             "session_scroll rejected a run in the current root; active context is already available"
         )
     window = max(1, min(int(window or 5), _TOOL_MAX_RESULTS))
     results = _compact_records(
-        index.scroll(run_id, event_id, direction=direction, window=window),
+        ledger.scroll_events(run_id, event_id, direction=direction, window=window),
         preview_chars=_SCROLL_CONTENT_PREVIEW_CHARS,
     )
     return json.dumps(
