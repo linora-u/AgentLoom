@@ -19,7 +19,7 @@ from src.lib.checkpoint.file_history_hook import (
     record_active_file_history,
 )
 from src.lib.smolagents.hooks.types import HookContext
-from src.tools import list_tool_specs
+from src.tools.catalog import list_tool_specs
 
 
 @pytest.fixture
@@ -103,10 +103,13 @@ class TestFileHistoryHook:
                 tool_input={"file_path": "/tmp/test.py"},
             )
 
-    def test_destructive_tool_registry_failure_propagates_to_gate_policy(self, hook):
+    def test_destructive_tool_catalog_failure_propagates_to_gate_policy(self, hook):
         with (
-            patch("src.tools.list_tool_specs", side_effect=RuntimeError("registry unavailable")),
-            pytest.raises(RuntimeError, match="registry unavailable"),
+            patch(
+                "src.tools.catalog.list_tool_specs",
+                side_effect=RuntimeError("catalog unavailable"),
+            ),
+            pytest.raises(RuntimeError, match="catalog unavailable"),
         ):
             hook(
                 event_type="PRE_TOOL_USE",

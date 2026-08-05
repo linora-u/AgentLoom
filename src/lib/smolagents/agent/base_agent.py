@@ -80,7 +80,8 @@ from src.lib.smolagents.prompts.prompt_builder import build_prompt_templates
 from src.lib.smolagents.skills.skills import SkillsManager
 from src.lib.smolagents.tools.tools import ensure_tool_wrapped
 from src.lib.utils.workspace import ensure_workspace_mounted_once
-from src.tools.tool_meta import resolve_tool_function, resolve_toolsets
+from src.tools.catalog import resolve_toolsets
+from src.tools.loader import resolve_tool_function
 from src.trace import (
     bind_explicit_execution_context,
     bind_local_run,

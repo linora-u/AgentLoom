@@ -821,11 +821,10 @@ tools:
 
 ```yaml
 tools:
-  - name: "codex"
+  - name: "grep_search"
     fixed_args:
-      cwd: "."
-      sandbox: "workspace-write"
-      search: "false"
+      path: "."
+      case_insensitive: false
 ```
 
 #### 预定义工具 + 元数据覆盖
@@ -876,8 +875,19 @@ tools:
 | `lsp_get_workspace_symbols` | 搜索工作区符号 |
 | `loom_retrieve_context` | 读取压缩上下文引用 |
 | `shell_tool` | 执行 shell 命令（受白名单限制） |
+| `check_background_task` | 读取后台任务状态与输出 |
+| `kill_background_task` | 终止后台任务 |
+| `list_background_tasks` | 列出运行中及最近的后台任务 |
 | `load_skill` | 加载指定技能 |
 | `list_skills` | 列出可用技能 |
+| `session_search` | 搜索历史 Run 的脱敏记录 |
+| `session_scroll` | 读取历史 Run 中某事件附近的上下文 |
+| `memory` | 读取或提议持久的 Project/Application 事实 |
+| `skill_manage` | 创建或更新生成式 Skill 提案 |
+| `todo_write` | Todo 启用时更新当前任务计划 |
+
+toolset 归属、implementation 加载规则和真实验收矩阵见
+[内置 Tool Catalog](tool_catalog.md)。
 
 ### 4.3 工具加载优先级
 

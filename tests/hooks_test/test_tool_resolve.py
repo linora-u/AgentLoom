@@ -1,18 +1,18 @@
-"""Tests for registry-backed built-in tool resolution."""
+"""Tests for catalog-backed built-in tool resolution."""
 
 import importlib
 
 import pytest
 
 from src.lib.config import C
-from src.tools import DEFAULT_TOOLSETS
-from src.tools.tool_meta import (
+from src.tools.catalog import (
+    DEFAULT_TOOLSETS,
     get_tool_spec,
     list_tool_specs,
     list_toolsets,
-    resolve_tool_function,
     resolve_toolsets,
 )
+from src.tools.loader import resolve_tool_function
 
 
 class TestDefaultToolsetsResolve:
@@ -111,7 +111,7 @@ class TestAdditionalToolsetsResolve:
             "lsp_get_workspace_symbols",
         ],
     )
-    def test_optional_registry_tool_resolves(self, tool_name):
+    def test_optional_catalog_tool_resolves(self, tool_name):
         assert callable(resolve_tool_function(tool_name))
 
 
@@ -143,15 +143,16 @@ class TestRemovedToolsRaise:
             resolve_tool_function(tool_name)
 
 
-class TestRegistryInvariants:
+class TestCatalogInvariants:
     def test_tool_names_are_unique(self):
         names = [spec.name for spec in list_tool_specs()]
         assert len(names) == len(set(names))
 
-    def test_all_specs_match_function_names(self):
+    def test_all_specs_have_explicit_implementation_references(self):
         for spec in list_tool_specs():
             assert get_tool_spec(spec.name) is spec
-            assert callable(spec.function)
+            assert spec.implementation.module.startswith("src.tools.")
+            assert spec.implementation.attribute == spec.name
 
     def test_case_sensitive(self):
         with pytest.raises(ValueError):

@@ -124,7 +124,7 @@ Tool 规则：
 tools:
   - name: "grep_search"
     fixed_args:
-      cwd: "."
+      path: "."
   - name: "get_module_context"
     module: "applications.<app>.agent_tools.module_context"
     function: "get_module_context"

@@ -32,7 +32,7 @@ workflow: |
   results.append(("lsp_get_document_symbols", "grep_search" in symbols, symbols))
 
   refs = lsp_find_references(file_path=file_path, line=51, character=5)
-  results.append(("lsp_find_references", "references in" in refs and "src/tools/registry.py" in refs, refs))
+  results.append(("lsp_find_references", "references in" in refs and "src/tools/search/grep_tool/__init__.py" in refs, refs))
 
   definition = lsp_find_definition(file_path=file_path, line=51, character=5)
   results.append(("lsp_find_definition", "grep_tool.py" in definition and "51" in definition, definition))

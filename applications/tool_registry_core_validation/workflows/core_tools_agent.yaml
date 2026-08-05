@@ -1,12 +1,12 @@
 name: "tool_registry_core_validation"
-description: "Validate default ToolSpec registry core toolsets through real tool calls."
+description: "Validate default built-in catalog toolsets through real tool calls."
 
 model_type: "powerful"
 tool_call_type: "code_act"
 max_steps: 5
 
 workflow: |
-  # Tool Registry Core Validation
+  # Built-in Tool Catalog Core Validation
 
   Execute one Python code block that calls the tools below directly. Do not
   split this into multiple code blocks. Do not output prose outside the code

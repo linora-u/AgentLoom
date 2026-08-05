@@ -804,11 +804,10 @@ and cannot be overridden by a tool call.
 
 ```yaml
 tools:
-  - name: "codex"
+  - name: "grep_search"
     fixed_args:
-      cwd: "."
-      sandbox: "workspace-write"
-      search: "false"
+      path: "."
+      case_insensitive: false
 ```
 
 #### Predefined Tools + Metadata Override
@@ -859,8 +858,19 @@ tools:
 | `lsp_get_workspace_symbols` | Search workspace symbols |
 | `loom_retrieve_context` | Retrieve compressed context refs |
 | `shell_tool` | Execute shell commands (whitelist-restricted) |
+| `check_background_task` | Read background task status and output |
+| `kill_background_task` | Terminate a background task |
+| `list_background_tasks` | List active and recent background tasks |
 | `load_skill` | Load specified skill |
 | `list_skills` | List available skills |
+| `session_search` | Search redacted records from prior Runs |
+| `session_scroll` | Read surrounding events from a prior Run |
+| `memory` | Read or propose durable Project/Application facts |
+| `skill_manage` | Create or update generated Skill proposals |
+| `todo_write` | Update the current task plan when Todo is enabled |
+
+For toolset membership, implementation-loading rules, and the validation
+matrix, see [Built-in Tool Catalog](tool_catalog.md).
 
 ### 4.3 Tool Loading Priority
 

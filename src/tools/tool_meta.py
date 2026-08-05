@@ -1,4 +1,4 @@
-"""Tool metadata facade backed by the canonical ToolSpec registry."""
+"""Apply runtime configuration overlays to canonical tool metadata."""
 
 from __future__ import annotations
 
@@ -8,15 +8,7 @@ from typing import Any
 from src.lib.config import C
 from src.lib.logging import get_logger
 
-from .registry import (
-    DEFAULT_TOOLSETS,
-    ToolSpec,
-    get_tool_spec,
-    list_tool_specs,
-    list_toolsets,
-    resolve_tool_function,
-    resolve_toolsets,
-)
+from .catalog import ToolSpec, get_tool_spec
 
 logger = get_logger(__name__)
 
@@ -53,7 +45,7 @@ def get_tool_meta(
 ) -> ToolSpec:
     """Return the registered ``ToolSpec`` with metadata overrides applied.
 
-    Resolution is registry-first.  Unknown tool names fail instead of falling
+    Resolution is catalog-first. Unknown tool names fail instead of falling
     back to convention-based imports.
     """
     spec = get_tool_spec(tool_name)
@@ -72,13 +64,4 @@ def get_tool_meta(
     return replace(spec, **filtered)
 
 
-__all__ = [
-    "DEFAULT_TOOLSETS",
-    "ToolSpec",
-    "get_tool_meta",
-    "get_tool_spec",
-    "list_tool_specs",
-    "list_toolsets",
-    "resolve_tool_function",
-    "resolve_toolsets",
-]
+__all__ = ["get_tool_meta"]
