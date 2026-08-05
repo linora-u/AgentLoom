@@ -122,6 +122,11 @@ def _now_iso() -> str:
     return datetime.now().astimezone().isoformat()
 
 
+def event_file_for_run(run_id: str) -> Path:
+    """Return the canonical JSONL export path for one validated run id."""
+    return session_events_dir() / f"{safe_run_id(run_id)}.jsonl"
+
+
 def _v5_memory_tables_sql(
     items_table: str,
     pending_table: str,
@@ -379,13 +384,6 @@ class SelfLearningLedger:
                 events.append(CanonicalSessionEvent.from_record(data))
         return [event for event in events if event.run_id]
 
-    @staticmethod
-    def _event_file_for_run(run_id: str) -> Path:
-        safe_name = "".join(
-            ch if ch.isalnum() or ch in "._-" else "_" for ch in str(run_id)
-        )
-        return session_events_dir() / f"{safe_name}.jsonl"
-
     @classmethod
     def _event_files(cls, target: str | Path | None = None) -> list[Path]:
         if target is None:
@@ -399,7 +397,7 @@ class SelfLearningLedger:
             return [path]
         if path.is_dir():
             return sorted(path.glob("*.jsonl"))
-        run_file = cls._event_file_for_run(str(target))
+        run_file = event_file_for_run(str(target))
         return [run_file] if run_file.exists() else []
 
     def index_run(self, target: str | Path) -> dict[str, Any]:

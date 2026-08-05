@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import uuid
-from pathlib import Path
 from threading import RLock
 from typing import TYPE_CHECKING, Any
 
@@ -18,7 +17,7 @@ if TYPE_CHECKING:
 
 from .application_scope import resolve_application_scope
 from .event_schema import CanonicalSessionEvent, compact_content, now_iso, safe_run_id
-from .paths import self_learning_enabled, session_events_dir
+from .paths import self_learning_enabled
 from .persistence.ledger import SelfLearningLedger
 from .redaction import redact_mapping, sanitize_text_fragment
 
@@ -38,11 +37,6 @@ _HOOK_EVENT_TYPES = {
     "PostToolUse": "tool_result",
     "PostToolUseFailure": "tool_error",
 }
-
-
-def event_file_for_run(run_id: str) -> Path:
-    safe_name = safe_run_id(run_id)
-    return session_events_dir() / f"{safe_name}.jsonl"
 
 
 def _payload_value(context: HookContext, name: str) -> str:

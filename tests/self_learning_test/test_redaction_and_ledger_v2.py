@@ -13,6 +13,7 @@ from time import perf_counter, sleep
 import pytest
 
 from src.extensions.self_learning.event_schema import CanonicalSessionEvent, now_iso
+from src.extensions.self_learning.persistence.database import SelfLearningDatabase
 from src.extensions.self_learning.persistence.ledger import SelfLearningLedger
 from src.extensions.self_learning.persistence.memory_store import MemoryStore
 from src.extensions.self_learning.persistence.review_engine import ReviewEngine
@@ -27,9 +28,8 @@ from src.extensions.self_learning.review_types import CandidateInput
 
 @contextmanager
 def _open_ledger(ledger: SelfLearningLedger):
-    """Inspect persisted rows without reaching through Ledger internals."""
-    conn = sqlite3.connect(ledger.db_path)
-    conn.row_factory = sqlite3.Row
+    """Inspect schema invariants through the public persistence owner."""
+    conn = SelfLearningDatabase(ledger.db_path).connect()
     try:
         yield conn
     finally:

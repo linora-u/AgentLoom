@@ -10,7 +10,7 @@ from __future__ import annotations
 import json
 from collections.abc import Callable, Mapping
 from pathlib import Path
-from typing import Any
+from typing import Any, Protocol
 
 from .application_scope import safe_application_id
 from .paths import review_config, self_learning_root
@@ -32,6 +32,16 @@ Fact payload is exactly {"text": "..."}. Experience payload is exactly
 Do not choose scope or approval policy. Do not request replace, remove, scope
 promotion, Skill generation, file writes, or any other side effect. An empty
 candidate array is correct when evidence is insufficient."""
+
+
+class ReviewContextReader(Protocol):
+    """Minimal persisted read port required by review orchestration."""
+
+    def unreviewed_application_ids(self) -> list[str]: ...
+
+    def collect_application(self, application_id: str) -> dict[str, Any]: ...
+
+    def collect_project(self) -> dict[str, Any]: ...
 
 
 def _resolve_review_model(model_type: str) -> Any:
@@ -90,12 +100,13 @@ class ReviewOrchestrator:
         agent_config: dict[str, Any] | None = None,
         model_resolver: Callable[[str], Any] | None = None,
         render_artifacts: bool = True,
+        context_store: ReviewContextReader | None = None,
     ) -> None:
         self.engine = engine
         self.agent_config = agent_config
         self._model_resolver = model_resolver or _resolve_review_model
         self._render_artifacts = bool(render_artifacts)
-        self._context_store = ReviewContextStore(self.db_path)
+        self._context_store = context_store or ReviewContextStore(self.db_path)
 
     @property
     def db_path(self) -> Path:
@@ -157,12 +168,6 @@ class ReviewOrchestrator:
         """
 
         normalized_scope, normalized_id = _normalize_scope(scope_type, scope_id)
-        if not self.db_path.exists():
-            return {
-                "source_runs": [],
-                "allowed_provenance": [],
-                "context": [],
-            }
         if normalized_scope == "project":
             return self._context_store.collect_project()
         return self._context_store.collect_application(normalized_id)
