@@ -258,10 +258,11 @@ tool_access_control:
 
 ### default_toolsets / toolsets 与工具名
 
-`default_toolsets` 与 Agent 级 `toolsets` 必须写 registry toolset 名，不是工具名。可用 toolsets：
+`default_toolsets` 与 Agent 级 `toolsets` 必须写 catalog toolset 名，不是工具名。可用 toolsets：
 
 ```text
-core_shell, core_file, core_search, context, skills, markdown_report, code_nav
+core_shell, core_file, core_search, context, skills, self_learning, planning,
+markdown_report, code_nav
 ```
 
 常见工具包括：
@@ -273,7 +274,8 @@ get_file_outline, lsp_find_definition, lsp_find_references,
 lsp_get_document_symbols, lsp_hover, lsp_get_workspace_symbols,
 grep_search, glob_search, ast_grep_search_file, loom_retrieve_context,
 shell_tool, check_background_task, kill_background_task, list_background_tasks,
-load_skill, list_skills, todo_write
+load_skill, list_skills, session_search, session_scroll, memory, skill_manage,
+todo_write
 ```
 
 实际完整列表以 `src/tools/catalog.py` 的 `ToolSpec` catalog 为准。读取 metadata

@@ -20,6 +20,16 @@ registered built-in through `src.tools.loader`; code that needs only metadata
 imports `src.tools.catalog`. Tests that exercise one concrete implementation
 may import its group directly.
 
+Compatibility exports in implementation-group `__init__.py` files are lazy.
+They must not import sibling implementation modules before an exported name is
+actually requested; catalog references point at the narrow implementation
+module, not at those package facades.
+
+The catalog also owns the configuration-facing `fixed_args` signature contract.
+Read-only validation checks that metadata without importing implementations;
+runtime construction validates it again against the actual callable. A boundary
+test compares both representations so signature drift fails the test suite.
+
 These rules preserve the dependency direction:
 
 ```text
