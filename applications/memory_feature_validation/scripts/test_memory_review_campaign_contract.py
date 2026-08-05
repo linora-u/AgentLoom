@@ -872,7 +872,7 @@ def test_real_campaign_release_sources_bind_harness_workflows_and_runtime() -> N
         "applications/memory_feature_validation/variants/on/config/system.yaml",
         "applications/memory_feature_validation/variants/on/workflows/analyze_without_memory.yaml",
         "src/extensions/self_learning/reviewer.py",
-        "src/extensions/self_learning/memory_store.py",
+        "src/extensions/self_learning/persistence/memory_store.py",
         "src/lib/smolagents/agent/base_agent.py",
         "src/lib/trusted_memory_evidence.py",
         "src/runner.py",

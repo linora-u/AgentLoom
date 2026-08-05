@@ -39,8 +39,8 @@ def _agent_config(app_id: str) -> dict:
 def test_model_proposal_is_a_review_candidate_until_review_engine_approves_it(
     tmp_path: Path,
 ) -> None:
-    from src.extensions.self_learning.memory_store import MemoryStore
-    from src.extensions.self_learning.review_engine import ReviewEngine
+    from src.extensions.self_learning.persistence.memory_store import MemoryStore
+    from src.extensions.self_learning.persistence.review_engine import ReviewEngine
 
     config = _agent_config("approval_app")
     store = MemoryStore(tmp_path / "self_learning.db", agent_config=config)
@@ -82,8 +82,8 @@ def test_model_proposal_is_a_review_candidate_until_review_engine_approves_it(
 
 
 def test_rejected_candidate_never_enters_the_next_root_snapshot(tmp_path: Path) -> None:
-    from src.extensions.self_learning.memory_store import MemoryStore
-    from src.extensions.self_learning.review_engine import ReviewEngine
+    from src.extensions.self_learning.persistence.memory_store import MemoryStore
+    from src.extensions.self_learning.persistence.review_engine import ReviewEngine
 
     config = _agent_config("rejection_app")
     store = MemoryStore(tmp_path / "self_learning.db", agent_config=config)
@@ -117,7 +117,7 @@ def test_rejected_candidate_never_enters_the_next_root_snapshot(tmp_path: Path) 
 def test_confirmed_app_memory_is_isolated_and_project_memory_is_shared(
     tmp_path: Path,
 ) -> None:
-    from src.extensions.self_learning.memory_store import MemoryStore
+    from src.extensions.self_learning.persistence.memory_store import MemoryStore
 
     db = tmp_path / "self_learning.db"
     app_a = _agent_config("app_a")
@@ -156,7 +156,7 @@ def test_unsafe_model_proposals_are_rejected_before_candidate_or_memory_storage(
     content: str,
     error: str,
 ) -> None:
-    from src.extensions.self_learning.memory_store import MemoryStore
+    from src.extensions.self_learning.persistence.memory_store import MemoryStore
 
     config = _agent_config("safe_app")
     store = MemoryStore(tmp_path / "self_learning.db", agent_config=config)
