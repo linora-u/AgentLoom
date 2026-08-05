@@ -24,6 +24,7 @@ EXECUTION_COMMAND_MAX_BYTES = 4 * 1024
 EXECUTION_COMMAND_ITEM_MAX_BYTES = 1024
 EXECUTION_ERROR_MAX_BYTES = 4 * 1024
 EXECUTION_JOB_NAME_MAX_BYTES = 512
+EXECUTION_GOAL_TEXT_MAX_BYTES = 4 * 1024
 
 
 class ScheduleStoreError(RuntimeError):
@@ -312,6 +313,20 @@ class ScheduleStore:
                 exclusive=True,
             ) as stderr_handle:
                 yield stdout_handle, stderr_handle
+
+    def read_execution_stdout(self, execution_id: str, *, max_bytes: int = 256 * 1024) -> str:
+        """Read the bounded tail of one execution's stdout from anchored storage."""
+
+        self._execution_log_paths(execution_id)
+        if max_bytes <= 0:
+            raise ValueError("max_bytes must be positive")
+        stdout_name = f"{execution_id}.stdout.log"
+        with self._executions_storage.open_binary_reader(stdout_name) as stream:
+            stream.seek(0, 2)
+            size = stream.tell()
+            stream.seek(max(0, size - max_bytes))
+            payload = stream.read(max_bytes)
+        return payload.decode("utf-8", errors="replace")
 
     def close(self) -> None:
         self._executions_storage.close()
@@ -619,12 +634,44 @@ class ScheduleStore:
         stdout_path: str,
         stderr_path: str,
         error: str | None = None,
+        terminal_status: str | None = None,
+        goal: dict[str, Any] | None = None,
         now: datetime | None = None,
     ) -> dict[str, Any]:
         finished_at = _as_utc(now)
         expected_stdout, expected_stderr = self._execution_log_paths(execution_id)
         if (stdout_path, stderr_path) != (expected_stdout, expected_stderr):
             raise ValueError("stdout_path and stderr_path must be canonical execution log paths")
+        if terminal_status not in {None, "budget_limited"}:
+            raise ValueError(f"unsupported schedule terminal status: {terminal_status}")
+        bounded_goal: dict[str, Any] | None = None
+        if goal is not None:
+            if terminal_status != "budget_limited" or goal.get("status") != "budget_limited":
+                raise ValueError("schedule Goal diagnostics require budget_limited status")
+            bounded_goal = {
+                key: (
+                    self._bounded_text(value, EXECUTION_GOAL_TEXT_MAX_BYTES)
+                    if key in {"objective", "evidence"} and value is not None
+                    else value
+                )
+                for key, value in goal.items()
+                if key
+                in {
+                    "schema_version",
+                    "goal_id",
+                    "status",
+                    "objective",
+                    "token_budget",
+                    "prompt_tokens",
+                    "completion_tokens",
+                    "used_tokens",
+                    "remaining_tokens",
+                    "evidence",
+                    "created_at",
+                    "updated_at",
+                    "completed_at",
+                }
+            }
         with self._locked(exclusive=True):
             payload = self._read_unlocked()
             execution = self._find_execution(payload, execution_id)
@@ -637,9 +684,10 @@ class ScheduleStore:
             if error is not None:
                 error = self._bounded_text(error, EXECUTION_ERROR_MAX_BYTES)
             success = exit_code == 0 and error is None
+            status = terminal_status or ("succeeded" if success else "failed")
             execution.update(
                 {
-                    "status": "succeeded" if success else "failed",
+                    "status": status,
                     "finished_at": finished_at.isoformat(),
                     "exit_code": exit_code,
                     "stdout_path": expected_stdout,
@@ -647,6 +695,8 @@ class ScheduleStore:
                     "error": error,
                 }
             )
+            if bounded_goal is not None:
+                execution["goal"] = bounded_goal
             job["claim"] = None
             job["last_run_at"] = finished_at.isoformat()
             job["last_status"] = execution["status"]

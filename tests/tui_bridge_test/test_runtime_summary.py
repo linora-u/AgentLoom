@@ -89,6 +89,63 @@ def _completed_run(tmp_path: Path) -> None:
     )
 
 
+def test_goal_status_and_usage_are_visible_in_runtime_summary_and_detail(
+    tmp_path: Path,
+) -> None:
+    bridge = _project(tmp_path)
+    _completed_run(tmp_path)
+    run_dir = tmp_path / ".runtime-live/runs/demo/run-live"
+    manifest_path = run_dir / "manifest.json"
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    manifest["status"] = "budget_limited"
+    manifest["goal"] = {
+        "status": "budget_limited",
+        "used_tokens": 105,
+        "token_budget": 100,
+        "remaining_tokens": 0,
+    }
+    _write(manifest_path, json.dumps(manifest))
+
+    bootstrap = bridge.bootstrap()
+    detail = bridge.dispatch(
+        "run.detail",
+        {"application_id": "demo", "run_id": "run-live"},
+    )
+
+    assert bootstrap["runs"][0]["status"] == "budget_limited"
+    assert bootstrap["runs"][0]["goal"]["used_tokens"] == 105
+    assert detail["summary"]["status"] == "budget_limited"
+    assert detail["summary"]["goal"] == manifest["goal"]
+
+
+def test_running_goal_is_loaded_from_checkpoint_for_tui_detail(tmp_path: Path) -> None:
+    bridge = _project(tmp_path)
+    _completed_run(tmp_path)
+    run_dir = tmp_path / ".runtime-live/runs/demo/run-live"
+    manifest_path = run_dir / "manifest.json"
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    manifest["status"] = "running"
+    manifest.pop("ended_at", None)
+    _write(manifest_path, json.dumps(manifest))
+    goal = {
+        "status": "active",
+        "used_tokens": 50,
+        "token_budget": 1000,
+        "remaining_tokens": 950,
+    }
+    _write(
+        tmp_path / ".runtime-live/checkpoints/demo/task-live/goal.json",
+        json.dumps(goal),
+    )
+
+    detail = bridge.dispatch(
+        "run.detail",
+        {"application_id": "demo", "run_id": "run-live"},
+    )
+
+    assert detail["summary"]["goal"] == goal
+
+
 def _schedule_document(tmp_path: Path) -> None:
     _write(
         tmp_path / ".agentloom/schedules/jobs.json",

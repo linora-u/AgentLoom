@@ -1,0 +1,33 @@
+name: "goal_documentation_auditor"
+description: "Audit Goal Mode documentation and examples against executable contracts."
+model_type: "summary"
+tool_call_type: "tool_call"
+max_steps: 2
+concurrency: 1
+
+workflow: |
+  Use only the EVIDENCE_BUNDLE embedded in the query. Compare the requested Goal
+  documentation slice with code and validator truth.
+  Check YAML forms, Supervisor-only ownership, list semantics, budgets, resume,
+  schedules, CLI/TUI, and zero-impact claims as applicable. Return exact headings:
+  DOCUMENTS, CODE_TRUTH, EXAMPLES, DRIFT, VERDICT. Cite paths and quote only short
+  field names or commands. Do not edit files. Keep the response under 1600 words.
+  Do not call any other tool or request more evidence. Your second model response
+  must be the final verdict. Do not call tools; your first response is final.
+
+agent_function_schema:
+  description: "Audit one Goal documentation slice against current code truth."
+  inputs:
+    task_id:
+      description: "Stable audit case identifier used by the batch ledger."
+      required: true
+    query:
+      description: "Documentation topic, expected claims, and repository paths."
+      required: true
+  output:
+    description: "Documentation consistency verdict and exact drift list."
+
+tools: []
+
+skills: []
+worker_agents: []

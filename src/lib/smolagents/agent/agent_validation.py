@@ -1,17 +1,19 @@
 from __future__ import annotations
 
 import inspect
-from dataclasses import dataclass
+from dataclasses import dataclass, field as dataclass_field
 from pathlib import Path
 from typing import Any, Callable, Optional
 
 from src.lib.config.config_validation import TODO_MODES, normalize_todo_mode_value
+from src.lib.goal import GoalConfig, normalize_goal_config
 from src.lib.logging import get_logger, validate_logging_config
 
 
 @dataclass
 class NormalizedAgentConfig:
     agent_function_schema: Optional[dict] = None
+    goal: GoalConfig = dataclass_field(default_factory=GoalConfig)
 
 
 _ALLOWED_EXECUTION_ENV_TYPES = {"local", "e2b", "docker", "wasm"}
@@ -635,9 +637,14 @@ class AgentConfigNormalizer:
         source_name: str,
     ) -> NormalizedAgentConfig:
         _ = agent_root
-        name = str(config.get("name", source_name))
+        if "goal" in config:
+            raise ValueError(
+                f"Worker Agent configuration {source_name} must not define goal; "
+                "Goal mode is Supervisor-only"
+            )
         return NormalizedAgentConfig(
             agent_function_schema=cls.validate_agent_function_schema(config),
+            goal=GoalConfig(),
         )
 
     @classmethod
@@ -652,4 +659,5 @@ class AgentConfigNormalizer:
         name = str(config.get("name", source_name))
         return NormalizedAgentConfig(
             agent_function_schema=None,
+            goal=normalize_goal_config(config, source=name),
         )

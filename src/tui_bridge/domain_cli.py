@@ -328,7 +328,11 @@ def _run_application(
     if action == "run.resume" and not isinstance(resume_task_id, str):
         raise BridgeError("invalid_params", "run.resume requires task_id")
 
-    from src.application_run import ApplicationRunError, ApplicationRunInterrupted
+    from src.application_run import (
+        ApplicationRunBudgetLimited,
+        ApplicationRunError,
+        ApplicationRunInterrupted,
+    )
     from src.runner import execute_app
 
     events: list[dict[str, Any]] = []
@@ -357,6 +361,16 @@ def _run_application(
             "task_id": error.run.task_id,
             "run_id": error.run.run_id,
             "resumable": error.resumable,
+            "events": events[-8:],
+        }
+    except ApplicationRunBudgetLimited as error:
+        return {
+            "status": "budget_limited",
+            "application_id": error.run.application_id,
+            "task_id": error.run.task_id,
+            "run_id": error.run.run_id,
+            "resumable": True,
+            "goal": dict(error.goal),
             "events": events[-8:],
         }
     except ApplicationRunError as error:

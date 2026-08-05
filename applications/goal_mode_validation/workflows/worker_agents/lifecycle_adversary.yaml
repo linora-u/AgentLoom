@@ -1,0 +1,32 @@
+name: "goal_lifecycle_adversary"
+description: "Adversarially audit Goal continuation, budget, completion, and resume semantics."
+model_type: "summary"
+tool_call_type: "tool_call"
+max_steps: 2
+concurrency: 1
+
+workflow: |
+  Act as a failure-injection reviewer. Use only the EVIDENCE_BUNDLE embedded in
+  the query, then trace the requested transition through public runner behavior, Base Agent,
+  checkpoint state, and tests. Return exact headings: SCENARIO, TRANSITIONS,
+  DURABILITY, FAILURE_INJECTION, TEST_EVIDENCE, VERDICT. Cite paths and symbols.
+  Identify root causes, not speculative patches. Do not modify files. Keep the
+  response under 2000 words. Do not call tools or request more evidence.
+  Your first model response must be the final verdict.
+
+agent_function_schema:
+  description: "Audit one adversarial Goal lifecycle and recovery scenario."
+  inputs:
+    task_id:
+      description: "Stable audit case identifier used by the batch ledger."
+      required: true
+    query:
+      description: "Failure scenario, required invariants, and repository paths."
+      required: true
+  output:
+    description: "Traceable lifecycle verdict and any uncovered failure modes."
+
+tools: []
+
+skills: []
+worker_agents: []

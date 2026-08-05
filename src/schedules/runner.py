@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import os
 import signal
 import socket
@@ -46,7 +47,34 @@ class ScheduleRunner:
             "src",
             "run",
             str(job["yaml_path"]),
+            "--output-format",
+            "jsonl",
         ]
+
+    def _goal_budget_event(self, execution_id: str) -> dict[str, Any] | None:
+        """Return a canonical budget event emitted by the isolated JSONL CLI."""
+
+        try:
+            stdout = self.store.read_execution_stdout(execution_id)
+        except (OSError, RuntimeError, ValueError):
+            return None
+        for line in reversed(stdout.splitlines()):
+            try:
+                payload = json.loads(line)
+            except (json.JSONDecodeError, TypeError):
+                continue
+            if not isinstance(payload, dict) or payload.get("event") != "run.budget_limited":
+                continue
+            goal = payload.get("goal")
+            run = payload.get("run")
+            if (
+                isinstance(goal, dict)
+                and goal.get("status") == "budget_limited"
+                and isinstance(run, dict)
+                and isinstance(run.get("task_id"), str)
+            ):
+                return payload
+        return None
 
     @staticmethod
     def _process_group_exists(process_group_id: int) -> bool:
@@ -142,6 +170,8 @@ class ScheduleRunner:
         process: subprocess.Popen[bytes] | None = None
         exit_code: int | None = None
         error: str | None = None
+        terminal_status: str | None = None
+        goal: dict[str, Any] | None = None
         heartbeat_every = max(0.1, min(30.0, self.store.claim_lease_seconds / 3))
         last_heartbeat = time.monotonic()
 
@@ -185,6 +215,14 @@ class ScheduleRunner:
                     time.sleep(self.poll_seconds)
             if exit_code != 0:
                 error = f"process exited with status {exit_code}"
+                budget_event = self._goal_budget_event(execution_id)
+                if budget_event is not None:
+                    terminal_status = "budget_limited"
+                    goal = budget_event["goal"]
+                    error = str(
+                        budget_event.get("error")
+                        or "Goal token budget exhausted; increase or remove token_budget and resume"
+                    )
         except BaseException as exc:
             if process is not None:
                 self._terminate_process_tree(process)
@@ -200,6 +238,8 @@ class ScheduleRunner:
             stdout_path=stdout_relative,
             stderr_path=stderr_relative,
             error=error,
+            terminal_status=terminal_status,
+            goal=goal,
         )
         if progress is not None:
             progress()

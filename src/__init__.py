@@ -15,6 +15,10 @@ _LAZY_EXPORTS = {
     "get_code_agent_config": ("src.lib.config", "get_code_agent_config"),
     "get_model_config": ("src.lib.config", "get_model_config"),
     "ApplicationRunError": ("src.application_run", "ApplicationRunError"),
+    "ApplicationRunBudgetLimited": (
+        "src.application_run",
+        "ApplicationRunBudgetLimited",
+    ),
     "ApplicationRunInterrupted": ("src.application_run", "ApplicationRunInterrupted"),
     "ApplicationRunResult": ("src.application_run", "ApplicationRunResult"),
     "RunEventSink": ("src.application_run", "RunEventSink"),
@@ -52,6 +56,7 @@ __all__ = [
     "get_code_agent_config",
     "get_model_config",
     "ApplicationRunError",
+    "ApplicationRunBudgetLimited",
     "ApplicationRunInterrupted",
     "ApplicationRunResult",
     "RunEventSink",

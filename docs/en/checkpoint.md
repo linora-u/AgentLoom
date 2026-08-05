@@ -24,7 +24,8 @@ This boundary prevents log rotation or run cleanup from damaging resumable state
 │   │   ├── shell.jsonl
 │   │   ├── shell.jsonl.1 ... shell.jsonl.2
 │   │   ├── task_tree.json
-│   │   └── task_events.jsonl
+│   │   ├── task_events.jsonl
+│   │   └── goal.json            # Goal audit evidence, when present
 │   └── artifacts/
 │       ├── result.txt
 │       ├── shell/
@@ -37,6 +38,8 @@ This boundary prevents log rotation or run cleanup from damaging resumable state
 │   ├── heartbeat.json
 │   ├── todos.json
 │   ├── todos.lock
+│   ├── goal.json                # canonical Goal state, when present
+│   ├── goal.lock
 │   ├── workers/<worker_name>/
 │   │   ├── calls/<call_index>/checkpoint.json
 │   │   └── heartbeat.json
@@ -57,6 +60,7 @@ Important boundaries:
 - Checkpoint lookup uses the canonical `<application_id>/<task_id>` path. It does not depend on a log directory, `.task_index.json`, or a scan of historical runs.
 - User deliverables remain under the Application's configured `output_dir`. Runtime cleanup never traverses Application output directories.
 - Persistent Agent recall uses application-scoped `insights.md` under `.agentloom/workspaces/agents/<application_id>/<agent_path>/`. Current-task Todo state follows the checkpoint lifecycle in `<application_id>/<task_id>/todos.json` when checkpointing is enabled; otherwise it remains in run-scoped memory. It is neither a run artifact nor long-term project state.
+- Goal Mode stores the objective fingerprint, `goal_started`, state, cumulative tokens, budget, and evidence in task-scoped `goal.json`. `active`, `budget_limited`, interrupted, failed, and crashed work retains the checkpoint. Only explicit Goal completion enters normal success cleanup, after copying Goal state into the run manifest and `audit/goal.json`.
 
 ## Configuration
 
@@ -100,6 +104,12 @@ loom run applications/<app>/workflows/<agent>.yaml --no-file-log
 # New execution attempt, same logical task/checkpoint
 loom run applications/<app>/workflows/<agent>.yaml --resume task_xxx
 ```
+
+Goal resume also verifies the description, normalized workflow, and original
+runtime-task fingerprint. A `budget_limited` Goal resumes only after raising
+`token_budget` above cumulative usage or removing the limit; usage never resets.
+Disabling an active Goal, changing its objective, or reducing its budget rejects
+resume. See [Goal Mode](goal_mode.md).
 
 There is no `--log-to-file` flag. File logging follows `logging.file_enabled` by default, and `--no-file-log` is the per-run opt-out.
 
