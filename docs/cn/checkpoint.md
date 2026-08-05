@@ -62,6 +62,25 @@ AgentLoom 将“一次执行尝试”和“需要恢复的逻辑任务”分开�
 - Agent 的持久 recall 使用 `.agentloom/workspaces/agents/<application_id>/<agent_path>/` 下、归 Application 所有的 `insights.md`。当前任务的 Todo 在启用 checkpoint 时随 `<application_id>/<task_id>/todos.json` 共同恢复和清理；未启用 checkpoint 时只保存在本次 run 的内存中。它既不是 run artifact，也不承担长期项目管理。
 - Goal Mode 使用 task-scoped `goal.json` 保存 objective 指纹、`goal_started`、状态、累计 token、预算和 evidence。`active`、`budget_limited`、`interrupted`、`failed`、`crashed` 都保留 checkpoint；只有显式完成后才进入现有成功清理流程。清理前状态会复制到 run manifest 和 `audit/goal.json`。
 
+### 终态 lifecycle ownership
+
+一个 Application Run owner 统一结算终态。Supervisor 只上报 output、memory
+snapshot、error 和可选 Goal projection，不再独立提交第二套 Application 终态。
+owner 按固定顺序完成一次事务：
+
+```text
+Supervisor report
+  -> terminal checkpoint/task event
+  -> result 与 audit evidence
+  -> terminal manifest
+  -> 可选的成功 checkpoint 删除
+  -> resource cleanup
+```
+
+如果 evidence 或 manifest finalization 在 checkpoint 删除前失败，同一个 owner 会把
+暂定成功改写为 `failed` 或 `interrupted` 并保留 checkpoint。如果删除已经开始后才被
+中断，run 会报告 `resumable: false`，且不会重建一个缺少真实进度的空 checkpoint。
+
 ## 配置
 
 在 `config/system.yaml` 中配置运行时存储、有界日志和 resume：
