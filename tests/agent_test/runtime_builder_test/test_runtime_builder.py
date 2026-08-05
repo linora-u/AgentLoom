@@ -5,6 +5,7 @@ import time
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import replace
 from pathlib import Path
+from unittest.mock import MagicMock
 
 import pytest
 import yaml
@@ -160,6 +161,87 @@ def _make_review_agent(*, logger=None) -> DummyAgent:
         model=object(),
         logger=logger,
     )
+
+
+def test_role_driven_agent_reports_to_application_lifecycle(monkeypatch):
+    agent = _make_agent(logger=DummyLoggerBackend())
+    runtime = DummyRuntimeRunner("reported-result")
+    lifecycle = MagicMock()
+    monkeypatch.setattr(agent, "build_runtime_agent", lambda: runtime)
+    monkeypatch.setattr(agent, "_inject_memory_snapshot", lambda tasks: tasks)
+
+    result = agent.run(
+        "application task",
+        task_id="task-1",
+        application_lifecycle=lifecycle,
+    )
+
+    assert result == "reported-result"
+    lifecycle.report_agent_invocation.assert_called_once_with(
+        coordinator=None,
+        runtime_agent=runtime,
+        result="reported-result",
+        error=None,
+        goal=None,
+    )
+
+
+def test_standalone_checkpoint_failure_still_deactivates_coordinator(
+    tmp_path,
+    monkeypatch,
+):
+    from src.lib.checkpoint import CheckpointManager
+    from src.lib.checkpoint.coordinator import CheckpointCoordinator
+
+    agent = _make_agent(logger=DummyLoggerBackend())
+    runtime = DummyRuntimeRunner("reported-result")
+    manager = CheckpointManager("runtime-dummy", checkpoints_root=tmp_path)
+    monkeypatch.setattr(agent, "build_runtime_agent", lambda: runtime)
+    monkeypatch.setattr(agent, "_inject_memory_snapshot", lambda tasks: tasks)
+    monkeypatch.setattr(
+        CheckpointCoordinator,
+        "save_supervisor",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(
+            OSError("checkpoint write failed")
+        ),
+    )
+
+    with pytest.raises(OSError, match="checkpoint write failed"):
+        agent.run(
+            "standalone task",
+            task_id="task-checkpoint-failure",
+            checkpoint_manager=manager,
+        )
+
+    assert CheckpointCoordinator.current() is None
+
+
+def test_standalone_base_exception_is_persisted_as_failure(tmp_path, monkeypatch):
+    from src.lib.checkpoint import CheckpointManager
+
+    agent = _make_agent(logger=DummyLoggerBackend())
+    runtime = DummyRuntimeRunner()
+    runtime.memory = MagicMock(steps=[])
+    manager = CheckpointManager("runtime-dummy", checkpoints_root=tmp_path)
+
+    def _exit(*, task, **kwargs):
+        raise SystemExit("runtime exited")
+
+    runtime.run = _exit
+    monkeypatch.setattr(agent, "build_runtime_agent", lambda: runtime)
+    monkeypatch.setattr(agent, "_inject_memory_snapshot", lambda tasks: tasks)
+
+    with pytest.raises(SystemExit, match="runtime exited"):
+        agent.run(
+            "standalone task",
+            task_id="task-system-exit",
+            checkpoint_manager=manager,
+        )
+
+    tree = manager.load_task_tree("task-system-exit")
+    assert tree is not None
+    assert tree["status"] == "failed"
+    assert tree["error"] == "runtime exited"
 
 
 def test_manual_review_policy_never_enters_run_end_reviewer(monkeypatch):
