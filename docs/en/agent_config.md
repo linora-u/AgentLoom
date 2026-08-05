@@ -804,11 +804,10 @@ and cannot be overridden by a tool call.
 
 ```yaml
 tools:
-  - name: "codex"
+  - name: "grep_search"
     fixed_args:
-      cwd: "."
-      sandbox: "workspace-write"
-      search: "false"
+      path: "."
+      case_insensitive: false
 ```
 
 #### Predefined Tools + Metadata Override
