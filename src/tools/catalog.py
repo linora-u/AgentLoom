@@ -1,20 +1,28 @@
-"""Canonical built-in tool registry.
+"""Pure metadata catalog for AgentLoom's built-in tools.
 
-The registry is the only supported entry point for resolving built-in tool
-names.  Importing a function in ``src.tools`` does not make it a public
-built-in tool; a tool must have a ``ToolSpec`` here.
+Reading this module never imports a tool implementation.  Runtime code must
+cross the explicit ``src.tools.loader`` seam to turn an implementation
+reference into a callable.
 """
 
 from __future__ import annotations
 
+from collections.abc import Iterable
 from dataclasses import dataclass
-from typing import Any, Callable, Iterable
+
+
+@dataclass(frozen=True)
+class ToolImplementation:
+    """Import reference for a tool implementation without importing it."""
+
+    module: str
+    attribute: str
 
 
 @dataclass(frozen=True)
 class ToolSpec:
     name: str
-    function: Callable[..., Any]
+    implementation: ToolImplementation
     toolset: str
     description: str
     category: str
@@ -24,7 +32,6 @@ class ToolSpec:
     max_result_chars: int | None
     path_params: tuple[str, ...] = ()
     output_kind: str = "text"
-    check_fn: Callable[..., Any] | None = None
 
 
 DEFAULT_TOOLSETS: tuple[str, ...] = (
@@ -36,13 +43,13 @@ DEFAULT_TOOLSETS: tuple[str, ...] = (
     "self_learning",
 )
 
-_REGISTRY: dict[str, ToolSpec] | None = None
+_CATALOG: dict[str, ToolSpec] | None = None
 _TOOLSETS: dict[str, tuple[str, ...]] | None = None
 
 
 def _spec(
     name: str,
-    function: Callable[..., Any],
+    implementation: ToolImplementation,
     toolset: str,
     description: str,
     category: str,
@@ -53,11 +60,10 @@ def _spec(
     max_result_chars: int | None = 20000,
     path_params: Iterable[str] = (),
     output_kind: str = "text",
-    check_fn: Callable[..., Any] | None = None,
 ) -> ToolSpec:
     return ToolSpec(
         name=name,
-        function=function,
+        implementation=implementation,
         toolset=toolset,
         description=description,
         category=category,
@@ -67,41 +73,42 @@ def _spec(
         max_result_chars=max_result_chars,
         path_params=tuple(path_params),
         output_kind=output_kind,
-        check_fn=check_fn,
     )
 
 
-def _build_registry() -> dict[str, ToolSpec]:
-    from src.tools.context import loom_retrieve_context
-    from src.tools.file_ops import (
-        append_markdown_sections,
-        edit_file,
-        get_file_outline,
-        list_directory,
-        read_file,
-        write_file,
-        write_markdown_file,
-        write_markdown_file_raw,
-    )
-    from src.tools.search import (
-        ast_grep_search_file,
-        glob_search,
-        grep_search,
-        lsp_find_definition,
-        lsp_find_references,
-        lsp_get_document_symbols,
-        lsp_get_workspace_symbols,
-        lsp_hover,
-    )
-    from src.tools.shell import (
-        check_background_task,
-        kill_background_task,
-        list_background_tasks,
-        shell_tool,
-    )
-    from src.tools.self_learning import memory, session_scroll, session_search, skill_manage
-    from src.tools.skills import list_skills, load_skill
-    from src.tools.todo import todo_write
+def _implementation(module: str, attribute: str) -> ToolImplementation:
+    return ToolImplementation(module=module, attribute=attribute)
+
+
+def _build_catalog() -> dict[str, ToolSpec]:
+    shell_tool = _implementation("src.tools.shell", "shell_tool")
+    check_background_task = _implementation("src.tools.shell", "check_background_task")
+    kill_background_task = _implementation("src.tools.shell", "kill_background_task")
+    list_background_tasks = _implementation("src.tools.shell", "list_background_tasks")
+    read_file = _implementation("src.tools.file_ops", "read_file")
+    edit_file = _implementation("src.tools.file_ops", "edit_file")
+    write_file = _implementation("src.tools.file_ops", "write_file")
+    list_directory = _implementation("src.tools.file_ops", "list_directory")
+    grep_search = _implementation("src.tools.search", "grep_search")
+    glob_search = _implementation("src.tools.search", "glob_search")
+    loom_retrieve_context = _implementation("src.tools.context", "loom_retrieve_context")
+    load_skill = _implementation("src.tools.skills", "load_skill")
+    list_skills = _implementation("src.tools.skills", "list_skills")
+    session_search = _implementation("src.tools.self_learning", "session_search")
+    session_scroll = _implementation("src.tools.self_learning", "session_scroll")
+    memory = _implementation("src.tools.self_learning", "memory")
+    skill_manage = _implementation("src.tools.self_learning", "skill_manage")
+    todo_write = _implementation("src.tools.todo", "todo_write")
+    write_markdown_file = _implementation("src.tools.file_ops", "write_markdown_file")
+    write_markdown_file_raw = _implementation("src.tools.file_ops", "write_markdown_file_raw")
+    append_markdown_sections = _implementation("src.tools.file_ops", "append_markdown_sections")
+    get_file_outline = _implementation("src.tools.file_ops", "get_file_outline")
+    ast_grep_search_file = _implementation("src.tools.search", "ast_grep_search_file")
+    lsp_find_definition = _implementation("src.tools.search", "lsp_find_definition")
+    lsp_find_references = _implementation("src.tools.search", "lsp_find_references")
+    lsp_get_document_symbols = _implementation("src.tools.search", "lsp_get_document_symbols")
+    lsp_hover = _implementation("src.tools.search", "lsp_hover")
+    lsp_get_workspace_symbols = _implementation("src.tools.search", "lsp_get_workspace_symbols")
 
     specs = [
         _spec(
@@ -401,26 +408,26 @@ def _build_registry() -> dict[str, ToolSpec]:
             output_kind="search",
         ),
     ]
-    registry = {spec.name: spec for spec in specs}
-    if len(registry) != len(specs):
+    catalog = {spec.name: spec for spec in specs}
+    if len(catalog) != len(specs):
         names = [spec.name for spec in specs]
         duplicates = sorted({name for name in names if names.count(name) > 1})
         raise RuntimeError(f"Duplicate ToolSpec names: {duplicates}")
-    return registry
+    return catalog
 
 
-def _ensure_registry() -> dict[str, ToolSpec]:
-    global _REGISTRY
-    if _REGISTRY is None:
-        _REGISTRY = _build_registry()
-    return _REGISTRY
+def _ensure_catalog() -> dict[str, ToolSpec]:
+    global _CATALOG
+    if _CATALOG is None:
+        _CATALOG = _build_catalog()
+    return _CATALOG
 
 
 def _ensure_toolsets() -> dict[str, tuple[str, ...]]:
     global _TOOLSETS
     if _TOOLSETS is None:
         grouped: dict[str, list[str]] = {}
-        for spec in _ensure_registry().values():
+        for spec in _ensure_catalog().values():
             grouped.setdefault(spec.toolset, []).append(spec.name)
         _TOOLSETS = {toolset: tuple(names) for toolset, names in grouped.items()}
     return _TOOLSETS
@@ -428,19 +435,15 @@ def _ensure_toolsets() -> dict[str, tuple[str, ...]]:
 
 def get_tool_spec(tool_name: str) -> ToolSpec:
     name = str(tool_name or "").strip()
-    spec = _ensure_registry().get(name)
+    spec = _ensure_catalog().get(name)
     if spec is None:
-        available = ", ".join(sorted(_ensure_registry()))
+        available = ", ".join(sorted(_ensure_catalog()))
         raise ValueError(f"Tool '{tool_name}' is not a registered built-in tool. Available tools: {available}")
     return spec
 
 
-def resolve_tool_function(tool_name: str) -> Callable[..., Any]:
-    return get_tool_spec(tool_name).function
-
-
 def list_tool_specs() -> tuple[ToolSpec, ...]:
-    return tuple(_ensure_registry().values())
+    return tuple(_ensure_catalog().values())
 
 
 def list_toolsets() -> dict[str, tuple[str, ...]]:

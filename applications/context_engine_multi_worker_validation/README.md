@@ -15,7 +15,8 @@ Supervisor/Worker/Tool split:
 Run:
 
 ```bash
-.venv/bin/loom run applications/context_engine_multi_worker_validation/workflows/context_engine_multi_worker_validation_agent.yaml --task "Run the ContextEngine multi-worker retrieval validation."
+AGENTLOOM_RUNTIME_ROOT=/tmp/agentloom-context-engine-multi \
+  .venv/bin/loom run applications/context_engine_multi_worker_validation/workflows/context_engine_multi_worker_validation_agent.yaml
 ```
 
 Validation:
@@ -27,5 +28,6 @@ Validation:
 Real regression:
 
 ```bash
-AGENT_LOOM_RUNTIME_ROOT=/tmp/agentloom-context-engine-apps .venv/bin/python tests/agent_test/context_engine/real_context_engine_application_validation.py --case multi
+AGENTLOOM_RUNTIME_ROOT=/tmp/agentloom-context-engine-apps \
+  .venv/bin/python tests/agent_test/context_engine/real_context_engine_application_validation.py --case multi
 ```

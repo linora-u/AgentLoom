@@ -1,7 +1,7 @@
 """Lightweight validation shared by the runner and read-only project tools.
 
 This module deliberately imports no Agent implementation, model provider, or
-tool registry.  Catalog/index callers can validate configuration without
+tool implementations. Catalog/index callers can validate configuration without
 paying the cost of constructing the execution runtime.
 """
 

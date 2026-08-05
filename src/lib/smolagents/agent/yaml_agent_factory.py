@@ -18,7 +18,8 @@ from src.lib.smolagents import AgentLogger
 from src.lib.smolagents.agent.agent_validation import AgentConfigNormalizer, NormalizedAgentConfig
 from src.lib.smolagents.agent.base_agent import AgentRoleProfile, AgentType, RoleDrivenAgent
 from src.lib.utils.dynamic_import import load_function
-from src.tools.tool_meta import resolve_tool_function, resolve_toolsets
+from src.tools.catalog import resolve_toolsets
+from src.tools.loader import resolve_tool_function
 from src.workflows.workflow_manager import get_worker_agent_yaml_path, infer_category_from_yaml_path
 
 # Keep module-level symbol for legacy tests that monkeypatch this path root.
