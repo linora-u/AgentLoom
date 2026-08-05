@@ -100,18 +100,18 @@ def _resolve_path_params(
 ) -> list[str]:
     """Match tool parameter names against path_param_patterns."""
     try:
-        from src.tools import get_tool_spec
+        from src.tools.catalog import get_tool_spec
 
-        registry_params = list(get_tool_spec(tool_name).path_params)
+        catalog_params = list(get_tool_spec(tool_name).path_params)
     except ValueError:
-        registry_params = []
+        catalog_params = []
 
     if not isinstance(tool_inputs_schema, dict) or not path_param_patterns:
-        return registry_params
+        return catalog_params
     pattern_set = set(path_param_patterns)
     schema_params = [name for name in tool_inputs_schema if name in pattern_set]
     merged = []
-    for name in [*registry_params, *schema_params]:
+    for name in [*catalog_params, *schema_params]:
         if name not in merged:
             merged.append(name)
     return merged

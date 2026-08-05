@@ -29,11 +29,11 @@ def route_content(text: str, tool_name: str = "default") -> ContentKind:
     if name in {"shell_tool", "python_interpreter", "run_skill_script"}:
         return ContentKind.LOG if _LOG_HINTS.search(stripped) else ContentKind.TEXT
 
-    registry_kind = _registry_content_kind(name)
-    if registry_kind is not None:
-        if registry_kind == ContentKind.CODE and not _CODE_HINTS.search(stripped):
+    catalog_kind = _catalog_content_kind(name)
+    if catalog_kind is not None:
+        if catalog_kind == ContentKind.CODE and not _CODE_HINTS.search(stripped):
             return ContentKind.TEXT
-        return registry_kind
+        return catalog_kind
 
     if _looks_like_json(stripped):
         return ContentKind.JSON
@@ -48,9 +48,9 @@ def route_content(text: str, tool_name: str = "default") -> ContentKind:
     return ContentKind.TEXT
 
 
-def _registry_content_kind(tool_name: str) -> ContentKind | None:
+def _catalog_content_kind(tool_name: str) -> ContentKind | None:
     try:
-        from src.tools import get_tool_spec
+        from src.tools.catalog import get_tool_spec
 
         output_kind = get_tool_spec(tool_name).output_kind
     except ValueError:

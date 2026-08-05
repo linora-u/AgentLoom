@@ -1,5 +1,5 @@
 name: "test_tool_resolve"
-description: "Validate convention-based tool resolution and metadata loading"
+description: "Validate explicit catalog-backed tool resolution and metadata loading"
 
 model_type: "powerful"
 tool_call_type: "code_act"
@@ -15,8 +15,8 @@ workflow: |
   ```python
   results = []
 
-  grep_result = grep_search(pattern="def get_tool_meta", path="src/tools/tool_meta.py")
-  results.append(("grep_search", "get_tool_meta" in grep_result, grep_result))
+  grep_result = grep_search(pattern="class ToolSpec", path="src/tools/catalog.py")
+  results.append(("grep_search", "ToolSpec" in grep_result, grep_result))
 
   glob_result = glob_search(pattern="*.yaml", path="config/")
   results.append(("glob_search", "system.yaml" in glob_result, glob_result))

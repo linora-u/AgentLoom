@@ -18,9 +18,9 @@ _logger = get_logger(__name__)
 
 
 def _file_modifying_specs() -> dict[str, tuple[str, ...]]:
-    from src.tools import list_tool_specs
+    from src.tools.catalog import list_tool_specs
 
-    # This registry is the security contract for destructive tools. Falling
+    # The catalog is the security contract for destructive tools. Falling
     # back to a hand-maintained subset would silently skip newly added tools.
     return {spec.name: spec.path_params for spec in list_tool_specs() if spec.is_destructive and spec.path_params}
 

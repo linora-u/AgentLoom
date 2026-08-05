@@ -6,16 +6,17 @@ Verifies that:
 """
 
 import pytest
-from src.tools import resolve_tool_function
+
+from src.tools.loader import resolve_tool_function
 from src.tools.search import (
-    grep_search,
-    glob_search,
     ast_grep_search_file,
+    glob_search,
+    grep_search,
     lsp_find_definition,
     lsp_find_references,
     lsp_get_document_symbols,
-    lsp_hover,
     lsp_get_workspace_symbols,
+    lsp_hover,
 )
 
 
