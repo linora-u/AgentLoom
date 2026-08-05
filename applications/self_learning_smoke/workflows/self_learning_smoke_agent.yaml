@@ -48,9 +48,11 @@ workflow: |
   prior_count = len(prior.get("results", []))
 
   memory_raw = memory(
-      action="add",
-      scope="project",
-      content=f"Self-learning smoke marker {marker}; prior_session_count={prior_count}",
+      action="propose",
+      scope="app",
+      kind="fact",
+      memory_key=f"self-learning-smoke-{safe_name}",
+      text=f"Self-learning smoke marker {marker}; prior_session_count={prior_count}",
   )
   memory_result = json.loads(memory_raw)
 
@@ -92,12 +94,12 @@ workflow: |
   result = {
       "marker": marker,
       "prior_session_count": prior_count,
-      "memory_proposal": bool(memory_result.get("proposal")),
-      "memory_id": memory_result.get("id"),
+      "memory_proposal": bool(memory_result.get("ok")),
+      "memory_id": memory_result.get("candidate_id"),
       "skill_proposal_path": create_result.get("proposal_path"),
       "reference_file_written": bool(write_result.get("ok")),
       "tmp_file_verified": tmp_verified,
-      "ok": bool(memory_result.get("proposal")) and bool(create_result.get("ok")) and bool(write_result.get("ok")) and tmp_verified,
+      "ok": bool(memory_result.get("ok")) and bool(create_result.get("ok")) and bool(write_result.get("ok")) and tmp_verified,
   }
   print(json.dumps(result, ensure_ascii=False, indent=2))
   final_answer(json.dumps(result, ensure_ascii=False, indent=2))

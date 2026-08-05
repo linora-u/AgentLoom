@@ -81,7 +81,7 @@ find applications/<app_name>/agent_tools -name '*.py' -print0 2>/dev/null | xarg
 
 | 改动类型 | 至少跑的 Application |
 |---|---|
-| 默认工具 / ToolSpec / toolsets | `applications/tool_registry_core_validation`、`applications/tool_registry_markdown_validation`、`applications/test_demo/workflows/test_tool_resolve_agent.yaml` |
+| 默认工具 / ToolSpec / toolsets / implementation loader | `applications/tool_registry_core_validation`、`applications/tool_registry_markdown_validation`、`applications/test_demo/workflows/test_tool_resolve_agent.yaml`、`applications/context_engine_text_retrieve_validation`、`applications/self_learning_smoke`；catalog/loader 改动五条都跑 |
 | 文件工具 / checkpoint file history | `applications/test_demo/workflows/test_edit_file_agent.yaml`、`test_file_rewind_agent.yaml`、`test_checkpoint_agent.yaml` |
 | 搜索 / 代码导航 | `applications/test_demo/workflows/test_search_tools_agent.yaml` |
 | ContextEngine / 压缩 | `applications/context_engine_*_retrieve_validation` 三个应用 |

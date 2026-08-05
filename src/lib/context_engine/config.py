@@ -8,7 +8,7 @@ from typing import Any
 
 def _default_skip_tools() -> tuple[str, ...]:
     try:
-        from src.tools import list_tool_specs
+        from src.tools.catalog import list_tool_specs
 
         destructive_file_tools = tuple(
             spec.name
