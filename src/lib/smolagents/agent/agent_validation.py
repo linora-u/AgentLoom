@@ -1,13 +1,14 @@
 from __future__ import annotations
 
 import inspect
-from dataclasses import dataclass, field as dataclass_field
+from collections.abc import Callable
+from dataclasses import dataclass
+from dataclasses import field as dataclass_field
 from pathlib import Path
-from typing import Any, Callable, Optional
+from typing import Any, Optional
 
 from src.lib.config.config_validation import TODO_MODES, normalize_todo_mode_value
 from src.lib.goal import GoalConfig, normalize_goal_config
-from src.lib.logging import get_logger, validate_logging_config
 
 
 @dataclass
@@ -231,9 +232,8 @@ class AgentConfigNormalizer:
         """Validate the ``tools`` field from an Agent YAML.
 
         ``tools`` must be a list of tool declaration dicts, each with
-        at least a ``name`` key.  Shell settings and tool mapping are
-        configured via separate top-level keys (``shell_settings``,
-        ``tools_mapping``).
+        at least a ``name`` key. Shell settings are configured through the
+        separate top-level ``shell_settings`` key.
         """
         if tool_configs is None:
             return
@@ -366,10 +366,14 @@ class AgentConfigNormalizer:
 
     @staticmethod
     def validate_skills_config(config: dict) -> None:
-        if "skills" in config:
-            skills_conf = config["skills"]
-            if not isinstance(skills_conf, (list, dict, str)):
-                raise ValueError("Configuration error: skills must be a list, dict, or string path")
+        if "skills" not in config:
+            return
+        skills_conf = config["skills"]
+        if not isinstance(skills_conf, dict) or set(skills_conf) != {"paths"}:
+            raise ValueError("Configuration error: skills must contain only a 'paths' list")
+        paths = skills_conf["paths"]
+        if not isinstance(paths, list) or any(not isinstance(item, str) or not item.strip() for item in paths):
+            raise ValueError("Configuration error: skills.paths must be a list of non-empty path strings")
 
     @staticmethod
     def resolve_tool_call_type(
@@ -408,6 +412,10 @@ class AgentConfigNormalizer:
         build_normalized: Callable[[], Any | None],
         validate_role_specific: Callable[[Any | None], None],
     ) -> Any | None:
+        if "tools_mapping" in config:
+            raise ValueError(
+                "Configuration error: tools_mapping was removed; Skills do not grant tools"
+            )
         if required_fields:
             AgentConfigNormalizer.validate_required_fields(config, list(required_fields))
             AgentConfigNormalizer.validate_tools_config(config)
@@ -423,57 +431,6 @@ class AgentConfigNormalizer:
         normalized = build_normalized()
         validate_role_specific(normalized)
         return normalized
-
-    @staticmethod
-    def validate_skill_dependencies(
-        config: dict,
-        skills_manager: Any,
-        *,
-        default_tools: list[str] | tuple[str, ...] | set[str],
-        logger: Any = None,
-    ) -> None:
-        """Check whether all skill-declared dependency tools exist in agent configuration."""
-        log = get_logger(logger, __name__)
-        skills = getattr(skills_manager, "skills", None)
-        if not skills:
-            return
-
-        agent_tool_names = set(default_tools)
-        for tool_item in config.get("tools", []):
-            if isinstance(tool_item, dict):
-                agent_tool_names.add(tool_item.get("name"))
-
-        missing_tools_map: dict[str, list[str]] = {}
-        for skill_name, skill in skills.items():
-            allowed_tools = getattr(getattr(skill, "metadata", None), "allowed_tools", None)
-            if not allowed_tools:
-                continue
-
-            missing_tools = [
-                tool_name for tool_name in allowed_tools
-                if tool_name not in agent_tool_names
-            ]
-            if missing_tools:
-                missing_tools_map[skill_name] = missing_tools
-
-        if missing_tools_map:
-            lines = []
-            lines.append(f"\n{'='*60}")
-            lines.append("SKILL CONFIGURATION INTEGRITY CHECK FAILED")
-            lines.append(f"{'='*60}\n")
-
-            lines.append(f"Agent: {config.get('name')}")
-            lines.append("Issue: Skills require tools that are not configured in 'xxx_agent.yaml'.\n")
-
-            lines.append("Missing Tools by Skill:")
-            for skill_name, tools in missing_tools_map.items():
-                tools_str = ", ".join([f"'{tool_name}'" for tool_name in tools])
-                lines.append(f"  • [Skill: {skill_name}]")
-                lines.append(f"     MISSING -> {tools_str}")
-
-            lines.append(f"{'='*60}")
-            warning_msg = "\n".join(lines)
-            log.warning(warning_msg)
 
     @staticmethod
     def validate_agent_function_schema(config: dict) -> Optional[dict]:

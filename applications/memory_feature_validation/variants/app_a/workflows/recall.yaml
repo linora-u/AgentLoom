@@ -14,5 +14,4 @@ workflow: |
 tools: []
 
 toolsets: []
-skills: []
 worker_agents: []

@@ -41,9 +41,8 @@ def test_project_catalog_aggregates_applications_and_agent_configuration(tmp_pat
 name: demo-supervisor
 description: Coordinates demo workers
 skills:
-  load-mode: on-demand
-  items:
-    - applications/demo/skills
+  paths:
+    - skills
 worker_agents:
   - path: worker.yaml
 """,
@@ -54,7 +53,8 @@ worker_agents:
 name: fact-worker
 description: Finds facts
 skills:
-  - fact-checking
+  paths:
+    - skills/fact-checking
 worker_agents: []
 """,
     )
@@ -98,10 +98,7 @@ worker_agents: []
             "description": "Coordinates demo workers",
             "path": supervisor,
             "role": "supervisor",
-            "skills": {
-                "load_mode": "on-demand",
-                "items": ["applications/demo/skills"],
-            },
+            "skills": {"paths": ["skills"]},
             "workers": [
                 {
                     "id": "applications/demo/workflows/worker_agents/worker.yaml",
@@ -110,7 +107,7 @@ worker_agents: []
                     "description": "Finds facts",
                     "path": "applications/demo/workflows/worker_agents/worker.yaml",
                     "role": "worker",
-                    "skills": {"load_mode": None, "items": ["fact-checking"]},
+                    "skills": {"paths": ["skills/fact-checking"]},
                     "workers": [],
                 }
             ],
@@ -224,7 +221,7 @@ agent_function_schema:
 
 def test_application_skills_are_project_local_and_never_follow_symlinks(tmp_path: Path) -> None:
     supervisor = "applications/demo/workflows/demo.yaml"
-    _write(tmp_path / supervisor, "name: demo\nworker_agents: []\nskills: []\n")
+    _write(tmp_path / supervisor, "name: demo\nworker_agents: []\n")
     _write(
         tmp_path / "applications/demo/skills/reviewer/SKILL.md",
         """---
@@ -265,7 +262,7 @@ def test_global_skills_are_runtime_global_and_not_application_or_framework_skill
     tmp_path: Path,
 ) -> None:
     supervisor = "applications/demo/workflows/demo.yaml"
-    _write(tmp_path / supervisor, "name: demo\nworker_agents: []\nskills: []\n")
+    _write(tmp_path / supervisor, "name: demo\nworker_agents: []\n")
     _write(
         tmp_path / "skills/global-review/SKILL.md",
         "---\nname: global-review\ndescription: Shared runtime review\n---\n",
@@ -299,7 +296,6 @@ name: demo
 worker_agents:
   - path: ../../../../outside.yaml
   - path: linked.yaml
-skills: []
 """,
     )
     _write(tmp_path / "outside.yaml", "name: outside\n")

@@ -12,29 +12,6 @@ from src.lib.smolagents.agent.agent_validation import (
 )
 
 
-class _CaptureLogger:
-    def __init__(self):
-        self.warning_messages: list[str] = []
-
-    def warning(self, msg, *args, **kwargs):
-        self.warning_messages.append(str(msg))
-
-
-class _DummySkillMetadata:
-    def __init__(self, allowed_tools):
-        self.allowed_tools = allowed_tools
-
-
-class _DummySkill:
-    def __init__(self, allowed_tools):
-        self.metadata = _DummySkillMetadata(allowed_tools)
-
-
-class _DummySkillsManager:
-    def __init__(self, skills):
-        self.skills = skills
-
-
 def _make_worker(config: dict) -> YamlConfiguredAgent:
     worker = object.__new__(YamlConfiguredAgent)
     worker._config = config
@@ -341,7 +318,19 @@ def test_common_validate_config_rejects_invalid_skills_type(maker, config_builde
     agent = maker(config_builder())
     agent._config["skills"] = 123
 
-    with pytest.raises(ValueError, match="skills must be a list, dict, or string path"):
+    with pytest.raises(ValueError, match="skills must contain only a 'paths' list"):
+        agent._validate_config()
+
+
+@pytest.mark.parametrize("maker,config_builder", [
+    (_make_worker, _worker_config),
+    (_make_supervisor, _supervisor_config),
+])
+def test_common_validate_config_rejects_removed_tools_mapping(maker, config_builder):
+    agent = maker(config_builder())
+    agent._config["tools_mapping"] = {"Claude": {"Read": "read_file"}}
+
+    with pytest.raises(ValueError, match="tools_mapping was removed"):
         agent._validate_config()
 
 
@@ -383,33 +372,6 @@ def test_supervisor_validate_config_rejects_invalid_worker_agents():
 
     with pytest.raises(ValueError, match="unsupported field 'name'"):
         supervisor._validate_config()
-
-
-def test_validate_skill_dependencies_logs_missing_tools_warning():
-    config = {
-        "name": "worker_validation_test",
-        "tools": [{"name": "shell_tool"}],
-    }
-    skills_manager = _DummySkillsManager(
-        {
-            "skill_with_missing_tools": _DummySkill(["shell_tool", "missing_tool"]),
-        }
-    )
-    logger = _CaptureLogger()
-
-    AgentConfigNormalizer.validate_skill_dependencies(
-        config,
-        skills_manager,
-        default_tools=["read_file"],
-        logger=logger,
-    )
-
-    assert len(logger.warning_messages) == 1
-    warning_msg = logger.warning_messages[0]
-    assert "SKILL CONFIGURATION INTEGRITY CHECK FAILED" in warning_msg
-    assert "Missing Tools by Skill:" in warning_msg
-    assert "[Skill: skill_with_missing_tools]" in warning_msg
-    assert "'missing_tool'" in warning_msg
 
 
 # ---------------------------------------------------------------------------

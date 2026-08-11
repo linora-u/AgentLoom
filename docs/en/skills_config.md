@@ -1,120 +1,68 @@
-# Skills Configuration
+# Skills
 
-AgentLoom skills use Claude Code style packages:
+AgentLoom Skills are instruction packages discovered from conventional directories:
 
 ```text
 skills/<skill-name>/SKILL.md
-skills/<skill-name>/references/
-skills/<skill-name>/scripts/
-skills/<skill-name>/assets/
+applications/<application>/skills/<skill-name>/SKILL.md
 ```
 
-`SKILL.md` is matched case-insensitively (`SKILL.md` or `skill.md`). Loose Markdown files and `skills.md` are not loaded.
+An Application definition can add local discovery roots. Paths are relative to
+the project root in `config/system.yaml`, and relative to the Application root
+in Application or Agent configuration:
 
-## SKILL.md Frontmatter
+```yaml
+skills:
+  paths:
+    - shared/skills
+```
 
-Required fields:
+`paths` is the only Skill configuration field. It does not select a loading
+mode or grant execution privileges.
+
+## Runtime semantics
+
+Skill loading is always model-context-on-demand:
+
+1. Agent startup discovers and parses `SKILL.md` packages.
+2. The system prompt receives only each permitted Skill's `name` and `description`.
+3. When a task matches, the model calls `skill(name)`.
+4. That tool result adds only the selected instructions, base directory, and a
+   sampled file list to the conversation.
+
+The catalogue is hidden when the Agent does not have the `skill` tool. There is
+no eager mode. Skill activation does not grant file, shell, script, or network
+access; the Agent's normal tools and permissions remain authoritative. Use
+those normal tools to read package resources or run commands.
+
+## `SKILL.md` contract
+
+Required frontmatter:
 
 ```yaml
 ---
 name: test-driven-development
-description: Test-driven development workflow.
+description: Use when implementing behavior with tests.
 ---
 ```
 
-Supported optional fields:
+Supported optional frontmatter follows the OpenCode package surface:
 
 ```yaml
-allowed-tools: Bash, Read, Edit
-argument-hint: "<task>"
-arguments: [task]
-when_to_use: Use when implementing or fixing behavior with tests.
-model: powerful
-context: fork
-agent: reviewer
-effort: high
-shell: bash
+license: MIT
+compatibility: Requires git.
+metadata:
+  owner: platform
 ```
 
-Unknown frontmatter fields are ignored. `hooks` is rejected with a migration error because Hooks use the independent top-level [`hooks`](hooks.md) configuration. Legacy fields such as `when-to-use`, `argument-names`, `requires`, `disable-model-invocation`, and `user-invocable` are not mapped.
+Unknown fields are ignored. `hooks` and `enable-hooks` are rejected because
+Hooks are an independent execution-authority boundary; configure them through
+[`hooks`](hooks.md).
 
-Invalid YAML, missing `name`, missing `description`, invalid names, and duplicate skill names are errors.
+Names must be lowercase kebab-case and at most 64 characters. Descriptions must
+be non-empty and at most 1024 characters. Invalid YAML, missing required fields,
+and duplicate names in one scope are errors. Agent definitions override
+Application definitions, which override project definitions with the same name.
 
-## Agent YAML
-
-Default loading is on-demand:
-
-```yaml
-skills:
-  load-mode: on-demand
-  items:
-    - skills/tdd
-    - skills/debugging
-```
-
-Eager loading injects the full skill body into the system prompt:
-
-```yaml
-skills:
-  load-mode: eager
-  items:
-    - skills/strict-review
-```
-
-Per-item overrides are allowed:
-
-```yaml
-skills:
-  load-mode: on-demand
-  items:
-    - skills/tdd
-    - path: skills/strict-review
-      load-mode: eager
-```
-
-Shorthand forms still work:
-
-```yaml
-skills: skills/tdd
-
-skills:
-  - skills/tdd
-  - path: skills/debugging
-```
-
-## Loading Semantics
-
-- Configured skills are registered at agent startup.
-- `on-demand`: the system prompt contains only a lightweight catalogue with `name`, `description`, `argument_hint`, and `when_to_use`.
-- `eager`: the full skill body is injected into `<eager_loaded_skills>` and is not repeated in the catalogue.
-- There is no hidden, user-invocable, force-inject, or invocation-control state.
-- `list_skills(detail="full")` lists all configured skills and their runtime policy.
-- `load_skill` returns a deduplication notice for eager skills because the body is already in context.
-
-## Resources
-
-Use `read_skill_resource(skill, path, offset, limit)` to read files bundled with a skill. Paths are resolved inside the skill directory; directory escape is rejected.
-
-## Scripts
-
-Third-party scripts are allowed by default:
-
-```python
-run_skill_script("youtube-transcript", "npm install")
-run_skill_script("youtube-transcript", "node transcript.js EBw7gsDPAYQ")
-```
-
-Execution audit logs include command, cwd, environment names, exit code, stdout/stderr paths, and the audit directory.
-
-Users can explicitly restrict behavior:
-
-```yaml
-skills:
-  load-mode: on-demand
-  allow-scripts: false
-  allow-network: false
-  items:
-    - skills/safe-review
-```
-
-`allow-scripts: false` blocks script execution. `allow-network: false` blocks common network commands such as `curl`, `wget`, `ssh`, `npm`, `pip`, `pnpm`, and `yarn`.
+Directories named `generated` are excluded from runtime discovery because
+self-learning proposals remain inactive until explicitly promoted.

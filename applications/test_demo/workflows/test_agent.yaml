@@ -27,9 +27,8 @@ worker_agents:
   []
 
 skills:
-  load-mode: "on-demand"
-  items:
-    - "applications/test_demo/skills"
+  paths:
+    - "skills"
 
 execution_env:
   type: "local"

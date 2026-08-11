@@ -19,7 +19,6 @@ workflow: |
 
 tools: []
 worker_agents: []
-skills: []
 execution_env:
   type: "docker"
   executor_kwargs:

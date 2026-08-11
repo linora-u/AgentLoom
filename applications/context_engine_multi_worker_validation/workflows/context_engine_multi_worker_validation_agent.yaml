@@ -32,5 +32,3 @@ tools:
 worker_agents:
   - path: "applications/context_engine_multi_worker_validation/workflows/worker_agents/log_payload_worker.yaml"
   - path: "applications/context_engine_multi_worker_validation/workflows/worker_agents/search_payload_worker.yaml"
-
-skills: []

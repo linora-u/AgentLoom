@@ -27,7 +27,7 @@ def scan_app_structure(app_path: str) -> str:
     - 每个 Worker 的配置摘要（name、agent_function_schema 的 inputs/output、tools 列表、execution_env、max_steps）
     - agent_tools/ 下的 Python 文件名、公开函数名与 docstring 摘要
     - 入口脚本路径（如有）
-    - 动态能力发现（有效 tools、tools_mapping.<platform> 映射线索）
+    - 动态能力发现（有效 tools 与 toolsets）
 
     不做任何分析判断，只提取事实。
 
@@ -248,35 +248,9 @@ def _discover_tool_capabilities(app_dir: Path) -> str:
     else:
         lines.append("- 有效 `default_toolsets`: (配置存在但类型不是 list，按不可用处理)")
 
-    mapping_info = _summarize_tools_mapping(effective)
-    lines.extend(mapping_info)
-
     lines.append("- 默认工具加载规则: 当 Agent `execution_env.type` 为 `docker`/`e2b` 时，默认 toolsets 会整体跳过。")
 
     return "\n".join(lines)
-
-
-def _summarize_tools_mapping(effective: Any) -> list[str]:
-    """输出平台化 tools_mapping 摘要。"""
-    if not isinstance(effective, dict):
-        return ["- 映射信息: 未发现有效配置"]
-
-    lines: list[str] = []
-    tools_mapping = effective.get("tools_mapping", {})
-
-    claude_mapping = {}
-    if isinstance(tools_mapping, dict):
-        raw = tools_mapping.get("Claude", {})
-        if isinstance(raw, dict):
-            claude_mapping = raw
-
-    if claude_mapping:
-        pairs = ", ".join(f"{k}->{v}" for k, v in sorted(claude_mapping.items()))
-        lines.append(f"- 有效 `tools_mapping.Claude` ({len(claude_mapping)} 项): {pairs}")
-        return lines
-
-    lines.append("- 映射信息: 未发现 `tools_mapping.Claude`")
-    return lines
 
 
 def _find_system_yaml_candidates(app_dir: Path) -> list[Path]:
@@ -422,39 +396,10 @@ def _extract_agent_summary(agent_file: Path, role: str = "Agent") -> str:
 
 
 def _format_skills_summary(skills_cfg: Any) -> str:
-    def _format_item(item: Any) -> str:
-        if isinstance(item, dict):
-            return str(item.get("path", item))
-        return str(item)
-
-    if isinstance(skills_cfg, dict) and "items" in skills_cfg:
-        items = skills_cfg.get("items")
-        if isinstance(items, list):
-            skill_items = [_format_item(item) for item in items]
-        elif items is None:
-            skill_items = []
-        else:
-            skill_items = [_format_item(items)]
-
-        suffix = []
-        load_mode = skills_cfg.get("load-mode")
-        if load_mode:
-            suffix.append(f"load-mode={load_mode}")
-        if skills_cfg.get("allow-scripts") is False:
-            suffix.append("allow-scripts=false")
-        if skills_cfg.get("allow-network") is False:
-            suffix.append("allow-network=false")
-
-        summary = ", ".join(skill_items) if skill_items else "(无)"
-        if suffix:
-            summary += f" ({', '.join(suffix)})"
-        return summary
-
-    if isinstance(skills_cfg, list):
-        return ", ".join(_format_item(item) for item in skills_cfg)
-    if isinstance(skills_cfg, dict):
-        return _format_item(skills_cfg)
-    return str(skills_cfg)
+    if not isinstance(skills_cfg, dict) or not isinstance(skills_cfg.get("paths"), list):
+        return "(无效配置)"
+    paths = [str(path) for path in skills_cfg["paths"]]
+    return ", ".join(paths) if paths else "(仅约定目录)"
 
 
 def _load_agent_config_from_file(agent_file: Path) -> tuple[dict[str, Any] | None, str | None]:

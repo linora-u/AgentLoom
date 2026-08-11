@@ -53,5 +53,4 @@ tools:
   - name: "list_background_tasks"
 
 worker_agents: []
-skills: []
 max_steps: 20

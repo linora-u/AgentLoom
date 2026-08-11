@@ -60,7 +60,6 @@ describe("detail presentation", () => {
           name: "demo-skill",
           description: "Demo",
           source: "application",
-          load_mode: "eager",
           path: "applications/demo/skills/demo-skill/SKILL.md",
         }],
         permissions: capability,
@@ -80,7 +79,7 @@ describe("detail presentation", () => {
     expect(overview).toContain("Tools: 1 · Skills: 1")
     expect(overview).not.toContain(longWorkflow)
     expect(agentText).toContain("read_file · agent")
-    expect(agentText).toContain("demo-skill · application · eager")
+    expect(agentText).toContain("demo-skill · application")
     expect(agentText).toContain("权限 · application: mode=denylist, shell=false")
     expect(agent.sections.some((section) => section.title === "Workflow 摘要")).toBeTrue()
     expect(agentText).not.toContain(longWorkflow)
@@ -170,7 +169,7 @@ describe("detail presentation", () => {
         description: "Summarize",
         path: "applications/digest/workflows/digest.yaml",
         role: "supervisor",
-        skills: { load_mode: "all", items: [] },
+        skills: { paths: [] },
         workers: [{
           id: "applications/digest/workflows/worker_agents/reader.yaml",
           application_id: "digest",
@@ -178,7 +177,7 @@ describe("detail presentation", () => {
           description: "Read source files",
           path: "applications/digest/workflows/worker_agents/reader.yaml",
           role: "worker",
-          skills: { load_mode: "selected", items: ["applications/digest/skills"] },
+          skills: { paths: ["applications/digest/skills"] },
           workers: [],
         }],
       }],

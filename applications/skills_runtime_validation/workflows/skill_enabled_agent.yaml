@@ -1,0 +1,21 @@
+name: "skill_runtime_enabled"
+description: "Validate on-demand Skill activation and Agent-scope precedence with a real model."
+
+model_type: "powerful"
+tool_call_type: "tool_call"
+toolsets:
+  - "skills"
+todo:
+  mode: "off"
+max_steps: 5
+
+skills:
+  paths:
+    - "agent-skills"
+
+workflow: |
+  A specialized Skill contains the exact marker required for this validation.
+  Use the available Skill before answering. Return only the marker required by
+  that Skill.
+
+worker_agents: []

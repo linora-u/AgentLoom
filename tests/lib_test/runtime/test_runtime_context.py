@@ -1,4 +1,3 @@
-from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
 import pytest
@@ -199,29 +198,6 @@ def test_failed_root_memory_read_freezes_an_empty_snapshot() -> None:
     assert calls == 1
 
 
-def test_runtime_context_allocates_safe_unique_skill_execution_dirs(tmp_path: Path) -> None:
-    from src.lib.runtime import RuntimeHome
-
-    context = RuntimeHome(tmp_path / ".agentloom").context(
-        application_id="app",
-        task_id="task",
-        run_id="run",
-    )
-
-    with ThreadPoolExecutor(max_workers=8) as executor:
-        directories = list(
-            executor.map(
-                lambda _: context.new_skill_execution_dir("中文/skill name"),
-                range(40),
-            )
-        )
-
-    assert len(set(directories)) == 40
-    assert all(path.is_dir() for path in directories)
-    assert all(path.is_relative_to(context.skill_artifacts_dir) for path in directories)
-    assert all("中文" not in str(path.relative_to(context.skill_artifacts_dir)) for path in directories)
-
-
 def test_artifact_allocator_rejects_cross_run_symlink(tmp_path: Path) -> None:
     from src.lib.runtime import RuntimeHome
 
@@ -240,24 +216,6 @@ def test_artifact_allocator_rejects_cross_run_symlink(tmp_path: Path) -> None:
         first.allocate_artifact("shell", prefix="cmd-", suffix=".txt")
 
     assert list(second.shell_artifacts_dir.iterdir()) == []
-
-
-def test_atomic_run_write_rejects_replaced_skill_audit_directory(tmp_path: Path) -> None:
-    from src.lib.runtime import RuntimeHome
-
-    home = RuntimeHome(tmp_path / ".agentloom")
-    first = home.context(application_id="first", task_id="task", run_id="run")
-    second = home.context(application_id="second", task_id="task", run_id="run")
-    first.prepare_run()
-    second.prepare_run()
-    audit_dir = first.new_skill_execution_dir("skill")
-    audit_dir.rmdir()
-    audit_dir.symlink_to(second.skill_artifacts_dir, target_is_directory=True)
-
-    with pytest.raises(RuntimeError, match="safe directory"):
-        first.atomic_write_run_file(audit_dir / "stdout.txt", "secret")
-
-    assert not (second.skill_artifacts_dir / "stdout.txt").exists()
 
 
 def test_bound_run_home_owns_self_learning_state(tmp_path: Path, monkeypatch) -> None:

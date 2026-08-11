@@ -17,5 +17,4 @@ tools:
     function: "validation_memory_case"
 
 toolsets: []
-skills: []
 worker_agents: []

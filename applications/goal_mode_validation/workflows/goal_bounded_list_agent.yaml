@@ -28,7 +28,6 @@ tools:
 worker_agents:
   - path: "applications/goal_mode_validation/workflows/worker_agents/evidence_synthesizer.yaml"
 
-skills: []
 execution_env:
   type: "local"
   executor_kwargs:

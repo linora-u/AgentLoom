@@ -55,7 +55,7 @@ disables built-in tools for that Agent.
 | `core_file` | `read_file`, `edit_file`, `write_file`, `list_directory` |
 | `core_search` | `grep_search`, `glob_search` |
 | `context` | `loom_retrieve_context` |
-| `skills` | `load_skill`, `list_skills` |
+| `skills` | `skill` |
 | `self_learning` | `session_search`, `session_scroll`, `memory`, `skill_manage` |
 | `planning` | `todo_write` |
 | `markdown_report` | `write_markdown_file`, `write_markdown_file_raw`, `append_markdown_sections` |

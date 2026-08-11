@@ -46,7 +46,6 @@ workflow: |
 tools:
   - name: "shell_tool"
 
-skills: []
 max_steps: 15
 
 execution_env:

@@ -6,7 +6,6 @@ tool_call_type: "code_act"
 max_steps: 8
 
 toolsets: []
-skills: []
 worker_agents: []
 
 tools:
@@ -37,7 +36,7 @@ workflow: |
   # Execution Contract
   - Emit every action as a Python `<code>...</code>` block.
   - Do not use native `<tool_call>` syntax.
-  - Do not call `load_skill`.
+  - Do not call `skill`.
   - Call `session_search` for both `AL_SELF_LEARNING_SMOKE` and `Self-learning smoke marker`.
   - Call `session_scroll` after the first non-empty search result.
   - Return JSON with `ok=true` only when both search terms have at least one hit.
