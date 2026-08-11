@@ -30,5 +30,4 @@ tools:
     module: "applications.context_engine_multi_worker_validation.agent_tools.payload_tools"
     function: "make_context_engine_search_payload"
 
-skills: []
 worker_agents: []

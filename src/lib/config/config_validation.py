@@ -419,6 +419,13 @@ class TodoSettings(BaseModel):
         return normalize_todo_mode_value(value)
 
 
+class SkillsSettings(BaseModel):
+    """Additional local Skill discovery roots."""
+
+    model_config = ConfigDict(extra="forbid")
+    paths: list[str] = Field(default_factory=list)
+
+
 class RootSettings(BaseModel):
     model_config = ConfigDict(extra="allow")
     system: SystemSettings = Field(default_factory=SystemSettings)
@@ -435,12 +442,12 @@ class RootSettings(BaseModel):
     default_toolsets: list[str] = Field(default_factory=list)
     toolsets: list[str] = Field(default_factory=list)
     shell_settings: dict[str, Any] = Field(default_factory=dict)
-    tools_mapping: dict[str, Any] = Field(default_factory=dict)
     tool_metadata: dict[str, Any] = Field(default_factory=dict)
     tool_output_limits: dict[str, Any] = Field(default_factory=dict)
     self_learning: SelfLearningSettings = Field(default_factory=SelfLearningSettings)
     hooks: dict[str, Any] = Field(default_factory=dict)
     todo: TodoSettings = Field(default_factory=TodoSettings)
+    skills: SkillsSettings = Field(default_factory=SkillsSettings)
 
 
 def raise_project_key_error(source: str) -> ValueError:
@@ -480,11 +487,10 @@ def validate_system_snapshot(snapshot: dict[str, Any], source: str) -> None:
                 "write_approval with the per-scope approval.fact and "
                 "approval.experience policies."
             )
-    tools_mapping = snapshot.get("tools_mapping")
-    if isinstance(tools_mapping, dict) and "mapping" in tools_mapping:
+    if "tools_mapping" in snapshot:
         raise ValueError(
-            f"Unsupported key 'tools_mapping.mapping' in {source}. "
-            "Use platform keys such as 'tools_mapping.Claude'."
+            f"Unsupported key 'tools_mapping' in {source}. "
+            "Skills no longer declare or map tool authority."
         )
     RootSettings.model_validate(snapshot)
 

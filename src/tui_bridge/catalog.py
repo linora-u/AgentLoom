@@ -220,19 +220,13 @@ def _worker_path(
 
 
 def _configured_skills(raw: Any) -> dict[str, Any]:
-    load_mode: str | None = None
-    items: Any = raw
-    if isinstance(raw, Mapping):
-        load_mode = _display_text(raw.get("load-mode") or raw.get("load_mode")) or None
-        items = raw.get("items")
-    if not isinstance(items, list):
-        items = []
+    paths: Any = raw.get("paths") if isinstance(raw, Mapping) else []
+    if not isinstance(paths, list):
+        paths = []
 
     normalized: list[str] = []
     seen: set[str] = set()
-    for item in items:
-        if isinstance(item, Mapping):
-            item = item.get("path") or item.get("name")
+    for item in paths:
         if not isinstance(item, str):
             continue
         value = item.strip()
@@ -244,7 +238,7 @@ def _configured_skills(raw: Any) -> dict[str, Any]:
         if value not in seen:
             normalized.append(value)
             seen.add(value)
-    return {"load_mode": load_mode, "items": normalized}
+    return {"paths": normalized}
 
 
 def _collect_worker_paths(raw_workers: Any, paths: set[str]) -> None:

@@ -1,120 +1,61 @@
-# Skills 配置
+# Skills
 
-AgentLoom Skill 使用 Claude Code 风格包结构：
+AgentLoom Skill 是从约定目录发现的说明包：
 
 ```text
 skills/<skill-name>/SKILL.md
-skills/<skill-name>/references/
-skills/<skill-name>/scripts/
-skills/<skill-name>/assets/
+applications/<application>/skills/<skill-name>/SKILL.md
 ```
 
-`SKILL.md` 忽略大小写匹配（`SKILL.md` 或 `skill.md`）。框架不会加载散落的 Markdown，也不会加载 `skills.md`。
+Application 定义可以增加本地发现目录。`config/system.yaml` 中的路径相对项目根目录，
+Application 或 Agent 配置中的路径相对 Application 根目录：
 
-## SKILL.md Frontmatter
+```yaml
+skills:
+  paths:
+    - shared/skills
+```
 
-必填字段：
+`paths` 是唯一的 Skill 配置字段。它不选择加载模式，也不授予执行权限。
+
+## 运行时语义
+
+Skill 的模型上下文加载始终按需进行：
+
+1. Agent 启动时发现并解析 `SKILL.md` 包。
+2. system prompt 只获得允许使用的 Skill 的 `name` 和 `description`。
+3. 任务匹配时，模型调用 `skill(name)`。
+4. 工具结果只把被选中的说明、基础目录和抽样文件列表加入对话。
+
+Agent 没有 `skill` 工具时，catalogue 也不会显示。系统没有 eager 模式。
+激活 Skill 不会授予文件、Shell、脚本或网络权限；Agent 的常规工具和权限仍是唯一依据。
+读取包内资源或执行命令时，使用这些常规工具。
+
+## `SKILL.md` 契约
+
+必填 frontmatter：
 
 ```yaml
 ---
 name: test-driven-development
-description: Test-driven development workflow.
+description: Use when implementing behavior with tests.
 ---
 ```
 
-支持的可选字段：
+支持的可选 frontmatter 与 OpenCode 包格式一致：
 
 ```yaml
-allowed-tools: Bash, Read, Edit
-argument-hint: "<task>"
-arguments: [task]
-when_to_use: Use when implementing or fixing behavior with tests.
-model: powerful
-context: fork
-agent: reviewer
-effort: high
-shell: bash
+license: MIT
+compatibility: Requires git.
+metadata:
+  owner: platform
 ```
 
-未知 frontmatter 字段会被静默忽略。`hooks` 会明确报迁移错误，因为 Hook 使用独立的顶层 [`hooks`](hooks.md) 配置。旧字段 `when-to-use`、`argument-names`、`requires`、`disable-model-invocation`、`user-invocable` 不会被映射到新字段。
+未知字段会被忽略。`hooks` 与 `enable-hooks` 会报错，因为 Hook 是独立的执行授权边界；
+请通过 [`hooks`](hooks.md) 配置。
 
-非法 YAML、缺 `name`、缺 `description`、非法 skill 名、重复 skill name 都会报错。
+名称必须是最长 64 字符的小写 kebab-case；描述必须非空且最长 1024 字符。
+非法 YAML、缺少必填字段、同一层级内重名都会报错。同名时 Agent 定义覆盖 Application，
+Application 覆盖项目定义。
 
-## Agent YAML
-
-默认是按需加载：
-
-```yaml
-skills:
-  load-mode: on-demand
-  items:
-    - skills/tdd
-    - skills/debugging
-```
-
-全文加载用 `eager`，完整正文会进入 system prompt：
-
-```yaml
-skills:
-  load-mode: eager
-  items:
-    - skills/strict-review
-```
-
-可以在单个条目上覆盖：
-
-```yaml
-skills:
-  load-mode: on-demand
-  items:
-    - skills/tdd
-    - path: skills/strict-review
-      load-mode: eager
-```
-
-简写仍然可用：
-
-```yaml
-skills: skills/tdd
-
-skills:
-  - skills/tdd
-  - path: skills/debugging
-```
-
-## 加载语义
-
-- 配置了 skill，Agent 启动时就注册。
-- `on-demand`：system prompt 只放轻量 catalogue，包含 `name`、`description`、`argument_hint`、`when_to_use`。
-- `eager`：完整 skill 正文注入 `<eager_loaded_skills>`，不会重复出现在 catalogue。
-- 不再支持 hidden、user-invocable、force-inject、invocation-control 状态。
-- `list_skills(detail="full")` 会列出全部已配置 skill 及其运行策略。
-- 对 eager skill 调用 `load_skill` 会返回去重提示，因为正文已经在上下文里。
-
-## 资源文件
-
-用 `read_skill_resource(skill, path, offset, limit)` 读取 skill 包内文件。路径必须留在 skill 目录内；目录逃逸会失败。
-
-## 脚本执行
-
-默认允许第三方脚本执行：
-
-```python
-run_skill_script("youtube-transcript", "npm install")
-run_skill_script("youtube-transcript", "node transcript.js EBw7gsDPAYQ")
-```
-
-执行审计会记录命令、cwd、环境变量名、退出码、stdout/stderr 文件路径和 audit 目录。
-
-用户需要限制时再显式配置：
-
-```yaml
-skills:
-  load-mode: on-demand
-  allow-scripts: false
-  allow-network: false
-  items:
-    - skills/safe-review
-```
-
-`allow-scripts: false` 会阻断脚本执行。`allow-network: false` 会阻断常见网络命令，例如 `curl`、`wget`、`ssh`、`npm`、`pip`、`pnpm`、`yarn`。
+名为 `generated` 的目录不会进入运行时发现，因为自学习提案在显式晋升前必须保持未激活状态。

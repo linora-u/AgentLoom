@@ -51,7 +51,6 @@ tools:
     description: "Run the second fixed local Codex task in the demo chain."
 
 worker_agents: []
-skills: []
 max_steps: 8
 
 execution_env:

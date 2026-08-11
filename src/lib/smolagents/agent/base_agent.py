@@ -40,9 +40,7 @@ from src.lib.config import (
     C,
     build_effective_agent_config_snapshot,
     get_code_agent_config,
-    get_default_toolsets,
 )
-from src.lib.config.config_validation import BoolParser  # noqa: F401 — used elsewhere
 from src.lib.config.defaults import DEFAULT_MAX_TOKENS
 from src.lib.logging import (
     get_global_logger,
@@ -77,10 +75,9 @@ from src.lib.smolagents.models.tool_call_parser import (
 )
 from src.lib.smolagents.monkey_patch import install_agentloom_runtime_adapters
 from src.lib.smolagents.prompts.prompt_builder import build_prompt_templates
-from src.lib.smolagents.skills.skills import SkillsManager
+from src.lib.smolagents.skills.catalog import SkillCatalog, SkillSource
 from src.lib.smolagents.tools.tools import ensure_tool_wrapped
 from src.lib.utils.workspace import ensure_workspace_mounted_once
-from src.tools.catalog import resolve_toolsets
 from src.tools.loader import resolve_tool_function
 from src.trace import (
     bind_explicit_execution_context,
@@ -768,8 +765,7 @@ class RoleDrivenAgent(BaseAgent):
         self.tool_call_type = self._role_profile().tool_call_type
 
         runtime_logger = self._effective_logger()
-        self._skills_manager = SkillsManager(logger=runtime_logger)
-        self.initialize_skills_manager(self._config, logger=runtime_logger)
+        self._skill_catalog = self.initialize_skill_catalog(logger=runtime_logger)
         hook_layers = tuple(
             HookConfigLayer(
                 name=layer.name,
@@ -784,21 +780,6 @@ class RoleDrivenAgent(BaseAgent):
             hook_layers,
             internal_handlers=builtin_hook_handlers(),
         )
-        try:
-            default_toolsets = (
-                self._config.get("toolsets")
-                if "toolsets" in self._config
-                else get_default_toolsets(self._effective_agent_config)
-            )
-            AgentConfigNormalizer.validate_skill_dependencies(
-                self._config,
-                self._skills_manager,
-                default_tools=resolve_toolsets(default_toolsets),
-                logger=runtime_logger,
-            )
-        except Exception:
-            pass
-
         self._after_role_init(**kwargs)
 
     def project_path(self):
@@ -903,184 +884,39 @@ class RoleDrivenAgent(BaseAgent):
             )
         return current_backend
 
-    @staticmethod
-    def _normalize_skills_config_items(skills_conf: Any) -> list[Any]:
-        if skills_conf is None:
-            return []
-        if isinstance(skills_conf, dict) and "items" in skills_conf:
-            items = skills_conf.get("items")
-            if items is None:
-                return []
-            if isinstance(items, (str, dict)):
-                return [items]
-            if isinstance(items, list):
-                return items
-            raise ValueError("Configuration error: skills.items must be a list, dict, or string path")
-        if isinstance(skills_conf, (str, dict)):
-            return [skills_conf]
-        if isinstance(skills_conf, list):
-            return skills_conf
-        raise ValueError("Configuration error: skills must be a list, dict, or string path")
-
-    @staticmethod
-    def _skills_config_defaults(skills_conf: Any, *, logger: Any) -> dict[str, Any]:
+    def initialize_skill_catalog(self, logger: AgentLogger | None = None) -> SkillCatalog:
+        """Resolve conventional and explicitly configured Skill sources once."""
         log = get_logger(logger, __name__)
-        defaults = {
-            "load_mode": "on-demand",
-            "allow_scripts": True,
-            "allow_network": True,
-            "policy_fields": set(),
-        }
-        if not isinstance(skills_conf, dict) or "items" not in skills_conf:
-            return defaults
-        if "enable-hooks" in skills_conf:
-            raise ValueError(
-                "skills.enable-hooks is not supported; configure a direct Hook or standalone Hook Bundle instead"
-            )
-        defaults["load_mode"] = str(skills_conf.get("load-mode", "on-demand")).strip().lower()
-        if "load-mode" in skills_conf:
-            defaults["policy_fields"].add("load_mode")
-        defaults["allow_scripts"] = BoolParser.parse(
-            skills_conf.get("allow-scripts", True),
-            default=True,
-            field_name="skills.allow-scripts",
-            logger=log,
-        )
-        if "allow-scripts" in skills_conf:
-            defaults["policy_fields"].add("allow_scripts")
-        defaults["allow_network"] = BoolParser.parse(
-            skills_conf.get("allow-network", True),
-            default=True,
-            field_name="skills.allow-network",
-            logger=log,
-        )
-        if "allow-network" in skills_conf:
-            defaults["policy_fields"].add("allow_network")
-        return defaults
-
-    def _load_skills_from_config_entries(
-        self,
-        skills_manager: SkillsManager,
-        skills_conf: Any,
-        *,
-        logger: Any,
-        policy_priority: int,
-    ) -> None:
-        log = get_logger(logger, __name__)
-        defaults = self._skills_config_defaults(skills_conf, logger=log)
-        for sk in self._normalize_skills_config_items(skills_conf):
-            sk_path = None
-            sk_platform = None
-            sk_load_mode = defaults["load_mode"]
-            sk_allow_scripts = defaults["allow_scripts"]
-            sk_allow_network = defaults["allow_network"]
-            sk_policy_fields = set(defaults["policy_fields"])
-
-            if isinstance(sk, dict):
-                if "enable-hooks" in sk:
-                    raise ValueError(
-                        "skills.items.enable-hooks is not supported; configure a "
-                        "direct Hook or standalone Hook Bundle instead"
-                    )
-                sk_path = sk.get("path")
-                sk_platform = sk.get("platform")
-                if "load-mode" in sk:
-                    sk_load_mode = str(sk.get("load-mode", sk_load_mode)).strip().lower()
-                    sk_policy_fields.add("load_mode")
-                if "allow-scripts" in sk:
-                    sk_allow_scripts = BoolParser.parse(
-                        sk.get("allow-scripts"),
-                        default=sk_allow_scripts,
-                        field_name="skills.items.allow-scripts",
-                        logger=log,
-                    )
-                    sk_policy_fields.add("allow_scripts")
-                if "allow-network" in sk:
-                    sk_allow_network = BoolParser.parse(
-                        sk.get("allow-network"),
-                        default=sk_allow_network,
-                        field_name="skills.items.allow-network",
-                        logger=log,
-                    )
-                    sk_policy_fields.add("allow_network")
-                if not sk_path:
-                    msg = f"Skill configuration error: dictionary item is missing required 'path' field: {sk}"
-                    log.warning(msg)
-                    continue
-            else:
-                sk_path = sk
-
-            if not sk_path:
+        sources: list[SkillSource] = []
+        for layer in self._effective_agent_config_snapshot.layers:
+            scope = {
+                "global_system": "project",
+                "application_system": "application",
+                "agent": "agent",
+            }.get(layer.name)
+            if scope is None:
                 continue
 
-            path_obj = Path(sk_path)
-            if not path_obj.is_absolute():
-                path_obj = Path(C.agent_root) / path_obj
+            if scope in {"project", "application"}:
+                sources.append(SkillSource(path=Path(layer.root) / "skills", scope=scope))
 
-            # Load skills from the directory and keep track of loaded skill names
-            skills_manager.load_skills_from_directory(
-                str(path_obj),
-                platform=sk_platform,
-                load_mode=sk_load_mode,
-                allow_scripts=sk_allow_scripts,
-                allow_network=sk_allow_network,
-                policy_priority=policy_priority,
-                policy_fields=sk_policy_fields,
-            )
+            configured = layer.data.get("skills") if isinstance(layer.data, dict) else None
+            if configured is None:
+                continue
+            if not isinstance(configured, dict) or set(configured) != {"paths"}:
+                raise ValueError("skills must be a mapping containing only a 'paths' list")
+            paths = configured["paths"]
+            if not isinstance(paths, list) or any(not isinstance(item, str) or not item.strip() for item in paths):
+                raise ValueError("skills.paths must be a list of non-empty path strings")
+            for raw_path in paths:
+                path = Path(raw_path).expanduser()
+                if not path.is_absolute():
+                    path = Path(layer.root) / path
+                sources.append(SkillSource(path=path, scope=scope))
 
-    def initialize_skills_manager(self, config: dict, logger: AgentLogger | None = None):
-        """
-        Initialize the current agent's SkillsManager in a unified way.
-
-        Responsibilities:
-        1. Set tool mappings (aliases)
-        2. Load global skills from system config
-        3. Load global default directory skills
-        4. Load current agent's configured skills
-        """
-        log = get_logger(logger, __name__)
-        skills_manager = self._skills_manager
-        if skills_manager is None:
-            skills_manager = SkillsManager.get_instance(logger=log)
-
-        skills_manager.set_tools_mapping(C.get("tools_mapping", {}))
-
-        # Load skills from effective agent config (app-level system.yaml overlay).
-        # skills: []                         → explicit opt-out, skip default directory.
-        # skills: null                       → not configured, only load default directory.
-        # skills: [p1]                       → load entries + default directory.
-        # skills: {load-mode, items: [...]}  → load entries with a shared policy.
-        global_skills_conf = self._effective_agent_config.get("skills")
-
-        if global_skills_conf:
-            self._load_skills_from_config_entries(
-                skills_manager,
-                global_skills_conf,
-                logger=log,
-                policy_priority=1,
-            )
-
-        if global_skills_conf != []:
-            skills_manager.load_skills_from_directory(
-                str(Path(C.agent_root) / "skills"),
-                policy_priority=0,
-            )
-
-        if "skills" in config:
-            self._load_skills_from_config_entries(
-                skills_manager,
-                config["skills"],
-                logger=log,
-                policy_priority=2,
-            )
-
-        # Log skills loading summary
-        loaded_skills = list(skills_manager.skills.keys()) if hasattr(skills_manager, "skills") else []
-        agent_name = config.get("name", "unknown")
-        if loaded_skills:
-            log.info(f"Agent '{agent_name}' loaded skills: {loaded_skills}")
-        else:
-            log.warning(f"Agent '{agent_name}' has no skills loaded.")
+        catalog = SkillCatalog.discover(sources, logger=log)
+        log.info("Agent '%s' resolved Skills: %s", self.name, [item.name for item in catalog.summaries()])
+        return catalog
 
     @abstractmethod
     def _role_profile(self) -> AgentRoleProfile:
@@ -1245,6 +1081,7 @@ class RoleDrivenAgent(BaseAgent):
         runtime_logger: Any,
         use_customized_prompt: bool,
         prompt_template_path: str | None,
+        skill_tool_enabled: bool,
     ) -> Any:
         if not use_customized_prompt:
             return None
@@ -1254,7 +1091,8 @@ class RoleDrivenAgent(BaseAgent):
             effective_prompt_path=self._resolve_effective_prompt_template_path(),
             model_id=getattr(self._model, "model_id", None) if self._model else None,
             agent_root=C.agent_root,
-            skills_manager=self._skills_manager,
+            skill_catalog=self._skill_catalog,
+            skill_tool_enabled=skill_tool_enabled,
             logger=runtime_logger,
             tool_call_type=self.tool_call_type,
             use_structured_output=getattr(self._model, "supports_structured_output", "false") == "true",
@@ -1360,6 +1198,7 @@ class RoleDrivenAgent(BaseAgent):
             runtime_logger=runtime_logger,
             use_customized_prompt=use_customized_prompt,
             prompt_template_path=prompt_template_path,
+            skill_tool_enabled=any(getattr(tool, "name", None) == "skill" for tool in hooked_tools),
         )
 
         if self.tool_call_type == "tool_call":
@@ -1579,7 +1418,7 @@ class RoleDrivenAgent(BaseAgent):
                     agent_id=agent_id,
                     agent_name=self.name,
                     agent_config=self._effective_agent_config or self._config,
-                    skills_manager=self._skills_manager,
+                    skill_catalog=self._skill_catalog,
                     hook_run=hook_run,
                     runtime_agent_path=runtime_path,
                 )

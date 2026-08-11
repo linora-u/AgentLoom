@@ -32,7 +32,6 @@ tools:
   - name: "glob_search"
 
 worker_agents: []
-skills: []
 max_steps: 10
 
 execution_env:

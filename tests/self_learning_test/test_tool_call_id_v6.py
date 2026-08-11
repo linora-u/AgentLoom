@@ -40,7 +40,7 @@ def test_wrapped_tool_reuses_one_call_id_for_call_and_result_events() -> None:
         agent_id="agent_1",
         agent_name="agent",
         agent_config={"application_id": "app"},
-        skills_manager=None,
+        skill_catalog=None,
         hook_run=run,
         runtime_agent_path="agent",
         root_run_id="root_1",

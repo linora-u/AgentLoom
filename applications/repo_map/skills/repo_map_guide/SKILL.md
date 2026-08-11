@@ -1,7 +1,6 @@
 ---
 name: repo_map_guide
 description: Guide for generating and using AI-readable code maps
-version: "1.0"
 ---
 
 # Repo Map 生成指南

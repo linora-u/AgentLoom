@@ -799,11 +799,11 @@ class TestLayer3ObservationMasking:
         ]
         assert len(dedup_resp) == 1  # dedup placeholder untouched
 
-    def test_masking_preserves_load_skill_tool_response(self):
+    def test_masking_preserves_skill_tool_response(self):
         messages = [
             create_mock_message(
                 MessageRole.TOOL_CALL,
-                "{'name': 'load_skill', 'arguments': {'skill': 'agent-recall-with-files'}}",
+                "{'name': 'skill', 'arguments': {'name': 'agent-recall-with-files'}}",
             ),
             create_mock_message(MessageRole.TOOL_RESPONSE, "skill instructions " * 200),
         ]
@@ -812,8 +812,8 @@ class TestLayer3ObservationMasking:
 
         new_msgs, _ = _apply_observation_masking(messages, frac_to_mask=0.5)
 
-        load_skill_response = new_msgs[1]
-        assert _extract_content_text(load_skill_response.message.content) == "skill instructions " * 200
+        skill_response = new_msgs[1]
+        assert _extract_content_text(skill_response.message.content) == "skill instructions " * 200
 
         masked = [
             m for m in new_msgs
@@ -1093,12 +1093,12 @@ class TestTruncateUntilFits:
                 text = _extract_content_text(msg.message.content)
                 assert text == OBSERVATION_MASKING_PLACEHOLDER
 
-    def test_content_level_fallback_preserves_load_skill_tool_response(self, monkeypatch):
+    def test_content_level_fallback_preserves_skill_tool_response(self, monkeypatch):
         messages = [
             ChatMessage(role=MessageRole.SYSTEM, content="system"),
             ChatMessage(
                 role=MessageRole.TOOL_CALL,
-                content="{'name': 'load_skill', 'arguments': {'skill': 'agent-recall-with-files'}}",
+                content="{'name': 'skill', 'arguments': {'name': 'agent-recall-with-files'}}",
             ),
             ChatMessage(role=MessageRole.TOOL_RESPONSE, content=[{"type": "text", "text": "skill instructions " * 500}]),
         ]

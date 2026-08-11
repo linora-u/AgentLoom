@@ -56,7 +56,6 @@ tools:
   - name: "read_file"
 
 worker_agents: []
-skills: []
 max_steps: 15
 
 execution_env:

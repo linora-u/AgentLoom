@@ -47,7 +47,6 @@ _WORKFLOW_OVERLAY_KEYS = {
     "code_agent",
     "tools",
     "shell_settings",
-    "tools_mapping",
     "default_toolsets",
     "toolsets",
     "prompt",
@@ -55,6 +54,7 @@ _WORKFLOW_OVERLAY_KEYS = {
     "self_learning",
     "hooks",
     "todo",
+    "skills",
 }
 _LLM_ONLY_TOP_LEVEL_KEYS = {"model", "llm", "langfuse"}
 _GLOBAL_ONLY_TOP_LEVEL_KEYS = {"runtime", "logging"}
@@ -539,7 +539,7 @@ def extract_workflow_overlay(
                 overlay[key] = value
             continue
 
-        if key in ("shell_settings", "tools_mapping", "default_toolsets", "toolsets"):
+        if key in ("shell_settings", "default_toolsets", "toolsets"):
             overlay[key] = value
             continue
 

@@ -25,7 +25,6 @@ tools:
   - name: "lsp_get_workspace_symbols"
 
 worker_agents: []
-skills: []
 max_steps: 10
 
 execution_env:

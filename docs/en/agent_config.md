@@ -100,8 +100,8 @@ prompt:
   path: "applications/my_app/sysprompt/code_agent.yaml"
 
 skills:
-  - path: "applications/my_app/skills"
-    platform: "Claude"                   # Optional: specify skill platform adaptation
+  paths:
+    - "shared/skills"                    # Optional extra discovery root
 ```
 
 ### 2.2 Worker Complete Template
@@ -517,87 +517,20 @@ Custom type names from `llm.yaml` are also supported (e.g., `"code_review"`).
 
 ### 3.8 `skills` — Skill Package Configuration
 
-`skills` in Agent YAML declares the Agent's private skill packages. **Not through the overlay whitelist**; loaded through an independent three-layer stacking mechanism.
-
-#### Three-Layer Loading Order
-
-```
-Layer 1: config/system.yaml global skills      ← C.get("skills")
-Layer 2: AGENT_ROOT/skills/ directory auto-discovery  ← load_skills_from_directory()
-Layer 3: skills field in Agent YAML              ← Read directly from raw YAML dict
-```
-
-The three layers are **additive**, not overriding. Skills with the same name are overridden by later-loaded ones (with a warning).
-`AGENT_ROOT` refers to the project root directory containing `config/system.yaml` (`C.agent_root`), not the directory of the current Agent YAML file.
-
-#### Disabling Global Skills (opt-out)
-
-Set `skills` to an empty list in the app-level `config/system.yaml` to **completely disable** Layer 1 and Layer 2 loading (global entries + directory auto-discovery are both skipped), leaving only Layer 3 Agent-private Skills:
-
-```yaml
-# applications/<app>/config/system.yaml
-skills: []   # Explicit opt-out: skip all global skills including AGENT_ROOT/skills/ directory
-```
-
-| `skills` value | Behavior |
-|---|---|
-| Not configured / `null` | Global entries not loaded, but `AGENT_ROOT/skills/` directory is still auto-discovered |
-| `[]` (empty list) | **Fully disabled**: both global entries and directory auto-discovery are skipped |
-| `[entries...]` | Load specified entries AND auto-discover `AGENT_ROOT/skills/` directory |
-
-#### Three Supported Formats
-
-**Format 1: List format (recommended)**
+AgentLoom automatically discovers project `skills/` and Application `skills/`
+directories. Agent YAML can add paths relative to the Application root:
 
 ```yaml
 skills:
-  - path: "skills/agent-recall-with-files"
-    load-mode: "eager"
-  - "skills/another-skill"              # Plain strings work as list items too
+  paths:
+    - shared/skills
 ```
 
-**Format 1b: Shared policy with `items`**
-
-```yaml
-skills:
-  load-mode: "on-demand"
-  allow-scripts: false
-  allow-network: false
-  items:
-    - "skills/safe-review"
-    - path: "skills/strict-review"
-      load-mode: "eager"
-```
-
-**Format 2: Dictionary format (single skill)**
-
-```yaml
-skills:
-  path: "skills/agent-recall-with-files"
-  platform: "Claude"
-```
-
-**Format 3: String format (simplest)**
-
-```yaml
-skills: "skills/agent-recall-with-files"
-```
-
-> Dictionary and string formats are automatically converted to single-element lists for processing.
-
-#### List Item Sub-fields
-
-| Sub-field | Type | Default | Required | Description |
-|--------|------|--------|------|------|
-| `path` | `str` | — | ✅ Required | Skill package path. Relative paths resolve from `AGENT_ROOT`. The runtime loads only a package entrypoint named `SKILL.md` / `skill.md` (case-insensitive), not loose Markdown or `skills.md` |
-| `platform` | `str` | `null` | ❌ Optional | Specify the platform the skill is adapted for (e.g., `"Claude"`), used by `tools_mapping` |
-| `load-mode` | `str` | `on-demand` | ❌ Optional | `on-demand` puts only the catalogue in the prompt; `eager` injects the full skill body |
-| `allow-scripts` | `bool` | `true` | ❌ Optional | Set to `false` to block `run_skill_script` for this skill |
-| `allow-network` | `bool` | `true` | ❌ Optional | Set to `false` to block common network commands inside `run_skill_script` |
-
-The group-level policy is inherited by `items`; an item-level field overrides it. Skill discovery and loading never declare, enable, or execute Hooks. A `hooks` field in `SKILL.md` or `enable-hooks` in Skill configuration is a migration error; configure the independent top-level [`hooks`](hooks.md) interface instead.
-
-**Validation**: `skills` overall must be `list`, `dict`, or `str`; otherwise raises `skills must be a list, dict, or string path`.
+`paths` is the only supported field. The system prompt contains only the
+resolved `name` and `description` catalogue; the model calls `skill(name)` to
+add one selected body to the conversation. There is no configurable loading
+mode. Skill activation does not grant tools, script, network, or Hook authority.
+See [Skills](skills_config.md) for discovery and precedence details.
 
 ---
 
@@ -861,8 +794,7 @@ tools:
 | `check_background_task` | Read background task status and output |
 | `kill_background_task` | Terminate a background task |
 | `list_background_tasks` | List active and recent background tasks |
-| `load_skill` | Load specified skill |
-| `list_skills` | List available skills |
+| `skill` | Load one selected Skill into the conversation |
 | `session_search` | Search redacted records from prior Runs |
 | `session_scroll` | Read surrounding events from a prior Run |
 | `memory` | Read or propose durable Project/Application facts |
@@ -1494,7 +1426,6 @@ The following top-level fields in Agent YAML can override system configuration (
 | `code_agent` | `dict` | CodeAgent code execution permissions |
 | `tools` | `list` | Agent tool list and its effective-config overlay |
 | `shell_settings` | `any` | Shell safety settings |
-| `tools_mapping` | `any` | Tool mapping override |
 | `default_toolsets` / `toolsets` | `any` | Toolset defaults or replacement |
 | `prompt` | `str`/`dict` | Custom System Prompt template path |
 | `mcp_servers` | `str`/`list`/`dict` | MCP server configuration |
