@@ -26,7 +26,6 @@ agent_function_schema:
 tools:
   - name: "shell_tool"
 
-skills: []
 worker_agents: []
 execution_env:
   type: "local"

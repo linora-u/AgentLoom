@@ -29,7 +29,6 @@ GLOBAL_ONLY_TOP_LEVEL = {"runtime", "logging"}
 ALLOWED_TOOL_CALL_TYPES = {"code_act", "tool_call"}
 ALLOWED_EXECUTION_ENV_TYPES = {"local", "docker", "e2b", "wasm"}
 ALLOWED_WORKER_EXTENSIONS = {".yaml", ".yml", ".md"}
-ALLOWED_SKILL_LOAD_MODES = {"on-demand", "eager"}
 ALLOWED_CONCURRENCY_VALUES = {"auto"}
 LLM_ONLY_TOP_LEVEL = {"model", "llm", "langfuse"}
 
@@ -484,7 +483,6 @@ def _validate_overlay_config_types(
         "execution_env",
         "code_agent",
         "shell_settings",
-        "tools_mapping",
     )
     for field in dict_fields:
         if field in config and not isinstance(config.get(field), dict):
@@ -527,15 +525,14 @@ def _validate_overlay_config_types(
             project_root=project_root,
         )
 
-    tools_mapping = config.get("tools_mapping")
-    if isinstance(tools_mapping, dict) and "mapping" in tools_mapping:
+    if "tools_mapping" in config:
         _add_error(
             errors,
             file_path=file_path,
-            field="tools_mapping.mapping",
+            field="tools_mapping",
             rule="removed_field",
-            message="tools_mapping.mapping legacy fallback 已删除",
-            suggestion="改用 tools_mapping.Claude 等平台键",
+            message="tools_mapping 已删除；Skill 不再声明或映射工具权限",
+            suggestion="删除 tools_mapping，并通过 Agent tools/toolsets 配置工具",
             project_root=project_root,
         )
 
@@ -666,149 +663,6 @@ def _validate_dynamic_tools(
             )
 
 
-def _validate_single_skill_entry(
-    item: Any,
-    *,
-    file_path: Path,
-    field_prefix: str,
-    errors: list[dict[str, str]],
-    project_root: Path,
-) -> None:
-    if isinstance(item, str):
-        if not item.strip():
-            _add_error(
-                errors,
-                file_path=file_path,
-                field=field_prefix,
-                rule="required_non_empty_string",
-                message="skills 路径字符串不能为空",
-                suggestion="填写有效的 skills 路径，例如 skills/agent-recall-with-files",
-                project_root=project_root,
-            )
-        return
-
-    if not isinstance(item, dict):
-        _add_error(
-            errors,
-            file_path=file_path,
-            field=field_prefix,
-            rule="type_dict_or_string",
-            message="skills 列表项必须是字符串或字典",
-            suggestion="使用字符串路径，或使用 {path/platform/load-mode/allow-scripts/allow-network} 字典",
-            project_root=project_root,
-        )
-        return
-
-    path_value = item.get("path")
-    if not isinstance(path_value, str) or not path_value.strip():
-        _add_error(
-            errors,
-            file_path=file_path,
-            field=f"{field_prefix}.path",
-            rule="required_non_empty_string",
-            message="skills.path 必须是非空字符串",
-            suggestion="填写有效路径，例如 skills/agent-recall-with-files",
-            project_root=project_root,
-        )
-
-    platform = item.get("platform")
-    if platform is not None and (not isinstance(platform, str) or not platform.strip()):
-        _add_error(
-            errors,
-            file_path=file_path,
-            field=f"{field_prefix}.platform",
-            rule="type_non_empty_string",
-            message="skills.platform 必须是非空字符串",
-            suggestion="删除该字段或设置为有效平台名（如 Claude）",
-            project_root=project_root,
-        )
-
-    _validate_skill_runtime_options(
-        item,
-        file_path=file_path,
-        field_prefix=field_prefix,
-        errors=errors,
-        project_root=project_root,
-    )
-
-
-def _validate_skill_runtime_options(
-    options: dict[str, Any],
-    *,
-    file_path: Path,
-    field_prefix: str,
-    errors: list[dict[str, str]],
-    project_root: Path,
-) -> None:
-    load_mode = options.get("load-mode")
-    if load_mode is not None and (
-        not isinstance(load_mode, str)
-        or load_mode.strip().lower() not in ALLOWED_SKILL_LOAD_MODES
-    ):
-        _add_error(
-            errors,
-            file_path=file_path,
-            field=f"{field_prefix}.load-mode",
-            rule="allowed_values",
-            message="skills.load-mode 仅支持 on-demand 或 eager",
-            suggestion="删除该字段或设置为 on-demand/eager",
-            project_root=project_root,
-        )
-
-    for key in ("allow-scripts", "allow-network"):
-        value = options.get(key)
-        if value is not None and not isinstance(value, bool):
-            _add_error(
-                errors,
-                file_path=file_path,
-                field=f"{field_prefix}.{key}",
-                rule="type_bool",
-                message=f"skills.{key} 必须是布尔值",
-                suggestion=f"将 {key} 设置为 true 或 false，或删除该字段使用默认允许",
-                project_root=project_root,
-            )
-
-
-def _validate_skill_items(
-    items: Any,
-    *,
-    file_path: Path,
-    field_prefix: str,
-    errors: list[dict[str, str]],
-    project_root: Path,
-) -> None:
-    if isinstance(items, (str, dict)):
-        _validate_single_skill_entry(
-            items,
-            file_path=file_path,
-            field_prefix=field_prefix,
-            errors=errors,
-            project_root=project_root,
-        )
-        return
-
-    if not isinstance(items, list):
-        _add_error(
-            errors,
-            file_path=file_path,
-            field=field_prefix,
-            rule="type_list_dict_or_string",
-            message="skills.items 必须是 list / dict / string",
-            suggestion="使用字符串路径，或使用路径字典，或使用列表组合多个 skill",
-            project_root=project_root,
-        )
-        return
-
-    for idx, item in enumerate(items):
-        _validate_single_skill_entry(
-            item,
-            file_path=file_path,
-            field_prefix=f"{field_prefix}[{idx}]",
-            errors=errors,
-            project_root=project_root,
-        )
-
-
 def _validate_skills_config(
     config: dict[str, Any],
     file_path: Path,
@@ -819,61 +673,42 @@ def _validate_skills_config(
     if skills is None:
         return
 
-    if isinstance(skills, str):
-        _validate_single_skill_entry(
-            skills,
-            file_path=file_path,
-            field_prefix="skills",
-            errors=errors,
-            project_root=project_root,
-        )
-        return
-
-    if isinstance(skills, dict):
-        if "items" in skills:
-            _validate_skill_runtime_options(
-                skills,
-                file_path=file_path,
-                field_prefix="skills",
-                errors=errors,
-                project_root=project_root,
-            )
-            _validate_skill_items(
-                skills.get("items"),
-                file_path=file_path,
-                field_prefix="skills.items",
-                errors=errors,
-                project_root=project_root,
-            )
-        else:
-            _validate_single_skill_entry(
-                skills,
-                file_path=file_path,
-                field_prefix="skills",
-                errors=errors,
-                project_root=project_root,
-            )
-        return
-
-    if not isinstance(skills, list):
+    if not isinstance(skills, dict) or set(skills) != {"paths"}:
         _add_error(
             errors,
             file_path=file_path,
             field="skills",
-            rule="type_list_dict_or_string",
-            message="skills 必须是 list / dict / string",
-            suggestion="使用三种受支持格式之一：string / dict(path...) / list",
+            rule="exact_paths_mapping",
+            message="skills 必须是只包含 paths 的字典",
+            suggestion="使用 skills: {paths: [skills/example]}",
             project_root=project_root,
         )
         return
 
-    _validate_skill_items(
-        skills,
-        file_path=file_path,
-        field_prefix="skills",
-        errors=errors,
-        project_root=project_root,
-    )
+    paths = skills.get("paths")
+    if not isinstance(paths, list):
+        _add_error(
+            errors,
+            file_path=file_path,
+            field="skills.paths",
+            rule="type_list",
+            message="skills.paths 必须是字符串列表",
+            suggestion="使用 paths: [skills/example]",
+            project_root=project_root,
+        )
+        return
+
+    for idx, path in enumerate(paths):
+        if not isinstance(path, str) or not path.strip():
+            _add_error(
+                errors,
+                file_path=file_path,
+                field=f"skills.paths[{idx}]",
+                rule="required_non_empty_string",
+                message="skills.paths 中每一项都必须是非空字符串",
+                suggestion="填写有效的 Skill 目录路径",
+                project_root=project_root,
+            )
 
 
 def _validate_system_config_map(

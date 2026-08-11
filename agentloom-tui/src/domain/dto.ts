@@ -90,7 +90,6 @@ export interface EffectiveSkillDto {
   name: string
   description: string
   source: Exclude<CapabilitySource, "none">
-  load_mode: string
   path: string
 }
 
@@ -126,8 +125,7 @@ export interface ApplicationDetailResultDto {
 }
 
 export interface ConfiguredSkillsDto {
-  load_mode: string | null
-  items: string[]
+  paths: string[]
 }
 
 export interface AgentCatalogDto {

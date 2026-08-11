@@ -291,7 +291,6 @@ workflow: |
   Ask both Workers for evidence, reconcile conflicts, and return one release decision.
 
 tools: []
-skills: []
 max_steps: 12
 ```
 
@@ -317,7 +316,6 @@ workflow: |
 
 tools: []
 worker_agents: []
-skills: []
 max_steps: 8
 ```
 

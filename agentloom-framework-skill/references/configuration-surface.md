@@ -101,14 +101,14 @@ Worker YAML 如果出现任何 `goal` key 必须 fail-closed；不能用 `goal: 
 ```text
 system, model_request_headers, smart_summary, context_engine,
 tool_access_control, execution_env, code_agent, tools, shell_settings,
-tools_mapping, default_toolsets, toolsets, prompt, mcp_servers, self_learning, hooks
+default_toolsets, toolsets, prompt, mcp_servers, self_learning, hooks
 ```
 
 注意：
 
 - 这不是 7 个字段；旧文档如果说只有 7 个已经过期。
 - `tools` 在白名单里只有当它是 `list` 时才进入 overlay；它同时也是 Agent 的工具列表。
-- `shell_settings`、`tools_mapping`、`toolsets` 可以在 Agent YAML 覆盖；`toolsets` 会整体替换全局 `default_toolsets`。
+- `shell_settings`、`toolsets` 可以在 Agent YAML 覆盖；`toolsets` 会整体替换全局 `default_toolsets`。
 - `context_engine` 可以在 Agent YAML 覆盖，用于按应用或 Agent 调整可逆上下文压缩。
 - `self_learning` 和显式 `hooks` bundle 可以在应用或 Agent YAML 覆盖；reviewer 必须从当前 root 的最终生效配置读取，不能使用进程全局回退。
 - `mcp_servers` 可以在 Agent YAML 覆盖，并支持 string/list/dict。
@@ -135,7 +135,6 @@ tools_mapping, default_toolsets, toolsets, prompt, mcp_servers, self_learning, h
 | `default_toolsets` | 默认加载 toolset 名列表 |
 | `toolsets` | Agent 级内置 toolset 覆盖，空列表表示无内置工具 |
 | `shell_settings` | shell 命令白名单、安全检查、sandbox、后台任务、audit log |
-| `tools_mapping` | Skill `allowed-tools` 的平台别名映射 |
 | `tool_access_control` | 工具路径访问控制 |
 | `tool_metadata` | 工具输出截断、并发安全、分类、类型转换 |
 | `tool_output_limits` | 上下文压缩阶段的工具输出保留上限 |
@@ -274,7 +273,7 @@ get_file_outline, lsp_find_definition, lsp_find_references,
 lsp_get_document_symbols, lsp_hover, lsp_get_workspace_symbols,
 grep_search, glob_search, ast_grep_search_file, loom_retrieve_context,
 shell_tool, check_background_task, kill_background_task, list_background_tasks,
-load_skill, list_skills, session_search, session_scroll, memory, skill_manage,
+skill, session_search, session_scroll, memory, skill_manage,
 todo_write
 ```
 
@@ -357,57 +356,35 @@ description: Test-driven development workflow.
 支持字段：
 
 ```yaml
-allowed-tools: Bash, Read, Edit
-argument-hint: "<task>"
-arguments: [task]
-when_to_use: Use when implementing or fixing behavior with tests.
-model: powerful
-context: fork       # inline | fork
-agent: reviewer
-effort: high
-shell: bash
+license: MIT
+compatibility: Requires git.
+metadata:
+  owner: platform
 ```
 
 规则：
 
 - unknown frontmatter 字段静默忽略。
-- `when-to-use`、`argument-names`、`requires`、`disable-model-invocation`、`user-invocable` 这类旧字段不映射。
+- 未识别字段不进入运行时元数据。
 - `name` 必须是小写 kebab-case，最长 64；`description` 最长 1024。
-- 同名 Skill 从不同路径加载会报错；同一路径重复加载只更新 runtime options。
-- `allowed-tools` 可写逗号、竖线或换行分隔的字符串，也可写字符串列表；有 `platform` 时会通过 `tools_mapping` 映射。
+- 同层同名 Skill 报错；Agent 覆盖 Application，Application 覆盖项目。
 
 Skill 配置格式：
 
 ```yaml
 skills:
-  load-mode: on-demand
-  allow-scripts: false
-  allow-network: false
-  items:
-    - applications/<app>/skills/safe-review
-    - path: applications/<app>/skills/strict-review
-      load-mode: eager
-```
-
-也支持：
-
-```yaml
-skills: applications/<app>/skills/tdd
-
-skills:
-  - applications/<app>/skills/tdd
-  - path: applications/<app>/skills/debugging
+  paths:
+    - shared/skills
 ```
 
 加载层级：
 
-1. 有效系统配置里的 `skills`，包括应用级 system overlay。
-2. `AGENT_ROOT/skills/` 自动发现，除非有效系统配置显式 `skills: []`。
-3. 当前 Agent YAML 的 `skills`。
+1. 项目 `skills/` 约定目录与项目配置的额外 `skills.paths`。
+2. Application `skills/` 约定目录与 Application 配置的额外路径。
+3. Agent YAML 的额外路径。
 
-`load-mode` 只控制 prompt 注入：`on-demand` 进 catalogue，`eager` 注入全文。Skill 发现和加载都不触碰 Hook。`SKILL.md` 中的 `hooks` 与 Skill 配置中的 `enable-hooks` 会明确报迁移错误。
-
-`read_skill_resource(skill, path, offset, limit)` 读取包内资源，拒绝目录逃逸。`run_skill_script(skill, command, ...)` 在 skill 目录下运行脚本并写审计日志；`allow-scripts: false` 禁止脚本；`allow-network: false` 禁止常见网络命令。
+prompt 只展示 catalogue，模型调用 `skill(name)` 后才获得选中正文。Skill
+发现和加载不触碰 Hook，也不授予文件、Shell、脚本或网络权限。
 
 ## Hooks 配置
 

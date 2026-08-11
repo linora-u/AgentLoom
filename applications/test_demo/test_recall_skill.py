@@ -1,7 +1,5 @@
 #!/usr/bin/env python3
-"""
-Test whether the agent-recall-with-files skill can be loaded correctly and use aliases.
-"""
+"""Exercise catalogue discovery and on-demand Skill activation."""
 import sys
 import os
 from pathlib import Path
@@ -28,7 +26,8 @@ def run_recall_skill_test():
         print(f"Error: config file not found {yaml_path}")
         return
 
-    # YamlAgentFactory automatically handles SkillsManager initialization and mapping injection (Read -> read_file_content).
+    # YamlAgentFactory discovers the Skill catalogue. The model activates one
+    # body with skill(name); tools remain governed by the Agent configuration.
     config = YamlAgentFactory._load_config_from_file(yaml_path)
     
     # 2. Initialize agent.
@@ -36,12 +35,9 @@ def run_recall_skill_test():
     supervisor = YamlConfiguredSupervisorAgent(config=config)
 
     # 3. Build task.
-    # Goal: verify whether 'Read' alias is available and PreToolUse hook is triggered.
-    # Verify by reading this script file.
-    target_file = "applications/test_demo/test_recall_skill.py"
-    
+    # Goal: activate the Skill and then use the separately authorized file tools.
     task_content = """
-    分析 'applications' 目录下所有的Python文件。
+    先调用 skill(name="agent-recall-with-files") 获取说明，再分析 'applications' 目录下所有的Python文件。
     请找出其中包含 'test' 字样的文件，读取它们的内容，提取出每个文件的文档字符串（docstring）说明。
     最后，在当前目录下创建一个名为 'test_summary.md' 的文件，将这些文件的路径和对应的功能说明按Markdown列表格式写入。
     

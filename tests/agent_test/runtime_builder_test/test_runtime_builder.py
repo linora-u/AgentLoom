@@ -17,6 +17,7 @@ from src.lib.logging import get_global_logger, set_global_logger
 from src.lib.smolagents.agent.loom_mixin import LoomAgentMixin
 from src.lib.smolagents.hooks import HookEvent, HookHandler, HookPlan, HookResult, HookRun
 from src.lib.smolagents.hooks.tool_shim import inject_hooks
+from src.lib.smolagents.skills.catalog import SkillCatalog
 from src.lib.smolagents.tools.tools import tool
 from src.trace import (
     bind_explicit_execution_context,
@@ -2196,9 +2197,7 @@ def test_build_prompt_templates_uses_default_when_not_configured(monkeypatch, tm
             return default
 
     agent = _make_agent(logger=DummyLoggerBackend())
-    from src.lib.smolagents.skills.skills import SkillsManager as _SM
-
-    agent._skills_manager = _SM(logger=DummyLoggerBackend())
+    agent._skill_catalog = SkillCatalog.empty()
 
     monkeypatch.setattr(base_agent_module, "C", _DummyConfig())
     monkeypatch.setattr(prompt_builder_module, "get_agent_environment_prompt", lambda: "")
@@ -2207,6 +2206,7 @@ def test_build_prompt_templates_uses_default_when_not_configured(monkeypatch, tm
         runtime_logger=DummyLoggerBackend(),
         use_customized_prompt=True,
         prompt_template_path=None,
+        skill_tool_enabled=False,
     )
 
     # Should have loaded smolagents' built-in prompt
@@ -2230,6 +2230,7 @@ def test_build_prompt_templates_raises_on_invalid_explicit_prompt_path(monkeypat
             runtime_logger=DummyLoggerBackend(),
             use_customized_prompt=True,
             prompt_template_path=str(tmp_path / "missing_prompt.yaml"),
+            skill_tool_enabled=False,
         )
 
 
@@ -2250,20 +2251,11 @@ def test_create_agent_prioritizes_explicit_prompt_over_system_default(monkeypatc
                 return {"path": str(default_prompt)}
             return default
 
-    class _NoSkills:
-        def get_eager_skills_prompt(self):
-            return ""
-
-        def get_skills_prompt(self):
-            return ""
-
     previous_global_logger = get_global_logger(create_if_missing=False)
     set_global_logger(DummyLoggerBackend())
 
     monkeypatch.setattr(base_agent_module, "C", _DummyConfig())
     monkeypatch.setattr(prompt_builder_module, "get_agent_environment_prompt", lambda: "")
-    monkeypatch.setattr(prompt_builder_module.SkillsManager, "get_instance", lambda logger=None: _NoSkills())
-
     try:
         agent = _make_agent(logger=None)
         runtime_agent = agent._create_agent(

@@ -7,6 +7,7 @@ independently of BaseAgent.
 from __future__ import annotations
 
 import logging
+from pathlib import Path
 
 import pytest
 
@@ -16,6 +17,7 @@ from src.lib.smolagents.prompts.prompt_builder import (
     resolve_model_family_prompt_path,
     resolve_prompt_path,
 )
+from src.lib.smolagents.skills.catalog import SkillCatalog, SkillSource
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -24,24 +26,14 @@ from src.lib.smolagents.prompts.prompt_builder import (
 _LOGGER = logging.getLogger(__name__)
 
 
-class _NoSkills:
-    """Stub SkillsManager that contributes no prompt sections."""
-
-    def get_eager_skills_prompt(self) -> str:
-        return ""
-
-    def get_skills_prompt(self) -> str:
-        return ""
-
-
-class _TaggedSkills:
-    """SkillsManager stub returning identifiable prompt fragments."""
-
-    def get_eager_skills_prompt(self) -> str:
-        return "\n[EAGER]"
-
-    def get_skills_prompt(self) -> str:
-        return "\n[ON_DEMAND_CATALOGUE]"
+def _catalog(tmp_path: Path) -> SkillCatalog:
+    skill_dir = tmp_path / "skills" / "tagged-skill"
+    skill_dir.mkdir(parents=True)
+    (skill_dir / "SKILL.md").write_text(
+        "---\nname: tagged-skill\ndescription: Tagged catalogue entry.\n---\n[PRIVATE_BODY]\n",
+        encoding="utf-8",
+    )
+    return SkillCatalog.discover([SkillSource(tmp_path / "skills", "project")])
 
 
 # ---------------------------------------------------------------------------
@@ -163,7 +155,8 @@ class TestBuildPromptTemplates:
             effective_prompt_path=None,
             model_id=None,
             agent_root=tmp_path,
-            skills_manager=_NoSkills(),
+            skill_catalog=SkillCatalog.empty(),
+            skill_tool_enabled=False,
             logger=_LOGGER,
         )
         assert isinstance(result, dict)
@@ -178,7 +171,8 @@ class TestBuildPromptTemplates:
             effective_prompt_path=None,
             model_id=None,
             agent_root=tmp_path,
-            skills_manager=_NoSkills(),
+            skill_catalog=SkillCatalog.empty(),
+            skill_tool_enabled=False,
             logger=_LOGGER,
             tool_call_type="code_act",
             todo_mode="auto",
@@ -198,7 +192,8 @@ class TestBuildPromptTemplates:
             effective_prompt_path=None,
             model_id=None,
             agent_root=tmp_path,
-            skills_manager=_NoSkills(),
+            skill_catalog=SkillCatalog.empty(),
+            skill_tool_enabled=False,
             logger=_LOGGER,
             tool_call_type="tool_call",
             todo_mode="on",
@@ -215,7 +210,8 @@ class TestBuildPromptTemplates:
             effective_prompt_path=None,
             model_id=None,
             agent_root=tmp_path,
-            skills_manager=_NoSkills(),
+            skill_catalog=SkillCatalog.empty(),
+            skill_tool_enabled=False,
             logger=_LOGGER,
             todo_mode="off",
         )
@@ -231,12 +227,13 @@ class TestBuildPromptTemplates:
             effective_prompt_path=None,
             model_id=None,
             agent_root=tmp_path,
-            skills_manager=_NoSkills(),
+            skill_catalog=SkillCatalog.empty(),
+            skill_tool_enabled=False,
             logger=_LOGGER,
         )
         assert "[ENV]" in result["system_prompt"]
 
-    def test_appends_skills_sections(self, monkeypatch, tmp_path):
+    def test_appends_skill_catalogue_without_body(self, monkeypatch, tmp_path):
         monkeypatch.setattr(pb_module, "get_agent_environment_prompt", lambda: "")
 
         result = build_prompt_templates(
@@ -244,15 +241,15 @@ class TestBuildPromptTemplates:
             effective_prompt_path=None,
             model_id=None,
             agent_root=tmp_path,
-            skills_manager=_TaggedSkills(),
+            skill_catalog=_catalog(tmp_path),
+            skill_tool_enabled=True,
             logger=_LOGGER,
         )
         system = result["system_prompt"]
-        assert "[EAGER]" in system
-        assert "[ON_DEMAND_CATALOGUE]" in system
-        # Eager full instructions should come before the on-demand catalogue.
-        assert system.index("[EAGER]") < system.index("[ON_DEMAND_CATALOGUE]")
-        assert system.index("[ON_DEMAND_CATALOGUE]") < system.index("## Task Tracking")
+        assert "tagged-skill" in system
+        assert "Tagged catalogue entry." in system
+        assert "[PRIVATE_BODY]" not in system
+        assert system.index("tagged-skill") < system.index("## Task Tracking")
 
     def test_raises_on_missing_explicit_path(self, tmp_path):
         with pytest.raises(ValueError, match="does not exist"):
@@ -261,14 +258,15 @@ class TestBuildPromptTemplates:
                 effective_prompt_path=None,
                 model_id=None,
                 agent_root=tmp_path,
-                skills_manager=_NoSkills(),
+                skill_catalog=SkillCatalog.empty(),
+                skill_tool_enabled=False,
                 logger=_LOGGER,
             )
 
     def test_returns_none_on_fallback_load_failure(self, monkeypatch, tmp_path):
         """When smolagents built-in fails to load, returns None."""
         # Make the extensions loader raise an error
-        def _broken_builtin(tool_call_type):
+        def _broken_builtin(tool_call_type, use_structured_output=True):
             raise RuntimeError("simulated failure")
         monkeypatch.setattr(pb_module, "_load_smolagents_builtin", _broken_builtin)
 
@@ -277,7 +275,8 @@ class TestBuildPromptTemplates:
             effective_prompt_path=None,
             model_id=None,
             agent_root=tmp_path,
-            skills_manager=_NoSkills(),
+            skill_catalog=SkillCatalog.empty(),
+            skill_tool_enabled=False,
             logger=_LOGGER,
         )
         assert result is None
@@ -293,25 +292,21 @@ class TestBuildPromptTemplates:
                 effective_prompt_path=None,
                 model_id=None,
                 agent_root=tmp_path,
-                skills_manager=_NoSkills(),
+                skill_catalog=SkillCatalog.empty(),
+                skill_tool_enabled=False,
                 logger=_LOGGER,
             )
 
-    def test_falls_back_to_skills_manager_get_instance(self, monkeypatch, tmp_path):
-        """When skills_manager=None, falls back to SkillsManager.get_instance()."""
+    def test_disabled_skill_tool_hides_nonempty_catalogue(self, monkeypatch, tmp_path):
         monkeypatch.setattr(pb_module, "get_agent_environment_prompt", lambda: "")
-        monkeypatch.setattr(
-            pb_module.SkillsManager,
-            "get_instance",
-            lambda logger=None: _TaggedSkills(),
-        )
 
         result = build_prompt_templates(
             prompt_template_path=None,
             effective_prompt_path=None,
             model_id=None,
             agent_root=tmp_path,
-            skills_manager=None,
+            skill_catalog=_catalog(tmp_path),
+            skill_tool_enabled=False,
             logger=_LOGGER,
         )
-        assert "[EAGER]" in result["system_prompt"]
+        assert "tagged-skill" not in result["system_prompt"]

@@ -29,7 +29,7 @@ workflow: |
     - `title=""`（不要标题）
     - 不要传 `metadata` 参数（不要 metadata 引用块）
     - 将完整 YAML frontmatter（`---` 包裹）放在第一个 section 的 `body` 开头。
-  - 禁止调用 `load_skill` / `list_skills` / `shell_tool`，不要加载外部 skill 上下文。
+  - 禁止调用 `skill` / `shell_tool`，不要加载外部 skill 上下文。
   - Worker 不直接生成 `agents/openai.yaml`；该文件由 `prepare_repo_map_skill_workspace` 确定性生成，并由 `validate_repo_map_skill` 校验。
   - 不生成 README / INSTALL / CHANGELOG 等额外文档。
 

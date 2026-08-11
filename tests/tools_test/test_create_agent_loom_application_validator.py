@@ -59,27 +59,11 @@ def _run_validator(project_root: Path, app_root: str = "applications/demo") -> t
 @pytest.mark.parametrize(
     "skills_value",
     [
-        "skills/agent-recall-with-files",
-        {"path": "skills/agent-recall-with-files", "platform": "Claude"},
-        [
-            "skills/agent-recall-with-files",
-            {
-                "path": "skills/demo-eager",
-                "load-mode": "eager",
-                "allow-scripts": False,
-            },
-        ],
-        {
-            "load-mode": "on-demand",
-            "allow-network": False,
-            "items": [
-                "skills/agent-recall-with-files",
-                {"path": "skills/demo-eager", "load-mode": "eager"},
-            ],
-        },
+        {"paths": []},
+        {"paths": ["skills/agent-recall-with-files", "shared/skills"]},
     ],
 )
-def test_skills_config_formats_are_supported(tmp_path: Path, skills_value) -> None:
+def test_skills_paths_config_is_supported(tmp_path: Path, skills_value) -> None:
     _create_min_project(tmp_path, skills_value=skills_value)
 
     completed, payload = _run_validator(tmp_path)
@@ -89,15 +73,41 @@ def test_skills_config_formats_are_supported(tmp_path: Path, skills_value) -> No
     assert payload["errors"] == []
 
 
-def test_invalid_skills_type_is_rejected(tmp_path: Path) -> None:
-    _create_min_project(tmp_path, skills_value=123)
+@pytest.mark.parametrize(
+    "skills_value",
+    [
+        123,
+        "skills/agent-recall-with-files",
+        ["skills/agent-recall-with-files"],
+        {"items": ["skills/agent-recall-with-files"]},
+        {"paths": [], "load-mode": "eager"},
+    ],
+)
+def test_legacy_or_invalid_skills_shapes_are_rejected(tmp_path: Path, skills_value) -> None:
+    _create_min_project(tmp_path, skills_value=skills_value)
 
     completed, payload = _run_validator(tmp_path)
 
     assert completed.returncode == 1
     assert payload["summary"]["valid"] is False
     assert any(
-        err["field"] == "skills" and err["rule"] == "type_list_dict_or_string"
+        err["field"] == "skills" and err["rule"] == "exact_paths_mapping"
+        for err in payload["errors"]
+    )
+
+
+def test_removed_tools_mapping_is_rejected(tmp_path: Path) -> None:
+    _create_min_project(tmp_path)
+    workflow_file = tmp_path / "applications" / "demo" / "workflows" / "demo_agent.yaml"
+    config = yaml.safe_load(workflow_file.read_text(encoding="utf-8"))
+    config["tools_mapping"] = {"Claude": {"Read": "read_file"}}
+    _write_yaml(workflow_file, config)
+
+    completed, payload = _run_validator(tmp_path)
+
+    assert completed.returncode == 1
+    assert any(
+        err["field"] == "tools_mapping" and err["rule"] == "removed_field"
         for err in payload["errors"]
     )
 

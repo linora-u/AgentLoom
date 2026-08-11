@@ -26,5 +26,3 @@ tools:
 
 worker_agents:
   - path: "applications/context_engine_text_retrieve_validation/workflows/worker_agents/text_payload_worker.yaml"
-
-skills: []

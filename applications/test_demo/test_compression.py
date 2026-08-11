@@ -221,7 +221,7 @@ def _build_skill_load_history() -> list[ChatMessage]:
         _msg(MessageRole.USER, _large_text("skill-load-input")),
         _msg(
             MessageRole.TOOL_CALL,
-            "{'name': 'load_skill', 'arguments': {'skill': 'agentloom-framework-skill'}}",
+            "{'name': 'skill', 'arguments': {'name': 'agentloom-framework-skill'}}",
         ),
         _msg(MessageRole.TOOL_RESPONSE, "SKILL_LOAD_SENTINEL " * 1000),
         _python_call('result = shell_tool(commands=["printf old-output"])\nprint(result)'),
@@ -273,7 +273,7 @@ def _validate_large_output(result: ScenarioResult) -> None:
 def _validate_skill_load(result: ScenarioResult) -> None:
     for idx, internal_message in enumerate(result.internal_messages[:-1]):
         call_text = _extract_content_text(internal_message.message.content)
-        if "load_skill" not in call_text:
+        if "skill" not in call_text:
             continue
         response = result.internal_messages[idx + 1]
         response_text = _extract_content_text(response.message.content)

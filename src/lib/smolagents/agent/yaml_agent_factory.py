@@ -785,7 +785,8 @@ class YamlConfiguredSupervisorAgent(RoleDrivenAgent):
         worker_logger = getattr(self, "logger", None) or getattr(self, "_logger", None)
         log = get_logger(worker_logger, __name__)
 
-        # Load standard tools (including tools from skills when allowed_tools is configured)
+        # Load explicitly configured tools and toolsets. Skill activation never
+        # changes this authority boundary.
         effective = getattr(self, "_effective_agent_config", None)
         standard_tools, mcp_manager = YamlAgentFactory.get_tools_from_config(self._config, logger=worker_logger, effective_agent_config=effective)
         self._mcp_manager = mcp_manager

@@ -17,5 +17,4 @@ tools:
   - name: "memory"
 
 toolsets: []
-skills: []
 worker_agents: []

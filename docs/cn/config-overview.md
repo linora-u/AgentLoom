@@ -45,7 +45,7 @@ flowchart TD
 
 #### Level 3: Agent 级覆盖
 单个 Agent 的 YAML 文件除了定义自身的工作流外，还可以覆盖系统的部分配置。支持覆盖的白名单字段（`_WORKFLOW_OVERLAY_KEYS`）包含：
-- `system`, `model_request_headers`, `smart_summary`, `context_engine`, `tool_access_control`, `execution_env`, `code_agent`, `tools`, `prompt`, `shell_settings`, `tools_mapping`, `default_toolsets`, `toolsets`, `mcp_servers`, `self_learning`, `hooks`。
+- `system`, `model_request_headers`, `smart_summary`, `context_engine`, `tool_access_control`, `execution_env`, `code_agent`, `tools`, `prompt`, `shell_settings`, `default_toolsets`, `toolsets`, `mcp_servers`, `self_learning`, `hooks`。
 
 ### Runtime 存储归属
 

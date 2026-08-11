@@ -1,8 +1,6 @@
 ---
 name: agent-recall-with-files
 description: Cross-session experience recall via file-based memory. Agents accumulate insights (pitfalls, decisions, facts) that persist across runs, plus ephemeral context and trace files for the current task.
-version: "6.0.0"
-allowed-tools: "Read, Write, Edit, Bash, Glob, Grep"
 ---
 
 # Agent Recall With Files

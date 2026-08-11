@@ -20,7 +20,6 @@ workflow:
 tools: []
 worker_agents: []
 toolsets: []
-skills: []
 
 execution_env:
   type: "local"

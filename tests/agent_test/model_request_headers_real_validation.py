@@ -131,7 +131,6 @@ workflow: |
   Return exactly HEADER_VALIDATION_PASS and do not call tools.
 tools: []
 worker_agents: []
-skills: []
 default_toolsets: []
 inject_default_file_tools: false
 max_steps: 2

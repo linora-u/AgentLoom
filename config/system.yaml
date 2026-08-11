@@ -24,22 +24,11 @@ context_engine:
   min_chars: 2000
   preview_max_chars: 3000
 
-# ============================================
-# Global Skills Configuration
-# ============================================
-# All agents inherit the skills declared here by default, and then additionally layer on:
-# 1. Skills in the C.agent_root/skills directory
-# 2. Top-level skills in the current agent / workflow YAML
-# Notes:
-# - A skill with the same name will raise an error within the final view of the same agent
-# - The examples below are commented out by default to avoid conflicts with existing agent-private skills
-skills:
-  # The recall instructions are independent from the similarly named Hook
-  # Bundle below. Enable either interface explicitly; loading the Skill never
-  # executes Hook code.
-  # - path: "skills/agent-recall-with-files"
-  #   invocation-control:
-  #     allow-model: "force-inject"
+# Skills are discovered from project and Application `skills/` directories.
+# Only additional local roots need configuration:
+# skills:
+#   paths:
+#     - "shared/skills"
 
 # ============================================
 # Global Hook Configuration
@@ -407,18 +396,3 @@ shell_settings:
     enabled: true           # Master switch (default: true)
     log_policy_snapshot: true  # Log effective shell policy once per run
     log_success: false      # Also log successful executions (default: false)
-
-# ============================================
-# Tool Alias Mapping
-# ============================================
-tools_mapping:
-  Claude:
-    Read: "read_file"
-    Write: "write_file"
-    Bash: "shell_tool"
-    Glob: "glob_search"
-    Grep: "grep_search"
-    Edit: "edit_file"
-    Definition: "lsp_find_definition"
-    References: "lsp_find_references"
-    Symbols: "lsp_get_document_symbols"

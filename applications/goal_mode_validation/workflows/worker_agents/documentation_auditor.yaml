@@ -29,5 +29,4 @@ agent_function_schema:
 
 tools: []
 
-skills: []
 worker_agents: []

@@ -334,7 +334,6 @@ describe("bundled OpenCode Runtime", () => {
       "workflow: Validate the Application without changing files.",
       "tools: []",
       "worker_agents: []",
-      "skills: []",
       "execution_env:",
       "  type: local",
     ].join("\n") + "\n", "utf8")

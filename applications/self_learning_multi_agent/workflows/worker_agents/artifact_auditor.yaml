@@ -6,13 +6,11 @@ tool_call_type: "code_act"
 max_steps: 10
 
 toolsets: []
-skills: []
 worker_agents: []
 
 tools:
   - name: "read_file"
   - name: "shell_tool"
-  - name: "list_skills"
   - name: "write_markdown_file"
   - name: "edit_file"
   - name: "glob_search"
@@ -36,8 +34,7 @@ workflow: |
   # Execution Contract
   - Emit every action as a Python `<code>...</code>` block.
   - Do not use native `<tool_call>` syntax.
-  - Do not call `load_skill`.
-  - Use `list_skills` to verify the generated proposal is not active.
+  - Verify that runtime discovery prunes every directory named `generated`.
   - Use `shell_tool` only for filesystem existence checks.
   - Return `ok=true` only when all audit checks pass.
 
@@ -51,9 +48,12 @@ workflow: |
   proposal_name = payload["skill"]["proposal_name"]
   proposal_path = payload["skill"]["proposal_path"]
 
-  skills = json.loads(list_skills(include_description=True, detail="summary"))
-  active_skill_names = [item.get("name") for item in skills]
-  proposal_is_not_active = proposal_name not in active_skill_names
+  active_manifests_raw = shell_tool(
+      command="find skills -type d -name generated -prune -o -type f -iname SKILL.md -print",
+      timeout=10,
+  )
+  active_manifests = [line.strip() for line in active_manifests_raw.splitlines() if line.strip()]
+  proposal_is_not_active = proposal_path + "/SKILL.md" not in active_manifests
 
   existence_raw = shell_tool(
       command=(
@@ -77,7 +77,7 @@ workflow: |
       "proposal_skill_contains_marker": marker_files_ok,
       "proposal_evidence_contains_marker": marker_files_ok,
       "proposal_is_not_active": proposal_is_not_active,
-      "active_skill_count": len(active_skill_names),
+      "active_skill_count": len(active_manifests),
       "ok": (
           "durable_files=ok" in existence_raw
           and marker_files_ok
