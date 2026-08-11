@@ -50,7 +50,6 @@ tools:
 
 worker_agents: []
 
-skills: []
 execution_env:
   type: "local"
   executor_kwargs:

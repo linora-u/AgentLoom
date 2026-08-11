@@ -24,7 +24,6 @@ tools:
   - name: "lsp_find_references"
 
 worker_agents: []
-skills: []
 max_steps: 10
 
 execution_env:

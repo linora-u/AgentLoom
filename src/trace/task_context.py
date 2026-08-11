@@ -31,7 +31,7 @@ _current_sub_task_id: ContextVar[Optional[str]] = ContextVar('current_sub_task_i
 _current_agent_id: ContextVar[Optional[str]] = ContextVar('current_agent_id', default=None)
 _current_agent_name: ContextVar[Optional[str]] = ContextVar('current_agent_name', default=None)
 _current_agent_config: ContextVar[Optional[dict]] = ContextVar('current_agent_config', default=None)
-_current_skills_manager: ContextVar[Optional[Any]] = ContextVar('current_skills_manager', default=None)
+_current_skill_catalog: ContextVar[Optional[Any]] = ContextVar('current_skill_catalog', default=None)
 _current_hook_run: ContextVar[Any | None] = ContextVar('current_hook_run', default=None)
 _current_runtime_agent_path: ContextVar[Optional[str]] = ContextVar('current_runtime_agent_path', default=None)
 _current_session_run_id: ContextVar[Optional[str]] = ContextVar('current_session_run_id', default=None)
@@ -49,7 +49,6 @@ _global_agent_id_fallback: Optional[str] = None
 _global_agent_config_fallback: Optional[dict] = None
 _global_agent_name_fallback: Optional[str] = None
 _global_runtime_agent_path_fallback: Optional[str] = None
-_global_skills_manager_fallback: Optional[Any] = None
 # NOTE: the session run id deliberately has NO global fallback. Worker threads
 # inherit it via contextvars.copy_context() (see ParallelAgentExecutor), and a
 # process-wide scalar would leak run A's identity into a concurrently running
@@ -76,7 +75,7 @@ class ExplicitExecutionContext:
     agent_id: Optional[str]
     agent_name: Optional[str]
     agent_config: Optional[dict]
-    skills_manager: Optional[Any]
+    skill_catalog: Optional[Any]
     hook_run: Any | None
     runtime_agent_path: Optional[str]
     root_run_id: Optional[str]
@@ -105,7 +104,7 @@ def capture_explicit_execution_context() -> ExplicitExecutionContext:
         agent_id=_current_agent_id.get(),
         agent_name=_current_agent_name.get(),
         agent_config=_current_agent_config.get(),
-        skills_manager=_current_skills_manager.get(),
+        skill_catalog=_current_skill_catalog.get(),
         hook_run=_current_hook_run.get(),
         runtime_agent_path=_current_runtime_agent_path.get(),
         root_run_id=_current_session_run_id.get(),
@@ -139,7 +138,7 @@ def bind_explicit_execution_context(
         (_current_agent_id, context.agent_id),
         (_current_agent_name, context.agent_name),
         (_current_agent_config, context.agent_config),
-        (_current_skills_manager, context.skills_manager),
+        (_current_skill_catalog, context.skill_catalog),
         (_current_hook_run, context.hook_run),
         (_current_runtime_agent_path, context.runtime_agent_path),
         (_current_session_run_id, context.root_run_id),
@@ -335,31 +334,21 @@ def clear_current_agent_config() -> None:
     logger.debug("Cleared agent config")
 
 
-def set_current_skills_manager(skills_manager: Any) -> None:
-    """Set the current skills manager for the active agent context."""
-    global _global_skills_manager_fallback
-    _current_skills_manager.set(skills_manager)
-    with _global_lock:
-        _global_skills_manager_fallback = skills_manager
-    logger.debug("Set current skills manager")
+def set_current_skill_catalog(skill_catalog: Any) -> None:
+    """Bind the Skill catalogue to the current explicit execution context."""
+    _current_skill_catalog.set(skill_catalog)
+    logger.debug("Set current Skill catalogue")
 
 
-def get_current_skills_manager() -> Optional[Any]:
-    """Get the current skills manager for the active agent context."""
-    value = _current_skills_manager.get()
-    if value is not None:
-        return value
-    with _global_lock:
-        return _global_skills_manager_fallback
+def get_current_skill_catalog() -> Optional[Any]:
+    """Return the current Skill catalogue without process-global fallback."""
+    return _current_skill_catalog.get()
 
 
-def clear_current_skills_manager() -> None:
-    """Clear the current skills manager."""
-    global _global_skills_manager_fallback
-    _current_skills_manager.set(None)
-    with _global_lock:
-        _global_skills_manager_fallback = None
-    logger.debug("Cleared current skills manager")
+def clear_current_skill_catalog() -> None:
+    """Clear the current Skill catalogue."""
+    _current_skill_catalog.set(None)
+    logger.debug("Cleared current Skill catalogue")
 
 
 def set_current_hook_run(hook_run: Any) -> None:

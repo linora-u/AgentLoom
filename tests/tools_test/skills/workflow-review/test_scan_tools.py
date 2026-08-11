@@ -1275,60 +1275,6 @@ class TestEffectiveConfigDiscovery:
         assert "有效 `default_toolsets`: []" in result
         assert str(app_dir / "config" / "system.yaml") in result
 
-    def test_mapping_requires_platform_key(self, tmp_path):
-        project_root = tmp_path / "proj"
-        app_dir = project_root / "applications" / "demo_app"
-        (project_root / "config").mkdir(parents=True)
-        (app_dir / "workflows").mkdir(parents=True)
-
-        with open(app_dir / "workflows" / "demo.yaml", "w", encoding="utf-8") as f:
-            yaml.dump({"name": "demo", "description": "x", "workflow": "x"}, f, allow_unicode=True)
-
-        with open(project_root / "config" / "system.yaml", "w", encoding="utf-8") as f:
-            yaml.dump(
-                {
-                    "tools_mapping": {
-                        "mapping": {
-                            "Read": "read_file",
-                            "Write": "write_file",
-                        }
-                    }
-                },
-                f,
-                allow_unicode=True,
-            )
-
-        result = scan_app_structure(str(app_dir))
-        assert "未发现 `tools_mapping.Claude`" in result
-
-    def test_mapping_reports_claude_mapping(self, tmp_path):
-        project_root = tmp_path / "proj"
-        app_dir = project_root / "applications" / "demo_app"
-        (project_root / "config").mkdir(parents=True)
-        (app_dir / "workflows").mkdir(parents=True)
-
-        with open(app_dir / "workflows" / "demo.yaml", "w", encoding="utf-8") as f:
-            yaml.dump({"name": "demo", "description": "x", "workflow": "x"}, f, allow_unicode=True)
-
-        with open(project_root / "config" / "system.yaml", "w", encoding="utf-8") as f:
-            yaml.dump(
-                {
-                    "tools_mapping": {
-                        "Claude": {
-                            "Read": "read_file",
-                            "Write": "write_file",
-                        },
-                    }
-                },
-                f,
-                allow_unicode=True,
-            )
-
-        result = scan_app_structure(str(app_dir))
-        assert "tools_mapping.Claude" in result
-        assert "Write->write_file" in result
-
-
 class TestExecutionEnvAndMarkdownSupport:
     """验证 execution_env 字段提取和 Markdown Agent 配置兼容。"""
 

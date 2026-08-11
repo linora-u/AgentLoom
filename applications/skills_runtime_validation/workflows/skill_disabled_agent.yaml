@@ -1,0 +1,14 @@
+name: "skill_runtime_disabled"
+description: "Validate that removing the Skill tool still permits an ordinary real-model run."
+
+model_type: "powerful"
+tool_call_type: "tool_call"
+toolsets: []
+todo:
+  mode: "off"
+max_steps: 3
+
+workflow: |
+  Return exactly `SKILL_TOOL_DISABLED_OK`. Do not add punctuation or explanation.
+
+worker_agents: []

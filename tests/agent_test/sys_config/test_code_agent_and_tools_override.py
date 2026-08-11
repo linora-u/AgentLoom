@@ -81,6 +81,5 @@ def test_code_agent_and_tools_inherits_from_app_override(code_agent_override_con
     # Check get_tools returns correct default tools
     tools = agent._get_tools()
     tool_names = [getattr(t, "name", getattr(t, "__name__", str(t))) for t in tools]
-    assert "load_skill" in tool_names
-    assert "list_skills" in tool_names
+    assert "skill" in tool_names
     assert "shell_tool" not in tool_names

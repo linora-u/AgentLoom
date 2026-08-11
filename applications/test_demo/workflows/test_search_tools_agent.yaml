@@ -54,7 +54,6 @@ tools:
   - name: "lsp_get_document_symbols"
 
 worker_agents: []
-skills: []
 
 execution_env:
   type: "local"

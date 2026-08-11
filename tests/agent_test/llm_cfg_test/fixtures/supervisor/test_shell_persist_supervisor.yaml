@@ -22,6 +22,5 @@ tools:
 worker_agents:
   - path: "applications/test_demo/workflows/worker_agents/test_shell_persist_worker.yaml"
 
-skills: []
 execution_env:
   type: "local"

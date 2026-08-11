@@ -11,7 +11,7 @@ from pathlib import Path
 import yaml
 
 from src.lib.runtime import safe_agent_path
-from src.lib.smolagents.skills.skills import SkillsManager
+from src.lib.smolagents.skills.parser import parse_skill_file
 
 ROOT = Path(__file__).parents[2]
 VISUALIZATION_BUNDLE = ROOT / "hooks" / "agent-visualization"
@@ -124,15 +124,12 @@ def test_visualization_is_a_hook_bundle_not_a_skill() -> None:
 
 
 def test_recall_skill_and_hook_bundle_are_independent() -> None:
-    manager = SkillsManager()
-    skill = manager.load_skill_metadata(
-        str(ROOT / "skills" / "agent-recall-with-files" / "SKILL.md")
-    )
+    skill, _ = parse_skill_file(str(ROOT / "skills" / "agent-recall-with-files" / "SKILL.md"))
     manifest = yaml.safe_load((RECALL_BUNDLE / "HOOK.yaml").read_text(encoding="utf-8"))
 
-    assert skill.metadata.name == "agent-recall-with-files"
-    assert not hasattr(skill.metadata, "hooks")
-    assert manifest["name"] == skill.metadata.name
+    assert skill.name == "agent-recall-with-files"
+    assert not hasattr(skill, "hooks")
+    assert manifest["name"] == skill.name
     assert not list((ROOT / "skills" / "agent-recall-with-files" / "scripts").glob("*.py"))
     assert {
         path.name

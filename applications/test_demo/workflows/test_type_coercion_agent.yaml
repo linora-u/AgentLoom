@@ -31,7 +31,6 @@ tools:
   - name: "grep_search"
 
 worker_agents: []
-skills: []
 max_steps: 10
 
 execution_env:

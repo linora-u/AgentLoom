@@ -6,7 +6,6 @@ tool_call_type: "code_act"
 max_steps: 10
 
 toolsets: []
-skills: []
 worker_agents: []
 
 tools:
@@ -36,7 +35,7 @@ workflow: |
   # Execution Contract
   - Emit every action as a Python `<code>...</code>` block.
   - Do not use native `<tool_call>` syntax.
-  - Do not call `load_skill`.
+  - Do not call `skill`.
   - Use `skill_manage`; do not write directly into active `skills/`.
   - Return `ok=true` only when SKILL.md and references/evidence.json both contain
     the marker.

@@ -1,8 +1,3 @@
-from .skills import Skill, SkillContent, SkillMetadata, SkillsManager
+from .catalog import SkillActivation, SkillCatalog, SkillSource, SkillSummary
 
-__all__ = [
-    "Skill",
-    "SkillContent",
-    "SkillMetadata",
-    "SkillsManager",
-]
+__all__ = ["SkillActivation", "SkillCatalog", "SkillSource", "SkillSummary"]

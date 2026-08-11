@@ -33,7 +33,6 @@ tools:
 worker_agents:
   - path: "applications/test_demo/workflows/worker_agents/test_shell_session_isolation_worker.yaml"
 
-skills: []
 execution_env:
   type: "local"
   executor_kwargs:

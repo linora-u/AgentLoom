@@ -26,7 +26,7 @@ def route_content(text: str, tool_name: str = "default") -> ContentKind:
 
     if re.search(r"(^|[_-])(log|logs|test|tests|build|pytest)([_-]|$)", name):
         return ContentKind.LOG
-    if name in {"shell_tool", "python_interpreter", "run_skill_script"}:
+    if name in {"shell_tool", "python_interpreter"}:
         return ContentKind.LOG if _LOG_HINTS.search(stripped) else ContentKind.TEXT
 
     catalog_kind = _catalog_content_kind(name)

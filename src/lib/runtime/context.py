@@ -381,10 +381,6 @@ class RuntimeContext:
         return self.artifacts_dir / "background"
 
     @property
-    def skill_artifacts_dir(self) -> Path:
-        return self.artifacts_dir / "skills"
-
-    @property
     def agent_workspaces_dir(self) -> Path:
         """Canonical root for persistent and task-scoped agent workspaces."""
 
@@ -430,44 +426,6 @@ class RuntimeContext:
             root=self.root_dir,
         )
 
-    def skill_workspace_dir(self, skill_name: str) -> Path:
-        """Return the canonical workspace for one skill in this run."""
-
-        component = _safe_named_part(
-            skill_name,
-            fallback="skill",
-            include_hash_on_change=True,
-        )
-        return self.skill_artifacts_dir / component
-
-    def new_skill_execution_dir(self, skill_name: str) -> Path:
-        """Atomically allocate a unique audit directory for a skill execution."""
-
-        executions_dir = self.skill_workspace_dir(skill_name) / "runs"
-        executions_fd = _open_runtime_directory(
-            executions_dir,
-            root=self.root_dir,
-            create=True,
-        )
-        try:
-            while True:
-                name = generate_runtime_id("execution")
-                try:
-                    os.mkdir(name, mode=0o700, dir_fd=executions_fd)
-                except FileExistsError:
-                    continue
-                return executions_dir / name
-        finally:
-            os.close(executions_fd)
-
-    def prepare_skill_workspace(self, skill_name: str) -> Path:
-        """Create and return a skill workspace through the trusted path layer."""
-
-        return _ensure_runtime_directory(
-            self.skill_workspace_dir(skill_name),
-            root=self.root_dir,
-        )
-
     def allocate_artifact(
         self,
         kind: str,
@@ -480,7 +438,6 @@ class RuntimeContext:
         directories = {
             "shell": self.shell_artifacts_dir,
             "background": self.background_artifacts_dir,
-            "skills": self.skill_artifacts_dir,
         }
         try:
             directory = directories[kind]
@@ -745,7 +702,6 @@ class RuntimeContext:
         for path in (
             self.shell_artifacts_dir,
             self.background_artifacts_dir,
-            self.skill_artifacts_dir,
         ):
             _ensure_runtime_directory(path, root=self.root_dir)
 
