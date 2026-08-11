@@ -13,7 +13,6 @@ tools:
   - name: "shell_tool"
   - name: "read_file"
 
-skills: []
 worker_agents: []
 
 workflow: |

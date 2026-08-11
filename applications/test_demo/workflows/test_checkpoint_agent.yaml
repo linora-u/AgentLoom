@@ -80,7 +80,6 @@ tools:
   - name: "edit_file"
 
 worker_agents: []
-skills: []
 
 execution_env:
   type: "local"

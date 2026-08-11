@@ -101,10 +101,10 @@ if __name__ == "__main__":
 ## Skill 生成原则
 
 - Skill 包使用 `skills/<skill_name>/SKILL.md`，文件名按 `SKILL.md` 书写。
-- `SKILL.md` frontmatter 至少写 `name` 和 `description`；需要模型传参时写 `argument-hint`。
+- `SKILL.md` frontmatter 至少写 `name` 和 `description`；可选字段只有 `license`、`compatibility`、`metadata`。
 - 参考资料放 `references/`，脚本放 `scripts/`，模板或静态素材放 `assets/`。
-- Agent YAML 只配置要注册的 skill 路径和加载策略；不要在 YAML 里维护 source、commit、hash、license 这类审计元数据。
-- 第三方脚本默认允许执行；只有用户明确要求限制时，才配置 `allow-scripts: false` 或 `allow-network: false`。
+- 约定目录会自动发现；额外目录只用 `skills.paths` 配置。
+- Skill 只提供说明，不授予脚本、网络或工具权限；需要执行时使用 Agent 已有工具和权限。
 - 如果某个 skill 只服务当前 Application，放在 `applications/<app_name>/skills/`；确实跨应用复用时，再考虑全局 runtime skill。
 - `SKILL.md` 不得包含 `hooks`；确定性事件行为使用独立 `hooks/<name>/HOOK.yaml` Bundle，并通过 system/Agent YAML 顶层 `hooks.bundles` 显式引用。
 
@@ -113,7 +113,6 @@ if __name__ == "__main__":
 只有需要覆盖当前 Application 的系统行为时才创建：
 
 ```yaml
-skills: []                 # 关闭全局 skill 列表和 AGENT_ROOT/skills 自动发现
 hooks:
   bundles:
     my-hook:

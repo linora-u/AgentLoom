@@ -5,8 +5,7 @@ Encapsulates the full prompt resolution chain:
   explicit path → effective agent config → global config → model-family variant → smolagents built-in
 
 And the multi-section assembly:
-  base YAML → environment context → eager skills → on-demand skills catalogue →
-  mode-aware Todo policy
+  base YAML → environment context → available Skill catalogue → mode-aware Todo policy
 
 When no explicit prompt path is configured, the module uses smolagents' native
 built-in prompt template. Users can provide custom prompt YAML files (see
@@ -27,7 +26,8 @@ import yaml
 
 from src.lib.smolagents.agent.agent_env import get_agent_environment_prompt
 from src.lib.smolagents.agent.agent_validation import resolve_execution_prompt_template_path
-from src.lib.smolagents.skills.skills import SkillsManager
+from src.lib.smolagents.skills.catalog import SkillCatalog
+from src.lib.smolagents.skills.parser import build_skills_prompt
 
 # ---------------------------------------------------------------------------
 # Paths
@@ -212,7 +212,8 @@ def build_prompt_templates(
     effective_prompt_path: str | None,
     model_id: str | None,
     agent_root: Path | str,
-    skills_manager: SkillsManager | None,
+    skill_catalog: SkillCatalog,
+    skill_tool_enabled: bool,
     logger: Any,
     tool_call_type: str = "code_act",
     use_structured_output: bool = True,
@@ -261,22 +262,14 @@ def build_prompt_templates(
         # 1) Environment context (workspace root, exclusions)
         _append_to_system_prompt(prompt_templates, get_agent_environment_prompt())
 
-        # 2) Resolve skills manager
-        resolved_skills = skills_manager
-        if resolved_skills is None:
-            resolved_skills = SkillsManager.get_instance(logger=logger)
+        # 2) Advertise the same resolved catalogue used by the skill tool.
+        if skill_tool_enabled:
+            _append_to_system_prompt(
+                prompt_templates,
+                build_skills_prompt(skill_catalog.summaries()),
+            )
 
-        # 3) Eager skills (full instructions)
-        _append_to_system_prompt(
-            prompt_templates, resolved_skills.get_eager_skills_prompt()
-        )
-
-        # 4) On-demand skills catalogue
-        _append_to_system_prompt(
-            prompt_templates, resolved_skills.get_skills_prompt()
-        )
-
-        # 5) Keep the mode policy last so long environment/skill sections do
+        # 3) Keep the mode policy last so long environment/skill sections do
         # not bury the current task-tracking contract.
         todo_policy = todo_policy_for_mode(todo_mode)
         if todo_policy:

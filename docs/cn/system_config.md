@@ -72,14 +72,6 @@ prompt:
   path: "sysprompt/system_prompt.yaml"
 
 # ============================================
-# 全局 Skills 配置
-# ============================================
-skills:
-  # NOTE: agent-recall-with-files 默认禁用。
-  # 需要时独立启用其提示词/资源包。
-  # - path: "skills/agent-recall-with-files"
-
-# ============================================
 # 显式 Hook 配置
 # ============================================
 hooks:
@@ -140,18 +132,6 @@ default_toolsets:
 shell_settings:
   allowed_commands: "*"
   allowed_operators: "*"
-
-# ============================================
-# 工具别名映射
-# ============================================
-tools_mapping:
-  Claude:
-    Read: "read_file"
-    Write: "write_file"
-    Bash: "shell_tool"
-    Glob: "glob_search"
-    Grep: "grep_search"
-    Edit: "edit_file"
 
 # ============================================
 # 工作空间配置（可选，以下为 Pydantic 默认值，不写也生效）
@@ -323,87 +303,20 @@ prompt:
 
 ## 4. skills — 全局 Skills 配置
 
-定义所有 Agent 默认继承的全局 Skill 包。Skills 是可复用的 Claude 风格 `SKILL.md` 包。加载策略由 `load-mode` 控制：`on-demand`（只放 catalogue）或 `eager`（完整正文注入 system prompt）。
+项目 `skills/` 与 Application `skills/` 目录会自动发现。该配置增加相对项目根目录的发现路径：
 
 **YAML 路径**：`skills` (顶层字段)
-**类型**：`list[dict | str] | dict`
-
-### 4.1 Skills 条目格式
-
-Skills 支持两种格式：
-
-#### 完整字典格式
+**类型**：`{paths: list[str]}`
 
 ```yaml
 skills:
-  - path: "skills/agent-recall-with-files"
-    platform: "Claude"
+  paths:
+    - shared/skills
 ```
 
-#### 简写字符串格式
-
-```yaml
-skills:
-  - "skills/agent-recall-with-files"
-```
-
-#### 共享策略格式
-
-```yaml
-skills:
-  items:
-    - path: "skills/agent-recall-with-files"
-    - path: "skills/safe-review"
-```
-
-### 4.2 Skills 条目参数
-
-| 参数 | 类型 | 默认值 | 必选 | 说明 |
-|------|------|--------|------|------|
-| `path` | `str` | — | ✅ 是（字典格式时） | Skill 包所在目录路径。相对路径基于 `AGENT_ROOT`（包含 `config/system.yaml` 的项目根目录）解析 |
-| `platform` | `str` | — | ❌ 否 | 平台标识符（如 `"Claude"`），用于通过 `tools_mapping` 映射工具别名 |
-| `load-mode` | `str` | `on-demand` | ❌ 否 | `on-demand` catalogue 加载，或 `eager` 完整正文注入 |
-| `allow-scripts` | `bool` | `true` | ❌ 否 | 设为 `false` 时阻断 `run_skill_script` |
-| `allow-network` | `bool` | `true` | ❌ 否 | 设为 `false` 时阻断 `run_skill_script` 中常见网络命令 |
-
-Skill 发现和加载都不会启用 Hook。`SKILL.md` 中的 `hooks` 与 Skill 配置中的 `enable-hooks` 都会作为迁移字段被拒绝；请通过独立顶层 [`hooks`](hooks.md) 配置直接 Hook 或显式 Bundle。
-
-### 4.3 Skills 加载顺序
-
-1. **全局 Skills**：`config/system.yaml` 中 `skills` 列表
-2. **AGENT_ROOT Skills**：`AgentLoom/skills/` 目录下自动发现的 Skills
-3. **Agent 私有 Skills**：Agent YAML 中 `skills` 字段定义的 Skills
-
-> `AGENT_ROOT` 即包含 `config/system.yaml` 的项目根目录（`C.agent_root`）。
-
-> ⚠️ **同名 Skill 冲突**：同一个 Agent 的最终 Skill 视图中如果出现同名 Skill，框架会报错。
-
-### 4.4 禁用全局 Skills（opt-out）
-
-将 `skills` 设置为空列表可完全禁用第 1、2 层加载（全局条目 + 目录自动发现均跳过）：
-
-```yaml
-skills: []   # 显式 opt-out：跳过所有全局 skills，包括 AGENT_ROOT/skills/ 目录
-```
-
-| `skills` 值 | 行为 |
-|---|---|
-| 未配置 / `null` | 不加载全局条目，但仍自动发现 `AGENT_ROOT/skills/` 目录 |
-| `[]`（空列表） | **完全禁用**：全局条目和目录自动发现均跳过 |
-| `[entries...]` | 加载指定条目，同时自动发现 `AGENT_ROOT/skills/` 目录 |
-
-适用于不需要任何 Skill 的轻量级 Agent（如 intent_labeler）。第 3 层 Agent 私有 Skills 不受影响。
-
-**示例**：
-
-```yaml
-skills:
-  - path: "skills/agent-recall-with-files"
-    load-mode: "eager"
-
-  # 简写格式（默认 on-demand，允许脚本和网络）
-  - "skills/my-custom-skill"
-```
+模型只看到允许使用的 Skill catalogue，直到调用 `skill(name)`。系统没有加载模式配置。
+激活 Skill 不会授予执行权限。若要同时隐藏工具与 catalogue，从 Agent 的 `toolsets`
+中移除 `skills`。详见 [Skills](skills_config.md)。
 
 ## 4.5 hooks — 独立 Hook Runtime
 
@@ -906,7 +819,7 @@ Agent YAML 中的 `toolsets:` 会整体替换全局默认；`toolsets: []` 表�
 | `core_file` | `read_file`, `edit_file`, `write_file`, `list_directory` |
 | `core_search` | `grep_search`, `glob_search` |
 | `context` | `loom_retrieve_context` |
-| `skills` | `load_skill`, `list_skills` |
+| `skills` | `skill` |
 | `self_learning` | `session_search`, `session_scroll`, `memory`, `skill_manage` |
 | `planning` | `todo_write` |
 | `markdown_report` | `write_markdown_file`, `write_markdown_file_raw`, `append_markdown_sections` |
@@ -930,8 +843,7 @@ Agent YAML 中的 `toolsets:` 会整体替换全局默认；`toolsets: []` 表�
 | `lsp_hover` | 查看 hover/type 信息 |
 | `lsp_get_workspace_symbols` | 搜索工作区符号 |
 | `loom_retrieve_context` | 读取压缩上下文引用 |
-| `load_skill` | 加载指定 Skill |
-| `list_skills` | 列出可用 Skills |
+| `skill` | 将一个选定的 Skill 加入对话 |
 | `session_search` | 搜索历史 Run 的脱敏记录 |
 | `session_scroll` | 读取历史 Run 中某事件附近的上下文 |
 | `memory` | 读取或提议持久的 Project/Application 事实 |
@@ -1108,31 +1020,6 @@ shell_settings:
     network_isolation: false
     excluded_commands: []
 ```
-
-### 8.3 tools_mapping — 工具别名映射与 legacy 兼容
-
-| 参数 | 类型 | 默认值 | 必选 | 说明 |
-|------|------|--------|------|------|
-| `tools_mapping` | `dict[str, dict[str, str]]` | `{}` | ❌ 否 | 按平台分组的工具名别名映射 |
-
-用于将 Skill 文件中声明的简短工具别名（如 `Read`, `Write`, `Bash`）映射到框架真实的工具名称。当 Skill 的 `platform` 为 `"Claude"` 时，会查找 `tools_mapping.Claude` 下的映射。
-
-> **Legacy 兼容**：如果 `tools_mapping.Claude` 为空或未设置，框架会回退读取 `tools.mapping` 作为 `Claude` 分组的 legacy 兼容映射；如果 `tools_mapping.Claude` 中存在任何配置，则 `tools.mapping` 会被完全忽略。
-
-**示例**：
-
-```yaml
-tools_mapping:
-  Claude:
-    Read: "read_file"
-    Write: "write_file"
-    Bash: "shell_tool"
-    Glob: "glob_search"
-    Grep: "grep_search"
-    Edit: "edit_file"
-```
-
----
 
 ## 9. tool_access_control — 工具访问控制
 
@@ -1438,7 +1325,6 @@ checkpoint:
 | `default_toolsets` | `list[str]` | `[]` |
 | `toolsets` | `list[str]` | `[]` |
 | `shell_settings` | `dict[str, Any]` | `{}` |
-| `tools_mapping` | `dict[str, Any]` | `{}` |
 | `tool_metadata` | `dict[str, Any]` | `{}` |
 | `tool_output_limits` | `dict[str, Any]` | `{}` |
 | `self_learning` | `SelfLearningSettings` | `SelfLearningSettings()` |
@@ -1450,7 +1336,7 @@ checkpoint:
 
 | 解析器 | 用途 | 位于 |
 |--------|------|------|
-| `BoolParser` | 兼容布尔输入归一化，实际用于 `logging.console_enabled` / `logging.file_enabled`、Skill 的 `allow-scripts` / `allow-network` 解析，以及部分 LLM 配置开关 | `config_validation.py` / `src/lib/logging/logger_manager.py` / `src/lib/smolagents/agent/base_agent.py` / `src/lib/config/llm_config.py` |
+| `BoolParser` | 兼容布尔输入归一化，用于日志与部分 LLM 配置开关 | `config_validation.py` / `src/lib/logging/logger_manager.py` / `src/lib/config/llm_config.py` |
 | `IntParser` | 兼容整数与旁路字符串输入，实际用于模型配置里的 `max_tokens`（支持 `"max"`） | `config_validation.py` / `src/lib/config/llm_config.py` |
 | `FloatParser` | 兼容浮点与整数字符串输入，实际用于模型配置里的 `temperature`、`retry_delay`、`max_retry_delay` | `config_validation.py` / `src/lib/config/llm_config.py` |
 | `EnumParser` | 通用枚举归一化辅助函数，当前未在 system.yaml 主链路中直接消费 | `config_validation.py` |

@@ -20,6 +20,5 @@ tools:
 worker_agents:
   - path: "applications/test_demo/workflows/worker_agents/test_default_logger_fallback_worker.yaml"
 
-skills: []
 execution_env:
   type: "local"

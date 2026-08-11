@@ -30,7 +30,6 @@ tools:
   - name: "edit_file"
   - name: "shell_tool"
 
-skills: []
 worker_agents: []
 max_steps: 10
 

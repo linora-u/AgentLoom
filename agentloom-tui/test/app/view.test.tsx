@@ -134,7 +134,7 @@ const catalogSnapshot: BootstrapResultDto = {
     description: "not run",
     path: "applications/new/workflows/new.yaml",
     role: "supervisor",
-    skills: { load_mode: null, items: [] },
+    skills: { paths: [] },
     workers: [{
       id: "applications/new/workflows/worker_agents/helper.yaml",
       application_id: "new",
@@ -142,7 +142,7 @@ const catalogSnapshot: BootstrapResultDto = {
       description: "assist the supervisor",
       path: "applications/new/workflows/worker_agents/helper.yaml",
       role: "worker",
-      skills: { load_mode: "selected", items: ["helper-skill"] },
+      skills: { paths: ["helper-skill"] },
       workers: [],
     }],
   }],
@@ -487,7 +487,6 @@ describe("AgentLoom TUI view", () => {
               name: "local-writer",
               description: "Writes reports",
               source: "agent",
-              load_mode: "eager",
               path: "applications/new/skills/local-writer/SKILL.md",
             }],
             permissions: { value: { mode: "denylist" }, source: "application", source_path: "applications/new/config/system.yaml" },
@@ -530,7 +529,7 @@ describe("AgentLoom TUI view", () => {
     const frame = setup.captureCharFrame()
     expect(frame).toContain("Working Revision")
     expect(frame).toContain("working123")
-    expect(frame).toContain("local-writer · agent · eager")
+    expect(frame).toContain("local-writer · agent")
     expect(frame).toContain("权限: application 2")
     expect(frame).toContain("Agents: 2 · 1 Supervisor · 1 Worker")
     expect(frame).not.toContain("coordinate research")

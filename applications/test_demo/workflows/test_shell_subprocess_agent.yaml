@@ -46,7 +46,6 @@ tools:
   - name: "shell_tool"
 
 worker_agents: []
-skills: []
 max_steps: 15
 
 execution_env:

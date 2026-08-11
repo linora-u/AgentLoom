@@ -148,7 +148,7 @@ OBSERVATION_MASKING_PLACEHOLDER: str = (
 # (Layer 3) and content-level fallback truncation.  If the preceding TOOL_CALL
 # contains any of these names in its text, the response is preserved.
 COMPRESSION_EXEMPT_TOOL_NAMES: frozenset[str] = frozenset({
-    "load_skill",
+    "skill",
 })
 
 # Number of recent error-related TOOL_RESPONSE messages to exempt from

@@ -22,5 +22,4 @@ agent_function_schema:
     description: "One bounded Markdown Goal Mode validation report."
 
 tools: []
-skills: []
 worker_agents: []

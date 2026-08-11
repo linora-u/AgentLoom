@@ -93,7 +93,7 @@ const catalogSnapshot: BootstrapResultDto = {
     description: "not run",
     path: "applications/new/workflows/new.yaml",
     role: "supervisor",
-    skills: { load_mode: null, items: [] },
+    skills: { paths: [] },
     workers: [{
       id: "applications/new/workflows/worker_agents/helper.yaml",
       application_id: "new",
@@ -101,7 +101,7 @@ const catalogSnapshot: BootstrapResultDto = {
       description: "assist the supervisor",
       path: "applications/new/workflows/worker_agents/helper.yaml",
       role: "worker",
-      skills: { load_mode: "selected", items: ["helper-skill"] },
+      skills: { paths: ["helper-skill"] },
       workers: [],
     }],
   }],

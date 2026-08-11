@@ -107,7 +107,7 @@ const catalogBootstrap: BootstrapResultDto = {
       description: "running",
       path: "applications/live/workflows/live.yaml",
       role: "supervisor",
-      skills: { load_mode: "all", items: ["research"] },
+      skills: { paths: ["research"] },
       workers: [
         {
           id: "applications/live/workflows/worker_agents/researcher.yaml",
@@ -116,7 +116,7 @@ const catalogBootstrap: BootstrapResultDto = {
           description: "collect evidence",
           path: "applications/live/workflows/worker_agents/researcher.yaml",
           role: "worker",
-          skills: { load_mode: "selected", items: ["research"] },
+          skills: { paths: ["research"] },
           workers: [],
         },
       ],
