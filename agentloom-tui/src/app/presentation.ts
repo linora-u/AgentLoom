@@ -68,7 +68,7 @@ export function applicationDetailSections(detail: ApplicationDetailResultDto): D
     {
       title: `Skills · ${skills.length}`,
       lines: limitedLines(
-        skills.map((skill) => `${skill.name} · ${skill.source} · ${skill.load_mode}`),
+        skills.map((skill) => `${skill.name} · ${skill.source}`),
         10,
         "打开具体 Agent 查看加载来源",
       ),
@@ -118,7 +118,7 @@ export function effectiveAgentDetail(
       {
         title: `Skills · ${agent.skills.length}`,
         lines: limitedLines(
-          agent.skills.map((skill) => `${skill.name} · ${skill.source} · ${skill.load_mode}`),
+          agent.skills.map((skill) => `${skill.name} · ${skill.source}`),
           12,
         ),
       },
@@ -394,8 +394,7 @@ export function workspaceEntityDetail(
         {
           title: "Skills",
           lines: [
-            `加载模式: ${agent.skills.load_mode ?? "未指定"}`,
-            ...agent.skills.items,
+            ...(agent.skills.paths.length > 0 ? agent.skills.paths : ["无附加路径"]),
           ],
         },
         {
@@ -411,7 +410,7 @@ export function workspaceEntityDetail(
     const skill = snapshot.skills.find((item) => item.id === route.skillID)
     if (!skill) return null
     const configuredBy = flattenAgents(snapshot.agents)
-      .filter(({ agent }) => agent.skills.items.some((item) => skillItemMatches(item, skill.name, skill.path)))
+      .filter(({ agent }) => agent.skills.paths.some((item) => skillItemMatches(item, skill.name, skill.path)))
       .map(({ agent }) => agent.name)
     return {
       title: "Skill",

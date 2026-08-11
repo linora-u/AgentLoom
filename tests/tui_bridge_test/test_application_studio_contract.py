@@ -25,8 +25,6 @@ tools:
     timeout: 10
 tool_access_control:
   mode: allowlist
-skills:
-  - path: skills/global-review
 hooks:
   SessionStart: []
 """,
@@ -69,9 +67,8 @@ workflow: Delegate research, then assemble a report.
 tools:
   - name: web_search
 skills:
-  load-mode: eager
-  items:
-    - path: applications/reports/skills/local-writer
+  paths:
+    - skills/local-writer
 worker_agents:
   - path: researcher.yaml
 """,
@@ -103,9 +100,9 @@ agent_function_schema:
     assert supervisor["role"] == "supervisor"
     assert supervisor["model"] == {"type": "powerful", "source": "agent"}
     assert supervisor["tools"] == [{"name": "web_search", "source": "agent"}]
-    assert [(skill["name"], skill["source"], skill["load_mode"]) for skill in supervisor["skills"]] == [
-        ("global-review", "global", "on-demand"),
-        ("local-writer", "agent", "eager"),
+    assert [(skill["name"], skill["source"]) for skill in supervisor["skills"]] == [
+        ("global-review", "global"),
+        ("local-writer", "agent"),
     ]
     assert supervisor["permissions"]["source"] == "application"
     assert supervisor["hooks"]["source"] == "global"
@@ -195,18 +192,12 @@ def test_domain_application_detail_is_paginated_and_bounded_for_large_apps(
         tmp_path / "config/llm.yaml",
         "model:\n  default_model_type: test\n  test:\n    model: openai/test\n",
     )
-    skill_paths: list[str] = []
     for index in range(8):
         skill_path = f"skills/shared-{index}"
-        skill_paths.append(skill_path)
         _write(
             tmp_path / skill_path / "SKILL.md",
             f"---\nname: shared-{index}\ndescription: {'shared capability ' * 12}\n---\n",
         )
-    _write(
-        tmp_path / "config/system.yaml",
-        "skills:\n" + "".join(f"  - path: {path}\n" for path in skill_paths),
-    )
     for index in range(32):
         _write(
             tmp_path / f"applications/large/workflows/agent-{index:02d}.yaml",

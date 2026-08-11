@@ -299,7 +299,7 @@ def test_tool_wrapper_propagates_and_refreshes_root_across_executor_thread(
             agent_id="agent-1",
             agent_name="supervisor",
             agent_config=agent_config,
-            skills_manager=None,
+            skill_catalog=None,
             hook_run=HookRun(
                 HookPlan(),
                 local_run_id=f"local-{root_run_id}",

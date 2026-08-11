@@ -30,5 +30,4 @@ tools:
     module: "applications.context_engine_text_retrieve_validation.agent_tools.payload_tools"
     function: "make_context_engine_text_payload"
 
-skills: []
 worker_agents: []

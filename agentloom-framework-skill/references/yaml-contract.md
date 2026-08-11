@@ -97,7 +97,7 @@ Agent YAML 当前可覆盖的系统配置白名单：
 ```text
 system, model_request_headers, smart_summary, context_engine,
 tool_access_control, execution_env, code_agent, tools, shell_settings,
-tools_mapping, default_toolsets, toolsets, prompt, mcp_servers, self_learning, hooks
+default_toolsets, toolsets, prompt, mcp_servers, self_learning, hooks
 ```
 
 Worker 的有效配置由 Worker YAML 自己重建，不继承 Supervisor 的权限覆盖；需要相同路径权限或 shell 权限时，Worker YAML 或应用级 `config/system.yaml` 也要写。
@@ -132,62 +132,24 @@ tools:
 
 ## Skills 配置
 
-AgentLoom 的 Skill 配置是 application/agent 行为配置，不是元数据登记表。配置了就启动时注册；默认按需加载。
+AgentLoom 从项目和 Application 的 `skills/` 约定目录自动发现 Skill。
+额外目录只使用 `paths` 配置：
 
 最常用写法：
 
 ```yaml
 skills:
-  load-mode: on-demand
-  items:
-    - applications/<app_name>/skills/<skill_name>
-    - applications/<app_name>/skills/<another_skill>
-```
-
-全文预加载：
-
-```yaml
-skills:
-  load-mode: eager
-  items:
-    - applications/<app_name>/skills/strict-review
-```
-
-显式收紧脚本或网络：
-
-```yaml
-skills:
-  load-mode: on-demand
-  allow-scripts: false
-  allow-network: false
-  items:
-    - applications/<app_name>/skills/safe-review
+  paths:
+    - shared/skills
 ```
 
 规则：
 
-- `load-mode` 只支持 `on-demand` 和 `eager`，不写时默认 `on-demand`。
-- `on-demand` 只把 catalogue 放进 prompt：`name`、`description`、`argument_hint`、`when_to_use`；模型需要时调用 `load_skill`。
-- `eager` 把完整 Skill 正文注入系统 prompt，不再重复放 catalogue。
-- `items` 推荐写应用内相对路径，例如 `applications/<app_name>/skills/tdd`。
-- `skills` 支持字符串、单个字典、列表、或带共享策略的 `{load-mode, allow-scripts, allow-network, items}`。
-- 单个 item 可以写字符串路径；只有需要覆盖策略或 `platform` 时才写字典。
-- `allow-scripts` 和 `allow-network` 默认允许；用户明确禁止时才设置为 `false`。
-- 全局/应用级有效配置 `skills: []` 会关闭全局 skills 列表和 `AGENT_ROOT/skills/` 自动发现；Agent YAML 的 `skills: []` 只影响 Agent 私有层。
-- 同名 Skill 从不同路径加载会报错，不是覆盖。
-- 不再使用 `invocation-control`、`force-inject`、`hidden`、`user-invocable` 这类状态。
-
-字典 item 写法仅用于局部覆盖：
-
-```yaml
-skills:
-  load-mode: on-demand
-  items:
-    - path: applications/<app_name>/skills/script-probe
-      load-mode: eager
-      allow-scripts: true
-      allow-network: false
-```
+- `skills` 必须是只包含 `paths: list[str]` 的字典。
+- prompt 只显示 `name`、`description`；模型需要时调用 `skill(name)`。
+- Skill 正文没有预加载模式。
+- 激活 Skill 不会授予脚本、网络、工具或 Hook 权限。
+- 同层同名 Skill 报错；Agent 覆盖 Application，Application 覆盖项目。
 
 ## Skill 包结构
 
@@ -206,16 +168,11 @@ applications/<app_name>/skills/<skill_name>/
 ```yaml
 ---
 name: tdd
-description: Test-driven development workflow.
-allowed-tools: Bash, Read, Edit
-argument-hint: "<task>"
-arguments: [task]
-when_to_use: Use when implementing or fixing behavior with tests.
-model: powerful
-context: fork
-agent: reviewer
-effort: high
-shell: bash
+description: Use when implementing behavior with tests.
+license: MIT
+compatibility: Requires git.
+metadata:
+  owner: platform
 ---
 ```
 
@@ -225,7 +182,7 @@ shell: bash
 - `SKILL.md` 文件发现忽略大小写，但新写文件统一使用 `SKILL.md`。
 - 不加载散落 `.md`、`skills.md` 或 loose markdown。
 - 未识别 frontmatter 字段静默忽略，不映射旧字段。
-- `when-to-use` 不等于 `when_to_use`，`argument-names` 不等于 `arguments`。
-- skill 需要脚本时，把脚本放在 `scripts/`，由 `run_skill_script` 执行并保留审计日志。
+- 未识别 frontmatter 字段不会进入运行时元数据。
+- 包内资源和脚本通过 Agent 已有的常规文件/Shell 工具使用。
 - Skill 与 Hook 是独立模块；`SKILL.md` 中出现 `hooks` 会明确报迁移错误。
 - Hook 通过 Agent YAML 顶层 `hooks:` 直接声明，或显式引用带 `HOOK.yaml` 的独立 Bundle。

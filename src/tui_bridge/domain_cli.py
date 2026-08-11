@@ -212,7 +212,6 @@ def _model_capabilities(agents: list[dict[str, Any]]) -> dict[str, Any]:
                 "name": str(skill.get("name") or ""),
                 "description": _bounded_text(skill.get("description"), limit=180),
                 "source": str(skill.get("source") or ""),
-                "load_mode": str(skill.get("load_mode") or ""),
                 "path": path,
             }
     return {

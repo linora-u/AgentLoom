@@ -234,6 +234,13 @@ class TestValidateSystemSnapshot:
         with pytest.raises(ValueError, match="Unsupported top-level key 'project'"):
             validate_system_snapshot(snapshot, "test")
 
+    def test_snapshot_rejects_removed_tools_mapping(self):
+        with pytest.raises(ValueError, match="tools_mapping"):
+            validate_system_snapshot(
+                {"tools_mapping": {"Claude": {"Read": "read_file"}}},
+                "test",
+            )
+
     def test_snapshot_empty_passes(self):
         """An empty snapshot should be valid."""
         validate_system_snapshot({}, "test")

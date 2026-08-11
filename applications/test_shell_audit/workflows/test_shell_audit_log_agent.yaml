@@ -144,7 +144,6 @@ workflow: |
   final_answer(summary)
   ```
 
-skills: []
 worker_agents: []
 max_steps: 12
 

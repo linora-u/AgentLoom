@@ -71,14 +71,6 @@ prompt:
   path: "sysprompt/system_prompt.yaml"
 
 # ============================================
-# Global Skills Configuration
-# ============================================
-skills:
-  # NOTE: agent-recall-with-files is disabled by default.
-  # Enable its prompt/resource package independently when needed.
-  # - path: "skills/agent-recall-with-files"
-
-# ============================================
 # Explicit Hook Configuration
 # ============================================
 hooks:
@@ -139,18 +131,6 @@ default_toolsets:
 shell_settings:
   allowed_commands: "*"
   allowed_operators: "*"
-
-# ============================================
-# Tool Alias Mapping
-# ============================================
-tools_mapping:
-  Claude:
-    Read: "read_file"
-    Write: "write_file"
-    Bash: "shell_tool"
-    Glob: "glob_search"
-    Grep: "grep_search"
-    Edit: "edit_file"
 
 # ============================================
 # Tool Access Control Configuration (optional, Pydantic defaults below apply even if omitted)
@@ -325,87 +305,22 @@ prompt:
 
 ## 4. skills — Global Skills Configuration
 
-Defines global Skill packages inherited by all Agents by default. Skills are reusable Claude-style `SKILL.md` packages. Loading is controlled by `load-mode`: `on-demand` (catalogue only) or `eager` (full body injected into the system prompt).
+Project `skills/` and Application `skills/` directories are discovered
+automatically. This setting adds project-relative discovery roots:
 
 **YAML path**: `skills` (top-level field)
-**Type**: `list[dict | str] | dict`
-
-### 4.1 Skills Entry Format
-
-Skills support two formats:
-
-#### Full Dictionary Format
+**Type**: `{paths: list[str]}`
 
 ```yaml
 skills:
-  - path: "skills/agent-recall-with-files"
-    platform: "Claude"
+  paths:
+    - shared/skills
 ```
 
-#### Shorthand String Format
-
-```yaml
-skills:
-  - "skills/agent-recall-with-files"
-```
-
-#### Shared Policy Format
-
-```yaml
-skills:
-  items:
-    - path: "skills/agent-recall-with-files"
-    - path: "skills/safe-review"
-```
-
-### 4.2 Skills Entry Parameters
-
-| Parameter | Type | Default | Required | Description |
-|------|------|--------|------|------|
-| `path` | `str` | — | ✅ Yes (in dictionary format) | Skill package directory path. Relative paths are resolved based on `AGENT_ROOT` (project root containing `config/system.yaml`) |
-| `platform` | `str` | — | ❌ No | Platform identifier (e.g., `"Claude"`), used for mapping tool aliases via `tools_mapping` |
-| `load-mode` | `str` | `on-demand` | ❌ No | `on-demand` catalogue loading or `eager` full-body injection |
-| `allow-scripts` | `bool` | `true` | ❌ No | Set to `false` to block `run_skill_script` |
-| `allow-network` | `bool` | `true` | ❌ No | Set to `false` to block common network commands in `run_skill_script` |
-
-Skill discovery and loading never enable Hooks. `SKILL.md` `hooks` and Skill `enable-hooks` are rejected migration fields. Configure direct Hooks or explicit Bundles through the independent top-level [`hooks`](hooks.md) mapping.
-
-### 4.3 Skills Loading Order
-
-1. **Global Skills**: `skills` list in `config/system.yaml`
-2. **AGENT_ROOT Skills**: Auto-discovered Skills under the `AgentLoom/skills/` directory
-3. **Agent Private Skills**: Skills defined in the `skills` field of Agent YAML
-
-> `AGENT_ROOT` is the project root directory containing `config/system.yaml` (`C.agent_root`).
-
-> ⚠️ **Duplicate Skill names**: If the same Skill name appears in an Agent's final Skill view, the framework will raise an error.
-
-### 4.4 Disabling Global Skills (opt-out)
-
-Set `skills` to an empty list to fully disable Layer 1 and Layer 2 loading (global entries + directory auto-discovery are both skipped):
-
-```yaml
-skills: []   # Explicit opt-out: skip all global skills including AGENT_ROOT/skills/ directory
-```
-
-| `skills` value | Behavior |
-|---|---|
-| Not configured / `null` | Global entries not loaded, but `AGENT_ROOT/skills/` directory is still auto-discovered |
-| `[]` (empty list) | **Fully disabled**: both global entries and directory auto-discovery are skipped |
-| `[entries...]` | Load specified entries AND auto-discover `AGENT_ROOT/skills/` directory |
-
-Useful for lightweight Agents that don't need any Skills (e.g., intent_labeler). Layer 3 Agent-private Skills are unaffected.
-
-**Example**:
-
-```yaml
-skills:
-  - path: "skills/agent-recall-with-files"
-    load-mode: "eager"
-
-  # Shorthand format (defaults: on-demand, scripts/network allowed)
-  - "skills/my-custom-skill"
-```
+The model sees only the permitted Skill catalogue until it calls `skill(name)`.
+There is no loading-mode setting. Skill activation never grants execution
+authority. Remove the `skills` toolset from an Agent's `toolsets` to hide both
+the tool and catalogue. See [Skills](skills_config.md).
 
 ## 4.5 hooks — Independent Hook Runtime
 
@@ -883,7 +798,7 @@ Agent YAML `toolsets:` replaces this global list entirely. `toolsets: []` means 
 | `core_file` | `read_file`, `edit_file`, `write_file`, `list_directory` |
 | `core_search` | `grep_search`, `glob_search` |
 | `context` | `loom_retrieve_context` |
-| `skills` | `load_skill`, `list_skills` |
+| `skills` | `skill` |
 | `self_learning` | `session_search`, `session_scroll`, `memory`, `skill_manage` |
 | `planning` | `todo_write` |
 | `markdown_report` | `write_markdown_file`, `write_markdown_file_raw`, `append_markdown_sections` |
@@ -907,8 +822,7 @@ Complete predefined tool list:
 | `lsp_hover` | Show hover/type information |
 | `lsp_get_workspace_symbols` | Search workspace symbols |
 | `loom_retrieve_context` | Retrieve compressed context refs |
-| `load_skill` | Load specified Skill |
-| `list_skills` | List available Skills |
+| `skill` | Load one selected Skill into the conversation |
 | `session_search` | Search redacted records from prior Runs |
 | `session_scroll` | Read surrounding events from a prior Run |
 | `memory` | Read or propose durable Project/Application facts |
@@ -1085,31 +999,6 @@ shell_settings:
     network_isolation: false
     excluded_commands: []
 ```
-
-### 8.3 tools_mapping — Tool Alias Mapping and Legacy Compatibility
-
-| Parameter | Type | Default | Required | Description |
-|------|------|--------|------|------|
-| `tools_mapping` | `dict[str, dict[str, str]]` | `{}` | ❌ No | Tool name alias mapping grouped by platform |
-
-Used to map short tool aliases declared in Skill files (e.g., `Read`, `Write`, `Bash`) to the framework's actual tool names. When a Skill's `platform` is `"Claude"`, it looks up mappings under `tools_mapping.Claude`.
-
-> **Legacy compatibility**: If `tools_mapping.Claude` is empty or not set, the framework falls back to reading `tools.mapping` as the `Claude` group's legacy mapping; if `tools_mapping.Claude` has any configuration, `tools.mapping` is completely ignored.
-
-**Example**:
-
-```yaml
-tools_mapping:
-  Claude:
-    Read: "read_file"
-    Write: "write_file"
-    Bash: "shell_tool"
-    Glob: "glob_search"
-    Grep: "grep_search"
-    Edit: "edit_file"
-```
-
----
 
 ## 9. tool_access_control — Tool Access Control
 
@@ -1412,7 +1301,6 @@ The framework uses Pydantic to validate system configuration. The following show
 | `default_toolsets` | `list[str]` | `[]` |
 | `toolsets` | `list[str]` | `[]` |
 | `shell_settings` | `dict[str, Any]` | `{}` |
-| `tools_mapping` | `dict[str, Any]` | `{}` |
 | `tool_metadata` | `dict[str, Any]` | `{}` |
 | `tool_output_limits` | `dict[str, Any]` | `{}` |
 | `self_learning` | `SelfLearningSettings` | `SelfLearningSettings()` |
@@ -1424,7 +1312,7 @@ The framework uses Pydantic to validate system configuration. The following show
 
 | Parser | Purpose | Located in |
 |--------|------|------|
-| `BoolParser` | Compatible boolean input normalization, used for `logging.console_enabled` / `logging.file_enabled`, Skill `allow-scripts` / `allow-network`, and some LLM config switches | `config_validation.py` / `src/lib/logging/logger_manager.py` / `src/lib/smolagents/agent/base_agent.py` / `src/lib/config/llm_config.py` |
+| `BoolParser` | Compatible boolean input normalization, used for logging and some LLM configuration switches | `config_validation.py` / `src/lib/logging/logger_manager.py` / `src/lib/config/llm_config.py` |
 | `IntParser` | Compatible integer and bypass string input, used for `max_tokens` in model config (supports `"max"`) | `config_validation.py` / `src/lib/config/llm_config.py` |
 | `FloatParser` | Compatible float and integer string input, used for `temperature`, `retry_delay`, `max_retry_delay` in model config | `config_validation.py` / `src/lib/config/llm_config.py` |
 | `EnumParser` | General-purpose enum normalization helper, not currently consumed directly in the system.yaml main pipeline | `config_validation.py` |

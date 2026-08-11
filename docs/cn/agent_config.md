@@ -102,8 +102,8 @@ prompt:
   path: "applications/my_app/sysprompt/code_agent.yaml"
 
 skills:
-  - path: "applications/my_app/skills"
-    platform: "Claude"                   # 可选: 指定 skill 适配的平台
+  paths:
+    - "shared/skills"                    # 可选的额外发现目录
 ```
 
 ### 2.2 Worker 完整模板
@@ -517,87 +517,19 @@ Agent YAML 不能直接修改 LLM 参数，但可以通过 `model_type` **选择
 
 ### 3.8 `skills` — 技能包配置
 
-Agent YAML 中的 `skills` 用于声明当前 Agent 的私有技能包。**不走 overlay 白名单**，通过独立的三层叠加机制加载。
-
-#### 三层加载顺序
-
-```
-第 1 层: config/system.yaml 全局 skills      ← C.get("skills")
-第 2 层: AGENT_ROOT/skills/ 目录自动发现      ← load_skills_from_directory()
-第 3 层: Agent YAML 中的 skills 字段          ← 直接从原始 YAML dict 读取
-```
-
-三层是**叠加**关系，不是覆盖。同名 skill 后加载的会覆盖先加载的（输出 warning）。
-其中 `AGENT_ROOT` 指包含 `config/system.yaml` 的项目根目录（`C.agent_root`），不是当前 Agent YAML 文件目录。
-
-#### 禁用全局 Skills（opt-out）
-
-在 app 级别的 `config/system.yaml` 中将 `skills` 设置为空列表，可以**完全禁用**第 1 层和第 2 层的 Skills 加载（全局条目 + 目录自动发现均跳过），仅保留第 3 层 Agent 私有 Skills：
-
-```yaml
-# applications/<app>/config/system.yaml
-skills: []   # 显式 opt-out：跳过所有全局 skills，包括 AGENT_ROOT/skills/ 目录
-```
-
-| `skills` 值 | 行为 |
-|---|---|
-| 未配置 / `null` | 不加载全局条目，但仍自动发现 `AGENT_ROOT/skills/` 目录 |
-| `[]`（空列表） | **完全禁用**：全局条目和目录自动发现均跳过 |
-| `[entries...]` | 加载指定条目，同时自动发现 `AGENT_ROOT/skills/` 目录 |
-
-#### 支持的三种格式
-
-**格式 1：列表格式（推荐）**
+AgentLoom 自动发现项目 `skills/` 和 Application `skills/` 目录。Agent YAML
+可以添加相对 Application 根目录的路径：
 
 ```yaml
 skills:
-  - path: "skills/agent-recall-with-files"
-    load-mode: "eager"
-  - "skills/another-skill"              # 纯字符串也可以作为列表项
+  paths:
+    - shared/skills
 ```
 
-**格式 1b：通过 `items` 设置共享策略**
-
-```yaml
-skills:
-  load-mode: "on-demand"
-  allow-scripts: false
-  allow-network: false
-  items:
-    - "skills/safe-review"
-    - path: "skills/strict-review"
-      load-mode: "eager"
-```
-
-**格式 2：字典格式（单个 skill）**
-
-```yaml
-skills:
-  path: "skills/agent-recall-with-files"
-  platform: "Claude"
-```
-
-**格式 3：字符串格式（最简写法）**
-
-```yaml
-skills: "skills/agent-recall-with-files"
-```
-
-> 字典和字符串格式会自动转为单元素列表处理。
-
-#### 列表项子字段
-
-| 子字段 | 类型 | 默认值 | 必填 | 说明 |
-|--------|------|--------|------|------|
-| `path` | `str` | — | ✅ 必填 | Skill 包路径。相对路径基于 `AGENT_ROOT` 解析。运行时只加载名为 `SKILL.md` / `skill.md` 的包入口（大小写不敏感），不加载散落 Markdown 或 `skills.md` |
-| `platform` | `str` | `null` | ❌ 可选 | 指定 skill 适配的平台（如 `"Claude"`），用于 `tools_mapping` |
-| `load-mode` | `str` | `on-demand` | ❌ 可选 | `on-demand` 只在 prompt 放 catalogue；`eager` 注入完整 skill 正文 |
-| `allow-scripts` | `bool` | `true` | ❌ 可选 | 设为 `false` 时阻断该 skill 的 `run_skill_script` |
-| `allow-network` | `bool` | `true` | ❌ 可选 | 设为 `false` 时阻断 `run_skill_script` 中常见网络命令 |
-
-组级策略由 `items` 继承，条目级字段可覆盖。Skill 发现和加载都不会声明、启用或执行 Hook。`SKILL.md` 中出现 `hooks` 或 Skill 配置出现 `enable-hooks` 属于迁移错误；请改用独立顶层 [`hooks`](hooks.md) 接口。
-
-**校验**：`skills` 整体必须是 `list`、`dict` 或 `str`，否则报错 `skills must be a list, dict, or string path`。
+`paths` 是唯一支持的字段。system prompt 只包含解析后的 `name` 与
+`description` catalogue；模型调用 `skill(name)` 后，才把一个被选中的正文加入对话。
+系统没有可配置加载模式。激活 Skill 不会授予工具、脚本、网络或 Hook 权限。
+发现与覆盖规则见 [Skills](skills_config.md)。
 
 ---
 
@@ -878,8 +810,7 @@ tools:
 | `check_background_task` | 读取后台任务状态与输出 |
 | `kill_background_task` | 终止后台任务 |
 | `list_background_tasks` | 列出运行中及最近的后台任务 |
-| `load_skill` | 加载指定技能 |
-| `list_skills` | 列出可用技能 |
+| `skill` | 将一个选定的 Skill 加入对话 |
 | `session_search` | 搜索历史 Run 的脱敏记录 |
 | `session_scroll` | 读取历史 Run 中某事件附近的上下文 |
 | `memory` | 读取或提议持久的 Project/Application 事实 |
@@ -1521,7 +1452,6 @@ Agent YAML 中以下顶层字段能覆盖系统配置（源码 `_WORKFLOW_OVERLA
 | `code_agent` | `dict` | CodeAgent 代码执行权限 |
 | `tools` | `list` | Agent 工具列表及其最终配置覆盖 |
 | `shell_settings` | `any` | Shell 安全配置 |
-| `tools_mapping` | `any` | 工具映射覆盖 |
 | `default_toolsets` / `toolsets` | `any` | 默认工具集或工具集替换 |
 | `prompt` | `str`/`dict` | 自定义 System Prompt 模板路径 |
 | `mcp_servers` | `str`/`list`/`dict` | MCP server 配置 |

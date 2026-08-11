@@ -4,15 +4,16 @@ from __future__ import annotations
 
 import json
 import os
+from collections.abc import Mapping
 from copy import deepcopy
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any, Mapping
+from typing import Any
 
 import yaml
 
-from src.lib.config.layered_builder import LayeredConfigBuilder
 from src.application_revision import application_revision
+from src.lib.config.layered_builder import LayeredConfigBuilder
 from src.tui_bridge.catalog import _skill_manifests, _skill_metadata
 from src.tui_bridge.definition import load_agent_definition
 
@@ -142,8 +143,9 @@ def _agent_detail(
         "skills": _effective_skills(
             root,
             application_root,
-            effective.get("skills"),
-            source=sources.get("skills", ("global", "config/system.yaml"))[0],
+            global_config.get("skills"),
+            application_config.get("skills"),
+            agent_overlay.get("skills"),
         ),
         "permissions": _sourced(effective.get("tool_access_control"), sources.get("tool_access_control")),
         "hooks": _sourced(effective.get("hooks"), sources.get("hooks")),
@@ -176,7 +178,7 @@ def _agent_overlay(definition: Mapping[str, Any]) -> dict[str, Any]:
     allowed = {
         "system", "model_request_headers", "smart_summary", "context_engine",
         "tool_access_control", "execution_env", "code_agent", "tools",
-        "shell_settings", "tools_mapping", "default_toolsets", "toolsets",
+        "shell_settings", "default_toolsets", "toolsets",
         "prompt", "mcp_servers", "self_learning", "hooks", "skills",
     }
     return {key: deepcopy(value) for key, value in definition.items() if key in allowed}
@@ -185,63 +187,56 @@ def _agent_overlay(definition: Mapping[str, Any]) -> dict[str, Any]:
 def _effective_skills(
     root: Path,
     application_root: Path,
-    configured: Any,
-    *,
-    source: str,
+    global_configured: Any,
+    application_configured: Any,
+    agent_configured: Any,
 ) -> list[dict[str, Any]]:
-    resolved: dict[Path, tuple[Path, str, str]] = {}
-    if configured != []:
-        _add_skill_source(resolved, root, root / "skills", "global", "on-demand")
+    resolved: dict[Path, tuple[Path, str]] = {}
+    layers = (
+        (root, global_configured, "global"),
+        (application_root, application_configured, "application"),
+        (application_root, agent_configured, "agent"),
+    )
+    _add_skill_source(resolved, root, root / "skills", "global")
+    _add_skill_source(resolved, root, application_root / "skills", "application")
+    for layer_root, configured, source in layers:
+        paths = configured.get("paths") if isinstance(configured, Mapping) else None
+        for raw_path in paths if isinstance(paths, list) else []:
+            if not isinstance(raw_path, str) or not raw_path.strip():
+                continue
+            relative = Path(raw_path.strip())
+            if relative.is_absolute() or ".." in relative.parts:
+                continue
+            _add_skill_source(resolved, root, layer_root / relative, source)
 
-    shared_load_mode = "on-demand"
-    items = configured
-    if isinstance(configured, Mapping):
-        shared_load_mode = str(configured.get("load-mode") or "on-demand")
-        items = configured.get("items")
-    if isinstance(items, (str, Mapping)):
-        items = [items]
-    for item in items if isinstance(items, list) else []:
-        load_mode = shared_load_mode
-        raw_path = item
-        if isinstance(item, Mapping):
-            raw_path = item.get("path")
-            load_mode = str(item.get("load-mode") or shared_load_mode)
-        if not isinstance(raw_path, str) or not raw_path.strip():
-            continue
-        relative = Path(raw_path.strip())
-        if relative.is_absolute() or ".." in relative.parts:
-            continue
-        _add_skill_source(resolved, root, root / relative, source, load_mode)
-
-    skills: list[dict[str, Any]] = []
-    seen_names: dict[str, str] = {}
-    for manifest, (display_path, skill_source, load_mode) in sorted(
-        resolved.items(), key=lambda item: item[1][0].as_posix()
+    skills_by_name: dict[str, dict[str, Any]] = {}
+    for manifest, (display_path, skill_source) in sorted(
+        resolved.items(), key=lambda item: (item[1][1], item[1][0].as_posix())
     ):
         metadata = _skill_metadata(root, manifest)
         name = str(metadata.get("name") or manifest.parent.name)
         relative_path = display_path.relative_to(root).as_posix()
-        if name in seen_names and seen_names[name] != relative_path:
-            continue
-        seen_names[name] = relative_path
-        skills.append(
-            {
-                "name": name,
-                "description": str(metadata.get("description") or ""),
-                "source": skill_source,
-                "load_mode": load_mode,
-                "path": relative_path,
-            }
-        )
+        entry = {
+            "name": name,
+            "description": str(metadata.get("description") or ""),
+            "source": skill_source,
+            "path": relative_path,
+        }
+        existing = skills_by_name.get(name)
+        priority = {"global": 0, "application": 1, "agent": 2}
+        if existing is None or priority[skill_source] > priority[str(existing["source"])]:
+            skills_by_name[name] = entry
+        elif priority[skill_source] == priority[str(existing["source"])] and relative_path < str(existing["path"]):
+            skills_by_name[name] = entry
+    skills = list(skills_by_name.values())
     return sorted(skills, key=lambda item: (item["source"] != "global", item["name"], item["path"]))
 
 
 def _add_skill_source(
-    resolved: dict[Path, tuple[Path, str, str]],
+    resolved: dict[Path, tuple[Path, str]],
     root: Path,
     source_path: Path,
     source: str,
-    load_mode: str,
 ) -> None:
     try:
         candidate = source_path.resolve(strict=True)
@@ -257,7 +252,7 @@ def _add_skill_source(
     else:
         manifests = []
     for manifest in manifests:
-        resolved[manifest.resolve()] = (manifest, source, load_mode)
+        resolved[manifest.resolve()] = (manifest, source)
 
 
 def _tool_summaries(raw: Any) -> list[dict[str, str]]:

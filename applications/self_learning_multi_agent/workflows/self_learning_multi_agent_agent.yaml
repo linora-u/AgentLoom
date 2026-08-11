@@ -6,7 +6,6 @@ tool_call_type: "code_act"
 max_steps: 18
 
 toolsets: []
-skills: []
 
 tools:
   - name: "shell_tool"
@@ -32,7 +31,7 @@ workflow: |
   # Execution Contract
   - Emit every action as a Python `<code>...</code>` block.
   - Do not use native `<tool_call>` syntax.
-  - Do not call `load_skill`.
+  - Do not call `skill`.
   - Do not infer worker results. Call each worker tool exactly once.
   - Execute the required code shape in one Python code block.
   - Return the final result with `final_answer(JSON_STRING)`.

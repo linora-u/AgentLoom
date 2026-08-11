@@ -64,7 +64,6 @@ workflow: |
   Report overall: X/4 PASSED.
   Include the full-output artifact path you inspected.
 
-skills: []
 worker_agents: []
 max_steps: 12
 

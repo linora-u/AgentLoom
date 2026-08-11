@@ -26,5 +26,3 @@ tools:
 
 worker_agents:
   - path: "applications/context_engine_json_retrieve_validation/workflows/worker_agents/json_payload_worker.yaml"
-
-skills: []

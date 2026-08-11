@@ -189,7 +189,7 @@ PYTHONPATH=/Users/bytedance/code/data_clear/AgentLoom-checkpoint \
 rg -n "_WORKFLOW_OVERLAY_KEYS|_LLM_ONLY_TOP_LEVEL_KEYS|extract_workflow_overlay" src/lib/config/config.py
 rg -n "class RootSettings|class ToolAccessControlSettings|class LlmModelTypeSettings|extra_completion_params|supports_structured_output|supports_native_tool_calls|tool_choice" src/lib/config src/lib/smolagents/models docs/en docs/cn agentloom-framework-skill
 rg -n "install_agentloom_runtime_adapters|parse_structured_tool_call|ToolCallCandidate|schema-bound|tool_call_type" src/lib/smolagents src/lib/config tests docs/en docs/cn agentloom-framework-skill
-rg -n "load-mode|allow-scripts|allow-network|Duplicate skill name|hooks:" src/lib/smolagents/skills src/lib/smolagents/hooks docs/en agentloom-framework-skill
+rg -n "skills.paths|Duplicate skill name|hooks:" src/lib/smolagents/skills src/lib/smolagents/hooks docs/en agentloom-framework-skill
 rg -n "mcp_servers|parse_mcp_servers_yaml_value" src tests docs/en agentloom-framework-skill
 ```
 
@@ -201,7 +201,7 @@ rg -n "mcp_servers|parse_mcp_servers_yaml_value" src tests docs/en agentloom-fra
 - `supports_native_tool_calls` 是否仍只作为 removed-field 拒绝逻辑存在；不要在 skill/docs/example 里重新教用户配置它。
 - `tool_choice` 是否仍只是模型请求透传参数；不要把它写成 native tool-call 能力探测开关。
 - `tool_call` 模式是否仍只接受结构化 native/tool-call block；不要恢复自由文本猜测、fuzzy tool-name repair 或坏参数 `{}` 兜底。
-- `skills` 的格式、默认值、同名处理以及 `SKILL.md` 禁止 `hooks` 是否与 `SkillsManager` 一致。
+- `skills.paths`、约定目录、同名覆盖以及 `SKILL.md` 禁止 `hooks` 是否与 `SkillCatalog` 一致。
 - `hooks` 是否只通过顶层直接声明或显式 `HOOK.yaml` Bundle 编译，且保留三层来源顺序。
 - `mcp_servers` 的 string/list/dict 三种形式是否仍被 parser 支持。
 - `docs/en/config-overview.md`、`agent_config.md`、`system_config.md` 如果和代码冲突，最终 skill 先写代码真相，并在交付里说明文档漂移。
@@ -224,7 +224,7 @@ rg -n "mcp_servers|parse_mcp_servers_yaml_value" src tests docs/en agentloom-fra
 - `scan_app_structure('applications/feature_planner_demo')` 证明它包含 1 个 Supervisor 和 2 个 Worker，两个 Worker 都有 `agent_function_schema`。
 - `.venv/bin/loom create applications/feature_planner_demo/workflows/feature_planner_demo_agent.yaml -o /tmp/feature_planner_demo_generated_app.py` 通过，生成脚本可 `py_compile`。
 - 真实运行验证在 120 秒上限内完成 Supervisor 启动和 `requirement_router` 调用，并进入 `implementation_blueprint`；未得到最终回答，记录为“运行路径部分通过，端到端输出未完成”。
-- 运行时发现：如果纯规划 demo 不需要内置工具，应显式设置 Agent 级 `toolsets: []`；如果要关闭全局自动发现 Skills，应在应用级 `config/system.yaml` 写 `skills: []`，不是只写 Agent YAML 的 `skills: []`。
+- 运行时发现：如果纯规划 demo 不需要内置工具，应显式设置 Agent 级 `toolsets: []`；这也会隐藏 `skill` 工具与 catalogue。
 
 ## 架构评审维度
 
