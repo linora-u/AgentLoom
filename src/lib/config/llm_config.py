@@ -11,6 +11,7 @@ from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from src.lib.config.config_validation import BoolParser, IntParser
 from src.lib.config.defaults import (
+    DEFAULT_MAX_OUTPUT_TOKENS,
     DEFAULT_MAX_TOKENS,
     DEFAULT_MODEL_CONTEXT_CACHE,
     DEFAULT_MODEL_MAX_RETRY_DELAY,
@@ -88,6 +89,9 @@ class LlmModelTypeSettings(BaseModel):
     api_key: str = ""
     temperature: float = DEFAULT_MODEL_TEMPERATURE
     max_tokens: int | str = DEFAULT_MAX_TOKENS
+    context_window: int = DEFAULT_MAX_TOKENS
+    max_output_tokens: int = DEFAULT_MAX_OUTPUT_TOKENS
+    input_token_limit: int = DEFAULT_MAX_TOKENS - DEFAULT_MAX_OUTPUT_TOKENS
     timeout: int = DEFAULT_MODEL_TIMEOUT
     num_retries: int = DEFAULT_MODEL_NUM_RETRIES
     retry_delay: float = DEFAULT_MODEL_RETRY_DELAY
@@ -146,6 +150,33 @@ class LLMConfig(BaseModel):
             resolved_rpm = v.get("requests_per_minute", DEFAULT_MODEL_REQUESTS_PER_MINUTE)
             resolved_temp = v.get("temperature", DEFAULT_MODEL_TEMPERATURE)
             resolved_max_tokens = v.get("max_tokens", DEFAULT_MAX_TOKENS)
+            has_legacy_budget = "max_tokens" in v and "context_window" not in v and "max_output_tokens" not in v
+            if has_legacy_budget:
+                legacy_budget = IntParser.parse(
+                    resolved_max_tokens,
+                    default=DEFAULT_MAX_TOKENS,
+                    allow_bypass_strings=("max",),
+                )
+                resolved_context_window = legacy_budget
+                resolved_max_output_tokens = legacy_budget
+                resolved_input_token_limit = legacy_budget
+            else:
+                resolved_context_window = IntParser.parse(
+                    v.get("context_window", DEFAULT_MAX_TOKENS),
+                    default=DEFAULT_MAX_TOKENS,
+                    allow_bypass_strings=("max",),
+                )
+                resolved_max_output_tokens = IntParser.parse(
+                    v.get("max_output_tokens", DEFAULT_MAX_OUTPUT_TOKENS),
+                    default=DEFAULT_MAX_OUTPUT_TOKENS,
+                    allow_bypass_strings=("max",),
+                )
+                if resolved_max_output_tokens >= resolved_context_window:
+                    raise ValueError(
+                        f"Model type '{k}' max_output_tokens ({resolved_max_output_tokens}) must be smaller "
+                        f"than context_window ({resolved_context_window})."
+                    )
+                resolved_input_token_limit = resolved_context_window - resolved_max_output_tokens
             resolved_timeout = v.get("timeout", DEFAULT_MODEL_TIMEOUT)
             resolved_num_retries = v.get("num_retries", DEFAULT_MODEL_NUM_RETRIES)
             resolved_retry_delay = v.get("retry_delay", DEFAULT_MODEL_RETRY_DELAY)
@@ -171,6 +202,7 @@ class LLMConfig(BaseModel):
             # These are passed through to litellm.completion() as-is.
             _KNOWN_FIELDS = {
                 "model", "base_url", "api_key", "temperature", "max_tokens",
+                "context_window", "max_output_tokens",
                 "timeout", "num_retries", "retry_delay", "max_retry_delay",
                 "extra_headers", "context_cache", "system_prompt_boundary",
                 "description", "requests_per_minute", "supports_structured_output",
@@ -185,6 +217,9 @@ class LLMConfig(BaseModel):
                 api_key=resolved_api_key,
                 temperature=float(resolved_temp),
                 max_tokens=IntParser.parse(resolved_max_tokens, default=DEFAULT_MAX_TOKENS, allow_bypass_strings=("max",)),
+                context_window=resolved_context_window,
+                max_output_tokens=resolved_max_output_tokens,
+                input_token_limit=resolved_input_token_limit,
                 timeout=int(resolved_timeout),
                 num_retries=int(resolved_num_retries),
                 retry_delay=float(resolved_retry_delay),

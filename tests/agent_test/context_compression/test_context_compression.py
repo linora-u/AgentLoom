@@ -17,6 +17,7 @@ from src.lib.smolagents.memory.context_compression import (
     _extract_content_text,
     _extract_tool_invocations,
     _serialize_messages_for_summary,
+    _split_summary_head_and_recent_tail,
     summarize_conversation,
     to_api_messages,
     to_internal_messages,
@@ -424,7 +425,14 @@ def test_smart_summary_enabled_uses_layer4(monkeypatch):
     monkeypatch.setattr(compression_module, "_apply_tool_output_truncation", lambda messages, logger=None: (messages, 0))
     monkeypatch.setattr(compression_module, "_apply_observation_masking", lambda messages, frac_to_mask=0.3, logger=None: (calls.append("layer3_masking"), (messages, 0))[1])
 
-    def fake_summarize(messages, model_id, custom_condense_prompt=None, cached_command_blocks=None, cached_skill_load=None):
+    def fake_summarize(
+        messages,
+        model_id,
+        custom_condense_prompt=None,
+        cached_command_blocks=None,
+        cached_skill_load=None,
+        preserve_recent_tokens=None,
+    ):
         calls.append(("layer4_summary", model_id))
         return SummarizeResponse(messages=messages, summary="", error="summary failed")
 
@@ -843,7 +851,14 @@ class TestLayer4Summary:
         monkeypatch.setattr(compression_module, "_apply_tool_output_truncation", lambda m, logger=None: (m, 0))
         monkeypatch.setattr(compression_module, "_apply_observation_masking", lambda m, frac_to_mask=0.3, logger=None: (m, 0))
 
-        def fake_summarize(messages, model_id, custom_condense_prompt=None, cached_command_blocks=None, cached_skill_load=None):
+        def fake_summarize(
+            messages,
+            model_id,
+            custom_condense_prompt=None,
+            cached_command_blocks=None,
+            cached_skill_load=None,
+            preserve_recent_tokens=None,
+        ):
             calls.append("layer4_summary")
             return SummarizeResponse(messages=messages, summary="summary", error=None)
 
@@ -867,7 +882,14 @@ class TestLayer4Summary:
         monkeypatch.setattr(compression_module, "_apply_tool_output_truncation", lambda m, logger=None: (m, 0))
         monkeypatch.setattr(compression_module, "_apply_observation_masking", lambda m, frac_to_mask=0.3, logger=None: (m, 0))
 
-        def fake_summarize(messages, model_id, custom_condense_prompt=None, cached_command_blocks=None, cached_skill_load=None):
+        def fake_summarize(
+            messages,
+            model_id,
+            custom_condense_prompt=None,
+            cached_command_blocks=None,
+            cached_skill_load=None,
+            preserve_recent_tokens=None,
+        ):
             calls.append("layer4_summary")
             return SummarizeResponse(messages=messages, summary="summary", error=None)
 
@@ -1168,7 +1190,14 @@ class TestIntegration:
         monkeypatch.setattr(compression_module, "_apply_observation_masking",
                             lambda m, frac_to_mask=0.3, logger=None: (calls.append("layer3_masking"), (m, 0))[1])
 
-        def fake_summarize(messages, model_id, custom_condense_prompt=None, cached_command_blocks=None, cached_skill_load=None):
+        def fake_summarize(
+            messages,
+            model_id,
+            custom_condense_prompt=None,
+            cached_command_blocks=None,
+            cached_skill_load=None,
+            preserve_recent_tokens=None,
+        ):
             calls.append("layer4_summary")
             return SummarizeResponse(messages=messages, summary="", error="fail")
 
@@ -1414,3 +1443,61 @@ def test_smart_summary_does_not_run_until_more_than_two_user_turns(monkeypatch):
 
     assert result.error == "Not enough messages available for compression"
     assert to_api_messages(result.messages) == [message.message for message in messages]
+
+
+def test_recent_tail_shrinks_to_token_budget_without_splitting_turn(monkeypatch):
+    monkeypatch.setattr(
+        compression_module,
+        "_count_tokens",
+        lambda messages, _model_id: sum(len(_extract_content_text(message.content)) for message in messages),
+    )
+    messages = to_internal_messages(
+        [
+            ChatMessage(role=MessageRole.USER, content="OLD"),
+            ChatMessage(role=MessageRole.ASSISTANT, content="old answer"),
+            ChatMessage(role=MessageRole.USER, content="RECENT ONE"),
+            ChatMessage(role=MessageRole.ASSISTANT, content="x" * 200),
+            ChatMessage(role=MessageRole.USER, content="RECENT TWO"),
+            ChatMessage(role=MessageRole.ASSISTANT, content="short"),
+        ]
+    )
+
+    head, tail = _split_summary_head_and_recent_tail(
+        messages,
+        model_id="dummy-model",
+        preserve_recent_tokens=50,
+    )
+
+    assert [_extract_content_text(message.message.content) for message in head][-2:] == [
+        "RECENT ONE",
+        "x" * 200,
+    ]
+    assert [_extract_content_text(message.message.content) for message in tail] == [
+        "RECENT TWO",
+        "short",
+    ]
+
+
+def test_recent_tail_is_omitted_when_one_complete_turn_exceeds_budget(monkeypatch):
+    monkeypatch.setattr(
+        compression_module,
+        "_count_tokens",
+        lambda messages, _model_id: sum(len(_extract_content_text(message.content)) for message in messages),
+    )
+    messages = to_internal_messages(
+        [
+            ChatMessage(role=MessageRole.USER, content="OLD"),
+            ChatMessage(role=MessageRole.ASSISTANT, content="old answer"),
+            ChatMessage(role=MessageRole.USER, content="RECENT"),
+            ChatMessage(role=MessageRole.ASSISTANT, content="x" * 200),
+        ]
+    )
+
+    head, tail = _split_summary_head_and_recent_tail(
+        messages,
+        model_id="dummy-model",
+        preserve_recent_tokens=50,
+    )
+
+    assert head == messages
+    assert tail == []

@@ -13,7 +13,10 @@ model:
     api_key: "xxxxxxx"
     model: "openai/gpt-5_5"
     temperature: 0.2
-    max_tokens: 128000
+    # Context and generation budgets are distinct. Compression starts before
+    # the request would consume the output reserve.
+    context_window: 128000
+    max_output_tokens: 16384
     timeout: 300
     # 速率限制：每分钟最大请求数（用于 smolagents，防止超出 API 限制）
     requests_per_minute: 10
@@ -35,7 +38,8 @@ model:
     model: "gemini/gemini-3_1-pro-preview"
     # 注意：LiteLLM 对 gpt-5 模型要求 temperature=1.0
     temperature: 1.0
-    max_tokens: 50000
+    context_window: 50000
+    max_output_tokens: 8192
     timeout: 300
     context_cache: true
   
@@ -47,7 +51,8 @@ model:
     api_key: "xxxxxxx"
     model: "openai/gpt-5_5"
     temperature: 0.2
-    max_tokens: 128000
+    context_window: 128000
+    max_output_tokens: 16384
     timeout: 300
     # Completed-run memory review owns its four-call budget and does not use
     # SDK retries. One action step must not duplicate a side-effecting tool.

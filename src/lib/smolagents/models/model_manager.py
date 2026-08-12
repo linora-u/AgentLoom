@@ -5,26 +5,25 @@ Provides unified management of different model types, including model selection
 and configuration.
 """
 
-from dataclasses import dataclass, replace
 import json
-from typing import Any, Optional, Union
+from dataclasses import dataclass, replace
+from typing import Optional, Union
 
 import litellm
 
-litellm.suppress_debug_info = True
-litellm.drop_params = True
-
 from smolagents import AgentLogger
-
 from src.lib.logging import get_logger
-from src.lib.smolagents.models.litellm_retry import patch_litellm_completion
 from src.lib.smolagents.models.litellm_model import LiteLLMModelV2
+from src.lib.smolagents.models.litellm_retry import patch_litellm_completion
 from src.lib.smolagents.models.request_headers import (
     build_model_request_headers,
     get_system_model_request_headers,
 )
 
 from .model_types import ModelConfig, ModelType, ModelTypeManager
+
+litellm.suppress_debug_info = True
+litellm.drop_params = True
 
 logger = get_logger(__name__)
 
@@ -36,6 +35,8 @@ class ModelConfigOverlay:
     api_key: Optional[str] = None
     temperature: Optional[float] = None
     max_tokens: Optional[int] = None
+    context_window: Optional[int] = None
+    max_output_tokens: Optional[int] = None
     timeout: Optional[int] = None
     description: Optional[str] = None
     num_retries: Optional[int] = None
@@ -48,7 +49,10 @@ class ModelConfigOverlay:
     extra_completion_params: Optional[dict] = None
 
     def to_mapping(self) -> dict:
-        return {k: v for k, v in self.__dict__.items() if v is not None}
+        mapping = {k: v for k, v in self.__dict__.items() if v is not None}
+        if self.max_tokens is not None and self.max_output_tokens is None:
+            mapping["max_output_tokens"] = self.max_tokens
+        return mapping
 
 
 class ModelConfigBuilder:
@@ -68,10 +72,20 @@ class ModelConfigBuilder:
 
     def build(self, base_config: ModelConfig) -> ModelConfig:
         merged = replace(base_config)
+        split_budget_overridden = False
         for _source, layer in self._layers:
             if not layer:
                 continue
+            split_budget_overridden = split_budget_overridden or bool(
+                {"context_window", "max_output_tokens"}.intersection(layer)
+            )
             merged = replace(merged, **layer)
+        if split_budget_overridden:
+            if not isinstance(merged.max_output_tokens, int):
+                raise ValueError("max_output_tokens overlay must be an integer")
+            if merged.max_output_tokens >= merged.context_window:
+                raise ValueError("max_output_tokens must be smaller than context_window")
+            merged.input_token_limit = merged.context_window - merged.max_output_tokens
         return merged
 
     def cache_fragment(self) -> str:
@@ -181,7 +195,7 @@ class ModelManager:
         litellm_params = {
             "model": model_config.model_id,
             "temperature": model_config.temperature,
-            "max_tokens": model_config.max_tokens,
+            "max_tokens": model_config.max_output_tokens,
             # Retry-related parameters
             "num_retries": model_config.num_retries,
             "retry_delay": model_config.retry_delay,
@@ -260,7 +274,7 @@ class ModelManager:
             api_base=model_config.base_url,
             api_key=model_config.api_key,
             timeout=model_config.timeout,
-            max_tokens=model_config.max_tokens,
+            max_tokens=model_config.max_output_tokens,
             temperature=model_config.temperature,
             requests_per_minute=model_config.requests_per_minute or 10,
             # Retry-related parameters

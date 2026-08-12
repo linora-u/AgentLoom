@@ -242,10 +242,14 @@ class CodeAgentV2(_SuccessfulRunStateMixin, LoomAgentMixin, CodeAgent):
         **kwargs,
     ):
         max_tokens = kwargs.pop("max_tokens", None)
+        context_window = kwargs.pop("context_window", None)
+        max_output_tokens = kwargs.pop("max_output_tokens", None)
         smart_summary = kwargs.pop("smart_summary", True)
         self._init_loom_agent(
             before_run_callbacks,
             max_tokens=max_tokens,
+            context_window=context_window,
+            max_output_tokens=max_output_tokens,
             smart_summary=smart_summary,
         )
         super().__init__(*args, **kwargs)
@@ -264,10 +268,14 @@ class ToolCallingAgentV2(_SuccessfulRunStateMixin, LoomAgentMixin, ToolCallingAg
         kwargs.pop("executor_kwargs", None)
 
         max_tokens = kwargs.pop("max_tokens", None)
+        context_window = kwargs.pop("context_window", None)
+        max_output_tokens = kwargs.pop("max_output_tokens", None)
         smart_summary = kwargs.pop("smart_summary", True)
         self._init_loom_agent(
             before_run_callbacks,
             max_tokens=max_tokens,
+            context_window=context_window,
+            max_output_tokens=max_output_tokens,
             smart_summary=smart_summary,
         )
         super().__init__(*args, **kwargs)
@@ -1079,6 +1087,21 @@ class RoleDrivenAgent(BaseAgent):
         except Exception:
             return DEFAULT_MAX_TOKENS
 
+    def _resolve_split_token_budget_from_config(self) -> tuple[int | None, int | None]:
+        try:
+            settings = C.llm.for_type(self.default_model_type)
+            context_window = getattr(settings, "context_window", None)
+            max_output_tokens = getattr(settings, "max_output_tokens", None)
+            if (
+                not isinstance(context_window, int)
+                or not isinstance(max_output_tokens, int)
+                or max_output_tokens >= context_window
+            ):
+                return None, None
+            return context_window, max_output_tokens
+        except Exception:
+            return None, None
+
     def _resolve_smart_summary_from_config(self) -> bool:
         effective_cfg = self._effective_agent_config
         return effective_cfg.get("smart_summary", True) if isinstance(effective_cfg, dict) else True
@@ -1102,6 +1125,7 @@ class RoleDrivenAgent(BaseAgent):
             )
 
         code_agent_cfg = get_code_agent_config(self._effective_agent_config)
+        context_window, max_output_tokens = self._resolve_split_token_budget_from_config()
         return {
             "additional_authorized_imports": profile.additional_authorized_imports,
             "additional_functions": code_agent_cfg.get("additional_functions", {}),
@@ -1112,6 +1136,8 @@ class RoleDrivenAgent(BaseAgent):
             "prompt_template_path": execution_normalized.prompt_template_path,
             "planning_interval": execution_normalized.planning_interval,
             "max_tokens": self._resolve_max_tokens_from_config(),
+            "context_window": context_window,
+            "max_output_tokens": max_output_tokens,
             "smart_summary": self._resolve_smart_summary_from_config(),
             "runtime_name": self._runtime_agent_name(),
             "runtime_description": self._runtime_agent_description(),
@@ -1252,6 +1278,8 @@ class RoleDrivenAgent(BaseAgent):
         executor_kwargs: dict[str, Any] | None = None,
         planning_interval: int | None = None,
         max_tokens: int | None = None,
+        context_window: int | None = None,
+        max_output_tokens: int | None = None,
         smart_summary: bool | None = None,
         runtime_name: str | None = None,
         runtime_description: str | None = None,
@@ -1297,6 +1325,10 @@ class RoleDrivenAgent(BaseAgent):
             agent_kwargs["planning_interval"] = normalized_planning_interval
         if max_tokens is not None:
             agent_kwargs["max_tokens"] = max_tokens
+        if context_window is not None:
+            agent_kwargs["context_window"] = context_window
+        if max_output_tokens is not None:
+            agent_kwargs["max_output_tokens"] = max_output_tokens
         if smart_summary is not None:
             agent_kwargs["smart_summary"] = smart_summary
         if runtime_name is not None:
