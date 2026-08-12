@@ -182,7 +182,7 @@ Except for `default_model_type`, **all dict-valued keys under the `model` block 
 | `temperature` | `float` | `0.1` | ❌ No | Creativity/randomness control (0.0 - 2.0). See [3.2 temperature Recommendations](#32-temperature-configuration-recommendations) |
 | `context_window` | `int` | `150000` | ❌ No | Total model context window used to budget input plus reserved output |
 | `max_output_tokens` | `int` | `16384` | ❌ No | Maximum tokens reserved for one model generation and sent to the provider |
-| `max_tokens` | `int` \| `str` | `150000` | ❌ No | Deprecated compatibility alias; when used alone it supplies both legacy budgets |
+| `max_tokens` | `int` | `150000` | ❌ No | Deprecated compatibility alias; when used alone it supplies both legacy budgets. The old `"max"` value resolves to this finite default. |
 | `timeout` | `int` | `60` | ❌ No | Single HTTP request timeout (seconds). Interrupted if no response within this time |
 | `num_retries` | `int` | `5` | ❌ No | Number of retries on API call failure |
 | `retry_delay` | `float` | `15.0` | ❌ No | Initial retry delay (seconds). See [Section 6](#6-retry-mechanism-details) |
@@ -537,7 +537,7 @@ class LlmModelTypeSettings(BaseModel):
     base_url: str = ""
     api_key: str = ""
     temperature: float = 0.1           # DEFAULT_MODEL_TEMPERATURE
-    max_tokens: int | str = 150000     # DEFAULT_MAX_TOKENS
+    max_tokens: int = 150000           # DEFAULT_MAX_TOKENS
     context_window: int = 150000       # DEFAULT_MAX_TOKENS
     max_output_tokens: int = 16384     # DEFAULT_MAX_OUTPUT_TOKENS
     timeout: int = 60                  # DEFAULT_MODEL_TIMEOUT

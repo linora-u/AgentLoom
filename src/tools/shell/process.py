@@ -33,7 +33,7 @@ import sys
 import tempfile
 import threading
 from dataclasses import dataclass
-from typing import Dict, List, Optional
+from typing import Optional
 
 from src.lib.config import C
 from src.lib.logging import get_logger
@@ -64,8 +64,8 @@ class ExecResult:
 
     output: str = ""
     timed_out: bool = False
-    exit_code: Optional[int] = None
-    background_task_id: Optional[str] = None
+    exit_code: int | None = None
+    background_task_id: str | None = None
     interrupted: bool = False
 
 
@@ -279,8 +279,8 @@ class ShellProcess:
             self._shell_path = find_suitable_shell()
 
         # Session state for session-scoped mode.
-        self._session: Optional[ShellSession] = None
-        self._snapshot_path: Optional[str] = None
+        self._session: ShellSession | None = None
+        self._snapshot_path: str | None = None
 
         if self.session_scoped:
             self._init_session()
@@ -306,7 +306,7 @@ class ShellProcess:
     # ------------------------------------------------------------------
 
     @property
-    def cwd(self) -> Optional[str]:
+    def cwd(self) -> str | None:
         """Current working directory of the shell session.
 
         Updated after every session-scoped command via the out-of-band CWD
@@ -344,7 +344,7 @@ class ShellProcess:
         if self.is_windows:
             command = f"chcp 65001 >nul & {command}"
             try:
-                result = subprocess.run(
+                completed = subprocess.run(
                     command,
                     shell=True,
                     stdout=subprocess.PIPE,
@@ -354,7 +354,7 @@ class ShellProcess:
                     errors="replace",
                     env=_build_subprocess_env(),
                 )
-                return ExecResult(output=result.stdout or "", exit_code=result.returncode)
+                return ExecResult(output=completed.stdout or "", exit_code=completed.returncode)
             except subprocess.TimeoutExpired as e:
                 partial = e.stdout or ""
                 if isinstance(partial, bytes):
@@ -390,7 +390,7 @@ class ShellProcess:
                 command=command,
             )
         except Exception as e:
-            result = ExecResult(output=f"Execution failed: {str(e)}")
+            result = ExecResult(output=f"Execution failed: {str(e)}", interrupted=True)
 
         return result
 
@@ -503,7 +503,7 @@ class ShellProcess:
                 command=command,
             )
         except Exception as e:
-            result = ExecResult(output=f"Execution failed: {str(e)}")
+            result = ExecResult(output=f"Execution failed: {str(e)}", interrupted=True)
 
         # Update session state from tracking files (CWD only).
         session.update_cwd_from_file()
@@ -873,7 +873,7 @@ class ShellProcess:
         proc,
         output_path: str,
         command: str,
-        watchdog: Optional[SizeWatchdog] = None,
+        watchdog: SizeWatchdog | None = None,
         output_fd: int | None = None,
     ) -> str:
         """Register a running process as a background task.
@@ -964,7 +964,7 @@ class ShellProcessRegistry:
         with cls._instance_lock:
             if cls._instance is None:
                 cls._instance = super().__new__(cls)
-                cls._instance._registry: Dict[ShellProcessOwner, ShellProcess] = {}
+                cls._instance._registry: dict[ShellProcessOwner, ShellProcess] = {}
                 cls._instance._registry_lock = threading.Lock()
         return cls._instance
 
@@ -1048,7 +1048,7 @@ class ShellProcessRegistry:
                 pass
         return len(processes)
 
-    def get_session_cwd(self, agent_id: str) -> Optional[str]:
+    def get_session_cwd(self, agent_id: str) -> str | None:
         """Return the current working directory of the shell session for *agent_id*.
 
         Returns ``None`` if no session exists yet for the given agent or
@@ -1066,7 +1066,7 @@ class ShellProcessRegistry:
                 return process.cwd
         return None
 
-    def registered_agent_ids(self) -> List[str]:
+    def registered_agent_ids(self) -> list[str]:
         """Return agent IDs registered only within the current run."""
         context = get_current_run_context()
         if context is None:

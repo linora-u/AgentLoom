@@ -123,7 +123,7 @@ class TestShellTool(unittest.TestCase):
 
         self.assertIn("before failure", str(captured.exception))
         self.assertEqual(captured.exception.exit_code, 7)
-        self.assertTrue(captured.exception.retryable)
+        self.assertFalse(captured.exception.retryable)
 
     def test_shell_tool_preserves_informational_nonzero_exit_semantics(self):
         result = shell_tool("grep definitely_missing_pattern pyproject.toml")

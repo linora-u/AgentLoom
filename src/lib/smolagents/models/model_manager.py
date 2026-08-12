@@ -7,7 +7,6 @@ and configuration.
 
 import json
 from dataclasses import dataclass, replace
-from typing import Optional, Union
 
 import litellm
 
@@ -15,6 +14,7 @@ from smolagents import AgentLogger
 from src.lib.logging import get_logger
 from src.lib.smolagents.models.litellm_model import LiteLLMModelV2
 from src.lib.smolagents.models.litellm_retry import patch_litellm_completion
+from src.lib.smolagents.models.provider_tool_errors import patch_litellm_tool_error_projection
 from src.lib.smolagents.models.request_headers import (
     build_model_request_headers,
     get_system_model_request_headers,
@@ -30,23 +30,23 @@ logger = get_logger(__name__)
 
 @dataclass(frozen=True)
 class ModelConfigOverlay:
-    model_id: Optional[str] = None
-    base_url: Optional[str] = None
-    api_key: Optional[str] = None
-    temperature: Optional[float] = None
-    max_tokens: Optional[int] = None
-    context_window: Optional[int] = None
-    max_output_tokens: Optional[int] = None
-    timeout: Optional[int] = None
-    description: Optional[str] = None
-    num_retries: Optional[int] = None
-    retry_delay: Optional[float] = None
-    max_retry_delay: Optional[float] = None
-    extra_headers: Optional[dict] = None
-    context_cache: Optional[bool] = None
-    system_prompt_boundary: Optional[str] = None
-    requests_per_minute: Optional[int] = None
-    extra_completion_params: Optional[dict] = None
+    model_id: str | None = None
+    base_url: str | None = None
+    api_key: str | None = None
+    temperature: float | None = None
+    max_tokens: int | None = None
+    context_window: int | None = None
+    max_output_tokens: int | None = None
+    timeout: int | None = None
+    description: str | None = None
+    num_retries: int | None = None
+    retry_delay: float | None = None
+    max_retry_delay: float | None = None
+    extra_headers: dict | None = None
+    context_cache: bool | None = None
+    system_prompt_boundary: str | None = None
+    requests_per_minute: int | None = None
+    extra_completion_params: dict | None = None
 
     def to_mapping(self) -> dict:
         mapping = {k: v for k, v in self.__dict__.items() if v is not None}
@@ -116,6 +116,7 @@ class ModelManager:
 
         # Apply custom retry wrapper.
         patch_litellm_completion(litellm)
+        patch_litellm_tool_error_projection()
 
         # Configure global headers from config for litellm versions that expose
         # a module-level default. Per-call extra_headers is the authoritative path.
@@ -192,7 +193,7 @@ class ModelManager:
         # If new parameters are added here, verify they are supported by litellm.
         # Unsupported parameters may be forwarded to provider APIs and cause failures.
         # Retry-related params (retry_delay, max_retry_delay) are removed in retry wrapper.
-        litellm_params = {
+        litellm_params: dict[str, object] = {
             "model": model_config.model_id,
             "temperature": model_config.temperature,
             "max_tokens": model_config.max_output_tokens,
@@ -229,7 +230,7 @@ class ModelManager:
         model_type: ModelType,
         model_builder: ModelConfigBuilder | None = None,
         model_cache: bool = True,
-        logger: Optional[AgentLogger] = None
+        logger: AgentLogger | None = None
     ) -> LiteLLMModelV2:
         """
         Get a model instance for smolagents.
@@ -309,12 +310,12 @@ class ModelManager:
 
     def get_model(
         self,
-        model_type: str,
+        model_type: str | None,
         framework: str = "litellm",
         model_builder: ModelConfigBuilder | None = None,
         model_cache: bool = True,
-        logger: Optional[AgentLogger] = None
-    ) -> Union[dict, LiteLLMModelV2]:
+        logger: AgentLogger | None = None
+    ) -> dict | LiteLLMModelV2:
         """
         Get an appropriate model based on model type.
 
@@ -333,7 +334,7 @@ class ModelManager:
         runtime_logger = get_logger(logger, __name__) if logger is not None else None
         if runtime_logger:
             runtime_logger.info(f"Requested model type '{model_type}', resolved to: {resolved_type.value}")
-        
+
         if framework.lower() == "litellm":
             return self.get_litellm_config(resolved_type, model_builder, model_cache)
         elif framework.lower() == "smolagents":
@@ -363,12 +364,12 @@ model_manager = ModelManager()
 
 
 def get_model(
-    model_type: str,
+    model_type: str | None,
     framework: str = "litellm",
     model_builder: ModelConfigBuilder | None = None,
     model_cache: bool = True,
-    logger: Optional[AgentLogger] = None
-) -> Union[dict, LiteLLMModelV2]:
+    logger: AgentLogger | None = None
+) -> dict | LiteLLMModelV2:
     """
     Convenience helper: get a model by model type.
 

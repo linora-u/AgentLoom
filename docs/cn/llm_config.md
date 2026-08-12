@@ -182,7 +182,7 @@ model:
 | `temperature` | `float` | `0.1` | ❌ 否 | 创造力/随机性控制 (0.0 - 2.0)。详见 [3.2 temperature 建议](#32-temperature-配置建议) |
 | `context_window` | `int` | `150000` | ❌ 否 | 模型总上下文窗口，用于计算输入与预留输出预算 |
 | `max_output_tokens` | `int` | `16384` | ❌ 否 | 单次生成预留并传给模型服务的最大输出 Token 数 |
-| `max_tokens` | `int` \| `str` | `150000` | ❌ 否 | 已弃用的兼容字段；单独使用时同时填充两项旧预算 |
+| `max_tokens` | `int` | `150000` | ❌ 否 | 已弃用的兼容字段；单独使用时同时填充两项旧预算。旧值 `"max"` 会解析为该有限默认值。 |
 | `timeout` | `int` | `60` | ❌ 否 | 单次 HTTP 请求超时（秒）。超过此时间未响应则中断 |
 | `num_retries` | `int` | `5` | ❌ 否 | API 调用失败重试次数 |
 | `retry_delay` | `float` | `15.0` | ❌ 否 | 重试初始延迟（秒）。详见 [第 6 节](#6-重试机制详解) |
@@ -536,7 +536,7 @@ class LlmModelTypeSettings(BaseModel):
     base_url: str = ""
     api_key: str = ""
     temperature: float = 0.1           # DEFAULT_MODEL_TEMPERATURE
-    max_tokens: int | str = 150000     # DEFAULT_MAX_TOKENS
+    max_tokens: int = 150000           # DEFAULT_MAX_TOKENS
     context_window: int = 150000       # DEFAULT_MAX_TOKENS
     max_output_tokens: int = 16384     # DEFAULT_MAX_OUTPUT_TOKENS
     timeout: int = 60                  # DEFAULT_MODEL_TIMEOUT

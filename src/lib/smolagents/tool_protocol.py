@@ -48,7 +48,7 @@ class ToolCallRecord:
         return asdict(self)
 
     @classmethod
-    def from_dict(cls, raw: dict[str, Any]) -> "ToolCallRecord":
+    def from_dict(cls, raw: dict[str, Any]) -> ToolCallRecord:
         error_raw = raw.get("error")
         error = ToolErrorRecord(**error_raw) if isinstance(error_raw, dict) else None
         return cls(

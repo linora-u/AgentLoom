@@ -1313,7 +1313,7 @@ The framework uses Pydantic to validate system configuration. The following show
 | Parser | Purpose | Located in |
 |--------|------|------|
 | `BoolParser` | Compatible boolean input normalization, used for logging and some LLM configuration switches | `config_validation.py` / `src/lib/logging/logger_manager.py` / `src/lib/config/llm_config.py` |
-| `IntParser` | Compatible integer and bypass string input, used for `max_tokens` in model config (supports `"max"`) | `config_validation.py` / `src/lib/config/llm_config.py` |
+| `IntParser` | Tolerant integer parsing; legacy `max_tokens: "max"` now resolves to the finite model default | `config_validation.py` / `src/lib/config/llm_config.py` |
 | `FloatParser` | Compatible float and integer string input, used for `temperature`, `retry_delay`, `max_retry_delay` in model config | `config_validation.py` / `src/lib/config/llm_config.py` |
 | `EnumParser` | General-purpose enum normalization helper, not currently consumed directly in the system.yaml main pipeline | `config_validation.py` |
 | `LogLevelParser` | Parses `logging.level`, supports standard `logging` levels and `OFF` | `config_validation.py` / `src/lib/logging/logger_manager.py` |

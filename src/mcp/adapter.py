@@ -15,7 +15,7 @@ class McpToolExecutionError(RuntimeError):
     kind = "mcp_error"
     stage = "tool_execution"
 
-    def __init__(self, message: str, *, retryable: bool = True) -> None:
+    def __init__(self, message: str, *, retryable: bool = False) -> None:
         super().__init__(message)
         self.retryable = retryable
 
