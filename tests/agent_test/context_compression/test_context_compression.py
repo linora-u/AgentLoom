@@ -1,29 +1,26 @@
 import json
 import logging
 import pathlib
-import pytest
-import re
+
 from smolagents.models import ChatMessage, MessageRole
 
 import src.lib.smolagents.memory.context_compression as compression_module
 from src.lib.smolagents.memory.context_compression import (
+    FILE_DEDUP_PLACEHOLDER,
+    OBSERVATION_MASKING_PLACEHOLDER,
     ConversationHistoryManager,
     InternalChatMessage,
     SummarizeResponse,
-    TruncationResult,
+    _apply_observation_masking,
     _apply_tool_dedup,
     _apply_tool_output_truncation,
-    _apply_observation_masking,
     _extract_content_text,
-    truncate_conversation,
-    to_internal_messages,
-    to_api_messages,
-    TOOL_DEDUP_PATTERNS,
-    FILE_DEDUP_PLACEHOLDER,
-    OBSERVATION_MASKING_PLACEHOLDER,
-    TRUNCATION_FRAC_TO_REMOVE,
     _extract_tool_invocations,
     _serialize_messages_for_summary,
+    summarize_conversation,
+    to_api_messages,
+    to_internal_messages,
+    truncate_conversation,
 )
 
 MOCK_DIR = pathlib.Path(__file__).parent
@@ -728,7 +725,7 @@ class TestLayer3ObservationMasking:
         original_calls = [m for m in messages if m.message.role == MessageRole.TOOL_CALL]
         new_calls = [m for m in new_msgs if m.message.role == MessageRole.TOOL_CALL]
         assert len(original_calls) == len(new_calls)
-        for orig, new in zip(original_calls, new_calls):
+        for orig, new in zip(original_calls, new_calls, strict=True):
             assert _extract_content_text(orig.message.content) == _extract_content_text(new.message.content)
 
     def test_masking_chars_saved_calculation(self):
@@ -1270,3 +1267,150 @@ def test_summary_serialization_truncates_large_tool_results():
     assert "[Tool result]:" in serialized
     assert "characters truncated for summary" in serialized
     assert "A" * 5000 not in serialized
+
+
+def test_sync_rebuilds_when_same_length_history_changes():
+    manager = ConversationHistoryManager(max_tokens=1000)
+    manager.sync_from_messages(
+        [
+            ChatMessage(role=MessageRole.SYSTEM, content="system"),
+            ChatMessage(role=MessageRole.USER, content="first task"),
+        ]
+    )
+
+    manager.sync_from_messages(
+        [
+            ChatMessage(role=MessageRole.SYSTEM, content="system"),
+            ChatMessage(role=MessageRole.USER, content="replacement task"),
+        ]
+    )
+
+    visible = to_api_messages(manager.get_internal_messages())
+    assert [_extract_content_text(message.content) for message in visible] == [
+        "system",
+        "replacement task",
+    ]
+    assert "replacement task" in (manager._cached_command_blocks or "")
+    assert "first task" not in (manager._cached_command_blocks or "")
+
+
+def test_large_dedup_saving_is_remeasured_before_short_circuit(monkeypatch):
+    calls = []
+    messages = create_history_messages()
+
+    monkeypatch.setattr(compression_module, "_count_tokens", lambda _messages, _model_id: 9999)
+    monkeypatch.setattr(
+        compression_module,
+        "_apply_tool_dedup",
+        lambda current, model_id, logger=None: (current, 0.5),
+    )
+    monkeypatch.setattr(
+        compression_module,
+        "_apply_context_engine_compression",
+        lambda current, logger=None: (calls.append("context_engine"), (current, 0))[1],
+    )
+    monkeypatch.setattr(
+        compression_module,
+        "_apply_tool_output_truncation",
+        lambda current, logger=None: (current, 0),
+    )
+    monkeypatch.setattr(
+        compression_module,
+        "_apply_observation_masking",
+        lambda current, frac_to_mask=0.3, logger=None: (current, 0),
+    )
+    monkeypatch.setattr(ConversationHistoryManager, "truncate_until_fits", lambda *args, **kwargs: None)
+
+    manager = ConversationHistoryManager(max_tokens=10, smart_summary=False)
+    manager.sync_from_messages(messages)
+    manager.get_compressed_messages(model_id="dummy-model")
+
+    assert calls == ["context_engine"]
+
+
+def test_structured_tool_error_is_exempt_from_observation_masking():
+    messages = []
+    contents = [
+        '{"ok":false,"status":"error","error":{"kind":"shell_command_error","message":"boom"}}',
+        "success one " * 100,
+        "success two " * 100,
+        "success three " * 100,
+    ]
+    for index, content in enumerate(contents):
+        messages.extend(
+            [
+                create_mock_message(MessageRole.TOOL_CALL, f"{{'name': 'shell_tool', 'arguments': '{index}'}}"),
+                create_mock_message(MessageRole.TOOL_RESPONSE, content),
+            ]
+        )
+
+    compressed, _ = _apply_observation_masking(messages, frac_to_mask=0.75)
+
+    assert _extract_content_text(compressed[1].message.content) == contents[0]
+
+
+def test_smart_summary_keeps_two_recent_user_turns_verbatim(monkeypatch):
+    captured = {}
+
+    class SummaryModel:
+        def generate(self, messages):
+            captured["request"] = messages
+            return ChatMessage(role=MessageRole.ASSISTANT, content="summary of old work")
+
+    monkeypatch.setattr(
+        compression_module.model_manager,
+        "get_smolagents_model",
+        lambda _model_type: SummaryModel(),
+    )
+    messages = to_internal_messages(
+        [
+            ChatMessage(role=MessageRole.SYSTEM, content="system"),
+            ChatMessage(role=MessageRole.USER, content="OLD USER TURN"),
+            ChatMessage(role=MessageRole.ASSISTANT, content="OLD ASSISTANT TURN"),
+            ChatMessage(role=MessageRole.USER, content="RECENT USER ONE"),
+            ChatMessage(role=MessageRole.ASSISTANT, content="RECENT ASSISTANT ONE"),
+            ChatMessage(role=MessageRole.USER, content="RECENT USER TWO"),
+            ChatMessage(role=MessageRole.ASSISTANT, content="RECENT ASSISTANT TWO"),
+        ]
+    )
+
+    result = summarize_conversation(messages, model_id="dummy-model")
+
+    assert result.error is None
+    request_text = "\n".join(_extract_content_text(message.content) for message in captured["request"])
+    assert "OLD USER TURN" in request_text
+    assert "RECENT USER ONE" not in request_text
+    visible_texts = [
+        _extract_content_text(message.content)
+        for message in to_api_messages(result.messages)
+    ]
+    assert visible_texts == [
+        "system",
+        "## Conversation Summary\nsummary of old work",
+        "RECENT USER ONE",
+        "RECENT ASSISTANT ONE",
+        "RECENT USER TWO",
+        "RECENT ASSISTANT TWO",
+    ]
+
+
+def test_smart_summary_does_not_run_until_more_than_two_user_turns(monkeypatch):
+    monkeypatch.setattr(
+        compression_module.model_manager,
+        "get_smolagents_model",
+        lambda _model_type: (_ for _ in ()).throw(AssertionError("summary model must not run")),
+    )
+    messages = to_internal_messages(
+        [
+            ChatMessage(role=MessageRole.SYSTEM, content="system"),
+            ChatMessage(role=MessageRole.USER, content="USER ONE"),
+            ChatMessage(role=MessageRole.ASSISTANT, content="ASSISTANT ONE"),
+            ChatMessage(role=MessageRole.USER, content="USER TWO"),
+            ChatMessage(role=MessageRole.ASSISTANT, content="ASSISTANT TWO"),
+        ]
+    )
+
+    result = summarize_conversation(messages, model_id="dummy-model")
+
+    assert result.error == "Not enough messages available for compression"
+    assert to_api_messages(result.messages) == [message.message for message in messages]
