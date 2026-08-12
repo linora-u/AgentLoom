@@ -158,7 +158,7 @@ def _load_profile(project_root: Path, requested_model_type: str | None) -> ChatM
             f"模型类型 {model_type!r} 没有可用凭据；请检查 config/llm.yaml。",
         )
 
-    raw_max_tokens = settings.max_tokens
+    raw_max_tokens = getattr(settings, "max_output_tokens", settings.max_tokens)
     configured_max = raw_max_tokens if isinstance(raw_max_tokens, int) else _MAX_OUTPUT_TOKENS
     max_output_tokens = max(1, min(configured_max, _MAX_OUTPUT_TOKENS))
 

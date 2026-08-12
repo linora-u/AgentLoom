@@ -162,6 +162,8 @@ RECENT_ERROR_EXEMPT_COUNT: int = 1
 # Raw recent turns remain after an LLM summary so the next model request keeps
 # exact intent, tool-call identity, and recovery details at the hand-off edge.
 SUMMARY_RECENT_USER_TURNS: int = 2
+SUMMARY_RECENT_TOKENS_MIN: int = 2000
+SUMMARY_RECENT_TOKENS_MAX: int = 8000
 
 # ===========================================================================
 # Layer 4 Constants – LLM Summarization
@@ -1154,6 +1156,9 @@ def _serialize_messages_for_summary(messages: List[InternalChatMessage]) -> str:
 def _split_summary_head_and_recent_tail(
     messages: List[InternalChatMessage],
     recent_user_turns: int = SUMMARY_RECENT_USER_TURNS,
+    *,
+    model_id: str | None = None,
+    preserve_recent_tokens: int | None = None,
 ) -> tuple[list[InternalChatMessage], list[InternalChatMessage]]:
     """Split visible history at a complete user-turn boundary."""
     visible = [
@@ -1166,10 +1171,21 @@ def _split_summary_head_and_recent_tail(
         for index, message in enumerate(visible)
         if message.message.role == MessageRole.USER and not message.is_summary
     ]
-    if len(user_positions) <= recent_user_turns:
-        return [], visible
-    tail_start = user_positions[-recent_user_turns]
-    return visible[:tail_start], visible[tail_start:]
+    if not user_positions:
+        return visible, []
+    tail_start = user_positions[-min(recent_user_turns, len(user_positions))]
+    while tail_start < len(visible):
+        tail = visible[tail_start:]
+        if preserve_recent_tokens is None or not model_id:
+            return visible[:tail_start], tail
+        tail_tokens = _count_tokens([message.message for message in tail], model_id)
+        if tail_tokens <= preserve_recent_tokens:
+            return visible[:tail_start], tail
+        remaining_user_positions = [position for position in user_positions if position > tail_start]
+        if not remaining_user_positions:
+            break
+        tail_start = remaining_user_positions[0]
+    return visible, []
 
 def summarize_conversation(
     messages: List[InternalChatMessage],
@@ -1177,6 +1193,7 @@ def summarize_conversation(
     custom_condense_prompt: Optional[str] = None,
     cached_command_blocks: Optional[str] = None,
     cached_skill_load: Optional[str] = None,
+    preserve_recent_tokens: int | None = None,
 ) -> SummarizeResponse:
     """Layer 4: LLM Summarization (smart compression).
 
@@ -1208,7 +1225,11 @@ def summarize_conversation(
         )
 
     messages_to_summarize = get_messages_since_last_summary(messages)
-    summarizable_messages, recent_tail = _split_summary_head_and_recent_tail(messages_to_summarize)
+    summarizable_messages, recent_tail = _split_summary_head_and_recent_tail(
+        messages_to_summarize,
+        model_id=model_id,
+        preserve_recent_tokens=preserve_recent_tokens,
+    )
 
     if len(summarizable_messages) <= 1:
         error = "Not enough messages available for compression"
@@ -1584,9 +1605,22 @@ class ConversationHistoryManager:
     Each layer short-circuits if the budget is satisfied.
     """
 
-    def __init__(self, max_tokens: int = DEFAULT_MAX_TOKENS, smart_summary: bool = True):
+    def __init__(
+        self,
+        max_tokens: int | None = None,
+        smart_summary: bool = True,
+        *,
+        context_window: int | None = None,
+        max_output_tokens: int | None = None,
+    ):
         self._internal_message_history: List[InternalChatMessage] = []
-        self._max_tokens = max_tokens
+        if context_window is not None:
+            reserved_output = max_output_tokens or 0
+            if reserved_output >= context_window:
+                raise ValueError("max_output_tokens must be smaller than context_window")
+            self._max_tokens = context_window - reserved_output
+        else:
+            self._max_tokens = max_tokens if max_tokens is not None else DEFAULT_MAX_TOKENS
         self._smart_summary = smart_summary
         self._cached_command_blocks: Optional[str] = None
         self._cached_skill_load: Optional[str] = None
@@ -1846,6 +1880,14 @@ class ConversationHistoryManager:
             model_id=model_id,
             cached_command_blocks=self._cached_command_blocks,
             cached_skill_load=self._cached_skill_load,
+            preserve_recent_tokens=max(
+                1,
+                min(
+                    self._max_tokens,
+                    SUMMARY_RECENT_TOKENS_MAX,
+                    max(SUMMARY_RECENT_TOKENS_MIN, int(self._max_tokens * 0.25)),
+                ),
+            ),
         )
 
         if result.error:
