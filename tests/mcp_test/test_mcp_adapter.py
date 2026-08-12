@@ -35,7 +35,7 @@ def test_mcp_is_error_becomes_a_tool_execution_failure_with_all_text() -> None:
 
     assert str(captured.value) == "database unavailable\nretry after reconnecting"
     assert captured.value.kind == "mcp_error"
-    assert captured.value.retryable is True
+    assert captured.value.retryable is False
 
 
 def test_mcp_structured_content_is_preserved_on_success() -> None:

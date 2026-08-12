@@ -46,7 +46,7 @@ def _compress_json(text: str, limit: int) -> tuple[str, str]:
         return _compress_text(text, limit), "json_parse_fallback"
 
     if isinstance(value, list):
-        all_error_items = [
+        list_error_items = [
             item
             for item in value
             if ERROR_RE.search(json.dumps(item, ensure_ascii=False, default=str))
@@ -60,7 +60,7 @@ def _compress_json(text: str, limit: int) -> tuple[str, str]:
                     limit,
                     anchors=[
                         json.dumps(item, ensure_ascii=False, default=str)
-                        for item in all_error_items[:10]
+                        for item in list_error_items[:10]
                     ],
                 ),
                 "json_small_list",
@@ -86,14 +86,14 @@ def _compress_json(text: str, limit: int) -> tuple[str, str]:
             _fit(
                 json.dumps(preview, ensure_ascii=False, indent=2, default=str),
                 limit,
-                anchors=[json.dumps(item, ensure_ascii=False, default=str) for item in all_error_items[:10]],
+                anchors=[json.dumps(item, ensure_ascii=False, default=str) for item in list_error_items[:10]],
             ),
             "smart_crusher_lite_list",
         )
 
     if isinstance(value, dict):
         keys = list(value)
-        all_error_items = {
+        dict_error_items = {
             key: value[key]
             for key in keys
             if ERROR_RE.search(str(key))
@@ -107,7 +107,7 @@ def _compress_json(text: str, limit: int) -> tuple[str, str]:
                     limit,
                     anchors=[
                         json.dumps({key: item}, ensure_ascii=False, default=str)
-                        for key, item in list(all_error_items.items())[:10]
+                        for key, item in list(dict_error_items.items())[:10]
                     ],
                 ),
                 "json_small_object",
@@ -134,7 +134,7 @@ def _compress_json(text: str, limit: int) -> tuple[str, str]:
                 limit,
                 anchors=[
                     json.dumps({key: item}, ensure_ascii=False, default=str)
-                    for key, item in list(all_error_items.items())[:10]
+                    for key, item in list(dict_error_items.items())[:10]
                 ],
             ),
             "smart_crusher_lite_object",

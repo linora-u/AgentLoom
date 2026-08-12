@@ -5,7 +5,7 @@ Independent Parsing for LLM Configuration (llm.yaml)
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Any, Dict, Optional
+from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
@@ -26,12 +26,12 @@ from src.lib.config.yaml_loader import load_unique_yaml
 _RESERVED_MODEL_KEYS = {"default_model_type", "common"}
 
 
-def _available_types_text(models: Dict[str, Any]) -> str:
+def _available_types_text(models: dict[str, Any]) -> str:
     available = list(models.keys())
     return ", ".join(available) if available else "(none)"
 
 
-def _missing_default_model_type_error(models: Dict[str, Any]) -> str:
+def _missing_default_model_type_error(models: dict[str, Any]) -> str:
     return (
         "No model_type was provided and config/llm.yaml does not set "
         "`model.default_model_type`; the model call was not started. "
@@ -41,7 +41,7 @@ def _missing_default_model_type_error(models: Dict[str, Any]) -> str:
     )
 
 
-def _unknown_model_type_error(model_type: Any, models: Dict[str, Any]) -> str:
+def _unknown_model_type_error(model_type: Any, models: dict[str, Any]) -> str:
     return (
         f"Model type '{model_type}' is not defined in config/llm.yaml; "
         "the model call was not started. "
@@ -51,7 +51,7 @@ def _unknown_model_type_error(model_type: Any, models: Dict[str, Any]) -> str:
     )
 
 
-def _missing_default_target_error(default_type: str, models: Dict[str, Any]) -> str:
+def _missing_default_target_error(default_type: str, models: dict[str, Any]) -> str:
     return (
         f"config/llm.yaml sets `model.default_model_type: {default_type}`, "
         "but that model type is not defined; the model call was not started. "
@@ -88,7 +88,7 @@ class LlmModelTypeSettings(BaseModel):
     base_url: str = ""
     api_key: str = ""
     temperature: float = DEFAULT_MODEL_TEMPERATURE
-    max_tokens: int | str = DEFAULT_MAX_TOKENS
+    max_tokens: int = DEFAULT_MAX_TOKENS
     context_window: int = DEFAULT_MAX_TOKENS
     max_output_tokens: int = DEFAULT_MAX_OUTPUT_TOKENS
     input_token_limit: int = DEFAULT_MAX_TOKENS - DEFAULT_MAX_OUTPUT_TOKENS
@@ -96,14 +96,14 @@ class LlmModelTypeSettings(BaseModel):
     num_retries: int = DEFAULT_MODEL_NUM_RETRIES
     retry_delay: float = DEFAULT_MODEL_RETRY_DELAY
     max_retry_delay: float = DEFAULT_MODEL_MAX_RETRY_DELAY
-    extra_headers: Optional[Dict[str, Any]] = None
+    extra_headers: dict[str, Any] | None = None
     context_cache: bool = DEFAULT_MODEL_CONTEXT_CACHE
-    system_prompt_boundary: Optional[str] = None
+    system_prompt_boundary: str | None = None
     description: str = ""
     requests_per_minute: int = DEFAULT_MODEL_REQUESTS_PER_MINUTE
     # Extra parameters passed through to litellm.completion() (e.g. reasoning_effort,
     # extra_body). Any YAML key not in the known fields list is collected here.
-    extra_completion_params: Optional[Dict[str, Any]] = None
+    extra_completion_params: dict[str, Any] | None = None
 
     @model_validator(mode="before")
     @classmethod
@@ -122,10 +122,10 @@ class LLMConfig(BaseModel):
     langfuse: LangfuseSettings = Field(default_factory=LangfuseSettings)
     # the entire "model" block gets split into its pieces
     default_model_type: str = ""
-    models: Dict[str, LlmModelTypeSettings] = Field(default_factory=dict)
+    models: dict[str, LlmModelTypeSettings] = Field(default_factory=dict)
 
     @classmethod
-    def load_from_yaml(cls, path: Path) -> "LLMConfig":
+    def load_from_yaml(cls, path: Path) -> LLMConfig:
         if not path.exists():
             return cls()
         with path.open("r", encoding="utf-8") as f:
@@ -134,13 +134,13 @@ class LLMConfig(BaseModel):
         return cls.from_dict(raw)
 
     @classmethod
-    def from_dict(cls, raw: Dict[str, Any]) -> "LLMConfig":
+    def from_dict(cls, raw: dict[str, Any]) -> LLMConfig:
         langfuse_raw = raw.get("langfuse", {})
         model_raw = raw.get("model", {})
         default_type = model_raw.get("default_model_type", "")
 
         # Build models dict
-        models: Dict[str, LlmModelTypeSettings] = {}
+        models: dict[str, LlmModelTypeSettings] = {}
         for k, v in model_raw.items():
             if k in _RESERVED_MODEL_KEYS or not isinstance(v, dict):
                 continue
@@ -150,27 +150,32 @@ class LLMConfig(BaseModel):
             resolved_rpm = v.get("requests_per_minute", DEFAULT_MODEL_REQUESTS_PER_MINUTE)
             resolved_temp = v.get("temperature", DEFAULT_MODEL_TEMPERATURE)
             resolved_max_tokens = v.get("max_tokens", DEFAULT_MAX_TOKENS)
+            parsed_max_tokens = (
+                DEFAULT_MAX_TOKENS
+                if isinstance(resolved_max_tokens, str) and resolved_max_tokens.strip() == "max"
+                else int(
+                    IntParser.parse(
+                        resolved_max_tokens,
+                        default=DEFAULT_MAX_TOKENS,
+                    )
+                )
+            )
             has_legacy_budget = "max_tokens" in v and "context_window" not in v and "max_output_tokens" not in v
             if has_legacy_budget:
-                legacy_budget = IntParser.parse(
-                    resolved_max_tokens,
-                    default=DEFAULT_MAX_TOKENS,
-                    allow_bypass_strings=("max",),
-                )
-                resolved_context_window = legacy_budget
-                resolved_max_output_tokens = legacy_budget
-                resolved_input_token_limit = legacy_budget
+                resolved_context_window = parsed_max_tokens
+                resolved_max_output_tokens = parsed_max_tokens
+                resolved_input_token_limit = parsed_max_tokens
             else:
-                resolved_context_window = IntParser.parse(
+                parsed_context_window = IntParser.parse(
                     v.get("context_window", DEFAULT_MAX_TOKENS),
                     default=DEFAULT_MAX_TOKENS,
-                    allow_bypass_strings=("max",),
                 )
-                resolved_max_output_tokens = IntParser.parse(
+                parsed_max_output_tokens = IntParser.parse(
                     v.get("max_output_tokens", DEFAULT_MAX_OUTPUT_TOKENS),
                     default=DEFAULT_MAX_OUTPUT_TOKENS,
-                    allow_bypass_strings=("max",),
                 )
+                resolved_context_window = int(parsed_context_window)
+                resolved_max_output_tokens = int(parsed_max_output_tokens)
                 if resolved_max_output_tokens >= resolved_context_window:
                     raise ValueError(
                         f"Model type '{k}' max_output_tokens ({resolved_max_output_tokens}) must be smaller "
@@ -216,7 +221,7 @@ class LLMConfig(BaseModel):
                 base_url=resolved_base_url,
                 api_key=resolved_api_key,
                 temperature=float(resolved_temp),
-                max_tokens=IntParser.parse(resolved_max_tokens, default=DEFAULT_MAX_TOKENS, allow_bypass_strings=("max",)),
+                max_tokens=parsed_max_tokens,
                 context_window=resolved_context_window,
                 max_output_tokens=resolved_max_output_tokens,
                 input_token_limit=resolved_input_token_limit,
@@ -248,7 +253,7 @@ class LLMConfig(BaseModel):
             models=models
         )
 
-    def to_legacy_dict(self) -> Dict[str, Any]:
+    def to_legacy_dict(self) -> dict[str, Any]:
         """
         Export back to the nested dict structure expected by the rest of the application
         if arbitrary code tries to read C.raw['model'] or C.raw['langfuse'].
@@ -264,7 +269,7 @@ class LLMConfig(BaseModel):
             "model": model_dict
         }
 
-    def for_type(self, model_type: Optional[str]) -> LlmModelTypeSettings:
+    def for_type(self, model_type: str | None) -> LlmModelTypeSettings:
         desired = (model_type or "").strip().lower()
 
         # If user explicitly requested a type and it exists, return it.
