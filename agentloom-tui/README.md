@@ -1,124 +1,190 @@
 # AgentLoom Application Studio
 
-`agentloom` is an Applications-first terminal control plane. It embeds a fixed
-Studio runtime for the Agent Loop and uses AgentLoom's Python runtime
-only for domain truth: configuration, validation, Effective Config, topology,
-Run lifecycle, and evidence.
+`agentloom` is an Applications-first terminal control plane. A dedicated Studio
+Agent can inspect and edit an Application, while AgentLoom's Python runtime
+remains authoritative for Effective Config, topology, validation, Run lifecycle,
+Goal state, and evidence.
 
-## Install, update, and run
+![AgentLoom Application Studio in a real terminal](../docs/assets/agentloom-studio.svg)
+
+The image above comes from a real reduced-motion terminal session. The Studio
+indexed the checkout and rendered its Applications, global Skills, validation
+state, Runs, and command input. It is not a static product mockup.
+
+## Install and open
 
 ```bash
 cd /path/to/AgentLoom
 ./install
+cp config/llm.example.yaml config/llm.yaml
+# Edit config/llm.yaml with at least one working model profile.
 agentloom --project /path/to/AgentLoom
 ```
 
-Rerun `./install` to update a source installation. After the first install,
-`agentloom update` performs the same update from the recorded trusted checkout.
-`./install --no-modify-path` is optional and only prevents the installer from
-editing shell PATH configuration; it is not required for updates.
+The installer creates one compatible unit under `~/.agentloom`: the
+TypeScript/OpenTUI binary, bundled Studio runtime, and locked Python environment.
+Use the non-interactive commands to verify that unit without opening the UI:
 
-The TUI checks the recorded trusted source checkout after first render. When
-relevant sources are newer than the installed compatible unit, `Ctrl+X` offers
-an explicit update of TUI + Studio runtime + Python followed by a safe restart. It
-does not fetch Git or silently replace an active Session.
+```bash
+agentloom --version
+agentloom --snapshot --project /path/to/AgentLoom
+```
 
-The installer builds and installs one compatible unit under `~/.agentloom`:
-the TypeScript/OpenTUI binary, bundled Studio runtime, and a locked Python
-environment. `agentloom --snapshot` is the non-interactive health check.
+Rerun `./install` to update from the current source checkout. After installation,
+`agentloom update` rebuilds from the recorded trusted checkout. The TUI checks
+that checkout after first render; when relevant source files are newer, `Ctrl+X`
+offers an explicit whole-product update and safe restart. It does not fetch Git
+or replace an active Session silently.
 
-## Product model
+## Read the workspace
 
-- The first entry is `+ New Application`, followed by every directory under
-  `applications/`. Choosing another Application retargets the current Studio
-  Session and keeps its conversation memory; only `/new` starts a fresh Session.
-  `/compact` summarizes the active context in place, retaining Session identity,
-  durable history, and completed file changes.
-  A target switch is blocked while an Agent Loop is active; wait or press `Esc`
-  before switching so an old turn cannot finish against the new Application.
-- The workspace summary counts Applications, not expanded Supervisor/Worker
-  YAML definitions. Main Supervisor Agents are searchable through `Ctrl+X`;
-  Worker Agents remain inspectable inside Application and main-Agent details.
-- `Global Skills` counts runtime-global Skill manifests from the root `skills/`
-  directory and explicit global configuration. Application-private Skills are
-  shown only inside that Application and its Agent details. The framework Skill
-  used by Studio is development context and is not counted as an Application Skill.
-- The right panel shows Effective Config, Working Revision, Running Revision,
-  Supervisor/Workers, model sources, Tools, Skills, permissions, Hooks, MCP,
-  workflow source files, and validation. It does not expose model credentials.
-- Recent Runs are secondary navigation. Their default detail is a compact,
-  actionable summary; raw event objects and full log bodies are not dumped.
-- Goal-aware Runs expose `active`, `complete`, and `budget_limited` state in the
-  same list/detail projection. Run detail shows cumulative/remaining tokens,
-  objective, and completion evidence. While a Run is active the bridge reads
-  canonical checkpoint `goal.json`; terminal Runs use the manifest/audit copy.
+The main screen has three working areas:
+
+1. **Conversation and Agent Loop** occupy the left pane. Tool calls, Diffs,
+   permissions, questions, sub-Agent progress, and the final response remain in
+   the same task history.
+2. **Workspace index** occupies the right pane. It lists Applications, global
+   Skills, Run counts, schedule service state, and recent executions.
+3. **Composer and status footer** show current model, permission scope, loop
+   state, copy/interrupt actions, and discoverable commands.
+
+Selecting an Application opens details sourced from Effective Config:
+
+- Supervisor and Worker topology;
+- model type and configuration source;
+- Tools and Skills with their loading source;
+- permissions, Hooks, and MCP configuration;
+- workflow source files and validation errors;
+- Working Revision and Running Revision;
+- recent Runs and available recovery actions.
+
+The homepage counts directories under `applications/`, not every expanded Agent
+YAML. Main Supervisors are searchable through `Ctrl+X`; Workers stay nested in
+Application and Supervisor details so one large Application does not flood the
+global index.
 
 ## Studio Agent Loop
 
-The Studio Agent can read the project, edit the selected Application directly,
-show Tool and Diff blocks, validate, request permission to run, inspect
-structured Run evidence, and continue fixing until the acceptance criteria are
-met. There is no separate draft-write command in the normal workflow.
+The normal workflow does not use a separate draft command:
 
-`Application Only` is the default: project reads and writes inside the selected
-Application are allowed; Shell, global files, other Applications, and unknown
-new-Application paths require explicit permission. Permission cards support
-`1` once, `2` for this Session, and `3` reject. `Full Access` is available from
-`Ctrl+X` as one on/off toggle. It can be preset before selecting an Application,
-remains active while switching Applications, and resets when the TUI exits.
-Task sub-agent text and Tool cards are visible in the parent Studio; completed
-sub-agent text remains until the next turn. Select it and press `Ctrl+Y` to copy
-through OSC52.
+```text
+inspect project and Effective Config
+  → edit the selected Application
+  → show the Diff
+  → validate YAML and references
+  → request permission for a real Run
+  → inspect structured Run evidence
+  → repair until acceptance criteria pass
+```
 
-Agent question requests are shown as decision cards. A user can click one
-choice or type an answer; multiple answers are separated with `|`, and `Esc`
-rejects the request. Set `AGENTLOOM_REDUCED_MOTION=1` to use static status
-symbols; dumb and CI terminals select this mode automatically.
+Studio must distinguish static validation from execution. If Run permission is
+rejected, the result is “configuration validated, not run.” A process exit or a
+plausible final answer is also insufficient proof; Studio reads the manifest,
+terminal state, Goal projection, and available audit evidence.
 
-Model-facing Application detail is deduplicated and paginated instead of
-placing a complete large Application in one Tool result. Studio persists the
-Session lifecycle for status, retry, permission, question, and Task
-sub-session progress; quiet model latency is not treated as a cancellation
-signal. Context-limit compaction is performed by the Runtime and shown in the
-TUI; `/compact` invokes the same Session compaction explicitly. `Esc` is the explicit manual interrupt. An interrupted unfinished turn is
-removed from future model context, while file changes already completed by its
-tools are retained; the next message therefore starts a new task instead of
-silently resuming the cancelled one.
+Tool and Diff cards are visible in the parent conversation. Task sub-Agent text
+remains visible until the next turn and can be selected and copied with
+`Ctrl+Y`. Quiet provider latency does not count as cancellation. `Esc` is the
+explicit interrupt.
 
-Runs pin the Application content hash in `manifest.json`. Later edits change the
-Working Revision but never hot-switch the Running Revision. A new/restarted Run
-is required to use new configuration.
+An interrupted unfinished turn is removed from future model context. File
+changes already completed by tools remain on disk, so the next message starts a
+new task against the actual project state instead of silently resuming cancelled
+reasoning.
 
-Studio and Application Agents share the project-root `config/llm.yaml` as their
-only model catalog, Provider, authentication, and default source. The Studio
-maps those profiles into the bundled Studio runtime; Application Agents keep
-resolving them through Python and YAML `model_type`. Selecting a Studio model
-with `/models` or `Ctrl+X` never changes an Application model. Missing or invalid
-configuration is an explicit startup error, not an ambient default fallback.
+## Permissions
+
+`Application Only` is the default:
+
+- reads may inspect the project;
+- direct writes inside the selected Application are allowed;
+- Shell, global files, other Applications, and unknown new-Application paths
+  require a permission card.
+
+Permission cards offer `1` once, `2` for this Session, and `3` reject. `Full
+Access` is one explicit toggle under `Ctrl+X`. It can be set before selecting an
+Application, remains active when switching targets, and resets when the TUI
+exits.
+
+Agent question requests use decision cards. Select a visible choice or type a
+custom answer. Separate answers to multiple questions with `|`; `Esc` rejects
+the request.
+
+## Sessions and models
+
+Choosing another Application retargets the current Studio Session and preserves
+conversation memory. A switch is blocked while the Agent Loop is active so an
+old turn cannot finish against a new target.
+
+- `/new` starts a blank conversation while retaining durable Application
+  history for later Agent retrieval.
+- `/compact` compresses current context in place, preserving Session identity,
+  durable history, and completed file changes.
+- Runtime-initiated context compaction appears in the TUI and follows the same
+  continuity contract.
+
+Studio and Application Agents share project-root `config/llm.yaml` as their only
+model catalog, Provider configuration, and authentication source. `/models`
+changes the Studio model for the current Session; it never changes an
+Application Agent's YAML `model_type`. Missing or invalid configuration is an
+explicit startup error, not a fallback to ambient credentials.
+
+## Revisions, Runs, and Goals
+
+Every Run pins the Application content hash in `manifest.json`. Editing YAML
+changes the Working Revision; an active Run continues using its Running Revision.
+A restart or new Run is required to execute new configuration.
+
+Recent Runs are secondary navigation. Their default view is a bounded,
+decision-ready summary rather than a raw event dump. Problem Runs expose an
+`a` action that asks Studio to diagnose the stored evidence.
+
+Goal-aware Run details display:
+
+- `active`, `complete`, or `budget_limited` state;
+- objective and completion evidence;
+- cumulative and remaining token budget;
+- resume eligibility and the current task identifier.
+
+While a Run is active, the bridge reads canonical checkpoint `goal.json`.
+Terminal Runs use the manifest and audit copy. This keeps the TUI aligned with
+CLI JSON/JSONL and Python `ApplicationRunResult` instead of deriving state from
+terminal output.
 
 ## Navigation
 
 | Action | Key / command |
 |---|---|
 | Send a Studio message | `Enter` |
-| Start a blank conversation while retaining Application history | `/new` |
-| Compact the current Session without starting over | `/compact` |
+| Start a blank conversation | `/new` |
+| Compact the current Session | `/compact` |
 | Search commands and global entities | `Ctrl+X` |
-| Select a Studio model from `config/llm.yaml` | `/models` or `Ctrl+X` |
-| Re-index project state | `/refresh` |
-| Scroll chat or the focused detail | `PgUp` / `PgDn`; mouse wheel scrolls the pointed region |
-| Diagnose a selected failed Run | `a` |
-| Close detail / reject permission or question / interrupt active loop | `Esc` |
+| Select a Studio model | `/models` or `Ctrl+X` |
+| Re-index the project | `/refresh` |
+| Scroll focused chat or detail | `PgUp` / `PgDn` or mouse wheel |
+| Copy selected text through OSC52 | `Ctrl+Y` |
+| Diagnose a selected problem Run | `a` |
+| Close detail, reject a decision, or interrupt the loop | `Esc` |
 | Exit | `Ctrl+C` |
 
-There is intentionally no global `?` binding. Discoverability lives in the
-visible footer, `/help`, and the `Ctrl+X` command descriptions.
+There is no global `?` binding. The footer, `/help`, and `Ctrl+X` descriptions
+carry command discovery.
 
-Schedules remain a separate foreground service:
+Set `AGENTLOOM_REDUCED_MOTION=1` for static status symbols. Dumb and CI terminals
+select reduced motion automatically.
+
+## Schedules
+
+The TUI creates and manages durable schedules. Automatic firing is a separate
+foreground service:
 
 ```bash
 agentloom schedules --project /path/to/project serve
 ```
+
+Closing the TUI therefore does not leave a hidden scheduler daemon. The workspace
+shows whether the service is running, while scheduled Runs use the same Run,
+Goal, checkpoint, and evidence contracts as manually started Runs.
 
 ## Architecture
 
@@ -136,8 +202,12 @@ agentloom_domain
        └─ run.start / stop / resume / restart / detail
 ```
 
-Third-party provenance and license notices for the presentation and runtime
-adaptations are maintained under [`upstream/`](upstream/README.md).
+The TypeScript layer owns presentation and the Studio Session. The Python bridge
+owns AgentLoom domain truth. Model-facing Application detail is deduplicated and
+paginated rather than placing a complete large topology in one Tool result.
+
+Third-party provenance and license notices for presentation and runtime
+adaptations live under [`upstream/`](upstream/README.md).
 
 ## Development
 

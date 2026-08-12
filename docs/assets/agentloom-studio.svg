@@ -1,0 +1,267 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1296" height="792" viewBox="0 0 1296 792" role="img" aria-labelledby="title desc">
+<title id="title">AgentLoom Application Studio</title>
+<desc id="desc">A real AgentLoom terminal session showing the Studio workspace, an application, run status, and command input.</desc>
+<rect width="100%" height="100%" fill="#080808"/>
+<style>text{font-family:Menlo,Monaco,Consolas,"Liberation Mono",monospace;font-size:14px;font-variant-ligatures:none}</style>
+<rect x="925.2" y="18.0" width="8.4" height="18" fill="#121212"/>
+<text x="925.2" y="32.0" fill="#444444" font-weight="400">│</text>
+<rect x="933.6" y="18.0" width="344.4" height="18" fill="#121212"/>
+<text x="34.8" y="50.0" fill="#ffaf87" font-weight="400">▄▀█ █▀▀ █▀▀ █▄░█ ▀█▀ █░░ █▀█ █▀█ █▀▄▀█</text>
+<rect x="925.2" y="36.0" width="8.4" height="18" fill="#121212"/>
+<text x="925.2" y="50.0" fill="#444444" font-weight="400">│</text>
+<rect x="933.6" y="36.0" width="16.8" height="18" fill="#121212"/>
+<rect x="950.4" y="36.0" width="151.2" height="18" fill="#121212"/>
+<text x="950.4" y="50.0" fill="#eeeeee" font-weight="700">Application Studio</text>
+<rect x="1101.6" y="36.0" width="176.4" height="18" fill="#121212"/>
+<text x="34.8" y="68.0" fill="#ffaf87" font-weight="400">█▀█ █▄█ ██▄ █░▀█ ░█░ █▄▄ █▄█ █▄█ █░▀░█</text>
+<rect x="925.2" y="54.0" width="8.4" height="18" fill="#121212"/>
+<text x="925.2" y="68.0" fill="#444444" font-weight="400">│</text>
+<rect x="933.6" y="54.0" width="16.8" height="18" fill="#121212"/>
+<rect x="950.4" y="54.0" width="235.2" height="18" fill="#121212"/>
+<text x="950.4" y="68.0" fill="#7f7f7f" font-weight="400">agentloom-readme-demo.SIHeVj</text>
+<rect x="1185.6" y="54.0" width="92.4" height="18" fill="#121212"/>
+<rect x="925.2" y="72.0" width="8.4" height="18" fill="#121212"/>
+<text x="925.2" y="86.0" fill="#444444" font-weight="400">│</text>
+<rect x="933.6" y="72.0" width="344.4" height="18" fill="#121212"/>
+<text x="34.8" y="104.0" fill="#eeeeee" font-weight="700">agentloom-readme-demo.SIHeVj</text>
+<text x="648.0" y="104.0" fill="#7f7f7f" font-weight="400">Studio: config/llm.yaml default</text>
+<rect x="925.2" y="90.0" width="8.4" height="18" fill="#121212"/>
+<text x="925.2" y="104.0" fill="#444444" font-weight="400">│</text>
+<rect x="933.6" y="90.0" width="16.8" height="18" fill="#121212"/>
+<rect x="950.4" y="90.0" width="100.8" height="18" fill="#121212"/>
+<text x="950.4" y="104.0" fill="#ffaf87" font-weight="700">Applications</text>
+<rect x="1051.2" y="90.0" width="226.8" height="18" fill="#121212"/>
+<rect x="925.2" y="108.0" width="8.4" height="18" fill="#121212"/>
+<text x="925.2" y="122.0" fill="#444444" font-weight="400">│</text>
+<rect x="933.6" y="108.0" width="344.4" height="18" fill="#121212"/>
+<text x="34.8" y="140.0" fill="#eeeeee" font-weight="700">AgentLoom Application Studio</text>
+<text x="572.4" y="140.0" fill="#7f7f7f" font-weight="400">Choose an Application · Application Only</text>
+<rect x="925.2" y="126.0" width="8.4" height="18" fill="#121212"/>
+<text x="925.2" y="140.0" fill="#444444" font-weight="400">│</text>
+<rect x="933.6" y="126.0" width="16.8" height="18" fill="#121212"/>
+<rect x="950.4" y="126.0" width="8.4" height="18" fill="#121212"/>
+<text x="950.4" y="140.0" fill="#ffaf87" font-weight="400">│</text>
+<rect x="958.8" y="126.0" width="8.4" height="18" fill="#121212"/>
+<rect x="967.2" y="126.0" width="260.4" height="18" fill="#121212"/>
+<text x="967.2" y="140.0" fill="#eeeeee" font-weight="400">1 Application · 0 Global Skills</text>
+<rect x="1227.6" y="126.0" width="50.4" height="18" fill="#121212"/>
+<rect x="925.2" y="144.0" width="8.4" height="18" fill="#121212"/>
+<text x="925.2" y="158.0" fill="#444444" font-weight="400">│</text>
+<rect x="933.6" y="144.0" width="16.8" height="18" fill="#121212"/>
+<rect x="950.4" y="144.0" width="8.4" height="18" fill="#121212"/>
+<text x="950.4" y="158.0" fill="#ffaf87" font-weight="400">│</text>
+<rect x="958.8" y="144.0" width="8.4" height="18" fill="#121212"/>
+<rect x="967.2" y="144.0" width="142.8" height="18" fill="#121212"/>
+<text x="967.2" y="158.0" fill="#ffaf87" font-weight="700">+ New Application</text>
+<rect x="1110.0" y="144.0" width="168.0" height="18" fill="#121212"/>
+<text x="34.8" y="176.0" fill="#7f7f7f" font-weight="400">创 建  · 修 改  · 验 证  · 运 行   ·  Studio: config/llm.yaml default</text>
+<rect x="925.2" y="162.0" width="8.4" height="18" fill="#121212"/>
+<text x="925.2" y="176.0" fill="#444444" font-weight="400">│</text>
+<rect x="933.6" y="162.0" width="344.4" height="18" fill="#121212"/>
+<rect x="925.2" y="180.0" width="8.4" height="18" fill="#121212"/>
+<text x="925.2" y="194.0" fill="#444444" font-weight="400">│</text>
+<rect x="933.6" y="180.0" width="16.8" height="18" fill="#121212"/>
+<rect x="950.4" y="180.0" width="168.0" height="18" fill="#121212"/>
+<text x="950.4" y="194.0" fill="#eeeeee" font-weight="400">goal_mode_validation</text>
+<rect x="1118.4" y="180.0" width="159.6" height="18" fill="#121212"/>
+<text x="34.8" y="212.0" fill="#5fafff" font-weight="400">│</text>
+<rect x="925.2" y="198.0" width="8.4" height="18" fill="#121212"/>
+<text x="925.2" y="212.0" fill="#444444" font-weight="400">│</text>
+<rect x="933.6" y="198.0" width="16.8" height="18" fill="#121212"/>
+<rect x="950.4" y="198.0" width="252.0" height="18" fill="#121212"/>
+<text x="950.4" y="212.0" fill="#7f7f7f" font-weight="400">配 置 有 效  · 尚 未 运 行  · 点 击 打 开 </text>
+<rect x="1202.4" y="198.0" width="75.6" height="18" fill="#121212"/>
+<text x="34.8" y="230.0" fill="#5fafff" font-weight="400">│</text>
+<text x="51.6" y="230.0" fill="#5fafff" font-weight="700">AgentLoom</text>
+<rect x="925.2" y="216.0" width="8.4" height="18" fill="#121212"/>
+<text x="925.2" y="230.0" fill="#444444" font-weight="400">│</text>
+<rect x="933.6" y="216.0" width="344.4" height="18" fill="#121212"/>
+<text x="34.8" y="248.0" fill="#5fafff" font-weight="400">│</text>
+<text x="51.6" y="248.0" fill="#eeeeee" font-weight="400">我 是  AgentLoom Studio Agent。 请 新 建 或 选 择 一 个  Application； 之 后 可 以 直 接 让 我 检 查 、 修 改 、 验 证 和 运 行 它 。 </text>
+<rect x="925.2" y="234.0" width="8.4" height="18" fill="#121212"/>
+<text x="925.2" y="248.0" fill="#444444" font-weight="400">│</text>
+<rect x="933.6" y="234.0" width="344.4" height="18" fill="#121212"/>
+<text x="34.8" y="266.0" fill="#5fafff" font-weight="400">│</text>
+<rect x="925.2" y="252.0" width="8.4" height="18" fill="#121212"/>
+<text x="925.2" y="266.0" fill="#444444" font-weight="400">│</text>
+<rect x="933.6" y="252.0" width="16.8" height="18" fill="#121212"/>
+<rect x="950.4" y="252.0" width="67.2" height="18" fill="#121212"/>
+<text x="950.4" y="266.0" fill="#ffaf87" font-weight="700">运 行 记 录 </text>
+<rect x="1017.6" y="252.0" width="260.4" height="18" fill="#121212"/>
+<rect x="925.2" y="270.0" width="8.4" height="18" fill="#121212"/>
+<text x="925.2" y="284.0" fill="#444444" font-weight="400">│</text>
+<rect x="933.6" y="270.0" width="344.4" height="18" fill="#121212"/>
+<rect x="925.2" y="288.0" width="8.4" height="18" fill="#121212"/>
+<text x="925.2" y="302.0" fill="#444444" font-weight="400">│</text>
+<rect x="933.6" y="288.0" width="16.8" height="18" fill="#121212"/>
+<rect x="950.4" y="288.0" width="8.4" height="18" fill="#121212"/>
+<text x="950.4" y="302.0" fill="#ffaf87" font-weight="400">│</text>
+<rect x="958.8" y="288.0" width="8.4" height="18" fill="#121212"/>
+<rect x="967.2" y="288.0" width="184.8" height="18" fill="#121212"/>
+<text x="967.2" y="302.0" fill="#eeeeee" font-weight="400">0 次  · 0 成 功  · 0 失 败 </text>
+<rect x="1152.0" y="288.0" width="126.0" height="18" fill="#121212"/>
+<rect x="925.2" y="306.0" width="8.4" height="18" fill="#121212"/>
+<text x="925.2" y="320.0" fill="#444444" font-weight="400">│</text>
+<rect x="933.6" y="306.0" width="16.8" height="18" fill="#121212"/>
+<rect x="950.4" y="306.0" width="8.4" height="18" fill="#121212"/>
+<text x="950.4" y="320.0" fill="#ffaf87" font-weight="400">│</text>
+<rect x="958.8" y="306.0" width="8.4" height="18" fill="#121212"/>
+<rect x="967.2" y="306.0" width="277.2" height="18" fill="#121212"/>
+<text x="967.2" y="320.0" fill="#eeeeee" font-weight="400">0 预 算 受 限  · 0 崩 溃  · 0 中 断  · 0 </text>
+<rect x="1244.4" y="306.0" width="33.6" height="18" fill="#121212"/>
+<rect x="925.2" y="324.0" width="8.4" height="18" fill="#121212"/>
+<text x="925.2" y="338.0" fill="#444444" font-weight="400">│</text>
+<rect x="933.6" y="324.0" width="16.8" height="18" fill="#121212"/>
+<rect x="950.4" y="324.0" width="8.4" height="18" fill="#121212"/>
+<text x="950.4" y="338.0" fill="#ffaf87" font-weight="400">│</text>
+<rect x="958.8" y="324.0" width="8.4" height="18" fill="#121212"/>
+<rect x="967.2" y="324.0" width="50.4" height="18" fill="#121212"/>
+<text x="967.2" y="338.0" fill="#eeeeee" font-weight="400">运 行 中 </text>
+<rect x="1017.6" y="324.0" width="260.4" height="18" fill="#121212"/>
+<rect x="925.2" y="342.0" width="8.4" height="18" fill="#121212"/>
+<text x="925.2" y="356.0" fill="#444444" font-weight="400">│</text>
+<rect x="933.6" y="342.0" width="16.8" height="18" fill="#121212"/>
+<rect x="950.4" y="342.0" width="8.4" height="18" fill="#121212"/>
+<text x="950.4" y="356.0" fill="#ffaf87" font-weight="400">│</text>
+<rect x="958.8" y="342.0" width="8.4" height="18" fill="#121212"/>
+<rect x="967.2" y="342.0" width="134.4" height="18" fill="#121212"/>
+<text x="967.2" y="356.0" fill="#7f7f7f" font-weight="400">调 度 服 务 : 未 启 动 </text>
+<rect x="1101.6" y="342.0" width="176.4" height="18" fill="#121212"/>
+<rect x="925.2" y="360.0" width="8.4" height="18" fill="#121212"/>
+<text x="925.2" y="374.0" fill="#444444" font-weight="400">│</text>
+<rect x="933.6" y="360.0" width="344.4" height="18" fill="#121212"/>
+<rect x="925.2" y="378.0" width="8.4" height="18" fill="#121212"/>
+<text x="925.2" y="392.0" fill="#444444" font-weight="400">│</text>
+<rect x="933.6" y="378.0" width="16.8" height="18" fill="#121212"/>
+<rect x="950.4" y="378.0" width="8.4" height="18" fill="#121212"/>
+<text x="950.4" y="392.0" fill="#ffaf5f" font-weight="400">│</text>
+<rect x="958.8" y="378.0" width="8.4" height="18" fill="#121212"/>
+<rect x="967.2" y="378.0" width="176.4" height="18" fill="#121212"/>
+<text x="967.2" y="392.0" fill="#ffaf5f" font-weight="400">Worker 状 态 索 引 不 完 整 </text>
+<rect x="1143.6" y="378.0" width="134.4" height="18" fill="#121212"/>
+<rect x="925.2" y="396.0" width="8.4" height="18" fill="#121212"/>
+<text x="925.2" y="410.0" fill="#444444" font-weight="400">│</text>
+<rect x="933.6" y="396.0" width="16.8" height="18" fill="#121212"/>
+<rect x="950.4" y="396.0" width="8.4" height="18" fill="#121212"/>
+<text x="950.4" y="410.0" fill="#ffaf5f" font-weight="400">│</text>
+<rect x="958.8" y="396.0" width="8.4" height="18" fill="#121212"/>
+<rect x="967.2" y="396.0" width="285.6" height="18" fill="#121212"/>
+<text x="967.2" y="410.0" fill="#7f7f7f" font-weight="400">部 分 历 史 调 用 无 法 确 认 ； 不 会 把 它 们 误 </text>
+<rect x="1252.8" y="396.0" width="25.2" height="18" fill="#121212"/>
+<rect x="925.2" y="414.0" width="8.4" height="18" fill="#121212"/>
+<text x="925.2" y="428.0" fill="#444444" font-weight="400">│</text>
+<rect x="933.6" y="414.0" width="16.8" height="18" fill="#121212"/>
+<rect x="950.4" y="414.0" width="8.4" height="18" fill="#121212"/>
+<text x="950.4" y="428.0" fill="#ffaf5f" font-weight="400">│</text>
+<rect x="958.8" y="414.0" width="8.4" height="18" fill="#121212"/>
+<rect x="967.2" y="414.0" width="134.4" height="18" fill="#121212"/>
+<text x="967.2" y="428.0" fill="#7f7f7f" font-weight="400">报 为  Never run。 </text>
+<rect x="1101.6" y="414.0" width="176.4" height="18" fill="#121212"/>
+<rect x="925.2" y="432.0" width="8.4" height="18" fill="#121212"/>
+<text x="925.2" y="446.0" fill="#444444" font-weight="400">│</text>
+<rect x="933.6" y="432.0" width="344.4" height="18" fill="#121212"/>
+<rect x="925.2" y="450.0" width="8.4" height="18" fill="#121212"/>
+<text x="925.2" y="464.0" fill="#444444" font-weight="400">│</text>
+<rect x="933.6" y="450.0" width="16.8" height="18" fill="#121212"/>
+<rect x="950.4" y="450.0" width="8.4" height="18" fill="#121212"/>
+<text x="950.4" y="464.0" fill="#ffaf5f" font-weight="400">│</text>
+<rect x="958.8" y="450.0" width="8.4" height="18" fill="#121212"/>
+<rect x="967.2" y="450.0" width="168.0" height="18" fill="#121212"/>
+<text x="967.2" y="464.0" fill="#ffaf5f" font-weight="400">Run 状 态 索 引 正 在 收 敛 </text>
+<rect x="1135.2" y="450.0" width="142.8" height="18" fill="#121212"/>
+<rect x="925.2" y="468.0" width="8.4" height="18" fill="#121212"/>
+<text x="925.2" y="482.0" fill="#444444" font-weight="400">│</text>
+<rect x="933.6" y="468.0" width="16.8" height="18" fill="#121212"/>
+<rect x="950.4" y="468.0" width="8.4" height="18" fill="#121212"/>
+<text x="950.4" y="482.0" fill="#ffaf5f" font-weight="400">│</text>
+<rect x="958.8" y="468.0" width="8.4" height="18" fill="#121212"/>
+<rect x="967.2" y="468.0" width="285.6" height="18" fill="#121212"/>
+<text x="967.2" y="482.0" fill="#7f7f7f" font-weight="400">当 前 是 有 界 增 量 窗 口 ； 后 续 刷 新 会 继 续 </text>
+<rect x="1252.8" y="468.0" width="25.2" height="18" fill="#121212"/>
+<rect x="925.2" y="486.0" width="8.4" height="18" fill="#121212"/>
+<text x="925.2" y="500.0" fill="#444444" font-weight="400">│</text>
+<rect x="933.6" y="486.0" width="16.8" height="18" fill="#121212"/>
+<rect x="950.4" y="486.0" width="8.4" height="18" fill="#121212"/>
+<text x="950.4" y="500.0" fill="#ffaf5f" font-weight="400">│</text>
+<rect x="958.8" y="486.0" width="8.4" height="18" fill="#121212"/>
+<rect x="967.2" y="486.0" width="134.4" height="18" fill="#121212"/>
+<text x="967.2" y="500.0" fill="#7f7f7f" font-weight="400">对 账 新 增 与 删 除 。 </text>
+<rect x="1101.6" y="486.0" width="176.4" height="18" fill="#121212"/>
+<rect x="925.2" y="504.0" width="8.4" height="18" fill="#121212"/>
+<text x="925.2" y="518.0" fill="#444444" font-weight="400">│</text>
+<rect x="933.6" y="504.0" width="344.4" height="18" fill="#121212"/>
+<rect x="925.2" y="522.0" width="8.4" height="18" fill="#121212"/>
+<text x="925.2" y="536.0" fill="#444444" font-weight="400">│</text>
+<rect x="933.6" y="522.0" width="16.8" height="18" fill="#121212"/>
+<rect x="950.4" y="522.0" width="67.2" height="18" fill="#121212"/>
+<text x="950.4" y="536.0" fill="#ffaf87" font-weight="700">最 近 执 行 </text>
+<rect x="1017.6" y="522.0" width="260.4" height="18" fill="#121212"/>
+<rect x="925.2" y="540.0" width="8.4" height="18" fill="#121212"/>
+<text x="925.2" y="554.0" fill="#444444" font-weight="400">│</text>
+<rect x="933.6" y="540.0" width="344.4" height="18" fill="#121212"/>
+<rect x="925.2" y="558.0" width="8.4" height="18" fill="#121212"/>
+<text x="925.2" y="572.0" fill="#444444" font-weight="400">│</text>
+<rect x="933.6" y="558.0" width="16.8" height="18" fill="#121212"/>
+<rect x="950.4" y="558.0" width="100.8" height="18" fill="#121212"/>
+<text x="950.4" y="572.0" fill="#7f7f7f" font-weight="400">暂 无 运 行 记 录 </text>
+<rect x="1051.2" y="558.0" width="226.8" height="18" fill="#121212"/>
+<rect x="925.2" y="576.0" width="8.4" height="18" fill="#121212"/>
+<text x="925.2" y="590.0" fill="#444444" font-weight="400">│</text>
+<rect x="933.6" y="576.0" width="344.4" height="18" fill="#121212"/>
+<rect x="925.2" y="594.0" width="8.4" height="18" fill="#121212"/>
+<text x="925.2" y="608.0" fill="#444444" font-weight="400">│</text>
+<rect x="933.6" y="594.0" width="344.4" height="18" fill="#121212"/>
+<rect x="925.2" y="612.0" width="8.4" height="18" fill="#121212"/>
+<text x="925.2" y="626.0" fill="#444444" font-weight="400">│</text>
+<rect x="933.6" y="612.0" width="344.4" height="18" fill="#121212"/>
+<rect x="925.2" y="630.0" width="8.4" height="18" fill="#121212"/>
+<text x="925.2" y="644.0" fill="#444444" font-weight="400">│</text>
+<rect x="933.6" y="630.0" width="344.4" height="18" fill="#121212"/>
+<rect x="34.8" y="648.0" width="873.6" height="18" fill="#1c1c1c"/>
+<text x="34.8" y="662.0" fill="#5f5f5f" font-weight="400">┌──────────────────────────────────────────────────────────────────────────────────────────────────────┐</text>
+<rect x="925.2" y="648.0" width="8.4" height="18" fill="#121212"/>
+<text x="925.2" y="662.0" fill="#444444" font-weight="400">│</text>
+<rect x="933.6" y="648.0" width="344.4" height="18" fill="#121212"/>
+<rect x="34.8" y="666.0" width="8.4" height="18" fill="#1c1c1c"/>
+<text x="34.8" y="680.0" fill="#5f5f5f" font-weight="400">│</text>
+<rect x="43.2" y="666.0" width="8.4" height="18" fill="#1c1c1c"/>
+<rect x="51.6" y="666.0" width="445.2" height="18" fill="#1c1c1c"/>
+<text x="51.6" y="680.0" fill="#7f7f7f" font-weight="400">描 述 你 要 创 建 或 修 改 的  Application； 输 入  /help 查 看 命 令 </text>
+<rect x="496.8" y="666.0" width="403.2" height="18" fill="#1c1c1c"/>
+<rect x="900.0" y="666.0" width="8.4" height="18" fill="#1c1c1c"/>
+<text x="900.0" y="680.0" fill="#5f5f5f" font-weight="400">│</text>
+<rect x="925.2" y="666.0" width="8.4" height="18" fill="#121212"/>
+<text x="925.2" y="680.0" fill="#444444" font-weight="400">│</text>
+<rect x="933.6" y="666.0" width="344.4" height="18" fill="#121212"/>
+<rect x="34.8" y="684.0" width="873.6" height="18" fill="#1c1c1c"/>
+<text x="34.8" y="698.0" fill="#5f5f5f" font-weight="400">└──────────────────────────────────────────────────────────────────────────────────────────────────────┘</text>
+<rect x="925.2" y="684.0" width="8.4" height="18" fill="#121212"/>
+<text x="925.2" y="698.0" fill="#444444" font-weight="400">│</text>
+<rect x="933.6" y="684.0" width="344.4" height="18" fill="#121212"/>
+<rect x="925.2" y="702.0" width="8.4" height="18" fill="#121212"/>
+<text x="925.2" y="716.0" fill="#444444" font-weight="400">│</text>
+<rect x="933.6" y="702.0" width="344.4" height="18" fill="#121212"/>
+<text x="34.8" y="734.0" fill="#ffaf87" font-weight="700">[ Enter 发 送  ]</text>
+<text x="169.2" y="734.0" fill="#7f7f7f" font-weight="400">Ctrl+X Commands</text>
+<text x="312.0" y="734.0" fill="#7f7f7f" font-weight="400">Ctrl+Y 复 制 选 中 </text>
+<text x="454.8" y="734.0" fill="#7f7f7f" font-weight="400">/help 帮 助 </text>
+<rect x="925.2" y="720.0" width="8.4" height="18" fill="#121212"/>
+<text x="925.2" y="734.0" fill="#444444" font-weight="400">│</text>
+<rect x="933.6" y="720.0" width="344.4" height="18" fill="#121212"/>
+<rect x="925.2" y="738.0" width="8.4" height="18" fill="#121212"/>
+<text x="925.2" y="752.0" fill="#444444" font-weight="400">│</text>
+<rect x="933.6" y="738.0" width="16.8" height="18" fill="#121212"/>
+<rect x="950.4" y="738.0" width="218.4" height="18" fill="#121212"/>
+<text x="950.4" y="752.0" fill="#7f7f7f" font-weight="400">Ctrl+X Commands · Esc 返 回 </text>
+<rect x="1168.8" y="738.0" width="109.2" height="18" fill="#121212"/>
+<rect x="18.0" y="756.0" width="16.8" height="18" fill="#121212"/>
+<rect x="34.8" y="756.0" width="378.0" height="18" fill="#121212"/>
+<text x="34.8" y="770.0" fill="#7f7f7f" font-weight="400">AgentLoom · 全 局 运 行 状 态 自 动 刷 新  · r 重 新 索 引 </text>
+<rect x="412.8" y="756.0" width="252.0" height="18" fill="#121212"/>
+<rect x="664.8" y="756.0" width="243.6" height="18" fill="#121212"/>
+<text x="664.8" y="770.0" fill="#7f7f7f" font-weight="400">Ctrl+Y 复 制 选 中  · Ctrl-C 退 出 </text>
+<rect x="908.4" y="756.0" width="16.8" height="18" fill="#121212"/>
+<rect x="925.2" y="756.0" width="8.4" height="18" fill="#121212"/>
+<text x="925.2" y="770.0" fill="#444444" font-weight="400">│</text>
+<rect x="933.6" y="756.0" width="344.4" height="18" fill="#121212"/>
+</svg>
