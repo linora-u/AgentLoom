@@ -8,11 +8,13 @@ Provides shared capabilities such as model management and execution environment 
 # Checkpoint / Resume support
 import hashlib as _hashlib
 import os
+import time
 import uuid
 from abc import ABC, abstractmethod
 from collections.abc import Callable
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from contextlib import nullcontext
-from contextvars import ContextVar
+from contextvars import ContextVar, copy_context
 from copy import deepcopy
 from dataclasses import dataclass, replace
 from enum import Enum
@@ -24,7 +26,9 @@ if TYPE_CHECKING:
     from src.application_run_lifecycle import ApplicationRunLifecycle
 
 from smolagents import (
+    AgentAudio,
     AgentGenerationError,
+    AgentImage,
     AgentLogger,
     AgentParsingError,
     AgentToolCallError,
@@ -36,6 +40,8 @@ from smolagents import (
     ToolCallingAgent,
     validate_tool_arguments,
 )
+from smolagents.agents import ToolOutput
+from smolagents.memory import ToolCall
 from src.lib.config import (
     C,
     build_effective_agent_config_snapshot,
@@ -64,7 +70,13 @@ from src.lib.smolagents.hooks import (
     HookRun,
     builtin_hook_handlers,
 )
-from src.lib.smolagents.hooks.tool_shim import clone_tool_for_runtime, inject_hooks
+from src.lib.smolagents.hooks.tool_shim import (
+    ToolBlockedError,
+    ToolBlockedResult,
+    bind_tool_call_id,
+    clone_tool_for_runtime,
+    inject_hooks,
+)
 from src.lib.smolagents.models.model_manager import (
     ModelConfigBuilder,
     get_model,
@@ -76,6 +88,7 @@ from src.lib.smolagents.models.tool_call_parser import (
 from src.lib.smolagents.monkey_patch import install_agentloom_runtime_adapters
 from src.lib.smolagents.prompts.prompt_builder import build_prompt_templates
 from src.lib.smolagents.skills.catalog import SkillCatalog, SkillSource
+from src.lib.smolagents.tool_protocol import ToolCallRecord, ToolErrorRecord
 from src.lib.smolagents.tools.tools import ensure_tool_wrapped
 from src.lib.utils.workspace import ensure_workspace_mounted_once
 from src.tools.loader import resolve_tool_function
@@ -279,12 +292,137 @@ class ToolCallingAgentV2(_SuccessfulRunStateMixin, LoomAgentMixin, ToolCallingAg
                 ) from cause
             raise
 
-    def execute_tool_call(self, tool_name: str, arguments: dict[str, str] | str) -> Any:
+    @staticmethod
+    def _tool_error_record(exc: Exception) -> ToolErrorRecord:
+        """Classify an execution exception without exposing wrapper arguments."""
+
+        cause = exc.__cause__ if isinstance(exc.__cause__, Exception) else exc
+        if isinstance(exc, AgentToolCallError):
+            kind = "invalid_arguments"
+            stage = "input_validation"
+            retryable = True
+        else:
+            kind = str(getattr(cause, "kind", "execution_error"))
+            stage = str(getattr(cause, "stage", "tool_execution"))
+            retryable = bool(getattr(cause, "retryable", True))
+        return ToolErrorRecord(
+            kind=kind,
+            message=str(cause) or type(cause).__name__,
+            retryable=retryable,
+            stage=stage,
+        )
+
+    def process_tool_calls(self, chat_message, memory_step):
+        """Settle every Tool call independently and persist its stable provider ID."""
+
+        assert chat_message.tool_calls is not None
+        calls = [
+            ToolCall(
+                name=call.function.name,
+                arguments=call.function.arguments,
+                id=call.id,
+            )
+            for call in chat_message.tool_calls
+        ]
+        memory_step.tool_calls = calls
+        records = [
+            ToolCallRecord(
+                call_id=call.id,
+                tool_name=call.name,
+                input=call.arguments or {},
+            )
+            for call in calls
+        ]
+        memory_step.tool_results = records
+
+        for call in calls:
+            yield call
+
+        def execute_one(index: int) -> tuple[int, ToolOutput]:
+            call = calls[index]
+            record = records[index]
+            record.status = "running"
+            record.started_at = time.time()
+            try:
+                result = self.execute_tool_call(
+                    call.name,
+                    call.arguments or {},
+                    call_id=call.id,
+                )
+                if isinstance(result, ToolBlockedResult):
+                    record.status = "blocked"
+                    record.error = ToolErrorRecord(
+                        kind=result.kind,
+                        message=str(result),
+                        retryable=result.retryable,
+                        stage=result.stage,
+                    )
+                    observation = record.model_content()
+                    is_final_answer = False
+                    output = observation
+                elif type(result) in {AgentImage, AgentAudio}:
+                    observation_name = "image.png" if type(result) is AgentImage else "audio.mp3"
+                    self.state[observation_name] = result
+                    observation = f"Stored '{observation_name}' in memory."
+                    record.status = "completed"
+                    record.output = observation
+                    is_final_answer = call.name == "final_answer"
+                    output = result
+                else:
+                    observation = str(result).strip()
+                    record.status = "completed"
+                    record.output = result
+                    is_final_answer = call.name == "final_answer"
+                    output = result
+            except Exception as exc:
+                cause = exc.__cause__ if isinstance(exc.__cause__, Exception) else exc
+                record.status = "blocked" if isinstance(cause, ToolBlockedError) else "error"
+                record.error = self._tool_error_record(exc)
+                observation = record.model_content()
+                is_final_answer = False
+                output = observation
+            finally:
+                record.ended_at = time.time()
+
+            self.logger.log(f"Tool {call.name} [{call.id}] -> {record.status}", level=LogLevel.INFO)
+            return index, ToolOutput(
+                id=call.id,
+                output=output,
+                is_final_answer=is_final_answer,
+                observation=observation,
+                tool_call=call,
+            )
+
+        outputs: dict[int, ToolOutput] = {}
+        if len(calls) == 1:
+            index, output = execute_one(0)
+            outputs[index] = output
+            yield output
+        else:
+            with ThreadPoolExecutor(self.max_tool_threads) as executor:
+                futures = []
+                for index in range(len(calls)):
+                    context = copy_context()
+                    futures.append(executor.submit(context.run, execute_one, index))
+                for future in as_completed(futures):
+                    index, output = future.result()
+                    outputs[index] = output
+                    yield output
+
+        memory_step.observations = "\n".join(outputs[index].observation for index in range(len(calls)))
+
+    def execute_tool_call(
+        self,
+        tool_name: str,
+        arguments: dict[str, str] | str,
+        *,
+        call_id: str | None = None,
+    ) -> Any:
         """Execute a tool with AgentLoom-local schema-bound argument coercion."""
 
         available_tools = {**self.tools, **self.managed_agents}
         if tool_name not in available_tools:
-            raise AgentToolExecutionError(
+            raise AgentToolCallError(
                 f"Unknown tool {tool_name}, should be one of: {', '.join(available_tools)}.",
                 self.logger,
             )
@@ -304,9 +442,10 @@ class ToolCallingAgentV2(_SuccessfulRunStateMixin, LoomAgentMixin, ToolCallingAg
             raise AgentToolExecutionError(error_msg, self.logger) from e
 
         try:
-            if isinstance(arguments, dict):
-                return tool(**arguments) if is_managed_agent else tool(**arguments, sanitize_inputs_outputs=True)
-            return tool(arguments) if is_managed_agent else tool(arguments, sanitize_inputs_outputs=True)
+            with bind_tool_call_id(call_id or uuid.uuid4().hex):
+                if isinstance(arguments, dict):
+                    return tool(**arguments) if is_managed_agent else tool(**arguments, sanitize_inputs_outputs=True)
+                return tool(arguments) if is_managed_agent else tool(arguments, sanitize_inputs_outputs=True)
         except Exception as e:
             if is_managed_agent:
                 error_msg = (

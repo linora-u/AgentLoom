@@ -21,13 +21,24 @@ from contextvars import ContextVar
 from typing import Any
 
 from smolagents import AgentLogger, LiteLLMModel
-from smolagents.models import ChatMessage, ChatMessageToolCall, ChatMessageToolCallFunction, MessageRole
+from smolagents.models import (
+    ChatMessage,
+    ChatMessageToolCall,
+    ChatMessageToolCallFunction,
+    MessageRole,
+    get_clean_message_list,
+    tool_role_conversions,
+)
 from smolagents.monitoring import TokenUsage
 from src.lib.logging import get_logger
 from src.lib.smolagents.models.tool_call_parser import (
     ToolCallParseError,
     parse_json_with_repair,
     parse_structured_tool_call,
+)
+from src.lib.smolagents.tool_protocol import (
+    has_native_tool_marker,
+    native_tool_message_dict,
 )
 
 _LOG = get_logger(__name__)
@@ -313,7 +324,34 @@ class LiteLLMModelV2(LiteLLMModel):
             tool_call.function.arguments = arguments
 
     def _prepare_completion_kwargs(self, *args, **kwargs):
+        source_messages = args[0] if args else kwargs.get("messages", [])
         completion_kwargs = super()._prepare_completion_kwargs(*args, **kwargs)
+
+        if any(has_native_tool_marker(message) for message in source_messages):
+            projected: list[dict[str, Any]] = []
+            ordinary: list[ChatMessage | dict] = []
+
+            def flush_ordinary() -> None:
+                if not ordinary:
+                    return
+                projected.extend(
+                    get_clean_message_list(
+                        ordinary,
+                        role_conversions=kwargs.get("custom_role_conversions") or tool_role_conversions,
+                        convert_images_to_image_urls=kwargs.get("convert_images_to_image_urls", False),
+                        flatten_messages_as_text=kwargs.get("flatten_messages_as_text", self.flatten_messages_as_text),
+                    )
+                )
+                ordinary.clear()
+
+            for message in source_messages:
+                if isinstance(message, ChatMessage) and has_native_tool_marker(message):
+                    flush_ordinary()
+                    projected.append(native_tool_message_dict(message))
+                else:
+                    ordinary.append(message)
+            flush_ordinary()
+            completion_kwargs["messages"] = projected
 
         # ToolCallingAgent cannot consume a plain assistant response: every
         # action step must invoke a registered tool or final_answer. Preserve a
