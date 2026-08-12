@@ -3,6 +3,8 @@ from __future__ import annotations
 import contextvars
 import threading
 
+import pytest
+
 from src.lib.context_engine import ContextEngine, ContextEngineConfig
 from src.lib.context_engine.compressors import compress_content
 from src.lib.context_engine.config import ContextStoreConfig
@@ -175,6 +177,41 @@ def test_log_compressor_preserves_error_traceback_and_tail():
     assert "ERROR validation failed" in result.preview
     assert "ValueError: LOG-NEEDLE" in result.preview
     assert "INFO tail row=139" in result.preview
+
+
+@pytest.mark.parametrize("limit", [1, 20, 120, 500, 3000])
+def test_compressor_preview_never_exceeds_positive_limit(limit):
+    result = compress_content("payload\n" * 2000, ContentKind.TEXT, preview_max_chars=limit)
+
+    assert len(result.preview) <= limit
+
+
+def test_log_compressor_prioritizes_middle_error_under_tight_limit():
+    lines = [f"INFO head row={idx:03d} {'x' * 20}" for idx in range(70)]
+    lines.append("ERROR UNIQUE-MIDDLE-FAILURE")
+    lines.extend(f"INFO tail row={idx:03d} {'y' * 20}" for idx in range(70, 140))
+
+    result = compress_content("\n".join(lines), ContentKind.LOG, preview_max_chars=320)
+
+    assert len(result.preview) <= 320
+    assert "UNIQUE-MIDDLE-FAILURE" in result.preview
+
+
+def test_json_compressor_prioritizes_middle_error_under_tight_limit():
+    items = [
+        {"status": "ok", "idx": idx, "payload": "x" * 60}
+        for idx in range(80)
+    ]
+    items[40] = {"status": "error", "message": "UNIQUE-JSON-MIDDLE-FAILURE"}
+
+    result = compress_content(
+        __import__("json").dumps(items),
+        ContentKind.JSON,
+        preview_max_chars=400,
+    )
+
+    assert len(result.preview) <= 400
+    assert "UNIQUE-JSON-MIDDLE-FAILURE" in result.preview
 
 
 def test_diff_compressor_preserves_file_hunks_and_changed_lines():

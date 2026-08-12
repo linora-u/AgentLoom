@@ -4,10 +4,8 @@ from __future__ import annotations
 
 import json
 import re
-from typing import Any
 
 from .models import CompressionResult, ContentKind
-
 
 ERROR_RE = re.compile(r"(error|exception|failed|failure|traceback|panic|fatal)", re.IGNORECASE)
 
@@ -48,10 +46,25 @@ def _compress_json(text: str, limit: int) -> tuple[str, str]:
         return _compress_text(text, limit), "json_parse_fallback"
 
     if isinstance(value, list):
+        all_error_items = [
+            item
+            for item in value
+            if ERROR_RE.search(json.dumps(item, ensure_ascii=False, default=str))
+        ]
         length = len(value)
         if length <= 12:
             compact = json.dumps(value, ensure_ascii=False, indent=2)
-            return _fit(compact, limit), "json_small_list"
+            return (
+                _fit(
+                    compact,
+                    limit,
+                    anchors=[
+                        json.dumps(item, ensure_ascii=False, default=str)
+                        for item in all_error_items[:10]
+                    ],
+                ),
+                "json_small_list",
+            )
         keep_indices = set(range(min(5, length))) | set(range(max(0, length - 3), length))
         for idx, item in enumerate(value):
             if idx in keep_indices:
@@ -69,13 +82,36 @@ def _compress_json(text: str, limit: int) -> tuple[str, str]:
             },
             "items": kept,
         }
-        return _fit(json.dumps(preview, ensure_ascii=False, indent=2, default=str), limit), "smart_crusher_lite_list"
+        return (
+            _fit(
+                json.dumps(preview, ensure_ascii=False, indent=2, default=str),
+                limit,
+                anchors=[json.dumps(item, ensure_ascii=False, default=str) for item in all_error_items[:10]],
+            ),
+            "smart_crusher_lite_list",
+        )
 
     if isinstance(value, dict):
         keys = list(value)
+        all_error_items = {
+            key: value[key]
+            for key in keys
+            if ERROR_RE.search(str(key))
+            or ERROR_RE.search(json.dumps(value.get(key), ensure_ascii=False, default=str))
+        }
         if len(keys) <= 20:
             compact = json.dumps(value, ensure_ascii=False, indent=2, default=str)
-            return _fit(compact, limit), "json_small_object"
+            return (
+                _fit(
+                    compact,
+                    limit,
+                    anchors=[
+                        json.dumps({key: item}, ensure_ascii=False, default=str)
+                        for key, item in list(all_error_items.items())[:10]
+                    ],
+                ),
+                "json_small_object",
+            )
         kept_keys = keys[:12] + keys[-5:]
         for key in keys:
             if key in kept_keys:
@@ -92,7 +128,17 @@ def _compress_json(text: str, limit: int) -> tuple[str, str]:
             },
             "items": {key: value[key] for key in dict.fromkeys(kept_keys)},
         }
-        return _fit(json.dumps(preview, ensure_ascii=False, indent=2, default=str), limit), "smart_crusher_lite_object"
+        return (
+            _fit(
+                json.dumps(preview, ensure_ascii=False, indent=2, default=str),
+                limit,
+                anchors=[
+                    json.dumps({key: item}, ensure_ascii=False, default=str)
+                    for key, item in list(all_error_items.items())[:10]
+                ],
+            ),
+            "smart_crusher_lite_object",
+        )
 
     compact = json.dumps(value, ensure_ascii=False, indent=2, default=str)
     return _fit(compact, limit), "json_scalar"
@@ -106,7 +152,7 @@ def _compress_search(text: str, limit: int) -> tuple[str, str]:
     error_lines = [line for line in lines if ERROR_RE.search(line)]
     selected = _dedupe_keep_order(selected[:12] + error_lines[:10] + selected[12:])
     header = f"[Search summary: original_lines={len(lines)} preview_lines={len(selected)}]"
-    return _fit("\n".join([header, *selected]), limit), "search_first_last_errors"
+    return _fit("\n".join([header, *selected]), limit, anchors=error_lines[:10]), "search_first_last_errors"
 
 
 def _compress_log(text: str, limit: int) -> tuple[str, str]:
@@ -123,7 +169,8 @@ def _compress_log(text: str, limit: int) -> tuple[str, str]:
     selected.extend(lines[-40:])
     selected = _dedupe_keep_order(selected)
     header = f"[Log summary: original_lines={len(lines)} preview_lines={len(selected)} errors_preserved=yes]"
-    return _fit("\n".join([header, *selected]), limit), "log_errors_tail"
+    error_lines = [line for line in lines if ERROR_RE.search(line)]
+    return _fit("\n".join([header, *selected]), limit, anchors=error_lines[:10]), "log_errors_tail"
 
 
 def _compress_diff(text: str, limit: int) -> tuple[str, str]:
@@ -155,18 +202,39 @@ def _compress_text(text: str, limit: int) -> str:
     return _fit(text, limit)
 
 
-def _fit(text: str, limit: int) -> str:
+def _fit(text: str, limit: int, anchors: list[str] | None = None) -> str:
     if limit <= 0 or len(text) <= limit:
         return text
-    half = max(1, limit // 2)
-    omitted = len(text) - (half * 2)
-    if omitted <= 0:
-        return text[:limit]
-    return (
-        text[:half]
-        + f"\n\n... [ContextEngine preview omitted {omitted:,} characters; use loom_retrieve_context for full content] ...\n\n"
-        + text[-half:]
-    )
+
+    marker = "\n...[preview omitted; retrieve ContextRef]...\n"
+    priority = _dedupe_keep_order([anchor.strip() for anchor in anchors or [] if anchor.strip()])
+
+    if priority:
+        prefix = "[Priority excerpts]\n"
+        priority_text = "\n".join(priority)
+        reserved = len(prefix) + len(marker)
+        if reserved >= limit:
+            return (prefix + priority_text)[:limit]
+
+        anchor_budget = min(len(priority_text), max(1, (limit - reserved) * 2 // 3))
+        anchor_text = priority_text[:anchor_budget]
+        remaining = limit - len(prefix) - len(anchor_text) - len(marker)
+        head_chars = max(0, remaining // 2)
+        tail_chars = max(0, remaining - head_chars)
+        result = prefix + anchor_text + marker + text[:head_chars]
+        if tail_chars:
+            result += text[-tail_chars:]
+        return result[:limit]
+
+    available = limit - len(marker)
+    if available <= 0:
+        return marker[:limit]
+    head_chars = available // 2
+    tail_chars = available - head_chars
+    result = text[:head_chars] + marker
+    if tail_chars:
+        result += text[-tail_chars:]
+    return result[:limit]
 
 
 def _first_last(lines: list[str], first: int, last: int) -> list[str]:
