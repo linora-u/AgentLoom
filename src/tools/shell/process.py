@@ -317,22 +317,29 @@ class ShellProcess:
             return self._session.cwd
         return None
 
+    def execute(self, command: str) -> ExecResult:
+        """Execute a command and return its structured terminal outcome."""
+        if self.session_scoped:
+            return self._execute_session_scoped(command)
+        return self._execute_standalone(command)
+
     def run(self, command: str) -> str:
         """Execute a shell command.
 
         In session-scoped mode, CWD state is preserved across calls.
         In standalone mode, each call is fully isolated.
         """
-        if self.session_scoped:
-            return self._run_session_scoped(command)
-        else:
-            return self._run_standalone(command)
+        return self.render(self.execute(command))
+
+    def render(self, result: ExecResult) -> str:
+        """Render a structured execution result for backwards-compatible callers."""
+        return self._render_exec_result(result)
 
     # ------------------------------------------------------------------
     # Standalone execution
     # ------------------------------------------------------------------
 
-    def _run_standalone(self, command: str) -> str:
+    def _execute_standalone(self, command: str) -> ExecResult:
         """Run a command as an isolated subprocess."""
         if self.is_windows:
             command = f"chcp 65001 >nul & {command}"
@@ -347,16 +354,14 @@ class ShellProcess:
                     errors="replace",
                     env=_build_subprocess_env(),
                 )
-                return self._format_output(result.stdout or "")
+                return ExecResult(output=result.stdout or "", exit_code=result.returncode)
             except subprocess.TimeoutExpired as e:
                 partial = e.stdout or ""
                 if isinstance(partial, bytes):
                     partial = partial.decode(errors="replace")
-                return self._format_output(
-                    f"{partial}\n\n[Timeout Error: Command took longer than {self.timeout} seconds]"
-                )
+                return ExecResult(output=partial, timed_out=True)
             except Exception as e:
-                return self._format_output(f"Execution failed: {str(e)}")
+                return ExecResult(output=f"Execution failed: {str(e)}", interrupted=True)
 
         env = _build_subprocess_env()
         is_zsh = "zsh" in os.path.basename(self._shell_path).lower()
@@ -387,13 +392,13 @@ class ShellProcess:
         except Exception as e:
             result = ExecResult(output=f"Execution failed: {str(e)}")
 
-        return self._render_exec_result(result)
+        return result
 
     # ------------------------------------------------------------------
     # Session-scoped execution (stateless subprocess + CWD state)
     # ------------------------------------------------------------------
 
-    def _run_session_scoped(self, command: str) -> str:
+    def _execute_session_scoped(self, command: str) -> ExecResult:
         """Run a command with session state preservation.
 
         Each call spawns a new subprocess.  Previous session CWD is
@@ -503,7 +508,7 @@ class ShellProcess:
         # Update session state from tracking files (CWD only).
         session.update_cwd_from_file()
 
-        return self._render_exec_result(result)
+        return result
 
     def _render_exec_result(self, result: ExecResult) -> str:
         output = result.output

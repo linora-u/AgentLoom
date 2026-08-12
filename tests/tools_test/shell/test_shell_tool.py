@@ -1,16 +1,15 @@
 import unittest
 from unittest.mock import MagicMock, patch
 
-
-
 from src.tools.shell import shell_tool
 from src.tools.shell import validator as validator_module
+from src.tools.shell.shell_tool import ShellCommandError
 
 
 class TestShellTool(unittest.TestCase):
     def setUp(self):
         # Ensure no agent context bleeds in from prior tests
-        from src.trace.task_context import clear_current_agent_id, clear_current_agent_config
+        from src.trace.task_context import clear_current_agent_config, clear_current_agent_id
         try:
             clear_current_agent_id()
         except Exception:
@@ -23,7 +22,7 @@ class TestShellTool(unittest.TestCase):
         self._commands_patcher = patch.object(
             validator_module,
             "load_allowed_commands",
-            return_value=["echo", "ls", "pwd", "cat", "python", "python3", "base64", "command"],
+            return_value=["echo", "ls", "pwd", "cat", "python", "python3", "base64", "command", "grep"],
         )
         self._operators_patcher = patch.object(
             validator_module,
@@ -117,6 +116,20 @@ class TestShellTool(unittest.TestCase):
         result = shell_tool("python3 -c 'pass'")
         self.assertIn("produced no output", result)
         self.assertIn("python3 -c 'pass'", result)
+
+    def test_shell_tool_surfaces_nonzero_exit_as_tool_failure_with_output(self):
+        with self.assertRaisesRegex(ShellCommandError, "exit code 7") as captured:
+            shell_tool("python3 -c 'import sys; print(\"before failure\"); sys.exit(7)'")
+
+        self.assertIn("before failure", str(captured.exception))
+        self.assertEqual(captured.exception.exit_code, 7)
+        self.assertTrue(captured.exception.retryable)
+
+    def test_shell_tool_preserves_informational_nonzero_exit_semantics(self):
+        result = shell_tool("grep definitely_missing_pattern pyproject.toml")
+
+        self.assertIn("No matches found", result)
+        self.assertIn("exit code 1", result)
 
     def test_shell_tool_logs_policy_snapshot_for_successful_command(self):
         mock_audit = MagicMock()

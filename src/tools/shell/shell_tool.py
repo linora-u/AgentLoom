@@ -1,5 +1,6 @@
 from src.lib.logging import get_logger
 from src.lib.runtime import get_current_run_context
+from src.tools.shell.command_semantics import interpret_exit_code
 from src.tools.shell.output_interceptor import OutputInterceptor
 from src.tools.shell.process import ShellProcess, ShellProcessRegistry
 from src.tools.shell.should_use_sandbox import get_sandbox_manager, should_use_sandbox
@@ -7,6 +8,24 @@ from src.tools.shell.validator import validate_command
 from src.trace import capture_explicit_execution_context
 
 logger = get_logger(__name__)
+
+
+class ShellCommandError(RuntimeError):
+    """A shell invocation completed with a model-visible failure outcome."""
+
+    kind = "shell_command_error"
+    stage = "tool_execution"
+
+    def __init__(
+        self,
+        message: str,
+        *,
+        exit_code: int | None = None,
+        retryable: bool = True,
+    ) -> None:
+        super().__init__(message)
+        self.exit_code = exit_code
+        self.retryable = retryable
 
 
 def _no_command_message() -> str:
@@ -196,7 +215,37 @@ def shell_tool(
             load_profile=load_profile,
         )
 
-    result_text = process.run(exec_command)
+    execution = process.execute(exec_command)
+    result_text = process.render(execution)
+
+    if execution.background_task_id:
+        return result_text
+
+    if execution.interrupted:
+        detail = result_text.strip() or "Shell command execution was interrupted."
+        raise ShellCommandError(detail, exit_code=execution.exit_code, retryable=True)
+
+    if execution.timed_out:
+        detail = result_text.strip() or f"Shell command timed out after {timeout} seconds."
+        raise ShellCommandError(detail, exit_code=execution.exit_code, retryable=True)
+
+    interpretation = None
+    if execution.exit_code is not None:
+        interpretation = interpret_exit_code(command, execution.exit_code)
+        if interpretation.is_error:
+            status = interpretation.message or f"Command failed with exit code {execution.exit_code}"
+            detail = f"{status}."
+            if result_text.strip():
+                detail = f"{detail}\nOutput:\n{result_text.strip()}"
+            raise ShellCommandError(
+                detail,
+                exit_code=execution.exit_code,
+                retryable=True,
+            )
+
+    if interpretation is not None and interpretation.message:
+        semantic_status = f"[Shell status: {interpretation.message}; exit code {execution.exit_code}]"
+        result_text = f"{result_text.rstrip()}\n\n{semantic_status}" if result_text.strip() else semantic_status
 
     if not result_text:
         return _no_output_message(command)
