@@ -1,19 +1,18 @@
 import pytest
+from smolagents.models import ChatMessage, MessageRole
 
 import src.lib.smolagents.agent.base_agent as base_agent_module
 import src.lib.smolagents.agent.yaml_agent_factory as yaml_factory_module
 from src.lib.smolagents.agent.agent_validation import NormalizedExecutionConfig
-from smolagents.models import ChatMessage, MessageRole
-
-from src.trace.task_context import (
-    clear_current_hook_run,
-    set_current_hook_run,
-)
 from src.lib.smolagents.agent.loom_mixin import LoomAgentMixin
-from src.lib.smolagents.hooks import HookPlan, HookRun
 from src.lib.smolagents.agent.yaml_agent_factory import (
     YamlConfiguredAgent,
     YamlConfiguredSupervisorAgent,
+)
+from src.lib.smolagents.hooks import HookPlan, HookRun
+from src.trace.task_context import (
+    clear_current_hook_run,
+    set_current_hook_run,
 )
 
 _UNSET = object()
@@ -258,6 +257,17 @@ def test_hooked_memory_uses_max_tokens_override():
     dummy._init_loom_agent(before_run_callbacks=None, max_tokens=3500)
 
     assert dummy._history_manager._max_tokens == 3500
+
+
+def test_hooked_memory_reserves_output_budget_from_context_window():
+    dummy = _DummyHistoryMixin()
+    dummy._init_loom_agent(
+        before_run_callbacks=None,
+        context_window=128000,
+        max_output_tokens=16000,
+    )
+
+    assert dummy._history_manager._max_tokens == 112000
 
 
 def test_hooked_memory_uses_smart_summary_override():

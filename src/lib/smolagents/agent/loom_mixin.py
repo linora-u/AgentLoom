@@ -74,11 +74,15 @@ class LoomAgentMixin:
         self,
         before_run_callbacks: list | None,
         max_tokens: int | None = None,
+        context_window: int | None = None,
+        max_output_tokens: int | None = None,
         smart_summary: bool = True,
     ):
         self._before_run_callbacks = before_run_callbacks or []
         self._history_manager = ConversationHistoryManager(
             max_tokens=max_tokens,
+            context_window=context_window,
+            max_output_tokens=max_output_tokens,
             smart_summary=smart_summary,
         )
         self._agent_loom_supports_reset_false_task_step_control = True
@@ -129,9 +133,12 @@ class LoomAgentMixin:
         """
         Write memory into message list with smart compression and state persistence.
         """
-        messages = self.memory.system_prompt.to_messages(summary_mode=summary_mode)
-        for memory_step in self.memory.steps:
-            messages.extend(action_step_to_protocol_messages(memory_step, summary_mode=summary_mode))
+        if hasattr(self, "memory"):
+            messages = self.memory.system_prompt.to_messages(summary_mode=summary_mode)
+            for memory_step in self.memory.steps:
+                messages.extend(action_step_to_protocol_messages(memory_step, summary_mode=summary_mode))
+        else:
+            messages = super().write_memory_to_messages(summary_mode=summary_mode)
 
         if summary_mode:
             return append_current_todo_state(

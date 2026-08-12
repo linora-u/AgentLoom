@@ -180,7 +180,9 @@ model:
 | `api_key` | `str` | `""` | ❌ 否 | API 认证密钥。每个模型类型独立配置 |
 | `description` | `str` | `"Model type '{k}' loaded from YAML config"` | ❌ 否 | 模型的人类可读描述。用于日志和文档 |
 | `temperature` | `float` | `0.1` | ❌ 否 | 创造力/随机性控制 (0.0 - 2.0)。详见 [3.2 temperature 建议](#32-temperature-配置建议) |
-| `max_tokens` | `int` \| `str` | `150000` | ❌ 否 | 模型单次生成的最大 Token 数。特殊值 `"max"` 表示使用模型原生最大值 |
+| `context_window` | `int` | `150000` | ❌ 否 | 模型总上下文窗口，用于计算输入与预留输出预算 |
+| `max_output_tokens` | `int` | `16384` | ❌ 否 | 单次生成预留并传给模型服务的最大输出 Token 数 |
+| `max_tokens` | `int` \| `str` | `150000` | ❌ 否 | 已弃用的兼容字段；单独使用时同时填充两项旧预算 |
 | `timeout` | `int` | `60` | ❌ 否 | 单次 HTTP 请求超时（秒）。超过此时间未响应则中断 |
 | `num_retries` | `int` | `5` | ❌ 否 | API 调用失败重试次数 |
 | `retry_delay` | `float` | `15.0` | ❌ 否 | 重试初始延迟（秒）。详见 [第 6 节](#6-重试机制详解) |
@@ -200,14 +202,12 @@ model:
 
 > ⚠️ **特殊模型要求**：部分模型（如 OpenAI `o1`, 某些平台的 `gpt-5`）要求 `temperature: 1.0`。如果你使用的模型有此限制，请强制设置。
 
-### 3.3 max_tokens 特殊值
+### 3.3 上下文与输出预算
 
-| 配置值 | 行为 |
-|--------|------|
-| 整数（如 `8192`） | 限制为固定 Token 数 |
-| `"max"` (字符串) | 委托给模型的原生最大值（由 LiteLLM 自动获取） |
-
-> 框架使用 `IntParser` 进行宽松解析，`"max"` 是特殊的 bypass 字符串。
+使用 `context_window` 声明服务端总上下文容量，使用 `max_output_tokens`
+声明生成预留。AgentLoom 按 `context_window - max_output_tokens` 压缩模型输入，
+只把 `max_output_tokens` 作为 `max_tokens` 发送给模型服务。仅当两个新字段都未设置时，
+继续接受旧的 `max_tokens` 配置。
 
 ### 3.4 extra_headers 覆盖行为
 
@@ -401,7 +401,9 @@ model:
 | `base_url` | 未设置时为 `""` |
 | `api_key` | 未设置时为 `""` |
 | `temperature` | 未设置时为 `0.1` |
-| `max_tokens` | 未设置时为 `150000` |
+| `context_window` | 未设置时为 `150000` |
+| `max_output_tokens` | 未设置时为 `16384` |
+| `max_tokens` | 旧配置兼容别名 |
 | `timeout` | 未设置时为 `60` |
 | `num_retries` | 未设置时为 `5` |
 | `retry_delay` | 未设置时为 `15.0` |
@@ -513,6 +515,7 @@ litellm.completion failed (attempt 2/5): RateLimitError: Rate limit exceeded. Re
 | 常量名 | 值 | 对应参数 |
 |--------|-----|---------|
 | `DEFAULT_MAX_TOKENS` | `150000` | `max_tokens` |
+| `DEFAULT_MAX_OUTPUT_TOKENS` | `16384` | `max_output_tokens` |
 | `DEFAULT_MODEL_TEMPERATURE` | `0.1` | `temperature` |
 | `DEFAULT_MODEL_TIMEOUT` | `60` | `timeout` |
 | `DEFAULT_MODEL_NUM_RETRIES` | `5` | `num_retries` |
@@ -534,6 +537,8 @@ class LlmModelTypeSettings(BaseModel):
     api_key: str = ""
     temperature: float = 0.1           # DEFAULT_MODEL_TEMPERATURE
     max_tokens: int | str = 150000     # DEFAULT_MAX_TOKENS
+    context_window: int = 150000       # DEFAULT_MAX_TOKENS
+    max_output_tokens: int = 16384     # DEFAULT_MAX_OUTPUT_TOKENS
     timeout: int = 60                  # DEFAULT_MODEL_TIMEOUT
     num_retries: int = 5              # DEFAULT_MODEL_NUM_RETRIES
     retry_delay: float = 15.0         # DEFAULT_MODEL_RETRY_DELAY
