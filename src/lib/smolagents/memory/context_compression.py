@@ -55,20 +55,23 @@ Key design decisions:
 from __future__ import annotations
 
 import ast
-from dataclasses import dataclass
 import json
 import re
 import time
 import uuid
-from typing import Iterable, Optional, List, Union
+from dataclasses import dataclass
+from typing import Iterable, List, Optional, Union
 
 from litellm.utils import token_counter
+
 from smolagents import AgentLogger
 from smolagents.models import ChatMessage, MessageRole
 from src.lib.config.defaults import DEFAULT_MAX_TOKENS
 from src.lib.context_engine.engine import CONTEXT_REF_PREFIX
 from src.lib.context_engine.runtime import get_current_context_engine
 from src.lib.logging import get_logger
+from src.lib.smolagents.models.model_manager import model_manager
+from src.lib.smolagents.models.model_types import ModelType
 
 # ===========================================================================
 # Global Configuration
@@ -156,12 +159,13 @@ COMPRESSION_EXEMPT_TOOL_NAMES: frozenset[str] = frozenset({
 # the latest error recovery guidance from being compressed away.
 RECENT_ERROR_EXEMPT_COUNT: int = 1
 
+# Raw recent turns remain after an LLM summary so the next model request keeps
+# exact intent, tool-call identity, and recovery details at the hand-off edge.
+SUMMARY_RECENT_USER_TURNS: int = 2
+
 # ===========================================================================
 # Layer 4 Constants – LLM Summarization
 # ===========================================================================
-from src.lib.smolagents.models.model_manager import model_manager
-from src.lib.smolagents.models.model_types import ModelType
-
 # LLM system prompt and condensation instructions for Layer 4.
 SUMMARY_SYSTEM_PROMPT = """You are a helpful AI assistant tasked with summarizing conversations.
 
@@ -699,8 +703,22 @@ def _recent_error_response_indices(
     for response_index in reversed(candidate_indices):
         if exempt_remaining <= 0:
             break
-        content_text = _extract_content_text(messages[response_index].message.content)
-        if content_text.startswith("Error:"):
+        message = messages[response_index].message
+        content_text = _extract_content_text(message.content)
+        raw = message.raw if isinstance(message.raw, dict) else {}
+        raw_record = raw.get("agentloom_tool_result")
+        raw_status = raw_record.get("status") if isinstance(raw_record, dict) else None
+        structured_error = raw_status in {"error", "blocked", "cancelled"}
+        if not structured_error:
+            try:
+                payload = json.loads(content_text)
+            except (TypeError, ValueError):
+                payload = None
+            structured_error = isinstance(payload, dict) and (
+                payload.get("ok") is False
+                or payload.get("status") in {"error", "blocked", "cancelled"}
+            )
+        if content_text.startswith("Error:") or structured_error:
             exempt_indices.add(response_index)
             exempt_remaining -= 1
     return exempt_indices
@@ -1132,6 +1150,27 @@ def _serialize_messages_for_summary(messages: List[InternalChatMessage]) -> str:
     lines.append("</conversation>")
     return "\n".join(lines)
 
+
+def _split_summary_head_and_recent_tail(
+    messages: List[InternalChatMessage],
+    recent_user_turns: int = SUMMARY_RECENT_USER_TURNS,
+) -> tuple[list[InternalChatMessage], list[InternalChatMessage]]:
+    """Split visible history at a complete user-turn boundary."""
+    visible = [
+        message
+        for message in messages
+        if message.is_visible() and message.message.role != MessageRole.SYSTEM
+    ]
+    user_positions = [
+        index
+        for index, message in enumerate(visible)
+        if message.message.role == MessageRole.USER and not message.is_summary
+    ]
+    if len(user_positions) <= recent_user_turns:
+        return [], visible
+    tail_start = user_positions[-recent_user_turns]
+    return visible[:tail_start], visible[tail_start:]
+
 def summarize_conversation(
     messages: List[InternalChatMessage],
     model_id: str,
@@ -1169,17 +1208,14 @@ def summarize_conversation(
         )
 
     messages_to_summarize = get_messages_since_last_summary(messages)
-    summarizable_messages = [
-        msg for msg in messages_to_summarize
-        if msg.message.role != MessageRole.SYSTEM and msg.is_visible()
-    ]
+    summarizable_messages, recent_tail = _split_summary_head_and_recent_tail(messages_to_summarize)
 
     if len(summarizable_messages) <= 1:
         error = "Not enough messages available for compression"
         return SummarizeResponse(messages=messages, summary="", error=error)
 
     condense_instructions = custom_condense_prompt.strip() if custom_condense_prompt else CONDENSE_INSTRUCTION
-    serialized_history = _serialize_messages_for_summary(messages_to_summarize)
+    serialized_history = _serialize_messages_for_summary(summarizable_messages)
 
     # CONDENSE + history
     request_messages: List[Union[ChatMessage, dict]] = []
@@ -1210,7 +1246,11 @@ def summarize_conversation(
         )
     )
 
-    log.info(f"Preparing to compress {len(messages_to_summarize)} messages...")
+    log.info(
+        "Preparing to compress %d messages while preserving %d recent messages...",
+        len(summarizable_messages),
+        len(recent_tail),
+    )
     log.info("=" * 80)
     log.info("📨 Compression request messages sent to LLM:")
     log.info("=" * 80)
@@ -1225,8 +1265,6 @@ def summarize_conversation(
     model = model_manager.get_smolagents_model(ModelType.SUMMARY)
 
     summary_text = ""
-    cost = 0.0         # TODO: get cost from model
-
     try:
         generation_messages: List[Union[ChatMessage, dict]] = [
             ChatMessage(role=MessageRole.SYSTEM, content=SUMMARY_SYSTEM_PROMPT),
@@ -1273,7 +1311,11 @@ def summarize_conversation(
 
     # TODO: Add environment information
 
-    last_msg_ts = messages[-1].ts if messages else time.time()
+    first_tail_index = next(
+        (index for index, message in enumerate(messages) if any(message is tail for tail in recent_tail)),
+        len(messages),
+    )
+    previous_ts = messages[first_tail_index - 1].ts if first_tail_index > 0 else None
     summary_message = InternalChatMessage(
         message=ChatMessage(
             role=MessageRole.USER,
@@ -1282,7 +1324,7 @@ def summarize_conversation(
             raw=None,
             token_usage=None,
         ),
-        ts=last_msg_ts + 1,
+        ts=previous_ts or time.time(),
         is_summary=True,
     )
 
@@ -1292,8 +1334,7 @@ def summarize_conversation(
     new_messages = []
     messages_to_condense = {
         id(msg)
-        for msg in messages_to_summarize
-        if msg.message.role != MessageRole.SYSTEM
+        for msg in summarizable_messages
     }
     for msg in messages:
         is_system_msg = msg.message.role == MessageRole.SYSTEM
@@ -1314,7 +1355,7 @@ def summarize_conversation(
         else:
             new_messages.append(msg)
 
-    new_messages.append(summary_message)
+    new_messages.insert(first_tail_index, summary_message)
 
     new_context_tokens = _count_tokens(
         [msg.message for msg in new_messages if msg.is_visible()],
@@ -1551,6 +1592,7 @@ class ConversationHistoryManager:
         self._cached_skill_load: Optional[str] = None
         self._cached_sys_prompt: Optional[str] = None
         self._raw_message_count: int = 0  # count of real smolagents messages synced (excludes synthetic entries)
+        self._raw_message_fingerprints: list[str] = []
 
     def truncate_until_fits(
         self,
@@ -1650,6 +1692,19 @@ class ConversationHistoryManager:
         Also caches the system prompt and the original task command block
         (used by truncation markers and summaries to preserve task context).
         """
+        fingerprints = [
+            json.dumps(message.dict(), sort_keys=True, ensure_ascii=False, default=str)
+            for message in messages
+        ]
+        unchanged_prefix = (
+            len(fingerprints) >= len(self._raw_message_fingerprints)
+            and fingerprints[: len(self._raw_message_fingerprints)] == self._raw_message_fingerprints
+        )
+        if self._raw_message_fingerprints and not unchanged_prefix:
+            self._cached_command_blocks = None
+            self._cached_skill_load = None
+            self._cached_sys_prompt = None
+
         if self._cached_sys_prompt is None and messages:
             for msg in messages:
                 if msg.role == MessageRole.SYSTEM:
@@ -1674,14 +1729,16 @@ class ConversationHistoryManager:
             self._cached_skill_load = _extract_content_text(next_msg.content) or None
             break
 
-        if not self._internal_message_history:
+        if not self._internal_message_history or not unchanged_prefix:
             self._internal_message_history = to_internal_messages(messages)
             self._raw_message_count = len(messages)
+            self._raw_message_fingerprints = fingerprints
         else:
             if len(messages) > self._raw_message_count:
                 for msg in messages[self._raw_message_count:]:
                     self._internal_message_history.append(InternalChatMessage.from_chat_message(msg))
                 self._raw_message_count = len(messages)
+                self._raw_message_fingerprints = fingerprints
 
     def get_compressed_messages(
         self,
@@ -1716,22 +1773,22 @@ class ConversationHistoryManager:
             model_id=model_id,
         )
 
-        if saved_ratio >= TRUNCATION_FRAC_TO_REMOVE:
-            # Enough savings from dedup alone — skip compress/truncate
-            self._internal_message_history = deduped_messages
-            log.info(
-                f"[Layer 1] File dedup saved {saved_ratio:.1%} of context "
-                f"(threshold={TRUNCATION_FRAC_TO_REMOVE:.0%}). "
-                f"Skipping LLM summarization and truncation."
-            )
-            return to_api_messages(self._internal_message_history)
-
-        # Partial savings: persist the dedup changes anyway (reduces future compression cost)
         if saved_ratio > 0.0:
             self._internal_message_history = deduped_messages
+            current_tokens = _count_tokens(to_api_messages(self._internal_message_history), model_id)
+            if current_tokens <= self._max_tokens:
+                log.info(
+                    "[Layer 1] File dedup resolved context limits (%d <= %d).",
+                    current_tokens,
+                    self._max_tokens,
+                )
+                return to_api_messages(self._internal_message_history)
             log.info(
-                f"[Layer 1] File dedup saved {saved_ratio:.1%} (below {TRUNCATION_FRAC_TO_REMOVE:.0%} threshold). "
-                f"Continuing with Layer 2 Tool Output Truncation."
+                "[Layer 1] File dedup saved %.1f%% but context remains over budget (%d > %d); "
+                "continuing with Layer 2.",
+                saved_ratio * 100,
+                current_tokens,
+                self._max_tokens,
             )
 
         # --- Layer 2: Reversible ContextEngine Compression ---
@@ -1824,3 +1881,4 @@ class ConversationHistoryManager:
         self._cached_skill_load = None
         self._cached_sys_prompt = None
         self._raw_message_count = 0
+        self._raw_message_fingerprints = []
