@@ -6,6 +6,8 @@ import inspect
 import math
 import os
 import uuid
+from contextlib import contextmanager
+from contextvars import ContextVar
 from copy import deepcopy
 from functools import wraps
 from typing import Any
@@ -35,10 +37,45 @@ from .types import (
 HOOKS_INJECTED_ATTR = "_hooks_injected"
 ORIGINAL_FORWARD_ATTR = "_agentloom_original_forward"
 logger = get_logger(__name__)
+_BOUND_TOOL_CALL_ID: ContextVar[str | None] = ContextVar("agentloom_tool_call_id", default=None)
+
+
+@contextmanager
+def bind_tool_call_id(call_id: str):
+    """Bind the provider's stable call ID to Hook events for one invocation."""
+
+    token = _BOUND_TOOL_CALL_ID.set(call_id)
+    try:
+        yield
+    finally:
+        _BOUND_TOOL_CALL_ID.reset(token)
 
 
 class _ToolInputContractError(ValueError):
     """The effective tool input does not satisfy the executable contract."""
+
+
+class ToolBlockedResult(str):
+    """Model-visible policy rejection that remains string-compatible."""
+
+    kind = "policy_blocked"
+    retryable = False
+
+    def __new__(cls, reason: str, *, stage: str):
+        instance = super().__new__(cls, reason)
+        instance.stage = stage
+        return instance
+
+
+class ToolBlockedError(RuntimeError):
+    """Executor-visible policy rejection; it is a Tool terminal state, not a turn failure."""
+
+    kind = "policy_blocked"
+    retryable = False
+
+    def __init__(self, reason: str, *, stage: str) -> None:
+        super().__init__(reason)
+        self.stage = stage
 
 
 def _trusted_evidence_payload(tool_instance: Tool, raw_result: Any) -> list[dict[str, str]]:
@@ -361,7 +398,7 @@ def _execute_tool_pipeline(
     """Execute one invocation through the complete immutable safety boundary."""
 
     tool_name = tool_instance.name
-    tool_call_id = uuid.uuid4().hex
+    tool_call_id = _BOUND_TOOL_CALL_ID.get() or uuid.uuid4().hex
     tool_inputs_schema = getattr(tool_instance, "inputs", None)
     if not isinstance(tool_inputs_schema, dict):
         tool_inputs_schema = None
@@ -492,27 +529,21 @@ def _execute_tool_pipeline(
         )
         return outcome
 
-    try:
-        trusted_evidence = _trusted_evidence_payload(tool_instance, raw_result)
-        result = raw_result
-        if result is None or (isinstance(result, str) and not result.strip()):
-            result = f"({tool_name} completed with no output)"
-        if isinstance(result, str):
+    trusted_evidence = _trusted_evidence_payload(tool_instance, raw_result)
+    result = raw_result
+    if result is None or (isinstance(result, str) and not result.strip()):
+        result = f"({tool_name} completed with no output)"
+    if isinstance(result, str):
+        try:
             compressed = _try_context_engine_compress(tool_name, result)
             if compressed is not None:
                 result = compressed
-    except Exception as processing_error:
-        outcome = Failed(effective_input, processing_error, "result_processing", tool_name=tool_name)
-        _record_tool_outcome(hook_run, outcome)
-        _dispatch_tool_failure(
-            hook_run,
-            tool_name=tool_name,
-            tool_input=effective_input,
-            tool_call_id=tool_call_id,
-            tool_inputs_schema=tool_inputs_schema,
-            error=processing_error,
-        )
-        return outcome
+        except Exception as processing_error:
+            logger.warning(
+                "Context compression failed open for tool %s; returning the raw result: %s",
+                tool_name,
+                processing_error,
+            )
 
     tool_response: dict[str, Any] = {"result": result}
     if trusted_evidence:
@@ -556,7 +587,9 @@ def inject_hooks(tool_instance: Tool) -> Tool:
             kwargs=dict(kwargs),
         )
         if isinstance(outcome, Blocked):
-            return outcome.model_response()
+            if _BOUND_TOOL_CALL_ID.get() is not None:
+                raise ToolBlockedError(outcome.model_response(), stage=outcome.stage)
+            return ToolBlockedResult(outcome.model_response(), stage=outcome.stage)
         if isinstance(outcome, Failed):
             raise outcome.error
         return outcome.value

@@ -11,6 +11,7 @@ from smolagents.models import ChatMessage, MessageRole
 from src.lib.logging import get_logger
 from src.lib.smolagents.hooks import wrap_in_system_reminder
 from src.lib.smolagents.memory.context_compression import ConversationHistoryManager
+from src.lib.smolagents.tool_protocol import action_step_to_protocol_messages
 from src.trace import (
     get_current_agent_name,
     get_current_hook_run,
@@ -128,7 +129,9 @@ class LoomAgentMixin:
         """
         Write memory into message list with smart compression and state persistence.
         """
-        messages = super().write_memory_to_messages(summary_mode=summary_mode)
+        messages = self.memory.system_prompt.to_messages(summary_mode=summary_mode)
+        for memory_step in self.memory.steps:
+            messages.extend(action_step_to_protocol_messages(memory_step, summary_mode=summary_mode))
 
         if summary_mode:
             return append_current_todo_state(
