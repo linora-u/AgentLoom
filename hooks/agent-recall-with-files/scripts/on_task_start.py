@@ -5,20 +5,17 @@ Core behaviour:
 - ``context.md`` and ``trace.md`` are isolated by task id and created when missing.
 - ``insights.md`` is **preserved** if it already exists (cross-session experience).
   Only created from template when missing.
-- Old insights are compressed via ``summarize_insights`` when the file is too long.
+- Old insights are compacted via ``summarize_insights`` when the file is too long.
 """
 
 from common import (
     CONTEXT_FILE,
     HOOK_TAG,
     INSIGHTS_FILE,
-    LEGACY_ROOT_FILES,
     TRACE_FILE,
     output,
     persistent_insights_path,
-    project_root_dir,
     read_template,
-    remove_path,
     summarize_insights,
     task_workspace_dir,
 )
@@ -26,20 +23,8 @@ from common import (
 
 def main() -> None:
     workspace = task_workspace_dir()
-    project_root = project_root_dir()
-
-    # Clean up legacy artifacts from workspace root.
-    remove_path(project_root / ".planning")
-    for name in LEGACY_ROOT_FILES:
-        remove_path(project_root / name)
-
-    # Clean up legacy files with old names inside the runtime dir.
-    for old_name in ("progress.md", "findings.md"):
-        old_path = workspace / old_name
-        if old_path.exists():
-            remove_path(old_path)
-
-    # Ensure runtime directory exists (do NOT delete it — insights must survive).
+    # Runtime owns only this canonical workspace. Repository-root files may have
+    # the same names and must never be treated as disposable migration state.
     workspace.mkdir(parents=True, exist_ok=True)
 
     # Task files are fresh for a new task id and preserved on resume.
@@ -59,7 +44,7 @@ def main() -> None:
             read_template(INSIGHTS_FILE, "Insights"), encoding="utf-8",
         )
 
-    # Compress insights if they have grown too long.
+    # Compact insights if they have grown too long.
     if has_prior_insights:
         summarize_insights(persistent_insights)
 

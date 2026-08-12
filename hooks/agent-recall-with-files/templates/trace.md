@@ -1,6 +1,6 @@
 # Trace
 
-Ephemeral execution log for the current task. Cleared on each new run.
+Execution log for the current task. Preserved on resume; a new task gets a new file.
 
 ## Log
 - [YYYY-MM-DD HH:MM:SS] Task started.
