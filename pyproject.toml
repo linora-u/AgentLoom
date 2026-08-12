@@ -119,6 +119,7 @@ src = ["**/*.yaml", "**/*.yml", "**/*.j2", "**/*.md"]
 testpaths = ["tests"]
 python_files = ["test_*.py"]
 addopts = ["-v", "--tb=short"]
+markers = ["timeout(seconds): declare the maximum expected duration for a test"]
 
 [tool.black]
 line-length = 120
@@ -127,10 +128,12 @@ target-version = ["py312"]
 [tool.ruff]
 line-length = 120
 target-version = "py312"
+
+[tool.ruff.lint]
 select = ["E", "W", "F", "I", "UP", "B"]
 ignore = ["E501"]
 
-[tool.ruff.per-file-ignores]
+[tool.ruff.lint.per-file-ignores]
 "__init__.py" = ["F401"]
 
 [tool.mypy]

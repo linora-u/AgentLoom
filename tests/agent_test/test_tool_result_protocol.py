@@ -16,6 +16,7 @@ from src.lib.smolagents.agent.base_agent import ToolCallingAgentV2
 from src.lib.smolagents.hooks import HookEvent, HookHandler, HookPlan, HookResult, HookRun
 from src.lib.smolagents.hooks.tool_shim import inject_hooks
 from src.lib.smolagents.models.litellm_model import LiteLLMModelV2
+from src.lib.smolagents.models.provider_tool_errors import patch_litellm_tool_error_projection
 from src.trace import ExplicitExecutionContext, bind_explicit_execution_context
 
 
@@ -106,7 +107,7 @@ def test_failed_tool_keeps_provider_call_id_and_error_record() -> None:
     assert result.call_id == "provider-failure-42"
     assert result.status == "error"
     assert result.error.kind == "execution_error"
-    assert result.error.retryable is True
+    assert result.error.retryable is False
     assert "boom:bad" in result.error.message
 
 
@@ -170,10 +171,41 @@ def test_litellm_payload_projects_native_tool_calls_and_error_results() -> None:
             "content": (
                 '{"ok":false,"status":"error","error":'
                 '{"kind":"execution_error","message":"boom:wire",'
-                '"retryable":true,"stage":"tool_execution"}}'
+                '"retryable":false,"stage":"tool_execution"}}'
             ),
         },
     ]
+
+
+def test_litellm_projects_tool_errors_to_anthropic_and_bedrock_native_flags() -> None:
+    from litellm.litellm_core_utils.prompt_templates import factory
+
+    patch_litellm_tool_error_projection()
+    tool_message = {
+        "role": "tool",
+        "tool_call_id": "wire-error-7",
+        "content": (
+            '{"ok":false,"status":"error","error":'
+            '{"kind":"execution_error","message":"boom",'
+            '"retryable":false,"stage":"tool_execution"}}'
+        ),
+    }
+
+    anthropic = factory.convert_to_anthropic_tool_result(tool_message)
+    bedrock = factory._convert_to_bedrock_tool_call_result(tool_message)
+
+    assert anthropic["tool_use_id"] == "wire-error-7"
+    assert anthropic["is_error"] is True
+    assert bedrock["toolResult"]["toolUseId"] == "wire-error-7"
+    assert bedrock["toolResult"]["status"] == "error"
+
+    success_message = {
+        "role": "tool",
+        "tool_call_id": "wire-success-8",
+        "content": '{"ok":true,"status":"completed","output":"done"}',
+    }
+    assert "is_error" not in factory.convert_to_anthropic_tool_result(success_message)
+    assert "status" not in factory._convert_to_bedrock_tool_call_result(success_message)["toolResult"]
 
 
 def test_policy_block_is_a_non_retryable_tool_result_with_same_call_id() -> None:

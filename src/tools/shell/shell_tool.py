@@ -21,7 +21,7 @@ class ShellCommandError(RuntimeError):
         message: str,
         *,
         exit_code: int | None = None,
-        retryable: bool = True,
+        retryable: bool = False,
     ) -> None:
         super().__init__(message)
         self.exit_code = exit_code
@@ -240,7 +240,7 @@ def shell_tool(
             raise ShellCommandError(
                 detail,
                 exit_code=execution.exit_code,
-                retryable=True,
+                retryable=False,
             )
 
     if interpretation is not None and interpretation.message:

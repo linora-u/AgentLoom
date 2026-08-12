@@ -308,11 +308,15 @@ class ToolCallingAgentV2(_SuccessfulRunStateMixin, LoomAgentMixin, ToolCallingAg
         if isinstance(exc, AgentToolCallError):
             kind = "invalid_arguments"
             stage = "input_validation"
-            retryable = True
+            retryable = False
         else:
             kind = str(getattr(cause, "kind", "execution_error"))
             stage = str(getattr(cause, "stage", "tool_execution"))
-            retryable = bool(getattr(cause, "retryable", True))
+            # Unknown execution errors are deterministic until a tool adapter
+            # explicitly marks them transient. This flag describes whether
+            # retrying the same call is sensible, not whether the LLM may
+            # recover by changing arguments or choosing another tool.
+            retryable = bool(getattr(cause, "retryable", False))
         return ToolErrorRecord(
             kind=kind,
             message=str(cause) or type(cause).__name__,
@@ -343,8 +347,7 @@ class ToolCallingAgentV2(_SuccessfulRunStateMixin, LoomAgentMixin, ToolCallingAg
         ]
         memory_step.tool_results = records
 
-        for call in calls:
-            yield call
+        yield from calls
 
         def execute_one(index: int) -> tuple[int, ToolOutput]:
             call = calls[index]

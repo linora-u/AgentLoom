@@ -227,6 +227,24 @@ def test_legacy_max_tokens_populates_both_budgets(monkeypatch):
     assert resolved.max_output_tokens == 8192
 
 
+def test_legacy_max_tokens_max_uses_finite_default(monkeypatch):
+    raw = {
+        "model": {
+            "default_model_type": "powerful",
+            "powerful": {"model": "openai/powerful", "max_tokens": "max"},
+            "summary": {"model": "openai/test-summary"},
+        }
+    }
+    _patch_active_config(monkeypatch, raw)
+
+    resolved = config_module.C.llm.for_type("powerful")
+
+    assert resolved.max_tokens == 150000
+    assert resolved.context_window == 150000
+    assert resolved.max_output_tokens == 150000
+    assert resolved.input_token_limit == 150000
+
+
 def test_invalid_token_budget_is_rejected(monkeypatch):
     raw = {
         "model": {

@@ -60,6 +60,7 @@ class ToolBlockedResult(str):
 
     kind = "policy_blocked"
     retryable = False
+    stage: str
 
     def __new__(cls, reason: str, *, stage: str):
         instance = super().__new__(cls, reason)
@@ -165,6 +166,7 @@ def _build_tool_input(forward_callable, args, kwargs) -> dict[str, Any]:
 
 def _schema_type_names(schema: dict[str, Any]) -> tuple[str, ...]:
     raw = schema.get("type")
+    names: tuple[str, ...]
     if isinstance(raw, str):
         names = (raw,)
     elif isinstance(raw, list) and all(isinstance(item, str) for item in raw):
@@ -517,8 +519,8 @@ def _execute_tool_pipeline(
     try:
         raw_result = original_forward(**call_kwargs)
     except Exception as tool_error:
-        outcome = Failed(effective_input, tool_error, "tool_execution", tool_name=tool_name)
-        _record_tool_outcome(hook_run, outcome)
+        failed_outcome = Failed(effective_input, tool_error, "tool_execution", tool_name=tool_name)
+        _record_tool_outcome(hook_run, failed_outcome)
         _dispatch_tool_failure(
             hook_run,
             tool_name=tool_name,
@@ -527,7 +529,7 @@ def _execute_tool_pipeline(
             tool_inputs_schema=tool_inputs_schema,
             error=tool_error,
         )
-        return outcome
+        return failed_outcome
 
     trusted_evidence = _trusted_evidence_payload(tool_instance, raw_result)
     result = raw_result
@@ -548,8 +550,8 @@ def _execute_tool_pipeline(
     tool_response: dict[str, Any] = {"result": result}
     if trusted_evidence:
         tool_response[TRUSTED_MEMORY_EVIDENCE_RESPONSE_KEY] = TrustedMemoryEvidenceEnvelope(trusted_evidence)
-    outcome = Executed(effective_input, result, tool_name=tool_name)
-    _record_tool_outcome(hook_run, outcome)
+    executed_outcome = Executed(effective_input, result, tool_name=tool_name)
+    _record_tool_outcome(hook_run, executed_outcome)
     try:
         hook_run.dispatch(
             HookEvent.POST_TOOL_USE,
@@ -562,7 +564,7 @@ def _execute_tool_pipeline(
         hook_run.flush_user_messages()
     except Exception as exc:
         logger.warning("PostToolUse observer dispatch failed open: %s", exc)
-    return outcome
+    return executed_outcome
 
 
 def inject_hooks(tool_instance: Tool) -> Tool:
