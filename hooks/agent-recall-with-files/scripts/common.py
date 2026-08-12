@@ -4,8 +4,8 @@ from __future__ import annotations
 
 import json
 import os
-import shutil
 import sys
+from collections import Counter
 from pathlib import Path
 from typing import Any
 
@@ -16,15 +16,6 @@ from typing import Any
 CONTEXT_FILE = "context.md"
 TRACE_FILE = "trace.md"
 INSIGHTS_FILE = "insights.md"
-
-LEGACY_ROOT_FILES = (
-    "task_plan.md",
-    "findings.md",
-    "progress.md",
-    "trace.md",
-    "insights.md",
-    "context.md",
-)
 
 # How many tail lines to inject into agent_context during PreToolUse.
 PRE_TOOL_TRACE_LINES = 20
@@ -83,16 +74,6 @@ def read_template(name: str, title: str) -> str:
     return f"# {title}\n"
 
 
-def remove_path(path: Path) -> None:
-    """Safely delete a file or directory."""
-    if not path.exists():
-        return
-    if path.is_dir() and not path.is_symlink():
-        shutil.rmtree(path)
-    else:
-        path.unlink()
-
-
 # ---------------------------------------------------------------------------
 # File reading helpers
 # ---------------------------------------------------------------------------
@@ -119,14 +100,14 @@ def read_full(path: Path) -> str:
 # ---------------------------------------------------------------------------
 
 def summarize_insights(path: Path) -> None:
-    """Compress *insights.md* when it exceeds ``MAX_INSIGHTS_LINES``.
+    """Bound *insights.md* when it exceeds ``MAX_INSIGHTS_LINES``.
 
     Strategy:
     - Keep the header block (lines before the first ``## `` section or
       the first tagged entry ``- [``).
-    - Split remaining entries into archive (older) and recent (newest).
-    - Deduplicate archive entries (exact match).
-    - Write back with ``## Archive`` and ``## Recent`` sections.
+    - Keep the newest entries verbatim.
+    - Replace older entries with a deterministic archive summary grouped by tag.
+    - Keep the final file under the configured line bound.
     """
     if not path.exists():
         return
@@ -165,23 +146,30 @@ def summarize_insights(path: Path) -> None:
     if len(pure_entries) <= INSIGHTS_RECENT_KEEP:
         return  # Not enough to warrant splitting.
 
-    # Split into archive and recent.
+    # Split into archive and recent. Archive details are intentionally replaced
+    # by a bounded index: old entries remain countable by type while recent,
+    # actionable knowledge stays verbatim.
     archive = pure_entries[:-INSIGHTS_RECENT_KEEP]
     recent = pure_entries[-INSIGHTS_RECENT_KEEP:]
 
-    # Deduplicate archive (preserve order, keep last occurrence).
-    seen: set[str] = set()
-    deduped_archive: list[str] = []
-    for line in reversed(archive):
-        key = line.strip()
-        if key not in seen:
-            seen.add(key)
-            deduped_archive.append(line)
-    deduped_archive.reverse()
+    tag_counts: Counter[str] = Counter()
+    for line in archive:
+        tag = "untagged"
+        for candidate in ("pitfall", "decision", "fact", "dependency", "perf", "config"):
+            if f"[{candidate}]" in line:
+                tag = candidate
+                break
+        tag_counts[tag] += 1
+
+    archive_summary = [
+        f"- Older entries compacted: {len(archive)} total; "
+        + ", ".join(f"{tag}={tag_counts[tag]}" for tag in sorted(tag_counts))
+        + "."
+    ]
 
     # Reassemble.
     result_lines = header_lines + ["", "## Archive", ""]
-    result_lines.extend(deduped_archive)
+    result_lines.extend(archive_summary)
     result_lines += ["", "## Recent", ""]
     result_lines.extend(recent)
     result_lines.append("")  # Trailing newline.

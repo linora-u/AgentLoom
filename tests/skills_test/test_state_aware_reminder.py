@@ -33,6 +33,7 @@ from common import (  # noqa: E402
     is_template_only,
     load_write_tracker,
     save_write_tracker,
+    summarize_insights,
 )
 
 
@@ -224,6 +225,30 @@ class TestWriteTracker(unittest.TestCase):
             self.tmpdir, tracker, step=9, persistent_insights=self.tmpdir / INSIGHTS_FILE
         )
         self.assertEqual(staleness[TRACE_FILE], 0)  # Fresh again.
+
+
+class TestInsightCompaction(unittest.TestCase):
+    def test_old_entries_are_replaced_by_bounded_tag_summary(self):
+        import tempfile
+
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / INSIGHTS_FILE
+            entries = [
+                f"- [2026-08-12] [fact] Durable fact {index}."
+                for index in range(100)
+            ]
+            path.write_text(
+                "# Insights\n\n## Log\n" + "\n".join(entries) + "\n",
+                encoding="utf-8",
+            )
+
+            summarize_insights(path)
+
+            compacted = path.read_text(encoding="utf-8")
+            self.assertLessEqual(len(compacted.splitlines()), 80)
+            self.assertIn("Older entries compacted: 70 total; fact=70.", compacted)
+            self.assertNotIn("Durable fact 0.", compacted)
+            self.assertIn("Durable fact 99.", compacted)
 
 
 class TestPostToolUseBehavior(unittest.TestCase):
