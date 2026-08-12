@@ -5,26 +5,71 @@
 <h1 align="center">AgentLoom</h1>
 
 <p align="center">
-  <strong>创建、运行并查看由 YAML 定义的多 Agent 应用。</strong>
+  <strong>用 YAML 构建多 Agent 应用，并通过可追溯证据的终端 Studio 运行和维护。</strong>
 </p>
 
 <p align="center">
-  使用 Application Studio 创建、修改、校验、运行并查看 AgentLoom Application。
+  类型化 Worker、权限确认、断点恢复、Goal 预算和经审核的记忆，都以同一套运行时权威状态为准。
 </p>
 
 <p align="center">
   <a href="https://github.com/linora-u/AgentLoom/actions/workflows/tests.yml"><img alt="tests" src="https://github.com/linora-u/AgentLoom/actions/workflows/tests.yml/badge.svg"></a>
   <a href="https://www.python.org/downloads/"><img alt="python >=3.12" src="https://img.shields.io/badge/python-%3E%3D3.12-3776AB?logo=python&logoColor=white"></a>
-  <a href="https://github.com/linora-u/AgentLoom/releases/tag/v1.0.1"><img alt="release v1.0.1" src="https://img.shields.io/badge/release-v1.0.1-007EC6"></a>
+  <img alt="version 1.0.1" src="https://img.shields.io/badge/version-1.0.1-007EC6">
 </p>
 
 <p align="center">
-  <img alt="AgentLoom application flow" src="../assets/agentloom-application-flow.svg">
+  <img alt="真实终端中运行的 AgentLoom Application Studio" src="../assets/agentloom-studio.svg">
 </p>
 
-## 安装
+<p align="center"><sub>开启 reduced-motion 后录制的真实终端会话。Studio 从当前项目读取 Application、Skill、校验状态、Run 和命令。</sub></p>
 
-推荐从源码安装脚本开始。它会同时准备 TUI、Python Runtime 和所需依赖，不需要手工搭建多套环境。
+AgentLoom 把多 Agent 系统当成一个**有执行契约的 Application**。YAML 定义
+Supervisor、类型化 Worker、模型、Tool、Skill、Hook、权限和 Runtime 策略。
+Application Studio 可以修改这份契约、展示 Diff、为副作用请求授权、发起运行、
+读取结构化证据，并根据失败证据继续修复。
+
+## 核心价值
+
+### Worker 会成为类型化工具
+
+Worker 通过 `agent_function_schema` 声明接口，Runtime 将它转换成 Supervisor
+可调用、带参数校验的工具。不同 Worker 可以使用不同模型和工具、并发执行，同时保持
+稳定的输入输出契约，不依赖提示词里的口头约定。
+
+### Run 产出证据，不靠解析终端猜状态
+
+每个已分配存储的 Run 都有独立的 `run_id`、manifest 和带版本的生命周期事件；
+启用文件日志时还会生成有界日志，并保留审计记录和产物。逻辑任务使用稳定的
+`task_id` 恢复。TUI、CLI JSON/JSONL 和 Python API 读取同一份权威状态。预检
+拒绝发生在 Run 及其存储分配之前。
+
+### 长任务有明确的完成责任人
+
+Goal Mode 让根 Supervisor 跨 continuation 和 Worker 调用持续推进同一个目标。
+只有根 Supervisor 能携带证据完成 Goal。可选 token 预算覆盖整棵 Agent 树；启用
+checkpoint 时，达到预算后进入 `budget_limited` 并保留恢复状态。
+
+### 记忆有审核边界
+
+AgentLoom 把两类需求分开处理：
+
+- [`agent-recall-with-files`](../../skills/agent-recall-with-files/SKILL.md)
+  使用运行时约定的工作区文件保存轻量的任务恢复信息和 Agent 局部经验。可选
+  Hook Bundle 会注入最近记录，并按新鲜度提醒更新。
+- [Self-Learning v6](self_learning.md) 分开保存可搜索历史和经过证据门禁的记忆。
+  Fact 和 Experience 候选需通过证据门禁及作用域审批策略；提升到 Project
+  级别必须由人工发起。
+
+### 扩展不会隐式获得权限
+
+Skill 是按需加载的模型上下文包。Hook 是独立显式授权的 Runtime 代码。内置 Tool
+的元数据可以在不导入实现的情况下发现；真正的 Tool、文件、Shell 和 MCP 权限
+仍由 Agent 配置与权限策略决定。
+
+## 快速开始
+
+源码安装器会针对当前代码版本构建 TUI，并准备锁定依赖的 Python 环境：
 
 ```bash
 git clone https://github.com/linora-u/AgentLoom.git
@@ -32,47 +77,19 @@ cd AgentLoom
 ./install
 ```
 
-安装完成后打开一个新终端，在仓库根目录验证命令：
+目前支持 macOS 和 Linux Shell，需要 Git 与 Bash。安装器会通过官方安装器补齐
+`uv` 和 Bun，再把配套运行环境安装到 `~/.agentloom`。打开新终端后验证：
 
 ```bash
 agentloom --version
 agentloom --snapshot
 ```
 
-安装脚本会：
-
-- 通过官方安装器补齐缺少的 `uv` 和 Bun；
-- 在 `~/.agentloom/venv` 创建锁定的 Python 环境；
-- 构建当前平台的 TypeScript/OpenTUI 原生程序；
-- 将 `agentloom` 和 `agentloom-tui` 安装到 `~/.agentloom/bin`；
-- 在存在可写 Shell 配置时，把该目录加入 `PATH`。
-
-源码安装脚本目前面向 macOS 和 Linux Shell。它需要 Git 和 Bash；仅在缺少 `uv` 或 Bun 时需要 `curl`。
-
-源码更新只需在仓库中重新运行 `./install`。首次安装后也可执行
-`agentloom update`，它会从安装时记录的可信源码目录重新构建。参数
-`--no-modify-path` 仅表示“不修改 Shell PATH 配置”，不是更新必需参数。
-
-安装版 TUI 会在后台检查这个可信源码目录。如果与产品相关的源码比当前安装
-更新，`Ctrl+X` 会提供“整体更新并安全重启”。它不会擅自执行 Git 拉取，也不
-会在活跃 Session 中静默替换程序。
-
-需要自定义安装目录或不修改 `PATH` 时，可以使用：
-
-```bash
-AGENTLOOM_INSTALL_DIR="$HOME/tools/agentloom" ./install
-./install --no-modify-path
-```
-
-### 配置 Application 模型
-
-使用 TUI 对话或运行 Agent 前，先复制模型配置模板：
+创建本地模型配置：
 
 ```bash
 cp config/llm.example.yaml config/llm.yaml
 ```
-
-编辑 `config/llm.yaml` 并替换占位内容。不要提交这个文件；它包含凭证，已经被 Git 忽略。
 
 ```yaml
 model:
@@ -80,188 +97,78 @@ model:
   powerful:
     model: "openai/<model-id>"
     api_key: "<api-key>"
-    base_url: "https://<openai-compatible-endpoint>"  # OpenAI 官方端点可省略
+    base_url: "https://<openai-compatible-endpoint>"  # OpenAI 可省略
+    tool_choice: "auto"
+  fast:
+    model: "openai/<fast-model-id>"
+    api_key: "<api-key>"
+    base_url: "https://<openai-compatible-endpoint>"
     tool_choice: "auto"
 ```
 
-这份文件是 Studio 与 Application Agent 唯一共享的模型配置源。
-
-## Goal Mode
-
-顶层 Supervisor 可以通过 `goal: true` 或
-`goal: {enabled: true, token_budget: 120000}` 开启长期目标模式。它会在普通 final
-或 `max_steps` 后继续使用同一 runtime 和记忆，Worker 用量计入同一预算，并且只有
-根 Supervisor 的 `update_goal(complete, evidence)` 能完成。预算耗尽时 run 进入
-`budget_limited`，提高或移除预算后用同一个 `task_id` resume。完整的配置、状态、
-checkpoint、CLI/JSONL/TUI 和调度说明见 [Goal Mode](goal_mode.md)。
-
-文档导航：
-
-- [配置体系总览](config-overview.md)：配置层级、overlay 与运行时目录；
-- [Agent YAML](agent_config.md)：Supervisor/Worker 的全部字段与严格校验；
-- [Goal Mode](goal_mode.md)：continuation、显式完成、预算、resume 与可观测性；
-- [Checkpoint](checkpoint.md)：task/run 身份、持久化布局和恢复；
-- [Run 可观测性](run_observability.md)：Python receipt、typed outcome 与 JSONL；
-- [系统配置](system_config.md)、[内置 Tool Catalog](tool_catalog.md)、[模型配置](llm_config.md)、[Skills](skills_config.md)、[Hooks](hooks.md) 和 [自学习](self_learning.md)。
-Application Agent 由 Python Runtime 按 YAML `model_type` 解析；TypeScript
-Studio 适配器把同一批 Profile、端点、凭证和兼容请求参数安全映射给内置
-Studio Runtime。`/models` 或 `Ctrl+X` 只切换当前 Studio Session 使用的
-`llm.yaml` 模型类型，不修改任何 Application YAML 的 `model_type`。配置缺失
-或无效时 Studio 会明确启动失败，不会回退到未配置的环境默认模型。
-
-## 从 TUI 开始
-
-在需要查看的项目中运行 `agentloom`，也可以显式指定项目：
+`config/llm.yaml` 已被 Git 忽略，是 Studio 和 Application Agent 共用的唯一模型
+目录。在任意 AgentLoom 项目中启动 Studio：
 
 ```bash
-cd /path/to/AgentLoom
 agentloom
 
-# 查看另一个 AgentLoom 项目
+# 或查看另一个项目
 agentloom --project /path/to/project
 ```
 
-TUI 是 Applications-first 控制面。独立的 Studio Agent 可以读取项目、
-直接修改当前 Application、展示 Tool 与 Diff、校验配置、请求
-真实运行授权、读取结构化 Run 证据，并在失败后继续修复。
-
-### 1. 新建或选择 Application
-
-按 `Enter` 发送需求。一个有效的初始描述应写清应用、角色、输入、输出和验收标准：
+可以从一条包含角色和验收条件的需求开始：
 
 ```text
-创建一个名为 release_review 的应用。
-使用一个 Supervisor 和两个 Worker，分别负责 API 审查和测试审查。
-模型类型从 config/llm.yaml 中选择。
-校验完成后，在首次真实运行前向我申请权限。
+创建一个名为 release_review 的 Application。
+使用一个 Supervisor，以及负责 API 审查和测试审查的两个 Worker。
+模型类型只能从 config/llm.yaml 选择。
+完成校验后，在第一次真实 Run 前向我确认。
 ```
 
-Studio 在授权范围内直接改文件，并显示产生的 Diff。自治 Loop 会检查
-Effective Config、YAML/引用、Tools、Skills、权限、拓扑与相关测试；行为
-变化还会在获准后真实冒烟运行。未获运行授权时只能报告“配置已验证，
-尚未运行”，不能宣称完全完成。
+Studio 直接修改当前 Application，并展示每次 Diff。它按照下面的闭环工作：
 
-大型 Application 的模型侧详情会去重并按每页最多 10 个 Agent 返回，避免
-把完整配置塞进一次 Tool 输出。Studio 会持久化 Session 的状态、重试、
-权限、问题和 Task 子会话事件；模型安静思考不会被误判成需要自动中止。需要立即
-中止时按 `Esc`。
+```text
+检查 → 修改 → 校验 → 请求 Run 权限 → 执行 → 检查证据 → 修复
+```
 
-### 2. 首页数字与详情
+如果用户没有批准执行，Studio 会明确报告“配置已校验，未运行”，不会把静态校验
+包装成运行成功。
 
-首页只统计 `applications/` 下的 Application 数量，不统计展开后的
-Supervisor/Worker YAML 数量。`Global Skills` 只统计根目录运行时全局
-Skills；Application 私有 Skills 在对应 Application 和 Agent 详情中查看。
-Studio 使用的框架 Skill 不计入业务 Application Skills。
+## Application Studio
 
-`Ctrl+X` 搜索命令、权限、Application、主 Supervisor Agent、Skill、
-Schedule 和 Run。Worker 子 Agent 只在所属 Application 和主 Agent 详情中
-展示，不作为独立的全局搜索条目。Application 详情展示带来源的 Effective Config，包括
-模型、Tools、Skills、子 Agent、权限、Hooks、MCP、配置文件、校验、
-Working Revision 和 Running Revision。Run 默认只展示可行动摘要，不铺开
-原始 Events 和完整日志。
+TUI 是围绕 Application 设计的控制面，不是简单的日志查看器。
 
-### 3. 权限与 Revision
+- **Application 工作区：**查看 Effective Config、Supervisor/Worker 拓扑、配置
+  来源、模型、Tool、Skill、Hook、MCP、权限和校验结果。
+- **Agent Loop：**检查项目、修改当前 Application、展示 Tool 与 Diff 卡片、提出
+  业务问题、执行冒烟运行，并诊断失败 Run。
+- **权限边界：**默认 `Application Only` 允许读取项目、写入当前 Application。
+  Shell、全局文件、其他 Application 和未知新路径需要可见的权限确认。
+  `Full Access` 是显式 Session 开关，退出后自动重置。
+- **Session 连续性：**切换 Application 会保留 Studio 对话记忆；`/new` 开始新
+  对话，`/compact` 在保留已完成文件修改和持久历史的前提下压缩当前上下文。
+- **Revision 安全：**每个 Run 固定 Application 内容哈希。后续修改只改变
+  Working Revision，不会热切换正在执行的 Running Revision。
+- **Run 诊断：**摘要展示终态、Goal 进度、token 用量、完成证据和恢复操作，默认
+  不展示全部底层事件。
 
-默认 `Application Only`：可读整个项目，可直接写当前 Application；Shell、
-全局文件、其他 Application 和新建时未知目录由 Studio 弹出权限卡。
-按 `1` 仅本次、`2` 本次会话、`3` 拒绝。`Ctrl+X` 中的 Full Access 是同一个
-开关：未选择 Application 时也可预设，切换 Application 后继续生效，退出 TUI
-后恢复默认。切换 Application 会保留当前 Studio 对话记忆，只有 `/new` 才开始
-不带旧记忆的新 Session；`/compact` 使用当前 Studio 模型压缩当前 Session，保留
-任务连续性、持久历史和已经完成的文件修改。上下文接近上限时，Runtime 的自动压缩
-也会在 TUI 中显示。Agent Loop 运行时不能切换目标；等待完成或先按 `Esc`
-中止，避免旧回合污染新 Application。子 Agent 执行文本会保留到下一回合，选中
-TUI 文本后按 `Ctrl+Y` 可复制。
-Studio Agent 需要业务决定时，可点击选项或在输入框回答；一次出现多个问题时
-用 `|` 分隔答案。
-
-Run 启动时把 Application 内容哈希写入 manifest。之后继续修改只会改变
-Working Revision，不会热切换正在运行的 Agent；新配置需新 Run 或重启。
-
-| 操作 | 命令 / 按键 |
+| 操作 | 按键 / 命令 |
 |---|---|
-| 发送对话 | `Enter` |
-| 开始新的 Studio 对话 | `/new` |
-| 不开新会话，压缩当前对话上下文 | `/compact` |
-| 复制选中的 TUI 文本 | `Ctrl+Y` |
-| 搜索命令和全局实体 | `Ctrl+X` |
-| 从 `config/llm.yaml` 选择 Studio 模型 | `/models` 或 `Ctrl+X` |
-| 刷新完整索引 | `/refresh` 或在详情页按 `r` |
-| 分析选中的失败 Run | `a` |
-| 关闭详情、拒绝权限/问题或中止当前 Loop | `Esc` |
+| 发送 Studio 消息 | `Enter` |
+| 搜索 Application、Agent、Skill、Run、模型、权限和命令 | `Ctrl+X` |
+| 开始新对话 | `/new` |
+| 压缩当前对话 | `/compact` |
+| 选择 Studio 模型 | `/models` |
+| 刷新项目索引 | `/refresh` |
+| 诊断当前选中的失败 Run | `a` |
+| 关闭详情、拒绝决策或中断 Agent Loop | `Esc` |
 
-TUI 架构与开发说明见 [agentloom-tui/README.md](../../agentloom-tui/README.md)。
+界面行为、架构、更新、调度和开发命令见
+[Application Studio](../../agentloom-tui/README.md)。
 
-### 5. 显式运行调度服务
+## 定义 Application
 
-TUI 可以创建和管理持久化 Schedule。自动触发由独立的前台服务负责，因此关闭 TUI 后不会留下隐藏 daemon。
-
-```bash
-agentloom schedules --project /path/to/project serve
-```
-
-## 运行已有 Agent
-
-如果想先验证框架而不创建新应用，可以运行仓库自带的代码审查示例：
-
-```bash
-uv run loom run applications/ai_quality_analysis/workflows/code_review_agent.yaml
-```
-
-一次运行会在 `.agentloom/runs/<application_id>/<run_id>/` 下生成 receipt。开启 checkpoint 后，可恢复状态位于 `.agentloom/checkpoints/<application_id>/<task_id>/`。
-
-`run_id` 标识一次 attempt，resume 后会改变；`task_id` 标识逻辑任务，resume 时保持不变。
-
-## AgentLoom 如何工作
-
-AgentLoom 把多 Agent 系统视为一个应用，而不是一组松散的 Prompt。
-
-| 概念 | 职责 |
-|---|---|
-| Supervisor | 拆解应用任务，并协调 Worker 和工具。 |
-| Worker | 负责一个专门角色，并暴露 typed callable contract。 |
-| Agent YAML | 定义角色、工作流、模型类型、工具、Skill、Worker 和运行策略。 |
-| Python Runtime | 负责模型路由、Worker 工具生成、并发、日志、checkpoint 和产物。 |
-
-编排逻辑可以复用，确定性的前处理、校验、缓存和结果写入仍然由普通 Python 代码完成。
-
-### 核心能力
-
-| 需求 | AgentLoom 提供 |
-|---|---|
-| 从配置构建应用 | 使用 `loom run` 直接执行 YAML，并可生成 Python 入口。 |
-| 为不同角色选择模型 | 每个 Agent 设置 `model_type`，凭证隔离在 `config/llm.yaml`。 |
-| 像工具一样调用 Agent | Worker 的 `agent_function_schema` 会转换成带校验的 callable function。 |
-| 处理重复输入 | 固定或自动 Worker 并发，并支持 `.batch(tasks)`。 |
-| 扩展 Agent | 内置工具、本地 Python 函数、MCP Server、Claude-style Skill 和显式 Hook。 |
-| 跟踪复杂执行 | Agent 私有的 Todo 快照，支持自主 `auto`、强提示 `on` 和权威关闭 `off`。 |
-| 恢复并检查任务 | Run receipt、有界日志、Shell audit、checkpoint resume、结构化事件、Web UI、dashboard 和 TUI。 |
-
-### 当前任务 Todo 跟踪
-
-Todo 是当前 task、当前 Agent 的执行状态，不是长期项目管理器。它可以在全局、
-Application 或 Agent 层配置，更具体的层级优先：
-
-```yaml
-todo:
-  mode: "auto"  # auto | on | off
-```
-
-- `auto` 是默认值：工具可用，由模型自主判断有意义的多步骤任务是否值得跟踪。
-- `on` 强提示非简单 Agent 在实质执行前建立完整 Todo 快照；Runtime 不插入隐藏的
-  planning 轮次，也不阻止最终回答。
-- `off` 完全移除工具、策略与上下文状态；即使通用工具列表包含 `todo_write` 也以
-  `off` 为准。
-
-每次 `todo_write` 都会原子替换完整有序列表。开启 checkpoint 时，按 Agent path
-隔离的权威快照位于当前 task checkpoint 的 `todos.json`，共用 resume、锁、保留
-与清理生命周期；关闭 checkpoint 时只存在于本次 run 的内存中。
-`planning_interval` 仍可控制周期 replanning，但不再控制 Todo。完整说明见
-[Agent 配置参考](agent_config.md#311-todomode--任务跟踪)。
-
-## 手工创建应用
-
-一个应用把 Supervisor、Worker、Prompt、可选工具和输出放在一起：
+Application 将 Supervisor、Worker、提示词、可选 Tool 和输出放在一起：
 
 ```text
 applications/release_review/
@@ -270,12 +177,12 @@ applications/release_review/
 │   └── worker_agents/
 │       ├── api_reviewer.yaml
 │       └── test_reviewer.yaml
-├── config/system.yaml          # 可选的应用级覆盖
-├── sysprompt/                  # 可选 Prompt 模板
-└── README.md
+├── config/system.yaml          # 可选的 Application 覆盖配置
+├── skills/                     # 可选的私有 Skill
+└── sysprompt/                  # 可选的提示词模板
 ```
 
-最小 Supervisor 会引用 Worker YAML：
+Supervisor 引用 Worker 定义：
 
 ```yaml
 name: "release_review"
@@ -292,9 +199,12 @@ workflow: |
 
 tools: []
 max_steps: 12
+goal:
+  enabled: true
+  token_budget: 120000
 ```
 
-每个 Worker 定义 Supervisor 可见的调用契约：
+每个 Worker 声明 Supervisor 看到的接口：
 
 ```yaml
 name: "api_reviewer"
@@ -319,113 +229,116 @@ worker_agents: []
 max_steps: 8
 ```
 
-确认真实 `model_type` 存在于 `config/llm.yaml`，然后运行 Supervisor：
+直接运行 Supervisor：
 
 ```bash
 uv run loom run applications/release_review/workflows/release_review_agent.yaml
 ```
 
-完整字段见 [Agent 配置参考](agent_config.md)。
+也可以让支持 Skill 的编程助手先读取
+[`agentloom-framework-skill/SKILL.md`](../../agentloom-framework-skill/SKILL.md)，
+再创建文件、校验配置、运行 Application，并检查 `.agentloom` 证据。
 
-## 使用编程助手创建应用
-
-仓库提供 `agentloom-framework-skill/`，供 Codex、Claude Code 和其他支持 Skill 的编程助手使用。
-
-创建文件前，先要求助手读取该 Skill：
-
-```text
-先读取 agentloom-framework-skill/SKILL.md。
-
-为下面目标创建一个名为 <app_name> 的 AgentLoom 应用：
-<任务、输入、输出和验收标准>
-
-在 applications/<app_name>/ 下创建一个 Supervisor 和必要的 Worker。
-只使用 config/llm.yaml 中存在的模型类型。
-用 agent_function_schema 定义每个 Worker 的输入和输出。
-校验 YAML、运行应用、检查 .agentloom 证据，
-并报告通过、失败和仍有限制的内容。
-```
-
-Framework Skill 是提供给编程助手的开发说明。它不是 Runtime Skill，也不会被 Agent 应用自动加载。
-
-## 架构
+## Runtime 模型
 
 <p align="center">
-  <img alt="AgentLoom runtime architecture" src="../assets/agentloom-runtime-architecture.svg">
+  <img alt="AgentLoom Runtime 架构" src="../assets/agentloom-runtime-architecture.svg">
 </p>
 
-Worker Agent 会转换成生成的工具。Supervisor 可以同时调用 Worker，以及普通 Python、MCP、文件、Shell、搜索、Git、Codex 或 Skill 工具。
+Python Runtime 负责模型路由、Worker Tool 生成、并发、权限、Hook、checkpoint 和
+证据。确定性的预处理、校验、缓存和输出仍然使用普通 Python 代码。
 
-Runtime 负责执行身份和证据。TUI 与其他观察端读取这套标准状态，而不是根据进程输出猜测结果。
+Runtime 存储将执行尝试和可恢复任务分开：
 
-## 示例应用
-
-| 应用 | 展示能力 |
-|---|---|
-| `ai_quality_analysis` | 十二个专门 Worker 协作完成分阶段代码审查。 |
-| `unit_test_studio` | 使用自定义 Python 入口的严格 pytest 生成流水线。 |
-| `repo_map` | 确定性前处理、Bottom-Up Agent 分析、批处理和进度持久化。 |
-| `codex_exec_demo` | 将本地 `codex exec` 注册为带固定参数的普通 Agent 工具。 |
-
-```bash
-# 生成仓库架构地图
-uv run python applications/repo_map/repo_map_app.py /path/to/project \
-  --output_dir /tmp/repo-map-output
-
-# 为指定函数生成 pytest
-uv run python applications/unit_test_studio/studio_runner.py \
-  /path/to/project "src/utils.py:parse_config" \
-  --output_dir tests/generated
-
-# 本地 Codex 工具示例
-uv run loom run applications/codex_exec_demo/workflows/use_codex_exec_demo.yaml
+```text
+.agentloom/
+├── runs/<application_id>/<run_id>/
+│   ├── manifest.json
+│   ├── logs/runtime.log
+│   ├── audit/
+│   └── artifacts/
+├── checkpoints/<application_id>/<task_id>/
+│   ├── checkpoint.json
+│   ├── workers/<worker>/calls/<index>/checkpoint.json
+│   ├── todos.json
+│   ├── goal.json
+│   ├── context_store/
+│   └── file-history/
+└── workspaces/agents/<application_id>/<agent_path>/
+    ├── insights.md
+    └── tasks/<task_id>/{context.md,trace.md}
 ```
 
-## CLI 参考
+Goal、Todo、context-store、file-history 和 Recall 文件只会在对应能力已配置或被使用
+时出现。
 
-| 命令 | 用途 |
+## 运行与集成
+
+无需新建 Application，即可运行仓库内置的代码审查 Application：
+
+```bash
+uv run loom run applications/ai_quality_analysis/workflows/code_review_agent.yaml
+```
+
+其他程序负责调度时，使用机器可读的生命周期事件：
+
+```bash
+uv run loom run <workflow> --output-format json
+uv run loom run <workflow> --output-format jsonl
+```
+
+在 Python 中调用 `execute_app()`，会返回包含输出、时间、结构化 Goal 状态和
+`RunInfo` receipt 的 `ApplicationRunResult`：
+
+```python
+from src.runner import execute_app
+
+result = execute_app("applications/release_review/workflows/release_review_agent.yaml")
+print(result.output, result.run.run_id)
+```
+
+存储分配后的失败携带同一 receipt；若预检阶段拒绝运行，会在分配运行存储前发出
+`run.rejected` 事件。详见[结构化 Run API](run_observability.md)。
+
+持久化 Schedule 复用相同的 Application 契约与 Run 生命周期。自动触发由单独的
+前台服务负责，关闭 TUI 不会留下隐藏 daemon：
+
+```bash
+agentloom schedules --project /path/to/project serve
+```
+
+## 示例 Application
+
+| Application | 展示能力 |
 |---|---|
-| `uv run loom run <workflow>` | 运行应用。 |
-| `uv run loom run <workflow> --output-format json` | 输出一个带版本的终态生命周期事件。 |
-| `uv run loom run <workflow> --output-format jsonl` | 输出带版本的生命周期事件流。 |
-| `uv run loom create <workflow>` | 生成 Python 入口。 |
-| `uv run loom list-tasks` | 列出可恢复任务。 |
-| `uv run loom dashboard` | 打开终端任务 dashboard。 |
-| `uv run loom ui` | 打开 Web 可视化面板。 |
-| `uv run loom schedules ...` | 管理持久化 Schedule。 |
-| `uv run loom sessions ...` | 搜索和维护执行历史。 |
-| `uv run loom learn review ...` | 触发 Application 或 Project review。 |
-| `uv run loom reviews ...` | 查看、应用或回滚 review decision。 |
-| `uv run loom memory ...` | 管理 Curated Memory。 |
-| `uv run loom feedback submit <run_id> ...` | 为 Run 添加结果反馈。 |
-| `uv run loom clean-tasks` | 删除保留的 checkpoint 任务。 |
-| `uv run loom clean-runtime` | 执行已配置的 Run 和 artifact retention。 |
-| `uv run loom migrate-runtime --dry-run\|--apply` | 预览或执行旧 Runtime 迁移。 |
-
-使用 `uv run loom <command> --help` 查看完整命令契约。
+| `ai_quality_analysis` | 十二个专业 Worker 协作完成分阶段代码审查 |
+| `unit_test_studio` | 通过确定性 Python 入口执行严格的 pytest 生成流程 |
+| `repo_map` | 确定性预处理、自底向上 Agent 分析、批处理和进度持久化 |
+| `codex_exec_demo` | 将本地 `codex exec` 作为带固定参数的普通 Agent Tool |
+| `goal_mode_validation` | Goal 显式完成、预算统计和可恢复终态 |
+| `self_learning_smoke` | Session 历史、记忆提案、证据和审核边界 |
 
 ## 文档
 
 | 文档 | 内容 |
 |---|---|
-| [配置体系总览](config-overview.md) | 配置层级、合并和隔离。 |
-| [Agent 配置](agent_config.md) | Supervisor 和 Worker YAML 字段。 |
-| [LLM 配置](llm_config.md) | 模型类型、Provider、重试和缓存。 |
-| [系统配置](system_config.md) | Runtime、权限、执行环境和工具。 |
-| [Skill 配置](skills_config.md) | Skill 包、加载方式和策略。 |
-| [Hook 参考](hooks.md) | 直接 Hook、Bundle、事件和执行方式。 |
-| [Goal Mode](goal_mode.md) | Supervisor continuation、显式完成、预算、resume、调度、CLI 与 TUI。 |
-| [Checkpoint 恢复](checkpoint.md) | Run 证据、checkpoint 布局和恢复。 |
-| [Self-learning v6](self_learning.md) | History、candidate、review、审批和 promotion。 |
-| [结构化 Run API](run_observability.md) | Python receipt、typed error、event sink、JSON 和 JSONL。 |
+| [配置总览](config-overview.md) | 配置分层、合并与隔离 |
+| [Agent 配置](agent_config.md) | Supervisor 和 Worker YAML 字段 |
+| [Tool Catalog](tool_catalog.md) | 延迟实现加载、Toolset、元数据和扩展规则 |
+| [Skills](skills_config.md) | 发现、按需激活与权限边界 |
+| [Hooks](hooks.md) | 显式授权、事件、输入转换和失败语义 |
+| [Goal Mode](goal_mode.md) | continuation、完成责任、预算、恢复与调度 |
+| [Checkpoint 与 Runtime 存储](checkpoint.md) | Run/task 身份、证据、恢复和保留策略 |
+| [Self-Learning v6](self_learning.md) | 历史、候选、审核、审批与提升 |
+| [结构化 Run API](run_observability.md) | Python receipt、类型化失败、JSON 与 JSONL |
 
 ## 开发与支持
 
 ```bash
-# Framework 测试
+# Framework
 uv run pytest tests -q
 
-# TUI 测试
+# TUI
 cd agentloom-tui
 bun test
 bun run typecheck
@@ -433,6 +346,7 @@ bun run typecheck
 
 - Issue：[github.com/linora-u/AgentLoom/issues](https://github.com/linora-u/AgentLoom/issues)
 - 联系方式：[raine_walker@163.com](mailto:raine_walker@163.com?subject=AgentLoom%20Collaboration)
-- TUI 上游来源与许可证：[agentloom-tui/upstream/README.md](../../agentloom-tui/upstream/README.md)
+- TUI 来源与声明：[agentloom-tui/upstream/README.md](../../agentloom-tui/upstream/README.md)
 
-如果 AgentLoom 对你的项目有帮助，欢迎 Star 仓库，或贡献一个范围明确的示例、修复或文档改进。
+如果 AgentLoom 对你的项目有帮助，欢迎 Star，或贡献一个边界清晰的 Application、
+修复或验证用例。

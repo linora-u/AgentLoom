@@ -6,7 +6,7 @@ from src.encoding.terminal import configure_terminal_encoding
 
 configure_terminal_encoding()
 
-__version__ = "0.1.0"
+__version__ = "1.0.1"
 
 _LAZY_EXPORTS = {
     "C": ("src.lib.config", "C"),

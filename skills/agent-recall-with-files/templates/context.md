@@ -1,6 +1,6 @@
 # Context
 
-Current task state snapshot. Updated as the task progresses. Cleared on each new run.
+Current task state snapshot. Preserved on resume; a new task gets a new file.
 
 ## Goal
 

@@ -2,7 +2,7 @@ import { stat } from "node:fs/promises"
 import { BridgeClient, PythonTransport } from "../bridge"
 import { formatSnapshot, parseCliArgs } from "./args"
 
-export const VERSION = "0.1.0"
+export const VERSION = process.env.AGENTLOOM_VERSION ?? "1.0.1"
 const MAX_BRIDGE_DIAGNOSTIC_CHARS = 4_000
 
 export const HELP = `AgentLoom Application Studio — create, inspect, modify, validate and run Applications
