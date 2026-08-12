@@ -86,12 +86,5 @@ The agent immediately knows to check thread-safety in the test setup, and avoids
 
 ## Example 5: No New Insights
 
-```md
-# Insights
-
-## Log
-- [2026-03-12] [pitfall] `TokenManager` is a singleton but not thread-safe...
-- [2026-03-13] [fact] No new insights this session; task was a straightforward test fix using the existing lock pattern.
-```
-
-Do not leave `insights.md` untouched. An explicit "no new insights" entry confirms the file was reviewed.
+Leave `insights.md` unchanged. Record task completion in `trace.md`; the durable
+file should contain only knowledge that another task can reuse.

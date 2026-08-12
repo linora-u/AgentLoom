@@ -73,10 +73,12 @@ class TestAgentRecallSkillRepoAdaptation(unittest.TestCase):
         self.assertNotIn("CODEX_SKILL_ROOT", content)
         self.assertNotIn("session-catchup.py", content)
         self.assertNotIn("/clear", content)
-        self.assertNotIn("hooks:", content)
+        frontmatter = content.split("---", 2)[1]
+        self.assertNotIn("hooks:", frontmatter)
         self.assertNotIn("python ./scripts/", content)
-        self.assertIn("skills/agent-recall-with-files", content)
         self.assertIn("hooks/agent-recall-with-files", content)
+        self.assertIn("references/examples.md", content)
+        self.assertIn("references/reference.md", content)
         self.assertTrue(HOOK_MANIFEST.exists())
         manifest = HOOK_MANIFEST.read_text(encoding="utf-8")
         self.assertIn("name: agent-recall-with-files", manifest)
@@ -84,13 +86,14 @@ class TestAgentRecallSkillRepoAdaptation(unittest.TestCase):
         self.assertNotIn("task_plan.md", content)
         self.assertNotIn(".planning/", content)
 
-    def test_workflow_uses_canonical_skill_path(self):
+    def test_workflow_activates_discovered_skill_by_name(self):
         self.assertTrue(WORKFLOW_PATH.exists(), f"Workflow file not found: {WORKFLOW_PATH}")
         content = WORKFLOW_PATH.read_text(encoding="utf-8")
-        self.assertIn('path: "skills/agent-recall-with-files"', content)
+        self.assertIn('skill(name="agent-recall-with-files")', content)
+        self.assertNotIn('path: "skills/agent-recall-with-files"', content)
         self.assertTrue(SKILL_DIR.exists(), f"Canonical skill directory not found: {SKILL_DIR}")
 
-    def test_task_start_script_bootstraps_runtime_and_cleans_legacy(self):
+    def test_task_start_script_bootstraps_runtime_without_deleting_project_files(self):
         self.assertTrue(TASK_START_SCRIPT.exists(), f"TaskCreated script not found: {TASK_START_SCRIPT}")
 
         with tempfile.TemporaryDirectory(prefix="recall-task-start-") as tmp:
@@ -136,10 +139,10 @@ class TestAgentRecallSkillRepoAdaptation(unittest.TestCase):
             insights_content = Path(agent_root, "insights.md").read_text(encoding="utf-8").replace("\r\n", "\n")
             trace_content = Path(runtime_dir, "trace.md").read_text(encoding="utf-8").replace("\r\n", "\n")
             context_content = Path(runtime_dir, "context.md").read_text(encoding="utf-8").replace("\r\n", "\n")
-            self.assertFalse(Path(tmp, ".planning").exists())
-            self.assertFalse(Path(tmp, "task_plan.md").exists())
-            self.assertFalse(Path(tmp, "findings.md").exists())
-            self.assertFalse(Path(tmp, "progress.md").exists())
+            self.assertTrue(Path(tmp, ".planning", "old_agent", "task_plan.md").is_file())
+            self.assertEqual(Path(tmp, "task_plan.md").read_text(encoding="utf-8"), "legacy root plan\n")
+            self.assertEqual(Path(tmp, "findings.md").read_text(encoding="utf-8"), "legacy root findings\n")
+            self.assertEqual(Path(tmp, "progress.md").read_text(encoding="utf-8"), "legacy root progress\n")
             self.assertEqual(
                 INSIGHTS_TEMPLATE.read_text(encoding="utf-8").replace("\r\n", "\n").strip(),
                 insights_content.strip(),

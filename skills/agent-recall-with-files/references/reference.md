@@ -1,62 +1,48 @@
-# Reference
+# Runtime reference
 
-## Intent
+## Canonical layout
 
-This skill gives each agent a small, durable workspace under `.agentloom/workspaces/agents/<application_id>/<agent_path>/`.
-
-It enables cross-session experience recall — agents learn from past pitfalls and decisions.
-
-## File Roles
-
-| File | Lifecycle | Role |
-|------|-----------|------|
-| `tasks/<task_id>/context.md` | Per task | Task goal, current status, remaining items. Recovery snapshot. |
-| `tasks/<task_id>/trace.md` | Per task | Chronological execution log. Preserved when the task resumes. |
-| `insights.md` | **Cross-task** | Application/agent-scoped experience: pitfalls, decisions, facts. Tagged and dated. |
-
-## Template State Does Not Count
-
-If any file still looks like the original template, treat it as not updated yet.
-
-Examples of template state:
-
-- `trace.md` still contains only the placeholder timestamp line.
-- `context.md` still has `(What is this task trying to achieve?)` placeholders.
-- `insights.md` still contains only generic guidance bullets and no dated entries.
-
-## Insights Entry Format
-
-```
-- [YYYY-MM-DD] [tag] Specific, actionable description.
+```text
+.agentloom/workspaces/agents/<application_id>/<agent_path>/
+├── insights.md
+└── tasks/<task_id>/
+    ├── context.md
+    ├── trace.md
+    └── .write_tracker.json
 ```
 
-Tags: `[pitfall]` `[decision]` `[fact]` `[dependency]` `[perf]` `[config]`
+`context.md` and `trace.md` belong to one logical `task_id`. A resume preserves
+them. A new task receives new files. `insights.md` belongs to one Application and
+runtime Agent path and survives across tasks.
 
-## Recommended Entry Style
+## Template detection
 
-- Prefer short bullets.
-- Include concrete paths, commands, and identifiers.
-- Record failures once with the `[pitfall]` tag, then change approach.
-- Always tag insights — untagged entries are harder to scan.
+A missing, empty, or unchanged template file counts as unwritten. The Hook emits
+a short marker instead of injecting placeholder text. Task completion remains
+default-allow even when a file is stale.
 
-## Cross-Session Behaviour
+## Reminder thresholds
 
-- `insights.md` is **never automatically cleared**. It accumulates across task runs.
-- When it exceeds the line threshold (80 lines), `TaskCreated` compresses older entries into an `## Archive` section and keeps recent entries under `## Recent`.
-- `context.md` and `trace.md` are recreated from templates on each new task.
+- Steps 1–3: no PostToolUse reminder.
+- `trace.md`: gentle after 4 stale steps, urgent after 7.
+- `context.md`: gentle after 6 stale steps, urgent after 10.
+- Reminder cooldown: 3 steps.
+- `insights.md`: no staleness reminder; write only durable knowledge.
 
-## Minimum Self-Check Before Finishing
+PreToolUse and PostToolUse match the built-in file, Shell, and search tools named
+in `HOOK.yaml`. They do not intercept arbitrary MCP, Worker, Skill, or custom
+tools.
 
-- `context.md` contains task-specific content (not just template placeholders).
-- `trace.md` contains at least one task-specific action entry.
-- `trace.md` mentions the latest meaningful step or produced artifact.
-- `insights.md` contains either a dated insight entry or an explicit "no new insights" note.
-- All files use the exact canonical paths injected by the framework.
+## Insight compaction
 
-## Hook Summary
+At TaskCreated, a file over 80 lines keeps its newest 30 non-empty entries under
+`## Recent`. Older entries are replaced by one deterministic count grouped by
+tag under `## Archive`. This is lossy bounding, not model-generated synthesis.
 
-- `TaskCreated` bootstraps missing task files and preserves `insights.md` plus resume state.
-- `PreToolUse` injects full `context.md`, recent `trace.md` (20 lines), recent `insights.md` (30 lines).
-- `PostToolUse` reminds the agent to record meaningful changes.
-- `SubagentStop` on failure emphasises logging pitfalls in `insights.md`.
-- `Stop` always allows; the skill depends on manual compliance rather than a hard gate.
+## Concurrency boundary
+
+Different runtime Agent paths have separate `insights.md` files. Concurrent
+tasks using the same Application and Agent path share one file. Serialize those
+tasks: both manual edits and automatic TaskCreated compaction use unlocked
+read/write cycles, so overlapping writers can lose entries. Safe concurrency
+requires a future lock or atomic merge implementation.
