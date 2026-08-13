@@ -30,15 +30,9 @@ context_engine:
 #   paths:
 #     - "shared/skills"
 
-# ============================================
-# Global Hook Configuration
-# ============================================
-# Bundle references are explicit execution authorization. Hook directories are
-# never auto-discovered, including when a Skill has the same name.
-hooks:
-  bundles:
-    agent-visualization:
-      path: "hooks/agent-visualization"
+# Hook Bundles are opt-in execution authorization. Declare them here, in an
+# Application system config, or in an Agent config when they are required.
+# Hook directories are never auto-discovered.
 
 # ============================================
 # Global Execution Environment Configuration

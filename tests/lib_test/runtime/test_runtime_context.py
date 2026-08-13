@@ -47,9 +47,6 @@ def test_runtime_context_builds_canonical_agent_workspace_paths(tmp_path: Path) 
     assert context.agent_task_workspace_dir("supervisor/researcher") == (
         agent_root / "tasks" / "task_123"
     )
-    assert context.agent_visualization_path("supervisor/researcher") == (
-        agent_root / "tasks" / "task_123" / "visualization.json"
-    )
 
 
 def test_agent_insights_are_shared_but_task_workspace_is_isolated(tmp_path: Path) -> None:

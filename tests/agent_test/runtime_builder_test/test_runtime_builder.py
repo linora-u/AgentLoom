@@ -1070,11 +1070,10 @@ def test_builtin_session_end_has_only_the_recorder_hook():
     assert "builtin:self_learning_finalizer" not in all_sources
 
 
-def test_default_system_config_enables_visualization_bundle_only():
+def test_default_system_config_does_not_enable_shell_hook_bundles():
     agent = _make_agent(logger=DummyLoggerBackend())
-    hook_ids = {handler.hook_id for handler in agent._hook_plan.handlers if handler.hook_id is not None}
 
-    assert any(hook_id.startswith("agent-visualization.") for hook_id in hook_ids)
+    assert all(handler.source.startswith("builtin:") for handler in agent._hook_plan.handlers)
     assert len(agent._hook_plan.fingerprint) == 64
 
 
