@@ -72,14 +72,6 @@ prompt:
   path: "sysprompt/system_prompt.yaml"
 
 # ============================================
-# 显式 Hook 配置
-# ============================================
-hooks:
-  bundles:
-    agent-visualization:
-      path: hooks/agent-visualization
-
-# ============================================
 # 执行环境全局配置
 # ============================================
 execution_env:
@@ -317,13 +309,13 @@ skills:
 
 ## 4.5 hooks — 独立 Hook Runtime
 
-Hook 与 Skill 分开配置。下面的声明会显式授权 visualization Bundle：
+Hook 与 Skill 分开配置。例如，下面的声明会显式授权一个本地审计 Bundle：
 
 ```yaml
 hooks:
   bundles:
-    agent-visualization:
-      path: hooks/agent-visualization
+    local-audit:
+      path: hooks/local-audit
 ```
 
 直接声明、Bundle manifest、分层替换、tombstone、事件语义和 Shell 协议详见 [Hook 参考](hooks.md)。
