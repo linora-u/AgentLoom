@@ -16,7 +16,12 @@ from src.lib.smolagents.agent.base_agent import ToolCallingAgentV2
 from src.lib.smolagents.hooks import HookEvent, HookHandler, HookPlan, HookResult, HookRun
 from src.lib.smolagents.hooks.tool_shim import inject_hooks
 from src.lib.smolagents.models.litellm_model import LiteLLMModelV2
-from src.lib.smolagents.models.provider_tool_errors import patch_litellm_tool_error_projection
+from src.lib.smolagents.tool_protocol import (
+    ToolCallRecord,
+    ToolErrorRecord,
+    patch_litellm_tool_error_projection,
+    settle_tool_call,
+)
 from src.trace import ExplicitExecutionContext, bind_explicit_execution_context
 
 
@@ -38,6 +43,38 @@ class EchoTool(Tool):
 
     def forward(self, text: str) -> str:
         return f"echo:{text}"
+
+
+class ManagedAgentLike:
+    name = "worker"
+    inputs = {"request": {"type": "string", "description": "Worker request"}}
+
+    def __call__(self, request: str) -> str:
+        return f"worker:{request}"
+
+
+class SetupTool(Tool):
+    name = "setup_tool"
+    description = "Return state initialized by setup."
+    inputs = {}
+    output_type = "string"
+
+    def setup(self) -> None:
+        self.ready = "ready"
+        super().setup()
+
+    def forward(self) -> str:
+        return self.ready
+
+
+class InvalidImageTool(Tool):
+    name = "invalid_image"
+    description = "Return an invalid image payload."
+    inputs = {}
+    output_type = "image"
+
+    def forward(self) -> object:
+        return object()
 
 
 class NativeBatchModel:
@@ -86,6 +123,168 @@ def _call(call_id: str, name: str, arguments: dict) -> ChatMessageToolCall:
 
 def _step() -> ActionStep:
     return ActionStep(step_number=1, timing=Timing(start_time=time.time()))
+
+
+def test_tool_runtime_returns_one_canonical_terminal_record() -> None:
+    completed = settle_tool_call(
+        EchoTool(),
+        {"text": "kept"},
+        call_id="runtime-ok",
+    )
+    failed = settle_tool_call(
+        ExplodingTool(),
+        {"label": "isolated"},
+        call_id="runtime-error",
+    )
+
+    assert completed.call_id == "runtime-ok"
+    assert completed.status == "completed"
+    assert completed.output == "echo:kept"
+    assert completed.error is None
+    assert failed.call_id == "runtime-error"
+    assert failed.status == "error"
+    assert failed.error.kind == "execution_error"
+    assert failed.error.stage == "tool_execution"
+    assert failed.error.retryable is False
+    assert failed.model_content() == (
+        '{"ok":false,"status":"error","error":'
+        '{"kind":"execution_error","message":"boom:isolated",'
+        '"retryable":false,"stage":"tool_execution"}}'
+    )
+
+
+def test_tool_runtime_does_not_pass_tool_only_sanitize_flag_to_managed_agent() -> None:
+    settled = settle_tool_call(
+        ManagedAgentLike(),
+        {"request": "audit"},
+        call_id="worker-call",
+        sanitize_inputs_outputs=False,
+    )
+
+    assert settled.status == "completed"
+    assert settled.output == "worker:audit"
+
+
+def test_hooked_tool_settlement_preserves_lazy_setup_contract() -> None:
+    run = HookRun(HookPlan(), local_run_id="local-setup", root_run_id="root-setup")
+    execution = ExplicitExecutionContext(
+        task_id="task-setup",
+        sub_task_id=None,
+        agent_id="agent-setup",
+        agent_name="agent",
+        agent_config={},
+        skill_catalog=None,
+        hook_run=run,
+        runtime_agent_path="agent",
+        root_run_id="root-setup",
+        local_run_id="local-setup",
+    )
+    tool = inject_hooks(SetupTool())
+
+    with bind_explicit_execution_context(execution):
+        settled = settle_tool_call(tool, {}, call_id="setup-call")
+
+    assert settled.status == "completed"
+    assert settled.output == "ready"
+    assert tool.is_initialized is True
+
+
+def test_output_validation_failure_is_the_only_hook_terminal_record() -> None:
+    run = HookRun(HookPlan(), local_run_id="local-output", root_run_id="root-output")
+    execution = ExplicitExecutionContext(
+        task_id="task-output",
+        sub_task_id=None,
+        agent_id="agent-output",
+        agent_name="agent",
+        agent_config={},
+        skill_catalog=None,
+        hook_run=run,
+        runtime_agent_path="agent",
+        root_run_id="root-output",
+        local_run_id="local-output",
+    )
+
+    with bind_explicit_execution_context(execution):
+        settled = settle_tool_call(
+            inject_hooks(InvalidImageTool()),
+            {},
+            call_id="invalid-output-call",
+            sanitize_inputs_outputs=True,
+        )
+
+    assert settled.status == "error"
+    assert settled.stage == "output_validation"
+    traced = run.tool_outcomes_snapshot()
+    assert len(traced) == 1
+    assert traced[0].status == "error"
+    assert traced[0].stage == "output_validation"
+
+
+def test_terminal_record_rejects_nonterminal_or_contradictory_state() -> None:
+    try:
+        ToolCallRecord(call_id="bad", tool_name="echo", input={}, status="pending")
+    except ValueError as error:
+        assert "terminal status" in str(error)
+    else:
+        raise AssertionError("nonterminal status was accepted")
+
+    try:
+        ToolCallRecord(
+            call_id="bad-completed",
+            tool_name="echo",
+            input={},
+            status="completed",
+            error=ToolErrorRecord("execution_error", "bad", False, "tool_execution"),
+        )
+    except ValueError as error:
+        assert "completed Tool record" in str(error)
+    else:
+        raise AssertionError("contradictory completed record was accepted")
+
+
+def test_hook_trace_consumes_base_canonical_record_without_subtype_tags() -> None:
+    run = HookRun(HookPlan(), local_run_id="base-record", root_run_id="root-record")
+    run.record_tool_outcome(
+        ToolCallRecord.completed(
+            call_id="base-call",
+            tool_name="echo",
+            input={"text": "one"},
+            output="echo:one",
+        )
+    )
+
+    traced = run.tool_outcomes_snapshot()
+    assert len(traced) == 1
+    assert type(traced[0]) is ToolCallRecord
+    assert traced[0].status == "completed"
+
+
+def test_hooked_tool_settlement_sanitizes_completed_output_without_changing_terminal_state() -> None:
+    run = HookRun(HookPlan(), local_run_id="local-settle", root_run_id="root-settle")
+    execution = ExplicitExecutionContext(
+        task_id="task-settle",
+        sub_task_id=None,
+        agent_id="agent-settle",
+        agent_name="agent",
+        agent_config={},
+        skill_catalog=None,
+        hook_run=run,
+        runtime_agent_path="agent",
+        root_run_id="root-settle",
+        local_run_id="local-settle",
+    )
+
+    with bind_explicit_execution_context(execution):
+        settled = settle_tool_call(
+            inject_hooks(EchoTool()),
+            {"text": "sanitized"},
+            call_id="hooked-success",
+            sanitize_inputs_outputs=True,
+        )
+
+    assert settled.status == "completed"
+    assert settled.call_id == "hooked-success"
+    assert str(settled.output) == "echo:sanitized"
 
 
 def test_failed_tool_keeps_provider_call_id_and_error_record() -> None:
@@ -173,6 +372,58 @@ def test_litellm_payload_projects_native_tool_calls_and_error_results() -> None:
                 '{"kind":"execution_error","message":"boom:wire",'
                 '"retryable":false,"stage":"tool_execution"}}'
             ),
+        },
+    ]
+
+
+def test_litellm_projects_parallel_success_results_before_message_cleaning() -> None:
+    model = NativeBatchModel(
+        [
+            _call("wire-ok-1", "echo", {"text": "one"}),
+            _call("wire-ok-2", "echo", {"text": "two"}),
+        ]
+    )
+    agent = ToolCallingAgentV2(
+        tools=[EchoTool()],
+        model=model,
+        max_steps=1,
+        max_tokens=4096,
+        verbosity_level=0,
+    )
+    memory_step = _step()
+    list(agent._step_stream(memory_step))
+    agent.memory.steps.append(memory_step)
+
+    completion = LiteLLMModelV2(model_id="openai/test")._prepare_completion_kwargs(
+        messages=agent.write_memory_to_messages(),
+    )
+
+    assert completion["messages"][-3:] == [
+        {
+            "role": "assistant",
+            "content": "",
+            "tool_calls": [
+                {
+                    "id": "wire-ok-1",
+                    "type": "function",
+                    "function": {"name": "echo", "arguments": '{"text":"one"}'},
+                },
+                {
+                    "id": "wire-ok-2",
+                    "type": "function",
+                    "function": {"name": "echo", "arguments": '{"text":"two"}'},
+                },
+            ],
+        },
+        {
+            "role": "tool",
+            "tool_call_id": "wire-ok-1",
+            "content": '{"ok":true,"status":"completed","output":"echo:one"}',
+        },
+        {
+            "role": "tool",
+            "tool_call_id": "wire-ok-2",
+            "content": '{"ok":true,"status":"completed","output":"echo:two"}',
         },
     ]
 

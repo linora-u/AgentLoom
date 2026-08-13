@@ -15,8 +15,9 @@ from src.lib.smolagents.hooks.tool_shim import (
     clone_tool_for_runtime,
     inject_hooks,
 )
-from src.lib.smolagents.hooks.types import Blocked, Executed, Failed
+from src.lib.smolagents.hooks.types import Blocked
 from src.lib.smolagents.monkey_patch import install_agentloom_runtime_adapters
+from src.lib.smolagents.tool_protocol import ToolCallRecord, ToolPolicyBlockedError
 from src.lib.smolagents.tools.tools import tool
 from src.lib.trusted_memory_evidence import (
     TRUSTED_MEMORY_EVIDENCE_ATTR,
@@ -451,7 +452,8 @@ def test_internal_outcomes_distinguish_executed_blocked_and_failed() -> None:
         args=(),
         kwargs={"count": 1},
     )
-    assert isinstance(executed, Executed)
+    assert type(executed) is ToolCallRecord
+    assert executed.status == "completed"
     assert executed.outcome == "executed"
 
     blocked_run = HookRun(
@@ -474,7 +476,8 @@ def test_internal_outcomes_distinguish_executed_blocked_and_failed() -> None:
         args=(),
         kwargs={"count": 2},
     )
-    assert isinstance(blocked, Blocked)
+    assert type(blocked) is ToolCallRecord
+    assert blocked.status == "blocked"
     assert blocked.outcome == "blocked"
     assert blocked.reason == "denied"
 
@@ -495,9 +498,12 @@ def test_internal_outcomes_distinguish_executed_blocked_and_failed() -> None:
         args=(),
         kwargs={"value": 3},
     )
-    assert isinstance(failed, Failed)
+    assert type(failed) is ToolCallRecord
+    assert failed.status == "error"
     assert failed.outcome == "failed"
-    assert isinstance(failed.error, ValueError)
+    assert failed.error.kind == "execution_error"
+    assert failed.error.message == "boom-3"
+    assert isinstance(failed.exception, ValueError)
 
 
 def test_run_owned_trace_preserves_executed_blocked_and_failed() -> None:
@@ -505,7 +511,8 @@ def test_run_owned_trace_preserves_executed_blocked_and_failed() -> None:
     assert _invoke(_count_tool([]), executed_run, count=1) == 1
     executed_trace = executed_run.tool_outcomes_snapshot()
     assert len(executed_trace) == 1
-    assert isinstance(executed_trace[0], Executed)
+    assert type(executed_trace[0]) is ToolCallRecord
+    assert executed_trace[0].status == "completed"
     assert executed_trace[0].outcome == "executed"
     assert executed_trace[0].tool_name == "boundary_count"
     assert executed_trace[0].value is None
@@ -526,7 +533,8 @@ def test_run_owned_trace_preserves_executed_blocked_and_failed() -> None:
     assert _invoke(_count_tool([]), blocked_run, count=2) == "policy denied"
     blocked_trace = blocked_run.tool_outcomes_snapshot()
     assert len(blocked_trace) == 1
-    assert isinstance(blocked_trace[0], Blocked)
+    assert type(blocked_trace[0]) is ToolCallRecord
+    assert blocked_trace[0].status == "blocked"
     assert blocked_trace[0].outcome == "blocked"
     assert blocked_trace[0].stage == "pre_tool_use"
     assert blocked_trace[0].tool_name == "boundary_count"
@@ -546,7 +554,8 @@ def test_run_owned_trace_preserves_executed_blocked_and_failed() -> None:
         _invoke(traced_failure, failed_run, value=3)
     failed_trace = failed_run.tool_outcomes_snapshot()
     assert len(failed_trace) == 1
-    assert isinstance(failed_trace[0], Failed)
+    assert type(failed_trace[0]) is ToolCallRecord
+    assert failed_trace[0].status == "error"
     assert failed_trace[0].outcome == "failed"
     assert failed_trace[0].stage == "tool_execution"
     assert failed_trace[0].tool_name == "traced_failure"
@@ -800,7 +809,8 @@ def test_local_python_executor_timeout_thread_keeps_concurrent_run_identity_isol
         }
         assert run.consume_pending_agent_context() == [f"context-{label}"]
         assert len(trace) == 1
-        assert isinstance(trace[0], Executed)
+        assert type(trace[0]) is ToolCallRecord
+        assert trace[0].status == "completed"
         assert trace[0].tool_input == {"label": label}
 
 
@@ -887,6 +897,40 @@ def test_real_tool_failure_still_dispatches_post_tool_use_failure() -> None:
     assert failures == [{"error": "boom-5", "error_type": "ValueError"}]
 
 
+def test_typed_policy_block_is_not_reported_as_tool_failure() -> None:
+    failures: list[dict] = []
+
+    @tool
+    def policy_guarded(value: int) -> int:
+        """Reject a policy-blocked request.
+
+        Args:
+            value: Rejected value.
+        """
+
+        raise ToolPolicyBlockedError(f"denied-{value}")
+
+    run = HookRun(
+        HookPlan(
+            (
+                HookHandler(
+                    HookEvent.POST_TOOL_USE_FAILURE,
+                    "policy_guarded",
+                    lambda context: failures.append(context.tool_response or {}),
+                ),
+            )
+        ),
+        local_run_id="policy-local",
+        root_run_id="policy-root",
+    )
+
+    assert _invoke(policy_guarded, run, value=5) == "denied-5"
+    assert failures == []
+    traced = run.tool_outcomes_snapshot()
+    assert len(traced) == 1
+    assert traced[0].status == "blocked"
+
+
 def test_failure_observer_framework_error_does_not_replace_tool_error(monkeypatch) -> None:
     @tool
     def boundary_failure(value: int) -> int:
@@ -913,5 +957,6 @@ def test_failure_observer_framework_error_does_not_replace_tool_error(monkeypatc
 
     trace = run.tool_outcomes_snapshot()
     assert len(trace) == 1
-    assert isinstance(trace[0], Failed)
-    assert str(trace[0].error) == "ValueError: original-9"
+    assert type(trace[0]) is ToolCallRecord
+    assert trace[0].status == "error"
+    assert trace[0].error.message == "original-9"

@@ -14,9 +14,9 @@ from abc import ABC, abstractmethod
 from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from contextlib import nullcontext
-from contextvars import ContextVar, copy_context
+from contextvars import copy_context
 from copy import deepcopy
-from dataclasses import dataclass, replace
+from dataclasses import dataclass
 from enum import Enum
 from pathlib import Path
 from threading import RLock
@@ -31,14 +31,11 @@ from smolagents import (
     AgentImage,
     AgentLogger,
     AgentParsingError,
-    AgentToolCallError,
-    AgentToolExecutionError,
     CodeAgent,
     LogLevel,
     RunResult,
     Tool,
     ToolCallingAgent,
-    validate_tool_arguments,
 )
 from smolagents.agents import ToolOutput
 from smolagents.memory import ToolCall
@@ -61,22 +58,16 @@ from src.lib.smolagents.agent.agent_validation import (
     validate_execution_config_payload,
     validate_todo_config,
 )
+from src.lib.smolagents.agent.invocation import current_worker_memory, require_successful_runtime_result
 from src.lib.smolagents.agent.tool_argument_coercion import coerce_tool_arguments
 from src.lib.smolagents.hooks import (
     HookConfigLayer,
     HookEvent,
     HookPlan,
     HookPlanCompiler,
-    HookRun,
     builtin_hook_handlers,
 )
-from src.lib.smolagents.hooks.tool_shim import (
-    ToolBlockedError,
-    ToolBlockedResult,
-    bind_tool_call_id,
-    clone_tool_for_runtime,
-    inject_hooks,
-)
+from src.lib.smolagents.hooks.tool_shim import clone_tool_for_runtime, inject_hooks
 from src.lib.smolagents.models.model_manager import (
     ModelConfigBuilder,
     get_model,
@@ -88,23 +79,19 @@ from src.lib.smolagents.models.tool_call_parser import (
 from src.lib.smolagents.monkey_patch import install_agentloom_runtime_adapters
 from src.lib.smolagents.prompts.prompt_builder import build_prompt_templates
 from src.lib.smolagents.skills.catalog import SkillCatalog, SkillSource
-from src.lib.smolagents.tool_protocol import ToolCallRecord, ToolErrorRecord
+from src.lib.smolagents.tool_protocol import ToolCallRecord, settle_tool_call
 from src.lib.smolagents.tools.tools import ensure_tool_wrapped
 from src.lib.utils.workspace import ensure_workspace_mounted_once
 from src.tools.loader import resolve_tool_function
 from src.trace import (
-    bind_explicit_execution_context,
     bind_local_run,
     bind_root_run,
     capture_explicit_execution_context,
     generate_id,
     get_current_hook_run,
-    require_root_run_id,
     require_root_run_state,
     sub_task_context,
 )
-
-_current_worker_memory: ContextVar[list | None] = ContextVar("_current_worker_memory", default=None)
 
 install_agentloom_runtime_adapters()
 
@@ -126,69 +113,6 @@ def _normalize_tool_arguments_object(arguments: dict[str, Any] | str) -> dict[st
             return arguments
 
     return parsed if isinstance(parsed, dict) else arguments
-
-
-def _require_runtime_result(
-    run_result: Any,
-    *,
-    allowed_states: set[str],
-    error_prefix: str,
-) -> None:
-    run_state = str(getattr(run_result, "state", "") or "")
-    if run_state not in allowed_states:
-        state_label = run_state or "missing_run_state"
-        raise RuntimeError(f"{error_prefix}: {state_label}")
-
-
-def _require_successful_runtime_result(run_result: Any) -> None:
-    """Reject structured runtime results that did not finish successfully."""
-
-    _require_runtime_result(
-        run_result,
-        allowed_states={"success"},
-        error_prefix="Agent run did not complete successfully",
-    )
-
-
-def _require_goal_runtime_result(run_result: Any) -> None:
-    """Accept both ordinary finals and max-step segment boundaries in Goal mode."""
-
-    _require_runtime_result(
-        run_result,
-        allowed_states={"success", "max_steps_error"},
-        error_prefix="Agent Goal segment failed",
-    )
-
-
-def _goal_continuation_prompt(state: Any) -> str:
-    budget = "unlimited"
-    if state.token_budget is not None:
-        remaining = max(state.token_budget - state.used_tokens, 0)
-        budget = (
-            f"{state.used_tokens}/{state.token_budget} tokens used; "
-            f"{remaining} tokens remain before the next-request fence"
-        )
-    return (
-        "Continue working toward the active Goal using the existing conversation "
-        "and tool state. Do not restart or repeat completed work.\n\n"
-        f"Goal ID: {state.goal_id}\n"
-        "Objective: unchanged from the initial task context; call get_goal only "
-        "if you need to inspect the canonical objective again.\n"
-        f"Goal status: {state.status}\n"
-        f"Token budget: {budget}\n\n"
-        "A normal final answer does not complete the Goal. Only after the entire "
-        "objective is delivered and verified, call update_goal with status="
-        "'complete' and concise evidence."
-    )
-
-
-def _goal_completion_output(segment_output: Any, evidence: str | None) -> Any:
-    if (
-        isinstance(segment_output, str)
-        and segment_output.startswith("Error in generating final LLM output:")
-    ):
-        return evidence
-    return segment_output if segment_output is not None else evidence
 
 
 class _SuccessfulRunStateMixin:
@@ -230,7 +154,7 @@ class _SuccessfulRunStateMixin:
             return_full_result=True,
             **kwargs,
         )
-        _require_successful_runtime_result(run_result)
+        require_successful_runtime_result(run_result)
         return run_result if wants_full_result else run_result.output
 
 
@@ -300,30 +224,6 @@ class ToolCallingAgentV2(_SuccessfulRunStateMixin, LoomAgentMixin, ToolCallingAg
                 ) from cause
             raise
 
-    @staticmethod
-    def _tool_error_record(exc: Exception) -> ToolErrorRecord:
-        """Classify an execution exception without exposing wrapper arguments."""
-
-        cause = exc.__cause__ if isinstance(exc.__cause__, Exception) else exc
-        if isinstance(exc, AgentToolCallError):
-            kind = "invalid_arguments"
-            stage = "input_validation"
-            retryable = False
-        else:
-            kind = str(getattr(cause, "kind", "execution_error"))
-            stage = str(getattr(cause, "stage", "tool_execution"))
-            # Unknown execution errors are deterministic until a tool adapter
-            # explicitly marks them transient. This flag describes whether
-            # retrying the same call is sensible, not whether the LLM may
-            # recover by changing arguments or choosing another tool.
-            retryable = bool(getattr(cause, "retryable", False))
-        return ToolErrorRecord(
-            kind=kind,
-            message=str(cause) or type(cause).__name__,
-            retryable=retryable,
-            stage=stage,
-        )
-
     def process_tool_calls(self, chat_message, memory_step):
         """Settle every Tool call independently and persist its stable provider ID."""
 
@@ -337,66 +237,34 @@ class ToolCallingAgentV2(_SuccessfulRunStateMixin, LoomAgentMixin, ToolCallingAg
             for call in chat_message.tool_calls
         ]
         memory_step.tool_calls = calls
-        records = [
-            ToolCallRecord(
-                call_id=call.id,
-                tool_name=call.name,
-                input=call.arguments or {},
-            )
-            for call in calls
-        ]
-        memory_step.tool_results = records
-
         yield from calls
 
-        def execute_one(index: int) -> tuple[int, ToolOutput]:
+        def execute_one(index: int) -> tuple[int, ToolCallRecord, ToolOutput]:
             call = calls[index]
-            record = records[index]
-            record.status = "running"
-            record.started_at = time.time()
-            try:
-                result = self.execute_tool_call(
-                    call.name,
-                    call.arguments or {},
-                    call_id=call.id,
-                )
-                if isinstance(result, ToolBlockedResult):
-                    record.status = "blocked"
-                    record.error = ToolErrorRecord(
-                        kind=result.kind,
-                        message=str(result),
-                        retryable=result.retryable,
-                        stage=result.stage,
-                    )
-                    observation = record.model_content()
-                    is_final_answer = False
-                    output = observation
-                elif type(result) in {AgentImage, AgentAudio}:
-                    observation_name = "image.png" if type(result) is AgentImage else "audio.mp3"
-                    self.state[observation_name] = result
-                    observation = f"Stored '{observation_name}' in memory."
-                    record.status = "completed"
-                    record.output = observation
-                    is_final_answer = call.name == "final_answer"
-                    output = result
-                else:
-                    observation = str(result).strip()
-                    record.status = "completed"
-                    record.output = result
-                    is_final_answer = call.name == "final_answer"
-                    output = result
-            except Exception as exc:
-                cause = exc.__cause__ if isinstance(exc.__cause__, Exception) else exc
-                record.status = "blocked" if isinstance(cause, ToolBlockedError) else "error"
-                record.error = self._tool_error_record(exc)
+            record = self.execute_tool_call_record(
+                call.name,
+                call.arguments or {},
+                call_id=call.id,
+            )
+            if record.status != "completed":
                 observation = record.model_content()
                 is_final_answer = False
                 output = observation
-            finally:
-                record.ended_at = time.time()
+            elif type(record.output) in {AgentImage, AgentAudio}:
+                media_output = record.output
+                observation_name = "image.png" if type(record.output) is AgentImage else "audio.mp3"
+                self.state[observation_name] = media_output
+                observation = f"Stored '{observation_name}' in memory."
+                record = record.with_output(observation)
+                is_final_answer = call.name == "final_answer"
+                output = media_output
+            else:
+                observation = str(record.output).strip()
+                is_final_answer = call.name == "final_answer"
+                output = record.output
 
             self.logger.log(f"Tool {call.name} [{call.id}] -> {record.status}", level=LogLevel.INFO)
-            return index, ToolOutput(
+            return index, record, ToolOutput(
                 id=call.id,
                 output=output,
                 is_final_answer=is_final_answer,
@@ -405,8 +273,10 @@ class ToolCallingAgentV2(_SuccessfulRunStateMixin, LoomAgentMixin, ToolCallingAg
             )
 
         outputs: dict[int, ToolOutput] = {}
+        records: dict[int, ToolCallRecord] = {}
         if len(calls) == 1:
-            index, output = execute_one(0)
+            index, record, output = execute_one(0)
+            records[index] = record
             outputs[index] = output
             yield output
         else:
@@ -416,11 +286,60 @@ class ToolCallingAgentV2(_SuccessfulRunStateMixin, LoomAgentMixin, ToolCallingAg
                     context = copy_context()
                     futures.append(executor.submit(context.run, execute_one, index))
                 for future in as_completed(futures):
-                    index, output = future.result()
+                    index, record, output = future.result()
+                    records[index] = record
                     outputs[index] = output
                     yield output
 
+        memory_step.tool_results = [records[index] for index in range(len(calls))]
         memory_step.observations = "\n".join(outputs[index].observation for index in range(len(calls)))
+
+    def execute_tool_call_record(
+        self,
+        tool_name: str,
+        arguments: dict[str, str] | str,
+        *,
+        call_id: str | None = None,
+    ) -> ToolCallRecord:
+        """Settle one Tool invocation without exception-based terminal-state transport."""
+
+        available_tools = {**self.tools, **self.managed_agents}
+        stable_call_id = call_id or uuid.uuid4().hex
+        if tool_name not in available_tools:
+            return ToolCallRecord.blocked(
+                call_id=stable_call_id,
+                tool_name=tool_name,
+                input=arguments,
+                message=f"Unknown tool {tool_name}, should be one of: {', '.join(available_tools)}.",
+                kind="invalid_arguments",
+                stage="input_validation",
+                started_at=time.time(),
+                ended_at=time.time(),
+            )
+
+        tool = available_tools[tool_name]
+        try:
+            normalized = _normalize_tool_arguments_object(arguments)
+            normalized = self._substitute_state_variables(normalized)
+            normalized = coerce_tool_arguments(tool, normalized)
+        except Exception as error:
+            return ToolCallRecord.blocked(
+                call_id=stable_call_id,
+                tool_name=tool_name,
+                input=arguments,
+                message=str(error) or type(error).__name__,
+                kind="invalid_arguments",
+                stage="input_validation",
+                started_at=time.time(),
+                ended_at=time.time(),
+            )
+
+        return settle_tool_call(
+            tool,
+            normalized,
+            call_id=stable_call_id,
+            sanitize_inputs_outputs=tool_name not in self.managed_agents,
+        )
 
     def execute_tool_call(
         self,
@@ -429,46 +348,13 @@ class ToolCallingAgentV2(_SuccessfulRunStateMixin, LoomAgentMixin, ToolCallingAg
         *,
         call_id: str | None = None,
     ) -> Any:
-        """Execute a tool with AgentLoom-local schema-bound argument coercion."""
+        """Compatibility interface for callers that need the ordinary Tool value."""
 
-        available_tools = {**self.tools, **self.managed_agents}
-        if tool_name not in available_tools:
-            raise AgentToolCallError(
-                f"Unknown tool {tool_name}, should be one of: {', '.join(available_tools)}.",
-                self.logger,
-            )
-
-        tool = available_tools[tool_name]
-        arguments = _normalize_tool_arguments_object(arguments)
-        arguments = self._substitute_state_variables(arguments)
-        arguments = coerce_tool_arguments(tool, arguments)
-        is_managed_agent = tool_name in self.managed_agents
-
-        try:
-            validate_tool_arguments(tool, arguments)
-        except (ValueError, TypeError) as e:
-            raise AgentToolCallError(str(e), self.logger) from e
-        except Exception as e:
-            error_msg = f"Error executing tool '{tool_name}' with arguments {str(arguments)}: {type(e).__name__}: {e}"
-            raise AgentToolExecutionError(error_msg, self.logger) from e
-
-        try:
-            with bind_tool_call_id(call_id or uuid.uuid4().hex):
-                if isinstance(arguments, dict):
-                    return tool(**arguments) if is_managed_agent else tool(**arguments, sanitize_inputs_outputs=True)
-                return tool(arguments) if is_managed_agent else tool(arguments, sanitize_inputs_outputs=True)
-        except Exception as e:
-            if is_managed_agent:
-                error_msg = (
-                    f"Error executing request to team member '{tool_name}' with arguments {str(arguments)}: {e}\n"
-                    "Please try again or request to another team member"
-                )
-            else:
-                error_msg = (
-                    f"Error executing tool '{tool_name}' with arguments {str(arguments)}: {type(e).__name__}: {e}\n"
-                    "Please try again or use another tool"
-                )
-            raise AgentToolExecutionError(error_msg, self.logger) from e
+        return self.execute_tool_call_record(
+            tool_name,
+            arguments,
+            call_id=call_id,
+        ).direct_result()
 
 
 class AgentType(Enum):
@@ -1439,20 +1325,23 @@ class RoleDrivenAgent(BaseAgent):
         """
 
         def _run_once() -> str:
+            from src.lib.smolagents.agent.invocation import AgentInvocation
+
             # Every invocation gets a fresh local id. The outermost invocation
             # also owns it as the root; delegated workers keep their own local id.
             local_run_id = run_id or str(uuid.uuid4())
             with bind_local_run(local_run_id):
                 with bind_root_run(local_run_id) as owns_root_run:
-                    return self._run_with_root_context(
-                        task,
+                    return AgentInvocation(
+                        self,
+                        task=task,
                         task_id=task_id,
                         checkpoint_manager=checkpoint_manager,
                         application_lifecycle=application_lifecycle,
                         resume=resume,
                         additional_args=additional_args,
                         owns_root_run=owns_root_run,
-                    )
+                    ).run()
 
         role_profile_resolver = getattr(self, "_role_profile", None)
         cache_runtime_agent = bool(
@@ -1462,410 +1351,6 @@ class RoleDrivenAgent(BaseAgent):
             with self._cached_runtime_run_lock:
                 return _run_once()
         return _run_once()
-
-    def _run_with_root_context(
-        self,
-        task: str,
-        task_id: str | None = None,
-        checkpoint_manager: Any | None = None,
-        application_lifecycle: "ApplicationRunLifecycle | None" = None,
-        resume: bool = False,
-        additional_args: dict[str, Any] | None = None,
-        *,
-        owns_root_run: bool,
-    ) -> str:
-        from src.lib.checkpoint.coordinator import CheckpointCoordinator
-        from src.lib.goal import (
-            GoalStateProvider,
-            build_goal_objective,
-            goal_objective_fingerprint,
-            normalize_goal_config,
-        )
-
-        # Transform task before passing it to the runtime agent.
-        transformed_tasks = self._transform_tasks(task)
-        if not transformed_tasks:
-            raise ValueError("Agent task transformation produced no tasks")
-        transformed_tasks = self._inject_memory_snapshot(transformed_tasks)
-        transformed_task = "\n\n".join(transformed_tasks)
-        goal_config = normalize_goal_config(
-            self._config,
-            source=self._config.get("name", "agent"),
-        )
-        goal_objective = None
-        goal_fingerprint = None
-        if goal_config.enabled:
-            if not owns_root_run:
-                raise ValueError("Goal mode can only be configured by the root Supervisor Agent")
-            goal_objective = build_goal_objective(
-                description=str(self._config.get("description", "")),
-                workflow=self._config["workflow"],
-                task=task,
-            )
-            goal_fingerprint = goal_objective_fingerprint(
-                description=str(self._config.get("description", "")),
-                workflow=self._config["workflow"],
-                task=task,
-            )
-        # Determine ID
-        parent_execution_context = capture_explicit_execution_context()
-        current_task_id = parent_execution_context.task_id
-        final_task_id = (
-            current_task_id
-            or task_id
-            or generate_id(f"{self._get_agent_type().value.lower()}_{self.name}", prefix="task")
-        )
-        self._task_id = final_task_id
-
-        # Supervisor activates a new coordinator; workers inherit via ContextVar.
-        if checkpoint_manager is not None:
-            coord = CheckpointCoordinator.activate(
-                checkpoint_manager,
-                final_task_id,
-                transformed_task,
-                resume=resume,
-                effective_config=self._effective_agent_config or self._config,
-            )
-        else:
-            coord = CheckpointCoordinator.current()
-
-        owns_application_lifecycle = False
-        if application_lifecycle is None and checkpoint_manager is not None:
-            from src.application_run_lifecycle import ApplicationRunLifecycle
-
-            application_lifecycle = ApplicationRunLifecycle()
-            application_lifecycle.enter_execution()
-            owns_application_lifecycle = True
-
-        goal_provider = None
-        if goal_config.enabled:
-            assert goal_objective is not None and goal_fingerprint is not None
-            try:
-                goal_provider = GoalStateProvider.initialize(
-                    config=goal_config,
-                    objective=goal_objective,
-                    objective_fingerprint=goal_fingerprint,
-                    resume=resume,
-                )
-            except Exception:
-                if checkpoint_manager is not None and coord is not None:
-                    CheckpointCoordinator.deactivate(coord)
-                raise
-
-        def _execute_agent():
-            session_started = False
-            session_result = None
-            session_error: BaseException | None = None
-            runtime_agent = None
-            # Inject agent_id into model (for LiteLLM/Langfuse tracing)
-            agent_id = self.get_agent_id()
-            previous_model_agent_id = getattr(self._model, "agent_id", ...) if hasattr(self._model, "agent_id") else ...
-            if previous_model_agent_id is not ...:
-                self._model.agent_id = agent_id
-
-            active_context = capture_explicit_execution_context()
-            hook_agent_config = self._effective_agent_config or self._config
-            if goal_config.enabled:
-                # Goal is an Agent-owned lifecycle field, not a system overlay.
-                # Preserve the raw validated value in the execution-time
-                # identity snapshot used by root-only Goal tool guards.
-                hook_agent_config = {
-                    **hook_agent_config,
-                    "goal": deepcopy(self._config["goal"]),
-                }
-            hook_run = HookRun(
-                self._hook_plan,
-                local_run_id=active_context.local_run_id or "",
-                root_run_id=active_context.root_run_id or "",
-                parent=active_context.hook_run,
-                agent_config=hook_agent_config,
-                project_root=str(C.agent_root),
-            )
-            previous_runtime_path = active_context.runtime_agent_path
-            if previous_runtime_path:
-                runtime_path = f"{previous_runtime_path}/{self.name}"
-            else:
-                runtime_path = self.name
-            execution_binding = bind_explicit_execution_context(
-                replace(
-                    active_context,
-                    agent_id=agent_id,
-                    agent_name=self.name,
-                    agent_config=self._effective_agent_config or self._config,
-                    skill_catalog=self._skill_catalog,
-                    hook_run=hook_run,
-                    runtime_agent_path=runtime_path,
-                )
-            )
-            execution_binding.__enter__()
-            from src.lib.goal import bind_goal_state_provider
-            from src.lib.todo import ensure_todo_state_provider
-
-            goal_provider_binding = (
-                bind_goal_state_provider(goal_provider)
-                if goal_provider is not None
-                else nullcontext(None)
-            )
-            goal_provider_binding.__enter__()
-            todo_provider_binding = ensure_todo_state_provider()
-            todo_provider_binding.__enter__()
-
-            try:
-                # Build tools only after the complete explicit context has
-                # been bound.  LocalPythonExecutor/tool wrappers capture this
-                # context before crossing their timeout thread boundary.
-                runtime_agent = self.build_runtime_agent()
-                self._bind_hook_message_sink(runtime_agent)
-                ensure_workspace_mounted_once()
-                if owns_root_run:
-                    self._emit_session_lifecycle_event(
-                        HookEvent.SESSION_START,
-                        transformed_task,
-                    )
-                    session_started = True
-
-                if coord is not None:
-                    # ── Resume: restore memory from checkpoint ──
-                    if resume and checkpoint_manager is not None:
-                        coord.restore(runtime_agent)
-                        # Sync heartbeat step to restored count so dashboard
-                        # shows the correct value immediately (not 0).
-                        if coord._supervisor_heartbeat is not None:
-                            try:
-                                coord._supervisor_heartbeat.update_step(len(runtime_agent.memory.steps))
-                            except Exception:
-                                pass
-
-                    # ── Incremental checkpoint: register step callback ──
-                    if checkpoint_manager is not None:
-                        # Supervisor: register and store callback for workers.
-                        coord.register_supervisor_step_callback(runtime_agent)
-                    else:
-                        # Worker: inherit the supervisor's callback.  The
-                        # invocation later passes that runtime explicitly when
-                        # atomic preparation allocates its call_index.
-                        coord.register_worker_step_callback(runtime_agent, agent_name=self.name)
-
-                # Pass reset=False when resuming (preserves injected memory) and
-                # for later workflow items (preserves memory from previous runs).
-                # Always request the structured result.  smolagents otherwise
-                # returns only its fallback output for a max-steps termination,
-                # which is indistinguishable from a successful final answer and
-                # would incorrectly emit TaskCompleted and run memory review.
-                result = None
-                if goal_provider is not None:
-                    initial_state = goal_provider.snapshot()
-                    segment_index = 0
-                    while True:
-                        state = goal_provider.snapshot()
-                        if state.status == "complete":
-                            result = state.evidence
-                            break
-                        goal_provider.assert_request_allowed()
-                        use_initial_context = segment_index == 0 and not initial_state.goal_started
-                        current_task = (
-                            transformed_tasks[0]
-                            if use_initial_context
-                            else _goal_continuation_prompt(state)
-                        )
-                        run_kwargs = {
-                            "task": current_task,
-                            "return_full_result": True,
-                        }
-                        if additional_args:
-                            run_kwargs["additional_args"] = dict(additional_args)
-                        if resume or segment_index > 0 or not use_initial_context:
-                            run_kwargs["reset"] = False
-                        if (
-                            not use_initial_context
-                            and getattr(
-                                runtime_agent,
-                                "_agent_loom_supports_reset_false_task_step_control",
-                                False,
-                            )
-                        ):
-                            run_kwargs["_skip_task_step_on_reset_false"] = False
-                        try:
-                            run_result = runtime_agent.run(**run_kwargs)
-                        except Exception as exc:
-                            from src.lib.goal import (
-                                GoalBudgetLimitedError,
-                                GoalCompleteError,
-                            )
-
-                            terminal_state = goal_provider.snapshot()
-                            if (
-                                isinstance(exc, GoalCompleteError)
-                                or terminal_state.status == "complete"
-                            ):
-                                result = terminal_state.evidence
-                                break
-                            if terminal_state.status == "budget_limited":
-                                raise GoalBudgetLimitedError(terminal_state) from exc
-                            raise
-                        _require_goal_runtime_result(run_result)
-                        segment_output = getattr(run_result, "output", None)
-                        segment_index += 1
-                        state = goal_provider.snapshot()
-                        if state.status == "complete":
-                            # A CodeAgent can commit completion and call
-                            # final_answer in the same model response. Preserve
-                            # that user-facing delivery; evidence is only the
-                            # durable fallback when no final output settled.
-                            result = _goal_completion_output(
-                                segment_output,
-                                state.evidence,
-                            )
-                            break
-                        goal_provider.assert_request_allowed()
-                else:
-                    for task_index, current_task in enumerate(transformed_tasks):
-                        run_kwargs: dict = {
-                            "task": current_task,
-                            "return_full_result": True,
-                        }
-                        if additional_args:
-                            run_kwargs["additional_args"] = dict(additional_args)
-                        if resume or task_index > 0:
-                            run_kwargs["reset"] = False
-                        if task_index > 0 and getattr(
-                            runtime_agent, "_agent_loom_supports_reset_false_task_step_control", False
-                        ):
-                            run_kwargs["_skip_task_step_on_reset_false"] = False
-                        run_result = runtime_agent.run(**run_kwargs)
-                        _require_successful_runtime_result(run_result)
-                        result = getattr(run_result, "output", None)
-
-                # Compatibility fallback for wrapper paths that cannot read
-                # memory directly from the runtime agent.
-                try:
-                    _current_worker_memory.set(list(runtime_agent.memory.steps))
-                except Exception:
-                    pass
-
-                self._emit_task_lifecycle_event(
-                    HookEvent.TASK_COMPLETED,
-                    transformed_task,
-                    result=result,
-                )
-                session_result = result
-
-                return result
-            except BaseException as exc:
-                from src.lib.goal import GoalBudgetLimitedError
-
-                session_error = exc
-                if isinstance(exc, GoalBudgetLimitedError):
-                    raise
-                if isinstance(exc, Exception):
-                    self._emit_task_lifecycle_event(
-                        HookEvent.STOP_FAILURE,
-                        transformed_task,
-                        error=exc,
-                    )
-                raise
-            finally:
-                application_lifecycle_error: BaseException | None = None
-                try:
-                    goal_snapshot = (
-                        goal_provider.snapshot().to_dict()
-                        if goal_provider is not None
-                        else None
-                    )
-                    if application_lifecycle is not None:
-                        try:
-                            application_lifecycle.report_agent_invocation(
-                                coordinator=coord,
-                                runtime_agent=runtime_agent,
-                                result=session_result,
-                                error=session_error,
-                                goal=goal_snapshot,
-                            )
-                            if owns_application_lifecycle:
-                                application_lifecycle.settle_reported_agent_invocation()
-                                application_lifecycle.commit_checkpoint(
-                                    checkpoint_manager=checkpoint_manager,
-                                    task_id=final_task_id,
-                                )
-                        except BaseException as exc:
-                            application_lifecycle_error = exc
-                    if session_started:
-                        self._emit_session_lifecycle_event(
-                            HookEvent.SESSION_END,
-                            transformed_task,
-                            result=session_result,
-                            error=session_error,
-                        )
-                        if session_error is None:
-                            # SessionEnd owns only the short, deterministic ledger
-                            # write. Once a successful run is recorded, the root
-                            # owner may perform the optional synchronous review
-                            # while its trusted binding is still alive. Workers do
-                            # not enter this block, and review failure cannot change
-                            # the successful task result.
-                            try:
-                                from src.extensions.self_learning.paths import (
-                                    review_config,
-                                    self_learning_enabled,
-                                )
-
-                                effective_config = (
-                                    self._effective_agent_config or self._config
-                                )
-                                review_policies = (
-                                    review_config(effective_config, scope="application"),
-                                    review_config(effective_config, scope="project"),
-                                )
-                                if (
-                                    self_learning_enabled(effective_config)
-                                    and any(
-                                        policy.get("enabled")
-                                        and str((policy.get("trigger") or {}).get("mode") or "manual")
-                                        != "manual"
-                                        for policy in review_policies
-                                    )
-                                ):
-                                    from src.extensions.self_learning.reviewer import (
-                                        review_finished_run,
-                                    )
-
-                                    review_finished_run(
-                                        root_run_id=require_root_run_id(),
-                                        agent_config=effective_config,
-                                    )
-                            except Exception:
-                                if self._logger:
-                                    self._logger.warning("Completed-run memory review failed unexpectedly")
-                    if previous_model_agent_id is not ...:
-                        self._model.agent_id = previous_model_agent_id
-                finally:
-                    try:
-                        if (
-                            owns_application_lifecycle
-                            and checkpoint_manager is not None
-                            and coord is not None
-                        ):
-                            assert application_lifecycle is not None
-                            application_lifecycle.close_agent_coordinator(coord)
-                    finally:
-                        try:
-                            todo_provider_binding.__exit__(None, None, None)
-                        finally:
-                            try:
-                                goal_provider_binding.__exit__(None, None, None)
-                            finally:
-                                execution_binding.__exit__(None, None, None)
-                if application_lifecycle_error is not None:
-                    raise application_lifecycle_error
-
-        if current_task_id:
-            return _execute_agent()
-
-        # Bind a fresh task id without mutating the legacy process-global
-        # fallback, which can belong to another concurrent top-level run.
-        with bind_explicit_execution_context(replace(parent_execution_context, task_id=final_task_id)):
-            return _execute_agent()
-
 
 class SubTaskTrackedAgent:
     """
@@ -1913,7 +1398,7 @@ class SubTaskTrackedAgent:
                 return list(steps)
         except Exception:
             pass
-        return _current_worker_memory.get(None)
+        return current_worker_memory.get(None)
 
     def _execute_with_lifecycle(self, callable_fn, task, call_label, *args, **kwargs):
         """Run callable within sub-task context, broadcasting lifecycle events.
@@ -1994,7 +1479,7 @@ class SubTaskTrackedAgent:
                 # check is intentionally too late to prevent a completed
                 # worker checkpoint from being reused on resume.
                 if isinstance(result, RunResult):
-                    _require_successful_runtime_result(result)
+                    require_successful_runtime_result(result)
             except KeyboardInterrupt:
                 if coord is not None:
                     coord.record_worker_interrupted(

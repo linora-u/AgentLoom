@@ -78,9 +78,6 @@ hooks:
   bundles:
     agent-visualization:
       path: hooks/agent-visualization
-    # Recall Hook 与 Recall Skill 独立，默认禁用。
-    # agent-recall-with-files:
-    #   path: hooks/agent-recall-with-files
 
 # ============================================
 # 执行环境全局配置
@@ -320,15 +317,13 @@ skills:
 
 ## 4.5 hooks — 独立 Hook Runtime
 
-Hook 与 Skill 分开配置。下面的声明会显式授权 visualization Bundle，同时保持 recall 禁用：
+Hook 与 Skill 分开配置。下面的声明会显式授权 visualization Bundle：
 
 ```yaml
 hooks:
   bundles:
     agent-visualization:
       path: hooks/agent-visualization
-    # agent-recall-with-files:
-    #   path: hooks/agent-recall-with-files
 ```
 
 直接声明、Bundle manifest、分层替换、tombstone、事件语义和 Shell 协议详见 [Hook 参考](hooks.md)。

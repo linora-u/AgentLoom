@@ -60,7 +60,7 @@ def _run_validator(project_root: Path, app_root: str = "applications/demo") -> t
     "skills_value",
     [
         {"paths": []},
-        {"paths": ["skills/agent-recall-with-files", "shared/skills"]},
+        {"paths": ["skills/custom-analysis", "shared/skills"]},
     ],
 )
 def test_skills_paths_config_is_supported(tmp_path: Path, skills_value) -> None:
@@ -77,9 +77,9 @@ def test_skills_paths_config_is_supported(tmp_path: Path, skills_value) -> None:
     "skills_value",
     [
         123,
-        "skills/agent-recall-with-files",
-        ["skills/agent-recall-with-files"],
-        {"items": ["skills/agent-recall-with-files"]},
+        "skills/custom-analysis",
+        ["skills/custom-analysis"],
+        {"items": ["skills/custom-analysis"]},
         {"paths": [], "load-mode": "eager"},
     ],
 )
