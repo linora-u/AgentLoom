@@ -9,9 +9,10 @@ Covers:
 """
 
 import os
-import pytest
 import sys
-from unittest.mock import patch, MagicMock
+from unittest.mock import MagicMock, patch
+
+import pytest
 
 from src.tools.shell.process import (
     AGENT_SHELL_PROMPT_ENV,
@@ -63,6 +64,16 @@ def test_shell_process_real_python_execution():
     proc = ShellProcess(session_scoped=False)
     result = proc.run("python3 -c \"print('hello from python')\"")
     assert "hello from python" in result
+
+
+def test_shell_process_marks_spawn_failure_as_interrupted(monkeypatch):
+    proc = ShellProcess(session_scoped=False, load_profile=False)
+    monkeypatch.setattr(proc, "_exec_subprocess", MagicMock(side_effect=OSError("spawn unavailable")))
+
+    result = proc.execute("echo unreachable")
+
+    assert result.interrupted is True
+    assert "spawn unavailable" in result.output
 
 
 @pytest.mark.skipif(

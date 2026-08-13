@@ -11,6 +11,7 @@ from __future__ import annotations
 from typing import Any
 
 from src.lib.logging import get_logger
+from src.mcp.client import AgentLoomMCPClient as MCPClient
 from src.mcp.config import McpServerConfig, McpSettings, to_mcp_client_params
 from src.mcp.tool_wrapper import wrap_mcp_tools
 
@@ -62,17 +63,6 @@ class McpManager:
 
     def _connect_one(self, cfg: McpServerConfig) -> None:
         """Connect to a single MCP server.  Never raises."""
-        try:
-            from smolagents import MCPClient
-        except ImportError:
-            msg = (
-                "smolagents[mcp] is required for MCP support. "
-                "Install with: uv pip install 'smolagents[mcp]'"
-            )
-            logger.warning("[MCP] %s", msg)
-            self._errors[cfg.name] = msg
-            return
-
         try:
             params = to_mcp_client_params(cfg)
             client = MCPClient(params)
@@ -150,7 +140,7 @@ class McpManager:
     # Context manager
     # ------------------------------------------------------------------
 
-    def __enter__(self) -> "McpManager":
+    def __enter__(self) -> McpManager:
         self.connect_all()
         return self
 

@@ -2149,6 +2149,25 @@ def test_create_agent_passes_max_tokens(monkeypatch):
         set_global_logger(previous_global_logger)
 
 
+def test_create_agent_passes_split_context_budget(monkeypatch):
+    _patch_agent_classes(monkeypatch)
+    previous_global_logger = get_global_logger(create_if_missing=False)
+    set_global_logger(DummyLoggerBackend())
+
+    try:
+        agent = _make_agent(logger=None)
+        runtime_agent = agent._create_agent(
+            tools=[],
+            use_customized_prompt=False,
+            context_window=128000,
+            max_output_tokens=16000,
+        )
+        assert runtime_agent.kwargs["context_window"] == 128000
+        assert runtime_agent.kwargs["max_output_tokens"] == 16000
+    finally:
+        set_global_logger(previous_global_logger)
+
+
 def test_create_agent_keeps_wildcard_imports_for_local_executor(monkeypatch):
     _patch_agent_classes(monkeypatch)
     previous_global_logger = get_global_logger(create_if_missing=False)
