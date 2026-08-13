@@ -1,7 +1,7 @@
-from pydantic import ValidationError
 from pathlib import Path
 
 import pytest
+from pydantic import ValidationError
 
 import src.lib.config.config as config_module
 
@@ -25,7 +25,8 @@ def test_llm_readonly_members_basic(monkeypatch):
                 "api_key": "powerful-key",
                 "requests_per_minute": 12,
                 "temperature": 0.2,
-                "max_tokens": 1024,
+                "context_window": 32768,
+                "max_output_tokens": 4096,
                 "timeout": 31,
                 "description": "powerful model",
             },
@@ -49,7 +50,8 @@ def test_llm_readonly_members_basic(monkeypatch):
     assert powerful.base_url == "https://powerful.example/v1"
     assert powerful.api_key == "powerful-key"
     assert powerful.temperature == 0.2
-    assert powerful.max_tokens == 1024
+    assert powerful.context_window == 32768
+    assert powerful.max_output_tokens == 4096
     assert powerful.timeout == 31
     assert powerful.description == "powerful model"
 
@@ -204,3 +206,57 @@ def test_llm_max_tokens_default_is_150000(monkeypatch):
     _patch_active_config(monkeypatch, raw)
 
     resolved = config_module.C.llm.for_type("powerful")
+
+    assert resolved.context_window == 150000
+    assert resolved.max_output_tokens == 16384
+
+
+def test_legacy_max_tokens_populates_both_budgets(monkeypatch):
+    raw = {
+        "model": {
+            "default_model_type": "powerful",
+            "powerful": {"model": "openai/powerful", "max_tokens": 8192},
+            "summary": {"model": "openai/test-summary"},
+        }
+    }
+    _patch_active_config(monkeypatch, raw)
+
+    resolved = config_module.C.llm.for_type("powerful")
+
+    assert resolved.context_window == 8192
+    assert resolved.max_output_tokens == 8192
+
+
+def test_legacy_max_tokens_max_uses_finite_default(monkeypatch):
+    raw = {
+        "model": {
+            "default_model_type": "powerful",
+            "powerful": {"model": "openai/powerful", "max_tokens": "max"},
+            "summary": {"model": "openai/test-summary"},
+        }
+    }
+    _patch_active_config(monkeypatch, raw)
+
+    resolved = config_module.C.llm.for_type("powerful")
+
+    assert resolved.max_tokens == 150000
+    assert resolved.context_window == 150000
+    assert resolved.max_output_tokens == 150000
+    assert resolved.input_token_limit == 150000
+
+
+def test_invalid_token_budget_is_rejected(monkeypatch):
+    raw = {
+        "model": {
+            "default_model_type": "powerful",
+            "powerful": {
+                "model": "openai/powerful",
+                "context_window": 4096,
+                "max_output_tokens": 8192,
+            },
+            "summary": {"model": "openai/test-summary"},
+        }
+    }
+
+    with pytest.raises(ValueError, match="max_output_tokens.*context_window"):
+        _patch_active_config(monkeypatch, raw)

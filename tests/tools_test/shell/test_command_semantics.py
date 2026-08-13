@@ -1,15 +1,11 @@
 """Tests for shell command exit code semantic interpretation."""
 
-import pytest
-
 from src.tools.shell.command_semantics import (
-    interpret_exit_code,
-    is_silent_command,
-    is_search_or_read_command,
     _extract_last_command_name,
-    ExitCodeInterpretation,
+    interpret_exit_code,
+    is_search_or_read_command,
+    is_silent_command,
 )
-
 
 # =========================================================================
 # Normal path — correct interpretation of known exit codes
@@ -105,6 +101,73 @@ class TestEdgeCases:
         assert result.is_error is False
         assert "No matches" in result.message
 
+    def test_short_circuited_compound_command_is_not_misreported_as_grep_info(self):
+        result = interpret_exit_code("false && grep pattern missing.txt", 1)
+
+        assert result.is_error is True
+        assert result.message == "Command failed with exit code 1"
+
+    def test_quoted_list_operators_keep_search_exit_semantics(self):
+        for command in (
+            "grep ';' pyproject.toml",
+            "rg 'a&&b' pyproject.toml",
+            'grep "x||y" pyproject.toml',
+            r"grep \; pyproject.toml",
+        ):
+            result = interpret_exit_code(command, 1)
+            assert result.is_error is False
+            assert result.message == "No matches found"
+
+    def test_comment_list_operators_keep_search_exit_semantics(self):
+        for command in (
+            "grep missing pyproject.toml # ;",
+            "rg missing pyproject.toml # && ignored",
+            "grep missing pyproject.toml # || ignored",
+            "grep missing pyproject.toml # first\n# second",
+            "grep missing pyproject.toml\n\n# trailing comment",
+        ):
+            result = interpret_exit_code(command, 1)
+            assert result.is_error is False
+            assert result.message == "No matches found"
+
+    def test_multiline_command_after_comments_is_compound(self):
+        result = interpret_exit_code("false # first\n# second\ngrep missing file", 1)
+
+        assert result.is_error is True
+        assert result.message == "Command failed with exit code 1"
+
+    def test_heredoc_body_operators_do_not_make_a_command_compound(self):
+        for command in (
+            "grep missing file <<'EOF'\n; && ||\nEOF",
+            'rg missing file <<"DATA"\n# ; && ||\nDATA',
+            "grep missing file <<-EOF\n\t; && ||\n\tEOF",
+            "grep missing file <<ONE <<'TWO'\n;\nONE\n&&\nTWO",
+        ):
+            result = interpret_exit_code(command, 1)
+            assert result.is_error is False
+            assert result.message == "No matches found"
+
+    def test_heredoc_delimiter_shell_word_fragments_are_joined(self):
+        for declaration in (
+            "<<'E'OF",
+            '<<"E"OF',
+            "<<'E'\\O\"F\"",
+            "<<E\\\nOF",
+        ):
+            command = f"grep missing file {declaration}\n; && ||\nEOF\nfalse"
+            result = interpret_exit_code(command, 1)
+            assert result.is_error is True
+            assert result.message == "Command failed with exit code 1"
+
+    def test_command_after_heredoc_is_compound(self):
+        result = interpret_exit_code("grep missing file <<EOF\nbody\nEOF\necho after", 1)
+
+        assert result.is_error is True
+        assert result.message == "Command failed with exit code 1"
+
+    def test_hash_inside_a_word_does_not_start_a_comment(self):
+        assert _extract_last_command_name("printf foo#bar ; grep missing file") == "grep"
+
     def test_command_with_env_var(self):
         result = interpret_exit_code("NODE_ENV=test grep pattern file", 1)
         assert result.is_error is False
@@ -115,7 +178,7 @@ class TestEdgeCases:
 
     def test_chained_command_last_wins(self):
         result = interpret_exit_code("echo hello && diff a b", 1)
-        assert result.is_error is False
+        assert result.is_error is True
 
     def test_extract_last_command_simple(self):
         assert _extract_last_command_name("ls -la") == "ls"

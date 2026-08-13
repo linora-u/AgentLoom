@@ -68,3 +68,52 @@ def test_wrapped_tool_reuses_one_call_id_for_call_and_result_events() -> None:
         observed[0].tool_call_id,
         observed[0].tool_call_id,
     ]
+
+
+def test_wrapped_tool_uses_provider_call_id_when_bound_by_executor() -> None:
+    from src.lib.smolagents.hooks import HookHandler, HookPlan, HookRun
+    from src.lib.smolagents.hooks.tool_shim import bind_tool_call_id, inject_hooks
+    from src.lib.smolagents.hooks.types import HookEvent, HookResult
+    from src.trace import ExplicitExecutionContext, bind_explicit_execution_context
+
+    observed = []
+    run = HookRun(
+        HookPlan(
+            (
+                HookHandler(
+                    HookEvent.PRE_TOOL_USE,
+                    "echo",
+                    lambda context: observed.append(context) or HookResult(),
+                ),
+            )
+        ),
+        local_run_id="local_2",
+        root_run_id="root_2",
+        project_root="/tmp",
+    )
+
+    class EchoTool:
+        name = "echo"
+        inputs = {"text": {"type": "string", "required": True}}
+
+        def forward(self, text: str) -> str:
+            return text
+
+    execution = ExplicitExecutionContext(
+        task_id="task_2",
+        sub_task_id=None,
+        agent_id="agent_2",
+        agent_name="agent",
+        agent_config={},
+        skill_catalog=None,
+        hook_run=run,
+        runtime_agent_path="agent",
+        root_run_id="root_2",
+        local_run_id="local_2",
+    )
+    tool = EchoTool()
+    with bind_explicit_execution_context(execution), bind_tool_call_id("provider-call-99"):
+        inject_hooks(tool)
+        assert tool.forward(text="hello") == "hello"
+
+    assert observed[0].tool_call_id == "provider-call-99"
