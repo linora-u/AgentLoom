@@ -930,8 +930,8 @@ def sanitize_campaign_artifact_value(value: Any) -> Any:
     Executable extensions have independent adapters (configured Shell Hooks
     and explicitly invoked Skill scripts). Both must cross this same boundary
     before writing a temp file, environment variable, stdin stream, or passive
-    visualization artifact. Outside the isolated validation campaign the
-    adapters retain their existing payload contract.
+    artifact. Outside the isolated validation campaign the adapters retain
+    their existing payload contract.
     """
     enabled = os.environ.get(_MEMORY_CAMPAIGN_SAFE_ARTIFACTS_ENV, "").strip().casefold() in {"1", "true", "yes", "on"}
     return sanitize_value_fragments(value) if enabled else value

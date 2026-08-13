@@ -12,8 +12,8 @@ declare Shell Hooks directly:
 ```yaml
 hooks:
   bundles:
-    agent-visualization:
-      path: hooks/agent-visualization
+    local-audit:
+      path: hooks/local-audit
 
   PreToolUse:
     - id: workspace.normalize-write
@@ -25,11 +25,11 @@ hooks:
 Bundle directories contain an exact-case `HOOK.yaml` plus their scripts:
 
 ```yaml
-name: agent-visualization
-description: Collect Agent runtime events.
+name: local-audit
+description: Record selected runtime events.
 hooks:
   TaskCreated:
-    - id: agent-visualization.task-created
+    - id: local-audit.task-created
       command: "python scripts/on_task_start.py"
       timeout: 20
 ```
@@ -60,7 +60,7 @@ A Bundle can be disabled in a higher layer without repeating its path:
 ```yaml
 hooks:
   bundles:
-    agent-visualization:
+    local-audit:
       enabled: false
   PreToolUse:
     - id: workspace.normalize-write
