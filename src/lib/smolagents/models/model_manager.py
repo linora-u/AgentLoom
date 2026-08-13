@@ -14,11 +14,11 @@ from smolagents import AgentLogger
 from src.lib.logging import get_logger
 from src.lib.smolagents.models.litellm_model import LiteLLMModelV2
 from src.lib.smolagents.models.litellm_retry import patch_litellm_completion
-from src.lib.smolagents.models.provider_tool_errors import patch_litellm_tool_error_projection
 from src.lib.smolagents.models.request_headers import (
     build_model_request_headers,
     get_system_model_request_headers,
 )
+from src.lib.smolagents.tool_protocol import patch_litellm_tool_error_projection
 
 from .model_types import ModelConfig, ModelType, ModelTypeManager
 

@@ -810,7 +810,7 @@ class TestLayer3ObservationMasking:
         messages = [
             create_mock_message(
                 MessageRole.TOOL_CALL,
-                "{'name': 'skill', 'arguments': {'name': 'agent-recall-with-files'}}",
+                "{'name': 'skill', 'arguments': {'name': 'custom-analysis'}}",
             ),
             create_mock_message(MessageRole.TOOL_RESPONSE, "skill instructions " * 200),
         ]
@@ -1007,13 +1007,13 @@ class TestTruncateConversation:
         result = truncate_conversation(
             messages,
             frac_to_remove=0.3,
-            cached_skill_load="<skill_name>agent-recall-with-files</skill_name>",
+            cached_skill_load="<skill_name>custom-analysis</skill_name>",
         )
         markers = [m for m in result.messages if m.is_truncation_marker]
         assert len(markers) == 1
         marker_text = _extract_content_text(markers[0].message.content)
         assert "Recent Skill Load" in marker_text
-        assert "<skill_name>agent-recall-with-files</skill_name>" in marker_text
+        assert "<skill_name>custom-analysis</skill_name>" in marker_text
 
     def test_truncation_preserves_tool_pair_when_only_plain_group_removed(self):
         messages = [
@@ -1119,7 +1119,7 @@ class TestTruncateUntilFits:
             ChatMessage(role=MessageRole.SYSTEM, content="system"),
             ChatMessage(
                 role=MessageRole.TOOL_CALL,
-                content="{'name': 'skill', 'arguments': {'name': 'agent-recall-with-files'}}",
+                content="{'name': 'skill', 'arguments': {'name': 'custom-analysis'}}",
             ),
             ChatMessage(role=MessageRole.TOOL_RESPONSE, content=[{"type": "text", "text": "skill instructions " * 500}]),
         ]

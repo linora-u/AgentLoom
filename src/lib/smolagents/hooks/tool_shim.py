@@ -5,6 +5,7 @@ from __future__ import annotations
 import inspect
 import math
 import os
+import time
 import uuid
 from contextlib import contextmanager
 from contextvars import ContextVar
@@ -12,9 +13,10 @@ from copy import deepcopy
 from functools import wraps
 from typing import Any
 
-from smolagents.tools import Tool
+from smolagents.tools import Tool, handle_agent_output_types
 from src.lib.checkpoint.file_history_hook import record_active_file_history
 from src.lib.logging import get_logger
+from src.lib.smolagents.tool_protocol import TOOL_SETTLER_ATTR, ToolCallRecord
 from src.lib.trusted_memory_evidence import (
     TRUSTED_MEMORY_EVIDENCE_RESPONSE_KEY,
     TrustedMemoryEvidenceEnvelope,
@@ -25,9 +27,6 @@ from src.trace import get_current_hook_run
 from .path_validators import enforce_core_tool_guard
 from .type_coercion import coerce_tool_parameters
 from .types import (
-    Blocked,
-    Executed,
-    Failed,
     HookContext,
     HookEvent,
     HookResult,
@@ -53,30 +52,6 @@ def bind_tool_call_id(call_id: str):
 
 class _ToolInputContractError(ValueError):
     """The effective tool input does not satisfy the executable contract."""
-
-
-class ToolBlockedResult(str):
-    """Model-visible policy rejection that remains string-compatible."""
-
-    kind = "policy_blocked"
-    retryable = False
-    stage: str
-
-    def __new__(cls, reason: str, *, stage: str):
-        instance = super().__new__(cls, reason)
-        instance.stage = stage
-        return instance
-
-
-class ToolBlockedError(RuntimeError):
-    """Executor-visible policy rejection; it is a Tool terminal state, not a turn failure."""
-
-    kind = "policy_blocked"
-    retryable = False
-
-    def __init__(self, reason: str, *, stage: str) -> None:
-        super().__init__(reason)
-        self.stage = stage
 
 
 def _trusted_evidence_payload(tool_instance: Tool, raw_result: Any) -> list[dict[str, str]]:
@@ -112,7 +87,7 @@ def clone_tool_for_runtime(tool_instance: Tool) -> Tool:
         if inspect.ismethod(original_forward) and original_forward.__self__ is tool_instance:
             original_forward = original_forward.__func__.__get__(cloned, type(cloned))
         cloned.forward = original_forward
-    for attribute in (HOOKS_INJECTED_ATTR, ORIGINAL_FORWARD_ATTR):
+    for attribute in (HOOKS_INJECTED_ATTR, ORIGINAL_FORWARD_ATTR, TOOL_SETTLER_ATTR):
         if attribute in getattr(cloned, "__dict__", {}):
             delattr(cloned, attribute)
     return cloned
@@ -396,11 +371,13 @@ def _execute_tool_pipeline(
     *,
     args: tuple[Any, ...],
     kwargs: dict[str, Any],
+    sanitize_output: bool = False,
 ) -> ToolExecutionOutcome:
     """Execute one invocation through the complete immutable safety boundary."""
 
     tool_name = tool_instance.name
     tool_call_id = _BOUND_TOOL_CALL_ID.get() or uuid.uuid4().hex
+    started_at = time.time()
     tool_inputs_schema = getattr(tool_instance, "inputs", None)
     if not isinstance(tool_inputs_schema, dict):
         tool_inputs_schema = None
@@ -412,7 +389,15 @@ def _execute_tool_pipeline(
     except Exception as exc:
         return _record_tool_outcome(
             hook_run,
-            Blocked({}, str(exc), "initial_decode", tool_name=tool_name),
+            ToolCallRecord.blocked(
+                call_id=tool_call_id,
+                tool_name=tool_name,
+                input={},
+                message=str(exc),
+                stage="initial_decode",
+                started_at=started_at,
+                ended_at=time.time(),
+            ),
         )
 
     try:
@@ -427,11 +412,14 @@ def _execute_tool_pipeline(
     except Exception as exc:
         return _record_tool_outcome(
             hook_run,
-            Blocked(
-                tool_input,
-                f"PreToolUse failed closed: {exc}",
-                "pre_tool_use",
+            ToolCallRecord.blocked(
+                call_id=tool_call_id,
                 tool_name=tool_name,
+                input=tool_input,
+                message=f"PreToolUse failed closed: {exc}",
+                stage="pre_tool_use",
+                started_at=started_at,
+                ended_at=time.time(),
             ),
         )
     candidate_input = (
@@ -440,11 +428,14 @@ def _execute_tool_pipeline(
     if pre_result.should_block():
         return _record_tool_outcome(
             hook_run,
-            Blocked(
-                candidate_input,
-                pre_result.get_blocked_response(),
-                "pre_tool_use",
+            ToolCallRecord.blocked(
+                call_id=tool_call_id,
                 tool_name=tool_name,
+                input=candidate_input,
+                message=pre_result.get_blocked_response(),
+                stage="pre_tool_use",
+                started_at=started_at,
+                ended_at=time.time(),
             ),
         )
 
@@ -457,7 +448,15 @@ def _execute_tool_pipeline(
     except Exception as exc:
         return _record_tool_outcome(
             hook_run,
-            Blocked(candidate_input, str(exc), "final_decode", tool_name=tool_name),
+            ToolCallRecord.blocked(
+                call_id=tool_call_id,
+                tool_name=tool_name,
+                input=candidate_input,
+                message=str(exc),
+                stage="final_decode",
+                started_at=started_at,
+                ended_at=time.time(),
+            ),
         )
 
     final_context = _build_runtime_context(
@@ -479,21 +478,27 @@ def _execute_tool_pipeline(
     except Exception as exc:
         return _record_tool_outcome(
             hook_run,
-            Blocked(
-                effective_input,
-                f"Core tool guard failed closed: {exc}",
-                "core_tool_guard",
+            ToolCallRecord.blocked(
+                call_id=tool_call_id,
                 tool_name=tool_name,
+                input=effective_input,
+                message=f"Core tool guard failed closed: {exc}",
+                stage="core_tool_guard",
+                started_at=started_at,
+                ended_at=time.time(),
             ),
         )
     if guard_result.should_block():
         return _record_tool_outcome(
             hook_run,
-            Blocked(
-                effective_input,
-                guard_result.get_blocked_response(),
-                "core_tool_guard",
+            ToolCallRecord.blocked(
+                call_id=tool_call_id,
                 tool_name=tool_name,
+                input=effective_input,
+                message=guard_result.get_blocked_response(),
+                stage="core_tool_guard",
+                started_at=started_at,
+                ended_at=time.time(),
             ),
         )
 
@@ -506,32 +511,70 @@ def _execute_tool_pipeline(
     except Exception as exc:
         return _record_tool_outcome(
             hook_run,
-            Blocked(
-                effective_input,
-                f"File history protection failed closed: {exc}",
-                "file_history",
+            ToolCallRecord.blocked(
+                call_id=tool_call_id,
                 tool_name=tool_name,
+                input=effective_input,
+                message=f"File history protection failed closed: {exc}",
+                stage="file_history",
+                started_at=started_at,
+                ended_at=time.time(),
             ),
         )
 
     _observe_final_tool_input(final_context)
 
     try:
+        setup = getattr(tool_instance, "setup", None)
+        if callable(setup) and not bool(getattr(tool_instance, "is_initialized", False)):
+            setup()
         raw_result = original_forward(**call_kwargs)
     except Exception as tool_error:
-        failed_outcome = Failed(effective_input, tool_error, "tool_execution", tool_name=tool_name)
-        _record_tool_outcome(hook_run, failed_outcome)
-        _dispatch_tool_failure(
-            hook_run,
+        failed_outcome = ToolCallRecord.from_exception(
+            call_id=tool_call_id,
             tool_name=tool_name,
-            tool_input=effective_input,
-            tool_call_id=tool_call_id,
-            tool_inputs_schema=tool_inputs_schema,
+            input=effective_input,
             error=tool_error,
+            stage="tool_execution",
+            started_at=started_at,
+            ended_at=time.time(),
         )
+        _record_tool_outcome(hook_run, failed_outcome)
+        if failed_outcome.status == "error":
+            _dispatch_tool_failure(
+                hook_run,
+                tool_name=tool_name,
+                tool_input=effective_input,
+                tool_call_id=tool_call_id,
+                tool_inputs_schema=tool_inputs_schema,
+                error=tool_error,
+            )
         return failed_outcome
 
     trusted_evidence = _trusted_evidence_payload(tool_instance, raw_result)
+    if sanitize_output:
+        try:
+            raw_result = handle_agent_output_types(raw_result, getattr(tool_instance, "output_type", None))
+        except Exception as output_error:
+            failed_outcome = ToolCallRecord.failed(
+                call_id=tool_call_id,
+                tool_name=tool_name,
+                input=effective_input,
+                error=output_error,
+                stage="output_validation",
+                started_at=started_at,
+                ended_at=time.time(),
+            )
+            _record_tool_outcome(hook_run, failed_outcome)
+            _dispatch_tool_failure(
+                hook_run,
+                tool_name=tool_name,
+                tool_input=effective_input,
+                tool_call_id=tool_call_id,
+                tool_inputs_schema=tool_inputs_schema,
+                error=output_error,
+            )
+            return failed_outcome
     result = raw_result
     if result is None or (isinstance(result, str) and not result.strip()):
         result = f"({tool_name} completed with no output)"
@@ -550,7 +593,14 @@ def _execute_tool_pipeline(
     tool_response: dict[str, Any] = {"result": result}
     if trusted_evidence:
         tool_response[TRUSTED_MEMORY_EVIDENCE_RESPONSE_KEY] = TrustedMemoryEvidenceEnvelope(trusted_evidence)
-    executed_outcome = Executed(effective_input, result, tool_name=tool_name)
+    executed_outcome = ToolCallRecord.completed(
+        call_id=tool_call_id,
+        tool_name=tool_name,
+        input=effective_input,
+        output=result,
+        started_at=started_at,
+        ended_at=time.time(),
+    )
     _record_tool_outcome(hook_run, executed_outcome)
     try:
         hook_run.dispatch(
@@ -578,6 +628,27 @@ def inject_hooks(tool_instance: Tool) -> Tool:
     original_forward = tool_instance.forward
     setattr(tool_instance, ORIGINAL_FORWARD_ATTR, original_forward)
 
+    def settle(
+        arguments: dict[str, Any] | Any,
+        *,
+        call_id: str,
+        sanitize_inputs_outputs: bool,
+        started_at: float | None = None,
+    ) -> ToolExecutionOutcome:
+        hook_run = get_current_hook_run(required=True)
+        args = () if isinstance(arguments, dict) else (arguments,)
+        kwargs = dict(arguments) if isinstance(arguments, dict) else {}
+        with bind_tool_call_id(call_id):
+            outcome = _execute_tool_pipeline(
+                tool_instance,
+                original_forward,
+                hook_run,
+                args=args,
+                kwargs=kwargs,
+                sanitize_output=sanitize_inputs_outputs,
+            )
+        return outcome
+
     @wraps(original_forward)
     def wrapped_forward(*args, **kwargs):
         hook_run = get_current_hook_run(required=True)
@@ -588,14 +659,9 @@ def inject_hooks(tool_instance: Tool) -> Tool:
             args=args,
             kwargs=dict(kwargs),
         )
-        if isinstance(outcome, Blocked):
-            if _BOUND_TOOL_CALL_ID.get() is not None:
-                raise ToolBlockedError(outcome.model_response(), stage=outcome.stage)
-            return ToolBlockedResult(outcome.model_response(), stage=outcome.stage)
-        if isinstance(outcome, Failed):
-            raise outcome.error
-        return outcome.value
+        return outcome.direct_result()
 
     tool_instance.forward = wrapped_forward
+    setattr(tool_instance, TOOL_SETTLER_ATTR, settle)
     setattr(tool_instance, HOOKS_INJECTED_ATTR, True)
     return tool_instance
