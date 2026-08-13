@@ -57,7 +57,6 @@ class HookContext:
     project_root: str | None = None
     agent_task_workspace: str | None = None
     agent_insights_path: str | None = None
-    agent_visualization_path: str | None = None
 
 
 @dataclass

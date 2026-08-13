@@ -487,8 +487,8 @@ class BaseAgent(ABC):
         Every explicitly configured ``TaskCreated`` Hook will be notified.
 
         Worker agents running inside a ``sub_task_context`` skip this event
-        because they should only emit SubagentStart/SubagentStop — not
-        TaskCreated, which would create a separate visualization.json file.
+        because their lifecycle is already represented by
+        SubagentStart/SubagentStop.
         """
         _ = runtime_agent
         _ = args

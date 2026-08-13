@@ -393,8 +393,8 @@ Hook 只能由全局 system、应用 system 或 Agent YAML 的顶层 `hooks:` �
 ```yaml
 hooks:
   bundles:
-    agent-visualization:
-      path: hooks/agent-visualization
+    local-audit:
+      path: hooks/local-audit
   PreToolUse:
     - id: security-checker.pre-tool
       matcher: "Write|Edit|Bash"

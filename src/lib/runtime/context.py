@@ -413,11 +413,6 @@ class RuntimeContext:
         safe_filename = _safe_part(filename, field="agent task filename")
         return self.agent_task_workspace_dir(agent_path) / safe_filename
 
-    def agent_visualization_path(self, agent_path: str) -> Path:
-        """Return the canonical task-scoped visualization file for one agent."""
-
-        return self.agent_task_file(agent_path, "visualization.json")
-
     def prepare_agent_workspace(self, agent_path: str) -> Path:
         """Create the trusted task workspace and return its canonical path."""
 
