@@ -1,5 +1,6 @@
 from src.lib.logging import get_logger
 from src.lib.runtime import get_current_run_context
+from src.lib.smolagents.tool_protocol import ToolPolicyBlockedError
 from src.tools.shell.command_semantics import interpret_exit_code
 from src.tools.shell.output_interceptor import OutputInterceptor
 from src.tools.shell.process import ShellProcess, ShellProcessRegistry
@@ -158,7 +159,10 @@ def shell_tool(
         registry = ShellProcessRegistry.get_instance()
         session_cwd = registry.get_session_cwd(agent_id)
 
-    validate_command(command, cwd=session_cwd)
+    try:
+        validate_command(command, cwd=session_cwd)
+    except ValueError as error:
+        raise ToolPolicyBlockedError(str(error)) from error
 
     # Sandbox wrapping: if enabled, wrap the command with OS-level isolation
     exec_command = command

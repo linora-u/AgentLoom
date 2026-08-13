@@ -5,7 +5,14 @@ from __future__ import annotations
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from enum import Enum
-from typing import Any, Literal
+from typing import Any
+
+from src.lib.smolagents.tool_protocol import (  # noqa: F401
+    Blocked,
+    Executed,
+    Failed,
+    ToolExecutionOutcome,
+)
 
 
 class HookEvent(Enum):
@@ -99,50 +106,3 @@ class HookHandler:
     source_path: str | None = None
     cwd: str | None = None
     shell_spec: Any | None = field(default=None, repr=False, compare=False)
-
-
-@dataclass(frozen=True, slots=True)
-class Executed:
-    """A tool call that crossed every gate and produced a model-visible value."""
-
-    tool_input: dict[str, Any]
-    value: Any
-    tool_name: str = ""
-    outcome: Literal["executed"] = field(default="executed", init=False)
-
-    def __post_init__(self) -> None:
-        object.__setattr__(self, "tool_input", dict(self.tool_input))
-
-
-@dataclass(frozen=True, slots=True)
-class Blocked:
-    """A policy/schema rejection that occurred before tool side effects."""
-
-    tool_input: dict[str, Any]
-    reason: str
-    stage: str
-    tool_name: str = ""
-    outcome: Literal["blocked"] = field(default="blocked", init=False)
-
-    def __post_init__(self) -> None:
-        object.__setattr__(self, "tool_input", dict(self.tool_input))
-
-    def model_response(self) -> str:
-        return self.reason or "Action blocked by tool runtime policy"
-
-
-@dataclass(frozen=True, slots=True)
-class Failed:
-    """A failure after the tool execution boundary was entered."""
-
-    tool_input: dict[str, Any]
-    error: Exception
-    stage: str
-    tool_name: str = ""
-    outcome: Literal["failed"] = field(default="failed", init=False)
-
-    def __post_init__(self) -> None:
-        object.__setattr__(self, "tool_input", dict(self.tool_input))
-
-
-type ToolExecutionOutcome = Executed | Blocked | Failed
