@@ -325,9 +325,10 @@ class LiteLLMModelV2(LiteLLMModel):
 
     def _prepare_completion_kwargs(self, *args, **kwargs):
         source_messages = args[0] if args else kwargs.get("messages", [])
-        completion_kwargs = super()._prepare_completion_kwargs(*args, **kwargs)
-
-        if any(has_native_tool_marker(message) for message in source_messages):
+        has_native_messages = any(has_native_tool_marker(message) for message in source_messages)
+        projected_source: list[dict[str, Any]] | None = None
+        super_source = source_messages
+        if has_native_messages:
             projected: list[dict[str, Any]] = []
             ordinary: list[ChatMessage | dict] = []
 
@@ -351,7 +352,24 @@ class LiteLLMModelV2(LiteLLMModel):
                 else:
                     ordinary.append(message)
             flush_ordinary()
-            completion_kwargs["messages"] = projected
+            projected_source = projected
+            # The upstream cleaner does not understand OpenAI's ``tool`` role
+            # and merges consecutive ToolResponse strings. Let it prepare all
+            # non-message kwargs using only ordinary messages, then replace the
+            # message payload with the already-clean canonical projection.
+            super_source = [
+                message
+                for message in source_messages
+                if not (isinstance(message, ChatMessage) and has_native_tool_marker(message))
+            ]
+
+        if args:
+            args = (super_source, *args[1:])
+        else:
+            kwargs = {**kwargs, "messages": super_source}
+        completion_kwargs = super()._prepare_completion_kwargs(*args, **kwargs)
+        if projected_source is not None:
+            completion_kwargs["messages"] = projected_source
 
         # ToolCallingAgent cannot consume a plain assistant response: every
         # action step must invoke a registered tool or final_answer. Preserve a

@@ -40,11 +40,6 @@ hooks:
     agent-visualization:
       path: "hooks/agent-visualization"
 
-    # Recall Hooks remain disabled by default because their injected context is
-    # intentionally high-volume. Enable separately from the recall Skill.
-    # agent-recall-with-files:
-    #   path: "hooks/agent-recall-with-files"
-
 # ============================================
 # Global Execution Environment Configuration
 # ============================================

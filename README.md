@@ -57,13 +57,7 @@ resume.
 
 ### Memory has review boundaries
 
-AgentLoom separates two jobs:
-
-- [`agent-recall-with-files`](skills/agent-recall-with-files/SKILL.md) keeps
-  lightweight task recovery notes and Agent-local experience in canonical
-  workspace files. Its optional Hook Bundle injects recent notes and uses
-  freshness-based reminders.
-- [Self-Learning v6](docs/en/self_learning.md) stores searchable history and
+[Self-Learning v6](docs/en/self_learning.md) stores searchable history and
   evidence-gated memory separately. Fact and experience candidates pass
   evidence gates and the configured scope-approval policy; promotion to Project
   scope is always initiated by a person.

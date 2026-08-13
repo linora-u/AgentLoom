@@ -13,13 +13,11 @@ from threading import RLock
 from typing import Any
 
 from src.lib.logging import get_logger
+from src.lib.smolagents.tool_protocol import ToolCallRecord, ToolErrorRecord
 
 from .hook_helpers import matches_pattern
 from .types import (
     GATE_EVENTS,
-    Blocked,
-    Executed,
-    Failed,
     HookContext,
     HookEvent,
     HookHandler,
@@ -249,22 +247,48 @@ class HookRun:
 
         tool_input = _bounded_trace_input(outcome.tool_input) if for_storage else deepcopy(outcome.tool_input)
         tool_name = _bounded_trace_text(outcome.tool_name)
-        if isinstance(outcome, Executed):
+        if outcome.status == "completed":
             # Trace the state transition, not a potentially unbounded tool
             # payload that is already owned by model memory/context storage.
-            return Executed(tool_input, None, tool_name=tool_name)
-        if isinstance(outcome, Blocked):
-            return Blocked(
-                tool_input,
-                _bounded_trace_text(outcome.reason),
-                _bounded_trace_text(outcome.stage),
+            return ToolCallRecord.completed(
+                call_id=outcome.call_id,
                 tool_name=tool_name,
+                input=tool_input,
+                output=None,
             )
-        if isinstance(outcome, Failed):
+        if outcome.status == "blocked":
+            return ToolCallRecord.blocked(
+                call_id=outcome.call_id,
+                tool_name=tool_name,
+                input=tool_input,
+                message=_bounded_trace_text(outcome.reason),
+                stage=_bounded_trace_text(outcome.stage),
+                kind=_bounded_trace_text(outcome.error.kind if outcome.error is not None else "policy_blocked"),
+            )
+        if outcome.status == "error":
+            exception = outcome.exception
+            if not isinstance(exception, _TracedToolFailure):
+                error_text = (
+                    f"{type(exception).__name__}: {exception}"
+                    if isinstance(exception, Exception)
+                    else outcome.reason or "Tool execution failed"
+                )
+                exception = _TracedToolFailure(_bounded_trace_text(error_text))
             error = outcome.error
-            if not isinstance(error, _TracedToolFailure):
-                error = _TracedToolFailure(_bounded_trace_text(f"{type(error).__name__}: {error}"))
-            return Failed(tool_input, error, _bounded_trace_text(outcome.stage), tool_name=tool_name)
+            assert error is not None
+            return ToolCallRecord(
+                call_id=outcome.call_id,
+                tool_name=tool_name,
+                input=tool_input,
+                status="error",
+                error=ToolErrorRecord(
+                    kind=_bounded_trace_text(error.kind),
+                    message=_bounded_trace_text(error.message),
+                    retryable=error.retryable,
+                    stage=_bounded_trace_text(error.stage),
+                ),
+                exception=exception,
+            )
         raise TypeError(f"Unsupported tool execution outcome: {type(outcome).__name__}")
 
     def record_tool_outcome(self, outcome: ToolExecutionOutcome) -> None:
