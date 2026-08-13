@@ -52,12 +52,7 @@ checkpoint 时，达到预算后进入 `budget_limited` 并保留恢复状态。
 
 ### 记忆有审核边界
 
-AgentLoom 把两类需求分开处理：
-
-- [`agent-recall-with-files`](../../skills/agent-recall-with-files/SKILL.md)
-  使用运行时约定的工作区文件保存轻量的任务恢复信息和 Agent 局部经验。可选
-  Hook Bundle 会注入最近记录，并按新鲜度提醒更新。
-- [Self-Learning v6](self_learning.md) 分开保存可搜索历史和经过证据门禁的记忆。
+[Self-Learning v6](self_learning.md) 分开保存可搜索历史和经过证据门禁的记忆。
   Fact 和 Experience 候选需通过证据门禁及作用域审批策略；提升到 Project
   级别必须由人工发起。
 

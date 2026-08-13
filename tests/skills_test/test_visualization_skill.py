@@ -11,11 +11,9 @@ from pathlib import Path
 import yaml
 
 from src.lib.runtime import safe_agent_path
-from src.lib.smolagents.skills.parser import parse_skill_file
 
 ROOT = Path(__file__).parents[2]
 VISUALIZATION_BUNDLE = ROOT / "hooks" / "agent-visualization"
-RECALL_BUNDLE = ROOT / "hooks" / "agent-recall-with-files"
 
 
 def _payload(
@@ -121,20 +119,6 @@ def test_visualization_is_a_hook_bundle_not_a_skill() -> None:
         "PostToolUse",
         "PostToolUseFailure",
     }
-
-
-def test_recall_skill_and_hook_bundle_are_independent() -> None:
-    skill, _ = parse_skill_file(str(ROOT / "skills" / "agent-recall-with-files" / "SKILL.md"))
-    manifest = yaml.safe_load((RECALL_BUNDLE / "HOOK.yaml").read_text(encoding="utf-8"))
-
-    assert skill.name == "agent-recall-with-files"
-    assert not hasattr(skill, "hooks")
-    assert manifest["name"] == skill.name
-    assert not list((ROOT / "skills" / "agent-recall-with-files" / "scripts").glob("*.py"))
-    assert {
-        path.name
-        for path in (ROOT / "skills" / "agent-recall-with-files" / "templates").glob("*.md")
-    } == {"context.md", "insights.md", "trace.md"}
 
 
 def test_system_config_enables_visualization_bundle_only() -> None:
@@ -402,50 +386,4 @@ def test_visualization_observer_failure_is_fail_open(tmp_path: Path) -> None:
 
     assert completed.returncode == 0
     assert json.loads(completed.stdout) == {"decision": "allow"}
-    assert "schema_version" in completed.stderr
-
-
-def test_recall_bundle_bootstraps_from_versioned_stdin(tmp_path: Path) -> None:
-    result = _run_bundle_script(
-        RECALL_BUNDLE,
-        "on_task_start.py",
-        _payload(
-            tmp_path,
-            event="TaskCreated",
-            hook_id="agent-recall-with-files.task-created",
-        ),
-    )
-
-    assert result["decision"] == "allow"
-    payload = _payload(
-        tmp_path,
-        event="TaskCreated",
-        hook_id="agent-recall-with-files.task-created",
-    )
-    task_workspace = Path(payload["agent_task_workspace"])
-    assert (task_workspace / "context.md").is_file()
-    assert (task_workspace / "trace.md").is_file()
-    assert Path(payload["agent_insights_path"]).is_file()
-
-
-def test_recall_pre_tool_rejects_an_unknown_stdin_schema(tmp_path: Path) -> None:
-    payload = _payload(
-        tmp_path,
-        event="PreToolUse",
-        hook_id="agent-recall-with-files.pre-tool-use",
-        tool_name="read_file",
-    )
-    payload["schema_version"] = 2
-
-    completed = subprocess.run(
-        [sys.executable, str(RECALL_BUNDLE / "scripts" / "on_pre_tool_use.py")],
-        cwd=RECALL_BUNDLE,
-        input=json.dumps(payload),
-        text=True,
-        capture_output=True,
-        timeout=10,
-        check=False,
-    )
-
-    assert completed.returncode != 0
     assert "schema_version" in completed.stderr
