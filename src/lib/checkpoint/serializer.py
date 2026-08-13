@@ -14,7 +14,6 @@ Design decisions:
 
 from __future__ import annotations
 
-import json
 import time
 from typing import Any
 
@@ -52,6 +51,9 @@ class CheckpointSerializer:
             d.pop("observations_images", None)
             d.pop("task_images", None)
             d.pop("model_input_messages", None)
+            tool_results = getattr(step, "tool_results", None)
+            if tool_results:
+                d["tool_results"] = [result.to_dict() for result in tool_results]
             result.append(d)
         return result
 
@@ -143,7 +145,7 @@ def _rebuild_chat_message(raw: Any) -> ChatMessage | None:
 
 
 def _rebuild_action_step(d: dict) -> ActionStep:
-    return ActionStep(
+    step = ActionStep(
         step_number=d.get("step_number", 0),
         timing=_rebuild_timing(d.get("timing")),
         tool_calls=_rebuild_tool_calls(d.get("tool_calls")),
@@ -158,6 +160,12 @@ def _rebuild_action_step(d: dict) -> ActionStep:
         # which has internal-only fields.  Deserialized checkpoints don't
         # replay errors – they only serve as historical context.
     )
+    raw_results = d.get("tool_results")
+    if raw_results:
+        from src.lib.smolagents.tool_protocol import ToolCallRecord
+
+        step.tool_results = [ToolCallRecord.from_dict(item) for item in raw_results]
+    return step
 
 
 def _rebuild_planning_step(d: dict) -> PlanningStep:

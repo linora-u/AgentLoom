@@ -55,20 +55,23 @@ Key design decisions:
 from __future__ import annotations
 
 import ast
-from dataclasses import dataclass
 import json
 import re
 import time
 import uuid
-from typing import Iterable, Optional, List, Union
+from collections.abc import Iterable
+from dataclasses import dataclass
 
 from litellm.utils import token_counter
+
 from smolagents import AgentLogger
 from smolagents.models import ChatMessage, MessageRole
 from src.lib.config.defaults import DEFAULT_MAX_TOKENS
 from src.lib.context_engine.engine import CONTEXT_REF_PREFIX
 from src.lib.context_engine.runtime import get_current_context_engine
 from src.lib.logging import get_logger
+from src.lib.smolagents.models.model_manager import model_manager
+from src.lib.smolagents.models.model_types import ModelType
 
 # ===========================================================================
 # Global Configuration
@@ -115,7 +118,7 @@ FILE_READ_TOOL_NAMES: frozenset[str] = frozenset(TOOL_DEDUP_PATTERNS)
 # Per-tool character limits.  ``None`` means the tool is exempt from hard
 # truncation (e.g. read_file is handled by Layer 1 deduplication).
 # Tools not listed here fall back to the ``"default"`` limit.
-TOOL_MAX_RETAIN_CHARS: dict[str, Union[int, None]] = {
+TOOL_MAX_RETAIN_CHARS: dict[str, int | None] = {
     "shell_tool": 2000,
     "glob_search": 1500,
     "grep_search": 3000,
@@ -156,12 +159,15 @@ COMPRESSION_EXEMPT_TOOL_NAMES: frozenset[str] = frozenset({
 # the latest error recovery guidance from being compressed away.
 RECENT_ERROR_EXEMPT_COUNT: int = 1
 
+# Raw recent turns remain after an LLM summary so the next model request keeps
+# exact intent, tool-call identity, and recovery details at the hand-off edge.
+SUMMARY_RECENT_USER_TURNS: int = 2
+SUMMARY_RECENT_TOKENS_MIN: int = 2000
+SUMMARY_RECENT_TOKENS_MAX: int = 8000
+
 # ===========================================================================
 # Layer 4 Constants – LLM Summarization
 # ===========================================================================
-from src.lib.smolagents.models.model_manager import model_manager
-from src.lib.smolagents.models.model_types import ModelType
-
 # LLM system prompt and condensation instructions for Layer 4.
 SUMMARY_SYSTEM_PROMPT = """You are a helpful AI assistant tasked with summarizing conversations.
 
@@ -292,17 +298,18 @@ class InternalChatMessage:
     """
     message: ChatMessage
 
-    truncation_parent: Optional[str] = None
+    truncation_parent: str | None = None
     is_truncation_marker: bool = False
-    truncation_id: Optional[str] = None
+    truncation_id: str | None = None
 
-    condense_id: Optional[str] = None
+    condense_id: str | None = None
     is_summary: bool = False
+    preserve_verbatim: bool = False
 
-    ts: Optional[float] = None
+    ts: float | None = None
 
     @classmethod
-    def from_chat_message(cls, msg: ChatMessage, ts: Optional[float] = None) -> InternalChatMessage:
+    def from_chat_message(cls, msg: ChatMessage, ts: float | None = None) -> InternalChatMessage:
         return cls(message=msg, ts=ts or time.time())
 
     def to_chat_message(self) -> ChatMessage:
@@ -315,18 +322,18 @@ class InternalChatMessage:
 @dataclass
 class SummarizeResponse:
     """Return type of ``summarize_conversation`` (Layer 4)."""
-    messages: List[InternalChatMessage]
+    messages: list[InternalChatMessage]
     summary: str
     cost: float = 0.0
-    new_context_tokens: Optional[int] = None
-    error: Optional[str] = None
-    error_details: Optional[str] = None
+    new_context_tokens: int | None = None
+    error: str | None = None
+    error_details: str | None = None
 
 
 @dataclass
 class TruncationResult:
     """Return type of ``truncate_conversation`` (Fallback)."""
-    messages: List[InternalChatMessage]
+    messages: list[InternalChatMessage]
     truncation_id: str
     messages_removed: int
 
@@ -343,7 +350,7 @@ class ContextBudgetConfig:
         return int(self.max_tokens * self.target_ratio)
 
     @classmethod
-    def default(cls) -> "ContextBudgetConfig":
+    def default(cls) -> ContextBudgetConfig:
         return cls()
 
 
@@ -352,8 +359,8 @@ class ToolInvocation:
     """A normalized tool call extracted from text, native metadata, or CodeAct code."""
 
     name: str
-    arguments: Optional[str] = None
-    dedup_key: Optional[str] = None
+    arguments: str | None = None
+    dedup_key: str | None = None
 
 
 @dataclass(frozen=True)
@@ -423,11 +430,12 @@ def _clone_internal_message_with_content(
         truncation_id=internal_msg.truncation_id,
         condense_id=internal_msg.condense_id,
         is_summary=internal_msg.is_summary,
+        preserve_verbatim=internal_msg.preserve_verbatim,
         ts=internal_msg.ts,
     )
 
 
-def _extract_tool_payload(text: str) -> tuple[Optional[str], object]:
+def _extract_tool_payload(text: str) -> tuple[str | None, object]:
     if not text:
         return None, None
 
@@ -473,7 +481,7 @@ def _extract_tool_payload(text: str) -> tuple[Optional[str], object]:
 def _tool_invocation_from_name_args(
     name: object,
     arguments: object = None,
-) -> Optional[ToolInvocation]:
+) -> ToolInvocation | None:
     if not isinstance(name, str) or not name.strip():
         return None
 
@@ -517,7 +525,7 @@ def _extract_native_tool_invocations(msg: ChatMessage) -> list[ToolInvocation]:
     return invocations
 
 
-def _get_ast_call_name(node: ast.AST) -> Optional[str]:
+def _get_ast_call_name(node: ast.AST) -> str | None:
     if isinstance(node, ast.Name):
         return node.id.lower()
     if isinstance(node, ast.Attribute):
@@ -534,7 +542,7 @@ def _normalize_ast_value(node: ast.AST) -> object:
         return ast.dump(node, include_attributes=False)
 
 
-def _extract_tool_calls_from_source(source: str) -> List[tuple[str, str]]:
+def _extract_tool_calls_from_source(source: str) -> list[tuple[str, str]]:
     if not isinstance(source, str) or not source.strip():
         return []
 
@@ -543,7 +551,7 @@ def _extract_tool_calls_from_source(source: str) -> List[tuple[str, str]]:
     except SyntaxError:
         return []
 
-    calls: List[tuple[str, str]] = []
+    calls: list[tuple[str, str]] = []
     for node in ast.walk(tree):
         if not isinstance(node, ast.Call):
             continue
@@ -623,26 +631,35 @@ def _extract_tool_invocations(msg: ChatMessage) -> list[ToolInvocation]:
     return _extract_tool_invocations_from_text(text)
 
 
-def _iter_visible_tool_response_pairs(messages: List[InternalChatMessage]) -> list[ToolResponsePair]:
+def _iter_visible_tool_response_pairs(messages: list[InternalChatMessage]) -> list[ToolResponsePair]:
     visible = [(idx, msg) for idx, msg in enumerate(messages) if msg.is_visible()]
     pairs: list[ToolResponsePair] = []
-    for visible_idx, (call_idx, call_msg) in enumerate(visible[:-1]):
+    for visible_idx, (call_idx, call_msg) in enumerate(visible):
         if not _is_tool_call_role(call_msg.message.role):
             continue
-        response_idx, response_msg = visible[visible_idx + 1]
-        if not _is_tool_response_role(response_msg.message.role):
-            continue
-        pairs.append(
-            ToolResponsePair(
-                call_index=call_idx,
-                response_index=response_idx,
-                invocations=tuple(_extract_tool_invocations(call_msg.message)),
+        invocations = tuple(_extract_tool_invocations(call_msg.message))
+        response_offset = 1
+        while visible_idx + response_offset < len(visible):
+            response_idx, response_msg = visible[visible_idx + response_offset]
+            if not _is_tool_response_role(response_msg.message.role):
+                break
+            invocation = (
+                (invocations[response_offset - 1],)
+                if response_offset <= len(invocations)
+                else ()
             )
-        )
+            pairs.append(
+                ToolResponsePair(
+                    call_index=call_idx,
+                    response_index=response_idx,
+                    invocations=invocation,
+                )
+            )
+            response_offset += 1
     return pairs
 
 
-def _iter_visible_non_system_groups(messages: List[InternalChatMessage]) -> list[VisibleMessageGroup]:
+def _iter_visible_non_system_groups(messages: list[InternalChatMessage]) -> list[VisibleMessageGroup]:
     """Group visible non-system messages without splitting tool-call/tool-response pairs."""
     visible = [
         (idx, msg)
@@ -659,22 +676,26 @@ def _iter_visible_non_system_groups(messages: List[InternalChatMessage]) -> list
             and visible_idx + 1 < len(visible)
             and _is_tool_response_role(visible[visible_idx + 1][1].message.role)
         ):
-            groups.append(VisibleMessageGroup((idx, visible[visible_idx + 1][0])))
-            visible_idx += 2
+            group_indices = [idx]
+            visible_idx += 1
+            while visible_idx < len(visible) and _is_tool_response_role(visible[visible_idx][1].message.role):
+                group_indices.append(visible[visible_idx][0])
+                visible_idx += 1
+            groups.append(VisibleMessageGroup(tuple(group_indices)))
             continue
         groups.append(VisibleMessageGroup((idx,)))
         visible_idx += 1
     return groups
 
 
-def _build_response_pair_map(messages: List[InternalChatMessage]) -> dict[int, ToolResponsePair]:
+def _build_response_pair_map(messages: list[InternalChatMessage]) -> dict[int, ToolResponsePair]:
     return {pair.response_index: pair for pair in _iter_visible_tool_response_pairs(messages)}
 
 
 def _is_tool_response_exempt(
-    messages: List[InternalChatMessage],
+    messages: list[InternalChatMessage],
     response_index: int,
-    pair_by_response: Optional[dict[int, ToolResponsePair]] = None,
+    pair_by_response: dict[int, ToolResponsePair] | None = None,
 ) -> bool:
     pair_by_response = pair_by_response if pair_by_response is not None else _build_response_pair_map(messages)
     pair = pair_by_response.get(response_index)
@@ -691,7 +712,7 @@ def _is_tool_response_exempt(
 
 
 def _recent_error_response_indices(
-    messages: List[InternalChatMessage],
+    messages: list[InternalChatMessage],
     candidate_indices: list[int],
 ) -> set[int]:
     exempt_indices: set[int] = set()
@@ -699,11 +720,78 @@ def _recent_error_response_indices(
     for response_index in reversed(candidate_indices):
         if exempt_remaining <= 0:
             break
-        content_text = _extract_content_text(messages[response_index].message.content)
-        if content_text.startswith("Error:"):
+        message = messages[response_index].message
+        content_text = _extract_content_text(message.content)
+        raw = message.raw if isinstance(message.raw, dict) else {}
+        raw_record = raw.get("agentloom_tool_result")
+        raw_status = raw_record.get("status") if isinstance(raw_record, dict) else None
+        structured_error = raw_status in {"error", "blocked", "cancelled"}
+        if not structured_error:
+            try:
+                payload = json.loads(content_text)
+            except (TypeError, ValueError):
+                payload = None
+            structured_error = isinstance(payload, dict) and (
+                payload.get("ok") is False
+                or payload.get("status") in {"error", "blocked", "cancelled"}
+            )
+        if content_text.startswith("Error:") or structured_error:
             exempt_indices.add(response_index)
             exempt_remaining -= 1
     return exempt_indices
+
+
+def _recent_user_turn_indices(
+    messages: list[InternalChatMessage],
+    recent_user_turns: int = SUMMARY_RECENT_USER_TURNS,
+) -> set[int]:
+    """Return visible indices belonging to the newest complete user turns."""
+    visible_indices = [
+        index
+        for index, message in enumerate(messages)
+        if message.is_visible() and message.message.role != MessageRole.SYSTEM
+    ]
+    user_offsets = [
+        offset
+        for offset, index in enumerate(visible_indices)
+        if messages[index].message.role == MessageRole.USER and not messages[index].is_summary
+    ]
+    if not user_offsets:
+        return set()
+    tail_offset = user_offsets[-min(recent_user_turns, len(user_offsets))]
+    return set(visible_indices[tail_offset:])
+
+
+def _protected_message_indices(messages: list[InternalChatMessage]) -> set[int]:
+    return {
+        index
+        for index, message in enumerate(messages)
+        if message.is_visible() and message.preserve_verbatim
+    }
+
+
+def _mark_recent_user_turns_for_preservation(
+    messages: list[InternalChatMessage],
+) -> None:
+    visible_user_turns = sum(
+        1
+        for message in messages
+        if message.is_visible()
+        and message.message.role == MessageRole.USER
+        and not message.is_summary
+    )
+    # A verbatim tail is useful only when an older head exists to compress.
+    # With one or two oversized turns, protecting the entire conversation
+    # would disable reversible ContextEngine compression and force destructive
+    # fallback truncation. The summary splitter handles that case with its
+    # bounded assistant-suffix fallback instead.
+    protected = (
+        _recent_user_turn_indices(messages)
+        if visible_user_turns > SUMMARY_RECENT_USER_TURNS
+        else set()
+    )
+    for index, message in enumerate(messages):
+        message.preserve_verbatim = index in protected
 
 
 def _is_context_ref_response(text: str) -> bool:
@@ -715,7 +803,7 @@ def _is_placeholder_response(text: str) -> bool:
 
 
 def _is_group_truncatable(
-    messages: List[InternalChatMessage],
+    messages: list[InternalChatMessage],
     group: VisibleMessageGroup,
     pair_by_response: dict[int, ToolResponsePair],
     error_exempt_indices: set[int],
@@ -732,7 +820,7 @@ def _is_group_truncatable(
     return True
 
 
-def _extract_dedup_keys_from_tool_call(msg: ChatMessage) -> List[tuple[str, str]]:
+def _extract_dedup_keys_from_tool_call(msg: ChatMessage) -> list[tuple[str, str]]:
     """Extract deduplication keys (like file paths) from a TOOL_CALL message.
 
     In CodeAct mode the TOOL_CALL content looks like:
@@ -752,9 +840,9 @@ def _extract_dedup_keys_from_tool_call(msg: ChatMessage) -> List[tuple[str, str]
 # ===========================================================================
 
 def _apply_tool_dedup(
-    messages: List[InternalChatMessage],
+    messages: list[InternalChatMessage],
     model_id: str,
-    logger: Optional[AgentLogger] = None,
+    logger: AgentLogger | None = None,
 ) -> tuple:  # (modified_messages, tokens_saved_ratio)
     """Layer 1: File Read Deduplication.
 
@@ -786,12 +874,15 @@ def _apply_tool_dedup(
     # Map from original message idx -> new observation text (only old reads)
     replacements: dict[int, tuple[str, str]] = {}
     engine = get_current_context_engine()
+    protected_indices = _protected_message_indices(messages)
 
     for (tool_name, key), response_indices in tool_read_pairs.items():
         if len(response_indices) <= 1:
             continue  # only read once, nothing to deduplicate
         # Keep the LAST read; replace all earlier ones
         for response_idx in response_indices[:-1]:
+            if response_idx in protected_indices:
+                continue
             if response_idx not in replacements:
                 original_text = _extract_content_text(messages[response_idx].message.content)
                 ref_preview = None
@@ -843,7 +934,7 @@ def _apply_tool_dedup(
     return new_messages, saved_ratio
 
 
-def _extract_tools_from_code(code: str) -> List[str]:
+def _extract_tools_from_code(code: str) -> list[str]:
     """Identify underlying native tool calls from direct code or a tool payload wrapper."""
     tools: list[str] = []
     for invocation in _extract_tool_invocations_from_text(code):
@@ -857,8 +948,8 @@ def _extract_tools_from_code(code: str) -> List[str]:
 # ===========================================================================
 
 def _apply_context_engine_compression(
-    messages: List[InternalChatMessage],
-    logger: Optional[AgentLogger] = None,
+    messages: list[InternalChatMessage],
+    logger: AgentLogger | None = None,
 ) -> tuple[list[InternalChatMessage], int]:
     """Compress large tool responses into previews backed by retrievable refs."""
     engine = get_current_context_engine()
@@ -869,10 +960,13 @@ def _apply_context_engine_compression(
     replacements: dict[int, str] = {}
     total_saved_chars = 0
     pairs = _iter_visible_tool_response_pairs(messages)
+    protected_indices = _protected_message_indices(messages)
     candidate_indices = [pair.response_index for pair in pairs]
     error_exempt_indices = _recent_error_response_indices(messages, candidate_indices)
 
     for pair in pairs:
+        if pair.response_index in protected_indices:
+            continue
         if pair.response_index in error_exempt_indices:
             continue
         if _is_tool_response_exempt(messages, pair.response_index):
@@ -914,9 +1008,65 @@ def _apply_context_engine_compression(
 # Layer 3 – Tool Output Hard Truncation
 # ===========================================================================
 
+def _truncate_structured_tool_error(
+    response_text: str,
+    *,
+    quota: int,
+    tool_name: str,
+) -> str | None:
+    """Shorten an old canonical error without corrupting its JSON envelope.
+
+    ``None`` means the payload is not a structured tool error and may use the
+    ordinary text truncation path. Returning the original text means it is a
+    structured error that cannot fit safely and must remain intact.
+    """
+    try:
+        payload = json.loads(response_text)
+    except (TypeError, ValueError):
+        return None
+    if not isinstance(payload, dict) or not (
+        payload.get("ok") is False
+        or payload.get("status") in {"error", "blocked", "cancelled"}
+    ):
+        return None
+    error = payload.get("error")
+    if not isinstance(error, dict) or not isinstance(error.get("message"), str):
+        return response_text
+
+    original_message = error["message"]
+
+    def render(kept_chars: int) -> str:
+        omitted_chars = len(original_message) - kept_chars
+        head_chars = kept_chars // 2
+        tail_chars = kept_chars - head_chars
+        shortened = original_message[:head_chars]
+        if omitted_chars > 0:
+            shortened += f"... [Truncated {omitted_chars:,} characters from {tool_name} error] ..."
+        if tail_chars > 0:
+            shortened += original_message[-tail_chars:]
+        shortened_payload = dict(payload)
+        shortened_error = dict(error)
+        shortened_error["message"] = shortened
+        shortened_payload["error"] = shortened_error
+        return json.dumps(shortened_payload, ensure_ascii=False, separators=(",", ":"), default=str)
+
+    low, high = 0, len(original_message)
+    best = render(0)
+    if len(best) > quota:
+        return response_text
+    while low <= high:
+        middle = (low + high) // 2
+        candidate = render(middle)
+        if len(candidate) <= quota:
+            best = candidate
+            low = middle + 1
+        else:
+            high = middle - 1
+    return best
+
 def _apply_tool_output_truncation(
-    messages: List[InternalChatMessage],
-    logger: Optional[AgentLogger] = None,
+    messages: list[InternalChatMessage],
+    logger: AgentLogger | None = None,
 ) -> tuple:
     """Layer 2: Tool Output Hard Truncation.
 
@@ -930,8 +1080,18 @@ def _apply_tool_output_truncation(
     log = get_logger(logger, __name__)
     replacements: dict[int, str] = {}
     total_saved_chars = 0
+    pairs = _iter_visible_tool_response_pairs(messages)
+    protected_indices = _protected_message_indices(messages)
+    error_exempt_indices = _recent_error_response_indices(
+        messages,
+        [pair.response_index for pair in pairs],
+    )
 
-    for pair in _iter_visible_tool_response_pairs(messages):
+    for pair in pairs:
+        if pair.response_index in protected_indices:
+            continue
+        if pair.response_index in error_exempt_indices:
+            continue
         tools_used = [invocation.name for invocation in pair.invocations] or ["default"]
         quotas: list[tuple[str, int]] = []
         for tool_name in tools_used:
@@ -949,6 +1109,17 @@ def _apply_tool_output_truncation(
         if len(response_text) <= quota:
             continue
 
+        structured_error = _truncate_structured_tool_error(
+            response_text,
+            quota=quota,
+            tool_name=primary,
+        )
+        if structured_error is not None:
+            if structured_error != response_text:
+                replacements[pair.response_index] = structured_error
+                total_saved_chars += len(response_text) - len(structured_error)
+            continue
+
         half = quota // 2
         head = response_text[:half]
         tail = response_text[-half:] if half > 0 else ""
@@ -962,17 +1133,17 @@ def _apply_tool_output_truncation(
 
     if not replacements:
         return messages, 0.0
-        
+
     new_messages = []
     for idx, msg in enumerate(messages):
         if idx in replacements:
             new_messages.append(_clone_internal_message_with_content(msg, replacements[idx]))
         else:
             new_messages.append(msg)
-            
+
     if total_saved_chars > 0:
         log.info(f"[Tool Truncation] Truncated {len(replacements)} overly long tool responses. Chars saved: {total_saved_chars:,}")
-        
+
     return new_messages, total_saved_chars
 
 
@@ -981,9 +1152,9 @@ def _apply_tool_output_truncation(
 # ===========================================================================
 
 def _apply_observation_masking(
-    messages: List[InternalChatMessage],
+    messages: list[InternalChatMessage],
     frac_to_mask: float = TRUNCATION_FRAC_TO_REMOVE,
-    logger: Optional[AgentLogger] = None,
+    logger: AgentLogger | None = None,
 ) -> tuple[list[InternalChatMessage], int]:
     """Layer 3: Observation Masking (inspired by OpenHands ObservationMaskingCondenser).
 
@@ -998,9 +1169,12 @@ def _apply_observation_masking(
     log = get_logger(logger, __name__)
 
     pair_by_response = _build_response_pair_map(messages)
+    protected_indices = _protected_message_indices(messages)
     tool_response_indices: list[int] = []
     for idx, internal_msg in enumerate(messages):
         if not internal_msg.is_visible() or not _is_tool_response_role(internal_msg.message.role):
+            continue
+        if idx in protected_indices:
             continue
         content_text = _extract_content_text(internal_msg.message.content)
         if not content_text or _is_placeholder_response(content_text):
@@ -1061,7 +1235,7 @@ def _extract_message_text(message: ChatMessage) -> str:
     return text
 
 
-def get_messages_since_last_summary(messages: List[InternalChatMessage]) -> List[InternalChatMessage]:
+def get_messages_since_last_summary(messages: list[InternalChatMessage]) -> list[InternalChatMessage]:
     last_summary_idx = -1
     for idx in range(len(messages) - 1, -1, -1):
         if messages[idx].is_summary:
@@ -1077,7 +1251,7 @@ def _count_tokens(messages: Iterable[ChatMessage], model_id: str) -> int:
     payload = []
     for msg in messages:
         text = _extract_message_text(msg)
-        
+
         role_value = msg.role.value if isinstance(msg.role, MessageRole) else str(msg.role)
         if role_value in {"system", "user", "assistant", "tool"}:
             role = role_value
@@ -1085,7 +1259,7 @@ def _count_tokens(messages: Iterable[ChatMessage], model_id: str) -> int:
             role = "tool"
         else:
             role = "user"
-            
+
         payload.append({
             "role": role,
             "content": text,
@@ -1117,7 +1291,7 @@ def _summary_role_label(role: object) -> str:
     return value.replace("_", " ").replace("-", " ").title()
 
 
-def _serialize_messages_for_summary(messages: List[InternalChatMessage]) -> str:
+def _serialize_messages_for_summary(messages: list[InternalChatMessage]) -> str:
     """Serialize visible history into bounded text for the real summary model."""
     lines = ["<conversation>"]
     for internal_msg in messages:
@@ -1132,12 +1306,63 @@ def _serialize_messages_for_summary(messages: List[InternalChatMessage]) -> str:
     lines.append("</conversation>")
     return "\n".join(lines)
 
+
+def _split_summary_head_and_recent_tail(
+    messages: list[InternalChatMessage],
+    recent_user_turns: int = SUMMARY_RECENT_USER_TURNS,
+    *,
+    model_id: str | None = None,
+    preserve_recent_tokens: int | None = None,
+) -> tuple[list[InternalChatMessage], list[InternalChatMessage]]:
+    """Split visible history at a complete user-turn boundary."""
+    visible = [
+        message
+        for message in messages
+        if message.is_visible() and message.message.role != MessageRole.SYSTEM
+    ]
+    user_positions = [
+        index
+        for index, message in enumerate(visible)
+        if message.message.role == MessageRole.USER and not message.is_summary
+    ]
+    if not user_positions:
+        return visible, []
+    tail_start = user_positions[-min(recent_user_turns, len(user_positions))]
+    while tail_start < len(visible):
+        tail = visible[tail_start:]
+        if preserve_recent_tokens is None or not model_id:
+            return visible[:tail_start], tail
+        tail_tokens = _count_tokens([message.message for message in tail], model_id)
+        if tail_tokens <= preserve_recent_tokens:
+            return visible[:tail_start], tail
+        remaining_user_positions = [position for position in user_positions if position > tail_start]
+        if not remaining_user_positions:
+            break
+        tail_start = remaining_user_positions[0]
+    if preserve_recent_tokens is not None and model_id:
+        # If the newest complete user turn alone is oversized, retain the
+        # earliest assistant suffix that fits. This mirrors OpenCode's
+        # continuation boundary while keeping the full user request in the
+        # summary instead of dropping recent assistant state unnecessarily.
+        newest_user_position = user_positions[-1]
+        for candidate in range(newest_user_position + 1, len(visible)):
+            if visible[candidate].message.role != MessageRole.ASSISTANT:
+                continue
+            candidate_tail = visible[candidate:]
+            if _count_tokens(
+                [message.message for message in candidate_tail],
+                model_id,
+            ) <= preserve_recent_tokens:
+                return visible[:candidate], candidate_tail
+    return visible, []
+
 def summarize_conversation(
-    messages: List[InternalChatMessage],
+    messages: list[InternalChatMessage],
     model_id: str,
-    custom_condense_prompt: Optional[str] = None,
-    cached_command_blocks: Optional[str] = None,
-    cached_skill_load: Optional[str] = None,
+    custom_condense_prompt: str | None = None,
+    cached_command_blocks: str | None = None,
+    cached_skill_load: str | None = None,
+    preserve_recent_tokens: int | None = None,
 ) -> SummarizeResponse:
     """Layer 4: LLM Summarization (smart compression).
 
@@ -1169,20 +1394,21 @@ def summarize_conversation(
         )
 
     messages_to_summarize = get_messages_since_last_summary(messages)
-    summarizable_messages = [
-        msg for msg in messages_to_summarize
-        if msg.message.role != MessageRole.SYSTEM and msg.is_visible()
-    ]
+    summarizable_messages, recent_tail = _split_summary_head_and_recent_tail(
+        messages_to_summarize,
+        model_id=model_id,
+        preserve_recent_tokens=preserve_recent_tokens,
+    )
 
-    if len(summarizable_messages) <= 1:
+    if not summarizable_messages or (len(summarizable_messages) == 1 and not recent_tail):
         error = "Not enough messages available for compression"
         return SummarizeResponse(messages=messages, summary="", error=error)
 
     condense_instructions = custom_condense_prompt.strip() if custom_condense_prompt else CONDENSE_INSTRUCTION
-    serialized_history = _serialize_messages_for_summary(messages_to_summarize)
+    serialized_history = _serialize_messages_for_summary(summarizable_messages)
 
     # CONDENSE + history
-    request_messages: List[Union[ChatMessage, dict]] = []
+    request_messages: list[ChatMessage | dict] = []
 
     # CONDENSE
     condense_message = ChatMessage(
@@ -1210,7 +1436,11 @@ def summarize_conversation(
         )
     )
 
-    log.info(f"Preparing to compress {len(messages_to_summarize)} messages...")
+    log.info(
+        "Preparing to compress %d messages while preserving %d recent messages...",
+        len(summarizable_messages),
+        len(recent_tail),
+    )
     log.info("=" * 80)
     log.info("📨 Compression request messages sent to LLM:")
     log.info("=" * 80)
@@ -1225,10 +1455,8 @@ def summarize_conversation(
     model = model_manager.get_smolagents_model(ModelType.SUMMARY)
 
     summary_text = ""
-    cost = 0.0         # TODO: get cost from model
-
     try:
-        generation_messages: List[Union[ChatMessage, dict]] = [
+        generation_messages: list[ChatMessage | dict] = [
             ChatMessage(role=MessageRole.SYSTEM, content=SUMMARY_SYSTEM_PROMPT),
         ] + request_messages
 
@@ -1273,7 +1501,11 @@ def summarize_conversation(
 
     # TODO: Add environment information
 
-    last_msg_ts = messages[-1].ts if messages else time.time()
+    first_tail_index = next(
+        (index for index, message in enumerate(messages) if any(message is tail for tail in recent_tail)),
+        len(messages),
+    )
+    previous_ts = messages[first_tail_index - 1].ts if first_tail_index > 0 else None
     summary_message = InternalChatMessage(
         message=ChatMessage(
             role=MessageRole.USER,
@@ -1282,7 +1514,7 @@ def summarize_conversation(
             raw=None,
             token_usage=None,
         ),
-        ts=last_msg_ts + 1,
+        ts=previous_ts or time.time(),
         is_summary=True,
     )
 
@@ -1292,8 +1524,7 @@ def summarize_conversation(
     new_messages = []
     messages_to_condense = {
         id(msg)
-        for msg in messages_to_summarize
-        if msg.message.role != MessageRole.SYSTEM
+        for msg in summarizable_messages
     }
     for msg in messages:
         is_system_msg = msg.message.role == MessageRole.SYSTEM
@@ -1314,7 +1545,7 @@ def summarize_conversation(
         else:
             new_messages.append(msg)
 
-    new_messages.append(summary_message)
+    new_messages.insert(first_tail_index, summary_message)
 
     new_context_tokens = _count_tokens(
         [msg.message for msg in new_messages if msg.is_visible()],
@@ -1333,12 +1564,12 @@ def summarize_conversation(
 # Message Conversion & Visibility Helpers
 # ===========================================================================
 
-def to_internal_messages(messages: List[ChatMessage]) -> List[InternalChatMessage]:
+def to_internal_messages(messages: list[ChatMessage]) -> list[InternalChatMessage]:
     """Wrap raw ``ChatMessage`` objects into ``InternalChatMessage`` with metadata."""
     return [InternalChatMessage.from_chat_message(msg) for msg in messages]
 
 
-def get_effective_history(messages: List[InternalChatMessage]) -> List[InternalChatMessage]:
+def get_effective_history(messages: list[InternalChatMessage]) -> list[InternalChatMessage]:
     """Return the visible slice of the conversation history.
 
     Includes system prompts, the latest summary (if any), and all messages
@@ -1375,7 +1606,7 @@ def get_effective_history(messages: List[InternalChatMessage]) -> List[InternalC
     return result
 
 
-def to_api_messages(messages: List[InternalChatMessage]) -> List[ChatMessage]:
+def to_api_messages(messages: list[InternalChatMessage]) -> list[ChatMessage]:
     """Convert internal messages to API-ready ``ChatMessage`` list (visible only)."""
     effective_history = get_effective_history(messages)
 
@@ -1391,10 +1622,10 @@ def to_api_messages(messages: List[InternalChatMessage]) -> List[ChatMessage]:
 # ===========================================================================
 
 def truncate_conversation(
-    messages: List[InternalChatMessage],
+    messages: list[InternalChatMessage],
     frac_to_remove: float,
-    cached_command_blocks: Optional[str] = None,
-    cached_skill_load: Optional[str] = None,
+    cached_command_blocks: str | None = None,
+    cached_skill_load: str | None = None,
 ) -> TruncationResult:
     """Fallback: Sliding-Window Truncation.
 
@@ -1543,14 +1774,28 @@ class ConversationHistoryManager:
     Each layer short-circuits if the budget is satisfied.
     """
 
-    def __init__(self, max_tokens: int = DEFAULT_MAX_TOKENS, smart_summary: bool = True):
-        self._internal_message_history: List[InternalChatMessage] = []
-        self._max_tokens = max_tokens
+    def __init__(
+        self,
+        max_tokens: int | None = None,
+        smart_summary: bool = True,
+        *,
+        context_window: int | None = None,
+        max_output_tokens: int | None = None,
+    ):
+        self._internal_message_history: list[InternalChatMessage] = []
+        if context_window is not None:
+            reserved_output = max_output_tokens or 0
+            if reserved_output >= context_window:
+                raise ValueError("max_output_tokens must be smaller than context_window")
+            self._max_tokens = context_window - reserved_output
+        else:
+            self._max_tokens = max_tokens if max_tokens is not None else DEFAULT_MAX_TOKENS
         self._smart_summary = smart_summary
-        self._cached_command_blocks: Optional[str] = None
-        self._cached_skill_load: Optional[str] = None
-        self._cached_sys_prompt: Optional[str] = None
+        self._cached_command_blocks: str | None = None
+        self._cached_skill_load: str | None = None
+        self._cached_sys_prompt: str | None = None
         self._raw_message_count: int = 0  # count of real smolagents messages synced (excludes synthetic entries)
+        self._raw_message_fingerprints: list[str] = []
 
     def truncate_until_fits(
         self,
@@ -1642,7 +1887,7 @@ class ConversationHistoryManager:
                 )
                 break
 
-    def sync_from_messages(self, messages: List[ChatMessage]):
+    def sync_from_messages(self, messages: list[ChatMessage]):
         """Incrementally sync new ``ChatMessage`` objects from the agent runtime.
 
         On the first call, all messages are ingested.  On subsequent calls,
@@ -1650,6 +1895,19 @@ class ConversationHistoryManager:
         Also caches the system prompt and the original task command block
         (used by truncation markers and summaries to preserve task context).
         """
+        fingerprints = [
+            json.dumps(message.dict(), sort_keys=True, ensure_ascii=False, default=str)
+            for message in messages
+        ]
+        unchanged_prefix = (
+            len(fingerprints) >= len(self._raw_message_fingerprints)
+            and fingerprints[: len(self._raw_message_fingerprints)] == self._raw_message_fingerprints
+        )
+        if self._raw_message_fingerprints and not unchanged_prefix:
+            self._cached_command_blocks = None
+            self._cached_skill_load = None
+            self._cached_sys_prompt = None
+
         if self._cached_sys_prompt is None and messages:
             for msg in messages:
                 if msg.role == MessageRole.SYSTEM:
@@ -1674,20 +1932,22 @@ class ConversationHistoryManager:
             self._cached_skill_load = _extract_content_text(next_msg.content) or None
             break
 
-        if not self._internal_message_history:
+        if not self._internal_message_history or not unchanged_prefix:
             self._internal_message_history = to_internal_messages(messages)
             self._raw_message_count = len(messages)
+            self._raw_message_fingerprints = fingerprints
         else:
             if len(messages) > self._raw_message_count:
                 for msg in messages[self._raw_message_count:]:
                     self._internal_message_history.append(InternalChatMessage.from_chat_message(msg))
                 self._raw_message_count = len(messages)
+                self._raw_message_fingerprints = fingerprints
 
     def get_compressed_messages(
         self,
         model_id: str,
-        step: Optional[int] = None,
-    ) -> List[ChatMessage]:
+        step: int | None = None,
+    ) -> list[ChatMessage]:
         """Run the full compression pipeline and return API-ready messages.
 
         Pipeline: Layer 1 → Layer 2 → Layer 3 → Layer 4 → Fallback.
@@ -1710,28 +1970,32 @@ class ConversationHistoryManager:
         else:
             log.info(f"Triggering standard compression: {current_tokens} > {self._max_tokens} tokens")
 
+        _mark_recent_user_turns_for_preservation(
+            self._internal_message_history,
+        )
+
         # --- Layer 1: File Read Deduplication ---
         deduped_messages, saved_ratio = _apply_tool_dedup(
             self._internal_message_history,
             model_id=model_id,
         )
 
-        if saved_ratio >= TRUNCATION_FRAC_TO_REMOVE:
-            # Enough savings from dedup alone — skip compress/truncate
-            self._internal_message_history = deduped_messages
-            log.info(
-                f"[Layer 1] File dedup saved {saved_ratio:.1%} of context "
-                f"(threshold={TRUNCATION_FRAC_TO_REMOVE:.0%}). "
-                f"Skipping LLM summarization and truncation."
-            )
-            return to_api_messages(self._internal_message_history)
-
-        # Partial savings: persist the dedup changes anyway (reduces future compression cost)
         if saved_ratio > 0.0:
             self._internal_message_history = deduped_messages
+            current_tokens = _count_tokens(to_api_messages(self._internal_message_history), model_id)
+            if current_tokens <= self._max_tokens:
+                log.info(
+                    "[Layer 1] File dedup resolved context limits (%d <= %d).",
+                    current_tokens,
+                    self._max_tokens,
+                )
+                return to_api_messages(self._internal_message_history)
             log.info(
-                f"[Layer 1] File dedup saved {saved_ratio:.1%} (below {TRUNCATION_FRAC_TO_REMOVE:.0%} threshold). "
-                f"Continuing with Layer 2 Tool Output Truncation."
+                "[Layer 1] File dedup saved %.1f%% but context remains over budget (%d > %d); "
+                "continuing with Layer 2.",
+                saved_ratio * 100,
+                current_tokens,
+                self._max_tokens,
             )
 
         # --- Layer 2: Reversible ContextEngine Compression ---
@@ -1755,7 +2019,7 @@ class ConversationHistoryManager:
         )
         if trunc_saved > 0:
             self._internal_message_history = trunc_messages
-            
+
             # Recalculate tokens since we hard truncated strings
             current_tokens = _count_tokens(to_api_messages(self._internal_message_history), model_id)
             if current_tokens <= self._max_tokens:
@@ -1789,6 +2053,14 @@ class ConversationHistoryManager:
             model_id=model_id,
             cached_command_blocks=self._cached_command_blocks,
             cached_skill_load=self._cached_skill_load,
+            preserve_recent_tokens=max(
+                1,
+                min(
+                    self._max_tokens,
+                    SUMMARY_RECENT_TOKENS_MAX,
+                    max(SUMMARY_RECENT_TOKENS_MIN, int(self._max_tokens * 0.25)),
+                ),
+            ),
         )
 
         if result.error:
@@ -1814,7 +2086,7 @@ class ConversationHistoryManager:
 
         return to_api_messages(self._internal_message_history)
 
-    def get_internal_messages(self) -> List[InternalChatMessage]:
+    def get_internal_messages(self) -> list[InternalChatMessage]:
         return self._internal_message_history
 
 
@@ -1824,3 +2096,4 @@ class ConversationHistoryManager:
         self._cached_skill_load = None
         self._cached_sys_prompt = None
         self._raw_message_count = 0
+        self._raw_message_fingerprints = []

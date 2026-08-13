@@ -33,7 +33,8 @@ def _base_model_config() -> dict:
                 "base_url": "https://example.test/v1",
                 "api_key": "key-powerful",
                 "temperature": 0.2,
-                "max_tokens": 1024,
+                "context_window": 32768,
+                "max_output_tokens": 4096,
                 "timeout": 60,
                 "num_retries": 7,
                 "retry_delay": 2.5,
@@ -66,6 +67,9 @@ def test_llm_member_access_and_model_config_fields(monkeypatch):
     assert cfg.base_url == "https://example.test/v1"
     assert cfg.api_key == "key-powerful"
     assert cfg.timeout == 60
+    assert cfg.context_window == 32768
+    assert cfg.max_output_tokens == 4096
+    assert cfg.usable_input_tokens == 28672
     assert cfg.num_retries == 7
     assert cfg.retry_delay == 2.5
     assert cfg.max_retry_delay == 20.0
@@ -94,6 +98,8 @@ def test_model_manager_litellm_config_contains_passthrough_fields(monkeypatch):
     )
 
     assert params["model"] == "openai/test-model"
+    assert params["max_tokens"] == 4096
+    assert "context_window" not in params
     assert params["timeout"] == 60
     assert params["num_retries"] == 7
     assert params["retry_delay"] == 2.5
@@ -101,6 +107,22 @@ def test_model_manager_litellm_config_contains_passthrough_fields(monkeypatch):
     assert params["extra_headers"] == {"X-Model": "powerful"}
     assert params["api_base"] == "https://example.test/v1"
     assert params["api_key"] == "key-powerful"
+
+
+def test_legacy_max_tokens_remains_usable_by_model_manager(monkeypatch):
+    config = _base_model_config()
+    powerful = config["model"]["powerful"]
+    powerful.pop("context_window")
+    powerful.pop("max_output_tokens")
+    powerful["max_tokens"] = 8192
+    _patch_yaml_config(monkeypatch, config)
+
+    manager = model_manager_module.ModelManager()
+    model_config = manager.get_model_config(model_types.ModelType("powerful"))
+    params = manager.get_litellm_config(model_types.ModelType("powerful"), model_cache=False)
+
+    assert model_config.usable_input_tokens == 8192
+    assert params["max_tokens"] == 8192
 
 
 def test_langfuse_private_key_fallback(monkeypatch):

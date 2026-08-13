@@ -180,7 +180,9 @@ Except for `default_model_type`, **all dict-valued keys under the `model` block 
 | `api_key` | `str` | `""` | ❌ No | API authentication key. Configure independently for each model type |
 | `description` | `str` | `"Model type '{k}' loaded from YAML config"` | ❌ No | Human-readable model description. Used in logs and documentation |
 | `temperature` | `float` | `0.1` | ❌ No | Creativity/randomness control (0.0 - 2.0). See [3.2 temperature Recommendations](#32-temperature-configuration-recommendations) |
-| `max_tokens` | `int` \| `str` | `150000` | ❌ No | Maximum tokens per single model generation. Special value `"max"` uses the model's native maximum |
+| `context_window` | `int` | `150000` | ❌ No | Total model context window used to budget input plus reserved output |
+| `max_output_tokens` | `int` | `16384` | ❌ No | Maximum tokens reserved for one model generation and sent to the provider |
+| `max_tokens` | `int` | `150000` | ❌ No | Deprecated compatibility alias; when used alone it supplies both legacy budgets. The old `"max"` value resolves to this finite default. |
 | `timeout` | `int` | `60` | ❌ No | Single HTTP request timeout (seconds). Interrupted if no response within this time |
 | `num_retries` | `int` | `5` | ❌ No | Number of retries on API call failure |
 | `retry_delay` | `float` | `15.0` | ❌ No | Initial retry delay (seconds). See [Section 6](#6-retry-mechanism-details) |
@@ -200,14 +202,13 @@ Except for `default_model_type`, **all dict-valued keys under the `model` block 
 
 > ⚠️ **Special model requirements**: Some models (e.g., OpenAI `o1`, certain platforms' `gpt-5`) require `temperature: 1.0`. If your model has this restriction, set it explicitly.
 
-### 3.3 max_tokens Special Values
+### 3.3 Context and output budgets
 
-| Config Value | Behavior |
-|--------|------|
-| Integer (e.g., `8192`) | Limits to a fixed token count |
-| `"max"` (string) | Delegates to the model's native maximum (automatically obtained by LiteLLM) |
-
-> The framework uses `IntParser` for lenient parsing; `"max"` is a special bypass string.
+Use `context_window` for the provider's total context capacity and
+`max_output_tokens` for the generation reserve. AgentLoom compresses model input
+against `context_window - max_output_tokens`; only `max_output_tokens` is sent to
+the provider as `max_tokens`. The legacy `max_tokens` field remains accepted when
+neither new field is set.
 
 ### 3.4 extra_headers Override Behavior
 
@@ -401,7 +402,9 @@ Code default values (defaults.py)
 | `base_url` | `""` when unset |
 | `api_key` | `""` when unset |
 | `temperature` | `0.1` when unset |
-| `max_tokens` | `150000` when unset |
+| `context_window` | `150000` when unset |
+| `max_output_tokens` | `16384` when unset |
+| `max_tokens` | Legacy compatibility alias |
 | `timeout` | `60` when unset |
 | `num_retries` | `5` when unset |
 | `retry_delay` | `15.0` when unset |
@@ -513,6 +516,7 @@ The following constants are defined in `src/lib/config/defaults.py` and serve as
 | Constant Name | Value | Corresponding Parameter |
 |--------|-----|---------|
 | `DEFAULT_MAX_TOKENS` | `150000` | `max_tokens` |
+| `DEFAULT_MAX_OUTPUT_TOKENS` | `16384` | `max_output_tokens` |
 | `DEFAULT_MODEL_TEMPERATURE` | `0.1` | `temperature` |
 | `DEFAULT_MODEL_TIMEOUT` | `60` | `timeout` |
 | `DEFAULT_MODEL_NUM_RETRIES` | `5` | `num_retries` |
@@ -533,7 +537,9 @@ class LlmModelTypeSettings(BaseModel):
     base_url: str = ""
     api_key: str = ""
     temperature: float = 0.1           # DEFAULT_MODEL_TEMPERATURE
-    max_tokens: int | str = 150000     # DEFAULT_MAX_TOKENS
+    max_tokens: int = 150000           # DEFAULT_MAX_TOKENS
+    context_window: int = 150000       # DEFAULT_MAX_TOKENS
+    max_output_tokens: int = 16384     # DEFAULT_MAX_OUTPUT_TOKENS
     timeout: int = 60                  # DEFAULT_MODEL_TIMEOUT
     num_retries: int = 5              # DEFAULT_MODEL_NUM_RETRIES
     retry_delay: float = 15.0         # DEFAULT_MODEL_RETRY_DELAY

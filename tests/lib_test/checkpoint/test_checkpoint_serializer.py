@@ -4,12 +4,12 @@ from __future__ import annotations
 
 import time
 
-import pytest
 from smolagents.memory import ActionStep, PlanningStep, TaskStep, ToolCall
 from smolagents.models import ChatMessage, MessageRole
 from smolagents.monitoring import Timing, TokenUsage
 
 from src.lib.checkpoint.serializer import CheckpointSerializer
+from src.lib.smolagents.tool_protocol import ToolCallRecord, ToolErrorRecord
 
 # ── helpers ──────────────────────────────────────────────────────────────
 
@@ -67,6 +67,34 @@ class TestSerializeActionStep:
         assert rebuilt[0].token_usage is not None
         assert rebuilt[0].token_usage.input_tokens == 200
         assert rebuilt[0].token_usage.output_tokens == 80
+
+    def test_roundtrip_with_terminal_tool_error_record(self):
+        step = ActionStep(
+            step_number=2,
+            timing=_make_timing(),
+            tool_calls=[ToolCall(name="shell_tool", arguments={"command": "false"}, id="call-error")],
+        )
+        step.tool_results = [
+            ToolCallRecord(
+                call_id="call-error",
+                tool_name="shell_tool",
+                input={"command": "false"},
+                status="error",
+                error=ToolErrorRecord(
+                    kind="shell_command_error",
+                    message="Command failed with exit code 1.",
+                    retryable=True,
+                    stage="tool_execution",
+                ),
+            )
+        ]
+
+        data = CheckpointSerializer.serialize_memory_steps([step])
+        rebuilt = CheckpointSerializer.deserialize_memory_steps(data)[0]
+
+        assert rebuilt.tool_results[0].call_id == "call-error"
+        assert rebuilt.tool_results[0].status == "error"
+        assert rebuilt.tool_results[0].error.kind == "shell_command_error"
 
     def test_roundtrip_with_model_output(self):
         step = ActionStep(

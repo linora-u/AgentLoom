@@ -7,8 +7,8 @@ from dataclasses import dataclass
 from typing import Optional
 
 from src.lib.config import C
-from src.lib.logging import get_logger
 from src.lib.config.defaults import (
+    DEFAULT_MAX_OUTPUT_TOKENS,
     DEFAULT_MAX_TOKENS,
     DEFAULT_MODEL_CONTEXT_CACHE,
     DEFAULT_MODEL_MAX_RETRY_DELAY,
@@ -18,6 +18,7 @@ from src.lib.config.defaults import (
     DEFAULT_MODEL_TEMPERATURE,
     DEFAULT_MODEL_TIMEOUT,
 )
+from src.lib.logging import get_logger
 
 logger = get_logger(__name__)
 
@@ -54,6 +55,9 @@ class ModelConfig:
     api_key: Optional[str] = None
     temperature: float = DEFAULT_MODEL_TEMPERATURE
     max_tokens: int = DEFAULT_MAX_TOKENS
+    context_window: int = DEFAULT_MAX_TOKENS
+    max_output_tokens: int = DEFAULT_MAX_OUTPUT_TOKENS
+    input_token_limit: int = DEFAULT_MAX_TOKENS - DEFAULT_MAX_OUTPUT_TOKENS
     timeout: int = DEFAULT_MODEL_TIMEOUT  # seconds
     description: str = ""
     num_retries: int = DEFAULT_MODEL_NUM_RETRIES
@@ -70,6 +74,10 @@ class ModelConfig:
     # Extra parameters passed through to litellm.completion() (e.g. reasoning_effort,
     # extra_body for provider-specific features like DeepSeek thinking mode).
     extra_completion_params: Optional[dict] = None
+
+    @property
+    def usable_input_tokens(self) -> int:
+        return self.input_token_limit
 
 
 class ModelType:
@@ -136,6 +144,9 @@ def _build_model_config_from_yaml(type_name: str) -> ModelConfig:
         api_key=resolved.api_key or None,
         temperature=float(resolved.temperature),
         max_tokens=int(resolved.max_tokens),
+        context_window=int(resolved.context_window),
+        max_output_tokens=int(resolved.max_output_tokens),
+        input_token_limit=int(resolved.input_token_limit),
         timeout=int(resolved.timeout),
         description=resolved.description,
         num_retries=int(resolved.num_retries),
