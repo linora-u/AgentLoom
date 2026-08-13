@@ -77,9 +77,6 @@ hooks:
   bundles:
     agent-visualization:
       path: hooks/agent-visualization
-    # Recall Hooks are independent from the Recall Skill and disabled by default.
-    # agent-recall-with-files:
-    #   path: hooks/agent-recall-with-files
 
 # ============================================
 # Execution Environment Global Configuration
@@ -325,15 +322,13 @@ the tool and catalogue. See [Skills](skills_config.md).
 ## 4.5 hooks — Independent Hook Runtime
 
 Hooks are configured independently from Skills. The following explicitly
-authorizes the visualization Bundle while leaving recall disabled:
+authorizes the visualization Bundle:
 
 ```yaml
 hooks:
   bundles:
     agent-visualization:
       path: hooks/agent-visualization
-    # agent-recall-with-files:
-    #   path: hooks/agent-recall-with-files
 ```
 
 See the [Hooks reference](hooks.md) for direct declarations, Bundle manifests,

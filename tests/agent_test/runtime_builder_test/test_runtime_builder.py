@@ -11,6 +11,7 @@ import pytest
 import yaml
 
 import src.lib.smolagents.agent.base_agent as base_agent_module
+import src.lib.smolagents.agent.invocation as invocation_module
 import src.lib.smolagents.prompts.prompt_builder as prompt_builder_module
 from src.extensions.self_learning.persistence.review_engine import ReviewEngine
 from src.lib.logging import get_global_logger, set_global_logger
@@ -186,6 +187,28 @@ def test_role_driven_agent_reports_to_application_lifecycle(monkeypatch):
         error=None,
         goal=None,
     )
+
+
+def test_role_driven_agent_delegates_one_run_to_the_invocation_module(monkeypatch):
+    agent = _make_agent(logger=DummyLoggerBackend())
+    observed = []
+
+    class RecordingInvocation:
+        def __init__(self, owner, **arguments):
+            observed.append((owner, arguments))
+
+        def run(self):
+            return "invocation-result"
+
+    monkeypatch.setattr(invocation_module, "AgentInvocation", RecordingInvocation)
+
+    assert agent.run("delegated task", task_id="task-invocation") == "invocation-result"
+    assert len(observed) == 1
+    owner, arguments = observed[0]
+    assert owner is agent
+    assert arguments["task"] == "delegated task"
+    assert arguments["task_id"] == "task-invocation"
+    assert arguments["owns_root_run"] is True
 
 
 def test_standalone_checkpoint_failure_still_deactivates_coordinator(
@@ -1047,12 +1070,11 @@ def test_builtin_session_end_has_only_the_recorder_hook():
     assert "builtin:self_learning_finalizer" not in all_sources
 
 
-def test_default_system_config_enables_visualization_bundle_but_not_recall():
+def test_default_system_config_enables_visualization_bundle_only():
     agent = _make_agent(logger=DummyLoggerBackend())
     hook_ids = {handler.hook_id for handler in agent._hook_plan.handlers if handler.hook_id is not None}
 
     assert any(hook_id.startswith("agent-visualization.") for hook_id in hook_ids)
-    assert not any(hook_id.startswith("agent-recall-with-files.") for hook_id in hook_ids)
     assert len(agent._hook_plan.fingerprint) == 64
 
 

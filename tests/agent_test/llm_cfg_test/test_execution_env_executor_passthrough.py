@@ -291,7 +291,7 @@ def test_hooked_memory_injects_pending_agent_context_and_logs_user_messages():
 
     hook_run = HookRun(HookPlan(), local_run_id="local", root_run_id="root")
     hook_run.queue_agent_context("phase-1 still active")
-    hook_run.queue_user_message("[agent-recall-with-files] File updated.")
+    hook_run.queue_user_message("Hook observer updated runtime state.")
     set_current_hook_run(hook_run)
 
     try:
@@ -301,7 +301,7 @@ def test_hooked_memory_injects_pending_agent_context_and_logs_user_messages():
 
     assert messages[-1].role == MessageRole.SYSTEM
     assert "phase-1 still active" in str(messages[-1].content)
-    assert dummy.logger.entries == [("[hook] [agent-recall-with-files] File updated.", 1)]
+    assert dummy.logger.entries == [("[hook] Hook observer updated runtime state.", 1)]
     assert hook_run.consume_pending_agent_context() == []
     assert hook_run.consume_pending_user_messages() == []
 
