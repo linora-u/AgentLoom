@@ -9,8 +9,8 @@ AgentLoom Hook 是独立的运行时扩展。Skill 只提供提示词说明与�
 ```yaml
 hooks:
   bundles:
-    agent-visualization:
-      path: hooks/agent-visualization
+    local-audit:
+      path: hooks/local-audit
 
   PreToolUse:
     - id: workspace.normalize-write
@@ -22,11 +22,11 @@ hooks:
 Bundle 目录包含大小写固定的 `HOOK.yaml` 和脚本：
 
 ```yaml
-name: agent-visualization
-description: Collect Agent runtime events.
+name: local-audit
+description: Record selected runtime events.
 hooks:
   TaskCreated:
-    - id: agent-visualization.task-created
+    - id: local-audit.task-created
       command: "python scripts/on_task_start.py"
       timeout: 20
 ```
@@ -50,7 +50,7 @@ Bundle 永不自动发现，也不能递归引用其他 Bundle。配置 key 必�
 ```yaml
 hooks:
   bundles:
-    agent-visualization:
+    local-audit:
       enabled: false
   PreToolUse:
     - id: workspace.normalize-write

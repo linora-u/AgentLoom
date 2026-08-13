@@ -103,7 +103,6 @@ def _runtime_workspace_fields(runtime_agent_path: str | None) -> dict[str, str |
     empty = {
         "agent_task_workspace": None,
         "agent_insights_path": None,
-        "agent_visualization_path": None,
     }
     if not isinstance(runtime_agent_path, str) or not runtime_agent_path.strip():
         return empty
@@ -115,13 +114,9 @@ def _runtime_workspace_fields(runtime_agent_path: str | None) -> dict[str, str |
             return empty
         agent_path = runtime_agent_path.strip()
         task_workspace = runtime_context.prepare_agent_workspace(agent_path)
-        root_agent_path = agent_path.split("/", 1)[0]
         return {
             "agent_task_workspace": str(task_workspace),
             "agent_insights_path": str(runtime_context.agent_insights_path(agent_path)),
-            "agent_visualization_path": str(
-                runtime_context.agent_visualization_path(root_agent_path)
-            ),
         }
     except (OSError, RuntimeError, TypeError, ValueError):
         return empty

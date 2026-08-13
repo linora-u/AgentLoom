@@ -71,14 +71,6 @@ prompt:
   path: "sysprompt/system_prompt.yaml"
 
 # ============================================
-# Explicit Hook Configuration
-# ============================================
-hooks:
-  bundles:
-    agent-visualization:
-      path: hooks/agent-visualization
-
-# ============================================
 # Execution Environment Global Configuration
 # ============================================
 execution_env:
@@ -321,14 +313,14 @@ the tool and catalogue. See [Skills](skills_config.md).
 
 ## 4.5 hooks — Independent Hook Runtime
 
-Hooks are configured independently from Skills. The following explicitly
-authorizes the visualization Bundle:
+Hooks are configured independently from Skills. For example, this explicitly
+authorizes a local audit Bundle:
 
 ```yaml
 hooks:
   bundles:
-    agent-visualization:
-      path: hooks/agent-visualization
+    local-audit:
+      path: hooks/local-audit
 ```
 
 See the [Hooks reference](hooks.md) for direct declarations, Bundle manifests,

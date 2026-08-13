@@ -61,7 +61,6 @@ def _payload(spec: ShellHookSpec, context: HookContext) -> dict[str, Any]:
         "tool_inputs_schema": context.tool_inputs_schema,
         "agent_task_workspace": context.agent_task_workspace,
         "agent_insights_path": context.agent_insights_path,
-        "agent_visualization_path": context.agent_visualization_path,
     }
 
 
