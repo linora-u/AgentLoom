@@ -47,7 +47,6 @@ def _context(tmp_path: Path, *, payload: object | None = None) -> HookContext:
         runtime_agent_path="parent/worker",
         agent_task_workspace=str(tmp_path / ".agentloom/workspaces/worker/task"),
         agent_insights_path=str(tmp_path / ".agentloom/workspaces/worker/insights.md"),
-        agent_visualization_path=str(tmp_path / ".agentloom/workspaces/parent/visualization.json"),
         hook_event_name="PreToolUse",
         tool_name="write_file",
         tool_input={"payload": payload if payload is not None else "value"},
@@ -110,7 +109,6 @@ json.dump({"decision": "modify", "modified_input": {"normalized": True}, "teleme
         "tool_inputs_schema",
         "agent_task_workspace",
         "agent_insights_path",
-        "agent_visualization_path",
     }
     assert payload == {
         "schema_version": 1,
@@ -132,9 +130,6 @@ json.dump({"decision": "modify", "modified_input": {"normalized": True}, "teleme
         "tool_inputs_schema": {"type": "object"},
         "agent_task_workspace": str(tmp_path / ".agentloom/workspaces/worker/task"),
         "agent_insights_path": str(tmp_path / ".agentloom/workspaces/worker/insights.md"),
-        "agent_visualization_path": str(
-            tmp_path / ".agentloom/workspaces/parent/visualization.json"
-        ),
     }
     assert result.telemetry["script"] == "ok"
     assert result.telemetry["shell_hook"]["hook_id"] == "test.pre"
