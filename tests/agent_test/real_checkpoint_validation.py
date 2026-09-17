@@ -102,6 +102,74 @@ def _configure_session(session_root: Path, *, existing: bool = False) -> None:
     YAML_PATH = str(ROOT / "applications" / ("architecture_acceptance_" + hashlib.sha256(str(SESSION_ROOT).encode()).hexdigest()[:12]) / "workflows/test_checkpoint_complex_supervisor.yaml")
 
 
+def _configure_completed_worker_probe() -> None:
+    """Keep the original task, adding a host-controlled pause after Worker commit."""
+    import yaml
+
+    path = Path(YAML_PATH)
+    app_root = path.parents[1]
+    shutil.copyfile(ROOT / "tests/acceptance/checkpoint_probe_tools.py", app_root / "checkpoint_probe_tools.py")
+    config = yaml.safe_load(path.read_text())
+    workflow = config["workflow"]
+    start = workflow.index("## Phase 2:")
+    end = workflow.index("## Phase 3:")
+    query = (
+        f"Build a checkpoint validation report in {WORK_DIR}. "
+        "Read items/a.txt, items/b.txt, items/c.txt, and supervisor_manifest.txt. "
+        "Create worker_progress/started.txt, worker_progress/combined.txt, and worker_report.txt. "
+        "worker_report.txt must include alpha=11, beta=22, gamma=33, manifest_status=ready, "
+        "and worker_status=complete."
+    )
+    phase = (
+        "## Phase 2: Completed Worker handoff and intentional interruption\n"
+        "Execute exactly the following TWO calls in ONE Python code block. "
+        "The host interrupts the first handoff, after the Worker has completed. "
+        "On resume, execute this entire block again with the identical Worker query. "
+        "The framework must return the completed Worker result from its checkpoint. "
+        "Do not reuse a remembered Python variable or invent the result. "
+        "Only after this block returns may you proceed to Phase 3.\n\n"
+        f"worker_result = artifact_worker(query={query!r})\n"
+        f"record_checkpoint_worker_output(workspace={str(SESSION_ROOT)!r}, output=worker_result)\n\n"
+    )
+    config["workflow"] = workflow[:start] + phase + workflow[end:]
+    config["tools"].append({"name": "record_checkpoint_worker_output", "module": f"applications.{app_root.name}.checkpoint_probe_tools",
+                            "function": "record_checkpoint_worker_output"})
+    path.write_text(yaml.safe_dump(config, allow_unicode=True, sort_keys=False))
+
+
+def _wait_for_completed_worker_interrupt_point(proc: subprocess.Popen, timeout: float = 240) -> Path:
+    started = time.monotonic()
+    while time.monotonic() - started < timeout:
+        if proc.poll() is not None:
+            raise RuntimeError(f"run exited before completed Worker handoff: {proc.returncode}")
+        task_dir = _latest_task_dir()
+        if task_dir is not None:
+            calls = _worker_calls(task_dir)
+            output_path = SESSION_ROOT / "worker_output_before.txt"
+            if (len(calls) == 1 and calls[0].get("status") == "completed"
+                    and output_path.is_file()
+                    and output_path.read_text() == _worker_final_output(_worker_ckpt(task_dir))):
+                if (WORK_DIR / "final_manifest.txt").exists():
+                    raise AssertionError("Supervisor finalized before the interruption")
+                return task_dir
+        time.sleep(0.2)
+    raise TimeoutError("timed out waiting for completed Worker handoff")
+
+
+def _worker_usage(checkpoint: dict) -> dict[str, int]:
+    fields = ("input_tokens", "output_tokens")
+    return {field: sum((step.get("token_usage") or {}).get(field, 0)
+                       for step in checkpoint.get("memory_steps", [])) for field in fields}
+
+
+def _worker_final_output(checkpoint: dict):
+    final = [step for step in checkpoint.get("memory_steps", [])
+             if step.get("_step_type") == "ActionStep" and step.get("is_final_answer") is True and step.get("error") is None]
+    if len(final) != 1 or "action_output" not in final[0]:
+        raise AssertionError("Worker checkpoint lacks one successful final ActionStep output")
+    return final[0]["action_output"]
+
+
 def _latest_task_dir() -> Path | None:
     candidates = sorted(_checkpoint_root().glob("*/task_*"))
     return candidates[-1] if candidates else None
@@ -379,9 +447,10 @@ def prepare(scenario: str) -> dict:
     started_at = datetime.now(timezone.utc).isoformat()
     proc = _start_run(log_dir / "initial.log")
     try:
-        wait = _wait_for_main_interrupt_point if scenario == "main" else _wait_for_worker_interrupt_point
+        wait = {"main": _wait_for_main_interrupt_point, "worker": _wait_for_worker_interrupt_point,
+                "completed": _wait_for_completed_worker_interrupt_point}[scenario]
         task_dir = wait(proc)
-        before_worker = _worker_ckpt(task_dir) if scenario == "worker" else None
+        before_worker = _worker_ckpt(task_dir) if scenario in {"worker", "completed"} else None
         returncode = _interrupt(proc)
     finally:
         if proc.poll() is None:
@@ -409,6 +478,17 @@ def prepare(scenario: str) -> dict:
         "baseline_revision": subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=ROOT, text=True).strip(),
         "prepared_at": datetime.now(timezone.utc).isoformat(),
     }
+    if scenario == "completed":
+        before_path = SESSION_ROOT / "worker_output_before.txt"
+        output = before_path.read_text()
+        if _worker_final_output(before_worker) != output:
+            raise AssertionError("Observed initial Worker return differs from committed final ActionStep")
+        state["completed_worker"] = {
+            "output": output, "usage": _worker_usage(before_worker),
+            "checkpoint": before_worker,
+            "call_count": len(_worker_calls(task_dir)),
+            "side_effect_counts": dict(Counter(SIDE_EFFECT_LOG.read_text().splitlines())),
+        }
     (SESSION_ROOT / "resume_state.json").write_text(json.dumps(state, indent=2) + "\n")
     return state
 
@@ -421,6 +501,8 @@ def resume_prepared(state: dict) -> dict:
         for path in current_app.rglob("*.yaml"):
             path.write_text(path.read_text().replace(str(previous_app), str(current_app)))
     task_dir = Path(state["task_dir"])
+    if state["scenario"] == "completed":
+        (SESSION_ROOT / "handoff_release").touch(exist_ok=False)
     resume_text = _resume(state["task_id"], SESSION_ROOT / "logs" / "resume.log")
     after = _event_counts(task_dir)
     new_ids = _run_ids_for_task(state["task_id"])
@@ -433,6 +515,18 @@ def resume_prepared(state: dict) -> dict:
     if state["scenario"] == "worker":
         if _worker_ckpt(task_dir).get("step_count", 0) <= state["before_worker_step"]:
             raise AssertionError("worker did not advance saved memory")
+    if state["scenario"] == "completed":
+        before = state["completed_worker"]
+        after_worker = _worker_ckpt(task_dir)
+        after_output = (SESSION_ROOT / "worker_output_after.txt").read_text()
+        if after_output != before["output"]:
+            raise AssertionError("Cached Worker output differs from its real pre-interruption return")
+        if len(calls) != before["call_count"] or after.get("worker_call_cached_result_claimed") != 1:
+            raise AssertionError("Completed Worker was not claimed exactly once from cache")
+        if after_worker != before["checkpoint"] or _worker_usage(after_worker) != before["usage"]:
+            raise AssertionError("Completed Worker checkpoint or model usage changed on replay")
+        if sum(before["usage"].values()) <= 0:
+            raise AssertionError("Completed Worker has no real model usage")
     manifests = [json.loads(path.read_text()) for path in (RUNTIME_ROOT / "runs").glob("**/manifest.json")]
     if not any(item.get("status") == "completed" for item in manifests):
         raise AssertionError("resume has no completed canonical Run manifest")
@@ -440,12 +534,14 @@ def resume_prepared(state: dict) -> dict:
             "candidate_revision": subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=ROOT, text=True).strip(),
             "ended_at": datetime.now(timezone.utc).isoformat(),
             "assertions": ["task preserved", "new run", "one Worker call", "side effects exactly once",
-                           "final artifact oracle", "old ContextRef retrieved", "file history restored"]}
+                           "final artifact oracle", "old ContextRef retrieved", "file history restored"]
+                          + (["completed Worker cached exactly once", "exact cached output", "Worker usage unchanged"]
+                             if state["scenario"] == "completed" else [])}
 
 
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--scenario", choices=["main", "worker", "all"], default="all")
+    parser.add_argument("--scenario", choices=["main", "worker", "completed", "all"], default="all")
     parser.add_argument("--workspace", type=Path, help="New evidence directory; existing directories are never deleted")
     parser.add_argument("--prepare-only", action="store_true", help="Leave interrupted material for later-version resume")
     parser.add_argument("--resume-state", type=Path, help="Resume a previously prepared state using this checkout")
@@ -457,8 +553,10 @@ def main() -> int:
         reports.append(resume_prepared(state))
     else:
         root = args.workspace or Path(tempfile.mkdtemp(prefix="agentloom-checkpoint-")) / "cases"
-        for scenario in (["main", "worker"] if args.scenario == "all" else [args.scenario]):
+        for scenario in (["main", "worker", "completed"] if args.scenario == "all" else [args.scenario]):
             _configure_session(root / scenario)
+            if scenario == "completed":
+                _configure_completed_worker_probe()
             try:
                 state = prepare(scenario)
                 reports.append(state if args.prepare_only else resume_prepared(state))
@@ -468,7 +566,13 @@ def main() -> int:
                 raise
     for report in reports:
         (Path(report["session_root"]) / "report.json").write_text(json.dumps(report, indent=2) + "\n")
-    print(json.dumps(reports, ensure_ascii=False, indent=2))
+    display = []
+    for report in reports:
+        compact = dict(report)
+        if "completed_worker" in compact:
+            compact["completed_worker"] = {key: value for key, value in compact["completed_worker"].items() if key != "checkpoint"}
+        display.append(compact)
+    print(json.dumps(display, ensure_ascii=False, indent=2))
     return 0
 
 
