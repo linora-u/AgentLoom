@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
 from datetime import UTC, datetime, timedelta
 import subprocess
@@ -290,7 +291,10 @@ def _trace_fixture(tmp_path, tamper=None, application_id="app"):
             output["test_report"] = "reports/pytest-verifier.json"
             output["verified"] = True
         started, ended = _trace_time(index * 10), _trace_time(index * 10 + 8)
-        input_hash = f"input-{index}"
+        task_input = ("task\n<inputs>\nPlease process the following call inputs in order:\n"
+                      "1. JSON result from the previous stage, with absolute workspace and unique case_nonce.: "
+                      + json.dumps(json.dumps(query)) + "\n</inputs>")
+        input_hash = hashlib.sha256(task_input.encode()).hexdigest()[:16]
         events.extend([
             {"type": "worker_call_started", "agent_name": name, "call_index": 0,
              "input_hash": input_hash, "run_id": "run-current", "started_at": started},
@@ -302,9 +306,7 @@ def _trace_fixture(tmp_path, tamper=None, application_id="app"):
         (call_dir / "checkpoint.json").write_text(json.dumps({
             "task_id": "task-current", "run_id": "run-current", "agent_name": name,
             "call_index": 0, "input_hash": input_hash, "result": json.dumps(output),
-            "status": "completed", "task_input": "task\n<inputs>\nPlease process the following call inputs in order:\n"
-            "1. JSON result from the previous stage, with absolute workspace and unique case_nonce.: "
-            + json.dumps(json.dumps(query)) + "\n</inputs>",
+            "status": "completed", "task_input": task_input,
             "memory_steps": [{"token_usage": {"input_tokens": 0 if tamper == "no_model_usage" else 10},
                               "code_action": "result = 1" if tamper == "worker_python" else None,
                               "tool_results": [{"tool_name": "final_answer", "status": "completed", "output": json.dumps(output)}]}],
@@ -322,6 +324,7 @@ def _trace_fixture(tmp_path, tamper=None, application_id="app"):
 def _trace_replace_query(checkpoint, query):
     prefix = checkpoint["task_input"].split(".: ", 1)[0] + ".: "
     checkpoint["task_input"] = prefix + json.dumps(json.dumps(query)) + "\n</inputs>"
+    checkpoint["input_hash"] = hashlib.sha256(checkpoint["task_input"].encode()).hexdigest()[:16]
 
 
 def _trace_add_call(tmp_path, checkpoints, worker, query, output, start, finish):
@@ -355,7 +358,7 @@ def _trace_add_call(tmp_path, checkpoints, worker, query, output, start, finish)
 
 @pytest.mark.parametrize("mode", ["native", "codeact"])
 @pytest.mark.parametrize("tamper", [None, "wrong_output", "future", "foreign_task", "foreign_run",
-                                  "wrong_call", "wrong_hash", "corrupt_result"])
+                                  "wrong_call", "wrong_hash", "corrupt_result", "changed_text_same_hash"])
 def test_trace_selects_actually_consumed_completed_repeat_and_rejects_invalid_sources(tmp_path, mode, tamper):
     run, checkpoints = _trace_fixture(tmp_path)
     original = json.loads((checkpoints / "workers/repository_investigator/calls/0/checkpoint.json").read_text())
@@ -367,6 +370,12 @@ def test_trace_selects_actually_consumed_completed_repeat_and_rejects_invalid_so
     planner = json.loads(planner_path.read_text())
     _trace_replace_query(planner, {**second_output, "findings": ["invented"]} if tamper == "wrong_output" else second_output)
     planner_path.write_text(json.dumps(planner))
+    events_path = checkpoints / "task_events.jsonl"
+    events = [json.loads(line) for line in events_path.read_text().splitlines()]
+    for event in events:
+        if event["agent_name"] == "change_planner":
+            event["input_hash"] = planner["input_hash"]
+    events_path.write_text("\n".join(json.dumps(row) for row in events))
     second = json.loads(second_path.read_text())
     if tamper == "foreign_task":
         foreign = checkpoints.parent / "other-task/workers/repository_investigator/calls/1/checkpoint.json"
@@ -380,6 +389,8 @@ def test_trace_selects_actually_consumed_completed_repeat_and_rejects_invalid_so
         second["input_hash"] = "different-input"
     elif tamper == "corrupt_result":
         second["result"] = json.dumps({**second_output, "findings": ["corrupt"]})
+    elif tamper == "changed_text_same_hash":
+        second["task_input"] += "\nAltered instructions with the original hash."
     if second_path.exists():
         second_path.write_text(json.dumps(second))
     result = validate_trace(tmp_path, {"case_nonce": "case-unique", "run": run, "mode": mode})
