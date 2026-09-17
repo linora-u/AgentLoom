@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+from datetime import UTC, datetime, timedelta
 import subprocess
 import sys
 from pathlib import Path
@@ -84,6 +85,11 @@ def test_invalid_config(config):
     with pytest.raises(ValueError): load_settings(config)
 def test_empty_cart():
     assert quote([]) == dict(subtotal_cents=0, discount_cents=0, shipping_cents=0, total_cents=0)
+@pytest.mark.parametrize("threshold, shipping", [(5000, 123), (0, 0)])
+def test_zero_price(threshold, shipping):
+    overrides = {"free_shipping_at": threshold, "shipping_cents": 123}
+    assert quote([{"unit_cents": 0, "quantity": 1}], overrides) == dict(subtotal_cents=0, discount_cents=0, shipping_cents=shipping, total_cents=shipping)
+    assert quote([], overrides) == dict(subtotal_cents=0, discount_cents=0, shipping_cents=0, total_cents=0)
 def test_multiple_lines():
     assert quote([{"unit_cents": 333, "quantity": 3}, {"unit_cents": 501, "quantity": 2}], {"discount_percent": 15})["total_cents"] == 2201
 '''
@@ -175,17 +181,77 @@ def test_trace_validation_does_not_accept_an_artifact_only_success(tmp_path):
     assert len(result["errors"]) >= len(WORKERS)
 
 
-@pytest.mark.parametrize("tamper", [None, "wrapped_input", "wrapped_json_text", "sibling_context", "wrapped_omission", "wrapped_alteration", "wrapped_fabrication",
-                                  "cross_run", "dropped_input", "no_model_usage", "no_python", "wrong_root_task",
-                                  "wrong_root_run", "foreign_python", "worker_python"])
-@pytest.mark.parametrize("application_id", ["app", "nested/suite/app"])
-def test_codeact_trace_checks_real_checkpoint_contract_and_independent_ids(tmp_path, tamper, application_id):
+@pytest.mark.parametrize("tamper", ["report_object", "missing_report", "absolute_report", "wrong_nonce",
+                                  "workers_type", "tests_type", "missing_test", "verdict_type",
+                                  "changed_counts", "missing_junit", "failed_run", "forged_report"])
+def test_final_report_writer_rejects_invalid_evidence_before_overwriting(workspace, tamper):
+    _complete_artifacts(workspace)
+    final = workspace / "reports/final.json"
+    before = final.read_bytes()
+    ledger = workspace.parent / "tool-ledger.jsonl"
+    ledger_before = ledger.read_bytes()
+    report = json.loads(before)
+    evidence_path = workspace / report["test_report"]
+    evidence = json.loads(evidence_path.read_text())
+    if tamper == "report_object":
+        report["test_report"] = evidence
+    elif tamper == "missing_report":
+        report["test_report"] = "reports/missing.json"
+    elif tamper == "absolute_report":
+        report["test_report"] = str(evidence_path)
+    elif tamper == "wrong_nonce":
+        report["case_nonce"] = "another-case"
+    elif tamper == "workers_type":
+        report["workers"] = "repository_investigator"
+    elif tamper == "tests_type":
+        report["generated_tests"] = [{"path": "tests/generated/test_regressions.py"}]
+    elif tamper == "missing_test":
+        report["generated_tests"] = ["tests/generated/test_missing.py"]
+    elif tamper == "verdict_type":
+        report["verified"] = "true"
+    elif tamper == "changed_counts":
+        evidence["tests"] += 1
+        evidence_path.write_text(json.dumps(evidence))
+    elif tamper == "missing_junit":
+        evidence["junit"] = "reports/missing.xml"
+        evidence_path.write_text(json.dumps(evidence))
+    elif tamper == "failed_run":
+        evidence["exit_code"] = 1
+        evidence_path.write_text(json.dumps(evidence))
+    else:
+        report["test_report"] = evidence["report"] = "reports/forged.json"
+        (workspace / evidence["report"]).write_text(json.dumps(evidence))
+    with pytest.raises(ValueError) as failure:
+        tools.write_workspace_file(str(workspace), "reports/final.json", json.dumps(report))
+    if tamper == "report_object":
+        assert "relative-path string from run_workspace_tests.report" in str(failure.value)
+    assert final.read_bytes() == before
+    assert ledger.read_bytes() == ledger_before
+
+
+def test_zero_price_regressions_and_oracle_reject_zero_subtotal_empty_cart_shortcut(workspace, tmp_path):
+    _complete_artifacts(workspace)
+    checkout = workspace / "orderdesk/service/checkout.py"
+    checkout.write_text(checkout.read_text().replace(
+        "    discount = subtotal", "    if subtotal == 0:\n        return dict(subtotal_cents=0, discount_cents=0, shipping_cents=0, total_cents=0)\n    discount = subtotal"))
+    result = validate_artifacts(workspace, tmp_path / "evidence", "case-unique")
+    oracle = json.loads((tmp_path / "evidence/oracle.json").read_text())
+    assert not result["passed"]
+    assert oracle["checks"] == 50 and any("zero_price" in item for item in oracle["failures"])
+    assert result["pytest"]["failures"] > 0
+
+
+def _trace_time(seconds):
+    return (datetime(2026, 9, 17, tzinfo=UTC) + timedelta(seconds=seconds)).isoformat()
+
+
+def _trace_fixture(tmp_path, tamper=None, application_id="app"):
     run = {"application_id": application_id, "run_id": "run-current", "task_id": "task-current",
            "manifest_path": str(tmp_path / "manifest.json")}
     (tmp_path / "manifest.json").write_text('{"status":"completed"}')
     report_dir = tmp_path / "workspace/reports"
     report_dir.mkdir(parents=True)
-    (report_dir / "final.json").write_text('{"test_report":"reports/pytest-verifier.json"}')
+    (report_dir / "final.json").write_text('{"test_report":"reports/pytest-verifier.json","verified":true}')
     checkpoints = tmp_path / "runtime/checkpoints" / application_id / "task-current"
     checkpoints.mkdir(parents=True)
     (checkpoints / "checkpoint.json").write_text(json.dumps({
@@ -201,7 +267,7 @@ def test_codeact_trace_checks_real_checkpoint_contract_and_independent_ids(tmp_p
             "task_id": "other-task", "run_id": "other-run", "memory_steps": [{"code_action": "result = 1"}]
         }))
     previous = {"workspace": str(tmp_path / "workspace"), "case_nonce": "case-unique"}
-    ledger = []
+    ledger, events = [], []
     for index, name in enumerate(WORKERS):
         query = dict(previous)
         if tamper == "dropped_input" and index == 2:
@@ -220,9 +286,22 @@ def test_codeact_trace_checks_real_checkpoint_contract_and_independent_ids(tmp_p
             if tamper == "wrapped_json_text":
                 query["preceding_result"]["data"][0] = json.dumps(query["preceding_result"]["data"][0])
         output = {**previous, "findings": [name, index]}
+        if name == "independent_verifier":
+            output["test_report"] = "reports/pytest-verifier.json"
+            output["verified"] = True
+        started, ended = _trace_time(index * 10), _trace_time(index * 10 + 8)
+        input_hash = f"input-{index}"
+        events.extend([
+            {"type": "worker_call_started", "agent_name": name, "call_index": 0,
+             "input_hash": input_hash, "run_id": "run-current", "started_at": started},
+            {"type": "worker_call_finished", "agent_name": name, "call_index": 0,
+             "input_hash": input_hash, "status": "completed", "finished_at": ended},
+        ])
         call_dir = checkpoints / f"workers/{name}/calls/0"
         call_dir.mkdir(parents=True)
         (call_dir / "checkpoint.json").write_text(json.dumps({
+            "task_id": "task-current", "run_id": "run-current", "agent_name": name,
+            "call_index": 0, "input_hash": input_hash, "result": json.dumps(output),
             "status": "completed", "task_input": "task\n<inputs>\nPlease process the following call inputs in order:\n"
             "1. JSON result from the previous stage, with absolute workspace and unique case_nonce.: "
             + json.dumps(json.dumps(query)) + "\n</inputs>",
@@ -230,12 +309,118 @@ def test_codeact_trace_checks_real_checkpoint_contract_and_independent_ids(tmp_p
                               "code_action": "result = 1" if tamper == "worker_python" else None,
                               "tool_results": [{"tool_name": "final_answer", "status": "completed", "output": json.dumps(output)}]}],
         }))
-        ledger.append({"agent_name": name, "root_run_id": "other-run" if tamper == "cross_run" else "run-current",
+        ledger.append({"at": _trace_time(index * 10 + 4), "workspace": str(tmp_path / "workspace"), "agent_name": name, "root_run_id": "other-run" if tamper == "cross_run" else "run-current",
                        "task_id": "task-current", "case_nonce": "case-unique", "local_run_id": f"local-{index}",
                        "operation": "pytest" if index >= 2 else "read", "exit_code": 0,
                        "report": "reports/pytest-verifier.json"})
         previous = output
     (tmp_path / "tool-ledger.jsonl").write_text("\n".join(json.dumps(row) for row in ledger))
+    (checkpoints / "task_events.jsonl").write_text("\n".join(json.dumps(row) for row in events))
+    return run, checkpoints
+
+
+def _trace_replace_query(checkpoint, query):
+    prefix = checkpoint["task_input"].split(".: ", 1)[0] + ".: "
+    checkpoint["task_input"] = prefix + json.dumps(json.dumps(query)) + "\n</inputs>"
+
+
+def _trace_add_call(tmp_path, checkpoints, worker, query, output, start, finish):
+    source = checkpoints / f"workers/{worker}/calls/0/checkpoint.json"
+    checkpoint = json.loads(source.read_text())
+    checkpoint.update(call_index=1, input_hash=f"{worker}-second", result=json.dumps(output))
+    checkpoint["memory_steps"][-1]["tool_results"][-1]["output"] = json.dumps(output)
+    _trace_replace_query(checkpoint, query)
+    target = source.parent.parent / "1/checkpoint.json"
+    target.parent.mkdir()
+    target.write_text(json.dumps(checkpoint))
+    event_path = checkpoints / "task_events.jsonl"
+    events = [json.loads(line) for line in event_path.read_text().splitlines()]
+    events.extend([
+        {"type": "worker_call_started", "agent_name": worker, "call_index": 1,
+         "input_hash": checkpoint["input_hash"], "run_id": "run-current", "started_at": _trace_time(start)},
+        {"type": "worker_call_finished", "agent_name": worker, "call_index": 1,
+         "input_hash": checkpoint["input_hash"], "status": "completed", "finished_at": _trace_time(finish)},
+    ])
+    events.sort(key=lambda row: row.get("started_at") or row["finished_at"])
+    event_path.write_text("\n".join(json.dumps(row) for row in events))
+    ledger_path = tmp_path / "tool-ledger.jsonl"
+    ledger = [json.loads(line) for line in ledger_path.read_text().splitlines()]
+    row = dict(next(row for row in ledger if row["agent_name"] == worker))
+    row.update(at=_trace_time((start + finish) / 2), local_run_id=f"local-{worker}-second",
+               report=output.get("test_report"))
+    ledger.append(row)
+    ledger_path.write_text("\n".join(json.dumps(row) for row in ledger))
+    return target
+
+
+@pytest.mark.parametrize("mode", ["native", "codeact"])
+@pytest.mark.parametrize("tamper", [None, "wrong_output", "future", "foreign_task", "foreign_run",
+                                  "wrong_call", "wrong_hash", "corrupt_result"])
+def test_trace_selects_actually_consumed_completed_repeat_and_rejects_invalid_sources(tmp_path, mode, tamper):
+    run, checkpoints = _trace_fixture(tmp_path)
+    original = json.loads((checkpoints / "workers/repository_investigator/calls/0/checkpoint.json").read_text())
+    second_output = {**json.loads(original["result"]), "findings": ["second investigation", 9]}
+    second_path = _trace_add_call(tmp_path, checkpoints, "repository_investigator",
+                                  {"workspace": str(tmp_path / "workspace"), "case_nonce": "case-unique"},
+                                  second_output, 8.2, 12 if tamper == "future" else 9.8)
+    planner_path = checkpoints / "workers/change_planner/calls/0/checkpoint.json"
+    planner = json.loads(planner_path.read_text())
+    _trace_replace_query(planner, {**second_output, "findings": ["invented"]} if tamper == "wrong_output" else second_output)
+    planner_path.write_text(json.dumps(planner))
+    second = json.loads(second_path.read_text())
+    if tamper == "foreign_task":
+        foreign = checkpoints.parent / "other-task/workers/repository_investigator/calls/1/checkpoint.json"
+        foreign.parent.mkdir(parents=True)
+        second_path.rename(foreign)
+    elif tamper == "foreign_run":
+        second["run_id"] = "another-run"
+    elif tamper == "wrong_call":
+        second["call_index"] = 3
+    elif tamper == "wrong_hash":
+        second["input_hash"] = "different-input"
+    elif tamper == "corrupt_result":
+        second["result"] = json.dumps({**second_output, "findings": ["corrupt"]})
+    if second_path.exists():
+        second_path.write_text(json.dumps(second))
+    result = validate_trace(tmp_path, {"case_nonce": "case-unique", "run": run, "mode": mode})
+    assert result["passed"] is (tamper is None), result["errors"]
+    if tamper is None:
+        assert result["transfers"][0]["from_call_index"] == 1
+        assert result["transfers"][0]["to_call_index"] == 0
+
+
+@pytest.mark.parametrize("mode", ["native", "codeact"])
+@pytest.mark.parametrize("tamper", [None, "future_repair", "unrelated_final_report", "stale_final_report", "false_verdict"])
+def test_trace_preserves_corrective_repair_loop_and_binds_final_verifier(tmp_path, mode, tamper):
+    run, checkpoints = _trace_fixture(tmp_path)
+    first_verifier_path = checkpoints / "workers/independent_verifier/calls/0/checkpoint.json"
+    first = json.loads(first_verifier_path.read_text())
+    verdict = {**json.loads(first["result"]), "verified": False, "findings": ["missing regression"]}
+    first["result"] = json.dumps(verdict)
+    first["memory_steps"][-1]["tool_results"][-1]["output"] = first["result"]
+    first_verifier_path.write_text(json.dumps(first))
+    repair = {"workspace": str(tmp_path / "workspace"), "case_nonce": "case-unique", "summary": "corrected regression"}
+    _trace_add_call(tmp_path, checkpoints, "repair_implementer", verdict, repair, 40, 52 if tamper == "future_repair" else 48)
+    final = {**repair, "verified": tamper != "false_verdict", "test_report": "reports/pytest-verifier-second.json"}
+    _trace_add_call(tmp_path, checkpoints, "independent_verifier", repair, final, 50, 58)
+    (tmp_path / "workspace/reports/final.json").write_text(json.dumps({
+        "verified": True,
+        "test_report": ("reports/unrelated.json" if tamper == "unrelated_final_report" else
+                        "reports/pytest-verifier.json" if tamper == "stale_final_report" else final["test_report"])}))
+    result = validate_trace(tmp_path, {"case_nonce": "case-unique", "run": run, "mode": mode})
+    assert result["passed"] is (tamper is None), result["errors"]
+    if tamper is None:
+        assert len(result["transfers"]) == 3 and len(result["corrective_transfers"]) == 1
+        assert result["transfers"][-1]["from_call_index"] == result["transfers"][-1]["to_call_index"] == 1
+        assert result["corrective_transfers"][0]["from"] == "independent_verifier"
+
+
+@pytest.mark.parametrize("tamper", [None, "wrapped_input", "wrapped_json_text", "sibling_context", "wrapped_omission", "wrapped_alteration", "wrapped_fabrication",
+                                  "cross_run", "dropped_input", "no_model_usage", "no_python", "wrong_root_task",
+                                  "wrong_root_run", "foreign_python", "worker_python"])
+@pytest.mark.parametrize("application_id", ["app", "nested/suite/app"])
+def test_codeact_trace_checks_real_checkpoint_contract_and_independent_ids(tmp_path, tamper, application_id):
+    run, checkpoints = _trace_fixture(tmp_path, tamper, application_id)
     result = validate_trace(tmp_path, {"case_nonce": "case-unique", "run": run, "mode": "codeact"})
     assert result["passed"] is (tamper in {None, "wrapped_input", "wrapped_json_text", "sibling_context"}), result["errors"]
     if result["passed"]:
