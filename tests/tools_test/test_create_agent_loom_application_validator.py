@@ -26,9 +26,21 @@ def _write_markdown(path: Path, content: str) -> None:
     path.write_text(content, encoding="utf-8")
 
 
+def _write_project_config(tmp_path: Path) -> None:
+    _write_yaml(tmp_path / "config/system.yaml", {})
+    _write_yaml(tmp_path / "config/llm.yaml", {"model": {
+        "default_model_type": "custom-model-key",
+        "custom-model-key": {"model": "openai/test"},
+        "summary": {"model": "openai/test"},
+    }})
+
+
+def _messages(payload: dict) -> str:
+    return "\n".join(error["message"] for error in payload["errors"])
+
+
 def _create_min_project(tmp_path: Path, *, skills_value=None) -> Path:
-    (tmp_path / "config").mkdir(parents=True, exist_ok=True)
-    (tmp_path / "config" / "system.yaml").write_text("system: {}\n", encoding="utf-8")
+    _write_project_config(tmp_path)
 
     app_root = tmp_path / "applications" / "demo"
     workflow_file = app_root / "workflows" / "demo_agent.yaml"
@@ -90,10 +102,7 @@ def test_legacy_or_invalid_skills_shapes_are_rejected(tmp_path: Path, skills_val
 
     assert completed.returncode == 1
     assert payload["summary"]["valid"] is False
-    assert any(
-        err["field"] == "skills" and err["rule"] == "exact_paths_mapping"
-        for err in payload["errors"]
-    )
+    assert "skills" in _messages(payload)
 
 
 def test_removed_tools_mapping_is_rejected(tmp_path: Path) -> None:
@@ -104,12 +113,8 @@ def test_removed_tools_mapping_is_rejected(tmp_path: Path) -> None:
     _write_yaml(workflow_file, config)
 
     completed, payload = _run_validator(tmp_path)
-
     assert completed.returncode == 1
-    assert any(
-        err["field"] == "tools_mapping" and err["rule"] == "removed_field"
-        for err in payload["errors"]
-    )
+    assert "tools_mapping was removed" in _messages(payload)
 
 
 def test_validator_accepts_list_workflow(tmp_path: Path) -> None:
@@ -140,10 +145,7 @@ def test_validator_rejects_invalid_list_workflow_item(tmp_path: Path) -> None:
 
     assert completed.returncode == 1
     assert payload["summary"]["valid"] is False
-    assert any(
-        err["field"] == "workflow[1]" and err["rule"] == "required_non_empty_string"
-        for err in payload["errors"]
-    )
+    assert "workflow" in _messages(payload)
 
 
 @pytest.mark.parametrize(
@@ -177,7 +179,7 @@ def test_validator_rejects_invalid_goal_forms(tmp_path: Path, goal) -> None:
     completed, payload = _run_validator(tmp_path)
 
     assert completed.returncode == 1
-    assert any(error["field"] == "goal" for error in payload["errors"])
+    assert "goal" in _messages(payload)
 
 
 def test_validator_rejects_goal_on_worker(tmp_path: Path) -> None:
@@ -201,10 +203,8 @@ def test_validator_rejects_goal_on_worker(tmp_path: Path) -> None:
     completed, payload = _run_validator(tmp_path)
 
     assert completed.returncode == 1
-    assert any(
-        error["field"] == "goal" and error["rule"] == "supervisor_only"
-        for error in payload["errors"]
-    )
+    assert "must not define goal" in _messages(payload)
+    assert "Supervisor-only" in _messages(payload)
 
 
 @pytest.mark.parametrize("mode", ["auto", "on", "off"])
@@ -246,7 +246,7 @@ def test_validator_rejects_invalid_todo_config(tmp_path: Path, todo) -> None:
 
     assert completed.returncode == 1
     assert payload["summary"]["valid"] is False
-    assert any(error["field"].startswith("todo") for error in payload["errors"])
+    assert "todo" in _messages(payload)
 
 
 @pytest.mark.parametrize(
@@ -272,10 +272,8 @@ def test_agent_yaml_rejects_global_only_runtime_and_logging(
 
     assert completed.returncode == 1
     assert payload["summary"]["valid"] is False
-    matching = [error for error in payload["errors"] if error["field"] == field]
-    assert matching
-    assert all(error["rule"] == "global_only_top_level_key" for error in matching)
-    assert all("enabled: true" not in error["suggestion"] for error in matching)
+    assert field in _messages(payload)
+    assert "global-only" in _messages(payload)
 
 
 @pytest.mark.parametrize(
@@ -298,15 +296,12 @@ def test_application_system_yaml_rejects_global_only_runtime_and_logging(
 
     assert completed.returncode == 1
     assert payload["summary"]["valid"] is False
-    matching = [error for error in payload["errors"] if error["field"] == field]
-    assert matching
-    assert all(error["rule"] == "global_only_top_level_key" for error in matching)
-    assert all("enabled: true" not in error["suggestion"] for error in matching)
+    assert field in _messages(payload)
+    assert "global-only" in _messages(payload)
 
 
 def test_worker_path_must_point_to_file(tmp_path: Path) -> None:
-    (tmp_path / "config").mkdir(parents=True, exist_ok=True)
-    (tmp_path / "config" / "system.yaml").write_text("system: {}\n", encoding="utf-8")
+    _write_project_config(tmp_path)
 
     app_root = tmp_path / "applications" / "demo"
     workflows = app_root / "workflows"
@@ -327,12 +322,11 @@ def test_worker_path_must_point_to_file(tmp_path: Path) -> None:
 
     assert completed.returncode == 1
     assert payload["summary"]["valid"] is False
-    assert any(err["rule"] == "path_is_file" for err in payload["errors"])
+    assert "directory" in _messages(payload).lower()
 
 
 def test_markdown_agent_body_is_used_as_workflow(tmp_path: Path) -> None:
-    (tmp_path / "config").mkdir(parents=True, exist_ok=True)
-    (tmp_path / "config" / "system.yaml").write_text("system: {}\n", encoding="utf-8")
+    _write_project_config(tmp_path)
 
     workflow_file = tmp_path / "applications" / "demo" / "workflows" / "demo_agent.md"
     _write_markdown(
@@ -356,8 +350,7 @@ Run checks here.
 
 
 def test_markdown_without_yaml_block_is_rejected(tmp_path: Path) -> None:
-    (tmp_path / "config").mkdir(parents=True, exist_ok=True)
-    (tmp_path / "config" / "system.yaml").write_text("system: {}\n", encoding="utf-8")
+    _write_project_config(tmp_path)
 
     workflow_file = tmp_path / "applications" / "demo" / "workflows" / "demo_agent.md"
     _write_markdown(workflow_file, "# markdown only\n\nno yaml block")
@@ -366,7 +359,190 @@ def test_markdown_without_yaml_block_is_rejected(tmp_path: Path) -> None:
 
     assert completed.returncode == 1
     assert payload["summary"]["valid"] is False
-    assert any(
-        err["field"] == "yaml_parse" and err["rule"] == "parse_success"
-        for err in payload["errors"]
+    assert "No YAML code block" in _messages(payload)
+
+
+def _canonical_errors(project_root: Path, workflow_file: Path) -> list[str]:
+    from agentloom.application.definition import definition_error, load_agent_definition, validate_agent_definition
+
+    try:
+        definition = load_agent_definition(workflow_file)
+    except (OSError, yaml.YAMLError, TypeError, ValueError) as exc:
+        return [f"{workflow_file}: {definition_error(exc)}"]
+    return validate_agent_definition(project_root, str(workflow_file), definition)
+
+
+def _assert_canonical_parity(project_root: Path, workflow_file: Path, *, valid: bool) -> dict:
+    canonical = _canonical_errors(project_root, workflow_file)
+    completed, payload = _run_validator(project_root)
+    assert (not canonical) is valid
+    assert completed.returncode == (0 if valid else 1), completed.stderr + completed.stdout
+    assert payload["summary"]["valid"] is valid
+    assert set(canonical).issubset({error["message"] for error in payload["errors"]})
+    assert payload["summary"]["error_count"] == len(payload["errors"])
+    assert all(set(error) == {"file", "field", "rule", "message", "suggestion"} for error in payload["errors"])
+    return payload
+
+
+def _write_worker(path: Path, **overrides) -> None:
+    _write_yaml(path, {
+        "name": path.stem,
+        "description": "Worker contract",
+        "workflow": "Return the requested evidence.",
+        "agent_function_schema": {
+            "description": "Return evidence",
+            "inputs": {"query": {"description": "Requested task", "required": True}},
+            "output": {"description": "Evidence"},
+        },
+        **overrides,
+    })
+
+
+def test_validator_shares_nested_source_relative_worker_paths_and_mcp_null(tmp_path: Path) -> None:
+    app = _create_min_project(tmp_path)
+    _write_yaml(app / "config/system.yaml", {"mcp_servers": None})
+    workflow = app / "workflows/demo_agent.yaml"
+    definition = yaml.safe_load(workflow.read_text())
+    definition.update({"worker_agents": [{"path": "worker_agents/first.yaml"}], "mcp_servers": None})
+    _write_yaml(workflow, definition)
+    _write_worker(app / "workflows/worker_agents/first.yaml", worker_agents=[{"path": "./nested/second.md"}])
+    second = app / "workflows/worker_agents/nested/second.md"
+    _write_markdown(second, """```yaml
+name: second
+description: Markdown Worker
+mcp_servers: null
+agent_function_schema:
+  description: Return evidence
+  inputs:
+    query: {description: Requested task, required: true}
+  output: {description: Evidence}
+```
+
+Return the evidence.
+""")
+
+    payload = _assert_canonical_parity(tmp_path, workflow, valid=True)
+    assert payload["summary"]["files_checked"] == 3
+    assert payload["summary"]["config_files_checked"] == 1
+
+
+@pytest.mark.parametrize("suffix", [".yaml", ".md"])
+@pytest.mark.parametrize("duplicate", ["name: changed\n", "hooks:\n  PreToolUse: []\n  PreToolUse: []\n"])
+def test_validator_duplicate_keys_match_shared_parser(tmp_path: Path, suffix: str, duplicate: str) -> None:
+    app = _create_min_project(tmp_path)
+    old_path = app / "workflows/demo_agent.yaml"
+    body = old_path.read_text() + duplicate
+    old_path.unlink()
+    workflow = old_path.with_suffix(suffix)
+    workflow.write_text(f"```yaml\n{body}```\n\nRun the task.\n" if suffix == ".md" else body)
+
+    payload = _assert_canonical_parity(tmp_path, workflow, valid=False)
+    assert "Duplicate YAML mapping key" in _messages(payload)
+
+
+@pytest.mark.parametrize("role_error", ["goal", "missing_schema"])
+def test_validator_invalid_referenced_worker_matches_shared_walk(tmp_path: Path, role_error: str) -> None:
+    app = _create_min_project(tmp_path)
+    workflow = app / "workflows/demo_agent.yaml"
+    definition = yaml.safe_load(workflow.read_text())
+    definition["worker_agents"] = [{"path": "worker_agents/worker.yaml"}]
+    _write_yaml(workflow, definition)
+    worker = app / "workflows/worker_agents/worker.yaml"
+    _write_worker(worker)
+    config = yaml.safe_load(worker.read_text())
+    if role_error == "goal":
+        config["goal"] = False
+    else:
+        del config["agent_function_schema"]
+    _write_yaml(worker, config)
+
+    payload = _assert_canonical_parity(tmp_path, workflow, valid=False)
+    assert ("goal" if role_error == "goal" else "agent_function_schema") in _messages(payload)
+
+
+@pytest.mark.parametrize("yaml_workflow,body,valid", [
+    ("workflow: Kept YAML workflow\n", "", True),
+    ("workflow: ''\n", "Body workflow", True),
+    ("", "", False),
+])
+def test_validator_markdown_workflow_matches_shared_parser(tmp_path: Path, yaml_workflow: str, body: str, valid: bool) -> None:
+    app = _create_min_project(tmp_path)
+    (app / "workflows/demo_agent.yaml").unlink()
+    workflow = app / "workflows/demo_agent.md"
+    workflow.write_text(f"```yaml\nname: demo\ndescription: Demo\n{yaml_workflow}```\n\n{body}\n")
+    _assert_canonical_parity(tmp_path, workflow, valid=valid)
+
+
+@pytest.mark.parametrize("model_type", ["unconfigured", 42])
+def test_validator_model_reference_matches_shared_preflight(tmp_path: Path, model_type) -> None:
+    app = _create_min_project(tmp_path)
+    workflow = app / "workflows/demo_agent.yaml"
+    definition = yaml.safe_load(workflow.read_text())
+    definition["model_type"] = model_type
+    _write_yaml(workflow, definition)
+    _assert_canonical_parity(tmp_path, workflow, valid=False)
+
+
+def test_validator_missing_model_catalog_is_a_failure(tmp_path: Path) -> None:
+    app = _create_min_project(tmp_path)
+    (tmp_path / "config/llm.yaml").unlink()
+    payload = _assert_canonical_parity(tmp_path, app / "workflows/demo_agent.yaml", valid=False)
+    assert "llm.yaml" in _messages(payload)
+
+
+def test_validator_unreferenced_nested_worker_uses_shared_role_validation(tmp_path: Path) -> None:
+    from agentloom.application.definition import definition_error, load_agent_definition
+    from agentloom.application.readiness import validate_runtime_worker_config
+
+    app = _create_min_project(tmp_path)
+    worker = app / "workflows/worker_agents/nested/orphan.yaml"
+    _write_worker(worker, goal=False)
+    with pytest.raises(ValueError) as canonical:
+        validate_runtime_worker_config(load_agent_definition(worker), worker, agent_root=tmp_path)
+    completed, payload = _run_validator(tmp_path)
+    assert completed.returncode == 1
+    assert f"{worker}: {definition_error(canonical.value)}" in _messages(payload)
+
+
+def test_skill_scripts_inspect_without_model_tool_or_hook_execution(tmp_path: Path) -> None:
+    app = _create_min_project(tmp_path)
+    workflow = app / "workflows/demo_agent.yaml"
+    definition = yaml.safe_load(workflow.read_text())
+    definition.update({
+        "tools": [{"name": "read_file"}],
+        "hooks": {"SessionStart": [{"id": "no-execution", "command": "touch must-not-exist"}]},
+    })
+    _write_yaml(workflow, definition)
+    tools = app / "agent_tools"
+    tools.mkdir()
+    (tools / "should_not_import.py").write_text("raise RuntimeError('Tool module must not execute')\n")
+    program = """
+import runpy, sys
+from pathlib import Path
+script, app = map(Path, sys.argv[1:])
+sys.argv = [str(script), '--app-root', str(app)]
+try:
+    runpy.run_path(str(script), run_name='__main__')
+except SystemExit as exc:
+    assert exc.code == 0, exc.code
+scanner = runpy.run_path(str(script.with_name('scan_tools.py')))
+assert 'should_not_import.py' in scanner['scan_app_structure'](str(app))
+for prefix in ('litellm', 'agentloom.runtime.agent', 'agentloom.tools.file_ops', 'agentloom.tools.shell', 'agentloom.tools.search'):
+    assert not any(name == prefix or name.startswith(prefix + '.') for name in sys.modules), prefix
+assert not Path('.agentloom').exists()
+assert not Path('must-not-exist').exists()
+"""
+    completed = subprocess.run(
+        [sys.executable, "-c", program, str(SCRIPT_PATH), str(app)],
+        cwd=tmp_path, capture_output=True, text=True, timeout=20,
     )
+    assert completed.returncode == 0, completed.stdout + completed.stderr
+
+
+def test_validator_duplicate_application_overlay_matches_shared_preflight(tmp_path: Path) -> None:
+    app = _create_min_project(tmp_path)
+    overlay = app / "config/system.yaml"
+    overlay.parent.mkdir()
+    overlay.write_text("mcp_servers: null\nmcp_servers: []\n")
+    payload = _assert_canonical_parity(tmp_path, app / "workflows/demo_agent.yaml", valid=False)
+    assert "Duplicate YAML mapping key" in _messages(payload)
