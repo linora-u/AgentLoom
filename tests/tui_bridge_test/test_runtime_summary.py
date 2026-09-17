@@ -26,7 +26,7 @@ def _project(tmp_path: Path) -> TuiBridge:
     )
     _write(
         tmp_path / "config/llm.yaml",
-        "model:\n  default_model_type: test\n  test:\n    model: openai/test\n",
+        "model:\n  summary:\n    model: openai/test-summary\n  default_model_type: test\n  test:\n    model: openai/test\n",
     )
     _write(
         tmp_path / SYSTEM_ID,

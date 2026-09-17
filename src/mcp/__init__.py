@@ -16,10 +16,18 @@ Public API
 from src.mcp.config import (
     McpServerConfig,
     McpSettings,
-    parse_mcp_yaml_value,
     merge_mcp_configs,
+    parse_mcp_yaml_value,
 )
-from src.mcp.manager import McpManager
+
+
+def __getattr__(name):
+    if name == "McpManager":
+        from src.mcp.manager import McpManager
+        globals()[name] = McpManager
+        return McpManager
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
+
 
 __all__ = [
     "McpServerConfig",

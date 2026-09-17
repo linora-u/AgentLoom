@@ -28,7 +28,10 @@ def _construct_unique_mapping(
             display_key = loader.construct_object(key_node, deep=deep)
             identity = ("key", display_key)
         if identity in seen:
-            raise ValueError(f"Duplicate YAML mapping key: {display_key!r}")
+            raise ValueError(
+                f"Duplicate YAML mapping key: {display_key!r} "
+                f"at line {key_node.start_mark.line + 1}, column {key_node.start_mark.column + 1}"
+            )
         seen.add(identity)
 
     loader.flatten_mapping(node)
