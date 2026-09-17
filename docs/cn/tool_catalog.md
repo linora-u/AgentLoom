@@ -13,9 +13,9 @@ AgentLoom 将内置工具的 metadata 与 Python implementation 加载彻底分�
 | `src/tools/tool_meta.py` | 合并全局与 Agent override 后的有效 metadata | 转发 catalog interface 或加载 implementation |
 | `src/tools/<group>/` | 具体工具 implementation | 内置 catalog 归属 |
 
-`src.tools` 根包有意不导出任何内容。导入根包既不会注册工具，也不会加载
-工具。Runtime 通过 `src.tools.loader` 解析已注册内置工具；只需要 metadata 的
-代码直接依赖 `src.tools.catalog`；只测试某个具体 implementation 时，可以直接
+`agentloom.tools` 根包有意不导出任何内容。导入根包既不会注册工具，也不会加载
+工具。Runtime 通过 `agentloom.tools.loader` 解析已注册内置工具；只需要 metadata 的
+代码直接依赖 `agentloom.tools.catalog`；只测试某个具体 implementation 时，可以直接
 导入对应工具组。
 
 implementation group 的 `__init__.py` 兼容导出必须保持 lazy：只有真正请求某个

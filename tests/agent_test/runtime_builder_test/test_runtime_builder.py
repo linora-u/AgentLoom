@@ -10,17 +10,17 @@ from unittest.mock import MagicMock
 import pytest
 import yaml
 
-import src.lib.smolagents.agent.base_agent as base_agent_module
-import src.lib.smolagents.agent.invocation as invocation_module
-import src.lib.smolagents.prompts.prompt_builder as prompt_builder_module
-from src.extensions.self_learning.persistence.review_engine import ReviewEngine
-from src.lib.logging import get_global_logger, set_global_logger
-from src.lib.smolagents.agent.loom_mixin import LoomAgentMixin
-from src.lib.smolagents.hooks import HookEvent, HookHandler, HookPlan, HookResult, HookRun
-from src.lib.smolagents.hooks.tool_shim import inject_hooks
-from src.lib.smolagents.skills.catalog import SkillCatalog
-from src.lib.smolagents.tools.tools import tool
-from src.trace import (
+import agentloom.runtime.agent as base_agent_module
+import agentloom.runtime.invocation as invocation_module
+import agentloom.runtime.prompts.prompt_builder as prompt_builder_module
+from agentloom.self_learning.persistence.review_engine import ReviewEngine
+from agentloom.runtime.logging import get_global_logger, set_global_logger
+from agentloom.runtime.loom_mixin import LoomAgentMixin
+from agentloom.runtime.hooks import HookEvent, HookHandler, HookPlan, HookResult, HookRun
+from agentloom.adapters.smolagents.tool_shim import inject_hooks
+from agentloom.runtime.skills.catalog import SkillCatalog
+from agentloom.adapters.smolagents.tools.tools import tool
+from agentloom.runtime.trace import (
     bind_explicit_execution_context,
     capture_explicit_execution_context,
     clear_current_hook_run,
@@ -215,8 +215,8 @@ def test_standalone_checkpoint_failure_still_deactivates_coordinator(
     tmp_path,
     monkeypatch,
 ):
-    from src.lib.checkpoint import CheckpointManager
-    from src.lib.checkpoint.coordinator import CheckpointCoordinator
+    from agentloom.runtime.checkpoint import CheckpointManager
+    from agentloom.runtime.checkpoint.coordinator import CheckpointCoordinator
 
     agent = _make_agent(logger=DummyLoggerBackend())
     runtime = DummyRuntimeRunner("reported-result")
@@ -242,7 +242,7 @@ def test_standalone_checkpoint_failure_still_deactivates_coordinator(
 
 
 def test_standalone_base_exception_is_persisted_as_failure(tmp_path, monkeypatch):
-    from src.lib.checkpoint import CheckpointManager
+    from agentloom.runtime.checkpoint import CheckpointManager
 
     agent = _make_agent(logger=DummyLoggerBackend())
     runtime = DummyRuntimeRunner()
@@ -270,7 +270,7 @@ def test_standalone_base_exception_is_persisted_as_failure(tmp_path, monkeypatch
 
 
 def test_manual_review_policy_never_enters_run_end_reviewer(monkeypatch):
-    from src.extensions.self_learning import reviewer
+    from agentloom.self_learning import reviewer
 
     agent = DummyAgent(
         config={
@@ -356,7 +356,7 @@ def test_create_agent_uses_global_logger_when_not_provided(monkeypatch):
 
 def test_create_agent_requires_global_logger(monkeypatch):
     """Standalone construction can explicitly initialize a console backend."""
-    from src.lib.logging import initialize_global_logger_once
+    from agentloom.runtime.logging import initialize_global_logger_once
 
     _patch_agent_classes(monkeypatch)
     previous_global_logger = get_global_logger(create_if_missing=False)
@@ -629,7 +629,7 @@ def test_base_run_emits_task_complete_on_success(monkeypatch):
 
 
 def test_base_run_binds_root_before_memory_snapshot_and_only_owner_emits_session(monkeypatch):
-    from src.trace import bind_root_run, get_current_session_run_id, require_root_run_id
+    from agentloom.runtime.trace import bind_root_run, get_current_session_run_id, require_root_run_id
 
     agent = _make_agent(logger=DummyLoggerBackend())
     runtime_agent = DummyRuntimeRunner(result="ok")
@@ -676,8 +676,8 @@ def test_base_run_binds_root_before_memory_snapshot_and_only_owner_emits_session
 
 
 def test_main_agent_and_worker_inject_the_same_frozen_root_memory_snapshot() -> None:
-    from src.extensions.self_learning.persistence.memory_store import MemoryStore
-    from src.trace import bind_root_run
+    from agentloom.self_learning.persistence.memory_store import MemoryStore
+    from agentloom.runtime.trace import bind_root_run
 
     config = {
         "application_id": "runtime_snapshot_app",
@@ -716,11 +716,11 @@ def test_main_agent_and_worker_inject_the_same_frozen_root_memory_snapshot() -> 
 def test_failed_initial_memory_store_open_freezes_empty_for_workers(
     monkeypatch,
 ) -> None:
-    from src.extensions.self_learning.persistence import (
+    from agentloom.self_learning.persistence import (
         memory_store as memory_store_module,
     )
-    from src.extensions.self_learning.persistence.memory_store import MemoryStore
-    from src.trace import bind_root_run
+    from agentloom.self_learning.persistence.memory_store import MemoryStore
+    from agentloom.runtime.trace import bind_root_run
 
     config = {
         "application_id": "runtime_snapshot_failure_app",
@@ -751,7 +751,7 @@ def test_failed_initial_memory_store_open_freezes_empty_for_workers(
 
 
 def test_base_run_uses_runner_supplied_run_id_for_root_lifecycle(monkeypatch):
-    from src.trace import capture_explicit_execution_context
+    from agentloom.runtime.trace import capture_explicit_execution_context
 
     agent = _make_agent(logger=DummyLoggerBackend())
     runtime_agent = DummyRuntimeRunner(result="ok")
@@ -770,7 +770,7 @@ def test_base_run_uses_runner_supplied_run_id_for_root_lifecycle(monkeypatch):
 
 
 def test_base_run_releases_owned_root_after_failure(monkeypatch):
-    from src.trace import get_current_session_run_id, require_root_run_id
+    from agentloom.runtime.trace import get_current_session_run_id, require_root_run_id
 
     agent = _make_agent(logger=DummyLoggerBackend())
     runtime_agent = DummyRuntimeRunner(exc=RuntimeError("boom-root"))
@@ -791,8 +791,8 @@ def test_base_run_releases_owned_root_after_failure(monkeypatch):
 
 
 def test_root_memory_review_runs_after_session_end_inside_owned_root(monkeypatch):
-    from src.extensions.self_learning import reviewer
-    from src.trace import bind_root_run, require_root_run_id
+    from agentloom.self_learning import reviewer
+    from agentloom.runtime.trace import bind_root_run, require_root_run_id
 
     agent = _make_review_agent(logger=DummyLoggerBackend())
     runtime_agent = DummyRuntimeRunner(result="ok")
@@ -829,7 +829,7 @@ def test_root_memory_review_runs_after_session_end_inside_owned_root(monkeypatch
 
 
 def test_memory_review_failure_does_not_change_root_run_result(monkeypatch):
-    from src.extensions.self_learning import reviewer
+    from agentloom.self_learning import reviewer
 
     agent = _make_review_agent(logger=DummyLoggerBackend())
     runtime_agent = DummyRuntimeRunner(result="main-result")
@@ -854,7 +854,7 @@ def test_memory_review_failure_does_not_change_root_run_result(monkeypatch):
 
 
 def test_disabled_self_learning_never_enters_completed_run_review(monkeypatch):
-    from src.extensions.self_learning import reviewer
+    from agentloom.self_learning import reviewer
 
     agent = DummyAgent(
         config={
@@ -882,7 +882,7 @@ def test_disabled_self_learning_never_enters_completed_run_review(monkeypatch):
 
 
 def test_failed_root_records_session_end_without_running_memory_review(monkeypatch):
-    from src.extensions.self_learning import reviewer
+    from agentloom.self_learning import reviewer
 
     agent = _make_agent(logger=DummyLoggerBackend())
     runtime_agent = DummyRuntimeRunner(exc=RuntimeError("main failed"))
@@ -909,7 +909,7 @@ def test_failed_root_records_session_end_without_running_memory_review(monkeypat
 
 
 def test_max_steps_root_is_a_failure_and_never_runs_memory_review(monkeypatch):
-    from src.extensions.self_learning import reviewer
+    from agentloom.self_learning import reviewer
 
     class MaxStepsResult:
         state = "max_steps_error"
@@ -949,8 +949,8 @@ def test_max_steps_root_is_a_failure_and_never_runs_memory_review(monkeypatch):
 def test_max_steps_worker_is_failed_before_checkpoint_success(tmp_path, monkeypatch):
     from smolagents import RunResult
 
-    from src.lib.checkpoint import CheckpointManager
-    from src.lib.checkpoint.coordinator import CheckpointCoordinator
+    from agentloom.runtime.checkpoint import CheckpointManager
+    from agentloom.runtime.checkpoint.coordinator import CheckpointCoordinator
 
     class MaxStepsWorkerRuntime:
         def __init__(self):
@@ -1000,14 +1000,155 @@ def test_max_steps_worker_is_failed_before_checkpoint_success(tmp_path, monkeypa
     assert checkpoint["status"] == "failed"
 
 
+def test_shipped_checkpoint_worker_call_preserves_literal_input_across_executor_recreation(tmp_path):
+    import ast
+
+    from smolagents import LocalPythonExecutor
+
+    from agentloom.application.definition import load_agent_definition
+
+    root = Path(__file__).resolve().parents[3]
+    source = root / "applications/test_demo/workflows/test_checkpoint_complex_supervisor.yaml"
+    workflow = load_agent_definition(source)["workflow"]
+    workflow = workflow.replace("/tmp/agentloom_ckpt_complex", str(tmp_path / "work space"))
+    phase = workflow.split("## Phase 2:", 1)[1].split("## Phase 3:", 1)[0]
+    lines = [line.strip() for line in phase.splitlines() if line.strip().startswith("worker_result =")]
+    assert len(lines) == 1
+    statement = ast.parse(lines[0]).body[0]
+    assert isinstance(statement, ast.Assign) and isinstance(statement.value, ast.Call)
+    assert statement.value.func.id == "artifact_worker"
+    assert len(statement.value.keywords) == 1 and statement.value.keywords[0].arg == "query"
+    literal = ast.literal_eval(statement.value.keywords[0].value)
+    assert isinstance(literal, str) and "\n" not in literal
+    assert str(tmp_path / "work space") in literal
+    inputs = []
+
+    def capture_worker(query):
+        inputs.append(query)
+        return "worker-result"
+
+    for _attempt in range(2):
+        executor = LocalPythonExecutor([])
+        executor.send_tools({"artifact_worker": capture_worker})
+        executor(lines[0])
+    assert inputs == [literal, literal]
+    input_hash = base_agent_module.SubTaskTrackedAgent._compute_input_hash
+    assert input_hash(inputs[0]) == input_hash(inputs[1])
+    # Resume identity remains exact; the Application owns stable query text.
+    assert input_hash(literal.replace(". Read", ".\nRead", 1)) != input_hash(literal)
+
+
+def test_shipped_checkpoint_supervisor_budget_reaches_real_local_executor(monkeypatch):
+    from smolagents import AgentLogger, LocalPythonExecutor
+
+    from agentloom.application.definition import load_agent_definition, prepare_application_definition
+    from agentloom.configuration.config import UnifiedConfig, bind_config
+    from agentloom.configuration.llm_config import LLMConfig
+    from agentloom.runtime.factory import YamlConfiguredSupervisorAgent
+
+    root = Path(__file__).resolve().parents[3]
+    source = root / "applications/test_demo/workflows/test_checkpoint_complex_supervisor.yaml"
+    base = UnifiedConfig(
+        {"execution_env": {"type": "local", "executor_kwargs": {"timeout_seconds": 0.01}}},
+        agent_root=root,
+        llm_config=LLMConfig.from_dict({"model": {
+            "default_model_type": "powerful",
+            "powerful": {"model": "openai/test"},
+            "summary": {"model": "openai/test"},
+        }}),
+    )
+    effects = []
+
+    @tool
+    def synchronous_probe() -> str:
+        """Return after the deliberately short ambient code-block budget."""
+        time.sleep(0.05)
+        effects.append("completed")
+        return "exact result: 验证\nreturned once"
+
+    with bind_config(base):
+        prepared = prepare_application_definition(root, source, load_agent_definition(source), base_config=base)
+        snapshot = prepared["_effective_agent_config_snapshot"]
+        assert snapshot.values["execution_env"]["executor_kwargs"]["timeout_seconds"] == 1200
+        agent = YamlConfiguredSupervisorAgent(config=prepared, model=object(), logger=AgentLogger(level=0))
+        # Keep model calls and application side effects out of this assembly test;
+        # the published definition, effective config and CodeAct executor are real.
+        monkeypatch.setattr(agent, "_build_runtime_tools", lambda _profile: [synchronous_probe])
+        runtime = agent.build_runtime_agent()
+        assert isinstance(runtime.python_executor, LocalPythonExecutor)
+        assert runtime.python_executor.timeout_seconds == 1200
+        runtime.python_executor.send_tools(runtime.tools)
+        result = runtime.python_executor("synchronous_probe()")
+
+    assert result.output == "exact result: 验证\nreturned once"
+    assert effects == ["completed"]
+    assert base.raw["execution_env"]["executor_kwargs"]["timeout_seconds"] == 0.01
+
+
+@pytest.mark.parametrize("output", ["worker answer", "", None])
+def test_completed_worker_resume_replays_output_in_requested_shape(tmp_path, monkeypatch, output):
+    from smolagents import RunResult
+    from smolagents.monitoring import TokenUsage
+
+    from agentloom.runtime.checkpoint import CheckpointManager
+    from agentloom.runtime.checkpoint.coordinator import CheckpointCoordinator
+
+    from agentloom.runtime.goal import GoalState
+    from agentloom.runtime.goal.provider import GoalStateProvider
+
+    provider = GoalStateProvider(GoalState.create(objective="delegate", objective_fingerprint="test", token_budget=1000))
+
+    class SuccessfulRuntime:
+        def __init__(self):
+            self.logger = DummyLoggerBackend()
+            self.memory = type("Memory", (), {"steps": []})()
+            self.calls = 0
+
+        def run(self, task, *args, **kwargs):
+            self.calls += 1
+            provider.record_usage(prompt_tokens=20, completion_tokens=11)
+            return RunResult(output=output, state="success", steps=[], token_usage=TokenUsage(20, 11), timing=None)
+
+    manager = CheckpointManager("supervisor", checkpoints_root=tmp_path, run_id="run_initial")
+    coordinator = CheckpointCoordinator(manager, "task-completed-worker", "delegate")
+    monkeypatch.setattr(CheckpointCoordinator, "current", staticmethod(lambda: coordinator))
+    runtime = SuccessfulRuntime()
+    worker = base_agent_module.SubTaskTrackedAgent(runtime, "completed_worker")
+
+    initial = worker.run("delegate", return_full_result=True)
+    assert initial.output == output
+    checkpoint = manager.load_worker_checkpoint("task-completed-worker", "completed_worker", call_index=0)
+    assert checkpoint.get("result") == output
+    assert provider.snapshot().used_tokens == 31
+    manager.close()
+    manager = CheckpointManager("supervisor", checkpoints_root=tmp_path, run_id="run_resume")
+
+    coordinator = CheckpointCoordinator(manager, "task-completed-worker", "delegate", resume=True)
+    resumed = worker.run("delegate", return_full_result=True)
+    invocation_module.require_successful_runtime_result(resumed)
+    assert resumed.output == initial.output
+    assert resumed.token_usage is None
+    assert provider.snapshot().used_tokens == 31
+    assert runtime.calls == 1
+    assert len(manager.load_task_tree("task-completed-worker")["workers"]["completed_worker"]) == 1
+
+    manager.close()
+    manager = CheckpointManager("supervisor", checkpoints_root=tmp_path, run_id="run_resume_plain")
+    coordinator = CheckpointCoordinator(manager, "task-completed-worker", "delegate", resume=True)
+    assert worker.run("delegate", return_full_result=False) == output
+    assert runtime.calls == 1
+    assert provider.snapshot().used_tokens == 31
+    manager.close()
+
+
 def test_max_steps_managed_worker_fails_before_call_discards_state(
     tmp_path,
     monkeypatch,
 ):
     from smolagents import RunResult
 
-    from src.lib.checkpoint import CheckpointManager
-    from src.lib.checkpoint.coordinator import CheckpointCoordinator
+    from agentloom.runtime.checkpoint import CheckpointManager
+    from agentloom.runtime.checkpoint.coordinator import CheckpointCoordinator
 
     runtime = base_agent_module.ToolCallingAgentV2(
         tools=[],
@@ -1017,7 +1158,7 @@ def test_max_steps_managed_worker_fails_before_call_discards_state(
         verbosity_level=0,
     )
     monkeypatch.setattr(
-        base_agent_module.LoomAgentMixin,
+        LoomAgentMixin,
         "run",
         lambda *_args, **_kwargs: RunResult(
             output="fallback answer",
@@ -1081,7 +1222,7 @@ def test_real_config_builder_compiles_global_application_and_agent_hook_layers(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    import src.lib.config.config as config_module
+    import agentloom.configuration.config as config_module
 
     agent_root = tmp_path / "AgentLoom"
     config_dir = agent_root / "config"
@@ -1153,8 +1294,8 @@ def test_real_config_builder_compiles_global_application_and_agent_hook_layers(
 
 def test_successful_root_review_waits_for_session_end_recorder_commit(monkeypatch):
     """The public run seam must not review an incompletely finalized root."""
-    from src.extensions.self_learning import reviewer
-    from src.extensions.self_learning.persistence.ledger import SelfLearningLedger
+    from agentloom.self_learning import reviewer
+    from agentloom.self_learning.persistence.ledger import SelfLearningLedger
 
     agent = _make_review_agent(logger=DummyLoggerBackend())
     runtime_agent = DummyRuntimeRunner(result="main-result")
@@ -1214,8 +1355,8 @@ def test_successful_root_review_waits_for_session_end_recorder_commit(monkeypatc
 
 def test_custom_session_end_telemetry_cannot_disable_persisted_review(monkeypatch):
     """The completed ledger projection, not shared telemetry, authorizes review."""
-    from src.extensions.self_learning import reviewer
-    from src.extensions.self_learning.persistence.ledger import SelfLearningLedger
+    from agentloom.self_learning import reviewer
+    from agentloom.self_learning.persistence.ledger import SelfLearningLedger
 
     agent = _make_review_agent(logger=DummyLoggerBackend())
     runtime_agent = DummyRuntimeRunner(result="main-result")
@@ -1259,9 +1400,9 @@ def test_session_end_persistence_failure_never_builds_completed_run_review(
     monkeypatch,
 ):
     """A successful task is not reviewable until its SessionEnd is durable."""
-    from src.extensions.self_learning import reviewer
-    from src.extensions.self_learning.persistence.ledger import SelfLearningLedger
-    from src.extensions.self_learning.session_recorder import SessionRecorder
+    from agentloom.self_learning import reviewer
+    from agentloom.self_learning.persistence.ledger import SelfLearningLedger
+    from agentloom.self_learning.session_recorder import SessionRecorder
 
     agent = _make_review_agent(logger=DummyLoggerBackend())
     runtime_agent = DummyRuntimeRunner(result="main-result")
@@ -1311,9 +1452,9 @@ def test_custom_session_end_telemetry_cannot_create_orphan_review_audit(
     monkeypatch,
 ):
     """Reviewer independently requires the persisted completed-run projection."""
-    from src.extensions.self_learning import reviewer
-    from src.extensions.self_learning.persistence.ledger import SelfLearningLedger
-    from src.extensions.self_learning.session_recorder import (
+    from agentloom.self_learning import reviewer
+    from agentloom.self_learning.persistence.ledger import SelfLearningLedger
+    from agentloom.self_learning.session_recorder import (
         SessionRecorder,
     )
 
@@ -1367,7 +1508,7 @@ def test_custom_session_end_telemetry_cannot_create_orphan_review_audit(
 
 
 def test_same_base_agent_concurrent_top_level_runs_do_not_cross_context(monkeypatch):
-    from src.trace import (
+    from agentloom.runtime.trace import (
         capture_explicit_execution_context,
         clear_current_task_id,
         set_current_task_id,
@@ -1569,7 +1710,7 @@ def test_subagent_lifecycle_belongs_to_parent_while_worker_tools_belong_to_child
 
 
 def test_worker_subtask_cannot_emit_root_task_lifecycle() -> None:
-    from src.trace import sub_task_context
+    from agentloom.runtime.trace import sub_task_context
 
     events: list[HookEvent] = []
     agent = _make_agent(logger=DummyLoggerBackend())
@@ -1604,7 +1745,7 @@ def test_worker_subtask_cannot_emit_root_task_lifecycle() -> None:
 
 
 def test_root_task_lifecycle_never_reads_legacy_subtask_fallback() -> None:
-    from src.trace import clear_current_sub_task_id, set_current_sub_task_id
+    from agentloom.runtime.trace import clear_current_sub_task_id, set_current_sub_task_id
 
     events: list[HookEvent] = []
     agent = _make_agent(logger=DummyLoggerBackend())
@@ -1673,7 +1814,7 @@ def test_each_run_rebinds_message_sink_for_cached_runtime(monkeypatch):
 
 
 def test_same_base_agent_serializes_real_cached_runtime_runs(monkeypatch):
-    from src.trace import require_root_run_id
+    from agentloom.runtime.trace import require_root_run_id
 
     agent = _make_agent(logger=DummyLoggerBackend())
     base_profile = agent._role_profile()
@@ -1792,7 +1933,7 @@ def test_base_run_executes_transformed_tasks_sequentially_with_reset_false(tmp_p
 
 
 def test_goal_mode_continues_after_normal_final_until_update_goal(monkeypatch):
-    from src.lib.goal import get_current_goal_provider
+    from agentloom.runtime.goal import get_current_goal_provider
 
     agent = DummyGoalAgent(
         config={
@@ -1828,7 +1969,7 @@ def test_goal_mode_continues_after_normal_final_until_update_goal(monkeypatch):
 
 
 def test_goal_mode_treats_max_steps_as_continuation_boundary(monkeypatch):
-    from src.lib.goal import get_current_goal_provider
+    from agentloom.runtime.goal import get_current_goal_provider
 
     agent = DummyGoalAgent(
         config={
@@ -1859,7 +2000,7 @@ def test_goal_mode_treats_max_steps_as_continuation_boundary(monkeypatch):
 
 
 def test_goal_mode_uses_evidence_when_max_steps_final_delivery_failed(monkeypatch):
-    from src.lib.goal import get_current_goal_provider
+    from agentloom.runtime.goal import get_current_goal_provider
 
     agent = DummyGoalAgent(
         config={
@@ -1889,7 +2030,7 @@ def test_goal_mode_uses_evidence_when_max_steps_final_delivery_failed(monkeypatc
 
 
 def test_goal_mode_stops_before_next_segment_after_soft_budget_crossing(monkeypatch):
-    from src.lib.goal import GoalBudgetLimitedError, get_current_goal_provider
+    from agentloom.runtime.goal import GoalBudgetLimitedError, get_current_goal_provider
 
     agent = DummyGoalAgent(
         config={
@@ -1924,8 +2065,8 @@ def test_goal_mode_resume_after_completion_commit_does_not_restart_work(
     tmp_path,
     monkeypatch,
 ):
-    from src.lib.checkpoint import CheckpointManager
-    from src.lib.goal import get_current_goal_provider
+    from agentloom.runtime.checkpoint import CheckpointManager
+    from agentloom.runtime.goal import get_current_goal_provider
 
     config = {
         "name": "goal-runtime",

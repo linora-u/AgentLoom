@@ -11,7 +11,7 @@ import os
 from pathlib import Path
 from typing import Union
 
-from src.lib.logging import get_logger
+from agentloom.runtime.logging import get_logger
 
 from .._safety import (
     DEFAULT_READ_LIMIT,

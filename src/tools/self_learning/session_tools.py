@@ -4,9 +4,9 @@ from __future__ import annotations
 
 import json
 
-from src.extensions.self_learning.application_scope import current_application_scope
-from src.extensions.self_learning.event_schema import safe_run_id
-from src.extensions.self_learning.persistence.ledger import SelfLearningLedger
+from agentloom.self_learning.application_scope import current_application_scope
+from agentloom.self_learning.event_schema import safe_run_id
+from agentloom.self_learning.persistence.ledger import SelfLearningLedger
 
 _SEARCH_CONTENT_PREVIEW_CHARS = 80
 _SCROLL_CONTENT_PREVIEW_CHARS = 240
@@ -28,8 +28,8 @@ _TOOL_RESULT_FIELDS = (
 
 
 def _disabled_response() -> str | None:
-    from src.extensions.self_learning.paths import self_learning_enabled
-    from src.trace import capture_explicit_execution_context
+    from agentloom.self_learning.paths import self_learning_enabled
+    from agentloom.runtime.trace import capture_explicit_execution_context
 
     context = capture_explicit_execution_context()
     agent_config = (
@@ -46,7 +46,7 @@ def _disabled_response() -> str | None:
 
 
 def _current_run_id() -> str:
-    from src.trace import MissingRunContextError, require_root_run_id
+    from agentloom.runtime.trace import MissingRunContextError, require_root_run_id
 
     try:
         return require_root_run_id()

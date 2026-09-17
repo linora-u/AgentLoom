@@ -1,11 +1,11 @@
-"""Unit tests for src.mcp.manager — McpManager lifecycle, tool aggregation, graceful degradation."""
+"""Unit tests for agentloom.adapters.mcp.manager — McpManager lifecycle, tool aggregation, graceful degradation."""
 
 from __future__ import annotations
 
 from unittest.mock import MagicMock, patch
 
-from src.mcp.config import McpServerConfig, McpSettings
-from src.mcp.manager import McpManager
+from agentloom.adapters.mcp.config import McpServerConfig, McpSettings
+from agentloom.adapters.mcp.manager import McpManager
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -39,8 +39,8 @@ def _mock_mcp_client(tools: list | None = None):
 
 class TestConnectAll:
 
-    @patch("src.mcp.manager.to_mcp_client_params")
-    @patch("src.mcp.manager.MCPClient")
+    @patch("agentloom.adapters.mcp.manager.to_mcp_client_params")
+    @patch("agentloom.adapters.mcp.manager.MCPClient")
     def test_success(self, MockMCPClient, mock_params):
         mock_params.return_value = MagicMock()
         fake_tools = [_fake_tool("t1"), _fake_tool("t2")]
@@ -54,8 +54,8 @@ class TestConnectAll:
         assert len(manager._raw_tools["srv"]) == 2
         assert not manager._errors
 
-    @patch("src.mcp.manager.to_mcp_client_params")
-    @patch("src.mcp.manager.MCPClient", side_effect=RuntimeError("boom"))
+    @patch("agentloom.adapters.mcp.manager.to_mcp_client_params")
+    @patch("agentloom.adapters.mcp.manager.MCPClient", side_effect=RuntimeError("boom"))
     def test_failure_graceful(self, MockMCPClient, mock_params):
         mock_params.return_value = MagicMock()
 
@@ -67,8 +67,8 @@ class TestConnectAll:
         assert "bad" in manager._errors
         assert "boom" in manager._errors["bad"]
 
-    @patch("src.mcp.manager.to_mcp_client_params")
-    @patch("src.mcp.manager.MCPClient")
+    @patch("agentloom.adapters.mcp.manager.to_mcp_client_params")
+    @patch("agentloom.adapters.mcp.manager.MCPClient")
     def test_partial_failure(self, MockMCPClient, mock_params):
         """One server succeeds, one fails — both recorded correctly."""
         mock_params.return_value = MagicMock()
@@ -103,8 +103,8 @@ class TestConnectAll:
 
 class TestGetAllTools:
 
-    @patch("src.mcp.manager.to_mcp_client_params")
-    @patch("src.mcp.manager.MCPClient")
+    @patch("agentloom.adapters.mcp.manager.to_mcp_client_params")
+    @patch("agentloom.adapters.mcp.manager.MCPClient")
     def test_tools_from_multiple_servers(self, MockMCPClient, mock_params):
         mock_params.return_value = MagicMock()
         call_count = [0]
@@ -138,8 +138,8 @@ class TestGetAllTools:
 
 class TestGetServerStatus:
 
-    @patch("src.mcp.manager.to_mcp_client_params")
-    @patch("src.mcp.manager.MCPClient")
+    @patch("agentloom.adapters.mcp.manager.to_mcp_client_params")
+    @patch("agentloom.adapters.mcp.manager.MCPClient")
     def test_status_mixed(self, MockMCPClient, mock_params):
         mock_params.return_value = MagicMock()
         call_count = [0]
@@ -172,8 +172,8 @@ class TestGetServerStatus:
 
 class TestDisconnectAll:
 
-    @patch("src.mcp.manager.to_mcp_client_params")
-    @patch("src.mcp.manager.MCPClient")
+    @patch("agentloom.adapters.mcp.manager.to_mcp_client_params")
+    @patch("agentloom.adapters.mcp.manager.MCPClient")
     def test_disconnect_cleans_up(self, MockMCPClient, mock_params):
         mock_params.return_value = MagicMock()
         mock_client = _mock_mcp_client()
@@ -194,8 +194,8 @@ class TestDisconnectAll:
         manager.disconnect_all()
         manager.disconnect_all()  # second call — should not error
 
-    @patch("src.mcp.manager.to_mcp_client_params")
-    @patch("src.mcp.manager.MCPClient")
+    @patch("agentloom.adapters.mcp.manager.to_mcp_client_params")
+    @patch("agentloom.adapters.mcp.manager.MCPClient")
     def test_disconnect_error_suppressed(self, MockMCPClient, mock_params):
         mock_params.return_value = MagicMock()
         mock_client = _mock_mcp_client()
@@ -217,8 +217,8 @@ class TestDisconnectAll:
 
 class TestContextManager:
 
-    @patch("src.mcp.manager.to_mcp_client_params")
-    @patch("src.mcp.manager.MCPClient")
+    @patch("agentloom.adapters.mcp.manager.to_mcp_client_params")
+    @patch("agentloom.adapters.mcp.manager.MCPClient")
     def test_context_manager(self, MockMCPClient, mock_params):
         mock_params.return_value = MagicMock()
         MockMCPClient.return_value = _mock_mcp_client()

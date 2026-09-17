@@ -2,7 +2,7 @@ from pathlib import Path
 
 import yaml
 
-import src.lib.config.config as config_module
+import agentloom.configuration.config as config_module
 
 
 def _write_yaml(path: Path, data: dict) -> None:

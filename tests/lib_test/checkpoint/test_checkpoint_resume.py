@@ -15,8 +15,8 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from src.lib.checkpoint import CheckpointManager, CheckpointSerializer
-from src.lib.checkpoint.coordinator import CheckpointCoordinator
+from agentloom.runtime.checkpoint import CheckpointManager, CheckpointSerializer
+from agentloom.runtime.checkpoint.coordinator import CheckpointCoordinator
 
 # ── fixtures ─────────────────────────────────────────────────────────────
 
@@ -53,7 +53,7 @@ class TestSupervisorCheckpointSave:
         from smolagents.memory import ActionStep
         from smolagents.monitoring import Timing
 
-        from src.lib.checkpoint.coordinator import _steps_including_completed
+        from agentloom.runtime.checkpoint.coordinator import _steps_including_completed
 
         previous = ActionStep(
             step_number=1,
@@ -369,7 +369,7 @@ class TestWorkerCheckpoint:
                 pass
 
         monkeypatch.setattr(
-            "src.lib.checkpoint.coordinator.WorkerHeartbeat",
+            "agentloom.runtime.checkpoint.coordinator.WorkerHeartbeat",
             _Heartbeat,
         )
 
@@ -554,3 +554,45 @@ class TestWorkerResume:
 
         assert completed == ["w1"]
         assert set(need_rerun) == {"w2", "w3"}
+
+
+@pytest.mark.parametrize("projection", [
+    "RunResult(output='old envelope', state='success', steps=[])",
+    "[ContextRef ctx_0000000000000001 kind=log source=worker original_chars=200000] compressed old envelope",
+    "__import__('os').system('this must never be evaluated')",
+])
+@pytest.mark.parametrize("output", ["exact Worker answer", "", None, "RunResult(output='legitimate text')"])
+def test_completed_cache_uses_committed_action_output_without_parsing_projection(tmp_path, projection, output):
+    from smolagents.memory import ActionStep
+    from smolagents.monitoring import Timing, TokenUsage
+
+    initial = CheckpointManager("supervisor", checkpoints_root=tmp_path, run_id="run_initial")
+    task = "task_legacy_worker"
+    call_index = initial.record_worker_started(task, "worker", input_hash="same-input", task_input="delegate")
+    step = ActionStep(step_number=1, timing=Timing(start_time=1, end_time=2), action_output=output,
+                      is_final_answer=True, token_usage=TokenUsage(20, 11))
+    initial.save_worker_checkpoint(task, "worker", call_index=call_index, input_hash="same-input",
+                                   task_input="delegate", status="completed", result=projection, memory_steps=[step])
+    initial.record_worker_finished(task, "worker", call_index=call_index, input_hash="same-input",
+                                   task_input="delegate", status="completed", result=projection)
+    before = initial.load_worker_checkpoint(task, "worker", call_index=0)
+    initial.close()
+
+    resumed = CheckpointManager("supervisor", checkpoints_root=tmp_path, run_id="run_resume")
+    coordinator = CheckpointCoordinator(resumed, task, "delegate", resume=True)
+    result = coordinator.prepare_worker_call("worker", "same-input", "delegate")
+    assert result.should_execute is False
+    assert result.cached_result == output
+    assert resumed.load_worker_checkpoint(task, "worker", call_index=0) == before
+    assert len(resumed.load_task_tree(task)["workers"]["worker"]) == 1
+    resumed.close()
+
+
+@pytest.mark.parametrize("final_step", [
+    {"_step_type": "ActionStep", "is_final_answer": False, "action_output": "uncommitted"},
+    {"_step_type": "ActionStep", "is_final_answer": True, "action_output": "failed", "error": "failure"},
+    {"_step_type": "ActionStep", "is_final_answer": True},
+    {"_step_type": "UnknownStep", "is_final_answer": True, "action_output": "unknown"},
+])
+def test_completed_output_requires_explicit_successful_final_action(final_step):
+    assert CheckpointSerializer.completed_worker_output([final_step]) == (False, None)

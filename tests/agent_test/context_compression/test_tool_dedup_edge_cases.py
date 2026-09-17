@@ -7,7 +7,7 @@ canonical tool names (glob_search, grep_search) and that old alias names
 
 import pytest
 
-from src.lib.smolagents.memory.context_compression import (
+from agentloom.runtime.memory.context_compression import (
     TOOL_MAX_RETAIN_CHARS,
     TOOL_DEDUP_PATTERNS,
     FILE_READ_TOOL_NAMES,

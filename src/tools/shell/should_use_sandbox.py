@@ -2,7 +2,7 @@
 
 Determines whether a given shell command should be executed
 inside a sandbox.  This is the bridge between the shell tool
-and the sandbox manager (src.utils.sandbox).
+and the sandbox manager (agentloom.utils.sandbox).
 
 Decision flow:
 1. Is sandbox enabled globally? → No → skip
@@ -11,7 +11,7 @@ Decision flow:
 4. Default → use sandbox
 """
 
-from src.utils.sandbox import SandboxManager
+from agentloom.utils.sandbox import SandboxManager
 
 
 def should_use_sandbox(command: str) -> bool:

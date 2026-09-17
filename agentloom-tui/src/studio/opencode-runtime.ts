@@ -238,7 +238,7 @@ export const AgentLoomPlugin = async () => ({
       throw new Error("AgentLoom domain operation aborted before launch")
     }
     const child = Bun.spawn({
-      cmd: [python, "-I", "-m", "src.tui_bridge.domain_cli", "--project", context.directory, args.action, JSON.stringify(args.params || {})],
+      cmd: [python, "-I", "-m", "agentloom.tui_bridge.domain_cli", "--project", context.directory, args.action, JSON.stringify(args.params || {})],
       cwd: context.directory,
       env: process.env,
       detached: process.platform !== "win32",

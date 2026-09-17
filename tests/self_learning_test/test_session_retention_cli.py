@@ -6,15 +6,15 @@ from pathlib import Path
 import pytest
 from click.testing import CliRunner
 
-from src.extensions.self_learning.event_schema import CanonicalSessionEvent, now_iso
-from src.extensions.self_learning.persistence.ledger import SelfLearningLedger
+from agentloom.self_learning.event_schema import CanonicalSessionEvent, now_iso
+from agentloom.self_learning.persistence.ledger import SelfLearningLedger
 
 
 def test_sessions_prune_rejects_negative_days_before_constructing_ledger(
     monkeypatch,
 ) -> None:
-    import src.extensions.self_learning.persistence.ledger as ledger_module
-    from src.__main__ import sessions_prune
+    import agentloom.self_learning.persistence.ledger as ledger_module
+    from agentloom.__main__ import sessions_prune
 
     constructed = False
 
@@ -43,8 +43,8 @@ def test_sessions_prune_rejects_negative_days_before_constructing_ledger(
 def test_sessions_prune_accepts_zero_as_the_explicit_full_history_cutoff(
     monkeypatch,
 ) -> None:
-    import src.extensions.self_learning.persistence.ledger as ledger_module
-    from src.__main__ import sessions_prune
+    import agentloom.self_learning.persistence.ledger as ledger_module
+    from agentloom.__main__ import sessions_prune
 
     received_days: list[int] = []
 

@@ -1,7 +1,7 @@
 from smolagents.utils import RateLimiter
 
-from src.lib.smolagents.models.litellm_model import LiteLLMModelV2
-from src.lib.smolagents.monkey_patch import install_agentloom_runtime_adapters
+from agentloom.adapters.smolagents.models.litellm_model import LiteLLMModelV2
+from agentloom.adapters.smolagents.monkey_patch import install_agentloom_runtime_adapters
 
 
 def test_runtime_adapters_do_not_patch_global_rate_limiter():

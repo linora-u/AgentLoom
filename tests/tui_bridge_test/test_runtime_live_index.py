@@ -8,8 +8,8 @@ from typing import Any
 
 import pytest
 
-from src.lib.runtime.context import RuntimeRunLease
-from src.tui_bridge.bridge import TuiBridge
+from agentloom.runtime.context import RuntimeRunLease
+from agentloom.tui_bridge.bridge import TuiBridge
 
 SYSTEM_ID = "applications/demo/workflows/demo.yaml"
 

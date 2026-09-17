@@ -2,7 +2,7 @@
 
 from typing import Any
 
-from src.tools._lazy_exports import install_lazy_exports, resolve_lazy_export
+from agentloom.tools._lazy_exports import install_lazy_exports, resolve_lazy_export
 
 _EXPORTS = {
     "read_file": (".read_file", "read_file"),

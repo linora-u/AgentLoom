@@ -21,7 +21,7 @@ import time
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple
 
-from src.lib.logging import get_logger
+from agentloom.runtime.logging import get_logger
 
 logger = get_logger(__name__)
 
@@ -38,7 +38,7 @@ _TIMEOUT_SECONDS = 20
 _SIGKILL_GRACE = 5
 
 # Exclude pattern utilities shared with glob_tool via search_utils.
-from src.tools.search.search_utils import (
+from agentloom.tools.search.search_utils import (
     get_search_exclude_patterns,
     get_python_exclude_dirs,
 )

@@ -20,13 +20,13 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from src.lib.checkpoint.checkpoint_manager import CheckpointManager
-from src.lib.checkpoint.coordinator import CheckpointCoordinator
-from src.lib.checkpoint.conversation_recovery import (
+from agentloom.runtime.checkpoint.checkpoint_manager import CheckpointManager
+from agentloom.runtime.checkpoint.coordinator import CheckpointCoordinator
+from agentloom.runtime.checkpoint.conversation_recovery import (
     TurnInterruptionState,
     prepare_steps_for_resume,
 )
-from src.lib.checkpoint.file_history import FileHistoryManager
+from agentloom.runtime.checkpoint.file_history import FileHistoryManager
 
 
 # ---------------------------------------------------------------------------
@@ -123,7 +123,7 @@ class TestCheckpointSaveAndResume:
         assert len(ckpt["memory_steps"]) == 3
 
         # Simulate resume: deserialize then run pipeline
-        from src.lib.checkpoint.serializer import CheckpointSerializer
+        from agentloom.runtime.checkpoint.serializer import CheckpointSerializer
         deserialized = CheckpointSerializer.deserialize_memory_steps(ckpt["memory_steps"])
 
         cleaned, interruption = prepare_steps_for_resume(deserialized)
@@ -183,7 +183,7 @@ class TestCheckpointSaveAndResume:
 
         coord = CheckpointCoordinator.activate(cm, task_id, "task")
         try:
-            from src.lib.context_engine.runtime import get_current_context_engine
+            from agentloom.runtime.context_engine.runtime import get_current_context_engine
 
             engine = get_current_context_engine()
             assert engine is not None
@@ -202,7 +202,7 @@ class TestCheckpointSaveAndResume:
 
         resumed = CheckpointCoordinator.activate(cm, task_id, "task", resume=True)
         try:
-            from src.lib.context_engine.runtime import get_current_context_engine
+            from agentloom.runtime.context_engine.runtime import get_current_context_engine
 
             resumed_engine = get_current_context_engine()
             assert resumed_engine is not None
@@ -291,7 +291,7 @@ class TestHeartbeatCrashDetection:
 
     def test_stale_heartbeat_detected_as_crashed(self, tmp_path):
         """Heartbeat with old timestamp and dead PID is detected as crashed."""
-        from src.lib.heartbeat.status import detect_crashed_status
+        from agentloom.runtime.heartbeat.status import detect_crashed_status
 
         heartbeat = {
             "pid": 999999999,  # Non-existent PID
@@ -303,14 +303,14 @@ class TestHeartbeatCrashDetection:
 
     def test_none_heartbeat_is_crashed(self):
         """Missing heartbeat file is treated as crashed."""
-        from src.lib.heartbeat.status import detect_crashed_status
+        from agentloom.runtime.heartbeat.status import detect_crashed_status
 
         result = detect_crashed_status(None)
         assert result == "crashed"
 
     def test_stopped_heartbeat_is_crashed(self):
         """Heartbeat with status=stopped is treated as crashed."""
-        from src.lib.heartbeat.status import detect_crashed_status
+        from agentloom.runtime.heartbeat.status import detect_crashed_status
         import time
 
         heartbeat = {

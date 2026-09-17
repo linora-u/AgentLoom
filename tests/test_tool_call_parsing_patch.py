@@ -2,7 +2,7 @@ import json
 
 import pytest
 
-from src.lib.smolagents.models.tool_call_parser import (
+from agentloom.adapters.smolagents.models.tool_call_parser import (
     ToolCallParseError,
     parse_json_with_repair,
     parse_structured_tool_call,

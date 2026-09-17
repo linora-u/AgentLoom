@@ -1,16 +1,16 @@
 import pytest
 from smolagents.models import ChatMessage, MessageRole
 
-import src.lib.smolagents.agent.base_agent as base_agent_module
-import src.lib.smolagents.agent.yaml_agent_factory as yaml_factory_module
-from src.lib.smolagents.agent.agent_validation import NormalizedExecutionConfig
-from src.lib.smolagents.agent.loom_mixin import LoomAgentMixin
-from src.lib.smolagents.agent.yaml_agent_factory import (
+import agentloom.runtime.agent as base_agent_module
+import agentloom.runtime.factory as yaml_factory_module
+from agentloom.application.validation import NormalizedExecutionConfig
+from agentloom.runtime.loom_mixin import LoomAgentMixin
+from agentloom.runtime.factory import (
     YamlConfiguredAgent,
     YamlConfiguredSupervisorAgent,
 )
-from src.lib.smolagents.hooks import HookPlan, HookRun
-from src.trace.task_context import (
+from agentloom.runtime.hooks import HookPlan, HookRun
+from agentloom.runtime.trace.task_context import (
     clear_current_hook_run,
     set_current_hook_run,
 )
@@ -331,7 +331,7 @@ def test_worker_prompt_path_passthrough_from_mapping(monkeypatch, tmp_path):
     prompt_file = tmp_path / "prompts" / "worker_prompt.yaml"
     prompt_file.parent.mkdir(parents=True, exist_ok=True)
     prompt_file.write_text("system_prompt: worker", encoding="utf-8")
-    monkeypatch.setattr(yaml_factory_module, "AGENT_ROOT", tmp_path)
+    monkeypatch.setattr(yaml_factory_module, "C", _config_at(tmp_path))
     monkeypatch.setattr(base_agent_module, "C", type("ConfigProxy", (), {"agent_root": tmp_path, "get": staticmethod(lambda *args, **kwargs: None), "llm": type("L", (), {"for_type": staticmethod(lambda _model_type: type("V", (), {"max_tokens": 1000})())})()})())
 
     worker = _make_worker(_worker_config_with_prompt({"path": "prompts/worker_prompt.yaml"}))
@@ -345,7 +345,7 @@ def test_supervisor_prompt_path_passthrough_from_string(monkeypatch, tmp_path):
     prompt_file = tmp_path / "prompts" / "supervisor_prompt.yaml"
     prompt_file.parent.mkdir(parents=True, exist_ok=True)
     prompt_file.write_text("system_prompt: supervisor", encoding="utf-8")
-    monkeypatch.setattr(yaml_factory_module, "AGENT_ROOT", tmp_path)
+    monkeypatch.setattr(yaml_factory_module, "C", _config_at(tmp_path))
     monkeypatch.setattr(base_agent_module, "C", type("ConfigProxy", (), {"agent_root": tmp_path, "get": staticmethod(lambda *args, **kwargs: None), "llm": type("L", (), {"for_type": staticmethod(lambda _model_type: type("V", (), {"max_tokens": 1000})())})()})())
 
     supervisor = _make_supervisor(_supervisor_config(prompt="prompts/supervisor_prompt.yaml"))
@@ -359,7 +359,7 @@ def test_build_execution_config_builder_autonormalizes_when_validate_not_called(
     worker_prompt = tmp_path / "prompts" / "worker_prompt.yaml"
     worker_prompt.parent.mkdir(parents=True, exist_ok=True)
     worker_prompt.write_text("system_prompt: worker", encoding="utf-8")
-    monkeypatch.setattr(yaml_factory_module, "AGENT_ROOT", tmp_path)
+    monkeypatch.setattr(yaml_factory_module, "C", _config_at(tmp_path))
     monkeypatch.setattr(base_agent_module, "C", type("ConfigProxy", (), {"agent_root": tmp_path, "get": staticmethod(lambda *args, **kwargs: None), "llm": type("L", (), {"for_type": staticmethod(lambda _model_type: type("V", (), {"max_tokens": 1000})())})()})())
 
     worker = _make_worker(
@@ -457,3 +457,15 @@ def test_build_execution_kwargs_rejects_non_dict_normalized_executor_kwargs():
 
     with pytest.raises(ValueError, match="execution normalized executor_kwargs must be a dictionary"):
         _build_execution_kwargs(worker)
+
+
+def _config_at(root):
+    from agentloom.configuration import C
+
+    class ProjectConfig:
+        agent_root = root
+
+        def __getattr__(self, name):
+            return getattr(C, name)
+
+    return ProjectConfig()

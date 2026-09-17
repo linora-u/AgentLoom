@@ -10,7 +10,7 @@ from pathlib import Path
 
 import pytest
 
-from src.tools.search.glob_tool.glob_tool import (
+from agentloom.tools.search.glob_tool.glob_tool import (
     glob_search,
     _filter_excluded_paths,
     _glob_with_python,
@@ -19,7 +19,7 @@ from src.tools.search.glob_tool.glob_tool import (
 # The mock target is the same as in test_grep_exclude.py — the shared
 # _resolve_tool_access_control_config function in path_validators.
 _RESOLVE_MOCK_TARGET = (
-    "src.lib.permissions.workspace._resolve_tool_access_control_config"
+    "agentloom.runtime.permissions.workspace._resolve_tool_access_control_config"
 )
 
 
@@ -175,9 +175,9 @@ class TestGlobGrepConsistency:
 
     def test_both_use_same_shared_util(self):
         """Both tools import from search_utils, not independent implementations."""
-        from src.tools.search import search_utils
-        import src.tools.search.grep_tool.grep_tool as grep_mod
-        import src.tools.search.glob_tool.glob_tool as glob_mod
+        from agentloom.tools.search import search_utils
+        import agentloom.tools.search.grep_tool.grep_tool as grep_mod
+        import agentloom.tools.search.glob_tool.glob_tool as glob_mod
 
         # Both tools should import get_search_exclude_patterns from search_utils
         assert grep_mod.get_search_exclude_patterns is search_utils.get_search_exclude_patterns

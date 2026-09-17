@@ -6,7 +6,7 @@ edge cases like empty schema, missing keys, and already-correct types.
 
 import pytest
 
-from src.lib.smolagents.hooks.type_coercion import coerce_tool_parameters
+from agentloom.runtime.hooks.type_coercion import coerce_tool_parameters
 
 
 # ---------------------------------------------------------------------------

@@ -14,10 +14,10 @@ self-learning, Todo, or ContextEngine implementations.
 | `src/tools/tool_meta.py` | Effective metadata after global and Agent overrides | Catalog exports or implementation loading |
 | `src/tools/<group>/` | Concrete tool implementations | Built-in catalog membership |
 
-`src.tools` intentionally exports nothing. Importing that package is not a
+`agentloom.tools` intentionally exports nothing. Importing that package is not a
 registration mechanism and does not load tools. Runtime code resolves a
-registered built-in through `src.tools.loader`; code that needs only metadata
-imports `src.tools.catalog`. Tests that exercise one concrete implementation
+registered built-in through `agentloom.tools.loader`; code that needs only metadata
+imports `agentloom.tools.catalog`. Tests that exercise one concrete implementation
 may import its group directly.
 
 Compatibility exports in implementation-group `__init__.py` files are lazy.

@@ -102,8 +102,8 @@ def _get_row_key(table: DataTable) -> str | None:
 
 
 def _checkpoints_root() -> Path:
-    from src.lib.config import C
-    from src.lib.runtime import resolve_runtime_home
+    from agentloom.configuration import C
+    from agentloom.runtime import resolve_runtime_home
 
     return resolve_runtime_home(C.raw, agent_root=C.agent_root).checkpoints_root
 
@@ -111,7 +111,7 @@ def _checkpoints_root() -> Path:
 def _delete_dashboard_task(target: Mapping[str, Any]) -> bool:
     """Delete through the same inactive-task lease used by the CLI cleaner."""
 
-    from src.lib.checkpoint.checkpoint_manager import (
+    from agentloom.runtime.checkpoint.checkpoint_manager import (
         delete_checkpoint_task_if_inactive,
     )
 
@@ -169,7 +169,7 @@ class TaskDashboardApp(App):
         self.set_interval(2, self._refresh_tasks)
 
     def _refresh_tasks(self) -> None:
-        from src.lib.checkpoint.checkpoint_manager import list_all_tasks
+        from agentloom.runtime.checkpoint.checkpoint_manager import list_all_tasks
 
         tasks = list_all_tasks(checkpoints_root=_checkpoints_root())
         table: DataTable = self.query_one("#tasks")
@@ -320,7 +320,7 @@ class TaskDashboardApp(App):
             return
         task_id = identity[1]
 
-        from src.lib.checkpoint.checkpoint_manager import list_all_tasks
+        from agentloom.runtime.checkpoint.checkpoint_manager import list_all_tasks
         tasks = list_all_tasks(checkpoints_root=_checkpoints_root())
         target = _find_task(tasks, identity)
         if not target:

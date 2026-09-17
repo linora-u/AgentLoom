@@ -13,7 +13,7 @@ import subprocess
 import tempfile
 from typing import Optional
 
-from src.lib.logging import get_logger
+from agentloom.runtime.logging import get_logger
 
 logger = get_logger(__name__)
 
@@ -179,7 +179,7 @@ def create_snapshot(
     script = _build_zsh_snapshot_script() if is_zsh else _build_bash_snapshot_script()
 
     if env is None:
-        from src.tools.shell.subprocess_env import build_subprocess_env
+        from agentloom.tools.shell.subprocess_env import build_subprocess_env
         env = build_subprocess_env()
 
     try:

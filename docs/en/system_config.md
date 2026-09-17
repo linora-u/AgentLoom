@@ -354,7 +354,7 @@ lsp_servers:
 | `max_restarts` | `int` | `3` | Max crash recovery attempts per server |
 | `servers` | `list` | `[python]` | Languages to start (40+ supported) |
 
-> Servers are managed by `src/services/lsp/LSPServerManager`. Unsupported languages automatically fall back to tree-sitter AST analysis (46+ languages).
+> Servers are managed by `agentloom.adapters.lsp.lsp_server_manager.LSPServerManager`. Unsupported languages automatically fall back to tree-sitter AST analysis (46+ languages).
 
 ---
 
@@ -454,7 +454,11 @@ Runs AI-generated Python code directly in the host environment. This is the defa
 | Parameter | Type | Default | Description |
 |------|------|--------|------|
 | `max_print_outputs_length` | `int` | `50000` | Maximum characters of `print()` output per code execution. Excess is truncated |
-| `timeout_seconds` | `int \| null` | `30` | Maximum wall-clock seconds for one generated Python code block. Use a larger value for workflows that synchronously invoke worker Agents or other long-running tool calls |
+| `timeout_seconds` | `int \| null` | `30` | Wall-clock timeout threshold for one generated Python code block, including synchronous Worker and tool calls. `null` disables this timeout |
+
+Set a finite budget in the calling Agent's YAML that covers the complete synchronous Worker call, including its model requests and tools. The shipped complex checkpoint Supervisor uses `1200` seconds, as do other multi-Worker Applications. A Worker's own execution budget does not extend its caller's budget.
+
+This timeout is not cancellation. The pinned local executor waits for its Python thread to finish before returning the timeout error, even if the Worker or tool completes successfully after the threshold. Its side effects may therefore be committed despite the caller receiving an error. Retrying the same Worker input within that attempt creates a new call; checkpoint resume does not provide general retry deduplication.
 
 > `additional_functions` is automatically injected by the framework based on `code_agent.additional_functions` configuration; no need to specify manually in `executor_kwargs`.
 
@@ -1262,13 +1266,13 @@ The framework uses Pydantic to validate system configuration. The following show
 
 | Config Section | Pydantic Model | Source File |
 |--------|--------------|--------|
-| Root configuration | `RootSettings` | `src/lib/config/config_validation.py` |
-| `system.*` | `SystemSettings` | `src/lib/config/config_validation.py` |
-| `model_request_headers.*` | `ModelRequestHeadersSettings` | `src/lib/config/config_validation.py` |
-| `tool_access_control.*` | `ToolAccessControlSettings` | `src/lib/config/config_validation.py` |
-| `runtime.*` | `RuntimeSettings` | `src/lib/config/config_validation.py` |
-| `logging.*` | `LoggingSettings` | `src/lib/config/config_validation.py` |
-| `self_learning.*` | `SelfLearningSettings` / `SelfLearningReviewSettings` | `src/lib/config/config_validation.py` |
+| Root configuration | `RootSettings` | `src/configuration/config_validation.py` |
+| `system.*` | `SystemSettings` | `src/configuration/config_validation.py` |
+| `model_request_headers.*` | `ModelRequestHeadersSettings` | `src/configuration/config_validation.py` |
+| `tool_access_control.*` | `ToolAccessControlSettings` | `src/configuration/config_validation.py` |
+| `runtime.*` | `RuntimeSettings` | `src/configuration/config_validation.py` |
+| `logging.*` | `LoggingSettings` | `src/configuration/config_validation.py` |
+| `self_learning.*` | `SelfLearningSettings` / `SelfLearningReviewSettings` | `src/configuration/config_validation.py` |
 
 **`RootSettings` complete field definitions**:
 
@@ -1299,11 +1303,11 @@ The framework uses Pydantic to validate system configuration. The following show
 
 | Parser | Purpose | Located in |
 |--------|------|------|
-| `BoolParser` | Compatible boolean input normalization, used for logging and some LLM configuration switches | `config_validation.py` / `src/lib/logging/logger_manager.py` / `src/lib/config/llm_config.py` |
-| `IntParser` | Tolerant integer parsing; legacy `max_tokens: "max"` now resolves to the finite model default | `config_validation.py` / `src/lib/config/llm_config.py` |
-| `FloatParser` | Compatible float and integer string input, used for `temperature`, `retry_delay`, `max_retry_delay` in model config | `config_validation.py` / `src/lib/config/llm_config.py` |
+| `BoolParser` | Compatible boolean input normalization, used for logging and some LLM configuration switches | `config_validation.py` / `src/runtime/logging/logger_manager.py` / `src/configuration/llm_config.py` |
+| `IntParser` | Tolerant integer parsing; legacy `max_tokens: "max"` now resolves to the finite model default | `config_validation.py` / `src/configuration/llm_config.py` |
+| `FloatParser` | Compatible float and integer string input, used for `temperature`, `retry_delay`, `max_retry_delay` in model config | `config_validation.py` / `src/configuration/llm_config.py` |
 | `EnumParser` | General-purpose enum normalization helper, not currently consumed directly in the system.yaml main pipeline | `config_validation.py` |
-| `LogLevelParser` | Parses `logging.level`, supports standard `logging` levels and `OFF` | `config_validation.py` / `src/lib/logging/logger_manager.py` |
+| `LogLevelParser` | Parses `logging.level`, supports standard `logging` levels and `OFF` | `config_validation.py` / `src/runtime/logging/logger_manager.py` |
 
 ---
 

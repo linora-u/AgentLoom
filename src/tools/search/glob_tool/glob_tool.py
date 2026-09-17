@@ -19,8 +19,8 @@ import time
 from pathlib import Path
 from typing import List, Optional
 
-from src.lib.logging import get_logger
-from src.tools.search.search_utils import (
+from agentloom.runtime.logging import get_logger
+from agentloom.tools.search.search_utils import (
     get_search_exclude_patterns,
     get_python_exclude_dirs,
 )

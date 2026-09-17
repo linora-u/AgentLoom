@@ -5,7 +5,7 @@ from pathlib import Path
 
 import pytest
 
-from src.extensions.self_learning.persistence.ledger import SelfLearningLedger
+from agentloom.self_learning.persistence.ledger import SelfLearningLedger
 
 EXPECTED_COLUMNS = [
     ("event_id", "TEXT", 1, None, 1),

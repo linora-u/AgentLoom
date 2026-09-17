@@ -35,16 +35,16 @@ import threading
 from dataclasses import dataclass
 from typing import Optional
 
-from src.lib.config import C
-from src.lib.logging import get_logger
-from src.lib.runtime import get_current_run_context
-from src.tools.shell.ansi_stripper import strip_ansi
-from src.tools.shell.pipe_redirect import rearrange_pipe_command
-from src.tools.shell.shell_session import ShellSession
-from src.tools.shell.shell_snapshot import create_snapshot, remove_snapshot
-from src.tools.shell.stall_watchdog import detect_stall_prompt
-from src.tools.shell.subprocess_env import build_subprocess_env as _build_subprocess_env
-from src.tools.shell.tree_kill import SizeWatchdog, graceful_kill
+from agentloom.configuration import C
+from agentloom.runtime.logging import get_logger
+from agentloom.runtime import get_current_run_context
+from agentloom.tools.shell.ansi_stripper import strip_ansi
+from agentloom.tools.shell.pipe_redirect import rearrange_pipe_command
+from agentloom.tools.shell.shell_session import ShellSession
+from agentloom.tools.shell.shell_snapshot import create_snapshot, remove_snapshot
+from agentloom.tools.shell.stall_watchdog import detect_stall_prompt
+from agentloom.tools.shell.subprocess_env import build_subprocess_env as _build_subprocess_env
+from agentloom.tools.shell.tree_kill import SizeWatchdog, graceful_kill
 
 logger = get_logger(__name__)
 
@@ -554,7 +554,7 @@ class ShellProcess:
         promoted = False  # True if promoted to background
 
         try:
-            from src.lib.runtime import get_current_run_context
+            from agentloom.runtime import get_current_run_context
 
             runtime_context = get_current_run_context()
             if runtime_context is not None:
@@ -614,7 +614,7 @@ class ShellProcess:
 
             # Start foreground stall watchdog to detect interactive
             # prompts (y/n, Continue?, etc.) during the wait period.
-            from src.tools.shell.stall_watchdog import StallWatchdog
+            from agentloom.tools.shell.stall_watchdog import StallWatchdog
 
             stall_threshold = _foreground_stall_threshold(timeout)
 
@@ -656,7 +656,7 @@ class ShellProcess:
                         )
                         # Write to per-agent shell audit log
                         try:
-                            from src.tools.shell.shell_audit_log import (
+                            from agentloom.tools.shell.shell_audit_log import (
                                 get_shell_audit_logger,
                             )
 
@@ -697,7 +697,7 @@ class ShellProcess:
                         proc.pid,
                     )
                     try:
-                        from src.tools.shell.shell_audit_log import (
+                        from agentloom.tools.shell.shell_audit_log import (
                             get_shell_audit_logger,
                         )
 
@@ -747,7 +747,7 @@ class ShellProcess:
                     promoted = True
                     # Audit the background promotion
                     try:
-                        from src.tools.shell.shell_audit_log import (
+                        from agentloom.tools.shell.shell_audit_log import (
                             get_shell_audit_logger,
                         )
 
@@ -769,7 +769,7 @@ class ShellProcess:
                 # Background disabled — kill the process.
                 # Audit the timeout kill
                 try:
-                    from src.tools.shell.shell_audit_log import (
+                    from agentloom.tools.shell.shell_audit_log import (
                         get_shell_audit_logger,
                     )
 
@@ -883,7 +883,7 @@ class ShellProcess:
 
         Returns the background task ID.
         """
-        from src.tools.shell.background_task import BackgroundTaskRegistry
+        from agentloom.tools.shell.background_task import BackgroundTaskRegistry
 
         registry = BackgroundTaskRegistry.get_instance()
         try:

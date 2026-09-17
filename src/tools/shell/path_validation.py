@@ -17,9 +17,9 @@ import re
 from pathlib import Path
 from typing import Dict, List, Optional, Set, Callable
 
-from src.lib.config import C
-from src.lib.logging import get_logger
-from src.lib.permissions.workspace import get_allowed_directories
+from agentloom.configuration import C
+from agentloom.runtime.logging import get_logger
+from agentloom.runtime.permissions.workspace import get_allowed_directories
 
 logger = get_logger(__name__)
 
@@ -33,7 +33,7 @@ _PATH_GUIDANCE = (
 def _get_shell_config_path(key: str, *, default=None):
     """Read a shell config value, preferring per-agent effective config."""
     try:
-        from src.trace import get_current_agent_config
+        from agentloom.runtime.trace import get_current_agent_config
         agent_cfg = get_current_agent_config()
         if isinstance(agent_cfg, dict):
             shell = agent_cfg.get("shell_settings")
@@ -47,7 +47,7 @@ def _get_shell_config_path(key: str, *, default=None):
 def _audit_path_violation(command: str, message: str, path: str = "") -> None:
     """Write a path violation event to the per-agent shell audit log."""
     try:
-        from src.tools.shell.shell_audit_log import get_shell_audit_logger
+        from agentloom.tools.shell.shell_audit_log import get_shell_audit_logger
         audit = get_shell_audit_logger()
         audit.log_path_violation(command=command, message=message, path=path)
     except Exception:

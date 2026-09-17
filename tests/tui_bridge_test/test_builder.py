@@ -8,8 +8,8 @@ from types import SimpleNamespace
 
 import pytest
 
-import src.tui_bridge.builder as builder_module
-from src.tui_bridge.builder import BuilderService, DraftConflictError
+import agentloom.tui_bridge.builder as builder_module
+from agentloom.tui_bridge.builder import BuilderService, DraftConflictError
 
 VALID_AGENT_YAML = """\
 name: report_agent
@@ -27,7 +27,7 @@ def _configured_model_catalog(tmp_path: Path) -> None:
     config = tmp_path / "config"
     config.mkdir(exist_ok=True)
     (config / "llm.yaml").write_text(
-        "model:\n  default_model_type: powerful\n  powerful:\n    model: openai/test\n",
+        "model:\n  summary:\n    model: openai/test-summary\n  default_model_type: powerful\n  powerful:\n    model: openai/test\n",
         encoding="utf-8",
     )
 
@@ -809,7 +809,7 @@ def test_validation_rejects_runtime_invalid_structure_model_and_worker_reference
 ) -> None:
     (tmp_path / "config").mkdir(exist_ok=True)
     (tmp_path / "config/llm.yaml").write_text(
-        "model:\n  default_model_type: powerful\n  powerful:\n    model: openai/test\n",
+        "model:\n  summary:\n    model: openai/test-summary\n  default_model_type: powerful\n  powerful:\n    model: openai/test\n",
         encoding="utf-8",
     )
 
@@ -817,9 +817,8 @@ def test_validation_rejects_runtime_invalid_structure_model_and_worker_reference
     _stage_yaml(
         service,
         "applications/reports/workflows/broken.yaml",
-        VALID_AGENT_YAML
-        + "tool_call_type: unsupported\n"
-        + "model_type: missing-model\n"
+        VALID_AGENT_YAML.replace("tool_call_type: tool_call", "tool_call_type: unsupported")
+        .replace("model_type: powerful", "model_type: missing-model")
         + "worker_agents:\n  - path: missing_worker.yaml\n",
     )
     result = _validate_draft(service)

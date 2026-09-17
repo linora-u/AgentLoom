@@ -67,7 +67,7 @@ project_root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(_
 if project_root not in sys.path:
     sys.path.insert(0, project_root)
 
-from src.runner import run_app
+from agentloom.application.runner import run_app
 
 
 def main(user_request: str, file_logging: bool | None = None, resume: str | None = None) -> str:
