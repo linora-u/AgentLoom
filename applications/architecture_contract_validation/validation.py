@@ -168,12 +168,20 @@ def validate_trace(attempt: Path, receipt: dict[str, object]) -> dict[str, objec
                                "output": final_records[-1]["output"]}
         except (KeyError, IndexError, ValueError):
             errors.append(f"missing typed input or final Tool record in {name} checkpoint")
+    transfers = []
     for previous, following in zip(WORKERS, WORKERS[1:], strict=False):
         try:
             previous_output = _structured(by_worker[previous]["output"])
-            next_input = _structured(by_worker[following]["input"]["query"])
-            if not _contains_exact_json(next_input, previous_output):
+            if not isinstance(previous_output, dict):
+                raise ValueError("Worker result must be a JSON object")
+            next_input = by_worker[following]["input"]["query"]
+            matching_path = _exact_json_path(next_input, previous_output)
+            if matching_path is None:
                 errors.append(f"Worker result was not passed intact: {previous} -> {following}")
+            else:
+                transfers.append({"from": previous, "to": following, "query_path": matching_path,
+                                  "original_output_sha256": hashlib.sha256(json.dumps(previous_output, sort_keys=True,
+                                                                                      ensure_ascii=False).encode()).hexdigest()})
         except (KeyError, TypeError, ValueError) as exc:
             errors.append(f"missing structured Worker data transfer {previous} -> {following}: {exc}")
     try:
@@ -189,7 +197,7 @@ def validate_trace(attempt: Path, receipt: dict[str, object]) -> dict[str, objec
         errors.append(f"Run manifest status is {manifest.get('status')!r}")
     return {"passed": not errors, "errors": errors, "workers": list(WORKERS),
             "local_run_ids": sorted(str(item) for item in local_ids), "tool_events": len(ledger),
-            "checkpoint_files": [str(p) for p in calls]}
+            "checkpoint_files": [str(p) for p in calls], "transfers": transfers}
 
 
 def _structured(value):
@@ -204,16 +212,43 @@ def _structured(value):
 
 
 def _contains_exact_json(value, expected) -> bool:
-    """Permit a query envelope while requiring the entire original result intact.
+    return _exact_json_path(value, expected) is not None
 
-    The Application says the next query must contain the preceding result; it
-    does not require that result to occupy the JSON root. Structural matching
-    retains every field, order within lists, scalar value and JSON scalar type.
+
+def _exact_json_path(value, expected) -> str | None:
+    """Locate an intact result in a bounded JSON query/envelope traversal.
+
+    Sibling context fields may supplement the result object, but every original
+    field retains its complete exact nested value, type, and list order. A real
+    Worker returns JSON text, so a Supervisor may preserve that text inside an
+    envelope. At most three JSON decodes per path, 32 levels and 10,000 nodes are
+    examined; malformed or excessively encoded payloads cannot count as proof.
     """
-    if _same_json(value, expected):
-        return True
-    children = value.values() if isinstance(value, dict) else value if isinstance(value, list) else ()
-    return any(_contains_exact_json(child, expected) for child in children)
+    pending = [(value, "$", 0, 3)]
+    for _ in range(10_000):
+        if not pending:
+            break
+        current, path, depth, decodes = pending.pop()
+        if depth > 32:
+            continue
+        if _same_json(current, expected):
+            return path
+        if isinstance(current, dict) and isinstance(expected, dict):
+            if expected.keys() <= current.keys() and all(_same_json(current[key], item) for key, item in expected.items()):
+                return path
+        if isinstance(current, str) and decodes and len(current) <= 1_000_000:
+            try:
+                decoded = json.loads(current)
+            except (ValueError, RecursionError):
+                continue
+            pending.append((decoded, path + "::json", depth + 1, decodes - 1))
+        elif isinstance(current, dict):
+            pending.extend((item, f"{path}[{json.dumps(key)}]", depth + 1, decodes)
+                           for key, item in reversed(list(current.items())))
+        elif isinstance(current, list):
+            pending.extend((current[index], f"{path}[{index}]", depth + 1, decodes)
+                           for index in range(len(current) - 1, -1, -1))
+    return None
 
 
 def _same_json(value, expected) -> bool:
