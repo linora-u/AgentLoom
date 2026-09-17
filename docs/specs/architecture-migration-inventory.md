@@ -1,98 +1,93 @@
-# Architecture ownership and compatibility inventory
+# Architecture ownership and migration inventory
 
-Baseline: `ca27966d`. This inventory precedes implementation; the final evidence
-report records actual moves and validation, rather than treating this plan as a
-passing result.
+Research baseline: `ca27966d`. The implementation uses the user-selected layout:
+responsibility modules live directly under `src/`, and standard setuptools
+`package-dir` configuration maps that directory to the installed `agentloom`
+package. There is no nested `src/agentloom/` or repository-root `agentloom/` tree.
+Source paths and Python import names are distinct.
 
-## Responsibilities
+The migration is intentionally breaking for old Python imports and module
+commands. Repository-owned callers, Applications, tests, templates and current
+documentation use canonical names. The old `src.*` Python identity, alias finder,
+synthetic namespaces and old module entry points are removed; the source package
+initializer rejects loading under the name `src`. This inventory describes code
+ownership, not completion of E1 acceptance or E2 review.
 
-| Current owner | Target owner | Reason |
+## Implemented owners
+
+The first column records historical baseline imports only. It is not a set of
+supported aliases.
+
+| Baseline owner at ca27966d | Physical source owner | Canonical Python owner and responsibility |
 | --- | --- | --- |
-| `src.runner`, `application_run*`, `application_revision`, scattered definition interpretation | `agentloom.application` | One Application definition, identity, revision and execution contract |
-| `src.lib.config` | `agentloom.configuration` | Shared project/model configuration, normalization and provenance |
-| `src.lib.smolagents.agent` orchestration and definition assembly | `agentloom.runtime` / `agentloom.application` | Supervisor/Worker ownership and definition semantics are AgentLoom behavior |
-| `src.lib.smolagents` upstream Agent subclasses, model adapters, patches, tool conversion | `agentloom.adapters.smolagents` | Keep actual coupling to fixed smolagents 1.26.0 visible |
-| Hook policy/dispatch, skills, checkpoint, Goal, Todo, ContextEngine, runtime storage/context | `agentloom.runtime` | Invocation-specific state and policy stay together |
-| `src.mcp`, `src.services.lsp` | `agentloom.adapters.mcp`, `agentloom.adapters.lsp` | External protocol connections |
-| `src.tools` | `agentloom.tools` | Preserve light catalog and selective implementation loader |
-| `src.extensions.self_learning` | `agentloom.self_learning` | Preserve the existing cohesive persistence/review scope |
-| `src.__main__`, scaffold, TUI bridge, schedules | CLI / Studio / scheduling adapters | Consume shared Application and Run truth |
+| `src.runner`, `src.application_run*`, `src.application_revision`, scattered definition interpretation | `src/application/` | `agentloom.application`: shared definition, paths, validation, presentation, Run identity, revision, lifecycle and execution |
+| `src.lib.config` | `src/configuration/` | `agentloom.configuration`: project/model configuration, normalization, provenance and invocation binding |
+| `src.lib.smolagents.agent` orchestration and assembly | `src/runtime/{agent,factory,invocation,loom_mixin}.py` | `agentloom.runtime`: Supervisor/Worker construction, delegation and runtime ownership |
+| Hook policy, Skills, prompts, checkpoint, Goal, Todo, ContextEngine, storage/context | `src/runtime/` responsibility modules | `agentloom.runtime`: invocation state, authorization, recovery, usage, context and persistence |
+| `src.lib.smolagents` upstream Agent subclasses, model adapters, patches and Tool conversion | `src/adapters/smolagents/` | `agentloom.adapters.smolagents`: actual coupling to fixed smolagents 1.26.0 |
+| `src.mcp`, `src.services.lsp` | `src/adapters/{mcp,lsp}/` | `agentloom.adapters.mcp`, `agentloom.adapters.lsp`: external protocol connections |
+| `src.tools` | `src/tools/` | `agentloom.tools`: lightweight catalog and selective implementation loading |
+| `src.extensions.self_learning` | `src/self_learning/` | `agentloom.self_learning`: existing persistence, recording and review responsibilities |
+| `src.__main__`, scaffold, TUI bridge, schedules | `src/__main__.py`, `src/scaffold.py`, `src/tui_bridge/`, `src/schedules/` | Canonical CLI, Studio and scheduling adapters consume Application and Run owners |
 
-The final layout must contain implementations with these responsibilities, not
-parallel copies or a new forwarding hierarchy. Behavior changes and mechanical
-moves are separate commits.
+`agentloom.runtime.agent` owns orchestration; upstream CodeAgent/ToolCallingAgent
+subclasses live in `agentloom.adapters.smolagents.agents`.
+`agentloom.runtime.tool_protocol` owns terminal ToolCallRecord values without
+importing smolagents. Tool execution and provider-message conversion stay in the
+smolagents adapter and use those same values. Hook configuration and Run policy
+can describe an outcome without importing upstream Tool execution. Runtime
+patches install when a concrete Agent implementation is imported.
 
-## External interfaces to preserve
+Configuration, registries and ContextVars have one implementation each. Canonical
+package exports lazily reference their owners; they do not recreate old module
+paths. The temporary C1/D1 alias implementation visible in earlier commits was
+removed when the user rejected compatibility. It is not part of the final layout.
 
-- Python package exports in `src.__all__`, including `C`, `get_config`, model and
-  toolset accessors, `execute_app`, `run_app` and all Run result/error/event types.
-- Existing direct `src.*` imports: factory, Agent subclasses, Hook types,
-  ToolCallRecord, tools, model/config access, checkpoint serializers, tracing
-  ContextVars and registries. New and old paths must resolve to identical modules
-  or the same objects; patching a legacy module must affect the implementation.
-- `loom` console script, `python -m src`, new `python -m agentloom`, existing CLI
-  parameters, exit states, JSONL output, resume/task identity.
-- TUI isolated Python bridge (`python -I -u -m src.tui_bridge` at baseline), both
-  installed-interpreter and project/uv fallback selection.
-- String imports in Application `tools` definitions and generated scaffolds;
-  application-owned `applications.*` tools; dynamic function lookup.
-- YAML/Markdown workflows, Worker typed schemas and relative/absolute Worker
-  references; Application config layering, nested Application identity, Skill and
-  prompt paths. Existing valid Applications require no manual rewrites.
-- Bundled YAML/Jinja/Markdown prompt and workflow resources, CLI/TUI resource
-  discovery, editable and wheel installs from outside the checkout.
-- Checkpoint serializer class lookup, task/run manifests, cumulative usage,
-  filesystem/runtime home defaults, historic task identity and committed effects.
-- Read-only catalog, definition and Studio entry points must remain lazy and
+## Current public interfaces and preserved behavior
+
+- Python callers use `agentloom`, including its lazy `C`, configuration accessors,
+  `execute_app`, `run_app` and Run result/error/event exports. Direct imports use
+  the canonical responsibility owners above.
+- Supported commands are `loom` and `python -m agentloom`. CLI parameters, exit
+  states, JSONL output and resume/task semantics are preserved. Old
+  `python -m src` and `src.tui_bridge` commands are unsupported.
+- TUI uses `python -I -u -m agentloom.tui_bridge`; installed-interpreter and
+  project/uv selection must both resolve the installed package. The domain CLI
+  uses `agentloom.tui_bridge.domain_cli` with explicit project context.
+- Framework Tool strings and generated scaffolds use `agentloom.*`. Tools owned
+  by Applications retain `applications.*` imports resolved from explicit project
+  context. External integrations must migrate old framework import strings.
+- YAML/Markdown definition format, typed Worker schemas, Worker reference rules,
+  nested Application identity, configuration layering, Skill discovery and prompt
+  semantics remain supported. Repository-owned definitions migrate with code.
+- Editable and wheel installations expose `agentloom` outside the checkout,
+  including isolated Python. YAML/Jinja/Markdown prompt resources and SCM syntax
+  queries are bundled under the installed package. Wheels exclude the old `src`
+  package identity and sibling repository assets.
+- Checkpoint serialization, task/run manifests, cumulative usage, runtime data
+  locations, historic task identity and committed effects retain their contracts.
+  Historical source capsules bind files from their own revision; current source
+  manifests bind the mapped `src/` tree. Reading old persisted data does not
+  require an old Python import compatibility layer.
+- Read-only catalog, definition and Studio entry points remain lazy and must
   cause no model requests, MCP processes, Shell Hooks or Run allocation.
 
-## Baseline and evidence protocol
+## Evidence and delivery gate
 
-The full Python suite is the CI command including the two explicit memory campaign
-contract files. Record test collection and pass/fail/error/skip totals. TUI requires
-tests, typecheck and build. Python 3.12 follows CI; automatic Python 3.14 selection
-fails in the existing pinned `sqlean-py` source dependency, so it is not used to
-change the dependency lock for this migration.
+The required Python suite includes the full CI command and its two explicit
+memory-campaign contract files, plus affected Application tests. Record collection
+and pass/fail/error/skip totals. TUI requires tests, typecheck and build. Python
+3.12 follows CI; the baseline Python 3.14 attempt failed in pinned `sqlean-py`,
+so the migration does not change the dependency lock to use that interpreter.
 
-Real acceptance is F1–F9 in the specification. Each runner uses a fresh controlled
-workspace, an explicit timeout and execution limits, genuine configured models,
-Run/Worker/tool evidence and independent artifact assertions. Baseline failures
-are retained; neither model success text nor two equally wrong read paths count
-as verification. Baseline recovery material is retained outside the checkout for
-candidate-version resume.
+Real F1–F9 acceptance uses fresh controlled workspaces, explicit time and execution
+limits, configured models, Run/Worker/Tool evidence and independent artifact
+assertions. Baseline and failed candidate attempts remain retained. Historical
+checkpoint recovery runs against saved baseline state without changing committed
+effects. Installation and source-origin checks cover the mapped source layout.
 
-Local evidence: `/Users/bytedance/code/data_clear/agentloom-architecture-notes/`.
-Ignored `config/llm.yaml` is copied into each worktree. No secret values, prior
-runtime data, `codex/`, or `temp/` reference checkout is added to the PR.
-
-## Responsibility migration (C1)
-
-The implementation now uses these owners inside the existing `src` namespace.
-The subsequent D1 commit changes the public package name separately.
-
-| Owner | Implementation |
-| --- | --- |
-| Application | `application/{definition,paths,presentation,validation,readiness,runner,run,lifecycle,revision,workflows}` |
-| Configuration | `configuration/` (the existing single config proxy and invocation binding) |
-| Agent runtime | `runtime/{agent,factory,invocation,loom_mixin}` and runtime Hook, Skill, prompt, memory, Goal, Todo, checkpoint, ContextEngine, permissions, trace, storage and logging modules |
-| smolagents adapter | `adapters/smolagents/{agents,tool_shim,tool_protocol,tool_argument_coercion}`, upstream patches, model and Tool wrappers |
-| External adapters | `adapters/{mcp,lsp}` |
-| Self-learning | `self_learning/`, preserving its existing persistence owner |
-| Tools and UI adapters | `tools/`, CLI, `tui_bridge/`, schedules and UI consume these owners |
-
-`runtime.agent` retains Supervisor/Worker orchestration. Its old upstream
-CodeAgent/ToolCallingAgent subclasses now live in `adapters.smolagents.agents`.
-`runtime.tool_protocol` owns terminal ToolCallRecord values without importing
-smolagents; execution and provider-message conversion stay in the adapter, which
-reexports those exact values for compatibility. Hook configuration and Run policy
-therefore no longer import the upstream Tool execution layer just to name an
-outcome. Runtime patches still install only when a concrete Agent is imported.
-
-`src._compat` resolves historical module paths lazily to those implementation
-modules. Moved leaf modules share identity, globals, registries and ContextVars;
-unchanged package subtrees share package identity too. Historical grouping
-namespaces whose child names have split remain lightweight containers, so both
-`import old.leaf` and `from old.parent import leaf` still work. The loader retains
-canonical metadata and delegates executable-module loading for `python -m`.
-No reference checkout, previous runtime directory or stored checkpoint format is
-changed by this migration.
+Local evidence lives at
+`/Users/bytedance/code/data_clear/agentloom-architecture-notes/`. Each worktree has
+its own ignored `config/llm.yaml`; secret values, earlier runtime data and reference
+checkouts are excluded from commits. Required E1 checks and E2 review must finish
+before the final GitHub push. No result in this inventory waives that gate.
