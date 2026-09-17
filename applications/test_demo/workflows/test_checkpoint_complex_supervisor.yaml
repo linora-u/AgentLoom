@@ -63,3 +63,6 @@ max_steps: 10
 
 execution_env:
   type: "local"
+  executor_kwargs:
+    # The whole Python block includes the synchronous Worker's model/tool calls.
+    timeout_seconds: 1200

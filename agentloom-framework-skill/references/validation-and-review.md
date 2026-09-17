@@ -142,6 +142,8 @@ ContextEngine/CCR 额外必须验证：
 
 它会运行 `applications/test_demo/workflows/test_checkpoint_complex_supervisor.yaml`，分别制造 Supervisor 中断、Worker 中断和已完成 Worker 交接处中断，并检查最终文件、task event、worker call 复用和 Worker memory restore。
 
+该 Supervisor 在已发布 YAML 中声明 `timeout_seconds: 1200`，因为同步 Worker 的完整运行时间计入调用方 Python 代码块预算。验收副本须保留这一配置，记录定义 hash；不要用未记录的脚本超时覆盖掩盖失败。超过预算后执行器会等待线程结束再报错，不会取消已提交的副作用；同一次 attempt 内随后重试仍是新调用，不能算作 checkpoint resume 的复用保证。
+
 Supervisor 中断必须等到初始化副作用 ledger 与预期文件均落盘、对应成功且有 observation 的 ActionStep 已提交到 checkpoint，并且 Worker 尚未启动。只有 Todo 步数或文件已出现都不足以证明这个时机；初始化 shell 会清空工作目录，过早注入的恢复探针会被合法删除。停止进程后须再次检查边界，再注入 ContextRef / file-history 探针。历史恢复使用新建的 `--prepare-only` 材料和 `--resume-state`，保留失败尝试，不覆盖或改写已有 checkpoint。
 
 如果真实模型调用因权限、额度或超时失败，不能标为通过；记录失败命令、错误文本、已产生的 checkpoint 证据，以及还缺哪条功能路径。
