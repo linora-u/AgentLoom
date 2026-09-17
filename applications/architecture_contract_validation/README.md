@@ -59,14 +59,36 @@ Each attempt contains:
   cannot pass acceptance.
 
 Artifact checks require unchanged baseline tests/configuration/contract, all
-eight named behavior families collected and passing, zero skipped tests, and at
+nine named behavior families collected and passing, zero skipped tests, and at
 least five failures when generated tests are applied to original source. Trace
 checks require all four distinct Worker local runs, actual model usage, persisted
 completed Worker checkpoints, intact output-to-input transfers (including a
 complete preceding result inside a JSON or JSON-text wrapper, or accompanied by
 sibling context fields; original nested values and types must remain exact), real implementer
 and verifier pytest calls, an accurately referenced verifier report, and completed
-Run state. Supervisor Python evidence comes only from the exact Application/task
+Run state. The `zero_price` family distinguishes an empty cart from a nonempty
+zero-valued cart under positive and zero free-shipping thresholds; zero subtotal
+does not imply an empty cart. The 50-check oracle remains independent of model
+instructions and generated tests.
+
+`reports/final.json.test_report` is a relative-path string from the final verifier's
+actual `run_workspace_tests.report` field. The existing writer rejects malformed
+final reports before writing: field types and current identity, local generated
+files, pytest JSON/JUnit agreement, and an actual test-call ledger entry must match.
+It returns an actionable error and never fills in model claims. Trace validation
+separately requires the final verifier's own successful call and true verdict.
+
+Worker transfers are matched by receipt Application/task, per-call checkpoint
+identity, canonical start/finish order, input hash, and local tool-event identity.
+The input hash is recomputed from the checkpoint's actual task text using the
+runtime's SHA-256 prefix rule; matching hash fields alone are insufficient.
+Repeated calls may produce different results; only an intact result completed
+before the consuming call can establish an edge. Corrective verifier→repair→verifier
+iterations retain their earlier investigation/planning lineage. Validation records
+the selected call indices, checkpoint paths, completion/start times and result hashes;
+future or foreign-task results cannot satisfy a transfer.
+
+Supervisor Python evidence comes only from the exact Application/task
 checkpoint named by the receipt, with matching task and run IDs; other tasks
 and Worker Python actions cannot satisfy it. Policy checks read the persisted `ToolCallRecord`, require `blocked`
 with the expected reason, and verify the requested file was never written.

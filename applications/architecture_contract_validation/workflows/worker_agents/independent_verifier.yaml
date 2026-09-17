@@ -13,9 +13,13 @@ workflow: Parse query as the repair_implementer result. Independently read CONTR
   all changed source files and every generated test via read_workspace_file. Check
   the implementation against the contract, including bool rejection, empty override,
   unknown/non-mapping config, quantity bounds, inclusive shipping threshold, integer
-  discount and multi-line carts. Do not change source or tests. Run run_workspace_tests(workspace,
+  discount, multi-line carts, and the distinction between empty and nonempty zero-priced
+  carts. Require zero_price regressions with positive and zero free-shipping thresholds;
+  inspect their assertions and the empty-cart predicate. Missing coverage or treating
+  zero subtotal as empty must produce verified=false. Do not change source or tests. Run run_workspace_tests(workspace,
   label="verifier") yourself. Return JSON with workspace, case_nonce, changed_files,
-  generated_tests, test_report (YOUR actual report path), verified (true only if code
+  generated_tests, test_report (the relative-path string from YOUR run_workspace_tests.report,
+  never the whole report object), verified (true only if code
   review and actual tests pass), and summary explaining evidence. A test file's existence
   is not execution. If defects remain return verified=false with specific findings.
   Preserve nonce.
