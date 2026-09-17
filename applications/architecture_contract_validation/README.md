@@ -54,7 +54,8 @@ Artifact checks require unchanged baseline tests/configuration/contract, all
 eight named behavior families collected and passing, zero skipped tests, and at
 least five failures when generated tests are applied to original source. Trace
 checks require all four distinct Worker local runs, actual model usage, persisted
-completed Worker checkpoints, intact output-to-input transfers, real implementer
+completed Worker checkpoints, intact output-to-input transfers (including a
+complete preceding result inside a JSON wrapper), real implementer
 and verifier pytest calls, an accurately referenced verifier report, and completed
 Run state. Policy checks read the persisted `ToolCallRecord`, require `blocked`
 with the expected reason, and verify the requested file was never written.
