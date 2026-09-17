@@ -254,11 +254,12 @@ def validate_trace(attempt: Path, receipt: dict[str, object]) -> dict[str, objec
             if (previous["worker"] not in allowed or previous["finish_order"] >= record["start_order"]
                     or previous["finished_at"] > record["started_at"]):
                 continue
-            query_path = _exact_json_path(record["query"], previous["output"])
-            if query_path is None:
+            query_match = _exact_json_match(record["query"], previous["output"])
+            if query_match is None:
                 continue
             transfer = {
-                "from": previous["worker"], "to": name, "query_path": query_path,
+                "from": previous["worker"], "to": name, "query_path": query_match["path"],
+                "query_json_spans": query_match["json_spans"],
                 "from_call_index": previous["call_index"], "to_call_index": record["call_index"],
                 "from_checkpoint": previous["checkpoint"], "to_checkpoint": record["checkpoint"],
                 "from_local_run_id": previous["local_run_id"], "to_local_run_id": record["local_run_id"],
@@ -323,37 +324,76 @@ def _contains_exact_json(value, expected) -> bool:
 
 
 def _exact_json_path(value, expected) -> str | None:
-    """Locate an intact result in a bounded JSON query/envelope traversal.
+    match = _exact_json_match(value, expected)
+    return match["path"] if match is not None else None
+
+
+def _exact_json_match(value, expected) -> dict | None:
+    """Locate an intact result, preserving replayable paths and decoded spans.
 
     Sibling context fields may supplement the result object, but every original
     field retains its complete exact nested value, type, and list order. A real
     Worker returns JSON text, so a Supervisor may preserve that text inside an
-    envelope. At most three JSON decodes per path, 32 levels and 10,000 nodes are
-    examined; malformed or excessively encoded payloads cannot count as proof.
+    envelope or free text. A malformed outer envelope does not invalidate an
+    intact JSON object inside it. raw_decode only reads complete containers; it
+    never repairs text or assembles fields from separate fragments.
+
+    At most three JSON decodes per path, 32 levels and 10,000 nodes are examined.
+    Strings are at most one million characters; fallback scanning also limits
+    candidates to 10,000 and cumulative consumed/error spans to four million.
+    ::json_at[start:end] slices Unicode characters in the current string before
+    decoding, and json_spans records the same raw_decode boundaries for replay.
     """
-    pending = [(value, "$", 0, 3)]
+    decoder = json.JSONDecoder()
+    remaining_attempts, remaining_characters = 10_000, 4_000_000
+    pending = [(value, "$", 0, 3, [])]
     for _ in range(10_000):
         if not pending:
             break
-        current, path, depth, decodes = pending.pop()
+        current, path, depth, decodes, spans = pending.pop()
         if depth > 32:
             continue
         if _same_json(current, expected):
-            return path
+            return {"path": path, "json_spans": spans}
         if isinstance(current, dict) and isinstance(expected, dict):
             if expected.keys() <= current.keys() and all(_same_json(current[key], item) for key, item in expected.items()):
-                return path
+                return {"path": path, "json_spans": spans}
         if isinstance(current, str) and decodes and len(current) <= 1_000_000:
             try:
                 decoded = json.loads(current)
-            except (ValueError, RecursionError):
+            except RecursionError:
                 continue
-            pending.append((decoded, path + "::json", depth + 1, decodes - 1))
+            except ValueError:
+                fragments = []
+                offset = 0
+                while offset < len(current) and remaining_attempts and remaining_characters > 0:
+                    if current[offset] not in "{[":
+                        offset += 1
+                        continue
+                    remaining_attempts -= 1
+                    try:
+                        decoded, end = decoder.raw_decode(current, offset)
+                    except json.JSONDecodeError as exc:
+                        remaining_characters -= max(1, exc.pos - offset)
+                        offset += 1
+                        continue
+                    except RecursionError:
+                        break
+                    remaining_characters -= end - offset
+                    if remaining_characters < 0:
+                        break
+                    span = {"input_path": path, "offset": offset, "end": end, "characters": end - offset}
+                    fragments.append((decoded, f"{path}::json_at[{offset}:{end}]", depth + 1,
+                                      decodes - 1, [*spans, span]))
+                    offset = end  # Nested values are visited through this decoded container.
+                pending.extend(reversed(fragments))
+            else:
+                pending.append((decoded, path + "::json", depth + 1, decodes - 1, spans))
         elif isinstance(current, dict):
-            pending.extend((item, f"{path}[{json.dumps(key)}]", depth + 1, decodes)
+            pending.extend((item, f"{path}[{json.dumps(key)}]", depth + 1, decodes, spans)
                            for key, item in reversed(list(current.items())))
         elif isinstance(current, list):
-            pending.extend((current[index], f"{path}[{index}]", depth + 1, decodes)
+            pending.extend((current[index], f"{path}[{index}]", depth + 1, decodes, spans)
                            for index in range(len(current) - 1, -1, -1))
     return None
 
