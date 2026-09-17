@@ -22,7 +22,7 @@ skills:
 
 Skill 的模型上下文加载始终按需进行：
 
-1. Agent 启动时发现并解析 `SKILL.md` 包。
+1. 共享定义预检在分配 Run 前，发现并解析 Supervisor 和所有引用 Worker 的 `SKILL.md` 包。
 2. system prompt 只获得允许使用的 Skill 的 `name` 和 `description`。
 3. 任务匹配时，模型调用 `skill(name)`。
 4. 工具结果只把被选中的说明、基础目录和抽样文件列表加入对话。
@@ -30,6 +30,12 @@ Skill 的模型上下文加载始终按需进行：
 Agent 没有 `skill` 工具时，catalogue 也不会显示。系统没有 eager 模式。
 激活 Skill 不会授予文件、Shell、脚本或网络权限；Agent 的常规工具和权限仍是唯一依据。
 读取包内资源或执行命令时，使用这些常规工具。
+
+Studio 与执行使用同一次静态检查的结果。非法 frontmatter、名称及同层重名会在
+Run 分配前拒绝。检查只读取 Skill 数据，不创建模型、加载工具实现、连接 MCP 或执行 Hook。
+
+每个准备好的 Agent 定义保留已解析的 Skill 目录与正文。新的检查或调用看到磁盘编辑，
+已有调用继续使用原正文。激活时仍从当前目录采样资源文件位置，不冻结所有资源文件。
 
 ## `SKILL.md` 契约
 

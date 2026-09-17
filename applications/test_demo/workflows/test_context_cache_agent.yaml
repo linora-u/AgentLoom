@@ -16,7 +16,7 @@ workflow: |
   Verify: output contains "Agent started successfully".
 
   ## Step 2: Read the litellm_model.py source
-  Use read_file to read lines 80-110 of file "src/lib/smolagents/models/litellm_model.py".
+  Use read_file to read lines 426-480 of file "src/adapters/smolagents/models/litellm_model.py".
   Expected: you should see the _inject_cache_control method that handles universal
   cache_control injection for all providers.
   Verify: output contains "_inject_cache_control" and "cache_control" and "ephemeral".
@@ -27,7 +27,7 @@ workflow: |
   Verify: output shows "context_cache: true".
 
   ## Step 4: Verify no provider-specific code remains
-  Use shell_tool to run: grep -c "is_claude\|is_gpt\|_enable_anthropic_caching\|_enable_openai_caching" src/lib/smolagents/models/litellm_model.py || echo "CLEAN: 0 matches"
+  Use shell_tool to run: grep -c "is_claude\|is_gpt\|_enable_anthropic_caching\|_enable_openai_caching" src/adapters/smolagents/models/litellm_model.py || echo "CLEAN: 0 matches"
   Expected: No provider-specific caching code should exist.
   Verify: output shows "CLEAN: 0 matches" or count is 0.
 

@@ -24,7 +24,8 @@ mode or grant execution privileges.
 
 Skill loading is always model-context-on-demand:
 
-1. Agent startup discovers and parses `SKILL.md` packages.
+1. Shared definition preflight discovers and parses `SKILL.md` packages for the
+   Supervisor and every referenced Worker before allocating a Run.
 2. The system prompt receives only each permitted Skill's `name` and `description`.
 3. When a task matches, the model calls `skill(name)`.
 4. That tool result adds only the selected instructions, base directory, and a
@@ -34,6 +35,16 @@ The catalogue is hidden when the Agent does not have the `skill` tool. There is
 no eager mode. Skill activation does not grant file, shell, script, or network
 access; the Agent's normal tools and permissions remain authoritative. Use
 those normal tools to read package resources or run commands.
+
+Studio and execution use the same static inspection result. Invalid frontmatter,
+names, and duplicate names within one scope reject the definition before Run
+allocation. Inspection reads Skill data without constructing models, loading tool
+implementations, connecting MCP servers, or executing Hooks.
+
+Each prepared Agent definition retains its parsed Skill catalogue and instruction
+text. A fresh inspection or invocation sees file edits; an existing invocation
+keeps its original instructions. Activation still samples resource file locations
+from the current directory; it does not freeze all resource files.
 
 ## `SKILL.md` contract
 

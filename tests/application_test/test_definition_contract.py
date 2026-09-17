@@ -232,7 +232,135 @@ def test_invalid_worker_is_rejected_before_any_run_allocation(tmp_path, monkeypa
     assert len(events) == 1 and events[0].event == "run.rejected"
 
 
-def test_file_tool_cache_uses_content_and_preserves_existing_callable(tmp_path):
+@pytest.mark.parametrize("target", ["supervisor", "worker"])
+@pytest.mark.parametrize(
+    "manifests,message",
+    [
+        ({"agent-skills/bad_name": "---\nname: bad_name\ndescription: Invalid name.\n---\nInstructions.\n"}, "kebab-case"),
+        ({"agent-skills/broken": "---\nname: [unterminated\n---\nInstructions.\n"}, "Invalid skill frontmatter"),
+        ({"agent-skills/missing": "---\nname: missing\n---\nInstructions.\n"}, "field 'description'"),
+        (
+            {
+                "agent-skills/same-name": "---\nname: same-name\ndescription: First.\n---\nFirst.\n",
+                "other-skills/same-name": "---\nname: same-name\ndescription: Second.\n---\nSecond.\n",
+            },
+            "Duplicate skill name 'same-name'",
+        ),
+    ],
+    ids=["invalid-name", "malformed-frontmatter", "missing-description", "duplicate-name"],
+)
+def test_invalid_discovered_skill_is_rejected_before_any_run_allocation(tmp_path, monkeypatch, target, manifests, message):
+    from types import SimpleNamespace
+
+    import agentloom.application.runner as runner
+    from agentloom.tui_bridge.application_studio import application_detail
+
+    base = project_config(tmp_path)
+    app = tmp_path / "applications/demo"
+    skill_config = "skills: {paths: [agent-skills, other-skills]}\n"
+    path = write(
+        app / "workflows/root.yaml",
+        BASE + "worker_agents: [{path: child.yaml}]\n" + (skill_config if target == "supervisor" else ""),
+    )
+    write(path.parent / "worker_agents/child.yaml", BASE + SCHEMA + (skill_config if target == "worker" else ""))
+    for directory, content in manifests.items():
+        write(app / directory / "SKILL.md", content)
+
+    detail = application_detail(tmp_path, "demo", systems=[{"path": str(path.relative_to(tmp_path)), "application_id": "demo"}])
+    assert detail["application"]["health"] == "invalid"
+    agent = detail["agents"][0]
+    assert any(message in error for error in agent["validation"]["errors"])
+    if target == "worker":
+        assert any(message in error for error in agent["workers"][0]["validation"]["errors"])
+    errors = validate_agent_definition(tmp_path, str(path), load_agent_definition(path))
+    assert any(message in error for error in errors), errors
+
+    monkeypatch.setattr(runner, "C", SimpleNamespace(agent_root=tmp_path))
+    monkeypatch.setattr(runner, "get_config", lambda: base)
+    monkeypatch.setattr(runner, "generate_runtime_id", lambda *args: pytest.fail("allocated a Run for invalid Skill"))
+    events = []
+    with pytest.raises(ValueError, match=message):
+        runner.execute_app(path, event_sink=events.append)
+    assert not (tmp_path / ".agentloom").exists()
+    assert len(events) == 1 and events[0].event == "run.rejected"
+
+
+def test_skill_instructions_are_pinned_for_each_runtime_definition_and_refresh_on_next_preparation(tmp_path, monkeypatch):
+    import json
+    import logging
+
+    from agentloom.application.definition import prepare_application_definition
+    from agentloom.application.presentation import configuration_projection
+    from agentloom.runtime.agent import AgentRoleProfile, AgentType, RoleDrivenAgent
+    from agentloom.runtime.skills.catalog import SkillCatalog
+
+    class SnapshotAgent(RoleDrivenAgent):
+        def _role_profile(self):
+            return AgentRoleProfile(agent_type=AgentType.WORKER, tool_call_type="tool_call")
+
+        def _get_tools(self):
+            return []
+
+    def skill(path, instructions):
+        return write(path, f"---\nname: shared-review\ndescription: Shared review.\n---\n{instructions}\n")
+
+    base = project_config(tmp_path)
+    app = tmp_path / "applications/demo"
+    path = write(app / "workflows/root.yaml", BASE + "worker_agents: [{path: child.yaml}]\n")
+    worker = write(path.parent / "worker_agents/child.yaml", BASE + SCHEMA + "skills: {paths: [agent-skills]}\n")
+    skill(tmp_path / "skills/shared-review/SKILL.md", "Project instructions.")
+    app_skill = skill(app / "skills/shared-review/SKILL.md", "Original application instructions.")
+    agent_skill = skill(app / "agent-skills/shared-review/SKILL.md", "Original agent instructions.")
+    first = prepare_application_definition(tmp_path, path, load_agent_definition(path), base_config=base)
+    skill(app_skill, "Edited application instructions.")
+    skill(agent_skill, "Edited agent instructions.")
+    second = prepare_application_definition(tmp_path, path, load_agent_definition(path), base_config=base)
+
+    monkeypatch.setattr(SkillCatalog, "discover", lambda *args, **kwargs: pytest.fail("runtime reread pinned Skills"))
+    for prepared, prefix in [(first, "Original"), (second, "Edited")]:
+        definitions = [(prepared, "application"), (prepared["_worker_definitions"][str(worker)], "agent")]
+        for definition, scope in definitions:
+            agent = SnapshotAgent(config=definition, model=object(), logger=logging.getLogger(__name__))
+            catalog = agent._skill_catalog
+            assert catalog.summaries()[0].scope == scope
+            assert catalog.activate("shared-review").instructions == f"{prefix} {scope} instructions.\n"
+            public = json.dumps(configuration_projection(definition["_effective_agent_config_snapshot"], tmp_path))
+            assert "_skill_catalog_snapshot" not in public
+            assert "instructions." not in public
+    assert "_skill_catalog_snapshot" not in base.raw
+
+
+def test_studio_uses_the_catalog_parsed_during_its_single_definition_inspection(tmp_path, monkeypatch):
+    import json
+
+    from agentloom.runtime.skills.catalog import SkillCatalog
+    from agentloom.tui_bridge.application_studio import application_detail
+
+    project_config(tmp_path)
+    app = tmp_path / "applications/demo"
+    path = write(app / "workflows/root.yaml", BASE)
+    manifest = write(app / "skills/review/SKILL.md", "---\nname: review\ndescription: Original summary.\n---\nPrivate instructions.\n")
+    discover = SkillCatalog.discover
+    calls = []
+
+    def edit_after_discovery(sources, **kwargs):
+        catalog = discover(sources, **kwargs)
+        calls.append(catalog)
+        write(manifest, "---\nname: review\ndescription: Edited summary.\n---\nEdited private instructions.\n")
+        return catalog
+
+    monkeypatch.setattr(SkillCatalog, "discover", edit_after_discovery)
+    systems = [{"path": str(path.relative_to(tmp_path)), "application_id": "demo"}]
+    first = application_detail(tmp_path, "demo", systems=systems)
+    assert len(calls) == 1
+    assert first["agents"][0]["skills"][0]["description"] == "Original summary."
+    assert "Private instructions." not in json.dumps(first)
+    second = application_detail(tmp_path, "demo", systems=systems)
+    assert len(calls) == 2
+    assert second["agents"][0]["skills"][0]["description"] == "Edited summary."
+
+
+def test_fresh_file_tool_definition_preserves_existing_callable(tmp_path):
     from agentloom.runtime.factory import YamlAgentFactory
 
     class DefinitionTool:
@@ -246,14 +374,12 @@ def test_file_tool_cache_uses_content_and_preserves_existing_callable(tmp_path):
             return work
 
     path = write(tmp_path / "worker.yaml", BASE)
-    YamlAgentFactory.clear_tool_cache()
     first = YamlAgentFactory.create_agent_as_tool(path, agent_class=DefinitionTool)
     write(path, BASE.replace("Run the task.", "Use new definition."))
     second = YamlAgentFactory.create_agent_as_tool(path, agent_class=DefinitionTool)
     assert first() == "Run the task."
     assert second() == "Use new definition."
     assert first is not second
-    YamlAgentFactory.clear_tool_cache()
 
 
 def test_worker_resolution_rejects_symlink_escape_and_allows_absolute_file(tmp_path):
@@ -293,6 +419,7 @@ mcp_servers: config/test.mcp.json
 """,
     )
     write(tmp_path / "config/test.mcp.json", '{"mcpServers":{"test":{"type":"http","url":"http://127.0.0.1:9/mcp"}}}')
+    write(tmp_path / "applications/demo/skills/review/SKILL.md", "---\nname: review\ndescription: Review.\n---\nPrivate review instructions.\n")
     program = """
 import json, sys
 from pathlib import Path
@@ -300,6 +427,13 @@ from agentloom.tui_bridge.bridge import TuiBridge
 root = Path(sys.argv[1])
 detail = TuiBridge(root).dispatch('application.detail', {'application_id':'demo'})
 assert detail['agents'][0]['validation']['valid'], detail
+assert detail['agents'][0]['skills'][0]['name'] == 'review'
+assert 'Private review instructions.' not in json.dumps(detail)
+from agentloom.application.definition import load_agent_definition, prepare_application_definition
+from agentloom.configuration.config import load_project_config
+path = root / 'applications/demo/workflows/root.yaml'
+prepared = prepare_application_definition(root, path, load_agent_definition(path), base_config=load_project_config(root))
+assert prepared['_skill_catalog_snapshot'].activate('review').instructions == 'Private review instructions.\\n'
 for prefix in ('litellm', 'agentloom.runtime.agent', 'agentloom.tools.file_ops', 'agentloom.tools.shell', 'agentloom.tools.search'):
     assert not any(name == prefix or name.startswith(prefix + '.') for name in sys.modules), prefix
 assert not (root / '.agentloom').exists()
