@@ -172,7 +172,7 @@ def validate_trace(attempt: Path, receipt: dict[str, object]) -> dict[str, objec
         try:
             previous_output = _structured(by_worker[previous]["output"])
             next_input = _structured(by_worker[following]["input"]["query"])
-            if previous_output != next_input:
+            if not _contains_exact_json(next_input, previous_output):
                 errors.append(f"Worker result was not passed intact: {previous} -> {following}")
         except (KeyError, TypeError, ValueError) as exc:
             errors.append(f"missing structured Worker data transfer {previous} -> {following}: {exc}")
@@ -201,6 +201,30 @@ def _structured(value):
             text = text.split("\n", 1)[1].rsplit("```", 1)[0]
         value = json.loads(text)
     return value
+
+
+def _contains_exact_json(value, expected) -> bool:
+    """Permit a query envelope while requiring the entire original result intact.
+
+    The Application says the next query must contain the preceding result; it
+    does not require that result to occupy the JSON root. Structural matching
+    retains every field, order within lists, scalar value and JSON scalar type.
+    """
+    if _same_json(value, expected):
+        return True
+    children = value.values() if isinstance(value, dict) else value if isinstance(value, list) else ()
+    return any(_contains_exact_json(child, expected) for child in children)
+
+
+def _same_json(value, expected) -> bool:
+    # Python considers True == 1 and 1 == 1.0; these are not intact JSON values.
+    if type(value) is not type(expected):
+        return False
+    if isinstance(value, dict):
+        return value.keys() == expected.keys() and all(_same_json(value[key], expected[key]) for key in value)
+    if isinstance(value, list):
+        return len(value) == len(expected) and all(_same_json(left, right) for left, right in zip(value, expected, strict=True))
+    return value == expected
 
 
 def _checkpoint_query(task_input: str) -> str:
