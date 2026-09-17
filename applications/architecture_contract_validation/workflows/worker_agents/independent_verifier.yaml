@@ -1,0 +1,38 @@
+name: independent_verifier
+description: Architecture contract independent verifier
+model_type: powerful
+tool_call_type: tool_call
+max_steps: 24
+todo:
+  mode: 'off'
+toolsets: []
+context_engine:
+  min_chars: 80000
+  preview_max_chars: 80000
+workflow: Parse query as the repair_implementer result. Independently read CONTRACT.md,
+  all changed source files and every generated test via read_workspace_file. Check
+  the implementation against the contract, including bool rejection, empty override,
+  unknown/non-mapping config, quantity bounds, inclusive shipping threshold, integer
+  discount and multi-line carts. Do not change source or tests. Run run_workspace_tests(workspace,
+  label="verifier") yourself. Return JSON with workspace, case_nonce, changed_files,
+  generated_tests, test_report (YOUR actual report path), verified (true only if code
+  review and actual tests pass), and summary explaining evidence. A test file's existence
+  is not execution. If defects remain return verified=false with specific findings.
+  Preserve nonce.
+agent_function_schema:
+  description: independent verifier
+  inputs:
+    query:
+      description: JSON result from the previous stage, with absolute workspace and
+        unique case_nonce.
+      required: true
+  output:
+    description: Structured JSON stage evidence, preserving workspace and case_nonce.
+tools:
+- name: read_workspace_file
+  module: applications.architecture_contract_validation.agent_tools.workspace_tools
+  function: read_workspace_file
+- name: run_workspace_tests
+  module: applications.architecture_contract_validation.agent_tools.workspace_tools
+  function: run_workspace_tests
+worker_agents: []
