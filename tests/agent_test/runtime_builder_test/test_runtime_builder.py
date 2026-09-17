@@ -1000,6 +1000,44 @@ def test_max_steps_worker_is_failed_before_checkpoint_success(tmp_path, monkeypa
     assert checkpoint["status"] == "failed"
 
 
+def test_shipped_checkpoint_worker_call_preserves_literal_input_across_executor_recreation(tmp_path):
+    import ast
+
+    from smolagents import LocalPythonExecutor
+
+    from agentloom.application.definition import load_agent_definition
+
+    root = Path(__file__).resolve().parents[3]
+    source = root / "applications/test_demo/workflows/test_checkpoint_complex_supervisor.yaml"
+    workflow = load_agent_definition(source)["workflow"]
+    workflow = workflow.replace("/tmp/agentloom_ckpt_complex", str(tmp_path / "work space"))
+    phase = workflow.split("## Phase 2:", 1)[1].split("## Phase 3:", 1)[0]
+    lines = [line.strip() for line in phase.splitlines() if line.strip().startswith("worker_result =")]
+    assert len(lines) == 1
+    statement = ast.parse(lines[0]).body[0]
+    assert isinstance(statement, ast.Assign) and isinstance(statement.value, ast.Call)
+    assert statement.value.func.id == "artifact_worker"
+    assert len(statement.value.keywords) == 1 and statement.value.keywords[0].arg == "query"
+    literal = ast.literal_eval(statement.value.keywords[0].value)
+    assert isinstance(literal, str) and "\n" not in literal
+    assert str(tmp_path / "work space") in literal
+    inputs = []
+
+    def capture_worker(query):
+        inputs.append(query)
+        return "worker-result"
+
+    for _attempt in range(2):
+        executor = LocalPythonExecutor([])
+        executor.send_tools({"artifact_worker": capture_worker})
+        executor(lines[0])
+    assert inputs == [literal, literal]
+    input_hash = base_agent_module.SubTaskTrackedAgent._compute_input_hash
+    assert input_hash(inputs[0]) == input_hash(inputs[1])
+    # Resume identity remains exact; the Application owns stable query text.
+    assert input_hash(literal.replace(". Read", ".\nRead", 1)) != input_hash(literal)
+
+
 def test_shipped_checkpoint_supervisor_budget_reaches_real_local_executor(monkeypatch):
     from smolagents import AgentLogger, LocalPythonExecutor
 

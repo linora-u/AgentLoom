@@ -156,7 +156,9 @@ Resume 的恢复链路为：
   -> 使用新的 run_id 继续执行
 ```
 
-每次 Worker 调用拥有独立的 `workers/<worker>/calls/<call_index>/checkpoint.json`，并发调用不会互相覆盖。Resume 会复用未完成的 call index，不会为同一段中断工作再创建一个重复调用。
+每次 Worker 调用拥有独立的 `workers/<worker>/calls/<call_index>/checkpoint.json`，并发调用不会互相覆盖。Worker 输入完全相同时，Resume 才会复用未完成的 call index。
+
+调用身份根据完整格式化后的 Worker task 计算哈希，包括 query 中的空白字符。把换行改成空格或改写 query 会改变身份，产生新调用。Application 必须逐字重放原始 query；复杂 checkpoint Supervisor 为首次执行和 resume 提供同一条固定单行 Python 字符串。Runtime 不会归一化不同输入来合并调用。
 
 Supervisor 与 Worker heartbeat 都记录当前 `run_id`。崩溃检测会检查 heartbeat 是否缺失/停止、PID 是否存活以及时间戳是否过期。Resume 后会在同一个 task checkpoint 中写入新 attempt 的 `run_id`。
 
