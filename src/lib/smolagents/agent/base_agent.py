@@ -1435,6 +1435,20 @@ class SubTaskTrackedAgent:
                         self._agent_name,
                         input_hash[:8],
                     )
+                    # The checkpoint stores the Worker output, not the upstream
+                    # execution envelope. Preserve the caller's requested return
+                    # shape when replaying a completed call without executing it.
+                    wants_full_result = kwargs.get("return_full_result")
+                    if wants_full_result is None:
+                        wants_full_result = getattr(self._agent, "return_full_result", False)
+                    if call_label == "run" and wants_full_result:
+                        return RunResult(
+                            output=preparation.cached_result,
+                            state="success",
+                            steps=[],
+                            token_usage=None,
+                            timing=None,
+                        )
                     return preparation.cached_result
                 call_index = preparation.call_index
             else:
@@ -1518,7 +1532,7 @@ class SubTaskTrackedAgent:
                     call_index,
                     input_hash,
                     str(task),
-                    result,
+                    result.output if isinstance(result, RunResult) else result,
                     self._snapshot_worker_memory(),
                 )
 
