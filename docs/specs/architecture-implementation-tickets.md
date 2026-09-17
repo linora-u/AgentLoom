@@ -1,0 +1,24 @@
+# Architecture implementation task graph
+
+Parent specification: [#67](https://github.com/linora-u/AgentLoom/issues/67),
+[full contract](architecture-and-application-definition.md). Baseline: `ca27966d`.
+The issue has no separate tracker tickets; these local tickets define the graph.
+Every acceptance requirement in the specification remains mandatory.
+
+| Ticket | Deliverable | Blocked by |
+| --- | --- | --- |
+| A1 | Baseline Python/TUI collection and results, ownership and public interface inventory, safe worktree configuration | — |
+| A2 | Real architecture_contract_validation Application, native/CodeAct four-Worker tasks, independent oracle, nested/repeated/rejection variants, bounded reproducible runner | — |
+| A3 | Controlled F3–F9 runners and independent validators; portable paths and historical checkpoint material | — |
+| B1 | Shared lightweight definition loading, normalization, topology, configuration/provenance, paths and revision snapshots; runtime and Studio consumers | A1 |
+| C1 | Move project-owned runtime responsibilities out of smolagents integration; preserve behavior and identity | A2, B1 |
+| D1 | Canonical agentloom namespace, lazy legacy compatibility, package resources, CLI/TUI/scaffold/dynamic imports and installation matrix | C1 |
+| E1 | Full final Python/TUI, installation and real F1–F9 acceptance on candidate revision, retained failure evidence | A3, D1 |
+| E2 | Independent code review, fixes, affected validation, ready PR, local main integration and GitHub delivery | E1 |
+
+Each implementer uses its own branch/worktree. A merger integrates completed
+tickets into `codex/architecture-application`. Configuration secrets remain in
+ignored files, never commits. Evidence and coordination notes live outside the
+repository at `/Users/bytedance/code/data_clear/agentloom-architecture-notes/`;
+publish only sanitized summaries. Reference checkouts and prior user runtime data
+are not changed or removed. A ticket is complete only with its stated evidence.
