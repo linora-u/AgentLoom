@@ -19,8 +19,8 @@ workflow: 'Use the exact JSON payload after "ACCEPTANCE_PAYLOAD=" in the task. Y
   if false, call repair_implementer with findings then independent_verifier again.
   At most two repair attempts. Finally write reports/final.json using write_workspace_file.
   Its JSON must contain case_nonce, workspace, workers (list of all four exact Worker
-  names), generated_tests, test_report (the verifier''s actual report), verified,
-  and summary; take artifacts and verdict from actual verifier output. Return the
+  names), generated_tests, test_report (a relative-path string from the verifier''s test_report, which must be the report field returned by its run_workspace_tests call; never embed the report object), verified,
+  and summary; take artifacts and verdict from actual verifier output. The writer validates this report before saving. If it rejects a field, correct the report from real evidence and retry the write; do not invent fields or claim success without a successful write. Return the
   exact JSON report. Do not edit source or tests yourself.'
 worker_agents:
 - path: worker_agents/repository_investigator.yaml
