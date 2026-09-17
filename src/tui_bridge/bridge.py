@@ -298,7 +298,7 @@ class TuiBridge:
             and workflow_index >= 2
             and workflow_index < len(parts) - 1
             and "worker_agents" not in parts
-            and relative.suffix.lower() in {".yaml", ".yml"}
+            and relative.suffix.lower() in {".yaml", ".yml", ".md"}
         )
         try:
             if not structurally_valid or self._has_symlink_component(candidate, self.project_root):
@@ -308,25 +308,25 @@ class TuiBridge:
         except (OSError, ValueError) as error:
             raise BridgeError(
                 "invalid_params",
-                "yaml_path must identify a real, non-symlink project supervisor YAML",
+                "yaml_path must identify a real, non-symlink project Supervisor Agent definition",
             ) from error
         if canonical != yaml_path or not resolved.is_file():
             raise BridgeError(
                 "invalid_params",
-                "yaml_path must identify a real, non-symlink project supervisor YAML",
+                "yaml_path must identify a real, non-symlink project Supervisor Agent definition",
             )
         try:
             summary, validated_path, _ = self._direct_system_summary(yaml_path)
         except BridgeError as error:
             raise BridgeError(
                 "invalid_params",
-                "yaml_path must identify a real, non-symlink project supervisor YAML",
+                "yaml_path must identify a real, non-symlink project Supervisor Agent definition",
             ) from error
         validation = summary.get("validation")
         if not isinstance(validation, dict) or validation.get("valid") is not True:
             raise BridgeError(
                 "invalid_params",
-                "yaml_path must identify a valid supervisor Agent",
+                "yaml_path must identify a valid supervisor Agent definition",
             )
         if validated_path != resolved:
             raise BridgeError(
@@ -634,7 +634,7 @@ class TuiBridge:
             or applications_root not in resolved.parents
             or "workflows" not in relative.parts
             or "worker_agents" in relative.parts
-            or resolved.suffix.lower() not in {".yaml", ".yml"}
+            or resolved.suffix.lower() not in {".yaml", ".yml", ".md"}
         ):
             raise BridgeError("not_found", f"system not found: {system_id}")
 
@@ -810,7 +810,7 @@ class TuiBridge:
             or applications_root not in resolved.parents
             or "workflows" not in relative.parts
             or "worker_agents" in relative.parts
-            or resolved.suffix.lower() not in {".yaml", ".yml"}
+            or resolved.suffix.lower() not in {".yaml", ".yml", ".md"}
             or self._application_id(resolved) != application_id
         ):
             raise BridgeError("invalid_params", "system_id must identify the Run's Agent System")
@@ -2600,7 +2600,7 @@ class TuiBridge:
             return []
         paths = sorted(
             path
-            for pattern in ("*.yaml", "*.yml")
+            for pattern in ("*.yaml", "*.yml", "*.md")
             for path in applications_root.rglob(pattern)
             if "workflows" in path.parts
             and "worker_agents" not in path.parts
