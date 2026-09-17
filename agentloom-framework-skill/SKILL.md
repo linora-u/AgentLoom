@@ -111,11 +111,11 @@ test -f config/llm.yaml
 # 新 worktree 缺失时，先确认它是否为被忽略的本地配置
 git check-ignore -v config/llm.yaml || true
 
-# YAML 契约校验
+# 共享定义与 Effective Config 预检（含 Worker 引用图）
 .venv/bin/python agentloom-framework-skill/scripts/validate_application_yaml.py \
   --app-root applications/<app_name>
 
-# Application 结构扫描
+# Application 结构扫描（复用共享 YAML/Markdown 解析器）
 .venv/bin/python -c "
 import sys
 sys.path.insert(0, 'agentloom-framework-skill')
