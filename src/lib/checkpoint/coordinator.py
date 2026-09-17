@@ -451,6 +451,13 @@ class CheckpointCoordinator:
             resume=self._resume,
         )
         if not preparation.should_execute:
+            from src.lib.checkpoint.serializer import CheckpointSerializer
+
+            checkpoint = self._cm.load_worker_checkpoint(self._task_id, agent_name, call_index=preparation.call_index)
+            if checkpoint and checkpoint.get("status") == "completed":
+                has_output, output = CheckpointSerializer.completed_worker_output(checkpoint.get("memory_steps") or [])
+                if has_output:
+                    return replace(preparation, cached_result=output)
             return preparation
         call_index = preparation.call_index
 

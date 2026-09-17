@@ -15,6 +15,7 @@ Design decisions:
 from __future__ import annotations
 
 import time
+from copy import deepcopy
 from typing import Any
 
 from smolagents.memory import ActionStep, MemoryStep, PlanningStep, TaskStep, ToolCall
@@ -77,6 +78,23 @@ class CheckpointSerializer:
                 # checkpoint files don't crash the deserialiser.
                 pass
         return steps
+
+    @staticmethod
+    def completed_worker_output(data: list[dict]) -> tuple[bool, Any]:
+        """Read the committed final answer, independent of stored display text.
+
+        Older checkpoints may have stored a stringified RunResult (possibly
+        compressed) in ``result``. The existing ActionStep schema already keeps
+        its exact output separately. Never evaluate model code or parse reprs.
+        The boolean distinguishes a real ``None`` answer from missing evidence.
+        """
+        for raw in reversed(data):
+            if raw.get(_STEP_TYPE_KEY) != "ActionStep":
+                continue
+            if raw.get("is_final_answer") is True and raw.get("error") is None and "action_output" in raw:
+                return True, deepcopy(raw["action_output"])
+            return False, None
+        return False, None
 
     # ── conversation-level serialisation ─────────────────────────────────
 
