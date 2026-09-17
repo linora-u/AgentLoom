@@ -103,6 +103,30 @@ def _configure_session(session_root: Path, *, existing: bool = False) -> None:
     YAML_PATH = str(ROOT / "applications" / ("architecture_acceptance_" + hashlib.sha256(str(SESSION_ROOT).encode()).hexdigest()[:12]) / "workflows/test_checkpoint_complex_supervisor.yaml")
 
 
+def _canonical_worker_query(workflow: str) -> str:
+    """Read the single published call; fail instead of inventing a probe query."""
+    if workflow.count("## Phase 2:") != 1 or workflow.count("## Phase 3:") != 1:
+        raise ValueError("workflow must contain unique Phase 2 and Phase 3 boundaries")
+    phase = workflow.split("## Phase 2:", 1)[1].split("## Phase 3:", 1)[0]
+    if phase.count("```python\n") != 1 or phase.count("```") != 2:
+        raise ValueError("Phase 2 must contain exactly one Python block with the canonical Worker call")
+    code = phase.split("```python\n", 1)[1].split("```", 1)[0].strip()
+    statements = ast.parse(code).body
+    if len(statements) != 1 or not isinstance(statements[0], ast.Assign) or len(code.splitlines()) != 1:
+        raise ValueError("Phase 2 must contain exactly one single-line Worker assignment")
+    assignment = statements[0]
+    call = assignment.value
+    if (len(assignment.targets) != 1 or not isinstance(assignment.targets[0], ast.Name)
+            or assignment.targets[0].id != "worker_result" or not isinstance(call, ast.Call)
+            or not isinstance(call.func, ast.Name) or call.func.id != "artifact_worker"
+            or call.args or len(call.keywords) != 1 or call.keywords[0].arg != "query"
+            or not isinstance(call.keywords[0].value, ast.Constant)
+            or not isinstance(call.keywords[0].value.value, str) or not call.keywords[0].value.value
+            or "\n" in call.keywords[0].value.value):
+        raise ValueError("Phase 2 must assign artifact_worker(query=<single-line string literal>) to worker_result")
+    return call.keywords[0].value.value
+
+
 def _configure_completed_worker_probe() -> None:
     """Keep the original task, adding a host-controlled pause after Worker commit."""
     import yaml
@@ -114,13 +138,7 @@ def _configure_completed_worker_probe() -> None:
     workflow = config["workflow"]
     start = workflow.index("## Phase 2:")
     end = workflow.index("## Phase 3:")
-    query = (
-        f"Build a checkpoint validation report in {WORK_DIR}. "
-        "Read items/a.txt, items/b.txt, items/c.txt, and supervisor_manifest.txt. "
-        "Create worker_progress/started.txt, worker_progress/combined.txt, and worker_report.txt. "
-        "worker_report.txt must include alpha=11, beta=22, gamma=33, manifest_status=ready, "
-        "and worker_status=complete."
-    )
+    query = _canonical_worker_query(workflow)
     phase = (
         "## Phase 2: Completed Worker handoff and intentional interruption\n"
         "Execute exactly the following TWO calls in ONE Python code block. "
