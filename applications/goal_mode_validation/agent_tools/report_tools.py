@@ -4,12 +4,13 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
 import re
 from pathlib import Path
 
 _APP_ROOT = Path(__file__).resolve().parents[1]
 _REPO_ROOT = _APP_ROOT.parents[1]
-_OUTPUT_ROOT = _APP_ROOT / "outputs"
+_OUTPUT_ROOT = Path(os.environ.get("AGENTLOOM_GOAL_VALIDATION_OUTPUT_ROOT", _APP_ROOT / "outputs")).resolve()
 _SAFE_NAME = re.compile(r"^[a-z0-9][a-z0-9_-]{0,63}$")
 _AUDIT_WORKERS = {
     "contract": "contract_auditor.yaml",
