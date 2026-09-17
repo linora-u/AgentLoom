@@ -45,12 +45,20 @@ def test_legacy_package_and_alias_loader_are_absent() -> None:
         import importlib.util
         import sys
         import agentloom
-        assert importlib.util.find_spec('src') is None
+        for name in ('src', 'src.application', 'src.runtime'):
+            try:
+                importlib.import_module(name)
+            except ImportError as exc:
+                assert "Import AgentLoom as 'agentloom'" in str(exc)
+            else:
+                raise AssertionError(f'legacy import succeeded: {name}')
         assert importlib.util.find_spec('agentloom._compat') is None
         assert not any(type(finder).__name__ == '_LegacyFinder' for finder in sys.meta_path)
         assert not any(name == 'src' or name.startswith('src.') for name in sys.modules)
     """)
-    assert not (ROOT / 'src').exists()
+    assert not (ROOT / 'agentloom').exists()
+    for package in ('application', 'configuration', 'runtime', 'adapters', 'tools'):
+        assert (ROOT / 'src' / package).is_dir()
 
 
 def test_tool_terminal_records_and_hook_outcomes_do_not_load_the_engine() -> None:

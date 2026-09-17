@@ -107,8 +107,8 @@ loom = "agentloom.__main__:main"
 [tool.setuptools]
 include-package-data = true
 
-[tool.setuptools.packages.find]
-include = ["agentloom", "agentloom.*"]
+[tool.setuptools.package-dir]
+agentloom = "src"
 
 [tool.setuptools.package-data]
 agentloom = ["**/*.yaml", "**/*.yml", "**/*.j2", "**/*.md", "**/*.scm"]
