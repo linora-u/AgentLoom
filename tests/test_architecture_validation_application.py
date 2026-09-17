@@ -1,0 +1,240 @@
+"""Deterministic checks for the real Application's independent acceptance seam."""
+
+from __future__ import annotations
+
+import json
+import subprocess
+import sys
+from pathlib import Path
+
+import pytest
+import yaml
+
+from applications.architecture_contract_validation.agent_tools import workspace_tools as tools
+from applications.architecture_contract_validation.validation import (
+    APP_ROOT,
+    REQUIRED_CASES,
+    WORKERS,
+    reset_fixture,
+    validate_artifacts,
+    validate_trace,
+)
+
+
+@pytest.fixture
+def workspace(tmp_path, monkeypatch):
+    root = reset_fixture(tmp_path / "workspace", "case-unique")
+    monkeypatch.setenv("AGENTLOOM_ARCHITECTURE_WORKSPACE", str(root))
+    return root
+
+
+def _repair(root: Path) -> None:
+    """A hand-reviewed positive control for the validator, never a live tool."""
+    (root / "orderdesk/domain/lines.py").write_text('''def line_total(line):
+    price, quantity = line["unit_cents"], line["quantity"]
+    if type(price) is not int or price < 0:
+        raise ValueError("invalid price")
+    if type(quantity) is not int or not 1 <= quantity <= 100:
+        raise ValueError("invalid quantity")
+    return price * quantity
+''')
+    (root / "orderdesk/config/settings.py").write_text('''DEFAULTS = {"discount_percent": 0, "shipping_cents": 500, "free_shipping_at": 5000}
+def load_settings(overrides=None):
+    if overrides is not None and not isinstance(overrides, dict):
+        raise ValueError("invalid configuration shape")
+    values = dict(DEFAULTS)
+    values.update(overrides or {})
+    if any(k not in DEFAULTS or type(v) is not int or v < 0 for k, v in values.items()):
+        raise ValueError("invalid configuration value")
+    if values["discount_percent"] > 50:
+        raise ValueError("invalid discount")
+    return values
+''')
+    (root / "orderdesk/service/checkout.py").write_text('''from orderdesk.domain.lines import line_total
+from orderdesk.config.settings import load_settings
+def quote(lines, overrides=None):
+    settings = load_settings(overrides)
+    lines = list(lines)
+    subtotal = sum(line_total(line) for line in lines)
+    discount = subtotal * settings["discount_percent"] // 100
+    shipping = 0 if not lines or subtotal >= settings["free_shipping_at"] else settings["shipping_cents"]
+    return {"subtotal_cents": subtotal, "discount_cents": discount, "shipping_cents": shipping, "total_cents": subtotal - discount + shipping}
+''')
+
+
+GENERATED = '''import pytest
+from orderdesk.service.checkout import quote
+from orderdesk.config.settings import load_settings
+
+def test_threshold_equal():
+    assert quote([{"unit_cents": 5000, "quantity": 1}])["shipping_cents"] == 0
+def test_discount_before_shipping():
+    assert quote([{"unit_cents": 999, "quantity": 1}], {"discount_percent": 10})["total_cents"] == 1400
+def test_override_precedence():
+    assert load_settings({"shipping_cents": 123})["shipping_cents"] == 123
+@pytest.mark.parametrize("quantity", [0, True, False, 101, 1.0, "1"])
+def test_invalid_quantity(quantity):
+    with pytest.raises(ValueError): quote([{"unit_cents": 100, "quantity": quantity}])
+@pytest.mark.parametrize("price", [True, False, -1, 1.0, "1"])
+def test_invalid_price(price):
+    with pytest.raises(ValueError): quote([{"unit_cents": price, "quantity": 1}])
+@pytest.mark.parametrize("config", [{"discount_percent": True}, {"shipping_cents": -1}, [], False])
+def test_invalid_config(config):
+    with pytest.raises(ValueError): load_settings(config)
+def test_empty_cart():
+    assert quote([]) == dict(subtotal_cents=0, discount_cents=0, shipping_cents=0, total_cents=0)
+def test_multiple_lines():
+    assert quote([{"unit_cents": 333, "quantity": 3}, {"unit_cents": 501, "quantity": 2}], {"discount_percent": 15})["total_cents"] == 2201
+'''
+
+
+def _complete_artifacts(root: Path) -> None:
+    _repair(root)
+    tools.write_workspace_file(str(root), "tests/generated/test_regressions.py", GENERATED)
+    result = json.loads(tools.run_workspace_tests(str(root), "verifier"))
+    tools.write_workspace_file(str(root), "reports/final.json", json.dumps({
+        "workspace": str(root), "case_nonce": "case-unique", "workers": WORKERS,
+        "generated_tests": ["tests/generated/test_regressions.py"],
+        "test_report": result["report"], "verified": True, "summary": "Actual pytest evidence.",
+    }))
+
+
+def test_fixture_is_resettable_without_deleting_previous_evidence(workspace):
+    with pytest.raises(FileExistsError, match="refusing"):
+        reset_fixture(workspace, "other-case")
+    assert json.loads((workspace / ".architecture-case.json").read_text())["case_nonce"] == "case-unique"
+    assert len(list(workspace.glob("orderdesk/*/*.py"))) >= 6
+
+
+@pytest.mark.parametrize("path", ["../outside.py", "/tmp/escape.py", "tests/test_existing.py", "CONTRACT.md", "configs/valid.json", "conftest.py"])
+def test_workspace_tool_rejects_escapes_and_protected_fixture_writes(workspace, path):
+    with pytest.raises(ValueError):
+        tools.write_workspace_file(str(workspace), path, "replacement")
+
+
+def test_workspace_symlink_cannot_escape(workspace, tmp_path):
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    (workspace / "reports").symlink_to(outside, target_is_directory=True)
+    with pytest.raises(ValueError, match="inside"):
+        tools.write_workspace_file(str(workspace), "reports/result.json", "{}")
+    assert not list(outside.iterdir())
+
+
+def test_oracle_rejects_original_defects_and_accepts_independent_positive_control(workspace):
+    command = [sys.executable, str(APP_ROOT / "oracle.py"), str(workspace)]
+    original = subprocess.run(command, text=True, capture_output=True, check=False)
+    report = json.loads(original.stdout)
+    assert original.returncode == 1
+    assert report["checks"] == 50
+    assert any("threshold_equal" in error for error in report["failures"])
+    assert any("invalid_config_shape" in error for error in report["failures"])
+    _repair(workspace)
+    fixed = subprocess.run(command, text=True, capture_output=True, check=False)
+    assert fixed.returncode == 0, fixed.stdout + fixed.stderr
+    assert json.loads(fixed.stdout)["checks"] == 50
+
+
+def test_independent_validation_executes_tests_and_negative_control(workspace, tmp_path):
+    _complete_artifacts(workspace)
+    result = validate_artifacts(workspace, tmp_path / "evidence", "case-unique")
+    assert result["passed"], result["errors"]
+    assert result["pytest"]["tests"] > 3
+    assert result["pytest"]["failures"] == result["pytest"]["errors"] == 0
+    assert result["negative_control"]["failures"] >= 5
+    assert all(any(required in name for name in result["pytest"]["cases"]) for required in REQUIRED_CASES)
+
+
+@pytest.mark.parametrize("tamper", ["baseline_test", "report_identity", "reported_count", "trivial_generated"])
+def test_validation_rejects_forged_or_weakened_success(workspace, tmp_path, tamper):
+    _complete_artifacts(workspace)
+    report_path = workspace / "reports/final.json"
+    report = json.loads(report_path.read_text())
+    if tamper == "baseline_test":
+        (workspace / "tests/test_existing.py").write_text("def test_fake(): assert True\n")
+    elif tamper == "report_identity":
+        report["case_nonce"] = "previous-case"
+        report_path.write_text(json.dumps(report))
+    elif tamper == "reported_count":
+        test_report = workspace / report["test_report"]
+        payload = json.loads(test_report.read_text())
+        payload["tests"] = 999
+        test_report.write_text(json.dumps(payload))
+    else:
+        (workspace / "tests/generated/test_regressions.py").write_text(
+            "\n".join(f"def test_{name}(): assert True" for name in REQUIRED_CASES))
+    result = validate_artifacts(workspace, tmp_path / "evidence", "case-unique")
+    assert not result["passed"]
+    assert result["errors"]
+
+
+def test_trace_validation_does_not_accept_an_artifact_only_success(tmp_path):
+    result = validate_trace(tmp_path, {"case_nonce": "case-unique", "run": {}})
+    assert not result["passed"]
+    assert len(result["errors"]) >= len(WORKERS)
+
+
+@pytest.mark.parametrize("tamper", [None, "cross_run", "dropped_input", "no_model_usage", "no_python"])
+def test_codeact_trace_checks_real_checkpoint_contract_and_independent_ids(tmp_path, tamper):
+    run = {"run_id": "run-current", "task_id": "task-current", "manifest_path": str(tmp_path / "manifest.json")}
+    (tmp_path / "manifest.json").write_text('{"status":"completed"}')
+    report_dir = tmp_path / "workspace/reports"
+    report_dir.mkdir(parents=True)
+    (report_dir / "final.json").write_text('{"test_report":"reports/pytest-verifier.json"}')
+    checkpoints = tmp_path / "runtime/checkpoints/app/task-current"
+    checkpoints.mkdir(parents=True)
+    (checkpoints / "checkpoint.json").write_text(json.dumps({
+        "memory_steps": [{"code_action": None if tamper == "no_python" else "result = repository_investigator(query=payload)"}]
+    }))
+    previous = {"workspace": str(tmp_path / "workspace"), "case_nonce": "case-unique"}
+    ledger = []
+    for index, name in enumerate(WORKERS):
+        query = dict(previous)
+        if tamper == "dropped_input" and index == 2:
+            query.pop("findings")
+        output = {**previous, "findings": [name, index]}
+        call_dir = checkpoints / f"workers/{name}/calls/0"
+        call_dir.mkdir(parents=True)
+        (call_dir / "checkpoint.json").write_text(json.dumps({
+            "status": "completed", "task_input": "task\n<inputs>\nPlease process the following call inputs in order:\n"
+            "1. JSON result from the previous stage, with absolute workspace and unique case_nonce.: "
+            + json.dumps(json.dumps(query)) + "\n</inputs>",
+            "memory_steps": [{"token_usage": {"input_tokens": 0 if tamper == "no_model_usage" else 10},
+                              "tool_results": [{"tool_name": "final_answer", "status": "completed", "output": json.dumps(output)}]}],
+        }))
+        ledger.append({"agent_name": name, "root_run_id": "other-run" if tamper == "cross_run" else "run-current",
+                       "task_id": "task-current", "case_nonce": "case-unique", "local_run_id": f"local-{index}",
+                       "operation": "pytest" if index >= 2 else "read", "exit_code": 0,
+                       "report": "reports/pytest-verifier.json"})
+        previous = output
+    (tmp_path / "tool-ledger.jsonl").write_text("\n".join(json.dumps(row) for row in ledger))
+    result = validate_trace(tmp_path, {"case_nonce": "case-unique", "run": run, "mode": "codeact"})
+    assert result["passed"] is (tamper is None), result["errors"]
+
+
+def test_native_and_codeact_definitions_have_four_real_typed_workers():
+    from src.lib.smolagents.agent.runtime_validation import validate_runtime_agent_config
+    from src.lib.smolagents.agent.yaml_agent_factory import YamlAgentFactory
+
+    for mode, expected in (("native", "tool_call"), ("codeact", "code_act")):
+        source = APP_ROOT / "workflows" / f"{mode}.yaml"
+        definition = YamlAgentFactory._load_config_from_file(source)
+        validate_runtime_agent_config(definition, source, agent_root=APP_ROOT.parents[1])
+        assert definition["tool_call_type"] == expected
+        assert len(definition["worker_agents"]) == 4
+        names = set()
+        for item in definition["worker_agents"]:
+            worker_source = source.parent / item["path"]
+            worker = YamlAgentFactory._load_config_from_file(worker_source)
+            assert worker["agent_function_schema"]["inputs"]["query"]["required"] is True
+            assert worker["tools"]
+            names.add(worker["name"])
+        assert names == set(WORKERS)
+    assert (APP_ROOT / "workflows/worker_agents/change_planner.md").is_file()
+
+
+def test_application_config_retains_run_evidence_and_disables_unused_connections():
+    config = yaml.safe_load((APP_ROOT / "config/system.yaml").read_text())
+    assert config["checkpoint"]["cleanup_on_success"] is False
+    assert config["lsp_servers"]["enabled"] is False
+    assert config["mcp_servers"] is None

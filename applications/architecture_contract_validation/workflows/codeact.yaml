@@ -1,0 +1,43 @@
+name: architecture_contract_validation_codeact
+description: Repair and independently validate a multi-module checkout repository
+  via four Workers.
+model_type: powerful
+tool_call_type: code_act
+max_steps: 16
+todo:
+  mode: 'off'
+toolsets: []
+context_engine:
+  min_chars: 80000
+  preview_max_chars: 80000
+workflow: 'Use the exact JSON payload after "ACCEPTANCE_PAYLOAD=" in the task. You
+  orchestrate four real typed Worker tools in this order: repository_investigator,
+  change_planner, repair_implementer, independent_verifier. Pass query as a JSON string;
+  each next query MUST contain the actual preceding Worker output, not your invented
+  answer. If output is JSON fenced in markdown, remove only fences. Do not skip any
+  Worker. Each output must preserve workspace and case_nonce. Require independent_verifier.verified=true;
+  if false, call repair_implementer with findings then independent_verifier again.
+  At most two repair attempts. Finally write reports/final.json using write_workspace_file.
+  Its JSON must contain case_nonce, workspace, workers (list of all four exact Worker
+  names), generated_tests, test_report (the verifier''s actual report), verified,
+  and summary; take artifacts and verdict from actual verifier output. Return the
+  exact JSON report. Do not edit source or tests yourself.
+
+  Use <code> Python blocks for every action and final_answer(report_json). The runtime
+  exposes task. Parse payload with json.JSONDecoder().raw_decode(task.rpartition("ACCEPTANCE_PAYLOAD=")[2].lstrip())[0].
+  A good first block imports json, extracts payload, then calls repository_investigator(query=json.dumps(payload)).
+  Pass its real return to the next Worker. Continue sequentially. Do not use bare
+  prose as final output.'
+worker_agents:
+- path: worker_agents/repository_investigator.yaml
+- path: worker_agents/change_planner.md
+- path: worker_agents/repair_implementer.yaml
+- path: worker_agents/independent_verifier.yaml
+tools:
+- name: write_workspace_file
+  module: applications.architecture_contract_validation.agent_tools.workspace_tools
+  function: write_workspace_file
+execution_env:
+  type: local
+  executor_kwargs:
+    timeout_seconds: 1200
