@@ -1,0 +1,43 @@
+name: repair_implementer
+description: Architecture contract repair implementer
+model_type: powerful
+tool_call_type: tool_call
+max_steps: 24
+todo:
+  mode: 'off'
+toolsets: []
+context_engine:
+  min_chars: 80000
+  preview_max_chars: 80000
+workflow: Parse query as the actual change_planner result. Read CONTRACT.md and implicated
+  source files using read_workspace_file. Repair the original defect causes with write_workspace_file,
+  maintaining public interfaces. Author meaningful pytest regressions in tests/generated/test_checkout_regressions.py.
+  Include all required scenario identifiers in test names and concrete assertions/raises
+  for boundaries, multi-line input, invalid bool/string/float values, configuration
+  overrides and empty carts. Preserve every existing test/config/contract. Use the
+  plan but verify code yourself. Run run_workspace_tests(workspace, label="implementer");
+  if failing, investigate and repair then run again. Never claim tests passed without
+  this tool returning exit_code=0, tests>0, failures=errors=skipped=0. All tools operate
+  on real files; there is no template generator. Return JSON with workspace, case_nonce,
+  changed_files, generated_tests (list of relative paths), test_report (actual JSON
+  report path), and summary. Keep it concise and preserve nonce.
+agent_function_schema:
+  description: repair implementer
+  inputs:
+    query:
+      description: JSON result from the previous stage, with absolute workspace and
+        unique case_nonce.
+      required: true
+  output:
+    description: Structured JSON stage evidence, preserving workspace and case_nonce.
+tools:
+- name: read_workspace_file
+  module: applications.architecture_contract_validation.agent_tools.workspace_tools
+  function: read_workspace_file
+- name: write_workspace_file
+  module: applications.architecture_contract_validation.agent_tools.workspace_tools
+  function: write_workspace_file
+- name: run_workspace_tests
+  module: applications.architecture_contract_validation.agent_tools.workspace_tools
+  function: run_workspace_tests
+worker_agents: []
