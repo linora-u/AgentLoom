@@ -4,9 +4,9 @@ from __future__ import annotations
 
 import hashlib
 import json
-from datetime import UTC, datetime, timedelta
 import subprocess
 import sys
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 import pytest
@@ -18,6 +18,7 @@ from applications.architecture_contract_validation.validation import (
     REQUIRED_CASES,
     WORKERS,
     _contains_exact_json,
+    _exact_json_match,
     reset_fixture,
     validate_artifacts,
     validate_trace,
@@ -568,3 +569,86 @@ print(json.dumps({"origin": str(origin), "outside_cache_rejected": True}))
                                cwd=attempt / "project", text=True, capture_output=True, timeout=30)
     assert completed.returncode == 0, completed.stdout + completed.stderr
     assert json.loads(completed.stdout)["outside_cache_rejected"] is True
+
+
+@pytest.mark.parametrize("wrapper", ["plain_text", "bad_sibling"])
+@pytest.mark.parametrize("tamper", [None, "missing_field", "changed_value", "changed_type", "list_order", "broken_result"])
+def test_complete_json_in_text_preserves_exact_result_and_replayable_offsets(wrapper, tamper):
+    expected = {"workspace": "/tmp/real", "case_nonce": "current", "findings": {"count": 2, "files": ["one.py", "two.py"]}}
+    supplied = json.loads(json.dumps(expected))
+    if tamper == "missing_field":
+        supplied.pop("case_nonce")
+    elif tamper == "changed_value":
+        supplied["findings"]["count"] = 3
+    elif tamper == "changed_type":
+        supplied["findings"]["count"] = 2.0
+    elif tamper == "list_order":
+        supplied["findings"]["files"].reverse()
+    serialized = json.dumps(supplied, ensure_ascii=False)
+    if tamper == "broken_result":
+        serialized = serialized[:-1]
+    prefix = "保留原结果：\n" if wrapper == "plain_text" else '{"context": [1, 2]], "prior_worker": '
+    # A newline suffix cannot supply a missing result delimiter.
+    query = prefix + serialized + "\n"
+    match = _exact_json_match(query, expected)
+    if tamper:
+        assert match is None
+        return
+    start, end = len(prefix), len(prefix) + len(serialized)
+    assert match == {"path": f"$::json_at[{start}:{end}]", "json_spans": [
+        {"input_path": "$", "offset": start, "end": end, "characters": len(serialized)}
+    ]}
+    decoded, consumed = json.JSONDecoder().raw_decode(query, start)
+    assert consumed == end and decoded == expected
+    assert json.loads(query[start:end]) == expected
+
+
+def test_json_fragment_evidence_preserves_envelope_path_and_encoding_budget():
+    expected = {"case_nonce": "current", "value": {"count": 1}}
+    payload = "Result follows: " + json.dumps(expected)
+    envelope = {"previous": json.dumps(payload)}
+    match = _exact_json_match(envelope, expected)
+    assert match["path"].startswith('$["previous"]::json::json_at[')
+    assert match["json_spans"][0]["input_path"] == '$["previous"]::json'
+    overencoded = payload
+    for _ in range(3):
+        overencoded = json.dumps(overencoded)
+    assert _exact_json_match(overencoded, expected) is None
+    assert _exact_json_match("x" * 1_000_001 + json.dumps(expected), expected) is None
+
+
+@pytest.mark.parametrize("tamper", [None, "changed_output", "wrong_hash", "future", "foreign_run"])
+def test_trace_accepts_only_intact_json_fragment_with_original_call_identity(tmp_path, tamper):
+    run, checkpoints = _trace_fixture(tmp_path)
+    verifier_path = checkpoints / "workers/independent_verifier/calls/0/checkpoint.json"
+    verifier = json.loads(verifier_path.read_text())
+    source_path = checkpoints / "workers/repair_implementer/calls/0/checkpoint.json"
+    source = json.loads(source_path.read_text())
+    original = json.loads(source["result"])
+    supplied = {**original, "findings": ["altered"]} if tamper == "changed_output" else original
+    serialized = json.dumps(supplied)
+    prefix = '{"other_context": ["bad"]], "prior": '
+    query = prefix + serialized + "}"
+    verifier["task_input"] = verifier["task_input"].split(".: ", 1)[0] + ".: " + query + "\n</inputs>"
+    verifier["input_hash"] = hashlib.sha256(verifier["task_input"].encode()).hexdigest()[:16]
+    events_path = checkpoints / "task_events.jsonl"
+    events = [json.loads(line) for line in events_path.read_text().splitlines()]
+    for event in events:
+        if event.get("agent_name") == "independent_verifier":
+            event["input_hash"] = verifier["input_hash"]
+        if tamper == "future" and event.get("agent_name") == "repair_implementer" and event["type"] == "worker_call_finished":
+            event["finished_at"] = _trace_time(39)
+    if tamper == "wrong_hash":
+        verifier["task_input"] += "altered after hashing"
+    elif tamper == "foreign_run":
+        verifier["run_id"] = "another-run"
+    verifier_path.write_text(json.dumps(verifier))
+    events_path.write_text("\n".join(json.dumps(event) for event in events))
+    result = validate_trace(tmp_path, {"case_nonce": "case-unique", "run": run, "mode": "codeact"})
+    assert result["passed"] is (tamper is None), result["errors"]
+    if tamper is None:
+        transfer = result["transfers"][-1]
+        start, end = len(prefix), len(prefix) + len(serialized)
+        assert transfer["query_path"] == f"$::json_at[{start}:{end}]"
+        assert transfer["query_json_spans"] == [{"input_path": "$", "offset": start, "end": end, "characters": len(serialized)}]
+        assert json.loads(query[start:end]) == original
