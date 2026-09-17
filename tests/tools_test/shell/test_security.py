@@ -3,7 +3,7 @@
 import pytest
 from unittest.mock import patch
 
-from src.tools.shell.security import (
+from agentloom.tools.shell.security import (
     check_command_security,
     validate_command_security,
     _extract_unquoted_content,
@@ -60,23 +60,23 @@ class TestSafeCommands:
         "echo 'test' > output.txt",
         "cd src && ls",
     ])
-    @patch("src.tools.shell.security.C.get_nested", side_effect=_mock_config_all_enabled)
+    @patch("agentloom.tools.shell.security.C.get_nested", side_effect=_mock_config_all_enabled)
     def test_safe_commands_pass(self, mock_config, cmd):
         failures = check_command_security(cmd)
         assert failures == [], f"Expected no failures for '{cmd}', got: {[f.message for f in failures]}"
 
-    @patch("src.tools.shell.security.C.get_nested", side_effect=_mock_config_all_enabled)
+    @patch("agentloom.tools.shell.security.C.get_nested", side_effect=_mock_config_all_enabled)
     def test_empty_command_passes(self, mock_config):
         assert check_command_security("") == []
         assert check_command_security("   ") == []
 
-    @patch("src.tools.shell.security.C.get_nested", side_effect=_mock_config_all_enabled)
+    @patch("agentloom.tools.shell.security.C.get_nested", side_effect=_mock_config_all_enabled)
     def test_quoted_dollar_sign_passes(self, mock_config):
         """$ inside single quotes should NOT trigger substitution detection."""
         failures = check_command_security("echo '$HOME'")
         assert failures == [], f"Single-quoted $ should be safe, got: {[f.message for f in failures]}"
 
-    @patch("src.tools.shell.security.C.get_nested", side_effect=_mock_config_all_enabled)
+    @patch("agentloom.tools.shell.security.C.get_nested", side_effect=_mock_config_all_enabled)
     def test_safe_env_var_passes(self, mock_config):
         """Safe env var assignments should not be blocked."""
         failures = check_command_security("NODE_ENV=production npm run build")
@@ -95,19 +95,19 @@ class TestCommandSubstitution:
         ("echo $(rm -rf /)", "dangerous $()"),
         ("echo ${IFS}cat${IFS}/etc/passwd", "${} expansion"),
     ])
-    @patch("src.tools.shell.security.C.get_nested", side_effect=_mock_config_all_enabled)
+    @patch("agentloom.tools.shell.security.C.get_nested", side_effect=_mock_config_all_enabled)
     def test_command_substitution_blocked(self, mock_config, cmd, desc):
         failures = check_command_security(cmd)
         assert len(failures) > 0, f"Expected block for {desc}: '{cmd}'"
         assert any("substitution" in f.message.lower() or "expansion" in f.message.lower() for f in failures)
 
-    @patch("src.tools.shell.security.C.get_nested", side_effect=_mock_config_all_enabled)
+    @patch("agentloom.tools.shell.security.C.get_nested", side_effect=_mock_config_all_enabled)
     def test_backtick_substitution_blocked(self, mock_config):
         failures = check_command_security("echo `id`")
         assert len(failures) > 0, "Backtick substitution should be blocked"
         assert any("backtick" in f.message.lower() for f in failures)
 
-    @patch("src.tools.shell.security.C.get_nested", side_effect=_mock_config_all_enabled)
+    @patch("agentloom.tools.shell.security.C.get_nested", side_effect=_mock_config_all_enabled)
     def test_escaped_backtick_passes(self, mock_config):
         """Escaped backticks should not trigger."""
         failures = check_command_security("echo \\`not a substitution\\`")
@@ -123,7 +123,7 @@ class TestProcessSubstitution:
         "diff <(sort file1) <(sort file2)",
         "tee >(logger)",
     ])
-    @patch("src.tools.shell.security.C.get_nested", side_effect=_mock_config_all_enabled)
+    @patch("agentloom.tools.shell.security.C.get_nested", side_effect=_mock_config_all_enabled)
     def test_process_substitution_blocked(self, mock_config, cmd):
         failures = check_command_security(cmd)
         assert len(failures) > 0, f"Expected block for process substitution: '{cmd}'"
@@ -137,7 +137,7 @@ class TestEnvInjection:
         "PATH=/tmp/evil:$PATH cmd",
         "IFS=/ cat /etc/passwd",
     ])
-    @patch("src.tools.shell.security.C.get_nested", side_effect=_mock_config_all_enabled)
+    @patch("agentloom.tools.shell.security.C.get_nested", side_effect=_mock_config_all_enabled)
     def test_dangerous_env_blocked(self, mock_config, cmd):
         failures = check_command_security(cmd)
         assert len(failures) > 0, f"Expected block for env injection: '{cmd}'"
@@ -153,7 +153,7 @@ class TestDangerousShellPrefix:
         "env evil_command",
         "xargs rm",
     ])
-    @patch("src.tools.shell.security.C.get_nested", side_effect=_mock_config_all_enabled)
+    @patch("agentloom.tools.shell.security.C.get_nested", side_effect=_mock_config_all_enabled)
     def test_shell_prefix_blocked(self, mock_config, cmd):
         failures = check_command_security(cmd)
         assert len(failures) > 0, f"Expected block for shell prefix: '{cmd}'"
@@ -170,7 +170,7 @@ class TestDestructivePatterns:
         ("mkfs /dev/sda1", "format disk"),
         ("DROP TABLE users", "SQL drop"),
     ])
-    @patch("src.tools.shell.security.C.get_nested", side_effect=_mock_config_all_enabled)
+    @patch("agentloom.tools.shell.security.C.get_nested", side_effect=_mock_config_all_enabled)
     def test_destructive_pattern_blocked(self, mock_config, cmd, desc):
         failures = check_command_security(cmd)
         assert len(failures) > 0, f"Expected block for {desc}: '{cmd}'"
@@ -179,12 +179,12 @@ class TestDestructivePatterns:
 class TestControlCharacters:
     """Verify control characters are blocked."""
 
-    @patch("src.tools.shell.security.C.get_nested", side_effect=_mock_config_all_enabled)
+    @patch("agentloom.tools.shell.security.C.get_nested", side_effect=_mock_config_all_enabled)
     def test_null_byte_blocked(self, mock_config):
         failures = check_command_security("echo \x00hidden")
         assert len(failures) > 0, "Null byte should be blocked"
 
-    @patch("src.tools.shell.security.C.get_nested", side_effect=_mock_config_all_enabled)
+    @patch("agentloom.tools.shell.security.C.get_nested", side_effect=_mock_config_all_enabled)
     def test_bel_char_blocked(self, mock_config):
         failures = check_command_security("echo \x07bell")
         assert len(failures) > 0, "BEL character should be blocked"
@@ -200,7 +200,7 @@ class TestIncompleteCommands:
         "|| rm -rf /",
         "; cat /etc/passwd",
     ])
-    @patch("src.tools.shell.security.C.get_nested", side_effect=_mock_config_all_enabled)
+    @patch("agentloom.tools.shell.security.C.get_nested", side_effect=_mock_config_all_enabled)
     def test_fragments_blocked(self, mock_config, cmd):
         failures = check_command_security(cmd)
         assert len(failures) > 0, f"Expected block for fragment: '{cmd!r}'"
@@ -215,7 +215,7 @@ class TestZshDangerousCommands:
         "ztcp evil.com 80",
         "zf_rm /etc/passwd",
     ])
-    @patch("src.tools.shell.security.C.get_nested", side_effect=_mock_config_all_enabled)
+    @patch("agentloom.tools.shell.security.C.get_nested", side_effect=_mock_config_all_enabled)
     def test_zsh_commands_blocked(self, mock_config, cmd):
         failures = check_command_security(cmd)
         assert len(failures) > 0, f"Expected block for zsh command: '{cmd}'"
@@ -228,24 +228,24 @@ class TestZshDangerousCommands:
 class TestBoundaryConditions:
     """Edge cases and boundary conditions."""
 
-    @patch("src.tools.shell.security.C.get_nested", side_effect=_mock_config_all_enabled)
+    @patch("agentloom.tools.shell.security.C.get_nested", side_effect=_mock_config_all_enabled)
     def test_validate_raises_on_failure(self, mock_config):
         """validate_command_security should raise ValueError."""
         with pytest.raises(ValueError, match="Blocked"):
             validate_command_security("echo $(id)")
 
-    @patch("src.tools.shell.security.C.get_nested", side_effect=_mock_config_all_enabled)
+    @patch("agentloom.tools.shell.security.C.get_nested", side_effect=_mock_config_all_enabled)
     def test_validate_passes_safe_command(self, mock_config):
         """validate_command_security should not raise for safe commands."""
         validate_command_security("ls -la")  # should not raise
 
-    @patch("src.tools.shell.security.C.get_nested", side_effect=_mock_config_all_disabled)
+    @patch("agentloom.tools.shell.security.C.get_nested", side_effect=_mock_config_all_disabled)
     def test_all_checks_disabled_passes_everything(self, mock_config):
         """When all checks are disabled, even dangerous commands pass."""
         failures = check_command_security("echo $(rm -rf /)")
         assert failures == [], "All disabled checks should let everything through"
 
-    @patch("src.tools.shell.security.C.get_nested")
+    @patch("agentloom.tools.shell.security.C.get_nested")
     def test_single_check_toggle(self, mock_get):
         """Disabling one check should not affect others."""
         mock_get.return_value = {"command_substitution": False}
@@ -253,7 +253,7 @@ class TestBoundaryConditions:
         failures = check_command_security("rm -rf /")
         assert any(f.check_id == "destructive_patterns" for f in failures)
 
-    @patch("src.tools.shell.security.C.get_nested", side_effect=_mock_config_all_enabled)
+    @patch("agentloom.tools.shell.security.C.get_nested", side_effect=_mock_config_all_enabled)
     def test_multiple_failures_reported(self, mock_config):
         """A command hitting multiple checks should report all failures."""
         # This hits both env_injection (LD_PRELOAD) and dangerous_shell_prefix (sudo)

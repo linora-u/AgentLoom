@@ -6,9 +6,9 @@ from pathlib import Path
 import pytest
 import yaml
 
-import src.tui_bridge.bridge as bridge_module
-from src.lib.runtime.context import RuntimeRunLease
-from src.tui_bridge.bridge import BridgeError, TuiBridge
+import agentloom.tui_bridge.bridge as bridge_module
+from agentloom.runtime.context import RuntimeRunLease
+from agentloom.tui_bridge.bridge import BridgeError, TuiBridge
 
 SYSTEM_ID = "applications/demo/workflows/demo.yaml"
 
@@ -26,7 +26,7 @@ def _project(tmp_path: Path) -> TuiBridge:
     )
     _write(
         tmp_path / "config/llm.yaml",
-        "model:\n  default_model_type: test\n  test:\n    model: openai/test\n",
+        "model:\n  summary:\n    model: openai/test-summary\n  default_model_type: test\n  test:\n    model: openai/test\n",
     )
     _write(
         tmp_path / SYSTEM_ID,

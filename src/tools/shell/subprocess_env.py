@@ -13,7 +13,7 @@ Two scrubbing strategies:
 
 import os
 
-from src.lib.logging import get_logger
+from agentloom.runtime.logging import get_logger
 
 logger = get_logger(__name__)
 

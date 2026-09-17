@@ -14,8 +14,8 @@ def test_read_only_validation_import_does_not_load_agent_runtime() -> None:
             "-c",
             (
                 "import sys; "
-                "import src.lib.smolagents.agent.agent_validation; "
-                "assert 'src.lib.smolagents.agent.base_agent' not in sys.modules; "
+                "import agentloom.application.validation; "
+                "assert 'agentloom.runtime.agent' not in sys.modules; "
                 "assert 'litellm' not in sys.modules"
             ),
         ],
@@ -36,9 +36,9 @@ def test_read_only_tui_bridge_import_does_not_load_model_runtime() -> None:
             "-c",
             (
                 "import sys; "
-                "from src.tui_bridge.bridge import TuiBridge; "
+                "from agentloom.tui_bridge.bridge import TuiBridge; "
                 "assert TuiBridge; "
-                "assert 'src.lib.smolagents.agent.base_agent' not in sys.modules; "
+                "assert 'agentloom.runtime.agent' not in sys.modules; "
                 "assert 'litellm' not in sys.modules"
             ),
         ],

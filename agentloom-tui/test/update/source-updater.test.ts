@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, test } from "bun:test"
 import { chmod, mkdir, mkdtemp, rm, utimes, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
-import { join } from "node:path"
+import { dirname, join } from "node:path"
 import { createSourceUpdateClient } from "../../src/update/source-updater"
 
 const temporaryDirectories: string[] = []
@@ -11,15 +11,16 @@ afterEach(async () => {
 })
 
 describe("trusted source updates", () => {
-  test("detects source changes newer than the installed compatible unit", async () => {
+  test.each(["src/runtime/agent.py", "agentloom-tui/src/main.ts"])(
+    "detects %s changes newer than the installed compatible unit", async (relativeSource) => {
     const root = await mkdtemp(join(tmpdir(), "agentloom-update-"))
     temporaryDirectories.push(root)
     const sourceRoot = join(root, "source")
     const installRoot = join(root, "installed")
-    await mkdir(join(sourceRoot, "agentloom-tui/src"), { recursive: true })
+    await mkdir(dirname(join(sourceRoot, relativeSource)), { recursive: true })
     await mkdir(installRoot, { recursive: true })
     await writeFile(join(installRoot, "installed-at"), "1000\n")
-    const source = join(sourceRoot, "agentloom-tui/src/main.ts")
+    const source = join(sourceRoot, relativeSource)
     await writeFile(source, "export {}\n")
     await utimes(source, 2_000, 2_000)
 

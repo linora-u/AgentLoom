@@ -9,7 +9,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from src.lib.logging import get_logger
+from agentloom.runtime.logging import get_logger
 
 from .._safety import normalize_path, validate_file_access
 from .._read_file_state import get_read_file_state

@@ -19,6 +19,10 @@ git check-ignore -v config/llm.yaml || true
 
 通过标准：`summary.valid == true` 且 `error_count == 0`。
 
+此脚本是 `agentloom.application.definition` 共享预检的 CLI 适配器，不维护第二套字段、路径、模型或 MCP 规则。它读取项目模型目录和有效配置，检查 Supervisor 的完整 Worker 引用图；`worker_agents/` 内尚未被引用的定义也调用共享 Worker 校验。缺少本地 `config/llm.yaml` 会失败，不能跳过模型校验后报告通过。
+
+输出保留 `summary` 与 `errors` envelope；共享诊断使用 `field: definition`、`rule: shared_definition`，`message` 保留 canonical 原因。目录缺失、没有定义等 authoring 结构错误使用独立规则，不保证旧脚本的字段级 rule 名称。
+
 ```bash
 .venv/bin/python -c "
 import sys
@@ -27,6 +31,8 @@ from scripts.scan_tools import scan_app_structure
 print(scan_app_structure('applications/<app_name>'))
 "
 ```
+
+结构扫描与校验均通过 `load_agent_definition` 读取 YAML/Markdown，拒绝重复 YAML key，并采用同一 Markdown workflow 规则。扫描只提取事实，不代替有效配置预检；两者都不构造模型、导入工具实现、连接 MCP 或执行 Hook。
 
 检查点：
 
@@ -88,6 +94,8 @@ find applications/<app_name>/agent_tools -name '*.py' -print0 2>/dev/null | xarg
 | shell 权限 / audit | `applications/test_shell_audit/*`、`applications/test_shell_allowlist_matrix/*` |
 | 多 Worker 调度 | `applications/context_engine_multi_worker_validation`、`applications/test_demo/workflows/test_checkpoint_complex_supervisor.yaml` |
 
+`applications/architecture_contract_validation` 用原生工具调用和 CodeAct 各跑两次，再验证嵌套 Application 与拒绝场景。保留九类具名回归，包括区分空购物车与零金额非空购物车的 `zero_price`；50 项独立 oracle 不随生成结果放宽。最终 `test_report` 必须是最后一次 verifier 的真实 pytest 报告相对路径，写入前检查类型、当前身份和 JSON/JUnit/调用证据。多次调用同名 Worker 时，按当前任务的 call index、开始/完成事件和实际输入输出关联，并按 runtime 的 SHA-256 前缀规则重算 checkpoint 中 task_input 的哈希，不能只比较几个哈希字段；允许验证失败后的修复循环，不能固定选第一次调用，也不能用未来或其他任务的结果补齐证据。
+
 交付时至少列出：
 
 - 实际运行的 Application 数量和 workflow 路径。
@@ -136,12 +144,18 @@ ContextEngine/CCR 额外必须验证：
 当前仓库可用的真实 LLM 验证脚本：
 
 ```bash
-PYTHONPATH=/Users/bytedance/code/data_clear/AgentLoom-checkpoint \
-/Users/bytedance/code/data_clear/AgentLoom/.venv/bin/python \
-  tests/agent_test/real_checkpoint_validation.py --scenario all
+.venv/bin/python tests/agent_test/real_checkpoint_validation.py \
+  --scenario all --workspace /absolute/new/checkpoint-evidence
 ```
 
-它会运行 `applications/test_demo/workflows/test_checkpoint_complex_supervisor.yaml`，分别制造 Supervisor 中断和 Worker 中断，并检查最终文件、task event、worker call 复用和 Worker memory restore。
+它会运行 `applications/test_demo/workflows/test_checkpoint_complex_supervisor.yaml`，分别制造 Supervisor 中断、Worker 中断和已完成 Worker 交接处中断，并检查最终文件、task event、worker call 复用和 Worker memory restore。
+
+该 Supervisor 在已发布 YAML 中声明 `timeout_seconds: 1200`，因为同步 Worker 的完整运行时间计入调用方 Python 代码块预算。验收副本须保留这一配置，记录定义 hash；不要用未记录的脚本超时覆盖掩盖失败。超过预算后执行器会等待线程结束再报错，不会取消已提交的副作用；同一次 attempt 内随后重试仍是新调用，不能算作 checkpoint resume 的复用保证。
+
+Phase 2 使用固定单行 Python literal 调用 Worker；首次执行和 resume 都必须逐字复用，包括空格和标点。Worker 身份使用完整格式化 task 的精确哈希，换行折叠或同义改写会产生新调用。不要修改 runtime 哈希规则来掩盖 Application 输入漂移，也不要改写历史失败输入让验收通过。
+Completed-Worker probe 从 canonical Phase 2 唯一 Python 调用的 literal 提取同一 query，不另写副本；缺失、多调用或动态表达式都应显式失败。
+
+Supervisor 中断必须等到初始化副作用 ledger 与预期文件均落盘、对应成功且有 observation 的 ActionStep 已提交到 checkpoint，并且 Worker 尚未启动。只有 Todo 步数或文件已出现都不足以证明这个时机；初始化 shell 会清空工作目录，过早注入的恢复探针会被合法删除。停止进程后须再次检查边界，再注入 ContextRef / file-history 探针。历史恢复使用新建的 `--prepare-only` 材料和 `--resume-state`，保留失败尝试，不覆盖或改写已有 checkpoint。
 
 如果真实模型调用因权限、额度或超时失败，不能标为通过；记录失败命令、错误文本、已产生的 checkpoint 证据，以及还缺哪条功能路径。
 
@@ -186,10 +200,10 @@ PYTHONPATH=/Users/bytedance/code/data_clear/AgentLoom-checkpoint \
 最小检查：
 
 ```bash
-rg -n "_WORKFLOW_OVERLAY_KEYS|_LLM_ONLY_TOP_LEVEL_KEYS|extract_workflow_overlay" src/lib/config/config.py
-rg -n "class RootSettings|class ToolAccessControlSettings|class LlmModelTypeSettings|extra_completion_params|supports_structured_output|supports_native_tool_calls|tool_choice" src/lib/config src/lib/smolagents/models docs/en docs/cn agentloom-framework-skill
-rg -n "install_agentloom_runtime_adapters|parse_structured_tool_call|ToolCallCandidate|schema-bound|tool_call_type" src/lib/smolagents src/lib/config tests docs/en docs/cn agentloom-framework-skill
-rg -n "skills.paths|Duplicate skill name|hooks:" src/lib/smolagents/skills src/lib/smolagents/hooks docs/en agentloom-framework-skill
+rg -n "_WORKFLOW_OVERLAY_KEYS|_LLM_ONLY_TOP_LEVEL_KEYS|extract_workflow_overlay" src/configuration/config.py
+rg -n "class RootSettings|class ToolAccessControlSettings|class LlmModelTypeSettings|extra_completion_params|supports_structured_output|supports_native_tool_calls|tool_choice" src/configuration src/adapters/smolagents/models docs/en docs/cn agentloom-framework-skill
+rg -n "install_agentloom_runtime_adapters|parse_structured_tool_call|ToolCallCandidate|schema-bound|tool_call_type" src/adapters/smolagents src/configuration tests docs/en docs/cn agentloom-framework-skill
+rg -n "skills.paths|Duplicate skill name|hooks:" src/runtime/skills src/runtime/hooks src/application/definition.py docs/en agentloom-framework-skill
 rg -n "mcp_servers|parse_mcp_servers_yaml_value" src tests docs/en agentloom-framework-skill
 ```
 
@@ -203,7 +217,7 @@ rg -n "mcp_servers|parse_mcp_servers_yaml_value" src tests docs/en agentloom-fra
 - `tool_call` 模式是否仍只接受结构化 native/tool-call block；不要恢复自由文本猜测、fuzzy tool-name repair 或坏参数 `{}` 兜底。
 - `skills.paths`、约定目录、同名覆盖以及 `SKILL.md` 禁止 `hooks` 是否与 `SkillCatalog` 一致。
 - `hooks` 是否只通过顶层直接声明或显式 `HOOK.yaml` Bundle 编译，且保留三层来源顺序。
-- `mcp_servers` 的 string/list/dict 三种形式是否仍被 parser 支持。
+- `mcp_servers` 的 string/list/dict 形式和 `null` 空配置是否与共享 parser 一致。
 - `docs/en/config-overview.md`、`agent_config.md`、`system_config.md` 如果和代码冲突，最终 skill 先写代码真相，并在交付里说明文档漂移。
 
 ## 多 Agent 验证

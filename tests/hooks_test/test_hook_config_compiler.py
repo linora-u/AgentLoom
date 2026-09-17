@@ -5,7 +5,7 @@ from pathlib import Path
 
 import pytest
 
-from src.lib.smolagents.hooks import (
+from agentloom.runtime.hooks import (
     HookConfigLayer,
     HookEvent,
     HookPlanCompiler,

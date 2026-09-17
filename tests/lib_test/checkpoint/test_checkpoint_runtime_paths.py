@@ -10,13 +10,13 @@ from datetime import UTC, datetime, timedelta
 
 import pytest
 
-from src.lib.checkpoint.checkpoint_manager import (
+from agentloom.runtime.checkpoint.checkpoint_manager import (
     CheckpointManager,
     cleanup_expired_tasks,
     list_all_tasks,
 )
-from src.lib.checkpoint.coordinator import CheckpointCoordinator
-from src.lib.runtime import RuntimeHome
+from agentloom.runtime.checkpoint.coordinator import CheckpointCoordinator
+from agentloom.runtime import RuntimeHome
 
 
 def _context(tmp_path, *, task_id: str = "task_123", run_id: str = "run_1"):

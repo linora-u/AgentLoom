@@ -21,7 +21,7 @@ Configuration (config/system.yaml)::
 
 Usage::
 
-    from src.tools.shell.shell_audit_log import get_shell_audit_logger
+    from agentloom.tools.shell.shell_audit_log import get_shell_audit_logger
 
     audit = get_shell_audit_logger()
     audit.log_security_block(
@@ -42,9 +42,9 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
-from src.lib.config import C
-from src.lib.logging import get_logger
-from src.lib.runtime import (
+from agentloom.configuration import C
+from agentloom.runtime.logging import get_logger
+from agentloom.runtime import (
     RuntimeContext,
     RuntimeRotatingTextSink,
     get_current_run_context,
@@ -278,7 +278,7 @@ def _coerce_bool(value: Any) -> bool:
 def _get_shell_config_with_source(key: str, *, default: Any = None) -> tuple[Any, str]:
     """Read effective shell config and identify where it came from."""
     try:
-        from src.trace import get_current_agent_config
+        from agentloom.runtime.trace import get_current_agent_config
         agent_cfg = get_current_agent_config()
         if isinstance(agent_cfg, dict):
             shell = agent_cfg.get("shell_settings")
@@ -767,7 +767,7 @@ def get_shell_audit_logger(
     """
     if agent_name is None:
         try:
-            from src.trace import capture_explicit_execution_context
+            from agentloom.runtime.trace import capture_explicit_execution_context
 
             agent_name = capture_explicit_execution_context().agent_name or "_global"
         except Exception:

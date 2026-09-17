@@ -12,15 +12,15 @@ from typing import TYPE_CHECKING, Any, NoReturn
 
 import yaml
 
-from src.lib.runtime.context import (
+from agentloom.runtime.context import (
     RuntimeRunLease,
     safe_application_id,
     validate_runtime_id,
 )
-from src.lib.runtime.storage import SecureDirectory
+from agentloom.runtime.storage import SecureDirectory
 
 if TYPE_CHECKING:
-    from src.tui_bridge.definition import AgentDefinitionCache
+    from agentloom.application.definition import AgentDefinitionCache
 
 # ``run.detail`` is refreshed while its panel is open.  These are response and
 # filesystem work budgets, not pagination defaults: one refresh must remain
@@ -112,7 +112,7 @@ class TuiBridge:
 
     def _builder_service(self) -> Any:
         if self._builder is None:
-            from src.tui_bridge.builder import BuilderService
+            from agentloom.tui_bridge.builder import BuilderService
 
             self._builder = BuilderService(self.project_root)
         return self._builder
@@ -156,7 +156,7 @@ class TuiBridge:
                 raise BridgeError("invalid_params", str(error)) from error
             if canonical != application_id:
                 raise BridgeError("invalid_params", "application_id is not canonical")
-            from src.tui_bridge.application_studio import application_detail
+            from agentloom.tui_bridge.application_studio import application_detail
 
             try:
                 return application_detail(
@@ -210,7 +210,7 @@ class TuiBridge:
                 # ChatAgentError is the only provider failure whose code and
                 # message are explicitly safe for the UI. Keep the import lazy
                 # so read-only workspace observation does not load an SDK.
-                from src.tui_bridge.chat_agent import ChatAgentError
+                from agentloom.tui_bridge.chat_agent import ChatAgentError
 
                 if isinstance(error, ChatAgentError):
                     raise BridgeError(error.code, str(error)) from error
@@ -226,7 +226,7 @@ class TuiBridge:
                 raise BridgeError("invalid_params", "session_id must be a non-empty string")
             return self._builder_service().get_draft(session_id)
         if method == "draft.apply":
-            from src.tui_bridge.builder import DraftConflictError
+            from agentloom.tui_bridge.builder import DraftConflictError
 
             session_id = params.get("session_id")
             expected_revision = params.get("expected_revision")
@@ -298,7 +298,7 @@ class TuiBridge:
             and workflow_index >= 2
             and workflow_index < len(parts) - 1
             and "worker_agents" not in parts
-            and relative.suffix.lower() in {".yaml", ".yml"}
+            and relative.suffix.lower() in {".yaml", ".yml", ".md"}
         )
         try:
             if not structurally_valid or self._has_symlink_component(candidate, self.project_root):
@@ -308,25 +308,25 @@ class TuiBridge:
         except (OSError, ValueError) as error:
             raise BridgeError(
                 "invalid_params",
-                "yaml_path must identify a real, non-symlink project supervisor YAML",
+                "yaml_path must identify a real, non-symlink project Supervisor Agent definition",
             ) from error
         if canonical != yaml_path or not resolved.is_file():
             raise BridgeError(
                 "invalid_params",
-                "yaml_path must identify a real, non-symlink project supervisor YAML",
+                "yaml_path must identify a real, non-symlink project Supervisor Agent definition",
             )
         try:
             summary, validated_path, _ = self._direct_system_summary(yaml_path)
         except BridgeError as error:
             raise BridgeError(
                 "invalid_params",
-                "yaml_path must identify a real, non-symlink project supervisor YAML",
+                "yaml_path must identify a real, non-symlink project Supervisor Agent definition",
             ) from error
         validation = summary.get("validation")
         if not isinstance(validation, dict) or validation.get("valid") is not True:
             raise BridgeError(
                 "invalid_params",
-                "yaml_path must identify a valid supervisor Agent",
+                "yaml_path must identify a valid supervisor Agent definition",
             )
         if validated_path != resolved:
             raise BridgeError(
@@ -337,7 +337,7 @@ class TuiBridge:
 
     @classmethod
     def _schedule_from_wire(cls, raw: Any) -> dict[str, Any]:
-        from src.schedules.schedule import cron_schedule, interval_schedule, once_schedule
+        from agentloom.schedules.schedule import cron_schedule, interval_schedule, once_schedule
 
         if not isinstance(raw, dict):
             raise BridgeError("invalid_params", "schedule must be an object")
@@ -391,7 +391,7 @@ class TuiBridge:
 
     @staticmethod
     def _raise_schedule_store_error(error: Exception) -> NoReturn:
-        from src.schedules.store import JobBusyError, JobNotFoundError
+        from agentloom.schedules.store import JobBusyError, JobNotFoundError
 
         if isinstance(error, JobNotFoundError):
             raise BridgeError("not_found", str(error)) from error
@@ -400,7 +400,7 @@ class TuiBridge:
         raise BridgeError("schedule_failed", str(error)) from error
 
     def _schedule_add(self, params: dict[str, Any]) -> dict[str, Any]:
-        from src.schedules.store import ScheduleStore, ScheduleStoreError
+        from agentloom.schedules.store import ScheduleStore, ScheduleStoreError
 
         self._exact_params(
             params,
@@ -440,7 +440,7 @@ class TuiBridge:
         method: str,
         params: dict[str, Any],
     ) -> dict[str, Any]:
-        from src.schedules.store import ScheduleStore, ScheduleStoreError
+        from agentloom.schedules.store import ScheduleStore, ScheduleStoreError
 
         self._exact_params(params, {"job_id"}, method=method)
         job_id = self._required_wire_string(params["job_id"], field="job_id")
@@ -467,7 +467,7 @@ class TuiBridge:
             definition_cache=definition_cache,
             runtime_root=runtime_root,
         )
-        from src.tui_bridge.catalog import project_catalog
+        from agentloom.tui_bridge.catalog import project_catalog
 
         catalog = project_catalog(
             self.project_root,
@@ -547,7 +547,7 @@ class TuiBridge:
             index.worker_invocations = copy.deepcopy(worker_invocations)
             index.worker_invocations_incomplete = worker_invocations_incomplete
 
-        from src.tui_bridge.catalog import schedule_catalog
+        from agentloom.tui_bridge.catalog import schedule_catalog
 
         return {
             "systems": systems,
@@ -616,7 +616,7 @@ class TuiBridge:
         self,
         system_id: str,
     ) -> tuple[dict[str, Any], Path, dict[str, Any]]:
-        from src.tui_bridge.definition import model_types, validate_agent_definition
+        from agentloom.application.definition import model_types, validate_agent_definition
 
         relative = Path(system_id)
         candidate = self.project_root / relative
@@ -634,7 +634,7 @@ class TuiBridge:
             or applications_root not in resolved.parents
             or "workflows" not in relative.parts
             or "worker_agents" in relative.parts
-            or resolved.suffix.lower() not in {".yaml", ".yml"}
+            or resolved.suffix.lower() not in {".yaml", ".yml", ".md"}
         ):
             raise BridgeError("not_found", f"system not found: {system_id}")
 
@@ -810,7 +810,7 @@ class TuiBridge:
             or applications_root not in resolved.parents
             or "workflows" not in relative.parts
             or "worker_agents" in relative.parts
-            or resolved.suffix.lower() not in {".yaml", ".yml"}
+            or resolved.suffix.lower() not in {".yaml", ".yml", ".md"}
             or self._application_id(resolved) != application_id
         ):
             raise BridgeError("invalid_params", "system_id must identify the Run's Agent System")
@@ -2593,14 +2593,14 @@ class TuiBridge:
         *,
         definition_cache: AgentDefinitionCache | None = None,
     ) -> list[dict[str, Any]]:
-        from src.tui_bridge.definition import model_types, validate_agent_definition
+        from agentloom.application.definition import model_types, validate_agent_definition
 
         applications_root = self.project_root / "applications"
         if applications_root.is_symlink() or not applications_root.is_dir():
             return []
         paths = sorted(
             path
-            for pattern in ("*.yaml", "*.yml")
+            for pattern in ("*.yaml", "*.yml", "*.md")
             for path in applications_root.rglob(pattern)
             if "workflows" in path.parts
             and "worker_agents" not in path.parts
@@ -2652,19 +2652,16 @@ class TuiBridge:
         raw_workers = definition.get("worker_agents", [])
         if not isinstance(raw_workers, list):
             return []
-        worker_folder = supervisor_path.parent / "worker_agents"
         workers: list[Path] = []
         for item in raw_workers:
             raw_path = item.get("path") if isinstance(item, dict) else None
             if not isinstance(raw_path, str) or not raw_path.strip():
                 continue
-            configured = Path(raw_path.strip())
-            if configured.is_absolute():
-                candidate = configured.resolve()
-            elif "/" in raw_path or "\\" in raw_path:
-                candidate = (self.project_root / configured).resolve()
-            else:
-                candidate = (worker_folder / configured).resolve()
+            from agentloom.application.definition import resolve_worker_path
+            try:
+                candidate = resolve_worker_path(self.project_root, supervisor_path, raw_path)
+            except ValueError:
+                continue
             try:
                 candidate.relative_to(self.project_root)
             except ValueError:
@@ -2694,7 +2691,7 @@ class TuiBridge:
         *,
         definition_cache: AgentDefinitionCache | None = None,
     ) -> tuple[dict[str, Any], list[str]]:
-        from src.tui_bridge.definition import read_agent_definition
+        from agentloom.application.definition import read_agent_definition
 
         result = read_agent_definition(path, cache=definition_cache)
         if result.error is not None or result.definition is None:

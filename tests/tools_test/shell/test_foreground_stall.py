@@ -15,7 +15,7 @@ from unittest.mock import MagicMock, patch, PropertyMock
 
 import pytest
 
-from src.tools.shell.process import ExecResult, ShellProcess
+from agentloom.tools.shell.process import ExecResult, ShellProcess
 
 
 # ---------------------------------------------------------------------------
@@ -59,7 +59,7 @@ class TestForegroundStallEarlyKill:
 
             # Patch the stall threshold to 2 seconds (instead of 45)
             # so the test finishes fast.
-            with patch("src.tools.shell.process.C") as mock_c:
+            with patch("agentloom.tools.shell.process.C") as mock_c:
                 mock_c.get_nested = MagicMock(side_effect=lambda *args, **kwargs: {
                     # stall_threshold_seconds -> 2 seconds
                     ("shell_settings", "background_tasks",
@@ -173,7 +173,7 @@ class TestForegroundNoStallTimeout:
             timeout=3,
         )
         try:
-            with patch("src.tools.shell.process.C") as mock_c:
+            with patch("agentloom.tools.shell.process.C") as mock_c:
                 mock_c.get_nested = MagicMock(side_effect=lambda *args, **kwargs: {
                     ("shell_settings", "background_tasks",
                      "stall_threshold_seconds"): 45,
@@ -225,7 +225,7 @@ class TestForegroundPromptAtTimeout:
             timeout=4,
         )
         try:
-            with patch("src.tools.shell.process.C") as mock_c:
+            with patch("agentloom.tools.shell.process.C") as mock_c:
                 mock_c.get_nested = MagicMock(side_effect=lambda *args, **kwargs: {
                     ("shell_settings", "background_tasks",
                      "stall_threshold_seconds"): 45,
@@ -264,7 +264,7 @@ class TestForegroundStallOutputPreserved:
         kill should return the partial output plus the stall warning."""
         proc = _make_session_scoped_process(timeout=120)
         try:
-            with patch("src.tools.shell.process.C") as mock_c:
+            with patch("agentloom.tools.shell.process.C") as mock_c:
                 mock_c.get_nested = MagicMock(side_effect=lambda *args, **kwargs: {
                     ("shell_settings", "background_tasks",
                      "stall_threshold_seconds"): 2,

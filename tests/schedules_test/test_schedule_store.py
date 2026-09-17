@@ -8,8 +8,8 @@ from pathlib import Path
 
 import pytest
 
-from src.schedules.schedule import interval_schedule, once_schedule
-from src.schedules.store import JobBusyError, ScheduleStore
+from agentloom.schedules.schedule import interval_schedule, once_schedule
+from agentloom.schedules.store import JobBusyError, ScheduleStore
 
 NOW = datetime(2026, 7, 18, 8, 0, tzinfo=UTC)
 

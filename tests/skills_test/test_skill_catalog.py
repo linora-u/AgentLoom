@@ -2,12 +2,12 @@ import logging
 from pathlib import Path
 from types import SimpleNamespace
 
-from src.lib.smolagents.agent.base_agent import AgentRoleProfile, AgentType, RoleDrivenAgent
-from src.lib.smolagents.prompts.prompt_builder import build_prompt_templates
-from src.lib.smolagents.skills.catalog import SkillCatalog, SkillSource
-from src.lib.smolagents.skills.parser import build_skills_prompt
-from src.tools.skills import skill
-from src.trace.task_context import clear_current_skill_catalog, set_current_skill_catalog
+from agentloom.runtime.agent import AgentRoleProfile, AgentType, RoleDrivenAgent
+from agentloom.runtime.prompts.prompt_builder import build_prompt_templates
+from agentloom.runtime.skills.catalog import SkillCatalog, SkillSource
+from agentloom.runtime.skills.parser import build_skills_prompt
+from agentloom.tools.skills import skill
+from agentloom.runtime.trace.task_context import clear_current_skill_catalog, set_current_skill_catalog
 
 
 def _write_skill(root: Path, name: str, body: str = "# Exact instructions\n") -> Path:
@@ -79,7 +79,7 @@ def test_prompt_exposes_catalogue_only_when_skill_tool_is_available(monkeypatch,
     prompt_path = tmp_path / "prompt.yaml"
     prompt_path.write_text("system_prompt: base\n", encoding="utf-8")
 
-    import src.lib.smolagents.prompts.prompt_builder as prompt_builder_module
+    import agentloom.runtime.prompts.prompt_builder as prompt_builder_module
 
     monkeypatch.setattr(prompt_builder_module, "DEFAULT_CODE_AGENT_PROMPT_PATH", prompt_path)
     monkeypatch.setattr(prompt_builder_module, "get_agent_environment_prompt", lambda: "")
@@ -118,6 +118,7 @@ def test_runtime_catalog_composes_project_application_and_agent_sources(tmp_path
     agent = object.__new__(_CatalogAgent)
     agent._config = {"name": "catalog-agent"}
     agent._effective_agent_config_snapshot = SimpleNamespace(
+        values={},
         layers=(
             SimpleNamespace(name="global_system", root=project_root, data={}),
             SimpleNamespace(name="application_system", root=application_root, data={}),

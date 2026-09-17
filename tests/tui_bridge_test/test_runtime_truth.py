@@ -10,10 +10,10 @@ from typing import Any
 
 import pytest
 
-import src.lib.runtime.context as runtime_context_module
-import src.tui_bridge.bridge as bridge_module
-from src.lib.runtime.context import RuntimeRunLease
-from src.tui_bridge.bridge import BridgeError, TuiBridge
+import agentloom.runtime.context as runtime_context_module
+import agentloom.tui_bridge.bridge as bridge_module
+from agentloom.runtime.context import RuntimeRunLease
+from agentloom.tui_bridge.bridge import BridgeError, TuiBridge
 
 
 def _write(path: Path, content: str) -> Path:
@@ -128,7 +128,7 @@ def test_run_scan_never_replays_the_unbounded_checkpoint_event_catalog(
         raise AssertionError("TUI status scan must not replay cumulative task events")
 
     monkeypatch.setattr(
-        "src.lib.checkpoint.checkpoint_manager.CheckpointManager._read_task_events_from_path",
+        "agentloom.runtime.checkpoint.checkpoint_manager.CheckpointManager._read_task_events_from_path",
         fail_if_events_are_replayed,
     )
 

@@ -1,7 +1,7 @@
 """Pure metadata catalog for AgentLoom's built-in tools.
 
 Reading this module never imports a tool implementation.  Runtime code must
-cross the explicit ``src.tools.loader`` seam to turn an implementation
+cross the explicit ``agentloom.tools.loader`` seam to turn an implementation
 reference into a callable.
 """
 
@@ -89,7 +89,7 @@ def _build_catalog() -> dict[str, ToolSpec]:
     specs = [
         _spec(
             "shell_tool",
-            "src.tools.shell.shell_tool",
+            "agentloom.tools.shell.shell_tool",
             "core_shell",
             "Run a shell command with AgentLoom shell policy enforcement.",
             "shell",
@@ -101,7 +101,7 @@ def _build_catalog() -> dict[str, ToolSpec]:
         ),
         _spec(
             "check_background_task",
-            "src.tools.shell.background_task_tools",
+            "agentloom.tools.shell.background_task_tools",
             "core_shell",
             "Read current output and status for a background shell task.",
             "shell",
@@ -112,7 +112,7 @@ def _build_catalog() -> dict[str, ToolSpec]:
         ),
         _spec(
             "kill_background_task",
-            "src.tools.shell.background_task_tools",
+            "agentloom.tools.shell.background_task_tools",
             "core_shell",
             "Terminate a running background shell task.",
             "shell",
@@ -125,7 +125,7 @@ def _build_catalog() -> dict[str, ToolSpec]:
         ),
         _spec(
             "list_background_tasks",
-            "src.tools.shell.background_task_tools",
+            "agentloom.tools.shell.background_task_tools",
             "core_shell",
             "List active and recent background shell tasks.",
             "shell",
@@ -136,7 +136,7 @@ def _build_catalog() -> dict[str, ToolSpec]:
         ),
         _spec(
             "read_file",
-            "src.tools.file_ops.read_file",
+            "agentloom.tools.file_ops.read_file",
             "core_file",
             "Read a file with pagination and read-state tracking.",
             "file_ops",
@@ -148,7 +148,7 @@ def _build_catalog() -> dict[str, ToolSpec]:
         ),
         _spec(
             "edit_file",
-            "src.tools.file_ops.edit_file",
+            "agentloom.tools.file_ops.edit_file",
             "core_file",
             "Apply one or more unique text edits to an existing file.",
             "file_ops",
@@ -160,7 +160,7 @@ def _build_catalog() -> dict[str, ToolSpec]:
         ),
         _spec(
             "write_file",
-            "src.tools.file_ops.write_file",
+            "agentloom.tools.file_ops.write_file",
             "core_file",
             "Create or completely overwrite a file with read-state protection.",
             "file_ops",
@@ -172,7 +172,7 @@ def _build_catalog() -> dict[str, ToolSpec]:
         ),
         _spec(
             "list_directory",
-            "src.tools.file_ops.directory_browser",
+            "agentloom.tools.file_ops.directory_browser",
             "core_file",
             "List a directory tree with repository-oriented filtering.",
             "file_ops",
@@ -193,7 +193,7 @@ def _build_catalog() -> dict[str, ToolSpec]:
         ),
         _spec(
             "grep_search",
-            "src.tools.search.grep_tool",
+            "agentloom.tools.search.grep_tool",
             "core_search",
             "Search file contents using ripgrep-compatible regular expressions.",
             "search",
@@ -217,7 +217,7 @@ def _build_catalog() -> dict[str, ToolSpec]:
         ),
         _spec(
             "glob_search",
-            "src.tools.search.glob_tool",
+            "agentloom.tools.search.glob_tool",
             "core_search",
             "Find files by glob pattern under a directory.",
             "search",
@@ -229,7 +229,7 @@ def _build_catalog() -> dict[str, ToolSpec]:
         ),
         _spec(
             "loom_retrieve_context",
-            "src.tools.context.retrieve_context",
+            "agentloom.tools.context.retrieve_context",
             "context",
             "Retrieve original content behind a ContextRef.",
             "context",
@@ -240,7 +240,7 @@ def _build_catalog() -> dict[str, ToolSpec]:
         ),
         _spec(
             "skill",
-            "src.tools.skills.skill_tool",
+            "agentloom.tools.skills.skill_tool",
             "skills",
             "Load a specialized Skill when its description matches the current task.",
             "skills",
@@ -251,7 +251,7 @@ def _build_catalog() -> dict[str, ToolSpec]:
         ),
         _spec(
             "session_search",
-            "src.tools.self_learning.session_tools",
+            "agentloom.tools.self_learning.session_tools",
             "self_learning",
             "Search redacted records from prior AgentLoom runs.",
             "self_learning",
@@ -262,7 +262,7 @@ def _build_catalog() -> dict[str, ToolSpec]:
         ),
         _spec(
             "session_scroll",
-            "src.tools.self_learning.session_tools",
+            "agentloom.tools.self_learning.session_tools",
             "self_learning",
             "Scroll around an indexed session event.",
             "self_learning",
@@ -273,7 +273,7 @@ def _build_catalog() -> dict[str, ToolSpec]:
         ),
         _spec(
             "memory",
-            "src.tools.self_learning.memory_tool",
+            "agentloom.tools.self_learning.memory_tool",
             "self_learning",
             "Read or change curated project/current-application facts that remain useful after this run.",
             "self_learning",
@@ -295,7 +295,7 @@ def _build_catalog() -> dict[str, ToolSpec]:
         ),
         _spec(
             "skill_manage",
-            "src.tools.self_learning.skill_manage_tool",
+            "agentloom.tools.self_learning.skill_manage_tool",
             "self_learning",
             "Create and update generated skill proposal packages.",
             "self_learning",
@@ -315,7 +315,7 @@ def _build_catalog() -> dict[str, ToolSpec]:
         ),
         _spec(
             "todo_write",
-            "src.tools.todo.todo_write",
+            "agentloom.tools.todo.todo_write",
             "planning",
             "Write the current task plan.",
             "planning",
@@ -329,7 +329,7 @@ def _build_catalog() -> dict[str, ToolSpec]:
         ),
         _spec(
             "write_markdown_file",
-            "src.tools.file_ops.markdown_writer",
+            "agentloom.tools.file_ops.markdown_writer",
             "markdown_report",
             "Write a Markdown report from structured sections.",
             "file_ops",
@@ -349,7 +349,7 @@ def _build_catalog() -> dict[str, ToolSpec]:
         ),
         _spec(
             "write_markdown_file_raw",
-            "src.tools.file_ops.markdown_writer",
+            "agentloom.tools.file_ops.markdown_writer",
             "markdown_report",
             "Write raw Markdown content to a file.",
             "file_ops",
@@ -368,7 +368,7 @@ def _build_catalog() -> dict[str, ToolSpec]:
         ),
         _spec(
             "append_markdown_sections",
-            "src.tools.file_ops.markdown_writer",
+            "agentloom.tools.file_ops.markdown_writer",
             "markdown_report",
             "Append structured Markdown sections to an existing report.",
             "file_ops",
@@ -380,7 +380,7 @@ def _build_catalog() -> dict[str, ToolSpec]:
         ),
         _spec(
             "get_file_outline",
-            "src.tools.file_ops.file_outliner",
+            "agentloom.tools.file_ops.file_outliner",
             "code_nav",
             "Return a compact outline for a source file.",
             "code_nav",
@@ -398,7 +398,7 @@ def _build_catalog() -> dict[str, ToolSpec]:
         ),
         _spec(
             "ast_grep_search_file",
-            "src.tools.search.ast_grep_tool",
+            "agentloom.tools.search.ast_grep_tool",
             "code_nav",
             "Search source structure in one file using AST-aware matching.",
             "code_nav",
@@ -409,7 +409,7 @@ def _build_catalog() -> dict[str, ToolSpec]:
         ),
         _spec(
             "lsp_find_definition",
-            "src.tools.search.lsp_tool",
+            "agentloom.tools.search.lsp_tool",
             "code_nav",
             "Find a symbol definition using LSP or tree-sitter fallback.",
             "code_nav",
@@ -420,7 +420,7 @@ def _build_catalog() -> dict[str, ToolSpec]:
         ),
         _spec(
             "lsp_find_references",
-            "src.tools.search.lsp_tool",
+            "agentloom.tools.search.lsp_tool",
             "code_nav",
             "Find symbol references using LSP or tree-sitter fallback.",
             "code_nav",
@@ -431,7 +431,7 @@ def _build_catalog() -> dict[str, ToolSpec]:
         ),
         _spec(
             "lsp_get_document_symbols",
-            "src.tools.search.lsp_tool",
+            "agentloom.tools.search.lsp_tool",
             "code_nav",
             "List document symbols for one file.",
             "code_nav",
@@ -442,7 +442,7 @@ def _build_catalog() -> dict[str, ToolSpec]:
         ),
         _spec(
             "lsp_hover",
-            "src.tools.search.lsp_tool",
+            "agentloom.tools.search.lsp_tool",
             "code_nav",
             "Return hover/type information at a source location.",
             "code_nav",
@@ -453,7 +453,7 @@ def _build_catalog() -> dict[str, ToolSpec]:
         ),
         _spec(
             "lsp_get_workspace_symbols",
-            "src.tools.search.lsp_tool",
+            "agentloom.tools.search.lsp_tool",
             "code_nav",
             "Search symbols in a workspace directory.",
             "code_nav",

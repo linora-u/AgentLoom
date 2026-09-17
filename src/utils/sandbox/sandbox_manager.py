@@ -21,8 +21,8 @@ import shutil
 from dataclasses import dataclass, field
 from typing import List, Optional
 
-from src.lib.config import C
-from src.lib.logging import get_logger
+from agentloom.configuration import C
+from agentloom.runtime.logging import get_logger
 
 logger = get_logger(__name__)
 

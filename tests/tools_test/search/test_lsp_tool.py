@@ -3,7 +3,7 @@ import textwrap
 
 import pytest
 
-from src.tools.search.lsp_tool.lsp_tool import (
+from agentloom.tools.search.lsp_tool.lsp_tool import (
     lsp_find_definition,
     lsp_find_references,
     lsp_get_document_symbols,
@@ -12,7 +12,7 @@ from src.tools.search.lsp_tool.lsp_tool import (
     _read_symbol_at,
     _find_project_root,
 )
-from src.tools.search.lsp_tool.treesitter_fallback import (
+from agentloom.tools.search.lsp_tool.treesitter_fallback import (
     ts_get_symbols,
     ts_find_definitions,
     ts_find_definitions_in_directory,

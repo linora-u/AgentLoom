@@ -5,8 +5,8 @@ import unittest
 import tempfile
 from pathlib import Path
 
-from src.tools.file_ops.write_file import write_file
-from src.tools.file_ops._read_file_state import get_read_file_state
+from agentloom.tools.file_ops.write_file import write_file
+from agentloom.tools.file_ops._read_file_state import get_read_file_state
 
 
 class TestWriteFileBasic(unittest.TestCase):
@@ -132,7 +132,7 @@ class TestWriteFileStalenessIntegration(unittest.TestCase):
 
     def test_read_then_write_succeeds(self):
         """Full flow: read file, then write should succeed."""
-        from src.tools.file_ops.read_file import read_file
+        from agentloom.tools.file_ops.read_file import read_file
         fp = self.test_dir / "flow.txt"
         fp.write_text("original content\n")
         read_result = read_file(str(fp))

@@ -21,7 +21,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Optional, Union
 
-from src.lib.logging import get_logger
+from agentloom.runtime.logging import get_logger
 
 logger = get_logger(__name__)
 

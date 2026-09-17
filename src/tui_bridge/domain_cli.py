@@ -327,12 +327,12 @@ def _run_application(
     if action == "run.resume" and not isinstance(resume_task_id, str):
         raise BridgeError("invalid_params", "run.resume requires task_id")
 
-    from src.application_run import (
+    from agentloom.application.run import (
         ApplicationRunBudgetLimited,
         ApplicationRunError,
         ApplicationRunInterrupted,
     )
-    from src.runner import execute_app
+    from agentloom.application.runner import execute_app
 
     events: list[dict[str, Any]] = []
 

@@ -2,7 +2,7 @@
 
 from typing import Any
 
-from src.tools._lazy_exports import install_lazy_exports, resolve_lazy_export
+from agentloom.tools._lazy_exports import install_lazy_exports, resolve_lazy_export
 
 _EXPORTS = {
     "grep_search": (".grep_tool", "grep_search"),

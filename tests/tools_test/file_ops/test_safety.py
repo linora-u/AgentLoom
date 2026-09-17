@@ -5,7 +5,7 @@ import unittest
 import tempfile
 from pathlib import Path
 
-from src.tools.file_ops._safety import (
+from agentloom.tools.file_ops._safety import (
     BLOCKED_DEVICE_PATHS,
     DEFAULT_READ_LIMIT,
     MAX_EDIT_FILE_SIZE,

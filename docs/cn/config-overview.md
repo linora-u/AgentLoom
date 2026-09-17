@@ -95,7 +95,7 @@ logging:
 无论配置如何合并，开发者和框架底层都通过唯一的 `C` 单例对象来访问配置。`C` 封装了复杂的合并逻辑，提供了极其简洁的 API。
 
 ```python
-from src.lib.config import C
+from agentloom.configuration import C
 
 # 1. 访问系统配置
 tools_list = C.get_nested("tools", "default", default=[])
@@ -122,3 +122,12 @@ Goal Mode 只能配置在顶层 Supervisor Agent YAML，不属于全局或 Appli
 `audit/goal.json`。`budget_limited` 保留 checkpoint，修改 YAML 预算后沿用同一
 `task_id` resume。完整字段、continuation、预算和调度语义见
 [Goal Mode](goal_mode.md)。
+
+## 安装后的包与项目路径
+
+Python 包统一为 `agentloom`，使用 `python -m agentloom` 或 `loom` 命令。
+原有 `src` 包和模块命令已移除。安装 wheel 后从项目外启动时，将
+`AGENTLOOM_PROJECT_ROOT` 设置为包含 `config/system.yaml` 和 `config/llm.yaml`
+的项目目录；没有显式配置时，继续沿父目录发现项目。生成的脚本记录相对输出
+文件的项目位置，也接受该环境变量覆盖。项目工具仍使用 `applications.*`，
+运行时从选定项目加载，不将整个项目加入框架的模块搜索路径。

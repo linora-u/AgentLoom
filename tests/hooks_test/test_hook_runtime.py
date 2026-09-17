@@ -9,8 +9,8 @@ from pathlib import Path
 
 import pytest
 
-from src.lib.runtime import process as process_runtime
-from src.lib.smolagents.hooks import (
+from agentloom.runtime import process as process_runtime
+from agentloom.runtime.hooks import (
     HOOK_EVENT_NAMES,
     HookConfigLayer,
     HookEvent,
@@ -20,9 +20,9 @@ from src.lib.smolagents.hooks import (
     HookResult,
     HookRun,
 )
-from src.lib.smolagents.hooks.tool_shim import inject_hooks
-from src.lib.smolagents.tools.tools import tool
-from src.trace import bind_explicit_execution_context, capture_explicit_execution_context
+from agentloom.adapters.smolagents.tool_shim import inject_hooks
+from agentloom.adapters.smolagents.tools.tools import tool
+from agentloom.runtime.trace import bind_explicit_execution_context, capture_explicit_execution_context
 
 
 def _run(*handlers: HookHandler) -> HookRun:

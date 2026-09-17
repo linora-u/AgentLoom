@@ -1,5 +1,5 @@
 """
-Tests for src.lib.checkpoint.conversation_recovery.
+Tests for agentloom.runtime.checkpoint.conversation_recovery.
 
 Covers:
 - filter_unresolved_tool_uses: normal, boundary, edge cases
@@ -15,7 +15,7 @@ from typing import Any, Optional
 
 import pytest
 
-from src.lib.checkpoint.conversation_recovery import (
+from agentloom.runtime.checkpoint.conversation_recovery import (
     TurnInterruptionState,
     detect_turn_interruption,
     filter_empty_steps,

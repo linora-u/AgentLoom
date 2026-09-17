@@ -3,7 +3,7 @@
 This module deliberately uses the OpenAI-compatible SDK directly.  It does
 not import the AgentLoom execution Agent, smolagents, or LiteLLM.  The TUI
 agent owns a small conversation/tool loop and can call only the draft tools
-provided by :mod:`src.tui_bridge.builder`.
+provided by :mod:`agentloom.tui_bridge.builder`.
 """
 
 from __future__ import annotations
@@ -29,7 +29,7 @@ from openai import (
     RateLimitError,
 )
 
-from src.lib.config.llm_config import LLMConfig
+from agentloom.configuration.llm_config import LLMConfig
 
 _MAX_PROVIDER_TURNS = 6
 _MAX_PROVIDER_ATTEMPTS = 2

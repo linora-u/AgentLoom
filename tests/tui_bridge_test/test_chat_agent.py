@@ -10,9 +10,9 @@ import httpx
 import pytest
 from openai import OpenAI
 
-from src.tui_bridge.bridge import BridgeError, TuiBridge
-from src.tui_bridge.builder import BuilderService
-from src.tui_bridge.chat_agent import ChatModelProfile
+from agentloom.tui_bridge.bridge import BridgeError, TuiBridge
+from agentloom.tui_bridge.builder import BuilderService
+from agentloom.tui_bridge.chat_agent import ChatModelProfile
 
 
 def _write_catalog(project_root: Path) -> None:
@@ -650,8 +650,8 @@ def test_default_openai_endpoint_rejects_non_openai_litellm_model_prefix(tmp_pat
 def test_importing_tui_chat_does_not_import_litellm_or_smolagents() -> None:
     script = """
 import sys
-import src.tui_bridge.builder
-import src.tui_bridge.chat_agent
+import agentloom.tui_bridge.builder
+import agentloom.tui_bridge.chat_agent
 loaded = sorted(name for name in sys.modules if name == 'litellm' or name.startswith('smolagents'))
 if loaded:
     raise SystemExit(','.join(loaded))

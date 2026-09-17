@@ -1,7 +1,7 @@
 import pytest
 
-from src.tools.shell import validator as validator_module
-from src.tools.shell.validator import analyze_command, validate_command
+from agentloom.tools.shell import validator as validator_module
+from agentloom.tools.shell.validator import analyze_command, validate_command
 
 
 class _DummyConfig:

@@ -9,8 +9,8 @@ project_root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(_
 if project_root not in sys.path:
     sys.path.insert(0, project_root)
 
-from src.lib.smolagents.agent.yaml_agent_factory import YamlAgentFactory, YamlConfiguredSupervisorAgent
-from src.trace import generate_id
+from agentloom.runtime.factory import YamlAgentFactory, YamlConfiguredSupervisorAgent
+from agentloom.runtime.trace import generate_id
 
 
 def run_shell_session_isolation_test():

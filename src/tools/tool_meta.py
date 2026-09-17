@@ -5,8 +5,8 @@ from __future__ import annotations
 from dataclasses import fields, replace
 from typing import Any
 
-from src.lib.config import C
-from src.lib.logging import get_logger
+from agentloom.configuration import C
+from agentloom.runtime.logging import get_logger
 
 from .catalog import ToolSpec, get_tool_spec
 
