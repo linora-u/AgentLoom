@@ -28,6 +28,14 @@ repetitions supply the required two consecutive successes without duplicating
 another pair of fresh-process runs. They share loaded framework modules and the Application definition but
 use distinct workspace nonces and must have distinct task/run identities.
 
+Nested copies relocate their App-owned, fully qualified Python tool module
+names from `applications.architecture_contract_validation.*` to
+`applications.nested.suite.architecture_contract_validation.*`. This explicit
+path migration is recorded field by field in `namespace_adaptations`, along
+with all resulting definition digests. Relative Worker paths, workflow text
+and prompt/resource paths stay unchanged. The tool loader must still reject
+modules cached from outside the isolated project.
+
 Each attempt has a 1..3600 second wall-clock limit. Timeout sends SIGINT to the
 process group, then SIGKILL after 15 seconds if required; it is a failed attempt.
 Agent steps and each pytest subprocess are also bounded. The runner does not
