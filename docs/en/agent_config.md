@@ -7,6 +7,14 @@
 
 Agent YAML is the configuration file in the AgentLoom framework that **defines the behavior of a single Agent**, controlling the Agent's role description, workflow instructions, available tools, model selection, execution environment, skill packages, and more. Agents are divided into two roles: **Supervisor** (multi-Agent orchestrator) and **Worker** (specific task executor).
 
+Both roles support `.yaml`, `.yml`, and `.md` definitions. Markdown uses a fenced
+`yaml` configuration block; nonempty text outside that block becomes `workflow`.
+Application Studio, its catalog/details, validation, and schedule targets discover
+Markdown Supervisors in top-level or nested Application/workflow directories using
+the same definition reader as execution. Worker definitions stay under their
+Supervisor's references, and malformed Markdown or duplicate YAML keys produce
+the same validation diagnostics. Reading these views does not start a Run or model.
+
 > ⚠️ **LLM Configuration Isolation**: `model`/`llm`/`langfuse` in Agent YAML are automatically filtered with a warning. LLM parameters can only be defined in `config/llm.yaml`; Agents select which predefined model type to use via the `model_type` field.
 
 ---
