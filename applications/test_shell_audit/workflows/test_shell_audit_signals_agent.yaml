@@ -102,7 +102,7 @@ workflow: |
 
   sandbox_reasons = []
   try:
-      from src.utils.sandbox.sandbox_manager import SandboxConfig, SandboxManager
+      from agentloom.utils.sandbox.sandbox_manager import SandboxConfig, SandboxManager
       for mode in ("bwrap", "docker"):
           manager = SandboxManager(SandboxConfig(enabled=True, mode=mode))
           available = manager.is_available()

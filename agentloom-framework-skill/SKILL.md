@@ -12,6 +12,7 @@ description: "当用户需要理解、开发、扩展或验证 AgentLoom 框架�
 - 先进入 AgentLoom 根目录。运行时代码用 `pyproject.toml` 中 `[project].name == "AgentLoom"` 发现项目根；本 Skill 的操作前置检查额外要求 `config/llm.yaml` 存在，因为它是被忽略的本地模型配置，也是生成/验证 Application 前必须确认的环境条件。不要只用 `config/system.yaml` 判定环境可用。
 - 新建 worktree 或干净 checkout 后先检查 `config/llm.yaml`；该文件通常被 `.gitignore` 忽略，不会随 worktree 自动生成。缺失时从同机可信工作区复制，或让用户提供本地配置；不要提交该文件，也不要凭空生成模型配置。
 - 当前本地环境可能没有 `uv`；验证优先用 `.venv/bin/python` 和 `.venv/bin/loom`。
+- 框架 Python 导入统一使用 `agentloom.*`；职责模块的物理源码直接位于 `src/application/`、`src/runtime/`、`src/adapters/` 等目录，由安装配置映射为 `agentloom`。不要新增 `src.*` 导入或旧路径转发。
 - 写 Application 前先读真实仓库结构与 `config/llm.yaml`，`model_type` 只能来自项目配置。
 - 如果用户目标不清晰，先问清“功能目标、输入、输出、验收标准”；不要为了显得完整而发明需求。
 
@@ -75,18 +76,23 @@ description: "当用户需要理解、开发、扩展或验证 AgentLoom 框架�
 - `run.start` / `run.resume` / `run.restart` / `run.stop`：标准 Run 生命周期；
 - `run.detail`：结构化、限长的 Run 证据。
 
+Studio 检查和 Run 准备共用 `agentloom.application.definition` 的完整拓扑预检。
+它解析 Supervisor 与所有 Worker 的 Skill 目录、校验 frontmatter 和同层重名，
+在分配 Run 前拒绝静态错误。运行复用已解析的 Skill 正文；新的检查或调用重新读取，
+不把磁盘编辑热切换到已有调用。静态检查不创建模型、连接 MCP、执行 Hook 或加载工具实现。
+
 调用格式：
 
 ```bash
-.venv/bin/python -I -m src.tui_bridge.domain_cli \
+.venv/bin/python -I -m agentloom.tui_bridge.domain_cli \
   --project "$PWD" application.detail '{"application_id":"<app>"}'
 
 # Application 很大时继续读取下一页；不要读取 OpenCode managed tool-output 全文
-.venv/bin/python -I -m src.tui_bridge.domain_cli \
+.venv/bin/python -I -m agentloom.tui_bridge.domain_cli \
   --project "$PWD" application.detail \
   '{"application_id":"<app>","offset":10,"limit":10}'
 
-.venv/bin/python -I -m src.tui_bridge.domain_cli \
+.venv/bin/python -I -m agentloom.tui_bridge.domain_cli \
   --project "$PWD" application.validate '{"application_id":"<app>"}'
 ```
 
@@ -95,6 +101,14 @@ description: "当用户需要理解、开发、扩展或验证 AgentLoom 框架�
 `page.next_offset`；不要为了拿完整目录而读取 OpenCode managed tool-output
 文件。模型密钥、Base URL、认证 Header 不属于该合同，不能通过其他读取
 方式补进上下文。
+
+## 当前扫描边界
+
+两个 Skill 脚本当前漏扫嵌套 workflow 目录中的 Supervisor，已记录为
+[#69](https://github.com/linora-u/AgentLoom/issues/69)，按维护者决定后续修复。
+包含嵌套 workflow 时，使用上面的领域 `application.validate` 命令校验完整
+Application；不要把结构扫描或 YAML 脚本的成功结果视为完整校验通过。
+框架与 Studio 的共享定义检查支持这些嵌套定义。
 
 ## 命令速查
 
@@ -105,11 +119,11 @@ test -f config/llm.yaml
 # 新 worktree 缺失时，先确认它是否为被忽略的本地配置
 git check-ignore -v config/llm.yaml || true
 
-# YAML 契约校验
+# 共享定义与 Effective Config 预检（含 Worker 引用图）
 .venv/bin/python agentloom-framework-skill/scripts/validate_application_yaml.py \
   --app-root applications/<app_name>
 
-# Application 结构扫描
+# Application 结构扫描（复用共享 YAML/Markdown 解析器）
 .venv/bin/python -c "
 import sys
 sys.path.insert(0, 'agentloom-framework-skill')
@@ -118,9 +132,9 @@ print(scan_app_structure('applications/<app_name>'))
 "
 
 # Studio/Codex 共用的 Effective Config 与领域校验
-.venv/bin/python -I -m src.tui_bridge.domain_cli \
+.venv/bin/python -I -m agentloom.tui_bridge.domain_cli \
   --project "$PWD" application.detail '{"application_id":"<app_name>"}'
-.venv/bin/python -I -m src.tui_bridge.domain_cli \
+.venv/bin/python -I -m agentloom.tui_bridge.domain_cli \
   --project "$PWD" application.validate '{"application_id":"<app_name>"}'
 
 # Python 编译校验

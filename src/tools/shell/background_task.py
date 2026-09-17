@@ -18,11 +18,11 @@ import uuid
 from dataclasses import dataclass, field
 from typing import Dict, List, Literal, Optional
 
-from src.lib.config import C
-from src.lib.logging import get_logger
-from src.lib.runtime import copy_runtime_context, get_current_run_context
-from src.tools.shell.output_reader import AnchoredOutputReader
-from src.tools.shell.tree_kill import SizeWatchdog, graceful_kill
+from agentloom.configuration import C
+from agentloom.runtime.logging import get_logger
+from agentloom.runtime import copy_runtime_context, get_current_run_context
+from agentloom.tools.shell.output_reader import AnchoredOutputReader
+from agentloom.tools.shell.tree_kill import SizeWatchdog, graceful_kill
 
 logger = get_logger(__name__)
 
@@ -305,7 +305,7 @@ class BackgroundTaskRegistry:
 
         # Start stall watchdog if enabled.
         if self._cfg_stall_detection():
-            from src.tools.shell.stall_watchdog import StallWatchdog
+            from agentloom.tools.shell.stall_watchdog import StallWatchdog
 
             def _record_stall(message: str) -> None:
                 with self._lock:

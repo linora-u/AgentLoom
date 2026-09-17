@@ -7,11 +7,11 @@ from unittest.mock import patch
 
 import pytest
 
-from src.lib.runtime import RuntimeHome, bind_run_context, copy_runtime_context
+from agentloom.runtime import RuntimeHome, bind_run_context, copy_runtime_context
 
 
 def test_shell_audit_is_jsonl_in_the_current_run(tmp_path: Path) -> None:
-    from src.tools.shell.shell_audit_log import (
+    from agentloom.tools.shell.shell_audit_log import (
         get_shell_audit_logger,
         reset_audit_loggers,
     )
@@ -39,7 +39,7 @@ def test_shell_audit_is_jsonl_in_the_current_run(tmp_path: Path) -> None:
 
 
 def test_large_shell_output_spills_to_the_current_run(tmp_path: Path) -> None:
-    from src.tools.shell.output_interceptor import OutputInterceptor
+    from agentloom.tools.shell.output_interceptor import OutputInterceptor
 
     context = RuntimeHome(tmp_path / ".agentloom").context(
         application_id="search",
@@ -58,8 +58,8 @@ def test_large_shell_output_spills_to_the_current_run(tmp_path: Path) -> None:
 
 
 def test_background_shell_output_belongs_to_the_current_run(tmp_path: Path) -> None:
-    from src.tools.shell.background_task import BackgroundTaskRegistry
-    from src.tools.shell.shell_tool import shell_tool
+    from agentloom.tools.shell.background_task import BackgroundTaskRegistry
+    from agentloom.tools.shell.shell_tool import shell_tool
 
     context = RuntimeHome(tmp_path / ".agentloom").context(
         application_id="search",
@@ -83,8 +83,8 @@ def test_background_check_keeps_the_original_output_inode_when_directory_is_repl
     import os
     import subprocess
 
-    from src.tools.shell.background_task import BackgroundTaskRegistry
-    from src.tools.shell.background_task_tools import check_background_task
+    from agentloom.tools.shell.background_task import BackgroundTaskRegistry
+    from agentloom.tools.shell.background_task_tools import check_background_task
 
     home = RuntimeHome(tmp_path / ".agentloom")
     first = home.context(application_id="first", task_id="task", run_id="run")
@@ -144,14 +144,14 @@ def test_background_check_keeps_the_original_output_inode_when_directory_is_repl
 
 
 def test_explicit_background_shell_requires_a_runtime_context() -> None:
-    from src.tools.shell.shell_tool import shell_tool
+    from agentloom.tools.shell.shell_tool import shell_tool
 
     with pytest.raises(RuntimeError, match="RuntimeContext"):
         shell_tool("printf no-run-context", run_in_background=True)
 
 
 def test_background_spawn_failure_removes_partial_run_artifact(tmp_path: Path) -> None:
-    from src.tools.shell.shell_tool import shell_tool
+    from agentloom.tools.shell.shell_tool import shell_tool
 
     context = RuntimeHome(tmp_path / ".agentloom").context(
         application_id="search",
@@ -173,7 +173,7 @@ def test_background_spawn_failure_removes_partial_run_artifact(tmp_path: Path) -
 
 
 def test_shell_audit_rotation_keeps_two_backups(tmp_path: Path) -> None:
-    from src.tools.shell.shell_audit_log import ShellAuditLogger
+    from agentloom.tools.shell.shell_audit_log import ShellAuditLogger
 
     context = RuntimeHome(tmp_path / ".agentloom").context(
         application_id="search",
@@ -204,7 +204,7 @@ def test_shell_audit_rotation_keeps_two_backups(tmp_path: Path) -> None:
 
 
 def test_shell_audit_keeps_opened_directory_when_path_is_replaced(tmp_path: Path) -> None:
-    from src.tools.shell.shell_audit_log import ShellAuditLogger
+    from agentloom.tools.shell.shell_audit_log import ShellAuditLogger
 
     home = RuntimeHome(tmp_path / ".agentloom")
     first = home.context(application_id="first", task_id="task", run_id="run")
@@ -230,7 +230,7 @@ def test_shell_audit_keeps_opened_directory_when_path_is_replaced(tmp_path: Path
 def test_large_output_does_not_follow_replaced_shell_artifact_directory(
     tmp_path: Path,
 ) -> None:
-    from src.tools.shell.output_interceptor import OutputInterceptor
+    from agentloom.tools.shell.output_interceptor import OutputInterceptor
 
     home = RuntimeHome(tmp_path / ".agentloom")
     first = home.context(application_id="first", task_id="task", run_id="run")
@@ -253,7 +253,7 @@ def test_large_output_does_not_follow_replaced_shell_artifact_directory(
 
 
 def test_sequential_runs_do_not_reuse_shell_audit_sinks(tmp_path: Path) -> None:
-    from src.tools.shell.shell_audit_log import (
+    from agentloom.tools.shell.shell_audit_log import (
         get_shell_audit_logger,
         reset_audit_loggers,
     )
@@ -281,7 +281,7 @@ def test_sequential_runs_do_not_reuse_shell_audit_sinks(tmp_path: Path) -> None:
 
 
 def test_concurrent_runs_keep_shell_audit_contexts_isolated(tmp_path: Path) -> None:
-    from src.tools.shell.shell_audit_log import (
+    from agentloom.tools.shell.shell_audit_log import (
         get_shell_audit_logger,
         reset_audit_loggers,
     )
@@ -316,12 +316,12 @@ def test_concurrent_runs_keep_shell_audit_contexts_isolated(tmp_path: Path) -> N
 
 
 def test_run_logger_scope_closes_shell_audit_handler(tmp_path: Path) -> None:
-    from src.lib.logging import (
+    from agentloom.runtime.logging import (
         LoggingConfigBuilder,
         bind_logger_backend,
         initialize_run_logger,
     )
-    from src.tools.shell.shell_audit_log import get_shell_audit_logger
+    from agentloom.tools.shell.shell_audit_log import get_shell_audit_logger
 
     context = RuntimeHome(tmp_path / ".agentloom").context(application_id="search", task_id="task", run_id="run")
     config = LoggingConfigBuilder().apply_mapping({"console_enabled": False, "file_enabled": False}, source="test")
@@ -349,13 +349,13 @@ def test_shell_audit_agent_never_reads_process_global_trace_fallback(
     import importlib
     from dataclasses import replace
 
-    from src.tools.shell.shell_audit_log import get_shell_audit_logger, reset_audit_loggers
-    from src.trace import (
+    from agentloom.tools.shell.shell_audit_log import get_shell_audit_logger, reset_audit_loggers
+    from agentloom.runtime.trace import (
         bind_explicit_execution_context,
         capture_explicit_execution_context,
     )
 
-    task_context_module = importlib.import_module("src.trace.task_context")
+    task_context_module = importlib.import_module("agentloom.runtime.trace.task_context")
 
     context = RuntimeHome(tmp_path / ".agentloom").context(
         application_id="search",

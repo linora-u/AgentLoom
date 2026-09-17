@@ -14,7 +14,7 @@ import json
 from unittest.mock import patch, MagicMock
 import pytest
 
-from src.lib.smolagents.models.litellm_model import LiteLLMModelV2
+from agentloom.adapters.smolagents.models.litellm_model import LiteLLMModelV2
 
 
 # ---------------------------------------------------------------------------

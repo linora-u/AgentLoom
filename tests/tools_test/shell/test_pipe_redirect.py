@@ -2,7 +2,7 @@
 
 import pytest
 
-from src.tools.shell.pipe_redirect import (
+from agentloom.tools.shell.pipe_redirect import (
     rearrange_pipe_command,
     _extract_unquoted,
     _split_on_unquoted_pipe,

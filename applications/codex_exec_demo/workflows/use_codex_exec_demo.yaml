@@ -28,7 +28,7 @@ workflow: |
 
 tools:
   - name: "codex1"
-    module: "src.tools.codex.codex_tool"
+    module: "agentloom.tools.codex.codex_tool"
     function: "codex"
     fixed_args:
       prompt: "Read pyproject.toml and return the project name and version. Keep it concise."
@@ -39,7 +39,7 @@ tools:
       search: "false"
     description: "Run the first fixed local Codex task in the demo chain."
   - name: "codex2"
-    module: "src.tools.codex.codex_tool"
+    module: "agentloom.tools.codex.codex_tool"
     function: "codex"
     fixed_args:
       prompt: "Inspect the repository root and return a concise list of top-level directories with one short role for each."

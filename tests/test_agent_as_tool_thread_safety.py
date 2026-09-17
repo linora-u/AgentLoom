@@ -70,7 +70,7 @@ def _create_tool_with_mock_agent(config=None, agent_instances=None):
             agent_instances.append(self)
 
         def _ensure_normalized(self):
-            from src.lib.smolagents.agent.agent_validation import AgentConfigNormalizer
+            from agentloom.application.validation import AgentConfigNormalizer
             return AgentConfigNormalizer.build_worker_normalized_config(
                 self._config, agent_root=".", source_name="test",
             )
@@ -83,7 +83,7 @@ def _create_tool_with_mock_agent(config=None, agent_instances=None):
             return f"result_from_{self._id}"
 
         def agent_as_tool(self):
-            from src.lib.smolagents.agent.yaml_agent_factory import YamlConfiguredAgent
+            from agentloom.runtime.factory import YamlConfiguredAgent
             # Delegate to the real agent_as_tool logic but with our class
             real = YamlConfiguredAgent.__dict__['agent_as_tool']
             return real(self)
@@ -186,7 +186,7 @@ class TestFactoryMode:
                 self.description = config.get("description", "")
 
             def _ensure_normalized(self):
-                from src.lib.smolagents.agent.agent_validation import AgentConfigNormalizer
+                from agentloom.application.validation import AgentConfigNormalizer
                 return AgentConfigNormalizer.build_worker_normalized_config(
                     self._config, agent_root=".", source_name="test",
                 )
@@ -203,7 +203,7 @@ class TestFactoryMode:
                 return f"ok_{n}"
 
             def agent_as_tool(self):
-                from src.lib.smolagents.agent.yaml_agent_factory import YamlConfiguredAgent
+                from agentloom.runtime.factory import YamlConfiguredAgent
                 return YamlConfiguredAgent.__dict__['agent_as_tool'](self)
 
         agent = FailOnSecond(config)
@@ -230,9 +230,9 @@ class TestFactoryMode:
         assert len(results) == 3
 
     def test_large_worker_result_returns_context_ref(self, tmp_path):
-        from src.lib.context_engine import ContextEngine, ContextEngineConfig
-        from src.lib.context_engine.runtime import clear_current_context_engine, set_current_context_engine
-        from src.lib.smolagents.agent.yaml_agent_factory import YamlConfiguredAgent
+        from agentloom.runtime.context_engine import ContextEngine, ContextEngineConfig
+        from agentloom.runtime.context_engine.runtime import clear_current_context_engine, set_current_context_engine
+        from agentloom.runtime.factory import YamlConfiguredAgent
 
         config = _make_minimal_config()
 
@@ -249,7 +249,7 @@ class TestFactoryMode:
                 self.description = config.get("description", "")
 
             def _ensure_normalized(self):
-                from src.lib.smolagents.agent.agent_validation import AgentConfigNormalizer
+                from agentloom.application.validation import AgentConfigNormalizer
 
                 return AgentConfigNormalizer.build_worker_normalized_config(
                     self._config, agent_root=".", source_name="test",
@@ -277,7 +277,7 @@ class TestFactoryMode:
             clear_current_context_engine(engine)
 
     def test_worker_context_engine_failure_is_visible(self):
-        from src.lib.context_engine.runtime import clear_current_context_engine, set_current_context_engine
+        from agentloom.runtime.context_engine.runtime import clear_current_context_engine, set_current_context_engine
 
         bad_engine = MagicMock()
         bad_engine.compress_tool_result.side_effect = RuntimeError("worker context store unavailable")

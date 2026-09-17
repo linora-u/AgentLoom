@@ -5,7 +5,7 @@ from unittest.mock import MagicMock, call
 
 import pytest
 
-from src.application_run_lifecycle import (
+from agentloom.application.lifecycle import (
     ApplicationRunFinalization,
     ApplicationRunLifecycle,
     ApplicationRunResources,
@@ -94,7 +94,7 @@ def test_finalize_run_owns_evidence_manifest_and_success_cleanup(
     persist_observability = MagicMock()
     manifest_updates: dict[str, object] = {}
     monkeypatch.setattr(
-        "src.application_run_lifecycle._persist_run_observability",
+        "agentloom.application.lifecycle._persist_run_observability",
         persist_observability,
     )
 
@@ -144,7 +144,7 @@ def test_finalization_failure_can_replace_an_execution_failure() -> None:
 
 
 def test_terminal_checkpoint_precedes_coordinator_deactivation(monkeypatch) -> None:
-    from src.lib.checkpoint.coordinator import CheckpointCoordinator
+    from agentloom.runtime.checkpoint.coordinator import CheckpointCoordinator
 
     lifecycle = ApplicationRunLifecycle()
     coordinator = MagicMock()
@@ -184,7 +184,7 @@ def test_terminal_checkpoint_precedes_coordinator_deactivation(monkeypatch) -> N
 def test_checkpoint_resources_close_when_coordinator_deactivation_fails(
     monkeypatch,
 ) -> None:
-    from src.lib.checkpoint.coordinator import CheckpointCoordinator
+    from agentloom.runtime.checkpoint.coordinator import CheckpointCoordinator
 
     lifecycle = ApplicationRunLifecycle()
     coordinator = MagicMock()

@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import json
 
-from src.lib.smolagents.tools.tools import tool
+from agentloom.adapters.smolagents.tools.tools import tool
 
 
 @tool
@@ -38,8 +38,8 @@ def todo_write(todos: list[dict[str, str]]) -> str:
         JSON containing the exact committed todos, per-status counts, and the
         new canonical list revision.
     """
-    from src.lib.todo import get_current_todo_provider, todo_counts
-    from src.trace import get_current_agent_name, get_current_runtime_agent_path
+    from agentloom.runtime.todo import get_current_todo_provider, todo_counts
+    from agentloom.runtime.trace import get_current_agent_name, get_current_runtime_agent_path
 
     provider = get_current_todo_provider(required=True)
     agent_path = get_current_runtime_agent_path() or get_current_agent_name() or "default"

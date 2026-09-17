@@ -20,7 +20,7 @@ bashPipeCommand.ts.
 import re
 from typing import List, Optional
 
-from src.lib.logging import get_logger
+from agentloom.runtime.logging import get_logger
 
 logger = get_logger(__name__)
 

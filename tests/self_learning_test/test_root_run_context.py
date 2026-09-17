@@ -13,8 +13,8 @@ from pathlib import Path
 import pytest
 from packaging.requirements import Requirement
 
-from src.lib.smolagents.hooks import HookEvent, HookHandler, HookPlan, HookResult, HookRun
-from src.trace import (
+from agentloom.runtime.hooks import HookEvent, HookHandler, HookPlan, HookResult, HookRun
+from agentloom.runtime.trace import (
     ExplicitExecutionContext,
     MissingRunContextError,
     bind_explicit_execution_context,
@@ -46,7 +46,7 @@ def test_bind_root_run_owns_outer_binding_and_nested_calls_inherit_it() -> None:
 
 
 def test_bind_root_run_reuses_one_state_and_next_root_gets_a_fresh_state():
-    from src.trace import require_root_run_state
+    from agentloom.runtime.trace import require_root_run_state
 
     with bind_root_run("shared-root-state"):
         first = require_root_run_state()
@@ -119,11 +119,11 @@ def test_session_search_excludes_explicit_root(
             return []
 
     monkeypatch.setattr(
-        "src.tools.self_learning.session_tools.SelfLearningLedger",
+        "agentloom.tools.self_learning.session_tools.SelfLearningLedger",
         lambda: _FakeLedger(),
     )
 
-    from src.tools.self_learning.session_tools import session_search
+    from agentloom.tools.self_learning.session_tools import session_search
 
     with bind_root_run("real-root-run"):
         payload = json.loads(session_search("needle", scope="all"))
@@ -133,8 +133,8 @@ def test_session_search_excludes_explicit_root(
 
 
 def test_canonical_event_carries_hook_run_local_and_root_ids() -> None:
-    from src.extensions.self_learning.session_recorder import event_from_hook_context
-    from src.lib.smolagents.hooks import HookContext
+    from agentloom.self_learning.session_recorder import event_from_hook_context
+    from agentloom.runtime.hooks import HookContext
 
     event = event_from_hook_context(
         HookContext(
@@ -157,8 +157,8 @@ def test_canonical_event_carries_hook_run_local_and_root_ids() -> None:
 def test_application_disable_prevents_session_recorder_write(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    from src.extensions.self_learning.session_recorder import SessionRecorder
-    from src.lib.smolagents.hooks import HookContext
+    from agentloom.self_learning.session_recorder import SessionRecorder
+    from agentloom.runtime.hooks import HookContext
 
     recorder = SessionRecorder()
     monkeypatch.setattr(
@@ -187,7 +187,7 @@ def test_application_disable_prevents_session_recorder_write(
 def test_session_tools_fail_closed_before_reading_without_root_context(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    from src.tools.self_learning.session_tools import session_scroll, session_search
+    from agentloom.tools.self_learning.session_tools import session_scroll, session_search
 
     class _MustNotRead:
         def search_events(self, *_args, **_kwargs):
@@ -197,7 +197,7 @@ def test_session_tools_fail_closed_before_reading_without_root_context(
             raise AssertionError("scroll must not read without a root context")
 
     monkeypatch.setattr(
-        "src.tools.self_learning.session_tools.SelfLearningLedger",
+        "agentloom.tools.self_learning.session_tools.SelfLearningLedger",
         lambda: _MustNotRead(),
     )
 
@@ -212,11 +212,11 @@ def test_disabled_self_learning_tools_do_not_initialize_runtime_or_state(
     root = tmp_path / ".agentloom"
     monkeypatch.setenv("AGENTLOOM_RUNTIME_ROOT", str(root))
     monkeypatch.setattr(
-        "src.extensions.self_learning.paths.self_learning_enabled",
+        "agentloom.self_learning.paths.self_learning_enabled",
         lambda _agent_config=None: False,
     )
 
-    from src.tools.self_learning import memory_tool, session_tools
+    from agentloom.tools.self_learning import memory_tool, session_tools
 
     def _must_not_initialize(*_args, **_kwargs):
         raise AssertionError("disabled tools must not initialize runtime or state")
@@ -251,7 +251,7 @@ def test_memory_tool_fails_before_creating_state_without_root_context(
 ) -> None:
     root = tmp_path / ".agentloom"
     monkeypatch.setenv("AGENTLOOM_RUNTIME_ROOT", str(root))
-    from src.tools.self_learning.memory_tool import memory
+    from agentloom.tools.self_learning.memory_tool import memory
 
     result = json.loads(memory("list", scope="project"))
 
@@ -265,11 +265,11 @@ def test_tool_wrapper_propagates_and_refreshes_root_across_executor_thread(
     monkeypatch.setenv(
         "AGENTLOOM_RUNTIME_ROOT", str(tmp_path / ".agentloom")
     )
-    from src.extensions.self_learning.persistence.memory_store import MemoryStore
-    from src.lib.smolagents.hooks.tool_shim import inject_hooks
-    from src.lib.smolagents.tools.tools import ensure_tool_wrapped
-    from src.tools.self_learning import memory_tool
-    from src.tools.self_learning.memory_tool import memory
+    from agentloom.self_learning.persistence.memory_store import MemoryStore
+    from agentloom.adapters.smolagents.tool_shim import inject_hooks
+    from agentloom.adapters.smolagents.tools.tools import ensure_tool_wrapped
+    from agentloom.tools.self_learning import memory_tool
+    from agentloom.tools.self_learning.memory_tool import memory
 
     agent_config = {
         "application_id": "root_context_test",
@@ -370,9 +370,9 @@ def test_session_tools_exclude_every_leaf_of_current_root(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     monkeypatch.setenv("AGENTLOOM_RUNTIME_ROOT", str(tmp_path / ".agentloom"))
-    from src.extensions.self_learning.event_schema import CanonicalSessionEvent, now_iso
-    from src.extensions.self_learning.persistence.ledger import SelfLearningLedger
-    from src.tools.self_learning.session_tools import session_scroll, session_search
+    from agentloom.self_learning.event_schema import CanonicalSessionEvent, now_iso
+    from agentloom.self_learning.persistence.ledger import SelfLearningLedger
+    from agentloom.tools.self_learning.session_tools import session_scroll, session_search
 
     ledger = SelfLearningLedger()
     for run_id, root_run_id in (

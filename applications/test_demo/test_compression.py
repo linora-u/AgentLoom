@@ -16,21 +16,21 @@ if str(PROJECT_ROOT) not in sys.path:
 
 from smolagents.models import ChatMessage, MessageRole
 
-from src.lib.smolagents.agent.yaml_agent_factory import (
+from agentloom.runtime.factory import (
     YamlAgentFactory,
     YamlConfiguredSupervisorAgent,
 )
-from src.lib.logging import get_global_logger, initialize_global_logger_once
-from src.lib.smolagents.memory.context_compression import (
+from agentloom.runtime.logging import get_global_logger, initialize_global_logger_once
+from agentloom.runtime.memory.context_compression import (
     FILE_DEDUP_PLACEHOLDER,
     OBSERVATION_MASKING_PLACEHOLDER,
     ConversationHistoryManager,
     InternalChatMessage,
     _extract_content_text,
 )
-from src.lib.smolagents.models.model_manager import model_manager
-from src.lib.smolagents.models.model_types import ModelType
-from src.trace import generate_id
+from agentloom.adapters.smolagents.models.model_manager import model_manager
+from agentloom.adapters.smolagents.models.model_types import ModelType
+from agentloom.runtime.trace import generate_id
 
 
 ScenarioBuilder = Callable[[], list[ChatMessage]]

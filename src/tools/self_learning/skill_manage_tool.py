@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import json
 
-from src.extensions.self_learning.proposal_writer import ProposalWriter
+from agentloom.self_learning.proposal_writer import ProposalWriter
 
 
 def skill_manage(

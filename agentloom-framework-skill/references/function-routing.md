@@ -27,6 +27,22 @@
 | “只要说明怎么用/补文档” | README/docs 修改 | 不创建 Agent |
 | “现有应用跑不通/架构不合理” | 验证评审 | 先扫描，再修根因 |
 
+框架修改按行为归属定位源码：
+
+| 要修改的行为 | 源码位置 |
+|---|---|
+| YAML/Markdown 定义、Worker 引用、有效配置来源、Application 与 Run 身份 | `src/application/` |
+| Supervisor/Worker 编排、Hook、Skill、checkpoint、Goal、上下文与持久化 | `src/runtime/` |
+| 与 smolagents 对象和执行器直接耦合的适配 | `src/adapters/smolagents/` |
+| MCP/LSP 外部协议连接 | `src/adapters/mcp/`、`src/adapters/lsp/` |
+| 全局和模型配置读取、规范化 | `src/configuration/` |
+| 工具目录与具体工具实现 | `src/tools/` |
+| Studio 展示、命令与调度入口 | `src/tui_bridge/`、`src/__main__.py`、`src/schedules/` |
+
+这些目录通过安装配置统一属于 `agentloom` 包，例如 `agentloom.application`
+对应 `src/application/`。定义规则由 Application 模块提供，Studio、运行入口和
+Skill 脚本应复用它；不要各自解析 YAML、维护字段白名单或推导 Worker 路径。
+
 ## 单 Agent / 多 Agent 判断
 
 优先单 Agent：

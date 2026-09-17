@@ -4,12 +4,13 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
 import re
 from pathlib import Path
 
 _APP_ROOT = Path(__file__).resolve().parents[1]
 _REPO_ROOT = _APP_ROOT.parents[1]
-_OUTPUT_ROOT = _APP_ROOT / "outputs"
+_OUTPUT_ROOT = Path(os.environ.get("AGENTLOOM_GOAL_VALIDATION_OUTPUT_ROOT", _APP_ROOT / "outputs")).resolve()
 _SAFE_NAME = re.compile(r"^[a-z0-9][a-z0-9_-]{0,63}$")
 _AUDIT_WORKERS = {
     "contract": "contract_auditor.yaml",
@@ -19,28 +20,28 @@ _AUDIT_WORKERS = {
 }
 _EVIDENCE_FILES = {
     "contract": (
-        "src/lib/goal/model.py",
-        "src/lib/goal/provider.py",
-        "src/lib/smolagents/agent/runtime_validation.py",
-        "src/lib/smolagents/agent/yaml_agent_factory.py",
+        "src/runtime/goal/model.py",
+        "src/runtime/goal/provider.py",
+        "src/application/readiness.py",
+        "src/runtime/factory.py",
         "tests/goal_test/test_goal_config.py",
         "tests/goal_test/test_goal_state.py",
         "tests/agent_test/llm_cfg_test/test_supervisor_task_spec_format.py",
         "tests/agent_test/runtime_builder_test/test_runtime_builder.py",
     ),
     "lifecycle": (
-        "src/lib/goal/model.py",
-        "src/lib/goal/provider.py",
-        "src/lib/smolagents/agent/base_agent.py",
-        "src/lib/checkpoint/checkpoint_manager.py",
-        "src/lib/checkpoint/coordinator.py",
-        "src/runner.py",
+        "src/runtime/goal/model.py",
+        "src/runtime/goal/provider.py",
+        "src/runtime/agent.py",
+        "src/runtime/checkpoint/checkpoint_manager.py",
+        "src/runtime/checkpoint/coordinator.py",
+        "src/application/runner.py",
         "tests/goal_test/test_goal_model_accounting.py",
         "tests/agent_test/runtime_builder_test/test_runtime_builder.py",
     ),
     "observability": (
-        "src/application_run.py",
-        "src/runner.py",
+        "src/application/run.py",
+        "src/application/runner.py",
         "src/schedules/runner.py",
         "src/schedules/store.py",
         "src/tui_bridge/bridge.py",
@@ -168,7 +169,7 @@ def run_goal_audit_batch(
             }
         )
 
-    from src.lib.smolagents.agent.yaml_agent_factory import YamlAgentFactory
+    from agentloom.runtime.factory import YamlAgentFactory
 
     worker_path = _APP_ROOT / "workflows" / "worker_agents" / filename
     results = YamlAgentFactory.run_agents_parallel(
@@ -199,7 +200,7 @@ def run_parallel_goal_budget_probe(tasks_json: str, concurrency: int = 6) -> str
         concurrency: Positive Worker concurrency for this batch.
     """
 
-    from src.lib.goal import get_current_goal_provider
+    from agentloom.runtime.goal import get_current_goal_provider
 
     provider = get_current_goal_provider(required=True)
     existing = json.loads(inspect_parallel_goal_budget_report())
@@ -272,7 +273,7 @@ def run_parallel_goal_budget_probe(tasks_json: str, concurrency: int = 6) -> str
 def inspect_parallel_goal_budget_report() -> str:
     """Report whether persisted parallel evidence belongs to the current Goal."""
 
-    from src.lib.goal import get_current_goal_provider
+    from agentloom.runtime.goal import get_current_goal_provider
 
     state = get_current_goal_provider(required=True).snapshot()
     target = _OUTPUT_ROOT / "parallel_budget.md"

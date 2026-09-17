@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from src.lib.context_engine.runtime import get_active_context_engine
+from agentloom.runtime.context_engine.runtime import get_active_context_engine
 
 
 def loom_retrieve_context(

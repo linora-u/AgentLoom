@@ -8,14 +8,14 @@ from pathlib import Path
 import pytest
 from click.testing import CliRunner
 
-from src.extensions.self_learning.persistence.memory_store import MemoryStore
+from agentloom.self_learning.persistence.memory_store import MemoryStore
 
 
 @pytest.fixture()
 def seeded_store(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> MemoryStore:
     runtime_root = tmp_path / ".agentloom"
     monkeypatch.setattr(
-        "src.extensions.self_learning.paths._runtime_config_section",
+        "agentloom.self_learning.paths._runtime_config_section",
         lambda: {"root_dir": str(runtime_root)},
     )
     config = {
@@ -34,7 +34,7 @@ def seeded_store(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> MemoryStore
         "active project fact",
         memory_key="export:active-project-fact",
     )
-    from src.extensions.self_learning.persistence.review_engine import ReviewEngine
+    from agentloom.self_learning.persistence.review_engine import ReviewEngine
 
     ReviewEngine(store.db_path).review(
         "project",
@@ -66,7 +66,7 @@ def test_export_items_returns_active_only(seeded_store: MemoryStore) -> None:
 
 
 def test_export_json_payload_separates_active_and_pending(seeded_store: MemoryStore) -> None:
-    from src.__main__ import memory_export
+    from agentloom.__main__ import memory_export
 
     result = CliRunner().invoke(memory_export, [])
     assert result.exit_code == 0, result.output
@@ -88,7 +88,7 @@ def test_export_json_payload_separates_active_and_pending(seeded_store: MemorySt
 
 
 def test_export_markdown_contains_only_active_memory(seeded_store: MemoryStore) -> None:
-    from src.__main__ import memory_export
+    from agentloom.__main__ import memory_export
 
     result = CliRunner().invoke(memory_export, ["--format", "markdown"])
     assert result.exit_code == 0, result.output
@@ -98,7 +98,7 @@ def test_export_markdown_contains_only_active_memory(seeded_store: MemoryStore) 
 
 
 def test_export_to_file(seeded_store: MemoryStore, tmp_path: Path) -> None:
-    from src.__main__ import memory_export
+    from agentloom.__main__ import memory_export
 
     out_file = tmp_path / "memory_dump.json"
     result = CliRunner().invoke(memory_export, ["--out", str(out_file)])

@@ -102,16 +102,16 @@ lint = [
 ]
 
 [project.scripts]
-loom = "src.__main__:main"
+loom = "agentloom.__main__:main"
 
 [tool.setuptools]
 include-package-data = true
 
-[tool.setuptools.packages.find]
-include = ["src*"]
+[tool.setuptools.package-dir]
+agentloom = "src"
 
 [tool.setuptools.package-data]
-src = ["**/*.yaml", "**/*.yml", "**/*.j2", "**/*.md"]
+agentloom = ["**/*.yaml", "**/*.yml", "**/*.j2", "**/*.md", "**/*.scm"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

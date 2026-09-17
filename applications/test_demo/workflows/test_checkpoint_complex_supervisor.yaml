@@ -29,12 +29,13 @@ workflow: |
     test -s /tmp/agentloom_ckpt_complex/supervisor_manifest.txt
 
   ## Phase 2: Worker report
-  Call artifact_worker with query:
-    "Build a checkpoint validation report in /tmp/agentloom_ckpt_complex.
-     Read items/a.txt, items/b.txt, items/c.txt, and supervisor_manifest.txt.
-     Create worker_progress/started.txt, worker_progress/combined.txt, and
-     worker_report.txt. worker_report.txt must include alpha=11, beta=22,
-     gamma=33, manifest_status=ready, and worker_status=complete."
+  Execute this exact single-line Python call. Copy the query literal verbatim
+  on the initial call and when resuming an interrupted call: preserve every
+  character, space and punctuation mark. Do not reflow, paraphrase, insert
+  newlines, or rebuild it from a summary. Resume matches the exact Worker input.
+  ```python
+  worker_result = artifact_worker(query="Build a checkpoint validation report in /tmp/agentloom_ckpt_complex. Read items/a.txt, items/b.txt, items/c.txt, and supervisor_manifest.txt. Create worker_progress/started.txt, worker_progress/combined.txt, and worker_report.txt. worker_report.txt must include alpha=11, beta=22, gamma=33, manifest_status=ready, and worker_status=complete.")
+  ```
 
   ## Phase 3: Supervisor verification and final manifest
   Use shell_tool once to run this exact command:
@@ -63,3 +64,6 @@ max_steps: 10
 
 execution_env:
   type: "local"
+  executor_kwargs:
+    # The whole Python block includes the synchronous Worker's model/tool calls.
+    timeout_seconds: 1200

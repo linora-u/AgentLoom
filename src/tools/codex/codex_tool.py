@@ -10,8 +10,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-from src.lib.config import C
-from src.lib.logging import get_logger
+from agentloom.configuration import C
+from agentloom.runtime.logging import get_logger
 
 _VALID_SANDBOXES = {"", "read-only", "workspace-write", "danger-full-access"}
 _DEFAULT_TIMEOUT_SECONDS = 600

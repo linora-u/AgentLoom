@@ -44,7 +44,7 @@ class ScheduleRunner:
             sys.executable,
             "-I",
             "-m",
-            "src",
+            "agentloom",
             "run",
             str(job["yaml_path"]),
             "--output-format",

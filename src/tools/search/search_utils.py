@@ -42,7 +42,7 @@ def _load_exclude_paths(tool_name: str = "grep_search") -> List[str]:
     dirs: List[str] = []
 
     try:
-        from src.lib.permissions.workspace import get_rule_exclude_paths
+        from agentloom.runtime.permissions.workspace import get_rule_exclude_paths
         for excl in get_rule_exclude_paths(tool_name):
             if excl.strip():
                 dirs.append(excl.strip().rstrip("/"))

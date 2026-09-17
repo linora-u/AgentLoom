@@ -6,6 +6,7 @@ import inspect
 import json
 import subprocess
 import sys
+from pathlib import Path
 from textwrap import dedent
 
 
@@ -25,16 +26,16 @@ def test_tools_package_is_not_a_public_export_facade() -> None:
         """
         import json
         import sys
-        import src.tools as tools
+        import agentloom.tools as tools
 
         implementation_prefixes = (
-            "src.tools.context",
-            "src.tools.file_ops",
-            "src.tools.search",
-            "src.tools.self_learning",
-            "src.tools.shell",
-            "src.tools.skills",
-            "src.tools.todo",
+            "agentloom.tools.context",
+            "agentloom.tools.file_ops",
+            "agentloom.tools.search",
+            "agentloom.tools.self_learning",
+            "agentloom.tools.shell",
+            "agentloom.tools.skills",
+            "agentloom.tools.todo",
         )
         loaded = sorted(
             name
@@ -64,17 +65,17 @@ def test_catalog_metadata_does_not_load_tool_implementations() -> None:
         """
         import json
         import sys
-        from src.tools.catalog import list_tool_specs
+        from agentloom.tools.catalog import list_tool_specs
 
         specs = list_tool_specs()
         implementation_prefixes = (
-            "src.tools.context",
-            "src.tools.file_ops",
-            "src.tools.search",
-            "src.tools.self_learning",
-            "src.tools.shell",
-            "src.tools.skills",
-            "src.tools.todo",
+            "agentloom.tools.context",
+            "agentloom.tools.file_ops",
+            "agentloom.tools.search",
+            "agentloom.tools.self_learning",
+            "agentloom.tools.shell",
+            "agentloom.tools.skills",
+            "agentloom.tools.todo",
         )
         loaded = sorted(
             name
@@ -101,13 +102,13 @@ def test_loader_imports_only_the_selected_tool_implementation() -> None:
         """
         import json
         import sys
-        from src.tools.loader import resolve_tool_function
+        from agentloom.tools.loader import resolve_tool_function
 
         resolved = resolve_tool_function("grep_search")
         sibling_prefixes = (
-            "src.tools.search.ast_grep_tool",
-            "src.tools.search.glob_tool",
-            "src.tools.search.lsp_tool",
+            "agentloom.tools.search.ast_grep_tool",
+            "agentloom.tools.search.glob_tool",
+            "agentloom.tools.search.lsp_tool",
         )
         loaded_siblings = sorted(
             prefix
@@ -124,7 +125,7 @@ def test_loader_imports_only_the_selected_tool_implementation() -> None:
 
     assert state == {
         "name": "grep_search",
-        "module": "src.tools.search.grep_tool.grep_tool",
+        "module": "agentloom.tools.search.grep_tool.grep_tool",
         "loaded_siblings": [],
     }
 
@@ -135,11 +136,11 @@ def test_lazy_group_exports_survive_same_named_submodule_imports() -> None:
         import importlib
         import json
 
-        importlib.import_module("src.tools.shell.shell_tool")
-        importlib.import_module("src.tools.file_ops.read_file")
+        importlib.import_module("agentloom.tools.shell.shell_tool")
+        importlib.import_module("agentloom.tools.file_ops.read_file")
 
-        from src.tools.file_ops import read_file
-        from src.tools.shell import shell_tool
+        from agentloom.tools.file_ops import read_file
+        from agentloom.tools.shell import shell_tool
 
         print(json.dumps({
             "read_file_callable": callable(read_file),
@@ -155,8 +156,8 @@ def test_lazy_group_exports_survive_same_named_submodule_imports() -> None:
 
 
 def test_catalog_fixed_arg_contract_matches_implementations() -> None:
-    from src.tools.catalog import list_tool_specs
-    from src.tools.loader import resolve_tool_function
+    from agentloom.tools.catalog import list_tool_specs
+    from agentloom.tools.loader import resolve_tool_function
 
     for spec in list_tool_specs():
         parameters = inspect.signature(resolve_tool_function(spec.name)).parameters
@@ -180,7 +181,7 @@ def test_tui_definition_validation_does_not_load_implementations() -> None:
         import json
         import sys
         from pathlib import Path
-        from src.tui_bridge.definition import validate_agent_definition
+        from agentloom.application.definition import validate_agent_definition
 
         valid_errors = validate_agent_definition(
             Path("."),
@@ -207,13 +208,13 @@ def test_tui_definition_validation_does_not_load_implementations() -> None:
             catalog=("powerful", {"powerful": {"model": "openai/test"}}),
         )
         implementation_prefixes = (
-            "src.tools.context",
-            "src.tools.file_ops",
-            "src.tools.search",
-            "src.tools.self_learning",
-            "src.tools.shell",
-            "src.tools.skills",
-            "src.tools.todo",
+            "agentloom.tools.context",
+            "agentloom.tools.file_ops",
+            "agentloom.tools.search",
+            "agentloom.tools.self_learning",
+            "agentloom.tools.shell",
+            "agentloom.tools.skills",
+            "agentloom.tools.todo",
         )
         loaded = sorted(
             name
@@ -230,6 +231,7 @@ def test_tui_definition_validation_does_not_load_implementations() -> None:
 
     assert state["valid_errors"] == []
     assert state["invalid_errors"] == [
+        f"{Path.cwd() / 'applications/example/workflows/example.yaml'}: "
         "Unknown fixed_args for tool 'grep_search': unknown"
     ]
     assert state["loaded"] == []
@@ -240,17 +242,17 @@ def test_context_engine_metadata_lookup_does_not_load_implementations() -> None:
         """
         import json
         import sys
-        from src.lib.context_engine.config import ContextEngineConfig
+        from agentloom.runtime.context_engine.config import ContextEngineConfig
 
         config = ContextEngineConfig()
         implementation_prefixes = (
-            "src.tools.context",
-            "src.tools.file_ops",
-            "src.tools.search",
-            "src.tools.self_learning",
-            "src.tools.shell",
-            "src.tools.skills",
-            "src.tools.todo",
+            "agentloom.tools.context",
+            "agentloom.tools.file_ops",
+            "agentloom.tools.search",
+            "agentloom.tools.self_learning",
+            "agentloom.tools.shell",
+            "agentloom.tools.skills",
+            "agentloom.tools.todo",
         )
         loaded = sorted(
             name

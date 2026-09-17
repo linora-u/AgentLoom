@@ -1,12 +1,12 @@
-from src.lib.logging import get_logger
-from src.lib.runtime import get_current_run_context
-from src.lib.smolagents.tool_protocol import ToolPolicyBlockedError
-from src.tools.shell.command_semantics import interpret_exit_code
-from src.tools.shell.output_interceptor import OutputInterceptor
-from src.tools.shell.process import ShellProcess, ShellProcessRegistry
-from src.tools.shell.should_use_sandbox import get_sandbox_manager, should_use_sandbox
-from src.tools.shell.validator import validate_command
-from src.trace import capture_explicit_execution_context
+from agentloom.runtime.logging import get_logger
+from agentloom.runtime import get_current_run_context
+from agentloom.runtime.tool_protocol import ToolPolicyBlockedError
+from agentloom.tools.shell.command_semantics import interpret_exit_code
+from agentloom.tools.shell.output_interceptor import OutputInterceptor
+from agentloom.tools.shell.process import ShellProcess, ShellProcessRegistry
+from agentloom.tools.shell.should_use_sandbox import get_sandbox_manager, should_use_sandbox
+from agentloom.tools.shell.validator import validate_command
+from agentloom.runtime.trace import capture_explicit_execution_context
 
 logger = get_logger(__name__)
 
@@ -131,7 +131,7 @@ def shell_tool(
         return _no_command_message()
 
     try:
-        from src.tools.shell.shell_audit_log import get_shell_audit_logger
+        from agentloom.tools.shell.shell_audit_log import get_shell_audit_logger
 
         get_shell_audit_logger().log_effective_policy()
     except Exception:
@@ -172,7 +172,7 @@ def shell_tool(
             exec_command = sandbox_mgr.wrap_command(command)
             logger.info("Command sandboxed via %s", sandbox_mgr.config.mode)
             try:
-                from src.tools.shell.shell_audit_log import get_shell_audit_logger
+                from agentloom.tools.shell.shell_audit_log import get_shell_audit_logger
 
                 get_shell_audit_logger().log_sandbox_wrap(
                     command,
@@ -184,7 +184,7 @@ def shell_tool(
             reason = sandbox_mgr.get_unavailable_reason()
             logger.warning("Sandbox requested but unavailable: %s", reason)
             try:
-                from src.tools.shell.shell_audit_log import get_shell_audit_logger
+                from agentloom.tools.shell.shell_audit_log import get_shell_audit_logger
 
                 get_shell_audit_logger().log_sandbox_unavailable(
                     command,
@@ -274,11 +274,11 @@ def _run_in_background(
     import os
     import subprocess
 
-    from src.lib.runtime import get_current_run_context
-    from src.tools.shell.background_task import BackgroundTaskRegistry
-    from src.tools.shell.process import _MAX_OUTPUT_BYTES, find_suitable_shell
-    from src.tools.shell.subprocess_env import build_subprocess_env
-    from src.tools.shell.tree_kill import SizeWatchdog, graceful_kill
+    from agentloom.runtime import get_current_run_context
+    from agentloom.tools.shell.background_task import BackgroundTaskRegistry
+    from agentloom.tools.shell.process import _MAX_OUTPUT_BYTES, find_suitable_shell
+    from agentloom.tools.shell.subprocess_env import build_subprocess_env
+    from agentloom.tools.shell.tree_kill import SizeWatchdog, graceful_kill
 
     shell_path = find_suitable_shell()
     env = build_subprocess_env()

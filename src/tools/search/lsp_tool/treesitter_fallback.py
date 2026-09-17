@@ -19,7 +19,7 @@ from collections import namedtuple
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple
 
-from src.lib.logging import get_logger
+from agentloom.runtime.logging import get_logger
 
 logger = get_logger(__name__)
 

@@ -1,4 +1,4 @@
-"""Unit tests for src.mcp.tool_wrapper — name prefixing, sanitization, description enrichment."""
+"""Unit tests for agentloom.adapters.mcp.tool_wrapper — name prefixing, sanitization, description enrichment."""
 
 from __future__ import annotations
 
@@ -7,8 +7,8 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from src.mcp.config import McpSettings, McpServerConfig
-from src.mcp.tool_wrapper import wrap_mcp_tools, _sanitize_name
+from agentloom.adapters.mcp.config import McpSettings, McpServerConfig
+from agentloom.adapters.mcp.tool_wrapper import wrap_mcp_tools, _sanitize_name
 
 
 # ---------------------------------------------------------------------------

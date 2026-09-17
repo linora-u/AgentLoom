@@ -1,15 +1,15 @@
 import unittest
 from unittest.mock import MagicMock, patch
 
-from src.tools.shell import shell_tool
-from src.tools.shell import validator as validator_module
-from src.tools.shell.shell_tool import ShellCommandError
+from agentloom.tools.shell import shell_tool
+from agentloom.tools.shell import validator as validator_module
+from agentloom.tools.shell.shell_tool import ShellCommandError
 
 
 class TestShellTool(unittest.TestCase):
     def setUp(self):
         # Ensure no agent context bleeds in from prior tests
-        from src.trace.task_context import clear_current_agent_config, clear_current_agent_id
+        from agentloom.runtime.trace.task_context import clear_current_agent_config, clear_current_agent_id
         try:
             clear_current_agent_id()
         except Exception:
@@ -134,7 +134,7 @@ class TestShellTool(unittest.TestCase):
     def test_shell_tool_logs_policy_snapshot_for_successful_command(self):
         mock_audit = MagicMock()
         with patch(
-            "src.tools.shell.shell_audit_log.get_shell_audit_logger",
+            "agentloom.tools.shell.shell_audit_log.get_shell_audit_logger",
             return_value=mock_audit,
         ):
             result = shell_tool("echo audit_policy_ok")

@@ -14,13 +14,13 @@ import pytest
 from pathlib import Path
 from unittest.mock import patch, MagicMock
 
-from src.tools.file_ops._safety import validate_file_access
+from agentloom.tools.file_ops._safety import validate_file_access
 
 
 def _mock_agent_context():
     """Mock an active agent context so validate_file_access enforces boundaries."""
     return patch(
-        "src.trace.task_context.get_current_agent_config",
+        "agentloom.runtime.trace.task_context.get_current_agent_config",
         return_value={"name": "test_agent"},
     )
 
@@ -30,7 +30,7 @@ def _mock_workspace(ws_path, include_paths=None, exclude_paths=None):
 
     Patches validate_path at the point where _safety.py imports it.
     """
-    from src.lib.permissions.path_validation import PathValidationResult
+    from agentloom.runtime.permissions.path_validation import PathValidationResult
 
     def _validate(path_str, operation="read", tool_name=None, extra_include=None, extra_exclude=None):
         raw = path_str[7:] if path_str.startswith("file://") else path_str
@@ -67,7 +67,7 @@ def _mock_workspace(ws_path, include_paths=None, exclude_paths=None):
 
         return PathValidationResult(allowed=True, resolved_path=resolved)
 
-    return patch("src.lib.permissions.validate_path", side_effect=_validate)
+    return patch("agentloom.runtime.permissions.validate_path", side_effect=_validate)
 
 
 def _is_within(path: Path, root: Path) -> bool:
@@ -213,7 +213,7 @@ class TestNoAgentContext:
         f = tmp_path / "test.txt"
         f.write_text("content")
         with patch(
-            "src.trace.task_context.get_current_agent_config",
+            "agentloom.runtime.trace.task_context.get_current_agent_config",
             return_value=None,
         ):
             validate_file_access(str(f), "read")  # should not raise
@@ -221,7 +221,7 @@ class TestNoAgentContext:
     def test_unc_always_blocked_even_without_context(self):
         """UNC paths are always blocked regardless of agent context."""
         with patch(
-            "src.trace.task_context.get_current_agent_config",
+            "agentloom.runtime.trace.task_context.get_current_agent_config",
             return_value=None,
         ):
             with pytest.raises(ValueError, match="UNC"):

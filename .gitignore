@@ -194,3 +194,7 @@ config/llm.yaml
 # Keep generic legacy ignore for compatibility
 llm.yaml
 applications/web_search/config/.mcp.anysearch.json
+
+# Isolated real-Application acceptance definitions and artifacts.
+**/.architecture_acceptance/
+/applications/architecture_acceptance_*/

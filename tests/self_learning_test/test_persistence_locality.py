@@ -4,7 +4,7 @@ import ast
 from pathlib import Path
 
 _SOURCE_ROOT = Path(__file__).resolve().parents[2] / "src"
-_SELF_LEARNING_ROOT = _SOURCE_ROOT / "extensions" / "self_learning"
+_SELF_LEARNING_ROOT = _SOURCE_ROOT / "self_learning"
 _PERSISTENCE_ROOT = _SELF_LEARNING_ROOT / "persistence"
 
 
@@ -24,14 +24,14 @@ def _imports_self_learning(module_path: Path) -> bool:
     tree = ast.parse(module_path.read_text(encoding="utf-8"))
     for node in ast.walk(tree):
         if isinstance(node, ast.Import) and any(
-            alias.name.startswith("src.extensions.self_learning")
+            alias.name.startswith("agentloom.self_learning")
             for alias in node.names
         ):
             return True
         if (
             isinstance(node, ast.ImportFrom)
             and node.module
-            and node.module.startswith("src.extensions.self_learning")
+            and node.module.startswith("agentloom.self_learning")
         ):
             return True
     return False
@@ -89,7 +89,7 @@ def test_database_owner_is_not_imported_by_production_consumers() -> None:
         if any(
             isinstance(node, ast.ImportFrom)
             and node.module
-            == "src.extensions.self_learning.persistence.database"
+            == "agentloom.self_learning.persistence.database"
             for node in ast.walk(tree)
         ):
             offenders.append(path.relative_to(_SOURCE_ROOT).as_posix())
@@ -123,10 +123,10 @@ def test_database_module_is_the_only_connection_owner() -> None:
 def test_session_index_forwarder_has_been_absorbed() -> None:
     assert not (_SELF_LEARNING_ROOT / "session_index.py").exists()
 
-    from src.extensions.self_learning.persistence.event_importer import (
+    from agentloom.self_learning.persistence.event_importer import (
         SessionEventImporter,
     )
-    from src.extensions.self_learning.persistence.ledger import SelfLearningLedger
+    from agentloom.self_learning.persistence.ledger import SelfLearningLedger
 
     assert {"index_run", "index_all"} <= set(dir(SessionEventImporter))
     assert not {"index_run", "index_all"} & set(dir(SelfLearningLedger))

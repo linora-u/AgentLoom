@@ -1,6 +1,6 @@
 """Lightweight, read-only workspace projections for the TUI.
 
-This module deliberately depends only on files and ``yaml.safe_load``.  Merely
+This module consumes the shared lightweight definition reader.  Merely
 opening the workspace catalog must never construct a model, import the Agent
 runtime, or create runtime storage.
 """
@@ -18,7 +18,7 @@ from typing import TYPE_CHECKING, Any
 import yaml
 
 if TYPE_CHECKING:
-    from src.tui_bridge.definition import AgentDefinitionCache
+    from agentloom.application.definition import AgentDefinitionCache
 
 AGENT_YAML_MAX_BYTES = 1024 * 1024
 SKILL_MANIFEST_MAX_BYTES = 128 * 1024
@@ -105,7 +105,7 @@ def _agent_tree(
     definition_cache: AgentDefinitionCache | None,
 ) -> dict[str, Any] | None:
     raw_path = summary.get("path") or summary.get("id")
-    path = _safe_project_file(root, raw_path, suffixes={".yaml", ".yml"})
+    path = _safe_project_file(root, raw_path, suffixes={".yaml", ".yml", ".md"})
     if path is None:
         return None
     relative = path.relative_to(root)
@@ -201,22 +201,12 @@ def _worker_path(
     raw_path = raw_worker.get("path")
     if not isinstance(raw_path, str) or not raw_path.strip() or "\\" in raw_path:
         return None
-    configured = Path(raw_path.strip())
-    if configured.is_absolute():
-        return None
-    if "/" in raw_path:
-        candidate = root / configured
-    else:
-        candidate = supervisor_path.parent / "worker_agents" / configured
-    path = _safe_project_file(root, candidate, suffixes={".yaml", ".yml"})
-    if path is None:
-        return None
-    application_root = root / "applications" / Path(*application_id.split("/"))
+    from agentloom.application.definition import resolve_worker_path
     try:
-        path.relative_to(application_root)
+        candidate = resolve_worker_path(root, supervisor_path, raw_path)
     except ValueError:
         return None
-    return path
+    return _safe_project_file(root, candidate, suffixes={".yaml", ".yml", ".md"})
 
 
 def _configured_skills(raw: Any) -> dict[str, Any]:
@@ -301,7 +291,7 @@ def _contains_supervisor_yaml(root: Path, workflows_root: Path) -> bool:
                 continue
             if entry.is_file(follow_symlinks=False):
                 path = Path(entry.path)
-                if path.suffix.lower() in {".yaml", ".yml"} and _safe_project_file(root, path) is not None:
+                if path.suffix.lower() in {".yaml", ".yml", ".md"} and _safe_project_file(root, path) is not None:
                     return True
                 continue
             if entry.is_dir(follow_symlinks=False) and entry.name != "worker_agents":
@@ -664,7 +654,7 @@ def _read_agent_definition_object(
 ) -> dict[str, Any]:
     """Reuse a bridge parse while preserving the catalog's file safety limits."""
 
-    safe = _safe_project_file(root, path, suffixes={".yaml", ".yml"})
+    safe = _safe_project_file(root, path, suffixes={".yaml", ".yml", ".md"})
     if safe is None:
         return {}
     try:
@@ -672,10 +662,7 @@ def _read_agent_definition_object(
             return {}
     except OSError:
         return {}
-    if cache is None:
-        return _read_yaml_object(root, safe)
-
-    from src.tui_bridge.definition import read_agent_definition
+    from agentloom.application.definition import read_agent_definition
 
     result = read_agent_definition(safe, cache=cache)
     if result.definition is None:

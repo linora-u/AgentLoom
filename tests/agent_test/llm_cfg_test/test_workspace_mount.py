@@ -1,8 +1,8 @@
 import os
 from pathlib import Path
 
-import src.lib.config.config as config_module
-import src.lib.utils.workspace as workspace_module
+import agentloom.configuration.config as config_module
+import agentloom.runtime.workspace as workspace_module
 
 
 def _patch_config(monkeypatch, raw: dict, root: Path) -> None:

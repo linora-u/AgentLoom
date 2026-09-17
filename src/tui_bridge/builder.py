@@ -20,8 +20,10 @@ from pathlib import Path, PurePosixPath
 from typing import Any
 
 import yaml
+from agentloom.configuration.yaml_loader import load_unique_yaml
+from agentloom.application.definition import definition_error
 
-from src.tui_bridge.definition import validate_agent_definition
+from agentloom.application.definition import validate_agent_definition
 
 _MAX_TRANSCRIPT_MESSAGES = 16
 _MAX_BUILDER_MESSAGE_CHARS = 32_000
@@ -426,9 +428,9 @@ def _validate_yaml(
     draft_configs: Mapping[str, dict[str, object]],
 ) -> list[str]:
     try:
-        parsed = yaml.safe_load(content)
-    except yaml.YAMLError as exc:
-        return [f"{relative_path}: invalid YAML: {exc}"]
+        parsed = load_unique_yaml(content)
+    except (yaml.YAMLError, ValueError, TypeError) as exc:
+        return [f"{relative_path}: invalid YAML: {definition_error(exc)}"]
     if not isinstance(parsed, dict):
         return [f"{relative_path}: Agent YAML must be a mapping"]
     return validate_agent_definition(
@@ -447,8 +449,8 @@ def _draft_summary(project_root: Path, draft: _Draft) -> dict[str, object]:
     draft_configs: dict[str, dict[str, object]] = {}
     for relative_path, content in draft.files.items():
         try:
-            parsed = yaml.safe_load(content)
-        except yaml.YAMLError:
+            parsed = load_unique_yaml(content)
+        except (yaml.YAMLError, ValueError, TypeError):
             continue
         if isinstance(parsed, dict):
             draft_configs[relative_path] = parsed
@@ -662,7 +664,7 @@ class BuilderService:
         tools = self._tools(working_draft)
 
         if self._chat_agent is None:
-            from src.tui_bridge.chat_agent import TuiChatAgent
+            from agentloom.tui_bridge.chat_agent import TuiChatAgent
 
             kwargs: dict[str, object] = {}
             if self._chat_client_factory is not None:

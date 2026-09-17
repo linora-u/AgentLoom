@@ -1,5 +1,5 @@
 """
-CLI entry point for the src package.
+CLI entry point for the agentloom package.
 
 After ``pip install -e .``, the ``loom`` command is available::
 
@@ -23,7 +23,7 @@ from typing import Any, TextIO
 
 import click
 
-from src.schedules.cli import schedules as _schedules_command
+from agentloom.schedules.cli import schedules as _schedules_command
 
 _MAIN_EPILOG = """\
 \b
@@ -165,7 +165,7 @@ def main():
     from pathlib import Path as _Path
 
     try:
-        from src.lib.config import C
+        from agentloom.configuration import C
 
         agent_root = _Path(C.agent_root).resolve()
         if _Path.cwd().resolve() != agent_root:
@@ -188,10 +188,10 @@ def _has_transient_provider_error(error: BaseException) -> bool:
     )
     from smolagents import AgentMaxStepsError, AgentParsingError
 
-    from src.lib.smolagents.models.litellm_retry import (
+    from agentloom.adapters.smolagents.models.litellm_retry import (
         ProviderCallBudgetExceeded,
     )
-    from src.lib.smolagents.models.tool_call_parser import ToolCallParseError
+    from agentloom.adapters.smolagents.models.tool_call_parser import ToolCallParseError
 
     transient_types = (
         Timeout,
@@ -297,7 +297,7 @@ def run(
         event_stream = active_event_stream
         try:
             if machine_output:
-                from src.runner import execute_app
+                from agentloom.application.runner import execute_app
 
                 def emit_event(event: Any) -> None:
                     assert event_stream is not None
@@ -313,7 +313,7 @@ def run(
                     event_sink=emit_event,
                 )
             else:
-                from src.runner import execute_app
+                from agentloom.application.runner import execute_app
 
                 completed = execute_app(
                     yaml_path,
@@ -328,7 +328,7 @@ def run(
         except KeyboardInterrupt as exc:
             if not emitted_events:
                 emit_rejected(exc, message="interrupted before run started")
-            from src.application_run import ApplicationRunInterrupted
+            from agentloom.application.run import ApplicationRunInterrupted
 
             if isinstance(exc, ApplicationRunInterrupted) and exc.resumable:
                 click.echo("\nInterrupted. Use --resume to continue.", err=True)
@@ -339,7 +339,7 @@ def run(
                 )
             raise click.exceptions.Exit(130) from exc
         except Exception as exc:
-            from src.application_run import ApplicationRunBudgetLimited
+            from agentloom.application.run import ApplicationRunBudgetLimited
 
             if isinstance(exc, ApplicationRunBudgetLimited):
                 if not emitted_events:
@@ -368,8 +368,8 @@ def run(
 # ─────────────────────────────────────────────
 
 def _configured_runtime_home():
-    from src.lib.config import C
-    from src.lib.runtime import resolve_runtime_home
+    from agentloom.configuration import C
+    from agentloom.runtime import resolve_runtime_home
 
     return resolve_runtime_home(C.raw, agent_root=C.agent_root)
 
@@ -385,7 +385,7 @@ def _configured_checkpoints_root():
 @click.option("--detail", is_flag=True, default=False, help="Show worker-level details.")
 def list_tasks(detail: bool):
     """List all retained checkpoint tasks."""
-    from src.lib.checkpoint.checkpoint_manager import list_all_tasks
+    from agentloom.runtime.checkpoint.checkpoint_manager import list_all_tasks
 
     tasks = list_all_tasks(
         checkpoints_root=_configured_checkpoints_root()
@@ -435,11 +435,11 @@ def clean_tasks(clean_all: bool, before_days: int | None):
     """Clean old checkpoint data."""
     from pathlib import Path as _Path
 
-    from src.lib.checkpoint import (
+    from agentloom.runtime.checkpoint import (
         cleanup_expired_tasks,
         delete_checkpoint_task_if_inactive,
     )
-    from src.lib.checkpoint.checkpoint_manager import list_all_tasks
+    from agentloom.runtime.checkpoint.checkpoint_manager import list_all_tasks
 
     checkpoints_root = _configured_checkpoints_root()
     tasks = list_all_tasks(checkpoints_root=checkpoints_root)
@@ -468,8 +468,8 @@ def clean_tasks(clean_all: bool, before_days: int | None):
 @main.command("clean-runtime")
 def clean_runtime_command() -> None:
     """Apply bounded retention to run directories and raw artifacts."""
-    from src.lib.config import C
-    from src.lib.runtime.retention import clean_runtime
+    from agentloom.configuration import C
+    from agentloom.runtime.retention import clean_runtime
 
     runtime_config = C.get("runtime", {})
     if not isinstance(runtime_config, dict):
@@ -508,9 +508,9 @@ def migrate_runtime_command(dry_run: bool) -> None:
     from datetime import timedelta as _timedelta
     from pathlib import Path as _Path
 
-    from src.lib.config import C
-    from src.lib.runtime.migration import migrate_runtime
-    from src.lib.runtime.workspace_migration import (
+    from agentloom.configuration import C
+    from agentloom.runtime.migration import migrate_runtime
+    from agentloom.runtime.workspace_migration import (
         archive_legacy_agent_workspaces,
         preview_legacy_agent_workspaces,
     )
@@ -581,7 +581,7 @@ def sessions_index(path: str):
     """Report ledger counts or import canonical self-learning event exports."""
     import json as _json
 
-    from src.extensions.self_learning.persistence.event_importer import (
+    from agentloom.self_learning.persistence.event_importer import (
         SessionEventImporter,
     )
 
@@ -600,7 +600,7 @@ def sessions_search(query: str, limit: int, agent: str | None, app: str | None, 
     """Search indexed session events."""
     import json as _json
 
-    from src.extensions.self_learning.persistence.ledger import SelfLearningLedger
+    from agentloom.self_learning.persistence.ledger import SelfLearningLedger
 
     result = SelfLearningLedger().search_events(
         query,
@@ -622,7 +622,7 @@ def sessions_scroll(run_id: str, event_id: int, direction: str, window: int):
     """Scroll before or after a session event."""
     import json as _json
 
-    from src.extensions.self_learning.persistence.ledger import SelfLearningLedger
+    from agentloom.self_learning.persistence.ledger import SelfLearningLedger
 
     result = SelfLearningLedger().scroll_events(
         run_id,
@@ -644,7 +644,7 @@ def sessions_prune(retention_days: int):
     """Prune old run/event history; curated memory is unaffected."""
     import json as _json
 
-    from src.extensions.self_learning.persistence.ledger import SelfLearningLedger
+    from agentloom.self_learning.persistence.ledger import SelfLearningLedger
 
     result = SelfLearningLedger().prune_events(retention_days=retention_days)
     click.echo(_json.dumps(result, ensure_ascii=False, indent=2, default=str))
@@ -684,7 +684,7 @@ def _review_cli_service():
     root_context = click.get_current_context().find_root()
     if isinstance(root_context.obj, dict) and "review_service" in root_context.obj:
         return root_context.obj["review_service"]
-    from src.extensions.self_learning.review_artifacts import ReviewCLIService
+    from agentloom.self_learning.review_artifacts import ReviewCLIService
 
     return ReviewCLIService()
 
@@ -832,7 +832,7 @@ def memory_list(scope: str | None, scope_id: str):
     """List active curated memory."""
     import json as _json
 
-    from src.extensions.self_learning.persistence.memory_store import MemoryStore
+    from agentloom.self_learning.persistence.memory_store import MemoryStore
 
     result = MemoryStore().list(scope=scope, scope_id=scope_id)
     click.echo(_json.dumps(result, ensure_ascii=False, indent=2, default=str))
@@ -846,7 +846,7 @@ def memory_add(scope: str, scope_id: str, content: str):
     """Add active memory directly from CLI."""
     import json as _json
 
-    from src.extensions.self_learning.persistence.memory_store import MemoryStore
+    from agentloom.self_learning.persistence.memory_store import MemoryStore
 
     result = MemoryStore().add(scope, content, scope_id=scope_id)
     click.echo(_json.dumps(result, ensure_ascii=False, indent=2, default=str))
@@ -861,7 +861,7 @@ def memory_replace(scope: str, scope_id: str, target: str, content: str):
     """Replace active memory directly from CLI."""
     import json as _json
 
-    from src.extensions.self_learning.persistence.memory_store import MemoryStore
+    from agentloom.self_learning.persistence.memory_store import MemoryStore
 
     result = MemoryStore().replace(scope, target, content, scope_id=scope_id)
     click.echo(_json.dumps(result, ensure_ascii=False, indent=2, default=str))
@@ -875,7 +875,7 @@ def memory_remove(scope: str, scope_id: str, target: str):
     """Remove active memory directly from CLI."""
     import json as _json
 
-    from src.extensions.self_learning.persistence.memory_store import MemoryStore
+    from agentloom.self_learning.persistence.memory_store import MemoryStore
 
     result = MemoryStore().remove(scope, target, scope_id=scope_id)
     click.echo(_json.dumps(result, ensure_ascii=False, indent=2, default=str))
@@ -892,7 +892,7 @@ def memory_pending(status: str):
     """List exact writes waiting for approval (or their audit status)."""
     import json as _json
 
-    from src.extensions.self_learning.persistence.memory_store import MemoryStore
+    from agentloom.self_learning.persistence.memory_store import MemoryStore
 
     result = MemoryStore().list_pending(status=None if status == "all" else status)
     click.echo(_json.dumps(result, ensure_ascii=False, indent=2, default=str))
@@ -903,7 +903,7 @@ def memory_stats():
     """Show active memory capacity and pending-write status."""
     import json as _json
 
-    from src.extensions.self_learning.persistence.memory_store import MemoryStore
+    from agentloom.self_learning.persistence.memory_store import MemoryStore
 
     result = MemoryStore().stats()
     click.echo(_json.dumps(result, ensure_ascii=False, indent=2, default=str))
@@ -917,7 +917,7 @@ def memory_export(out_path: str, fmt: str):
     import json as _json
     from datetime import datetime as _datetime
 
-    from src.extensions.self_learning.persistence.memory_store import MemoryStore
+    from agentloom.self_learning.persistence.memory_store import MemoryStore
 
     store = MemoryStore()
     items = store.export_items()
@@ -970,7 +970,7 @@ def skill_proposals_list():
     """List generated skill proposals."""
     import json as _json
 
-    from src.extensions.self_learning.proposal_writer import ProposalWriter
+    from agentloom.self_learning.proposal_writer import ProposalWriter
 
     click.echo(_json.dumps(ProposalWriter().list(), ensure_ascii=False, indent=2, default=str))
 
@@ -981,7 +981,7 @@ def skill_proposals_show(proposal_id: str):
     """Show a generated skill proposal."""
     import json as _json
 
-    from src.extensions.self_learning.proposal_writer import ProposalWriter
+    from agentloom.self_learning.proposal_writer import ProposalWriter
 
     click.echo(_json.dumps(ProposalWriter().show(proposal_id), ensure_ascii=False, indent=2, default=str))
 
@@ -993,7 +993,7 @@ def skill_proposals_promote(proposal_id: str, destination: str):
     """Promote a proposal with SKILL.md into active skills."""
     import json as _json
 
-    from src.extensions.self_learning.proposal_writer import ProposalWriter
+    from agentloom.self_learning.proposal_writer import ProposalWriter
 
     result = ProposalWriter().promote(proposal_id, destination=destination)
     click.echo(_json.dumps(result, ensure_ascii=False, indent=2, default=str))
@@ -1005,7 +1005,7 @@ def skill_proposals_archive(proposal_id: str):
     """Archive a generated skill proposal."""
     import json as _json
 
-    from src.extensions.self_learning.proposal_writer import ProposalWriter
+    from agentloom.self_learning.proposal_writer import ProposalWriter
 
     result = ProposalWriter().archive(proposal_id)
     click.echo(_json.dumps(result, ensure_ascii=False, indent=2, default=str))
@@ -1018,7 +1018,7 @@ def skill_proposals_archive(proposal_id: str):
 @main.command("dashboard")
 def dashboard():
     """Launch the terminal TUI task monitoring dashboard (Textual)."""
-    from src.ui.dashboard import run_dashboard
+    from agentloom.ui.dashboard import run_dashboard
 
     run_dashboard()
 
@@ -1036,7 +1036,7 @@ Examples:
 @click.option("-o", "--output", default=None, help="Output file path. Defaults to applications/{category}/{name}_app.py.")
 def create(yaml_path: str, output: str | None):
     """Generate a minimal demo script for a supervisor YAML config."""
-    from src.scaffold import create_demo_script
+    from agentloom.scaffold import create_demo_script
 
     try:
         generated = create_demo_script(yaml_path, output_path=output, interactive=True)

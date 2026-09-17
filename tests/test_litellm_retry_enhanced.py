@@ -17,8 +17,8 @@ from unittest.mock import MagicMock
 import pytest
 from litellm.exceptions import RateLimitError, Timeout
 
-from src.lib.concurrency.rate_limiter import GlobalRateLimiterRegistry
-from src.lib.smolagents.models.litellm_retry import (
+from agentloom.runtime.concurrency.rate_limiter import GlobalRateLimiterRegistry
+from agentloom.adapters.smolagents.models.litellm_retry import (
     ProviderCallBudgetExceeded,
     _is_rate_limit_error,
     _parse_retry_after,

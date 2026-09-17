@@ -11,7 +11,7 @@ from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any, BinaryIO
 
-from src.lib.runtime import SecureDirectory
+from agentloom.runtime import SecureDirectory
 
 from .schedule import next_run, parse_datetime, validate_schedule
 

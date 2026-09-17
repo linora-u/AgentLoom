@@ -7,6 +7,14 @@
 
 Agent YAML is the configuration file in the AgentLoom framework that **defines the behavior of a single Agent**, controlling the Agent's role description, workflow instructions, available tools, model selection, execution environment, skill packages, and more. Agents are divided into two roles: **Supervisor** (multi-Agent orchestrator) and **Worker** (specific task executor).
 
+Both roles support `.yaml`, `.yml`, and `.md` definitions. Markdown uses a fenced
+`yaml` configuration block; nonempty text outside that block becomes `workflow`.
+Application Studio, its catalog/details, validation, and schedule targets discover
+Markdown Supervisors in top-level or nested Application/workflow directories using
+the same definition reader as execution. Worker definitions stay under their
+Supervisor's references, and malformed Markdown or duplicate YAML keys produce
+the same validation diagnostics. Reading these views does not start a Run or model.
+
 > ⚠️ **LLM Configuration Isolation**: `model`/`llm`/`langfuse` in Agent YAML are automatically filtered with a warning. LLM parameters can only be defined in `config/llm.yaml`; Agents select which predefined model type to use via the `model_type` field.
 
 ---
@@ -849,7 +857,7 @@ The core idea of this pattern is: **Python control flow + Agent intelligence** �
 #### 4.4.3 Core API: `YamlAgentFactory.create_agent_as_tool()`
 
 ```python
-from src.lib.smolagents.agent.yaml_agent_factory import YamlAgentFactory
+from agentloom.runtime.factory import YamlAgentFactory
 
 tools = YamlAgentFactory.create_agent_as_tool(
     config_path,        # str | Path | dict — Worker YAML path (relative to AGENT_ROOT) or config dict
@@ -885,8 +893,8 @@ When you only need some deterministic processing before and after the Agent call
 from __future__ import annotations
 from pathlib import Path
 
-from src.lib.logging import get_logger
-from src.lib.smolagents.agent.yaml_agent_factory import YamlAgentFactory
+from agentloom.runtime.logging import get_logger
+from agentloom.runtime.factory import YamlAgentFactory
 
 _AGENT_YAML = "applications/<app>/workflows/worker_agents/<worker>.yaml"
 
@@ -943,8 +951,8 @@ import json
 import traceback
 from pathlib import Path
 
-from src.lib.logging import get_logger
-from src.lib.smolagents.agent.yaml_agent_factory import YamlAgentFactory
+from agentloom.runtime.logging import get_logger
+from agentloom.runtime.factory import YamlAgentFactory
 
 _AGENT_YAML = "applications/<app>/workflows/worker_agents/<worker>.yaml"
 

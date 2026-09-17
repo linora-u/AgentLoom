@@ -22,8 +22,8 @@ import re
 from dataclasses import dataclass
 from typing import List, Optional, Tuple
 
-from src.lib.config import C
-from src.lib.logging import get_logger
+from agentloom.configuration import C
+from agentloom.runtime.logging import get_logger
 
 logger = get_logger(__name__)
 
@@ -418,7 +418,7 @@ _SECURITY_CHECKS = {
 def _get_shell_config_security(key: str, *, default=None):
     """Read a shell config value, preferring per-agent effective config."""
     try:
-        from src.trace import get_current_agent_config
+        from agentloom.runtime.trace import get_current_agent_config
         agent_cfg = get_current_agent_config()
         if isinstance(agent_cfg, dict):
             shell = agent_cfg.get("shell_settings")
@@ -480,7 +480,7 @@ def check_command_security(command: str) -> List[SecurityCheckResult]:
             )
             # Write to per-agent shell audit log
             try:
-                from src.tools.shell.shell_audit_log import get_shell_audit_logger
+                from agentloom.tools.shell.shell_audit_log import get_shell_audit_logger
                 audit = get_shell_audit_logger()
                 audit.log_security_block(
                     command=command,

@@ -12,10 +12,10 @@ from smolagents.models import (
     MessageRole,
 )
 
-from src.lib.smolagents.agent.base_agent import ToolCallingAgentV2
-from src.lib.todo import TodoStateProvider, bind_todo_state_provider
-from src.tools.todo import todo_write
-from src.trace import bind_explicit_execution_context, capture_explicit_execution_context
+from agentloom.adapters.smolagents.agents import ToolCallingAgentV2
+from agentloom.runtime.todo import TodoStateProvider, bind_todo_state_provider
+from agentloom.tools.todo import todo_write
+from agentloom.runtime.trace import bind_explicit_execution_context, capture_explicit_execution_context
 
 
 def _tool_call(name: str, arguments: dict, call_id: str) -> ChatMessage:
@@ -108,8 +108,8 @@ def test_pending_todo_is_hydrated_without_extra_call_or_final_gate() -> None:
 
 
 def test_checkpoint_snapshot_is_visible_on_first_resumed_model_action(tmp_path) -> None:
-    from src.lib.checkpoint.checkpoint_manager import CheckpointManager
-    from src.lib.checkpoint.coordinator import CheckpointCoordinator
+    from agentloom.runtime.checkpoint.checkpoint_manager import CheckpointManager
+    from agentloom.runtime.checkpoint.coordinator import CheckpointCoordinator
 
     task_id = "resume-task"
     manager = CheckpointManager(

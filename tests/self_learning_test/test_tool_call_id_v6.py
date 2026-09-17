@@ -2,11 +2,11 @@ from __future__ import annotations
 
 
 def test_wrapped_tool_reuses_one_call_id_for_call_and_result_events() -> None:
-    from src.extensions.self_learning.session_recorder import event_from_hook_context
-    from src.lib.smolagents.hooks import HookHandler, HookPlan, HookRun
-    from src.lib.smolagents.hooks.tool_shim import inject_hooks
-    from src.lib.smolagents.hooks.types import HookEvent, HookResult
-    from src.trace import ExplicitExecutionContext, bind_explicit_execution_context
+    from agentloom.self_learning.session_recorder import event_from_hook_context
+    from agentloom.runtime.hooks import HookHandler, HookPlan, HookRun
+    from agentloom.adapters.smolagents.tool_shim import inject_hooks
+    from agentloom.runtime.hooks.types import HookEvent, HookResult
+    from agentloom.runtime.trace import ExplicitExecutionContext, bind_explicit_execution_context
 
     observed = []
 
@@ -71,10 +71,10 @@ def test_wrapped_tool_reuses_one_call_id_for_call_and_result_events() -> None:
 
 
 def test_wrapped_tool_uses_provider_call_id_when_bound_by_executor() -> None:
-    from src.lib.smolagents.hooks import HookHandler, HookPlan, HookRun
-    from src.lib.smolagents.hooks.tool_shim import bind_tool_call_id, inject_hooks
-    from src.lib.smolagents.hooks.types import HookEvent, HookResult
-    from src.trace import ExplicitExecutionContext, bind_explicit_execution_context
+    from agentloom.runtime.hooks import HookHandler, HookPlan, HookRun
+    from agentloom.adapters.smolagents.tool_shim import bind_tool_call_id, inject_hooks
+    from agentloom.runtime.hooks.types import HookEvent, HookResult
+    from agentloom.runtime.trace import ExplicitExecutionContext, bind_explicit_execution_context
 
     observed = []
     run = HookRun(

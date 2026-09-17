@@ -1,4 +1,4 @@
-from src.lib.smolagents.agent.yaml_agent_factory import YamlConfiguredAgent
+from agentloom.runtime.factory import YamlConfiguredAgent
 
 
 def test_agent_function_schema_docstring_rendering():

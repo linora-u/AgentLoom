@@ -16,7 +16,7 @@ import tempfile
 
 import pytest
 
-from src.tools.shell.process import (
+from agentloom.tools.shell.process import (
     _is_executable,
     _is_supported_shell,
     find_suitable_shell,
@@ -177,7 +177,7 @@ class TestFindSuitableShellWhich:
         """14a: which finds bash only -> return bash path."""
         monkeypatch.delenv("SHELL", raising=False)
         monkeypatch.setattr("shutil.which", lambda cmd: "/usr/bin/bash" if cmd == "bash" else None)
-        monkeypatch.setattr("src.tools.shell.process._is_executable", lambda p: "/usr/bin/bash" == p)
+        monkeypatch.setattr("agentloom.tools.shell.process._is_executable", lambda p: "/usr/bin/bash" == p)
         result = find_suitable_shell()
         assert result == "/usr/bin/bash"
 
@@ -185,7 +185,7 @@ class TestFindSuitableShellWhich:
         """14b: which finds zsh but not bash -> return zsh."""
         monkeypatch.delenv("SHELL", raising=False)
         monkeypatch.setattr("shutil.which", lambda cmd: "/usr/bin/zsh" if cmd == "zsh" else None)
-        monkeypatch.setattr("src.tools.shell.process._is_executable", lambda p: "/usr/bin/zsh" == p)
+        monkeypatch.setattr("agentloom.tools.shell.process._is_executable", lambda p: "/usr/bin/zsh" == p)
         result = find_suitable_shell()
         assert result == "/usr/bin/zsh"
 
@@ -193,7 +193,7 @@ class TestFindSuitableShellWhich:
         """14c: $SHELL hints bash -> bash appears before zsh in candidates."""
         monkeypatch.setenv("SHELL", "/nonexistent/bash")  # hints bash preference
         monkeypatch.setattr("shutil.which", lambda cmd: f"/usr/bin/{cmd}" if cmd in ("bash", "zsh") else None)
-        monkeypatch.setattr("src.tools.shell.process._is_executable",
+        monkeypatch.setattr("agentloom.tools.shell.process._is_executable",
                             lambda p: p in ("/usr/bin/bash", "/usr/bin/zsh"))
         result = find_suitable_shell()
         assert result == "/usr/bin/bash"
@@ -202,7 +202,7 @@ class TestFindSuitableShellWhich:
         """14d: $SHELL hints zsh -> zsh appears before bash in candidates."""
         monkeypatch.setenv("SHELL", "/nonexistent/zsh")  # hints zsh preference
         monkeypatch.setattr("shutil.which", lambda cmd: f"/usr/bin/{cmd}" if cmd in ("bash", "zsh") else None)
-        monkeypatch.setattr("src.tools.shell.process._is_executable",
+        monkeypatch.setattr("agentloom.tools.shell.process._is_executable",
                             lambda p: p in ("/usr/bin/bash", "/usr/bin/zsh"))
         result = find_suitable_shell()
         assert result == "/usr/bin/zsh"
@@ -219,7 +219,7 @@ class TestFindSuitableShellFallback:
         """15a: $SHELL invalid, which fails -> /bin/bash found."""
         monkeypatch.delenv("SHELL", raising=False)
         monkeypatch.setattr("shutil.which", lambda cmd: None)
-        monkeypatch.setattr("src.tools.shell.process._is_executable",
+        monkeypatch.setattr("agentloom.tools.shell.process._is_executable",
                             lambda p: p == "/bin/bash")
         result = find_suitable_shell()
         assert result == "/bin/bash"
@@ -228,7 +228,7 @@ class TestFindSuitableShellFallback:
         """15b: Only /opt/homebrew/bin/zsh exists -> returns it."""
         monkeypatch.delenv("SHELL", raising=False)
         monkeypatch.setattr("shutil.which", lambda cmd: None)
-        monkeypatch.setattr("src.tools.shell.process._is_executable",
+        monkeypatch.setattr("agentloom.tools.shell.process._is_executable",
                             lambda p: p == "/opt/homebrew/bin/zsh")
         result = find_suitable_shell()
         assert result == "/opt/homebrew/bin/zsh"
@@ -237,7 +237,7 @@ class TestFindSuitableShellFallback:
         """15c: All paths fail -> FileNotFoundError with helpful message."""
         monkeypatch.delenv("SHELL", raising=False)
         monkeypatch.setattr("shutil.which", lambda cmd: None)
-        monkeypatch.setattr("src.tools.shell.process._is_executable", lambda p: False)
+        monkeypatch.setattr("agentloom.tools.shell.process._is_executable", lambda p: False)
         with pytest.raises(FileNotFoundError, match="No suitable shell found"):
             find_suitable_shell()
 
@@ -294,15 +294,15 @@ class TestWindowsShellDetection:
 
     def test_comspec_valid(self, monkeypatch):
         """17a: $COMSPEC set and valid -> use it."""
-        from src.tools.shell.process import _resolve_shell_path_windows
+        from agentloom.tools.shell.process import _resolve_shell_path_windows
         monkeypatch.setenv("COMSPEC", "/bin/bash")  # Not real Windows but testable
-        monkeypatch.setattr("src.tools.shell.process._is_executable", lambda p: p == "/bin/bash")
+        monkeypatch.setattr("agentloom.tools.shell.process._is_executable", lambda p: p == "/bin/bash")
         result = _resolve_shell_path_windows()
         assert result == "/bin/bash"
 
     def test_windows_all_fail(self, monkeypatch):
         """17b: All Windows paths fail -> FileNotFoundError."""
-        from src.tools.shell.process import _resolve_shell_path_windows
+        from agentloom.tools.shell.process import _resolve_shell_path_windows
         monkeypatch.delenv("COMSPEC", raising=False)
         monkeypatch.setattr("os.path.isfile", lambda p: False)
         with pytest.raises(FileNotFoundError, match="No suitable Windows shell"):

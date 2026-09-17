@@ -9,9 +9,9 @@ from types import SimpleNamespace
 
 from click.testing import CliRunner
 
-from src.__main__ import main
-from src.lib.checkpoint import CheckpointManager
-from src.lib.runtime import RuntimeHome
+from agentloom.__main__ import main
+from agentloom.runtime.checkpoint import CheckpointManager
+from agentloom.runtime import RuntimeHome
 
 
 def test_clean_runtime_command_applies_configured_retention(
@@ -34,7 +34,7 @@ def test_clean_runtime_command_applies_configured_retention(
         ),
         encoding="utf-8",
     )
-    monkeypatch.setattr("src.__main__._configured_runtime_home", lambda: home)
+    monkeypatch.setattr("agentloom.__main__._configured_runtime_home", lambda: home)
 
     result = CliRunner().invoke(main, ["clean-runtime"])
 
@@ -59,7 +59,7 @@ def test_clean_runtime_command_never_removes_checkpoint(
             "workers": {},
         },
     )
-    monkeypatch.setattr("src.__main__._configured_runtime_home", lambda: home)
+    monkeypatch.setattr("agentloom.__main__._configured_runtime_home", lambda: home)
 
     result = CliRunner().invoke(main, ["clean-runtime"])
 
@@ -74,7 +74,7 @@ def test_clean_runtime_command_reports_lock_contention_as_failure(
 ) -> None:
     home = RuntimeHome(tmp_path / ".agentloom")
     home.root_dir.mkdir(parents=True)
-    monkeypatch.setattr("src.__main__._configured_runtime_home", lambda: home)
+    monkeypatch.setattr("agentloom.__main__._configured_runtime_home", lambda: home)
     lock_fd = os.open(home.root_dir, os.O_RDONLY)
     fcntl.flock(lock_fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
     try:
@@ -110,10 +110,10 @@ def test_migrate_runtime_command_defaults_to_dry_run(
             archive_dir=None,
         )
 
-    monkeypatch.setattr("src.__main__._configured_runtime_home", lambda: home)
-    monkeypatch.setattr("src.lib.runtime.migration.migrate_runtime", _migrate)
+    monkeypatch.setattr("agentloom.__main__._configured_runtime_home", lambda: home)
+    monkeypatch.setattr("agentloom.runtime.migration.migrate_runtime", _migrate)
     monkeypatch.setattr(
-        "src.lib.runtime.workspace_migration.preview_legacy_agent_workspaces",
+        "agentloom.runtime.workspace_migration.preview_legacy_agent_workspaces",
         lambda source: SimpleNamespace(
             source_dir=Path(source), file_count=3, total_bytes=42, archive_dir=None
         ),
@@ -146,11 +146,11 @@ def test_migrate_runtime_apply_requests_atomic_legacy_archive(
             archive_dir=home.root_dir / "legacy" / "logs-v1-now",
         )
 
-    monkeypatch.setattr("src.__main__._configured_runtime_home", lambda: home)
-    monkeypatch.setattr("src.lib.runtime.migration.migrate_runtime", _migrate)
+    monkeypatch.setattr("agentloom.__main__._configured_runtime_home", lambda: home)
+    monkeypatch.setattr("agentloom.runtime.migration.migrate_runtime", _migrate)
     archived_workspace = home.root_dir / "workspaces" / "legacy-unscoped" / "workspace-v1-now"
     monkeypatch.setattr(
-        "src.lib.runtime.workspace_migration.archive_legacy_agent_workspaces",
+        "agentloom.runtime.workspace_migration.archive_legacy_agent_workspaces",
         lambda source, runtime_root: SimpleNamespace(
             source_dir=Path(source),
             file_count=4,

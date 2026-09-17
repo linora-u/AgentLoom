@@ -3,7 +3,7 @@
 The storage/claim design is informed by NousResearch/hermes-agent's
 ``cron/jobs.py`` (Copyright (c) 2025 Nous Research, MIT License, commit
 ``29e3983fa``), but is independently written for AgentLoom's much smaller
-execution boundary: ``python -m src run``.
+execution boundary: ``python -m agentloom run``.
 """
 
 from .runner import ScheduleRunner
