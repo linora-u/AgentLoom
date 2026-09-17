@@ -88,6 +88,15 @@ iterations retain their earlier investigation/planning lineage. Validation recor
 the selected call indices, checkpoint paths, completion/start times and result hashes;
 future or foreign-task results cannot satisfy a transfer.
 
+The typed query is text: an intact JSON result can appear inside prose or an
+outer envelope whose unrelated context is malformed. The validator uses bounded
+`JSONDecoder.raw_decode` to locate a complete object/array without repairing text
+or assembling fields. All original nested values, types and list order must match.
+`query_path` records `::json_at[start:end]` for these fragments: slice the current
+string at Python Unicode character offsets, then JSON-decode it. Each transfer's
+`query_json_spans` also records `input_path`, `offset`, `end` and `characters` for
+independent replay. Existing `::json` and key/index path segments retain their meaning.
+
 Supervisor Python evidence comes only from the exact Application/task
 checkpoint named by the receipt, with matching task and run IDs; other tasks
 and Worker Python actions cannot satisfy it. Policy checks read the persisted `ToolCallRecord`, require `blocked`
