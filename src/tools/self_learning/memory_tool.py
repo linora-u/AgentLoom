@@ -5,7 +5,7 @@ from __future__ import annotations
 import json
 from typing import Any, Literal
 
-from src.extensions.self_learning.persistence.memory_store import (
+from src.self_learning.persistence.memory_store import (
     MemoryStore,
     current_session_run_id,
 )
@@ -16,7 +16,7 @@ _LIST_MAX_ITEMS = 20
 
 def _current_agent_config() -> dict[str, Any] | None:
     try:
-        from src.trace import capture_explicit_execution_context
+        from src.runtime.trace import capture_explicit_execution_context
 
         # Never consult task_context's process-global fallback here: two
         # concurrent roots may have different Application identities/policies.
@@ -90,7 +90,7 @@ def memory(
         learned_action: Compact corrective action.
         verification: How success was verified.
     """
-    from src.extensions.self_learning.paths import self_learning_enabled
+    from src.self_learning.paths import self_learning_enabled
 
     agent_config = _current_agent_config()
     if agent_config is not None and not self_learning_enabled(agent_config):

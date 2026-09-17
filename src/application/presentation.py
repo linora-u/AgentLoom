@@ -6,7 +6,7 @@ from collections.abc import Mapping
 from pathlib import Path
 from typing import Any
 
-from src.lib.config.config import EffectiveAgentConfigSnapshot
+from src.configuration.config import EffectiveAgentConfigSnapshot
 
 _SOURCE_NAMES = {"global_system": "global", "application_system": "application", "agent": "agent"}
 _PRIVATE_KEYS = {"model", "llm", "langfuse"}
@@ -74,7 +74,7 @@ def configuration_projection(snapshot: EffectiveAgentConfigSnapshot, root: Path)
     values = public_value(snapshot.values)
     # Hooks compose by stable ID, not by recursive dict/list merging. Present
     # the same compiled plan that execution consumes, with per-handler origins.
-    from src.lib.smolagents.hooks.config import HookConfigLayer, HookPlanCompiler
+    from src.runtime.hooks.config import HookConfigLayer, HookPlanCompiler
 
     plan = HookPlanCompiler().compile(
         tuple(
