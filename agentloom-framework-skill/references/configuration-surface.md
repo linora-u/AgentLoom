@@ -28,7 +28,7 @@
 | Worker YAML | `applications/<app>/workflows/worker_agents/*.yaml` | 被 Supervisor 调用的 Agent 工具 | 有 `agent_function_schema` 才能导出为 callable tool |
 | Skill 包 | `applications/<app>/skills/<name>/SKILL.md` 或 `skills/<name>/SKILL.md` | 可按需加载的长期能力、脚本和资源 | `SKILL.md`/`skill.md` 入口；不得声明 Hook |
 | Hook Bundle | `applications/<app>/hooks/<name>/HOOK.yaml` 或 `hooks/<name>/HOOK.yaml` | 显式授权的确定性事件行为 | 只由顶层 `hooks.bundles` 引用；永不自动发现 |
-| MCP 配置 | `mcp_servers` 指向的 JSON 文件 | 外部 MCP server 工具 | `mcp_servers` 支持 string/list/dict 三种 YAML 形式 |
+| MCP 配置 | `mcp_servers` 指向的 JSON 文件 | 外部 MCP server 工具 | `mcp_servers` 支持 string/list/dict；`null` 表示空配置 |
 
 合并顺序：框架默认值 -> `config/system.yaml` -> `applications/<app>/config/system.yaml` -> Agent YAML 白名单字段。字典递归合并；列表和标量整体替换。
 
@@ -118,7 +118,7 @@ todo, skills, tool_metadata, tool_output_limits
 - `shell_settings`、`toolsets` 可以在 Agent YAML 覆盖；`toolsets` 会整体替换全局 `default_toolsets`。
 - `context_engine` 可以在 Agent YAML 覆盖，用于按应用或 Agent 调整可逆上下文压缩。
 - `self_learning` 和显式 `hooks` bundle 可以在应用或 Agent YAML 覆盖；reviewer 必须从当前 root 的最终生效配置读取，不能使用进程全局回退。
-- `mcp_servers` 可以在 Agent YAML 覆盖，并支持 string/list/dict。
+- `mcp_servers` 可以在 Agent YAML 覆盖，并支持 string/list/dict；`null` 表示空配置。
 - `runtime`、`logging`、`checkpoint` 不在 Agent YAML 白名单；不要把存储 root、日志策略或 resume 生命周期塞进 Agent workflow。
 - Worker 的有效配置由全局、应用级、Worker YAML 自己重建；不会继承 Supervisor 的运行时覆盖。Worker 需要同样权限时必须自己写。
 
@@ -484,7 +484,7 @@ mcp_servers:
   tool_name_prefix: true
 ```
 
-dict 形式也支持 `paths: [...]`。无效类型、无效连接配置或缺失文件在共享静态预检时拒绝。
+dict 形式也支持 `paths: [...]`；`mcp_servers: null` 是有效的空配置。无效类型、无效连接配置或缺失文件在共享静态预检时拒绝。Skill 校验脚本直接调用该预检，不另写 MCP 类型或路径规则。
 
 ## 生成配置时的取舍
 

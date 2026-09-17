@@ -6,17 +6,15 @@ scan_tools.py 的单元测试。
   .venv/bin/python -m pytest tests/tools_test/skills/workflow-review/test_scan_tools.py -v
 """
 
+# ---------------------------------------------------------------------------
+# 导入被测模块
+# ---------------------------------------------------------------------------
+import importlib.util
 import textwrap
 from pathlib import Path
 
 import pytest
 import yaml
-
-# ---------------------------------------------------------------------------
-# 导入被测模块
-# ---------------------------------------------------------------------------
-import importlib.util
-import sys
 
 _AGENT_LOOM_ROOT = Path(__file__).resolve().parents[4]
 _SCAN_TOOLS_PATH = _AGENT_LOOM_ROOT / "agentloom-framework-skill" / "scripts" / "scan_tools.py"
@@ -1390,3 +1388,50 @@ class TestSkillContractText:
         assert 'pyproject.toml` 中 `[project].name == "AgentLoom"' in content
         assert "config/llm.yaml" in content
         assert "不要只用 `config/system.yaml` 判定环境可用" in content
+
+
+@pytest.mark.parametrize("suffix", [".yaml", ".md"])
+@pytest.mark.parametrize("content", [
+    "name: first\nname: second\nworkflow: Work\n",
+    "name: first\nhooks:\n  PreToolUse: []\n  PreToolUse: []\n",
+    "name: first\nworkflow: [\nsecret-sentinel-must-not-echo\n",
+])
+def test_scanner_parse_errors_match_canonical_without_raw_input(tmp_path, suffix, content):
+    from agentloom.application.definition import definition_error, load_agent_definition
+
+    app = tmp_path / "app"
+    path = app / "workflows" / f"supervisor{suffix}"
+    path.parent.mkdir(parents=True)
+    path.write_text(f"```yaml\n{content}```\nWorkflow" if suffix == ".md" else content)
+    with pytest.raises((ValueError, yaml.YAMLError)) as canonical:
+        load_agent_definition(path)
+    parsed, error = _mod._load_agent_config_from_file(path)
+    assert parsed is None
+    assert error == definition_error(canonical.value)
+    assert error in scan_app_structure(str(app))
+    assert "secret-sentinel-must-not-echo" not in error
+
+
+@pytest.mark.parametrize("yaml_workflow,body", [
+    ("workflow: Original YAML\n", "Markdown body wins."),
+    ("workflow: [First, Second]\n", ""),
+    ("", ""),
+])
+def test_scanner_markdown_workflow_is_exact_canonical_parse(tmp_path, yaml_workflow, body):
+    from agentloom.application.definition import load_agent_definition
+
+    path = tmp_path / "supervisor.md"
+    path.write_text(f"```yaml\nname: demo\ndescription: Demo\n{yaml_workflow}```\n\n{body}\n")
+    parsed, error = _mod._load_agent_config_from_file(path)
+    assert error is None
+    assert parsed == load_agent_definition(path)
+
+
+def test_scan_includes_nested_worker_definitions(tmp_path):
+    app = tmp_path / "app"
+    worker = app / "workflows/worker_agents/nested/worker.md"
+    worker.parent.mkdir(parents=True)
+    worker.write_text("```yaml\nname: nested_worker\ndescription: Nested worker\n```\nWork")
+    result = scan_app_structure(str(app))
+    assert "Worker Agents (1 个)" in result
+    assert "nested_worker" in result

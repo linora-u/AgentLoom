@@ -19,6 +19,10 @@ git check-ignore -v config/llm.yaml || true
 
 通过标准：`summary.valid == true` 且 `error_count == 0`。
 
+此脚本是 `agentloom.application.definition` 共享预检的 CLI 适配器，不维护第二套字段、路径、模型或 MCP 规则。它读取项目模型目录和有效配置，检查 Supervisor 的完整 Worker 引用图；`worker_agents/` 内尚未被引用的定义也调用共享 Worker 校验。缺少本地 `config/llm.yaml` 会失败，不能跳过模型校验后报告通过。
+
+输出保留 `summary` 与 `errors` envelope；共享诊断使用 `field: definition`、`rule: shared_definition`，`message` 保留 canonical 原因。目录缺失、没有定义等 authoring 结构错误使用独立规则，不保证旧脚本的字段级 rule 名称。
+
 ```bash
 .venv/bin/python -c "
 import sys
@@ -27,6 +31,8 @@ from scripts.scan_tools import scan_app_structure
 print(scan_app_structure('applications/<app_name>'))
 "
 ```
+
+结构扫描与校验均通过 `load_agent_definition` 读取 YAML/Markdown，拒绝重复 YAML key，并采用同一 Markdown workflow 规则。扫描只提取事实，不代替有效配置预检；两者都不构造模型、导入工具实现、连接 MCP 或执行 Hook。
 
 检查点：
 
@@ -211,7 +217,7 @@ rg -n "mcp_servers|parse_mcp_servers_yaml_value" src tests docs/en agentloom-fra
 - `tool_call` 模式是否仍只接受结构化 native/tool-call block；不要恢复自由文本猜测、fuzzy tool-name repair 或坏参数 `{}` 兜底。
 - `skills.paths`、约定目录、同名覆盖以及 `SKILL.md` 禁止 `hooks` 是否与 `SkillCatalog` 一致。
 - `hooks` 是否只通过顶层直接声明或显式 `HOOK.yaml` Bundle 编译，且保留三层来源顺序。
-- `mcp_servers` 的 string/list/dict 三种形式是否仍被 parser 支持。
+- `mcp_servers` 的 string/list/dict 形式和 `null` 空配置是否与共享 parser 一致。
 - `docs/en/config-overview.md`、`agent_config.md`、`system_config.md` 如果和代码冲突，最终 skill 先写代码真相，并在交付里说明文档漂移。
 
 ## 多 Agent 验证
