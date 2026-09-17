@@ -12,6 +12,7 @@ import dataclasses
 import hashlib
 import json
 import os
+import re
 import shutil
 import signal
 import subprocess
@@ -45,6 +46,42 @@ def _revision(project: Path) -> str:
     return subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=project, text=True).strip()
 
 
+def _relocate_tool_namespaces(application: Path, application_id: str) -> list[dict[str, str]]:
+    """Adapt absolute Python names only in the copied nested Application.
+
+    Unlike Worker paths, an applications.* module is project-root-qualified.
+    Moving its owner changes that namespace; preserve the loader's project
+    isolation and record the explicit migration rather than using a fallback.
+    """
+    original = "applications.architecture_contract_validation."
+    relocated = "applications." + application_id.replace("/", ".") + "."
+    if original == relocated:
+        return []
+    changes = []
+    for source in sorted((application / "workflows").rglob("*")):
+        if source.suffix not in {".yaml", ".yml", ".md"}:
+            continue
+        content = source.read_text(encoding="utf-8")
+        block = re.search(r"```yaml\s*\n(.*?)\n```", content, re.DOTALL) if source.suffix == ".md" else None
+        if source.suffix == ".md" and block is None:
+            raise ValueError(f"Markdown definition has no YAML block: {source}")
+        config = yaml.safe_load(block.group(1) if block else content)
+        changed = False
+        for index, tool in enumerate(config.get("tools", [])):
+            module = tool.get("module")
+            if isinstance(module, str) and module.startswith(original):
+                tool["module"] = relocated + module.removeprefix(original)
+                changes.append({"definition": source.relative_to(application).as_posix(),
+                                "field": f"tools[{index}].module", "from": module, "to": tool["module"]})
+                changed = True
+        if changed:
+            rendered = yaml.safe_dump(config, sort_keys=False)
+            if block:
+                rendered = content[:block.start(1)] + rendered.rstrip("\n") + content[block.end(1):]
+            source.write_text(rendered, encoding="utf-8")
+    return changes
+
+
 def prepare_attempt(project: Path, output: Path, case: str, *, baseline_project_relative: bool = False) -> tuple[Path, dict]:
     stamp = datetime.now(UTC).strftime("%Y%m%dT%H%M%S")
     nonce = uuid.uuid4().hex
@@ -68,6 +105,7 @@ def prepare_attempt(project: Path, output: Path, case: str, *, baseline_project_
     application_id = "nested/suite/architecture_contract_validation" if case.startswith("nested-") else "architecture_contract_validation"
     application = isolated / "applications" / application_id
     shutil.copytree(APP_ROOT, application, ignore=shutil.ignore_patterns("__pycache__", "*.pyc"))
+    namespace_adaptations = _relocate_tool_namespaces(application, application_id)
     if baseline_project_relative:
         for supervisor in (application / "workflows").glob("*.yaml"):
             config = yaml.safe_load(supervisor.read_text())
@@ -86,19 +124,25 @@ def prepare_attempt(project: Path, output: Path, case: str, *, baseline_project_
         "project": str(isolated), "candidate_project": str(project), "application_id": application_id,
         "definition": str(definition), "mode": mode, "started_at": datetime.now(UTC).isoformat(),
         "baseline_project_relative_adaptation": baseline_project_relative,
+        "namespace_adaptations": namespace_adaptations,
         "configuration": {"lsp_servers": False, "mcp_servers": None, "checkpoint_cleanup_on_success": False,
                           "model_profile": "powerful", "runtime_root": str(attempt / "runtime")},
     }
     if case == "policy":
         _policy_definition(attempt, request)
         request["definition_sha256"] = sha256(definition)
+    request["prepared_definition_sha256"] = {
+        source.relative_to(application).as_posix(): sha256(source)
+        for source in sorted((application / "workflows").rglob("*"))
+        if source.is_file() and source.suffix in {".yaml", ".yml", ".md"}
+    }
     _write(attempt / "request.json", request)
     return attempt, request
 
 
 def _run_child(attempt: Path, request: dict) -> int:
-    from agentloom.configuration import C
     from agentloom.application.runner import execute_app
+    from agentloom.configuration import C
 
     receipt = {**request, "status": "failed"}
     events = []

@@ -286,3 +286,70 @@ def test_application_config_retains_run_evidence_and_disables_unused_connections
     assert config["checkpoint"]["cleanup_on_success"] is False
     assert config["lsp_servers"]["enabled"] is False
     assert config["mcp_servers"] is None
+
+
+@pytest.mark.parametrize("mode", ["native", "codeact"])
+def test_prepared_nested_application_relocates_only_tool_namespaces_and_loads_local_tools(tmp_path, monkeypatch, mode):
+    from agentloom.application.definition import load_agent_definition
+
+    from applications.architecture_contract_validation import run_acceptance
+
+    project = tmp_path / "candidate"
+    (project / "config").mkdir(parents=True)
+    (project / "config/system.yaml").write_text("{}\n")
+    (project / "config/llm.yaml").write_text(
+        "model:\n  default_model_type: powerful\n  powerful:\n    model: openai/test\n"
+        "  summary:\n    model: openai/test\n")
+    monkeypatch.setattr(run_acceptance, "_revision", lambda _project: "test-candidate")
+    attempt, request = run_acceptance.prepare_attempt(project, tmp_path / "evidence", f"nested-{mode}")
+    prepared = Path(request["project"]) / "applications" / request["application_id"]
+    assert request["namespace_adaptations"]
+    assert any(row["definition"].endswith(".md") for row in request["namespace_adaptations"])
+    recorded = {(row["definition"], row["field"]): row for row in request["namespace_adaptations"]}
+    for relative, digest in request["prepared_definition_sha256"].items():
+        assert run_acceptance.sha256(prepared / relative) == digest
+        original = load_agent_definition(APP_ROOT / relative)
+        copied = load_agent_definition(prepared / relative)
+        original.pop("_yaml_file_path")
+        copied.pop("_yaml_file_path")
+        for index, (before, after) in enumerate(zip(original.get("tools", []), copied.get("tools", []), strict=True)):
+            if before.get("module"):
+                change = recorded[(relative, f"tools[{index}].module")]
+                assert change["from"] == before["module"]
+                assert change["to"] == after["module"]
+                assert after["module"].startswith("applications.nested.suite.architecture_contract_validation.")
+                after["module"] = before["module"]
+        assert copied == original  # includes exact workflow, Worker and resource path values
+
+    script = r'''
+import importlib.util, json, sys
+from pathlib import Path
+from agentloom.application.definition import load_agent_definition, validate_agent_definition
+from agentloom.configuration import C
+from agentloom.utils.dynamic_import import load_function
+definition, outside = map(Path, sys.argv[1:])
+config = load_agent_definition(definition)
+assert validate_agent_definition(C.agent_root, str(definition.relative_to(C.agent_root)), config) == []
+# Cached code under the old absolute namespace must never bypass project isolation.
+old = "applications.architecture_contract_validation.agent_tools.workspace_tools"
+spec = importlib.util.spec_from_file_location(old, outside)
+module = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(module)
+sys.modules[old] = module
+try:
+    load_function(old, "write_workspace_file")
+except ImportError as exc:
+    assert "did not resolve inside" in str(exc), str(exc)
+else:
+    raise AssertionError("outside cached original tool was accepted")
+tool = config["tools"][0]
+loaded = load_function(tool["module"], tool["function"])
+origin = Path(sys.modules[loaded.__module__].__file__).resolve()
+assert origin.is_relative_to(C.agent_root / "applications/nested/suite/architecture_contract_validation")
+print(json.dumps({"origin": str(origin), "outside_cache_rejected": True}))
+'''
+    completed = subprocess.run([sys.executable, "-I", "-c", script, request["definition"],
+                                str(APP_ROOT / "agent_tools/workspace_tools.py")],
+                               cwd=attempt / "project", text=True, capture_output=True, timeout=30)
+    assert completed.returncode == 0, completed.stdout + completed.stderr
+    assert json.loads(completed.stdout)["outside_cache_rejected"] is True
