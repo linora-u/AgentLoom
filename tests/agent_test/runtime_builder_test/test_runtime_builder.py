@@ -1000,6 +1000,53 @@ def test_max_steps_worker_is_failed_before_checkpoint_success(tmp_path, monkeypa
     assert checkpoint["status"] == "failed"
 
 
+def test_shipped_checkpoint_supervisor_budget_reaches_real_local_executor(monkeypatch):
+    from smolagents import AgentLogger, LocalPythonExecutor
+
+    from agentloom.application.definition import load_agent_definition, prepare_application_definition
+    from agentloom.configuration.config import UnifiedConfig, bind_config
+    from agentloom.configuration.llm_config import LLMConfig
+    from agentloom.runtime.factory import YamlConfiguredSupervisorAgent
+
+    root = Path(__file__).resolve().parents[3]
+    source = root / "applications/test_demo/workflows/test_checkpoint_complex_supervisor.yaml"
+    base = UnifiedConfig(
+        {"execution_env": {"type": "local", "executor_kwargs": {"timeout_seconds": 0.01}}},
+        agent_root=root,
+        llm_config=LLMConfig.from_dict({"model": {
+            "default_model_type": "powerful",
+            "powerful": {"model": "openai/test"},
+            "summary": {"model": "openai/test"},
+        }}),
+    )
+    effects = []
+
+    @tool
+    def synchronous_probe() -> str:
+        """Return after the deliberately short ambient code-block budget."""
+        time.sleep(0.05)
+        effects.append("completed")
+        return "exact result: 验证\nreturned once"
+
+    with bind_config(base):
+        prepared = prepare_application_definition(root, source, load_agent_definition(source), base_config=base)
+        snapshot = prepared["_effective_agent_config_snapshot"]
+        assert snapshot.values["execution_env"]["executor_kwargs"]["timeout_seconds"] == 1200
+        agent = YamlConfiguredSupervisorAgent(config=prepared, model=object(), logger=AgentLogger(level=0))
+        # Keep model calls and application side effects out of this assembly test;
+        # the published definition, effective config and CodeAct executor are real.
+        monkeypatch.setattr(agent, "_build_runtime_tools", lambda _profile: [synchronous_probe])
+        runtime = agent.build_runtime_agent()
+        assert isinstance(runtime.python_executor, LocalPythonExecutor)
+        assert runtime.python_executor.timeout_seconds == 1200
+        runtime.python_executor.send_tools(runtime.tools)
+        result = runtime.python_executor("synchronous_probe()")
+
+    assert result.output == "exact result: 验证\nreturned once"
+    assert effects == ["completed"]
+    assert base.raw["execution_env"]["executor_kwargs"]["timeout_seconds"] == 0.01
+
+
 @pytest.mark.parametrize("output", ["worker answer", "", None])
 def test_completed_worker_resume_replays_output_in_requested_shape(tmp_path, monkeypatch, output):
     from smolagents import RunResult
