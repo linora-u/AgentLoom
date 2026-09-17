@@ -10,6 +10,7 @@ from __future__ import annotations
 import ast
 import importlib.util
 import json
+import pprint
 import re
 from datetime import datetime, timezone
 from pathlib import Path
@@ -98,6 +99,8 @@ def _extract_args(node: ast.FunctionDef) -> tuple[list[str], list[str]]:
     defaults = len(node.args.defaults)
     required_count = max(0, len(args) - defaults)
     required = args[:required_count]
+    args.extend(arg.arg for arg in node.args.kwonlyargs)
+    required.extend(arg.arg for arg, default in zip(node.args.kwonlyargs, node.args.kw_defaults) if default is None)
     return args, required
 
 
@@ -261,14 +264,26 @@ def plan_test_scenarios(function_context: str, function_name: str) -> str:
         ("alternate_flags_or_limits", alternate_input),
     ]
 
+    # Exercise absent text and numeric boundaries as real exception/value cases.
+    # Keep these independently named so an acceptance verifier can inspect coverage.
+    for name in arg_names:
+        if any(token in name.lower() for token in ("text", "message", "title", "content")):
+            raw_cases.append((f"{name}_none", {**baseline_input, name: None}))
+        if any(token in name.lower() for token in ("limit", "max_len", "count", "size")):
+            raw_cases.append((f"{name}_zero", {**baseline_input, name: 0}))
+        if any(token in name.lower() for token in ("strict", "flag", "enabled")):
+            raw_cases.append((f"{name}_true", {**baseline_input, name: True}))
+
     cases: list[dict[str, Any]] = []
     for case_name, case_input in raw_cases:
         expected: Any
         try:
             expected = target(**case_input)
             expected = _json_safe(expected)
-        except Exception as exc:  # pragma: no cover - best effort fallback
-            expected = f"__RUNTIME_EXCEPTION__: {type(exc).__name__}: {exc}"
+        except Exception as exc:
+            cases.append({"name": case_name, "input": case_input,
+                          "raises": type(exc).__name__, "message": str(exc)})
+            continue
 
         cases.append(
             {
@@ -309,7 +324,7 @@ def build_pytest_template(
     scenario = json.loads(scenario_markdown)
     cases = scenario["cases"]
     test_fn = f"test_{function_name}_parameterized"
-    cases_json = json.dumps(cases, ensure_ascii=False, indent=4)
+    cases_literal = pprint.pformat(cases, width=100, sort_dicts=False)
 
     # Compute a relative path from the output directory to the module, so generated
     # test files are portable across machines and work regardless of where the
@@ -320,7 +335,9 @@ def build_pytest_template(
     rel_module_path = rel_module_path.replace("\\", "/")
 
     lines: list[str] = []
+    lines.append("import builtins")
     lines.append("import importlib.util")
+    lines.append("import re")
     lines.append("from pathlib import Path")
     lines.append("")
     lines.append("import pytest")
@@ -341,12 +358,21 @@ def build_pytest_template(
     lines.append("")
     lines.append("TARGET_FUNCTION = _load_function()")
     lines.append("")
-    lines.append(f"TEST_CASES = {cases_json}")
+    lines.append(f"TEST_CASES = {cases_literal}")
     lines.append("")
     lines.append(
         "@pytest.mark.parametrize(\"case\", TEST_CASES, ids=[case[\"name\"] for case in TEST_CASES])"
     )
     lines.append(f"def {test_fn}(case):")
+    lines.append('    if "raises" in case:')
+    lines.append('        exception_type = getattr(builtins, case["raises"], None)')
+    lines.append('        if exception_type is None:')
+    lines.append('            exception_type = TARGET_FUNCTION.__globals__.get(case["raises"])')
+    lines.append('        if not isinstance(exception_type, type) or not issubclass(exception_type, Exception):')
+    lines.append('            raise TypeError(f"Unknown expected exception: {case[\"raises\"]}")')
+    lines.append('        with pytest.raises(exception_type, match=re.escape(case["message"])):')
+    lines.append('            TARGET_FUNCTION(**case["input"])')
+    lines.append('        return')
     lines.append("    result = TARGET_FUNCTION(**case[\"input\"])")
     lines.append("    assert result == case[\"expected\"]")
     lines.append("# === UNIT_TEST_STUDIO GENERATED TEST END ===")
