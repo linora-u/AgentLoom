@@ -1,12 +1,12 @@
-from src.lib.logging import get_logger
-from src.lib.runtime import get_current_run_context
-from src.lib.smolagents.tool_protocol import ToolPolicyBlockedError
+from src.runtime.logging import get_logger
+from src.runtime import get_current_run_context
+from src.runtime.tool_protocol import ToolPolicyBlockedError
 from src.tools.shell.command_semantics import interpret_exit_code
 from src.tools.shell.output_interceptor import OutputInterceptor
 from src.tools.shell.process import ShellProcess, ShellProcessRegistry
 from src.tools.shell.should_use_sandbox import get_sandbox_manager, should_use_sandbox
 from src.tools.shell.validator import validate_command
-from src.trace import capture_explicit_execution_context
+from src.runtime.trace import capture_explicit_execution_context
 
 logger = get_logger(__name__)
 
@@ -274,7 +274,7 @@ def _run_in_background(
     import os
     import subprocess
 
-    from src.lib.runtime import get_current_run_context
+    from src.runtime import get_current_run_context
     from src.tools.shell.background_task import BackgroundTaskRegistry
     from src.tools.shell.process import _MAX_OUTPUT_BYTES, find_suitable_shell
     from src.tools.shell.subprocess_env import build_subprocess_env

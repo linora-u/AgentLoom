@@ -12,12 +12,12 @@ from typing import TYPE_CHECKING, Any, NoReturn
 
 import yaml
 
-from src.lib.runtime.context import (
+from src.runtime.context import (
     RuntimeRunLease,
     safe_application_id,
     validate_runtime_id,
 )
-from src.lib.runtime.storage import SecureDirectory
+from src.runtime.storage import SecureDirectory
 
 if TYPE_CHECKING:
     from src.tui_bridge.definition import AgentDefinitionCache
