@@ -55,7 +55,8 @@ eight named behavior families collected and passing, zero skipped tests, and at
 least five failures when generated tests are applied to original source. Trace
 checks require all four distinct Worker local runs, actual model usage, persisted
 completed Worker checkpoints, intact output-to-input transfers (including a
-complete preceding result inside a JSON wrapper), real implementer
+complete preceding result inside a JSON or JSON-text wrapper, or accompanied by
+sibling context fields; original nested values and types must remain exact), real implementer
 and verifier pytest calls, an accurately referenced verifier report, and completed
 Run state. Policy checks read the persisted `ToolCallRecord`, require `blocked`
 with the expected reason, and verify the requested file was never written.

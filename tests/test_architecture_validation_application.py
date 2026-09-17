@@ -175,7 +175,7 @@ def test_trace_validation_does_not_accept_an_artifact_only_success(tmp_path):
     assert len(result["errors"]) >= len(WORKERS)
 
 
-@pytest.mark.parametrize("tamper", [None, "wrapped_input", "wrapped_omission", "wrapped_alteration", "wrapped_fabrication",
+@pytest.mark.parametrize("tamper", [None, "wrapped_input", "wrapped_json_text", "sibling_context", "wrapped_omission", "wrapped_alteration", "wrapped_fabrication",
                                   "cross_run", "dropped_input", "no_model_usage", "no_python"])
 def test_codeact_trace_checks_real_checkpoint_contract_and_independent_ids(tmp_path, tamper):
     run = {"run_id": "run-current", "task_id": "task-current", "manifest_path": str(tmp_path / "manifest.json")}
@@ -194,6 +194,8 @@ def test_codeact_trace_checks_real_checkpoint_contract_and_independent_ids(tmp_p
         query = dict(previous)
         if tamper == "dropped_input" and index == 2:
             query.pop("findings")
+        if tamper == "sibling_context":
+            query["additional_context"] = {"source_files": ["CONTRACT.md"]}
         if isinstance(tamper, str) and tamper.startswith("wrapped_"):
             if index == 2:
                 if tamper == "wrapped_omission":
@@ -203,6 +205,8 @@ def test_codeact_trace_checks_real_checkpoint_contract_and_independent_ids(tmp_p
                 elif tamper == "wrapped_fabrication":
                     query = {"workspace": query["workspace"], "case_nonce": query["case_nonce"], "findings": ["fabricated"]}
             query = {"workspace": query["workspace"], "case_nonce": query["case_nonce"], "preceding_result": {"data": [query]}}
+            if tamper == "wrapped_json_text":
+                query["preceding_result"]["data"][0] = json.dumps(query["preceding_result"]["data"][0])
         output = {**previous, "findings": [name, index]}
         call_dir = checkpoints / f"workers/{name}/calls/0"
         call_dir.mkdir(parents=True)
@@ -220,12 +224,40 @@ def test_codeact_trace_checks_real_checkpoint_contract_and_independent_ids(tmp_p
         previous = output
     (tmp_path / "tool-ledger.jsonl").write_text("\n".join(json.dumps(row) for row in ledger))
     result = validate_trace(tmp_path, {"case_nonce": "case-unique", "run": run, "mode": "codeact"})
-    assert result["passed"] is (tamper in {None, "wrapped_input"}), result["errors"]
+    assert result["passed"] is (tamper in {None, "wrapped_input", "wrapped_json_text", "sibling_context"}), result["errors"]
+    if result["passed"]:
+        assert len(result["transfers"]) == 3
+        assert all(row["query_path"].startswith("$") and len(row["original_output_sha256"]) == 64 for row in result["transfers"])
 
 
 @pytest.mark.parametrize("replacement", [True, 1.0, "1", 2])
 def test_exact_json_transfer_rejects_scalar_value_or_type_substitution(replacement):
     assert not _contains_exact_json({"result": {"count": replacement}}, {"count": 1})
+
+
+@pytest.mark.parametrize("mutation", ["missing_key", "changed_key", "nested_addition", "nested_change", "list_order",
+                                     "malformed_json", "overencoded_json", "fabricated_data"])
+def test_json_query_envelopes_cannot_disguise_changed_or_unreadable_original_data(mutation):
+    expected = {"case_nonce": "current", "findings": {"count": 2, "files": ["one.py", "two.py"]}}
+    result = json.loads(json.dumps(expected))
+    if mutation == "missing_key":
+        result.pop("case_nonce")
+    elif mutation == "changed_key":
+        result["case_nonce"] = "previous"
+    elif mutation == "nested_addition":
+        result["findings"]["fabricated"] = True
+    elif mutation == "nested_change":
+        result["findings"]["count"] = 3
+    elif mutation == "list_order":
+        result["findings"]["files"].reverse()
+    elif mutation == "malformed_json":
+        result = json.dumps(result)[:-1]
+    elif mutation == "overencoded_json":
+        for _ in range(4):
+            result = json.dumps(result)
+    else:
+        result = {"case_nonce": "current", "findings": {"count": 2, "files": ["invented.py"]}}
+    assert not _contains_exact_json({"prior_worker": result, "additional_context": "retained"}, expected)
 
 
 def test_native_and_codeact_definitions_have_four_real_typed_workers():
