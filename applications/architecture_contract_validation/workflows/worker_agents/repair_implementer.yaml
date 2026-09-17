@@ -14,13 +14,16 @@ workflow: Parse query as the actual change_planner result. Read CONTRACT.md and 
   maintaining public interfaces. Author meaningful pytest regressions in tests/generated/test_checkout_regressions.py.
   Include all required scenario identifiers in test names and concrete assertions/raises
   for boundaries, multi-line input, invalid bool/string/float values, configuration
-  overrides and empty carts. Preserve every existing test/config/contract. Use the
+  overrides, empty carts and nonempty zero-priced carts (zero_price). The latter
+  still follow the shipping rule under positive and zero free-shipping thresholds;
+  zero subtotal does not prove a cart is empty. Preserve every existing test/config/contract. Use the
   plan but verify code yourself. Run run_workspace_tests(workspace, label="implementer");
   if failing, investigate and repair then run again. Never claim tests passed without
   this tool returning exit_code=0, tests>0, failures=errors=skipped=0. All tools operate
   on real files; there is no template generator. Return JSON with workspace, case_nonce,
-  changed_files, generated_tests (list of relative paths), test_report (actual JSON
-  report path), and summary. Keep it concise and preserve nonce.
+  changed_files, generated_tests (list of relative paths), test_report (the relative-path
+  string from run_workspace_tests.report, never the whole report object), and summary.
+  Keep it concise and preserve nonce.
 agent_function_schema:
   description: repair implementer
   inputs:

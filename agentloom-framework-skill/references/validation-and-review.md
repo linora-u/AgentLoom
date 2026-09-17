@@ -88,6 +88,8 @@ find applications/<app_name>/agent_tools -name '*.py' -print0 2>/dev/null | xarg
 | shell 权限 / audit | `applications/test_shell_audit/*`、`applications/test_shell_allowlist_matrix/*` |
 | 多 Worker 调度 | `applications/context_engine_multi_worker_validation`、`applications/test_demo/workflows/test_checkpoint_complex_supervisor.yaml` |
 
+`applications/architecture_contract_validation` 用原生工具调用和 CodeAct 各跑两次，再验证嵌套 Application 与拒绝场景。保留九类具名回归，包括区分空购物车与零金额非空购物车的 `zero_price`；50 项独立 oracle 不随生成结果放宽。最终 `test_report` 必须是最后一次 verifier 的真实 pytest 报告相对路径，写入前检查类型、当前身份和 JSON/JUnit/调用证据。多次调用同名 Worker 时，按当前任务的 call index、开始/完成事件和实际输入输出关联；允许验证失败后的修复循环，不能固定选第一次调用，也不能用未来或其他任务的结果补齐证据。
+
 交付时至少列出：
 
 - 实际运行的 Application 数量和 workflow 路径。

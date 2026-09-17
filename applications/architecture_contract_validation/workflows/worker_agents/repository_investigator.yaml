@@ -12,7 +12,8 @@ context_engine:
 workflow: Inspect the workspace provided in query (JSON with workspace and case_nonce)
   using inspect_workspace and read_workspace_file. Read CONTRACT.md, all three implementation
   modules, configuration fixtures, and existing tests. Trace the cross-module calls
-  and identify concrete contract violations from actual source. Do not edit. Return
+  and identify concrete contract violations from actual source. Distinguish an empty
+  cart from a nonempty zero-priced cart when checking the shipping rule. Do not edit. Return
   one JSON object containing workspace, case_nonce, source_files (paths), findings
   (specific observed defects), and relevant contract cases. Preserve the input nonce
   exactly. Your output feeds the planner; claims must cite source paths.
