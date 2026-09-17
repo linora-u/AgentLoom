@@ -307,6 +307,16 @@ result = execute_app("applications/release_review/workflows/release_review_agent
 print(result.output, result.run.run_id)
 ```
 
+Framework source lives directly in `src/application/`, `src/runtime/`,
+`src/adapters/`, and the other responsibility modules. Installation maps `src/`
+to the Python package name `agentloom`: the import above loads
+`src/application/runner.py`. There is no extra `agentloom` source directory.
+Use `uv sync --python 3.12 --locked --all-groups` to install the checkout before
+calling Python APIs. The old `src.*` imports and module commands are removed;
+supported commands are `loom` and `python -m agentloom`. See the
+[architecture and migration map](docs/specs/architecture-migration-inventory.md)
+for module ownership and migration details.
+
 Post-allocation failures carry the same receipt; preflight rejection emits
 `run.rejected` before storage exists. See
 [Structured Run API](docs/en/run_observability.md).
