@@ -1,5 +1,5 @@
 ---
-name: repo_map_guide
+name: repo-map-guide
 description: Guide for generating and using AI-readable code maps
 ---
 
