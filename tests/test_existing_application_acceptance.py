@@ -100,6 +100,55 @@ def test_checkpoint_handoff_captures_exact_returns_and_rejects_duplicate_writes(
 
 
 @pytest.fixture
+def checkpoint_helper():
+    spec = importlib.util.spec_from_file_location(
+        "checkpoint_helper", Path(__file__).parent / "agent_test/real_checkpoint_validation.py"
+    )
+    helper = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(helper)
+    return helper
+
+
+def test_completed_probe_uses_the_published_query_without_a_second_text_source(tmp_path, checkpoint_helper):
+    import ast
+    import yaml
+
+    helper = checkpoint_helper
+    source = helper.ROOT / helper.YAML_PATH
+    copied = tmp_path / "application/workflows/supervisor.yaml"
+    copied.parent.mkdir(parents=True)
+    config = yaml.safe_load(source.read_text())
+    config["workflow"] = config["workflow"].replace("/tmp/agentloom_ckpt_complex", str(tmp_path / "distinct-workspace"))
+    copied.write_text(yaml.safe_dump(config))
+    expected = helper._canonical_worker_query(config["workflow"])
+    helper.YAML_PATH = str(copied)
+    helper.SESSION_ROOT = tmp_path / "evidence"
+    helper._configure_completed_worker_probe()
+    configured = yaml.safe_load(copied.read_text())["workflow"]
+    call_line = next(line for line in configured.splitlines() if line.startswith("worker_result ="))
+    call = ast.parse(call_line).body[0].value
+    assert ast.literal_eval(call.keywords[0].value) == expected
+    assert "record_checkpoint_worker_output(" in configured
+
+
+@pytest.mark.parametrize("body", [
+    "Call the Worker with a report query.",
+    "```python\nworker_result = artifact_worker(query='one')\nworker_result = artifact_worker(query='two')\n```",
+    "```python\nworker_result = artifact_worker(query=query)\n```",
+    "```python\nworker_result = artifact_worker(query='prefix' + query)\n```",
+    "```python\nworker_result = artifact_worker(query='one')\n```\n```python\nworker_result = artifact_worker(query='two')\n```",
+])
+def test_completed_probe_rejects_missing_multiple_or_dynamic_queries(checkpoint_helper, body):
+    with pytest.raises(ValueError):
+        checkpoint_helper._canonical_worker_query(f"## Phase 2:\n{body}\n## Phase 3:\nVerify.")
+
+
+def test_completed_probe_rejects_missing_phase_boundary(checkpoint_helper):
+    with pytest.raises(ValueError, match="unique Phase 2"):
+        checkpoint_helper._canonical_worker_query("No canonical phase boundaries.")
+
+
+@pytest.fixture
 def main_checkpoint_gate(tmp_path, monkeypatch):
     from types import SimpleNamespace
 

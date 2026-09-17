@@ -159,7 +159,9 @@ load persisted MemorySteps
   -> continue execution under a new run_id
 ```
 
-Each Worker call has its own `workers/<worker>/calls/<call_index>/checkpoint.json`, so concurrent calls do not overwrite one another. Resume reuses the incomplete call index; it does not create a duplicate call for the same interrupted work.
+Each Worker call has its own `workers/<worker>/calls/<call_index>/checkpoint.json`, so concurrent calls do not overwrite one another. Resume reuses the incomplete call index when the Worker input matches exactly.
+
+Call identity hashes the complete formatted Worker task, including query whitespace. Replacing newlines with spaces or paraphrasing a query changes its identity and creates a new call. Applications must replay the original query verbatim; the complex checkpoint Supervisor supplies a fixed single-line Python literal for both initial execution and resume. The runtime does not normalize distinct inputs into the same call.
 
 The Supervisor and Worker heartbeat payloads include the active `run_id`. Crash detection considers missing/stopped heartbeats, dead PIDs, and stale timestamps. Resume writes the next heartbeat to the same task checkpoint with the new attempt's `run_id`.
 
