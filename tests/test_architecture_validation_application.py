@@ -15,6 +15,7 @@ from applications.architecture_contract_validation.validation import (
     APP_ROOT,
     REQUIRED_CASES,
     WORKERS,
+    _contains_exact_json,
     reset_fixture,
     validate_artifacts,
     validate_trace,
@@ -174,7 +175,8 @@ def test_trace_validation_does_not_accept_an_artifact_only_success(tmp_path):
     assert len(result["errors"]) >= len(WORKERS)
 
 
-@pytest.mark.parametrize("tamper", [None, "cross_run", "dropped_input", "no_model_usage", "no_python"])
+@pytest.mark.parametrize("tamper", [None, "wrapped_input", "wrapped_omission", "wrapped_alteration", "wrapped_fabrication",
+                                  "cross_run", "dropped_input", "no_model_usage", "no_python"])
 def test_codeact_trace_checks_real_checkpoint_contract_and_independent_ids(tmp_path, tamper):
     run = {"run_id": "run-current", "task_id": "task-current", "manifest_path": str(tmp_path / "manifest.json")}
     (tmp_path / "manifest.json").write_text('{"status":"completed"}')
@@ -192,6 +194,15 @@ def test_codeact_trace_checks_real_checkpoint_contract_and_independent_ids(tmp_p
         query = dict(previous)
         if tamper == "dropped_input" and index == 2:
             query.pop("findings")
+        if isinstance(tamper, str) and tamper.startswith("wrapped_"):
+            if index == 2:
+                if tamper == "wrapped_omission":
+                    query.pop("findings")
+                elif tamper == "wrapped_alteration":
+                    query["findings"] = [*query["findings"], "unreported claim"]
+                elif tamper == "wrapped_fabrication":
+                    query = {"workspace": query["workspace"], "case_nonce": query["case_nonce"], "findings": ["fabricated"]}
+            query = {"workspace": query["workspace"], "case_nonce": query["case_nonce"], "preceding_result": {"data": [query]}}
         output = {**previous, "findings": [name, index]}
         call_dir = checkpoints / f"workers/{name}/calls/0"
         call_dir.mkdir(parents=True)
@@ -209,7 +220,12 @@ def test_codeact_trace_checks_real_checkpoint_contract_and_independent_ids(tmp_p
         previous = output
     (tmp_path / "tool-ledger.jsonl").write_text("\n".join(json.dumps(row) for row in ledger))
     result = validate_trace(tmp_path, {"case_nonce": "case-unique", "run": run, "mode": "codeact"})
-    assert result["passed"] is (tamper is None), result["errors"]
+    assert result["passed"] is (tamper in {None, "wrapped_input"}), result["errors"]
+
+
+@pytest.mark.parametrize("replacement", [True, 1.0, "1", 2])
+def test_exact_json_transfer_rejects_scalar_value_or_type_substitution(replacement):
+    assert not _contains_exact_json({"result": {"count": replacement}}, {"count": 1})
 
 
 def test_native_and_codeact_definitions_have_four_real_typed_workers():
