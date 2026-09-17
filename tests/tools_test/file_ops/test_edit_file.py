@@ -6,8 +6,8 @@ import time
 import unittest
 from pathlib import Path
 
-from src.tools.file_ops._read_file_state import get_read_file_state
-from src.tools.file_ops.edit_file import edit_file
+from agentloom.tools.file_ops._read_file_state import get_read_file_state
+from agentloom.tools.file_ops.edit_file import edit_file
 
 
 class EditFileTestCase(unittest.TestCase):

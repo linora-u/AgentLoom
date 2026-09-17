@@ -185,7 +185,7 @@ if [ "${1:-}" = "update" ]; then
 fi
 if [ "${1:-}" = "schedules" ]; then
   shift
-  exec "$AGENTLOOM_PYTHON" -I -m src schedules "$@"
+  exec "$AGENTLOOM_PYTHON" -I -m agentloom schedules "$@"
 fi
 exec "$install_root/bin/agentloom-tui" "$@"
 EOF

@@ -29,7 +29,7 @@ from pathlib import Path
 
 import yaml
 
-from src.lib.logging import resolve_logger
+from agentloom.runtime.logging import resolve_logger
 
 from .paths import repo_map_docs_root, repo_map_skill_name, repo_map_skill_root
 
@@ -246,7 +246,7 @@ def _write_resolver_script(script_path: Path) -> None:
             if source_root:
                 root = Path(source_root)
                 try:
-                    rel = src.resolve().relative_to(root.resolve())
+                    rel = agentloom.resolve().relative_to(root.resolve())
                 except Exception:
                     rel = src
 
@@ -655,7 +655,7 @@ def run_analysis_loop(
 
     # create_agent_as_tool 内置缓存，同一 YAML 文件只创建一次
     # logger=None 让框架使用全局 AgentLogger（由 runner 初始化）
-    from src.lib.smolagents.agent.yaml_agent_factory import YamlAgentFactory
+    from agentloom.runtime.factory import YamlAgentFactory
     tool = YamlAgentFactory.create_agent_as_tool(_DIR_ANALYSIS_YAML)
     if tool is None:
         raise RuntimeError(f"Failed to create agent tool from {_DIR_ANALYSIS_YAML}")
@@ -794,7 +794,7 @@ def run_analysis_loop(
             results = tool.batch(batch_tasks)
         else:
             # Fallback: 逐个调用（测试中 tool 可能无 batch 方法）
-            from src.lib.concurrency.models import TaskResult
+            from agentloom.runtime.concurrency.models import TaskResult
             import time as _time
             results = []
             for t in batch_tasks:

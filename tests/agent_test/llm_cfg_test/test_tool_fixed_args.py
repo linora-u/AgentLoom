@@ -6,9 +6,9 @@ import inspect
 
 import pytest
 
-from src.lib.smolagents.agent import yaml_agent_factory
-from src.lib.smolagents.agent.yaml_agent_factory import YamlAgentFactory
-from src.lib.smolagents.tools.tools import ensure_tool_wrapped
+from agentloom.runtime import factory as yaml_agent_factory
+from agentloom.runtime.factory import YamlAgentFactory
+from agentloom.adapters.smolagents.tools.tools import ensure_tool_wrapped
 
 
 def sample_tool(prompt: str, cwd: str = ".", sandbox: str = "", search: str = "") -> str:
@@ -63,7 +63,7 @@ def test_dynamic_tool_fixed_args_use_yaml_name_as_exposed_tool_name(monkeypatch)
             "tools": [
                 {
                     "name": "codex1",
-                    "module": "src.tools.codex.codex_tool",
+                    "module": "agentloom.tools.codex.codex_tool",
                     "function": "codex",
                     "fixed_args": {
                         "prompt": "first prompt",
@@ -74,7 +74,7 @@ def test_dynamic_tool_fixed_args_use_yaml_name_as_exposed_tool_name(monkeypatch)
                 },
                 {
                     "name": "codex2",
-                    "module": "src.tools.codex.codex_tool",
+                    "module": "agentloom.tools.codex.codex_tool",
                     "function": "codex",
                     "fixed_args": {
                         "prompt": "second prompt",

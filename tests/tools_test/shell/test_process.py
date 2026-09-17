@@ -14,7 +14,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from src.tools.shell.process import (
+from agentloom.tools.shell.process import (
     AGENT_SHELL_PROMPT_ENV,
     ShellProcess,
 )
@@ -35,7 +35,7 @@ def test_shell_process_standalone():
 
 def test_shell_process_timeout():
     """Test standalone timeout when auto-background is disabled."""
-    with patch("src.tools.shell.process.C") as mock_c:
+    with patch("agentloom.tools.shell.process.C") as mock_c:
         mock_c.get_nested = MagicMock(side_effect=lambda *args, **kwargs: {
             ("shell_settings", "background_tasks", "enabled"): False,
             ("shell_settings", "background_tasks",

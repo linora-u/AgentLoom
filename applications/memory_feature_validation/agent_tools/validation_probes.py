@@ -6,7 +6,7 @@ import json
 import os
 from pathlib import Path
 
-from src.lib.smolagents.tools import trusted_memory_evidence
+from agentloom.adapters.smolagents.tools import trusted_memory_evidence
 
 _MEMORY_CASE_ENV = "AGENTLOOM_MEMORY_CASE_ID"
 _MEMORY_PHASE_ENV = "AGENTLOOM_MEMORY_CASE_PHASE"

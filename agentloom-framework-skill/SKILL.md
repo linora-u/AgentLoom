@@ -78,15 +78,15 @@ description: "当用户需要理解、开发、扩展或验证 AgentLoom 框架�
 调用格式：
 
 ```bash
-.venv/bin/python -I -m src.tui_bridge.domain_cli \
+.venv/bin/python -I -m agentloom.tui_bridge.domain_cli \
   --project "$PWD" application.detail '{"application_id":"<app>"}'
 
 # Application 很大时继续读取下一页；不要读取 OpenCode managed tool-output 全文
-.venv/bin/python -I -m src.tui_bridge.domain_cli \
+.venv/bin/python -I -m agentloom.tui_bridge.domain_cli \
   --project "$PWD" application.detail \
   '{"application_id":"<app>","offset":10,"limit":10}'
 
-.venv/bin/python -I -m src.tui_bridge.domain_cli \
+.venv/bin/python -I -m agentloom.tui_bridge.domain_cli \
   --project "$PWD" application.validate '{"application_id":"<app>"}'
 ```
 
@@ -118,9 +118,9 @@ print(scan_app_structure('applications/<app_name>'))
 "
 
 # Studio/Codex 共用的 Effective Config 与领域校验
-.venv/bin/python -I -m src.tui_bridge.domain_cli \
+.venv/bin/python -I -m agentloom.tui_bridge.domain_cli \
   --project "$PWD" application.detail '{"application_id":"<app_name>"}'
-.venv/bin/python -I -m src.tui_bridge.domain_cli \
+.venv/bin/python -I -m agentloom.tui_bridge.domain_cli \
   --project "$PWD" application.validate '{"application_id":"<app_name>"}'
 
 # Python 编译校验

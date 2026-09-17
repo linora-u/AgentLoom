@@ -229,8 +229,8 @@ def test_exact_json_transfer_rejects_scalar_value_or_type_substitution(replaceme
 
 
 def test_native_and_codeact_definitions_have_four_real_typed_workers():
-    from src.lib.smolagents.agent.runtime_validation import validate_runtime_agent_config
-    from src.lib.smolagents.agent.yaml_agent_factory import YamlAgentFactory
+    from agentloom.application.readiness import validate_runtime_agent_config
+    from agentloom.runtime.factory import YamlAgentFactory
 
     for mode, expected in (("native", "tool_call"), ("codeact", "code_act")):
         source = APP_ROOT / "workflows" / f"{mode}.yaml"

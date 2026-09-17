@@ -62,12 +62,12 @@ def _run_code(resume_task_id: str | None = None) -> str:
     resume_arg = f", resume_task_id={resume_task_id!r}" if resume_task_id else ""
     return dedent(
         f"""
-        from src.lib.config import C
+        from agentloom.configuration import C
         C.raw.setdefault("runtime", {{}})["root_dir"] = {str(RUNTIME_ROOT)!r}
         C.raw.setdefault("checkpoint", {{}})["cleanup_on_success"] = False
         C.raw.setdefault("lsp_servers", {{}})["enabled"] = False
         C.raw["skills"] = {{"paths": []}}
-        from src.runner import execute_app
+        from agentloom.application.runner import execute_app
         result = execute_app({YAML_PATH!r}{resume_arg}, file_logging=True)
         print("RESULT_PREFIX=" + result.output[:200].replace("\\n", " "))
         """
@@ -215,9 +215,9 @@ def _worker_ckpt(task_dir: Path, call_index: int = 0) -> dict:
 def _seed_resume_probes(task_dir: Path) -> tuple[str, Path]:
     """Add old ContextRef and file-history state before the real resume."""
 
-    from src.lib.checkpoint import CheckpointManager
-    from src.lib.checkpoint.file_history import FileHistoryManager
-    from src.lib.context_engine.engine import ContextEngine
+    from agentloom.runtime.checkpoint import CheckpointManager
+    from agentloom.runtime.checkpoint.file_history import FileHistoryManager
+    from agentloom.runtime.context_engine.engine import ContextEngine
 
     manager = CheckpointManager("resume-probe", checkpoint_dir=task_dir)
     context_engine = ContextEngine(
@@ -252,9 +252,9 @@ def _seed_resume_probes(task_dir: Path) -> tuple[str, Path]:
 
 
 def _verify_resume_probes(task_dir: Path, ref: str, probe_path: Path) -> None:
-    from src.lib.checkpoint import CheckpointManager
-    from src.lib.checkpoint.file_history import FileHistoryManager
-    from src.lib.context_engine.store import ContextStore
+    from agentloom.runtime.checkpoint import CheckpointManager
+    from agentloom.runtime.checkpoint.file_history import FileHistoryManager
+    from agentloom.runtime.context_engine.store import ContextStore
 
     manager = CheckpointManager("resume-probe", checkpoint_dir=task_dir)
     store = ContextStore(
@@ -442,7 +442,7 @@ def _wait_for_worker_interrupt_point(proc: subprocess.Popen, timeout: float = 24
 
 def prepare(scenario: str) -> dict:
     """Retain an interrupted baseline for a later candidate-version resume."""
-    from src.lib.config import C
+    from agentloom.configuration import C
     log_dir = SESSION_ROOT / "logs"
     started_at = datetime.now(timezone.utc).isoformat()
     proc = _start_run(log_dir / "initial.log")
@@ -473,7 +473,7 @@ def prepare(scenario: str) -> dict:
         "old_run_ids": sorted(old_run_ids), "before_counts": before,
         "before_worker_step": before_worker.get("step_count") if before_worker else None,
         "interrupt_returncode": returncode,
-        "framework_tree": subprocess.check_output(["git", "rev-parse", "HEAD:src"], cwd=ROOT, text=True).strip(),
+        "framework_tree": subprocess.check_output(["git", "rev-parse", "HEAD:agentloom"], cwd=ROOT, text=True).strip(),
         "workflow": YAML_PATH,
         "baseline_revision": subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=ROOT, text=True).strip(),
         "prepared_at": datetime.now(timezone.utc).isoformat(),

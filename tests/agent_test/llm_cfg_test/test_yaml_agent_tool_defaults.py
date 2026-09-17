@@ -5,9 +5,9 @@ from pathlib import Path
 import pytest
 import yaml
 
-import src.lib.smolagents.agent.yaml_agent_factory as yaml_agent_factory
-from src.lib.logging import initialize_global_logger_once, get_global_logger, set_global_logger
-from src.lib.smolagents.agent.yaml_agent_factory import (
+import agentloom.runtime.factory as yaml_agent_factory
+from agentloom.runtime.logging import initialize_global_logger_once, get_global_logger, set_global_logger
+from agentloom.runtime.factory import (
     YamlAgentFactory,
     YamlConfiguredAgent,
     YamlConfiguredSupervisorAgent,

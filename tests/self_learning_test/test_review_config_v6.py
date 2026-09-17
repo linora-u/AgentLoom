@@ -38,7 +38,7 @@ def _root_review_config() -> dict:
 
 
 def test_review_config_exposes_application_and_project_policies() -> None:
-    from src.extensions.self_learning.paths import review_config
+    from agentloom.self_learning.paths import review_config
 
     config = {
         "self_learning": {
@@ -79,7 +79,7 @@ def test_review_config_exposes_application_and_project_policies() -> None:
 
 
 def test_review_config_rejects_unknown_trigger_mode() -> None:
-    from src.lib.config import validate_system_snapshot
+    from agentloom.configuration import validate_system_snapshot
 
     with pytest.raises(ValueError, match="trigger.mode"):
         validate_system_snapshot(
@@ -100,7 +100,7 @@ def test_review_config_rejects_unknown_trigger_mode() -> None:
 
 
 def test_legacy_memory_review_keys_fail_with_migration_guidance() -> None:
-    from src.lib.config import validate_system_snapshot
+    from agentloom.configuration import validate_system_snapshot
 
     with pytest.raises(
         ValueError,
@@ -120,7 +120,7 @@ def test_legacy_memory_review_keys_fail_with_migration_guidance() -> None:
 
 
 def test_application_config_cannot_override_project_review_policy(tmp_path) -> None:
-    import src.lib.config.config as config_module
+    import agentloom.configuration.config as config_module
 
     agent_root = tmp_path / "agent"
     config_dir = agent_root / "config"
@@ -163,7 +163,7 @@ def test_application_config_cannot_override_project_review_policy(tmp_path) -> N
     ],
 )
 def test_application_review_overlay_allows_only_application_policy(key, value) -> None:
-    from src.lib.config.config import extract_workflow_overlay
+    from agentloom.configuration.config import extract_workflow_overlay
 
     with pytest.raises(
         ValueError,
@@ -176,7 +176,7 @@ def test_application_review_overlay_allows_only_application_policy(key, value) -
 
 
 def test_enabled_review_rejects_unconfigured_model(tmp_path) -> None:
-    import src.lib.config.config as config_module
+    import agentloom.configuration.config as config_module
 
     config_dir = tmp_path / "agent" / "config"
     invalid = _root_review_config()
@@ -192,7 +192,7 @@ def test_enabled_review_rejects_unconfigured_model(tmp_path) -> None:
 
 
 def test_project_system_yaml_declares_safe_v6_review_defaults() -> None:
-    from src.lib.config import validate_system_snapshot
+    from agentloom.configuration import validate_system_snapshot
 
     raw = yaml.safe_load(Path("config/system.yaml").read_text(encoding="utf-8"))
     validate_system_snapshot(raw, "config/system.yaml")

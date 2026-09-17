@@ -2,11 +2,11 @@ from __future__ import annotations
 
 from smolagents.models import ChatMessage, MessageRole
 
-import src.lib.smolagents.memory.context_compression as compression_module
-from src.lib.context_engine import ContextEngine, ContextEngineConfig
-from src.lib.context_engine.config import ContextSafetyConfig
-from src.lib.context_engine.runtime import clear_current_context_engine, set_current_context_engine
-from src.lib.smolagents.memory.context_compression import (
+import agentloom.runtime.memory.context_compression as compression_module
+from agentloom.runtime.context_engine import ContextEngine, ContextEngineConfig
+from agentloom.runtime.context_engine.config import ContextSafetyConfig
+from agentloom.runtime.context_engine.runtime import clear_current_context_engine, set_current_context_engine
+from agentloom.runtime.memory.context_compression import (
     ConversationHistoryManager,
     InternalChatMessage,
     _extract_content_text,

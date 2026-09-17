@@ -4,7 +4,7 @@
 确保两个配置域之间不存在交叉泄露。
 """
 
-from src.lib.config.config import (
+from agentloom.configuration.config import (
     _LLM_ONLY_TOP_LEVEL_KEYS,
     _WORKFLOW_OVERLAY_KEYS,
     _filter_llm_only_top_level_keys,

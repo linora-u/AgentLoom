@@ -17,7 +17,7 @@ import sys
 
 import pytest
 
-from src.tools.shell.process import ShellProcess
+from agentloom.tools.shell.process import ShellProcess
 
 
 @pytest.fixture

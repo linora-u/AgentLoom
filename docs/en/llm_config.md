@@ -511,7 +511,7 @@ The `model` field value must include a **Provider prefix** in the format `{provi
 
 ## 8. Default Value Constants Reference Table
 
-The following constants are defined in `src/lib/config/defaults.py` and serve as the ultimate fallback values for all model parameters:
+The following constants are defined in `agentloom/configuration/defaults.py` and serve as the ultimate fallback values for all model parameters:
 
 | Constant Name | Value | Corresponding Parameter |
 |--------|-----|---------|
@@ -574,7 +574,7 @@ class LLMConfig(BaseModel):
 **Runtime access**:
 
 ```python
-from src.lib.config.config import C
+from agentloom.configuration.config import C
 
 # Get the LLMConfig object
 llm = C.llm

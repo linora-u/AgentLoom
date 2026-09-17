@@ -1,10 +1,10 @@
 import pytest
-from src.lib.smolagents.agent.yaml_agent_factory import YamlConfiguredAgent
-from src.lib.config.config import _ACTIVE_CONFIG, _load_merged_config
+from agentloom.runtime.factory import YamlConfiguredAgent
+from agentloom.configuration.config import _ACTIVE_CONFIG, _load_merged_config
 
 @pytest.fixture
 def code_agent_override_config(tmp_path, monkeypatch):
-    from src.lib.config import config as config_module
+    from agentloom.configuration import config as config_module
     
     agent_root = tmp_path / "AgentLoom"
     app_root = agent_root / "applications" / "test_app"
@@ -54,7 +54,7 @@ workflow: |
         config_module._ACTIVE_CONFIG = previous
 
 def test_code_agent_and_tools_inherits_from_app_override(code_agent_override_config):
-    from src.lib.logging import initialize_global_logger_once
+    from agentloom.runtime.logging import initialize_global_logger_once
     initialize_global_logger_once("test_app")
     
     agent_cfg = {

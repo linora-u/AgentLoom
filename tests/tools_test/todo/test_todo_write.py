@@ -11,8 +11,8 @@ import pytest
 
 @pytest.fixture
 def todo_runtime():
-    from src.lib.todo import TodoStateProvider, bind_todo_state_provider
-    from src.trace import bind_explicit_execution_context, capture_explicit_execution_context
+    from agentloom.runtime.todo import TodoStateProvider, bind_todo_state_provider
+    from agentloom.runtime.trace import bind_explicit_execution_context, capture_explicit_execution_context
 
     provider = TodoStateProvider()
     execution = replace(
@@ -25,7 +25,7 @@ def todo_runtime():
 
 
 def _write(todos: Any) -> dict:
-    from src.tools.todo import todo_write
+    from agentloom.tools.todo import todo_write
 
     return json.loads(todo_write.forward(todos=todos))
 
@@ -157,6 +157,6 @@ def test_agent_scopes_do_not_share_memory_state(todo_runtime) -> None:
 
 
 def test_tool_schema_accepts_structured_array() -> None:
-    from src.tools.todo import todo_write
+    from agentloom.tools.todo import todo_write
 
     assert todo_write.inputs["todos"]["type"] == "array"
