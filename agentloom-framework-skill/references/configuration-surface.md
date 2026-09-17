@@ -36,6 +36,8 @@ LLM 配置不参与这个链条。`model`、`llm`、`langfuse` 写进 `system.ya
 
 `runtime` 与 `logging` 是 global-only：Application 级 `config/system.yaml` 和 Agent YAML 一旦包含任一顶层字段就会校验失败；必须删除并改到项目根 `config/system.yaml`。这样错误位置的配置不会被静默忽略。`checkpoint` 仍可由 Application 级 system overlay 调整，但不在 Agent YAML 白名单中。
 
+`tools_mapping` 已移除；Supervisor 与 Worker 的共享预检和实际构建都拒绝此字段。Skill 不授予工具，应通过 Agent 的 `tools` / `toolsets` 配置能力。
+
 需要隔离子进程时只允许使用 `AGENTLOOM_RUNTIME_ROOT` 覆盖整套 canonical runtime home；禁止恢复 self-learning 专用 root 或让日志/checkpoint/session 分根。
 
 ## Agent YAML 可配置字段
