@@ -19,6 +19,9 @@ was copied into the worktree; no credentials are included in this report.
 Raw baseline logs, JUnit XML, installed wheel and environment are retained in
 `/Users/bytedance/code/data_clear/agentloom-architecture-notes/`, named
 `baseline-*`. These results are a baseline, not final candidate acceptance.
+The two existing skips are Docker real-LLM executor coverage (Docker CLI is not
+installed on this host) and a Windows-only wexpect encoding test. No new skip or
+xfail was introduced.
 
 ## Observed gaps
 
