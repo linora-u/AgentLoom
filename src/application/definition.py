@@ -16,16 +16,16 @@ from typing import Any
 import yaml
 from pydantic import ValidationError
 
-from src.lib.config.config import (
+from src.configuration.config import (
     EffectiveAgentConfigSnapshot,
     UnifiedConfig,
     build_effective_agent_config_snapshot,
     load_project_config,
 )
-from src.lib.config.llm_config import LLMConfig
-from src.lib.config.yaml_loader import load_unique_yaml
-from src.lib.smolagents.agent.agent_validation import AgentConfigNormalizer
-from src.lib.smolagents.agent.runtime_validation import (
+from src.configuration.llm_config import LLMConfig
+from src.configuration.yaml_loader import load_unique_yaml
+from src.application.validation import AgentConfigNormalizer
+from src.application.readiness import (
     validate_runtime_agent_config,
     validate_runtime_worker_config,
 )
@@ -237,8 +237,8 @@ def _walk_definitions(
 
 
 def validate_effective_definition(snapshot: EffectiveAgentConfigSnapshot, root: Path, source: str) -> None:
-    from src.lib.smolagents.agent.agent_validation import build_normalized_execution_config
-    from src.lib.smolagents.hooks.config import HookConfigLayer, HookPlanCompiler
+    from src.application.validation import build_normalized_execution_config
+    from src.runtime.hooks.config import HookConfigLayer, HookPlanCompiler
 
     # Compilation builds an immutable plan only; handlers are never invoked.
     HookPlanCompiler().compile(
@@ -250,7 +250,7 @@ def validate_effective_definition(snapshot: EffectiveAgentConfigSnapshot, root: 
     normalized = build_normalized_execution_config(snapshot.values, source_name=source, agent_root=root)
     if normalized.prompt_template_path and not Path(normalized.prompt_template_path).is_file():
         raise ValueError(f"Prompt template does not exist: {normalized.prompt_template_path}")
-    from src.mcp.config import parse_mcp_yaml_value
+    from src.adapters.mcp.config import parse_mcp_yaml_value
 
     snapshot.values["_mcp_settings_snapshot"] = parse_mcp_yaml_value(
         snapshot.values.get("mcp_servers"),
@@ -328,7 +328,7 @@ def prepare_application_definition(
 
 def skill_sources(snapshot: EffectiveAgentConfigSnapshot):
     """Resolve Skill roots with the same layer and path rules for every adapter."""
-    from src.lib.smolagents.skills.catalog import SkillSource
+    from src.runtime.skills.catalog import SkillSource
 
     sources = []
     for layer in snapshot.layers:

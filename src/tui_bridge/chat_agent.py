@@ -29,7 +29,7 @@ from openai import (
     RateLimitError,
 )
 
-from src.lib.config.llm_config import LLMConfig
+from src.configuration.llm_config import LLMConfig
 
 _MAX_PROVIDER_TURNS = 6
 _MAX_PROVIDER_ATTEMPTS = 2

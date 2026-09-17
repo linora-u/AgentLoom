@@ -12,7 +12,7 @@ import re
 from pathlib import Path
 from typing import Union
 
-from src.lib.logging import get_logger
+from src.runtime.logging import get_logger
 
 logger = get_logger(__name__)
 
@@ -190,7 +190,7 @@ def validate_file_access(
         ValueError: If the path is outside allowed directories or
             fails security checks.
     """
-    from src.lib.permissions.path_validation import (
+    from src.runtime.permissions.path_validation import (
         is_vulnerable_unc_path,
         has_suspicious_windows_pattern,
     )
@@ -211,14 +211,14 @@ def validate_file_access(
     # When tools are called standalone (unit tests, scripts), skip boundary
     # checks since there is no meaningful workspace to enforce.
     try:
-        from src.trace.task_context import get_current_agent_config
+        from src.runtime.trace.task_context import get_current_agent_config
         agent_cfg = get_current_agent_config()
         if agent_cfg is None:
             return  # No agent context, skip boundary check
     except Exception:
         return  # Tracing not available, skip boundary check
 
-    from src.lib.permissions import validate_path
+    from src.runtime.permissions import validate_path
     result = validate_path(file_path, operation=operation, tool_name=tool_name)
     if not result.allowed:
         raise ValueError(result.reason)

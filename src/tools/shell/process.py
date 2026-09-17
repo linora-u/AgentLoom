@@ -35,9 +35,9 @@ import threading
 from dataclasses import dataclass
 from typing import Optional
 
-from src.lib.config import C
-from src.lib.logging import get_logger
-from src.lib.runtime import get_current_run_context
+from src.configuration import C
+from src.runtime.logging import get_logger
+from src.runtime import get_current_run_context
 from src.tools.shell.ansi_stripper import strip_ansi
 from src.tools.shell.pipe_redirect import rearrange_pipe_command
 from src.tools.shell.shell_session import ShellSession
@@ -554,7 +554,7 @@ class ShellProcess:
         promoted = False  # True if promoted to background
 
         try:
-            from src.lib.runtime import get_current_run_context
+            from src.runtime import get_current_run_context
 
             runtime_context = get_current_run_context()
             if runtime_context is not None:
