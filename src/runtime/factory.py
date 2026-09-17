@@ -3,7 +3,6 @@ import hashlib
 import inspect
 import json
 import re
-import threading
 from functools import wraps
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional, Union
@@ -1099,16 +1098,6 @@ class YamlAgentFactory:
 
         # Return agent tool list directly; tools are already decorated with @tool
         return agent._get_tools()
-
-    # Legacy cache/reset surface retained for callers; creations are now fresh.
-    _tool_cache: Dict[tuple, Callable] = {}
-    _tool_cache_lock = threading.Lock()
-
-    @classmethod
-    def clear_tool_cache(cls) -> None:
-        """Clear the agent-as-tool cache. Primarily for testing."""
-        with cls._tool_cache_lock:
-            cls._tool_cache.clear()
 
     @staticmethod
     def create_agent_as_tool(config_path: Union[str, Path, dict],
