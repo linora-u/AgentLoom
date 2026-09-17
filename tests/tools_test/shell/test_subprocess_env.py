@@ -8,7 +8,7 @@ Covers:
 
 import os
 
-from src.tools.shell.subprocess_env import _INJECT, _SCRUB_EXACT, build_subprocess_env
+from agentloom.tools.shell.subprocess_env import _INJECT, _SCRUB_EXACT, build_subprocess_env
 
 # ---------------------------------------------------------------------------
 # Sensitive variable filtering — 6 cases

@@ -7,7 +7,7 @@ from pathlib import Path
 
 import pytest
 
-from src.extensions.self_learning.persistence.ledger import (
+from agentloom.self_learning.persistence.ledger import (
     SelfLearningLedger,
     memory_content_hash,
 )
@@ -436,7 +436,7 @@ def test_v4_upgrade_preserves_history_but_never_auto_activates_proposals(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    from src.extensions.self_learning import reviewer
+    from agentloom.self_learning import reviewer
 
     def fail_if_model_is_resolved(*_args: object, **_kwargs: object) -> None:
         raise AssertionError("schema migration must not resolve a review model")

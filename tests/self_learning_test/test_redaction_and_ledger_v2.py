@@ -12,18 +12,18 @@ from time import perf_counter, sleep
 
 import pytest
 
-from src.extensions.self_learning.event_schema import CanonicalSessionEvent, now_iso
-from src.extensions.self_learning.persistence.database import SelfLearningDatabase
-from src.extensions.self_learning.persistence.ledger import SelfLearningLedger
-from src.extensions.self_learning.persistence.memory_store import MemoryStore
-from src.extensions.self_learning.persistence.review_engine import ReviewEngine
-from src.extensions.self_learning.redaction import (
+from agentloom.self_learning.event_schema import CanonicalSessionEvent, now_iso
+from agentloom.self_learning.persistence.database import SelfLearningDatabase
+from agentloom.self_learning.persistence.ledger import SelfLearningLedger
+from agentloom.self_learning.persistence.memory_store import MemoryStore
+from agentloom.self_learning.persistence.review_engine import ReviewEngine
+from agentloom.self_learning.redaction import (
     BLOCKED_TEXT,
     redact_mapping,
     redact_text,
     scan_injection_patterns,
 )
-from src.extensions.self_learning.review_types import CandidateInput
+from agentloom.self_learning.review_types import CandidateInput
 
 
 @contextmanager
@@ -745,7 +745,7 @@ def test_ledger_and_memory_store_share_the_same_writer_gate(
     ledger = SelfLearningLedger(db_path)
     memory_transaction_started = threading.Event()
     memory_errors: list[BaseException] = []
-    import src.extensions.self_learning.persistence.memory_store as memory_store_module
+    import agentloom.self_learning.persistence.memory_store as memory_store_module
 
     original_transaction = memory_store_module.serialized_write_transaction
 
@@ -877,7 +877,7 @@ def test_all_ledger_writers_share_the_memory_store_gate(
     ledger = SelfLearningLedger(db_path)
     memory_transaction_started = threading.Event()
     memory_errors: list[BaseException] = []
-    import src.extensions.self_learning.persistence.memory_store as memory_store_module
+    import agentloom.self_learning.persistence.memory_store as memory_store_module
 
     original_transaction = memory_store_module.serialized_write_transaction
 

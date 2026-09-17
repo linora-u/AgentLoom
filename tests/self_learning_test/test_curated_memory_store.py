@@ -7,7 +7,7 @@ from pathlib import Path
 import pytest
 from click.testing import CliRunner
 
-from src.extensions.self_learning.persistence.memory_store import MemoryStore
+from agentloom.self_learning.persistence.memory_store import MemoryStore
 
 
 def _config(*, project_budget: int = 8000) -> dict:
@@ -25,8 +25,8 @@ def _config(*, project_budget: int = 8000) -> dict:
 
 
 def test_model_facing_memory_schema_has_one_canonical_write_contract() -> None:
-    from src.lib.smolagents.tools.tools import ensure_tool_wrapped
-    from src.tools.self_learning.memory_tool import memory
+    from agentloom.adapters.smolagents.tools.tools import ensure_tool_wrapped
+    from agentloom.tools.self_learning.memory_tool import memory
 
     model_tool = ensure_tool_wrapped([memory])[0]
     description = " ".join(model_tool.description.split())
@@ -43,7 +43,7 @@ def test_model_facing_memory_schema_has_one_canonical_write_contract() -> None:
 def test_model_facing_memory_rejects_project_proposals(monkeypatch: pytest.MonkeyPatch) -> None:
     import json
 
-    from src.tools.self_learning import memory_tool
+    from agentloom.tools.self_learning import memory_tool
 
     monkeypatch.setattr(memory_tool, "current_session_run_id", lambda: "root-project-proposal")
     monkeypatch.setattr(memory_tool, "_current_agent_config", lambda: _config())
@@ -187,7 +187,7 @@ def test_memory_target_special_characters_still_match_their_literal_text(
 
 
 def test_memory_cli_exposes_only_the_simplified_public_commands() -> None:
-    from src.__main__ import memory
+    from agentloom.__main__ import memory
 
     result = CliRunner().invoke(memory, ["--help"])
     assert result.exit_code == 0
@@ -321,12 +321,12 @@ def test_model_memory_never_uses_another_threads_global_application_fallback(
 ) -> None:
     import json
 
-    from src.tools.self_learning.memory_tool import memory
-    from src.trace import bind_root_run, clear_current_agent_config, set_current_agent_config
+    from agentloom.tools.self_learning.memory_tool import memory
+    from agentloom.runtime.trace import bind_root_run, clear_current_agent_config, set_current_agent_config
 
     runtime_root = tmp_path / ".agentloom"
     monkeypatch.setattr(
-        "src.extensions.self_learning.paths._runtime_config_section",
+        "agentloom.self_learning.paths._runtime_config_section",
         lambda: {"root_dir": str(runtime_root)},
     )
     set_current_agent_config(

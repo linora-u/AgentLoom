@@ -7,14 +7,14 @@ from uuid import UUID
 import pytest
 import yaml
 
-import src.lib.config.config as config_module
-from src.lib.config.config_validation import RootSettings, validate_system_snapshot
-from src.lib.config.model_request_header_profiles import (
+import agentloom.configuration.config as config_module
+from agentloom.configuration.config_validation import RootSettings, validate_system_snapshot
+from agentloom.configuration.model_request_header_profiles import (
     MODEL_REQUEST_HEADER_PROFILES,
 )
-from src.lib.smolagents.models import model_manager as model_manager_module
-from src.lib.smolagents.models import model_types
-from src.lib.smolagents.models.request_headers import (
+from agentloom.adapters.smolagents.models import model_manager as model_manager_module
+from agentloom.adapters.smolagents.models import model_types
+from agentloom.adapters.smolagents.models.request_headers import (
     AGENTLOOM_SESSION_UUID_TOKEN,
     AGENTLOOM_SESSION_TOKEN_TOKEN,
     GENERIC_MODEL_USER_AGENT,

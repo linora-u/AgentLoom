@@ -58,7 +58,6 @@ from agentloom.runtime.hooks import (
     builtin_hook_handlers,
 )
 from agentloom.runtime.invocation import current_worker_memory, require_successful_runtime_result
-from agentloom.runtime.loom_mixin import LoomAgentMixin  # noqa: F401 - historical base_agent export
 from agentloom.runtime.logging import (
     get_global_logger,
     get_logger,

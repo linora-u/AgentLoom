@@ -34,7 +34,7 @@ workflow: |
   ## Step 5: Verify cache_control injection logic
   Use shell_tool to run the following Python command:
   .venv/bin/python -c "
-  from src.lib.smolagents.models.litellm_model import LiteLLMModelV2
+  from agentloom.adapters.smolagents.models.litellm_model import LiteLLMModelV2
   import json
 
   model = LiteLLMModelV2(model_id='anthropic/test-model', api_key='test', context_cache=True)

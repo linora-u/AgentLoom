@@ -3,9 +3,9 @@ import sys
 from unittest.mock import patch
 import subprocess
 
-from src.tools.shell.shell_tool import shell_tool
-import src.tools.shell.validator as validator_module
-import src.tools.shell.process as process_module
+from agentloom.tools.shell.shell_tool import shell_tool
+import agentloom.tools.shell.validator as validator_module
+import agentloom.tools.shell.process as process_module
 
 
 @pytest.mark.skipif(sys.platform != 'win32', reason="Windows specific test reliant on wexpect")

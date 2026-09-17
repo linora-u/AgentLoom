@@ -4,8 +4,8 @@ from pathlib import Path
 
 import pytest
 
-from src.tui_bridge.bridge import BridgeError, TuiBridge
-from src.tui_bridge.builder import DraftConflictError
+from agentloom.tui_bridge.bridge import BridgeError, TuiBridge
+from agentloom.tui_bridge.builder import DraftConflictError
 
 
 class _FakeBuilder:

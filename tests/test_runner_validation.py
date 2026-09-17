@@ -2,7 +2,7 @@ from pathlib import Path
 
 import pytest
 
-from src.runner import validate_required_yaml_fields
+from agentloom.application.runner import validate_required_yaml_fields
 
 
 def _base_config() -> dict:

@@ -2,8 +2,8 @@ import pytest
 import os
 import sys
 import shutil
-from src.tools.shell.shell_tool import shell_tool
-from src.tools.shell.process import ShellProcessRegistry
+from agentloom.tools.shell.shell_tool import shell_tool
+from agentloom.tools.shell.process import ShellProcessRegistry
 
 @pytest.fixture(autouse=True)
 def clean_registry():
@@ -37,8 +37,8 @@ def test_zsh_profile_loading(clean_registry, monkeypatch):
     
     try:
         # Import task_context to set agent_id
-        from src.trace.task_context import task_context, sub_task_context, set_current_agent_id
-        from src.trace.task_context import set_current_agent_config
+        from agentloom.runtime.trace.task_context import task_context, sub_task_context, set_current_agent_id
+        from agentloom.runtime.trace.task_context import set_current_agent_config
         with task_context("test_task"):
             with sub_task_context("test_agent_isolation"):
                 set_current_agent_id("zsh_profile_loading_agent")
@@ -75,7 +75,7 @@ def test_shell_env_fallback_without_execution_env_config(clean_registry, monkeyp
     if not has_zsh:
         pytest.skip("zsh is not installed on this system")
 
-    from src.trace.task_context import (
+    from agentloom.runtime.trace.task_context import (
         set_current_agent_config,
         set_current_agent_id,
         sub_task_context,
@@ -100,8 +100,8 @@ def test_bash_norc_fallback(clean_registry):
         pytest.skip("bash is not installed on this system")
 
     try:
-        from src.trace.task_context import task_context, sub_task_context, set_current_agent_id
-        from src.trace.task_context import set_current_agent_config
+        from agentloom.runtime.trace.task_context import task_context, sub_task_context, set_current_agent_id
+        from agentloom.runtime.trace.task_context import set_current_agent_config
         with task_context("test_task_2"):
             with sub_task_context("test_agent_isolation_2"):
                 set_current_agent_id("bash_norc_fallback_agent")
@@ -121,8 +121,8 @@ def test_cross_agent_env_ephemeral(monkeypatch):
     even within the SAME agent across separate tool calls.
     This is by design (stateless subprocess, no env delta tracking).
     """
-    from src.trace.task_context import task_context, sub_task_context, set_current_agent_id
-    import src.tools.shell.validator as validator_module
+    from agentloom.runtime.trace.task_context import task_context, sub_task_context, set_current_agent_id
+    import agentloom.tools.shell.validator as validator_module
 
     monkeypatch.setattr(validator_module, 'load_allowed_commands', lambda: ['export', 'echo'])
 
@@ -169,11 +169,11 @@ def test_bash_load_profile_isolation(clean_registry, monkeypatch):
         monkeypatch.setenv("SSH_CLIENT", "127.0.0.1 10000 22")
         monkeypatch.setenv("SSH_CONNECTION", "127.0.0.1 10000 127.0.0.1 22")
         # Clear shell detection cache so it picks up the new $SHELL.
-        from src.tools.shell.process import find_suitable_shell
+        from agentloom.tools.shell.process import find_suitable_shell
         find_suitable_shell.cache_clear()
 
-        from src.trace.task_context import task_context, sub_task_context, set_current_agent_id
-        from src.trace.task_context import set_current_agent_config
+        from agentloom.runtime.trace.task_context import task_context, sub_task_context, set_current_agent_id
+        from agentloom.runtime.trace.task_context import set_current_agent_config
         with task_context("test_bash_profile"):
             # When load_profile is False, the bashrc should NOT be sourced.
             with sub_task_context("bash_profile_false"):
@@ -204,8 +204,8 @@ def test_zsh_load_profile_isolation(clean_registry, monkeypatch):
     if shutil.which("zsh") is None:
         pytest.skip("Zsh is required for this test.")
 
-    from src.trace.task_context import task_context, sub_task_context, set_current_agent_id
-    from src.trace.task_context import set_current_agent_config
+    from agentloom.runtime.trace.task_context import task_context, sub_task_context, set_current_agent_id
+    from agentloom.runtime.trace.task_context import set_current_agent_config
 
     with task_context("test_zsh_profile"):
         # load_profile=False — no snapshot, no login shell.
@@ -231,8 +231,8 @@ def test_cross_agent_cwd_isolation(bypass_shell_security, tmp_path):
     Test that changing the current working directory in Agent A does not
     affect the current working directory in Agent B.
     """
-    from src.lib.runtime import RuntimeHome, bind_run_context
-    from src.trace.task_context import task_context, sub_task_context, set_current_agent_id
+    from agentloom.runtime import RuntimeHome, bind_run_context
+    from agentloom.runtime.trace.task_context import task_context, sub_task_context, set_current_agent_id
 
     run_context = RuntimeHome(tmp_path / ".agentloom").context(
         application_id="cwd-isolation-test",

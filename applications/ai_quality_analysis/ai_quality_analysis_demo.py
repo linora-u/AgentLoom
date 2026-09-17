@@ -19,7 +19,7 @@ import fire
 import shutil
 
 from pathlib import Path
-from src.workflows.workflow_manager import get_supervisor_agent_yaml_path
+from agentloom.application.workflows import get_supervisor_agent_yaml_path
 
 def run_ai_quality_analysis(
     project_path: str = ".",
@@ -34,7 +34,7 @@ def run_ai_quality_analysis(
         file_logging: Per-run file logging override. ``None`` follows global config.
         resume:       Resume from a checkpoint task ID.
     """
-    from src.runner import run_app
+    from agentloom.application.runner import run_app
 
     # Resolve and validate project path.
     resolved_project = Path(project_path).resolve()

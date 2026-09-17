@@ -24,6 +24,9 @@ _SECRET_KEYS = {
     "extra_headers",
     "env",
     "base_url",
+    # Connection URLs can embed userinfo, signed queries or path credentials.
+    # Their public projection is never used as the execution configuration.
+    "url",
 }
 
 

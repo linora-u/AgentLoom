@@ -2,9 +2,9 @@ from pathlib import Path
 
 import pytest
 
-import src.lib.smolagents.agent.yaml_agent_factory as yaml_factory_module
-from src.lib.smolagents.agent.yaml_agent_factory import YamlConfiguredAgent, YamlConfiguredSupervisorAgent
-from src.lib.smolagents.agent.agent_validation import (
+import agentloom.runtime.factory as yaml_factory_module
+from agentloom.runtime.factory import YamlConfiguredAgent, YamlConfiguredSupervisorAgent
+from agentloom.application.validation import (
     AgentConfigNormalizer,
     NormalizedAgentConfig,
     normalize_execution_env,
@@ -148,7 +148,7 @@ def test_validate_config_returns_normalized_object(monkeypatch, tmp_path: Path):
     prompt_file = tmp_path / "prompts" / "worker_prompt.yaml"
     prompt_file.parent.mkdir(parents=True, exist_ok=True)
     prompt_file.write_text("system_prompt: worker", encoding="utf-8")
-    monkeypatch.setattr(yaml_factory_module, "AGENT_ROOT", tmp_path)
+    monkeypatch.setattr(yaml_factory_module, "C", _config_at(tmp_path))
 
     worker = object.__new__(YamlConfiguredAgent)
     worker._config = {
@@ -185,7 +185,7 @@ def test_ensure_normalized_autobuilds(monkeypatch, tmp_path: Path):
     prompt_file = tmp_path / "prompts" / "worker_prompt.yaml"
     prompt_file.parent.mkdir(parents=True, exist_ok=True)
     prompt_file.write_text("system_prompt: worker", encoding="utf-8")
-    monkeypatch.setattr(yaml_factory_module, "AGENT_ROOT", tmp_path)
+    monkeypatch.setattr(yaml_factory_module, "C", _config_at(tmp_path))
 
     worker = object.__new__(YamlConfiguredAgent)
     worker._config = {
@@ -415,10 +415,22 @@ def test_validate_config_accepts_missing_tools_field(maker, config_builder):
 ])
 def test_get_tools_from_config_returns_list_when_tools_missing(config_builder):
     """When ``tools`` key is absent, ``get_tools_from_config`` should return a (list, manager) tuple."""
-    from src.lib.smolagents.agent.yaml_agent_factory import YamlAgentFactory
+    from agentloom.runtime.factory import YamlAgentFactory
 
     result = YamlAgentFactory.get_tools_from_config(config_builder())
     assert isinstance(result, tuple)
     tools, mcp_mgr = result
     assert isinstance(tools, list)
     assert mcp_mgr is None
+
+
+def _config_at(root):
+    from agentloom.configuration import C
+
+    class ProjectConfig:
+        agent_root = root
+
+        def __getattr__(self, name):
+            return getattr(C, name)
+
+    return ProjectConfig()

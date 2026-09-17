@@ -3,11 +3,11 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-from src.extensions.self_learning.event_schema import CanonicalSessionEvent, now_iso
-from src.extensions.self_learning.persistence.event_importer import (
+from agentloom.self_learning.event_schema import CanonicalSessionEvent, now_iso
+from agentloom.self_learning.persistence.event_importer import (
     SessionEventImporter,
 )
-from src.extensions.self_learning.persistence.ledger import SelfLearningLedger
+from agentloom.self_learning.persistence.ledger import SelfLearningLedger
 
 
 def test_event_importer_replaces_one_run_from_canonical_jsonl(tmp_path: Path) -> None:

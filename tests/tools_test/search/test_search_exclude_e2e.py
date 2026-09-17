@@ -14,15 +14,15 @@ from pathlib import Path
 
 import pytest
 
-from src.tools.search.grep_tool.grep_tool import grep_search, _RG_PATH
-from src.tools.search.glob_tool.glob_tool import glob_search
+from agentloom.tools.search.grep_tool.grep_tool import grep_search, _RG_PATH
+from agentloom.tools.search.glob_tool.glob_tool import glob_search
 
 
 # ---------------------------------------------------------------------------
 # Mock target for tool_access_control config
 # ---------------------------------------------------------------------------
 _RESOLVE_MOCK_TARGET = (
-    "src.lib.permissions.workspace._resolve_tool_access_control_config"
+    "agentloom.runtime.permissions.workspace._resolve_tool_access_control_config"
 )
 
 
@@ -213,7 +213,7 @@ class TestGrepSearchPythonFallbackExclude:
         """When ripgrep is unavailable, Python fallback still excludes."""
         # Force Python fallback by hiding ripgrep
         monkeypatch.setattr(
-            "src.tools.search.grep_tool.grep_tool._RG_PATH", None
+            "agentloom.tools.search.grep_tool.grep_tool._RG_PATH", None
         )
         monkeypatch.setattr(
             _RESOLVE_MOCK_TARGET,
@@ -231,7 +231,7 @@ class TestGrepSearchPythonFallbackExclude:
     def test_python_fallback_no_exclude_shows_all(self, monkeypatch, search_tree):
         """Python fallback without exclude shows all matches."""
         monkeypatch.setattr(
-            "src.tools.search.grep_tool.grep_tool._RG_PATH", None
+            "agentloom.tools.search.grep_tool.grep_tool._RG_PATH", None
         )
         monkeypatch.setattr(
             _RESOLVE_MOCK_TARGET,
@@ -294,7 +294,7 @@ class TestGlobSearchExcludeE2E:
         """Python fallback glob also excludes correctly."""
         # Force Python fallback
         monkeypatch.setattr(
-            "src.tools.search.glob_tool.glob_tool._RG_PATH", None
+            "agentloom.tools.search.glob_tool.glob_tool._RG_PATH", None
         )
         monkeypatch.setattr(
             _RESOLVE_MOCK_TARGET,

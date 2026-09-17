@@ -11,8 +11,8 @@ project_root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(_
 if project_root not in sys.path:
     sys.path.insert(0, project_root)
 
-from src.lib.logging import get_global_logger, resolve_logger
-from src.lib.smolagents.agent.yaml_agent_factory import YamlAgentFactory, YamlConfiguredSupervisorAgent
+from agentloom.runtime.logging import get_global_logger, resolve_logger
+from agentloom.runtime.factory import YamlAgentFactory, YamlConfiguredSupervisorAgent
 
 
 DEFAULT_YAML_PATH = Path(__file__).parent / "workflows" / "test_default_logger_fallback_multi_supervisor.yaml"

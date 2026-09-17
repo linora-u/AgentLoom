@@ -6,9 +6,9 @@ from pathlib import Path
 import pytest
 import yaml
 
-import src.tui_bridge.bridge as bridge_module
-from src.lib.runtime.context import RuntimeRunLease
-from src.tui_bridge.bridge import BridgeError, TuiBridge
+import agentloom.tui_bridge.bridge as bridge_module
+from agentloom.runtime.context import RuntimeRunLease
+from agentloom.tui_bridge.bridge import BridgeError, TuiBridge
 
 SYSTEM_ID = "applications/demo/workflows/demo.yaml"
 

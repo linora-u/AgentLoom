@@ -24,9 +24,9 @@ from smolagents import (
     AgentParsingError,
 )
 
-from src.__main__ import main
-from src.lib.smolagents.models.litellm_retry import ProviderCallBudgetExceeded
-from src.lib.smolagents.models.tool_call_parser import ToolCallParseError
+from agentloom.__main__ import main
+from agentloom.adapters.smolagents.models.litellm_retry import ProviderCallBudgetExceeded
+from agentloom.adapters.smolagents.models.tool_call_parser import ToolCallParseError
 
 
 def _wrapped_generation_failure(provider_error: Exception) -> RuntimeError:
@@ -41,7 +41,7 @@ def _invoke_failure(monkeypatch: pytest.MonkeyPatch, error: BaseException):
     def fail(*_args, **_kwargs):
         raise error
 
-    monkeypatch.setattr("src.runner.execute_app", fail)
+    monkeypatch.setattr("agentloom.application.runner.execute_app", fail)
     return CliRunner().invoke(main, ["run", "unused.yaml"])
 
 
@@ -52,7 +52,7 @@ def test_run_no_file_log_is_a_real_python_override(monkeypatch: pytest.MonkeyPat
         observed.update(kwargs)
         return SimpleNamespace(output="ok")
 
-    monkeypatch.setattr("src.runner.execute_app", succeed)
+    monkeypatch.setattr("agentloom.application.runner.execute_app", succeed)
     result = CliRunner().invoke(main, ["run", "unused.yaml", "--no-file-log"])
 
     assert result.exit_code == 0
@@ -67,7 +67,7 @@ def test_run_uses_configured_file_logging_by_default(monkeypatch: pytest.MonkeyP
         observed.update(kwargs)
         return SimpleNamespace(output="ok")
 
-    monkeypatch.setattr("src.runner.execute_app", succeed)
+    monkeypatch.setattr("agentloom.application.runner.execute_app", succeed)
     result = CliRunner().invoke(main, ["run", "unused.yaml"])
 
     assert result.exit_code == 0

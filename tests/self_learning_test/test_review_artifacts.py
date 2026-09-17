@@ -7,7 +7,7 @@ from pathlib import Path
 
 import pytest
 
-from src.extensions.self_learning.review_artifacts import (
+from agentloom.self_learning.review_artifacts import (
     ReviewArtifactConflictError,
     ReviewArtifactRenderer,
 )

@@ -3,8 +3,8 @@
 import os
 from pathlib import Path
 
-import src.lib.config.config as config_module
-from src.lib.smolagents.hooks.path_validators import (
+import agentloom.configuration.config as config_module
+from agentloom.runtime.hooks.path_validators import (
     DEFAULT_PATH_PARAM_PATTERNS,
     _find_rule_for_tool,
     _normalize_str_list,
@@ -12,7 +12,7 @@ from src.lib.smolagents.hooks.path_validators import (
     enforce_core_tool_guard,
     validate_workspace_path,
 )
-from src.lib.smolagents.hooks.types import HookContext
+from agentloom.runtime.hooks.types import HookContext
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -29,14 +29,14 @@ def _patch_config(monkeypatch, raw: dict, root: Path) -> None:
     # Ensure workspace module reads from the same config (bypass agent context)
     tac = raw.get("tool_access_control", {})
     monkeypatch.setattr(
-        "src.lib.permissions.workspace._resolve_tool_access_control_config",
+        "agentloom.runtime.permissions.workspace._resolve_tool_access_control_config",
         lambda: tac,
     )
 
 
 def _patch_no_agent(monkeypatch) -> None:
     monkeypatch.setattr(
-        "src.lib.smolagents.hooks.path_validators.get_current_agent_config",
+        "agentloom.runtime.hooks.path_validators.get_current_agent_config",
         lambda: None,
     )
 

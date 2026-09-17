@@ -1,5 +1,5 @@
-from src.lib.checkpoint.checkpoint_manager import CheckpointManager
-from src.ui.dashboard import _delete_dashboard_task, _find_task, _task_row_key
+from agentloom.runtime.checkpoint.checkpoint_manager import CheckpointManager
+from agentloom.ui.dashboard import _delete_dashboard_task, _find_task, _task_row_key
 
 
 def test_dashboard_row_key_includes_application_identity() -> None:

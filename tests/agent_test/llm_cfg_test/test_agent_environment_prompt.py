@@ -1,6 +1,6 @@
 from pathlib import Path
 
-import src.lib.smolagents.agent.agent_env as agent_env_module
+import agentloom.runtime.prompts.environment as agent_env_module
 
 
 class _DummyConfig:

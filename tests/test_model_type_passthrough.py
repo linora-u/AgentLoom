@@ -15,7 +15,7 @@ import pytest
 class TestModelTypePassthrough:
     def test_model_manager_sets_agent_loom_model_type(self):
         """get_smolagents_model should set _agent_loom_model_type on the model."""
-        from src.lib.smolagents.models.model_manager import ModelManager
+        from agentloom.adapters.smolagents.models.model_manager import ModelManager
 
         manager = ModelManager.__new__(ModelManager)
         manager._model_cache = {}
@@ -37,14 +37,14 @@ class TestModelTypePassthrough:
 
         mock_logger = MagicMock()
         with patch.object(manager, "get_model_config", return_value=mock_config):
-            from src.lib.smolagents.models.model_types import ModelType
+            from agentloom.adapters.smolagents.models.model_types import ModelType
             model = manager.get_smolagents_model(ModelType.POWERFUL, model_cache=False, logger=mock_logger)
             assert hasattr(model, "_agent_loom_model_type")
             assert model._agent_loom_model_type == "powerful"
 
     def test_litellm_model_passes_model_type_in_kwargs(self):
         """_prepare_completion_kwargs should include _agent_loom_model_type."""
-        from src.lib.smolagents.models.litellm_model import LiteLLMModelV2
+        from agentloom.adapters.smolagents.models.litellm_model import LiteLLMModelV2
 
         model = LiteLLMModelV2.__new__(LiteLLMModelV2)
         model.context_cache = False
@@ -58,7 +58,7 @@ class TestModelTypePassthrough:
 
     def test_missing_model_type_no_error(self):
         """If _agent_loom_model_type not set, _prepare_completion_kwargs still works."""
-        from src.lib.smolagents.models.litellm_model import LiteLLMModelV2
+        from agentloom.adapters.smolagents.models.litellm_model import LiteLLMModelV2
 
         model = LiteLLMModelV2.__new__(LiteLLMModelV2)
         model.context_cache = False

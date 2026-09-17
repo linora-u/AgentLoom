@@ -6,7 +6,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from src.extensions.self_learning.review_types import (
+from agentloom.self_learning.review_types import (
     CandidateResult,
     ReviewBatchResult,
 )
@@ -140,7 +140,7 @@ class _ContextReader:
 def test_review_context_reader_is_an_injectable_persistence_boundary(
     tmp_path: Path,
 ) -> None:
-    from src.extensions.self_learning.review_orchestration import ReviewOrchestrator
+    from agentloom.self_learning.review_orchestration import ReviewOrchestrator
 
     reader = _ContextReader()
     orchestrator = ReviewOrchestrator(
@@ -157,7 +157,7 @@ def test_review_context_reader_is_an_injectable_persistence_boundary(
 def test_review_model_only_returns_candidates_and_cannot_choose_scope_policy_or_mutation(
     tmp_path: Path,
 ) -> None:
-    from src.extensions.self_learning.review_orchestration import ReviewOrchestrator
+    from agentloom.self_learning.review_orchestration import ReviewOrchestrator
 
     engine = _Engine(tmp_path / "self_learning.db")
     model = _StructuredModel()
@@ -201,7 +201,7 @@ def test_review_model_only_returns_candidates_and_cannot_choose_scope_policy_or_
 def test_large_context_uses_valid_json_and_binds_only_complete_prompted_runs(
     tmp_path: Path,
 ) -> None:
-    from src.extensions.self_learning.review_orchestration import ReviewOrchestrator
+    from agentloom.self_learning.review_orchestration import ReviewOrchestrator
 
     engine = _Engine(tmp_path / "self_learning.db")
     prompted: list[dict] = []
@@ -282,7 +282,7 @@ def test_large_context_uses_valid_json_and_binds_only_complete_prompted_runs(
 def test_single_oversized_run_is_retryable_without_model_or_engine_call(
     tmp_path: Path,
 ) -> None:
-    from src.extensions.self_learning.review_orchestration import ReviewOrchestrator
+    from agentloom.self_learning.review_orchestration import ReviewOrchestrator
 
     engine = _Engine(tmp_path / "self_learning.db")
     model = _StructuredModel()
@@ -313,7 +313,7 @@ def test_single_oversized_run_is_retryable_without_model_or_engine_call(
 def test_ambiguous_same_root_entry_is_neither_prompted_nor_consumed(
     tmp_path: Path,
 ) -> None:
-    from src.extensions.self_learning.review_orchestration import ReviewOrchestrator
+    from agentloom.self_learning.review_orchestration import ReviewOrchestrator
 
     engine = _Engine(tmp_path / "self_learning.db")
     prompted: list[dict] = []
@@ -389,7 +389,7 @@ def test_ambiguous_same_root_entry_is_neither_prompted_nor_consumed(
 def test_only_ambiguous_same_root_entries_fail_before_model_or_consumption(
     tmp_path: Path,
 ) -> None:
-    from src.extensions.self_learning.review_orchestration import ReviewOrchestrator
+    from agentloom.self_learning.review_orchestration import ReviewOrchestrator
 
     engine = _Engine(tmp_path / "self_learning.db")
     model = _StructuredModel()
@@ -423,7 +423,7 @@ def test_only_ambiguous_same_root_entries_fail_before_model_or_consumption(
 def test_project_collection_never_contains_raw_application_transcripts(
     tmp_path: Path,
 ) -> None:
-    from src.extensions.self_learning.review_orchestration import ReviewOrchestrator
+    from agentloom.self_learning.review_orchestration import ReviewOrchestrator
 
     engine = _Engine(tmp_path / "self_learning.db")
     orchestrator = ReviewOrchestrator(
@@ -440,7 +440,7 @@ def test_project_collection_never_contains_raw_application_transcripts(
 
 
 def test_review_trigger_modes_are_synchronous_and_threshold_driven() -> None:
-    from src.extensions.self_learning.review_orchestration import ReviewOrchestrator
+    from agentloom.self_learning.review_orchestration import ReviewOrchestrator
 
     application_context = {
         "source_runs": [{"root_run_id": f"root-{index}", "application_id": "app-a"} for index in range(5)],
@@ -486,9 +486,9 @@ def test_review_trigger_modes_are_synchronous_and_threshold_driven() -> None:
 def test_project_collection_does_not_repropose_an_existing_project_candidate(
     tmp_path: Path,
 ) -> None:
-    from src.extensions.self_learning.persistence.memory_store import MemoryStore
-    from src.extensions.self_learning.persistence.review_engine import ReviewEngine
-    from src.extensions.self_learning.review_orchestration import ReviewOrchestrator
+    from agentloom.self_learning.persistence.memory_store import MemoryStore
+    from agentloom.self_learning.persistence.review_engine import ReviewEngine
+    from agentloom.self_learning.review_orchestration import ReviewOrchestrator
 
     db_path = tmp_path / "self_learning.db"
     store = MemoryStore(db_path, agent_config=_config())
@@ -526,11 +526,11 @@ def test_project_collection_does_not_repropose_an_existing_project_candidate(
 def test_project_collection_consumes_direct_project_evidence_once(
     tmp_path: Path,
 ) -> None:
-    from src.extensions.self_learning.event_schema import CanonicalSessionEvent
-    from src.extensions.self_learning.persistence.ledger import SelfLearningLedger
-    from src.extensions.self_learning.persistence.review_engine import ReviewEngine
-    from src.extensions.self_learning.review_orchestration import ReviewOrchestrator
-    from src.lib.trusted_memory_evidence import TRUSTED_MEMORY_EVIDENCE_KIND
+    from agentloom.self_learning.event_schema import CanonicalSessionEvent
+    from agentloom.self_learning.persistence.ledger import SelfLearningLedger
+    from agentloom.self_learning.persistence.review_engine import ReviewEngine
+    from agentloom.self_learning.review_orchestration import ReviewOrchestrator
+    from agentloom.runtime.trusted_memory_evidence import TRUSTED_MEMORY_EVIDENCE_KIND
 
     db_path = tmp_path / "self_learning.db"
     ledger = SelfLearningLedger(db_path)
@@ -593,13 +593,13 @@ def test_artifact_failure_rolls_back_activation_and_keeps_source_run_retryable(
 
     import pytest
 
-    from src.extensions.self_learning.event_schema import CanonicalSessionEvent
-    from src.extensions.self_learning.persistence.evidence_gate import SQLiteEvidenceGate
-    from src.extensions.self_learning.persistence.ledger import SelfLearningLedger
-    from src.extensions.self_learning.persistence.review_engine import ReviewEngine
-    from src.extensions.self_learning.review_artifacts import ReviewArtifactRenderer
-    from src.extensions.self_learning.review_orchestration import ReviewOrchestrator
-    from src.lib.trusted_memory_evidence import TRUSTED_MEMORY_EVIDENCE_KIND
+    from agentloom.self_learning.event_schema import CanonicalSessionEvent
+    from agentloom.self_learning.persistence.evidence_gate import SQLiteEvidenceGate
+    from agentloom.self_learning.persistence.ledger import SelfLearningLedger
+    from agentloom.self_learning.persistence.review_engine import ReviewEngine
+    from agentloom.self_learning.review_artifacts import ReviewArtifactRenderer
+    from agentloom.self_learning.review_orchestration import ReviewOrchestrator
+    from agentloom.runtime.trusted_memory_evidence import TRUSTED_MEMORY_EVIDENCE_KIND
 
     db_path = tmp_path / "self_learning.db"
     ledger = SelfLearningLedger(db_path)

@@ -8,8 +8,8 @@ from types import SimpleNamespace
 
 import pytest
 
-import src.tui_bridge.builder as builder_module
-from src.tui_bridge.builder import BuilderService, DraftConflictError
+import agentloom.tui_bridge.builder as builder_module
+from agentloom.tui_bridge.builder import BuilderService, DraftConflictError
 
 VALID_AGENT_YAML = """\
 name: report_agent

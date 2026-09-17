@@ -100,7 +100,7 @@ def assert_workers(runtime: Path, required: set[str], count: int | None = None) 
 
 
 def metadata(workflow: Path) -> dict:
-    from src.lib.config import C
+    from agentloom.configuration import C
     import yaml
     cfg = yaml.safe_load(workflow.read_text())
     model_type = cfg.get("model_type", C.default_model_type)
@@ -114,8 +114,8 @@ def metadata(workflow: Path) -> dict:
 
 
 def execute(workflow: Path, workspace: Path, *, task: str | None = None, resume: str | None = None, attempt="run") -> dict:
-    from src.runner import execute_app
-    from src.application_run import ApplicationRunBudgetLimited
+    from agentloom.application.runner import execute_app
+    from agentloom.application.run import ApplicationRunBudgetLimited
     lifecycle = []
     meta = metadata(workflow)
     meta["started_at"] = datetime.now(timezone.utc).isoformat()
@@ -309,7 +309,7 @@ def validate_goal(workspace: Path, receipt: dict, *, bounded: bool) -> dict:
 
 
 def child(case: str, workspace: Path) -> dict:
-    from src.lib.config import C
+    from agentloom.configuration import C
     C.raw.setdefault("runtime", {})["root_dir"] = str(workspace / "runtime")
     C.raw.setdefault("checkpoint", {})["cleanup_on_success"] = False
     C.raw.setdefault("lsp_servers", {})["enabled"] = False

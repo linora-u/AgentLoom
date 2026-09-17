@@ -5,7 +5,7 @@ import time
 
 import pytest
 
-from src.tools.shell.stall_watchdog import PROMPT_PATTERNS, StallWatchdog
+from agentloom.tools.shell.stall_watchdog import PROMPT_PATTERNS, StallWatchdog
 
 
 class TestPromptPatterns:
