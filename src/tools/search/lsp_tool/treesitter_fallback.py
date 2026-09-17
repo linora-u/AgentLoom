@@ -6,7 +6,7 @@ Provides definition search, symbol extraction, and reference search
 using tree-sitter AST queries + ripgrep.
 
 Supports 46+ languages via .scm tag-query files shipped in
-``agentloom/tools/queries/``.
+``src/tools/queries/``.
 """
 
 import os

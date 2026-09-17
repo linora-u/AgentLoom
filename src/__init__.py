@@ -2,6 +2,9 @@
 AI Agents package.
 """
 
+if __name__ != "agentloom":
+    raise ImportError("Import AgentLoom as 'agentloom'; install the project first.")
+
 from agentloom.encoding.terminal import configure_terminal_encoding
 
 configure_terminal_encoding()

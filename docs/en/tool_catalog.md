@@ -9,10 +9,10 @@ self-learning, Todo, or ContextEngine implementations.
 
 | Module | Owns | Must not own |
 |---|---|---|
-| `agentloom/tools/catalog.py` | `ToolSpec`, toolset membership, descriptions, safety and output metadata, implementation references | Imports of concrete tool packages or runtime configuration |
-| `agentloom/tools/loader.py` | Resolving one registered implementation reference to a callable | Tool metadata or toolset membership |
-| `agentloom/tools/tool_meta.py` | Effective metadata after global and Agent overrides | Catalog exports or implementation loading |
-| `agentloom/tools/<group>/` | Concrete tool implementations | Built-in catalog membership |
+| `src/tools/catalog.py` | `ToolSpec`, toolset membership, descriptions, safety and output metadata, implementation references | Imports of concrete tool packages or runtime configuration |
+| `src/tools/loader.py` | Resolving one registered implementation reference to a callable | Tool metadata or toolset membership |
+| `src/tools/tool_meta.py` | Effective metadata after global and Agent overrides | Catalog exports or implementation loading |
+| `src/tools/<group>/` | Concrete tool implementations | Built-in catalog membership |
 
 `agentloom.tools` intentionally exports nothing. Importing that package is not a
 registration mechanism and does not load tools. Runtime code resolves a
@@ -39,7 +39,7 @@ effective metadata ────────────┘
 ```
 
 The catalog is the single source of truth. A function that exists under
-`agentloom/tools/` is not a built-in tool until it has a `ToolSpec` in the catalog.
+`src/tools/` is not a built-in tool until it has a `ToolSpec` in the catalog.
 Dynamic YAML tools and generated Worker tools do not belong in this catalog.
 Goal tools are injected by Goal Mode and are also outside the default catalog.
 
@@ -69,7 +69,7 @@ the reporting and code-navigation sets are opt-in.
 
 1. Put the implementation in the narrowest existing tool group, or create a
    group with a clear responsibility.
-2. Add one `ToolSpec` to `agentloom/tools/catalog.py`, including an explicit
+2. Add one `ToolSpec` to `src/tools/catalog.py`, including an explicit
    implementation reference and complete safety/output metadata.
 3. Do not add a root-package export and do not import the implementation from
    the catalog.

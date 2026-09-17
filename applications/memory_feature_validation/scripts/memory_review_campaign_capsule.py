@@ -52,7 +52,7 @@ _TRUSTED_IMPORT_SHADOW_PATHS = (
     "applications.py",
     "applications/__init__.py",
     "applications/memory_feature_validation.py",
-    "agentloom.py",
+    "src.py",
     "agentloom.py",
 )
 _ALLOWED_PARENT_ENV = {
@@ -275,13 +275,20 @@ def _clean_python_env(root: Path, *, token: str, uv: Path) -> dict[str, str]:
     return env
 
 
-def _capsule_runtime_package(root: Path) -> str:
-    """Resolve only supported entrypoints from the verified source snapshot."""
+def _capsule_runtime_layout(root: Path) -> tuple[str, str]:
+    """Resolve the three supported layouts from the verified source snapshot."""
     try:
         with (root / "pyproject.toml").open("rb") as handle:
-            configured = tomllib.load(handle)["project"]["scripts"]["loom"]
-        return {"src.__main__:main": "src", "agentloom.__main__:main": "agentloom"}[configured]
-    except (KeyError, OSError, TypeError, tomllib.TOMLDecodeError) as exc:
+            project = tomllib.load(handle)
+        configured = project["project"]["scripts"]["loom"]
+        package_dirs = project.get("tool", {}).get("setuptools", {}).get("package-dir", {})
+        if package_dirs == {}:
+            package = {"src.__main__:main": "src", "agentloom.__main__:main": "agentloom"}[configured]
+            return package, package
+        if configured == "agentloom.__main__:main" and package_dirs == {"agentloom": "src"}:
+            return "agentloom", "src"
+        raise ValueError("unsupported package mapping")
+    except (AttributeError, KeyError, OSError, TypeError, ValueError) as exc:
         raise RuntimeError("capsule loom entrypoint contract was invalid") from exc
 
 
@@ -335,12 +342,43 @@ def _write_trusted_loom_launcher(root: Path, python: Path) -> Path:
         created_identity = (initial.st_dev, initial.st_ino)
         if not stat.S_ISREG(initial.st_mode) or initial.st_nlink != 1:
             raise RuntimeError("capsule loom launcher was not a new regular file")
-        package = _capsule_runtime_package(root)
+        package, source_directory = _capsule_runtime_layout(root)
         # Keep the historical launcher byte-for-byte compatible; canonical
         # snapshots validate their actual implementation origin before import.
         payload = payload.replace(b'"src"', json.dumps(package).encode()).replace(
             b"from src.__main__ import main", f"from {package}.__main__ import main".encode()
         )
+        if source_directory != package:
+            # The locked environment intentionally contains dependencies only.
+            # Reproduce the one supported setuptools source mapping explicitly,
+            # registering only the canonical name and rejecting installed shadows.
+            direct_lookup = b'_SRC_SPEC = find_spec("agentloom")\n'
+            mapped_lookup = (
+                '_SOURCE = _CAPSULE_ROOT / "src"\n'
+                'if _SOURCE.resolve() != _SOURCE or (_SOURCE / "__init__.py").is_symlink():\n'
+                '    raise RuntimeError("capsule source directory was invalid")\n'
+                '_SRC_SPEC = find_spec("agentloom")\n'
+                'if _SRC_SPEC is not None and (\n'
+                '    _SRC_SPEC.origin is None\n'
+                '    or Path(_SRC_SPEC.origin).resolve() != _SOURCE / "__init__.py"\n'
+                '):\n'
+                '    raise RuntimeError("capsule src import origin was invalid")\n'
+                'from importlib.util import module_from_spec, spec_from_file_location\n'
+                '_SRC_SPEC = spec_from_file_location(\n'
+                '    "agentloom", _SOURCE / "__init__.py",\n'
+                '    submodule_search_locations=[str(_SOURCE)],\n'
+                ')\n'
+            ).encode()
+            payload = payload.replace(direct_lookup, mapped_lookup).replace(
+                b'(_CAPSULE_ROOT / "agentloom" / "__init__.py").resolve()',
+                b'(_CAPSULE_ROOT / "src" / "__init__.py").resolve()',
+            ).replace(
+                b"from agentloom.__main__ import main",
+                b'_PACKAGE = module_from_spec(_SRC_SPEC)\n'
+                b'sys.modules["agentloom"] = _PACKAGE\n'
+                b'_SRC_SPEC.loader.exec_module(_PACKAGE)\n'
+                b'from agentloom.__main__ import main',
+            )
         with os.fdopen(descriptor, "wb", closefd=True) as handle:
             descriptor = -1
             handle.write(payload)
@@ -1364,8 +1402,17 @@ def build_capsule_descriptor(
         except (OSError, RuntimeError, subprocess.SubprocessError):
             lock_sync_ok = False
 
-    runtime_package = _capsule_runtime_package(repo_root)
+    runtime_package, source_directory = _capsule_runtime_layout(repo_root)
     src_spec = importlib.util.find_spec(runtime_package)
+    if src_spec is None and source_directory != runtime_package:
+        # This runner observes the dependency-only environment without importing
+        # runtime implementation. The trusted launcher enforces the same mapping.
+        source = repo_root / source_directory
+        source_init = source / "__init__.py"
+        if source.resolve() == source and source_init.is_file() and not source_init.is_symlink():
+            src_spec = importlib.util.spec_from_file_location(
+                runtime_package, source_init, submodule_search_locations=[str(source)],
+            )
     src_origin = Path(src_spec.origin) if src_spec and src_spec.origin else Path()
     shebang_target = Path()
     if loom.is_file():
@@ -1476,6 +1523,7 @@ def build_capsule_descriptor(
         "loom_shebang_matches_python": shebang_matches_python,
         "src_origin_is_capsule": _resolved_inside(src_origin, repo_root),
         "runtime_package": runtime_package,
+        "source_directory": source_directory,
         "loom_entrypoint": f"{runtime_package}.__main__:main",
         "runner_origin_is_capsule": _resolved_inside(runner_file, repo_root),
         "src_origin_relative": _relative_origin(src_origin, repo_root),
@@ -1569,12 +1617,25 @@ def capsule_descriptor_issues(descriptor: dict[str, Any]) -> list[str]:
     # Old descriptors predate explicit package identity and refer strictly to
     # src. New descriptors bind both the selected entrypoint and exact origin.
     runtime_package = descriptor.get("runtime_package", "src")
+    source_directory = descriptor.get("source_directory", runtime_package)
     if not isinstance(runtime_package, str) or runtime_package not in {"src", "agentloom"} or (
         ("runtime_package" in descriptor or "loom_entrypoint" in descriptor)
         and descriptor.get("loom_entrypoint") != f"{runtime_package}.__main__:main"
     ):
         issues.append("capsule runtime entrypoint was invalid")
-    if descriptor.get("src_origin_relative") != f"{runtime_package}/__init__.py":
+    if (
+        not isinstance(runtime_package, str)
+        or not isinstance(source_directory, str)
+        or (runtime_package, source_directory) not in {
+            ("src", "src"), ("agentloom", "agentloom"), ("agentloom", "src"),
+        }
+        or ("source_directory" in descriptor and (
+            descriptor.get("runtime_package") != runtime_package
+            or descriptor.get("loom_entrypoint") != f"{runtime_package}.__main__:main"
+        ))
+    ):
+        issues.append("capsule runtime source layout was invalid")
+    if descriptor.get("src_origin_relative") != f"{source_directory}/__init__.py":
         issues.append("capsule src import origin was invalid")
     if descriptor.get("runner_origin_relative") != expected_runner:
         issues.append("capsule runner origin was invalid")
