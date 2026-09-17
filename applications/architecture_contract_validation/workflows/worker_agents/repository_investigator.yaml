@@ -1,0 +1,35 @@
+name: repository_investigator
+description: Architecture contract repository investigator
+model_type: powerful
+tool_call_type: tool_call
+max_steps: 24
+todo:
+  mode: 'off'
+toolsets: []
+context_engine:
+  min_chars: 80000
+  preview_max_chars: 80000
+workflow: Inspect the workspace provided in query (JSON with workspace and case_nonce)
+  using inspect_workspace and read_workspace_file. Read CONTRACT.md, all three implementation
+  modules, configuration fixtures, and existing tests. Trace the cross-module calls
+  and identify concrete contract violations from actual source. Do not edit. Return
+  one JSON object containing workspace, case_nonce, source_files (paths), findings
+  (specific observed defects), and relevant contract cases. Preserve the input nonce
+  exactly. Your output feeds the planner; claims must cite source paths.
+agent_function_schema:
+  description: repository investigator
+  inputs:
+    query:
+      description: JSON result from the previous stage, with absolute workspace and
+        unique case_nonce.
+      required: true
+  output:
+    description: Structured JSON stage evidence, preserving workspace and case_nonce.
+tools:
+- name: inspect_workspace
+  module: applications.architecture_contract_validation.agent_tools.workspace_tools
+  function: inspect_workspace
+- name: read_workspace_file
+  module: applications.architecture_contract_validation.agent_tools.workspace_tools
+  function: read_workspace_file
+worker_agents: []
