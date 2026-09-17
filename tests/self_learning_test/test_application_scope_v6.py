@@ -2,10 +2,10 @@ from __future__ import annotations
 
 
 def test_self_learning_uses_the_runtime_canonical_application_id() -> None:
-    from src.extensions.self_learning.application_scope import (
+    from agentloom.self_learning.application_scope import (
         safe_application_id as self_learning_application_id,
     )
-    from src.lib.runtime import safe_application_id as runtime_application_id
+    from agentloom.runtime import safe_application_id as runtime_application_id
 
     raw = "commerce/中文应用"
 
@@ -13,8 +13,8 @@ def test_self_learning_uses_the_runtime_canonical_application_id() -> None:
 
 
 def test_bound_runtime_application_id_wins_over_config_fallback(tmp_path) -> None:
-    from src.extensions.self_learning.application_scope import resolve_application_scope
-    from src.lib.runtime import RuntimeContext, bind_run_context
+    from agentloom.self_learning.application_scope import resolve_application_scope
+    from agentloom.runtime import RuntimeContext, bind_run_context
 
     runtime = RuntimeContext(
         root_dir=tmp_path / ".agentloom",
@@ -30,7 +30,7 @@ def test_bound_runtime_application_id_wins_over_config_fallback(tmp_path) -> Non
 
 
 def test_legacy_application_id_uses_one_authoritative_workflow_path() -> None:
-    from src.extensions.self_learning.application_scope import (
+    from agentloom.self_learning.application_scope import (
         resolve_legacy_application_id,
     )
 
@@ -45,7 +45,7 @@ def test_legacy_application_id_uses_one_authoritative_workflow_path() -> None:
 
 
 def test_legacy_application_id_quarantines_conflicting_paths() -> None:
-    from src.extensions.self_learning.application_scope import (
+    from agentloom.self_learning.application_scope import (
         resolve_legacy_application_id,
     )
 
@@ -63,7 +63,7 @@ def test_legacy_application_id_quarantines_conflicting_paths() -> None:
 
 
 def test_already_canonical_legacy_application_id_maps_losslessly() -> None:
-    from src.extensions.self_learning.application_scope import (
+    from agentloom.self_learning.application_scope import (
         resolve_legacy_application_id,
     )
 

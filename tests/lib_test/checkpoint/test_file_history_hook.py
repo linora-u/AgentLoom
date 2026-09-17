@@ -1,5 +1,5 @@
 """
-Tests for src.lib.checkpoint.file_history_hook.
+Tests for agentloom.runtime.checkpoint.file_history_hook.
 
 Covers:
 - Hook intercepts file-modifying tools (edit_file, write_file, etc.)
@@ -14,12 +14,12 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from src.lib.checkpoint.file_history_hook import (
+from agentloom.runtime.checkpoint.file_history_hook import (
     FileHistoryHook,
     record_active_file_history,
 )
-from src.lib.smolagents.hooks.types import HookContext
-from src.tools.catalog import list_tool_specs
+from agentloom.runtime.hooks.types import HookContext
+from agentloom.tools.catalog import list_tool_specs
 
 
 @pytest.fixture
@@ -106,7 +106,7 @@ class TestFileHistoryHook:
     def test_destructive_tool_catalog_failure_propagates_to_gate_policy(self, hook):
         with (
             patch(
-                "src.tools.catalog.list_tool_specs",
+                "agentloom.tools.catalog.list_tool_specs",
                 side_effect=RuntimeError("catalog unavailable"),
             ),
             pytest.raises(RuntimeError, match="catalog unavailable"),
@@ -173,7 +173,7 @@ class TestFileHistoryHook:
         coordinator._file_history = mock_fh
 
         with patch(
-            "src.lib.checkpoint.coordinator.CheckpointCoordinator.current",
+            "agentloom.runtime.checkpoint.coordinator.CheckpointCoordinator.current",
             return_value=coordinator,
         ):
             record_active_file_history(

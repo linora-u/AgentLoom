@@ -22,7 +22,7 @@ sys.path.insert(0, str(REPO_ROOT))
 from applications.repo_map.agent_tools import pipeline_agent_tools as pat
 from applications.repo_map.agent_tools.markdown_tool import generate_markdown_map
 from applications.repo_map.agent_tools.scan_rank_tool import scan_and_rank
-from src.lib.smolagents.skills.parser import parse_skill_file
+from agentloom.runtime.skills.parser import parse_skill_file
 
 
 FIXTURE_PROJECT = Path(__file__).parent / "fixtures" / "sample_project"
@@ -249,7 +249,7 @@ def test_analysis_loop_prepare_validate_integration(tmp_path, monkeypatch):
         return f"# 架构分析: {kwargs['dir_path']}\n\nmock"
     _mock_tool.__name__ = "mock_dir_analysis"
     monkeypatch.setattr(
-        "src.lib.smolagents.agent.yaml_agent_factory.YamlAgentFactory.create_agent_as_tool",
+        "agentloom.runtime.factory.YamlAgentFactory.create_agent_as_tool",
         lambda *args, **kwargs: _mock_tool,
     )
 

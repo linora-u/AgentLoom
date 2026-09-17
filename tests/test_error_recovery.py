@@ -1,5 +1,5 @@
 """
-Tests for src.lib.smolagents.error_recovery module.
+Tests for agentloom.runtime.error_recovery module.
 
 Covers error classification, tool info extraction, progressive recovery
 message generation, error message consolidation, and exception safety.
@@ -7,7 +7,7 @@ message generation, error message consolidation, and exception safety.
 
 import pytest
 
-from src.lib.smolagents.error_recovery import (
+from agentloom.runtime.error_recovery import (
     ErrorCategory,
     NOW_LETS_RETRY_PREFIX,
     PARTIAL_TOOL_NAME_PATTERNS,

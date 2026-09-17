@@ -13,11 +13,11 @@ from threading import Event, Thread
 import pytest
 from click.testing import CliRunner
 
-from src.__main__ import main
-from src.schedules.runner import ScheduleRunner
-from src.schedules.schedule import once_schedule
-from src.schedules.service import ScheduleService
-from src.schedules.store import ScheduleStore
+from agentloom.__main__ import main
+from agentloom.schedules.runner import ScheduleRunner
+from agentloom.schedules.schedule import once_schedule
+from agentloom.schedules.service import ScheduleService
+from agentloom.schedules.store import ScheduleStore
 
 NOW = datetime(2026, 7, 18, 8, 0, tzinfo=UTC)
 
@@ -41,7 +41,7 @@ def test_runner_uses_canonical_agentloom_command_by_default(tmp_path: Path) -> N
         sys.executable,
         "-I",
         "-m",
-        "src",
+        "agentloom",
         "run",
         "agent.yaml",
         "--output-format",
@@ -89,8 +89,9 @@ def test_runner_persists_goal_budget_limit_as_resumable_terminal_status(
     assert store.get_job(job["id"])["last_status"] == "budget_limited"
 
 
-def test_default_runner_isolated_mode_rejects_project_local_src_shadowing(tmp_path: Path) -> None:
-    source_package = tmp_path / "src"
+@pytest.mark.parametrize("package", ["src", "agentloom"])
+def test_default_runner_isolated_mode_rejects_project_local_src_shadowing(tmp_path: Path, package: str) -> None:
+    source_package = tmp_path / package
     source_package.mkdir()
     (source_package / "__init__.py").write_text("", encoding="utf-8")
     marker = tmp_path / "shadowed"
@@ -497,7 +498,7 @@ def test_interrupt_kills_agent_descendants(tmp_path: Path) -> None:
 
 def test_python_module_entrypoint_reaches_registered_schedules_cli() -> None:
     result = subprocess.run(
-        [sys.executable, "-m", "src", "schedules", "--help"],
+        [sys.executable, "-m", "agentloom", "schedules", "--help"],
         cwd=Path(__file__).resolve().parents[2],
         capture_output=True,
         text=True,

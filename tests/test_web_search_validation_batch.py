@@ -250,7 +250,7 @@ def test_batch_uses_cli_jsonl_and_canonical_log_without_sidecar(
     assert observed["command"][:4] == [
         batch.sys.executable,
         "-m",
-        "src.__main__",
+        "agentloom.__main__",
         "run",
     ]
     assert "--output-format" in observed["command"]

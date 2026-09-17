@@ -1,4 +1,4 @@
-"""Tests for ``src.lib.heartbeat.status`` — crash detection functions."""
+"""Tests for ``agentloom.runtime.heartbeat.status`` — crash detection functions."""
 
 from __future__ import annotations
 
@@ -7,7 +7,7 @@ import time
 
 import pytest
 
-from src.lib.heartbeat.status import (
+from agentloom.runtime.heartbeat.status import (
     HEARTBEAT_STALE_THRESHOLD,
     detect_crashed_status,
     detect_worker_call_crashed,

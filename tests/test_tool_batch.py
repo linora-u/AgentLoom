@@ -13,7 +13,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from src.lib.concurrency.models import TaskResult
+from agentloom.runtime.concurrency.models import TaskResult
 
 
 # ─── Helpers ────────────────────────────────────────────────────── #
@@ -61,7 +61,7 @@ def _create_tool(config):
             self.description = config.get("description", "")
 
         def _ensure_normalized(self):
-            from src.lib.smolagents.agent.agent_validation import AgentConfigNormalizer
+            from agentloom.application.validation import AgentConfigNormalizer
             return AgentConfigNormalizer.build_worker_normalized_config(
                 self._config, agent_root=".", source_name="test",
             )
@@ -73,7 +73,7 @@ def _create_tool(config):
             return "mock_result"
 
         def agent_as_tool(self):
-            from src.lib.smolagents.agent.yaml_agent_factory import YamlConfiguredAgent
+            from agentloom.runtime.factory import YamlConfiguredAgent
             return YamlConfiguredAgent.__dict__['agent_as_tool'](self)
 
     agent = SimpleAgent(config, model=MagicMock())
@@ -91,7 +91,7 @@ class TestToolBatch:
         """YAML concurrency: auto → executor gets max_workers=None (auto)."""
         tool = _create_tool(_make_config(concurrency="auto"))
 
-        with patch("src.lib.concurrency.ParallelAgentExecutor") as MockExecutor:
+        with patch("agentloom.runtime.concurrency.ParallelAgentExecutor") as MockExecutor:
             mock_instance = MockExecutor.return_value
             mock_instance.execute_batch.return_value = [
                 TaskResult(task_id="q1", status="completed", result="r1"),
@@ -111,7 +111,7 @@ class TestToolBatch:
         """tool.batch(tasks, concurrency=3) should override YAML concurrency: 6."""
         tool = _create_tool(_make_config(concurrency=6))
 
-        with patch("src.lib.concurrency.ParallelAgentExecutor") as MockExecutor:
+        with patch("agentloom.runtime.concurrency.ParallelAgentExecutor") as MockExecutor:
             mock_instance = MockExecutor.return_value
             mock_instance.execute_batch.return_value = []
 
@@ -126,7 +126,7 @@ class TestToolBatch:
         """No concurrency in YAML → executor gets max_workers=None (auto)."""
         tool = _create_tool(_make_config())  # no concurrency field
 
-        with patch("src.lib.concurrency.ParallelAgentExecutor") as MockExecutor:
+        with patch("agentloom.runtime.concurrency.ParallelAgentExecutor") as MockExecutor:
             mock_instance = MockExecutor.return_value
             mock_instance.execute_batch.return_value = []
 
@@ -146,7 +146,7 @@ class TestToolBatch:
             TaskResult(task_id="q2", status="failed", error="boom"),
         ]
 
-        with patch("src.lib.concurrency.ParallelAgentExecutor") as MockExecutor:
+        with patch("agentloom.runtime.concurrency.ParallelAgentExecutor") as MockExecutor:
             mock_instance = MockExecutor.return_value
             mock_instance.execute_batch.return_value = expected
 
@@ -164,7 +164,7 @@ class TestToolBatch:
         def on_progress(done, total, result):
             progress_calls.append((done, total, result.task_id))
 
-        with patch("src.lib.concurrency.ParallelAgentExecutor") as MockExecutor:
+        with patch("agentloom.runtime.concurrency.ParallelAgentExecutor") as MockExecutor:
             mock_instance = MockExecutor.return_value
             mock_instance.execute_batch.return_value = []
 
@@ -179,7 +179,7 @@ class TestToolBatch:
         """batch([]) should return empty list."""
         tool = _create_tool(_make_config(concurrency=2))
 
-        with patch("src.lib.concurrency.ParallelAgentExecutor") as MockExecutor:
+        with patch("agentloom.runtime.concurrency.ParallelAgentExecutor") as MockExecutor:
             mock_instance = MockExecutor.return_value
             mock_instance.execute_batch.return_value = []
 

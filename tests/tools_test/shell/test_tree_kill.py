@@ -16,7 +16,7 @@ import time
 
 import pytest
 
-from src.tools.shell.tree_kill import (
+from agentloom.tools.shell.tree_kill import (
     SizeWatchdog,
     _is_alive,
     graceful_kill,

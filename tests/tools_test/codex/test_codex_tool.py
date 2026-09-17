@@ -5,8 +5,8 @@ from pathlib import Path
 
 import pytest
 
-from src.lib.config import C
-from src.tools.codex.codex_tool import CodexExecRunner, CodexExecSettings
+from agentloom.configuration import C
+from agentloom.tools.codex.codex_tool import CodexExecRunner, CodexExecSettings
 
 
 def _install_fake_codex(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> tuple[Path, Path, Path]:

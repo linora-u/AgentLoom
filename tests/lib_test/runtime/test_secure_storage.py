@@ -6,7 +6,7 @@ from pathlib import Path
 
 import pytest
 
-from src.lib.runtime import SecureDirectory
+from agentloom.runtime import SecureDirectory
 
 
 def test_atomic_write_fsyncs_file_and_parent_directory(

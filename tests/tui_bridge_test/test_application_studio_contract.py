@@ -5,8 +5,8 @@ import json
 import subprocess
 import sys
 
-from src.tui_bridge.bridge import TuiBridge
-from src.tui_bridge.application_studio import application_detail
+from agentloom.tui_bridge.bridge import TuiBridge
+from agentloom.tui_bridge.application_studio import application_detail
 
 
 def _write(path: Path, content: str) -> None:
@@ -153,7 +153,7 @@ def test_versioned_domain_cli_returns_json_envelopes_and_safe_errors(tmp_path: P
     command = [
         sys.executable,
         "-m",
-        "src.tui_bridge.domain_cli",
+        "agentloom.tui_bridge.domain_cli",
         "--project",
         str(tmp_path),
     ]
@@ -218,7 +218,7 @@ def test_domain_application_detail_is_paginated_and_bounded_for_large_apps(
     command = [
         sys.executable,
         "-m",
-        "src.tui_bridge.domain_cli",
+        "agentloom.tui_bridge.domain_cli",
         "--project",
         str(tmp_path),
         "application.detail",
@@ -257,7 +257,7 @@ def test_domain_impact_distinguishes_one_application_from_global_changes(tmp_pat
     command = [
         sys.executable,
         "-m",
-        "src.tui_bridge.domain_cli",
+        "agentloom.tui_bridge.domain_cli",
         "--project",
         str(tmp_path),
         "application.impact",

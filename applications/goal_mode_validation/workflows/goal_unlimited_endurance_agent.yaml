@@ -29,7 +29,7 @@ workflow: |
   4. goal_documentation_auditor: audit root docs; cn/en Goal docs; config/checkpoint
      docs; framework-skill contract and validation guidance.
 
-  Each query must name its acceptance criterion and the relevant paths under src/,
+  Each query must name its acceptance criterion and the relevant paths under agentloom/,
   tests/, docs/, agentloom-tui/, and agentloom-framework-skill/. Collect every
   TaskResult. Fail if any status is not completed. Send a JSON representation of
   all results to goal_evidence_synthesizer. Persist its Markdown using

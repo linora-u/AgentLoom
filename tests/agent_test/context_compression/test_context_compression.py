@@ -4,8 +4,8 @@ import pathlib
 
 from smolagents.models import ChatMessage, ChatMessageToolCall, ChatMessageToolCallFunction, MessageRole
 
-import src.lib.smolagents.memory.context_compression as compression_module
-from src.lib.smolagents.memory.context_compression import (
+import agentloom.runtime.memory.context_compression as compression_module
+from agentloom.runtime.memory.context_compression import (
     FILE_DEDUP_PLACEHOLDER,
     OBSERVATION_MASKING_PLACEHOLDER,
     ConversationHistoryManager,

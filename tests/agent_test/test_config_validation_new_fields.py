@@ -2,11 +2,11 @@
 
 import pytest
 
-from src.lib.config.config import (
+from agentloom.configuration.config import (
     _reject_application_global_only_keys,
     extract_workflow_overlay,
 )
-from src.lib.config.config_validation import (
+from agentloom.configuration.config_validation import (
     LoggingSettings,
     RootSettings,
     RuntimeSettings,

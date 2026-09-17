@@ -197,7 +197,7 @@ OpenTUI / SolidJS
        └─ AgentLoom Effective Config / catalog / Run evidence
 
 agentloom_domain
-  └─ python -I -m src.tui_bridge.domain_cli
+  └─ python -I -m agentloom.tui_bridge.domain_cli
        ├─ application.detail / validate / impact
        └─ run.start / stop / resume / restart / detail
 ```

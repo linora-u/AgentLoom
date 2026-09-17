@@ -1,7 +1,7 @@
 import pytest
 import os
 import shutil
-from src.trace.task_context import (
+from agentloom.runtime.trace.task_context import (
     task_context,
     set_current_agent_config,
     get_current_agent_config,
@@ -9,8 +9,8 @@ from src.trace.task_context import (
     set_current_agent_name,
     set_current_agent_id
 )
-from src.tools.shell.shell_tool import shell_tool
-from src.tools.shell.process import ShellProcessRegistry
+from agentloom.tools.shell.shell_tool import shell_tool
+from agentloom.tools.shell.process import ShellProcessRegistry
 
 @pytest.fixture
 def clean_registry():
@@ -119,7 +119,7 @@ def test_context_var_concurrent_isolation():
         assert get_current_agent_config().get("agent") == "A"
         clear_current_agent_config()
 
-from src.lib.smolagents.tools.tools import tool
+from agentloom.adapters.smolagents.tools.tools import tool
 
 def test_tool_decorator_context_binding():
     """
@@ -243,12 +243,12 @@ def test_concurrent_shell_execution_isolation(clean_registry, monkeypatch, tmp_p
     if not (has_zsh and has_bash):
         pytest.skip("Both zsh and bash are required for this concurrency test")
 
-    import src.tools.shell.validator as validator_module
+    import agentloom.tools.shell.validator as validator_module
     # Allow the commands used in this test (CWD isolation verification).
     monkeypatch.setattr(validator_module, 'load_allowed_commands', lambda: ['mkdir', 'cd', 'pwd', 'echo'])
 
     results = {}
-    from src.lib.runtime import RuntimeHome, bind_run_context
+    from agentloom.runtime import RuntimeHome, bind_run_context
 
     run_context = RuntimeHome(tmp_path / ".agentloom").context(
         application_id="concurrent-shell-test",

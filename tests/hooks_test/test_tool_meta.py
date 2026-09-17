@@ -4,9 +4,9 @@ from dataclasses import FrozenInstanceError
 
 import pytest
 
-from src.tools.catalog import ToolSpec
-from src.tools.loader import resolve_tool_function
-from src.tools.tool_meta import get_tool_meta
+from agentloom.tools.catalog import ToolSpec
+from agentloom.tools.loader import resolve_tool_function
+from agentloom.tools.tool_meta import get_tool_meta
 
 
 class TestResolveToolFunction:

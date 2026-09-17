@@ -3,7 +3,7 @@ import shutil
 import tempfile
 import pytest
 
-from src.tools.shell.output_interceptor import OutputInterceptor
+from agentloom.tools.shell.output_interceptor import OutputInterceptor
 
 
 @pytest.fixture

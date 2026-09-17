@@ -9,23 +9,23 @@ from unittest.mock import MagicMock, patch
 import pytest
 from smolagents import LocalPythonExecutor, Tool
 
-from src.lib.smolagents.hooks import HookEvent, HookHandler, HookPlan, HookResult, HookRun
-from src.lib.smolagents.hooks.tool_shim import (
+from agentloom.runtime.hooks import HookEvent, HookHandler, HookPlan, HookResult, HookRun
+from agentloom.adapters.smolagents.tool_shim import (
     _execute_tool_pipeline,
     clone_tool_for_runtime,
     inject_hooks,
 )
-from src.lib.smolagents.hooks.types import Blocked
-from src.lib.smolagents.monkey_patch import install_agentloom_runtime_adapters
-from src.lib.smolagents.tool_protocol import ToolCallRecord, ToolPolicyBlockedError
-from src.lib.smolagents.tools.tools import tool
-from src.lib.trusted_memory_evidence import (
+from agentloom.runtime.hooks.types import Blocked
+from agentloom.adapters.smolagents.monkey_patch import install_agentloom_runtime_adapters
+from agentloom.runtime.tool_protocol import ToolCallRecord, ToolPolicyBlockedError
+from agentloom.adapters.smolagents.tools.tools import tool
+from agentloom.runtime.trusted_memory_evidence import (
     TRUSTED_MEMORY_EVIDENCE_ATTR,
     TRUSTED_MEMORY_EVIDENCE_KIND,
     TRUSTED_MEMORY_EVIDENCE_RESPONSE_KEY,
     TrustedMemoryEvidenceEnvelope,
 )
-from src.trace import bind_explicit_execution_context, capture_explicit_execution_context
+from agentloom.runtime.trace import bind_explicit_execution_context, capture_explicit_execution_context
 
 
 def _tool(name: str, result):
@@ -94,7 +94,7 @@ def test_context_engine_remains_the_only_large_result_compression_boundary() -> 
     engine.compress_tool_result.return_value = "[ContextRef ctx_123] preview"
 
     with patch(
-        "src.lib.context_engine.runtime.get_active_context_engine",
+        "agentloom.runtime.context_engine.runtime.get_active_context_engine",
         return_value=engine,
     ):
         result = _invoke(_tool("large_tool", "x" * 60_000), run)
@@ -133,7 +133,7 @@ def test_trusted_evidence_is_captured_before_result_compression() -> None:
     engine.compress_tool_result.return_value = "[ContextRef ctx_123] preview"
 
     with patch(
-        "src.lib.context_engine.runtime.get_active_context_engine",
+        "agentloom.runtime.context_engine.runtime.get_active_context_engine",
         return_value=engine,
     ):
         assert _invoke(tool, run) == "[ContextRef ctx_123] preview"
@@ -343,15 +343,15 @@ def test_final_input_pipeline_order_is_guard_history_recorder_tool_post() -> Non
 
     with (
         patch(
-            "src.lib.smolagents.hooks.tool_shim.enforce_core_tool_guard",
+            "agentloom.adapters.smolagents.tool_shim.enforce_core_tool_guard",
             side_effect=guard,
         ),
         patch(
-            "src.lib.smolagents.hooks.tool_shim.record_active_file_history",
+            "agentloom.adapters.smolagents.tool_shim.record_active_file_history",
             side_effect=history,
         ),
         patch(
-            "src.extensions.self_learning.session_recorder.session_recorder_hook",
+            "agentloom.self_learning.session_recorder.session_recorder_hook",
             side_effect=recorder,
         ),
     ):
@@ -405,11 +405,11 @@ def test_core_guard_block_is_not_tool_failure_and_has_no_side_effect() -> None:
 
     with (
         patch(
-            "src.lib.smolagents.hooks.tool_shim.enforce_core_tool_guard",
+            "agentloom.adapters.smolagents.tool_shim.enforce_core_tool_guard",
             side_effect=guard,
         ),
-        patch("src.lib.smolagents.hooks.tool_shim.record_active_file_history") as history,
-        patch("src.extensions.self_learning.session_recorder.session_recorder_hook") as recorder,
+        patch("agentloom.adapters.smolagents.tool_shim.record_active_file_history") as history,
+        patch("agentloom.self_learning.session_recorder.session_recorder_hook") as recorder,
     ):
         result = _invoke(
             _write_tool(side_effects),
@@ -431,7 +431,7 @@ def test_self_learning_final_input_observer_failure_does_not_block_tool() -> Non
     run = HookRun(HookPlan(), local_run_id="local", root_run_id="root")
 
     with patch(
-        "src.extensions.self_learning.session_recorder.session_recorder_hook",
+        "agentloom.self_learning.session_recorder.session_recorder_hook",
         side_effect=RuntimeError("recorder unavailable"),
     ) as recorder:
         result = _invoke(_count_tool(side_effects), run, count="7")

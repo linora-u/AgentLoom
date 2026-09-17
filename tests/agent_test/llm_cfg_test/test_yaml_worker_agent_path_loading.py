@@ -2,9 +2,9 @@ from pathlib import Path
 
 import pytest
 
-import src.lib.smolagents.agent.yaml_agent_factory as yaml_factory_module
-from src.lib.smolagents.agent.agent_validation import AgentConfigNormalizer
-from src.lib.smolagents.agent.yaml_agent_factory import YamlAgentFactory, YamlConfiguredSupervisorAgent
+import agentloom.runtime.factory as yaml_factory_module
+from agentloom.application.validation import AgentConfigNormalizer
+from agentloom.runtime.factory import YamlAgentFactory, YamlConfiguredSupervisorAgent
 
 
 class _DummyLogger:
@@ -62,7 +62,7 @@ def test_precheck_resolves_shorthand_relative_and_absolute_paths(tmp_path, monke
     _write_min_worker_yaml(relative_file, "beta")
     _write_min_worker_yaml(absolute_file, "gamma")
 
-    monkeypatch.setattr(yaml_factory_module, "AGENT_ROOT", tmp_path)
+    monkeypatch.setattr(yaml_factory_module, "C", _config_at(tmp_path))
 
     expected_agents = [
         {"path": "alpha.yaml"},
@@ -89,7 +89,7 @@ def test_precheck_aggregates_errors_and_raises(tmp_path, monkeypatch):
     bad_ext_file = worker_folder / "bad.txt"
     bad_ext_file.write_text("name: bad", encoding="utf-8")
 
-    monkeypatch.setattr(yaml_factory_module, "AGENT_ROOT", tmp_path)
+    monkeypatch.setattr(yaml_factory_module, "C", _config_at(tmp_path))
 
     expected_agents = [
         {"path": "missing_worker.yaml"},
@@ -114,7 +114,7 @@ def test_get_tools_precheck_failure_aborts_loading(tmp_path, monkeypatch):
     worker_folder = tmp_path / "applications" / "demo" / "workflows" / "worker_agents"
     _write_min_worker_yaml(worker_folder / "ok_worker.yaml", "ok_worker")
 
-    monkeypatch.setattr(yaml_factory_module, "AGENT_ROOT", tmp_path)
+    monkeypatch.setattr(yaml_factory_module, "C", _config_at(tmp_path))
     monkeypatch.setattr(yaml_factory_module, "get_worker_agent_yaml_path", lambda _category: worker_folder)
     monkeypatch.setattr(YamlAgentFactory, "get_tools_from_config", lambda *_args, **_kwargs: ([], None))
 
@@ -172,7 +172,7 @@ def test_get_tools_loads_all_workers_after_precheck(tmp_path, monkeypatch):
     _write_min_worker_yaml(relative_file, "beta")
     _write_min_worker_yaml(absolute_file, "gamma")
 
-    monkeypatch.setattr(yaml_factory_module, "AGENT_ROOT", tmp_path)
+    monkeypatch.setattr(yaml_factory_module, "C", _config_at(tmp_path))
     monkeypatch.setattr(yaml_factory_module, "get_worker_agent_yaml_path", lambda _category: worker_folder)
     monkeypatch.setattr(YamlAgentFactory, "get_tools_from_config", lambda *_args, **_kwargs: ([], None))
 
@@ -239,7 +239,7 @@ agent_function_schema:
     description: "worker textual output"
 """, encoding="utf-8")
 
-    monkeypatch.setattr(yaml_factory_module, "AGENT_ROOT", tmp_path)
+    monkeypatch.setattr(yaml_factory_module, "C", _config_at(tmp_path))
     monkeypatch.setattr(yaml_factory_module, "get_worker_agent_yaml_path", lambda _category: worker_folder)
     monkeypatch.setattr(YamlAgentFactory, "get_tools_from_config", lambda *_args, **_kwargs: ([], None))
     real_create_agent_as_tool = YamlAgentFactory.create_agent_as_tool
@@ -273,7 +273,7 @@ tools: []
 workflow: "wf"
 """, encoding="utf-8")
 
-    monkeypatch.setattr(yaml_factory_module, "AGENT_ROOT", tmp_path)
+    monkeypatch.setattr(yaml_factory_module, "C", _config_at(tmp_path))
     monkeypatch.setattr(yaml_factory_module, "get_worker_agent_yaml_path", lambda _category: worker_folder)
     monkeypatch.setattr(YamlAgentFactory, "get_tools_from_config", lambda *_args, **_kwargs: ([], None))
     real_create_agent_as_tool = YamlAgentFactory.create_agent_as_tool
@@ -287,3 +287,15 @@ workflow: "wf"
     tools = supervisor._get_tools()
 
     assert len(tools) == 0
+
+
+def _config_at(root):
+    from agentloom.configuration import C
+
+    class ProjectConfig:
+        agent_root = root
+
+        def __getattr__(self, name):
+            return getattr(C, name)
+
+    return ProjectConfig()

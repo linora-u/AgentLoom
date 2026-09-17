@@ -34,8 +34,8 @@ def _config(*, mode: str = "after_run") -> dict:
 
 
 def _record_completed_run(db_path: Path, run_id: str = "review-root") -> None:
-    from src.extensions.self_learning.event_schema import CanonicalSessionEvent
-    from src.extensions.self_learning.persistence.ledger import SelfLearningLedger
+    from agentloom.self_learning.event_schema import CanonicalSessionEvent
+    from agentloom.self_learning.persistence.ledger import SelfLearningLedger
 
     SelfLearningLedger(db_path).append_runtime_event(
         CanonicalSessionEvent(
@@ -53,7 +53,7 @@ def _record_completed_run(db_path: Path, run_id: str = "review-root") -> None:
 def test_root_review_lock_file_count_is_bounded_across_many_roots(
     tmp_path: Path,
 ) -> None:
-    from src.extensions.self_learning.reviewer import _root_review_lock
+    from agentloom.self_learning.reviewer import _root_review_lock
 
     db_path = tmp_path / "self_learning.db"
     for index in range(128):
@@ -76,7 +76,7 @@ def test_root_review_lock_serializes_different_roots_across_processes(
 import sys
 import time
 from pathlib import Path
-from src.extensions.self_learning.reviewer import _root_review_lock
+from agentloom.self_learning.reviewer import _root_review_lock
 
 db_path, held, release = map(Path, sys.argv[1:])
 with _root_review_lock(db_path, "root:holder"):
@@ -88,7 +88,7 @@ with _root_review_lock(db_path, "root:holder"):
     contender_script = """
 import sys
 from pathlib import Path
-from src.extensions.self_learning.reviewer import _root_review_lock
+from agentloom.self_learning.reviewer import _root_review_lock
 
 db_path, ready, entered = map(Path, sys.argv[1:])
 ready.write_text("ready", encoding="utf-8")
@@ -157,7 +157,7 @@ with _root_review_lock(db_path, "root:contender"):
 
 
 def test_review_prompt_is_candidate_only_and_forbids_all_write_tools() -> None:
-    from src.extensions.self_learning.reviewer import MEMORY_REVIEW_PROMPT
+    from agentloom.self_learning.reviewer import MEMORY_REVIEW_PROMPT
 
     prompt = " ".join(MEMORY_REVIEW_PROMPT.split())
     assert "typed Fact or Experience candidates only" in prompt
@@ -167,9 +167,9 @@ def test_review_prompt_is_candidate_only_and_forbids_all_write_tools() -> None:
 
 
 def test_review_model_resolution_disables_provider_retry(monkeypatch) -> None:
-    from src.extensions.self_learning import reviewer
-    from src.lib.smolagents.models import model_manager
-    from src.lib.smolagents.models.model_types import ModelConfig
+    from agentloom.self_learning import reviewer
+    from agentloom.adapters.smolagents.models import model_manager
+    from agentloom.adapters.smolagents.models.model_types import ModelConfig
 
     captured = {}
     sentinel = object()
@@ -196,7 +196,7 @@ def test_failed_or_incomplete_root_never_resolves_a_review_model(
     tmp_path: Path,
     monkeypatch,
 ) -> None:
-    from src.extensions.self_learning import reviewer
+    from agentloom.self_learning import reviewer
 
     db_path = tmp_path / "self_learning.db"
     monkeypatch.setattr(
@@ -219,7 +219,7 @@ def test_concurrent_review_of_one_root_calls_model_exactly_once(
     tmp_path: Path,
     monkeypatch,
 ) -> None:
-    from src.extensions.self_learning import reviewer
+    from agentloom.self_learning import reviewer
 
     db_path = tmp_path / "self_learning.db"
     _record_completed_run(db_path, "concurrent-root")
@@ -261,7 +261,7 @@ def test_provider_error_content_is_never_logged(
     monkeypatch,
     caplog,
 ) -> None:
-    from src.extensions.self_learning import reviewer
+    from agentloom.self_learning import reviewer
 
     db_path = tmp_path / "self_learning.db"
     _record_completed_run(db_path, "error-root")

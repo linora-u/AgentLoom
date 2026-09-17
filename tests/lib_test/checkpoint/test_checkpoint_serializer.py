@@ -1,4 +1,4 @@
-"""Tests for ``src.lib.checkpoint.serializer.CheckpointSerializer``."""
+"""Tests for ``agentloom.runtime.checkpoint.serializer.CheckpointSerializer``."""
 
 from __future__ import annotations
 
@@ -8,8 +8,8 @@ from smolagents.memory import ActionStep, PlanningStep, TaskStep, ToolCall
 from smolagents.models import ChatMessage, MessageRole
 from smolagents.monitoring import Timing, TokenUsage
 
-from src.lib.checkpoint.serializer import CheckpointSerializer
-from src.lib.smolagents.tool_protocol import ToolCallRecord, ToolErrorRecord
+from agentloom.runtime.checkpoint.serializer import CheckpointSerializer
+from agentloom.runtime.tool_protocol import ToolCallRecord, ToolErrorRecord
 
 # ── helpers ──────────────────────────────────────────────────────────────
 

@@ -17,7 +17,7 @@ const SOURCE_ENTRIES = [
   "install",
   "pyproject.toml",
   "uv.lock",
-  "src",
+  "agentloom",
   "agentloom-framework-skill",
   "agentloom-tui/package.json",
   "agentloom-tui/bun.lock",
