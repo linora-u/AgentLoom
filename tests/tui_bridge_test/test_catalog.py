@@ -121,7 +121,7 @@ def test_bootstrap_parses_each_agent_definition_once_and_keeps_shared_worker_tre
 ) -> None:
     _write(
         tmp_path / "config/llm.yaml",
-        "model:\n  default_model_type: test\n  test:\n    model: openai/test\n",
+        "model:\n  summary:\n    model: openai/test-summary\n  default_model_type: test\n  test:\n    model: openai/test\n",
     )
     alpha = "applications/demo/workflows/alpha.yaml"
     beta = "applications/demo/workflows/beta.yaml"
@@ -158,7 +158,8 @@ agent_function_schema:
         _write(tmp_path / relative, payload)
 
     parse_counts: Counter[str] = Counter()
-    original_safe_load = yaml.safe_load
+    from src.application import definition as definition_module
+    original_safe_load = definition_module.load_unique_yaml
 
     def count_definition_parse(stream):
         text = stream.read() if hasattr(stream, "read") else stream
@@ -171,7 +172,7 @@ agent_function_schema:
                     break
         return original_safe_load(text)
 
-    monkeypatch.setattr(yaml, "safe_load", count_definition_parse)
+    monkeypatch.setattr(definition_module, "load_unique_yaml", count_definition_parse)
 
     result = TuiBridge(tmp_path).bootstrap()
 

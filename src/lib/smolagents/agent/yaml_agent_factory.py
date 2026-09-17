@@ -10,6 +10,7 @@ from typing import Any, Callable, Dict, List, Optional, Union
 
 from src.lib.config import C, get_code_agent_config, get_default_toolsets
 from src.lib.config.yaml_loader import load_unique_yaml
+from src.application.definition import load_agent_definition, extract_markdown_definition
 from src.lib.logging import (
     get_logger,
 )
@@ -797,18 +798,30 @@ class YamlConfiguredSupervisorAgent(RoleDrivenAgent):
             log.info("[YamlConfiguredSupervisorAgent] Successfully loaded all tools for supervisor agent.")
             return tools
 
-        worker_agents_folder = get_worker_agent_yaml_path(self.workflow_category)
+        source_path = self._config.get("_yaml_file_path")
+        worker_agents_folder = (Path(source_path).parent / "worker_agents"
+                                if source_path else get_worker_agent_yaml_path(self.workflow_category))
 
-        resolved_worker_agents = AgentConfigNormalizer.precheck_worker_agent_paths(
-            expected_agents,
-            worker_agents_folder,
-            agent_root=AGENT_ROOT,
-        )
+        pinned_workers = self._config.get("_worker_definitions")
+        if isinstance(pinned_workers, dict):
+            resolved_worker_agents = [
+                (item['path'], AgentConfigNormalizer.resolve_worker_agent_config_path(
+                    item['path'], worker_agents_folder, agent_root=AGENT_ROOT,
+                )) for item in expected_agents
+            ]
+        else:
+            resolved_worker_agents = AgentConfigNormalizer.precheck_worker_agent_paths(
+                expected_agents, worker_agents_folder, agent_root=AGENT_ROOT,
+            )
 
         for configured_path, found_file in resolved_worker_agents:
             try:
                 # Load configuration
-                agent_config = YamlAgentFactory._load_config_from_file(found_file)
+                pinned_workers = self._config.get("_worker_definitions", {})
+                if str(found_file) in pinned_workers:
+                    agent_config = copy.deepcopy(pinned_workers[str(found_file)])
+                else:
+                    agent_config = YamlAgentFactory._load_config_from_file(found_file)
 
                 # Create agent tool
                 agent_tool = YamlAgentFactory.create_agent_as_tool(
@@ -840,6 +853,7 @@ def _load_mcp_tools(
     Returns a :class:`McpManager` instance when at least one MCP server is
     configured, or ``None`` otherwise.  Failures are logged — never raised.
     """
+    strict = effective_agent_config is not None and "_mcp_settings_snapshot" in effective_agent_config
     global_raw = (effective_agent_config or {}).get("mcp_servers")
     agent_raw = config.get("mcp_servers")
 
@@ -850,9 +864,12 @@ def _load_mcp_tools(
         from src.mcp.config import merge_mcp_configs, parse_mcp_yaml_value
         from src.mcp.manager import McpManager
 
-        global_settings = parse_mcp_yaml_value(global_raw, agent_root) if global_raw is not None else None
-        agent_settings = parse_mcp_yaml_value(agent_raw, agent_root) if agent_raw is not None else None
-        merged = merge_mcp_configs(global_settings, agent_settings)
+        if effective_agent_config is not None and "_mcp_settings_snapshot" in effective_agent_config:
+            merged = effective_agent_config["_mcp_settings_snapshot"]
+        else:
+            global_settings = parse_mcp_yaml_value(global_raw, agent_root) if global_raw is not None else None
+            agent_settings = parse_mcp_yaml_value(agent_raw, agent_root) if agent_raw is not None else None
+            merged = merge_mcp_configs(global_settings, agent_settings)
 
         if merged is None or not merged.configs:
             log.debug("[MCP] No MCP servers configured after parsing")
@@ -860,14 +877,24 @@ def _load_mcp_tools(
 
         manager = McpManager(merged)
         manager.connect_all()
+        if strict:
+            failed = sorted(name for name, status in manager.get_server_status().items()
+                            if not status.get("connected"))
+            if failed:
+                manager.disconnect_all()
+                raise RuntimeError("MCP connection failed for server(s): " + ", ".join(failed))
         for tool in manager.get_all_tools():
             append_tool(tool)
         return manager
 
     except ImportError as exc:
+        if strict:
+            raise
         log.warning("[MCP] MCP support not available: %s", exc)
         return None
     except Exception as exc:
+        if strict:
+            raise
         log.warning("[MCP] Unexpected error loading MCP tools: %s", exc)
         return None
 
@@ -891,6 +918,10 @@ class YamlAgentFactory:
             when no MCP servers are configured.
         """
         log = get_logger(logger, __name__)
+        config = dict(config)
+        for key in ("tools", "toolsets", "execution_env"):
+            if effective_agent_config is not None and key in effective_agent_config:
+                config[key] = copy.deepcopy(effective_agent_config[key])
         tools = []
         seen = set()
 
@@ -949,7 +980,7 @@ class YamlAgentFactory:
             patch_shell_tool_security(tools, log)
             return tools, mcp_manager
 
-        raw_tools = config['tools']
+        raw_tools = config['tools'] or []
         AgentConfigNormalizer.validate_tools_config_entries(raw_tools)
 
         for tool_config in raw_tools:
@@ -1007,24 +1038,7 @@ class YamlAgentFactory:
         Returns:
             tuple: (yaml_config, workflow_content)
         """
-        # Find YAML code block
-        yaml_pattern = r'```yaml\s*\n(.*?)\n```'
-        match = re.search(yaml_pattern, content, re.DOTALL)
-
-        if not match:
-            raise ValueError("No YAML code block found in markdown file")
-
-        yaml_content = match.group(1)
-        yaml_config = load_unique_yaml(yaml_content)
-
-        # Remove YAML code block; remaining content is workflow
-        workflow_content = re.sub(yaml_pattern, '', content, flags=re.DOTALL).strip()
-
-        # Add workflow content into configuration
-        if workflow_content:
-            yaml_config['workflow'] = workflow_content
-
-        return yaml_config, workflow_content
+        return extract_markdown_definition(content)
 
     @staticmethod
     def _prepare_agent_config(config: dict, *, source_path: Union[str, Path, None] = None) -> dict:
@@ -1052,19 +1066,7 @@ class YamlAgentFactory:
         Returns:
             dict: Parsed configuration dictionary.
         """
-        config_path = Path(config_path)
-
-        with open(config_path, 'r', encoding='utf-8') as f:
-            content = f.read()
-
-        if config_path.suffix.lower() == '.md':
-            config, _ = YamlAgentFactory._extract_yaml_from_markdown(content)
-        elif config_path.suffix.lower() in ['.yaml', '.yml']:
-            config = load_unique_yaml(content)
-        else:
-            raise ValueError(f"Unsupported file format: {config_path.suffix}")
-
-        return YamlAgentFactory._prepare_agent_config(config, source_path=config_path)
+        return load_agent_definition(config_path)
 
     @staticmethod
     def create_agent_tool(config_path: Union[str, Path, dict],
@@ -1101,8 +1103,8 @@ class YamlAgentFactory:
         # Return agent tool list directly; tools are already decorated with @tool
         return agent._get_tools()
 
-    # ── Tool cache: keyed by resolved file path, thread-safe ──
-    _tool_cache: Dict[str, Callable] = {}
+    # Legacy cache/reset surface retained for callers; creations are now fresh.
+    _tool_cache: Dict[tuple, Callable] = {}
     _tool_cache_lock = threading.Lock()
 
     @classmethod
@@ -1126,9 +1128,8 @@ class YamlAgentFactory:
         for parallel execution, or ``None`` if the YAML has no
         ``agent_function_schema`` (meaning the agent is not exported as a tool).
 
-        File-based configs are cached by resolved path — repeated calls
-        with the same YAML file return the cached tool without re-creating
-        the agent.  Dict-based configs are never cached.
+        Each creation captures a fresh definition and configuration snapshot.
+        The returned callable retains that snapshot for its lifetime.
 
         Args:
             config_path: YAML/Markdown config file path or config dictionary.
@@ -1140,14 +1141,9 @@ class YamlAgentFactory:
         Returns:
             Optional[Callable]: The agent tool function, or None.
         """
-        # ── Cache lookup (file paths only) ──
-        cache_key: Optional[str] = None
-        if not isinstance(config_path, dict):
-            cache_key = str(Path(config_path).resolve())
-            cached = YamlAgentFactory._tool_cache.get(cache_key)
-            if cached is not None:
-                return cached
-
+        # Each creation owns a new definition/configuration snapshot. Reusing
+        # a path-only callable would retain Application overrides and resources
+        # after edits, even when the Agent YAML itself did not change.
         # Use custom class or default YamlConfiguredAgent
         AgentClass = agent_class or YamlConfiguredAgent
 
@@ -1172,10 +1168,6 @@ class YamlAgentFactory:
         log = get_logger(effective_logger, __name__)
         if tool is not None:
             log.info(f"[YamlAgentFactory] Successfully created agent tool: {tool.__name__} from {config_path if not isinstance(config_path, dict) else 'dict'}")
-            # ── Store in cache ──
-            if cache_key is not None:
-                with YamlAgentFactory._tool_cache_lock:
-                    YamlAgentFactory._tool_cache[cache_key] = tool
         else:
             log.error(f"[YamlAgentFactory] Failed to create agent tool from {config_path if not isinstance(config_path, dict) else 'dict'} (disabled or missing config)")
         return tool

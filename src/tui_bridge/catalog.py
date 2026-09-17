@@ -1,6 +1,6 @@
 """Lightweight, read-only workspace projections for the TUI.
 
-This module deliberately depends only on files and ``yaml.safe_load``.  Merely
+This module consumes the shared lightweight definition reader.  Merely
 opening the workspace catalog must never construct a model, import the Agent
 runtime, or create runtime storage.
 """
@@ -201,22 +201,12 @@ def _worker_path(
     raw_path = raw_worker.get("path")
     if not isinstance(raw_path, str) or not raw_path.strip() or "\\" in raw_path:
         return None
-    configured = Path(raw_path.strip())
-    if configured.is_absolute():
-        return None
-    if "/" in raw_path:
-        candidate = root / configured
-    else:
-        candidate = supervisor_path.parent / "worker_agents" / configured
-    path = _safe_project_file(root, candidate, suffixes={".yaml", ".yml"})
-    if path is None:
-        return None
-    application_root = root / "applications" / Path(*application_id.split("/"))
+    from src.application.definition import resolve_worker_path
     try:
-        path.relative_to(application_root)
+        candidate = resolve_worker_path(root, supervisor_path, raw_path)
     except ValueError:
         return None
-    return path
+    return _safe_project_file(root, candidate, suffixes={".yaml", ".yml", ".md"})
 
 
 def _configured_skills(raw: Any) -> dict[str, Any]:
@@ -664,7 +654,7 @@ def _read_agent_definition_object(
 ) -> dict[str, Any]:
     """Reuse a bridge parse while preserving the catalog's file safety limits."""
 
-    safe = _safe_project_file(root, path, suffixes={".yaml", ".yml"})
+    safe = _safe_project_file(root, path, suffixes={".yaml", ".yml", ".md"})
     if safe is None:
         return {}
     try:
@@ -672,9 +662,6 @@ def _read_agent_definition_object(
             return {}
     except OSError:
         return {}
-    if cache is None:
-        return _read_yaml_object(root, safe)
-
     from src.tui_bridge.definition import read_agent_definition
 
     result = read_agent_definition(safe, cache=cache)
