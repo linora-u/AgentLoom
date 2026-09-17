@@ -71,6 +71,11 @@ removed when the user rejected compatibility. It is not part of the final layout
   require an old Python import compatibility layer.
 - Read-only catalog, definition and Studio entry points remain lazy and must
   cause no model requests, MCP processes, Shell Hooks or Run allocation.
+- Shared topology inspection parses each Supervisor and Worker's Skill sources
+  before Run allocation. Studio projects the same per-definition catalog;
+  prepared runtime definitions retain the parsed instructions in their existing
+  private snapshot seam. New inspections observe edits, while existing calls
+  retain their Skill instructions. Resource-file sampling remains activation-time.
 
 ## Evidence and delivery gate
 

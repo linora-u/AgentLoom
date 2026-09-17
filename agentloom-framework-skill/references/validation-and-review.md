@@ -189,7 +189,7 @@ PYTHONPATH=/Users/bytedance/code/data_clear/AgentLoom-checkpoint \
 rg -n "_WORKFLOW_OVERLAY_KEYS|_LLM_ONLY_TOP_LEVEL_KEYS|extract_workflow_overlay" src/configuration/config.py
 rg -n "class RootSettings|class ToolAccessControlSettings|class LlmModelTypeSettings|extra_completion_params|supports_structured_output|supports_native_tool_calls|tool_choice" src/configuration src/adapters/smolagents/models docs/en docs/cn agentloom-framework-skill
 rg -n "install_agentloom_runtime_adapters|parse_structured_tool_call|ToolCallCandidate|schema-bound|tool_call_type" src/adapters/smolagents src/configuration tests docs/en docs/cn agentloom-framework-skill
-rg -n "skills.paths|Duplicate skill name|hooks:" src/adapters/smolagents/skills src/adapters/smolagents/hooks docs/en agentloom-framework-skill
+rg -n "skills.paths|Duplicate skill name|hooks:" src/runtime/skills src/runtime/hooks src/application/definition.py docs/en agentloom-framework-skill
 rg -n "mcp_servers|parse_mcp_servers_yaml_value" src tests docs/en agentloom-framework-skill
 ```
 

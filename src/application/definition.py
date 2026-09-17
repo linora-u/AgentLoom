@@ -11,11 +11,14 @@ import re
 from collections.abc import Mapping, MutableMapping
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 import yaml
-from pydantic import ValidationError
-
+from agentloom.application.readiness import (
+    validate_runtime_agent_config,
+    validate_runtime_worker_config,
+)
+from agentloom.application.validation import AgentConfigNormalizer
 from agentloom.configuration.config import (
     EffectiveAgentConfigSnapshot,
     UnifiedConfig,
@@ -24,11 +27,10 @@ from agentloom.configuration.config import (
 )
 from agentloom.configuration.llm_config import LLMConfig
 from agentloom.configuration.yaml_loader import load_unique_yaml
-from agentloom.application.validation import AgentConfigNormalizer
-from agentloom.application.readiness import (
-    validate_runtime_agent_config,
-    validate_runtime_worker_config,
-)
+from pydantic import ValidationError
+
+if TYPE_CHECKING:
+    from agentloom.runtime.skills.catalog import SkillCatalog
 
 _MARKDOWN_YAML = re.compile(r"```yaml\s*\n(.*?)\n```", re.DOTALL)
 
@@ -40,6 +42,16 @@ class AgentDefinitionRead:
 
 
 type AgentDefinitionCache = MutableMapping[Path, AgentDefinitionRead]
+
+
+@dataclass(frozen=True)
+class ApplicationDefinitionInspection:
+    """One static read of a topology, including partially invalid definitions."""
+
+    definitions: dict[Path, dict[str, object]]
+    snapshots: dict[Path, EffectiveAgentConfigSnapshot]
+    errors: tuple[str, ...]
+    errors_by_path: dict[Path, tuple[str, ...]]
 
 
 def extract_markdown_definition(content: str) -> tuple[dict[str, Any], str]:
@@ -167,10 +179,11 @@ def _walk_definitions(
     draft_paths: set[str],
     draft_configs: Mapping[str, dict[str, object]],
     cache: AgentDefinitionCache,
-) -> tuple[dict[Path, dict[str, object]], dict[Path, EffectiveAgentConfigSnapshot], list[str]]:
+) -> ApplicationDefinitionInspection:
     nodes: dict[Path, dict[str, object]] = {}
     snapshots: dict[Path, EffectiveAgentConfigSnapshot] = {}
     errors: list[str] = []
+    errors_by_path: dict[Path, tuple[str, ...]] = {}
     active: list[Path] = []
 
     def visit(path: Path, config: dict[str, object], *, worker: bool) -> None:
@@ -184,6 +197,7 @@ def _walk_definitions(
         config["_yaml_file_path"] = str(path)
         nodes[path] = config
         active.append(path)
+        error_start = len(errors)
         try:
             validator = validate_runtime_worker_config if worker else validate_runtime_agent_config
             try:
@@ -230,16 +244,20 @@ def _walk_definitions(
                 except (TypeError, ValueError, OSError, yaml.YAMLError) as exc:
                     errors.append(f"{path}: worker_agents path '{reference}' is invalid: {definition_error(exc)}")
         finally:
+            errors_by_path[path] = tuple(errors[error_start:])
             active.pop()
 
     visit(source_path, parsed, worker=False)
-    return nodes, snapshots, errors
+    return ApplicationDefinitionInspection(nodes, snapshots, tuple(errors), errors_by_path)
 
 
 def validate_effective_definition(snapshot: EffectiveAgentConfigSnapshot, root: Path, source: str) -> None:
     from agentloom.application.validation import build_normalized_execution_config
     from agentloom.runtime.hooks.config import HookConfigLayer, HookPlanCompiler
 
+    # Keep the parsed catalog available for inspection even if another
+    # capability (for example a tool reference) makes the definition invalid.
+    skill_catalog(snapshot)
     # Compilation builds an immutable plan only; handlers are never invoked.
     HookPlanCompiler().compile(
         tuple(
@@ -258,8 +276,44 @@ def validate_effective_definition(snapshot: EffectiveAgentConfigSnapshot, root: 
         strict=True,
     )
     AgentConfigNormalizer.validate_runtime_tool_references(snapshot.values)
-    for layer in snapshot.layers:
-        AgentConfigNormalizer.validate_skills_config(layer.data)
+
+
+def inspect_application_definition(
+    project_root: Path,
+    relative_path: str,
+    parsed: dict[str, object],
+    *,
+    draft_paths: set[str] | None = None,
+    draft_configs: Mapping[str, dict[str, object]] | None = None,
+    catalog: tuple[str, dict[str, object]] | None = None,
+    definition_cache: AgentDefinitionCache | None = None,
+    base_config: UnifiedConfig | None = None,
+) -> ApplicationDefinitionInspection:
+    """Read and validate one complete topology without constructing a runtime."""
+    root = project_root.resolve()
+    errors = []
+    base = base_config
+    if base is None:
+        try:
+            base = load_project_config(root)
+        except (TypeError, ValueError, OSError, yaml.YAMLError) as exc:
+            errors.append(f"{root}/config: {definition_error(exc)}")
+    inspection = _walk_definitions(
+        root,
+        root / relative_path,
+        parsed,
+        catalog=catalog or (model_catalog(base) if base is not None else model_types(root)),
+        base=base,
+        draft_paths=draft_paths or set(),
+        draft_configs=draft_configs or {},
+        cache=definition_cache if definition_cache is not None else {},
+    )
+    return ApplicationDefinitionInspection(
+        inspection.definitions,
+        inspection.snapshots,
+        tuple(dict.fromkeys([*errors, *inspection.errors])),
+        inspection.errors_by_path,
+    )
 
 
 def validate_agent_definition(
@@ -273,25 +327,16 @@ def validate_agent_definition(
     definition_cache: AgentDefinitionCache | None = None,
     base_config: UnifiedConfig | None = None,
 ) -> list[str]:
-    root = project_root.resolve()
-    errors = []
-    base = base_config
-    if base is None:
-        try:
-            base = load_project_config(root)
-        except (TypeError, ValueError, OSError, yaml.YAMLError) as exc:
-            errors.append(f"{root}/config: {definition_error(exc)}")
-    _, _, graph_errors = _walk_definitions(
-        root,
-        root / relative_path,
+    return list(inspect_application_definition(
+        project_root,
+        relative_path,
         parsed,
-        catalog=catalog or (model_catalog(base) if base is not None else model_types(root)),
-        base=base,
-        draft_paths=draft_paths or set(),
-        draft_configs=draft_configs or {},
-        cache=definition_cache if definition_cache is not None else {},
-    )
-    return list(dict.fromkeys(errors + graph_errors))
+        draft_paths=draft_paths,
+        draft_configs=draft_configs,
+        catalog=catalog,
+        definition_cache=definition_cache,
+        base_config=base_config,
+    ).errors)
 
 
 def prepare_application_definition(
@@ -302,21 +347,18 @@ def prepare_application_definition(
     base_config: UnifiedConfig,
 ) -> dict[str, object]:
     """Validate and pin every referenced definition/config before Run allocation."""
-    catalog = model_catalog(base_config)
-    nodes, snapshots, errors = _walk_definitions(
-        project_root.resolve(),
-        source_path,
+    inspection = inspect_application_definition(
+        project_root,
+        str(source_path),
         parsed,
-        catalog=catalog,
-        base=base_config,
-        draft_paths=set(),
-        draft_configs={},
-        cache={},
+        base_config=base_config,
     )
-    if errors:
-        raise ValueError("\n".join(errors))
+    if inspection.errors:
+        raise ValueError("\n".join(inspection.errors))
+    nodes, snapshots = inspection.definitions, inspection.snapshots
     for path, config in nodes.items():
         config["_effective_agent_config_snapshot"] = snapshots[path]
+        config["_skill_catalog_snapshot"] = skill_catalog(snapshots[path])
         config["_worker_definitions"] = {
             str(resolve_worker_path(project_root, path, item["path"])): nodes[
                 resolve_worker_path(project_root, path, item["path"])
@@ -324,6 +366,17 @@ def prepare_application_definition(
             for item in config.get("worker_agents", [])
         }
     return copy.deepcopy(nodes[source_path.resolve()])
+
+
+def skill_catalog(snapshot: EffectiveAgentConfigSnapshot, *, logger=None) -> SkillCatalog:
+    """Parse Skill instructions once for this definition's effective sources."""
+    from agentloom.runtime.skills.catalog import SkillCatalog
+
+    catalog = snapshot.values.get("_skill_catalog_snapshot")
+    if catalog is None:
+        catalog = SkillCatalog.discover(skill_sources(snapshot), logger=logger)
+        snapshot.values["_skill_catalog_snapshot"] = catalog
+    return catalog
 
 
 def skill_sources(snapshot: EffectiveAgentConfigSnapshot):
