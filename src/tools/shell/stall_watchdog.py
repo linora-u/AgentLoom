@@ -14,8 +14,8 @@ import threading
 import time
 from typing import Callable, Optional
 
-from src.lib.logging import get_logger
-from src.lib.runtime import copy_runtime_context
+from src.runtime.logging import get_logger
+from src.runtime import copy_runtime_context
 from src.tools.shell.output_reader import AnchoredOutputReader
 
 logger = get_logger(__name__)

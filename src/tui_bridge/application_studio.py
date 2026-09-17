@@ -22,10 +22,10 @@ from src.application.definition import (
     validate_agent_definition,
 )
 from src.application.presentation import configuration_projection, display_path, public_value
-from src.application_revision import application_revision
-from src.lib.config.config import build_effective_agent_config_snapshot, load_project_config
-from src.lib.config.yaml_loader import load_unique_yaml
-from src.lib.smolagents.skills.catalog import SkillCatalog
+from src.application.revision import application_revision
+from src.configuration.config import build_effective_agent_config_snapshot, load_project_config
+from src.configuration.yaml_loader import load_unique_yaml
+from src.runtime.skills.catalog import SkillCatalog
 
 _MAX_REVISION_FILES = 4096
 _MAX_REVISION_BYTES = 64 * 1024 * 1024

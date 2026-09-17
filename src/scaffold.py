@@ -23,8 +23,8 @@ from typing import Optional
 
 import click
 
-from src.lib.config import C
-from src.workflows.workflow_manager import infer_category_from_yaml_path
+from src.configuration import C
+from src.application.workflows import infer_category_from_yaml_path
 
 
 _DEMO_TEMPLATE = textwrap.dedent('''\

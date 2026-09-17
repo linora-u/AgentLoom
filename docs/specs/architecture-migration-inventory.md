@@ -64,3 +64,35 @@ candidate-version resume.
 Local evidence: `/Users/bytedance/code/data_clear/agentloom-architecture-notes/`.
 Ignored `config/llm.yaml` is copied into each worktree. No secret values, prior
 runtime data, `codex/`, or `temp/` reference checkout is added to the PR.
+
+## Responsibility migration (C1)
+
+The implementation now uses these owners inside the existing `src` namespace.
+The subsequent D1 commit changes the public package name separately.
+
+| Owner | Implementation |
+| --- | --- |
+| Application | `application/{definition,paths,presentation,validation,readiness,runner,run,lifecycle,revision,workflows}` |
+| Configuration | `configuration/` (the existing single config proxy and invocation binding) |
+| Agent runtime | `runtime/{agent,factory,invocation,loom_mixin}` and runtime Hook, Skill, prompt, memory, Goal, Todo, checkpoint, ContextEngine, permissions, trace, storage and logging modules |
+| smolagents adapter | `adapters/smolagents/{agents,tool_shim,tool_protocol,tool_argument_coercion}`, upstream patches, model and Tool wrappers |
+| External adapters | `adapters/{mcp,lsp}` |
+| Self-learning | `self_learning/`, preserving its existing persistence owner |
+| Tools and UI adapters | `tools/`, CLI, `tui_bridge/`, schedules and UI consume these owners |
+
+`runtime.agent` retains Supervisor/Worker orchestration. Its old upstream
+CodeAgent/ToolCallingAgent subclasses now live in `adapters.smolagents.agents`.
+`runtime.tool_protocol` owns terminal ToolCallRecord values without importing
+smolagents; execution and provider-message conversion stay in the adapter, which
+reexports those exact values for compatibility. Hook configuration and Run policy
+therefore no longer import the upstream Tool execution layer just to name an
+outcome. Runtime patches still install only when a concrete Agent is imported.
+
+`src._compat` resolves historical module paths lazily to those implementation
+modules. Moved leaf modules share identity, globals, registries and ContextVars;
+unchanged package subtrees share package identity too. Historical grouping
+namespaces whose child names have split remain lightweight containers, so both
+`import old.leaf` and `from old.parent import leaf` still work. The loader retains
+canonical metadata and delegates executable-module loading for `python -m`.
+No reference checkout, previous runtime directory or stored checkpoint format is
+changed by this migration.

@@ -2,6 +2,10 @@
 AI Agents package.
 """
 
+from src._compat import install_legacy_imports
+
+install_legacy_imports()
+
 from src.encoding.terminal import configure_terminal_encoding
 
 configure_terminal_encoding()
@@ -9,26 +13,26 @@ configure_terminal_encoding()
 __version__ = "1.0.1"
 
 _LAZY_EXPORTS = {
-    "C": ("src.lib.config", "C"),
-    "get_config": ("src.lib.config", "get_config"),
-    "get_default_toolsets": ("src.lib.config", "get_default_toolsets"),
-    "get_code_agent_config": ("src.lib.config", "get_code_agent_config"),
-    "get_model_config": ("src.lib.config", "get_model_config"),
-    "ApplicationRunError": ("src.application_run", "ApplicationRunError"),
+    "C": ("src.configuration", "C"),
+    "get_config": ("src.configuration", "get_config"),
+    "get_default_toolsets": ("src.configuration", "get_default_toolsets"),
+    "get_code_agent_config": ("src.configuration", "get_code_agent_config"),
+    "get_model_config": ("src.configuration", "get_model_config"),
+    "ApplicationRunError": ("src.application.run", "ApplicationRunError"),
     "ApplicationRunBudgetLimited": (
-        "src.application_run",
+        "src.application.run",
         "ApplicationRunBudgetLimited",
     ),
-    "ApplicationRunInterrupted": ("src.application_run", "ApplicationRunInterrupted"),
-    "ApplicationRunResult": ("src.application_run", "ApplicationRunResult"),
-    "RunEventSink": ("src.application_run", "RunEventSink"),
-    "RunInfo": ("src.application_run", "RunInfo"),
-    "RunLifecycleEvent": ("src.application_run", "RunLifecycleEvent"),
-    "RunPhase": ("src.application_run", "RunPhase"),
-    "RunRejectedEvent": ("src.application_run", "RunRejectedEvent"),
-    "RunRejection": ("src.application_run", "RunRejection"),
-    "execute_app": ("src.runner", "execute_app"),
-    "run_app": ("src.runner", "run_app"),
+    "ApplicationRunInterrupted": ("src.application.run", "ApplicationRunInterrupted"),
+    "ApplicationRunResult": ("src.application.run", "ApplicationRunResult"),
+    "RunEventSink": ("src.application.run", "RunEventSink"),
+    "RunInfo": ("src.application.run", "RunInfo"),
+    "RunLifecycleEvent": ("src.application.run", "RunLifecycleEvent"),
+    "RunPhase": ("src.application.run", "RunPhase"),
+    "RunRejectedEvent": ("src.application.run", "RunRejectedEvent"),
+    "RunRejection": ("src.application.run", "RunRejection"),
+    "execute_app": ("src.application.runner", "execute_app"),
+    "run_app": ("src.application.runner", "run_app"),
 }
 
 
