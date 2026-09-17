@@ -21,6 +21,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
+from src.application.definition import prepare_application_definition
 from src.application_revision import application_revision
 from src.application_run import (
     ApplicationRunBudgetLimited,
@@ -43,7 +44,8 @@ from src.application_run_lifecycle import (
 )
 from src.lib.checkpoint import CheckpointManager
 from src.lib.checkpoint.file_history import FileHistoryManager
-from src.lib.config import C, build_effective_agent_config
+from src.lib.config import C, build_effective_agent_config, get_config
+from src.lib.config.config import bind_config, fresh_invocation_config
 from src.lib.goal import GoalBudgetLimitedError, normalize_goal_config
 from src.lib.heartbeat import SupervisorHeartbeat
 from src.lib.logging import (
@@ -60,7 +62,7 @@ from src.lib.runtime import (
 )
 from src.lib.smolagents.agent.runtime_validation import (
     validate_required_yaml_fields,  # noqa: F401 - public compatibility re-export
-    validate_runtime_agent_config,
+    validate_runtime_agent_config,  # noqa: F401 - public compatibility re-export
 )
 from src.lib.smolagents.agent.yaml_agent_factory import (
     YamlAgentFactory,
@@ -216,6 +218,26 @@ def execute_app(
     *,
     event_sink: RunEventSink | None = None,
 ) -> ApplicationRunResult:
+    """Execute against current configuration, pinned for the lifetime of the Run."""
+    try:
+        invocation_config = fresh_invocation_config(get_config())
+    except BaseException as exc:
+        _emit_preflight_rejection(event_sink, exc)
+        raise
+    with bind_config(invocation_config):
+        return _execute_app(
+            yaml_path, resume_task_id, task_override, file_logging, event_sink=event_sink,
+        )
+
+
+def _execute_app(
+    yaml_path: str | Path,
+    resume_task_id: str | None = None,
+    task_override: str | None = None,
+    file_logging: bool | None = None,
+    *,
+    event_sink: RunEventSink | None = None,
+) -> ApplicationRunResult:
     """Execute one Application and return its output plus canonical run receipt.
 
     Configuration errors are rejected before a run is allocated. Once a run
@@ -225,10 +247,8 @@ def execute_app(
     try:
         resolved_path = _resolve_yaml_path(yaml_path)
         config = YamlAgentFactory._load_config_from_file(resolved_path)
-        validate_runtime_agent_config(
-            config,
-            resolved_path,
-            agent_root=C.agent_root,
+        config = prepare_application_definition(
+            Path(C.agent_root), resolved_path, config, base_config=get_config(),
         )
         effective_config = build_effective_agent_config(
             config,
@@ -255,6 +275,9 @@ def execute_app(
             config,
             resolved_path,
             agent_root=C.agent_root,
+        )
+        running_revision = application_revision(
+            Path(C.agent_root) / "applications" / Path(*application_id.split("/"))
         )
         runtime_home = resolve_runtime_home(effective_config, agent_root=C.agent_root)
         is_resume = resume_task_id is not None
@@ -306,9 +329,7 @@ def execute_app(
             runtime_context.write_manifest(
                 yaml_path=str(resolved_path),
                 agent_name=agent_name,
-                application_revision=application_revision(
-                    Path(C.agent_root) / "applications" / Path(*application_id.split("/"))
-                ),
+                application_revision=running_revision,
                 mode="resume" if is_resume else "new",
                 task_tree_observation={
                     "enabled": bool(ckpt_enabled),

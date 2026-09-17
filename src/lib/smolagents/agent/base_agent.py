@@ -786,6 +786,7 @@ class RoleDrivenAgent(BaseAgent):
         )
         self._effective_agent_config_snapshot = effective_snapshot
         self._effective_agent_config = effective_snapshot.values
+        self._config["_effective_agent_config_snapshot"] = deepcopy(effective_snapshot)
 
         self._before_config_validation(**kwargs)
         normalized: Any | None = self._validate_config()
@@ -801,7 +802,10 @@ class RoleDrivenAgent(BaseAgent):
         self.tool_call_type = self._role_profile().tool_call_type
 
         runtime_logger = self._effective_logger()
-        self._skill_catalog = self.initialize_skill_catalog(logger=runtime_logger)
+        self._skill_catalog = self._config.get("_skill_catalog_snapshot")
+        if self._skill_catalog is None:
+            self._skill_catalog = self.initialize_skill_catalog(logger=runtime_logger)
+            self._config["_skill_catalog_snapshot"] = self._skill_catalog
         hook_layers = tuple(
             HookConfigLayer(
                 name=layer.name,
@@ -812,10 +816,13 @@ class RoleDrivenAgent(BaseAgent):
             )
             for priority, layer in enumerate(effective_snapshot.layers)
         )
-        self._hook_plan = HookPlanCompiler().compile(
-            hook_layers,
-            internal_handlers=builtin_hook_handlers(),
-        )
+        self._hook_plan = self._config.get("_hook_plan_snapshot")
+        if self._hook_plan is None:
+            self._hook_plan = HookPlanCompiler().compile(
+                hook_layers,
+                internal_handlers=builtin_hook_handlers(),
+            )
+            self._config["_hook_plan_snapshot"] = self._hook_plan
         self._after_role_init(**kwargs)
 
     def project_path(self):
@@ -923,32 +930,8 @@ class RoleDrivenAgent(BaseAgent):
     def initialize_skill_catalog(self, logger: AgentLogger | None = None) -> SkillCatalog:
         """Resolve conventional and explicitly configured Skill sources once."""
         log = get_logger(logger, __name__)
-        sources: list[SkillSource] = []
-        for layer in self._effective_agent_config_snapshot.layers:
-            scope = {
-                "global_system": "project",
-                "application_system": "application",
-                "agent": "agent",
-            }.get(layer.name)
-            if scope is None:
-                continue
-
-            if scope in {"project", "application"}:
-                sources.append(SkillSource(path=Path(layer.root) / "skills", scope=scope))
-
-            configured = layer.data.get("skills") if isinstance(layer.data, dict) else None
-            if configured is None:
-                continue
-            if not isinstance(configured, dict) or set(configured) != {"paths"}:
-                raise ValueError("skills must be a mapping containing only a 'paths' list")
-            paths = configured["paths"]
-            if not isinstance(paths, list) or any(not isinstance(item, str) or not item.strip() for item in paths):
-                raise ValueError("skills.paths must be a list of non-empty path strings")
-            for raw_path in paths:
-                path = Path(raw_path).expanduser()
-                if not path.is_absolute():
-                    path = Path(layer.root) / path
-                sources.append(SkillSource(path=path, scope=scope))
+        from src.application.definition import skill_sources
+        sources = skill_sources(self._effective_agent_config_snapshot)
 
         catalog = SkillCatalog.discover(sources, logger=log)
         log.info("Agent '%s' resolved Skills: %s", self.name, [item.name for item in catalog.summaries()])

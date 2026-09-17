@@ -7,7 +7,7 @@ def test_catalog_uses_runner_required_fields_for_agent_validation(tmp_path: Path
     config = tmp_path / "config"
     config.mkdir()
     (config / "llm.yaml").write_text(
-        "model:\n  default_model_type: powerful\n  powerful:\n    model: openai/test\n",
+        "model:\n  summary:\n    model: openai/test-summary\n  default_model_type: powerful\n  powerful:\n    model: openai/test\n",
         encoding="utf-8",
     )
     valid = tmp_path / "applications/valid/workflows/valid.yaml"
@@ -35,7 +35,7 @@ def test_catalog_validation_reuses_runtime_model_structure_and_worker_checks(tmp
     config = tmp_path / "config"
     config.mkdir()
     (config / "llm.yaml").write_text(
-        "model:\n  default_model_type: powerful\n  powerful:\n    model: openai/test\n",
+        "model:\n  summary:\n    model: openai/test-summary\n  default_model_type: powerful\n  powerful:\n    model: openai/test\n",
         encoding="utf-8",
     )
     invalid = tmp_path / "applications/invalid/workflows/invalid.yaml"
@@ -84,7 +84,7 @@ def test_system_detail_includes_runtime_supported_markdown_workers(tmp_path: Pat
     config = tmp_path / "config"
     config.mkdir()
     (config / "llm.yaml").write_text(
-        "model:\n  default_model_type: powerful\n  powerful:\n    model: openai/test\n",
+        "model:\n  summary:\n    model: openai/test-summary\n  default_model_type: powerful\n  powerful:\n    model: openai/test\n",
         encoding="utf-8",
     )
     workflow = tmp_path / "applications/markdown/workflows/supervisor.yaml"
@@ -140,7 +140,7 @@ def test_catalog_rejects_invalid_markdown_worker_schema(tmp_path: Path) -> None:
     config = tmp_path / "config"
     config.mkdir()
     (config / "llm.yaml").write_text(
-        "model:\n  default_model_type: powerful\n  powerful:\n    model: openai/test\n",
+        "model:\n  summary:\n    model: openai/test-summary\n  default_model_type: powerful\n  powerful:\n    model: openai/test\n",
         encoding="utf-8",
     )
     workflow = tmp_path / "applications/markdown/workflows/supervisor.yaml"
@@ -186,7 +186,7 @@ def test_catalog_rejects_referenced_worker_without_function_schema(tmp_path: Pat
     config = tmp_path / "config"
     config.mkdir()
     (config / "llm.yaml").write_text(
-        "model:\n  default_model_type: powerful\n  powerful:\n    model: openai/test\n",
+        "model:\n  summary:\n    model: openai/test-summary\n  default_model_type: powerful\n  powerful:\n    model: openai/test\n",
         encoding="utf-8",
     )
     workflow = tmp_path / "applications/no_schema/workflows/supervisor.yaml"
@@ -220,7 +220,7 @@ def test_catalog_rejects_existing_worker_with_unconfigured_model(tmp_path: Path)
     config = tmp_path / "config"
     config.mkdir()
     (config / "llm.yaml").write_text(
-        "model:\n  default_model_type: powerful\n  powerful:\n    model: openai/test\n",
+        "model:\n  summary:\n    model: openai/test-summary\n  default_model_type: powerful\n  powerful:\n    model: openai/test\n",
         encoding="utf-8",
     )
     workflow = tmp_path / "applications/bad_model/workflows/supervisor.yaml"
