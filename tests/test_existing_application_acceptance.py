@@ -97,3 +97,154 @@ def test_checkpoint_handoff_captures_exact_returns_and_rejects_duplicate_writes(
     assert (tmp_path / "worker_output_after.txt").read_text() == exact
     with pytest.raises(FileExistsError):
         probe.record_checkpoint_worker_output(str(tmp_path), "duplicate")
+
+
+@pytest.fixture
+def main_checkpoint_gate(tmp_path, monkeypatch):
+    from types import SimpleNamespace
+
+    spec = importlib.util.spec_from_file_location(
+        "real_checkpoint_validation", Path(__file__).parent / "agent_test/real_checkpoint_validation.py"
+    )
+    checkpoint = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(checkpoint)
+    checkpoint.WORK_DIR = tmp_path / "work"
+    checkpoint.SIDE_EFFECT_LOG = tmp_path / "side_effects.log"
+    task_dir = tmp_path / "runtime/checkpoints/app/task_one"
+    task_dir.mkdir(parents=True)
+    monkeypatch.setattr(checkpoint, "_latest_task_dir", lambda: task_dir)
+
+    def wait():
+        ticks = iter([0.0, 0.1, 0.2])
+        with monkeypatch.context() as clock:
+            clock.setattr(checkpoint.time, "monotonic", lambda: next(ticks))
+            clock.setattr(checkpoint.time, "sleep", lambda _: None)
+            return checkpoint._wait_for_main_interrupt_point(SimpleNamespace(poll=lambda: None), timeout=0.2)
+
+    return checkpoint, task_dir, wait
+
+
+def committed_action(code, observations="Execution logs: setup completed"):
+    return {
+        "_step_type": "ActionStep", "step_number": 1,
+        "code_action": code,
+        "tool_calls": [{"id": "call_1", "type": "function", "function": {"name": "python_interpreter", "arguments": code}}],
+        "observations": observations, "error": None,
+        "timing": {"start_time": 1, "end_time": 2, "duration": 1},
+    }
+
+
+def write_supervisor_setup(checkpoint):
+    import yaml
+
+    expected = {
+        "items/a.txt": "alpha=11\n", "items/b.txt": "beta=22\n", "items/c.txt": "gamma=33\n",
+        "ledger.txt": "supervisor:setup\n",
+        "supervisor_manifest.txt": "alpha=11\nbeta=22\ngamma=33\nmanifest_status=ready\n",
+    }
+    for relative, content in expected.items():
+        path = checkpoint.WORK_DIR / relative
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(content)
+    checkpoint.SIDE_EFFECT_LOG.write_text("supervisor_setup\n")
+    workflow_path = Path(__file__).parents[1] / "applications/test_demo/workflows/test_checkpoint_complex_supervisor.yaml"
+    workflow = yaml.safe_load(workflow_path.read_text())["workflow"]
+    command = workflow.split("Use shell_tool once to run this exact command:\n", 1)[1].split("\n\n", 1)[0].strip()
+    command = command.replace("/tmp/agentloom_ckpt_complex", str(checkpoint.WORK_DIR))
+    command = command.replace("/tmp/agentloom_ckpt_side_effects.log", str(checkpoint.SIDE_EFFECT_LOG))
+    return committed_action(f"shell_tool(command={command!r})")
+
+
+@pytest.mark.parametrize("setup_on_disk", [False, True], ids=["early-todo", "setup-not-checkpointed"])
+def test_main_interrupt_waits_for_setup_action_commit(main_checkpoint_gate, setup_on_disk):
+    checkpoint, task_dir, wait = main_checkpoint_gate
+    if setup_on_disk:
+        write_supervisor_setup(checkpoint)
+    todo = committed_action("todo_write([{'content': 'supervisor_setup', 'status': 'in_progress'}])", "Todo saved")
+    write_json(task_dir / "checkpoint.json", {"step_count": 3, "memory_steps": [todo]})
+    with pytest.raises(TimeoutError, match="main interrupt point"):
+        wait()
+
+
+def test_main_interrupt_accepts_committed_setup_before_worker(main_checkpoint_gate):
+    checkpoint, task_dir, wait = main_checkpoint_gate
+    setup = write_supervisor_setup(checkpoint)
+    write_json(task_dir / "checkpoint.json", {"step_count": 3, "memory_steps": [setup]})
+    assert wait() == task_dir
+
+
+def test_main_interrupt_observes_files_then_waits_for_checkpoint_commit(main_checkpoint_gate, monkeypatch):
+    from types import SimpleNamespace
+
+    checkpoint, task_dir, _ = main_checkpoint_gate
+    todo = committed_action("todo_write([])", "Todo saved")
+    write_json(task_dir / "checkpoint.json", {"step_count": 3, "memory_steps": [todo]})
+    states = []
+
+    def advance(_):
+        if not states:
+            states.append(write_supervisor_setup(checkpoint))
+        elif len(states) == 1:
+            write_json(task_dir / "checkpoint.json", {"step_count": 4, "memory_steps": [todo, states[0]]})
+            states.append("committed")
+        else:
+            pytest.fail("committed setup was not accepted")
+
+    ticks = iter([0.0, 0.1, 0.2, 0.3, 0.4])
+    monkeypatch.setattr(checkpoint.time, "monotonic", lambda: next(ticks))
+    monkeypatch.setattr(checkpoint.time, "sleep", advance)
+    assert checkpoint._wait_for_main_interrupt_point(SimpleNamespace(poll=lambda: None), timeout=1) == task_dir
+    assert states[-1] == "committed"
+
+
+def test_main_prepare_rechecks_worker_race_before_seeding_probes(main_checkpoint_gate, monkeypatch):
+    from types import SimpleNamespace
+
+    checkpoint, task_dir, _ = main_checkpoint_gate
+    setup = write_supervisor_setup(checkpoint)
+    write_json(task_dir / "checkpoint.json", {"step_count": 3, "memory_steps": [setup]})
+    write_json(task_dir / "task_tree.json", {"status": "interrupted"})
+    events = task_dir / "task_events.jsonl"
+    events.write_text(json.dumps({"type": "run_started"}) + "\n")
+    checkpoint.SESSION_ROOT = checkpoint.WORK_DIR.parent
+    monkeypatch.setattr(checkpoint, "_start_run", lambda _: SimpleNamespace(poll=lambda: 130))
+
+    def ready(_):
+        assert checkpoint._main_setup_is_committed(task_dir)
+        return task_dir
+
+    def interrupt(_):
+        with events.open("a") as stream:
+            stream.write(json.dumps({"type": "worker_call_started"}) + "\n")
+        return 130
+
+    monkeypatch.setattr(checkpoint, "_wait_for_main_interrupt_point", ready)
+    monkeypatch.setattr(checkpoint, "_interrupt", interrupt)
+    monkeypatch.setattr(checkpoint, "_seed_resume_probes", lambda _: pytest.fail("seeded probes after Worker start"))
+    with pytest.raises(AssertionError, match="committed setup before Worker start"):
+        checkpoint.prepare("main")
+
+
+@pytest.mark.parametrize("defect", ["unobserved", "unfinished", "error", "no-tool-call", "worker-started", "missing-file", "wrong-manifest", "duplicate-setup"])
+def test_main_interrupt_rejects_incomplete_or_late_setup(main_checkpoint_gate, defect):
+    checkpoint, task_dir, wait = main_checkpoint_gate
+    setup = write_supervisor_setup(checkpoint)
+    if defect == "unobserved":
+        setup["observations"] = None
+    elif defect == "unfinished":
+        setup["timing"]["end_time"] = None
+    elif defect == "error":
+        setup["error"] = {"type": "AgentExecutionError", "message": "shell failed"}
+    elif defect == "no-tool-call":
+        setup["tool_calls"] = []
+    elif defect == "worker-started":
+        (task_dir / "task_events.jsonl").write_text(json.dumps({"type": "worker_call_started"}) + "\n")
+    elif defect == "missing-file":
+        (checkpoint.WORK_DIR / "items/c.txt").unlink()
+    elif defect == "wrong-manifest":
+        (checkpoint.WORK_DIR / "supervisor_manifest.txt").write_text("manifest_status=ready\n")
+    elif defect == "duplicate-setup":
+        checkpoint.SIDE_EFFECT_LOG.write_text("supervisor_setup\nsupervisor_setup\n")
+    write_json(task_dir / "checkpoint.json", {"step_count": 3, "memory_steps": [setup]})
+    with pytest.raises(TimeoutError, match="main interrupt point"):
+        wait()
