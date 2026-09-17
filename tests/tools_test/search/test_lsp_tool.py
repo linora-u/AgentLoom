@@ -31,12 +31,12 @@ def python_project(tmp_path):
     (tmp_path / "pyproject.toml").write_text('[project]\nname = "test"\n')
 
     src = tmp_path / "src"
-    agentloom.mkdir()
+    src.mkdir()
     (src / "__init__.py").write_text("")
 
     (src / "main.py").write_text(
         textwrap.dedent("""\
-        from agentloom.utils import helper
+        from src.utils import helper
 
         class MyAgent:
             def __init__(self, name):
