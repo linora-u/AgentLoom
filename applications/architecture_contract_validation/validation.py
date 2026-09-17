@@ -8,6 +8,7 @@ import os
 import shutil
 import subprocess
 import sys
+from datetime import datetime
 from pathlib import Path
 
 from .agent_tools.workspace_tools import junit_summary
@@ -15,7 +16,7 @@ from .agent_tools.workspace_tools import junit_summary
 APP_ROOT = Path(__file__).resolve().parent
 WORKERS = ("repository_investigator", "change_planner", "repair_implementer", "independent_verifier")
 REQUIRED_CASES = ("threshold_equal", "discount_before_shipping", "override_precedence",
-                  "invalid_quantity", "invalid_price", "invalid_config", "empty_cart", "multiple_lines")
+                  "invalid_quantity", "invalid_price", "invalid_config", "empty_cart", "zero_price", "multiple_lines")
 
 
 def sha256(path: Path) -> str:
@@ -91,6 +92,8 @@ def validate_artifacts(workspace: Path, evidence: Path, case_nonce: str) -> dict
             errors.append("report Worker list or verifier verdict is incomplete")
         if set(report.get("generated_tests", [])) != {p.relative_to(workspace).as_posix() for p in generated}:
             errors.append("report generated_tests differs from actual files")
+        if not isinstance(report.get("test_report"), str):
+            raise ValueError("test_report must be a relative-path string from run_workspace_tests.report, not a report object")
         referenced = (workspace / report["test_report"]).resolve()
         if workspace not in referenced.parents or not referenced.is_file():
             raise ValueError("test_report must reference an existing local report")
@@ -105,6 +108,85 @@ def validate_artifacts(workspace: Path, evidence: Path, case_nonce: str) -> dict
     return {"passed": not errors, "errors": errors, "pytest": test_result, "negative_control": negative_result,
             "artifact_hashes": {p.relative_to(workspace).as_posix(): sha256(p) for p in workspace.rglob("*.py")
                                 if "__pycache__" not in p.parts}}
+
+
+def _event_time(value) -> datetime:
+    if not isinstance(value, str):
+        raise ValueError("missing call or tool event timestamp")
+    parsed = datetime.fromisoformat(value)
+    if parsed.tzinfo is None:
+        raise ValueError("call and tool timestamps must include their timezone")
+    return parsed
+
+
+def _completed_worker_calls(task_root, run_id, task_id, nonce, workspace, ledger):
+    """Read only this receipt's calls; bind each to real start/finish and tool events."""
+    if task_root is None:
+        return [], [], []
+    calls = sorted(task_root.glob("workers/*/calls/*/checkpoint.json"))
+    records, errors = [], []
+    try:
+        events = [json.loads(line) for line in (task_root / "task_events.jsonl").read_text().splitlines()]
+    except (OSError, ValueError):
+        return calls, records, ["missing canonical Worker lifecycle events for receipt Application/task"]
+    for path in calls:
+        name = path.parents[2].name
+        if name not in WORKERS:
+            continue
+        try:
+            checkpoint = json.loads(path.read_text())
+            if checkpoint.get("status") != "completed":
+                continue  # Failed attempts cannot supply outputs; later repairs are legitimate.
+            index = int(path.parent.name)
+            if (checkpoint.get("task_id") != task_id or checkpoint.get("run_id") != run_id
+                    or checkpoint.get("agent_name") != name or checkpoint.get("call_index") != index):
+                raise ValueError("checkpoint task/run/Worker/call identity does not match its receipt path")
+            starts = [(i, row) for i, row in enumerate(events) if row.get("type") == "worker_call_started"
+                      and row.get("agent_name") == name and row.get("call_index") == index]
+            finishes = [(i, row) for i, row in enumerate(events) if row.get("type") == "worker_call_finished"
+                        and row.get("agent_name") == name and row.get("call_index") == index]
+            if len(starts) != 1 or len(finishes) != 1:
+                raise ValueError("completed call must have one canonical start and finish")
+            start_order, start = starts[0]
+            finish_order, finish = finishes[0]
+            actual_hash = hashlib.sha256(str(checkpoint["task_input"]).encode()).hexdigest()[:16]
+            if (start.get("run_id") != run_id or finish.get("status") != "completed"
+                    or checkpoint.get("input_hash") != actual_hash
+                    or start.get("input_hash") != checkpoint["input_hash"]
+                    or finish.get("input_hash") != checkpoint["input_hash"] or start_order >= finish_order):
+                raise ValueError("canonical call lifecycle identity or order mismatch")
+            started_at, finished_at = _event_time(start.get("started_at")), _event_time(finish.get("finished_at"))
+            if started_at >= finished_at:
+                raise ValueError("call finish must follow its start")
+            tool_events = [row for row in ledger if row.get("agent_name") == name
+                           and row.get("task_id") == task_id and row.get("root_run_id") == run_id
+                           and row.get("case_nonce") == nonce and row.get("workspace") == str(workspace)
+                           and started_at <= _event_time(row.get("at")) <= finished_at]
+            local_ids = {row.get("local_run_id") for row in tool_events}
+            if len(local_ids) != 1 or not next(iter(local_ids)) or run_id in local_ids:
+                raise ValueError("call must correlate to one distinct Worker local run's tool events")
+            if any(record["local_run_id"] in local_ids for record in records):
+                raise ValueError("distinct Worker calls must not reuse one local run identity")
+            steps = checkpoint.get("memory_steps", [])
+            if not any(sum((step.get("token_usage") or {}).get(key, 0) or 0
+                           for key in ("input_tokens", "output_tokens")) > 0 for step in steps):
+                raise ValueError("no actual model usage in completed Worker memory")
+            finals = [row for step in steps for row in (step.get("tool_results") or [])
+                      if row.get("tool_name") == "final_answer" and row.get("status") == "completed"]
+            output = _structured(finals[-1]["output"])
+            if not isinstance(output, dict) or not _same_json(output, _structured(checkpoint["result"])):
+                raise ValueError("completed result differs from the actual final-answer Tool output")
+            identity = {"workspace": str(workspace), "case_nonce": nonce}
+            query = _checkpoint_query(checkpoint["task_input"])
+            if any(output.get(key) != value for key, value in identity.items()) or not _contains_exact_json(query, identity):
+                raise ValueError("Worker input/output workspace or nonce differs from receipt")
+            records.append({"worker": name, "call_index": index, "checkpoint": str(path),
+                            "query": query, "output": output, "start_order": start_order, "finish_order": finish_order,
+                            "started_at": started_at, "finished_at": finished_at,
+                            "local_run_id": next(iter(local_ids)), "events": tool_events})
+        except (OSError, ValueError, KeyError, IndexError, TypeError) as exc:
+            errors.append(f"invalid {name} call evidence at {path}: {exc}")
+    return calls, records, errors
 
 
 def validate_trace(attempt: Path, receipt: dict[str, object]) -> dict[str, object]:
@@ -131,20 +213,18 @@ def validate_trace(attempt: Path, receipt: dict[str, object]) -> dict[str, objec
         if not any(row.get("agent_name") == worker and row.get("operation") == "pytest"
                    and row.get("exit_code") == 0 for row in ledger):
             errors.append(f"no successful actual pytest execution by {worker}")
-    calls = list((attempt / "runtime").glob("**/workers/*/calls/*/checkpoint.json"))
-    checkpoints = [json.loads(path.read_text()) for path in calls]
-    for worker in WORKERS:
-        matching = [checkpoint for path, checkpoint in zip(calls, checkpoints, strict=True) if path.parents[2].name == worker]
-        if not any(c.get("status") == "completed" and c.get("memory_steps") for c in matching):
-            errors.append(f"no completed framework checkpoint with model memory for {worker}")
-        if not any(sum((step.get("token_usage") or {}).get(key, 0) or 0
-                       for step in c.get("memory_steps", []) for key in ("input_tokens", "output_tokens")) > 0 for c in matching):
-            errors.append(f"no actual model usage in Worker memory for {worker}")
-    supervisor_records = []
     code_actions = []
     application_id = receipt.get("run", {}).get("application_id")
     supervisor_path = (attempt / "runtime/checkpoints" / application_id / task_id / "checkpoint.json"
                        if application_id and task_id else None)
+    calls, records, call_errors = _completed_worker_calls(
+        supervisor_path.parent if supervisor_path else None, root_run_id, task_id, nonce,
+        attempt / "workspace", ledger,
+    )
+    errors.extend(call_errors)
+    for worker in WORKERS:
+        if not any(row["worker"] == worker for row in records):
+            errors.append(f"no completed framework checkpoint with model memory and call identity for {worker}")
     if supervisor_path is None or not supervisor_path.is_file():
         errors.append("missing Supervisor checkpoint for receipt Application/task identity")
         checkpoint = {}
@@ -157,50 +237,64 @@ def validate_trace(attempt: Path, receipt: dict[str, object]) -> dict[str, objec
         for step in checkpoint.get("memory_steps", []):
             if step.get("code_action"):
                 code_actions.append(step["code_action"])
-            supervisor_records.extend(row for row in (step.get("tool_results") or [])
-                                      if row.get("tool_name") in WORKERS and row.get("status") == "completed")
     if receipt.get("mode") == "codeact" and not code_actions:
         errors.append("CodeAct Supervisor has no persisted Python execution evidence")
-    # Native Supervisor memory records typed calls directly. CodeAct's nested
-    # calls are evidenced by the Worker's canonical input and final-answer Tool
-    # record, without relying on an optional self-learning audit projection.
-    by_worker = {}
-    for row in supervisor_records:
-        by_worker.setdefault(row["tool_name"], row)
-    for path, checkpoint in sorted(zip(calls, checkpoints, strict=True), key=lambda pair: str(pair[0])):
-        name = path.parents[2].name
-        if name in by_worker or name not in WORKERS or checkpoint.get("status") != "completed":
+    # Both modes use the same canonical per-call input, result and lifecycle
+    # evidence. Never pick a first call by filesystem or tool-result ordering.
+    reachable = []
+    for record in sorted(records, key=lambda row: row["start_order"]):
+        name = record["worker"]
+        if name == WORKERS[0]:
+            reachable.append({**record, "transfers": {}, "corrective_transfers": []})
             continue
-        try:
-            final_records = [row for step in checkpoint["memory_steps"] for row in (step.get("tool_results") or [])
-                             if row.get("tool_name") == "final_answer" and row.get("status") == "completed"]
-            by_worker[name] = {"input": {"query": _checkpoint_query(checkpoint["task_input"])},
-                               "output": final_records[-1]["output"]}
-        except (KeyError, IndexError, ValueError):
-            errors.append(f"missing typed input or final Tool record in {name} checkpoint")
-    transfers = []
-    for previous, following in zip(WORKERS, WORKERS[1:], strict=False):
-        try:
-            previous_output = _structured(by_worker[previous]["output"])
-            if not isinstance(previous_output, dict):
-                raise ValueError("Worker result must be a JSON object")
-            next_input = by_worker[following]["input"]["query"]
-            matching_path = _exact_json_path(next_input, previous_output)
-            if matching_path is None:
-                errors.append(f"Worker result was not passed intact: {previous} -> {following}")
+        allowed = {WORKERS[WORKERS.index(name) - 1]}
+        if name == "repair_implementer":
+            allowed.add("independent_verifier")
+        for previous in sorted(reachable, key=lambda row: row["finish_order"], reverse=True):
+            if (previous["worker"] not in allowed or previous["finish_order"] >= record["start_order"]
+                    or previous["finished_at"] > record["started_at"]):
+                continue
+            query_path = _exact_json_path(record["query"], previous["output"])
+            if query_path is None:
+                continue
+            transfer = {
+                "from": previous["worker"], "to": name, "query_path": query_path,
+                "from_call_index": previous["call_index"], "to_call_index": record["call_index"],
+                "from_checkpoint": previous["checkpoint"], "to_checkpoint": record["checkpoint"],
+                "from_local_run_id": previous["local_run_id"], "to_local_run_id": record["local_run_id"],
+                "source_finished_at": previous["finished_at"].isoformat(),
+                "target_started_at": record["started_at"].isoformat(),
+                "original_output_sha256": hashlib.sha256(json.dumps(previous["output"], sort_keys=True,
+                                                                     ensure_ascii=False).encode()).hexdigest(),
+            }
+            transfers = dict(previous["transfers"])
+            corrective = list(previous["corrective_transfers"])
+            if previous["worker"] == "independent_verifier":
+                corrective.append(transfer)
             else:
-                transfers.append({"from": previous, "to": following, "query_path": matching_path,
-                                  "original_output_sha256": hashlib.sha256(json.dumps(previous_output, sort_keys=True,
-                                                                                      ensure_ascii=False).encode()).hexdigest()})
-        except (KeyError, TypeError, ValueError) as exc:
-            errors.append(f"missing structured Worker data transfer {previous} -> {following}: {exc}")
+                transfers[(previous["worker"], name)] = transfer
+            reachable.append({**record, "transfers": transfers, "corrective_transfers": corrective})
+            break
+    verifiers = [row for row in reachable if row["worker"] == "independent_verifier"]
+    selected = verifiers[-1] if verifiers else None
     try:
         report = json.loads((attempt / "workspace/reports/final.json").read_text())
-        if not any(row.get("agent_name") == "independent_verifier" and row.get("operation") == "pytest"
-                   and row.get("report") == report.get("test_report") for row in ledger):
-            errors.append("final report does not reference the independent verifier's actual test run")
-    except (OSError, ValueError):
+        reported_verifiers = [record for record in verifiers[-1:]
+                              if isinstance(report.get("test_report"), str)
+                              and report.get("verified") is True and record["output"].get("verified") is True
+                              and record["output"].get("test_report") == report["test_report"]
+                              and any(row.get("operation") == "pytest" and row.get("exit_code") == 0
+                                      and row.get("report") == report["test_report"] for row in record["events"])]
+        if reported_verifiers:
+            selected = reported_verifiers[-1]
+        else:
+            errors.append("final report does not match the final independent verifier's actual test run and verdict")
+    except (OSError, ValueError, AttributeError):
         errors.append("missing structured final report for trace correlation")
+    transfers = list(selected["transfers"].values()) if selected else []
+    for previous, following in zip(WORKERS, WORKERS[1:], strict=False):
+        if not any(row["from"] == previous and row["to"] == following for row in transfers):
+            errors.append(f"Worker result was not passed intact from an earlier completed call: {previous} -> {following}")
     manifest_path = receipt.get("run", {}).get("manifest_path")
     manifest = json.loads(Path(manifest_path).read_text()) if manifest_path else {}
     if manifest.get("status") != "completed":
@@ -208,6 +302,7 @@ def validate_trace(attempt: Path, receipt: dict[str, object]) -> dict[str, objec
     return {"passed": not errors, "errors": errors, "workers": list(WORKERS),
             "local_run_ids": sorted(str(item) for item in local_ids), "tool_events": len(ledger),
             "checkpoint_files": [str(p) for p in calls], "transfers": transfers,
+            "corrective_transfers": selected["corrective_transfers"] if selected else [],
             "supervisor_checkpoint": str(supervisor_path) if supervisor_path else None,
             "supervisor_code_actions": len(code_actions)}
 
