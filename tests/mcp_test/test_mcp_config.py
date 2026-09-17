@@ -1,4 +1,4 @@
-"""Unit tests for src.mcp.config — JSON loading, path resolution, parsing, merging."""
+"""Unit tests for agentloom.adapters.mcp.config — JSON loading, path resolution, parsing, merging."""
 
 from __future__ import annotations
 
@@ -8,7 +8,7 @@ from pathlib import Path
 
 import pytest
 
-from src.mcp.config import (
+from agentloom.adapters.mcp.config import (
     McpServerConfig,
     McpSettings,
     load_mcp_json,

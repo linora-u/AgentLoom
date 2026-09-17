@@ -8,14 +8,14 @@ AgentLoom 将内置工具的 metadata 与 Python implementation 加载彻底分�
 
 | Module | 唯一职责 | 禁止承担 |
 |---|---|---|
-| `src/tools/catalog.py` | `ToolSpec`、toolset 归属、描述、安全与输出 metadata、implementation 引用 | 导入具体工具包或 Runtime 配置 |
-| `src/tools/loader.py` | 把一个已注册 implementation 引用解析为 callable | 工具 metadata 或 toolset 归属 |
-| `src/tools/tool_meta.py` | 合并全局与 Agent override 后的有效 metadata | 转发 catalog interface 或加载 implementation |
-| `src/tools/<group>/` | 具体工具 implementation | 内置 catalog 归属 |
+| `agentloom/tools/catalog.py` | `ToolSpec`、toolset 归属、描述、安全与输出 metadata、implementation 引用 | 导入具体工具包或 Runtime 配置 |
+| `agentloom/tools/loader.py` | 把一个已注册 implementation 引用解析为 callable | 工具 metadata 或 toolset 归属 |
+| `agentloom/tools/tool_meta.py` | 合并全局与 Agent override 后的有效 metadata | 转发 catalog interface 或加载 implementation |
+| `agentloom/tools/<group>/` | 具体工具 implementation | 内置 catalog 归属 |
 
-`src.tools` 根包有意不导出任何内容。导入根包既不会注册工具，也不会加载
-工具。Runtime 通过 `src.tools.loader` 解析已注册内置工具；只需要 metadata 的
-代码直接依赖 `src.tools.catalog`；只测试某个具体 implementation 时，可以直接
+`agentloom.tools` 根包有意不导出任何内容。导入根包既不会注册工具，也不会加载
+工具。Runtime 通过 `agentloom.tools.loader` 解析已注册内置工具；只需要 metadata 的
+代码直接依赖 `agentloom.tools.catalog`；只测试某个具体 implementation 时，可以直接
 导入对应工具组。
 
 implementation group 的 `__init__.py` 兼容导出必须保持 lazy：只有真正请求某个
@@ -34,7 +34,7 @@ metadata consumer ──> catalog <── loader ──> selected implementation
 effective metadata ───────────┘
 ```
 
-catalog 是唯一事实源。函数即使存在于 `src/tools/`，没有 catalog 中的
+catalog 是唯一事实源。函数即使存在于 `agentloom/tools/`，没有 catalog 中的
 `ToolSpec` 也不是内置工具。YAML 动态工具、生成的 Worker 工具不进入该 catalog；
 Goal 工具由 Goal Mode 注入，也不属于默认 catalog。
 
@@ -63,7 +63,7 @@ Goal 工具由 Goal Mode 注入，也不属于默认 catalog。
 ## 新增内置工具
 
 1. 将 implementation 放进职责最窄的现有工具组；没有合适归属时再创建新组。
-2. 只在 `src/tools/catalog.py` 增加一个 `ToolSpec`，显式填写 implementation
+2. 只在 `agentloom/tools/catalog.py` 增加一个 `ToolSpec`，显式填写 implementation
    引用以及完整的安全与输出 metadata。
 3. 不增加根包转发，不允许 catalog 导入 implementation。
 4. 增加解析、metadata 与 fresh-interpreter import 测试；metadata-only 测试必须

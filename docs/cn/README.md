@@ -286,7 +286,7 @@ uv run loom run <workflow> --output-format jsonl
 `RunInfo` receipt 的 `ApplicationRunResult`：
 
 ```python
-from src.runner import execute_app
+from agentloom.application.runner import execute_app
 
 result = execute_app("applications/release_review/workflows/release_review_agent.yaml")
 print(result.output, result.run.run_id)

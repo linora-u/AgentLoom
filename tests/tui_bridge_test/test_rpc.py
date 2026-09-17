@@ -9,7 +9,7 @@ from pathlib import Path
 
 import pytest
 
-from src.lib.runtime.context import RuntimeRunLease
+from agentloom.runtime.context import RuntimeRunLease
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 
@@ -89,7 +89,7 @@ def _rpc(project_root: Path, *requests: dict) -> list[dict]:
     env["PYTHONPATH"] = os.pathsep.join(part for part in (str(REPO_ROOT), existing_pythonpath) if part)
     payload = "".join(json.dumps(request) + "\n" for request in requests)
     completed = subprocess.run(
-        [sys.executable, "-m", "src.tui_bridge"],
+        [sys.executable, "-m", "agentloom.tui_bridge"],
         cwd=project_root,
         env=env,
         input=payload,

@@ -160,7 +160,7 @@ def test_oracle_is_stdlib_only_and_does_not_call_production_classifiers() -> Non
         str(node.module or "") for node in ast.walk(tree) if isinstance(node, ast.ImportFrom)
     }
 
-    assert not any(name == "src" or name.startswith("src.") for name in imports)
+    assert not any(name in {"src", "agentloom"} or name.startswith(("src.", "agentloom.")) for name in imports)
     assert "redact_text(" not in source
     assert "scan_injection_patterns(" not in source
     assert "memory_content_hash(" not in source
@@ -221,7 +221,9 @@ def test_cli_defaults_are_the_only_release_eligible_shape() -> None:
     assert args.baseline_metrics is None
 
 
+@pytest.mark.parametrize("layout", ["historical", "responsibility", "canonical"])
 def test_release_source_gate_ignores_unrelated_worktree_changes(
+    layout: str,
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -236,7 +238,13 @@ def test_release_source_gate_ignores_unrelated_worktree_changes(
 
     repo = tmp_path / "repo"
     repo.mkdir()
-    for relative in offline_runner._SOURCE_FILES:
+    markers = {
+        "historical": set(),
+        "responsibility": {"src/self_learning/event_schema.py"},
+        "canonical": {"agentloom/self_learning/event_schema.py"},
+    }
+    source_paths = offline_runner._source_paths_for_tree(markers[layout])
+    for relative in source_paths:
         path = repo / relative
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(f"bound source: {relative}\n", encoding="utf-8")
@@ -282,7 +290,7 @@ def test_release_source_gate_ignores_unrelated_worktree_changes(
     assert unknown_global_state["dirty"] is False
     assert unknown_global_state["worktree_dirty"] is None
 
-    bound_path = repo / offline_runner._SOURCE_FILES[-1]
+    bound_path = repo / source_paths[-1]
     bound_path.write_text("changed production source\n", encoding="utf-8")
     bound_dirty = offline_runner._git_source_state()
     assert bound_dirty["dirty"] is True

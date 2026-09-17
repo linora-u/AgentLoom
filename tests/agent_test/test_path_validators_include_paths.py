@@ -7,9 +7,9 @@ include_paths + exclude_paths conflict, and symlink + include_paths combination.
 import os
 from pathlib import Path
 
-import src.lib.config.config as config_module
-from src.lib.smolagents.hooks.path_validators import validate_workspace_path
-from src.lib.smolagents.hooks.types import HookContext
+import agentloom.configuration.config as config_module
+from agentloom.runtime.hooks.path_validators import validate_workspace_path
+from agentloom.runtime.hooks.types import HookContext
 
 # ---------------------------------------------------------------------------
 # Helpers (same conventions as test_path_validators_security.py)
@@ -26,14 +26,14 @@ def _patch_config(monkeypatch, raw: dict, root: Path) -> None:
     # Ensure workspace module reads from the same config (bypass agent context)
     tac = raw.get("tool_access_control", {})
     monkeypatch.setattr(
-        "src.lib.permissions.workspace._resolve_tool_access_control_config",
+        "agentloom.runtime.permissions.workspace._resolve_tool_access_control_config",
         lambda: tac,
     )
 
 
 def _patch_no_agent(monkeypatch) -> None:
     monkeypatch.setattr(
-        "src.lib.smolagents.hooks.path_validators.get_current_agent_config",
+        "agentloom.runtime.hooks.path_validators.get_current_agent_config",
         lambda: None,
     )
 

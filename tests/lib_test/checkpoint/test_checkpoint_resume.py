@@ -15,8 +15,8 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from src.lib.checkpoint import CheckpointManager, CheckpointSerializer
-from src.lib.checkpoint.coordinator import CheckpointCoordinator
+from agentloom.runtime.checkpoint import CheckpointManager, CheckpointSerializer
+from agentloom.runtime.checkpoint.coordinator import CheckpointCoordinator
 
 # ── fixtures ─────────────────────────────────────────────────────────────
 
@@ -53,7 +53,7 @@ class TestSupervisorCheckpointSave:
         from smolagents.memory import ActionStep
         from smolagents.monitoring import Timing
 
-        from src.lib.checkpoint.coordinator import _steps_including_completed
+        from agentloom.runtime.checkpoint.coordinator import _steps_including_completed
 
         previous = ActionStep(
             step_number=1,
@@ -369,7 +369,7 @@ class TestWorkerCheckpoint:
                 pass
 
         monkeypatch.setattr(
-            "src.lib.checkpoint.coordinator.WorkerHeartbeat",
+            "agentloom.runtime.checkpoint.coordinator.WorkerHeartbeat",
             _Heartbeat,
         )
 

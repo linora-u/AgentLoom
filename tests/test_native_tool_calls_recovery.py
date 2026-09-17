@@ -10,10 +10,10 @@ from smolagents.memory import ActionStep
 from smolagents.models import ChatMessage, ChatMessageToolCall, ChatMessageToolCallFunction, MessageRole
 from smolagents.monitoring import Timing
 
-from src.lib.logging import NullLoggerBackend
-from src.lib.smolagents.agent.base_agent import ToolCallingAgentV2
-from src.lib.smolagents.models.litellm_model import LiteLLMModelV2
-from src.lib.smolagents.models.tool_call_parser import ToolCallParseError
+from agentloom.runtime.logging import NullLoggerBackend
+from agentloom.adapters.smolagents.agents import ToolCallingAgentV2
+from agentloom.adapters.smolagents.models.litellm_model import LiteLLMModelV2
+from agentloom.adapters.smolagents.models.tool_call_parser import ToolCallParseError
 
 
 class EchoTool(Tool):

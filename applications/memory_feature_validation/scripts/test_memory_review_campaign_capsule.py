@@ -630,19 +630,20 @@ def test_trusted_launcher_creation_is_exclusive(tmp_path: Path) -> None:
     assert loom.stat().st_ino == original_inode
 
 
+@pytest.mark.parametrize("runtime_package", ["src", "agentloom"])
 def test_trusted_launcher_checks_exact_pycache_prefix_before_other_imports(
-    tmp_path: Path,
+    tmp_path: Path, runtime_package: str,
 ) -> None:
     root = tmp_path / "capsule"
     python = root / ".venv" / "bin" / "python"
     python.parent.mkdir(parents=True)
     python.symlink_to(Path(sys.executable).resolve())
     (root / "pyproject.toml").write_text(
-        '[project.scripts]\nloom = "src.__main__:main"\n',
+        f'[project.scripts]\nloom = "{runtime_package}.__main__:main"\n',
         encoding="utf-8",
     )
     imported = root / "src-imported"
-    package = root / "src"
+    package = root / runtime_package
     package.mkdir()
     (package / "__init__.py").write_text(
         f"from pathlib import Path\nPath({str(imported)!r}).touch()\n",
@@ -1289,3 +1290,15 @@ def test_runtime_guard_blocks_unix_socket_proxy_writes(tmp_path: Path) -> None:
     assert not daemon.is_alive()
     assert connected.is_set() is False
     assert target.read_text(encoding="utf-8") == "safe"
+
+
+def test_canonical_capsule_descriptor_binds_entrypoint_and_exact_origin():
+    descriptor = _valid_descriptor()
+    descriptor.update(runtime_package='agentloom', loom_entrypoint='agentloom.__main__:main',
+                      src_origin_relative='agentloom/__init__.py')
+    assert capsule_descriptor_issues(_reseal(descriptor)) == []
+    descriptor['src_origin_relative'] = 'src/__init__.py'
+    assert 'capsule src import origin was invalid' in capsule_descriptor_issues(_reseal(descriptor))
+    descriptor['src_origin_relative'] = 'agentloom/__init__.py'
+    descriptor['loom_entrypoint'] = 'unexpected.module:main'
+    assert 'capsule runtime entrypoint was invalid' in capsule_descriptor_issues(_reseal(descriptor))

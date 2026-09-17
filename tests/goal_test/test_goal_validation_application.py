@@ -5,7 +5,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from src.lib.goal import GoalState, GoalStateProvider, bind_goal_state_provider
+from agentloom.runtime.goal import GoalState, GoalStateProvider, bind_goal_state_provider
 
 _REPORT_TOOLS_PATH = (
     Path(__file__).parents[2]
@@ -84,7 +84,7 @@ def test_parallel_budget_probe_reuses_report_for_same_goal(tmp_path, monkeypatch
 
 
 def test_goal_audit_batch_injects_evidence_into_tool_free_worker_query(monkeypatch):
-    from src.lib.smolagents.agent.yaml_agent_factory import YamlAgentFactory
+    from agentloom.runtime.factory import YamlAgentFactory
 
     captured = {}
 
@@ -113,4 +113,4 @@ def test_goal_audit_batch_injects_evidence_into_tool_free_worker_query(monkeypat
     assert captured["max_workers"] == 1
     query = captured["tasks"][0]["query"]
     assert "EVIDENCE_BUNDLE=" in query
-    assert '"src/runtime/goal/model.py"' in query
+    assert '"agentloom/runtime/goal/model.py"' in query

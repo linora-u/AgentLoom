@@ -3,7 +3,7 @@ from pathlib import Path
 import pytest
 from pydantic import ValidationError
 
-import src.lib.config.config as config_module
+import agentloom.configuration.config as config_module
 
 
 def _patch_active_config(monkeypatch, raw: dict) -> None:
@@ -99,7 +99,7 @@ def test_llm_no_default_model_type_raises_for_implicit_request(monkeypatch):
     assert "the model call was not started" in message
     assert "Agent YAML" in message
 
-    from src.lib.smolagents.models.model_types import ModelTypeManager
+    from agentloom.adapters.smolagents.models.model_types import ModelTypeManager
 
     with pytest.raises(ValueError) as exc_info:
         ModelTypeManager.resolve_model_type(None)

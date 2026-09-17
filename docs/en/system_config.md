@@ -354,7 +354,7 @@ lsp_servers:
 | `max_restarts` | `int` | `3` | Max crash recovery attempts per server |
 | `servers` | `list` | `[python]` | Languages to start (40+ supported) |
 
-> Servers are managed by `src/services/lsp/LSPServerManager`. Unsupported languages automatically fall back to tree-sitter AST analysis (46+ languages).
+> Servers are managed by `agentloom/adapters/lsp/LSPServerManager`. Unsupported languages automatically fall back to tree-sitter AST analysis (46+ languages).
 
 ---
 
@@ -1262,13 +1262,13 @@ The framework uses Pydantic to validate system configuration. The following show
 
 | Config Section | Pydantic Model | Source File |
 |--------|--------------|--------|
-| Root configuration | `RootSettings` | `src/lib/config/config_validation.py` |
-| `system.*` | `SystemSettings` | `src/lib/config/config_validation.py` |
-| `model_request_headers.*` | `ModelRequestHeadersSettings` | `src/lib/config/config_validation.py` |
-| `tool_access_control.*` | `ToolAccessControlSettings` | `src/lib/config/config_validation.py` |
-| `runtime.*` | `RuntimeSettings` | `src/lib/config/config_validation.py` |
-| `logging.*` | `LoggingSettings` | `src/lib/config/config_validation.py` |
-| `self_learning.*` | `SelfLearningSettings` / `SelfLearningReviewSettings` | `src/lib/config/config_validation.py` |
+| Root configuration | `RootSettings` | `agentloom/configuration/config_validation.py` |
+| `system.*` | `SystemSettings` | `agentloom/configuration/config_validation.py` |
+| `model_request_headers.*` | `ModelRequestHeadersSettings` | `agentloom/configuration/config_validation.py` |
+| `tool_access_control.*` | `ToolAccessControlSettings` | `agentloom/configuration/config_validation.py` |
+| `runtime.*` | `RuntimeSettings` | `agentloom/configuration/config_validation.py` |
+| `logging.*` | `LoggingSettings` | `agentloom/configuration/config_validation.py` |
+| `self_learning.*` | `SelfLearningSettings` / `SelfLearningReviewSettings` | `agentloom/configuration/config_validation.py` |
 
 **`RootSettings` complete field definitions**:
 
@@ -1299,11 +1299,11 @@ The framework uses Pydantic to validate system configuration. The following show
 
 | Parser | Purpose | Located in |
 |--------|------|------|
-| `BoolParser` | Compatible boolean input normalization, used for logging and some LLM configuration switches | `config_validation.py` / `src/lib/logging/logger_manager.py` / `src/lib/config/llm_config.py` |
-| `IntParser` | Tolerant integer parsing; legacy `max_tokens: "max"` now resolves to the finite model default | `config_validation.py` / `src/lib/config/llm_config.py` |
-| `FloatParser` | Compatible float and integer string input, used for `temperature`, `retry_delay`, `max_retry_delay` in model config | `config_validation.py` / `src/lib/config/llm_config.py` |
+| `BoolParser` | Compatible boolean input normalization, used for logging and some LLM configuration switches | `config_validation.py` / `agentloom/runtime/logging/logger_manager.py` / `agentloom/configuration/llm_config.py` |
+| `IntParser` | Tolerant integer parsing; legacy `max_tokens: "max"` now resolves to the finite model default | `config_validation.py` / `agentloom/configuration/llm_config.py` |
+| `FloatParser` | Compatible float and integer string input, used for `temperature`, `retry_delay`, `max_retry_delay` in model config | `config_validation.py` / `agentloom/configuration/llm_config.py` |
 | `EnumParser` | General-purpose enum normalization helper, not currently consumed directly in the system.yaml main pipeline | `config_validation.py` |
-| `LogLevelParser` | Parses `logging.level`, supports standard `logging` levels and `OFF` | `config_validation.py` / `src/lib/logging/logger_manager.py` |
+| `LogLevelParser` | Parses `logging.level`, supports standard `logging` levels and `OFF` | `config_validation.py` / `agentloom/runtime/logging/logger_manager.py` |
 
 ---
 

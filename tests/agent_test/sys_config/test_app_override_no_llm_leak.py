@@ -11,7 +11,7 @@ from pathlib import Path
 import pytest
 import yaml
 
-import src.lib.config.config as config_module
+import agentloom.configuration.config as config_module
 
 
 @pytest.fixture(autouse=True)

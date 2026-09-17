@@ -20,7 +20,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from src.tools.file_ops.markdown_writer import (
+from agentloom.tools.file_ops.markdown_writer import (
     write_markdown_file,
     write_markdown_file_raw,
     append_markdown_sections,

@@ -5,7 +5,7 @@ import { BridgeClosedError, BridgeProtocolError, type BridgeTransport, type Brid
 // Isolated mode removes the inspected project's cwd and PYTHON* environment
 // variables from module resolution, so only the selected environment can
 // provide AgentLoom's bridge package.
-export const uvPythonBridgeCommand = ["uv", "run", "python", "-I", "-u", "-m", "src.tui_bridge"] as const
+export const uvPythonBridgeCommand = ["uv", "run", "python", "-I", "-u", "-m", "agentloom.tui_bridge"] as const
 export const defaultMaxBridgeLineBytes = 8 * 1024 * 1024
 
 export interface PythonTransportOptions {
@@ -37,14 +37,14 @@ export function resolvePythonBridgeCommand(
   env: Readonly<Record<string, string | undefined>> = process.env,
 ) {
   const installedPython = env.AGENTLOOM_PYTHON?.trim()
-  if (installedPython) return [installedPython, "-I", "-u", "-m", "src.tui_bridge"] as const
+  if (installedPython) return [installedPython, "-I", "-u", "-m", "agentloom.tui_bridge"] as const
 
   const candidates =
     process.platform === "win32"
       ? [resolve(projectRoot, ".venv", "Scripts", "python.exe"), resolve(projectRoot, ".venv", "bin", "python")]
       : [resolve(projectRoot, ".venv", "bin", "python"), resolve(projectRoot, ".venv", "Scripts", "python.exe")]
   const projectPython = candidates.find((candidate) => existsSync(candidate))
-  if (projectPython) return [projectPython, "-I", "-u", "-m", "src.tui_bridge"] as const
+  if (projectPython) return [projectPython, "-I", "-u", "-m", "agentloom.tui_bridge"] as const
 
   return uvPythonBridgeCommand
 }

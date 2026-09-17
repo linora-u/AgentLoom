@@ -43,7 +43,7 @@ def phase_interrupt():
     t = threading.Thread(target=_auto_sigint, daemon=True)
     t.start()
 
-    from src.runner import run_app
+    from agentloom.application.runner import run_app
     try:
         result = run_app(YAML_PATH)
         print(f"[E2E] Completed normally (task finished before interrupt): {str(result)[:200]}")
@@ -61,9 +61,9 @@ def phase_interrupt():
 def phase_check():
     """List all saved checkpoints."""
     print("[E2E] Phase 2: Checking saved checkpoints...")
-    from src.lib.config import C
-    from src.lib.checkpoint.checkpoint_manager import list_all_tasks
-    from src.lib.runtime import resolve_runtime_home
+    from agentloom.configuration import C
+    from agentloom.runtime.checkpoint.checkpoint_manager import list_all_tasks
+    from agentloom.runtime import resolve_runtime_home
 
     checkpoints_root = resolve_runtime_home(C.raw, agent_root=C.agent_root).root_dir / "checkpoints"
     tasks = list_all_tasks(checkpoints_root=checkpoints_root)
@@ -98,7 +98,7 @@ def phase_check():
 def phase_resume(task_id: str):
     """Resume from a checkpoint."""
     print(f"[E2E] Phase 3: Resuming task {task_id}")
-    from src.runner import run_app
+    from agentloom.application.runner import run_app
     try:
         result = run_app(YAML_PATH, resume_task_id=task_id)
         print(f"[E2E] >>> RESUMED and completed successfully <<<")

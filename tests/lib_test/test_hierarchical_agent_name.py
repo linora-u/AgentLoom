@@ -11,7 +11,7 @@ via the ``runtime_agent_path`` ContextVar + ``RUNTIME_AGENT_PATH`` env var.
 
 import pytest
 
-from src.trace.task_context import (
+from agentloom.runtime.trace.task_context import (
     get_current_agent_name,
     set_current_agent_name,
     clear_current_agent_name,

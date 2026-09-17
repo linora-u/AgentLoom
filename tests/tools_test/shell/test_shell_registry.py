@@ -44,10 +44,10 @@ import os
 import threading
 from contextvars import copy_context
 
-from src.lib.runtime import RuntimeHome, bind_run_context
-from src.tools.shell.process import ShellProcess, ShellProcessRegistry
-from src.tools.shell import shell_tool
-from src.trace import (
+from agentloom.runtime import RuntimeHome, bind_run_context
+from agentloom.tools.shell.process import ShellProcess, ShellProcessRegistry
+from agentloom.tools.shell import shell_tool
+from agentloom.runtime.trace import (
     set_current_agent_id,
     clear_current_agent_id,
 )

@@ -4,7 +4,7 @@ import threading
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
-from src.extensions.self_learning.persistence.memory_store import MemoryStore
+from agentloom.self_learning.persistence.memory_store import MemoryStore
 
 
 def _config(*, prompt_max_chars: int = 12_000) -> dict:
@@ -130,8 +130,8 @@ def test_model_facing_write_submits_candidate_and_never_directly_activates(
 
 
 def test_model_memory_tool_exposes_candidate_only_contract() -> None:
-    from src.lib.smolagents.tools.tools import ensure_tool_wrapped
-    from src.tools.self_learning.memory_tool import memory
+    from agentloom.adapters.smolagents.tools.tools import ensure_tool_wrapped
+    from agentloom.tools.self_learning.memory_tool import memory
 
     tool = ensure_tool_wrapped([memory])[0]
     description = " ".join(tool.description.split())
@@ -147,7 +147,7 @@ def test_model_memory_tool_exposes_candidate_only_contract() -> None:
 def test_root_snapshot_freezes_memory_mutations_until_the_next_root(
     tmp_path: Path,
 ) -> None:
-    from src.trace import bind_root_run, require_root_run_state
+    from agentloom.runtime.trace import bind_root_run, require_root_run_state
 
     config = _config()
     db_path = tmp_path / "self_learning.db"
@@ -190,7 +190,7 @@ def test_concurrent_workers_compute_one_shared_root_snapshot(
     tmp_path: Path,
     monkeypatch,
 ) -> None:
-    from src.trace import (
+    from agentloom.runtime.trace import (
         bind_explicit_execution_context,
         bind_root_run,
         capture_explicit_execution_context,

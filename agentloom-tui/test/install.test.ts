@@ -61,7 +61,7 @@ describe("source installer", () => {
       env: { ...process.env, AGENTLOOM_PYTHON: undefined, AGENTLOOM_TEST_LOG: fixture.log },
     })
     expect(schedulerInvocation.exitCode).toBe(0)
-    expect(await readFile(fixture.log, "utf8")).toContain("python|-I -m src schedules --help")
+    expect(await readFile(fixture.log, "utf8")).toContain("python|-I -m agentloom schedules --help")
     const updateInvocation = Bun.spawnSync({
       cmd: [wrapper, "update"],
       cwd: repositoryRoot,

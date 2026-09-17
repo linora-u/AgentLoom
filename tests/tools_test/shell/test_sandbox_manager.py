@@ -4,13 +4,13 @@ import os
 import pytest
 from unittest.mock import patch, MagicMock
 
-from src.utils.sandbox.sandbox_manager import (
+from agentloom.utils.sandbox.sandbox_manager import (
     SandboxManager,
     SandboxConfig,
     _match_excluded_command,
     _load_sandbox_config,
 )
-from src.tools.shell.should_use_sandbox import should_use_sandbox
+from agentloom.tools.shell.should_use_sandbox import should_use_sandbox
 
 
 # =========================================================================
@@ -20,14 +20,14 @@ from src.tools.shell.should_use_sandbox import should_use_sandbox
 class TestSandboxConfig:
     """Test sandbox configuration loading."""
 
-    @patch("src.utils.sandbox.sandbox_manager.C.get_nested", return_value=None)
+    @patch("agentloom.utils.sandbox.sandbox_manager.C.get_nested", return_value=None)
     def test_default_config_disabled(self, mock_config):
         config = _load_sandbox_config()
         assert config.enabled is False
         assert config.mode == "bwrap"
         assert "." in config.allow_write
 
-    @patch("src.utils.sandbox.sandbox_manager.C.get_nested", return_value={
+    @patch("agentloom.utils.sandbox.sandbox_manager.C.get_nested", return_value={
         "enabled": True, "mode": "docker",
         "allow_write": ["/workspace"], "deny_write": ["/etc"],
         "network_isolation": True, "excluded_commands": ["git push:*"],
@@ -108,7 +108,7 @@ class TestShouldSandbox:
 class TestShouldUseSandboxWrapper:
     """Test the should_use_sandbox top-level function."""
 
-    @patch("src.tools.shell.should_use_sandbox.SandboxManager")
+    @patch("agentloom.tools.shell.should_use_sandbox.SandboxManager")
     def test_delegates_to_manager(self, MockManager):
         instance = MockManager.return_value
         instance.should_sandbox.return_value = True

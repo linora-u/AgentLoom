@@ -9,8 +9,8 @@ from pathlib import Path
 import pytest
 from click.testing import CliRunner
 
-from src.__main__ import main
-from src.extensions.self_learning.review_artifacts import ReviewCLIService
+from agentloom.__main__ import main
+from agentloom.self_learning.review_artifacts import ReviewCLIService
 
 
 def _commands(output: str) -> set[str]:

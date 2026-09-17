@@ -11,7 +11,7 @@ import pytest
 from pathlib import Path
 from unittest.mock import patch
 
-from src.lib.permissions.path_validation import (
+from agentloom.runtime.permissions.path_validation import (
     PathValidationResult,
     has_suspicious_windows_pattern,
     is_vulnerable_unc_path,
@@ -40,15 +40,15 @@ class _MockedWorkspace:
             allowed.extend(Path(p).resolve() for p in include_paths)
         self.patches = [
             patch(
-                "src.lib.permissions.workspace.get_workspace_root",
+                "agentloom.runtime.permissions.workspace.get_workspace_root",
                 return_value=Path(ws_path).resolve(),
             ),
             patch(
-                "src.lib.permissions.workspace.get_allowed_directories",
+                "agentloom.runtime.permissions.workspace.get_allowed_directories",
                 return_value=allowed,
             ),
             patch(
-                "src.lib.permissions.workspace.get_rule_exclude_paths",
+                "agentloom.runtime.permissions.workspace.get_rule_exclude_paths",
                 return_value=self.exclude_paths,
             ),
         ]
@@ -201,11 +201,11 @@ class TestValidatePathAbnormal:
     def test_exception_handling(self):
         """Invalid input should not crash, returns blocked."""
         # Patch to force an error during path resolution
-        with patch("src.lib.permissions.workspace.get_allowed_directories",
+        with patch("agentloom.runtime.permissions.workspace.get_allowed_directories",
                     side_effect=RuntimeError("boom")):
-            with patch("src.lib.permissions.workspace.get_workspace_root",
+            with patch("agentloom.runtime.permissions.workspace.get_workspace_root",
                        return_value=Path("/fake")):
-                with patch("src.lib.permissions.workspace.get_rule_exclude_paths",
+                with patch("agentloom.runtime.permissions.workspace.get_rule_exclude_paths",
                            return_value=[]):
                     # The function should handle the error gracefully
                     # It may raise or return blocked, but NOT return allowed=True
@@ -359,7 +359,7 @@ class TestValidatePathGlob:
         outside.mkdir()
         (outside / "file.txt").write_text("data")
         with _MockedWorkspace(ws):
-            with patch("src.lib.permissions.workspace.get_allowed_directories",
+            with patch("agentloom.runtime.permissions.workspace.get_allowed_directories",
                        return_value=[Path("*")]):
                 result = validate_path(str(outside / "file.txt"))
                 assert result.allowed is True

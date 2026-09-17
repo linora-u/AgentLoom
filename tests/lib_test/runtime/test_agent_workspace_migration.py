@@ -4,7 +4,7 @@ from pathlib import Path
 def test_archive_legacy_agent_workspaces_moves_tree_under_runtime_home(
     tmp_path: Path,
 ) -> None:
-    from src.lib.runtime.workspace_migration import archive_legacy_agent_workspaces
+    from agentloom.runtime.workspace_migration import archive_legacy_agent_workspaces
 
     legacy_root = tmp_path / ".runtime"
     (legacy_root / "supervisor" / "worker").mkdir(parents=True)
@@ -29,7 +29,7 @@ def test_archive_legacy_agent_workspaces_moves_tree_under_runtime_home(
 
 
 def test_preview_legacy_agent_workspaces_does_not_move_files(tmp_path: Path) -> None:
-    from src.lib.runtime.workspace_migration import preview_legacy_agent_workspaces
+    from agentloom.runtime.workspace_migration import preview_legacy_agent_workspaces
 
     legacy_root = tmp_path / ".runtime"
     (legacy_root / "agent").mkdir(parents=True)
@@ -49,7 +49,7 @@ def test_archive_legacy_agent_workspaces_rejects_runtime_inside_source(
 ) -> None:
     import pytest
 
-    from src.lib.runtime.workspace_migration import archive_legacy_agent_workspaces
+    from agentloom.runtime.workspace_migration import archive_legacy_agent_workspaces
 
     legacy_root = tmp_path / ".runtime"
     legacy_root.mkdir()
@@ -66,7 +66,7 @@ def test_archive_legacy_agent_workspaces_rejects_symlinked_workspaces(
 ) -> None:
     import pytest
 
-    from src.lib.runtime.workspace_migration import archive_legacy_agent_workspaces
+    from agentloom.runtime.workspace_migration import archive_legacy_agent_workspaces
 
     legacy_root = tmp_path / ".runtime"
     legacy_root.mkdir()

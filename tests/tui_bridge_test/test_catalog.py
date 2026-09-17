@@ -10,8 +10,8 @@ from pathlib import Path
 
 import yaml
 
-from src.tui_bridge.bridge import TuiBridge
-from src.tui_bridge.catalog import project_catalog
+from agentloom.tui_bridge.bridge import TuiBridge
+from agentloom.tui_bridge.catalog import project_catalog
 
 NOW = datetime(2026, 7, 18, 8, 0, tzinfo=UTC)
 REPO_ROOT = Path(__file__).resolve().parents[2]
@@ -158,7 +158,7 @@ agent_function_schema:
         _write(tmp_path / relative, payload)
 
     parse_counts: Counter[str] = Counter()
-    from src.application import definition as definition_module
+    from agentloom.application import definition as definition_module
     original_safe_load = definition_module.load_unique_yaml
 
     def count_definition_parse(stream):
@@ -446,10 +446,10 @@ def test_catalog_import_does_not_load_agent_or_model_runtime() -> None:
             "-c",
             (
                 "import sys; "
-                "from src.tui_bridge.catalog import project_catalog; "
+                "from agentloom.tui_bridge.catalog import project_catalog; "
                 "assert project_catalog; "
-                "assert 'src.lib.smolagents.agent.base_agent' not in sys.modules; "
-                "assert 'src.runner' not in sys.modules; "
+                "assert 'agentloom.runtime.agent' not in sys.modules; "
+                "assert 'agentloom.application.runner' not in sys.modules; "
                 "assert 'litellm' not in sys.modules"
             ),
         ],

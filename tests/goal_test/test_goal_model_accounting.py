@@ -3,14 +3,14 @@ from types import SimpleNamespace
 import pytest
 from smolagents import LiteLLMModel
 
-from src.lib.goal import GoalBudgetLimitedError, GoalCompleteError, GoalState
-from src.lib.goal.provider import GoalStateProvider, bind_goal_state_provider
-from src.lib.smolagents.memory.context_compression import (
+from agentloom.runtime.goal import GoalBudgetLimitedError, GoalCompleteError, GoalState
+from agentloom.runtime.goal.provider import GoalStateProvider, bind_goal_state_provider
+from agentloom.runtime.memory.context_compression import (
     InternalChatMessage,
     summarize_conversation,
 )
-from src.lib.smolagents.models.litellm_model import LiteLLMModelV2
-from src.trace import bind_local_run
+from agentloom.adapters.smolagents.models.litellm_model import LiteLLMModelV2
+from agentloom.runtime.trace import bind_local_run
 
 
 def _model():
@@ -176,7 +176,7 @@ def test_budget_crossing_does_not_grant_completion_settlement(monkeypatch):
 def test_smart_summary_cannot_consume_completion_settlement(monkeypatch):
     from smolagents.models import ChatMessage, MessageRole
 
-    from src.lib.smolagents.memory import context_compression
+    from agentloom.runtime.memory import context_compression
 
     monkeypatch.setattr(
         context_compression.model_manager,

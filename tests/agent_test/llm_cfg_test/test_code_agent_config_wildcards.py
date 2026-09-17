@@ -2,7 +2,7 @@ import builtins
 
 import pytest
 
-import src.lib.config.config as config_module
+import agentloom.configuration.config as config_module
 
 
 class _DummyConfigProxy:

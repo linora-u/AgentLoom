@@ -301,7 +301,7 @@ For programmatic execution, `execute_app()` returns an `ApplicationRunResult`
 with output, timestamps, structured Goal state, and a `RunInfo` receipt:
 
 ```python
-from src.runner import execute_app
+from agentloom.application.runner import execute_app
 
 result = execute_app("applications/release_review/workflows/release_review_agent.yaml")
 print(result.output, result.run.run_id)

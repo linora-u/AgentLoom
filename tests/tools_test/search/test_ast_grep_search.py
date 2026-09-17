@@ -3,8 +3,8 @@
 import json
 from pathlib import Path
 import pytest
-from src.tools.search.ast_grep_tool import ast_grep_search_file
-from src.tools.search.ast_grep_tool.ast_grep_tool import infer_language_from_file
+from agentloom.tools.search.ast_grep_tool import ast_grep_search_file
+from agentloom.tools.search.ast_grep_tool.ast_grep_tool import infer_language_from_file
 
 TESTDATA_DIR = Path(__file__).parent / "testdata"
 

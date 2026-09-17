@@ -1,4 +1,4 @@
-"""Unit tests for src.lib.smolagents.prompts.prompt_builder.
+"""Unit tests for agentloom.runtime.prompts.prompt_builder.
 
 These tests verify the prompt resolution chain and assembly logic
 independently of BaseAgent.
@@ -11,13 +11,13 @@ from pathlib import Path
 
 import pytest
 
-import src.lib.smolagents.prompts.prompt_builder as pb_module
-from src.lib.smolagents.prompts.prompt_builder import (
+import agentloom.runtime.prompts.prompt_builder as pb_module
+from agentloom.runtime.prompts.prompt_builder import (
     build_prompt_templates,
     resolve_model_family_prompt_path,
     resolve_prompt_path,
 )
-from src.lib.smolagents.skills.catalog import SkillCatalog, SkillSource
+from agentloom.runtime.skills.catalog import SkillCatalog, SkillSource
 
 # ---------------------------------------------------------------------------
 # Helpers
