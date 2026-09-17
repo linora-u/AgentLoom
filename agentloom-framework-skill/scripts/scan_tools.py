@@ -9,12 +9,11 @@ from __future__ import annotations
 
 import ast
 import copy
-import re
 from pathlib import Path
 from typing import Any
 
 import yaml
-
+from agentloom.application.definition import definition_error, load_agent_definition
 
 _AGENT_CONFIG_EXTS = {".yaml", ".yml", ".md"}
 
@@ -75,7 +74,7 @@ def scan_app_structure(app_path: str) -> str:
         if worker_dir.is_dir():
             worker_configs = sorted(
                 f
-                for f in worker_dir.iterdir()
+                for f in worker_dir.rglob("*")
                 if f.suffix.lower() in _AGENT_CONFIG_EXTS and f.is_file()
             )
             sections.append(f"\n## Worker Agents ({len(worker_configs)} 个)\n")
@@ -403,46 +402,11 @@ def _format_skills_summary(skills_cfg: Any) -> str:
 
 
 def _load_agent_config_from_file(agent_file: Path) -> tuple[dict[str, Any] | None, str | None]:
-    """加载 Agent 配置文件，支持 .yaml/.yml/.md。"""
+    """复用共享定义解析器；结构扫描不构造模型或执行工具。"""
     try:
-        with agent_file.open("r", encoding="utf-8") as f:
-            content = f.read()
-    except Exception as e:
-        return None, f"读取失败: {e}"
-
-    suffix = agent_file.suffix.lower()
-    try:
-        if suffix in {".yaml", ".yml"}:
-            data = yaml.safe_load(content)
-        elif suffix == ".md":
-            data, _ = _extract_yaml_from_markdown(content)
-        else:
-            return None, f"不支持的文件后缀: {suffix}"
-    except Exception as e:
-        return None, str(e)
-
-    if not isinstance(data, dict):
-        return None, "内容不是字典格式"
-    return data, None
-
-
-def _extract_yaml_from_markdown(content: str) -> tuple[dict[str, Any], str]:
-    """从 Markdown 中提取 YAML 代码块，并将剩余文本作为 workflow。"""
-    yaml_pattern = r"```yaml\s*\n(.*?)\n```"
-    match = re.search(yaml_pattern, content, re.DOTALL)
-    if not match:
-        raise ValueError("Markdown 中未找到 YAML 代码块")
-
-    yaml_content = match.group(1)
-    parsed = yaml.safe_load(yaml_content)
-    if not isinstance(parsed, dict):
-        raise ValueError("Markdown YAML 代码块内容不是字典")
-
-    workflow_content = re.sub(yaml_pattern, "", content, flags=re.DOTALL).strip()
-    if workflow_content:
-        parsed["workflow"] = workflow_content
-
-    return parsed, workflow_content
+        return load_agent_definition(agent_file), None
+    except (OSError, UnicodeError, yaml.YAMLError, TypeError, ValueError) as exc:
+        return None, definition_error(exc)
 
 
 def _extract_python_tool_capabilities(py_file: Path) -> list[tuple[str, str]]:
