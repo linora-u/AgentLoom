@@ -5,8 +5,8 @@ from pathlib import Path
 
 import pytest
 
-from src.schedules.store import ScheduleStore
-from src.tui_bridge.bridge import BridgeError, TuiBridge
+from agentloom.schedules.store import ScheduleStore
+from agentloom.tui_bridge.bridge import BridgeError, TuiBridge
 
 
 def _write_agent(project_root: Path, relative_path: str, *, name: str = "scheduled_agent") -> Path:

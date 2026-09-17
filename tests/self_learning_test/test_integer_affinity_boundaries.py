@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import pytest
 
-from src.extensions.self_learning.event_schema import CanonicalSessionEvent
+from agentloom.self_learning.event_schema import CanonicalSessionEvent
 
 
 @pytest.mark.parametrize("invalid", [True, False, "7", "password=STEPSECRET71"])

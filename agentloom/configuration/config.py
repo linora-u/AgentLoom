@@ -232,6 +232,8 @@ def _discover_agent_root(config_dir: Path | str | None = None) -> Path:
     * When *config_dir* is given (e.g. from tests), it is used directly –
       expected to point at the ``config/`` directory that contains
       ``system.yaml``.
+    * ``AGENTLOOM_PROJECT_ROOT`` selects a project explicitly for installed
+      execution outside its checkout. Invalid explicit input fails directly.
     * Otherwise the function walks **upward** from the current working
       directory and from the package source tree (``__file__``) looking for
       a ``pyproject.toml`` whose ``[project] name`` equals
@@ -247,6 +249,16 @@ def _discover_agent_root(config_dir: Path | str | None = None) -> Path:
                 f"contain '{SYSTEM_CONFIG_NAME}'. Please verify the path."
             )
         return configured_dir.parent
+
+    explicit_root = os.environ.get("AGENTLOOM_PROJECT_ROOT")
+    if explicit_root is not None:
+        root = Path(explicit_root).expanduser().resolve()
+        if not explicit_root.strip() or not (root / "config" / SYSTEM_CONFIG_NAME).is_file():
+            raise FileNotFoundError(
+                f"AGENTLOOM_PROJECT_ROOT '{explicit_root}' must contain "
+                f"config/{SYSTEM_CONFIG_NAME}."
+            )
+        return root
 
     search_origins = [
         ("current working directory", Path.cwd().resolve()),
@@ -265,8 +277,8 @@ def _discover_agent_root(config_dir: Path | str | None = None) -> Path:
         f"Cannot locate the {_PROJECT_NAME} project root. "
         f"Searched upward from: {searched}. "
         f"Expected to find a pyproject.toml with [project] name = '{_PROJECT_NAME}'. "
-        f"Hint: either run from within the project tree or install the package "
-        f"in editable mode ('pip install -e .')."
+        f"Hint: set AGENTLOOM_PROJECT_ROOT to the project directory or run "
+        f"from within the project tree."
     )
 
 

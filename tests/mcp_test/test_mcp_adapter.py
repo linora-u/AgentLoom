@@ -3,11 +3,11 @@ from __future__ import annotations
 import pytest
 from mcp.types import CallToolResult, TextContent, Tool
 
-from src.lib.smolagents.hooks import HookPlan, HookRun
-from src.lib.smolagents.hooks.tool_shim import inject_hooks
-from src.lib.smolagents.tool_protocol import settle_tool_call
-from src.mcp.adapter import AgentLoomSmolAgentsAdapter, McpToolExecutionError
-from src.trace import ExplicitExecutionContext, bind_explicit_execution_context
+from agentloom.runtime.hooks import HookPlan, HookRun
+from agentloom.adapters.smolagents.tool_shim import inject_hooks
+from agentloom.adapters.smolagents.tool_protocol import settle_tool_call
+from agentloom.adapters.mcp.adapter import AgentLoomSmolAgentsAdapter, McpToolExecutionError
+from agentloom.runtime.trace import ExplicitExecutionContext, bind_explicit_execution_context
 
 
 def _mcp_tool() -> Tool:

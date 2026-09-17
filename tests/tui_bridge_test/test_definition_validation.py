@@ -1,6 +1,6 @@
 from pathlib import Path
 
-from src.tui_bridge.bridge import TuiBridge
+from agentloom.tui_bridge.bridge import TuiBridge
 
 
 def test_catalog_uses_runner_required_fields_for_agent_validation(tmp_path: Path) -> None:

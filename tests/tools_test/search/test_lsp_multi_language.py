@@ -15,7 +15,7 @@ from pathlib import Path
 
 import pytest
 
-from src.tools.search.lsp_tool.lsp_tool import (
+from agentloom.tools.search.lsp_tool.lsp_tool import (
     lsp_find_definition,
     lsp_find_references,
     lsp_get_document_symbols,

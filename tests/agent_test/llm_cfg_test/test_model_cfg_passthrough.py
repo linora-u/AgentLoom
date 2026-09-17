@@ -1,9 +1,9 @@
 import copy
 from pathlib import Path
 
-import src.lib.config.config as config_module
-from src.lib.smolagents.models import model_manager as model_manager_module
-from src.lib.smolagents.models import model_types
+import agentloom.configuration.config as config_module
+from agentloom.adapters.smolagents.models import model_manager as model_manager_module
+from agentloom.adapters.smolagents.models import model_types
 
 
 def _patch_yaml_config(monkeypatch, config: dict) -> dict:

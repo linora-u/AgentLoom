@@ -2,10 +2,10 @@ import threading
 
 import pytest
 
-from src.lib.checkpoint import CheckpointManager
-from src.lib.checkpoint.coordinator import CheckpointCoordinator
-from src.lib.goal import GoalConfig, GoalState
-from src.lib.goal.provider import (
+from agentloom.runtime.checkpoint import CheckpointManager
+from agentloom.runtime.checkpoint.coordinator import CheckpointCoordinator
+from agentloom.runtime.goal import GoalConfig, GoalState
+from agentloom.runtime.goal.provider import (
     GoalBudgetLimitedError,
     GoalStateProvider,
     bind_goal_state_provider,

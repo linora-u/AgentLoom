@@ -15,7 +15,7 @@ import tempfile
 
 import pytest
 
-from src.tools.shell.process import ShellProcess
+from agentloom.tools.shell.process import ShellProcess
 
 
 # Unix-only tests (subprocess architecture works on both, but tests use /tmp).

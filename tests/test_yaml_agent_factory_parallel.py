@@ -10,7 +10,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from src.lib.concurrency.rate_limiter import GlobalRateLimiterRegistry
+from agentloom.runtime.concurrency.rate_limiter import GlobalRateLimiterRegistry
 
 
 @pytest.fixture(autouse=True)
@@ -28,18 +28,18 @@ class TestRunAgentsParallel:
 
         return (
             patch(
-                "src.lib.smolagents.agent.yaml_agent_factory.YamlAgentFactory.create_agent_as_tool",
+                "agentloom.runtime.factory.YamlAgentFactory.create_agent_as_tool",
                 return_value=mock_tool,
             ),
             patch(
-                "src.lib.concurrency.parallel_executor.ParallelAgentExecutor.execute_batch",
+                "agentloom.runtime.concurrency.parallel_executor.ParallelAgentExecutor.execute_batch",
                 return_value=[MagicMock(status="completed")],
             ),
             mock_tool,
         )
 
     def test_creates_tool_and_executes(self):
-        from src.lib.smolagents.agent.yaml_agent_factory import YamlAgentFactory
+        from agentloom.runtime.factory import YamlAgentFactory
 
         cm_create, cm_exec, mock_tool = self._patch_factory()
         with cm_create as m_create, cm_exec as m_exec:
@@ -52,13 +52,13 @@ class TestRunAgentsParallel:
             assert len(results) == 1
 
     def test_reads_model_type_from_dict(self):
-        from src.lib.smolagents.agent.yaml_agent_factory import YamlAgentFactory
+        from agentloom.runtime.factory import YamlAgentFactory
 
         mock_tool = MagicMock()
         mock_tool.__name__ = "t"
         with patch.object(YamlAgentFactory, "create_agent_as_tool", return_value=mock_tool):
-            with patch("src.lib.concurrency.parallel_executor.ParallelAgentExecutor.__init__", return_value=None) as init_mock:
-                with patch("src.lib.concurrency.parallel_executor.ParallelAgentExecutor.execute_batch", return_value=[]):
+            with patch("agentloom.runtime.concurrency.parallel_executor.ParallelAgentExecutor.__init__", return_value=None) as init_mock:
+                with patch("agentloom.runtime.concurrency.parallel_executor.ParallelAgentExecutor.execute_batch", return_value=[]):
                     YamlAgentFactory.run_agents_parallel(
                         config_path={"name": "test", "model_type": "summary"},
                         tasks=[],
@@ -68,13 +68,13 @@ class TestRunAgentsParallel:
                     assert init_mock.call_args.kwargs["model_type"] == "summary"
 
     def test_default_model_type_powerful(self):
-        from src.lib.smolagents.agent.yaml_agent_factory import YamlAgentFactory
+        from agentloom.runtime.factory import YamlAgentFactory
 
         mock_tool = MagicMock()
         mock_tool.__name__ = "t"
         with patch.object(YamlAgentFactory, "create_agent_as_tool", return_value=mock_tool):
-            with patch("src.lib.concurrency.parallel_executor.ParallelAgentExecutor.__init__", return_value=None) as init_mock:
-                with patch("src.lib.concurrency.parallel_executor.ParallelAgentExecutor.execute_batch", return_value=[]):
+            with patch("agentloom.runtime.concurrency.parallel_executor.ParallelAgentExecutor.__init__", return_value=None) as init_mock:
+                with patch("agentloom.runtime.concurrency.parallel_executor.ParallelAgentExecutor.execute_batch", return_value=[]):
                     YamlAgentFactory.run_agents_parallel(
                         config_path={"name": "test"},  # no model_type
                         tasks=[],
@@ -82,7 +82,7 @@ class TestRunAgentsParallel:
                     assert init_mock.call_args.kwargs["model_type"] == "powerful"
 
     def test_raises_on_empty_tools(self):
-        from src.lib.smolagents.agent.yaml_agent_factory import YamlAgentFactory
+        from agentloom.runtime.factory import YamlAgentFactory
 
         with patch.object(YamlAgentFactory, "create_agent_as_tool", return_value=None):
             with pytest.raises(RuntimeError, match="Failed to create"):
@@ -92,13 +92,13 @@ class TestRunAgentsParallel:
                 )
 
     def test_max_workers_passed(self):
-        from src.lib.smolagents.agent.yaml_agent_factory import YamlAgentFactory
+        from agentloom.runtime.factory import YamlAgentFactory
 
         mock_tool = MagicMock()
         mock_tool.__name__ = "t"
         with patch.object(YamlAgentFactory, "create_agent_as_tool", return_value=mock_tool):
-            with patch("src.lib.concurrency.parallel_executor.ParallelAgentExecutor.__init__", return_value=None) as init_mock:
-                with patch("src.lib.concurrency.parallel_executor.ParallelAgentExecutor.execute_batch", return_value=[]):
+            with patch("agentloom.runtime.concurrency.parallel_executor.ParallelAgentExecutor.__init__", return_value=None) as init_mock:
+                with patch("agentloom.runtime.concurrency.parallel_executor.ParallelAgentExecutor.execute_batch", return_value=[]):
                     YamlAgentFactory.run_agents_parallel(
                         config_path={"name": "test"},
                         tasks=[],

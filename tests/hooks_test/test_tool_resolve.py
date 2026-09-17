@@ -4,15 +4,15 @@ import importlib
 
 import pytest
 
-from src.lib.config import C
-from src.tools.catalog import (
+from agentloom.configuration import C
+from agentloom.tools.catalog import (
     DEFAULT_TOOLSETS,
     get_tool_spec,
     list_tool_specs,
     list_toolsets,
     resolve_toolsets,
 )
-from src.tools.loader import resolve_tool_function
+from agentloom.tools.loader import resolve_tool_function
 
 
 class TestDefaultToolsetsResolve:
@@ -81,15 +81,15 @@ class TestToolsets:
 
 class TestDynamicModuleLoading:
     def test_grep_search_from_search_module(self):
-        mod = importlib.import_module("src.tools.search")
+        mod = importlib.import_module("agentloom.tools.search")
         assert callable(mod.grep_search)
 
     def test_read_file_from_file_ops_module(self):
-        mod = importlib.import_module("src.tools.file_ops")
+        mod = importlib.import_module("agentloom.tools.file_ops")
         assert callable(mod.read_file)
 
     def test_resolved_function_matches_module_function(self):
-        from src.tools.search import grep_search as direct
+        from agentloom.tools.search import grep_search as direct
 
         assert resolve_tool_function("grep_search") is direct
 
@@ -150,7 +150,7 @@ class TestCatalogInvariants:
     def test_all_specs_have_explicit_implementation_references(self):
         for spec in list_tool_specs():
             assert get_tool_spec(spec.name) is spec
-            assert spec.implementation.module.startswith("src.tools.")
+            assert spec.implementation.module.startswith("agentloom.tools.")
             assert spec.implementation.attribute == spec.name
 
     def test_case_sensitive(self):

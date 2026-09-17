@@ -87,7 +87,7 @@ profile with `num_retries: 0` and `parallel_tool_calls: false`. The campaign
 rejects `thinking.type: disabled` for the validated endpoint, records only a
 secret-free fingerprint of the complete provider behavior config, and fails
 before any model call if those invariants are absent. The harness, dataset,
-workflows, Application configs, the complete tracked `src/` runtime, and the
+workflows, Application configs, the complete tracked `agentloom/` runtime, and the
 Python dependency manifests are also hashed and must exactly match the current
 Git commit; unrelated worktree changes do not affect this bound-source check.
 
@@ -132,7 +132,7 @@ lockfile, Git/uv/Python runtimes, standard library, canonical path-free venv
 bytes, `loom`, import origins, the raw commit tree, inherited network
 environment, and inode isolation; every Application attempt carries the same
 capsule ID. Historical reproduction is rejected unless the entire executable
-validation surface, `src/` runtime, system config, and dependency manifests
+validation surface, `agentloom/` runtime, system config, and dependency manifests
 exactly match the currently trusted checkout, so neither an older runner nor
 an import-shadow file can run before attestation.
 

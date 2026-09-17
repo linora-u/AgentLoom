@@ -8,7 +8,7 @@ import time
 
 import pytest
 
-from src.tools.shell.background_task import (
+from agentloom.tools.shell.background_task import (
     BackgroundTaskRegistry,
     BackgroundTaskState,
 )

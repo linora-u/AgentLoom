@@ -2,9 +2,9 @@
 
 import pytest
 
-from src.lib.config.llm_config import LLMConfig, LlmModelTypeSettings
-from src.lib.smolagents.models.litellm_model import LiteLLMModelV2
-from src.lib.smolagents.models.model_types import ModelConfig
+from agentloom.configuration.llm_config import LLMConfig, LlmModelTypeSettings
+from agentloom.adapters.smolagents.models.litellm_model import LiteLLMModelV2
+from agentloom.adapters.smolagents.models.model_types import ModelConfig
 
 
 def test_model_config_has_no_native_tool_call_detection_field():

@@ -39,7 +39,7 @@ def _path(root: Path, relative_path: str) -> Path:
 
 
 def _ledger(root: Path, operation: str, **values: object) -> None:
-    from src.trace.task_context import capture_explicit_execution_context
+    from agentloom.runtime.trace.task_context import capture_explicit_execution_context
 
     context = capture_explicit_execution_context()
     marker = json.loads((root / ".architecture-case.json").read_text())

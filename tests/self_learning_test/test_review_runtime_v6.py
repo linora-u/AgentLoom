@@ -8,8 +8,8 @@ import pytest
 
 
 def _record_completed_root(db_path: Path, run_id: str, application_id: str) -> None:
-    from src.extensions.self_learning.event_schema import CanonicalSessionEvent
-    from src.extensions.self_learning.persistence.ledger import SelfLearningLedger
+    from agentloom.self_learning.event_schema import CanonicalSessionEvent
+    from agentloom.self_learning.persistence.ledger import SelfLearningLedger
 
     SelfLearningLedger(db_path).append_runtime_event(
         CanonicalSessionEvent(
@@ -75,8 +75,8 @@ def test_all_trigger_and_approval_combinations_are_noninteractive(
     project_fact: str,
     project_experience: str,
 ) -> None:
-    from src.extensions.self_learning import reviewer
-    from src.extensions.self_learning.review_orchestration import ReviewOrchestrator
+    from agentloom.self_learning import reviewer
+    from agentloom.self_learning.review_orchestration import ReviewOrchestrator
 
     db_path = tmp_path / "self_learning.db"
     _record_completed_root(db_path, "root-matrix", "app-a")
@@ -132,7 +132,7 @@ def test_manual_trigger_never_calls_model_or_reads_user_input(
     tmp_path: Path,
     monkeypatch,
 ) -> None:
-    from src.extensions.self_learning import reviewer
+    from agentloom.self_learning import reviewer
 
     db_path = tmp_path / "self_learning.db"
     _record_completed_root(db_path, "root-manual", "app-a")
@@ -160,9 +160,9 @@ def test_after_run_review_uses_structured_model_without_tools_and_consumes_run(
     tmp_path: Path,
     monkeypatch,
 ) -> None:
-    from src.extensions.self_learning import reviewer
-    from src.extensions.self_learning.persistence.review_engine import ReviewEngine
-    from src.extensions.self_learning.review_orchestration import ReviewOrchestrator
+    from agentloom.self_learning import reviewer
+    from agentloom.self_learning.persistence.review_engine import ReviewEngine
+    from agentloom.self_learning.review_orchestration import ReviewOrchestrator
 
     db_path = tmp_path / "self_learning.db"
     _record_completed_root(db_path, "root-after", "app-a")
@@ -192,9 +192,9 @@ def test_model_failure_does_not_consume_unreviewed_run(
     tmp_path: Path,
     monkeypatch,
 ) -> None:
-    from src.extensions.self_learning import reviewer
-    from src.extensions.self_learning.persistence.review_engine import ReviewEngine
-    from src.extensions.self_learning.review_orchestration import ReviewOrchestrator
+    from agentloom.self_learning import reviewer
+    from agentloom.self_learning.persistence.review_engine import ReviewEngine
+    from agentloom.self_learning.review_orchestration import ReviewOrchestrator
 
     db_path = tmp_path / "self_learning.db"
     _record_completed_root(db_path, "root-timeout", "app-a")
@@ -231,7 +231,7 @@ def test_batch_trigger_waits_for_completed_run_threshold(
     tmp_path: Path,
     monkeypatch,
 ) -> None:
-    from src.extensions.self_learning import reviewer
+    from agentloom.self_learning import reviewer
 
     db_path = tmp_path / "self_learning.db"
     _record_completed_root(db_path, "root-one", "app-a")

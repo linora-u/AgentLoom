@@ -21,7 +21,7 @@ _FRAMEWORK_ROOT = Path(__file__).resolve().parents[2]
 if str(_FRAMEWORK_ROOT) not in sys.path:
     sys.path.insert(0, str(_FRAMEWORK_ROOT))
 
-from src.lib.goal.model import normalize_goal_config  # noqa: E402
+from agentloom.runtime.goal.model import normalize_goal_config  # noqa: E402
 
 REQUIRED_FIELDS = ("name", "description", "workflow")
 FORBIDDEN_TOP_LEVEL = {"model", "llm", "langfuse"}

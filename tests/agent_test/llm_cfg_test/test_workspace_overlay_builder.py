@@ -3,7 +3,7 @@ from pathlib import Path
 
 import pytest
 
-import src.lib.config.config as config_module
+import agentloom.configuration.config as config_module
 
 
 def _patch_base_config(monkeypatch, agent_root: Path) -> None:

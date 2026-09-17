@@ -33,7 +33,7 @@ workflow: |
   checks.append(("strict_container_failure", "Could not parse a structured tool call" in parser))
   checks.append(("consolidate_error_messages", "_consolidate_error_messages" in loom_mixin))
   checks.append(("circuit_breaker_removed", "_inject_parse_error_circuit_breaker" not in loom_mixin))
-  checks.append(("error_recovery_imports", "src.lib.smolagents.error_recovery" in loom_mixin))
+  checks.append(("error_recovery_imports", "agentloom.runtime.error_recovery" in loom_mixin))
   checks.append(("recent_error_exempt_count", "RECENT_ERROR_EXEMPT_COUNT" in compression))
 
   for name, ok in checks:

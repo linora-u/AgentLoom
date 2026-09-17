@@ -6,7 +6,7 @@ Python entrypoint or special system config; it only sees registered tools.
 
 ## Framework Support
 
-AgentLoom provides `src.tools.codex.codex_tool.codex`, a built-in wrapper around
+AgentLoom provides `agentloom.tools.codex.codex_tool.codex`, a built-in wrapper around
 local `codex exec`. It can be registered like any other YAML tool through
 `module/function`.
 
@@ -37,7 +37,7 @@ tools named `codex1` and `codex2`; the LLM cannot override those fixed values.
 ```yaml
 tools:
   - name: "codex1"
-    module: "src.tools.codex.codex_tool"
+    module: "agentloom.tools.codex.codex_tool"
     function: "codex"
     fixed_args:
       prompt: "Read pyproject.toml and return the project name and version."
@@ -47,7 +47,7 @@ tools:
       sandbox: ""
       search: "false"
   - name: "codex2"
-    module: "src.tools.codex.codex_tool"
+    module: "agentloom.tools.codex.codex_tool"
     function: "codex"
     fixed_args:
       prompt: "Inspect the repository root and summarize top-level directories."
@@ -59,7 +59,7 @@ tools:
 ```
 
 At runtime, `YamlAgentFactory.get_tools_from_config()` loads
-`src.tools.codex.codex_tool.codex` for both entries and exposes them as `codex1`
+`agentloom.tools.codex.codex_tool.codex` for both entries and exposes them as `codex1`
 and `codex2`. The demo uses `tool_call` mode, so the LLM invokes `codex1` first
 and `codex2` second through structured tool calls. Both tools take no
 LLM-provided arguments because all `codex` inputs are fixed in YAML.

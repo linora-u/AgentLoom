@@ -12,17 +12,13 @@ from smolagents.models import (
 )
 from smolagents.monitoring import Timing
 
-from src.lib.smolagents.agent.base_agent import ToolCallingAgentV2
-from src.lib.smolagents.hooks import HookEvent, HookHandler, HookPlan, HookResult, HookRun
-from src.lib.smolagents.hooks.tool_shim import inject_hooks
-from src.lib.smolagents.models.litellm_model import LiteLLMModelV2
-from src.lib.smolagents.tool_protocol import (
-    ToolCallRecord,
-    ToolErrorRecord,
-    patch_litellm_tool_error_projection,
-    settle_tool_call,
-)
-from src.trace import ExplicitExecutionContext, bind_explicit_execution_context
+from agentloom.adapters.smolagents.agents import ToolCallingAgentV2
+from agentloom.runtime.hooks import HookEvent, HookHandler, HookPlan, HookResult, HookRun
+from agentloom.adapters.smolagents.tool_shim import inject_hooks
+from agentloom.adapters.smolagents.models.litellm_model import LiteLLMModelV2
+from agentloom.runtime.tool_protocol import ToolCallRecord, ToolErrorRecord
+from agentloom.adapters.smolagents.tool_protocol import patch_litellm_tool_error_projection, settle_tool_call
+from agentloom.runtime.trace import ExplicitExecutionContext, bind_explicit_execution_context
 
 
 class ExplodingTool(Tool):

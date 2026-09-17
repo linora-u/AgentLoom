@@ -1,8 +1,8 @@
 from __future__ import annotations
 
-from src.lib.context_engine import ContextEngine, ContextEngineConfig
-from src.lib.context_engine.runtime import clear_current_context_engine, set_current_context_engine
-from src.tools.context.retrieve_context import loom_retrieve_context
+from agentloom.runtime.context_engine import ContextEngine, ContextEngineConfig
+from agentloom.runtime.context_engine.runtime import clear_current_context_engine, set_current_context_engine
+from agentloom.tools.context.retrieve_context import loom_retrieve_context
 
 
 def test_loom_retrieve_context_returns_query_matches_from_active_store(tmp_path):

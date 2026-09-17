@@ -105,7 +105,7 @@ In AgentLoom, **LLM configuration (`llm.yaml`) is physically isolated from syste
 Regardless of how configurations are merged, both developers and the framework's underlying layers access configuration through a unique `C` singleton object. `C` encapsulates complex merging logic and provides a very simple API.
 
 ```python
-from src.lib.config import C
+from agentloom.configuration import C
 
 # 1. Access system configuration
 tools_list = C.get_nested("tools", "default", default=[])
@@ -133,3 +133,15 @@ structured state and terminal evidence is copied to `audit/goal.json`.
 `budget_limited` preserves the checkpoint so a YAML budget change can resume the
 same `task_id`. See [Goal Mode](goal_mode.md) for configuration, continuation,
 budget, and schedule behavior.
+
+## Installed package and project context
+
+The Python package is `agentloom`; use `python -m agentloom` or the `loom`
+console command. The former `src` package and module commands have been removed.
+For an installed wheel launched outside a project, set `AGENTLOOM_PROJECT_ROOT`
+to the directory containing `config/system.yaml` and `config/llm.yaml`. Without
+an explicit root, the existing project-ancestor discovery still applies.
+Generated scripts record their project location relative to their output file
+and accept the same environment override. Project tools remain in
+`applications.*`; execution loads that namespace from the selected project
+without adding the entire project to Python's framework import search path.

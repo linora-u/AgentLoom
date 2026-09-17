@@ -1,5 +1,5 @@
 import pytest
-from src.tools.shell.ansi_stripper import strip_ansi
+from agentloom.tools.shell.ansi_stripper import strip_ansi
 
 def test_strip_ansi_basic():
     # Basic color codes

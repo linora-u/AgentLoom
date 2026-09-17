@@ -3,7 +3,7 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-from src.tui_bridge.bridge import TuiBridge
+from agentloom.tui_bridge.bridge import TuiBridge
 
 
 def test_run_detail_uses_durable_events_after_success_checkpoint_cleanup(tmp_path: Path) -> None:

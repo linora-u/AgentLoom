@@ -3,7 +3,7 @@ and _SearchResult model behavior."""
 
 import pytest
 
-from src.tools.search.grep_tool.grep_tool import (
+from agentloom.tools.search.grep_tool.grep_tool import (
     _format_output,
     _SearchResult,
 )
