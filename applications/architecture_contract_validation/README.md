@@ -80,6 +80,8 @@ separately requires the final verifier's own successful call and true verdict.
 
 Worker transfers are matched by receipt Application/task, per-call checkpoint
 identity, canonical start/finish order, input hash, and local tool-event identity.
+The input hash is recomputed from the checkpoint's actual task text using the
+runtime's SHA-256 prefix rule; matching hash fields alone are insufficient.
 Repeated calls may produce different results; only an intact result completed
 before the consuming call can establish an edge. Corrective verifier→repair→verifier
 iterations retain their earlier investigation/planning lineage. Validation records

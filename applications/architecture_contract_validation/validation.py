@@ -149,8 +149,9 @@ def _completed_worker_calls(task_root, run_id, task_id, nonce, workspace, ledger
                 raise ValueError("completed call must have one canonical start and finish")
             start_order, start = starts[0]
             finish_order, finish = finishes[0]
+            actual_hash = hashlib.sha256(str(checkpoint["task_input"]).encode()).hexdigest()[:16]
             if (start.get("run_id") != run_id or finish.get("status") != "completed"
-                    or not checkpoint.get("input_hash")
+                    or checkpoint.get("input_hash") != actual_hash
                     or start.get("input_hash") != checkpoint["input_hash"]
                     or finish.get("input_hash") != checkpoint["input_hash"] or start_order >= finish_order):
                 raise ValueError("canonical call lifecycle identity or order mismatch")
