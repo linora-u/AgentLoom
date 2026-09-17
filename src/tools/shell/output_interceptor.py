@@ -2,7 +2,7 @@ import os
 import uuid
 from pathlib import Path
 
-from src.lib.runtime import get_current_run_context
+from src.runtime import get_current_run_context
 
 
 class OutputInterceptor:

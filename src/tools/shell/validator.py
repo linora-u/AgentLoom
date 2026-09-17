@@ -1,7 +1,7 @@
 import re
 from typing import Any, List, Tuple
 
-from src.lib.config import C
+from src.configuration import C
 from src.tools.shell.shell_command_ast import ShellCommandInvocation, analyze_shell_command
 from src.tools.shell.security import validate_command_security
 from src.tools.shell.path_validation import check_path_constraints
@@ -19,7 +19,7 @@ def _get_shell_config(key: str, *, default: Any = None) -> Any:
     actually take effect at runtime.
     """
     try:
-        from src.trace import get_current_agent_config
+        from src.runtime.trace import get_current_agent_config
         agent_cfg = get_current_agent_config()
         if isinstance(agent_cfg, dict):
             shell = agent_cfg.get("shell_settings")

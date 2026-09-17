@@ -21,7 +21,7 @@ import time
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple
 
-from src.lib.logging import get_logger
+from src.runtime.logging import get_logger
 
 logger = get_logger(__name__)
 

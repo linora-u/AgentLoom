@@ -4,12 +4,12 @@ from __future__ import annotations
 
 import json
 
-from src.lib.smolagents.tools.tools import tool
+from src.adapters.smolagents.tools.tools import tool
 
 
 def _require_root_goal_provider():
-    from src.lib.goal import get_current_goal_provider, normalize_goal_config
-    from src.trace import (
+    from src.runtime.goal import get_current_goal_provider, normalize_goal_config
+    from src.runtime.trace import (
         get_current_hook_run,
         require_local_run_id,
         require_root_run_id,
@@ -67,7 +67,7 @@ def update_goal(status: str, evidence: str) -> str:
 
     if status != "complete":
         raise ValueError("update_goal status must be 'complete'")
-    from src.trace import require_local_run_id
+    from src.runtime.trace import require_local_run_id
 
     provider = _require_root_goal_provider()
     state = provider.complete(
