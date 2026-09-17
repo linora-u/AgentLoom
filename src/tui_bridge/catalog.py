@@ -105,7 +105,7 @@ def _agent_tree(
     definition_cache: AgentDefinitionCache | None,
 ) -> dict[str, Any] | None:
     raw_path = summary.get("path") or summary.get("id")
-    path = _safe_project_file(root, raw_path, suffixes={".yaml", ".yml"})
+    path = _safe_project_file(root, raw_path, suffixes={".yaml", ".yml", ".md"})
     if path is None:
         return None
     relative = path.relative_to(root)
@@ -291,7 +291,7 @@ def _contains_supervisor_yaml(root: Path, workflows_root: Path) -> bool:
                 continue
             if entry.is_file(follow_symlinks=False):
                 path = Path(entry.path)
-                if path.suffix.lower() in {".yaml", ".yml"} and _safe_project_file(root, path) is not None:
+                if path.suffix.lower() in {".yaml", ".yml", ".md"} and _safe_project_file(root, path) is not None:
                     return True
                 continue
             if entry.is_dir(follow_symlinks=False) and entry.name != "worker_agents":
