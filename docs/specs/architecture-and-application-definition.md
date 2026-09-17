@@ -18,7 +18,9 @@
 
 ## Solution
 
-把 AgentLoom 自有行为按职责集中到可识别的 module，保留已有有效 seam，并将 Python 对外 package 的目标命名空间统一为 `agentloom`。先统一行为归属，再进行目录和命名空间迁移；行为修复与机械搬迁分别审阅和回滚。最终代码只提供新的命名空间，所有仓库内 Python 调用方、Application 工具引用、测试、命令入口、模板和当前文档一起迁移；不保留 `src` package、旧路径转发或兼容 import finder。
+把 AgentLoom 自有行为按职责集中到可识别的 module，保留已有有效 seam，并将 Python 对外 package 的目标命名空间统一为 `agentloom`。先统一行为归属，再进行目录和命名空间迁移；行为修复与机械搬迁分别审阅和回滚。最终代码只提供新的命名空间，所有仓库内 Python 调用方、Application 工具引用、测试、命令入口、模板和当前文档一起迁移；不保留旧 `src.*` 导入、旧路径转发或兼容 import finder。
+
+用户进一步选择源码直接放在 `src/` 下：`src/application/`、`src/runtime/`、`src/adapters/` 等，不再增加一层 `agentloom` 目录。源码位置和 Python 导入名称分开：通过标准安装配置将源码目录 `src` 映射为 `agentloom` package，调用方使用 `agentloom.application` 等名称。这是构建布局，不是旧命名空间兼容；发布产物只提供 `agentloom`。
 
 让同一份 Application 定义经过同一套读取、校验、配置合成、来源记录和路径解析。Studio adapter 负责展示，运行 adapter 负责执行，两者消费一致的定义语义。只读检查继续保持轻量，不创建 Agent 运行、不调用模型、不连接 MCP、不执行 Hook。
 
@@ -115,7 +117,7 @@
 ### 命名空间迁移与分发
 
 19. 在移动前枚举 Python 导出、命令入口、TUI 隔离模式启动、动态工具引用、模板和资源寻址、Application 定位等对外 interface。仓库内调用方全部迁移到新归属，不只检查静态 import。
-20. 根据用户最新决定，本次是命名空间的破坏性迁移：移除旧 `src` package、旧 `python -m src` / `src.tui_bridge` 入口及所有专为旧路径存在的转发、alias finder 和 synthetic namespace。真实 implementation 位于 `agentloom` 的职责 module；全局配置、registry、类身份和 ContextVars 只创建一份。正常的内聚公共导出可以保留，但不能借此恢复旧目录。
+20. 根据用户最新决定，本次是命名空间的破坏性迁移：移除旧 `src.*` Python package 身份、旧 `python -m src` / `src.tui_bridge` 入口及所有专为旧路径存在的转发、alias finder 和 synthetic namespace。真实 implementation 位于 `src/` 下的职责目录，由标准构建配置作为 `agentloom` package 安装；源码目录名称不构成旧导入支持。全局配置、registry、类身份和 ContextVars 只创建一份。正常的内聚公共导出可以保留，但不能借此恢复旧命名空间。
 21. Application 定义格式、`loom` CLI 参数和 Run 返回语义保持可用；仓库内既有 Application 的框架工具引用、内部字符串和生成模板同批迁移。外部集成使用的旧 `src.*` 引用需要升级到文档列出的 canonical 路径，不提供旧导入兼容。历史 checkpoint 的稳定存储协议与基于历史源码 revision 的独立 capsule 不依赖候选代码提供旧 package。
 22. 包资源随分发产物正确打包；从源码开发安装、wheel 安装、仓库外工作目录与 TUI 隔离解释器启动均必须可用。启动所需项目上下文必须显式或按已有发现规则解析，不能偶然依赖当前源码目录。
 23. 运行存储格式、Run / task 身份、恢复协议和用户数据位置不因目录迁移变化。迁移后的实现必须能读取本任务基线版本产生的恢复材料并完成对应验收。
@@ -239,6 +241,7 @@
 
 - 本规格的两个目标来自已讨论的“自有源码目录/职责整理”和“Application 配置解释统一”；参考仓库搬迁方案已被用户明确否决并移出范围。
 - 用户最新要求取消命名空间兼容层。较早的研究清单、Issue 初始描述和阶段提交中若仍提及旧入口兼容，以本规格更新后的要求为准；最终交付必须移除这些中间兼容代码。后续 GitHub 最终推送在完整必要单元、构建、安装、真实 Application 验收与代码审查完成后进行。
+- 随后用户明确选择“src/ 下直接放各模块：通过安装配置映射为 agentloom 包”。这取代实施中一度采用的仓库根目录 `agentloom/` 布局；取消旧导入兼容、职责拆分与完整验收要求继续有效。
 - 用户已明确确认主要测试 seam：真实 Application 的公开执行入口，加上 Studio 只读入口的配置一致性对照，以及所属 module 的单元测试。
 - 本规格交付时只完成研究与规格编写。此前两项只读导入检查通过，仅证明研究基线的轻量导入行为，不构成本规格的完整验收。
 - Issue tracker 使用项目已配置的 GitHub Issues；发布标签为 `ready-for-agent`。

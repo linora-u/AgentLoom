@@ -11,6 +11,12 @@ owned caller to canonical owners. Existing behavioral tests and real
 Applications remain mandatory; historical checkpoint data is preserved. The
 final GitHub push waits for complete E1 acceptance and E2 review.
 
+Source-layout selection: the user subsequently chose modules directly under
+src/ (src/application, src/runtime, etc.), mapped by standard build configuration
+to the installed agentloom package. No nested agentloom source folder and no
+legacy src.* import support. Source location and Python package identity are
+distinct; installation/source-origin/capsule contracts must cover this mapping.
+
 | Ticket | Deliverable | Blocked by |
 | --- | --- | --- |
 | A1 | Baseline Python/TUI collection and results, ownership and public interface inventory, safe worktree configuration | — |
