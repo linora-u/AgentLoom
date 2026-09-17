@@ -246,7 +246,7 @@ def _write_resolver_script(script_path: Path) -> None:
             if source_root:
                 root = Path(source_root)
                 try:
-                    rel = agentloom.resolve().relative_to(root.resolve())
+                    rel = src.resolve().relative_to(root.resolve())
                 except Exception:
                     rel = src
 
