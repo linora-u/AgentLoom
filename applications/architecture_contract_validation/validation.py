@@ -142,8 +142,18 @@ def validate_trace(attempt: Path, receipt: dict[str, object]) -> dict[str, objec
             errors.append(f"no actual model usage in Worker memory for {worker}")
     supervisor_records = []
     code_actions = []
-    for checkpoint_path in (attempt / "runtime").glob("checkpoints/*/*/checkpoint.json"):
-        checkpoint = json.loads(checkpoint_path.read_text())
+    application_id = receipt.get("run", {}).get("application_id")
+    supervisor_path = (attempt / "runtime/checkpoints" / application_id / task_id / "checkpoint.json"
+                       if application_id and task_id else None)
+    if supervisor_path is None or not supervisor_path.is_file():
+        errors.append("missing Supervisor checkpoint for receipt Application/task identity")
+        checkpoint = {}
+    else:
+        checkpoint = json.loads(supervisor_path.read_text())
+        if checkpoint.get("task_id") != task_id or checkpoint.get("run_id") != root_run_id:
+            errors.append("Supervisor checkpoint identity does not match receipt")
+            checkpoint = {}
+    if checkpoint:
         for step in checkpoint.get("memory_steps", []):
             if step.get("code_action"):
                 code_actions.append(step["code_action"])
@@ -197,7 +207,9 @@ def validate_trace(attempt: Path, receipt: dict[str, object]) -> dict[str, objec
         errors.append(f"Run manifest status is {manifest.get('status')!r}")
     return {"passed": not errors, "errors": errors, "workers": list(WORKERS),
             "local_run_ids": sorted(str(item) for item in local_ids), "tool_events": len(ledger),
-            "checkpoint_files": [str(p) for p in calls], "transfers": transfers}
+            "checkpoint_files": [str(p) for p in calls], "transfers": transfers,
+            "supervisor_checkpoint": str(supervisor_path) if supervisor_path else None,
+            "supervisor_code_actions": len(code_actions)}
 
 
 def _structured(value):
