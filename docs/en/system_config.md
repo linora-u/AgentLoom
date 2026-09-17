@@ -354,7 +354,7 @@ lsp_servers:
 | `max_restarts` | `int` | `3` | Max crash recovery attempts per server |
 | `servers` | `list` | `[python]` | Languages to start (40+ supported) |
 
-> Servers are managed by `src/adapters/lsp/LSPServerManager`. Unsupported languages automatically fall back to tree-sitter AST analysis (46+ languages).
+> Servers are managed by `agentloom.adapters.lsp.lsp_server_manager.LSPServerManager`. Unsupported languages automatically fall back to tree-sitter AST analysis (46+ languages).
 
 ---
 
