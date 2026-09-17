@@ -620,3 +620,98 @@ def test_public_connection_urls_never_expose_authentication(tmp_path):
     assert public['values']['mcp_servers']['remote']['url'] == '[redacted]'
     assert snapshot.values['mcp_servers']['remote']['url'] == url
     assert snapshot.values['mcp_servers']['remote']['headers']['Authorization'] == 'synthetic-header'
+
+
+@pytest.mark.parametrize("target", ["supervisor", "worker"])
+@pytest.mark.parametrize("suffix", [".yaml", ".md"])
+def test_removed_fields_reject_consistently_before_run_allocation(tmp_path, monkeypatch, capsys, target, suffix):
+    import json
+    from types import SimpleNamespace
+
+    import agentloom.application.runner as runner
+    from agentloom.application.definition import prepare_application_definition
+    from agentloom.application.readiness import validate_runtime_agent_config, validate_runtime_worker_config
+    from agentloom.runtime.factory import YamlConfiguredAgent, YamlConfiguredSupervisorAgent
+    from agentloom.tui_bridge.bridge import TuiBridge
+    from agentloom.tui_bridge.domain_cli import main as domain_main
+
+    base = project_config(tmp_path)
+    path = tmp_path / "applications/demo/workflows/root.yaml"
+    worker = path.parent / f"worker_agents/child{suffix}"
+    removed = "tools_mapping: {Claude: {Read: read_file}}\n"
+    supervisor_text = BASE + f"worker_agents: [{{path: child{suffix}}}]\n"
+    worker_text = BASE + SCHEMA
+    for role, source, body in (("supervisor", path, supervisor_text), ("worker", worker, worker_text)):
+        if role == target:
+            body += removed
+        write(source, f"```yaml\n{body}```\nRun the task.\n" if source.suffix == ".md" else body)
+
+    message = "Configuration error: tools_mapping was removed; Skills do not grant tools"
+    invalid_path = path if target == "supervisor" else worker
+    definition = load_agent_definition(path)
+    invalid_definition = load_agent_definition(invalid_path)
+    readiness = validate_runtime_agent_config if target == "supervisor" else validate_runtime_worker_config
+    with pytest.raises(ValueError, match="tools_mapping was removed") as readiness_error:
+        readiness(invalid_definition, invalid_path, agent_root=tmp_path)
+    assert str(readiness_error.value) == message
+    errors = validate_agent_definition(tmp_path, str(path), definition)
+    assert f"{invalid_path}: {message}" in errors
+    with pytest.raises(ValueError, match="tools_mapping was removed"):
+        prepare_application_definition(tmp_path, path, definition, base_config=base)
+
+    detail = TuiBridge(tmp_path).dispatch("application.detail", {"application_id": "demo"})
+    assert detail["application"]["health"] == "invalid"
+    entry = detail["agents"][0]
+    if target == "worker":
+        entry = entry["workers"][0]
+    assert f"{invalid_path}: {message}" in entry["validation"]["errors"]
+    assert domain_main(["--project", str(tmp_path), "application.validate", '{"application_id":"demo"}']) == 0
+    public = json.loads(capsys.readouterr().out)
+    assert public["ok"] is True
+    assert public["result"]["valid"] is False
+    assert f"{invalid_path}: {message}" in public["result"]["errors"]
+
+    # Exercise the existing runtime validation entry, without constructing a model.
+    cls = YamlConfiguredSupervisorAgent if target == "supervisor" else YamlConfiguredAgent
+    agent = object.__new__(cls)
+    agent._config = invalid_definition
+    agent._normalized = None
+    agent._execution_normalized = None
+    with pytest.raises(ValueError, match="tools_mapping was removed") as runtime_error:
+        agent._validate_config()
+    assert str(runtime_error.value) == message
+
+    monkeypatch.setattr(runner, "C", SimpleNamespace(agent_root=tmp_path))
+    monkeypatch.setattr(runner, "get_config", lambda: base)
+    monkeypatch.setattr(runner, "generate_runtime_id", lambda *args: pytest.fail("allocated a Run for a removed field"))
+    events = []
+    with pytest.raises(ValueError, match="tools_mapping was removed"):
+        runner.execute_app(path, event_sink=events.append)
+    assert not (tmp_path / ".agentloom").exists()
+    assert len(events) == 1 and events[0].event == "run.rejected"
+
+
+def test_removed_fields_in_markdown_supervisor_reject_before_run(tmp_path, monkeypatch):
+    from types import SimpleNamespace
+
+    import agentloom.application.runner as runner
+    from agentloom.application.definition import prepare_application_definition
+
+    base = project_config(tmp_path)
+    path = write(
+        tmp_path / "applications/demo/workflows/root.md",
+        "```yaml\n" + BASE + "tools_mapping: {}\n```\nRun the task.\n",
+    )
+    definition = load_agent_definition(path)
+    errors = validate_agent_definition(tmp_path, str(path), definition)
+    assert any("tools_mapping was removed" in error for error in errors)
+    with pytest.raises(ValueError, match="tools_mapping was removed"):
+        prepare_application_definition(tmp_path, path, definition, base_config=base)
+    monkeypatch.setattr(runner, "C", SimpleNamespace(agent_root=tmp_path))
+    monkeypatch.setattr(runner, "get_config", lambda: base)
+    monkeypatch.setattr(runner, "generate_runtime_id", lambda *args: pytest.fail("allocated a Run for a removed field"))
+    events = []
+    with pytest.raises(ValueError, match="tools_mapping was removed"):
+        runner.execute_app(path, event_sink=events.append)
+    assert not (tmp_path / ".agentloom").exists()
+    assert len(events) == 1 and events[0].event == "run.rejected"

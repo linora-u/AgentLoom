@@ -403,6 +403,14 @@ class AgentConfigNormalizer:
         )
 
     @staticmethod
+    def validate_removed_fields(config: dict) -> None:
+        """Keep removed-field rejection identical in preflight and construction."""
+        if "tools_mapping" in config:
+            raise ValueError(
+                "Configuration error: tools_mapping was removed; Skills do not grant tools"
+            )
+
+    @staticmethod
     def validate_role_driven_config(
         config: dict,
         *,
@@ -412,10 +420,7 @@ class AgentConfigNormalizer:
         build_normalized: Callable[[], Any | None],
         validate_role_specific: Callable[[Any | None], None],
     ) -> Any | None:
-        if "tools_mapping" in config:
-            raise ValueError(
-                "Configuration error: tools_mapping was removed; Skills do not grant tools"
-            )
+        AgentConfigNormalizer.validate_removed_fields(config)
         if required_fields:
             AgentConfigNormalizer.validate_required_fields(config, list(required_fields))
             AgentConfigNormalizer.validate_tools_config(config)
