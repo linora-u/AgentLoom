@@ -70,3 +70,30 @@ def test_context_requires_matching_real_retrieval_output_and_source(tmp_path):
     }]})
     with pytest.raises(AssertionError, match="correlated real retrieval"):
         validation.verify_context("text", tmp_path)
+
+
+def test_checkpoint_handoff_captures_exact_returns_and_rejects_duplicate_writes(tmp_path):
+    import time
+    from concurrent.futures import ThreadPoolExecutor
+
+    spec = importlib.util.spec_from_file_location(
+        "checkpoint_probe", Path(__file__).parent / "acceptance/checkpoint_probe_tools.py"
+    )
+    probe = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(probe)
+    exact = "A real Worker return with \"quotes\", a newline\nand Unicode: 验证"
+    with ThreadPoolExecutor(max_workers=1) as pool:
+        waiting = pool.submit(probe.record_checkpoint_worker_output, str(tmp_path), exact)
+        deadline = time.monotonic() + 2
+        before = tmp_path / "worker_output_before.txt"
+        try:
+            while (not before.exists() or before.read_text() != exact) and time.monotonic() < deadline:
+                time.sleep(0.01)
+            assert before.read_text() == exact
+        finally:
+            (tmp_path / "handoff_release").touch()
+        assert "proceed" in waiting.result(timeout=2)
+    probe.record_checkpoint_worker_output(str(tmp_path), exact)
+    assert (tmp_path / "worker_output_after.txt").read_text() == exact
+    with pytest.raises(FileExistsError):
+        probe.record_checkpoint_worker_output(str(tmp_path), "duplicate")
