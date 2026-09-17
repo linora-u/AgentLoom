@@ -25,7 +25,7 @@ directories are private to the selected evidence directory.
 | `goal_bounded` | Completed finite 600000-token Goal, four completed Workers, cumulative usage, persisted verified report | 1500 s |
 | `goal_parallel` | Six concurrent Workers cross 50000-token shared budget, preserved checkpoint/report, increased bounded budget for same-task/new-run resume, same goal_id and cumulative usage, identical report and no additional Worker batch | 1200 s including resume |
 | `core`, `markdown` | Exact independently read artifacts plus actual completed shell/file/search/Markdown tools, existing default versus explicit replacement toolset Workflows | 900 s each |
-| checkpoint `main`, `worker` | Signal after committed progress, same task/new run, exactly-once ledger, one completed Worker, complete file manifest, historical ContextRef and file-history recovery | Initial 180/240 s; resume 360 s each |
+| checkpoint `main`, `worker`, `completed` | Signal after committed progress, same task/new run, exactly-once ledger, one completed Worker, complete file manifest, historical ContextRef and file-history recovery | Initial 180/240/240 s; resume 360 s each |
 
 All real scenarios also retain the original model log, canonical Run receipt,
 manifest and lifecycle events. CodeAct actual tool events are read from the
@@ -48,6 +48,7 @@ with the candidate interpreter/check-out:
 python tests/agent_test/real_checkpoint_validation.py --scenario all --prepare-only --workspace /new/baseline
 python tests/agent_test/real_checkpoint_validation.py --resume-state /new/baseline/main/resume_state.json
 python tests/agent_test/real_checkpoint_validation.py --resume-state /new/baseline/worker/resume_state.json
+python tests/agent_test/real_checkpoint_validation.py --resume-state /new/baseline/completed/resume_state.json
 ```
 
 Freeze the prepared directory before consuming it. Preserve the source baseline
@@ -55,3 +56,13 @@ Application copy until candidate resume: the runner copies that Application to
 the candidate under the same identity, adjusting only its absolute Worker
 reference. It leaves the original task identity, runtime and effect ledger in
 place. Configuration secrets are neither copied into evidence nor reported.
+
+The `completed` checkpoint case adds one bounded capture/barrier tool to a copied
+complex checkpoint Application. It pauses the Supervisor after the original
+Worker has committed its full task. On resume the Supervisor calls the identical
+Worker input again. The validator requires one durable cache claim, one Worker
+call total, byte-identical observed Worker returns, unchanged Worker checkpoint
+and token totals, and exactly-once side effects. The barrier captures actual
+Worker output; it does not generate Agent responses. Its own duplicate output
+writes fail explicitly. A prepared `completed` state can also be created by the
+baseline framework and resumed by a later candidate.
