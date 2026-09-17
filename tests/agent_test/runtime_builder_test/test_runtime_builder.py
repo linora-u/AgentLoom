@@ -1000,6 +1000,62 @@ def test_max_steps_worker_is_failed_before_checkpoint_success(tmp_path, monkeypa
     assert checkpoint["status"] == "failed"
 
 
+@pytest.mark.parametrize("output", ["worker answer", "", None])
+def test_completed_worker_resume_replays_output_in_requested_shape(tmp_path, monkeypatch, output):
+    from smolagents import RunResult
+    from smolagents.monitoring import TokenUsage
+
+    from src.lib.checkpoint import CheckpointManager
+    from src.lib.checkpoint.coordinator import CheckpointCoordinator
+
+    from src.lib.goal import GoalState
+    from src.lib.goal.provider import GoalStateProvider
+
+    provider = GoalStateProvider(GoalState.create(objective="delegate", objective_fingerprint="test", token_budget=1000))
+
+    class SuccessfulRuntime:
+        def __init__(self):
+            self.logger = DummyLoggerBackend()
+            self.memory = type("Memory", (), {"steps": []})()
+            self.calls = 0
+
+        def run(self, task, *args, **kwargs):
+            self.calls += 1
+            provider.record_usage(prompt_tokens=20, completion_tokens=11)
+            return RunResult(output=output, state="success", steps=[], token_usage=TokenUsage(20, 11), timing=None)
+
+    manager = CheckpointManager("supervisor", checkpoints_root=tmp_path, run_id="run_initial")
+    coordinator = CheckpointCoordinator(manager, "task-completed-worker", "delegate")
+    monkeypatch.setattr(CheckpointCoordinator, "current", staticmethod(lambda: coordinator))
+    runtime = SuccessfulRuntime()
+    worker = base_agent_module.SubTaskTrackedAgent(runtime, "completed_worker")
+
+    initial = worker.run("delegate", return_full_result=True)
+    assert initial.output == output
+    checkpoint = manager.load_worker_checkpoint("task-completed-worker", "completed_worker", call_index=0)
+    assert checkpoint.get("result") == output
+    assert provider.snapshot().used_tokens == 31
+    manager.close()
+    manager = CheckpointManager("supervisor", checkpoints_root=tmp_path, run_id="run_resume")
+
+    coordinator = CheckpointCoordinator(manager, "task-completed-worker", "delegate", resume=True)
+    resumed = worker.run("delegate", return_full_result=True)
+    invocation_module.require_successful_runtime_result(resumed)
+    assert resumed.output == initial.output
+    assert resumed.token_usage is None
+    assert provider.snapshot().used_tokens == 31
+    assert runtime.calls == 1
+    assert len(manager.load_task_tree("task-completed-worker")["workers"]["completed_worker"]) == 1
+
+    manager.close()
+    manager = CheckpointManager("supervisor", checkpoints_root=tmp_path, run_id="run_resume_plain")
+    coordinator = CheckpointCoordinator(manager, "task-completed-worker", "delegate", resume=True)
+    assert worker.run("delegate", return_full_result=False) == output
+    assert runtime.calls == 1
+    assert provider.snapshot().used_tokens == 31
+    manager.close()
+
+
 def test_max_steps_managed_worker_fails_before_call_discards_state(
     tmp_path,
     monkeypatch,
