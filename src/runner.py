@@ -45,6 +45,7 @@ from src.application_run_lifecycle import (
 from src.lib.checkpoint import CheckpointManager
 from src.lib.checkpoint.file_history import FileHistoryManager
 from src.lib.config import C, build_effective_agent_config, get_config
+from src.lib.config.config import bind_config, fresh_invocation_config
 from src.lib.goal import GoalBudgetLimitedError, normalize_goal_config
 from src.lib.heartbeat import SupervisorHeartbeat
 from src.lib.logging import (
@@ -210,6 +211,26 @@ def _resolve_yaml_path(yaml_path: str | Path) -> Path:
 
 
 def execute_app(
+    yaml_path: str | Path,
+    resume_task_id: str | None = None,
+    task_override: str | None = None,
+    file_logging: bool | None = None,
+    *,
+    event_sink: RunEventSink | None = None,
+) -> ApplicationRunResult:
+    """Execute against current configuration, pinned for the lifetime of the Run."""
+    try:
+        invocation_config = fresh_invocation_config(get_config())
+    except BaseException as exc:
+        _emit_preflight_rejection(event_sink, exc)
+        raise
+    with bind_config(invocation_config):
+        return _execute_app(
+            yaml_path, resume_task_id, task_override, file_logging, event_sink=event_sink,
+        )
+
+
+def _execute_app(
     yaml_path: str | Path,
     resume_task_id: str | None = None,
     task_override: str | None = None,

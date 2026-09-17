@@ -11,6 +11,8 @@ from __future__ import annotations
 
 import builtins
 import os
+from contextlib import contextmanager
+from contextvars import ContextVar
 from copy import deepcopy
 from dataclasses import dataclass
 from pathlib import Path
@@ -405,6 +407,7 @@ class UnifiedConfig:
 
 
 _ACTIVE_CONFIG: UnifiedConfig | None = None
+_INVOCATION_CONFIG: ContextVar[UnifiedConfig | None] = ContextVar("agentloom_config", default=None)
 
 
 def _load_merged_config(config_dir: Path | str | None = None) -> UnifiedConfig:
@@ -435,14 +438,42 @@ def load_project_config(project_root: Path | str) -> UnifiedConfig:
     layered_builder.apply_mapping("config/system.yaml", system_yaml)
 
     merged = layered_builder.build()
-    return UnifiedConfig(merged, agent_root=agent_root, llm_config=llm_config)
+    config = UnifiedConfig(merged, agent_root=agent_root, llm_config=llm_config)
+    # Programmatic configs and the credential-pipe campaign are explicit
+    # overrides. Only unchanged disk-loaded bases may be refreshed for a Run.
+    if os.environ.get("AGENTLOOM_MEMORY_CAMPAIGN_CAPSULE_ACTIVE") != "1":
+        config._loaded_raw = deepcopy(config.raw)
+        config._loaded_llm = config.llm.model_dump()
+    return config
 
 
 def get_config() -> UnifiedConfig:
+    bound = _INVOCATION_CONFIG.get()
+    if bound is not None:
+        return bound
     global _ACTIVE_CONFIG
     if _ACTIVE_CONFIG is None:
         _ACTIVE_CONFIG = _load_merged_config()
     return _ACTIVE_CONFIG
+
+
+def fresh_invocation_config(base: UnifiedConfig) -> UnifiedConfig:
+    """Read current disk sources without changing another invocation's config."""
+    loaded_raw = getattr(base, "_loaded_raw", None)
+    loaded_llm = getattr(base, "_loaded_llm", None)
+    if loaded_raw is not None and base.raw == loaded_raw and base.llm.model_dump() == loaded_llm:
+        return load_project_config(base.agent_root)
+    return deepcopy(base)
+
+
+@contextmanager
+def bind_config(config: UnifiedConfig):
+    """Pin the global configuration source for one invocation and its Workers."""
+    token = _INVOCATION_CONFIG.set(config)
+    try:
+        yield config
+    finally:
+        _INVOCATION_CONFIG.reset(token)
 
 
 class ConfigProxy:
