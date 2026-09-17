@@ -3,7 +3,7 @@ from __future__ import annotations
 import ast
 from pathlib import Path
 
-_SOURCE_ROOT = Path(__file__).resolve().parents[2] / "agentloom"
+_SOURCE_ROOT = Path(__file__).resolve().parents[2] / "src"
 _SELF_LEARNING_ROOT = _SOURCE_ROOT / "self_learning"
 _PERSISTENCE_ROOT = _SELF_LEARNING_ROOT / "persistence"
 

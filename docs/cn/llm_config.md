@@ -510,7 +510,7 @@ litellm.completion failed (attempt 2/5): RateLimitError: Rate limit exceeded. Re
 
 ## 8. 默认值常量对照表
 
-以下常量定义在 `agentloom/configuration/defaults.py` 中，是所有模型参数的最终兜底值：
+以下常量定义在 `src/configuration/defaults.py` 中，是所有模型参数的最终兜底值：
 
 | 常量名 | 值 | 对应参数 |
 |--------|-----|---------|
