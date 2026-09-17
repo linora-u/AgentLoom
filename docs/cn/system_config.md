@@ -475,7 +475,11 @@ shell_settings:
 | 参数 | 类型 | 默认值 | 说明 |
 |------|------|--------|------|
 | `max_print_outputs_length` | `int` | `50000` | 单次代码执行中 `print()` 输出的最大字符数。超出部分会被截断 |
-| `timeout_seconds` | `int \| null` | `30` | 单个生成 Python 代码块的最长墙钟执行秒数。同步调用 Worker Agent 或其他长耗时工具时可调大 |
+| `timeout_seconds` | `int \| null` | `30` | 单个生成 Python 代码块的墙钟超时阈值，包含同步 Worker 和工具调用的等待时间。`null` 关闭此超时 |
+
+调用方 Agent 的 YAML 应声明有限预算，覆盖同步 Worker 完整调用中的模型请求和工具执行。仓库的复杂 checkpoint Supervisor 与其他多 Worker Application 一样使用 `1200` 秒。Worker 自身的执行预算不会延长调用方的预算。
+
+该超时不代表取消执行。当前固定版本的本地执行器会等待 Python 线程结束，再返回超时错误；即使 Worker 或工具在超时阈值之后成功完成，调用方仍会收到错误，此时副作用可能已经提交。在同一次 attempt 内重试相同 Worker 输入仍会创建新调用；checkpoint resume 不提供通用的重试去重。
 
 > `additional_functions` 由框架根据 `code_agent.additional_functions` 配置自动注入，无需在 `executor_kwargs` 中手动指定。
 
