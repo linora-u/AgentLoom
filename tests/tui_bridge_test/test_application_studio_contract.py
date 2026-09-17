@@ -20,11 +20,9 @@ def test_application_detail_exposes_effective_capabilities_with_sources(
     _write(
         tmp_path / "config/system.yaml",
         """
-tools:
-  search:
-    timeout: 10
+tools: []
 tool_access_control:
-  mode: allowlist
+  path_validation: []
 hooks:
   SessionStart: []
 """,
@@ -33,6 +31,8 @@ hooks:
         tmp_path / "config/llm.yaml",
         """
 model:
+  summary:
+    model: openai/test-summary
   default_model_type: powerful
   powerful:
     model: openai/test
@@ -48,9 +48,9 @@ model:
         tmp_path / "applications/reports/config/system.yaml",
         """
 tool_access_control:
-  mode: denylist
+  path_validation: []
 mcp_servers:
-  - reports-db
+  - config/reports-mcp.json
 """,
     )
     _write(
@@ -89,6 +89,8 @@ agent_function_schema:
 """,
     )
 
+    _write(tmp_path / "config/reports-mcp.json", '{"mcpServers":{}}')
+
     detail = TuiBridge(tmp_path).dispatch(
         "application.detail",
         {"application_id": "reports"},
@@ -102,7 +104,7 @@ agent_function_schema:
     assert supervisor["tools"] == [{"name": "web_search", "source": "agent"}]
     assert [(skill["name"], skill["source"]) for skill in supervisor["skills"]] == [
         ("global-review", "global"),
-        ("local-writer", "agent"),
+        ("local-writer", "application"),
     ]
     assert supervisor["permissions"]["source"] == "application"
     assert supervisor["hooks"]["source"] == "global"
@@ -142,7 +144,7 @@ def test_application_detail_pins_running_revision_to_the_started_run(tmp_path: P
 def test_versioned_domain_cli_returns_json_envelopes_and_safe_errors(tmp_path: Path) -> None:
     _write(
         tmp_path / "config/llm.yaml",
-        "model:\n  default_model_type: test\n  test:\n    model: openai/test\n    api_key: secret-value\n",
+        "model:\n  summary:\n    model: openai/test-summary\n  default_model_type: test\n  test:\n    model: openai/test\n    api_key: secret-value\n",
     )
     _write(
         tmp_path / "applications/demo/workflows/demo.yaml",
@@ -190,7 +192,7 @@ def test_domain_application_detail_is_paginated_and_bounded_for_large_apps(
 ) -> None:
     _write(
         tmp_path / "config/llm.yaml",
-        "model:\n  default_model_type: test\n  test:\n    model: openai/test\n",
+        "model:\n  summary:\n    model: openai/test-summary\n  default_model_type: test\n  test:\n    model: openai/test\n",
     )
     for index in range(8):
         skill_path = f"skills/shared-{index}"

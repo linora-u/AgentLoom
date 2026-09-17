@@ -46,6 +46,8 @@ _WORKFLOW_OVERLAY_KEYS = {
     "execution_env",
     "code_agent",
     "tools",
+    "tool_metadata",
+    "tool_output_limits",
     "shell_settings",
     "default_toolsets",
     "toolsets",
@@ -414,6 +416,12 @@ def _load_merged_config(config_dir: Path | str | None = None) -> UnifiedConfig:
     """
     agent_root = _discover_agent_root(config_dir=config_dir)
 
+    return load_project_config(agent_root)
+
+
+def load_project_config(project_root: Path | str) -> UnifiedConfig:
+    """Read an explicit project without mutating the process-wide config."""
+    agent_root = Path(project_root).expanduser().resolve()
     config_root = agent_root / "config"
     layered_builder = LayeredConfigBuilder(
         validate_hook=lambda snapshot, overlay: validate_system_snapshot(snapshot, overlay.name)
@@ -523,52 +531,17 @@ def extract_workflow_overlay(
         filtered_map,
         source_name=source_name,
     )
-    overlay: dict[str, Any] = {}
-    for key in _WORKFLOW_OVERLAY_KEYS:
-        if key not in filtered_map:
-            continue
-
-        value = filtered_map[key]
-        if key == "prompt":
-            if isinstance(value, (str, dict)):
-                overlay[key] = value
-            continue
-
-        if key == "tools":
-            if isinstance(value, list):
-                overlay[key] = value
-            continue
-
-        if key in ("shell_settings", "default_toolsets", "toolsets"):
-            overlay[key] = value
-            continue
-
-        if key == "smart_summary":
-            overlay[key] = value
-            continue
-
-        # Preserve invalid values as well as valid mappings. Hook validation
-        # needs the actual Agent-layer declaration; silently dropping
-        # ``hooks: null`` or ``hooks: []`` would turn a configuration error
-        # into an unintended fallback to lower-precedence Hooks.
-        if key == "hooks":
-            overlay[key] = value
-            continue
-
-        # mcp_servers: pass through as-is (string, list, or dict all valid)
-        if key == "mcp_servers":
-            overlay[key] = value
-            continue
-
-        if isinstance(value, dict):
-            overlay[key] = value
-    return overlay
+    # Keep invalid values visible to the shared validator: silently discarding
+    # a malformed override would execute a different lower-precedence value.
+    return {key: deepcopy(value) for key, value in filtered_map.items()
+            if key in _WORKFLOW_OVERLAY_KEYS}
 
 
 def build_effective_agent_config_snapshot(
     agent_config: dict[str, Any] | None,
     *,
     source_name: str = "agent",
+    base_config: UnifiedConfig | None = None,
 ) -> EffectiveAgentConfigSnapshot:
     """Build merged Agent values while retaining every unmerged source.
 
@@ -581,7 +554,10 @@ def build_effective_agent_config_snapshot(
     YAML file path (stored in ``agent_config["_yaml_file_path"]``) until a
     ``workflows/`` directory is found.
     """
-    base = get_config()
+    pinned = (agent_config or {}).get("_effective_agent_config_snapshot")
+    if isinstance(pinned, EffectiveAgentConfigSnapshot):
+        return deepcopy(pinned)
+    base = base_config if base_config is not None else get_config()
     layers: list[ConfigLayerSnapshot] = []
     layered_builder = LayeredConfigBuilder(
         validate_hook=lambda snapshot, overlay: validate_system_snapshot(snapshot, overlay.name)
@@ -617,7 +593,7 @@ def build_effective_agent_config_snapshot(
             else:
                 agent_layer_root = app_root.resolve()
                 app_config_path = app_root / APP_CONFIG_RELATIVE_PATH
-                if app_root != base.agent_root and app_config_path.exists():
+                if app_root != base.agent_root:
                     app_system_yaml = _filter_llm_only_top_level_keys(
                         _load_yaml(app_config_path),
                         source_name=str(app_config_path),
@@ -659,6 +635,8 @@ def build_effective_agent_config_snapshot(
                 )
             )
     merged = layered_builder.build()
+    normalized = RootSettings.model_validate(merged).model_dump(exclude_unset=True)
+    merged.update(normalized)
     normalize_tool_access_control_section(merged, base.agent_root)
     validate_system_snapshot(merged, source_name)
     _validate_review_model_references(

@@ -16,6 +16,8 @@ def _write_agent(project_root: Path, relative_path: str, *, name: str = "schedul
         model_config.write_text(
             """
 model:
+  summary:
+    model: openai/test-summary
   default_model_type: powerful
   powerful:
     model: openai/test-model
