@@ -6,6 +6,7 @@ import inspect
 import json
 import subprocess
 import sys
+from pathlib import Path
 from textwrap import dedent
 
 
@@ -230,6 +231,7 @@ def test_tui_definition_validation_does_not_load_implementations() -> None:
 
     assert state["valid_errors"] == []
     assert state["invalid_errors"] == [
+        f"{Path.cwd() / 'applications/example/workflows/example.yaml'}: "
         "Unknown fixed_args for tool 'grep_search': unknown"
     ]
     assert state["loaded"] == []

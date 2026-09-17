@@ -156,24 +156,30 @@ def _parse_one_server(name: str, raw: dict[str, Any]) -> McpServerConfig:
     )
 
 
-def parse_mcp_servers_from_json(data: dict) -> list[McpServerConfig]:
+def parse_mcp_servers_from_json(data: dict, *, strict: bool = False) -> list[McpServerConfig]:
     """Parse ``mcpServers`` dict from JSON into a list of :class:`McpServerConfig`.
 
     Skips invalid entries with a warning instead of raising.
     """
     servers_raw = data.get("mcpServers", {})
     if not isinstance(servers_raw, dict):
+        if strict:
+            raise ValueError("MCP mcpServers must be a mapping")
         logger.warning("[MCP] 'mcpServers' value is not a dict, skipping")
         return []
 
     configs: list[McpServerConfig] = []
     for name, entry in servers_raw.items():
         if not isinstance(entry, dict):
+            if strict:
+                raise ValueError(f"MCP server {name!r} must be a mapping")
             logger.warning("[MCP] Server '%s': expected dict, got %s — skipping", name, type(entry).__name__)
             continue
         try:
             configs.append(_parse_one_server(name, entry))
         except ValueError as exc:
+            if strict:
+                raise
             logger.warning("[MCP] %s — skipping", exc)
     return configs
 
@@ -186,6 +192,7 @@ def parse_mcp_servers_from_json(data: dict) -> list[McpServerConfig]:
 def _load_configs_from_paths(
     paths: list[str],
     agent_root: Path,
+    *, strict: bool = False,
 ) -> list[McpServerConfig]:
     """Resolve, load, and parse a list of JSON paths.  Failures are logged as
     warnings; valid configs are returned.
@@ -195,12 +202,16 @@ def _load_configs_from_paths(
         resolved = resolve_mcp_json_path(raw_path, agent_root)
         try:
             data = load_mcp_json(resolved)
-            parsed = parse_mcp_servers_from_json(data)
+            parsed = parse_mcp_servers_from_json(data, strict=strict)
             configs.extend(parsed)
             logger.info("[MCP] Loaded config from '%s': %d servers", resolved, len(parsed))
         except FileNotFoundError:
+            if strict:
+                raise
             logger.warning("[MCP] Config file not found: %s", resolved)
         except ValueError as exc:
+            if strict:
+                raise
             logger.warning("[MCP] %s", exc)
     return configs
 
@@ -208,6 +219,7 @@ def _load_configs_from_paths(
 def parse_mcp_yaml_value(
     raw_value: Any,
     agent_root: Path,
+    *, strict: bool = False,
 ) -> Optional[McpSettings]:
     """Parse the ``mcp_servers`` YAML value into :class:`McpSettings`.
 
@@ -233,12 +245,49 @@ def parse_mcp_yaml_value(
     if raw_value is None:
         return None
 
+    if strict:
+        from src.lib.config.config_validation import BoolParser
+        if not isinstance(raw_value, (str, list, dict)):
+            raise ValueError("mcp_servers must be a path, list of paths, or mapping")
+        if isinstance(raw_value, list) and any(not isinstance(p, str) or not p.strip() for p in raw_value):
+            raise ValueError("mcp_servers paths must be non-empty strings")
+        if isinstance(raw_value, dict):
+            extra = set(raw_value) - {"path", "paths", "timeout", "tool_timeout", "tool_name_prefix"}
+            if extra:
+                raise ValueError("mcp_servers has unsupported fields: " + ", ".join(sorted(extra)))
+            if not raw_value:
+                return None
+            if not any(key in raw_value for key in ("path", "paths")):
+                raise ValueError("mcp_servers mapping requires path or paths")
+            if "path" in raw_value and (not isinstance(raw_value["path"], str) or not raw_value["path"].strip()):
+                raise ValueError("mcp_servers.path must be a non-empty string")
+            if "paths" in raw_value and (not isinstance(raw_value["paths"], list) or any(
+                not isinstance(p, str) or not p.strip() for p in raw_value["paths"]
+            )):
+                raise ValueError("mcp_servers.paths must be a list of non-empty strings")
+            raw_value = dict(raw_value)
+            for key in ("timeout", "tool_timeout"):
+                if key in raw_value:
+                    try:
+                        number = int(raw_value[key])
+                    except (ValueError, TypeError):
+                        raise ValueError(f"mcp_servers.{key} must be a positive integer") from None
+                    if isinstance(raw_value[key], bool) or number <= 0:
+                        raise ValueError(f"mcp_servers.{key} must be a positive integer")
+                    raw_value[key] = number
+            if "tool_name_prefix" in raw_value:
+                value = raw_value["tool_name_prefix"]
+                if not isinstance(value, (bool, str)) or (isinstance(value, str) and value.strip().lower() not in
+                        BoolParser._TRUTHY_STRINGS | BoolParser._FALSY_STRINGS):
+                    raise ValueError("mcp_servers.tool_name_prefix must be a boolean")
+                raw_value["tool_name_prefix"] = BoolParser.parse(value)
+
     # Option 1: single string path
     if isinstance(raw_value, str):
         raw_value = raw_value.strip()
         if not raw_value:
             return None
-        configs = _load_configs_from_paths([raw_value], agent_root)
+        configs = _load_configs_from_paths([raw_value], agent_root, strict=strict)
         return McpSettings(configs=configs)
 
     # Option 2: list of string paths
@@ -246,7 +295,7 @@ def parse_mcp_yaml_value(
         paths = [str(p).strip() for p in raw_value if isinstance(p, str) and str(p).strip()]
         if not paths:
             return None
-        configs = _load_configs_from_paths(paths, agent_root)
+        configs = _load_configs_from_paths(paths, agent_root, strict=strict)
         return McpSettings(configs=configs)
 
     # Option 3: dict with path/paths + options
@@ -265,7 +314,7 @@ def parse_mcp_yaml_value(
             logger.warning("[MCP] mcp_servers dict has no 'path' or 'paths' — skipping")
             return None
 
-        configs = _load_configs_from_paths(paths, agent_root)
+        configs = _load_configs_from_paths(paths, agent_root, strict=strict)
         return McpSettings(
             configs=configs,
             timeout=int(raw_value.get("timeout", 30)),

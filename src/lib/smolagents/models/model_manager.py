@@ -5,8 +5,9 @@ Provides unified management of different model types, including model selection
 and configuration.
 """
 
+import hashlib
 import json
-from dataclasses import dataclass, replace
+from dataclasses import asdict, dataclass, replace
 
 import litellm
 
@@ -158,7 +159,11 @@ class ModelManager:
         model_builder: ModelConfigBuilder | None = None,
     ) -> str:
         """Generate a deterministic cache key including builder overlays."""
-        cache_key = f"{prefix}_{model_type.value}"
+        # A profile name can keep its identity while its provider/settings
+        # change between Runs. Never reuse a model from an earlier snapshot.
+        settings = asdict(self.get_model_config(model_type, model_builder))
+        digest = hashlib.sha256(json.dumps(settings, sort_keys=True, default=str).encode()).hexdigest()
+        cache_key = f"{prefix}_{model_type.value}_{digest}"
         if model_builder is not None:
             builder_fragment = model_builder.cache_fragment()
             if builder_fragment:
@@ -182,7 +187,7 @@ class ModelManager:
         Returns:
             dict: Configuration parameters for `litellm.completion`.
         """
-        cache_key = self._generate_cache_key("litellm_config", model_type, model_builder)
+        cache_key = self._generate_cache_key("litellm_config", model_type, model_builder) if model_cache else ""
 
         if model_cache and cache_key in self._model_cache:
             return self._model_cache[cache_key]
@@ -244,7 +249,7 @@ class ModelManager:
         Returns:
             LiteLLMModelV2: Smolagents model instance.
         """
-        cache_key = self._generate_cache_key("smolagents", model_type, model_builder)
+        cache_key = self._generate_cache_key("smolagents", model_type, model_builder) if model_cache else ""
 
         if model_cache and cache_key in self._model_cache:
             return self._model_cache[cache_key]

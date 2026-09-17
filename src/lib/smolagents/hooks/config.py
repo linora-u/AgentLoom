@@ -494,12 +494,16 @@ class HookPlanCompiler:
 
     @staticmethod
     def _handler_for(spec: ShellHookSpec) -> HookHandler:
-        from .shell import create_shell_hook_executor
+        def execute(context):
+            # Compiling definitions must not import tool/process execution
+            # implementations. Resolve transport only when this Hook runs.
+            from .shell import create_shell_hook_executor
+            return create_shell_hook_executor(spec)(context)
 
         return HookHandler(
             event=spec.event,
             pattern=spec.matcher,
-            callback=create_shell_hook_executor(spec),
+            callback=execute,
             source=f"{spec.layer_name}:{spec.source_path}#{spec.hook_id}",
             hook_id=spec.hook_id,
             source_path=str(spec.source_path),
