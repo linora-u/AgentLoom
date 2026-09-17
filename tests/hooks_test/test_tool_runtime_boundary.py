@@ -8,6 +8,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 from smolagents import LocalPythonExecutor, Tool
+from smolagents.local_python_executor import ExecutionTimeoutError
 
 from agentloom.runtime.hooks import HookEvent, HookHandler, HookPlan, HookResult, HookRun
 from agentloom.adapters.smolagents.tool_shim import (
@@ -850,7 +851,7 @@ def test_local_python_executor_timeout_leaves_no_delayed_hook_or_tool_effect_aft
     executor.send_tools({"slow_shared_tool": inject_hooks(slow_shared_tool)})
 
     started = time.monotonic()
-    with bind_explicit_execution_context(explicit), pytest.raises(Exception, match="exceeded"):
+    with bind_explicit_execution_context(explicit), pytest.raises(ExecutionTimeoutError, match="exceeded"):
         executor('slow_shared_tool(label="A")')
     elapsed = time.monotonic() - started
     effects_at_return = list(effects)
@@ -862,6 +863,11 @@ def test_local_python_executor_timeout_leaves_no_delayed_hook_or_tool_effect_aft
     assert elapsed >= 0.15
     assert effects_at_return == ["tool-A", "post"]
     assert effects == effects_at_return
+    # Completion does not turn the expired whole-block budget into success.
+    # The caller receives the timeout even though tool completion is recorded.
+    records = run.tool_outcomes_snapshot()
+    assert len(records) == 1
+    assert records[0].status == "completed"
 
 
 def test_real_tool_failure_still_dispatches_post_tool_use_failure() -> None:

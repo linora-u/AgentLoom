@@ -454,7 +454,11 @@ Runs AI-generated Python code directly in the host environment. This is the defa
 | Parameter | Type | Default | Description |
 |------|------|--------|------|
 | `max_print_outputs_length` | `int` | `50000` | Maximum characters of `print()` output per code execution. Excess is truncated |
-| `timeout_seconds` | `int \| null` | `30` | Maximum wall-clock seconds for one generated Python code block. Use a larger value for workflows that synchronously invoke worker Agents or other long-running tool calls |
+| `timeout_seconds` | `int \| null` | `30` | Wall-clock timeout threshold for one generated Python code block, including synchronous Worker and tool calls. `null` disables this timeout |
+
+Set a finite budget in the calling Agent's YAML that covers the complete synchronous Worker call, including its model requests and tools. The shipped complex checkpoint Supervisor uses `1200` seconds, as do other multi-Worker Applications. A Worker's own execution budget does not extend its caller's budget.
+
+This timeout is not cancellation. The pinned local executor waits for its Python thread to finish before returning the timeout error, even if the Worker or tool completes successfully after the threshold. Its side effects may therefore be committed despite the caller receiving an error. Retrying the same Worker input within that attempt creates a new call; checkpoint resume does not provide general retry deduplication.
 
 > `additional_functions` is automatically injected by the framework based on `code_agent.additional_functions` configuration; no need to specify manually in `executor_kwargs`.
 

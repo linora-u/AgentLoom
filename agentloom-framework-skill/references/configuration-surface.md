@@ -67,6 +67,8 @@ workflow: |
 
 `tool_call` 模式的主路径是 provider/native tool calls。只要当前 Agent 有可用工具，AgentLoom 就发送结构化 tools schema；如果 provider 返回文本 fallback，也只接受明确结构化容器，例如 `{name, arguments}`、dump 出来的 native `tool_calls/function`、XML/invoke wrapper。不要设计依赖自由文本正则兜底的 workflow。
 
+`code_act` 的本地执行器默认对整个 Python 代码块使用 30 秒墙钟超时，包括同步 Worker 的模型请求与工具等待。长耗时编排应在调用方 Agent YAML 的 `execution_env.executor_kwargs.timeout_seconds` 声明足够的有限预算；复杂 checkpoint Supervisor 使用 `1200` 秒。超时不是取消：执行器等待线程结束后仍返回超时错误，期间工具或 Worker 可能已成功提交副作用。Worker 的预算不会延长调用方预算，同一次 attempt 内重试相同输入也不会自动去重。
+
 Supervisor 专属：
 
 ```yaml
