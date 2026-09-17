@@ -118,6 +118,7 @@ def test_runtime_catalog_composes_project_application_and_agent_sources(tmp_path
     agent = object.__new__(_CatalogAgent)
     agent._config = {"name": "catalog-agent"}
     agent._effective_agent_config_snapshot = SimpleNamespace(
+        values={},
         layers=(
             SimpleNamespace(name="global_system", root=project_root, data={}),
             SimpleNamespace(name="application_system", root=application_root, data={}),

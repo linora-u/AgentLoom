@@ -650,10 +650,9 @@ class RoleDrivenAgent(BaseAgent):
     def initialize_skill_catalog(self, logger: AgentLogger | None = None) -> SkillCatalog:
         """Resolve conventional and explicitly configured Skill sources once."""
         log = get_logger(logger, __name__)
-        from agentloom.application.definition import skill_sources
-        sources = skill_sources(self._effective_agent_config_snapshot)
+        from agentloom.application.definition import skill_catalog
 
-        catalog = SkillCatalog.discover(sources, logger=log)
+        catalog = skill_catalog(self._effective_agent_config_snapshot, logger=log)
         log.info("Agent '%s' resolved Skills: %s", self.name, [item.name for item in catalog.summaries()])
         return catalog
 

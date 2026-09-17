@@ -17,10 +17,10 @@ workflow: |
   from pathlib import Path
 
   checks = []
-  error_recovery = Path("src/lib/smolagents/error_recovery.py").read_text()
-  parser = Path("src/lib/smolagents/models/tool_call_parser.py").read_text()
-  loom_mixin = Path("src/lib/smolagents/agent/loom_mixin.py").read_text()
-  compression = Path("src/lib/smolagents/memory/context_compression.py").read_text()
+  error_recovery = Path("src/runtime/error_recovery.py").read_text()
+  parser = Path("src/adapters/smolagents/models/tool_call_parser.py").read_text()
+  loom_mixin = Path("src/runtime/loom_mixin.py").read_text()
+  compression = Path("src/runtime/memory/context_compression.py").read_text()
 
   categories = ["FORMAT_NOT_FOUND", "JSON_SYNTAX_ERROR", "UNKNOWN_TOOL", "ARGUMENT_ERROR"]
   checks.append(("four_error_categories", all(item in error_recovery for item in categories)))
