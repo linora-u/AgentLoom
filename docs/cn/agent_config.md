@@ -7,6 +7,12 @@
 
 Agent YAML 是 AgentLoom 框架中**定义单个 Agent 行为**的配置文件，控制 Agent 的角色描述、工作流指令、可用工具、模型选择、执行环境、技能包等。Agent 分为 **Supervisor**（多 Agent 编排者）和 **Worker**（具体任务执行者）两种角色。
 
+两种角色都支持 `.yaml`、`.yml` 和 `.md` 定义。Markdown 在 `yaml` 围栏代码块中
+声明配置，代码块外非空正文成为 `workflow`。Application Studio 的目录、详情、
+校验及 schedule 目标均支持顶层或嵌套 Application/workflow 目录中的 Markdown
+Supervisor，并复用执行入口的定义读取器。Worker 仍通过 Supervisor 引用呈现；
+非法 Markdown、重复 YAML key 等错误使用相同校验诊断。读取这些视图不会启动 Run 或模型。
+
 > ⚠️ **LLM 配置隔离**：Agent YAML 中的 `model`/`llm`/`langfuse` 会被自动过滤并输出 warning。LLM 参数只能在 `config/llm.yaml` 中定义，Agent 通过 `model_type` 字段选择使用哪个预定义模型类型。
 
 ---
