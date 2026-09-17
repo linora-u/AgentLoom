@@ -13,7 +13,7 @@ import subprocess
 import tempfile
 from typing import Optional
 
-from src.lib.logging import get_logger
+from src.runtime.logging import get_logger
 
 logger = get_logger(__name__)
 

@@ -4,8 +4,8 @@ from __future__ import annotations
 
 import html
 
-from src.lib.smolagents.skills.catalog import SkillCatalog
-from src.trace.task_context import get_current_skill_catalog
+from src.runtime.skills.catalog import SkillCatalog
+from src.runtime.trace.task_context import get_current_skill_catalog
 
 
 def _resolve_catalog() -> SkillCatalog:

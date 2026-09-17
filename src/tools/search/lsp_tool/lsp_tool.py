@@ -29,7 +29,7 @@ from collections import OrderedDict
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple
 
-from src.lib.logging import get_logger
+from src.runtime.logging import get_logger
 
 from . import treesitter_fallback as ts_fb
 
@@ -50,7 +50,7 @@ def _find_project_root(file_path: str) -> str:
     """
     resolved = Path(file_path).resolve()
     try:
-        from src.lib.config import C
+        from src.configuration import C
         agent_root = Path(C.agent_root).resolve()
         # Only use agent_root when the file is within the project tree
         if resolved == agent_root or agent_root in resolved.parents:
@@ -76,7 +76,7 @@ def _find_project_root(file_path: str) -> str:
 def _get_lsp_instance(file_path: str):
     """Get the LSPServerInstance for a file, or None if unavailable."""
     try:
-        from src.services.lsp import LSPServerManager
+        from src.adapters.lsp import LSPServerManager
         manager = LSPServerManager.get_instance()
         if not manager.is_initialized:
             return None
@@ -324,7 +324,7 @@ def lsp_get_workspace_symbols(
     instance = None
     if language:
         try:
-            from src.services.lsp import LSPServerManager
+            from src.adapters.lsp import LSPServerManager
             manager = LSPServerManager.get_instance()
             instance = manager.get_server_for_language(language)
         except Exception:

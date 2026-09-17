@@ -17,9 +17,9 @@ import re
 from pathlib import Path
 from typing import Dict, List, Optional, Set, Callable
 
-from src.lib.config import C
-from src.lib.logging import get_logger
-from src.lib.permissions.workspace import get_allowed_directories
+from src.configuration import C
+from src.runtime.logging import get_logger
+from src.runtime.permissions.workspace import get_allowed_directories
 
 logger = get_logger(__name__)
 
@@ -33,7 +33,7 @@ _PATH_GUIDANCE = (
 def _get_shell_config_path(key: str, *, default=None):
     """Read a shell config value, preferring per-agent effective config."""
     try:
-        from src.trace import get_current_agent_config
+        from src.runtime.trace import get_current_agent_config
         agent_cfg = get_current_agent_config()
         if isinstance(agent_cfg, dict):
             shell = agent_cfg.get("shell_settings")

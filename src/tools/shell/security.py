@@ -22,8 +22,8 @@ import re
 from dataclasses import dataclass
 from typing import List, Optional, Tuple
 
-from src.lib.config import C
-from src.lib.logging import get_logger
+from src.configuration import C
+from src.runtime.logging import get_logger
 
 logger = get_logger(__name__)
 
@@ -418,7 +418,7 @@ _SECURITY_CHECKS = {
 def _get_shell_config_security(key: str, *, default=None):
     """Read a shell config value, preferring per-agent effective config."""
     try:
-        from src.trace import get_current_agent_config
+        from src.runtime.trace import get_current_agent_config
         agent_cfg = get_current_agent_config()
         if isinstance(agent_cfg, dict):
             shell = agent_cfg.get("shell_settings")

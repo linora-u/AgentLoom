@@ -20,7 +20,7 @@ from pathlib import Path, PurePosixPath
 from typing import Any
 
 import yaml
-from src.lib.config.yaml_loader import load_unique_yaml
+from src.configuration.yaml_loader import load_unique_yaml
 from src.application.definition import definition_error
 
 from src.tui_bridge.definition import validate_agent_definition

@@ -10,7 +10,7 @@ long-running commands that have been promoted to background execution:
 
 import time
 
-from src.lib.logging import get_logger
+from src.runtime.logging import get_logger
 from src.tools.shell.background_task import BackgroundTaskRegistry
 
 logger = get_logger(__name__)
