@@ -296,7 +296,7 @@ class AgentConfigNormalizer:
                 raise ValueError("toolsets must be a list of toolset names when provided")
             resolve_toolsets(raw_toolsets)
 
-        for tool_config in config.get("tools", []):
+        for tool_config in config.get("tools") or []:
             if "module" in tool_config and "function" in tool_config:
                 continue
             spec = get_tool_spec(tool_config["name"])
@@ -520,23 +520,8 @@ class AgentConfigNormalizer:
         *,
         agent_root: Path | str,
     ) -> Path:
-        path_value = path_value.strip()
-        configured_path = Path(path_value)
-
-        if configured_path.is_absolute():
-            return configured_path.resolve()
-
-        if "/" in path_value or "\\" in path_value:
-            return (Path(agent_root).resolve() / configured_path).resolve()
-
-        if configured_path.suffix:
-            # Has a file extension — resolve in worker_agents folder.
-            # Precheck will reject unsupported extensions (.txt etc.).
-            return (worker_agents_folder / configured_path).resolve()
-        raise ValueError(
-            f"worker_agents path '{path_value}' is missing a file extension; "
-            f"must end with .yaml, .yml, or .md (e.g. '{path_value}.yaml')"
-        )
+        from src.application.paths import resolve_worker_reference
+        return resolve_worker_reference(path_value, worker_agents_folder, project_root=agent_root)
 
     @classmethod
     def precheck_worker_agent_paths(
@@ -552,11 +537,6 @@ class AgentConfigNormalizer:
 
         errors: list[str] = []
         resolved_items: list[tuple[str, Path]] = []
-
-        if not worker_agents_folder.exists():
-            errors.append(f"worker_agents folder not found: {worker_agents_folder}")
-        elif not worker_agents_folder.is_dir():
-            errors.append(f"worker_agents path is not a directory: {worker_agents_folder}")
 
         for idx, agent_conf in enumerate(expected_agents):
             configured_path = agent_conf["path"].strip()

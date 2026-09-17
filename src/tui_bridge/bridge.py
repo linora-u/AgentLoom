@@ -2652,19 +2652,16 @@ class TuiBridge:
         raw_workers = definition.get("worker_agents", [])
         if not isinstance(raw_workers, list):
             return []
-        worker_folder = supervisor_path.parent / "worker_agents"
         workers: list[Path] = []
         for item in raw_workers:
             raw_path = item.get("path") if isinstance(item, dict) else None
             if not isinstance(raw_path, str) or not raw_path.strip():
                 continue
-            configured = Path(raw_path.strip())
-            if configured.is_absolute():
-                candidate = configured.resolve()
-            elif "/" in raw_path or "\\" in raw_path:
-                candidate = (self.project_root / configured).resolve()
-            else:
-                candidate = (worker_folder / configured).resolve()
+            from src.application.definition import resolve_worker_path
+            try:
+                candidate = resolve_worker_path(self.project_root, supervisor_path, raw_path)
+            except ValueError:
+                continue
             try:
                 candidate.relative_to(self.project_root)
             except ValueError:

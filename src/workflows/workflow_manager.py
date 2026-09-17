@@ -20,7 +20,8 @@ class WorkflowManager:
     def get_supervisor_agent_yaml_path(self, category: str) -> Path:
         """Get the supervisor-agent configuration directory path."""
             
-        root_dir = self.workflows_dir.parents[1]
+        from src.lib.config import C
+        root_dir = Path(C.agent_root)
         app_path = root_dir / 'applications' / category / 'workflows'
         if app_path.exists():
             return app_path
@@ -56,16 +57,10 @@ def infer_category_from_yaml_path(yaml_path: Path) -> str:
         ValueError: Raised when the path format is not as expected.
     """
     yaml_path = Path(yaml_path).resolve()
-    parts = yaml_path.parts
-    
-    # Find the index of 'applications' in the path.
-    try:
-        app_index = parts.index('applications')
-        # category should appear right after 'applications'.
-        if app_index + 1 < len(parts):
-            category = parts[app_index + 1]
-            return category
-        else:
-            raise ValueError(f"Cannot infer category from path: {yaml_path}")
-    except ValueError:
-        raise ValueError(f"'applications' directory was not found in path: {yaml_path}")
+    for ancestor in yaml_path.parents:
+        if ancestor.name == 'workflows':
+            app_root = ancestor.parent
+            for parent in app_root.parents:
+                if parent.name == 'applications':
+                    return app_root.relative_to(parent).as_posix()
+    raise ValueError(f"'applications' directory was not found in path: {yaml_path}")
