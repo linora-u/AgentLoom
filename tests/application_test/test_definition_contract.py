@@ -636,7 +636,7 @@ def test_removed_fields_reject_consistently_before_run_allocation(tmp_path, monk
     from agentloom.tui_bridge.domain_cli import main as domain_main
 
     base = project_config(tmp_path)
-    path = tmp_path / "applications/demo/workflows/root.yaml"
+    path = tmp_path / f"applications/demo/workflows/root{suffix}"
     worker = path.parent / f"worker_agents/child{suffix}"
     removed = "tools_mapping: {Claude: {Read: read_file}}\n"
     supervisor_text = BASE + f"worker_agents: [{{path: child{suffix}}}]\n"
