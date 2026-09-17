@@ -2,7 +2,7 @@
 
 规格日期：2026-09-17。研究基线：`ca27966d`。本规格合并本次讨论的两个目标：自有源码目录与职责整理，以及 Application 定义、配置和路径解释统一。
 
-状态：规格已确定，实施与完整验收待执行。用户已确认以真实 Application 执行入口为主要测试 seam，并通过 Studio 只读入口验证配置一致性。写出本规格不代表实现完成或测试通过。
+状态：实施中，完整最终验收待执行。用户于 2026-09-17 明确调整迁移要求：“不要兼容要彻底重构”，并再次要求最终提交前完成大量单元测试、功能测试和真实 Application 执行。本规格据此取消旧 `src.*` 导入及模块命令的兼容层，统一迁移仓库内调用方。历史运行数据与 checkpoint 的保留、恢复要求不变。写出本规格不代表实现完成或测试通过。
 
 ## Problem Statement
 
@@ -18,7 +18,7 @@
 
 ## Solution
 
-把 AgentLoom 自有行为按职责集中到可识别的 module，保留已有有效 seam，并将 Python 对外 package 的目标命名空间统一为 `agentloom`。先统一行为归属，再进行目录和命名空间迁移；行为修复与机械搬迁分别审阅和回滚。
+把 AgentLoom 自有行为按职责集中到可识别的 module，保留已有有效 seam，并将 Python 对外 package 的目标命名空间统一为 `agentloom`。先统一行为归属，再进行目录和命名空间迁移；行为修复与机械搬迁分别审阅和回滚。最终代码只提供新的命名空间，所有仓库内 Python 调用方、Application 工具引用、测试、命令入口、模板和当前文档一起迁移；不保留 `src` package、旧路径转发或兼容 import finder。
 
 让同一份 Application 定义经过同一套读取、校验、配置合成、来源记录和路径解析。Studio adapter 负责展示，运行 adapter 负责执行，两者消费一致的定义语义。只读检查继续保持轻量，不创建 Agent 运行、不调用模型、不连接 MCP、不执行 Hook。
 
@@ -42,7 +42,7 @@
 14. As an Application author, I want Worker references resolved independently of package source depth, so that framework directory changes do not change my workflow.
 15. As an Application author, I want missing or cyclic Worker references diagnosed before execution, so that invalid topology cannot trigger a partial Run.
 16. As an Application author, I want Worker schemas validated consistently, so that my Supervisor receives the intended callable contract.
-17. As an Application author, I want existing custom tool references preserved, so that migration does not require unrelated Application rewrites.
+17. As an Application author, I want repository-owned custom tool references migrated with their implementation, so that Applications execute through the canonical namespace.
 18. As an Application author, I want prompt and Skill resources resolved consistently, so that changing launch location does not change Agent behavior.
 19. As an Application author, I want Skill loading independent from Hook authorization, so that loading instructions does not silently authorize execution.
 20. As an Application operator, I want Hook Plan ordering and source identity preserved, so that runtime policy remains reproducible after refactoring.
@@ -55,8 +55,8 @@
 27. As an Application operator, I want Goal budgets to include Worker usage, so that accounting remains correct across delegation and resume.
 28. As an Application operator, I want compressed Worker outputs to remain retrievable, so that a Supervisor can verify evidence from long tasks.
 29. As an Application operator, I want CLI, Studio, and Python entry points to report the same Run state, so that operational decisions do not depend on presentation.
-30. As an AgentLoom integrator, I want existing public Python entry points preserved during migration, so that upgrading does not immediately break integrations.
-31. As an AgentLoom integrator, I want old and new imports to resolve to the same runtime objects, so that compatibility does not duplicate registries or context state.
+30. As an AgentLoom integrator, I want one canonical Python namespace and documented entry points, so that the new architecture is explicit rather than hidden behind old forwarding modules.
+31. As an AgentLoom integrator, I want canonical imports to use one implementation and shared runtime objects, so that registries and context state are not duplicated.
 32. As an AgentLoom integrator, I want installed packages and bundled resources to work outside the source checkout, so that packaging errors are found before release.
 33. As a Studio user, I want definition inspection to avoid loading model runtimes and tool implementations, so that browsing Applications remains lightweight.
 34. As a Studio user, I want effective configuration and diagnostics to agree with execution, so that the interface accurately explains the next Run.
@@ -64,7 +64,7 @@
 36. As an AgentLoom contributor, I want a real multi-Worker acceptance Application, so that tests exercise the actual framework instead of only mocks.
 37. As an AgentLoom contributor, I want both CodeAct and native tool-calling workflows exercised, so that neither supported execution mode regresses.
 38. As an AgentLoom contributor, I want generated tests actually executed, so that creating test files cannot be mistaken for passing tests.
-39. As an AgentLoom contributor, I want existing complex Applications included in regression testing, so that compatibility is demonstrated on established workflows.
+39. As an AgentLoom contributor, I want existing complex Applications included in regression testing, so that established workflows retain their behavior after migration.
 40. As an AgentLoom reviewer, I want independently checked artifacts and Run evidence for every acceptance case, so that success claims can be audited.
 41. As an AgentLoom reviewer, I want failed attempts and retries retained, so that intermittent failures cannot disappear from the acceptance report.
 42. As an AgentLoom reviewer, I want behavior changes and directory migrations delivered in separate batches, so that each batch can be evaluated and reverted safely.
@@ -75,7 +75,7 @@
 
 ### 范围与 module 归属
 
-1. 本规格包含自有源码职责整理与 Application 定义统一。开源参考仓库保持原位，忽略配置与研究资产不因本次任务被迁移或删除。已有 Application、用户配置、运行数据与历史 checkpoint 保留原有外部契约。
+1. 本规格包含自有源码职责整理与 Application 定义统一。开源参考仓库保持原位，忽略配置与研究资产不因本次任务被迁移或删除。Application 定义格式与运行语义、用户配置、运行数据和历史 checkpoint 的契约保持；旧 Python 导入与模块命令按第 20、21 条迁移。
 2. 目录迁移以职责是否集中为依据，不以文件长度、目录数量或机械分层为依据。module 的 depth 体现为调用者需要掌握的规则减少；locality 体现为一种行为的修改集中；leverage 体现为同一实现同时服务展示、验证与运行。
 3. 目标 Python 命名空间为 `agentloom`，维持单一 Python 分发包。已有 TypeScript TUI 继续独立维护。命名空间迁移在定义与路径行为统一并验证之后执行。
 4. 按以下语义组织 module，具体文件拆分在实施时结合实际依赖确定，不提前创建空目录或只转发的新抽象。
@@ -112,11 +112,11 @@
 17. 只读定义检查不加载模型运行、具体工具 implementation，不连接外部进程，不执行 Shell Hook，也不分配 Run 存储。Tools catalog / loader 以及懒加载导出的现有 seam 必须保留。
 18. 不将所有上游类型简单再包一遍。确实需要移动的 smolagents 适配保持原有安装时机与语义，版本继续固定。兼容 patch 的主动替换或上游升级是另一个独立决策。
 
-### 迁移与兼容
+### 命名空间迁移与分发
 
-19. 在移动前枚举 Python 导出、命令入口、TUI 隔离模式启动、动态工具引用、模板和资源寻址、Application 定位等对外 interface。调用方迁移不只检查静态 import。
-20. 本规格内保留当前公开入口的兼容访问；旧入口移除另行提出。兼容导出必须引用同一 implementation 和对象，不能让新旧命名空间分别创建全局配置、registry、类身份或 ContextVars。
-21. Application 定义格式、既有动态工具引用、CLI 参数和 Run 返回语义保持可用；需要迁移的内部字符串和生成模板同批更新。已存在的 Application 不要求用户逐个手改。
+19. 在移动前枚举 Python 导出、命令入口、TUI 隔离模式启动、动态工具引用、模板和资源寻址、Application 定位等对外 interface。仓库内调用方全部迁移到新归属，不只检查静态 import。
+20. 根据用户最新决定，本次是命名空间的破坏性迁移：移除旧 `src` package、旧 `python -m src` / `src.tui_bridge` 入口及所有专为旧路径存在的转发、alias finder 和 synthetic namespace。真实 implementation 位于 `agentloom` 的职责 module；全局配置、registry、类身份和 ContextVars 只创建一份。正常的内聚公共导出可以保留，但不能借此恢复旧目录。
+21. Application 定义格式、`loom` CLI 参数和 Run 返回语义保持可用；仓库内既有 Application 的框架工具引用、内部字符串和生成模板同批迁移。外部集成使用的旧 `src.*` 引用需要升级到文档列出的 canonical 路径，不提供旧导入兼容。历史 checkpoint 的稳定存储协议与基于历史源码 revision 的独立 capsule 不依赖候选代码提供旧 package。
 22. 包资源随分发产物正确打包；从源码开发安装、wheel 安装、仓库外工作目录与 TUI 隔离解释器启动均必须可用。启动所需项目上下文必须显式或按已有发现规则解析，不能偶然依赖当前源码目录。
 23. 运行存储格式、Run / task 身份、恢复协议和用户数据位置不因目录迁移变化。迁移后的实现必须能读取本任务基线版本产生的恢复材料并完成对应验收。
 
@@ -127,7 +127,7 @@
 | A：基线与验收载体 | 建立 module 归属和兼容清单，新增真实架构验收 Application，收集现有测试和指定 Application 基线 | 每个必测场景有明确预期、验证器和证据位置；基线缺陷被记录 | 测试与文档独立提交，参考仓库不变 |
 | B：统一定义 | 先统一 YAML / Markdown 读取，再统一配置来源、有效值与路径解析，接入 Studio 和运行入口 | 定义一致性矩阵、只读副作用检查与相关真实任务通过 | 行为 PR 分开提交，外部入口保持 |
 | C：职责归组 | 按已验证语义移动 AgentLoom 编排与真实上游适配；消除重复解释和浅转发 | 核心 Python / TUI 回归、两种 Agent 模式与复杂 Application 通过 | 可运行的小范围迁移 PR |
-| D：命名空间与分发 | 统一目标 package、兼容导出、入口、动态引用和资源寻址 | 安装矩阵、既有 Application 兼容与所有最终验收通过 | 机械迁移单独提交，保留上一安装产物 |
+| D：命名空间与分发 | 统一目标 package，移除旧命名空间，迁移全部调用方、入口、动态引用和资源寻址 | canonical 安装矩阵、迁移后的既有 Application 与所有最终验收通过 | 机械迁移单独提交，保留上一安装产物 |
 | E：最终验收 | 在最终候选 revision 执行全套必要检查并汇总证据 | 下述完成门槛全部满足；无未解释失败 | 失败则修复原因，重新验证受影响范围 |
 
 ## Testing Decisions
@@ -160,7 +160,7 @@
 | Run 生命周期 | 静态拒绝前无 Run，执行成功/失败/中断/预算限制，终结错误不能继续报告成功；事件与结果一致 |
 | revision | Working / Running Revision 独立；相同定义新调用看到当前内容，正在运行的调用不被编辑改变 |
 | 多 Agent 隔离 | fresh Worker、并发 Worker、重复 Supervisor 调用、上下文与工具状态隔离、累计 token 归属 |
-| 兼容导出 | 新旧导入对象身份、类型判断、共享配置与 ContextVars 一致；保持懒加载 |
+| canonical 导出 | 新入口的对象身份、类型判断、共享配置与 ContextVars 一致；保持懒加载；分发包不存在旧 src package 或旧命令入口 |
 | 安装与入口 | 开发安装、wheel 安装、外部 cwd、CLI、TUI 隔离模式、包资源、脚手架生成的 Application 与动态工具 |
 | 历史恢复 | 基线版本产生的 checkpoint 能被候选版本读取并按既有协议恢复，不改变 task 身份和已提交工作 |
 
@@ -232,12 +232,13 @@
 - 重做 TUI 产品交互、记忆算法、压缩算法、Goal 规则或 Hook 授权模型。
 - 新增完整配置检查命令或扩大模型就绪检查到所有未使用 profile；相关已有 issue 单独跟踪。
 - 将 MCP 生命周期和 Worker 缓存作为额外的独立重构项目。若其现有缺陷阻断本规格的必测行为，则按验收要求提交必要修复，而非豁免测试。
-- 删除旧公开入口的兼容能力；后续清理需要独立说明兼容期与迁移结果。
+- 为旧 `src.*` 路径或旧模块命令提供兼容层；用户已要求本次彻底迁移，不另设兼容期。
 - 无限时长或无界 token 消耗的压力测试；本规格用有限、可复跑且覆盖实际行为的复杂任务验收。
 
 ## Further Notes
 
 - 本规格的两个目标来自已讨论的“自有源码目录/职责整理”和“Application 配置解释统一”；参考仓库搬迁方案已被用户明确否决并移出范围。
+- 用户最新要求取消命名空间兼容层。较早的研究清单、Issue 初始描述和阶段提交中若仍提及旧入口兼容，以本规格更新后的要求为准；最终交付必须移除这些中间兼容代码。后续 GitHub 最终推送在完整必要单元、构建、安装、真实 Application 验收与代码审查完成后进行。
 - 用户已明确确认主要测试 seam：真实 Application 的公开执行入口，加上 Studio 只读入口的配置一致性对照，以及所属 module 的单元测试。
 - 本规格交付时只完成研究与规格编写。此前两项只读导入检查通过，仅证明研究基线的轻量导入行为，不构成本规格的完整验收。
 - Issue tracker 使用项目已配置的 GitHub Issues；发布标签为 `ready-for-agent`。
