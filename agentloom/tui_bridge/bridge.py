@@ -20,7 +20,7 @@ from agentloom.runtime.context import (
 from agentloom.runtime.storage import SecureDirectory
 
 if TYPE_CHECKING:
-    from agentloom.tui_bridge.definition import AgentDefinitionCache
+    from agentloom.application.definition import AgentDefinitionCache
 
 # ``run.detail`` is refreshed while its panel is open.  These are response and
 # filesystem work budgets, not pagination defaults: one refresh must remain
@@ -616,7 +616,7 @@ class TuiBridge:
         self,
         system_id: str,
     ) -> tuple[dict[str, Any], Path, dict[str, Any]]:
-        from agentloom.tui_bridge.definition import model_types, validate_agent_definition
+        from agentloom.application.definition import model_types, validate_agent_definition
 
         relative = Path(system_id)
         candidate = self.project_root / relative
@@ -2593,7 +2593,7 @@ class TuiBridge:
         *,
         definition_cache: AgentDefinitionCache | None = None,
     ) -> list[dict[str, Any]]:
-        from agentloom.tui_bridge.definition import model_types, validate_agent_definition
+        from agentloom.application.definition import model_types, validate_agent_definition
 
         applications_root = self.project_root / "applications"
         if applications_root.is_symlink() or not applications_root.is_dir():
@@ -2691,7 +2691,7 @@ class TuiBridge:
         *,
         definition_cache: AgentDefinitionCache | None = None,
     ) -> tuple[dict[str, Any], list[str]]:
-        from agentloom.tui_bridge.definition import read_agent_definition
+        from agentloom.application.definition import read_agent_definition
 
         result = read_agent_definition(path, cache=definition_cache)
         if result.error is not None or result.definition is None:

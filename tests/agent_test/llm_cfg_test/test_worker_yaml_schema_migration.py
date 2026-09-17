@@ -2,7 +2,7 @@ from pathlib import Path
 
 import yaml
 
-from src.lib.smolagents.agent.yaml_agent_factory import YamlConfiguredAgent
+from agentloom.runtime.factory import YamlConfiguredAgent
 
 FIXTURE_ROOT = Path(__file__).resolve().parent / "fixtures"
 FIXTURE_WORKER_ROOT = FIXTURE_ROOT / "worker"

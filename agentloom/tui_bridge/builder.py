@@ -23,7 +23,7 @@ import yaml
 from agentloom.configuration.yaml_loader import load_unique_yaml
 from agentloom.application.definition import definition_error
 
-from agentloom.tui_bridge.definition import validate_agent_definition
+from agentloom.application.definition import validate_agent_definition
 
 _MAX_TRANSCRIPT_MESSAGES = 16
 _MAX_BUILDER_MESSAGE_CHARS = 32_000

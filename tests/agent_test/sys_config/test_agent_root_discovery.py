@@ -12,7 +12,7 @@ from pathlib import Path
 
 import pytest
 
-import src.lib.config.config as config_module
+import agentloom.configuration.config as config_module
 
 
 def _write_pyproject(directory: Path, name: str = "AgentLoom") -> None:
@@ -134,3 +134,23 @@ def test_discover_fails_outside_project(monkeypatch, tmp_path: Path):
 
     with pytest.raises(FileNotFoundError, match="cannot locate root"):
         config_module._discover_agent_root()
+
+
+def test_explicit_project_context_precedes_cwd_and_source_tree(monkeypatch, tmp_path: Path):
+    selected = tmp_path / 'selected'
+    _write_config(selected)
+    monkeypatch.setenv('AGENTLOOM_PROJECT_ROOT', str(selected))
+    assert config_module._discover_agent_root() == selected
+
+
+def test_invalid_explicit_project_context_never_falls_through(monkeypatch, tmp_path: Path):
+    monkeypatch.setenv('AGENTLOOM_PROJECT_ROOT', str(tmp_path / 'missing'))
+    with pytest.raises(FileNotFoundError, match='AGENTLOOM_PROJECT_ROOT'):
+        config_module._discover_agent_root()
+
+
+def test_programmatic_config_directory_precedes_environment(monkeypatch, tmp_path: Path):
+    selected = tmp_path / 'selected'
+    _write_config(selected)
+    monkeypatch.setenv('AGENTLOOM_PROJECT_ROOT', str(tmp_path / 'missing'))
+    assert config_module._discover_agent_root(config_dir=selected / 'config') == selected

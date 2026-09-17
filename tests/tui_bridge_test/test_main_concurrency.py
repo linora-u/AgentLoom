@@ -6,7 +6,7 @@ import sys
 import threading
 import time
 
-from src.tui_bridge import __main__ as bridge_main
+from agentloom.tui_bridge import __main__ as bridge_main
 
 
 def _run_main(monkeypatch, bridge, *requests: dict) -> list[dict]:

@@ -15,7 +15,7 @@ if project_root not in sys.path:
 
 from smolagents.tools import get_json_schema
 
-from src.lib.smolagents.agent.yaml_agent_factory import YamlAgentFactory
+from agentloom.runtime.factory import YamlAgentFactory
 
 
 def run_direct_worker_demo() -> None:

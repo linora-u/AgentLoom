@@ -6,8 +6,8 @@ from pathlib import Path
 
 import pytest
 
-from src.extensions.self_learning.event_schema import CanonicalSessionEvent
-from src.extensions.self_learning.persistence.ledger import (
+from agentloom.self_learning.event_schema import CanonicalSessionEvent
+from agentloom.self_learning.persistence.ledger import (
     SelfLearningLedger,
     memory_content_hash,
 )
@@ -165,8 +165,8 @@ def test_v5_active_and_pending_state_migrate_without_auto_applying(tmp_path: Pat
 
 
 def test_migrated_v5_pending_fact_can_only_be_manually_approved(tmp_path: Path) -> None:
-    from src.extensions.self_learning.persistence.evidence_gate import SQLiteEvidenceGate
-    from src.extensions.self_learning.persistence.review_engine import ReviewEngine
+    from agentloom.self_learning.persistence.evidence_gate import SQLiteEvidenceGate
+    from agentloom.self_learning.persistence.review_engine import ReviewEngine
 
     db = tmp_path / "v5-manual-approval.db"
     _create_v5_fixture(db)
@@ -200,8 +200,8 @@ def test_migrated_v5_pending_fact_can_only_be_manually_approved(tmp_path: Path) 
 def test_migration_manual_gate_keeps_capacity_revision_scope_and_payload_safety(
     tmp_path: Path,
 ) -> None:
-    from src.extensions.self_learning.persistence.evidence_gate import SQLiteEvidenceGate
-    from src.extensions.self_learning.persistence.review_engine import ReviewConflictError, ReviewEngine
+    from agentloom.self_learning.persistence.evidence_gate import SQLiteEvidenceGate
+    from agentloom.self_learning.persistence.review_engine import ReviewConflictError, ReviewEngine
 
     db = tmp_path / "v5-manual-guards.db"
     _create_v5_fixture(db)

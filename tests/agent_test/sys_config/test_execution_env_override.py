@@ -1,13 +1,13 @@
 import pytest
 from copy import deepcopy
 from pathlib import Path
-from src.lib.smolagents.agent.yaml_agent_factory import YamlConfiguredAgent
-from src.lib.config.config import _ACTIVE_CONFIG, _load_merged_config
-from src.lib.logging import initialize_global_logger_once
+from agentloom.runtime.factory import YamlConfiguredAgent
+from agentloom.configuration.config import _ACTIVE_CONFIG, _load_merged_config
+from agentloom.runtime.logging import initialize_global_logger_once
 
 @pytest.fixture
 def override_config(tmp_path, monkeypatch):
-    from src.lib.config import config as config_module
+    from agentloom.configuration import config as config_module
     
     # Create mock directories
     agent_root = tmp_path / "AgentLoom"

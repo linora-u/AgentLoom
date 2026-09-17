@@ -2,10 +2,6 @@
 AI Agents package.
 """
 
-from agentloom._compat import install_legacy_imports
-
-install_legacy_imports()
-
 from agentloom.encoding.terminal import configure_terminal_encoding
 
 configure_terminal_encoding()

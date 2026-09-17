@@ -2,8 +2,8 @@ from pathlib import Path
 
 import pytest
 
-from src.lib.smolagents.agent.agent_validation import AgentConfigNormalizer
-from src.tui_bridge.definition import load_agent_definition, validate_agent_definition
+from agentloom.application.validation import AgentConfigNormalizer
+from agentloom.application.definition import load_agent_definition, validate_agent_definition
 
 
 def write(path: Path, content: str) -> Path:
@@ -93,7 +93,7 @@ def test_recursive_worker_topology_is_rejected(tmp_path):
 
 
 def project_config(root):
-    from src.lib.config.config import load_project_config
+    from agentloom.configuration.config import load_project_config
 
     write(
         root / "config/system.yaml",
@@ -107,8 +107,8 @@ def project_config(root):
 
 
 def test_effective_values_sources_and_secret_projection_are_independent(tmp_path):
-    from src.lib.config.config import build_effective_agent_config_snapshot
-    from src.tui_bridge.application_studio import application_detail
+    from agentloom.configuration.config import build_effective_agent_config_snapshot
+    from agentloom.tui_bridge.application_studio import application_detail
 
     base = project_config(tmp_path)
     app = tmp_path / "applications/group/demo"
@@ -160,7 +160,7 @@ model_request_headers:
     ],
 )
 def test_invalid_overrides_are_never_dropped(tmp_path, field, value):
-    from src.lib.config.config import build_effective_agent_config_snapshot
+    from agentloom.configuration.config import build_effective_agent_config_snapshot
 
     base = project_config(tmp_path)
     path = write(tmp_path / "applications/demo/workflows/root.yaml", BASE + f"{field}: {value}\n")
@@ -172,7 +172,7 @@ def test_invalid_overrides_are_never_dropped(tmp_path, field, value):
 
 
 def test_model_catalog_selection_preserves_case_and_empty_fallback(tmp_path):
-    from src.application.definition import selected_model_type
+    from agentloom.application.definition import selected_model_type
 
     project_config(tmp_path)
     catalog = ("TEST", {"test": {"model": "openai/test"}, "summary": {"model": "openai/test"}})
@@ -184,7 +184,7 @@ def test_model_catalog_selection_preserves_case_and_empty_fallback(tmp_path):
 
 
 def test_summary_profile_requirement_matches_runtime_catalog(tmp_path):
-    from src.lib.config.config import load_project_config
+    from agentloom.configuration.config import load_project_config
 
     write(tmp_path / "config/llm.yaml", "model:\n  default_model_type: test\n  test: {model: openai/test}\n")
     path = write(tmp_path / "applications/demo/workflows/root.yaml", BASE)
@@ -195,7 +195,7 @@ def test_summary_profile_requirement_matches_runtime_catalog(tmp_path):
 
 
 def test_running_graph_and_config_remain_pinned_while_next_call_observes_edits(tmp_path):
-    from src.application.definition import prepare_application_definition
+    from agentloom.application.definition import prepare_application_definition
 
     base = project_config(tmp_path)
     app = tmp_path / "applications/nested/demo"
@@ -217,7 +217,7 @@ def test_running_graph_and_config_remain_pinned_while_next_call_observes_edits(t
 def test_invalid_worker_is_rejected_before_any_run_allocation(tmp_path, monkeypatch):
     from types import SimpleNamespace
 
-    import src.runner as runner
+    import agentloom.application.runner as runner
 
     base = project_config(tmp_path)
     path = write(tmp_path / "applications/demo/workflows/root.yaml", BASE + "worker_agents: [{path: child.yaml}]\n")
@@ -233,7 +233,7 @@ def test_invalid_worker_is_rejected_before_any_run_allocation(tmp_path, monkeypa
 
 
 def test_file_tool_cache_uses_content_and_preserves_existing_callable(tmp_path):
-    from src.lib.smolagents.agent.yaml_agent_factory import YamlAgentFactory
+    from agentloom.runtime.factory import YamlAgentFactory
 
     class DefinitionTool:
         def __init__(self, config, **kwargs):
@@ -257,7 +257,7 @@ def test_file_tool_cache_uses_content_and_preserves_existing_callable(tmp_path):
 
 
 def test_worker_resolution_rejects_symlink_escape_and_allows_absolute_file(tmp_path):
-    from src.application.definition import resolve_worker_path
+    from agentloom.application.definition import resolve_worker_path
 
     source = write(tmp_path / "project/applications/demo/workflows/root.yaml", BASE)
     external = write(tmp_path / "outside/worker.yaml", BASE + SCHEMA)
@@ -269,7 +269,7 @@ def test_worker_resolution_rejects_symlink_escape_and_allows_absolute_file(tmp_p
 
 
 def test_worker_agents_prefix_is_relative_to_supervisor_source(tmp_path):
-    from src.application.definition import resolve_worker_path
+    from agentloom.application.definition import resolve_worker_path
 
     source = tmp_path / "applications/nested/demo/workflows/root.yaml"
     assert resolve_worker_path(tmp_path, source, "worker_agents/worker.md") == source.parent / "worker_agents/worker.md"
@@ -296,11 +296,11 @@ mcp_servers: config/test.mcp.json
     program = """
 import json, sys
 from pathlib import Path
-from src.tui_bridge.bridge import TuiBridge
+from agentloom.tui_bridge.bridge import TuiBridge
 root = Path(sys.argv[1])
 detail = TuiBridge(root).dispatch('application.detail', {'application_id':'demo'})
 assert detail['agents'][0]['validation']['valid'], detail
-for prefix in ('litellm', 'src.lib.smolagents.agent.base_agent', 'src.tools.file_ops', 'src.tools.shell', 'src.tools.search'):
+for prefix in ('litellm', 'agentloom.runtime.agent', 'agentloom.tools.file_ops', 'agentloom.tools.shell', 'agentloom.tools.search'):
     assert not any(name == prefix or name.startswith(prefix + '.') for name in sys.modules), prefix
 assert not (root / '.agentloom').exists()
 assert not (root / 'must-not-exist').exists()
@@ -322,7 +322,7 @@ def test_mcp_static_errors_reject_before_runtime(tmp_path, value):
 
 
 def test_mcp_snapshot_preserves_credentials_and_normalizes_options(tmp_path):
-    from src.application.definition import prepare_application_definition
+    from agentloom.application.definition import prepare_application_definition
 
     base = project_config(tmp_path)
     path = write(
@@ -340,8 +340,8 @@ def test_mcp_snapshot_preserves_credentials_and_normalizes_options(tmp_path):
 
 
 def test_hook_projection_uses_complete_id_replacement_and_disabling(tmp_path):
-    from src.application.presentation import configuration_projection
-    from src.lib.config.config import build_effective_agent_config_snapshot
+    from agentloom.application.presentation import configuration_projection
+    from agentloom.configuration.config import build_effective_agent_config_snapshot
 
     base = project_config(tmp_path)
     base.raw["hooks"] = {
@@ -377,9 +377,9 @@ def test_hook_projection_uses_complete_id_replacement_and_disabling(tmp_path):
 def test_mcp_connection_failure_is_reported_in_execution_stage(tmp_path, monkeypatch):
     from unittest.mock import MagicMock
 
-    import src.mcp.manager as manager_module
-    from src.lib.smolagents.agent.yaml_agent_factory import YamlAgentFactory
-    from src.mcp.config import McpServerConfig, McpSettings
+    import agentloom.adapters.mcp.manager as manager_module
+    from agentloom.runtime.factory import YamlAgentFactory
+    from agentloom.adapters.mcp.config import McpServerConfig, McpSettings
 
     manager = MagicMock()
     manager.get_server_status.return_value = {
@@ -403,8 +403,8 @@ def test_mcp_connection_failure_is_reported_in_execution_stage(tmp_path, monkeyp
 def test_execute_app_refreshes_global_config_between_calls_but_pins_running_read(tmp_path, monkeypatch):
     from types import SimpleNamespace
 
-    import src.lib.config.config as config_module
-    import src.runner as runner
+    import agentloom.configuration.config as config_module
+    import agentloom.application.runner as runner
 
     base = project_config(tmp_path)
     path = write(tmp_path / "applications/demo/workflows/root.yaml", BASE)
@@ -433,7 +433,7 @@ def test_execute_app_refreshes_global_config_between_calls_but_pins_running_read
 
 
 def test_programmatic_config_override_remains_authoritative(tmp_path):
-    from src.lib.config.config import fresh_invocation_config
+    from agentloom.configuration.config import fresh_invocation_config
 
     base = project_config(tmp_path)
     base.raw["todo"]["mode"] = "off"
@@ -444,9 +444,9 @@ def test_programmatic_config_override_remains_authoritative(tmp_path):
 
 
 def test_model_cache_tracks_profile_content_across_invocations(tmp_path):
-    from src.lib.config.config import bind_config, fresh_invocation_config
-    from src.lib.smolagents.models.model_manager import ModelManager
-    from src.lib.smolagents.models.model_types import ModelType
+    from agentloom.configuration.config import bind_config, fresh_invocation_config
+    from agentloom.adapters.smolagents.models.model_manager import ModelManager
+    from agentloom.adapters.smolagents.models.model_types import ModelType
 
     base = project_config(tmp_path)
     with bind_config(fresh_invocation_config(base)):
@@ -463,3 +463,26 @@ def test_model_cache_tracks_profile_content_across_invocations(tmp_path):
     assert first["model"] == "openai/test"
     assert second["model"] == "openai/changed"
     assert second["api_key"] == "updated-key"
+
+
+def test_public_connection_urls_never_expose_authentication(tmp_path):
+    import json
+    from agentloom.configuration.config import build_effective_agent_config_snapshot
+    from agentloom.tui_bridge.application_studio import application_detail
+
+    base = project_config(tmp_path)
+    url = 'https://synthetic-user:synthetic-password@example.invalid/mcp?access_token=synthetic-token'
+    path = write(
+        tmp_path / 'applications/demo/workflows/root.yaml',
+        BASE + f'mcp_servers:\n  remote:\n    url: {url}\n    headers:\n      Authorization: synthetic-header\n',
+    )
+    snapshot = build_effective_agent_config_snapshot(load_agent_definition(path), base_config=base)
+    detail = application_detail(
+        tmp_path, 'demo', systems=[{'path': str(path.relative_to(tmp_path)), 'application_id': 'demo'}],
+    )
+    public = detail['agents'][0]['effective_config']
+    for secret in ('synthetic-user', 'synthetic-password', 'synthetic-token', 'synthetic-header'):
+        assert secret not in json.dumps(public)
+    assert public['values']['mcp_servers']['remote']['url'] == '[redacted]'
+    assert snapshot.values['mcp_servers']['remote']['url'] == url
+    assert snapshot.values['mcp_servers']['remote']['headers']['Authorization'] == 'synthetic-header'

@@ -1,5 +1,5 @@
 """
-CLI entry point for the src package.
+CLI entry point for the agentloom package.
 
 After ``pip install -e .``, the ``loom`` command is available::
 

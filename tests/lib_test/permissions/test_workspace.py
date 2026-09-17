@@ -12,7 +12,7 @@ import pytest
 from pathlib import Path
 from unittest.mock import patch
 
-from src.lib.permissions.workspace import (
+from agentloom.runtime.permissions.workspace import (
     get_workspace_root,
     get_rule_include_paths,
     get_rule_exclude_paths,
@@ -35,7 +35,7 @@ class TestWorkspaceNormal:
 
     def test_get_workspace_root(self):
         """Returns resolved agent_root."""
-        with patch("src.lib.permissions.workspace.C") as mock_c:
+        with patch("agentloom.runtime.permissions.workspace.C") as mock_c:
             mock_c.agent_root = "/home/user/project"
             root = get_workspace_root()
             assert root == Path("/home/user/project").resolve()
@@ -51,10 +51,10 @@ class TestWorkspaceNormal:
 
     def test_get_allowed_directories_default_no_rules(self):
         """No rules → only workspace root returned."""
-        with patch("src.lib.permissions.workspace.get_workspace_root",
+        with patch("agentloom.runtime.permissions.workspace.get_workspace_root",
                     return_value=Path("/ws").resolve()):
             with patch(
-                "src.lib.permissions.workspace._resolve_tool_access_control_config",
+                "agentloom.runtime.permissions.workspace._resolve_tool_access_control_config",
                 return_value=_make_cfg([]),
             ):
                 result = get_allowed_directories()
@@ -67,10 +67,10 @@ class TestWorkspaceNormal:
         cfg = _make_cfg([
             {"tools": ["read_file"], "include_paths": [str(ext)]},
         ])
-        with patch("src.lib.permissions.workspace.get_workspace_root",
+        with patch("agentloom.runtime.permissions.workspace.get_workspace_root",
                     return_value=tmp_path.resolve()):
             with patch(
-                "src.lib.permissions.workspace._resolve_tool_access_control_config",
+                "agentloom.runtime.permissions.workspace._resolve_tool_access_control_config",
                 return_value=cfg,
             ):
                 result = get_allowed_directories(tool_name="read_file")
@@ -89,7 +89,7 @@ class TestRuleIncludePaths:
             {"tools": ["read_file"], "include_paths": ["/opt/libs"]},
         ])
         with patch(
-            "src.lib.permissions.workspace._resolve_tool_access_control_config",
+            "agentloom.runtime.permissions.workspace._resolve_tool_access_control_config",
             return_value=cfg,
         ):
             result = get_rule_include_paths("read_file")
@@ -102,7 +102,7 @@ class TestRuleIncludePaths:
             {"tools": ["shell_tool"], "include_paths": ["/opt/b"]},
         ])
         with patch(
-            "src.lib.permissions.workspace._resolve_tool_access_control_config",
+            "agentloom.runtime.permissions.workspace._resolve_tool_access_control_config",
             return_value=cfg,
         ):
             result = get_rule_include_paths("shell_tool")
@@ -117,10 +117,10 @@ class TestRuleIncludePaths:
         cfg = _make_cfg([
             {"tools": ["read_file"], "include_paths": ["~/libs"]},
         ])
-        with patch("src.lib.permissions.workspace.get_workspace_root",
+        with patch("agentloom.runtime.permissions.workspace.get_workspace_root",
                     return_value=tmp_path.resolve()):
             with patch(
-                "src.lib.permissions.workspace._resolve_tool_access_control_config",
+                "agentloom.runtime.permissions.workspace._resolve_tool_access_control_config",
                 return_value=cfg,
             ):
                 dirs = get_allowed_directories(tool_name="read_file")
@@ -133,7 +133,7 @@ class TestRuleIncludePaths:
             {"tools": ["shell_tool"], "include_paths": ["/home/*/code"]},
         ])
         with patch(
-            "src.lib.permissions.workspace._resolve_tool_access_control_config",
+            "agentloom.runtime.permissions.workspace._resolve_tool_access_control_config",
             return_value=cfg,
         ):
             result = get_rule_include_paths("shell_tool")
@@ -145,7 +145,7 @@ class TestRuleIncludePaths:
             {"tools": ["shell_tool"], "include_paths": ["*", "/opt/extra"]},
         ])
         with patch(
-            "src.lib.permissions.workspace._resolve_tool_access_control_config",
+            "agentloom.runtime.permissions.workspace._resolve_tool_access_control_config",
             return_value=cfg,
         ):
             result = get_rule_include_paths("shell_tool")
@@ -164,7 +164,7 @@ class TestRuleExcludePaths:
             {"tools": ["read_file"], "exclude_paths": ["secrets", ".env"]},
         ])
         with patch(
-            "src.lib.permissions.workspace._resolve_tool_access_control_config",
+            "agentloom.runtime.permissions.workspace._resolve_tool_access_control_config",
             return_value=cfg,
         ):
             result = get_rule_exclude_paths("read_file")
@@ -178,7 +178,7 @@ class TestRuleExcludePaths:
             {"tools": ["shell_tool"], "exclude_paths": ["build"]},
         ])
         with patch(
-            "src.lib.permissions.workspace._resolve_tool_access_control_config",
+            "agentloom.runtime.permissions.workspace._resolve_tool_access_control_config",
             return_value=cfg,
         ):
             result = get_rule_exclude_paths("shell_tool")
@@ -191,7 +191,7 @@ class TestRuleExcludePaths:
             {"tools": ["shell_tool"], "exclude_paths": ["*"]},
         ])
         with patch(
-            "src.lib.permissions.workspace._resolve_tool_access_control_config",
+            "agentloom.runtime.permissions.workspace._resolve_tool_access_control_config",
             return_value=cfg,
         ):
             result = get_rule_exclude_paths("shell_tool")
@@ -203,7 +203,7 @@ class TestRuleExcludePaths:
             {"tools": ["read_file"], "exclude_paths": ["secrets"]},
         ])
         with patch(
-            "src.lib.permissions.workspace._resolve_tool_access_control_config",
+            "agentloom.runtime.permissions.workspace._resolve_tool_access_control_config",
             return_value=cfg,
         ):
             result = get_rule_exclude_paths("shell_tool")
@@ -212,7 +212,7 @@ class TestRuleExcludePaths:
     def test_empty_path_validation(self):
         """Empty path_validation returns empty list."""
         with patch(
-            "src.lib.permissions.workspace._resolve_tool_access_control_config",
+            "agentloom.runtime.permissions.workspace._resolve_tool_access_control_config",
             return_value=_make_cfg([]),
         ):
             assert get_rule_include_paths("any_tool") == []
@@ -238,7 +238,7 @@ class TestWorkspaceAbnormal:
     def test_missing_config(self):
         """Missing config returns empty list."""
         with patch(
-            "src.lib.permissions.workspace._resolve_tool_access_control_config",
+            "agentloom.runtime.permissions.workspace._resolve_tool_access_control_config",
             return_value={},
         ):
             assert get_rule_include_paths("any") == []
@@ -252,7 +252,7 @@ class TestWorkspaceAbnormal:
             {"tools": ["read_file"], "include_paths": [str(ext)]},
         ])
         with patch(
-            "src.lib.permissions.workspace._resolve_tool_access_control_config",
+            "agentloom.runtime.permissions.workspace._resolve_tool_access_control_config",
             return_value=cfg,
         ):
             result = get_rule_include_paths("read_file")
@@ -278,10 +278,10 @@ class TestWorkspaceBoundary:
         extra = tmp_path / "extra"
         extra.mkdir()
         cfg = _make_cfg([])
-        with patch("src.lib.permissions.workspace.get_workspace_root",
+        with patch("agentloom.runtime.permissions.workspace.get_workspace_root",
                     return_value=ws.resolve()):
             with patch(
-                "src.lib.permissions.workspace._resolve_tool_access_control_config",
+                "agentloom.runtime.permissions.workspace._resolve_tool_access_control_config",
                 return_value=cfg,
             ):
                 result = get_allowed_directories(extra_include=[str(extra)])
@@ -296,10 +296,10 @@ class TestWorkspaceBoundary:
         cfg = _make_cfg([
             {"tools": ["read_file"], "include_paths": [str(link)]},
         ])
-        with patch("src.lib.permissions.workspace.get_workspace_root",
+        with patch("agentloom.runtime.permissions.workspace.get_workspace_root",
                     return_value=tmp_path.resolve()):
             with patch(
-                "src.lib.permissions.workspace._resolve_tool_access_control_config",
+                "agentloom.runtime.permissions.workspace._resolve_tool_access_control_config",
                 return_value=cfg,
             ):
                 dirs = get_allowed_directories(tool_name="read_file")
@@ -310,10 +310,10 @@ class TestWorkspaceBoundary:
         cfg = _make_cfg([
             {"tools": ["read_file"], "include_paths": ["*"]},
         ])
-        with patch("src.lib.permissions.workspace.get_workspace_root",
+        with patch("agentloom.runtime.permissions.workspace.get_workspace_root",
                     return_value=Path("/ws").resolve()):
             with patch(
-                "src.lib.permissions.workspace._resolve_tool_access_control_config",
+                "agentloom.runtime.permissions.workspace._resolve_tool_access_control_config",
                 return_value=cfg,
             ):
                 dirs = get_allowed_directories(tool_name="read_file")
@@ -380,10 +380,10 @@ class TestGlobAllowedDirectories:
         cfg = _make_cfg([
             {"tools": ["read_file"], "include_paths": ["*"]},
         ])
-        with patch("src.lib.permissions.workspace.get_workspace_root",
+        with patch("agentloom.runtime.permissions.workspace.get_workspace_root",
                     return_value=Path("/ws").resolve()):
             with patch(
-                "src.lib.permissions.workspace._resolve_tool_access_control_config",
+                "agentloom.runtime.permissions.workspace._resolve_tool_access_control_config",
                 return_value=cfg,
             ):
                 dirs = get_allowed_directories(tool_name="read_file")
@@ -420,7 +420,7 @@ class TestToolInMultipleRules:
             {"tools": ["read_file"], "include_paths": ["/b"]},
         ])
         with patch(
-            "src.lib.permissions.workspace._resolve_tool_access_control_config",
+            "agentloom.runtime.permissions.workspace._resolve_tool_access_control_config",
             return_value=cfg,
         ):
             result = get_rule_include_paths("read_file")
@@ -433,7 +433,7 @@ class TestToolInMultipleRules:
             {"tools": ["shell_tool"], "exclude_paths": ["b"]},
         ])
         with patch(
-            "src.lib.permissions.workspace._resolve_tool_access_control_config",
+            "agentloom.runtime.permissions.workspace._resolve_tool_access_control_config",
             return_value=cfg,
         ):
             result = get_rule_exclude_paths("shell_tool")
@@ -445,7 +445,7 @@ class TestToolInMultipleRules:
             {"tools": ["*"], "include_paths": ["/global"]},
         ])
         with patch(
-            "src.lib.permissions.workspace._resolve_tool_access_control_config",
+            "agentloom.runtime.permissions.workspace._resolve_tool_access_control_config",
             return_value=cfg,
         ):
             assert "/global" in get_rule_include_paths("read_file")
@@ -459,7 +459,7 @@ class TestToolInMultipleRules:
             {"tools": ["read_file"], "include_paths": ["/a"]},
         ])
         with patch(
-            "src.lib.permissions.workspace._resolve_tool_access_control_config",
+            "agentloom.runtime.permissions.workspace._resolve_tool_access_control_config",
             return_value=cfg,
         ):
             result = get_rule_include_paths("read_file")

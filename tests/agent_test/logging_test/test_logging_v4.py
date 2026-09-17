@@ -6,7 +6,7 @@ import pytest
 
 
 def test_logging_overlay_exposes_only_bounded_run_settings() -> None:
-    from src.lib.logging import LoggingConfigOverlay
+    from agentloom.runtime.logging import LoggingConfigOverlay
 
     overlay = LoggingConfigOverlay(
         level="DEBUG",
@@ -26,7 +26,7 @@ def test_logging_overlay_exposes_only_bounded_run_settings() -> None:
 
 @pytest.mark.parametrize("removed_key", ["enabled", "dir", "file_path"])
 def test_removed_path_settings_are_rejected(removed_key: str) -> None:
-    from src.lib.logging import validate_logging_config
+    from agentloom.runtime.logging import validate_logging_config
 
     with pytest.raises(ValueError, match=removed_key):
         validate_logging_config(
@@ -36,7 +36,7 @@ def test_removed_path_settings_are_rejected(removed_key: str) -> None:
 
 
 def test_arbitrary_unknown_logging_setting_is_rejected() -> None:
-    from src.lib.logging import LoggingConfigBuilder
+    from agentloom.runtime.logging import LoggingConfigBuilder
 
     with pytest.raises(ValueError, match="surprise"):
         LoggingConfigBuilder().apply_mapping(
@@ -46,7 +46,7 @@ def test_arbitrary_unknown_logging_setting_is_rejected() -> None:
 
 
 def test_backend_without_runtime_context_has_no_file_sink(tmp_path: Path) -> None:
-    from src.lib.logging import LoggingConfigBuilder, build_logger_backend_from_config
+    from agentloom.runtime.logging import LoggingConfigBuilder, build_logger_backend_from_config
 
     backend = build_logger_backend_from_config(
         "standalone",
@@ -59,8 +59,8 @@ def test_backend_without_runtime_context_has_no_file_sink(tmp_path: Path) -> Non
 
 
 def test_file_logging_override_can_disable_only_the_file_sink(tmp_path: Path) -> None:
-    from src.lib.logging import LoggingConfigBuilder, initialize_run_logger
-    from src.lib.runtime import RuntimeHome
+    from agentloom.runtime.logging import LoggingConfigBuilder, initialize_run_logger
+    from agentloom.runtime import RuntimeHome
 
     context = RuntimeHome(tmp_path / ".agentloom").context(
         application_id="app", task_id="task", run_id="run"

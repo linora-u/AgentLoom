@@ -43,6 +43,7 @@ _MDNS_RESPONDER_SOCKET = "/private/var/run/mDNSResponder"
 _TRUSTED_EXECUTION_PREFIXES = (
     "applications/memory_feature_validation",
     "src",
+    "agentloom",
     "config/system.yaml",
     "pyproject.toml",
     "uv.lock",
@@ -51,7 +52,8 @@ _TRUSTED_IMPORT_SHADOW_PATHS = (
     "applications.py",
     "applications/__init__.py",
     "applications/memory_feature_validation.py",
-    "src.py",
+    "agentloom.py",
+    "agentloom.py",
 )
 _ALLOWED_PARENT_ENV = {
     "ALL_PROXY",
@@ -273,6 +275,16 @@ def _clean_python_env(root: Path, *, token: str, uv: Path) -> dict[str, str]:
     return env
 
 
+def _capsule_runtime_package(root: Path) -> str:
+    """Resolve only supported entrypoints from the verified source snapshot."""
+    try:
+        with (root / "pyproject.toml").open("rb") as handle:
+            configured = tomllib.load(handle)["project"]["scripts"]["loom"]
+        return {"src.__main__:main": "src", "agentloom.__main__:main": "agentloom"}[configured]
+    except (KeyError, OSError, TypeError, tomllib.TOMLDecodeError) as exc:
+        raise RuntimeError("capsule loom entrypoint contract was invalid") from exc
+
+
 def _write_trusted_loom_launcher(root: Path, python: Path) -> Path:
     """Create the capsule CLI without installing mutable project metadata."""
     root = root.resolve()
@@ -323,16 +335,12 @@ def _write_trusted_loom_launcher(root: Path, python: Path) -> Path:
         created_identity = (initial.st_dev, initial.st_ino)
         if not stat.S_ISREG(initial.st_mode) or initial.st_nlink != 1:
             raise RuntimeError("capsule loom launcher was not a new regular file")
-        try:
-            with (root / "pyproject.toml").open("rb") as handle:
-                project_config = tomllib.load(handle)
-            configured_entrypoint = project_config["project"]["scripts"]["loom"]
-        except (KeyError, OSError, TypeError, tomllib.TOMLDecodeError) as exc:
-            raise RuntimeError(
-                "capsule loom entrypoint contract was invalid"
-            ) from exc
-        if configured_entrypoint != "src.__main__:main":
-            raise RuntimeError("capsule loom entrypoint contract was invalid")
+        package = _capsule_runtime_package(root)
+        # Keep the historical launcher byte-for-byte compatible; canonical
+        # snapshots validate their actual implementation origin before import.
+        payload = payload.replace(b'"src"', json.dumps(package).encode()).replace(
+            b"from src.__main__ import main", f"from {package}.__main__ import main".encode()
+        )
         with os.fdopen(descriptor, "wb", closefd=True) as handle:
             descriptor = -1
             handle.write(payload)
@@ -1356,7 +1364,8 @@ def build_capsule_descriptor(
         except (OSError, RuntimeError, subprocess.SubprocessError):
             lock_sync_ok = False
 
-    src_spec = importlib.util.find_spec("src")
+    runtime_package = _capsule_runtime_package(repo_root)
+    src_spec = importlib.util.find_spec(runtime_package)
     src_origin = Path(src_spec.origin) if src_spec and src_spec.origin else Path()
     shebang_target = Path()
     if loom.is_file():
@@ -1466,6 +1475,8 @@ def build_capsule_descriptor(
         ),
         "loom_shebang_matches_python": shebang_matches_python,
         "src_origin_is_capsule": _resolved_inside(src_origin, repo_root),
+        "runtime_package": runtime_package,
+        "loom_entrypoint": f"{runtime_package}.__main__:main",
         "runner_origin_is_capsule": _resolved_inside(runner_file, repo_root),
         "src_origin_relative": _relative_origin(src_origin, repo_root),
         "runner_origin_relative": _relative_origin(runner_file, repo_root),
@@ -1555,7 +1566,15 @@ def capsule_descriptor_issues(descriptor: dict[str, Any]) -> list[str]:
         "applications/memory_feature_validation/scripts/"
         "run_memory_review_campaign.py"
     )
-    if descriptor.get("src_origin_relative") != "src/__init__.py":
+    # Old descriptors predate explicit package identity and refer strictly to
+    # src. New descriptors bind both the selected entrypoint and exact origin.
+    runtime_package = descriptor.get("runtime_package", "src")
+    if not isinstance(runtime_package, str) or runtime_package not in {"src", "agentloom"} or (
+        ("runtime_package" in descriptor or "loom_entrypoint" in descriptor)
+        and descriptor.get("loom_entrypoint") != f"{runtime_package}.__main__:main"
+    ):
+        issues.append("capsule runtime entrypoint was invalid")
+    if descriptor.get("src_origin_relative") != f"{runtime_package}/__init__.py":
         issues.append("capsule src import origin was invalid")
     if descriptor.get("runner_origin_relative") != expected_runner:
         issues.append("capsule runner origin was invalid")

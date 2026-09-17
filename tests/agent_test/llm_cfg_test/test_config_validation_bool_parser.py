@@ -1,6 +1,6 @@
 import pytest
 
-from src.lib.config.config_validation import BoolParser
+from agentloom.configuration.config_validation import BoolParser
 
 
 @pytest.mark.parametrize(

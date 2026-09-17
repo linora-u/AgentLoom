@@ -13,8 +13,8 @@ import pytest
 from click.testing import CliRunner
 from litellm.exceptions import Timeout
 
-from src.__main__ import main
-from src.application_run import (
+from agentloom.__main__ import main
+from agentloom.application.run import (
     ApplicationRunBudgetLimited,
     ApplicationRunError,
     ApplicationRunInterrupted,
@@ -65,7 +65,7 @@ def test_run_accepts_task_override(monkeypatch: pytest.MonkeyPatch) -> None:
         observed.update(kwargs)
         return SimpleNamespace(output="completed")
 
-    monkeypatch.setattr("src.runner.execute_app", succeed)
+    monkeypatch.setattr("agentloom.application.runner.execute_app", succeed)
 
     result = CliRunner().invoke(
         main,
@@ -88,7 +88,7 @@ def test_text_run_displays_goal_status_and_usage(monkeypatch: pytest.MonkeyPatch
             },
         )
 
-    monkeypatch.setattr("src.runner.execute_app", succeed)
+    monkeypatch.setattr("agentloom.application.runner.execute_app", succeed)
 
     result = CliRunner().invoke(main, ["run", "unused.yaml"])
 
@@ -125,7 +125,7 @@ def test_jsonl_budget_limited_event_contains_structured_goal(
             goal=goal,
         )
 
-    monkeypatch.setattr("src.runner.execute_app", execute, raising=False)
+    monkeypatch.setattr("agentloom.application.runner.execute_app", execute, raising=False)
 
     result = CliRunner().invoke(
         main,
@@ -147,7 +147,7 @@ def test_python_module_invocation_exposes_run_command() -> None:
     env["PYTHONPATH"] = str(_REPO_ROOT)
 
     completed = subprocess.run(
-        [sys.executable, "-m", "src", "run", "--help"],
+        [sys.executable, "-m", "agentloom", "run", "--help"],
         cwd=_REPO_ROOT,
         env=env,
         text=True,
@@ -176,7 +176,7 @@ def test_json_run_emits_one_terminal_object_with_structured_goal(
         event_sink(_event("run.completed", output="final answer", goal=goal))
         return SimpleNamespace(output="final answer", goal=goal)
 
-    monkeypatch.setattr("src.runner.execute_app", execute, raising=False)
+    monkeypatch.setattr("agentloom.application.runner.execute_app", execute, raising=False)
 
     result = CliRunner().invoke(
         main,
@@ -210,7 +210,7 @@ def test_jsonl_run_emits_only_lifecycle_events_on_stdout(
         event_sink(_event("run.completed", output="final answer"))
         return SimpleNamespace(output="final answer")
 
-    monkeypatch.setattr("src.runner.execute_app", execute, raising=False)
+    monkeypatch.setattr("agentloom.application.runner.execute_app", execute, raising=False)
 
     result = CliRunner().invoke(
         main,
@@ -263,8 +263,8 @@ def test_jsonl_run_isolates_native_and_child_fd1_from_protocol_stdout() -> None:
         from pathlib import Path
         from types import SimpleNamespace
 
-        import src.runner
-        from src.application_run import RunInfo, RunLifecycleEvent
+        import agentloom.application.runner
+        from agentloom.application.run import RunInfo, RunLifecycleEvent
 
         run_dir = Path("/tmp/agentloom/runs/demo/run_fd_isolation")
         run = RunInfo(
@@ -299,8 +299,8 @@ def test_jsonl_run_isolates_native_and_child_fd1_from_protocol_stdout() -> None:
             event_sink(event("run.completed", output="final answer"))
             return SimpleNamespace(output="final answer")
 
-        src.runner.execute_app = execute
-        from src.__main__ import main
+        agentloom.application.runner.execute_app = execute
+        from agentloom.__main__ import main
 
         main(["run", "unused.yaml", "--output-format", "jsonl"])
         """
@@ -334,7 +334,7 @@ def test_jsonl_preflight_failure_emits_run_rejected(
     def reject(*_args, **_kwargs):
         raise ValueError("invalid application configuration")
 
-    monkeypatch.setattr("src.runner.execute_app", reject, raising=False)
+    monkeypatch.setattr("agentloom.application.runner.execute_app", reject, raising=False)
 
     result = CliRunner().invoke(
         main,
@@ -373,7 +373,7 @@ def test_jsonl_core_preflight_rejection_is_serialized_once(
         )
         raise ValueError("invalid application configuration")
 
-    monkeypatch.setattr("src.runner.execute_app", reject, raising=False)
+    monkeypatch.setattr("agentloom.application.runner.execute_app", reject, raising=False)
 
     result = CliRunner().invoke(
         main,
@@ -416,7 +416,7 @@ def test_jsonl_allocated_failure_keeps_core_terminal_event(
             original_error=RuntimeError("boom"),
         )
 
-    monkeypatch.setattr("src.runner.execute_app", execute)
+    monkeypatch.setattr("agentloom.application.runner.execute_app", execute)
 
     result = CliRunner().invoke(
         main,
@@ -453,7 +453,7 @@ def test_jsonl_allocated_interrupt_keeps_core_terminal_event(
             original_error=KeyboardInterrupt(),
         )
 
-    monkeypatch.setattr("src.runner.execute_app", execute)
+    monkeypatch.setattr("agentloom.application.runner.execute_app", execute)
 
     result = CliRunner().invoke(
         main,
@@ -494,7 +494,7 @@ def test_jsonl_transient_provider_failure_keeps_tempfail_exit_code(
         )
         raise failure from provider_error
 
-    monkeypatch.setattr("src.runner.execute_app", execute)
+    monkeypatch.setattr("agentloom.application.runner.execute_app", execute)
 
     result = CliRunner().invoke(
         main,
@@ -520,7 +520,7 @@ def test_text_interrupt_does_not_offer_unavailable_resume(
             resumable=False,
         )
 
-    monkeypatch.setattr("src.runner.execute_app", execute)
+    monkeypatch.setattr("agentloom.application.runner.execute_app", execute)
 
     result = CliRunner().invoke(main, ["run", "unused.yaml"])
 

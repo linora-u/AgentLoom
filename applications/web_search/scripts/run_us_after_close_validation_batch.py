@@ -441,7 +441,7 @@ def _run_one(
     command = [
         sys.executable,
         "-m",
-        "src.__main__",
+        "agentloom.__main__",
         "run",
         WORKFLOW,
         "--task",

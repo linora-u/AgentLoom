@@ -141,7 +141,7 @@ def _make_legacy_task(
 def test_scan_ignores_index_and_filters_by_metadata_age_test_identity_and_real_progress(
     tmp_path: Path,
 ) -> None:
-    from src.lib.runtime.migration import RuntimeMigration
+    from agentloom.runtime.migration import RuntimeMigration
 
     repo_root = tmp_path / "repo"
     legacy_root = repo_root / ".logs"
@@ -213,7 +213,7 @@ def test_scan_ignores_index_and_filters_by_metadata_age_test_identity_and_real_p
 
 
 def test_scan_skips_legacy_task_ids_that_cannot_be_resumed_exactly(tmp_path: Path) -> None:
-    from src.lib.runtime.migration import RuntimeMigration
+    from agentloom.runtime.migration import RuntimeMigration
 
     repo_root = tmp_path / "repo"
     legacy_root = repo_root / ".logs"
@@ -244,7 +244,7 @@ def test_scan_never_follows_a_symlinked_legacy_ancestor(
     tmp_path: Path,
     symlink_ancestor: str,
 ) -> None:
-    from src.lib.runtime.migration import RuntimeMigration
+    from agentloom.runtime.migration import RuntimeMigration
 
     repo_root = tmp_path / "repo"
     legacy_root = repo_root / ".logs"
@@ -297,8 +297,8 @@ def test_scan_never_follows_a_symlinked_legacy_ancestor(
 def test_external_workflow_uses_the_same_application_id_for_migration_and_runner(
     tmp_path: Path,
 ) -> None:
-    from src.lib.runtime import resolve_application_id
-    from src.lib.runtime.migration import RuntimeMigration
+    from agentloom.runtime import resolve_application_id
+    from agentloom.runtime.migration import RuntimeMigration
 
     repo_root = tmp_path / "repo"
     workflow = tmp_path / "external_workflow.yaml"
@@ -338,7 +338,7 @@ def test_external_workflow_uses_the_same_application_id_for_migration_and_runner
 def test_scan_requires_a_parseable_live_workflow_with_matching_application_id(
     tmp_path: Path,
 ) -> None:
-    from src.lib.runtime.migration import RuntimeMigration
+    from agentloom.runtime.migration import RuntimeMigration
 
     repo_root = tmp_path / "repo"
     legacy_root = repo_root / ".logs"
@@ -391,7 +391,7 @@ def test_scan_requires_a_parseable_live_workflow_with_matching_application_id(
 
 
 def test_scan_only_tolerates_one_malformed_final_crash_tail(tmp_path: Path) -> None:
-    from src.lib.runtime.migration import RuntimeMigration
+    from agentloom.runtime.migration import RuntimeMigration
 
     repo_root = tmp_path / "repo"
     legacy_root = repo_root / ".logs"
@@ -436,7 +436,7 @@ def test_scan_only_tolerates_one_malformed_final_crash_tail(tmp_path: Path) -> N
 def test_scan_isolates_invalid_utf8_checkpoint_metadata_and_context(
     tmp_path: Path,
 ) -> None:
-    from src.lib.runtime.migration import RuntimeMigration
+    from agentloom.runtime.migration import RuntimeMigration
 
     repo_root = tmp_path / "repo"
     legacy_root = repo_root / ".logs"
@@ -488,7 +488,7 @@ def test_scan_isolates_invalid_utf8_checkpoint_metadata_and_context(
 def test_invalid_worker_checkpoint_is_skipped_without_blocking_valid_task_apply(
     tmp_path: Path,
 ) -> None:
-    from src.lib.runtime.migration import RuntimeMigration
+    from agentloom.runtime.migration import RuntimeMigration
 
     repo_root = tmp_path / "repo"
     legacy_root = repo_root / ".logs"
@@ -538,7 +538,7 @@ def test_invalid_worker_checkpoint_is_skipped_without_blocking_valid_task_apply(
 
 
 def test_live_legacy_heartbeat_blocks_scan_and_apply_archive(tmp_path: Path) -> None:
-    from src.lib.runtime.migration import MigrationError, RuntimeMigration
+    from agentloom.runtime.migration import MigrationError, RuntimeMigration
 
     repo_root = tmp_path / "repo"
     legacy_root = repo_root / ".logs"
@@ -580,7 +580,7 @@ def test_live_legacy_heartbeat_blocks_scan_and_apply_archive(tmp_path: Path) -> 
 def test_scan_requires_original_created_at_instead_of_fresh_saved_metadata(
     tmp_path: Path,
 ) -> None:
-    from src.lib.runtime.migration import RuntimeMigration
+    from agentloom.runtime.migration import RuntimeMigration
 
     repo_root = tmp_path / "repo"
     legacy_root = repo_root / ".logs"
@@ -621,7 +621,7 @@ def test_scan_requires_original_created_at_instead_of_fresh_saved_metadata(
 def test_scan_does_not_treat_step_count_without_memory_steps_as_progress(
     tmp_path: Path,
 ) -> None:
-    from src.lib.runtime.migration import RuntimeMigration
+    from agentloom.runtime.migration import RuntimeMigration
 
     repo_root = tmp_path / "repo"
     legacy_root = repo_root / ".logs"
@@ -654,8 +654,8 @@ def test_scan_does_not_treat_step_count_without_memory_steps_as_progress(
 def test_apply_uses_staging_verifies_context_ref_and_archives_whole_legacy_tree(
     tmp_path: Path,
 ) -> None:
-    from src.lib.context_engine.store import ContextStore
-    from src.lib.runtime.migration import RuntimeMigration
+    from agentloom.runtime.context_engine.store import ContextStore
+    from agentloom.runtime.migration import RuntimeMigration
 
     repo_root = tmp_path / "repo"
     legacy_root = repo_root / ".logs"
@@ -738,7 +738,7 @@ def test_apply_uses_staging_verifies_context_ref_and_archives_whole_legacy_tree(
     assert not (destination / "workers" / "researcher" / "checkpoint.json").exists()
     worker_checkpoint = destination / "workers" / "researcher" / "calls" / "2" / "checkpoint.json"
     assert worker_checkpoint.is_file()
-    from src.lib.checkpoint import CheckpointManager
+    from agentloom.runtime.checkpoint import CheckpointManager
 
     manager = CheckpointManager("supervisor", checkpoint_dir=destination)
     assert manager.load_worker_checkpoint("task_valid", "researcher", 2)["step_count"] == 1
@@ -757,9 +757,9 @@ def test_archive_failure_keeps_published_task_leased_until_safe_rollback(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    import src.lib.runtime.migration as migration_module
-    from src.lib.checkpoint.checkpoint_manager import CheckpointTaskLease
-    from src.lib.runtime.migration import MigrationError, RuntimeMigration
+    import agentloom.runtime.migration as migration_module
+    from agentloom.runtime.checkpoint.checkpoint_manager import CheckpointTaskLease
+    from agentloom.runtime.migration import MigrationError, RuntimeMigration
 
     repo_root = tmp_path / "repo"
     legacy_root = repo_root / ".logs"
@@ -817,7 +817,7 @@ def test_archive_failure_keeps_published_task_leased_until_safe_rollback(
 def test_source_change_during_staging_aborts_before_publish_or_archive(
     tmp_path: Path,
 ) -> None:
-    from src.lib.runtime.migration import MigrationError, RuntimeMigration
+    from agentloom.runtime.migration import MigrationError, RuntimeMigration
 
     repo_root = tmp_path / "repo"
     legacy_root = repo_root / ".logs"
@@ -859,7 +859,7 @@ def test_source_change_during_staging_aborts_before_publish_or_archive(
 
 
 def test_apply_is_idempotent_when_destination_already_matches(tmp_path: Path) -> None:
-    from src.lib.runtime.migration import RuntimeMigration
+    from agentloom.runtime.migration import RuntimeMigration
 
     repo_root = tmp_path / "repo"
     legacy_root = repo_root / ".logs"
@@ -890,7 +890,7 @@ def test_apply_is_idempotent_when_destination_already_matches(tmp_path: Path) ->
 def test_validator_failure_rolls_back_destination_and_keeps_legacy_tree(
     tmp_path: Path,
 ) -> None:
-    from src.lib.runtime.migration import MigrationError, RuntimeMigration
+    from agentloom.runtime.migration import MigrationError, RuntimeMigration
 
     repo_root = tmp_path / "repo"
     legacy_root = repo_root / ".logs"
@@ -929,7 +929,7 @@ def test_validator_failure_rolls_back_destination_and_keeps_legacy_tree(
 def test_apply_rejects_symlinked_destination_component_and_keeps_legacy(
     tmp_path: Path,
 ) -> None:
-    from src.lib.runtime.migration import MigrationError, RuntimeMigration
+    from agentloom.runtime.migration import MigrationError, RuntimeMigration
 
     repo_root = tmp_path / "repo"
     legacy_root = repo_root / ".logs"
@@ -961,7 +961,7 @@ def test_apply_rejects_symlinked_destination_component_and_keeps_legacy(
 
 
 def test_scan_skips_checkpoint_with_missing_file_history_backup(tmp_path: Path) -> None:
-    from src.lib.runtime.migration import RuntimeMigration
+    from agentloom.runtime.migration import RuntimeMigration
 
     repo_root = tmp_path / "repo"
     legacy_root = repo_root / ".logs"

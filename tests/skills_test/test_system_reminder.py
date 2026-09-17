@@ -1,6 +1,6 @@
 from pathlib import Path
 
-from src.lib.smolagents.hooks import HookPlan, HookRun, wrap_in_system_reminder
+from agentloom.runtime.hooks import HookPlan, HookRun, wrap_in_system_reminder
 
 
 def test_system_reminder_wraps_once_and_ignores_blank_text() -> None:
@@ -23,10 +23,10 @@ def test_hook_run_owns_step_number_and_effect_queue() -> None:
 def test_prompt_templates_document_system_reminders() -> None:
     root = Path(__file__).parents[2]
     prompt_files = [
-        root / "src/runtime/prompts/toolcalling_agent.example.yaml",
-        root / "src/runtime/prompts/anthropic/toolcalling_agent.example.yaml",
-        root / "src/runtime/prompts/openai/toolcalling_agent.example.yaml",
-        root / "src/runtime/prompts/gemini/toolcalling_agent.example.yaml",
+        root / "agentloom/runtime/prompts/toolcalling_agent.example.yaml",
+        root / "agentloom/runtime/prompts/anthropic/toolcalling_agent.example.yaml",
+        root / "agentloom/runtime/prompts/openai/toolcalling_agent.example.yaml",
+        root / "agentloom/runtime/prompts/gemini/toolcalling_agent.example.yaml",
     ]
 
     assert prompt_files

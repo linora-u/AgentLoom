@@ -18,7 +18,7 @@ from typing import TYPE_CHECKING, Any
 import yaml
 
 if TYPE_CHECKING:
-    from agentloom.tui_bridge.definition import AgentDefinitionCache
+    from agentloom.application.definition import AgentDefinitionCache
 
 AGENT_YAML_MAX_BYTES = 1024 * 1024
 SKILL_MANIFEST_MAX_BYTES = 128 * 1024
@@ -662,7 +662,7 @@ def _read_agent_definition_object(
             return {}
     except OSError:
         return {}
-    from agentloom.tui_bridge.definition import read_agent_definition
+    from agentloom.application.definition import read_agent_definition
 
     result = read_agent_definition(safe, cache=cache)
     if result.definition is None:

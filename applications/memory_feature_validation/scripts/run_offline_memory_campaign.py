@@ -49,20 +49,20 @@ from applications.memory_feature_validation.scripts.offline_memory_campaign_comm
     private_marker,
     safe_marker,
 )
-from src.extensions.self_learning.event_schema import CanonicalSessionEvent  # noqa: E402
-from src.extensions.self_learning.persistence.database import (  # noqa: E402
+from agentloom.self_learning.event_schema import CanonicalSessionEvent  # noqa: E402
+from agentloom.self_learning.persistence.database import (  # noqa: E402
     SelfLearningDatabase,
 )
-from src.extensions.self_learning.persistence.ledger import (  # noqa: E402
+from agentloom.self_learning.persistence.ledger import (  # noqa: E402
     SelfLearningLedger,
 )
-from src.extensions.self_learning.persistence.memory_store import (  # noqa: E402
+from agentloom.self_learning.persistence.memory_store import (  # noqa: E402
     MemoryStore,
 )
-from src.extensions.self_learning.persistence.review_engine import (  # noqa: E402
+from agentloom.self_learning.persistence.review_engine import (  # noqa: E402
     ReviewEngine,
 )
-from src.extensions.self_learning.review_types import (  # noqa: E402
+from agentloom.self_learning.review_types import (  # noqa: E402
     CandidateInput,
     EvidenceGateResult,
     ReviewConflictError,
@@ -131,6 +131,37 @@ _SOURCE_FILES = (
     "src/lib/trusted_memory_evidence.py",
 )
 _TRUSTED_DRIVER_FILES = frozenset(_SOURCE_FILES[:3])
+# Preserve the baseline paths for historical Git blobs. The same semantic
+# sources have moved twice; choose one complete layout for each source tree,
+# never substitute another revision's content when a bound file is missing.
+_SOURCE_OWNER_MOVES = (
+    ("src/extensions/self_learning/", "src/self_learning/"),
+    ("src/lib/runtime/", "src/runtime/"),
+    ("src/lib/config/", "src/configuration/"),
+    ("src/lib/logging/", "src/runtime/logging/"),
+    ("src/lib/trusted_memory_evidence.py", "src/runtime/trusted_memory_evidence.py"),
+)
+
+
+def _source_paths_for_tree(paths: set[str]) -> tuple[str, ...]:
+    if "agentloom/self_learning/event_schema.py" in paths:
+        namespace = "agentloom"
+    elif "src/self_learning/event_schema.py" in paths:
+        namespace = "src"
+    else:
+        return _SOURCE_FILES
+    result: list[str] = []
+    for relative in _SOURCE_FILES:
+        for old, new in _SOURCE_OWNER_MOVES:
+            if relative.startswith(old):
+                relative = new + relative[len(old):]
+                break
+        if namespace == "agentloom" and relative.startswith("src/"):
+            relative = "agentloom/" + relative[4:]
+        result.append(relative)
+    return tuple(result)
+
+
 _PERFORMANCE_ARTIFACT_NAMES = (
     "cases.jsonl.gz",
     "self_learning.db",
@@ -158,7 +189,12 @@ def _write_json(path: Path, value: Any) -> None:
 
 def _source_manifest() -> list[dict[str, Any]]:
     rows: list[dict[str, Any]] = []
-    for relative in _SOURCE_FILES:
+    layout_markers = {
+        relative for relative in (
+            "agentloom/self_learning/event_schema.py", "src/self_learning/event_schema.py"
+        ) if (REPO_ROOT / relative).is_file()
+    }
+    for relative in _source_paths_for_tree(layout_markers):
         path = REPO_ROOT / relative
         digest = hashlib.sha256()
         with path.open("rb") as handle:
@@ -224,8 +260,15 @@ def _git_source_state() -> dict[str, Any]:
 def _source_manifest_at_commit(commit: str) -> list[dict[str, Any]]:
     if not re.fullmatch(r"[0-9a-f]{40}", str(commit or "")):
         return []
+    try:
+        tree = subprocess.run(
+            ["git", "ls-tree", "-r", "--name-only", commit, "--", "agentloom", "src"],
+            cwd=REPO_ROOT, check=True, capture_output=True, text=True, timeout=30,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return []
     rows: list[dict[str, Any]] = []
-    for relative in _SOURCE_FILES:
+    for relative in _source_paths_for_tree(set(tree.stdout.splitlines())):
         try:
             result = subprocess.run(
                 ["git", "show", f"{commit}:{relative}"],

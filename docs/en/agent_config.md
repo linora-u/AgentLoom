@@ -849,7 +849,7 @@ The core idea of this pattern is: **Python control flow + Agent intelligence** â
 #### 4.4.3 Core API: `YamlAgentFactory.create_agent_as_tool()`
 
 ```python
-from src.lib.smolagents.agent.yaml_agent_factory import YamlAgentFactory
+from agentloom.runtime.factory import YamlAgentFactory
 
 tools = YamlAgentFactory.create_agent_as_tool(
     config_path,        # str | Path | dict â€” Worker YAML path (relative to AGENT_ROOT) or config dict
@@ -885,8 +885,8 @@ When you only need some deterministic processing before and after the Agent call
 from __future__ import annotations
 from pathlib import Path
 
-from src.lib.logging import get_logger
-from src.lib.smolagents.agent.yaml_agent_factory import YamlAgentFactory
+from agentloom.runtime.logging import get_logger
+from agentloom.runtime.factory import YamlAgentFactory
 
 _AGENT_YAML = "applications/<app>/workflows/worker_agents/<worker>.yaml"
 
@@ -943,8 +943,8 @@ import json
 import traceback
 from pathlib import Path
 
-from src.lib.logging import get_logger
-from src.lib.smolagents.agent.yaml_agent_factory import YamlAgentFactory
+from agentloom.runtime.logging import get_logger
+from agentloom.runtime.factory import YamlAgentFactory
 
 _AGENT_YAML = "applications/<app>/workflows/worker_agents/<worker>.yaml"
 

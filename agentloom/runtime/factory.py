@@ -23,9 +23,6 @@ from agentloom.tools.catalog import resolve_toolsets
 from agentloom.tools.loader import resolve_tool_function
 from agentloom.application.workflows import get_worker_agent_yaml_path, infer_category_from_yaml_path
 
-# Keep module-level symbol for legacy tests that monkeypatch this path root.
-AGENT_ROOT = C.agent_root
-
 # Prompt protocol constants are externalized in prompts/ YAML to keep wording/template
 # configuration centralized and editable without changing implementation logic.
 _PROMPT_PROTOCOL_PATH = (Path(__file__).resolve().parent / "prompts" / "agent_tool_behavior_spec.yaml").resolve()
@@ -403,12 +400,12 @@ class YamlConfiguredAgent(RoleDrivenAgent):
     def _build_normalized_config(self) -> NormalizedAgentConfig:
         return AgentConfigNormalizer.build_worker_normalized_config(
             self._config,
-            agent_root=AGENT_ROOT,
+            agent_root=C.agent_root,
             source_name="agent",
         )
 
     def _execution_validation_agent_root(self) -> str:
-        return str(AGENT_ROOT)
+        return str(C.agent_root)
 
     def process_tool_query(self, query):
         return query
@@ -707,12 +704,12 @@ class YamlConfiguredSupervisorAgent(RoleDrivenAgent):
     def _build_normalized_config(self) -> NormalizedAgentConfig:
         return AgentConfigNormalizer.build_supervisor_normalized_config(
             self._config,
-            agent_root=AGENT_ROOT,
+            agent_root=C.agent_root,
             source_name="supervisor",
         )
 
     def _execution_validation_agent_root(self) -> str:
-        return str(AGENT_ROOT)
+        return str(C.agent_root)
 
     def _validate_role_specific_config(self, normalized: Any | None) -> None:
         AgentConfigNormalizer.validate_worker_agents_config(self._config.get('worker_agents', []))
@@ -806,12 +803,12 @@ class YamlConfiguredSupervisorAgent(RoleDrivenAgent):
         if isinstance(pinned_workers, dict):
             resolved_worker_agents = [
                 (item['path'], AgentConfigNormalizer.resolve_worker_agent_config_path(
-                    item['path'], worker_agents_folder, agent_root=AGENT_ROOT,
+                    item['path'], worker_agents_folder, agent_root=C.agent_root,
                 )) for item in expected_agents
             ]
         else:
             resolved_worker_agents = AgentConfigNormalizer.precheck_worker_agent_paths(
-                expected_agents, worker_agents_folder, agent_root=AGENT_ROOT,
+                expected_agents, worker_agents_folder, agent_root=C.agent_root,
             )
 
         for configured_path, found_file in resolved_worker_agents:
@@ -972,7 +969,7 @@ class YamlAgentFactory:
             mcp_manager = _load_mcp_tools(
                 config=config,
                 effective_agent_config=effective_agent_config,
-                agent_root=AGENT_ROOT,
+                agent_root=C.agent_root,
                 append_tool=_append_tool,
                 log=log,
             )
@@ -1016,7 +1013,7 @@ class YamlAgentFactory:
         mcp_manager = _load_mcp_tools(
             config=config,
             effective_agent_config=effective_agent_config,
-            agent_root=AGENT_ROOT,
+            agent_root=C.agent_root,
             append_tool=_append_tool,
             log=log,
         )

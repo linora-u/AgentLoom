@@ -865,7 +865,7 @@ toolset 归属、implementation 加载规则和真实验收矩阵见
 #### 4.4.3 核心 API：`YamlAgentFactory.create_agent_as_tool()`
 
 ```python
-from src.lib.smolagents.agent.yaml_agent_factory import YamlAgentFactory
+from agentloom.runtime.factory import YamlAgentFactory
 
 tools = YamlAgentFactory.create_agent_as_tool(
     config_path,        # str | Path | dict — Worker YAML 路径（相对于 AGENT_ROOT）或配置字典
@@ -901,8 +901,8 @@ tools = YamlAgentFactory.create_agent_as_tool(
 from __future__ import annotations
 from pathlib import Path
 
-from src.lib.logging import get_logger
-from src.lib.smolagents.agent.yaml_agent_factory import YamlAgentFactory
+from agentloom.runtime.logging import get_logger
+from agentloom.runtime.factory import YamlAgentFactory
 
 _AGENT_YAML = "applications/<app>/workflows/worker_agents/<worker>.yaml"
 
@@ -959,8 +959,8 @@ import json
 import traceback
 from pathlib import Path
 
-from src.lib.logging import get_logger
-from src.lib.smolagents.agent.yaml_agent_factory import YamlAgentFactory
+from agentloom.runtime.logging import get_logger
+from agentloom.runtime.factory import YamlAgentFactory
 
 _AGENT_YAML = "applications/<app>/workflows/worker_agents/<worker>.yaml"
 

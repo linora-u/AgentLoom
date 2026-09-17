@@ -4,7 +4,7 @@ from datetime import UTC, datetime, timedelta
 
 import pytest
 
-from src.schedules.schedule import (
+from agentloom.schedules.schedule import (
     cron_schedule,
     interval_schedule,
     next_run,

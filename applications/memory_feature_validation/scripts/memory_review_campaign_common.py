@@ -55,6 +55,7 @@ WORKFLOWS = {
 _RELEASE_SOURCE_PATHS = (
     "applications/memory_feature_validation",
     "src",
+    "agentloom",
     "config/system.yaml",
     "pyproject.toml",
     "uv.lock",

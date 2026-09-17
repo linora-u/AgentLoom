@@ -5,7 +5,7 @@ from pathlib import Path
 import pytest
 from unittest.mock import patch
 
-from src.tools.shell.path_validation import (
+from agentloom.tools.shell.path_validation import (
     check_path_constraints,
     _filter_out_flags,
     _resolve_path,
@@ -47,7 +47,7 @@ def _patch_allowed_dirs(*dirs):
     """Mock get_allowed_directories to return given directories."""
     resolved = [Path(d).resolve() for d in dirs]
     return patch(
-        "src.tools.shell.path_validation.get_allowed_directories",
+        "agentloom.tools.shell.path_validation.get_allowed_directories",
         return_value=resolved,
     )
 
@@ -151,7 +151,7 @@ class TestDangerousRemoval:
         But they may still fail the workspace boundary check.
         """
         with _ws_patch(), \
-             patch("src.tools.shell.path_validation._get_shell_config_path",
+             patch("agentloom.tools.shell.path_validation._get_shell_config_path",
                    side_effect=_mock_shell_config_no_destructive):
             with pytest.raises(ValueError, match="outside allowed workspace"):
                 check_path_constraints("rm -rf /etc")

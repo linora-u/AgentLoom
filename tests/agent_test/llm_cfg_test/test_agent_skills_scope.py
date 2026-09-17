@@ -4,10 +4,10 @@ from types import SimpleNamespace
 
 import pytest
 
-import src.lib.smolagents.agent.base_agent as base_agent_module
-from src.lib.smolagents.hooks import HookPlan, HookRun
-from src.lib.smolagents.skills.catalog import SkillCatalog, SkillSource
-from src.trace import get_current_hook_run, get_current_skill_catalog
+import agentloom.runtime.agent as base_agent_module
+from agentloom.runtime.hooks import HookPlan, HookRun
+from agentloom.runtime.skills.catalog import SkillCatalog, SkillSource
+from agentloom.runtime.trace import get_current_hook_run, get_current_skill_catalog
 
 
 class _DummyRuntimeAgent:

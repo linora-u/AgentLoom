@@ -4,14 +4,14 @@ detection, symlink chain resolution, and integration with validate_workspace_pat
 import os
 from pathlib import Path
 
-import src.lib.config.config as config_module
-from src.lib.smolagents.hooks.path_validators import (
+import agentloom.configuration.config as config_module
+from agentloom.runtime.hooks.path_validators import (
     has_suspicious_windows_pattern,
     is_vulnerable_unc_path,
     resolve_symlink_chain,
     validate_workspace_path,
 )
-from src.lib.smolagents.hooks.types import HookContext
+from agentloom.runtime.hooks.types import HookContext
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -29,7 +29,7 @@ def _patch_config(monkeypatch, raw: dict, root: Path) -> None:
 
 def _patch_no_agent(monkeypatch) -> None:
     monkeypatch.setattr(
-        "src.lib.smolagents.hooks.path_validators.get_current_agent_config",
+        "agentloom.runtime.hooks.path_validators.get_current_agent_config",
         lambda: None,
     )
 

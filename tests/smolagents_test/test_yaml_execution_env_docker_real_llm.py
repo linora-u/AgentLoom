@@ -13,8 +13,8 @@ import pytest
 import yaml
 from smolagents.models import LiteLLMModel
 
-from src.lib.logging import initialize_global_logger_once, get_global_logger
-from src.lib.smolagents.agent.yaml_agent_factory import YamlAgentFactory, YamlConfiguredSupervisorAgent
+from agentloom.runtime.logging import initialize_global_logger_once, get_global_logger
+from agentloom.runtime.factory import YamlAgentFactory, YamlConfiguredSupervisorAgent
 
 LLM_CONFIG_PATH = Path(__file__).resolve().parents[2] / "config" / "llm.yaml"
 WORKFLOW_PATH = Path(__file__).resolve().parents[2] / "applications" / "test_demo" / "workflows" / "test_docker_real_agent.yaml"

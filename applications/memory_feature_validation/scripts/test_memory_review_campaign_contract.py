@@ -67,7 +67,7 @@ from applications.memory_feature_validation.scripts.run_memory_review_campaign i
     _sanitize_text,
     _write_inbox_decision,
 )
-from src.lib.trusted_memory_evidence import (  # noqa: E402
+from agentloom.runtime.trusted_memory_evidence import (  # noqa: E402
     extract_trusted_memory_evidence,
 )
 
@@ -871,15 +871,15 @@ def test_real_campaign_release_sources_bind_harness_workflows_and_runtime() -> N
         "applications/memory_feature_validation/scripts/audit_memory_review_campaign.py",
         "applications/memory_feature_validation/variants/on/config/system.yaml",
         "applications/memory_feature_validation/variants/on/workflows/analyze_without_memory.yaml",
-        "src/self_learning/reviewer.py",
-        "src/self_learning/persistence/memory_store.py",
-        "src/runtime/agent.py",
-        "src/runtime/trusted_memory_evidence.py",
-        "src/application/runner.py",
-        "src/runtime/factory.py",
-        "src/adapters/smolagents/models/model_manager.py",
-        "src/adapters/smolagents/models/tool_call_parser.py",
-        "src/configuration/llm_config.py",
+        "agentloom/self_learning/reviewer.py",
+        "agentloom/self_learning/persistence/memory_store.py",
+        "agentloom/runtime/agent.py",
+        "agentloom/runtime/trusted_memory_evidence.py",
+        "agentloom/application/runner.py",
+        "agentloom/runtime/factory.py",
+        "agentloom/adapters/smolagents/models/model_manager.py",
+        "agentloom/adapters/smolagents/models/tool_call_parser.py",
+        "agentloom/configuration/llm_config.py",
         "pyproject.toml",
         "uv.lock",
     } <= paths
@@ -888,7 +888,7 @@ def test_real_campaign_release_sources_bind_harness_workflows_and_runtime() -> N
 def test_review_off_cohort_uses_real_global_summary_application_opt_out(
     monkeypatch,
 ) -> None:
-    import src.lib.config.config as config_module
+    import agentloom.configuration.config as config_module
 
     specs = [
         spec for spec in build_full_plan()
@@ -968,12 +968,12 @@ from pathlib import Path
 
 import yaml
 
-from src.lib.utils.workspace import ensure_workspace_mounted_once
+from agentloom.runtime.workspace import ensure_workspace_mounted_once
 
 ensure_workspace_mounted_once()
 workflow = yaml.safe_load(Path({workflow_relative!r}).read_text(encoding="utf-8"))
 tool = next(item for item in workflow["tools"] if item["name"] == "validation_memory_case")
-from src.lib.utils.dynamic_import import load_function
+from agentloom.utils.dynamic_import import load_function
 function = load_function(tool["module"], tool["function"])
 payload = json.loads(function())
 assert payload["case_id"] == {spec.case_id!r}
@@ -1839,7 +1839,9 @@ def test_campaign_scripts_do_not_import_self_learning_implementation() -> None:
     removed_file_logging_flag = "--log" + "-to-file"
     for name in ("run_memory_review_campaign.py", "audit_memory_review_campaign.py"):
         source = (APP_ROOT / "scripts" / name).read_text(encoding="utf-8")
+        assert "from agentloom." not in source
         assert "from src." not in source
+        assert "import agentloom." not in source
         assert "import src." not in source
         assert removed_file_logging_flag not in source
 
