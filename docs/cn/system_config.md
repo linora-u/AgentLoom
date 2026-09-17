@@ -348,7 +348,7 @@ lsp_servers:
 | `max_restarts` | `int` | `3` | 服务器崩溃后自动重启的最大次数 |
 | `servers` | `list` | `[python]` | 语言列表，支持 40+ 种语言 |
 
-> 服务器由 `agentloom/adapters/lsp/LSPServerManager` 统一管理，采用三层架构（Manager → Instance → solidlsp）。
+> 服务器由 `src/adapters/lsp/LSPServerManager` 统一管理，采用三层架构（Manager → Instance → solidlsp）。
 > 不支持的语言自动回退到 tree-sitter AST 分析（46+ 语言）。
 
 ---
@@ -1286,13 +1286,13 @@ checkpoint:
 
 | 配置段 | Pydantic 模型 | 源文件 |
 |--------|--------------|--------|
-| 根配置 | `RootSettings` | `agentloom/configuration/config_validation.py` |
-| `system.*` | `SystemSettings` | `agentloom/configuration/config_validation.py` |
-| `model_request_headers.*` | `ModelRequestHeadersSettings` | `agentloom/configuration/config_validation.py` |
-| `tool_access_control.*` | `ToolAccessControlSettings` | `agentloom/configuration/config_validation.py` |
-| `runtime.*` | `RuntimeSettings` | `agentloom/configuration/config_validation.py` |
-| `logging.*` | `LoggingSettings` | `agentloom/configuration/config_validation.py` |
-| `self_learning.*` | `SelfLearningSettings` / `SelfLearningReviewSettings` | `agentloom/configuration/config_validation.py` |
+| 根配置 | `RootSettings` | `src/configuration/config_validation.py` |
+| `system.*` | `SystemSettings` | `src/configuration/config_validation.py` |
+| `model_request_headers.*` | `ModelRequestHeadersSettings` | `src/configuration/config_validation.py` |
+| `tool_access_control.*` | `ToolAccessControlSettings` | `src/configuration/config_validation.py` |
+| `runtime.*` | `RuntimeSettings` | `src/configuration/config_validation.py` |
+| `logging.*` | `LoggingSettings` | `src/configuration/config_validation.py` |
+| `self_learning.*` | `SelfLearningSettings` / `SelfLearningReviewSettings` | `src/configuration/config_validation.py` |
 
 **`RootSettings` 完整字段定义**：
 
@@ -1323,11 +1323,11 @@ checkpoint:
 
 | 解析器 | 用途 | 位于 |
 |--------|------|------|
-| `BoolParser` | 兼容布尔输入归一化，用于日志与部分 LLM 配置开关 | `config_validation.py` / `agentloom/runtime/logging/logger_manager.py` / `agentloom/configuration/llm_config.py` |
-| `IntParser` | 宽容整数解析；旧配置 `max_tokens: "max"` 现在会解析为有限的模型默认值 | `config_validation.py` / `agentloom/configuration/llm_config.py` |
-| `FloatParser` | 兼容浮点与整数字符串输入，实际用于模型配置里的 `temperature`、`retry_delay`、`max_retry_delay` | `config_validation.py` / `agentloom/configuration/llm_config.py` |
+| `BoolParser` | 兼容布尔输入归一化，用于日志与部分 LLM 配置开关 | `config_validation.py` / `src/runtime/logging/logger_manager.py` / `src/configuration/llm_config.py` |
+| `IntParser` | 宽容整数解析；旧配置 `max_tokens: "max"` 现在会解析为有限的模型默认值 | `config_validation.py` / `src/configuration/llm_config.py` |
+| `FloatParser` | 兼容浮点与整数字符串输入，实际用于模型配置里的 `temperature`、`retry_delay`、`max_retry_delay` | `config_validation.py` / `src/configuration/llm_config.py` |
 | `EnumParser` | 通用枚举归一化辅助函数，当前未在 system.yaml 主链路中直接消费 | `config_validation.py` |
-| `LogLevelParser` | 解析 `logging.level`，支持标准 `logging` 级别与 `OFF` | `config_validation.py` / `agentloom/runtime/logging/logger_manager.py` |
+| `LogLevelParser` | 解析 `logging.level`，支持标准 `logging` 级别与 `OFF` | `config_validation.py` / `src/runtime/logging/logger_manager.py` |
 
 ---
 

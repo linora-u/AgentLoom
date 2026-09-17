@@ -473,7 +473,7 @@ def prepare(scenario: str) -> dict:
         "old_run_ids": sorted(old_run_ids), "before_counts": before,
         "before_worker_step": before_worker.get("step_count") if before_worker else None,
         "interrupt_returncode": returncode,
-        "framework_tree": subprocess.check_output(["git", "rev-parse", "HEAD:agentloom"], cwd=ROOT, text=True).strip(),
+        "framework_tree": subprocess.check_output(["git", "rev-parse", "HEAD:src"], cwd=ROOT, text=True).strip(),
         "workflow": YAML_PATH,
         "baseline_revision": subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=ROOT, text=True).strip(),
         "prepared_at": datetime.now(timezone.utc).isoformat(),

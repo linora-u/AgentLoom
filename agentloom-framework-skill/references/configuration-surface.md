@@ -7,11 +7,11 @@
 配置相关改动至少交叉看这几类文件：
 
 - 用户文档：`docs/en/config-overview.md`、`agent_config.md`、`goal_mode.md`、`system_config.md`、`llm_config.md`、`skills_config.md`、`hooks.md`、`checkpoint.md`。
-- 系统配置加载：`agentloom/configuration/config.py`、`layered_builder.py`、`config_validation.py`。
-- LLM 配置：`agentloom/configuration/llm_config.py`、`agentloom/adapters/smolagents/models/model_types.py`、`model_manager.py`。
-- Agent YAML 校验：`agentloom/adapters/smolagents/agent/agent_validation.py`、`yaml_agent_factory.py`、`base_agent.py`。
-- Skill/Hook：`agentloom/runtime/skills/parser.py`、`skills.py`、`agentloom/runtime/hooks/*`。
-- MCP：`agentloom/adapters/mcp/config.py`、`tests/mcp_test/*`。
+- 系统配置加载：`src/configuration/config.py`、`layered_builder.py`、`config_validation.py`。
+- LLM 配置：`src/configuration/llm_config.py`、`src/adapters/smolagents/models/model_types.py`、`model_manager.py`。
+- Agent YAML 校验：`src/adapters/smolagents/agent/agent_validation.py`、`yaml_agent_factory.py`、`base_agent.py`。
+- Skill/Hook：`src/runtime/skills/parser.py`、`skills.py`、`src/runtime/hooks/*`。
+- MCP：`src/adapters/mcp/config.py`、`tests/mcp_test/*`。
 
 ## 配置文件与层级
 
@@ -277,8 +277,8 @@ skill, session_search, session_scroll, memory, skill_manage,
 todo_write
 ```
 
-实际完整列表以 `agentloom/tools/catalog.py` 的 `ToolSpec` catalog 为准。读取 metadata
-不得导入具体工具；Runtime implementation 只通过 `agentloom/tools/loader.py` 按需加载。
+实际完整列表以 `src/tools/catalog.py` 的 `ToolSpec` catalog 为准。读取 metadata
+不得导入具体工具；Runtime implementation 只通过 `src/tools/loader.py` 按需加载。
 
 ## llm.yaml 配置面
 
