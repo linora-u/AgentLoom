@@ -61,6 +61,7 @@ def validate_runtime_agent_config(
     *,
     agent_root: Path | str,
 ) -> None:
+    AgentConfigNormalizer.validate_removed_fields(config)
     validate_required_yaml_fields(config, yaml_path)
     AgentConfigNormalizer.validate_runtime_tool_references(config)
     AgentConfigNormalizer.validate_workflow_config(config)
