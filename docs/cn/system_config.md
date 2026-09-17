@@ -348,7 +348,7 @@ lsp_servers:
 | `max_restarts` | `int` | `3` | 服务器崩溃后自动重启的最大次数 |
 | `servers` | `list` | `[python]` | 语言列表，支持 40+ 种语言 |
 
-> 服务器由 `src/adapters/lsp/LSPServerManager` 统一管理，采用三层架构（Manager → Instance → solidlsp）。
+> 服务器由 `agentloom.adapters.lsp.lsp_server_manager.LSPServerManager` 统一管理，采用三层架构（Manager → Instance → solidlsp）。
 > 不支持的语言自动回退到 tree-sitter AST 分析（46+ 语言）。
 
 ---

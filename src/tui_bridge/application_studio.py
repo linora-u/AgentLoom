@@ -10,22 +10,19 @@ from pathlib import Path
 from typing import Any
 
 import yaml
-
 from agentloom.application.definition import (
     definition_error,
+    inspect_application_definition,
     load_agent_definition,
     model_catalog,
     model_types,
     resolve_worker_path,
     selected_model_type,
-    skill_sources,
-    validate_agent_definition,
 )
 from agentloom.application.presentation import configuration_projection, display_path, public_value
 from agentloom.application.revision import application_revision
-from agentloom.configuration.config import build_effective_agent_config_snapshot, load_project_config
+from agentloom.configuration.config import load_project_config
 from agentloom.configuration.yaml_loader import load_unique_yaml
-from agentloom.runtime.skills.catalog import SkillCatalog
 
 _MAX_REVISION_FILES = 4096
 _MAX_REVISION_BYTES = 64 * 1024 * 1024
@@ -51,20 +48,22 @@ def application_detail(project_root: Path, application_id: str, *, systems: list
     catalog = model_catalog(base) if base is not None else model_types(root)
     for system in supervisor_systems:
         path = root / str(system["path"])
+        inspection = None
         try:
             definition = load_agent_definition(path)
         except (OSError, TypeError, ValueError, yaml.YAMLError) as exc:
             definition = {"name": path.stem}
             errors = [f"{path}: {definition_error(exc)}"]
         else:
-            errors = validate_agent_definition(root, str(path), definition, base_config=base, catalog=catalog)
+            inspection = inspect_application_definition(root, str(path), definition, base_config=base, catalog=catalog)
+            errors = list(inspection.errors)
         agents.append(
             _agent_detail(
                 root,
                 path,
                 definition,
                 role="supervisor",
-                base=base,
+                inspection=inspection,
                 catalog=catalog,
                 errors=list(dict.fromkeys(config_errors + errors)),
                 ancestry=frozenset(),
@@ -86,12 +85,11 @@ def application_detail(project_root: Path, application_id: str, *, systems: list
     }
 
 
-def _agent_detail(root, path, definition, *, role, base, catalog, errors, ancestry):
+def _agent_detail(root, path, definition, *, role, inspection, catalog, errors, ancestry):
     projection = {"values": {}, "sources": {}}
-    snapshot = None
-    if base is not None:
+    snapshot = inspection.snapshots.get(path.resolve()) if inspection is not None else None
+    if snapshot is not None:
         try:
-            snapshot = build_effective_agent_config_snapshot(definition, source_name=str(path), base_config=base)
             projection = configuration_projection(snapshot, root)
         except (OSError, TypeError, ValueError, yaml.YAMLError) as exc:
             errors.append(f"{path}: {definition_error(exc)}")
@@ -106,17 +104,19 @@ def _agent_detail(root, path, definition, *, role, base, catalog, errors, ancest
             child_path = resolve_worker_path(root, path, raw["path"])
             if child_path in ancestry:
                 continue
-            child = load_agent_definition(child_path)
+            child = inspection.definitions.get(child_path) if inspection is not None else None
+            if child is None:
+                continue
         except (OSError, TypeError, ValueError, yaml.YAMLError):
             continue
-        child_errors = validate_agent_definition(root, str(child_path), child, base_config=base, catalog=catalog)
+        child_errors = list(inspection.errors_by_path.get(child_path, ()))
         workers.append(
             _agent_detail(
                 root,
                 child_path,
                 child,
                 role="worker",
-                base=base,
+                inspection=inspection,
                 catalog=catalog,
                 errors=child_errors,
                 ancestry=ancestry,
@@ -127,19 +127,17 @@ def _agent_detail(root, path, definition, *, role, base, catalog, errors, ancest
     except (TypeError, ValueError):
         model = str(definition.get("model_type") or catalog[0])
     skills = []
-    if snapshot is not None:
-        try:
-            skills = [
-                {
-                    "name": item.name,
-                    "description": item.description,
-                    "source": "global" if item.scope == "project" else item.scope,
-                    "path": display_path(item.location, root),
-                }
-                for item in SkillCatalog.discover(skill_sources(snapshot)).summaries()
-            ]
-        except (OSError, TypeError, ValueError) as exc:
-            errors.append(f"{path}: {definition_error(exc)}")
+    skill_catalog = snapshot.values.get("_skill_catalog_snapshot") if snapshot is not None else None
+    if skill_catalog is not None:
+        skills = [
+            {
+                "name": item.name,
+                "description": item.description,
+                "source": "global" if item.scope == "project" else item.scope,
+                "path": display_path(item.location, root),
+            }
+            for item in skill_catalog.summaries()
+        ]
     return {
         "id": display_path(path, root),
         "name": str(definition.get("name") or path.stem),

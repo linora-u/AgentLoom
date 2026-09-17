@@ -9,9 +9,13 @@
 - 用户文档：`docs/en/config-overview.md`、`agent_config.md`、`goal_mode.md`、`system_config.md`、`llm_config.md`、`skills_config.md`、`hooks.md`、`checkpoint.md`。
 - 系统配置加载：`src/configuration/config.py`、`layered_builder.py`、`config_validation.py`。
 - LLM 配置：`src/configuration/llm_config.py`、`src/adapters/smolagents/models/model_types.py`、`model_manager.py`。
-- Agent YAML 校验：`src/adapters/smolagents/agent/agent_validation.py`、`yaml_agent_factory.py`、`base_agent.py`。
-- Skill/Hook：`src/runtime/skills/parser.py`、`skills.py`、`src/runtime/hooks/*`。
+- Agent 定义与校验：`src/application/definition.py`、`src/application/validation.py`；执行构造：`src/runtime/factory.py`、`src/runtime/agent.py`。
+- Skill/Hook：`src/runtime/skills/parser.py`、`src/runtime/skills/catalog.py`、`src/runtime/hooks/*`。
 - MCP：`src/adapters/mcp/config.py`、`tests/mcp_test/*`。
+
+以上是物理源码位置；Python 导入使用 `agentloom.application`、`agentloom.runtime`
+等 canonical 名称。标准安装将直接位于 `src/` 的职责模块映射为 `agentloom`，
+不支持旧 `src.*` 导入。
 
 ## 配置文件与层级
 
@@ -58,7 +62,7 @@ workflow: |
 | `concurrency` | 正整数或 `"auto"` | 仅影响同一 Worker 通过 `.batch()` 被多输入批量调用 |
 | `execution_env` | `dict` | `code_act` 的执行环境：`local`、`docker`、`e2b`、`wasm` |
 | `prompt` | `str` 或 `{path: ...}` | 自定义系统 prompt 模板路径 |
-| `skills` | `str` / `dict` / `list` | 当前 Agent 私有 Skill 配置 |
+| `skills` | `{paths: list[str]}` | 当前 Agent 的额外 Skill 发现目录 |
 | `goal` | `bool` 或 `{enabled: bool, token_budget?: int}` | 仅顶层 Supervisor；开启 continuation、显式完成和根 Agent 树软 token 预算 |
 
 `tool_call` 模式的主路径是 provider/native tool calls。只要当前 Agent 有可用工具，AgentLoom 就发送结构化 tools schema；如果 provider 返回文本 fallback，也只接受明确结构化容器，例如 `{name, arguments}`、dump 出来的 native `tool_calls/function`、XML/invoke wrapper。不要设计依赖自由文本正则兜底的 workflow。
@@ -101,13 +105,14 @@ Worker YAML 如果出现任何 `goal` key 必须 fail-closed；不能用 `goal: 
 ```text
 system, model_request_headers, smart_summary, context_engine,
 tool_access_control, execution_env, code_agent, tools, shell_settings,
-default_toolsets, toolsets, prompt, mcp_servers, self_learning, hooks
+default_toolsets, toolsets, prompt, mcp_servers, self_learning, hooks,
+todo, skills, tool_metadata, tool_output_limits
 ```
 
 注意：
 
 - 这不是 7 个字段；旧文档如果说只有 7 个已经过期。
-- `tools` 在白名单里只有当它是 `list` 时才进入 overlay；它同时也是 Agent 的工具列表。
+- `tools` 同时是 Agent 的工具列表；非法类型的覆盖会被校验拒绝，不会退回低层配置。
 - `shell_settings`、`toolsets` 可以在 Agent YAML 覆盖；`toolsets` 会整体替换全局 `default_toolsets`。
 - `context_engine` 可以在 Agent YAML 覆盖，用于按应用或 Agent 调整可逆上下文压缩。
 - `self_learning` 和显式 `hooks` bundle 可以在应用或 Agent YAML 覆盖；reviewer 必须从当前 root 的最终生效配置读取，不能使用进程全局回退。
@@ -125,7 +130,7 @@ default_toolsets, toolsets, prompt, mcp_servers, self_learning, hooks
 | `smart_summary` | 是否启用智能上下文压缩 |
 | `context_engine` | 可逆上下文压缩：工具原文进本地 store，模型可见压缩预览和 `ContextRef` |
 | `prompt` | 顶层系统 prompt 覆盖，字符串或 `{path: ...}` |
-| `skills` | 全局 Skill 列表或共享策略 |
+| `skills` | `{paths: [...]}` 额外 Skill 发现目录 |
 | `hooks` | 独立直接 Shell Hook 与显式 `HOOK.yaml` Bundle |
 | `lsp_servers` | LSP 服务开关、重启次数、语言列表 |
 | `execution_env` | 默认执行环境 |
@@ -334,7 +339,7 @@ model:
 
 ## Skills 配置
 
-AgentLoom Skill 使用 Claude Code 风格包：
+AgentLoom Skill 使用 OpenCode 兼容的 `SKILL.md` 包：
 
 ```text
 <skill-dir>/
@@ -385,6 +390,11 @@ skills:
 
 prompt 只展示 catalogue，模型调用 `skill(name)` 后才获得选中正文。Skill
 发现和加载不触碰 Hook，也不授予文件、Shell、脚本或网络权限。
+
+Studio 与执行共用完整拓扑静态预检：Supervisor 和所有 Worker 的 Skill frontmatter、
+名称与同层重名错误在 Run 分配前拒绝。每个定义的有效配置快照保留已解析的 Skill
+目录与正文，Studio 只展示摘要，运行使用相同快照。新检查或新调用重新读取磁盘；
+已有调用保持原正文。资源文件列表仍在激活时采样，不是整个 Skill 目录的文件快照。
 
 ## Hooks 配置
 
@@ -472,7 +482,7 @@ mcp_servers:
   tool_name_prefix: true
 ```
 
-dict 形式也支持 `paths: [...]`。无效类型会跳过并 warning。
+dict 形式也支持 `paths: [...]`。无效类型、无效连接配置或缺失文件在共享静态预检时拒绝。
 
 ## 生成配置时的取舍
 
@@ -480,6 +490,6 @@ dict 形式也支持 `paths: [...]`。无效类型会跳过并 warning。
 - 配置越少越好。新增配置前先确认它改变用户可观察行为；能用代码默认表达的边界不要暴露成开关。
 - 只有模型路由和 API 参数进 `config/llm.yaml`；不要把 endpoint、key、temperature 写进 Agent YAML。
 - Worker 需要权限就写在 Worker YAML 或 app-level system；不要指望 Supervisor 传下去。
-- 列表是替换，不是追加。Agent YAML 覆盖 `toolsets` 或 `skills` 时要写完整意图。
+- 普通列表覆盖是替换，不是追加；`toolsets` 要写完整意图。Skill 发现保留各层来源，分别解析每层 `skills.paths`，再按作用域处理同名覆盖。
 - 确定性逻辑放 `agent_tools/*.py`，推理协议放 workflow，长期领域协议才放 Skill。
 - 需要 Hook 时创建应用私有 Hook Bundle，通过顶层 `hooks.bundles` 显式引用；不要创建承载 Hook 的 Skill。
