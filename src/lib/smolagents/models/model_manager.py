@@ -187,7 +187,7 @@ class ModelManager:
         Returns:
             dict: Configuration parameters for `litellm.completion`.
         """
-        cache_key = self._generate_cache_key("litellm_config", model_type, model_builder)
+        cache_key = self._generate_cache_key("litellm_config", model_type, model_builder) if model_cache else ""
 
         if model_cache and cache_key in self._model_cache:
             return self._model_cache[cache_key]
@@ -249,7 +249,7 @@ class ModelManager:
         Returns:
             LiteLLMModelV2: Smolagents model instance.
         """
-        cache_key = self._generate_cache_key("smolagents", model_type, model_builder)
+        cache_key = self._generate_cache_key("smolagents", model_type, model_builder) if model_cache else ""
 
         if model_cache and cache_key in self._model_cache:
             return self._model_cache[cache_key]
