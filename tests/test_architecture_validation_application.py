@@ -176,18 +176,30 @@ def test_trace_validation_does_not_accept_an_artifact_only_success(tmp_path):
 
 
 @pytest.mark.parametrize("tamper", [None, "wrapped_input", "wrapped_json_text", "sibling_context", "wrapped_omission", "wrapped_alteration", "wrapped_fabrication",
-                                  "cross_run", "dropped_input", "no_model_usage", "no_python"])
-def test_codeact_trace_checks_real_checkpoint_contract_and_independent_ids(tmp_path, tamper):
-    run = {"run_id": "run-current", "task_id": "task-current", "manifest_path": str(tmp_path / "manifest.json")}
+                                  "cross_run", "dropped_input", "no_model_usage", "no_python", "wrong_root_task",
+                                  "wrong_root_run", "foreign_python", "worker_python"])
+@pytest.mark.parametrize("application_id", ["app", "nested/suite/app"])
+def test_codeact_trace_checks_real_checkpoint_contract_and_independent_ids(tmp_path, tamper, application_id):
+    run = {"application_id": application_id, "run_id": "run-current", "task_id": "task-current",
+           "manifest_path": str(tmp_path / "manifest.json")}
     (tmp_path / "manifest.json").write_text('{"status":"completed"}')
     report_dir = tmp_path / "workspace/reports"
     report_dir.mkdir(parents=True)
     (report_dir / "final.json").write_text('{"test_report":"reports/pytest-verifier.json"}')
-    checkpoints = tmp_path / "runtime/checkpoints/app/task-current"
+    checkpoints = tmp_path / "runtime/checkpoints" / application_id / "task-current"
     checkpoints.mkdir(parents=True)
     (checkpoints / "checkpoint.json").write_text(json.dumps({
-        "memory_steps": [{"code_action": None if tamper == "no_python" else "result = repository_investigator(query=payload)"}]
+        "task_id": "other-task" if tamper == "wrong_root_task" else "task-current",
+        "run_id": "other-run" if tamper == "wrong_root_run" else "run-current",
+        "memory_steps": [{"code_action": None if tamper in {"no_python", "foreign_python", "worker_python"}
+                          else "result = repository_investigator(query=payload)"}]
     }))
+    if tamper == "foreign_python":
+        foreign = tmp_path / "runtime/checkpoints/other-app/other-task"
+        foreign.mkdir(parents=True)
+        (foreign / "checkpoint.json").write_text(json.dumps({
+            "task_id": "other-task", "run_id": "other-run", "memory_steps": [{"code_action": "result = 1"}]
+        }))
     previous = {"workspace": str(tmp_path / "workspace"), "case_nonce": "case-unique"}
     ledger = []
     for index, name in enumerate(WORKERS):
@@ -215,6 +227,7 @@ def test_codeact_trace_checks_real_checkpoint_contract_and_independent_ids(tmp_p
             "1. JSON result from the previous stage, with absolute workspace and unique case_nonce.: "
             + json.dumps(json.dumps(query)) + "\n</inputs>",
             "memory_steps": [{"token_usage": {"input_tokens": 0 if tamper == "no_model_usage" else 10},
+                              "code_action": "result = 1" if tamper == "worker_python" else None,
                               "tool_results": [{"tool_name": "final_answer", "status": "completed", "output": json.dumps(output)}]}],
         }))
         ledger.append({"agent_name": name, "root_run_id": "other-run" if tamper == "cross_run" else "run-current",
@@ -228,6 +241,12 @@ def test_codeact_trace_checks_real_checkpoint_contract_and_independent_ids(tmp_p
     if result["passed"]:
         assert len(result["transfers"]) == 3
         assert all(row["query_path"].startswith("$") and len(row["original_output_sha256"]) == 64 for row in result["transfers"])
+        assert result["supervisor_checkpoint"] == str(checkpoints / "checkpoint.json")
+        assert result["supervisor_code_actions"] == 1
+    elif tamper in {"no_python", "foreign_python", "worker_python"}:
+        assert "CodeAct Supervisor has no persisted Python execution evidence" in result["errors"]
+    elif tamper in {"wrong_root_task", "wrong_root_run"}:
+        assert "Supervisor checkpoint identity does not match receipt" in result["errors"]
 
 
 @pytest.mark.parametrize("replacement", [True, 1.0, "1", 2])

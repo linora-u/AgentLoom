@@ -66,7 +66,9 @@ completed Worker checkpoints, intact output-to-input transfers (including a
 complete preceding result inside a JSON or JSON-text wrapper, or accompanied by
 sibling context fields; original nested values and types must remain exact), real implementer
 and verifier pytest calls, an accurately referenced verifier report, and completed
-Run state. Policy checks read the persisted `ToolCallRecord`, require `blocked`
+Run state. Supervisor Python evidence comes only from the exact Application/task
+checkpoint named by the receipt, with matching task and run IDs; other tasks
+and Worker Python actions cannot satisfy it. Policy checks read the persisted `ToolCallRecord`, require `blocked`
 with the expected reason, and verify the requested file was never written.
 Invalid variants require Studio and preflight diagnostics for the same cause,
 no model network request, no tool ledger, and no allocated Run.
