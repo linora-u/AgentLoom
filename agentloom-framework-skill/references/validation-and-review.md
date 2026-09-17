@@ -136,12 +136,13 @@ ContextEngine/CCR 额外必须验证：
 当前仓库可用的真实 LLM 验证脚本：
 
 ```bash
-PYTHONPATH=/Users/bytedance/code/data_clear/AgentLoom-checkpoint \
-/Users/bytedance/code/data_clear/AgentLoom/.venv/bin/python \
-  tests/agent_test/real_checkpoint_validation.py --scenario all
+.venv/bin/python tests/agent_test/real_checkpoint_validation.py \
+  --scenario all --workspace /absolute/new/checkpoint-evidence
 ```
 
-它会运行 `applications/test_demo/workflows/test_checkpoint_complex_supervisor.yaml`，分别制造 Supervisor 中断和 Worker 中断，并检查最终文件、task event、worker call 复用和 Worker memory restore。
+它会运行 `applications/test_demo/workflows/test_checkpoint_complex_supervisor.yaml`，分别制造 Supervisor 中断、Worker 中断和已完成 Worker 交接处中断，并检查最终文件、task event、worker call 复用和 Worker memory restore。
+
+Supervisor 中断必须等到初始化副作用 ledger 与预期文件均落盘、对应成功且有 observation 的 ActionStep 已提交到 checkpoint，并且 Worker 尚未启动。只有 Todo 步数或文件已出现都不足以证明这个时机；初始化 shell 会清空工作目录，过早注入的恢复探针会被合法删除。停止进程后须再次检查边界，再注入 ContextRef / file-history 探针。历史恢复使用新建的 `--prepare-only` 材料和 `--resume-state`，保留失败尝试，不覆盖或改写已有 checkpoint。
 
 如果真实模型调用因权限、额度或超时失败，不能标为通过；记录失败命令、错误文本、已产生的 checkpoint 证据，以及还缺哪条功能路径。
 
