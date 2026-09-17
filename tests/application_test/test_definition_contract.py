@@ -398,3 +398,68 @@ def test_mcp_connection_failure_is_reported_in_execution_stage(tmp_path, monkeyp
         )
     assert "secret" not in str(captured.value)
     manager.disconnect_all.assert_called_once()
+
+
+def test_execute_app_refreshes_global_config_between_calls_but_pins_running_read(tmp_path, monkeypatch):
+    from types import SimpleNamespace
+
+    import src.lib.config.config as config_module
+    import src.runner as runner
+
+    base = project_config(tmp_path)
+    path = write(tmp_path / "applications/demo/workflows/root.yaml", BASE)
+    monkeypatch.setattr(config_module, "_ACTIVE_CONFIG", base)
+    monkeypatch.setattr(runner, "C", SimpleNamespace(agent_root=tmp_path))
+    seen = []
+
+    class StopAfterPreflight(Exception):
+        pass
+
+    def inspect_allocation(kind):
+        current = config_module.get_config()
+        seen.append(config_module.build_effective_agent_config(load_agent_definition(path))["todo"]["mode"])
+        write(tmp_path / "config/system.yaml", "todo: {mode: on}\ntoolsets: []\n")
+        assert config_module.get_config() is current
+        assert config_module.build_effective_agent_config(load_agent_definition(path))["todo"]["mode"] == seen[-1]
+        raise StopAfterPreflight
+
+    monkeypatch.setattr(runner, "generate_runtime_id", inspect_allocation)
+    for _ in range(2):
+        with pytest.raises(StopAfterPreflight):
+            runner.execute_app(path)
+    assert seen == ["auto", "on"]
+    assert config_module.get_config() is base
+    assert base.raw["todo"]["mode"] == "auto"
+
+
+def test_programmatic_config_override_remains_authoritative(tmp_path):
+    from src.lib.config.config import fresh_invocation_config
+
+    base = project_config(tmp_path)
+    base.raw["todo"]["mode"] = "off"
+    write(tmp_path / "config/system.yaml", "todo: {mode: on}\n")
+    snapshot = fresh_invocation_config(base)
+    assert snapshot.raw["todo"]["mode"] == "off"
+    assert snapshot is not base
+
+
+def test_model_cache_tracks_profile_content_across_invocations(tmp_path):
+    from src.lib.config.config import bind_config, fresh_invocation_config
+    from src.lib.smolagents.models.model_manager import ModelManager
+    from src.lib.smolagents.models.model_types import ModelType
+
+    base = project_config(tmp_path)
+    with bind_config(fresh_invocation_config(base)):
+        manager = ModelManager()
+        first = manager.get_litellm_config(ModelType("test"))
+        write(
+            tmp_path / "config/llm.yaml",
+            "model:\n  default_model_type: test\n  test: {model: openai/changed, api_key: updated-key}\n  summary: {model: openai/test}\n",
+        )
+        still_running = manager.get_litellm_config(ModelType("test"))
+        assert still_running is first
+    with bind_config(fresh_invocation_config(base)):
+        second = manager.get_litellm_config(ModelType("test"))
+    assert first["model"] == "openai/test"
+    assert second["model"] == "openai/changed"
+    assert second["api_key"] == "updated-key"
