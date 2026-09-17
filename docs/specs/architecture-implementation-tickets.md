@@ -34,3 +34,12 @@ ignored files, never commits. Evidence and coordination notes live outside the
 repository at `/Users/bytedance/code/data_clear/agentloom-architecture-notes/`;
 publish only sanitized summaries. Reference checkouts and prior user runtime data
 are not changed or removed. A ticket is complete only with its stated evidence.
+
+## Delivery status
+
+A1–D1 are implemented. E1 verification is complete; results and exact execution
+revisions are recorded in [final validation](architecture-final-validation.md).
+E2 Spec review has no remaining findings. Its one Standards finding, Skill
+discovery of nested workflow definitions, is explicitly deferred by the maintainer
+to [#69](https://github.com/linora-u/AgentLoom/issues/69). It is not silently waived
+or represented as fixed. PR #68 contains the completed implementation and records.
