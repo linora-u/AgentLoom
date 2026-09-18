@@ -167,9 +167,9 @@ def test_review_prompt_is_candidate_only_and_forbids_all_write_tools() -> None:
 
 
 def test_review_model_resolution_disables_provider_retry(monkeypatch) -> None:
-    from agentloom.self_learning import reviewer
     from agentloom.adapters.smolagents.models import model_manager
     from agentloom.adapters.smolagents.models.model_types import ModelConfig
+    from agentloom.self_learning import reviewer
 
     captured = {}
     sentinel = object()
@@ -178,7 +178,12 @@ def test_review_model_resolution_disables_provider_retry(monkeypatch) -> None:
         captured["model_type"] = model_type
         captured["framework"] = framework
         captured["config"] = model_builder.build(
-            ModelConfig(num_retries=9, retry_delay=3.0, max_retry_delay=30.0)
+            ModelConfig(
+                adapter="openai_chat",
+                num_retries=9,
+                retry_delay=3.0,
+                max_retry_delay=30.0,
+            )
         )
         return sentinel
 
