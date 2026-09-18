@@ -1,4 +1,4 @@
-from agentloom.adapters.smolagents.models.litellm_retry import create_retry_wrapper
+from agentloom.adapters.litellm.litellm_retry import create_retry_wrapper
 from agentloom.adapters.smolagents.monkey_patch import install_agentloom_runtime_adapters
 from smolagents.utils import RateLimiter
 

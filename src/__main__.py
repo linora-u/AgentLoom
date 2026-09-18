@@ -175,7 +175,7 @@ def main():
 
 def _has_transient_provider_error(error: BaseException) -> bool:
     """Return true only for a trusted transient LiteLLM exception chain."""
-    from agentloom.adapters.smolagents.models.litellm_retry import (
+    from agentloom.adapters.litellm.litellm_retry import (
         ProviderCallBudgetExceeded,
     )
     from agentloom.runtime.model_protocol import ModelProtocolError
