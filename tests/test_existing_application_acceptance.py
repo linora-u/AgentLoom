@@ -314,6 +314,24 @@ def test_checkpoint_verifier_decodes_only_completed_worker_handoff_envelopes(
         )
 
 
+def test_checkpoint_verifier_normalizes_plain_and_enveloped_worker_handoffs(
+    checkpoint_helper,
+):
+    plain = "worker result\nwith exact content"
+    enveloped = json.dumps(
+        {
+            "ok": True,
+            "status": "completed",
+            "output": plain,
+        },
+        separators=(",", ":"),
+    )
+
+    assert checkpoint_helper._worker_handoff_output(plain) == (
+        checkpoint_helper._worker_handoff_output(enveloped)
+    )
+
+
 @pytest.mark.parametrize(
     ("scenario", "statuses", "resume_claims"),
     [

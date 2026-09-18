@@ -739,7 +739,9 @@ def resume_prepared(state: dict) -> dict:
         before = state["completed_worker"]
         after_worker = _worker_ckpt(task_dir)
         after_output = (SESSION_ROOT / "worker_output_after.txt").read_text()
-        if after_output != before["output"]:
+        if _worker_handoff_output(after_output) != _worker_handoff_output(
+            before["output"]
+        ):
             raise AssertionError("Cached Worker output differs from its real pre-interruption return")
         if (
             len(calls) != before["call_count"]
