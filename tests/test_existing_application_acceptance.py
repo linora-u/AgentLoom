@@ -48,13 +48,19 @@ def test_core_validation_pins_search_root_outside_model_control():
     )
 
 
-def smolagents_checkpoint(steps, *, step_count=3):
+def smolagents_checkpoint(
+    steps,
+    *,
+    step_count=3,
+    adapter_id="openai_chat",
+):
     return {
         "step_count": step_count,
         "runtime_checkpoint": {
             "runtime_id": "smolagents",
             "runtime_version": "test",
             "state_schema_version": 2,
+            "audit_metadata": {"model_adapter_id": adapter_id},
             "payload": {
                 "step_count": step_count,
                 "memory_steps": steps,
@@ -229,6 +235,11 @@ def test_checkpoint_verifier_requires_smolagents_runtime_envelope(checkpoint_hel
     with pytest.raises(AssertionError, match="canonical_model_items"):
         checkpoint_helper._worker_final_output(missing_canonical)
 
+    missing_adapter = smolagents_checkpoint([step])
+    del missing_adapter["runtime_checkpoint"]["audit_metadata"]["model_adapter_id"]
+    with pytest.raises(AssertionError, match="model_adapter_id"):
+        checkpoint_helper._worker_final_output(missing_adapter)
+
     assert checkpoint_helper._worker_final_output(
         smolagents_checkpoint([step])
     ) == "done"
@@ -257,6 +268,7 @@ def test_checkpoint_resume_gate_requires_same_revision_and_runtime_contract(
             "runtime_id": "smolagents",
             "runtime_version": "test",
             "state_schema_version": 2,
+            "model_adapter_id": "openai_chat",
         },
         "task_dir": str(task_dir),
     }

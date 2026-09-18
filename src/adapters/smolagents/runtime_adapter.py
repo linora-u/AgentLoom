@@ -28,6 +28,7 @@ from agentloom.runtime.agent_runtime import (
     require_runtime_state,
 )
 from agentloom.runtime.logging import get_logger
+from agentloom.runtime.model_binding import ModelTurnBinding
 from agentloom.runtime.model_protocol import ModelProtocolError, ModelTurnResult
 from agentloom.runtime.tool_gateway import ToolGateway
 from agentloom.runtime.tool_protocol import ToolCallRecord
@@ -38,6 +39,7 @@ except PackageNotFoundError:  # pragma: no cover - importing this adapter requir
     _SMOLAGENTS_VERSION = "unknown"
 
 logger = get_logger(__name__)
+MODEL_ADAPTER_AUDIT_KEY = "model_adapter_id"
 
 
 def _exception_chain(error: Exception) -> tuple[Exception, ...]:
@@ -139,10 +141,14 @@ class SmolagentsRuntimeAdapter:
         self,
         native_runtime: Any,
         *,
+        model_binding: ModelTurnBinding,
         checkpoint_sink: Any | None = None,
         tool_gateway: ToolGateway | None = None,
     ) -> None:
+        if not isinstance(model_binding, ModelTurnBinding):
+            raise TypeError("model_binding must be a ModelTurnBinding")
         self._native_runtime = native_runtime
+        self._model_binding = model_binding
         self._tool_gateway = tool_gateway
         self._default_checkpoint_sink = checkpoint_sink
         self._checkpoint_sink_context: ContextVar[Any | None] = ContextVar(
@@ -222,6 +228,7 @@ class SmolagentsRuntimeAdapter:
             audit_metadata={
                 "native_step_count": len(memory_steps),
                 "canonical_item_count": len(canonical_items),
+                MODEL_ADAPTER_AUDIT_KEY: self._model_binding.adapter_id,
             },
             payload={
                 "memory_steps": SmolagentsCheckpointCodec.serialize_memory_steps(
@@ -318,6 +325,24 @@ class SmolagentsRuntimeAdapter:
     def restore(self, checkpoint: RuntimeCheckpointEnvelope) -> None:
         """Restore a compatible envelope into the native smolagents runtime."""
 
+        checkpoint_adapter = checkpoint.audit_metadata.get(
+            MODEL_ADAPTER_AUDIT_KEY
+        )
+        if not isinstance(checkpoint_adapter, str) or not checkpoint_adapter:
+            raise AgentRuntimeError(
+                "Checkpoint is missing required model adapter identity",
+                category="configuration",
+                retryable=False,
+            )
+        current_adapter = self._model_binding.adapter_id
+        if checkpoint_adapter != current_adapter:
+            raise AgentRuntimeError(
+                "Checkpoint model adapter "
+                f"{checkpoint_adapter!r} is incompatible with "
+                f"{current_adapter!r}",
+                category="configuration",
+                retryable=False,
+            )
         checkpoint.require_compatible(
             runtime_id=self.runtime_id,
             state_schema_version=self.state_schema_version,

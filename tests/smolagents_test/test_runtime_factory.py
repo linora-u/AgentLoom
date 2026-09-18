@@ -167,6 +167,7 @@ def test_factory_builds_native_runtime_from_complete_definition(
     runtime = SmolagentsRuntimeFactory()(definition)
 
     assert isinstance(runtime, SmolagentsRuntimeAdapter)
+    assert runtime._model_binding is definition.model
     assert captured["tool_gateway"] is definition.tool_gateway
     assert isinstance(captured["model"], SmolagentsModelTurnBridge)
     assert captured["model"].binding is definition.model
@@ -343,7 +344,11 @@ def test_runtime_close_releases_gateway_after_native_close_failure() -> None:
         def close(self) -> None:
             raise RuntimeError("native close failed")
 
-    runtime = SmolagentsRuntimeAdapter(_Native(), tool_gateway=gateway)
+    runtime = SmolagentsRuntimeAdapter(
+        _Native(),
+        model_binding=_definition().model,
+        tool_gateway=gateway,
+    )
 
     with pytest.raises(RuntimeError, match="native close failed"):
         runtime.close()

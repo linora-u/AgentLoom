@@ -262,7 +262,9 @@ def _checkpoint_fixture(
             "task_id": "task-1",
             "run_id": "run-1",
             "progress": 1,
-            "audit_metadata": {},
+            "audit_metadata": {
+                "model_adapter_id": "openai_responses",
+            },
             "payload": {
                 "memory_steps": [
                     {
@@ -305,6 +307,7 @@ def test_checkpoint_evidence_requires_correlated_canonical_calls(
         path,
         task_id="task-1",
         run_id="run-1",
+        adapter_id="openai_responses",
     )
 
     assert result["runtime_version"] == "1.26.0"
@@ -334,6 +337,7 @@ def test_checkpoint_evidence_rejects_incomplete_runtime_contract(
             path,
             task_id="task-1",
             run_id="run-1",
+            adapter_id="openai_responses",
         )
 
 
