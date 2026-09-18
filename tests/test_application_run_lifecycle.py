@@ -11,6 +11,7 @@ from agentloom.application.lifecycle import (
 from agentloom.runtime.agent_runtime import (
     AgentRuntimeResult,
     RuntimeCheckpointEnvelope,
+    RuntimeEvent,
 )
 
 
@@ -54,6 +55,33 @@ def test_lifecycle_defers_agent_checkpoint_until_run_owner_commits() -> None:
         error=None,
     )
     assert lifecycle.goal == {"status": "complete"}
+
+
+def test_lifecycle_collects_events_returned_only_in_runtime_result() -> None:
+    lifecycle = ApplicationRunLifecycle()
+    event = RuntimeEvent(
+        kind="model",
+        timestamp=1.0,
+        application_id="application",
+        task_id="task",
+        run_id="run",
+        details={"phase": "completed"},
+    )
+
+    lifecycle.enter_execution()
+    lifecycle.report_agent_invocation(
+        coordinator=None,
+        runtime_result=AgentRuntimeResult(
+            state="success",
+            output="done",
+            events=(event,),
+        ),
+        result="done",
+        error=None,
+        goal=None,
+    )
+
+    assert lifecycle.runtime_events_snapshot() == (event,)
 
 
 def test_finalization_failure_replaces_provisional_success_checkpoint() -> None:
@@ -144,6 +172,7 @@ def test_finalize_run_owns_evidence_manifest_and_success_cleanup(
         "task-1",
         result="done",
         event_start_offset=10,
+        runtime_events=(),
         manifest_updates=manifest_updates,
     )
     runtime_context.update_manifest.assert_called_once()

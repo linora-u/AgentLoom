@@ -1168,7 +1168,10 @@ def test_max_steps_managed_worker_fails_before_call_discards_state(
         SmolagentsRuntimeAdapter,
     )
     worker = base_agent_module.SubTaskTrackedAgent(
-        SmolagentsRuntimeAdapter(native_runtime),
+        SmolagentsRuntimeAdapter(
+            native_runtime,
+            model_binding=_model_binding(),
+        ),
         "max_steps_managed_worker",
     )
     monkeypatch.setattr(
@@ -2043,6 +2046,13 @@ def test_invocation_collects_ordered_runtime_events_without_sink_duplicates(
     ]
     assert [
         event.details["segment"] for event in reported.events
+    ] == [1, 2]
+    observed_by_lifecycle = [
+        call.args[0]
+        for call in lifecycle.observe_runtime_event.call_args_list
+    ]
+    assert [
+        event.details["segment"] for event in observed_by_lifecycle
     ] == [1, 2]
 
 
