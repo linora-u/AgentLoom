@@ -23,9 +23,8 @@ from pathlib import Path
 from typing import Any
 
 import yaml
-
-from agentloom.runtime.prompts.environment import get_agent_environment_prompt
 from agentloom.application.validation import resolve_execution_prompt_template_path
+from agentloom.runtime.prompts.environment import get_agent_environment_prompt
 from agentloom.runtime.skills.catalog import SkillCatalog
 from agentloom.runtime.skills.parser import build_skills_prompt
 
@@ -172,6 +171,50 @@ def _load_smolagents_builtin() -> dict[str, Any]:
     return yaml.safe_load(content)
 
 
+def load_base_prompt_templates(
+    *,
+    prompt_template_path: str | None,
+    effective_prompt_path: str | None = None,
+    model_id: str | None,
+    agent_root: Path | str,
+    logger: Any,
+) -> dict[str, Any] | None:
+    """Resolve and load native prompt templates without injecting runtime context.
+
+    Explicitly configured paths fail closed. Model-family and local overrides
+    retain the existing resolution order; a failure on the implicit built-in
+    chain returns ``None`` so the concrete runtime may use its native
+    instructions fallback.
+    """
+
+    prompt_path, explicit_configured = resolve_prompt_path(
+        prompt_template_path=prompt_template_path,
+        effective_prompt_path=effective_prompt_path,
+        model_id=model_id,
+        agent_root=agent_root,
+        logger=logger,
+    )
+
+    if explicit_configured and prompt_path is not None and (
+        not prompt_path.exists() or not prompt_path.is_file()
+    ):
+        raise ValueError(
+            f"Configured prompt path does not exist or is not a file: {prompt_path}"
+        )
+
+    try:
+        if prompt_path is not None:
+            return _load_and_validate_yaml(prompt_path)
+        return _load_smolagents_builtin()
+    except Exception as exc:
+        if explicit_configured:
+            raise ValueError(
+                f"Failed to load configured prompt template '{prompt_path}': {exc}"
+            ) from exc
+        logger.warning("Failed to load base prompt templates: %s", exc)
+        return None
+
+
 def build_prompt_templates(
     *,
     prompt_template_path: str | None,
@@ -198,51 +241,30 @@ def build_prompt_templates(
     Raises :class:`ValueError` when an *explicitly configured* prompt path is
     missing or cannot be loaded.
     """
-    prompt_path, explicit_configured = resolve_prompt_path(
+    prompt_templates = load_base_prompt_templates(
         prompt_template_path=prompt_template_path,
         effective_prompt_path=effective_prompt_path,
         model_id=model_id,
         agent_root=agent_root,
         logger=logger,
     )
+    if prompt_templates is None:
+        return None
 
-    if explicit_configured and prompt_path is not None and (
-        not prompt_path.exists() or not prompt_path.is_file()
-    ):
-        raise ValueError(
-            f"Configured prompt path does not exist or is not a file: {prompt_path}"
+    # 1) Environment context (workspace root, exclusions)
+    _append_to_system_prompt(prompt_templates, get_agent_environment_prompt())
+
+    # 2) Advertise the same resolved catalogue used by the skill tool.
+    if skill_tool_enabled:
+        _append_to_system_prompt(
+            prompt_templates,
+            build_skills_prompt(skill_catalog.summaries()),
         )
 
-    try:
-        if prompt_path is not None:
-            # User-provided path or model-family variant
-            prompt_templates = _load_and_validate_yaml(prompt_path)
-        else:
-            # Default: use smolagents' built-in prompt
-            prompt_templates = _load_smolagents_builtin()
+    # 3) Keep the mode policy last so long environment/skill sections do
+    # not bury the current task-tracking contract.
+    todo_policy = todo_policy_for_mode(todo_mode)
+    if todo_policy:
+        _append_to_system_prompt(prompt_templates, todo_policy)
 
-        # 1) Environment context (workspace root, exclusions)
-        _append_to_system_prompt(prompt_templates, get_agent_environment_prompt())
-
-        # 2) Advertise the same resolved catalogue used by the skill tool.
-        if skill_tool_enabled:
-            _append_to_system_prompt(
-                prompt_templates,
-                build_skills_prompt(skill_catalog.summaries()),
-            )
-
-        # 3) Keep the mode policy last so long environment/skill sections do
-        # not bury the current task-tracking contract.
-        todo_policy = todo_policy_for_mode(todo_mode)
-        if todo_policy:
-            _append_to_system_prompt(prompt_templates, todo_policy)
-
-        return prompt_templates
-
-    except Exception as exc:
-        if explicit_configured:
-            raise ValueError(
-                f"Failed to load configured prompt template '{prompt_path}': {exc}"
-            ) from exc
-        logger.warning("Failed to load or patch customized prompt: %s", exc)
-        return None
+    return prompt_templates

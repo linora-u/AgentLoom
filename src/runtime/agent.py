@@ -17,10 +17,11 @@ if TYPE_CHECKING:
 
 from agentloom.application.validation import (
     AgentConfigNormalizer,
-    normalize_positive_int_value,
+    build_normalized_execution_config,
     validate_todo_config,
 )
 from agentloom.configuration import (
+    C,
     build_effective_agent_config_snapshot,
 )
 from agentloom.runtime.agent_runtime import (
@@ -599,19 +600,6 @@ class RoleDrivenAgent(BaseAgent):
         config = effective_cfg if isinstance(effective_cfg, dict) else self._config
         return validate_todo_config(config, source=self.name)
 
-    def _resolve_planning_interval(self) -> int | None:
-        self._ensure_normalized()
-        log = get_logger(self._effective_logger(), __name__)
-        raw_planning_interval = self._config.get("planning_interval")
-        planning_interval = normalize_positive_int_value(raw_planning_interval)
-        if raw_planning_interval is not None and planning_interval is None:
-            log.warning(
-                "Ignored invalid '%s.planning_interval'=%r; expected a positive integer or numeric string.",
-                self.name,
-                raw_planning_interval,
-            )
-        return planning_interval
-
     def _transform_task(self, task: str) -> str:
         """Task transformation hook."""
         return task
@@ -683,6 +671,8 @@ class RoleDrivenAgent(BaseAgent):
     def _build_runtime_instructions(self, gateway: AgentLoomToolGateway) -> str:
         sections = [get_agent_environment_prompt()]
         if any(item.name == "skill" for item in gateway.definitions):
+            if self._skill_catalog is None:
+                raise RuntimeError("Skill Tool requires a resolved Skill catalog")
             sections.append(build_skills_prompt(self._skill_catalog.summaries()))
         sections.append(todo_policy_for_mode(self._resolve_todo_mode()))
         return "\n\n".join(section for section in sections if section.strip())
@@ -690,6 +680,11 @@ class RoleDrivenAgent(BaseAgent):
     def _build_runtime_definition(self) -> RuntimeDefinition:
         runtime_id = AgentConfigNormalizer.validate_agent_runtime_config(
             self._config
+        )
+        execution = build_normalized_execution_config(
+            self._effective_agent_config,
+            source_name=self.name,
+            agent_root=C.agent_root,
         )
         gateway = self._build_tool_gateway()
         return RuntimeDefinition(
@@ -700,14 +695,16 @@ class RoleDrivenAgent(BaseAgent):
             tool_gateway=gateway,
             max_steps=self.max_steps,
             instructions=self._build_runtime_instructions(gateway),
-            planning_interval=self._resolve_planning_interval(),
+            planning_interval=execution.planning_interval,
             smart_summary=self._resolve_smart_summary_from_config(),
             todo_mode=self._resolve_todo_mode(),
             metadata={
                 "max_consecutive_parse_errors": self._config.get(
                     "max_consecutive_parse_errors",
                     5,
-                )
+                ),
+                "smolagents_prompt_template_path": execution.prompt_template_path,
+                "agent_root": str(C.agent_root),
             },
         )
 
