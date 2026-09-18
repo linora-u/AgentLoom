@@ -1,12 +1,23 @@
 import agentloom.runtime.agent as base_agent_module
-import agentloom.runtime.factory as yaml_factory_module
 import pytest
+from agentloom.application.validation import build_normalized_execution_config
 from agentloom.runtime.factory import (
     YamlConfiguredAgent,
     YamlConfiguredSupervisorAgent,
 )
 from agentloom.runtime.hooks import HookPlan, HookRun
 from agentloom.runtime.loom_mixin import LoomAgentMixin
+from agentloom.runtime.model_binding import ModelTurnBinding
+from agentloom.runtime.model_protocol import (
+    MessageItem,
+    ModelTurnRequest,
+    ModelTurnResult,
+)
+from agentloom.runtime.skills.catalog import SkillCatalog
+from agentloom.runtime.tool_gateway import (
+    AgentLoomToolGateway,
+    final_answer_binding,
+)
 from agentloom.runtime.trace.task_context import (
     clear_current_hook_run,
     set_current_hook_run,
@@ -16,13 +27,44 @@ from smolagents.models import ChatMessage, MessageRole
 _UNSET = object()
 
 
+class _ModelAdapter:
+    adapter_id = "openai_chat"
+
+    def turn(self, request: ModelTurnRequest) -> ModelTurnResult:
+        return ModelTurnResult(
+            items=(MessageItem(role="assistant", text=request.model),)
+        )
+
+
+def _model_binding(
+    *,
+    max_tokens: int = 9000,
+    context_window: int = 12000,
+    max_output_tokens: int = 3000,
+) -> ModelTurnBinding:
+    return ModelTurnBinding(
+        model_type="test",
+        model_id="provider/opaque-model",
+        adapter=_ModelAdapter(),
+        max_tokens=max_tokens,
+        context_window=context_window,
+        max_output_tokens=max_output_tokens,
+        input_token_limit=context_window - max_output_tokens,
+    )
+
+
 def _make_worker(config: dict) -> YamlConfiguredAgent:
     worker = object.__new__(YamlConfiguredAgent)
     worker._config = config
     worker._normalized = None
     worker._execution_normalized = None
-    worker._effective_agent_config = None
+    worker._effective_agent_config = dict(config)
     worker._logger = None
+    worker._model_binding = _model_binding()
+    worker._skill_catalog = SkillCatalog.empty()
+    worker._build_tool_gateway = lambda: AgentLoomToolGateway(
+        [final_answer_binding()]
+    )
     return worker
 
 
@@ -31,8 +73,13 @@ def _make_supervisor(config: dict) -> YamlConfiguredSupervisorAgent:
     supervisor._config = config
     supervisor._normalized = None
     supervisor._execution_normalized = None
-    supervisor._effective_agent_config = None
+    supervisor._effective_agent_config = dict(config)
     supervisor._logger = None
+    supervisor._model_binding = _model_binding()
+    supervisor._skill_catalog = SkillCatalog.empty()
+    supervisor._build_tool_gateway = lambda: AgentLoomToolGateway(
+        [final_answer_binding()]
+    )
     return supervisor
 
 
@@ -94,78 +141,109 @@ def _worker_config_with_prompt(prompt, execution_env=None) -> dict:
     return config
 
 
-def _build_execution_kwargs(agent):
-    return agent._build_execution_agent_kwargs(agent._role_profile())
+def _build_definition(agent, monkeypatch, root):
+    monkeypatch.setattr(
+        base_agent_module,
+        "C",
+        type("ConfigProxy", (), {"agent_root": root})(),
+    )
+    monkeypatch.setattr(
+        base_agent_module,
+        "get_agent_environment_prompt",
+        lambda: "",
+    )
+    return agent._build_runtime_definition()
 
 
-@pytest.mark.parametrize("maker,config_builder", [
-    (_make_worker, _worker_config),
-    (_make_supervisor, _supervisor_config),
-])
-def test_removed_execution_env_has_no_runtime_kwargs(maker, config_builder):
-    agent = maker(config_builder(["ignored", {"type": "unknown"}]))
+@pytest.mark.parametrize(
+    "maker,config_builder",
+    [
+        (_make_worker, _worker_config),
+        (_make_supervisor, _supervisor_config),
+    ],
+)
+def test_removed_execution_env_has_no_runtime_definition_effect(
+    maker,
+    config_builder,
+    monkeypatch,
+    tmp_path,
+):
+    config = config_builder(["ignored", {"type": "unknown"}])
+    config["code_agent"] = {"anything": True}
+    agent = maker(config)
 
     agent._validate_config()
-    config = _build_execution_kwargs(agent)
+    definition = _build_definition(agent, monkeypatch, tmp_path)
 
-    assert "executor_type" not in config
-    assert "executor_kwargs" not in config
-
-
-def test_worker_planning_interval_passthrough_from_int():
-    worker = _make_worker(_worker_config(planning_interval=3))
-
-    worker._validate_config()
-    config = _build_execution_kwargs(worker)
-
-    assert config["planning_interval"] == 3
+    assert "execution_env" not in definition.__dataclass_fields__
+    assert "code_agent" not in definition.__dataclass_fields__
+    assert "execution_env" not in definition.metadata
+    assert "code_agent" not in definition.metadata
+    assert "executor_type" not in definition.metadata
+    assert "executor_kwargs" not in definition.metadata
 
 
-def test_supervisor_planning_interval_passthrough_from_numeric_string():
-    supervisor = _make_supervisor(_supervisor_config(planning_interval="2"))
+def test_worker_planning_interval_passthrough_from_int(tmp_path):
+    config = build_normalized_execution_config(
+        _worker_config(planning_interval=3),
+        source_name="worker",
+        agent_root=tmp_path,
+    )
 
-    supervisor._validate_config()
-    config = _build_execution_kwargs(supervisor)
-
-    assert config["planning_interval"] == 2
-
-
-def test_invalid_planning_interval_falls_back_to_none():
-    worker = _make_worker(_worker_config(planning_interval="abc"))
-
-    worker._validate_config()
-    config = _build_execution_kwargs(worker)
-
-    assert config["planning_interval"] is None
+    assert config.planning_interval == 3
 
 
-def test_worker_model_config_builder_ignores_agent_max_tokens_fields():
+def test_supervisor_planning_interval_passthrough_from_numeric_string(tmp_path):
+    config = build_normalized_execution_config(
+        _supervisor_config(planning_interval="2"),
+        source_name="supervisor",
+        agent_root=tmp_path,
+    )
+
+    assert config.planning_interval == 2
+
+
+def test_invalid_planning_interval_falls_back_to_none(tmp_path):
+    config = build_normalized_execution_config(
+        _worker_config(planning_interval="abc"),
+        source_name="worker",
+        agent_root=tmp_path,
+    )
+
+    assert config.planning_interval is None
+
+
+def test_worker_definition_ignores_agent_max_tokens_fields(monkeypatch, tmp_path):
     worker = _make_worker(_worker_config(max_tokens=3100, llm_max_tokens=2200))
+    binding = _model_binding(
+        max_tokens=9000,
+        context_window=12000,
+        max_output_tokens=3000,
+    )
+    worker._model_binding = binding
 
     worker._validate_config()
-    builder = worker._build_model_config_builder()
+    definition = _build_definition(worker, monkeypatch, tmp_path)
 
-    assert builder is None
+    assert definition.model is binding
+    assert definition.model.max_tokens == 9000
+    assert definition.model.context_window == 12000
+    assert definition.model.max_output_tokens == 3000
 
 
-def test_worker_execution_builder_ignores_agent_max_tokens_and_uses_config_value(monkeypatch):
+def test_worker_definition_budget_comes_only_from_model_binding(
+    monkeypatch,
+    tmp_path,
+):
     worker = _make_worker(_worker_config(max_tokens=2200, llm_max_tokens=1800))
-    fake_llm = type(
-        "FakeLlmView",
-        (),
-        {"for_type": staticmethod(lambda _model_type: type("FakeTypeView", (), {"max_tokens": 9000})())},
-    )()
-    fake_config = type(
-        "FakeConfigProxy",
-        (),
-        {"llm": fake_llm, "get": staticmethod(lambda *args, **kwargs: None), "agent_root": "."},
-    )()
-    monkeypatch.setattr(base_agent_module, "C", fake_config)
+    binding = _model_binding(max_tokens=9000)
+    worker._model_binding = binding
 
     worker._validate_config()
-    config = _build_execution_kwargs(worker)
+    definition = _build_definition(worker, monkeypatch, tmp_path)
 
-    assert config["max_tokens"] == 9000
+    assert definition.model is binding
+    assert definition.model.max_tokens == 9000
 
 
 class _DummyHistoryMixin(LoomAgentMixin):
@@ -257,60 +335,50 @@ def test_hooked_memory_injects_pending_agent_context_and_logs_user_messages():
     assert hook_run.consume_pending_user_messages() == []
 
 
-def test_worker_execution_builder_uses_effective_smart_summary_override(monkeypatch):
+def test_worker_definition_uses_effective_smart_summary_override(
+    monkeypatch,
+    tmp_path,
+):
     worker = _make_worker(_worker_config())
     worker._effective_agent_config = {"smart_summary": False}
-    fake_llm = type(
-        "FakeLlmView",
-        (),
-        {"for_type": staticmethod(lambda _model_type: type("FakeTypeView", (), {"max_tokens": 9000})())},
-    )()
-    fake_config = type(
-        "FakeConfigProxy",
-        (),
-        {"llm": fake_llm, "get": staticmethod(lambda *args, **kwargs: None), "agent_root": "."},
-    )()
-    monkeypatch.setattr(base_agent_module, "C", fake_config)
 
     worker._validate_config()
-    config = _build_execution_kwargs(worker)
+    definition = _build_definition(worker, monkeypatch, tmp_path)
 
-    assert config["smart_summary"] is False
+    assert definition.smart_summary is False
 
 
 def test_worker_prompt_path_passthrough_from_mapping(monkeypatch, tmp_path):
     prompt_file = tmp_path / "prompts" / "worker_prompt.yaml"
     prompt_file.parent.mkdir(parents=True, exist_ok=True)
     prompt_file.write_text("system_prompt: worker", encoding="utf-8")
-    monkeypatch.setattr(yaml_factory_module, "C", _config_at(tmp_path))
-    monkeypatch.setattr(base_agent_module, "C", type("ConfigProxy", (), {"agent_root": tmp_path, "get": staticmethod(lambda *args, **kwargs: None), "llm": type("L", (), {"for_type": staticmethod(lambda _model_type: type("V", (), {"max_tokens": 1000})())})()})())
-
     worker = _make_worker(_worker_config_with_prompt({"path": "prompts/worker_prompt.yaml"}))
-    worker._effective_agent_config = worker._config
+    definition = _build_definition(worker, monkeypatch, tmp_path)
 
-    assert worker._resolve_effective_prompt_template_path() == str(prompt_file.resolve())
+    assert definition.metadata["smolagents_prompt_template_path"] == str(
+        prompt_file.resolve()
+    )
 
 
 def test_supervisor_prompt_path_passthrough_from_string(monkeypatch, tmp_path):
     prompt_file = tmp_path / "prompts" / "supervisor_prompt.yaml"
     prompt_file.parent.mkdir(parents=True, exist_ok=True)
     prompt_file.write_text("system_prompt: supervisor", encoding="utf-8")
-    monkeypatch.setattr(yaml_factory_module, "C", _config_at(tmp_path))
-    monkeypatch.setattr(base_agent_module, "C", type("ConfigProxy", (), {"agent_root": tmp_path, "get": staticmethod(lambda *args, **kwargs: None), "llm": type("L", (), {"for_type": staticmethod(lambda _model_type: type("V", (), {"max_tokens": 1000})())})()})())
-
     supervisor = _make_supervisor(_supervisor_config(prompt="prompts/supervisor_prompt.yaml"))
-    supervisor._effective_agent_config = supervisor._config
+    definition = _build_definition(supervisor, monkeypatch, tmp_path)
 
-    assert supervisor._resolve_effective_prompt_template_path() == str(prompt_file.resolve())
+    assert definition.metadata["smolagents_prompt_template_path"] == str(
+        prompt_file.resolve()
+    )
 
 
-def test_build_execution_config_builder_autonormalizes_when_validate_not_called(monkeypatch, tmp_path):
+def test_runtime_definition_autonormalizes_execution_config_without_validate(
+    monkeypatch,
+    tmp_path,
+):
     worker_prompt = tmp_path / "prompts" / "worker_prompt.yaml"
     worker_prompt.parent.mkdir(parents=True, exist_ok=True)
     worker_prompt.write_text("system_prompt: worker", encoding="utf-8")
-    monkeypatch.setattr(yaml_factory_module, "C", _config_at(tmp_path))
-    monkeypatch.setattr(base_agent_module, "C", type("ConfigProxy", (), {"agent_root": tmp_path, "get": staticmethod(lambda *args, **kwargs: None), "llm": type("L", (), {"for_type": staticmethod(lambda _model_type: type("V", (), {"max_tokens": 1000})())})()})())
-
     worker = _make_worker(
         _worker_config_with_prompt(
             "prompts/worker_prompt.yaml",
@@ -318,11 +386,11 @@ def test_build_execution_config_builder_autonormalizes_when_validate_not_called(
         )
     )
     assert worker._normalized is None
-    worker_config = _build_execution_kwargs(worker)
-    assert "executor_type" not in worker_config
-    assert "executor_kwargs" not in worker_config
-    assert worker_config["prompt_template_path"] is None
-    assert worker._normalized is not None
+    worker_definition = _build_definition(worker, monkeypatch, tmp_path)
+    assert worker_definition.metadata["smolagents_prompt_template_path"] == str(
+        worker_prompt.resolve()
+    )
+    assert "execution_env" not in worker_definition.metadata
 
     supervisor_prompt = tmp_path / "prompts" / "supervisor_prompt.yaml"
     supervisor_prompt.write_text("system_prompt: supervisor", encoding="utf-8")
@@ -333,20 +401,8 @@ def test_build_execution_config_builder_autonormalizes_when_validate_not_called(
         )
     )
     assert supervisor._normalized is None
-    supervisor_config = _build_execution_kwargs(supervisor)
-    assert "executor_type" not in supervisor_config
-    assert "executor_kwargs" not in supervisor_config
-    assert supervisor_config["prompt_template_path"] is None
-    assert supervisor._normalized is not None
-
-
-def _config_at(root):
-    from agentloom.configuration import C
-
-    class ProjectConfig:
-        agent_root = root
-
-        def __getattr__(self, name):
-            return getattr(C, name)
-
-    return ProjectConfig()
+    supervisor_definition = _build_definition(supervisor, monkeypatch, tmp_path)
+    assert supervisor_definition.metadata[
+        "smolagents_prompt_template_path"
+    ] == str(supervisor_prompt.resolve())
+    assert "execution_env" not in supervisor_definition.metadata
