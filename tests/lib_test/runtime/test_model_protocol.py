@@ -487,40 +487,38 @@ def test_openai_chat_skips_canonical_reasoning_without_exposing_it() -> None:
     assert "cipher" not in str(messages)
 
 
-def test_openai_responses_skips_anthropic_reasoning_without_exposing_it() -> None:
+def test_openai_responses_rejects_anthropic_reasoning_without_exposing_it() -> None:
     transport = _RecordingTransport(
         {"id": "resp_2", "output": [], "usage": {}}
     )
     adapter = OpenAIResponsesModelTurnAdapter(transport=transport)
 
-    adapter.turn(
-        ModelTurnRequest(
-            model="opaque-model",
-            items=(
-                MessageItem(role="user", text="Continue"),
-                ReasoningItem(
-                    text="private thinking",
-                    replay_payload={
-                        "type": "thinking",
-                        "thinking": "private thinking",
-                        "signature": "anthropic-signature",
-                    },
+    with pytest.raises(
+        ModelProtocolError,
+        match="cannot replay reasoning from another protocol",
+    ):
+        adapter.turn(
+            ModelTurnRequest(
+                model="opaque-model",
+                items=(
+                    MessageItem(role="user", text="Continue"),
+                    ReasoningItem(
+                        text="private thinking",
+                        replay_payload={
+                            "type": "thinking",
+                            "thinking": "private thinking",
+                            "signature": "anthropic-signature",
+                        },
+                    ),
+                    MessageItem(role="assistant", text="Previous answer"),
                 ),
-                MessageItem(role="assistant", text="Previous answer"),
-            ),
+            )
         )
-    )
 
-    input_items = transport.requests[0]["input"]
-    assert input_items == [
-        {"role": "user", "content": "Continue"},
-        {"role": "assistant", "content": "Previous answer"},
-    ]
-    assert "private thinking" not in str(input_items)
-    assert "anthropic-signature" not in str(input_items)
+    assert transport.requests == []
 
 
-def test_anthropic_messages_skips_responses_reasoning_without_exposing_it() -> None:
+def test_anthropic_messages_rejects_responses_reasoning_without_exposing_it() -> None:
     transport = _RecordingTransport(
         {
             "id": "msg_3",
@@ -532,30 +530,28 @@ def test_anthropic_messages_skips_responses_reasoning_without_exposing_it() -> N
     )
     adapter = AnthropicMessagesModelTurnAdapter(transport=transport)
 
-    adapter.turn(
-        ModelTurnRequest(
-            model="opaque-model",
-            items=(
-                MessageItem(role="user", text="Continue"),
-                ReasoningItem(
-                    summary=("private summary",),
-                    replay_payload={
-                        "type": "reasoning",
-                        "encrypted_content": "responses-cipher",
-                    },
+    with pytest.raises(
+        ModelProtocolError,
+        match="cannot replay reasoning from another protocol",
+    ):
+        adapter.turn(
+            ModelTurnRequest(
+                model="opaque-model",
+                items=(
+                    MessageItem(role="user", text="Continue"),
+                    ReasoningItem(
+                        summary=("private summary",),
+                        replay_payload={
+                            "type": "reasoning",
+                            "encrypted_content": "responses-cipher",
+                        },
+                    ),
+                    MessageItem(role="assistant", text="Previous answer"),
                 ),
-                MessageItem(role="assistant", text="Previous answer"),
-            ),
+            )
         )
-    )
 
-    messages = transport.requests[0]["messages"]
-    assert messages == [
-        {"role": "user", "content": "Continue"},
-        {"role": "assistant", "content": "Previous answer"},
-    ]
-    assert "private summary" not in str(messages)
-    assert "responses-cipher" not in str(messages)
+    assert transport.requests == []
 
 
 def test_anthropic_messages_preserves_thinking_signature_and_native_tool_use() -> None:
