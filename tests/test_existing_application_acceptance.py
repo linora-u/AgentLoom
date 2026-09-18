@@ -1,7 +1,6 @@
 """Negative controls for the independent real-Application evidence verifier."""
 import importlib.util
 import json
-import sqlite3
 from pathlib import Path
 
 import pytest
@@ -24,10 +23,11 @@ def smolagents_checkpoint(steps, *, step_count=3):
         "runtime_checkpoint": {
             "runtime_id": "smolagents",
             "runtime_version": "test",
-            "state_schema_version": 1,
+            "state_schema_version": 2,
             "payload": {
                 "step_count": step_count,
                 "memory_steps": steps,
+                "canonical_model_items": [],
             },
         },
     }
@@ -48,14 +48,23 @@ def test_model_claim_is_not_tool_execution_evidence(tmp_path):
 
 
 def test_tool_evidence_accepts_only_durable_successful_tool_results(tmp_path):
-    with sqlite3.connect(tmp_path / "self_learning.db") as connection:
-        connection.execute("CREATE TABLE events (event_id, tool_name, status, input_json, output_json, root_run_id, run_id, event_type)")
-        connection.execute("INSERT INTO events VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
-                           ("evt", "write_file", "completed", "{}", '{"result":"written"}', "root", "local", "tool_result"))
+    write_json(tmp_path / "checkpoint.json", {
+        "tool_results": [{
+            "call_id": "evt",
+            "tool_name": "write_file",
+            "status": "completed",
+            "input": {},
+            "output": {"result": "written"},
+        }],
+    })
     evidence = validation.assert_tools(tmp_path, {"write_file"})
-    assert evidence[0]["root_run_id"] == "root"
-    assert evidence[0]["run_id"] == "local"
-    assert evidence[0]["evidence_source"] == "session_recorder"
+    assert evidence == [{
+        "call_id": "evt",
+        "tool_name": "write_file",
+        "status": "completed",
+        "input": {},
+        "output": {"result": "written"},
+    }]
 
 
 def test_worker_manifest_copy_does_not_double_count_calls(tmp_path):
@@ -179,6 +188,16 @@ def test_checkpoint_verifier_requires_smolagents_runtime_envelope(checkpoint_hel
     with pytest.raises(AssertionError, match="runtime is not smolagents"):
         checkpoint_helper._worker_final_output(wrong_runtime)
 
+    schema_one = smolagents_checkpoint([step])
+    schema_one["runtime_checkpoint"]["state_schema_version"] = 1
+    with pytest.raises(AssertionError, match="state schema"):
+        checkpoint_helper._worker_final_output(schema_one)
+
+    missing_canonical = smolagents_checkpoint([step])
+    del missing_canonical["runtime_checkpoint"]["payload"]["canonical_model_items"]
+    with pytest.raises(AssertionError, match="canonical_model_items"):
+        checkpoint_helper._worker_final_output(missing_canonical)
+
     assert checkpoint_helper._worker_final_output(
         smolagents_checkpoint([step])
     ) == "done"
@@ -188,6 +207,48 @@ def test_checkpoint_verifier_requires_smolagents_runtime_envelope(checkpoint_hel
         checkpoint_helper._worker_final_output(
             smolagents_checkpoint([step])
         )
+
+
+def test_checkpoint_resume_gate_requires_same_revision_and_runtime_contract(
+    tmp_path,
+    checkpoint_helper,
+    monkeypatch,
+):
+    helper = checkpoint_helper
+    task_dir = tmp_path / "task"
+    write_json(
+        task_dir / "checkpoint.json",
+        smolagents_checkpoint([]),
+    )
+    state = {
+        "source_revision": "same-revision",
+        "runtime_contract": {
+            "runtime_id": "smolagents",
+            "runtime_version": "test",
+            "state_schema_version": 2,
+        },
+        "task_dir": str(task_dir),
+    }
+    monkeypatch.setattr(helper, "_source_revision", lambda: "same-revision")
+    monkeypatch.setattr(
+        helper,
+        "_current_runtime_contract",
+        lambda: dict(state["runtime_contract"]),
+    )
+
+    helper._require_same_runtime_contract(state)
+
+    state["source_revision"] = "different-revision"
+    with pytest.raises(ValueError, match="same source revision"):
+        helper._require_same_runtime_contract(state)
+
+    state["source_revision"] = "same-revision"
+    state["runtime_contract"] = {
+        **state["runtime_contract"],
+        "runtime_version": "different-version",
+    }
+    with pytest.raises(ValueError, match="runtime contract"):
+        helper._require_same_runtime_contract(state)
 
 
 def test_checkpoint_verifier_decodes_only_completed_worker_handoff_envelopes(
