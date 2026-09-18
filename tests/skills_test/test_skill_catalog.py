@@ -81,7 +81,11 @@ def test_prompt_exposes_catalogue_only_when_skill_tool_is_available(monkeypatch,
 
     import agentloom.runtime.prompts.prompt_builder as prompt_builder_module
 
-    monkeypatch.setattr(prompt_builder_module, "DEFAULT_CODE_AGENT_PROMPT_PATH", prompt_path)
+    monkeypatch.setattr(
+        prompt_builder_module,
+        "DEFAULT_TOOLCALLING_AGENT_PROMPT_PATH",
+        prompt_path,
+    )
     monkeypatch.setattr(prompt_builder_module, "get_agent_environment_prompt", lambda: "")
 
     hidden = build_prompt_templates(

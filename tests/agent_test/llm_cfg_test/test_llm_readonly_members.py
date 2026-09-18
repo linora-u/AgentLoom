@@ -21,6 +21,7 @@ def test_llm_readonly_members_basic(monkeypatch):
             "default_model_type": "powerful",
             "powerful": {
                 "model": "openai/powerful",
+                "adapter": "openai_chat",
                 "base_url": "https://powerful.example/v1",
                 "api_key": "powerful-key",
                 "requests_per_minute": 12,
@@ -32,9 +33,11 @@ def test_llm_readonly_members_basic(monkeypatch):
             },
             "fast": {
                 "model": "openai/fast",
+                "adapter": "openai_chat",
             },
             "summary": {
                 "model": "openai/test-summary",
+                "adapter": "openai_chat",
             },
         }
     }
@@ -63,9 +66,10 @@ def test_llm_unknown_type_raises(monkeypatch):
             "default_model_type": "fast",
             "fast": {
                 "model": "openai/fast",
+                "adapter": "openai_chat",
                 "temperature": 0.6,
             },
-            "summary": {"model": "openai/test-summary"},
+            "summary": {"model": "openai/test-summary", "adapter": "openai_chat"},
         }
     }
     _patch_active_config(monkeypatch, raw)
@@ -85,8 +89,9 @@ def test_llm_no_default_model_type_raises_for_implicit_request(monkeypatch):
         "model": {
             "powerful": {
                 "model": "openai/powerful",
+                "adapter": "openai_chat",
             },
-            "summary": {"model": "openai/test-summary"},
+            "summary": {"model": "openai/test-summary", "adapter": "openai_chat"},
         }
     }
     _patch_active_config(monkeypatch, raw)
@@ -117,9 +122,10 @@ def test_llm_does_not_require_common(monkeypatch):
             "default_model_type": "powerful",
             "powerful": {
                 "model": "openai/powerful",
+                "adapter": "openai_chat",
                 "api_key": "powerful-key",
             },
-            "summary": {"model": "openai/test-summary"},
+            "summary": {"model": "openai/test-summary", "adapter": "openai_chat"},
         }
     }
     _patch_active_config(monkeypatch, raw)
@@ -138,12 +144,13 @@ def test_llm_common_block_is_ignored(monkeypatch):
             },
             "powerful": {
                 "model": "openai/powerful",
+                "adapter": "openai_chat",
                 "base_url": "https://powerful.example/v1",
                 "api_key": "powerful-key",
                 "requests_per_minute": 12,
                 "temperature": 0.4,
             },
-            "summary": {"model": "openai/test-summary"},
+            "summary": {"model": "openai/test-summary", "adapter": "openai_chat"},
         }
     }
     _patch_active_config(monkeypatch, raw)
@@ -165,8 +172,8 @@ def test_llm_legacy_export_does_not_invent_common(monkeypatch):
     raw = {
         "model": {
             "default_model_type": "powerful",
-            "powerful": {"model": "openai/powerful"},
-            "summary": {"model": "openai/test-summary"},
+            "powerful": {"model": "openai/powerful", "adapter": "openai_chat"},
+            "summary": {"model": "openai/test-summary", "adapter": "openai_chat"},
         }
     }
     cfg = config_module.LLMConfig.from_dict(raw)
@@ -183,8 +190,9 @@ def test_llm_views_are_readonly(monkeypatch):
             "default_model_type": "powerful",
             "powerful": {
                 "model": "openai/powerful",
+                "adapter": "openai_chat",
             },
-            "summary": {"model": "openai/test-summary"},
+            "summary": {"model": "openai/test-summary", "adapter": "openai_chat"},
         }
     }
     _patch_active_config(monkeypatch, raw)
@@ -199,8 +207,9 @@ def test_llm_max_tokens_default_is_150000(monkeypatch):
             "default_model_type": "powerful",
             "powerful": {
                 "model": "openai/powerful",
+                "adapter": "openai_chat",
             },
-            "summary": {"model": "openai/test-summary"},
+            "summary": {"model": "openai/test-summary", "adapter": "openai_chat"},
         }
     }
     _patch_active_config(monkeypatch, raw)
@@ -215,8 +224,8 @@ def test_legacy_max_tokens_populates_both_budgets(monkeypatch):
     raw = {
         "model": {
             "default_model_type": "powerful",
-            "powerful": {"model": "openai/powerful", "max_tokens": 8192},
-            "summary": {"model": "openai/test-summary"},
+            "powerful": {"model": "openai/powerful", "adapter": "openai_chat", "max_tokens": 8192},
+            "summary": {"model": "openai/test-summary", "adapter": "openai_chat"},
         }
     }
     _patch_active_config(monkeypatch, raw)
@@ -231,8 +240,8 @@ def test_legacy_max_tokens_max_uses_finite_default(monkeypatch):
     raw = {
         "model": {
             "default_model_type": "powerful",
-            "powerful": {"model": "openai/powerful", "max_tokens": "max"},
-            "summary": {"model": "openai/test-summary"},
+            "powerful": {"model": "openai/powerful", "adapter": "openai_chat", "max_tokens": "max"},
+            "summary": {"model": "openai/test-summary", "adapter": "openai_chat"},
         }
     }
     _patch_active_config(monkeypatch, raw)
@@ -251,10 +260,11 @@ def test_invalid_token_budget_is_rejected(monkeypatch):
             "default_model_type": "powerful",
             "powerful": {
                 "model": "openai/powerful",
+                "adapter": "openai_chat",
                 "context_window": 4096,
                 "max_output_tokens": 8192,
             },
-            "summary": {"model": "openai/test-summary"},
+            "summary": {"model": "openai/test-summary", "adapter": "openai_chat"},
         }
     }
 

@@ -65,8 +65,8 @@ def test_layering_precedence_with_application_override(tmp_path):
         llm_data={
             "model": {
                 "default_model_type": "powerful",
-                "powerful": {"model": "openai/llm-powerful", "base_url": "https://llm.example/v1", "api_key": "llm-key", "requests_per_minute": 9, "timeout": 60},
-                "summary": {"model": "openai/test-summary"},
+                "powerful": {"model": "openai/llm-powerful", "adapter": "openai_chat", "base_url": "https://llm.example/v1", "api_key": "llm-key", "requests_per_minute": 9, "timeout": 60},
+                "summary": {"model": "openai/test-summary", "adapter": "openai_chat"},
             }
         },
         app_data={
@@ -96,8 +96,8 @@ def test_non_application_path_does_not_load_app_override(tmp_path):
     _write_yaml(config_dir / "llm.yaml", {
         "model": {
             "default_model_type": "powerful",
-            "powerful": {"model": "openai/llm-powerful", "base_url": "https://llm.example/v1"},
-            "summary": {"model": "openai/test-summary"},
+            "powerful": {"model": "openai/llm-powerful", "adapter": "openai_chat", "base_url": "https://llm.example/v1"},
+            "summary": {"model": "openai/test-summary", "adapter": "openai_chat"},
         }
     })
     app_root = agent_root / "applications" / "ai_quality_analysis"
@@ -124,7 +124,7 @@ def test_max_tokens_uses_llm_yaml_only_and_ignores_system_layers(tmp_path):
             "model": {"default_model_type": "powerful", "powerful": {"model": "openai/system-powerful", "max_tokens": 22222}, "summary": {"model": "openai/test-summary"}},
         },
         llm_data={
-            "model": {"default_model_type": "powerful", "powerful": {"model": "openai/llm-powerful", "max_tokens": 44444}, "summary": {"model": "openai/test-summary"}},
+            "model": {"default_model_type": "powerful", "powerful": {"model": "openai/llm-powerful", "adapter": "openai_chat", "max_tokens": 44444}, "summary": {"model": "openai/test-summary", "adapter": "openai_chat"}},
         },
         app_data={
             "model": {"powerful": {"max_tokens": 66666}, "summary": {"model": "openai/test-summary"}},
@@ -142,7 +142,7 @@ def test_max_tokens_falls_back_to_builtin_when_llm_yaml_omits_it(tmp_path):
             "model": {"default_model_type": "powerful", "powerful": {"model": "openai/system-powerful", "max_tokens": 33333}, "summary": {"model": "openai/test-summary"}},
         },
         llm_data={
-            "model": {"default_model_type": "powerful", "powerful": {"model": "openai/llm-powerful"}, "summary": {"model": "openai/test-summary"}},
+            "model": {"default_model_type": "powerful", "powerful": {"model": "openai/llm-powerful", "adapter": "openai_chat"}, "summary": {"model": "openai/test-summary", "adapter": "openai_chat"}},
         },
         app_data={
             "model": {"powerful": {"max_tokens": 55555}, "summary": {"model": "openai/test-summary"}},
