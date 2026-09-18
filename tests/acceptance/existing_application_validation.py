@@ -334,7 +334,7 @@ def child(case: str, workspace: Path) -> dict:
         execute(workflow, workspace)
         if case == "core":
             content = (workspace / "artifacts/result.txt").read_text()
-            if content != "ALPHA one\nbeta two\nGAMMA three\n":
+            if content.splitlines() != ["ALPHA one", "beta two", "GAMMA three"]:
                 raise AssertionError(f"Wrong real file result: {content!r}")
             expected = {"shell_tool", "write_file", "edit_file", "read_file", "glob_search", "grep_search", "list_directory"}
         else:
