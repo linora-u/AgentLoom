@@ -210,6 +210,57 @@ def test_checkpoint_verifier_decodes_only_completed_worker_handoff_envelopes(
         )
 
 
+@pytest.mark.parametrize(
+    ("scenario", "statuses", "resume_claims"),
+    [
+        ("main", ["completed"], 0),
+        ("completed", ["completed"], 0),
+        ("worker", ["interrupted", "completed"], 1),
+    ],
+)
+def test_checkpoint_verifier_uses_scenario_specific_worker_resume_events(
+    tmp_path,
+    checkpoint_helper,
+    scenario,
+    statuses,
+    resume_claims,
+):
+    events = tmp_path / "task_events.jsonl"
+    records = [
+        {"type": "worker_call_started"},
+        *[
+            {"type": "worker_call_finished", "status": status}
+            for status in statuses
+        ],
+        *[
+            {"type": "worker_call_resume_claimed"}
+            for _ in range(resume_claims)
+        ],
+    ]
+    events.write_text(
+        "".join(json.dumps(record) + "\n" for record in records)
+    )
+    counts = {
+        "worker_call_started": 1,
+        "worker_call_finished": len(statuses),
+        "worker_call_resume_claimed": resume_claims,
+    }
+
+    checkpoint_helper._assert_worker_resume_events(
+        tmp_path,
+        counts,
+        scenario=scenario,
+    )
+
+    counts["worker_call_finished"] += 1
+    with pytest.raises(AssertionError, match="duplicated or left unfinished"):
+        checkpoint_helper._assert_worker_resume_events(
+            tmp_path,
+            counts,
+            scenario=scenario,
+        )
+
+
 @pytest.fixture
 def main_checkpoint_gate(tmp_path, monkeypatch):
     from types import SimpleNamespace

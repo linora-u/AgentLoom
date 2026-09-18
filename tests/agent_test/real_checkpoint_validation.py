@@ -417,13 +417,14 @@ def _assert_completed_resume(
     task_dir: Path,
     resume_text: str,
     counts: dict[str, int],
+    *,
+    scenario: str,
 ) -> tuple[dict, list[dict]]:
     if "CHECKPOINT COMPLEX COMPLETE" not in resume_text:
         raise AssertionError("resume result did not contain the required final answer")
     if counts.get("run_started") != 1 or counts.get("run_resumed") != 1:
         raise AssertionError(f"resume attempt events are not one-to-one: {counts}")
-    if counts.get("worker_call_started") != 1 or counts.get("worker_call_finished") != 1:
-        raise AssertionError(f"worker call was duplicated or left unfinished: {counts}")
+    _assert_worker_resume_events(task_dir, counts, scenario=scenario)
     tree = json.loads((task_dir / "task_tree.json").read_text(encoding="utf-8"))
     if tree.get("status") != "completed":
         raise AssertionError(f"task tree did not complete: {tree.get('status')}")
@@ -432,6 +433,34 @@ def _assert_completed_resume(
         raise AssertionError(f"expected exactly one completed worker call: {calls}")
     _assert_side_effects_executed_once()
     return tree, calls
+
+
+def _assert_worker_resume_events(
+    task_dir: Path,
+    counts: dict[str, int],
+    *,
+    scenario: str,
+) -> None:
+    worker_finished = [
+        event
+        for event in _events(task_dir)
+        if event.get("type") == "worker_call_finished"
+    ]
+    expected_statuses = (
+        ["interrupted", "completed"]
+        if scenario == "worker"
+        else ["completed"]
+    )
+    expected_resume_claims = 1 if scenario == "worker" else 0
+    if (
+        counts.get("worker_call_started") != 1
+        or counts.get("worker_call_finished") != len(expected_statuses)
+        or [event.get("status") for event in worker_finished]
+        != expected_statuses
+        or counts.get("worker_call_resume_claimed", 0)
+        != expected_resume_claims
+    ):
+        raise AssertionError(f"worker call was duplicated or left unfinished: {counts}")
 
 
 def _start_run(log_path: Path) -> subprocess.Popen:
@@ -621,7 +650,12 @@ def resume_prepared(state: dict) -> dict:
         raise AssertionError(f"resume must preserve task and create new run: {old_ids} -> {new_ids}")
     _verify_resume_probes(task_dir, state["context_ref"], Path(state["probe_path"]))
     _assert_final_files()
-    tree, calls = _assert_completed_resume(task_dir, resume_text, after)
+    tree, calls = _assert_completed_resume(
+        task_dir,
+        resume_text,
+        after,
+        scenario=state["scenario"],
+    )
     if state["scenario"] == "worker":
         if _worker_ckpt(task_dir).get("step_count", 0) <= state["before_worker_step"]:
             raise AssertionError("worker did not advance saved memory")
