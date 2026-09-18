@@ -1,16 +1,15 @@
 from __future__ import annotations
 
-from smolagents.models import ChatMessage, MessageRole
-
-import agentloom.runtime.memory.context_compression as compression_module
-from agentloom.runtime.context_engine import ContextEngine, ContextEngineConfig
-from agentloom.runtime.context_engine.config import ContextSafetyConfig
-from agentloom.runtime.context_engine.runtime import clear_current_context_engine, set_current_context_engine
-from agentloom.runtime.memory.context_compression import (
+import agentloom.adapters.smolagents.context_compression as compression_module
+from agentloom.adapters.smolagents.context_compression import (
     ConversationHistoryManager,
     InternalChatMessage,
     _extract_content_text,
 )
+from agentloom.runtime.context_engine import ContextEngine, ContextEngineConfig
+from agentloom.runtime.context_engine.config import ContextSafetyConfig
+from agentloom.runtime.context_engine.runtime import clear_current_context_engine, set_current_context_engine
+from smolagents.models import ChatMessage, MessageRole
 
 
 def _msg(role, text):

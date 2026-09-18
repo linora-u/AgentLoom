@@ -19,8 +19,8 @@ workflow: |
   checks = []
   error_recovery = Path("src/runtime/error_recovery.py").read_text()
   bridge = Path("src/adapters/smolagents/model_turn_bridge.py").read_text()
-  loom_mixin = Path("src/runtime/loom_mixin.py").read_text()
-  compression = Path("src/runtime/memory/context_compression.py").read_text()
+  loom_mixin = Path("src/adapters/smolagents/loom_mixin.py").read_text()
+  compression = Path("src/adapters/smolagents/context_compression.py").read_text()
 
   categories = ["NATIVE_TOOL_CALL_REQUIRED", "UNKNOWN_TOOL", "ARGUMENT_ERROR"]
   checks.append(("native_error_categories", all(item in error_recovery for item in categories)))

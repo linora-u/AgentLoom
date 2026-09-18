@@ -27,7 +27,7 @@ from smolagents.memory import ToolCall
 # mixin is loaded, rather than installing patches during definition inspection.
 install_agentloom_runtime_adapters()
 
-from agentloom.runtime.loom_mixin import LoomAgentMixin  # noqa: E402
+from agentloom.adapters.smolagents.loom_mixin import LoomAgentMixin  # noqa: E402
 
 
 def _decode_provider_tool_arguments(arguments: Any) -> dict[str, Any]:

@@ -1,11 +1,11 @@
 import agentloom.runtime.agent as base_agent_module
+from agentloom.adapters.smolagents.loom_mixin import LoomAgentMixin
 from agentloom.application.validation import build_normalized_execution_config
 from agentloom.runtime.factory import (
     YamlConfiguredAgent,
     YamlConfiguredSupervisorAgent,
 )
 from agentloom.runtime.hooks import HookPlan, HookRun
-from agentloom.runtime.loom_mixin import LoomAgentMixin
 from agentloom.runtime.model_binding import ModelTurnBinding
 from agentloom.runtime.model_protocol import (
     MessageItem,
