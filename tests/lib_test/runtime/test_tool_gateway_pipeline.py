@@ -108,7 +108,12 @@ def test_gateway_preserves_stable_id_for_success_and_error() -> None:
 
 
 def test_gateway_hook_can_transform_or_block_before_side_effect() -> None:
-    effects = []
+    effects: list[str] = []
+
+    def record_effect(text: str) -> str:
+        effects.append(text)
+        return text
+
     run = HookRun(
         HookPlan(
             (
@@ -132,8 +137,8 @@ def test_gateway_hook_can_transform_or_block_before_side_effect() -> None:
     )
     gateway = AgentLoomToolGateway(
         [
-            _binding("echo", lambda text: effects.append(text) or text),
-            _binding("denied", lambda text: effects.append(text) or text),
+            _binding("echo", record_effect),
+            _binding("denied", record_effect),
         ]
     )
 
@@ -211,10 +216,56 @@ def test_plain_callable_binding_resolves_postponed_annotations() -> None:
     binding = bind_tool(read_file)
 
     properties = binding.definition.parameters["properties"]
+    assert binding.definition.description.startswith(
+        "Reads a file from the local filesystem."
+    )
+    assert "Args:" not in binding.definition.description
+    assert "Returns:" not in binding.definition.description
+    assert "Raises:" not in binding.definition.description
+    assert "Examples:" not in binding.definition.description
     assert properties["file_path"]["type"] == "string"
+    assert properties["file_path"]["description"] == (
+        "Absolute path to the file to read."
+    )
     assert properties["offset"]["type"] == "integer"
+    assert properties["offset"]["description"] == (
+        "Line number to start reading from (1-based, default 1)."
+    )
     assert properties["limit"]["type"] == "integer"
+    assert properties["limit"]["description"] == (
+        "Maximum number of lines to read. 0 means the default (2000 lines)."
+    )
     assert binding.definition.parameters["required"] == ["file_path"]
     assert binding.inputs_schema["file_path"]["required"] is True
     assert binding.inputs_schema["offset"]["required"] is False
     assert binding.inputs_schema["limit"]["required"] is False
+
+
+def test_tool_like_explicit_description_and_inputs_remain_authoritative() -> None:
+    class ExplicitTool:
+        name = "explicit"
+        description = "Explicit Tool description with Args: kept verbatim."
+        inputs = {
+            "value": {
+                "type": "string",
+                "description": "Explicit input description.",
+                "nullable": False,
+            }
+        }
+
+        def forward(self, value: str) -> str:
+            """A callable docstring that must not replace Tool metadata.
+
+            Args:
+                value: A docstring-derived description that must not win.
+            """
+            return value
+
+    binding = bind_tool(ExplicitTool())
+
+    assert binding.definition.description == (
+        "Explicit Tool description with Args: kept verbatim."
+    )
+    assert binding.definition.parameters["properties"]["value"][
+        "description"
+    ] == "Explicit input description."

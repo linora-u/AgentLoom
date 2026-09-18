@@ -5,6 +5,7 @@ from __future__ import annotations
 import inspect
 import math
 import os
+import re
 import time
 import types
 from collections.abc import Callable, Iterable, Mapping
@@ -180,8 +181,82 @@ def _annotation_schema(annotation: Any) -> dict[str, Any]:
     return {"type": "any"}
 
 
+_GOOGLE_DOCSTRING_SECTIONS = frozenset(
+    {"Args:", "Returns:", "Raises:", "Examples:"}
+)
+_GOOGLE_DOCSTRING_ARG = re.compile(
+    r"^(?P<name>[A-Za-z_]\w*)(?:\s*\([^)]*\))?\s*:\s*(?P<description>.*)$"
+)
+
+
+def _parse_google_docstring(
+    forward: ToolForward,
+) -> tuple[str, dict[str, str]]:
+    """Return the callable summary and Google-style argument descriptions."""
+
+    docstring = inspect.getdoc(forward) or ""
+    lines = docstring.splitlines()
+    first_section = next(
+        (
+            index
+            for index, line in enumerate(lines)
+            if line.strip() in _GOOGLE_DOCSTRING_SECTIONS
+        ),
+        len(lines),
+    )
+    description = "\n".join(lines[:first_section]).strip()
+
+    try:
+        args_start = next(
+            index for index, line in enumerate(lines) if line.strip() == "Args:"
+        )
+    except StopIteration:
+        return description, {}
+
+    args_indent = len(lines[args_start]) - len(lines[args_start].lstrip())
+    descriptions: dict[str, list[str]] = {}
+    current_name: str | None = None
+    parameter_indent: int | None = None
+    for line in lines[args_start + 1 :]:
+        stripped = line.strip()
+        if stripped in _GOOGLE_DOCSTRING_SECTIONS:
+            break
+        if not stripped:
+            continue
+
+        indent = len(line) - len(line.lstrip())
+        if indent <= args_indent:
+            current_name = None
+            continue
+
+        match = _GOOGLE_DOCSTRING_ARG.match(stripped)
+        if match and (
+            parameter_indent is None or indent == parameter_indent
+        ):
+            parameter_indent = indent
+            current_name = match.group("name")
+            descriptions[current_name] = [match.group("description").strip()]
+            continue
+        if current_name is not None and (
+            parameter_indent is None or indent > parameter_indent
+        ):
+            descriptions[current_name].append(stripped)
+
+    return (
+        description,
+        {
+            name: " ".join(
+                " ".join(part for part in parts if part).split()
+            )
+            for name, parts in descriptions.items()
+        },
+    )
+
+
 def _callable_schema(
     forward: ToolForward,
+    *,
+    parameter_descriptions: Mapping[str, str] | None = None,
 ) -> tuple[dict[str, Any], tuple[str, ...]]:
     signature = _get_effective_signature(forward)
     try:
@@ -199,7 +274,10 @@ def _callable_schema(
         schema = _annotation_schema(
             resolved_hints.get(name, parameter.annotation)
         )
-        schema.setdefault("description", "")
+        schema.setdefault(
+            "description",
+            (parameter_descriptions or {}).get(name, ""),
+        )
         if parameter.default is inspect.Parameter.empty:
             required.append(name)
             schema["required"] = True
@@ -242,7 +320,9 @@ def bind_tool(
     if isinstance(tool, ToolBinding):
         return tool
 
-    forward = getattr(tool, "forward", None)
+    declared_forward = getattr(tool, "forward", None)
+    plain_callable = not callable(declared_forward) and callable(tool)
+    forward = declared_forward
     if not callable(forward):
         forward = tool if callable(tool) else None
     if not callable(forward):
@@ -271,11 +351,18 @@ def bind_tool(
         name = getattr(tool, "name", None) or getattr(forward, "__name__", None)
         if not isinstance(name, str) or not name:
             raise ValueError("Tool binding requires a non-empty name")
-        description = (
-            getattr(tool, "description", None)
-            or inspect.getdoc(forward)
-            or ""
-        )
+        parameter_descriptions: Mapping[str, str] = {}
+        if plain_callable:
+            callable_description, parameter_descriptions = (
+                _parse_google_docstring(forward)
+            )
+            description = callable_description
+        else:
+            description = (
+                getattr(tool, "description", None)
+                or inspect.getdoc(forward)
+                or ""
+            )
         raw_inputs = getattr(tool, "inputs", None)
         if isinstance(raw_inputs, Mapping):
             required_names = tuple(
@@ -289,7 +376,10 @@ def bind_tool(
                 required=required_names,
             )
         else:
-            inputs_schema, required_names = _callable_schema(forward)
+            inputs_schema, required_names = _callable_schema(
+                forward,
+                parameter_descriptions=parameter_descriptions,
+            )
         parameters = {
             "type": "object",
             "properties": {
