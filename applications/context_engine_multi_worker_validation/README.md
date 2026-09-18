@@ -9,7 +9,7 @@ Output: `MULTI_CONTEXT_RETRIEVE_PASS log_value=LOG-CTX-8842 search_value=SEARCH-
 Supervisor/Worker/Tool split:
 
 - Supervisor calls `log_payload_worker` and `search_payload_worker`, then retrieves each original payload by ref.
-- Workers call deterministic payload tools and return exact large outputs.
+- Workers call deterministic payload tools and return independent `ContextRef` values.
 - Tools generate log-like and grep-like payloads with hidden validation records.
 
 Run:

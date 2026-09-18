@@ -7,23 +7,20 @@ max_steps: 4
 workflow: |
   # Search Payload Worker
 
-  Produce the payload by executing this logic in one code block:
-
-  ```
-  payload = make_context_engine_search_payload(case_id="search")
-  final_answer(payload)
-  ```
-
-  Return the payload exactly. Do not summarize it.
+  1. Call `make_context_engine_search_payload` exactly once through its native
+     structured tool call with `case_id: "search"`.
+  2. The large tool result is replaced with a `[ContextRef ctx_...]` preview.
+     Extract the `ctx_...` reference without retrieving the original payload.
+  3. Call `final_answer` exactly once with only that ContextRef.
 
 agent_function_schema:
-  description: "Return the large search validation payload exactly."
+  description: "Create the large search validation payload and return its ContextRef."
   inputs:
     user_request:
       description: "Validation request from the supervisor."
       required: true
   output:
-    description: "The complete large search payload."
+    description: "The ContextRef for the complete large search payload."
 
 tools:
   - name: "make_context_engine_search_payload"
