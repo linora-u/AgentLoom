@@ -56,12 +56,6 @@ class SmolagentsRuntimeAdapter:
             subagents=True,
         )
 
-    @property
-    def native_runtime(self) -> Any:
-        """Return the native runtime for adapter-owned compatibility bridges."""
-
-        return self._native_runtime
-
     def _checkpoint(self, steps: list[Any] | None = None) -> RuntimeCheckpointEnvelope:
         if steps is None:
             memory = getattr(self._native_runtime, "memory", None)

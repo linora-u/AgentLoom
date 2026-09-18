@@ -6,6 +6,7 @@ from collections.abc import Callable, Mapping
 from typing import Any
 
 from agentloom.runtime.model_protocol import (
+    MODEL_ADAPTERS,
     AdapterKind,
     FunctionCallItem,
     FunctionCallOutputItem,
@@ -778,6 +779,14 @@ class AnthropicMessagesModelTurnAdapter:
         )
 
 
+_ADAPTER_TYPES: dict[AdapterKind, type[ModelTurnAdapter]] = {
+    "openai_chat": OpenAIChatModelTurnAdapter,
+    "openai_responses": OpenAIResponsesModelTurnAdapter,
+    "anthropic_messages": AnthropicMessagesModelTurnAdapter,
+}
+assert set(_ADAPTER_TYPES) == set(MODEL_ADAPTERS)
+
+
 def create_model_turn_adapter(
     adapter_id: str,
     *,
@@ -787,25 +796,14 @@ def create_model_turn_adapter(
 ) -> ModelTurnAdapter:
     """Create one explicitly selected model protocol adapter."""
 
-    if adapter_id == "openai_chat":
-        return OpenAIChatModelTurnAdapter(
-            transport=transport,
-            context_cache=context_cache,
-            system_prompt_boundary=system_prompt_boundary,
+    adapter_type = _ADAPTER_TYPES.get(adapter_id)
+    if adapter_type is None:
+        raise ValueError(
+            f"unknown model adapter {adapter_id!r}; "
+            f"expected {', '.join(MODEL_ADAPTERS)}"
         )
-    if adapter_id == "openai_responses":
-        return OpenAIResponsesModelTurnAdapter(
-            transport=transport,
-            context_cache=context_cache,
-            system_prompt_boundary=system_prompt_boundary,
-        )
-    if adapter_id == "anthropic_messages":
-        return AnthropicMessagesModelTurnAdapter(
-            transport=transport,
-            context_cache=context_cache,
-            system_prompt_boundary=system_prompt_boundary,
-        )
-    raise ValueError(
-        "unknown model adapter "
-        f"{adapter_id!r}; expected openai_chat, openai_responses, or anthropic_messages"
+    return adapter_type(
+        transport=transport,
+        context_cache=context_cache,
+        system_prompt_boundary=system_prompt_boundary,
     )
