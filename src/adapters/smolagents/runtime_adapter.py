@@ -167,12 +167,29 @@ class SmolagentsRuntimeAdapter:
             subagents=True,
         )
 
+    @staticmethod
+    def _committed_steps(steps: list[Any]) -> list[Any]:
+        """Exclude ActionSteps that never completed a canonical model turn."""
+
+        from smolagents.memory import ActionStep
+
+        return [
+            step
+            for step in steps
+            if not (
+                isinstance(step, ActionStep)
+                and step.model_output_message is None
+            )
+        ]
+
     def _checkpoint(self, steps: list[Any] | None = None) -> RuntimeCheckpointEnvelope:
         if steps is None:
             memory = getattr(self._native_runtime, "memory", None)
-            memory_steps = list(getattr(memory, "steps", ()) or ())
+            memory_steps = self._committed_steps(
+                list(getattr(memory, "steps", ()) or ())
+            )
         else:
-            memory_steps = list(steps)
+            memory_steps = self._committed_steps(list(steps))
         canonical_items = (
             SmolagentsCheckpointCodec.serialize_canonical_model_items(
                 memory_steps
@@ -327,6 +344,8 @@ class SmolagentsRuntimeAdapter:
                 or self._default_checkpoint_sink
             )
             if checkpoint_sink is None:
+                return
+            if completed_step.model_output_message is None:
                 return
             steps = list(native.memory.steps)
             if kwargs.get("agent") is native and (
