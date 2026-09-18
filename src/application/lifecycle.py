@@ -13,10 +13,14 @@ import os
 from collections.abc import Mapping
 from dataclasses import dataclass
 from datetime import datetime
+from threading import RLock
 from typing import Any, Literal
 
 from agentloom.application.run import RunPhase
-from agentloom.runtime.agent_runtime import AgentRuntimeResult
+from agentloom.runtime.agent_runtime import (
+    AgentRuntimeResult,
+    RuntimeEvent,
+)
 from agentloom.runtime.checkpoint import CheckpointManager
 from agentloom.runtime.goal import GoalBudgetLimitedError
 
@@ -83,6 +87,8 @@ class ApplicationRunLifecycle:
         self._error: BaseException | None = None
         self._checkpoint_deletion_started = False
         self._resumable = False
+        self._runtime_events: list[RuntimeEvent] = []
+        self._runtime_events_lock = RLock()
 
     @property
     def phase(self) -> RunPhase:
@@ -121,6 +127,20 @@ class ApplicationRunLifecycle:
     def goal(self) -> dict[str, object] | None:
         return None if self._goal is None else dict(self._goal)
 
+    def observe_runtime_event(self, event: RuntimeEvent) -> None:
+        """Retain one ordered runtime-neutral event for durable Run evidence."""
+
+        if not isinstance(event, RuntimeEvent):
+            raise TypeError("runtime event must be a RuntimeEvent")
+        with self._runtime_events_lock:
+            self._runtime_events.append(event)
+
+    def runtime_events_snapshot(self) -> tuple[RuntimeEvent, ...]:
+        """Return the runtime event stream observed so far."""
+
+        with self._runtime_events_lock:
+            return tuple(self._runtime_events)
+
     def report_agent_invocation(
         self,
         *,
@@ -140,6 +160,11 @@ class ApplicationRunLifecycle:
             result=None if result is None else str(result),
             error=error,
         )
+        if runtime_result is not None:
+            with self._runtime_events_lock:
+                for event in runtime_result.events:
+                    if event not in self._runtime_events:
+                        self._runtime_events.append(event)
         if goal is not None:
             self._goal = dict(goal)
 
@@ -260,6 +285,7 @@ class ApplicationRunLifecycle:
                     finalization.task_id,
                     result=self.result,
                     event_start_offset=finalization.event_start_offset,
+                    runtime_events=self.runtime_events_snapshot(),
                     manifest_updates=finalization.manifest_updates,
                 )
             else:
@@ -270,6 +296,7 @@ class ApplicationRunLifecycle:
                         finalization.task_id,
                         result=None,
                         event_start_offset=finalization.event_start_offset,
+                        runtime_events=self.runtime_events_snapshot(),
                         manifest_updates=finalization.manifest_updates,
                     )
                 except Exception as exc:
@@ -522,6 +549,7 @@ def _persist_run_observability(
     *,
     result: str | None,
     event_start_offset: int | None,
+    runtime_events: tuple[RuntimeEvent, ...] = (),
     manifest_updates: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Copy terminal task evidence into the immutable Run directory."""
@@ -534,6 +562,17 @@ def _persist_run_observability(
         manifest_updates.update(
             result_artifact="artifacts/result.txt",
             result_size=len(result.encode("utf-8")),
+        )
+
+    if runtime_events:
+        runtime_event_size = runtime_context.atomic_write_run_file_chunks(
+            runtime_context.audit_dir / "runtime_events.jsonl",
+            _runtime_event_chunks(runtime_events),
+        )
+        manifest_updates.update(
+            runtime_events_artifact="audit/runtime_events.jsonl",
+            runtime_events_count=len(runtime_events),
+            runtime_events_size=runtime_event_size,
         )
 
     if checkpoint_manager is None:
@@ -588,6 +627,25 @@ def _persist_run_observability(
             task_events_complete=event_stats["complete"],
         )
     return manifest_updates
+
+
+def _runtime_event_chunks(events: tuple[RuntimeEvent, ...]):
+    for event in events:
+        yield (
+            json.dumps(
+                {
+                    "kind": event.kind,
+                    "timestamp": event.timestamp,
+                    "application_id": event.application_id,
+                    "task_id": event.task_id,
+                    "run_id": event.run_id,
+                    "details": dict(event.details),
+                },
+                ensure_ascii=False,
+                separators=(",", ":"),
+            )
+            + "\n"
+        )
 
 
 def _task_events_size(
