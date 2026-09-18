@@ -18,6 +18,21 @@ def write_json(path, value):
     path.write_text(json.dumps(value))
 
 
+def smolagents_checkpoint(steps, *, step_count=3):
+    return {
+        "step_count": step_count,
+        "runtime_checkpoint": {
+            "runtime_id": "smolagents",
+            "runtime_version": "test",
+            "state_schema_version": 1,
+            "payload": {
+                "step_count": step_count,
+                "memory_steps": steps,
+            },
+        },
+    }
+
+
 def test_model_claim_is_not_tool_execution_evidence(tmp_path):
     write_json(tmp_path / "checkpoint.json", {
         "output": "write_file completed",
@@ -143,6 +158,37 @@ def test_completed_probe_rejects_missing_phase_boundary(checkpoint_helper):
         checkpoint_helper._canonical_worker_query("No canonical phase boundaries.")
 
 
+def test_checkpoint_verifier_requires_smolagents_runtime_envelope(checkpoint_helper):
+    step = committed_action("final_answer", {"answer": "done"})
+    step["is_final_answer"] = True
+    step["tool_results"] = [
+        {
+            "call_id": "call_1",
+            "tool_name": "final_answer",
+            "status": "completed",
+            "output": "done",
+        }
+    ]
+
+    with pytest.raises(AssertionError, match="runtime checkpoint envelope"):
+        checkpoint_helper._worker_final_output({"memory_steps": [step]})
+
+    wrong_runtime = smolagents_checkpoint([step])
+    wrong_runtime["runtime_checkpoint"]["runtime_id"] = "langgraph"
+    with pytest.raises(AssertionError, match="runtime is not smolagents"):
+        checkpoint_helper._worker_final_output(wrong_runtime)
+
+    assert checkpoint_helper._worker_final_output(
+        smolagents_checkpoint([step])
+    ) == "done"
+
+    step["tool_results"][0]["call_id"] = "wrong-call"
+    with pytest.raises(AssertionError, match="correlated final_answer"):
+        checkpoint_helper._worker_final_output(
+            smolagents_checkpoint([step])
+        )
+
+
 @pytest.fixture
 def main_checkpoint_gate(tmp_path, monkeypatch):
     from types import SimpleNamespace
@@ -216,7 +262,7 @@ def test_main_interrupt_waits_for_setup_action_commit(main_checkpoint_gate, setu
         {"items": [{"content": "supervisor_setup", "status": "in_progress"}]},
         "Todo saved",
     )
-    write_json(task_dir / "checkpoint.json", {"step_count": 3, "memory_steps": [todo]})
+    write_json(task_dir / "checkpoint.json", smolagents_checkpoint([todo]))
     with pytest.raises(TimeoutError, match="main interrupt point"):
         wait()
 
@@ -224,7 +270,7 @@ def test_main_interrupt_waits_for_setup_action_commit(main_checkpoint_gate, setu
 def test_main_interrupt_accepts_committed_setup_before_worker(main_checkpoint_gate):
     checkpoint, task_dir, wait = main_checkpoint_gate
     setup = write_supervisor_setup(checkpoint)
-    write_json(task_dir / "checkpoint.json", {"step_count": 3, "memory_steps": [setup]})
+    write_json(task_dir / "checkpoint.json", smolagents_checkpoint([setup]))
     assert wait() == task_dir
 
 
@@ -233,14 +279,17 @@ def test_main_interrupt_observes_files_then_waits_for_checkpoint_commit(main_che
 
     checkpoint, task_dir, _ = main_checkpoint_gate
     todo = committed_action("todo_write", {"items": []}, "Todo saved")
-    write_json(task_dir / "checkpoint.json", {"step_count": 3, "memory_steps": [todo]})
+    write_json(task_dir / "checkpoint.json", smolagents_checkpoint([todo]))
     states = []
 
     def advance(_):
         if not states:
             states.append(write_supervisor_setup(checkpoint))
         elif len(states) == 1:
-            write_json(task_dir / "checkpoint.json", {"step_count": 4, "memory_steps": [todo, states[0]]})
+            write_json(
+                task_dir / "checkpoint.json",
+                smolagents_checkpoint([todo, states[0]], step_count=4),
+            )
             states.append("committed")
         else:
             pytest.fail("committed setup was not accepted")
@@ -257,7 +306,7 @@ def test_main_prepare_rechecks_worker_race_before_seeding_probes(main_checkpoint
 
     checkpoint, task_dir, _ = main_checkpoint_gate
     setup = write_supervisor_setup(checkpoint)
-    write_json(task_dir / "checkpoint.json", {"step_count": 3, "memory_steps": [setup]})
+    write_json(task_dir / "checkpoint.json", smolagents_checkpoint([setup]))
     write_json(task_dir / "task_tree.json", {"status": "interrupted"})
     events = task_dir / "task_events.jsonl"
     events.write_text(json.dumps({"type": "run_started"}) + "\n")
@@ -300,6 +349,6 @@ def test_main_interrupt_rejects_incomplete_or_late_setup(main_checkpoint_gate, d
         (checkpoint.WORK_DIR / "supervisor_manifest.txt").write_text("manifest_status=ready\n")
     elif defect == "duplicate-setup":
         checkpoint.SIDE_EFFECT_LOG.write_text("supervisor_setup\nsupervisor_setup\n")
-    write_json(task_dir / "checkpoint.json", {"step_count": 3, "memory_steps": [setup]})
+    write_json(task_dir / "checkpoint.json", smolagents_checkpoint([setup]))
     with pytest.raises(TimeoutError, match="main interrupt point"):
         wait()
