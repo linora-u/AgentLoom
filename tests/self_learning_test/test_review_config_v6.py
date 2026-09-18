@@ -17,10 +17,14 @@ def _llm_yaml() -> dict:
             "default_model_type": "summary",
             "common": {
                 "model": "openai/test-common",
+                "adapter": "openai_chat",
                 "base_url": "https://example.test/v1",
                 "api_key": "test-key",
             },
-            "summary": {"model": "openai/test-summary"},
+            "summary": {
+                "model": "openai/test-summary",
+                "adapter": "openai_chat",
+            },
         }
     }
 

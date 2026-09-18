@@ -1,17 +1,17 @@
 from pathlib import Path
 
 import pytest
-
-from agentloom.runtime.goal import GoalConfig, normalize_goal_config
 from agentloom.application.readiness import (
     validate_runtime_agent_config,
     validate_runtime_worker_config,
 )
+from agentloom.runtime.goal import GoalConfig, normalize_goal_config
 
 
 def _config(**overrides):
     return {
         "name": "goal-test",
+        "agent_runtime": "smolagents",
         "description": "Finish the requested work.",
         "workflow": "Inspect, implement, and verify.",
         "tools": [],
