@@ -2,6 +2,7 @@
 
 import time
 import uuid
+import json
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from contextlib import nullcontext
 from contextvars import copy_context
@@ -12,14 +13,13 @@ from smolagents import (
     AgentGenerationError,
     AgentImage,
     AgentParsingError,
-    CodeAgent,
     LogLevel,
     ToolCallingAgent,
 )
 from smolagents.agents import ToolOutput
 from smolagents.memory import ToolCall
 
-from agentloom.adapters.smolagents.models.tool_call_parser import ToolCallParseError, parse_json_with_repair
+from agentloom.adapters.smolagents.models.litellm_model import NativeToolCallError
 from agentloom.adapters.smolagents.monkey_patch import install_agentloom_runtime_adapters
 from agentloom.adapters.smolagents.tool_argument_coercion import coerce_tool_arguments
 from agentloom.adapters.smolagents.tool_protocol import settle_tool_call
@@ -42,8 +42,8 @@ def _normalize_tool_arguments_object(arguments: dict[str, Any] | str) -> dict[st
         if not isinstance(parsed, str):
             break
         try:
-            parsed = parse_json_with_repair(parsed)
-        except Exception:
+            parsed = json.loads(parsed)
+        except (json.JSONDecodeError, TypeError):
             return arguments
 
     return parsed if isinstance(parsed, dict) else arguments
@@ -92,27 +92,6 @@ class _SuccessfulRunStateMixin:
         return run_result if wants_full_result else run_result.output
 
 
-class CodeAgentV2(_SuccessfulRunStateMixin, LoomAgentMixin, CodeAgent):
-    def __init__(
-        self,
-        *args,
-        before_run_callbacks: list | None = None,
-        **kwargs,
-    ):
-        max_tokens = kwargs.pop("max_tokens", None)
-        context_window = kwargs.pop("context_window", None)
-        max_output_tokens = kwargs.pop("max_output_tokens", None)
-        smart_summary = kwargs.pop("smart_summary", True)
-        self._init_loom_agent(
-            before_run_callbacks,
-            max_tokens=max_tokens,
-            context_window=context_window,
-            max_output_tokens=max_output_tokens,
-            smart_summary=smart_summary,
-        )
-        super().__init__(*args, **kwargs)
-
-
 class ToolCallingAgentV2(_SuccessfulRunStateMixin, LoomAgentMixin, ToolCallingAgent):
     def __init__(
         self,
@@ -120,11 +99,6 @@ class ToolCallingAgentV2(_SuccessfulRunStateMixin, LoomAgentMixin, ToolCallingAg
         before_run_callbacks: list | None = None,
         **kwargs,
     ):
-        # Remove all code_act specific kwargs before calling ToolCallingAgent.__init__
-        # ToolCallingAgent does not support these parameters
-        kwargs.pop("executor_type", None)
-        kwargs.pop("executor_kwargs", None)
-
         max_tokens = kwargs.pop("max_tokens", None)
         context_window = kwargs.pop("context_window", None)
         max_output_tokens = kwargs.pop("max_output_tokens", None)
@@ -151,7 +125,7 @@ class ToolCallingAgentV2(_SuccessfulRunStateMixin, LoomAgentMixin, ToolCallingAg
             # or implementation failure, so feed it back as a recoverable
             # parsing error and let the next ReAct step correct itself.
             cause = exc.__cause__
-            if isinstance(cause, ToolCallParseError):
+            if isinstance(cause, NativeToolCallError):
                 raise AgentParsingError(
                     f"Error while parsing tool call from model output: {cause}",
                     self.logger,

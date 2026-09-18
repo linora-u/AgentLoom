@@ -33,6 +33,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any
 
+from agentloom.runtime import SecureDirectory, portable_runtime_component
 from agentloom.runtime.checkpoint.serializer import CheckpointSerializer
 from agentloom.runtime.heartbeat.status import (
     detect_crashed_status as _detect_crashed_status,
@@ -41,7 +42,6 @@ from agentloom.runtime.heartbeat.status import (
     detect_worker_call_crashed as _detect_worker_call_crashed,
 )
 from agentloom.runtime.logging import get_logger
-from agentloom.runtime import SecureDirectory, portable_runtime_component
 from agentloom.runtime.todo.model import (
     TODO_SCHEMA_VERSION,
     empty_todo_snapshot,
@@ -1188,6 +1188,51 @@ class CheckpointManager:
             return self._append_event_and_refresh_projection_unlocked(task_id, event)
 
     # ── supervisor checkpoint ────────────────────────────────────────────
+
+    def save_supervisor_runtime_checkpoint(
+        self,
+        task_id: str,
+        *,
+        runtime_checkpoint: dict[str, Any],
+        task_text: str,
+        status: str,
+        config_snapshot: dict | None = None,
+        result: str | None = None,
+        error: str | None = None,
+        context_store: dict | None = None,
+    ) -> Path:
+        """Save one runtime-neutral envelope plus task metadata."""
+
+        payload = runtime_checkpoint.get("payload")
+        if not isinstance(payload, dict):
+            raise ValueError("runtime_checkpoint.payload must be a dictionary")
+        step_count = payload.get("step_count")
+        if not isinstance(step_count, int):
+            memory_steps = payload.get("memory_steps")
+            step_count = len(memory_steps) if isinstance(memory_steps, list) else 0
+        data = {
+            "agent_name": self._supervisor_name,
+            "agent_type": "supervisor",
+            "task_id": task_id,
+            "task_text": task_text,
+            "status": status,
+            "step_count": step_count,
+            "runtime_checkpoint": _jsonable(runtime_checkpoint),
+            "saved_at": datetime.now().astimezone().isoformat(),
+        }
+        if self._run_id:
+            data["run_id"] = self._run_id
+        if config_snapshot:
+            data["config_snapshot"] = config_snapshot
+        if result is not None:
+            data["result"] = result
+        if error is not None:
+            data["error"] = error
+        if context_store is not None:
+            data["context_store"] = context_store
+        path = self._supervisor_ckpt(task_id)
+        self._write_json(path, data)
+        return path
 
     def save_supervisor_checkpoint(
         self,

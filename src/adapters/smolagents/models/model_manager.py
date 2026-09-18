@@ -10,16 +10,16 @@ import json
 from dataclasses import asdict, dataclass, replace
 
 import litellm
-
-from smolagents import AgentLogger
-from agentloom.runtime.logging import get_logger
-from agentloom.adapters.smolagents.models.litellm_model import LiteLLMModelV2
+from agentloom.adapters.litellm import create_model_turn_adapter
+from agentloom.adapters.smolagents.model_turn_bridge import SmolagentsModelTurnBridge
 from agentloom.adapters.smolagents.models.litellm_retry import patch_litellm_completion
 from agentloom.adapters.smolagents.models.request_headers import (
     build_model_request_headers,
     get_system_model_request_headers,
 )
 from agentloom.adapters.smolagents.tool_protocol import patch_litellm_tool_error_projection
+from agentloom.runtime.logging import get_logger
+from smolagents import AgentLogger
 
 from .model_types import ModelConfig, ModelType, ModelTypeManager
 
@@ -236,7 +236,7 @@ class ModelManager:
         model_builder: ModelConfigBuilder | None = None,
         model_cache: bool = True,
         logger: AgentLogger | None = None
-    ) -> LiteLLMModelV2:
+    ) -> SmolagentsModelTurnBridge:
         """
         Get a model instance for smolagents.
 
@@ -247,7 +247,7 @@ class ModelManager:
             logger: Logger instance.
 
         Returns:
-            LiteLLMModelV2: Smolagents model instance.
+            SmolagentsModelTurnBridge: Smolagents-compatible model instance.
         """
         cache_key = self._generate_cache_key("smolagents", model_type, model_builder) if model_cache else ""
 
@@ -275,23 +275,33 @@ class ModelManager:
         if model_config.extra_completion_params:
             optional_kwargs.update(model_config.extra_completion_params)
 
-        model = LiteLLMModelV2(
-            model_id=model_config.model_id,
-            api_base=model_config.base_url,
-            api_key=model_config.api_key,
-            timeout=model_config.timeout,
-            max_tokens=model_config.max_output_tokens,
-            temperature=model_config.temperature,
-            requests_per_minute=model_config.requests_per_minute or 10,
-            # Retry-related parameters
-            num_retries=model_config.num_retries,
-            retry_delay=model_config.retry_delay,
-            max_retry_delay=model_config.max_retry_delay,
-            logger=runtime_logger,
-            context_cache=model_config.context_cache,
-            system_prompt_boundary=model_config.system_prompt_boundary,
-            supports_structured_output=model_config.supports_structured_output,
-            **optional_kwargs,
+        output_token_key = (
+            "max_output_tokens"
+            if model_config.adapter == "openai_responses"
+            else "max_tokens"
+        )
+        turn_options: dict[str, object] = {
+            output_token_key: model_config.max_output_tokens,
+            "temperature": model_config.temperature,
+            "timeout": model_config.timeout,
+            "num_retries": model_config.num_retries,
+            "retry_delay": model_config.retry_delay,
+            "max_retry_delay": model_config.max_retry_delay,
+            "_agent_loom_model_type": model_type.value,
+        }
+        if model_config.base_url:
+            turn_options["api_base"] = model_config.base_url
+        if model_config.api_key:
+            turn_options["api_key"] = model_config.api_key
+        turn_options.update(optional_kwargs)
+        model = SmolagentsModelTurnBridge(
+            adapter=create_model_turn_adapter(
+                model_config.adapter,
+                context_cache=model_config.context_cache,
+                system_prompt_boundary=model_config.system_prompt_boundary,
+            ),
+            model_id=model_config.model_id or "",
+            options=turn_options,
         )
 
         # Inject model_type for global rate limiting (consumed by litellm_retry wrapper)
@@ -320,7 +330,7 @@ class ModelManager:
         model_builder: ModelConfigBuilder | None = None,
         model_cache: bool = True,
         logger: AgentLogger | None = None
-    ) -> dict | LiteLLMModelV2:
+    ) -> dict | SmolagentsModelTurnBridge:
         """
         Get an appropriate model based on model type.
 
@@ -374,7 +384,7 @@ def get_model(
     model_builder: ModelConfigBuilder | None = None,
     model_cache: bool = True,
     logger: AgentLogger | None = None
-) -> dict | LiteLLMModelV2:
+) -> dict | SmolagentsModelTurnBridge:
     """
     Convenience helper: get a model by model type.
 

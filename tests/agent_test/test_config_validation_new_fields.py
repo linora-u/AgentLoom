@@ -113,8 +113,8 @@ class TestMissingFieldsDefault:
         assert settings.tool_metadata == {}
         assert settings.tool_output_limits == {}
         assert settings.model == {}
-        assert settings.execution_env == {}
-        assert settings.code_agent == {}
+        assert not hasattr(settings, "execution_env")
+        assert not hasattr(settings, "code_agent")
         assert settings.context_engine == {}
         assert settings.tools == []
 
@@ -188,6 +188,8 @@ class TestExistingFieldsCoexistence:
         assert settings.tool_metadata["bash_tool"]["label"] == "Shell"
         assert settings.tool_output_limits["max_chars"] == 8000
         assert settings.tool_access_control.include_paths == ["/workspace"]
+        assert not hasattr(settings, "execution_env")
+        assert not hasattr(settings, "code_agent")
 
     def test_system_field_default(self):
         """The system field uses its own default model."""

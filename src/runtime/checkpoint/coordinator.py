@@ -38,8 +38,9 @@ from __future__ import annotations
 import threading
 from contextvars import ContextVar
 from dataclasses import replace
-from typing import Any, Optional
+from typing import Any
 
+from agentloom.runtime.agent_runtime import RuntimeCheckpointEnvelope
 from agentloom.runtime.context_engine import (
     ContextEngine,
     ContextEngineConfig,
@@ -53,7 +54,7 @@ _logger = get_logger(__name__)
 
 # Single ContextVar — replaces the previous two (_current_checkpoint_manager
 # and _step_checkpoint_cb) in base_agent.py.
-_current_coordinator: ContextVar[Optional["CheckpointCoordinator"]] = ContextVar(
+_current_coordinator: ContextVar[CheckpointCoordinator | None] = ContextVar(
     "_current_coordinator", default=None
 )
 # Stores a heartbeat writer set by runner.py before supervisor.run(); consumed by activate().
@@ -164,7 +165,7 @@ class CheckpointCoordinator:
         *,
         resume: bool = False,
         effective_config: dict[str, Any] | None = None,
-    ) -> "CheckpointCoordinator":
+    ) -> CheckpointCoordinator:
         """Create and store a new coordinator for this task.  Called by supervisor."""
         coord = cls(checkpoint_manager, task_id, task_text, resume=resume)
         _current_coordinator.set(coord)
@@ -182,12 +183,12 @@ class CheckpointCoordinator:
         return coord
 
     @staticmethod
-    def current() -> Optional["CheckpointCoordinator"]:
+    def current() -> CheckpointCoordinator | None:
         """Return the coordinator inherited from the current context (may be None)."""
         return _current_coordinator.get()
 
     @staticmethod
-    def deactivate(coord: Optional["CheckpointCoordinator"] = None) -> None:
+    def deactivate(coord: CheckpointCoordinator | None = None) -> None:
         """Clear the active coordinator after a supervisor run finishes."""
         current = _current_coordinator.get()
         target = coord or current
@@ -234,6 +235,71 @@ class CheckpointCoordinator:
         set_current_context_engine(self._context_engine)
 
     # ── Supervisor ops ───────────────────────────────────────────────
+
+    def load_runtime_checkpoint(self) -> RuntimeCheckpointEnvelope | None:
+        """Load the selected runtime's opaque supervisor checkpoint."""
+
+        checkpoint = self._cm.load_supervisor_checkpoint(self._task_id)
+        if checkpoint is None:
+            return None
+        raw = checkpoint.get("runtime_checkpoint")
+        if not isinstance(raw, dict):
+            return None
+        return RuntimeCheckpointEnvelope.from_dict(raw)
+
+    def save_runtime_checkpoint(
+        self,
+        checkpoint: RuntimeCheckpointEnvelope,
+        status: str,
+        *,
+        result: str | None = None,
+        error: str | None = None,
+    ) -> None:
+        """Persist a runtime-owned state envelope without inspecting its payload."""
+
+        try:
+            self._cm.save_supervisor_runtime_checkpoint(
+                self._task_id,
+                runtime_checkpoint=checkpoint.to_dict(),
+                task_text=self._task_text,
+                status=status,
+                result=result,
+                error=error,
+                context_store=(
+                    self._context_engine.stats_snapshot()
+                    if self._context_engine
+                    else None
+                ),
+            )
+            self._cm.record_task_status_changed(
+                self._task_id,
+                status,
+                result=result,
+                error=error,
+            )
+            step_count = checkpoint.payload.get("step_count")
+            if not isinstance(step_count, int):
+                memory_steps = checkpoint.payload.get("memory_steps")
+                step_count = len(memory_steps) if isinstance(memory_steps, list) else 0
+            if self._supervisor_heartbeat is not None:
+                self._supervisor_heartbeat.update_step(step_count)
+            if self._file_history is not None:
+                self._file_history.make_post_step_snapshot(step_count)
+            _logger.info(
+                "Runtime checkpoint saved [%s] task_id=%s runtime=%s",
+                status,
+                self._task_id,
+                checkpoint.runtime_id,
+            )
+        except Exception as exc:
+            _logger.error("Failed to save runtime checkpoint: %s", exc, exc_info=True)
+            try:
+                self._cm.update_task_tree(
+                    self._task_id,
+                    lambda tree: {**tree, "checkpoint_degraded": True},
+                )
+            except Exception:
+                pass
 
     def restore(self, runtime_agent: Any) -> None:
         """Inject saved memory steps into *runtime_agent* for resumption.
@@ -316,8 +382,8 @@ class CheckpointCoordinator:
         runtime_agent: Any,
         status: str,
         *,
-        result: Optional[str] = None,
-        error: Optional[str] = None,
+        result: str | None = None,
+        error: str | None = None,
         memory_steps: list[Any] | None = None,
     ) -> None:
         """Save supervisor checkpoint + update task_tree status."""
@@ -546,7 +612,7 @@ class CheckpointCoordinator:
         call_index: int,
         input_hash: str,
         task_input: str,
-        result: Optional[str],
+        result: str | None,
         worker_mem: Any,
     ) -> None:
         """Record successful worker completion."""
@@ -684,7 +750,7 @@ class CheckpointCoordinator:
         """Store file history manager before supervisor.run(); activate() will pick it up."""
         _pending_file_history.set(file_history)
 
-    def get_worker_heartbeat(self, agent_name: str) -> "WorkerHeartbeat | None":
+    def get_worker_heartbeat(self, agent_name: str) -> WorkerHeartbeat | None:
         """Return the heartbeat writer for *agent_name* (if any)."""
         with self._worker_heartbeats_lock:
             return self._worker_heartbeats.get(agent_name)

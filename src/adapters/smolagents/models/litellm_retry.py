@@ -1,8 +1,8 @@
 """
 Custom retry mechanism for litellm.
 
-Adds exponential-backoff retry logic to `litellm.completion`, with support for
-custom `retry_delay` and `max_retry_delay`.
+Adds exponential-backoff retry logic to LiteLLM provider entry points, with
+support for custom `retry_delay` and `max_retry_delay`.
 """
 
 import time
@@ -13,6 +13,7 @@ from dataclasses import dataclass
 from functools import wraps
 from typing import Any
 
+from agentloom.runtime.logging import get_logger
 from litellm.exceptions import (
     APIConnectionError,
     AuthenticationError,
@@ -29,8 +30,6 @@ from tenacity import (
     stop_after_attempt,
     wait_exponential,
 )
-
-from agentloom.runtime.logging import get_logger
 
 logger = get_logger(__name__)
 
@@ -319,30 +318,23 @@ def _log_retry_attempt(retry_state: RetryCallState, max_retries: int):
 
 def patch_litellm_completion(litellm_module: Any):
     """
-    Monkey-patch `litellm.completion` to add custom retry logic.
+    Monkey-patch LiteLLM chat and Responses entry points with shared governance.
 
     Args:
         litellm_module: litellm module object.
     """
-    # Check whether it has already been patched (avoid duplicate patching).
-    if hasattr(litellm_module.completion, "_agent_loom_retry_patched"):
-        logger.debug("litellm.completion is already patched; skipping duplicate patch")
-        return
-
-    original_completion = litellm_module.completion
-
-    # Create wrapper function.
-    wrapped_completion = create_retry_wrapper(
-        original_completion
-    )
-
-    # Mark as patched.
-    wrapped_completion._agent_loom_retry_patched = True
-
-    # Replace function.
-    litellm_module.completion = wrapped_completion
+    patched: list[str] = []
+    for name in ("completion", "responses"):
+        original = getattr(litellm_module, name, None)
+        if original is None or hasattr(original, "_agent_loom_retry_patched"):
+            continue
+        wrapped = create_retry_wrapper(original)
+        wrapped._agent_loom_retry_patched = True
+        setattr(litellm_module, name, wrapped)
+        patched.append(name)
 
     logger.debug(
-        "Added custom retry mechanism for litellm.completion "
-        "(supports retry_delay and max_retry_delay parameters)"
+        "Added custom retry mechanism for LiteLLM entry points %s "
+        "(supports retry_delay and max_retry_delay parameters)",
+        patched,
     )

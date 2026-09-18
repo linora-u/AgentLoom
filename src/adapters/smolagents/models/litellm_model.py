@@ -14,7 +14,7 @@ Automatic prompt caching:
   No provider-specific branching is needed in this code.
 """
 
-import uuid
+import json
 from collections.abc import Iterator
 from contextlib import contextmanager
 from contextvars import ContextVar
@@ -23,25 +23,22 @@ from typing import Any
 from smolagents import AgentLogger, LiteLLMModel
 from smolagents.models import (
     ChatMessage,
-    ChatMessageToolCall,
-    ChatMessageToolCallFunction,
     MessageRole,
     get_clean_message_list,
     tool_role_conversions,
 )
 from smolagents.monitoring import TokenUsage
 from agentloom.runtime.logging import get_logger
-from agentloom.adapters.smolagents.models.tool_call_parser import (
-    ToolCallParseError,
-    parse_json_with_repair,
-    parse_structured_tool_call,
-)
 from agentloom.adapters.smolagents.tool_protocol import (
     has_native_tool_marker,
     native_tool_message_dict,
 )
 
 _LOG = get_logger(__name__)
+
+
+class NativeToolCallError(ValueError):
+    """Raised when a model response violates the native tool-call contract."""
 
 
 class LiteLLMModelV2(LiteLLMModel):
@@ -76,9 +73,6 @@ class LiteLLMModelV2(LiteLLMModel):
         self.logger = get_logger(logger, __name__) if logger is not None else _LOG
         self.context_cache = context_cache
         self.system_prompt_boundary = system_prompt_boundary
-        # Whether the model supports json_schema structured output.
-        # "true" - use structured output (json_schema) for code_act mode
-        # "false" - use text-based <code> block parsing for code_act mode
         self.supports_structured_output = supports_structured_output.lower().strip()
         # Model instances are cached and shared by concurrent worker agents.
         # Invocation-specific tracing/tool schema state must therefore live in
@@ -232,36 +226,15 @@ class LiteLLMModelV2(LiteLLMModel):
             raise
 
     def parse_tool_calls(self, message: ChatMessage) -> ChatMessage:
-        """Parse text fallback tool calls without patching smolagents globals."""
+        """Validate provider-native tool calls without parsing assistant text."""
         current_tools = LiteLLMModelV2._current_tools(self)
         try:
             message.role = MessageRole.ASSISTANT
             if not message.tool_calls:
-                if message.content is None:
-                    raise ToolCallParseError("Message contains no content and no tool calls")
-                available_tool_names = [
-                    tool.name for tool in current_tools if hasattr(tool, "name")
-                ]
-                candidate = parse_structured_tool_call(
-                    str(message.content),
-                    available_tool_names=available_tool_names or None,
-                    tool_name_key=self.tool_name_key,
-                    tool_arguments_key=self.tool_arguments_key,
-                    model_id=self.model_id,
+                raise NativeToolCallError(
+                    "Model response must contain native structured tool_calls; "
+                    "assistant text is not interpreted as a tool call"
                 )
-                message.tool_calls = [
-                    ChatMessageToolCall(
-                        id=candidate.id or str(uuid.uuid4()),
-                        type="function",
-                        function=ChatMessageToolCallFunction(
-                            name=candidate.name,
-                            arguments=candidate.arguments,
-                        ),
-                    )
-                ]
-
-            if not message.tool_calls:
-                raise ToolCallParseError("No tool call was found in the model output")
 
             LiteLLMModelV2._normalize_and_validate_tool_calls(
                 message,
@@ -290,8 +263,8 @@ class LiteLLMModelV2(LiteLLMModel):
             if not isinstance(parsed, str):
                 return parsed
             try:
-                parsed = parse_json_with_repair(parsed)
-            except Exception:
+                parsed = json.loads(parsed)
+            except (json.JSONDecodeError, TypeError):
                 return original
         return parsed
 
@@ -311,14 +284,14 @@ class LiteLLMModelV2(LiteLLMModel):
         for tool_call in message.tool_calls:
             tool_name = tool_call.function.name
             if not isinstance(tool_name, str) or not tool_name:
-                raise ToolCallParseError("Malformed tool_call: missing function name")
+                raise NativeToolCallError("Malformed tool_call: missing function name")
             if available_tool_names and tool_name not in available_tool_names:
-                raise ToolCallParseError(
+                raise NativeToolCallError(
                     f"Tool '{tool_name}' not found in registered tools {sorted(available_tool_names)}"
                 )
             arguments = LiteLLMModelV2._normalize_tool_arguments(tool_call.function.arguments)
             if not isinstance(arguments, dict):
-                raise ToolCallParseError(
+                raise NativeToolCallError(
                     f"Malformed tool_call for '{tool_name}': arguments must be a JSON object"
                 )
             tool_call.function.arguments = arguments

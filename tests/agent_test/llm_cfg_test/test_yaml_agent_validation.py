@@ -1,15 +1,13 @@
 from pathlib import Path
 
-import pytest
-
 import agentloom.runtime.factory as yaml_factory_module
-from agentloom.runtime.factory import YamlConfiguredAgent, YamlConfiguredSupervisorAgent
+import pytest
 from agentloom.application.validation import (
     AgentConfigNormalizer,
     NormalizedAgentConfig,
-    normalize_execution_env,
     normalize_execution_prompt_template_path,
 )
+from agentloom.runtime.factory import YamlConfiguredAgent, YamlConfiguredSupervisorAgent
 
 
 def _make_worker(config: dict) -> YamlConfiguredAgent:
@@ -31,6 +29,7 @@ def _make_supervisor(config: dict) -> YamlConfiguredSupervisorAgent:
 def _worker_config() -> dict:
     return {
         "name": "worker_validation_test",
+        "agent_runtime": "smolagents",
         "description": "worker",
         "tools": [],
         "workflow": "wf",
@@ -40,6 +39,7 @@ def _worker_config() -> dict:
 def _supervisor_config() -> dict:
     return {
         "name": "supervisor_validation_test",
+        "agent_runtime": "smolagents",
         "description": "supervisor",
         "tools": [],
         "workflow": "wf",
@@ -114,13 +114,6 @@ def test_normalize_prompt_template_path_rejects_invalid_shape(tmp_path: Path, ra
         )
 
 
-def test_normalize_execution_env_defaults_and_rejects_invalid():
-    assert normalize_execution_env({}, "worker.execution_env") == {"type": "local", "executor_kwargs": {}}
-
-    with pytest.raises(ValueError, match="must be one of"):
-        normalize_execution_env({"execution_env": {"type": "host"}}, "worker.execution_env")
-
-
 def test_validate_agent_function_schema_normalizes_and_rejects():
     config = {
         "agent_function_schema": {
@@ -166,7 +159,6 @@ def test_validate_config_returns_normalized_object(monkeypatch, tmp_path: Path):
     assert isinstance(normalized, NormalizedAgentConfig)
     assert not hasattr(normalized, "prompt_template_path")
     assert normalized.agent_function_schema is not None
-    assert worker._execution_normalized.prompt_template_path == str(prompt_file.resolve())
 
     supervisor = object.__new__(YamlConfiguredSupervisorAgent)
     supervisor._config = {
@@ -178,39 +170,21 @@ def test_validate_config_returns_normalized_object(monkeypatch, tmp_path: Path):
     assert isinstance(normalized_supervisor, NormalizedAgentConfig)
     assert not hasattr(normalized_supervisor, "prompt_template_path")
     assert normalized_supervisor.agent_function_schema is None
-    assert supervisor._execution_normalized.prompt_template_path == str(prompt_file.resolve())
 
 
-def test_ensure_normalized_autobuilds(monkeypatch, tmp_path: Path):
-    prompt_file = tmp_path / "prompts" / "worker_prompt.yaml"
-    prompt_file.parent.mkdir(parents=True, exist_ok=True)
-    prompt_file.write_text("system_prompt: worker", encoding="utf-8")
-    monkeypatch.setattr(yaml_factory_module, "C", _config_at(tmp_path))
-
+def test_ensure_normalized_autobuilds():
     worker = object.__new__(YamlConfiguredAgent)
-    worker._config = {
-        **_worker_config(),
-        "prompt": "prompts/worker_prompt.yaml",
-    }
+    worker._config = _worker_config()
     worker._normalized = None
-    worker._execution_normalized = None
     normalized = worker._ensure_normalized()
     assert normalized.agent_function_schema is None
-    execution_normalized = worker._ensure_execution_normalized()
-    assert execution_normalized.prompt_template_path == str(prompt_file.resolve())
     assert worker._normalized is not None
 
     supervisor = object.__new__(YamlConfiguredSupervisorAgent)
-    supervisor._config = {
-        **_supervisor_config(),
-        "prompt": "prompts/worker_prompt.yaml",
-    }
+    supervisor._config = _supervisor_config()
     supervisor._normalized = None
-    supervisor._execution_normalized = None
     normalized_supervisor = supervisor._ensure_normalized()
     assert normalized_supervisor.agent_function_schema is None
-    execution_normalized_supervisor = supervisor._ensure_execution_normalized()
-    assert execution_normalized_supervisor.prompt_template_path == str(prompt_file.resolve())
     assert supervisor._normalized is not None
 
 
@@ -334,38 +308,6 @@ def test_common_validate_config_rejects_removed_tools_mapping(maker, config_buil
         agent._validate_config()
 
 
-@pytest.mark.parametrize("maker,config_builder", [
-    (_make_worker, _worker_config),
-    (_make_supervisor, _supervisor_config),
-])
-def test_common_validate_config_rejects_invalid_tool_call_type(maker, config_builder):
-    agent = maker(config_builder())
-    agent._config["tool_call_type"] = "invalid"
-
-    with pytest.raises(ValueError, match="tool_call_type must be 'tool_call' or 'code_act'"):
-        agent._validate_config()
-
-
-def test_worker_role_profile_defaults_tool_call_type_to_tool_call():
-    worker = _make_worker(_worker_config())
-    assert worker._role_profile().tool_call_type == "tool_call"
-
-
-def test_supervisor_role_profile_defaults_tool_call_type_to_tool_call():
-    supervisor = _make_supervisor(_supervisor_config())
-    assert supervisor._role_profile().tool_call_type == "tool_call"
-
-
-@pytest.mark.parametrize("maker,config_builder", [
-    (_make_worker, _worker_config),
-    (_make_supervisor, _supervisor_config),
-])
-def test_role_profile_respects_explicit_tool_call_type_tool_call(maker, config_builder):
-    agent = maker(config_builder())
-    agent._config["tool_call_type"] = "tool_call"
-    assert agent._role_profile().tool_call_type == "tool_call"
-
-
 def test_supervisor_validate_config_rejects_invalid_worker_agents():
     supervisor = _make_supervisor(_supervisor_config())
     supervisor._config["worker_agents"] = [{"name": "legacy_name"}]
@@ -383,6 +325,7 @@ def _worker_config_without_tools() -> dict:
     """Worker config with no ``tools`` key at all."""
     return {
         "name": "worker_no_tools",
+        "agent_runtime": "smolagents",
         "description": "worker without tools field",
         "workflow": "wf",
     }
@@ -392,6 +335,7 @@ def _supervisor_config_without_tools() -> dict:
     """Supervisor config with no ``tools`` key at all."""
     return {
         "name": "supervisor_no_tools",
+        "agent_runtime": "smolagents",
         "description": "supervisor without tools field",
         "workflow": "wf",
         "worker_agents": [],
