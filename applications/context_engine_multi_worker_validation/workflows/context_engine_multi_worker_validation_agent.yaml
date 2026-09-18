@@ -15,19 +15,27 @@ workflow: |
      "Return the large search validation payload exactly."
   3. Each worker result must contain its own ContextRef marker. Do not guess the
      hidden values from the task.
-  4. Call loom_retrieve_context for the log worker ref with:
-       query: "LOG_TARGET_RECORD"
-       offset: 0
-       limit: 20
-  5. Call loom_retrieve_context for the search worker ref with:
-       query: "SEARCH_TARGET_RECORD"
-       offset: 0
-       limit: 20
+  4. Call retrieve_log_context with the log worker ContextRef.
+  5. Call retrieve_search_context with the search worker ContextRef.
+     The Application fixes each tool's query and pagination parameters.
   6. Final answer must be exactly:
        MULTI_CONTEXT_RETRIEVE_PASS log_value=<log-value> search_value=<search-value>
 
 tools:
-  - name: "loom_retrieve_context"
+  - name: "retrieve_log_context"
+    module: "agentloom.tools.context.retrieve_context"
+    function: "loom_retrieve_context"
+    fixed_args:
+      query: "LOG_TARGET_RECORD"
+      offset: 0
+      limit: 20
+  - name: "retrieve_search_context"
+    module: "agentloom.tools.context.retrieve_context"
+    function: "loom_retrieve_context"
+    fixed_args:
+      query: "SEARCH_TARGET_RECORD"
+      offset: 0
+      limit: 20
 
 worker_agents:
   - path: "applications/context_engine_multi_worker_validation/workflows/worker_agents/log_payload_worker.yaml"
