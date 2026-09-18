@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 import inspect
+from collections.abc import Mapping
 from pathlib import Path
+from typing import Any
 
 import agentloom.application.validation as validation_module
 import agentloom.runtime.agent as agent_module
@@ -11,13 +13,76 @@ from agentloom.application.readiness import validate_runtime_agent_config
 from agentloom.configuration.llm_config import LLMConfig
 from agentloom.runtime.agent_runtime import (
     RuntimeCapabilities,
+    RuntimeDefinition,
     RuntimeRegistry,
     RuntimeRequirements,
     UnsupportedRuntimeError,
 )
 from agentloom.runtime.factory import YamlAgentFactory
+from agentloom.runtime.model_binding import ModelTurnBinding
+from agentloom.runtime.model_protocol import (
+    MessageItem,
+    ModelTurnRequest,
+    ModelTurnResult,
+    ToolDefinition,
+)
+from agentloom.runtime.tool_protocol import ToolCallRecord
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
+
+
+class _ModelAdapter:
+    adapter_id = "openai_chat"
+
+    def turn(self, request: ModelTurnRequest) -> ModelTurnResult:
+        return ModelTurnResult(
+            items=(MessageItem(role="assistant", text=request.model),)
+        )
+
+
+class _ClosableToolGateway:
+    def __init__(self) -> None:
+        self.closed = False
+
+    @property
+    def definitions(self) -> tuple[ToolDefinition, ...]:
+        return ()
+
+    def invoke(
+        self,
+        *,
+        call_id: str,
+        tool_name: str,
+        arguments: Mapping[str, Any],
+    ) -> ToolCallRecord:
+        return ToolCallRecord.completed(
+            call_id=call_id,
+            tool_name=tool_name,
+            input=dict(arguments),
+            output="done",
+        )
+
+    def close(self) -> None:
+        self.closed = True
+
+
+def _runtime_definition(
+    runtime_id: str,
+) -> tuple[RuntimeDefinition, _ClosableToolGateway]:
+    gateway = _ClosableToolGateway()
+    definition = RuntimeDefinition(
+        runtime_id=runtime_id,
+        name="runtime-owner",
+        description="Exercise the owner-to-registry seam.",
+        model=ModelTurnBinding(
+            model_type="test",
+            model_id="opaque-model",
+            adapter=_ModelAdapter(),
+        ),
+        tool_gateway=gateway,
+        max_steps=5,
+    )
+    return definition, gateway
 
 
 def test_python_agent_api_does_not_expose_removed_execution_environment() -> None:
@@ -91,22 +156,23 @@ def test_role_driven_agent_builds_selected_runtime_through_registry(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     runtime = object()
+    definition, _gateway = _runtime_definition("smolagents")
     observed: dict[str, object] = {}
 
     class _RecordingRegistry:
-        def create(self, runtime_id: str) -> object:
-            observed["runtime_id"] = runtime_id
+        def create(self, received_definition: RuntimeDefinition) -> object:
+            observed["definition"] = received_definition
             return runtime
 
-    def build_registry(*, smolagents_factory: object) -> _RecordingRegistry:
-        observed["smolagents_factory"] = smolagents_factory
+    def build_registry() -> _RecordingRegistry:
+        observed["registry_built"] = True
         return _RecordingRegistry()
 
     class _RuntimeOwner:
         _config = {"agent_runtime": "smolagents"}
 
-        def _build_smolagents_runtime(self) -> object:
-            raise AssertionError("registry owns runtime construction")
+        def _build_runtime_definition(self) -> RuntimeDefinition:
+            return definition
 
         def _role_profile(self) -> agent_module.AgentRoleProfile:
             return agent_module.AgentRoleProfile(
@@ -124,25 +190,48 @@ def test_role_driven_agent_builds_selected_runtime_through_registry(
 
     assert selected is runtime
     assert observed == {
-        "runtime_id": "smolagents",
-        "smolagents_factory": owner._build_smolagents_runtime,
+        "registry_built": True,
+        "definition": definition,
     }
+    assert observed["definition"] is definition
 
 
-def test_role_driven_agent_rejects_langgraph_before_runtime_construction() -> None:
+def test_role_driven_agent_rejects_langgraph_and_closes_definition_gateway(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     calls: list[str] = []
+    definition, gateway = _runtime_definition("langgraph")
+    registry = RuntimeRegistry()
+
+    def build_smolagents(
+        _definition: RuntimeDefinition,
+    ) -> object:
+        calls.append("smolagents")
+        return object()
+
+    registry.register(
+        "smolagents",
+        capabilities=RuntimeCapabilities(True, True, True, True),
+        factory=build_smolagents,
+    )
 
     class _RuntimeOwner:
         _config = {"agent_runtime": "langgraph"}
 
-        def _build_smolagents_runtime(self) -> object:
-            calls.append("smolagents")
-            return object()
+        def _build_runtime_definition(self) -> RuntimeDefinition:
+            return definition
+
+    monkeypatch.setattr(
+        agent_module,
+        "build_builtin_runtime_registry",
+        lambda: registry,
+    )
 
     with pytest.raises(ValueError, match="agent_runtime.*smolagents"):
         agent_module.RoleDrivenAgent.build_runtime(_RuntimeOwner())  # type: ignore[arg-type]
 
     assert calls == []
+    assert gateway.closed is True
 
 
 def test_runtime_preflight_uses_registry_capabilities(
