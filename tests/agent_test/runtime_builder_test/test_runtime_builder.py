@@ -14,11 +14,14 @@ import pytest
 import yaml
 from agentloom.adapters.smolagents.agents import ToolCallingAgentV2
 from agentloom.adapters.smolagents.tools.tools import tool
+from agentloom.runtime import RuntimeHome, bind_run_context
 from agentloom.runtime.agent_runtime import (
     AgentRuntimeRequest,
     AgentRuntimeResult,
     RuntimeCapabilities,
     RuntimeCheckpointEnvelope,
+    RuntimeEvent,
+    RuntimeRequirements,
     RuntimeUsage,
     require_runtime_state,
 )
@@ -267,14 +270,86 @@ def test_invocation_uses_runtime_neutral_request(monkeypatch):
     )
 
     assert result == "runtime-result"
-    assert runtime.requests == [
-        AgentRuntimeRequest(
-            task="runtime-neutral task",
-            continue_session=False,
-            record_task=False,
-            additional_args={"scope": "contract"},
+    assert len(runtime.requests) == 1
+    request = runtime.requests[0]
+    assert request.task == "runtime-neutral task"
+    assert request.task_id == "task-runtime-neutral"
+    assert request.run_id
+    assert request.requirements == RuntimeRequirements(
+        checkpoint_resume=True,
+    )
+    assert callable(request.event_sink)
+    assert request.continue_session is False
+    assert request.record_task is False
+    assert dict(request.additional_args) == {"scope": "contract"}
+
+
+def test_invocation_populates_runtime_context_identity_and_real_requirements(
+    tmp_path,
+    monkeypatch,
+):
+    agent = _make_agent(logger=DummyLoggerBackend())
+    agent._effective_agent_config = {
+        **agent._config,
+        "concurrency": 2,
+        "checkpoint": {"enabled": True},
+        "worker_agents": [{"path": "worker.yaml"}],
+    }
+    runtime = RecordingAgentRuntime("runtime-result")
+    monkeypatch.setattr(agent, "build_runtime", lambda: runtime)
+    monkeypatch.setattr(agent, "_inject_memory_snapshot", lambda tasks: tasks)
+    context = RuntimeHome(tmp_path / ".agentloom").context(
+        application_id="application",
+        task_id="canonical-task",
+        run_id="canonical-run",
+    )
+
+    with bind_run_context(context):
+        result = agent.run(
+            "runtime-neutral task",
+            task_id="agent-local-task",
+            run_id="worker-local-run",
         )
+
+    assert result == "runtime-result"
+    assert len(runtime.requests) == 1
+    request = runtime.requests[0]
+    assert request.application_id == "application"
+    assert request.task_id == "canonical-task"
+    assert request.run_id == "canonical-run"
+    assert request.requirements == RuntimeRequirements(
+        structured_tools=True,
+        parallel_tools=True,
+        checkpoint_resume=True,
+        subagents=True,
+    )
+
+
+def test_subtask_runtime_projects_owned_subagent_lifecycle_events() -> None:
+    runtime = RecordingAgentRuntime("worker-result")
+    worker = base_agent_module.SubTaskTrackedAgent(runtime, "worker-agent")
+    observed: list[RuntimeEvent] = []
+
+    result = worker.run(
+        AgentRuntimeRequest(
+            task="delegate",
+            application_id="application",
+            task_id="canonical-task",
+            run_id="canonical-run",
+            event_sink=observed.append,
+        )
+    )
+
+    assert [event.kind for event in result.events] == ["subagent", "subagent"]
+    assert [event.details["phase"] for event in result.events] == [
+        "started",
+        "completed",
     ]
+    assert observed == list(result.events)
+    assert {
+        (event.application_id, event.task_id, event.run_id)
+        for event in result.events
+    } == {("application", "canonical-task", "canonical-run")}
 
 
 def test_standalone_checkpoint_failure_still_deactivates_coordinator(
@@ -567,13 +642,17 @@ def test_base_run_emits_task_complete_on_success(monkeypatch):
     complete_event = next(item for item in events if item[0] is HookEvent.TASK_COMPLETED)
     assert complete_event[2]["task_id"] == "task-complete"
     assert complete_event[2]["agent_name"] == agent.name
-    assert runtime_agent.requests == [
-        AgentRuntimeRequest(
-            task="do work",
-            continue_session=False,
-            record_task=False,
-        )
-    ]
+    assert len(runtime_agent.requests) == 1
+    request = runtime_agent.requests[0]
+    assert request.task == "do work"
+    assert request.task_id == "task-complete"
+    assert request.run_id
+    assert request.requirements == RuntimeRequirements(
+        checkpoint_resume=True,
+    )
+    assert callable(request.event_sink)
+    assert request.continue_session is False
+    assert request.record_task is False
 
 
 def test_base_run_binds_root_before_memory_snapshot_and_only_owner_emits_session(monkeypatch):
@@ -1869,23 +1948,78 @@ def test_base_run_executes_transformed_tasks_sequentially_with_reset_false(tmp_p
 
     assert result == "final-result"
     assert build_calls == [runtime_agent]
-    assert runtime_agent.requests == [
-        AgentRuntimeRequest(
-            task="first task",
-            continue_session=False,
-            record_task=False,
-        ),
-        AgentRuntimeRequest(
-            task="second task",
-            continue_session=True,
-            record_task=True,
-        ),
-        AgentRuntimeRequest(
-            task="third task",
-            continue_session=True,
-            record_task=True,
-        ),
+    assert [request.task for request in runtime_agent.requests] == [
+        "first task",
+        "second task",
+        "third task",
     ]
+    assert [
+        (request.continue_session, request.record_task)
+        for request in runtime_agent.requests
+    ] == [(False, False), (True, True), (True, True)]
+    assert {
+        request.task_id for request in runtime_agent.requests
+    } == {"multi-workflow"}
+    assert len(
+        {request.run_id for request in runtime_agent.requests}
+    ) == 1
+    assert all(request.run_id for request in runtime_agent.requests)
+    assert all(
+        request.requirements
+        == RuntimeRequirements(checkpoint_resume=True)
+        for request in runtime_agent.requests
+    )
+    assert all(
+        callable(request.event_sink)
+        for request in runtime_agent.requests
+    )
+
+
+def test_invocation_collects_ordered_runtime_events_without_sink_duplicates(
+    monkeypatch,
+) -> None:
+    agent = _make_agent(logger=DummyLoggerBackend())
+    lifecycle = MagicMock()
+    call_index = 0
+
+    def _recording_run(request: AgentRuntimeRequest) -> AgentRuntimeResult:
+        nonlocal call_index
+        call_index += 1
+        event = RuntimeEvent(
+            kind="model",
+            task_id=request.task_id,
+            run_id=request.run_id,
+            details={"segment": call_index},
+        )
+        assert request.event_sink is not None
+        request.event_sink(event)
+        return AgentRuntimeResult(
+            state="success",
+            output=f"result-{call_index}",
+            events=(event,),
+        )
+
+    runtime = RecordingAgentRuntime(side_effect=_recording_run)
+    monkeypatch.setattr(agent, "build_runtime", lambda: runtime)
+    monkeypatch.setattr(agent, "_inject_memory_snapshot", lambda tasks: tasks)
+    monkeypatch.setattr(
+        agent,
+        "_transform_tasks",
+        lambda _task: ["first task", "second task"],
+    )
+
+    assert agent.run(
+        "do work",
+        task_id="event-task",
+        application_lifecycle=lifecycle,
+    ) == "result-2"
+
+    reported = lifecycle.report_agent_invocation.call_args.kwargs[
+        "runtime_result"
+    ]
+    assert [
+        event.details["segment"] for event in reported.events
+    ] == [1, 2]
 
 
 def test_goal_mode_continues_after_normal_final_until_update_goal(monkeypatch):

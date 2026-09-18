@@ -8,8 +8,12 @@ from dataclasses import dataclass, replace
 from typing import TYPE_CHECKING, Any
 
 from agentloom.configuration import C
+from agentloom.runtime import get_current_run_context
 from agentloom.runtime.agent_runtime import (
     AgentRuntimeRequest,
+    AgentRuntimeResult,
+    RuntimeEvent,
+    RuntimeRequirements,
     require_runtime_state,
 )
 from agentloom.runtime.hooks import HookEvent, HookRun
@@ -54,6 +58,53 @@ def goal_completion_output(segment_output: Any, evidence: str | None) -> Any:
     ):
         return evidence
     return segment_output if segment_output is not None else evidence
+
+
+def _runtime_requirements(
+    config: dict[str, Any],
+    *,
+    checkpoint_active: bool,
+) -> RuntimeRequirements:
+    """Compile only semantic features exercised by this invocation."""
+
+    concurrency = config.get("concurrency")
+    parallel_tools = (
+        concurrency == "auto"
+        or (
+            isinstance(concurrency, int)
+            and not isinstance(concurrency, bool)
+            and concurrency > 1
+        )
+    )
+    checkpoint = config.get("checkpoint")
+    return RuntimeRequirements(
+        structured_tools=True,
+        parallel_tools=parallel_tools,
+        checkpoint_resume=(
+            checkpoint_active
+            or (
+                isinstance(checkpoint, dict)
+                and checkpoint.get("enabled") is True
+            )
+        ),
+        subagents=bool(config.get("worker_agents")),
+    )
+
+
+def _merge_runtime_events(
+    observed: list[RuntimeEvent],
+    result: AgentRuntimeResult,
+    *,
+    segment_start: int,
+) -> AgentRuntimeResult:
+    """Retain one ordered invocation event history across runtime segments."""
+
+    segment_events = observed[segment_start:]
+    for event in result.events:
+        if event not in segment_events:
+            observed.append(event)
+            segment_events.append(event)
+    return replace(result, events=tuple(observed))
 
 
 @dataclass(slots=True)
@@ -325,6 +376,41 @@ class AgentInvocation:
         runtime_checkpoint: Any = None,
         checkpoint_sink: Any = None,
     ) -> tuple[Any, Any]:
+        runtime_context = get_current_run_context()
+        execution_context = capture_explicit_execution_context()
+        effective_config = (
+            self.owner._effective_agent_config or self.owner._config
+        )
+        requirements = _runtime_requirements(
+            effective_config,
+            checkpoint_active=(
+                runtime_checkpoint is not None
+                or checkpoint_sink is not None
+                or self.resume
+            ),
+        )
+        request_identity = {
+            "application_id": (
+                runtime_context.application_id
+                if runtime_context is not None
+                else None
+            ),
+            "task_id": (
+                runtime_context.task_id
+                if runtime_context is not None
+                else execution_context.task_id
+            ),
+            "run_id": (
+                runtime_context.run_id
+                if runtime_context is not None
+                else (
+                    execution_context.root_run_id
+                    or execution_context.local_run_id
+                )
+            ),
+            "requirements": requirements,
+        }
+        runtime_events: list[RuntimeEvent] = []
         if goal_provider is None:
             result = None
             for task_index, current_task in enumerate(transformed_tasks):
@@ -333,9 +419,12 @@ class AgentInvocation:
                     current_task,
                     additional_args=self.additional_args or {},
                 )
+                segment_start = len(runtime_events)
                 run_result = runtime_agent.run(
                     AgentRuntimeRequest(
                         task=current_task,
+                        **request_identity,
+                        event_sink=runtime_events.append,
                         continue_session=self.resume or task_index > 0,
                         record_task=task_index > 0,
                         additional_args=self.additional_args or {},
@@ -344,6 +433,11 @@ class AgentInvocation:
                         ),
                         checkpoint_sink=checkpoint_sink,
                     )
+                )
+                run_result = _merge_runtime_events(
+                    runtime_events,
+                    run_result,
+                    segment_start=segment_start,
                 )
                 require_runtime_state(
                     run_result,
@@ -372,9 +466,12 @@ class AgentInvocation:
                     current_task,
                     additional_args=self.additional_args or {},
                 )
+                segment_start = len(runtime_events)
                 run_result = runtime_agent.run(
                     AgentRuntimeRequest(
                         task=current_task,
+                        **request_identity,
+                        event_sink=runtime_events.append,
                         continue_session=(
                             self.resume
                             or segment_index > 0
@@ -387,6 +484,11 @@ class AgentInvocation:
                         ),
                         checkpoint_sink=checkpoint_sink,
                     )
+                )
+                run_result = _merge_runtime_events(
+                    runtime_events,
+                    run_result,
+                    segment_start=segment_start,
                 )
             except Exception as exc:
                 from agentloom.runtime.goal import GoalBudgetLimitedError, GoalCompleteError

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from contextlib import nullcontext
 from contextvars import ContextVar
 from importlib.metadata import PackageNotFoundError, version
 from threading import RLock
@@ -15,19 +16,111 @@ from agentloom.adapters.smolagents.conversation_recovery import (
     prepare_steps_for_resume,
 )
 from agentloom.runtime.agent_runtime import (
+    AgentRuntimeError,
     AgentRuntimeRequest,
     AgentRuntimeResult,
+    JSONValue,
     RuntimeCapabilities,
     RuntimeCheckpointEnvelope,
+    RuntimeEvent,
+    RuntimeEventKind,
+    RuntimeUsage,
     require_runtime_state,
 )
+from agentloom.runtime.model_protocol import ModelProtocolError, ModelTurnResult
 from agentloom.runtime.tool_gateway import ToolGateway
-from agentloom.runtime.trace import capture_explicit_execution_context
+from agentloom.runtime.tool_protocol import ToolCallRecord
 
 try:
     _SMOLAGENTS_VERSION = version("smolagents")
 except PackageNotFoundError:  # pragma: no cover - importing this adapter requires smolagents
     _SMOLAGENTS_VERSION = "unknown"
+
+
+def _exception_chain(error: Exception) -> tuple[Exception, ...]:
+    chain: list[Exception] = []
+    current: BaseException | None = error
+    visited: set[int] = set()
+    while isinstance(current, Exception) and id(current) not in visited:
+        visited.add(id(current))
+        chain.append(current)
+        current = current.__cause__ or current.__context__
+    return tuple(chain)
+
+
+def _goal_control_error(error: Exception) -> Exception | None:
+    from agentloom.runtime.goal import GoalBudgetLimitedError, GoalCompleteError
+
+    return next(
+        (
+            item
+            for item in _exception_chain(error)
+            if isinstance(item, (GoalCompleteError, GoalBudgetLimitedError))
+        ),
+        None,
+    )
+
+
+def _provider_cause(error: Exception) -> Exception | None:
+    from litellm.exceptions import (
+        APIConnectionError,
+        APIError,
+        AuthenticationError,
+        BadRequestError,
+        InternalServerError,
+        NotFoundError,
+        PermissionDeniedError,
+        RateLimitError,
+        ServiceUnavailableError,
+        Timeout,
+        UnsupportedParamsError,
+    )
+
+    provider_types = (
+        APIConnectionError,
+        APIError,
+        AuthenticationError,
+        BadRequestError,
+        InternalServerError,
+        NotFoundError,
+        PermissionDeniedError,
+        RateLimitError,
+        ServiceUnavailableError,
+        Timeout,
+        UnsupportedParamsError,
+        ModelProtocolError,
+    )
+    return next(
+        (
+            item
+            for item in _exception_chain(error)
+            if isinstance(item, provider_types)
+        ),
+        None,
+    )
+
+
+def _runtime_error(error: Exception) -> AgentRuntimeError:
+    if isinstance(error, AgentRuntimeError):
+        return error
+    provider_cause = _provider_cause(error)
+    if provider_cause is not None:
+        from agentloom.adapters.litellm.litellm_retry import (
+            is_retryable_litellm_error,
+        )
+
+        return AgentRuntimeError(
+            f"Agent runtime provider failure: {provider_cause}",
+            category="provider",
+            cause=provider_cause,
+            retryable=is_retryable_litellm_error(provider_cause),
+        )
+    return AgentRuntimeError(
+        f"Agent runtime internal failure: {error}",
+        category="internal",
+        cause=error,
+        retryable=False,
+    )
 
 
 class SmolagentsRuntimeAdapter:
@@ -51,6 +144,14 @@ class SmolagentsRuntimeAdapter:
         self._default_checkpoint_sink = checkpoint_sink
         self._checkpoint_sink_context: ContextVar[Any | None] = ContextVar(
             f"agentloom_smolagents_checkpoint_sink_{id(self)}",
+            default=None,
+        )
+        self._request_context: ContextVar[AgentRuntimeRequest | None] = ContextVar(
+            f"agentloom_smolagents_request_{id(self)}",
+            default=None,
+        )
+        self._event_context: ContextVar[list[RuntimeEvent] | None] = ContextVar(
+            f"agentloom_smolagents_events_{id(self)}",
             default=None,
         )
         self._close_lock = RLock()
@@ -77,13 +178,26 @@ class SmolagentsRuntimeAdapter:
                 memory_steps
             )
         )
-        execution = capture_explicit_execution_context()
+        request = self._request_context.get()
+        application_context = None
+        if request is None:
+            from agentloom.runtime import get_current_run_context
+
+            application_context = get_current_run_context()
         return RuntimeCheckpointEnvelope(
             runtime_id=self.runtime_id,
             runtime_version=self.runtime_version,
             state_schema_version=self.state_schema_version,
-            task_id=execution.task_id,
-            run_id=execution.local_run_id,
+            task_id=(
+                request.task_id
+                if request is not None
+                else getattr(application_context, "task_id", None)
+            ),
+            run_id=(
+                request.run_id
+                if request is not None
+                else getattr(application_context, "run_id", None)
+            ),
             progress=len(memory_steps),
             audit_metadata={
                 "native_step_count": len(memory_steps),
@@ -94,6 +208,81 @@ class SmolagentsRuntimeAdapter:
                     memory_steps
                 ),
                 CANONICAL_MODEL_ITEMS_KEY: canonical_items,
+            },
+        )
+
+    def _event(
+        self,
+        kind: RuntimeEventKind,
+        *,
+        details: dict[str, JSONValue] | None = None,
+    ) -> RuntimeEvent:
+        request = self._request_context.get()
+        return RuntimeEvent(
+            kind=kind,
+            application_id=request.application_id if request is not None else None,
+            task_id=request.task_id if request is not None else None,
+            run_id=request.run_id if request is not None else None,
+            details=details or {},
+        )
+
+    def _emit_event(
+        self,
+        kind: RuntimeEventKind,
+        *,
+        details: dict[str, JSONValue] | None = None,
+    ) -> RuntimeEvent:
+        event = self._event(kind, details=details)
+        events = self._event_context.get()
+        if events is not None:
+            events.append(event)
+        request = self._request_context.get()
+        if request is not None and request.event_sink is not None:
+            try:
+                request.event_sink(event)
+            except Exception:
+                pass
+        return event
+
+    def _emit_step_events(self, step: Any) -> None:
+        records = getattr(step, "tool_results", None) or ()
+        for record in records:
+            if not isinstance(record, ToolCallRecord):
+                continue
+            self._emit_event(
+                "tool",
+                details={
+                    "call_id": record.call_id,
+                    "name": record.tool_name,
+                    "status": record.status,
+                },
+            )
+
+    def _observe_model_turn(self, turn: ModelTurnResult) -> None:
+        self._emit_event(
+            "model",
+            details={
+                "phase": "completed",
+                "item_count": len(turn.items),
+                "response_id": turn.response_id,
+            },
+        )
+        usage = RuntimeUsage(
+            input_tokens=turn.usage.input_tokens,
+            output_tokens=turn.usage.output_tokens,
+            total_tokens=turn.usage.total_tokens,
+            cached_input_tokens=turn.usage.cached_input_tokens,
+            reasoning_tokens=turn.usage.reasoning_tokens,
+            details=turn.usage.details,
+        )
+        self._emit_event(
+            "usage",
+            details={
+                "input_tokens": usage.input_tokens,
+                "output_tokens": usage.output_tokens,
+                "total_tokens": usage.total_tokens,
+                "cached_input_tokens": usage.cached_input_tokens,
+                "reasoning_tokens": usage.reasoning_tokens,
             },
         )
 
@@ -131,7 +320,8 @@ class SmolagentsRuntimeAdapter:
 
         from smolagents.memory import ActionStep
 
-        def push_checkpoint(completed_step: Any, **kwargs: Any) -> None:
+        def observe_completed_step(completed_step: Any, **kwargs: Any) -> None:
+            self._emit_step_events(completed_step)
             checkpoint_sink = (
                 self._checkpoint_sink_context.get()
                 or self._default_checkpoint_sink
@@ -143,44 +333,117 @@ class SmolagentsRuntimeAdapter:
                 not steps or steps[-1] is not completed_step
             ):
                 steps.append(completed_step)
-            checkpoint_sink(self._checkpoint(steps))
+            checkpoint = self._checkpoint(steps)
+            checkpoint_sink(checkpoint)
+            self._emit_event(
+                "checkpoint",
+                details={"progress": checkpoint.progress},
+            )
 
-        callbacks.register(ActionStep, push_checkpoint)
+        callbacks.register(ActionStep, observe_completed_step)
 
     def run(self, request: AgentRuntimeRequest) -> AgentRuntimeResult:
-        if request.checkpoint is not None:
-            self.restore(request.checkpoint)
-
-        run_kwargs: dict[str, Any] = {
-            "task": request.task,
-            "return_full_result": True,
-            "reset": not request.continue_session,
-        }
-        if request.continue_session and request.record_task:
-            run_kwargs["_skip_task_step_on_reset_false"] = False
-        if request.additional_args:
-            run_kwargs["additional_args"] = dict(request.additional_args)
-
-        checkpoint_sink = request.checkpoint_sink or self._default_checkpoint_sink
-        token = self._checkpoint_sink_context.set(checkpoint_sink)
+        events: list[RuntimeEvent] = []
+        request_token = self._request_context.set(request)
+        event_token = self._event_context.set(events)
         try:
-            native_result = self._native_runtime.run(**run_kwargs)
+            unsupported = request.requirements.unsupported_by(
+                self.capabilities
+            )
+            if unsupported:
+                raise AgentRuntimeError(
+                    "Agent runtime 'smolagents' does not support required "
+                    f"capabilities: {', '.join(unsupported)}",
+                    category="unsupported_capability",
+                    retryable=False,
+                )
+            self._emit_event(
+                "run",
+                details={
+                    "phase": "started",
+                    "resumed": request.checkpoint is not None,
+                },
+            )
+            if request.checkpoint is not None:
+                self.restore(request.checkpoint)
+
+            run_kwargs: dict[str, Any] = {
+                "task": request.task,
+                "return_full_result": True,
+                "reset": not request.continue_session,
+            }
+            if request.continue_session and request.record_task:
+                run_kwargs["_skip_task_step_on_reset_false"] = False
+            if request.additional_args:
+                run_kwargs["additional_args"] = dict(request.additional_args)
+
+            checkpoint_sink = request.checkpoint_sink or self._default_checkpoint_sink
+            checkpoint_token = self._checkpoint_sink_context.set(checkpoint_sink)
+            native = getattr(self._native_runtime, "_agent", self._native_runtime)
+            observe_turns = getattr(getattr(native, "model", None), "observe_turns", None)
+            model_observer = (
+                observe_turns(self._observe_model_turn)
+                if callable(observe_turns)
+                else nullcontext()
+            )
+            try:
+                with model_observer:
+                    native_result = self._native_runtime.run(**run_kwargs)
+            finally:
+                self._checkpoint_sink_context.reset(checkpoint_token)
+            require_runtime_state(
+                native_result,
+                allowed_states={"success", "max_steps_error"},
+                error_prefix="Agent run did not complete successfully",
+            )
+            usage = RuntimeUsage.from_value(
+                getattr(native_result, "token_usage", None)
+            )
+            checkpoint = self._checkpoint()
+            if checkpoint_sink is not None:
+                checkpoint_sink(checkpoint)
+            self._emit_event(
+                "checkpoint",
+                details={"progress": checkpoint.progress},
+            )
+            self._emit_event(
+                "usage",
+                details={
+                    "input_tokens": usage.input_tokens,
+                    "output_tokens": usage.output_tokens,
+                    "total_tokens": usage.total_tokens,
+                },
+            )
+            self._emit_event(
+                "terminal",
+                details={"state": getattr(native_result, "state", "success")},
+            )
+            return AgentRuntimeResult(
+                state=getattr(native_result, "state", "success"),
+                output=getattr(native_result, "output", None),
+                usage=usage,
+                events=tuple(events),
+                checkpoint=checkpoint,
+            )
+        except Exception as exc:
+            control_error = _goal_control_error(exc)
+            if control_error is not None:
+                if control_error is exc:
+                    raise
+                raise control_error from exc
+            error = _runtime_error(exc)
+            self._emit_event(
+                "terminal",
+                details={
+                    "state": "failed",
+                    "category": error.category,
+                    "retryable": error.retryable,
+                },
+            )
+            raise error from error.cause
         finally:
-            self._checkpoint_sink_context.reset(token)
-        require_runtime_state(
-            native_result,
-            allowed_states={"success", "max_steps_error"},
-            error_prefix="Agent run did not complete successfully",
-        )
-        checkpoint = self._checkpoint()
-        if checkpoint_sink is not None:
-            checkpoint_sink(checkpoint)
-        return AgentRuntimeResult(
-            state=getattr(native_result, "state", "success"),
-            output=getattr(native_result, "output", None),
-            usage=getattr(native_result, "token_usage", None),
-            checkpoint=checkpoint,
-        )
+            self._event_context.reset(event_token)
+            self._request_context.reset(request_token)
 
     def close(self) -> None:
         with self._close_lock:
