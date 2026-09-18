@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 from contextlib import nullcontext
-from contextvars import ContextVar
 from copy import deepcopy
 from dataclasses import dataclass, replace
 from typing import TYPE_CHECKING, Any
@@ -24,9 +23,6 @@ from agentloom.runtime.workspace import ensure_workspace_mounted_once
 
 if TYPE_CHECKING:
     from agentloom.application.lifecycle import ApplicationRunLifecycle
-
-
-current_worker_memory: ContextVar[list | None] = ContextVar("current_worker_memory", default=None)
 
 
 def require_runtime_result(
@@ -283,11 +279,6 @@ class AgentInvocation:
                 goal_provider=goal_provider,
                 runtime_checkpoint=runtime_checkpoint,
                 checkpoint_sink=checkpoint_sink,
-            )
-            current_worker_memory.set(
-                None
-                if runtime_result is None or runtime_result.checkpoint is None
-                else runtime_result.checkpoint.to_dict()
             )
             owner._emit_task_lifecycle_event(
                 HookEvent.TASK_COMPLETED,

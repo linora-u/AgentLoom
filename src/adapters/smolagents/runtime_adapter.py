@@ -6,6 +6,12 @@ from contextvars import ContextVar
 from importlib.metadata import PackageNotFoundError, version
 from typing import Any
 
+from agentloom.adapters.smolagents.checkpoint_codec import (
+    SmolagentsCheckpointCodec,
+)
+from agentloom.adapters.smolagents.conversation_recovery import (
+    prepare_steps_for_resume,
+)
 from agentloom.runtime.agent_runtime import (
     AgentRuntimeRequest,
     AgentRuntimeResult,
@@ -13,10 +19,6 @@ from agentloom.runtime.agent_runtime import (
     RuntimeCheckpointEnvelope,
     require_runtime_state,
 )
-from agentloom.runtime.checkpoint.conversation_recovery import (
-    prepare_steps_for_resume,
-)
-from agentloom.runtime.checkpoint.serializer import CheckpointSerializer
 
 try:
     _SMOLAGENTS_VERSION = version("smolagents")
@@ -71,9 +73,31 @@ class SmolagentsRuntimeAdapter:
             runtime_version=self.runtime_version,
             state_schema_version=self.state_schema_version,
             payload={
-                "memory_steps": CheckpointSerializer.serialize_memory_steps(memory_steps)
+                "memory_steps": SmolagentsCheckpointCodec.serialize_memory_steps(
+                    memory_steps
+                ),
+                "step_count": len(memory_steps),
             },
         )
+
+    def snapshot(self) -> RuntimeCheckpointEnvelope:
+        """Capture the native runtime state as an opaque runtime envelope."""
+
+        return self._checkpoint()
+
+    def restore(self, checkpoint: RuntimeCheckpointEnvelope) -> None:
+        """Restore a compatible envelope into the native smolagents runtime."""
+
+        checkpoint.require_compatible(
+            runtime_id=self.runtime_id,
+            state_schema_version=self.state_schema_version,
+        )
+        raw_steps = checkpoint.payload.get("memory_steps", [])
+        steps = SmolagentsCheckpointCodec.deserialize_memory_steps(
+            list(raw_steps)
+        )
+        steps, _interruption = prepare_steps_for_resume(steps)
+        self._native_runtime.memory.steps = steps
 
     def _register_checkpoint_bridge(self) -> None:
         native = getattr(self._native_runtime, "_agent", self._native_runtime)
@@ -101,14 +125,7 @@ class SmolagentsRuntimeAdapter:
 
     def run(self, request: AgentRuntimeRequest) -> AgentRuntimeResult:
         if request.checkpoint is not None:
-            request.checkpoint.require_compatible(
-                runtime_id=self.runtime_id,
-                state_schema_version=self.state_schema_version,
-            )
-            raw_steps = request.checkpoint.payload.get("memory_steps", [])
-            steps = CheckpointSerializer.deserialize_memory_steps(list(raw_steps))
-            steps, _interruption = prepare_steps_for_resume(steps)
-            self._native_runtime.memory.steps = steps
+            self.restore(request.checkpoint)
 
         run_kwargs: dict[str, Any] = {
             "task": request.task,

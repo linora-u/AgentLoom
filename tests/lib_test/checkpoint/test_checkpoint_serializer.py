@@ -1,15 +1,17 @@
-"""Tests for ``agentloom.runtime.checkpoint.serializer.CheckpointSerializer``."""
+"""Tests for the smolagents-owned checkpoint codec."""
 
 from __future__ import annotations
 
 import json
 import time
 
+from agentloom.adapters.smolagents.checkpoint_codec import (
+    SmolagentsCheckpointCodec as CheckpointSerializer,
+)
 from agentloom.adapters.smolagents.model_turn_bridge import (
     MODEL_ITEMS_RAW_KEY,
     MODEL_RESPONSE_ID_RAW_KEY,
 )
-from agentloom.runtime.checkpoint.serializer import CheckpointSerializer
 from agentloom.runtime.model_protocol import FunctionCallItem, ReasoningItem
 from agentloom.runtime.tool_protocol import ToolCallRecord, ToolErrorRecord
 from smolagents.memory import ActionStep, PlanningStep, TaskStep, ToolCall

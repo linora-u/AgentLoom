@@ -11,7 +11,7 @@ import uuid
 from abc import ABC, abstractmethod
 from collections.abc import Callable
 from copy import deepcopy
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from enum import Enum
 from pathlib import Path
 from threading import RLock
@@ -40,7 +40,12 @@ from agentloom.configuration import (
 from agentloom.configuration.defaults import DEFAULT_MAX_TOKENS
 from agentloom.runtime.agent_runtime import (
     AgentRuntime,
+    AgentRuntimeRequest,
+    AgentRuntimeResult,
+    RuntimeCapabilities,
+    RuntimeCheckpointEnvelope,
     build_builtin_runtime_registry,
+    require_runtime_state,
 )
 from agentloom.runtime.hooks import (
     HookConfigLayer,
@@ -49,7 +54,6 @@ from agentloom.runtime.hooks import (
     HookPlanCompiler,
     builtin_hook_handlers,
 )
-from agentloom.runtime.invocation import current_worker_memory, require_successful_runtime_result
 from agentloom.runtime.logging import (
     get_global_logger,
     get_logger,
@@ -67,13 +71,7 @@ from agentloom.runtime.trace import (
 )
 from agentloom.runtime.workspace import ensure_workspace_mounted_once
 from agentloom.tools.loader import resolve_tool_function
-from smolagents import (
-    AgentLogger,
-    LogLevel,
-    RunResult,
-    Tool,
-    ToolCallingAgent,
-)
+from smolagents import AgentLogger, LogLevel, Tool, ToolCallingAgent
 
 
 class AgentType(Enum):
@@ -755,7 +753,11 @@ class RoleDrivenAgent(BaseAgent):
         registry = build_builtin_runtime_registry(
             smolagents_factory=self._build_smolagents_runtime,
         )
-        return registry.create(runtime_id)
+        runtime = registry.create(runtime_id)
+        profile = self._role_profile()
+        if profile.enable_sub_task_tracking:
+            return SubTaskTrackedAgent(runtime, self.name)
+        return runtime
 
     def _build_smolagents_runtime(self) -> AgentRuntime:
         """Construct the smolagents adapter behind the registry factory."""
@@ -897,10 +899,6 @@ class RoleDrivenAgent(BaseAgent):
         max_parse_errors = self._config.get("max_consecutive_parse_errors", 5)
         agent._max_consecutive_parse_errors = max_parse_errors  # type: ignore[attr-defined]
 
-        if enable_sub_task_tracking:
-            resolved_agent_name = agent_name or self.name
-            agent = SubTaskTrackedAgent(agent, resolved_agent_name)
-
         return agent
 
     def _bind_hook_message_sink(self, runtime_agent: Any) -> None:
@@ -968,51 +966,48 @@ class SubTaskTrackedAgent:
     """
     Sub-task tracing wrapper that provides an isolated tracing chain for worker agents.
 
-    This class wraps the original CodeAgent/ToolCallingAgent and automatically
-    creates sub-task context during execution.
+    This class wraps a complete-run ``AgentRuntime`` and automatically creates
+    sub-task context during execution.
     Telemetry collection has been removed; agent_id is injected for LiteLLM/Langfuse tracing.
     """
 
-    def __init__(self, agent, agent_name: str):
+    def __init__(self, runtime: AgentRuntime, agent_name: str):
         """
         Initialize sub-task tracing wrapper.
 
         Args:
-            agent: Original CodeAgent or ToolCallingAgent instance.
+            runtime: Runtime-neutral complete-run Agent adapter.
             agent_name: Agent name, used to generate sub-task IDs.
         """
-        self._agent = agent
+        self._runtime = runtime
         self._agent_name = agent_name
-        self._log = get_logger(getattr(agent, "logger", None), __name__)
+        self._log = get_logger(getattr(runtime, "logger", None), __name__)
 
-        # Proxy all attributes to original agent (except overridden methods)
-        excluded_attrs = {"run", "__call__"}
-        for attr in dir(self._agent):
-            if (
-                not attr.startswith("_")
-                and attr not in excluded_attrs
-                and hasattr(self._agent, attr)
-                and not callable(getattr(self._agent, attr, None))
-            ):
-                setattr(self, attr, getattr(self._agent, attr))
+    @property
+    def runtime_id(self) -> str:
+        return self._runtime.runtime_id
+
+    @property
+    def capabilities(self) -> RuntimeCapabilities:
+        return self._runtime.capabilities
+
+    @property
+    def logger(self) -> Any:
+        return getattr(self._runtime, "logger", None)
 
     @staticmethod
     def _compute_input_hash(task_text: str) -> str:
         """Short hash of the worker input for skip-on-resume matching."""
         return _hashlib.sha256(str(task_text).encode()).hexdigest()[:16]
 
-    def _snapshot_worker_memory(self) -> list | None:
-        """Return the wrapped runtime agent memory at the lifecycle boundary."""
+    def _snapshot_runtime(self) -> RuntimeCheckpointEnvelope | None:
+        """Return the wrapped runtime's opaque state envelope."""
         try:
-            memory = getattr(self._agent, "memory", None)
-            steps = getattr(memory, "steps", None)
-            if steps is not None:
-                return list(steps)
+            return self._runtime.snapshot()
         except Exception:
-            pass
-        return current_worker_memory.get(None)
+            return None
 
-    def _execute_with_lifecycle(self, callable_fn, task, call_label, *args, **kwargs):
+    def run(self, request: AgentRuntimeRequest) -> AgentRuntimeResult:
         """Run callable within sub-task context, broadcasting lifecycle events.
 
         Emits ``SubagentStart`` before execution and ``SubagentStop`` after
@@ -1026,10 +1021,14 @@ class SubTaskTrackedAgent:
         from agentloom.runtime.checkpoint.coordinator import CheckpointCoordinator
 
         with sub_task_context(self._agent_name) as sub_task_id:
-            self._log.debug(f"Starting sub-task {sub_task_id} (agent: {self._agent_name}) via {call_label}")
+            self._log.debug(
+                "Starting sub-task %s (agent: %s)",
+                sub_task_id,
+                self._agent_name,
+            )
 
             coord = CheckpointCoordinator.current()
-            input_hash = self._compute_input_hash(task)
+            input_hash = self._compute_input_hash(request.task)
 
             # Claim/allocate exactly one logical call before side effects.  The
             # explicit outcome distinguishes a cached ``None``/empty result
@@ -1038,8 +1037,7 @@ class SubTaskTrackedAgent:
                 preparation = coord.prepare_worker_call(
                     self._agent_name,
                     input_hash,
-                    str(task),
-                    runtime_agent=self._agent,
+                    request.task,
                 )
                 if not preparation.should_execute:
                     self._log.info(
@@ -1047,21 +1045,10 @@ class SubTaskTrackedAgent:
                         self._agent_name,
                         input_hash[:8],
                     )
-                    # The checkpoint stores the Worker output, not the upstream
-                    # execution envelope. Preserve the caller's requested return
-                    # shape when replaying a completed call without executing it.
-                    wants_full_result = kwargs.get("return_full_result")
-                    if wants_full_result is None:
-                        wants_full_result = getattr(self._agent, "return_full_result", False)
-                    if call_label == "run" and wants_full_result:
-                        return RunResult(
-                            output=preparation.cached_result,
-                            state="success",
-                            steps=[],
-                            token_usage=None,
-                            timing=None,
-                        )
-                    return preparation.cached_result
+                    return AgentRuntimeResult(
+                        state="success",
+                        output=preparation.cached_result,
+                    )
                 call_index = preparation.call_index
             else:
                 call_index = 0
@@ -1091,29 +1078,47 @@ class SubTaskTrackedAgent:
             except Exception as hook_err:
                 self._log.warning("SubagentStart hook error: %s", hook_err)
 
-            worker_restored = (
-                coord.restore_worker(self._agent, self._agent_name, call_index) if coord is not None else False
+            checkpoint = (
+                coord.load_worker_runtime_checkpoint(
+                    self._agent_name,
+                    call_index,
+                )
+                if coord is not None
+                else None
             )
-            if worker_restored:
-                kwargs.setdefault("reset", False)
+            checkpoint_sink = (
+                coord.worker_checkpoint_sink(
+                    self._agent_name,
+                    call_index,
+                    input_hash,
+                    request.task,
+                )
+                if coord is not None
+                else request.checkpoint_sink
+            )
+            runtime_request = replace(
+                request,
+                continue_session=request.continue_session
+                or checkpoint is not None,
+                checkpoint=checkpoint or request.checkpoint,
+                checkpoint_sink=checkpoint_sink,
+            )
 
             try:
-                result = callable_fn(task, *args, **kwargs)
-                # RoleDrivenAgent requests a structured RunResult from its
-                # smolagents runtime.  Validate that result before crossing
-                # the checkpoint success boundary; the outer RoleDrivenAgent
-                # check is intentionally too late to prevent a completed
-                # worker checkpoint from being reused on resume.
-                if isinstance(result, RunResult):
-                    require_successful_runtime_result(result)
+                result = self._runtime.run(runtime_request)
+                require_runtime_state(
+                    result,
+                    allowed_states={"success"},
+                    error_prefix="Worker run did not complete successfully",
+                )
             except KeyboardInterrupt:
                 if coord is not None:
                     coord.record_worker_interrupted(
                         self._agent_name,
                         call_index,
                         input_hash,
-                        str(task),
-                        self._snapshot_worker_memory(),
+                        request.task,
+                        self._snapshot_runtime(),
                     )
                 raise
             except Exception as exc:
@@ -1122,9 +1127,9 @@ class SubTaskTrackedAgent:
                         self._agent_name,
                         call_index,
                         input_hash,
-                        str(task),
+                        request.task,
                         str(exc),
-                        self._snapshot_worker_memory(),
+                        self._snapshot_runtime(),
                     )
                 try:
                     lifecycle_run.dispatch(
@@ -1143,9 +1148,9 @@ class SubTaskTrackedAgent:
                     self._agent_name,
                     call_index,
                     input_hash,
-                    str(task),
-                    result.output if isinstance(result, RunResult) else result,
-                    self._snapshot_worker_memory(),
+                    request.task,
+                    result.output,
+                    result.checkpoint or self._snapshot_runtime(),
                 )
 
             try:
@@ -1158,38 +1163,11 @@ class SubTaskTrackedAgent:
             except Exception as hook_err:
                 self._log.warning("SubagentStop hook error: %s", hook_err)
 
-            self._log.debug(f"Finished sub-task {sub_task_id}")
+            self._log.debug("Finished sub-task %s", sub_task_id)
             return result
 
-    def run(self, task: str, *args, **kwargs):
-        """
-        Run task within sub-task context.
+    def snapshot(self) -> RuntimeCheckpointEnvelope:
+        return self._runtime.snapshot()
 
-        Args:
-            task: Task description.
-            *args, **kwargs: Arguments forwarded to original agent.
-
-        Returns:
-            Task execution result.
-        """
-        return self._execute_with_lifecycle(self._agent.run, task, "run", *args, **kwargs)
-
-    def __call__(self, task: str, **kwargs):
-        """
-        Call agent within sub-task context (method used by smolagents framework).
-
-        Args:
-            task: Task description.
-            **kwargs: Arguments forwarded to original agent.
-
-        Returns:
-            Task execution result.
-        """
-        return self._execute_with_lifecycle(self._agent, task, "__call__", **kwargs)
-
-    def __getattr__(self, name):
-        """Proxy undefined attributes to the original agent."""
-        # Do not proxy methods already overridden here
-        if name in ("run", "__call__"):
-            raise AttributeError(f"'{self.__class__.__name__}' object has no attribute '{name}'")
-        return getattr(self._agent, name)
+    def close(self) -> None:
+        self._runtime.close()

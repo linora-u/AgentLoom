@@ -32,11 +32,7 @@ def test_canonical_modules_own_configuration_and_context_state() -> None:
         with config.bind_config('bound'):
             assert agentloom.get_config() == 'bound'
         assert agentloom.get_config() is sentinel
-        token = invocation.current_worker_memory.set(['worker'])
-        try:
-            assert importlib.import_module('agentloom.runtime.invocation').current_worker_memory.get() == ['worker']
-        finally:
-            invocation.current_worker_memory.reset(token)
+        assert not hasattr(invocation, "current_worker_memory")
     """)
 
 

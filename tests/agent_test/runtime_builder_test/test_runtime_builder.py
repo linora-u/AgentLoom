@@ -396,22 +396,33 @@ def test_create_agent_requires_global_logger(monkeypatch):
         set_global_logger(previous_global_logger)
 
 
-def test_create_agent_wraps_sub_task_when_enabled(monkeypatch):
+def test_build_runtime_wraps_worker_runtime_when_tracking_enabled(monkeypatch):
     _patch_agent_classes(monkeypatch)
     previous_global_logger = get_global_logger(create_if_missing=False)
     set_global_logger(DummyLoggerBackend())
 
     try:
         agent = _make_agent(logger=None)
-        wrapped = agent._create_agent(
-            tools=[],
-            use_customized_prompt=False,
-            enable_sub_task_tracking=True,
-            agent_name="worker_agent",
+        native_runtime = object()
+        monkeypatch.setattr(
+            agent,
+            "_build_smolagents_runtime",
+            lambda: native_runtime,
         )
+        monkeypatch.setattr(
+            agent,
+            "_role_profile",
+            lambda: base_agent_module.AgentRoleProfile(
+                agent_type=base_agent_module.AgentType.WORKER,
+                enable_sub_task_tracking=True,
+            ),
+        )
+
+        wrapped = agent.build_runtime()
+
         assert isinstance(wrapped, DummyWrapper)
-        assert wrapped.agent_name == "worker_agent"
-        assert isinstance(wrapped.agent, DummySmolagentsAgent)
+        assert wrapped.agent_name == agent.name
+        assert wrapped.agent is native_runtime
     finally:
         set_global_logger(previous_global_logger)
 
@@ -951,21 +962,27 @@ def test_max_steps_root_is_a_failure_and_never_runs_memory_review(monkeypatch):
 def test_max_steps_worker_is_failed_before_checkpoint_success(tmp_path, monkeypatch):
     from agentloom.runtime.checkpoint import CheckpointManager
     from agentloom.runtime.checkpoint.coordinator import CheckpointCoordinator
-    from smolagents import RunResult
 
     class MaxStepsWorkerRuntime:
-        def __init__(self):
-            self.logger = DummyLoggerBackend()
-            self.memory = type("Memory", (), {"steps": []})()
+        runtime_id = "test"
+        capabilities = base_agent_module.RuntimeCapabilities(
+            structured_tools=True,
+            parallel_tools=True,
+            checkpoint_resume=True,
+            subagents=True,
+        )
 
-        def run(self, task, *args, **kwargs):
-            return RunResult(
+        def run(self, request):
+            return AgentRuntimeResult(
                 output="fallback answer",
                 state="max_steps_error",
-                steps=[],
-                token_usage=None,
-                timing=None,
             )
+
+        def snapshot(self):
+            return None
+
+        def close(self):
+            return None
 
     checkpoint_manager = CheckpointManager(
         "supervisor",
@@ -988,7 +1005,7 @@ def test_max_steps_worker_is_failed_before_checkpoint_success(tmp_path, monkeypa
     )
 
     with pytest.raises(RuntimeError, match="max_steps_error"):
-        worker.run("delegate work", return_full_result=True)
+        worker.run(AgentRuntimeRequest(task="delegate work"))
 
     tree = checkpoint_manager.load_task_tree("task-max-steps-worker")
     worker_call = tree["workers"]["max_steps_worker"][0]
@@ -1007,21 +1024,31 @@ def test_completed_worker_resume_replays_output_in_requested_shape(tmp_path, mon
     from agentloom.runtime.checkpoint.coordinator import CheckpointCoordinator
     from agentloom.runtime.goal import GoalState
     from agentloom.runtime.goal.provider import GoalStateProvider
-    from smolagents import RunResult
-    from smolagents.monitoring import TokenUsage
 
     provider = GoalStateProvider(GoalState.create(objective="delegate", objective_fingerprint="test", token_budget=1000))
 
     class SuccessfulRuntime:
+        runtime_id = "test"
+        capabilities = base_agent_module.RuntimeCapabilities(
+            structured_tools=True,
+            parallel_tools=True,
+            checkpoint_resume=True,
+            subagents=True,
+        )
+
         def __init__(self):
-            self.logger = DummyLoggerBackend()
-            self.memory = type("Memory", (), {"steps": []})()
             self.calls = 0
 
-        def run(self, task, *args, **kwargs):
+        def run(self, request):
             self.calls += 1
             provider.record_usage(prompt_tokens=20, completion_tokens=11)
-            return RunResult(output=output, state="success", steps=[], token_usage=TokenUsage(20, 11), timing=None)
+            return AgentRuntimeResult(output=output, state="success")
+
+        def snapshot(self):
+            return None
+
+        def close(self):
+            return None
 
     manager = CheckpointManager("supervisor", checkpoints_root=tmp_path, run_id="run_initial")
     coordinator = CheckpointCoordinator(manager, "task-completed-worker", "delegate")
@@ -1029,7 +1056,7 @@ def test_completed_worker_resume_replays_output_in_requested_shape(tmp_path, mon
     runtime = SuccessfulRuntime()
     worker = base_agent_module.SubTaskTrackedAgent(runtime, "completed_worker")
 
-    initial = worker.run("delegate", return_full_result=True)
+    initial = worker.run(AgentRuntimeRequest(task="delegate"))
     assert initial.output == output
     checkpoint = manager.load_worker_checkpoint("task-completed-worker", "completed_worker", call_index=0)
     assert checkpoint.get("result") == output
@@ -1038,10 +1065,10 @@ def test_completed_worker_resume_replays_output_in_requested_shape(tmp_path, mon
     manager = CheckpointManager("supervisor", checkpoints_root=tmp_path, run_id="run_resume")
 
     coordinator = CheckpointCoordinator(manager, "task-completed-worker", "delegate", resume=True)
-    resumed = worker.run("delegate", return_full_result=True)
+    resumed = worker.run(AgentRuntimeRequest(task="delegate"))
     invocation_module.require_successful_runtime_result(resumed)
     assert resumed.output == initial.output
-    assert resumed.token_usage is None
+    assert resumed.usage is None
     assert provider.snapshot().used_tokens == 31
     assert runtime.calls == 1
     assert len(manager.load_task_tree("task-completed-worker")["workers"]["completed_worker"]) == 1
@@ -1049,7 +1076,7 @@ def test_completed_worker_resume_replays_output_in_requested_shape(tmp_path, mon
     manager.close()
     manager = CheckpointManager("supervisor", checkpoints_root=tmp_path, run_id="run_resume_plain")
     coordinator = CheckpointCoordinator(manager, "task-completed-worker", "delegate", resume=True)
-    assert worker.run("delegate", return_full_result=False) == output
+    assert worker.run(AgentRuntimeRequest(task="delegate")).output == output
     assert runtime.calls == 1
     assert provider.snapshot().used_tokens == 31
     manager.close()
@@ -1063,7 +1090,7 @@ def test_max_steps_managed_worker_fails_before_call_discards_state(
     from agentloom.runtime.checkpoint.coordinator import CheckpointCoordinator
     from smolagents import RunResult
 
-    runtime = base_agent_module.ToolCallingAgentV2(
+    native_runtime = base_agent_module.ToolCallingAgentV2(
         tools=[],
         model=object(),
         max_steps=1,
@@ -1091,8 +1118,11 @@ def test_max_steps_managed_worker_fails_before_call_discards_state(
         "task-max-steps-managed-worker",
         "delegate managed work",
     )
+    from agentloom.adapters.smolagents.runtime_adapter import (
+        SmolagentsRuntimeAdapter,
+    )
     worker = base_agent_module.SubTaskTrackedAgent(
-        runtime,
+        SmolagentsRuntimeAdapter(native_runtime),
         "max_steps_managed_worker",
     )
     monkeypatch.setattr(
@@ -1102,7 +1132,7 @@ def test_max_steps_managed_worker_fails_before_call_discards_state(
     )
 
     with pytest.raises(RuntimeError, match="max_steps_error"):
-        worker("delegate managed work")
+        worker.run(AgentRuntimeRequest(task="delegate managed work"))
 
     tree = checkpoint_manager.load_task_tree("task-max-steps-managed-worker")
     worker_call = tree["workers"]["max_steps_managed_worker"][0]
@@ -1554,9 +1584,15 @@ def test_subagent_lifecycle_belongs_to_parent_while_worker_tools_belong_to_child
     hooked_add = inject_hooks(add)
 
     class _WorkerRuntime:
-        logger = DummyLoggerBackend()
+        runtime_id = "test"
+        capabilities = base_agent_module.RuntimeCapabilities(
+            structured_tools=True,
+            parallel_tools=True,
+            checkpoint_resume=True,
+            subagents=True,
+        )
 
-        def run(self, _task):
+        def run(self, _request):
             current = capture_explicit_execution_context()
             with bind_explicit_execution_context(
                 replace(
@@ -1566,27 +1602,53 @@ def test_subagent_lifecycle_belongs_to_parent_while_worker_tools_belong_to_child
                     root_run_id="root",
                 )
             ):
-                return hooked_add(a=1, b=2)
+                return AgentRuntimeResult(
+                    output=hooked_add(a=1, b=2),
+                    state="success",
+                )
+
+        def snapshot(self):
+            return None
+
+        def close(self):
+            return None
 
     set_current_hook_run(root_run)
     worker = base_agent_module.SubTaskTrackedAgent(_WorkerRuntime(), "worker-agent")
 
-    assert worker.run("delegated") == 3
+    assert worker.run(AgentRuntimeRequest(task="delegated")).output == 3
     assert root_events == ["SubagentStart", "SubagentStop"]
     assert child_events == ["PreToolUse", "PostToolUse"]
 
     class _NestedRuntime:
-        logger = DummyLoggerBackend()
+        runtime_id = "test"
+        capabilities = base_agent_module.RuntimeCapabilities(
+            structured_tools=True,
+            parallel_tools=True,
+            checkpoint_resume=True,
+            subagents=True,
+        )
 
-        def run(self, _task):
-            return "nested"
+        def run(self, _request):
+            return AgentRuntimeResult(output="nested", state="success")
+
+        def snapshot(self):
+            return None
+
+        def close(self):
+            return None
 
     set_current_hook_run(child_run)
     grandchild = base_agent_module.SubTaskTrackedAgent(
         _NestedRuntime(),
         "grandchild-agent",
     )
-    assert grandchild.run("nested delegated") == "nested"
+    assert (
+        grandchild.run(
+            AgentRuntimeRequest(task="nested delegated")
+        ).output
+        == "nested"
+    )
     assert root_events == ["SubagentStart", "SubagentStop"]
     assert child_events == [
         "PreToolUse",
@@ -1612,7 +1674,12 @@ def test_subagent_lifecycle_belongs_to_parent_while_worker_tools_belong_to_child
             _NestedRuntime(),
             "worker-agent",
         )
-        assert prebound_worker.run("prebound") == "nested"
+        assert (
+            prebound_worker.run(
+                AgentRuntimeRequest(task="prebound")
+            ).output
+            == "nested"
+        )
 
     assert root_events == [
         "SubagentStart",

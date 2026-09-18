@@ -5,7 +5,6 @@ from __future__ import annotations
 import json
 import os
 import threading
-import time
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
@@ -243,25 +242,6 @@ class TestSupervisorCheckpoint:
         assert loaded["runtime_checkpoint"] == envelope.to_dict()
         assert loaded["step_count"] == 0
 
-    def test_save_load(self, cm: CheckpointManager, task_id: str):
-        from smolagents.memory import ActionStep, TaskStep
-        from smolagents.monitoring import Timing
-        steps = [
-            TaskStep(task="test task"),
-            ActionStep(step_number=1, timing=Timing(start_time=time.time()), observations="ok"),
-        ]
-        cm.save_supervisor_checkpoint(
-            task_id,
-            memory_steps=steps,
-            task_text="test task",
-            status="interrupted",
-        )
-        loaded = cm.load_supervisor_checkpoint(task_id)
-        assert loaded is not None
-        assert loaded["status"] == "interrupted"
-        assert loaded["step_count"] == 2
-        assert len(loaded["memory_steps"]) == 2
-
     def test_load_nonexistent(self, cm: CheckpointManager, task_id: str):
         assert cm.load_supervisor_checkpoint(task_id) is None
 
@@ -282,8 +262,39 @@ class TestSupervisorCheckpoint:
 
 class TestWorkerCheckpoint:
 
+    def test_save_load_runtime_envelope(
+        self,
+        cm: CheckpointManager,
+        task_id: str,
+    ) -> None:
+        envelope = RuntimeCheckpointEnvelope(
+            runtime_id="smolagents",
+            runtime_version="1.26.0",
+            state_schema_version=1,
+            payload={"memory_steps": [], "step_count": 0},
+        )
+
+        cm.save_worker_runtime_checkpoint(
+            task_id,
+            "search_worker",
+            call_index=2,
+            input_hash="hash",
+            runtime_checkpoint=envelope.to_dict(),
+            task_input="scan src/",
+            status="interrupted",
+        )
+
+        loaded = cm.load_worker_checkpoint(
+            task_id,
+            "search_worker",
+            call_index=2,
+        )
+        assert loaded is not None
+        assert loaded["runtime_checkpoint"] == envelope.to_dict()
+        assert "memory_steps" not in loaded
+
     def test_save_load(self, cm: CheckpointManager, task_id: str):
-        cm.save_worker_checkpoint(
+        cm.save_worker_runtime_checkpoint(
             task_id, "search_worker",
             task_input="scan src/",
             status="completed",
@@ -295,9 +306,9 @@ class TestWorkerCheckpoint:
         assert loaded["result"] == "42 files found"
 
     def test_multiple_workers(self, cm: CheckpointManager, task_id: str):
-        cm.save_worker_checkpoint(task_id, "w1", status="completed", result="done1")
-        cm.save_worker_checkpoint(task_id, "w2", status="failed", error="timeout")
-        cm.save_worker_checkpoint(task_id, "w3", status="interrupted")
+        cm.save_worker_runtime_checkpoint(task_id, "w1", status="completed", result="done1")
+        cm.save_worker_runtime_checkpoint(task_id, "w2", status="failed", error="timeout")
+        cm.save_worker_runtime_checkpoint(task_id, "w3", status="interrupted")
 
         assert cm.load_worker_checkpoint(task_id, "w1")["status"] == "completed"
         assert cm.load_worker_checkpoint(task_id, "w2")["status"] == "failed"
@@ -306,11 +317,11 @@ class TestWorkerCheckpoint:
     def test_worker_checkpoints_are_per_call_and_latest_default(self, cm: CheckpointManager, task_id: str):
         cm.save_task_tree(task_id, {"task_id": task_id, "agent_name": "sup", "status": "running", "workers": {}})
         c0 = cm.record_worker_started(task_id, "repeat_worker", input_hash="h0", task_input="first")
-        cm.save_worker_checkpoint(task_id, "repeat_worker", call_index=c0, status="completed", result="first")
+        cm.save_worker_runtime_checkpoint(task_id, "repeat_worker", call_index=c0, status="completed", result="first")
         cm.record_worker_finished(task_id, "repeat_worker", call_index=c0, status="completed", result="first")
 
         c1 = cm.record_worker_started(task_id, "repeat_worker", input_hash="h1", task_input="second")
-        cm.save_worker_checkpoint(task_id, "repeat_worker", call_index=c1, status="completed", result="second")
+        cm.save_worker_runtime_checkpoint(task_id, "repeat_worker", call_index=c1, status="completed", result="second")
         cm.record_worker_finished(task_id, "repeat_worker", call_index=c1, status="completed", result="second")
 
         assert c0 == 0
