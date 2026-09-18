@@ -264,3 +264,59 @@ def test_context_engine_workers_use_structured_context_ref_handoff(
     assert "one code block" not in workflow
     assert "payload =" not in workflow
     assert "final_answer(payload)" not in workflow
+
+
+@pytest.mark.parametrize(
+    ("relative_path", "expected_tools"),
+    [
+        (
+            "applications/context_engine_text_retrieve_validation/"
+            "workflows/context_engine_text_retrieve_validation_agent.yaml",
+            {
+                "loom_retrieve_context": {
+                    "query": "TARGET_RECORD case=text",
+                    "offset": 0,
+                    "limit": 20,
+                }
+            },
+        ),
+        (
+            "applications/context_engine_json_retrieve_validation/"
+            "workflows/context_engine_json_retrieve_validation_agent.yaml",
+            {
+                "loom_retrieve_context": {
+                    "query": "verification_value",
+                    "offset": 0,
+                    "limit": 30,
+                }
+            },
+        ),
+        (
+            "applications/context_engine_multi_worker_validation/"
+            "workflows/context_engine_multi_worker_validation_agent.yaml",
+            {
+                "retrieve_log_context": {
+                    "query": "LOG_TARGET_RECORD",
+                    "offset": 0,
+                    "limit": 20,
+                },
+                "retrieve_search_context": {
+                    "query": "SEARCH_TARGET_RECORD",
+                    "offset": 0,
+                    "limit": 20,
+                },
+            },
+        ),
+    ],
+)
+def test_context_engine_supervisors_fix_retrieval_parameters(
+    relative_path: str,
+    expected_tools: dict[str, dict[str, object]],
+) -> None:
+    definition = load_agent_definition(PROJECT_ROOT / relative_path)
+    configured_tools = {
+        tool["name"]: tool.get("fixed_args")
+        for tool in definition["tools"]
+    }
+
+    assert configured_tools == expected_tools
