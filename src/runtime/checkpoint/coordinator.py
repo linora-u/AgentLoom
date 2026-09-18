@@ -388,45 +388,42 @@ class CheckpointCoordinator:
         runtime_checkpoint: RuntimeCheckpointEnvelope | None,
     ) -> None:
         """Record successful worker completion."""
-        try:
-            full_result = None if result is None else str(result)
-            stored_result = full_result
-            if full_result and self._context_engine is not None:
-                stored_result = (
-                    self._context_engine.compress_tool_result(
-                        full_result,
-                        tool_name=agent_name,
-                        source=f"worker_result:{agent_name}",
-                    )
-                    or full_result
+        full_result = None if result is None else str(result)
+        stored_result = full_result
+        if full_result and self._context_engine is not None:
+            stored_result = (
+                self._context_engine.compress_tool_result(
+                    full_result,
+                    tool_name=agent_name,
+                    source=f"worker_result:{agent_name}",
                 )
-            self._cm.save_worker_runtime_checkpoint(
-                self._task_id,
-                agent_name,
-                call_index=call_index,
-                input_hash=input_hash,
-                runtime_checkpoint=(
-                    runtime_checkpoint.to_dict()
-                    if runtime_checkpoint is not None
-                    else None
-                ),
-                task_input=str(task_input),
-                status="completed",
-                result=stored_result,
+                or full_result
             )
-            self._cm.record_worker_finished(
-                self._task_id,
-                agent_name,
-                call_index=call_index,
-                input_hash=input_hash,
-                task_input=str(task_input),
-                status="completed",
-                result=stored_result,
-            )
-            # ── Worker heartbeat: mark completed ──
-            self._update_worker_heartbeat(agent_name, call_index, "completed")
-        except Exception:
-            pass
+        self._cm.record_worker_finished(
+            self._task_id,
+            agent_name,
+            call_index=call_index,
+            input_hash=input_hash,
+            task_input=str(task_input),
+            status="completed",
+            result=stored_result,
+        )
+        self._cm.save_worker_runtime_checkpoint(
+            self._task_id,
+            agent_name,
+            call_index=call_index,
+            input_hash=input_hash,
+            runtime_checkpoint=(
+                runtime_checkpoint.to_dict()
+                if runtime_checkpoint is not None
+                else None
+            ),
+            task_input=str(task_input),
+            status="completed",
+            result=stored_result,
+        )
+        # ── Worker heartbeat: mark completed ──
+        self._update_worker_heartbeat(agent_name, call_index, "completed")
 
     def record_worker_failure(
         self,
