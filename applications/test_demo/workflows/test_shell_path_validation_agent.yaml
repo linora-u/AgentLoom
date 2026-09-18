@@ -1,8 +1,8 @@
 name: "test_shell_path_validation"
+agent_runtime: smolagents
 description: "Validate shell_tool path boundary checks restrict operations to project directory"
 
 model_type: "powerful"
-tool_call_type: "code_act"
 
 workflow: |
   # Shell Path Validation
@@ -50,6 +50,3 @@ tools:
   - name: "shell_tool"
 
 max_steps: 15
-
-execution_env:
-  type: "local"

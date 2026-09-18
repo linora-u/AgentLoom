@@ -1,6 +1,6 @@
 name: "project_scan"
+agent_runtime: smolagents
 description: "Scans project structure, classifies file roles, maps dependencies, and identifies typical execution scenarios."
-tool_call_type: "code_act"
 model_type: "powerful"
 toolsets:
   - "core_shell"

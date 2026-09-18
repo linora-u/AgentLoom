@@ -1,7 +1,7 @@
 name: "memory_review_off_recall"
+agent_runtime: smolagents
 description: "Answer one follow-up using only the run-start persistent-memory snapshot."
 model_type: "summary"
-tool_call_type: "tool_call"
 max_steps: 5
 
 workflow: |

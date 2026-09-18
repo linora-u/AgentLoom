@@ -1,8 +1,8 @@
 name: "test_open_agent"
+agent_runtime: smolagents
 description: "用于测试 open 函数是否可用的简单 agent"
 
 agent_type: "code"
-tool_call_type: "code_act"
 model_type: "powerful"
 
 workflow: |

@@ -1,8 +1,8 @@
 name: "test_lsp_definition"
+agent_runtime: smolagents
 description: "Validate lsp_find_definition across Python, Go, TypeScript"
 
 model_type: "powerful"
-tool_call_type: "code_act"
 
 workflow: |
   # LSP Go-To-Definition Validation
@@ -27,6 +27,3 @@ tools:
 
 worker_agents: []
 max_steps: 10
-
-execution_env:
-  type: "local"

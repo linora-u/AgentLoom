@@ -1,8 +1,8 @@
 name: "test_path_security"
+agent_runtime: smolagents
 description: "Validate path security hardening — workspace boundaries, symlink, tilde"
 
 model_type: "powerful"
-tool_call_type: "code_act"
 
 workflow: |
   # Path Security Validation
@@ -34,6 +34,3 @@ tools:
 
 worker_agents: []
 max_steps: 10
-
-execution_env:
-  type: "local"

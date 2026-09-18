@@ -232,7 +232,7 @@ name: "search_agent"
 description: |
   Use web_search to find information.
 model_type: "powerful"
-tool_call_type: "code_act"
+agent_runtime: "smolagents"
 
 mcp_servers: "my_app/config/.mcp.json"
 

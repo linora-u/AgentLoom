@@ -26,8 +26,8 @@ import yaml
 
 from .validation import APP_ROOT, reset_fixture, sha256, validate_artifacts, validate_trace
 
-CASES = ("native", "codeact", "nested-native", "nested-codeact", "repeat-native", "repeat-codeact", "rejections", "policy")
-ALL_CASES = ("repeat-native", "repeat-codeact", "nested-native", "nested-codeact", "rejections", "policy")
+CASES = ("native", "nested-native", "repeat-native", "rejections", "policy")
+ALL_CASES = ("repeat-native", "nested-native", "rejections", "policy")
 
 
 def _json_default(value):
@@ -112,8 +112,8 @@ def prepare_attempt(project: Path, output: Path, case: str, *, baseline_project_
             for worker in config["worker_agents"]:
                 worker["path"] = f"applications/{application_id}/workflows/{worker['path']}"
             supervisor.write_text(yaml.safe_dump(config, sort_keys=False))
-    mode = "codeact" if case.endswith("codeact") else "native"
-    definition = application / "workflows" / f"{mode}.yaml"
+    mode = "native"
+    definition = application / "workflows/native.yaml"
     identity = hashlib.sha256()
     for path in sorted(APP_ROOT.rglob("*")):
         if path.is_file() and "__pycache__" not in path.parts:
@@ -223,8 +223,6 @@ def _rejection_child(attempt: Path, request: dict) -> int:
             invalid = yaml.safe_load(original)
             invalid["worker_agents"][0]["path"] = "worker_agents/does_not_exist.yaml"
             definition.write_text(yaml.safe_dump(invalid, sort_keys=False))
-        # Keep only the tested supervisor: a second valid definition must not mask errors.
-        (app / "workflows/codeact.yaml").unlink()
         studio = _dispatch(project, "application.validate", {"application_id": application_id})
         events = []
         error = None
@@ -338,7 +336,7 @@ def main() -> int:
     parser.add_argument("--project", type=Path, default=APP_ROOT.parents[1])
     parser.add_argument("--output", type=Path)
     parser.add_argument("--case", choices=("all", *CASES), default="all")
-    parser.add_argument("--repeats", type=int, default=2, help="consecutive fresh native/CodeAct runs; default 2")
+    parser.add_argument("--repeats", type=int, default=2, help="consecutive fresh native structured-tool runs; default 2")
     parser.add_argument("--timeout", type=int, default=1200, help="per-attempt wall-clock seconds")
     parser.add_argument("--baseline-project-relative", action="store_true", help="record an explicit baseline-only Worker-path adaptation; final acceptance must omit")
     parser.add_argument("--child", type=Path, help=argparse.SUPPRESS)
@@ -355,7 +353,7 @@ def main() -> int:
     cases = ALL_CASES if args.case == "all" else (args.case,)
     summaries = []
     for case in cases:
-        for _ in range(args.repeats if case in {"native", "codeact"} else 1):
+        for _ in range(args.repeats if case == "native" else 1):
             try:
                 summary = run_attempt(args.project.resolve(), output, case, args.timeout,
                                       baseline_project_relative=args.baseline_project_relative)

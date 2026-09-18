@@ -1,7 +1,7 @@
 name: "memory_review_on_analysis"
+agent_runtime: smolagents
 description: "Analyze one natural operational case; configured completed-run review may learn afterward."
 model_type: "summary"
-tool_call_type: "tool_call"
 max_steps: 6
 
 workflow: |

@@ -1,4 +1,5 @@
 name: "test_checkpoint"
+agent_runtime: smolagents
 description: |
   Checkpoint & Resume integration test.
 
@@ -22,56 +23,23 @@ description: |
     step1.txt (modified), step2.txt (original), summary.txt
 
 model_type: "powerful"
-tool_call_type: "code_act"
-max_steps: 5
+max_steps: 12
 
 workflow: |
   # Checkpoint Resume Test Workflow
 
-  Execute one Python code block that calls the tools below directly. Do not
-  split this into multiple code blocks. Do not output prose outside the code
-  block.
-
-  ```python
-  root = "/tmp/agentloom_checkpoint_test"
-  shell_tool(command=f"rm -rf {root} && mkdir -p {root}")
-  results = []
-
-  step1 = f"{root}/step1.txt"
-  step2 = f"{root}/step2.txt"
-  summary = f"{root}/summary.txt"
-
-  r1 = write_file(file_path=step1, content="Hello from step 1\n")
-  results.append(("write step1", "Created" in r1 or "Updated" in r1, r1))
-
-  r2 = write_file(file_path=step2, content="Hello from step 2\n")
-  results.append(("write step2", "Created" in r2 or "Updated" in r2, r2))
-
-  edited = edit_file(
-      file_path=step1,
-      edits=[{"old_text": "Hello from step 1", "new_text": "Hello from step 1 — modified in step 3"}],
-  )
-  results.append(("edit step1", "Successfully edited" in edited, edited))
-
-  step1_content = read_file(file_path=step1)
-  step2_content = read_file(file_path=step2)
-  results.append(("verify step1", "modified in step 3" in step1_content, step1_content))
-  results.append(("verify step2", "Hello from step 2" in step2_content, step2_content))
-
-  summary_result = write_file(
-      file_path=summary,
-      content="step1 created and modified\nstep2 created\nsummary created\n",
-  )
-  results.append(("write summary", "Created" in summary_result or "Updated" in summary_result, summary_result))
-
-  ok = all(item[1] for item in results)
-  lines = ["CHECKPOINT_VALIDATION: " + ("PASS" if ok else "FAIL")]
-  for name, passed, detail in results:
-      lines.append(f"{name}: {'PASS' if passed else 'FAIL'}")
-      if not passed:
-          lines.append(str(detail))
-  final_answer("\n".join(lines))
-  ```
+  Invoke tools through their native structured schemas, in this order:
+  1. Call `shell_tool` to recreate `/tmp/agentloom_checkpoint_test`.
+  2. Call `write_file` for `step1.txt` with `Hello from step 1` and for
+     `step2.txt` with `Hello from step 2`.
+  3. Call `edit_file` once to replace `Hello from step 1` with
+     `Hello from step 1 — modified in step 3`.
+  4. Call `read_file` on both files and verify the actual returns contain the
+     expected text.
+  5. Call `write_file` for `summary.txt` with the three required summary lines.
+  6. Call `final_answer` with `CHECKPOINT_VALIDATION: PASS` only when every
+     actual tool return proves success; otherwise report FAIL and the failing
+     evidence. Do not infer or fabricate a completed step.
 
 tools:
   - name: "shell_tool"
@@ -80,6 +48,3 @@ tools:
   - name: "edit_file"
 
 worker_agents: []
-
-execution_env:
-  type: "local"

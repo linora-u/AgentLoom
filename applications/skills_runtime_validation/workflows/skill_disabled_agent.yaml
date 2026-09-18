@@ -1,8 +1,8 @@
 name: "skill_runtime_disabled"
+agent_runtime: smolagents
 description: "Validate that removing the Skill tool still permits an ordinary real-model run."
 
 model_type: "powerful"
-tool_call_type: "tool_call"
 toolsets: []
 todo:
   mode: "off"

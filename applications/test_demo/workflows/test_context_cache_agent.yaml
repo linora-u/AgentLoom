@@ -1,8 +1,8 @@
 name: "test_context_cache"
+agent_runtime: smolagents
 description: "Validate that context_cache injection works correctly with the configured LLM model"
 
 model_type: "powerful"
-tool_call_type: "code_act"
 
 workflow: |
   # Context Cache Validation Workflow
@@ -57,6 +57,3 @@ tools:
 
 worker_agents: []
 max_steps: 15
-
-execution_env:
-  type: "local"

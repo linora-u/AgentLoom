@@ -1,7 +1,7 @@
 name: "log_payload_worker"
+agent_runtime: smolagents
 description: "Worker that returns a large log payload for ContextEngine validation."
 model_type: "powerful"
-tool_call_type: "code_act"
 max_steps: 4
 
 workflow: |

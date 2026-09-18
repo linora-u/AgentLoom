@@ -1,8 +1,8 @@
 name: "test_shell_policy_snapshot"
+agent_runtime: smolagents
 description: "Validate shell audit log records effective all-allow policy even when no command is blocked"
 
 model_type: "powerful"
-tool_call_type: "code_act"
 
 tools:
   - name: "shell_tool"
@@ -10,121 +10,27 @@ tools:
 workflow: |
   # Shell Policy Snapshot Audit Validation
 
-  You are a testing agent. Execute the harness below in one Python code block.
   This workflow intentionally uses the default global shell policy, where
-  `allowed_commands` and `allowed_operators` are both `"*"`.
+  `allowed_commands` and `allowed_operators` are both `"*"`. Use native
+  structured `shell_tool` calls and retain every actual result:
 
-  The test only passes if a successful, fully allowed shell run still creates a
-  real `audit/shell.jsonl` containing a `POLICY_SNAPSHOT` event. Do not mark PASS
-  from expectation alone.
-
-  ```python
-  import json
-  import os
-
-  rows = {}
-  notes = {}
-
-  def record(name, status, evidence):
-      rows[name] = status
-      notes[name] = evidence
-
-  first = shell_tool(command="echo policy_snapshot_all_allow_ok", timeout=10)
-  record(
-      "SUCCESSFUL_ALLOWED_COMMAND",
-      "PASS" if "policy_snapshot_all_allow_ok" in first else "FAIL",
-      first.strip()[:300],
-  )
-
-  second = shell_tool(command="printf 'alpha\nbeta\n' | grep beta", timeout=10)
-  record(
-      "ALLOWED_OPERATOR_PIPE",
-      "PASS" if "beta" in second else "FAIL",
-      second.strip()[:300],
-  )
-
-  audit_path = shell_tool(
-      command="ls -dt .agentloom/runs/test_shell_audit/run_*/audit/shell.jsonl | head -1",
-      timeout=10,
-  ).strip().splitlines()[0]
-  audit_content = shell_tool(command=f"cat {audit_path}", timeout=10)
-  audit_events = []
-  for line in audit_content.splitlines():
-      try:
-          event = json.loads(line)
-      except json.JSONDecodeError:
-          continue
-      if isinstance(event, dict):
-          audit_events.append(event)
-  print("AUDIT_PATH", audit_path)
-  print(audit_content)
-
-  audit_run_dir = os.path.dirname(os.path.dirname(audit_path))
-  agent_log_path = os.path.join(audit_run_dir, "logs", "runtime.log")
-  same_parent = os.path.isfile(agent_log_path)
-  record(
-      "CO_LOCATION",
-      "PASS" if same_parent else "FAIL",
-      f"audit={audit_path}; agent={agent_log_path}",
-  )
-
-  policy_event = next(
-      (event for event in audit_events if event.get("event_type") == "POLICY_SNAPSHOT"),
-      None,
-  )
-  details = policy_event.get("details", {}) if policy_event else {}
-  required = {
-      "allowed_commands": "* (all command names allowed)",
-      "allowed_operators": "* (all shell operators allowed)",
-      "command_success_logging": "false",
-  }
-  missing = [
-      f"{key}={value}"
-      for key, value in required.items()
-      if details.get(key) != value
-  ]
-  if "sandbox_enabled" not in details:
-      missing.append("sandbox_enabled")
-  record(
-      "POLICY_SNAPSHOT",
-      "PASS" if not missing else "FAIL",
-      "missing=" + ", ".join(missing) if missing else "all required fields present",
-  )
-
-  record(
-      "NO_SUCCESS_SPAM",
-      "PASS"
-      if not any(event.get("event_type") == "COMMAND_SUCCESS" for event in audit_events)
-      else "FAIL",
-      "COMMAND_SUCCESS absent because log_success=false",
-  )
-
-  ordered = [
-      "SUCCESSFUL_ALLOWED_COMMAND",
-      "ALLOWED_OPERATOR_PIPE",
-      "POLICY_SNAPSHOT",
-      "NO_SUCCESS_SPAM",
-      "CO_LOCATION",
-  ]
-  overall = "PASS" if all(rows.get(name) == "PASS" for name in ordered) else "FAIL"
-
-  summary_lines = [
-      f"Overall: {overall}",
-      f"shell.jsonl: {audit_path}",
-      f"runtime.log: {agent_log_path}",
-      "",
-      "| Check | Status | Evidence |",
-      "|---|---|---|",
-  ]
-  for name in ordered:
-      summary_lines.append(f"| {name} | {rows.get(name, 'FAIL')} | {notes.get(name, 'missing')} |")
-  summary = "\n".join(summary_lines)
-  print(summary)
-  final_answer(summary)
-  ```
+  1. Run `echo policy_snapshot_all_allow_ok`; require the marker.
+  2. Run `printf 'alpha\nbeta\n' | grep beta`; require `beta`.
+  3. Locate the newest current-run audit using
+     `ls -dt .agentloom/runs/test_shell_audit/run_*/audit/shell.jsonl | head -1`.
+  4. Call `shell_tool` to read that exact file. Parse each valid JSON line.
+  5. Derive the sibling `logs/runtime.log` path and use `shell_tool` with
+     `test -f` to prove it exists.
+  6. Require one `POLICY_SNAPSHOT` event whose details contain:
+     `allowed_commands="* (all command names allowed)"`,
+     `allowed_operators="* (all shell operators allowed)"`,
+     `command_success_logging="false"`, and a `sandbox_enabled` field.
+  7. Require that no event has `event_type=COMMAND_SUCCESS`.
+  8. Call `final_answer` with the audit path, runtime log path, and one
+     PASS/FAIL row for `SUCCESSFUL_ALLOWED_COMMAND`,
+     `ALLOWED_OPERATOR_PIPE`, `POLICY_SNAPSHOT`, `NO_SUCCESS_SPAM`, and
+     `CO_LOCATION`. Overall is PASS only when every row is proven by the
+     actual command or audit result. Do not mark PASS from expectation alone.
 
 worker_agents: []
 max_steps: 24
-
-execution_env:
-  type: "local"

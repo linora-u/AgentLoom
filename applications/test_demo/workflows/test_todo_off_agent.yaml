@@ -1,8 +1,8 @@
 name: "test_todo_off"
+agent_runtime: smolagents
 description: "Transform a word through multiple internal steps"
 
 model_type: "powerful"
-tool_call_type: "tool_call"
 max_steps: 6
 
 todo:

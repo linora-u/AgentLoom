@@ -1,8 +1,8 @@
 name: architecture_contract_validation_native
+agent_runtime: smolagents
 description: Repair and independently validate a multi-module checkout repository
   via four Workers.
 model_type: powerful
-tool_call_type: tool_call
 max_steps: 16
 todo:
   mode: 'off'
@@ -31,7 +31,3 @@ tools:
 - name: write_workspace_file
   module: applications.architecture_contract_validation.agent_tools.workspace_tools
   function: write_workspace_file
-execution_env:
-  type: local
-  executor_kwargs:
-    timeout_seconds: 1200

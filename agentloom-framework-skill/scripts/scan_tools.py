@@ -24,8 +24,8 @@ def scan_app_structure(app_path: str) -> str:
     """扫描 Application 目录结构，提取 YAML/Markdown 与工具相关关键字段。
 
     返回结构化的文本摘要，包含：
-    - Supervisor 配置摘要（name、description 前 80 字、tools 列表、worker_agents 列表、model_type、execution_env、max_steps）
-    - 每个 Worker 的配置摘要（name、agent_function_schema 的 inputs/output、tools 列表、execution_env、max_steps）
+    - Supervisor 配置摘要（name、description 前 80 字、tools 列表、worker_agents 列表、agent_runtime、model_type、max_steps）
+    - 每个 Worker 的配置摘要（name、agent_function_schema 的 inputs/output、tools 列表、agent_runtime、model_type、max_steps）
     - agent_tools/ 下的 Python 文件名、公开函数名与 docstring 摘要
     - 入口脚本路径（如有）
     - 动态能力发现（有效 tools 与 toolsets）
@@ -241,7 +241,7 @@ def _discover_tool_capabilities(app_dir: Path) -> str:
     else:
         lines.append("- 有效 `default_toolsets`: (配置存在但类型不是 list，按不可用处理)")
 
-    lines.append("- 默认工具加载规则: 当 Agent `execution_env.type` 为 `docker`/`e2b` 时，默认 toolsets 会整体跳过。")
+    lines.append("- Agent 只通过模型原生结构化 tool call 调用已注册工具。")
 
     return "\n".join(lines)
 
@@ -301,17 +301,13 @@ def _extract_agent_summary(agent_file: Path, role: str = "Agent") -> str:
     desc_preview = desc[:80].replace("\n", " ").strip() + ("..." if len(desc) > 80 else "")
 
     model_type = data.get("model_type", "(未指定)")
-    tool_call_type = data.get("tool_call_type", "(未指定)")
+    agent_runtime = data.get("agent_runtime", "(未指定)")
     max_steps = data.get("max_steps", "(默认)")
     planning_interval = data.get("planning_interval")
     prompt_cfg = data.get("prompt")
     skills_cfg = data.get("skills")
     toolsets_cfg = data.get("toolsets", None)
 
-    execution_env_type = "(未指定)"
-    execution_env = data.get("execution_env")
-    if isinstance(execution_env, dict):
-        execution_env_type = execution_env.get("type", "(未指定)")
 
     tools = data.get("tools", [])
     if isinstance(tools, list):
@@ -347,10 +343,7 @@ def _extract_agent_summary(agent_file: Path, role: str = "Agent") -> str:
     lines.append(f"- **name**: {name}")
     lines.append(f"- **description**: {desc_preview}")
     lines.append(f"- **model_type**: {model_type}")
-    lines.append(f"- **tool_call_type**: {tool_call_type}")
-    lines.append(f"- **execution_env.type**: {execution_env_type}")
-    if isinstance(execution_env_type, str) and execution_env_type.strip().lower() in {"docker", "e2b"}:
-        lines.append("- **默认工具加载**: 跳过 `default_toolsets`（execution_env.type=remote）")
+    lines.append(f"- **agent_runtime**: {agent_runtime}")
 
     lines.append(f"- **max_steps**: {max_steps}")
 

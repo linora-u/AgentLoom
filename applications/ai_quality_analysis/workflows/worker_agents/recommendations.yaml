@@ -1,6 +1,6 @@
 name: "recommendations"
+agent_runtime: smolagents
 description: "Synthesizes findings from all analysis stages into prioritized, actionable remediation plans with effort estimates and side-effect assessments."
-tool_call_type: "code_act"
 model_type: "powerful"
 toolsets:
   - "core_shell"

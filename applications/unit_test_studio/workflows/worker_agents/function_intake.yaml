@@ -1,20 +1,18 @@
 name: "function_intake"
+agent_runtime: smolagents
 description: |
   Parse and normalize raw function targets for downstream workers.
 
 model_type: "powerful"
-tool_call_type: "code_act"
 max_steps: 30
 
 workflow: |
-  # 0) CodeAct Execution Contract
-  - Every action MUST be emitted as a Python `<code>...</code>` block.
-  - Execute the Python code in section 4. Do not replace tool calls with inferred
-    outputs.
+  # 0) Structured Tool Execution Contract
+  - Invoke tools through native structured tool calls. Do not replace calls with
+    inferred outputs.
   - `todo_write` is progress bookkeeping only. It is not evidence that a tool
     ran and it must not be used instead of the required tool call.
-  - Final output MUST be produced by `final_answer(...)` inside a `<code>` block.
-    Never return bare JSON, XML, markdown, or fenced code as the final response.
+  - Final output MUST be produced through the `final_answer` tool.
 
   # 1) Background & Role
   You are the **Function Intake Worker**.
@@ -42,20 +40,11 @@ workflow: |
   ```
 
   # 4) Step-by-Step Execution Details
-  ```python
-  import json
-
-  payload = json.loads(query)
-  output_dir = payload.get("output_dir", "test/generated")
-  resolved = json.loads(
-      resolve_function_targets(
-          target_root=payload["target_root"],
-          targets=payload["targets"],
-      )
-  )
-  resolved["output_dir"] = output_dir
-  final_answer(json.dumps(resolved, ensure_ascii=False))
-  ```
+  1. Parse `query` as JSON and require `target_root` and `targets`.
+  2. Call `resolve_function_targets` exactly once with those two values.
+  3. Parse the actual tool return as JSON and add `output_dir` from the input,
+     defaulting to `test/generated`.
+  4. Call `final_answer` with the resulting JSON string.
 
   Runtime checks:
   - Ensure `payload["target_root"]` and `payload["targets"]` exist.
@@ -82,6 +71,3 @@ agent_function_schema:
   output:
     description: |
       JSON string containing normalized target items and output_dir.
-
-execution_env:
-  type: "local"

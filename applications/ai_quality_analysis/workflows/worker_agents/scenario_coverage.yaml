@@ -1,6 +1,6 @@
 name: "scenario_coverage"
+agent_runtime: smolagents
 description: "Validates risk coverage across runtime scenarios, identifies blind spots, and analyzes edge cases."
-tool_call_type: "code_act"
 model_type: "powerful"
 toolsets:
   - "core_shell"
