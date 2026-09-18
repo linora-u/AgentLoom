@@ -13,6 +13,7 @@ import agentloom.runtime.invocation as invocation_module
 import pytest
 import yaml
 from agentloom.adapters.smolagents.agents import ToolCallingAgentV2
+from agentloom.adapters.smolagents.loom_mixin import LoomAgentMixin
 from agentloom.adapters.smolagents.tools.tools import tool
 from agentloom.runtime import RuntimeHome, bind_run_context
 from agentloom.runtime.agent_runtime import (
@@ -26,7 +27,6 @@ from agentloom.runtime.agent_runtime import (
     require_runtime_state,
 )
 from agentloom.runtime.hooks import HookEvent, HookHandler, HookPlan, HookResult, HookRun
-from agentloom.runtime.loom_mixin import LoomAgentMixin
 from agentloom.runtime.model_binding import ModelTurnBinding
 from agentloom.runtime.model_protocol import ModelTurnRequest, ModelTurnResult
 from agentloom.runtime.tool_gateway import AgentLoomToolGateway, final_answer_binding

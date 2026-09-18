@@ -2,8 +2,8 @@ import json
 import logging
 import pathlib
 
-import agentloom.runtime.memory.context_compression as compression_module
-from agentloom.runtime.memory.context_compression import (
+import agentloom.adapters.smolagents.context_compression as compression_module
+from agentloom.adapters.smolagents.context_compression import (
     FILE_DEDUP_PLACEHOLDER,
     OBSERVATION_MASKING_PLACEHOLDER,
     ConversationHistoryManager,

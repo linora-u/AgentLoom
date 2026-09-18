@@ -5,13 +5,13 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 import pytest
-from agentloom.adapters.smolagents.model_turn_bridge import SmolagentsModelTurnBridge
-from agentloom.runtime.goal import GoalBudgetLimitedError, GoalCompleteError, GoalState
-from agentloom.runtime.goal.provider import GoalStateProvider, bind_goal_state_provider
-from agentloom.runtime.memory.context_compression import (
+from agentloom.adapters.smolagents.context_compression import (
     InternalChatMessage,
     summarize_conversation,
 )
+from agentloom.adapters.smolagents.model_turn_bridge import SmolagentsModelTurnBridge
+from agentloom.runtime.goal import GoalBudgetLimitedError, GoalCompleteError, GoalState
+from agentloom.runtime.goal.provider import GoalStateProvider, bind_goal_state_provider
 from agentloom.runtime.model_binding import ModelTurnBinding
 from agentloom.runtime.model_protocol import (
     FunctionCallItem,
@@ -158,7 +158,7 @@ def test_budget_crossing_does_not_grant_completion_settlement() -> None:
 
 
 def test_smart_summary_cannot_consume_completion_settlement(monkeypatch) -> None:
-    from agentloom.runtime.memory import context_compression
+    from agentloom.adapters.smolagents import context_compression
 
     monkeypatch.setattr(
         context_compression,
