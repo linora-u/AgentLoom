@@ -179,6 +179,13 @@ def _runtime_memory_steps(checkpoint: dict) -> list[dict]:
         )
     if not isinstance(envelope.get("runtime_version"), str) or not envelope["runtime_version"]:
         raise AssertionError("smolagents checkpoint lacks runtime_version")
+    audit_metadata = envelope.get("audit_metadata")
+    if (
+        not isinstance(audit_metadata, dict)
+        or not isinstance(audit_metadata.get("model_adapter_id"), str)
+        or not audit_metadata["model_adapter_id"]
+    ):
+        raise AssertionError("smolagents checkpoint lacks model_adapter_id")
     payload = envelope.get("payload")
     if not isinstance(payload, dict):
         raise AssertionError("smolagents checkpoint payload is not a mapping")
@@ -196,11 +203,16 @@ def _current_runtime_contract() -> dict[str, object]:
     from agentloom.adapters.smolagents.runtime_adapter import (
         SmolagentsRuntimeAdapter,
     )
+    from agentloom.configuration import C
 
+    adapter_id = C.get_model_config("powerful", "adapter")
+    if not isinstance(adapter_id, str) or not adapter_id:
+        raise ValueError("powerful model profile lacks adapter")
     return {
         "runtime_id": SmolagentsRuntimeAdapter.runtime_id,
         "runtime_version": SmolagentsRuntimeAdapter.runtime_version,
         "state_schema_version": SmolagentsRuntimeAdapter.state_schema_version,
+        "model_adapter_id": adapter_id,
     }
 
 
@@ -238,6 +250,9 @@ def _require_same_runtime_contract(state: dict) -> None:
         "runtime_id": envelope.get("runtime_id"),
         "runtime_version": envelope.get("runtime_version"),
         "state_schema_version": envelope.get("state_schema_version"),
+        "model_adapter_id": (
+            envelope.get("audit_metadata") or {}
+        ).get("model_adapter_id"),
     }
     if actual_contract != prepared_contract:
         raise ValueError(

@@ -13,7 +13,10 @@ from agentloom.adapters.smolagents.model_turn_bridge import (
     MODEL_RESPONSE_ID_RAW_KEY,
     SmolagentsModelTurnBridge,
 )
-from agentloom.adapters.smolagents.runtime_adapter import SmolagentsRuntimeAdapter
+from agentloom.adapters.smolagents.runtime_adapter import (
+    MODEL_ADAPTER_AUDIT_KEY,
+    SmolagentsRuntimeAdapter,
+)
 from agentloom.adapters.smolagents.tool_protocol import (
     action_step_to_protocol_messages,
 )
@@ -102,6 +105,36 @@ class _RecordingTurnAdapter:
         )
 
 
+def _binding(
+    adapter: object | None = None,
+    *,
+    model_type: str = "test",
+    model_id: str = "opaque-model",
+) -> ModelTurnBinding:
+    return ModelTurnBinding(
+        model_type=model_type,
+        model_id=model_id,
+        adapter=adapter or _RecordingTurnAdapter(),  # type: ignore[arg-type]
+    )
+
+
+def _runtime(
+    native: object,
+    *,
+    binding: ModelTurnBinding | None = None,
+    **kwargs: object,
+) -> SmolagentsRuntimeAdapter:
+    return SmolagentsRuntimeAdapter(
+        native,
+        model_binding=binding or _binding(),
+        **kwargs,
+    )
+
+
+def _audit(adapter_id: str = "openai_responses") -> dict[str, str]:
+    return {MODEL_ADAPTER_AUDIT_KEY: adapter_id}
+
+
 class _ReplayNativeRuntime(_NativeRuntime):
     def __init__(self, model: SmolagentsModelTurnBridge) -> None:
         super().__init__(_NativeResult(output="done"))
@@ -165,7 +198,7 @@ class _EventNativeRuntime(_NativeRuntime):
 
 def test_adapter_translates_runtime_request_and_result() -> None:
     native = _NativeRuntime(_NativeResult(output={"ok": True}, token_usage={"input": 2}))
-    runtime = SmolagentsRuntimeAdapter(native)
+    runtime = _runtime(native)
 
     result = runtime.run(
         AgentRuntimeRequest(
@@ -192,13 +225,16 @@ def test_adapter_translates_runtime_request_and_result() -> None:
     assert result.checkpoint.runtime_id == "smolagents"
     assert result.checkpoint.state_schema_version == 2
     assert result.checkpoint.progress == 0
+    assert result.checkpoint.audit_metadata[MODEL_ADAPTER_AUDIT_KEY] == (
+        "openai_responses"
+    )
     assert result.checkpoint.payload["memory_steps"] == []
     assert result.checkpoint.payload["canonical_model_items"] == []
 
 
 def test_adapter_emits_runtime_events_with_canonical_identity_and_typed_usage() -> None:
     native = _EventNativeRuntime()
-    runtime = SmolagentsRuntimeAdapter(native)
+    runtime = _runtime(native, binding=native.model.binding)
     observed: list[RuntimeEvent] = []
 
     result = runtime.run(
@@ -239,7 +275,7 @@ def test_adapter_event_sink_failure_is_visible_but_does_not_fail_run(
     from agentloom.adapters.smolagents import runtime_adapter as adapter_module
 
     native = _NativeRuntime(_NativeResult(output="done"))
-    runtime = SmolagentsRuntimeAdapter(native)
+    runtime = _runtime(native)
     warnings: list[str] = []
     monkeypatch.setattr(
         adapter_module,
@@ -279,7 +315,7 @@ def test_adapter_classifies_provider_error_and_emits_terminal_failure() -> None:
     )
     native = _NativeRuntime(_NativeResult(output=None))
     native.run = lambda **_kwargs: (_ for _ in ()).throw(provider_error)  # type: ignore[method-assign]
-    runtime = SmolagentsRuntimeAdapter(native)
+    runtime = _runtime(native)
     observed: list[RuntimeEvent] = []
 
     with pytest.raises(AgentRuntimeError) as captured:
@@ -313,7 +349,10 @@ def test_adapter_rejects_unsupported_requirements_before_native_execution() -> N
             )
 
     native = _NativeRuntime(_NativeResult(output="must not run"))
-    runtime = LimitedRuntimeAdapter(native)
+    runtime = LimitedRuntimeAdapter(
+        native,
+        model_binding=_binding(),
+    )
     observed: list[RuntimeEvent] = []
 
     with pytest.raises(AgentRuntimeError) as captured:
@@ -352,7 +391,7 @@ def test_adapter_preserves_goal_and_keyboard_interrupt_control_flow() -> None:
             raise error
 
         native.run = fail  # type: ignore[method-assign]
-        runtime = SmolagentsRuntimeAdapter(native)
+        runtime = _runtime(native)
 
         with pytest.raises(type(control_error)) as captured:
             runtime.run(AgentRuntimeRequest(task="inspect"))
@@ -362,7 +401,7 @@ def test_adapter_preserves_goal_and_keyboard_interrupt_control_flow() -> None:
 
 def test_adapter_omits_empty_additional_args_and_resets_new_session() -> None:
     native = _NativeRuntime(_NativeResult(output="done"))
-    runtime = SmolagentsRuntimeAdapter(native)
+    runtime = _runtime(native)
 
     runtime.run(AgentRuntimeRequest(task="inspect"))
 
@@ -377,7 +416,7 @@ def test_adapter_omits_empty_additional_args_and_resets_new_session() -> None:
 
 def test_adapter_rejects_unsuccessful_native_state() -> None:
     native = _NativeRuntime(_NativeResult(output=None, state="error"))
-    runtime = SmolagentsRuntimeAdapter(native)
+    runtime = _runtime(native)
 
     with pytest.raises(RuntimeError, match="error"):
         runtime.run(AgentRuntimeRequest(task="inspect"))
@@ -385,7 +424,7 @@ def test_adapter_rejects_unsuccessful_native_state() -> None:
 
 def test_adapter_preserves_max_steps_for_goal_owner_to_settle() -> None:
     native = _NativeRuntime(_NativeResult(output=None, state="max_steps_error"))
-    runtime = SmolagentsRuntimeAdapter(native)
+    runtime = _runtime(native)
 
     result = runtime.run(AgentRuntimeRequest(task="inspect"))
 
@@ -394,7 +433,7 @@ def test_adapter_preserves_max_steps_for_goal_owner_to_settle() -> None:
 
 def test_adapter_closes_native_runtime_when_supported() -> None:
     native = _NativeRuntime(_NativeResult(output="done"))
-    runtime = SmolagentsRuntimeAdapter(native)
+    runtime = _runtime(native)
 
     runtime.close()
 
@@ -403,13 +442,14 @@ def test_adapter_closes_native_runtime_when_supported() -> None:
 
 def test_adapter_restores_native_memory_from_compatible_checkpoint() -> None:
     native = _NativeRuntime(_NativeResult(output="done"))
-    runtime = SmolagentsRuntimeAdapter(native)
+    runtime = _runtime(native)
     task = TaskStep(task="prior task")
     checkpoint = RuntimeCheckpointEnvelope(
         runtime_id="smolagents",
         runtime_version=runtime.runtime_version,
         state_schema_version=runtime.state_schema_version,
         progress=1,
+        audit_metadata=_audit(),
         payload={
             "memory_steps": [
                 task.dict() | {"_step_type": "TaskStep"}
@@ -443,7 +483,7 @@ def test_resume_replays_canonical_items_through_the_next_model_turn() -> None:
         )
     )
     native = _ReplayNativeRuntime(model)
-    runtime = SmolagentsRuntimeAdapter(native)
+    runtime = _runtime(native)
     reasoning = ReasoningItem(
         item_id="reasoning-1",
         summary=("Inspect the repository",),
@@ -497,6 +537,7 @@ def test_resume_replays_canonical_items_through_the_next_model_turn() -> None:
                     runtime_version=runtime.runtime_version,
                     state_schema_version=runtime.state_schema_version,
                     progress=1,
+                    audit_metadata=_audit(),
                     payload={
                         "memory_steps": serialized_steps,
                         "canonical_model_items": canonical_items,
@@ -529,7 +570,7 @@ def test_resume_replays_canonical_items_through_the_next_model_turn() -> None:
 def test_adapter_pushes_runtime_checkpoint_to_sink() -> None:
     native = _NativeRuntime(_NativeResult(output="done"))
     native.memory.steps = [TaskStep(task="done")]
-    runtime = SmolagentsRuntimeAdapter(native)
+    runtime = _runtime(native)
     observed: list[RuntimeCheckpointEnvelope] = []
 
     result = runtime.run(
@@ -547,7 +588,7 @@ def test_adapter_pushes_runtime_checkpoint_to_sink() -> None:
 def test_adapter_registers_one_native_step_bridge_and_pushes_completed_step() -> None:
     native = _NativeRuntime(_NativeResult(output="done"))
     observed: list[RuntimeCheckpointEnvelope] = []
-    SmolagentsRuntimeAdapter(native, checkpoint_sink=observed.append)
+    _runtime(native, checkpoint_sink=observed.append)
 
     assert len(native.step_callbacks.callbacks) == 1
     completed = ActionStep(
@@ -573,7 +614,7 @@ def test_adapter_does_not_checkpoint_action_step_aborted_before_model_turn() -> 
     native = _NativeRuntime(_NativeResult(output="done"))
     native.memory.steps = [TaskStep(task="resume-safe task")]
     observed: list[RuntimeCheckpointEnvelope] = []
-    SmolagentsRuntimeAdapter(native, checkpoint_sink=observed.append)
+    _runtime(native, checkpoint_sink=observed.append)
 
     aborted = ActionStep(
         step_number=1,
@@ -594,7 +635,7 @@ def test_adapter_snapshot_excludes_synthetic_step_without_model_turn() -> None:
             action_output="synthetic max-steps answer",
         ),
     ]
-    runtime = SmolagentsRuntimeAdapter(native)
+    runtime = _runtime(native)
 
     checkpoint = runtime.snapshot()
 
@@ -603,7 +644,7 @@ def test_adapter_snapshot_excludes_synthetic_step_without_model_turn() -> None:
         step["_step_type"] for step in checkpoint.payload["memory_steps"]
     ] == ["TaskStep"]
     restored = _NativeRuntime(_NativeResult(output="done"))
-    SmolagentsRuntimeAdapter(restored).restore(checkpoint)
+    _runtime(restored).restore(checkpoint)
     assert [type(step).__name__ for step in restored.memory.steps] == [
         "TaskStep"
     ]
@@ -612,7 +653,7 @@ def test_adapter_snapshot_excludes_synthetic_step_without_model_turn() -> None:
 def test_adapter_snapshot_and_restore_own_native_memory() -> None:
     native = _NativeRuntime(_NativeResult(output="done"))
     native.memory.steps = [TaskStep(task="worker task")]
-    runtime = SmolagentsRuntimeAdapter(native)
+    runtime = _runtime(native)
 
     checkpoint = runtime.snapshot()
     native.memory.steps = []
@@ -622,9 +663,92 @@ def test_adapter_snapshot_and_restore_own_native_memory() -> None:
     assert [step.task for step in native.memory.steps] == ["worker task"]
 
 
+def test_adapter_rejects_cross_protocol_checkpoint_before_memory_or_model_call() -> None:
+    native = _NativeRuntime(_NativeResult(output="must not run"))
+    runtime = _runtime(
+        native,
+        binding=_binding(
+            adapter=_EventTurnAdapter(),
+            model_type="responses",
+            model_id="responses-deployment",
+        ),
+    )
+    checkpoint = RuntimeCheckpointEnvelope(
+        runtime_id="smolagents",
+        runtime_version=runtime.runtime_version,
+        state_schema_version=runtime.state_schema_version,
+        progress=1,
+        audit_metadata=_audit("openai_chat"),
+        payload={
+            # Deliberately corrupt: adapter mismatch must win before decoding.
+            "memory_steps": ["not-a-memory-step"],
+            "canonical_model_items": "not-a-canonical-stream",
+        },
+    )
+
+    with pytest.raises(
+        AgentRuntimeError,
+        match="openai_chat.*openai_responses",
+    ) as captured:
+        runtime.run(
+            AgentRuntimeRequest(
+                task="continue",
+                checkpoint=checkpoint,
+            )
+        )
+
+    assert captured.value.category == "configuration"
+    assert native.calls == []
+    assert native.memory.steps == []
+
+
+def test_adapter_rejects_schema2_checkpoint_without_model_adapter_identity() -> None:
+    runtime = _runtime(_NativeRuntime(_NativeResult(output="must not run")))
+    checkpoint = RuntimeCheckpointEnvelope(
+        runtime_id="smolagents",
+        runtime_version=runtime.runtime_version,
+        state_schema_version=runtime.state_schema_version,
+        payload={
+            "memory_steps": [],
+            "canonical_model_items": [],
+        },
+    )
+
+    with pytest.raises(
+        AgentRuntimeError,
+        match="missing required model adapter identity",
+    ) as captured:
+        runtime.restore(checkpoint)
+
+    assert captured.value.category == "configuration"
+
+
+def test_adapter_allows_same_protocol_with_different_opaque_model_identity() -> None:
+    source = _runtime(
+        _NativeRuntime(_NativeResult(output="source")),
+        binding=_binding(
+            model_type="source-profile",
+            model_id="provider/source-deployment",
+        ),
+    )
+    checkpoint = source.snapshot()
+    target_native = _NativeRuntime(_NativeResult(output="target"))
+    target = _runtime(
+        target_native,
+        binding=_binding(
+            model_type="target-profile",
+            model_id="provider/replacement-deployment",
+        ),
+    )
+
+    target.restore(checkpoint)
+
+    assert target_native.memory.steps == []
+
+
 def test_adapter_rejects_old_schema_and_runtime_version() -> None:
     native = _NativeRuntime(_NativeResult(output="done"))
-    runtime = SmolagentsRuntimeAdapter(native)
+    runtime = _runtime(native)
 
     with pytest.raises(ValueError, match="schema 1"):
         runtime.restore(
@@ -632,6 +756,7 @@ def test_adapter_rejects_old_schema_and_runtime_version() -> None:
                 runtime_id="smolagents",
                 runtime_version=runtime.runtime_version,
                 state_schema_version=1,
+                audit_metadata=_audit(),
                 payload={"memory_steps": []},
             )
         )
@@ -641,6 +766,7 @@ def test_adapter_rejects_old_schema_and_runtime_version() -> None:
                 runtime_id="smolagents",
                 runtime_version="different-version",
                 state_schema_version=2,
+                audit_metadata=_audit(),
                 payload={
                     "memory_steps": [],
                     "canonical_model_items": [],
@@ -651,7 +777,7 @@ def test_adapter_rejects_old_schema_and_runtime_version() -> None:
 
 def test_adapter_rejects_corrupt_call_output_linkage() -> None:
     native = _NativeRuntime(_NativeResult(output="done"))
-    runtime = SmolagentsRuntimeAdapter(native)
+    runtime = _runtime(native)
     step = ActionStep(
         step_number=1,
         timing=Timing(start_time=0.0),
@@ -662,6 +788,7 @@ def test_adapter_rejects_corrupt_call_output_linkage() -> None:
         runtime_version=runtime.runtime_version,
         state_schema_version=2,
         progress=1,
+        audit_metadata=_audit(),
         payload={
             "memory_steps": (
                 SmolagentsCheckpointCodec.serialize_memory_steps([step])
