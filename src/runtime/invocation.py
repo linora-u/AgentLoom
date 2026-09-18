@@ -25,33 +25,6 @@ if TYPE_CHECKING:
     from agentloom.application.lifecycle import ApplicationRunLifecycle
 
 
-def require_runtime_result(
-    run_result: Any,
-    *,
-    allowed_states: set[str],
-    error_prefix: str,
-) -> None:
-    run_state = str(getattr(run_result, "state", "") or "")
-    if run_state not in allowed_states:
-        raise RuntimeError(f"{error_prefix}: {run_state or 'missing_run_state'}")
-
-
-def require_successful_runtime_result(run_result: Any) -> None:
-    require_runtime_result(
-        run_result,
-        allowed_states={"success"},
-        error_prefix="Agent run did not complete successfully",
-    )
-
-
-def require_goal_runtime_result(run_result: Any) -> None:
-    require_runtime_result(
-        run_result,
-        allowed_states={"success", "max_steps_error"},
-        error_prefix="Agent Goal segment failed",
-    )
-
-
 def goal_continuation_prompt(state: Any) -> str:
     budget = "unlimited"
     if state.token_budget is not None:

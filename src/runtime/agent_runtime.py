@@ -47,6 +47,31 @@ class RuntimeCapabilities:
 
 
 @dataclass(frozen=True, slots=True)
+class RuntimeRequirements:
+    """Semantic features an Application requires from its selected runtime."""
+
+    structured_tools: bool = True
+    parallel_tools: bool = False
+    checkpoint_resume: bool = False
+    subagents: bool = False
+
+    def unsupported_by(
+        self,
+        capabilities: RuntimeCapabilities,
+    ) -> tuple[str, ...]:
+        return tuple(
+            name
+            for name in (
+                "structured_tools",
+                "parallel_tools",
+                "checkpoint_resume",
+                "subagents",
+            )
+            if getattr(self, name) and not getattr(capabilities, name)
+        )
+
+
+@dataclass(frozen=True, slots=True)
 class RuntimeCheckpointEnvelope:
     """Versioned, runtime-owned state stored inside AgentLoom checkpoints."""
 
@@ -154,32 +179,90 @@ class AgentRuntime(Protocol):
 RuntimeFactory = Callable[[], AgentRuntime]
 
 
+@dataclass(frozen=True, slots=True)
+class RuntimeRegistration:
+    """One registered runtime's static contract and optional constructor."""
+
+    runtime_id: str
+    capabilities: RuntimeCapabilities
+    factory: RuntimeFactory | None = None
+
+
+SMOLAGENTS_CAPABILITIES = RuntimeCapabilities(
+    structured_tools=True,
+    parallel_tools=True,
+    checkpoint_resume=True,
+    subagents=True,
+)
+
+
 class RuntimeRegistry:
     """Explicit registry for complete Agent runtime adapters."""
 
     def __init__(self) -> None:
-        self._factories: dict[str, RuntimeFactory] = {}
+        self._registrations: dict[str, RuntimeRegistration] = {}
 
-    def register(self, runtime_id: str, factory: RuntimeFactory) -> None:
+    @property
+    def runtime_ids(self) -> tuple[str, ...]:
+        return tuple(sorted(self._registrations))
+
+    def register(
+        self,
+        runtime_id: str,
+        *,
+        capabilities: RuntimeCapabilities,
+        factory: RuntimeFactory | None = None,
+    ) -> None:
         if not runtime_id:
             raise ValueError("runtime_id must be non-empty")
-        if runtime_id in self._factories:
+        if runtime_id in self._registrations:
             raise ValueError(f"Agent runtime '{runtime_id}' is already registered")
-        self._factories[runtime_id] = factory
+        self._registrations[runtime_id] = RuntimeRegistration(
+            runtime_id=runtime_id,
+            capabilities=capabilities,
+            factory=factory,
+        )
+
+    def validate(
+        self,
+        runtime_id: Any,
+        *,
+        requirements: RuntimeRequirements | None = None,
+    ) -> RuntimeRegistration:
+        registration = (
+            self._registrations.get(runtime_id)
+            if isinstance(runtime_id, str)
+            else None
+        )
+        if registration is None:
+            available = ", ".join(self.runtime_ids) or "(none)"
+            raise UnsupportedRuntimeError(
+                f"agent_runtime {runtime_id!r} is not registered; "
+                f"available runtimes: {available}"
+            )
+        missing = (requirements or RuntimeRequirements()).unsupported_by(
+            registration.capabilities
+        )
+        if missing:
+            raise UnsupportedRuntimeError(
+                f"Agent runtime '{runtime_id}' does not support required "
+                f"capabilities: {', '.join(missing)}"
+            )
+        return registration
 
     def create(self, runtime_id: str) -> AgentRuntime:
-        factory = self._factories.get(runtime_id)
-        if factory is None:
-            available = ", ".join(sorted(self._factories)) or "(none)"
+        registration = self.validate(runtime_id)
+        if registration.factory is None:
             raise UnsupportedRuntimeError(
-                f"Agent runtime '{runtime_id}' is not registered; available runtimes: {available}"
+                f"Agent runtime '{runtime_id}' is registered for validation "
+                "but no runtime factory was provided"
             )
-        return factory()
+        return registration.factory()
 
 
 def build_builtin_runtime_registry(
     *,
-    smolagents_factory: RuntimeFactory,
+    smolagents_factory: RuntimeFactory | None = None,
 ) -> RuntimeRegistry:
     """Build the production registry for the runtimes shipped in this stage.
 
@@ -189,5 +272,9 @@ def build_builtin_runtime_registry(
     """
 
     registry = RuntimeRegistry()
-    registry.register("smolagents", smolagents_factory)
+    registry.register(
+        "smolagents",
+        capabilities=SMOLAGENTS_CAPABILITIES,
+        factory=smolagents_factory,
+    )
     return registry

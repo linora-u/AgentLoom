@@ -11,7 +11,7 @@ from typing import Any
 from agentloom.adapters.smolagents.monkey_patch import install_agentloom_runtime_adapters
 from agentloom.adapters.smolagents.tool_argument_coercion import coerce_tool_arguments
 from agentloom.adapters.smolagents.tool_protocol import settle_tool_call
-from agentloom.runtime.invocation import require_successful_runtime_result
+from agentloom.runtime.agent_runtime import require_runtime_state
 from agentloom.runtime.model_protocol import ModelProtocolError
 from agentloom.runtime.tool_protocol import ToolCallRecord
 from smolagents import (
@@ -87,7 +87,11 @@ class _SuccessfulRunStateMixin:
             return_full_result=True,
             **kwargs,
         )
-        require_successful_runtime_result(run_result)
+        require_runtime_state(
+            run_result,
+            allowed_states={"success"},
+            error_prefix="Agent run did not complete successfully",
+        )
         return run_result if wants_full_result else run_result.output
 
 

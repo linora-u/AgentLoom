@@ -8,6 +8,10 @@ from pathlib import Path
 from typing import Any
 
 from agentloom.configuration.config_validation import TODO_MODES, normalize_todo_mode_value
+from agentloom.runtime.agent_runtime import (
+    RuntimeRequirements,
+    build_builtin_runtime_registry,
+)
 from agentloom.runtime.goal import GoalConfig, normalize_goal_config
 
 
@@ -17,7 +21,6 @@ class NormalizedAgentConfig:
     goal: GoalConfig = dataclass_field(default_factory=GoalConfig)
 
 
-_REGISTERED_AGENT_RUNTIMES = frozenset({"smolagents"})
 _WORKFLOW_VALIDATION_ERROR = (
     "workflow field must be a non-empty string or non-empty list of non-empty strings"
 )
@@ -175,21 +178,47 @@ def validate_execution_config_payload(normalized: Any) -> NormalizedExecutionCon
 
 class AgentConfigNormalizer:
     @staticmethod
-    def validate_agent_runtime_config(config: dict) -> str:
+    def validate_agent_runtime_config(
+        config: dict,
+        *,
+        effective_config: dict[str, Any] | None = None,
+    ) -> str:
         """Return the explicitly selected, currently registered Agent runtime."""
 
         runtime_id = config.get("agent_runtime")
         if runtime_id is None:
+            available = ", ".join(
+                build_builtin_runtime_registry().runtime_ids
+            )
             raise ValueError(
                 "Configuration is missing required 'agent_runtime' field; "
-                "available runtimes: smolagents"
+                f"available runtimes: {available}"
             )
-        if not isinstance(runtime_id, str) or runtime_id not in _REGISTERED_AGENT_RUNTIMES:
-            available = ", ".join(sorted(_REGISTERED_AGENT_RUNTIMES))
-            raise ValueError(
-                f"agent_runtime must name a registered runtime ({available}); "
-                f"current value: {runtime_id!r}"
+        effective = effective_config or config
+        checkpoint = effective.get("checkpoint")
+        checkpoint_resume = (
+            isinstance(checkpoint, dict)
+            and checkpoint.get("enabled") is True
+        )
+        concurrency = config.get("concurrency")
+        parallel_tools = (
+            concurrency == "auto"
+            or (
+                isinstance(concurrency, int)
+                and not isinstance(concurrency, bool)
+                and concurrency > 1
             )
+        )
+        requirements = RuntimeRequirements(
+            structured_tools=True,
+            parallel_tools=parallel_tools,
+            checkpoint_resume=checkpoint_resume,
+            subagents=bool(config.get("worker_agents")),
+        )
+        build_builtin_runtime_registry().validate(
+            runtime_id,
+            requirements=requirements,
+        )
         return runtime_id
 
     @staticmethod

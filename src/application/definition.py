@@ -264,6 +264,10 @@ def _walk_definitions(
                         source_name=str(path),
                         base_config=base,
                     )
+                    AgentConfigNormalizer.validate_agent_runtime_config(
+                        config,
+                        effective_config=snapshots[path].values,
+                    )
                     # These schema/path checks depend on effective lower layers.
                     validate_effective_definition(snapshots[path], project_root, str(path))
                 except (TypeError, ValueError, OSError, yaml.YAMLError) as exc:
