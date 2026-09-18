@@ -173,6 +173,8 @@ def _items_to_chat_messages(
             assistant_items.append(item)
         elif isinstance(item, FunctionCallItem):
             assistant_items.append(item)
+        elif isinstance(item, ReasoningItem):
+            continue
         else:
             flush_assistant_items()
             if isinstance(item, MessageItem):
@@ -239,7 +241,7 @@ def _tool_definition_for_responses(tool: ToolDefinition) -> dict[str, Any]:
     return wire
 
 
-def _item_to_responses_input(item: ModelItem) -> dict[str, Any]:
+def _item_to_responses_input(item: ModelItem) -> dict[str, Any] | None:
     if isinstance(item, MessageItem):
         if item.replay_payload.get("type") == "message":
             allowed = {"id", "type", "role", "status", "content"}
@@ -288,9 +290,7 @@ def _item_to_responses_input(item: ModelItem) -> dict[str, Any]:
         return wire
     if isinstance(item, ReasoningItem):
         if item.replay_payload.get("type") != "reasoning":
-            raise ModelProtocolError(
-                "openai_responses reasoning replay requires the original replay_payload"
-            )
+            return None
         allowed = {
             "id",
             "type",
@@ -534,7 +534,11 @@ class OpenAIResponsesModelTurnAdapter:
         self._system_prompt_boundary = system_prompt_boundary
 
     def turn(self, request: ModelTurnRequest) -> ModelTurnResult:
-        input_items = [_item_to_responses_input(item) for item in request.items]
+        input_items = [
+            wire_item
+            for item in request.items
+            if (wire_item := _item_to_responses_input(item)) is not None
+        ]
         _apply_system_prompt_cache(
             input_items,
             enabled=self._context_cache,
@@ -626,8 +630,15 @@ def _items_to_anthropic_messages(
     for item in items:
         if isinstance(item, MessageItem) and item.role == "assistant":
             assistant_items.append(item)
-        elif isinstance(item, (FunctionCallItem, ReasoningItem)):
+        elif isinstance(item, FunctionCallItem):
             assistant_items.append(item)
+        elif isinstance(item, ReasoningItem):
+            if item.replay_payload.get("type") in {
+                "thinking",
+                "redacted_thinking",
+            }:
+                assistant_items.append(item)
+            continue
         else:
             flush_assistant_items()
             if isinstance(item, MessageItem):
