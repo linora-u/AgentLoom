@@ -191,7 +191,7 @@ def _has_transient_provider_error(error: BaseException) -> bool:
     from agentloom.adapters.smolagents.models.litellm_retry import (
         ProviderCallBudgetExceeded,
     )
-    from agentloom.adapters.smolagents.models.tool_call_parser import ToolCallParseError
+    from agentloom.adapters.smolagents.models.litellm_model import NativeToolCallError
 
     transient_types = (
         Timeout,
@@ -211,7 +211,7 @@ def _has_transient_provider_error(error: BaseException) -> bool:
         ProviderCallBudgetExceeded,
         AgentParsingError,
         AgentMaxStepsError,
-        ToolCallParseError,
+        NativeToolCallError,
     )
     current: BaseException | None = error
     visited: set[int] = set()

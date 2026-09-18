@@ -16,16 +16,14 @@ __all__ = [
     "AgentLogger",
     "LogLevel",
     "Tool",
-    "CodeAgent",
     "ToolCallingAgent",
-    "CodeAgentV2",
     "ToolCallingAgentV2",
 ]
 
 _UPSTREAM_EXPORTS = frozenset(
-    {"AgentLogger", "LogLevel", "Tool", "CodeAgent", "ToolCallingAgent"}
+    {"AgentLogger", "LogLevel", "Tool", "ToolCallingAgent"}
 )
-_AGENTLOOM_EXPORTS = frozenset({"CodeAgentV2", "ToolCallingAgentV2"})
+_AGENTLOOM_EXPORTS = frozenset({"ToolCallingAgentV2"})
 
 
 def __getattr__(name: str) -> Any:

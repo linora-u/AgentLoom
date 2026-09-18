@@ -7,7 +7,7 @@ from functools import wraps
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional, Union
 
-from agentloom.configuration import C, get_code_agent_config, get_default_toolsets
+from agentloom.configuration import C, get_default_toolsets
 from agentloom.configuration.yaml_loader import load_unique_yaml
 from agentloom.application.definition import load_agent_definition, extract_markdown_definition
 from agentloom.runtime.logging import (
@@ -410,14 +410,10 @@ class YamlConfiguredAgent(RoleDrivenAgent):
         return query
 
     def _role_profile(self) -> AgentRoleProfile:
-        effective = getattr(self, "_effective_agent_config", None)
-        code_agent_cfg = get_code_agent_config(effective)
         return AgentRoleProfile(
             agent_type=AgentType.WORKER,
-            tool_call_type=self._resolve_tool_call_type(),
             cache_runtime_agent=False,
             enable_sub_task_tracking=True,
-            additional_authorized_imports=code_agent_cfg.get('additional_authorized_imports', []),
             inject_default_file_tools=False
         )
 
@@ -464,7 +460,6 @@ class YamlConfiguredAgent(RoleDrivenAgent):
         # so we create a NEW agent per call. These components are safe to share:
         _shared_model = getattr(self, "_model", None) or getattr(self, "model", None)
         _shared_logger = getattr(self, "logger", None) or getattr(self, "_logger", None)
-        _shared_execution_env = getattr(self, "_execution_env", None)
         _frozen_config = self._config  # read-only dict
         _AgentClass = self.__class__
         _self_ref = self
@@ -482,7 +477,6 @@ class YamlConfiguredAgent(RoleDrivenAgent):
             return _AgentClass(
                 config=_frozen_config,
                 model=_shared_model,
-                execution_env=_shared_execution_env,
                 logger=_shared_logger,
             )
 
@@ -719,13 +713,10 @@ class YamlConfiguredSupervisorAgent(RoleDrivenAgent):
         return self._inferred_category
 
     def _role_profile(self) -> AgentRoleProfile:
-        self._ensure_execution_normalized()
         return AgentRoleProfile(
             agent_type=AgentType.SUPERVISOR,
-            tool_call_type=self._resolve_tool_call_type(),
             cache_runtime_agent=True,
             enable_sub_task_tracking=False,
-            additional_authorized_imports=['*'],
             inject_default_file_tools=False,
         )
 
@@ -822,7 +813,6 @@ class YamlConfiguredSupervisorAgent(RoleDrivenAgent):
                 # Create agent tool
                 agent_tool = YamlAgentFactory.create_agent_as_tool(
                     agent_config,
-                    execution_env=self._execution_env,
                     logger=worker_logger
                 )
                 if agent_tool is not None:
@@ -915,7 +905,7 @@ class YamlAgentFactory:
         """
         log = get_logger(logger, __name__)
         config = dict(config)
-        for key in ("tools", "toolsets", "execution_env"):
+        for key in ("tools", "toolsets"):
             if effective_agent_config is not None and key in effective_agent_config:
                 config[key] = copy.deepcopy(effective_agent_config[key])
         tools = []
@@ -932,36 +922,21 @@ class YamlAgentFactory:
                 seen.add(tool_name)
             tools.append(tool_obj)
 
-        env_cfg = config.get("execution_env", {})
-        execution_env_type = "local"
-        if isinstance(env_cfg, dict):
-            raw_type = env_cfg.get("type")
-            if isinstance(raw_type, str) and raw_type.strip():
-                execution_env_type = raw_type.strip().lower()
-
-        # Remote executors validate tool bodies more strictly and many local filesystem
-        # helpers are intentionally unavailable there, so default tools are skipped.
-        if execution_env_type in {"docker", "e2b"}:
-            log.info(
-                "[YamlAgentFactory] Skip loading default tools for execution_env.type='%s'",
-                execution_env_type,
-            )
+        if "toolsets" in config:
+            raw_toolsets = config.get("toolsets", [])
         else:
-            if "toolsets" in config:
-                raw_toolsets = config.get("toolsets", [])
+            if isinstance(effective_agent_config, dict) and "default_toolsets" in effective_agent_config:
+                raw_toolsets = get_default_toolsets(effective_agent_config)
             else:
-                if isinstance(effective_agent_config, dict) and "default_toolsets" in effective_agent_config:
-                    raw_toolsets = get_default_toolsets(effective_agent_config)
-                else:
-                    raw_toolsets = None
+                raw_toolsets = None
 
-            if raw_toolsets is not None and not isinstance(raw_toolsets, list):
-                raise ValueError("toolsets/default_toolsets must be a list of toolset names")
+        if raw_toolsets is not None and not isinstance(raw_toolsets, list):
+            raise ValueError("toolsets/default_toolsets must be a list of toolset names")
 
-            for tool_name in resolve_toolsets(raw_toolsets):
-                tool_function = resolve_tool_function(tool_name)
-                _append_tool(tool_function, explicit_name=tool_name)
-                log.info(f"[YamlAgentFactory] Loaded toolset tool: {tool_name}")
+        for tool_name in resolve_toolsets(raw_toolsets):
+            tool_function = resolve_tool_function(tool_name)
+            _append_tool(tool_function, explicit_name=tool_name)
+            log.info(f"[YamlAgentFactory] Loaded toolset tool: {tool_name}")
 
         if 'tools' not in config:
             # Still check for MCP tools even when no explicit tools are listed.

@@ -9,21 +9,113 @@ Design decisions:
   them from ``write_memory_to_messages()`` so they are redundant.
 - ``observations_images`` / ``task_images`` are **skipped**: ``PIL.Image``
   objects cannot be JSON-serialised and very few AgentLoom workflows use them.
-- ``raw`` on ``ChatMessage`` is excluded by the upstream ``dict()`` helper.
+- AgentLoom canonical model items and response IDs are explicitly persisted
+  from ``ChatMessage.raw``. Arbitrary provider objects are not persisted.
 """
 
 from __future__ import annotations
 
 import time
 from copy import deepcopy
+from dataclasses import asdict
 from typing import Any
 
+from agentloom.runtime.model_protocol import (
+    MODEL_ITEMS_RAW_KEY,
+    MODEL_RESPONSE_ID_RAW_KEY,
+    model_item_from_dict,
+    model_item_to_dict,
+)
 from smolagents.memory import ActionStep, MemoryStep, PlanningStep, TaskStep, ToolCall
 from smolagents.models import ChatMessage
 from smolagents.monitoring import Timing, TokenUsage
 
 # ── step-type discriminator key ──────────────────────────────────────────
 _STEP_TYPE_KEY = "_step_type"
+_TOOL_CALL_RAW_KEY = "agentloom_tool_call"
+_TOOL_RESULT_RAW_KEY = "agentloom_tool_result"
+
+
+def _serialize_chat_message(message: ChatMessage | None) -> dict[str, Any] | None:
+    if message is None:
+        return None
+    tool_calls = [
+        {
+            "id": call.id,
+            "type": call.type,
+            "function": {
+                "name": call.function.name,
+                "arguments": call.function.arguments,
+            },
+        }
+        for call in message.tool_calls or ()
+    ]
+    raw: dict[str, Any] = {}
+    source_raw = message.raw if isinstance(message.raw, dict) else {}
+    canonical_items = source_raw.get(MODEL_ITEMS_RAW_KEY)
+    if canonical_items is not None:
+        raw[MODEL_ITEMS_RAW_KEY] = [
+            model_item_to_dict(item) for item in canonical_items
+        ]
+    for key in (
+        MODEL_RESPONSE_ID_RAW_KEY,
+        _TOOL_CALL_RAW_KEY,
+        _TOOL_RESULT_RAW_KEY,
+    ):
+        if key in source_raw:
+            raw[key] = deepcopy(source_raw[key])
+    role = getattr(message.role, "value", message.role)
+    return {
+        "role": role,
+        "content": deepcopy(message.content),
+        "tool_calls": tool_calls or None,
+        "raw": raw or None,
+        "token_usage": (
+            asdict(message.token_usage) if message.token_usage is not None else None
+        ),
+    }
+
+
+def _serialize_memory_step(step: MemoryStep) -> dict[str, Any]:
+    if isinstance(step, TaskStep):
+        return {"task": step.task, _STEP_TYPE_KEY: "TaskStep"}
+    if isinstance(step, PlanningStep):
+        return {
+            "model_input_messages": None,
+            "model_output_message": _serialize_chat_message(
+                step.model_output_message
+            ),
+            "plan": step.plan,
+            "timing": step.timing.dict(),
+            "token_usage": (
+                asdict(step.token_usage) if step.token_usage is not None else None
+            ),
+            _STEP_TYPE_KEY: "PlanningStep",
+        }
+    if isinstance(step, ActionStep):
+        value = {
+            "step_number": step.step_number,
+            "timing": step.timing.dict(),
+            "tool_calls": [call.dict() for call in step.tool_calls or ()],
+            "error": step.error.dict() if step.error else None,
+            "model_output_message": _serialize_chat_message(
+                step.model_output_message
+            ),
+            "model_output": deepcopy(step.model_output),
+            "code_action": step.code_action,
+            "observations": step.observations,
+            "action_output": deepcopy(step.action_output),
+            "token_usage": (
+                asdict(step.token_usage) if step.token_usage is not None else None
+            ),
+            "is_final_answer": step.is_final_answer,
+            _STEP_TYPE_KEY: "ActionStep",
+        }
+        tool_results = getattr(step, "tool_results", None)
+        if tool_results:
+            value["tool_results"] = [result.to_dict() for result in tool_results]
+        return value
+    raise TypeError(f"unsupported smolagents memory step: {type(step).__name__}")
 
 
 # =========================================================================
@@ -45,17 +137,7 @@ class CheckpointSerializer:
         """
         result: list[dict] = []
         for step in steps:
-            d = step.dict()
-            d[_STEP_TYPE_KEY] = type(step).__name__
-
-            # Drop non-serialisable / redundant fields.
-            d.pop("observations_images", None)
-            d.pop("task_images", None)
-            d.pop("model_input_messages", None)
-            tool_results = getattr(step, "tool_results", None)
-            if tool_results:
-                d["tool_results"] = [result.to_dict() for result in tool_results]
-            result.append(d)
+            result.append(_serialize_memory_step(step))
         return result
 
     # ── deserialise (dict → MemoryStep) ──────────────────────────────────
@@ -159,7 +241,23 @@ def _rebuild_chat_message(raw: Any) -> ChatMessage | None:
         return None
     if isinstance(raw, ChatMessage):
         return raw
-    return ChatMessage.from_dict(raw)
+    value = dict(raw)
+    raw_payload = value.pop("raw", None)
+    token_usage = _rebuild_token_usage(value.pop("token_usage", None))
+    if isinstance(raw_payload, dict):
+        serialized_items = raw_payload.get(MODEL_ITEMS_RAW_KEY)
+        if serialized_items is not None:
+            if not isinstance(serialized_items, list):
+                raise ValueError("canonical model items must be a list")
+            raw_payload = dict(raw_payload)
+            raw_payload[MODEL_ITEMS_RAW_KEY] = tuple(
+                model_item_from_dict(item) for item in serialized_items
+            )
+    return ChatMessage.from_dict(
+        value,
+        raw=raw_payload,
+        token_usage=token_usage,
+    )
 
 
 def _rebuild_action_step(d: dict) -> ActionStep:

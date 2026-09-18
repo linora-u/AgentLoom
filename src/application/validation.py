@@ -5,7 +5,7 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from dataclasses import field as dataclass_field
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any
 
 from agentloom.configuration.config_validation import TODO_MODES, normalize_todo_mode_value
 from agentloom.runtime.goal import GoalConfig, normalize_goal_config
@@ -13,11 +13,11 @@ from agentloom.runtime.goal import GoalConfig, normalize_goal_config
 
 @dataclass
 class NormalizedAgentConfig:
-    agent_function_schema: Optional[dict] = None
+    agent_function_schema: dict | None = None
     goal: GoalConfig = dataclass_field(default_factory=GoalConfig)
 
 
-_ALLOWED_EXECUTION_ENV_TYPES = {"local", "e2b", "docker", "wasm"}
+_REGISTERED_AGENT_RUNTIMES = frozenset({"smolagents"})
 _WORKFLOW_VALIDATION_ERROR = (
     "workflow field must be a non-empty string or non-empty list of non-empty strings"
 )
@@ -25,49 +25,14 @@ _WORKFLOW_VALIDATION_ERROR = (
 
 @dataclass(frozen=True)
 class NormalizedExecutionConfig:
-    executor_type: str
-    executor_kwargs: dict[str, Any]
-    prompt_template_path: Optional[str]
-    planning_interval: Optional[int] = None
+    """Supported execution settings shared by preflight and construction."""
+
+    prompt_template_path: str | None
+    planning_interval: int | None = None
 
 
 def _resolve_agent_root(agent_root: Path | str) -> Path:
     return Path(agent_root).expanduser().resolve()
-
-
-def normalize_execution_env(config: dict, source: str) -> dict[str, Any]:
-    raw_execution_env = config.get("execution_env")
-    if raw_execution_env is None:
-        return {"type": "local", "executor_kwargs": {}}
-    if not isinstance(raw_execution_env, dict):
-        raise ValueError(f"{source} must be a dictionary when provided")
-
-    normalized: dict[str, Any] = {
-        "type": "local",
-        "executor_kwargs": {},
-    }
-
-    raw_type = raw_execution_env.get("type", "local")
-    if not isinstance(raw_type, str) or not raw_type.strip():
-        raise ValueError(f"{source}.type must be a non-empty string")
-    normalized_type = raw_type.strip().lower()
-    if normalized_type not in _ALLOWED_EXECUTION_ENV_TYPES:
-        raise ValueError(
-            f"{source}.type must be one of ['local', 'e2b', 'docker', 'wasm'], "
-            f"current value: {raw_type}"
-        )
-    normalized["type"] = normalized_type
-
-    raw_executor_kwargs = raw_execution_env.get("executor_kwargs", {})
-    if raw_executor_kwargs is None:
-        raw_executor_kwargs = {}
-    if not isinstance(raw_executor_kwargs, dict):
-        raise ValueError(f"{source}.executor_kwargs must be a dictionary when provided")
-    normalized["executor_kwargs"] = dict(raw_executor_kwargs)
-
-    # bash_path is silently ignored — shell is auto-detected from $SHELL.
-
-    return normalized
 
 
 def resolve_execution_prompt_template_path(
@@ -91,7 +56,7 @@ def normalize_execution_prompt_template_path_value(
     source: str,
     *,
     agent_root: Path | str,
-) -> Optional[str]:
+) -> str | None:
     if raw_prompt is None:
         return None
 
@@ -118,7 +83,7 @@ def normalize_execution_prompt_template_path(
     source: str,
     *,
     agent_root: Path | str,
-) -> Optional[str]:
+) -> str | None:
     return normalize_execution_prompt_template_path_value(
         config.get("prompt"),
         source,
@@ -126,7 +91,7 @@ def normalize_execution_prompt_template_path(
     )
 
 
-def normalize_execution_planning_interval_value(raw_value: Any) -> Optional[int]:
+def normalize_execution_planning_interval_value(raw_value: Any) -> int | None:
     return normalize_positive_int_value(raw_value)
 
 
@@ -148,7 +113,7 @@ def validate_todo_config(config: dict, *, source: str) -> str:
     return raw_mode
 
 
-def normalize_positive_int_value(raw_value: Any) -> Optional[int]:
+def normalize_positive_int_value(raw_value: Any) -> int | None:
     if raw_value is None:
         return None
     if isinstance(raw_value, bool):
@@ -174,7 +139,6 @@ def build_normalized_execution_config(
     agent_root: Path | str,
 ) -> NormalizedExecutionConfig:
     name = str(config.get("name", source_name))
-    execution_env = normalize_execution_env(config, source=f"{name}.execution_env")
     prompt_template_path = normalize_execution_prompt_template_path(
         config,
         source=f"{name}.prompt",
@@ -183,8 +147,6 @@ def build_normalized_execution_config(
     planning_interval = normalize_execution_planning_interval_value(config.get("planning_interval"))
 
     return NormalizedExecutionConfig(
-        executor_type=str(execution_env.get("type", "local")),
-        executor_kwargs=dict(execution_env.get("executor_kwargs", {})),
         prompt_template_path=prompt_template_path,
         planning_interval=planning_interval,
     )
@@ -193,19 +155,6 @@ def build_normalized_execution_config(
 def validate_execution_config_payload(normalized: Any) -> NormalizedExecutionConfig:
     if not isinstance(normalized, NormalizedExecutionConfig):
         raise ValueError("execution normalized config must be NormalizedExecutionConfig")
-
-    executor_type = normalized.executor_type
-    if not isinstance(executor_type, str) or not executor_type.strip():
-        raise ValueError("execution normalized executor_type must be a non-empty string")
-    executor_type = executor_type.strip().lower()
-    if executor_type not in _ALLOWED_EXECUTION_ENV_TYPES:
-        raise ValueError(
-            "execution normalized executor_type must be one of ['local', 'e2b', 'docker', 'wasm']"
-        )
-
-    executor_kwargs = normalized.executor_kwargs
-    if not isinstance(executor_kwargs, dict):
-        raise ValueError("execution normalized executor_kwargs must be a dictionary")
 
     prompt_template_path = normalized.prompt_template_path
     if prompt_template_path is not None:
@@ -219,14 +168,30 @@ def validate_execution_config_payload(normalized: Any) -> NormalizedExecutionCon
             raise ValueError("execution normalized planning_interval must be a positive integer when provided")
 
     return NormalizedExecutionConfig(
-        executor_type=executor_type,
-        executor_kwargs=dict(executor_kwargs),
         prompt_template_path=prompt_template_path,
         planning_interval=planning_interval,
     )
 
 
 class AgentConfigNormalizer:
+    @staticmethod
+    def validate_agent_runtime_config(config: dict) -> str:
+        """Return the explicitly selected, currently registered Agent runtime."""
+
+        runtime_id = config.get("agent_runtime")
+        if runtime_id is None:
+            raise ValueError(
+                "Configuration is missing required 'agent_runtime' field; "
+                "available runtimes: smolagents"
+            )
+        if not isinstance(runtime_id, str) or runtime_id not in _REGISTERED_AGENT_RUNTIMES:
+            available = ", ".join(sorted(_REGISTERED_AGENT_RUNTIMES))
+            raise ValueError(
+                f"agent_runtime must name a registered runtime ({available}); "
+                f"current value: {runtime_id!r}"
+            )
+        return runtime_id
+
     @staticmethod
     def validate_tools_config_entries(tool_configs: Any) -> None:
         """Validate the ``tools`` field from an Agent YAML.
@@ -376,33 +341,6 @@ class AgentConfigNormalizer:
             raise ValueError("Configuration error: skills.paths must be a list of non-empty path strings")
 
     @staticmethod
-    def resolve_tool_call_type(
-        config: dict,
-        *,
-        default_tool_call_type: str,
-        allowed_tool_call_types: tuple[str, ...],
-    ) -> str:
-        tool_call_type = config.get("tool_call_type", default_tool_call_type)
-        if tool_call_type not in allowed_tool_call_types:
-            raise ValueError(
-                f"tool_call_type must be 'tool_call' or 'code_act', current value: {tool_call_type}"
-            )
-        return tool_call_type
-
-    @staticmethod
-    def validate_tool_call_type_config(
-        config: dict,
-        *,
-        default_tool_call_type: str,
-        allowed_tool_call_types: tuple[str, ...],
-    ) -> None:
-        AgentConfigNormalizer.resolve_tool_call_type(
-            config,
-            default_tool_call_type=default_tool_call_type,
-            allowed_tool_call_types=allowed_tool_call_types,
-        )
-
-    @staticmethod
     def validate_removed_fields(config: dict) -> None:
         """Keep removed-field rejection identical in preflight and construction."""
         if "tools_mapping" in config:
@@ -415,30 +353,23 @@ class AgentConfigNormalizer:
         config: dict,
         *,
         required_fields: tuple[str, ...],
-        default_tool_call_type: str,
-        allowed_tool_call_types: tuple[str, ...],
         build_normalized: Callable[[], Any | None],
         validate_role_specific: Callable[[Any | None], None],
     ) -> Any | None:
         AgentConfigNormalizer.validate_removed_fields(config)
+        AgentConfigNormalizer.validate_agent_runtime_config(config)
         if required_fields:
             AgentConfigNormalizer.validate_required_fields(config, list(required_fields))
             AgentConfigNormalizer.validate_tools_config(config)
             AgentConfigNormalizer.validate_workflow_config(config)
             AgentConfigNormalizer.validate_skills_config(config)
 
-        AgentConfigNormalizer.validate_tool_call_type_config(
-            config,
-            default_tool_call_type=default_tool_call_type,
-            allowed_tool_call_types=allowed_tool_call_types,
-        )
-
         normalized = build_normalized()
         validate_role_specific(normalized)
         return normalized
 
     @staticmethod
-    def validate_agent_function_schema(config: dict) -> Optional[dict]:
+    def validate_agent_function_schema(config: dict) -> dict | None:
         """
         Validate and normalize worker tool schema.
 

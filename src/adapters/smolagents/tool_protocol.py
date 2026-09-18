@@ -9,17 +9,20 @@ from collections.abc import Callable
 from functools import wraps
 from typing import Any
 
-from smolagents import validate_tool_arguments
-from smolagents.memory import ActionStep
-from smolagents.models import ChatMessage, MessageRole
-from smolagents.tools import handle_agent_input_types
-
+from agentloom.runtime.model_protocol import (
+    MODEL_ITEMS_RAW_KEY,
+    MODEL_RESPONSE_ID_RAW_KEY,
+)
 from agentloom.runtime.tool_protocol import (
     TOOL_CALL_RAW_KEY,
     TOOL_RESULT_RAW_KEY,
     TOOL_SETTLER_ATTR,
     ToolCallRecord,
 )
+from smolagents import validate_tool_arguments
+from smolagents.memory import ActionStep
+from smolagents.models import ChatMessage, MessageRole
+from smolagents.tools import handle_agent_input_types
 
 
 def settle_tool_call(
@@ -193,12 +196,22 @@ def action_step_to_protocol_messages(
         ]
 
     call_content = "" if summary_mode else (step.model_output or "")
+    model_raw = (
+        step.model_output_message.raw
+        if step.model_output_message is not None
+        and isinstance(step.model_output_message.raw, dict)
+        else {}
+    )
+    call_raw = {TOOL_CALL_RAW_KEY: True}
+    for key in (MODEL_ITEMS_RAW_KEY, MODEL_RESPONSE_ID_RAW_KEY):
+        if key in model_raw:
+            call_raw[key] = model_raw[key]
     messages.append(
         ChatMessage(
             role=MessageRole.TOOL_CALL,
             content=call_content,
             tool_calls=tool_calls,
-            raw={TOOL_CALL_RAW_KEY: True},
+            raw=call_raw,
         )
     )
     for record in records:

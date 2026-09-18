@@ -35,8 +35,6 @@ from agentloom.runtime.skills.parser import build_skills_prompt
 
 _PROMPTS_DIR: Path = Path(__file__).parent.resolve()
 
-# Legacy constants kept for backward compatibility
-DEFAULT_CODE_AGENT_PROMPT_PATH: Path = _PROMPTS_DIR / "structured_code_agent.example.yaml"
 DEFAULT_TOOLCALLING_AGENT_PROMPT_PATH: Path = _PROMPTS_DIR / "toolcalling_agent.example.yaml"
 
 
@@ -56,33 +54,12 @@ For every non-trivial execution task with multiple steps or deliverables, you MU
     raise ValueError(f"unsupported todo mode: {mode}")
 
 
-def get_prompt_filename_for_tool_call_type(tool_call_type: str, use_structured_output: bool = True) -> str:
-    """Return the base prompt filename based on tool_call_type.
-
-    Args:
-        tool_call_type: Either "tool_call" or "code_act"
-        use_structured_output: Whether to use structured output (json_schema) for code_act
-
-    Returns:
-        "toolcalling_agent.yaml" for "tool_call",
-        "structured_code_agent.yaml" for code_act with structured output,
-        "code_agent.yaml" for code_act without structured output.
-    """
-    if tool_call_type == "tool_call":
-        return "toolcalling_agent.yaml"
-    if use_structured_output:
-        return "structured_code_agent.yaml"
-    return "code_agent.yaml"
-
-
 # ---------------------------------------------------------------------------
 # Model-family variant resolution
 # ---------------------------------------------------------------------------
 
 def resolve_model_family_prompt_path(
     model_id: str | None,
-    tool_call_type: str = "code_act",
-    use_structured_output: bool = True,
 ) -> Path | None:
     """Try to find a model-family-specific prompt variant.
 
@@ -99,8 +76,7 @@ def resolve_model_family_prompt_path(
     if not family:
         return None
 
-    prompt_filename = get_prompt_filename_for_tool_call_type(tool_call_type, use_structured_output)
-    variant_path = (_PROMPTS_DIR / family / prompt_filename).resolve()
+    variant_path = (_PROMPTS_DIR / family / "toolcalling_agent.yaml").resolve()
     if variant_path.is_file():
         return variant_path
     return None
@@ -117,9 +93,7 @@ def resolve_prompt_path(
     model_id: str | None,
     agent_root: Path | str,
     logger: Any,
-    tool_call_type: str = "code_act",
     default_prompt_path: Path | None = None,
-    use_structured_output: bool = True,
 ) -> tuple[Path | None, bool]:
     """Resolve the final prompt YAML path and whether it was explicitly configured.
 
@@ -127,7 +101,7 @@ def resolve_prompt_path(
     1. *prompt_template_path* – passed in from execution config
     2. *effective_prompt_path* – from agent / global system config
     3. Model-family variant (e.g. ``anthropic/toolcalling_agent.yaml``)
-    4. Local override in prompts dir (e.g. ``structured_code_agent.yaml`` without .example)
+    4. Local ``toolcalling_agent.yaml`` override in the prompts directory
     5. None (use smolagents' built-in)
 
     Returns:
@@ -141,33 +115,27 @@ def resolve_prompt_path(
         resolved = effective_prompt_path
 
     if resolved is not None:
-        code_agent_prompt_path = resolve_execution_prompt_template_path(
+        prompt_path = resolve_execution_prompt_template_path(
             resolved,
             "execution.prompt_template_path",
             agent_root=agent_root,
         )
-        return code_agent_prompt_path, True
+        return prompt_path, True
 
     # No explicit config – try model-family variant
-    variant_path = resolve_model_family_prompt_path(model_id, tool_call_type, use_structured_output)
+    variant_path = resolve_model_family_prompt_path(model_id)
     if variant_path is not None:
         logger.info(
-            "Using model-family prompt variant: %s (model_id=%s, tool_call_type=%s)",
+            "Using model-family prompt variant: %s (model_id=%s)",
             variant_path,
             model_id,
-            tool_call_type,
         )
         return variant_path, False
 
     # Try local override: user placed a non-.example file in the prompts dir
-    prompt_filename = get_prompt_filename_for_tool_call_type(tool_call_type, use_structured_output)
-    local_override = (_PROMPTS_DIR / prompt_filename).resolve()
+    local_override = (_PROMPTS_DIR / "toolcalling_agent.yaml").resolve()
     if local_override.is_file():
-        logger.info(
-            "Using local prompt override: %s (tool_call_type=%s)",
-            local_override,
-            tool_call_type,
-        )
+        logger.info("Using local prompt override: %s", local_override)
         return local_override, False
 
     # No override found – use smolagents' built-in
@@ -194,15 +162,13 @@ def _append_to_system_prompt(templates: dict[str, Any], section: str) -> None:
         templates["system_prompt"] = current + separator + section
 
 
-def _load_smolagents_builtin(tool_call_type: str, use_structured_output: bool = True) -> dict[str, Any]:
+def _load_smolagents_builtin() -> dict[str, Any]:
     """Load smolagents' built-in prompt template from the installed package."""
-    if tool_call_type == "tool_call":
-        filename = "toolcalling_agent.yaml"
-    elif use_structured_output:
-        filename = "structured_code_agent.yaml"
-    else:
-        filename = "code_agent.yaml"
-    content = importlib.resources.files("smolagents.prompts").joinpath(filename).read_text()
+    content = (
+        importlib.resources.files("smolagents.prompts")
+        .joinpath("toolcalling_agent.yaml")
+        .read_text()
+    )
     return yaml.safe_load(content)
 
 
@@ -215,8 +181,6 @@ def build_prompt_templates(
     skill_catalog: SkillCatalog,
     skill_tool_enabled: bool,
     logger: Any,
-    tool_call_type: str = "code_act",
-    use_structured_output: bool = True,
     todo_mode: str = "auto",
 ) -> dict[str, Any] | None:
     """Build the final prompt-templates dict ready for the runtime agent.
@@ -234,30 +198,28 @@ def build_prompt_templates(
     Raises :class:`ValueError` when an *explicitly configured* prompt path is
     missing or cannot be loaded.
     """
-    code_agent_prompt_path, explicit_configured = resolve_prompt_path(
+    prompt_path, explicit_configured = resolve_prompt_path(
         prompt_template_path=prompt_template_path,
         effective_prompt_path=effective_prompt_path,
         model_id=model_id,
         agent_root=agent_root,
         logger=logger,
-        tool_call_type=tool_call_type,
-        use_structured_output=use_structured_output,
     )
 
-    if explicit_configured and code_agent_prompt_path is not None and (
-        not code_agent_prompt_path.exists() or not code_agent_prompt_path.is_file()
+    if explicit_configured and prompt_path is not None and (
+        not prompt_path.exists() or not prompt_path.is_file()
     ):
         raise ValueError(
-            f"Configured prompt path does not exist or is not a file: {code_agent_prompt_path}"
+            f"Configured prompt path does not exist or is not a file: {prompt_path}"
         )
 
     try:
-        if code_agent_prompt_path is not None:
+        if prompt_path is not None:
             # User-provided path or model-family variant
-            prompt_templates = _load_and_validate_yaml(code_agent_prompt_path)
+            prompt_templates = _load_and_validate_yaml(prompt_path)
         else:
             # Default: use smolagents' built-in prompt
-            prompt_templates = _load_smolagents_builtin(tool_call_type, use_structured_output)
+            prompt_templates = _load_smolagents_builtin()
 
         # 1) Environment context (workspace root, exclusions)
         _append_to_system_prompt(prompt_templates, get_agent_environment_prompt())
@@ -280,7 +242,7 @@ def build_prompt_templates(
     except Exception as exc:
         if explicit_configured:
             raise ValueError(
-                f"Failed to load configured prompt template '{code_agent_prompt_path}': {exc}"
+                f"Failed to load configured prompt template '{prompt_path}': {exc}"
             ) from exc
         logger.warning("Failed to load or patch customized prompt: %s", exc)
         return None

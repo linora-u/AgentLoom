@@ -436,8 +436,6 @@ class RootSettings(BaseModel):
     smart_summary: bool = True
     context_engine: dict[str, Any] = Field(default_factory=dict)
     model: dict[str, Any] = Field(default_factory=dict)
-    execution_env: dict[str, Any] = Field(default_factory=dict)
-    code_agent: dict[str, Any] = Field(default_factory=dict)
     tools: list[Any] = Field(default_factory=list)
     default_toolsets: list[str] = Field(default_factory=list)
     toolsets: list[str] = Field(default_factory=list)
@@ -448,6 +446,16 @@ class RootSettings(BaseModel):
     hooks: dict[str, Any] = Field(default_factory=dict)
     todo: TodoSettings = Field(default_factory=TodoSettings)
     skills: SkillsSettings = Field(default_factory=SkillsSettings)
+
+    @model_validator(mode="before")
+    @classmethod
+    def ignore_removed_code_execution_settings(cls, value: Any) -> Any:
+        if not isinstance(value, dict):
+            return value
+        filtered = dict(value)
+        filtered.pop("execution_env", None)
+        filtered.pop("code_agent", None)
+        return filtered
 
 
 def raise_project_key_error(source: str) -> ValueError:

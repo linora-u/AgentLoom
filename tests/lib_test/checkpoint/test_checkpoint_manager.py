@@ -10,7 +10,7 @@ from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 import pytest
-
+from agentloom.runtime.agent_runtime import RuntimeCheckpointEnvelope
 from agentloom.runtime.checkpoint.checkpoint_manager import (
     CheckpointManager,
     cleanup_expired_tasks,
@@ -217,6 +217,31 @@ class TestTaskEvents:
 
 
 class TestSupervisorCheckpoint:
+
+    def test_save_load_runtime_envelope(
+        self,
+        cm: CheckpointManager,
+        task_id: str,
+    ):
+        envelope = RuntimeCheckpointEnvelope(
+            runtime_id="smolagents",
+            runtime_version="1.26.0",
+            state_schema_version=1,
+            payload={"memory_steps": [], "step_count": 0},
+        )
+        cm.save_supervisor_runtime_checkpoint(
+            task_id,
+            runtime_checkpoint=envelope.to_dict(),
+            task_text="test task",
+            status="interrupted",
+        )
+
+        loaded = cm.load_supervisor_checkpoint(task_id)
+
+        assert loaded is not None
+        assert loaded["status"] == "interrupted"
+        assert loaded["runtime_checkpoint"] == envelope.to_dict()
+        assert loaded["step_count"] == 0
 
     def test_save_load(self, cm: CheckpointManager, task_id: str):
         from smolagents.memory import ActionStep, TaskStep

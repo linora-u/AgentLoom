@@ -1,19 +1,17 @@
-import pytest
-from smolagents.models import ChatMessage, MessageRole
-
 import agentloom.runtime.agent as base_agent_module
 import agentloom.runtime.factory as yaml_factory_module
-from agentloom.application.validation import NormalizedExecutionConfig
-from agentloom.runtime.loom_mixin import LoomAgentMixin
+import pytest
 from agentloom.runtime.factory import (
     YamlConfiguredAgent,
     YamlConfiguredSupervisorAgent,
 )
 from agentloom.runtime.hooks import HookPlan, HookRun
+from agentloom.runtime.loom_mixin import LoomAgentMixin
 from agentloom.runtime.trace.task_context import (
     clear_current_hook_run,
     set_current_hook_run,
 )
+from smolagents.models import ChatMessage, MessageRole
 
 _UNSET = object()
 
@@ -46,6 +44,7 @@ def _worker_config(
 ) -> dict:
     config = {
         "name": "worker_env_test",
+        "agent_runtime": "smolagents",
         "description": "worker",
         "tools": [],
         "workflow": "wf",
@@ -70,6 +69,7 @@ def _supervisor_config(
 ) -> dict:
     config = {
         "name": "supervisor_env_test",
+        "agent_runtime": "smolagents",
         "description": "supervisor",
         "tools": [],
         "workflow": "wf",
@@ -98,58 +98,18 @@ def _build_execution_kwargs(agent):
     return agent._build_execution_agent_kwargs(agent._role_profile())
 
 
-def test_worker_execution_env_defaults_to_local_and_empty_kwargs():
-    worker = _make_worker(_worker_config())
+@pytest.mark.parametrize("maker,config_builder", [
+    (_make_worker, _worker_config),
+    (_make_supervisor, _supervisor_config),
+])
+def test_removed_execution_env_has_no_runtime_kwargs(maker, config_builder):
+    agent = maker(config_builder(["ignored", {"type": "unknown"}]))
 
-    worker._validate_config()
-    config = _build_execution_kwargs(worker)
+    agent._validate_config()
+    config = _build_execution_kwargs(agent)
 
-    assert config["executor_type"] == "local"
-    assert config["executor_kwargs"] == {}
-
-
-def test_worker_execution_env_passthrough_docker_type_and_kwargs():
-    worker = _make_worker(
-        _worker_config(
-            {
-                "type": "docker",
-                "executor_kwargs": {
-                    "host": "127.0.0.1",
-                    "image_name": "agentloom-smolagents-jupyter-kernel:local",
-                    "build_new_image": False,
-                },
-                "config": {"ignored": True},
-                "unknown_key": "ignored",
-            }
-        )
-    )
-
-    worker._validate_config()
-    config = _build_execution_kwargs(worker)
-
-    assert config["executor_type"] == "docker"
-    assert config["executor_kwargs"] == {
-        "host": "127.0.0.1",
-        "image_name": "agentloom-smolagents-jupyter-kernel:local",
-        "build_new_image": False,
-    }
-
-
-def test_supervisor_execution_env_passthrough_e2b_kwargs():
-    supervisor = _make_supervisor(
-        _supervisor_config(
-            {
-                "type": "e2b",
-                "executor_kwargs": {"timeout": 300},
-            }
-        )
-    )
-
-    supervisor._validate_config()
-    config = _build_execution_kwargs(supervisor)
-
-    assert config["executor_type"] == "e2b"
-    assert config["executor_kwargs"] == {"timeout": 300}
+    assert "executor_type" not in config
+    assert "executor_kwargs" not in config
 
 
 def test_worker_planning_interval_passthrough_from_int():
@@ -177,15 +137,6 @@ def test_invalid_planning_interval_falls_back_to_none():
     config = _build_execution_kwargs(worker)
 
     assert config["planning_interval"] is None
-
-
-def test_agent_max_tokens_fields_do_not_affect_execution_normalized():
-    worker = _make_worker(_worker_config(max_tokens=3000, llm_max_tokens=2600))
-
-    worker._validate_config()
-    execution_normalized = worker._ensure_execution_normalized()
-
-    assert not hasattr(execution_normalized, "max_tokens")
 
 
 def test_worker_model_config_builder_ignores_agent_max_tokens_fields():
@@ -335,10 +286,9 @@ def test_worker_prompt_path_passthrough_from_mapping(monkeypatch, tmp_path):
     monkeypatch.setattr(base_agent_module, "C", type("ConfigProxy", (), {"agent_root": tmp_path, "get": staticmethod(lambda *args, **kwargs: None), "llm": type("L", (), {"for_type": staticmethod(lambda _model_type: type("V", (), {"max_tokens": 1000})())})()})())
 
     worker = _make_worker(_worker_config_with_prompt({"path": "prompts/worker_prompt.yaml"}))
-    worker._validate_config()
-    config = _build_execution_kwargs(worker)
+    worker._effective_agent_config = worker._config
 
-    assert config["prompt_template_path"] == str(prompt_file.resolve())
+    assert worker._resolve_effective_prompt_template_path() == str(prompt_file.resolve())
 
 
 def test_supervisor_prompt_path_passthrough_from_string(monkeypatch, tmp_path):
@@ -349,10 +299,9 @@ def test_supervisor_prompt_path_passthrough_from_string(monkeypatch, tmp_path):
     monkeypatch.setattr(base_agent_module, "C", type("ConfigProxy", (), {"agent_root": tmp_path, "get": staticmethod(lambda *args, **kwargs: None), "llm": type("L", (), {"for_type": staticmethod(lambda _model_type: type("V", (), {"max_tokens": 1000})())})()})())
 
     supervisor = _make_supervisor(_supervisor_config(prompt="prompts/supervisor_prompt.yaml"))
-    supervisor._validate_config()
-    config = _build_execution_kwargs(supervisor)
+    supervisor._effective_agent_config = supervisor._config
 
-    assert config["prompt_template_path"] == str(prompt_file.resolve())
+    assert supervisor._resolve_effective_prompt_template_path() == str(prompt_file.resolve())
 
 
 def test_build_execution_config_builder_autonormalizes_when_validate_not_called(monkeypatch, tmp_path):
@@ -370,9 +319,9 @@ def test_build_execution_config_builder_autonormalizes_when_validate_not_called(
     )
     assert worker._normalized is None
     worker_config = _build_execution_kwargs(worker)
-    assert worker_config["executor_type"] == "docker"
-    assert worker_config["executor_kwargs"] == {"host": "127.0.0.1"}
-    assert worker_config["prompt_template_path"] == str(worker_prompt.resolve())
+    assert "executor_type" not in worker_config
+    assert "executor_kwargs" not in worker_config
+    assert worker_config["prompt_template_path"] is None
     assert worker._normalized is not None
 
     supervisor_prompt = tmp_path / "prompts" / "supervisor_prompt.yaml"
@@ -385,78 +334,10 @@ def test_build_execution_config_builder_autonormalizes_when_validate_not_called(
     )
     assert supervisor._normalized is None
     supervisor_config = _build_execution_kwargs(supervisor)
-    assert supervisor_config["executor_type"] == "e2b"
-    assert supervisor_config["executor_kwargs"] == {"timeout": 120}
-    assert supervisor_config["prompt_template_path"] == str(supervisor_prompt.resolve())
+    assert "executor_type" not in supervisor_config
+    assert "executor_kwargs" not in supervisor_config
+    assert supervisor_config["prompt_template_path"] is None
     assert supervisor._normalized is not None
-
-
-@pytest.mark.parametrize("maker,config_builder", [
-    (_make_worker, _worker_config),
-    (_make_supervisor, _supervisor_config),
-])
-def test_execution_env_rejects_host_type(maker, config_builder):
-    agent = maker(config_builder({"type": "host"}))
-
-    with pytest.raises(ValueError, match="must be one of"):
-        agent._validate_config()
-
-
-@pytest.mark.parametrize("maker,config_builder", [
-    (_make_worker, _worker_config),
-    (_make_supervisor, _supervisor_config),
-])
-def test_execution_env_rejects_non_dict_executor_kwargs(maker, config_builder):
-    agent = maker(config_builder({"type": "local", "executor_kwargs": ["bad"]}))
-
-    with pytest.raises(ValueError, match="executor_kwargs"):
-        agent._validate_config()
-
-
-@pytest.mark.parametrize("maker,config_builder", [
-    (_make_worker, _worker_config),
-    (_make_supervisor, _supervisor_config),
-])
-def test_execution_env_rejects_non_string_bash_path(maker, config_builder):
-    # bash_path is silently ignored — no validation error expected
-    agent = maker(config_builder({"type": "local", "bash_path": 123}))
-    agent._validate_config()  # should not raise
-
-
-@pytest.mark.parametrize(
-    "maker,config",
-    [
-        (_make_worker, _worker_config_with_prompt(prompt=["bad"])),
-        (_make_supervisor, _supervisor_config(prompt=["bad"])),
-        (_make_worker, _worker_config_with_prompt(prompt={"name": "missing_path"})),
-        (_make_supervisor, _supervisor_config(prompt={"name": "missing_path"})),
-    ],
-)
-def test_prompt_config_rejects_invalid_shape(maker, config):
-    agent = maker(config)
-
-    with pytest.raises(ValueError, match="prompt"):
-        agent._validate_config()
-
-
-def test_build_execution_kwargs_rejects_non_dict_normalized_execution_env():
-    worker = _make_worker(_worker_config())
-    worker._execution_normalized = "bad"
-
-    with pytest.raises(ValueError, match="execution normalized config must be NormalizedExecutionConfig"):
-        _build_execution_kwargs(worker)
-
-
-def test_build_execution_kwargs_rejects_non_dict_normalized_executor_kwargs():
-    worker = _make_worker(_worker_config())
-    worker._execution_normalized = NormalizedExecutionConfig(
-        executor_type="local",
-        executor_kwargs=["bad"],  # type: ignore[arg-type]
-        prompt_template_path=None,
-    )
-
-    with pytest.raises(ValueError, match="execution normalized executor_kwargs must be a dictionary"):
-        _build_execution_kwargs(worker)
 
 
 def _config_at(root):

@@ -15,7 +15,6 @@ _LAZY_EXPORTS = {
     "C": ("agentloom.configuration", "C"),
     "get_config": ("agentloom.configuration", "get_config"),
     "get_default_toolsets": ("agentloom.configuration", "get_default_toolsets"),
-    "get_code_agent_config": ("agentloom.configuration", "get_code_agent_config"),
     "get_model_config": ("agentloom.configuration", "get_model_config"),
     "ApplicationRunError": ("agentloom.application.run", "ApplicationRunError"),
     "ApplicationRunBudgetLimited": (
@@ -56,7 +55,6 @@ __all__ = [
     "C",
     "get_config",
     "get_default_toolsets",
-    "get_code_agent_config",
     "get_model_config",
     "ApplicationRunError",
     "ApplicationRunBudgetLimited",
