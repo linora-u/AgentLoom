@@ -514,11 +514,63 @@ def test_adapter_registers_one_native_step_bridge_and_pushes_completed_step() ->
     SmolagentsRuntimeAdapter(native, checkpoint_sink=observed.append)
 
     assert len(native.step_callbacks.callbacks) == 1
-    completed = ActionStep(step_number=1, timing=Timing(start_time=0.0))
+    completed = ActionStep(
+        step_number=1,
+        timing=Timing(start_time=0.0),
+        model_output_message=ChatMessage(
+            role=MessageRole.ASSISTANT,
+            content="done",
+            raw={
+                MODEL_ITEMS_RAW_KEY: (
+                    MessageItem(role="assistant", text="done"),
+                ),
+            },
+        ),
+    )
     native.step_callbacks.callbacks[0](completed, agent=native)
 
     assert len(observed) == 1
     assert observed[0].payload["memory_steps"][0]["_step_type"] == "ActionStep"
+
+
+def test_adapter_does_not_checkpoint_action_step_aborted_before_model_turn() -> None:
+    native = _NativeRuntime(_NativeResult(output="done"))
+    native.memory.steps = [TaskStep(task="resume-safe task")]
+    observed: list[RuntimeCheckpointEnvelope] = []
+    SmolagentsRuntimeAdapter(native, checkpoint_sink=observed.append)
+
+    aborted = ActionStep(
+        step_number=1,
+        timing=Timing(start_time=0.0),
+    )
+    native.step_callbacks.callbacks[0](aborted, agent=native)
+
+    assert observed == []
+
+
+def test_adapter_snapshot_excludes_synthetic_step_without_model_turn() -> None:
+    native = _NativeRuntime(_NativeResult(output="done"))
+    native.memory.steps = [
+        TaskStep(task="resume-safe task"),
+        ActionStep(
+            step_number=1,
+            timing=Timing(start_time=0.0),
+            action_output="synthetic max-steps answer",
+        ),
+    ]
+    runtime = SmolagentsRuntimeAdapter(native)
+
+    checkpoint = runtime.snapshot()
+
+    assert checkpoint.progress == 1
+    assert [
+        step["_step_type"] for step in checkpoint.payload["memory_steps"]
+    ] == ["TaskStep"]
+    restored = _NativeRuntime(_NativeResult(output="done"))
+    SmolagentsRuntimeAdapter(restored).restore(checkpoint)
+    assert [type(step).__name__ for step in restored.memory.steps] == [
+        "TaskStep"
+    ]
 
 
 def test_adapter_snapshot_and_restore_own_native_memory() -> None:
