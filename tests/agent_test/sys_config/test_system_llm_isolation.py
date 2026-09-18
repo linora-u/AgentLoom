@@ -10,7 +10,6 @@ from agentloom.configuration.config import (
     _filter_llm_only_top_level_keys,
 )
 
-
 # ─── 测试：_filter_llm_only_top_level_keys 边界条件 ───
 
 
@@ -76,11 +75,6 @@ def test_workflow_overlay_and_llm_only_are_disjoint():
     assert intersection == set(), (
         f"Isolation violation: these keys appear in both sets: {intersection}"
     )
-
-
-def test_removed_code_execution_keys_are_not_workflow_overlays() -> None:
-    assert "execution_env" not in _WORKFLOW_OVERLAY_KEYS
-    assert "code_agent" not in _WORKFLOW_OVERLAY_KEYS
 
 
 def test_llm_only_keys_contains_expected_members():

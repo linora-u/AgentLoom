@@ -57,7 +57,6 @@ def test_build_worker_normalized_config_defaults(tmp_path: Path):
     )
 
     assert isinstance(normalized, NormalizedAgentConfig)
-    assert not hasattr(normalized, "execution_env")
     assert not hasattr(normalized, "prompt_template_path")
     assert normalized.agent_function_schema is None
 
@@ -72,7 +71,6 @@ def test_build_supervisor_normalized_config_defaults(tmp_path: Path):
     )
 
     assert isinstance(normalized, NormalizedAgentConfig)
-    assert not hasattr(normalized, "execution_env")
     assert not hasattr(normalized, "prompt_template_path")
     assert normalized.agent_function_schema is None
 

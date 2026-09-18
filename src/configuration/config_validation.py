@@ -13,7 +13,6 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator, model_valida
 
 TodoMode = Literal["auto", "on", "off"]
 TODO_MODES = frozenset(get_args(TodoMode))
-REMOVED_CODE_EXECUTION_FIELDS = frozenset({"execution_env", "code_agent"})
 
 
 def normalize_todo_mode_value(value: Any) -> Any:
@@ -446,16 +445,6 @@ class RootSettings(BaseModel):
     hooks: dict[str, Any] = Field(default_factory=dict)
     todo: TodoSettings = Field(default_factory=TodoSettings)
     skills: SkillsSettings = Field(default_factory=SkillsSettings)
-
-    @model_validator(mode="before")
-    @classmethod
-    def ignore_removed_code_execution_settings(cls, value: Any) -> Any:
-        if not isinstance(value, dict):
-            return value
-        filtered = dict(value)
-        for field_name in REMOVED_CODE_EXECUTION_FIELDS:
-            filtered.pop(field_name, None)
-        return filtered
 
 
 def raise_project_key_error(source: str) -> ValueError:
