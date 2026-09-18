@@ -29,6 +29,19 @@ ADAPTERS = (
     "openai_responses",
     "anthropic_messages",
 )
+ADAPTER_CREDENTIAL_ENV = {
+    "openai_chat": (
+        "OPENAI_API_KEY",
+        "AZURE_API_KEY",
+        "AZURE_OPENAI_API_KEY",
+    ),
+    "openai_responses": (
+        "OPENAI_API_KEY",
+        "AZURE_API_KEY",
+        "AZURE_OPENAI_API_KEY",
+    ),
+    "anthropic_messages": ("ANTHROPIC_API_KEY",),
+}
 TOKEN = "AGENTLOOM_PROTOCOL_MATRIX_OK"
 DEFAULT_TIMEOUT_SECONDS = 600
 Status = Literal["PASSED", "FAILED", "NOT-RUN"]
@@ -68,15 +81,15 @@ def redact_text(value: object, *, secrets: tuple[str, ...] = ()) -> str:
     text = str(value)
     for secret in secrets:
         text = text.replace(secret, "<redacted>")
-    text = re.sub(r"https?://[^\\s'\"<>]+", "<redacted-url>", text)
+    text = re.sub(r"https?://[^\s'\"<>]+", "<redacted-url>", text)
     text = re.sub(
-        r"(?i)\\b(api[_-]?key|authorization|token|secret|password)"
-        r"\\s*[:=]\\s*[^\\s,;}]+",
-        r"\\1=<redacted>",
+        r"(?i)\b(api[_-]?key|authorization|token|secret|password)"
+        r"\s*[:=]\s*[^\s,;}]+",
+        r"\1=<redacted>",
         text,
     )
-    text = re.sub(r"(?i)\\bbearer\\s+[^\\s,;}]+", "Bearer <redacted>", text)
-    text = re.sub(r"\\bsk-[A-Za-z0-9_-]{8,}\\b", "<redacted-key>", text)
+    text = re.sub(r"(?i)\bbearer\s+[^\s,;}]+", "Bearer <redacted>", text)
+    text = re.sub(r"\bsk-[A-Za-z0-9_-]{8,}\b", "<redacted-key>", text)
     return text
 
 
@@ -95,16 +108,12 @@ def _profile_has_credentials(settings: object, environ: dict[str, str]) -> bool:
     api_key = getattr(settings, "api_key", "")
     if isinstance(api_key, str) and _is_configured_credential(api_key):
         return True
-    known_keys = (
-        "OPENAI_API_KEY",
-        "AZURE_API_KEY",
-        "AZURE_OPENAI_API_KEY",
-        "ANTHROPIC_API_KEY",
-        "GEMINI_API_KEY",
-        "GOOGLE_API_KEY",
-        "AWS_ACCESS_KEY_ID",
-    )
-    if any(_is_configured_credential(environ.get(key, "")) for key in known_keys):
+    adapter = str(getattr(settings, "adapter", "") or "")
+    credential_keys = ADAPTER_CREDENTIAL_ENV.get(adapter, ())
+    if any(
+        _is_configured_credential(environ.get(key, ""))
+        for key in credential_keys
+    ):
         return True
     base_url = str(getattr(settings, "base_url", "") or "").lower()
     model = str(getattr(settings, "model", "") or "").lower()

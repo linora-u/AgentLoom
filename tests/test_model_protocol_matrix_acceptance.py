@@ -113,6 +113,45 @@ def test_redaction_removes_configured_secrets_and_urls() -> None:
     assert "<redacted" in redacted
 
 
+def test_redaction_removes_common_secret_shapes_without_configured_values() -> None:
+    secret = "sk-unlisted-secret-123456"
+    text = (
+        f"api_key={secret} Authorization: Bearer {secret} "
+        "https://provider.example/v1"
+    )
+
+    redacted = matrix.redact_text(text)
+
+    assert secret not in redacted
+    assert "provider.example" not in redacted
+    assert "api_key=<redacted>" in redacted
+    assert "Authorization=<redacted>" in redacted
+
+
+def test_provider_environment_credentials_do_not_cross_adapter_boundaries() -> None:
+    config = SimpleNamespace(
+        default_model_type="chat",
+        models={
+            "chat": _settings("openai_chat", "openai/chat"),
+            "responses": _settings("openai_responses", "openai/response"),
+            "claude": _settings(
+                "anthropic_messages",
+                "anthropic/claude",
+            ),
+        },
+    )
+
+    cases = matrix.select_cases(
+        config,
+        environ={"OPENAI_API_KEY": "openai-only-secret"},
+    )
+
+    assert cases[0].runnable is True
+    assert cases[1].runnable is True
+    assert cases[2].runnable is False
+    assert "credential" in cases[2].reason
+
+
 def test_application_workflow_path_is_unique_and_discoverable(tmp_path) -> None:
     first = matrix.application_workflow_path(tmp_path / "one", "openai_chat")
     second = matrix.application_workflow_path(tmp_path / "two", "openai_chat")
