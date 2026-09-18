@@ -27,6 +27,9 @@ from agentloom.runtime.model_protocol import (
     MODEL_ITEMS_RAW_KEY,
     MODEL_RESPONSE_ID_RAW_KEY,
     FunctionCallItem,
+    MessageItem,
+    ModelTurnResult,
+    ReasoningItem,
 )
 from smolagents.models import ChatMessage, ChatMessageToolCall, ChatMessageToolCallFunction, MessageRole
 
@@ -1599,15 +1602,22 @@ def test_old_structured_tool_error_with_oversized_metadata_stays_valid_json():
 def test_smart_summary_keeps_two_recent_user_turns_verbatim(monkeypatch):
     captured = {}
 
-    class SummaryModel:
-        def generate(self, messages):
-            captured["request"] = messages
-            return ChatMessage(role=MessageRole.ASSISTANT, content="summary of old work")
+    class SummaryBinding:
+        def turn(self, *, items, **_kwargs):
+            captured["request"] = items
+            return ModelTurnResult(
+                items=(
+                    MessageItem(
+                        role="assistant",
+                        text="summary of old work",
+                    ),
+                )
+            )
 
     monkeypatch.setattr(
-        compression_module.model_manager,
-        "get_smolagents_model",
-        lambda _model_type: SummaryModel(),
+        compression_module,
+        "resolve_litellm_model_turn_binding",
+        lambda _model_type: SummaryBinding(),
     )
     messages = to_internal_messages(
         [
@@ -1624,7 +1634,7 @@ def test_smart_summary_keeps_two_recent_user_turns_verbatim(monkeypatch):
     result = summarize_conversation(messages, model_id="dummy-model")
 
     assert result.error is None
-    request_text = "\n".join(_extract_content_text(message.content) for message in captured["request"])
+    request_text = "\n".join(item.text for item in captured["request"])
     assert "OLD USER TURN" in request_text
     assert "RECENT USER ONE" not in request_text
     visible_texts = [
@@ -1639,6 +1649,71 @@ def test_smart_summary_keeps_two_recent_user_turns_verbatim(monkeypatch):
         "RECENT USER TWO",
         "RECENT ASSISTANT TWO",
     ]
+
+
+def test_smart_summary_accepts_reasoning_but_rejects_executable_items(
+    monkeypatch,
+) -> None:
+    messages = to_internal_messages(
+        [
+            ChatMessage(role=MessageRole.USER, content="OLD USER ONE"),
+            ChatMessage(role=MessageRole.ASSISTANT, content="OLD ANSWER ONE"),
+            ChatMessage(role=MessageRole.USER, content="OLD USER TWO"),
+            ChatMessage(role=MessageRole.ASSISTANT, content="OLD ANSWER TWO"),
+            ChatMessage(role=MessageRole.USER, content="RECENT USER ONE"),
+            ChatMessage(role=MessageRole.ASSISTANT, content="RECENT ANSWER ONE"),
+            ChatMessage(role=MessageRole.USER, content="RECENT USER TWO"),
+            ChatMessage(role=MessageRole.ASSISTANT, content="RECENT ANSWER TWO"),
+        ]
+    )
+
+    class SummaryBinding:
+        def __init__(self, result: ModelTurnResult) -> None:
+            self.result = result
+
+        def turn(self, *, items, **_kwargs):
+            assert [item.role for item in items] == ["system", "user", "user"]
+            return self.result
+
+    monkeypatch.setattr(
+        compression_module,
+        "resolve_litellm_model_turn_binding",
+        lambda _model_type: SummaryBinding(
+            ModelTurnResult(
+                items=(
+                    ReasoningItem(summary=("condense",)),
+                    MessageItem(role="assistant", text="safe summary"),
+                )
+            )
+        ),
+    )
+
+    accepted = summarize_conversation(messages, model_id="dummy-model")
+
+    assert accepted.error is None
+    assert accepted.summary == "safe summary"
+
+    monkeypatch.setattr(
+        compression_module,
+        "resolve_litellm_model_turn_binding",
+        lambda _model_type: SummaryBinding(
+            ModelTurnResult(
+                items=(
+                    FunctionCallItem(
+                        call_id="unexpected",
+                        name="read_file",
+                        arguments_json="{}",
+                    ),
+                )
+            )
+        ),
+    )
+
+    rejected = summarize_conversation(messages, model_id="dummy-model")
+
+    assert rejected.summary == ""
+    assert "ModelProtocolError" in (rejected.error or "")
+    assert "executable item" in (rejected.error or "")
 
 
 def test_smart_summary_preprocessing_keeps_two_recent_turns_byte_exact(monkeypatch):
@@ -1715,9 +1790,11 @@ def test_standard_preprocessing_keeps_two_recent_turns_byte_exact(monkeypatch):
 
 def test_smart_summary_does_not_run_until_more_than_two_user_turns(monkeypatch):
     monkeypatch.setattr(
-        compression_module.model_manager,
-        "get_smolagents_model",
-        lambda _model_type: (_ for _ in ()).throw(AssertionError("summary model must not run")),
+        compression_module,
+        "resolve_litellm_model_turn_binding",
+        lambda _model_type: (_ for _ in ()).throw(
+            AssertionError("summary model must not run")
+        ),
     )
     messages = to_internal_messages(
         [
@@ -1821,10 +1898,17 @@ def test_recent_tail_falls_back_to_assistant_suffix_within_oversized_turn(monkey
 def test_summary_accepts_single_oversized_head_when_assistant_suffix_fits(monkeypatch):
     calls = []
 
-    class SummaryModel:
-        def generate(self, messages):
-            calls.append(messages)
-            return ChatMessage(role=MessageRole.ASSISTANT, content="oversized request summary")
+    class SummaryBinding:
+        def turn(self, *, items, **_kwargs):
+            calls.append(items)
+            return ModelTurnResult(
+                items=(
+                    MessageItem(
+                        role="assistant",
+                        text="oversized request summary",
+                    ),
+                )
+            )
 
     monkeypatch.setattr(
         compression_module,
@@ -1832,9 +1916,9 @@ def test_summary_accepts_single_oversized_head_when_assistant_suffix_fits(monkey
         lambda messages, _model_id: sum(len(_extract_content_text(message.content)) for message in messages),
     )
     monkeypatch.setattr(
-        compression_module.model_manager,
-        "get_smolagents_model",
-        lambda _model_type: SummaryModel(),
+        compression_module,
+        "resolve_litellm_model_turn_binding",
+        lambda _model_type: SummaryBinding(),
     )
     messages = to_internal_messages(
         [
