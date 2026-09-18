@@ -156,7 +156,8 @@ def _wait_for_completed_worker_interrupt_point(proc: subprocess.Popen, timeout: 
             output_path = SESSION_ROOT / "worker_output_before.txt"
             if (len(calls) == 1 and calls[0].get("status") == "completed"
                     and output_path.is_file()
-                    and output_path.read_text() == _worker_final_output(_worker_ckpt(task_dir))):
+                    and _worker_handoff_output(output_path.read_text())
+                    == _worker_final_output(_worker_ckpt(task_dir))):
                 if (WORK_DIR / "final_manifest.txt").exists():
                     raise AssertionError("Supervisor finalized before the interruption")
                 return task_dir
@@ -190,6 +191,23 @@ def _worker_usage(checkpoint: dict) -> dict[str, int]:
     fields = ("input_tokens", "output_tokens")
     return {field: sum((step.get("token_usage") or {}).get(field, 0)
                        for step in _runtime_memory_steps(checkpoint)) for field in fields}
+
+
+def _worker_handoff_output(raw: str) -> str:
+    try:
+        envelope = json.loads(raw)
+    except json.JSONDecodeError as exc:
+        raise AssertionError("Worker handoff is not a JSON result envelope") from exc
+    if (
+        not isinstance(envelope, dict)
+        or envelope.get("ok") is not True
+        or envelope.get("status") != "completed"
+        or not isinstance(envelope.get("output"), str)
+    ):
+        raise AssertionError(
+            "Worker handoff is not a completed Agent-as-Tool result envelope"
+        )
+    return envelope["output"]
 
 
 def _worker_final_output(checkpoint: dict):
@@ -572,7 +590,7 @@ def prepare(scenario: str) -> dict:
     if scenario == "completed":
         before_path = SESSION_ROOT / "worker_output_before.txt"
         output = before_path.read_text()
-        if _worker_final_output(before_worker) != output:
+        if _worker_final_output(before_worker) != _worker_handoff_output(output):
             raise AssertionError("Observed initial Worker return differs from committed final ActionStep")
         state["completed_worker"] = {
             "output": output, "usage": _worker_usage(before_worker),
