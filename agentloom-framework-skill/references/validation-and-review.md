@@ -40,7 +40,7 @@ print(scan_app_structure('applications/<app_name>'))
 - Worker 数量是否符合设计。
 - 每个 Worker 是否有 `agent_function_schema`。
 - `tools` 是否与 workflow 动作匹配。
-- `model_type`、`tool_call_type`、`max_steps` 是否合理。
+- `agent_runtime`、`model_type`、`max_steps` 是否合理。
 - Agent YAML 是否误写 LLM 参数、无效 `planning_interval`/`todo.mode`/`concurrency`、错误 `prompt`、错误 `fixed_args`、错误 `mcp_servers`。
 - Goal mapping 是否显式配置 `enabled`、预算是否为正整数、Worker 是否错误配置 Goal；Goal workflow list 是否按一个编号上下文运行。
 
@@ -94,7 +94,7 @@ find applications/<app_name>/agent_tools -name '*.py' -print0 2>/dev/null | xarg
 | shell 权限 / audit | `applications/test_shell_audit/*`、`applications/test_shell_allowlist_matrix/*` |
 | 多 Worker 调度 | `applications/context_engine_multi_worker_validation`、`applications/test_demo/workflows/test_checkpoint_complex_supervisor.yaml` |
 
-`applications/architecture_contract_validation` 用原生工具调用和 CodeAct 各跑两次，再验证嵌套 Application 与拒绝场景。保留九类具名回归，包括区分空购物车与零金额非空购物车的 `zero_price`；50 项独立 oracle 不随生成结果放宽。最终 `test_report` 必须是最后一次 verifier 的真实 pytest 报告相对路径，写入前检查类型、当前身份和 JSON/JUnit/调用证据。多次调用同名 Worker 时，按当前任务的 call index、开始/完成事件和实际输入输出关联，并按 runtime 的 SHA-256 前缀规则重算 checkpoint 中 task_input 的哈希，不能只比较几个哈希字段；允许验证失败后的修复循环，不能固定选第一次调用，也不能用未来或其他任务的结果补齐证据。
+`applications/architecture_contract_validation` 通过原生结构化工具调用验证嵌套 Application 与拒绝场景。保留九类具名回归，包括区分空购物车与零金额非空购物车的 `zero_price`；50 项独立 oracle 不随生成结果放宽。最终 `test_report` 必须是最后一次 verifier 的真实 pytest 报告相对路径，写入前检查类型、当前身份和 JSON/JUnit/调用证据。多次调用同名 Worker 时，按当前任务的 call index、开始/完成事件和实际输入输出关联，并按 runtime 的 SHA-256 前缀规则重算 checkpoint 中 task_input 的哈希，不能只比较几个哈希字段；允许验证失败后的修复循环，不能固定选第一次调用，也不能用未来或其他任务的结果补齐证据。
 
 交付时至少列出：
 
@@ -202,7 +202,7 @@ Supervisor 中断必须等到初始化副作用 ledger 与预期文件均落盘�
 ```bash
 rg -n "_WORKFLOW_OVERLAY_KEYS|_LLM_ONLY_TOP_LEVEL_KEYS|extract_workflow_overlay" src/configuration/config.py
 rg -n "class RootSettings|class ToolAccessControlSettings|class LlmModelTypeSettings|extra_completion_params|supports_structured_output|supports_native_tool_calls|tool_choice" src/configuration src/adapters/smolagents/models docs/en docs/cn agentloom-framework-skill
-rg -n "install_agentloom_runtime_adapters|parse_structured_tool_call|ToolCallCandidate|schema-bound|tool_call_type" src/adapters/smolagents src/configuration tests docs/en docs/cn agentloom-framework-skill
+rg -n "agent_runtime|ModelTurnAdapter|schema-bound|openai_responses|anthropic_messages" src/adapters/smolagents src/configuration tests docs/en docs/cn agentloom-framework-skill
 rg -n "skills.paths|Duplicate skill name|hooks:" src/runtime/skills src/runtime/hooks src/application/definition.py docs/en agentloom-framework-skill
 rg -n "mcp_servers|parse_mcp_servers_yaml_value" src tests docs/en agentloom-framework-skill
 ```

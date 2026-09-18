@@ -181,9 +181,9 @@ Supervisor 引用 Worker 定义：
 
 ```yaml
 name: "release_review"
+agent_runtime: "smolagents"
 description: "Review an API release and its test evidence."
 model_type: "powerful"
-tool_call_type: "tool_call"
 
 worker_agents:
   - path: "applications/release_review/workflows/worker_agents/api_reviewer.yaml"
@@ -203,9 +203,9 @@ goal:
 
 ```yaml
 name: "api_reviewer"
+agent_runtime: "smolagents"
 description: "Review API compatibility risks."
 model_type: "fast"
-tool_call_type: "tool_call"
 
 agent_function_schema:
   description: "Review one release request."

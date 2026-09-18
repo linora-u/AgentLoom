@@ -1,22 +1,20 @@
 name: "scenario_planner"
+agent_runtime: smolagents
 description: |
   Build executable test scenarios for each normalized function target.
 
 model_type: "powerful"
-tool_call_type: "code_act"
 max_steps: 40
 
 workflow: |
-  # 0) CodeAct Execution Contract
-  - Every action MUST be emitted as a Python `<code>...</code>` block.
-  - Execute the Python code in section 4. Do not replace tool calls with inferred
-    outputs.
+  # 0) Structured Tool Execution Contract
+  - Invoke tools through native structured tool calls. Do not replace calls with
+    inferred outputs.
   - `todo_write` is progress bookkeeping only. It is not evidence that a tool
     ran and it must not be used instead of the required tool call.
   - Do not mark a workflow step completed until the corresponding tool call has
     returned successfully.
-  - Final output MUST be produced by `final_answer(...)` inside a `<code>` block.
-    Never return bare JSON, XML, markdown, or fenced code as the final response.
+  - Final output MUST be produced through the `final_answer` tool.
 
   # 1) Background & Role
   You are the **Scenario Planner Worker**.
@@ -47,40 +45,13 @@ workflow: |
   ```
 
   # 4) Step-by-Step Execution Details
-  ```python
-  import json
-
-  payload = json.loads(query)
-  planned_items = []
-  for item in payload["items"]:
-      ctx = get_function_context(
-          target_root=payload["target_root"],
-          module_path=item["module_path"],
-          function_name=item["function_name"],
-      )
-      scenarios = plan_test_scenarios(
-          function_context=ctx,
-          function_name=item["function_name"],
-      )
-      planned_items.append(
-          {
-              "module_path": item["module_path"],
-              "function_name": item["function_name"],
-              "scenario": json.loads(scenarios),
-          }
-      )
-
-  final_answer(
-      json.dumps(
-          {
-              "target_root": payload["target_root"],
-              "output_dir": payload["output_dir"],
-              "planned_items": planned_items,
-          },
-          ensure_ascii=False,
-      )
-  )
-  ```
+  1. Parse `query` as JSON.
+  2. For each input item, call `get_function_context` with the exact target
+     fields, then call `plan_test_scenarios` with the returned context.
+  3. Preserve one `planned_item` per input item containing its module path,
+     function name, and parsed scenario result.
+  4. Call `final_answer` with JSON containing the original `target_root`,
+     `output_dir`, and the complete `planned_items` list.
 
   Runtime checks:
   - `len(planned_items)` should equal `len(payload["items"])` unless an exception is raised.
@@ -111,6 +82,3 @@ agent_function_schema:
       required: true
   output:
     description: JSON containing planned_items with scenario payloads.
-
-execution_env:
-  type: "local"

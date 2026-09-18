@@ -1,8 +1,8 @@
 name: "test_todo_auto_trivial"
+agent_runtime: smolagents
 description: "Return a fixed one-step result"
 
 model_type: "powerful"
-tool_call_type: "tool_call"
 max_steps: 4
 
 todo:

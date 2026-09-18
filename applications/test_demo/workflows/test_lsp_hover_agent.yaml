@@ -1,8 +1,8 @@
 name: "test_lsp_hover"
+agent_runtime: smolagents
 description: "Validate lsp_hover returns type information for Python symbols"
 
 model_type: "powerful"
-tool_call_type: "code_act"
 
 workflow: |
   # LSP Hover Validation
@@ -25,6 +25,3 @@ tools:
 
 worker_agents: []
 max_steps: 10
-
-execution_env:
-  type: "local"

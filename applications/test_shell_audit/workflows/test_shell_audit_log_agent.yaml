@@ -1,16 +1,14 @@
 name: "test_shell_audit_log"
+agent_runtime: smolagents
 description: "Validate shell security audit log — verify that blocked commands produce JSONL events in the current .agentloom run"
 
 model_type: "powerful"
-tool_call_type: "code_act"
 
-# Tools list declares which tools this agent uses.
 tools:
   - name: "shell_tool"
   - name: "glob_search"
   - name: "grep_search"
 
-# Per-agent shell security override (top-level, not nested under tools).
 shell_settings:
   allowed_commands: ["ls", "cat", "grep", "find", "echo", "wc", "pwd", "head", "tail"]
   allowed_operators: ["|", "&&"]
@@ -18,134 +16,31 @@ shell_settings:
 workflow: |
   # Shell Audit Log Validation Workflow
 
-  You are a testing agent. Execute the harness below in one Python code block.
-  Do not replace the shell commands with alternatives. The harness catches
-  expected blocked shell_tool calls, reads the real audit/shell.jsonl, and only
-  marks rows PASS when the audit file contains the expected evidence.
+  Use native structured `shell_tool` calls and retain every actual result or
+  error. Never mark PASS from expectation alone.
 
-  ```python
-  import json
-  import os
-
-  rows = {}
-  notes = {}
-
-  def record(name, status, evidence):
-      rows[name] = status
-      notes[name] = evidence
-
-  safe_output = shell_tool(command='echo "audit log test"', timeout=10)
-  record(
-      "SAFE_COMMAND",
-      "PASS" if "audit log test" in safe_output else "FAIL",
-      safe_output.strip(),
-  )
-
-  def expect_block(name, command, expected_text):
-      try:
-          output = shell_tool(command=command, timeout=10)
-          record(name, "FAIL", "Expected block, but command succeeded: " + output[:200])
-      except Exception as exc:
-          text = str(exc)
-          record(name, "PASS" if expected_text in text else "FAIL", text)
-
-  expect_block("WGET_REJECT", "wget http://example.com", "Command not allowed: wget")
-  expect_block("OPERATOR_REJECT", "echo hello ; echo world", "Operator not allowed: ;")
-
-  audit_path = shell_tool(
-      command="ls -dt .agentloom/runs/test_shell_audit/run_*/audit/shell.jsonl | head -1",
-      timeout=10,
-  ).strip().splitlines()[0]
-  audit_content = shell_tool(command=f"cat {audit_path}", timeout=10)
-  audit_events = []
-  for line in audit_content.splitlines():
-      try:
-          event = json.loads(line)
-      except json.JSONDecodeError:
-          continue
-      if isinstance(event, dict):
-          audit_events.append(event)
-  print("AUDIT_PATH", audit_path)
-  print(audit_content)
-
-  audit_run_dir = os.path.dirname(os.path.dirname(audit_path))
-  agent_log_path = os.path.join(audit_run_dir, "logs", "runtime.log")
-  same_parent = os.path.isfile(agent_log_path)
-  record(
-      "CO_LOCATION",
-      "PASS" if same_parent else "FAIL",
-      f"audit={audit_path}; agent={agent_log_path}",
-  )
-
-  def find_event(command_substr):
-      for event in audit_events:
-          if (
-              event.get("event_type") == "WHITELIST_REJECT"
-              and command_substr in str(event.get("command", ""))
-          ):
-              return event
-      return None
-
-  wget_event = find_event("wget http://example.com")
-  operator_event = find_event("echo hello ; echo world")
-
-  wget_message = str((wget_event or {}).get("message", ""))
-  wget_suggestion = str((wget_event or {}).get("suggestion", ""))
-  operator_message = str((operator_event or {}).get("message", ""))
-  operator_suggestion = str((operator_event or {}).get("suggestion", ""))
-
-  record(
-      "WGET_AUDIT_ENTRY",
-      "PASS"
-      if (
-          wget_event
-          and "Command not allowed: wget." in wget_message
-          and "Allowed commands: cat, echo, find, grep, head, ls, pwd, tail, wc" in wget_message
-          and "allowed_commands" in wget_suggestion
-      )
-      else "FAIL",
-      json.dumps(wget_event, ensure_ascii=False) if wget_event else "missing event",
-  )
-  record(
-      "OPERATOR_AUDIT_ENTRY",
-      "PASS"
-      if (
-          operator_event
-          and "Operator not allowed: ;." in operator_message
-          and "Allowed operators: &&, |" in operator_message
-          and "allowed_operators" in operator_suggestion
-          and "allowed_commands" not in operator_suggestion
-      )
-      else "FAIL",
-      json.dumps(operator_event, ensure_ascii=False) if operator_event else "missing event",
-  )
-
-  ordered = [
-      "SAFE_COMMAND",
-      "WGET_REJECT",
-      "OPERATOR_REJECT",
-      "WGET_AUDIT_ENTRY",
-      "OPERATOR_AUDIT_ENTRY",
-      "CO_LOCATION",
-  ]
-  overall = "PASS" if all(rows.get(name) == "PASS" for name in ordered) else "FAIL"
-  summary_lines = [
-      f"Overall: {overall}",
-      f"shell.jsonl: {audit_path}",
-      f"runtime.log: {agent_log_path}",
-      "",
-      "| Step | Status | Evidence |",
-      "|---|---|---|",
-  ]
-  for name in ordered:
-      summary_lines.append(f"| {name} | {rows.get(name, 'FAIL')} | {notes.get(name, 'missing')} |")
-  summary = "\n".join(summary_lines)
-  print(summary)
-  final_answer(summary)
-  ```
+  1. Run `echo "audit log test"` and require `audit log test` in the result.
+  2. Attempt `wget http://example.com` exactly once. Require an error containing
+     `Command not allowed: wget`.
+  3. Attempt `echo hello ; echo world` exactly once. Require an error containing
+     `Operator not allowed: ;`.
+  4. Locate the newest current-run audit with
+     `ls -dt .agentloom/runs/test_shell_audit/run_*/audit/shell.jsonl | head -1`,
+     then call `shell_tool` to read that exact file.
+  5. Parse each valid JSON line from the actual audit content. Require a
+     `WHITELIST_REJECT` event for `wget http://example.com` whose message lists
+     `Allowed commands: cat, echo, find, grep, head, ls, pwd, tail, wc`
+     and whose suggestion contains `allowed_commands`.
+  6. Require a `WHITELIST_REJECT` event for `echo hello ; echo world` whose
+     message lists `Allowed operators: &&, |`, whose suggestion contains
+     `allowed_operators`, and whose suggestion does not contain
+     `allowed_commands`.
+  7. Derive the sibling `logs/runtime.log` path and call `ls` on that exact path
+     to prove it exists.
+  8. Call `final_answer` with the audit path, runtime log path, and PASS/FAIL
+     rows for `SAFE_COMMAND`, `WGET_REJECT`, `OPERATOR_REJECT`,
+     `WGET_AUDIT_ENTRY`, `OPERATOR_AUDIT_ENTRY`, and `CO_LOCATION`. Overall is
+     PASS only when every row is proven by the actual call or audit event.
 
 worker_agents: []
 max_steps: 12
-
-execution_env:
-  type: "local"

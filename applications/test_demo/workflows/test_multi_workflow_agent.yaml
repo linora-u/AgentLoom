@@ -1,9 +1,9 @@
 name: "test_multi_workflow_agent"
+agent_runtime: smolagents
 description: |
   Demo agent for sequential list workflows.
 
 model_type: "powerful"
-tool_call_type: "tool_call"
 max_steps: 3
 
 workflow:
@@ -20,6 +20,3 @@ workflow:
 tools: []
 worker_agents: []
 toolsets: []
-
-execution_env:
-  type: "local"

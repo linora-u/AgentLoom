@@ -1,7 +1,7 @@
 name: "context_engine_json_retrieve_validation"
+agent_runtime: smolagents
 description: "Validate that a supervisor can retrieve original worker JSON through ContextRef."
 model_type: "powerful"
-tool_call_type: "tool_call"
 max_steps: 8
 
 workflow: |

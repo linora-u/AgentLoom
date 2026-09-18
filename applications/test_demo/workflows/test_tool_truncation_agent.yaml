@@ -1,8 +1,8 @@
 name: "test_tool_truncation"
+agent_runtime: smolagents
 description: "Validate tool result truncation, persistence, and pagination feedback"
 
 model_type: "powerful"
-tool_call_type: "code_act"
 
 workflow: |
   # Tool Result Truncation Validation
@@ -25,19 +25,12 @@ workflow: |
   Verify: output is NOT empty, contains "No matches found".
 
   ## Final Summary
-  Return PASS/FAIL for each step and overall result using the code_act final
-  answer format. Do not use XML/tool_call syntax. Your final response must be a
-  code block that calls final_answer, for example:
-
-  <code>
-  final_answer("Step 1: PASS\nStep 2: PASS\nStep 3: PASS\nOverall: PASS")
-  </code>
+  Call `final_answer` through its native structured tool schema. Return
+  PASS/FAIL for each step and overall result. Do not emit XML, pseudo-calls, or
+  fenced code.
 
 tools:
   - name: "grep_search"
 
 worker_agents: []
 max_steps: 10
-
-execution_env:
-  type: "local"

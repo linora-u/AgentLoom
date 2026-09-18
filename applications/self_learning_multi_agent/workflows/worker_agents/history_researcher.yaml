@@ -1,8 +1,8 @@
 name: "history_researcher"
+agent_runtime: smolagents
 description: "Search indexed session history and return real event evidence."
 
 model_type: "powerful"
-tool_call_type: "code_act"
 max_steps: 8
 
 toolsets: []
@@ -34,57 +34,17 @@ workflow: |
   return JSON only.
 
   # Execution Contract
-  - Emit every action as a Python `<code>...</code>` block.
-  - Do not use native `<tool_call>` syntax.
+  - Invoke tools through native structured calls.
   - Do not call `skill`.
   - Call `session_search` for both `AL_SELF_LEARNING_SMOKE` and `Self-learning smoke marker`.
   - Call `session_scroll` after the first non-empty search result.
   - Return JSON with `ok=true` only when both search terms have at least one hit.
 
-  # Required Code Shape
-  ```python
-  import json
-
-  payload = json.loads(query)
-  marker = payload["marker"]
-  terms = ["AL_SELF_LEARNING_SMOKE", "Self-learning smoke marker"]
-  searches = {}
-  first_hit = None
-
-  for term in terms:
-      raw = session_search(query=term, limit=5, scope="all")
-      data = json.loads(raw)
-      rows = data.get("results", [])
-      searches[term] = {
-          "result_count": len(rows),
-          "run_ids": sorted({row.get("run_id", "") for row in rows if row.get("run_id")})[:5],
-          "first_event_id": rows[0].get("id") if rows else None,
-          "first_run_id": rows[0].get("run_id") if rows else "",
-      }
-      if rows and first_hit is None:
-          first_hit = rows[0]
-
-  scroll_count = 0
-  if first_hit:
-      scroll_raw = session_scroll(
-          run_id=first_hit["run_id"],
-          event_id=int(first_hit["id"]),
-          direction="after",
-          window=2,
-      )
-      scroll_count = len(json.loads(scroll_raw).get("results", []))
-
-  result = {
-      "worker": "history_researcher",
-      "marker": marker,
-      "searches": searches,
-      "scroll_count": scroll_count,
-      "ok": all(searches[term]["result_count"] > 0 for term in terms) and scroll_count >= 0,
-  }
-  final_answer(json.dumps(result, ensure_ascii=False))
-  ```
-
-execution_env:
-  type: "local"
-  executor_kwargs:
-    timeout_seconds: 1200
+  # Required Structured Call Flow
+  1. Parse `query` and retain its marker.
+  2. Call `session_search` once for each required term with `limit=5` and
+     `scope=all`.
+  3. From the first actual non-empty result, call `session_scroll` with its
+     `run_id`, numeric event id, `direction=after`, and `window=2`.
+  4. Return JSON through `final_answer` containing both search counts, their
+     run ids, the scroll count, marker, worker name, and evidence-based `ok`.

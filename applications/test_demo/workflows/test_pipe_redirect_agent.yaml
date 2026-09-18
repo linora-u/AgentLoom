@@ -1,8 +1,8 @@
 name: "test_pipe_redirect"
+agent_runtime: smolagents
 description: "Validate pipe redirect normalization: piped commands should execute without hanging"
 
 model_type: "powerful"
-tool_call_type: "code_act"
 
 workflow: |
   # Pipe Redirect Normalization Validation Workflow

@@ -1,8 +1,8 @@
 name: "test_search_exclude"
+agent_runtime: smolagents
 description: "Validate search tools respect tool_access_control exclude_paths"
 
 model_type: "powerful"
-tool_call_type: "code_act"
 
 workflow: |
   # Search Exclude Validation
@@ -33,6 +33,3 @@ tools:
 
 worker_agents: []
 max_steps: 10
-
-execution_env:
-  type: "local"

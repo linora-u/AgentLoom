@@ -1,20 +1,18 @@
 name: "delivery_reporter"
+agent_runtime: smolagents
 description: |
   Produce the final English markdown delivery report.
 
 model_type: "powerful"
-tool_call_type: "code_act"
 max_steps: 20
 
 workflow: |
-  # 0) CodeAct Execution Contract
-  - Every action MUST be emitted as a Python `<code>...</code>` block.
-  - Execute the Python code in section 4. Do not replace tool calls with inferred
-    outputs.
+  # 0) Structured Tool Execution Contract
+  - Invoke tools through native structured tool calls. Do not replace calls with
+    inferred outputs.
   - `todo_write` is progress bookkeeping only. It is not evidence that a tool
     ran and it must not be used instead of the required tool call.
-  - Final output MUST be produced by `final_answer(...)` inside a `<code>` block.
-    Never return bare markdown, bare JSON, XML, or fenced code as the final response.
+  - Final output MUST be produced through the `final_answer` tool.
 
   # 1) Background & Role
   You are the **Delivery Reporter Worker**.
@@ -37,16 +35,9 @@ workflow: |
   ```
 
   # 4) Step-by-Step Execution Details
-  ```python
-  import json
-
-  payload = json.loads(query)
-  report = collect_generation_report(
-      target_root=payload["target_root"],
-      output_dir=payload["output_dir"],
-  )
-  final_answer(report)
-  ```
+  1. Parse `query` as JSON and require `target_root` and `output_dir`.
+  2. Call `collect_generation_report` with those exact values.
+  3. Call `final_answer` with the exact report returned by the tool.
 
   Runtime checks:
   - Ensure required keys `target_root` and `output_dir` exist before tool invocation.
@@ -71,6 +62,3 @@ agent_function_schema:
       required: true
   output:
     description: English markdown report text.
-
-execution_env:
-  type: "local"
