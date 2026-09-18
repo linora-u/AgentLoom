@@ -184,32 +184,6 @@ class SmolagentsCheckpointCodec:
         return [ChatMessage.from_dict(value) for value in data]
 
     @classmethod
-    def migrate_legacy_checkpoint(
-        cls,
-        checkpoint: Mapping[str, Any],
-        *,
-        runtime_version: str = "legacy",
-    ) -> RuntimeCheckpointEnvelope:
-        """Validate and wrap one declared legacy smolagents checkpoint."""
-
-        raw_steps = checkpoint.get("memory_steps", [])
-        if not isinstance(raw_steps, list):
-            raise ValueError("legacy memory_steps must be a list")
-        steps = cls.deserialize_memory_steps(raw_steps)
-        if raw_steps and not steps:
-            raise ValueError("legacy memory_steps contain no supported steps")
-        prepare_steps_for_resume(steps)
-        return RuntimeCheckpointEnvelope(
-            runtime_id="smolagents",
-            runtime_version=runtime_version,
-            state_schema_version=1,
-            payload={
-                "memory_steps": deepcopy(raw_steps),
-                "step_count": len(raw_steps),
-            },
-        )
-
-    @classmethod
     def validate_runtime_checkpoint(
         cls,
         raw_checkpoint: Mapping[str, Any],

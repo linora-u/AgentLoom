@@ -31,6 +31,18 @@ def _make_workflow(repo_root: Path, application_id: str) -> Path:
     return workflow
 
 
+def _runtime_checkpoint(steps: list[dict]) -> dict:
+    return {
+        "runtime_id": "smolagents",
+        "runtime_version": "test",
+        "state_schema_version": 1,
+        "payload": {
+            "memory_steps": steps,
+            "step_count": len(steps),
+        },
+    }
+
+
 def _make_legacy_task(
     legacy_root: Path,
     *,
@@ -83,7 +95,11 @@ def _make_legacy_task(
             "agent_name": supervisor,
             "status": "interrupted",
             "saved_at": timestamp,
-            "memory_steps": ([{"_step_type": "TaskStep", "task": "resume me"}] if progress == "memory" else []),
+            "runtime_checkpoint": _runtime_checkpoint(
+                [{"_step_type": "TaskStep", "task": "resume me"}]
+                if progress == "memory"
+                else []
+            ),
             "step_count": (1 if progress == "memory" else 0),
         },
     )
@@ -623,7 +639,7 @@ def test_scan_requires_original_created_at_instead_of_fresh_saved_metadata(
     ]
 
 
-def test_scan_does_not_treat_step_count_without_memory_steps_as_progress(
+def test_scan_ignores_top_level_legacy_progress_outside_runtime_envelope(
     tmp_path: Path,
 ) -> None:
     from agentloom.runtime.migration import RuntimeMigration
@@ -640,7 +656,9 @@ def test_scan_does_not_treat_step_count_without_memory_steps_as_progress(
     )
     checkpoint = json.loads((task_dir / "checkpoint.json").read_text(encoding="utf-8"))
     checkpoint["step_count"] = 3
-    checkpoint["memory_steps"] = []
+    checkpoint["memory_steps"] = [
+        {"_step_type": "TaskStep", "task": "legacy progress"}
+    ]
     _write_json(task_dir / "checkpoint.json", checkpoint)
 
     plan = RuntimeMigration(
@@ -653,6 +671,40 @@ def test_scan_does_not_treat_step_count_without_memory_steps_as_progress(
     assert not plan.candidates
     assert [(item.task_id, item.reason) for item in plan.skipped] == [
         ("task_count_only", "no resumable progress")
+    ]
+
+
+def test_scan_skips_checkpoint_without_runtime_envelope(tmp_path: Path) -> None:
+    from agentloom.runtime.migration import RuntimeMigration
+
+    repo_root = tmp_path / "repo"
+    legacy_root = repo_root / ".logs"
+    workflow = _make_workflow(repo_root, "demo")
+    task_dir = _make_legacy_task(
+        legacy_root,
+        task_id="task_legacy_schema",
+        workflow=workflow,
+        age=timedelta(days=1),
+        progress="memory",
+    )
+    checkpoint = json.loads(
+        (task_dir / "checkpoint.json").read_text(encoding="utf-8")
+    )
+    legacy_steps = checkpoint["runtime_checkpoint"]["payload"]["memory_steps"]
+    checkpoint.pop("runtime_checkpoint")
+    checkpoint["memory_steps"] = legacy_steps
+    _write_json(task_dir / "checkpoint.json", checkpoint)
+
+    plan = RuntimeMigration(
+        legacy_logs_dir=legacy_root,
+        runtime_root=repo_root / ".agentloom",
+        agent_root=repo_root,
+        now=NOW,
+    ).scan()
+
+    assert not plan.candidates
+    assert [(item.task_id, item.reason) for item in plan.skipped] == [
+        ("task_legacy_schema", "unsupported legacy runtime checkpoint")
     ]
 
 
@@ -673,9 +725,10 @@ def test_apply_uses_staging_verifies_context_ref_and_archives_whole_legacy_tree(
         age=timedelta(days=1),
     )
     checkpoint = json.loads((task_dir / "checkpoint.json").read_text(encoding="utf-8"))
+    supervisor_steps = [{"_step_type": "TaskStep", "task": "resume supervisor"}]
     checkpoint.update(
         {
-            "memory_steps": [{"_step_type": "TaskStep", "task": "resume supervisor"}],
+            "runtime_checkpoint": _runtime_checkpoint(supervisor_steps),
             "step_count": 1,
         }
     )
@@ -700,7 +753,9 @@ def test_apply_uses_staging_verifies_context_ref_and_archives_whole_legacy_tree(
             "call_index": 2,
             "status": "interrupted",
             "saved_at": (NOW - timedelta(days=1)).isoformat(),
-            "memory_steps": [{"_step_type": "TaskStep", "task": "resume worker"}],
+            "runtime_checkpoint": _runtime_checkpoint(
+                [{"_step_type": "TaskStep", "task": "resume worker"}]
+            ),
             "step_count": 1,
         },
     )
@@ -856,9 +911,10 @@ def test_source_change_during_staging_aborts_before_publish_or_archive(
     def append_legacy_progress(_candidate, _staged: Path) -> None:
         checkpoint_path = source / "checkpoint.json"
         checkpoint = json.loads(checkpoint_path.read_text(encoding="utf-8"))
-        checkpoint["memory_steps"].append(
+        checkpoint["runtime_checkpoint"]["payload"]["memory_steps"].append(
             {"_step_type": "TaskStep", "task": "new legacy progress"}
         )
+        checkpoint["runtime_checkpoint"]["payload"]["step_count"] = 2
         checkpoint["step_count"] = 2
         _write_json(checkpoint_path, checkpoint)
 
