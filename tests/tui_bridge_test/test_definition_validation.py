@@ -7,19 +7,19 @@ def test_catalog_uses_runner_required_fields_for_agent_validation(tmp_path: Path
     config = tmp_path / "config"
     config.mkdir()
     (config / "llm.yaml").write_text(
-        "model:\n  summary:\n    model: openai/test-summary\n  default_model_type: powerful\n  powerful:\n    model: openai/test\n",
+        "model:\n  summary:\n    model: openai/test-summary\n    adapter: openai_chat\n  default_model_type: powerful\n  powerful:\n    model: openai/test\n    adapter: openai_chat\n",
         encoding="utf-8",
     )
     valid = tmp_path / "applications/valid/workflows/valid.yaml"
     valid.parent.mkdir(parents=True)
     valid.write_text(
-        "name: valid\ndescription: valid agent\nworkflow:\n  - first\n  - second\n",
+        "name: valid\nagent_runtime: smolagents\ndescription: valid agent\nworkflow:\n  - first\n  - second\n",
         encoding="utf-8",
     )
     invalid = tmp_path / "applications/invalid/workflows/invalid.yaml"
     invalid.parent.mkdir(parents=True)
     invalid.write_text(
-        "name: invalid\nworkflow: []\n",
+        "name: invalid\nagent_runtime: smolagents\nworkflow: []\n",
         encoding="utf-8",
     )
 
@@ -35,7 +35,7 @@ def test_catalog_validation_reuses_runtime_model_structure_and_worker_checks(tmp
     config = tmp_path / "config"
     config.mkdir()
     (config / "llm.yaml").write_text(
-        "model:\n  summary:\n    model: openai/test-summary\n  default_model_type: powerful\n  powerful:\n    model: openai/test\n",
+        "model:\n  summary:\n    model: openai/test-summary\n    adapter: openai_chat\n  default_model_type: powerful\n  powerful:\n    model: openai/test\n    adapter: openai_chat\n",
         encoding="utf-8",
     )
     invalid = tmp_path / "applications/invalid/workflows/invalid.yaml"
@@ -43,9 +43,9 @@ def test_catalog_validation_reuses_runtime_model_structure_and_worker_checks(tmp
     invalid.write_text(
         """\
 name: invalid
+agent_runtime: langgraph
 description: invalid runtime config
 model_type: missing-model
-tool_call_type: unsupported
 worker_agents:
   - path: absent.yaml
 workflow: do the task
@@ -60,6 +60,7 @@ workflow: do the task
     invalid_extension.write_text(
         """\
 name: invalid_extension
+agent_runtime: smolagents
 description: invalid worker extension
 worker_agents:
   - path: worker.txt
@@ -73,7 +74,7 @@ workflow: do the task
     errors = "\n".join(systems["invalid"]["validation"]["errors"])
     assert systems["invalid"]["validation"]["valid"] is False
     assert "missing-model" in errors
-    assert "tool_call_type" in errors
+    assert "langgraph" in errors
     assert "absent.yaml" in errors
     extension_errors = "\n".join(systems["invalid_extension"]["validation"]["errors"])
     assert systems["invalid_extension"]["validation"]["valid"] is False
@@ -84,7 +85,7 @@ def test_system_detail_includes_runtime_supported_markdown_workers(tmp_path: Pat
     config = tmp_path / "config"
     config.mkdir()
     (config / "llm.yaml").write_text(
-        "model:\n  summary:\n    model: openai/test-summary\n  default_model_type: powerful\n  powerful:\n    model: openai/test\n",
+        "model:\n  summary:\n    model: openai/test-summary\n    adapter: openai_chat\n  default_model_type: powerful\n  powerful:\n    model: openai/test\n    adapter: openai_chat\n",
         encoding="utf-8",
     )
     workflow = tmp_path / "applications/markdown/workflows/supervisor.yaml"
@@ -92,6 +93,7 @@ def test_system_detail_includes_runtime_supported_markdown_workers(tmp_path: Pat
     workflow.write_text(
         """\
 name: markdown_supervisor
+agent_runtime: smolagents
 description: delegates to a Markdown worker
 worker_agents:
   - path: worker.md
@@ -105,6 +107,7 @@ workflow: delegate the task
         """\
 ```yaml
 name: markdown_worker
+agent_runtime: smolagents
 description: worker stored as Markdown
 agent_function_schema:
   description: Handle one task.
@@ -140,7 +143,7 @@ def test_catalog_rejects_invalid_markdown_worker_schema(tmp_path: Path) -> None:
     config = tmp_path / "config"
     config.mkdir()
     (config / "llm.yaml").write_text(
-        "model:\n  summary:\n    model: openai/test-summary\n  default_model_type: powerful\n  powerful:\n    model: openai/test\n",
+        "model:\n  summary:\n    model: openai/test-summary\n    adapter: openai_chat\n  default_model_type: powerful\n  powerful:\n    model: openai/test\n    adapter: openai_chat\n",
         encoding="utf-8",
     )
     workflow = tmp_path / "applications/markdown/workflows/supervisor.yaml"
@@ -148,6 +151,7 @@ def test_catalog_rejects_invalid_markdown_worker_schema(tmp_path: Path) -> None:
     workflow.write_text(
         """\
 name: markdown_supervisor
+agent_runtime: smolagents
 description: delegates to a Markdown worker
 worker_agents:
   - path: worker.md
@@ -161,6 +165,7 @@ workflow: delegate the task
         """\
 ```yaml
 name: markdown_worker
+agent_runtime: smolagents
 description: invalid worker schema
 agent_function_schema:
   description: Handle one task.
@@ -186,7 +191,7 @@ def test_catalog_rejects_referenced_worker_without_function_schema(tmp_path: Pat
     config = tmp_path / "config"
     config.mkdir()
     (config / "llm.yaml").write_text(
-        "model:\n  summary:\n    model: openai/test-summary\n  default_model_type: powerful\n  powerful:\n    model: openai/test\n",
+        "model:\n  summary:\n    model: openai/test-summary\n    adapter: openai_chat\n  default_model_type: powerful\n  powerful:\n    model: openai/test\n    adapter: openai_chat\n",
         encoding="utf-8",
     )
     workflow = tmp_path / "applications/no_schema/workflows/supervisor.yaml"
@@ -194,6 +199,7 @@ def test_catalog_rejects_referenced_worker_without_function_schema(tmp_path: Pat
     workflow.write_text(
         """\
 name: supervisor
+agent_runtime: smolagents
 description: delegates to a worker
 worker_agents:
   - path: worker.yaml
@@ -204,7 +210,7 @@ workflow: delegate the task
     worker = workflow.parent / "worker_agents/worker.yaml"
     worker.parent.mkdir()
     worker.write_text(
-        "name: worker\ndescription: worker without tool schema\nworkflow: do the task\n",
+        "name: worker\nagent_runtime: smolagents\ndescription: worker without tool schema\nworkflow: do the task\n",
         encoding="utf-8",
     )
 
@@ -220,7 +226,7 @@ def test_catalog_rejects_existing_worker_with_unconfigured_model(tmp_path: Path)
     config = tmp_path / "config"
     config.mkdir()
     (config / "llm.yaml").write_text(
-        "model:\n  summary:\n    model: openai/test-summary\n  default_model_type: powerful\n  powerful:\n    model: openai/test\n",
+        "model:\n  summary:\n    model: openai/test-summary\n    adapter: openai_chat\n  default_model_type: powerful\n  powerful:\n    model: openai/test\n    adapter: openai_chat\n",
         encoding="utf-8",
     )
     workflow = tmp_path / "applications/bad_model/workflows/supervisor.yaml"
@@ -228,6 +234,7 @@ def test_catalog_rejects_existing_worker_with_unconfigured_model(tmp_path: Path)
     workflow.write_text(
         """\
 name: supervisor
+agent_runtime: smolagents
 description: delegates to a worker
 worker_agents:
   - path: worker.yaml
@@ -240,6 +247,7 @@ workflow: delegate the task
     worker.write_text(
         """\
 name: worker
+agent_runtime: smolagents
 description: worker with missing model
 model_type: definitely_missing
 workflow: do the task
