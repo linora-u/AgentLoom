@@ -15,8 +15,11 @@ workflow: |
      `alpha one`, `beta two`, and `gamma three`.
   3. Call `edit_file` once with two edits: `alpha one` to `ALPHA one`, and
      `gamma three` to `GAMMA three`.
-  4. Call `read_file`, `glob_search(pattern="*.txt")`,
-     `grep_search(pattern="GAMMA")`, and `list_directory` against that root.
+  4. Call these exact structured operations against the same root:
+     - `read_file(file_path="/tmp/agentloom_tool_registry_core_validation/result.txt")`
+     - `glob_search(pattern="*.txt", path="/tmp/agentloom_tool_registry_core_validation")`
+     - `grep_search(pattern="GAMMA", path="/tmp/agentloom_tool_registry_core_validation")`
+     - `list_directory(directory_path="/tmp/agentloom_tool_registry_core_validation")`
   5. Mark each named tool PASS only when its actual return proves the requested
      effect. Call `final_answer` with `CORE_TOOL_REGISTRY_VALIDATION: PASS` only
      when every row passed, followed by one PASS/FAIL row per tool and the
