@@ -89,10 +89,9 @@ def test_definition_inspection_preserves_lazy_engine_patch_installation() -> Non
         assert 'agentloom.runtime.agent' not in sys.modules
         assert not any(name.startswith('agentloom.tools.shell') for name in sys.modules)
 
-        from agentloom.adapters.smolagents.agents import CodeAgentV2, ToolCallingAgentV2
+        from agentloom.adapters.smolagents.agents import ToolCallingAgentV2
         from agentloom.adapters.smolagents import monkey_patch
         from agentloom.runtime.agent import RoleDrivenAgent
-        assert CodeAgentV2.__module__ == 'agentloom.adapters.smolagents.agents'
         assert ToolCallingAgentV2.__module__ == 'agentloom.adapters.smolagents.agents'
         assert RoleDrivenAgent.__module__ == 'agentloom.runtime.agent'
         assert monkey_patch._INSTALLED is True

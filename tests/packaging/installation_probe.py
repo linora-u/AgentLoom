@@ -8,10 +8,10 @@ from __future__ import annotations
 import argparse
 import json
 import os
-from pathlib import Path
 import subprocess
 import sys
 import textwrap
+from pathlib import Path
 
 MODEL_RUNNER = r'''
 import importlib.abc
@@ -89,7 +89,17 @@ def probe(workspace: Path) -> dict:
         todo:
           mode: off
     """))
-    (config / "llm.yaml").write_text("model:\n  default_model_type: probe\n  probe:\n    model: openai/installation-probe\n    api_key: synthetic-not-used\n  summary:\n    model: openai/installation-summary\n")
+    (config / "llm.yaml").write_text(
+        "model:\n"
+        "  default_model_type: probe\n"
+        "  probe:\n"
+        "    model: openai/installation-probe\n"
+        "    adapter: openai_chat\n"
+        "    api_key: synthetic-not-used\n"
+        "  summary:\n"
+        "    model: openai/installation-summary\n"
+        "    adapter: openai_chat\n"
+    )
     app = project / "applications" / "nested" / "probe"
     (app / "workflows").mkdir(parents=True)
     (app / "helper.py").write_text("SUFFIX = ':helper'\n")
@@ -111,9 +121,9 @@ def probe(workspace: Path) -> dict:
     definition = app / "workflows" / "probe.yaml"
     definition.write_text(textwrap.dedent('''\
         name: installation_probe
+        agent_runtime: smolagents
         description: Exercise installed Application execution.
         model_type: probe
-        tool_call_type: tool_call
         max_steps: 3
         toolsets: []
         tools:

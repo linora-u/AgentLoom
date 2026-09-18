@@ -18,10 +18,9 @@ def write_json(path, value):
     path.write_text(json.dumps(value))
 
 
-def test_model_claim_and_model_code_are_not_tool_execution_evidence(tmp_path):
+def test_model_claim_is_not_tool_execution_evidence(tmp_path):
     write_json(tmp_path / "checkpoint.json", {
         "output": "write_file completed",
-        "code_action": "write_file(file_path='result.txt', content='ok')",
     })
     with pytest.raises(AssertionError, match="tool completion evidence"):
         validation.assert_tools(tmp_path, {"write_file"})
@@ -33,7 +32,7 @@ def test_model_claim_and_model_code_are_not_tool_execution_evidence(tmp_path):
         validation.assert_tools(tmp_path, {"write_file"})
 
 
-def test_codeact_accepts_only_durable_successful_tool_results(tmp_path):
+def test_tool_evidence_accepts_only_durable_successful_tool_results(tmp_path):
     with sqlite3.connect(tmp_path / "self_learning.db") as connection:
         connection.execute("CREATE TABLE events (event_id, tool_name, status, input_json, output_json, root_run_id, run_id, event_type)")
         connection.execute("INSERT INTO events VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
@@ -110,7 +109,6 @@ def checkpoint_helper():
 
 
 def test_completed_probe_uses_the_published_query_without_a_second_text_source(tmp_path, checkpoint_helper):
-    import ast
     import yaml
 
     helper = checkpoint_helper
@@ -125,18 +123,15 @@ def test_completed_probe_uses_the_published_query_without_a_second_text_source(t
     helper.SESSION_ROOT = tmp_path / "evidence"
     helper._configure_completed_worker_probe()
     configured = yaml.safe_load(copied.read_text())["workflow"]
-    call_line = next(line for line in configured.splitlines() if line.startswith("worker_result ="))
-    call = ast.parse(call_line).body[0].value
-    assert ast.literal_eval(call.keywords[0].value) == expected
-    assert "record_checkpoint_worker_output(" in configured
+    assert helper._canonical_worker_query(configured) == expected
+    assert "`record_checkpoint_worker_output`" in configured
 
 
 @pytest.mark.parametrize("body", [
     "Call the Worker with a report query.",
-    "```python\nworker_result = artifact_worker(query='one')\nworker_result = artifact_worker(query='two')\n```",
-    "```python\nworker_result = artifact_worker(query=query)\n```",
-    "```python\nworker_result = artifact_worker(query='prefix' + query)\n```",
-    "```python\nworker_result = artifact_worker(query='one')\n```\n```python\nworker_result = artifact_worker(query='two')\n```",
+    "Call `artifact_worker` through its native structured tool schema.\n  `one`\n  `two`",
+    "Call `artifact_worker` with query assembled from earlier text.",
+    "  `one`",
 ])
 def test_completed_probe_rejects_missing_multiple_or_dynamic_queries(checkpoint_helper, body):
     with pytest.raises(ValueError):
@@ -173,11 +168,18 @@ def main_checkpoint_gate(tmp_path, monkeypatch):
     return checkpoint, task_dir, wait
 
 
-def committed_action(code, observations="Execution logs: setup completed"):
+def committed_action(
+    tool_name,
+    arguments,
+    observations="Execution logs: setup completed",
+):
     return {
         "_step_type": "ActionStep", "step_number": 1,
-        "code_action": code,
-        "tool_calls": [{"id": "call_1", "type": "function", "function": {"name": "python_interpreter", "arguments": code}}],
+        "tool_calls": [{
+            "id": "call_1",
+            "type": "function",
+            "function": {"name": tool_name, "arguments": arguments},
+        }],
         "observations": observations, "error": None,
         "timing": {"start_time": 1, "end_time": 2, "duration": 1},
     }
@@ -201,7 +203,7 @@ def write_supervisor_setup(checkpoint):
     command = workflow.split("Use shell_tool once to run this exact command:\n", 1)[1].split("\n\n", 1)[0].strip()
     command = command.replace("/tmp/agentloom_ckpt_complex", str(checkpoint.WORK_DIR))
     command = command.replace("/tmp/agentloom_ckpt_side_effects.log", str(checkpoint.SIDE_EFFECT_LOG))
-    return committed_action(f"shell_tool(command={command!r})")
+    return committed_action("shell_tool", {"command": command})
 
 
 @pytest.mark.parametrize("setup_on_disk", [False, True], ids=["early-todo", "setup-not-checkpointed"])
@@ -209,7 +211,11 @@ def test_main_interrupt_waits_for_setup_action_commit(main_checkpoint_gate, setu
     checkpoint, task_dir, wait = main_checkpoint_gate
     if setup_on_disk:
         write_supervisor_setup(checkpoint)
-    todo = committed_action("todo_write([{'content': 'supervisor_setup', 'status': 'in_progress'}])", "Todo saved")
+    todo = committed_action(
+        "todo_write",
+        {"items": [{"content": "supervisor_setup", "status": "in_progress"}]},
+        "Todo saved",
+    )
     write_json(task_dir / "checkpoint.json", {"step_count": 3, "memory_steps": [todo]})
     with pytest.raises(TimeoutError, match="main interrupt point"):
         wait()
@@ -226,7 +232,7 @@ def test_main_interrupt_observes_files_then_waits_for_checkpoint_commit(main_che
     from types import SimpleNamespace
 
     checkpoint, task_dir, _ = main_checkpoint_gate
-    todo = committed_action("todo_write([])", "Todo saved")
+    todo = committed_action("todo_write", {"items": []}, "Todo saved")
     write_json(task_dir / "checkpoint.json", {"step_count": 3, "memory_steps": [todo]})
     states = []
 

@@ -4,6 +4,7 @@ from agentloom.runtime.factory import YamlConfiguredAgent
 def test_agent_function_schema_docstring_rendering():
     config = {
         "name": "test_agent",
+        "agent_runtime": "smolagents",
         "description": "test agent desc",
         "workflow": "test workflow",
         "tools": [],

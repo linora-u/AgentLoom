@@ -9,8 +9,6 @@ from __future__ import annotations
 
 from unittest.mock import MagicMock, patch
 
-import pytest
-
 
 class TestModelTypePassthrough:
     def test_model_manager_sets_agent_loom_model_type(self):
@@ -23,10 +21,13 @@ class TestModelTypePassthrough:
         # Mock get_model_config to return a config-like object
         mock_config = MagicMock()
         mock_config.model_id = "test-model"
+        mock_config.adapter = "openai_chat"
         mock_config.base_url = "http://localhost"
         mock_config.api_key = "test-key"
         mock_config.timeout = 30
         mock_config.max_tokens = 1000
+        mock_config.context_window = 32000
+        mock_config.max_output_tokens = 1000
         mock_config.temperature = 0.5
         mock_config.requests_per_minute = 10
         mock_config.num_retries = 3
@@ -34,6 +35,8 @@ class TestModelTypePassthrough:
         mock_config.max_retry_delay = 60.0
         mock_config.extra_headers = None
         mock_config.context_cache = False
+        mock_config.system_prompt_boundary = None
+        mock_config.extra_completion_params = None
 
         mock_logger = MagicMock()
         with patch.object(manager, "get_model_config", return_value=mock_config):
