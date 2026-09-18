@@ -19,6 +19,7 @@ from applications.architecture_contract_validation.validation import (
     WORKERS,
     _contains_exact_json,
     _exact_json_match,
+    _runtime_memory_steps,
     reset_fixture,
     validate_artifacts,
     validate_trace,
@@ -247,6 +248,37 @@ def _trace_time(seconds):
     return (datetime(2026, 9, 17, tzinfo=UTC) + timedelta(seconds=seconds)).isoformat()
 
 
+def _runtime_checkpoint(steps):
+    return {
+        "runtime_id": "smolagents",
+        "runtime_version": "test",
+        "state_schema_version": 1,
+        "payload": {
+            "step_count": len(steps),
+            "memory_steps": steps,
+        },
+    }
+
+
+def _checkpoint_steps(checkpoint):
+    return checkpoint["runtime_checkpoint"]["payload"]["memory_steps"]
+
+
+def test_architecture_trace_requires_runtime_checkpoint_envelope():
+    steps = [{"token_usage": {"input_tokens": 1}}]
+    assert _runtime_memory_steps(
+        {"runtime_checkpoint": _runtime_checkpoint(steps)}
+    ) == steps
+
+    with pytest.raises(ValueError, match="runtime checkpoint envelope"):
+        _runtime_memory_steps({"memory_steps": steps})
+
+    wrong_runtime = _runtime_checkpoint(steps)
+    wrong_runtime["runtime_id"] = "langgraph"
+    with pytest.raises(ValueError, match="runtime is not smolagents"):
+        _runtime_memory_steps({"runtime_checkpoint": wrong_runtime})
+
+
 def _trace_fixture(tmp_path, tamper=None, application_id="app"):
     run = {"application_id": application_id, "run_id": "run-current", "task_id": "task-current",
            "manifest_path": str(tmp_path / "manifest.json")}
@@ -259,7 +291,7 @@ def _trace_fixture(tmp_path, tamper=None, application_id="app"):
     (checkpoints / "checkpoint.json").write_text(json.dumps({
         "task_id": "other-task" if tamper == "wrong_root_task" else "task-current",
         "run_id": "other-run" if tamper == "wrong_root_run" else "run-current",
-        "memory_steps": [],
+        "runtime_checkpoint": _runtime_checkpoint([]),
     }))
     previous = {"workspace": str(tmp_path / "workspace"), "case_nonce": "case-unique"}
     ledger, events = [], []
@@ -301,8 +333,20 @@ def _trace_fixture(tmp_path, tamper=None, application_id="app"):
             "task_id": "task-current", "run_id": "run-current", "agent_name": name,
             "call_index": 0, "input_hash": input_hash, "result": json.dumps(output),
             "status": "completed", "task_input": task_input,
-            "memory_steps": [{"token_usage": {"input_tokens": 0 if tamper == "no_model_usage" else 10},
-                              "tool_results": [{"tool_name": "final_answer", "status": "completed", "output": json.dumps(output)}]}],
+            "runtime_checkpoint": _runtime_checkpoint([
+                {
+                    "token_usage": {
+                        "input_tokens": 0 if tamper == "no_model_usage" else 10
+                    },
+                    "tool_results": [
+                        {
+                            "tool_name": "final_answer",
+                            "status": "completed",
+                            "output": json.dumps(output),
+                        }
+                    ],
+                }
+            ]),
         }))
         ledger.append({"at": _trace_time(index * 10 + 4), "workspace": str(tmp_path / "workspace"), "agent_name": name, "root_run_id": "other-run" if tamper == "cross_run" else "run-current",
                        "task_id": "task-current", "case_nonce": "case-unique", "local_run_id": f"local-{index}",
@@ -324,7 +368,7 @@ def _trace_add_call(tmp_path, checkpoints, worker, query, output, start, finish)
     source = checkpoints / f"workers/{worker}/calls/0/checkpoint.json"
     checkpoint = json.loads(source.read_text())
     checkpoint.update(call_index=1, input_hash=f"{worker}-second", result=json.dumps(output))
-    checkpoint["memory_steps"][-1]["tool_results"][-1]["output"] = json.dumps(output)
+    _checkpoint_steps(checkpoint)[-1]["tool_results"][-1]["output"] = json.dumps(output)
     _trace_replace_query(checkpoint, query)
     target = source.parent.parent / "1/checkpoint.json"
     target.parent.mkdir()
@@ -399,7 +443,7 @@ def test_trace_preserves_corrective_repair_loop_and_binds_final_verifier(tmp_pat
     first = json.loads(first_verifier_path.read_text())
     verdict = {**json.loads(first["result"]), "verified": False, "findings": ["missing regression"]}
     first["result"] = json.dumps(verdict)
-    first["memory_steps"][-1]["tool_results"][-1]["output"] = first["result"]
+    _checkpoint_steps(first)[-1]["tool_results"][-1]["output"] = first["result"]
     first_verifier_path.write_text(json.dumps(first))
     repair = {"workspace": str(tmp_path / "workspace"), "case_nonce": "case-unique", "summary": "corrected regression"}
     _trace_add_call(tmp_path, checkpoints, "repair_implementer", verdict, repair, 40, 52 if tamper == "future_repair" else 48)

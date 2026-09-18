@@ -119,6 +119,28 @@ def _event_time(value) -> datetime:
     return parsed
 
 
+def _runtime_memory_steps(checkpoint: dict) -> list[dict]:
+    envelope = checkpoint.get("runtime_checkpoint")
+    if not isinstance(envelope, dict):
+        raise ValueError("checkpoint lacks a runtime checkpoint envelope")
+    if envelope.get("runtime_id") != "smolagents":
+        raise ValueError(
+            f"checkpoint runtime is not smolagents: {envelope.get('runtime_id')!r}"
+        )
+    if envelope.get("state_schema_version") != 1:
+        raise ValueError(
+            "checkpoint has unsupported smolagents state schema: "
+            f"{envelope.get('state_schema_version')!r}"
+        )
+    payload = envelope.get("payload")
+    if not isinstance(payload, dict):
+        raise ValueError("smolagents checkpoint payload is not a mapping")
+    steps = payload.get("memory_steps")
+    if not isinstance(steps, list):
+        raise ValueError("smolagents checkpoint payload lacks memory_steps")
+    return steps
+
+
 def _completed_worker_calls(task_root, run_id, task_id, nonce, workspace, ledger):
     """Read only this receipt's calls; bind each to real start/finish and tool events."""
     if task_root is None:
@@ -167,7 +189,7 @@ def _completed_worker_calls(task_root, run_id, task_id, nonce, workspace, ledger
                 raise ValueError("call must correlate to one distinct Worker local run's tool events")
             if any(record["local_run_id"] in local_ids for record in records):
                 raise ValueError("distinct Worker calls must not reuse one local run identity")
-            steps = checkpoint.get("memory_steps", [])
+            steps = _runtime_memory_steps(checkpoint)
             if not any(sum((step.get("token_usage") or {}).get(key, 0) or 0
                            for key in ("input_tokens", "output_tokens")) > 0 for step in steps):
                 raise ValueError("no actual model usage in completed Worker memory")
@@ -232,6 +254,12 @@ def validate_trace(attempt: Path, receipt: dict[str, object]) -> dict[str, objec
         if checkpoint.get("task_id") != task_id or checkpoint.get("run_id") != root_run_id:
             errors.append("Supervisor checkpoint identity does not match receipt")
             checkpoint = {}
+        else:
+            try:
+                _runtime_memory_steps(checkpoint)
+            except ValueError as exc:
+                errors.append(f"invalid Supervisor runtime checkpoint: {exc}")
+                checkpoint = {}
     # Both modes use the same canonical per-call input, result and lifecycle
     # evidence. Never pick a first call by filesystem or tool-result ordering.
     reachable = []
