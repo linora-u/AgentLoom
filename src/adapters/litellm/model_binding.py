@@ -5,6 +5,7 @@ from __future__ import annotations
 import hashlib
 import json
 from collections.abc import Callable, Mapping
+from dataclasses import dataclass
 from threading import RLock
 from typing import Any
 
@@ -28,6 +29,79 @@ _BINDING_CACHE: dict[str, ModelTurnBinding] = {}
 _BINDING_CACHE_LOCK = RLock()
 _GOVERNANCE_LOCK = RLock()
 _GOVERNANCE_INSTALLED = False
+
+
+@dataclass(frozen=True, slots=True)
+class ModelProfileOverlay:
+    """Typed overrides applied after a configured model profile is resolved."""
+
+    model_id: str | None = None
+    base_url: str | None = None
+    api_key: str | None = None
+    temperature: float | None = None
+    max_tokens: int | None = None
+    context_window: int | None = None
+    max_output_tokens: int | None = None
+    timeout: int | None = None
+    num_retries: int | None = None
+    retry_delay: float | None = None
+    max_retry_delay: float | None = None
+    extra_headers: dict[str, Any] | None = None
+    context_cache: bool | None = None
+    system_prompt_boundary: str | None = None
+    description: str | None = None
+    requests_per_minute: int | None = None
+    extra_completion_params: dict[str, Any] | None = None
+
+    def apply(
+        self,
+        settings: LlmModelTypeSettings,
+    ) -> LlmModelTypeSettings:
+        updates = {
+            field_name: value
+            for field_name, value in (
+                ("model", self.model_id),
+                ("base_url", self.base_url),
+                ("api_key", self.api_key),
+                ("temperature", self.temperature),
+                ("max_tokens", self.max_tokens),
+                ("context_window", self.context_window),
+                ("max_output_tokens", self.max_output_tokens),
+                ("timeout", self.timeout),
+                ("num_retries", self.num_retries),
+                ("retry_delay", self.retry_delay),
+                ("max_retry_delay", self.max_retry_delay),
+                ("extra_headers", self.extra_headers),
+                ("context_cache", self.context_cache),
+                ("system_prompt_boundary", self.system_prompt_boundary),
+                ("description", self.description),
+                ("requests_per_minute", self.requests_per_minute),
+                ("extra_completion_params", self.extra_completion_params),
+            )
+            if value is not None
+        }
+        if self.max_tokens is not None and self.max_output_tokens is None:
+            updates["max_output_tokens"] = self.max_tokens
+        if {"context_window", "max_output_tokens"}.intersection(updates):
+            context_window = int(
+                updates.get("context_window", settings.context_window)
+            )
+            max_output_tokens = int(
+                updates.get(
+                    "max_output_tokens",
+                    settings.max_output_tokens,
+                )
+            )
+            if max_output_tokens >= context_window:
+                raise ValueError(
+                    "max_output_tokens must be smaller than context_window"
+                )
+            updates["input_token_limit"] = (
+                context_window - max_output_tokens
+            )
+        return LlmModelTypeSettings.model_validate(
+            settings.model_dump() | updates
+        )
 
 
 def _install_existing_model_governance() -> None:
@@ -156,12 +230,15 @@ def _cache_key(
 def resolve_litellm_model_turn_binding(
     model_type: str | None,
     *,
+    profile_overlay: ModelProfileOverlay | None = None,
     model_cache: bool = True,
     adapter_factory: AdapterFactory = create_model_turn_adapter,
 ) -> ModelTurnBinding:
     """Resolve a configured model type without inferring or falling back protocols."""
 
     settings = C.llm.for_type(model_type)
+    if profile_overlay is not None:
+        settings = profile_overlay.apply(settings)
     resolved_type = _normalized_model_type(
         model_type if model_type else C.llm.default_model_type
     )

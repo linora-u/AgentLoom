@@ -2,9 +2,14 @@ from __future__ import annotations
 
 from itertools import product
 from pathlib import Path
-from types import SimpleNamespace
 
 import pytest
+from agentloom.runtime.model_binding import ModelTurnBinding
+from agentloom.runtime.model_protocol import (
+    MessageItem,
+    ModelTurnRequest,
+    ModelTurnResult,
+)
 
 
 def _record_completed_root(db_path: Path, run_id: str, application_id: str) -> None:
@@ -50,15 +55,30 @@ def _config(*, mode: str, min_completed_runs: int = 5) -> dict:
 
 
 class _EmptyCandidateModel:
-    model_id = "fake/summary"
+    adapter_id = "openai_chat"
 
     def __init__(self) -> None:
         self.calls = 0
 
-    def generate(self, _messages, **kwargs):
+    def turn(self, request: ModelTurnRequest) -> ModelTurnResult:
         self.calls += 1
-        assert kwargs == {}
-        return SimpleNamespace(content='{"candidates":[]}')
+        assert request.tools == ()
+        return ModelTurnResult(
+            items=(
+                MessageItem(
+                    role="assistant",
+                    text='{"candidates":[]}',
+                ),
+            )
+        )
+
+
+def _binding(adapter) -> ModelTurnBinding:
+    return ModelTurnBinding(
+        model_type="summary",
+        model_id="fake/summary",
+        adapter=adapter,
+    )
 
 
 @pytest.mark.parametrize("mode", ["manual", "batch", "after_run"])
@@ -95,7 +115,11 @@ def test_all_trigger_and_approval_combinations_are_noninteractive(
         "experience": project_experience,
     }
     model = _EmptyCandidateModel()
-    monkeypatch.setattr(reviewer, "_resolve_review_model", lambda _name: model)
+    monkeypatch.setattr(
+        reviewer,
+        "_resolve_review_model",
+        lambda _name: _binding(model),
+    )
     monkeypatch.setattr(
         "builtins.input",
         lambda *_args, **_kwargs: (_ for _ in ()).throw(AssertionError("review attempted interactive input")),
@@ -167,7 +191,11 @@ def test_after_run_review_uses_structured_model_without_tools_and_consumes_run(
     db_path = tmp_path / "self_learning.db"
     _record_completed_root(db_path, "root-after", "app-a")
     model = _EmptyCandidateModel()
-    monkeypatch.setattr(reviewer, "_resolve_review_model", lambda _name: model)
+    monkeypatch.setattr(
+        reviewer,
+        "_resolve_review_model",
+        lambda _name: _binding(model),
+    )
 
     result = reviewer.review_finished_run(
         root_run_id="root-after",
@@ -200,15 +228,15 @@ def test_model_failure_does_not_consume_unreviewed_run(
     _record_completed_root(db_path, "root-timeout", "app-a")
 
     class _FailingModel:
-        model_id = "fake/timeout"
+        adapter_id = "openai_chat"
 
-        def generate(self, _messages):
+        def turn(self, _request: ModelTurnRequest) -> ModelTurnResult:
             raise TimeoutError("provider timeout")
 
     monkeypatch.setattr(
         reviewer,
         "_resolve_review_model",
-        lambda _name: _FailingModel(),
+        lambda _name: _binding(_FailingModel()),
     )
     config = _config(mode="after_run")
 
