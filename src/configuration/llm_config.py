@@ -5,7 +5,7 @@ Independent Parsing for LLM Configuration (llm.yaml)
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Any, Literal
+from typing import Any
 
 from agentloom.configuration.config_validation import BoolParser, IntParser
 from agentloom.configuration.defaults import (
@@ -20,19 +20,10 @@ from agentloom.configuration.defaults import (
     DEFAULT_MODEL_TIMEOUT,
 )
 from agentloom.configuration.yaml_loader import load_unique_yaml
+from agentloom.runtime.model_protocol import MODEL_ADAPTERS, AdapterKind
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 _RESERVED_MODEL_KEYS = {"default_model_type", "common"}
-ModelAdapter = Literal[
-    "openai_chat",
-    "openai_responses",
-    "anthropic_messages",
-]
-MODEL_ADAPTERS: tuple[ModelAdapter, ...] = (
-    "openai_chat",
-    "openai_responses",
-    "anthropic_messages",
-)
 
 
 def _available_types_text(models: dict[str, Any]) -> str:
@@ -94,7 +85,7 @@ class LangfuseSettings(BaseModel):
 class LlmModelTypeSettings(BaseModel):
     model_config = ConfigDict(extra="allow", arbitrary_types_allowed=True, frozen=True)
     model: str = ""
-    adapter: ModelAdapter
+    adapter: AdapterKind
     base_url: str = ""
     api_key: str = ""
     temperature: float = DEFAULT_MODEL_TEMPERATURE
