@@ -3,11 +3,18 @@ from __future__ import annotations
 import inspect
 from pathlib import Path
 
+import agentloom.application.validation as validation_module
 import agentloom.runtime.agent as agent_module
 import pytest
 from agentloom.application.definition import load_agent_definition
 from agentloom.application.readiness import validate_runtime_agent_config
 from agentloom.configuration.llm_config import LLMConfig
+from agentloom.runtime.agent_runtime import (
+    RuntimeCapabilities,
+    RuntimeRegistry,
+    RuntimeRequirements,
+    UnsupportedRuntimeError,
+)
 from agentloom.runtime.factory import YamlAgentFactory
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
@@ -136,6 +143,57 @@ def test_role_driven_agent_rejects_langgraph_before_runtime_construction() -> No
         agent_module.RoleDrivenAgent.build_runtime(_RuntimeOwner())  # type: ignore[arg-type]
 
     assert calls == []
+
+
+def test_runtime_preflight_uses_registry_capabilities(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    registry = RuntimeRegistry()
+    registry.register(
+        "minimal",
+        capabilities=RuntimeCapabilities(
+            structured_tools=True,
+            parallel_tools=False,
+            checkpoint_resume=False,
+            subagents=False,
+        ),
+    )
+    observed: list[RuntimeRequirements] = []
+    original_validate = registry.validate
+
+    def validate(runtime_id: object, *, requirements: RuntimeRequirements):
+        observed.append(requirements)
+        return original_validate(runtime_id, requirements=requirements)
+
+    registry.validate = validate  # type: ignore[method-assign]
+    monkeypatch.setattr(
+        validation_module,
+        "build_builtin_runtime_registry",
+        lambda: registry,
+    )
+
+    validate_runtime_agent_config(
+        _agent_config(agent_runtime="minimal"),
+        tmp_path / "agent.yaml",
+        agent_root=tmp_path,
+    )
+    assert observed == [RuntimeRequirements(structured_tools=True)]
+
+    with pytest.raises(
+        UnsupportedRuntimeError,
+        match="parallel_tools, checkpoint_resume, subagents",
+    ):
+        validate_runtime_agent_config(
+            _agent_config(
+                agent_runtime="minimal",
+                concurrency=2,
+                checkpoint={"enabled": True},
+                worker_agents=[{"path": "worker.yaml"}],
+            ),
+            tmp_path / "agent.yaml",
+            agent_root=tmp_path,
+        )
 
 
 @pytest.mark.parametrize(

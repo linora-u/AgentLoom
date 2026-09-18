@@ -4,13 +4,16 @@ from dataclasses import dataclass
 
 import pytest
 from agentloom.runtime.agent_runtime import (
+    AgentRuntimeError,
     AgentRuntimeRequest,
     AgentRuntimeResult,
     RuntimeCapabilities,
     RuntimeCheckpointEnvelope,
     RuntimeRegistry,
+    RuntimeRequirements,
     UnsupportedRuntimeError,
     build_builtin_runtime_registry,
+    require_runtime_state,
 )
 
 
@@ -48,7 +51,11 @@ class _RecordingRuntime:
 def test_registry_resolves_a_complete_runtime_without_exposing_native_types() -> None:
     requests: list[AgentRuntimeRequest] = []
     registry = RuntimeRegistry()
-    registry.register("smolagents", lambda: _RecordingRuntime("smolagents", requests))
+    registry.register(
+        "smolagents",
+        capabilities=RuntimeCapabilities(True, True, True, True),
+        factory=lambda: _RecordingRuntime("smolagents", requests),
+    )
 
     runtime = registry.create("smolagents")
     result = runtime.run(
@@ -69,7 +76,11 @@ def test_registry_resolves_a_complete_runtime_without_exposing_native_types() ->
 
 def test_registry_rejects_unknown_runtime_without_fallback() -> None:
     registry = RuntimeRegistry()
-    registry.register("smolagents", lambda: _RecordingRuntime("smolagents", []))
+    registry.register(
+        "smolagents",
+        capabilities=RuntimeCapabilities(True, True, True, True),
+        factory=lambda: _RecordingRuntime("smolagents", []),
+    )
 
     with pytest.raises(UnsupportedRuntimeError, match="langgraph"):
         registry.create("langgraph")
@@ -94,6 +105,52 @@ def test_builtin_registry_registers_only_explicit_smolagents_factory() -> None:
     with pytest.raises(UnsupportedRuntimeError, match="langgraph"):
         registry.create("langgraph")
     assert created == ["smolagents"]
+
+
+def test_registry_validates_capabilities_without_constructing_runtime() -> None:
+    registry = RuntimeRegistry()
+    registry.register(
+        "minimal",
+        capabilities=RuntimeCapabilities(
+            structured_tools=True,
+            parallel_tools=False,
+            checkpoint_resume=False,
+            subagents=False,
+        ),
+    )
+
+    registration = registry.validate(
+        "minimal",
+        requirements=RuntimeRequirements(structured_tools=True),
+    )
+
+    assert registry.runtime_ids == ("minimal",)
+    assert registration.runtime_id == "minimal"
+    with pytest.raises(
+        UnsupportedRuntimeError,
+        match="checkpoint_resume, subagents",
+    ):
+        registry.validate(
+            "minimal",
+            requirements=RuntimeRequirements(
+                structured_tools=True,
+                checkpoint_resume=True,
+                subagents=True,
+            ),
+        )
+    with pytest.raises(UnsupportedRuntimeError, match="no runtime factory"):
+        registry.create("minimal")
+
+
+def test_runtime_state_failure_uses_typed_runtime_error() -> None:
+    result = AgentRuntimeResult(state="failed", output=None)
+
+    with pytest.raises(AgentRuntimeError, match="runtime failed: failed"):
+        require_runtime_state(
+            result,
+            allowed_states={"success"},
+            error_prefix="runtime failed",
+        )
 
 
 def test_checkpoint_envelope_rejects_cross_runtime_resume() -> None:

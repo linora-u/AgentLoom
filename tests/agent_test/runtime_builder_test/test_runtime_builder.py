@@ -14,7 +14,11 @@ import pytest
 import yaml
 from agentloom.adapters.smolagents.tool_shim import inject_hooks
 from agentloom.adapters.smolagents.tools.tools import tool
-from agentloom.runtime.agent_runtime import AgentRuntimeRequest, AgentRuntimeResult
+from agentloom.runtime.agent_runtime import (
+    AgentRuntimeRequest,
+    AgentRuntimeResult,
+    require_runtime_state,
+)
 from agentloom.runtime.hooks import HookEvent, HookHandler, HookPlan, HookResult, HookRun
 from agentloom.runtime.logging import get_global_logger, set_global_logger
 from agentloom.runtime.loom_mixin import LoomAgentMixin
@@ -1066,7 +1070,11 @@ def test_completed_worker_resume_replays_output_in_requested_shape(tmp_path, mon
 
     coordinator = CheckpointCoordinator(manager, "task-completed-worker", "delegate", resume=True)
     resumed = worker.run(AgentRuntimeRequest(task="delegate"))
-    invocation_module.require_successful_runtime_result(resumed)
+    require_runtime_state(
+        resumed,
+        allowed_states={"success"},
+        error_prefix="Agent run did not complete successfully",
+    )
     assert resumed.output == initial.output
     assert resumed.usage is None
     assert provider.snapshot().used_tokens == 31
