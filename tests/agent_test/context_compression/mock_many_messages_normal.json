@@ -13,7 +13,8 @@
   },
   {
     "role": "tool-call",
-    "content": "{'name': 'python_interpreter', 'arguments': \"result = shell_tool(commands=['find /workspace/src -name \\\"Can_*.c\\\" -o -name \\\"Can_*.h\\\"'])\\nprint(result)\"}"
+    "content": "",
+    "tool_call": {"id": "glob-1", "name": "glob_search", "arguments": {"path": "/workspace/src", "pattern": "Can_*"}}
   },
   {
     "role": "tool-response",
@@ -25,7 +26,8 @@
   },
   {
     "role": "tool-call",
-    "content": "{'name': 'python_interpreter', 'arguments': \"content = read_file_content('/workspace/src/Can.h')\\nprint(content)\"}"
+    "content": "",
+    "tool_call": {"id": "read-1", "name": "read_file", "arguments": {"file_path": "/workspace/src/Can.h"}}
   },
   {
     "role": "tool-response",
@@ -37,7 +39,8 @@
   },
   {
     "role": "tool-call",
-    "content": "{'name': 'python_interpreter', 'arguments': \"content = read_file_content('/workspace/src/Can_Cfg.h')\\nprint(content)\"}"
+    "content": "",
+    "tool_call": {"id": "read-2", "name": "read_file", "arguments": {"file_path": "/workspace/src/Can_Cfg.h"}}
   },
   {
     "role": "tool-response",
@@ -49,7 +52,8 @@
   },
   {
     "role": "tool-call",
-    "content": "{'name': 'python_interpreter', 'arguments': \"content = read_file_content('/workspace/src/Can.c')\\nprint(content)\"}"
+    "content": "",
+    "tool_call": {"id": "read-3", "name": "read_file", "arguments": {"file_path": "/workspace/src/Can.c"}}
   },
   {
     "role": "tool-response",
@@ -61,7 +65,8 @@
   },
   {
     "role": "tool-call",
-    "content": "{'name': 'python_interpreter', 'arguments': \"result = ripgrep_search_directory(directory='/workspace/src', rg_args=['-n', 'Can_Init', '--include', '*.c'])\\nprint(result)\"}"
+    "content": "",
+    "tool_call": {"id": "grep-1", "name": "grep_search", "arguments": {"path": "/workspace/src", "pattern": "Can_Init", "include": "*.c"}}
   },
   {
     "role": "tool-response",
@@ -73,7 +78,8 @@
   },
   {
     "role": "tool-call",
-    "content": "{'name': 'python_interpreter', 'arguments': \"content = read_file_content('/workspace/src/EcuM.c')\\nprint(content)\"}"
+    "content": "",
+    "tool_call": {"id": "read-4", "name": "read_file", "arguments": {"file_path": "/workspace/src/EcuM.c"}}
   },
   {
     "role": "tool-response",
@@ -85,7 +91,8 @@
   },
   {
     "role": "tool-call",
-    "content": "{'name': 'python_interpreter', 'arguments': \"result = shell_tool(commands=['gcc -c -I/workspace/include /workspace/src/Can.c -o /tmp/Can.o 2>&1'])\\nprint(result)\"}"
+    "content": "",
+    "tool_call": {"id": "shell-1", "name": "shell_tool", "arguments": {"command": "gcc -c -I/workspace/include /workspace/src/Can.c -o /tmp/Can.o 2>&1"}}
   },
   {
     "role": "tool-response",
