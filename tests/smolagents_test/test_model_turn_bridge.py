@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from dataclasses import dataclass
 
 import pytest
@@ -87,6 +88,7 @@ def test_bridge_converts_smolagents_messages_and_native_tool_calls() -> None:
     assert result.tool_calls[0].function.name == "weather"
     assert result.tool_calls[0].function.arguments == {"city": "Shanghai"}
     assert result.token_usage == TokenUsage(input_tokens=11, output_tokens=5)
+    json.dumps(result.dict())
 
 
 def test_bridge_rejects_plain_text_when_tool_call_is_required() -> None:
