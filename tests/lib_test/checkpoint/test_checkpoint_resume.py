@@ -13,6 +13,7 @@ from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
+from agentloom.runtime.agent_runtime import RuntimeCheckpointEnvelope
 from agentloom.runtime.checkpoint import CheckpointManager
 from agentloom.runtime.checkpoint.coordinator import CheckpointCoordinator
 
@@ -257,6 +258,97 @@ class TestWorkerCheckpoint:
         )
         assert preparation.should_execute is False
         assert preparation.cached_result == "completed side effect"
+
+
+class TestSupervisorCheckpoint:
+    @pytest.mark.parametrize(
+        "status",
+        ["completed", "failed", "interrupted", "budget_limited"],
+    )
+    def test_terminal_checkpoint_write_failure_propagates(
+        self,
+        cm: CheckpointManager,
+        task_id: str,
+        monkeypatch: pytest.MonkeyPatch,
+        status: str,
+    ) -> None:
+        cm.save_task_tree(
+            task_id,
+            {
+                "task_id": task_id,
+                "status": "running",
+                "agent_name": "sup",
+                "workers": {},
+            },
+        )
+        coord = CheckpointCoordinator(cm, task_id, "supervise")
+        monkeypatch.setattr(
+            cm,
+            "save_supervisor_runtime_checkpoint",
+            lambda *_args, **_kwargs: (_ for _ in ()).throw(
+                OSError("terminal checkpoint write failed")
+            ),
+        )
+
+        with pytest.raises(
+            OSError,
+            match="terminal checkpoint write failed",
+        ):
+            coord.save_runtime_checkpoint(
+                RuntimeCheckpointEnvelope(
+                    runtime_id="smolagents",
+                    runtime_version="test",
+                    state_schema_version=2,
+                    progress=1,
+                    payload={
+                        "memory_steps": [],
+                        "canonical_model_items": [],
+                    },
+                ),
+                status,
+            )
+
+        assert cm.load_task_tree(task_id)["checkpoint_degraded"] is True
+
+    def test_running_checkpoint_write_failure_remains_best_effort(
+        self,
+        cm: CheckpointManager,
+        task_id: str,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        cm.save_task_tree(
+            task_id,
+            {
+                "task_id": task_id,
+                "status": "running",
+                "agent_name": "sup",
+                "workers": {},
+            },
+        )
+        coord = CheckpointCoordinator(cm, task_id, "supervise")
+        monkeypatch.setattr(
+            cm,
+            "save_supervisor_runtime_checkpoint",
+            lambda *_args, **_kwargs: (_ for _ in ()).throw(
+                OSError("running checkpoint write failed")
+            ),
+        )
+
+        coord.save_runtime_checkpoint(
+            RuntimeCheckpointEnvelope(
+                runtime_id="smolagents",
+                runtime_version="test",
+                state_schema_version=2,
+                progress=1,
+                payload={
+                    "memory_steps": [],
+                    "canonical_model_items": [],
+                },
+            ),
+            "running",
+        )
+
+        assert cm.load_task_tree(task_id)["checkpoint_degraded"] is True
 
 # ── Worker resume (skip completed) ──────────────────────────────────────
 
