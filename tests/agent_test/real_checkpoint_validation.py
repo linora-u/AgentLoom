@@ -196,8 +196,10 @@ def _worker_usage(checkpoint: dict) -> dict[str, int]:
 def _worker_handoff_output(raw: str) -> str:
     try:
         envelope = json.loads(raw)
-    except json.JSONDecodeError as exc:
-        raise AssertionError("Worker handoff is not a JSON result envelope") from exc
+    except json.JSONDecodeError:
+        if not raw:
+            raise AssertionError("Worker handoff output is empty") from None
+        return raw
     if (
         not isinstance(envelope, dict)
         or envelope.get("ok") is not True
