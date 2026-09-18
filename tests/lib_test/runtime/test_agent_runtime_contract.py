@@ -348,6 +348,35 @@ def test_runtime_definition_freezes_json_safe_metadata() -> None:
         )
 
 
+def test_runtime_definition_validates_typed_execution_context() -> None:
+    valid = _definition("test")
+    definition = RuntimeDefinition(
+        runtime_id="test",
+        name="typed-context",
+        description="Expose shared runtime construction context.",
+        model=valid.model,
+        tool_gateway=valid.tool_gateway,
+        max_steps=3,
+        prompt_template_path=" prompts/custom.yaml ",
+        project_root=" /workspace ",
+        max_consecutive_model_errors=7,
+    )
+
+    assert definition.prompt_template_path == "prompts/custom.yaml"
+    assert definition.project_root == "/workspace"
+    assert definition.max_consecutive_model_errors == 7
+    with pytest.raises(ValueError, match="max_consecutive_model_errors"):
+        RuntimeDefinition(
+            runtime_id="test",
+            name="bad-model-error-limit",
+            description="Reject invalid typed execution context.",
+            model=valid.model,
+            tool_gateway=valid.tool_gateway,
+            max_steps=3,
+            max_consecutive_model_errors=0,
+        )
+
+
 @pytest.mark.parametrize(
     "invalid_metadata",
     [

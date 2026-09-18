@@ -441,6 +441,9 @@ class RuntimeDefinition:
     planning_interval: int | None = None
     smart_summary: bool = True
     todo_mode: Literal["auto", "on", "off"] = "auto"
+    prompt_template_path: str | None = None
+    project_root: str | None = None
+    max_consecutive_model_errors: int = 5
     metadata: Mapping[str, JSONValue] = field(default_factory=dict, repr=False)
 
     def __post_init__(self) -> None:
@@ -474,6 +477,24 @@ class RuntimeDefinition:
             raise TypeError("smart_summary must be a boolean")
         if self.todo_mode not in {"auto", "on", "off"}:
             raise ValueError("todo_mode must be one of: auto, on, off")
+        for field_name in ("prompt_template_path", "project_root"):
+            value = getattr(self, field_name)
+            if value is not None and (
+                not isinstance(value, str) or not value.strip()
+            ):
+                raise ValueError(
+                    f"{field_name} must be a non-empty string when provided"
+                )
+            if isinstance(value, str):
+                object.__setattr__(self, field_name, value.strip())
+        if (
+            isinstance(self.max_consecutive_model_errors, bool)
+            or not isinstance(self.max_consecutive_model_errors, int)
+            or self.max_consecutive_model_errors < 1
+        ):
+            raise ValueError(
+                "max_consecutive_model_errors must be a positive integer"
+            )
         if not isinstance(self.metadata, Mapping):
             raise TypeError("metadata must be a mapping")
         object.__setattr__(self, "runtime_id", self.runtime_id.strip())

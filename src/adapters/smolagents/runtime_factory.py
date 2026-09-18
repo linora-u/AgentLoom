@@ -23,10 +23,6 @@ from agentloom.runtime.prompts.prompt_builder import (
 from agentloom.runtime.trace import get_current_hook_run
 from smolagents import LogLevel
 
-_DEFAULT_MAX_CONSECUTIVE_PARSE_ERRORS = 5
-_MAX_CONSECUTIVE_PARSE_ERRORS_KEY = "max_consecutive_parse_errors"
-_PROMPT_TEMPLATE_PATH_KEY = "smolagents_prompt_template_path"
-_AGENT_ROOT_KEY = "agent_root"
 logger = get_logger(__name__)
 
 
@@ -41,41 +37,12 @@ def _run_scoped_stop_check(
     return hook_run.build_stop_check()(final_answer, memory, **kwargs)
 
 
-def _max_consecutive_parse_errors(definition: RuntimeDefinition) -> int:
-    raw_value = definition.metadata.get(
-        _MAX_CONSECUTIVE_PARSE_ERRORS_KEY,
-        _DEFAULT_MAX_CONSECUTIVE_PARSE_ERRORS,
-    )
-    if (
-        isinstance(raw_value, bool)
-        or not isinstance(raw_value, int)
-        or raw_value < 1
-    ):
-        raise ValueError(
-            "runtime definition metadata.max_consecutive_parse_errors "
-            "must be a positive integer"
-        )
-    return raw_value
-
-
 def _prompt_metadata(definition: RuntimeDefinition) -> tuple[str | None, str]:
-    prompt_path = definition.metadata.get(_PROMPT_TEMPLATE_PATH_KEY)
-    if prompt_path is not None and (
-        not isinstance(prompt_path, str) or not prompt_path.strip()
-    ):
+    if definition.project_root is None:
         raise ValueError(
-            "runtime definition metadata.smolagents_prompt_template_path "
-            "must be a non-empty string path when provided"
+            "Smolagents runtime requires RuntimeDefinition.project_root"
         )
-    agent_root = definition.metadata.get(_AGENT_ROOT_KEY)
-    if not isinstance(agent_root, str) or not agent_root.strip():
-        raise ValueError(
-            "runtime definition metadata.agent_root must be a non-empty string path"
-        )
-    return (
-        prompt_path.strip() if isinstance(prompt_path, str) else None,
-        agent_root.strip(),
-    )
+    return definition.prompt_template_path, definition.project_root
 
 
 class SmolagentsRuntimeFactory:
@@ -134,7 +101,7 @@ class SmolagentsRuntimeFactory:
         native_runtime = ToolCallingAgentV2(**agent_kwargs)
         native_runtime._agent_loom_todo_mode = definition.todo_mode
         native_runtime._max_consecutive_parse_errors = (
-            _max_consecutive_parse_errors(definition)
+            definition.max_consecutive_model_errors
         )
         return SmolagentsRuntimeAdapter(
             native_runtime,

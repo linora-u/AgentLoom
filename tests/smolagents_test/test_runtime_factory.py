@@ -108,16 +108,12 @@ def _definition(
     metadata: Mapping[str, Any] | None = None,
     planning_interval: int | None = 3,
     instructions: str = "Use proof_tool, then finish.",
+    prompt_template_path: str | None = None,
+    project_root: str | None = None,
+    max_consecutive_model_errors: int = 9,
 ) -> RuntimeDefinition:
     resolved_gateway = gateway or _RecordingGateway()
     assert isinstance(resolved_gateway, ToolGateway)
-    resolved_metadata = {
-        "max_consecutive_parse_errors": 9,
-        "smolagents_prompt_template_path": None,
-        "agent_root": str(Path.cwd()),
-    }
-    if metadata is not None:
-        resolved_metadata.update(metadata)
     return RuntimeDefinition(
         runtime_id="smolagents",
         name="proof_agent",
@@ -138,7 +134,10 @@ def _definition(
         planning_interval=planning_interval,
         smart_summary=False,
         todo_mode="on",
-        metadata=resolved_metadata,
+        prompt_template_path=prompt_template_path,
+        project_root=project_root or str(Path.cwd()),
+        max_consecutive_model_errors=max_consecutive_model_errors,
+        metadata=metadata or {},
     )
 
 
@@ -357,16 +356,12 @@ def test_runtime_close_releases_gateway_after_native_close_failure() -> None:
 
 
 @pytest.mark.parametrize(
-    "metadata",
-    [
-        {"max_consecutive_parse_errors": 0},
-        {"max_consecutive_parse_errors": True},
-        {"max_consecutive_parse_errors": "5"},
-    ],
+    "value",
+    [0, True, "5"],
 )
-def test_factory_rejects_invalid_parse_error_metadata(metadata) -> None:
+def test_definition_rejects_invalid_model_error_limit(value) -> None:
     with pytest.raises(ValueError, match="positive integer"):
-        SmolagentsRuntimeFactory()(_definition(metadata=metadata))
+        _definition(max_consecutive_model_errors=value)
 
 
 def test_factory_loads_explicit_prompt_and_appends_instructions_once(
@@ -395,10 +390,8 @@ def test_factory_loads_explicit_prompt_and_appends_instructions_once(
         lambda **_kwargs: None,
     )
     definition = _definition(
-        metadata={
-            "smolagents_prompt_template_path": str(prompt_path),
-            "agent_root": str(tmp_path),
-        },
+        prompt_template_path=str(prompt_path),
+        project_root=str(tmp_path),
         instructions="Runtime-owned instructions.",
     )
 
