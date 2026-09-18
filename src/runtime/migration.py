@@ -205,7 +205,6 @@ class RuntimeMigration:
                 if copied_checksum != candidate.checksum:
                     raise MigrationError(f"checksum mismatch while staging {candidate.task_id}")
                 _normalize_legacy_worker_checkpoints(staged)
-                _normalize_legacy_runtime_checkpoints(staged)
                 validate_migrated_checkpoint(candidate, staged)
                 if validator is not None:
                     validator(candidate, staged)
@@ -328,6 +327,12 @@ class RuntimeMigration:
         if checkpoint is None:
             reason = "invalid checkpoint" if checkpoint_path.exists() else "missing checkpoint"
             return SkippedMigration(task_dir, task_id, reason)
+        if not isinstance(checkpoint.get("runtime_checkpoint"), dict):
+            return SkippedMigration(
+                task_dir,
+                task_id,
+                "unsupported legacy runtime checkpoint",
+            )
         task_created = next(
             (event for event in events if event.get("type") == "task_created"),
             {},
@@ -377,6 +382,12 @@ class RuntimeMigration:
                     task_dir,
                     task_id,
                     "invalid worker checkpoint",
+                )
+            if not isinstance(worker_checkpoint.get("runtime_checkpoint"), dict):
+                return SkippedMigration(
+                    task_dir,
+                    task_id,
+                    "unsupported legacy worker runtime checkpoint",
                 )
             metadata.append(worker_checkpoint)
         for heartbeat_path in (
@@ -824,15 +835,13 @@ def _file_history_progress_state(task_dir: Path) -> str:
 
 
 def _checkpoint_has_memory(checkpoint: dict[str, Any]) -> bool:
-    steps = checkpoint.get("memory_steps")
-    if not isinstance(steps, list):
-        runtime_checkpoint = checkpoint.get("runtime_checkpoint")
-        payload = (
-            runtime_checkpoint.get("payload")
-            if isinstance(runtime_checkpoint, dict)
-            else None
-        )
-        steps = payload.get("memory_steps") if isinstance(payload, dict) else None
+    runtime_checkpoint = checkpoint.get("runtime_checkpoint")
+    payload = (
+        runtime_checkpoint.get("payload")
+        if isinstance(runtime_checkpoint, dict)
+        else None
+    )
+    steps = payload.get("memory_steps") if isinstance(payload, dict) else None
     return isinstance(steps, list) and len(steps) > 0
 
 
@@ -914,46 +923,6 @@ def _normalize_legacy_worker_checkpoints(task_dir: Path) -> None:
             legacy_checkpoint.unlink()
         else:
             os.replace(legacy_checkpoint, target)
-
-
-def _normalize_legacy_runtime_checkpoints(task_dir: Path) -> None:
-    """Convert declared legacy smolagents payloads into runtime envelopes."""
-
-    from agentloom.adapters.smolagents.checkpoint_codec import (
-        SmolagentsCheckpointCodec,
-    )
-
-    paths = [task_dir / "checkpoint.json"]
-    paths.extend(
-        sorted((task_dir / "workers").glob("*/calls/*/checkpoint.json"))
-    )
-    for path in paths:
-        checkpoint = _read_json_object(path)
-        if checkpoint is None:
-            raise MigrationError(f"invalid checkpoint: {path}")
-        raw_runtime = checkpoint.get("runtime_checkpoint")
-        try:
-            if isinstance(raw_runtime, dict):
-                envelope = (
-                    SmolagentsCheckpointCodec.validate_runtime_checkpoint(
-                        raw_runtime
-                    )
-                )
-            else:
-                envelope = SmolagentsCheckpointCodec.migrate_legacy_checkpoint(
-                    checkpoint
-                )
-        except (TypeError, ValueError) as exc:
-            raise MigrationError(
-                f"invalid legacy smolagents checkpoint: {path}"
-            ) from exc
-        checkpoint["runtime_checkpoint"] = envelope.to_dict()
-        checkpoint["step_count"] = envelope.payload.get("step_count", 0)
-        checkpoint.pop("memory_steps", None)
-        path.write_text(
-            json.dumps(checkpoint, ensure_ascii=False, indent=2),
-            encoding="utf-8",
-        )
 
 
 def _worker_call_index(checkpoint: dict[str, Any], tree: dict[str, Any], worker_name: str) -> int:
