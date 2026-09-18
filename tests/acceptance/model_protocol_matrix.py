@@ -255,6 +255,7 @@ def _validate_checkpoint(
     *,
     task_id: str,
     run_id: str,
+    adapter_id: str,
 ) -> dict[str, object]:
     checkpoint = json.loads(checkpoint_path.read_text(encoding="utf-8"))
     envelope = checkpoint.get("runtime_checkpoint")
@@ -268,6 +269,14 @@ def _validate_checkpoint(
         "runtime_version"
     ]:
         raise AssertionError("checkpoint lacks runtime_version")
+    audit_metadata = envelope.get("audit_metadata")
+    if (
+        not isinstance(audit_metadata, dict)
+        or audit_metadata.get("model_adapter_id") != adapter_id
+    ):
+        raise AssertionError(
+            "checkpoint model_adapter_id does not match the selected adapter"
+        )
     if envelope.get("task_id") != task_id or envelope.get("run_id") != run_id:
         raise AssertionError("checkpoint identity does not match public Run")
     payload = envelope.get("payload")
@@ -403,6 +412,7 @@ def run_case(case: MatrixCase, workspace: Path) -> dict[str, object]:
         _checkpoint_path(result.run, runtime_root=workspace / "runtime"),
         task_id=result.run.task_id,
         run_id=result.run.run_id,
+        adapter_id=case.adapter,
     )
     _write_json(workspace / "lifecycle.json", lifecycle)
     return {
