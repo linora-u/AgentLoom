@@ -18,8 +18,8 @@ from agentloom.configuration.defaults import (
     DEFAULT_MODEL_TEMPERATURE,
     DEFAULT_MODEL_TIMEOUT,
 )
-from agentloom.configuration.llm_config import ModelAdapter
 from agentloom.runtime.logging import get_logger
+from agentloom.runtime.model_protocol import AdapterKind
 
 logger = get_logger(__name__)
 
@@ -51,7 +51,7 @@ def _unknown_model_type_error(model_type: str, available: list[str]) -> str:
 @dataclass
 class ModelConfig:
     """Model configuration."""
-    adapter: ModelAdapter
+    adapter: AdapterKind
     model_id: str | None = None
     base_url: str | None = None
     api_key: str | None = None
