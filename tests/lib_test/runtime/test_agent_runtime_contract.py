@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+from collections.abc import Mapping
 from dataclasses import dataclass
+from typing import Any
 
 import pytest
 from agentloom.runtime.agent_runtime import (
@@ -9,12 +11,71 @@ from agentloom.runtime.agent_runtime import (
     AgentRuntimeResult,
     RuntimeCapabilities,
     RuntimeCheckpointEnvelope,
+    RuntimeDefinition,
     RuntimeRegistry,
     RuntimeRequirements,
     UnsupportedRuntimeError,
     build_builtin_runtime_registry,
     require_runtime_state,
 )
+from agentloom.runtime.model_binding import ModelTurnBinding
+from agentloom.runtime.model_protocol import (
+    MessageItem,
+    ModelTurnRequest,
+    ModelTurnResult,
+    ToolDefinition,
+)
+from agentloom.runtime.tool_gateway import ToolGateway
+from agentloom.runtime.tool_protocol import ToolCallRecord
+
+
+class _ModelAdapter:
+    adapter_id = "openai_chat"
+
+    def turn(self, request: ModelTurnRequest) -> ModelTurnResult:
+        return ModelTurnResult(
+            items=(MessageItem(role="assistant", text=request.model),)
+        )
+
+
+class _ToolGateway:
+    @property
+    def definitions(self) -> tuple[ToolDefinition, ...]:
+        return ()
+
+    def invoke(
+        self,
+        *,
+        call_id: str,
+        tool_name: str,
+        arguments: Mapping[str, Any],
+    ) -> ToolCallRecord:
+        return ToolCallRecord.completed(
+            call_id=call_id,
+            tool_name=tool_name,
+            input=dict(arguments),
+            output="done",
+        )
+
+    def close(self) -> None:
+        return None
+
+
+def _definition(runtime_id: str) -> RuntimeDefinition:
+    gateway = _ToolGateway()
+    assert isinstance(gateway, ToolGateway)
+    return RuntimeDefinition(
+        runtime_id=runtime_id,
+        name="runtime-contract",
+        description="Exercise one registered runtime.",
+        model=ModelTurnBinding(
+            model_type="test",
+            model_id="opaque-model",
+            adapter=_ModelAdapter(),
+        ),
+        tool_gateway=gateway,
+        max_steps=5,
+    )
 
 
 @dataclass
@@ -50,14 +111,21 @@ class _RecordingRuntime:
 
 def test_registry_resolves_a_complete_runtime_without_exposing_native_types() -> None:
     requests: list[AgentRuntimeRequest] = []
+    definitions: list[RuntimeDefinition] = []
     registry = RuntimeRegistry()
+
+    def factory(definition: RuntimeDefinition) -> _RecordingRuntime:
+        definitions.append(definition)
+        return _RecordingRuntime("smolagents", requests)
+
     registry.register(
         "smolagents",
         capabilities=RuntimeCapabilities(True, True, True, True),
-        factory=lambda: _RecordingRuntime("smolagents", requests),
+        factory=factory,
     )
+    definition = _definition("smolagents")
 
-    runtime = registry.create("smolagents")
+    runtime = registry.create(definition)
     result = runtime.run(
         AgentRuntimeRequest(
             task="inspect the project",
@@ -72,6 +140,8 @@ def test_registry_resolves_a_complete_runtime_without_exposing_native_types() ->
     assert result.checkpoint.payload == {"turn": 1}
     assert requests[0].task == "inspect the project"
     assert requests[0].additional_args == {"scope": "runtime"}
+    assert definitions == [definition]
+    assert definitions[0] is definition
 
 
 def test_registry_rejects_unknown_runtime_without_fallback() -> None:
@@ -79,18 +149,20 @@ def test_registry_rejects_unknown_runtime_without_fallback() -> None:
     registry.register(
         "smolagents",
         capabilities=RuntimeCapabilities(True, True, True, True),
-        factory=lambda: _RecordingRuntime("smolagents", []),
+        factory=lambda _definition: _RecordingRuntime("smolagents", []),
     )
 
     with pytest.raises(UnsupportedRuntimeError, match="langgraph"):
-        registry.create("langgraph")
+        registry.create(_definition("langgraph"))
 
 
 def test_builtin_registry_registers_only_explicit_smolagents_factory() -> None:
     requests: list[AgentRuntimeRequest] = []
     created: list[str] = []
 
-    def build_smolagents() -> _RecordingRuntime:
+    def build_smolagents(
+        _definition: RuntimeDefinition,
+    ) -> _RecordingRuntime:
         created.append("smolagents")
         return _RecordingRuntime("smolagents", requests)
 
@@ -98,12 +170,12 @@ def test_builtin_registry_registers_only_explicit_smolagents_factory() -> None:
         smolagents_factory=build_smolagents,
     )
 
-    runtime = registry.create("smolagents")
+    runtime = registry.create(_definition("smolagents"))
 
     assert runtime.runtime_id == "smolagents"
     assert created == ["smolagents"]
     with pytest.raises(UnsupportedRuntimeError, match="langgraph"):
-        registry.create("langgraph")
+        registry.create(_definition("langgraph"))
     assert created == ["smolagents"]
 
 
@@ -139,7 +211,71 @@ def test_registry_validates_capabilities_without_constructing_runtime() -> None:
             ),
         )
     with pytest.raises(UnsupportedRuntimeError, match="no runtime factory"):
-        registry.create("minimal")
+        registry.create(_definition("minimal"))
+
+
+def test_runtime_definition_requires_neutral_model_and_tool_gateway() -> None:
+    valid = _definition("test")
+
+    assert isinstance(valid.model, ModelTurnBinding)
+    assert isinstance(valid.tool_gateway, ToolGateway)
+    with pytest.raises(TypeError, match="ModelTurnBinding"):
+        RuntimeDefinition(
+            runtime_id="test",
+            name="invalid-model",
+            description="Do not accept an arbitrary model.",
+            model=object(),  # type: ignore[arg-type]
+            tool_gateway=valid.tool_gateway,
+            max_steps=5,
+        )
+    with pytest.raises(TypeError, match="ToolGateway"):
+        RuntimeDefinition(
+            runtime_id="test",
+            name="invalid-gateway",
+            description="Do not accept a tuple of arbitrary tools.",
+            model=valid.model,
+            tool_gateway=(),  # type: ignore[arg-type]
+            max_steps=5,
+        )
+    with pytest.raises(TypeError):
+        RuntimeDefinition(  # type: ignore[call-arg]
+            runtime_id="test",
+            name="legacy-tools",
+            description="A tools tuple is not part of the interface.",
+            model=valid.model,
+            tool_gateway=valid.tool_gateway,
+            tools=(),
+            max_steps=5,
+        )
+
+
+def test_runtime_definition_freezes_json_safe_metadata() -> None:
+    original = {"labels": ["proof"]}
+    definition = RuntimeDefinition(
+        runtime_id="test",
+        name="metadata",
+        description="Freeze caller-owned metadata.",
+        model=_definition("test").model,
+        tool_gateway=_definition("test").tool_gateway,
+        max_steps=3,
+        planning_interval=2,
+        smart_summary=False,
+        todo_mode="off",
+        metadata=original,
+    )
+    original["labels"].append("mutated")
+
+    assert definition.metadata == {"labels": ["proof"]}
+    with pytest.raises(ValueError, match="JSON serializable"):
+        RuntimeDefinition(
+            runtime_id="test",
+            name="bad-metadata",
+            description="Reject opaque metadata.",
+            model=definition.model,
+            tool_gateway=definition.tool_gateway,
+            max_steps=3,
+            metadata={"opaque": object()},
+        )
 
 
 def test_runtime_state_failure_uses_typed_runtime_error() -> None:
