@@ -1273,10 +1273,10 @@ class TestEffectiveConfigDiscovery:
         assert "有效 `default_toolsets`: []" in result
         assert str(app_dir / "config" / "system.yaml") in result
 
-class TestExecutionEnvAndMarkdownSupport:
-    """验证 execution_env 字段提取和 Markdown Agent 配置兼容。"""
+class TestRemovedExecutionConfigAndMarkdownSupport:
+    """验证旧执行配置被忽略，且 Markdown Agent 仍可扫描。"""
 
-    def test_execution_env_fields_in_summary(self, tmp_path):
+    def test_removed_execution_env_is_absent_from_summary(self, tmp_path):
         app_dir = tmp_path / "env_app"
         workflows_dir = app_dir / "workflows"
         workflows_dir.mkdir(parents=True)
@@ -1284,6 +1284,7 @@ class TestExecutionEnvAndMarkdownSupport:
             yaml.dump(
                 {
                     "name": "env_agent",
+                    "agent_runtime": "smolagents",
                     "description": "x",
                     "workflow": "x",
                     "execution_env": {
@@ -1295,9 +1296,8 @@ class TestExecutionEnvAndMarkdownSupport:
             )
 
         result = scan_app_structure(str(app_dir))
-        assert "execution_env.type" in result
-        assert "docker" in result
-        assert "跳过 `default_toolsets`" in result
+        assert "execution_env" not in result
+        assert "docker" not in result
 
     def test_markdown_agent_is_scanned_and_workflow_extractable(self, tmp_path):
         app_dir = tmp_path / "md_app"
