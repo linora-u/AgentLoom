@@ -222,3 +222,45 @@ def test_shipped_llm_example_declares_adapter_for_every_model_type() -> None:
         "openai_responses",
         "anthropic_messages",
     } for settings in config.models.values())
+
+
+@pytest.mark.parametrize(
+    ("relative_path", "payload_tool"),
+    [
+        (
+            "applications/context_engine_text_retrieve_validation/"
+            "workflows/worker_agents/text_payload_worker.yaml",
+            "make_context_engine_text_payload",
+        ),
+        (
+            "applications/context_engine_json_retrieve_validation/"
+            "workflows/worker_agents/json_payload_worker.yaml",
+            "make_context_engine_json_payload",
+        ),
+        (
+            "applications/context_engine_multi_worker_validation/"
+            "workflows/worker_agents/log_payload_worker.yaml",
+            "make_context_engine_log_payload",
+        ),
+        (
+            "applications/context_engine_multi_worker_validation/"
+            "workflows/worker_agents/search_payload_worker.yaml",
+            "make_context_engine_search_payload",
+        ),
+    ],
+)
+def test_context_engine_workers_use_structured_context_ref_handoff(
+    relative_path: str,
+    payload_tool: str,
+) -> None:
+    definition = load_agent_definition(PROJECT_ROOT / relative_path)
+    workflow = str(definition["workflow"])
+    normalized_workflow = " ".join(workflow.split())
+
+    assert payload_tool in workflow
+    assert "native structured tool call" in normalized_workflow
+    assert "ContextRef" in workflow
+    assert "final_answer" in workflow
+    assert "one code block" not in workflow
+    assert "payload =" not in workflow
+    assert "final_answer(payload)" not in workflow

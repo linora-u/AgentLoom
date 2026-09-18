@@ -7,23 +7,20 @@ max_steps: 4
 workflow: |
   # Log Payload Worker
 
-  Produce the payload by executing this logic in one code block:
-
-  ```
-  payload = make_context_engine_log_payload(case_id="log")
-  final_answer(payload)
-  ```
-
-  Return the payload exactly. Do not summarize it.
+  1. Call `make_context_engine_log_payload` exactly once through its native
+     structured tool call with `case_id: "log"`.
+  2. The large tool result is replaced with a `[ContextRef ctx_...]` preview.
+     Extract the `ctx_...` reference without retrieving the original payload.
+  3. Call `final_answer` exactly once with only that ContextRef.
 
 agent_function_schema:
-  description: "Return the large log validation payload exactly."
+  description: "Create the large log validation payload and return its ContextRef."
   inputs:
     user_request:
       description: "Validation request from the supervisor."
       required: true
   output:
-    description: "The complete large log payload."
+    description: "The ContextRef for the complete large log payload."
 
 tools:
   - name: "make_context_engine_log_payload"
