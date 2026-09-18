@@ -1,10 +1,9 @@
 """Tests for strict native tool-call transport behavior."""
 
 import pytest
-
-from agentloom.configuration.llm_config import LLMConfig, LlmModelTypeSettings
 from agentloom.adapters.smolagents.models.litellm_model import LiteLLMModelV2
 from agentloom.adapters.smolagents.models.model_types import ModelConfig
+from agentloom.configuration.llm_config import LLMConfig, LlmModelTypeSettings
 
 
 def test_model_config_has_no_native_tool_call_detection_field():
@@ -28,14 +27,18 @@ def test_litellm_model_rejects_removed_supports_native_tool_calls_constructor_ar
 
 
 def test_llm_model_type_settings_has_no_native_tool_call_detection_field():
-    settings = LlmModelTypeSettings(model="test/model")
+    settings = LlmModelTypeSettings(model="test/model", adapter="openai_chat")
 
     assert not hasattr(settings, "supports_native_tool_calls")
 
 
 def test_llm_model_type_settings_rejects_removed_native_tool_call_detection_field():
     with pytest.raises(ValueError, match="supports_native_tool_calls"):
-        LlmModelTypeSettings(model="test/model", supports_native_tool_calls="false")
+        LlmModelTypeSettings(
+            model="test/model",
+            adapter="openai_chat",
+            supports_native_tool_calls="false",
+        )
 
 
 def test_llm_config_rejects_removed_supports_native_tool_calls_field():
@@ -43,10 +46,12 @@ def test_llm_config_rejects_removed_supports_native_tool_calls_field():
         "model": {
             "powerful": {
                 "model": "test/powerful",
+                "adapter": "openai_chat",
                 "supports_native_tool_calls": "false",
             },
             "summary": {
                 "model": "test/summary",
+                "adapter": "openai_chat",
             },
         },
     }
@@ -60,10 +65,12 @@ def test_llm_config_keeps_tool_choice_as_extra_completion_param():
         "model": {
             "powerful": {
                 "model": "test/powerful",
+                "adapter": "openai_chat",
                 "tool_choice": "auto",
             },
             "summary": {
                 "model": "test/summary",
+                "adapter": "openai_chat",
             },
         },
     }

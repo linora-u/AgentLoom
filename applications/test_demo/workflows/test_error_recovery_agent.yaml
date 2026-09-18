@@ -1,6 +1,6 @@
 name: "test_error_recovery"
 agent_runtime: smolagents
-description: "Validate error recovery: explicit parser failures, error classification, progressive recovery messages, and error consolidation"
+description: "Validate native tool-call enforcement, error classification, progressive recovery messages, and error consolidation"
 
 model_type: "powerful"
 max_steps: 4
@@ -18,19 +18,15 @@ workflow: |
 
   checks = []
   error_recovery = Path("src/runtime/error_recovery.py").read_text()
-  parser = Path("src/adapters/smolagents/models/tool_call_parser.py").read_text()
+  bridge = Path("src/adapters/smolagents/model_turn_bridge.py").read_text()
   loom_mixin = Path("src/runtime/loom_mixin.py").read_text()
   compression = Path("src/runtime/memory/context_compression.py").read_text()
 
-  categories = ["FORMAT_NOT_FOUND", "JSON_SYNTAX_ERROR", "UNKNOWN_TOOL", "ARGUMENT_ERROR"]
-  checks.append(("four_error_categories", all(item in error_recovery for item in categories)))
-  checks.append(("tool_call_parse_error_category", "self.error_category = error_category" in parser))
-  checks.append(("strict_parser_entrypoint", "def parse_structured_tool_call(" in parser))
-  checks.append(("model_id_parameter", "model_id: str | None = None" in parser))
-  checks.append(("no_strategy_cache", "strategy_cache" not in parser))
-  checks.append(("no_global_parser_patch", "patch_smolagents_tool_call_parsing" not in parser))
-  checks.append(("no_regex_fallback_strategy", "_strategy_regex_extraction" not in parser))
-  checks.append(("strict_container_failure", "Could not parse a structured tool call" in parser))
+  categories = ["NATIVE_TOOL_CALL_REQUIRED", "UNKNOWN_TOOL", "ARGUMENT_ERROR"]
+  checks.append(("native_error_categories", all(item in error_recovery for item in categories)))
+  checks.append(("strict_native_tool_calls", "assistant text is not interpreted as a tool call" in bridge))
+  checks.append(("canonical_model_items", "MODEL_ITEMS_RAW_KEY" in bridge))
+  checks.append(("no_text_parser_module", not Path("src/adapters/smolagents/models/tool_call_parser.py").exists()))
   checks.append(("consolidate_error_messages", "_consolidate_error_messages" in loom_mixin))
   checks.append(("circuit_breaker_removed", "_inject_parse_error_circuit_breaker" not in loom_mixin))
   checks.append(("error_recovery_imports", "agentloom.runtime.error_recovery" in loom_mixin))
