@@ -47,3 +47,18 @@ result:
 ```text
 ISSUE_69_NESTED_APPLICATION_PASS worker=ISSUE_69_NESTED_WORKER_PASS
 ```
+
+The recorded acceptance run used
+`AGENTLOOM_RUNTIME_ROOT=/private/tmp/agentloom-issue-69-runtime-final` and
+returned exit code 0:
+
+- task: `task_20260918T035736159774Z_46bd87f48b38`
+- run: `run_20260918T035736159795Z_21a683b33a7a`
+- manifest: `status=completed`
+- Worker: `nested_discovery_acceptance_worker`, `call_index=0`,
+  `status=completed`
+- CLI JSONL: `/private/tmp/agentloom-issue-69-final.jsonl`
+
+The runtime log contained no framework-level `[ERROR]` or `[WARNING]` entries.
+This workflow did not call Shell, so the on-demand `audit/shell.jsonl` artifact
+was not created.
