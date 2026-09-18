@@ -96,6 +96,7 @@ def _merge_runtime_events(
     result: AgentRuntimeResult,
     *,
     segment_start: int,
+    lifecycle: ApplicationRunLifecycle | None,
 ) -> AgentRuntimeResult:
     """Retain one ordered invocation event history across runtime segments."""
 
@@ -104,6 +105,8 @@ def _merge_runtime_events(
         if event not in segment_events:
             observed.append(event)
             segment_events.append(event)
+            if lifecycle is not None:
+                lifecycle.observe_runtime_event(event)
     return replace(result, events=tuple(observed))
 
 
@@ -296,6 +299,7 @@ class AgentInvocation:
                 runtime_agent,
                 transformed_tasks=transformed_tasks,
                 goal_provider=goal_provider,
+                lifecycle=lifecycle,
                 runtime_checkpoint=runtime_checkpoint,
                 checkpoint_sink=checkpoint_sink,
             )
@@ -384,6 +388,7 @@ class AgentInvocation:
         *,
         transformed_tasks: list[str],
         goal_provider: Any,
+        lifecycle: ApplicationRunLifecycle | None,
         runtime_checkpoint: Any = None,
         checkpoint_sink: Any = None,
     ) -> tuple[Any, Any]:
@@ -422,6 +427,12 @@ class AgentInvocation:
             "requirements": requirements,
         }
         runtime_events: list[RuntimeEvent] = []
+
+        def observe_runtime_event(event: RuntimeEvent) -> None:
+            runtime_events.append(event)
+            if lifecycle is not None:
+                lifecycle.observe_runtime_event(event)
+
         if goal_provider is None:
             result = None
             for task_index, current_task in enumerate(transformed_tasks):
@@ -435,7 +446,7 @@ class AgentInvocation:
                     AgentRuntimeRequest(
                         task=current_task,
                         **request_identity,
-                        event_sink=runtime_events.append,
+                        event_sink=observe_runtime_event,
                         continue_session=self.resume or task_index > 0,
                         record_task=task_index > 0,
                         additional_args=self.additional_args or {},
@@ -449,6 +460,7 @@ class AgentInvocation:
                     runtime_events,
                     run_result,
                     segment_start=segment_start,
+                    lifecycle=lifecycle,
                 )
                 require_runtime_state(
                     run_result,
@@ -482,7 +494,7 @@ class AgentInvocation:
                     AgentRuntimeRequest(
                         task=current_task,
                         **request_identity,
-                        event_sink=runtime_events.append,
+                        event_sink=observe_runtime_event,
                         continue_session=(
                             self.resume
                             or segment_index > 0
@@ -500,6 +512,7 @@ class AgentInvocation:
                     runtime_events,
                     run_result,
                     segment_start=segment_start,
+                    lifecycle=lifecycle,
                 )
             except Exception as exc:
                 from agentloom.runtime.goal import GoalBudgetLimitedError, GoalCompleteError

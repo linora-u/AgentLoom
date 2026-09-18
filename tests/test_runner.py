@@ -357,6 +357,77 @@ class TestRunApp:
         assert not context.checkpoint_dir.exists()
 
     @patch("agentloom.application.runner.YamlConfiguredSupervisorAgent")
+    def test_completed_run_persists_ordered_runtime_events_as_audit_evidence(
+        self,
+        mock_cls,
+        fake_yaml: Path,
+    ) -> None:
+        from agentloom.application.runner import run_app
+        from agentloom.runtime import get_current_run_context
+        from agentloom.runtime.agent_runtime import RuntimeEvent
+
+        observed = {}
+
+        def _run(_task, **kwargs):
+            context = get_current_run_context(required=True)
+            lifecycle = kwargs["application_lifecycle"]
+            lifecycle.observe_runtime_event(
+                RuntimeEvent(
+                    kind="model",
+                    timestamp=1.25,
+                    application_id=context.application_id,
+                    task_id=context.task_id,
+                    run_id=context.run_id,
+                    details={"phase": "completed"},
+                )
+            )
+            lifecycle.observe_runtime_event(
+                RuntimeEvent(
+                    kind="tool",
+                    timestamp=2.5,
+                    application_id=context.application_id,
+                    task_id=context.task_id,
+                    run_id=context.run_id,
+                    details={"call_id": "call-1", "status": "completed"},
+                )
+            )
+            observed["context"] = context
+            return "final answer"
+
+        mock_cls.return_value.run.side_effect = _run
+
+        assert run_app(str(fake_yaml), file_logging=False) == "final answer"
+
+        context = observed["context"]
+        manifest = json.loads(context.manifest_path.read_text(encoding="utf-8"))
+        artifact_path = context.run_dir / manifest["runtime_events_artifact"]
+        events = [
+            json.loads(line)
+            for line in artifact_path.read_text(encoding="utf-8").splitlines()
+        ]
+        assert events == [
+            {
+                "kind": "model",
+                "timestamp": 1.25,
+                "application_id": context.application_id,
+                "task_id": context.task_id,
+                "run_id": context.run_id,
+                "details": {"phase": "completed"},
+            },
+            {
+                "kind": "tool",
+                "timestamp": 2.5,
+                "application_id": context.application_id,
+                "task_id": context.task_id,
+                "run_id": context.run_id,
+                "details": {"call_id": "call-1", "status": "completed"},
+            },
+        ]
+        assert manifest["runtime_events_artifact"] == "audit/runtime_events.jsonl"
+        assert manifest["runtime_events_count"] == 2
+        assert manifest["runtime_events_size"] == artifact_path.stat().st_size
+
+    @patch("agentloom.application.runner.YamlConfiguredSupervisorAgent")
     def test_completed_run_commits_manifest_before_checkpoint_cleanup(
         self,
         mock_cls,
@@ -1562,6 +1633,8 @@ class TestExecuteApp:
 
         from agentloom.application.run import ApplicationRunError
         from agentloom.application.runner import execute_app
+        from agentloom.runtime import get_current_run_context
+        from agentloom.runtime.agent_runtime import RuntimeEvent
         from agentloom.runtime.goal import GoalState
 
         fake_yaml.write_text(_SAMPLE_YAML + "\ngoal: true\n", encoding="utf-8")
@@ -1572,6 +1645,17 @@ class TestExecuteApp:
         )
 
         def _fail(_task, **kwargs):
+            context = get_current_run_context(required=True)
+            kwargs["application_lifecycle"].observe_runtime_event(
+                RuntimeEvent(
+                    kind="model",
+                    timestamp=3.0,
+                    application_id=context.application_id,
+                    task_id=context.task_id,
+                    run_id=context.run_id,
+                    details={"phase": "failed"},
+                )
+            )
             kwargs["checkpoint_manager"].save_goal(
                 kwargs["task_id"], state.to_dict()
             )
@@ -1595,6 +1679,24 @@ class TestExecuteApp:
             caught.value.run.manifest_path.read_text(encoding="utf-8")
         )
         assert manifest["status"] == "failed"
+        runtime_events = [
+            json.loads(line)
+            for line in (
+                caught.value.run.run_dir / manifest["runtime_events_artifact"]
+            )
+            .read_text(encoding="utf-8")
+            .splitlines()
+        ]
+        assert runtime_events == [
+            {
+                "kind": "model",
+                "timestamp": 3.0,
+                "application_id": caught.value.run.application_id,
+                "task_id": caught.value.run.task_id,
+                "run_id": caught.value.run.run_id,
+                "details": {"phase": "failed"},
+            }
+        ]
 
     @patch("agentloom.application.runner.YamlConfiguredSupervisorAgent")
     def test_interruption_carries_run_info(
@@ -1602,8 +1704,12 @@ class TestExecuteApp:
         mock_cls,
         fake_yaml: Path,
     ) -> None:
+        import json
+
         from agentloom.application.run import ApplicationRunInterrupted
         from agentloom.application.runner import execute_app
+        from agentloom.runtime import get_current_run_context
+        from agentloom.runtime.agent_runtime import RuntimeEvent
         from agentloom.runtime.goal import GoalState
 
         fake_yaml.write_text(_SAMPLE_YAML + "\ngoal: true\n", encoding="utf-8")
@@ -1614,6 +1720,17 @@ class TestExecuteApp:
         )
 
         def _interrupt(_task, **kwargs):
+            context = get_current_run_context(required=True)
+            kwargs["application_lifecycle"].observe_runtime_event(
+                RuntimeEvent(
+                    kind="tool",
+                    timestamp=4.0,
+                    application_id=context.application_id,
+                    task_id=context.task_id,
+                    run_id=context.run_id,
+                    details={"call_id": "interrupted-call"},
+                )
+            )
             kwargs["checkpoint_manager"].save_goal(
                 kwargs["task_id"], state.to_dict()
             )
@@ -1636,6 +1753,27 @@ class TestExecuteApp:
         ]
         assert events[-1].run == caught.value.run
         assert events[-1].goal["status"] == "active"
+        manifest = json.loads(
+            caught.value.run.manifest_path.read_text(encoding="utf-8")
+        )
+        runtime_events = [
+            json.loads(line)
+            for line in (
+                caught.value.run.run_dir / manifest["runtime_events_artifact"]
+            )
+            .read_text(encoding="utf-8")
+            .splitlines()
+        ]
+        assert runtime_events == [
+            {
+                "kind": "tool",
+                "timestamp": 4.0,
+                "application_id": caught.value.run.application_id,
+                "task_id": caught.value.run.task_id,
+                "run_id": caught.value.run.run_id,
+                "details": {"call_id": "interrupted-call"},
+            }
+        ]
 
     def test_preflight_failure_emits_rejected_without_allocating(
         self,
