@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from contextvars import ContextVar
 from importlib.metadata import PackageNotFoundError, version
+from threading import RLock
 from typing import Any
 
 from agentloom.adapters.smolagents.checkpoint_codec import (
@@ -19,6 +20,7 @@ from agentloom.runtime.agent_runtime import (
     RuntimeCheckpointEnvelope,
     require_runtime_state,
 )
+from agentloom.runtime.tool_gateway import ToolGateway
 
 try:
     _SMOLAGENTS_VERSION = version("smolagents")
@@ -38,13 +40,17 @@ class SmolagentsRuntimeAdapter:
         native_runtime: Any,
         *,
         checkpoint_sink: Any | None = None,
+        tool_gateway: ToolGateway | None = None,
     ) -> None:
         self._native_runtime = native_runtime
+        self._tool_gateway = tool_gateway
         self._default_checkpoint_sink = checkpoint_sink
         self._checkpoint_sink_context: ContextVar[Any | None] = ContextVar(
             f"agentloom_smolagents_checkpoint_sink_{id(self)}",
             default=None,
         )
+        self._close_lock = RLock()
+        self._closed = False
         self._register_checkpoint_bridge()
 
     @property
@@ -153,6 +159,25 @@ class SmolagentsRuntimeAdapter:
         )
 
     def close(self) -> None:
-        close = getattr(self._native_runtime, "close", None)
-        if callable(close):
-            close()
+        with self._close_lock:
+            if self._closed:
+                return
+            self._closed = True
+
+        first_error: Exception | None = None
+        native_close = getattr(self._native_runtime, "close", None)
+        if callable(native_close):
+            try:
+                native_close()
+            except Exception as exc:
+                first_error = exc
+
+        if self._tool_gateway is not None:
+            try:
+                self._tool_gateway.close()
+            except Exception as exc:
+                if first_error is None:
+                    first_error = exc
+
+        if first_error is not None:
+            raise first_error
