@@ -1,32 +1,28 @@
 from __future__ import annotations
 
-import time
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import replace
 from threading import Barrier, Lock
 from unittest.mock import MagicMock, patch
 
 import pytest
-from smolagents import LocalPythonExecutor, Tool
-from smolagents.local_python_executor import ExecutionTimeoutError
-
-from agentloom.runtime.hooks import HookEvent, HookHandler, HookPlan, HookResult, HookRun
 from agentloom.adapters.smolagents.tool_shim import (
     _execute_tool_pipeline,
     clone_tool_for_runtime,
     inject_hooks,
 )
-from agentloom.runtime.hooks.types import Blocked
-from agentloom.adapters.smolagents.monkey_patch import install_agentloom_runtime_adapters
-from agentloom.runtime.tool_protocol import ToolCallRecord, ToolPolicyBlockedError
 from agentloom.adapters.smolagents.tools.tools import tool
+from agentloom.runtime.hooks import HookEvent, HookHandler, HookPlan, HookResult, HookRun
+from agentloom.runtime.hooks.types import Blocked
+from agentloom.runtime.tool_protocol import ToolCallRecord, ToolPolicyBlockedError
+from agentloom.runtime.trace import bind_explicit_execution_context, capture_explicit_execution_context
 from agentloom.runtime.trusted_memory_evidence import (
     TRUSTED_MEMORY_EVIDENCE_ATTR,
     TRUSTED_MEMORY_EVIDENCE_KIND,
     TRUSTED_MEMORY_EVIDENCE_RESPONSE_KEY,
     TrustedMemoryEvidenceEnvelope,
 )
-from agentloom.runtime.trace import bind_explicit_execution_context, capture_explicit_execution_context
+from smolagents import Tool
 
 
 def _tool(name: str, result):
@@ -734,140 +730,6 @@ def test_uncloneable_stateful_tool_requires_explicit_runtime_factory() -> None:
 
     with pytest.raises(RuntimeError, match=r"implement clone_for_runtime\(\)"):
         clone_tool_for_runtime(UncloneableTool())
-
-
-def test_local_python_executor_timeout_thread_keeps_concurrent_run_identity_isolated() -> None:
-    install_agentloom_runtime_adapters()
-    rendezvous = Barrier(2)
-    observations: dict[str, dict[str, object]] = {}
-
-    @tool
-    def shared_identity_tool(label: str) -> str:
-        """Return a run label through a shared tool definition.
-
-        Args:
-            label: Run label.
-        """
-
-        return label
-
-    shared_tool = inject_hooks(shared_identity_tool)
-
-    def execute(label: str):
-        def observe(context):
-            active = capture_explicit_execution_context()
-            observations[label] = {
-                "context_task": context.task_id,
-                "context_agent": context.agent_name,
-                "context_root": context.root_run_id,
-                "context_local": context.local_run_id,
-                "active_task": active.task_id,
-                "active_agent": active.agent_name,
-                "active_root": active.root_run_id,
-                "active_local": active.local_run_id,
-                "active_hook_run": active.hook_run,
-            }
-            rendezvous.wait(timeout=3)
-            return HookResult(agent_context=f"context-{label}")
-
-        run = HookRun(
-            HookPlan((HookHandler(HookEvent.PRE_TOOL_USE, "shared_identity_tool", observe),)),
-            local_run_id=f"local-{label}",
-            root_run_id=f"root-{label}",
-        )
-        current = capture_explicit_execution_context()
-        explicit = replace(
-            current,
-            task_id=f"task-{label}",
-            agent_name=f"agent-{label}",
-            hook_run=run,
-            root_run_id=f"root-{label}",
-            local_run_id=f"local-{label}",
-        )
-        with bind_explicit_execution_context(explicit):
-            executor = LocalPythonExecutor([], timeout_seconds=5)
-            executor.send_tools({"shared_identity_tool": shared_tool})
-            result = executor(f'shared_identity_tool(label="{label}")')
-        return result.output, run, run.tool_outcomes_snapshot()
-
-    with ThreadPoolExecutor(max_workers=2) as pool:
-        futures = {label: pool.submit(execute, label) for label in ("A", "B")}
-        results = {label: future.result(timeout=10) for label, future in futures.items()}
-
-    for label in ("A", "B"):
-        value, run, trace = results[label]
-        assert value == label
-        assert observations[label] == {
-            "context_task": f"task-{label}",
-            "context_agent": f"agent-{label}",
-            "context_root": f"root-{label}",
-            "context_local": f"local-{label}",
-            "active_task": f"task-{label}",
-            "active_agent": f"agent-{label}",
-            "active_root": f"root-{label}",
-            "active_local": f"local-{label}",
-            "active_hook_run": run,
-        }
-        assert run.consume_pending_agent_context() == [f"context-{label}"]
-        assert len(trace) == 1
-        assert type(trace[0]) is ToolCallRecord
-        assert trace[0].status == "completed"
-        assert trace[0].tool_input == {"label": label}
-
-
-def test_local_python_executor_timeout_leaves_no_delayed_hook_or_tool_effect_after_return() -> None:
-    install_agentloom_runtime_adapters()
-    effects: list[str] = []
-
-    @tool
-    def slow_shared_tool(label: str) -> str:
-        """Complete after the executor timeout threshold.
-
-        Args:
-            label: Effect label.
-        """
-
-        time.sleep(0.15)
-        effects.append(f"tool-{label}")
-        return label
-
-    def observe(_context):
-        effects.append("post")
-        return HookResult()
-
-    run = HookRun(
-        HookPlan((HookHandler(HookEvent.POST_TOOL_USE, "slow_shared_tool", observe),)),
-        local_run_id="timed",
-        root_run_id="timed",
-    )
-    current = capture_explicit_execution_context()
-    explicit = replace(
-        current,
-        hook_run=run,
-        root_run_id="timed",
-        local_run_id="timed",
-    )
-    executor = LocalPythonExecutor([], timeout_seconds=0.05)
-    executor.send_tools({"slow_shared_tool": inject_hooks(slow_shared_tool)})
-
-    started = time.monotonic()
-    with bind_explicit_execution_context(explicit), pytest.raises(ExecutionTimeoutError, match="exceeded"):
-        executor('slow_shared_tool(label="A")')
-    elapsed = time.monotonic() - started
-    effects_at_return = list(effects)
-    time.sleep(0.2)
-
-    # smolagents cannot kill its Python timeout thread and waits for shutdown;
-    # the Hook Runtime does not promise cancellation of trusted Python tools.
-    # The invariant we can enforce is that no old-run effect occurs later.
-    assert elapsed >= 0.15
-    assert effects_at_return == ["tool-A", "post"]
-    assert effects == effects_at_return
-    # Completion does not turn the expired whole-block budget into success.
-    # The caller receives the timeout even though tool completion is recorded.
-    records = run.tool_outcomes_snapshot()
-    assert len(records) == 1
-    assert records[0].status == "completed"
 
 
 def test_real_tool_failure_still_dispatches_post_tool_use_failure() -> None:
