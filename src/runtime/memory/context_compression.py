@@ -429,7 +429,11 @@ def _chat_message_fingerprint(message: ChatMessage) -> str:
         for key, value in message.raw.items():
             if key == MODEL_ITEMS_RAW_KEY:
                 raw[str(key)] = [
-                    model_item_to_dict(item)
+                    (
+                        model_item_to_dict(item)
+                        if not isinstance(item, Mapping)
+                        else _fingerprint_value(item)
+                    )
                     for item in value
                 ]
             else:

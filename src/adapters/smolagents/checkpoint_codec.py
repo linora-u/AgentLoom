@@ -15,7 +15,6 @@ from agentloom.runtime.agent_runtime import RuntimeCheckpointEnvelope
 from agentloom.runtime.model_protocol import (
     MODEL_ITEMS_RAW_KEY,
     MODEL_RESPONSE_ID_RAW_KEY,
-    model_item_from_dict,
     model_item_to_dict,
 )
 from smolagents.memory import (
@@ -54,7 +53,12 @@ def _serialize_chat_message(
     canonical_items = source_raw.get(MODEL_ITEMS_RAW_KEY)
     if canonical_items is not None:
         raw[MODEL_ITEMS_RAW_KEY] = [
-            model_item_to_dict(item) for item in canonical_items
+            (
+                model_item_to_dict(item)
+                if not isinstance(item, Mapping)
+                else deepcopy(dict(item))
+            )
+            for item in canonical_items
         ]
     for key in (
         MODEL_RESPONSE_ID_RAW_KEY,
@@ -284,9 +288,7 @@ def _rebuild_chat_message(raw: Any) -> ChatMessage | None:
             if not isinstance(serialized_items, list):
                 raise ValueError("canonical model items must be a list")
             raw_payload = dict(raw_payload)
-            raw_payload[MODEL_ITEMS_RAW_KEY] = tuple(
-                model_item_from_dict(item) for item in serialized_items
-            )
+            raw_payload[MODEL_ITEMS_RAW_KEY] = deepcopy(serialized_items)
     return ChatMessage.from_dict(
         value,
         raw=raw_payload,

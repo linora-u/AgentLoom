@@ -12,7 +12,11 @@ from agentloom.adapters.smolagents.model_turn_bridge import (
     MODEL_ITEMS_RAW_KEY,
     MODEL_RESPONSE_ID_RAW_KEY,
 )
-from agentloom.runtime.model_protocol import FunctionCallItem, ReasoningItem
+from agentloom.runtime.model_protocol import (
+    FunctionCallItem,
+    ReasoningItem,
+    model_item_to_dict,
+)
 from agentloom.runtime.tool_protocol import ToolCallRecord, ToolErrorRecord
 from smolagents.memory import ActionStep, PlanningStep, TaskStep, ToolCall
 from smolagents.models import ChatMessage, MessageRole
@@ -150,7 +154,9 @@ class TestSerializeActionStep:
 
         assert rebuilt.model_output_message is not None
         assert rebuilt.model_output_message.raw == {
-            MODEL_ITEMS_RAW_KEY: items,
+            MODEL_ITEMS_RAW_KEY: [
+                model_item_to_dict(item) for item in items
+            ],
             MODEL_RESPONSE_ID_RAW_KEY: "response-1",
         }
 
