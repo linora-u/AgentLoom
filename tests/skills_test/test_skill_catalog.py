@@ -6,8 +6,8 @@ from agentloom.runtime.agent import AgentRoleProfile, AgentType, RoleDrivenAgent
 from agentloom.runtime.prompts.prompt_builder import build_prompt_templates
 from agentloom.runtime.skills.catalog import SkillCatalog, SkillSource
 from agentloom.runtime.skills.parser import build_skills_prompt
-from agentloom.tools.skills import skill
 from agentloom.runtime.trace.task_context import clear_current_skill_catalog, set_current_skill_catalog
+from agentloom.tools.skills import skill
 
 
 def _write_skill(root: Path, name: str, body: str = "# Exact instructions\n") -> Path:
@@ -25,7 +25,7 @@ def _write_skill(root: Path, name: str, body: str = "# Exact instructions\n") ->
 
 class _CatalogAgent(RoleDrivenAgent):
     def _role_profile(self) -> AgentRoleProfile:
-        return AgentRoleProfile(agent_type=AgentType.WORKER, tool_call_type="tool_call")
+        return AgentRoleProfile(agent_type=AgentType.WORKER)
 
     def _get_tools(self):
         return []

@@ -120,14 +120,16 @@ class BaseAgent(ABC):
         pass
 
     def __init__(
-        self, model=None, execution_env: Any | None = None, logger: AgentLogger | None = None, model_cache: bool = True
+        self,
+        model=None,
+        logger: AgentLogger | None = None,
+        model_cache: bool = True,
     ):
         """
         Initialize agent.
 
         Args:
             model: Optional model instance. If omitted, the model manager selects one.
-            execution_env: Ignored legacy argument.
             logger: Optional logger instance.
             model_cache: Whether to enable model caching.
         """
@@ -143,8 +145,6 @@ class BaseAgent(ABC):
             )
         else:
             self._model = model
-
-        _ = execution_env
 
         # Initialize logger
         self._logger = logger
@@ -457,7 +457,6 @@ class RoleDrivenAgent(BaseAgent):
         config: dict | None = None,
         project_path: str = "",
         model=None,
-        execution_env: Any | None = None,
         logger: AgentLogger | None = None,
         model_cache: bool = True,
         **kwargs,
@@ -491,7 +490,11 @@ class RoleDrivenAgent(BaseAgent):
             provided_logger=logger,
         )
 
-        super().__init__(model=model, execution_env=execution_env, logger=resolved_logger, model_cache=model_cache)
+        super().__init__(
+            model=model,
+            logger=resolved_logger,
+            model_cache=model_cache,
+        )
 
         runtime_logger = self._effective_logger()
         self._skill_catalog = self._config.get("_skill_catalog_snapshot")

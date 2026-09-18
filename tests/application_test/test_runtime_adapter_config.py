@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import inspect
 from pathlib import Path
 
 import agentloom.runtime.agent as agent_module
@@ -7,8 +8,22 @@ import pytest
 from agentloom.application.definition import load_agent_definition
 from agentloom.application.readiness import validate_runtime_agent_config
 from agentloom.configuration.llm_config import LLMConfig
+from agentloom.runtime.factory import YamlAgentFactory
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
+
+
+def test_python_agent_api_does_not_expose_removed_execution_environment() -> None:
+    callables = (
+        agent_module.BaseAgent.__init__,
+        agent_module.RoleDrivenAgent.__init__,
+        YamlAgentFactory.create_agent_tool,
+        YamlAgentFactory.create_agent_as_tool,
+        YamlAgentFactory.create_agents_as_tools_from_folder,
+    )
+
+    for callable_ in callables:
+        assert "execution_env" not in inspect.signature(callable_).parameters
 
 
 def _agent_config(**overrides: object) -> dict[str, object]:
