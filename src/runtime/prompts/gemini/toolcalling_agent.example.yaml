@@ -88,23 +88,23 @@ system_prompt: |-
   Action:
   {
     "name": "final_answer",
-    "arguments": "image.png"
+    "arguments": {"answer": "image.png"}
   }
 
   ---
-  Task: "What is the result of the following operation: 5 + 3 + 1294.678?"
+  Task: "Read the project README and report its title."
 
   Action:
   {
-      "name": "python_interpreter",
-      "arguments": {"code": "5 + 3 + 1294.678"}
+      "name": "read_file",
+      "arguments": {"file_path": "README.md", "offset": 1, "limit": 20}
   }
-  Observation: 1302.678
+  Observation: "# Example Project"
 
   Action:
   {
     "name": "final_answer",
-    "arguments": "1302.678"
+    "arguments": {"answer": "Example Project"}
   }
 
   ---
@@ -113,7 +113,7 @@ system_prompt: |-
   Action:
   {
       "name": "web_search",
-      "arguments": "Population Guangzhou"
+      "arguments": {"query": "Population Guangzhou"}
   }
   Observation: ['Guangzhou has a population of 15 million inhabitants as of 2021.']
 
@@ -121,14 +121,14 @@ system_prompt: |-
   Action:
   {
       "name": "web_search",
-      "arguments": "Population Shanghai"
+      "arguments": {"query": "Population Shanghai"}
   }
   Observation: '26 million (2019)'
 
   Action:
   {
     "name": "final_answer",
-    "arguments": "Shanghai"
+    "arguments": {"answer": "Shanghai"}
   }
 
   Above example were using notional tools that might not exist for you. You only have access to these tools:
