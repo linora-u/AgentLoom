@@ -102,13 +102,13 @@ Studio 检查和 Run 准备共用 `agentloom.application.definition` 的完整�
 文件。模型密钥、Base URL、认证 Header 不属于该合同，不能通过其他读取
 方式补进上下文。
 
-## 当前扫描边界
+## 定义发现
 
-两个 Skill 脚本当前漏扫嵌套 workflow 目录中的 Supervisor，已记录为
-[#69](https://github.com/linora-u/AgentLoom/issues/69)，按维护者决定后续修复。
-包含嵌套 workflow 时，使用上面的领域 `application.validate` 命令校验完整
-Application；不要把结构扫描或 YAML 脚本的成功结果视为完整校验通过。
-框架与 Studio 的共享定义检查支持这些嵌套定义。
+结构扫描和 YAML 校验共用 `agentloom.application.definition` 的递归发现规则：
+`workflows/` 下所有 YAML/Markdown 定义都会被发现；相对路径中包含
+`worker_agents` 目录段的定义按 Worker 处理，其余按 Supervisor 处理。
+发现过程不跟随 symlink。YAML 校验随后复用共享定义预检，覆盖嵌套 Supervisor、
+未引用 Worker 与完整 Worker 引用图。
 
 ## 命令速查
 

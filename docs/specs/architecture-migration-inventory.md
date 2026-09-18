@@ -11,8 +11,10 @@ commands. Repository-owned callers, Applications, tests, templates and current
 documentation use canonical names. The old `src.*` Python identity, alias finder,
 synthetic namespaces and old module entry points are removed; the source package
 initializer rejects loading under the name `src`. This inventory describes code
-ownership. Completed E1/E2 evidence and the explicitly deferred Skill discovery
-issue #69 are recorded in [final validation](architecture-final-validation.md).
+ownership. Completed E1/E2 evidence and the Skill discovery issue #69 as it stood
+when PR #68 shipped are recorded in [final validation](architecture-final-validation.md);
+the later #69 fix is recorded in
+[nested workflow discovery validation](nested-workflow-discovery-validation.md).
 
 ## Implemented owners
 
