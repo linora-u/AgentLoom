@@ -8,6 +8,7 @@ for each attempt; existing directories are never cleared.
 ```bash
 python tests/acceptance/existing_application_validation.py --case all --workspace /new/evidence
 python tests/agent_test/real_checkpoint_validation.py --scenario all --workspace /new/checkpoints
+python tests/acceptance/model_protocol_matrix.py --workspace /new/protocol-matrix
 ```
 
 The first command runs F3, F4, all three F5 cases, both F7 cases and both F8 cases.
@@ -16,6 +17,18 @@ public `execute_app` interface. Original Workflows remain intact; required outpu
 path adaptations are copied to ignored `applications/architecture_acceptance_*`
 Applications to preserve stable project discovery. Runtime, fixture and result
 directories are private to the selected evidence directory.
+
+The protocol matrix reads the ignored `config/llm.yaml` without modifying it.
+For each of `openai_chat`, `openai_responses`, and `anthropic_messages`, it
+selects one explicitly configured profile and runs the same minimal
+smolagents/Tool Gateway/final-answer Application through public `execute_app`.
+Missing profiles or credentials are recorded as `NOT-RUN` with a reason; they
+are never counted as passed. Runnable failures are recorded as `FAILED`, do not
+stop the remaining adapters, and make the command exit nonzero. Evidence under
+the requested workspace includes the revision, adapter, profile, reportable
+model name, Run manifest and lifecycle identities, completed echo/final-answer
+Tool records, and schema-2 canonical checkpoint summary. API keys and base URLs
+are excluded or redacted from reports and process logs.
 
 | Case | Independent checks | Wall limit |
 | --- | --- | --- |
