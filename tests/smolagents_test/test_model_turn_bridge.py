@@ -10,6 +10,7 @@ from agentloom.runtime.goal.provider import (
     GoalStateProvider,
     bind_goal_state_provider,
 )
+from agentloom.runtime.model_binding import ModelTurnBinding
 from agentloom.runtime.model_protocol import (
     FunctionCallItem,
     FunctionCallOutputItem,
@@ -19,6 +20,7 @@ from agentloom.runtime.model_protocol import (
     ModelTurnResult,
     ModelUsage,
     ReasoningItem,
+    ToolDefinition,
 )
 from agentloom.runtime.tool_protocol import TOOL_RESULT_RAW_KEY, ToolCallRecord
 from agentloom.runtime.trace import bind_local_run
@@ -60,14 +62,27 @@ class _RecordingTurnAdapter:
         )
 
 
+def _binding(
+    adapter,
+    *,
+    options: dict | None = None,
+) -> ModelTurnBinding:
+    return ModelTurnBinding(
+        model_type="test",
+        model_id="opaque-model",
+        adapter=adapter,
+        options=options or {},
+    )
+
+
 def test_bridge_converts_smolagents_messages_and_native_tool_calls() -> None:
     adapter = _RecordingTurnAdapter()
     model = SmolagentsModelTurnBridge(
-        adapter=adapter,
-        model_id="opaque-model",
-        options={"temperature": 0.2},
+        binding=_binding(adapter, options={"temperature": 0.2}),
     )
 
+    assert model.model_id == "opaque-model"
+    assert model.binding.adapter is adapter
     result = model.generate(
         [ChatMessage(role=MessageRole.USER, content="Check Shanghai")],
         tools_to_call_from=[_Tool()],
@@ -91,6 +106,50 @@ def test_bridge_converts_smolagents_messages_and_native_tool_calls() -> None:
     json.dumps(result.dict())
 
 
+def test_bridge_preserves_exact_canonical_tool_definition() -> None:
+    adapter = _RecordingTurnAdapter()
+    model = SmolagentsModelTurnBridge(binding=_binding(adapter))
+    canonical = ToolDefinition(
+        name="weather",
+        description="Exact gateway definition.",
+        parameters={
+            "type": "object",
+            "properties": {
+                "location": {
+                    "type": "object",
+                    "properties": {
+                        "city": {"type": "string"},
+                    },
+                    "required": ["city"],
+                    "additionalProperties": False,
+                },
+            },
+            "required": ["location"],
+            "additionalProperties": False,
+        },
+        strict=True,
+    )
+    tool = _Tool()
+    tool._agentloom_tool_definition = canonical
+
+    model.generate(
+        [ChatMessage(role=MessageRole.USER, content="Check Shanghai")],
+        tools_to_call_from=[tool],
+    )
+
+    assert adapter.requests[0].tools == (canonical,)
+    assert adapter.requests[0].tools[0] is canonical
+
+
+def test_bridge_rejects_legacy_adapter_model_and_options_constructor() -> None:
+    with pytest.raises(TypeError):
+        SmolagentsModelTurnBridge(
+            adapter=_RecordingTurnAdapter(),
+            model_id="opaque-model",
+            options={"temperature": 0.2},
+        )
+
+
 def test_bridge_rejects_plain_text_when_tool_call_is_required() -> None:
     class _TextAdapter:
         adapter_id = "openai_chat"
@@ -101,8 +160,7 @@ def test_bridge_rejects_plain_text_when_tool_call_is_required() -> None:
             )
 
     model = SmolagentsModelTurnBridge(
-        adapter=_TextAdapter(),
-        model_id="opaque-model",
+        binding=_binding(_TextAdapter()),
     )
 
     with model.require_tool_calls(), pytest.raises(
@@ -117,8 +175,7 @@ def test_bridge_rejects_plain_text_when_tool_call_is_required() -> None:
 
 def test_bridge_parse_tool_calls_never_parses_text_fallback() -> None:
     model = SmolagentsModelTurnBridge(
-        adapter=_RecordingTurnAdapter(),
-        model_id="opaque-model",
+        binding=_binding(_RecordingTurnAdapter()),
     )
 
     with pytest.raises(ModelProtocolError, match="native structured tool_calls"):
@@ -133,8 +190,7 @@ def test_bridge_parse_tool_calls_never_parses_text_fallback() -> None:
 def test_bridge_replays_restored_canonical_items_without_observation_parsing() -> None:
     adapter = _RecordingTurnAdapter()
     model = SmolagentsModelTurnBridge(
-        adapter=adapter,
-        model_id="opaque-model",
+        binding=_binding(adapter),
     )
     reasoning = ReasoningItem(
         item_id="reasoning-1",
@@ -191,8 +247,7 @@ def test_bridge_replays_restored_canonical_items_without_observation_parsing() -
 def test_bridge_accounts_usage_and_fences_the_next_goal_request() -> None:
     adapter = _RecordingTurnAdapter()
     model = SmolagentsModelTurnBridge(
-        adapter=adapter,
-        model_id="opaque-model",
+        binding=_binding(adapter),
     )
     provider = GoalStateProvider(
         GoalState.create(
@@ -220,8 +275,7 @@ def test_bridge_accounts_usage_and_fences_the_next_goal_request() -> None:
 def test_bridge_completion_settlement_exposes_only_final_answer_once() -> None:
     adapter = _RecordingTurnAdapter()
     model = SmolagentsModelTurnBridge(
-        adapter=adapter,
-        model_id="opaque-model",
+        binding=_binding(adapter),
     )
     provider = GoalStateProvider(
         GoalState.create(

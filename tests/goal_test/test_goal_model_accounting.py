@@ -12,6 +12,7 @@ from agentloom.runtime.memory.context_compression import (
     InternalChatMessage,
     summarize_conversation,
 )
+from agentloom.runtime.model_binding import ModelTurnBinding
 from agentloom.runtime.model_protocol import (
     FunctionCallItem,
     MessageItem,
@@ -58,7 +59,13 @@ class _UsageAdapter:
 
 
 def _model(adapter: _UsageAdapter) -> SmolagentsModelTurnBridge:
-    return SmolagentsModelTurnBridge(adapter=adapter, model_id="opaque-model")
+    return SmolagentsModelTurnBridge(
+        binding=ModelTurnBinding(
+            model_type="test",
+            model_id="opaque-model",
+            adapter=adapter,
+        )
+    )
 
 
 def _provider(budget=100):
