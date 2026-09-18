@@ -15,7 +15,7 @@ import time
 from unittest.mock import MagicMock
 
 import pytest
-from agentloom.adapters.smolagents.models.litellm_retry import (
+from agentloom.adapters.litellm.litellm_retry import (
     ProviderCallBudgetExceeded,
     _is_rate_limit_error,
     _parse_retry_after,

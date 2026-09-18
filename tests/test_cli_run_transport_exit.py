@@ -7,7 +7,7 @@ import click
 import httpx
 import pytest
 from agentloom.__main__ import main
-from agentloom.adapters.smolagents.models.litellm_retry import ProviderCallBudgetExceeded
+from agentloom.adapters.litellm.litellm_retry import ProviderCallBudgetExceeded
 from click.testing import CliRunner
 from litellm.exceptions import (
     APIConnectionError,

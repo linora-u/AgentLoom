@@ -11,13 +11,15 @@ from dataclasses import asdict, dataclass, replace
 
 import litellm
 from agentloom.adapters.litellm import create_model_turn_adapter
-from agentloom.adapters.smolagents.model_turn_bridge import SmolagentsModelTurnBridge
-from agentloom.adapters.smolagents.models.litellm_retry import patch_litellm_completion
-from agentloom.adapters.smolagents.models.request_headers import (
+from agentloom.adapters.litellm.litellm_retry import patch_litellm_completion
+from agentloom.adapters.litellm.request_headers import (
     build_model_request_headers,
     get_system_model_request_headers,
 )
-from agentloom.adapters.smolagents.tool_protocol import patch_litellm_tool_error_projection
+from agentloom.adapters.litellm.tool_error_projection import (
+    patch_litellm_tool_error_projection,
+)
+from agentloom.adapters.smolagents.model_turn_bridge import SmolagentsModelTurnBridge
 from agentloom.runtime.logging import get_logger
 from smolagents import AgentLogger
 
