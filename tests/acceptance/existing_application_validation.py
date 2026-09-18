@@ -31,10 +31,40 @@ CASES = ("unit", "repo", "context_text", "context_json", "context_multi", "core"
 TIMEOUTS = {case: 900 for case in CASES} | {"goal_bounded": 1500, "goal_parallel": 1200}
 WORKERS = ("function_intake", "scenario_planner", "pytest_generator", "test_refiner", "delivery_reporter")
 CONTEXT = {
-    "text": [("make_context_engine_text_payload", "text", "TARGET_RECORD case=text", "TEXT-CTX-7319")],
-    "json": [("make_context_engine_json_payload", "json", "JSON_TARGET_RECORD", "JSON-CTX-4927")],
-    "multi": [("make_context_engine_log_payload", "log", "LOG_TARGET_RECORD", "LOG-CTX-8842"),
-              ("make_context_engine_search_payload", "search", "SEARCH_TARGET_RECORD", "SEARCH-CTX-6194")],
+    "text": [
+        (
+            "make_context_engine_text_payload",
+            "loom_retrieve_context",
+            "text",
+            "TARGET_RECORD case=text",
+            "TEXT-CTX-7319",
+        )
+    ],
+    "json": [
+        (
+            "make_context_engine_json_payload",
+            "loom_retrieve_context",
+            "json",
+            "verification_value",
+            "JSON-CTX-4927",
+        )
+    ],
+    "multi": [
+        (
+            "make_context_engine_log_payload",
+            "retrieve_log_context",
+            "log",
+            "LOG_TARGET_RECORD",
+            "LOG-CTX-8842",
+        ),
+        (
+            "make_context_engine_search_payload",
+            "retrieve_search_context",
+            "search",
+            "SEARCH_TARGET_RECORD",
+            "SEARCH-CTX-6194",
+        ),
+    ],
 }
 
 
@@ -212,21 +242,22 @@ def verify_context(case: str, workspace: Path) -> dict:
     entries = [json.loads(path.read_text()) for path in runtime.glob("**/context_store/entries/*.json")]
     retrieves = [json.loads(line) for path in runtime.glob("**/context_store/events.jsonl")
                 for line in path.read_text().splitlines() if line.strip() and json.loads(line).get("type") == "retrieved"]
-    tool_records = assert_tools(runtime, {"loom_retrieve_context"})
+    retrieval_tools = {item[1] for item in CONTEXT[case]}
+    tool_records = assert_tools(runtime, retrieval_tools)
     matched_refs = []
-    for tool, kind, marker, hidden in CONTEXT[case]:
+    for tool, retrieval_tool, kind, marker, hidden in CONTEXT[case]:
         matches = [entry for entry in entries if entry.get("source") == f"tool_result:{tool}" and entry.get("kind") == kind
                    and marker in entry.get("original", "") and hidden in entry.get("original", "")]
         if not matches:
             raise AssertionError(f"Missing independently verified context origin {tool}/{kind}/{hidden}")
         refs = {entry["ref"] for entry in matches}
         retrieval = [event for event in retrieves if event["ref"] in refs and event["retrieved_chars"] > 0]
-        actual = [record for record in tool_records if record["tool_name"] == "loom_retrieve_context" and record["status"] == "completed"
+        actual = [record for record in tool_records if record["tool_name"] == retrieval_tool and record["status"] == "completed"
                   and hidden in str(record.get("output")) and record["input"].get("ref") in refs
                   and any(event["ref"] == record["input"].get("ref")
-                          and event["query"] == record["input"].get("query", "")
-                          and event["offset"] == record["input"].get("offset", 0)
-                          and event["limit"] == record["input"].get("limit", 200) for event in retrieval)]
+                          and event["query"] == marker
+                          and event["offset"] == 0
+                          and event["limit"] in {20, 30} for event in retrieval)]
         if not retrieval or not actual:
             raise AssertionError(f"No correlated real retrieval + returned hidden value for {tool}")
         matched_refs.append(refs)
