@@ -528,11 +528,10 @@ def test_runtime_definition_contains_complete_neutral_runtime_input(
     assert definition.smart_summary is False
     assert definition.todo_mode == "on"
     assert definition.instructions == "environment\n\ntodo:on"
-    assert definition.metadata == {
-        "max_consecutive_parse_errors": 7,
-        "smolagents_prompt_template_path": str(prompt_path.resolve()),
-        "agent_root": str(tmp_path),
-    }
+    assert definition.prompt_template_path == str(prompt_path.resolve())
+    assert definition.project_root == str(tmp_path)
+    assert definition.max_consecutive_model_errors == 7
+    assert definition.metadata == {}
     assert tuple(item.name for item in definition.tool_gateway.definitions) == (
         "proof",
         "todo_write",

@@ -699,14 +699,12 @@ class RoleDrivenAgent(BaseAgent):
             planning_interval=execution.planning_interval,
             smart_summary=self._resolve_smart_summary_from_config(),
             todo_mode=self._resolve_todo_mode(),
-            metadata={
-                "max_consecutive_parse_errors": self._config.get(
-                    "max_consecutive_parse_errors",
-                    5,
-                ),
-                "smolagents_prompt_template_path": execution.prompt_template_path,
-                "agent_root": str(C.agent_root),
-            },
+            prompt_template_path=execution.prompt_template_path,
+            project_root=str(C.agent_root),
+            max_consecutive_model_errors=self._config.get(
+                "max_consecutive_parse_errors",
+                5,
+            ),
         )
 
     def build_runtime(self) -> AgentRuntime:
