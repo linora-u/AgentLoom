@@ -259,15 +259,8 @@ def _trace_fixture(tmp_path, tamper=None, application_id="app"):
     (checkpoints / "checkpoint.json").write_text(json.dumps({
         "task_id": "other-task" if tamper == "wrong_root_task" else "task-current",
         "run_id": "other-run" if tamper == "wrong_root_run" else "run-current",
-        "memory_steps": [{"code_action": None if tamper in {"no_python", "foreign_python", "worker_python"}
-                          else "result = repository_investigator(query=payload)"}]
+        "memory_steps": [],
     }))
-    if tamper == "foreign_python":
-        foreign = tmp_path / "runtime/checkpoints/other-app/other-task"
-        foreign.mkdir(parents=True)
-        (foreign / "checkpoint.json").write_text(json.dumps({
-            "task_id": "other-task", "run_id": "other-run", "memory_steps": [{"code_action": "result = 1"}]
-        }))
     previous = {"workspace": str(tmp_path / "workspace"), "case_nonce": "case-unique"}
     ledger, events = [], []
     for index, name in enumerate(WORKERS):
@@ -309,7 +302,6 @@ def _trace_fixture(tmp_path, tamper=None, application_id="app"):
             "call_index": 0, "input_hash": input_hash, "result": json.dumps(output),
             "status": "completed", "task_input": task_input,
             "memory_steps": [{"token_usage": {"input_tokens": 0 if tamper == "no_model_usage" else 10},
-                              "code_action": "result = 1" if tamper == "worker_python" else None,
                               "tool_results": [{"tool_name": "final_answer", "status": "completed", "output": json.dumps(output)}]}],
         }))
         ledger.append({"at": _trace_time(index * 10 + 4), "workspace": str(tmp_path / "workspace"), "agent_name": name, "root_run_id": "other-run" if tamper == "cross_run" else "run-current",
@@ -357,10 +349,9 @@ def _trace_add_call(tmp_path, checkpoints, worker, query, output, start, finish)
     return target
 
 
-@pytest.mark.parametrize("mode", ["native", "codeact"])
 @pytest.mark.parametrize("tamper", [None, "wrong_output", "future", "foreign_task", "foreign_run",
                                   "wrong_call", "wrong_hash", "corrupt_result", "changed_text_same_hash"])
-def test_trace_selects_actually_consumed_completed_repeat_and_rejects_invalid_sources(tmp_path, mode, tamper):
+def test_trace_selects_actually_consumed_completed_repeat_and_rejects_invalid_sources(tmp_path, tamper):
     run, checkpoints = _trace_fixture(tmp_path)
     original = json.loads((checkpoints / "workers/repository_investigator/calls/0/checkpoint.json").read_text())
     second_output = {**json.loads(original["result"]), "findings": ["second investigation", 9]}
@@ -394,16 +385,15 @@ def test_trace_selects_actually_consumed_completed_repeat_and_rejects_invalid_so
         second["task_input"] += "\nAltered instructions with the original hash."
     if second_path.exists():
         second_path.write_text(json.dumps(second))
-    result = validate_trace(tmp_path, {"case_nonce": "case-unique", "run": run, "mode": mode})
+    result = validate_trace(tmp_path, {"case_nonce": "case-unique", "run": run, "mode": "native"})
     assert result["passed"] is (tamper is None), result["errors"]
     if tamper is None:
         assert result["transfers"][0]["from_call_index"] == 1
         assert result["transfers"][0]["to_call_index"] == 0
 
 
-@pytest.mark.parametrize("mode", ["native", "codeact"])
 @pytest.mark.parametrize("tamper", [None, "future_repair", "unrelated_final_report", "stale_final_report", "false_verdict"])
-def test_trace_preserves_corrective_repair_loop_and_binds_final_verifier(tmp_path, mode, tamper):
+def test_trace_preserves_corrective_repair_loop_and_binds_final_verifier(tmp_path, tamper):
     run, checkpoints = _trace_fixture(tmp_path)
     first_verifier_path = checkpoints / "workers/independent_verifier/calls/0/checkpoint.json"
     first = json.loads(first_verifier_path.read_text())
@@ -419,7 +409,7 @@ def test_trace_preserves_corrective_repair_loop_and_binds_final_verifier(tmp_pat
         "verified": True,
         "test_report": ("reports/unrelated.json" if tamper == "unrelated_final_report" else
                         "reports/pytest-verifier.json" if tamper == "stale_final_report" else final["test_report"])}))
-    result = validate_trace(tmp_path, {"case_nonce": "case-unique", "run": run, "mode": mode})
+    result = validate_trace(tmp_path, {"case_nonce": "case-unique", "run": run, "mode": "native"})
     assert result["passed"] is (tamper is None), result["errors"]
     if tamper is None:
         assert len(result["transfers"]) == 3 and len(result["corrective_transfers"]) == 1
@@ -428,20 +418,17 @@ def test_trace_preserves_corrective_repair_loop_and_binds_final_verifier(tmp_pat
 
 
 @pytest.mark.parametrize("tamper", [None, "wrapped_input", "wrapped_json_text", "sibling_context", "wrapped_omission", "wrapped_alteration", "wrapped_fabrication",
-                                  "cross_run", "dropped_input", "no_model_usage", "no_python", "wrong_root_task",
-                                  "wrong_root_run", "foreign_python", "worker_python"])
+                                  "cross_run", "dropped_input", "no_model_usage", "wrong_root_task",
+                                  "wrong_root_run"])
 @pytest.mark.parametrize("application_id", ["app", "nested/suite/app"])
-def test_codeact_trace_checks_real_checkpoint_contract_and_independent_ids(tmp_path, tamper, application_id):
+def test_native_trace_checks_real_checkpoint_contract_and_independent_ids(tmp_path, tamper, application_id):
     run, checkpoints = _trace_fixture(tmp_path, tamper, application_id)
-    result = validate_trace(tmp_path, {"case_nonce": "case-unique", "run": run, "mode": "codeact"})
+    result = validate_trace(tmp_path, {"case_nonce": "case-unique", "run": run, "mode": "native"})
     assert result["passed"] is (tamper in {None, "wrapped_input", "wrapped_json_text", "sibling_context"}), result["errors"]
     if result["passed"]:
         assert len(result["transfers"]) == 3
         assert all(row["query_path"].startswith("$") and len(row["original_output_sha256"]) == 64 for row in result["transfers"])
         assert result["supervisor_checkpoint"] == str(checkpoints / "checkpoint.json")
-        assert result["supervisor_code_actions"] == 1
-    elif tamper in {"no_python", "foreign_python", "worker_python"}:
-        assert "CodeAct Supervisor has no persisted Python execution evidence" in result["errors"]
     elif tamper in {"wrong_root_task", "wrong_root_run"}:
         assert "Supervisor checkpoint identity does not match receipt" in result["errors"]
 
@@ -476,24 +463,23 @@ def test_json_query_envelopes_cannot_disguise_changed_or_unreadable_original_dat
     assert not _contains_exact_json({"prior_worker": result, "additional_context": "retained"}, expected)
 
 
-def test_native_and_codeact_definitions_have_four_real_typed_workers():
+def test_native_definition_has_four_real_typed_workers():
     from agentloom.application.readiness import validate_runtime_agent_config
     from agentloom.runtime.factory import YamlAgentFactory
 
-    for mode, expected in (("native", "tool_call"), ("codeact", "code_act")):
-        source = APP_ROOT / "workflows" / f"{mode}.yaml"
-        definition = YamlAgentFactory._load_config_from_file(source)
-        validate_runtime_agent_config(definition, source, agent_root=APP_ROOT.parents[1])
-        assert definition["tool_call_type"] == expected
-        assert len(definition["worker_agents"]) == 4
-        names = set()
-        for item in definition["worker_agents"]:
-            worker_source = source.parent / item["path"]
-            worker = YamlAgentFactory._load_config_from_file(worker_source)
-            assert worker["agent_function_schema"]["inputs"]["query"]["required"] is True
-            assert worker["tools"]
-            names.add(worker["name"])
-        assert names == set(WORKERS)
+    source = APP_ROOT / "workflows/native.yaml"
+    definition = YamlAgentFactory._load_config_from_file(source)
+    validate_runtime_agent_config(definition, source, agent_root=APP_ROOT.parents[1])
+    assert definition["agent_runtime"] == "smolagents"
+    assert len(definition["worker_agents"]) == 4
+    names = set()
+    for item in definition["worker_agents"]:
+        worker_source = source.parent / item["path"]
+        worker = YamlAgentFactory._load_config_from_file(worker_source)
+        assert worker["agent_function_schema"]["inputs"]["query"]["required"] is True
+        assert worker["tools"]
+        names.add(worker["name"])
+    assert names == set(WORKERS)
     assert (APP_ROOT / "workflows/worker_agents/change_planner.md").is_file()
 
 
@@ -504,8 +490,7 @@ def test_application_config_retains_run_evidence_and_disables_unused_connections
     assert config["mcp_servers"] is None
 
 
-@pytest.mark.parametrize("mode", ["native", "codeact"])
-def test_prepared_nested_application_relocates_only_tool_namespaces_and_loads_local_tools(tmp_path, monkeypatch, mode):
+def test_prepared_nested_application_relocates_only_tool_namespaces_and_loads_local_tools(tmp_path, monkeypatch):
     from agentloom.application.definition import load_agent_definition
 
     from applications.architecture_contract_validation import run_acceptance
@@ -515,9 +500,10 @@ def test_prepared_nested_application_relocates_only_tool_namespaces_and_loads_lo
     (project / "config/system.yaml").write_text("{}\n")
     (project / "config/llm.yaml").write_text(
         "model:\n  default_model_type: powerful\n  powerful:\n    model: openai/test\n"
-        "  summary:\n    model: openai/test\n")
+        "    adapter: openai_chat\n"
+        "  summary:\n    model: openai/test\n    adapter: openai_chat\n")
     monkeypatch.setattr(run_acceptance, "_revision", lambda _project: "test-candidate")
-    attempt, request = run_acceptance.prepare_attempt(project, tmp_path / "evidence", f"nested-{mode}")
+    attempt, request = run_acceptance.prepare_attempt(project, tmp_path / "evidence", "nested-native")
     prepared = Path(request["project"]) / "applications" / request["application_id"]
     assert request["namespace_adaptations"]
     assert any(row["definition"].endswith(".md") for row in request["namespace_adaptations"])
@@ -644,7 +630,7 @@ def test_trace_accepts_only_intact_json_fragment_with_original_call_identity(tmp
         verifier["run_id"] = "another-run"
     verifier_path.write_text(json.dumps(verifier))
     events_path.write_text("\n".join(json.dumps(event) for event in events))
-    result = validate_trace(tmp_path, {"case_nonce": "case-unique", "run": run, "mode": "codeact"})
+    result = validate_trace(tmp_path, {"case_nonce": "case-unique", "run": run, "mode": "native"})
     assert result["passed"] is (tamper is None), result["errors"]
     if tamper is None:
         transfer = result["transfers"][-1]

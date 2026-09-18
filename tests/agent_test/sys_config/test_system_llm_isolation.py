@@ -78,6 +78,11 @@ def test_workflow_overlay_and_llm_only_are_disjoint():
     )
 
 
+def test_removed_code_execution_keys_are_not_workflow_overlays() -> None:
+    assert "execution_env" not in _WORKFLOW_OVERLAY_KEYS
+    assert "code_agent" not in _WORKFLOW_OVERLAY_KEYS
+
+
 def test_llm_only_keys_contains_expected_members():
     """_LLM_ONLY_TOP_LEVEL_KEYS 必须至少包含 model, llm, langfuse。
 

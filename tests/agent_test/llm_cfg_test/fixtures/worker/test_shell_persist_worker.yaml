@@ -1,8 +1,8 @@
 name: "shell_worker"
+agent_runtime: smolagents
 description: |
   一个工作 agent，负责演示 shell 的持久性和独立性。
 model_type: "powerful"
-tool_call_type: "code_act"
 workflow: |
   # Shell Worker Workflow
   1. 接收 supervisor 的指令
@@ -24,6 +24,3 @@ tools:
   - name: "shell_tool"
 
 worker_agents: []
-execution_env:
-  type: "local"
-  bash_path: "zsh"

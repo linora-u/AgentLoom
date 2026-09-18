@@ -48,16 +48,18 @@ def test_model_config_loaded_from_llm_yaml(tmp_path, monkeypatch):
                 "default_model_type": "powerful",
                 "powerful": {
                     "model": "openai/gpt-5",
+                    "adapter": "openai_chat",
                     "base_url": "https://llm-from-llm-yaml.test/v1",
                     "api_key": "llm-yaml-key",
                     "requests_per_minute": 15,
                 },
                 "fast": {
                     "model": "openai/gpt-4o-mini",
+                    "adapter": "openai_chat",
                     "base_url": "https://fast.test/v1",
                     "api_key": "fast-key",
                 },
-                "summary": {"model": "openai/test-summary"},
+                "summary": {"model": "openai/test-summary", "adapter": "openai_chat"},
             },
         },
     )
@@ -79,8 +81,8 @@ def test_langfuse_loaded_from_llm_yaml(tmp_path, monkeypatch):
         llm_yaml_data={
             "model": {
                 "default_model_type": "powerful",
-                "powerful": {"model": "openai/test", "base_url": "https://test/v1", "api_key": "k"},
-                "summary": {"model": "openai/test-summary"},
+                "powerful": {"model": "openai/test", "adapter": "openai_chat", "base_url": "https://test/v1", "api_key": "k"},
+                "summary": {"model": "openai/test-summary", "adapter": "openai_chat"},
             },
             "langfuse": {
                 "enabled": True,
@@ -117,8 +119,8 @@ def test_model_in_system_yaml_ignored_llm_yaml_wins(tmp_path, monkeypatch):
         llm_yaml_data={
             "model": {
                 "default_model_type": "powerful",
-                "powerful": {"model": "openai/correct-model", "base_url": "https://correct.test/v1", "api_key": "correct-key"},
-                "summary": {"model": "openai/test-summary"},
+                "powerful": {"model": "openai/correct-model", "adapter": "openai_chat", "base_url": "https://correct.test/v1", "api_key": "correct-key"},
+                "summary": {"model": "openai/test-summary", "adapter": "openai_chat"},
             },
             "langfuse": {
                 "enabled": True,
@@ -145,8 +147,8 @@ def test_llm_yaml_missing_fields_use_defaults(tmp_path, monkeypatch):
         llm_yaml_data={
             "model": {
                 "default_model_type": "powerful",
-                "powerful": {"model": "openai/test", "base_url": "https://test/v1", "api_key": "k"},
-                "summary": {"model": "openai/test-summary"},
+                "powerful": {"model": "openai/test", "adapter": "openai_chat", "base_url": "https://test/v1", "api_key": "k"},
+                "summary": {"model": "openai/test-summary", "adapter": "openai_chat"},
             },
             # 不写 langfuse — 应使用默认值
         },
@@ -169,7 +171,7 @@ def test_campaign_capsule_reads_llm_config_from_memory_without_a_file(
         system_yaml_data={},
         llm_yaml_data={
             "model": {
-                "summary": {"model": "openai/wrong-disk-model"},
+                "summary": {"model": "openai/wrong-disk-model", "adapter": "openai_chat"},
             }
         },
     )
@@ -178,6 +180,7 @@ def test_campaign_capsule_reads_llm_config_from_memory_without_a_file(
             "model": {
                 "summary": {
                     "model": "openai/capsule-summary",
+                    "adapter": "openai_chat",
                     "api_key": "memory-only-secret",
                 }
             }
@@ -207,7 +210,7 @@ def test_campaign_capsule_does_not_accept_config_payload_from_environment(
     config_dir = _setup_config_dir(
         tmp_path,
         system_yaml_data={},
-        llm_yaml_data={"model": {"summary": {"model": "openai/disk-summary"}}},
+        llm_yaml_data={"model": {"summary": {"model": "openai/disk-summary", "adapter": "openai_chat"}}},
     )
     monkeypatch.setenv("AGENTLOOM_MEMORY_CAMPAIGN_CAPSULE_ACTIVE", "1")
     monkeypatch.setenv(

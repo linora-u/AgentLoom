@@ -55,7 +55,7 @@ class TestResolveModelFamilyPromptPath:
     def test_returns_path_when_variant_exists(self, monkeypatch, tmp_path):
         family_dir = tmp_path / "myfamily"
         family_dir.mkdir()
-        variant = family_dir / "structured_code_agent.yaml"
+        variant = family_dir / "toolcalling_agent.yaml"
         variant.write_text("system_prompt: variant", encoding="utf-8")
 
         monkeypatch.setattr(pb_module, "_PROMPTS_DIR", tmp_path)
@@ -66,7 +66,7 @@ class TestResolveModelFamilyPromptPath:
     def test_family_is_case_insensitive(self, monkeypatch, tmp_path):
         family_dir = tmp_path / "anthropic"
         family_dir.mkdir()
-        variant = family_dir / "structured_code_agent.yaml"
+        variant = family_dir / "toolcalling_agent.yaml"
         variant.write_text("system_prompt: anthropic-variant", encoding="utf-8")
 
         monkeypatch.setattr(pb_module, "_PROMPTS_DIR", tmp_path)
@@ -111,7 +111,7 @@ class TestResolvePromptPath:
     def test_model_family_variant_when_no_config(self, monkeypatch, tmp_path):
         family_dir = tmp_path / "testfamily"
         family_dir.mkdir()
-        variant = family_dir / "structured_code_agent.yaml"
+        variant = family_dir / "toolcalling_agent.yaml"
         variant.write_text("system_prompt: family-variant", encoding="utf-8")
         monkeypatch.setattr(pb_module, "_PROMPTS_DIR", tmp_path)
 
@@ -174,7 +174,6 @@ class TestBuildPromptTemplates:
             skill_catalog=SkillCatalog.empty(),
             skill_tool_enabled=False,
             logger=_LOGGER,
-            tool_call_type="code_act",
             todo_mode="auto",
         )
 
@@ -195,7 +194,6 @@ class TestBuildPromptTemplates:
             skill_catalog=SkillCatalog.empty(),
             skill_tool_enabled=False,
             logger=_LOGGER,
-            tool_call_type="tool_call",
             todo_mode="on",
         )
 
@@ -266,7 +264,7 @@ class TestBuildPromptTemplates:
     def test_returns_none_on_fallback_load_failure(self, monkeypatch, tmp_path):
         """When smolagents built-in fails to load, returns None."""
         # Make the extensions loader raise an error
-        def _broken_builtin(tool_call_type, use_structured_output=True):
+        def _broken_builtin():
             raise RuntimeError("simulated failure")
         monkeypatch.setattr(pb_module, "_load_smolagents_builtin", _broken_builtin)
 

@@ -1,10 +1,10 @@
 name: "code_review_agent"
+agent_runtime: smolagents
 description: |
   Universal Code Review Supervisor Agent. Orchestrates comprehensive code quality review
   by coordinating specialized worker agents across multiple analysis stages.
 
 model_type: "powerful"
-tool_call_type: "code_act"
 
 workflow: |
   # Universal Code Review Workflow (Standard Operating Procedure)
@@ -66,6 +66,3 @@ tools:
     module: "applications.ai_quality_analysis.agent_tools.module_context_generator"
     function: "get_module_context"
     description: "Retrieve module context."
-
-execution_env:
-  type: "local"

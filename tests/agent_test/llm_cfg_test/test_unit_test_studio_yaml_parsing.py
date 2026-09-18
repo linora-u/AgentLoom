@@ -1,10 +1,8 @@
 from pathlib import Path
 
 import pytest
-
-from agentloom.runtime.logging import initialize_global_logger_once, get_global_logger, set_global_logger
 from agentloom.runtime.factory import YamlAgentFactory
-from agentloom.runtime.factory import YamlConfiguredSupervisorAgent
+from agentloom.runtime.logging import get_global_logger, initialize_global_logger_once, set_global_logger
 
 
 @pytest.fixture(autouse=True)
@@ -37,7 +35,7 @@ def test_unit_test_studio_supervisor_and_workers_parse():
         assert worker_cfg.get("workflow")
 
 
-def test_unit_test_studio_code_act_contracts_are_strict():
+def test_unit_test_studio_uses_structured_tool_runtime_contract():
     repo_root = Path(__file__).resolve().parents[3]
     app_root = repo_root / "applications" / "unit_test_studio"
     supervisor_yaml = app_root / "workflows" / "unit_test_studio_agent.yaml"
@@ -47,34 +45,14 @@ def test_unit_test_studio_code_act_contracts_are_strict():
     for config_path in config_paths:
         cfg = YamlAgentFactory._load_config_from_file(config_path)
         workflow = cfg["workflow"]
-        assert "CodeAct Execution Contract" in workflow
-        assert "Every action MUST be emitted as a Python `<code>...</code>` block" in workflow
-        assert "Final output MUST be produced by `final_answer(...)` inside a `<code>` block" in workflow
-        assert "Never return bare" in workflow
+        assert cfg["agent_runtime"] == "smolagents"
+        assert "Structured Tool Execution Contract" in workflow
+        assert "<code>" not in workflow
 
     assert "planning_interval" not in YamlAgentFactory._load_config_from_file(supervisor_yaml)
     for worker_yaml in worker_dir.glob("*.yaml"):
         cfg = YamlAgentFactory._load_config_from_file(worker_yaml)
         assert "planning_interval" not in cfg
-
-
-def test_unit_test_studio_supervisor_payload_extraction_survives_task_wrapping():
-    repo_root = Path(__file__).resolve().parents[3]
-    app_root = repo_root / "applications" / "unit_test_studio"
-    supervisor_yaml = app_root / "workflows" / "unit_test_studio_agent.yaml"
-    cfg = YamlAgentFactory._load_config_from_file(supervisor_yaml)
-
-    supervisor = object.__new__(YamlConfiguredSupervisorAgent)
-    supervisor._config = cfg
-    supervisor._logger = None
-
-    transformed = supervisor._transform_task(
-        'Generate tests.\nUse this JSON payload exactly:\n{"target_root":"x","targets":"y","output_dir":"z"}'
-    )
-
-    assert "_before_payload, marker_text, payload_text = text.rpartition(marker)" in transformed
-    assert "payload_text = payload_text.lstrip()" in transformed
-    assert "payload_text = text.lstrip()" not in transformed
 
 
 def test_unit_test_studio_workers_register_as_tools_when_schema_present():

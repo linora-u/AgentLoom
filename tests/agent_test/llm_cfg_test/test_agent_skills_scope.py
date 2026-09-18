@@ -2,9 +2,8 @@ import logging
 from pathlib import Path
 from types import SimpleNamespace
 
-import pytest
-
 import agentloom.runtime.agent as base_agent_module
+import pytest
 from agentloom.runtime.hooks import HookPlan, HookRun
 from agentloom.runtime.skills.catalog import SkillCatalog, SkillSource
 from agentloom.runtime.trace import get_current_hook_run, get_current_skill_catalog
@@ -26,7 +25,6 @@ class _MinimalAgent(base_agent_module.RoleDrivenAgent):
     def _role_profile(self) -> base_agent_module.AgentRoleProfile:
         return base_agent_module.AgentRoleProfile(
             agent_type=base_agent_module.AgentType.WORKER,
-            tool_call_type="code_act",
         )
 
     def _get_tools(self):
@@ -46,7 +44,10 @@ def _write_skill(root: Path, skill_name: str) -> Path:
 
 def test_base_agent_run_binds_agent_scoped_catalogue():
     agent = _MinimalAgent(
-        config={"name": "minimal_agent"},
+        config={
+            "name": "minimal_agent",
+            "agent_runtime": "smolagents",
+        },
         model=object(),
         logger=logging.getLogger(__name__),
     )
