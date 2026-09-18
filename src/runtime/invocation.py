@@ -341,6 +341,11 @@ class AgentInvocation:
                 except BaseException as exc:
                     if lifecycle_error is None:
                         lifecycle_error = exc
+                    elif lifecycle_error is not exc:
+                        lifecycle_error.add_note(
+                            "Runtime close also failed: "
+                            f"{type(exc).__name__}: {exc}"
+                        )
                 finally:
                     try:
                         todo_binding.__exit__(None, None, None)
@@ -350,7 +355,13 @@ class AgentInvocation:
                         finally:
                             execution_binding.__exit__(None, None, None)
             if lifecycle_error is not None:
-                raise lifecycle_error
+                if session_error is None:
+                    raise lifecycle_error
+                if lifecycle_error is not session_error:
+                    session_error.add_note(
+                        "Run cleanup also failed: "
+                        f"{type(lifecycle_error).__name__}: {lifecycle_error}"
+                    )
 
     def _prepare_checkpoint(self, coordinator: Any) -> tuple[Any, Any]:
         if coordinator is None:
