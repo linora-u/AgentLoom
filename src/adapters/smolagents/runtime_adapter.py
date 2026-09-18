@@ -8,6 +8,7 @@ from threading import RLock
 from typing import Any
 
 from agentloom.adapters.smolagents.checkpoint_codec import (
+    CANONICAL_MODEL_ITEMS_KEY,
     SmolagentsCheckpointCodec,
 )
 from agentloom.adapters.smolagents.conversation_recovery import (
@@ -21,6 +22,7 @@ from agentloom.runtime.agent_runtime import (
     require_runtime_state,
 )
 from agentloom.runtime.tool_gateway import ToolGateway
+from agentloom.runtime.trace import capture_explicit_execution_context
 
 try:
     _SMOLAGENTS_VERSION = version("smolagents")
@@ -33,7 +35,9 @@ class SmolagentsRuntimeAdapter:
 
     runtime_id = "smolagents"
     runtime_version = _SMOLAGENTS_VERSION
-    state_schema_version = 1
+    # Schema 2 makes the canonical item stream explicit and authoritative.
+    # Schema 1 is deliberately not translated or resumed.
+    state_schema_version = 2
 
     def __init__(
         self,
@@ -68,15 +72,28 @@ class SmolagentsRuntimeAdapter:
             memory_steps = list(getattr(memory, "steps", ()) or ())
         else:
             memory_steps = list(steps)
+        canonical_items = (
+            SmolagentsCheckpointCodec.serialize_canonical_model_items(
+                memory_steps
+            )
+        )
+        execution = capture_explicit_execution_context()
         return RuntimeCheckpointEnvelope(
             runtime_id=self.runtime_id,
             runtime_version=self.runtime_version,
             state_schema_version=self.state_schema_version,
+            task_id=execution.task_id,
+            run_id=execution.local_run_id,
+            progress=len(memory_steps),
+            audit_metadata={
+                "native_step_count": len(memory_steps),
+                "canonical_item_count": len(canonical_items),
+            },
             payload={
                 "memory_steps": SmolagentsCheckpointCodec.serialize_memory_steps(
                     memory_steps
                 ),
-                "step_count": len(memory_steps),
+                CANONICAL_MODEL_ITEMS_KEY: canonical_items,
             },
         )
 
@@ -91,10 +108,17 @@ class SmolagentsRuntimeAdapter:
         checkpoint.require_compatible(
             runtime_id=self.runtime_id,
             state_schema_version=self.state_schema_version,
+            runtime_version=self.runtime_version,
         )
-        raw_steps = checkpoint.payload.get("memory_steps", [])
+        raw_steps = checkpoint.payload.get("memory_steps")
+        if not isinstance(raw_steps, list):
+            raise ValueError("smolagents memory_steps must be a list")
         steps = SmolagentsCheckpointCodec.deserialize_memory_steps(
-            list(raw_steps)
+            raw_steps
+        )
+        SmolagentsCheckpointCodec.restore_canonical_model_items(
+            steps,
+            checkpoint.payload.get(CANONICAL_MODEL_ITEMS_KEY),
         )
         steps, _interruption = prepare_steps_for_resume(steps)
         self._native_runtime.memory.steps = steps

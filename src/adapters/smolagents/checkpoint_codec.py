@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import time
 from collections.abc import Mapping
 from copy import deepcopy
@@ -15,6 +16,12 @@ from agentloom.runtime.agent_runtime import RuntimeCheckpointEnvelope
 from agentloom.runtime.model_protocol import (
     MODEL_ITEMS_RAW_KEY,
     MODEL_RESPONSE_ID_RAW_KEY,
+    FunctionCallItem,
+    FunctionCallOutputItem,
+    MessageItem,
+    ModelItem,
+    ReasoningItem,
+    model_item_from_dict,
     model_item_to_dict,
 )
 from smolagents.memory import (
@@ -30,6 +37,162 @@ from smolagents.monitoring import Timing, TokenUsage
 _STEP_TYPE_KEY = "_step_type"
 _TOOL_CALL_RAW_KEY = "agentloom_tool_call"
 _TOOL_RESULT_RAW_KEY = "agentloom_tool_result"
+CANONICAL_MODEL_ITEMS_KEY = "canonical_model_items"
+
+
+def _canonical_items_from_message(
+    message: ChatMessage | None,
+) -> tuple[ModelItem, ...]:
+    if message is None or not isinstance(message.raw, Mapping):
+        return ()
+    raw_items = message.raw.get(MODEL_ITEMS_RAW_KEY)
+    if raw_items is None:
+        return ()
+    if not isinstance(raw_items, (list, tuple)):
+        raise ValueError("canonical model items must be a list")
+    result: list[ModelItem] = []
+    for raw_item in raw_items:
+        if isinstance(
+            raw_item,
+            (
+                MessageItem,
+                FunctionCallItem,
+                FunctionCallOutputItem,
+                ReasoningItem,
+            ),
+        ):
+            result.append(raw_item)
+            continue
+        if not isinstance(raw_item, Mapping):
+            raise ValueError("canonical model item must be an object")
+        result.append(model_item_from_dict(raw_item))
+    return tuple(result)
+
+
+def _canonical_tool_outputs(step: ActionStep) -> tuple[FunctionCallOutputItem, ...]:
+    records = getattr(step, "tool_results", None)
+    if not records:
+        return ()
+    return tuple(
+        FunctionCallOutputItem(
+            call_id=record.call_id,
+            output=record.model_content(),
+            status=record.status,
+            is_error=record.status != "completed",
+            replay_payload={"record": record.to_dict()},
+        )
+        for record in records
+    )
+
+
+def _canonical_entries_from_steps(
+    steps: list[MemoryStep],
+) -> list[dict[str, Any]]:
+    entries: list[dict[str, Any]] = []
+    for step_index, step in enumerate(steps):
+        if isinstance(step, TaskStep):
+            items: tuple[ModelItem, ...] = (
+                MessageItem(role="user", text=f"New task:\n{step.task}"),
+            )
+            response_id = None
+        elif isinstance(step, PlanningStep):
+            model_items = _canonical_items_from_message(
+                step.model_output_message
+            )
+            if step.model_output_message is not None and not model_items:
+                raise ValueError(
+                    f"PlanningStep {step_index} lacks canonical model items"
+                )
+            items = (
+                *model_items,
+                MessageItem(role="user", text="Now proceed and carry out this plan."),
+            )
+            raw = (
+                step.model_output_message.raw
+                if step.model_output_message is not None
+                and isinstance(step.model_output_message.raw, Mapping)
+                else {}
+            )
+            response_id = raw.get(MODEL_RESPONSE_ID_RAW_KEY)
+            if response_id is not None and not isinstance(response_id, str):
+                raise ValueError("canonical response_id must be a string")
+        elif isinstance(step, ActionStep):
+            model_items = _canonical_items_from_message(
+                step.model_output_message
+            )
+            if step.model_output_message is not None and not model_items:
+                raise ValueError(
+                    f"ActionStep {step_index} lacks canonical model items"
+                )
+            items = (*model_items, *_canonical_tool_outputs(step))
+            raw = (
+                step.model_output_message.raw
+                if step.model_output_message is not None
+                and isinstance(step.model_output_message.raw, Mapping)
+                else {}
+            )
+            response_id = raw.get(MODEL_RESPONSE_ID_RAW_KEY)
+            if response_id is not None and not isinstance(response_id, str):
+                raise ValueError("canonical response_id must be a string")
+        else:
+            raise TypeError(
+                f"unsupported smolagents memory step: {type(step).__name__}"
+            )
+        for item_index, item in enumerate(items):
+            entries.append(
+                {
+                    "step_index": step_index,
+                    "item_index": item_index,
+                    "response_id": response_id,
+                    "item": model_item_to_dict(item),
+                }
+            )
+    return entries
+
+
+def _deserialize_canonical_entries(
+    raw_entries: Any,
+    *,
+    step_count: int,
+) -> list[list[tuple[ModelItem, str | None]]]:
+    if not isinstance(raw_entries, list):
+        raise ValueError("canonical_model_items must be a list")
+    by_step: list[list[tuple[ModelItem, str | None]]] = [
+        [] for _ in range(step_count)
+    ]
+    previous_position: tuple[int, int] | None = None
+    for entry in raw_entries:
+        if not isinstance(entry, Mapping):
+            raise ValueError("canonical model stream entry must be an object")
+        step_index = entry.get("step_index")
+        item_index = entry.get("item_index")
+        if (
+            isinstance(step_index, bool)
+            or not isinstance(step_index, int)
+            or not 0 <= step_index < step_count
+            or isinstance(item_index, bool)
+            or not isinstance(item_index, int)
+            or item_index < 0
+        ):
+            raise ValueError("canonical model stream position is invalid")
+        position = (step_index, item_index)
+        if previous_position is not None and position <= previous_position:
+            raise ValueError("canonical model stream is not strictly ordered")
+        if item_index != len(by_step[step_index]):
+            raise ValueError("canonical model stream item indexes are not contiguous")
+        response_id = entry.get("response_id")
+        if response_id is not None and not isinstance(response_id, str):
+            raise ValueError("canonical response_id must be a string")
+        raw_item = entry.get("item")
+        if not isinstance(raw_item, Mapping):
+            raise ValueError("canonical model stream item must be an object")
+        try:
+            item = model_item_from_dict(raw_item)
+        except (TypeError, ValueError) as exc:
+            raise ValueError("canonical model stream item is invalid") from exc
+        by_step[step_index].append((item, response_id))
+        previous_position = position
+    return by_step
 
 
 def _serialize_chat_message(
@@ -50,18 +213,7 @@ def _serialize_chat_message(
     ]
     raw: dict[str, Any] = {}
     source_raw = message.raw if isinstance(message.raw, dict) else {}
-    canonical_items = source_raw.get(MODEL_ITEMS_RAW_KEY)
-    if canonical_items is not None:
-        raw[MODEL_ITEMS_RAW_KEY] = [
-            (
-                model_item_to_dict(item)
-                if not isinstance(item, Mapping)
-                else deepcopy(dict(item))
-            )
-            for item in canonical_items
-        ]
     for key in (
-        MODEL_RESPONSE_ID_RAW_KEY,
         _TOOL_CALL_RAW_KEY,
         _TOOL_RESULT_RAW_KEY,
     ):
@@ -144,7 +296,11 @@ class SmolagentsCheckpointCodec:
         data: list[dict[str, Any]],
     ) -> list[MemoryStep]:
         steps: list[MemoryStep] = []
-        for value in data:
+        for index, value in enumerate(data):
+            if not isinstance(value, Mapping):
+                raise ValueError(
+                    f"smolagents memory step {index} must be an object"
+                )
             raw = dict(value)
             step_type = raw.pop(_STEP_TYPE_KEY, None)
             if step_type == "TaskStep":
@@ -153,7 +309,217 @@ class SmolagentsCheckpointCodec:
                 steps.append(_rebuild_action_step(raw))
             elif step_type == "PlanningStep":
                 steps.append(_rebuild_planning_step(raw))
+            else:
+                raise ValueError(
+                    f"unsupported smolagents memory step type: {step_type!r}"
+                )
         return steps
+
+    @staticmethod
+    def serialize_canonical_model_items(
+        steps: list[MemoryStep],
+    ) -> list[dict[str, Any]]:
+        """Return the only authoritative ordered model-history stream."""
+
+        return _canonical_entries_from_steps(steps)
+
+    @classmethod
+    def restore_canonical_model_items(
+        cls,
+        steps: list[MemoryStep],
+        raw_entries: Any,
+    ) -> None:
+        """Overwrite native model-history projections from canonical items."""
+
+        by_step = _deserialize_canonical_entries(
+            raw_entries,
+            step_count=len(steps),
+        )
+        for step_index, (step, entries) in enumerate(
+            zip(steps, by_step, strict=True)
+        ):
+            cls._restore_step_canonical_items(
+                step,
+                entries,
+                step_index=step_index,
+            )
+        restored = cls.serialize_canonical_model_items(steps)
+        expected = [
+            {
+                "step_index": entry["step_index"],
+                "item_index": entry["item_index"],
+                "response_id": entry.get("response_id"),
+                "item": dict(entry["item"]),
+            }
+            for entry in raw_entries
+        ]
+        if restored != expected:
+            raise ValueError(
+                "restored canonical model stream does not match checkpoint"
+            )
+
+    @staticmethod
+    def _restore_step_canonical_items(
+        step: MemoryStep,
+        entries: list[tuple[ModelItem, str | None]],
+        *,
+        step_index: int,
+    ) -> None:
+        items = [item for item, _response_id in entries]
+        response_ids = {
+            response_id
+            for _item, response_id in entries
+            if response_id is not None
+        }
+        if len(response_ids) > 1:
+            raise ValueError(
+                f"canonical step {step_index} has conflicting response IDs"
+            )
+        response_id = next(iter(response_ids), None)
+        if isinstance(step, TaskStep):
+            if len(items) != 1 or not isinstance(items[0], MessageItem):
+                raise ValueError(
+                    f"TaskStep {step_index} must contain one user message"
+                )
+            item = items[0]
+            prefix = "New task:\n"
+            if item.role != "user" or not item.text.startswith(prefix):
+                raise ValueError(
+                    f"TaskStep {step_index} canonical message is invalid"
+                )
+            step.task = item.text.removeprefix(prefix)
+            return
+        if isinstance(step, PlanningStep):
+            if (
+                len(items) < 2
+                or not isinstance(items[-1], MessageItem)
+                or items[-1]
+                != MessageItem(
+                    role="user",
+                    text="Now proceed and carry out this plan.",
+                )
+            ):
+                raise ValueError(
+                    f"PlanningStep {step_index} canonical messages are invalid"
+                )
+            model_items = items[:-1]
+            assistant_text = "".join(
+                item.text
+                for item in model_items
+                if isinstance(item, MessageItem)
+                and item.role == "assistant"
+            )
+            if not assistant_text:
+                raise ValueError(
+                    f"PlanningStep {step_index} lacks assistant plan text"
+                )
+            step.plan = assistant_text
+            step.model_output_message = ChatMessage(
+                role="assistant",
+                content=assistant_text,
+                raw={
+                    MODEL_ITEMS_RAW_KEY: [
+                        model_item_to_dict(item) for item in model_items
+                    ],
+                    MODEL_RESPONSE_ID_RAW_KEY: response_id,
+                },
+            )
+            return
+        if not isinstance(step, ActionStep):
+            raise ValueError(
+                f"unsupported smolagents memory step: {type(step).__name__}"
+            )
+
+        model_items = [
+            item
+            for item in items
+            if not isinstance(item, FunctionCallOutputItem)
+        ]
+        output_items = [
+            item
+            for item in items
+            if isinstance(item, FunctionCallOutputItem)
+        ]
+        saw_output = False
+        for item in items:
+            if isinstance(item, FunctionCallOutputItem):
+                saw_output = True
+            elif saw_output:
+                raise ValueError(
+                    f"ActionStep {step_index} canonical outputs must trail model items"
+                )
+        calls = [
+            item
+            for item in model_items
+            if isinstance(item, FunctionCallItem)
+        ]
+        call_ids = [item.call_id for item in calls]
+        if len(call_ids) != len(set(call_ids)):
+            raise ValueError(
+                f"ActionStep {step_index} has duplicate function call IDs"
+            )
+        output_call_ids = [item.call_id for item in output_items]
+        if (
+            len(output_call_ids) != len(set(output_call_ids))
+            or not set(output_call_ids) <= set(call_ids)
+        ):
+            raise ValueError(
+                f"ActionStep {step_index} function call outputs are not correlated"
+            )
+        if (
+            calls
+            and (step.observations is not None or step.is_final_answer)
+            and set(output_call_ids) != set(call_ids)
+        ):
+            raise ValueError(
+                f"ActionStep {step_index} completed calls lack canonical outputs"
+            )
+
+        from agentloom.runtime.tool_protocol import ToolCallRecord
+
+        records: list[ToolCallRecord] = []
+        for output in output_items:
+            raw_record = output.replay_payload.get("record")
+            if not isinstance(raw_record, Mapping):
+                raise ValueError(
+                    f"ActionStep {step_index} tool output lacks canonical record"
+                )
+            record = ToolCallRecord.from_dict(dict(raw_record))
+            if (
+                record.call_id != output.call_id
+                or record.status != output.status
+                or record.model_content() != output.output
+            ):
+                raise ValueError(
+                    f"ActionStep {step_index} canonical tool output is inconsistent"
+                )
+            records.append(record)
+
+        raw = {
+            MODEL_ITEMS_RAW_KEY: [
+                model_item_to_dict(item) for item in model_items
+            ],
+            MODEL_RESPONSE_ID_RAW_KEY: response_id,
+        }
+        step.model_output_message = ChatMessage(
+            role="assistant",
+            content="".join(
+                item.text
+                for item in model_items
+                if isinstance(item, MessageItem)
+                and item.role == "assistant"
+            ),
+            raw=raw,
+        )
+        step.tool_calls = [
+            ToolCall(
+                name=call.name,
+                arguments=deepcopy(json.loads(call.arguments_json)),
+                id=call.call_id,
+            )
+            for call in calls
+        ] or None
+        step.tool_results = records
 
     @staticmethod
     def completed_worker_output(
@@ -193,14 +559,14 @@ class SmolagentsCheckpointCodec:
         checkpoint = RuntimeCheckpointEnvelope.from_dict(raw_checkpoint)
         checkpoint.require_compatible(
             runtime_id="smolagents",
-            state_schema_version=1,
+            state_schema_version=2,
         )
-        raw_steps = checkpoint.payload.get("memory_steps", [])
+        raw_steps = checkpoint.payload.get("memory_steps")
         if not isinstance(raw_steps, list):
             raise ValueError("smolagents memory_steps must be a list")
         steps = cls.deserialize_memory_steps(raw_steps)
-        if raw_steps and not steps:
-            raise ValueError("smolagents memory_steps contain no supported steps")
+        raw_items = checkpoint.payload.get(CANONICAL_MODEL_ITEMS_KEY)
+        cls.restore_canonical_model_items(steps, raw_items)
         prepare_steps_for_resume(steps)
         return checkpoint
 
