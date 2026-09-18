@@ -51,8 +51,8 @@ def _unknown_model_type_error(model_type: str, available: list[str]) -> str:
 @dataclass
 class ModelConfig:
     """Model configuration."""
+    adapter: ModelAdapter
     model_id: str | None = None
-    adapter: ModelAdapter = "openai_chat"
     base_url: str | None = None
     api_key: str | None = None
     temperature: float = DEFAULT_MODEL_TEMPERATURE
