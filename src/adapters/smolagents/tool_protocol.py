@@ -1,10 +1,8 @@
-"""smolagents Tool execution and provider message projections."""
+"""smolagents message projections for canonical Tool calls and results."""
 
 from __future__ import annotations
 
 import json
-import time
-import uuid
 from typing import Any
 
 from agentloom.runtime.model_protocol import (
@@ -14,96 +12,11 @@ from agentloom.runtime.model_protocol import (
 from agentloom.runtime.tool_protocol import (
     TOOL_CALL_RAW_KEY,
     TOOL_RESULT_RAW_KEY,
-    TOOL_SETTLER_ATTR,
     ToolCallRecord,
 )
-from smolagents import validate_tool_arguments
 from smolagents.memory import ActionStep
 from smolagents.models import ChatMessage, MessageRole
-from smolagents.tools import handle_agent_input_types
 
-
-def settle_tool_call(
-    tool: Any,
-    arguments: dict[str, Any] | Any,
-    *,
-    call_id: str | None = None,
-    sanitize_inputs_outputs: bool = False,
-) -> ToolCallRecord:
-    """Execute one Tool and return its only canonical terminal state."""
-
-    stable_call_id = call_id or uuid.uuid4().hex
-    tool_name = str(getattr(tool, "name", type(tool).__name__))
-    started_at = time.time()
-    settler = getattr(tool, TOOL_SETTLER_ATTR, None)
-    if callable(settler):
-        normalized_arguments = arguments
-        if sanitize_inputs_outputs:
-            if isinstance(arguments, dict):
-                _, normalized_arguments = handle_agent_input_types(**arguments)
-            else:
-                normalized_args, _ = handle_agent_input_types(arguments)
-                normalized_arguments = normalized_args[0]
-        return settler(
-            normalized_arguments,
-            call_id=stable_call_id,
-            sanitize_inputs_outputs=sanitize_inputs_outputs,
-            started_at=started_at,
-        )
-
-    if isinstance(arguments, dict):
-        try:
-            validate_tool_arguments(tool, arguments)
-        except (TypeError, ValueError) as error:
-            return ToolCallRecord.blocked(
-                call_id=stable_call_id,
-                tool_name=tool_name,
-                input=arguments,
-                message=str(error) or type(error).__name__,
-                kind="invalid_arguments",
-                stage="input_validation",
-                started_at=started_at,
-                ended_at=time.time(),
-            )
-        except Exception as error:
-            return ToolCallRecord.failed(
-                call_id=stable_call_id,
-                tool_name=tool_name,
-                input=arguments,
-                error=error,
-                stage="input_validation",
-                started_at=started_at,
-                ended_at=time.time(),
-            )
-
-    try:
-        if isinstance(arguments, dict):
-            if sanitize_inputs_outputs:
-                output = tool(**arguments, sanitize_inputs_outputs=True)
-            else:
-                output = tool(**arguments)
-        else:
-            if sanitize_inputs_outputs:
-                output = tool(arguments, sanitize_inputs_outputs=True)
-            else:
-                output = tool(arguments)
-    except Exception as error:
-        return ToolCallRecord.from_exception(
-            call_id=stable_call_id,
-            tool_name=tool_name,
-            input=arguments,
-            error=error,
-            started_at=started_at,
-            ended_at=time.time(),
-        )
-    return ToolCallRecord.completed(
-        call_id=stable_call_id,
-        tool_name=tool_name,
-        input=arguments,
-        output=output,
-        started_at=started_at,
-        ended_at=time.time(),
-    )
 
 def action_step_to_protocol_messages(
     step: ActionStep,

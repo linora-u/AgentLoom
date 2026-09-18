@@ -9,8 +9,6 @@ from agentloom.adapters.litellm.tool_error_projection import (
 )
 from agentloom.adapters.smolagents.agents import ToolCallingAgentV2
 from agentloom.adapters.smolagents.model_turn_bridge import SmolagentsModelTurnBridge
-from agentloom.adapters.smolagents.tool_protocol import settle_tool_call
-from agentloom.adapters.smolagents.tool_shim import inject_hooks
 from agentloom.runtime.hooks import HookEvent, HookHandler, HookPlan, HookResult, HookRun
 from agentloom.runtime.model_binding import ModelTurnBinding
 from agentloom.runtime.tool_gateway import (
@@ -189,15 +187,16 @@ def _project_chat_messages(messages) -> list[dict]:
 
 
 def test_tool_runtime_returns_one_canonical_terminal_record() -> None:
-    completed = settle_tool_call(
-        EchoTool(),
-        {"text": "kept"},
+    gateway = _gateway(EchoTool(), ExplodingTool())
+    completed = gateway.invoke(
         call_id="runtime-ok",
+        tool_name="echo",
+        arguments={"text": "kept"},
     )
-    failed = settle_tool_call(
-        ExplodingTool(),
-        {"label": "isolated"},
+    failed = gateway.invoke(
         call_id="runtime-error",
+        tool_name="explode",
+        arguments={"label": "isolated"},
     )
 
     assert completed.call_id == "runtime-ok"
@@ -216,12 +215,12 @@ def test_tool_runtime_returns_one_canonical_terminal_record() -> None:
     )
 
 
-def test_tool_runtime_does_not_pass_tool_only_sanitize_flag_to_managed_agent() -> None:
-    settled = settle_tool_call(
-        ManagedAgentLike(),
-        {"request": "audit"},
+def test_gateway_invokes_callable_managed_agent_binding() -> None:
+    gateway = _gateway(ManagedAgentLike())
+    settled = gateway.invoke(
         call_id="worker-call",
-        sanitize_inputs_outputs=False,
+        tool_name="worker",
+        arguments={"request": "audit"},
     )
 
     assert settled.status == "completed"
@@ -242,14 +241,17 @@ def test_hooked_tool_settlement_preserves_lazy_setup_contract() -> None:
         root_run_id="root-setup",
         local_run_id="local-setup",
     )
-    tool = inject_hooks(SetupTool())
+    gateway = _gateway(SetupTool())
 
     with bind_explicit_execution_context(execution):
-        settled = settle_tool_call(tool, {}, call_id="setup-call")
+        settled = gateway.invoke(
+            call_id="setup-call",
+            tool_name="setup_tool",
+            arguments={},
+        )
 
     assert settled.status == "completed"
     assert settled.output == "ready"
-    assert tool.is_initialized is True
 
 
 def test_output_validation_failure_is_the_only_hook_terminal_record() -> None:
@@ -268,11 +270,10 @@ def test_output_validation_failure_is_the_only_hook_terminal_record() -> None:
     )
 
     with bind_explicit_execution_context(execution):
-        settled = settle_tool_call(
-            inject_hooks(InvalidImageTool()),
-            {},
+        settled = _gateway(InvalidImageTool()).invoke(
             call_id="invalid-output-call",
-            sanitize_inputs_outputs=True,
+            tool_name="invalid_image",
+            arguments={},
         )
 
     assert settled.status == "error"
@@ -338,11 +339,10 @@ def test_hooked_tool_settlement_sanitizes_completed_output_without_changing_term
     )
 
     with bind_explicit_execution_context(execution):
-        settled = settle_tool_call(
-            inject_hooks(EchoTool()),
-            {"text": "sanitized"},
+        settled = _gateway(EchoTool()).invoke(
             call_id="hooked-success",
-            sanitize_inputs_outputs=True,
+            tool_name="echo",
+            arguments={"text": "sanitized"},
         )
 
     assert settled.status == "completed"

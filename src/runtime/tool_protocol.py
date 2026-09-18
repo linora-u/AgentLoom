@@ -9,7 +9,6 @@ from typing import Any, Literal
 
 TOOL_CALL_RAW_KEY = "agentloom_tool_call"
 TOOL_RESULT_RAW_KEY = "agentloom_tool_result"
-TOOL_SETTLER_ATTR = "_agentloom_settle_tool_call"
 
 ToolCallStatus = Literal[
     "completed",

@@ -235,18 +235,3 @@ class ToolCallingAgentV2(_SuccessfulRunStateMixin, LoomAgentMixin, ToolCallingAg
             tool_name=tool_name,
             arguments=substituted_arguments,
         )
-
-    def execute_tool_call(
-        self,
-        tool_name: str,
-        arguments: dict[str, Any],
-        *,
-        call_id: str,
-    ) -> Any:
-        """Compatibility interface for callers that need the ordinary Tool value."""
-
-        return self.execute_tool_call_record(
-            tool_name,
-            arguments,
-            call_id=call_id,
-        ).direct_result()
