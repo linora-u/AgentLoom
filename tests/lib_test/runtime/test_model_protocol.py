@@ -310,6 +310,13 @@ def test_openai_responses_preserves_order_reasoning_and_replay_payload() -> None
                 FunctionCallOutputItem(
                     call_id="call_previous",
                     output='{"temperature":20}',
+                    replay_payload={
+                        "record": {
+                            "call_id": "call_previous",
+                            "tool_name": "weather",
+                            "status": "completed",
+                        }
+                    },
                 ),
             ),
             tools=(

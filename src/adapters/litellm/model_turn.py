@@ -240,11 +240,30 @@ def _tool_definition_for_responses(tool: ToolDefinition) -> dict[str, Any]:
 
 
 def _item_to_responses_input(item: ModelItem) -> dict[str, Any]:
-    if item.replay_payload:
-        return dict(item.replay_payload)
     if isinstance(item, MessageItem):
+        if item.replay_payload.get("type") == "message":
+            allowed = {"id", "type", "role", "status", "content"}
+            return {
+                key: value
+                for key, value in item.replay_payload.items()
+                if key in allowed
+            }
         return {"role": item.role, "content": item.text}
     if isinstance(item, FunctionCallItem):
+        if item.replay_payload.get("type") == "function_call":
+            allowed = {
+                "id",
+                "type",
+                "status",
+                "call_id",
+                "name",
+                "arguments",
+            }
+            return {
+                key: value
+                for key, value in item.replay_payload.items()
+                if key in allowed
+            }
         wire: dict[str, Any] = {
             "type": "function_call",
             "call_id": item.call_id,
@@ -268,9 +287,23 @@ def _item_to_responses_input(item: ModelItem) -> dict[str, Any]:
             wire["status"] = item.status
         return wire
     if isinstance(item, ReasoningItem):
-        raise ModelProtocolError(
-            "openai_responses reasoning replay requires the original replay_payload"
-        )
+        if item.replay_payload.get("type") != "reasoning":
+            raise ModelProtocolError(
+                "openai_responses reasoning replay requires the original replay_payload"
+            )
+        allowed = {
+            "id",
+            "type",
+            "status",
+            "summary",
+            "content",
+            "encrypted_content",
+        }
+        return {
+            key: value
+            for key, value in item.replay_payload.items()
+            if key in allowed
+        }
     raise ModelProtocolError(
         f"openai_responses cannot replay canonical item {type(item).__name__}"
     )
