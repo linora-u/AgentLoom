@@ -291,7 +291,9 @@ def _item_to_responses_input(item: ModelItem) -> dict[str, Any] | None:
         return wire
     if isinstance(item, ReasoningItem):
         if item.replay_payload.get("type") != "reasoning":
-            return None
+            raise ModelProtocolError(
+                "openai_responses cannot replay reasoning from another protocol"
+            )
         allowed = {
             "id",
             "type",
@@ -639,7 +641,10 @@ def _items_to_anthropic_messages(
                 "redacted_thinking",
             }:
                 assistant_items.append(item)
-            continue
+                continue
+            raise ModelProtocolError(
+                "anthropic_messages cannot replay reasoning from another protocol"
+            )
         else:
             flush_assistant_items()
             if isinstance(item, MessageItem):
