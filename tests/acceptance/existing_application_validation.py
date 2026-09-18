@@ -16,13 +16,12 @@ import json
 import os
 import shutil
 import signal
-import sqlite3
 import subprocess
 import sys
 import tempfile
 import time
 import xml.etree.ElementTree as ET
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -88,21 +87,6 @@ def records(runtime: Path) -> list[dict]:
         for value in walk(json.loads(path.read_text())):
             if {"tool_name", "status", "call_id", "input"} <= value.keys():
                 found[value["call_id"]] = value
-    # CodeAct keeps ToolCallRecord in HookRun memory and projects real tool
-    # completions to the durable session recorder. Read that observation seam,
-    # never infer execution from model code or a final answer.
-    database = runtime / "self_learning.db"
-    if database.is_file():
-        with sqlite3.connect(f"file:{database}?mode=ro", uri=True) as connection:
-            connection.row_factory = sqlite3.Row
-            for row in connection.execute(
-                "SELECT event_id, tool_name, status, input_json, output_json, root_run_id, run_id "
-                "FROM events WHERE event_type = 'tool_result'"
-            ):
-                found[row["event_id"]] = {"call_id": row["event_id"], "tool_name": row["tool_name"],
-                    "status": row["status"], "input": json.loads(row["input_json"]),
-                    "output": json.loads(row["output_json"]), "root_run_id": row["root_run_id"],
-                    "run_id": row["run_id"], "evidence_source": "session_recorder"}
     return list(found.values())
 
 
@@ -130,8 +114,8 @@ def assert_workers(runtime: Path, required: set[str], count: int | None = None) 
 
 
 def metadata(workflow: Path) -> dict:
-    from agentloom.configuration import C
     import yaml
+    from agentloom.configuration import C
     cfg = yaml.safe_load(workflow.read_text())
     model_type = cfg.get("model_type", C.default_model_type)
     return {"revision": subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=ROOT, text=True).strip(),
@@ -145,11 +129,11 @@ def metadata(workflow: Path) -> dict:
 
 
 def execute(workflow: Path, workspace: Path, *, task: str | None = None, resume: str | None = None, attempt="run") -> dict:
-    from agentloom.application.runner import execute_app
     from agentloom.application.run import ApplicationRunBudgetLimited
+    from agentloom.application.runner import execute_app
     lifecycle = []
     meta = metadata(workflow)
-    meta["started_at"] = datetime.now(timezone.utc).isoformat()
+    meta["started_at"] = datetime.now(UTC).isoformat()
     def observe(event):
         from dataclasses import asdict
         lifecycle.append(asdict(event))
@@ -161,7 +145,7 @@ def execute(workflow: Path, workspace: Path, *, task: str | None = None, resume:
         meta.update(status="budget_limited", run_id=exc.run.run_id, task_id=exc.run.task_id,
                     manifest=str(exc.run.manifest_path), goal=dict(exc.goal))
     finally:
-        meta["ended_at"] = datetime.now(timezone.utc).isoformat()
+        meta["ended_at"] = datetime.now(UTC).isoformat()
         dump(workspace / f"{attempt}_receipt.json", meta)
         dump(workspace / f"{attempt}_lifecycle.json", lifecycle)
     manifest = json.loads(Path(meta["manifest"]).read_text())
@@ -193,7 +177,7 @@ def verify_unit(workspace: Path) -> dict:
     original = ROOT / "applications/unit_test_studio/test/fixtures/sample_project/src/text_pipeline.py"
     if (target / "src/text_pipeline.py").read_bytes() != original.read_bytes():
         raise AssertionError("generation changed the source fixture")
-    suffix = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%S%fZ")
+    suffix = datetime.now(UTC).strftime("%Y%m%dT%H%M%S%fZ")
     xml = workspace / f"generated_pytest_{suffix}.xml"
     with (workspace / f"generated_pytest_{suffix}.log").open("w") as log:
         result = subprocess.run([sys.executable, "-m", "pytest", *map(str, files), "-q", f"--junitxml={xml}"],
@@ -375,8 +359,8 @@ def child(case: str, workspace: Path) -> dict:
             expected = {"write_markdown_file", "read_file"}
         return {"tools": sorted(expected), "tool_records": len(assert_tools(workspace / "runtime", expected)), "artifact_oracle": True}
     if case == "repo":
-        from applications.repo_map.agent_tools.scan_rank_tool import scan_and_rank
         from applications.repo_map.agent_tools.markdown_tool import generate_markdown_map
+        from applications.repo_map.agent_tools.scan_rank_tool import scan_and_rank
         repo_fixture(workspace / "repository")
         scan_and_rank(str(workspace / "repository"), str(workspace / "repo_output"), incremental=False)
         generate_markdown_map(str(workspace / "repo_output"))
@@ -420,7 +404,7 @@ def main() -> int:
     if args.verify_existing:
         if not args.workspace or args.case == "all":
             parser.error("--verify-existing requires one --case and its existing scenario --workspace")
-        output = args.workspace / ("verification_" + datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%S%fZ") + ".json")
+        output = args.workspace / ("verification_" + datetime.now(UTC).strftime("%Y%m%dT%H%M%S%fZ") + ".json")
         try:
             if args.case == "unit":
                 value = verify_unit(args.workspace)
@@ -436,7 +420,7 @@ def main() -> int:
         except BaseException as exc:
             dump(output, {"status": "failed", "type": type(exc).__name__, "error": str(exc)})
             raise
-        dump(output, {"status": "passed", "rechecked_at": datetime.now(timezone.utc).isoformat(), **value})
+        dump(output, {"status": "passed", "rechecked_at": datetime.now(UTC).isoformat(), **value})
         print(output)
         return 0
 
