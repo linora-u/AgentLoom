@@ -18,9 +18,14 @@ from agentloom.adapters.smolagents.tool_protocol import (
     action_step_to_protocol_messages,
 )
 from agentloom.runtime.agent_runtime import (
+    AgentRuntimeError,
     AgentRuntimeRequest,
+    RuntimeCapabilities,
     RuntimeCheckpointEnvelope,
+    RuntimeEvent,
+    RuntimeRequirements,
 )
+from agentloom.runtime.goal import GoalCompleteError, GoalState
 from agentloom.runtime.model_binding import ModelTurnBinding
 from agentloom.runtime.model_protocol import (
     FunctionCallItem,
@@ -28,6 +33,7 @@ from agentloom.runtime.model_protocol import (
     MessageItem,
     ModelTurnRequest,
     ModelTurnResult,
+    ModelUsage,
     ReasoningItem,
 )
 from agentloom.runtime.tool_protocol import ToolCallRecord
@@ -65,6 +71,10 @@ class _CallbackRegistry:
 
     def register(self, _step_type: object, callback: object) -> None:
         self.callbacks.append(callback)
+
+    def emit(self, step: object, *, agent: object) -> None:
+        for callback in self.callbacks:
+            callback(step, agent=agent)
 
 
 @dataclass
@@ -105,6 +115,54 @@ class _ReplayNativeRuntime(_NativeRuntime):
         return super().run(**kwargs)
 
 
+class _EventTurnAdapter:
+    adapter_id = "openai_responses"
+
+    def turn(self, _request: ModelTurnRequest) -> ModelTurnResult:
+        return ModelTurnResult(
+            items=(MessageItem(role="assistant", text="done"),),
+            response_id="response-1",
+            usage=ModelUsage(
+                input_tokens=3,
+                output_tokens=2,
+                total_tokens=5,
+                cached_input_tokens=1,
+            ),
+        )
+
+
+class _EventNativeRuntime(_NativeRuntime):
+    def __init__(self) -> None:
+        super().__init__(
+            _NativeResult(
+                output="done",
+                token_usage={"input_tokens": 3, "output_tokens": 2},
+            )
+        )
+        self.model = SmolagentsModelTurnBridge(
+            binding=ModelTurnBinding(
+                model_type="test",
+                model_id="opaque-model",
+                adapter=_EventTurnAdapter(),
+            )
+        )
+
+    def run(self, **kwargs: object) -> _NativeResult:
+        self.model.generate([{"role": "user", "content": "inspect"}])
+        step = ActionStep(step_number=1, timing=Timing(start_time=0.0))
+        step.tool_results = [
+            ToolCallRecord.completed(
+                call_id="call-1",
+                tool_name="weather",
+                input={"city": "Shanghai"},
+                output={"temperature": 20},
+            )
+        ]
+        self.memory.steps.append(step)
+        self.step_callbacks.emit(step, agent=self)
+        return super().run(**kwargs)
+
+
 def test_adapter_translates_runtime_request_and_result() -> None:
     native = _NativeRuntime(_NativeResult(output={"ok": True}, token_usage={"input": 2}))
     runtime = SmolagentsRuntimeAdapter(native)
@@ -136,6 +194,134 @@ def test_adapter_translates_runtime_request_and_result() -> None:
     assert result.checkpoint.progress == 0
     assert result.checkpoint.payload["memory_steps"] == []
     assert result.checkpoint.payload["canonical_model_items"] == []
+
+
+def test_adapter_emits_runtime_events_with_canonical_identity_and_typed_usage() -> None:
+    native = _EventNativeRuntime()
+    runtime = SmolagentsRuntimeAdapter(native)
+    observed: list[RuntimeEvent] = []
+
+    result = runtime.run(
+        AgentRuntimeRequest(
+            task="inspect",
+            application_id="application",
+            task_id="task",
+            run_id="canonical-run",
+            event_sink=observed.append,
+        )
+    )
+
+    assert [event.kind for event in result.events] == [
+        "run",
+        "model",
+        "usage",
+        "tool",
+        "checkpoint",
+        "usage",
+        "terminal",
+    ]
+    assert observed == list(result.events)
+    assert {
+        (event.application_id, event.task_id, event.run_id)
+        for event in result.events
+    } == {("application", "task", "canonical-run")}
+    assert result.usage.input_tokens == 3
+    assert result.usage.output_tokens == 2
+    assert result.usage.total_tokens == 5
+    assert result.checkpoint is not None
+    assert result.checkpoint.task_id == "task"
+    assert result.checkpoint.run_id == "canonical-run"
+
+
+def test_adapter_classifies_provider_error_and_emits_terminal_failure() -> None:
+    from litellm.exceptions import Timeout
+
+    provider_error = Timeout(
+        message="provider timeout",
+        model="opaque-model",
+        llm_provider="openai",
+    )
+    native = _NativeRuntime(_NativeResult(output=None))
+    native.run = lambda **_kwargs: (_ for _ in ()).throw(provider_error)  # type: ignore[method-assign]
+    runtime = SmolagentsRuntimeAdapter(native)
+    observed: list[RuntimeEvent] = []
+
+    with pytest.raises(AgentRuntimeError) as captured:
+        runtime.run(
+            AgentRuntimeRequest(
+                task="inspect",
+                event_sink=observed.append,
+            )
+        )
+
+    assert captured.value.category == "provider"
+    assert captured.value.cause is provider_error
+    assert captured.value.retryable is True
+    assert observed[-1].kind == "terminal"
+    assert observed[-1].details == {
+        "state": "failed",
+        "category": "provider",
+        "retryable": True,
+    }
+
+
+def test_adapter_rejects_unsupported_requirements_before_native_execution() -> None:
+    class LimitedRuntimeAdapter(SmolagentsRuntimeAdapter):
+        @property
+        def capabilities(self) -> RuntimeCapabilities:
+            return RuntimeCapabilities(
+                structured_tools=True,
+                parallel_tools=False,
+                checkpoint_resume=True,
+                subagents=True,
+            )
+
+    native = _NativeRuntime(_NativeResult(output="must not run"))
+    runtime = LimitedRuntimeAdapter(native)
+    observed: list[RuntimeEvent] = []
+
+    with pytest.raises(AgentRuntimeError) as captured:
+        runtime.run(
+            AgentRuntimeRequest(
+                task="inspect",
+                requirements=RuntimeRequirements(parallel_tools=True),
+                event_sink=observed.append,
+            )
+        )
+
+    assert captured.value.category == "unsupported_capability"
+    assert captured.value.retryable is False
+    assert native.calls == []
+    assert [event.kind for event in observed] == ["terminal"]
+    assert observed[0].details["category"] == "unsupported_capability"
+
+
+def test_adapter_preserves_goal_and_keyboard_interrupt_control_flow() -> None:
+    goal_error = GoalCompleteError(
+        GoalState.create(
+            objective="finish",
+            objective_fingerprint="test",
+            token_budget=None,
+        )
+    )
+
+    for control_error in (goal_error, KeyboardInterrupt()):
+        native = _NativeRuntime(_NativeResult(output=None))
+
+        def fail(
+            *,
+            error: BaseException = control_error,
+            **_kwargs: object,
+        ) -> _NativeResult:
+            raise error
+
+        native.run = fail  # type: ignore[method-assign]
+        runtime = SmolagentsRuntimeAdapter(native)
+
+        with pytest.raises(type(control_error)) as captured:
+            runtime.run(AgentRuntimeRequest(task="inspect"))
+
+        assert captured.value is control_error
 
 
 def test_adapter_omits_empty_additional_args_and_resets_new_session() -> None:
