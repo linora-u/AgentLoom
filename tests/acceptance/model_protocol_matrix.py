@@ -457,6 +457,27 @@ def not_run_reports(reason: str) -> list[dict[str, object]]:
     ]
 
 
+def configuration_failure_reports(error: Exception) -> list[dict[str, object]]:
+    """Classify absent local config separately from invalid configuration."""
+
+    reason = redact_text(
+        f"model configuration unavailable: {type(error).__name__}: {error}"
+    )
+    if isinstance(error, FileNotFoundError):
+        return not_run_reports(reason)
+    return [
+        {
+            "revision": _revision(),
+            "adapter": adapter,
+            "profile": None,
+            "model": None,
+            "status": "FAILED",
+            "reason": reason,
+        }
+        for adapter in ADAPTERS
+    ]
+
+
 def matrix_exit_code(reports: list[dict[str, object]]) -> int:
     return 1 if any(report.get("status") == "FAILED" for report in reports) else 0
 
@@ -638,12 +659,10 @@ def main() -> int:
     try:
         config = _load_config()
     except Exception as exc:
-        reports = not_run_reports(
-            redact_text(f"model configuration unavailable: {type(exc).__name__}: {exc}")
-        )
+        reports = configuration_failure_reports(exc)
         _write_json(root / "summary.json", reports)
         print(json.dumps(reports, ensure_ascii=False, indent=2))
-        return 0
+        return matrix_exit_code(reports)
 
     secrets = _configured_secret_values(config)
     selected = (
