@@ -109,7 +109,6 @@ def _serialize_memory_step(step: MemoryStep) -> dict[str, Any]:
                 step.model_output_message
             ),
             "model_output": deepcopy(step.model_output),
-            "code_action": step.code_action,
             "observations": step.observations,
             "action_output": deepcopy(step.action_output),
             "token_usage": (
@@ -306,7 +305,6 @@ def _rebuild_action_step(value: dict[str, Any]) -> ActionStep:
             value.get("model_output_message")
         ),
         observations=value.get("observations"),
-        code_action=value.get("code_action"),
         action_output=value.get("action_output"),
         token_usage=_rebuild_token_usage(value.get("token_usage")),
         is_final_answer=value.get("is_final_answer", False),
