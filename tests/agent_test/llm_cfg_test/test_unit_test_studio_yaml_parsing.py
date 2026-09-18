@@ -3,6 +3,23 @@ from pathlib import Path
 import pytest
 from agentloom.runtime.factory import YamlAgentFactory
 from agentloom.runtime.logging import get_global_logger, initialize_global_logger_once, set_global_logger
+from agentloom.runtime.model_binding import ModelTurnBinding
+from agentloom.runtime.model_protocol import ModelTurnResult
+
+
+class _NoopAdapter:
+    adapter_id = "openai_chat"
+
+    def turn(self, _request):
+        return ModelTurnResult()
+
+
+def make_test_model_binding():
+    return ModelTurnBinding(
+        model_type="test",
+        model_id="test/model",
+        adapter=_NoopAdapter(),
+    )
 
 
 @pytest.fixture(autouse=True)
@@ -66,7 +83,10 @@ def test_unit_test_studio_workers_register_as_tools_when_schema_present():
     tool_count = 0
     for worker_yaml in worker_files:
         cfg = YamlAgentFactory._load_config_from_file(worker_yaml)
-        tool = YamlAgentFactory.create_agent_as_tool(cfg, model=object())
+        tool = YamlAgentFactory.create_agent_as_tool(
+            cfg,
+            model_binding=make_test_model_binding(),
+        )
         if cfg.get("agent_function_schema") is None:
             assert tool is None
         else:
