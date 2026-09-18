@@ -123,10 +123,10 @@ def _write_workflow(app_root: Path, name: str) -> Path:
     workflow_path = workflow_dir / f"{name}_agent.yaml"
     workflow_path.write_text(
         f"""name: "{name}"
+agent_runtime: "smolagents"
 description: |
   Return exactly HEADER_VALIDATION_PASS.
 model_type: "powerful"
-tool_call_type: "tool_call"
 workflow: |
   Return exactly HEADER_VALIDATION_PASS and do not call tools.
 tools: []
