@@ -10,6 +10,7 @@ from concurrent.futures import ThreadPoolExecutor
 import pytest
 from agentloom.adapters.smolagents.agents import ToolCallingAgentV2
 from agentloom.adapters.smolagents.model_turn_bridge import SmolagentsModelTurnBridge
+from agentloom.runtime.hooks import HookPlan, HookRun
 from agentloom.runtime.logging import NullLoggerBackend
 from agentloom.runtime.model_binding import ModelTurnBinding
 from agentloom.runtime.model_protocol import (
@@ -17,6 +18,15 @@ from agentloom.runtime.model_protocol import (
     ModelProtocolError,
     ModelTurnRequest,
     ModelTurnResult,
+)
+from agentloom.runtime.tool_gateway import (
+    AgentLoomToolGateway,
+    bind_tool,
+    final_answer_binding,
+)
+from agentloom.runtime.trace import (
+    bind_explicit_execution_context,
+    capture_explicit_execution_context,
 )
 from smolagents import Tool
 from smolagents.memory import ActionStep
@@ -27,6 +37,7 @@ from smolagents.models import (
     MessageRole,
 )
 from smolagents.monitoring import Timing
+from smolagents.tools import handle_agent_output_types
 
 
 class EchoTool(Tool):
@@ -129,14 +140,44 @@ def _call(call_id: str, name: str, arguments) -> ChatMessageToolCall:
 
 
 def _agent(model, tools, *, max_steps=1, logger=None):
+    gateway = AgentLoomToolGateway(
+        [
+            *(
+                bind_tool(tool, output_normalizer=handle_agent_output_types)
+                for tool in tools
+            ),
+            final_answer_binding(),
+        ]
+    )
     return ToolCallingAgentV2(
-        tools=tools,
+        tool_gateway=gateway,
         model=model,
         logger=logger,
         max_steps=max_steps,
         max_tokens=4096,
         verbosity_level=0,
     )
+
+
+@pytest.fixture(autouse=True)
+def _bind_tool_runtime():
+    current = capture_explicit_execution_context()
+    run = HookRun(HookPlan(), local_run_id="native-tools", root_run_id="native-tools")
+    with bind_explicit_execution_context(
+        current.__class__(
+            task_id=current.task_id,
+            sub_task_id=current.sub_task_id,
+            agent_id=current.agent_id,
+            agent_name=current.agent_name,
+            agent_config=current.agent_config,
+            skill_catalog=current.skill_catalog,
+            hook_run=run,
+            runtime_agent_path=current.runtime_agent_path,
+            root_run_id="native-tools",
+            local_run_id="native-tools",
+        )
+    ):
+        yield
 
 
 def _step() -> ActionStep:

@@ -23,6 +23,7 @@ from agentloom.runtime.hooks import HookEvent, HookHandler, HookPlan, HookResult
 from agentloom.runtime.logging import get_global_logger, set_global_logger
 from agentloom.runtime.loom_mixin import LoomAgentMixin
 from agentloom.runtime.skills.catalog import SkillCatalog
+from agentloom.runtime.tool_gateway import AgentLoomToolGateway, final_answer_binding
 from agentloom.runtime.trace import (
     bind_explicit_execution_context,
     capture_explicit_execution_context,
@@ -1099,7 +1100,7 @@ def test_max_steps_managed_worker_fails_before_call_discards_state(
     from smolagents import RunResult
 
     native_runtime = base_agent_module.ToolCallingAgentV2(
-        tools=[],
+        tool_gateway=AgentLoomToolGateway([final_answer_binding()]),
         model=object(),
         max_steps=1,
         max_tokens=32,

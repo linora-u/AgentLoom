@@ -38,6 +38,41 @@ ToolOutputNormalizer = Callable[[Any, str | None], Any]
 ToolResourceCloser = Callable[[], None]
 
 
+def _return_final_answer(answer: Any) -> Any:
+    return answer
+
+
+def final_answer_binding() -> ToolBinding:
+    """Return AgentLoom's explicit runtime-neutral terminal Tool binding."""
+
+    inputs_schema = {
+        "answer": {
+            "type": "string",
+            "description": "The final answer to the problem",
+            "required": True,
+        }
+    }
+    return ToolBinding(
+        definition=ToolDefinition(
+            name="final_answer",
+            description="Provides a final answer to the given problem.",
+            parameters={
+                "type": "object",
+                "properties": {
+                    "answer": {
+                        "type": "string",
+                        "description": "The final answer to the problem",
+                    }
+                },
+                "required": ["answer"],
+            },
+        ),
+        forward=_return_final_answer,
+        inputs_schema=inputs_schema,
+        output_type="string",
+    )
+
+
 @dataclass(frozen=True, slots=True)
 class ToolBinding:
     """One immutable runtime-neutral Tool declaration and execution binding."""
