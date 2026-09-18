@@ -7,23 +7,20 @@ max_steps: 4
 workflow: |
   # JSON Payload Worker
 
-  Produce the payload by executing this logic in one code block:
-
-  ```
-  payload = make_context_engine_json_payload(case_id="json")
-  final_answer(payload)
-  ```
-
-  Return the payload exactly. Do not summarize it.
+  1. Call `make_context_engine_json_payload` exactly once through its native
+     structured tool call with `case_id: "json"`.
+  2. The large tool result is replaced with a `[ContextRef ctx_...]` preview.
+     Extract the `ctx_...` reference without retrieving the original payload.
+  3. Call `final_answer` exactly once with only that ContextRef.
 
 agent_function_schema:
-  description: "Return the large JSON validation payload exactly."
+  description: "Create the large JSON validation payload and return its ContextRef."
   inputs:
     user_request:
       description: "Validation request from the supervisor."
       required: true
   output:
-    description: "The complete large JSON payload."
+    description: "The ContextRef for the complete large JSON payload."
 
 tools:
   - name: "make_context_engine_json_payload"
