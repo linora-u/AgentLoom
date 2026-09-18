@@ -8,11 +8,10 @@ from pathlib import Path
 
 import httpx
 import pytest
-from openai import OpenAI
-
 from agentloom.tui_bridge.bridge import BridgeError, TuiBridge
 from agentloom.tui_bridge.builder import BuilderService
 from agentloom.tui_bridge.chat_agent import ChatModelProfile
+from openai import OpenAI
 
 
 def _write_catalog(project_root: Path) -> None:
@@ -26,6 +25,7 @@ model:
     base_url: https://models.example.test/api/v3
     api_key: test-key
     model: openai/ep-test
+    adapter: openai_chat
     max_tokens: 128000
     timeout: 300
     num_retries: 10000
@@ -297,9 +297,9 @@ def test_fragmented_tool_call_stages_only_in_memory_then_returns_plain_text(
     requests: list[dict[str, object]] = []
     yaml_content = """\
 name: report_agent
+agent_runtime: smolagents
 description: Build a report.
 model_type: powerful
-tool_call_type: tool_call
 workflow: |
   Return a concise report.
 """
