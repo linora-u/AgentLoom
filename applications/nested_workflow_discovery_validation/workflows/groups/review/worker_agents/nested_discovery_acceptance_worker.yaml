@@ -1,0 +1,19 @@
+name: "nested_discovery_acceptance_worker"
+description: "Return a fixed token for nested discovery functional acceptance."
+model_type: "powerful"
+tool_call_type: "tool_call"
+max_steps: 3
+
+workflow: |
+  Return exactly the token requested by the query. Do not add any other text.
+
+agent_function_schema:
+  description: "Return the exact validation token requested by the Supervisor."
+  inputs:
+    query:
+      description: "The exact token request."
+      required: true
+  output:
+    description: "The exact requested token."
+
+worker_agents: []

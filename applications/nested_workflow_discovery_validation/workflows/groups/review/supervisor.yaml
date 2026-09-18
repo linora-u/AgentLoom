@@ -1,0 +1,15 @@
+name: "nested_discovery_acceptance_supervisor"
+description: "Exercise nested workflow discovery and one real Worker call."
+model_type: "powerful"
+tool_call_type: "tool_call"
+max_steps: 5
+
+workflow: |
+  Call nested_discovery_acceptance_worker exactly once with:
+    query: "Return the exact token ISSUE_69_NESTED_WORKER_PASS"
+
+  Read the Worker result. Your final answer must be exactly:
+    ISSUE_69_NESTED_APPLICATION_PASS worker=ISSUE_69_NESTED_WORKER_PASS
+
+worker_agents:
+  - path: "worker_agents/nested_discovery_acceptance_worker.yaml"

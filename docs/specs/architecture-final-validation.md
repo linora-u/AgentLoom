@@ -3,6 +3,8 @@
 实现与验证已完成。维护者明确要求将最后发现的 **Skill 嵌套 workflow 扫描问题**
 独立记录为 [#69](https://github.com/linora-u/AgentLoom/issues/69)，后续修复，
 先提交本次已完成内容。本次没有合入该问题的修复，也不把它记录为已解决。
+这是 PR #68 的历史交付状态；#69 的后续修复与独立验证见
+[嵌套 workflow 定义发现验证](nested-workflow-discovery-validation.md)。
 
 完整的脱敏结果、Run/task 身份、定义摘要、计数与证据哈希见
 [机器验证记录](architecture-final-validation.json)。
@@ -87,8 +89,8 @@ Markdown 定义发现/入口一致性。两个版本对 **23 份实际请求、6
 
 Spec 轴无未解决 finding。Standards 轴发现一个 P2：两个 Skill 脚本漏扫嵌套
 workflow 目录，可能漏报非法嵌套定义。按维护者明确决定延期到 [#69](https://github.com/linora-u/AgentLoom/issues/69)。
-涉及嵌套 workflow 时，应使用共享的领域 `application.validate` 检查，不能以当前
-两个 Skill 脚本的成功结果证明完整 Application 已通过校验。
+本段记录 PR #68 提交时的审阅结论；后续 #69 已让两个 Skill 脚本复用共享的递归、
+角色感知发现器，当前验证结果见[专项记录](nested-workflow-discovery-validation.md)。
 
 ## 复跑与提交
 

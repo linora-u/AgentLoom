@@ -504,6 +504,98 @@ def test_validator_unreferenced_nested_worker_uses_shared_role_validation(tmp_pa
     assert f"{worker}: {definition_error(canonical.value)}" in _messages(payload)
 
 
+def test_validator_accepts_nested_only_supervisor_and_worker_tree(tmp_path: Path) -> None:
+    app = _create_min_project(tmp_path)
+    top_level = app / "workflows/demo_agent.yaml"
+    top_level.unlink()
+    supervisor = app / "workflows/groups/review/supervisor.md"
+    worker = app / "workflows/groups/review/worker_agents/deep/worker.yaml"
+    _write_markdown(
+        supervisor,
+        """```yaml
+name: nested_supervisor
+description: Coordinate a nested workflow
+model_type: custom-model-key
+worker_agents:
+  - path: worker_agents/deep/worker.yaml
+```
+
+Ask the Worker for evidence and return it.
+""",
+    )
+    _write_worker(worker)
+
+    completed, payload = _run_validator(tmp_path)
+
+    assert completed.returncode == 0, completed.stderr + completed.stdout
+    assert payload["summary"]["valid"] is True
+    assert payload["summary"]["files_checked"] == 2
+    assert payload["errors"] == []
+
+
+def test_validator_top_level_definition_cannot_hide_invalid_nested_definitions(tmp_path: Path) -> None:
+    app = _create_min_project(tmp_path)
+    nested_supervisor = app / "workflows/groups/review/supervisor.md"
+    nested_worker = app / "workflows/groups/review/worker_agents/deep/orphan.yaml"
+    _write_markdown(
+        nested_supervisor,
+        """```yaml
+name: invalid_nested_supervisor
+description: Must be discovered
+tools_mapping: {}
+```
+
+Run the nested workflow.
+""",
+    )
+    _write_worker(nested_worker, goal=False)
+
+    completed, payload = _run_validator(tmp_path)
+
+    assert completed.returncode == 1
+    assert payload["summary"]["valid"] is False
+    assert payload["summary"]["files_checked"] == 3
+    messages = _messages(payload)
+    assert "tools_mapping was removed" in messages
+    assert "must not define goal" in messages
+
+
+def test_validator_does_not_follow_symlinked_definition_files_or_directories(tmp_path: Path) -> None:
+    app = _create_min_project(tmp_path)
+    outside = tmp_path / "outside"
+    invalid_file = outside / "invalid.yaml"
+    invalid_file.parent.mkdir()
+    invalid_file.write_text(
+        "name: linked\nname: duplicate\ndescription: Linked\nworkflow: Work\n",
+        encoding="utf-8",
+    )
+    workflows = app / "workflows"
+    (workflows / "linked.yaml").symlink_to(invalid_file)
+    (workflows / "linked_group").symlink_to(outside, target_is_directory=True)
+
+    completed, payload = _run_validator(tmp_path)
+
+    assert completed.returncode == 0, completed.stderr + completed.stdout
+    assert payload["summary"]["valid"] is True
+    assert payload["summary"]["files_checked"] == 1
+    assert payload["errors"] == []
+
+
+def test_validator_does_not_follow_symlinked_workflows_root(tmp_path: Path) -> None:
+    app = _create_min_project(tmp_path)
+    workflows = app / "workflows"
+    outside = tmp_path / "outside_workflows"
+    workflows.rename(outside)
+    workflows.symlink_to(outside, target_is_directory=True)
+
+    completed, payload = _run_validator(tmp_path)
+
+    assert completed.returncode == 1
+    assert payload["summary"]["valid"] is False
+    assert payload["summary"]["files_checked"] == 0
+    assert "workflows 中没有 Agent YAML/Markdown 定义" in _messages(payload)
+
+
 def test_skill_scripts_inspect_without_model_tool_or_hook_execution(tmp_path: Path) -> None:
     app = _create_min_project(tmp_path)
     workflow = app / "workflows/demo_agent.yaml"
