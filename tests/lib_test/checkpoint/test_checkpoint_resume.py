@@ -350,6 +350,57 @@ class TestSupervisorCheckpoint:
 
         assert cm.load_task_tree(task_id)["checkpoint_degraded"] is True
 
+    @pytest.mark.parametrize("auxiliary", ["heartbeat", "file_history"])
+    def test_terminal_checkpoint_ignores_auxiliary_refresh_failure(
+        self,
+        cm: CheckpointManager,
+        task_id: str,
+        auxiliary: str,
+    ) -> None:
+        cm.save_task_tree(
+            task_id,
+            {
+                "task_id": task_id,
+                "status": "running",
+                "agent_name": "sup",
+                "workers": {},
+            },
+        )
+        coord = CheckpointCoordinator(cm, task_id, "supervise")
+        failing = SimpleNamespace(
+            update_step=lambda *_args: (_ for _ in ()).throw(
+                OSError("heartbeat refresh failed")
+            ),
+            make_post_step_snapshot=lambda *_args: (_ for _ in ()).throw(
+                OSError("file history refresh failed")
+            ),
+        )
+        if auxiliary == "heartbeat":
+            coord._supervisor_heartbeat = failing
+        else:
+            coord._file_history = failing
+
+        coord.save_runtime_checkpoint(
+            RuntimeCheckpointEnvelope(
+                runtime_id="smolagents",
+                runtime_version="test",
+                state_schema_version=2,
+                progress=1,
+                payload={
+                    "memory_steps": [],
+                    "canonical_model_items": [],
+                },
+            ),
+            "completed",
+            result="done",
+        )
+
+        checkpoint = cm.load_supervisor_checkpoint(task_id)
+        tree = cm.load_task_tree(task_id)
+        assert checkpoint["status"] == "completed"
+        assert tree["status"] == "completed"
+        assert tree.get("checkpoint_degraded") is not True
+
 # ── Worker resume (skip completed) ──────────────────────────────────────
 
 

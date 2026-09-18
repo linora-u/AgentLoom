@@ -262,17 +262,6 @@ class CheckpointCoordinator:
                 result=result,
                 error=error,
             )
-            step_count = checkpoint.progress
-            if self._supervisor_heartbeat is not None:
-                self._supervisor_heartbeat.update_step(step_count)
-            if self._file_history is not None:
-                self._file_history.make_post_step_snapshot(step_count)
-            _logger.info(
-                "Runtime checkpoint saved [%s] task_id=%s runtime=%s",
-                status,
-                self._task_id,
-                checkpoint.runtime_id,
-            )
         except Exception as exc:
             _logger.error("Failed to save runtime checkpoint: %s", exc, exc_info=True)
             try:
@@ -287,6 +276,31 @@ class CheckpointCoordinator:
                 )
             if status in _TERMINAL_CHECKPOINT_STATUSES:
                 raise
+            return
+
+        step_count = checkpoint.progress
+        if self._supervisor_heartbeat is not None:
+            try:
+                self._supervisor_heartbeat.update_step(step_count)
+            except Exception as exc:
+                _logger.warning(
+                    "Failed to update Supervisor heartbeat after checkpoint: %s",
+                    exc,
+                )
+        if self._file_history is not None:
+            try:
+                self._file_history.make_post_step_snapshot(step_count)
+            except Exception as exc:
+                _logger.warning(
+                    "Failed to snapshot file history after checkpoint: %s",
+                    exc,
+                )
+        _logger.info(
+            "Runtime checkpoint saved [%s] task_id=%s runtime=%s",
+            status,
+            self._task_id,
+            checkpoint.runtime_id,
+        )
 
     # ── Worker ops ───────────────────────────────────────────────────
 
