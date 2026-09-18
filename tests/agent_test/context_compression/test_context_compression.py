@@ -1192,7 +1192,7 @@ class TestTruncateUntilFits:
         Uses caplog (stdlib) to capture the warning.  LoggerAdapter._dispatch
         mirrors all log output to the stdlib logging hierarchy via
         _stdlib_emit, so caplog always sees the records regardless of whether
-        a global EnhancedAgentLogger backend is active.
+        a global Rich logger backend is active.
         """
         messages = [
             ChatMessage(role=MessageRole.SYSTEM, content="system"),
