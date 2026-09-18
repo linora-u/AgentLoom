@@ -9,14 +9,18 @@ from dataclasses import dataclass, replace
 from typing import TYPE_CHECKING, Any
 
 from agentloom.configuration import C
+from agentloom.runtime.agent_runtime import (
+    AgentRuntimeRequest,
+    require_runtime_state,
+)
 from agentloom.runtime.hooks import HookEvent, HookRun
-from agentloom.runtime.workspace import ensure_workspace_mounted_once
 from agentloom.runtime.trace import (
     bind_explicit_execution_context,
     capture_explicit_execution_context,
     generate_id,
     require_root_run_id,
 )
+from agentloom.runtime.workspace import ensure_workspace_mounted_once
 
 if TYPE_CHECKING:
     from agentloom.application.lifecycle import ApplicationRunLifecycle
@@ -211,6 +215,7 @@ class AgentInvocation:
         owner = self.owner
         session_started = False
         session_result = None
+        runtime_result = None
         session_error: BaseException | None = None
         runtime_agent = None
         agent_id = owner.get_agent_id()
@@ -262,23 +267,28 @@ class AgentInvocation:
         todo_binding.__enter__()
 
         try:
-            runtime_agent = owner.build_runtime_agent()
+            runtime_agent = owner.build_runtime()
             owner._bind_hook_message_sink(runtime_agent)
             ensure_workspace_mounted_once()
             if self.owns_root_run:
                 owner._emit_session_lifecycle_event(HookEvent.SESSION_START, transformed_task)
                 session_started = True
 
-            self._prepare_checkpoint(runtime_agent, coordinator)
-            result = self._run_runtime(
+            runtime_checkpoint, checkpoint_sink = self._prepare_checkpoint(
+                coordinator
+            )
+            result, runtime_result = self._run_runtime(
                 runtime_agent,
                 transformed_tasks=transformed_tasks,
                 goal_provider=goal_provider,
+                runtime_checkpoint=runtime_checkpoint,
+                checkpoint_sink=checkpoint_sink,
             )
-            try:
-                current_worker_memory.set(list(runtime_agent.memory.steps))
-            except Exception:
-                pass
+            current_worker_memory.set(
+                None
+                if runtime_result is None or runtime_result.checkpoint is None
+                else runtime_result.checkpoint.to_dict()
+            )
             owner._emit_task_lifecycle_event(
                 HookEvent.TASK_COMPLETED,
                 transformed_task,
@@ -303,7 +313,7 @@ class AgentInvocation:
                 lifecycle_error = self._finalize(
                     transformed_task=transformed_task,
                     final_task_id=final_task_id,
-                    runtime_agent=runtime_agent,
+                    runtime_result=runtime_result,
                     coordinator=coordinator,
                     lifecycle=lifecycle,
                     owns_lifecycle=owns_lifecycle,
@@ -326,20 +336,20 @@ class AgentInvocation:
             if lifecycle_error is not None:
                 raise lifecycle_error
 
-    def _prepare_checkpoint(self, runtime_agent: Any, coordinator: Any) -> None:
+    def _prepare_checkpoint(self, coordinator: Any) -> tuple[Any, Any]:
         if coordinator is None:
-            return
+            return None, None
+        runtime_checkpoint = None
         if self.resume and self.checkpoint_manager is not None:
-            coordinator.restore(runtime_agent)
-            if coordinator._supervisor_heartbeat is not None:
-                try:
-                    coordinator._supervisor_heartbeat.update_step(len(runtime_agent.memory.steps))
-                except Exception:
-                    pass
+            runtime_checkpoint = coordinator.load_runtime_checkpoint()
+
+        checkpoint_sink = None
         if self.checkpoint_manager is not None:
-            coordinator.register_supervisor_step_callback(runtime_agent)
-        else:
-            coordinator.register_worker_step_callback(runtime_agent, agent_name=self.owner.name)
+            def save_running_checkpoint(checkpoint: Any) -> None:
+                coordinator.save_runtime_checkpoint(checkpoint, "running")
+
+            checkpoint_sink = save_running_checkpoint
+        return runtime_checkpoint, checkpoint_sink
 
     def _run_runtime(
         self,
@@ -347,35 +357,38 @@ class AgentInvocation:
         *,
         transformed_tasks: list[str],
         goal_provider: Any,
-    ) -> Any:
+        runtime_checkpoint: Any = None,
+        checkpoint_sink: Any = None,
+    ) -> tuple[Any, Any]:
         if goal_provider is None:
             result = None
             for task_index, current_task in enumerate(transformed_tasks):
-                run_kwargs: dict[str, Any] = {
-                    "task": current_task,
-                    "return_full_result": True,
-                }
-                if self.additional_args:
-                    run_kwargs["additional_args"] = dict(self.additional_args)
-                if self.resume or task_index > 0:
-                    run_kwargs["reset"] = False
-                if task_index > 0 and getattr(
-                    runtime_agent,
-                    "_agent_loom_supports_reset_false_task_step_control",
-                    False,
-                ):
-                    run_kwargs["_skip_task_step_on_reset_false"] = False
-                run_result = runtime_agent.run(**run_kwargs)
-                require_successful_runtime_result(run_result)
-                result = getattr(run_result, "output", None)
-            return result
+                run_result = runtime_agent.run(
+                    AgentRuntimeRequest(
+                        task=current_task,
+                        continue_session=self.resume or task_index > 0,
+                        record_task=task_index > 0,
+                        additional_args=self.additional_args or {},
+                        checkpoint=(
+                            runtime_checkpoint if task_index == 0 else None
+                        ),
+                        checkpoint_sink=checkpoint_sink,
+                    )
+                )
+                require_runtime_state(
+                    run_result,
+                    allowed_states={"success"},
+                    error_prefix="Agent run did not complete successfully",
+                )
+                result = run_result.output
+            return result, run_result
 
         initial_state = goal_provider.snapshot()
         segment_index = 0
         while True:
             state = goal_provider.snapshot()
             if state.status == "complete":
-                return state.evidence
+                return state.evidence, None
             goal_provider.assert_request_allowed()
             use_initial_context = segment_index == 0 and not initial_state.goal_started
             current_task = (
@@ -383,34 +396,42 @@ class AgentInvocation:
                 if use_initial_context
                 else goal_continuation_prompt(state)
             )
-            run_kwargs = {"task": current_task, "return_full_result": True}
-            if self.additional_args:
-                run_kwargs["additional_args"] = dict(self.additional_args)
-            if self.resume or segment_index > 0 or not use_initial_context:
-                run_kwargs["reset"] = False
-            if not use_initial_context and getattr(
-                runtime_agent,
-                "_agent_loom_supports_reset_false_task_step_control",
-                False,
-            ):
-                run_kwargs["_skip_task_step_on_reset_false"] = False
             try:
-                run_result = runtime_agent.run(**run_kwargs)
+                run_result = runtime_agent.run(
+                    AgentRuntimeRequest(
+                        task=current_task,
+                        continue_session=(
+                            self.resume
+                            or segment_index > 0
+                            or not use_initial_context
+                        ),
+                        record_task=not use_initial_context,
+                        additional_args=self.additional_args or {},
+                        checkpoint=(
+                            runtime_checkpoint if segment_index == 0 else None
+                        ),
+                        checkpoint_sink=checkpoint_sink,
+                    )
+                )
             except Exception as exc:
                 from agentloom.runtime.goal import GoalBudgetLimitedError, GoalCompleteError
 
                 terminal_state = goal_provider.snapshot()
                 if isinstance(exc, GoalCompleteError) or terminal_state.status == "complete":
-                    return terminal_state.evidence
+                    return terminal_state.evidence, None
                 if terminal_state.status == "budget_limited":
                     raise GoalBudgetLimitedError(terminal_state) from exc
                 raise
-            require_goal_runtime_result(run_result)
-            segment_output = getattr(run_result, "output", None)
+            require_runtime_state(
+                run_result,
+                allowed_states={"success", "max_steps_error"},
+                error_prefix="Agent Goal segment failed",
+            )
+            segment_output = run_result.output
             segment_index += 1
             state = goal_provider.snapshot()
             if state.status == "complete":
-                return goal_completion_output(segment_output, state.evidence)
+                return goal_completion_output(segment_output, state.evidence), run_result
             goal_provider.assert_request_allowed()
 
     def _finalize(
@@ -418,7 +439,7 @@ class AgentInvocation:
         *,
         transformed_task: str,
         final_task_id: str,
-        runtime_agent: Any,
+        runtime_result: Any,
         coordinator: Any,
         lifecycle: ApplicationRunLifecycle | None,
         owns_lifecycle: bool,
@@ -436,7 +457,7 @@ class AgentInvocation:
                 try:
                     lifecycle.report_agent_invocation(
                         coordinator=coordinator,
-                        runtime_agent=runtime_agent,
+                        runtime_result=runtime_result,
                         result=session_result,
                         error=session_error,
                         goal=goal_snapshot,

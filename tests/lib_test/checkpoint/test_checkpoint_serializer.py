@@ -2,14 +2,19 @@
 
 from __future__ import annotations
 
+import json
 import time
 
+from agentloom.adapters.smolagents.model_turn_bridge import (
+    MODEL_ITEMS_RAW_KEY,
+    MODEL_RESPONSE_ID_RAW_KEY,
+)
+from agentloom.runtime.checkpoint.serializer import CheckpointSerializer
+from agentloom.runtime.model_protocol import FunctionCallItem, ReasoningItem
+from agentloom.runtime.tool_protocol import ToolCallRecord, ToolErrorRecord
 from smolagents.memory import ActionStep, PlanningStep, TaskStep, ToolCall
 from smolagents.models import ChatMessage, MessageRole
 from smolagents.monitoring import Timing, TokenUsage
-
-from agentloom.runtime.checkpoint.serializer import CheckpointSerializer
-from agentloom.runtime.tool_protocol import ToolCallRecord, ToolErrorRecord
 
 # ── helpers ──────────────────────────────────────────────────────────────
 
@@ -106,6 +111,46 @@ class TestSerializeActionStep:
         data = CheckpointSerializer.serialize_memory_steps([step])
         rebuilt = CheckpointSerializer.deserialize_memory_steps(data)
         assert rebuilt[0].model_output == "I will call shell_tool to list files."
+
+    def test_roundtrip_preserves_canonical_items_and_response_id(self):
+        items = (
+            ReasoningItem(
+                item_id="reasoning-1",
+                summary=("Inspect the repository",),
+                replay_payload={
+                    "type": "reasoning",
+                    "encrypted_content": "opaque-ciphertext",
+                },
+            ),
+            FunctionCallItem(
+                call_id="call-1",
+                name="shell_tool",
+                arguments_json='{"command":"pwd"}',
+                item_id="function-1",
+            ),
+        )
+        step = ActionStep(
+            step_number=1,
+            timing=_make_timing(),
+            model_output_message=ChatMessage(
+                role=MessageRole.ASSISTANT,
+                content="",
+                raw={
+                    MODEL_ITEMS_RAW_KEY: items,
+                    MODEL_RESPONSE_ID_RAW_KEY: "response-1",
+                },
+            ),
+        )
+
+        data = CheckpointSerializer.serialize_memory_steps([step])
+        json.dumps(data)
+        rebuilt = CheckpointSerializer.deserialize_memory_steps(data)[0]
+
+        assert rebuilt.model_output_message is not None
+        assert rebuilt.model_output_message.raw == {
+            MODEL_ITEMS_RAW_KEY: items,
+            MODEL_RESPONSE_ID_RAW_KEY: "response-1",
+        }
 
     def test_skip_model_input_messages(self):
         """model_input_messages should be stripped during serialisation."""

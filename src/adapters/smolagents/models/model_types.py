@@ -4,7 +4,7 @@ Model type definitions and configuration.
 
 import json
 from dataclasses import dataclass
-from typing import Optional
+from typing import Any
 
 from agentloom.configuration import C
 from agentloom.configuration.defaults import (
@@ -18,6 +18,7 @@ from agentloom.configuration.defaults import (
     DEFAULT_MODEL_TEMPERATURE,
     DEFAULT_MODEL_TIMEOUT,
 )
+from agentloom.configuration.llm_config import ModelAdapter
 from agentloom.runtime.logging import get_logger
 
 logger = get_logger(__name__)
@@ -50,9 +51,10 @@ def _unknown_model_type_error(model_type: str, available: list[str]) -> str:
 @dataclass
 class ModelConfig:
     """Model configuration."""
-    model_id: Optional[str] = None
-    base_url: Optional[str] = None
-    api_key: Optional[str] = None
+    model_id: str | None = None
+    adapter: ModelAdapter = "openai_chat"
+    base_url: str | None = None
+    api_key: str | None = None
     temperature: float = DEFAULT_MODEL_TEMPERATURE
     max_tokens: int = DEFAULT_MAX_TOKENS
     context_window: int = DEFAULT_MAX_TOKENS
@@ -63,17 +65,15 @@ class ModelConfig:
     num_retries: int = DEFAULT_MODEL_NUM_RETRIES
     retry_delay: float = DEFAULT_MODEL_RETRY_DELAY
     max_retry_delay: float = DEFAULT_MODEL_MAX_RETRY_DELAY
-    extra_headers: Optional[dict] = None
+    extra_headers: dict | None = None
     context_cache: bool = DEFAULT_MODEL_CONTEXT_CACHE
-    system_prompt_boundary: Optional[str] = None
+    system_prompt_boundary: str | None = None
     requests_per_minute: int = DEFAULT_MODEL_REQUESTS_PER_MINUTE
-    # Whether the model supports json_schema structured output (response_format).
-    # "true" - use structured output (json_schema) for code_act mode
-    # "false" - use text-based <code> block parsing for code_act mode
+    # Whether the model supports provider-native structured output.
     supports_structured_output: str = "false"
     # Extra parameters passed through to litellm.completion() (e.g. reasoning_effort,
     # extra_body for provider-specific features like DeepSeek thinking mode).
-    extra_completion_params: Optional[dict] = None
+    extra_completion_params: dict[str, Any] | None = None
 
     @property
     def usable_input_tokens(self) -> int:
@@ -140,6 +140,7 @@ def _build_model_config_from_yaml(type_name: str) -> ModelConfig:
 
     return ModelConfig(
         model_id=resolved.model,
+        adapter=resolved.adapter,
         base_url=resolved.base_url or None,
         api_key=resolved.api_key or None,
         temperature=float(resolved.temperature),
@@ -204,7 +205,7 @@ class ModelTypeManager:
         return cls.get_llm_config(model_type).description
 
     @classmethod
-    def resolve_model_type(cls, model_type: Optional[str]) -> "ModelType":
+    def resolve_model_type(cls, model_type: str | None) -> "ModelType":
         """
         Resolve a model type string to a ModelType instance.
 

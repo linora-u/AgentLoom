@@ -22,7 +22,10 @@ def _make_workflow(repo_root: Path, application_id: str) -> Path:
     workflow = repo_root / "applications" / application_id / "workflows" / "agent.yaml"
     workflow.parent.mkdir(parents=True, exist_ok=True)
     workflow.write_text(
-        "name: supervisor\ndescription: migration test\nworkflow: resume safely\n",
+        "name: supervisor\n"
+        "agent_runtime: smolagents\n"
+        "description: migration test\n"
+        "workflow: resume safely\n",
         encoding="utf-8",
     )
     return workflow
@@ -304,6 +307,7 @@ def test_external_workflow_uses_the_same_application_id_for_migration_and_runner
     workflow = tmp_path / "external_workflow.yaml"
     workflow.write_text(
         "name: custom_supervisor\n"
+        "agent_runtime: smolagents\n"
         "application_id: explicit-app\n"
         "description: migration test\n"
         "workflow: resume safely\n",
@@ -324,6 +328,7 @@ def test_external_workflow_uses_the_same_application_id_for_migration_and_runner
     runner_id = resolve_application_id(
         {
             "name": "custom_supervisor",
+            "agent_runtime": "smolagents",
             "application_id": "explicit-app",
             "description": "migration test",
             "workflow": "resume safely",

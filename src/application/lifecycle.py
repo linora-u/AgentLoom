@@ -16,6 +16,7 @@ from datetime import datetime
 from typing import Any, Literal
 
 from agentloom.application.run import RunPhase
+from agentloom.runtime.agent_runtime import AgentRuntimeResult
 from agentloom.runtime.checkpoint import CheckpointManager
 from agentloom.runtime.goal import GoalBudgetLimitedError
 
@@ -32,7 +33,7 @@ ApplicationRunOutcome = Literal[
 @dataclass(slots=True)
 class _AgentInvocation:
     coordinator: Any | None
-    runtime_agent: Any | None
+    runtime_result: AgentRuntimeResult | None
     result: str | None
     error: BaseException | None
 
@@ -124,7 +125,7 @@ class ApplicationRunLifecycle:
         self,
         *,
         coordinator: Any | None,
-        runtime_agent: Any | None,
+        runtime_result: AgentRuntimeResult | None,
         result: object | None,
         error: BaseException | None,
         goal: Mapping[str, object] | None,
@@ -135,7 +136,7 @@ class ApplicationRunLifecycle:
             raise RuntimeError("Application Run Agent invocation was already reported")
         self._invocation = _AgentInvocation(
             coordinator=coordinator,
-            runtime_agent=runtime_agent,
+            runtime_result=runtime_result,
             result=None if result is None else str(result),
             error=error,
         )
@@ -217,9 +218,14 @@ class ApplicationRunLifecycle:
             return
 
         invocation = self._invocation
-        if invocation is not None and invocation.coordinator is not None and invocation.runtime_agent is not None:
-            invocation.coordinator.save_supervisor(
-                invocation.runtime_agent,
+        if (
+            invocation is not None
+            and invocation.coordinator is not None
+            and invocation.runtime_result is not None
+            and invocation.runtime_result.checkpoint is not None
+        ):
+            invocation.coordinator.save_runtime_checkpoint(
+                invocation.runtime_result.checkpoint,
                 outcome,
                 result=result if outcome == "completed" else None,
                 error=error_message,

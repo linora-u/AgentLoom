@@ -20,15 +20,7 @@ from typing import TYPE_CHECKING, Any
 if TYPE_CHECKING:
     from agentloom.application.lifecycle import ApplicationRunLifecycle
 
-from smolagents import (
-    AgentLogger,
-    CodeAgent,
-    LogLevel,
-    RunResult,
-    Tool,
-)
-
-from agentloom.adapters.smolagents.agents import CodeAgentV2, ToolCallingAgentV2
+from agentloom.adapters.smolagents.agents import ToolCallingAgentV2
 from agentloom.adapters.smolagents.models.model_manager import (
     ModelConfigBuilder,
     get_model,
@@ -37,19 +29,19 @@ from agentloom.adapters.smolagents.tool_shim import clone_tool_for_runtime, inje
 from agentloom.adapters.smolagents.tools.tools import ensure_tool_wrapped
 from agentloom.application.validation import (
     AgentConfigNormalizer,
-    NormalizedExecutionConfig,
-    build_normalized_execution_config,
     normalize_execution_prompt_template_path_value,
     normalize_positive_int_value,
-    validate_execution_config_payload,
     validate_todo_config,
 )
 from agentloom.configuration import (
     C,
     build_effective_agent_config_snapshot,
-    get_code_agent_config,
 )
 from agentloom.configuration.defaults import DEFAULT_MAX_TOKENS
+from agentloom.runtime.agent_runtime import (
+    AgentRuntime,
+    build_builtin_runtime_registry,
+)
 from agentloom.runtime.hooks import (
     HookConfigLayer,
     HookEvent,
@@ -75,6 +67,13 @@ from agentloom.runtime.trace import (
 )
 from agentloom.runtime.workspace import ensure_workspace_mounted_once
 from agentloom.tools.loader import resolve_tool_function
+from smolagents import (
+    AgentLogger,
+    LogLevel,
+    RunResult,
+    Tool,
+    ToolCallingAgent,
+)
 
 
 class AgentType(Enum):
@@ -94,9 +93,8 @@ class BaseAgent(ABC):
     and execution environment integration.
     """
 
-    # Default configuration, subclasses can override
-    tool_call_type = "tool_call"  # tool_call, code_act
     max_steps = 80
+    _config: dict[str, Any]
 
     @property
     @abstractmethod
@@ -129,7 +127,7 @@ class BaseAgent(ABC):
 
         Args:
             model: Optional model instance. If omitted, the model manager selects one.
-            execution_env: Optional execution environment instance.
+            execution_env: Ignored legacy argument.
             logger: Optional logger instance.
             model_cache: Whether to enable model caching.
         """
@@ -146,8 +144,7 @@ class BaseAgent(ABC):
         else:
             self._model = model
 
-        # Initialize execution environment
-        self._execution_env: Any | None = execution_env
+        _ = execution_env
 
         # Initialize logger
         self._logger = logger
@@ -168,7 +165,7 @@ class BaseAgent(ABC):
         # Generate unique agent ID
         self._agent_id = self._generate_agent_id()
 
-        self._final_answer_checks = []
+        self._final_answer_checks: list[Callable[..., bool]] = []
         self._hook_plan = HookPlan(builtin_hook_handlers())
 
     def _generate_agent_id(self) -> str:
@@ -192,10 +189,6 @@ class BaseAgent(ABC):
             str: Unique identifier of the agent.
         """
         return self._agent_id
-
-    def set_execution_env(self, execution_env: Any):
-        """Set execution environment."""
-        self._execution_env = execution_env
 
     def set_final_answer_checks(self, check_func_list):
         """Set final-answer validation callbacks."""
@@ -363,17 +356,6 @@ class BaseAgent(ABC):
             return tasks
         return [f"{snapshot}\n\n{tasks[0]}", *tasks[1:]]
 
-    def get_execution_tools(self) -> list:
-        """
-        Get tool list from execution environment.
-
-        Returns:
-            List: Execution environment tools.
-        """
-        if self._execution_env:
-            return self._execution_env.tools()
-        return []
-
     def get_all_tools(self, agent_type: str = "worker") -> list:
         """
         Get all available tools.
@@ -384,10 +366,7 @@ class BaseAgent(ABC):
         Returns:
             List: Merged tool list.
         """
-        execution_tools = self.get_execution_tools()
-        agent_tools = self._get_tools()
-
-        return agent_tools + execution_tools
+        return self._get_tools()
 
     @staticmethod
     def _resolve_runtime_logger_backend(provided_logger: Any) -> Any:
@@ -459,10 +438,8 @@ class BaseAgent(ABC):
 @dataclass(frozen=True)
 class AgentRoleProfile:
     agent_type: AgentType
-    tool_call_type: str
     cache_runtime_agent: bool = False
     enable_sub_task_tracking: bool = False
-    additional_authorized_imports: list[str] | None = None
     inject_default_file_tools: bool = False
 
 
@@ -475,9 +452,6 @@ class RoleDrivenAgent(BaseAgent):
 
     COMMON_REQUIRED_FIELDS: tuple[str, ...] = ("name", "description", "workflow")
     REQUIRED_CONFIG_FIELDS: tuple[str, ...] = ()
-    ALLOWED_TOOL_CALL_TYPES: tuple[str, ...] = ("tool_call", "code_act")
-    DEFAULT_TOOL_CALL_TYPE: str = "tool_call"
-
     def __init__(
         self,
         config: dict | None = None,
@@ -499,7 +473,6 @@ class RoleDrivenAgent(BaseAgent):
         else:
             raise ValueError(f"Agent config must be a dictionary, got {type(config).__name__}")
         self._normalized = None
-        self._execution_normalized: NormalizedExecutionConfig | None = None
         effective_snapshot = build_effective_agent_config_snapshot(
             self._config,
             source_name=str(self._config.get("_yaml_file_path") or self._config.get("name") or self.__class__.__name__),
@@ -519,7 +492,6 @@ class RoleDrivenAgent(BaseAgent):
         )
 
         super().__init__(model=model, execution_env=execution_env, logger=resolved_logger, model_cache=model_cache)
-        self.tool_call_type = self._role_profile().tool_call_type
 
         runtime_logger = self._effective_logger()
         self._skill_catalog = self._config.get("_skill_catalog_snapshot")
@@ -577,13 +549,6 @@ class RoleDrivenAgent(BaseAgent):
     def _required_config_fields(self) -> tuple[str, ...]:
         return tuple(self.REQUIRED_CONFIG_FIELDS)
 
-    def _resolve_tool_call_type(self) -> str:
-        return AgentConfigNormalizer.resolve_tool_call_type(
-            self._config,
-            default_tool_call_type=self.DEFAULT_TOOL_CALL_TYPE,
-            allowed_tool_call_types=self.ALLOWED_TOOL_CALL_TYPES,
-        )
-
     def _validate_role_specific_config(self, normalized: Any | None) -> None:
         """Role-specific validation hook after common validation and normalization."""
 
@@ -592,12 +557,9 @@ class RoleDrivenAgent(BaseAgent):
         normalized = AgentConfigNormalizer.validate_role_driven_config(
             self._config,
             required_fields=self._required_config_fields(),
-            default_tool_call_type=self.DEFAULT_TOOL_CALL_TYPE,
-            allowed_tool_call_types=self.ALLOWED_TOOL_CALL_TYPES,
             build_normalized=self._build_normalized_config,
             validate_role_specific=self._validate_role_specific_config,
         )
-        self._execution_normalized = self._build_execution_normalized_config()
         return normalized
 
     def _build_normalized_config(self) -> Any | None:
@@ -608,26 +570,6 @@ class RoleDrivenAgent(BaseAgent):
         if self._normalized is None:
             self._normalized = self._build_normalized_config()
         return self._normalized
-
-    def _execution_validation_agent_root(self) -> str:
-        return str(C.agent_root)
-
-    def _build_execution_normalized_config(self) -> NormalizedExecutionConfig:
-        cfg = dict(self._config)
-        effective = getattr(self, "_effective_agent_config", None)
-        if effective and "execution_env" in effective:
-            cfg["execution_env"] = effective["execution_env"]
-
-        return build_normalized_execution_config(
-            cfg,
-            source_name=self.__class__.__name__,
-            agent_root=self._execution_validation_agent_root(),
-        )
-
-    def _ensure_execution_normalized(self) -> NormalizedExecutionConfig:
-        if self._execution_normalized is None:
-            self._execution_normalized = self._build_execution_normalized_config()
-        return self._execution_normalized
 
     @staticmethod
     def resolve_agent_logger_from_config(
@@ -703,29 +645,24 @@ class RoleDrivenAgent(BaseAgent):
         return validate_todo_config(config, source=self.name)
 
     def _build_execution_agent_kwargs(self, profile: AgentRoleProfile) -> dict[str, Any]:
-        """Build validated runtime kwargs for `_create_agent`."""
+        """Build runtime kwargs for the structured tool-calling agent."""
         self._ensure_normalized()
-        execution_normalized = validate_execution_config_payload(self._ensure_execution_normalized())
         log = get_logger(self._effective_logger(), __name__)
         raw_planning_interval = self._config.get("planning_interval")
-        if raw_planning_interval is not None and execution_normalized.planning_interval is None:
+        planning_interval = normalize_positive_int_value(raw_planning_interval)
+        if raw_planning_interval is not None and planning_interval is None:
             log.warning(
                 "Ignored invalid '%s.planning_interval'=%r; expected a positive integer or numeric string.",
                 self.name,
                 raw_planning_interval,
             )
 
-        code_agent_cfg = get_code_agent_config(self._effective_agent_config)
         context_window, max_output_tokens = self._resolve_split_token_budget_from_config()
         return {
-            "additional_authorized_imports": profile.additional_authorized_imports,
-            "additional_functions": code_agent_cfg.get("additional_functions", {}),
             "enable_sub_task_tracking": profile.enable_sub_task_tracking,
             "agent_name": self.name if profile.enable_sub_task_tracking else None,
-            "executor_type": execution_normalized.executor_type,
-            "executor_kwargs": dict(execution_normalized.executor_kwargs),
-            "prompt_template_path": execution_normalized.prompt_template_path,
-            "planning_interval": execution_normalized.planning_interval,
+            "prompt_template_path": None,
+            "planning_interval": planning_interval,
             "max_tokens": self._resolve_max_tokens_from_config(),
             "context_window": context_window,
             "max_output_tokens": max_output_tokens,
@@ -785,7 +722,7 @@ class RoleDrivenAgent(BaseAgent):
             tools = [*tools, resolve_tool_function("todo_write")]
         return tools
 
-    def build_runtime_agent(self) -> CodeAgent:
+    def build_runtime_agent(self) -> ToolCallingAgent:
         profile = self._role_profile()
 
         if profile.cache_runtime_agent and self._runtime_agent is not None:
@@ -805,6 +742,26 @@ class RoleDrivenAgent(BaseAgent):
             self._runtime_agent = runtime_agent
 
         return runtime_agent
+
+    def build_runtime(self) -> AgentRuntime:
+        """Build the configured complete-run Agent runtime adapter."""
+
+        runtime_id = AgentConfigNormalizer.validate_agent_runtime_config(
+            self._config
+        )
+        registry = build_builtin_runtime_registry(
+            smolagents_factory=self._build_smolagents_runtime,
+        )
+        return registry.create(runtime_id)
+
+    def _build_smolagents_runtime(self) -> AgentRuntime:
+        """Construct the smolagents adapter behind the registry factory."""
+
+        from agentloom.adapters.smolagents.runtime_adapter import (
+            SmolagentsRuntimeAdapter,
+        )
+
+        return SmolagentsRuntimeAdapter(self.build_runtime_agent())
 
     def _prepare_runtime_tools(self, tools: list[Any]) -> list[Tool]:
         wrapped = ensure_tool_wrapped(self._deduplicate_tools(tools))
@@ -850,8 +807,6 @@ class RoleDrivenAgent(BaseAgent):
             skill_catalog=self._skill_catalog,
             skill_tool_enabled=skill_tool_enabled,
             logger=runtime_logger,
-            tool_call_type=self.tool_call_type,
-            use_structured_output=getattr(self._model, "supports_structured_output", "false") == "true",
             todo_mode=self._resolve_todo_mode(),
         )
 
@@ -859,14 +814,10 @@ class RoleDrivenAgent(BaseAgent):
         self,
         tools: list | None = None,
         *,
-        additional_authorized_imports: list[str] | None = None,
-        additional_functions: dict[str, Any] | None = None,
         enable_sub_task_tracking: bool = False,
         agent_name: str | None = None,
         use_customized_prompt: bool = True,
         prompt_template_path: str | None = None,
-        executor_type: str | None = None,
-        executor_kwargs: dict[str, Any] | None = None,
         planning_interval: int | None = None,
         max_tokens: int | None = None,
         context_window: int | None = None,
@@ -875,7 +826,7 @@ class RoleDrivenAgent(BaseAgent):
         runtime_name: str | None = None,
         runtime_description: str | None = None,
         todo_mode: str = "auto",
-    ) -> CodeAgent:
+    ) -> ToolCallingAgent:
         """
         Create configured agent instance.
 
@@ -883,7 +834,7 @@ class RoleDrivenAgent(BaseAgent):
             tools: Tool list. If omitted, use get_all_tools().
 
         Returns:
-            CodeAgent: Configured agent instance.
+            ToolCallingAgent: Configured agent instance.
         """
         if tools is None:
             tools = self.get_all_tools()
@@ -908,10 +859,6 @@ class RoleDrivenAgent(BaseAgent):
             "before_run_callbacks": list(self._before_run_callbacks),
             "final_answer_checks": self._build_runtime_final_answer_checks(),
         }
-        if executor_type is not None:
-            agent_kwargs["executor_type"] = executor_type
-        if executor_kwargs is not None:
-            agent_kwargs["executor_kwargs"] = dict(executor_kwargs)
         if normalized_planning_interval is not None:
             agent_kwargs["planning_interval"] = normalized_planning_interval
         if max_tokens is not None:
@@ -927,35 +874,6 @@ class RoleDrivenAgent(BaseAgent):
         if runtime_description is not None:
             agent_kwargs["description"] = runtime_description
 
-        if additional_functions is not None:
-            if executor_type in {"docker", "e2b"}:
-                runtime_logger.info(
-                    "Skipped additional_functions injection for executor_type='%s' because the executor "
-                    "constructor does not support this key.",
-                    executor_type,
-                )
-            else:
-                agent_kwargs.setdefault("executor_kwargs", {})
-                agent_kwargs["executor_kwargs"]["additional_functions"] = dict(additional_functions)
-                runtime_logger.info(
-                    "Added additional_functions to executor_kwargs: %s",
-                    list(additional_functions.keys()),
-                )
-
-        resolved_additional_authorized_imports = additional_authorized_imports
-        if resolved_additional_authorized_imports is not None:
-            resolved_additional_authorized_imports = list(resolved_additional_authorized_imports)
-            if executor_type in {"docker", "e2b", "wasm"} and "*" in resolved_additional_authorized_imports:
-                resolved_additional_authorized_imports = [
-                    item for item in resolved_additional_authorized_imports if item != "*"
-                ]
-                runtime_logger.info(
-                    "Removed wildcard '*' from additional_authorized_imports for executor_type='%s' "
-                    "to avoid remote package-install side effects; keeping explicit imports: %s",
-                    executor_type,
-                    resolved_additional_authorized_imports,
-                )
-
         prompt_templates = self._build_prompt_templates(
             runtime_logger=runtime_logger,
             use_customized_prompt=use_customized_prompt,
@@ -963,23 +881,12 @@ class RoleDrivenAgent(BaseAgent):
             skill_tool_enabled=any(getattr(tool, "name", None) == "skill" for tool in hooked_tools),
         )
 
-        if self.tool_call_type == "tool_call":
-            agent = ToolCallingAgentV2(
-                tools=hooked_tools,
-                stream_outputs=False,
-                prompt_templates=prompt_templates,
-                **agent_kwargs,
-            )
-        else:
-            use_structured = getattr(self._model, "supports_structured_output", "false") == "true"
-            agent = CodeAgentV2(
-                tools=hooked_tools,
-                stream_outputs=False,
-                prompt_templates=prompt_templates,
-                additional_authorized_imports=resolved_additional_authorized_imports,
-                use_structured_outputs_internally=use_structured,
-                **agent_kwargs,
-            )
+        agent = ToolCallingAgentV2(
+            tools=hooked_tools,
+            stream_outputs=False,
+            prompt_templates=prompt_templates,
+            **agent_kwargs,
+        )
 
         agent._agent_loom_todo_mode = todo_mode
 

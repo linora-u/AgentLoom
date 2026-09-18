@@ -231,14 +231,12 @@ class LoomAgentMixin:
                 build_recovery_message,
                 consolidate_error_messages,
                 extract_category_from_error,
-                extract_tool_info,
             )
 
             # Extract error category from [CATEGORY:...] tag in error message
             error_str = str(latest_error_step.error) if latest_error_step and latest_error_step.error else ""
             error_category = extract_category_from_error(error_str)
 
-            # Extract tool info from error message (failures) and raw LLM output
             raw_text = getattr(latest_error_step, "model_output", None) if latest_error_step else None
 
             # Gather available tool names and descriptions
@@ -252,12 +250,6 @@ class LoomAgentMixin:
                     first_line = desc.split("\n")[0][:80]
                     tool_descriptions[name] = first_line
 
-            # Extract partial tool name for category-aware L1 guidance
-            partial_tool_name = extract_tool_info(
-                raw_text=raw_text,
-                available_tool_names=tool_names if tool_names else None,
-            )
-
             # Build recovery message
             last_snippet = raw_text[:300] if raw_text else None
             recovery_msg = build_recovery_message(
@@ -266,7 +258,6 @@ class LoomAgentMixin:
                 last_output_snippet=last_snippet,
                 available_tool_names=tool_names,
                 tool_descriptions=tool_descriptions,
-                partial_tool_name=partial_tool_name,
             )
 
             # Consolidate error messages in the message list
