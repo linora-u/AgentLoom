@@ -8,10 +8,9 @@ ensuring thread-safe concurrent execution (no memory.steps crosstalk).
 from __future__ import annotations
 
 import threading
-from unittest.mock import MagicMock, patch, PropertyMock
+from unittest.mock import MagicMock
 
 import pytest
-
 
 # ─── Helpers ────────────────────────────────────────────────────── #
 
@@ -22,7 +21,7 @@ def _make_minimal_config(concurrency=None):
         "description": "Test worker agent",
         "workflow": "Analyze the input and return a result.",
         "model_type": "powerful",
-        "tool_call_type": "code_act",
+        "agent_runtime": "smolagents",
         "agent_function_schema": {
             "description": "Test tool",
             "inputs": {
@@ -58,12 +57,11 @@ def _create_tool_with_mock_agent(config=None, agent_instances=None):
 
         REQUIRED_CONFIG_FIELDS = ["name", "description", "workflow"]
 
-        def __init__(self, config, model=None, execution_env=None, logger=None, **kw):
+        def __init__(self, config, model=None, logger=None, **kw):
             self._config = config
             self._model = model
             self.model = model
             self.logger = logger
-            self._execution_env = execution_env
             self.name = config["name"]
             self.description = config.get("description", "")
             self._id = id(self)
@@ -181,7 +179,6 @@ class TestFactoryMode:
                 self._model = kw.get("model")
                 self.model = self._model
                 self.logger = kw.get("logger")
-                self._execution_env = kw.get("execution_env")
                 self.name = config["name"]
                 self.description = config.get("description", "")
 
@@ -239,12 +236,11 @@ class TestFactoryMode:
         class LargeResultAgent:
             REQUIRED_CONFIG_FIELDS = ["name", "description", "workflow"]
 
-            def __init__(self, config, model=None, execution_env=None, logger=None, **kw):
+            def __init__(self, config, model=None, logger=None, **kw):
                 self._config = config
                 self._model = model or MagicMock(name="model")
                 self.model = self._model
                 self.logger = logger
-                self._execution_env = execution_env
                 self.name = config["name"]
                 self.description = config.get("description", "")
 

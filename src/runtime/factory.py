@@ -1042,7 +1042,7 @@ class YamlAgentFactory:
     @staticmethod
     def create_agent_tool(config_path: Union[str, Path, dict],
                          agent_class=None,
-                         model=None, execution_env=None) -> List:
+                         model=None) -> List:
         """
         Create an agent tool from YAML configuration.
 
@@ -1050,7 +1050,6 @@ class YamlAgentFactory:
             config_path: YAML/Markdown config file path or config dictionary.
             agent_class: Optional custom agent class, defaults to YamlConfiguredAgent.
             model: Optional model instance.
-            execution_env: Optional execution environment instance.
 
         Returns:
             List: List of functions decorated by @tool.
@@ -1068,7 +1067,6 @@ class YamlAgentFactory:
         agent = AgentClass(
             config=config,
             model=model,
-            execution_env=execution_env
         )
 
         # Return agent tool list directly; tools are already decorated with @tool
@@ -1078,7 +1076,6 @@ class YamlAgentFactory:
     def create_agent_as_tool(config_path: Union[str, Path, dict],
                             agent_class=None,
                             model=None,
-                            execution_env=None,
                             logger: Optional[AgentLogger]=None,
                             **kwargs
                             ) -> Optional[Callable]:
@@ -1096,7 +1093,6 @@ class YamlAgentFactory:
             config_path: YAML/Markdown config file path or config dictionary.
             agent_class: Optional custom agent class, defaults to YamlConfiguredAgent.
             model: Optional model instance.
-            execution_env: Optional execution environment instance.
             logger: Optional logger instance.
 
         Returns:
@@ -1118,7 +1114,6 @@ class YamlAgentFactory:
         agent = AgentClass(
             config=config,
             model=model,
-            execution_env=execution_env,
             logger=logger,
             **kwargs
         )
@@ -1189,7 +1184,6 @@ class YamlAgentFactory:
     def create_agents_as_tools_from_folder(folder_path: Union[str, Path],
                                           agent_class=None,
                                           model=None,
-                                          execution_env=None,
                                           logger: Optional[AgentLogger]=None,
                                           **kwargs
                                           ) -> List:
@@ -1200,7 +1194,6 @@ class YamlAgentFactory:
             folder_path: Folder path containing YAML/Markdown config files.
             agent_class: Optional custom agent class, defaults to YamlConfiguredAgent.
             model: Optional model instance.
-            execution_env: Optional execution environment instance.
             logger: Optional logger instance.
 
         Returns:
@@ -1220,7 +1213,6 @@ class YamlAgentFactory:
                     config_file,
                     agent_class=agent_class,
                     model=model,
-                    execution_env=execution_env,
                     logger=logger,
                     **kwargs
                 )
