@@ -202,6 +202,62 @@ class TestWorkerCheckpoint:
         assert checkpoint["result"] == ""
         assert call["result"] == ""
 
+    def test_worker_success_checkpoint_write_failure_propagates_without_losing_completion(
+        self,
+        cm: CheckpointManager,
+        task_id: str,
+        monkeypatch: pytest.MonkeyPatch,
+        tmp_path: Path,
+    ):
+        call_index = cm.record_worker_started(
+            task_id,
+            "side_effect_worker",
+            input_hash="hash",
+            task_input="perform side effect",
+        )
+        coord = CheckpointCoordinator(cm, task_id, "supervise")
+
+        def fail_checkpoint_write(*args, **kwargs):
+            raise OSError("checkpoint write failed")
+
+        monkeypatch.setattr(
+            cm,
+            "save_worker_runtime_checkpoint",
+            fail_checkpoint_write,
+        )
+
+        with pytest.raises(OSError, match="checkpoint write failed"):
+            coord.record_worker_success(
+                "side_effect_worker",
+                call_index,
+                "hash",
+                "perform side effect",
+                "completed side effect",
+                None,
+            )
+
+        call = cm.load_task_tree(task_id)["workers"]["side_effect_worker"][0]
+        assert call["status"] == "completed"
+        assert call["result"] == "completed side effect"
+
+        resumed = CheckpointManager(
+            "test_supervisor",
+            checkpoints_root=tmp_path,
+            run_id="run_resume",
+        )
+        preparation = CheckpointCoordinator(
+            resumed,
+            task_id,
+            "supervise",
+            resume=True,
+        ).prepare_worker_call(
+            "side_effect_worker",
+            "hash",
+            "perform side effect",
+        )
+        assert preparation.should_execute is False
+        assert preparation.cached_result == "completed side effect"
+
 # ── Worker resume (skip completed) ──────────────────────────────────────
 
 
