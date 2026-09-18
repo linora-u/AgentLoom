@@ -21,7 +21,6 @@ import yaml
 from agentloom.runtime.logging import get_logger
 
 from .config_validation import (
-    REMOVED_CODE_EXECUTION_FIELDS,
     RootSettings,
     normalize_tool_access_control_section,
     raise_project_key_error,
@@ -157,8 +156,6 @@ def _filter_llm_only_top_level_keys(
 
     filtered: dict[str, Any] = {}
     for key, value in config_map.items():
-        if key in REMOVED_CODE_EXECUTION_FIELDS:
-            continue
         if key in _LLM_ONLY_TOP_LEVEL_KEYS:
             logger.warning(
                 "Ignoring top-level key '%s' in %s; LLM settings must come from config/%s only.",

@@ -286,30 +286,6 @@ def test_runtime_preflight_uses_registry_capabilities(
 
 
 @pytest.mark.parametrize(
-    "removed_fields",
-    [
-        {"tool_call_type": "code_act"},
-        {"execution_env": ["not", "a", "mapping"]},
-        {"code_agent": object()},
-        {
-            "tool_call_type": "unknown",
-            "execution_env": {"type": "unknown"},
-            "code_agent": {"anything": True},
-        },
-    ],
-)
-def test_removed_execution_mode_fields_have_no_runtime_effect(
-    tmp_path: Path,
-    removed_fields: dict[str, object],
-) -> None:
-    validate_runtime_agent_config(
-        _agent_config(agent_runtime="smolagents", **removed_fields),
-        tmp_path / "agent.yaml",
-        agent_root=tmp_path,
-    )
-
-
-@pytest.mark.parametrize(
     "adapter",
     ["openai_chat", "openai_responses", "anthropic_messages"],
 )
