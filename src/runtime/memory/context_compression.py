@@ -59,19 +59,22 @@ import json
 import re
 import time
 import uuid
-from collections.abc import Iterable
+from collections.abc import Iterable, Mapping
 from dataclasses import dataclass
 
-from litellm.utils import token_counter
-
-from smolagents import AgentLogger
-from smolagents.models import ChatMessage, MessageRole
+from agentloom.adapters.smolagents.models.model_manager import model_manager
+from agentloom.adapters.smolagents.models.model_types import ModelType
 from agentloom.configuration.defaults import DEFAULT_MAX_TOKENS
 from agentloom.runtime.context_engine.engine import CONTEXT_REF_PREFIX
 from agentloom.runtime.context_engine.runtime import get_current_context_engine
 from agentloom.runtime.logging import get_logger
-from agentloom.adapters.smolagents.models.model_manager import model_manager
-from agentloom.adapters.smolagents.models.model_types import ModelType
+from agentloom.runtime.model_protocol import (
+    MODEL_ITEMS_RAW_KEY,
+    model_item_to_dict,
+)
+from litellm.utils import token_counter
+from smolagents import AgentLogger
+from smolagents.models import ChatMessage, MessageRole
 
 # ===========================================================================
 # Global Configuration
@@ -403,6 +406,62 @@ def _extract_content_text(content: object) -> str:
 
 def _role_value(role: object) -> str:
     return role.value if hasattr(role, "value") else str(role)
+
+
+def _fingerprint_value(value: object) -> object:
+    """Project nested message metadata without deepcopying frozen mappings."""
+
+    if value is None or isinstance(value, (str, int, float, bool)):
+        return value
+    if isinstance(value, Mapping):
+        return {
+            str(key): _fingerprint_value(item)
+            for key, item in value.items()
+        }
+    if isinstance(value, (list, tuple)):
+        return [_fingerprint_value(item) for item in value]
+    return str(value)
+
+
+def _chat_message_fingerprint(message: ChatMessage) -> str:
+    raw: dict[str, object] = {}
+    if isinstance(message.raw, Mapping):
+        for key, value in message.raw.items():
+            if key == MODEL_ITEMS_RAW_KEY:
+                raw[str(key)] = [
+                    model_item_to_dict(item)
+                    for item in value
+                ]
+            else:
+                raw[str(key)] = _fingerprint_value(value)
+    tool_calls = [
+        {
+            "id": call.id,
+            "type": call.type,
+            "function": {
+                "name": call.function.name,
+                "arguments": _fingerprint_value(call.function.arguments),
+            },
+        }
+        for call in message.tool_calls or ()
+    ]
+    token_usage = None
+    if message.token_usage is not None:
+        token_usage = {
+            "input_tokens": message.token_usage.input_tokens,
+            "output_tokens": message.token_usage.output_tokens,
+        }
+    return json.dumps(
+        {
+            "role": _role_value(message.role),
+            "content": _fingerprint_value(message.content),
+            "tool_calls": tool_calls,
+            "raw": raw,
+            "token_usage": token_usage,
+        },
+        sort_keys=True,
+        ensure_ascii=False,
+    )
 
 
 def _is_tool_call_role(role: object) -> bool:
@@ -1895,10 +1954,7 @@ class ConversationHistoryManager:
         Also caches the system prompt and the original task command block
         (used by truncation markers and summaries to preserve task context).
         """
-        fingerprints = [
-            json.dumps(message.dict(), sort_keys=True, ensure_ascii=False, default=str)
-            for message in messages
-        ]
+        fingerprints = [_chat_message_fingerprint(message) for message in messages]
         unchanged_prefix = (
             len(fingerprints) >= len(self._raw_message_fingerprints)
             and fingerprints[: len(self._raw_message_fingerprints)] == self._raw_message_fingerprints
