@@ -2,16 +2,15 @@ import copy
 import json
 from pathlib import Path
 
+import agentloom.runtime.factory as yaml_agent_factory
 import pytest
 import yaml
-
-import agentloom.runtime.factory as yaml_agent_factory
-from agentloom.runtime.logging import initialize_global_logger_once, get_global_logger, set_global_logger
 from agentloom.runtime.factory import (
     YamlAgentFactory,
     YamlConfiguredAgent,
     YamlConfiguredSupervisorAgent,
 )
+from agentloom.runtime.logging import get_global_logger, initialize_global_logger_once, set_global_logger
 
 
 @pytest.fixture(autouse=True)
@@ -124,6 +123,7 @@ def test_agent_as_tool_exports_when_agent_function_schema_present():
     worker = _make_worker(
         {
             "name": "demo_worker",
+            "agent_runtime": "smolagents",
             "description": "worker desc",
             "tools": [],
             "workflow": "demo workflow",
@@ -158,6 +158,7 @@ def test_agent_as_tool_not_exported_when_agent_function_schema_missing():
     worker = _make_worker(
         {
             "name": "demo_worker",
+            "agent_runtime": "smolagents",
             "description": "worker desc",
             "tools": [],
             "workflow": "demo workflow",
@@ -172,6 +173,7 @@ def test_legacy_agent_function_description_is_ignored_without_schema():
     worker = _make_worker(
         {
             "name": "demo_worker",
+            "agent_runtime": "smolagents",
             "description": "worker desc",
             "tools": [],
             "workflow": "demo workflow",
@@ -187,6 +189,7 @@ def test_validate_config_rejects_invalid_agent_function_schema_type():
     worker = _make_worker(
         {
             "name": "demo_worker",
+            "agent_runtime": "smolagents",
             "description": "worker desc",
             "tools": [],
             "workflow": "demo workflow",
@@ -205,6 +208,7 @@ def test_validate_config_rejects_missing_input_description():
     worker = _make_worker(
         {
             "name": "demo_worker",
+            "agent_runtime": "smolagents",
             "description": "worker desc",
             "tools": [],
             "workflow": "demo workflow",
@@ -223,6 +227,7 @@ def test_validate_config_ignores_input_type_when_present():
     worker = _make_worker(
         {
             "name": "demo_worker",
+            "agent_runtime": "smolagents",
             "description": "worker desc",
             "tools": [],
             "workflow": "demo workflow",
@@ -243,6 +248,7 @@ def test_validate_config_rejects_missing_output_description():
     worker = _make_worker(
         {
             "name": "demo_worker",
+            "agent_runtime": "smolagents",
             "description": "worker desc",
             "tools": [],
             "workflow": "demo workflow",
@@ -257,6 +263,7 @@ def test_validate_config_rejects_missing_output_description():
 def test_factory_create_agent_as_tool_exports_when_schema_present():
     config = {
         "name": "demo_worker",
+        "agent_runtime": "smolagents",
         "description": "worker desc",
         "tools": [],
         "workflow": "demo workflow",
@@ -270,6 +277,7 @@ def test_factory_create_agent_as_tool_exports_when_schema_present():
 def test_factory_create_agent_as_tool_not_exported_when_schema_missing():
     config = {
         "name": "demo_worker",
+        "agent_runtime": "smolagents",
         "description": "worker desc",
         "tools": [],
         "workflow": "demo workflow",
@@ -281,6 +289,7 @@ def test_factory_create_agent_as_tool_not_exported_when_schema_missing():
 def test_generated_tool_supports_multiple_inputs_and_optional_fields():
     config = {
         "name": "demo_worker",
+        "agent_runtime": "smolagents",
         "description": "worker desc",
         "tools": [],
         "workflow": "demo workflow",
@@ -316,6 +325,7 @@ def test_generated_tool_supports_multiple_inputs_and_optional_fields():
 def test_generated_tool_serializes_structured_agent_results_as_json():
     config = {
         "name": "demo_worker",
+        "agent_runtime": "smolagents",
         "description": "worker desc",
         "tools": [],
         "workflow": "demo workflow",
@@ -335,6 +345,7 @@ def test_generated_tool_serializes_structured_agent_results_as_json():
 def test_generated_tool_embeds_list_workflow_items_without_stage_wrappers():
     config = {
         "name": "demo_worker",
+        "agent_runtime": "smolagents",
         "description": "worker desc",
         "tools": [],
         "workflow": [
@@ -360,6 +371,7 @@ def test_supervisor_respects_empty_toolsets():
     supervisor = YamlConfiguredSupervisorAgent(
         config={
             "name": "demo",
+            "agent_runtime": "smolagents",
             "description": "demo supervisor",
             "workflow": "demo workflow",
             "tools": [],
@@ -376,6 +388,7 @@ def test_supervisor_respects_empty_toolsets():
 def test_generated_tool_embeds_mermaid_block_into_workflow_tag():
     config = {
         "name": "demo_worker",
+        "agent_runtime": "smolagents",
         "description": "worker desc",
         "tools": [],
         "workflow": (
@@ -415,6 +428,7 @@ def test_generated_tool_appends_warning_when_mermaid_invalid(monkeypatch):
 
     config = {
         "name": "demo_worker",
+        "agent_runtime": "smolagents",
         "description": "worker desc",
         "tools": [],
         "workflow": (

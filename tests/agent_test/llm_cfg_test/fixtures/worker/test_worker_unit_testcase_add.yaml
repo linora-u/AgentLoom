@@ -1,11 +1,11 @@
 max_steps: 80
 
 name: "unit_test_studio_append"
+agent_runtime: smolagents
 description: |
   基于 Unit Test Studio 的函数级 pytest 生成与补充智能体。
   负责解析目标函数、规划场景、生成/追加测试文件、执行轻量校验，并输出交付报告。
 
-tool_call_type: "code_act"
 model_type: "powerful"
 
 workflow: |
@@ -131,9 +131,6 @@ tools:
   - name: "collect_generation_report"
     module: "applications.unit_test_studio.agent_tools.unit_test_tools"
     function: "collect_generation_report"
-
-execution_env:
-  type: "local"
 
 agent_function_schema:
   description: |

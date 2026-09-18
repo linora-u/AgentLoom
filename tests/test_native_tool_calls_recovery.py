@@ -12,8 +12,10 @@ from smolagents.monitoring import Timing
 
 from agentloom.runtime.logging import NullLoggerBackend
 from agentloom.adapters.smolagents.agents import ToolCallingAgentV2
-from agentloom.adapters.smolagents.models.litellm_model import LiteLLMModelV2
-from agentloom.adapters.smolagents.models.tool_call_parser import ToolCallParseError
+from agentloom.adapters.smolagents.models.litellm_model import (
+    LiteLLMModelV2,
+    NativeToolCallError,
+)
 
 
 class EchoTool(Tool):
@@ -39,25 +41,6 @@ class AddTool(Tool):
         return a + b
 
 
-class TextFallbackModel:
-    tool_name_key = "name"
-    tool_arguments_key = "arguments"
-    model_id = "fake-text"
-
-    def __init__(self, content: str):
-        self.content = content
-        self._last_tools_to_call_from = []
-        self.seen_tools = None
-
-    def generate(self, _messages, stop_sequences=None, tools_to_call_from=None, **_kwargs):
-        self.seen_tools = tools_to_call_from
-        self._last_tools_to_call_from = list(tools_to_call_from or [])
-        return ChatMessage(role=MessageRole.ASSISTANT, content=self.content)
-
-    def parse_tool_calls(self, message):
-        return LiteLLMModelV2.parse_tool_calls(self, message)
-
-
 class NativeToolCallModel:
     def __init__(self, tool_call: ChatMessageToolCall):
         self.tool_call = tool_call
@@ -77,7 +60,7 @@ class UnknownToolThenFinalModel:
     def generate(self, _messages, stop_sequences=None, tools_to_call_from=None, **_kwargs):
         self.calls += 1
         if self.calls == 1:
-            raise ToolCallParseError(
+            raise NativeToolCallError(
                 "Tool 'tool_name' not found in registered tools "
                 "['echo', 'final_answer']"
             )
@@ -156,18 +139,6 @@ def _make_agent(model, tools):
 
 def _action_step() -> ActionStep:
     return ActionStep(step_number=1, timing=Timing(start_time=time.time()))
-
-
-def test_tool_calling_agent_executes_text_fallback_call():
-    model = TextFallbackModel('{"name": "echo", "arguments": {"text": "hello"}}')
-    agent = _make_agent(model, [EchoTool()])
-
-    memory_step = _action_step()
-    result = agent.step(memory_step)
-
-    assert result.output is None
-    assert model.seen_tools[0].name == "echo"
-    assert memory_step.observations.strip() == "echo:hello"
 
 
 def test_tool_calling_agent_executes_native_tool_call():
@@ -264,16 +235,6 @@ def test_tool_calling_agent_executes_native_tool_call_with_double_encoded_argume
 
     assert memory_step.tool_calls[0].id == "call_native_double"
     assert memory_step.observations.strip() == "echo:native-double"
-
-
-def test_text_fallback_applies_schema_bound_coercion_at_execution():
-    model = TextFallbackModel('{"name": "add", "arguments": {"a": "2", "b": "3"}}')
-    agent = _make_agent(model, [AddTool()])
-
-    memory_step = _action_step()
-    agent.step(memory_step)
-
-    assert memory_step.observations.strip() == "5"
 
 
 def test_litellm_model_keeps_tools_schema_and_tool_choice():
@@ -471,17 +432,25 @@ def test_litellm_generate_rejects_unknown_native_tool():
     model.retryer = lambda _func, **_kwargs: response
     model.client = SimpleNamespace(completion=lambda **_kwargs: response)
 
-    with pytest.raises(ToolCallParseError) as exc_info:
+    with pytest.raises(NativeToolCallError) as exc_info:
         model.generate([{"role": "user", "content": "hi"}], tools_to_call_from=[EchoTool()])
 
     assert "Tool 'missing' not found" in str(exc_info.value)
 
 
-def test_text_fallback_rejects_unknown_tool_before_execution():
-    model = TextFallbackModel('{"name": "missing", "arguments": {"text": "x"}}')
-    agent = _make_agent(model, [EchoTool()])
+@pytest.mark.parametrize(
+    "content",
+    [
+        '{"name": "echo", "arguments": {"text": "x"}}',
+        '<tool_call><name>echo</name><arguments>{"text": "x"}</arguments></tool_call>',
+        "Calling tool: echo with text=x",
+    ],
+)
+def test_model_rejects_text_tool_call_fallback(content: str) -> None:
+    model = LiteLLMModelV2(model_id="test/model")
+    model._set_current_tools([EchoTool()])
 
-    with pytest.raises(Exception) as exc_info:
-        agent.step(_action_step())
-
-    assert "Tool 'missing' not found" in str(exc_info.value)
+    with pytest.raises(NativeToolCallError, match="native structured tool_calls"):
+        model.parse_tool_calls(
+            ChatMessage(role=MessageRole.ASSISTANT, content=content)
+        )

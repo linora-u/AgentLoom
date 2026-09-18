@@ -1,8 +1,7 @@
 from pathlib import Path
 
-import pytest
-
 import agentloom.runtime.factory as yaml_factory_module
+import pytest
 from agentloom.application.validation import AgentConfigNormalizer
 from agentloom.runtime.factory import YamlAgentFactory, YamlConfiguredSupervisorAgent
 
@@ -25,7 +24,10 @@ class _DummyLogger:
 
 def _write_min_worker_yaml(path: Path, name: str) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(f'name: "{name}"\n', encoding="utf-8")
+    path.write_text(
+        f'name: "{name}"\nagent_runtime: smolagents\n',
+        encoding="utf-8",
+    )
 
 
 def _build_supervisor_for_get_tools(worker_agents: list[dict]) -> YamlConfiguredSupervisorAgent:
@@ -33,13 +35,13 @@ def _build_supervisor_for_get_tools(worker_agents: list[dict]) -> YamlConfigured
     agent = object.__new__(YamlConfiguredSupervisorAgent)
     agent._config = {
         "name": "test_supervisor",
+        "agent_runtime": "smolagents",
         "description": "desc",
         "tools": [],
         "workflow": "wf",
         "worker_agents": worker_agents,
     }
     agent._inferred_category = "dummy_category"
-    agent._execution_env = None
     agent._logger = _DummyLogger()
     return agent
 
@@ -207,7 +209,10 @@ def test_resolve_bare_name_without_extension_raises(tmp_path):
     worker_folder = tmp_path / "applications" / "demo" / "workflows" / "worker_agents"
     worker_folder.mkdir(parents=True, exist_ok=True)
     # Even if a matching .yaml file exists, bare name is rejected
-    (worker_folder / "alpha.yaml").write_text('name: "alpha"\n', encoding="utf-8")
+    (worker_folder / "alpha.yaml").write_text(
+        'name: "alpha"\nagent_runtime: smolagents\n',
+        encoding="utf-8",
+    )
 
     with pytest.raises(ValueError, match="missing a file extension"):
         AgentConfigNormalizer.resolve_worker_agent_config_path(
@@ -226,6 +231,7 @@ def test_get_tools_registers_worker_as_tool_when_schema_present(tmp_path, monkey
     valid_file = worker_folder / "valid.yaml"
     valid_file.write_text("""
 name: "valid_worker"
+agent_runtime: smolagents
 description: "desc"
 tools: []
 workflow: "wf"
@@ -268,6 +274,7 @@ def test_get_tools_ignores_worker_as_tool_when_schema_missing(tmp_path, monkeypa
     missing_desc_file = worker_folder / "missing.yaml"
     missing_desc_file.write_text("""
 name: "missing_worker"
+agent_runtime: smolagents
 description: "desc"
 tools: []
 workflow: "wf"

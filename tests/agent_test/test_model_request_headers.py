@@ -28,8 +28,8 @@ def _patch_config(monkeypatch, *, system_config: dict, llm_config: dict | None =
     llm_raw = llm_config or {
         "model": {
             "default_model_type": "powerful",
-            "powerful": {"model": "openai/test-model"},
-            "summary": {"model": "openai/test-summary"},
+            "powerful": {"model": "openai/test-model", "adapter": "openai_chat"},
+            "summary": {"model": "openai/test-summary", "adapter": "openai_chat"},
         }
     }
     monkeypatch.setattr(
@@ -336,6 +336,7 @@ def test_model_manager_litellm_config_merges_system_and_model_headers(monkeypatc
                 "default_model_type": "powerful",
                 "powerful": {
                     "model": "openai/test-model",
+                    "adapter": "openai_chat",
                     "base_url": "https://example.test/v1",
                     "api_key": "key",
                     "extra_headers": {
@@ -343,7 +344,7 @@ def test_model_manager_litellm_config_merges_system_and_model_headers(monkeypatc
                         "X-Model": "powerful",
                     },
                 },
-                "summary": {"model": "openai/test-summary"},
+                "summary": {"model": "openai/test-summary", "adapter": "openai_chat"},
             }
         },
     )
@@ -370,10 +371,11 @@ def test_smolagents_model_receives_merged_request_headers(monkeypatch) -> None:
                 "default_model_type": "powerful",
                 "powerful": {
                     "model": "openai/test-model",
+                    "adapter": "openai_chat",
                     "extra_headers": {"X-Model": "powerful"},
                     "requests_per_minute": 999999,
                 },
-                "summary": {"model": "openai/test-summary"},
+                "summary": {"model": "openai/test-summary", "adapter": "openai_chat"},
             }
         },
     )
@@ -381,7 +383,7 @@ def test_smolagents_model_receives_merged_request_headers(monkeypatch) -> None:
     manager = model_manager_module.ModelManager()
     model = manager.get_smolagents_model(model_types.ModelType("powerful"), model_cache=False)
 
-    assert model.kwargs["extra_headers"] == {
+    assert model.options["extra_headers"] == {
         "User-Agent": GENERIC_MODEL_USER_AGENT,
         "X-Privacy": "on",
         "X-Model": "powerful",

@@ -1,9 +1,9 @@
 name: "shell_supervisor"
+agent_runtime: smolagents
 description: |
   主 agent，负责自身的 shell 操作并调度 worker agent，验证两者 shell 是否相互隔离。
 
 model_type: "powerful"
-tool_call_type: "code_act"
 
 workflow: |
   # Shell Persistence & Isolation Test
@@ -21,6 +21,3 @@ tools:
 
 worker_agents:
   - path: "applications/test_demo/workflows/worker_agents/test_shell_persist_worker.yaml"
-
-execution_env:
-  type: "local"

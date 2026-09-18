@@ -9,7 +9,6 @@ import agentloom.configuration.config as config_module
 def _patch_base_config(monkeypatch, agent_root: Path) -> None:
     base_raw = {
         "tool_access_control": {"exclude_paths": ["Tools"]},
-        "execution_env": {"type": "local"},
         "smart_summary": True,
         "todo": {"mode": "auto"},
     }
@@ -28,6 +27,7 @@ def test_build_effective_agent_config_applies_workflow_overlay(monkeypatch, tmp_
     overlay = {
         "tool_access_control": {"exclude_paths": ["Test"]},
         "execution_env": {"type": "docker", "executor_kwargs": {"host": "127.0.0.1"}},
+        "code_agent": {"additional_authorized_imports": "*"},
         "name": "supervisor_only_metadata",
         "workflow": "wf",
     }
@@ -35,8 +35,8 @@ def test_build_effective_agent_config_applies_workflow_overlay(monkeypatch, tmp_
     effective = config_module.build_effective_agent_config(overlay, source_name="supervisor.yaml")
 
     assert effective["tool_access_control"]["exclude_paths"] == ["Test"]
-    assert effective["execution_env"]["type"] == "docker"
-    assert effective["execution_env"]["executor_kwargs"]["host"] == "127.0.0.1"
+    assert "execution_env" not in effective
+    assert "code_agent" not in effective
     assert "name" not in effective
     assert "workflow" not in effective
 
@@ -89,8 +89,8 @@ def test_worker_effective_snapshot_is_independent_from_supervisor(monkeypatch, t
 
     assert supervisor_effective["tool_access_control"]["exclude_paths"] == ["Build"]
     assert worker_effective["tool_access_control"]["exclude_paths"] == ["Temp"]
-    assert supervisor_effective["execution_env"]["type"] == "docker"
-    assert worker_effective["execution_env"]["type"] == "local"
+    assert "execution_env" not in supervisor_effective
+    assert "execution_env" not in worker_effective
 
 
 def test_build_effective_agent_config_rejects_project_key(monkeypatch, tmp_path: Path):
@@ -145,6 +145,7 @@ def test_build_effective_agent_config_does_not_mutate_base_snapshot(monkeypatch,
         {
             "tool_access_control": {"exclude_paths": ["Build"]},
             "execution_env": {"type": "docker"},
+            "code_agent": {"additional_functions": "*"},
         },
         source_name="worker.yaml",
     )

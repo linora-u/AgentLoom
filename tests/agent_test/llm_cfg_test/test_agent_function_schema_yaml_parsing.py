@@ -1,9 +1,8 @@
 from pathlib import Path
 
 import pytest
-
-from agentloom.runtime.logging import initialize_global_logger_once, get_global_logger, set_global_logger
 from agentloom.runtime.factory import YamlAgentFactory
+from agentloom.runtime.logging import get_global_logger, initialize_global_logger_once, set_global_logger
 
 
 @pytest.fixture(autouse=True)
@@ -34,6 +33,7 @@ def test_real_worker_yaml_parses_and_registers_tool():
 def test_worker_without_agent_function_schema_is_not_registered():
     config = {
         "name": "demo_worker",
+        "agent_runtime": "smolagents",
         "description": "worker desc",
         "tools": [],
         "workflow": "demo workflow",
@@ -46,6 +46,7 @@ def test_worker_without_agent_function_schema_is_not_registered():
 def test_invalid_agent_function_schema_raises_value_error():
     config = {
         "name": "demo_worker",
+        "agent_runtime": "smolagents",
         "description": "worker desc",
         "tools": [],
         "workflow": "demo workflow",
