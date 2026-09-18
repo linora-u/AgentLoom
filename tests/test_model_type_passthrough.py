@@ -1,72 +1,63 @@
-"""
-Tests for model_type passthrough chain:
-  model_manager → litellm_model → litellm_retry wrapper
-
-Verifies that _agent_loom_model_type flows correctly through the call chain.
-"""
+"""Model-type metadata from ModelManager to the LiteLLM retry boundary."""
 
 from __future__ import annotations
 
 from unittest.mock import MagicMock, patch
 
+from agentloom.adapters.smolagents.models.model_manager import ModelManager
+from agentloom.adapters.smolagents.models.model_types import ModelType
 
-class TestModelTypePassthrough:
-    def test_model_manager_sets_agent_loom_model_type(self):
-        """get_smolagents_model should set _agent_loom_model_type on the model."""
-        from agentloom.adapters.smolagents.models.model_manager import ModelManager
 
-        manager = ModelManager.__new__(ModelManager)
-        manager._model_cache = {}
+def _manager_and_config():
+    manager = ModelManager.__new__(ModelManager)
+    manager._model_cache = {}
+    config = MagicMock()
+    config.model_id = "test-model"
+    config.adapter = "openai_chat"
+    config.base_url = "http://localhost"
+    config.api_key = "test-key"
+    config.timeout = 30
+    config.max_tokens = 1000
+    config.context_window = 32000
+    config.max_output_tokens = 1000
+    config.temperature = 0.5
+    config.requests_per_minute = 10
+    config.num_retries = 3
+    config.retry_delay = 1.0
+    config.max_retry_delay = 60.0
+    config.extra_headers = None
+    config.context_cache = False
+    config.system_prompt_boundary = None
+    config.extra_completion_params = None
+    return manager, config
 
-        # Mock get_model_config to return a config-like object
-        mock_config = MagicMock()
-        mock_config.model_id = "test-model"
-        mock_config.adapter = "openai_chat"
-        mock_config.base_url = "http://localhost"
-        mock_config.api_key = "test-key"
-        mock_config.timeout = 30
-        mock_config.max_tokens = 1000
-        mock_config.context_window = 32000
-        mock_config.max_output_tokens = 1000
-        mock_config.temperature = 0.5
-        mock_config.requests_per_minute = 10
-        mock_config.num_retries = 3
-        mock_config.retry_delay = 1.0
-        mock_config.max_retry_delay = 60.0
-        mock_config.extra_headers = None
-        mock_config.context_cache = False
-        mock_config.system_prompt_boundary = None
-        mock_config.extra_completion_params = None
 
-        mock_logger = MagicMock()
-        with patch.object(manager, "get_model_config", return_value=mock_config):
-            from agentloom.adapters.smolagents.models.model_types import ModelType
-            model = manager.get_smolagents_model(ModelType.POWERFUL, model_cache=False, logger=mock_logger)
-            assert hasattr(model, "_agent_loom_model_type")
-            assert model._agent_loom_model_type == "powerful"
+def test_model_manager_sets_model_type_on_bridge_and_turn_options() -> None:
+    manager, config = _manager_and_config()
 
-    def test_litellm_model_passes_model_type_in_kwargs(self):
-        """_prepare_completion_kwargs should include _agent_loom_model_type."""
-        from agentloom.adapters.smolagents.models.litellm_model import LiteLLMModelV2
+    with patch.object(manager, "get_model_config", return_value=config):
+        model = manager.get_smolagents_model(
+            ModelType.POWERFUL,
+            model_cache=False,
+            logger=MagicMock(),
+        )
 
-        model = LiteLLMModelV2.__new__(LiteLLMModelV2)
-        model.context_cache = False
-        model._agent_loom_model_type = "fast"
+    assert model._agent_loom_model_type == "powerful"
+    assert model.options["_agent_loom_model_type"] == "powerful"
 
-        # Mock super()._prepare_completion_kwargs
-        with patch("smolagents.LiteLLMModel._prepare_completion_kwargs", return_value={"model": "test"}):
-            result = model._prepare_completion_kwargs()
-            assert "_agent_loom_model_type" in result
-            assert result["_agent_loom_model_type"] == "fast"
 
-    def test_missing_model_type_no_error(self):
-        """If _agent_loom_model_type not set, _prepare_completion_kwargs still works."""
-        from agentloom.adapters.smolagents.models.litellm_model import LiteLLMModelV2
+def test_model_manager_litellm_config_carries_model_type_only_at_bridge_boundary() -> None:
+    manager, config = _manager_and_config()
 
-        model = LiteLLMModelV2.__new__(LiteLLMModelV2)
-        model.context_cache = False
-        # Deliberately NOT setting _agent_loom_model_type
+    with patch.object(manager, "get_model_config", return_value=config):
+        ordinary = manager.get_litellm_config(
+            ModelType.POWERFUL,
+            model_cache=False,
+        )
+        bridge = manager.get_smolagents_model(
+            ModelType.POWERFUL,
+            model_cache=False,
+        )
 
-        with patch("smolagents.LiteLLMModel._prepare_completion_kwargs", return_value={"model": "test"}):
-            result = model._prepare_completion_kwargs()
-            assert "_agent_loom_model_type" not in result
+    assert "_agent_loom_model_type" not in ordinary
+    assert bridge.options["_agent_loom_model_type"] == "powerful"

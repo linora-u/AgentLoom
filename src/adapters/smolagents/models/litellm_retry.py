@@ -215,7 +215,7 @@ def create_retry_wrapper(
         max_retry_delay = kwargs.pop("max_retry_delay", default_max_retry_delay)
         num_retries = kwargs.pop("num_retries", default_num_retries)
 
-        # Extract AgentLoom model_type for global rate limiting (injected by LiteLLMModelV2).
+        # Extract AgentLoom model_type injected by the model-turn bridge.
         model_type = kwargs.pop("_agent_loom_model_type", None)
 
         logger.debug(
@@ -238,7 +238,7 @@ def create_retry_wrapper(
 
         # ── Build rate-limited wrapper around original_func ──
         # Global rate limiting is injected here so it's transparent to
-        # the rest of the call chain (LiteLLMModelV2 unchanged).
+        # the rest of the model-turn call chain.
         _limiter = None
         _state = None
         if model_type:

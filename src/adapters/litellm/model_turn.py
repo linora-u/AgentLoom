@@ -344,6 +344,10 @@ def _items_from_responses(raw_output: Any) -> tuple[ModelItem, ...]:
                 raise ModelProtocolError(
                     f"responses function call is missing {exc.args[0]}"
                 ) from exc
+            except (TypeError, ValueError) as exc:
+                raise ModelProtocolError(
+                    f"malformed responses function call for {item.get('name')!r}: {exc}"
+                ) from exc
         elif item_type == "message":
             role = item.get("role")
             if role not in {"system", "developer", "user", "assistant"}:
@@ -465,6 +469,10 @@ class OpenAIChatModelTurnAdapter:
             except KeyError as exc:
                 raise ModelProtocolError(
                     f"chat tool call is missing {exc.args[0]}"
+                ) from exc
+            except (TypeError, ValueError) as exc:
+                raise ModelProtocolError(
+                    f"malformed chat tool call for {function.get('name')!r}: {exc}"
                 ) from exc
 
         return ModelTurnResult(
@@ -664,6 +672,10 @@ def _items_from_anthropic_message(raw_message: Any) -> tuple[ModelItem, ...]:
         except KeyError as exc:
             raise ModelProtocolError(
                 f"anthropic tool call is missing {exc.args[0]}"
+            ) from exc
+        except (TypeError, ValueError) as exc:
+            raise ModelProtocolError(
+                f"malformed anthropic tool call for {function.get('name')!r}: {exc}"
             ) from exc
     return tuple(result)
 
