@@ -5,6 +5,7 @@ import time
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import replace
 from pathlib import Path
+from types import SimpleNamespace
 from unittest.mock import MagicMock
 
 import agentloom.runtime.agent as base_agent_module
@@ -383,17 +384,22 @@ def _append_hook_handler(agent, event, callback, *, source="test"):
     agent._hook_plan = HookPlan((*agent._hook_plan.handlers, HookHandler(event, "*", callback, source=source)))
 
 
-def test_runtime_definition_contains_complete_neutral_runtime_input(monkeypatch):
+def test_runtime_definition_contains_complete_neutral_runtime_input(
+    monkeypatch,
+    tmp_path,
+):
     model_binding = _model_binding(
         max_tokens=64_000,
         context_window=64_000,
         max_output_tokens=8_000,
     )
+    prompt_path = tmp_path / "prompts" / "custom.yaml"
     agent = DummyAgent(
         config={
             "name": "definition_agent",
             "description": "Complete neutral definition.",
             "workflow": "Use the proof tool.",
+            "prompt": {"path": "prompts/custom.yaml"},
             "planning_interval": 3,
             "smart_summary": False,
             "todo": {"mode": "on"},
@@ -403,6 +409,16 @@ def test_runtime_definition_contains_complete_neutral_runtime_input(monkeypatch)
         model_binding=model_binding,
         logger=DummyLoggerBackend(),
     )
+    monkeypatch.setattr(
+        base_agent_module,
+        "C",
+        SimpleNamespace(agent_root=tmp_path),
+    )
+    agent._effective_agent_config = {
+        **agent._effective_agent_config,
+        "prompt": {"path": "prompts/custom.yaml"},
+        "planning_interval": 3,
+    }
 
     @tool
     def proof(value: str) -> str:
@@ -437,7 +453,11 @@ def test_runtime_definition_contains_complete_neutral_runtime_input(monkeypatch)
     assert definition.smart_summary is False
     assert definition.todo_mode == "on"
     assert definition.instructions == "environment\n\ntodo:on"
-    assert definition.metadata == {"max_consecutive_parse_errors": 7}
+    assert definition.metadata == {
+        "max_consecutive_parse_errors": 7,
+        "smolagents_prompt_template_path": str(prompt_path.resolve()),
+        "agent_root": str(tmp_path),
+    }
     assert tuple(item.name for item in definition.tool_gateway.definitions) == (
         "proof",
         "todo_write",

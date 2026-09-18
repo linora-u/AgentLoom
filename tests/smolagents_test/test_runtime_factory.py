@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from collections.abc import Mapping
 from dataclasses import dataclass
+from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
 
@@ -103,14 +104,22 @@ def _definition(
     gateway: _RecordingGateway | None = None,
     metadata: Mapping[str, Any] | None = None,
     planning_interval: int | None = 3,
+    instructions: str = "Use proof_tool, then finish.",
 ) -> RuntimeDefinition:
     resolved_gateway = gateway or _RecordingGateway()
     assert isinstance(resolved_gateway, ToolGateway)
+    resolved_metadata = {
+        "max_consecutive_parse_errors": 9,
+        "smolagents_prompt_template_path": None,
+        "agent_root": str(Path.cwd()),
+    }
+    if metadata is not None:
+        resolved_metadata.update(metadata)
     return RuntimeDefinition(
         runtime_id="smolagents",
         name="proof_agent",
         description="Prove the smolagents runtime factory.",
-        instructions="Use proof_tool, then finish.",
+        instructions=instructions,
         model=ModelTurnBinding(
             model_type="proof",
             model_id="provider/opaque-model",
@@ -126,7 +135,7 @@ def _definition(
         planning_interval=planning_interval,
         smart_summary=False,
         todo_mode="on",
-        metadata=metadata or {"max_consecutive_parse_errors": 9},
+        metadata=resolved_metadata,
     )
 
 
@@ -168,9 +177,11 @@ def test_factory_builds_native_runtime_from_complete_definition(
     assert captured["stream_outputs"] is False
     assert captured["name"] == "proof_agent"
     assert captured["description"] == "Prove the smolagents runtime factory."
-    assert captured["instructions"] == "Use proof_tool, then finish."
+    assert "instructions" not in captured
     assert captured["logger"] is logger
-    assert "prompt_templates" not in captured
+    assert captured["prompt_templates"]["system_prompt"].count(
+        "Use proof_tool, then finish."
+    ) == 1
     assert len(captured["final_answer_checks"]) == 1
     native = runtime._native_runtime
     assert native._agent_loom_todo_mode == "on"
@@ -190,9 +201,10 @@ def test_factory_uses_smolagents_default_prompt_and_exact_proxy_definitions(
     runtime = SmolagentsRuntimeFactory()(definition)
     native = runtime._native_runtime
 
-    assert native.instructions == definition.instructions
     assert native.planning_interval is None
-    assert native.prompt_templates["system_prompt"]
+    assert native.prompt_templates["system_prompt"].count(
+        definition.instructions
+    ) == 1
     assert tuple(native.tools) == ("proof_tool", "final_answer")
     proof_proxy = native.tools["proof_tool"]
     assert isinstance(proof_proxy, SmolagentsToolGatewayProxy)
@@ -318,6 +330,79 @@ def test_runtime_close_releases_gateway_after_native_close_failure() -> None:
 def test_factory_rejects_invalid_parse_error_metadata(metadata) -> None:
     with pytest.raises(ValueError, match="positive integer"):
         SmolagentsRuntimeFactory()(_definition(metadata=metadata))
+
+
+def test_factory_loads_explicit_prompt_and_appends_instructions_once(
+    monkeypatch,
+    tmp_path,
+) -> None:
+    captured: dict[str, Any] = {}
+    prompt_path = tmp_path / "custom.yaml"
+    prompt_path.write_text(
+        "system_prompt: Custom base prompt.\nplanning: {}\n",
+        encoding="utf-8",
+    )
+
+    class _NativeAgent:
+        def __init__(self, **kwargs: Any) -> None:
+            captured.update(kwargs)
+            self.memory = SimpleNamespace(steps=[])
+            self.step_callbacks = SimpleNamespace(
+                register=lambda *_args, **_kwargs: None
+            )
+
+    monkeypatch.setattr(factory_module, "ToolCallingAgentV2", _NativeAgent)
+    monkeypatch.setattr(
+        factory_module,
+        "get_global_logger",
+        lambda **_kwargs: None,
+    )
+    definition = _definition(
+        metadata={
+            "smolagents_prompt_template_path": str(prompt_path),
+            "agent_root": str(tmp_path),
+        },
+        instructions="Runtime-owned instructions.",
+    )
+
+    SmolagentsRuntimeFactory()(definition)
+
+    assert "instructions" not in captured
+    assert captured["prompt_templates"]["system_prompt"] == (
+        "Custom base prompt.\n\nRuntime-owned instructions."
+    )
+
+
+def test_factory_uses_native_instructions_only_when_implicit_prompt_load_fails(
+    monkeypatch,
+) -> None:
+    captured: dict[str, Any] = {}
+
+    class _NativeAgent:
+        def __init__(self, **kwargs: Any) -> None:
+            captured.update(kwargs)
+            self.memory = SimpleNamespace(steps=[])
+            self.step_callbacks = SimpleNamespace(
+                register=lambda *_args, **_kwargs: None
+            )
+
+    monkeypatch.setattr(factory_module, "ToolCallingAgentV2", _NativeAgent)
+    monkeypatch.setattr(
+        factory_module,
+        "load_base_prompt_templates",
+        lambda **_kwargs: None,
+    )
+    monkeypatch.setattr(
+        factory_module,
+        "get_global_logger",
+        lambda **_kwargs: None,
+    )
+    definition = _definition(instructions="Fallback instructions.")
+
+    SmolagentsRuntimeFactory()(definition)
+
+    assert captured["instructions"] == "Fallback instructions."
+    assert "prompt_templates" not in captured
 
 
 def test_factory_rejects_non_smolagents_definition() -> None:
