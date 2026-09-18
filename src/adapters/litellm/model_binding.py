@@ -8,9 +8,13 @@ from collections.abc import Callable, Mapping
 from threading import RLock
 from typing import Any
 
+from agentloom.adapters.litellm.litellm_retry import patch_litellm_completion
 from agentloom.adapters.litellm.model_turn import create_model_turn_adapter
-from agentloom.adapters.smolagents.models.request_headers import (
+from agentloom.adapters.litellm.request_headers import (
     build_model_request_headers,
+)
+from agentloom.adapters.litellm.tool_error_projection import (
+    patch_litellm_tool_error_projection,
 )
 from agentloom.configuration import C
 from agentloom.configuration.llm_config import LlmModelTypeSettings
@@ -36,13 +40,6 @@ def _install_existing_model_governance() -> None:
         if _GOVERNANCE_INSTALLED:
             return
         import litellm
-        from agentloom.adapters.smolagents.models.litellm_retry import (
-            patch_litellm_completion,
-        )
-        from agentloom.adapters.smolagents.tool_protocol import (
-            patch_litellm_tool_error_projection,
-        )
-
         litellm.suppress_debug_info = True
         litellm.drop_params = True
         patch_litellm_completion(litellm)
