@@ -1,5 +1,4 @@
 import agentloom.runtime.agent as base_agent_module
-import pytest
 from agentloom.application.validation import build_normalized_execution_config
 from agentloom.runtime.factory import (
     YamlConfiguredAgent,
@@ -84,7 +83,6 @@ def _make_supervisor(config: dict) -> YamlConfiguredSupervisorAgent:
 
 
 def _worker_config(
-    execution_env=None,
     planning_interval=_UNSET,
     max_tokens=_UNSET,
     llm_max_tokens=_UNSET,
@@ -96,8 +94,6 @@ def _worker_config(
         "tools": [],
         "workflow": "wf",
     }
-    if execution_env is not None:
-        config["execution_env"] = execution_env
     if planning_interval is not _UNSET:
         config["planning_interval"] = planning_interval
     if max_tokens is not _UNSET:
@@ -108,7 +104,6 @@ def _worker_config(
 
 
 def _supervisor_config(
-    execution_env=None,
     prompt=None,
     planning_interval=_UNSET,
     max_tokens=_UNSET,
@@ -122,8 +117,6 @@ def _supervisor_config(
         "workflow": "wf",
         "worker_agents": [],
     }
-    if execution_env is not None:
-        config["execution_env"] = execution_env
     if prompt is not None:
         config["prompt"] = prompt
     if planning_interval is not _UNSET:
@@ -135,8 +128,8 @@ def _supervisor_config(
     return config
 
 
-def _worker_config_with_prompt(prompt, execution_env=None) -> dict:
-    config = _worker_config(execution_env=execution_env)
+def _worker_config_with_prompt(prompt) -> dict:
+    config = _worker_config()
     config["prompt"] = prompt
     return config
 
@@ -153,34 +146,6 @@ def _build_definition(agent, monkeypatch, root):
         lambda: "",
     )
     return agent._build_runtime_definition()
-
-
-@pytest.mark.parametrize(
-    "maker,config_builder",
-    [
-        (_make_worker, _worker_config),
-        (_make_supervisor, _supervisor_config),
-    ],
-)
-def test_removed_execution_env_has_no_runtime_definition_effect(
-    maker,
-    config_builder,
-    monkeypatch,
-    tmp_path,
-):
-    config = config_builder(["ignored", {"type": "unknown"}])
-    config["code_agent"] = {"anything": True}
-    agent = maker(config)
-
-    agent._validate_config()
-    definition = _build_definition(agent, monkeypatch, tmp_path)
-
-    assert "execution_env" not in definition.__dataclass_fields__
-    assert "code_agent" not in definition.__dataclass_fields__
-    assert "execution_env" not in definition.metadata
-    assert "code_agent" not in definition.metadata
-    assert "executor_type" not in definition.metadata
-    assert "executor_kwargs" not in definition.metadata
 
 
 def test_worker_planning_interval_passthrough_from_int(tmp_path):
@@ -380,23 +345,18 @@ def test_runtime_definition_autonormalizes_execution_config_without_validate(
     worker_prompt.parent.mkdir(parents=True, exist_ok=True)
     worker_prompt.write_text("system_prompt: worker", encoding="utf-8")
     worker = _make_worker(
-        _worker_config_with_prompt(
-            "prompts/worker_prompt.yaml",
-            execution_env={"type": "docker", "executor_kwargs": {"host": "127.0.0.1"}},
-        )
+        _worker_config_with_prompt("prompts/worker_prompt.yaml")
     )
     assert worker._normalized is None
     worker_definition = _build_definition(worker, monkeypatch, tmp_path)
     assert worker_definition.metadata["smolagents_prompt_template_path"] == str(
         worker_prompt.resolve()
     )
-    assert "execution_env" not in worker_definition.metadata
 
     supervisor_prompt = tmp_path / "prompts" / "supervisor_prompt.yaml"
     supervisor_prompt.write_text("system_prompt: supervisor", encoding="utf-8")
     supervisor = _make_supervisor(
         _supervisor_config(
-            execution_env={"type": "e2b", "executor_kwargs": {"timeout": 120}},
             prompt="prompts/supervisor_prompt.yaml",
         )
     )
@@ -405,4 +365,3 @@ def test_runtime_definition_autonormalizes_execution_config_without_validate(
     assert supervisor_definition.metadata[
         "smolagents_prompt_template_path"
     ] == str(supervisor_prompt.resolve())
-    assert "execution_env" not in supervisor_definition.metadata
