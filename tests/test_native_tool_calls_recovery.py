@@ -1,21 +1,31 @@
+"""Native tool-call behavior through the bridge and smolagents runtime."""
+
+from __future__ import annotations
+
 import json
 import threading
 import time
 from concurrent.futures import ThreadPoolExecutor
-from types import SimpleNamespace
 
 import pytest
-from smolagents import LiteLLMModel, Tool
-from smolagents.memory import ActionStep
-from smolagents.models import ChatMessage, ChatMessageToolCall, ChatMessageToolCallFunction, MessageRole
-from smolagents.monitoring import Timing
-
-from agentloom.runtime.logging import NullLoggerBackend
 from agentloom.adapters.smolagents.agents import ToolCallingAgentV2
-from agentloom.adapters.smolagents.models.litellm_model import (
-    LiteLLMModelV2,
-    NativeToolCallError,
+from agentloom.adapters.smolagents.model_turn_bridge import SmolagentsModelTurnBridge
+from agentloom.runtime.logging import NullLoggerBackend
+from agentloom.runtime.model_protocol import (
+    FunctionCallItem,
+    ModelProtocolError,
+    ModelTurnRequest,
+    ModelTurnResult,
 )
+from smolagents import Tool
+from smolagents.memory import ActionStep
+from smolagents.models import (
+    ChatMessage,
+    ChatMessageToolCall,
+    ChatMessageToolCallFunction,
+    MessageRole,
+)
+from smolagents.monitoring import Timing
 
 
 class EchoTool(Tool):
@@ -42,34 +52,38 @@ class AddTool(Tool):
 
 
 class NativeToolCallModel:
+    model_id = "fake-native"
+
     def __init__(self, tool_call: ChatMessageToolCall):
         self.tool_call = tool_call
         self.seen_tools = None
 
     def generate(self, _messages, stop_sequences=None, tools_to_call_from=None, **_kwargs):
         self.seen_tools = tools_to_call_from
-        return ChatMessage(role=MessageRole.ASSISTANT, content="", tool_calls=[self.tool_call])
+        return ChatMessage(
+            role=MessageRole.ASSISTANT,
+            content="",
+            tool_calls=[self.tool_call],
+        )
 
 
-class UnknownToolThenFinalModel:
-    model_id = "fake-unknown-then-final"
+class RecoveringModel:
+    model_id = "fake-recovering"
 
-    def __init__(self):
+    def __init__(self, error: str):
         self.calls = 0
+        self.error = error
 
     def generate(self, _messages, stop_sequences=None, tools_to_call_from=None, **_kwargs):
         self.calls += 1
         if self.calls == 1:
-            raise NativeToolCallError(
-                "Tool 'tool_name' not found in registered tools "
-                "['echo', 'final_answer']"
-            )
+            raise ModelProtocolError(self.error)
         return ChatMessage(
             role=MessageRole.ASSISTANT,
             content="",
             tool_calls=[
                 ChatMessageToolCall(
-                    id="call-final-after-unknown",
+                    id="call-final",
                     type="function",
                     function=ChatMessageToolCallFunction(
                         name="final_answer",
@@ -80,252 +94,147 @@ class UnknownToolThenFinalModel:
         )
 
 
-class MalformedArgumentsThenFinalModel:
-    model_id = "fake-malformed-then-final"
+class RecordingAdapter:
+    adapter_id = "openai_chat"
 
-    def __init__(self):
-        self.calls = 0
+    def __init__(self, result_factory):
+        self.result_factory = result_factory
+        self.requests: list[ModelTurnRequest] = []
 
-    def generate(self, _messages, stop_sequences=None, tools_to_call_from=None, **_kwargs):
-        self.calls += 1
-        if self.calls == 1:
-            message = ChatMessage(
-                role=MessageRole.ASSISTANT,
-                content="",
-                tool_calls=[
-                    ChatMessageToolCall(
-                        id="call-malformed",
-                        type="function",
-                        function=ChatMessageToolCallFunction(
-                            name="final_answer",
-                            arguments=(
-                                '{"answer":{"summary":"returned '
-                                '{"enabled": true}"}}'
-                            ),
-                        ),
-                    )
-                ],
-            )
-            LiteLLMModelV2._normalize_and_validate_tool_calls(
-                message,
-                list(tools_to_call_from or []),
-            )
-            return message
-        return ChatMessage(
-            role=MessageRole.ASSISTANT,
-            content="",
-            tool_calls=[
-                ChatMessageToolCall(
-                    id="call-final-after-malformed",
-                    type="function",
-                    function=ChatMessageToolCallFunction(
-                        name="final_answer",
-                        arguments={"answer": {"summary": 'returned {"enabled": true}'}},
-                    ),
-                )
-            ],
-        )
+    def turn(self, request: ModelTurnRequest) -> ModelTurnResult:
+        self.requests.append(request)
+        return self.result_factory(request)
 
 
-def _make_agent(model, tools):
+def _call(call_id: str, name: str, arguments) -> ChatMessageToolCall:
+    return ChatMessageToolCall(
+        id=call_id,
+        type="function",
+        function=ChatMessageToolCallFunction(name=name, arguments=arguments),
+    )
+
+
+def _agent(model, tools, *, max_steps=1, logger=None):
     return ToolCallingAgentV2(
         tools=tools,
         model=model,
-        max_steps=1,
+        logger=logger,
+        max_steps=max_steps,
         max_tokens=4096,
         verbosity_level=0,
     )
 
 
-def _action_step() -> ActionStep:
+def _step() -> ActionStep:
     return ActionStep(step_number=1, timing=Timing(start_time=time.time()))
 
 
-def test_tool_calling_agent_executes_native_tool_call():
-    tool_call = ChatMessageToolCall(
-        id="call_native",
-        type="function",
-        function=ChatMessageToolCallFunction(name="echo", arguments={"text": "native"}),
-    )
-    model = NativeToolCallModel(tool_call)
-    agent = _make_agent(model, [EchoTool()])
+@pytest.mark.parametrize(
+    ("arguments", "expected"),
+    [
+        ({"text": "native"}, "echo:native"),
+        (json.dumps({"text": "native-json"}), "echo:native-json"),
+        (json.dumps(json.dumps({"text": "native-double"})), "echo:native-double"),
+    ],
+)
+def test_tool_calling_agent_executes_native_argument_forms(arguments, expected) -> None:
+    model = NativeToolCallModel(_call("call-native", "echo", arguments))
+    agent = _agent(model, [EchoTool()])
+    memory_step = _step()
 
-    memory_step = _action_step()
     agent.step(memory_step)
 
     assert model.seen_tools[0].name == "echo"
-    assert memory_step.tool_calls[0].id == "call_native"
-    assert memory_step.observations.strip() == "echo:native"
+    assert memory_step.tool_calls[0].id == "call-native"
+    assert memory_step.observations.strip() == expected
 
 
-def test_tool_calling_agent_recovers_when_model_emits_an_unknown_tool() -> None:
-    model = UnknownToolThenFinalModel()
-    agent = ToolCallingAgentV2(
-        tools=[EchoTool()],
-        model=model,
-        max_steps=2,
-        max_tokens=4096,
-        verbosity_level=0,
-    )
+@pytest.mark.parametrize(
+    "error",
+    [
+        "Tool 'missing' not found in registered tools ['echo', 'final_answer']",
+        "Malformed tool_call for 'final_answer': arguments must be a JSON object",
+    ],
+)
+def test_tool_calling_agent_recovers_from_model_protocol_error(error: str) -> None:
+    model = RecoveringModel(error)
+    agent = _agent(model, [EchoTool()], max_steps=2)
 
     assert agent.run("Return a final answer.") == "recovered"
     assert model.calls == 2
 
 
-def test_tool_calling_agent_rejects_malformed_native_arguments_and_recovers() -> None:
-    model = MalformedArgumentsThenFinalModel()
-    agent = ToolCallingAgentV2(
-        tools=[],
-        model=model,
+def test_tool_calling_agent_recovers_with_logging_disabled() -> None:
+    model = RecoveringModel("bad structured output")
+    agent = _agent(
+        model,
+        [EchoTool()],
         max_steps=2,
-        max_tokens=4096,
-        verbosity_level=0,
-    )
-
-    assert agent.run("Return a structured final answer.") == {
-        "summary": 'returned {"enabled": true}'
-    }
-    assert model.calls == 2
-
-
-def test_tool_calling_agent_runs_with_logging_explicitly_disabled() -> None:
-    model = UnknownToolThenFinalModel()
-    agent = ToolCallingAgentV2(
-        tools=[EchoTool()],
-        model=model,
         logger=NullLoggerBackend(),
-        max_steps=2,
-        max_tokens=4096,
-        verbosity_level=0,
     )
 
     assert agent.run("Return a final answer.") == "recovered"
 
 
-def test_tool_calling_agent_executes_native_tool_call_with_json_string_arguments():
-    tool_call = ChatMessageToolCall(
-        id="call_native_json",
-        type="function",
-        function=ChatMessageToolCallFunction(name="echo", arguments=json.dumps({"text": "native-json"})),
+def test_bridge_projects_tools_and_required_choice() -> None:
+    adapter = RecordingAdapter(
+        lambda _request: ModelTurnResult(
+            items=(
+                FunctionCallItem(
+                    call_id="call-echo",
+                    name="echo",
+                    arguments_json='{"text":"required"}',
+                ),
+            )
+        )
     )
-    model = NativeToolCallModel(tool_call)
-    agent = _make_agent(model, [EchoTool()])
-
-    memory_step = _action_step()
-    agent.step(memory_step)
-
-    assert memory_step.tool_calls[0].id == "call_native_json"
-    assert memory_step.observations.strip() == "echo:native-json"
-
-
-def test_tool_calling_agent_executes_native_tool_call_with_double_encoded_arguments():
-    tool_call = ChatMessageToolCall(
-        id="call_native_double",
-        type="function",
-        function=ChatMessageToolCallFunction(
-            name="echo",
-            arguments=json.dumps(json.dumps({"text": "native-double"})),
-        ),
-    )
-    model = NativeToolCallModel(tool_call)
-    agent = _make_agent(model, [EchoTool()])
-
-    memory_step = _action_step()
-    agent.step(memory_step)
-
-    assert memory_step.tool_calls[0].id == "call_native_double"
-    assert memory_step.observations.strip() == "echo:native-double"
-
-
-def test_litellm_model_keeps_tools_schema_and_tool_choice():
-    model = LiteLLMModelV2(model_id="test/model")
-    completion_kwargs = model._prepare_completion_kwargs(
-        messages=[{"role": "user", "content": "hi"}],
-        tools_to_call_from=[EchoTool()],
-        tool_choice="auto",
+    model = SmolagentsModelTurnBridge(
+        adapter=adapter,
+        model_id="opaque-model",
+        options={"tool_choice": "auto"},
     )
 
-    assert completion_kwargs["tools"][0]["function"]["name"] == "echo"
-    assert completion_kwargs["tool_choice"] == "auto"
-
-
-def test_tool_calling_agent_requires_a_tool_call_even_when_model_default_is_auto(
-    monkeypatch,
-):
-    model = LiteLLMModelV2(model_id="test/model", tool_choice="auto")
-    observed_choices: list[str] = []
-
-    def generate(_messages, stop_sequences=None, tools_to_call_from=None, **_kwargs):
-        completion_kwargs = model._prepare_completion_kwargs(
-            messages=[{"role": "user", "content": "hi"}],
-            stop_sequences=stop_sequences,
-            tools_to_call_from=tools_to_call_from,
-        )
-        observed_choices.append(completion_kwargs["tool_choice"])
-        return ChatMessage(
-            role=MessageRole.ASSISTANT,
-            content="",
-            tool_calls=[
-                ChatMessageToolCall(
-                    id="call-required",
-                    type="function",
-                    function=ChatMessageToolCallFunction(
-                        name="echo",
-                        arguments={"text": "required"},
-                    ),
-                )
-            ],
+    with model.require_tool_calls():
+        message = model.generate(
+            [{"role": "user", "content": "echo"}],
+            tools_to_call_from=[EchoTool()],
         )
 
-    monkeypatch.setattr(model, "generate", generate)
-    agent = _make_agent(model, [EchoTool()])
-
-    memory_step = _action_step()
-    agent.step(memory_step)
-
-    assert observed_choices == ["required"]
-    assert memory_step.observations.strip() == "echo:required"
+    assert adapter.requests[0].tools[0].name == "echo"
+    assert adapter.requests[0].options["tool_choice"] == "required"
+    assert message.tool_calls[0].function.arguments == {"text": "required"}
 
 
-def test_shared_litellm_model_keeps_concurrent_tool_schemas_isolated(monkeypatch):
-    model = LiteLLMModelV2(model_id="test/model")
-    generate_barrier = threading.Barrier(2)
+def test_shared_bridge_keeps_concurrent_tool_schemas_isolated() -> None:
+    barrier = threading.Barrier(2)
 
-    def _fake_parent_generate(
-        _self,
-        _messages,
-        stop_sequences=None,
-        response_format=None,
-        tools_to_call_from=None,
-        **_kwargs,
-    ):
-        tool_name = tools_to_call_from[0].name
-        generate_barrier.wait(timeout=5)
-        return ChatMessage(
-            role=MessageRole.ASSISTANT,
-            content="",
-            tool_calls=[
-                ChatMessageToolCall(
-                    id=f"call-{tool_name}",
-                    type="function",
-                    function=ChatMessageToolCallFunction(
-                        name=tool_name,
-                        arguments={"text": "x"} if tool_name == "echo" else {"a": 1, "b": 2},
-                    ),
-                )
-            ],
+    def result(request: ModelTurnRequest) -> ModelTurnResult:
+        tool = request.tools[0]
+        barrier.wait(timeout=5)
+        arguments = '{"text":"x"}' if tool.name == "echo" else '{"a":1,"b":2}'
+        return ModelTurnResult(
+            items=(
+                FunctionCallItem(
+                    call_id=f"call-{tool.name}",
+                    name=tool.name,
+                    arguments_json=arguments,
+                ),
+            )
         )
 
-    monkeypatch.setattr(LiteLLMModel, "generate", _fake_parent_generate)
+    model = SmolagentsModelTurnBridge(
+        adapter=RecordingAdapter(result),
+        model_id="opaque-model",
+    )
 
-    def _generate_and_parse(tool):
+    def generate(tool):
         message = model.generate([], tools_to_call_from=[tool])
-        return model.parse_tool_calls(message).tool_calls[0].function.name
+        return message.tool_calls[0].function.name
 
     with ThreadPoolExecutor(max_workers=2) as pool:
         futures = {
-            "echo": pool.submit(_generate_and_parse, EchoTool()),
-            "add": pool.submit(_generate_and_parse, AddTool()),
+            "echo": pool.submit(generate, EchoTool()),
+            "add": pool.submit(generate, AddTool()),
         }
         assert {name: future.result(timeout=5) for name, future in futures.items()} == {
             "echo": "echo",
@@ -333,12 +242,15 @@ def test_shared_litellm_model_keeps_concurrent_tool_schemas_isolated(monkeypatch
         }
 
 
-def test_shared_litellm_model_agent_id_is_execution_local():
-    model = LiteLLMModelV2(model_id="test/model")
+def test_shared_bridge_agent_id_is_execution_local() -> None:
+    model = SmolagentsModelTurnBridge(
+        adapter=RecordingAdapter(lambda _request: ModelTurnResult()),
+        model_id="opaque-model",
+    )
     assigned = threading.Barrier(2)
     observed = threading.Barrier(2)
 
-    def _observe(label):
+    def observe(label):
         model.agent_id = label
         assigned.wait(timeout=5)
         current = model.agent_id
@@ -347,7 +259,7 @@ def test_shared_litellm_model_agent_id_is_execution_local():
         return current
 
     with ThreadPoolExecutor(max_workers=2) as pool:
-        futures = {label: pool.submit(_observe, label) for label in ("A", "B")}
+        futures = {label: pool.submit(observe, label) for label in ("A", "B")}
         assert {label: future.result(timeout=5) for label, future in futures.items()} == {
             "A": "A",
             "B": "B",
@@ -355,102 +267,41 @@ def test_shared_litellm_model_agent_id_is_execution_local():
     assert model.agent_id is None
 
 
-def test_generate_without_tool_calls_does_not_create_native_detection_state():
-    model = LiteLLMModelV2(model_id="test/model")
-    response = SimpleNamespace(
-        choices=[
-            SimpleNamespace(
-                message=SimpleNamespace(role=MessageRole.ASSISTANT, content='{"name":"echo","arguments":{"text":"x"}}', tool_calls=None)
+def test_bridge_rejects_unknown_tool_name() -> None:
+    model = SmolagentsModelTurnBridge(
+        adapter=RecordingAdapter(
+            lambda _request: ModelTurnResult(
+                items=(
+                    FunctionCallItem(
+                        call_id="call-missing",
+                        name="missing",
+                        arguments_json="{}",
+                    ),
+                )
             )
-        ],
-        usage=SimpleNamespace(prompt_tokens=1, completion_tokens=1),
-    )
-    model.retryer = lambda _func, **_kwargs: response
-    model.client = SimpleNamespace(completion=lambda **_kwargs: response)
-
-    message = model.generate([{"role": "user", "content": "hi"}], tools_to_call_from=[EchoTool()])
-
-    assert message.tool_calls is None
-    assert not hasattr(model, "_native_tool_calls_detected")
-    assert not hasattr(model, "should_use_native_tool_calls")
-
-
-def test_generate_with_native_tool_calls_does_not_create_native_detection_state():
-    model = LiteLLMModelV2(model_id="test/model")
-    tool_call = ChatMessageToolCall(
-        id="call_auto",
-        type="function",
-        function=ChatMessageToolCallFunction(name="echo", arguments={"text": "x"}),
-    )
-    response = SimpleNamespace(
-        choices=[SimpleNamespace(message=SimpleNamespace(role=MessageRole.ASSISTANT, content="", tool_calls=[tool_call]))],
-        usage=SimpleNamespace(prompt_tokens=1, completion_tokens=1),
-    )
-    model.retryer = lambda _func, **_kwargs: response
-    model.client = SimpleNamespace(completion=lambda **_kwargs: response)
-
-    message = model.generate([{"role": "user", "content": "hi"}], tools_to_call_from=[EchoTool()])
-
-    assert message.tool_calls == [tool_call]
-    assert not hasattr(model, "_native_tool_calls_detected")
-    assert not hasattr(model, "should_use_native_tool_calls")
-
-
-def test_litellm_generate_normalizes_native_tool_call_arguments():
-    model = LiteLLMModelV2(model_id="test/model")
-    tool_call = ChatMessageToolCall(
-        id="call_auto_json",
-        type="function",
-        function=ChatMessageToolCallFunction(
-            name="echo",
-            arguments=json.dumps(json.dumps({"text": "x"})),
         ),
+        model_id="opaque-model",
     )
-    response = SimpleNamespace(
-        choices=[SimpleNamespace(message=SimpleNamespace(role=MessageRole.ASSISTANT, content="", tool_calls=[tool_call]))],
-        usage=SimpleNamespace(prompt_tokens=1, completion_tokens=1),
-    )
-    model.retryer = lambda _func, **_kwargs: response
-    model.client = SimpleNamespace(completion=lambda **_kwargs: response)
 
-    message = model.generate([{"role": "user", "content": "hi"}], tools_to_call_from=[EchoTool()])
-
-    assert message.tool_calls[0].function.arguments == {"text": "x"}
-
-
-def test_litellm_generate_rejects_unknown_native_tool():
-    model = LiteLLMModelV2(model_id="test/model")
-    tool_call = ChatMessageToolCall(
-        id="call_unknown",
-        type="function",
-        function=ChatMessageToolCallFunction(name="missing", arguments=json.dumps({"text": "x"})),
-    )
-    response = SimpleNamespace(
-        choices=[SimpleNamespace(message=SimpleNamespace(role=MessageRole.ASSISTANT, content="", tool_calls=[tool_call]))],
-        usage=SimpleNamespace(prompt_tokens=1, completion_tokens=1),
-    )
-    model.retryer = lambda _func, **_kwargs: response
-    model.client = SimpleNamespace(completion=lambda **_kwargs: response)
-
-    with pytest.raises(NativeToolCallError) as exc_info:
-        model.generate([{"role": "user", "content": "hi"}], tools_to_call_from=[EchoTool()])
-
-    assert "Tool 'missing' not found" in str(exc_info.value)
+    with pytest.raises(ModelProtocolError, match="not found in registered tools"):
+        model.generate([], tools_to_call_from=[EchoTool()])
 
 
 @pytest.mark.parametrize(
     "content",
     [
-        '{"name": "echo", "arguments": {"text": "x"}}',
-        '<tool_call><name>echo</name><arguments>{"text": "x"}</arguments></tool_call>',
+        '{"name":"echo","arguments":{"text":"x"}}',
+        '<tool_call><name>echo</name></tool_call>',
         "Calling tool: echo with text=x",
     ],
 )
-def test_model_rejects_text_tool_call_fallback(content: str) -> None:
-    model = LiteLLMModelV2(model_id="test/model")
-    model._set_current_tools([EchoTool()])
+def test_bridge_never_parses_text_tool_call_fallback(content: str) -> None:
+    model = SmolagentsModelTurnBridge(
+        adapter=RecordingAdapter(lambda _request: ModelTurnResult()),
+        model_id="opaque-model",
+    )
 
-    with pytest.raises(NativeToolCallError, match="native structured tool_calls"):
+    with pytest.raises(ModelProtocolError, match="native structured tool_calls"):
         model.parse_tool_calls(
             ChatMessage(role=MessageRole.ASSISTANT, content=content)
         )

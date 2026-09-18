@@ -236,18 +236,38 @@ class SmolagentsModelTurnBridge(Model):
             )
         tool_calls: list[ChatMessageToolCall] = []
         text: list[str] = []
+        available_tool_names = {
+            getattr(tool, "name", "")
+            for tool in tools_to_call_from or ()
+            if getattr(tool, "name", "")
+        }
         for item in turn.items:
             if isinstance(item, MessageItem):
                 if item.role == "assistant":
                     text.append(item.text)
             elif isinstance(item, FunctionCallItem):
+                if available_tool_names and item.name not in available_tool_names:
+                    raise ModelProtocolError(
+                        f"Tool {item.name!r} not found in registered tools "
+                        f"{sorted(available_tool_names)}"
+                    )
+                try:
+                    arguments = json.loads(item.arguments_json)
+                except json.JSONDecodeError as exc:
+                    raise ModelProtocolError(
+                        f"Malformed tool_call for {item.name!r}: arguments must be valid JSON"
+                    ) from exc
+                if not isinstance(arguments, dict):
+                    raise ModelProtocolError(
+                        f"Malformed tool_call for {item.name!r}: arguments must be a JSON object"
+                    )
                 tool_calls.append(
                     ChatMessageToolCall(
                         id=item.call_id,
                         type="function",
                         function=ChatMessageToolCallFunction(
                             name=item.name,
-                            arguments=json.loads(item.arguments_json),
+                            arguments=arguments,
                         ),
                     )
                 )

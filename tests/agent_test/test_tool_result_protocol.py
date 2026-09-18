@@ -2,6 +2,14 @@ from __future__ import annotations
 
 import time
 
+from agentloom.adapters.litellm import OpenAIChatModelTurnAdapter
+from agentloom.adapters.smolagents.agents import ToolCallingAgentV2
+from agentloom.adapters.smolagents.model_turn_bridge import SmolagentsModelTurnBridge
+from agentloom.adapters.smolagents.tool_protocol import patch_litellm_tool_error_projection, settle_tool_call
+from agentloom.adapters.smolagents.tool_shim import inject_hooks
+from agentloom.runtime.hooks import HookEvent, HookHandler, HookPlan, HookResult, HookRun
+from agentloom.runtime.tool_protocol import ToolCallRecord, ToolErrorRecord
+from agentloom.runtime.trace import ExplicitExecutionContext, bind_explicit_execution_context
 from smolagents import Tool
 from smolagents.memory import ActionStep
 from smolagents.models import (
@@ -11,14 +19,6 @@ from smolagents.models import (
     MessageRole,
 )
 from smolagents.monitoring import Timing
-
-from agentloom.adapters.smolagents.agents import ToolCallingAgentV2
-from agentloom.runtime.hooks import HookEvent, HookHandler, HookPlan, HookResult, HookRun
-from agentloom.adapters.smolagents.tool_shim import inject_hooks
-from agentloom.adapters.smolagents.models.litellm_model import LiteLLMModelV2
-from agentloom.runtime.tool_protocol import ToolCallRecord, ToolErrorRecord
-from agentloom.adapters.smolagents.tool_protocol import patch_litellm_tool_error_projection, settle_tool_call
-from agentloom.runtime.trace import ExplicitExecutionContext, bind_explicit_execution_context
 
 
 class ExplodingTool(Tool):
@@ -98,10 +98,7 @@ class FailureThenFinalModel:
                 content="",
                 tool_calls=[_call("recover-call-11", "explode", {"label": "recoverable"})],
             )
-        self.second_request_payload = LiteLLMModelV2(model_id="openai/test")._prepare_completion_kwargs(
-            messages=messages,
-            tools_to_call_from=tools_to_call_from,
-        )["messages"]
+        self.second_request_payload = _project_chat_messages(messages)
         return ChatMessage(
             role=MessageRole.ASSISTANT,
             content="",
@@ -119,6 +116,25 @@ def _call(call_id: str, name: str, arguments: dict) -> ChatMessageToolCall:
 
 def _step() -> ActionStep:
     return ActionStep(step_number=1, timing=Timing(start_time=time.time()))
+
+
+def _project_chat_messages(messages) -> list[dict]:
+    captured: dict = {}
+
+    def transport(**request):
+        captured.update(request)
+        return {
+            "id": "wire-projection",
+            "choices": [{"message": {"content": "done", "tool_calls": []}}],
+            "usage": {},
+        }
+
+    model = SmolagentsModelTurnBridge(
+        adapter=OpenAIChatModelTurnAdapter(transport=transport),
+        model_id="openai/test",
+    )
+    model.generate(messages)
+    return captured["messages"]
 
 
 def test_tool_runtime_returns_one_canonical_terminal_record() -> None:
@@ -344,14 +360,12 @@ def test_litellm_payload_projects_native_tool_calls_and_error_results() -> None:
     list(agent._step_stream(memory_step))
     agent.memory.steps.append(memory_step)
 
-    completion = LiteLLMModelV2(model_id="openai/test")._prepare_completion_kwargs(
-        messages=agent.write_memory_to_messages(),
-    )
+    messages = _project_chat_messages(agent.write_memory_to_messages())
 
-    assert completion["messages"][-2:] == [
+    assert messages[-2:] == [
         {
             "role": "assistant",
-            "content": "",
+            "content": None,
             "tool_calls": [
                 {
                     "id": "wire-error-7",
@@ -390,14 +404,12 @@ def test_litellm_projects_parallel_success_results_before_message_cleaning() -> 
     list(agent._step_stream(memory_step))
     agent.memory.steps.append(memory_step)
 
-    completion = LiteLLMModelV2(model_id="openai/test")._prepare_completion_kwargs(
-        messages=agent.write_memory_to_messages(),
-    )
+    messages = _project_chat_messages(agent.write_memory_to_messages())
 
-    assert completion["messages"][-3:] == [
+    assert messages[-3:] == [
         {
             "role": "assistant",
-            "content": "",
+            "content": None,
             "tool_calls": [
                 {
                     "id": "wire-ok-1",

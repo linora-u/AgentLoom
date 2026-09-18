@@ -1,13 +1,19 @@
 """Extensions of the pinned smolagents Agent and native Tool-call protocol."""
 
+import json
 import time
 import uuid
-import json
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from contextlib import nullcontext
 from contextvars import copy_context
 from typing import Any
 
+from agentloom.adapters.smolagents.monkey_patch import install_agentloom_runtime_adapters
+from agentloom.adapters.smolagents.tool_argument_coercion import coerce_tool_arguments
+from agentloom.adapters.smolagents.tool_protocol import settle_tool_call
+from agentloom.runtime.invocation import require_successful_runtime_result
+from agentloom.runtime.model_protocol import ModelProtocolError
+from agentloom.runtime.tool_protocol import ToolCallRecord
 from smolagents import (
     AgentAudio,
     AgentGenerationError,
@@ -18,13 +24,6 @@ from smolagents import (
 )
 from smolagents.agents import ToolOutput
 from smolagents.memory import ToolCall
-
-from agentloom.adapters.smolagents.models.litellm_model import NativeToolCallError
-from agentloom.adapters.smolagents.monkey_patch import install_agentloom_runtime_adapters
-from agentloom.adapters.smolagents.tool_argument_coercion import coerce_tool_arguments
-from agentloom.adapters.smolagents.tool_protocol import settle_tool_call
-from agentloom.runtime.invocation import require_successful_runtime_result
-from agentloom.runtime.tool_protocol import ToolCallRecord
 
 # Preserve installation at the first concrete Agent-runtime import, before the
 # mixin is loaded, rather than installing patches during definition inspection.
@@ -120,12 +119,11 @@ class ToolCallingAgentV2(_SuccessfulRunStateMixin, LoomAgentMixin, ToolCallingAg
             with required_call_context:
                 yield from super()._step_stream(memory_step)
         except AgentGenerationError as exc:
-            # LiteLLMModelV2 validates native tool calls at the provider
-            # boundary. A bad tool name is model output, not an infrastructure
-            # or implementation failure, so feed it back as a recoverable
-            # parsing error and let the next ReAct step correct itself.
+            # Protocol-shape failures are model output, not infrastructure
+            # failures. Feed them back as recoverable parsing errors so the
+            # next ReAct step can correct itself.
             cause = exc.__cause__
-            if isinstance(cause, NativeToolCallError):
+            if isinstance(cause, ModelProtocolError):
                 raise AgentParsingError(
                     f"Error while parsing tool call from model output: {cause}",
                     self.logger,
