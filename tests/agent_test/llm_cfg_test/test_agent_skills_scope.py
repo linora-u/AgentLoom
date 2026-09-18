@@ -4,7 +4,7 @@ from pathlib import Path
 import agentloom.runtime.agent as base_agent_module
 import pytest
 from agentloom.runtime.agent_runtime import AgentRuntimeResult
-from agentloom.runtime.hooks import HookPlan, HookRun
+from agentloom.runtime.hooks import HookPlan
 from agentloom.runtime.model_binding import ModelTurnBinding
 from agentloom.runtime.model_protocol import ModelTurnResult
 from agentloom.runtime.skills.catalog import SkillCatalog, SkillSource
@@ -13,10 +13,11 @@ from agentloom.runtime.trace import get_current_hook_run, get_current_skill_cata
 
 class _DummyRuntimeAgent:
     def run(self, request):
+        hook_run = get_current_hook_run(required=True)
         output = {
             "task": request.task,
-            "skill_catalog": get_current_skill_catalog(),
-            "hook_run": get_current_hook_run(required=True),
+            "skill_catalog_identity": id(get_current_skill_catalog()),
+            "hook_plan_identity": id(hook_run.plan),
         }
         return AgentRuntimeResult(output=output, state="success")
 
@@ -74,9 +75,8 @@ def test_base_agent_run_binds_agent_scoped_catalogue():
     result = agent.run("demo-task")
 
     assert result["task"] == "demo-task"
-    assert result["skill_catalog"] is custom_catalog
-    assert isinstance(result["hook_run"], HookRun)
-    assert result["hook_run"].plan is agent._hook_plan
+    assert result["skill_catalog_identity"] == id(custom_catalog)
+    assert result["hook_plan_identity"] == id(agent._hook_plan)
 
 
 def test_same_scope_duplicate_skill_names_fail(tmp_path: Path):
