@@ -127,17 +127,23 @@ def _runtime_memory_steps(checkpoint: dict) -> list[dict]:
         raise ValueError(
             f"checkpoint runtime is not smolagents: {envelope.get('runtime_id')!r}"
         )
-    if envelope.get("state_schema_version") != 1:
+    if envelope.get("state_schema_version") != 2:
         raise ValueError(
             "checkpoint has unsupported smolagents state schema: "
             f"{envelope.get('state_schema_version')!r}"
         )
+    if not isinstance(envelope.get("runtime_version"), str) or not envelope["runtime_version"]:
+        raise ValueError("smolagents checkpoint lacks runtime_version")
     payload = envelope.get("payload")
     if not isinstance(payload, dict):
         raise ValueError("smolagents checkpoint payload is not a mapping")
     steps = payload.get("memory_steps")
     if not isinstance(steps, list):
         raise ValueError("smolagents checkpoint payload lacks memory_steps")
+    if not isinstance(payload.get("canonical_model_items"), list):
+        raise ValueError(
+            "smolagents checkpoint payload lacks canonical_model_items"
+        )
     return steps
 
 

@@ -252,10 +252,11 @@ def _runtime_checkpoint(steps):
     return {
         "runtime_id": "smolagents",
         "runtime_version": "test",
-        "state_schema_version": 1,
+        "state_schema_version": 2,
         "payload": {
             "step_count": len(steps),
             "memory_steps": steps,
+            "canonical_model_items": [],
         },
     }
 
@@ -277,6 +278,11 @@ def test_architecture_trace_requires_runtime_checkpoint_envelope():
     wrong_runtime["runtime_id"] = "langgraph"
     with pytest.raises(ValueError, match="runtime is not smolagents"):
         _runtime_memory_steps({"runtime_checkpoint": wrong_runtime})
+
+    missing_canonical = _runtime_checkpoint(steps)
+    del missing_canonical["payload"]["canonical_model_items"]
+    with pytest.raises(ValueError, match="canonical_model_items"):
+        _runtime_memory_steps({"runtime_checkpoint": missing_canonical})
 
 
 def _trace_fixture(tmp_path, tamper=None, application_id="app"):
