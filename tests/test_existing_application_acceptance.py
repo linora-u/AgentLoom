@@ -196,8 +196,9 @@ def test_checkpoint_verifier_decodes_only_completed_worker_handoff_envelopes(
         '{"ok":true,"status":"completed","output":"done"}'
     ) == "done"
 
-    with pytest.raises(AssertionError, match="not a JSON result envelope"):
-        checkpoint_helper._worker_handoff_output("done")
+    assert checkpoint_helper._worker_handoff_output("done") == "done"
+    with pytest.raises(AssertionError, match="output is empty"):
+        checkpoint_helper._worker_handoff_output("")
     with pytest.raises(AssertionError, match="not a completed"):
         checkpoint_helper._worker_handoff_output(
             '{"ok":false,"status":"error","error":{"message":"failed"}}'
