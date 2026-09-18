@@ -225,8 +225,12 @@ class TestSupervisorCheckpoint:
         envelope = RuntimeCheckpointEnvelope(
             runtime_id="smolagents",
             runtime_version="1.26.0",
-            state_schema_version=1,
-            payload={"memory_steps": [], "step_count": 0},
+            state_schema_version=2,
+            progress=0,
+            payload={
+                "memory_steps": [],
+                "canonical_model_items": [],
+            },
         )
         cm.save_supervisor_runtime_checkpoint(
             task_id,
@@ -270,8 +274,12 @@ class TestWorkerCheckpoint:
         envelope = RuntimeCheckpointEnvelope(
             runtime_id="smolagents",
             runtime_version="1.26.0",
-            state_schema_version=1,
-            payload={"memory_steps": [], "step_count": 0},
+            state_schema_version=2,
+            progress=0,
+            payload={
+                "memory_steps": [],
+                "canonical_model_items": [],
+            },
         )
 
         cm.save_worker_runtime_checkpoint(
