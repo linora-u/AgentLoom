@@ -186,8 +186,12 @@ class TestCheckpointSaveAndResume:
                 RuntimeCheckpointEnvelope(
                     runtime_id="smolagents",
                     runtime_version="test",
-                    state_schema_version=1,
-                    payload={"step_count": 0, "memory_steps": []},
+                    state_schema_version=2,
+                    progress=0,
+                    payload={
+                        "memory_steps": [],
+                        "canonical_model_items": [],
+                    },
                 ),
                 "running",
             )
