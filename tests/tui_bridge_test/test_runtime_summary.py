@@ -3,10 +3,9 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+import agentloom.tui_bridge.bridge as bridge_module
 import pytest
 import yaml
-
-import agentloom.tui_bridge.bridge as bridge_module
 from agentloom.runtime.context import RuntimeRunLease
 from agentloom.tui_bridge.bridge import BridgeError, TuiBridge
 
@@ -26,12 +25,13 @@ def _project(tmp_path: Path) -> TuiBridge:
     )
     _write(
         tmp_path / "config/llm.yaml",
-        "model:\n  summary:\n    model: openai/test-summary\n  default_model_type: test\n  test:\n    model: openai/test\n",
+        "model:\n  summary:\n    model: openai/test-summary\n    adapter: openai_chat\n  default_model_type: test\n  test:\n    model: openai/test\n    adapter: openai_chat\n",
     )
     _write(
         tmp_path / SYSTEM_ID,
         """\
 name: demo
+agent_runtime: smolagents
 description: Cached Agent identity
 model_type: test
 worker_agents: []
