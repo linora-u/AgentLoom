@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import time
 
+import pytest
 from agentloom.adapters.litellm import OpenAIChatModelTurnAdapter
 from agentloom.adapters.litellm.tool_error_projection import (
     patch_litellm_tool_error_projection,
@@ -12,8 +13,17 @@ from agentloom.adapters.smolagents.tool_protocol import settle_tool_call
 from agentloom.adapters.smolagents.tool_shim import inject_hooks
 from agentloom.runtime.hooks import HookEvent, HookHandler, HookPlan, HookResult, HookRun
 from agentloom.runtime.model_binding import ModelTurnBinding
+from agentloom.runtime.tool_gateway import (
+    AgentLoomToolGateway,
+    bind_tool,
+    final_answer_binding,
+)
 from agentloom.runtime.tool_protocol import ToolCallRecord, ToolErrorRecord
-from agentloom.runtime.trace import ExplicitExecutionContext, bind_explicit_execution_context
+from agentloom.runtime.trace import (
+    ExplicitExecutionContext,
+    bind_explicit_execution_context,
+    capture_explicit_execution_context,
+)
 from smolagents import Tool
 from smolagents.memory import ActionStep
 from smolagents.models import (
@@ -23,6 +33,7 @@ from smolagents.models import (
     MessageRole,
 )
 from smolagents.monitoring import Timing
+from smolagents.tools import handle_agent_output_types
 
 
 class ExplodingTool(Tool):
@@ -108,6 +119,39 @@ class FailureThenFinalModel:
             content="",
             tool_calls=[_call("final-after-error", "final_answer", {"answer": "recovered"})],
         )
+
+
+def _gateway(*tools: object) -> AgentLoomToolGateway:
+    return AgentLoomToolGateway(
+        [
+            *(
+                bind_tool(tool, output_normalizer=handle_agent_output_types)
+                for tool in tools
+            ),
+            final_answer_binding(),
+        ]
+    )
+
+
+@pytest.fixture(autouse=True)
+def _bind_tool_runtime():
+    current = capture_explicit_execution_context()
+    run = HookRun(HookPlan(), local_run_id="tool-results", root_run_id="tool-results")
+    with bind_explicit_execution_context(
+        ExplicitExecutionContext(
+            task_id=current.task_id,
+            sub_task_id=current.sub_task_id,
+            agent_id=current.agent_id,
+            agent_name=current.agent_name,
+            agent_config=current.agent_config,
+            skill_catalog=current.skill_catalog,
+            hook_run=run,
+            runtime_agent_path=current.runtime_agent_path,
+            root_run_id="tool-results",
+            local_run_id="tool-results",
+        )
+    ):
+        yield
 
 
 def _call(call_id: str, name: str, arguments: dict) -> ChatMessageToolCall:
@@ -309,7 +353,7 @@ def test_hooked_tool_settlement_sanitizes_completed_output_without_changing_term
 def test_failed_tool_keeps_provider_call_id_and_error_record() -> None:
     model = NativeBatchModel([_call("provider-failure-42", "explode", {"label": "bad"})])
     agent = ToolCallingAgentV2(
-        tools=[ExplodingTool()],
+        tool_gateway=_gateway(ExplodingTool()),
         model=model,
         max_steps=1,
         max_tokens=4096,
@@ -337,7 +381,7 @@ def test_parallel_calls_settle_success_and_failure_independently() -> None:
         ]
     )
     agent = ToolCallingAgentV2(
-        tools=[EchoTool(), ExplodingTool()],
+        tool_gateway=_gateway(EchoTool(), ExplodingTool()),
         model=model,
         max_steps=1,
         max_tokens=4096,
@@ -357,7 +401,7 @@ def test_parallel_calls_settle_success_and_failure_independently() -> None:
 def test_litellm_payload_projects_native_tool_calls_and_error_results() -> None:
     model = NativeBatchModel([_call("wire-error-7", "explode", {"label": "wire"})])
     agent = ToolCallingAgentV2(
-        tools=[ExplodingTool()],
+        tool_gateway=_gateway(ExplodingTool()),
         model=model,
         max_steps=1,
         max_tokens=4096,
@@ -401,7 +445,7 @@ def test_litellm_projects_parallel_success_results_before_message_cleaning() -> 
         ]
     )
     agent = ToolCallingAgentV2(
-        tools=[EchoTool()],
+        tool_gateway=_gateway(EchoTool()),
         model=model,
         max_steps=1,
         max_tokens=4096,
@@ -505,7 +549,7 @@ def test_policy_block_is_a_non_retryable_tool_result_with_same_call_id() -> None
     )
     model = NativeBatchModel([_call("provider-block-8", "echo", {"text": "not-run"})])
     agent = ToolCallingAgentV2(
-        tools=[inject_hooks(EchoTool())],
+        tool_gateway=_gateway(EchoTool()),
         model=model,
         max_steps=1,
         max_tokens=4096,
@@ -527,7 +571,7 @@ def test_policy_block_is_a_non_retryable_tool_result_with_same_call_id() -> None
 def test_next_model_request_receives_native_error_and_can_recover() -> None:
     model = FailureThenFinalModel()
     agent = ToolCallingAgentV2(
-        tools=[ExplodingTool()],
+        tool_gateway=_gateway(ExplodingTool()),
         model=model,
         max_steps=2,
         max_tokens=4096,
