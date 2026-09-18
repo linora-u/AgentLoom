@@ -161,8 +161,8 @@ def test_smart_summary_cannot_consume_completion_settlement(monkeypatch) -> None
     from agentloom.runtime.memory import context_compression
 
     monkeypatch.setattr(
-        context_compression.model_manager,
-        "get_smolagents_model",
+        context_compression,
+        "resolve_litellm_model_turn_binding",
         lambda *_args, **_kwargs: pytest.fail("summary model must not be called"),
     )
     provider = _provider(budget=None)
