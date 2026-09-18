@@ -233,6 +233,42 @@ def test_adapter_emits_runtime_events_with_canonical_identity_and_typed_usage() 
     assert result.checkpoint.run_id == "canonical-run"
 
 
+def test_adapter_event_sink_failure_is_visible_but_does_not_fail_run(
+    monkeypatch,
+) -> None:
+    from agentloom.adapters.smolagents import runtime_adapter as adapter_module
+
+    native = _NativeRuntime(_NativeResult(output="done"))
+    runtime = SmolagentsRuntimeAdapter(native)
+    warnings: list[str] = []
+    monkeypatch.setattr(
+        adapter_module,
+        "logger",
+        SimpleNamespace(
+            warning=lambda message, *args: warnings.append(message % args)
+        ),
+    )
+
+    result = runtime.run(
+        AgentRuntimeRequest(
+            task="inspect",
+            event_sink=lambda _event: (_ for _ in ()).throw(
+                RuntimeError("observer failed")
+            ),
+        )
+    )
+
+    assert result.state == "success"
+    assert [event.kind for event in result.events] == [
+        "run",
+        "checkpoint",
+        "usage",
+        "terminal",
+    ]
+    assert len(warnings) == len(result.events)
+    assert all("observer failed" in warning for warning in warnings)
+
+
 def test_adapter_classifies_provider_error_and_emits_terminal_failure() -> None:
     from litellm.exceptions import Timeout
 
