@@ -40,6 +40,9 @@ from agentloom.runtime.heartbeat.worker_heartbeat import WorkerHeartbeat
 from agentloom.runtime.logging import get_logger
 
 _logger = get_logger(__name__)
+_TERMINAL_CHECKPOINT_STATUSES = frozenset(
+    {"completed", "failed", "interrupted", "budget_limited"}
+)
 
 # Single ContextVar — replaces the previous two (_current_checkpoint_manager
 # and _step_checkpoint_cb) in base_agent.py.
@@ -277,8 +280,13 @@ class CheckpointCoordinator:
                     self._task_id,
                     lambda tree: {**tree, "checkpoint_degraded": True},
                 )
-            except Exception:
-                pass
+            except Exception as degraded_error:
+                exc.add_note(
+                    "Marking checkpoint_degraded also failed: "
+                    f"{type(degraded_error).__name__}: {degraded_error}"
+                )
+            if status in _TERMINAL_CHECKPOINT_STATUSES:
+                raise
 
     # ── Worker ops ───────────────────────────────────────────────────
 
