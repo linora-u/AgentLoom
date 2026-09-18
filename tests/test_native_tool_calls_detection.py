@@ -15,7 +15,15 @@ class _EmptyAdapter:
 
 
 def test_model_config_has_no_native_tool_call_detection_field() -> None:
-    assert not hasattr(ModelConfig(), "supports_native_tool_calls")
+    assert not hasattr(
+        ModelConfig(adapter="openai_chat"),
+        "supports_native_tool_calls",
+    )
+
+
+def test_model_config_requires_explicit_adapter() -> None:
+    with pytest.raises(TypeError, match="adapter"):
+        ModelConfig()  # type: ignore[call-arg]
 
 
 def test_bridge_has_no_native_tool_call_detection_state() -> None:
