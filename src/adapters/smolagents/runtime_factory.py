@@ -12,12 +12,19 @@ from agentloom.adapters.smolagents.runtime_adapter import (
     SmolagentsRuntimeAdapter,
 )
 from agentloom.runtime.agent_runtime import RuntimeDefinition
-from agentloom.runtime.logging import get_global_logger
+from agentloom.runtime.logging import get_global_logger, get_logger
+from agentloom.runtime.prompts.prompt_builder import (
+    _append_to_system_prompt,
+    load_base_prompt_templates,
+)
 from agentloom.runtime.trace import get_current_hook_run
 from smolagents import LogLevel
 
 _DEFAULT_MAX_CONSECUTIVE_PARSE_ERRORS = 5
 _MAX_CONSECUTIVE_PARSE_ERRORS_KEY = "max_consecutive_parse_errors"
+_PROMPT_TEMPLATE_PATH_KEY = "smolagents_prompt_template_path"
+_AGENT_ROOT_KEY = "agent_root"
+logger = get_logger(__name__)
 
 
 def _run_scoped_stop_check(
@@ -48,6 +55,26 @@ def _max_consecutive_parse_errors(definition: RuntimeDefinition) -> int:
     return raw_value
 
 
+def _prompt_metadata(definition: RuntimeDefinition) -> tuple[str | None, str]:
+    prompt_path = definition.metadata.get(_PROMPT_TEMPLATE_PATH_KEY)
+    if prompt_path is not None and (
+        not isinstance(prompt_path, str) or not prompt_path.strip()
+    ):
+        raise ValueError(
+            "runtime definition metadata.smolagents_prompt_template_path "
+            "must be a non-empty string path when provided"
+        )
+    agent_root = definition.metadata.get(_AGENT_ROOT_KEY)
+    if not isinstance(agent_root, str) or not agent_root.strip():
+        raise ValueError(
+            "runtime definition metadata.agent_root must be a non-empty string path"
+        )
+    return (
+        prompt_path.strip() if isinstance(prompt_path, str) else None,
+        agent_root.strip(),
+    )
+
+
 class SmolagentsRuntimeFactory:
     """Build one complete smolagents runtime from a neutral definition."""
 
@@ -66,10 +93,16 @@ class SmolagentsRuntimeFactory:
             )
 
         model = SmolagentsModelTurnBridge(binding=definition.model)
+        prompt_path, agent_root = _prompt_metadata(definition)
+        prompt_templates = load_base_prompt_templates(
+            prompt_template_path=prompt_path,
+            model_id=definition.model.model_id,
+            agent_root=agent_root,
+            logger=logger,
+        )
         agent_kwargs: dict[str, Any] = {
             "tool_gateway": definition.tool_gateway,
             "model": model,
-            "instructions": definition.instructions,
             "max_steps": definition.max_steps,
             "max_tokens": definition.model.max_tokens,
             "context_window": definition.model.context_window,
@@ -82,6 +115,14 @@ class SmolagentsRuntimeFactory:
             "final_answer_checks": [_run_scoped_stop_check],
             "logger": get_global_logger(create_if_missing=False),
         }
+        if prompt_templates is None:
+            agent_kwargs["instructions"] = definition.instructions
+        else:
+            _append_to_system_prompt(
+                prompt_templates,
+                definition.instructions,
+            )
+            agent_kwargs["prompt_templates"] = prompt_templates
         if definition.planning_interval is not None:
             agent_kwargs["planning_interval"] = definition.planning_interval
 

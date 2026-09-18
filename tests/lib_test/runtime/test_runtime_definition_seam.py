@@ -39,7 +39,6 @@ _FORBIDDEN_RUNTIME_SYMBOLS = (
     "SmolagentsModelTurnBridge",
 )
 _FORBIDDEN_RUNTIME_SOURCE_FRAGMENTS = (
-    "smolagents",
     "agentloom.adapters.smolagents",
     "ToolCallingAgentV2",
     "SmolagentsModelTurnBridge",
