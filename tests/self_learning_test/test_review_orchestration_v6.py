@@ -2,10 +2,14 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
-from types import SimpleNamespace
 
 import pytest
-
+from agentloom.runtime.model_binding import ModelTurnBinding
+from agentloom.runtime.model_protocol import (
+    MessageItem,
+    ModelTurnRequest,
+    ModelTurnResult,
+)
 from agentloom.self_learning.review_types import (
     CandidateResult,
     ReviewBatchResult,
@@ -78,36 +82,49 @@ class _Engine:
         )
 
 
+def _binding(adapter) -> ModelTurnBinding:
+    return ModelTurnBinding(
+        model_type="summary",
+        model_id="fake/summary",
+        adapter=adapter,
+    )
+
+
 class _StructuredModel:
-    model_id = "fake/summary"
+    adapter_id = "openai_chat"
 
     def __init__(self) -> None:
         self.calls = []
 
-    def generate(self, messages, **kwargs):
-        self.calls.append((messages, kwargs))
-        assert not kwargs.get("tools_to_call_from")
-        return SimpleNamespace(
-            content=json.dumps(
-                {
-                    "candidates": [
+    def turn(self, request: ModelTurnRequest) -> ModelTurnResult:
+        self.calls.append(request)
+        assert request.tools == ()
+        return ModelTurnResult(
+            items=(
+                MessageItem(
+                    role="assistant",
+                    text=json.dumps(
                         {
-                            "scope": "project",
-                            "kind": "fact",
-                            "memory_key": "api:page-size",
-                            "payload": {"text": "The page size is 100 rows."},
-                            "approval": "manual",
-                            "action": "remove",
-                            "provenance": [
+                            "candidates": [
                                 {
-                                    "root_run_id": "root-1",
-                                    "event_id": "event-1",
-                                    "tool_call_id": "call-1",
+                                    "scope": "project",
+                                    "kind": "fact",
+                                    "memory_key": "api:page-size",
+                                    "payload": {"text": "The page size is 100 rows."},
+                                    "approval": "manual",
+                                    "action": "remove",
+                                    "provenance": [
+                                        {
+                                            "root_run_id": "root-1",
+                                            "event_id": "event-1",
+                                            "tool_call_id": "call-1",
+                                        }
+                                    ],
                                 }
-                            ],
+                            ]
                         }
-                    ]
-                }
+                    ),
+                ),
             )
         )
 
@@ -164,7 +181,7 @@ def test_review_model_only_returns_candidates_and_cannot_choose_scope_policy_or_
     orchestrator = ReviewOrchestrator(
         engine=engine,
         agent_config=_config(),
-        model_resolver=lambda _name: model,
+        model_resolver=lambda _name: _binding(model),
         render_artifacts=False,
     )
     orchestrator.collect = lambda _scope, _scope_id: {
@@ -196,6 +213,60 @@ def test_review_model_only_returns_candidates_and_cannot_choose_scope_policy_or_
             "tool_call_id": "call-1",
         },
     )
+    request = model.calls[0]
+    assert request.tools == ()
+    assert request.options == {}
+    assert [item.role for item in request.items] == ["system", "user"]
+    assert "Return one JSON object" in request.items[0].text
+    assert json.loads(request.items[1].text)["scope_id"] == "app-a"
+
+
+def test_review_turn_has_one_provider_call_budget(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    from agentloom.self_learning import review_orchestration
+    from agentloom.self_learning.review_orchestration import ReviewOrchestrator
+
+    observed: list[int] = []
+
+    class _Budget:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args):
+            return False
+
+    monkeypatch.setattr(
+        review_orchestration,
+        "limit_provider_calls",
+        lambda value: observed.append(value) or _Budget(),
+    )
+    model = _StructuredModel()
+    orchestrator = ReviewOrchestrator(
+        engine=_Engine(tmp_path / "self_learning.db"),
+        agent_config=_config(),
+        model_resolver=lambda _name: _binding(model),
+        render_artifacts=False,
+    )
+    orchestrator.collect = lambda _scope, _scope_id: {
+        "source_runs": [
+            {"root_run_id": "root-1", "application_id": "app-a"}
+        ],
+        "allowed_provenance": [
+            {
+                "root_run_id": "root-1",
+                "event_id": "event-1",
+                "tool_call_id": "call-1",
+            }
+        ],
+        "context": [{"kind": "trusted_evidence"}],
+    }
+
+    orchestrator.run_review("application", "app-a")
+
+    assert observed == [1]
+    assert len(model.calls) == 1
 
 
 def test_large_context_uses_valid_json_and_binds_only_complete_prompted_runs(
@@ -207,29 +278,36 @@ def test_large_context_uses_valid_json_and_binds_only_complete_prompted_runs(
     prompted: list[dict] = []
 
     class _PromptAwareModel:
-        def generate(self, messages, **_kwargs):
-            payload = json.loads(messages[-1].content)
+        adapter_id = "openai_chat"
+
+        def turn(self, request: ModelTurnRequest) -> ModelTurnResult:
+            payload = json.loads(request.items[-1].text)
             prompted.append(payload)
             provenance = payload["allowed_provenance"][0]
-            return SimpleNamespace(
-                content=json.dumps(
-                    {
-                        "candidates": [
+            return ModelTurnResult(
+                items=(
+                    MessageItem(
+                        role="assistant",
+                        text=json.dumps(
                             {
-                                "kind": "fact",
-                                "memory_key": "prompt:bounded",
-                                "payload": {"text": "Only prompted runs are consumed."},
-                                "provenance": [provenance],
+                                "candidates": [
+                                    {
+                                        "kind": "fact",
+                                        "memory_key": "prompt:bounded",
+                                        "payload": {"text": "Only prompted runs are consumed."},
+                                        "provenance": [provenance],
+                                    }
+                                ]
                             }
-                        ]
-                    }
+                        ),
+                    ),
                 )
             )
 
     orchestrator = ReviewOrchestrator(
         engine=engine,
         agent_config=_config(),
-        model_resolver=lambda _name: _PromptAwareModel(),
+        model_resolver=lambda _name: _binding(_PromptAwareModel()),
         render_artifacts=False,
     )
     orchestrator.collect = lambda _scope, _scope_id: {
@@ -289,7 +367,7 @@ def test_single_oversized_run_is_retryable_without_model_or_engine_call(
     orchestrator = ReviewOrchestrator(
         engine=engine,
         agent_config=_config(),
-        model_resolver=lambda _name: model,
+        model_resolver=lambda _name: _binding(model),
         render_artifacts=False,
     )
     provenance = {
@@ -319,27 +397,34 @@ def test_ambiguous_same_root_entry_is_neither_prompted_nor_consumed(
     prompted: list[dict] = []
 
     class _CaptureModel:
-        def generate(self, messages, **_kwargs):
-            prompted.append(json.loads(messages[-1].content))
-            return SimpleNamespace(
-                content=json.dumps(
-                    {
-                        "candidates": [
+        adapter_id = "openai_chat"
+
+        def turn(self, request: ModelTurnRequest) -> ModelTurnResult:
+            prompted.append(json.loads(request.items[-1].text))
+            return ModelTurnResult(
+                items=(
+                    MessageItem(
+                        role="assistant",
+                        text=json.dumps(
                             {
-                                "kind": "fact",
-                                "memory_key": "prompt:bound-only",
-                                "payload": {"text": "Only bound evidence is eligible."},
-                                "provenance": [prompted[-1]["allowed_provenance"][0]],
+                                "candidates": [
+                                    {
+                                        "kind": "fact",
+                                        "memory_key": "prompt:bound-only",
+                                        "payload": {"text": "Only bound evidence is eligible."},
+                                        "provenance": [prompted[-1]["allowed_provenance"][0]],
+                                    }
+                                ]
                             }
-                        ]
-                    }
+                        ),
+                    ),
                 )
             )
 
     orchestrator = ReviewOrchestrator(
         engine=engine,
         agent_config=_config(),
-        model_resolver=lambda _name: _CaptureModel(),
+        model_resolver=lambda _name: _binding(_CaptureModel()),
         render_artifacts=False,
     )
     orchestrator.collect = lambda _scope, _scope_id: {
@@ -396,7 +481,7 @@ def test_only_ambiguous_same_root_entries_fail_before_model_or_consumption(
     orchestrator = ReviewOrchestrator(
         engine=engine,
         agent_config=_config(),
-        model_resolver=lambda _name: model,
+        model_resolver=lambda _name: _binding(model),
         render_artifacts=False,
     )
     orchestrator.collect = lambda _scope, _scope_id: {
@@ -429,7 +514,7 @@ def test_project_collection_never_contains_raw_application_transcripts(
     orchestrator = ReviewOrchestrator(
         engine=engine,
         agent_config=_config(),
-        model_resolver=lambda _name: _StructuredModel(),
+        model_resolver=lambda _name: _binding(_StructuredModel()),
         render_artifacts=False,
     )
 
@@ -526,11 +611,11 @@ def test_project_collection_does_not_repropose_an_existing_project_candidate(
 def test_project_collection_consumes_direct_project_evidence_once(
     tmp_path: Path,
 ) -> None:
+    from agentloom.runtime.trusted_memory_evidence import TRUSTED_MEMORY_EVIDENCE_KIND
     from agentloom.self_learning.event_schema import CanonicalSessionEvent
     from agentloom.self_learning.persistence.ledger import SelfLearningLedger
     from agentloom.self_learning.persistence.review_engine import ReviewEngine
     from agentloom.self_learning.review_orchestration import ReviewOrchestrator
-    from agentloom.runtime.trusted_memory_evidence import TRUSTED_MEMORY_EVIDENCE_KIND
 
     db_path = tmp_path / "self_learning.db"
     ledger = SelfLearningLedger(db_path)
@@ -592,14 +677,13 @@ def test_artifact_failure_rolls_back_activation_and_keeps_source_run_retryable(
     import sqlite3
 
     import pytest
-
+    from agentloom.runtime.trusted_memory_evidence import TRUSTED_MEMORY_EVIDENCE_KIND
     from agentloom.self_learning.event_schema import CanonicalSessionEvent
     from agentloom.self_learning.persistence.evidence_gate import SQLiteEvidenceGate
     from agentloom.self_learning.persistence.ledger import SelfLearningLedger
     from agentloom.self_learning.persistence.review_engine import ReviewEngine
     from agentloom.self_learning.review_artifacts import ReviewArtifactRenderer
     from agentloom.self_learning.review_orchestration import ReviewOrchestrator
-    from agentloom.runtime.trusted_memory_evidence import TRUSTED_MEMORY_EVIDENCE_KIND
 
     db_path = tmp_path / "self_learning.db"
     ledger = SelfLearningLedger(db_path)
@@ -638,32 +722,37 @@ def test_artifact_failure_rolls_back_activation_and_keeps_source_run_retryable(
     )
 
     model = _StructuredModel()
-    model.generate = lambda _messages, **_kwargs: SimpleNamespace(
-        content=json.dumps(
-            {
-                "candidates": [
+    model.turn = lambda _request: ModelTurnResult(
+        items=(
+            MessageItem(
+                role="assistant",
+                text=json.dumps(
                     {
-                        "kind": "fact",
-                        "memory_key": "export:limit",
-                        "payload": {"text": fact_text},
-                        "provenance": [
+                        "candidates": [
                             {
-                                "root_run_id": "root-artifact-failure",
-                                "application_id": "app-a",
-                                "event_id": "artifact-failure-fact",
-                                "tool_call_id": "call-artifact-failure",
+                                "kind": "fact",
+                                "memory_key": "export:limit",
+                                "payload": {"text": fact_text},
+                                "provenance": [
+                                    {
+                                        "root_run_id": "root-artifact-failure",
+                                        "application_id": "app-a",
+                                        "event_id": "artifact-failure-fact",
+                                        "tool_call_id": "call-artifact-failure",
+                                    }
+                                ],
                             }
-                        ],
+                        ]
                     }
-                ]
-            }
+                ),
+            ),
         )
     )
     engine = ReviewEngine(db_path, evidence_gate=SQLiteEvidenceGate(db_path))
     orchestrator = ReviewOrchestrator(
         engine=engine,
         agent_config=_config(),
-        model_resolver=lambda _name: model,
+        model_resolver=lambda _name: _binding(model),
     )
 
     monkeypatch.setattr(
@@ -701,7 +790,7 @@ def test_artifact_failure_rolls_back_activation_and_keeps_source_run_retryable(
     retry = ReviewOrchestrator(
         engine=engine,
         agent_config=_config(),
-        model_resolver=lambda _name: model,
+        model_resolver=lambda _name: _binding(model),
         render_artifacts=False,
     ).run_review("application", "app-a")
 
