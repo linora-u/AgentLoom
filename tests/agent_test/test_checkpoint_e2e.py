@@ -12,22 +12,16 @@ from __future__ import annotations
 
 import json
 import os
-import threading
-from pathlib import Path
 from dataclasses import dataclass
-from typing import Any, Optional
-from unittest.mock import MagicMock, patch
+from datetime import UTC
 
-import pytest
-
-from agentloom.runtime.checkpoint.checkpoint_manager import CheckpointManager
-from agentloom.runtime.checkpoint.coordinator import CheckpointCoordinator
-from agentloom.runtime.checkpoint.conversation_recovery import (
-    TurnInterruptionState,
+from agentloom.adapters.smolagents.conversation_recovery import (
     prepare_steps_for_resume,
 )
+from agentloom.runtime.agent_runtime import RuntimeCheckpointEnvelope
+from agentloom.runtime.checkpoint.checkpoint_manager import CheckpointManager
+from agentloom.runtime.checkpoint.coordinator import CheckpointCoordinator
 from agentloom.runtime.checkpoint.file_history import FileHistoryManager
-
 
 # ---------------------------------------------------------------------------
 # Step stubs (duck-typed to match smolagents MemoryStep)
@@ -35,10 +29,10 @@ from agentloom.runtime.checkpoint.file_history import FileHistoryManager
 
 @dataclass
 class _FakeActionStep:
-    tool_calls: Optional[list] = None
-    observations: Optional[str] = None
-    model_output: Optional[str] = None
-    action_output: Optional[str] = None
+    tool_calls: list | None = None
+    observations: str | None = None
+    model_output: str | None = None
+    action_output: str | None = None
     is_final_answer: bool = False
     step_number: int = 0
 
@@ -103,7 +97,7 @@ class TestCheckpointSaveAndResume:
 
         # Write checkpoint.json directly (bypass serializer)
         import json
-        from datetime import datetime, timezone
+        from datetime import datetime
         ckpt_path = cm._supervisor_ckpt(task_id)
         ckpt_path.parent.mkdir(parents=True, exist_ok=True)
         ckpt_data = {
@@ -113,7 +107,7 @@ class TestCheckpointSaveAndResume:
             "status": "interrupted",
             "step_count": len(steps_raw),
             "memory_steps": steps_raw,
-            "saved_at": datetime.now(timezone.utc).isoformat(),
+            "saved_at": datetime.now(UTC).isoformat(),
         }
         ckpt_path.write_text(json.dumps(ckpt_data), encoding="utf-8")
 
@@ -123,7 +117,9 @@ class TestCheckpointSaveAndResume:
         assert len(ckpt["memory_steps"]) == 3
 
         # Simulate resume: deserialize then run pipeline
-        from agentloom.runtime.checkpoint.serializer import CheckpointSerializer
+        from agentloom.adapters.smolagents.checkpoint_codec import (
+            SmolagentsCheckpointCodec as CheckpointSerializer,
+        )
         deserialized = CheckpointSerializer.deserialize_memory_steps(ckpt["memory_steps"])
 
         cleaned, interruption = prepare_steps_for_resume(deserialized)
@@ -173,14 +169,6 @@ class TestCheckpointSaveAndResume:
         )
         task_id = "task_context_store"
 
-        class RuntimeAgent:
-            _config = {}
-
-            class Memory:
-                steps = []
-
-            memory = Memory()
-
         coord = CheckpointCoordinator.activate(cm, task_id, "task")
         try:
             from agentloom.runtime.context_engine.runtime import get_current_context_engine
@@ -194,7 +182,15 @@ class TestCheckpointSaveAndResume:
             )
             assert preview is not None
             ref = preview.split()[1]
-            coord.save_supervisor(RuntimeAgent(), "running")
+            coord.save_runtime_checkpoint(
+                RuntimeCheckpointEnvelope(
+                    runtime_id="smolagents",
+                    runtime_version="test",
+                    state_schema_version=1,
+                    payload={"step_count": 0, "memory_steps": []},
+                ),
+                "running",
+            )
             ckpt = cm.load_supervisor_checkpoint(task_id)
             assert ckpt["context_store"]["ref_count"] == 1
         finally:
@@ -310,8 +306,9 @@ class TestHeartbeatCrashDetection:
 
     def test_stopped_heartbeat_is_crashed(self):
         """Heartbeat with status=stopped is treated as crashed."""
-        from agentloom.runtime.heartbeat.status import detect_crashed_status
         import time
+
+        from agentloom.runtime.heartbeat.status import detect_crashed_status
 
         heartbeat = {
             "pid": os.getpid(),

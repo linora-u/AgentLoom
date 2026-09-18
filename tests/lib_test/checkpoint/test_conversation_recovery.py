@@ -1,5 +1,5 @@
 """
-Tests for agentloom.runtime.checkpoint.conversation_recovery.
+Tests for the smolagents-owned conversation recovery pipeline.
 
 Covers:
 - filter_unresolved_tool_uses: normal, boundary, edge cases
@@ -11,11 +11,9 @@ Covers:
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Any, Optional
+from typing import Any
 
-import pytest
-
-from agentloom.runtime.checkpoint.conversation_recovery import (
+from agentloom.adapters.smolagents.conversation_recovery import (
     TurnInterruptionState,
     detect_turn_interruption,
     filter_empty_steps,
@@ -33,10 +31,10 @@ from agentloom.runtime.checkpoint.conversation_recovery import (
 @dataclass
 class _FakeActionStep:
     """Minimal ActionStep stub."""
-    tool_calls: Optional[list[dict[str, Any]]] = None
-    observations: Optional[str] = None
-    model_output: Optional[str] = None
-    action_output: Optional[str] = None
+    tool_calls: list[dict[str, Any]] | None = None
+    observations: str | None = None
+    model_output: str | None = None
+    action_output: str | None = None
     is_final_answer: bool = False
     step_number: int = 0
 
