@@ -101,6 +101,11 @@ def test_role_driven_agent_builds_selected_runtime_through_registry(
         def _build_smolagents_runtime(self) -> object:
             raise AssertionError("registry owns runtime construction")
 
+        def _role_profile(self) -> agent_module.AgentRoleProfile:
+            return agent_module.AgentRoleProfile(
+                agent_type=agent_module.AgentType.SUPERVISOR,
+            )
+
     owner = _RuntimeOwner()
     monkeypatch.setattr(
         agent_module,
