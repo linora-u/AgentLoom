@@ -54,9 +54,7 @@ Key design decisions:
 """
 from __future__ import annotations
 
-import ast
 import json
-import re
 import time
 import uuid
 from collections.abc import Iterable, Mapping
@@ -107,19 +105,9 @@ FILE_DEDUP_PLACEHOLDER: str = (
     "Please refer to the latest read operation for the most up-to-date content.]"
 )
 
-# Regex patterns used to extract file paths from tool-call text.
-# Each key corresponds to a file-reading tool name.
-TOOL_DEDUP_PATTERNS: dict[str, re.Pattern] = {
-    "read_file": re.compile(
-        r'read_file\s*\(\s*(?:f?["\']([^"\'\n]+)["\'])',
-        re.IGNORECASE,
-    ),
-    "get_file_outline": re.compile(
-        r'get_file_outline\s*\(\s*(?:f?["\']([^"\'\n]+)["\'])',
-        re.IGNORECASE,
-    ),
-}
-FILE_READ_TOOL_NAMES: frozenset[str] = frozenset(TOOL_DEDUP_PATTERNS)
+FILE_READ_TOOL_NAMES: frozenset[str] = frozenset(
+    {"read_file", "get_file_outline"}
+)
 
 # ===========================================================================
 # Layer 2 Constants – Tool Output Hard Truncation
@@ -133,18 +121,8 @@ TOOL_MAX_RETAIN_CHARS: dict[str, int | None] = {
     "grep_search": 3000,
     "read_file": None,
     "get_file_outline": None,
-    "python_interpreter": 3000,
     "default": 3000,
 }
-AST_TOOL_CALL_NAME_ALLOWLIST: frozenset[str] = frozenset(TOOL_MAX_RETAIN_CHARS) | frozenset({
-    "get_file_outline",
-    "read_file_content",
-    "ripgrep_search_directory",
-    "list_files_glob",
-    "list_directory",
-    "write_file",
-    "write_markdown_file",
-})
 
 # ===========================================================================
 # Layer 3 Constants – Observation Masking
@@ -365,7 +343,7 @@ class ContextBudgetConfig:
 
 @dataclass(frozen=True)
 class ToolInvocation:
-    """A normalized tool call extracted from text, native metadata, or CodeAct code."""
+    """A normalized tool call extracted from canonical structured metadata."""
 
     name: str
     arguments: str | None = None
@@ -504,49 +482,6 @@ def _clone_internal_message_with_content(
     )
 
 
-def _extract_tool_payload(text: str) -> tuple[str | None, object]:
-    if not text:
-        return None, None
-
-    candidates = [text]
-    if "Calling tools:" in text:
-        candidates.append(text.split("Calling tools:", 1)[1].strip())
-
-    for candidate in candidates:
-        try:
-            payload = ast.literal_eval(candidate)
-        except Exception:
-            continue
-
-        if isinstance(payload, dict):
-            function_payload = payload.get("function")
-            if isinstance(function_payload, dict):
-                name = function_payload.get("name")
-                arguments = function_payload.get("arguments")
-            else:
-                name = payload.get("name") or payload.get("tool")
-                arguments = payload.get("arguments")
-
-            if isinstance(name, str):
-                return name.strip().lower(), arguments
-
-        if isinstance(payload, list):
-            for item in payload:
-                if not isinstance(item, dict):
-                    continue
-                function_payload = item.get("function")
-                if isinstance(function_payload, dict):
-                    name = function_payload.get("name")
-                    arguments = function_payload.get("arguments")
-                else:
-                    name = item.get("name") or item.get("tool")
-                    arguments = item.get("arguments")
-                if isinstance(name, str):
-                    return name.strip().lower(), arguments
-
-    return None, None
-
-
 def _tool_invocation_from_name_args(
     name: object,
     arguments: object = None,
@@ -594,110 +529,30 @@ def _extract_native_tool_invocations(msg: ChatMessage) -> list[ToolInvocation]:
     return invocations
 
 
-def _get_ast_call_name(node: ast.AST) -> str | None:
-    if isinstance(node, ast.Name):
-        return node.id.lower()
-    if isinstance(node, ast.Attribute):
-        return node.attr.lower()
-    return None
-
-
-def _normalize_ast_value(node: ast.AST) -> object:
-    try:
-        return ast.literal_eval(node)
-    except Exception:
-        if hasattr(ast, "unparse"):
-            return ast.unparse(node)
-        return ast.dump(node, include_attributes=False)
-
-
-def _extract_tool_calls_from_source(source: str) -> list[tuple[str, str]]:
-    if not isinstance(source, str) or not source.strip():
-        return []
-
-    try:
-        tree = ast.parse(source)
-    except SyntaxError:
-        return []
-
-    calls: list[tuple[str, str]] = []
-    for node in ast.walk(tree):
-        if not isinstance(node, ast.Call):
-            continue
-
-        tool_name = _get_ast_call_name(node.func)
-        if not tool_name:
-            continue
-        if tool_name not in AST_TOOL_CALL_NAME_ALLOWLIST and not tool_name.endswith(("_tool", "_search")):
-            continue
-
-        call_payload = {
-            "args": [_normalize_ast_value(arg) for arg in node.args],
-            "kwargs": {
-                (keyword.arg or "**kwargs"): _normalize_ast_value(keyword.value)
-                for keyword in node.keywords
-            },
-        }
-        calls.append((tool_name, json.dumps(call_payload, ensure_ascii=True, sort_keys=True)))
-
-    return calls
-
-
-def _invocations_from_python_source(source: str) -> list[ToolInvocation]:
-    invocations: list[ToolInvocation] = []
-    for tool_name, arguments in _extract_tool_calls_from_source(source):
-        invocation = _tool_invocation_from_name_args(tool_name, arguments)
-        if invocation:
-            invocations.append(invocation)
-    return invocations
-
-
-def _extract_tool_invocations_from_text(text: str) -> list[ToolInvocation]:
-    primary_tool, nested_source = _extract_tool_payload(text)
-    if primary_tool:
-        if primary_tool == "python_interpreter" and isinstance(nested_source, str) and nested_source:
-            nested = _invocations_from_python_source(nested_source)
-            return nested
-        invocation = _tool_invocation_from_name_args(primary_tool, nested_source)
-        return [invocation] if invocation else []
-
-    invocations = _invocations_from_python_source(text)
-    if invocations:
-        return invocations
-
-    # Last-resort fallback for non-Python text snippets that still contain
-    # familiar read-file calls.
-    fallback: list[ToolInvocation] = []
-    for tool_name, pattern in TOOL_DEDUP_PATTERNS.items():
-        for match in pattern.findall(text):
-            if match:
-                fallback.append(
-                    ToolInvocation(
-                        name=tool_name,
-                        arguments=match.strip(),
-                        dedup_key=match.strip(),
-                    )
-                )
-    return fallback
-
-
 def _extract_tool_invocations(msg: ChatMessage) -> list[ToolInvocation]:
-    """Extract normalized tool invocations from native metadata or message text."""
-    native = _extract_native_tool_invocations(msg)
-    if native:
-        expanded: list[ToolInvocation] = []
-        for invocation in native:
-            if invocation.name == "python_interpreter" and invocation.arguments:
-                nested = _invocations_from_python_source(invocation.arguments)
-                expanded.extend(nested)
-            else:
-                expanded.append(invocation)
-        return expanded
+    """Extract invocations only from canonical raw items or native metadata."""
 
-    text = _extract_content_text(msg.content)
-    if not text:
-        return []
-    return _extract_tool_invocations_from_text(text)
+    raw = msg.raw if isinstance(msg.raw, Mapping) else {}
+    raw_items = raw.get(MODEL_ITEMS_RAW_KEY)
+    if isinstance(raw_items, (list, tuple)):
+        canonical: list[ToolInvocation] = []
+        for item in raw_items:
+            if isinstance(item, FunctionCallItem):
+                name = item.name
+                arguments = item.arguments_json
+            elif isinstance(item, Mapping) and item.get("type") == "function_call":
+                name = item.get("name")
+                arguments = item.get("arguments_json")
+            else:
+                continue
+            invocation = _tool_invocation_from_name_args(name, arguments)
+            if invocation:
+                canonical.append(invocation)
+        if canonical:
+            return canonical
+
+    native = _extract_native_tool_invocations(msg)
+    return native
 
 
 def _iter_visible_tool_response_pairs(messages: list[InternalChatMessage]) -> list[ToolResponsePair]:
@@ -769,14 +624,10 @@ def _is_tool_response_exempt(
     pair_by_response = pair_by_response if pair_by_response is not None else _build_response_pair_map(messages)
     pair = pair_by_response.get(response_index)
     if pair:
-        if any(invocation.name in COMPRESSION_EXEMPT_TOOL_NAMES for invocation in pair.invocations):
-            return True
-        call_text = _extract_content_text(messages[pair.call_index].message.content)
-        return any(tool_name in call_text for tool_name in COMPRESSION_EXEMPT_TOOL_NAMES)
-
-    if response_index > 0 and _is_tool_call_role(messages[response_index - 1].message.role):
-        call_text = _extract_content_text(messages[response_index - 1].message.content)
-        return any(tool_name in call_text for tool_name in COMPRESSION_EXEMPT_TOOL_NAMES)
+        return any(
+            invocation.name in COMPRESSION_EXEMPT_TOOL_NAMES
+            for invocation in pair.invocations
+        )
     return False
 
 
@@ -890,13 +741,7 @@ def _is_group_truncatable(
 
 
 def _extract_dedup_keys_from_tool_call(msg: ChatMessage) -> list[tuple[str, str]]:
-    """Extract deduplication keys (like file paths) from a TOOL_CALL message.
-
-    In CodeAct mode the TOOL_CALL content looks like:
-        Calling tools: [{'function': {'name': 'python_interpreter', 'arguments': '<python code>'}}]
-    We scan the entire text for patterns defined in TOOL_DEDUP_PATTERNS.
-    Returns: A list of tuples (tool_name: str, dedup_key: str)
-    """
+    """Extract file-read dedup keys from canonical structured calls."""
     return [
         (invocation.name, invocation.dedup_key)
         for invocation in _extract_tool_invocations(msg)
@@ -1001,15 +846,6 @@ def _apply_tool_dedup(
         )
 
     return new_messages, saved_ratio
-
-
-def _extract_tools_from_code(code: str) -> list[str]:
-    """Identify underlying native tool calls from direct code or a tool payload wrapper."""
-    tools: list[str] = []
-    for invocation in _extract_tool_invocations_from_text(code):
-        if invocation.name not in tools:
-            tools.append(invocation.name)
-    return tools
 
 
 # ===========================================================================
