@@ -8,6 +8,7 @@ from contextlib import contextmanager
 from contextvars import ContextVar
 from typing import Any
 
+from agentloom.runtime.model_binding import ModelTurnBinding
 from agentloom.runtime.model_protocol import (
     MODEL_ITEMS_RAW_KEY,
     MODEL_RESPONSE_ID_RAW_KEY,
@@ -16,8 +17,6 @@ from agentloom.runtime.model_protocol import (
     MessageItem,
     ModelItem,
     ModelProtocolError,
-    ModelTurnAdapter,
-    ModelTurnRequest,
     ReasoningItem,
     ToolDefinition,
     model_item_from_dict,
@@ -154,6 +153,9 @@ def _messages_to_items(messages: list[ChatMessage | dict]) -> tuple[ModelItem, .
 
 
 def _tool_definition(tool: Any) -> ToolDefinition:
+    canonical = getattr(tool, "_agentloom_tool_definition", None)
+    if isinstance(canonical, ToolDefinition):
+        return canonical
     schema = get_tool_json_schema(tool)
     function = schema["function"]
     return ToolDefinition(
@@ -165,18 +167,15 @@ def _tool_definition(tool: Any) -> ToolDefinition:
 
 
 class SmolagentsModelTurnBridge(Model):
-    """Project smolagents model calls through one AgentLoom ModelTurnAdapter."""
+    """Project smolagents model calls through one resolved model binding."""
 
     def __init__(
         self,
         *,
-        adapter: ModelTurnAdapter,
-        model_id: str,
-        options: Mapping[str, Any] | None = None,
+        binding: ModelTurnBinding,
     ) -> None:
-        super().__init__(model_id=model_id)
-        self.adapter = adapter
-        self.options = dict(options or {})
+        super().__init__(model_id=binding.model_id)
+        self.binding = binding
         self._require_tool_calls: ContextVar[bool] = ContextVar(
             f"agentloom_bridge_require_tool_calls_{id(self)}",
             default=False,
@@ -239,18 +238,15 @@ class SmolagentsModelTurnBridge(Model):
 
         if response_format is not None:
             raise ModelProtocolError("structured response_format is not supported by the tool runtime")
-        options = {**self.options, **kwargs}
+        options = dict(kwargs)
         if stop_sequences:
             options["stop"] = list(stop_sequences)
         if self._require_tool_calls.get() and tools_to_call_from:
             options["tool_choice"] = "required"
-        turn = self.adapter.turn(
-            ModelTurnRequest(
-                model=self.model_id or "",
-                items=_messages_to_items(messages),
-                tools=tuple(_tool_definition(tool) for tool in tools_to_call_from or ()),
-                options=options,
-            )
+        turn = self.binding.turn(
+            items=_messages_to_items(messages),
+            tools=tuple(_tool_definition(tool) for tool in tools_to_call_from or ()),
+            options=options,
         )
         if goal_provider is not None:
             goal_provider.record_usage(

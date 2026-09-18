@@ -10,8 +10,10 @@ import json
 from dataclasses import asdict, dataclass, replace
 
 import litellm
-from agentloom.adapters.litellm import create_model_turn_adapter
 from agentloom.adapters.litellm.litellm_retry import patch_litellm_completion
+from agentloom.adapters.litellm.model_binding import (
+    build_litellm_model_turn_binding,
+)
 from agentloom.adapters.litellm.request_headers import (
     build_model_request_headers,
     get_system_model_request_headers,
@@ -20,6 +22,7 @@ from agentloom.adapters.litellm.tool_error_projection import (
     patch_litellm_tool_error_projection,
 )
 from agentloom.adapters.smolagents.model_turn_bridge import SmolagentsModelTurnBridge
+from agentloom.configuration.llm_config import LlmModelTypeSettings
 from agentloom.runtime.logging import get_logger
 from smolagents import AgentLogger
 
@@ -265,58 +268,29 @@ class ModelManager:
             _log.info(f"Creating smolagents model with config: {safe_model_config}")
 
 
-        # Create smolagents model with retry settings.
-        # If new parameters are added here, verify litellm/provider compatibility.
-        # Retry params are removed in retry wrapper and will not be forwarded downstream.
-        # Build optional kwargs that should only be passed when set.
-        # extra_headers flows through smolagents self.kwargs → litellm.completion() natively.
-        optional_kwargs = {}
-        request_headers = build_model_request_headers(model_config.extra_headers)
-        if request_headers:
-            optional_kwargs["extra_headers"] = request_headers
-        if model_config.extra_completion_params:
-            optional_kwargs.update(model_config.extra_completion_params)
-
-        output_token_key = (
-            "max_output_tokens"
-            if model_config.adapter == "openai_responses"
-            else "max_tokens"
+        settings = LlmModelTypeSettings(
+            model=model_config.model_id or "",
+            adapter=model_config.adapter,
+            base_url=model_config.base_url or "",
+            api_key=model_config.api_key or "",
+            temperature=model_config.temperature,
+            max_tokens=model_config.max_tokens,
+            context_window=model_config.context_window,
+            max_output_tokens=model_config.max_output_tokens,
+            input_token_limit=model_config.input_token_limit,
+            timeout=model_config.timeout,
+            num_retries=model_config.num_retries,
+            retry_delay=model_config.retry_delay,
+            max_retry_delay=model_config.max_retry_delay,
+            extra_headers=model_config.extra_headers,
+            context_cache=model_config.context_cache,
+            system_prompt_boundary=model_config.system_prompt_boundary,
+            description=model_config.description,
+            requests_per_minute=model_config.requests_per_minute,
+            extra_completion_params=model_config.extra_completion_params,
         )
-        turn_options: dict[str, object] = {
-            output_token_key: model_config.max_output_tokens,
-            "temperature": model_config.temperature,
-            "timeout": model_config.timeout,
-            "num_retries": model_config.num_retries,
-            "retry_delay": model_config.retry_delay,
-            "max_retry_delay": model_config.max_retry_delay,
-            "_agent_loom_model_type": model_type.value,
-        }
-        if model_config.base_url:
-            turn_options["api_base"] = model_config.base_url
-        if model_config.api_key:
-            turn_options["api_key"] = model_config.api_key
-        turn_options.update(optional_kwargs)
-        model = SmolagentsModelTurnBridge(
-            adapter=create_model_turn_adapter(
-                model_config.adapter,
-                context_cache=model_config.context_cache,
-                system_prompt_boundary=model_config.system_prompt_boundary,
-            ),
-            model_id=model_config.model_id or "",
-            options=turn_options,
-        )
-
-        # Inject model_type for global rate limiting (consumed by litellm_retry wrapper)
-        model._agent_loom_model_type = model_type.value
-
-        # Pre-register rate limiter with the configured RPM so litellm_retry
-        # doesn't fall back to the default (10 RPM).
-        try:
-            from agentloom.runtime.concurrency.rate_limiter import GlobalRateLimiterRegistry
-            _rpm = model_config.requests_per_minute or 60
-            GlobalRateLimiterRegistry.get_limiter(model_type.value, rpm=_rpm)
-        except Exception:
-            pass
+        binding = build_litellm_model_turn_binding(model_type.value, settings)
+        model = SmolagentsModelTurnBridge(binding=binding)
 
         if model_cache:
             self._model_cache[cache_key] = model
