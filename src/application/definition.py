@@ -7,11 +7,12 @@ Hook execution belong to the execution adapter after preflight succeeds.
 from __future__ import annotations
 
 import copy
+import os
 import re
 from collections.abc import Mapping, MutableMapping
 from dataclasses import dataclass
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, Literal
 
 import yaml
 from agentloom.application.readiness import (
@@ -33,6 +34,7 @@ if TYPE_CHECKING:
     from agentloom.runtime.skills.catalog import SkillCatalog
 
 _MARKDOWN_YAML = re.compile(r"```yaml\s*\n(.*?)\n```", re.DOTALL)
+_AGENT_DEFINITION_EXTENSIONS = frozenset({".yaml", ".yml", ".md"})
 
 
 @dataclass(frozen=True)
@@ -52,6 +54,55 @@ class ApplicationDefinitionInspection:
     snapshots: dict[Path, EffectiveAgentConfigSnapshot]
     errors: tuple[str, ...]
     errors_by_path: dict[Path, tuple[str, ...]]
+
+
+@dataclass(frozen=True)
+class DiscoveredAgentDefinition:
+    """One Application definition found below workflows/, with its file role."""
+
+    path: Path
+    role: Literal["supervisor", "worker"]
+
+
+def discover_application_definition_files(
+    workflows_dir: Path | str,
+) -> tuple[DiscoveredAgentDefinition, ...]:
+    """Recursively find YAML/Markdown definitions without following symlinks.
+
+    A definition below any ``worker_agents`` directory is a Worker. Every other
+    definition below ``workflows`` is a Supervisor, including definitions in
+    nested workflow groups.
+    """
+
+    configured_root = Path(workflows_dir).expanduser()
+    if configured_root.is_symlink():
+        return ()
+    root = configured_root.resolve()
+    if not root.is_dir():
+        return ()
+
+    definitions: list[DiscoveredAgentDefinition] = []
+    for current, directory_names, file_names in os.walk(root, topdown=True, followlinks=False):
+        current_path = Path(current)
+        directory_names[:] = sorted(
+            name
+            for name in directory_names
+            if not (current_path / name).is_symlink()
+        )
+        for name in sorted(file_names):
+            path = current_path / name
+            if (
+                path.suffix.lower() not in _AGENT_DEFINITION_EXTENSIONS
+                or path.is_symlink()
+                or not path.is_file()
+            ):
+                continue
+            relative = path.relative_to(root)
+            role: Literal["supervisor", "worker"] = (
+                "worker" if "worker_agents" in relative.parts[:-1] else "supervisor"
+            )
+            definitions.append(DiscoveredAgentDefinition(path.resolve(), role))
+    return tuple(definitions)
 
 
 def extract_markdown_definition(content: str) -> tuple[dict[str, Any], str]:
@@ -174,6 +225,7 @@ def _walk_definitions(
     source_path: Path,
     parsed: dict[str, object],
     *,
+    root_is_worker: bool,
     catalog: tuple[str, dict[str, object]],
     base: UnifiedConfig | None,
     draft_paths: set[str],
@@ -247,7 +299,7 @@ def _walk_definitions(
             errors_by_path[path] = tuple(errors[error_start:])
             active.pop()
 
-    visit(source_path, parsed, worker=False)
+    visit(source_path, parsed, worker=root_is_worker)
     return ApplicationDefinitionInspection(nodes, snapshots, tuple(errors), errors_by_path)
 
 
@@ -283,6 +335,7 @@ def inspect_application_definition(
     relative_path: str,
     parsed: dict[str, object],
     *,
+    root_is_worker: bool = False,
     draft_paths: set[str] | None = None,
     draft_configs: Mapping[str, dict[str, object]] | None = None,
     catalog: tuple[str, dict[str, object]] | None = None,
@@ -302,6 +355,7 @@ def inspect_application_definition(
         root,
         root / relative_path,
         parsed,
+        root_is_worker=root_is_worker,
         catalog=catalog or (model_catalog(base) if base is not None else model_types(root)),
         base=base,
         draft_paths=draft_paths or set(),
@@ -321,6 +375,7 @@ def validate_agent_definition(
     relative_path: str,
     parsed: dict[str, object],
     *,
+    root_is_worker: bool = False,
     draft_paths: set[str] | None = None,
     draft_configs: Mapping[str, dict[str, object]] | None = None,
     catalog: tuple[str, dict[str, object]] | None = None,
@@ -331,6 +386,7 @@ def validate_agent_definition(
         project_root,
         relative_path,
         parsed,
+        root_is_worker=root_is_worker,
         draft_paths=draft_paths,
         draft_configs=draft_configs,
         catalog=catalog,

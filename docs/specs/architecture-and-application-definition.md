@@ -2,7 +2,7 @@
 
 规格日期：2026-09-17。研究基线：`ca27966d`。本规格合并本次讨论的两个目标：自有源码目录与职责整理，以及 Application 定义、配置和路径解释统一。
 
-状态：本次实现与验证已完成，详见[最终验证记录](architecture-final-validation.md)。维护者明确将最后发现的 Skill 嵌套 workflow 扫描问题延期到 [#69](https://github.com/linora-u/AgentLoom/issues/69)，要求先提交已完成内容；该项不计作已修复。用户于 2026-09-17 明确调整迁移要求：“不要兼容要彻底重构”，并再次要求最终提交前完成大量单元测试、功能测试和真实 Application 执行。本规格据此取消旧 `src.*` 导入及模块命令的兼容层，统一迁移仓库内调用方。历史运行数据与 checkpoint 的保留、恢复要求不变。写出本规格不代表实现完成或测试通过。
+状态：本次实现与验证已完成，详见[最终验证记录](architecture-final-validation.md)。维护者在 PR #68 提交时明确将 Skill 嵌套 workflow 扫描问题延期到 [#69](https://github.com/linora-u/AgentLoom/issues/69)；该 PR 没有把它记录为已修复。#69 的后续实现与验证见[嵌套 workflow 定义发现验证](nested-workflow-discovery-validation.md)。用户于 2026-09-17 明确调整迁移要求：“不要兼容要彻底重构”，并再次要求最终提交前完成大量单元测试、功能测试和真实 Application 执行。本规格据此取消旧 `src.*` 导入及模块命令的兼容层，统一迁移仓库内调用方。历史运行数据与 checkpoint 的保留、恢复要求不变。
 
 ## Problem Statement
 

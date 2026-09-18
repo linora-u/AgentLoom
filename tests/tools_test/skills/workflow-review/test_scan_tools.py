@@ -1435,3 +1435,75 @@ def test_scan_includes_nested_worker_definitions(tmp_path):
     result = scan_app_structure(str(app))
     assert "Worker Agents (1 个)" in result
     assert "nested_worker" in result
+
+
+def test_scan_includes_nested_supervisors_and_workers_by_role(tmp_path):
+    app = tmp_path / "app"
+    supervisor = app / "workflows/groups/review/supervisor.md"
+    worker = app / "workflows/groups/review/worker_agents/deep/worker.yaml"
+    supervisor.parent.mkdir(parents=True)
+    supervisor.write_text(
+        "```yaml\nname: nested_supervisor\ndescription: Nested supervisor\n```\nCoordinate work"
+    )
+    worker.parent.mkdir(parents=True)
+    worker.write_text("name: nested_worker\ndescription: Nested worker\nworkflow: Work\n")
+
+    result = scan_app_structure(str(app))
+
+    assert "### supervisor.md (Supervisor)" in result
+    assert "**name**: nested_supervisor" in result
+    assert "Worker Agents (1 个)" in result
+    assert "### worker.yaml (Worker)" in result
+    assert "**name**: nested_worker" in result
+
+
+def test_scan_classifies_every_definition_below_worker_agents_as_worker(tmp_path):
+    app = tmp_path / "app"
+    top_level = app / "workflows/top.yaml"
+    worker_named_supervisor = app / "workflows/groups/worker_agents/team/supervisor.yaml"
+    top_level.parent.mkdir(parents=True)
+    top_level.write_text("name: top\ndescription: Top\nworkflow: Work\n")
+    worker_named_supervisor.parent.mkdir(parents=True)
+    worker_named_supervisor.write_text(
+        "name: worker_role\ndescription: Worker role\nworkflow: Work\n"
+    )
+
+    result = scan_app_structure(str(app))
+
+    assert "### top.yaml (Supervisor)" in result
+    assert "### supervisor.yaml (Worker)" in result
+    assert "### supervisor.yaml (Supervisor)" not in result
+
+
+def test_scan_does_not_follow_symlinked_definition_files_or_directories(tmp_path):
+    app = tmp_path / "app"
+    top_level = app / "workflows/top.yaml"
+    outside = tmp_path / "outside"
+    linked_definition = outside / "linked.yaml"
+    top_level.parent.mkdir(parents=True)
+    top_level.write_text("name: top\ndescription: Top\nworkflow: Work\n")
+    outside.mkdir()
+    linked_definition.write_text("name: linked\ndescription: Linked\nworkflow: Work\n")
+    (top_level.parent / "linked.yaml").symlink_to(linked_definition)
+    (top_level.parent / "linked_group").symlink_to(outside, target_is_directory=True)
+
+    result = scan_app_structure(str(app))
+
+    assert "### top.yaml (Supervisor)" in result
+    assert "**name**: linked" not in result
+
+
+def test_scan_does_not_follow_symlinked_workflows_root(tmp_path):
+    app = tmp_path / "app"
+    outside = tmp_path / "outside_workflows"
+    outside.mkdir()
+    (outside / "linked.yaml").write_text(
+        "name: linked\ndescription: Linked\nworkflow: Work\n"
+    )
+    app.mkdir()
+    (app / "workflows").symlink_to(outside, target_is_directory=True)
+
+    result = scan_app_structure(str(app))
+
+    assert "**name**: linked" not in result
+    assert "Worker Agents" not in result

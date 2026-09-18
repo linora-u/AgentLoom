@@ -19,13 +19,11 @@ from pathlib import Path
 import yaml
 from agentloom.application.definition import (
     definition_error,
+    discover_application_definition_files,
     inspect_application_definition,
     read_agent_definition,
 )
-from agentloom.application.readiness import validate_runtime_worker_config
 from agentloom.configuration.config import load_project_config
-
-_AGENT_EXTENSIONS = {".yaml", ".yml", ".md"}
 
 
 def _discover_project_root(start: Path) -> Path | None:
@@ -37,21 +35,6 @@ def _discover_project_root(start: Path) -> Path | None:
             if (candidate / "config" / filename).is_file():
                 return candidate
     return None
-
-
-def _collect_agent_files(workflows_dir: Path) -> list[Path]:
-    supervisors = sorted(
-        path.resolve()
-        for path in workflows_dir.iterdir()
-        if path.is_file() and path.suffix.lower() in _AGENT_EXTENSIONS
-    )
-    worker_dir = workflows_dir / "worker_agents"
-    workers = sorted(
-        path.resolve()
-        for path in worker_dir.rglob("*")
-        if path.is_file() and path.suffix.lower() in _AGENT_EXTENSIONS
-    )
-    return list(dict.fromkeys([*supervisors, *workers]))
 
 
 def _error(path: Path, message: str, *, root: Path, field: str = "definition", rule: str = "shared_definition") -> dict[str, str]:
@@ -103,7 +86,9 @@ def main() -> int:
             )])
             return 1
 
-    files = _collect_agent_files(workflows_dir)
+    discovered = discover_application_definition_files(workflows_dir)
+    files = [item.path for item in discovered]
+    roles = {item.path: item.role for item in discovered}
     config_files_checked = int((app_root / "config/system.yaml").is_file())
     if not files:
         _emit(app_root, [_error(
@@ -135,19 +120,16 @@ def main() -> int:
         add(project_root / "config", f"{project_root}/config: {definition_error(exc)}")
         base = None
     visited: set[Path] = set()
-    worker_dir = (workflows_dir / "worker_agents").resolve()
     for path, definition in parsed.items():
         if path in visited:
             continue
-        # Referenced Workers are validated as Workers by the shared walk.
-        # Authoring also checks unreferenced definitions in worker_agents/.
-        if path.is_relative_to(worker_dir):
-            try:
-                validate_runtime_worker_config(definition, path, agent_root=project_root)
-            except (TypeError, ValueError) as exc:
-                add(path, f"{path}: {definition_error(exc)}")
         inspection = inspect_application_definition(
-            project_root, str(path), definition, base_config=base, definition_cache=cache,
+            project_root,
+            str(path),
+            definition,
+            root_is_worker=roles[path] == "worker",
+            base_config=base,
+            definition_cache=cache,
         )
         visited.update(inspection.definitions)
         for message in inspection.errors:
