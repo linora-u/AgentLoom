@@ -98,6 +98,23 @@ class CheckpointCoordinator:
     def task_text(self) -> str:
         return self._task_text
 
+    def _with_storage_identity(
+        self,
+        checkpoint: RuntimeCheckpointEnvelope,
+    ) -> RuntimeCheckpointEnvelope:
+        run_id = self._cm.run_id
+        if not isinstance(run_id, str) or not run_id:
+            raise ValueError("checkpoint manager has no current run_id")
+        if checkpoint.task_id not in {None, self._task_id}:
+            raise ValueError("runtime checkpoint task_id does not match coordinator")
+        if checkpoint.run_id not in {None, run_id}:
+            raise ValueError("runtime checkpoint run_id does not match coordinator")
+        return replace(
+            checkpoint,
+            task_id=self._task_id,
+            run_id=run_id,
+        )
+
     def load_todos(self, agent_path: str) -> dict[str, Any]:
         """Load the active task's Todo snapshot for one Agent scope."""
 
@@ -222,6 +239,7 @@ class CheckpointCoordinator:
         """Persist a runtime-owned state envelope without inspecting its payload."""
 
         try:
+            checkpoint = self._with_storage_identity(checkpoint)
             self._cm.save_supervisor_runtime_checkpoint(
                 self._task_id,
                 runtime_checkpoint=checkpoint.to_dict(),
@@ -241,9 +259,7 @@ class CheckpointCoordinator:
                 result=result,
                 error=error,
             )
-            step_count = checkpoint.payload.get("step_count", 0)
-            if isinstance(step_count, bool) or not isinstance(step_count, int):
-                step_count = 0
+            step_count = checkpoint.progress
             if self._supervisor_heartbeat is not None:
                 self._supervisor_heartbeat.update_step(step_count)
             if self._file_history is not None:
@@ -346,6 +362,7 @@ class CheckpointCoordinator:
         """Return a sink that persists runtime-owned Worker envelopes."""
 
         def save(checkpoint: RuntimeCheckpointEnvelope) -> None:
+            checkpoint = self._with_storage_identity(checkpoint)
             self._cm.save_worker_runtime_checkpoint(
                 self._task_id,
                 agent_name,
@@ -355,11 +372,9 @@ class CheckpointCoordinator:
                 task_input=str(task_input),
                 status="running",
             )
-            step_count = checkpoint.payload.get("step_count", 0)
-            if isinstance(step_count, int) and not isinstance(step_count, bool):
-                heartbeat = self.get_worker_heartbeat(agent_name)
-                if heartbeat is not None:
-                    heartbeat.update_call_step(call_index, step_count)
+            heartbeat = self.get_worker_heartbeat(agent_name)
+            if heartbeat is not None:
+                heartbeat.update_call_step(call_index, checkpoint.progress)
 
         return save
 
