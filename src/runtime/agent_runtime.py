@@ -8,6 +8,9 @@ from dataclasses import dataclass, field
 from types import MappingProxyType
 from typing import Any, Literal, Protocol
 
+from agentloom.runtime.model_binding import ModelTurnBinding
+from agentloom.runtime.tool_gateway import ToolGateway
+
 RuntimeState = Literal[
     "success",
     "max_steps_error",
@@ -68,6 +71,70 @@ class RuntimeRequirements:
                 "subagents",
             )
             if getattr(self, name) and not getattr(capabilities, name)
+        )
+
+
+@dataclass(frozen=True, slots=True)
+class RuntimeDefinition:
+    """Complete, runtime-neutral definition used to construct one Agent runtime."""
+
+    runtime_id: str
+    name: str
+    description: str
+    model: ModelTurnBinding
+    tool_gateway: ToolGateway
+    max_steps: int
+    instructions: str = ""
+    planning_interval: int | None = None
+    smart_summary: bool = True
+    todo_mode: Literal["auto", "on", "off"] = "auto"
+    metadata: Mapping[str, Any] = field(default_factory=dict, repr=False)
+
+    def __post_init__(self) -> None:
+        for field_name in ("runtime_id", "name", "description", "instructions"):
+            value = getattr(self, field_name)
+            if not isinstance(value, str):
+                raise TypeError(f"{field_name} must be a string")
+        if not self.runtime_id.strip():
+            raise ValueError("runtime_id must be non-empty")
+        if not self.name.strip():
+            raise ValueError("name must be non-empty")
+        if not isinstance(self.model, ModelTurnBinding):
+            raise TypeError("model must be a ModelTurnBinding")
+        if not isinstance(self.tool_gateway, ToolGateway):
+            raise TypeError("tool_gateway must satisfy ToolGateway")
+        if (
+            isinstance(self.max_steps, bool)
+            or not isinstance(self.max_steps, int)
+            or self.max_steps < 1
+        ):
+            raise ValueError("max_steps must be a positive integer")
+        if self.planning_interval is not None and (
+            isinstance(self.planning_interval, bool)
+            or not isinstance(self.planning_interval, int)
+            or self.planning_interval < 1
+        ):
+            raise ValueError(
+                "planning_interval must be a positive integer when provided"
+            )
+        if not isinstance(self.smart_summary, bool):
+            raise TypeError("smart_summary must be a boolean")
+        if self.todo_mode not in {"auto", "on", "off"}:
+            raise ValueError("todo_mode must be one of: auto, on, off")
+        if not isinstance(self.metadata, Mapping):
+            raise TypeError("metadata must be a mapping")
+        try:
+            normalized_metadata = json.loads(
+                json.dumps(dict(self.metadata), ensure_ascii=False)
+            )
+        except (TypeError, ValueError) as exc:
+            raise ValueError("runtime definition metadata must be JSON serializable") from exc
+        object.__setattr__(self, "runtime_id", self.runtime_id.strip())
+        object.__setattr__(self, "name", self.name.strip())
+        object.__setattr__(
+            self,
+            "metadata",
+            MappingProxyType(normalized_metadata),
         )
 
 
@@ -176,7 +243,7 @@ class AgentRuntime(Protocol):
     def close(self) -> None: ...
 
 
-RuntimeFactory = Callable[[], AgentRuntime]
+RuntimeFactory = Callable[[RuntimeDefinition], AgentRuntime]
 
 
 @dataclass(frozen=True, slots=True)
@@ -250,14 +317,16 @@ class RuntimeRegistry:
             )
         return registration
 
-    def create(self, runtime_id: str) -> AgentRuntime:
-        registration = self.validate(runtime_id)
+    def create(self, definition: RuntimeDefinition) -> AgentRuntime:
+        if not isinstance(definition, RuntimeDefinition):
+            raise TypeError("runtime definition must be a RuntimeDefinition")
+        registration = self.validate(definition.runtime_id)
         if registration.factory is None:
             raise UnsupportedRuntimeError(
-                f"Agent runtime '{runtime_id}' is registered for validation "
+                f"Agent runtime '{definition.runtime_id}' is registered for validation "
                 "but no runtime factory was provided"
             )
-        return registration.factory()
+        return registration.factory(definition)
 
 
 def build_builtin_runtime_registry(
