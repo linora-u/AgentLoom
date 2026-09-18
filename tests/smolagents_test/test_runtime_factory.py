@@ -21,6 +21,7 @@ from agentloom.adapters.smolagents.tool_proxy import (
     SmolagentsToolGatewayProxy,
 )
 from agentloom.runtime.agent_runtime import RuntimeDefinition
+from agentloom.runtime.logging import RichLoggerBackend
 from agentloom.runtime.model_binding import ModelTurnBinding
 from agentloom.runtime.model_protocol import (
     MessageItem,
@@ -30,6 +31,8 @@ from agentloom.runtime.model_protocol import (
 )
 from agentloom.runtime.tool_gateway import ToolGateway
 from agentloom.runtime.tool_protocol import ToolCallRecord
+from rich.console import Console
+from smolagents import AgentLogger
 
 
 class _ModelAdapter:
@@ -186,6 +189,35 @@ def test_factory_builds_native_runtime_from_complete_definition(
     native = runtime._native_runtime
     assert native._agent_loom_todo_mode == "on"
     assert native._max_consecutive_parse_errors == 9
+
+
+def test_factory_adapts_runtime_neutral_logger_only_at_smolagents_boundary(
+    monkeypatch,
+) -> None:
+    captured: dict[str, Any] = {}
+
+    class _NativeAgent:
+        def __init__(self, **kwargs: Any) -> None:
+            captured.update(kwargs)
+            self.memory = SimpleNamespace(steps=[])
+            self.step_callbacks = SimpleNamespace(
+                register=lambda *_args, **_kwargs: None
+            )
+
+    console = Console()
+    neutral_logger = RichLoggerBackend(console=console)
+    monkeypatch.setattr(factory_module, "ToolCallingAgentV2", _NativeAgent)
+    monkeypatch.setattr(
+        factory_module,
+        "get_global_logger",
+        lambda **_kwargs: neutral_logger,
+    )
+
+    SmolagentsRuntimeFactory()(_definition())
+
+    assert isinstance(captured["logger"], AgentLogger)
+    assert captured["logger"].console is console
+    assert captured["logger"] is not neutral_logger
 
 
 def test_factory_uses_smolagents_default_prompt_and_exact_proxy_definitions(

@@ -4,6 +4,9 @@ from __future__ import annotations
 
 from typing import Any
 
+from agentloom.adapters.smolagents.agent_logger import (
+    adapt_smolagents_logger_backend,
+)
 from agentloom.adapters.smolagents.agents import ToolCallingAgentV2
 from agentloom.adapters.smolagents.model_turn_bridge import (
     SmolagentsModelTurnBridge,
@@ -113,7 +116,9 @@ class SmolagentsRuntimeFactory:
             "name": definition.name,
             "description": definition.description,
             "final_answer_checks": [_run_scoped_stop_check],
-            "logger": get_global_logger(create_if_missing=False),
+            "logger": adapt_smolagents_logger_backend(
+                get_global_logger(create_if_missing=False)
+            ),
         }
         if prompt_templates is None:
             agent_kwargs["instructions"] = definition.instructions
