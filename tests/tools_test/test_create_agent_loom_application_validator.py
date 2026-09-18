@@ -30,8 +30,8 @@ def _write_project_config(tmp_path: Path) -> None:
     _write_yaml(tmp_path / "config/system.yaml", {})
     _write_yaml(tmp_path / "config/llm.yaml", {"model": {
         "default_model_type": "custom-model-key",
-        "custom-model-key": {"model": "openai/test"},
-        "summary": {"model": "openai/test"},
+        "custom-model-key": {"model": "openai/test", "adapter": "openai_chat"},
+        "summary": {"model": "openai/test", "adapter": "openai_chat"},
     }})
 
 
@@ -46,6 +46,7 @@ def _create_min_project(tmp_path: Path, *, skills_value=None) -> Path:
     workflow_file = app_root / "workflows" / "demo_agent.yaml"
     config = {
         "name": "demo_agent",
+        "agent_runtime": "smolagents",
         "description": "demo",
         "workflow": "# demo\n",
         "model_type": "custom-model-key",
@@ -189,6 +190,7 @@ def test_validator_rejects_goal_on_worker(tmp_path: Path) -> None:
         worker_file,
         {
             "name": "worker",
+            "agent_runtime": "smolagents",
             "description": "worker",
             "workflow": "work",
             "goal": False,
@@ -312,6 +314,7 @@ def test_worker_path_must_point_to_file(tmp_path: Path) -> None:
 
     supervisor = {
         "name": "demo_supervisor",
+        "agent_runtime": "smolagents",
         "description": "demo",
         "workflow": "# demo\n",
         "worker_agents": [{"path": "applications/demo/not_a_worker.yaml"}],
@@ -333,6 +336,7 @@ def test_markdown_agent_body_is_used_as_workflow(tmp_path: Path) -> None:
         workflow_file,
         """```yaml
 name: demo_agent
+agent_runtime: smolagents
 description: demo
 ```
 
@@ -387,6 +391,7 @@ def _assert_canonical_parity(project_root: Path, workflow_file: Path, *, valid: 
 def _write_worker(path: Path, **overrides) -> None:
     _write_yaml(path, {
         "name": path.stem,
+        "agent_runtime": "smolagents",
         "description": "Worker contract",
         "workflow": "Return the requested evidence.",
         "agent_function_schema": {
@@ -409,6 +414,7 @@ def test_validator_shares_nested_source_relative_worker_paths_and_mcp_null(tmp_p
     second = app / "workflows/worker_agents/nested/second.md"
     _write_markdown(second, """```yaml
 name: second
+agent_runtime: smolagents
 description: Markdown Worker
 mcp_servers: null
 agent_function_schema:
@@ -469,7 +475,9 @@ def test_validator_markdown_workflow_matches_shared_parser(tmp_path: Path, yaml_
     app = _create_min_project(tmp_path)
     (app / "workflows/demo_agent.yaml").unlink()
     workflow = app / "workflows/demo_agent.md"
-    workflow.write_text(f"```yaml\nname: demo\ndescription: Demo\n{yaml_workflow}```\n\n{body}\n")
+    workflow.write_text(
+        f"```yaml\nname: demo\nagent_runtime: smolagents\ndescription: Demo\n{yaml_workflow}```\n\n{body}\n"
+    )
     _assert_canonical_parity(tmp_path, workflow, valid=valid)
 
 
@@ -514,6 +522,7 @@ def test_validator_accepts_nested_only_supervisor_and_worker_tree(tmp_path: Path
         supervisor,
         """```yaml
 name: nested_supervisor
+agent_runtime: smolagents
 description: Coordinate a nested workflow
 model_type: custom-model-key
 worker_agents:
@@ -541,6 +550,7 @@ def test_validator_top_level_definition_cannot_hide_invalid_nested_definitions(t
         nested_supervisor,
         """```yaml
 name: invalid_nested_supervisor
+agent_runtime: smolagents
 description: Must be discovered
 tools_mapping: {}
 ```
