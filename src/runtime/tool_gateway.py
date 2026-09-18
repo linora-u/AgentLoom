@@ -333,28 +333,6 @@ def _clone_tool_like_for_runtime(tool: Any) -> Any:
             "clone_for_runtime() must return a Tool-like object with forward()"
         )
 
-    # A definition may still carry the old inject_hooks wrapper. The new
-    # Gateway owns that pipeline, so bind the original executable semantics to
-    # the clone and remove the old wrapper markers without importing its
-    # framework module.
-    original_forward = getattr(tool, "_agentloom_original_forward", None)
-    if callable(original_forward):
-        if (
-            inspect.ismethod(original_forward)
-            and original_forward.__self__ is tool
-        ):
-            original_forward = original_forward.__func__.__get__(
-                cloned,
-                type(cloned),
-            )
-        cloned.forward = original_forward
-    for attribute in (
-        "_hooks_injected",
-        "_agentloom_original_forward",
-        "_agentloom_settle_tool_call",
-    ):
-        if attribute in getattr(cloned, "__dict__", {}):
-            delattr(cloned, attribute)
     return cloned
 
 

@@ -13,13 +13,13 @@ import agentloom.runtime.invocation as invocation_module
 import pytest
 import yaml
 from agentloom.adapters.smolagents.agents import ToolCallingAgentV2
-from agentloom.adapters.smolagents.tool_shim import inject_hooks
 from agentloom.adapters.smolagents.tools.tools import tool
 from agentloom.runtime.agent_runtime import (
     AgentRuntimeRequest,
     AgentRuntimeResult,
     RuntimeCapabilities,
     RuntimeCheckpointEnvelope,
+    RuntimeUsage,
     require_runtime_state,
 )
 from agentloom.runtime.hooks import HookEvent, HookHandler, HookPlan, HookResult, HookRun
@@ -1011,7 +1011,7 @@ def test_completed_worker_resume_replays_output_in_requested_shape(tmp_path, mon
         error_prefix="Agent run did not complete successfully",
     )
     assert resumed.output == initial.output
-    assert resumed.usage is None
+    assert resumed.usage == RuntimeUsage()
     assert provider.snapshot().used_tokens == 31
     assert runtime.calls == 1
     assert len(manager.load_task_tree("task-completed-worker")["workers"]["completed_worker"]) == 1
@@ -1541,7 +1541,7 @@ def test_subagent_lifecycle_belongs_to_parent_while_worker_tools_belong_to_child
 
         return a + b
 
-    hooked_add = inject_hooks(add)
+    child_gateway = AgentLoomToolGateway.from_tools([add])
 
     class _WorkerRuntime:
         runtime_id = "test"
@@ -1563,7 +1563,11 @@ def test_subagent_lifecycle_belongs_to_parent_while_worker_tools_belong_to_child
                 )
             ):
                 return AgentRuntimeResult(
-                    output=hooked_add(a=1, b=2),
+                    output=child_gateway.invoke(
+                        call_id="child-add",
+                        tool_name="add",
+                        arguments={"a": 1, "b": 2},
+                    ).direct_result(),
                     state="success",
                 )
 

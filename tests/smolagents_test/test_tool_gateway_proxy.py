@@ -1,8 +1,10 @@
 from __future__ import annotations
 
+import ast
 import threading
 import time
 from dataclasses import dataclass
+from pathlib import Path
 
 import pytest
 from agentloom.adapters.smolagents.agents import ToolCallingAgentV2
@@ -21,6 +23,8 @@ from smolagents.models import (
     MessageRole,
 )
 from smolagents.monitoring import Timing
+
+ROOT = Path(__file__).resolve().parents[2]
 
 
 @dataclass
@@ -286,3 +290,42 @@ def test_proxy_builder_requires_explicit_final_answer() -> None:
 
     with pytest.raises(ValueError, match="explicitly provide"):
         build_smolagents_tool_proxies(gateway)
+
+
+def test_agents_source_can_execute_tools_only_through_gateway() -> None:
+    source = (
+        ROOT / "src/adapters/smolagents/agents.py"
+    ).read_text(encoding="utf-8")
+    tree = ast.parse(source)
+    forbidden_names = {
+        "settle_tool_call",
+        "inject_hooks",
+        "clone_tool_for_runtime",
+        "_execute_tool_pipeline",
+    }
+
+    assert forbidden_names.isdisjoint(
+        {
+            node.id
+            for node in ast.walk(tree)
+            if isinstance(node, ast.Name)
+        }
+    )
+    assert not any(
+        isinstance(node, ast.Call)
+        and isinstance(node.func, ast.Attribute)
+        and node.func.attr in {"forward", "__call__"}
+        for node in ast.walk(tree)
+    )
+    assert ".tool_gateway.invoke(" in source
+
+
+def test_removed_tool_shim_cannot_restore_a_second_execution_path() -> None:
+    shim = ROOT / "src/adapters/smolagents/tool_shim.py"
+    protocol = (
+        ROOT / "src/adapters/smolagents/tool_protocol.py"
+    ).read_text(encoding="utf-8")
+
+    assert not shim.exists()
+    assert "def settle_tool_call" not in protocol
+    assert "TOOL_SETTLER_ATTR" not in protocol

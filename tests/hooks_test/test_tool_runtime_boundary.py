@@ -6,14 +6,10 @@ from threading import Barrier, Lock
 from unittest.mock import MagicMock, patch
 
 import pytest
-from agentloom.adapters.smolagents.tool_shim import (
-    _execute_tool_pipeline,
-    clone_tool_for_runtime,
-    inject_hooks,
-)
 from agentloom.adapters.smolagents.tools.tools import tool
 from agentloom.runtime.hooks import HookEvent, HookHandler, HookPlan, HookResult, HookRun
 from agentloom.runtime.hooks.types import Blocked
+from agentloom.runtime.tool_gateway import AgentLoomToolGateway
 from agentloom.runtime.tool_protocol import ToolCallRecord, ToolPolicyBlockedError
 from agentloom.runtime.trace import bind_explicit_execution_context, capture_explicit_execution_context
 from agentloom.runtime.trusted_memory_evidence import (
@@ -26,19 +22,53 @@ from smolagents import Tool
 
 
 def _tool(name: str, result):
-    tool = MagicMock()
-    tool.name = name
-    tool.inputs = {}
-    tool._hooks_injected = False
-    tool.forward = MagicMock(return_value=result)
-    tool.forward.__name__ = "forward"
-    return tool
+    class FakeTool:
+        description = name
+        inputs: dict[str, dict[str, object]] = {}
+        output_type = "any"
+
+        def __init__(self) -> None:
+            self.name = name
+
+        def forward(self):
+            return result
+
+    return FakeTool()
 
 
 def _invoke(tool, run: HookRun, *args, **kwargs):
+    if args:
+        raise TypeError("Gateway test helper accepts keyword Tool arguments only")
+    gateway = AgentLoomToolGateway.from_tools([tool])
     context = replace(capture_explicit_execution_context(), hook_run=run)
     with bind_explicit_execution_context(context):
-        return inject_hooks(tool).forward(*args, **kwargs)
+        return gateway.invoke(
+            call_id="test-call",
+            tool_name=tool.name,
+            arguments=kwargs,
+        ).direct_result()
+
+
+def _invoke_gateway(
+    gateway: AgentLoomToolGateway,
+    run: HookRun,
+    *,
+    call_id: str,
+    tool_name: str,
+    arguments: dict,
+):
+    context = replace(capture_explicit_execution_context(), hook_run=run)
+    with bind_explicit_execution_context(context):
+        return gateway.invoke(
+            call_id=call_id,
+            tool_name=tool_name,
+            arguments=arguments,
+        ).direct_result()
+
+
+def _bind(run: HookRun):
+    context = replace(capture_explicit_execution_context(), hook_run=run)
+    return bind_explicit_execution_context(context)
 
 
 def _write_tool(events: list[str]):
@@ -72,11 +102,16 @@ def _count_tool(events: list[int]):
     return boundary_count
 
 
-def test_tool_wrapper_requires_an_active_hook_run() -> None:
+def test_tool_gateway_requires_an_active_hook_run() -> None:
     context = replace(capture_explicit_execution_context(), hook_run=None)
+    gateway = AgentLoomToolGateway.from_tools([_count_tool([])])
 
     with bind_explicit_execution_context(context), pytest.raises(RuntimeError, match="HookRun"):
-        inject_hooks(_count_tool([])).forward(count=1)
+        gateway.invoke(
+            call_id="missing-hook",
+            tool_name="boundary_count",
+            arguments={"count": 1},
+        )
 
 
 def test_empty_tool_result_is_visible_to_the_model() -> None:
@@ -340,11 +375,11 @@ def test_final_input_pipeline_order_is_guard_history_recorder_tool_post() -> Non
 
     with (
         patch(
-            "agentloom.adapters.smolagents.tool_shim.enforce_core_tool_guard",
+            "agentloom.runtime.hooks.path_validators.enforce_core_tool_guard",
             side_effect=guard,
         ),
         patch(
-            "agentloom.adapters.smolagents.tool_shim.record_active_file_history",
+            "agentloom.runtime.checkpoint.file_history_hook.record_active_file_history",
             side_effect=history,
         ),
         patch(
@@ -402,10 +437,12 @@ def test_core_guard_block_is_not_tool_failure_and_has_no_side_effect() -> None:
 
     with (
         patch(
-            "agentloom.adapters.smolagents.tool_shim.enforce_core_tool_guard",
+            "agentloom.runtime.hooks.path_validators.enforce_core_tool_guard",
             side_effect=guard,
         ),
-        patch("agentloom.adapters.smolagents.tool_shim.record_active_file_history") as history,
+        patch(
+            "agentloom.runtime.checkpoint.file_history_hook.record_active_file_history"
+        ) as history,
         patch("agentloom.self_learning.session_recorder.session_recorder_hook") as recorder,
     ):
         result = _invoke(
@@ -442,13 +479,13 @@ def test_self_learning_final_input_observer_failure_does_not_block_tool() -> Non
 def test_internal_outcomes_distinguish_executed_blocked_and_failed() -> None:
     executed_tool = _count_tool([])
     run = HookRun(HookPlan(), local_run_id="local", root_run_id="root")
-    executed = _execute_tool_pipeline(
-        executed_tool,
-        executed_tool.forward,
-        run,
-        args=(),
-        kwargs={"count": 1},
-    )
+    executed_gateway = AgentLoomToolGateway.from_tools([executed_tool])
+    with _bind(run):
+        executed = executed_gateway.invoke(
+            call_id="executed",
+            tool_name="boundary_count",
+            arguments={"count": 1},
+        )
     assert type(executed) is ToolCallRecord
     assert executed.status == "completed"
     assert executed.outcome == "executed"
@@ -466,13 +503,13 @@ def test_internal_outcomes_distinguish_executed_blocked_and_failed() -> None:
         local_run_id="local-blocked",
         root_run_id="root",
     )
-    blocked = _execute_tool_pipeline(
-        executed_tool,
-        executed_tool.forward,
-        blocked_run,
-        args=(),
-        kwargs={"count": 2},
-    )
+    blocked_gateway = AgentLoomToolGateway.from_tools([executed_tool])
+    with _bind(blocked_run):
+        blocked = blocked_gateway.invoke(
+            call_id="blocked",
+            tool_name="boundary_count",
+            arguments={"count": 2},
+        )
     assert type(blocked) is ToolCallRecord
     assert blocked.status == "blocked"
     assert blocked.outcome == "blocked"
@@ -488,13 +525,13 @@ def test_internal_outcomes_distinguish_executed_blocked_and_failed() -> None:
 
         raise ValueError(f"boom-{value}")
 
-    failed = _execute_tool_pipeline(
-        boundary_failure,
-        boundary_failure.forward,
-        run,
-        args=(),
-        kwargs={"value": 3},
-    )
+    failed_gateway = AgentLoomToolGateway.from_tools([boundary_failure])
+    with _bind(run):
+        failed = failed_gateway.invoke(
+            call_id="failed",
+            tool_name="boundary_failure",
+            arguments={"value": 3},
+        )
     assert type(failed) is ToolCallRecord
     assert failed.status == "error"
     assert failed.outcome == "failed"
@@ -699,19 +736,27 @@ def test_stateful_tool_runtime_clones_do_not_share_mutable_state() -> None:
             return label
 
     definition = StatefulTool()
-    runtime_tools = [inject_hooks(clone_tool_for_runtime(definition)) for _ in range(2)]
+    runtime_gateways = [
+        AgentLoomToolGateway.from_tools([definition])
+        for _ in range(2)
+    ]
     runs = [HookRun(HookPlan(), local_run_id=f"local-{label}", root_run_id=f"root-{label}") for label in "AB"]
 
     with ThreadPoolExecutor(max_workers=2) as pool:
         futures = [
-            pool.submit(_invoke, runtime_tool, run, label=label)
-            for runtime_tool, run, label in zip(runtime_tools, runs, "AB", strict=True)
+            pool.submit(
+                _invoke_gateway,
+                gateway,
+                run,
+                call_id=f"call-{label}",
+                tool_name="stateful_tool",
+                arguments={"label": label},
+            )
+            for gateway, run, label in zip(runtime_gateways, runs, "AB", strict=True)
         ]
         assert [future.result(timeout=5) for future in futures] == ["A", "B"]
 
     assert definition.calls == []
-    assert runtime_tools[0].calls == ["A"]
-    assert runtime_tools[1].calls == ["B"]
 
 
 def test_uncloneable_stateful_tool_requires_explicit_runtime_factory() -> None:
@@ -729,7 +774,7 @@ def test_uncloneable_stateful_tool_requires_explicit_runtime_factory() -> None:
             return "ok"
 
     with pytest.raises(RuntimeError, match=r"implement clone_for_runtime\(\)"):
-        clone_tool_for_runtime(UncloneableTool())
+        AgentLoomToolGateway.from_tools([UncloneableTool()])
 
 
 def test_real_tool_failure_still_dispatches_post_tool_use_failure() -> None:
