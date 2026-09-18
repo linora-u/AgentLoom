@@ -140,6 +140,7 @@ def test_completed_probe_uses_the_published_query_without_a_second_text_source(t
     configured = yaml.safe_load(copied.read_text())["workflow"]
     assert helper._canonical_worker_query(configured) == expected
     assert "`record_checkpoint_worker_output`" in configured
+    assert "Do not call the Worker again" in configured
 
 
 @pytest.mark.parametrize("body", [
