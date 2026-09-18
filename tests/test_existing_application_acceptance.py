@@ -189,6 +189,25 @@ def test_checkpoint_verifier_requires_smolagents_runtime_envelope(checkpoint_hel
         )
 
 
+def test_checkpoint_verifier_decodes_only_completed_worker_handoff_envelopes(
+    checkpoint_helper,
+):
+    assert checkpoint_helper._worker_handoff_output(
+        '{"ok":true,"status":"completed","output":"done"}'
+    ) == "done"
+
+    with pytest.raises(AssertionError, match="not a JSON result envelope"):
+        checkpoint_helper._worker_handoff_output("done")
+    with pytest.raises(AssertionError, match="not a completed"):
+        checkpoint_helper._worker_handoff_output(
+            '{"ok":false,"status":"error","error":{"message":"failed"}}'
+        )
+    with pytest.raises(AssertionError, match="not a completed"):
+        checkpoint_helper._worker_handoff_output(
+            '{"ok":true,"status":"completed","output":{"value":"done"}}'
+        )
+
+
 @pytest.fixture
 def main_checkpoint_gate(tmp_path, monkeypatch):
     from types import SimpleNamespace
