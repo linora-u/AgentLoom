@@ -11,11 +11,9 @@ import time
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from types import SimpleNamespace
-from unittest.mock import MagicMock
 
 import pytest
-
-from agentloom.runtime.checkpoint import CheckpointManager, CheckpointSerializer
+from agentloom.runtime.checkpoint import CheckpointManager
 from agentloom.runtime.checkpoint.coordinator import CheckpointCoordinator
 
 # ── fixtures ─────────────────────────────────────────────────────────────
@@ -33,261 +31,6 @@ def cm(tmp_path: Path) -> CheckpointManager:
 @pytest.fixture()
 def task_id() -> str:
     return "task_resume_test"
-
-
-class _StepCallbacks:
-    def __init__(self) -> None:
-        self.callbacks = []
-
-    def register(self, step_type, callback) -> None:
-        self.callbacks.append((step_type, callback))
-
-
-# ── Supervisor checkpoint save ───────────────────────────────────────────
-
-
-class TestSupervisorCheckpointSave:
-
-    def test_completed_step_identity_not_step_number_controls_deduplication(self):
-        """A resumed run may restart step numbering at one."""
-        from smolagents.memory import ActionStep
-        from smolagents.monitoring import Timing
-
-        from agentloom.runtime.checkpoint.coordinator import _steps_including_completed
-
-        previous = ActionStep(
-            step_number=1,
-            timing=Timing(start_time=time.time()),
-            observations="previous attempt",
-        )
-        current = ActionStep(
-            step_number=1,
-            timing=Timing(start_time=time.time()),
-            observations="resumed attempt",
-        )
-
-        assert _steps_including_completed([previous], previous) == [previous]
-        assert _steps_including_completed([previous], current) == [previous, current]
-
-    def test_save_on_completed(self, cm: CheckpointManager, task_id: str):
-        """After a successful run, checkpoint is saved with status=completed."""
-        from smolagents.memory import ActionStep, TaskStep
-        from smolagents.monitoring import Timing
-
-        steps = [
-            TaskStep(task="do work"),
-            ActionStep(step_number=1, timing=Timing(start_time=time.time()), observations="result"),
-        ]
-        cm.save_supervisor_checkpoint(
-            task_id, memory_steps=steps, task_text="do work", status="completed", result="done",
-        )
-        loaded = cm.load_supervisor_checkpoint(task_id)
-        assert loaded["status"] == "completed"
-        assert loaded["result"] == "done"
-
-    def test_save_on_interrupted(self, cm: CheckpointManager, task_id: str):
-        from smolagents.memory import ActionStep, TaskStep
-        from smolagents.monitoring import Timing
-
-        steps = [
-            TaskStep(task="interrupted work"),
-            ActionStep(step_number=1, timing=Timing(start_time=time.time()), observations="partial"),
-        ]
-        cm.save_supervisor_checkpoint(
-            task_id, memory_steps=steps, task_text="interrupted work", status="interrupted",
-        )
-        cm.save_task_tree(task_id, {"task_id": task_id, "status": "interrupted", "agent_name": "test_supervisor", "workers": {}})
-        loaded = cm.load_supervisor_checkpoint(task_id)
-        assert loaded["status"] == "interrupted"
-        tree = cm.load_task_tree(task_id)
-        assert tree["status"] == "interrupted"
-
-    def test_step_callback_persists_completed_step_before_memory_append(
-        self,
-        cm: CheckpointManager,
-        task_id: str,
-    ):
-        """smolagents calls callbacks before appending the completed step."""
-        from smolagents.memory import ActionStep, TaskStep
-        from smolagents.monitoring import Timing
-
-        task_step = TaskStep(task="do work")
-        previous_step = ActionStep(
-            step_number=1,
-            timing=Timing(start_time=time.time()),
-            observations="previous attempt",
-        )
-        action_step = ActionStep(
-            # smolagents restarts numbering for a resumed run.
-            step_number=1,
-            timing=Timing(start_time=time.time()),
-            observations="side effect complete",
-        )
-        callbacks = _StepCallbacks()
-        inner = SimpleNamespace(
-            memory=SimpleNamespace(steps=[task_step, previous_step]),
-            step_callbacks=callbacks,
-        )
-        coord = CheckpointCoordinator(cm, task_id, "do work")
-        heartbeat = MagicMock()
-        file_history = MagicMock()
-        coord.set_supervisor_heartbeat(heartbeat)
-        coord._file_history = file_history
-        coord.register_supervisor_step_callback(inner)
-
-        callback = callbacks.callbacks[0][1]
-        callback(action_step, agent=inner)
-
-        loaded = cm.load_supervisor_checkpoint(task_id)
-        restored = CheckpointSerializer.deserialize_memory_steps(loaded["memory_steps"])
-        assert loaded["step_count"] == 3
-        assert restored[-1].observations == "side effect complete"
-        heartbeat.update_step.assert_called_with(3)
-        file_history.make_post_step_snapshot.assert_called_with(3)
-
-        # Also tolerate callback timing where the framework has already
-        # appended the same step; the checkpoint must not duplicate it.
-        inner.memory.steps.append(action_step)
-        callback(action_step, agent=inner)
-        assert cm.load_supervisor_checkpoint(task_id)["step_count"] == 3
-
-    def test_inherited_supervisor_callback_does_not_store_worker_step(
-        self,
-        cm: CheckpointManager,
-        task_id: str,
-    ):
-        from smolagents.memory import ActionStep, TaskStep
-        from smolagents.monitoring import Timing
-
-        supervisor_callbacks = _StepCallbacks()
-        supervisor = SimpleNamespace(
-            memory=SimpleNamespace(steps=[TaskStep(task="supervise")]),
-            step_callbacks=supervisor_callbacks,
-        )
-        worker_callbacks = _StepCallbacks()
-        worker = SimpleNamespace(
-            memory=SimpleNamespace(steps=[TaskStep(task="work")]),
-            step_callbacks=worker_callbacks,
-        )
-        worker_step = ActionStep(
-            step_number=1,
-            timing=Timing(start_time=time.time()),
-            observations="worker-only result",
-        )
-        coord = CheckpointCoordinator(cm, task_id, "supervise")
-        coord.register_supervisor_step_callback(supervisor)
-        coord.register_worker_step_callback(worker)
-
-        inherited_callback = worker_callbacks.callbacks[0][1]
-        inherited_callback(worker_step, agent=worker)
-
-        loaded = cm.load_supervisor_checkpoint(task_id)
-        assert loaded["step_count"] == 1
-        assert "worker-only result" not in str(loaded["memory_steps"])
-
-
-# ── Supervisor checkpoint restore ────────────────────────────────────────
-
-
-class TestSupervisorRestore:
-
-    def test_restore_memory_steps(self, cm: CheckpointManager, task_id: str):
-        """Deserialised memory steps should match the originals."""
-        from smolagents.memory import ActionStep, TaskStep, ToolCall
-        from smolagents.monitoring import Timing
-
-        original_steps = [
-            TaskStep(task="analyse code"),
-            ActionStep(
-                step_number=1,
-                timing=Timing(start_time=time.time()),
-                tool_calls=[ToolCall(name="shell_tool", arguments={"cmd": "ls"}, id="c1")],
-                observations="file.py",
-            ),
-        ]
-        cm.save_supervisor_checkpoint(
-            task_id, memory_steps=original_steps, task_text="analyse code", status="interrupted",
-        )
-
-        loaded = cm.load_supervisor_checkpoint(task_id)
-        restored = CheckpointSerializer.deserialize_memory_steps(loaded["memory_steps"])
-        assert len(restored) == 2
-        assert isinstance(restored[0], TaskStep)
-        assert isinstance(restored[1], ActionStep)
-        assert restored[1].observations == "file.py"
-        assert restored[1].tool_calls[0].name == "shell_tool"
-
-
-class TestWorkerRestore:
-
-    def test_restore_worker_memory_steps_for_incomplete_resumed_call(self, cm: CheckpointManager, task_id: str):
-        from smolagents.memory import ActionStep, TaskStep
-        from smolagents.monitoring import Timing
-
-        steps = [
-            TaskStep(task="worker task"),
-            ActionStep(step_number=1, timing=Timing(start_time=time.time()), observations="partial"),
-        ]
-        cm.record_worker_started(task_id, "worker_a", input_hash="h", task_input="worker task")
-        cm.record_worker_finished(
-            task_id,
-            "worker_a",
-            call_index=0,
-            status="interrupted",
-            input_hash="h",
-            task_input="worker task",
-        )
-        cm.save_worker_checkpoint(
-            task_id,
-            "worker_a",
-            call_index=0,
-            input_hash="h",
-            memory_steps=steps,
-            task_input="worker task",
-            status="interrupted",
-        )
-
-        runtime_agent = SimpleNamespace(memory=SimpleNamespace(steps=[]))
-        coord = CheckpointCoordinator(cm, task_id, "supervisor task", resume=True)
-
-        assert coord.restore_worker(runtime_agent, "worker_a", 0) is True
-        assert len(runtime_agent.memory.steps) == 2
-        assert runtime_agent.memory.steps[0].task == "worker task"
-
-    def test_drops_incomplete_last_action(self, cm: CheckpointManager, task_id: str):
-        """An interrupted ActionStep (tool_calls but no observations) should be dropped."""
-        from smolagents.memory import ActionStep, TaskStep, ToolCall
-        from smolagents.monitoring import Timing
-
-        steps = [
-            TaskStep(task="code review"),
-            ActionStep(
-                step_number=1,
-                timing=Timing(start_time=time.time()),
-                observations="phase 1 done",
-            ),
-            ActionStep(
-                step_number=2,
-                timing=Timing(start_time=time.time()),
-                tool_calls=[ToolCall(name="worker_tool", arguments={}, id="c2")],
-                observations=None,  # interrupted mid-tool
-            ),
-        ]
-        cm.save_supervisor_checkpoint(
-            task_id, memory_steps=steps, task_text="code review", status="interrupted",
-        )
-
-        loaded = cm.load_supervisor_checkpoint(task_id)
-        restored = CheckpointSerializer.deserialize_memory_steps(loaded["memory_steps"])
-
-        # Simulate the drop logic from _restore_checkpoint
-        from smolagents.memory import ActionStep as AS
-        if restored and isinstance(restored[-1], AS):
-            last = restored[-1]
-            if last.tool_calls and not last.observations and not last.is_final_answer:
-                restored.pop()
-
-        assert len(restored) == 2  # TaskStep + first ActionStep only
 
 
 # ── Worker checkpoint ────────────────────────────────────────────────────
@@ -375,33 +118,21 @@ class TestWorkerCheckpoint:
 
         manager = _CheckpointManager()
         coord = CheckpointCoordinator(manager, "task_parallel", "supervise")
-        coord._step_cb = lambda *args, **kwargs: None
-        workers = [
-            SimpleNamespace(
-                memory=SimpleNamespace(steps=[]),
-                step_callbacks=_StepCallbacks(),
-            )
-            for _ in range(2)
-        ]
-
-        def _start(runtime_agent, input_hash):
-            coord.register_worker_step_callback(runtime_agent, "worker_a")
+        def _start(input_hash):
             return coord.prepare_worker_call(
                 "worker_a",
                 input_hash,
                 input_hash,
-                runtime_agent=runtime_agent,
             ).call_index
 
         with ThreadPoolExecutor(max_workers=2) as executor:
             futures = [
-                executor.submit(_start, worker, f"hash-{index}")
-                for index, worker in enumerate(workers)
+                executor.submit(_start, f"hash-{index}")
+                for index in range(2)
             ]
             call_indexes = {future.result(timeout=3) for future in futures}
 
         assert call_indexes == {0, 1}
-        assert [len(worker.step_callbacks.callbacks) for worker in workers] == [2, 2]
         assert len(heartbeat_instances) == 1
         heartbeat = heartbeat_instances[0]
         assert set(heartbeat._calls) == {0, 1}
@@ -412,26 +143,19 @@ class TestWorkerCheckpoint:
         assert heartbeat.stop_count == 1
 
         # A later sequential call reuses and restarts the same writer.
-        later_worker = SimpleNamespace(
-            memory=SimpleNamespace(steps=[]),
-            step_callbacks=_StepCallbacks(),
-        )
-        coord.register_worker_step_callback(later_worker, "worker_a")
         assert coord.prepare_worker_call(
             "worker_a",
             "hash-2",
             "third",
-            runtime_agent=later_worker,
         ).call_index == 2
         assert len(heartbeat_instances) == 1
         assert heartbeat.start_count == 3
-        assert len(later_worker.step_callbacks.callbacks) == 2
 
         coord.stop_all_worker_heartbeats()
 
     def test_worker_completed_in_tree(self, cm: CheckpointManager, task_id: str):
         cm.save_task_tree(task_id, {"task_id": task_id, "status": "running", "agent_name": "sup", "workers": {}})
-        cm.save_worker_checkpoint(task_id, "scan_worker", status="completed", result="42 files")
+        cm.save_worker_runtime_checkpoint(task_id, "scan_worker", status="completed", result="42 files")
         tree = cm.load_task_tree(task_id)
         # Update tree using v2 list format
         tree.setdefault("workers", {})["scan_worker"] = [{"status": "completed", "result_summary": "42 files", "call_index": 0, "input_hash": ""}]
@@ -441,7 +165,7 @@ class TestWorkerCheckpoint:
 
     def test_worker_failed_in_tree(self, cm: CheckpointManager, task_id: str):
         cm.save_task_tree(task_id, {"task_id": task_id, "status": "running", "agent_name": "sup", "workers": {}})
-        cm.save_worker_checkpoint(task_id, "bad_worker", status="failed", error="timeout")
+        cm.save_worker_runtime_checkpoint(task_id, "bad_worker", status="failed", error="timeout")
         ckpt = cm.load_worker_checkpoint(task_id, "bad_worker")
         assert ckpt["status"] == "failed"
         assert ckpt["error"] == "timeout"
@@ -465,7 +189,7 @@ class TestWorkerCheckpoint:
             "hash",
             "task",
             "",
-            [],
+            None,
         )
 
         checkpoint = cm.load_worker_checkpoint(
@@ -477,56 +201,6 @@ class TestWorkerCheckpoint:
         assert checkpoint["status"] == "completed"
         assert checkpoint["result"] == ""
         assert call["result"] == ""
-
-    def test_step_tracker_persists_completed_step_before_memory_append(
-        self,
-        cm: CheckpointManager,
-        task_id: str,
-    ):
-        from smolagents.memory import ActionStep, TaskStep
-        from smolagents.monitoring import Timing
-
-        task_step = TaskStep(task="worker task")
-        previous_step = ActionStep(
-            step_number=1,
-            timing=Timing(start_time=time.time()),
-            observations="previous worker attempt",
-        )
-        action_step = ActionStep(
-            # A resumed worker also restarts local step numbering.
-            step_number=1,
-            timing=Timing(start_time=time.time()),
-            observations="worker side effect complete",
-        )
-        callbacks = _StepCallbacks()
-        worker = SimpleNamespace(
-            memory=SimpleNamespace(steps=[task_step, previous_step]),
-            step_callbacks=callbacks,
-        )
-        heartbeat = MagicMock()
-        coord = CheckpointCoordinator(cm, task_id, "supervise")
-        coord._worker_heartbeats["worker_a"] = heartbeat
-        coord.register_worker_step_tracker(
-            worker,
-            "worker_a",
-            0,
-            input_hash="hash",
-            task_input="worker task",
-        )
-
-        callback = callbacks.callbacks[0][1]
-        callback(action_step, agent=worker)
-
-        loaded = cm.load_worker_checkpoint(task_id, "worker_a", call_index=0)
-        restored = CheckpointSerializer.deserialize_memory_steps(loaded["memory_steps"])
-        assert loaded["step_count"] == 3
-        assert restored[-1].observations == "worker side effect complete"
-        heartbeat.update_call_step.assert_called_with(0, 3)
-
-        worker.memory.steps.append(action_step)
-        callback(action_step, agent=worker)
-        assert cm.load_worker_checkpoint(task_id, "worker_a", call_index=0)["step_count"] == 3
-
 
 # ── Worker resume (skip completed) ──────────────────────────────────────
 
@@ -556,25 +230,25 @@ class TestWorkerResume:
         assert set(need_rerun) == {"w2", "w3"}
 
 
-@pytest.mark.parametrize("projection", [
-    "RunResult(output='old envelope', state='success', steps=[])",
-    "[ContextRef ctx_0000000000000001 kind=log source=worker original_chars=200000] compressed old envelope",
-    "__import__('os').system('this must never be evaluated')",
-])
-@pytest.mark.parametrize("output", ["exact Worker answer", "", None, "RunResult(output='legitimate text')"])
-def test_completed_cache_uses_committed_action_output_without_parsing_projection(tmp_path, projection, output):
-    from smolagents.memory import ActionStep
-    from smolagents.monitoring import Timing, TokenUsage
-
+@pytest.mark.parametrize(
+    "output",
+    ["exact Worker answer", "", None, "RunResult(output='legitimate text')"],
+)
+def test_completed_cache_uses_exact_stored_result(tmp_path, output):
     initial = CheckpointManager("supervisor", checkpoints_root=tmp_path, run_id="run_initial")
     task = "task_legacy_worker"
     call_index = initial.record_worker_started(task, "worker", input_hash="same-input", task_input="delegate")
-    step = ActionStep(step_number=1, timing=Timing(start_time=1, end_time=2), action_output=output,
-                      is_final_answer=True, token_usage=TokenUsage(20, 11))
-    initial.save_worker_checkpoint(task, "worker", call_index=call_index, input_hash="same-input",
-                                   task_input="delegate", status="completed", result=projection, memory_steps=[step])
+    initial.save_worker_runtime_checkpoint(
+        task,
+        "worker",
+        call_index=call_index,
+        input_hash="same-input",
+        task_input="delegate",
+        status="completed",
+        result=output,
+    )
     initial.record_worker_finished(task, "worker", call_index=call_index, input_hash="same-input",
-                                   task_input="delegate", status="completed", result=projection)
+                                   task_input="delegate", status="completed", result=output)
     before = initial.load_worker_checkpoint(task, "worker", call_index=0)
     initial.close()
 
@@ -586,13 +260,3 @@ def test_completed_cache_uses_committed_action_output_without_parsing_projection
     assert resumed.load_worker_checkpoint(task, "worker", call_index=0) == before
     assert len(resumed.load_task_tree(task)["workers"]["worker"]) == 1
     resumed.close()
-
-
-@pytest.mark.parametrize("final_step", [
-    {"_step_type": "ActionStep", "is_final_answer": False, "action_output": "uncommitted"},
-    {"_step_type": "ActionStep", "is_final_answer": True, "action_output": "failed", "error": "failure"},
-    {"_step_type": "ActionStep", "is_final_answer": True},
-    {"_step_type": "UnknownStep", "is_final_answer": True, "action_output": "unknown"},
-])
-def test_completed_output_requires_explicit_successful_final_action(final_step):
-    assert CheckpointSerializer.completed_worker_output([final_step]) == (False, None)

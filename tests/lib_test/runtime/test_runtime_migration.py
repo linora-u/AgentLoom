@@ -746,7 +746,18 @@ def test_apply_uses_staging_verifies_context_ref_and_archives_whole_legacy_tree(
     from agentloom.runtime.checkpoint import CheckpointManager
 
     manager = CheckpointManager("supervisor", checkpoint_dir=destination)
-    assert manager.load_worker_checkpoint("task_valid", "researcher", 2)["step_count"] == 1
+    supervisor_checkpoint = manager.load_supervisor_checkpoint("task_valid")
+    worker_payload = manager.load_worker_checkpoint(
+        "task_valid",
+        "researcher",
+        2,
+    )
+    assert supervisor_checkpoint["step_count"] == 1
+    assert supervisor_checkpoint["runtime_checkpoint"]["runtime_id"] == "smolagents"
+    assert "memory_steps" not in supervisor_checkpoint
+    assert worker_payload["step_count"] == 1
+    assert worker_payload["runtime_checkpoint"]["runtime_id"] == "smolagents"
+    assert "memory_steps" not in worker_payload
     assert ContextStore(destination / "context_store").retrieve(CONTEXT_REF) == CONTEXT_PAYLOAD
     assert not legacy_root.exists()
     assert result.archive_dir is not None

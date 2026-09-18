@@ -5,6 +5,9 @@ from dataclasses import dataclass
 from types import SimpleNamespace
 
 import pytest
+from agentloom.adapters.smolagents.checkpoint_codec import (
+    SmolagentsCheckpointCodec,
+)
 from agentloom.adapters.smolagents.model_turn_bridge import (
     MODEL_ITEMS_RAW_KEY,
     MODEL_RESPONSE_ID_RAW_KEY,
@@ -18,7 +21,6 @@ from agentloom.runtime.agent_runtime import (
     AgentRuntimeRequest,
     RuntimeCheckpointEnvelope,
 )
-from agentloom.runtime.checkpoint.serializer import CheckpointSerializer
 from agentloom.runtime.model_protocol import (
     FunctionCallItem,
     FunctionCallOutputItem,
@@ -129,7 +131,10 @@ def test_adapter_translates_runtime_request_and_result() -> None:
     assert result.usage == {"input": 2}
     assert result.checkpoint is not None
     assert result.checkpoint.runtime_id == "smolagents"
-    assert result.checkpoint.payload == {"memory_steps": []}
+    assert result.checkpoint.payload == {
+        "memory_steps": [],
+        "step_count": 0,
+    }
 
 
 def test_adapter_omits_empty_additional_args_and_resets_new_session() -> None:
@@ -247,7 +252,7 @@ def test_resume_replays_canonical_items_through_the_next_model_turn() -> None:
         observations=tool_record.model_content(),
     )
     step.tool_results = [tool_record]
-    serialized_steps = CheckpointSerializer.serialize_memory_steps([step])
+    serialized_steps = SmolagentsCheckpointCodec.serialize_memory_steps([step])
     checkpoint = RuntimeCheckpointEnvelope.from_dict(
         json.loads(
             json.dumps(
@@ -310,3 +315,16 @@ def test_adapter_registers_one_native_step_bridge_and_pushes_completed_step() ->
 
     assert len(observed) == 1
     assert observed[0].payload["memory_steps"][0]["_step_type"] == "ActionStep"
+
+
+def test_adapter_snapshot_and_restore_own_native_memory() -> None:
+    native = _NativeRuntime(_NativeResult(output="done"))
+    native.memory.steps = [TaskStep(task="worker task")]
+    runtime = SmolagentsRuntimeAdapter(native)
+
+    checkpoint = runtime.snapshot()
+    native.memory.steps = []
+
+    runtime.restore(checkpoint)
+
+    assert [step.task for step in native.memory.steps] == ["worker task"]

@@ -18,7 +18,7 @@ the LLM on resume. It handles:
 
 Usage::
 
-    from agentloom.runtime.checkpoint.conversation_recovery import prepare_steps_for_resume
+    from agentloom.adapters.smolagents.conversation_recovery import prepare_steps_for_resume
 
     steps, interruption = prepare_steps_for_resume(raw_steps)
     # steps: cleaned list of MemoryStep

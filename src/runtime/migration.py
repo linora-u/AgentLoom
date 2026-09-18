@@ -205,6 +205,7 @@ class RuntimeMigration:
                 if copied_checksum != candidate.checksum:
                     raise MigrationError(f"checksum mismatch while staging {candidate.task_id}")
                 _normalize_legacy_worker_checkpoints(staged)
+                _normalize_legacy_runtime_checkpoints(staged)
                 validate_migrated_checkpoint(candidate, staged)
                 if validator is not None:
                     validator(candidate, staged)
@@ -456,8 +457,8 @@ class RuntimeMigration:
         # Use the exact loader and launch-time validation used by run_app.  In
         # particular, the full config (including explicit application_id/app/
         # application) must participate in application scope resolution.
-        from agentloom.runtime.factory import YamlAgentFactory
         from agentloom.application.runner import validate_required_yaml_fields
+        from agentloom.runtime.factory import YamlAgentFactory
 
         try:
             agent_config = YamlAgentFactory._load_config_from_file(path)
@@ -824,6 +825,14 @@ def _file_history_progress_state(task_dir: Path) -> str:
 
 def _checkpoint_has_memory(checkpoint: dict[str, Any]) -> bool:
     steps = checkpoint.get("memory_steps")
+    if not isinstance(steps, list):
+        runtime_checkpoint = checkpoint.get("runtime_checkpoint")
+        payload = (
+            runtime_checkpoint.get("payload")
+            if isinstance(runtime_checkpoint, dict)
+            else None
+        )
+        steps = payload.get("memory_steps") if isinstance(payload, dict) else None
     return isinstance(steps, list) and len(steps) > 0
 
 
@@ -907,6 +916,46 @@ def _normalize_legacy_worker_checkpoints(task_dir: Path) -> None:
             os.replace(legacy_checkpoint, target)
 
 
+def _normalize_legacy_runtime_checkpoints(task_dir: Path) -> None:
+    """Convert declared legacy smolagents payloads into runtime envelopes."""
+
+    from agentloom.adapters.smolagents.checkpoint_codec import (
+        SmolagentsCheckpointCodec,
+    )
+
+    paths = [task_dir / "checkpoint.json"]
+    paths.extend(
+        sorted((task_dir / "workers").glob("*/calls/*/checkpoint.json"))
+    )
+    for path in paths:
+        checkpoint = _read_json_object(path)
+        if checkpoint is None:
+            raise MigrationError(f"invalid checkpoint: {path}")
+        raw_runtime = checkpoint.get("runtime_checkpoint")
+        try:
+            if isinstance(raw_runtime, dict):
+                envelope = (
+                    SmolagentsCheckpointCodec.validate_runtime_checkpoint(
+                        raw_runtime
+                    )
+                )
+            else:
+                envelope = SmolagentsCheckpointCodec.migrate_legacy_checkpoint(
+                    checkpoint
+                )
+        except (TypeError, ValueError) as exc:
+            raise MigrationError(
+                f"invalid legacy smolagents checkpoint: {path}"
+            ) from exc
+        checkpoint["runtime_checkpoint"] = envelope.to_dict()
+        checkpoint["step_count"] = envelope.payload.get("step_count", 0)
+        checkpoint.pop("memory_steps", None)
+        path.write_text(
+            json.dumps(checkpoint, ensure_ascii=False, indent=2),
+            encoding="utf-8",
+        )
+
+
 def _worker_call_index(checkpoint: dict[str, Any], tree: dict[str, Any], worker_name: str) -> int:
     raw_index = checkpoint.get("call_index")
     if isinstance(raw_index, int) and not isinstance(raw_index, bool) and raw_index >= 0:
@@ -920,9 +969,12 @@ def _worker_call_index(checkpoint: dict[str, Any], tree: dict[str, Any], worker_
     for call in calls:
         if not isinstance(call, dict):
             continue
+        value = call.get("call_index")
+        if isinstance(value, bool) or not isinstance(value, (int, str)):
+            continue
         try:
-            index = int(call.get("call_index"))
-        except (TypeError, ValueError):
+            index = int(value)
+        except ValueError:
             continue
         if index >= 0:
             indexes.append(index)
@@ -969,10 +1021,10 @@ def validate_migrated_checkpoint(candidate: MigrationCandidate, destination: Pat
     if not progress:
         raise MigrationError(f"resumable progress missing for {candidate.task_id}")
 
-    from types import SimpleNamespace
-
+    from agentloom.adapters.smolagents.checkpoint_codec import (
+        SmolagentsCheckpointCodec,
+    )
     from agentloom.runtime.checkpoint import CheckpointManager
-    from agentloom.runtime.checkpoint.coordinator import CheckpointCoordinator
 
     manager = CheckpointManager(
         "migration-validator",
@@ -985,19 +1037,19 @@ def validate_migrated_checkpoint(candidate: MigrationCandidate, destination: Pat
     if not isinstance(supervisor_checkpoint, dict):
         raise MigrationError(f"supervisor checkpoint unreadable for {candidate.task_id}")
 
-    sentinel = object()
-    holder = SimpleNamespace(memory=SimpleNamespace(steps=sentinel))
-    coordinator = CheckpointCoordinator(
-        manager,
-        candidate.task_id,
-        str(supervisor_checkpoint.get("task_text", "")),
-        resume=True,
-    )
-    coordinator.restore(holder)
-    if holder.memory.steps is sentinel:
-        raise MigrationError(f"supervisor restore failed for {candidate.task_id}")
-    if supervisor_checkpoint.get("memory_steps") and not holder.memory.steps:
-        raise MigrationError(f"supervisor memory was not restored for {candidate.task_id}")
+    raw_supervisor_runtime = supervisor_checkpoint.get("runtime_checkpoint")
+    if not isinstance(raw_supervisor_runtime, dict):
+        raise MigrationError(
+            f"supervisor runtime checkpoint missing for {candidate.task_id}"
+        )
+    try:
+        SmolagentsCheckpointCodec.validate_runtime_checkpoint(
+            raw_supervisor_runtime
+        )
+    except (TypeError, ValueError) as exc:
+        raise MigrationError(
+            f"supervisor runtime checkpoint invalid for {candidate.task_id}"
+        ) from exc
 
     workers_dir = destination / "workers"
     if workers_dir.is_dir():
@@ -1018,11 +1070,21 @@ def validate_migrated_checkpoint(candidate: MigrationCandidate, destination: Pat
             )
             if not isinstance(worker_checkpoint, dict):
                 raise MigrationError(f"canonical worker checkpoint unreadable: {worker_path}")
-            raw_steps = worker_checkpoint.get("memory_steps") or []
-            if raw_steps and worker_checkpoint.get("status") != "completed":
-                worker_holder = SimpleNamespace(memory=SimpleNamespace(steps=[]))
-                if not coordinator.restore_worker(worker_holder, worker_name, call_index):
-                    raise MigrationError(f"worker restore failed for {worker_name} call {call_index}")
+            raw_worker_runtime = worker_checkpoint.get("runtime_checkpoint")
+            if not isinstance(raw_worker_runtime, dict):
+                raise MigrationError(
+                    f"worker runtime checkpoint missing for "
+                    f"{worker_name} call {call_index}"
+                )
+            try:
+                SmolagentsCheckpointCodec.validate_runtime_checkpoint(
+                    raw_worker_runtime
+                )
+            except (TypeError, ValueError) as exc:
+                raise MigrationError(
+                    f"worker runtime checkpoint invalid for "
+                    f"{worker_name} call {call_index}"
+                ) from exc
 
     context_store_dir = destination / "context_store"
     if context_store_dir.is_dir():
