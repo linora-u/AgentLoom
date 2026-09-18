@@ -164,18 +164,60 @@ def _wait_for_completed_worker_interrupt_point(proc: subprocess.Popen, timeout: 
     raise TimeoutError("timed out waiting for completed Worker handoff")
 
 
+def _runtime_memory_steps(checkpoint: dict) -> list[dict]:
+    envelope = checkpoint.get("runtime_checkpoint")
+    if not isinstance(envelope, dict):
+        raise AssertionError("checkpoint lacks a runtime checkpoint envelope")
+    if envelope.get("runtime_id") != "smolagents":
+        raise AssertionError(
+            f"checkpoint runtime is not smolagents: {envelope.get('runtime_id')!r}"
+        )
+    if envelope.get("state_schema_version") != 1:
+        raise AssertionError(
+            "checkpoint has unsupported smolagents state schema: "
+            f"{envelope.get('state_schema_version')!r}"
+        )
+    payload = envelope.get("payload")
+    if not isinstance(payload, dict):
+        raise AssertionError("smolagents checkpoint payload is not a mapping")
+    steps = payload.get("memory_steps")
+    if not isinstance(steps, list):
+        raise AssertionError("smolagents checkpoint payload lacks memory_steps")
+    return steps
+
+
 def _worker_usage(checkpoint: dict) -> dict[str, int]:
     fields = ("input_tokens", "output_tokens")
     return {field: sum((step.get("token_usage") or {}).get(field, 0)
-                       for step in checkpoint.get("memory_steps", [])) for field in fields}
+                       for step in _runtime_memory_steps(checkpoint)) for field in fields}
 
 
 def _worker_final_output(checkpoint: dict):
-    final = [step for step in checkpoint.get("memory_steps", [])
+    final = [step for step in _runtime_memory_steps(checkpoint)
              if step.get("_step_type") == "ActionStep" and step.get("is_final_answer") is True and step.get("error") is None]
-    if len(final) != 1 or "action_output" not in final[0]:
+    if len(final) != 1:
         raise AssertionError("Worker checkpoint lacks one successful final ActionStep output")
-    return final[0]["action_output"]
+    calls = [
+        call
+        for call in final[0].get("tool_calls") or []
+        if call.get("function", {}).get("name") == "final_answer"
+    ]
+    results = [
+        result
+        for result in final[0].get("tool_results") or []
+        if result.get("tool_name") == "final_answer"
+        and result.get("status") == "completed"
+    ]
+    if (
+        len(calls) != 1
+        or len(results) != 1
+        or calls[0].get("id") != results[0].get("call_id")
+        or not isinstance(results[0].get("output"), str)
+    ):
+        raise AssertionError(
+            "Worker checkpoint lacks one correlated final_answer ToolCallRecord"
+        )
+    return results[0]["output"]
 
 
 def _latest_task_dir() -> Path | None:
@@ -446,7 +488,7 @@ def _main_setup_is_committed(task_dir: Path) -> bool:
         checkpoint = json.loads((task_dir / "checkpoint.json").read_text(encoding="utf-8"))
     except (OSError, UnicodeError, json.JSONDecodeError):
         return False
-    for step in checkpoint.get("memory_steps", []):
+    for step in _runtime_memory_steps(checkpoint):
         if (step.get("_step_type") != "ActionStep" or step.get("error") is not None
                 or not step.get("observations") or (step.get("timing") or {}).get("end_time") is None):
             continue
