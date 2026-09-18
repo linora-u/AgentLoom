@@ -6,14 +6,19 @@ from typing import Any
 
 import pytest
 from agentloom.runtime.agent_runtime import (
+    RUNTIME_EVENT_KINDS,
     AgentRuntimeError,
     AgentRuntimeRequest,
     AgentRuntimeResult,
+    RuntimeArtifact,
     RuntimeCapabilities,
     RuntimeCheckpointEnvelope,
     RuntimeDefinition,
+    RuntimeEvent,
+    RuntimeEventSink,
     RuntimeRegistry,
     RuntimeRequirements,
+    RuntimeUsage,
     UnsupportedRuntimeError,
     build_builtin_runtime_registry,
     require_runtime_state,
@@ -214,6 +219,71 @@ def test_registry_validates_capabilities_without_constructing_runtime() -> None:
         registry.create(_definition("minimal"))
 
 
+def test_registry_closes_runtime_whose_capabilities_drift_from_registration() -> None:
+    @dataclass
+    class MismatchedRuntime:
+        runtime_id: str = "smolagents"
+        close_calls: int = 0
+
+        @property
+        def capabilities(self) -> RuntimeCapabilities:
+            return RuntimeCapabilities(True, False, True, True)
+
+        def run(self, request: AgentRuntimeRequest) -> AgentRuntimeResult:
+            return AgentRuntimeResult(state="success", output=request.task)
+
+        def snapshot(self) -> RuntimeCheckpointEnvelope:
+            return RuntimeCheckpointEnvelope(
+                runtime_id=self.runtime_id,
+                runtime_version="test",
+                state_schema_version=1,
+                payload={},
+            )
+
+        def close(self) -> None:
+            self.close_calls += 1
+
+    runtime = MismatchedRuntime()
+    registry = RuntimeRegistry()
+    registry.register(
+        "smolagents",
+        capabilities=RuntimeCapabilities(True, True, True, True),
+        factory=lambda _definition: runtime,
+    )
+
+    with pytest.raises(
+        AgentRuntimeError,
+        match="capabilities do not match",
+    ) as error:
+        registry.create(_definition("smolagents"))
+
+    assert error.value.category == "internal"
+    assert error.value.retryable is False
+    assert runtime.close_calls == 1
+
+
+def test_registry_closes_runtime_whose_identity_drifted_from_registration() -> None:
+    @dataclass
+    class MismatchedRuntime(_RecordingRuntime):
+        close_calls: int = 0
+
+        def close(self) -> None:
+            self.close_calls += 1
+
+    runtime = MismatchedRuntime("another-runtime", [])
+    registry = RuntimeRegistry()
+    registry.register(
+        "smolagents",
+        capabilities=RuntimeCapabilities(True, True, True, True),
+        factory=lambda _definition: runtime,
+    )
+
+    with pytest.raises(AgentRuntimeError, match="another-runtime"):
+        registry.create(_definition("smolagents"))
+
+    assert runtime.close_calls == 1
+
+
 def test_runtime_definition_requires_neutral_model_and_tool_gateway() -> None:
     valid = _definition("test")
 
@@ -278,6 +348,115 @@ def test_runtime_definition_freezes_json_safe_metadata() -> None:
         )
 
 
+@pytest.mark.parametrize(
+    "invalid_metadata",
+    [
+        {1: "not-a-string-key"},
+        {"number": float("nan")},
+        {"number": float("inf")},
+    ],
+)
+def test_runtime_definition_rejects_non_json_metadata(
+    invalid_metadata: dict[object, object],
+) -> None:
+    valid = _definition("test")
+
+    with pytest.raises(ValueError, match="JSON|string object keys|finite"):
+        RuntimeDefinition(
+            runtime_id="test",
+            name="bad-metadata",
+            description="Reject values outside the JSON contract.",
+            model=valid.model,
+            tool_gateway=valid.tool_gateway,
+            max_steps=3,
+            metadata=invalid_metadata,  # type: ignore[arg-type]
+        )
+
+
+def test_runtime_request_preserves_identities_requirements_and_event_sink() -> None:
+    observed: list[RuntimeEvent] = []
+    requirements = RuntimeRequirements(
+        structured_tools=True,
+        checkpoint_resume=True,
+    )
+    request = AgentRuntimeRequest(
+        task="inspect",
+        application_id=" application ",
+        task_id=" task ",
+        run_id=" run ",
+        requirements=requirements,
+        event_sink=observed.append,
+    )
+    event = RuntimeEvent(
+        kind="run",
+        application_id=request.application_id,
+        task_id=request.task_id,
+        run_id=request.run_id,
+    )
+    assert request.event_sink is not None
+    request.event_sink(event)
+
+    assert request.application_id == "application"
+    assert request.task_id == "task"
+    assert request.run_id == "run"
+    assert request.requirements is requirements
+    assert isinstance(request.event_sink, RuntimeEventSink)
+    assert observed == [event]
+
+
+def test_runtime_request_identity_defaults_are_temporarily_optional() -> None:
+    # Production invocation must eventually populate these identities.
+    request = AgentRuntimeRequest(task="inspect")
+
+    assert request.application_id is None
+    assert request.task_id is None
+    assert request.run_id is None
+
+
+@pytest.mark.parametrize("field_name", ["application_id", "task_id", "run_id"])
+def test_runtime_request_rejects_blank_identity(field_name: str) -> None:
+    with pytest.raises(ValueError, match=field_name):
+        AgentRuntimeRequest(task="inspect", **{field_name: " "})
+
+
+def test_runtime_request_rejects_invalid_event_sink_and_json_arguments() -> None:
+    with pytest.raises(TypeError, match="event_sink"):
+        AgentRuntimeRequest(
+            task="inspect",
+            event_sink=object(),  # type: ignore[arg-type]
+        )
+    with pytest.raises(ValueError, match="JSON"):
+        AgentRuntimeRequest(task="inspect", additional_args={"opaque": object()})
+
+
+@pytest.mark.parametrize("kind", RUNTIME_EVENT_KINDS)
+def test_runtime_event_vocabulary_and_identities(kind: str) -> None:
+    event = RuntimeEvent(
+        kind=kind,  # type: ignore[arg-type]
+        timestamp=1.5,
+        application_id="app",
+        task_id="task",
+        run_id="run",
+        details={"step": 2},
+    )
+
+    assert event.kind == kind
+    assert event.timestamp == 1.5
+    assert event.application_id == "app"
+    assert event.task_id == "task"
+    assert event.run_id == "run"
+    assert event.details == {"step": 2}
+
+
+def test_runtime_event_requires_known_kind_timestamp_and_json_details() -> None:
+    with pytest.raises(ValueError, match="event kind"):
+        RuntimeEvent(kind="unknown")  # type: ignore[arg-type]
+    with pytest.raises(ValueError, match="timestamp"):
+        RuntimeEvent(kind="run", timestamp=float("nan"))
+    with pytest.raises(ValueError, match="JSON"):
+        RuntimeEvent(kind="run", details={"opaque": object()})
+
+
 def test_runtime_state_failure_uses_typed_runtime_error() -> None:
     result = AgentRuntimeResult(state="failed", output=None)
 
@@ -286,6 +465,118 @@ def test_runtime_state_failure_uses_typed_runtime_error() -> None:
             result,
             allowed_states={"success"},
             error_prefix="runtime failed",
+        )
+
+
+def test_runtime_error_preserves_category_cause_and_retryability() -> None:
+    cause = OSError("provider unavailable")
+    error = AgentRuntimeError(
+        "model turn failed",
+        category="provider",
+        cause=cause,
+        retryable=True,
+    )
+
+    assert error.category == "provider"
+    assert error.cause is cause
+    assert error.__cause__ is cause
+    assert error.retryable is True
+    with pytest.raises(ValueError, match="category"):
+        AgentRuntimeError(
+            "bad category",
+            category="unknown",  # type: ignore[arg-type]
+        )
+
+
+def test_runtime_result_normalizes_usage_and_defensively_copies_json() -> None:
+    output = {"nested": [{"value": 1}]}
+    usage_details = {"provider": {"cached": True}}
+    usage = RuntimeUsage(
+        input_tokens=2,
+        output_tokens=3,
+        total_tokens=5,
+        details=usage_details,
+    )
+    artifact_metadata = {"labels": ["report"]}
+    event_details = {"phase": ["start"]}
+    artifact = RuntimeArtifact(
+        name="report",
+        kind="document",
+        path="/tmp/report.md",
+        metadata=artifact_metadata,
+    )
+    event = RuntimeEvent(kind="terminal", timestamp=1, details=event_details)
+    artifacts = [artifact]
+    events = [event]
+    result = AgentRuntimeResult(
+        state="success",
+        output=output,
+        usage=usage,
+        artifacts=artifacts,  # type: ignore[arg-type]
+        events=events,  # type: ignore[arg-type]
+    )
+
+    output["nested"][0]["value"] = 9
+    usage_details["provider"]["cached"] = False
+    artifact_metadata["labels"].append("mutated")
+    event_details["phase"].append("mutated")
+    artifacts.clear()
+    events.clear()
+
+    assert result.output == {"nested": [{"value": 1}]}
+    assert result.usage.input_tokens == 2
+    assert result.usage.details == {"provider": {"cached": True}}
+    assert isinstance(result.artifacts, tuple)
+    assert result.artifacts[0].metadata == {"labels": ["report"]}
+    assert isinstance(result.events, tuple)
+    assert result.events[0].details == {"phase": ["start"]}
+
+
+def test_runtime_result_accepts_native_usage_shapes_at_adapter_boundary() -> None:
+    result = AgentRuntimeResult(
+        state="success",
+        output=None,
+        usage={"input": 2, "completion_tokens": 3},  # type: ignore[arg-type]
+    )
+
+    assert result.usage == RuntimeUsage(
+        input_tokens=2,
+        output_tokens=3,
+        total_tokens=5,
+    )
+
+
+def test_runtime_result_rejects_invalid_state_json_and_entries() -> None:
+    with pytest.raises(ValueError, match="runtime state"):
+        AgentRuntimeResult(
+            state="unknown",  # type: ignore[arg-type]
+            output=None,
+        )
+    with pytest.raises(ValueError, match="JSON"):
+        AgentRuntimeResult(state="success", output=object())  # type: ignore[arg-type]
+    with pytest.raises(TypeError, match="RuntimeArtifact"):
+        AgentRuntimeResult(
+            state="success",
+            output=None,
+            artifacts=(object(),),  # type: ignore[arg-type]
+        )
+    with pytest.raises(TypeError, match="RuntimeEvent"):
+        AgentRuntimeResult(
+            state="success",
+            output=None,
+            events=(object(),),  # type: ignore[arg-type]
+        )
+
+
+def test_runtime_artifact_requires_location_and_json_metadata() -> None:
+    with pytest.raises(ValueError, match="uri or path"):
+        RuntimeArtifact(name="report", kind="document")
+    with pytest.raises(ValueError, match="JSON"):
+        RuntimeArtifact(
+            name="report",
+            kind="document",
+            path="/tmp/report.md",
+            metadata={"opaque": object()},
         )
 
 
