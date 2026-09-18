@@ -1,104 +1,44 @@
 #!/usr/bin/env python
-# coding=utf-8
 
 from datetime import datetime
-from enum import IntEnum
 
+from agentloom.runtime.logging.levels import AgentLoomLogLevel
+from agentloom.runtime.trace import capture_explicit_execution_context
 from rich.console import Console
 from rich.text import Text
 from smolagents import AgentLogger
 from smolagents import LogLevel as SmolaLogLevel
 
-from agentloom.runtime.trace import capture_explicit_execution_context
+
+def _from_smolagents_level(
+    value: SmolaLogLevel | int,
+) -> AgentLoomLogLevel:
+    numeric = int(value)
+    if numeric <= int(SmolaLogLevel.OFF):
+        return AgentLoomLogLevel.OFF
+    if numeric <= int(SmolaLogLevel.ERROR):
+        return AgentLoomLogLevel.ERROR
+    if numeric <= int(SmolaLogLevel.INFO):
+        return AgentLoomLogLevel.INFO
+    return AgentLoomLogLevel.DEBUG
 
 
-class AgentLoomLogLevel(IntEnum):
-    """Standard log levels for AgentLoom.
-
-    Filtering rule: a message is emitted when ``msg_level >= logger.level``.
-    Higher numeric value means more severe (less verbose).
-
-    Mapping to smolagents.LogLevel (used by smolagents internals):
-        smolagents DEBUG(2)  -> AgentLoomLogLevel.DEBUG(10)
-        smolagents INFO(1)   -> AgentLoomLogLevel.INFO(20)
-        smolagents ERROR(0)  -> AgentLoomLogLevel.ERROR(40)
-        smolagents OFF(-1)   -> AgentLoomLogLevel.OFF(50)
-    """
-    DEBUG   = 10
-    INFO    = 20
-    WARNING = 30
-    ERROR   = 40
-    OFF     = 50
-
-    @classmethod
-    def from_str(cls, value: str) -> "AgentLoomLogLevel":
-        """Parse a string level name into AgentLoomLogLevel (case-insensitive)."""
-        normalized = value.strip().upper()
-        _MAP = {
-            "DEBUG":    cls.DEBUG,
-            "INFO":     cls.INFO,
-            "WARNING":  cls.WARNING,
-            "WARN":     cls.WARNING,
-            "ERROR":    cls.ERROR,
-            "CRITICAL": cls.ERROR,
-            "OFF":      cls.OFF,
-            "DISABLE":  cls.OFF,
-            "DISABLED": cls.OFF,
-        }
-        if normalized not in _MAP:
-            raise ValueError(f"Unknown log level: {value!r}")
-        return _MAP[normalized]
-
-    @classmethod
-    def from_int(cls, value: int) -> "AgentLoomLogLevel":
-        """Convert a stdlib logging int level to AgentLoomLogLevel."""
-        import logging as _logging
-        if value >= _logging.CRITICAL:   # 50
-            return cls.OFF
-        if value >= _logging.ERROR:      # 40
-            return cls.ERROR
-        if value >= _logging.WARNING:    # 30
-            return cls.WARNING
-        if value >= _logging.INFO:       # 20
-            return cls.INFO
-        return cls.DEBUG
-
-    @classmethod
-    def from_smola(cls, smola_level: "SmolaLogLevel | int") -> "AgentLoomLogLevel":
-        """Convert a smolagents LogLevel to AgentLoomLogLevel.
-
-        smolagents uses reverse numeric order (higher = more verbose):
-            OFF=-1, ERROR=0, INFO=1, DEBUG=2
-        We map to standard order so our >= filter works correctly.
-        """
-        # Treat raw int or SmolaLogLevel enum the same way.
-        v = int(smola_level)
-        if v <= int(SmolaLogLevel.OFF):      # -1
-            return cls.OFF
-        if v <= int(SmolaLogLevel.ERROR):    # 0
-            return cls.ERROR
-        if v <= int(SmolaLogLevel.INFO):     # 1
-            return cls.INFO
-        # DEBUG = 2 or higher
-        return cls.DEBUG
-
-
-TIMESTAMP_STYLE  = "#808080"  # Gray
-TASK_ID_STYLE    = "#00CED1"  # Dark cyan
+TIMESTAMP_STYLE = "#808080"  # Gray
+TASK_ID_STYLE = "#00CED1"  # Dark cyan
 SUBTASK_ID_STYLE = "#9370DB"  # Medium purple
-AGENT_ID_STYLE   = "#FFD700"  # Gold
+AGENT_ID_STYLE = "#FFD700"  # Gold
 
 _LEVEL_STYLE: dict[AgentLoomLogLevel, str] = {
-    AgentLoomLogLevel.DEBUG:   "bold cyan",
-    AgentLoomLogLevel.INFO:    "bold blue",
+    AgentLoomLogLevel.DEBUG: "bold cyan",
+    AgentLoomLogLevel.INFO: "bold blue",
     AgentLoomLogLevel.WARNING: "bold yellow",
-    AgentLoomLogLevel.ERROR:   "bold red",
+    AgentLoomLogLevel.ERROR: "bold red",
 }
 _MSG_STYLE: dict[AgentLoomLogLevel, str | None] = {
-    AgentLoomLogLevel.DEBUG:   None,
-    AgentLoomLogLevel.INFO:    None,
+    AgentLoomLogLevel.DEBUG: None,
+    AgentLoomLogLevel.INFO: None,
     AgentLoomLogLevel.WARNING: "bold yellow",
-    AgentLoomLogLevel.ERROR:   "bold red",
+    AgentLoomLogLevel.ERROR: "bold red",
 }
 
 
@@ -112,7 +52,7 @@ class EnhancedAgentLogger(AgentLogger):
 
     A message is printed only when ``msg_level >= self.level``.
     smolagents passes its own LogLevel enum into ``log()``; we convert it via
-    ``AgentLoomLogLevel.from_smola()`` before comparing.
+    the adapter-local level mapping before comparing.
     """
 
     def __init__(
@@ -161,7 +101,10 @@ class EnhancedAgentLogger(AgentLogger):
         prefix.append(f"[{level.name}] ", style=tag_style)
         return prefix
 
-    def _to_agent_loom_level(self, level: "int | str | SmolaLogLevel | AgentLoomLogLevel") -> AgentLoomLogLevel:
+    def _to_agent_loom_level(
+        self,
+        level: int | str | SmolaLogLevel | AgentLoomLogLevel,
+    ) -> AgentLoomLogLevel:
         """Normalise any level representation to AgentLoomLogLevel."""
         if isinstance(level, AgentLoomLogLevel):
             return level
@@ -173,17 +116,22 @@ class EnhancedAgentLogger(AgentLogger):
                 pass
             try:
                 smola = SmolaLogLevel[level.upper()]
-                return AgentLoomLogLevel.from_smola(smola)
+                return _from_smolagents_level(smola)
             except KeyError:
                 return AgentLoomLogLevel.INFO
         # int or SmolaLogLevel (which is IntEnum)
-        return AgentLoomLogLevel.from_smola(level)
+        return _from_smolagents_level(level)
 
     # ------------------------------------------------------------------
     # Core log override — all smolagents internals funnel through here
     # ------------------------------------------------------------------
 
-    def log(self, *args, level: "int | str | SmolaLogLevel | AgentLoomLogLevel" = SmolaLogLevel.INFO, **kwargs) -> None:  # type: ignore[override]
+    def log(
+        self,
+        *args,
+        level: int | str | SmolaLogLevel | AgentLoomLogLevel = SmolaLogLevel.INFO,
+        **kwargs,
+    ) -> None:  # type: ignore[override]
         """Emit args if resolved level >= ``self._agent_loom_level``."""
         agent_loom_level = self._to_agent_loom_level(level)
         if agent_loom_level < self._agent_loom_level:
@@ -198,7 +146,7 @@ class EnhancedAgentLogger(AgentLogger):
             msg_style = _MSG_STYLE.get(agent_loom_level)
             if msg_style and "style" not in kwargs:
                 kwargs = dict(kwargs, style=msg_style)
-            # Use end="" to keep prefix on the same line, then let console.print 
+            # Use end="" to keep prefix on the same line, then let console.print
             # parse the markup in first_arg (e.g., "[bold]Error[/bold]").
             self.console.print(prefix, end="")
             self.console.print(*args, **kwargs)
@@ -230,8 +178,8 @@ class EnhancedAgentLogger(AgentLogger):
         content: str | None = None,
         subtitle: str = "",
         title: str | None = None,
-        level: "int | str | SmolaLogLevel | AgentLoomLogLevel" = AgentLoomLogLevel.INFO,
-        **kwargs
+        level: int | str | SmolaLogLevel | AgentLoomLogLevel = AgentLoomLogLevel.INFO,
+        **kwargs,
     ) -> None:
         """Log the current task being executed by the agent."""
         # 兼容 smolagents 内部调用 (content, subtitle 等) 和旧代码可能带的 task 参数
@@ -244,8 +192,10 @@ class EnhancedAgentLogger(AgentLogger):
             task_str = "Unknown Task"
 
         from rich.panel import Panel
+
         try:
             from smolagents.utils import escape_code_brackets
+
             task_str = escape_code_brackets(task_str)
         except ImportError:
             pass
@@ -255,6 +205,29 @@ class EnhancedAgentLogger(AgentLogger):
             title="[bold]New run" + (f" - {title}" if title else ""),
             subtitle=subtitle,
             border_style="#d4b702",  # YELLOW_HEX from smolagents
-            subtitle_align="left"
+            subtitle_align="left",
         )
         self.log(panel, level=level)
+
+
+def adapt_smolagents_logger_backend(backend):
+    """Return a smolagents-compatible view of one AgentLoom logger backend."""
+
+    if backend is None or isinstance(backend, AgentLogger):
+        return backend
+    console = getattr(backend, "console", None)
+    if console is None:
+        return backend
+    level = getattr(backend, "level", AgentLoomLogLevel.INFO)
+    if not isinstance(level, AgentLoomLogLevel):
+        level = AgentLoomLogLevel.INFO
+    return EnhancedAgentLogger(
+        level=level,
+        console=console,
+        show_timestamp=bool(getattr(backend, "show_timestamp", True)),
+        timestamp_format=str(
+            getattr(backend, "timestamp_format", "%Y-%m-%d %H:%M:%S")
+        ),
+        show_trace_info=bool(getattr(backend, "show_trace_info", True)),
+        truncate_id_length=int(getattr(backend, "truncate_id_length", 8)),
+    )
