@@ -6,17 +6,17 @@ before-run callbacks, and canonical Todo state hydration.
 
 import json
 
-from smolagents import LogLevel
-from smolagents.models import ChatMessage, MessageRole
-from agentloom.runtime.logging import get_logger
-from agentloom.runtime.hooks import wrap_in_system_reminder
-from agentloom.runtime.memory.context_compression import ConversationHistoryManager
 from agentloom.adapters.smolagents.tool_protocol import action_step_to_protocol_messages
+from agentloom.runtime.hooks import wrap_in_system_reminder
+from agentloom.runtime.logging import get_logger
+from agentloom.runtime.memory.context_compression import ConversationHistoryManager
 from agentloom.runtime.trace import (
     get_current_agent_name,
     get_current_hook_run,
     get_current_runtime_agent_path,
 )
+from smolagents import LogLevel
+from smolagents.models import ChatMessage, MessageRole
 
 
 def append_current_todo_state(messages: list, *, todo_mode: str) -> list:
@@ -91,9 +91,6 @@ class LoomAgentMixin:
         skip_task_step_on_reset_false = kwargs.pop("_skip_task_step_on_reset_false", True)
         for callback in self._before_run_callbacks:
             task = callback(self, task, *args, **kwargs)
-
-        if getattr(self, "python_executor", None) is not None and hasattr(self, "state"):
-            self.state["task"] = task
 
         # Determine if we are resetting memory
         reset = kwargs.get("reset", True)
