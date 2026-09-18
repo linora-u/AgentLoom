@@ -10,11 +10,37 @@ SPEC = importlib.util.spec_from_file_location(
 )
 validation = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(validation)
+ROOT = Path(__file__).resolve().parents[1]
 
 
 def write_json(path, value):
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps(value))
+
+
+def test_core_validation_uses_explicit_root_for_every_path_aware_tool():
+    workflow = (
+        ROOT
+        / "applications/tool_registry_core_validation/workflows/core_tools_agent.yaml"
+    ).read_text(encoding="utf-8")
+    root = "/tmp/agentloom_tool_registry_core_validation"
+
+    assert (
+        f'glob_search(pattern="*.txt", path="{root}")'
+        in workflow
+    )
+    assert (
+        f'grep_search(pattern="GAMMA", path="{root}")'
+        in workflow
+    )
+    assert (
+        f'list_directory(directory_path="{root}")'
+        in workflow
+    )
+    assert (
+        f'read_file(file_path="{root}/result.txt")'
+        in workflow
+    )
 
 
 def smolagents_checkpoint(steps, *, step_count=3):
