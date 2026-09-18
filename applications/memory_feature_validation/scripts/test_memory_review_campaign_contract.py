@@ -366,7 +366,7 @@ def test_workflows_are_natural_and_do_not_script_memory_calls() -> None:
         assert "memory(action=" not in workflow
         assert "EXACTLY this" not in workflow
         assert payload.get("model_type") == "summary"
-        assert payload.get("tool_call_type") == "tool_call"
+        assert payload.get("agent_runtime") == "smolagents"
         tools = payload.get("tools") or []
         if relative in recall_workflows:
             assert tools == []

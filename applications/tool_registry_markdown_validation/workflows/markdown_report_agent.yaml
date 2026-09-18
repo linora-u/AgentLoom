@@ -1,8 +1,8 @@
 name: "tool_registry_markdown_validation"
+agent_runtime: smolagents
 description: "Validate explicit catalog markdown_report toolset through real tool calls."
 
 model_type: "powerful"
-tool_call_type: "code_act"
 toolsets:
   - "core_file"
   - "markdown_report"
@@ -11,34 +11,14 @@ max_steps: 5
 workflow: |
   # Built-in Tool Catalog Markdown Validation
 
-  Execute one Python code block that performs the actual write and read-back.
-  Do not split the work into multiple blocks and do not simulate tool results.
-
-  ```python
-  path = "/tmp/agentloom_tool_registry_markdown_validation/report.md"
-  written = write_markdown_file(
-      file_path=path,
-      title="Built-in Tool Catalog Markdown Validation",
-      sections=[
-          {
-              "heading": "Summary",
-              "body": "markdown_report toolset is explicitly enabled.",
-          },
-          {
-              "heading": "Result",
-              "body": "MARKDOWN_TOOLSET_VALIDATION: PASS",
-          },
-      ],
-  )
-  content = read_file(file_path=path)
-  ok = (
-      "Successfully wrote Markdown file" in written
-      and "Built-in Tool Catalog Markdown Validation" in content
-      and "MARKDOWN_TOOLSET_VALIDATION: PASS" in content
-  )
-  final_answer(
-      ("MARKDOWN_TOOLSET_VALIDATION: PASS" if ok else "MARKDOWN_TOOLSET_VALIDATION: FAIL")
-      + "\nOutput file: "
-      + path
-  )
-  ```
+  Use native structured tool calls and do not simulate results:
+  1. Call `write_markdown_file` for
+     `/tmp/agentloom_tool_registry_markdown_validation/report.md` with title
+     `Built-in Tool Catalog Markdown Validation` and two sections:
+     `Summary` / `markdown_report toolset is explicitly enabled.` and
+     `Result` / `MARKDOWN_TOOLSET_VALIDATION: PASS`.
+  2. Call `read_file` on that exact path.
+  3. Call `final_answer` with `MARKDOWN_TOOLSET_VALIDATION: PASS` and the output
+     path only when the write return reports success and the read-back contains
+     both the title and result marker. Otherwise return FAIL with actual
+     evidence.

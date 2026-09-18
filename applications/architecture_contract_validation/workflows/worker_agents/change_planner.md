@@ -2,9 +2,9 @@
 
 ```yaml
 name: change_planner
+agent_runtime: smolagents
 description: Architecture contract change planner
 model_type: powerful
-tool_call_type: tool_call
 max_steps: 24
 todo:
   mode: 'off'

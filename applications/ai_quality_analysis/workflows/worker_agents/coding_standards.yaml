@@ -1,6 +1,6 @@
 name: "coding_standards"
+agent_runtime: smolagents
 description: "Analyzes code for naming conventions, formatting, magic numbers, dead code, and duplication issues."
-tool_call_type: "code_act"
 model_type: "powerful"
 toolsets:
   - "core_shell"

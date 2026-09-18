@@ -8,9 +8,9 @@ The configuration of AgentLoom is primarily divided into three major categories,
 
 | Configuration File | Default Path | Role and Purpose |
 |----------|----------|------------|
-| `system.yaml` | `config/system.yaml` | **Global system configuration**. Controls execution environment, tool lists, tool access control, code execution permissions and other system-level behaviors. |
-| `llm.yaml` | `config/llm.yaml` | **Global model configuration**. Independently manages parameters for all LLM models (`api_key`, `base_url`, temperature, timeout, retry policies, etc.) and Langfuse observability configuration. |
-| `agent_xxx.yaml` | `applications/<app>/workflows/*.yaml` | **Agent configuration**. Defines role, workflow, tools, and model type. A top-level Supervisor may also enable [Goal Mode](goal_mode.md); Workers cannot own Goals. |
+| `system.yaml` | `config/system.yaml` | **Global system configuration**. Controls tools, workspace policy, permissions, and runtime storage. |
+| `llm.yaml` | `config/llm.yaml` | **Global model configuration**. Every model type explicitly selects a wire adapter and independently configures its model name, credentials, endpoint, and request parameters. |
+| `agent_xxx.yaml` | `applications/<app>/workflows/*.yaml` | **Agent configuration**. Defines role, runtime, workflow, tools, and model type. A top-level Supervisor may also enable [Goal Mode](goal_mode.md); Workers cannot own Goals. |
 | *Application-level system configuration* | `applications/<app>/config/system.yaml` | **Optional application-level override**. Used to override default system behaviors for specific applications (e.g., modifying tool access control or replacing default tools). |
 
 > For more information, refer to:
@@ -45,7 +45,7 @@ When loading an Agent YAML, the system automatically searches upward for its par
 
 #### Level 3: Agent-level Override
 In addition to defining its own workflow, a single Agent's YAML file can override selected system configurations. The whitelisted fields that support override (`_WORKFLOW_OVERLAY_KEYS`) are:
-- `system`, `model_request_headers`, `smart_summary`, `context_engine`, `tool_access_control`, `execution_env`, `code_agent`, `tools`, `shell_settings`, `default_toolsets`, `toolsets`, `prompt`, `mcp_servers`, `self_learning`, `hooks`.
+- `system`, `model_request_headers`, `smart_summary`, `context_engine`, `tool_access_control`, `tools`, `shell_settings`, `default_toolsets`, `toolsets`, `prompt`, `mcp_servers`, `self_learning`, `hooks`.
 
 `context_engine` is intentionally small. It is enabled by the task runtime and uses the task-scoped checkpoint context store; normal overrides should only tune:
 
@@ -99,6 +99,11 @@ In AgentLoom, **LLM configuration (`llm.yaml`) is physically isolated from syste
    After `model_type` has been resolved, parameter lookup order is:
    `models[model_type].parameter` → `built-in code default values`.
    If neither the Agent YAML nor `model.default_model_type` provides a model type, the model call fails fast with `ValueError`.
+
+Every model type, including `summary`, must also declare `adapter`. Supported
+values are `openai_chat`, `openai_responses`, and `anthropic_messages`.
+`model` is an opaque name passed to LiteLLM: AgentLoom neither infers the wire
+protocol from its prefix nor falls back to another adapter.
 
 ## 4. Global C Singleton (Unified Access)
 

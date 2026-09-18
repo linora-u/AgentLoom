@@ -5,7 +5,7 @@
 > 关于全局系统配置，请参阅 [系统配置文档](system_config.md)。
 > 关于 Agent YAML 参数，请参阅 [Agent 配置文档](agent_config.md)。
 
-`config/llm.yaml` 是 AgentLoom 框架的**模型路由与参数配置文件**，控制不同智能体使用的 LLM 模型类型（powerful/fast/summary 或自定义类型）、API 凭据、推理参数和重试策略。
+`config/llm.yaml` 是 AgentLoom 框架的**模型协议、路由与参数配置文件**，控制不同智能体使用的 LLM 模型类型（powerful/fast/summary 或自定义类型）、wire adapter、API 凭据、推理参数和重试策略。
 
 > ⚠️ **重要**：LLM 配置是**独立加载**的，不参与 `system.yaml` 的 deep merge 覆盖链。在 `config/system.yaml` 或 `applications/<app>/config/system.yaml` 中出现 `model`/`llm` 会被自动过滤并输出警告。
 
@@ -41,6 +41,7 @@ model:
 
   # ━━━ 必填：摘要模型（上下文压缩 smart_summary 功能依赖） ━━━
   summary:
+    adapter: openai_chat
     model: "openai/azure-gpt-5-chat"
     base_url: "https://llm-gateway.example.com/v1"
     api_key: "your-api-key"
@@ -53,6 +54,7 @@ model:
 
   # 强大模型（复杂推理、代码生成）
   powerful:
+    adapter: anthropic_messages
     model: "anthropic/aws-claude-opus-4-5"
     base_url: "https://llm-gateway-proxy.inner.chj.cloud/llm-gateway"
     api_key: "your-api-key"
@@ -64,6 +66,7 @@ model:
 
   # 快速模型（意图识别、分类）
   fast:
+    adapter: anthropic_messages
     model: "anthropic/aws-claude-sonnet-4-5"
     base_url: "https://llm-gateway.example.com/v1"
     api_key: "your-api-key"
@@ -111,6 +114,7 @@ model:
   # default_model_type: "fast"     # 如果默认用快速模型
 
   powerful:
+    adapter: anthropic_messages
     model: "anthropic/claude-3-5-sonnet"
     base_url: "https://your-gateway.com/v1"
     api_key: "your-key"
@@ -139,16 +143,19 @@ model:
   default_model_type: "powerful"
 
   powerful:
+    adapter: openai_chat
     model: "openai/gpt-4o"
     base_url: "https://your-gateway.com/v1"
     api_key: "sk-your-api-key"
 
   fast:
+    adapter: openai_chat
     model: "openai/gpt-4o-mini"
     base_url: "https://your-gateway.com/v1"
     api_key: "sk-your-api-key"
 
   summary:
+    adapter: openai_chat
     model: "openai/gpt-4o-mini"
     base_url: "https://your-gateway.com/v1"
     api_key: "sk-your-api-key"
@@ -166,7 +173,7 @@ model:
 | `default_model_type` | ❌ 可选 | 保留 key。没有隐式默认值；仅当所有 Agent 都显式指定 `model_type` 时才可省略 |
 | 其他任意 key | ❌ 可选 | 自由定义、删除、改名，如 `powerful`、`fast`、`code_review` 等 |
 
-除 `default_model_type` 外，`model` 块下**所有值为 dict 的 key 都会被解析为模型类型**。框架对类型名没有任何限制——`powerful`、`fast` 只是示例命名，你可以自由删除、重命名或新增。每个模型类型的 `model` 字段都是必填的。
+除 `default_model_type` 外，`model` 块下**所有值为 dict 的 key 都会被解析为模型类型**。框架对类型名没有任何限制——`powerful`、`fast` 只是示例命名，你可以自由删除、重命名或新增。每个模型类型的 `adapter` 和 `model` 字段都是必填的。
 
 **YAML 路径**：`model.<你的类型名>.*`（如 `model.powerful.*`、`model.my_llm.*`）
 **Pydantic 模型**：`LlmModelTypeSettings`
@@ -175,7 +182,8 @@ model:
 
 | 参数 | 类型 | 默认值 | 必选 | 说明 |
 |------|------|--------|------|------|
-| `model` | `str` | — | ❗ **必填** | **LiteLLM 模型 ID**，必须带 Provider 前缀。格式：`{provider}/{model-name}`。例如：`openai/gpt-4o`, `anthropic/claude-3-5-sonnet`, `gemini/gemini-1.5-pro`。**未配置会在加载时直接报错。** |
+| `adapter` | `str` | — | ❗ **必填** | Wire protocol：`openai_chat`、`openai_responses` 或 `anthropic_messages`。未配置或未知值会在加载时失败 |
+| `model` | `str` | — | ❗ **必填** | 传给 LiteLLM 的不透明模型名。AgentLoom 不从它的内容或前缀推断 adapter。未配置会在加载时直接报错 |
 | `base_url` | `str` | `""` | ❌ 否 | API 网关地址。每个模型类型独立配置。**注意：字段名是 `base_url`，不是 `api_base`** |
 | `api_key` | `str` | `""` | ❌ 否 | API 认证密钥。每个模型类型独立配置 |
 | `description` | `str` | `"Model type '{k}' loaded from YAML config"` | ❌ 否 | 模型的人类可读描述。用于日志和文档 |
@@ -250,6 +258,7 @@ model:
 
 ```yaml
 powerful:
+  adapter: anthropic_messages
   model: "anthropic/claude-sonnet-4-20250514"
   context_cache: true
   system_prompt_boundary: "<!-- DYNAMIC_BOUNDARY -->"
@@ -267,17 +276,19 @@ powerful:
 
 此检测仅用于诊断，不阻塞请求。
 
-### 3.6 Tool Call 行为
+### 3.6 Adapter 与 Tool Call 行为
 
-在 `tool_call` 模式下，只要有可用工具，AgentLoom 就会发送结构化 tools schema。`tool_choice` 只是普通 provider/smolagents 请求参数，不参与能力探测，也不会作为切换到文本兜底的开关。
+`adapter` 明确选择 wire contract，和 `model` 名字互不推断：
 
-Provider 原生 `tool_calls` 是主路径。如果 provider 没有返回原生 `tool_calls`，但返回了结构化文本 block，AgentLoom 只接受明确的工具调用容器：
+| adapter | 调用协议 |
+|---|---|
+| `openai_chat` | OpenAI-compatible Chat Completions |
+| `openai_responses` | OpenAI Responses |
+| `anthropic_messages` | Anthropic Messages |
 
-1. 标准 JSON 对象，例如 `{"name": "...", "arguments": {...}}`
-2. provider dump 出来的原生 `tool_calls` / `function` 结构
-3. 明确 XML 或 invoke wrapper
-
-解析器不会从 “Calling tool X with args...” 这类自然语言里猜测工具调用。repair 只作用于参数 JSON 字符串，只修 JSON 字符串字面量里的裸 control chars 和非法 backslash。未知工具、多候选文本工具调用、prose/free-text、残缺 JSON 都会显式失败，让 agent 带着清晰错误观察重试，或者直接暴露 provider 问题。
+LiteLLM 负责 provider transport。AgentLoom 不检查 LiteLLM 内部如何路由，也不会在
+adapter 之间回退；调用失败时直接向上抛出错误。只接受协议原生的结构化 tool call，
+不会从 prose、XML 或 JSON 文本中猜测工具调用。
 
 ### 3.7 自定义模型类型
 
@@ -297,12 +308,14 @@ model:
   default_model_type: "main"
 
   main:                          # ✅ 自定义名称，替代 powerful
+    adapter: anthropic_messages
     model: "anthropic/claude-3-5-sonnet"
     base_url: "https://your-gateway.com/v1"
     api_key: "your-key"
     temperature: 0.2
 
   code_review:                   # ✅ 自定义类型
+    adapter: anthropic_messages
     model: "anthropic/claude-3-5-sonnet"
     base_url: "https://your-gateway.com/v1"
     api_key: "your-key"
@@ -311,6 +324,7 @@ model:
     timeout: 600
 
   translation:                   # ✅ 自定义类型
+    adapter: openai_chat
     model: "openai/gpt-4o"
     base_url: "https://api.openai.com/v1"
     api_key: "your-openai-key"
@@ -318,6 +332,7 @@ model:
     max_tokens: 4096
 
   summary:                       # 保留 summary 以支持 smart_summary 功能
+    adapter: openai_chat
     model: "openai/gpt-4o-mini"
     base_url: "https://api.openai.com/v1"
     api_key: "your-openai-key"
@@ -338,6 +353,7 @@ model:
   default_model_type: "default"
 
   default:
+    adapter: openai_chat
     model: "openai/gpt-4o"
     base_url: "https://your-gateway.com/v1"
     api_key: "your-key"
@@ -351,6 +367,7 @@ model:
 ```yaml
 model:
   powerful:
+    adapter: anthropic_messages
     model: "anthropic/aws-claude-opus-4-5"
     base_url: "https://llm-gateway.example.com"
     description: "高质量推理模型"
@@ -365,6 +382,7 @@ model:
       X-Model-Tier: "powerful"
 
   fast:
+    adapter: openai_chat
     model: "gemini/gemini-3_1-pro-preview"
     base_url: "https://generativelanguage.googleapis.com/v1"
     api_key: "gemini-key"
@@ -374,6 +392,7 @@ model:
     context_cache: true
 
   summary:
+    adapter: openai_chat
     model: "openai/azure-gpt-5-chat"
     base_url: "https://portal-k8s-prod.ep.chehejia.com/api/copilot/v3/openai/azure-gpt-5-chat/v1"
     api_key: "summary-key"
@@ -481,11 +500,13 @@ litellm.completion failed (attempt 2/5): RateLimitError: Rate limit exceeded. Re
 
 ---
 
-## 7. Provider 前缀与特定行为
+## 7. LiteLLM 模型名与 Provider 行为
 
-`model` 字段的值必须包含 **Provider 前缀**，格式为 `{provider}/{model-name}`。LiteLLM 根据前缀自动路由到对应的 API。
+`model` 是原样传给 LiteLLM 的不透明字符串。某些 LiteLLM provider 使用
+`{provider}/{model-name}` 形式，另一些自建 endpoint 使用部署名；是否需要前缀由
+LiteLLM 与目标 provider 决定。AgentLoom 不读取前缀来选择 adapter。
 
-### 7.1 支持的 Provider 前缀
+### 7.1 常见 LiteLLM 模型名
 
 | Provider 前缀 | API 类型 | model 示例 |
 |---------------|---------|-----------|
@@ -532,6 +553,7 @@ litellm.completion failed (attempt 2/5): RateLimitError: Rate limit exceeded. Re
 
 ```python
 class LlmModelTypeSettings(BaseModel):
+    adapter: Literal["openai_chat", "openai_responses", "anthropic_messages"]
     model: str = ""
     base_url: str = ""
     api_key: str = ""
@@ -595,6 +617,7 @@ available = C.llm.available_types              # → ["powerful", "fast", "summa
 ```yaml
 model:
   powerful:
+    adapter: openai_chat
     model: "openai/gpt-4o"
     base_url: "https://api.openai.com/v1"
     api_key: "sk-your-openai-key"
@@ -608,6 +631,7 @@ model:
 ```yaml
 model:
   powerful:
+    adapter: openai_chat
     model: "ollama/llama3"
     base_url: "http://localhost:11434"
     temperature: 0.3
@@ -615,6 +639,7 @@ model:
     timeout: 120
 
   fast:
+    adapter: openai_chat
     model: "ollama/phi3"
     base_url: "http://localhost:11434"
     temperature: 0.7
@@ -629,6 +654,7 @@ model:
   default_model_type: "powerful"
 
   powerful:
+    adapter: anthropic_messages
     model: "anthropic/aws-claude-opus-4-5"
     base_url: "https://your-anthropic-gateway.com"
     api_key: "anthropic-specific-key"
@@ -637,6 +663,7 @@ model:
     max_tokens: 8192
 
   fast:
+    adapter: openai_chat
     model: "openai/gpt-4o-mini"
     base_url: "https://api.openai.com/v1"
     api_key: "openai-specific-key"
@@ -645,6 +672,7 @@ model:
     max_tokens: 1024
 
   summary:
+    adapter: openai_chat
     model: "gemini/gemini-1.5-flash"
     base_url: "https://generativelanguage.googleapis.com/v1"
     api_key: "gemini-specific-key"
@@ -658,18 +686,21 @@ model:
 ```yaml
 model:
   powerful:
+    adapter: openai_chat
     model: "openai/gpt-4o"
     base_url: "https://your-openai-proxy.com/v1"
     api_key: "sk-your-key"
     temperature: 0.2
 
   fast:
+    adapter: openai_chat
     model: "openai/gpt-4o-mini"
     base_url: "https://your-openai-proxy.com/v1"
     api_key: "sk-your-key"
     temperature: 0.7
 
   summary:
+    adapter: openai_chat
     model: "openai/gpt-4o-mini"
     base_url: "https://your-openai-proxy.com/v1"
     api_key: "sk-your-key"

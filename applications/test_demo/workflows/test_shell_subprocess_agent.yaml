@@ -1,8 +1,8 @@
 name: "test_shell_subprocess"
+agent_runtime: smolagents
 description: "Validate shell tool with stateless subprocess architecture: CWD persistence, output capture, and security"
 
 model_type: "powerful"
-tool_call_type: "code_act"
 
 workflow: |
   # Shell Tool (Stateless Subprocess) Validation Workflow
@@ -47,6 +47,3 @@ tools:
 
 worker_agents: []
 max_steps: 15
-
-execution_env:
-  type: "local"

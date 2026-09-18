@@ -1,8 +1,8 @@
 name: "test_write_file"
+agent_runtime: smolagents
 description: "Validate write_file tool: create, overwrite, error handling"
 
 model_type: "powerful"
-tool_call_type: "code_act"
 
 workflow: |
   # write_file Tool Validation Workflow

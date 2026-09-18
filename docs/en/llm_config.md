@@ -5,7 +5,7 @@
 > For global system configuration, see [System Configuration Reference](system_config.md).
 > For Agent YAML parameters, see [Agent Configuration Reference](agent_config.md).
 
-`config/llm.yaml` is the AgentLoom framework's **model routing and parameter configuration file**, controlling LLM model types (powerful/fast/summary or custom types), API credentials, inference parameters, and retry policies used by different agents.
+`config/llm.yaml` is AgentLoom's **model protocol, routing, and parameter configuration file**, controlling LLM model types (powerful/fast/summary or custom types), wire adapters, API credentials, inference parameters, and retry policies.
 
 > ⚠️ **Important**: LLM configuration is **loaded independently** and does not participate in the `system.yaml` deep merge override chain. If `model`/`llm` appears in `config/system.yaml` or `applications/<app>/config/system.yaml`, it will be automatically filtered and a warning will be printed.
 
@@ -41,6 +41,7 @@ model:
 
   # ━━━ Required: Summary model (smart_summary context compression depends on this) ━━━
   summary:
+    adapter: openai_chat
     model: "openai/azure-gpt-5-chat"
     base_url: "https://llm-gateway.example.com/v1"
     api_key: "your-api-key"
@@ -53,6 +54,7 @@ model:
 
   # Powerful model (complex reasoning, code generation)
   powerful:
+    adapter: anthropic_messages
     model: "anthropic/aws-claude-opus-4-5"
     base_url: "https://llm-gateway-proxy.inner.chj.cloud/llm-gateway"
     api_key: "your-api-key"
@@ -64,6 +66,7 @@ model:
 
   # Fast model (intent recognition, classification)
   fast:
+    adapter: anthropic_messages
     model: "anthropic/aws-claude-sonnet-4-5"
     base_url: "https://llm-gateway.example.com/v1"
     api_key: "your-api-key"
@@ -111,6 +114,7 @@ model:
   # default_model_type: "fast"     # If defaulting to the fast model
 
   powerful:
+    adapter: anthropic_messages
     model: "anthropic/claude-3-5-sonnet"
     base_url: "https://your-gateway.com/v1"
     api_key: "your-key"
@@ -139,16 +143,19 @@ model:
   default_model_type: "powerful"
 
   powerful:
+    adapter: openai_chat
     model: "openai/gpt-4o"
     base_url: "https://your-gateway.com/v1"
     api_key: "sk-your-api-key"
 
   fast:
+    adapter: openai_chat
     model: "openai/gpt-4o-mini"
     base_url: "https://your-gateway.com/v1"
     api_key: "sk-your-api-key"
 
   summary:
+    adapter: openai_chat
     model: "openai/gpt-4o-mini"
     base_url: "https://your-gateway.com/v1"
     api_key: "sk-your-api-key"
@@ -166,7 +173,7 @@ model:
 | `default_model_type` | ❌ Optional | Reserved key. No implicit default; omit only when every Agent specifies `model_type` |
 | Any other key | ❌ Optional | Freely define, delete, or rename, e.g., `powerful`, `fast`, `code_review`, etc. |
 
-Except for `default_model_type`, **all dict-valued keys under the `model` block are parsed as model types**. The framework has no restrictions on type names — `powerful` and `fast` are just example names. You can freely delete, rename, or add new ones. The `model` field for each model type is required.
+Except for `default_model_type`, **all dict-valued keys under the `model` block are parsed as model types**. The framework has no restrictions on type names — `powerful` and `fast` are just example names. You can freely delete, rename, or add new ones. Both `adapter` and `model` are required for every model type.
 
 **YAML path**: `model.<your-type-name>.*` (e.g., `model.powerful.*`, `model.my_llm.*`)
 **Pydantic model**: `LlmModelTypeSettings`
@@ -175,7 +182,8 @@ Except for `default_model_type`, **all dict-valued keys under the `model` block 
 
 | Parameter | Type | Default | Required | Description |
 |------|------|--------|------|------|
-| `model` | `str` | — | ❗ **Required** | **LiteLLM model ID**, must include Provider prefix. Format: `{provider}/{model-name}`. Examples: `openai/gpt-4o`, `anthropic/claude-3-5-sonnet`, `gemini/gemini-1.5-pro`. **Raises an error if not configured.** |
+| `adapter` | `str` | — | ❗ **Required** | Wire protocol: `openai_chat`, `openai_responses`, or `anthropic_messages`. Missing and unknown values fail at configuration load |
+| `model` | `str` | — | ❗ **Required** | Opaque model name passed to LiteLLM. AgentLoom does not infer the adapter from its content or prefix. Missing values fail at configuration load |
 | `base_url` | `str` | `""` | ❌ No | API gateway address. Configure independently for each model type. **Note: field name is `base_url`, not `api_base`** |
 | `api_key` | `str` | `""` | ❌ No | API authentication key. Configure independently for each model type |
 | `description` | `str` | `"Model type '{k}' loaded from YAML config"` | ❌ No | Human-readable model description. Used in logs and documentation |
@@ -251,6 +259,7 @@ When the system prompt contains both static parts (e.g., role definition, tool d
 
 ```yaml
 powerful:
+  adapter: anthropic_messages
   model: "anthropic/claude-sonnet-4-20250514"
   context_cache: true
   system_prompt_boundary: "<!-- DYNAMIC_BOUNDARY -->"
@@ -268,17 +277,20 @@ The framework automatically detects changes that may invalidate the cache, loggi
 
 This detection is diagnostic only and does not block requests.
 
-### 3.6 Tool Call Behavior
+### 3.6 Adapter and Tool Call Behavior
 
-In `tool_call` mode, AgentLoom sends structured tool schemas whenever tools are available. `tool_choice` is passed through as a normal provider/smolagents request parameter and is not used as a capability detection switch.
+`adapter` explicitly selects the wire contract and is never inferred from `model`:
 
-Native provider `tool_calls` are the primary path. If a provider returns a structured text block instead of native `tool_calls`, AgentLoom only accepts explicit tool-call containers:
+| adapter | Wire protocol |
+|---|---|
+| `openai_chat` | OpenAI-compatible Chat Completions |
+| `openai_responses` | OpenAI Responses |
+| `anthropic_messages` | Anthropic Messages |
 
-1. Standard JSON objects such as `{"name": "...", "arguments": {...}}`
-2. Provider-dumped native `tool_calls` / `function` structures
-3. Explicit XML or invoke wrappers
-
-The parser does not guess from prose such as “Calling tool X with args...”. It repairs only the argument JSON string payload, limited to raw control characters and invalid backslashes inside JSON string literals. Unknown tools, ambiguous multiple text candidates, prose/free-text, and incomplete JSON fail loudly so the agent can retry with a clear error observation or surface the provider issue.
+LiteLLM owns provider transport. AgentLoom neither inspects LiteLLM's internal
+routing nor falls back across adapters; failures propagate directly. Only native
+structured tool calls are accepted. AgentLoom does not infer a tool call from
+prose, XML, or JSON text.
 
 ### 3.7 Custom Model Types
 
@@ -298,12 +310,14 @@ model:
   default_model_type: "main"
 
   main:                          # ✅ Custom name, replaces powerful
+    adapter: anthropic_messages
     model: "anthropic/claude-3-5-sonnet"
     base_url: "https://your-gateway.com/v1"
     api_key: "your-key"
     temperature: 0.2
 
   code_review:                   # ✅ Custom type
+    adapter: anthropic_messages
     model: "anthropic/claude-3-5-sonnet"
     base_url: "https://your-gateway.com/v1"
     api_key: "your-key"
@@ -312,6 +326,7 @@ model:
     timeout: 600
 
   translation:                   # ✅ Custom type
+    adapter: openai_chat
     model: "openai/gpt-4o"
     base_url: "https://api.openai.com/v1"
     api_key: "your-openai-key"
@@ -319,6 +334,7 @@ model:
     max_tokens: 4096
 
   summary:                       # Keep summary to support smart_summary feature
+    adapter: openai_chat
     model: "openai/gpt-4o-mini"
     base_url: "https://api.openai.com/v1"
     api_key: "your-openai-key"
@@ -339,6 +355,7 @@ model:
   default_model_type: "default"
 
   default:
+    adapter: openai_chat
     model: "openai/gpt-4o"
     base_url: "https://your-gateway.com/v1"
     api_key: "your-key"
@@ -352,6 +369,7 @@ model:
 ```yaml
 model:
   powerful:
+    adapter: anthropic_messages
     model: "anthropic/aws-claude-opus-4-5"
     base_url: "https://llm-gateway.example.com"
     description: "High-quality reasoning model"
@@ -366,6 +384,7 @@ model:
       X-Model-Tier: "powerful"
 
   fast:
+    adapter: openai_chat
     model: "gemini/gemini-3_1-pro-preview"
     base_url: "https://generativelanguage.googleapis.com/v1"
     api_key: "gemini-key"
@@ -375,6 +394,7 @@ model:
     context_cache: true
 
   summary:
+    adapter: openai_chat
     model: "openai/azure-gpt-5-chat"
     base_url: "https://portal-k8s-prod.ep.chehejia.com/api/copilot/v3/openai/azure-gpt-5-chat/v1"
     api_key: "summary-key"
@@ -482,11 +502,13 @@ litellm.completion failed (attempt 2/5): RateLimitError: Rate limit exceeded. Re
 
 ---
 
-## 7. Provider Prefixes and Specific Behaviors
+## 7. LiteLLM Model Names and Provider-Specific Behavior
 
-The `model` field value must include a **Provider prefix** in the format `{provider}/{model-name}`. LiteLLM automatically routes to the corresponding API based on the prefix.
+`model` is an opaque string passed unchanged to LiteLLM. Some LiteLLM providers
+use `{provider}/{model-name}`, while custom endpoints may use deployment names.
+AgentLoom never reads that prefix to select an adapter.
 
-### 7.1 Supported Provider Prefixes
+### 7.1 Common LiteLLM Model Names
 
 | Provider Prefix | API Type | model Example |
 |---------------|---------|-----------|
@@ -533,6 +555,7 @@ The following constants are defined in `src/configuration/defaults.py` and serve
 
 ```python
 class LlmModelTypeSettings(BaseModel):
+    adapter: Literal["openai_chat", "openai_responses", "anthropic_messages"]
     model: str = ""
     base_url: str = ""
     api_key: str = ""
@@ -596,6 +619,7 @@ available = C.llm.available_types              # → ["powerful", "fast", "summa
 ```yaml
 model:
   powerful:
+    adapter: openai_chat
     model: "openai/gpt-4o"
     base_url: "https://api.openai.com/v1"
     api_key: "sk-your-openai-key"
@@ -609,6 +633,7 @@ model:
 ```yaml
 model:
   powerful:
+    adapter: openai_chat
     model: "ollama/llama3"
     base_url: "http://localhost:11434"
     temperature: 0.3
@@ -616,6 +641,7 @@ model:
     timeout: 120
 
   fast:
+    adapter: openai_chat
     model: "ollama/phi3"
     base_url: "http://localhost:11434"
     temperature: 0.7
@@ -630,6 +656,7 @@ model:
   default_model_type: "powerful"
 
   powerful:
+    adapter: anthropic_messages
     model: "anthropic/aws-claude-opus-4-5"
     base_url: "https://your-anthropic-gateway.com"
     api_key: "anthropic-specific-key"
@@ -638,6 +665,7 @@ model:
     max_tokens: 8192
 
   fast:
+    adapter: openai_chat
     model: "openai/gpt-4o-mini"
     base_url: "https://api.openai.com/v1"
     api_key: "openai-specific-key"
@@ -646,6 +674,7 @@ model:
     max_tokens: 1024
 
   summary:
+    adapter: openai_chat
     model: "gemini/gemini-1.5-flash"
     base_url: "https://generativelanguage.googleapis.com/v1"
     api_key: "gemini-specific-key"
@@ -659,18 +688,21 @@ model:
 ```yaml
 model:
   powerful:
+    adapter: openai_chat
     model: "openai/gpt-4o"
     base_url: "https://your-openai-proxy.com/v1"
     api_key: "sk-your-key"
     temperature: 0.2
 
   fast:
+    adapter: openai_chat
     model: "openai/gpt-4o-mini"
     base_url: "https://your-openai-proxy.com/v1"
     api_key: "sk-your-key"
     temperature: 0.7
 
   summary:
+    adapter: openai_chat
     model: "openai/gpt-4o-mini"
     base_url: "https://your-openai-proxy.com/v1"
     api_key: "sk-your-key"

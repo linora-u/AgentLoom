@@ -5,7 +5,10 @@
 > For `config/system.yaml`, see [System Configuration Reference](system_config.md).
 > For `config/llm.yaml`, see [LLM Configuration Reference](llm_config.md).
 
-Agent YAML is the configuration file in the AgentLoom framework that **defines the behavior of a single Agent**, controlling the Agent's role description, workflow instructions, available tools, model selection, execution environment, skill packages, and more. Agents are divided into two roles: **Supervisor** (multi-Agent orchestrator) and **Worker** (specific task executor).
+Agent YAML is the configuration file in the AgentLoom framework that **defines the behavior of a single Agent**, controlling the Agent's role description, runtime, workflow instructions, available tools, model selection, skill packages, and more. Agents are divided into two roles: **Supervisor** (multi-Agent orchestrator) and **Worker** (specific task executor).
+The required `agent_runtime` field selects the Agent runtime; the only currently
+registered value is `smolagents`. All Tools are invoked through native structured
+tool calls.
 
 Both roles support `.yaml`, `.yml`, and `.md` definitions. Markdown uses a fenced
 `yaml` configuration block; nonempty text outside that block becomes `workflow`.
@@ -28,8 +31,8 @@ the same validation diagnostics. Reading these views does not start a Run or mod
   - [3.2 Optional Common Fields](#32-optional-common-fields)
   - [3.3 Supervisor-Specific Fields](#33-supervisor-specific-fields)
   - [3.4 Worker-Specific Fields](#34-worker-specific-fields)
-  - [3.5 execution_env — Execution Environment](#35-execution_env--execution-environment)
-  - [3.6 tool_call_type — Interaction Mode](#36-tool_call_type--interaction-mode)
+  - [3.5 agent_runtime — Agent Runtime](#35-agent_runtime--agent-runtime)
+  - [3.6 Structured Tool Calls](#36-structured-tool-calls)
   - [3.7 model_type — Model Selection](#37-model_type--model-selection)
   - [3.8 skills — Skill Package Configuration](#38-skills--skill-package-configuration)
   - [3.9 prompt — Custom Prompt](#39-prompt--custom-prompt)
@@ -75,8 +78,9 @@ Supervisor (Main Agent)
 # File location: applications/<app>/workflows/<agent_name>.yaml
 # ============================================================
 
-# ---- Required Fields (3) ----
+# ---- Required Fields (4) ----
 name: "my_check_agent"
+agent_runtime: "smolagents"
 description: |
   As the code review supervisor agent, your core responsibility is...
 workflow: |
@@ -93,19 +97,14 @@ tools:
     function: "get_module_context"
 
 model_type: "powerful"                   # Options: "powerful", "fast", "summary", or custom key
-tool_call_type: "code_act"               # Options: "code_act", "tool_call"
 
 # ---- Supervisor-Specific ----
 worker_agents:
   - path: "applications/my_app/workflows/worker_agents/project_scan.yaml"
   - path: "applications/my_app/workflows/worker_agents/data_analysis.yaml"
 
-# ---- Other Optional Fields ----
-execution_env:
-  type: "local"                          # Options: "local", "docker", "e2b", "wasm"
-
 prompt:
-  path: "applications/my_app/sysprompt/code_agent.yaml"
+  path: "applications/my_app/sysprompt/agent_prompt.yaml"
 
 skills:
   paths:
@@ -120,8 +119,9 @@ skills:
 # File location: applications/<app>/workflows/worker_agents/<name>.yaml
 # ============================================================
 
-# ---- Required Fields (3) ----
+# ---- Required Fields (4) ----
 name: "project_scan"
+agent_runtime: "smolagents"
 description: "Project structure scanning agent"
 workflow: |
   You are a senior engineer responsible for...
@@ -139,7 +139,6 @@ tools:
     function: "get_module_context"
 
 model_type: "powerful"
-tool_call_type: "code_act"
 max_steps: 40                            # Maximum execution steps (default: 80)
 planning_interval: 3                     # Force re-planning every N steps
 todo: {mode: "auto"}                     # auto | on | off
@@ -158,9 +157,6 @@ agent_function_schema:
       required: false
   output:
     description: "Analysis summary text, detailed report generated in workspace"
-
-execution_env:
-  type: "local"
 ```
 
 ---
@@ -169,11 +165,12 @@ execution_env:
 
 ### 3.1 Required Fields
 
-Supervisor and Worker share 3 required fields:
+Supervisor and Worker share 4 required fields:
 
 | Field | Type | Validation Rule | Description |
 |------|------|----------|------|
 | `name` | `str` | Non-empty string | Agent unique identifier. In Worker, also serves as the exported tool function name |
+| `agent_runtime` | `str` | Must be registered; currently only `smolagents` | Selects the complete Agent runtime. Missing and unknown values fail during preflight |
 | `description` | `str` | Non-empty string | Agent role description. In Supervisor single-string workflows, participates in task assembly; list workflow items are executed as authored |
 | `workflow` | `str` or `list[str]` | Non-empty string, or non-empty list of non-empty strings | Workflow instruction text. Supports Markdown and Mermaid flowcharts. See [Writing Guidelines](#workflow-writing-guidelines-and-recommendations) below |
 
@@ -404,8 +401,6 @@ workflow: |
 |------|------|--------|------|
 | `tools` | `list[dict]` | `[]` | Tool list. See [Section 4](#4-tool-configuration-details) |
 | `model_type` | `str` | Configured global `default_model_type` | Model selection. See [3.7](#37-model_type--model-selection) |
-| `tool_call_type` | `str` | `"code_act"` | Agent interaction mode. See [3.6](#36-tool_call_type--interaction-mode) |
-| `execution_env` | `dict` | `{type: "local"}` | Execution environment configuration. See [3.5](#35-execution_env--execution-environment) |
 | `prompt` | `str` or `dict` | Framework built-in | Custom System Prompt template. See [3.9](#39-prompt--custom-prompt) |
 | `planning_interval` | `int` | Not set | Force re-planning every N steps. See [3.10](#310-planning_interval--planning-interval) |
 | `todo` | `dict` | `{mode: "auto"}` | Current-task progress tracking. See [3.11](#311-todomode--task-tracking) |
@@ -430,78 +425,29 @@ workflow: |
 |------|------|--------|------|
 | `agent_function_schema` | `dict` | Not set | Worker callable tool contract. Worker is exported as a tool when present and valid. See [Section 5](#5-worker-export-as-callable-tool) |
 
-> ⚠️ **Worker config isolation**: A Worker's effective configuration is resolved from global/app config plus the **Worker YAML itself**. It does **not** inherit runtime overrides from the Supervisor that called it. If a Worker needs extra filesystem or shell permissions, repeat the relevant whitelisted overrides (for example `tool_access_control.path_validation`) in the Worker YAML.
+> ⚠️ **Worker config isolation**: A Worker's effective configuration is resolved from global/app config plus the **Worker YAML itself**. It does **not** inherit permission overrides from the Supervisor that called it. If a Worker needs extra filesystem or shell permissions, repeat the relevant whitelisted overrides (for example `tool_access_control.path_validation`) in the Worker YAML.
 
 ---
 
-### 3.5 `execution_env` — Execution Environment
+### 3.5 `agent_runtime` — Agent Runtime
 
-| Sub-field | Type | Default | Required | Options | Description |
-|--------|------|--------|------|--------|------|
-| `type` | `str` | `"local"` | ❌ | `"local"` / `"docker"` / `"e2b"` / `"wasm"` | Executor type (auto-lowercased). `"host"` has been removed |
-| `executor_kwargs` | `dict` | `{}` | ❌ | Free key-value pairs | Executor parameters, passed through as-is |
-
-**`type` option descriptions**:
-
-| Value | Description | Default Tool Loading |
-|----|------|------------|
-| `"local"` | Local execution, uses host Shell and filesystem | ✅ Loaded |
-| `"docker"` | Docker container execution | ❌ Not loaded |
-| `"e2b"` | E2B cloud sandbox execution | ❌ Not loaded |
-| `"wasm"` | WebAssembly sandbox execution | ❌ Not loaded |
-
-**Validation rules**: `type` must be a non-empty string and one of the 4 values above; `executor_kwargs` must be a dictionary. Shell path is auto-detected from the `$SHELL` environment variable.
-
-**Examples**:
+Every Supervisor and Worker declares:
 
 ```yaml
-# Local execution
-execution_env:
-  type: "local"
-
-# Docker remote execution
-execution_env:
-  type: "docker"
-  executor_kwargs:
-    host: "127.0.0.1"
-    port: 8888
-    image_name: "my-jupyter-kernel:local"
+agent_runtime: "smolagents"
 ```
 
-> This field can override system configuration in Agent YAML (part of the [overlay whitelist](#92-overridable-field-whitelist)).
+The only currently registered value is `smolagents`. A missing value,
+`langgraph`, or any unknown value fails during Application preflight; AgentLoom
+does not select or fall back to another runtime. This field is independent from
+the global `runtime` mapping in `config/system.yaml`, which controls storage.
 
-> ⚠️ **Mode restriction**: `execution_env` only takes effect in `code_act` mode. In `tool_call` mode, `executor_type` and `executor_kwargs` are silently ignored (`ToolCallingAgentV2` does not execute code, so execution environment settings are not applicable).
+### 3.6 Structured Tool Calls
 
----
-
-### 3.6 `tool_call_type` — Interaction Mode
-
-| Option | Agent Type | Call Method | Flexibility | Recommended Scenario |
-|--------|-----------|----------|--------|----------|
-| `"tool_call"` | `ToolCallingAgentV2` | Structured tool_call messages | Structured (one tool call per step, clear and traceable) | **Recommended for Supervisor**, workflow Workers |
-| `"code_act"` | `CodeAgentV2` | Writes Python code to call tools | High (loops, conditions, multi-step orchestration) | Workers that need coding, highly flexible tasks |
-
-**Default**: `"code_act"`
-**Validation**: Only `"code_act"` or `"tool_call"` allowed; other values raise an error.
-
-#### How to Choose?
-
-| Scenario | Recommended Mode | Reason |
-|----------|-----------------|--------|
-| **Supervisor orchestrating multiple Workers** | **`tool_call`** ✅ | Each step’s Worker call, parameters, and results are structured records, making it easy to monitor and audit each Worker’s execution status |
-| **Workflow / fixed pipeline** | **`tool_call`** ✅ | Structured output, predictable, traceable, clear steps |
-| **Coding / highly flexible tasks** | **`code_act`** ✅ | Needs loops, conditionals, exception handling, data transformation, and other Python programming capabilities |
-| **Open-ended exploration tasks** | **`code_act`** ✅ | Uncertain number of steps, requires dynamic decision-making and complex control flow |
-
-> **Core principle**: `tool_call` suits **highly structured** scenarios (orchestration, fixed workflows) where steps are clear and traceable, giving full visibility into each tool’s execution; `code_act` suits **highly flexible** scenarios (coding, complex logic) that leverage Python’s programming expressiveness.
-
-> 💡 **Mode-specific parameters**: The following configurations only take effect in `code_act` mode and are silently ignored in `tool_call` mode:
->
-> | Parameter | Reason |
-> |-----------|--------|
-> | `execution_env` (`executor_type` / `executor_kwargs`) | `tool_call` mode does not execute code, so no execution environment is needed |
-> | `code_agent.additional_authorized_imports` | Import whitelists only apply to code execution |
-> | `code_agent.additional_functions` | Built-in function whitelists only apply to code execution |
+AgentLoom exposes one Tool execution protocol: the model returns a provider-native
+structured tool call, AgentLoom validates its arguments against the schema, and
+executes a registered Tool. It does not infer tool calls from prose, XML, or JSON
+text. A provider or model without structured-tool support fails directly.
 
 ---
 
@@ -550,11 +496,11 @@ Used to override the framework's built-in System Prompt template.
 
 ```yaml
 # Format 1: Direct string path
-prompt: "applications/my_app/sysprompt/code_agent.yaml"
+prompt: "applications/my_app/sysprompt/agent_prompt.yaml"
 
 # Format 2: Dictionary form (must include path key)
 prompt:
-  path: "applications/my_app/sysprompt/code_agent.yaml"
+  path: "applications/my_app/sysprompt/agent_prompt.yaml"
 ```
 
 #### Path Resolution Rules
@@ -569,14 +515,11 @@ prompt:
 | 1 | Function parameter `prompt_template_path` | Explicitly passed in code |
 | 2 | Agent YAML `prompt` field | Current document configuration |
 | 3 | Model family variant | `<prompts_dir>/<family>/toolcalling_agent.yaml` (user activates by removing `.example` suffix) |
-| 4 | Local override | `<prompts_dir>/structured_code_agent.yaml` or `toolcalling_agent.yaml` (user activates by removing `.example` suffix) |
+| 4 | Local override | `<prompts_dir>/toolcalling_agent.yaml` (user activates by removing `.example` suffix) |
 | 5 | smolagents built-in default | smolagents package's built-in prompt (no file needed) |
 
 > **Customization**: All `.example.yaml` files (including those under `anthropic/`, `openai/`, `gemini/` directories) are reference templates. To activate a custom prompt, simply remove the `.example` suffix:
 > ```bash
-> # Activate global custom prompt (code_act mode)
-> mv structured_code_agent.example.yaml structured_code_agent.yaml
->
 > # Activate anthropic model-family variant
 > mv anthropic/toolcalling_agent.example.yaml anthropic/toolcalling_agent.yaml
 > ```
@@ -680,6 +623,7 @@ Controls the maximum concurrency when this Agent is batch-invoked. Typically use
 ```yaml
 # Worker Agent: directory analysis (supports concurrent batch invocation)
 name: "dir_architecture_analysis"
+agent_runtime: "smolagents"
 model_type: "powerful"
 concurrency: auto          # Auto-calculate concurrency
 
@@ -690,6 +634,7 @@ workflow: |
 ```yaml
 # Worker Agent: fixed concurrency of 6
 name: "file_processor"
+agent_runtime: "smolagents"
 model_type: "fast"
 concurrency: 6
 ```
@@ -818,8 +763,6 @@ matrix, see [Built-in Tool Catalog](tool_catalog.md).
 2. **Agent tools**: Tools in the Agent YAML `tools` list
 3. **Deduplication rule**: Same-named tools are overridden by later-loaded ones
 
-> When `execution_env.type` is `"docker"` or `"e2b"`, default tools are **NOT auto-loaded**.
-
 ### 4.4 Advanced Pattern: Wrapping Agent as a Python Tool Function
 
 When a Worker Agent call needs **complex pre/post processing** (e.g., loop orchestration, checkpoint resume, error isolation, progress persistence), you can wrap the Agent in a regular Python tool function, then register it in the Supervisor's `tools` field via `module + function`.
@@ -832,7 +775,7 @@ The core idea of this pattern is: **Python control flow + Agent intelligence** �
 |------|----------|------|
 | Call Agent once, return result directly | `worker_agents` auto-registration | Simple and direct, YAML declaration only |
 | Need to read files/prepare context before calling Agent | **Python wrapper** | Deterministic operations shouldn't waste LLM tokens |
-| Need to loop-call Agent (batch processing) | **Python wrapper** | Python for loops are more reliable than LLM CodeAct |
+| Need to loop-call Agent (batch processing) | **Python wrapper** | Deterministic Python loops are more reliable |
 | Need checkpoint resume / progress persistence | **Python wrapper** | Write back progress file immediately per iteration, crash-safe |
 | Need error isolation (single item failure doesn't interrupt) | **Python wrapper** | try-except precise capture, continue processing next item |
 | Agent output needs post-processing (write files, format, aggregate) | **Python wrapper** | Deterministic operations at the Python layer |
@@ -863,7 +806,6 @@ tools = YamlAgentFactory.create_agent_as_tool(
     config_path,        # str | Path | dict — Worker YAML path (relative to AGENT_ROOT) or config dict
     agent_class=None,   # Optional, custom Agent class
     model=None,         # Optional, model instance
-    execution_env=None, # Optional, execution environment instance
     logger=None,        # Optional, AgentLogger instance
 )
 # Returns: List[Callable] — Contains one callable function, signature defined by Worker's agent_function_schema
@@ -1046,6 +988,7 @@ Register the wrapped Python function in the Supervisor's `tools` field:
 ```yaml
 # Supervisor YAML
 name: "my_supervisor"
+agent_runtime: "smolagents"
 description: "Orchestrate multi-step analysis process"
 workflow: |
   1. Call run_batch_analysis to batch analyze all subtasks
@@ -1277,8 +1220,8 @@ The system performs a full pre-check on **all** entries before loading (director
 
 | Error Message | Fix |
 |----------|------|
-| `tool_call_type must be 'tool_call' or 'code_act'` | Only these two values are allowed |
-| `execution_env.type='host' is no longer supported` | Change to `"local"` |
+| `missing required 'agent_runtime'` | Add `agent_runtime: smolagents` |
+| `agent_runtime must name a registered runtime` | Currently use only `smolagents` |
 | `skills must be a list, dict, or string path` | Use list/dict/string |
 
 ---
@@ -1291,6 +1234,7 @@ The system performs a full pre-check on **all** entries before loading (director
 
 ```yaml
 name: "repo_map_agent"
+agent_runtime: "smolagents"
 description: |
   Repo Map architecture analysis Supervisor.
   Scanning and Markdown generation are handled directly by repo_map_app.py (pure Python, zero LLM).
@@ -1298,7 +1242,6 @@ description: |
   then calls get_analysis_summary for the summary report.
 
 model_type: "powerful"
-tool_call_type: "code_act"
 
 workflow: |
   # Repo Map Architecture Analysis Workflow
@@ -1320,21 +1263,18 @@ tools:
 
 worker_agents:
   - path: "applications/repo_map/workflows/worker_agents/dir_architecture_analysis.yaml"
-
-execution_env:
-  type: "local"
 ```
 
 **Worker Example**: `dir_architecture_analysis.yaml`
 
 ```yaml
 name: "dir_architecture_analysis"
+agent_runtime: "smolagents"
 description: |
   Perform LLM architecture analysis on a single directory.
   Receives dir_path and index_content, returns Markdown-formatted architecture analysis text.
 
 model_type: "powerful"
-tool_call_type: "code_act"
 
 workflow: |
   # Single Directory Architecture Analysis
@@ -1343,9 +1283,6 @@ workflow: |
   1. Core functionality  2. Key modules  3. Design patterns  4. Dependencies  5. Notes
 
 tools: []
-
-execution_env:
-  type: "local"
 
 agent_function_schema:
   description: |
@@ -1365,6 +1302,7 @@ agent_function_schema:
 
 ```yaml
 name: "simple_reader"
+agent_runtime: "smolagents"
 description: "A simple Agent that reads and analyzes specified file content"
 workflow: |
   1. Read the user-specified file
@@ -1381,6 +1319,7 @@ Write configuration in a YAML code block at the beginning of the file; the remai
 ````markdown
 ```yaml
 name: "project_scan"
+agent_runtime: "smolagents"
 description: "Project structure scanning agent"
 model_type: "powerful"
 tools:
@@ -1430,8 +1369,6 @@ The following top-level fields in Agent YAML can override system configuration (
 | `smart_summary` | `any` | Context compression strategy |
 | `context_engine` | `dict` | Reversible context compression limits |
 | `tool_access_control` | `dict` | Working directory and path filtering |
-| `execution_env` | `dict` | Execution environment type and Shell path |
-| `code_agent` | `dict` | CodeAgent code execution permissions |
 | `tools` | `list` | Agent tool list and its effective-config overlay |
 | `shell_settings` | `any` | Shell safety settings |
 | `default_toolsets` / `toolsets` | `any` | Toolset defaults or replacement |
@@ -1440,7 +1377,7 @@ The following top-level fields in Agent YAML can override system configuration (
 | `self_learning` | `dict` | History and optional memory-review policy |
 | `todo` | `dict` | Todo mode (`auto`, `on`, or `off`) |
 
-> ⚠️ **Important**: The whitelist above is evaluated **per Agent YAML**, not per call chain. When a Supervisor invokes a Worker, the Worker's `tool_access_control`, `execution_env`, `prompt`, and other whitelisted overrides are rebuilt from the Worker YAML instead of being inherited from the Supervisor.
+> ⚠️ **Important**: The whitelist above is evaluated **per Agent YAML**, not per call chain. When a Supervisor invokes a Worker, the Worker's `tool_access_control`, `shell_settings`, `prompt`, and other whitelisted overrides are rebuilt from the Worker YAML instead of being inherited from the Supervisor.
 >
 > ```yaml
 > # If both Supervisor and Worker access the same external directory,
@@ -1462,7 +1399,7 @@ The following fields are processed independently as Agent properties and are not
 | `tools` (`list[dict]`) | Agent tool list, different from system `tools` (dict) |
 | `worker_agents` / `agent_function_schema` | Role-specific properties |
 | `skills` | Independent three-layer stacking loading (see [3.8](#38-skills--skill-package-configuration)) |
-| `model_type` / `tool_call_type` | Agent selection parameters |
+| `agent_runtime` / `model_type` | Agent runtime and model-type selectors |
 | `max_steps` / `planning_interval` | Agent execution parameters |
 
 ### 9.4 LLM Configuration Isolation
@@ -1493,19 +1430,8 @@ WARNING: Ignoring top-level key 'model' in agent config;
 ### 9.6 Override Examples
 
 ```yaml
-# Agent-level execution environment switch
-execution_env:
-  type: "docker"
-  executor_kwargs:
-    host: "127.0.0.1"
-    port: 8888
-
 # Agent-level disable smart summary
 smart_summary: false
-
-# Agent-level execution environment
-execution_env:
-  type: "local"
 ```
 
 ### 9.7 Per-Agent Shell Security Configuration Override
@@ -1521,9 +1447,9 @@ These are independent keys — no nesting required.
 
 ```yaml
 name: "readonly_auditor"
+agent_runtime: "smolagents"
 description: "Read-only code audit agent"
 model_type: "powerful"
-tool_call_type: "code_act"
 
 tools:
   - name: "shell_tool"
@@ -1553,9 +1479,9 @@ workflow: |
 
 ```yaml
 name: "developer"
+agent_runtime: "smolagents"
 description: "Development and testing agent"
 model_type: "powerful"
-tool_call_type: "code_act"
 
 tools:
   - name: "shell_tool"
@@ -1580,9 +1506,9 @@ workflow: |
 
 ```yaml
 name: "text_analyzer"
+agent_runtime: "smolagents"
 description: "Pure text analysis agent, no shell needed"
 model_type: "fast"
-tool_call_type: "code_act"
 
 # No shell_tool declared — agent cannot execute any shell commands
 # No shell_settings needed
@@ -1714,13 +1640,12 @@ These tolerance mechanisms significantly reduce wasted retries caused by LLM out
 | Field | Required | Supervisor | Worker | Type | Default |
 |------|------|-----------|--------|------|--------|
 | `name` | ✅ | ✅ | ✅ | `str` | — |
+| `agent_runtime` | ✅ | ✅ | ✅ | `str` | `smolagents` (must be explicit) |
 | `description` | ✅ | ✅ | ✅ | `str` | — |
 | `workflow` | ✅ | ✅ | ✅ | `str`/`list[str]` | — |
 | `goal` | ❌ | ✅ | ❌ | `bool`/`dict` | `false` |
 | `tools` | ❌ | ✅ | ✅ | `list[dict]` | `[]` |
 | `model_type` | ❌ | ✅ | ✅ | `str` | `model.default_model_type` from `config/llm.yaml`; no implicit default |
-| `tool_call_type` | ❌ | ✅ | ✅ | `str` | `"code_act"` |
-| `execution_env` | ❌ | ✅ | ✅ | `dict` | `{type: "local"}` |
 | `prompt` | ❌ | ✅ | ✅ | `str`/`dict` | Framework built-in |
 | `planning_interval` | ❌ | ✅ | ✅ | `int` | Not set |
 | `todo` | ❌ | ✅ | ✅ | `dict` | `{mode: "auto"}` |

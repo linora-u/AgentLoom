@@ -1,7 +1,7 @@
 name: "goal_lifecycle_adversary"
+agent_runtime: smolagents
 description: "Adversarially audit Goal continuation, budget, completion, and resume semantics."
 model_type: "summary"
-tool_call_type: "tool_call"
 max_steps: 2
 concurrency: 1
 

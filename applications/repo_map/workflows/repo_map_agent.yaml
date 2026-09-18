@@ -1,4 +1,5 @@
 name: "repo_map_agent"
+agent_runtime: smolagents
 description: |
   Repo Map 架构分析 Supervisor。
   扫描和 Markdown 生成已由 repo_map_app.py 直接完成（纯 Python，零 LLM）。
@@ -9,7 +10,6 @@ description: |
   4) 校验 skill 完整性并输出总结
 
 model_type: "powerful"
-tool_call_type: "tool_call"
 
 workflow: |
   # Repo Map 架构分析工作流

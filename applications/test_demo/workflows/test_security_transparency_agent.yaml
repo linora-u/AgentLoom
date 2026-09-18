@@ -1,80 +1,28 @@
 name: "test_security_transparency"
+agent_runtime: smolagents
 description: "Validate security policy transparency: dynamic tool descriptions, enriched denial messages, and environment prompt security section"
 
 model_type: "powerful"
-tool_call_type: "code_act"
 
 workflow: |
   # Security Policy Transparency Validation Workflow
 
-  You are a testing agent. Execute the harness below in one Python code block.
-  It catches expected security denials and only marks a row PASS when the
-  actual tool output contains the required reason and suggested alternative.
-  After the harness returns, use its printed summary as your final answer.
-
-  ```python
-  rows = []
-
-  def add(step, status, details):
-      rows.append((step, status, details.replace("\n", " | ")))
-
-  def expect_success(step, command, required):
-      try:
-          output = shell_tool(command=command, timeout=10)
-      except Exception as exc:
-          add(step, "FAIL", f"unexpected error: {exc}")
-          return
-      status = "PASS" if required in output else "FAIL"
-      add(step, status, output[:300])
-
-  def expect_block(step, command, required_terms):
-      try:
-          output = shell_tool(command=command, timeout=10)
-          add(step, "FAIL", f"unexpected success: {output[:300]}")
-          return
-      except Exception as exc:
-          text = str(exc)
-      status = "PASS" if all(term in text for term in required_terms) else "FAIL"
-      add(step, status, text)
-
-  expect_success("normal command", 'echo "security transparency test"', "security transparency test")
-  expect_success("workspace listing", "ls -la", "README.md")
-  expect_block(
-      "command substitution blocked",
-      "echo $(whoami)",
-      ["Blocked", "command substitution", "Suggested alternative:", "write_file"],
-  )
-  expect_block(
-      "sudo blocked",
-      "sudo ls /root",
-      ["Blocked", "sudo", "Suggested alternative:", "without sudo"],
-  )
-  expect_block(
-      "destructive command blocked",
-      "rm -rf /",
-      ["Blocked", "destructive", "Suggested alternative:", "targeted operations"],
-  )
-  expect_success("workspace cat pipeline", "cat README.md | head -5", "English")
-
-  passed = sum(1 for _, status, _ in rows if status == "PASS")
-  overall = "PASS" if passed == len(rows) else "FAIL"
-  summary_lines = [
-      f"Overall: {overall} ({passed}/{len(rows)} passed)",
-      "| Step | Status | Evidence |",
-      "|---|---|---|",
-  ]
-  for step, status, details in rows:
-      summary_lines.append(f"| {step} | {status} | {details} |")
-  summary = "\n".join(summary_lines)
-  print(summary)
-  final_answer(summary)
-  ```
+  Use native structured `shell_tool` calls. Retain every actual result or error:
+  1. Run `echo "security transparency test"` and require the marker.
+  2. Run `ls -la` and require `README.md`.
+  3. Attempt `echo $(whoami)` and require a blocked error containing `Blocked`,
+     `command substitution`, `Suggested alternative:`, and `write_file`.
+  4. Attempt `sudo ls /root` and require a blocked error containing `Blocked`,
+     `sudo`, `Suggested alternative:`, and `without sudo`.
+  5. Attempt `rm -rf /` and require a blocked error containing `Blocked`,
+     `destructive`, `Suggested alternative:`, and `targeted operations`.
+  6. Run `cat README.md | head -5` and require `English`.
+  7. Call `final_answer` with a PASS/FAIL evidence table. Overall is PASS only
+     if every successful call and every expected denial matched its actual
+     return. Never infer a denial or repeat a destructive command.
 
 tools:
   - name: "shell_tool"
 
 worker_agents: []
 max_steps: 8
-
-execution_env:
-  type: "local"

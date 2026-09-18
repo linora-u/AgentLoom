@@ -1,8 +1,8 @@
 name: "test_shell_semantics"
+agent_runtime: smolagents
 description: "Validate shell_tool exit code semantic interpretation (grep no-match is not an error)"
 
 model_type: "powerful"
-tool_call_type: "code_act"
 
 workflow: |
   # Shell Exit Code Semantics Validation
@@ -47,6 +47,3 @@ tools:
   - name: "shell_tool"
 
 max_steps: 15
-
-execution_env:
-  type: "local"

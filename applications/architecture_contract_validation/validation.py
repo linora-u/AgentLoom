@@ -213,7 +213,6 @@ def validate_trace(attempt: Path, receipt: dict[str, object]) -> dict[str, objec
         if not any(row.get("agent_name") == worker and row.get("operation") == "pytest"
                    and row.get("exit_code") == 0 for row in ledger):
             errors.append(f"no successful actual pytest execution by {worker}")
-    code_actions = []
     application_id = receipt.get("run", {}).get("application_id")
     supervisor_path = (attempt / "runtime/checkpoints" / application_id / task_id / "checkpoint.json"
                        if application_id and task_id else None)
@@ -233,12 +232,6 @@ def validate_trace(attempt: Path, receipt: dict[str, object]) -> dict[str, objec
         if checkpoint.get("task_id") != task_id or checkpoint.get("run_id") != root_run_id:
             errors.append("Supervisor checkpoint identity does not match receipt")
             checkpoint = {}
-    if checkpoint:
-        for step in checkpoint.get("memory_steps", []):
-            if step.get("code_action"):
-                code_actions.append(step["code_action"])
-    if receipt.get("mode") == "codeact" and not code_actions:
-        errors.append("CodeAct Supervisor has no persisted Python execution evidence")
     # Both modes use the same canonical per-call input, result and lifecycle
     # evidence. Never pick a first call by filesystem or tool-result ordering.
     reachable = []
@@ -304,8 +297,7 @@ def validate_trace(attempt: Path, receipt: dict[str, object]) -> dict[str, objec
             "local_run_ids": sorted(str(item) for item in local_ids), "tool_events": len(ledger),
             "checkpoint_files": [str(p) for p in calls], "transfers": transfers,
             "corrective_transfers": selected["corrective_transfers"] if selected else [],
-            "supervisor_checkpoint": str(supervisor_path) if supervisor_path else None,
-            "supervisor_code_actions": len(code_actions)}
+            "supervisor_checkpoint": str(supervisor_path) if supervisor_path else None}
 
 
 def _structured(value):

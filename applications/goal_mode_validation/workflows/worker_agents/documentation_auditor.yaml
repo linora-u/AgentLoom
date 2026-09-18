@@ -1,7 +1,7 @@
 name: "goal_documentation_auditor"
+agent_runtime: smolagents
 description: "Audit Goal Mode documentation and examples against executable contracts."
 model_type: "summary"
-tool_call_type: "tool_call"
 max_steps: 2
 concurrency: 1
 

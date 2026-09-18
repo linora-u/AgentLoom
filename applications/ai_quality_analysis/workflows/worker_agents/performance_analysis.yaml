@@ -1,6 +1,6 @@
 name: "performance_analysis"
+agent_runtime: smolagents
 description: "Identifies performance issues: algorithmic complexity hotspots, unnecessary copies, memory allocation patterns, and I/O bottlenecks."
-tool_call_type: "code_act"
 model_type: "powerful"
 toolsets:
   - "core_shell"

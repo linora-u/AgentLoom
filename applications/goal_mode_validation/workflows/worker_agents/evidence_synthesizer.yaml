@@ -1,7 +1,7 @@
 name: "goal_evidence_synthesizer"
+agent_runtime: smolagents
 description: "Synthesize multiple Goal audits into one bounded acceptance report."
 model_type: "summary"
-tool_call_type: "tool_call"
 max_steps: 8
 
 workflow: |

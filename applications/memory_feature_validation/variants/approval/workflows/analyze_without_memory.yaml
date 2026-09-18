@@ -1,7 +1,7 @@
 name: "memory_review_approval_analysis"
+agent_runtime: smolagents
 description: "Analyze one durable operational case while memory writes require approval."
 model_type: "summary"
-tool_call_type: "tool_call"
 max_steps: 6
 
 workflow: |
