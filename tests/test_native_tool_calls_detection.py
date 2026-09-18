@@ -4,6 +4,7 @@ import pytest
 from agentloom.adapters.smolagents.model_turn_bridge import SmolagentsModelTurnBridge
 from agentloom.adapters.smolagents.models.model_types import ModelConfig
 from agentloom.configuration.llm_config import LLMConfig, LlmModelTypeSettings
+from agentloom.runtime.model_binding import ModelTurnBinding
 from agentloom.runtime.model_protocol import ModelTurnRequest, ModelTurnResult
 
 
@@ -12,6 +13,14 @@ class _EmptyAdapter:
 
     def turn(self, request: ModelTurnRequest) -> ModelTurnResult:
         return ModelTurnResult()
+
+
+def _binding() -> ModelTurnBinding:
+    return ModelTurnBinding(
+        model_type="test",
+        model_id="test/model",
+        adapter=_EmptyAdapter(),
+    )
 
 
 def test_model_config_has_no_native_tool_call_detection_field() -> None:
@@ -27,10 +36,7 @@ def test_model_config_requires_explicit_adapter() -> None:
 
 
 def test_bridge_has_no_native_tool_call_detection_state() -> None:
-    model = SmolagentsModelTurnBridge(
-        adapter=_EmptyAdapter(),
-        model_id="test/model",
-    )
+    model = SmolagentsModelTurnBridge(binding=_binding())
 
     assert not hasattr(model, "supports_native_tool_calls")
     assert not hasattr(model, "_native_tool_calls_detected")
@@ -41,8 +47,7 @@ def test_bridge_has_no_native_tool_call_detection_state() -> None:
 def test_bridge_rejects_removed_supports_native_tool_calls_constructor_arg() -> None:
     with pytest.raises(TypeError):
         SmolagentsModelTurnBridge(
-            adapter=_EmptyAdapter(),
-            model_id="test/model",
+            binding=_binding(),
             supports_native_tool_calls=False,
         )
 

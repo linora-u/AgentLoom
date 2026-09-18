@@ -11,6 +11,7 @@ from agentloom.adapters.smolagents.model_turn_bridge import SmolagentsModelTurnB
 from agentloom.adapters.smolagents.tool_protocol import settle_tool_call
 from agentloom.adapters.smolagents.tool_shim import inject_hooks
 from agentloom.runtime.hooks import HookEvent, HookHandler, HookPlan, HookResult, HookRun
+from agentloom.runtime.model_binding import ModelTurnBinding
 from agentloom.runtime.tool_protocol import ToolCallRecord, ToolErrorRecord
 from agentloom.runtime.trace import ExplicitExecutionContext, bind_explicit_execution_context
 from smolagents import Tool
@@ -133,8 +134,11 @@ def _project_chat_messages(messages) -> list[dict]:
         }
 
     model = SmolagentsModelTurnBridge(
-        adapter=OpenAIChatModelTurnAdapter(transport=transport),
-        model_id="openai/test",
+        binding=ModelTurnBinding(
+            model_type="test",
+            model_id="openai/test",
+            adapter=OpenAIChatModelTurnAdapter(transport=transport),
+        )
     )
     model.generate(messages)
     return captured["messages"]

@@ -11,6 +11,7 @@ import pytest
 from agentloom.adapters.smolagents.agents import ToolCallingAgentV2
 from agentloom.adapters.smolagents.model_turn_bridge import SmolagentsModelTurnBridge
 from agentloom.runtime.logging import NullLoggerBackend
+from agentloom.runtime.model_binding import ModelTurnBinding
 from agentloom.runtime.model_protocol import (
     FunctionCallItem,
     ModelProtocolError,
@@ -106,6 +107,19 @@ class RecordingAdapter:
         return self.result_factory(request)
 
 
+def _binding(
+    adapter,
+    *,
+    options: dict | None = None,
+) -> ModelTurnBinding:
+    return ModelTurnBinding(
+        model_type="test",
+        model_id="opaque-model",
+        adapter=adapter,
+        options=options or {},
+    )
+
+
 def _call(call_id: str, name: str, arguments) -> ChatMessageToolCall:
     return ChatMessageToolCall(
         id=call_id,
@@ -189,9 +203,7 @@ def test_bridge_projects_tools_and_required_choice() -> None:
         )
     )
     model = SmolagentsModelTurnBridge(
-        adapter=adapter,
-        model_id="opaque-model",
-        options={"tool_choice": "auto"},
+        binding=_binding(adapter, options={"tool_choice": "auto"}),
     )
 
     with model.require_tool_calls():
@@ -223,8 +235,7 @@ def test_shared_bridge_keeps_concurrent_tool_schemas_isolated() -> None:
         )
 
     model = SmolagentsModelTurnBridge(
-        adapter=RecordingAdapter(result),
-        model_id="opaque-model",
+        binding=_binding(RecordingAdapter(result)),
     )
 
     def generate(tool):
@@ -244,8 +255,9 @@ def test_shared_bridge_keeps_concurrent_tool_schemas_isolated() -> None:
 
 def test_shared_bridge_agent_id_is_execution_local() -> None:
     model = SmolagentsModelTurnBridge(
-        adapter=RecordingAdapter(lambda _request: ModelTurnResult()),
-        model_id="opaque-model",
+        binding=_binding(
+            RecordingAdapter(lambda _request: ModelTurnResult())
+        ),
     )
     assigned = threading.Barrier(2)
     observed = threading.Barrier(2)
@@ -269,18 +281,19 @@ def test_shared_bridge_agent_id_is_execution_local() -> None:
 
 def test_bridge_rejects_unknown_tool_name() -> None:
     model = SmolagentsModelTurnBridge(
-        adapter=RecordingAdapter(
-            lambda _request: ModelTurnResult(
-                items=(
-                    FunctionCallItem(
-                        call_id="call-missing",
-                        name="missing",
-                        arguments_json="{}",
+        binding=_binding(
+            RecordingAdapter(
+                lambda _request: ModelTurnResult(
+                    items=(
+                        FunctionCallItem(
+                            call_id="call-missing",
+                            name="missing",
+                            arguments_json="{}",
+                        ),
                     ),
                 )
             )
         ),
-        model_id="opaque-model",
     )
 
     with pytest.raises(ModelProtocolError, match="not found in registered tools"):
@@ -297,8 +310,9 @@ def test_bridge_rejects_unknown_tool_name() -> None:
 )
 def test_bridge_never_parses_text_tool_call_fallback(content: str) -> None:
     model = SmolagentsModelTurnBridge(
-        adapter=RecordingAdapter(lambda _request: ModelTurnResult()),
-        model_id="opaque-model",
+        binding=_binding(
+            RecordingAdapter(lambda _request: ModelTurnResult())
+        ),
     )
 
     with pytest.raises(ModelProtocolError, match="native structured tool_calls"):

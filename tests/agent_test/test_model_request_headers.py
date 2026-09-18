@@ -384,7 +384,7 @@ def test_smolagents_model_receives_merged_request_headers(monkeypatch) -> None:
     manager = model_manager_module.ModelManager()
     model = manager.get_smolagents_model(model_types.ModelType("powerful"), model_cache=False)
 
-    assert model.options["extra_headers"] == {
+    assert model.binding.options["extra_headers"] == {
         "User-Agent": GENERIC_MODEL_USER_AGENT,
         "X-Privacy": "on",
         "X-Model": "powerful",

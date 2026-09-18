@@ -21,6 +21,7 @@ from agentloom.runtime.agent_runtime import (
     AgentRuntimeRequest,
     RuntimeCheckpointEnvelope,
 )
+from agentloom.runtime.model_binding import ModelTurnBinding
 from agentloom.runtime.model_protocol import (
     FunctionCallItem,
     FunctionCallOutputItem,
@@ -206,8 +207,11 @@ def test_adapter_restores_native_memory_from_compatible_checkpoint() -> None:
 def test_resume_replays_canonical_items_through_the_next_model_turn() -> None:
     turn_adapter = _RecordingTurnAdapter()
     model = SmolagentsModelTurnBridge(
-        adapter=turn_adapter,
-        model_id="opaque-model",
+        binding=ModelTurnBinding(
+            model_type="test",
+            model_id="opaque-model",
+            adapter=turn_adapter,
+        )
     )
     native = _ReplayNativeRuntime(model)
     runtime = SmolagentsRuntimeAdapter(native)
