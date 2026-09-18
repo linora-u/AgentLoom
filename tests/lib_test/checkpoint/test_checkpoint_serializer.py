@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import time
 
+import pytest
 from agentloom.adapters.smolagents.checkpoint_codec import (
     SmolagentsCheckpointCodec as CheckpointSerializer,
 )
@@ -149,8 +150,16 @@ class TestSerializeActionStep:
         )
 
         data = CheckpointSerializer.serialize_memory_steps([step])
+        canonical = CheckpointSerializer.serialize_canonical_model_items([step])
         json.dumps(data)
         rebuilt = CheckpointSerializer.deserialize_memory_steps(data)[0]
+        assert rebuilt.model_output_message is not None
+        assert rebuilt.model_output_message.raw is None
+
+        CheckpointSerializer.restore_canonical_model_items(
+            [rebuilt],
+            canonical,
+        )
 
         assert rebuilt.model_output_message is not None
         assert rebuilt.model_output_message.raw == {
@@ -159,6 +168,25 @@ class TestSerializeActionStep:
             ],
             MODEL_RESPONSE_ID_RAW_KEY: "response-1",
         }
+
+    def test_unknown_step_type_and_corrupt_canonical_item_fail(self):
+        with pytest.raises(ValueError, match="unsupported.*step type"):
+            CheckpointSerializer.deserialize_memory_steps(
+                [{"_step_type": "FutureStep"}]
+            )
+
+        with pytest.raises(ValueError, match="canonical model stream item"):
+            CheckpointSerializer.restore_canonical_model_items(
+                [TaskStep(task="task")],
+                [
+                    {
+                        "step_index": 0,
+                        "item_index": 0,
+                        "response_id": None,
+                        "item": {"type": "unknown"},
+                    }
+                ],
+            )
 
     def test_skip_model_input_messages(self):
         """model_input_messages should be stripped during serialisation."""

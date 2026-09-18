@@ -1204,19 +1204,16 @@ class CheckpointManager:
     ) -> Path:
         """Save one runtime-neutral envelope plus task metadata."""
 
-        payload = runtime_checkpoint.get("payload")
-        if not isinstance(payload, dict):
-            raise ValueError("runtime_checkpoint.payload must be a dictionary")
-        step_count = payload.get("step_count", 0)
-        if isinstance(step_count, bool) or not isinstance(step_count, int):
-            step_count = 0
+        progress = runtime_checkpoint.get("progress", 0)
+        if isinstance(progress, bool) or not isinstance(progress, int):
+            progress = 0
         data = {
             "agent_name": self._supervisor_name,
             "agent_type": "supervisor",
             "task_id": task_id,
             "task_text": task_text,
             "status": status,
-            "step_count": step_count,
+            "step_count": progress,
             "runtime_checkpoint": _jsonable(runtime_checkpoint),
             "saved_at": datetime.now().astimezone().isoformat(),
         }
@@ -1265,13 +1262,10 @@ class CheckpointManager:
         if self._run_id:
             data["run_id"] = self._run_id
         if runtime_checkpoint is not None:
-            payload = runtime_checkpoint.get("payload")
-            if not isinstance(payload, dict):
-                raise ValueError("runtime_checkpoint.payload must be a dictionary")
             data["runtime_checkpoint"] = _jsonable(runtime_checkpoint)
-            step_count = payload.get("step_count", 0)
-            if isinstance(step_count, int) and not isinstance(step_count, bool):
-                data["step_count"] = step_count
+            progress = runtime_checkpoint.get("progress", 0)
+            if isinstance(progress, int) and not isinstance(progress, bool):
+                data["step_count"] = progress
         if status == "completed" or result is not None:
             data["result"] = result
         if error is not None:

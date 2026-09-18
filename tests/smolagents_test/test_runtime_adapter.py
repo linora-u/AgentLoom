@@ -129,13 +129,13 @@ def test_adapter_translates_runtime_request_and_result() -> None:
     ]
     assert result.state == "success"
     assert result.output == {"ok": True}
-    assert result.usage == {"input": 2}
+    assert result.usage.input_tokens == 2
     assert result.checkpoint is not None
     assert result.checkpoint.runtime_id == "smolagents"
-    assert result.checkpoint.payload == {
-        "memory_steps": [],
-        "step_count": 0,
-    }
+    assert result.checkpoint.state_schema_version == 2
+    assert result.checkpoint.progress == 0
+    assert result.checkpoint.payload["memory_steps"] == []
+    assert result.checkpoint.payload["canonical_model_items"] == []
 
 
 def test_adapter_omits_empty_additional_args_and_resets_new_session() -> None:
@@ -182,14 +182,21 @@ def test_adapter_closes_native_runtime_when_supported() -> None:
 def test_adapter_restores_native_memory_from_compatible_checkpoint() -> None:
     native = _NativeRuntime(_NativeResult(output="done"))
     runtime = SmolagentsRuntimeAdapter(native)
+    task = TaskStep(task="prior task")
     checkpoint = RuntimeCheckpointEnvelope(
         runtime_id="smolagents",
         runtime_version=runtime.runtime_version,
         state_schema_version=runtime.state_schema_version,
+        progress=1,
         payload={
             "memory_steps": [
-                TaskStep(task="prior task").dict() | {"_step_type": "TaskStep"}
-            ]
+                task.dict() | {"_step_type": "TaskStep"}
+            ],
+            "canonical_model_items": (
+                SmolagentsCheckpointCodec.serialize_canonical_model_items(
+                    [task]
+                )
+            ),
         },
     )
 
@@ -257,6 +264,9 @@ def test_resume_replays_canonical_items_through_the_next_model_turn() -> None:
     )
     step.tool_results = [tool_record]
     serialized_steps = SmolagentsCheckpointCodec.serialize_memory_steps([step])
+    canonical_items = (
+        SmolagentsCheckpointCodec.serialize_canonical_model_items([step])
+    )
     checkpoint = RuntimeCheckpointEnvelope.from_dict(
         json.loads(
             json.dumps(
@@ -264,7 +274,11 @@ def test_resume_replays_canonical_items_through_the_next_model_turn() -> None:
                     runtime_id="smolagents",
                     runtime_version=runtime.runtime_version,
                     state_schema_version=runtime.state_schema_version,
-                    payload={"memory_steps": serialized_steps},
+                    progress=1,
+                    payload={
+                        "memory_steps": serialized_steps,
+                        "canonical_model_items": canonical_items,
+                    },
                 ).to_dict()
             )
         )
@@ -332,3 +346,70 @@ def test_adapter_snapshot_and_restore_own_native_memory() -> None:
     runtime.restore(checkpoint)
 
     assert [step.task for step in native.memory.steps] == ["worker task"]
+
+
+def test_adapter_rejects_old_schema_and_runtime_version() -> None:
+    native = _NativeRuntime(_NativeResult(output="done"))
+    runtime = SmolagentsRuntimeAdapter(native)
+
+    with pytest.raises(ValueError, match="schema 1"):
+        runtime.restore(
+            RuntimeCheckpointEnvelope(
+                runtime_id="smolagents",
+                runtime_version=runtime.runtime_version,
+                state_schema_version=1,
+                payload={"memory_steps": []},
+            )
+        )
+    with pytest.raises(ValueError, match="runtime version"):
+        runtime.restore(
+            RuntimeCheckpointEnvelope(
+                runtime_id="smolagents",
+                runtime_version="different-version",
+                state_schema_version=2,
+                payload={
+                    "memory_steps": [],
+                    "canonical_model_items": [],
+                },
+            )
+        )
+
+
+def test_adapter_rejects_corrupt_call_output_linkage() -> None:
+    native = _NativeRuntime(_NativeResult(output="done"))
+    runtime = SmolagentsRuntimeAdapter(native)
+    step = ActionStep(
+        step_number=1,
+        timing=Timing(start_time=0.0),
+        observations="completed",
+    )
+    checkpoint = RuntimeCheckpointEnvelope(
+        runtime_id="smolagents",
+        runtime_version=runtime.runtime_version,
+        state_schema_version=2,
+        progress=1,
+        payload={
+            "memory_steps": (
+                SmolagentsCheckpointCodec.serialize_memory_steps([step])
+            ),
+            "canonical_model_items": [
+                {
+                    "step_index": 0,
+                    "item_index": 0,
+                    "response_id": "response-1",
+                    "item": {
+                        "type": "function_call_output",
+                        "call_id": "missing-call",
+                        "output": "done",
+                        "item_id": None,
+                        "status": "completed",
+                        "is_error": False,
+                        "replay_payload": {},
+                    },
+                }
+            ],
+        },
+    )
+
+    with pytest.raises(ValueError, match="not correlated"):
+        runtime.restore(checkpoint)
