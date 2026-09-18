@@ -822,6 +822,30 @@ def test_base_run_releases_owned_root_after_failure(monkeypatch):
     assert get_current_session_run_id() is None
 
 
+def test_runtime_close_failure_does_not_replace_run_failure(monkeypatch):
+    agent = _make_agent(logger=DummyLoggerBackend())
+    run_error = RuntimeError("provider failed")
+    runtime_agent = RecordingAgentRuntime(exc=run_error)
+
+    def fail_close():
+        runtime_agent.close_calls += 1
+        raise OSError("runtime close failed")
+
+    runtime_agent.close = fail_close
+    monkeypatch.setattr(agent, "build_runtime", lambda: runtime_agent)
+    monkeypatch.setattr(agent, "_inject_memory_snapshot", lambda tasks: tasks)
+
+    with pytest.raises(RuntimeError) as captured:
+        agent.run("top-level-failure")
+
+    assert captured.value is run_error
+    assert runtime_agent.close_calls == 1
+    assert any(
+        "runtime close failed" in note
+        for note in getattr(captured.value, "__notes__", ())
+    )
+
+
 def test_root_memory_review_runs_after_session_end_inside_owned_root(monkeypatch):
     from agentloom.runtime.trace import bind_root_run, require_root_run_id
     from agentloom.self_learning import reviewer
