@@ -5,17 +5,23 @@ from __future__ import annotations
 import json
 from dataclasses import replace
 
+from agentloom.adapters.smolagents.agents import ToolCallingAgentV2
+from agentloom.runtime.hooks import HookPlan, HookRun
+from agentloom.runtime.todo import TodoStateProvider, bind_todo_state_provider
+from agentloom.runtime.tool_gateway import (
+    AgentLoomToolGateway,
+    bind_tool,
+    final_answer_binding,
+)
+from agentloom.runtime.trace import bind_explicit_execution_context, capture_explicit_execution_context
+from agentloom.tools.todo import todo_write
 from smolagents.models import (
     ChatMessage,
     ChatMessageToolCall,
     ChatMessageToolCallFunction,
     MessageRole,
 )
-
-from agentloom.adapters.smolagents.agents import ToolCallingAgentV2
-from agentloom.runtime.todo import TodoStateProvider, bind_todo_state_provider
-from agentloom.tools.todo import todo_write
-from agentloom.runtime.trace import bind_explicit_execution_context, capture_explicit_execution_context
+from smolagents.tools import handle_agent_output_types
 
 
 def _tool_call(name: str, arguments: dict, call_id: str) -> ChatMessage:
@@ -80,10 +86,19 @@ def _message_text(messages: list[ChatMessage]) -> str:
     )
 
 
+def _gateway() -> AgentLoomToolGateway:
+    return AgentLoomToolGateway(
+        [
+            bind_tool(todo_write, output_normalizer=handle_agent_output_types),
+            final_answer_binding(),
+        ]
+    )
+
+
 def test_pending_todo_is_hydrated_without_extra_call_or_final_gate() -> None:
     model = TodoThenFinalModel()
     agent = ToolCallingAgentV2(
-        tools=[todo_write],
+        tool_gateway=_gateway(),
         model=model,
         max_steps=3,
         max_tokens=4096,
@@ -93,6 +108,9 @@ def test_pending_todo_is_hydrated_without_extra_call_or_final_gate() -> None:
     provider = TodoStateProvider()
     execution = replace(
         capture_explicit_execution_context(),
+        hook_run=HookRun(HookPlan(), local_run_id="todo", root_run_id="todo"),
+        local_run_id="todo",
+        root_run_id="todo",
         runtime_agent_path="supervisor",
     )
 
@@ -130,7 +148,7 @@ def test_checkpoint_snapshot_is_visible_on_first_resumed_model_action(tmp_path) 
     )
     model = FinalOnlyModel()
     agent = ToolCallingAgentV2(
-        tools=[todo_write],
+        tool_gateway=_gateway(),
         model=model,
         max_steps=1,
         max_tokens=4096,
@@ -139,6 +157,9 @@ def test_checkpoint_snapshot_is_visible_on_first_resumed_model_action(tmp_path) 
     agent._agent_loom_todo_mode = "auto"
     execution = replace(
         capture_explicit_execution_context(),
+        hook_run=HookRun(HookPlan(), local_run_id="todo-resume", root_run_id="todo-resume"),
+        local_run_id="todo-resume",
+        root_run_id="todo-resume",
         runtime_agent_path="supervisor",
     )
 
