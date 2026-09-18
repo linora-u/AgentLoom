@@ -45,11 +45,12 @@ class _RecordingTurnAdapter:
 
     def turn(self, request: ModelTurnRequest) -> ModelTurnResult:
         self.requests.append(request)
+        tool_name = request.tools[0].name if request.tools else "weather"
         return ModelTurnResult(
             items=(
                 FunctionCallItem(
                     call_id="call_weather",
-                    name="weather",
+                    name=tool_name,
                     arguments_json='{"city":"Shanghai"}',
                 ),
             ),

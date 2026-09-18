@@ -22,7 +22,6 @@ from datetime import UTC, datetime
 from typing import Any, TextIO
 
 import click
-
 from agentloom.schedules.cli import schedules as _schedules_command
 
 _MAIN_EPILOG = """\
@@ -176,6 +175,10 @@ def main():
 
 def _has_transient_provider_error(error: BaseException) -> bool:
     """Return true only for a trusted transient LiteLLM exception chain."""
+    from agentloom.adapters.smolagents.models.litellm_retry import (
+        ProviderCallBudgetExceeded,
+    )
+    from agentloom.runtime.model_protocol import ModelProtocolError
     from litellm.exceptions import (
         APIConnectionError,
         AuthenticationError,
@@ -187,11 +190,6 @@ def _has_transient_provider_error(error: BaseException) -> bool:
         Timeout,
     )
     from smolagents import AgentMaxStepsError, AgentParsingError
-
-    from agentloom.adapters.smolagents.models.litellm_retry import (
-        ProviderCallBudgetExceeded,
-    )
-    from agentloom.adapters.smolagents.models.litellm_model import NativeToolCallError
 
     transient_types = (
         Timeout,
@@ -211,7 +209,7 @@ def _has_transient_provider_error(error: BaseException) -> bool:
         ProviderCallBudgetExceeded,
         AgentParsingError,
         AgentMaxStepsError,
-        NativeToolCallError,
+        ModelProtocolError,
     )
     current: BaseException | None = error
     visited: set[int] = set()

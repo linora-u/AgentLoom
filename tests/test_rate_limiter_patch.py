@@ -1,10 +1,9 @@
+from agentloom.adapters.smolagents.models.litellm_retry import create_retry_wrapper
+from agentloom.adapters.smolagents.monkey_patch import install_agentloom_runtime_adapters
 from smolagents.utils import RateLimiter
 
-from agentloom.adapters.smolagents.models.litellm_model import LiteLLMModelV2
-from agentloom.adapters.smolagents.monkey_patch import install_agentloom_runtime_adapters
 
-
-def test_runtime_adapters_do_not_patch_global_rate_limiter():
+def test_runtime_adapters_do_not_patch_global_rate_limiter() -> None:
     original = RateLimiter.throttle
 
     install_agentloom_runtime_adapters()
@@ -12,7 +11,18 @@ def test_runtime_adapters_do_not_patch_global_rate_limiter():
     assert RateLimiter.throttle is original
 
 
-def test_litellm_model_v2_disables_upstream_rate_limit_locally():
-    model = LiteLLMModelV2(model_id="test/model", requests_per_minute=1)
+def test_retry_wrapper_consumes_model_type_before_provider_call() -> None:
+    observed: dict = {}
 
-    assert model._apply_rate_limit() is None
+    def provider(**kwargs):
+        observed.update(kwargs)
+        return "ok"
+
+    wrapped = create_retry_wrapper(provider)
+
+    assert wrapped(
+        model="opaque-model",
+        _agent_loom_model_type="powerful",
+        num_retries=0,
+    ) == "ok"
+    assert "_agent_loom_model_type" not in observed

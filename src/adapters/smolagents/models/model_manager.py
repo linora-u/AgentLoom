@@ -342,7 +342,7 @@ class ModelManager:
             logger: Logger instance.
 
         Returns:
-            Union[dict, LiteLLMModelV2]: LiteLLM config dict or smolagents model instance.
+            LiteLLM config dict or SmolagentsModelTurnBridge instance.
         """
         resolved_type = ModelTypeManager.resolve_model_type(model_type)
 
@@ -395,6 +395,6 @@ def get_model(
         logger: Logger instance.
 
     Returns:
-        Union[dict, LiteLLMModelV2]: LiteLLM config dict or smolagents model instance.
+        LiteLLM config dict or SmolagentsModelTurnBridge instance.
     """
     return model_manager.get_model(model_type, framework, model_builder, model_cache, logger=logger)
