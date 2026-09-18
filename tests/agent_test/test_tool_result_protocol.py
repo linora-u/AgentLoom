@@ -305,6 +305,19 @@ def test_terminal_record_rejects_nonterminal_or_contradictory_state() -> None:
     else:
         raise AssertionError("contradictory completed record was accepted")
 
+    for status in ("pending", "running", "cancelled"):
+        with pytest.raises(ValueError, match="Unsupported Tool terminal status"):
+            ToolCallRecord.from_dict(
+                {
+                    "call_id": "legacy-in-flight",
+                    "tool_name": "echo",
+                    "input": {},
+                    "status": status,
+                    "output": None,
+                    "error": None,
+                }
+            )
+
 
 def test_hook_trace_consumes_base_canonical_record_without_subtype_tags() -> None:
     run = HookRun(HookPlan(), local_run_id="base-record", root_run_id="root-record")
