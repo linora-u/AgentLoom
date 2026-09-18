@@ -4,6 +4,7 @@ import json
 from pathlib import Path
 
 import pytest
+import yaml
 
 SPEC = importlib.util.spec_from_file_location(
     "existing_acceptance", Path(__file__).parent / "acceptance/existing_application_validation.py"
@@ -18,21 +19,25 @@ def write_json(path, value):
     path.write_text(json.dumps(value))
 
 
-def test_core_validation_uses_explicit_root_for_every_path_aware_tool():
-    workflow = (
+def test_core_validation_pins_search_root_outside_model_control():
+    workflow_path = (
         ROOT
         / "applications/tool_registry_core_validation/workflows/core_tools_agent.yaml"
-    ).read_text(encoding="utf-8")
+    )
+    config = yaml.safe_load(workflow_path.read_text(encoding="utf-8"))
+    workflow = config["workflow"]
     root = "/tmp/agentloom_tool_registry_core_validation"
 
-    assert (
-        f'glob_search(pattern="*.txt", path="{root}")'
-        in workflow
-    )
-    assert (
-        f'grep_search(pattern="GAMMA", path="{root}")'
-        in workflow
-    )
+    configured = {
+        tool["name"]: tool["fixed_args"]
+        for tool in config["tools"]
+    }
+    assert configured == {
+        "glob_search": {"path": root},
+        "grep_search": {"path": root},
+    }
+    assert 'glob_search(pattern="*.txt")' in workflow
+    assert 'grep_search(pattern="GAMMA")' in workflow
     assert (
         f'list_directory(directory_path="{root}")'
         in workflow
