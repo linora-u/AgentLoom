@@ -188,6 +188,7 @@ def test_tui_definition_validation_does_not_load_implementations() -> None:
             "applications/example/workflows/example.yaml",
             {
                 "name": "example",
+                "agent_runtime": "smolagents",
                 "description": "metadata-only validation",
                 "model_type": "powerful",
                 "tools": [{"name": "grep_search", "fixed_args": {"path": "."}}],
@@ -200,6 +201,7 @@ def test_tui_definition_validation_does_not_load_implementations() -> None:
             "applications/example/workflows/example.yaml",
             {
                 "name": "example",
+                "agent_runtime": "smolagents",
                 "description": "metadata-only validation",
                 "model_type": "powerful",
                 "tools": [{"name": "grep_search", "fixed_args": {"unknown": "."}}],
