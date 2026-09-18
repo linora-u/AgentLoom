@@ -1,18 +1,9 @@
-"""Tests for context_compression constants after tool alias rename.
-
-Verifies that TOOL_MAX_RETAIN_CHARS and TOOL_DEDUP_PATTERNS use the current
-canonical tool names (glob_search, grep_search) and that old alias names
-(list_files_glob, ripgrep_search_directory) are no longer present.
-"""
-
-import pytest
+"""Tests for canonical context-compression tool-name constants."""
 
 from agentloom.runtime.memory.context_compression import (
-    TOOL_MAX_RETAIN_CHARS,
-    TOOL_DEDUP_PATTERNS,
     FILE_READ_TOOL_NAMES,
+    TOOL_MAX_RETAIN_CHARS,
 )
-
 
 # ===========================================================================
 # TOOL_MAX_RETAIN_CHARS — alias rename verification
@@ -60,77 +51,19 @@ class TestToolMaxRetainCharsAliasRename:
 
 
 # ===========================================================================
-# TOOL_DEDUP_PATTERNS — file path extraction
-# ===========================================================================
-
-class TestToolDedupPatterns:
-    """Verify dedup patterns work correctly for file-read tools."""
-
-    def test_read_file_pattern_exists(self):
-        assert "read_file" in TOOL_DEDUP_PATTERNS
-
-    def test_read_file_pattern_exists(self):
-        assert "read_file" in TOOL_DEDUP_PATTERNS
-
-    def test_get_file_outline_pattern_exists(self):
-        assert "get_file_outline" in TOOL_DEDUP_PATTERNS
-
-    def test_read_file_extracts_path(self):
-        """Pattern should extract file path from a tool call string."""
-        regex = TOOL_DEDUP_PATTERNS["read_file"]
-        text = 'read_file("src/main.py")'
-        match = regex.search(text)
-        assert match is not None
-        assert match.group(1) == "src/main.py"
-
-    def test_read_file_extracts_single_quotes(self):
-        regex = TOOL_DEDUP_PATTERNS["read_file"]
-        text = "read_file('config/system.yaml')"
-        match = regex.search(text)
-        assert match is not None
-        assert match.group(1) == "config/system.yaml"
-
-    def test_read_file_extracts_path(self):
-        regex = TOOL_DEDUP_PATTERNS["read_file"]
-        text = 'read_file("src/utils.py")'
-        match = regex.search(text)
-        assert match is not None
-        assert match.group(1) == "src/utils.py"
-
-    def test_unrecognized_tool_not_in_patterns(self):
-        """Tools like grep_search should NOT have dedup patterns."""
-        assert "grep_search" not in TOOL_DEDUP_PATTERNS
-        assert "glob_search" not in TOOL_DEDUP_PATTERNS
-        assert "shell_tool" not in TOOL_DEDUP_PATTERNS
-
-    def test_no_match_on_garbage_input(self):
-        """Pattern should not match invalid call syntax."""
-        regex = TOOL_DEDUP_PATTERNS["read_file"]
-        assert regex.search("read_file()") is None
-        assert regex.search("read_file") is None
-
-    def test_path_with_spaces(self):
-        """File paths containing spaces should be extracted."""
-        regex = TOOL_DEDUP_PATTERNS["read_file"]
-        text = 'read_file("path with spaces/file.py")'
-        match = regex.search(text)
-        assert match is not None
-        assert match.group(1) == "path with spaces/file.py"
-
-
-# ===========================================================================
 # FILE_READ_TOOL_NAMES
 # ===========================================================================
 
 class TestFileReadToolNames:
-    """Verify FILE_READ_TOOL_NAMES is consistent with TOOL_DEDUP_PATTERNS."""
+    """Verify the canonical file-read Tool set."""
 
     def test_is_frozenset(self):
         assert isinstance(FILE_READ_TOOL_NAMES, frozenset)
 
-    def test_matches_dedup_pattern_keys(self):
-        """FILE_READ_TOOL_NAMES should contain exactly the TOOL_DEDUP_PATTERNS keys."""
-        assert FILE_READ_TOOL_NAMES == frozenset(TOOL_DEDUP_PATTERNS.keys())
+    def test_contains_only_canonical_read_tools(self):
+        assert FILE_READ_TOOL_NAMES == frozenset(
+            {"read_file", "get_file_outline"}
+        )
 
     def test_contains_read_file(self):
         assert "read_file" in FILE_READ_TOOL_NAMES
