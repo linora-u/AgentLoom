@@ -931,7 +931,16 @@ class YamlAgentFactory:
         if raw_toolsets is not None and not isinstance(raw_toolsets, list):
             raise ValueError("toolsets/default_toolsets must be a list of toolset names")
 
+        raw_tools = config.get("tools") or []
+        AgentConfigNormalizer.validate_tools_config_entries(raw_tools)
+        explicit_tool_names = {
+            tool_config["name"]
+            for tool_config in raw_tools
+        }
+
         for tool_name in resolve_toolsets(raw_toolsets):
+            if tool_name in explicit_tool_names:
+                continue
             tool_function = resolve_tool_function(tool_name)
             _append_tool(tool_function, explicit_name=tool_name)
             log.info(f"[YamlAgentFactory] Loaded toolset tool: {tool_name}")
@@ -948,9 +957,6 @@ class YamlAgentFactory:
             from agentloom.runtime.permissions.policy_summary import patch_shell_tool_security
             patch_shell_tool_security(tools, log)
             return tools, mcp_manager
-
-        raw_tools = config['tools'] or []
-        AgentConfigNormalizer.validate_tools_config_entries(raw_tools)
 
         for tool_config in raw_tools:
             tool_name = tool_config.get('name')
