@@ -13,9 +13,11 @@ from pathlib import Path
 from typing import Any
 
 import yaml
-from agentloom.application.definition import definition_error, load_agent_definition
-
-_AGENT_CONFIG_EXTS = {".yaml", ".yml", ".md"}
+from agentloom.application.definition import (
+    definition_error,
+    discover_application_definition_files,
+    load_agent_definition,
+)
 
 
 def scan_app_structure(app_path: str) -> str:
@@ -62,21 +64,13 @@ def scan_app_structure(app_path: str) -> str:
 
     workflows_dir = app_dir / "workflows"
     if workflows_dir.is_dir():
-        supervisor_configs = sorted(
-            f
-            for f in workflows_dir.iterdir()
-            if f.suffix.lower() in _AGENT_CONFIG_EXTS and f.is_file()
-        )
+        definitions = discover_application_definition_files(workflows_dir)
+        supervisor_configs = [item.path for item in definitions if item.role == "supervisor"]
+        worker_configs = [item.path for item in definitions if item.role == "worker"]
         for sup_cfg in supervisor_configs:
             sections.append(_extract_agent_summary(sup_cfg, role="Supervisor"))
 
-        worker_dir = workflows_dir / "worker_agents"
-        if worker_dir.is_dir():
-            worker_configs = sorted(
-                f
-                for f in worker_dir.rglob("*")
-                if f.suffix.lower() in _AGENT_CONFIG_EXTS and f.is_file()
-            )
+        if worker_configs:
             sections.append(f"\n## Worker Agents ({len(worker_configs)} 个)\n")
             for worker_cfg in worker_configs:
                 sections.append(_extract_agent_summary(worker_cfg, role="Worker"))

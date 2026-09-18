@@ -42,4 +42,7 @@ revisions are recorded in [final validation](architecture-final-validation.md).
 E2 Spec review has no remaining findings. Its one Standards finding, Skill
 discovery of nested workflow definitions, is explicitly deferred by the maintainer
 to [#69](https://github.com/linora-u/AgentLoom/issues/69). It is not silently waived
-or represented as fixed. PR #68 contains the completed implementation and records.
+or represented as fixed in PR #68. The follow-up implementation and validation for
+#69 are recorded in
+[nested workflow discovery validation](nested-workflow-discovery-validation.md).
+PR #68 contains the completed architecture implementation and its original records.
