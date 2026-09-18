@@ -309,6 +309,55 @@ def _normalize_input_schema(
     return normalized
 
 
+def _clone_tool_like_for_runtime(tool: Any) -> Any:
+    """Create one run-owned Tool-like instance without importing its framework."""
+
+    clone_factory = getattr(tool, "clone_for_runtime", None)
+    if callable(clone_factory):
+        cloned = clone_factory()
+    else:
+        try:
+            cloned = deepcopy(tool)
+        except Exception as exc:
+            raise RuntimeError(
+                f"Tool {getattr(tool, 'name', type(tool).__name__)!r} "
+                "cannot be isolated; implement clone_for_runtime()"
+            ) from exc
+
+    if cloned is tool:
+        raise RuntimeError(
+            "clone_for_runtime() must return a distinct Tool-like instance"
+        )
+    if not callable(getattr(cloned, "forward", None)):
+        raise RuntimeError(
+            "clone_for_runtime() must return a Tool-like object with forward()"
+        )
+
+    # A definition may still carry the old inject_hooks wrapper. The new
+    # Gateway owns that pipeline, so bind the original executable semantics to
+    # the clone and remove the old wrapper markers without importing its
+    # framework module.
+    original_forward = getattr(tool, "_agentloom_original_forward", None)
+    if callable(original_forward):
+        if (
+            inspect.ismethod(original_forward)
+            and original_forward.__self__ is tool
+        ):
+            original_forward = original_forward.__func__.__get__(
+                cloned,
+                type(cloned),
+            )
+        cloned.forward = original_forward
+    for attribute in (
+        "_hooks_injected",
+        "_agentloom_original_forward",
+        "_agentloom_settle_tool_call",
+    ):
+        if attribute in getattr(cloned, "__dict__", {}):
+            delattr(cloned, attribute)
+    return cloned
+
+
 def bind_tool(
     tool: ToolBinding | Any,
     *,
@@ -322,6 +371,13 @@ def bind_tool(
 
     declared_forward = getattr(tool, "forward", None)
     plain_callable = not callable(declared_forward) and callable(tool)
+    if not plain_callable:
+        if not callable(declared_forward):
+            raise TypeError(
+                "Tool binding requires a callable or an object with forward()"
+            )
+        tool = _clone_tool_like_for_runtime(tool)
+        declared_forward = getattr(tool, "forward", None)
     forward = declared_forward
     if not callable(forward):
         forward = tool if callable(tool) else None
