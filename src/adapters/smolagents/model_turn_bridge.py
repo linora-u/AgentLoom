@@ -20,6 +20,8 @@ from agentloom.runtime.model_protocol import (
     ModelTurnRequest,
     ReasoningItem,
     ToolDefinition,
+    model_item_from_dict,
+    model_item_to_dict,
 )
 from agentloom.runtime.tool_protocol import TOOL_CALL_RAW_KEY, TOOL_RESULT_RAW_KEY, ToolCallRecord
 from smolagents.models import (
@@ -68,9 +70,30 @@ def _model_items_from_raw(raw: Any) -> tuple[ModelItem, ...] | None:
     items = raw.get(MODEL_ITEMS_RAW_KEY)
     if items is None:
         return None
-    if not isinstance(items, tuple):
+    if not isinstance(items, (list, tuple)):
         raise ModelProtocolError("stored AgentLoom model items are invalid")
-    return items
+    result: list[ModelItem] = []
+    for item in items:
+        if isinstance(
+            item,
+            (
+                MessageItem,
+                FunctionCallItem,
+                FunctionCallOutputItem,
+                ReasoningItem,
+            ),
+        ):
+            result.append(item)
+            continue
+        if not isinstance(item, Mapping):
+            raise ModelProtocolError("stored AgentLoom model item is invalid")
+        try:
+            result.append(model_item_from_dict(item))
+        except (TypeError, ValueError) as exc:
+            raise ModelProtocolError(
+                "stored AgentLoom model item is invalid"
+            ) from exc
+    return tuple(result)
 
 
 def _messages_to_items(messages: list[ChatMessage | dict]) -> tuple[ModelItem, ...]:
@@ -280,7 +303,9 @@ class SmolagentsModelTurnBridge(Model):
         if self._require_tool_calls.get() and tools_to_call_from and not tool_calls:
             raise ModelProtocolError("model response did not contain a structured tool call")
         raw = {
-            MODEL_ITEMS_RAW_KEY: turn.items,
+            MODEL_ITEMS_RAW_KEY: [
+                model_item_to_dict(item) for item in turn.items
+            ],
             MODEL_RESPONSE_ID_RAW_KEY: turn.response_id,
             TOOL_CALL_RAW_KEY: bool(tool_calls),
         }
