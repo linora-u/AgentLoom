@@ -1,24 +1,34 @@
 import logging
 from pathlib import Path
-from types import SimpleNamespace
 
 import agentloom.runtime.agent as base_agent_module
 import pytest
+from agentloom.runtime.agent_runtime import AgentRuntimeResult
 from agentloom.runtime.hooks import HookPlan, HookRun
+from agentloom.runtime.model_binding import ModelTurnBinding
+from agentloom.runtime.model_protocol import ModelTurnResult
 from agentloom.runtime.skills.catalog import SkillCatalog, SkillSource
 from agentloom.runtime.trace import get_current_hook_run, get_current_skill_catalog
 
 
 class _DummyRuntimeAgent:
-    def run(self, task: str, **kwargs):
+    def run(self, request):
         output = {
-            "task": task,
+            "task": request.task,
             "skill_catalog": get_current_skill_catalog(),
             "hook_run": get_current_hook_run(required=True),
         }
-        if kwargs.get("return_full_result"):
-            return SimpleNamespace(output=output, state="success")
-        return output
+        return AgentRuntimeResult(output=output, state="success")
+
+    def close(self):
+        return None
+
+
+class _NoopAdapter:
+    adapter_id = "openai_chat"
+
+    def turn(self, _request):
+        return ModelTurnResult()
 
 
 class _MinimalAgent(base_agent_module.RoleDrivenAgent):
@@ -48,14 +58,18 @@ def test_base_agent_run_binds_agent_scoped_catalogue():
             "name": "minimal_agent",
             "agent_runtime": "smolagents",
         },
-        model=object(),
+        model_binding=ModelTurnBinding(
+            model_type="test",
+            model_id="test/model",
+            adapter=_NoopAdapter(),
+        ),
         logger=logging.getLogger(__name__),
     )
     custom_catalog = SkillCatalog.empty()
     agent._skill_catalog = custom_catalog
     agent._hook_plan = HookPlan()
     agent._effective_agent_config = {"tool_access_control": {}}
-    agent.build_runtime_agent = lambda: _DummyRuntimeAgent()
+    agent.build_runtime = lambda: _DummyRuntimeAgent()
 
     result = agent.run("demo-task")
 

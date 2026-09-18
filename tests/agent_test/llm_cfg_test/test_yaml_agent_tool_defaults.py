@@ -11,6 +11,23 @@ from agentloom.runtime.factory import (
     YamlConfiguredSupervisorAgent,
 )
 from agentloom.runtime.logging import get_global_logger, initialize_global_logger_once, set_global_logger
+from agentloom.runtime.model_binding import ModelTurnBinding
+from agentloom.runtime.model_protocol import ModelTurnResult
+
+
+class _NoopAdapter:
+    adapter_id = "openai_chat"
+
+    def turn(self, _request):
+        return ModelTurnResult()
+
+
+def make_test_model_binding():
+    return ModelTurnBinding(
+        model_type="test",
+        model_id="test/model",
+        adapter=_NoopAdapter(),
+    )
 
 
 @pytest.fixture(autouse=True)
@@ -269,7 +286,10 @@ def test_factory_create_agent_as_tool_exports_when_schema_present():
         "workflow": "demo workflow",
         "agent_function_schema": _basic_schema("factory tool doc"),
     }
-    tool = YamlAgentFactory.create_agent_as_tool(config, model=object())
+    tool = YamlAgentFactory.create_agent_as_tool(
+        config,
+        model_binding=make_test_model_binding(),
+    )
     assert tool is not None
     assert tool.__name__ == "demo_worker"
 
@@ -282,7 +302,10 @@ def test_factory_create_agent_as_tool_not_exported_when_schema_missing():
         "tools": [],
         "workflow": "demo workflow",
     }
-    tool = YamlAgentFactory.create_agent_as_tool(config, model=object())
+    tool = YamlAgentFactory.create_agent_as_tool(
+        config,
+        model_binding=make_test_model_binding(),
+    )
     assert tool is None
 
 

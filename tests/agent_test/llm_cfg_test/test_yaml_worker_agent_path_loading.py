@@ -4,6 +4,23 @@ import agentloom.runtime.factory as yaml_factory_module
 import pytest
 from agentloom.application.validation import AgentConfigNormalizer
 from agentloom.runtime.factory import YamlAgentFactory, YamlConfiguredSupervisorAgent
+from agentloom.runtime.model_binding import ModelTurnBinding
+from agentloom.runtime.model_protocol import ModelTurnResult
+
+
+class _NoopAdapter:
+    adapter_id = "openai_chat"
+
+    def turn(self, _request):
+        return ModelTurnResult()
+
+
+def make_test_model_binding():
+    return ModelTurnBinding(
+        model_type="test",
+        model_id="test/model",
+        adapter=_NoopAdapter(),
+    )
 
 
 class _DummyLogger:
@@ -250,10 +267,18 @@ agent_function_schema:
     monkeypatch.setattr(YamlAgentFactory, "get_tools_from_config", lambda *_args, **_kwargs: ([], None))
     real_create_agent_as_tool = YamlAgentFactory.create_agent_as_tool
 
-    def _create_with_test_model(config, **kwargs):
-        return real_create_agent_as_tool(config, model=object(), **kwargs)
+    def _create_with_test_model_binding(config, **kwargs):
+        return real_create_agent_as_tool(
+            config,
+            model_binding=make_test_model_binding(),
+            **kwargs,
+        )
 
-    monkeypatch.setattr(YamlAgentFactory, "create_agent_as_tool", _create_with_test_model)
+    monkeypatch.setattr(
+        YamlAgentFactory,
+        "create_agent_as_tool",
+        _create_with_test_model_binding,
+    )
 
     supervisor = _build_supervisor_for_get_tools([{"path": "valid.yaml"}])
     tools = supervisor._get_tools()
@@ -285,10 +310,18 @@ workflow: "wf"
     monkeypatch.setattr(YamlAgentFactory, "get_tools_from_config", lambda *_args, **_kwargs: ([], None))
     real_create_agent_as_tool = YamlAgentFactory.create_agent_as_tool
 
-    def _create_with_test_model(config, **kwargs):
-        return real_create_agent_as_tool(config, model=object(), **kwargs)
+    def _create_with_test_model_binding(config, **kwargs):
+        return real_create_agent_as_tool(
+            config,
+            model_binding=make_test_model_binding(),
+            **kwargs,
+        )
 
-    monkeypatch.setattr(YamlAgentFactory, "create_agent_as_tool", _create_with_test_model)
+    monkeypatch.setattr(
+        YamlAgentFactory,
+        "create_agent_as_tool",
+        _create_with_test_model_binding,
+    )
 
     supervisor = _build_supervisor_for_get_tools([{"path": "missing.yaml"}])
     tools = supervisor._get_tools()
