@@ -2,8 +2,6 @@ import json
 import logging
 import pathlib
 
-from smolagents.models import ChatMessage, ChatMessageToolCall, ChatMessageToolCallFunction, MessageRole
-
 import agentloom.runtime.memory.context_compression as compression_module
 from agentloom.runtime.memory.context_compression import (
     FILE_DEDUP_PLACEHOLDER,
@@ -25,6 +23,12 @@ from agentloom.runtime.memory.context_compression import (
     to_internal_messages,
     truncate_conversation,
 )
+from agentloom.runtime.model_protocol import (
+    MODEL_ITEMS_RAW_KEY,
+    MODEL_RESPONSE_ID_RAW_KEY,
+    FunctionCallItem,
+)
+from smolagents.models import ChatMessage, ChatMessageToolCall, ChatMessageToolCallFunction, MessageRole
 
 MOCK_DIR = pathlib.Path(__file__).parent
 
@@ -50,6 +54,33 @@ def create_history_messages():
         ChatMessage(role=MessageRole.USER, content="user request"),
         ChatMessage(role=MessageRole.ASSISTANT, content="assistant reply"),
     ]
+
+
+def test_sync_accepts_canonical_items_with_frozen_replay_payload() -> None:
+    manager = ConversationHistoryManager(max_tokens=4096)
+    message = ChatMessage(
+        role=MessageRole.ASSISTANT,
+        content="",
+        raw={
+            MODEL_ITEMS_RAW_KEY: (
+                FunctionCallItem(
+                    call_id="call-1",
+                    name="read_file",
+                    arguments_json='{"file_path":"/tmp/example"}',
+                    replay_payload={
+                        "type": "function_call",
+                        "provider": {"request_id": "opaque"},
+                    },
+                ),
+            ),
+            MODEL_RESPONSE_ID_RAW_KEY: "response-1",
+        },
+    )
+
+    manager.sync_from_messages([message])
+    manager.sync_from_messages([message])
+
+    assert manager.get_internal_messages()[0].message is message
 
 
 def test_extract_tool_invocations_from_native_dict_tool_calls():
