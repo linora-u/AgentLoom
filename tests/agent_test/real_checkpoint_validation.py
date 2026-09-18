@@ -131,9 +131,8 @@ def _configure_completed_worker_probe() -> None:
         "## Phase 2: Completed Worker handoff and intentional interruption\n"
         "Execute exactly two native structured tool calls. "
         "The host interrupts the first handoff, after the Worker has completed. "
-        "On resume, call the Worker again with the identical query. "
-        "The framework must return the completed Worker result from its checkpoint. "
-        "Do not invent or reconstruct the result.\n"
+        "On resume, continue from the committed Worker result in runtime state. "
+        "Do not call the Worker again, invent, or reconstruct the result.\n"
         "1. Call `artifact_worker` with this exact `query`:\n"
         f"  `{query}`\n"
         "2. Call `record_checkpoint_worker_output` with "
@@ -632,8 +631,15 @@ def resume_prepared(state: dict) -> dict:
         after_output = (SESSION_ROOT / "worker_output_after.txt").read_text()
         if after_output != before["output"]:
             raise AssertionError("Cached Worker output differs from its real pre-interruption return")
-        if len(calls) != before["call_count"] or after.get("worker_call_cached_result_claimed") != 1:
-            raise AssertionError("Completed Worker was not claimed exactly once from cache")
+        if (
+            len(calls) != before["call_count"]
+            or after.get("worker_call_started") != 1
+            or after.get("worker_call_finished") != 1
+            or after.get("worker_call_cached_result_claimed", 0) != 0
+        ):
+            raise AssertionError(
+                "Completed Worker was called again instead of replaying committed runtime state"
+            )
         if after_worker != before["checkpoint"] or _worker_usage(after_worker) != before["usage"]:
             raise AssertionError("Completed Worker checkpoint or model usage changed on replay")
         if sum(before["usage"].values()) <= 0:
@@ -646,7 +652,7 @@ def resume_prepared(state: dict) -> dict:
             "ended_at": datetime.now(UTC).isoformat(),
             "assertions": ["task preserved", "new run", "one Worker call", "side effects exactly once",
                            "final artifact oracle", "old ContextRef retrieved", "file history restored"]
-                          + (["completed Worker cached exactly once", "exact cached output", "Worker usage unchanged"]
+                          + (["completed Worker not called again", "exact replayed output", "Worker usage unchanged"]
                              if state["scenario"] == "completed" else [])}
 
 
