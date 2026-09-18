@@ -6,10 +6,10 @@ before-run callbacks, and canonical Todo state hydration.
 
 import json
 
+from agentloom.adapters.smolagents.context_compression import ConversationHistoryManager
 from agentloom.adapters.smolagents.tool_protocol import action_step_to_protocol_messages
 from agentloom.runtime.hooks import wrap_in_system_reminder
 from agentloom.runtime.logging import get_logger
-from agentloom.runtime.memory.context_compression import ConversationHistoryManager
 from agentloom.runtime.trace import (
     get_current_agent_name,
     get_current_hook_run,

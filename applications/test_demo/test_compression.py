@@ -13,6 +13,13 @@ if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
 
+from agentloom.adapters.smolagents.context_compression import (  # noqa: E402
+    FILE_DEDUP_PLACEHOLDER,
+    OBSERVATION_MASKING_PLACEHOLDER,
+    ConversationHistoryManager,
+    InternalChatMessage,
+    _extract_content_text,
+)
 from agentloom.adapters.smolagents.models.model_manager import model_manager  # noqa: E402
 from agentloom.adapters.smolagents.models.model_types import ModelType  # noqa: E402
 from agentloom.runtime.factory import (  # noqa: E402
@@ -22,13 +29,6 @@ from agentloom.runtime.factory import (  # noqa: E402
 from agentloom.runtime.logging import (  # noqa: E402
     get_global_logger,
     initialize_global_logger_once,
-)
-from agentloom.runtime.memory.context_compression import (  # noqa: E402
-    FILE_DEDUP_PLACEHOLDER,
-    OBSERVATION_MASKING_PLACEHOLDER,
-    ConversationHistoryManager,
-    InternalChatMessage,
-    _extract_content_text,
 )
 from agentloom.runtime.trace import generate_id  # noqa: E402
 from smolagents.models import (  # noqa: E402
