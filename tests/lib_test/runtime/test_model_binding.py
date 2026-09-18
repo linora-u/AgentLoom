@@ -288,6 +288,66 @@ def test_config_resolver_uses_existing_default_selection_and_content_cache(
     assert created == ["openai_chat", "openai_chat"]
 
 
+def test_config_resolver_applies_runtime_neutral_profile_overlay(
+    monkeypatch,
+) -> None:
+    config = LLMConfig.from_dict(
+        {
+            "model": {
+                "default_model_type": "summary",
+                "summary": {
+                    "model": "provider/summary",
+                    "adapter": "openai_responses",
+                    "context_window": 32_000,
+                    "max_output_tokens": 4_000,
+                    "num_retries": 9,
+                    "retry_delay": 3.0,
+                    "max_retry_delay": 30.0,
+                    "requests_per_minute": 19,
+                },
+            }
+        }
+    )
+    monkeypatch.setattr(litellm_binding, "C", SimpleNamespace(llm=config))
+    monkeypatch.setattr(
+        litellm_binding,
+        "build_model_request_headers",
+        lambda _headers: {"X-System": "kept"},
+    )
+    limiter_calls: list[tuple[str, int]] = []
+    monkeypatch.setattr(
+        litellm_binding.GlobalRateLimiterRegistry,
+        "get_limiter",
+        lambda model_type, rpm: limiter_calls.append((model_type, rpm)),
+    )
+    adapter = _RecordingAdapter()
+    adapter.adapter_id = "openai_responses"
+
+    binding = litellm_binding.resolve_litellm_model_turn_binding(
+        "summary",
+        profile_overlay=litellm_binding.ModelProfileOverlay(
+            num_retries=0,
+            retry_delay=0.0,
+            max_retry_delay=0.0,
+            context_window=40_000,
+            max_output_tokens=2_000,
+        ),
+        adapter_factory=lambda _selected, **_kwargs: adapter,
+    )
+
+    assert binding.model_id == "provider/summary"
+    assert binding.adapter is adapter
+    assert binding.context_window == 40_000
+    assert binding.max_output_tokens == 2_000
+    assert binding.input_token_limit == 38_000
+    assert binding.requests_per_minute == 19
+    assert binding.options["num_retries"] == 0
+    assert binding.options["retry_delay"] == 0.0
+    assert binding.options["max_retry_delay"] == 0.0
+    assert binding.options["extra_headers"] == {"X-System": "kept"}
+    assert limiter_calls == [("summary", 19)]
+
+
 def test_config_resolver_propagates_unknown_model_type_without_fallback(
     monkeypatch,
 ) -> None:
