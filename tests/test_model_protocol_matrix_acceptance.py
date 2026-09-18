@@ -402,6 +402,30 @@ def test_execute_matrix_continues_after_failure_and_preserves_not_run(
     assert json.loads((tmp_path / "summary.json").read_text()) == reports
 
 
+def test_missing_config_is_not_run_but_invalid_config_is_failed(
+    monkeypatch,
+) -> None:
+    monkeypatch.setattr(matrix, "_revision", lambda: "revision")
+
+    missing = matrix.configuration_failure_reports(
+        FileNotFoundError("config/llm.yaml is absent")
+    )
+    invalid = matrix.configuration_failure_reports(
+        ValueError(
+            "adapter=unknown api_key=sk-invalid-secret-123 "
+            "https://provider.example/v1"
+        )
+    )
+
+    assert {report["status"] for report in missing} == {"NOT-RUN"}
+    assert matrix.matrix_exit_code(missing) == 0
+    assert {report["status"] for report in invalid} == {"FAILED"}
+    assert matrix.matrix_exit_code(invalid) == 1
+    rendered = json.dumps(invalid)
+    assert "sk-invalid-secret-123" not in rendered
+    assert "provider.example" not in rendered
+
+
 @pytest.mark.parametrize(
     ("statuses", "expected"),
     [
