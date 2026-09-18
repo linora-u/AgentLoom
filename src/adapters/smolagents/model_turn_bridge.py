@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import json
-from collections.abc import Iterator, Mapping
+from collections.abc import Callable, Iterator, Mapping
 from contextlib import contextmanager
 from contextvars import ContextVar
 from typing import Any
@@ -17,6 +17,7 @@ from agentloom.runtime.model_protocol import (
     MessageItem,
     ModelItem,
     ModelProtocolError,
+    ModelTurnResult,
     ReasoningItem,
     ToolDefinition,
     model_item_from_dict,
@@ -184,6 +185,12 @@ class SmolagentsModelTurnBridge(Model):
             f"agentloom_bridge_agent_id_{id(self)}",
             default=None,
         )
+        self._turn_observer: ContextVar[
+            Callable[[ModelTurnResult], None] | None
+        ] = ContextVar(
+            f"agentloom_bridge_turn_observer_{id(self)}",
+            default=None,
+        )
 
     @property
     def agent_id(self) -> Any | None:
@@ -200,6 +207,19 @@ class SmolagentsModelTurnBridge(Model):
             yield
         finally:
             self._require_tool_calls.reset(token)
+
+    @contextmanager
+    def observe_turns(
+        self,
+        observer: Callable[[ModelTurnResult], None],
+    ) -> Iterator[None]:
+        """Observe canonical model turns for the enclosing runtime run only."""
+
+        token = self._turn_observer.set(observer)
+        try:
+            yield
+        finally:
+            self._turn_observer.reset(token)
 
     def generate(
         self,
@@ -248,6 +268,9 @@ class SmolagentsModelTurnBridge(Model):
             tools=tuple(_tool_definition(tool) for tool in tools_to_call_from or ()),
             options=options,
         )
+        turn_observer = self._turn_observer.get()
+        if turn_observer is not None:
+            turn_observer(turn)
         if goal_provider is not None:
             goal_provider.record_usage(
                 prompt_tokens=turn.usage.input_tokens,

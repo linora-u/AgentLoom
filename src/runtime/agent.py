@@ -31,6 +31,7 @@ from agentloom.runtime.agent_runtime import (
     RuntimeCapabilities,
     RuntimeCheckpointEnvelope,
     RuntimeDefinition,
+    RuntimeEvent,
     build_builtin_runtime_registry,
     require_runtime_state,
 )
@@ -819,6 +820,35 @@ class SubTaskTrackedAgent:
         except Exception:
             return None
 
+    def _subagent_event(
+        self,
+        request: AgentRuntimeRequest,
+        *,
+        phase: str,
+        sub_task_id: str,
+        error: str | None = None,
+    ) -> RuntimeEvent:
+        details = {
+            "phase": phase,
+            "agent_name": self._agent_name,
+            "sub_task_id": sub_task_id,
+        }
+        if error is not None:
+            details["error"] = error
+        event = RuntimeEvent(
+            kind="subagent",
+            application_id=request.application_id,
+            task_id=request.task_id,
+            run_id=request.run_id,
+            details=details,
+        )
+        if request.event_sink is not None:
+            try:
+                request.event_sink(event)
+            except Exception:
+                pass
+        return event
+
     def run(self, request: AgentRuntimeRequest) -> AgentRuntimeResult:
         """Run callable within sub-task context, broadcasting lifecycle events.
 
@@ -833,6 +863,11 @@ class SubTaskTrackedAgent:
         from agentloom.runtime.checkpoint.coordinator import CheckpointCoordinator
 
         with sub_task_context(self._agent_name) as sub_task_id:
+            started_event = self._subagent_event(
+                request,
+                phase="started",
+                sub_task_id=sub_task_id,
+            )
             self._log.debug(
                 "Starting sub-task %s (agent: %s)",
                 sub_task_id,
@@ -857,9 +892,15 @@ class SubTaskTrackedAgent:
                         self._agent_name,
                         input_hash[:8],
                     )
+                    completed_event = self._subagent_event(
+                        request,
+                        phase="completed",
+                        sub_task_id=sub_task_id,
+                    )
                     return AgentRuntimeResult(
                         state="success",
                         output=preparation.cached_result,
+                        events=(started_event, completed_event),
                     )
                 call_index = preparation.call_index
             else:
@@ -924,6 +965,11 @@ class SubTaskTrackedAgent:
                     error_prefix="Worker run did not complete successfully",
                 )
             except KeyboardInterrupt:
+                self._subagent_event(
+                    request,
+                    phase="interrupted",
+                    sub_task_id=sub_task_id,
+                )
                 if coord is not None:
                     coord.record_worker_interrupted(
                         self._agent_name,
@@ -934,6 +980,12 @@ class SubTaskTrackedAgent:
                     )
                 raise
             except Exception as exc:
+                self._subagent_event(
+                    request,
+                    phase="failed",
+                    sub_task_id=sub_task_id,
+                    error=str(exc),
+                )
                 if coord is not None:
                     coord.record_worker_failure(
                         self._agent_name,
@@ -976,7 +1028,15 @@ class SubTaskTrackedAgent:
                 self._log.warning("SubagentStop hook error: %s", hook_err)
 
             self._log.debug("Finished sub-task %s", sub_task_id)
-            return result
+            completed_event = self._subagent_event(
+                request,
+                phase="completed",
+                sub_task_id=sub_task_id,
+            )
+            return replace(
+                result,
+                events=(started_event, *result.events, completed_event),
+            )
 
     def snapshot(self) -> RuntimeCheckpointEnvelope:
         return self._runtime.snapshot()
