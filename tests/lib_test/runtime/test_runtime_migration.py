@@ -7,10 +7,6 @@ from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 import pytest
-from agentloom.adapters.smolagents.checkpoint_codec import (
-    CANONICAL_MODEL_ITEMS_KEY,
-    SmolagentsCheckpointCodec,
-)
 
 NOW = datetime(2026, 7, 16, 12, 0, tzinfo=UTC)
 CONTEXT_REF = "ctx_0123456789abcdef"
@@ -36,26 +32,18 @@ def _make_workflow(repo_root: Path, application_id: str) -> Path:
 
 
 def _runtime_checkpoint(steps: list[dict]) -> dict:
-    native_steps = SmolagentsCheckpointCodec.deserialize_memory_steps(steps)
-    canonical_items = (
-        SmolagentsCheckpointCodec.serialize_canonical_model_items(native_steps)
-    )
     return {
-        "runtime_id": "smolagents",
+        "runtime_id": "test-runtime",
         "runtime_version": "test",
-        "state_schema_version": 2,
+        "state_schema_version": 1,
         "task_id": None,
         "run_id": None,
-        "progress": len(native_steps),
+        "progress": len(steps),
         "audit_metadata": {
-            "native_step_count": len(native_steps),
-            "canonical_item_count": len(canonical_items),
+            "entry_count": len(steps),
         },
         "payload": {
-            "memory_steps": (
-                SmolagentsCheckpointCodec.serialize_memory_steps(native_steps)
-            ),
-            CANONICAL_MODEL_ITEMS_KEY: canonical_items,
+            "entries": steps,
         },
     }
 
@@ -707,7 +695,7 @@ def test_scan_skips_checkpoint_without_runtime_envelope(tmp_path: Path) -> None:
     checkpoint = json.loads(
         (task_dir / "checkpoint.json").read_text(encoding="utf-8")
     )
-    legacy_steps = checkpoint["runtime_checkpoint"]["payload"]["memory_steps"]
+    legacy_steps = checkpoint["runtime_checkpoint"]["payload"]["entries"]
     checkpoint.pop("runtime_checkpoint")
     checkpoint["memory_steps"] = legacy_steps
     _write_json(task_dir / "checkpoint.json", checkpoint)
@@ -825,10 +813,10 @@ def test_apply_uses_staging_verifies_context_ref_and_archives_whole_legacy_tree(
         2,
     )
     assert supervisor_checkpoint["step_count"] == 1
-    assert supervisor_checkpoint["runtime_checkpoint"]["runtime_id"] == "smolagents"
+    assert supervisor_checkpoint["runtime_checkpoint"]["runtime_id"] == "test-runtime"
     assert "memory_steps" not in supervisor_checkpoint
     assert worker_payload["step_count"] == 1
-    assert worker_payload["runtime_checkpoint"]["runtime_id"] == "smolagents"
+    assert worker_payload["runtime_checkpoint"]["runtime_id"] == "test-runtime"
     assert "memory_steps" not in worker_payload
     assert ContextStore(destination / "context_store").retrieve(CONTEXT_REF) == CONTEXT_PAYLOAD
     assert not legacy_root.exists()
@@ -929,23 +917,12 @@ def test_source_change_during_staging_aborts_before_publish_or_archive(
         checkpoint_path = source / "checkpoint.json"
         checkpoint = json.loads(checkpoint_path.read_text(encoding="utf-8"))
         payload = checkpoint["runtime_checkpoint"]["payload"]
-        payload["memory_steps"].append(
+        payload["entries"].append(
             {"_step_type": "TaskStep", "task": "new legacy progress"}
-        )
-        native_steps = SmolagentsCheckpointCodec.deserialize_memory_steps(
-            payload["memory_steps"]
-        )
-        payload[CANONICAL_MODEL_ITEMS_KEY] = (
-            SmolagentsCheckpointCodec.serialize_canonical_model_items(
-                native_steps
-            )
         )
         checkpoint["runtime_checkpoint"]["progress"] = 2
         checkpoint["runtime_checkpoint"]["audit_metadata"] = {
-            "native_step_count": 2,
-            "canonical_item_count": len(
-                payload[CANONICAL_MODEL_ITEMS_KEY]
-            ),
+            "entry_count": 2,
         }
         checkpoint["step_count"] = 2
         _write_json(checkpoint_path, checkpoint)

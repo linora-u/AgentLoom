@@ -836,13 +836,16 @@ def _file_history_progress_state(task_dir: Path) -> str:
 
 def _checkpoint_has_memory(checkpoint: dict[str, Any]) -> bool:
     runtime_checkpoint = checkpoint.get("runtime_checkpoint")
-    payload = (
-        runtime_checkpoint.get("payload")
-        if isinstance(runtime_checkpoint, dict)
-        else None
-    )
-    steps = payload.get("memory_steps") if isinstance(payload, dict) else None
-    return isinstance(steps, list) and len(steps) > 0
+    if not isinstance(runtime_checkpoint, dict):
+        return False
+
+    from agentloom.runtime.agent_runtime import RuntimeCheckpointEnvelope
+
+    try:
+        envelope = RuntimeCheckpointEnvelope.from_dict(runtime_checkpoint)
+    except (TypeError, ValueError):
+        return False
+    return envelope.progress > 0
 
 
 def _application_id_from_workflow(workflow: Path, agent_root: Path) -> str:
@@ -990,9 +993,7 @@ def validate_migrated_checkpoint(candidate: MigrationCandidate, destination: Pat
     if not progress:
         raise MigrationError(f"resumable progress missing for {candidate.task_id}")
 
-    from agentloom.adapters.smolagents.checkpoint_codec import (
-        SmolagentsCheckpointCodec,
-    )
+    from agentloom.runtime.agent_runtime import RuntimeCheckpointEnvelope
     from agentloom.runtime.checkpoint import CheckpointManager
 
     manager = CheckpointManager(
@@ -1012,9 +1013,7 @@ def validate_migrated_checkpoint(candidate: MigrationCandidate, destination: Pat
             f"supervisor runtime checkpoint missing for {candidate.task_id}"
         )
     try:
-        SmolagentsCheckpointCodec.validate_runtime_checkpoint(
-            raw_supervisor_runtime
-        )
+        RuntimeCheckpointEnvelope.from_dict(raw_supervisor_runtime)
     except (TypeError, ValueError) as exc:
         raise MigrationError(
             f"supervisor runtime checkpoint invalid for {candidate.task_id}"
@@ -1046,9 +1045,7 @@ def validate_migrated_checkpoint(candidate: MigrationCandidate, destination: Pat
                     f"{worker_name} call {call_index}"
                 )
             try:
-                SmolagentsCheckpointCodec.validate_runtime_checkpoint(
-                    raw_worker_runtime
-                )
+                RuntimeCheckpointEnvelope.from_dict(raw_worker_runtime)
             except (TypeError, ValueError) as exc:
                 raise MigrationError(
                     f"worker runtime checkpoint invalid for "
