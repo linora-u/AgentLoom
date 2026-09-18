@@ -8,13 +8,9 @@ ParallelAgentExecutor.
 
 from __future__ import annotations
 
-import threading
 from unittest.mock import MagicMock, patch
 
-import pytest
-
 from agentloom.runtime.concurrency.models import TaskResult
-
 
 # ─── Helpers ────────────────────────────────────────────────────── #
 
@@ -25,7 +21,7 @@ def _make_config(concurrency=None):
         "description": "Batch test worker",
         "workflow": "Process the query.",
         "model_type": "powerful",
-        "tool_call_type": "code_act",
+        "agent_runtime": "smolagents",
         "agent_function_schema": {
             "description": "Batch test tool",
             "inputs": {
@@ -56,7 +52,6 @@ def _create_tool(config):
             self._model = kw.get("model")
             self.model = self._model
             self.logger = kw.get("logger")
-            self._execution_env = kw.get("execution_env")
             self.name = config["name"]
             self.description = config.get("description", "")
 
