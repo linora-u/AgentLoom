@@ -7,6 +7,10 @@ from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 import pytest
+from agentloom.adapters.smolagents.checkpoint_codec import (
+    CANONICAL_MODEL_ITEMS_KEY,
+    SmolagentsCheckpointCodec,
+)
 
 NOW = datetime(2026, 7, 16, 12, 0, tzinfo=UTC)
 CONTEXT_REF = "ctx_0123456789abcdef"
@@ -32,13 +36,26 @@ def _make_workflow(repo_root: Path, application_id: str) -> Path:
 
 
 def _runtime_checkpoint(steps: list[dict]) -> dict:
+    native_steps = SmolagentsCheckpointCodec.deserialize_memory_steps(steps)
+    canonical_items = (
+        SmolagentsCheckpointCodec.serialize_canonical_model_items(native_steps)
+    )
     return {
         "runtime_id": "smolagents",
         "runtime_version": "test",
-        "state_schema_version": 1,
+        "state_schema_version": 2,
+        "task_id": None,
+        "run_id": None,
+        "progress": len(native_steps),
+        "audit_metadata": {
+            "native_step_count": len(native_steps),
+            "canonical_item_count": len(canonical_items),
+        },
         "payload": {
-            "memory_steps": steps,
-            "step_count": len(steps),
+            "memory_steps": (
+                SmolagentsCheckpointCodec.serialize_memory_steps(native_steps)
+            ),
+            CANONICAL_MODEL_ITEMS_KEY: canonical_items,
         },
     }
 
@@ -911,10 +928,25 @@ def test_source_change_during_staging_aborts_before_publish_or_archive(
     def append_legacy_progress(_candidate, _staged: Path) -> None:
         checkpoint_path = source / "checkpoint.json"
         checkpoint = json.loads(checkpoint_path.read_text(encoding="utf-8"))
-        checkpoint["runtime_checkpoint"]["payload"]["memory_steps"].append(
+        payload = checkpoint["runtime_checkpoint"]["payload"]
+        payload["memory_steps"].append(
             {"_step_type": "TaskStep", "task": "new legacy progress"}
         )
-        checkpoint["runtime_checkpoint"]["payload"]["step_count"] = 2
+        native_steps = SmolagentsCheckpointCodec.deserialize_memory_steps(
+            payload["memory_steps"]
+        )
+        payload[CANONICAL_MODEL_ITEMS_KEY] = (
+            SmolagentsCheckpointCodec.serialize_canonical_model_items(
+                native_steps
+            )
+        )
+        checkpoint["runtime_checkpoint"]["progress"] = 2
+        checkpoint["runtime_checkpoint"]["audit_metadata"] = {
+            "native_step_count": 2,
+            "canonical_item_count": len(
+                payload[CANONICAL_MODEL_ITEMS_KEY]
+            ),
+        }
         checkpoint["step_count"] = 2
         _write_json(checkpoint_path, checkpoint)
 
