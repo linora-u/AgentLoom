@@ -3,24 +3,25 @@ import hashlib
 import inspect
 import json
 import re
+from collections.abc import Callable
 from functools import wraps
 from pathlib import Path
-from typing import Any, Callable, Dict, List, Optional, Union
+from typing import Any
 
+from agentloom.application.definition import extract_markdown_definition, load_agent_definition
+from agentloom.application.validation import AgentConfigNormalizer, NormalizedAgentConfig
+from agentloom.application.workflows import get_worker_agent_yaml_path, infer_category_from_yaml_path
 from agentloom.configuration import C, get_default_toolsets
 from agentloom.configuration.yaml_loader import load_unique_yaml
-from agentloom.application.definition import load_agent_definition, extract_markdown_definition
+from agentloom.runtime.agent import AgentRoleProfile, AgentType, RoleDrivenAgent
+from agentloom.runtime.goal import normalize_goal_config, normalize_workflow_for_goal
 from agentloom.runtime.logging import (
     get_logger,
 )
-from agentloom.runtime.goal import normalize_goal_config, normalize_workflow_for_goal
-from agentloom.adapters.smolagents import AgentLogger
-from agentloom.application.validation import AgentConfigNormalizer, NormalizedAgentConfig
-from agentloom.runtime.agent import AgentRoleProfile, AgentType, RoleDrivenAgent
-from agentloom.utils.dynamic_import import load_function
+from agentloom.runtime.tool_gateway import bind_tool
 from agentloom.tools.catalog import resolve_toolsets
 from agentloom.tools.loader import resolve_tool_function
-from agentloom.application.workflows import get_worker_agent_yaml_path, infer_category_from_yaml_path
+from agentloom.utils.dynamic_import import load_function
 
 # Prompt protocol constants are externalized in prompts/ YAML to keep wording/template
 # configuration centralized and editable without changing implementation logic.
@@ -146,7 +147,7 @@ def _expand_prompt_protocol_string(value: str, symbols: dict[str, str], config_p
     return _PROMPT_PROTOCOL_VAR_PATTERN.sub(_replace, value)
 
 
-def _load_prompt_protocol_config(path: Optional[Path] = None) -> dict[str, Any]:
+def _load_prompt_protocol_config(path: Path | None = None) -> dict[str, Any]:
     config_path = Path(path) if path is not None else _PROMPT_PROTOCOL_PATH
     if not config_path.exists():
         raise RuntimeError(f"Prompt protocol config file not found: {config_path}")
@@ -245,9 +246,9 @@ WORKFLOW_INNER_INDENT = _PROMPT_PROTOCOL["workflow_inner_indent"]
 
 MERMAID_BLOCK_PATTERN = re.compile(r"```mermaid\s*\n(.*?)\n\s*```", flags=re.DOTALL | re.IGNORECASE)
 _TASK_SPEC_RENDER_CACHE: dict[str, tuple[str, tuple[str, ...], bool]] = {}
-_MERMAID_VALIDATION_CACHE: dict[str, Optional[str]] = {}
+_MERMAID_VALIDATION_CACHE: dict[str, str | None] = {}
 _MERMAID_VALIDATOR = None
-_MERMAID_VALIDATOR_IMPORT_ERROR: Optional[str] = None
+_MERMAID_VALIDATOR_IMPORT_ERROR: str | None = None
 
 
 def _get_mermaid_validator():
@@ -267,7 +268,7 @@ def _get_mermaid_validator():
     return _MERMAID_VALIDATOR
 
 
-def _validate_mermaid_text(mermaid_text: str) -> Optional[str]:
+def _validate_mermaid_text(mermaid_text: str) -> str | None:
     """
     Validate Mermaid content and return warning text when invalid.
 
@@ -369,7 +370,7 @@ def _render_task_spec_content(task_spec_source: str) -> tuple[str, list[str], bo
     return rendered_content, warnings, has_workflow
 
 
-def _build_task_spec_block(task_spec_source: str, logger: Optional[AgentLogger] = None) -> tuple[str, bool]:
+def _build_task_spec_block(task_spec_source: str, logger: Any = None) -> tuple[str, bool]:
     rendered_content, warnings, has_workflow = _render_task_spec_content(task_spec_source)
     log = get_logger(logger, __name__)
     if warnings:
@@ -417,10 +418,10 @@ class YamlConfiguredAgent(RoleDrivenAgent):
             inject_default_file_tools=False
         )
 
-    def _runtime_agent_name(self) -> Optional[str]:
+    def _runtime_agent_name(self) -> str | None:
         return self.name
 
-    def _runtime_agent_description(self) -> Optional[str]:
+    def _runtime_agent_description(self) -> str | None:
         return self.description
 
     def _get_tools(self):
@@ -458,7 +459,7 @@ class YamlConfiguredAgent(RoleDrivenAgent):
         # ── Factory mode: capture shared immutable state ──
         # Agent instances are stateful (memory.steps, state, step_number),
         # so we create a NEW agent per call. These components are safe to share:
-        _shared_model = getattr(self, "_model", None) or getattr(self, "model", None)
+        _shared_model_binding = getattr(self, "_model_binding", None)
         _shared_logger = getattr(self, "logger", None) or getattr(self, "_logger", None)
         _frozen_config = self._config  # read-only dict
         _AgentClass = self.__class__
@@ -466,9 +467,10 @@ class YamlConfiguredAgent(RoleDrivenAgent):
         _yaml_concurrency = self._config.get("concurrency")  # "auto" / int / None
         _model_type = self._config.get("model_type", "powerful")
 
-        # A missing model means the caller is using an already-constructed test/mock agent.
+        # A missing binding means the caller is using an already-constructed
+        # test/mock agent.
         # Reusing that instance keeps the call on the patched run() implementation.
-        _factory_mode = _shared_model is not None
+        _factory_mode = _shared_model_binding is not None
 
         def _create_fresh_agent():
             """Create a new Agent instance for thread-safe execution."""
@@ -476,7 +478,7 @@ class YamlConfiguredAgent(RoleDrivenAgent):
                 return _self_ref
             return _AgentClass(
                 config=_frozen_config,
-                model=_shared_model,
+                model_binding=_shared_model_binding,
                 logger=_shared_logger,
             )
 
@@ -662,11 +664,11 @@ class YamlConfiguredAgent(RoleDrivenAgent):
             return_annotation=str,
         )
 
-        # Fail fast: ensure the generated function can be converted into tool schema.
+        # Fail fast through AgentLoom's runtime-neutral Tool schema seam.
         try:
-            from smolagents.tools import get_json_schema
-
-            get_json_schema(dynamic_agent_tool)
+            binding = bind_tool(dynamic_agent_tool)
+            if binding.definition.name != function_name:
+                raise ValueError("generated Tool name does not match its schema")
         except Exception as e:
             raise ValueError(
                 f"Failed to generate agent tool schema for '{function_name}': {e}"
@@ -765,7 +767,7 @@ class YamlConfiguredSupervisorAgent(RoleDrivenAgent):
             return items
         return [self._transform_task(task)]
 
-    def _get_tools(self) -> List:
+    def _get_tools(self) -> list:
         """Get the tool list from configuration."""
         tools = []
         worker_logger = getattr(self, "logger", None) or getattr(self, "_logger", None)
@@ -827,11 +829,11 @@ class YamlConfiguredSupervisorAgent(RoleDrivenAgent):
 def _load_mcp_tools(
     *,
     config: dict,
-    effective_agent_config: Optional[dict],
+    effective_agent_config: dict | None,
     agent_root: Path,
     append_tool: Callable,
     log: Any,
-) -> Optional[Any]:
+) -> Any | None:
     """Load MCP tools from ``mcp_servers`` config and append them via *append_tool*.
 
     Returns a :class:`McpManager` instance when at least one MCP server is
@@ -892,7 +894,7 @@ class YamlAgentFactory:
     """
 
     @staticmethod
-    def get_tools_from_config(config: dict, logger: Optional[AgentLogger] = None, effective_agent_config: Optional[dict] = None) -> tuple:
+    def get_tools_from_config(config: dict, logger: Any = None, effective_agent_config: dict | None = None) -> tuple:
         """Load tool list from a configuration dictionary.
 
         Returns
@@ -909,10 +911,10 @@ class YamlAgentFactory:
         tools = []
         seen = set()
 
-        def _tool_name(tool_obj) -> Optional[str]:
+        def _tool_name(tool_obj) -> str | None:
             return getattr(tool_obj, "name", None) or getattr(tool_obj, "__name__", None)
 
-        def _append_tool(tool_obj, explicit_name: Optional[str] = None):
+        def _append_tool(tool_obj, explicit_name: str | None = None):
             tool_name = explicit_name or _tool_name(tool_obj)
             if tool_name and tool_name in seen:
                 return
@@ -1016,7 +1018,7 @@ class YamlAgentFactory:
         return extract_markdown_definition(content)
 
     @staticmethod
-    def _prepare_agent_config(config: dict, *, source_path: Union[str, Path, None] = None) -> dict:
+    def _prepare_agent_config(config: dict, *, source_path: str | Path | None = None) -> dict:
         if not isinstance(config, dict):
             raise ValueError(f"Agent configuration must be a mapping, got {type(config).__name__}")
 
@@ -1031,7 +1033,7 @@ class YamlAgentFactory:
         return prepared
 
     @staticmethod
-    def _load_config_from_file(config_path: Union[str, Path]) -> dict:
+    def _load_config_from_file(config_path: str | Path) -> dict:
         """
         Load configuration from file, supporting .yaml and .md files.
 
@@ -1044,16 +1046,16 @@ class YamlAgentFactory:
         return load_agent_definition(config_path)
 
     @staticmethod
-    def create_agent_tool(config_path: Union[str, Path, dict],
+    def create_agent_tool(config_path: str | Path | dict,
                          agent_class=None,
-                         model=None) -> List:
+                         model_binding=None) -> list:
         """
         Create an agent tool from YAML configuration.
 
         Args:
             config_path: YAML/Markdown config file path or config dictionary.
             agent_class: Optional custom agent class, defaults to YamlConfiguredAgent.
-            model: Optional model instance.
+            model_binding: Optional resolved model binding.
 
         Returns:
             List: List of functions decorated by @tool.
@@ -1070,19 +1072,19 @@ class YamlAgentFactory:
         # Create configured agent
         agent = AgentClass(
             config=config,
-            model=model,
+            model_binding=model_binding,
         )
 
         # Return agent tool list directly; tools are already decorated with @tool
         return agent._get_tools()
 
     @staticmethod
-    def create_agent_as_tool(config_path: Union[str, Path, dict],
+    def create_agent_as_tool(config_path: str | Path | dict,
                             agent_class=None,
-                            model=None,
-                            logger: Optional[AgentLogger]=None,
+                            model_binding=None,
+                            logger: Any = None,
                             **kwargs
-                            ) -> Optional[Callable]:
+                            ) -> Callable | None:
         """
         Create an agent-as-tool from YAML configuration.
 
@@ -1096,7 +1098,7 @@ class YamlAgentFactory:
         Args:
             config_path: YAML/Markdown config file path or config dictionary.
             agent_class: Optional custom agent class, defaults to YamlConfiguredAgent.
-            model: Optional model instance.
+            model_binding: Optional resolved model binding.
             logger: Optional logger instance.
 
         Returns:
@@ -1117,7 +1119,7 @@ class YamlAgentFactory:
         # Create configured agent
         agent = AgentClass(
             config=config,
-            model=model,
+            model_binding=model_binding,
             logger=logger,
             **kwargs
         )
@@ -1135,10 +1137,10 @@ class YamlAgentFactory:
 
     @staticmethod
     def run_agents_parallel(
-        config_path: Union[str, Path, dict],
+        config_path: str | Path | dict,
         tasks: list,
-        max_workers: Optional[int] = None,
-        logger: Optional[AgentLogger] = None,
+        max_workers: int | None = None,
+        logger: Any = None,
         on_progress=None,
     ) -> list:
         """
@@ -1185,19 +1187,19 @@ class YamlAgentFactory:
         return executor.execute_batch(tasks, agent_tool, on_progress)
 
     @staticmethod
-    def create_agents_as_tools_from_folder(folder_path: Union[str, Path],
+    def create_agents_as_tools_from_folder(folder_path: str | Path,
                                           agent_class=None,
-                                          model=None,
-                                          logger: Optional[AgentLogger]=None,
+                                          model_binding=None,
+                                          logger: Any = None,
                                           **kwargs
-                                          ) -> List:
+                                          ) -> list:
         """
         Load all YAML and Markdown files from a folder and create agent-as-tools.
 
         Args:
             folder_path: Folder path containing YAML/Markdown config files.
             agent_class: Optional custom agent class, defaults to YamlConfiguredAgent.
-            model: Optional model instance.
+            model_binding: Optional resolved model binding.
             logger: Optional logger instance.
 
         Returns:
@@ -1216,7 +1218,7 @@ class YamlAgentFactory:
                 agent_tool = YamlAgentFactory.create_agent_as_tool(
                     config_file,
                     agent_class=agent_class,
-                    model=model,
+                    model_binding=model_binding,
                     logger=logger,
                     **kwargs
                 )
@@ -1228,7 +1230,7 @@ class YamlAgentFactory:
         return all_tools
 
     @staticmethod
-    def load_agents_from_directory(directory: Union[str, Path], agent_class=None) -> Dict[str, List]:
+    def load_agents_from_directory(directory: str | Path, agent_class=None) -> dict[str, list]:
         """
         Load all YAML and Markdown config files from a directory and create agent tools.
 

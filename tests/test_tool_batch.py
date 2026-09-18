@@ -49,8 +49,7 @@ def _create_tool(config):
 
         def __init__(self, config, **kw):
             self._config = config
-            self._model = kw.get("model")
-            self.model = self._model
+            self._model_binding = kw.get("model_binding")
             self.logger = kw.get("logger")
             self.name = config["name"]
             self.description = config.get("description", "")
@@ -71,7 +70,7 @@ def _create_tool(config):
             from agentloom.runtime.factory import YamlConfiguredAgent
             return YamlConfiguredAgent.__dict__['agent_as_tool'](self)
 
-    agent = SimpleAgent(config, model=MagicMock())
+    agent = SimpleAgent(config, model_binding=MagicMock())
     tool = agent.agent_as_tool()
     assert tool is not None
     return tool
