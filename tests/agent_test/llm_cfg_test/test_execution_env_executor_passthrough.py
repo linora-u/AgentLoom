@@ -320,9 +320,7 @@ def test_worker_prompt_path_passthrough_from_mapping(monkeypatch, tmp_path):
     worker = _make_worker(_worker_config_with_prompt({"path": "prompts/worker_prompt.yaml"}))
     definition = _build_definition(worker, monkeypatch, tmp_path)
 
-    assert definition.metadata["smolagents_prompt_template_path"] == str(
-        prompt_file.resolve()
-    )
+    assert definition.prompt_template_path == str(prompt_file.resolve())
 
 
 def test_supervisor_prompt_path_passthrough_from_string(monkeypatch, tmp_path):
@@ -332,9 +330,7 @@ def test_supervisor_prompt_path_passthrough_from_string(monkeypatch, tmp_path):
     supervisor = _make_supervisor(_supervisor_config(prompt="prompts/supervisor_prompt.yaml"))
     definition = _build_definition(supervisor, monkeypatch, tmp_path)
 
-    assert definition.metadata["smolagents_prompt_template_path"] == str(
-        prompt_file.resolve()
-    )
+    assert definition.prompt_template_path == str(prompt_file.resolve())
 
 
 def test_runtime_definition_autonormalizes_execution_config_without_validate(
@@ -349,7 +345,7 @@ def test_runtime_definition_autonormalizes_execution_config_without_validate(
     )
     assert worker._normalized is None
     worker_definition = _build_definition(worker, monkeypatch, tmp_path)
-    assert worker_definition.metadata["smolagents_prompt_template_path"] == str(
+    assert worker_definition.prompt_template_path == str(
         worker_prompt.resolve()
     )
 
@@ -362,6 +358,6 @@ def test_runtime_definition_autonormalizes_execution_config_without_validate(
     )
     assert supervisor._normalized is None
     supervisor_definition = _build_definition(supervisor, monkeypatch, tmp_path)
-    assert supervisor_definition.metadata[
-        "smolagents_prompt_template_path"
-    ] == str(supervisor_prompt.resolve())
+    assert supervisor_definition.prompt_template_path == str(
+        supervisor_prompt.resolve()
+    )
