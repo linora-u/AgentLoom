@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from threading import Lock
 from unittest.mock import patch
 
 import pytest
@@ -269,3 +270,138 @@ def test_tool_like_explicit_description_and_inputs_remain_authoritative() -> Non
     assert binding.definition.parameters["properties"]["value"][
         "description"
     ] == "Explicit input description."
+
+
+def test_from_tools_clones_stateful_tool_like_objects_per_gateway() -> None:
+    class StatefulTool:
+        name = "stateful"
+        description = "Count calls in one runtime."
+        inputs = {
+            "text": {
+                "type": "string",
+                "description": "Text",
+            }
+        }
+        output_type = "integer"
+
+        def __init__(self) -> None:
+            self.calls: list[str] = []
+
+        def forward(self, text: str) -> int:
+            self.calls.append(text)
+            return len(self.calls)
+
+    definition = StatefulTool()
+    first = AgentLoomToolGateway.from_tools([definition])
+    second = AgentLoomToolGateway.from_tools([definition])
+    first_run = HookRun(
+        HookPlan(),
+        local_run_id="first",
+        root_run_id="root",
+    )
+    second_run = HookRun(
+        HookPlan(),
+        local_run_id="second",
+        root_run_id="root",
+    )
+
+    assert _invoke(first, first_run, name="stateful").output == 1
+    assert _invoke(second, second_run, name="stateful").output == 1
+    assert definition.calls == []
+
+
+def test_from_tools_requires_uncloneable_tool_like_factory() -> None:
+    class UncloneableTool:
+        name = "uncloneable"
+        description = "Own a process lock."
+        inputs: dict[str, dict[str, object]] = {}
+        output_type = "string"
+
+        def __init__(self) -> None:
+            self.lock = Lock()
+
+        def forward(self) -> str:
+            return "ok"
+
+    with pytest.raises(
+        RuntimeError,
+        match=r"cannot be isolated; implement clone_for_runtime\(\)",
+    ):
+        AgentLoomToolGateway.from_tools([UncloneableTool()])
+
+
+def test_from_tools_rejects_clone_factory_returning_same_instance() -> None:
+    class InvalidCloneTool:
+        name = "invalid_clone"
+        description = "Return itself from clone_for_runtime."
+        inputs: dict[str, dict[str, object]] = {}
+        output_type = "string"
+
+        def clone_for_runtime(self):
+            return self
+
+        def forward(self) -> str:
+            return "ok"
+
+    with pytest.raises(
+        RuntimeError,
+        match=r"clone_for_runtime\(\) must return a distinct",
+    ):
+        AgentLoomToolGateway.from_tools([InvalidCloneTool()])
+
+
+def test_plain_callable_binding_keeps_callable_identity() -> None:
+    def echo(text: str) -> str:
+        """Echo text.
+
+        Args:
+            text: Text to echo.
+        """
+
+        return text
+
+    first = bind_tool(echo)
+    second = bind_tool(echo)
+
+    assert first.forward is echo
+    assert second.forward is echo
+
+
+def test_from_tools_removes_old_hook_wrapper_from_cloned_tool() -> None:
+    wrapper_calls: list[str] = []
+
+    class PreviouslyWrappedTool:
+        name = "previously_wrapped"
+        description = "Exercise the original implementation."
+        _agentloom_original_forward: object
+        _hooks_injected: bool
+        inputs = {
+            "text": {
+                "type": "string",
+                "description": "Text",
+            }
+        }
+        output_type = "string"
+
+        def original_forward(self, text: str) -> str:
+            return f"raw:{text}"
+
+        def forward(self, text: str) -> str:
+            wrapper_calls.append(text)
+            return f"wrapped:{text}"
+
+    source = PreviouslyWrappedTool()
+    source._agentloom_original_forward = source.original_forward
+    source._hooks_injected = True
+    gateway = AgentLoomToolGateway.from_tools([source])
+    run = HookRun(HookPlan(), local_run_id="local", root_run_id="root")
+
+    result = _invoke(
+        gateway,
+        run,
+        name="previously_wrapped",
+        arguments={"text": "kept"},
+    )
+
+    assert result.output == "raw:kept"
+    assert wrapper_calls == []
