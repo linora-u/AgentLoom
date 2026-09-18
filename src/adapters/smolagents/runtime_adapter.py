@@ -27,6 +27,7 @@ from agentloom.runtime.agent_runtime import (
     RuntimeUsage,
     require_runtime_state,
 )
+from agentloom.runtime.logging import get_logger
 from agentloom.runtime.model_protocol import ModelProtocolError, ModelTurnResult
 from agentloom.runtime.tool_gateway import ToolGateway
 from agentloom.runtime.tool_protocol import ToolCallRecord
@@ -35,6 +36,8 @@ try:
     _SMOLAGENTS_VERSION = version("smolagents")
 except PackageNotFoundError:  # pragma: no cover - importing this adapter requires smolagents
     _SMOLAGENTS_VERSION = "unknown"
+
+logger = get_logger(__name__)
 
 
 def _exception_chain(error: Exception) -> tuple[Exception, ...]:
@@ -257,8 +260,12 @@ class SmolagentsRuntimeAdapter:
         if request is not None and request.event_sink is not None:
             try:
                 request.event_sink(event)
-            except Exception:
-                pass
+            except Exception as exc:
+                logger.warning(
+                    "Runtime event observer failed for %s: %s",
+                    kind,
+                    exc,
+                )
         return event
 
     def _emit_step_events(self, step: Any) -> None:
