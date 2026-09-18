@@ -340,6 +340,16 @@ def build_builtin_runtime_registry(
     default or compatibility fallback.
     """
 
+    if smolagents_factory is None:
+        def smolagents_factory(
+            definition: RuntimeDefinition,
+        ) -> AgentRuntime:
+            from agentloom.adapters.smolagents.runtime_factory import (
+                SmolagentsRuntimeFactory,
+            )
+
+            return SmolagentsRuntimeFactory()(definition)
+
     registry = RuntimeRegistry()
     registry.register(
         "smolagents",

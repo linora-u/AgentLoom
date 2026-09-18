@@ -1,15 +1,10 @@
-"""AgentLoom Supervisor/Worker orchestration and per-invocation runtime assembly.
-
-The concrete smolagents subclasses live in ``adapters.smolagents.agents``;
-this owner binds Application configuration, tools, Hook Plans and Worker state.
-"""
+"""AgentLoom Supervisor/Worker orchestration and runtime-neutral assembly."""
 
 # Checkpoint / Resume support
 import hashlib as _hashlib
 import os
 import uuid
 from abc import ABC, abstractmethod
-from collections.abc import Callable
 from copy import deepcopy
 from dataclasses import dataclass, replace
 from enum import Enum
@@ -20,30 +15,21 @@ from typing import TYPE_CHECKING, Any
 if TYPE_CHECKING:
     from agentloom.application.lifecycle import ApplicationRunLifecycle
 
-from agentloom.adapters.smolagents.agents import ToolCallingAgentV2
-from agentloom.adapters.smolagents.models.model_manager import (
-    ModelConfigBuilder,
-    get_model,
-)
-from agentloom.adapters.smolagents.tool_shim import clone_tool_for_runtime, inject_hooks
-from agentloom.adapters.smolagents.tools.tools import ensure_tool_wrapped
 from agentloom.application.validation import (
     AgentConfigNormalizer,
-    normalize_execution_prompt_template_path_value,
     normalize_positive_int_value,
     validate_todo_config,
 )
 from agentloom.configuration import (
-    C,
     build_effective_agent_config_snapshot,
 )
-from agentloom.configuration.defaults import DEFAULT_MAX_TOKENS
 from agentloom.runtime.agent_runtime import (
     AgentRuntime,
     AgentRuntimeRequest,
     AgentRuntimeResult,
     RuntimeCapabilities,
     RuntimeCheckpointEnvelope,
+    RuntimeDefinition,
     build_builtin_runtime_registry,
     require_runtime_state,
 )
@@ -58,8 +44,17 @@ from agentloom.runtime.logging import (
     get_global_logger,
     get_logger,
 )
-from agentloom.runtime.prompts.prompt_builder import build_prompt_templates
+from agentloom.runtime.model_binding import ModelTurnBinding
+from agentloom.runtime.prompts.environment import get_agent_environment_prompt
+from agentloom.runtime.prompts.prompt_builder import todo_policy_for_mode
 from agentloom.runtime.skills.catalog import SkillCatalog
+from agentloom.runtime.skills.parser import build_skills_prompt
+from agentloom.runtime.tool_gateway import (
+    AgentLoomToolGateway,
+    ToolBinding,
+    bind_tool,
+    final_answer_binding,
+)
 from agentloom.runtime.trace import (
     bind_local_run,
     bind_root_run,
@@ -71,7 +66,6 @@ from agentloom.runtime.trace import (
 )
 from agentloom.runtime.workspace import ensure_workspace_mounted_once
 from agentloom.tools.loader import resolve_tool_function
-from smolagents import AgentLogger, LogLevel, Tool, ToolCallingAgent
 
 
 class AgentType(Enum):
@@ -119,52 +113,56 @@ class BaseAgent(ABC):
 
     def __init__(
         self,
-        model=None,
-        logger: AgentLogger | None = None,
+        model_binding: ModelTurnBinding | None = None,
+        logger: Any | None = None,
         model_cache: bool = True,
     ):
         """
         Initialize agent.
 
         Args:
-            model: Optional model instance. If omitted, the model manager selects one.
+            model_binding: Optional canonical model binding. If omitted, the
+                configured LiteLLM profile is resolved.
             logger: Optional logger instance.
             model_cache: Whether to enable model caching.
         """
-        # Initialize model
-        model_builder = self._build_model_config_builder()
-        if model is None:
-            self._model = get_model(
-                self.default_model_type,
-                "smolagents",
-                model_builder=model_builder,
-                model_cache=model_cache,
-                logger=logger,
-            )
-        else:
-            self._model = model
+        self._model_binding = (
+            model_binding
+            if model_binding is not None
+            else self._resolve_model_binding(model_cache=model_cache)
+        )
+        if not isinstance(self._model_binding, ModelTurnBinding):
+            raise TypeError("model_binding must be a ModelTurnBinding")
 
         # Initialize logger
         self._logger = logger
 
-        # Callback list
-        self._before_run_callbacks = [self._emit_task_start]
-
         # Task ID
         self._task_id = None
 
-        # Supervisor runtimes are cached and smolagents agents keep mutable
-        # memory/state/python-executor objects. A single BaseAgent instance may
-        # therefore only drive its cached runtime once at a time. The lock is
-        # per BaseAgent, so independent agents and factory-created workers still
-        # run concurrently.
+        # A single Agent definition may only assemble and execute one runtime
+        # at a time. Independent Agents and factory-created Workers still run
+        # concurrently.
         self._cached_runtime_run_lock = RLock()
 
         # Generate unique agent ID
         self._agent_id = self._generate_agent_id()
 
-        self._final_answer_checks: list[Callable[..., bool]] = []
         self._hook_plan = HookPlan(builtin_hook_handlers())
+
+    def _resolve_model_binding(
+        self,
+        *,
+        model_cache: bool,
+    ) -> ModelTurnBinding:
+        from agentloom.adapters.litellm.model_binding import (
+            resolve_litellm_model_turn_binding,
+        )
+
+        return resolve_litellm_model_turn_binding(
+            self.default_model_type,
+            model_cache=model_cache,
+        )
 
     def _generate_agent_id(self) -> str:
         """
@@ -187,10 +185,6 @@ class BaseAgent(ABC):
             str: Unique identifier of the agent.
         """
         return self._agent_id
-
-    def set_final_answer_checks(self, check_func_list):
-        """Set final-answer validation callbacks."""
-        self._final_answer_checks = check_func_list
 
     def _emit_task_start(self, runtime_agent: Any, task: str, *args, **kwargs):
         """Broadcast a generic TaskCreated lifecycle event via the active Hook Run.
@@ -383,7 +377,11 @@ class BaseAgent(ABC):
         uniq_tools: list[Any] = []
         seen = set()
         for tool_item in tools:
-            key = tool_item.name if isinstance(tool_item, Tool) else tool_item
+            key = getattr(
+                tool_item,
+                "name",
+                getattr(tool_item, "__name__", tool_item),
+            )
             if key in seen:
                 continue
             seen.add(key)
@@ -391,23 +389,9 @@ class BaseAgent(ABC):
         return uniq_tools
 
     @staticmethod
-    def _emit_hook_user_message(runtime_agent: Any, runtime_logger: Any, message: str) -> None:
+    def _emit_hook_user_message(runtime_logger: Any, message: str) -> None:
         rendered = f"[hook] {message}"
-        agent_logger = getattr(runtime_agent, "logger", None)
-        if agent_logger is not None and hasattr(agent_logger, "log"):
-            agent_logger.log(rendered, level=LogLevel.INFO)
-            return
         runtime_logger.info(rendered)
-
-    def _build_runtime_final_answer_checks(self) -> list[Callable]:
-        checks = list(self._final_answer_checks)
-
-        def _run_scoped_stop_check(final_answer: Any, memory: Any, **kwargs: Any) -> bool:
-            hook_run = get_current_hook_run(required=True)
-            return hook_run.build_stop_check()(final_answer, memory, **kwargs)
-
-        checks.insert(0, _run_scoped_stop_check)
-        return checks
 
     def _validate_model(self) -> bool:
         """
@@ -417,7 +401,7 @@ class BaseAgent(ABC):
             bool: Whether model is available.
         """
 
-        return self._model is not None
+        return self._model_binding is not None
 
     def _get_agent_type(self) -> AgentType:
         """
@@ -427,11 +411,6 @@ class BaseAgent(ABC):
             AgentType: Agent type.
         """
         return AgentType.WORKER  # Default to worker agent
-
-    def _build_model_config_builder(self) -> ModelConfigBuilder | None:
-        """Model-config overlay hook. Subclasses can return a typed builder."""
-        return None
-
 
 @dataclass(frozen=True)
 class AgentRoleProfile:
@@ -454,15 +433,14 @@ class RoleDrivenAgent(BaseAgent):
         self,
         config: dict | None = None,
         project_path: str = "",
-        model=None,
-        logger: AgentLogger | None = None,
+        model_binding: ModelTurnBinding | None = None,
+        logger: Any | None = None,
         model_cache: bool = True,
         **kwargs,
     ):
         ensure_workspace_mounted_once()
 
         self._project_path = project_path
-        self._runtime_agent = None
         if config is None:
             self._config = {}
         elif isinstance(config, dict):
@@ -489,7 +467,7 @@ class RoleDrivenAgent(BaseAgent):
         )
 
         super().__init__(
-            model=model,
+            model_binding=model_binding,
             logger=resolved_logger,
             model_cache=model_cache,
         )
@@ -536,7 +514,7 @@ class RoleDrivenAgent(BaseAgent):
             return None
         return str(model_type)
 
-    def _effective_logger(self) -> AgentLogger | None:
+    def _effective_logger(self) -> Any | None:
         return getattr(self, "logger", None) or getattr(self, "_logger", None)
 
     def _before_config_validation(self, **kwargs) -> None:
@@ -576,8 +554,8 @@ class RoleDrivenAgent(BaseAgent):
     def resolve_agent_logger_from_config(
         config: dict,
         *,
-        provided_logger: AgentLogger | None = None,
-    ) -> AgentLogger | None:
+        provided_logger: Any | None = None,
+    ) -> Any | None:
         _ = config
         if provided_logger is not None:
             return provided_logger
@@ -590,7 +568,7 @@ class RoleDrivenAgent(BaseAgent):
             )
         return current_backend
 
-    def initialize_skill_catalog(self, logger: AgentLogger | None = None) -> SkillCatalog:
+    def initialize_skill_catalog(self, logger: Any | None = None) -> SkillCatalog:
         """Resolve conventional and explicitly configured Skill sources once."""
         log = get_logger(logger, __name__)
         from agentloom.application.definition import skill_catalog
@@ -605,36 +583,12 @@ class RoleDrivenAgent(BaseAgent):
         raise NotImplementedError
 
     def _runtime_agent_name(self) -> str | None:
-        """Optional runtime-level name passed to smolagents."""
+        """Optional runtime-level name passed to the selected runtime."""
         return None
 
     def _runtime_agent_description(self) -> str | None:
-        """Optional runtime-level description passed to smolagents."""
+        """Optional runtime-level description passed to the selected runtime."""
         return None
-
-    def _build_model_config_builder(self) -> ModelConfigBuilder | None:
-        return None
-
-    def _resolve_max_tokens_from_config(self) -> int:
-        try:
-            return C.llm.for_type(self.default_model_type).max_tokens
-        except Exception:
-            return DEFAULT_MAX_TOKENS
-
-    def _resolve_split_token_budget_from_config(self) -> tuple[int | None, int | None]:
-        try:
-            settings = C.llm.for_type(self.default_model_type)
-            context_window = getattr(settings, "context_window", None)
-            max_output_tokens = getattr(settings, "max_output_tokens", None)
-            if (
-                not isinstance(context_window, int)
-                or not isinstance(max_output_tokens, int)
-                or max_output_tokens >= context_window
-            ):
-                return None, None
-            return context_window, max_output_tokens
-        except Exception:
-            return None, None
 
     def _resolve_smart_summary_from_config(self) -> bool:
         effective_cfg = self._effective_agent_config
@@ -645,8 +599,7 @@ class RoleDrivenAgent(BaseAgent):
         config = effective_cfg if isinstance(effective_cfg, dict) else self._config
         return validate_todo_config(config, source=self.name)
 
-    def _build_execution_agent_kwargs(self, profile: AgentRoleProfile) -> dict[str, Any]:
-        """Build runtime kwargs for the structured tool-calling agent."""
+    def _resolve_planning_interval(self) -> int | None:
         self._ensure_normalized()
         log = get_logger(self._effective_logger(), __name__)
         raw_planning_interval = self._config.get("planning_interval")
@@ -657,21 +610,7 @@ class RoleDrivenAgent(BaseAgent):
                 self.name,
                 raw_planning_interval,
             )
-
-        context_window, max_output_tokens = self._resolve_split_token_budget_from_config()
-        return {
-            "enable_sub_task_tracking": profile.enable_sub_task_tracking,
-            "agent_name": self.name if profile.enable_sub_task_tracking else None,
-            "prompt_template_path": None,
-            "planning_interval": planning_interval,
-            "max_tokens": self._resolve_max_tokens_from_config(),
-            "context_window": context_window,
-            "max_output_tokens": max_output_tokens,
-            "smart_summary": self._resolve_smart_summary_from_config(),
-            "runtime_name": self._runtime_agent_name(),
-            "runtime_description": self._runtime_agent_description(),
-            "todo_mode": self._resolve_todo_mode(),
-        }
+        return planning_interval
 
     def _transform_task(self, task: str) -> str:
         """Task transformation hook."""
@@ -723,195 +662,77 @@ class RoleDrivenAgent(BaseAgent):
             tools = [*tools, resolve_tool_function("todo_write")]
         return tools
 
-    def build_runtime_agent(self) -> ToolCallingAgent:
+    def _build_tool_gateway(self) -> AgentLoomToolGateway:
         profile = self._role_profile()
-
-        if profile.cache_runtime_agent and self._runtime_agent is not None:
-            # The smolagents runtime may be cached, but Tool instances are
-            # run-owned. Refresh them from shared definitions so mutable Tool
-            # state cannot survive into the next invocation.
-            fresh_tools = self._prepare_runtime_tools(self._build_runtime_tools(profile))
-            self._runtime_agent.tools = {tool.name: tool for tool in fresh_tools}
-            return self._runtime_agent
-
-        runtime_agent = self._create_agent(
-            tools=self._build_runtime_tools(profile),
-            **self._build_execution_agent_kwargs(profile),
+        tools = self._deduplicate_tools(self._build_runtime_tools(profile))
+        bindings: list[ToolBinding] = [bind_tool(tool) for tool in tools]
+        if not any(binding.definition.name == "final_answer" for binding in bindings):
+            bindings.append(final_answer_binding())
+        mcp_manager = getattr(self, "_mcp_manager", None)
+        resource_closers = (
+            (mcp_manager.disconnect_all,)
+            if mcp_manager is not None
+            and callable(getattr(mcp_manager, "disconnect_all", None))
+            else ()
+        )
+        return AgentLoomToolGateway(
+            bindings,
+            resource_closers=resource_closers,
         )
 
-        if profile.cache_runtime_agent:
-            self._runtime_agent = runtime_agent
+    def _build_runtime_instructions(self, gateway: AgentLoomToolGateway) -> str:
+        sections = [get_agent_environment_prompt()]
+        if any(item.name == "skill" for item in gateway.definitions):
+            sections.append(build_skills_prompt(self._skill_catalog.summaries()))
+        sections.append(todo_policy_for_mode(self._resolve_todo_mode()))
+        return "\n\n".join(section for section in sections if section.strip())
 
-        return runtime_agent
+    def _build_runtime_definition(self) -> RuntimeDefinition:
+        runtime_id = AgentConfigNormalizer.validate_agent_runtime_config(
+            self._config
+        )
+        gateway = self._build_tool_gateway()
+        return RuntimeDefinition(
+            runtime_id=runtime_id,
+            name=self._runtime_agent_name() or self.name,
+            description=self._runtime_agent_description() or self.description,
+            model=self._model_binding,
+            tool_gateway=gateway,
+            max_steps=self.max_steps,
+            instructions=self._build_runtime_instructions(gateway),
+            planning_interval=self._resolve_planning_interval(),
+            smart_summary=self._resolve_smart_summary_from_config(),
+            todo_mode=self._resolve_todo_mode(),
+            metadata={
+                "max_consecutive_parse_errors": self._config.get(
+                    "max_consecutive_parse_errors",
+                    5,
+                )
+            },
+        )
 
     def build_runtime(self) -> AgentRuntime:
         """Build the configured complete-run Agent runtime adapter."""
 
-        runtime_id = AgentConfigNormalizer.validate_agent_runtime_config(
-            self._config
-        )
-        registry = build_builtin_runtime_registry(
-            smolagents_factory=self._build_smolagents_runtime,
-        )
-        runtime = registry.create(runtime_id)
+        registry = build_builtin_runtime_registry()
+        definition = self._build_runtime_definition()
+        try:
+            runtime = registry.create(definition)
+        except BaseException:
+            definition.tool_gateway.close()
+            raise
         profile = self._role_profile()
         if profile.enable_sub_task_tracking:
             return SubTaskTrackedAgent(runtime, self.name)
         return runtime
 
-    def _build_smolagents_runtime(self) -> AgentRuntime:
-        """Construct the smolagents adapter behind the registry factory."""
-
-        from agentloom.adapters.smolagents.runtime_adapter import (
-            SmolagentsRuntimeAdapter,
-        )
-
-        return SmolagentsRuntimeAdapter(self.build_runtime_agent())
-
-    def _prepare_runtime_tools(self, tools: list[Any]) -> list[Tool]:
-        wrapped = ensure_tool_wrapped(self._deduplicate_tools(tools))
-        return [inject_hooks(clone_tool_for_runtime(tool)) for tool in wrapped]
-
-    def _resolve_effective_prompt_template_path(self) -> str | None:
-        # Priority: current agent effective config -> global system baseline.
-        effective_cfg = self._effective_agent_config
-        if isinstance(effective_cfg, dict):
-            prompt_cfg = effective_cfg.get("prompt")
-            if prompt_cfg is not None:
-                return normalize_execution_prompt_template_path_value(
-                    prompt_cfg,
-                    f"{self.name}.effective.prompt",
-                    agent_root=C.agent_root,
-                )
-
-        prompt_cfg = C.get("prompt")
-        if prompt_cfg is not None:
-            return normalize_execution_prompt_template_path_value(
-                prompt_cfg,
-                "config.prompt",
-                agent_root=C.agent_root,
-            )
-        return None
-
-    def _build_prompt_templates(
-        self,
-        *,
-        runtime_logger: Any,
-        use_customized_prompt: bool,
-        prompt_template_path: str | None,
-        skill_tool_enabled: bool,
-    ) -> Any:
-        if not use_customized_prompt:
-            return None
-
-        return build_prompt_templates(
-            prompt_template_path=prompt_template_path,
-            effective_prompt_path=self._resolve_effective_prompt_template_path(),
-            model_id=getattr(self._model, "model_id", None) if self._model else None,
-            agent_root=C.agent_root,
-            skill_catalog=self._skill_catalog,
-            skill_tool_enabled=skill_tool_enabled,
-            logger=runtime_logger,
-            todo_mode=self._resolve_todo_mode(),
-        )
-
-    def _create_agent(
-        self,
-        tools: list | None = None,
-        *,
-        enable_sub_task_tracking: bool = False,
-        agent_name: str | None = None,
-        use_customized_prompt: bool = True,
-        prompt_template_path: str | None = None,
-        planning_interval: int | None = None,
-        max_tokens: int | None = None,
-        context_window: int | None = None,
-        max_output_tokens: int | None = None,
-        smart_summary: bool | None = None,
-        runtime_name: str | None = None,
-        runtime_description: str | None = None,
-        todo_mode: str = "auto",
-    ) -> ToolCallingAgent:
-        """
-        Create configured agent instance.
-
-        Args:
-            tools: Tool list. If omitted, use get_all_tools().
-
-        Returns:
-            ToolCallingAgent: Configured agent instance.
-        """
-        if tools is None:
-            tools = self.get_all_tools()
-
-        resolved_logger_backend = self._resolve_runtime_logger_backend(self._logger)
-        runtime_logger = get_logger(resolved_logger_backend, __name__)
-
-        hooked_tools = self._prepare_runtime_tools(tools)
-
-        normalized_planning_interval = normalize_positive_int_value(planning_interval)
-        if planning_interval is not None and normalized_planning_interval is None:
-            runtime_logger.warning(
-                "Ignored invalid planning_interval=%r; expected a positive integer or numeric string.",
-                planning_interval,
-            )
-
-        agent_kwargs: dict[str, Any] = {
-            "model": self._model,
-            "verbosity_level": LogLevel.INFO,
-            "max_steps": self.max_steps,
-            "logger": resolved_logger_backend,
-            "before_run_callbacks": list(self._before_run_callbacks),
-            "final_answer_checks": self._build_runtime_final_answer_checks(),
-        }
-        if normalized_planning_interval is not None:
-            agent_kwargs["planning_interval"] = normalized_planning_interval
-        if max_tokens is not None:
-            agent_kwargs["max_tokens"] = max_tokens
-        if context_window is not None:
-            agent_kwargs["context_window"] = context_window
-        if max_output_tokens is not None:
-            agent_kwargs["max_output_tokens"] = max_output_tokens
-        if smart_summary is not None:
-            agent_kwargs["smart_summary"] = smart_summary
-        if runtime_name is not None:
-            agent_kwargs["name"] = runtime_name
-        if runtime_description is not None:
-            agent_kwargs["description"] = runtime_description
-
-        prompt_templates = self._build_prompt_templates(
-            runtime_logger=runtime_logger,
-            use_customized_prompt=use_customized_prompt,
-            prompt_template_path=prompt_template_path,
-            skill_tool_enabled=any(getattr(tool, "name", None) == "skill" for tool in hooked_tools),
-        )
-
-        agent = ToolCallingAgentV2(
-            tools=hooked_tools,
-            stream_outputs=False,
-            prompt_templates=prompt_templates,
-            **agent_kwargs,
-        )
-
-        agent._agent_loom_todo_mode = todo_mode
-
-        # Apply circuit-breaker threshold from YAML config (default: 5 consecutive parse errors)
-        max_parse_errors = self._config.get("max_consecutive_parse_errors", 5)
-        agent._max_consecutive_parse_errors = max_parse_errors  # type: ignore[attr-defined]
-
-        return agent
-
     def _bind_hook_message_sink(self, runtime_agent: Any) -> None:
-        """Bind delivery to the current run, including cached runtimes."""
+        """Bind Hook user-message delivery to the current runtime-neutral run."""
 
         hook_run = get_current_hook_run(required=True)
-        runtime_logger = get_logger(
-            getattr(runtime_agent, "logger", None) or self._effective_logger(),
-            __name__,
-        )
+        runtime_logger = get_logger(self._effective_logger(), __name__)
         hook_run.set_user_message_sink(
             lambda message: self._emit_hook_user_message(
-                runtime_agent,
                 runtime_logger,
                 message,
             )
@@ -953,14 +774,8 @@ class RoleDrivenAgent(BaseAgent):
                         owns_root_run=owns_root_run,
                     ).run()
 
-        role_profile_resolver = getattr(self, "_role_profile", None)
-        cache_runtime_agent = bool(
-            role_profile_resolver().cache_runtime_agent if callable(role_profile_resolver) else False
-        )
-        if cache_runtime_agent:
-            with self._cached_runtime_run_lock:
-                return _run_once()
-        return _run_once()
+        with self._cached_runtime_run_lock:
+            return _run_once()
 
 class SubTaskTrackedAgent:
     """

@@ -9,26 +9,27 @@ from unittest.mock import MagicMock
 
 import agentloom.runtime.agent as base_agent_module
 import agentloom.runtime.invocation as invocation_module
-import agentloom.runtime.prompts.prompt_builder as prompt_builder_module
 import pytest
 import yaml
+from agentloom.adapters.smolagents.agents import ToolCallingAgentV2
 from agentloom.adapters.smolagents.tool_shim import inject_hooks
 from agentloom.adapters.smolagents.tools.tools import tool
 from agentloom.runtime.agent_runtime import (
     AgentRuntimeRequest,
     AgentRuntimeResult,
+    RuntimeCapabilities,
+    RuntimeCheckpointEnvelope,
     require_runtime_state,
 )
 from agentloom.runtime.hooks import HookEvent, HookHandler, HookPlan, HookResult, HookRun
-from agentloom.runtime.logging import get_global_logger, set_global_logger
 from agentloom.runtime.loom_mixin import LoomAgentMixin
-from agentloom.runtime.skills.catalog import SkillCatalog
+from agentloom.runtime.model_binding import ModelTurnBinding
+from agentloom.runtime.model_protocol import ModelTurnRequest, ModelTurnResult
 from agentloom.runtime.tool_gateway import AgentLoomToolGateway, final_answer_binding
 from agentloom.runtime.trace import (
     bind_explicit_execution_context,
     capture_explicit_execution_context,
     clear_current_hook_run,
-    get_current_hook_run,
     set_current_hook_run,
 )
 from agentloom.self_learning.persistence.review_engine import ReviewEngine
@@ -60,53 +61,82 @@ class DummyLoggerBackend:
         return None
 
 
-class DummySmolagentsAgent:
-    def __init__(self, *args, **kwargs):
-        self.logger = kwargs.get("logger")
-        self.kwargs = kwargs
-        self.tools = kwargs.get("tools", [])
+class _ModelAdapter:
+    adapter_id = "openai_chat"
+
+    def turn(self, _request: ModelTurnRequest) -> ModelTurnResult:
+        return ModelTurnResult()
 
 
-class DummyWrapper:
-    def __init__(self, agent, agent_name: str):
-        self.agent = agent
-        self.agent_name = agent_name
-
-
-class DummyRunResult:
-    def __init__(self, output, state: str = "success"):
-        self.output = output
-        self.state = state
-
-
-class DummyRuntimeRunner:
-    def __init__(self, result=None, exc: Exception | None = None):
-        self._result = result
-        self._exc = exc
-        self.calls = []
-
-    def run(self, *, task, **kwargs):
-        self.calls.append({"task": task, **kwargs})
-        if self._exc is not None:
-            raise self._exc
-        if hasattr(self._result, "state"):
-            return self._result
-        return DummyRunResult(self._result)
+def _model_binding(
+    *,
+    max_tokens: int = 32_000,
+    context_window: int = 32_000,
+    max_output_tokens: int = 4_000,
+) -> ModelTurnBinding:
+    return ModelTurnBinding(
+        model_type="test",
+        model_id="provider/test-model",
+        adapter=_ModelAdapter(),
+        max_tokens=max_tokens,
+        context_window=context_window,
+        max_output_tokens=max_output_tokens,
+        input_token_limit=max(context_window - max_output_tokens, 0),
+        requests_per_minute=60,
+    )
 
 
 class RecordingAgentRuntime:
     runtime_id = "smolagents"
+    capabilities = RuntimeCapabilities(True, True, True, True)
 
-    def __init__(self, output="ok"):
+    def __init__(
+        self,
+        output="ok",
+        *,
+        state: str = "success",
+        exc: BaseException | None = None,
+        side_effect=None,
+    ):
         self.output = output
+        self.state = state
+        self.exc = exc
+        self.side_effect = side_effect
         self.requests: list[AgentRuntimeRequest] = []
+        self.close_calls = 0
 
     def run(self, request: AgentRuntimeRequest) -> AgentRuntimeResult:
         self.requests.append(request)
-        return AgentRuntimeResult(state="success", output=self.output)
+        if self.exc is not None:
+            raise self.exc
+        if self.side_effect is not None:
+            result = self.side_effect(request)
+        else:
+            result = AgentRuntimeResult(
+            state=self.state,
+            output=self.output,
+            checkpoint=RuntimeCheckpointEnvelope(
+                runtime_id=self.runtime_id,
+                runtime_version="test",
+                state_schema_version=1,
+                payload={},
+            ),
+        )
+        if request.checkpoint_sink is not None and result.checkpoint is not None:
+            request.checkpoint_sink(result.checkpoint)
+        return result
 
     def close(self):
+        self.close_calls += 1
         return None
+
+    def snapshot(self):
+        return RuntimeCheckpointEnvelope(
+            runtime_id=self.runtime_id,
+            runtime_version="test",
+            state_schema_version=1,
+            payload={},
+        )
 
 
 class DummyBaseRuntime:
@@ -151,7 +181,7 @@ class DummyGoalAgent(DummyAgent):
 def _make_agent(*, logger=None) -> DummyAgent:
     agent = DummyAgent(
         config={"name": "runtime_dummy"},
-        model=object(),
+        model_binding=_model_binding(),
         logger=logger,
     )
     return agent
@@ -171,16 +201,16 @@ def _make_review_agent(*, logger=None) -> DummyAgent:
                 },
             },
         },
-        model=object(),
+        model_binding=_model_binding(),
         logger=logger,
     )
 
 
 def test_role_driven_agent_reports_to_application_lifecycle(monkeypatch):
     agent = _make_agent(logger=DummyLoggerBackend())
-    runtime = DummyRuntimeRunner("reported-result")
+    runtime = RecordingAgentRuntime("reported-result")
     lifecycle = MagicMock()
-    monkeypatch.setattr(agent, "build_runtime_agent", lambda: runtime)
+    monkeypatch.setattr(agent, "build_runtime", lambda: runtime)
     monkeypatch.setattr(agent, "_inject_memory_snapshot", lambda tasks: tasks)
 
     result = agent.run(
@@ -198,6 +228,7 @@ def test_role_driven_agent_reports_to_application_lifecycle(monkeypatch):
     assert report["result"] == "reported-result"
     assert report["error"] is None
     assert report["goal"] is None
+    assert runtime.close_calls == 1
 
 
 def test_role_driven_agent_delegates_one_run_to_the_invocation_module(monkeypatch):
@@ -253,9 +284,9 @@ def test_standalone_checkpoint_failure_still_deactivates_coordinator(
     from agentloom.runtime.checkpoint.coordinator import CheckpointCoordinator
 
     agent = _make_agent(logger=DummyLoggerBackend())
-    runtime = DummyRuntimeRunner("reported-result")
+    runtime = RecordingAgentRuntime("reported-result")
     manager = CheckpointManager("runtime-dummy", checkpoints_root=tmp_path)
-    monkeypatch.setattr(agent, "build_runtime_agent", lambda: runtime)
+    monkeypatch.setattr(agent, "build_runtime", lambda: runtime)
     monkeypatch.setattr(agent, "_inject_memory_snapshot", lambda tasks: tasks)
     monkeypatch.setattr(
         CheckpointCoordinator,
@@ -279,15 +310,9 @@ def test_standalone_base_exception_is_persisted_as_failure(tmp_path, monkeypatch
     from agentloom.runtime.checkpoint import CheckpointManager
 
     agent = _make_agent(logger=DummyLoggerBackend())
-    runtime = DummyRuntimeRunner()
-    runtime.memory = MagicMock(steps=[])
+    runtime = RecordingAgentRuntime(exc=SystemExit("runtime exited"))
     manager = CheckpointManager("runtime-dummy", checkpoints_root=tmp_path)
-
-    def _exit(*, task, **kwargs):
-        raise SystemExit("runtime exited")
-
-    runtime.run = _exit
-    monkeypatch.setattr(agent, "build_runtime_agent", lambda: runtime)
+    monkeypatch.setattr(agent, "build_runtime", lambda: runtime)
     monkeypatch.setattr(agent, "_inject_memory_snapshot", lambda tasks: tasks)
 
     with pytest.raises(SystemExit, match="runtime exited"):
@@ -319,7 +344,7 @@ def test_manual_review_policy_never_enters_run_end_reviewer(monkeypatch):
                 },
             },
         },
-        model=object(),
+        model_binding=_model_binding(),
         logger=DummyLoggerBackend(),
     )
     agent._effective_agent_config = {
@@ -338,9 +363,9 @@ def test_manual_review_policy_never_enters_run_end_reviewer(monkeypatch):
             },
         }
     }
-    runtime_agent = DummyRuntimeRunner(result="main-result")
+    runtime_agent = RecordingAgentRuntime(output="main-result")
     calls = []
-    monkeypatch.setattr(agent, "build_runtime_agent", lambda: runtime_agent)
+    monkeypatch.setattr(agent, "build_runtime", lambda: runtime_agent)
     monkeypatch.setattr(agent, "_inject_memory_snapshot", lambda tasks: tasks)
     monkeypatch.setattr(agent, "_emit_task_lifecycle_event", lambda *_args, **_kwargs: None)
     monkeypatch.setattr(agent, "_emit_session_lifecycle_event", lambda *_args, **_kwargs: None)
@@ -358,222 +383,103 @@ def _append_hook_handler(agent, event, callback, *, source="test"):
     agent._hook_plan = HookPlan((*agent._hook_plan.handlers, HookHandler(event, "*", callback, source=source)))
 
 
-def _patch_agent_classes(monkeypatch):
+def test_runtime_definition_contains_complete_neutral_runtime_input(monkeypatch):
+    model_binding = _model_binding(
+        max_tokens=64_000,
+        context_window=64_000,
+        max_output_tokens=8_000,
+    )
+    agent = DummyAgent(
+        config={
+            "name": "definition_agent",
+            "description": "Complete neutral definition.",
+            "workflow": "Use the proof tool.",
+            "planning_interval": 3,
+            "smart_summary": False,
+            "todo": {"mode": "on"},
+            "max_steps": 11,
+            "max_consecutive_parse_errors": 7,
+        },
+        model_binding=model_binding,
+        logger=DummyLoggerBackend(),
+    )
+
+    @tool
+    def proof(value: str) -> str:
+        """Return a proof value.
+
+        Args:
+            value: Value to return.
+        """
+
+        return value
+
+    monkeypatch.setattr(agent, "get_all_tools", lambda agent_type: [proof, proof])
     monkeypatch.setattr(
         base_agent_module,
-        "ToolCallingAgentV2",
-        DummySmolagentsAgent,
+        "get_agent_environment_prompt",
+        lambda: "environment",
     )
-    monkeypatch.setattr(base_agent_module, "SubTaskTrackedAgent", DummyWrapper)
-
-
-def test_create_agent_uses_global_logger_when_not_provided(monkeypatch):
-    _patch_agent_classes(monkeypatch)
-    previous_global_logger = get_global_logger(create_if_missing=False)
-    global_logger = DummyLoggerBackend()
-    set_global_logger(global_logger)
-
-    try:
-        agent = _make_agent(logger=None)
-        runtime_agent = agent._create_agent(tools=[], use_customized_prompt=False)
-        assert isinstance(runtime_agent, DummySmolagentsAgent)
-        assert runtime_agent.logger is global_logger
-    finally:
-        set_global_logger(previous_global_logger)
-
-
-def test_create_agent_requires_global_logger(monkeypatch):
-    """Standalone construction can explicitly initialize a console backend."""
-    from agentloom.runtime.logging import initialize_global_logger_once
-
-    _patch_agent_classes(monkeypatch)
-    previous_global_logger = get_global_logger(create_if_missing=False)
-    set_global_logger(None)
-
-    try:
-        initialize_global_logger_once("test_runtime_builder")
-        agent = _make_agent(logger=None)
-        runtime_agent = agent._create_agent(tools=[], use_customized_prompt=False)
-        assert isinstance(runtime_agent, DummySmolagentsAgent)
-        assert runtime_agent.logger is not None
-        assert get_global_logger(create_if_missing=False) is not None
-    finally:
-        set_global_logger(previous_global_logger)
-
-
-def test_build_runtime_wraps_worker_runtime_when_tracking_enabled(monkeypatch):
-    _patch_agent_classes(monkeypatch)
-    previous_global_logger = get_global_logger(create_if_missing=False)
-    set_global_logger(DummyLoggerBackend())
-
-    try:
-        agent = _make_agent(logger=None)
-        native_runtime = object()
-        monkeypatch.setattr(
-            agent,
-            "_build_smolagents_runtime",
-            lambda: native_runtime,
-        )
-        monkeypatch.setattr(
-            agent,
-            "_role_profile",
-            lambda: base_agent_module.AgentRoleProfile(
-                agent_type=base_agent_module.AgentType.WORKER,
-                enable_sub_task_tracking=True,
-            ),
-        )
-
-        wrapped = agent.build_runtime()
-
-        assert isinstance(wrapped, DummyWrapper)
-        assert wrapped.agent_name == agent.name
-        assert wrapped.agent is native_runtime
-    finally:
-        set_global_logger(previous_global_logger)
-
-
-def test_create_agent_deduplicates_tools_injects_hooks_and_prompt(monkeypatch):
-    _patch_agent_classes(monkeypatch)
-    previous_global_logger = get_global_logger(create_if_missing=False)
-    set_global_logger(DummyLoggerBackend())
-    captured = {}
-
-    def _fake_wrap(tools):
-        captured["wrapped_input"] = list(tools)
-        return list(tools)
-
-    def _fake_hook(tool):
-        return f"hooked:{tool}"
-
-    monkeypatch.setattr(base_agent_module, "ensure_tool_wrapped", _fake_wrap)
-    monkeypatch.setattr(base_agent_module, "clone_tool_for_runtime", lambda tool: tool)
-    monkeypatch.setattr(base_agent_module, "inject_hooks", _fake_hook)
     monkeypatch.setattr(
-        base_agent_module.RoleDrivenAgent,
-        "_build_prompt_templates",
-        lambda self, **_: {"system_prompt": "patched"},
+        base_agent_module,
+        "todo_policy_for_mode",
+        lambda mode: f"todo:{mode}",
     )
 
-    try:
-        agent = _make_agent(logger=None)
-        runtime_agent = agent._create_agent(
-            tools=["tool_a", "tool_a", "tool_b"],
-            use_customized_prompt=True,
-        )
-        assert captured["wrapped_input"] == ["tool_a", "tool_b"]
-        assert runtime_agent.tools == ["hooked:tool_a", "hooked:tool_b"]
-        assert runtime_agent.kwargs["prompt_templates"] == {"system_prompt": "patched"}
-    finally:
-        set_global_logger(previous_global_logger)
+    definition = agent._build_runtime_definition()
+
+    assert definition.runtime_id == "smolagents"
+    assert definition.name == "definition_agent"
+    assert definition.description == "Complete neutral definition."
+    assert definition.model is model_binding
+    assert definition.max_steps == 11
+    assert definition.planning_interval == 3
+    assert definition.smart_summary is False
+    assert definition.todo_mode == "on"
+    assert definition.instructions == "environment\n\ntodo:on"
+    assert definition.metadata == {"max_consecutive_parse_errors": 7}
+    assert tuple(item.name for item in definition.tool_gateway.definitions) == (
+        "proof",
+        "todo_write",
+        "final_answer",
+    )
 
 
-def test_create_agent_registers_before_finish_check(monkeypatch):
-    _patch_agent_classes(monkeypatch)
-    previous_global_logger = get_global_logger(create_if_missing=False)
-    set_global_logger(DummyLoggerBackend())
-
-    try:
-        agent = _make_agent(logger=None)
-        runtime_agent = agent._create_agent(
-            tools=[],
-            use_customized_prompt=False,
-        )
-        assert runtime_agent.kwargs["final_answer_checks"]
-    finally:
-        set_global_logger(previous_global_logger)
-
-
-def test_create_agent_final_answer_checks_contains_hook_stop(monkeypatch):
-    _patch_agent_classes(monkeypatch)
-    previous_global_logger = get_global_logger(create_if_missing=False)
-    set_global_logger(DummyLoggerBackend())
-
-    try:
-        agent = _make_agent(logger=None)
-
-        def hook_check(*_args, **_kwargs):
-            return True
-
-        hook_run = get_current_hook_run(required=True)
-        monkeypatch.setattr(hook_run, "build_stop_check", lambda: hook_check)
-
-        runtime_agent = agent._create_agent(
-            tools=[],
-            use_customized_prompt=False,
-        )
-        checks = runtime_agent.kwargs["final_answer_checks"]
-        assert len(checks) == 1
-        assert checks[0]("answer", object()) is True
-    finally:
-        set_global_logger(previous_global_logger)
-
-
-def test_cached_runtime_stop_check_resolves_current_hook_run_per_call():
+def test_each_invocation_builds_and_closes_a_fresh_runtime(monkeypatch):
     agent = _make_agent(logger=DummyLoggerBackend())
-    observed: list[str] = []
+    runtimes: list[RecordingAgentRuntime] = []
 
-    def stop(context):
-        observed.append(context.local_run_id)
+    def build_runtime() -> RecordingAgentRuntime:
+        runtime = RecordingAgentRuntime(output=f"run-{len(runtimes) + 1}")
+        runtimes.append(runtime)
+        return runtime
+
+    monkeypatch.setattr(agent, "build_runtime", build_runtime)
+    monkeypatch.setattr(agent, "_inject_memory_snapshot", lambda tasks: tasks)
+
+    assert agent.run("first") == "run-1"
+    assert agent.run("second") == "run-2"
+    assert len(runtimes) == 2
+    assert runtimes[0] is not runtimes[1]
+    assert [runtime.close_calls for runtime in runtimes] == [1, 1]
+
+
+def test_task_created_is_emitted_once_through_runtime_request(monkeypatch):
+    agent = _make_agent(logger=DummyLoggerBackend())
+    runtime = RecordingAgentRuntime("done")
+    events: list[HookEvent] = []
+    monkeypatch.setattr(agent, "build_runtime", lambda: runtime)
+    monkeypatch.setattr(agent, "_inject_memory_snapshot", lambda tasks: tasks)
+
+    def record(context):
+        events.append(HookEvent(context.hook_event_name))
         return HookResult()
 
-    shared_check = agent._build_runtime_final_answer_checks()[0]
-    memory = type("Memory", (), {"steps": []})()
-    for label in ("first", "second"):
-        run = HookRun(
-            HookPlan((HookHandler(HookEvent.STOP, "*", stop),)),
-            local_run_id=label,
-            root_run_id=label,
-        )
-        current = capture_explicit_execution_context()
-        with bind_explicit_execution_context(replace(current, hook_run=run)):
-            assert shared_check("answer", memory) is True
+    _append_hook_handler(agent, HookEvent.TASK_CREATED, record)
 
-    assert observed == ["first", "second"]
-
-
-def test_cached_runtime_refreshes_stateful_tool_instance_for_each_run(monkeypatch):
-    from smolagents import Tool
-
-    class StatefulTool(Tool):
-        name = "stateful_cached_tool"
-        description = "Retains calls on its instance."
-        inputs = {"value": {"type": "integer", "description": "Value"}}
-        output_type = "integer"
-
-        def __init__(self):
-            self.is_initialized = True
-            self.calls: list[int] = []
-
-        def forward(self, value: int) -> int:
-            self.calls.append(value)
-            return value
-
-    agent = _make_agent(logger=DummyLoggerBackend())
-    base_profile = agent._role_profile()
-    monkeypatch.setattr(
-        agent,
-        "_role_profile",
-        lambda: base_agent_module.AgentRoleProfile(
-            agent_type=base_profile.agent_type,
-            cache_runtime_agent=True,
-        ),
-    )
-    definition = StatefulTool()
-    runtime = type("CachedRuntime", (), {"tools": {}})()
-    agent._runtime_agent = runtime
-    monkeypatch.setattr(agent, "_build_runtime_tools", lambda _profile: [definition])
-
-    first_runtime = agent.build_runtime_agent()
-    first_tool = first_runtime.tools["stateful_cached_tool"]
-    first_tool.calls.append(1)
-    second_runtime = agent.build_runtime_agent()
-    second_tool = second_runtime.tools["stateful_cached_tool"]
-
-    assert first_runtime is second_runtime
-    assert first_tool is not second_tool
-    assert first_tool.calls == [1]
-    assert second_tool.calls == []
-    assert definition.calls == []
+    assert agent.run("one task", task_id="task-created") == "done"
+    assert events == [HookEvent.TASK_CREATED]
+    assert [request.task for request in runtime.requests] == ["one task"]
 
 
 @pytest.mark.parametrize("mode", ["auto", "on"])
@@ -583,7 +489,7 @@ def test_todo_enabled_modes_expose_tool_independent_of_planning_interval(
 ) -> None:
     agent = DummyAgent(
         config={"name": "runtime_dummy", "todo": {"mode": mode}},
-        model=object(),
+        model_binding=_model_binding(),
         logger=DummyLoggerBackend(),
     )
     sentinel = type("TodoTool", (), {"name": "todo_write"})()
@@ -607,7 +513,7 @@ def test_todo_off_hides_even_explicit_tool_with_planning_enabled(monkeypatch) ->
             "todo": {"mode": "off"},
             "planning_interval": 2,
         },
-        model=object(),
+        model_binding=_model_binding(),
         logger=DummyLoggerBackend(),
     )
     explicit = type("TodoTool", (), {"name": "todo_write"})()
@@ -621,10 +527,10 @@ def test_todo_off_hides_even_explicit_tool_with_planning_enabled(monkeypatch) ->
 
 def test_base_run_emits_task_complete_on_success(monkeypatch):
     agent = _make_agent(logger=DummyLoggerBackend())
-    runtime_agent = DummyRuntimeRunner(result="ok")
+    runtime_agent = RecordingAgentRuntime(output="ok")
     events = []
 
-    monkeypatch.setattr(agent, "build_runtime_agent", lambda: runtime_agent)
+    monkeypatch.setattr(agent, "build_runtime", lambda: runtime_agent)
 
     def _record(context):
         events.append(
@@ -641,8 +547,12 @@ def test_base_run_emits_task_complete_on_success(monkeypatch):
     complete_event = next(item for item in events if item[0] is HookEvent.TASK_COMPLETED)
     assert complete_event[2]["task_id"] == "task-complete"
     assert complete_event[2]["agent_name"] == agent.name
-    assert runtime_agent.calls == [
-        {"task": "do work", "return_full_result": True, "reset": True}
+    assert runtime_agent.requests == [
+        AgentRuntimeRequest(
+            task="do work",
+            continue_session=False,
+            record_task=False,
+        )
     ]
 
 
@@ -650,11 +560,16 @@ def test_base_run_binds_root_before_memory_snapshot_and_only_owner_emits_session
     from agentloom.runtime.trace import bind_root_run, get_current_session_run_id, require_root_run_id
 
     agent = _make_agent(logger=DummyLoggerBackend())
-    runtime_agent = DummyRuntimeRunner(result="ok")
+    runtimes: list[RecordingAgentRuntime] = []
     events = []
     snapshot_roots = []
 
-    monkeypatch.setattr(agent, "build_runtime_agent", lambda: runtime_agent)
+    def build_runtime() -> RecordingAgentRuntime:
+        runtime = RecordingAgentRuntime(output="ok")
+        runtimes.append(runtime)
+        return runtime
+
+    monkeypatch.setattr(agent, "build_runtime", build_runtime)
     monkeypatch.setattr(
         agent,
         "_inject_memory_snapshot",
@@ -772,10 +687,10 @@ def test_base_run_uses_runner_supplied_run_id_for_root_lifecycle(monkeypatch):
     from agentloom.runtime.trace import capture_explicit_execution_context
 
     agent = _make_agent(logger=DummyLoggerBackend())
-    runtime_agent = DummyRuntimeRunner(result="ok")
+    runtime_agent = RecordingAgentRuntime(output="ok")
     observed = []
 
-    monkeypatch.setattr(agent, "build_runtime_agent", lambda: runtime_agent)
+    monkeypatch.setattr(agent, "build_runtime", lambda: runtime_agent)
     monkeypatch.setattr(
         agent,
         "_inject_memory_snapshot",
@@ -791,10 +706,10 @@ def test_base_run_releases_owned_root_after_failure(monkeypatch):
     from agentloom.runtime.trace import get_current_session_run_id, require_root_run_id
 
     agent = _make_agent(logger=DummyLoggerBackend())
-    runtime_agent = DummyRuntimeRunner(exc=RuntimeError("boom-root"))
+    runtime_agent = RecordingAgentRuntime(exc=RuntimeError("boom-root"))
     snapshot_roots = []
 
-    monkeypatch.setattr(agent, "build_runtime_agent", lambda: runtime_agent)
+    monkeypatch.setattr(agent, "build_runtime", lambda: runtime_agent)
     monkeypatch.setattr(
         agent,
         "_inject_memory_snapshot",
@@ -813,10 +728,10 @@ def test_root_memory_review_runs_after_session_end_inside_owned_root(monkeypatch
     from agentloom.self_learning import reviewer
 
     agent = _make_review_agent(logger=DummyLoggerBackend())
-    runtime_agent = DummyRuntimeRunner(result="ok")
+    runtime_agent = RecordingAgentRuntime(output="ok")
     order = []
 
-    monkeypatch.setattr(agent, "build_runtime_agent", lambda: runtime_agent)
+    monkeypatch.setattr(agent, "build_runtime", lambda: runtime_agent)
     monkeypatch.setattr(agent, "_inject_memory_snapshot", lambda tasks: tasks)
     monkeypatch.setattr(agent, "_emit_task_lifecycle_event", lambda *_args, **_kwargs: None)
 
@@ -850,10 +765,10 @@ def test_memory_review_failure_does_not_change_root_run_result(monkeypatch):
     from agentloom.self_learning import reviewer
 
     agent = _make_review_agent(logger=DummyLoggerBackend())
-    runtime_agent = DummyRuntimeRunner(result="main-result")
+    runtime_agent = RecordingAgentRuntime(output="main-result")
     session_events = []
 
-    monkeypatch.setattr(agent, "build_runtime_agent", lambda: runtime_agent)
+    monkeypatch.setattr(agent, "build_runtime", lambda: runtime_agent)
     monkeypatch.setattr(agent, "_inject_memory_snapshot", lambda tasks: tasks)
     monkeypatch.setattr(agent, "_emit_task_lifecycle_event", lambda *_args, **_kwargs: None)
     monkeypatch.setattr(
@@ -879,13 +794,13 @@ def test_disabled_self_learning_never_enters_completed_run_review(monkeypatch):
             "name": "runtime_dummy_disabled_learning",
             "self_learning": {"enabled": False},
         },
-        model=object(),
+        model_binding=_model_binding(),
         logger=DummyLoggerBackend(),
     )
-    runtime_agent = DummyRuntimeRunner(result="main-result")
+    runtime_agent = RecordingAgentRuntime(output="main-result")
     review_calls = []
 
-    monkeypatch.setattr(agent, "build_runtime_agent", lambda: runtime_agent)
+    monkeypatch.setattr(agent, "build_runtime", lambda: runtime_agent)
     monkeypatch.setattr(agent, "_inject_memory_snapshot", lambda tasks: tasks)
     monkeypatch.setattr(agent, "_emit_task_lifecycle_event", lambda *_args, **_kwargs: None)
     monkeypatch.setattr(agent, "_emit_session_lifecycle_event", lambda *_args, **_kwargs: None)
@@ -903,10 +818,10 @@ def test_failed_root_records_session_end_without_running_memory_review(monkeypat
     from agentloom.self_learning import reviewer
 
     agent = _make_agent(logger=DummyLoggerBackend())
-    runtime_agent = DummyRuntimeRunner(exc=RuntimeError("main failed"))
+    runtime_agent = RecordingAgentRuntime(exc=RuntimeError("main failed"))
     session_events = []
 
-    monkeypatch.setattr(agent, "build_runtime_agent", lambda: runtime_agent)
+    monkeypatch.setattr(agent, "build_runtime", lambda: runtime_agent)
     monkeypatch.setattr(agent, "_inject_memory_snapshot", lambda tasks: tasks)
     monkeypatch.setattr(agent, "_emit_task_lifecycle_event", lambda *_args, **_kwargs: None)
     monkeypatch.setattr(
@@ -929,16 +844,15 @@ def test_failed_root_records_session_end_without_running_memory_review(monkeypat
 def test_max_steps_root_is_a_failure_and_never_runs_memory_review(monkeypatch):
     from agentloom.self_learning import reviewer
 
-    class MaxStepsResult:
-        state = "max_steps_error"
-        output = "fallback answer"
-
     agent = _make_agent(logger=DummyLoggerBackend())
-    runtime_agent = DummyRuntimeRunner(result=MaxStepsResult())
+    runtime_agent = RecordingAgentRuntime(
+        output="fallback answer",
+        state="max_steps_error",
+    )
     task_events = []
     session_events = []
 
-    monkeypatch.setattr(agent, "build_runtime_agent", lambda: runtime_agent)
+    monkeypatch.setattr(agent, "build_runtime", lambda: runtime_agent)
     monkeypatch.setattr(agent, "_inject_memory_snapshot", lambda tasks: tasks)
     monkeypatch.setattr(
         agent,
@@ -1099,9 +1013,9 @@ def test_max_steps_managed_worker_fails_before_call_discards_state(
     from agentloom.runtime.checkpoint.coordinator import CheckpointCoordinator
     from smolagents import RunResult
 
-    native_runtime = base_agent_module.ToolCallingAgentV2(
+    native_runtime = ToolCallingAgentV2(
         tool_gateway=AgentLoomToolGateway([final_answer_binding()]),
-        model=object(),
+        model=_model_binding().adapter,
         max_steps=1,
         max_tokens=32,
         verbosity_level=0,
@@ -1233,7 +1147,7 @@ def test_real_config_builder_compiles_global_application_and_agent_hook_layers(
             "_yaml_file_path": str(workflow_path),
             "hooks": {"SessionStart": [{"id": "layer.agent", "command": "python agent.py"}]},
         },
-        model=object(),
+        model_binding=_model_binding(),
         logger=DummyLoggerBackend(),
     )
     configured = [handler for handler in agent._hook_plan.handlers if handler.hook_id]
@@ -1256,11 +1170,11 @@ def test_successful_root_review_waits_for_session_end_recorder_commit(monkeypatc
     from agentloom.self_learning.persistence.ledger import SelfLearningLedger
 
     agent = _make_review_agent(logger=DummyLoggerBackend())
-    runtime_agent = DummyRuntimeRunner(result="main-result")
+    runtime_agent = RecordingAgentRuntime(output="main-result")
     recorder_committed = threading.Event()
     observations = []
 
-    monkeypatch.setattr(agent, "build_runtime_agent", lambda: runtime_agent)
+    monkeypatch.setattr(agent, "build_runtime", lambda: runtime_agent)
     monkeypatch.setattr(agent, "_inject_memory_snapshot", lambda tasks: tasks)
 
     session_end_handler = next(
@@ -1317,10 +1231,10 @@ def test_custom_session_end_telemetry_cannot_disable_persisted_review(monkeypatc
     from agentloom.self_learning.persistence.ledger import SelfLearningLedger
 
     agent = _make_review_agent(logger=DummyLoggerBackend())
-    runtime_agent = DummyRuntimeRunner(result="main-result")
+    runtime_agent = RecordingAgentRuntime(output="main-result")
     reviewed_roots = []
 
-    monkeypatch.setattr(agent, "build_runtime_agent", lambda: runtime_agent)
+    monkeypatch.setattr(agent, "build_runtime", lambda: runtime_agent)
     monkeypatch.setattr(agent, "_inject_memory_snapshot", lambda tasks: tasks)
 
     def _overwrite_shared_telemetry(_context):
@@ -1363,11 +1277,11 @@ def test_session_end_persistence_failure_never_builds_completed_run_review(
     from agentloom.self_learning.session_recorder import SessionRecorder
 
     agent = _make_review_agent(logger=DummyLoggerBackend())
-    runtime_agent = DummyRuntimeRunner(result="main-result")
+    runtime_agent = RecordingAgentRuntime(output="main-result")
     failed_root_ids = []
     review_calls = []
 
-    monkeypatch.setattr(agent, "build_runtime_agent", lambda: runtime_agent)
+    monkeypatch.setattr(agent, "build_runtime", lambda: runtime_agent)
     monkeypatch.setattr(agent, "_inject_memory_snapshot", lambda tasks: tasks)
 
     original_append = SessionRecorder.append
@@ -1417,10 +1331,10 @@ def test_custom_session_end_telemetry_cannot_create_orphan_review_audit(
     )
 
     agent = _make_review_agent(logger=DummyLoggerBackend())
-    runtime_agent = DummyRuntimeRunner(result="main-result")
+    runtime_agent = RecordingAgentRuntime(output="main-result")
     failed_root_ids = []
 
-    monkeypatch.setattr(agent, "build_runtime_agent", lambda: runtime_agent)
+    monkeypatch.setattr(agent, "build_runtime", lambda: runtime_agent)
     monkeypatch.setattr(agent, "_inject_memory_snapshot", lambda tasks: tasks)
 
     original_append = SessionRecorder.append
@@ -1473,15 +1387,17 @@ def test_same_base_agent_concurrent_top_level_runs_do_not_cross_context(monkeypa
     )
 
     agent = _make_agent(logger=DummyLoggerBackend())
-    barrier = threading.Barrier(2)
     runtime_observations = {}
     lifecycle_observations = []
+    runtimes: list[_InterleavedRuntime] = []
 
     class _InterleavedRuntime:
-        def run(self, *, task, **_kwargs):
-            barrier.wait(timeout=5)
+        runtime_id = "smolagents"
+        capabilities = RuntimeCapabilities(True, True, True, True)
+
+        def run(self, request: AgentRuntimeRequest) -> AgentRuntimeResult:
             current = capture_explicit_execution_context()
-            runtime_observations[task] = {
+            runtime_observations[request.task] = {
                 "task_id": current.task_id,
                 "root_run_id": current.root_run_id,
                 "local_run_id": current.local_run_id,
@@ -1489,9 +1405,22 @@ def test_same_base_agent_concurrent_top_level_runs_do_not_cross_context(monkeypa
                 "agent_name": current.agent_name,
                 "agent_config": current.agent_config,
             }
-            return DummyRunResult(task)
+            return AgentRuntimeResult(state="success", output=request.task)
 
-    monkeypatch.setattr(agent, "build_runtime_agent", _InterleavedRuntime)
+        def snapshot(self):
+            return None
+
+        def close(self):
+            self.closed = True
+            return None
+
+    def build_runtime() -> _InterleavedRuntime:
+        runtime = _InterleavedRuntime()
+        runtime.closed = False
+        runtimes.append(runtime)
+        return runtime
+
+    monkeypatch.setattr(agent, "build_runtime", build_runtime)
     monkeypatch.setattr(agent, "_inject_memory_snapshot", lambda tasks: tasks)
 
     def _record(context):
@@ -1533,6 +1462,8 @@ def test_same_base_agent_concurrent_top_level_runs_do_not_cross_context(monkeypa
         assert observed["agent_config"] == agent._effective_agent_config
         roots.add(observed["root_run_id"])
     assert len(roots) == 2
+    assert len(runtimes) == 2
+    assert all(runtime.closed for runtime in runtimes)
 
     for label in ("A", "B"):
         events = [item for item in lifecycle_observations if item[1] == f"task-{label}"]
@@ -1783,17 +1714,22 @@ def test_root_task_lifecycle_never_reads_legacy_subtask_fallback() -> None:
     assert events == [HookEvent.TASK_COMPLETED]
 
 
-def test_each_run_rebinds_message_sink_for_cached_runtime(monkeypatch):
+def test_each_run_rebinds_message_sink_for_fresh_runtime(monkeypatch):
     agent = _make_agent(logger=DummyLoggerBackend())
-    runtime = DummyRuntimeRunner(result="ok")
+    runtimes: list[RecordingAgentRuntime] = []
     delivered: list[str] = []
 
-    monkeypatch.setattr(agent, "build_runtime_agent", lambda: runtime)
+    def build_runtime() -> RecordingAgentRuntime:
+        runtime = RecordingAgentRuntime(output="ok")
+        runtimes.append(runtime)
+        return runtime
+
+    monkeypatch.setattr(agent, "build_runtime", build_runtime)
     monkeypatch.setattr(agent, "_inject_memory_snapshot", lambda tasks: tasks)
     monkeypatch.setattr(
         agent,
         "_emit_hook_user_message",
-        lambda _runtime, _logger, message: delivered.append(message),
+        lambda _logger, message: delivered.append(message),
     )
     _append_hook_handler(
         agent,
@@ -1806,54 +1742,46 @@ def test_each_run_rebinds_message_sink_for_cached_runtime(monkeypatch):
 
     assert len(delivered) == 2
     assert delivered[0] != delivered[1]
+    assert len(runtimes) == 2
+    assert [runtime.close_calls for runtime in runtimes] == [1, 1]
 
 
-def test_same_base_agent_serializes_real_cached_runtime_runs(monkeypatch):
+def test_same_base_agent_serializes_fresh_runtime_runs(monkeypatch):
     from agentloom.runtime.trace import require_root_run_id
 
     agent = _make_agent(logger=DummyLoggerBackend())
-    base_profile = agent._role_profile()
-    monkeypatch.setattr(
-        agent,
-        "_role_profile",
-        lambda: base_agent_module.AgentRoleProfile(
-            agent_type=base_profile.agent_type,
-            cache_runtime_agent=True,
-        ),
-    )
 
     state_lock = threading.Lock()
     first_entered = threading.Event()
     second_attempted = threading.Event()
     second_entered = threading.Event()
     release_first = threading.Event()
+    active = 0
+    max_active = 0
+    runtimes = []
 
-    class _StatefulCachedRuntime:
-        def __init__(self):
-            self.state = {}
-            self.active = 0
-            self.max_active = 0
+    def build_runtime() -> RecordingAgentRuntime:
+        nonlocal active, max_active
 
-        def run(self, *, task, **_kwargs):
+        def run(request: AgentRuntimeRequest) -> AgentRuntimeResult:
+            nonlocal active, max_active
             with state_lock:
-                self.active += 1
-                self.max_active = max(self.max_active, self.active)
-                self.state["task"] = task
-            if task == "A":
+                active += 1
+                max_active = max(max_active, active)
+            if request.task == "A":
                 first_entered.set()
                 assert release_first.wait(timeout=5)
             else:
                 second_entered.set()
-            result = self.state["task"]
             with state_lock:
-                self.active -= 1
-            return DummyRunResult(result)
+                active -= 1
+            return AgentRuntimeResult(state="success", output=request.task)
 
-    cached_runtime = _StatefulCachedRuntime()
-    monkeypatch.setattr(agent, "_create_agent", lambda **_kwargs: cached_runtime)
-    assert agent.build_runtime_agent() is cached_runtime
-    assert agent.build_runtime_agent() is cached_runtime
+        runtime = RecordingAgentRuntime(side_effect=run)
+        runtimes.append(runtime)
+        return runtime
 
+    monkeypatch.setattr(agent, "build_runtime", build_runtime)
     monkeypatch.setattr(agent, "_inject_memory_snapshot", lambda tasks: tasks)
     monkeypatch.setattr(agent, "_emit_task_lifecycle_event", lambda *_args, **_kwargs: None)
     session_ends = []
@@ -1880,7 +1808,9 @@ def test_same_base_agent_serializes_real_cached_runtime_runs(monkeypatch):
         assert first.result(timeout=5) == "A"
         assert second.result(timeout=5) == "B"
 
-    assert cached_runtime.max_active == 1
+    assert max_active == 1
+    assert len(runtimes) == 2
+    assert [runtime.close_calls for runtime in runtimes] == [1, 1]
     assert {task: result for task, result, _root in session_ends} == {
         "A": "A",
         "B": "B",
@@ -1894,37 +1824,43 @@ def test_base_run_executes_transformed_tasks_sequentially_with_reset_false(tmp_p
         str(tmp_path / ".agentloom"),
     )
     agent = _make_agent(logger=DummyLoggerBackend())
-    runtime_agent = DummyRuntimeRunner()
-    runtime_agent._result = None
     results = iter(["first-result", "second-result", "final-result"])
     build_calls = []
 
-    def _recording_run(*, task, **kwargs):
-        runtime_agent.calls.append({"task": task, **kwargs})
-        return DummyRunResult(next(results))
+    def _recording_run(_request: AgentRuntimeRequest) -> AgentRuntimeResult:
+        return AgentRuntimeResult(
+            state="success",
+            output=next(results),
+        )
 
-    runtime_agent.run = _recording_run
-    monkeypatch.setattr(agent, "build_runtime_agent", lambda: build_calls.append(runtime_agent) or runtime_agent)
+    runtime_agent = RecordingAgentRuntime(side_effect=_recording_run)
+    monkeypatch.setattr(
+        agent,
+        "build_runtime",
+        lambda: build_calls.append(runtime_agent) or runtime_agent,
+    )
     monkeypatch.setattr(agent, "_transform_tasks", lambda _task: ["first task", "second task", "third task"])
 
     result = agent.run("do work", task_id="multi-workflow")
 
     assert result == "final-result"
     assert build_calls == [runtime_agent]
-    assert runtime_agent.calls == [
-        {"task": "first task", "return_full_result": True, "reset": True},
-        {
-            "task": "second task",
-            "return_full_result": True,
-            "reset": False,
-            "_skip_task_step_on_reset_false": False,
-        },
-        {
-            "task": "third task",
-            "return_full_result": True,
-            "reset": False,
-            "_skip_task_step_on_reset_false": False,
-        },
+    assert runtime_agent.requests == [
+        AgentRuntimeRequest(
+            task="first task",
+            continue_session=False,
+            record_task=False,
+        ),
+        AgentRuntimeRequest(
+            task="second task",
+            continue_session=True,
+            record_task=True,
+        ),
+        AgentRuntimeRequest(
+            task="third task",
+            continue_session=True,
+            record_task=True,
+        ),
     ]
 
 
@@ -1938,30 +1874,31 @@ def test_goal_mode_continues_after_normal_final_until_update_goal(monkeypatch):
             "workflow": "Implement and verify.",
             "goal": {"enabled": True},
         },
-        model=object(),
+        model_binding=_model_binding(),
         logger=DummyLoggerBackend(),
     )
-    runtime = DummyRuntimeRunner()
-
-    def _run(*, task, **kwargs):
-        runtime.calls.append({"task": task, **kwargs})
-        if len(runtime.calls) == 2:
+    def _run(_request: AgentRuntimeRequest) -> AgentRuntimeResult:
+        if len(runtime.requests) == 2:
             get_current_goal_provider(required=True).complete("implemented; tests passed")
-        return DummyRunResult(f"segment-{len(runtime.calls)}", state="success")
+        return AgentRuntimeResult(
+            state="success",
+            output=f"segment-{len(runtime.requests)}",
+        )
 
-    runtime.run = _run
-    monkeypatch.setattr(agent, "build_runtime_agent", lambda: runtime)
+    runtime = RecordingAgentRuntime(side_effect=_run)
+    monkeypatch.setattr(agent, "build_runtime", lambda: runtime)
     monkeypatch.setattr(agent, "_inject_memory_snapshot", lambda tasks: tasks)
 
     result = agent.run("Add Goal mode", task_id="goal-task")
 
     assert result == "segment-2"
-    assert len(runtime.calls) == 2
-    assert runtime.calls[0]["task"] == "Add Goal mode"
-    assert "Continue working toward the active Goal" in runtime.calls[1]["task"]
-    assert "Implement and verify." not in runtime.calls[1]["task"]
-    assert "Goal ID: goal_" in runtime.calls[1]["task"]
-    assert runtime.calls[1]["reset"] is False
+    assert len(runtime.requests) == 2
+    assert runtime.requests[0].task == "Add Goal mode"
+    assert "Continue working toward the active Goal" in runtime.requests[1].task
+    assert "Implement and verify." not in runtime.requests[1].task
+    assert "Goal ID: goal_" in runtime.requests[1].task
+    assert runtime.requests[1].continue_session is True
+    assert runtime.requests[1].record_task is True
 
 
 def test_goal_mode_treats_max_steps_as_continuation_boundary(monkeypatch):
@@ -1974,25 +1911,22 @@ def test_goal_mode_treats_max_steps_as_continuation_boundary(monkeypatch):
             "workflow": "Implement and verify.",
             "goal": True,
         },
-        model=object(),
+        model_binding=_model_binding(),
         logger=DummyLoggerBackend(),
     )
-    runtime = DummyRuntimeRunner()
-
-    def _run(*, task, **kwargs):
-        runtime.calls.append({"task": task, **kwargs})
-        if len(runtime.calls) == 2:
+    def _run(_request: AgentRuntimeRequest) -> AgentRuntimeResult:
+        if len(runtime.requests) == 2:
             get_current_goal_provider(required=True).complete("done")
-        state = "max_steps_error" if len(runtime.calls) == 1 else "success"
-        output = "segment" if len(runtime.calls) == 1 else "done"
-        return DummyRunResult(output, state=state)
+        state = "max_steps_error" if len(runtime.requests) == 1 else "success"
+        output = "segment" if len(runtime.requests) == 1 else "done"
+        return AgentRuntimeResult(output=output, state=state)
 
-    runtime.run = _run
-    monkeypatch.setattr(agent, "build_runtime_agent", lambda: runtime)
+    runtime = RecordingAgentRuntime(side_effect=_run)
+    monkeypatch.setattr(agent, "build_runtime", lambda: runtime)
     monkeypatch.setattr(agent, "_inject_memory_snapshot", lambda tasks: tasks)
 
     assert agent.run("Add Goal mode", task_id="goal-task") == "done"
-    assert len(runtime.calls) == 2
+    assert len(runtime.requests) == 2
 
 
 def test_goal_mode_uses_evidence_when_max_steps_final_delivery_failed(monkeypatch):
@@ -2005,21 +1939,18 @@ def test_goal_mode_uses_evidence_when_max_steps_final_delivery_failed(monkeypatc
             "workflow": "Implement and verify.",
             "goal": True,
         },
-        model=object(),
+        model_binding=_model_binding(),
         logger=DummyLoggerBackend(),
     )
-    runtime = DummyRuntimeRunner()
-
-    def _run(*, task, **kwargs):
-        runtime.calls.append({"task": task, **kwargs})
+    def _run(_request: AgentRuntimeRequest) -> AgentRuntimeResult:
         get_current_goal_provider(required=True).complete("durable evidence")
-        return DummyRunResult(
-            "Error in generating final LLM output: Goal is already complete",
+        return AgentRuntimeResult(
             state="max_steps_error",
+            output="Error in generating final LLM output: Goal is already complete",
         )
 
-    runtime.run = _run
-    monkeypatch.setattr(agent, "build_runtime_agent", lambda: runtime)
+    runtime = RecordingAgentRuntime(side_effect=_run)
+    monkeypatch.setattr(agent, "build_runtime", lambda: runtime)
     monkeypatch.setattr(agent, "_inject_memory_snapshot", lambda tasks: tasks)
 
     assert agent.run("Add Goal mode", task_id="goal-task") == "durable evidence"
@@ -2035,26 +1966,23 @@ def test_goal_mode_stops_before_next_segment_after_soft_budget_crossing(monkeypa
             "workflow": "Implement and verify.",
             "goal": {"enabled": True, "token_budget": 100},
         },
-        model=object(),
+        model_binding=_model_binding(),
         logger=DummyLoggerBackend(),
     )
-    runtime = DummyRuntimeRunner()
-
-    def _run(*, task, **kwargs):
-        runtime.calls.append({"task": task, **kwargs})
+    def _run(_request: AgentRuntimeRequest) -> AgentRuntimeResult:
         get_current_goal_provider(required=True).record_usage(
             prompt_tokens=90,
             completion_tokens=20,
         )
-        return DummyRunResult("ordinary final")
+        return AgentRuntimeResult(state="success", output="ordinary final")
 
-    runtime.run = _run
-    monkeypatch.setattr(agent, "build_runtime_agent", lambda: runtime)
+    runtime = RecordingAgentRuntime(side_effect=_run)
+    monkeypatch.setattr(agent, "build_runtime", lambda: runtime)
     monkeypatch.setattr(agent, "_inject_memory_snapshot", lambda tasks: tasks)
 
     with pytest.raises(GoalBudgetLimitedError):
         agent.run("Add Goal mode", task_id="goal-task")
-    assert len(runtime.calls) == 1
+    assert len(runtime.requests) == 1
 
 
 def test_goal_mode_resume_after_completion_commit_does_not_restart_work(
@@ -2073,18 +2001,15 @@ def test_goal_mode_resume_after_completion_commit_does_not_restart_work(
     manager = CheckpointManager("goal-runtime", checkpoints_root=tmp_path)
     first_agent = DummyGoalAgent(
         config=config,
-        model=object(),
+        model_binding=_model_binding(),
         logger=DummyLoggerBackend(),
     )
-    first_runtime = DummyRuntimeRunner()
-
-    def _commit_then_interrupt(*, task, **kwargs):
-        first_runtime.calls.append({"task": task, **kwargs})
+    def _commit_then_interrupt(_request: AgentRuntimeRequest) -> AgentRuntimeResult:
         get_current_goal_provider(required=True).complete("delivered; tests passed")
         raise KeyboardInterrupt("crash after completion commit")
 
-    first_runtime.run = _commit_then_interrupt
-    monkeypatch.setattr(first_agent, "build_runtime_agent", lambda: first_runtime)
+    first_runtime = RecordingAgentRuntime(side_effect=_commit_then_interrupt)
+    monkeypatch.setattr(first_agent, "build_runtime", lambda: first_runtime)
     monkeypatch.setattr(first_agent, "_inject_memory_snapshot", lambda tasks: tasks)
 
     with pytest.raises(KeyboardInterrupt):
@@ -2100,11 +2025,11 @@ def test_goal_mode_resume_after_completion_commit_does_not_restart_work(
 
     resumed_agent = DummyGoalAgent(
         config=config,
-        model=object(),
+        model_binding=_model_binding(),
         logger=DummyLoggerBackend(),
     )
-    resumed_runtime = DummyRuntimeRunner()
-    monkeypatch.setattr(resumed_agent, "build_runtime_agent", lambda: resumed_runtime)
+    resumed_runtime = RecordingAgentRuntime()
+    monkeypatch.setattr(resumed_agent, "build_runtime", lambda: resumed_runtime)
     monkeypatch.setattr(resumed_agent, "_inject_memory_snapshot", lambda tasks: tasks)
 
     result = resumed_agent.run(
@@ -2115,7 +2040,7 @@ def test_goal_mode_resume_after_completion_commit_does_not_restart_work(
     )
 
     assert result == "delivered; tests passed"
-    assert resumed_runtime.calls == []
+    assert resumed_runtime.requests == []
     assert manager.load_goal("goal-complete-crash")["goal_id"] == persisted["goal_id"]
 
 
@@ -2131,7 +2056,7 @@ def test_goal_tools_are_absent_when_goal_mode_is_disabled(monkeypatch, goal):
         config["goal"] = goal
     agent = DummyGoalAgent(
         config=config,
-        model=object(),
+        model_binding=_model_binding(),
         logger=DummyLoggerBackend(),
     )
     monkeypatch.setattr(agent, "get_all_tools", lambda agent_type: [])
@@ -2148,7 +2073,7 @@ def test_goal_tools_are_added_only_for_enabled_root_supervisor(monkeypatch):
             "goal": True,
             "todo": {"mode": "off"},
         },
-        model=object(),
+        model_binding=_model_binding(),
         logger=DummyLoggerBackend(),
     )
     monkeypatch.setattr(agent, "get_all_tools", lambda agent_type: [])
@@ -2178,10 +2103,10 @@ def test_loom_runtime_can_keep_task_step_for_sequential_reset_false():
 
 def test_base_run_emits_task_fail_on_exception(monkeypatch):
     agent = _make_agent(logger=DummyLoggerBackend())
-    runtime_agent = DummyRuntimeRunner(exc=RuntimeError("boom-run"))
+    runtime_agent = RecordingAgentRuntime(exc=RuntimeError("boom-run"))
     events = []
 
-    monkeypatch.setattr(agent, "build_runtime_agent", lambda: runtime_agent)
+    monkeypatch.setattr(agent, "build_runtime", lambda: runtime_agent)
 
     def _record(context):
         events.append(
@@ -2198,147 +2123,3 @@ def test_base_run_emits_task_fail_on_exception(monkeypatch):
     fail_event = next(item for item in events if item[0] is HookEvent.STOP_FAILURE)
     assert fail_event[2]["task_id"] == "task-fail"
     assert fail_event[2]["error"] == "boom-run"
-
-
-def test_create_agent_uses_explicit_planning_interval_only(monkeypatch):
-    _patch_agent_classes(monkeypatch)
-    previous_global_logger = get_global_logger(create_if_missing=False)
-    set_global_logger(DummyLoggerBackend())
-
-    try:
-        agent = _make_agent(logger=None)
-        runtime_agent = agent._create_agent(
-            tools=[],
-            use_customized_prompt=False,
-            planning_interval=2,
-        )
-        assert runtime_agent.kwargs["planning_interval"] == 2
-
-        runtime_agent_invalid = agent._create_agent(
-            tools=[],
-            use_customized_prompt=False,
-            planning_interval="abc",  # type: ignore[arg-type]
-        )
-        assert "planning_interval" not in runtime_agent_invalid.kwargs
-    finally:
-        set_global_logger(previous_global_logger)
-
-
-def test_create_agent_passes_max_tokens(monkeypatch):
-    _patch_agent_classes(monkeypatch)
-    previous_global_logger = get_global_logger(create_if_missing=False)
-    set_global_logger(DummyLoggerBackend())
-
-    try:
-        agent = _make_agent(logger=None)
-        runtime_agent = agent._create_agent(
-            tools=[],
-            use_customized_prompt=False,
-            max_tokens=2048,
-        )
-        assert runtime_agent.kwargs["max_tokens"] == 2048
-    finally:
-        set_global_logger(previous_global_logger)
-
-
-def test_create_agent_passes_split_context_budget(monkeypatch):
-    _patch_agent_classes(monkeypatch)
-    previous_global_logger = get_global_logger(create_if_missing=False)
-    set_global_logger(DummyLoggerBackend())
-
-    try:
-        agent = _make_agent(logger=None)
-        runtime_agent = agent._create_agent(
-            tools=[],
-            use_customized_prompt=False,
-            context_window=128000,
-            max_output_tokens=16000,
-        )
-        assert runtime_agent.kwargs["context_window"] == 128000
-        assert runtime_agent.kwargs["max_output_tokens"] == 16000
-    finally:
-        set_global_logger(previous_global_logger)
-
-
-def test_build_prompt_templates_uses_default_when_not_configured(monkeypatch, tmp_path):
-    """When no prompt path is configured, loads smolagents built-in."""
-
-    class _DummyConfig:
-        agent_root = tmp_path
-
-        @staticmethod
-        def get(key: str, default=None):
-            return default
-
-    agent = _make_agent(logger=DummyLoggerBackend())
-    agent._skill_catalog = SkillCatalog.empty()
-
-    monkeypatch.setattr(base_agent_module, "C", _DummyConfig())
-    monkeypatch.setattr(prompt_builder_module, "get_agent_environment_prompt", lambda: "")
-
-    templates = agent._build_prompt_templates(
-        runtime_logger=DummyLoggerBackend(),
-        use_customized_prompt=True,
-        prompt_template_path=None,
-        skill_tool_enabled=False,
-    )
-
-    # Should have loaded smolagents' built-in prompt
-    assert "system_prompt" in templates
-    assert "planning" in templates
-
-
-def test_build_prompt_templates_raises_on_invalid_explicit_prompt_path(monkeypatch, tmp_path):
-    class _DummyConfig:
-        agent_root = tmp_path
-
-        @staticmethod
-        def get(key: str, default=None):
-            return default
-
-    agent = _make_agent(logger=DummyLoggerBackend())
-
-    monkeypatch.setattr(base_agent_module, "C", _DummyConfig())
-    with pytest.raises(ValueError, match="prompt"):
-        agent._build_prompt_templates(
-            runtime_logger=DummyLoggerBackend(),
-            use_customized_prompt=True,
-            prompt_template_path=str(tmp_path / "missing_prompt.yaml"),
-            skill_tool_enabled=False,
-        )
-
-
-def test_create_agent_prioritizes_explicit_prompt_over_system_default(monkeypatch, tmp_path):
-    _patch_agent_classes(monkeypatch)
-
-    explicit_prompt = tmp_path / "explicit.yaml"
-    explicit_prompt.write_text("system_prompt: explicit", encoding="utf-8")
-    default_prompt = tmp_path / "default.yaml"
-    default_prompt.write_text("system_prompt: default", encoding="utf-8")
-
-    class _DummyConfig:
-        agent_root = tmp_path
-
-        @staticmethod
-        def get(key: str, default=None):
-            if key == "prompt":
-                return {"path": str(default_prompt)}
-            return default
-
-    previous_global_logger = get_global_logger(create_if_missing=False)
-    set_global_logger(DummyLoggerBackend())
-
-    monkeypatch.setattr(base_agent_module, "C", _DummyConfig())
-    monkeypatch.setattr(prompt_builder_module, "get_agent_environment_prompt", lambda: "")
-    try:
-        agent = _make_agent(logger=None)
-        runtime_agent = agent._create_agent(
-            tools=[],
-            use_customized_prompt=True,
-            prompt_template_path=str(explicit_prompt),
-        )
-        system_prompt = runtime_agent.kwargs["prompt_templates"]["system_prompt"]
-        assert system_prompt.startswith("explicit")
-        assert "decide whether a task list" in system_prompt
-    finally:
-        set_global_logger(previous_global_logger)

@@ -188,11 +188,6 @@ class AgentInvocation:
         session_error: BaseException | None = None
         runtime_agent = None
         agent_id = owner.get_agent_id()
-        previous_model_agent_id = (
-            getattr(owner._model, "agent_id", ...) if hasattr(owner._model, "agent_id") else ...
-        )
-        if previous_model_agent_id is not ...:
-            owner._model.agent_id = agent_id
 
         active_context = capture_explicit_execution_context()
         hook_agent_config = owner._effective_agent_config or owner._config
@@ -285,18 +280,24 @@ class AgentInvocation:
                     session_result=session_result,
                     session_error=session_error,
                     goal_provider=goal_provider,
-                    previous_model_agent_id=previous_model_agent_id,
                 )
             except BaseException as exc:
                 lifecycle_error = exc
             finally:
                 try:
-                    todo_binding.__exit__(None, None, None)
+                    if runtime_agent is not None:
+                        runtime_agent.close()
+                except BaseException as exc:
+                    if lifecycle_error is None:
+                        lifecycle_error = exc
                 finally:
                     try:
-                        goal_binding.__exit__(None, None, None)
+                        todo_binding.__exit__(None, None, None)
                     finally:
-                        execution_binding.__exit__(None, None, None)
+                        try:
+                            goal_binding.__exit__(None, None, None)
+                        finally:
+                            execution_binding.__exit__(None, None, None)
             if lifecycle_error is not None:
                 raise lifecycle_error
 
@@ -327,6 +328,11 @@ class AgentInvocation:
         if goal_provider is None:
             result = None
             for task_index, current_task in enumerate(transformed_tasks):
+                self.owner._emit_task_start(
+                    runtime_agent,
+                    current_task,
+                    additional_args=self.additional_args or {},
+                )
                 run_result = runtime_agent.run(
                     AgentRuntimeRequest(
                         task=current_task,
@@ -361,6 +367,11 @@ class AgentInvocation:
                 else goal_continuation_prompt(state)
             )
             try:
+                self.owner._emit_task_start(
+                    runtime_agent,
+                    current_task,
+                    additional_args=self.additional_args or {},
+                )
                 run_result = runtime_agent.run(
                     AgentRuntimeRequest(
                         task=current_task,
@@ -411,7 +422,6 @@ class AgentInvocation:
         session_result: Any,
         session_error: BaseException | None,
         goal_provider: Any,
-        previous_model_agent_id: Any,
     ) -> BaseException | None:
         owner = self.owner
         lifecycle_error: BaseException | None = None
@@ -443,8 +453,6 @@ class AgentInvocation:
                 )
                 if session_error is None:
                     self._review_finished_run()
-            if previous_model_agent_id is not ...:
-                owner._model.agent_id = previous_model_agent_id
         finally:
             if (
                 owns_lifecycle

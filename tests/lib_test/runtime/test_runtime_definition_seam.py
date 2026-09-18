@@ -180,11 +180,12 @@ def test_importing_generic_runtime_owner_does_not_load_smolagents() -> None:
                 loaded = sorted(
                     name
                     for name in sys.modules
-                    if name == "smolagents" or name.startswith("smolagents.")
+                    if name in {"smolagents", "litellm", "openai"}
+                    or name.startswith(("smolagents.", "litellm.", "openai."))
                 )
                 if loaded:
                     raise AssertionError(
-                        "agentloom.runtime.agent imported smolagents modules: "
+                        "agentloom.runtime.agent imported engine/provider modules: "
                         + ", ".join(loaded)
                     )
                 """
