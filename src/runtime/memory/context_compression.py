@@ -62,14 +62,20 @@ import uuid
 from collections.abc import Iterable, Mapping
 from dataclasses import dataclass
 
-from agentloom.adapters.smolagents.models.model_manager import model_manager
-from agentloom.adapters.smolagents.models.model_types import ModelType
+from agentloom.adapters.litellm.model_binding import (
+    resolve_litellm_model_turn_binding,
+)
 from agentloom.configuration.defaults import DEFAULT_MAX_TOKENS
 from agentloom.runtime.context_engine.engine import CONTEXT_REF_PREFIX
 from agentloom.runtime.context_engine.runtime import get_current_context_engine
 from agentloom.runtime.logging import get_logger
 from agentloom.runtime.model_protocol import (
     MODEL_ITEMS_RAW_KEY,
+    FunctionCallItem,
+    FunctionCallOutputItem,
+    MessageItem,
+    ModelProtocolError,
+    ReasoningItem,
     model_item_to_dict,
 )
 from litellm.utils import token_counter
@@ -1470,33 +1476,10 @@ def summarize_conversation(
     condense_instructions = custom_condense_prompt.strip() if custom_condense_prompt else CONDENSE_INSTRUCTION
     serialized_history = _serialize_messages_for_summary(summarizable_messages)
 
-    # CONDENSE + history
-    request_messages: list[ChatMessage | dict] = []
-
-    # CONDENSE
-    condense_message = ChatMessage(
-        role=MessageRole.USER,
-        content=[{
-            "type": "text",
-            "text": condense_instructions
-        }],
-        tool_calls=None,
-        raw=None,
-        token_usage=None,
-    )
-    request_messages.append(condense_message)
-
-    request_messages.append(
-        ChatMessage(
-            role=MessageRole.USER,
-            content=[{
-                "type": "text",
-                "text": serialized_history,
-            }],
-            tool_calls=None,
-            raw=None,
-            token_usage=None,
-        )
+    request_items = (
+        MessageItem(role="system", text=SUMMARY_SYSTEM_PROMPT),
+        MessageItem(role="user", text=condense_instructions),
+        MessageItem(role="user", text=serialized_history),
     )
 
     log.info(
@@ -1507,24 +1490,36 @@ def summarize_conversation(
     log.info("=" * 80)
     log.info("📨 Compression request messages sent to LLM:")
     log.info("=" * 80)
-    for i, msg in enumerate(request_messages):
-        role = msg.role if hasattr(msg, 'role') else msg.get('role')
-        content = msg.content if hasattr(msg, 'content') else msg.get('content')
-        content_text = _extract_content_text(content)
-        log.info(f"\nMessage #{i}: [{role}]")
-        log.info(f"  Content: {content_text}")
+    for i, item in enumerate(request_items):
+        log.info(f"\nMessage #{i}: [{item.role}]")
+        log.info(f"  Content: {item.text}")
     log.info("=" * 80)
-
-    model = model_manager.get_smolagents_model(ModelType.SUMMARY)
 
     summary_text = ""
     try:
-        generation_messages: list[ChatMessage | dict] = [
-            ChatMessage(role=MessageRole.SYSTEM, content=SUMMARY_SYSTEM_PROMPT),
-        ] + request_messages
-
-        response_msg = model.generate(generation_messages)
-        summary_text = _extract_content_text(response_msg.content).strip()
+        binding = resolve_litellm_model_turn_binding("summary")
+        result = binding.turn(items=request_items)
+        unsupported_items = [
+            item
+            for item in result.items
+            if isinstance(item, (FunctionCallItem, FunctionCallOutputItem))
+        ]
+        if unsupported_items:
+            raise ModelProtocolError(
+                "summary model returned an executable item without Tool access"
+            )
+        if any(
+            not isinstance(item, (MessageItem, ReasoningItem))
+            for item in result.items
+        ):
+            raise ModelProtocolError(
+                "summary model returned an unsupported canonical item"
+            )
+        summary_text = "".join(
+            item.text
+            for item in result.items
+            if isinstance(item, MessageItem) and item.role == "assistant"
+        ).strip()
 
         if not summary_text:
             error = "LLM returned an empty summary"
