@@ -55,6 +55,38 @@ def test_fixed_args_are_hidden_from_llm_schema_and_applied(monkeypatch):
     assert result == "prompt=summarize;cwd=/repo;sandbox=workspace-write;search=false"
 
 
+def test_explicit_tool_config_overrides_same_named_default_toolset(monkeypatch):
+    monkeypatch.setattr(
+        yaml_agent_factory,
+        "resolve_toolsets",
+        lambda names: ["sample_tool"],
+    )
+    monkeypatch.setattr(
+        yaml_agent_factory,
+        "resolve_tool_function",
+        lambda name: sample_tool,
+    )
+
+    tools, _ = YamlAgentFactory.get_tools_from_config(
+        {
+            "tools": [
+                {
+                    "name": "sample_tool",
+                    "fixed_args": {"cwd": "/explicit"},
+                }
+            ]
+        },
+        effective_agent_config={"default_toolsets": ["defaults"]},
+    )
+
+    assert len(tools) == 1
+    tool_func = tools[0]
+    assert "cwd" not in inspect.signature(tool_func).parameters
+    assert tool_func(prompt="run") == (
+        "prompt=run;cwd=/explicit;sandbox=;search="
+    )
+
+
 def test_dynamic_tool_fixed_args_use_yaml_name_as_exposed_tool_name(monkeypatch):
     monkeypatch.setattr(yaml_agent_factory, "load_function", lambda module, function: sample_tool)
 
