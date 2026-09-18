@@ -560,8 +560,6 @@ class YamlConfiguredAgent(RoleDrivenAgent):
             # Factory mode: create a NEW agent for each call (thread-safe)
             agent = _create_fresh_agent()
             result = agent.run(formatted_query, additional_args=state_args)
-            # NOTE: _current_worker_memory is now set INSIDE _execute_agent()
-            # (P2 fix — the old SET here was too late for GET in _execute_with_lifecycle)
 
             # Agent-as-Tool crosses a text boundary. Preserve structured final
             # answers as real JSON instead of Python repr: downstream callers
