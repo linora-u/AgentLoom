@@ -15,6 +15,9 @@ from agentloom.adapters.smolagents.checkpoint_codec import (
 from agentloom.adapters.smolagents.conversation_recovery import (
     prepare_steps_for_resume,
 )
+from agentloom.adapters.smolagents.recoverable_errors import (
+    is_recoverable_agent_error,
+)
 from agentloom.runtime.agent_runtime import (
     AgentRuntimeError,
     AgentRuntimeRequest,
@@ -178,13 +181,12 @@ class SmolagentsRuntimeAdapter:
 
     @staticmethod
     def _is_committed_step(step: Any) -> bool:
-        from smolagents.agents import AgentParsingError
         from smolagents.memory import ActionStep
 
         return not (
             isinstance(step, ActionStep)
             and step.model_output_message is None
-            and not isinstance(step.error, AgentParsingError)
+            and not is_recoverable_agent_error(step.error)
         )
 
     @classmethod
