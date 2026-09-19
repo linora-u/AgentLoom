@@ -5,6 +5,7 @@ from dataclasses import dataclass
 
 import pytest
 from agentloom.adapters.smolagents.model_turn_bridge import SmolagentsModelTurnBridge
+from agentloom.runtime.error_recovery import RUNTIME_FEEDBACK_RAW_KEY
 from agentloom.runtime.goal import GoalBudgetLimitedError, GoalCompleteError, GoalState
 from agentloom.runtime.goal.provider import (
     GoalStateProvider,
@@ -242,6 +243,57 @@ def test_bridge_replays_restored_canonical_items_without_observation_parsing() -
             replay_payload={"record": tool_record.to_dict()},
         ),
     )
+
+
+def test_bridge_projects_smolagents_runtime_error_feedback_as_user_correction() -> None:
+    adapter = _RecordingTurnAdapter()
+    model = SmolagentsModelTurnBridge(binding=_binding(adapter))
+    feedback = (
+        "Error:\n"
+        "AgentParsingError: malformed native tool arguments\n"
+        "Now let's retry: use valid JSON."
+    )
+
+    model.generate(
+        [
+            ChatMessage(role=MessageRole.USER, content="Run"),
+            {
+                "role": "tool-response",
+                "content": [{"type": "text", "text": feedback}],
+                "raw": {RUNTIME_FEEDBACK_RAW_KEY: True},
+            },
+        ],
+        tools_to_call_from=[_Tool()],
+    )
+
+    assert adapter.requests[0].items == (
+        MessageItem(role="user", text="Run"),
+        MessageItem(role="user", text=feedback),
+    )
+
+
+@pytest.mark.parametrize(
+    "feedback",
+    [
+        "Observation:\nopaque",
+        "Error:\ntext alone is not trusted as runtime feedback",
+    ],
+)
+def test_bridge_rejects_unmarked_smolagents_tool_observation(feedback: str) -> None:
+    adapter = _RecordingTurnAdapter()
+    model = SmolagentsModelTurnBridge(binding=_binding(adapter))
+
+    with pytest.raises(ModelProtocolError, match="ToolCallRecord marker"):
+        model.generate(
+            [
+                ChatMessage(role=MessageRole.USER, content="Run"),
+                {
+                    "role": "tool-response",
+                    "content": [{"type": "text", "text": feedback}],
+                },
+            ],
+            tools_to_call_from=[_Tool()],
+        )
 
 
 def test_bridge_accounts_usage_and_fences_the_next_goal_request() -> None:
