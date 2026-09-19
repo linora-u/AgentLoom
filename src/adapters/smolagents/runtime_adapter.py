@@ -177,18 +177,24 @@ class SmolagentsRuntimeAdapter:
         )
 
     @staticmethod
-    def _committed_steps(steps: list[Any]) -> list[Any]:
-        """Exclude ActionSteps that never completed a canonical model turn."""
-
+    def _is_committed_step(step: Any) -> bool:
+        from smolagents.agents import AgentParsingError
         from smolagents.memory import ActionStep
+
+        return not (
+            isinstance(step, ActionStep)
+            and step.model_output_message is None
+            and not isinstance(step.error, AgentParsingError)
+        )
+
+    @classmethod
+    def _committed_steps(cls, steps: list[Any]) -> list[Any]:
+        """Exclude ActionSteps that never completed a canonical model turn."""
 
         return [
             step
             for step in steps
-            if not (
-                isinstance(step, ActionStep)
-                and step.model_output_message is None
-            )
+            if cls._is_committed_step(step)
         ]
 
     def _checkpoint(self, steps: list[Any] | None = None) -> RuntimeCheckpointEnvelope:
@@ -377,7 +383,7 @@ class SmolagentsRuntimeAdapter:
             )
             if checkpoint_sink is None:
                 return
-            if completed_step.model_output_message is None:
+            if not self._is_committed_step(completed_step):
                 return
             steps = list(native.memory.steps)
             if kwargs.get("agent") is native and (

@@ -268,7 +268,11 @@ def test_bridge_projects_smolagents_runtime_error_feedback_as_user_correction() 
 
     assert adapter.requests[0].items == (
         MessageItem(role="user", text="Run"),
-        MessageItem(role="user", text=feedback),
+        MessageItem(
+            role="user",
+            text=feedback,
+            replay_payload={RUNTIME_FEEDBACK_RAW_KEY: True},
+        ),
     )
 
 

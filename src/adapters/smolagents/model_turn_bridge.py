@@ -113,7 +113,11 @@ def _tool_response_item(*, content: Any, raw: Any) -> ModelItem:
         # smolagents uses TOOL_RESPONSE for its own model/tool parsing feedback
         # and converts that role to USER before provider calls.  This is not a
         # completed AgentLoom tool invocation and therefore has no call record.
-        return MessageItem(role="user", text=_message_text(content))
+        return MessageItem(
+            role="user",
+            text=_message_text(content),
+            replay_payload={RUNTIME_FEEDBACK_RAW_KEY: True},
+        )
 
     raise ModelProtocolError(
         "tool response is missing the structured ToolCallRecord marker"

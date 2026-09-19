@@ -13,12 +13,14 @@ from agentloom.adapters.smolagents.model_turn_bridge import (
     MODEL_ITEMS_RAW_KEY,
     MODEL_RESPONSE_ID_RAW_KEY,
 )
+from agentloom.runtime.error_recovery import RUNTIME_FEEDBACK_RAW_KEY
 from agentloom.runtime.model_protocol import (
     FunctionCallItem,
     ReasoningItem,
     model_item_to_dict,
 )
 from agentloom.runtime.tool_protocol import ToolCallRecord, ToolErrorRecord
+from smolagents.agents import AgentParsingError
 from smolagents.memory import ActionStep, PlanningStep, TaskStep, ToolCall
 from smolagents.models import ChatMessage, MessageRole
 from smolagents.monitoring import Timing, TokenUsage
@@ -79,6 +81,30 @@ class TestSerializeActionStep:
         assert rebuilt[0].token_usage is not None
         assert rebuilt[0].token_usage.input_tokens == 200
         assert rebuilt[0].token_usage.output_tokens == 80
+
+    def test_roundtrip_preserves_parsing_error_as_canonical_feedback(self):
+        logger = type("Logger", (), {"log_error": lambda self, message: None})()
+        step = ActionStep(
+            step_number=4,
+            timing=_make_timing(),
+            error=AgentParsingError(
+                "malformed native tool arguments",
+                logger,
+            ),
+        )
+
+        data = CheckpointSerializer.serialize_memory_steps([step])
+        canonical = CheckpointSerializer.serialize_canonical_model_items([step])
+        rebuilt = CheckpointSerializer.deserialize_memory_steps(data)
+        CheckpointSerializer.restore_canonical_model_items(rebuilt, canonical)
+
+        assert isinstance(rebuilt[0].error, AgentParsingError)
+        assert str(rebuilt[0].error) == "malformed native tool arguments"
+        assert canonical[0]["item"]["type"] == "message"
+        assert canonical[0]["item"]["role"] == "user"
+        assert canonical[0]["item"]["replay_payload"] == {
+            RUNTIME_FEEDBACK_RAW_KEY: True,
+        }
 
     def test_roundtrip_with_terminal_tool_error_record(self):
         step = ActionStep(
