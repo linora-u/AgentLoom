@@ -12,6 +12,10 @@ from typing import Any
 from agentloom.adapters.smolagents.conversation_recovery import (
     prepare_steps_for_resume,
 )
+from agentloom.adapters.smolagents.recoverable_errors import (
+    is_recoverable_agent_error,
+    rebuild_recoverable_agent_error,
+)
 from agentloom.runtime.agent_runtime import RuntimeCheckpointEnvelope
 from agentloom.runtime.error_recovery import RUNTIME_FEEDBACK_RAW_KEY
 from agentloom.runtime.model_protocol import (
@@ -25,7 +29,6 @@ from agentloom.runtime.model_protocol import (
     model_item_from_dict,
     model_item_to_dict,
 )
-from smolagents.agents import AgentParsingError
 from smolagents.memory import (
     ActionStep,
     MemoryStep,
@@ -88,7 +91,7 @@ def _canonical_tool_outputs(step: ActionStep) -> tuple[FunctionCallOutputItem, .
 
 
 def _runtime_feedback_item(step: ActionStep) -> MessageItem | None:
-    if not isinstance(step.error, AgentParsingError):
+    if not is_recoverable_agent_error(step.error):
         return None
     from agentloom.adapters.smolagents.tool_protocol import (
         action_step_to_protocol_messages,
@@ -472,10 +475,30 @@ class SmolagentsCheckpointCodec:
                 f"unsupported smolagents memory step: {type(step).__name__}"
             )
 
+        feedback_items = [
+            item
+            for item in items
+            if isinstance(item, MessageItem)
+            and item.replay_payload.get(RUNTIME_FEEDBACK_RAW_KEY) is True
+        ]
+        if len(feedback_items) > 1:
+            raise ValueError(
+                f"ActionStep {step_index} has duplicate runtime feedback items"
+            )
+        expected_feedback = _runtime_feedback_item(step)
+        if (
+            (expected_feedback is None) != (not feedback_items)
+            or feedback_items
+            and feedback_items[0] != expected_feedback
+        ):
+            raise ValueError(
+                f"ActionStep {step_index} runtime feedback is inconsistent"
+            )
         model_items = [
             item
             for item in items
             if not isinstance(item, FunctionCallOutputItem)
+            and item not in feedback_items
         ]
         output_items = [
             item
@@ -537,22 +560,25 @@ class SmolagentsCheckpointCodec:
                 )
             records.append(record)
 
-        raw = {
-            MODEL_ITEMS_RAW_KEY: [
-                model_item_to_dict(item) for item in model_items
-            ],
-            MODEL_RESPONSE_ID_RAW_KEY: response_id,
-        }
-        step.model_output_message = ChatMessage(
-            role="assistant",
-            content="".join(
-                item.text
-                for item in model_items
-                if isinstance(item, MessageItem)
-                and item.role == "assistant"
-            ),
-            raw=raw,
-        )
+        if model_items:
+            raw = {
+                MODEL_ITEMS_RAW_KEY: [
+                    model_item_to_dict(item) for item in model_items
+                ],
+                MODEL_RESPONSE_ID_RAW_KEY: response_id,
+            }
+            step.model_output_message = ChatMessage(
+                role="assistant",
+                content="".join(
+                    item.text
+                    for item in model_items
+                    if isinstance(item, MessageItem)
+                    and item.role == "assistant"
+                ),
+                raw=raw,
+            )
+        else:
+            step.model_output_message = None
         step.tool_calls = [
             ToolCall(
                 name=call.name,
@@ -677,32 +703,12 @@ def _rebuild_chat_message(raw: Any) -> ChatMessage | None:
     )
 
 
-class _CheckpointErrorLogger:
-    def log_error(self, _message: str) -> None:
-        return None
-
-
-def _rebuild_action_error(raw: Any) -> AgentParsingError | None:
-    if raw is None:
-        return None
-    if not isinstance(raw, Mapping):
-        raise ValueError("smolagents action error must be an object")
-    if raw.get("type") != "AgentParsingError":
-        raise ValueError(
-            f"unsupported resumable smolagents error type: {raw.get('type')!r}"
-        )
-    message = raw.get("message")
-    if not isinstance(message, str) or not message:
-        raise ValueError("smolagents action error message must be non-empty")
-    return AgentParsingError(message, _CheckpointErrorLogger())
-
-
 def _rebuild_action_step(value: dict[str, Any]) -> ActionStep:
     step = ActionStep(
         step_number=value.get("step_number", 0),
         timing=_rebuild_timing(value.get("timing")),
         tool_calls=_rebuild_tool_calls(value.get("tool_calls")),
-        error=_rebuild_action_error(value.get("error")),
+        error=rebuild_recoverable_agent_error(value.get("error")),
         model_output=value.get("model_output"),
         model_output_message=_rebuild_chat_message(
             value.get("model_output_message")
