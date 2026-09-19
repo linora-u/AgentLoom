@@ -8,6 +8,7 @@ from contextlib import contextmanager
 from contextvars import ContextVar
 from typing import Any
 
+from agentloom.runtime.error_recovery import RUNTIME_FEEDBACK_RAW_KEY
 from agentloom.runtime.model_binding import ModelTurnBinding
 from agentloom.runtime.model_protocol import (
     MODEL_ITEMS_RAW_KEY,
@@ -96,6 +97,29 @@ def _model_items_from_raw(raw: Any) -> tuple[ModelItem, ...] | None:
     return tuple(result)
 
 
+def _tool_response_item(*, content: Any, raw: Any) -> ModelItem:
+    record_raw = raw.get(TOOL_RESULT_RAW_KEY) if isinstance(raw, Mapping) else None
+    if isinstance(record_raw, Mapping):
+        record = ToolCallRecord.from_dict(dict(record_raw))
+        return FunctionCallOutputItem(
+            call_id=record.call_id,
+            output=record.model_content(),
+            status=record.status,
+            is_error=record.status != "completed",
+            replay_payload={"record": record.to_dict()},
+        )
+
+    if isinstance(raw, Mapping) and raw.get(RUNTIME_FEEDBACK_RAW_KEY) is True:
+        # smolagents uses TOOL_RESPONSE for its own model/tool parsing feedback
+        # and converts that role to USER before provider calls.  This is not a
+        # completed AgentLoom tool invocation and therefore has no call record.
+        return MessageItem(role="user", text=_message_text(content))
+
+    raise ModelProtocolError(
+        "tool response is missing the structured ToolCallRecord marker"
+    )
+
+
 def _messages_to_items(messages: list[ChatMessage | dict]) -> tuple[ModelItem, ...]:
     result: list[ModelItem] = []
     for message in messages:
@@ -106,20 +130,10 @@ def _messages_to_items(messages: list[ChatMessage | dict]) -> tuple[ModelItem, .
                 continue
             role = _message_role(message.role)
             if role == "tool":
-                raw = message.raw if isinstance(message.raw, Mapping) else {}
-                record_raw = raw.get(TOOL_RESULT_RAW_KEY)
-                if not isinstance(record_raw, Mapping):
-                    raise ModelProtocolError(
-                        "tool response is missing the structured ToolCallRecord marker"
-                    )
-                record = ToolCallRecord.from_dict(dict(record_raw))
                 result.append(
-                    FunctionCallOutputItem(
-                        call_id=record.call_id,
-                        output=record.model_content(),
-                        status=record.status,
-                        is_error=record.status != "completed",
-                        replay_payload={"record": record.to_dict()},
+                    _tool_response_item(
+                        content=message.content,
+                        raw=message.raw,
                     )
                 )
                 continue
@@ -146,7 +160,15 @@ def _messages_to_items(messages: list[ChatMessage | dict]) -> tuple[ModelItem, .
 
         if not isinstance(message, Mapping):
             raise ModelProtocolError("model history contains an unsupported message")
-        role = str(message.get("role") or "")
+        role = _message_role(message.get("role") or "")
+        if role == "tool":
+            result.append(
+                _tool_response_item(
+                    content=message.get("content"),
+                    raw=message.get("raw"),
+                )
+            )
+            continue
         if role not in {"system", "developer", "user", "assistant"}:
             raise ModelProtocolError(f"unsupported model message role: {role!r}")
         result.append(MessageItem(role=role, text=_message_text(message.get("content"))))

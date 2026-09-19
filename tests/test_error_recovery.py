@@ -8,6 +8,7 @@ message generation, error message consolidation, and exception safety.
 
 from agentloom.runtime.error_recovery import (
     NOW_LETS_RETRY_PREFIX,
+    RUNTIME_FEEDBACK_RAW_KEY,
     ErrorCategory,
     build_recovery_message,
     consolidate_error_messages,
@@ -194,6 +195,7 @@ class TestConsolidateErrorMessages:
         text = result[0]["content"][0]["text"]
         assert "Error:" in text
         assert "LEVEL1" in text
+        assert result[0]["raw"][RUNTIME_FEEDBACK_RAW_KEY] is True
 
     def test_non_consecutive_errors_independent(self):
         msgs = [
