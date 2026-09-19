@@ -28,6 +28,7 @@ from agentloom.runtime.agent_runtime import (
     RuntimeEvent,
     RuntimeRequirements,
 )
+from agentloom.runtime.error_recovery import RUNTIME_FEEDBACK_RAW_KEY
 from agentloom.runtime.goal import GoalCompleteError, GoalState
 from agentloom.runtime.model_binding import ModelTurnBinding
 from agentloom.runtime.model_protocol import (
@@ -133,6 +134,22 @@ def _runtime(
 
 def _audit(adapter_id: str = "openai_responses") -> dict[str, str]:
     return {MODEL_ADAPTER_AUDIT_KEY: adapter_id}
+
+
+def test_action_step_projection_persists_runtime_error_feedback_marker() -> None:
+    step = ActionStep(
+        step_number=1,
+        timing=Timing(start_time=0.0),
+        error=RuntimeError("malformed native tool arguments"),  # type: ignore[arg-type]
+    )
+
+    first = action_step_to_protocol_messages(step)
+    replayed = action_step_to_protocol_messages(step)
+
+    assert len(first) == 1
+    assert first[0].role == MessageRole.TOOL_RESPONSE
+    assert first[0].raw == {RUNTIME_FEEDBACK_RAW_KEY: True}
+    assert replayed[0].raw == first[0].raw
 
 
 class _ReplayNativeRuntime(_NativeRuntime):
