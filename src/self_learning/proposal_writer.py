@@ -117,6 +117,11 @@ class ProposalWriter:
         )
         if action == "create" and not content.strip():
             raise ValueError("create requires non-empty SKILL.md content")
+        if action == "write_file":
+            if not safe_path:
+                raise ValueError("write_file requires a relative path")
+            if not content.strip():
+                raise ValueError("write_file requires non-empty content")
 
         proposal_path = self._latest_for_name(safe_name) if action in {"write_file", "remove_file"} else None
         if proposal_path is None:
