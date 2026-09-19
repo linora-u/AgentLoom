@@ -3,11 +3,13 @@ agent_runtime: smolagents
 description: "Real-LLM smoke test for AgentLoom self-learning foundation tools."
 
 model_type: "powerful"
-max_steps: 12
+max_steps: 16
+
+todo:
+  mode: "off"
 
 tools:
   - name: "session_search"
-  - name: "session_scroll"
   - name: "memory"
   - name: "skill_manage"
   - name: "shell_tool"
@@ -34,20 +36,27 @@ workflow: |
   Required structured call sequence:
   1. Call `shell_tool` with a short non-interactive command that prints one
      fresh UTC marker with prefix `AL_SELF_LEARNING_SMOKE_`. Retain the exact
-     returned marker and derive a lowercase filesystem-safe suffix from it.
+     returned marker and derive a lowercase filesystem-safe suffix from it. Do
+     not call this marker-generation command again after it succeeds.
   2. Call `session_search(query="AL_SELF_LEARNING_SMOKE", limit=5,
-     scope="all")`. Parse its actual JSON and count `results`.
+     scope="all")`. Parse its actual JSON and count `results`. Do not repeat a
+     successful search.
   3. Call `memory` with `action="propose"`, `scope="app"`, `kind="fact"`, a
-     marker-derived `memory_key`, and text containing both marker and actual
-     prior count. Parse its actual JSON result.
+     lowercase marker-derived `memory_key`, and text containing both marker and
+     actual prior count. Include every parameter in the first call. Parse its
+     actual JSON result and do not repeat the call after `ok=true`.
   4. Call `skill_manage(action="create")` with a marker-derived name and a
-     valid `SKILL.md` body containing the marker. Parse and retain its actual
-     `proposal_path`.
-  5. Call `skill_manage(action="write_file")` for `references/run.json`. Its
-     content must contain the marker, actual prior count, and exact memory
-     result.
+     non-empty `content` argument containing a complete valid `SKILL.md` body
+     with YAML frontmatter (`name` and `description`) and the exact marker.
+     Parse and retain its actual `proposal_path`. If `ok=true`, trust that
+     result: do not inspect the proposal and do not create or edit another one.
+  5. Call `skill_manage(action="write_file")` with the same name,
+     `path="references/run.json"`, and a non-empty `content` argument containing
+     the marker, actual prior count, and exact memory result. If `ok=true`,
+     trust that result and do not call `skill_manage` again.
   6. Call `shell_tool` to write the exact marker to `/tmp/<marker>.txt`, then
-     call `read_file` and verify the returned content contains it.
+     call `read_file` exactly once for that file and verify the returned content
+     contains it. Do not use shell_tool or read_file to inspect the proposal.
   7. Build the required result only from those actual returns. Set `ok=true`
      only when both skill operations and memory proposal report success and
      the read-back matched. Pass that JSON string to `final_answer`.
