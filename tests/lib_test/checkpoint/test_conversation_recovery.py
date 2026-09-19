@@ -13,6 +13,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Any
 
+import pytest
 from agentloom.adapters.smolagents.conversation_recovery import (
     TurnInterruptionState,
     detect_turn_interruption,
@@ -35,6 +36,7 @@ class _FakeActionStep:
     observations: str | None = None
     model_output: str | None = None
     action_output: str | None = None
+    error: Exception | None = None
     is_final_answer: bool = False
     step_number: int = 0
 
@@ -485,3 +487,23 @@ class TestPrepareStepsForResume:
         assert len(cleaned) == 1
         # Has no observations → interrupted_turn
         assert interruption.kind == "interrupted_turn"
+
+    @pytest.mark.parametrize(
+        "step",
+        [
+            _FakeActionStep(
+                tool_calls=[{"name": "broken"}],
+                error=RuntimeError("invalid arguments"),
+            ),
+            _FakeActionStep(
+                model_output="invalid assistant text",
+                error=RuntimeError("native tool call required"),
+            ),
+            _FakeActionStep(error=RuntimeError("provider response rejected")),
+        ],
+    )
+    def test_error_feedback_steps_survive_resume_cleanup(self, step):
+        cleaned, interruption = prepare_steps_for_resume([step])
+
+        assert cleaned == [step]
+        assert interruption.kind == "none"

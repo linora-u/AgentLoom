@@ -41,6 +41,7 @@ from agentloom.runtime.model_protocol import (
     ReasoningItem,
 )
 from agentloom.runtime.tool_protocol import ToolCallRecord
+from smolagents.agents import AgentParsingError
 from smolagents.memory import ActionStep, TaskStep, ToolCall
 from smolagents.models import ChatMessage, MessageRole
 from smolagents.monitoring import Timing
@@ -582,6 +583,101 @@ def test_resume_replays_canonical_items_through_the_next_model_turn() -> None:
             replay_payload={"record": tool_record.to_dict()},
         ),
     )
+
+
+def test_resume_replays_structured_call_error_feedback_before_next_model_turn() -> None:
+    logger = SimpleNamespace(log_error=lambda _message: None)
+    feedback_error = AgentParsingError(
+        "malformed native tool arguments",
+        logger,
+    )
+    source_native = _NativeRuntime(_NativeResult(output="done"))
+    source_native.memory.steps = [
+        TaskStep(task="recover the structured call"),
+        ActionStep(
+            step_number=1,
+            timing=Timing(start_time=0.0),
+            error=feedback_error,
+        ),
+    ]
+    source_runtime = _runtime(source_native)
+
+    checkpoint = RuntimeCheckpointEnvelope.from_dict(
+        json.loads(json.dumps(source_runtime.snapshot().to_dict()))
+    )
+    turn_adapter = _RecordingTurnAdapter()
+    model = SmolagentsModelTurnBridge(
+        binding=ModelTurnBinding(
+            model_type="test",
+            model_id="opaque-model",
+            adapter=turn_adapter,
+        )
+    )
+    target_native = _ReplayNativeRuntime(model)
+    target_runtime = _runtime(target_native, binding=model.binding)
+
+    target_runtime.run(
+        AgentRuntimeRequest(
+            task="continue",
+            continue_session=True,
+            checkpoint=checkpoint,
+        )
+    )
+
+    feedback = (
+        "Error:\n"
+        "malformed native tool arguments\n"
+        "Now let's retry: take care not to repeat previous errors! "
+        "If you have retried several times, try a completely different approach.\n"
+    )
+    assert checkpoint.progress == 2
+    assert turn_adapter.requests[0].items == (
+        MessageItem(role="user", text="New task:\nrecover the structured call"),
+        MessageItem(
+            role="user",
+            text=feedback,
+            replay_payload={RUNTIME_FEEDBACK_RAW_KEY: True},
+        ),
+    )
+
+
+def test_restore_rejects_non_parsing_runtime_error_metadata() -> None:
+    native = _NativeRuntime(_NativeResult(output="done"))
+    runtime = _runtime(native)
+    checkpoint = RuntimeCheckpointEnvelope(
+        runtime_id="smolagents",
+        runtime_version=runtime.runtime_version,
+        state_schema_version=runtime.state_schema_version,
+        progress=1,
+        audit_metadata=_audit(),
+        payload={
+            "memory_steps": [
+                {
+                    "_step_type": "ActionStep",
+                    "step_number": 1,
+                    "timing": {"start_time": 0.0, "end_time": 1.0},
+                    "tool_calls": [],
+                    "error": {
+                        "type": "ArbitraryRuntimeError",
+                        "message": "must not be reconstructed",
+                    },
+                    "model_output_message": None,
+                    "model_output": None,
+                    "observations": None,
+                    "action_output": None,
+                    "token_usage": None,
+                    "is_final_answer": False,
+                }
+            ],
+            "canonical_model_items": [],
+        },
+    )
+
+    with pytest.raises(
+        ValueError,
+        match="unsupported resumable smolagents error type",
+    ):
+        runtime.restore(checkpoint)
 
 
 def test_adapter_pushes_runtime_checkpoint_to_sink() -> None:
