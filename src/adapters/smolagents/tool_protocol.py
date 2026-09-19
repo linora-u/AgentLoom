@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 from typing import Any
 
+from agentloom.runtime.error_recovery import RUNTIME_FEEDBACK_RAW_KEY
 from agentloom.runtime.model_protocol import (
     MODEL_ITEMS_RAW_KEY,
     MODEL_RESPONSE_ID_RAW_KEY,
@@ -27,7 +28,16 @@ def action_step_to_protocol_messages(
 
     records: list[ToolCallRecord] | None = getattr(step, "tool_results", None)
     if not records:
-        return step.to_messages(summary_mode=summary_mode)
+        projected_messages = step.to_messages(summary_mode=summary_mode)
+        if getattr(step, "error", None) is not None:
+            for message in reversed(projected_messages):
+                if message.role != MessageRole.TOOL_RESPONSE:
+                    continue
+                raw = dict(message.raw) if isinstance(message.raw, dict) else {}
+                raw[RUNTIME_FEEDBACK_RAW_KEY] = True
+                message.raw = raw
+                break
+        return projected_messages
 
     messages: list[ChatMessage] = []
     tool_calls = list(step.model_output_message.tool_calls or []) if step.model_output_message else []
