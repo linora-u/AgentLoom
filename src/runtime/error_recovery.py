@@ -8,7 +8,7 @@ list, dict) and never import smolagents types.
 from __future__ import annotations
 
 import enum
-from typing import Any, Optional
+from typing import Any
 
 from agentloom.runtime.logging import get_logger
 
@@ -19,6 +19,7 @@ _LOG = get_logger(__name__)
 # ---------------------------------------------------------------------------
 
 NOW_LETS_RETRY_PREFIX = "Now let's retry"
+RUNTIME_FEEDBACK_RAW_KEY = "agentloom_runtime_feedback"
 
 
 class ErrorCategory(enum.Enum):
@@ -29,7 +30,7 @@ class ErrorCategory(enum.Enum):
     ARGUMENT_ERROR = "ARGUMENT_ERROR"
 
 
-def extract_category_from_error(error_message: str) -> Optional[ErrorCategory]:
+def extract_category_from_error(error_message: str) -> ErrorCategory | None:
     """Classify a native tool-call validation error without parsing model text."""
 
     normalized = (error_message or "").lower()
@@ -240,6 +241,9 @@ def consolidate_error_messages(
         if not error_indices:
             return messages
 
+        for idx in error_indices:
+            messages[idx] = _mark_runtime_feedback(messages[idx])
+
         # error_indices is in reverse order (newest first)
         # Keep the last max_full_errors in full, compress the rest
         to_keep = error_indices[:max_full_errors]
@@ -338,4 +342,27 @@ def _set_content_text(msg: Any, text: str) -> Any:
     return {
         "role": role_str,
         "content": [{"type": "text", "text": text}],
+        "raw": dict(getattr(msg, "raw", None) or {}),
+    }
+
+
+def _mark_runtime_feedback(msg: Any) -> Any:
+    """Mark a smolagents parsing-error message without changing provider text."""
+
+    if isinstance(msg, dict):
+        marked = dict(msg)
+        raw = marked.get("raw")
+        marked["raw"] = dict(raw) if isinstance(raw, dict) else {}
+        marked["raw"][RUNTIME_FEEDBACK_RAW_KEY] = True
+        return marked
+
+    role = msg.role if hasattr(msg, "role") else "tool-response"
+    role_str = role.value if hasattr(role, "value") else str(role)
+    raw = getattr(msg, "raw", None)
+    marked_raw = dict(raw) if isinstance(raw, dict) else {}
+    marked_raw[RUNTIME_FEEDBACK_RAW_KEY] = True
+    return {
+        "role": role_str,
+        "content": getattr(msg, "content", ""),
+        "raw": marked_raw,
     }
