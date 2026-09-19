@@ -5,9 +5,8 @@ from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
 import pytest
-from click.testing import CliRunner
-
 from agentloom.self_learning.persistence.memory_store import MemoryStore
+from click.testing import CliRunner
 
 
 def _config(*, project_budget: int = 8000) -> dict:
@@ -59,6 +58,43 @@ def test_model_facing_memory_rejects_project_proposals(monkeypatch: pytest.Monke
 
     assert result["ok"] is False
     assert result["error"] == "project_promotion_requires_review"
+
+
+def test_model_facing_memory_requires_explicit_key_before_proposal_storage(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import json
+
+    from agentloom.tools.self_learning import memory_tool
+
+    monkeypatch.setattr(
+        memory_tool,
+        "current_session_run_id",
+        lambda: "root-missing-memory-key",
+    )
+    monkeypatch.setattr(memory_tool, "_current_agent_config", lambda: _config())
+    monkeypatch.setattr(
+        memory_tool,
+        "MemoryStore",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(
+            AssertionError("invalid proposal must not initialize memory storage")
+        ),
+    )
+
+    result = json.loads(
+        memory_tool.memory(
+            action="propose",
+            scope="app",
+            kind="fact",
+            text="A proposal without an identity must not be stored.",
+        )
+    )
+
+    assert result == {
+        "ok": False,
+        "error": "missing_memory_key",
+        "message": "propose requires a non-empty memory_key",
+    }
 
 
 def test_concurrent_exact_adds_create_one_active_row(tmp_path: Path) -> None:
@@ -321,8 +357,8 @@ def test_model_memory_never_uses_another_threads_global_application_fallback(
 ) -> None:
     import json
 
-    from agentloom.tools.self_learning.memory_tool import memory
     from agentloom.runtime.trace import bind_root_run, clear_current_agent_config, set_current_agent_config
+    from agentloom.tools.self_learning.memory_tool import memory
 
     runtime_root = tmp_path / ".agentloom"
     monkeypatch.setattr(

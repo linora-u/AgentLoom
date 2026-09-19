@@ -122,6 +122,16 @@ def memory(
             ensure_ascii=False,
             separators=(",", ":"),
         )
+    if action == "propose" and not memory_key.strip():
+        return json.dumps(
+            {
+                "ok": False,
+                "error": "missing_memory_key",
+                "message": "propose requires a non-empty memory_key",
+            },
+            ensure_ascii=False,
+            separators=(",", ":"),
+        )
     payload = (
         {"text": text}
         if kind == "fact"
