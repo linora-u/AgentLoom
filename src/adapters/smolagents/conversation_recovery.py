@@ -30,6 +30,9 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
+from agentloom.adapters.smolagents.recoverable_errors import (
+    is_recoverable_agent_error,
+)
 from agentloom.runtime.logging import get_logger
 
 if TYPE_CHECKING:
@@ -90,7 +93,9 @@ def filter_unresolved_tool_uses(steps: list[MemoryStep]) -> list[MemoryStep]:
         if _is_action_step(step):
             has_tool_calls = bool(getattr(step, "tool_calls", None))
             has_observations = bool(getattr(step, "observations", None))
-            has_error = getattr(step, "error", None) is not None
+            has_error = is_recoverable_agent_error(
+                getattr(step, "error", None)
+            )
             is_final = bool(getattr(step, "is_final_answer", False))
             if (
                 has_tool_calls
@@ -126,7 +131,9 @@ def filter_orphaned_thinking(steps: list[MemoryStep]) -> list[MemoryStep]:
             has_model_output = bool(getattr(step, "model_output", None))
             has_tool_calls = bool(getattr(step, "tool_calls", None))
             has_action_output = bool(getattr(step, "action_output", None))
-            has_error = getattr(step, "error", None) is not None
+            has_error = is_recoverable_agent_error(
+                getattr(step, "error", None)
+            )
             is_final = bool(getattr(step, "is_final_answer", False))
             if (
                 has_model_output
@@ -159,7 +166,9 @@ def filter_empty_steps(steps: list[MemoryStep]) -> list[MemoryStep]:
             has_tool_calls = bool(getattr(step, "tool_calls", None))
             has_observations = bool(getattr(step, "observations", None))
             has_action_output = bool(getattr(step, "action_output", None))
-            has_error = getattr(step, "error", None) is not None
+            has_error = is_recoverable_agent_error(
+                getattr(step, "error", None)
+            )
             is_final = bool(getattr(step, "is_final_answer", False))
             if (
                 not has_model_output
@@ -204,7 +213,7 @@ def detect_turn_interruption(steps: list[MemoryStep]) -> TurnInterruptionState:
     if getattr(last, "observations", None):
         return TurnInterruptionState(kind="none")
 
-    if getattr(last, "error", None) is not None:
+    if is_recoverable_agent_error(getattr(last, "error", None)):
         return TurnInterruptionState(kind="none")
 
     return TurnInterruptionState(kind="interrupted_turn")

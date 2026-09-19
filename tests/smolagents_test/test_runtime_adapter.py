@@ -13,6 +13,9 @@ from agentloom.adapters.smolagents.model_turn_bridge import (
     MODEL_RESPONSE_ID_RAW_KEY,
     SmolagentsModelTurnBridge,
 )
+from agentloom.adapters.smolagents.recoverable_errors import (
+    is_recoverable_agent_error,
+)
 from agentloom.adapters.smolagents.runtime_adapter import (
     MODEL_ADAPTER_AUDIT_KEY,
     SmolagentsRuntimeAdapter,
@@ -41,7 +44,15 @@ from agentloom.runtime.model_protocol import (
     ReasoningItem,
 )
 from agentloom.runtime.tool_protocol import ToolCallRecord
-from smolagents.agents import AgentParsingError
+from smolagents.agents import (
+    AgentError,
+    AgentExecutionError,
+    AgentGenerationError,
+    AgentMaxStepsError,
+    AgentParsingError,
+    AgentToolCallError,
+    AgentToolExecutionError,
+)
 from smolagents.memory import ActionStep, TaskStep, ToolCall
 from smolagents.models import ChatMessage, MessageRole
 from smolagents.monitoring import Timing
@@ -138,10 +149,14 @@ def _audit(adapter_id: str = "openai_responses") -> dict[str, str]:
 
 
 def test_action_step_projection_persists_runtime_error_feedback_marker() -> None:
+    logger = SimpleNamespace(log_error=lambda _message: None)
     step = ActionStep(
         step_number=1,
         timing=Timing(start_time=0.0),
-        error=RuntimeError("malformed native tool arguments"),  # type: ignore[arg-type]
+        error=AgentParsingError(
+            "malformed native tool arguments",
+            logger,
+        ),
     )
 
     first = action_step_to_protocol_messages(step)
@@ -585,9 +600,20 @@ def test_resume_replays_canonical_items_through_the_next_model_turn() -> None:
     )
 
 
-def test_resume_replays_structured_call_error_feedback_before_next_model_turn() -> None:
+@pytest.mark.parametrize(
+    "error_type",
+    [
+        AgentParsingError,
+        AgentExecutionError,
+        AgentToolCallError,
+        AgentToolExecutionError,
+    ],
+)
+def test_resume_replays_structured_call_error_feedback_before_next_model_turn(
+    error_type: type[Exception],
+) -> None:
     logger = SimpleNamespace(log_error=lambda _message: None)
-    feedback_error = AgentParsingError(
+    feedback_error = error_type(
         "malformed native tool arguments",
         logger,
     )
@@ -678,6 +704,22 @@ def test_restore_rejects_non_parsing_runtime_error_metadata() -> None:
         match="unsupported resumable smolagents error type",
     ):
         runtime.restore(checkpoint)
+
+
+@pytest.mark.parametrize(
+    "error_type",
+    [
+        AgentError,
+        AgentGenerationError,
+        AgentMaxStepsError,
+    ],
+)
+def test_terminal_or_infrastructure_agent_errors_are_not_replay_feedback(
+    error_type: type[Exception],
+) -> None:
+    logger = SimpleNamespace(log_error=lambda _message: None)
+
+    assert is_recoverable_agent_error(error_type("stop", logger)) is False
 
 
 def test_adapter_pushes_runtime_checkpoint_to_sink() -> None:

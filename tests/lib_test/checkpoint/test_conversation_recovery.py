@@ -22,6 +22,7 @@ from agentloom.adapters.smolagents.conversation_recovery import (
     filter_unresolved_tool_uses,
     prepare_steps_for_resume,
 )
+from smolagents.agents import AgentParsingError
 
 # ---------------------------------------------------------------------------
 # Lightweight step stubs — avoid heavy smolagents import for unit tests.
@@ -489,21 +490,38 @@ class TestPrepareStepsForResume:
         assert interruption.kind == "interrupted_turn"
 
     @pytest.mark.parametrize(
-        "step",
+        ("tool_calls", "model_output", "message"),
         [
-            _FakeActionStep(
-                tool_calls=[{"name": "broken"}],
-                error=RuntimeError("invalid arguments"),
-            ),
-            _FakeActionStep(
-                model_output="invalid assistant text",
-                error=RuntimeError("native tool call required"),
-            ),
-            _FakeActionStep(error=RuntimeError("provider response rejected")),
+            ([{"name": "broken"}], None, "invalid arguments"),
+            (None, "invalid assistant text", "native tool call required"),
+            (None, None, "provider response rejected"),
         ],
     )
-    def test_error_feedback_steps_survive_resume_cleanup(self, step):
+    def test_error_feedback_steps_survive_resume_cleanup(
+        self,
+        tool_calls,
+        model_output,
+        message,
+    ):
+        logger = type(
+            "Logger",
+            (),
+            {"log_error": lambda self, text: None},
+        )()
+        step = _FakeActionStep(
+            tool_calls=tool_calls,
+            model_output=model_output,
+            error=AgentParsingError(message, logger),
+        )
         cleaned, interruption = prepare_steps_for_resume([step])
 
         assert cleaned == [step]
+        assert interruption.kind == "none"
+
+    def test_arbitrary_error_does_not_turn_an_empty_step_into_feedback(self):
+        step = _FakeActionStep(error=RuntimeError("not model-correctable"))
+
+        cleaned, interruption = prepare_steps_for_resume([step])
+
+        assert cleaned == []
         assert interruption.kind == "none"
