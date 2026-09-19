@@ -90,8 +90,14 @@ def filter_unresolved_tool_uses(steps: list[MemoryStep]) -> list[MemoryStep]:
         if _is_action_step(step):
             has_tool_calls = bool(getattr(step, "tool_calls", None))
             has_observations = bool(getattr(step, "observations", None))
+            has_error = getattr(step, "error", None) is not None
             is_final = bool(getattr(step, "is_final_answer", False))
-            if has_tool_calls and not has_observations and not is_final:
+            if (
+                has_tool_calls
+                and not has_observations
+                and not has_error
+                and not is_final
+            ):
                 dropped += 1
                 continue  # Drop: unresolved tool use
         result.append(step)
@@ -120,8 +126,15 @@ def filter_orphaned_thinking(steps: list[MemoryStep]) -> list[MemoryStep]:
             has_model_output = bool(getattr(step, "model_output", None))
             has_tool_calls = bool(getattr(step, "tool_calls", None))
             has_action_output = bool(getattr(step, "action_output", None))
+            has_error = getattr(step, "error", None) is not None
             is_final = bool(getattr(step, "is_final_answer", False))
-            if has_model_output and not has_tool_calls and not has_action_output and not is_final:
+            if (
+                has_model_output
+                and not has_tool_calls
+                and not has_action_output
+                and not has_error
+                and not is_final
+            ):
                 dropped += 1
                 continue  # Drop: orphaned thinking
         result.append(step)
@@ -146,12 +159,14 @@ def filter_empty_steps(steps: list[MemoryStep]) -> list[MemoryStep]:
             has_tool_calls = bool(getattr(step, "tool_calls", None))
             has_observations = bool(getattr(step, "observations", None))
             has_action_output = bool(getattr(step, "action_output", None))
+            has_error = getattr(step, "error", None) is not None
             is_final = bool(getattr(step, "is_final_answer", False))
             if (
                 not has_model_output
                 and not has_tool_calls
                 and not has_observations
                 and not has_action_output
+                and not has_error
                 and not is_final
             ):
                 dropped += 1
@@ -187,6 +202,9 @@ def detect_turn_interruption(steps: list[MemoryStep]) -> TurnInterruptionState:
         return TurnInterruptionState(kind="none")
 
     if getattr(last, "observations", None):
+        return TurnInterruptionState(kind="none")
+
+    if getattr(last, "error", None) is not None:
         return TurnInterruptionState(kind="none")
 
     return TurnInterruptionState(kind="interrupted_turn")

@@ -13,6 +13,7 @@ from agentloom.adapters.smolagents.conversation_recovery import (
     prepare_steps_for_resume,
 )
 from agentloom.runtime.agent_runtime import RuntimeCheckpointEnvelope
+from agentloom.runtime.error_recovery import RUNTIME_FEEDBACK_RAW_KEY
 from agentloom.runtime.model_protocol import (
     MODEL_ITEMS_RAW_KEY,
     MODEL_RESPONSE_ID_RAW_KEY,
@@ -24,6 +25,7 @@ from agentloom.runtime.model_protocol import (
     model_item_from_dict,
     model_item_to_dict,
 )
+from smolagents.agents import AgentParsingError
 from smolagents.memory import (
     ActionStep,
     MemoryStep,
@@ -85,6 +87,36 @@ def _canonical_tool_outputs(step: ActionStep) -> tuple[FunctionCallOutputItem, .
     )
 
 
+def _runtime_feedback_item(step: ActionStep) -> MessageItem | None:
+    if not isinstance(step.error, AgentParsingError):
+        return None
+    from agentloom.adapters.smolagents.tool_protocol import (
+        action_step_to_protocol_messages,
+    )
+
+    for message in reversed(action_step_to_protocol_messages(step)):
+        raw = message.raw if isinstance(message.raw, Mapping) else {}
+        if raw.get(RUNTIME_FEEDBACK_RAW_KEY) is not True:
+            continue
+        content = message.content
+        if isinstance(content, str):
+            text = content
+        elif isinstance(content, list):
+            text = "".join(
+                str(item.get("text", ""))
+                for item in content
+                if isinstance(item, Mapping) and item.get("type") == "text"
+            )
+        else:
+            raise ValueError("runtime feedback content must be text")
+        return MessageItem(
+            role="user",
+            text=text,
+            replay_payload={RUNTIME_FEEDBACK_RAW_KEY: True},
+        )
+    raise ValueError("AgentParsingError step lacks runtime feedback message")
+
+
 def _canonical_entries_from_steps(
     steps: list[MemoryStep],
 ) -> list[dict[str, Any]]:
@@ -124,7 +156,17 @@ def _canonical_entries_from_steps(
                 raise ValueError(
                     f"ActionStep {step_index} lacks canonical model items"
                 )
-            items = (*model_items, *_canonical_tool_outputs(step))
+            feedback_item = _runtime_feedback_item(step)
+            has_feedback = any(
+                isinstance(item, MessageItem)
+                and item.replay_payload.get(RUNTIME_FEEDBACK_RAW_KEY) is True
+                for item in model_items
+            )
+            items = (
+                *model_items,
+                *((feedback_item,) if feedback_item is not None and not has_feedback else ()),
+                *_canonical_tool_outputs(step),
+            )
             raw = (
                 step.model_output_message.raw
                 if step.model_output_message is not None
@@ -635,11 +677,32 @@ def _rebuild_chat_message(raw: Any) -> ChatMessage | None:
     )
 
 
+class _CheckpointErrorLogger:
+    def log_error(self, _message: str) -> None:
+        return None
+
+
+def _rebuild_action_error(raw: Any) -> AgentParsingError | None:
+    if raw is None:
+        return None
+    if not isinstance(raw, Mapping):
+        raise ValueError("smolagents action error must be an object")
+    if raw.get("type") != "AgentParsingError":
+        raise ValueError(
+            f"unsupported resumable smolagents error type: {raw.get('type')!r}"
+        )
+    message = raw.get("message")
+    if not isinstance(message, str) or not message:
+        raise ValueError("smolagents action error message must be non-empty")
+    return AgentParsingError(message, _CheckpointErrorLogger())
+
+
 def _rebuild_action_step(value: dict[str, Any]) -> ActionStep:
     step = ActionStep(
         step_number=value.get("step_number", 0),
         timing=_rebuild_timing(value.get("timing")),
         tool_calls=_rebuild_tool_calls(value.get("tool_calls")),
+        error=_rebuild_action_error(value.get("error")),
         model_output=value.get("model_output"),
         model_output_message=_rebuild_chat_message(
             value.get("model_output_message")
