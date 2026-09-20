@@ -674,6 +674,14 @@ class RoleDrivenAgent(BaseAgent):
         runtime_id = AgentConfigNormalizer.validate_agent_runtime_config(
             self._config
         )
+        if runtime_id == "smolagents":
+            from importlib.util import find_spec
+
+            if find_spec("smolagents") is None:
+                raise RuntimeError(
+                    "The smol runtime is not installed. Install 'AgentLoom[smol]' "
+                    "or run uv sync --locked --extra smol in the checkout."
+                )
         from agentloom.application.runtime_options import normalize_runtime_options
 
         options, sources = normalize_runtime_options(

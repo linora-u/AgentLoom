@@ -34,7 +34,15 @@ jobs:
         run: uv python install 3.12
 
       - name: Install dependencies
-        run: uv sync --locked --all-groups
+        run: uv sync --locked --all-groups --extra smol --extra code
+
+      - name: Set up the supported Node runtime
+        uses: actions/setup-node@v6
+        with:
+          node-version: '22.19.0'
+
+      - name: Install the locked Pi SDK
+        run: uv run --locked --extra smol --extra code loom install-runtime pi
 
       - name: Prepare test LLM config
         run: cp config/llm.example.yaml config/llm.yaml
@@ -43,7 +51,40 @@ jobs:
         env:
           PYTHONPATH: .
         run: >-
-          uv run pytest tests/
+          uv run --locked --extra smol --extra code pytest tests/
           applications/memory_feature_validation/scripts/test_memory_review_campaign_capsule.py
           applications/memory_feature_validation/scripts/test_memory_review_campaign_contract.py
           -v --tb=short --color=yes
+
+  installation-profiles:
+    name: Installed ${{ matrix.profile }} Application
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        profile: [pi, pi-code, smol]
+    steps:
+      - uses: actions/checkout@v6
+      - uses: astral-sh/setup-uv@v8.1.0
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '22.19.0'
+      - run: uv python install 3.12
+      - name: Build and verify an isolated locked profile
+        run: >-
+          uv run --no-project --python 3.12
+          tests/packaging/validate_profiles.py
+          --profiles ${{ matrix.profile }}
+          --output "${{ runner.temp }}/agentloom-${{ matrix.profile }}-acceptance"
+          --node "$(command -v node)"
+      - name: Retain installation evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: installation-${{ matrix.profile }}
+          path: |
+            ${{ runner.temp }}/agentloom-${{ matrix.profile }}-acceptance/*.json
+            ${{ runner.temp }}/agentloom-${{ matrix.profile }}-acceptance/logs/
+            ${{ runner.temp }}/agentloom-${{ matrix.profile }}-acceptance/*/report.json
+            ${{ runner.temp }}/agentloom-${{ matrix.profile }}-acceptance/dist/

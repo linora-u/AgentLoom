@@ -20,7 +20,7 @@ from agentloom.adapters.pi.protocol import (
     BridgeError, Cancel, Close, Event, Request, RequestPayload, Response,
     decode_message, encode_message,
 )
-from agentloom.adapters.pi.install import find_node
+from agentloom.adapters.pi.install import find_node, installed_pi_entry
 from agentloom.runtime.agent_runtime import AgentRuntimeError, RuntimeErrorCategory
 from agentloom.runtime.resources import register_resource
 from agentloom.runtime.subprocess_env import build_subprocess_env
@@ -37,7 +37,6 @@ class Pending:
 class PiTransport:
     def __init__(self, instance_id: str):
         bridge = Path(__file__).parent / "bridge"
-        entry = bridge / "dist/index.js"
         env = build_subprocess_env()
         for name in list(env):
             if name.startswith(("PI_", "NODE_")):
@@ -46,13 +45,9 @@ class PiTransport:
         # compatible executable without mutating the process-wide PATH.
         try:
             node = find_node(env)
+            entry = installed_pi_entry(bridge)
         except RuntimeError as exc:
             raise AgentRuntimeError(str(exc), category="configuration") from None
-        if not entry.is_file() or not (bridge / "node_modules/@earendil-works/pi-coding-agent").is_dir():
-            raise AgentRuntimeError(
-                "Pi SDK is not installed. Run uv run loom install-runtime pi.",
-                category="configuration",
-            )
         self.instance_id = instance_id
         self._lock = RLock()
         self._termination_lock = Lock()

@@ -28,7 +28,8 @@ def test_smolagents_context_patch_dependency_is_exactly_pinned() -> None:
     project_root = Path(__file__).parents[2]
     project = tomllib.loads((project_root / "pyproject.toml").read_text())
     dependency = next(
-        Requirement(raw) for raw in project["project"]["dependencies"] if Requirement(raw).name == "smolagents"
+        Requirement(raw) for raw in project["project"]["optional-dependencies"]["smol"]
+        if Requirement(raw).name == "smolagents"
     )
 
     assert str(dependency.specifier) == "==1.26.0"
