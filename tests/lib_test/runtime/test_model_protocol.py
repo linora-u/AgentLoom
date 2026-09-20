@@ -184,7 +184,6 @@ def test_openai_chat_maps_native_tool_calls_to_canonical_items() -> None:
     ("adapter_type", "request_field", "block_type"),
     [
         (OpenAIChatModelTurnAdapter, "messages", "text"),
-        (OpenAIResponsesModelTurnAdapter, "input", "input_text"),
         (AnthropicMessagesModelTurnAdapter, "messages", "text"),
     ],
 )
@@ -193,14 +192,11 @@ def test_model_adapters_apply_configured_system_prompt_cache_boundary(
     request_field: str,
     block_type: str,
 ) -> None:
-    if adapter_type is OpenAIResponsesModelTurnAdapter:
-        response = {"id": "resp_1", "output": [], "usage": {}}
-    else:
-        response = {
-            "id": "msg_1",
-            "choices": [{"message": {"role": "assistant", "content": "done"}}],
-            "usage": {},
-        }
+    response = {
+        "id": "msg_1",
+        "choices": [{"message": {"role": "assistant", "content": "done"}}],
+        "usage": {},
+    }
     transport = _RecordingTransport(response)
     adapter = adapter_type(
         transport=transport,
@@ -236,6 +232,36 @@ def test_model_adapters_apply_configured_system_prompt_cache_boundary(
             },
         ],
     }
+
+
+@pytest.mark.parametrize("context_cache", [False, True])
+@pytest.mark.parametrize("system_prompt_boundary", [None, "<dynamic>"])
+def test_responses_cache_configuration_preserves_valid_system_input(
+    context_cache: bool,
+    system_prompt_boundary: str | None,
+) -> None:
+    transport = _RecordingTransport({"id": "resp_cached", "output": []})
+    adapter = OpenAIResponsesModelTurnAdapter(
+        transport=transport,
+        context_cache=context_cache,
+        system_prompt_boundary=system_prompt_boundary,
+    )
+    adapter.turn(ModelTurnRequest(
+        model="opaque-model",
+        instructions="Additional instructions",
+        items=(
+            MessageItem(role="system", text="Stable instructions<dynamic>Per-run context"),
+            MessageItem(role="user", text="Run"),
+        ),
+        options={"prompt_cache_key": "application-cache-key"},
+    ))
+
+    assert transport.requests[0]["input"] == [
+        {"role": "system", "content": "Stable instructions<dynamic>Per-run context"},
+        {"role": "user", "content": "Run"},
+    ]
+    assert transport.requests[0]["instructions"] == "Additional instructions"
+    assert transport.requests[0]["prompt_cache_key"] == "application-cache-key"
 
 
 def test_openai_responses_preserves_order_reasoning_and_replay_payload() -> None:
