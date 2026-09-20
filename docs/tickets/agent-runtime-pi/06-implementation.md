@@ -29,4 +29,12 @@
 - `tests/application_test/run_native_write_shell_live.py`：远程模型驱动相同 Application，保留每次运行记录及失败；不是 SDK 测试。
 - `tests/tools_test/search/test_query_governance.py`：绝对排除路径与 include 优先级在 ripgrep / Python 两个执行器均不泄漏。
 
-最终检查和实际模型运行统计在交付前补齐。
+## 审查后的补充
+
+- 备份复制失败必须向上抛出并阻止授权；备份索引持久化失败后，即使内存已有记录，新调用也必须重试索引，不能绕过。
+- 查询排除同时匹配逻辑路径、符号链接目标和排除路径的真实目标。ripgrep 的排除参数位于用户 include 之后，Python 在打开文件前检查。
+- 配置查询排除后，Shell 只放行不含扩展的字面量 `printf/echo/pwd/true/false` 和逐路径检查的直接 `cat`。其他命令、包装器、输入重定向拒绝执行，使用专门搜索工具；未配置排除时沿用现有命令政策。此限制避免不断增加包装器黑名单。
+- 原始产物引用提供实际 snapshot 路径与 `/raw_output` JSON pointer，写入 receipt 和 ToolCallRecord metadata。限额内的第一份原始结果可直接取回，后续文件变更不会改写它。
+- 命名文件版本字段用于核对 inode、时间、大小和解析后路径。
+
+最终全量检查和实际模型运行统计在交付前补齐。

@@ -130,3 +130,56 @@ def test_unverified_native_execution_constraints_fail_closed(tmp_path, policy):
         result = host.prepare(replace(request, raw_arguments={"command": "printf forbidden > artifact.txt"}))
         assert result.rejection.status == "blocked"
         assert not (Path(request.cwd) / "artifact.txt").exists()
+
+
+def test_backup_storage_failure_blocks_native_overwrite(tmp_path):
+    with native_scope(tmp_path, manifest=write_manifest(), extra_tools=(read_manifest(),)) as (host, request, _):
+        target = Path(request.cwd) / "source.txt"
+        target.write_text("original oracle")
+        request = read_then_write(host, request)
+        history_root = next((tmp_path / "runtime").rglob("native-file-history"))
+        for directory in history_root.iterdir():
+            directory.rmdir()  # Real filesystem failure at the backup sink.
+        prepared = host.prepare(request)
+        assert prepared.authorization is None and prepared.rejection.status == "blocked"
+        assert target.read_text() == "original oracle"
+
+
+def test_backup_index_failure_stays_blocked_on_new_call(tmp_path):
+    with native_scope(tmp_path, manifest=write_manifest(), extra_tools=(read_manifest(),)) as (host, request, _):
+        target = Path(request.cwd) / "source.txt"
+        target.write_text("original oracle")
+        request = read_then_write(host, request)
+        history_root = next((tmp_path / "runtime").rglob("native-file-history"))
+        for directory in history_root.iterdir():
+            (directory / "snapshots.json").mkdir()  # Copy succeeds; index replace fails.
+        for number in range(2):
+            prepared = host.prepare(replace(request, identity=replace(request.identity, call_id=f"write-{number}")))
+            assert prepared.authorization is None and prepared.rejection.status == "blocked"
+        assert target.read_text() == "original oracle"
+
+@pytest.mark.parametrize("wrapper", ["env", "timeout 30", "nice -n 5", "xargs", "command", "sudo", "sh -c"])
+def test_shell_query_wrapper_cannot_hide_excluded_search(tmp_path, wrapper):
+    config = {"shell_settings": {"allowed_commands": ["*"], "allowed_operators": ["*"], "sandbox": {"enabled": False}}, "tool_access_control": {"path_validation": [{"tools": ["grep_search"], "exclude_paths": ["secrets"]}]}}
+    with native_scope(tmp_path, manifest=shell_manifest(), config_extra=config) as (host, request, _):
+        result = host.prepare(replace(request, raw_arguments={"command": f"printf x; {wrapper} grep -r SECRET ."}))
+        assert result.authorization is None and result.rejection.status == "blocked"
+
+
+def test_query_limit_is_not_display_truncation_and_artifact_is_original(tmp_path):
+    import json
+    reader = read_manifest(parameters={"type": "object", "properties": {"path": {"type": "string"}, "limit": {"type": "integer"}}, "required": ["path", "limit"], "additionalProperties": False})
+    with native_scope(tmp_path, manifest=reader) as (host, request, _):
+        target = Path(request.cwd) / "source.txt"
+        target.write_text("first\nsecond\nthird\n")
+        grant = host.start_execution(host.prepare(replace(request, raw_arguments={"path": "source.txt", "limit": 1})).authorization)
+        raw = "".join(target.read_text().splitlines(keepends=True)[:grant.final_arguments["limit"]])
+        target.write_text("later content must never become original evidence")
+        ack = host.settle(NativeExecutionOutcome(grant.identity, grant.authorization_id, "completed", raw))
+        scope = host.receipt(grant.identity)["result_scope"]
+        assert scope["query_limits"] == {"limit": 1}
+        assert scope["display_truncated"] is False
+        assert scope == ack.record.metadata["native"]["result_scope"]
+        artifact = json.loads(Path(scope["raw_artifact"]["path"]).read_text())
+        assert artifact["raw_output"] == "first\n"
+        assert scope["raw_artifact"]["json_pointer"] == "/raw_output"
