@@ -146,3 +146,12 @@ def test_native_runtime_rejects_configured_stop_without_support(native_project, 
     with pytest.raises(ValueError, match="stop_hooks"):
         execute_app(path, file_logging=False)
     assert definitions == []
+
+
+def test_native_application_ignores_historical_global_smol_prompt(native_project):
+    path, definitions, _ = native_project
+    from agentloom.configuration.config import get_config
+    system = get_config().agent_root / "config/system.yaml"
+    system.write_text(system.read_text() + "prompt: missing-historical-smol-template.yaml\n")
+    assert execute_app(path, file_logging=False).output == "native answer"
+    assert definitions[0].runtime_options == {"thinking": "low"}

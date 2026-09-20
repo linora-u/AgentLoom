@@ -473,3 +473,13 @@ def test_conflicting_smol_options_report_both_configuration_sources(tmp_path):
         normalize_runtime_options(config, agent_root=tmp_path)
     assert f"{tmp_path / 'agent.yaml'}:max_steps" in str(error.value)
     assert f"{tmp_path / 'agent.yaml'}:runtime_options.max_steps" in str(error.value)
+
+
+def test_equivalent_legacy_and_new_smol_prompt_paths_do_not_conflict(tmp_path):
+    from agentloom.application.runtime_options import normalize_runtime_options
+
+    options, _ = normalize_runtime_options(_agent_config(
+        agent_runtime="smolagents", prompt={"path": "prompts/custom.yaml"},
+        runtime_options={"prompt_template_path": "prompts/custom.yaml"},
+    ), agent_root=tmp_path)
+    assert options["prompt_template_path"] == str(tmp_path / "prompts/custom.yaml")

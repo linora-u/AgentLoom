@@ -78,6 +78,10 @@ def normalize_runtime_options(
         for key, value in raw.items():
             if not isinstance(key, str):
                 raise ValueError(f"{layer_source}:runtime_options keys must be strings")
+            if runtime_id == "smolagents" and key == "prompt_template_path":
+                value = normalize_execution_prompt_template_path_value(
+                    value, f"{layer_source}:runtime_options.{key}", agent_root=agent_root,
+                )
             options[key] = value
             sources[key] = f"{layer_source}:runtime_options.{key}"
     if runtime_id == "smolagents":
