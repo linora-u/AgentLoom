@@ -4,6 +4,8 @@
 
 两项已分别通过独立 worktree 开发并合入 `codex/pi-integration`。准备提交为 `45ddbfdc`，最终 Python 验收 revision 为 `42662ed6c93d15680bf8829048f408b3dcddf1d7`。后续本次收尾提交只更新文档；main 保持 `c697b24f602e71d56c9aa2c532e6079c0db5aa9d`，最终合并由 14 负责。
 
+交付调整：用户随后要求放入 main 的 Changes 区。已将 integration 的完整成果展开为主工作区 main 上的未提交改动；迁移时核对内容树与 `8d63be5f` 一致，随后只更新本交接状态。没有新增 main 提交，也没有推送。
+
 ## 交付与边界
 
 | 票据 | 已验证行为 | 证据 |
@@ -59,4 +61,4 @@ uv run pytest tests/ \
 3. 恢复仅在 host 提交证据与 session、Run、call、tool、参数及 native parent 全部吻合时成立。实验只证明单调用成功恢复；不确定状态不得自动重放。
 4. `RuntimeModelSelection.settings` 只包含选定 profile。03/07 仍需将有效 `model_request_headers` 策略按实例投影，保持优先级并避免凭证进入公共元数据或日志。
 
-开发 worktree `t01`、`t02` 和独立 `validation` 保留。它们的提交已经集成；新 session 应从包含依赖的 integration 提交开始，不复制其他 worktree 的未提交文件。
+按用户要求，开发 worktree `t01`、`t02` 和独立 `validation` 已删除。已核对它们的提交全部包含在 integration 分支；该分支、两个实现分支和仓库外验收日志保留。新 session 需先确认 main 的未提交成果已进入所选基线，或从 integration 的已验证提交开始。
