@@ -31,3 +31,7 @@ Tests used Python 3.12.13 and the existing locked Python dependencies. `PYTHONPA
 3. `runtime.tool_gateway.final_answer_binding` is a lazy compatibility import; its implementation belongs to `adapters.smolagents.terminal`. Future runtime adapters must not use it as a universal completion mechanism.
 4. Old execution-config helpers remain for existing read-only tooling and callers. The new option normalization is the construction path; broad smol cleanup remains ticket 04.
 5. Only smol is production-registered. Native fixture registration exists solely in tests. Ticket 03 must freeze the capabilities/options against the Pi SDK proof; ticket 07 supplies actual Pi execution, and ticket 09 supplies Pi Goal/Stop behavior.
+
+## Prompt normalization follow-up
+
+A post-implementation review found that equivalent old/new prompt paths could be compared before both were resolved, and historical global smol prompt paths were still checked for native runtimes. Both were first reproduced as failures, then corrected. Preflight now validates the selected smol option path, while native preflight skips historical smol prompt defaults. The three affected application/config suites passed (88 tests); focused mypy retains only the same two pre-existing definition iterable diagnostics.
