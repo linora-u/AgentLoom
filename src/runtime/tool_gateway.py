@@ -824,6 +824,7 @@ def _prepare_tool_input(
     decode: Callable[[dict[str, Any]], tuple[dict[str, Any], dict[str, Any]]],
     started_at: float, coerce: bool = True, cwd: str | None = None,
     manifest: ToolManifestEntry | None = None,
+    protect: Callable[[dict[str, Any]], None] | None = None,
 ) -> tuple[dict[str, Any], dict[str, Any]] | ToolCallRecord:
     """Shared Python/native gate; executors never implement permission policy."""
     from agentloom.runtime.hooks.types import HookEvent, HookResult
@@ -961,6 +962,16 @@ def _prepare_tool_input(
             started_at=started_at,
         )
 
+    if protect is not None:
+        try:
+            protect(effective_input)
+        except Exception as exc:
+            return blocked(
+                hook_run, call_id=call_id, tool_name=tool_name,
+                arguments=effective_input, message=str(exc), stage="operation_policy",
+                kind="policy_blocked", started_at=started_at,
+            )
+
     from agentloom.runtime.checkpoint.file_history_hook import (
         record_active_file_history,
     )
@@ -970,6 +981,7 @@ def _prepare_tool_input(
             tool_name=tool_name,
             tool_input=effective_input,
             step_number=hook_run.step_number,
+            **({"manifest": manifest, "cwd": cwd} if manifest is not None else {}),
         )
     except Exception as exc:
         return blocked(

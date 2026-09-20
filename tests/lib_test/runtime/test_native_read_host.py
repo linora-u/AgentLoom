@@ -34,7 +34,7 @@ def read_manifest(**changes):
 
 
 @contextmanager
-def native_scope(tmp_path, *, handlers=(), manifest=None, instance="worker-1", extractors=None):
+def native_scope(tmp_path, *, handlers=(), manifest=None, instance="worker-1", extractors=None, extra_tools=(), config_extra=None):
     workspace = tmp_path / "workspace"
     workspace.mkdir(exist_ok=True)
     runtime = RuntimeContext(tmp_path / "runtime", "native-test", "task-1", "run-1")
@@ -43,6 +43,7 @@ def native_scope(tmp_path, *, handlers=(), manifest=None, instance="worker-1", e
             "path_validation": [{"tools": ["read_file"], "exclude_paths": [str(workspace / "denied.txt")]}]
         }
     }
+    config.update(config_extra or {})
     run = HookRun(
         HookPlan(tuple(handlers)),
         local_run_id="local-1",
@@ -64,7 +65,7 @@ def native_scope(tmp_path, *, handlers=(), manifest=None, instance="worker-1", e
     )
     tool = manifest or read_manifest()
     with bind_run_context(runtime), bind_explicit_execution_context(execution):
-        with NativeReadToolHost(tools=(tool,), cwd=str(workspace), evidence_extractors=extractors) as host:
+        with NativeReadToolHost(tools=(tool, *extra_tools), cwd=str(workspace), evidence_extractors=extractors) as host:
             identity = NativeCallIdentity(runtime.application_id, runtime.task_id, runtime.run_id, instance, "call-1")
             yield host, NativePrepareRequest(identity, tool, str(workspace), {"path": "source.txt"}), run
 
