@@ -215,7 +215,7 @@ class NativeReadToolHost:
 
     def settle(self, outcome: NativeExecutionOutcome) -> NativeCommitAck | NativeJournalEntry:
         self._require_scope(outcome.identity)
-        with self._journal.transaction(outcome.identity) as data:
+        with self._journal.transaction(outcome.identity, confirm=True) as data:
             entry = self._existing(data, outcome.identity)
             grant = entry.authorization
             if outcome.authorization_id != grant.authorization_id:
@@ -320,6 +320,7 @@ class NativeReadToolHost:
                 tool_response=response,
                 tool_inputs_schema=dict(grant.tool.parameters["properties"]),
                 cwd=grant.cwd,
+                tool_aliases=(grant.tool.logical_name,),
             )
             run.flush_user_messages()
         except Exception:
