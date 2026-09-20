@@ -227,11 +227,36 @@ class ReadFileState:
 
 
 # ---------------------------------------------------------------------------
-# Module-level singleton
+# Standalone compatibility state and owned Application instances
 # ---------------------------------------------------------------------------
 _read_file_state = ReadFileState()
+_states_lock = threading.RLock()
+_instance_states: dict[tuple[tuple[str, str, str, str], str], ReadFileState] = {}
 
 
 def get_read_file_state() -> ReadFileState:
-    """Return the process-global ``ReadFileState`` instance."""
-    return _read_file_state
+    """Return this Agent's cache; direct tool callers retain standalone behavior."""
+    from agentloom.runtime import get_current_run_context
+    from agentloom.runtime.resources import register_resource
+    from agentloom.runtime.trace import capture_explicit_execution_context
+
+    context = get_current_run_context()
+    if context is None:
+        return _read_file_state
+    owner = capture_explicit_execution_context().agent_id or ""
+    key = (context.runtime_key, owner)
+    with _states_lock:
+        state = _instance_states.get(key)
+        if state is None:
+            state = ReadFileState()
+            _instance_states[key] = state
+            captured = state
+
+            def close() -> None:
+                with _states_lock:
+                    if _instance_states.get(key) is captured:
+                        del _instance_states[key]
+                    captured.clear()
+
+            register_resource(f"smol.read-cache.{id(state)}", close, instance_id=owner)
+        return state
