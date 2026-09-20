@@ -11,6 +11,9 @@ All tests use mocks (no real LLM calls).
 
 from __future__ import annotations
 
+import os
+import subprocess
+import sys
 import time
 from unittest.mock import MagicMock
 
@@ -25,6 +28,52 @@ from agentloom.adapters.litellm.litellm_retry import (
 )
 from agentloom.runtime.concurrency.rate_limiter import GlobalRateLimiterRegistry
 from litellm.exceptions import RateLimitError, Timeout
+
+
+def test_agentloom_import_defaults_litellm_to_the_packaged_cost_map(tmp_path):
+    site = tmp_path / "site"
+    site.mkdir()
+    (site / "sitecustomize.py").write_text(
+        "import httpx\n"
+        "def forbidden(*args, **kwargs):\n"
+        " raise AssertionError('LiteLLM import attempted network access')\n"
+        "httpx.get=forbidden\n"
+    )
+    env = dict(os.environ)
+    env.pop("LITELLM_LOCAL_MODEL_COST_MAP", None)
+    env["PYTHONPATH"] = str(site)
+    result = subprocess.run(
+        [
+            sys.executable,
+            "-c",
+            "import agentloom.adapters.litellm.litellm_retry;"
+            "import os;"
+            "assert os.environ['LITELLM_LOCAL_MODEL_COST_MAP']=='True'",
+        ],
+        env=env,
+        capture_output=True,
+        text=True,
+        timeout=10,
+    )
+    assert result.returncode == 0, result.stderr
+
+
+def test_agentloom_import_preserves_explicit_litellm_cost_map_setting():
+    env = dict(os.environ)
+    env["LITELLM_LOCAL_MODEL_COST_MAP"] = "False"
+    result = subprocess.run(
+        [
+            sys.executable,
+            "-c",
+            "import agentloom;import os;"
+            "assert os.environ['LITELLM_LOCAL_MODEL_COST_MAP']=='False'",
+        ],
+        env=env,
+        capture_output=True,
+        text=True,
+        timeout=10,
+    )
+    assert result.returncode == 0, result.stderr
 
 
 @pytest.fixture(autouse=True)
