@@ -314,7 +314,6 @@ agentloom schedules --project /path/to/project serve
 | `ai_quality_analysis` | 十二个专业 Worker 协作完成分阶段代码审查 |
 | `unit_test_studio` | 通过确定性 Python 入口执行严格的 pytest 生成流程 |
 | `repo_map` | 确定性预处理、自底向上 Agent 分析、批处理和进度持久化 |
-| `codex_exec_demo` | 将本地 `codex exec` 作为带固定参数的普通 Agent Tool |
 | `goal_mode_validation` | Goal 显式完成、自动续跑和 checkpoint 恢复 |
 | `self_learning_smoke` | Session 历史、记忆提案、证据和审核边界 |
 
