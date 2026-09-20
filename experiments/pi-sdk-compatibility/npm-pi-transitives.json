@@ -1,0 +1,23 @@
+[
+  {
+    "name": "@earendil-works/pi-agent-core",
+    "version": "0.79.4",
+    "tarball": "https://registry.npmjs.org/@earendil-works/pi-agent-core/-/pi-agent-core-0.79.4.tgz",
+    "integrity": "sha512-xkaZ3yK2XbP9HYdHrrdj/6HqZPM0o/mwbjMSU4RTJyR3HjDG0ZrPz76Hg6s0W+G4u6PpJr1mGx/srCG+3eQA8A==",
+    "verifiedBytes": 211282
+  },
+  {
+    "name": "@earendil-works/pi-ai",
+    "version": "0.79.4",
+    "tarball": "https://registry.npmjs.org/@earendil-works/pi-ai/-/pi-ai-0.79.4.tgz",
+    "integrity": "sha512-Z1j+YP+6ZyPBKDUoc5m0GO/o1hPK17fWeErtDgegCTpm2dcKzuFvL/7GTqHeJkVkfpeXRwO37xOfgozQbK6EUw==",
+    "verifiedBytes": 522161
+  },
+  {
+    "name": "@earendil-works/pi-tui",
+    "version": "0.79.4",
+    "tarball": "https://registry.npmjs.org/@earendil-works/pi-tui/-/pi-tui-0.79.4.tgz",
+    "integrity": "sha512-/ZhfFiHSBMH7AbDrBQIN+UWlJnl9tSEpLYICRGGMzmNfyCqX+30NYacIhyOEaD8R5rS6wJZysAOPU0yNwigbXw==",
+    "verifiedBytes": 357618
+  }
+]
