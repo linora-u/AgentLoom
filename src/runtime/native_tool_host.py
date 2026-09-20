@@ -7,6 +7,8 @@ actual outcome. Native write/shell and restart recovery belong to later tickets.
 
 from __future__ import annotations
 
+import hashlib
+import json
 import time
 from collections.abc import Iterable, Mapping
 from pathlib import Path
@@ -18,12 +20,20 @@ from agentloom.runtime.native_journal import NativeCallJournal, journal_entry, s
 from agentloom.runtime.native_tools import (
     NativeAuthorization,
     NativeCallIdentity,
+    NativeCommitAck,
+    NativeExecutionOutcome,
     NativeJournalEntry,
     NativePreparation,
     NativePrepareRequest,
     ToolManifestEntry,
 )
-from agentloom.runtime.tool_gateway import _prepare_tool_input, _validate_schema_value
+from agentloom.runtime.tool_gateway import (
+    ToolEvidenceExtractor,
+    _compress_tool_result,
+    _EvidenceCarrier,
+    _prepare_tool_input,
+    _validate_schema_value,
+)
 from agentloom.runtime.tool_protocol import ToolCallRecord
 from agentloom.runtime.trace import capture_explicit_execution_context
 
@@ -50,7 +60,13 @@ def _check_read_schema(schema: Mapping[str, Any]) -> None:
 class NativeReadToolHost:
     """One host bound to the active Application Run, Hook Run and Agent instance."""
 
-    def __init__(self, *, tools: Iterable[ToolManifestEntry], cwd: str):
+    def __init__(
+        self,
+        *,
+        tools: Iterable[ToolManifestEntry],
+        cwd: str,
+        evidence_extractors: Mapping[str, ToolEvidenceExtractor] | None = None,
+    ):
         self._runtime = get_current_run_context(required=True)
         self._execution = capture_explicit_execution_context()
         if self._execution.hook_run is None or not self._execution.agent_id:
@@ -58,7 +74,13 @@ class NativeReadToolHost:
         if self._execution.task_id != self._runtime.task_id:
             raise ValueError("Native host task mismatch")
         self._cwd = str(Path(cwd).resolve(strict=True))
-        self._tools = {tool.visible_name: tool for tool in tools}
+        selected = tuple(tools)
+        self._tools = {tool.visible_name: tool for tool in selected}
+        if len(self._tools) != len(selected):
+            raise ValueError("Duplicate native tool definition")
+        self._extractors = dict(evidence_extractors or {})
+        if set(self._extractors) - set(self._tools) or any(not callable(value) for value in self._extractors.values()):
+            raise ValueError("Evidence extractors must belong to selected native tools")
         for tool in self._tools.values():
             if tool.operation != "read" or not tool.path_parameters:
                 raise ValueError("NativeReadToolHost only supports declared path reads")
@@ -69,6 +91,10 @@ class NativeReadToolHost:
                 raise ValueError("Native path parameters must be declared in the schema")
         self._journal = NativeCallJournal(self._runtime.run_dir / "native-tools")
         self._closed = False
+        self._owned: set[NativeCallIdentity] = set()
+        from agentloom.runtime.resources import register_resource
+
+        register_resource(f"native-host:{uuid4().hex}", self.close, instance_id=self._execution.agent_id)
 
     @property
     def journal_directory(self) -> Path:
@@ -89,7 +115,7 @@ class NativeReadToolHost:
             raise ValueError("Native call scope mismatch")
 
     def _existing(self, data: dict[str, Any], identity: NativeCallIdentity) -> NativeJournalEntry:
-        if not data or data.get("version") != 1:
+        if not data or data.get("version") != 1 or "authorization_id" not in data:
             raise ValueError("Unknown native call or journal version")
         entry = journal_entry(data)
         if entry.authorization.identity != identity or data["hook_run_id"] != self._execution.local_run_id:
@@ -125,7 +151,7 @@ class NativeReadToolHost:
                 hook_run=self._execution.hook_run,
                 call_id=request.identity.call_id,
                 tool_name=request.tool.visible_name,
-                arguments=request.raw_arguments,
+                arguments={**request.tool.fixed_arguments, **request.raw_arguments},
                 inputs_schema=request.tool.parameters["properties"],
                 decode=decode,
                 started_at=started,
@@ -135,7 +161,12 @@ class NativeReadToolHost:
             )
             if isinstance(prepared, ToolCallRecord):
                 # A rejected call is durably terminal as well, but never has a grant.
-                data.update(version=1, request=snapshot(request), rejection=prepared.to_dict())
+                data.update(
+                    version=1,
+                    request=snapshot(request),
+                    rejection=prepared.to_dict(),
+                    hook_run_id=self._execution.local_run_id,
+                )
                 return NativePreparation(rejection=prepared)
             grant = NativeAuthorization(uuid4().hex, request.identity, request.tool, request.cwd, prepared[0])
             data.update(
@@ -147,6 +178,7 @@ class NativeReadToolHost:
                 hook_run_id=self._execution.local_run_id,
                 started_at=started,
             )
+            self._owned.add(request.identity)
         return NativePreparation(authorization=grant)
 
     def start_execution(self, grant: NativeAuthorization) -> NativeAuthorization:
@@ -168,10 +200,152 @@ class NativeReadToolHost:
         with self._journal.transaction(identity) as data:
             return self._existing(data, identity)
 
+    def receipt(self, identity: NativeCallIdentity) -> dict[str, Any]:
+        """Detached durable provenance, raw output and verified evidence for audit."""
+        self._require_scope(identity)
+        with self._journal.transaction(identity) as data:
+            if (
+                not data
+                or data.get("version") != 1
+                or data["request"]["identity"] != snapshot(identity)
+                or data["hook_run_id"] != self._execution.local_run_id
+            ):
+                raise ValueError("Native receipt identity mismatch")
+            return snapshot(data)
+
+    def settle(self, outcome: NativeExecutionOutcome) -> NativeCommitAck | NativeJournalEntry:
+        self._require_scope(outcome.identity)
+        with self._journal.transaction(outcome.identity) as data:
+            entry = self._existing(data, outcome.identity)
+            grant = entry.authorization
+            if outcome.authorization_id != grant.authorization_id:
+                raise ValueError("Native settlement authorization mismatch")
+            actual = snapshot(outcome)
+            if entry.state == "committed":
+                if data["outcome"] != actual:
+                    raise ValueError("Conflicting native settlement")
+                assert entry.commit is not None
+                return entry.commit
+            if entry.state in {"cancelled", "uncertain"}:
+                return entry
+            if entry.state != "executing":
+                raise ValueError("Native settlement requires a consumed authorization")
+            data["outcome"] = actual
+            if outcome.status == "uncertain":
+                data["state"] = "uncertain"
+                return journal_entry(data)
+
+            evidence: tuple[dict[str, str], ...] = ()
+            evidence_status = "none"
+            extractor = self._extractors.get(grant.tool.visible_name)
+            if outcome.status == "completed" and extractor is not None:
+                from agentloom.runtime.trusted_memory_evidence import extract_trusted_memory_evidence
+
+                try:
+                    evidence = extract_trusted_memory_evidence(_EvidenceCarrier(extractor), outcome.output)
+                    evidence_status = "verified"
+                except Exception:
+                    evidence_status = "rejected"
+
+            output = outcome.output
+            if outcome.status == "completed" and isinstance(output, str):
+                try:
+                    output = _compress_tool_result(
+                        tool_name=grant.tool.visible_name,
+                        source=f"native:{grant.tool.provider}:{grant.identity.call_id}",
+                        result=output,
+                    )
+                except Exception:
+                    output = outcome.output
+            commit_id = uuid4().hex
+            output_digest = hashlib.sha256(
+                json.dumps(actual["output"], sort_keys=True, ensure_ascii=False).encode()
+            ).hexdigest()
+            record = ToolCallRecord(
+                call_id=grant.identity.call_id,
+                tool_name=grant.tool.visible_name,
+                input=dict(grant.final_arguments),
+                status=outcome.status,
+                output=output,
+                error=outcome.error,
+                started_at=data["started_at"],
+                ended_at=time.time(),
+                metadata={
+                    "native": {
+                        "identity": snapshot(grant.identity),
+                        "provider": grant.tool.provider,
+                        "logical_name": grant.tool.logical_name,
+                        "authorization_id": grant.authorization_id,
+                        "commit_id": commit_id,
+                        "cwd": grant.cwd,
+                        "raw_output_sha256": output_digest,
+                    }
+                },
+            )
+            data.update(
+                state="committed",
+                commit_id=commit_id,
+                record=record.to_dict(),
+                raw_output=actual["output"],
+                evidence=snapshot(evidence),
+                evidence_status=evidence_status,
+            )
+            ack = journal_entry(data).commit
+            assert ack is not None
+        # Observer failure is deliberately outside the atomic commit. Replays do
+        # not emit evidence twice, and observers never supply a commit barrier.
+        self._observe(ack, grant, evidence)
+        return ack
+
+    def _observe(self, ack: NativeCommitAck, grant: NativeAuthorization, evidence: tuple[dict[str, str], ...]) -> None:
+        from agentloom.runtime.hooks.types import HookEvent
+        from agentloom.runtime.logging import get_logger
+        from agentloom.runtime.trusted_memory_evidence import (
+            TRUSTED_MEMORY_EVIDENCE_RESPONSE_KEY,
+            TrustedMemoryEvidenceEnvelope,
+        )
+
+        run = self._execution.hook_run
+        record = ack.record
+        response = {"result": record.output} if record.status == "completed" else {"error": record.reason}
+        if evidence:
+            response[TRUSTED_MEMORY_EVIDENCE_RESPONSE_KEY] = TrustedMemoryEvidenceEnvelope(evidence)
+        try:
+            run.record_tool_outcome(record)
+            run.dispatch(
+                HookEvent.POST_TOOL_USE if record.status == "completed" else HookEvent.POST_TOOL_USE_FAILURE,
+                record.tool_name,
+                record.input,
+                tool_call_id=record.call_id,
+                tool_response=response,
+                tool_inputs_schema=dict(grant.tool.parameters["properties"]),
+                cwd=grant.cwd,
+            )
+            run.flush_user_messages()
+        except Exception:
+            get_logger(__name__).warning("Native tool outcome observer failed after durable commit")
+
+    def _cancel_owned(self, identity: NativeCallIdentity) -> NativeJournalEntry:
+        with self._journal.transaction(identity) as data:
+            entry = self._existing(data, identity)
+            if entry.state == "authorized":
+                data["state"] = "cancelled"
+            elif entry.state == "executing":
+                data["state"] = "uncertain"
+            return journal_entry(data)
+
+    def cancel(self, identity: NativeCallIdentity) -> NativeJournalEntry:
+        self._require_scope(identity)
+        return self._cancel_owned(identity)
+
     def close(self) -> None:
         if not self._closed:
-            self._closed = True
-            self._journal.close()
+            try:
+                for identity in self._owned:
+                    self._cancel_owned(identity)
+            finally:
+                self._closed = True
+                self._journal.close()
 
     def __enter__(self) -> NativeReadToolHost:
         return self
