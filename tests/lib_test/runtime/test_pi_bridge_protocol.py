@@ -11,7 +11,7 @@ def test_published_bridge_schema_matches_the_python_codec():
     from agentloom.adapters.pi.protocol import protocol_schema
 
     root = Path(__file__).resolve().parents[3]
-    published = json.loads((root / "src/adapters/pi/bridge-v1.schema.json").read_text())
+    published = json.loads((root / "src/adapters/pi/bridge-v2.schema.json").read_text())
     assert published == protocol_schema()
 
 
@@ -19,7 +19,7 @@ def test_pi_handshake_roundtrip_and_rejects_unknown_protocol():
     from agentloom.adapters.pi.protocol import decode_message, encode_message
 
     message = {
-        "version": 1,
+        "version": 2,
         "kind": "request",
         "request_id": "host:1",
         "instance_id": "worker-a",
@@ -28,14 +28,14 @@ def test_pi_handshake_roundtrip_and_rejects_unknown_protocol():
     parsed = decode_message(json.dumps(message))
     assert json.loads(encode_message(parsed))["payload"] == message["payload"]
     with pytest.raises(ValueError, match="Invalid Pi bridge message"):
-        decode_message(json.dumps({**message, "version": 2}))
+        decode_message(json.dumps({**message, "version": 1}))
 
 
 def test_snapshot_can_acknowledge_no_checkpoint():
     from agentloom.adapters.pi.protocol import decode_message, encode_message
 
     message = {
-        "version": 1,
+        "version": 2,
         "kind": "response",
         "request_id": "host:2",
         "instance_id": "worker-a",
@@ -64,7 +64,7 @@ def test_tool_settlement_cannot_cross_run_or_claim_uncertain_success():
 
     identity = dict(application_id="app", task_id="task", run_id="different", instance_id="worker-a", call_id="call")
     message = {
-        "version": 1,
+        "version": 2,
         "kind": "response",
         "request_id": "pi:3",
         "instance_id": "worker-a",
@@ -79,7 +79,7 @@ def test_run_frame_keeps_native_tool_schema_and_private_model_settings():
     from agentloom.adapters.pi.protocol import decode_message, encode_message
 
     message = {
-        "version": 1,
+        "version": 2,
         "kind": "request",
         "request_id": "host:2",
         "instance_id": "worker-a",

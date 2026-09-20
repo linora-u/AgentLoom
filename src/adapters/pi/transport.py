@@ -145,7 +145,7 @@ class PiTransport:
                 timeout: float | None = None, callback=None, cancel_callbacks: Callable[[], None] | None = None) -> Response:
         if payload.method == "run":
             self._owns_native_shell |= any(tool.operation == "shell" for tool in payload.tools)
-        request = Request(version=1, kind="request", instance_id=self.instance_id, run_id=run_id,
+        request = Request(version=2, kind="request", instance_id=self.instance_id, run_id=run_id,
                           request_id=f"host:{uuid4().hex}", payload=payload)
         pending = Pending(request)
         with self._lock:
@@ -163,12 +163,12 @@ class PiTransport:
             try:
                 assert callback is not None
                 result = callback(message.payload)
-                response = Response(version=1, kind="response", instance_id=self.instance_id,
+                response = Response(version=2, kind="response", instance_id=self.instance_id,
                     run_id=message.run_id, request_id=message.request_id, payload=result)
                 pending.queue.put((message, response))
             except BaseException as error:
                 category = "protocol" if isinstance(error, AgentRuntimeError) and error.category == "internal" else "tool"
-                pending.queue.put((message, Response(version=1, kind="response", instance_id=self.instance_id,
+                pending.queue.put((message, Response(version=2, kind="response", instance_id=self.instance_id,
                     run_id=message.run_id, request_id=message.request_id,
                     error=BridgeError(category=category, message="Pi tool callback failed"))))
 
@@ -186,7 +186,7 @@ class PiTransport:
                     continue
                 if isinstance(message, Request):
                     if callback is None:
-                        self._write(Response(version=1, kind="response", instance_id=self.instance_id,
+                        self._write(Response(version=2, kind="response", instance_id=self.instance_id,
                             run_id=message.run_id, request_id=message.request_id,
                             error=BridgeError(category="unsupported_capability", message="Pi tools are not enabled")))
                     else:

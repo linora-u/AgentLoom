@@ -1,4 +1,4 @@
-# 03：运行合同与 Pi 桥接合同 v1
+# 03：公共运行合同 v1 与 Pi 桥接合同（10 升级至 v2）
 
 本票冻结可运行的兼容基线；生产 Pi 注册在 07，native 治理实现在 05/06。后续实现同时遵循 [工具归属](tool-ownership.md) 和 [文件交接](03-file-ownership.md)。本文件不扩大 01 已证明的恢复范围。
 
@@ -68,11 +68,11 @@
 
 共享可执行示例在 `tests/lib_test/runtime/native_contract_fixture.py`，场景在 `test_native_tool_contract.py`：参数修正、拒绝无副作用、备份先于执行、fsync 后确认、两个崩溃窗口、派发前/后取消。这里的微型 host 明确是 fixture；05/06 必须把场景接到生产 Gateway，09/10 再接真实 Pi。01 的真实 SDK 恢复证明仍由迁移后的独立程序保留。
 
-## 4. Pi 专属 JSONL v1
+## 4. Pi 专属 JSONL v2（10 升级）
 
-值类型与编解码在 `src/adapters/pi/protocol.py`；跨语言 schema 是同目录 `bridge-v1.schema.json`。07 已在 builtin registry 注册 pi；09 增补模型请求前的 Goal 权限回调。
+值类型与编解码在 `src/adapters/pi/protocol.py`；跨语言 schema 是同目录 `bridge-v2.schema.json`。03/07/09 的历史冻结提交使用 v1。10 的必填捕获引用与禁止内联结果是破坏性变更，因此升级 Pi envelope 至 v2；公共 `native_tool_contract` 仍为 1，SDK 仍固定 0.79.4。旧桥接消息明确拒绝，两端、schema、安装指纹和发行资源同步升级。
 
-一行一个 JSON 对象。所有消息包含 version=1、kind 和 instance_id；Run 相关消息带 run_id。request/response 共享 request_id；event 关联发起 run 的 request_id 并携带从 1 开始的递增 sequence。双方请求分别使用 `host:`、`pi:` 前缀，避免双向回调 ID 碰撞。
+一行一个 JSON 对象。所有消息包含 version=2、kind 和 instance_id；Run 相关消息带 run_id。request/response 共享 request_id；event 关联发起 run 的 request_id 并携带从 1 开始的递增 sequence。双方请求分别使用 `host:`、`pi:` 前缀，避免双向回调 ID 碰撞。
 
 | 方法/消息 | 方向 | 结果与责任 |
 | --- | --- | --- |
@@ -82,12 +82,15 @@
 | cancel | host → Pi | 指明被取消的 request_id；accepted 仅确认收到，终结仍由原请求响应表达 |
 | close | host → Pi | 关闭该实例进程、工具和 pending 请求；重复调用幂等 |
 | tool_prepare | Pi → host | 使用原始输入与 call identity 请求变换、授权、写前保护 |
-| tool_settle | Pi → host | 提交实际执行结果，等待持久 commit ack；uncertain 不产生终态结果 |
+| tool_dispatch | Pi → host | SDK 执行前再次验证保存的授权、文件版本与政策，并消费一次批准 |
+| tool_settle | Pi → host | 必填非空 capture 摘要；outcome.output 为 null，实际结果从实例私有文件校验读取；等待持久 commit ack，uncertain 不产生终态结果 |
 | model_prepare | Pi → host | 每个模型 turn 请求一次权限，复用调用身份并返回 work/final/denied；final 只消费根 Goal 的一次交付额度，不提供工具 |
 | platform_invoke | Pi → host | 调用已选的平台/专业/MCP 工具；由 host 绑定正确 Hook Run 和 Worker 上下文 |
 | event | Pi → host | run/model/tool/subagent/usage/checkpoint/terminal 等运行观察；不承担提交确认 |
 
 model_prepare 是 09 的桥接增补，不改变公共 AgentRuntime 或 native tool contract。协议两端与 schema 同次交付；安装指纹检查会阻止旧构建混用。模型内部 HTTP 重试沿用本次许可，不重放工具；新模型 turn 必须重新检查 Goal。 `model_prepare` 回执的 `agent_context` 仅注入下一次模型请求；Run 的 `serial_tools` 来自公共 catalog 与 Agent 有效 metadata，平台回调发生前就按该集合串行调度，不能只串行消费已执行的回执。
+
+10 的捕获包含原始已收集输出、完整官方 result、完整性与显示截断，两者不能混淆。公共 Host 将原文持久保存后返回有界 ContextRef 或 journal 引用；缺失捕获不允许降级成功。Bash SDK 不提供流 EOF，正常结束仍记 `captured_stream/unknown` 并附限制，失败记 partial；不以 exit 0 伪造完整查询或可信记忆成功证据。公共 Host 的可选 capture 参数保持既有调用兼容。
 
 07 的 transport 必须持续收取双向请求：host 等待 run 时仍处理 tool/platform 回调；09 验证实际回调继续与并发关联。不得用阻塞读取一个响应的方式造成相互等待。
 

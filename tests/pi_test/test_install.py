@@ -24,7 +24,7 @@ def installation(tmp_path, monkeypatch):
     bridge.mkdir(parents=True)
     for name in ("package.json", "package-lock.json", "tsconfig.json", "index.ts", "protocol.ts"):
         shutil.copyfile(source / "bridge" / name, bridge / name)
-    shutil.copyfile(source / "bridge-v1.schema.json", bridge.parent / "bridge-v1.schema.json")
+    shutil.copyfile(source / "bridge-v2.schema.json", bridge.parent / "bridge-v2.schema.json")
     binary = tmp_path / "bin"
     binary.mkdir()
     node = install.find_node(os.environ.copy())

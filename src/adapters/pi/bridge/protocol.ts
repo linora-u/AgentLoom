@@ -1,7 +1,7 @@
 import { readFileSync } from "node:fs";
 import { Ajv2020 } from "ajv/dist/2020.js";
 
-const schema = JSON.parse(readFileSync(new URL("../../bridge-v1.schema.json", import.meta.url), "utf8"));
+const schema = JSON.parse(readFileSync(new URL("../../bridge-v2.schema.json", import.meta.url), "utf8"));
 const validate = new Ajv2020({strict: false, strictNumbers: true, allErrors: false, validateFormats: false}).compile(schema);
 
 /** JSON.parse accepts repeated keys; reject them before interpreting any protocol value. */
