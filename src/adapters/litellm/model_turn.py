@@ -533,8 +533,8 @@ class OpenAIResponsesModelTurnAdapter:
         system_prompt_boundary: str | None = None,
     ) -> None:
         self._transport = transport or _default_responses_transport
-        self._context_cache = context_cache
-        self._system_prompt_boundary = system_prompt_boundary
+        # Responses uses provider-managed prompt caching. Shared cache settings
+        # must not introduce Anthropic's cache_control content-block extension.
 
     def turn(self, request: ModelTurnRequest) -> ModelTurnResult:
         input_items = [
@@ -542,12 +542,6 @@ class OpenAIResponsesModelTurnAdapter:
             for item in request.items
             if (wire_item := _item_to_responses_input(item)) is not None
         ]
-        _apply_system_prompt_cache(
-            input_items,
-            enabled=self._context_cache,
-            boundary=self._system_prompt_boundary,
-            block_type="input_text",
-        )
         wire_request: dict[str, Any] = {
             "model": request.model,
             "input": input_items,
