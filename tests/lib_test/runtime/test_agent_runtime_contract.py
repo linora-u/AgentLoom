@@ -66,6 +66,49 @@ class _ToolGateway:
         return None
 
 
+def test_runtime_definition_exposes_selected_tool_manifest_and_keeps_legacy_gateway():
+    from dataclasses import replace
+    from agentloom.runtime.tool_gateway import AgentLoomToolGateway, bind_tool
+    from agentloom.tools.loader import resolve_tool_function
+
+    legacy = _definition("test")
+    assert legacy.tool_manifest == ()
+    gateway = AgentLoomToolGateway([bind_tool(resolve_tool_function("read_file"))])
+    definition = replace(legacy, tool_gateway=gateway)
+    (entry,) = definition.tool_manifest
+    assert (entry.visible_name, entry.owner, entry.provider, entry.capability) == (
+        "read_file", "runtime", "smolagents", "file.read",
+    )
+    assert entry.parameters == gateway.definitions[0].parameters
+
+    class LegacySelectedGateway(_ToolGateway):
+        definitions = gateway.definitions
+
+    fallback = replace(legacy, tool_gateway=LegacySelectedGateway()).tool_manifest
+    assert [(tool.visible_name, tool.owner, tool.provider) for tool in fallback] == [
+        ("read_file", "external", "python"),
+    ]
+
+
+@pytest.mark.parametrize("mismatch", ["missing", "schema", "duplicate_definition"])
+def test_runtime_definition_rejects_manifest_that_disagrees_with_selected_tools(mismatch):
+    from dataclasses import replace
+    from agentloom.runtime.tool_gateway import AgentLoomToolGateway, bind_tool
+    from agentloom.tools.loader import resolve_tool_function
+
+    gateway = AgentLoomToolGateway([bind_tool(resolve_tool_function("read_file"))])
+
+    class InconsistentGateway(_ToolGateway):
+        definitions = gateway.definitions * (2 if mismatch == "duplicate_definition" else 1)
+        manifest = () if mismatch == "missing" else (
+            replace(gateway.manifest[0], parameters={"type": "object", "properties": {}})
+            if mismatch == "schema" else gateway.manifest[0],
+        )
+
+    with pytest.raises(ValueError, match="Tool manifest"):
+        replace(_definition("test"), tool_gateway=InconsistentGateway())
+
+
 def _definition(runtime_id: str) -> RuntimeDefinition:
     gateway = _ToolGateway()
     assert isinstance(gateway, ToolGateway)

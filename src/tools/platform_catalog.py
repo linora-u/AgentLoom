@@ -18,6 +18,7 @@ def tool_specs() -> tuple[ToolSpec, ...]:
             owner="platform",
             provider="agentloom",
             capability="loom_retrieve_context",
+            operation="platform",
         ),
         _spec(
             "skill",
@@ -32,6 +33,7 @@ def tool_specs() -> tuple[ToolSpec, ...]:
             owner="platform",
             provider="agentloom",
             capability="skill",
+            operation="platform",
         ),
         _spec(
             "session_search",
@@ -46,6 +48,7 @@ def tool_specs() -> tuple[ToolSpec, ...]:
             owner="platform",
             provider="agentloom",
             capability="session_search",
+            operation="platform",
         ),
         _spec(
             "session_scroll",
@@ -60,6 +63,7 @@ def tool_specs() -> tuple[ToolSpec, ...]:
             owner="platform",
             provider="agentloom",
             capability="session_scroll",
+            operation="platform",
         ),
         _spec(
             "memory",
@@ -85,6 +89,7 @@ def tool_specs() -> tuple[ToolSpec, ...]:
             owner="platform",
             provider="agentloom",
             capability="memory",
+            operation="platform",
         ),
         _spec(
             "skill_manage",
@@ -108,5 +113,6 @@ def tool_specs() -> tuple[ToolSpec, ...]:
             owner="platform",
             provider="agentloom",
             capability="skill_manage",
+            operation="platform",
         ),
     )

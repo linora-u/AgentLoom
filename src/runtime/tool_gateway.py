@@ -464,12 +464,10 @@ def bind_tool(
                 owner=catalog_spec.owner,
                 provider=catalog_spec.provider,
                 capability=catalog_spec.capability,
-                operation=("shell" if catalog_spec.name == "shell_tool" else
-                           "platform" if catalog_spec.owner == "platform" else
-                           "read" if catalog_spec.is_read_only else "write"),
+                operation=catalog_spec.operation,
                 parameters=definition.parameters,
                 path_parameters=catalog_spec.path_params,
-                command_parameter="command" if catalog_spec.name == "shell_tool" else None,
+                command_parameter=catalog_spec.command_parameter,
                 fixed_arguments=getattr(tool, "_agentloom_fixed_values", {}),
             ) if catalog_spec is not None else getattr(tool, "_agentloom_manifest_entry", None)
         ),
@@ -775,6 +773,39 @@ class ToolGateway(Protocol):
     ) -> ToolCallRecord: ...
 
     def close(self) -> None: ...
+
+
+@runtime_checkable
+class ToolManifestSource(Protocol):
+    """Optional metadata extension; legacy execution gateways stay compatible."""
+
+    @property
+    def manifest(self) -> tuple[ToolManifestEntry, ...]: ...
+
+
+def tool_manifest_snapshot(gateway: ToolGateway) -> tuple[ToolManifestEntry, ...]:
+    """Resolve and validate the manifest consumed by every runtime definition."""
+    definitions = gateway.definitions
+    if isinstance(gateway, ToolManifestSource):
+        entries = tuple(gateway.manifest)
+    else:
+        entries = tuple(
+            ToolManifestEntry(
+                logical_name=definition.name, visible_name=definition.name,
+                owner="external", provider="python", capability=definition.name,
+                operation="control", parameters=definition.parameters,
+            ) for definition in definitions
+        )
+    by_name = {entry.visible_name: entry for entry in entries}
+    if (
+        len(by_name) != len(entries)
+        or len(by_name) != len(definitions)
+        or set(by_name) != {definition.name for definition in definitions}
+    ):
+        raise ValueError("Tool manifest must match selected definitions exactly")
+    if any(by_name[definition.name].parameters != definition.parameters for definition in definitions):
+        raise ValueError("Tool manifest schema must match selected definition")
+    return tuple(by_name[definition.name] for definition in definitions)
 
 
 class AgentLoomToolGateway:
