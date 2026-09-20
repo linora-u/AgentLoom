@@ -5,7 +5,7 @@ from agentloom.adapters.smolagents.tools.shell.command_semantics import interpre
 from agentloom.adapters.smolagents.tools.shell.output_interceptor import OutputInterceptor
 from agentloom.adapters.smolagents.tools.shell.process import ShellProcess, ShellProcessRegistry
 from agentloom.adapters.smolagents.tools.shell.should_use_sandbox import get_sandbox_manager, should_use_sandbox
-from agentloom.adapters.smolagents.tools.shell.validator import validate_command
+from agentloom.runtime.tool_governance.shell.validator import validate_command
 from agentloom.runtime.trace import capture_explicit_execution_context
 
 logger = get_logger(__name__)
@@ -160,7 +160,10 @@ def shell_tool(
         session_cwd = registry.get_session_cwd(agent_id)
 
     try:
-        validate_command(command, cwd=session_cwd)
+        from agentloom.runtime.tool_governance.shell.audit import policy_audit
+        from agentloom.adapters.smolagents.tools.shell.shell_audit_log import get_shell_audit_logger
+        with policy_audit(get_shell_audit_logger()):
+            validate_command(command, cwd=session_cwd)
     except ValueError as error:
         raise ToolPolicyBlockedError(str(error)) from error
 
@@ -169,7 +172,7 @@ def shell_tool(
     if should_use_sandbox(command):
         sandbox_mgr = get_sandbox_manager()
         if sandbox_mgr.is_available():
-            exec_command = sandbox_mgr.wrap_command(command)
+            exec_command = sandbox_mgr.wrap_command(command, cwd=session_cwd)
             logger.info("Command sandboxed via %s", sandbox_mgr.config.mode)
             try:
                 from agentloom.adapters.smolagents.tools.shell.shell_audit_log import get_shell_audit_logger
@@ -193,6 +196,7 @@ def shell_tool(
                 )
             except Exception:
                 pass
+            raise ToolPolicyBlockedError(f"Sandbox requested but unavailable: {reason or 'unknown'}")
 
     # Handle explicit background execution.
     if run_in_background:

@@ -1,8 +1,8 @@
-"""Production governance for externally executed, selected native reads.
+"""Production governance for externally executed, selected native tools.
 
-This host owns no reading algorithm. Adapters must call start_execution with
+This host owns no file or Shell execution algorithm. Adapters must call start_execution with
 the saved authorization and dispatch only its returned value, then settle the
-actual outcome. Native write/shell and restart recovery belong to later tickets.
+actual outcome. Verified Pi mappings and restart recovery belong to later tickets.
 """
 
 from __future__ import annotations
@@ -57,7 +57,7 @@ def _check_read_schema(schema: Mapping[str, Any]) -> None:
             _check_read_schema(schema[key])
 
 
-class NativeReadToolHost:
+class NativeToolHost:
     """One host bound to the active Application Run, Hook Run and Agent instance."""
 
     def __init__(
@@ -89,14 +89,24 @@ class NativeReadToolHost:
         if set(self._extractors) - set(self._tools) or any(not callable(value) for value in self._extractors.values()):
             raise ValueError("Evidence extractors must belong to selected native tools")
         for tool in self._tools.values():
-            if tool.operation != "read" or not tool.path_parameters:
-                raise ValueError("NativeReadToolHost only supports declared path reads")
+            if tool.operation not in {"read", "write", "shell"}:
+                raise ValueError("Native tools require a supported operation")
+            if tool.operation in {"read", "write"} and not tool.path_parameters:
+                raise ValueError("Native file tools require declared paths")
+            if tool.operation == "write" and tool.logical_name not in {"write_file", "edit_file"}:
+                raise ValueError("Unsupported native write mapping")
+            if tool.operation == "shell" and (tool.logical_name != "shell_tool" or not tool.command_parameter):
+                raise ValueError("Native Shell requires a declared command mapping")
             _check_read_schema(tool.parameters)
             if tool.parameters.get("type") != "object" or tool.parameters.get("additionalProperties") is not False:
                 raise ValueError("Native read input must be a closed object schema")
-            if any(name not in tool.parameters.get("properties", {}) for name in tool.path_parameters):
+            declared = (*tool.path_parameters, *((tool.command_parameter,) if tool.command_parameter else ()))
+            if any(name not in tool.parameters.get("properties", {}) for name in declared):
                 raise ValueError("Native path parameters must be declared in the schema")
         self._journal = NativeCallJournal(self._runtime.run_dir / "native-tools")
+        self._observed_files: dict[str, tuple[int, str | None]] = {}
+        from agentloom.runtime.checkpoint.file_history import FileHistoryManager
+        self._history = FileHistoryManager(self._runtime.run_dir / "native-file-history" / hashlib.sha256(self._execution.agent_id.encode()).hexdigest())
         self._closed = False
         self._owned: set[NativeCallIdentity] = set()
         from agentloom.runtime.resources import register_resource
@@ -178,6 +188,7 @@ class NativeReadToolHost:
                 coerce=False,
                 cwd=self._cwd,
                 manifest=request.tool,
+                protect=lambda arguments: self._protect(request.tool, arguments),
             )
             if isinstance(prepared, ToolCallRecord):
                 # A rejected call is durably terminal as well, but never has a grant.
@@ -199,9 +210,51 @@ class NativeReadToolHost:
                 hook_run_id=self._execution.local_run_id,
                 hook_root_id=self._execution.root_run_id,
                 started_at=started,
+                file_versions=self._file_versions(request.tool, prepared[0]),
             )
             self._owned.add(request.identity)
         return NativePreparation(authorization=grant)
+
+    def _file_versions(self, tool: ToolManifestEntry, arguments: Mapping[str, Any]) -> dict[str, Any]:
+        versions = {}
+        for name in tool.path_parameters:
+            path = Path(self._cwd) / arguments[name]
+            try:
+                stat = path.stat()
+                versions[str(path)] = {"resolved_path": str(path.resolve()), "exists": True,
+                    "device": stat.st_dev, "inode": stat.st_ino, "mtime_ns": stat.st_mtime_ns,
+                    "ctime_ns": stat.st_ctime_ns, "size": stat.st_size}
+            except FileNotFoundError:
+                versions[str(path)] = {"resolved_path": str(path.resolve()), "exists": False}
+        return versions
+
+    def _protect(self, tool: ToolManifestEntry, arguments: Mapping[str, Any]) -> None:
+        from agentloom.runtime.tool_governance.files import check_staleness
+        from agentloom.runtime.tool_governance.search import load_exclude_paths
+        if tool.logical_name in {"grep_search", "glob_search", "list_directory"}:
+            if load_exclude_paths(tool.logical_name) or load_exclude_paths(tool.visible_name):
+                raise ValueError("Native query exclusion mapping is not verified; refusing execution")
+        if tool.operation == "shell":
+            from agentloom.runtime.tool_governance.shell.validator import validate_command
+            from agentloom.utils.sandbox import SandboxManager
+            command = arguments.get(tool.command_parameter)
+            if not isinstance(command, str) or not command.strip():
+                raise ValueError("Native Shell requires a non-empty command")
+            validate_command(command, cwd=self._cwd)
+            if load_exclude_paths(tool.logical_name) or load_exclude_paths(tool.visible_name):
+                raise ValueError("Native Shell exclusion isolation is not verified; refusing execution")
+            if SandboxManager().should_sandbox(command):
+                raise ValueError("Native Shell sandbox execution mapping is not verified; refusing execution")
+        if tool.operation == "write":
+            for name in tool.path_parameters:
+                path = Path(self._cwd) / arguments[name]
+                if path.exists():
+                    observed = self._observed_files.get(str(path.resolve()))
+                    reason = check_staleness(path, observed[0] if observed else None, observed[1] if observed else None)
+                    if reason:
+                        raise ValueError(reason)
+                # Always preserve native pre-write history, even with checkpoints disabled.
+                self._history.track_edit(str(path), self._execution.hook_run.step_number)
 
     def start_execution(self, grant: NativeAuthorization) -> NativeAuthorization:
         self._require_scope(grant.identity)
@@ -213,7 +266,37 @@ class NativeReadToolHost:
             expected.require_match(grant.identity, grant.tool, grant.cwd, grant.final_arguments)
             if entry.state != "authorized":
                 raise ValueError("Native authorization already consumed or cancelled")
-            data["state"] = "executing"
+            try:
+                from agentloom.runtime.tool_gateway import _build_runtime_context
+                from agentloom.runtime.hooks.types import HookEvent
+                from agentloom.runtime.hooks.path_validators import enforce_core_tool_guard
+                context = _build_runtime_context(
+                    self._execution.hook_run, event=HookEvent.PRE_TOOL_USE,
+                    tool_name=expected.tool.visible_name, tool_input=dict(expected.final_arguments),
+                    tool_call_id=expected.identity.call_id,
+                    tool_inputs_schema=dict(expected.tool.parameters["properties"]), cwd=expected.cwd,
+                )
+                result = enforce_core_tool_guard(context, manifest=expected.tool)
+                if result.should_block():
+                    raise ValueError(result.get_blocked_response())
+                if expected.tool.operation == "write" and data["file_versions"] != self._file_versions(expected.tool, expected.final_arguments):
+                    raise ValueError("File changed after native authorization")
+                self._protect(expected.tool, expected.final_arguments)
+                data["file_versions"] = self._file_versions(expected.tool, expected.final_arguments)
+            except Exception as exc:
+                data["state"] = "cancelled"
+                rejection = ToolCallRecord.blocked(
+                    call_id=expected.identity.call_id, tool_name=expected.tool.visible_name,
+                    input=dict(expected.final_arguments), message=str(exc), stage="native_dispatch",
+                    kind="policy_blocked", started_at=data["started_at"], ended_at=time.time(),
+                )
+                data["dispatch_rejection"] = rejection.to_dict()
+            else:
+                data["state"] = "executing"
+        if data.get("dispatch_rejection"):
+            from agentloom.runtime.tool_protocol import ToolPolicyBlockedError
+            self._execution.hook_run.record_tool_outcome(rejection)
+            raise ToolPolicyBlockedError(rejection.reason)
         # The fsync barrier above completes before the adapter can execute.
         return expected
 
@@ -258,6 +341,16 @@ class NativeReadToolHost:
                 data["state"] = "uncertain"
                 return journal_entry(data)
 
+            if outcome.status == "completed" and grant.tool.logical_name == "read_file":
+                versions = self._file_versions(grant.tool, grant.final_arguments)
+                if versions == data.get("file_versions"):
+                    for path, version in versions.items():
+                        if version["exists"]:
+                            self._observed_files[str(Path(path).resolve())] = (version["mtime_ns"], None)
+            if grant.tool.operation == "write":
+                for name in grant.tool.path_parameters:
+                    self._observed_files.pop(str((Path(grant.cwd) / grant.final_arguments[name]).resolve()), None)
+
             evidence: tuple[dict[str, str], ...] = ()
             evidence_status = "none"
             extractor = self._extractors.get(grant.tool.visible_name)
@@ -286,6 +379,13 @@ class NativeReadToolHost:
             output_digest = hashlib.sha256(
                 json.dumps(actual["output"], sort_keys=True, ensure_ascii=False).encode()
             ).hexdigest()
+            result_scope = {
+                    "coverage": "executor_result_only" if outcome.status == "completed" else "none",
+                    "source_completeness": "unknown",
+                    "query_limits": {key: value for key, value in grant.final_arguments.items() if key in {"offset", "limit", "max_results", "max_count", "timeout"}},
+                    "display_truncated": output != actual["output"],
+                    "raw_artifact": {"journal": str(self.journal_directory), "path": str(self._journal.artifact_path(grant.identity)), "json_pointer": "/raw_output", "identity": snapshot(grant.identity), "sha256": output_digest},
+            }
             record = ToolCallRecord(
                 call_id=grant.identity.call_id,
                 tool_name=grant.tool.visible_name,
@@ -304,6 +404,7 @@ class NativeReadToolHost:
                         "commit_id": commit_id,
                         "cwd": grant.cwd,
                         "raw_output_sha256": output_digest,
+                        "result_scope": result_scope,
                     }
                 },
             )
@@ -312,6 +413,7 @@ class NativeReadToolHost:
                 commit_id=commit_id,
                 record=record.to_dict(),
                 raw_output=actual["output"],
+                result_scope=result_scope,
                 evidence=snapshot(evidence),
                 evidence_status=evidence_status,
             )
@@ -371,10 +473,15 @@ class NativeReadToolHost:
                     self._cancel_owned(identity)
             finally:
                 self._closed = True
+                self._history.close()
                 self._journal.close()
 
-    def __enter__(self) -> NativeReadToolHost:
+    def __enter__(self) -> NativeToolHost:
         return self
 
     def __exit__(self, *_args: Any) -> None:
         self.close()
+
+
+# Ticket 05/09 import compatibility; the wire contract remains version 1.
+NativeReadToolHost = NativeToolHost

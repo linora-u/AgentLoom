@@ -75,12 +75,17 @@ class NativeCallJournal:
             self._storage.close()
             raise
 
+    def artifact_path(self, identity: NativeCallIdentity) -> Path:
+        """Stable reference to the snapshot containing the original raw output."""
+        key = hashlib.sha256(json.dumps([identity.instance_id, identity.call_id]).encode()).hexdigest()
+        return self.directory / f"{key}.json"
+
     @contextmanager
     def transaction(self, identity: NativeCallIdentity, *, confirm: bool = False) -> Iterator[dict[str, Any]]:
         # Parent/session anchors must match the stored identity, not form a new
         # namespace that would permit reuse of an already consumed call ID.
-        key = hashlib.sha256(json.dumps([identity.instance_id, identity.call_id]).encode()).hexdigest()
-        name = f"{key}.json"
+        name = self.artifact_path(identity).name
+        key = Path(name).stem
         with self._lock, self._storage.advisory_file_lock(f"{key}.lock", create=True):
             try:
                 data = self._storage.read_json(name)

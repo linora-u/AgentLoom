@@ -11,7 +11,7 @@ from typing import Any
 
 from agentloom.adapters.litellm.litellm_retry import patch_litellm_completion
 from agentloom.adapters.litellm.model_turn import create_model_turn_adapter
-from agentloom.adapters.litellm.request_headers import (
+from agentloom.configuration.model_request_headers import (
     build_model_request_headers,
 )
 from agentloom.adapters.litellm.tool_error_projection import (
