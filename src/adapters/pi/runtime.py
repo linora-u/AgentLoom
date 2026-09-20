@@ -130,8 +130,8 @@ class PiRuntime:
         wire_tools = [tool if tool.owner == "runtime" else replace(tool, parameters={
             **tool.parameters, "description": descriptions[tool.visible_name]}) for tool in definition.tool_manifest]
         model_calls = set()
-        platform_calls = set()
-        platform_pending: dict[str, tuple[NativeCallIdentity, PreparedToolCall]] = {}
+        platform_calls: set[NativeCallIdentity] = set()
+        platform_pending: dict[NativeCallIdentity, PreparedToolCall] = {}
         platform_lock = Lock()
         emitted_commits = set()
         store = None
@@ -181,9 +181,9 @@ class PiRuntime:
                 with platform_lock:
                     if ((identity.application_id, identity.task_id, identity.run_id, identity.instance_id) != (
                             request.application_id, request.task_id, run_id, self.transport.instance_id)
-                            or payload.tool_name not in platform_entries or identity.call_id in platform_calls):
+                            or payload.tool_name not in platform_entries or identity in platform_calls):
                         raise AgentRuntimeError("Invalid Pi platform callback identity or selection", category="internal")
-                    platform_calls.add(identity.call_id)
+                    platform_calls.add(identity)
                 prepared = cast(PreparedToolGateway, definition.tool_gateway).prepare(call_id=identity.call_id, tool_name=payload.tool_name,
                                                             arguments=payload.arguments)
                 if isinstance(prepared, ToolCallRecord):
@@ -200,18 +200,18 @@ class PiRuntime:
                     record_tool(prepared, platform_entries[payload.tool_name], identity)
                     return PlatformPrepared(method="platform_prepare", arguments=arguments, rejection=_terminal(prepared))
                 with platform_lock:
-                    platform_pending[identity.call_id] = (identity, prepared)
+                    platform_pending[identity] = prepared
                 return PlatformPrepared(method="platform_prepare", arguments=arguments)
             if isinstance(payload, PlatformInvoke):
                 identity = payload.identity
                 with platform_lock:
-                    pending = platform_pending.pop(identity.call_id, None)
-                if (pending is None or pending[0] != identity or pending[1].tool_name != payload.tool_name
-                        or dict(pending[1].arguments) != payload.arguments):
+                    pending = platform_pending.pop(identity, None)
+                if (pending is None or pending.tool_name != payload.tool_name
+                        or dict(pending.arguments) != payload.arguments):
                     raise AgentRuntimeError("Pi platform invocation does not match preparation", category="internal")
                 if store is not None:
                     store.start_platform(identity, payload.tool_name, payload.arguments)
-                record = cast(PreparedToolGateway, definition.tool_gateway).execute_prepared(pending[1])
+                record = cast(PreparedToolGateway, definition.tool_gateway).execute_prepared(pending)
                 if store is not None:
                     store.commit_platform(identity, record)
                 record_tool(record, platform_entries[payload.tool_name], identity)

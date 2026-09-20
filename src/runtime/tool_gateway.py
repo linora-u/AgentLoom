@@ -1466,13 +1466,13 @@ class AgentLoomToolGateway:
         coordinator = CheckpointCoordinator.current()
         if coordinator is None:
             return None
-        result = coordinator.completed_worker_result(
+        matched, result = coordinator.completed_worker_result(
             agent_name=expected["agent_name"],
             input_hash=expected["input_hash"],
             task_input=expected["task_input"],
             run_id=run_id,
         )
-        if result is None:
+        if not matched:
             return None
         return ToolCallRecord.completed(
             call_id=call_id,
