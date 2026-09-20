@@ -11,7 +11,7 @@ def test_legacy_todo_runtime_and_prompt_contracts_are_absent() -> None:
         PROJECT_ROOT / "src/runtime/agent.py",
         PROJECT_ROOT / "src/tools/todo/todo_write.py",
     ]
-    prompt_files = list((PROJECT_ROOT / "src/runtime/prompts").glob("**/*.example.yaml"))
+    prompt_files = list((PROJECT_ROOT / "src/adapters/smolagents/prompts").glob("**/*.example.yaml"))
     source = "\n".join(path.read_text(encoding="utf-8") for path in runtime_files)
     prompts = "\n".join(path.read_text(encoding="utf-8") for path in prompt_files)
 

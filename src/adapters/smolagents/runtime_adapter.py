@@ -150,7 +150,7 @@ class SmolagentsRuntimeAdapter:
     ) -> None:
         if not isinstance(model_binding, ModelTurnBinding):
             raise TypeError("model_binding must be a ModelTurnBinding")
-        from agentloom.runtime.todo import TodoStateProvider
+        from agentloom.adapters.smolagents.todo import TodoStateProvider
 
         self._todo_provider = TodoStateProvider()
         self._native_runtime = native_runtime
@@ -407,7 +407,7 @@ class SmolagentsRuntimeAdapter:
         callbacks.register(ActionStep, observe_completed_step)
 
     def run(self, request: AgentRuntimeRequest) -> AgentRuntimeResult:
-        from agentloom.runtime.todo import bind_todo_state_provider
+        from agentloom.adapters.smolagents.todo import bind_todo_state_provider
 
         with bind_todo_state_provider(self._todo_provider):
             return self._run(request)

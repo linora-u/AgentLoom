@@ -8,7 +8,7 @@ from contextlib import contextmanager
 from contextvars import ContextVar
 from typing import Any
 
-from agentloom.runtime.error_recovery import RUNTIME_FEEDBACK_RAW_KEY
+from agentloom.adapters.smolagents.error_recovery import RUNTIME_FEEDBACK_RAW_KEY
 from agentloom.runtime.model_binding import ModelTurnBinding
 from agentloom.runtime.model_protocol import (
     MODEL_ITEMS_RAW_KEY,

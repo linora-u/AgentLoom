@@ -1,0 +1,247 @@
+{
+  "ticket": "04",
+  "status": "completed",
+  "date": "2026-09-20",
+  "base_revision": "9d5a88915efbd402d0f2697318125933fc1500e0",
+  "implementation_revision": "7885ac2a9971a296d220a78c06d426d9219fedb1",
+  "source_tree": "cb7034d81b42dc95831109fd3500502ad594a769",
+  "branch": "codex/pi-t04-smol",
+  "implementation_commits": [
+    {
+      "sha": "37702ef00086bce3373701fe9a140dbc00249362",
+      "summary": "Ticket 04: move basic file search and shell tools into smol runtime"
+    },
+    {
+      "sha": "c9c26c43905c8ab7f8fe2c15392c87ec5062ecc2",
+      "summary": "Ticket 04: move Todo options templates and recovery behind smol boundary"
+    },
+    {
+      "sha": "7b775ed34e96cf5aa1d2034ab59b3e085d0c82f4",
+      "summary": "Ticket 04: isolate read state and prevent cross-thread task inheritance"
+    },
+    {
+      "sha": "9506980431f5d2fba3dd9b8270504dff82ea1a15",
+      "summary": "Ticket 04: add real Application acceptance for all Todo modes"
+    },
+    {
+      "sha": "7885ac2a9971a296d220a78c06d426d9219fedb1",
+      "summary": "Ticket 04: preserve explicit legacy paths for shipped prompt templates"
+    }
+  ],
+  "evidence_root": "/Users/bytedance/code/data_clear/AgentLoom-worktrees/evidence/t04",
+  "environment": {
+    "private_llm_config_copied": true,
+    "private_llm_config_ignored": true,
+    "private_config_committed": false,
+    "python": "3.12",
+    "smolagents": "1.26.0",
+    "install": "uv sync --locked --all-groups"
+  },
+  "checks": [
+    {
+      "command": ".venv/bin/python -m pytest tests applications/memory_feature_validation/scripts -q --tb=short",
+      "passed": 4255,
+      "skipped": 1,
+      "warnings": 3,
+      "seconds": 290.82,
+      "exit_code": 0,
+      "log": "full-suite-final.log",
+      "test_tree_note": "Pinned runtime implementation plus the final ownership-aware catalog assertion; no runtime changes after this revision."
+    },
+    {
+      "command": "mypy --follow-imports=silent --ignore-missing-imports <options/todo/prompts/factory/adapter/application/logger/checkpoint>",
+      "exit_code": 0,
+      "log": "typecheck-final.log"
+    },
+    {
+      "command": "mypy <16 changed modules>",
+      "existing_errors": 4,
+      "new_errors": 0,
+      "log": "typecheck-candidate.log",
+      "baseline_log": "typecheck-trace-baseline.log"
+    },
+    {
+      "command": "mypy <39 migrated basic tool modules>",
+      "existing_errors": 17,
+      "new_errors": 0,
+      "log": "typecheck-tools.log",
+      "baseline_log": "typecheck-tools-baseline.log"
+    },
+    {
+      "command": "Fresh interpreter platform-only Gateway loading",
+      "passed": true,
+      "evidence": "platform-only-imports.json"
+    },
+    {
+      "command": "Build/install wheel, check all 48 moved resources, resolve 11 runtime tools and legacy explicit template path",
+      "passed": true,
+      "evidence": [
+        "wheel-validation.json",
+        "wheel-smoke.json"
+      ],
+      "wheel_sha256": "77033a2b82111322efc56073e975944dd543dfff8439d9423646bff453a31826"
+    }
+  ],
+  "live": {
+    "implementation_revision": "7885ac2a9971a296d220a78c06d426d9219fedb1",
+    "passed_scenarios": 17,
+    "not_run_scenarios": 1,
+    "scenarios": [
+      {
+        "case": "existing/unit",
+        "status": "passed",
+        "evidence": "live-7885ac2a-unit-absolute/unit/assertions.json",
+        "sha256": "c444322e9bfbd42105c0878071d8617ef822bbf9dfb4f9c3b63946092d22af11"
+      },
+      {
+        "case": "existing/repo",
+        "status": "passed",
+        "evidence": "live-7885ac2a-existing/repo/assertions.json",
+        "sha256": "209af9eda2445cda0d0b3310b17f1a3583e98ff3d82a617292de3f31c8767e1d"
+      },
+      {
+        "case": "existing/context_text",
+        "status": "passed",
+        "evidence": "live-7885ac2a-existing/context_text/assertions.json",
+        "sha256": "8c41b9d0ab11a92c6736bba66bf716ccbe0168317b239324e3fe7b2c7b19cbb7"
+      },
+      {
+        "case": "existing/context_json",
+        "status": "passed",
+        "evidence": "live-7885ac2a-existing/context_json/assertions.json",
+        "sha256": "a6ada380d18f43f2713badadec18177a02e21ac6dafbe3aae408a53445770dd5"
+      },
+      {
+        "case": "existing/context_multi",
+        "status": "passed",
+        "evidence": "live-7885ac2a-existing/context_multi/assertions.json",
+        "sha256": "f793269036bc46d6d169f11d39209059e24345c0fd78ed890d14c67c3ec5157d"
+      },
+      {
+        "case": "existing/core",
+        "status": "passed",
+        "evidence": "live-7885ac2a-existing/core/assertions.json",
+        "sha256": "809f7b49a279c235a1f90e068c33438de9842071cc5d498c932e7ee6ea460ff3"
+      },
+      {
+        "case": "existing/markdown",
+        "status": "passed",
+        "evidence": "live-7885ac2a-existing/markdown/assertions.json",
+        "sha256": "ae18505cd12b8a31c399af02bd9e65f974ef6d5aa6288de8a867fe2dad8e043f"
+      },
+      {
+        "case": "existing/goal_list",
+        "status": "passed",
+        "evidence": "live-7885ac2a-existing/goal_list/assertions.json",
+        "sha256": "a780195125324e1d346b59d0deac0314fac80f2ddbd5dd96680f460d17860c84"
+      },
+      {
+        "case": "existing/goal_parallel",
+        "status": "passed",
+        "evidence": "live-7885ac2a-existing/goal_parallel/assertions.json",
+        "sha256": "997a99cb7035cf096ae8f76fe62d39f846d2d16ba3f5c12b1731844e5272fe08"
+      },
+      {
+        "case": "checkpoint/main",
+        "status": "passed",
+        "evidence": "live-7885ac2a-checkpoint/main/report.json",
+        "sha256": "b19381bb9971e39e1521fdde60c416f98f139f602610895030f8c47397879069"
+      },
+      {
+        "case": "checkpoint/worker",
+        "status": "passed",
+        "evidence": "live-7885ac2a-checkpoint/worker/report.json",
+        "sha256": "af50f23cabba9611b912a6c5e588513572eaad9efc69e6d73b2f6cf00d92a694"
+      },
+      {
+        "case": "checkpoint/completed",
+        "status": "passed",
+        "evidence": "live-7885ac2a-checkpoint/completed/report.json",
+        "sha256": "54d5bdb8811a6b67097a9d8f7b75ecb8cb4b1d5cb76294acf2fb415d581baac5"
+      },
+      {
+        "case": "todo/on",
+        "status": "passed",
+        "evidence": "live-7885ac2a-todo/on/assertions.json",
+        "sha256": "a07b2c7affee140a0db5e6dbf7b82a75f3a00ce09aa59354b20a7f60f848127f"
+      },
+      {
+        "case": "todo/auto",
+        "status": "passed",
+        "evidence": "live-7885ac2a-todo/auto/assertions.json",
+        "sha256": "a2ffc60dc938173fe6d9f56e020ccb7e7ded8911ded80353ef7f5eac132548dd"
+      },
+      {
+        "case": "todo/off",
+        "status": "passed",
+        "evidence": "live-7885ac2a-todo/off/assertions.json",
+        "sha256": "1c502820d7345c946cccbd080baea45a8604e57aad73504af3050ad1d6d536db"
+      },
+      {
+        "case": "protocol/openai_chat",
+        "status": "passed",
+        "evidence": "live-7885ac2a-protocols/summary.json"
+      },
+      {
+        "case": "protocol/openai_responses",
+        "status": "passed",
+        "evidence": "live-7885ac2a-protocols/summary.json"
+      }
+    ],
+    "not_run": [
+      {
+        "case": "protocol/anthropic_messages",
+        "status": "NOT-RUN",
+        "reason": "No configured Anthropic protocol profile."
+      }
+    ],
+    "runners": [
+      "tests/acceptance/existing_application_validation.py",
+      "tests/agent_test/real_checkpoint_validation.py",
+      "tests/acceptance/model_protocol_matrix.py",
+      "tests/acceptance/smol_todo_validation.py"
+    ],
+    "archived_application_definitions": "acceptance-apps/manifest.json",
+    "extra_relative_artifacts": "worktree-relative-artifacts/"
+  },
+  "retained_failures": [
+    {
+      "evidence": "basic-tools-regression.log",
+      "reason": "Three Application failures from cross-thread task context inheritance; fixed in 7b775ed3."
+    },
+    {
+      "evidence": "instance-state-red.log",
+      "reason": "Instance read-state and task context leaks reproduced before fixes."
+    },
+    {
+      "evidence": "explicit-template-red.log",
+      "reason": "Eight explicit legacy template paths failed before exact allowlist fix in 7885ac2a."
+    },
+    {
+      "evidence": "full-suite.log",
+      "reason": "One old namespace assertion after tool relocation; replaced with ownership-aware assertion, retaining identity checks."
+    },
+    {
+      "evidence": "live-7885ac2a-existing/unit/assertions.json",
+      "reason": "Initial relative workspace made host JUnit verifier use the wrong report location. Application completed; absolute-path recheck and a fresh real-model run passed. Original failed attempt retained."
+    }
+  ],
+  "review": {
+    "standards": {
+      "findings": 0,
+      "unresolved": 0
+    },
+    "spec": {
+      "findings": 1,
+      "unresolved": 0,
+      "resolved": "Explicit legacy templates preserve relative/absolute paths and custom file precedence; re-reviewed after fix."
+    }
+  },
+  "handoff": {
+    "tool_inventory": "04-tool-inventory.md",
+    "path_mapping": "04-path-migration.json",
+    "policy_call_sites": "04-implementation.md",
+    "next_ticket": "06 after verified integration with 05",
+    "compatibility_cleanup": "13/14 after remaining consumers migrate"
+  }
+}
