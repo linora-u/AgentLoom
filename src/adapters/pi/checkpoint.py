@@ -168,6 +168,15 @@ class PiCheckpointStore:
             data = self.storage.read_json(self._platform_key(identity))
             if data.get("identity") != snapshot(identity):
                 raise ValueError("Pi platform receipt identity mismatch")
+            state = data.get("state")
+            if state not in {"prepared", "executing", "uncertain", "committed"}:
+                raise ValueError("Pi platform receipt has an unknown state")
+            if (state == "committed") != (data.get("record") is not None):
+                raise ValueError("Pi platform receipt state does not match its terminal record")
+            if state == "committed":
+                record = ToolCallRecord.from_dict(data["record"])
+                if record.call_id != identity.call_id or record.tool_name != data["tool_name"]:
+                    raise ValueError("Pi platform receipt result identity mismatch")
             if recovering and data.get("state") == "executing":
                 data["state"] = "uncertain"
                 self.storage.atomic_write_json(self._platform_key(identity), data)

@@ -19,7 +19,9 @@ def _result(call: dict[str, Any], record: dict[str, Any] | None) -> dict[str, An
         error = True
     elif record["status"] != "completed":
         content = [{"type": "text", "text": (record.get("error") or {}).get("message", "AgentLoom tool did not complete")}]
-        details = {"agentloom": record}
+        # The SDK projects both blocked calls and thrown execution errors with
+        # empty details, unlike successful platform results.
+        details = {}
         error = True
     elif call["owner"] == "runtime":
         output = record["output"]
@@ -111,9 +113,9 @@ def reconcile(store: PiCheckpointStore, bundle: dict[str, Any]) -> dict[str, Any
         if existing is not None:
             if existing.get("toolName") != call["tool_name"] or existing.get("isError") != expected["isError"]:
                 raise ValueError("Pi native result conflicts with host outcome")
-            if not expected["isError"] and existing.get("content") != expected["content"]:
+            if existing.get("content") != expected["content"]:
                 raise ValueError("Pi native result differs from committed host output")
-            if call["owner"] == "runtime" and not expected["isError"] and existing.get("details") != expected.get("details"):
+            if existing.get("details") != expected.get("details"):
                 raise ValueError("Pi native result details differ from committed host output")
             continue
         # Appending behind a later assistant would change which turn the

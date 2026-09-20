@@ -70,11 +70,37 @@ def recovery_receipt(runtime: RuntimeContext, identity: NativeCallIdentity) -> d
         with journal.transaction(identity) as data:
             if data.get("version") != 1 or data.get("request", {}).get("identity") != snapshot(identity):
                 raise ValueError("Recovered native journal identity mismatch")
+            _validate_recovery_state(data)
             if data.get("state") == "executing":
                 data["state"] = "uncertain"
             return snapshot(data)
     finally:
         journal.close()
+
+
+def _validate_recovery_state(data: dict[str, Any]) -> None:
+    # Preparation rejection never creates an authorization or execution state.
+    if "rejection" in data:
+        if any(key in data for key in ("state", "authorization_id", "final_arguments",
+                                       "record", "commit_id", "outcome", "dispatch_rejection")):
+            raise ValueError("Rejected native preparation contains execution evidence")
+        record = ToolCallRecord.from_dict(data["rejection"])
+        request = data["request"]
+        if (record.status == "completed" or record.call_id != request["identity"]["call_id"]
+                or record.tool_name != request["tool"]["visible_name"]):
+            raise ValueError("Native preparation rejection does not match its request")
+        return
+    entry = journal_entry(data)
+    if entry.commit is None and "commit_id" in data:
+        raise ValueError("Uncommitted native journal contains a commit identifier")
+    if "dispatch_rejection" in data:
+        record = ToolCallRecord.from_dict(data["dispatch_rejection"])
+        grant = entry.authorization
+        if (entry.state != "cancelled" or record.status != "blocked"
+                or record.call_id != grant.identity.call_id
+                or record.tool_name != grant.tool.visible_name
+                or record.input != dict(grant.final_arguments)):
+            raise ValueError("Native dispatch rejection does not match its authorization")
 
 
 class NativeCallJournal:
