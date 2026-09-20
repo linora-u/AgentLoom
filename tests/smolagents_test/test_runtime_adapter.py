@@ -5,6 +5,7 @@ from dataclasses import dataclass
 from types import SimpleNamespace
 
 import pytest
+from agentloom.adapters.smolagents.agents import ToolCallingAgentV2
 from agentloom.adapters.smolagents.checkpoint_codec import (
     SmolagentsCheckpointCodec,
 )
@@ -42,6 +43,7 @@ from agentloom.runtime.model_protocol import (
     ModelTurnResult,
     ModelUsage,
     ReasoningItem,
+    ToolDefinition,
 )
 from agentloom.runtime.tool_protocol import ToolCallRecord
 from smolagents.agents import (
@@ -504,6 +506,82 @@ def test_adapter_restores_native_memory_from_compatible_checkpoint() -> None:
     )
 
     assert [step.task for step in native.memory.steps] == ["prior task"]
+
+
+@pytest.mark.parametrize("record_task", [False, True])
+def test_checkpoint_alone_resumes_history_through_the_real_agent_loop(record_task: bool) -> None:
+    class FinalAnswerModel:
+        adapter_id = "openai_chat"
+
+        def __init__(self) -> None:
+            self.requests: list[ModelTurnRequest] = []
+
+        def turn(self, request: ModelTurnRequest) -> ModelTurnResult:
+            self.requests.append(request)
+            return ModelTurnResult(
+                items=(FunctionCallItem(
+                    call_id=f"answer-{len(self.requests)}",
+                    name="final_answer",
+                    arguments_json='{"answer":"done"}',
+                ),),
+            )
+
+    class FinalAnswerGateway:
+        definitions = (ToolDefinition(
+            name="final_answer",
+            description="Finish the task.",
+            parameters={
+                "type": "object",
+                "properties": {"answer": {"type": "string", "description": "Final answer."}},
+                "required": ["answer"],
+            },
+        ),)
+
+        def invoke(self, *, call_id, tool_name, arguments):
+            return ToolCallRecord.completed(
+                call_id=call_id, tool_name=tool_name, input=arguments, output=arguments["answer"],
+            )
+
+        def close(self) -> None:
+            pass
+
+    model = FinalAnswerModel()
+    binding = _binding(model)
+
+    def fresh_runtime() -> SmolagentsRuntimeAdapter:
+        gateway = FinalAnswerGateway()
+        native = ToolCallingAgentV2(
+            tool_gateway=gateway,
+            model=SmolagentsModelTurnBridge(binding=binding),
+            max_steps=3,
+            smart_summary=False,
+            verbosity_level=0,
+        )
+        return _runtime(native, binding=binding, tool_gateway=gateway)
+
+    original = fresh_runtime()
+    checkpoint = original.run(AgentRuntimeRequest(task="Remember PRIOR_CONTEXT_SENTINEL")).checkpoint
+    original.close()
+    resumed = fresh_runtime()
+    try:
+        result = resumed.run(
+            AgentRuntimeRequest(
+                task="Continue with NEW_CONTEXT_SENTINEL",
+                checkpoint=checkpoint,
+                record_task=record_task,
+            )
+        )
+    finally:
+        resumed.close()
+
+    messages = [item.text for item in model.requests[-1].items if isinstance(item, MessageItem)]
+    assert any("PRIOR_CONTEXT_SENTINEL" in text for text in messages)
+    assert any("NEW_CONTEXT_SENTINEL" in text for text in messages) is record_task
+    assert any(
+        isinstance(item, FunctionCallOutputItem) and item.call_id == "answer-1"
+        for item in model.requests[-1].items
+    )
+    assert result.output == "done"
 
 
 def test_resume_replays_canonical_items_through_the_next_model_turn() -> None:

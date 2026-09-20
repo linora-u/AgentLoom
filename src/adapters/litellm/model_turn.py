@@ -286,8 +286,8 @@ def _item_to_responses_input(item: ModelItem) -> dict[str, Any] | None:
         }
         if item.item_id is not None:
             wire["id"] = item.item_id
-        if item.status is not None:
-            wire["status"] = item.status
+        # Tool outcomes (completed/error/blocked) belong to the output record,
+        # not Responses' optional item-lifecycle status field.
         return wire
     if isinstance(item, ReasoningItem):
         if item.replay_payload.get("type") != "reasoning":
