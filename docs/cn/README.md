@@ -22,7 +22,7 @@
   <img alt="真实终端中运行的 AgentLoom Application Studio" src="../assets/agentloom-studio.svg">
 </p>
 
-<p align="center"><sub>开启 reduced-motion 后录制的真实终端会话。Studio 从当前项目读取 Application、Skill、校验状态、Run 和命令。</sub></p>
+<p align="center"><sub>开启 reduced-motion 后录制的历史终端会话。画面中的 Goal 示例现已删除。</sub></p>
 
 AgentLoom 把多 Agent 系统当成一个**有执行契约的 Application**。YAML 定义
 Supervisor、类型化 Worker、模型、Tool、Skill、Hook、权限和 Runtime 策略。

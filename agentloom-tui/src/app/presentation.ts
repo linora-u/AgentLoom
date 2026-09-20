@@ -749,7 +749,6 @@ function countWorkerStatuses(detail: RunDetailResultDto): Record<string, number>
 function workerCountLine(counts: Record<string, number>): string {
   const statuses = [
     ["completed", "成功"],
-    ["预算受限"],
     ["failed", "失败"],
     ["crashed", "崩溃"],
     ["interrupted", "中断"],

@@ -227,6 +227,29 @@ def test_role_driven_agent_reports_to_application_lifecycle(monkeypatch):
     assert runtime.close_calls == 1
 
 
+def test_direct_agent_rejects_removed_goal_checkpoint_before_building_runtime(tmp_path, monkeypatch):
+    from agentloom.runtime.checkpoint import CheckpointManager
+    from agentloom.runtime.checkpoint.coordinator import CheckpointCoordinator
+
+    manager = CheckpointManager("supervisor", checkpoints_root=tmp_path, run_id="run_resume")
+    task_id = "legacy-goal-task"
+    with manager.task_storage(task_id) as storage:
+        storage.atomic_write_json("goal.json", {"status": "active"})
+    agent = _make_agent(logger=DummyLoggerBackend())
+    runtime = RecordingAgentRuntime("must not run")
+    build = MagicMock(return_value=runtime)
+    monkeypatch.setattr(agent, "build_runtime", build)
+    monkeypatch.setattr(agent, "_inject_memory_snapshot", lambda tasks: tasks)
+
+    try:
+        with pytest.raises(ValueError, match="removed Goal-mode checkpoint"):
+            agent.run("resume", task_id=task_id, checkpoint_manager=manager, resume=True)
+        build.assert_not_called()
+        assert CheckpointCoordinator.current() is None
+    finally:
+        manager.close()
+
+
 def test_role_driven_agent_delegates_one_run_to_the_invocation_module(monkeypatch):
     agent = _make_agent(logger=DummyLoggerBackend())
     observed = []

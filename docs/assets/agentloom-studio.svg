@@ -62,7 +62,7 @@
 <text x="925.2" y="194.0" fill="#444444" font-weight="400">│</text>
 <rect x="933.6" y="180.0" width="16.8" height="18" fill="#121212"/>
 <rect x="950.4" y="180.0" width="168.0" height="18" fill="#121212"/>
-<text x="950.4" y="194.0" fill="#eeeeee" font-weight="400">context_engine_validation</text>
+<text x="950.4" y="194.0" fill="#eeeeee" font-weight="400">goal_mode_validation</text>
 <rect x="1118.4" y="180.0" width="159.6" height="18" fill="#121212"/>
 <text x="34.8" y="212.0" fill="#5fafff" font-weight="400">│</text>
 <rect x="925.2" y="198.0" width="8.4" height="18" fill="#121212"/>

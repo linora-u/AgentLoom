@@ -22,7 +22,7 @@ English | <a href="docs/cn/README.md">简体中文</a>
   <img alt="AgentLoom Application Studio running in a real terminal" src="docs/assets/agentloom-studio.svg">
 </p>
 
-<p align="center"><sub>Real reduced-motion terminal session using the current Chinese UI. The Studio indexes Applications, Skills, validation state, Runs, and commands from the project.</sub></p>
+<p align="center"><sub>Historical reduced-motion terminal recording of the Chinese UI. The Goal example shown in this recording has since been removed.</sub></p>
 
 AgentLoom treats a multi-agent system as an **Application with an execution
 contract**. YAML defines the Supervisor, typed Workers, models, tools, Skills,
