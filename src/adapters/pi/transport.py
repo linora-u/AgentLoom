@@ -8,6 +8,7 @@ from queue import Queue, Empty
 import shutil
 import signal
 import subprocess
+import re
 from tempfile import TemporaryDirectory
 from threading import Lock, RLock, Thread
 import time
@@ -32,9 +33,30 @@ class Pending:
 
 class PiTransport:
     def __init__(self, instance_id: str):
-        node = shutil.which("node")
         bridge = Path(__file__).parent / "bridge"
         entry = bridge / "dist/index.js"
+        env = build_subprocess_env()
+        for name in list(env):
+            if name.startswith(("PI_", "NODE_")):
+                env.pop(name)
+        # AgentLoom's other tools may prepend their bundled Node 18. Select a
+        # compatible executable without mutating the process-wide PATH.
+        node = None
+        inspected = set()
+        for directory in os.get_exec_path(env):
+            candidate = shutil.which("node", path=directory)
+            if candidate is None or candidate in inspected:
+                continue
+            inspected.add(candidate)
+            try:
+                probe = subprocess.run([candidate, "--version"], cwd=bridge, env=env,
+                    capture_output=True, timeout=5, text=True, check=True)
+                version = re.fullmatch(r"v(\d+)\.(\d+)\.\d+\s*", probe.stdout)
+                if version and (int(version[1]), int(version[2])) >= (22, 19):
+                    node = candidate
+                    break
+            except (OSError, subprocess.SubprocessError):
+                continue
         if not node or not entry.is_file() or not (bridge / "node_modules/@earendil-works/pi-coding-agent").is_dir():
             raise AgentRuntimeError(
                 f"Pi requires Node >=22.19 and a built bridge. Run npm ci --ignore-scripts && npm run build in {bridge}",
@@ -44,20 +66,17 @@ class PiTransport:
         self._lock = RLock()
         self._write_lock = Lock()
         self._pending: dict[str, Pending] = {}
+        self._callbacks: set[str] = set()
         self._failure: AgentRuntimeError | None = None
         self._closed = False
         self._closing = False
         self._directory = TemporaryDirectory(prefix="agentloom-pi-")
-        env = build_subprocess_env()
-        for name in list(env):
-            if name.startswith(("PI_", "NODE_")):
-                env.pop(name)
         env.update(HOME=self._directory.name, XDG_CONFIG_HOME=self._directory.name)
         try:
             self.process = subprocess.Popen(
                 [node, str(entry), self._directory.name], stdin=subprocess.PIPE,
                 stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, env=env,
-                start_new_session=True,
+                start_new_session=True, cwd=self._directory.name,
             )
         except OSError:
             self._directory.cleanup()
@@ -96,11 +115,12 @@ class PiTransport:
                         raise ValueError()
                     if isinstance(message, Request):
                         # Ticket 09 supplies callbacks. Reject them while continuing to service the reader.
-                        if (not message.request_id.startswith("pi:") or message.payload.method not in
+                        if (not message.request_id.startswith("pi:") or message.request_id in self._callbacks or message.payload.method not in
                             {"tool_prepare", "tool_settle", "platform_invoke"} or not any(
                                 item.request.run_id == message.run_id and item.request.payload.method == "run"
                                 for item in self._pending.values())):
                             raise ValueError()
+                        self._callbacks.add(message.request_id)
                     else:
                         pending = self._pending.get(message.request_id)
                         if pending is None or message.run_id != pending.request.run_id:
@@ -194,3 +214,5 @@ class PiTransport:
                 if pipe is not None:
                     pipe.close()
             self._directory.cleanup()
+        if self._failure is not None and self._failure.category != "interrupted":
+            raise self._failure
