@@ -7,8 +7,6 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any
 
-from pydantic import BaseModel, ConfigDict, Field, model_validator
-
 from agentloom.configuration.config_validation import BoolParser, IntParser
 from agentloom.configuration.defaults import (
     DEFAULT_MAX_OUTPUT_TOKENS,
@@ -22,6 +20,8 @@ from agentloom.configuration.defaults import (
     DEFAULT_MODEL_TIMEOUT,
 )
 from agentloom.configuration.yaml_loader import load_unique_yaml
+from agentloom.runtime.model_protocol import MODEL_ADAPTERS, AdapterKind
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 _RESERVED_MODEL_KEYS = {"default_model_type", "common"}
 
@@ -85,6 +85,7 @@ class LangfuseSettings(BaseModel):
 class LlmModelTypeSettings(BaseModel):
     model_config = ConfigDict(extra="allow", arbitrary_types_allowed=True, frozen=True)
     model: str = ""
+    adapter: AdapterKind
     base_url: str = ""
     api_key: str = ""
     temperature: float = DEFAULT_MODEL_TEMPERATURE
@@ -196,6 +197,18 @@ class LLMConfig(BaseModel):
                     f"(e.g., 'openai/gpt-4o', 'anthropic/claude-3-5-sonnet')."
                 )
 
+            adapter = v.get("adapter")
+            if adapter is None:
+                raise ValueError(
+                    f"Model type '{k}' in llm.yaml is missing required 'adapter' field. "
+                    f"Choose one of: {', '.join(MODEL_ADAPTERS)}."
+                )
+            if adapter not in MODEL_ADAPTERS:
+                raise ValueError(
+                    f"Model type '{k}' in llm.yaml has unsupported adapter {adapter!r}. "
+                    f"Choose one of: {', '.join(MODEL_ADAPTERS)}."
+                )
+
             if "supports_native_tool_calls" in v:
                 raise ValueError(
                     f"Model type '{k}' uses removed field 'supports_native_tool_calls'. "
@@ -206,7 +219,7 @@ class LLMConfig(BaseModel):
             # Collect extra keys not in the known fields list.
             # These are passed through to litellm.completion() as-is.
             _KNOWN_FIELDS = {
-                "model", "base_url", "api_key", "temperature", "max_tokens",
+                "model", "adapter", "base_url", "api_key", "temperature", "max_tokens",
                 "context_window", "max_output_tokens",
                 "timeout", "num_retries", "retry_delay", "max_retry_delay",
                 "extra_headers", "context_cache", "system_prompt_boundary",
@@ -218,6 +231,7 @@ class LLMConfig(BaseModel):
 
             models[k] = LlmModelTypeSettings(
                 model=model_id,
+                adapter=adapter,
                 base_url=resolved_base_url,
                 api_key=resolved_api_key,
                 temperature=float(resolved_temp),
@@ -258,7 +272,7 @@ class LLMConfig(BaseModel):
         Export back to the nested dict structure expected by the rest of the application
         if arbitrary code tries to read C.raw['model'] or C.raw['langfuse'].
         """
-        model_dict = {
+        model_dict: dict[str, Any] = {
             "default_model_type": self.default_model_type
         }
         for k, v in self.models.items():

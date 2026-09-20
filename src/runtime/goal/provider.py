@@ -11,17 +11,6 @@ from typing import Literal, overload
 from .model import GoalConfig, GoalState, validate_goal_state
 
 
-class GoalBudgetLimitedError(RuntimeError):
-    """Raised by the pre-request fence after a Goal exhausts its soft budget."""
-
-    def __init__(self, state: GoalState) -> None:
-        super().__init__(
-            f"Goal token budget exhausted: used={state.used_tokens}, "
-            f"budget={state.token_budget}"
-        )
-        self.state = state
-
-
 class GoalCompleteError(RuntimeError):
     """Stops further model calls after the Goal completion commit point."""
 
@@ -70,14 +59,12 @@ class GoalStateProvider:
                     "Cannot resume Goal mode because the objective changed; "
                     "description, workflow, and runtime task must match"
                 )
-            state = state.with_resumed_budget(config.token_budget)
         else:
             if raw is not None:
                 raise ValueError("Cannot start Goal mode: Goal state already exists")
             state = GoalState.create(
                 objective=objective,
                 objective_fingerprint=objective_fingerprint,
-                token_budget=config.token_budget,
             )
 
         provider = cls(state)
@@ -104,11 +91,6 @@ class GoalStateProvider:
         with self._lock:
             if self._state.status == "complete":
                 if (
-                    self._state.token_budget is not None
-                    and self._state.used_tokens >= self._state.token_budget
-                ):
-                    raise GoalBudgetLimitedError(self._state)
-                if (
                     allow_completion_settlement
                     and self._completion_settlement_available
                     and local_run_id == self._completion_settlement_run_id
@@ -116,8 +98,6 @@ class GoalStateProvider:
                     self._completion_settlement_available = False
                     return True
                 raise GoalCompleteError(self._state)
-            if self._state.status == "budget_limited":
-                raise GoalBudgetLimitedError(self._state)
             return False
 
     def completion_settlement_pending(self, *, local_run_id: str | None) -> bool:
@@ -126,19 +106,9 @@ class GoalStateProvider:
         with self._lock:
             return (
                 self._state.status == "complete"
-                and (
-                    self._state.token_budget is None
-                    or self._state.used_tokens < self._state.token_budget
-                )
                 and self._completion_settlement_available
                 and local_run_id == self._completion_settlement_run_id
             )
-
-    def record_usage(self, *, prompt_tokens: int, completion_tokens: int) -> GoalState:
-        with self._lock:
-            self._state = self._state.with_usage(prompt_tokens, completion_tokens)
-            self._persist_locked()
-            return self._state
 
     def mark_started(self) -> GoalState:
         with self._lock:

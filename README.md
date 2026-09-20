@@ -9,7 +9,7 @@ English | <a href="docs/cn/README.md">简体中文</a>
 </p>
 
 <p align="center">
-  Typed Workers, permissioned edits, resumable Runs, explicit Goal budgets, and review-gated memory share one runtime truth.
+  Typed Workers, permissioned edits, resumable Runs, explicit Goal completion, and review-gated memory share one runtime truth.
 </p>
 
 <p align="center">
@@ -51,9 +51,8 @@ Run or its storage is allocated.
 
 Goal Mode keeps one root Supervisor objective active across continuation
 segments and Worker delegation. Only that Supervisor can mark the Goal complete
-with evidence. An optional token budget covers the whole Agent tree. When
-checkpointing is enabled, `budget_limited` preserves recovery state for a later
-resume.
+with evidence. Checkpointing preserves the Goal and completed work across
+interruptions and resume.
 
 ### Memory has review boundaries
 
@@ -195,9 +194,9 @@ A Supervisor references Worker definitions:
 
 ```yaml
 name: "release_review"
+agent_runtime: "smolagents"
 description: "Review an API release and its test evidence."
 model_type: "powerful"
-tool_call_type: "tool_call"
 
 worker_agents:
   - path: "applications/release_review/workflows/worker_agents/api_reviewer.yaml"
@@ -210,16 +209,15 @@ tools: []
 max_steps: 12
 goal:
   enabled: true
-  token_budget: 120000
 ```
 
 Each Worker exposes the contract seen by its Supervisor:
 
 ```yaml
 name: "api_reviewer"
+agent_runtime: "smolagents"
 description: "Review API compatibility risks."
 model_type: "fast"
-tool_call_type: "tool_call"
 
 agent_function_schema:
   description: "Review one release request."
@@ -337,7 +335,7 @@ agentloom schedules --project /path/to/project serve
 | `unit_test_studio` | Strict pytest generation with a deterministic Python entrypoint |
 | `repo_map` | Deterministic preprocessing, bottom-up Agent analysis, batching, and progress persistence |
 | `codex_exec_demo` | Local `codex exec` exposed as normal Agent tools with fixed arguments |
-| `goal_mode_validation` | Explicit Goal completion, budget accounting, and resumable terminal states |
+| `goal_mode_validation` | Explicit Goal completion, continuation, and checkpoint resume |
 | `self_learning_smoke` | Session history, memory proposals, evidence, and review boundaries |
 
 ## Documentation
@@ -349,7 +347,7 @@ agentloom schedules --project /path/to/project serve
 | [Tool Catalog](docs/en/tool_catalog.md) | Lazy implementation loading, toolsets, metadata, and extension rules |
 | [Skills](docs/en/skills_config.md) | Discovery, on-demand activation, and permission boundaries |
 | [Hooks](docs/en/hooks.md) | Explicit authorization, events, transforms, and failure semantics |
-| [Goal Mode](docs/en/goal_mode.md) | Continuation, completion ownership, budgets, resume, and schedules |
+| [Goal Mode](docs/en/goal_mode.md) | Continuation, completion ownership, resume, and schedules |
 | [Checkpoint and Runtime Storage](docs/en/checkpoint.md) | Run/task identity, evidence, recovery, and retention |
 | [Self-Learning v6](docs/en/self_learning.md) | History, candidates, review, approval, and promotion |
 | [Structured Run API](docs/en/run_observability.md) | Python receipts, typed failures, JSON, and JSONL |

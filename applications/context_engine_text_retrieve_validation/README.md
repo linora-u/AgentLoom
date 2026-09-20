@@ -9,7 +9,7 @@ Output: `TEXT_CONTEXT_RETRIEVE_PASS verification_value=TEXT-CTX-7319`.
 Supervisor/Worker/Tool split:
 
 - Supervisor calls `text_payload_worker`, receives only a preview plus `ContextRef`, then calls `loom_retrieve_context`.
-- Worker calls `make_context_engine_text_payload` and returns the exact large payload.
+- Worker calls `make_context_engine_text_payload` and returns its `ContextRef`.
 - Tool deterministically generates the hidden validation record in the middle of the payload.
 
 Run:

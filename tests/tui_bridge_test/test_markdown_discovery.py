@@ -23,18 +23,20 @@ def _project(root: Path, app_id: str = "markdown", folder: str = "") -> tuple[Pa
     config.mkdir(parents=True, exist_ok=True)
     (config / "system.yaml").write_text("{}\n")
     (config / "llm.yaml").write_text(
-        "model:\n  default_model_type: test\n  test: {model: openai/test}\n  summary: {model: openai/test}\n"
+        "model:\n  default_model_type: test\n  test: {model: openai/test, adapter: openai_chat}\n  summary: {model: openai/test, adapter: openai_chat}\n"
     )
     supervisor = root / "applications" / app_id / "workflows" / folder / "supervisor.md"
     worker = supervisor.parent / "worker_agents/worker.md"
     _markdown(supervisor, {
-        "name": "markdown_supervisor", "description": "Coordinate Markdown work",
+        "name": "markdown_supervisor", "agent_runtime": "smolagents",
+        "description": "Coordinate Markdown work",
         "worker_agents": [{"path": "worker.md"}],
         "tools": [{"name": "read_file"}],
         "hooks": {"SessionStart": [{"id": "read-only-check", "command": "touch must-not-exist"}]},
     })
     _markdown(worker, {
-        "name": "markdown_worker", "description": "Read the declared task",
+        "name": "markdown_worker", "agent_runtime": "smolagents",
+        "description": "Read the declared task",
         "agent_function_schema": {
             "description": "Work on one task", "inputs": {"task": {"description": "Task", "required": True}},
             "output": {"description": "Evidence"},
@@ -119,7 +121,8 @@ def test_markdown_discovery_preserves_shared_definition_diagnostics(tmp_path, ca
 def test_markdown_discovery_does_not_promote_workers_or_follow_symlinks(tmp_path):
     supervisor, _ = _project(tmp_path)
     _markdown(tmp_path / "applications/worker_only/workflows/worker_agents/orphan.md", {
-        "name": "orphan", "description": "Unreferenced Worker",
+        "name": "orphan", "agent_runtime": "smolagents",
+        "description": "Unreferenced Worker",
     })
     (supervisor.parent / "linked.md").symlink_to(supervisor)
     (supervisor.parent / "linked_dir").symlink_to(supervisor.parent, target_is_directory=True)

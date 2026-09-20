@@ -1,6 +1,6 @@
 name: "security_scan"
+agent_runtime: smolagents
 description: "Scans for security vulnerabilities: input validation gaps, injection risks, buffer overflows, hardcoded secrets, and cryptographic misuse."
-tool_call_type: "code_act"
 model_type: "powerful"
 toolsets:
   - "core_shell"

@@ -1,8 +1,8 @@
 name: "test_shell_large_output"
+agent_runtime: smolagents
 description: "Validate large shell output truncation, visible artifact notice, and follow-up inspection"
 
 model_type: "powerful"
-tool_call_type: "code_act"
 
 tools:
   - name: "shell_tool"
@@ -66,6 +66,3 @@ workflow: |
 
 worker_agents: []
 max_steps: 12
-
-execution_env:
-  type: "local"

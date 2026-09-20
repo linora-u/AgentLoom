@@ -1,4 +1,5 @@
 name: "test_file_rewind"
+agent_runtime: smolagents
 description: |
   File history rewind integration test.
 
@@ -16,50 +17,20 @@ description: |
             .agentloom/checkpoints/test_demo/<task_id>/file-history/
 
 model_type: "powerful"
-tool_call_type: "code_act"
-max_steps: 5
+max_steps: 8
 
 workflow: |
   # File Rewind Test Workflow
 
-  Execute one Python code block that calls the tools below directly. Do not
-  split this into multiple code blocks. Do not output prose outside the code
-  block.
-
-  ```python
-  path = "/tmp/agentloom_rewind_test/original.txt"
-  shell_tool(command="rm -rf /tmp/agentloom_rewind_test && mkdir -p /tmp/agentloom_rewind_test")
-  results = []
-
-  created = write_file(file_path=path, content="version_1: original content\n")
-  results.append(("write_file original", "Created" in created or "Updated" in created, created))
-
-  first = edit_file(
-      file_path=path,
-      edits=[{"old_text": "version_1: original content", "new_text": "version_2: first modification"}],
-  )
-  results.append(("edit_file first", "Successfully edited" in first, first))
-
-  second = edit_file(
-      file_path=path,
-      edits=[{"old_text": "version_2: first modification", "new_text": "version_3: second modification"}],
-  )
-  results.append(("edit_file second", "Successfully edited" in second, second))
-
-  final_content = read_file(file_path=path)
-  results.append(("read_file final", "version_3: second modification" in final_content, final_content))
-
-  ok = all(item[1] for item in results)
-  lines = ["FILE_REWIND_VALIDATION: " + ("PASS" if ok else "FAIL")]
-  for name, passed, detail in results:
-      lines.append(f"{name}: {'PASS' if passed else 'FAIL'}")
-      if not passed:
-          lines.append(str(detail))
-  lines.append("Final file content:")
-  lines.append(final_content)
-  lines.append("File history should have created pre-edit backups for each edit_file call.")
-  final_answer("\n".join(lines))
-  ```
+  Use native structured tool calls:
+  1. Call `shell_tool` to recreate `/tmp/agentloom_rewind_test`.
+  2. Call `write_file` for `original.txt` with version 1.
+  3. Call `edit_file` once to change version 1 to version 2, then once more to
+     change version 2 to version 3. Do not combine or repeat the edits.
+  4. Call `read_file` and require `version_3: second modification`.
+  5. Call `final_answer` with `FILE_REWIND_VALIDATION: PASS` only when all
+     actual returns prove success. Include the actual final content and note
+     that the harness must independently verify two pre-edit backups.
 
 tools:
   - name: "shell_tool"
@@ -68,6 +39,3 @@ tools:
   - name: "edit_file"
 
 worker_agents: []
-
-execution_env:
-  type: "local"

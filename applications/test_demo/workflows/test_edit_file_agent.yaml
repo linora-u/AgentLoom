@@ -1,74 +1,26 @@
 name: "test_edit_file"
+agent_runtime: smolagents
 description: "Validate edit_file tool: multi-edit schema, unique matches, and error handling"
 
 model_type: "powerful"
-tool_call_type: "code_act"
-max_steps: 5
+max_steps: 10
 
 workflow: |
   # edit_file Tool Validation Workflow
 
-  Execute one Python code block that calls the tools below directly. Do not
-  split this into multiple code blocks. Do not output prose outside the code
-  block.
-
-  ```python
-  path = "/tmp/test_edit_agent.py"
-  results = []
-
-  created = write_file(
-      file_path=path,
-      content="def hello():\n    return 'world'\n\nstatus = 'draft'\n",
-  )
-  results.append(("write_file create", "Created" in created or "Updated" in created, created))
-
-  initial = read_file(file_path=path)
-  results.append(("read_file initial", "def hello():" in initial and "return 'world'" in initial, initial))
-
-  edited = edit_file(
-      file_path=path,
-      edits=[
-          {"old_text": "return 'world'", "new_text": "return 'universe'"},
-          {"old_text": "status = 'draft'", "new_text": "status = 'done'"},
-      ],
-  )
-  results.append(("edit_file multi-edit", "Successfully edited" in edited and "(2 edits)" in edited, edited))
-
-  final_content = read_file(file_path=path)
-  results.append((
-      "read_file final",
-      "return 'universe'" in final_content
-      and "status = 'done'" in final_content
-      and "return 'world'" not in final_content
-      and "status = 'draft'" not in final_content,
-      final_content,
-  ))
-
-  duplicate = edit_file(
-      file_path=path,
-      edits=[
-          {"old_text": "hello", "new_text": "hi"},
-          {"old_text": "hello", "new_text": "hey"},
-      ],
-  )
-  results.append(("edit_file duplicate old_text", "Duplicate old_text" in duplicate, duplicate))
-
-  identical = edit_file(
-      file_path=path,
-      edits=[{"old_text": "hello", "new_text": "hello"}],
-  )
-  results.append(("edit_file identical text", "identical" in identical, identical))
-
-  ok = all(item[1] for item in results)
-  lines = ["EDIT_FILE_VALIDATION: " + ("PASS" if ok else "FAIL")]
-  for name, passed, detail in results:
-      lines.append(f"{name}: {'PASS' if passed else 'FAIL'}")
-      if not passed:
-          lines.append(str(detail))
-  lines.append("Final file content:")
-  lines.append(final_content)
-  final_answer("\n".join(lines))
-  ```
+  Use native structured tool calls against `/tmp/test_edit_agent.py`:
+  1. Call `write_file` with the initial function and `status = 'draft'`.
+  2. Call `read_file` and verify the initial content.
+  3. Call `edit_file` once with two edits: change the return value to
+     `universe` and status to `done`.
+  4. Call `read_file` and verify both old values are absent and both new values
+     are present.
+  5. Call `edit_file` with two entries sharing the same `old_text`; require the
+     actual return to report the duplicate.
+  6. Call `edit_file` with identical old/new text; require the actual return to
+     report that error.
+  7. Call `final_answer` with `EDIT_FILE_VALIDATION: PASS` only if every check
+     passed, followed by one row per check and the actual final file content.
 
 tools:
   - name: "read_file"

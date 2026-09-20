@@ -1,11 +1,11 @@
 name: "repo_map_skill_writer"
+agent_runtime: smolagents
 description: |
   写入 repo_map 导航技能文档。
   输入仅为 output_dir，读取工具层准备的 context 后，
   使用 write_markdown_file 写入 SKILL.md 与 assets/examples/*.md。
 
 model_type: "powerful"
-tool_call_type: "tool_call"
 toolsets:
   - "core_file"
   - "markdown_report"

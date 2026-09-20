@@ -2,10 +2,9 @@ import json
 from inspect import signature
 from pathlib import Path
 
-from smolagents.tools import get_json_schema
-
 import agentloom.runtime.factory as yaml_agent_factory
 from agentloom.runtime.factory import YamlAgentFactory, YamlConfiguredAgent
+from smolagents.tools import get_json_schema
 
 FIXTURE_ROOT = Path(__file__).resolve().parent / "fixtures"
 WORKFLOW_INTRO = yaml_agent_factory.WORKFLOW_EXECUTION_INTRO
@@ -25,6 +24,7 @@ def _build_worker(config: dict) -> YamlConfiguredAgent:
 def test_generated_function_signature_from_schema():
     config = {
         "name": "test_agent",
+        "agent_runtime": "smolagents",
         "description": "test agent desc",
         "workflow": "test workflow",
         "tools": [],
@@ -94,6 +94,7 @@ def test_print_function_schema_generation_from_worker_yaml():
 def test_generated_tool_includes_optional_inputs_in_payload_block():
     config = {
         "name": "test_agent",
+        "agent_runtime": "smolagents",
         "description": "test agent desc",
         "workflow": "test workflow",
         "tools": [],

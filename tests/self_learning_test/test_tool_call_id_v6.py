@@ -2,11 +2,11 @@ from __future__ import annotations
 
 
 def test_wrapped_tool_reuses_one_call_id_for_call_and_result_events() -> None:
-    from agentloom.self_learning.session_recorder import event_from_hook_context
     from agentloom.runtime.hooks import HookHandler, HookPlan, HookRun
-    from agentloom.adapters.smolagents.tool_shim import inject_hooks
     from agentloom.runtime.hooks.types import HookEvent, HookResult
+    from agentloom.runtime.tool_gateway import AgentLoomToolGateway
     from agentloom.runtime.trace import ExplicitExecutionContext, bind_explicit_execution_context
+    from agentloom.self_learning.session_recorder import event_from_hook_context
 
     observed = []
 
@@ -46,11 +46,15 @@ def test_wrapped_tool_reuses_one_call_id_for_call_and_result_events() -> None:
         root_run_id="root_1",
         local_run_id="local_1",
     )
-    tool = EchoTool()
+    gateway = AgentLoomToolGateway.from_tools([EchoTool()])
 
     with bind_explicit_execution_context(execution):
-        inject_hooks(tool)
-        assert tool.forward(text="hello") == "hello"
+        record = gateway.invoke(
+            call_id="gateway-call-1",
+            tool_name="echo",
+            arguments={"text": "hello"},
+        )
+        assert record.output == "hello"
 
     assert [context.hook_event_name for context in observed] == [
         "PreToolUse",
@@ -72,8 +76,8 @@ def test_wrapped_tool_reuses_one_call_id_for_call_and_result_events() -> None:
 
 def test_wrapped_tool_uses_provider_call_id_when_bound_by_executor() -> None:
     from agentloom.runtime.hooks import HookHandler, HookPlan, HookRun
-    from agentloom.adapters.smolagents.tool_shim import bind_tool_call_id, inject_hooks
     from agentloom.runtime.hooks.types import HookEvent, HookResult
+    from agentloom.runtime.tool_gateway import AgentLoomToolGateway
     from agentloom.runtime.trace import ExplicitExecutionContext, bind_explicit_execution_context
 
     observed = []
@@ -111,9 +115,12 @@ def test_wrapped_tool_uses_provider_call_id_when_bound_by_executor() -> None:
         root_run_id="root_2",
         local_run_id="local_2",
     )
-    tool = EchoTool()
-    with bind_explicit_execution_context(execution), bind_tool_call_id("provider-call-99"):
-        inject_hooks(tool)
-        assert tool.forward(text="hello") == "hello"
+    gateway = AgentLoomToolGateway.from_tools([EchoTool()])
+    with bind_explicit_execution_context(execution):
+        assert gateway.invoke(
+            call_id="provider-call-99",
+            tool_name="echo",
+            arguments={"text": "hello"},
+        ).output == "hello"
 
     assert observed[0].tool_call_id == "provider-call-99"

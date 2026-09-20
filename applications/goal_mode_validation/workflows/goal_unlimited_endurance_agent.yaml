@@ -1,9 +1,9 @@
 name: "goal_unlimited_endurance_agent"
+agent_runtime: smolagents
 description: |
   Run a deep, read-only, multi-Worker acceptance audit of the AgentLoom Goal Mode
   implementation and persist a reproducible evidence report.
 model_type: "powerful"
-tool_call_type: "code_act"
 max_steps: 30
 goal: true
 
@@ -22,8 +22,8 @@ workflow: |
 
   1. goal_contract_auditor: audit strict YAML/Worker rejection; objective and list
      normalization; Goal state schema/identity; offline/runtime validator parity.
-  2. goal_lifecycle_adversary: audit premature final/max_steps; soft boundary and
-     parallel overshoot; budget increase/removal; completion-commit crash recovery.
+  2. goal_lifecycle_adversary: audit premature final/max_steps; explicit completion and
+     parallel Worker ownership; stable identity on resume; completion-commit crash recovery.
   3. goal_observability_auditor: audit Python/manifest; CLI/JSONL; schedule status;
      TUI bridge/TypeScript presentation.
   4. goal_documentation_auditor: audit root docs; cn/en Goal docs; config/checkpoint
@@ -35,8 +35,8 @@ workflow: |
   all results to goal_evidence_synthesizer. Persist its Markdown using
   persist_goal_validation_report(run_name="unlimited_endurance", report=...).
   Verify markers ["# Goal Mode Validation", "## Lifecycle and Resume",
-  "## Token Accounting", "## Observability", "## Verdict"]. Call get_goal and
-  confirm it is still active and unlimited. Finally call
+  "## Goal State", "## Observability", "## Verdict"]. Call get_goal and
+  confirm it is still active. Finally call
   update_goal(status="complete", evidence=<paths, worker count, and verification>)
   exactly once. Todo or a normal final answer is not completion.
 
@@ -53,8 +53,3 @@ tools:
 
 worker_agents:
   - path: "applications/goal_mode_validation/workflows/worker_agents/evidence_synthesizer.yaml"
-
-execution_env:
-  type: "local"
-  executor_kwargs:
-    timeout_seconds: 2400

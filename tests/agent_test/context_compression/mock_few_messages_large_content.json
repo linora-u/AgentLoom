@@ -9,7 +9,8 @@
   },
   {
     "role": "tool-call",
-    "content": "{'name': 'python_interpreter', 'arguments': \"content = read_file_content('/workspace/src/app_config.py')\\nprint(content)\"}"
+    "content": "",
+    "tool_call": {"id": "read-app", "name": "read_file", "arguments": {"file_path": "/workspace/src/app_config.py"}}
   },
   {
     "role": "tool-response",
@@ -21,7 +22,8 @@
   },
   {
     "role": "tool-call",
-    "content": "{'name': 'python_interpreter', 'arguments': \"content = read_file_content('/workspace/src/config_validator.py')\\nprint(content)\"}"
+    "content": "",
+    "tool_call": {"id": "read-validator", "name": "read_file", "arguments": {"file_path": "/workspace/src/config_validator.py"}}
   },
   {
     "role": "tool-response",

@@ -19,6 +19,10 @@ REPO_ROOT = Path(__file__).resolve().parents[3]
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
+from agentloom.runtime.trusted_memory_evidence import (  # noqa: E402
+    extract_trusted_memory_evidence,
+)
+
 from applications.memory_feature_validation.agent_tools.validation_probes import (  # noqa: E402
     extract_validation_memory_evidence,
     validation_memory_case,
@@ -66,9 +70,6 @@ from applications.memory_feature_validation.scripts.run_memory_review_campaign i
     _model_evidence,
     _sanitize_text,
     _write_inbox_decision,
-)
-from agentloom.runtime.trusted_memory_evidence import (  # noqa: E402
-    extract_trusted_memory_evidence,
 )
 
 
@@ -366,7 +367,7 @@ def test_workflows_are_natural_and_do_not_script_memory_calls() -> None:
         assert "memory(action=" not in workflow
         assert "EXACTLY this" not in workflow
         assert payload.get("model_type") == "summary"
-        assert payload.get("tool_call_type") == "tool_call"
+        assert payload.get("agent_runtime") == "smolagents"
         tools = payload.get("tools") or []
         if relative in recall_workflows:
             assert tools == []
@@ -878,7 +879,8 @@ def test_real_campaign_release_sources_bind_harness_workflows_and_runtime() -> N
         "src/application/runner.py",
         "src/runtime/factory.py",
         "src/adapters/smolagents/models/model_manager.py",
-        "src/adapters/smolagents/models/tool_call_parser.py",
+        "src/adapters/smolagents/model_turn_bridge.py",
+        "src/runtime/model_protocol.py",
         "src/configuration/llm_config.py",
         "pyproject.toml",
         "uv.lock",

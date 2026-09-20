@@ -1,8 +1,8 @@
 name: "test_lsp_references"
+agent_runtime: smolagents
 description: "Validate lsp_find_references on Python source files"
 
 model_type: "powerful"
-tool_call_type: "code_act"
 
 workflow: |
   # LSP Find References Validation
@@ -25,6 +25,3 @@ tools:
 
 worker_agents: []
 max_steps: 10
-
-execution_env:
-  type: "local"

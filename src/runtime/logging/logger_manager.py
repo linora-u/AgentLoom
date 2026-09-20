@@ -11,6 +11,8 @@ from typing import Any, Protocol, runtime_checkable
 
 from agentloom.configuration.config_validation import BoolParser
 from agentloom.runtime import RuntimeContext, get_current_run_context
+from agentloom.runtime.logging.levels import AgentLoomLogLevel
+from agentloom.runtime.logging.rich_backend import RichLoggerBackend
 
 DEFAULT_LEVEL = "INFO"
 DEFAULT_CONSOLE_ENABLED = True
@@ -211,8 +213,6 @@ class NullLoggerBackend:
 
 def _resolve_agent_log_level(level_value: Any):
     """Convert any level representation to AgentLoomLogLevel."""
-    from agentloom.runtime.logging.agent_logger import AgentLoomLogLevel
-
     if isinstance(level_value, AgentLoomLogLevel):
         return level_value
     if isinstance(level_value, int):
@@ -281,10 +281,8 @@ def build_logger_backend_from_config(
     supplied.  Standalone callers receive a console-only backend.
     """
     # Lazy import to keep logging core lightweight and avoid import cycles.
-    from rich.console import Console
-
-    from agentloom.runtime.logging.agent_logger import AgentLoomLogLevel, EnhancedAgentLogger
     from agentloom.runtime.logging.rich_console import DualConsole
+    from rich.console import Console
 
     effective_logging = merge_logging_config(logging_builder)
     level = _resolve_agent_log_level(effective_logging.get("level", DEFAULT_LEVEL))
@@ -329,7 +327,7 @@ def build_logger_backend_from_config(
         console = Console(highlight=False)
     else:
         return _tag_backend_runtime(NullLoggerBackend(), runtime_context)
-    backend = EnhancedAgentLogger(
+    backend = RichLoggerBackend(
         level=level,
         console=console,
         show_timestamp=True,
@@ -504,7 +502,7 @@ def _stdlib_emit(logger_name: str, method_name: str, rendered: str) -> None:
 
     This ensures that pytest ``caplog``, third-party log aggregators, and any
     handlers attached to the stdlib root logger always see our log output,
-    even when the primary backend is ``EnhancedAgentLogger`` (which bypasses
+    even when the primary backend is ``RichLoggerBackend`` (which bypasses
     stdlib entirely).
     """
     stdlib_logger = logging.getLogger(logger_name)
@@ -526,7 +524,7 @@ class LoggerAdapter:
     stdlib ``logging`` hierarchy.
 
     *Bound mode* (``backend=<object>``): created by ``get_logger(backend_obj, __name__)``.
-    Wraps a concrete backend (``EnhancedAgentLogger``, stdlib ``Logger``, etc.)
+    Wraps a concrete backend (``RichLoggerBackend``, stdlib ``Logger``, etc.)
     and dispatches directly to it.  If the backend method is missing or fails,
     applies the same global → stdlib fallback chain as lazy mode.
 

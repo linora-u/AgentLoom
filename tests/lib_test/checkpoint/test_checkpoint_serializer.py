@@ -1,15 +1,34 @@
-"""Tests for ``agentloom.runtime.checkpoint.serializer.CheckpointSerializer``."""
+"""Tests for the smolagents-owned checkpoint codec."""
 
 from __future__ import annotations
 
+import json
 import time
 
+import pytest
+from agentloom.adapters.smolagents.checkpoint_codec import (
+    SmolagentsCheckpointCodec as CheckpointSerializer,
+)
+from agentloom.adapters.smolagents.model_turn_bridge import (
+    MODEL_ITEMS_RAW_KEY,
+    MODEL_RESPONSE_ID_RAW_KEY,
+)
+from agentloom.runtime.error_recovery import RUNTIME_FEEDBACK_RAW_KEY
+from agentloom.runtime.model_protocol import (
+    FunctionCallItem,
+    ReasoningItem,
+    model_item_to_dict,
+)
+from agentloom.runtime.tool_protocol import ToolCallRecord, ToolErrorRecord
+from smolagents.agents import (
+    AgentExecutionError,
+    AgentParsingError,
+    AgentToolCallError,
+    AgentToolExecutionError,
+)
 from smolagents.memory import ActionStep, PlanningStep, TaskStep, ToolCall
 from smolagents.models import ChatMessage, MessageRole
 from smolagents.monitoring import Timing, TokenUsage
-
-from agentloom.runtime.checkpoint.serializer import CheckpointSerializer
-from agentloom.runtime.tool_protocol import ToolCallRecord, ToolErrorRecord
 
 # ── helpers ──────────────────────────────────────────────────────────────
 
@@ -68,6 +87,87 @@ class TestSerializeActionStep:
         assert rebuilt[0].token_usage.input_tokens == 200
         assert rebuilt[0].token_usage.output_tokens == 80
 
+    @pytest.mark.parametrize(
+        "error_type",
+        [
+            AgentParsingError,
+            AgentExecutionError,
+            AgentToolCallError,
+            AgentToolExecutionError,
+        ],
+    )
+    def test_roundtrip_preserves_recoverable_error_as_canonical_feedback(
+        self,
+        error_type,
+    ):
+        logger = type("Logger", (), {"log_error": lambda self, message: None})()
+        step = ActionStep(
+            step_number=4,
+            timing=_make_timing(),
+            error=error_type(
+                "malformed native tool arguments",
+                logger,
+            ),
+        )
+
+        data = CheckpointSerializer.serialize_memory_steps([step])
+        canonical = CheckpointSerializer.serialize_canonical_model_items([step])
+        rebuilt = CheckpointSerializer.deserialize_memory_steps(data)
+        CheckpointSerializer.restore_canonical_model_items(rebuilt, canonical)
+
+        assert type(rebuilt[0].error) is error_type
+        assert str(rebuilt[0].error) == "malformed native tool arguments"
+        assert canonical[0]["item"]["type"] == "message"
+        assert canonical[0]["item"]["role"] == "user"
+        assert canonical[0]["item"]["replay_payload"] == {
+            RUNTIME_FEEDBACK_RAW_KEY: True,
+        }
+
+    def test_execution_error_roundtrip_keeps_provider_call_before_feedback(self):
+        logger = type("Logger", (), {"log_error": lambda self, message: None})()
+        function_call = FunctionCallItem(
+            call_id="call-1",
+            name="final_answer",
+            arguments_json='{"answer":"done"}',
+        )
+        step = ActionStep(
+            step_number=5,
+            timing=_make_timing(),
+            tool_calls=[
+                ToolCall(
+                    name="final_answer",
+                    arguments={"answer": "done"},
+                    id="call-1",
+                )
+            ],
+            model_output_message=ChatMessage(
+                role=MessageRole.ASSISTANT,
+                content="",
+                raw={
+                    MODEL_ITEMS_RAW_KEY: (function_call,),
+                    MODEL_RESPONSE_ID_RAW_KEY: "response-1",
+                },
+            ),
+            error=AgentExecutionError(
+                "final_answer cannot run beside another call",
+                logger,
+            ),
+        )
+
+        data = CheckpointSerializer.serialize_memory_steps([step])
+        canonical = CheckpointSerializer.serialize_canonical_model_items([step])
+        rebuilt = CheckpointSerializer.deserialize_memory_steps(data)
+        CheckpointSerializer.restore_canonical_model_items(rebuilt, canonical)
+
+        assert canonical[0]["item"] == model_item_to_dict(function_call)
+        assert canonical[1]["item"]["replay_payload"] == {
+            RUNTIME_FEEDBACK_RAW_KEY: True,
+        }
+        assert rebuilt[0].model_output_message.raw[MODEL_ITEMS_RAW_KEY] == [
+            model_item_to_dict(function_call),
+        ]
+        assert CheckpointSerializer.serialize_canonical_model_items(rebuilt) == canonical
+
     def test_roundtrip_with_terminal_tool_error_record(self):
         step = ActionStep(
             step_number=2,
@@ -106,6 +206,75 @@ class TestSerializeActionStep:
         data = CheckpointSerializer.serialize_memory_steps([step])
         rebuilt = CheckpointSerializer.deserialize_memory_steps(data)
         assert rebuilt[0].model_output == "I will call shell_tool to list files."
+
+    def test_roundtrip_preserves_canonical_items_and_response_id(self):
+        items = (
+            ReasoningItem(
+                item_id="reasoning-1",
+                summary=("Inspect the repository",),
+                replay_payload={
+                    "type": "reasoning",
+                    "encrypted_content": "opaque-ciphertext",
+                },
+            ),
+            FunctionCallItem(
+                call_id="call-1",
+                name="shell_tool",
+                arguments_json='{"command":"pwd"}',
+                item_id="function-1",
+            ),
+        )
+        step = ActionStep(
+            step_number=1,
+            timing=_make_timing(),
+            model_output_message=ChatMessage(
+                role=MessageRole.ASSISTANT,
+                content="",
+                raw={
+                    MODEL_ITEMS_RAW_KEY: items,
+                    MODEL_RESPONSE_ID_RAW_KEY: "response-1",
+                },
+            ),
+        )
+
+        data = CheckpointSerializer.serialize_memory_steps([step])
+        canonical = CheckpointSerializer.serialize_canonical_model_items([step])
+        json.dumps(data)
+        rebuilt = CheckpointSerializer.deserialize_memory_steps(data)[0]
+        assert rebuilt.model_output_message is not None
+        assert rebuilt.model_output_message.raw is None
+
+        CheckpointSerializer.restore_canonical_model_items(
+            [rebuilt],
+            canonical,
+        )
+
+        assert rebuilt.model_output_message is not None
+        assert rebuilt.model_output_message.raw == {
+            MODEL_ITEMS_RAW_KEY: [
+                model_item_to_dict(item) for item in items
+            ],
+            MODEL_RESPONSE_ID_RAW_KEY: "response-1",
+        }
+
+    def test_unknown_step_type_and_corrupt_canonical_item_fail(self):
+        with pytest.raises(ValueError, match="unsupported.*step type"):
+            CheckpointSerializer.deserialize_memory_steps(
+                [{"_step_type": "FutureStep"}]
+            )
+
+        with pytest.raises(ValueError, match="canonical model stream item"):
+            CheckpointSerializer.restore_canonical_model_items(
+                [TaskStep(task="task")],
+                [
+                    {
+                        "step_index": 0,
+                        "item_index": 0,
+                        "response_id": None,
+                        "item": {"type": "unknown"},
+                    }
+                ],
+            )
 
     def test_skip_model_input_messages(self):
         """model_input_messages should be stripped during serialisation."""

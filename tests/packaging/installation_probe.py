@@ -8,10 +8,10 @@ from __future__ import annotations
 import argparse
 import json
 import os
-from pathlib import Path
 import subprocess
 import sys
 import textwrap
+from pathlib import Path
 
 MODEL_RUNNER = r'''
 import importlib.abc
@@ -20,44 +20,74 @@ import json
 from pathlib import Path
 import runpy
 import sys
-from smolagents.models import ChatMessage, ChatMessageToolCall, ChatMessageToolCallFunction, MessageRole
+from agentloom.runtime.model_binding import ModelTurnBinding
+from agentloom.runtime.model_protocol import (
+    FunctionCallItem,
+    FunctionCallOutputItem,
+    ModelTurnResult,
+    ModelUsage,
+)
 
-class Model:
-    model_id = 'deterministic-installation-probe'
-    last_input_token_count = 3
-    last_output_token_count = 2
+class ModelTurnAdapter:
+    adapter_id = 'openai_chat'
     def __init__(self):
         self.calls = 0
-    def generate(self, messages, **kwargs):
+        self.requests = []
+    def turn(self, request):
         self.calls += 1
+        self.requests.append(request)
         if self.calls == 1:
             name, arguments = 'write_probe', {'value': 'external-tool-ok'}
         else:
-            assert 'external-tool-ok:helper' in json.dumps([m.content for m in messages], default=str)
+            assert any(
+                isinstance(item, FunctionCallOutputItem)
+                and 'external-tool-ok:helper' in item.output
+                for item in request.items
+            ), request.items
             name, arguments = 'final_answer', {'answer': 'installation-complete'}
-        return ChatMessage(role=MessageRole.ASSISTANT, content='', tool_calls=[
-            ChatMessageToolCall(id=f'probe-{self.calls}', type='function',
-                function=ChatMessageToolCallFunction(name=name, arguments=arguments))
-        ])
-model = Model()
+        assert {tool.name for tool in request.tools} >= {'write_probe', 'final_answer'}
+        return ModelTurnResult(
+            items=(
+                FunctionCallItem(
+                    call_id=f'probe-{self.calls}',
+                    name=name,
+                    arguments_json=json.dumps(arguments),
+                ),
+            ),
+            usage=ModelUsage(input_tokens=3, output_tokens=2, total_tokens=5),
+        )
+adapter = ModelTurnAdapter()
+binding = ModelTurnBinding(
+    model_type='probe',
+    model_id='deterministic-installation-probe',
+    adapter=adapter,
+    max_tokens=4096,
+    context_window=32768,
+    max_output_tokens=4096,
+    input_token_limit=28672,
+    requests_per_minute=60,
+)
 
-# Intercept only the model factory. The generated program itself establishes
-# project context before importing the real Application runner.
+# Intercept only the canonical binding resolver. The generated program itself
+# establishes project context before importing the real Application runner.
 class Loader(importlib.abc.Loader):
     def __init__(self, wrapped): self.wrapped = wrapped
     def create_module(self, spec): return None
     def exec_module(self, module):
         self.wrapped.exec_module(module)
-        module.get_model = lambda *args, **kwargs: model
+        module.resolve_litellm_model_turn_binding = (
+            lambda *args, **kwargs: binding
+        )
 class Finder(importlib.abc.MetaPathFinder):
     def find_spec(self, fullname, path=None, target=None):
-        if fullname == 'agentloom.adapters.smolagents.models.model_manager':
+        if fullname == 'agentloom.adapters.litellm.model_binding':
             spec = importlib.machinery.PathFinder.find_spec(fullname, path)
             spec.loader = Loader(spec.loader)
             return spec
 sys.meta_path.insert(0, Finder())
 runpy.run_path(sys.argv[1], run_name='__main__')
-assert model.calls == 2, model.calls
+assert adapter.calls == 2, adapter.calls
+assert len(adapter.requests) == 2
 assert Path(sys.argv[2]).read_text() == 'external-tool-ok:helper'
 from agentloom.configuration import C
 assert Path(C.agent_root) == Path(sys.argv[3])
@@ -89,7 +119,17 @@ def probe(workspace: Path) -> dict:
         todo:
           mode: off
     """))
-    (config / "llm.yaml").write_text("model:\n  default_model_type: probe\n  probe:\n    model: openai/installation-probe\n    api_key: synthetic-not-used\n  summary:\n    model: openai/installation-summary\n")
+    (config / "llm.yaml").write_text(
+        "model:\n"
+        "  default_model_type: probe\n"
+        "  probe:\n"
+        "    model: openai/installation-probe\n"
+        "    adapter: openai_chat\n"
+        "    api_key: synthetic-not-used\n"
+        "  summary:\n"
+        "    model: openai/installation-summary\n"
+        "    adapter: openai_chat\n"
+    )
     app = project / "applications" / "nested" / "probe"
     (app / "workflows").mkdir(parents=True)
     (app / "helper.py").write_text("SUFFIX = ':helper'\n")
@@ -111,9 +151,9 @@ def probe(workspace: Path) -> dict:
     definition = app / "workflows" / "probe.yaml"
     definition.write_text(textwrap.dedent('''\
         name: installation_probe
+        agent_runtime: smolagents
         description: Exercise installed Application execution.
         model_type: probe
-        tool_call_type: tool_call
         max_steps: 3
         toolsets: []
         tools:

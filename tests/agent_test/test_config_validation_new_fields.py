@@ -1,7 +1,6 @@
 """Tests for RootSettings config validation with new runtime fields."""
 
 import pytest
-
 from agentloom.configuration.config import (
     _reject_application_global_only_keys,
     extract_workflow_overlay,
@@ -113,8 +112,6 @@ class TestMissingFieldsDefault:
         assert settings.tool_metadata == {}
         assert settings.tool_output_limits == {}
         assert settings.model == {}
-        assert settings.execution_env == {}
-        assert settings.code_agent == {}
         assert settings.context_engine == {}
         assert settings.tools == []
 
@@ -171,8 +168,6 @@ class TestExistingFieldsCoexistence:
         settings = RootSettings(
             smart_summary=False,
             model={"provider": "openai"},
-            execution_env={"timeout": 60},
-            code_agent={"max_steps": 10},
             tools=[{"name": "bash_tool"}],
             context_engine={"min_chars": 2000},
             tool_metadata={"bash_tool": {"label": "Shell"}},

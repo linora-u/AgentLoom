@@ -8,7 +8,6 @@ import time
 from pathlib import Path
 
 import pytest
-
 from agentloom.runtime.context import RuntimeRunLease
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
@@ -31,10 +30,12 @@ model:
   default_model_type: powerful
   powerful:
     model: openai/secret-endpoint
+    adapter: openai_chat
     api_key: must-not-cross-the-bridge
     description: Primary builder model
   summary:
     model: openai/summary-endpoint
+    adapter: openai_chat
     api_key: also-secret
     description: Summary model
 """.strip(),
@@ -54,6 +55,7 @@ checkpoint:
         "applications/never_run/workflows/never_run_agent.yaml",
         """
 name: never_run_agent
+agent_runtime: smolagents
 description: A system that has never run.
 model_type: powerful
 worker_agents:
@@ -67,6 +69,7 @@ workflow: |
         "applications/never_run/workflows/worker_agents/researcher.yaml",
         """
 name: researcher
+agent_runtime: smolagents
 description: Finds evidence.
 agent_function_schema:
   description: Research one question.
@@ -253,6 +256,7 @@ def test_runtime_state_merge_and_run_detail_use_canonical_runtime_data(
             f"applications/{application_id}/workflows/{application_id}_agent.yaml",
             f"""
 name: {application_id}_agent
+agent_runtime: smolagents
 description: {application_id} system
 model_type: powerful
 worker_agents: []

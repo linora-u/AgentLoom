@@ -141,9 +141,8 @@ decision-ready summary rather than a raw event dump. Problem Runs expose an
 
 Goal-aware Run details display:
 
-- `active`, `complete`, or `budget_limited` state;
+- `active` or `complete` state;
 - objective and completion evidence;
-- cumulative and remaining token budget;
 - resume eligibility and the current task identifier.
 
 While a Run is active, the bridge reads canonical checkpoint `goal.json`.

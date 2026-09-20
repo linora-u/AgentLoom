@@ -38,8 +38,8 @@ def _minimal_llm_yaml() -> dict:
                 "api_key": "test-key",
                 "requests_per_minute": 10,
             },
-            "powerful": {"model": "openai/test-model"},
-            "summary": {"model": "openai/test-summary"},
+            "powerful": {"model": "openai/test-model", "adapter": "openai_chat"},
+            "summary": {"model": "openai/test-summary", "adapter": "openai_chat"},
         },
     }
 

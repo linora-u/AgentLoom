@@ -9,7 +9,6 @@ from typing import Any, Literal
 
 TOOL_CALL_RAW_KEY = "agentloom_tool_call"
 TOOL_RESULT_RAW_KEY = "agentloom_tool_result"
-TOOL_SETTLER_ATTR = "_agentloom_settle_tool_call"
 
 ToolCallStatus = Literal[
     "completed",
@@ -235,17 +234,6 @@ class ToolCallRecord:
         output = raw.get("output")
         error_raw = raw.get("error")
         error = ToolErrorRecord(**error_raw) if isinstance(error_raw, dict) else None
-        if status in {"pending", "running", "cancelled"}:
-            # Old checkpoints could persist an in-flight record. Normalize it
-            # explicitly at the persistence edge; the core record stays terminal.
-            status = "error"
-            error = ToolErrorRecord(
-                kind="interrupted",
-                message="Tool execution was interrupted before a terminal record was persisted.",
-                retryable=True,
-                stage="tool_execution",
-            )
-            output = None
         if status not in {"completed", "error", "blocked"}:
             raise ValueError(f"Unsupported Tool terminal status in checkpoint: {status!r}")
         return cls(

@@ -30,6 +30,7 @@ def _base_model_config() -> dict:
             "default_model_type": "powerful",
             "powerful": {
                 "model": "openai/test-model",
+                "adapter": "openai_chat",
                 "base_url": "https://example.test/v1",
                 "api_key": "key-powerful",
                 "temperature": 0.2,
@@ -45,9 +46,11 @@ def _base_model_config() -> dict:
             },
             "fast": {
                 "model": "openai/fast-model",
+                "adapter": "openai_chat",
             },
             "summary": {
                 "model": "openai/test-summary",
+                "adapter": "openai_chat",
             },
         },
     }

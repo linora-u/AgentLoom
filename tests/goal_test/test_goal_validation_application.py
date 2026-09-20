@@ -25,7 +25,6 @@ def _provider() -> GoalStateProvider:
         GoalState.create(
             objective="Validate Goal mode.",
             objective_fingerprint="validation-app",
-            token_budget=50_000,
         )
     )
 
@@ -50,16 +49,16 @@ def test_goal_validation_evidence_rejects_unknown_topic():
         report_tools.load_goal_audit_evidence("unknown")
 
 
-def test_parallel_budget_probe_reuses_report_for_same_goal(tmp_path, monkeypatch):
+def test_parallel_probe_reuses_report_for_same_goal(tmp_path, monkeypatch):
     provider = _provider()
     goal_id = provider.snapshot().goal_id
     monkeypatch.setattr(report_tools, "_OUTPUT_ROOT", tmp_path)
-    (tmp_path / "parallel_budget.md").write_text(
+    (tmp_path / "parallel.md").write_text(
         "\n".join(
             [
-                "# Parallel Goal Budget",
+                "# Parallel Goal Validation",
                 "## Batch Results",
-                "## Accounting",
+                "## Goal State",
                 f"goal_id={goal_id}",
                 "## Resume Instructions",
             ]
@@ -73,7 +72,7 @@ def test_parallel_budget_probe_reuses_report_for_same_goal(tmp_path, monkeypatch
     monkeypatch.setattr(report_tools, "run_goal_audit_batch", fail_if_rerun)
     with bind_goal_state_provider(provider):
         result = json.loads(
-            report_tools.run_parallel_goal_budget_probe(
+            report_tools.run_parallel_goal_probe(
                 '[{"task_id":"audit-1","query":"Inspect the Goal contract."}]'
             )
         )

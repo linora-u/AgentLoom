@@ -328,7 +328,6 @@ def _run_application(
         raise BridgeError("invalid_params", "run.resume requires task_id")
 
     from agentloom.application.run import (
-        ApplicationRunBudgetLimited,
         ApplicationRunError,
         ApplicationRunInterrupted,
     )
@@ -360,16 +359,6 @@ def _run_application(
             "task_id": error.run.task_id,
             "run_id": error.run.run_id,
             "resumable": error.resumable,
-            "events": events[-8:],
-        }
-    except ApplicationRunBudgetLimited as error:
-        return {
-            "status": "budget_limited",
-            "application_id": error.run.application_id,
-            "task_id": error.run.task_id,
-            "run_id": error.run.run_id,
-            "resumable": True,
-            "goal": dict(error.goal),
             "events": events[-8:],
         }
     except ApplicationRunError as error:

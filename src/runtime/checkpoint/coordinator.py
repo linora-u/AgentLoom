@@ -6,31 +6,20 @@ Usage
 Supervisor (in ``run()`` before executing):
 
     coord = CheckpointCoordinator.activate(cm, task_id, task_text)
-    coord.restore(runtime_agent)
-    coord.register_supervisor_step_callback(runtime_agent)
-    # ... run agent ...
-    coord.save_supervisor(runtime_agent, "completed", result=result)
+    checkpoint = coord.load_runtime_checkpoint()
+    # ... run AgentRuntime with checkpoint and checkpoint sink ...
+    coord.save_runtime_checkpoint(result.checkpoint, "completed")
 
-Worker (inside its own ``run()``):
-
-    coord = CheckpointCoordinator.current()
-    if coord:
-        coord.register_worker_step_callback(runtime_agent)
-    # ... run agent ...
-
-SubTaskTrackedAgent lifecycle:
+Worker (inside ``SubTaskTrackedAgent.run()``):
 
     coord = CheckpointCoordinator.current()
     preparation = coord.prepare_worker_call(...) if coord else None
     if preparation is not None and not preparation.should_execute:
         return preparation.cached_result
-    call_index = preparation.call_index if preparation is not None else 0
-    try:
-        result = callable_fn(...)
-        if coord: coord.record_worker_success(...)
-    except Exception:
-        if coord: coord.record_worker_failure(...)
-        raise
+    checkpoint = coord.load_worker_runtime_checkpoint(...)
+    sink = coord.worker_checkpoint_sink(...)
+    result = runtime.run(request_with_checkpoint_and_sink)
+    coord.record_worker_success(..., result.checkpoint)
 """
 
 from __future__ import annotations
@@ -38,8 +27,9 @@ from __future__ import annotations
 import threading
 from contextvars import ContextVar
 from dataclasses import replace
-from typing import Any, Optional
+from typing import Any
 
+from agentloom.runtime.agent_runtime import RuntimeCheckpointEnvelope
 from agentloom.runtime.context_engine import (
     ContextEngine,
     ContextEngineConfig,
@@ -50,39 +40,19 @@ from agentloom.runtime.heartbeat.worker_heartbeat import WorkerHeartbeat
 from agentloom.runtime.logging import get_logger
 
 _logger = get_logger(__name__)
+_TERMINAL_CHECKPOINT_STATUSES = frozenset(
+    {"completed", "failed", "interrupted"}
+)
 
 # Single ContextVar — replaces the previous two (_current_checkpoint_manager
 # and _step_checkpoint_cb) in base_agent.py.
-_current_coordinator: ContextVar[Optional["CheckpointCoordinator"]] = ContextVar(
+_current_coordinator: ContextVar[CheckpointCoordinator | None] = ContextVar(
     "_current_coordinator", default=None
 )
 # Stores a heartbeat writer set by runner.py before supervisor.run(); consumed by activate().
 _pending_supervisor_heartbeat: ContextVar[Any] = ContextVar("_pending_supervisor_heartbeat", default=None)
 # Stores a file history manager set by runner.py before supervisor.run(); consumed by activate().
 _pending_file_history: ContextVar[Any] = ContextVar("_pending_file_history", default=None)
-
-
-def _steps_including_completed(
-    existing_steps: Any,
-    completed_step: Any,
-) -> list[Any]:
-    """Return checkpoint memory including the step that triggered a callback.
-
-    smolagents invokes step callbacks before appending the completed ActionStep
-    to ``memory.steps``.  Some callers may already have appended that exact
-    object, so avoid adding it twice by identity.
-    """
-    steps = list(existing_steps)
-    if not steps:
-        steps.append(completed_step)
-        return steps
-
-    tail = steps[-1]
-    if tail is completed_step:
-        return steps
-
-    steps.append(completed_step)
-    return steps
 
 
 class CheckpointCoordinator:
@@ -108,8 +78,6 @@ class CheckpointCoordinator:
         self._task_id = task_id
         self._task_text = task_text
         self._resume = resume
-        # Set after register_supervisor_step_callback(); workers inherit it.
-        self._step_cb: Any = None
         # Worker heartbeat writers — one per worker_name.
         self._worker_heartbeats: dict[str, WorkerHeartbeat] = {}
         self._worker_heartbeats_lock = threading.Lock()
@@ -132,6 +100,23 @@ class CheckpointCoordinator:
     @property
     def task_text(self) -> str:
         return self._task_text
+
+    def _with_storage_identity(
+        self,
+        checkpoint: RuntimeCheckpointEnvelope,
+    ) -> RuntimeCheckpointEnvelope:
+        run_id = self._cm.run_id
+        if not isinstance(run_id, str) or not run_id:
+            raise ValueError("checkpoint manager has no current run_id")
+        if checkpoint.task_id not in {None, self._task_id}:
+            raise ValueError("runtime checkpoint task_id does not match coordinator")
+        if checkpoint.run_id not in {None, run_id}:
+            raise ValueError("runtime checkpoint run_id does not match coordinator")
+        return replace(
+            checkpoint,
+            task_id=self._task_id,
+            run_id=run_id,
+        )
 
     def load_todos(self, agent_path: str) -> dict[str, Any]:
         """Load the active task's Todo snapshot for one Agent scope."""
@@ -164,7 +149,7 @@ class CheckpointCoordinator:
         *,
         resume: bool = False,
         effective_config: dict[str, Any] | None = None,
-    ) -> "CheckpointCoordinator":
+    ) -> CheckpointCoordinator:
         """Create and store a new coordinator for this task.  Called by supervisor."""
         coord = cls(checkpoint_manager, task_id, task_text, resume=resume)
         _current_coordinator.set(coord)
@@ -182,12 +167,12 @@ class CheckpointCoordinator:
         return coord
 
     @staticmethod
-    def current() -> Optional["CheckpointCoordinator"]:
+    def current() -> CheckpointCoordinator | None:
         """Return the coordinator inherited from the current context (may be None)."""
         return _current_coordinator.get()
 
     @staticmethod
-    def deactivate(coord: Optional["CheckpointCoordinator"] = None) -> None:
+    def deactivate(coord: CheckpointCoordinator | None = None) -> None:
         """Clear the active coordinator after a supervisor run finishes."""
         current = _current_coordinator.get()
         target = coord or current
@@ -235,107 +220,41 @@ class CheckpointCoordinator:
 
     # ── Supervisor ops ───────────────────────────────────────────────
 
-    def restore(self, runtime_agent: Any) -> None:
-        """Inject saved memory steps into *runtime_agent* for resumption.
+    def load_runtime_checkpoint(self) -> RuntimeCheckpointEnvelope | None:
+        """Load the selected runtime's opaque supervisor checkpoint."""
 
-        Uses the full conversation recovery pipeline (ported from the
-        reference implementation) to filter out unresolved tool uses,
-        orphaned thinking steps, and empty steps before injecting them
-        into the agent's memory.
-        """
-        try:
-            from agentloom.runtime.checkpoint.conversation_recovery import prepare_steps_for_resume
-            from agentloom.runtime.checkpoint.serializer import CheckpointSerializer
+        checkpoint = self._cm.load_supervisor_checkpoint(self._task_id)
+        if checkpoint is None:
+            return None
+        raw = checkpoint.get("runtime_checkpoint")
+        if not isinstance(raw, dict):
+            return None
+        return RuntimeCheckpointEnvelope.from_dict(raw)
 
-            sup_ckpt = self._cm.load_supervisor_checkpoint(self._task_id)
-            if sup_ckpt is None:
-                return
-
-            steps = CheckpointSerializer.deserialize_memory_steps(
-                sup_ckpt.get("memory_steps", [])
-            )
-
-            # Full pipeline: filter bad steps + detect interruption.
-            steps, interruption = prepare_steps_for_resume(steps)
-            self._interruption_state = interruption
-
-            runtime_agent.memory.steps = steps
-            _logger.info(
-                "Restored %d memory steps from checkpoint %s (interruption=%s)",
-                len(steps), self._task_id, interruption.kind,
-            )
-        except Exception as exc:
-            _logger.warning("Failed to restore checkpoint: %s", exc)
-
-    def register_supervisor_step_callback(self, runtime_agent: Any) -> None:
-        """Register a step callback that saves a checkpoint after every ActionStep.
-
-        Also stores the callback on this coordinator so worker agents can
-        inherit it via ``register_worker_step_callback()``.
-        """
-        from smolagents.memory import ActionStep
-
-        inner_agent = getattr(runtime_agent, "_agent", runtime_agent)
-        cb_registry = getattr(inner_agent, "step_callbacks", None)
-        if cb_registry is None:
-            return
-
-        def _on_step_complete(memory_step, **kwargs):
-            try:
-                memory_steps = list(runtime_agent.memory.steps)
-                # This callback is inherited by workers.  Only add the
-                # callback step to supervisor memory when the supervisor itself
-                # completed it; a worker step belongs in its own checkpoint.
-                if kwargs.get("agent") is inner_agent:
-                    memory_steps = _steps_including_completed(
-                        memory_steps,
-                        memory_step,
-                    )
-                self.save_supervisor(
-                    runtime_agent,
-                    "running",
-                    memory_steps=memory_steps,
-                )
-                if self._supervisor_heartbeat is not None:
-                    self._supervisor_heartbeat.update_step(len(memory_steps))
-                # Create post-step file history snapshot.
-                if self._file_history is not None:
-                    try:
-                        self._file_history.make_post_step_snapshot(len(memory_steps))
-                    except Exception as fh_exc:
-                        _logger.debug("file_history snapshot failed: %s", fh_exc)
-            except Exception as exc:
-                _logger.warning("step_checkpoint_callback failed: %s", exc, exc_info=True)
-
-        cb_registry.register(ActionStep, _on_step_complete)
-        # Store for workers to inherit.
-        self._step_cb = _on_step_complete
-
-    def save_supervisor(
+    def save_runtime_checkpoint(
         self,
-        runtime_agent: Any,
+        checkpoint: RuntimeCheckpointEnvelope,
         status: str,
         *,
-        result: Optional[str] = None,
-        error: Optional[str] = None,
-        memory_steps: list[Any] | None = None,
+        result: str | None = None,
+        error: str | None = None,
     ) -> None:
-        """Save supervisor checkpoint + update task_tree status."""
+        """Persist a runtime-owned state envelope without inspecting its payload."""
+
         try:
-            checkpoint_steps = (
-                list(runtime_agent.memory.steps)
-                if memory_steps is None
-                else list(memory_steps)
-            )
-            self._cm.save_supervisor_checkpoint(
+            checkpoint = self._with_storage_identity(checkpoint)
+            self._cm.save_supervisor_runtime_checkpoint(
                 self._task_id,
-                memory_steps=checkpoint_steps,
+                runtime_checkpoint=checkpoint.to_dict(),
                 task_text=self._task_text,
                 status=status,
-                config_snapshot=getattr(runtime_agent, "_config", None),
                 result=result,
                 error=error,
-                context_store=self._context_engine.stats_snapshot() if self._context_engine else None,
+                context_store=(
+                    self._context_engine.stats_snapshot()
+                    if self._context_engine
+                    else None
+                ),
             )
             self._cm.record_task_status_changed(
                 self._task_id,
@@ -343,103 +262,53 @@ class CheckpointCoordinator:
                 result=result,
                 error=error,
             )
-
-            _logger.info(
-                "Checkpoint saved [%s] task_id=%s steps=%d",
-                status,
-                self._task_id,
-                len(checkpoint_steps),
-            )
         except Exception as exc:
-            _logger.error("Failed to save checkpoint: %s", exc, exc_info=True)
-            # Mark the task tree as degraded so resume can detect partial saves.
+            _logger.error("Failed to save runtime checkpoint: %s", exc, exc_info=True)
             try:
                 self._cm.update_task_tree(
                     self._task_id,
-                    lambda t: {**t, "checkpoint_degraded": True},
+                    lambda tree: {**tree, "checkpoint_degraded": True},
                 )
-            except Exception:
-                pass  # Disk may be full; nothing more we can do.
+            except Exception as degraded_error:
+                exc.add_note(
+                    "Marking checkpoint_degraded also failed: "
+                    f"{type(degraded_error).__name__}: {degraded_error}"
+                )
+            if status in _TERMINAL_CHECKPOINT_STATUSES:
+                raise
+            return
+
+        step_count = checkpoint.progress
+        if self._supervisor_heartbeat is not None:
+            try:
+                self._supervisor_heartbeat.update_step(step_count)
+            except Exception as exc:
+                _logger.warning(
+                    "Failed to update Supervisor heartbeat after checkpoint: %s",
+                    exc,
+                )
+        if self._file_history is not None:
+            try:
+                self._file_history.make_post_step_snapshot(step_count)
+            except Exception as exc:
+                _logger.warning(
+                    "Failed to snapshot file history after checkpoint: %s",
+                    exc,
+                )
+        _logger.info(
+            "Runtime checkpoint saved [%s] task_id=%s runtime=%s",
+            status,
+            self._task_id,
+            checkpoint.runtime_id,
+        )
 
     # ── Worker ops ───────────────────────────────────────────────────
-
-    def register_worker_step_callback(self, runtime_agent: Any, agent_name: str = "") -> None:
-        """Register the inherited supervisor step callback on a worker's runtime agent.
-
-        This is the clean replacement for the previous ``elif checkpoint_manager is None``
-        block in ``_execute_agent()``.
-        """
-        if self._step_cb is None:
-            return
-        try:
-            from smolagents.memory import ActionStep
-
-            inner = getattr(runtime_agent, '_agent', runtime_agent)
-            cb_reg = getattr(inner, 'step_callbacks', None)
-            if cb_reg is not None:
-                cb_reg.register(ActionStep, self._step_cb)
-        except Exception as exc:
-            _logger.warning("Failed to register worker step callback: %s", exc)
-
-    def register_worker_step_tracker(
-        self,
-        runtime_agent: Any,
-        agent_name: str,
-        call_index: int,
-        *,
-        input_hash: str = "",
-        task_input: str = "",
-    ) -> None:
-        """Register a dedicated step-counter callback for a specific worker call.
-
-        Called from ``SubTaskTrackedAgent._execute_with_lifecycle`` after the
-        atomic worker preparation returns ``call_index``.  This updates the
-        worker heartbeat ``step`` field on
-        every ActionStep so the dashboard reflects real-time progress.
-        """
-        try:
-            from smolagents.memory import ActionStep
-
-            inner = getattr(runtime_agent, '_agent', runtime_agent)
-            cb_reg = getattr(inner, 'step_callbacks', None)
-            if cb_reg is None:
-                return
-
-            def _on_worker_step(memory_step, **kwargs):
-                try:
-                    memory_steps = _steps_including_completed(
-                        inner.memory.steps,
-                        memory_step,
-                    )
-                    self._cm.save_worker_checkpoint(
-                        self._task_id,
-                        agent_name,
-                        call_index=call_index,
-                        input_hash=input_hash,
-                        memory_steps=memory_steps,
-                        task_input=str(task_input),
-                        status="running",
-                    )
-                    whb = self.get_worker_heartbeat(agent_name)
-                    if whb is not None:
-                        whb.update_call_step(
-                            call_index,
-                            len(memory_steps),
-                        )
-                except Exception as exc:
-                    _logger.debug("Worker step tracker failed: %s", exc)
-
-            cb_reg.register(ActionStep, _on_worker_step)
-        except Exception as exc:
-            _logger.warning("Failed to register worker step tracker: %s", exc)
 
     def prepare_worker_call(
         self,
         agent_name: str,
         input_hash: str,
         task_input: str,
-        *,
-        runtime_agent: Any = None,
     ) -> Any:
         """Atomically claim prior work/cache or allocate one new worker call."""
         worker_dir = self._cm.worker_dir(self._task_id, agent_name)
@@ -451,13 +320,6 @@ class CheckpointCoordinator:
             resume=self._resume,
         )
         if not preparation.should_execute:
-            from agentloom.runtime.checkpoint.serializer import CheckpointSerializer
-
-            checkpoint = self._cm.load_worker_checkpoint(self._task_id, agent_name, call_index=preparation.call_index)
-            if checkpoint and checkpoint.get("status") == "completed":
-                has_output, output = CheckpointSerializer.completed_worker_output(checkpoint.get("memory_steps") or [])
-                if has_output:
-                    return replace(preparation, cached_result=output)
             return preparation
         call_index = preparation.call_index
 
@@ -489,56 +351,54 @@ class CheckpointCoordinator:
         except Exception as exc:
             _logger.debug("Worker heartbeat register failed: %s", exc)
 
-        # Register the tracker directly on this invocation's runtime.  Passing
-        # the runtime explicitly avoids a shared agent-name staging map, which
-        # cannot distinguish concurrent calls of the same worker type.
-        try:
-            if runtime_agent is not None:
-                self.register_worker_step_tracker(
-                    runtime_agent,
-                    agent_name,
-                    call_index,
-                    input_hash=input_hash,
-                    task_input=str(task_input),
-                )
-        except Exception as exc:
-            _logger.debug("Worker step tracker register failed: %s", exc)
-
         return preparation
 
-    def restore_worker(self, runtime_agent: Any, agent_name: str, call_index: int) -> bool:
-        """Inject saved worker memory for an incomplete resumed worker call."""
-        try:
-            if not self._resume:
-                return False
-            from agentloom.runtime.checkpoint.conversation_recovery import prepare_steps_for_resume
-            from agentloom.runtime.checkpoint.serializer import CheckpointSerializer
+    def load_worker_runtime_checkpoint(
+        self,
+        agent_name: str,
+        call_index: int,
+    ) -> RuntimeCheckpointEnvelope | None:
+        """Load one incomplete worker call's opaque runtime envelope."""
 
-            worker_ckpt = self._cm.load_worker_checkpoint(
+        if not self._resume:
+            return None
+        checkpoint = self._cm.load_worker_checkpoint(
+            self._task_id,
+            agent_name,
+            call_index=call_index,
+        )
+        if not checkpoint or checkpoint.get("status") == "completed":
+            return None
+        raw = checkpoint.get("runtime_checkpoint")
+        if not isinstance(raw, dict):
+            return None
+        return RuntimeCheckpointEnvelope.from_dict(raw)
+
+    def worker_checkpoint_sink(
+        self,
+        agent_name: str,
+        call_index: int,
+        input_hash: str,
+        task_input: str,
+    ) -> Any:
+        """Return a sink that persists runtime-owned Worker envelopes."""
+
+        def save(checkpoint: RuntimeCheckpointEnvelope) -> None:
+            checkpoint = self._with_storage_identity(checkpoint)
+            self._cm.save_worker_runtime_checkpoint(
                 self._task_id,
                 agent_name,
                 call_index=call_index,
+                input_hash=input_hash,
+                runtime_checkpoint=checkpoint.to_dict(),
+                task_input=str(task_input),
+                status="running",
             )
-            if not worker_ckpt or worker_ckpt.get("status") == "completed":
-                return False
-            raw_steps = worker_ckpt.get("memory_steps") or []
-            if not raw_steps:
-                return False
-            steps = CheckpointSerializer.deserialize_memory_steps(raw_steps)
-            steps, interruption = prepare_steps_for_resume(steps)
-            inner = getattr(runtime_agent, "_agent", runtime_agent)
-            inner.memory.steps = steps
-            _logger.info(
-                "Restored worker %s #%d with %d steps (interruption=%s)",
-                agent_name,
-                call_index,
-                len(steps),
-                interruption.kind,
-            )
-            return True
-        except Exception as exc:
-            _logger.warning("Failed to restore worker checkpoint: %s", exc)
-            return False
+            heartbeat = self.get_worker_heartbeat(agent_name)
+            if heartbeat is not None:
+                heartbeat.update_call_step(call_index, checkpoint.progress)
+
+        return save
 
     def record_worker_success(
         self,
@@ -546,45 +406,46 @@ class CheckpointCoordinator:
         call_index: int,
         input_hash: str,
         task_input: str,
-        result: Optional[str],
-        worker_mem: Any,
+        result: Any,
+        runtime_checkpoint: RuntimeCheckpointEnvelope | None,
     ) -> None:
         """Record successful worker completion."""
-        try:
-            full_result = None if result is None else str(result)
-            stored_result = full_result
-            if full_result and self._context_engine is not None:
-                stored_result = (
-                    self._context_engine.compress_tool_result(
-                        full_result,
-                        tool_name=agent_name,
-                        source=f"worker_result:{agent_name}",
-                    )
-                    or full_result
+        full_result = None if result is None else str(result)
+        stored_result = full_result
+        if full_result and self._context_engine is not None:
+            stored_result = (
+                self._context_engine.compress_tool_result(
+                    full_result,
+                    tool_name=agent_name,
+                    source=f"worker_result:{agent_name}",
                 )
-            self._cm.save_worker_checkpoint(
-                self._task_id,
-                agent_name,
-                call_index=call_index,
-                input_hash=input_hash,
-                memory_steps=worker_mem,
-                task_input=str(task_input),
-                status="completed",
-                result=stored_result,
+                or full_result
             )
-            self._cm.record_worker_finished(
-                self._task_id,
-                agent_name,
-                call_index=call_index,
-                input_hash=input_hash,
-                task_input=str(task_input),
-                status="completed",
-                result=stored_result,
-            )
-            # ── Worker heartbeat: mark completed ──
-            self._update_worker_heartbeat(agent_name, call_index, "completed")
-        except Exception:
-            pass
+        self._cm.record_worker_finished(
+            self._task_id,
+            agent_name,
+            call_index=call_index,
+            input_hash=input_hash,
+            task_input=str(task_input),
+            status="completed",
+            result=stored_result,
+        )
+        self._cm.save_worker_runtime_checkpoint(
+            self._task_id,
+            agent_name,
+            call_index=call_index,
+            input_hash=input_hash,
+            runtime_checkpoint=(
+                runtime_checkpoint.to_dict()
+                if runtime_checkpoint is not None
+                else None
+            ),
+            task_input=str(task_input),
+            status="completed",
+            result=stored_result,
+        )
+        # ── Worker heartbeat: mark completed ──
+        self._update_worker_heartbeat(agent_name, call_index, "completed")
 
     def record_worker_failure(
         self,
@@ -593,16 +454,20 @@ class CheckpointCoordinator:
         input_hash: str,
         task_input: str,
         error: str,
-        worker_mem: Any,
+        runtime_checkpoint: RuntimeCheckpointEnvelope | None,
     ) -> None:
         """Record worker failure."""
         try:
-            self._cm.save_worker_checkpoint(
+            self._cm.save_worker_runtime_checkpoint(
                 self._task_id,
                 agent_name,
                 call_index=call_index,
                 input_hash=input_hash,
-                memory_steps=worker_mem,
+                runtime_checkpoint=(
+                    runtime_checkpoint.to_dict()
+                    if runtime_checkpoint is not None
+                    else None
+                ),
                 task_input=task_input[:500],
                 status="failed",
                 error=error,
@@ -627,16 +492,20 @@ class CheckpointCoordinator:
         call_index: int,
         input_hash: str,
         task_input: str,
-        worker_mem: Any,
+        runtime_checkpoint: RuntimeCheckpointEnvelope | None,
     ) -> None:
         """Record an interrupted worker so resume can continue the same call."""
         try:
-            self._cm.save_worker_checkpoint(
+            self._cm.save_worker_runtime_checkpoint(
                 self._task_id,
                 agent_name,
                 call_index=call_index,
                 input_hash=input_hash,
-                memory_steps=worker_mem,
+                runtime_checkpoint=(
+                    runtime_checkpoint.to_dict()
+                    if runtime_checkpoint is not None
+                    else None
+                ),
                 task_input=str(task_input),
                 status="interrupted",
             )
@@ -684,7 +553,7 @@ class CheckpointCoordinator:
         """Store file history manager before supervisor.run(); activate() will pick it up."""
         _pending_file_history.set(file_history)
 
-    def get_worker_heartbeat(self, agent_name: str) -> "WorkerHeartbeat | None":
+    def get_worker_heartbeat(self, agent_name: str) -> WorkerHeartbeat | None:
         """Return the heartbeat writer for *agent_name* (if any)."""
         with self._worker_heartbeats_lock:
             return self._worker_heartbeats.get(agent_name)

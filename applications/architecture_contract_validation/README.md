@@ -19,11 +19,11 @@ python -m applications.architecture_contract_validation.run_acceptance \
   --output /absolute/private/evidence/architecture --case all --timeout 1200
 ```
 
-`--case native` and `--case codeact` each run twice by default. `--repeats 1`
-is useful for diagnosis but does not satisfy final consecutive-success criteria.
-The `all` suite runs both modes twice within one interpreter (`repeat-native` /
-`repeat-codeact`), both modes once in nested Application locations, all three
-invalid-definition variants, and a real Hook policy block. Same-interpreter
+`--case native` runs twice by default. `--repeats 1` is useful for diagnosis
+but does not satisfy final consecutive-success criteria. The `all` suite runs
+the structured-tool workflow twice within one interpreter (`repeat-native`),
+once in a nested Application location, all three invalid-definition variants,
+and a real Hook policy block. Same-interpreter
 repetitions supply the required two consecutive successes without duplicating
 another pair of fresh-process runs. They share loaded framework modules and the Application definition but
 use distinct workspace nonces and must have distinct task/run identities.
@@ -97,9 +97,9 @@ string at Python Unicode character offsets, then JSON-decode it. Each transfer's
 `query_json_spans` also records `input_path`, `offset`, `end` and `characters` for
 independent replay. Existing `::json` and key/index path segments retain their meaning.
 
-Supervisor Python evidence comes only from the exact Application/task
-checkpoint named by the receipt, with matching task and run IDs; other tasks
-and Worker Python actions cannot satisfy it. Policy checks read the persisted `ToolCallRecord`, require `blocked`
+Supervisor and Worker evidence comes only from the exact Application/task
+checkpoints named by the receipt, with matching task and run IDs; other tasks
+cannot satisfy it. Policy checks read the persisted `ToolCallRecord`, require `blocked`
 with the expected reason, and verify the requested file was never written.
 Invalid variants require Studio and preflight diagnostics for the same cause,
 no model network request, no tool ledger, and no allocated Run.

@@ -1,8 +1,8 @@
 name: "memory_reviewer"
+agent_runtime: smolagents
 description: "Create and verify a proposal-only Application memory candidate."
 
 model_type: "powerful"
-tool_call_type: "code_act"
 max_steps: 8
 
 toolsets: []
@@ -33,8 +33,7 @@ workflow: |
   pending-candidate result, and return JSON only.
 
   # Execution Contract
-  - Emit every action as a Python `<code>...</code>` block.
-  - Do not use native `<tool_call>` syntax.
+  - Invoke tools through native structured calls.
   - Do not call `skill`.
   - Use the `memory` tool; do not inspect the SQLite DB directly.
   - Application proposals are review candidates, not active memory. Do not try
@@ -42,44 +41,10 @@ workflow: |
   - Return `ok=true` only when the proposal result has a candidate id and reports
     `pending=true`, `state=pending_pre_review`, and `scope=app`.
 
-  # Required Code Shape
-  ```python
-  import json
-
-  payload = json.loads(query)
-  marker = payload["marker"]
-  history_counts = {
-      term: data["result_count"]
-      for term, data in payload["history"]["searches"].items()
-  }
-  content = f"Multi-agent self-learning validation {marker}; history_counts={history_counts}"
-
-  add_raw = memory(
-      action="propose",
-      scope="app",
-      kind="fact",
-      memory_key=f"multi-agent-self-learning-{marker.lower()}",
-      text=content,
-  )
-  add_result = json.loads(add_raw)
-  added_id = add_result.get("candidate_id")
-  pending = add_result.get("pending") is True
-  pending_state = add_result.get("state") == "pending_pre_review"
-  application_scoped = add_result.get("scope") == "app"
-
-  result = {
-      "worker": "memory_reviewer",
-      "marker": marker,
-      "memory_id": added_id,
-      "proposal": pending,
-      "pending_state": pending_state,
-      "application_scoped": application_scoped,
-      "ok": bool(add_result.get("ok")) and bool(added_id) and pending and pending_state and application_scoped,
-  }
-  final_answer(json.dumps(result, ensure_ascii=False))
-  ```
-
-execution_env:
-  type: "local"
-  executor_kwargs:
-    timeout_seconds: 1200
+  # Required Structured Call Flow
+  1. Parse `query` and preserve its marker and history counts.
+  2. Call `memory` once with `action=propose`, `scope=app`, `kind=fact`, a
+     marker-derived key, and evidence text containing the actual counts.
+  3. Parse the actual tool result. Return JSON through `final_answer` with
+     `ok=true` only when it has a candidate id, `pending=true`,
+     `state=pending_pre_review`, `scope=app`, and tool-level `ok=true`.

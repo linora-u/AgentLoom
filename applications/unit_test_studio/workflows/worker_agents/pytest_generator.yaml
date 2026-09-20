@@ -1,24 +1,22 @@
 name: "pytest_generator"
+agent_runtime: smolagents
 description: |
   Generate pytest content from scenarios and persist files to output_dir.
 
 model_type: "powerful"
-tool_call_type: "code_act"
 max_steps: 45
 
 workflow: |
-  # 0) CodeAct Execution Contract
-  - Every action MUST be emitted as a Python `<code>...</code>` block.
-  - Execute the Python code in section 4. Do not replace tool calls with inferred
-    outputs.
+  # 0) Structured Tool Execution Contract
+  - Invoke tools through native structured tool calls. Do not replace calls with
+    inferred outputs.
   - `todo_write` is progress bookkeeping only. It is not evidence that a tool
     ran and it must not be used instead of the required tool call.
   - Do not mark a workflow step completed until the corresponding tool call has
     returned successfully.
   - `generated_files` entries MUST come from `upsert_pytest_file(...)` return
     values. Never infer or synthesize generated file paths.
-  - Final output MUST be produced by `final_answer(...)` inside a `<code>` block.
-    Never return bare JSON, XML, markdown, or fenced code as the final response.
+  - Final output MUST be produced through the `final_answer` tool.
 
   # 1) Background & Role
   You are the **Pytest Generator Worker**.
@@ -49,42 +47,13 @@ workflow: |
   ```
 
   # 4) Step-by-Step Execution Details
-  ```python
-  import json
-
-  payload = json.loads(query)
-  generated_files = []
-
-  for item in payload["planned_items"]:
-      scenario_text = json.dumps(item["scenario"], ensure_ascii=False)
-      content = build_pytest_template(
-          module_path=item["module_path"],
-          function_name=item["function_name"],
-          scenario_markdown=scenario_text,
-          output_dir=payload["output_dir"],
-      )
-      result = json.loads(
-          upsert_pytest_file(
-              target_root=payload["target_root"],
-              module_path=item["module_path"],
-              function_name=item["function_name"],
-              test_content=content,
-              output_dir=payload["output_dir"],
-          )
-      )
-      generated_files.append(result["file_path"])
-
-  final_answer(
-      json.dumps(
-          {
-              "target_root": payload["target_root"],
-              "output_dir": payload["output_dir"],
-              "generated_files": generated_files,
-          },
-          ensure_ascii=False,
-      )
-  )
-  ```
+  1. Parse `query` as JSON.
+  2. For each planned item, call `build_pytest_template` with its exact fields
+     and serialized scenario.
+  3. Pass the actual template return to `upsert_pytest_file`; collect only the
+     `file_path` returned by that tool.
+  4. Call `final_answer` with JSON containing the original `target_root`,
+     `output_dir`, and the complete `generated_files` list.
 
   Runtime checks:
   - Every planned item should produce one `file_path`.
@@ -115,6 +84,3 @@ agent_function_schema:
       required: true
   output:
     description: JSON with target_root, output_dir, and generated_files list.
-
-execution_env:
-  type: "local"

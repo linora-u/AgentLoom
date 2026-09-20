@@ -11,7 +11,6 @@ from .model import (
     validate_goal_state,
 )
 from .provider import (
-    GoalBudgetLimitedError,
     GoalCompleteError,
     GoalStateProvider,
     bind_goal_state_provider,
@@ -27,7 +26,6 @@ __all__ = [
     "normalize_goal_config",
     "normalize_workflow_for_goal",
     "validate_goal_state",
-    "GoalBudgetLimitedError",
     "GoalCompleteError",
     "GoalStateProvider",
     "bind_goal_state_provider",

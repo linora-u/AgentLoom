@@ -2,8 +2,7 @@
 
 from __future__ import annotations
 
-from typing import Any
-
+from .levels import AgentLoomLogLevel
 from .logger_manager import (
     LazyLoggerAdapter,
     LoggerAdapter,
@@ -24,10 +23,11 @@ from .logger_manager import (
     set_global_logger,
     validate_logging_config,
 )
+from .rich_backend import RichLoggerBackend
 
 __all__ = [
     "AgentLoomLogLevel",
-    "EnhancedAgentLogger",
+    "RichLoggerBackend",
     "UnifiedLogger",
     "LazyLoggerAdapter",
     "LoggerAdapter",
@@ -47,16 +47,3 @@ __all__ = [
     "validate_logging_config",
     "get_active_log_file_path",
 ]
-
-
-def __getattr__(name: str) -> Any:
-    # AgentLoomLogLevel/EnhancedAgentLogger inherit upstream smolagents types.
-    # Keep them lazy so lightweight config/YAML validation (including the TUI
-    # chat sidecar) does not initialize the complete execution framework.
-    if name in {"AgentLoomLogLevel", "EnhancedAgentLogger"}:
-        from . import agent_logger
-
-        value = getattr(agent_logger, name)
-        globals()[name] = value
-        return value
-    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")

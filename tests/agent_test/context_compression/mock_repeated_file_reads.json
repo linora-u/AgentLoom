@@ -9,7 +9,8 @@
   },
   {
     "role": "tool-call",
-    "content": "{'name': 'python_interpreter', 'arguments': \"content = read_file('/workspace/src/app_config.py')\\nprint(content)\"}"
+    "content": "",
+    "tool_call": {"id": "read-1", "name": "read_file", "arguments": {"file_path": "/workspace/src/app_config.py"}}
   },
   {
     "role": "tool-response",
@@ -21,7 +22,8 @@
   },
   {
     "role": "tool-call",
-    "content": "{'name': 'python_interpreter', 'arguments': \"content = read_file('/workspace/src/app_config.py')\\nprint(content)\"}"
+    "content": "",
+    "tool_call": {"id": "read-2", "name": "read_file", "arguments": {"file_path": "/workspace/src/app_config.py"}}
   },
   {
     "role": "tool-response",
@@ -33,7 +35,8 @@
   },
   {
     "role": "tool-call",
-    "content": "{'name': 'python_interpreter', 'arguments': \"content = read_file('/workspace/src/app_config.py')\\nprint(content)\"}"
+    "content": "",
+    "tool_call": {"id": "read-3", "name": "read_file", "arguments": {"file_path": "/workspace/src/app_config.py"}}
   },
   {
     "role": "tool-response",
@@ -45,7 +48,8 @@
   },
   {
     "role": "tool-call",
-    "content": "{'name': 'python_interpreter', 'arguments': \"content = read_file('/workspace/src/app_config.py')\\nprint(content)\"}"
+    "content": "",
+    "tool_call": {"id": "read-4", "name": "read_file", "arguments": {"file_path": "/workspace/src/app_config.py"}}
   },
   {
     "role": "tool-response",

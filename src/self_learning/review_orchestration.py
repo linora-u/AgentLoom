@@ -12,6 +12,14 @@ from collections.abc import Callable, Mapping
 from pathlib import Path
 from typing import Any, Protocol
 
+from agentloom.adapters.litellm.litellm_retry import limit_provider_calls
+from agentloom.adapters.litellm.model_binding import (
+    ModelProfileOverlay,
+    resolve_litellm_model_turn_binding,
+)
+from agentloom.runtime.model_binding import ModelTurnBinding
+from agentloom.runtime.model_protocol import MessageItem, ModelTurnResult
+
 from .application_scope import safe_application_id
 from .paths import review_config, self_learning_root
 from .persistence.review_context import ReviewContextStore
@@ -44,36 +52,26 @@ class ReviewContextReader(Protocol):
     def collect_project(self) -> dict[str, Any]: ...
 
 
-def _resolve_review_model(model_type: str) -> Any:
-    from agentloom.adapters.smolagents.models.model_manager import (
-        ModelConfigBuilder,
-        ModelConfigOverlay,
-        get_model,
-    )
-
-    builder = ModelConfigBuilder().apply_overlay(
-        ModelConfigOverlay(
+def _resolve_review_model(model_type: str) -> ModelTurnBinding:
+    return resolve_litellm_model_turn_binding(
+        model_type,
+        profile_overlay=ModelProfileOverlay(
             num_retries=0,
             retry_delay=0.0,
             max_retry_delay=0.0,
         ),
-        source="self-learning review provider budget",
     )
-    return get_model(model_type, framework="smolagents", model_builder=builder)
 
 
-def _message_text(content: Any) -> str:
-    if isinstance(content, str):
-        return content
-    if isinstance(content, list):
-        parts: list[str] = []
-        for item in content:
-            if isinstance(item, Mapping) and item.get("type") == "text":
-                parts.append(str(item.get("text") or ""))
-            elif isinstance(item, str):
-                parts.append(item)
-        return "\n".join(parts)
-    return str(content or "")
+def _model_output_text(result: ModelTurnResult) -> str:
+    text: list[str] = []
+    for item in result.items:
+        if not isinstance(item, MessageItem) or item.role != "assistant":
+            raise ValueError(
+                "review model must return assistant text without Tool calls"
+            )
+        text.append(item.text)
+    return "".join(text).strip()
 
 
 def _normalize_scope(scope_type: str, scope_id: str) -> tuple[str, str]:
@@ -98,7 +96,7 @@ class ReviewOrchestrator:
         *,
         engine: Any,
         agent_config: dict[str, Any] | None = None,
-        model_resolver: Callable[[str], Any] | None = None,
+        model_resolver: Callable[[str], ModelTurnBinding] | None = None,
         render_artifacts: bool = True,
         context_store: ReviewContextReader | None = None,
     ) -> None:
@@ -344,7 +342,7 @@ class ReviewOrchestrator:
         policy: Mapping[str, Any],
         collected: Mapping[str, Any],
     ) -> tuple[CandidateInput, ...]:
-        text = _message_text(getattr(model_output, "content", model_output)).strip()
+        text = _model_output_text(model_output)
         try:
             decoded = json.loads(text)
         except (TypeError, ValueError, json.JSONDecodeError) as exc:
@@ -418,15 +416,14 @@ class ReviewOrchestrator:
             collected,
         )
 
-        from smolagents.models import ChatMessage, MessageRole
-
         model = self._model_resolver(model_type)
-        response = model.generate(
-            [
-                ChatMessage(role=MessageRole.SYSTEM, content=_SYSTEM_PROMPT),
-                ChatMessage(role=MessageRole.USER, content=bounded_context),
-            ]
-        )
+        with limit_provider_calls(1):
+            response = model.turn(
+                items=(
+                    MessageItem(role="system", text=_SYSTEM_PROMPT),
+                    MessageItem(role="user", text=bounded_context),
+                )
+            )
         candidates = self._extract_candidates(
             response,
             policy=policy,

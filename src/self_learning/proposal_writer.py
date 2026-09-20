@@ -115,6 +115,13 @@ class ProposalWriter:
             field="skill proposal target",
             allow_empty=True,
         )
+        if action == "create" and not content.strip():
+            raise ValueError("create requires non-empty SKILL.md content")
+        if action == "write_file":
+            if not safe_path:
+                raise ValueError("write_file requires a relative path")
+            if not content.strip():
+                raise ValueError("write_file requires non-empty content")
 
         proposal_path = self._latest_for_name(safe_name) if action in {"write_file", "remove_file"} else None
         if proposal_path is None:
@@ -137,9 +144,8 @@ class ProposalWriter:
         }
 
         if action == "create":
-            skill_body = content.strip() or f"# {safe_name}\n\nDescribe when to use this skill and the procedure here.\n"
             (proposal_path / "SKILL.md").write_text(
-                sanitize_text_fragment(skill_body).rstrip() + "\n",
+                sanitize_text_fragment(content.strip()).rstrip() + "\n",
                 encoding="utf-8",
             )
         elif action in {"patch", "edit", "archive"}:

@@ -8,8 +8,6 @@ import re
 from typing import Any
 
 from agentloom.runtime.logging import get_logger
-from agentloom.adapters.smolagents.models.tool_call_parser import parse_json_with_repair
-
 _LOG = get_logger(__name__)
 
 _RE_INTEGER = re.compile(r"^-?(?:0|[1-9]\d*)$")
@@ -55,9 +53,9 @@ def _coerce_scalar(value: Any, expected_type: str) -> Any:
 
     if expected_type in ("array", "object"):
         try:
-            parsed = parse_json_with_repair(stripped)
+            parsed = json.loads(stripped)
             if isinstance(parsed, str):
-                parsed = parse_json_with_repair(parsed)
+                parsed = json.loads(parsed)
         except (json.JSONDecodeError, ValueError):
             return value
         if expected_type == "array" and isinstance(parsed, list):

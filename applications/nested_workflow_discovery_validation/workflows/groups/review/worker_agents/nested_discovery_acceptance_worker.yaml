@@ -1,7 +1,7 @@
 name: "nested_discovery_acceptance_worker"
+agent_runtime: smolagents
 description: "Return a fixed token for nested discovery functional acceptance."
 model_type: "powerful"
-tool_call_type: "tool_call"
 max_steps: 3
 
 workflow: |

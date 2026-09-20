@@ -1,8 +1,8 @@
 name: "test_shell_stall_detection"
+agent_runtime: smolagents
 description: "Validate foreground stall detection: interactive prompts are automatically detected and killed, normal commands unaffected"
 
 model_type: "powerful"
-tool_call_type: "code_act"
 
 workflow: |
   # Shell Stall Detection Validation Workflow
@@ -48,6 +48,3 @@ tools:
 
 worker_agents: []
 max_steps: 20
-
-execution_env:
-  type: "local"

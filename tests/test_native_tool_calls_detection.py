@@ -1,20 +1,42 @@
-"""Tests for strict native tool-call transport behavior."""
+"""Strict native tool-call configuration and bridge state."""
 
 import pytest
-
-from agentloom.configuration.llm_config import LLMConfig, LlmModelTypeSettings
-from agentloom.adapters.smolagents.models.litellm_model import LiteLLMModelV2
+from agentloom.adapters.smolagents.model_turn_bridge import SmolagentsModelTurnBridge
 from agentloom.adapters.smolagents.models.model_types import ModelConfig
+from agentloom.configuration.llm_config import LLMConfig, LlmModelTypeSettings
+from agentloom.runtime.model_binding import ModelTurnBinding
+from agentloom.runtime.model_protocol import ModelTurnRequest, ModelTurnResult
 
 
-def test_model_config_has_no_native_tool_call_detection_field():
-    config = ModelConfig()
+class _EmptyAdapter:
+    adapter_id = "openai_chat"
 
-    assert not hasattr(config, "supports_native_tool_calls")
+    def turn(self, request: ModelTurnRequest) -> ModelTurnResult:
+        return ModelTurnResult()
 
 
-def test_litellm_model_has_no_native_tool_call_detection_state():
-    model = LiteLLMModelV2(model_id="test/model")
+def _binding() -> ModelTurnBinding:
+    return ModelTurnBinding(
+        model_type="test",
+        model_id="test/model",
+        adapter=_EmptyAdapter(),
+    )
+
+
+def test_model_config_has_no_native_tool_call_detection_field() -> None:
+    assert not hasattr(
+        ModelConfig(adapter="openai_chat"),
+        "supports_native_tool_calls",
+    )
+
+
+def test_model_config_requires_explicit_adapter() -> None:
+    with pytest.raises(TypeError, match="adapter"):
+        ModelConfig()  # type: ignore[call-arg]
+
+
+def test_bridge_has_no_native_tool_call_detection_state() -> None:
+    model = SmolagentsModelTurnBridge(binding=_binding())
 
     assert not hasattr(model, "supports_native_tool_calls")
     assert not hasattr(model, "_native_tool_calls_detected")
@@ -22,52 +44,64 @@ def test_litellm_model_has_no_native_tool_call_detection_state():
     assert not hasattr(model, "update_native_tool_calls_detection")
 
 
-def test_litellm_model_rejects_removed_supports_native_tool_calls_constructor_arg():
+def test_bridge_rejects_removed_supports_native_tool_calls_constructor_arg() -> None:
     with pytest.raises(TypeError):
-        LiteLLMModelV2(model_id="test/model", supports_native_tool_calls="false")
+        SmolagentsModelTurnBridge(
+            binding=_binding(),
+            supports_native_tool_calls=False,
+        )
 
 
-def test_llm_model_type_settings_has_no_native_tool_call_detection_field():
-    settings = LlmModelTypeSettings(model="test/model")
-
+def test_llm_model_type_settings_has_no_native_tool_call_detection_field() -> None:
+    settings = LlmModelTypeSettings(model="test/model", adapter="openai_chat")
     assert not hasattr(settings, "supports_native_tool_calls")
 
 
-def test_llm_model_type_settings_rejects_removed_native_tool_call_detection_field():
+def test_llm_model_type_settings_rejects_removed_native_tool_call_detection_field() -> None:
     with pytest.raises(ValueError, match="supports_native_tool_calls"):
-        LlmModelTypeSettings(model="test/model", supports_native_tool_calls="false")
+        LlmModelTypeSettings(
+            model="test/model",
+            adapter="openai_chat",
+            supports_native_tool_calls="false",
+        )
 
 
-def test_llm_config_rejects_removed_supports_native_tool_calls_field():
-    raw = {
-        "model": {
-            "powerful": {
-                "model": "test/powerful",
-                "supports_native_tool_calls": "false",
-            },
-            "summary": {
-                "model": "test/summary",
-            },
-        },
-    }
-
+def test_llm_config_rejects_removed_supports_native_tool_calls_field() -> None:
     with pytest.raises(ValueError, match="supports_native_tool_calls"):
-        LLMConfig.from_dict(raw)
+        LLMConfig.from_dict(
+            {
+                "model": {
+                    "powerful": {
+                        "model": "test/powerful",
+                        "adapter": "openai_chat",
+                        "supports_native_tool_calls": "false",
+                    },
+                    "summary": {
+                        "model": "test/summary",
+                        "adapter": "openai_chat",
+                    },
+                }
+            }
+        )
 
 
-def test_llm_config_keeps_tool_choice_as_extra_completion_param():
-    raw = {
-        "model": {
-            "powerful": {
-                "model": "test/powerful",
-                "tool_choice": "auto",
-            },
-            "summary": {
-                "model": "test/summary",
-            },
-        },
+def test_llm_config_keeps_tool_choice_as_extra_completion_param() -> None:
+    config = LLMConfig.from_dict(
+        {
+            "model": {
+                "powerful": {
+                    "model": "test/powerful",
+                    "adapter": "openai_chat",
+                    "tool_choice": "auto",
+                },
+                "summary": {
+                    "model": "test/summary",
+                    "adapter": "openai_chat",
+                },
+            }
+        }
+    )
+
+    assert config.models["powerful"].extra_completion_params == {
+        "tool_choice": "auto"
     }
-
-    config = LLMConfig.from_dict(raw)
-
-    assert config.models["powerful"].extra_completion_params == {"tool_choice": "auto"}

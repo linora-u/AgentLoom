@@ -8,7 +8,6 @@ import threading
 import time
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
-from types import SimpleNamespace
 
 
 def _config(*, mode: str = "after_run") -> dict:
@@ -167,29 +166,41 @@ def test_review_prompt_is_candidate_only_and_forbids_all_write_tools() -> None:
 
 
 def test_review_model_resolution_disables_provider_retry(monkeypatch) -> None:
-    from agentloom.self_learning import reviewer
-    from agentloom.adapters.smolagents.models import model_manager
-    from agentloom.adapters.smolagents.models.model_types import ModelConfig
+    from agentloom.runtime.model_binding import ModelTurnBinding
+    from agentloom.runtime.model_protocol import ModelTurnResult
+    from agentloom.self_learning import review_orchestration, reviewer
 
     captured = {}
-    sentinel = object()
+    sentinel_adapter = type(
+        "Adapter",
+        (),
+        {
+            "adapter_id": "openai_chat",
+            "turn": lambda _self, _request: ModelTurnResult(),
+        },
+    )()
+    sentinel = ModelTurnBinding(
+        model_type="summary",
+        model_id="fake/summary",
+        adapter=sentinel_adapter,
+    )
 
-    def capture_model(model_type, *, framework, model_builder):
+    def capture_model(model_type, *, profile_overlay):
         captured["model_type"] = model_type
-        captured["framework"] = framework
-        captured["config"] = model_builder.build(
-            ModelConfig(num_retries=9, retry_delay=3.0, max_retry_delay=30.0)
-        )
+        captured["overlay"] = profile_overlay
         return sentinel
 
-    monkeypatch.setattr(model_manager, "get_model", capture_model)
+    monkeypatch.setattr(
+        review_orchestration,
+        "resolve_litellm_model_turn_binding",
+        capture_model,
+    )
 
     assert reviewer._resolve_review_model("summary") is sentinel
     assert captured["model_type"] == "summary"
-    assert captured["framework"] == "smolagents"
-    assert captured["config"].num_retries == 0
-    assert captured["config"].retry_delay == 0.0
-    assert captured["config"].max_retry_delay == 0.0
+    assert captured["overlay"].num_retries == 0
+    assert captured["overlay"].retry_delay == 0.0
+    assert captured["overlay"].max_retry_delay == 0.0
 
 
 def test_failed_or_incomplete_root_never_resolves_a_review_model(
@@ -219,27 +230,49 @@ def test_concurrent_review_of_one_root_calls_model_exactly_once(
     tmp_path: Path,
     monkeypatch,
 ) -> None:
+    from agentloom.runtime.model_binding import ModelTurnBinding
+    from agentloom.runtime.model_protocol import (
+        MessageItem,
+        ModelTurnRequest,
+        ModelTurnResult,
+    )
     from agentloom.self_learning import reviewer
 
     db_path = tmp_path / "self_learning.db"
     _record_completed_run(db_path, "concurrent-root")
 
     class _Model:
-        model_id = "fake/summary"
+        adapter_id = "openai_chat"
 
         def __init__(self) -> None:
             self.calls = 0
             self.lock = threading.Lock()
 
-        def generate(self, _messages, **kwargs):
-            assert kwargs == {}
+        def turn(self, request: ModelTurnRequest) -> ModelTurnResult:
+            assert request.tools == ()
             with self.lock:
                 self.calls += 1
             time.sleep(0.02)
-            return SimpleNamespace(content='{"candidates":[]}')
+            return ModelTurnResult(
+                items=(
+                    MessageItem(
+                        role="assistant",
+                        text='{"candidates":[]}',
+                    ),
+                )
+            )
 
     model = _Model()
-    monkeypatch.setattr(reviewer, "_resolve_review_model", lambda _name: model)
+    binding = ModelTurnBinding(
+        model_type="summary",
+        model_id="fake/summary",
+        adapter=model,
+    )
+    monkeypatch.setattr(
+        reviewer,
+        "_resolve_review_model",
+        lambda _name: binding,
+    )
 
     def review_once(_index: int) -> dict:
         return reviewer.review_finished_run(
@@ -261,6 +294,8 @@ def test_provider_error_content_is_never_logged(
     monkeypatch,
     caplog,
 ) -> None:
+    from agentloom.runtime.model_binding import ModelTurnBinding
+    from agentloom.runtime.model_protocol import ModelTurnRequest, ModelTurnResult
     from agentloom.self_learning import reviewer
 
     db_path = tmp_path / "self_learning.db"
@@ -268,15 +303,20 @@ def test_provider_error_content_is_never_logged(
     secret = "password=provider-secret-value"
 
     class _FailingModel:
-        model_id = "fake/failing"
+        adapter_id = "openai_chat"
 
-        def generate(self, _messages):
+        def turn(self, _request: ModelTurnRequest) -> ModelTurnResult:
             raise RuntimeError(secret)
 
+    binding = ModelTurnBinding(
+        model_type="summary",
+        model_id="fake/failing",
+        adapter=_FailingModel(),
+    )
     monkeypatch.setattr(
         reviewer,
         "_resolve_review_model",
-        lambda _name: _FailingModel(),
+        lambda _name: binding,
     )
     caplog.set_level("WARNING")
 

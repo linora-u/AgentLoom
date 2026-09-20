@@ -1,7 +1,7 @@
 name: "browser_harness_probe"
+agent_runtime: smolagents
 description: "Run browser-harness doctor, then verify both isolated Chrome and real Chrome demo probes."
 model_type: "powerful"
-tool_call_type: "tool_call"
 max_steps: 8
 toolsets: []
 skills: []
@@ -33,9 +33,6 @@ tools:
     description: "Run custom Python code through browser-harness. Use only when the user asks for a custom browser script."
 
 worker_agents: []
-
-execution_env:
-  type: "local"
 
 workflow: |
   # Browser Harness Probe

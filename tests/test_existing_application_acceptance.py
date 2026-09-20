@@ -1,16 +1,17 @@
 """Negative controls for the independent real-Application evidence verifier."""
 import importlib.util
 import json
-import sqlite3
 from pathlib import Path
 
 import pytest
+import yaml
 
 SPEC = importlib.util.spec_from_file_location(
     "existing_acceptance", Path(__file__).parent / "acceptance/existing_application_validation.py"
 )
 validation = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(validation)
+ROOT = Path(__file__).resolve().parents[1]
 
 
 def write_json(path, value):
@@ -18,10 +19,60 @@ def write_json(path, value):
     path.write_text(json.dumps(value))
 
 
-def test_model_claim_and_model_code_are_not_tool_execution_evidence(tmp_path):
+def test_core_validation_pins_search_root_outside_model_control():
+    workflow_path = (
+        ROOT
+        / "applications/tool_registry_core_validation/workflows/core_tools_agent.yaml"
+    )
+    config = yaml.safe_load(workflow_path.read_text(encoding="utf-8"))
+    workflow = config["workflow"]
+    root = "/tmp/agentloom_tool_registry_core_validation"
+
+    configured = {
+        tool["name"]: tool["fixed_args"]
+        for tool in config["tools"]
+    }
+    assert configured == {
+        "glob_search": {"path": root},
+        "grep_search": {"path": root},
+    }
+    assert 'glob_search(pattern="*.txt")' in workflow
+    assert 'grep_search(pattern="GAMMA")' in workflow
+    assert (
+        f'list_directory(directory_path="{root}")'
+        in workflow
+    )
+    assert (
+        f'read_file(file_path="{root}/result.txt")'
+        in workflow
+    )
+
+
+def smolagents_checkpoint(
+    steps,
+    *,
+    step_count=3,
+    adapter_id="openai_chat",
+):
+    return {
+        "step_count": step_count,
+        "runtime_checkpoint": {
+            "runtime_id": "smolagents",
+            "runtime_version": "test",
+            "state_schema_version": 2,
+            "audit_metadata": {"model_adapter_id": adapter_id},
+            "payload": {
+                "step_count": step_count,
+                "memory_steps": steps,
+                "canonical_model_items": [],
+            },
+        },
+    }
+
+
+def test_model_claim_is_not_tool_execution_evidence(tmp_path):
     write_json(tmp_path / "checkpoint.json", {
         "output": "write_file completed",
-        "code_action": "write_file(file_path='result.txt', content='ok')",
     })
     with pytest.raises(AssertionError, match="tool completion evidence"):
         validation.assert_tools(tmp_path, {"write_file"})
@@ -33,15 +84,24 @@ def test_model_claim_and_model_code_are_not_tool_execution_evidence(tmp_path):
         validation.assert_tools(tmp_path, {"write_file"})
 
 
-def test_codeact_accepts_only_durable_successful_tool_results(tmp_path):
-    with sqlite3.connect(tmp_path / "self_learning.db") as connection:
-        connection.execute("CREATE TABLE events (event_id, tool_name, status, input_json, output_json, root_run_id, run_id, event_type)")
-        connection.execute("INSERT INTO events VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
-                           ("evt", "write_file", "completed", "{}", '{"result":"written"}', "root", "local", "tool_result"))
+def test_tool_evidence_accepts_only_durable_successful_tool_results(tmp_path):
+    write_json(tmp_path / "checkpoint.json", {
+        "tool_results": [{
+            "call_id": "evt",
+            "tool_name": "write_file",
+            "status": "completed",
+            "input": {},
+            "output": {"result": "written"},
+        }],
+    })
     evidence = validation.assert_tools(tmp_path, {"write_file"})
-    assert evidence[0]["root_run_id"] == "root"
-    assert evidence[0]["run_id"] == "local"
-    assert evidence[0]["evidence_source"] == "session_recorder"
+    assert evidence == [{
+        "call_id": "evt",
+        "tool_name": "write_file",
+        "status": "completed",
+        "input": {},
+        "output": {"result": "written"},
+    }]
 
 
 def test_worker_manifest_copy_does_not_double_count_calls(tmp_path):
@@ -110,7 +170,6 @@ def checkpoint_helper():
 
 
 def test_completed_probe_uses_the_published_query_without_a_second_text_source(tmp_path, checkpoint_helper):
-    import ast
     import yaml
 
     helper = checkpoint_helper
@@ -125,18 +184,16 @@ def test_completed_probe_uses_the_published_query_without_a_second_text_source(t
     helper.SESSION_ROOT = tmp_path / "evidence"
     helper._configure_completed_worker_probe()
     configured = yaml.safe_load(copied.read_text())["workflow"]
-    call_line = next(line for line in configured.splitlines() if line.startswith("worker_result ="))
-    call = ast.parse(call_line).body[0].value
-    assert ast.literal_eval(call.keywords[0].value) == expected
-    assert "record_checkpoint_worker_output(" in configured
+    assert helper._canonical_worker_query(configured) == expected
+    assert "`record_checkpoint_worker_output`" in configured
+    assert "Do not call the Worker again" in configured
 
 
 @pytest.mark.parametrize("body", [
     "Call the Worker with a report query.",
-    "```python\nworker_result = artifact_worker(query='one')\nworker_result = artifact_worker(query='two')\n```",
-    "```python\nworker_result = artifact_worker(query=query)\n```",
-    "```python\nworker_result = artifact_worker(query='prefix' + query)\n```",
-    "```python\nworker_result = artifact_worker(query='one')\n```\n```python\nworker_result = artifact_worker(query='two')\n```",
+    "Call `artifact_worker` through its native structured tool schema.\n  `one`\n  `two`",
+    "Call `artifact_worker` with query assembled from earlier text.",
+    "  `one`",
 ])
 def test_completed_probe_rejects_missing_multiple_or_dynamic_queries(checkpoint_helper, body):
     with pytest.raises(ValueError):
@@ -146,6 +203,184 @@ def test_completed_probe_rejects_missing_multiple_or_dynamic_queries(checkpoint_
 def test_completed_probe_rejects_missing_phase_boundary(checkpoint_helper):
     with pytest.raises(ValueError, match="unique Phase 2"):
         checkpoint_helper._canonical_worker_query("No canonical phase boundaries.")
+
+
+def test_checkpoint_verifier_requires_smolagents_runtime_envelope(checkpoint_helper):
+    step = committed_action("final_answer", {"answer": "done"})
+    step["is_final_answer"] = True
+    step["tool_results"] = [
+        {
+            "call_id": "call_1",
+            "tool_name": "final_answer",
+            "status": "completed",
+            "output": "done",
+        }
+    ]
+
+    with pytest.raises(AssertionError, match="runtime checkpoint envelope"):
+        checkpoint_helper._worker_final_output({"memory_steps": [step]})
+
+    wrong_runtime = smolagents_checkpoint([step])
+    wrong_runtime["runtime_checkpoint"]["runtime_id"] = "langgraph"
+    with pytest.raises(AssertionError, match="runtime is not smolagents"):
+        checkpoint_helper._worker_final_output(wrong_runtime)
+
+    schema_one = smolagents_checkpoint([step])
+    schema_one["runtime_checkpoint"]["state_schema_version"] = 1
+    with pytest.raises(AssertionError, match="state schema"):
+        checkpoint_helper._worker_final_output(schema_one)
+
+    missing_canonical = smolagents_checkpoint([step])
+    del missing_canonical["runtime_checkpoint"]["payload"]["canonical_model_items"]
+    with pytest.raises(AssertionError, match="canonical_model_items"):
+        checkpoint_helper._worker_final_output(missing_canonical)
+
+    missing_adapter = smolagents_checkpoint([step])
+    del missing_adapter["runtime_checkpoint"]["audit_metadata"]["model_adapter_id"]
+    with pytest.raises(AssertionError, match="model_adapter_id"):
+        checkpoint_helper._worker_final_output(missing_adapter)
+
+    assert checkpoint_helper._worker_final_output(
+        smolagents_checkpoint([step])
+    ) == "done"
+
+    step["tool_results"][0]["call_id"] = "wrong-call"
+    with pytest.raises(AssertionError, match="correlated final_answer"):
+        checkpoint_helper._worker_final_output(
+            smolagents_checkpoint([step])
+        )
+
+
+def test_checkpoint_resume_gate_requires_same_revision_and_runtime_contract(
+    tmp_path,
+    checkpoint_helper,
+    monkeypatch,
+):
+    helper = checkpoint_helper
+    task_dir = tmp_path / "task"
+    write_json(
+        task_dir / "checkpoint.json",
+        smolagents_checkpoint([]),
+    )
+    state = {
+        "source_revision": "same-revision",
+        "runtime_contract": {
+            "runtime_id": "smolagents",
+            "runtime_version": "test",
+            "state_schema_version": 2,
+            "model_adapter_id": "openai_chat",
+        },
+        "task_dir": str(task_dir),
+    }
+    monkeypatch.setattr(helper, "_source_revision", lambda: "same-revision")
+    monkeypatch.setattr(
+        helper,
+        "_current_runtime_contract",
+        lambda: dict(state["runtime_contract"]),
+    )
+
+    helper._require_same_runtime_contract(state)
+
+    state["source_revision"] = "different-revision"
+    with pytest.raises(ValueError, match="same source revision"):
+        helper._require_same_runtime_contract(state)
+
+    state["source_revision"] = "same-revision"
+    state["runtime_contract"] = {
+        **state["runtime_contract"],
+        "runtime_version": "different-version",
+    }
+    with pytest.raises(ValueError, match="runtime contract"):
+        helper._require_same_runtime_contract(state)
+
+
+def test_checkpoint_verifier_decodes_only_completed_worker_handoff_envelopes(
+    checkpoint_helper,
+):
+    assert checkpoint_helper._worker_handoff_output(
+        '{"ok":true,"status":"completed","output":"done"}'
+    ) == "done"
+
+    assert checkpoint_helper._worker_handoff_output("done") == "done"
+    with pytest.raises(AssertionError, match="output is empty"):
+        checkpoint_helper._worker_handoff_output("")
+    with pytest.raises(AssertionError, match="not a completed"):
+        checkpoint_helper._worker_handoff_output(
+            '{"ok":false,"status":"error","error":{"message":"failed"}}'
+        )
+    with pytest.raises(AssertionError, match="not a completed"):
+        checkpoint_helper._worker_handoff_output(
+            '{"ok":true,"status":"completed","output":{"value":"done"}}'
+        )
+
+
+def test_checkpoint_verifier_normalizes_plain_and_enveloped_worker_handoffs(
+    checkpoint_helper,
+):
+    plain = "worker result\nwith exact content"
+    enveloped = json.dumps(
+        {
+            "ok": True,
+            "status": "completed",
+            "output": plain,
+        },
+        separators=(",", ":"),
+    )
+
+    assert checkpoint_helper._worker_handoff_output(plain) == (
+        checkpoint_helper._worker_handoff_output(enveloped)
+    )
+
+
+@pytest.mark.parametrize(
+    ("scenario", "statuses", "resume_claims"),
+    [
+        ("main", ["completed"], 0),
+        ("completed", ["completed"], 0),
+        ("worker", ["interrupted", "completed"], 1),
+    ],
+)
+def test_checkpoint_verifier_uses_scenario_specific_worker_resume_events(
+    tmp_path,
+    checkpoint_helper,
+    scenario,
+    statuses,
+    resume_claims,
+):
+    events = tmp_path / "task_events.jsonl"
+    records = [
+        {"type": "worker_call_started"},
+        *[
+            {"type": "worker_call_finished", "status": status}
+            for status in statuses
+        ],
+        *[
+            {"type": "worker_call_resume_claimed"}
+            for _ in range(resume_claims)
+        ],
+    ]
+    events.write_text(
+        "".join(json.dumps(record) + "\n" for record in records)
+    )
+    counts = {
+        "worker_call_started": 1,
+        "worker_call_finished": len(statuses),
+        "worker_call_resume_claimed": resume_claims,
+    }
+
+    checkpoint_helper._assert_worker_resume_events(
+        tmp_path,
+        counts,
+        scenario=scenario,
+    )
+
+    counts["worker_call_finished"] += 1
+    with pytest.raises(AssertionError, match="duplicated or left unfinished"):
+        checkpoint_helper._assert_worker_resume_events(
+            tmp_path,
+            counts,
+            scenario=scenario,
+        )
 
 
 @pytest.fixture
@@ -173,11 +408,18 @@ def main_checkpoint_gate(tmp_path, monkeypatch):
     return checkpoint, task_dir, wait
 
 
-def committed_action(code, observations="Execution logs: setup completed"):
+def committed_action(
+    tool_name,
+    arguments,
+    observations="Execution logs: setup completed",
+):
     return {
         "_step_type": "ActionStep", "step_number": 1,
-        "code_action": code,
-        "tool_calls": [{"id": "call_1", "type": "function", "function": {"name": "python_interpreter", "arguments": code}}],
+        "tool_calls": [{
+            "id": "call_1",
+            "type": "function",
+            "function": {"name": tool_name, "arguments": arguments},
+        }],
         "observations": observations, "error": None,
         "timing": {"start_time": 1, "end_time": 2, "duration": 1},
     }
@@ -201,7 +443,7 @@ def write_supervisor_setup(checkpoint):
     command = workflow.split("Use shell_tool once to run this exact command:\n", 1)[1].split("\n\n", 1)[0].strip()
     command = command.replace("/tmp/agentloom_ckpt_complex", str(checkpoint.WORK_DIR))
     command = command.replace("/tmp/agentloom_ckpt_side_effects.log", str(checkpoint.SIDE_EFFECT_LOG))
-    return committed_action(f"shell_tool(command={command!r})")
+    return committed_action("shell_tool", {"command": command})
 
 
 @pytest.mark.parametrize("setup_on_disk", [False, True], ids=["early-todo", "setup-not-checkpointed"])
@@ -209,8 +451,12 @@ def test_main_interrupt_waits_for_setup_action_commit(main_checkpoint_gate, setu
     checkpoint, task_dir, wait = main_checkpoint_gate
     if setup_on_disk:
         write_supervisor_setup(checkpoint)
-    todo = committed_action("todo_write([{'content': 'supervisor_setup', 'status': 'in_progress'}])", "Todo saved")
-    write_json(task_dir / "checkpoint.json", {"step_count": 3, "memory_steps": [todo]})
+    todo = committed_action(
+        "todo_write",
+        {"items": [{"content": "supervisor_setup", "status": "in_progress"}]},
+        "Todo saved",
+    )
+    write_json(task_dir / "checkpoint.json", smolagents_checkpoint([todo]))
     with pytest.raises(TimeoutError, match="main interrupt point"):
         wait()
 
@@ -218,7 +464,7 @@ def test_main_interrupt_waits_for_setup_action_commit(main_checkpoint_gate, setu
 def test_main_interrupt_accepts_committed_setup_before_worker(main_checkpoint_gate):
     checkpoint, task_dir, wait = main_checkpoint_gate
     setup = write_supervisor_setup(checkpoint)
-    write_json(task_dir / "checkpoint.json", {"step_count": 3, "memory_steps": [setup]})
+    write_json(task_dir / "checkpoint.json", smolagents_checkpoint([setup]))
     assert wait() == task_dir
 
 
@@ -226,15 +472,18 @@ def test_main_interrupt_observes_files_then_waits_for_checkpoint_commit(main_che
     from types import SimpleNamespace
 
     checkpoint, task_dir, _ = main_checkpoint_gate
-    todo = committed_action("todo_write([])", "Todo saved")
-    write_json(task_dir / "checkpoint.json", {"step_count": 3, "memory_steps": [todo]})
+    todo = committed_action("todo_write", {"items": []}, "Todo saved")
+    write_json(task_dir / "checkpoint.json", smolagents_checkpoint([todo]))
     states = []
 
     def advance(_):
         if not states:
             states.append(write_supervisor_setup(checkpoint))
         elif len(states) == 1:
-            write_json(task_dir / "checkpoint.json", {"step_count": 4, "memory_steps": [todo, states[0]]})
+            write_json(
+                task_dir / "checkpoint.json",
+                smolagents_checkpoint([todo, states[0]], step_count=4),
+            )
             states.append("committed")
         else:
             pytest.fail("committed setup was not accepted")
@@ -251,7 +500,7 @@ def test_main_prepare_rechecks_worker_race_before_seeding_probes(main_checkpoint
 
     checkpoint, task_dir, _ = main_checkpoint_gate
     setup = write_supervisor_setup(checkpoint)
-    write_json(task_dir / "checkpoint.json", {"step_count": 3, "memory_steps": [setup]})
+    write_json(task_dir / "checkpoint.json", smolagents_checkpoint([setup]))
     write_json(task_dir / "task_tree.json", {"status": "interrupted"})
     events = task_dir / "task_events.jsonl"
     events.write_text(json.dumps({"type": "run_started"}) + "\n")
@@ -294,6 +543,6 @@ def test_main_interrupt_rejects_incomplete_or_late_setup(main_checkpoint_gate, d
         (checkpoint.WORK_DIR / "supervisor_manifest.txt").write_text("manifest_status=ready\n")
     elif defect == "duplicate-setup":
         checkpoint.SIDE_EFFECT_LOG.write_text("supervisor_setup\nsupervisor_setup\n")
-    write_json(task_dir / "checkpoint.json", {"step_count": 3, "memory_steps": [setup]})
+    write_json(task_dir / "checkpoint.json", smolagents_checkpoint([setup]))
     with pytest.raises(TimeoutError, match="main interrupt point"):
         wait()

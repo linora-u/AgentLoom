@@ -6,6 +6,8 @@ from types import SimpleNamespace
 import click
 import httpx
 import pytest
+from agentloom.__main__ import main
+from agentloom.adapters.litellm.litellm_retry import ProviderCallBudgetExceeded
 from click.testing import CliRunner
 from litellm.exceptions import (
     APIConnectionError,
@@ -23,10 +25,6 @@ from smolagents import (
     AgentMaxStepsError,
     AgentParsingError,
 )
-
-from agentloom.__main__ import main
-from agentloom.adapters.smolagents.models.litellm_retry import ProviderCallBudgetExceeded
-from agentloom.adapters.smolagents.models.tool_call_parser import ToolCallParseError
 
 
 def _wrapped_generation_failure(provider_error: Exception) -> RuntimeError:
@@ -148,7 +146,6 @@ def test_run_uses_tempfail_for_nested_transient_litellm_errors(
             )
         ),
         lambda: ProviderCallBudgetExceeded("provider call budget exhausted"),
-        lambda: ToolCallParseError("invalid tool call"),
         lambda: TimeoutError("raw timeout"),
         lambda: ConnectionError("raw connection error"),
         lambda: click.UsageError("invalid CLI usage"),
@@ -162,7 +159,6 @@ def test_run_uses_tempfail_for_nested_transient_litellm_errors(
         "permission",
         "bad-request",
         "provider-budget",
-        "tool-call-parse",
         "raw-timeout",
         "raw-connection",
         "click-usage",
@@ -184,9 +180,8 @@ def test_run_keeps_semantic_and_non_transient_failures_at_exit_one(
     [
         AgentParsingError("semantic parse failure", AgentLogger()),
         ProviderCallBudgetExceeded("provider call budget exhausted"),
-        ToolCallParseError("invalid tool call"),
     ],
-    ids=["agent-parse", "provider-budget", "tool-call-parse"],
+    ids=["agent-parse", "provider-budget"],
 )
 def test_denied_error_wins_over_transient_error_in_same_chain(
     monkeypatch: pytest.MonkeyPatch,

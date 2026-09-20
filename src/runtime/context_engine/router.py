@@ -7,7 +7,6 @@ import re
 
 from .models import ContentKind
 
-
 _LOG_HINTS = re.compile(
     r"(traceback|exception|error:|failed|failure|warning:|\bpytest\b|\bnpm ERR!\b|\bpanic:)",
     flags=re.IGNORECASE,
@@ -26,7 +25,7 @@ def route_content(text: str, tool_name: str = "default") -> ContentKind:
 
     if re.search(r"(^|[_-])(log|logs|test|tests|build|pytest)([_-]|$)", name):
         return ContentKind.LOG
-    if name in {"shell_tool", "python_interpreter"}:
+    if name == "shell_tool":
         return ContentKind.LOG if _LOG_HINTS.search(stripped) else ContentKind.TEXT
 
     catalog_kind = _catalog_content_kind(name)

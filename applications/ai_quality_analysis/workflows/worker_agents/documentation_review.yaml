@@ -1,6 +1,6 @@
 name: "documentation_review"
+agent_runtime: smolagents
 description: "Evaluates documentation quality: function/class docs, README completeness, API documentation, and inline comments."
-tool_call_type: "code_act"
 model_type: "powerful"
 toolsets:
   - "core_shell"

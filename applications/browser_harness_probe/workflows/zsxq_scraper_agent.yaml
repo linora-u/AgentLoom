@@ -1,7 +1,7 @@
 name: "zsxq_owner_post_scraper"
+agent_runtime: smolagents
 description: "Scrape the group-owner posts from a zsxq.com group via the user's real Chrome and write them to CSV."
 model_type: "powerful"
-tool_call_type: "tool_call"
 max_steps: 6
 toolsets: []
 skills: []
@@ -25,9 +25,6 @@ tools:
     description: "Reuse the user's already-open Chrome tab on the zsxq group, scroll from newest until reaching posts before since_date, expand folded content, collect the group owner's posts, and write CSV with columns 时间/内容/超链接 to the project root."
 
 worker_agents: []
-
-execution_env:
-  type: "local"
 
 workflow: |
   # ZSXQ Owner Post Scraper
