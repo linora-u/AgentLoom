@@ -12,9 +12,13 @@ from agentloom.adapters.pi.protocol import (
     Handshake, HandshakeResult, ModelSelection, Run, RunResult,
     Prepare, Dispatch, PrepareResult, Settle, SettleResult, TerminalRecord,
     PlatformInvoke, PlatformResult, ModelPrepare, ModelPermit,
+    SessionCheckpoint, SessionCheckpointResult,
 )
+from agentloom.adapters.pi.checkpoint import PiCheckpointStore
+from agentloom.adapters.pi.recovery import reconcile
+from agentloom.runtime import get_current_run_context
 from agentloom.runtime.native_tool_host import NativeToolHost
-from agentloom.runtime.native_tools import NativeCommitAck
+from agentloom.runtime.native_tools import NativeCallIdentity, NativeCommitAck
 from agentloom.runtime.tool_protocol import ToolCallRecord
 from agentloom.adapters.pi.transport import PiTransport
 from agentloom.runtime.agent_runtime import (
@@ -50,6 +54,7 @@ class PiRuntime:
                for tool in definition.tool_manifest):
             raise AgentRuntimeError("Unsupported Pi tool selection", category="unsupported_capability")
         self.definition = definition
+        self._checkpoint = None
         self.transport = PiTransport(definition.instance_id or uuid4().hex)
         try:
             response = self.transport.request(Handshake(method="handshake", native_tool_contract=1), timeout=15)
@@ -64,12 +69,12 @@ class PiRuntime:
                           instance_id=self.transport.instance_id)
 
     def snapshot(self):
-        raise AgentRuntimeError("Pi checkpoint/resume is not enabled", category="unsupported_capability")
+        return self._checkpoint
 
     def run(self, request: AgentRuntimeRequest) -> AgentRuntimeResult:
         missing = request.requirements.unsupported_by(self.capabilities)
-        if missing or request.checkpoint is not None or request.checkpoint_sink is not None:
-            raise AgentRuntimeError("Unsupported Pi request capabilities: " + ", ".join(missing or ("checkpoint",)),
+        if missing:
+            raise AgentRuntimeError("Unsupported Pi request capabilities: " + ", ".join(missing),
                                     category="unsupported_capability")
         events = []
         usage = RuntimeUsage()
@@ -113,6 +118,7 @@ class PiRuntime:
         platform_calls = set()
         platform_lock = Lock()
         emitted_commits = set()
+        store = None
 
         def record_tool(record, entry, identity):
             emit("tool", {"record": record.to_dict(), "owner": entry.owner, "provider": entry.provider,
@@ -126,6 +132,12 @@ class PiRuntime:
                 close_instance_resources(self.transport.instance_id)
 
         def callback(payload):
+            if isinstance(payload, SessionCheckpoint):
+                if store is None:
+                    raise AgentRuntimeError("Pi checkpoint was not requested", category="internal")
+                self._checkpoint = store.save(payload.sha256)
+                emit("checkpoint", {"progress": self._checkpoint.progress})
+                return SessionCheckpointResult(method="session_checkpoint", checkpoint=self._checkpoint)
             if isinstance(payload, ModelPrepare):
                 identity = payload.identity
                 with platform_lock:
@@ -156,8 +168,12 @@ class PiRuntime:
                             or payload.tool_name not in platform_entries or identity.call_id in platform_calls):
                         raise AgentRuntimeError("Invalid Pi platform callback identity or selection", category="internal")
                     platform_calls.add(identity.call_id)
+                if store is not None:
+                    store.start_platform(identity, payload.tool_name, payload.arguments)
                 record = definition.tool_gateway.invoke(call_id=identity.call_id, tool_name=payload.tool_name,
                                                         arguments=payload.arguments)
+                if store is not None:
+                    store.commit_platform(identity, record)
                 record_tool(record, platform_entries[payload.tool_name], identity)
                 return PlatformResult(method="platform_invoke", record=_terminal(record))
             if native is not None and isinstance(payload, Prepare):
@@ -198,6 +214,21 @@ class PiRuntime:
             raise AgentRuntimeError("Unexpected Pi tool callback", category="internal")
 
         try:
+            if request.checkpoint_sink is not None or request.checkpoint is not None or request.requirements.checkpoint_resume:
+                runtime_context = get_current_run_context(required=True)
+                assert runtime_context is not None
+                store = PiCheckpointStore(runtime_context, definition, self.transport.private_directory,
+                                          self.transport.instance_id, request.checkpoint_sink or (lambda _: None))
+                if request.checkpoint is not None:
+                    try:
+                        plan = reconcile(store, store.load(request.checkpoint))
+                        if native is not None:
+                            for call in plan["bundle"]["calls"]:
+                                if call["owner"] == "runtime":
+                                    native.restore_observation(NativeCallIdentity(**call["identity"]))
+                        store.private.atomic_write_json("restore.json", plan)
+                    except (ValueError, TypeError, KeyError, AttributeError, OSError) as exc:
+                        raise AgentRuntimeError("Pi checkpoint cannot be safely restored", category="configuration") from exc
             attempt = 0
             stop_blocks = 0
             while True:
@@ -211,7 +242,8 @@ class PiRuntime:
                         model_id=selection.model_id, protocol=selection.protocol, settings=dict(selection.settings),
                         request_headers=dict(selection.request_headers)), tools=wire_tools, serial_tools=serial_tools, runtime_options=dict(definition.runtime_options),
                     continue_session=request.continue_session or attempt > 0, record_task=request.record_task,
-                    additional_args=dict(request.additional_args))
+                    additional_args=dict(request.additional_args), checkpoint_enabled=store is not None,
+                    checkpoint=request.checkpoint if attempt == 0 else None)
                 response = self.transport.request(wire, run_id=run_id, observe=observe, callback=callback,
                                                   cancel_callbacks=cancel_callbacks)
                 result = response.payload
@@ -240,7 +272,8 @@ class PiRuntime:
                     task = goal_continuation_prompt(goal_state)
                 attempt += 1
             emit("terminal", {"state": result.state})
-            return AgentRuntimeResult(state=result.state, output=result.output, usage=usage, events=tuple(events))
+            return AgentRuntimeResult(state=result.state, output=result.output, usage=usage, events=tuple(events),
+                                      checkpoint=self._checkpoint)
         except KeyboardInterrupt:
             try:
                 self.transport.cancel()
@@ -255,6 +288,8 @@ class PiRuntime:
         finally:
             if native is not None:
                 native.close()
+            if store is not None:
+                store.close()
 
     def close(self):
         try:

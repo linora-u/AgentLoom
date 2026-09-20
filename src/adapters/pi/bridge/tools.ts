@@ -1,5 +1,6 @@
 /** Official SDK executors guarded by AgentLoom's existing native tool contract. */
 import { capturedExecutor } from "./capture.js";
+import type { SessionPersistence } from "./checkpoint.js";
 import { isDeepStrictEqual } from "node:util";
 import { Ajv2020 } from "ajv/dist/2020.js";
 import { createReadToolDefinition, createWriteToolDefinition, createEditToolDefinition, createBashToolDefinition, type ExtensionFactory, type ToolDefinition } from "@earendil-works/pi-coding-agent";
@@ -7,7 +8,7 @@ import { createReadToolDefinition, createWriteToolDefinition, createEditToolDefi
 type Obj = Record<string, any>;
 type Callback = (payload: Obj) => Promise<Obj>;
 
-export function nativeTools(manifest: Obj[], cwd: string, invoke: Callback, identity: (id: string) => Obj, canUseTools: () => boolean, serialTools: string[], agentDir: string, failRun: () => void) {
+export function nativeTools(manifest: Obj[], cwd: string, invoke: Callback, identity: (id: string) => Obj, canUseTools: () => boolean, serialTools: string[], agentDir: string, failRun: () => void, persistence: SessionPersistence) {
   const permits = new Map<string, Obj>();
   const seen = new Set<string>();
   const serial = new Set(serialTools);
@@ -20,10 +21,19 @@ export function nativeTools(manifest: Obj[], cwd: string, invoke: Callback, iden
       return {name: entry.visible_name, label: entry.visible_name, description: entry.parameters.description || entry.capability,
         parameters: entry.parameters, executionMode: serial.has(entry.visible_name) ? "sequential" : "parallel",
         execute: async (callId: string, args: any) => {
-          const record = permits.get(callId)?.record;
+          const permit = permits.get(callId);
           permits.delete(callId);
-          if (!record || record.call_id !== callId || record.tool_name !== entry.visible_name ||
-              !isDeepStrictEqual(record.input, args)) throw new Error("Missing platform tool receipt");
+          if (!permit?.platform || !isDeepStrictEqual(permit.arguments, args))
+            throw new Error("Missing platform tool preparation");
+          let completed: Obj;
+          try {
+            await persistence.save();
+            completed = await invoke({method: "platform_invoke", identity: permit.identity,
+              tool_name: entry.visible_name, arguments: args});
+            if (!completed.record || completed.record.call_id !== callId || completed.record.tool_name !== entry.visible_name)
+              throw new Error("Platform receipt identity mismatch");
+          } catch (error) {failRun(); throw error;}
+          const record = completed.record;
           if (record.status !== "completed") throw new Error(record.error?.message || "AgentLoom tool failed");
           return {content: [{type: "text" as const, text: typeof record.output === "string" ? record.output : JSON.stringify(record.output)}],
             details: {agentloom: record}};
@@ -43,6 +53,7 @@ export function nativeTools(manifest: Obj[], cwd: string, invoke: Callback, iden
         permits.delete(callId);
         if (!permit?.authorization || !isDeepStrictEqual(permit.authorization.final_arguments, args) ||
             permit.authorization.tool.visible_name !== entry.visible_name) throw new Error("Missing native authorization");
+        try {await persistence.save();} catch (error) {failRun(); throw error;}
         const dispatched = await invoke({method: "tool_dispatch", authorization: permit.authorization});
         if (!dispatched.authorization) throw new Error(dispatched.rejection?.error?.message || "Native dispatch rejected");
         if (!isDeepStrictEqual(dispatched.authorization, permit.authorization)) throw new Error("Native dispatch authorization mismatch");
@@ -76,13 +87,19 @@ export function nativeTools(manifest: Obj[], cwd: string, invoke: Callback, iden
     };
   });
   const extension: ExtensionFactory = pi => {
+    pi.on("session_before_compact", async () => {
+      try {await persistence.save();} catch (error) {failRun(); throw error;}
+    });
+    pi.on("session_compact", async () => {
+      try {await persistence.save();} catch (error) {failRun(); throw error;}
+    });
     pi.on("message_end", async ({message}) => {
       if (message.role !== "assistant") return;
       const replacement = structuredClone(message);
       const batch = new Set<string>();
       for (const part of replacement.content) {
         if (part.type !== "toolCall") continue;
-        if (!canUseTools() || seen.has(part.id) || batch.has(part.id) || !selected.has(part.name)) {
+        if (!canUseTools() || seen.has(part.id) || persistence.calls.has(part.id) || batch.has(part.id) || !selected.has(part.name)) {
           permits.clear();
           throw new Error("Unselected or duplicate tool call");
         }
@@ -95,12 +112,8 @@ export function nativeTools(manifest: Obj[], cwd: string, invoke: Callback, iden
         const entry = selected.get(part.name)!;
         const callIdentity = identity(part.id);
         if (entry.owner !== "runtime") {
-          const completed = await invoke({method: "platform_invoke", identity: callIdentity,
-            tool_name: part.name, arguments: part.arguments});
-          if (completed.record.call_id !== part.id || completed.record.tool_name !== part.name)
-            throw new Error("Platform receipt identity mismatch");
-          permits.set(part.id, completed);
-          part.arguments = completed.record.input;
+          persistence.register(callIdentity, part.name, part.arguments, entry.owner);
+          permits.set(part.id, {platform: true, identity: callIdentity, arguments: structuredClone(part.arguments)});
           return;
         }
         const prepared = await invoke({method: "tool_prepare", call: {identity: callIdentity, tool: entry, cwd,
@@ -111,6 +124,7 @@ export function nativeTools(manifest: Obj[], cwd: string, invoke: Callback, iden
           throw new Error("Invalid native authorization");
         permits.set(part.id, prepared);
         if (grant) part.arguments = grant.final_arguments;
+        persistence.register(callIdentity, part.name, part.arguments, entry.owner);
       };
       let parallel: Promise<void>[] = [];
       for (const part of replacement.content) {
@@ -124,10 +138,10 @@ export function nativeTools(manifest: Obj[], cwd: string, invoke: Callback, iden
       await Promise.all(parallel);
       return {message: replacement};
     });
-    pi.on("tool_call", ({toolCallId, toolName, input}) => {
+    pi.on("tool_call", async ({toolCallId, toolName, input}) => {
+      await persistence.save();
       const permit = permits.get(toolCallId);
-      if (permit?.record && permit.record.tool_name === toolName && isDeepStrictEqual(permit.record.input, input)) {
-        if (permit.record.status !== "completed") return {block: true, reason: permit.record.error?.message || "AgentLoom tool rejected"};
+      if (permit?.platform && isDeepStrictEqual(permit.arguments, input)) {
         return;
       }
       if (!permit?.authorization || permit.authorization.tool.visible_name !== toolName ||

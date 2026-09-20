@@ -5,6 +5,7 @@ import { isDeepStrictEqual } from "node:util";
 import { configureModel } from "./model.js";
 import { decode } from "./protocol.js";
 import { nativeTools } from "./tools.js";
+import { restoreSession, SessionPersistence } from "./checkpoint.js";
 import { randomUUID } from "node:crypto";
 import {
   AuthStorage, ModelRegistry, SettingsManager, SessionManager, DefaultResourceLoader,
@@ -15,10 +16,12 @@ type Obj = Record<string, any>;
 type Frame = {version: 2; kind: string; instance_id: string; run_id: string | null; request_id: string; payload: Obj};
 const sdkPackage = new URL("../package.json", import.meta.resolve("@earendil-works/pi-coding-agent"));
 const sdkVersion = JSON.parse(readFileSync(sdkPackage, "utf8")).version as string;
-const capabilities = {structured_tools: true, parallel_tools: true, checkpoint_resume: false, subagents: true, goal: true, stop_hooks: true};
+const capabilities = {structured_tools: true, parallel_tools: true, checkpoint_resume: true, subagents: true, goal: true, stop_hooks: true};
 const agentDir = process.argv[2];
 let instance: string | undefined;
 let session: AgentSession | undefined;
+let persistence: SessionPersistence | undefined;
+let restoredPhase: string | undefined;
 let current: {frame: Frame; abort: AbortController} | undefined;
 let closing = false;
 let nativeIncomplete = false;
@@ -61,13 +64,18 @@ async function createSession(p: Obj): Promise<AgentSession> {
   });
   // Adapter-controlled, bounded retry waits; no hidden SDK retry multiplier.
   const settings = SettingsManager.inMemory({retry: {enabled: false, provider: {maxRetries: 0, timeoutMs: s.timeout * 1000}},
-    compaction: {enabled: false}, enableAnalytics: false, enableInstallTelemetry: false, packages: []});
-  const manager = SessionManager.inMemory(p.cwd);
+    compaction: {enabled: false, ...p.runtime_options.compaction}, enableAnalytics: false, enableInstallTelemetry: false, packages: []});
+  const restored = p.checkpoint ? restoreSession(agentDir, p.cwd, p.checkpoint) : undefined;
+  const manager = restored?.manager ?? SessionManager.inMemory(p.cwd);
+  restoredPhase = restored?.bundle.phase;
+  persistence = new SessionPersistence(manager, agentDir, () => Boolean(current?.frame.payload.checkpoint_enabled),
+    () => ({application_id: current!.frame.payload.application_id, task_id: current!.frame.payload.task_id,
+      run_id: current!.frame.run_id, instance_id: instance}), invoke, restored?.bundle);
   let finalDelivery = false;
   const identity = (callId: string) => ({application_id: current!.frame.payload.application_id,
     task_id: current!.frame.payload.task_id, run_id: current!.frame.run_id, instance_id: instance, call_id: callId,
     native_session_id: manager.getSessionId(), native_parent_id: manager.getLeafId()});
-  const selected = nativeTools(p.tools, p.cwd, invoke, identity, () => !finalDelivery, p.serial_tools, agentDir, () => {nativeIncomplete = true; session?.agent.abort();});
+  const selected = nativeTools(p.tools, p.cwd, invoke, identity, () => !finalDelivery, p.serial_tools, agentDir, () => {nativeIncomplete = true; session?.agent.abort();}, persistence);
   const loader = new DefaultResourceLoader({cwd: p.cwd, agentDir, settingsManager: settings,
     noExtensions: true, noSkills: true, noPromptTemplates: true, noThemes: true, noContextFiles: true,
     systemPrompt: p.instructions, extensionFactories: [selected.extension]});
@@ -78,6 +86,7 @@ async function createSession(p: Obj): Promise<AgentSession> {
     resourceLoader: loader, settingsManager: settings, sessionManager: manager});
   await created.bindExtensions({onError: () => created.agent.abort()});
   modelFailure = configureModel(created, s, p.model.request_headers, async () => {
+    await persistence!.save();
     const requestIdentity = identity(`model:${randomUUID()}`);
     const permit = await invoke({method: "model_prepare", identity: requestIdentity});
     if (!isDeepStrictEqual(permit.identity, requestIdentity)) throw new Error("Invalid model permission identity");
@@ -115,15 +124,16 @@ async function run(frame: Frame, abort: AbortController) {
   let unavailableTool = false;
   let unsubscribe: (() => void) | undefined;
   try {
-    if (p.checkpoint)
-      throw new Error("Unsupported request");
+    if (p.checkpoint && session) throw new Error("Cannot restore into an active Pi session");
     if (!p.continue_session || !session) {
       session?.dispose();
       session = await createSession(p);
     }
     if (abort.signal.aborted) throw new Error("Interrupted");
-    event("run", {phase: "started", resumed: false});
+    event("run", {phase: "started", resumed: Boolean(p.checkpoint)});
     unsubscribe = session.subscribe(e => {
+      if (e.type === "compaction_start") event("checkpoint", {phase: "compaction_started"});
+      if (e.type === "compaction_end") event("checkpoint", {phase: "compaction_ended", aborted: e.aborted});
       if (e.type === "message_start" && e.message.role === "assistant") event("model", {phase: "started"});
       if (e.type === "message_end" && e.message.role === "assistant") {
         if (e.message.content.some(block => block.type === "toolCall" && !p.tools.some((tool: Obj) => tool.visible_name === block.name))) {
@@ -140,20 +150,23 @@ async function run(frame: Frame, abort: AbortController) {
     });
     reportRetry = attempt => event("model", {phase: "retry", attempt});
     const task = Object.keys(p.additional_args).length ? `${p.task}\n\nAgentLoom task inputs (JSON):\n${JSON.stringify(p.additional_args)}` : p.task;
-    await session.prompt(task, {expandPromptTemplates: false});
+    if (p.checkpoint && !p.record_task) {
+      if (restoredPhase !== "complete") await session.agent.continue();
+    } else await session.prompt(task, {expandPromptTemplates: false});
     const last = session.messages.at(-1);
     if (nativeIncomplete || modelFailure.timedOut || unavailableTool || abort.signal.aborted ||
         (last?.role === "assistant" && last.stopReason === "aborted")) throw new Error("Interrupted");
     const state = last?.role !== "assistant" || last.stopReason === "error" ? "failed" :
       last.stopReason === "length" ? "max_steps_error" : "success";
     const output = last?.role === "assistant" ? last.content.filter((b: Obj) => b.type === "text").map((b: Obj) => b.text).join("") : "";
+    if (state === "success") await persistence!.save("complete");
     event("usage", usage);
     // Host emits the public terminal event only after its Stop gate.
-    response(frame, {method: "run", state, output, usage, artifacts: [], checkpoint: null,
+    response(frame, {method: "run", state, output, usage, artifacts: [], checkpoint: persistence?.latest ?? null,
       error: state === "failed" ? {category: "provider", message: "Pi model request failed", retryable: modelFailure.status === 429 || modelFailure.status >= 500} : null});
   } catch {
     const interrupted = abort.signal.aborted;
-    response(frame, {method: "run", state: interrupted ? "interrupted" : "failed", output: null, usage, artifacts: [], checkpoint: null,
+    response(frame, {method: "run", state: interrupted ? "interrupted" : "failed", output: null, usage, artifacts: [], checkpoint: persistence?.latest ?? null,
       error: {category: interrupted ? "interrupted" : nativeIncomplete ? "tool" : "provider", message: nativeIncomplete ? "Pi native execution could not be durably completed" : unavailableTool ? "Pi model requested an unavailable tool" : interrupted ? "Pi run interrupted" : modelFailure.timedOut ? "Pi model request timed out" : "Pi model request failed", retryable: modelFailure.timedOut}});
   } finally {
     rejectCallbacks();
@@ -195,14 +208,15 @@ async function accept(frame: Frame) {
   } else if (p.method === "cancel") {
     const target = current?.frame;
     const accepted = target?.request_id === p.target_request_id && target?.run_id === frame.run_id;
-    if (accepted) {current!.abort.abort(); rejectCallbacks(); void session?.abort();}
+    if (accepted) {current!.abort.abort(); rejectCallbacks(); session?.abortCompaction(); void session?.abort();}
     response(frame, {method: "cancel", accepted});
   } else if (p.method === "snapshot") {
-    response(frame, {method: "snapshot", checkpoint: null});
+    response(frame, {method: "snapshot", checkpoint: persistence?.latest ?? null});
   } else if (p.method === "close") {
     closing = true;
     current?.abort.abort();
     rejectCallbacks();
+    session?.abortCompaction();
     await session?.abort();
     session?.dispose();
     response(frame, {method: "close", accepted: true});
@@ -217,4 +231,4 @@ input.on("line", line => {
     void accept(decode(line) as Frame).catch(() => process.exit(2));
   } catch {process.exit(2);}
 });
-input.on("close", () => {current?.abort.abort(); void session?.abort().finally(() => process.exit(0)); if (!session) process.exit(0);});
+input.on("close", () => {current?.abort.abort(); session?.abortCompaction(); void session?.abort().finally(() => process.exit(0)); if (!session) process.exit(0);});
