@@ -19,6 +19,37 @@ from agentloom.runtime.prompts.prompt_builder import (
 )
 from agentloom.runtime.skills.catalog import SkillCatalog, SkillSource
 
+
+@pytest.mark.parametrize("family", ["", "anthropic", "openai", "gemini"])
+@pytest.mark.parametrize("absolute", [False, True])
+def test_old_explicit_shipped_template_paths_remain_loadable(family, absolute):
+    from agentloom.application.validation import normalize_execution_prompt_template_path_value
+    from agentloom.runtime.prompts.prompt_builder import load_base_prompt_templates
+
+    root = Path(__file__).resolve().parents[2]
+    old = Path("src/runtime/prompts") / family / "toolcalling_agent.example.yaml"
+    configured = str(root / old if absolute else old)
+    normalized = normalize_execution_prompt_template_path_value(configured, "legacy.prompt", agent_root=root)
+    assert Path(normalized).is_file()
+    templates = load_base_prompt_templates(
+        prompt_template_path=configured, model_id=None, agent_root=root,
+        logger=logging.getLogger(__name__),
+    )
+    assert templates and templates["system_prompt"]
+
+
+def test_existing_user_template_at_legacy_path_has_priority(tmp_path):
+    from agentloom.runtime.prompts.prompt_builder import load_base_prompt_templates
+
+    legacy = tmp_path / "src/runtime/prompts/toolcalling_agent.example.yaml"
+    legacy.parent.mkdir(parents=True)
+    legacy.write_text("system_prompt: Keep my exact custom prompt\n")
+    templates = load_base_prompt_templates(
+        prompt_template_path=str(legacy), model_id=None, agent_root=tmp_path,
+        logger=logging.getLogger(__name__),
+    )
+    assert templates == {"system_prompt": "Keep my exact custom prompt"}
+
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------

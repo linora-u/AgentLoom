@@ -41,12 +41,6 @@ from agentloom.runtime.heartbeat.status import (
     detect_worker_call_crashed as _detect_worker_call_crashed,
 )
 from agentloom.runtime.logging import get_logger
-from agentloom.runtime.todo.model import (
-    TODO_SCHEMA_VERSION,
-    empty_todo_snapshot,
-    validate_todo_document,
-    validate_todo_items,
-)
 
 _logger = get_logger(__name__)
 
@@ -425,9 +419,8 @@ class CheckpointManager:
         import threading
 
         self._tree_lock = threading.Lock()
-        self._todo_lock = threading.RLock()
         self._goal_lock = threading.RLock()
-        self._todo_corrupt_scopes: set[tuple[str, str]] = set()
+        self._legacy_todos: Any = None
         self._task_storages: dict[Path, SecureDirectory] = {}
         if self._checkpoint_dir is not None and self._checkpoint_dir.is_dir():
             self._task_storages[self._checkpoint_dir] = SecureDirectory(
@@ -581,151 +574,22 @@ class CheckpointManager:
         ):
             return None
 
-    def _empty_todo_document(self, task_id: str) -> dict[str, Any]:
-        return {
-            "schema_version": TODO_SCHEMA_VERSION,
-            "task_id": task_id,
-            "agents": {},
-        }
+    def _legacy_todo_store(self):
+        """Compatibility only; native runtimes never initialize this store."""
+        with self._tree_lock:
+            if self._legacy_todos is None:
+                from agentloom.adapters.smolagents.todo.store import TodoStore
 
-    def _quarantine_corrupt_todos(
-        self,
-        storage: SecureDirectory,
-        *,
-        task_id: str,
-        agent_path: str,
-        error: BaseException,
-    ) -> bool:
-        quarantine_name = f"todos.corrupt.{time.time_ns()}.{uuid.uuid4().hex}.json"
-        evidence_preserved = False
-        try:
-            storage.rename_file("todos.json", quarantine_name)
-            evidence_preserved = True
-        except FileNotFoundError:
-            evidence_preserved = True
-        except Exception as quarantine_error:
-            _logger.warning(
-                "Failed to quarantine corrupt Todo state: task_id=%s agent_path=%s error=%s",
-                task_id,
-                agent_path,
-                quarantine_error,
-            )
-        _logger.warning(
-            "Ignoring corrupt Todo state and continuing with an empty list: "
-            "task_id=%s agent_path=%s error=%s",
-            task_id,
-            agent_path,
-            error,
-        )
-        return evidence_preserved
-
-    def _read_todo_document_locked(
-        self,
-        storage: SecureDirectory,
-        *,
-        task_id: str,
-        agent_path: str,
-    ) -> tuple[dict[str, Any], bool, bool]:
-        scope = (task_id, agent_path)
-        try:
-            raw = storage.read_json("todos.json")
-        except FileNotFoundError:
-            return (
-                self._empty_todo_document(task_id),
-                scope in self._todo_corrupt_scopes,
-                True,
-            )
-        except (UnicodeError, json.JSONDecodeError, OSError, RuntimeError, ValueError) as exc:
-            evidence_preserved = self._quarantine_corrupt_todos(
-                storage,
-                task_id=task_id,
-                agent_path=agent_path,
-                error=exc,
-            )
-            self._todo_corrupt_scopes.add(scope)
-            return self._empty_todo_document(task_id), True, evidence_preserved
-        try:
-            document = validate_todo_document(raw, task_id=task_id)
-            self._todo_corrupt_scopes.discard(scope)
-            return document, False, True
-        except (TypeError, ValueError) as exc:
-            evidence_preserved = self._quarantine_corrupt_todos(
-                storage,
-                task_id=task_id,
-                agent_path=agent_path,
-                error=exc,
-            )
-            self._todo_corrupt_scopes.add(scope)
-            return self._empty_todo_document(task_id), True, evidence_preserved
+                self._legacy_todos = TodoStore(self.task_storage)
+            return self._legacy_todos
 
     def load_todos(self, task_id: str, agent_path: str) -> dict[str, Any]:
-        """Load one Agent's canonical current-task Todo snapshot."""
+        """Legacy smol API; new callers use the adapter's TodoStateProvider."""
+        return self._legacy_todo_store().load_todos(task_id, agent_path)
 
-        from agentloom.runtime import safe_agent_path
-
-        task_id = _require_safe_path_component(task_id, field="task_id")
-        agent_path = safe_agent_path(agent_path)
-        with self._todo_lock:
-            storage = self.task_storage(task_id)
-            try:
-                with storage.advisory_file_lock("todos.lock", create=True):
-                    document, corrupt, _ = self._read_todo_document_locked(
-                        storage,
-                        task_id=task_id,
-                        agent_path=agent_path,
-                    )
-            finally:
-                storage.close()
-        snapshot = document["agents"].get(agent_path)
-        if snapshot is None:
-            return empty_todo_snapshot(corrupt=corrupt)
-        return {
-            "revision": snapshot["revision"],
-            "items": [dict(item) for item in snapshot["items"]],
-            "corrupt": corrupt,
-        }
-
-    def replace_todos(
-        self,
-        task_id: str,
-        agent_path: str,
-        items: Any,
-    ) -> dict[str, Any]:
-        """Atomically replace one Agent's complete current-task Todo list."""
-
-        from agentloom.runtime import safe_agent_path
-
-        task_id = _require_safe_path_component(task_id, field="task_id")
-        agent_path = safe_agent_path(agent_path)
-        canonical = validate_todo_items(items)
-        with self._todo_lock:
-            storage = self.task_storage(task_id)
-            try:
-                with storage.advisory_file_lock("todos.lock", create=True):
-                    document, _, evidence_preserved = self._read_todo_document_locked(
-                        storage,
-                        task_id=task_id,
-                        agent_path=agent_path,
-                    )
-                    if not evidence_preserved:
-                        raise RuntimeError(
-                            "cannot replace corrupt Todo state before its diagnostic evidence is preserved"
-                        )
-                    previous = document["agents"].get(agent_path)
-                    revision = int(previous["revision"]) + 1 if previous else 1
-                    document["agents"][agent_path] = {
-                        "revision": revision,
-                        "items": [dict(item) for item in canonical],
-                    }
-                    storage.atomic_write_json("todos.json", document)
-                    self._todo_corrupt_scopes.discard((task_id, agent_path))
-            finally:
-                storage.close()
-        return {
-            "revision": revision,
-            "items": [dict(item) for item in canonical],
-            "corrupt": False,
-        }
+    def replace_todos(self, task_id: str, agent_path: str, items: Any) -> dict[str, Any]:
+        """Legacy smol API; retained while external callers migrate."""
+        return self._legacy_todo_store().replace_todos(task_id, agent_path, items)
 
     def load_goal(self, task_id: str) -> dict[str, Any] | None:
         """Load strict Goal state; corruption is terminal rather than fail-open."""
