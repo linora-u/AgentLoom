@@ -5,7 +5,7 @@ from contextlib import contextmanager
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import json
 from pathlib import Path
-from threading import Thread
+from threading import Lock, Thread
 import time
 
 import pytest
@@ -18,6 +18,7 @@ from agentloom.configuration.config import bind_config, load_project_config
 @contextmanager
 def model_service(*, responses=False, fail_count=0, error_status=500, stall=None, finish="stop", stall_stream=False, turns=None):
     requests = []
+    request_lock = Lock()
 
     class Handler(BaseHTTPRequestHandler):
         def log_message(self, *args):
@@ -25,10 +26,12 @@ def model_service(*, responses=False, fail_count=0, error_status=500, stall=None
 
         def do_POST(self):
             request = json.loads(self.rfile.read(int(self.headers["Content-Length"])))
-            requests.append((self.path, request, dict(self.headers)))
+            with request_lock:
+                requests.append((self.path, request, dict(self.headers)))
+                request_number = len(requests)
             if stall is not None and not stall_stream:
                 stall.wait(timeout=10)
-            if len(requests) <= fail_count:
+            if request_number <= fail_count:
                 self.send_response(error_status)
                 self.send_header("Content-Type", "application/json")
                 self.end_headers()
@@ -44,8 +47,8 @@ def model_service(*, responses=False, fail_count=0, error_status=500, stall=None
                 {"choices": [{"index": 0, "delta": {"role": "assistant", "content": "Pi answer"}, "finish_reason": None}]},
                 {"choices": [{"index": 0, "delta": {}, "finish_reason": finish}], "usage": {"prompt_tokens": 12, "completion_tokens": 3, "total_tokens": 15}},
             ]
-            if turns is not None and len(requests) <= len(turns):
-                calls = turns[len(requests) - 1]
+            if turns is not None and request_number <= len(turns) and turns[request_number - 1] is not None:
+                calls = turns[request_number - 1]
                 chunks[0]["choices"][0]["delta"] = {"role": "assistant", "tool_calls": [
                     {"index": index, "id": call_id, "type": "function", "function": {
                         "name": name, "arguments": json.dumps(arguments)}}
@@ -53,7 +56,7 @@ def model_service(*, responses=False, fail_count=0, error_status=500, stall=None
                 ]}
                 chunks[1]["choices"][0]["finish_reason"] = "tool_calls"
             if finish == "tool_calls":
-                if len(requests) == 1:
+                if request_number == 1:
                     chunks[0]["choices"][0]["delta"]["tool_calls"] = [{"index": 0, "id": "unavailable_call", "type": "function",
                         "function": {"name": "write", "arguments": '{"path":"should-not-exist","content":"bad"}'}}]
                 else:
@@ -169,7 +172,6 @@ def test_profile_retry_count_and_private_error_redaction(tmp_path, status, retri
 
 @pytest.mark.parametrize("selection,match", [
     ("runtime_options: {thinking: low}\n", "Unsupported pi runtime_options"),
-    ("goal: {enabled: true}\n", "goal"),
     ("checkpoint: {enabled: true}\n", "checkpoint_resume"),
 ])
 def test_unsupported_features_rejected_at_public_application_boundary(tmp_path, selection, match):

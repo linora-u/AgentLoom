@@ -3,20 +3,33 @@ from __future__ import annotations
 
 from uuid import uuid4
 from pathlib import Path
+from dataclasses import replace
+from threading import Lock
+from typing import cast
 
 from agentloom.adapters.pi.metadata import CAPABILITIES, SDK_VERSION, validate_model, validate_options
 from agentloom.adapters.pi.protocol import (
     Handshake, HandshakeResult, ModelSelection, Run, RunResult,
     Prepare, PrepareResult, Settle, SettleResult, TerminalRecord,
+    PlatformInvoke, PlatformResult,
 )
 from agentloom.runtime.native_tool_host import NativeReadToolHost
 from agentloom.runtime.native_tools import NativeCommitAck
+from agentloom.runtime.tool_protocol import ToolCallRecord
 from agentloom.adapters.pi.transport import PiTransport
 from agentloom.runtime.agent_runtime import (
     AgentRuntimeError, AgentRuntimeRequest, AgentRuntimeResult, RuntimeDefinition, RuntimeEvent, RuntimeUsage,
 )
 from agentloom.runtime.hooks import HookEvent
 from agentloom.runtime.trace import capture_explicit_execution_context
+from agentloom.runtime.goal import get_current_goal_provider
+from agentloom.runtime.invocation import goal_continuation_prompt
+
+
+def _terminal(record: ToolCallRecord) -> TerminalRecord:
+    values = record.to_dict()
+    values["error"] = record.error
+    return TerminalRecord(**values)
 
 
 class PiRuntime:
@@ -31,8 +44,9 @@ class PiRuntime:
             validate_options(definition.runtime_options)
         except ValueError as exc:
             raise AgentRuntimeError(str(exc), category="configuration") from None
-        if any(tool.owner != "runtime" or tool.provider != "pi" or tool.visible_name != "read"
-               or tool.operation != "read" or tool.fixed_arguments for tool in definition.tool_manifest):
+        if any(tool.operation in {"write", "shell"} or (tool.owner == "runtime" and (
+               tool.provider != "pi" or tool.visible_name != "read" or tool.operation != "read" or tool.fixed_arguments))
+               for tool in definition.tool_manifest):
             raise AgentRuntimeError("Unsupported Pi tool selection", category="unsupported_capability")
         self.definition = definition
         self.transport = PiTransport(definition.instance_id or uuid4().hex)
@@ -50,8 +64,8 @@ class PiRuntime:
 
     def run(self, request: AgentRuntimeRequest) -> AgentRuntimeResult:
         missing = request.requirements.unsupported_by(self.capabilities)
-        if missing or request.checkpoint is not None or request.checkpoint_sink is not None or request.additional_args:
-            raise AgentRuntimeError("Unsupported Pi request capabilities: " + ", ".join(missing or ("checkpoint/additional_args",)),
+        if missing or request.checkpoint is not None or request.checkpoint_sink is not None:
+            raise AgentRuntimeError("Unsupported Pi request capabilities: " + ", ".join(missing or ("checkpoint",)),
                                     category="unsupported_capability")
         events = []
         usage = RuntimeUsage()
@@ -72,30 +86,52 @@ class PiRuntime:
         def observe(event):
             emit(event.event, event.payload)
 
-        hook = capture_explicit_execution_context().hook_run
+        execution = capture_explicit_execution_context()
+        hook = execution.hook_run
+        goal = get_current_goal_provider() if execution.local_run_id == execution.root_run_id else None
         task = request.task
-        max_stops = definition.runtime_options.get("max_stop_attempts", 3)
+        max_stops = cast(int, definition.runtime_options.get("max_stop_attempts", 3))
         run_id = request.run_id or uuid4().hex
         cwd = str(Path(definition.project_root or ".").resolve())
-        native = NativeReadToolHost(tools=definition.tool_manifest, cwd=cwd) if definition.tool_manifest else None
+        native_entries = tuple(tool for tool in definition.tool_manifest if tool.owner == "runtime")
+        platform_entries = {tool.visible_name: tool for tool in definition.tool_manifest if tool.owner != "runtime"}
+        native = NativeReadToolHost(tools=native_entries, cwd=cwd) if native_entries else None
+        descriptions = {tool.name: tool.description for tool in definition.tool_gateway.definitions}
+        wire_tools = [tool if tool.owner == "runtime" else replace(tool, parameters={
+            **tool.parameters, "description": descriptions[tool.visible_name]}) for tool in definition.tool_manifest]
+        platform_calls = set()
+        platform_lock = Lock()
 
         def callback(payload):
+            if isinstance(payload, PlatformInvoke):
+                identity = payload.identity
+                with platform_lock:
+                    if ((identity.application_id, identity.task_id, identity.run_id, identity.instance_id) != (
+                            request.application_id, request.task_id, run_id, self.transport.instance_id)
+                            or payload.tool_name not in platform_entries or identity.call_id in platform_calls):
+                        raise AgentRuntimeError("Invalid Pi platform callback identity or selection", category="internal")
+                    platform_calls.add(identity.call_id)
+                record = definition.tool_gateway.invoke(call_id=identity.call_id, tool_name=payload.tool_name,
+                                                        arguments=payload.arguments)
+                return PlatformResult(method="platform_invoke", record=_terminal(record))
             if native is not None and isinstance(payload, Prepare):
                 prepared = native.prepare(payload.call)
                 return PrepareResult(method="tool_prepare",
                     authorization=native.start_execution(prepared.authorization) if prepared.authorization else None,
-                    rejection=TerminalRecord(**prepared.rejection.to_dict()) if prepared.rejection else None)
+                    rejection=_terminal(prepared.rejection) if prepared.rejection else None)
             if native is not None and isinstance(payload, Settle):
                 settled = native.settle(payload.outcome)
                 return SettleResult(method="tool_settle", identity=payload.outcome.identity,
                     authorization_id=payload.outcome.authorization_id,
                     state="committed" if isinstance(settled, NativeCommitAck) else "uncertain",
                     commit_id=settled.commit_id if isinstance(settled, NativeCommitAck) else None,
-                    record=TerminalRecord(**settled.record.to_dict()) if isinstance(settled, NativeCommitAck) else None)
+                    record=_terminal(settled.record) if isinstance(settled, NativeCommitAck) else None)
             raise AgentRuntimeError("Unexpected Pi tool callback", category="internal")
 
         try:
-            for attempt in range(max_stops):
+            attempt = 0
+            stop_blocks = 0
+            while True:
                 if hook is not None:
                     context = hook.consume_pending_agent_context()
                     if context:
@@ -104,8 +140,9 @@ class PiRuntime:
                     task_id=request.task_id or "standalone", task=task, cwd=cwd,
                     instructions=definition.instructions or "", model=ModelSelection(model_type=selection.model_type,
                         model_id=selection.model_id, protocol=selection.protocol, settings=dict(selection.settings),
-                        request_headers=dict(selection.request_headers)), tools=list(definition.tool_manifest), runtime_options=dict(definition.runtime_options),
+                        request_headers=dict(selection.request_headers)), tools=wire_tools, runtime_options=dict(definition.runtime_options),
                     continue_session=request.continue_session or attempt > 0, record_task=request.record_task)
+                wire = wire.model_copy(update={"additional_args": dict(request.additional_args)})
                 response = self.transport.request(wire, run_id=run_id, observe=observe, callback=callback)
                 result = response.payload
                 assert isinstance(result, RunResult)
@@ -121,11 +158,17 @@ class PiRuntime:
                     break
                 decision = hook.dispatch(HookEvent.STOP, "final_answer", {"final_answer": result.output})
                 hook.flush_user_messages()
-                if not decision.should_block():
+                goal_state = goal.snapshot() if goal is not None else None
+                if not decision.should_block() and (goal_state is None or goal_state.status == "complete"):
                     break
-                if attempt == max_stops - 1:
-                    raise AgentRuntimeError("Pi Stop gate remained blocked", category="tool")
-                task = decision.get_blocked_response()
+                if decision.should_block():
+                    stop_blocks += 1
+                    if stop_blocks >= max_stops:
+                        raise AgentRuntimeError("Pi Stop gate remained blocked", category="tool")
+                    task = decision.get_blocked_response()
+                elif goal_state is not None:
+                    task = goal_continuation_prompt(goal_state)
+                attempt += 1
             emit("terminal", {"state": result.state})
             return AgentRuntimeResult(state=result.state, output=result.output, usage=usage, events=tuple(events))
         except KeyboardInterrupt:
