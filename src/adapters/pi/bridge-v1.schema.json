@@ -54,6 +54,21 @@
       "title": "Cancel",
       "type": "object"
     },
+    "CaptureFile": {
+      "additionalProperties": false,
+      "properties": {
+        "sha256": {
+          "pattern": "^[0-9a-f]{64}$",
+          "title": "Sha256",
+          "type": "string"
+        }
+      },
+      "required": [
+        "sha256"
+      ],
+      "title": "CaptureFile",
+      "type": "object"
+    },
     "Close": {
       "additionalProperties": false,
       "properties": {
@@ -90,6 +105,25 @@
         "accepted"
       ],
       "title": "ControlResult",
+      "type": "object"
+    },
+    "Dispatch": {
+      "additionalProperties": false,
+      "properties": {
+        "method": {
+          "const": "tool_dispatch",
+          "title": "Method",
+          "type": "string"
+        },
+        "authorization": {
+          "$ref": "#/$defs/NativeAuthorization"
+        }
+      },
+      "required": [
+        "method",
+        "authorization"
+      ],
+      "title": "Dispatch",
       "type": "object"
     },
     "Event": {
@@ -586,7 +620,10 @@
       "additionalProperties": false,
       "properties": {
         "method": {
-          "const": "tool_prepare",
+          "enum": [
+            "tool_prepare",
+            "tool_dispatch"
+          ],
           "title": "Method",
           "type": "string"
         },
@@ -665,6 +702,7 @@
               "platform_invoke": "#/$defs/PlatformInvoke",
               "run": "#/$defs/Run",
               "snapshot": "#/$defs/Snapshot",
+              "tool_dispatch": "#/$defs/Dispatch",
               "tool_prepare": "#/$defs/Prepare",
               "tool_settle": "#/$defs/Settle"
             },
@@ -688,6 +726,9 @@
             },
             {
               "$ref": "#/$defs/Prepare"
+            },
+            {
+              "$ref": "#/$defs/Dispatch"
             },
             {
               "$ref": "#/$defs/Settle"
@@ -760,6 +801,7 @@
                   "platform_invoke": "#/$defs/PlatformResult",
                   "run": "#/$defs/RunResult",
                   "snapshot": "#/$defs/SnapshotResult",
+                  "tool_dispatch": "#/$defs/PrepareResult",
                   "tool_prepare": "#/$defs/PrepareResult",
                   "tool_settle": "#/$defs/SettleResult"
                 },
@@ -1104,6 +1146,17 @@
         },
         "outcome": {
           "$ref": "#/$defs/NativeExecutionOutcome"
+        },
+        "capture": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/CaptureFile"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
         }
       },
       "required": [
