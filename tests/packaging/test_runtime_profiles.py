@@ -3,13 +3,16 @@ from __future__ import annotations
 
 from email.parser import BytesParser
 from pathlib import Path
+import shutil
 import subprocess
 from zipfile import ZipFile
 
 from packaging.requirements import Requirement
+import pytest
 
 
-def test_built_wheel_selects_smol_only_through_its_explicit_profile(tmp_path):
+@pytest.mark.parametrize("rename_schema", [False, True], ids=["current-schema", "next-schema-filename"])
+def test_built_wheel_selects_smol_only_through_its_explicit_profile(tmp_path, rename_schema):
     root = Path(__file__).resolve().parents[2]
     constraints = tmp_path / "build-constraints.txt"
     exported = subprocess.run(
@@ -17,8 +20,18 @@ def test_built_wheel_selects_smol_only_through_its_explicit_profile(tmp_path):
         cwd=root, capture_output=True, text=True, timeout=60,
     )
     assert exported.returncode == 0, exported.stdout + exported.stderr
+    source = root
+    if rename_schema:
+        source = tmp_path / "future-package"
+        shutil.copytree(root / "src", source / "src", ignore=shutil.ignore_patterns(
+            "node_modules", "dist", "__pycache__", "*.pyc", ".agentloom-install.*"))
+        for name in ("pyproject.toml", "README.md"):
+            shutil.copyfile(root / name, source / name)
+        schema = next((source / "src/adapters/pi").glob("bridge-v*.schema.json"))
+        version = int(schema.name.split("-v")[1].split(".")[0])
+        schema.rename(schema.with_name(f"bridge-v{version + 1}.schema.json"))
     built = subprocess.run(
-        ["uv", "build", "--wheel", str(root), "--out-dir", str(tmp_path),
+        ["uv", "build", "--wheel", str(source), "--out-dir", str(tmp_path),
          "--build-constraints", str(constraints), "--require-hashes"],
         capture_output=True, text=True, timeout=120,
     )
@@ -29,7 +42,7 @@ def test_built_wheel_selects_smol_only_through_its_explicit_profile(tmp_path):
                        or ".agentloom-install." in name for name in names_in_wheel)
         assert "agentloom/adapters/pi/bridge/tools.ts" in names_in_wheel
         assert "agentloom/adapters/pi/bridge/model.ts" in names_in_wheel
-        schemas = list((root / "src/adapters/pi").glob("bridge-v*.schema.json"))
+        schemas = list((source / "src/adapters/pi").glob("bridge-v*.schema.json"))
         assert schemas
         assert all("agentloom/adapters/pi/" + path.name in names_in_wheel for path in schemas)
         metadata = BytesParser().parsebytes(wheel.read(next(
