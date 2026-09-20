@@ -58,6 +58,9 @@ class PiRuntime:
         except BaseException:
             self.transport.close()
             raise
+        from agentloom.runtime.resources import register_resource
+        register_resource(f"pi-runtime:{self.transport.instance_id}", self.close,
+                          instance_id=self.transport.instance_id)
 
     def snapshot(self):
         raise AgentRuntimeError("Pi checkpoint/resume is not enabled", category="unsupported_capability")
