@@ -1,0 +1,762 @@
+{
+  "ticket": "11",
+  "status": "passed",
+  "date": "2026-09-21",
+  "initial_base": "2ec1412cd684bebb313b320fd0b9332050efeaaf",
+  "source_revision": "be3c35daf29748b21696db1ac3f9c77dae46af3a",
+  "sdk": {
+    "pi_coding_agent": "0.79.4",
+    "pi_ai": "0.79.4",
+    "node": "v25.9.0",
+    "python": "3.12.13",
+    "installer": "uv run --locked loom install-runtime pi",
+    "vendored_sdk": false
+  },
+  "checks": {
+    "full_suite": {
+      "command": "uv run --locked python -m pytest tests/ applications/memory_feature_validation/scripts/test_memory_review_campaign_capsule.py applications/memory_feature_validation/scripts/test_memory_review_campaign_contract.py -q --tb=short",
+      "passed": 4423,
+      "skipped": 1,
+      "warnings": 23,
+      "seconds": 443.51,
+      "exit_code": 0,
+      "log": "/Users/bytedance/code/data_clear/AgentLoom-validation/t11/verification/full-final.log"
+    },
+    "focused_public_fix": {
+      "passed": 141,
+      "exit_code": 0,
+      "log": "/Users/bytedance/code/data_clear/AgentLoom-validation/t11/verification/focused-public-fix.log",
+      "scope": "mixed Applications, review orchestration/runtime, Application lifecycle and Goal tests"
+    },
+    "shipped_yaml_contract": {
+      "passed": 26,
+      "exit_code": 0,
+      "log": "/Users/bytedance/code/data_clear/AgentLoom-validation/t11/verification/shipped-yaml-contract.log"
+    },
+    "python_types": {
+      "tool": "pyright 1.1.403",
+      "files": 7,
+      "errors": 0,
+      "warnings": 0,
+      "scope": "new Application/acceptance Python plus public invocation and review orchestration; not repository-wide",
+      "evidence": "/Users/bytedance/code/data_clear/AgentLoom-validation/t11/verification/pyright.json"
+    },
+    "review": {
+      "standards": "passed",
+      "spec": "passed after explicit native session assertions",
+      "remaining_actionable_findings": 0
+    },
+    "live_final": {
+      "latest_case_results": [
+        {
+          "case": "read_smol_to_pi",
+          "profile": "powerful",
+          "exit_code": 0,
+          "timed_out": false,
+          "passed": true,
+          "seconds": 26.47
+        },
+        {
+          "case": "read_pi_to_smol",
+          "profile": "powerful",
+          "exit_code": 0,
+          "timed_out": false,
+          "passed": true,
+          "seconds": 26.73
+        },
+        {
+          "case": "parallel_smol_to_pi",
+          "profile": "powerful",
+          "exit_code": 0,
+          "timed_out": false,
+          "passed": true,
+          "seconds": 37.93
+        },
+        {
+          "case": "parallel_pi_to_smol",
+          "profile": "powerful",
+          "exit_code": 0,
+          "timed_out": false,
+          "passed": true,
+          "seconds": 35.12
+        },
+        {
+          "case": "goal_smol_to_pi",
+          "profile": "powerful",
+          "exit_code": 0,
+          "timed_out": false,
+          "passed": true,
+          "seconds": 21.2
+        },
+        {
+          "case": "goal_pi_to_smol",
+          "profile": "powerful",
+          "exit_code": 0,
+          "timed_out": false,
+          "passed": true,
+          "seconds": 33.95
+        },
+        {
+          "case": "context_smol_to_pi",
+          "profile": "powerful",
+          "exit_code": 0,
+          "timed_out": false,
+          "passed": true,
+          "seconds": 38.2
+        },
+        {
+          "case": "context_pi_to_smol",
+          "profile": "powerful",
+          "exit_code": 0,
+          "timed_out": false,
+          "passed": true,
+          "seconds": 26.78
+        },
+        {
+          "case": "memory_handoff",
+          "profile": "powerful",
+          "exit_code": 0,
+          "timed_out": false,
+          "passed": true,
+          "seconds": 51.88
+        },
+        {
+          "case": "read_smol_to_pi",
+          "profile": "responses_powerful",
+          "exit_code": 0,
+          "timed_out": false,
+          "passed": true,
+          "seconds": 39.85
+        },
+        {
+          "case": "read_pi_to_smol",
+          "profile": "responses_powerful",
+          "exit_code": 0,
+          "timed_out": false,
+          "passed": true,
+          "seconds": 38.84
+        },
+        {
+          "case": "parallel_smol_to_pi",
+          "profile": "responses_powerful",
+          "exit_code": 0,
+          "timed_out": false,
+          "passed": true,
+          "seconds": 36.65
+        },
+        {
+          "case": "parallel_pi_to_smol",
+          "profile": "responses_powerful",
+          "exit_code": 0,
+          "timed_out": false,
+          "passed": true,
+          "seconds": 57.04
+        },
+        {
+          "case": "goal_smol_to_pi",
+          "profile": "responses_powerful",
+          "exit_code": 0,
+          "timed_out": false,
+          "passed": true,
+          "seconds": 24.62
+        },
+        {
+          "case": "goal_pi_to_smol",
+          "profile": "responses_powerful",
+          "exit_code": 0,
+          "timed_out": false,
+          "passed": true,
+          "seconds": 30.65
+        },
+        {
+          "case": "context_smol_to_pi",
+          "profile": "responses_powerful",
+          "exit_code": 0,
+          "timed_out": false,
+          "passed": true,
+          "seconds": 28.59
+        },
+        {
+          "case": "context_pi_to_smol",
+          "profile": "responses_powerful",
+          "exit_code": 0,
+          "timed_out": false,
+          "passed": true,
+          "seconds": 27.5
+        },
+        {
+          "case": "memory_handoff",
+          "profile": "responses_powerful",
+          "exit_code": 0,
+          "timed_out": false,
+          "passed": true,
+          "seconds": 56.15
+        }
+      ],
+      "case_profile_pairs_passed": 18,
+      "case_profile_pairs_total": 18,
+      "matrix_attempt": {
+        "passed": 17,
+        "total": 18,
+        "source_revision": "5778592be3eac31457de0395f799b20f7dd71812",
+        "directory": "/Users/bytedance/code/data_clear/AgentLoom-validation/t11/campaign-final-03"
+      },
+      "memory_recheck": {
+        "passed": 2,
+        "total": 2,
+        "source_revision": "be3c35daf29748b21696db1ac3f9c77dae46af3a",
+        "directory": "/Users/bytedance/code/data_clear/AgentLoom-validation/t11/memory-recheck-04"
+      },
+      "all_attempts_clean": true,
+      "source_equivalence": "5778592b..be3c35da changes only the shipped YAML contract test; src/, applications/ and live acceptance script are identical"
+    }
+  },
+  "campaign_history": [
+    {
+      "directory": "/Users/bytedance/code/data_clear/AgentLoom-validation/t11/smoke-01",
+      "total": 3,
+      "passed": 2,
+      "cases": [
+        {
+          "case": "read_smol_to_pi",
+          "profile": "powerful",
+          "exit_code": 0,
+          "timed_out": false,
+          "passed": true,
+          "seconds": 14.19
+        },
+        {
+          "case": "read_pi_to_smol",
+          "profile": "powerful",
+          "exit_code": 0,
+          "timed_out": false,
+          "passed": true,
+          "seconds": 17.32
+        },
+        {
+          "case": "memory_handoff",
+          "profile": "powerful",
+          "exit_code": 1,
+          "timed_out": false,
+          "passed": false,
+          "seconds": 25.44
+        }
+      ],
+      "attempt_revisions": [
+        "5298e4708c3b7dae926c506081f57d4a6bcef5fd"
+      ],
+      "all_attempts_clean": true
+    },
+    {
+      "directory": "/Users/bytedance/code/data_clear/AgentLoom-validation/t11/campaign-01",
+      "total": 18,
+      "passed": 15,
+      "cases": [
+        {
+          "case": "read_smol_to_pi",
+          "profile": "powerful",
+          "exit_code": 0,
+          "timed_out": false,
+          "passed": true,
+          "seconds": 17.06
+        },
+        {
+          "case": "read_pi_to_smol",
+          "profile": "powerful",
+          "exit_code": 0,
+          "timed_out": false,
+          "passed": true,
+          "seconds": 19.92
+        },
+        {
+          "case": "parallel_smol_to_pi",
+          "profile": "powerful",
+          "exit_code": 0,
+          "timed_out": false,
+          "passed": true,
+          "seconds": 27.28
+        },
+        {
+          "case": "parallel_pi_to_smol",
+          "profile": "powerful",
+          "exit_code": 0,
+          "timed_out": false,
+          "passed": true,
+          "seconds": 41.1
+        },
+        {
+          "case": "goal_smol_to_pi",
+          "profile": "powerful",
+          "exit_code": 0,
+          "timed_out": false,
+          "passed": true,
+          "seconds": 29.11
+        },
+        {
+          "case": "goal_pi_to_smol",
+          "profile": "powerful",
+          "exit_code": 0,
+          "timed_out": false,
+          "passed": true,
+          "seconds": 36.8
+        },
+        {
+          "case": "context_smol_to_pi",
+          "profile": "powerful",
+          "exit_code": 0,
+          "timed_out": false,
+          "passed": true,
+          "seconds": 53.72
+        },
+        {
+          "case": "context_pi_to_smol",
+          "profile": "powerful",
+          "exit_code": 0,
+          "timed_out": false,
+          "passed": true,
+          "seconds": 37.89
+        },
+        {
+          "case": "memory_handoff",
+          "profile": "powerful",
+          "exit_code": 1,
+          "timed_out": false,
+          "passed": false,
+          "seconds": 50.4
+        },
+        {
+          "case": "read_smol_to_pi",
+          "profile": "responses_powerful",
+          "exit_code": 0,
+          "timed_out": false,
+          "passed": true,
+          "seconds": 15.53
+        },
+        {
+          "case": "read_pi_to_smol",
+          "profile": "responses_powerful",
+          "exit_code": 0,
+          "timed_out": false,
+          "passed": true,
+          "seconds": 17.54
+        },
+        {
+          "case": "parallel_smol_to_pi",
+          "profile": "responses_powerful",
+          "exit_code": 0,
+          "timed_out": false,
+          "passed": true,
+          "seconds": 39.37
+        },
+        {
+          "case": "parallel_pi_to_smol",
+          "profile": "responses_powerful",
+          "exit_code": 1,
+          "timed_out": false,
+          "passed": false,
+          "seconds": 45.45
+        },
+        {
+          "case": "goal_smol_to_pi",
+          "profile": "responses_powerful",
+          "exit_code": 0,
+          "timed_out": false,
+          "passed": true,
+          "seconds": 26.98
+        },
+        {
+          "case": "goal_pi_to_smol",
+          "profile": "responses_powerful",
+          "exit_code": 0,
+          "timed_out": false,
+          "passed": true,
+          "seconds": 30.08
+        },
+        {
+          "case": "context_smol_to_pi",
+          "profile": "responses_powerful",
+          "exit_code": 0,
+          "timed_out": false,
+          "passed": true,
+          "seconds": 26.18
+        },
+        {
+          "case": "context_pi_to_smol",
+          "profile": "responses_powerful",
+          "exit_code": 0,
+          "timed_out": false,
+          "passed": true,
+          "seconds": 26.23
+        },
+        {
+          "case": "memory_handoff",
+          "profile": "responses_powerful",
+          "exit_code": 1,
+          "timed_out": false,
+          "passed": false,
+          "seconds": 25.79
+        }
+      ],
+      "attempt_revisions": [
+        "bf9fbc83205a891ae271f2716f4b63454f325dac"
+      ],
+      "all_attempts_clean": true
+    },
+    {
+      "directory": "/Users/bytedance/code/data_clear/AgentLoom-validation/t11/campaign-final-02",
+      "total": 18,
+      "passed": 16,
+      "cases": [
+        {
+          "case": "read_smol_to_pi",
+          "profile": "powerful",
+          "exit_code": 0,
+          "timed_out": false,
+          "passed": true,
+          "seconds": 15.45
+        },
+        {
+          "case": "read_pi_to_smol",
+          "profile": "powerful",
+          "exit_code": 0,
+          "timed_out": false,
+          "passed": true,
+          "seconds": 18.86
+        },
+        {
+          "case": "parallel_smol_to_pi",
+          "profile": "powerful",
+          "exit_code": 0,
+          "timed_out": false,
+          "passed": true,
+          "seconds": 29.2
+        },
+        {
+          "case": "parallel_pi_to_smol",
+          "profile": "powerful",
+          "exit_code": 0,
+          "timed_out": false,
+          "passed": true,
+          "seconds": 34.42
+        },
+        {
+          "case": "goal_smol_to_pi",
+          "profile": "powerful",
+          "exit_code": 0,
+          "timed_out": false,
+          "passed": true,
+          "seconds": 20.04
+        },
+        {
+          "case": "goal_pi_to_smol",
+          "profile": "powerful",
+          "exit_code": 0,
+          "timed_out": false,
+          "passed": true,
+          "seconds": 33.47
+        },
+        {
+          "case": "context_smol_to_pi",
+          "profile": "powerful",
+          "exit_code": 0,
+          "timed_out": false,
+          "passed": true,
+          "seconds": 55.36
+        },
+        {
+          "case": "context_pi_to_smol",
+          "profile": "powerful",
+          "exit_code": 0,
+          "timed_out": false,
+          "passed": true,
+          "seconds": 22.28
+        },
+        {
+          "case": "memory_handoff",
+          "profile": "powerful",
+          "exit_code": 1,
+          "timed_out": false,
+          "passed": false,
+          "seconds": 70.12
+        },
+        {
+          "case": "read_smol_to_pi",
+          "profile": "responses_powerful",
+          "exit_code": 0,
+          "timed_out": false,
+          "passed": true,
+          "seconds": 19.61
+        },
+        {
+          "case": "read_pi_to_smol",
+          "profile": "responses_powerful",
+          "exit_code": 0,
+          "timed_out": false,
+          "passed": true,
+          "seconds": 16.08
+        },
+        {
+          "case": "parallel_smol_to_pi",
+          "profile": "responses_powerful",
+          "exit_code": 0,
+          "timed_out": false,
+          "passed": true,
+          "seconds": 23.5
+        },
+        {
+          "case": "parallel_pi_to_smol",
+          "profile": "responses_powerful",
+          "exit_code": 0,
+          "timed_out": false,
+          "passed": true,
+          "seconds": 46.08
+        },
+        {
+          "case": "goal_smol_to_pi",
+          "profile": "responses_powerful",
+          "exit_code": 0,
+          "timed_out": false,
+          "passed": true,
+          "seconds": 19.54
+        },
+        {
+          "case": "goal_pi_to_smol",
+          "profile": "responses_powerful",
+          "exit_code": 0,
+          "timed_out": false,
+          "passed": true,
+          "seconds": 29.07
+        },
+        {
+          "case": "context_smol_to_pi",
+          "profile": "responses_powerful",
+          "exit_code": 0,
+          "timed_out": false,
+          "passed": true,
+          "seconds": 63.35
+        },
+        {
+          "case": "context_pi_to_smol",
+          "profile": "responses_powerful",
+          "exit_code": 0,
+          "timed_out": false,
+          "passed": true,
+          "seconds": 23.35
+        },
+        {
+          "case": "memory_handoff",
+          "profile": "responses_powerful",
+          "exit_code": 1,
+          "timed_out": false,
+          "passed": false,
+          "seconds": 48.56
+        }
+      ],
+      "attempt_revisions": [
+        "93890428f5413a2be460981df28ea7f16028fe0d"
+      ],
+      "all_attempts_clean": true
+    },
+    {
+      "directory": "/Users/bytedance/code/data_clear/AgentLoom-validation/t11/campaign-final-03",
+      "total": 18,
+      "passed": 17,
+      "cases": [
+        {
+          "case": "read_smol_to_pi",
+          "profile": "powerful",
+          "exit_code": 0,
+          "timed_out": false,
+          "passed": true,
+          "seconds": 26.47
+        },
+        {
+          "case": "read_pi_to_smol",
+          "profile": "powerful",
+          "exit_code": 0,
+          "timed_out": false,
+          "passed": true,
+          "seconds": 26.73
+        },
+        {
+          "case": "parallel_smol_to_pi",
+          "profile": "powerful",
+          "exit_code": 0,
+          "timed_out": false,
+          "passed": true,
+          "seconds": 37.93
+        },
+        {
+          "case": "parallel_pi_to_smol",
+          "profile": "powerful",
+          "exit_code": 0,
+          "timed_out": false,
+          "passed": true,
+          "seconds": 35.12
+        },
+        {
+          "case": "goal_smol_to_pi",
+          "profile": "powerful",
+          "exit_code": 0,
+          "timed_out": false,
+          "passed": true,
+          "seconds": 21.2
+        },
+        {
+          "case": "goal_pi_to_smol",
+          "profile": "powerful",
+          "exit_code": 0,
+          "timed_out": false,
+          "passed": true,
+          "seconds": 33.95
+        },
+        {
+          "case": "context_smol_to_pi",
+          "profile": "powerful",
+          "exit_code": 0,
+          "timed_out": false,
+          "passed": true,
+          "seconds": 38.2
+        },
+        {
+          "case": "context_pi_to_smol",
+          "profile": "powerful",
+          "exit_code": 0,
+          "timed_out": false,
+          "passed": true,
+          "seconds": 26.78
+        },
+        {
+          "case": "memory_handoff",
+          "profile": "powerful",
+          "exit_code": -2,
+          "timed_out": true,
+          "passed": false,
+          "seconds": 240.3
+        },
+        {
+          "case": "read_smol_to_pi",
+          "profile": "responses_powerful",
+          "exit_code": 0,
+          "timed_out": false,
+          "passed": true,
+          "seconds": 39.85
+        },
+        {
+          "case": "read_pi_to_smol",
+          "profile": "responses_powerful",
+          "exit_code": 0,
+          "timed_out": false,
+          "passed": true,
+          "seconds": 38.84
+        },
+        {
+          "case": "parallel_smol_to_pi",
+          "profile": "responses_powerful",
+          "exit_code": 0,
+          "timed_out": false,
+          "passed": true,
+          "seconds": 36.65
+        },
+        {
+          "case": "parallel_pi_to_smol",
+          "profile": "responses_powerful",
+          "exit_code": 0,
+          "timed_out": false,
+          "passed": true,
+          "seconds": 57.04
+        },
+        {
+          "case": "goal_smol_to_pi",
+          "profile": "responses_powerful",
+          "exit_code": 0,
+          "timed_out": false,
+          "passed": true,
+          "seconds": 24.62
+        },
+        {
+          "case": "goal_pi_to_smol",
+          "profile": "responses_powerful",
+          "exit_code": 0,
+          "timed_out": false,
+          "passed": true,
+          "seconds": 30.65
+        },
+        {
+          "case": "context_smol_to_pi",
+          "profile": "responses_powerful",
+          "exit_code": 0,
+          "timed_out": false,
+          "passed": true,
+          "seconds": 28.59
+        },
+        {
+          "case": "context_pi_to_smol",
+          "profile": "responses_powerful",
+          "exit_code": 0,
+          "timed_out": false,
+          "passed": true,
+          "seconds": 27.5
+        },
+        {
+          "case": "memory_handoff",
+          "profile": "responses_powerful",
+          "exit_code": 0,
+          "timed_out": false,
+          "passed": true,
+          "seconds": 59.0
+        }
+      ],
+      "attempt_revisions": [
+        "5778592be3eac31457de0395f799b20f7dd71812"
+      ],
+      "all_attempts_clean": true
+    },
+    {
+      "directory": "/Users/bytedance/code/data_clear/AgentLoom-validation/t11/memory-recheck-04",
+      "total": 2,
+      "passed": 2,
+      "cases": [
+        {
+          "case": "memory_handoff",
+          "profile": "powerful",
+          "exit_code": 0,
+          "timed_out": false,
+          "passed": true,
+          "seconds": 51.88
+        },
+        {
+          "case": "memory_handoff",
+          "profile": "responses_powerful",
+          "exit_code": 0,
+          "timed_out": false,
+          "passed": true,
+          "seconds": 56.15
+        }
+      ],
+      "attempt_revisions": [
+        "be3c35daf29748b21696db1ac3f9c77dae46af3a"
+      ],
+      "all_attempts_clean": true
+    }
+  ],
+  "attempt_totals": {
+    "total": 59,
+    "passed": 52,
+    "failed": 7,
+    "relabelled_not_run": 0
+  },
+  "resolved_findings": [
+    "Clarify array provenance and exact trusted fact extraction without relaxing the evidence gate",
+    "Keep platform-injected snapshot wrappers out of task lifecycle history; model context and existing safety rules stay intact",
+    "Accept Responses ReasoningItem metadata while still rejecting tool calls, non-assistant messages and missing final JSON",
+    "Validate shipped YAML for both existing supported runtimes",
+    "Assert nonempty unique Pi native session IDs and their root/task/instance bindings"
+  ],
+  "limits": [
+    "Pi write/Shell (10), checkpoint recovery (12), and Pi-only distribution (13) are outside this ticket",
+    "Snapshot timing, scope promotion, and source replacement after ContextRef creation are deterministic-model real-runtime Application checks; live matrix verifies ordinary tool and memory/history flows",
+    "Historical model format/argument failures and one provider HTTP timeout are retained; latest rechecks passed",
+    "Ticket14 must rerun combined acceptance after all dependencies merge"
+  ]
+}
