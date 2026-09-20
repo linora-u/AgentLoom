@@ -11,8 +11,23 @@ export function nativeTools(manifest: Obj[], cwd: string, invoke: Callback, iden
   const seen = new Set<string>();
   const selected = new Map(manifest.map(tool => [tool.visible_name, tool]));
   const ajv = new Ajv2020({strict: true, coerceTypes: false, useDefaults: false});
-  const validators = new Map(manifest.map(tool => [tool.visible_name, ajv.compile(tool.parameters)]));
+  const validators = new Map(manifest.filter(tool => tool.owner === "runtime").map(tool => [tool.visible_name, ajv.compile(tool.parameters)]));
   const tools: ToolDefinition<any, any>[] = manifest.map(entry => {
+    if (entry.owner !== "runtime") {
+      if (entry.operation === "write" || entry.operation === "shell") throw new Error("Unsupported platform tool");
+      return {name: entry.visible_name, label: entry.visible_name, description: entry.parameters.description || entry.capability,
+        parameters: entry.parameters, executionMode: "parallel",
+        execute: async (callId: string, args: any) => {
+          const record = permits.get(callId)?.record;
+          permits.delete(callId);
+          if (!record || record.call_id !== callId || record.tool_name !== entry.visible_name ||
+              !isDeepStrictEqual(record.input, args)) throw new Error("Missing platform tool receipt");
+          if (record.status !== "completed") throw new Error(record.error?.message || "AgentLoom tool failed");
+          return {content: [{type: "text" as const, text: typeof record.output === "string" ? record.output : JSON.stringify(record.output)}],
+            details: {agentloom: record}};
+        },
+      };
+    }
     if (entry.owner !== "runtime" || entry.provider !== "pi" || entry.visible_name !== "read" || entry.operation !== "read")
       throw new Error("Unsupported native tool");
     const official = createReadToolDefinition(cwd);
@@ -58,11 +73,20 @@ export function nativeTools(manifest: Obj[], cwd: string, invoke: Callback, iden
         batch.add(part.id);
       }
       for (const id of batch) seen.add(id);
-      for (const part of replacement.content) {
-        if (part.type !== "toolCall") continue;
+      await Promise.all(replacement.content.map(async part => {
+        if (part.type !== "toolCall") return;
         permits.set(part.id, {});
         const entry = selected.get(part.name)!;
         const callIdentity = identity(part.id);
+        if (entry.owner !== "runtime") {
+          const completed = await invoke({method: "platform_invoke", identity: callIdentity,
+            tool_name: part.name, arguments: part.arguments});
+          if (completed.record.call_id !== part.id || completed.record.tool_name !== part.name)
+            throw new Error("Platform receipt identity mismatch");
+          permits.set(part.id, completed);
+          part.arguments = completed.record.input;
+          return;
+        }
         const prepared = await invoke({method: "tool_prepare", call: {identity: callIdentity, tool: entry, cwd,
           raw_arguments: part.arguments}});
         const grant = prepared.authorization;
@@ -71,11 +95,15 @@ export function nativeTools(manifest: Obj[], cwd: string, invoke: Callback, iden
           throw new Error("Invalid native authorization");
         permits.set(part.id, prepared);
         if (grant) part.arguments = grant.final_arguments;
-      }
+      }));
       return {message: replacement};
     });
     pi.on("tool_call", ({toolCallId, toolName, input}) => {
       const permit = permits.get(toolCallId);
+      if (permit?.record && permit.record.tool_name === toolName && isDeepStrictEqual(permit.record.input, input)) {
+        if (permit.record.status !== "completed") return {block: true, reason: permit.record.error?.message || "AgentLoom tool rejected"};
+        return;
+      }
       if (!permit?.authorization || permit.authorization.tool.visible_name !== toolName ||
           !isDeepStrictEqual(permit.authorization.final_arguments, input))
         return {block: true, reason: permit?.rejection?.error?.message || "Missing or mismatched AgentLoom authorization"};

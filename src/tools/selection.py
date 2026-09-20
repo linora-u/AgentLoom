@@ -32,12 +32,18 @@ def resolve_runtime_toolsets(
         and (values.get("_default_toolsets_source", "global_system") == "global_system")
     )
     names = []
+
+    def validate_selection(spec):
+        if runtime_id == "pi" and spec.operation in {"write", "shell"}:
+            raise ValueError(f"Pi does not yet support write/Shell tool '{spec.name}'")
+
     for name in resolve_toolsets(raw):
         spec = get_tool_spec(name)
         if spec.owner == "runtime" and spec.provider != runtime_id:
             if inherited:
                 continue
             raise ValueError(f"Tool '{name}' has no compatible mapping for runtime '{runtime_id}'")
+        validate_selection(spec)
         names.append(name)
     for item in values.get("tools") or []:
         if not isinstance(item, dict) or "name" not in item:
@@ -46,11 +52,8 @@ def resolve_runtime_toolsets(
             if item["name"] in names:
                 raise ValueError(f"Duplicate tool name: {item['name']}")
             continue
-        if runtime_id == "smolagents":
-            # Its builtin-reference validator/loader owns unknown-name errors.
-            # Native selection additionally requires a cross-provider mapping.
-            continue
         spec = get_tool_spec(item["name"])
         if spec.owner == "runtime" and spec.provider != runtime_id:
             raise ValueError(f"Tool '{spec.name}' has no compatible mapping for runtime '{runtime_id}'")
+        validate_selection(spec)
     return names
