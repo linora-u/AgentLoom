@@ -208,11 +208,13 @@ class PiTransport:
                     self.process.wait(timeout=2)
         finally:
             self._closed = True
-            self._fail("Pi bridge closed", category="interrupted")
             self._reader.join(timeout=2)
             for pipe in (self.process.stdin, self.process.stdout):
                 if pipe is not None:
                     pipe.close()
+            # Validate buffered frames before installing a synthetic close reason.
+            # A late duplicate response must retain its protocol failure.
+            self._fail("Pi bridge closed", category="interrupted")
             self._directory.cleanup()
         if self._failure is not None and self._failure.category != "interrupted":
             raise self._failure
