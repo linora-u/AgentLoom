@@ -1,12 +1,11 @@
 from __future__ import annotations
 
 import pytest
-from agentloom.adapters.mcp.adapter import AgentLoomSmolAgentsAdapter, McpToolExecutionError
+from agentloom.adapters.mcp.adapter import AgentLoomMCPAdapter, McpToolExecutionError
 from agentloom.runtime.hooks import HookPlan, HookRun
 from agentloom.runtime.tool_gateway import AgentLoomToolGateway
 from agentloom.runtime.trace import ExplicitExecutionContext, bind_explicit_execution_context
 from mcp.types import CallToolResult, TextContent, Tool
-from smolagents.tools import handle_agent_output_types
 
 
 def _mcp_tool() -> Tool:
@@ -20,8 +19,19 @@ def _mcp_tool() -> Tool:
     )
 
 
+@pytest.mark.parametrize("original, visible", [("read-file", "read_file"), ("42-days", "_42_days"), ("class", "class_")])
+def test_mcp_keeps_historical_visible_tool_names(original, visible):
+    declaration = _mcp_tool().model_copy(update={"name": original})
+    adapted = AgentLoomMCPAdapter().adapt(
+        lambda arguments: CallToolResult(content=[TextContent(type="text", text=arguments["query"])]),
+        declaration,
+    )
+    assert adapted.definition.name == visible
+    assert adapted.forward(query="actual value") == "actual value"
+
+
 def test_mcp_is_error_becomes_a_tool_execution_failure_with_all_text() -> None:
-    adapter = AgentLoomSmolAgentsAdapter(structured_output=True)
+    adapter = AgentLoomMCPAdapter()
     adapted = adapter.adapt(
         lambda _arguments: CallToolResult(
             isError=True,
@@ -42,7 +52,7 @@ def test_mcp_is_error_becomes_a_tool_execution_failure_with_all_text() -> None:
 
 
 def test_mcp_structured_content_is_preserved_on_success() -> None:
-    adapter = AgentLoomSmolAgentsAdapter(structured_output=True)
+    adapter = AgentLoomMCPAdapter()
     adapted = adapter.adapt(
         lambda _arguments: CallToolResult(
             content=[TextContent(type="text", text='{"fallback": true}')],
@@ -55,7 +65,7 @@ def test_mcp_structured_content_is_preserved_on_success() -> None:
 
 
 def test_mcp_error_keeps_kind_through_hook_and_canonical_settlement() -> None:
-    adapted = AgentLoomSmolAgentsAdapter(structured_output=True).adapt(
+    adapted = AgentLoomMCPAdapter().adapt(
         lambda _arguments: CallToolResult(
             isError=True,
             content=[TextContent(type="text", text="database unavailable")],
@@ -64,7 +74,6 @@ def test_mcp_error_keeps_kind_through_hook_and_canonical_settlement() -> None:
     )
     gateway = AgentLoomToolGateway.from_tools(
         [adapted],
-        output_normalizer=handle_agent_output_types,
     )
     run = HookRun(HookPlan(), local_run_id="mcp-local", root_run_id="mcp-root")
     execution = ExplicitExecutionContext(
@@ -83,7 +92,7 @@ def test_mcp_error_keeps_kind_through_hook_and_canonical_settlement() -> None:
     with bind_explicit_execution_context(execution):
         settled = gateway.invoke(
             call_id="mcp-call",
-            tool_name=adapted.name,
+            tool_name=adapted.definition.name,
             arguments={"query": "agent state"},
         )
 
