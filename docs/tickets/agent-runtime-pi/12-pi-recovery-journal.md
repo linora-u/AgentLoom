@@ -1,0 +1,32 @@
+# 12: Pi 中断恢复与工具双日志对齐
+
+**What to build:** 一个已产生真实工具效果的 Pi 任务中断后可按支持边界恢复，已提交工作不重做，无法确定的副作用不会被自动重复执行。
+
+**Blocked by:** 10：Pi 官方写入和 Shell 产生可保护、可检索的结果
+
+**Status:** draft — 拆分待确认，尚未发布 GitHub；不代表已开工或已完成。
+
+**Required:** Yes — 本票属于最终交付必做项。
+
+**Session:** 沿用 Pi session；可与尚未完成的 11、13 并行
+
+## Scope
+
+集中实现同基座恢复、host/native journal 对齐和两个精确 crash window；不重复开发前面已经覆盖的全部取消机制。
+
+## Acceptance criteria
+
+- [ ] 正常 Pi session 重启后用同一 task、新 Run 继续，已完成 Worker 结果和已提交工具结果可复用。
+- [ ] 验证副作用已发生但 host 未提交的窗口：标记 uncertain，保留证据，不伪造未执行或成功，也不自动重试。
+- [ ] 验证 host 已提交、native toolResult 未持久化的窗口：通过支持的 SDK 补齐已提交结果而不执行工具；用独立文件/计数器核对执行次数。
+- [ ] 不兼容版本、跨 runtime 或无法安全对齐的状态明确拒绝；不能通过一律拒绝恢复来让正常恢复用例通过。
+- [ ] 恢复/compaction/等待结果期间可取消，协议损坏与子进程死亡能释放 pending 请求及受管子进程。
+- [ ] checkpoint、journal 和 native session 的关联、持久化顺序、版本以及终态唯一性可被独立验证。
+- [ ] 公共 checkpoint 协调的修改由本票独占经协调者接线，G1 已固定的 journal 合同如需变更须先升级共享合同。
+
+## Handoff
+
+交付可复现恢复材料、故障点与独立 oracle；14 不再承担遗漏的恢复功能开发。
+
+实施遵循已生成的 Pi 接入规格、并行开发计划及本轮票据执行索引。只认已集成、已验证的依赖提交；不要自行跳过阻塞任务，也不要从其他 worktree 复制未提交改动。
+
