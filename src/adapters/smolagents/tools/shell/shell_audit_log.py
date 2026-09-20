@@ -63,6 +63,9 @@ class _AuditScope:
     sink: _AuditSink | None = None
     loggers: dict[str, ShellAuditLogger] = field(default_factory=dict)
 
+    def close(self) -> None:
+        _close_scope(self)
+
 
 _CURRENT_AUDIT_SCOPE: contextvars.ContextVar[_AuditScope | None] = (
     contextvars.ContextVar("agentloom_shell_audit_scope", default=None)
@@ -242,11 +245,31 @@ def _scope_for_context(
 ) -> _AuditScope:
     runtime_key = _context_key(runtime_context)
     assert runtime_key is not None
+    from agentloom.runtime.logging.logger_manager import LogScopeClosed, get_logger_resource
+    from agentloom.runtime.resources import register_resource
+
+    def create_scope() -> _AuditScope:
+        created = _AuditScope(runtime_key=runtime_key, sink=_AuditSink(
+            runtime_context, max_file_bytes=max_file_bytes, backup_count=backup_count,
+        ))
+        # Run-owned: one Worker's close must not close another Worker's audit sink.
+        register_resource(f"smol.audit.{id(created)}", created.close, instance_id="")
+        return created
+
+    try:
+        shared_scope = get_logger_resource("smol.shell.audit", create_scope)
+    except LogScopeClosed:
+        # Late contexts never reopen a file after Application finalization.
+        return _AuditScope(runtime_key=runtime_key)
+    if shared_scope is not None:
+        _CURRENT_AUDIT_SCOPE.set(shared_scope)
+        return shared_scope
+
     scope = _CURRENT_AUDIT_SCOPE.get()
     if scope is None or scope.runtime_key != runtime_key:
         if scope is not None:
             _close_scope(scope)
-        scope = _AuditScope(runtime_key=runtime_key)
+        scope = create_scope()
         _CURRENT_AUDIT_SCOPE.set(scope)
     if scope.sink is None:
         scope.sink = _AuditSink(

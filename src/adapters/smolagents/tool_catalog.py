@@ -188,7 +188,7 @@ def tool_specs() -> tuple[ToolSpec, ...]:
         ),
         _spec(
             "todo_write",
-            "agentloom.tools.todo.todo_write",
+            "agentloom.adapters.smolagents.tools.todo.todo_write",
             "planning",
             "Write the current task plan.",
             "planning",
