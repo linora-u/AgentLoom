@@ -27,6 +27,37 @@
 
 目前定向回归通过：工具/catalog/读取/资源 61 项；私有执行、Todo、提示词、Application 163 项；Shell 审计和导入隔离 63 项。阶段 2 的 14 个改动模块通过 mypy。大组工具回归 969 通过、1 跳过，后置 Application 的 3 个失败与遗留任务上下文有关，独立 Application 回归 3 项通过，继续查根因。
 
+## 实例隔离修正
+
+两个可复现的失败已通过独立回归定位：读取缓存原先是进程级单例，Worker B 会误以为自己读过 Worker A 读取的文件；旧 `task_context` 在恢复父任务时读取了另一个线程的全局 fallback，污染后续 Application 的显式任务 ID。
+
+读取缓存现按完整 RuntimeKey 和 Agent instance 保存，登记 03 的捕获句柄关闭回调；关闭 A 不清空 B 的读取状态。直接调用工具、没有 Run 的旧调用者保留 standalone cache。任务上下文只恢复本 ContextVar 的显式父 ID。两个新增测试先复现失败，修改后连同 Shell 并发与后置 Application 共 31 项通过。
+
+## 04 → 06 保护调用点交接
+
+以下路径均以 `src/adapters/smolagents/tools/` 为根。06 在 04 与 05 均集成后接收这些文件的修改权，沿既有调用提取公共政策；不要再从旧路径复制实现。
+
+| 迁移后文件 | 保留的保护与调用者 | 对应回归 |
+| --- | --- | --- |
+| `file_ops/_read_file_state.py` | `check_staleness`、`update_after_write` 被 `edit_file/edit_file.py`、`write_file/write_file.py` 使用；06 分离写前保护，读取范围缓存/去重继续归 smol，并保留实例隔离 | `tests/tools_test/file_ops/test_edit_file.py`、`test_write_file.py`；`tests/tools_test/test_smol_native_tools.py` |
+| `file_ops/_safety.py` | read/edit/write 调用 `normalize_path`、`validate_file_access`；设备、二进制、读取大小策略仍属具体读取实现 | `test_safety.py`、`test_file_path_validation.py`、`test_read_file.py` |
+| `search/search_utils.py` | `_load_exclude_paths` 经 `rg_exclude_globs` / `merged_skip_dirs` 提供给 grep/glob；06 提取权限配置访问，保留各自搜索格式 | `tests/tools_test/search/test_search_exclude_e2e.py`、`test_grep_exclude.py`、`test_glob_exclude.py` |
+| `shell/validator.py`、`security.py`、`path_validation.py`、`readonly_validation.py` | `shell_tool.py` 在执行前调用 `validate_command`，再进入安全/路径/只读规则；06 统一政策调用，保留实际 session cwd 和最终输入约束 | `tests/tools_test/shell/test_validator.py`、`test_security.py`、`test_path_validation.py`、`test_path_security.py`、`test_readonly_validation.py` |
+| `shell/shell_command_ast.py`、`pipe_redirect.py` | 命令解析及重定向分析；按政策/执行职责拆分，避免复制规则引擎 | `test_path_security.py`、`test_pipe_redirect.py`、`test_security.py` |
+
+Shell process/session/background/watchdog/output、退出码解释和审计资源实现继续归 smol。`runtime/resources.py`、Gateway、Goal、长期记忆、ContextRef 的公共合同未改。
+
+## 兼容入口清单（供 13 / 14）
+
+- [路径清单](04-path-migration.json) 中旧工具叶子模块：仅别名；旧包 `__init__.py` 保留逐项导出。旧 YAML builtin 名、core toolset 和固定参数持续支持。
+- `runtime.todo`、`tools.todo`、`runtime.error_recovery`、`runtime.prompts.prompt_builder` 及 prompt 包的旧导出：测试和外部 Python 调用者仍使用；生产 smol 调用已改为新路径。
+- `CheckpointManager.load_todos/replace_todos` 与 Coordinator 同名入口：测试/旧调用者兼容；生产 smol provider 不再通过它们执行。`_todos_path` 也是旧辅助入口。
+- `application.validation` 的旧执行/Todo validator、`application.runtime_options.SMOL_DEFAULTS/LEGACY_OPTIONS`：兼容转发；实现位于 smol options，且不加载 SDK。
+- RuntimeDefinition 的旧 smol 字段、BaseAgent 的旧 `max_steps` 子类覆盖、公共 Gateway 的旧 `final_answer_binding`：保留 02 expand 合同。final_answer 实现和 manifest 已由 smol 持有。
+- `tools.shell.subprocess_env`：唯一实现在公共 runtime；smol、Hook 等生产调用已直接指向公共实现。
+
+14 只在确认调用者迁走后清理内部别名。旧 YAML 和用户显式模板路径不是可删除的内部别名。
+
 ## 验收计划
 
 运行原有工具、保护、Todo、提示词、协议回放、checkpoint 与应用兼容测试，不删除已有行为断言。最终代码候选固定后，运行：
