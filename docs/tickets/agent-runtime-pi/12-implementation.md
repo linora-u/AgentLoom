@@ -14,7 +14,7 @@ SDK 的 extension `message_end` 发生在原生消息入库之前。因此该阶
 
 ## 契约与压缩
 
-Pi JSONL v2 增补 `session_checkpoint` 回调和可选 checkpoint_enabled 字段；common native-tool 契约仍为 v1。Pi 状态 schema 为 1，绑定官方 SDK 0.79.4 / 原生会话格式 3，不保证跨 SDK 状态迁移。
+Pi JSONL v2 增补 `session_checkpoint` 回调和可选 checkpoint_enabled 字段；common native-tool 契约仍为 v1。Pi bridge 版本为 1，状态 schema 为 2，绑定官方 SDK 0.79.4 / 原生会话格式 3，不保证跨 bridge、状态 schema 或 SDK 的状态迁移。
 
 默认仍关闭自动压缩，可用 Pi 专属 runtime_options.compaction 启用官方算法。压缩前后落 checkpoint，取消同时调用 SDK abortCompaction 与 abort。
 

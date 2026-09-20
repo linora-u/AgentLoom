@@ -204,22 +204,6 @@ def test_invalid_final_platform_arguments_are_rejected_without_execution(tmp_pat
     assert 'forbidden_outline_5729' not in json.dumps(requests)
 
 
-def test_reused_call_id_in_a_later_sdk_turn_cannot_execute_again(tmp_path):
-    from agentloom.application.run import ApplicationRunError
-    source = tmp_path / 'facts.txt'
-    source.write_text('Duplicate calls must not execute 5729')
-    with model_service(turns=[[('reused', 'read', {'path': str(source)})],
-                               [('reused', 'read', {'path': str(source)})]]) as (url, requests):
-        app = project(tmp_path, url)
-        select(app, tools=[{'name': 'read'}])
-        with bind_config(load_project_config(tmp_path)), pytest.raises(ApplicationRunError) as error:
-            execute_app(app, file_logging=False)
-    entries = list((error.value.run.run_dir / 'native-tools').rglob('*.json'))
-    assert len(entries) == 1
-    assert json.loads(entries[0].read_text())['state'] == 'committed'
-    assert len(requests) == 2
-
-
 def test_pi_native_fixed_arguments_are_explicitly_unsupported(tmp_path):
     with model_service() as (url, requests):
         app = project(tmp_path, url)

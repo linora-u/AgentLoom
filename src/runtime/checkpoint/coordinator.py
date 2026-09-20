@@ -361,7 +361,7 @@ class CheckpointCoordinator:
         input_hash: str,
         task_input: str,
         run_id: str,
-    ) -> str | None:
+    ) -> tuple[bool, str]:
         """Return one result proven complete in the specified original Run."""
         tree = self._cm.load_task_tree(self._task_id) or {}
         calls = (tree.get("workers") or {}).get(agent_name, [])
@@ -374,11 +374,16 @@ class CheckpointCoordinator:
             and call.get("attempt_run_id") == run_id
             and call.get("input_hash") == input_hash
             and call.get("task_input") == task_input
-            and isinstance(call.get("result"), str)
+            and (
+                call.get("result") is None
+                or isinstance(call.get("result"), str)
+            )
         ]
         if len(matches) > 1:
             raise ValueError("Worker recovery evidence is ambiguous")
-        return matches[0]["result"] if matches else None
+        if not matches:
+            return False, ""
+        return True, str(matches[0].get("result") or "")
 
     def load_worker_runtime_checkpoint(
         self,

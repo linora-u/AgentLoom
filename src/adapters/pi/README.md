@@ -42,7 +42,8 @@ tools: []
 toolsets: []
 ```
 
-Disable checkpoint for this Application. Run with the existing
+Checkpoint is optional for this Application; enable it when task resume is
+required. Run with the existing
 `loom run applications/<app>/workflows/root.yaml` or `execute_app` entry.
 Dependency installation is explicit; Application execution never runs npm.
 Python packages include our bridge sources, schema and lock, not `node_modules`
