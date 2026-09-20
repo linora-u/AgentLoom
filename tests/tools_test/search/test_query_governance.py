@@ -47,7 +47,8 @@ def test_python_search_cannot_follow_alias_into_excluded_directory(tmp_path, too
 
 
 @pytest.mark.parametrize("backend", ["rg", "python"])
-def test_exclusion_alias_protects_canonical_directory(tmp_path, backend):
+@pytest.mark.parametrize("absolute", [True, False])
+def test_exclusion_alias_protects_canonical_directory(tmp_path, backend, absolute):
     module = import_module("agentloom.adapters.smolagents.tools.search.grep_tool.grep_tool")
     if backend == "rg" and not module._RG_PATH:
         pytest.skip("ripgrep unavailable")
@@ -55,7 +56,7 @@ def test_exclusion_alias_protects_canonical_directory(tmp_path, backend):
     (tmp_path / "secrets" / "hidden.txt").write_text("MATCH_SECRET")
     (tmp_path / "private-alias").symlink_to(tmp_path / "secrets", target_is_directory=True)
     (tmp_path / "public.txt").write_text("MATCH_PUBLIC")
-    set_current_agent_config({"tool_access_control": {"path_validation": [{"tools": ["grep_search"], "exclude_paths": [str(tmp_path / "private-alias")]}]}})
+    set_current_agent_config({"tool_access_control": {"path_validation": [{"tools": ["grep_search"], "exclude_paths": [str(tmp_path / "private-alias") if absolute else "private-alias"]}]}})
     original = module._RG_PATH
     try:
         if backend == "python":

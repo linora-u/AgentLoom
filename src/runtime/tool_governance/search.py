@@ -16,7 +16,7 @@ def load_exclude_paths(tool_name: str = "grep_search") -> List[str]:
         from agentloom.runtime.permissions.workspace import get_rule_exclude_paths
         for excl in get_rule_exclude_paths(tool_name):
             if excl.strip():
-                dirs.append(excl.strip().rstrip("/"))
+                dirs.append(excl.strip().rstrip("/") or "/")
     except ImportError:
         pass
 
@@ -33,6 +33,7 @@ def validate_shell_query_scope(command: str, cwd: str | None = None) -> None:
     """
     import os
     import shlex
+    import re
     from pathlib import Path
     from agentloom.runtime.tool_governance.shell.shell_command_ast import analyze_shell_command
     query_tools = ("grep_search", "glob_search", "list_directory", "shell_tool")
@@ -43,7 +44,9 @@ def validate_shell_query_scope(command: str, cwd: str | None = None) -> None:
         raise ValueError("Shell input redirection has no verified query exclusion mapping")
     for invocation in analysis.commands:
         name = invocation.name.strip("\"'")
-        if any(char in invocation.source for char in "$*?[]~`\\"):
+        # Positive literal grammar: shlex alone does not account for brace,
+        # pathname, parameter or command expansion in Bash/Zsh.
+        if not re.fullmatch(r"[A-Za-z0-9_./%:,=+@ \t'\"-]+", invocation.source):
             raise ValueError("Shell expansion has no verified query exclusion mapping")
         if name in {"printf", "echo", "pwd", "true", "false"}:
             continue
@@ -60,12 +63,19 @@ def search_excludes(tool_name: str, root) -> list[str]:
     from pathlib import Path
     import os
     root = Path(root).resolve()
+    from agentloom.runtime.trace import capture_explicit_execution_context
+    from agentloom.runtime.permissions.workspace import get_workspace_root
+    hook = capture_explicit_execution_context().hook_run
+    workspace = Path(hook.project_root).resolve() if hook is not None and hook.project_root else get_workspace_root()
     patterns = []
     for value in load_exclude_paths(tool_name):
         path = Path(os.path.expanduser(value))
         candidates = [path]
-        if path.is_absolute() and not any(c in str(path) for c in "*?["):
-            candidates.append(path.resolve())
+        if not any(c in str(path) for c in "*?["):
+            if path.is_absolute():
+                candidates.append(path.resolve())
+            else:
+                candidates.extend(((root / path).resolve(), (workspace / path).resolve()))
         for candidate in dict.fromkeys(candidates):
             value = str(candidate)
             if candidate.is_absolute():
