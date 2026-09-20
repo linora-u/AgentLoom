@@ -578,6 +578,73 @@
       "title": "PlatformInvoke",
       "type": "object"
     },
+    "PlatformPrepare": {
+      "additionalProperties": false,
+      "properties": {
+        "method": {
+          "const": "platform_prepare",
+          "title": "Method",
+          "type": "string"
+        },
+        "identity": {
+          "$ref": "#/$defs/NativeCallIdentity"
+        },
+        "tool_name": {
+          "minLength": 1,
+          "title": "Tool Name",
+          "type": "string"
+        },
+        "arguments": {
+          "additionalProperties": {
+            "$ref": "#/$defs/JsonValue"
+          },
+          "title": "Arguments",
+          "type": "object"
+        }
+      },
+      "required": [
+        "method",
+        "identity",
+        "tool_name",
+        "arguments"
+      ],
+      "title": "PlatformPrepare",
+      "type": "object"
+    },
+    "PlatformPrepared": {
+      "additionalProperties": false,
+      "properties": {
+        "method": {
+          "const": "platform_prepare",
+          "title": "Method",
+          "type": "string"
+        },
+        "arguments": {
+          "additionalProperties": {
+            "$ref": "#/$defs/JsonValue"
+          },
+          "title": "Arguments",
+          "type": "object"
+        },
+        "rejection": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/TerminalRecord"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        }
+      },
+      "required": [
+        "method",
+        "arguments"
+      ],
+      "title": "PlatformPrepared",
+      "type": "object"
+    },
     "PlatformResult": {
       "additionalProperties": false,
       "properties": {
@@ -700,6 +767,7 @@
               "handshake": "#/$defs/Handshake",
               "model_prepare": "#/$defs/ModelPrepare",
               "platform_invoke": "#/$defs/PlatformInvoke",
+              "platform_prepare": "#/$defs/PlatformPrepare",
               "run": "#/$defs/Run",
               "session_checkpoint": "#/$defs/SessionCheckpoint",
               "snapshot": "#/$defs/Snapshot",
@@ -736,6 +804,9 @@
             },
             {
               "$ref": "#/$defs/PlatformInvoke"
+            },
+            {
+              "$ref": "#/$defs/PlatformPrepare"
             },
             {
               "$ref": "#/$defs/ModelPrepare"
@@ -803,6 +874,7 @@
                   "handshake": "#/$defs/HandshakeResult",
                   "model_prepare": "#/$defs/ModelPermit",
                   "platform_invoke": "#/$defs/PlatformResult",
+                  "platform_prepare": "#/$defs/PlatformPrepared",
                   "run": "#/$defs/RunResult",
                   "session_checkpoint": "#/$defs/SessionCheckpointResult",
                   "snapshot": "#/$defs/SnapshotResult",
@@ -833,6 +905,9 @@
                 },
                 {
                   "$ref": "#/$defs/PlatformResult"
+                },
+                {
+                  "$ref": "#/$defs/PlatformPrepared"
                 },
                 {
                   "$ref": "#/$defs/ModelPermit"

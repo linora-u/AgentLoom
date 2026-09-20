@@ -800,8 +800,6 @@ class ToolGateway(Protocol):
     ``call_id`` in its terminal :class:`ToolCallRecord`; implementations do
     not generate or replace provider call IDs.  ``close`` releases any
     Tool-owned resources and must be safe to call more than once.
-    ``prepare`` finalizes input without authorizing or executing the tool;
-    ``execute_prepared`` consumes that gateway-owned handle exactly once.
     """
 
     @property
@@ -815,6 +813,17 @@ class ToolGateway(Protocol):
         arguments: Mapping[str, Any],
     ) -> ToolCallRecord: ...
 
+    def close(self) -> None: ...
+
+
+@runtime_checkable
+class PreparedToolGateway(ToolGateway, Protocol):
+    """Two-stage execution for runtimes that persist between input and effects.
+
+    ``prepare`` finalizes input without authorizing or executing the tool;
+    ``execute_prepared`` consumes that gateway-owned handle exactly once.
+    """
+
     def prepare(
         self,
         *,
@@ -824,9 +833,6 @@ class ToolGateway(Protocol):
     ) -> PreparedToolCall | ToolCallRecord: ...
 
     def execute_prepared(self, prepared: PreparedToolCall) -> ToolCallRecord: ...
-
-    def close(self) -> None: ...
-
 
 @runtime_checkable
 class ToolManifestSource(Protocol):

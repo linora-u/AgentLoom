@@ -112,8 +112,15 @@ class PlatformInvoke(WireValue):
     arguments: dict[str, JsonValue] = Field(repr=False)
 
 
+class PlatformPrepare(WireValue):
+    method: Literal["platform_prepare"]
+    identity: NativeCallIdentity
+    tool_name: NonEmpty
+    arguments: dict[str, JsonValue] = Field(repr=False)
+
+
 RequestPayload = Annotated[
-    Union[Handshake, Run, Snapshot, Cancel, Close, Prepare, Dispatch, Settle, PlatformInvoke, ModelPrepare, SessionCheckpoint], Field(discriminator="method")
+    Union[Handshake, Run, Snapshot, Cancel, Close, Prepare, Dispatch, Settle, PlatformInvoke, PlatformPrepare, ModelPrepare, SessionCheckpoint], Field(discriminator="method")
 ]
 
 
@@ -230,8 +237,14 @@ class PlatformResult(WireValue):
     record: TerminalRecord = Field(repr=False)
 
 
+class PlatformPrepared(WireValue):
+    method: Literal["platform_prepare"]
+    arguments: dict[str, JsonValue] = Field(repr=False)
+    rejection: TerminalRecord | None = Field(default=None, repr=False)
+
+
 ResultPayload = Annotated[
-    Union[HandshakeResult, RunResult, SnapshotResult, ControlResult, PrepareResult, SettleResult, PlatformResult, ModelPermit, SessionCheckpointResult],
+    Union[HandshakeResult, RunResult, SnapshotResult, ControlResult, PrepareResult, SettleResult, PlatformResult, PlatformPrepared, ModelPermit, SessionCheckpointResult],
     Field(discriminator="method"),
 ]
 
@@ -259,7 +272,7 @@ class Request(Envelope):
             else self.payload.outcome.identity
             if isinstance(self.payload, Settle)
             else self.payload.identity
-            if isinstance(self.payload, (PlatformInvoke, ModelPrepare))
+            if isinstance(self.payload, (PlatformInvoke, PlatformPrepare, ModelPrepare))
             else None
         )
         if identity is not None and (identity.run_id != self.run_id or identity.instance_id != self.instance_id):

@@ -11,7 +11,7 @@ from agentloom.adapters.pi.metadata import CAPABILITIES, SDK_VERSION, validate_m
 from agentloom.adapters.pi.protocol import (
     Handshake, HandshakeResult, ModelSelection, Run, RunResult,
     Prepare, Dispatch, PrepareResult, Settle, SettleResult, TerminalRecord,
-    PlatformInvoke, PlatformResult, ModelPrepare, ModelPermit,
+    PlatformInvoke, PlatformResult, PlatformPrepare, PlatformPrepared, ModelPrepare, ModelPermit,
     SessionCheckpoint, SessionCheckpointResult,
 )
 from agentloom.adapters.pi.checkpoint import PiCheckpointStore
@@ -20,6 +20,7 @@ from agentloom.runtime import get_current_run_context
 from agentloom.runtime.native_tool_host import NativeToolHost
 from agentloom.runtime.native_tools import NativeCallIdentity, NativeCommitAck
 from agentloom.runtime.tool_protocol import ToolCallRecord
+from agentloom.runtime.tool_gateway import PreparedToolCall, PreparedToolGateway
 from agentloom.adapters.pi.transport import PiTransport
 from agentloom.runtime.agent_runtime import (
     AgentRuntimeError, AgentRuntimeRequest, AgentRuntimeResult, RuntimeCheckpointEnvelope, RuntimeDefinition, RuntimeEvent, RuntimeUsage,
@@ -54,6 +55,8 @@ class PiRuntime:
                for tool in definition.tool_manifest):
             raise AgentRuntimeError("Unsupported Pi tool selection", category="unsupported_capability")
         self.definition = definition
+        if any(tool.owner != "runtime" for tool in definition.tool_manifest) and not isinstance(definition.tool_gateway, PreparedToolGateway):
+            raise AgentRuntimeError("Pi platform tools require preparation before execution", category="unsupported_capability")
         self._checkpoint: RuntimeCheckpointEnvelope | None = None
         self.transport = PiTransport(definition.instance_id or uuid4().hex)
         try:
@@ -118,6 +121,7 @@ class PiRuntime:
             **tool.parameters, "description": descriptions[tool.visible_name]}) for tool in definition.tool_manifest]
         model_calls = set()
         platform_calls = set()
+        platform_pending: dict[str, tuple[NativeCallIdentity, PreparedToolCall]] = {}
         platform_lock = Lock()
         emitted_commits = set()
         store = None
@@ -159,10 +163,10 @@ class PiRuntime:
                         state = "denied"
                 return ModelPermit(method="model_prepare", identity=identity, state=state,
                     agent_context=hook.consume_pending_agent_context() if hook is not None and state != "denied" else [])
-            if isinstance(payload, (PlatformInvoke, Prepare, Dispatch)) and shared_goal is not None:
+            if isinstance(payload, (PlatformPrepare, PlatformInvoke, Prepare, Dispatch)) and shared_goal is not None:
                 if shared_goal.snapshot().status == "complete":
                     raise AgentRuntimeError("Goal is complete; further tool work is forbidden", category="tool")
-            if isinstance(payload, PlatformInvoke):
+            if isinstance(payload, PlatformPrepare):
                 identity = payload.identity
                 with platform_lock:
                     if ((identity.application_id, identity.task_id, identity.run_id, identity.instance_id) != (
@@ -170,10 +174,34 @@ class PiRuntime:
                             or payload.tool_name not in platform_entries or identity.call_id in platform_calls):
                         raise AgentRuntimeError("Invalid Pi platform callback identity or selection", category="internal")
                     platform_calls.add(identity.call_id)
+                prepared = cast(PreparedToolGateway, definition.tool_gateway).prepare(call_id=identity.call_id, tool_name=payload.tool_name,
+                                                            arguments=payload.arguments)
+                if isinstance(prepared, ToolCallRecord):
+                    if prepared.status == "completed":
+                        raise AgentRuntimeError("Pi preparation cannot report an executed tool", category="internal")
+                    arguments = dict(prepared.input) if isinstance(prepared.input, dict) else dict(payload.arguments)
+                else:
+                    arguments = dict(prepared.arguments)
+                if store is not None:
+                    store.prepare_platform(identity, payload.tool_name, arguments)
+                if isinstance(prepared, ToolCallRecord):
+                    if store is not None:
+                        store.reject_platform(identity, prepared)
+                    record_tool(prepared, platform_entries[payload.tool_name], identity)
+                    return PlatformPrepared(method="platform_prepare", arguments=arguments, rejection=_terminal(prepared))
+                with platform_lock:
+                    platform_pending[identity.call_id] = (identity, prepared)
+                return PlatformPrepared(method="platform_prepare", arguments=arguments)
+            if isinstance(payload, PlatformInvoke):
+                identity = payload.identity
+                with platform_lock:
+                    pending = platform_pending.pop(identity.call_id, None)
+                if (pending is None or pending[0] != identity or pending[1].tool_name != payload.tool_name
+                        or dict(pending[1].arguments) != payload.arguments):
+                    raise AgentRuntimeError("Pi platform invocation does not match preparation", category="internal")
                 if store is not None:
                     store.start_platform(identity, payload.tool_name, payload.arguments)
-                record = definition.tool_gateway.invoke(call_id=identity.call_id, tool_name=payload.tool_name,
-                                                        arguments=payload.arguments)
+                record = cast(PreparedToolGateway, definition.tool_gateway).execute_prepared(pending[1])
                 if store is not None:
                     store.commit_platform(identity, record)
                 record_tool(record, platform_entries[payload.tool_name], identity)

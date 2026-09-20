@@ -112,8 +112,12 @@ export function nativeTools(manifest: Obj[], cwd: string, invoke: Callback, iden
         const entry = selected.get(part.name)!;
         const callIdentity = identity(part.id);
         if (entry.owner !== "runtime") {
+          const prepared = await invoke({method: "platform_prepare", identity: callIdentity,
+            tool_name: part.name, arguments: part.arguments});
+          part.arguments = prepared.arguments;
           persistence.register(callIdentity, part.name, part.arguments, entry.owner);
-          permits.set(part.id, {platform: true, identity: callIdentity, arguments: structuredClone(part.arguments)});
+          permits.set(part.id, {platform: true, identity: callIdentity, arguments: structuredClone(part.arguments),
+            rejection: prepared.rejection});
           return;
         }
         const prepared = await invoke({method: "tool_prepare", call: {identity: callIdentity, tool: entry, cwd,
@@ -141,8 +145,9 @@ export function nativeTools(manifest: Obj[], cwd: string, invoke: Callback, iden
     pi.on("tool_call", async ({toolCallId, toolName, input}) => {
       await persistence.save();
       const permit = permits.get(toolCallId);
-      if (permit?.platform && isDeepStrictEqual(permit.arguments, input)) {
-        return;
+      if (permit?.platform) {
+        if (permit.rejection) return {block: true, reason: permit.rejection.error?.message || "AgentLoom preparation rejected"};
+        if (isDeepStrictEqual(permit.arguments, input)) return;
       }
       if (!permit?.authorization || permit.authorization.tool.visible_name !== toolName ||
           !isDeepStrictEqual(permit.authorization.final_arguments, input))

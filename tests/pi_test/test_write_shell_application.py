@@ -58,26 +58,42 @@ def test_official_bash_executes_allowed_command_with_run_receipt(tmp_path):
     assert "shell-proof-1031" in json.dumps(requests[-1][1])
 
 
-def external_change(path: str) -> str:
-    """Simulate a concurrent writer after a tool was prepared.
+def test_native_write_rechecks_file_after_preparation_before_sdk_execution(tmp_path, monkeypatch):
+    import os
+    import sys
+    from tests.pi_test.test_process_lifecycle import sdk_node
 
-    Args:
-        path: Path changed by the independent writer.
-    """
-    from pathlib import Path
-    Path(path).write_text("external-version-3093")
-    return "changed"
-
-
-def test_native_write_rechecks_file_after_preparation_before_sdk_execution(tmp_path):
     source = tmp_path / "shared.txt"
     source.write_text("initial-version-1031")
+    # Independently change the real file after authorization, just before the
+    # genuine SDK's dispatch request reaches the host. Tool batch ordering is
+    # not an oracle for this race: platform execution now follows persistence.
+    binary = sdk_node()
+    launcher = tmp_path / 'bin/node'
+    launcher.parent.mkdir()
+    launcher.write_text(f'''#!{sys.executable}
+import json,os,subprocess,sys,threading
+from pathlib import Path
+if sys.argv[1:]==['--version']:os.execv({binary!r},[{binary!r},'--version'])
+p=subprocess.Popen([{binary!r},*sys.argv[1:]],stdin=subprocess.PIPE,stdout=subprocess.PIPE,stderr=subprocess.DEVNULL)
+def forward():
+ try:
+  for line in sys.stdin.buffer:p.stdin.write(line);p.stdin.flush()
+ except BrokenPipeError:pass
+threading.Thread(target=forward,daemon=True).start()
+for line in p.stdout:
+ value=json.loads(line);payload=value.get('payload') or {{}}
+ if value.get('kind')=='request' and payload.get('method')=='tool_dispatch' and payload['authorization']['tool']['visible_name']=='write':
+  Path({str(source)!r}).write_text('external-version-3093')
+ sys.stdout.buffer.write(line);sys.stdout.buffer.flush()
+p.wait();sys.exit(p.returncode)
+''')
+    launcher.chmod(0o755)
+    monkeypatch.setenv('PATH', str(launcher.parent) + os.pathsep + os.environ['PATH'])
     with model_service(turns=[[("observe", "read", {"path": str(source)})],
-                             [("overwrite", "write", {"path": str(source), "content": "must-not-overwrite"}),
-                              ("external", "external_change", {"path": str(source)})]]) as (url, requests):
+                             [("overwrite", "write", {"path": str(source), "content": "must-not-overwrite"})]]) as (url, requests):
         app = project(tmp_path, url)
-        select(app, tools=[{"name": "read"}, {"name": "write"},
-                           {"name": "external_change", "module": __name__, "function": "external_change"}])
+        select(app, tools=[{"name": "read"}, {"name": "write"}])
         with bind_config(load_project_config(tmp_path)):
             result = execute_app(app, file_logging=False)
     assert source.read_text() == "external-version-3093"
