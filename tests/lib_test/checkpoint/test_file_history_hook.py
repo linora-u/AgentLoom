@@ -157,16 +157,17 @@ class TestFileHistoryHook:
     def test_all_file_modifying_tools_recognized(self, mock_fh):
         """Verify destructive registry tools with path params trigger backup."""
         hook = FileHistoryHook(mock_fh)
-        tool_names = [spec.name for spec in list_tool_specs() if spec.is_destructive and spec.path_params]
-        assert tool_names
-        for tool_name in tool_names:
-            mock_fh.reset_mock()
-            hook(
-                event_type="PRE_TOOL_USE",
-                tool_name=tool_name,
-                tool_input={"file_path": "/tmp/test.py"},
-            )
-            assert mock_fh.track_edit.called, f"{tool_name} did not trigger backup"
+        specs = [spec for spec in list_tool_specs() if spec.is_destructive and spec.path_params]
+        assert specs
+        for spec in specs:
+            for path_param in spec.path_params:
+                mock_fh.reset_mock()
+                hook(
+                    event_type="PRE_TOOL_USE",
+                    tool_name=spec.name,
+                    tool_input={path_param: "/tmp/test.py"},
+                )
+                mock_fh.track_edit.assert_called_once_with("/tmp/test.py", 0)
 
     def test_active_runtime_entry_records_supplied_final_input(self, mock_fh):
         coordinator = MagicMock()
