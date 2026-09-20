@@ -24,7 +24,7 @@ from pydantic import BaseModel, ConfigDict, Field, JsonValue, TypeAdapter, model
 
 PI_BRIDGE_PROTOCOL_VERSION = 1
 NonEmpty = Annotated[str, Field(min_length=1)]
-Method = Literal["handshake", "run", "snapshot", "cancel", "close", "tool_prepare", "tool_settle", "platform_invoke"]
+Method = Literal["handshake", "run", "snapshot", "cancel", "close", "tool_prepare", "tool_settle", "platform_invoke", "model_prepare"]
 
 
 class WireValue(BaseModel):
@@ -83,6 +83,11 @@ class Settle(WireValue):
     outcome: NativeExecutionOutcome = Field(repr=False)
 
 
+class ModelPrepare(WireValue):
+    method: Literal["model_prepare"]
+    identity: NativeCallIdentity
+
+
 class PlatformInvoke(WireValue):
     method: Literal["platform_invoke"]
     identity: NativeCallIdentity
@@ -91,7 +96,7 @@ class PlatformInvoke(WireValue):
 
 
 RequestPayload = Annotated[
-    Union[Handshake, Run, Snapshot, Cancel, Close, Prepare, Settle, PlatformInvoke], Field(discriminator="method")
+    Union[Handshake, Run, Snapshot, Cancel, Close, Prepare, Settle, PlatformInvoke, ModelPrepare], Field(discriminator="method")
 ]
 
 
@@ -191,13 +196,19 @@ class SettleResult(WireValue):
         return self
 
 
+class ModelPermit(WireValue):
+    method: Literal["model_prepare"]
+    identity: NativeCallIdentity
+    state: Literal["work", "final", "denied"]
+
+
 class PlatformResult(WireValue):
     method: Literal["platform_invoke"]
     record: TerminalRecord = Field(repr=False)
 
 
 ResultPayload = Annotated[
-    Union[HandshakeResult, RunResult, SnapshotResult, ControlResult, PrepareResult, SettleResult, PlatformResult],
+    Union[HandshakeResult, RunResult, SnapshotResult, ControlResult, PrepareResult, SettleResult, PlatformResult, ModelPermit],
     Field(discriminator="method"),
 ]
 
@@ -205,10 +216,10 @@ ResultPayload = Annotated[
 class Envelope(WireValue):
     version: Literal[1]
     instance_id: NonEmpty
-    run_id: NonEmpty | None = None
 
 
 class Request(Envelope):
+    run_id: NonEmpty | None = None
     kind: Literal["request"]
     request_id: NonEmpty
     payload: RequestPayload = Field(repr=False)
@@ -223,7 +234,7 @@ class Request(Envelope):
             else self.payload.outcome.identity
             if isinstance(self.payload, Settle)
             else self.payload.identity
-            if isinstance(self.payload, PlatformInvoke)
+            if isinstance(self.payload, (PlatformInvoke, ModelPrepare))
             else None
         )
         if identity is not None and (identity.run_id != self.run_id or identity.instance_id != self.instance_id):
@@ -232,6 +243,7 @@ class Request(Envelope):
 
 
 class Response(Envelope):
+    run_id: NonEmpty | None = None
     kind: Literal["response"]
     request_id: NonEmpty
     payload: ResultPayload | None = Field(default=None, repr=False)
@@ -246,7 +258,7 @@ class Response(Envelope):
                 raise ValueError("Run-scoped response requires run_id")
             identity = (
                 self.payload.identity
-                if isinstance(self.payload, SettleResult)
+                if isinstance(self.payload, (SettleResult, ModelPermit))
                 else self.payload.authorization.identity
                 if isinstance(self.payload, PrepareResult) and self.payload.authorization is not None
                 else None

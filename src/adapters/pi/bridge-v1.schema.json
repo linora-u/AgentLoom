@@ -105,11 +105,6 @@
           "title": "Instance Id",
           "type": "string"
         },
-        "run_id": {
-          "minLength": 1,
-          "title": "Run Id",
-          "type": "string"
-        },
         "kind": {
           "const": "event",
           "title": "Kind",
@@ -118,6 +113,11 @@
         "request_id": {
           "minLength": 1,
           "title": "Request Id",
+          "type": "string"
+        },
+        "run_id": {
+          "minLength": 1,
+          "title": "Run Id",
           "type": "string"
         },
         "sequence": {
@@ -149,9 +149,9 @@
       "required": [
         "version",
         "instance_id",
-        "run_id",
         "kind",
         "request_id",
+        "run_id",
         "sequence",
         "event",
         "payload"
@@ -255,6 +255,54 @@
       ]
     },
     "JsonValue": {},
+    "ModelPermit": {
+      "additionalProperties": false,
+      "properties": {
+        "method": {
+          "const": "model_prepare",
+          "title": "Method",
+          "type": "string"
+        },
+        "identity": {
+          "$ref": "#/$defs/NativeCallIdentity"
+        },
+        "state": {
+          "enum": [
+            "work",
+            "final",
+            "denied"
+          ],
+          "title": "State",
+          "type": "string"
+        }
+      },
+      "required": [
+        "method",
+        "identity",
+        "state"
+      ],
+      "title": "ModelPermit",
+      "type": "object"
+    },
+    "ModelPrepare": {
+      "additionalProperties": false,
+      "properties": {
+        "method": {
+          "const": "model_prepare",
+          "title": "Method",
+          "type": "string"
+        },
+        "identity": {
+          "$ref": "#/$defs/NativeCallIdentity"
+        }
+      },
+      "required": [
+        "method",
+        "identity"
+      ],
+      "title": "ModelPrepare",
+      "type": "object"
+    },
     "ModelSelection": {
       "additionalProperties": false,
       "properties": {
@@ -606,6 +654,7 @@
               "cancel": "#/$defs/Cancel",
               "close": "#/$defs/Close",
               "handshake": "#/$defs/Handshake",
+              "model_prepare": "#/$defs/ModelPrepare",
               "platform_invoke": "#/$defs/PlatformInvoke",
               "run": "#/$defs/Run",
               "snapshot": "#/$defs/Snapshot",
@@ -638,6 +687,9 @@
             },
             {
               "$ref": "#/$defs/PlatformInvoke"
+            },
+            {
+              "$ref": "#/$defs/ModelPrepare"
             }
           ],
           "title": "Payload"
@@ -697,6 +749,7 @@
                   "cancel": "#/$defs/ControlResult",
                   "close": "#/$defs/ControlResult",
                   "handshake": "#/$defs/HandshakeResult",
+                  "model_prepare": "#/$defs/ModelPermit",
                   "platform_invoke": "#/$defs/PlatformResult",
                   "run": "#/$defs/RunResult",
                   "snapshot": "#/$defs/SnapshotResult",
@@ -726,6 +779,9 @@
                 },
                 {
                   "$ref": "#/$defs/PlatformResult"
+                },
+                {
+                  "$ref": "#/$defs/ModelPermit"
                 }
               ]
             },

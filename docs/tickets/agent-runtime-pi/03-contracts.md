@@ -70,7 +70,7 @@
 
 ## 4. Pi 专属 JSONL v1
 
-值类型与编解码在 `src/adapters/pi/protocol.py`；跨语言 schema 是同目录 `bridge-v1.schema.json`。本模块可以导入，但 builtin registry 尚未注册 pi。
+值类型与编解码在 `src/adapters/pi/protocol.py`；跨语言 schema 是同目录 `bridge-v1.schema.json`。07 已在 builtin registry 注册 pi；09 增补模型请求前的 Goal 权限回调。
 
 一行一个 JSON 对象。所有消息包含 version=1、kind 和 instance_id；Run 相关消息带 run_id。request/response 共享 request_id；event 关联发起 run 的 request_id 并携带从 1 开始的递增 sequence。双方请求分别使用 `host:`、`pi:` 前缀，避免双向回调 ID 碰撞。
 
@@ -83,8 +83,11 @@
 | close | host → Pi | 关闭该实例进程、工具和 pending 请求；重复调用幂等 |
 | tool_prepare | Pi → host | 使用原始输入与 call identity 请求变换、授权、写前保护 |
 | tool_settle | Pi → host | 提交实际执行结果，等待持久 commit ack；uncertain 不产生终态结果 |
+| model_prepare | Pi → host | 每个模型 turn 请求一次权限，复用调用身份并返回 work/final/denied；final 只消费根 Goal 的一次交付额度，不提供工具 |
 | platform_invoke | Pi → host | 调用已选的平台/专业/MCP 工具；由 host 绑定正确 Hook Run 和 Worker 上下文 |
 | event | Pi → host | run/model/tool/subagent/usage/checkpoint/terminal 等运行观察；不承担提交确认 |
+
+model_prepare 是 09 的桥接增补，不改变公共 AgentRuntime 或 native tool contract。协议两端与 schema 同次交付；安装指纹检查会阻止旧构建混用。模型内部 HTTP 重试沿用本次许可，不重放工具；新模型 turn 必须重新检查 Goal。
 
 07 的 transport 必须持续收取双向请求：host 等待 run 时仍处理 tool/platform 回调；09 验证实际回调继续与并发关联。不得用阻塞读取一个响应的方式造成相互等待。
 

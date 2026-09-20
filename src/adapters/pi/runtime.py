@@ -11,7 +11,7 @@ from agentloom.adapters.pi.metadata import CAPABILITIES, SDK_VERSION, validate_m
 from agentloom.adapters.pi.protocol import (
     Handshake, HandshakeResult, ModelSelection, Run, RunResult,
     Prepare, PrepareResult, Settle, SettleResult, TerminalRecord,
-    PlatformInvoke, PlatformResult,
+    PlatformInvoke, PlatformResult, ModelPrepare, ModelPermit,
 )
 from agentloom.runtime.native_tool_host import NativeReadToolHost
 from agentloom.runtime.native_tools import NativeCommitAck
@@ -22,7 +22,7 @@ from agentloom.runtime.agent_runtime import (
 )
 from agentloom.runtime.hooks import HookEvent
 from agentloom.runtime.trace import capture_explicit_execution_context
-from agentloom.runtime.goal import get_current_goal_provider
+from agentloom.runtime.goal import GoalCompleteError, get_current_goal_provider
 from agentloom.runtime.invocation import goal_continuation_prompt
 
 
@@ -94,7 +94,8 @@ class PiRuntime:
 
         execution = capture_explicit_execution_context()
         hook = execution.hook_run
-        goal = get_current_goal_provider() if execution.local_run_id == execution.root_run_id else None
+        shared_goal = get_current_goal_provider()
+        goal = shared_goal if execution.local_run_id == execution.root_run_id else None
         task = request.task
         max_stops = cast(int, definition.runtime_options.get("max_stop_attempts", 3))
         run_id = request.run_id or uuid4().hex
@@ -105,6 +106,7 @@ class PiRuntime:
         descriptions = {tool.name: tool.description for tool in definition.tool_gateway.definitions}
         wire_tools = [tool if tool.owner == "runtime" else replace(tool, parameters={
             **tool.parameters, "description": descriptions[tool.visible_name]}) for tool in definition.tool_manifest]
+        model_calls = set()
         platform_calls = set()
         platform_lock = Lock()
         emitted_commits = set()
@@ -121,6 +123,27 @@ class PiRuntime:
                 close_instance_resources(self.transport.instance_id)
 
         def callback(payload):
+            if isinstance(payload, ModelPrepare):
+                identity = payload.identity
+                with platform_lock:
+                    if ((identity.application_id, identity.task_id, identity.run_id, identity.instance_id) != (
+                            request.application_id or "standalone", request.task_id or "standalone", run_id,
+                            self.transport.instance_id) or identity.call_id in model_calls):
+                        raise AgentRuntimeError("Invalid Pi model callback identity", category="internal")
+                    model_calls.add(identity.call_id)
+                state = "work"
+                if shared_goal is not None:
+                    try:
+                        final = shared_goal.assert_request_allowed(local_run_id=execution.local_run_id,
+                                                                  allow_completion_settlement=True)
+                        shared_goal.mark_started()
+                        state = "final" if final else "work"
+                    except GoalCompleteError:
+                        state = "denied"
+                return ModelPermit(method="model_prepare", identity=identity, state=state)
+            if isinstance(payload, (PlatformInvoke, Prepare)) and shared_goal is not None:
+                if shared_goal.snapshot().status == "complete":
+                    raise AgentRuntimeError("Goal is complete; further tool work is forbidden", category="tool")
             if isinstance(payload, PlatformInvoke):
                 identity = payload.identity
                 with platform_lock:
@@ -191,7 +214,7 @@ class PiRuntime:
                     break
                 if decision.should_block():
                     stop_blocks += 1
-                    if stop_blocks >= max_stops:
+                    if stop_blocks >= max_stops or (goal_state is not None and goal_state.status == "complete"):
                         raise AgentRuntimeError("Pi Stop gate remained blocked", category="tool")
                     task = decision.get_blocked_response()
                 elif goal_state is not None:
