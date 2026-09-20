@@ -57,6 +57,7 @@ class PiTransport:
         self._lock = RLock()
         self._termination_lock = Lock()
         self._terminated = False
+        self._owns_native_shell = False
         self._process_token = uuid4().hex
         env["AGENTLOOM_SUBPROCESS_RUN_TOKEN"] = self._process_token
         self._write_lock = Lock()
@@ -142,6 +143,8 @@ class PiTransport:
 
     def request(self, payload: RequestPayload, *, run_id=None, observe: Callable[[Event], None] | None = None,
                 timeout: float | None = None, callback=None, cancel_callbacks: Callable[[], None] | None = None) -> Response:
+        if payload.method == "run":
+            self._owns_native_shell |= any(tool.operation == "shell" for tool in payload.tools)
         request = Request(version=1, kind="request", instance_id=self.instance_id, run_id=run_id,
                           request_id=f"host:{uuid4().hex}", payload=payload)
         pending = Pending(request)
@@ -239,7 +242,15 @@ class PiTransport:
             if not self._terminated:
                 # SDK bash starts its own sessions. The per-instance inherited
                 # marker also finds ordinary detached/reparented descendants.
-                terminate_process_tree(self.process, self._process_token)
+                if self._owns_native_shell:
+                    terminate_process_tree(self.process, self._process_token)
+                elif self.process.poll() is None:
+                    # No native Shell was selected: there are no detached SDK
+                    # commands to scan for; preserve the bounded bridge close.
+                    try:
+                        os.killpg(self.process.pid, signal.SIGKILL)
+                    except ProcessLookupError:
+                        pass
                 self._terminated = True
 
     def close(self):
