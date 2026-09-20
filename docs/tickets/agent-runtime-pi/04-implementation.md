@@ -25,7 +25,7 @@
 - Shell 审计按需登记日志资源；logger 不再导入 smol。共享日志 scope 保证 Worker 第一次使用时也复用同一日志资源，日志关闭和 Run 资源关闭均可回收它；迟到的线程不能重新打开已关闭日志。
 - 现有 native checkpoint envelope、模型协议和 smol 压缩逻辑保持原有格式。旧 smol Python 字段是 02 的过渡合同，14 根据消费者再清理；本票不破坏这些入口。
 
-目前定向回归通过：工具/catalog/读取/资源 61 项；私有执行、Todo、提示词、Application 163 项；Shell 审计和导入隔离 63 项。阶段 2 的 14 个改动模块通过 mypy。大组工具回归 969 通过、1 跳过，后置 Application 的 3 个失败与遗留任务上下文有关，独立 Application 回归 3 项通过，继续查根因。
+工具逐项归属、manifest、装配条件和行为证据见 [04-tool-inventory.md](04-tool-inventory.md)。阶段性失败及修正保留在外部证据目录；最终完整回归为 **4255 passed、1 skipped**。此前大组工具回归暴露的任务上下文污染已按下节修复。
 
 ## 实例隔离修正
 
@@ -41,7 +41,7 @@
 | --- | --- | --- |
 | `file_ops/_read_file_state.py` | `check_staleness`、`update_after_write` 被 `edit_file/edit_file.py`、`write_file/write_file.py` 使用；06 分离写前保护，读取范围缓存/去重继续归 smol，并保留实例隔离 | `tests/tools_test/file_ops/test_edit_file.py`、`test_write_file.py`；`tests/tools_test/test_smol_native_tools.py` |
 | `file_ops/_safety.py` | read/edit/write 调用 `normalize_path`、`validate_file_access`；设备、二进制、读取大小策略仍属具体读取实现 | `test_safety.py`、`test_file_path_validation.py`、`test_read_file.py` |
-| `search/search_utils.py` | `_load_exclude_paths` 经 `rg_exclude_globs` / `merged_skip_dirs` 提供给 grep/glob；06 提取权限配置访问，保留各自搜索格式 | `tests/tools_test/search/test_search_exclude_e2e.py`、`test_grep_exclude.py`、`test_glob_exclude.py` |
+| `search/search_utils.py` | `_load_exclude_paths` 经 `get_search_exclude_patterns` / `get_python_exclude_dirs` 提供给 grep/glob；06 提取权限配置访问，保留各自搜索格式 | `tests/tools_test/search/test_search_exclude_e2e.py`、`test_grep_exclude.py`、`test_glob_exclude.py` |
 | `shell/validator.py`、`security.py`、`path_validation.py`、`readonly_validation.py` | `shell_tool.py` 在执行前调用 `validate_command`，再进入安全/路径/只读规则；06 统一政策调用，保留实际 session cwd 和最终输入约束 | `tests/tools_test/shell/test_validator.py`、`test_security.py`、`test_path_validation.py`、`test_path_security.py`、`test_readonly_validation.py` |
 | `shell/shell_command_ast.py`、`pipe_redirect.py` | 命令解析及重定向分析；按政策/执行职责拆分，避免复制规则引擎 | `test_path_security.py`、`test_pipe_redirect.py`、`test_security.py` |
 
@@ -58,12 +58,34 @@ Shell process/session/background/watchdog/output、退出码解释和审计资�
 
 14 只在确认调用者迁走后清理内部别名。旧 YAML 和用户显式模板路径不是可删除的内部别名。
 
-## 验收计划
+## 验收结果
 
-运行原有工具、保护、Todo、提示词、协议回放、checkpoint 与应用兼容测试，不删除已有行为断言。最终代码候选固定后，运行：
+受检实现固定为 `7885ac2a9971a296d220a78c06d426d9219fedb1`。完整回归 **4255 passed、1 skipped**；最终检查只额外修正 catalog 测试的旧命名空间断言，没有改变受检源码。14 个选项/模板/Todo/装配/日志/存储文件通过 mypy；迁移工具和旧 trace 中合计 21 个类型诊断与原基线相同，无新增。
 
-- `existing_application_validation.py` 的 9 组真实 Application（文件/Shell、Markdown、仓库探索、单元测试、三组 ContextRef、两组 Goal/并行 Worker）。
-- `real_checkpoint_validation.py` 的 main / worker / completed 三组真实中断恢复。
-- `model_protocol_matrix.py` 中私有配置可用的协议配置；缺失记 NOT-RUN，不冒充通过。
+真实远程模型场景 **17 组通过**：原有 Application 9 组（文件/Shell、Markdown、仓库分析、测试生成、三组 ContextRef、两组 Goal/并行 Worker）、同基座中断恢复 3 组、OpenAI Chat/Responses 两种协议、Todo on/auto/off 3 组。Anthropic 没有对应模型配置，记为 **NOT-RUN**。
 
-最终结果、审查结论及 04→06 的保护调用点在验收后补齐。
+最初测试生成场景的宿主验收使用相对工作目录，JUnit 报告定位失败；Application 本身已完成。保留该失败，随后绝对路径复验及独立全新模型运行均通过。首次完整测试的一个旧 catalog 路径断言也保留失败记录，修正后完整测试通过。没有把重跑结果覆盖进旧记录。
+
+平台工具单独装配时未导入 smol 基础工具。wheel 包含全部 48 个迁移路径、没有私有配置；隔离安装后 11 个 runtime catalog 工具与旧显式模板路径可解析。此检查不替代 13 的完整无 smol 安装验收。
+
+机器可读结果见 [04-validation.json](04-validation.json)。外部证据位于 `/Users/bytedance/code/data_clear/AgentLoom-worktrees/evidence/t04`，包含 checkpoint、tool records、实际产物、原失败记录和脱离 worktree 的验收应用归档；其中原始模型日志按私有证据保存，不纳入 Git。
+
+## Standards
+
+固定基线 `9d5a8891` 的独立标准审查未发现需修改项。审查覆盖生命周期、锁/安全存储及既有规则迁移；未解决问题为 0。
+
+## Spec
+
+独立规格审查发现一个 P2：用户显式指定的四个旧内置示例模板路径在迁移后不可用。已用精确允许清单兼容相对/绝对路径，保留自定义文件优先级、未知路径报错；先复现 8 个失败，再通过 50 项模板和工具回归。复核确认修复，未解决问题为 0。
+
+## 分阶段提交
+
+| 提交 | 内容 |
+| --- | --- |
+| `37702ef0` | 基础文件/搜索/Shell 工具迁入 smol；旧导入兼容 |
+| `c9c26c43` | Todo、选项、模板、恢复实现和日志接线 |
+| `7b775ed3` | 实例读取状态隔离、跨线程任务上下文修复 |
+| `95069804` | 真实 Todo on/auto/off Application 验收 |
+| `7885ac2a` | 显式旧模板路径兼容修复 |
+
+最终测试归属断言、工具清单和验收报告单独提交；不 squash 上述历史。交付 main 时保留同期 05 和票据修订，main 保持未提交、未暂存；集成验证及 worktree 清理另记交付报告。
