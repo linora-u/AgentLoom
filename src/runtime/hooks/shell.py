@@ -10,7 +10,7 @@ from pathlib import Path
 from typing import Any
 
 from agentloom.runtime.process import CapturedProcessTimeout, run_captured_process
-from agentloom.tools.shell.subprocess_env import build_subprocess_env
+from agentloom.runtime.subprocess_env import build_subprocess_env
 
 from .config import ShellHookSpec
 from .types import HookContext, HookResult

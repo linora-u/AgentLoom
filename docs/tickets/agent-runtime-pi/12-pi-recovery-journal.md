@@ -8,11 +8,15 @@
 
 **Required:** Yes — 本票属于最终交付必做项。
 
+**Unlocks:** 14
+
 **Session:** 沿用 Pi session；可与尚未完成的 11、13 并行
 
 ## Scope
 
 集中实现同基座恢复、host/native journal 对齐和两个精确 crash window；不重复开发前面已经覆盖的全部取消机制。
+
+**Edit boundary:** 延续 Pi adapter/bridge 的修改权；公共 checkpoint 与 journal 的必要变更交协调者串行处理，并补对共享合同的回归验证。11 不编辑这些恢复文件，13 只消费构建产物。
 
 遵循 [工具归属](tool-ownership.md)：应用 task/Run、已提交 Worker 结果与证据由平台持有，Pi session/payload 由 Pi adapter 解释；不导入 smol 的消息、Todo、Shell 私有状态来实现 Pi 恢复。
 

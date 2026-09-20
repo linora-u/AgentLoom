@@ -8,11 +8,15 @@
 
 **Required:** Yes — 本票属于最终交付必做项。
 
+**Unlocks:** 06、13
+
 **Session:** smol session；可与 05、07、08 并行
 
 ## Scope
 
 migrate 阶段，按 [工具归属](tool-ownership.md) 收拢自研 Agent 的完整实现，不仅包一层 SDK。迁移基础文件/目录、grep/glob、Shell/后台任务和 Todo 工具及其私有状态；AST/LSP/大纲/Markdown 属于 08 的可选专业工具，不整目录误搬。
+
+**Edit boundary:** 独占自研 smol 实现、基础工具分区及对应独立测试；精确清单见 [03 文件交接](03-file-ownership.md)。混合目录的 `__init__.py`、全局 loader/catalog 和公共构造入口交协调者串行修改；08 所需的 smol 类型转换也不能与本票同时编辑同一文件。
 
 03 先处理公共消费者需要的辅助入口。04 保留既有保护行为，登记仍嵌在基础工具中的保护调用点，供随后 06 提取和接线；不改 05 的公共 Gateway，不把公共权限、Goal、长期记忆或 ContextRef 迁成 smol 私有能力。
 

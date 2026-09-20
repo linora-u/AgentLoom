@@ -8,11 +8,15 @@
 
 **Required:** Yes — 本票属于最终交付必做项。
 
+**Unlocks:** 12
+
 **Session:** 沿用 Pi session；可与 11、13 并行
 
 ## Scope
 
 把 06 的治理接入实际官方工具，不重写编辑器/压缩算法，不改新的长期记忆策略。
+
+**Edit boundary:** 延续 Pi adapter/bridge 与 Node lock 的唯一修改权；公共治理调用 06 已交付实现，平台工具调用 08 的入口。与 11/13 并行时不编辑其应用验收或 Python packaging 文件；构建产物合同变化通知 13。
 
 遵循 [工具归属](tool-ownership.md)：Pi 的基础写入/Shell 使用官方实现，自研 smol 基础工具留在 smol。可选专业写入工具只在显式选择且同样满足平台保护时开放。
 

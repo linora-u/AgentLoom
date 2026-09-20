@@ -207,14 +207,12 @@ class AgentConfigNormalizer:
     @staticmethod
     def runtime_requirements(config: dict, *, effective_config: dict | None = None, hook_plan=None) -> RuntimeRequirements:
         """Derive requirements from selected functions, not from an engine assumption."""
-        from agentloom.tools.catalog import resolve_toolsets
+        from agentloom.tools.selection import resolve_runtime_toolsets
 
         effective = effective_config if effective_config is not None else config
-        toolset_key = "toolsets" if "toolsets" in effective else "default_toolsets"
-        selected_toolsets = effective.get(toolset_key)
-        if toolset_key in effective and not isinstance(selected_toolsets, list):
-            raise ValueError(f"{toolset_key} must be a list of toolset names when provided")
-        tools_selected = bool(effective.get("tools") or resolve_toolsets(selected_toolsets))
+        AgentConfigNormalizer.validate_tools_config_entries(effective.get("tools"))
+        selected_tools = resolve_runtime_toolsets(config, effective_config)
+        tools_selected = bool(effective.get("tools") or selected_tools)
         checkpoint = effective.get("checkpoint", {})
         concurrency = effective.get("concurrency", config.get("concurrency"))
         goal = normalize_goal_config(config, source=str(config.get("name", "agent"))).enabled
@@ -248,6 +246,7 @@ class AgentConfigNormalizer:
             return
         if not isinstance(tool_configs, list):
             raise ValueError("tools configuration must be a list when provided")
+        seen_names: set[str] = set()
         for tool_config in tool_configs:
             if not isinstance(tool_config, dict):
                 raise ValueError("Tool configuration must be a dictionary")
@@ -256,6 +255,9 @@ class AgentConfigNormalizer:
             tool_name = tool_config["name"]
             if not isinstance(tool_name, str) or not tool_name.strip():
                 raise ValueError("Tool configuration 'name' must be a non-empty string")
+            if tool_name in seen_names:
+                raise ValueError(f"Duplicate tool name: {tool_name}")
+            seen_names.add(tool_name)
             if "module" in tool_config or "function" in tool_config:
                 if "module" not in tool_config or "function" not in tool_config:
                     raise ValueError(

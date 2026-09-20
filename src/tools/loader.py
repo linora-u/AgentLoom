@@ -23,4 +23,7 @@ def resolve_tool_function(tool_name: str) -> Callable[..., Any]:
             f"Tool '{spec.name}' implementation "
             f"'{reference.module}:{reference.attribute}' is not callable"
         )
+    # Immutable ownership metadata travels with this exact implementation,
+    # rather than being guessed from a possibly colliding visible name.
+    setattr(implementation, "_agentloom_catalog_spec", spec)
     return implementation

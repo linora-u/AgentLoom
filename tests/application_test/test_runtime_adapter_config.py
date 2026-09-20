@@ -267,7 +267,7 @@ def test_runtime_preflight_uses_registry_capabilities(
         tmp_path / "agent.yaml",
         agent_root=tmp_path,
     )
-    assert observed == [RuntimeRequirements(structured_tools=True)]
+    assert observed == [RuntimeRequirements(structured_tools=False)]
 
     with pytest.raises(
         UnsupportedRuntimeError,
@@ -309,13 +309,26 @@ def test_unknown_model_adapter_fails_at_config_load() -> None:
 
 
 def test_live_agent_definitions_use_the_current_runtime_contract() -> None:
+    import subprocess
+
     roots = (
         PROJECT_ROOT / "applications",
         PROJECT_ROOT / "tests/agent_test/llm_cfg_test/fixtures",
     )
+    # Validate shipped/current source definitions, not ignored local experiments
+    # or a user's private application. Include new, not-yet-committed sources.
+    source_paths = None
+    if (PROJECT_ROOT / ".git").exists():
+        listed = subprocess.check_output([
+            "git", "ls-files", "--cached", "--others", "--exclude-standard", "-z", "--",
+            *(str(root.relative_to(PROJECT_ROOT)) for root in roots),
+        ], cwd=PROJECT_ROOT)
+        source_paths = {PROJECT_ROOT / name.decode() for name in listed.split(b"\0") if name}
     definitions: list[tuple[Path, dict[str, object]]] = []
     for root in roots:
         for path in sorted((*root.rglob("*.yaml"), *root.rglob("*.yml"))):
+            if source_paths is not None and path not in source_paths:
+                continue
             try:
                 parsed = load_agent_definition(path)
             except ValueError:

@@ -55,36 +55,30 @@ def test_fixed_args_are_hidden_from_llm_schema_and_applied(monkeypatch):
     assert result == "prompt=summarize;cwd=/repo;sandbox=workspace-write;search=false"
 
 
-def test_explicit_tool_config_overrides_same_named_default_toolset(monkeypatch):
-    monkeypatch.setattr(
-        yaml_agent_factory,
-        "resolve_toolsets",
-        lambda names: ["sample_tool"],
-    )
-    monkeypatch.setattr(
-        yaml_agent_factory,
-        "resolve_tool_function",
-        lambda name: sample_tool,
-    )
-
+def test_explicit_tool_config_overrides_same_named_default_toolset(tmp_path):
+    target = tmp_path / "configured.txt"
     tools, _ = YamlAgentFactory.get_tools_from_config(
         {
             "tools": [
                 {
-                    "name": "sample_tool",
-                    "fixed_args": {"cwd": "/explicit"},
+                    "name": "write_file",
+                    "fixed_args": {"file_path": str(target)},
                 }
             ]
         },
-        effective_agent_config={"default_toolsets": ["defaults"]},
+        effective_agent_config={"default_toolsets": ["core_file"]},
     )
 
-    assert len(tools) == 1
-    tool_func = tools[0]
-    assert "cwd" not in inspect.signature(tool_func).parameters
-    assert tool_func(prompt="run") == (
-        "prompt=run;cwd=/explicit;sandbox=;search="
-    )
+    selected = [tool for tool in tools if tool.__name__ == "write_file"]
+    assert len(selected) == 1
+    tool_func = selected[0]
+    assert "file_path" not in inspect.signature(tool_func).parameters
+    tool_func(content="configured target", file_path=str(tmp_path / "ignored.txt"))
+    assert target.read_text() == "configured target"
+    assert not (tmp_path / "ignored.txt").exists()
+    from agentloom.runtime.tool_gateway import bind_tool
+    manifest = bind_tool(tool_func).manifest_entry
+    assert manifest.fixed_arguments == {"file_path": str(target)}
 
 
 def test_dynamic_tool_fixed_args_use_yaml_name_as_exposed_tool_name(monkeypatch):

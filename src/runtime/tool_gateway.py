@@ -26,6 +26,7 @@ from typing import (
 
 from agentloom.runtime.logging import get_logger
 from agentloom.runtime.model_protocol import ToolDefinition
+from agentloom.runtime.native_tools import ToolManifestEntry
 from agentloom.runtime.tool_protocol import ToolCallRecord
 
 logger = get_logger(__name__)
@@ -60,10 +61,16 @@ class ToolBinding:
     clone_factory: ToolCloneFactory | None = None
     output_normalizer: ToolOutputNormalizer | None = None
     compression_source: str | None = None
+    manifest_entry: ToolManifestEntry | None = None
 
     def __post_init__(self) -> None:
         properties = deepcopy(dict(self.inputs_schema))
         object.__setattr__(self, "inputs_schema", MappingProxyType(properties))
+        if self.manifest_entry is not None and (
+            self.manifest_entry.visible_name != self.definition.name
+            or self.manifest_entry.parameters != self.definition.parameters
+        ):
+            raise ValueError("Tool manifest must match its visible definition")
         for name in (
             "forward",
             "setup",
@@ -319,6 +326,8 @@ def bind_tool(
     if isinstance(tool, ToolBinding):
         return tool
 
+    catalog_spec = getattr(tool, "_agentloom_catalog_spec", None)
+
     declared_forward = getattr(tool, "forward", None)
     plain_callable = not callable(declared_forward) and callable(tool)
     if not plain_callable:
@@ -448,6 +457,22 @@ def bind_tool(
         clone_factory=clone_factory,
         output_normalizer=selected_normalizer,
         compression_source=compression_source,
+        manifest_entry=(
+            ToolManifestEntry(
+                logical_name=catalog_spec.name,
+                visible_name=definition.name,
+                owner=catalog_spec.owner,
+                provider=catalog_spec.provider,
+                capability=catalog_spec.capability,
+                operation=("shell" if catalog_spec.name == "shell_tool" else
+                           "platform" if catalog_spec.owner == "platform" else
+                           "read" if catalog_spec.is_read_only else "write"),
+                parameters=definition.parameters,
+                path_parameters=catalog_spec.path_params,
+                command_parameter="command" if catalog_spec.name == "shell_tool" else None,
+                fixed_arguments=getattr(tool, "_agentloom_fixed_values", {}),
+            ) if catalog_spec is not None else getattr(tool, "_agentloom_manifest_entry", None)
+        ),
     )
 
 
@@ -808,6 +833,19 @@ class AgentLoomToolGateway:
     @property
     def definitions(self) -> tuple[ToolDefinition, ...]:
         return self._definitions
+
+    @property
+    def manifest(self) -> tuple[ToolManifestEntry, ...]:
+        """Only selected tools, with explicit ownership and visible schemas."""
+        return tuple(
+            binding.manifest_entry or ToolManifestEntry(
+                logical_name=binding.definition.name,
+                visible_name=binding.definition.name,
+                owner="external", provider="python",
+                capability=binding.definition.name, operation="control",
+                parameters=binding.definition.parameters,
+            ) for binding in self._bindings.values()
+        )
 
     def _record(
         self,

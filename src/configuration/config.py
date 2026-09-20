@@ -689,6 +689,9 @@ def build_effective_agent_config_snapshot(
         # (self-learning memory layering, learning artifacts) reads the workflow
         # path from the effective config at hook time.
         merged["_yaml_file_path"] = str(agent_config["_yaml_file_path"])
+    for layer in layers:
+        if "default_toolsets" in layer.data:
+            merged["_default_toolsets_source"] = layer.name
     return EffectiveAgentConfigSnapshot(values=merged, layers=tuple(layers))
 
 

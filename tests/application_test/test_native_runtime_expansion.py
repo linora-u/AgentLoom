@@ -104,7 +104,11 @@ def test_binding_free_workers_have_fresh_instances_and_hook_runs(native_project,
     from threading import Barrier
     requests.barrier = Barrier(2)
     agent = YamlConfiguredAgent(config=config, logger=RichLoggerBackend(console=Console(file=StringIO())))
-    results = agent.agent_as_tool().batch([{"query": "one"}, {"query": "two"}], concurrency=2)
+    worker = agent.agent_as_tool()
+    from agentloom.runtime.tool_gateway import bind_tool
+    manifest = bind_tool(worker).manifest_entry
+    assert (manifest.owner, manifest.provider, manifest.capability) == ("platform", "agentloom", "worker.invoke")
+    results = worker.batch([{"query": "one"}, {"query": "two"}], concurrency=2)
     assert [result.status for result in results] == ["completed", "completed"]
     assert len({definition.instance_id for definition in definitions}) == 2
     assert len({id(item[0]) for item in requests.contexts}) == 2
@@ -123,7 +127,7 @@ def test_explicit_smol_options_are_rejected_before_native_construction(native_pr
 
 
 @pytest.mark.parametrize("selection, capability", [
-    ("tools: [{name: read_file}]\n", "structured_tools"),
+    ("tools: [{name: memory}]\n", "structured_tools"),
     ("goal: {enabled: true}\n", "goal"),
 ])
 def test_selected_functions_require_capabilities(native_project, selection, capability):
@@ -155,3 +159,73 @@ def test_native_application_ignores_historical_global_smol_prompt(native_project
     system.write_text(system.read_text() + "prompt: missing-historical-smol-template.yaml\n")
     assert execute_app(path, file_logging=False).output == "native answer"
     assert definitions[0].runtime_options == {"thinking": "low"}
+
+
+def test_native_application_does_not_inherit_smol_basic_tool_defaults(native_project):
+    path, definitions, _ = native_project
+    from agentloom.configuration.config import get_config
+    system = get_config().agent_root / "config/system.yaml"
+    system.write_text(system.read_text().replace(
+        "default_toolsets: []", "default_toolsets: [core_file, core_shell, core_search]",
+    ))
+    path.write_text(path.read_text().replace("toolsets: []\n", ""))
+    assert execute_app(path, file_logging=False).output == "native answer"
+    assert definitions[0].tool_gateway.definitions == ()
+
+
+@pytest.mark.parametrize("selection", [
+    "toolsets: [core_file]\n", "tools: [{name: read_file}]\n",
+])
+def test_native_explicit_smol_tool_without_mapping_is_rejected(native_project, selection):
+    path, definitions, _ = native_project
+    key = selection.split(":", 1)[0]
+    path.write_text(path.read_text().replace(f"{key}: []\n", selection))
+    with pytest.raises(ValueError, match="no compatible mapping"):
+        execute_app(path, file_logging=False)
+    assert definitions == []
+
+
+def test_native_application_tool_defaults_are_explicit(native_project):
+    path, definitions, _ = native_project
+    path.write_text(path.read_text().replace("toolsets: []\n", ""))
+    write(path.parent.parent / "config/system.yaml", "default_toolsets: [core_file]\n")
+    with pytest.raises(ValueError, match="no compatible mapping"):
+        execute_app(path, file_logging=False)
+    assert definitions == []
+
+
+def test_duplicate_explicit_tool_names_are_rejected_before_construction(native_project):
+    path, definitions, _ = native_project
+    path.write_text(path.read_text().replace("tools: []", "tools: [{name: memory}, {name: memory}]"))
+    with pytest.raises(ValueError, match="Duplicate tool name: memory"):
+        execute_app(path, file_logging=False)
+    assert definitions == []
+
+
+def test_native_model_projection_contains_effective_private_headers(native_project):
+    path, definitions, _ = native_project
+    from agentloom.configuration.config import get_config
+    root = get_config().agent_root
+    system = root / "config/system.yaml"
+    system.write_text(system.read_text() + (
+        "model_request_headers:\n  profile: none\n"
+        "  headers: {X-Global: global, X-Level: global}\n"
+    ))
+    write(path.parent.parent / "config/system.yaml", (
+        "model_request_headers:\n  headers: {X-App: app, X-Level: app}\n"
+    ))
+    path.write_text(path.read_text() + (
+        "model_request_headers:\n  headers: {X-Agent: agent, X-Level: agent}\n"
+    ))
+    model = root / "config/llm.yaml"
+    model.write_text(model.read_text().replace(
+        "api_key: fixture-secret", "api_key: fixture-secret, extra_headers: {x-level: model, Authorization: fixture-header-secret}",
+    ))
+    assert execute_app(path, file_logging=False).output == "native answer"
+    selection = definitions[0].model_selection
+    assert selection.request_headers == {
+        "X-Global": "global", "X-App": "app", "X-Agent": "agent",
+        "x-level": "model", "Authorization": "fixture-header-secret",
+    }
+    assert "fixture-header-secret" not in repr(definitions[0])
+    assert "fixture-header-secret" not in repr(selection)

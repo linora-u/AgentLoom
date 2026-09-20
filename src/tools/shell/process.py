@@ -959,12 +959,14 @@ class ShellProcessRegistry:
 
     _instance: Optional["ShellProcessRegistry"] = None
     _instance_lock: threading.Lock = threading.Lock()
+    _registry: dict[ShellProcessOwner, ShellProcess]
+    _registry_lock: threading.Lock
 
     def __new__(cls) -> "ShellProcessRegistry":
         with cls._instance_lock:
             if cls._instance is None:
                 cls._instance = super().__new__(cls)
-                cls._instance._registry: dict[ShellProcessOwner, ShellProcess] = {}
+                cls._instance._registry = {}
                 cls._instance._registry_lock = threading.Lock()
         return cls._instance
 
@@ -1008,11 +1010,25 @@ class ShellProcessRegistry:
                     load_profile=load_profile,
                 )
             process = self._registry[owner]
+            from agentloom.runtime.resources import register_resource
+
+            register_resource(
+                f"smol.shell.{id(process)}",
+                lambda: self._release_owned(owner, process),
+                instance_id=agent_id,
+            )
             process.timeout = timeout
             process.strip_newlines = strip_newlines
             process.return_err_output = return_err_output
             process.load_profile = load_profile
             return process
+
+    def _release_owned(self, owner: ShellProcessOwner, expected: ShellProcess) -> None:
+        with self._registry_lock:
+            if self._registry.get(owner) is not expected:
+                return
+            self._registry.pop(owner)
+        expected.cleanup()
 
     def release(self, agent_id: str) -> None:
         """Release ``agent_id`` only within the current run."""
