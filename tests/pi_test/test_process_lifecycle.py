@@ -100,7 +100,7 @@ def test_pending_model_call_terminates_and_cleans_process(tmp_path, interrupt):
     assert "fixture-secret" not in stdout + stderr
 
 
-@pytest.mark.parametrize("fault", ["malformed", "sequence", "identity", "duplicate_key", "duplicate_terminal", "duplicate_callback"])
+@pytest.mark.parametrize("fault", ["malformed", "sequence", "identity", "duplicate_key", "duplicate_terminal", "duplicate_callback", "duplicate_after_close"])
 def test_protocol_corruption_fails_application_and_reaps_real_bridge(tmp_path, fault):
     """The OS shim corrupts a real SDK event; it never manufactures model responses."""
     with model_service() as (url, requests):
@@ -126,13 +126,18 @@ def forward():
    p.stdin.write(line);p.stdin.flush()
  except (BrokenPipeError,ValueError):pass
 threading.Thread(target=forward,daemon=True).start()
+saved=b''
 for line in p.stdout:
  value=json.loads(line)
  fault={fault!r}
  trigger=(value.get('kind')=='response' and value.get('payload',{{}}).get('method')=='run') if fault=='duplicate_terminal' else value.get('kind')=='event'
+ if fault=='duplicate_after_close':
+  if value.get('payload',{{}}).get('method')=='run':saved=line
+  trigger=value.get('kind')=='response' and value.get('payload',{{}}).get('method')=='close'
  if trigger:
   if fault=='malformed': damaged='{{malformed frame}}\\n'
   elif fault=='duplicate_terminal': damaged=line.decode()*2
+  elif fault=='duplicate_after_close': damaged=(line+saved).decode()
   elif fault=='duplicate_callback':
    value={{'version':1,'kind':'request','instance_id':value['instance_id'],'run_id':value['run_id'],'request_id':'pi:repeated',
      'payload':{{'method':'platform_invoke','identity':{{'application_id':'pi','task_id':'task','run_id':value['run_id'],'instance_id':value['instance_id'],'call_id':'call'}},'tool_name':'unavailable','arguments':{{}}}}}}
@@ -145,7 +150,8 @@ for line in p.stdout:
    if fault=='identity':value['run_id']='wrong-run'
    damaged=json.dumps(value)+'\\n'
   sys.stdout.write(damaged);sys.stdout.flush()
-  p.kill();p.wait();sys.exit(2)
+  if p.poll() is None:p.kill()
+  p.wait();sys.exit(2)
  sys.stdout.buffer.write(line);sys.stdout.buffer.flush()
 p.wait()
 ''')
