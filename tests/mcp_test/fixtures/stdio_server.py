@@ -8,6 +8,7 @@ import time
 from pathlib import Path
 
 from mcp.server.fastmcp import FastMCP
+from pydantic import BaseModel, Field
 
 server = FastMCP("ticket08", log_level="ERROR")
 evidence = Path(sys.argv[1]) if len(sys.argv) > 1 else None
@@ -27,6 +28,17 @@ def lookup(query: str) -> dict:
     calls += 1
     record("lookup", query=query)
     return {"query": query, "pid": os.getpid(), "calls": calls, "answer": 42}
+
+
+class LookupRequest(BaseModel):
+    query: str = Field(min_length=3)
+    limit: int = Field(default=1, ge=1, le=3)
+
+
+@server.tool()
+def nested_lookup(request: LookupRequest) -> dict:
+    """Look up a fact using an input object described by a referenced schema."""
+    return lookup(request.query)
 
 
 @server.tool()
