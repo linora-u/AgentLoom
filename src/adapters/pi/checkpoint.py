@@ -201,6 +201,16 @@ class PiCheckpointStore:
                 raise ValueError("Pi platform callback already dispatched")
             self.storage.atomic_write_json(self._platform_key(identity), {**data, "state": "executing"})
 
+    def reject_platform(self, identity: NativeCallIdentity, record: ToolCallRecord) -> None:
+        """Persist a preparation rejection without claiming execution started."""
+        with self._lock:
+            data = self.platform_receipt(identity)
+            if (data["state"] != "prepared" or record.status == "completed"
+                    or record.call_id != identity.call_id or record.tool_name != data["tool_name"]):
+                raise ValueError("Pi platform rejection does not match preparation")
+            self.storage.atomic_write_json(self._platform_key(identity),
+                                           {**data, "state": "committed", "record": record.to_dict()})
+
     def commit_platform(self, identity: NativeCallIdentity, record: ToolCallRecord) -> None:
         with self._lock:
             data = self.platform_receipt(identity)
