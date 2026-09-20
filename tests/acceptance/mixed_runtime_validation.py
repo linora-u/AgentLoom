@@ -133,9 +133,10 @@ def run_mixed(case: str, workspace: Path, profile: str) -> list[dict]:
     if mode == 'parallel':
         tokens = ['MIXED-ALPHA-8149', 'MIXED-BETA-3952', 'MIXED-REPEAT-6471']
         for name, token in zip(['left', 'right', 'repeat'], tokens):
-            (fixtures / f'{name}.txt').write_text(f'Verification token: {token}\n')
-        definition['workflow'] = (f'Call inspect_note twice in one parallel batch, query={fixtures / "left.txt"} and query={fixtures / "right.txt"}. '
-            f'After both finish, call inspect_note a third time with query={fixtures / "repeat.txt"}. Report all three actual file tokens.')
+            (workspace / f'{name}.txt').write_text(f'Verification token: {token}\n')
+        definition['workflow'] = ('First issue two inspect_note calls in one parallel batch: {"query":"left.txt"} and {"query":"right.txt"}. '
+            'These are two different files; preserve each query exactly. After both finish, call inspect_note({"query":"repeat.txt"}) separately. '
+            'Report all three actual file tokens. Check the call arguments cover all three requested files before finishing; read any missing file.')
     elif mode == 'goal':
         definition['goal'] = True
         definition['workflow'] += ' After receiving the verified token, call get_goal and complete the root Goal with update_goal(status="complete", evidence=<actual Worker result>); then deliver the token.'
@@ -170,6 +171,8 @@ def run_mixed(case: str, workspace: Path, profile: str) -> list[dict]:
             committed = [entry for entry in commits if entry.get('state') == 'committed']
             assert len(committed) >= len(tokens)
             assert all(entry['request']['tool']['provider'] == 'pi' for entry in committed)
+            if mode == 'parallel':
+                assert len({entry['request']['identity']['native_session_id'] for entry in committed} - {None, ''}) >= 3
         if mode == 'goal':
             assert result.goal and result.goal['status'] == 'complete' and tokens[0] in str(result.goal['evidence'])
     return [proof]
