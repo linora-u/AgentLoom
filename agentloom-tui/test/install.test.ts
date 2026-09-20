@@ -35,7 +35,7 @@ describe("source installer", () => {
     const installedRoot = await realpath(installRoot)
     const calls = await readFile(fixture.log, "utf8")
     expect(calls).toContain(
-      `uv|sync --frozen --no-editable --no-dev --reinstall-package agentloom --project ${repositoryRoot}`,
+      `uv|sync --frozen --extra smol --no-editable --no-dev --reinstall-package agentloom --project ${repositoryRoot}`,
     )
     expect(calls).toContain("bun|install --frozen-lockfile")
     expect(calls).toContain("bun|run build -- --outfile")

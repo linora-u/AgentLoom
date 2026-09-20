@@ -17,6 +17,34 @@ from agentloom.runtime.subprocess_env import build_subprocess_env
 SDK_PACKAGE = "@earendil-works/pi-coding-agent"
 
 
+def _fingerprint(bridge: Path) -> str:
+    manifest = json.loads((bridge / "package.json").read_text())
+    lock = json.loads((bridge / "package-lock.json").read_text())
+    if (manifest["dependencies"][SDK_PACKAGE] != SDK_VERSION
+            or lock["packages"][""]["dependencies"][SDK_PACKAGE] != SDK_VERSION
+            or lock["packages"]["node_modules/" + SDK_PACKAGE]["version"] != SDK_VERSION):
+        raise RuntimeError("Pi SDK version and its committed dependency lock do not match.")
+    inputs = [bridge / name for name in ("package.json", "package-lock.json", "tsconfig.json", "index.ts", "protocol.ts")]
+    # Include modules added by later runtime tickets without including SDK code.
+    inputs.extend(path for path in sorted(bridge.glob("*.ts")) if path not in inputs)
+    inputs.append(bridge.parent / "bridge-v1.schema.json")
+    digest = hashlib.sha256()
+    for path in inputs:
+        digest.update(path.name.encode() + b"\0" + path.read_bytes() + b"\0")
+    return digest.hexdigest()
+
+
+def installed_pi_entry(bridge: Path | None = None) -> Path:
+    """Check an existing build without downloading or mutating dependencies."""
+    bridge = bridge or Path(__file__).parent / "bridge"
+    try:
+        if _installed(bridge, _fingerprint(bridge)):
+            return bridge / "dist/index.js"
+    except (OSError, ValueError, KeyError, TypeError, RuntimeError):
+        pass
+    raise RuntimeError("Pi SDK is not installed or its build is stale/incomplete. Run loom install-runtime pi (uv run --locked loom install-runtime pi in a checkout).")
+
+
 def find_node(env: dict[str, str]) -> str:
     """Skip the Node 18 executable bundled for other AgentLoom tools."""
     inspected = set()
@@ -60,7 +88,8 @@ def _installed(bridge: Path, fingerprint: str) -> bool:
         package = json.loads((bridge / "node_modules" / SDK_PACKAGE / "package.json").read_text())
         return (stamp == {"fingerprint": fingerprint, "sdk_version": SDK_VERSION}
                 and package["version"] == SDK_VERSION
-                and all((bridge / "dist" / name).is_file() for name in ("index.js", "protocol.js")))
+                and all((bridge / "dist" / source.with_suffix(".js").name).is_file()
+                        for source in bridge.glob("*.ts")))
     except (OSError, ValueError, KeyError, TypeError):
         return False
 
@@ -81,18 +110,7 @@ def install_pi(bridge: Path | None = None) -> Path:
     node = find_node(env)
     env["PATH"] = str(Path(node).parent) + os.pathsep + env.get("PATH", "")
     try:
-        manifest = json.loads((bridge / "package.json").read_text())
-        lock = json.loads((bridge / "package-lock.json").read_text())
-        if (manifest["dependencies"][SDK_PACKAGE] != SDK_VERSION
-                or lock["packages"][""]["dependencies"][SDK_PACKAGE] != SDK_VERSION
-                or lock["packages"]["node_modules/" + SDK_PACKAGE]["version"] != SDK_VERSION):
-            raise RuntimeError("Pi SDK version and its committed dependency lock do not match.")
-        inputs = [bridge / name for name in ("package.json", "package-lock.json", "tsconfig.json", "index.ts", "protocol.ts")]
-        inputs.append(bridge.parent / "bridge-v1.schema.json")
-        digest = hashlib.sha256()
-        for path in inputs:
-            digest.update(path.name.encode() + b"\0" + path.read_bytes() + b"\0")
-        fingerprint = digest.hexdigest()
+        fingerprint = _fingerprint(bridge)
         with (bridge / ".agentloom-install.lock").open("a") as guard:
             fcntl.flock(guard, fcntl.LOCK_EX)
             if _installed(bridge, fingerprint):
@@ -106,7 +124,10 @@ def install_pi(bridge: Path | None = None) -> Path:
             _run([node, str(bridge / "node_modules/typescript/bin/tsc")], bridge, env)
             _run([node, "--input-type=module", "-e", f"await import('{SDK_PACKAGE}'); await import('./dist/protocol.js');"], bridge, env)
             installed = json.loads((bridge / "node_modules" / SDK_PACKAGE / "package.json").read_text())
-            if installed["version"] != SDK_VERSION or not (bridge / "dist/index.js").is_file():
+            if installed["version"] != SDK_VERSION or not all(
+                (bridge / "dist" / source.with_suffix(".js").name).is_file()
+                for source in bridge.glob("*.ts")
+            ):
                 raise RuntimeError("Pi installation did not produce the locked SDK and bridge.")
             stamp.write_text(json.dumps({"fingerprint": fingerprint, "sdk_version": SDK_VERSION}) + "\n")
     except (OSError, ValueError, KeyError, TypeError, subprocess.SubprocessError):

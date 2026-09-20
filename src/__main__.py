@@ -199,7 +199,6 @@ def _has_transient_provider_error(error: BaseException) -> bool:
         ServiceUnavailableError,
         Timeout,
     )
-    from smolagents import AgentMaxStepsError, AgentParsingError
 
     transient_types = (
         Timeout,
@@ -217,10 +216,13 @@ def _has_transient_provider_error(error: BaseException) -> bool:
         PermissionDeniedError,
         BadRequestError,
         ProviderCallBudgetExceeded,
-        AgentParsingError,
-        AgentMaxStepsError,
         ModelProtocolError,
     )
+    # A smol exception can only exist if its SDK is already loaded. Do not
+    # import an optional runtime just to classify another runtime's failure.
+    smol = sys.modules.get("smolagents")
+    if smol is not None:
+        denied_types += (smol.AgentParsingError, smol.AgentMaxStepsError)
     current: BaseException | None = error
     visited: set[int] = set()
     transient_seen = False

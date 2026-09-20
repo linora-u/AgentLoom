@@ -108,6 +108,7 @@ fi
 printf '%b\n' "${MUTED}Creating the locked AgentLoom Python environment...${NC}"
 UV_PROJECT_ENVIRONMENT="$VENV_DIR" "$UV_BIN" sync \
   --frozen \
+  --extra smol \
   --no-editable \
   --no-dev \
   --reinstall-package agentloom \
