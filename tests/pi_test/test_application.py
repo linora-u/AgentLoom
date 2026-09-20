@@ -49,6 +49,8 @@ def model_service(*, responses=False, fail_count=0, error_status=500, stall=None
             ]
             if turns is not None and request_number <= len(turns) and turns[request_number - 1] is not None:
                 calls = turns[request_number - 1]
+                if callable(calls):
+                    calls = calls(request)
                 chunks[0]["choices"][0]["delta"] = {"role": "assistant", "tool_calls": [
                     {"index": index, "id": call_id, "type": "function", "function": {
                         "name": name, "arguments": json.dumps(arguments)}}
