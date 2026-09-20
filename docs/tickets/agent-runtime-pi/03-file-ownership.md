@@ -2,7 +2,7 @@
 
 本清单基于 03 实际调用者登记。它细化 [worktree 计划](worktree-plan.md)，避免按旧 tools 目录整包搬迁。路径为当前源文件；04 完成后提供精确目标路径给 06。任何一份文件同时只有一个修改者。
 
-**状态：03 已验收并冻结分工。** 下游以 `refs/agentloom/ticket03-frozen` 解析出的准确 SHA 和 [验收记录](03-validation.json) 为起点；本文定义未来修改权，不表示 04 之后的迁移已执行。
+**状态：03 已验收并冻结分工。** 下游基线必须包含 `refs/agentloom/ticket03-frozen` 对应提交，并核对 [验收记录](03-validation.json)；允许经检查的后继提交，实际工作区见 [当前登记](worktree-plan.md)。本文定义修改权，不表示后续迁移已经验收；协调者统一分发本轮文档修订。
 
 ## 冻结后可独立编辑的范围
 
@@ -36,11 +36,11 @@
 
 ## 始终由协调者串行接线
 
-`src/runtime/agent_runtime.py`、`native_tools.py`、`resources.py`、`agent.py`、`factory.py`、`invocation.py`；Application 定义/validation/readiness/lifecycle；配置和模型 headers 投影；`src/tools/catalog.py`、`catalog_types.py`、`selection.py`、`loader.py`；混合包的 `__init__.py`；公共 prompt/Skill parser 与 workspace 的 LSP 预热入口。
+`src/runtime/agent_runtime.py`、`native_tools.py`、`resources.py`、`agent.py`、`factory.py`、`invocation.py`；Application 定义/validation/readiness/lifecycle；配置和模型 headers 投影；`src/tools/catalog.py`、`catalog_types.py`、`selection.py`、`loader.py`；混合包的 `__init__.py`；公共 prompt/Skill parser；`src/application/runner.py::_execute_app` 中的 LSP 预热入口。
 
 04/08 各自修改登记分区，不编辑全量 catalog。基础工具迁移可保留旧路径兼容导出，使未完成的另一分支仍可运行。公共入口的必要补丁计入提出需求的那张票：协调者串行合入，实现分支同步后完成实际 Application 验收，不能拖到 14。
 
-08 若需要调整未选专业工具的 LSP 构造/预热，也通过公共 workspace 接线完成；不能只让 catalog 的 lazy import 测试通过就宣称整个应用已无需这些资源。
+08 调整未选专业工具的 LSP 构造/预热时，提交 Application runner 的最小接线补丁，由协调者与 07 的公共入口修改串行集成；不能只让 catalog 的 lazy import 测试通过就宣称整个应用已无需这些资源。
 
 ## 测试交接
 
@@ -63,4 +63,4 @@
 - Goal 的旧 smol decorator 仍由 08 移除；03 只标明平台 manifest。Todo decorator 与状态由 04 处理。
 - SDK 原始 RESULT.json 和历史提交证据不改写；移动记录见 `03-sdk-relocation.json`。03 的新重放不冒充 01 的原始运行。
 
-完成 03 后只发布冻结版本与验收，不自动开始 04。四路必须以包含最新合同及本清单的实际冻结提交为起点。
+03 的冻结结果继续作为公共合同基线；四路使用包含该结果的已验证提交，并同步本清单的最新修订。存在 worktree 不改变文件所有权，也不意味着可以启动尚有未完成前置的下一票。

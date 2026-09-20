@@ -43,6 +43,7 @@
 3. `f38470ec`：补取消、异常、超时、无工具终态与真实应用验收。
 4. `d79b674e`：修复审查发现的协议重复消息与 Node 版本选择。
 5. `a7907669`：保留关闭过程中晚到的协议失败。
+6. `eca311ee`：整理逐项验收、真实应用证据与下游交接。
 
 ## 09 / 13 接手
 
@@ -51,3 +52,11 @@
 13 消费 `src/adapters/pi/bridge/` 的 manifest/lock/build，以及相邻 `bridge-v1.schema.json`；不重写 Node lock。发行安装仍由 13 交付。07 不提前实现工具、Worker、Goal 或恢复。
 
 交付沿用 main 未提交、未暂存 Changes 的约定；增量历史保留在分支/冻结引用。只清理本票创建的 t07 worktree，其它并行 worktree 与既有 main 改动保留。
+
+## main 交付核对
+
+已交付到 main 未提交、未暂存 Changes。main HEAD 保持 `9d5a88915efbd402d0f2697318125933fc1500e0`；07 固定交接为 `eca311eeca103dc6cd64eef959428e8b01eb22b2`，05+07 的集成提交为 `0b5c4f4ed32244ef97b107361dcb45dbe2be149e`，保留全部增量历史。
+
+交付时 main 已包含并行 04/05 的源码改动。Pi 参数校验接入 04 拆分后的公共 options 入口；04 原有逻辑保持不变。组合运行 Pi、native host/Application、smol 私有状态及 runtime 配置用例：**97 passed，55.31 秒**；main 实际入口另跑 **1 个真实 Application，通过**。这两项验证补充前述工作分支的完整回归与 32 个真实 Application，不把未运行的最终全功能 Pi 验收算入 07。
+
+交付前快照中的 135 个其它文件内容保持不变，main index 为空。只删除了本票 t07 worktree，保留实现分支、冻结引用和仓库外证据。详细交付记录见 [07-delivery.json](07-delivery.json)。
