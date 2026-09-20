@@ -549,7 +549,7 @@ def _validate_schema_value(
     if not isinstance(value, dict):
         return
 
-    properties = schema.get("properties")
+    properties = schema.get("properties", {})
     if isinstance(properties, Mapping):
         required = schema.get("required", [])
         if isinstance(required, list):

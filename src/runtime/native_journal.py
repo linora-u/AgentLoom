@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
 from collections.abc import Iterator, Mapping
 from contextlib import contextmanager
 from dataclasses import asdict
@@ -60,6 +61,19 @@ class NativeCallJournal:
         self.directory = directory
         self._storage = SecureDirectory(directory)
         self._lock = RLock()
+        try:
+            # atomic_write fsyncs each snapshot and its containing directory.
+            # Also persist newly created ancestor entries; otherwise a reboot
+            # could lose the whole journal despite a successful file fsync.
+            for parent in directory.resolve(strict=True).parents:
+                fd = os.open(parent, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
+                try:
+                    os.fsync(fd)
+                finally:
+                    os.close(fd)
+        except BaseException:
+            self._storage.close()
+            raise
 
     @contextmanager
     def transaction(self, identity: NativeCallIdentity, *, confirm: bool = False) -> Iterator[dict[str, Any]]:
