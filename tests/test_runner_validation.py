@@ -1,13 +1,13 @@
 from pathlib import Path
 
 import pytest
-
 from agentloom.application.runner import validate_required_yaml_fields
 
 
 def _base_config() -> dict:
     return {
         "name": "demo_agent",
+        "agent_runtime": "smolagents",
         "description": "demo",
         "workflow": "Run the workflow.",
     }

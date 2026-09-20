@@ -1,8 +1,8 @@
 name: "test_tool_call_mode"
+agent_runtime: smolagents
 description: "Test tool_call mode: verify LLM can invoke tools via native function calling"
 
 model_type: "powerful"
-tool_call_type: "tool_call"
 
 workflow: |
   # Tool Call Mode Verification Test

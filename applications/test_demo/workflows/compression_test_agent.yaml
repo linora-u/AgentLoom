@@ -1,9 +1,9 @@
 name: "compression_test_agent"
+agent_runtime: smolagents
 description: |
   压缩功能测试专用agent，用于验证ConversationHistoryManager的完整工作流程。
 
 model_type: "powerful"
-tool_call_type: "code_act"
 
 workflow: |
   # 压缩功能测试 Workflow
@@ -35,6 +35,3 @@ tools:
 
 worker_agents:
   []
-
-execution_env:
-  type: "local"

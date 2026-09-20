@@ -1,14 +1,14 @@
 name: "goal_documentation_auditor"
+agent_runtime: smolagents
 description: "Audit Goal Mode documentation and examples against executable contracts."
 model_type: "summary"
-tool_call_type: "tool_call"
 max_steps: 2
 concurrency: 1
 
 workflow: |
   Use only the EVIDENCE_BUNDLE embedded in the query. Compare the requested Goal
   documentation slice with code and validator truth.
-  Check YAML forms, Supervisor-only ownership, list semantics, budgets, resume,
+  Check YAML forms, Supervisor-only ownership, list semantics, resume,
   schedules, CLI/TUI, and zero-impact claims as applicable. Return exact headings:
   DOCUMENTS, CODE_TRUTH, EXAMPLES, DRIFT, VERDICT. Cite paths and quote only short
   field names or commands. Do not edit files. Keep the response under 1600 words.

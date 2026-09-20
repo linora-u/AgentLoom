@@ -2,10 +2,8 @@ import json
 import logging
 import pathlib
 
-from smolagents.models import ChatMessage, ChatMessageToolCall, ChatMessageToolCallFunction, MessageRole
-
-import agentloom.runtime.memory.context_compression as compression_module
-from agentloom.runtime.memory.context_compression import (
+import agentloom.adapters.smolagents.context_compression as compression_module
+from agentloom.adapters.smolagents.context_compression import (
     FILE_DEDUP_PLACEHOLDER,
     OBSERVATION_MASKING_PLACEHOLDER,
     ConversationHistoryManager,
@@ -25,6 +23,15 @@ from agentloom.runtime.memory.context_compression import (
     to_internal_messages,
     truncate_conversation,
 )
+from agentloom.runtime.model_protocol import (
+    MODEL_ITEMS_RAW_KEY,
+    MODEL_RESPONSE_ID_RAW_KEY,
+    FunctionCallItem,
+    MessageItem,
+    ModelTurnResult,
+    ReasoningItem,
+)
+from smolagents.models import ChatMessage, ChatMessageToolCall, ChatMessageToolCallFunction, MessageRole
 
 MOCK_DIR = pathlib.Path(__file__).parent
 
@@ -37,10 +44,27 @@ def create_mock_message(role, content_text):
     return InternalChatMessage(message=msg)
 
 
-def create_python_interpreter_call(code_text):
-    return create_mock_message(
-        MessageRole.TOOL_CALL,
-        "{'name': 'python_interpreter', 'arguments': " + repr(code_text) + "}",
+def create_native_tool_call(
+    name: str,
+    arguments: dict,
+    *,
+    call_id: str = "call-1",
+):
+    return InternalChatMessage(
+        message=ChatMessage(
+            role=MessageRole.TOOL_CALL,
+            content="",
+            tool_calls=[
+                ChatMessageToolCall(
+                    id=call_id,
+                    type="function",
+                    function=ChatMessageToolCallFunction(
+                        name=name,
+                        arguments=arguments,
+                    ),
+                )
+            ],
+        )
     )
 
 
@@ -50,6 +74,33 @@ def create_history_messages():
         ChatMessage(role=MessageRole.USER, content="user request"),
         ChatMessage(role=MessageRole.ASSISTANT, content="assistant reply"),
     ]
+
+
+def test_sync_accepts_canonical_items_with_frozen_replay_payload() -> None:
+    manager = ConversationHistoryManager(max_tokens=4096)
+    message = ChatMessage(
+        role=MessageRole.ASSISTANT,
+        content="",
+        raw={
+            MODEL_ITEMS_RAW_KEY: (
+                FunctionCallItem(
+                    call_id="call-1",
+                    name="read_file",
+                    arguments_json='{"file_path":"/tmp/example"}',
+                    replay_payload={
+                        "type": "function_call",
+                        "provider": {"request_id": "opaque"},
+                    },
+                ),
+            ),
+            MODEL_RESPONSE_ID_RAW_KEY: "response-1",
+        },
+    )
+
+    manager.sync_from_messages([message])
+    manager.sync_from_messages([message])
+
+    assert manager.get_internal_messages()[0].message is message
 
 
 def test_extract_tool_invocations_from_native_dict_tool_calls():
@@ -78,15 +129,27 @@ def test_extract_tool_invocations_from_native_dict_tool_calls():
     assert invocations[0].dedup_key == invocations[0].arguments
 
 
-def test_extract_tool_invocations_from_codeact_python_interpreter():
-    code = """
-content = read_file(file_path="/tmp/codeact.py", offset=1, limit=40)
-result = shell_tool(commands=["printf hello"])
-print(content, result)
-""".strip()
+def test_extract_tool_invocations_from_canonical_raw_items():
     msg = ChatMessage(
         role=MessageRole.TOOL_CALL,
-        content="{'name': 'python_interpreter', 'arguments': " + repr(code) + "}",
+        content="",
+        raw={
+            MODEL_ITEMS_RAW_KEY: [
+                FunctionCallItem(
+                    call_id="call-read",
+                    name="read_file",
+                    arguments_json=(
+                        '{"file_path":"/tmp/canonical.py","offset":1,"limit":40}'
+                    ),
+                ),
+                {
+                    "type": "function_call",
+                    "call_id": "call-shell",
+                    "name": "shell_tool",
+                    "arguments_json": '{"command":"printf hello"}',
+                },
+            ]
+        },
     )
 
     invocations = _extract_tool_invocations(msg)
@@ -96,16 +159,16 @@ print(content, result)
     assert invocations[1].dedup_key is None
 
 
-def test_extract_tool_invocations_from_direct_python_ast():
-    msg = ChatMessage(
-        role=MessageRole.TOOL_CALL,
-        content='read_file("/tmp/direct.py", offset=5, limit=10)\nprint("ignored")',
+def test_plain_text_and_pseudo_json_do_not_become_tool_invocations():
+    contents = (
+        'read_file("/tmp/direct.py", offset=5, limit=10)',
+        '{"name":"read_file","arguments":{"file_path":"/tmp/pseudo.py"}}',
+        "<tool_call><name>read_file</name></tool_call>",
     )
 
-    invocations = _extract_tool_invocations(msg)
-
-    assert [invocation.name for invocation in invocations] == ["read_file"]
-    assert "/tmp/direct.py" in invocations[0].arguments
+    for content in contents:
+        msg = ChatMessage(role=MessageRole.TOOL_CALL, content=content)
+        assert _extract_tool_invocations(msg) == []
 
 
 def test_tool_deduplication_basic(tmp_path):
@@ -118,7 +181,11 @@ def test_tool_deduplication_basic(tmp_path):
     content_v1 = test_file.read_text()
 
     # 2. 模拟第一次工具调用与响应
-    msg1 = create_mock_message(MessageRole.TOOL_CALL, f"read_file('{test_file}')")
+    msg1 = create_native_tool_call(
+        "read_file",
+        {"file_path": str(test_file)},
+        call_id="read-1",
+    )
     msg2 = create_mock_message(MessageRole.TOOL_RESPONSE, content_v1)
 
     # 3. 模拟文件内容发生了更新
@@ -126,7 +193,11 @@ def test_tool_deduplication_basic(tmp_path):
     content_v2 = test_file.read_text()
 
     # 4. 模拟第二次针对同一文件的调用
-    msg3 = create_mock_message(MessageRole.TOOL_CALL, f"read_file('{test_file}')")
+    msg3 = create_native_tool_call(
+        "read_file",
+        {"file_path": str(test_file)},
+        call_id="read-2",
+    )
     msg4 = create_mock_message(MessageRole.TOOL_RESPONSE, content_v2)
 
     messages = [msg1, msg2, msg3, msg4]
@@ -146,18 +217,26 @@ def test_tool_deduplication_keyword_file_path(tmp_path):
     test_file.write_text("first version " * 40)
     content_v1 = test_file.read_text()
 
-    msg1 = create_mock_message(
-        MessageRole.TOOL_CALL,
-        f"read_file(file_path='{test_file}', strip_whitespace=False)",
+    msg1 = create_native_tool_call(
+        "read_file",
+        {
+            "file_path": str(test_file),
+            "strip_whitespace": False,
+        },
+        call_id="read-1",
     )
     msg2 = create_mock_message(MessageRole.TOOL_RESPONSE, content_v1)
 
     test_file.write_text(content_v1 + " updated")
     content_v2 = test_file.read_text()
 
-    msg3 = create_mock_message(
-        MessageRole.TOOL_CALL,
-        f"read_file(file_path='{test_file}', strip_whitespace=False)",
+    msg3 = create_native_tool_call(
+        "read_file",
+        {
+            "file_path": str(test_file),
+            "strip_whitespace": False,
+        },
+        call_id="read-2",
     )
     msg4 = create_mock_message(MessageRole.TOOL_RESPONSE, content_v2)
 
@@ -168,20 +247,17 @@ def test_tool_deduplication_keyword_file_path(tmp_path):
     assert saved_ratio > 0
 
 
-def test_tool_deduplication_python_interpreter_read_file_lines_same_range():
-    code = """
-content = read_file(
-    file_path="/tmp/demo.py",
-    start_line=10,
-    end_line=20,
-    include_line_numbers=True,
-)
-print(content)
-""".strip()
+def test_tool_deduplication_native_read_file_same_range():
+    arguments = {
+        "file_path": "/tmp/demo.py",
+        "start_line": 10,
+        "end_line": 20,
+        "include_line_numbers": True,
+    }
     messages = [
-        create_python_interpreter_call(code),
+        create_native_tool_call("read_file", arguments, call_id="read-1"),
         create_mock_message(MessageRole.TOOL_RESPONSE, "A" * 500),
-        create_python_interpreter_call(code),
+        create_native_tool_call("read_file", arguments, call_id="read-2"),
         create_mock_message(MessageRole.TOOL_RESPONSE, "B" * 550),
     ]
 
@@ -192,29 +268,29 @@ print(content)
     assert saved_ratio > 0
 
 
-def test_tool_deduplication_python_interpreter_read_file_lines_different_range_not_deduped():
-    code_a = """
-content = read_file(
-    file_path="/tmp/demo.py",
-    start_line=10,
-    end_line=20,
-    include_line_numbers=True,
-)
-print(content)
-""".strip()
-    code_b = """
-content = read_file(
-    file_path="/tmp/demo.py",
-    start_line=21,
-    end_line=40,
-    include_line_numbers=True,
-)
-print(content)
-""".strip()
+def test_tool_deduplication_native_read_file_different_range_not_deduped():
     messages = [
-        create_python_interpreter_call(code_a),
+        create_native_tool_call(
+            "read_file",
+            {
+                "file_path": "/tmp/demo.py",
+                "start_line": 10,
+                "end_line": 20,
+                "include_line_numbers": True,
+            },
+            call_id="read-1",
+        ),
         create_mock_message(MessageRole.TOOL_RESPONSE, "range-a"),
-        create_python_interpreter_call(code_b),
+        create_native_tool_call(
+            "read_file",
+            {
+                "file_path": "/tmp/demo.py",
+                "start_line": 21,
+                "end_line": 40,
+                "include_line_numbers": True,
+            },
+            call_id="read-2",
+        ),
         create_mock_message(MessageRole.TOOL_RESPONSE, "range-b"),
     ]
 
@@ -225,19 +301,24 @@ print(content)
     assert saved_ratio == 0
 
 
-def test_tool_deduplication_python_interpreter_get_file_outline_same_shape():
-    code = """
-outline = get_file_outline(
-    file_path="/tmp/demo.py",
-    detail_level="full",
-    include_line_numbers=False,
-)
-print(outline)
-""".strip()
+def test_tool_deduplication_native_get_file_outline_same_shape():
+    arguments = {
+        "file_path": "/tmp/demo.py",
+        "detail_level": "full",
+        "include_line_numbers": False,
+    }
     messages = [
-        create_python_interpreter_call(code),
+        create_native_tool_call(
+            "get_file_outline",
+            arguments,
+            call_id="outline-1",
+        ),
         create_mock_message(MessageRole.TOOL_RESPONSE, "outline-1" * 120),
-        create_python_interpreter_call(code),
+        create_native_tool_call(
+            "get_file_outline",
+            arguments,
+            call_id="outline-2",
+        ),
         create_mock_message(MessageRole.TOOL_RESPONSE, "outline-2" * 120),
     ]
 
@@ -249,11 +330,11 @@ print(outline)
 
 
 def test_tool_deduplication_preserves_latest_identical_response():
-    code = "content = read_file('/tmp/same-output.txt')\nprint(content)"
+    arguments = {"file_path": "/tmp/same-output.txt"}
     messages = [
-        create_python_interpreter_call(code),
+        create_native_tool_call("read_file", arguments, call_id="read-1"),
         create_mock_message(MessageRole.TOOL_RESPONSE, "unchanged file content"),
-        create_python_interpreter_call(code),
+        create_native_tool_call("read_file", arguments, call_id="read-2"),
         create_mock_message(MessageRole.TOOL_RESPONSE, "unchanged file content"),
     ]
 
@@ -265,8 +346,10 @@ def test_tool_deduplication_preserves_latest_identical_response():
 
 
 def test_tool_deduplication_case_insensitive():
-    # 测试路径匹配忽略大小写
-    msg1 = create_mock_message(MessageRole.TOOL_CALL, "READ_FILE('/tmp/test.txt')")
+    msg1 = create_native_tool_call(
+        "READ_FILE",
+        {"file_path": "/tmp/test.txt"},
+    )
     msg2 = create_mock_message(MessageRole.TOOL_RESPONSE, "content")
 
     messages = [msg1, msg2]
@@ -280,8 +363,10 @@ def test_overlap_tool_truncation_with_dedup():
     # 测试工具 A 在 DEDUP 中，但没有在 MAX_RETAIN_CHARS 限制，不应被 default 截断 (3000)
     long_content = "A" * 4000
 
-    # 我们用 read_file_content 测试（在 TOOL_MAX_RETAIN_CHARS 为 None，在 DEDUP_PATTERNS 中存在）
-    msg1 = create_mock_message(MessageRole.TOOL_CALL, "{'name': 'python_interpreter', 'arguments': 'read_file(\\'/tmp/big.txt\\')'}")
+    msg1 = create_native_tool_call(
+        "read_file",
+        {"file_path": "/tmp/big.txt"},
+    )
     msg2 = create_mock_message(MessageRole.TOOL_RESPONSE, long_content)
 
     messages = [msg1, msg2]
@@ -292,18 +377,16 @@ def test_overlap_tool_truncation_with_dedup():
     assert len(new_messages[1].message.content[0]["text"]) == 4000
 
 
-def test_python_interpreter_file_reads_are_exempt_from_layer2_truncation():
+def test_native_file_reads_are_exempt_from_layer2_truncation():
     long_content = "A" * 4000
-    msg1 = create_python_interpreter_call(
-        """
-content = read_file(
-    file_path="/tmp/big.txt",
-    start_line=1,
-    end_line=300,
-    include_line_numbers=True,
-)
-print(content)
-""".strip()
+    msg1 = create_native_tool_call(
+        "read_file",
+        {
+            "file_path": "/tmp/big.txt",
+            "start_line": 1,
+            "end_line": 300,
+            "include_line_numbers": True,
+        },
     )
     msg2 = create_mock_message(MessageRole.TOOL_RESPONSE, long_content)
 
@@ -313,17 +396,15 @@ print(content)
     assert new_messages[1].message.content[0]["text"] == long_content
 
 
-def test_python_interpreter_outline_reads_are_exempt_from_layer2_truncation():
+def test_native_outline_reads_are_exempt_from_layer2_truncation():
     long_content = "B" * 4500
-    msg1 = create_python_interpreter_call(
-        """
-outline = get_file_outline(
-    file_path="/tmp/huge.c",
-    detail_level="full",
-    include_line_numbers=True,
-)
-print(outline)
-""".strip()
+    msg1 = create_native_tool_call(
+        "get_file_outline",
+        {
+            "file_path": "/tmp/huge.c",
+            "detail_level": "full",
+            "include_line_numbers": True,
+        },
     )
     msg2 = create_mock_message(MessageRole.TOOL_RESPONSE, long_content)
 
@@ -333,10 +414,11 @@ print(outline)
     assert new_messages[1].message.content[0]["text"] == long_content
 
 
-def test_python_interpreter_shell_tool_still_truncates():
+def test_native_shell_tool_still_truncates():
     long_content = "C" * 3200
-    msg1 = create_python_interpreter_call(
-        'result = shell_tool(commands=["grep -n foo /tmp/demo.txt"])'
+    msg1 = create_native_tool_call(
+        "shell_tool",
+        {"command": "grep -n foo /tmp/demo.txt"},
     )
     msg2 = create_mock_message(MessageRole.TOOL_RESPONSE, long_content)
 
@@ -348,8 +430,16 @@ def test_python_interpreter_shell_tool_still_truncates():
 
 def test_tool_output_truncation_uses_message_position_not_object_equality():
     long_content = "Z" * 4000
-    read_call = create_python_interpreter_call("content = read_file('/tmp/large.txt')\nprint(content)")
-    shell_call = create_python_interpreter_call("result = shell_tool(commands=['cat /tmp/large.txt'])\nprint(result)")
+    read_call = create_native_tool_call(
+        "read_file",
+        {"file_path": "/tmp/large.txt"},
+        call_id="read",
+    )
+    shell_call = create_native_tool_call(
+        "shell_tool",
+        {"command": "cat /tmp/large.txt"},
+        call_id="shell",
+    )
     messages = [
         read_call,
         create_mock_message(MessageRole.TOOL_RESPONSE, long_content),
@@ -364,10 +454,11 @@ def test_tool_output_truncation_uses_message_position_not_object_equality():
     assert "shell_tool output" in new_messages[3].message.content[0]["text"]
 
 
-def test_python_interpreter_ripgrep_still_truncates():
+def test_native_grep_search_still_truncates():
     long_content = "D" * 3400
-    msg1 = create_python_interpreter_call(
-        'result = ripgrep_search_directory(directory="/tmp", rg_args=["-n", "foo"])'
+    msg1 = create_native_tool_call(
+        "grep_search",
+        {"path": "/tmp", "pattern": "foo"},
     )
     msg2 = create_mock_message(MessageRole.TOOL_RESPONSE, long_content)
 
@@ -458,11 +549,11 @@ def test_smart_summary_enabled_uses_layer4(monkeypatch):
     )
 
 
-def test_malformed_payload_falls_back_to_default_truncation():
+def test_plain_pseudo_tool_payload_uses_default_truncation():
     long_content = "E" * 3500
     msg1 = create_mock_message(
         MessageRole.TOOL_CALL,
-        "{'name': 'python_interpreter', 'arguments': 'read_file(/tmp/bad.txt'}",
+        '{"name":"read_file","arguments":{"file_path":"/tmp/not-structured"}}',
     )
     msg2 = create_mock_message(MessageRole.TOOL_RESPONSE, long_content)
 
@@ -476,7 +567,7 @@ def test_basic_truncation():
     # 测试普通工具超过 default 3000 被截断
     long_content = "A" * 3500
 
-    msg1 = create_mock_message(MessageRole.TOOL_CALL, "{'name': 'unknown_tool', 'arguments': ''}")
+    msg1 = create_native_tool_call("unknown_tool", {})
     msg2 = create_mock_message(MessageRole.TOOL_RESPONSE, long_content)
 
     messages = [msg1, msg2]
@@ -488,72 +579,6 @@ def test_basic_truncation():
     assert "Truncated 500 characters" in truncated_text
     # 头部和尾部各 1500，加上提示词的长度，大约 3000 出头
     assert len(truncated_text) < 3200
-
-
-def test_tool_deduplication_from_real_logs():
-    """
-    通过读取一个真实的类似 smolagents 输出格式的 test.log 文件内容，
-    验证去重机制确实能在这种文本序列中抓取关键工具调用并替换旧的响应。
-    """
-    import pathlib
-    log_path = pathlib.Path(__file__).parent / "test.log"
-    log_content = log_path.read_text(encoding="utf-8")
-
-    # 解析真实日志流并粗略还原为 Messages 列表
-    messages = []
-
-    lines = log_content.splitlines()
-    in_code_block = False
-    in_log_block = False
-    code_lines = []
-    log_lines = []
-
-    for line in lines:
-        if "─ Executing parsed code:" in line:
-            in_code_block = True
-            code_lines = []
-            continue
-        elif in_code_block and "─" * 10 in line:
-            in_code_block = False
-            if code_lines:
-                parsed_code = "\n".join(code_lines).strip()
-                messages.append(InternalChatMessage(message=ChatMessage(
-                    role=MessageRole.TOOL_CALL,
-                    content=parsed_code
-                )))
-            continue
-
-        if "Execution logs:" in line:
-            in_log_block = True
-            log_lines = []
-            continue
-        elif in_log_block and "Out:" in line:
-            in_log_block = False
-            if log_lines:
-                parsed_logs = "\n".join(log_lines).strip()
-                messages.append(InternalChatMessage(message=ChatMessage(
-                    role=MessageRole.TOOL_RESPONSE,
-                    content=[{"type": "text", "text": parsed_logs}]
-                )))
-            continue
-
-        if in_code_block:
-            code_lines.append(line)
-        if in_log_block:
-            log_lines.append(line)
-
-    assert len(messages) == 4
-
-    # 执行去重逻辑
-    new_messages, saved_ratio = _apply_tool_dedup(messages, "dummy_model", logger=None)
-
-    assert len(new_messages) == 4
-
-    # 验证旧的被去重了
-    assert new_messages[1].message.content[0]["text"] == FILE_DEDUP_PLACEHOLDER
-
-    # 验证最后的响应是最新的内容
-    assert "CANIF_VERSION 2.0" in new_messages[3].message.content[0]["text"]
 
 
 # =============================================================================
@@ -576,7 +601,20 @@ def _load_mock_messages(filename: str) -> list[InternalChatMessage]:
         content = item["content"]
         if isinstance(content, str):
             content = [{"type": "text", "text": content}]
-        msg = ChatMessage(role=role, content=content)
+        tool_call = item.get("tool_call")
+        tool_calls = None
+        if role == MessageRole.TOOL_CALL and isinstance(tool_call, dict):
+            tool_calls = [
+                ChatMessageToolCall(
+                    id=tool_call["id"],
+                    type="function",
+                    function=ChatMessageToolCallFunction(
+                        name=tool_call["name"],
+                        arguments=tool_call["arguments"],
+                    ),
+                )
+            ]
+        msg = ChatMessage(role=role, content=content, tool_calls=tool_calls)
         messages.append(InternalChatMessage(message=msg))
     return messages
 
@@ -625,26 +663,26 @@ class TestLayer1DedupExtra:
 # =============================================================================
 class TestLayer2TruncationExtra:
     def test_multiple_tools_mixed_truncation(self):
-        """shell_tool(2000), ripgrep(3000), unknown(3000 default) all over limit."""
+        """Native shell, grep, and unknown calls use their declared quotas."""
         messages = []
-        # shell_tool call + response (4000 chars, limit=2000)
-        messages.append(create_mock_message(
-            MessageRole.TOOL_CALL,
-            "{'name': 'python_interpreter', 'arguments': 'result = shell_tool(commands=[\"ls -la /\"])\\nprint(result)'}",
+        messages.append(create_native_tool_call(
+            "shell_tool",
+            {"command": "ls -la /"},
+            call_id="shell",
         ))
         messages.append(create_mock_message(MessageRole.TOOL_RESPONSE, "S" * 4000))
 
-        # ripgrep call + response (5000 chars, limit=3000)
-        messages.append(create_mock_message(
-            MessageRole.TOOL_CALL,
-            "{'name': 'python_interpreter', 'arguments': 'result = ripgrep_search_directory(directory=\"/tmp\", rg_args=[\"-n\", \"foo\"])\\nprint(result)'}",
+        messages.append(create_native_tool_call(
+            "grep_search",
+            {"path": "/tmp", "pattern": "foo"},
+            call_id="grep",
         ))
         messages.append(create_mock_message(MessageRole.TOOL_RESPONSE, "R" * 5000))
 
-        # unknown_tool call + response (4500 chars, default limit=3000)
-        messages.append(create_mock_message(
-            MessageRole.TOOL_CALL,
-            "{'name': 'unknown_tool', 'arguments': ''}",
+        messages.append(create_native_tool_call(
+            "unknown_tool",
+            {},
+            call_id="unknown",
         ))
         messages.append(create_mock_message(MessageRole.TOOL_RESPONSE, "U" * 4500))
 
@@ -699,9 +737,10 @@ class TestLayer2TruncationExtra:
 class TestLayer3ObservationMasking:
     def _make_tool_pair(self, idx: int, content: str) -> list[InternalChatMessage]:
         """Create a tool_call + tool_response pair."""
-        call = create_mock_message(
-            MessageRole.TOOL_CALL,
-            f"{{'name': 'python_interpreter', 'arguments': 'read_file_{idx}()'}}",
+        call = create_native_tool_call(
+            f"tool_{idx}",
+            {"index": idx},
+            call_id=f"call-{idx}",
         )
         resp = create_mock_message(MessageRole.TOOL_RESPONSE, content)
         return [call, resp]
@@ -771,7 +810,7 @@ class TestLayer3ObservationMasking:
         """Already-masked responses should not be re-counted."""
         messages = []
         # First pair: already masked
-        call = create_mock_message(MessageRole.TOOL_CALL, "{'name': 'tool', 'arguments': ''}")
+        call = create_native_tool_call("ordinary_tool", {})
         resp = create_mock_message(MessageRole.TOOL_RESPONSE, OBSERVATION_MASKING_PLACEHOLDER)
         messages.extend([call, resp])
         # Two more normal pairs
@@ -791,7 +830,7 @@ class TestLayer3ObservationMasking:
     def test_masking_skips_dedup_placeholder(self):
         """Responses already deduped (FILE_DEDUP_PLACEHOLDER) should not be re-masked."""
         messages = []
-        call = create_mock_message(MessageRole.TOOL_CALL, "{'name': 'tool', 'arguments': ''}")
+        call = create_native_tool_call("ordinary_tool", {})
         resp = create_mock_message(MessageRole.TOOL_RESPONSE, FILE_DEDUP_PLACEHOLDER)
         messages.extend([call, resp])
         for i in range(2):
@@ -808,9 +847,10 @@ class TestLayer3ObservationMasking:
 
     def test_masking_preserves_skill_tool_response(self):
         messages = [
-            create_mock_message(
-                MessageRole.TOOL_CALL,
-                "{'name': 'skill', 'arguments': {'name': 'custom-analysis'}}",
+            create_native_tool_call(
+                "skill",
+                {"name": "custom-analysis"},
+                call_id="skill",
             ),
             create_mock_message(MessageRole.TOOL_RESPONSE, "skill instructions " * 200),
         ]
@@ -1019,7 +1059,7 @@ class TestTruncateConversation:
         messages = [
             create_mock_message(MessageRole.SYSTEM, "system prompt"),
             create_mock_message(MessageRole.USER, "old user request"),
-            create_mock_message(MessageRole.TOOL_CALL, "{'name': 'shell_tool', 'arguments': ''}"),
+            create_native_tool_call("shell_tool", {}),
             create_mock_message(MessageRole.TOOL_RESPONSE, "old shell output"),
             create_mock_message(MessageRole.ASSISTANT, "newer assistant state"),
         ]
@@ -1119,7 +1159,17 @@ class TestTruncateUntilFits:
             ChatMessage(role=MessageRole.SYSTEM, content="system"),
             ChatMessage(
                 role=MessageRole.TOOL_CALL,
-                content="{'name': 'skill', 'arguments': {'name': 'custom-analysis'}}",
+                content="",
+                tool_calls=[
+                    ChatMessageToolCall(
+                        id="skill",
+                        type="function",
+                        function=ChatMessageToolCallFunction(
+                            name="skill",
+                            arguments={"name": "custom-analysis"},
+                        ),
+                    )
+                ],
             ),
             ChatMessage(role=MessageRole.TOOL_RESPONSE, content=[{"type": "text", "text": "skill instructions " * 500}]),
         ]
@@ -1142,7 +1192,7 @@ class TestTruncateUntilFits:
         Uses caplog (stdlib) to capture the warning.  LoggerAdapter._dispatch
         mirrors all log output to the stdlib logging hierarchy via
         _stdlib_emit, so caplog always sees the records regardless of whether
-        a global EnhancedAgentLogger backend is active.
+        a global Rich logger backend is active.
         """
         messages = [
             ChatMessage(role=MessageRole.SYSTEM, content="system"),
@@ -1262,7 +1312,7 @@ def test_standard_pipeline_keeps_tool_pairs_structurally_valid(monkeypatch):
     messages = [
         ChatMessage(role=MessageRole.SYSTEM, content="system"),
         ChatMessage(role=MessageRole.USER, content="Investigate the failing test."),
-        ChatMessage(role=MessageRole.TOOL_CALL, content="{'name': 'shell_tool', 'arguments': ''}"),
+        create_native_tool_call("shell_tool", {}).message,
         ChatMessage(role=MessageRole.TOOL_RESPONSE, content=[{"type": "text", "text": "X" * 5000}]),
         ChatMessage(role=MessageRole.ASSISTANT, content="The shell output shows the root cause."),
     ]
@@ -1369,7 +1419,10 @@ def test_parallel_tool_results_are_never_orphaned_by_fallback_truncation():
 def test_summary_serialization_truncates_large_tool_results():
     messages = [
         create_mock_message(MessageRole.USER, "Please inspect the logs."),
-        create_mock_message(MessageRole.TOOL_CALL, "{'name': 'shell_tool', 'arguments': 'cat /tmp/log'}"),
+        create_native_tool_call(
+            "shell_tool",
+            {"command": "cat /tmp/log"},
+        ),
         create_mock_message(MessageRole.TOOL_RESPONSE, "A" * 5000),
         create_mock_message(MessageRole.ASSISTANT, "The log points at timeout handling."),
     ]
@@ -1453,7 +1506,11 @@ def test_structured_tool_error_is_exempt_from_observation_masking():
     for index, content in enumerate(contents):
         messages.extend(
             [
-                create_mock_message(MessageRole.TOOL_CALL, f"{{'name': 'shell_tool', 'arguments': '{index}'}}"),
+                create_native_tool_call(
+                    "shell_tool",
+                    {"index": index},
+                    call_id=f"shell-{index}",
+                ),
                 create_mock_message(MessageRole.TOOL_RESPONSE, content),
             ]
         )
@@ -1477,7 +1534,7 @@ def test_structured_tool_error_remains_valid_json_after_hard_truncation():
         }
     )
     messages = [
-        create_mock_message(MessageRole.TOOL_CALL, "{'name': 'shell_tool', 'arguments': ''}"),
+        create_native_tool_call("shell_tool", {}),
         create_mock_message(MessageRole.TOOL_RESPONSE, error_content),
     ]
 
@@ -1507,7 +1564,11 @@ def test_old_structured_tool_errors_are_truncated_as_valid_json():
         originals.append(error_content)
         messages.extend(
             [
-                create_mock_message(MessageRole.TOOL_CALL, "{'name': 'shell_tool', 'arguments': ''}"),
+                create_native_tool_call(
+                    "shell_tool",
+                    {},
+                    call_id=f"shell-{index}",
+                ),
                 create_mock_message(MessageRole.TOOL_RESPONSE, error_content),
             ]
         )
@@ -1551,9 +1612,17 @@ def test_old_structured_tool_error_with_oversized_metadata_stays_valid_json():
         }
     )
     messages = [
-        create_mock_message(MessageRole.TOOL_CALL, "{'name': 'shell_tool', 'arguments': 'old'}"),
+        create_native_tool_call(
+            "shell_tool",
+            {"command": "old"},
+            call_id="shell-old",
+        ),
         create_mock_message(MessageRole.TOOL_RESPONSE, oversized_error),
-        create_mock_message(MessageRole.TOOL_CALL, "{'name': 'shell_tool', 'arguments': 'new'}"),
+        create_native_tool_call(
+            "shell_tool",
+            {"command": "new"},
+            call_id="shell-new",
+        ),
         create_mock_message(MessageRole.TOOL_RESPONSE, newest_error),
     ]
 
@@ -1568,15 +1637,22 @@ def test_old_structured_tool_error_with_oversized_metadata_stays_valid_json():
 def test_smart_summary_keeps_two_recent_user_turns_verbatim(monkeypatch):
     captured = {}
 
-    class SummaryModel:
-        def generate(self, messages):
-            captured["request"] = messages
-            return ChatMessage(role=MessageRole.ASSISTANT, content="summary of old work")
+    class SummaryBinding:
+        def turn(self, *, items, **_kwargs):
+            captured["request"] = items
+            return ModelTurnResult(
+                items=(
+                    MessageItem(
+                        role="assistant",
+                        text="summary of old work",
+                    ),
+                )
+            )
 
     monkeypatch.setattr(
-        compression_module.model_manager,
-        "get_smolagents_model",
-        lambda _model_type: SummaryModel(),
+        compression_module,
+        "resolve_litellm_model_turn_binding",
+        lambda _model_type: SummaryBinding(),
     )
     messages = to_internal_messages(
         [
@@ -1593,7 +1669,7 @@ def test_smart_summary_keeps_two_recent_user_turns_verbatim(monkeypatch):
     result = summarize_conversation(messages, model_id="dummy-model")
 
     assert result.error is None
-    request_text = "\n".join(_extract_content_text(message.content) for message in captured["request"])
+    request_text = "\n".join(item.text for item in captured["request"])
     assert "OLD USER TURN" in request_text
     assert "RECENT USER ONE" not in request_text
     visible_texts = [
@@ -1610,6 +1686,71 @@ def test_smart_summary_keeps_two_recent_user_turns_verbatim(monkeypatch):
     ]
 
 
+def test_smart_summary_accepts_reasoning_but_rejects_executable_items(
+    monkeypatch,
+) -> None:
+    messages = to_internal_messages(
+        [
+            ChatMessage(role=MessageRole.USER, content="OLD USER ONE"),
+            ChatMessage(role=MessageRole.ASSISTANT, content="OLD ANSWER ONE"),
+            ChatMessage(role=MessageRole.USER, content="OLD USER TWO"),
+            ChatMessage(role=MessageRole.ASSISTANT, content="OLD ANSWER TWO"),
+            ChatMessage(role=MessageRole.USER, content="RECENT USER ONE"),
+            ChatMessage(role=MessageRole.ASSISTANT, content="RECENT ANSWER ONE"),
+            ChatMessage(role=MessageRole.USER, content="RECENT USER TWO"),
+            ChatMessage(role=MessageRole.ASSISTANT, content="RECENT ANSWER TWO"),
+        ]
+    )
+
+    class SummaryBinding:
+        def __init__(self, result: ModelTurnResult) -> None:
+            self.result = result
+
+        def turn(self, *, items, **_kwargs):
+            assert [item.role for item in items] == ["system", "user", "user"]
+            return self.result
+
+    monkeypatch.setattr(
+        compression_module,
+        "resolve_litellm_model_turn_binding",
+        lambda _model_type: SummaryBinding(
+            ModelTurnResult(
+                items=(
+                    ReasoningItem(summary=("condense",)),
+                    MessageItem(role="assistant", text="safe summary"),
+                )
+            )
+        ),
+    )
+
+    accepted = summarize_conversation(messages, model_id="dummy-model")
+
+    assert accepted.error is None
+    assert accepted.summary == "safe summary"
+
+    monkeypatch.setattr(
+        compression_module,
+        "resolve_litellm_model_turn_binding",
+        lambda _model_type: SummaryBinding(
+            ModelTurnResult(
+                items=(
+                    FunctionCallItem(
+                        call_id="unexpected",
+                        name="read_file",
+                        arguments_json="{}",
+                    ),
+                )
+            )
+        ),
+    )
+
+    rejected = summarize_conversation(messages, model_id="dummy-model")
+
+    assert rejected.summary == ""
+    assert "ModelProtocolError" in (rejected.error or "")
+    assert "executable item" in (rejected.error or "")
+
+
 def test_smart_summary_preprocessing_keeps_two_recent_turns_byte_exact(monkeypatch):
     captured = {}
     recent_one = "recent tool output one " * 300
@@ -1619,11 +1760,19 @@ def test_smart_summary_preprocessing_keeps_two_recent_turns_byte_exact(monkeypat
         ChatMessage(role=MessageRole.USER, content="OLD USER"),
         ChatMessage(role=MessageRole.ASSISTANT, content="old answer"),
         ChatMessage(role=MessageRole.USER, content="RECENT USER ONE"),
-        ChatMessage(role=MessageRole.TOOL_CALL, content="{'name': 'shell_tool', 'arguments': 'one'}"),
+        create_native_tool_call(
+            "shell_tool",
+            {"command": "one"},
+            call_id="shell-one",
+        ).message,
         ChatMessage(role=MessageRole.TOOL_RESPONSE, content=recent_one),
         ChatMessage(role=MessageRole.ASSISTANT, content="RECENT ASSISTANT ONE"),
         ChatMessage(role=MessageRole.USER, content="RECENT USER TWO"),
-        ChatMessage(role=MessageRole.TOOL_CALL, content="{'name': 'shell_tool', 'arguments': 'two'}"),
+        create_native_tool_call(
+            "shell_tool",
+            {"command": "two"},
+            call_id="shell-two",
+        ).message,
         ChatMessage(role=MessageRole.TOOL_RESPONSE, content=recent_two),
         ChatMessage(role=MessageRole.ASSISTANT, content="RECENT ASSISTANT TWO"),
     ]
@@ -1657,11 +1806,19 @@ def test_standard_preprocessing_keeps_two_recent_turns_byte_exact(monkeypatch):
         ChatMessage(role=MessageRole.USER, content="OLD USER"),
         ChatMessage(role=MessageRole.ASSISTANT, content="old answer"),
         ChatMessage(role=MessageRole.USER, content="RECENT USER ONE"),
-        ChatMessage(role=MessageRole.TOOL_CALL, content="{'name': 'shell_tool', 'arguments': 'one'}"),
+        create_native_tool_call(
+            "shell_tool",
+            {"command": "one"},
+            call_id="shell-one",
+        ).message,
         ChatMessage(role=MessageRole.TOOL_RESPONSE, content=recent_one),
         ChatMessage(role=MessageRole.ASSISTANT, content="RECENT ASSISTANT ONE"),
         ChatMessage(role=MessageRole.USER, content="RECENT USER TWO"),
-        ChatMessage(role=MessageRole.TOOL_CALL, content="{'name': 'shell_tool', 'arguments': 'two'}"),
+        create_native_tool_call(
+            "shell_tool",
+            {"command": "two"},
+            call_id="shell-two",
+        ).message,
         ChatMessage(role=MessageRole.TOOL_RESPONSE, content=recent_two),
         ChatMessage(role=MessageRole.ASSISTANT, content="RECENT ASSISTANT TWO"),
     ]
@@ -1684,9 +1841,11 @@ def test_standard_preprocessing_keeps_two_recent_turns_byte_exact(monkeypatch):
 
 def test_smart_summary_does_not_run_until_more_than_two_user_turns(monkeypatch):
     monkeypatch.setattr(
-        compression_module.model_manager,
-        "get_smolagents_model",
-        lambda _model_type: (_ for _ in ()).throw(AssertionError("summary model must not run")),
+        compression_module,
+        "resolve_litellm_model_turn_binding",
+        lambda _model_type: (_ for _ in ()).throw(
+            AssertionError("summary model must not run")
+        ),
     )
     messages = to_internal_messages(
         [
@@ -1790,10 +1949,17 @@ def test_recent_tail_falls_back_to_assistant_suffix_within_oversized_turn(monkey
 def test_summary_accepts_single_oversized_head_when_assistant_suffix_fits(monkeypatch):
     calls = []
 
-    class SummaryModel:
-        def generate(self, messages):
-            calls.append(messages)
-            return ChatMessage(role=MessageRole.ASSISTANT, content="oversized request summary")
+    class SummaryBinding:
+        def turn(self, *, items, **_kwargs):
+            calls.append(items)
+            return ModelTurnResult(
+                items=(
+                    MessageItem(
+                        role="assistant",
+                        text="oversized request summary",
+                    ),
+                )
+            )
 
     monkeypatch.setattr(
         compression_module,
@@ -1801,9 +1967,9 @@ def test_summary_accepts_single_oversized_head_when_assistant_suffix_fits(monkey
         lambda messages, _model_id: sum(len(_extract_content_text(message.content)) for message in messages),
     )
     monkeypatch.setattr(
-        compression_module.model_manager,
-        "get_smolagents_model",
-        lambda _model_type: SummaryModel(),
+        compression_module,
+        "resolve_litellm_model_turn_binding",
+        lambda _model_type: SummaryBinding(),
     )
     messages = to_internal_messages(
         [

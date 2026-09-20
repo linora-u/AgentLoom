@@ -7,7 +7,7 @@
 > Goal Mode is not global configuration and can be enabled only in a top-level
 > Supervisor Agent YAML; see [Goal Mode](goal_mode.md).
 
-`config/system.yaml` is the AgentLoom framework's **core global configuration file**, controlling system metadata, context compression strategy, top-level prompts, global Skills, execution environment, code execution permissions, logging, tool system, tool access control, and more.
+`config/system.yaml` is the AgentLoom framework's **core global configuration file**, controlling system metadata, context compression strategy, top-level prompts, global Skills, logging, tool system, tool access control, and more.
 
 > ⚠️ **Isolation between system.yaml and llm.yaml**: All LLM-related configuration (`model`, `llm`, `langfuse`) **must and can only** be placed in `config/llm.yaml`. If these keys are written in `system.yaml`, the framework will automatically filter them during loading and output a warning log. See [LLM Configuration Reference](llm_config.md) for details.
 
@@ -25,8 +25,7 @@ The configuration loading order is `config/system.yaml` → `config/llm.yaml` �
 - [4. skills — Global Skills Configuration](#4-skills--global-skills-configuration)
 - [4.5 hooks — Independent Hook Runtime](#45-hooks--independent-hook-runtime)
 - [5. lsp_servers — LSP Language Server Configuration](#5-lsp_servers--lsp-language-server-configuration)
-- [6. execution_env — Execution Environment Configuration](#6-execution_env--execution-environment-configuration)
-- [6. code_agent — CodeAgent Code Execution Permissions](#6-code_agent--codeagent-code-execution-permissions)
+- [6. shell_tool — Shell Execution Model](#6-shell_tool--shell-execution-model)
 - [7. runtime and logging — Runtime Storage and Logging](#7-runtime-and-logging--runtime-storage-and-logging)
 - [8. tools — Tool System Configuration](#8-tools--tool-system-configuration)
 - [9. tool_access_control — Tool Access Control](#9-tool_access_control--tool-access-control)
@@ -69,20 +68,6 @@ smart_summary: false
 # ============================================
 prompt:
   path: "sysprompt/system_prompt.yaml"
-
-# ============================================
-# Execution Environment Global Configuration
-# ============================================
-execution_env:
-  type: "local"
-  # executor_kwargs: {}
-
-# ============================================
-# CodeAgent Code Execution Permissions
-# ============================================
-code_agent:
-  additional_authorized_imports: "*"
-  additional_functions: "*"
 
 # ============================================
 # Runtime Storage and Retention
@@ -287,7 +272,7 @@ smart_summary: false
 
 ```yaml
 prompt:
-  path: "applications/my_app/sysprompt/code_agent.yaml"
+  path: "applications/my_app/sysprompt/system_prompt.yaml"
 ```
 
 ---
@@ -358,35 +343,11 @@ lsp_servers:
 
 ---
 
-## 6. execution_env — Execution Environment Configuration
+## 6. shell_tool — Shell Execution Model
 
-Determines in which computing node Python code and Shell commands run. This is the most important security and environment isolation configuration.
+Agents execute shell commands only through structured `shell_tool` calls. Commands run in controlled local subprocesses; permissions, path rules, and command allow-lists are governed by `tool_access_control` and `shell_settings`. The framework has no separate mode for model-generated Python execution.
 
-> ⚠️ **Mode restriction**: The entire `execution_env` configuration only applies to Agents using `tool_call_type: "code_act"`. In `tool_call` mode, `executor_type` and `executor_kwargs` are silently ignored since `ToolCallingAgentV2` uses structured tool calls instead of code execution.
-At runtime, `executor_type` / `executor_kwargs` are normalized from the `execution_env` in Agent YAML; if the Agent YAML does not configure this field, it falls back to `local` + `{}`. Shell path is determined automatically via a smart detection chain (see section 5.2 below).
-
-**YAML path**: `execution_env.*`
-
-| Parameter | Type | Default | Required | Description |
-|------|------|--------|------|------|
-| `execution_env.type` | `str` | `"local"` | ❌ No | Execution environment type. **Only** allowed: `"local"`, `"docker"`, `"e2b"`, `"wasm"`; any other value raises an error |
-| `execution_env.executor_kwargs` | `dict` | `{}` | ❌ No | Extra parameters passed through to the executor constructor; accepted keys depend on the executor selected by `type` |
-
-> ⚠️ The `type` value is case-insensitive (the framework auto `.strip().lower()`), but **must** be one of the 4 values above. Unsupported values (e.g., `"host"`, `"ssh"`) will raise an error:
-> ```
-> execution_env.type must be one of ['local', 'e2b', 'docker', 'wasm'], current value: host
-> ```
-
-### 5.1 execution_env.type Overview
-
-| Value | Underlying Executor Class | Description | Security | Use Case |
-|----|-------------|------|--------|----------|
-| `"local"` | `LocalPythonExecutor` | Runs Python code directly in the host environment | ⚠️ Low (can modify host filesystem) | Development/debugging, trusted environments |
-| `"docker"` | `DockerExecutor` | Starts a Jupyter Kernel in a Docker container | ✅ High (isolated from host) | Production, untrusted code |
-| `"e2b"` | `E2BExecutor` | Deploys to [E2B](https://e2b.dev/) cloud sandbox | ✅ High (cloud isolation) | Cloud deployment, SaaS products |
-| `"wasm"` | `WasmExecutor` | Runs via Deno + Pyodide in a local WebAssembly sandbox | ✅ High (process-level isolation) | Lightweight local isolation |
-
-### 5.2 Shell Path Auto-Detection
+### 6.1 Shell Path Auto-Detection
 
 Shell path is determined automatically via a smart detection chain. No manual configuration is needed. Only **bash** and **zsh** are supported (other shells like sh, fish, csh are excluded due to syntax incompatibilities).
 
@@ -442,277 +403,6 @@ shell_settings:
 ```
 
 > Detection results are cached for the process lifetime and will not re-detect on each command.
-
-### 5.3 `local` — Local Executor
-
-Runs AI-generated Python code directly in the host environment. This is the default mode, requiring no additional dependencies.
-
-**Underlying class**: `smolagents.local_python_executor.LocalPythonExecutor`
-
-#### executor_kwargs Parameters
-
-| Parameter | Type | Default | Description |
-|------|------|--------|------|
-| `max_print_outputs_length` | `int` | `50000` | Maximum characters of `print()` output per code execution. Excess is truncated |
-| `timeout_seconds` | `int \| null` | `30` | Wall-clock timeout threshold for one generated Python code block, including synchronous Worker and tool calls. `null` disables this timeout |
-
-Set a finite budget in the calling Agent's YAML that covers the complete synchronous Worker call, including its model requests and tools. The shipped complex checkpoint Supervisor uses `1200` seconds, as do other multi-Worker Applications. A Worker's own execution budget does not extend its caller's budget.
-
-This timeout is not cancellation. The pinned local executor waits for its Python thread to finish before returning the timeout error, even if the Worker or tool completes successfully after the threshold. Its side effects may therefore be committed despite the caller receiving an error. Retrying the same Worker input within that attempt creates a new call; checkpoint resume does not provide general retry deduplication.
-
-> `additional_functions` is automatically injected by the framework based on `code_agent.additional_functions` configuration; no need to specify manually in `executor_kwargs`.
-
-#### Configuration Examples
-
-```yaml
-# Minimal configuration (recommended for development)
-execution_env:
-  type: "local"
-```
-
-```yaml
-# Limit output length
-execution_env:
-  type: "local"
-  executor_kwargs:
-    max_print_outputs_length: 100000
-    timeout_seconds: 120
-```
-
-### 5.4 `docker` — Docker Container Executor
-
-Starts a Jupyter Kernel inside a Docker container, communicating via HTTP to execute code. Code runs in an isolated container filesystem and cannot directly modify the host.
-
-**Underlying class**: `smolagents.remote_executors.DockerExecutor`
-
-#### Prerequisites
-
-- Install extension dependencies: `pip install 'smolagents[docker]'`
-- Docker daemon is running and accessible
-
-#### executor_kwargs Parameters
-
-| Parameter | Type | Default | Description |
-|------|------|--------|------|
-| `host` | `str` | `"127.0.0.1"` | Host address bound by the Docker container |
-| `port` | `int` | `8888` | Port bound by the Docker container |
-| `image_name` | `str` | `"jupyter-kernel"` | Docker image name to use |
-| `build_new_image` | `bool` | `true` | Whether to force rebuild the Docker image on startup. Set to `false` to reuse existing images for faster startup |
-| `container_run_kwargs` | `dict` | `{}` | Extra parameters passed through to `docker.containers.run()` (e.g., `mem_limit`, `network`, etc.) |
-
-> ⚠️ The Docker executor **does not support** `additional_functions` injection (the framework automatically skips it).
-> ⚠️ The wildcard `"*"` in `code_agent.additional_authorized_imports` is automatically stripped, keeping only explicitly listed modules.
-
-#### Configuration Examples
-
-```yaml
-# Basic Docker configuration
-execution_env:
-  type: "docker"
-  executor_kwargs:
-    image_name: "my-jupyter-kernel:latest"
-```
-
-```yaml
-# Full Docker configuration (reuse existing image + custom port + memory limit)
-execution_env:
-  type: "docker"
-  executor_kwargs:
-    host: "127.0.0.1"
-    port: 9999
-    image_name: "agentloom-smolagents-jupyter-kernel:local"
-    build_new_image: false
-    container_run_kwargs:
-      mem_limit: "2g"
-      network: "host"
-```
-
-### 5.5 `e2b` — E2B Cloud Sandbox Executor
-
-Delegates code execution to [E2B](https://e2b.dev/) cloud sandbox. Suitable for SaaS products or production environments requiring complete isolation.
-
-**Underlying class**: `smolagents.remote_executors.E2BExecutor`
-
-#### Prerequisites
-
-- Install extension dependencies: `pip install 'smolagents[e2b]'`
-- Set environment variable `E2B_API_KEY` (obtained from [E2B Dashboard](https://e2b.dev/dashboard))
-
-#### executor_kwargs Parameters
-
-All parameters in `executor_kwargs` are **passed through directly** to the `e2b_code_interpreter.Sandbox` constructor. Common parameters include:
-
-| Parameter | Type | Default | Description |
-|------|------|--------|------|
-| `timeout` | `int` | — | Sandbox timeout (seconds) |
-
-> See [E2B official documentation](https://e2b.dev/docs) for the full parameter list.
-> ⚠️ Similar to the Docker executor, `additional_functions` is not injected and the wildcard `"*"` is automatically stripped.
-
-#### Configuration Examples
-
-```yaml
-# Basic E2B configuration
-execution_env:
-  type: "e2b"
-  executor_kwargs:
-    timeout: 300
-```
-
-```yaml
-# E2B sandbox + long task timeout
-execution_env:
-  type: "e2b"
-  executor_kwargs:
-    timeout: 600
-```
-
-### 5.6 `wasm` — WebAssembly Local Sandbox Executor
-
-Runs Pyodide (WebAssembly-compiled Python) via Deno, providing process-level isolated Python execution locally. No Docker or cloud API required.
-
-**Underlying class**: `smolagents.remote_executors.WasmExecutor`
-
-#### Prerequisites
-
-- Install [Deno](https://deno.land/) (`curl -fsSL https://deno.land/install.sh | sh`)
-
-#### executor_kwargs Parameters
-
-| Parameter | Type | Default | Description |
-|------|------|--------|------|
-| `deno_path` | `str` | `"deno"` | Deno executable path. Defaults to searching `$PATH` |
-| `deno_permissions` | `list[str]` | *(see below)* | Deno runtime permission flags |
-| `timeout` | `int` | `60` | Timeout per code execution (seconds) |
-
-**`deno_permissions` default values** (allow Pyodide to download packages from CDN and use local cache):
-
-```
---allow-net=0.0.0.0:8000,cdn.jsdelivr.net:443,pypi.org:443,files.pythonhosted.org:443
---allow-read=~/.cache/deno
---allow-write=~/.cache/deno
-```
-
-> ⚠️ Unlike Docker/E2B executors, the Wasm executor is currently unrestricted — `additional_functions` will be injected. However, the wildcard `"*"` is still automatically stripped.
-
-#### Configuration Examples
-
-```yaml
-# Basic WASM configuration
-execution_env:
-  type: "wasm"
-```
-
-```yaml
-# Custom Deno path + extended timeout
-execution_env:
-  type: "wasm"
-  executor_kwargs:
-    deno_path: "/usr/local/bin/deno"
-    timeout: 120
-```
-
-```yaml
-# Full WASM configuration (restrict network permissions)
-execution_env:
-  type: "wasm"
-  executor_kwargs:
-    deno_path: "/usr/local/bin/deno"
-    timeout: 90
-    deno_permissions:
-      - "--allow-net=cdn.jsdelivr.net:443,pypi.org:443"
-      - "--allow-read=~/.cache/deno"
-      - "--allow-write=~/.cache/deno"
-```
-
-### 5.7 Common Behaviors for Remote Executors
-
-When `execution_env.type` is `"docker"`, `"e2b"`, or `"wasm"`, the framework automatically performs the following security adjustments:
-
-| Behavior | Description |
-|------|------|
-| **Strip `additional_functions`** | Remote executor constructors don't support this parameter; the framework automatically skips injection |
-| **Strip wildcard `"*"` imports** | `"*"` in `code_agent.additional_authorized_imports` is removed, keeping only explicitly listed module names |
-
-This means in remote executors, explicitly listing required import modules is recommended:
-
-```yaml
-# ❌ Not recommended: wildcards are automatically stripped in remote executors
-code_agent:
-  additional_authorized_imports: "*"
-
-# ✅ Recommended: explicitly list needed modules
-code_agent:
-  additional_authorized_imports:
-    - "json"
-    - "re"
-    - "math"
-    - "datetime"
-    - "pandas"
-    - "numpy"
-```
-
----
-
-## 6. code_agent — CodeAgent Code Execution Permissions
-
-Controls the boundaries of Python code automatically generated and run by AI. Only effective in `tool_call_type: "code_act"` mode.
-
-**YAML path**: `code_agent.*`
-
-| Parameter | Type | Default | Required | Description |
-|------|------|--------|------|------|
-| `code_agent.additional_authorized_imports` | `str` \| `list[str]` | `[]` (framework fallback) / `"*"` (repo example) | ❌ No | Whitelist of Python modules that AI code can import |
-| `code_agent.additional_functions` | `str` \| `list[str]` | `[]` (framework fallback) / `"*"` (repo example) | ❌ No | Whitelist of Python built-in functions that AI code can call |
-
-### 6.1 additional_authorized_imports
-
-| Config Value | Behavior |
-|--------|------|
-| `"*"` or `["*"]` | Allows importing all modules in the environment (**highest privilege**) |
-| `["json", "re", "os"]` | Only allows modules in the whitelist; other imports raise errors |
-
-### 6.2 additional_functions
-
-| Config Value | Behavior |
-|--------|------|
-| `"*"` or `["*"]` | Allows calling all callables in `builtins` (including high-risk functions like `open`, `exec`, `eval`) |
-| `["print", "len", "range"]` | Only allows built-in functions in the whitelist |
-
-> ⚠️ If a non-existent built-in function name is specified, an `AttributeError` is raised: `'xxx' is not a valid Python built-in function.`
-
-### 6.3 Wildcard Behavior in Remote Executors
-
-When `execution_env.type` is `"docker"`, `"e2b"`, or `"wasm"`, the wildcard `"*"` is stripped at runtime (preventing side effects in remote environments), keeping only explicitly listed entries.
-
-**Security configuration recommendations**:
-
-```yaml
-# Local development (trusted environment)
-code_agent:
-  additional_authorized_imports: "*"
-  additional_functions: "*"
-
-# Production environment (tightened permissions)
-code_agent:
-  additional_authorized_imports:
-    - "json"
-    - "re"
-    - "math"
-    - "datetime"
-    - "collections"
-  additional_functions:
-    - "print"
-    - "len"
-    - "range"
-    - "sorted"
-    - "enumerate"
-    - "zip"
-    - "map"
-    - "filter"
-```
-
----
 
 ## 7. runtime and logging — Runtime Storage and Logging
 
@@ -1180,8 +870,7 @@ Except for `manifest.json`, these run entries are conditional on logging being e
 - Log closing, rotation, and runtime retention cannot remove checkpoint state
 - Agent workspaces remain separate from run artifacts; Application `output_dir` remains Application-owned
 - A Supervisor-owned Goal adds canonical `goal.json`; completion copies it to
-  the run manifest/audit before normal success cleanup, while
-  `budget_limited` keeps it resumable
+  the run manifest/audit before normal success cleanup; interruptions retain it for resume
 
 > See [Checkpoint & Resume](checkpoint.md) for the storage contract and
 > [Goal Mode](goal_mode.md) for Goal-specific lifecycle rules.
@@ -1286,8 +975,6 @@ The framework uses Pydantic to validate system configuration. The following show
 | `smart_summary` | `bool` | `True` |
 | `context_engine` | `dict[str, Any]` | `{}` |
 | `model` | `dict[str, Any]` | `{}` |
-| `execution_env` | `dict[str, Any]` | `{}` |
-| `code_agent` | `dict[str, Any]` | `{}` |
 | `tools` | `list[Any]` | `[]` |
 | `default_toolsets` | `list[str]` | `[]` |
 | `toolsets` | `list[str]` | `[]` |
@@ -1365,8 +1052,6 @@ The following table shows the support status of each configuration key at differ
 | `logging` | ✅ Supported | ❌ Rejected | ❌ Rejected |
 | `checkpoint` | ✅ Supported | ✅ Supported | ❌ Ignored |
 | `tool_access_control` | ✅ Supported | ✅ Supported | ✅ Supported |
-| `execution_env` | ✅ Supported | ✅ Supported | ✅ Supported |
-| `code_agent` | ✅ Supported | ✅ Supported | ✅ Supported |
 | `tools` | ✅ Supported | ✅ Supported | ✅ Supported (dict override) |
 | `prompt` | ✅ Supported | ✅ Supported | ✅ Supported |
 

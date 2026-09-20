@@ -1,13 +1,12 @@
 from __future__ import annotations
 
 import pytest
-from mcp.types import CallToolResult, TextContent, Tool
-
-from agentloom.runtime.hooks import HookPlan, HookRun
-from agentloom.adapters.smolagents.tool_shim import inject_hooks
-from agentloom.adapters.smolagents.tool_protocol import settle_tool_call
 from agentloom.adapters.mcp.adapter import AgentLoomSmolAgentsAdapter, McpToolExecutionError
+from agentloom.runtime.hooks import HookPlan, HookRun
+from agentloom.runtime.tool_gateway import AgentLoomToolGateway
 from agentloom.runtime.trace import ExplicitExecutionContext, bind_explicit_execution_context
+from mcp.types import CallToolResult, TextContent, Tool
+from smolagents.tools import handle_agent_output_types
 
 
 def _mcp_tool() -> Tool:
@@ -63,6 +62,10 @@ def test_mcp_error_keeps_kind_through_hook_and_canonical_settlement() -> None:
         ),
         _mcp_tool(),
     )
+    gateway = AgentLoomToolGateway.from_tools(
+        [adapted],
+        output_normalizer=handle_agent_output_types,
+    )
     run = HookRun(HookPlan(), local_run_id="mcp-local", root_run_id="mcp-root")
     execution = ExplicitExecutionContext(
         task_id="mcp-task",
@@ -78,11 +81,10 @@ def test_mcp_error_keeps_kind_through_hook_and_canonical_settlement() -> None:
     )
 
     with bind_explicit_execution_context(execution):
-        settled = settle_tool_call(
-            inject_hooks(adapted),
-            {"query": "agent state"},
+        settled = gateway.invoke(
             call_id="mcp-call",
-            sanitize_inputs_outputs=True,
+            tool_name=adapted.name,
+            arguments={"query": "agent state"},
         )
 
     assert settled.status == "error"

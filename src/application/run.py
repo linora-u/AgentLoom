@@ -12,7 +12,6 @@ from typing import Literal, Protocol
 RunEventType = Literal[
     "run.started",
     "run.completed",
-    "run.budget_limited",
     "run.failed",
     "run.interrupted",
 ]
@@ -153,23 +152,3 @@ class ApplicationRunInterrupted(KeyboardInterrupt):
         self.phase = phase
         self.original_error = original_error
         self.resumable = resumable
-
-
-class ApplicationRunBudgetLimited(RuntimeError):
-    """Soft Goal budget exhaustion carrying a resumable run receipt."""
-
-    def __init__(
-        self,
-        message: str,
-        *,
-        run: RunInfo,
-        phase: RunPhase,
-        original_error: Exception,
-        goal: Mapping[str, object],
-    ) -> None:
-        super().__init__(message)
-        self.run = run
-        self.phase = phase
-        self.original_error = original_error
-        self.goal = GoalSnapshot(goal)
-        self.resumable = True

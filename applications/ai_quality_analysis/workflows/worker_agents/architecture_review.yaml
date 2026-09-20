@@ -1,6 +1,6 @@
 name: "architecture_review"
+agent_runtime: smolagents
 description: "Reviews architectural quality: coupling/cohesion, SOLID principles, API design, layering, and module boundary clarity."
-tool_call_type: "code_act"
 model_type: "powerful"
 toolsets:
   - "core_shell"

@@ -220,7 +220,7 @@ def test_runtime_log_rotation_keeps_opened_directory_when_path_is_replaced(
 def test_agent_log_prefix_never_reads_process_global_trace_fallbacks(monkeypatch) -> None:
     import importlib
 
-    from agentloom.runtime.logging.agent_logger import AgentLoomLogLevel, EnhancedAgentLogger
+    from agentloom.runtime.logging import AgentLoomLogLevel, RichLoggerBackend
 
     task_context_module = importlib.import_module("agentloom.runtime.trace.task_context")
 
@@ -228,7 +228,7 @@ def test_agent_log_prefix_never_reads_process_global_trace_fallbacks(monkeypatch
     monkeypatch.setattr(task_context_module, "_global_sub_task_id_fallback", "wrong-subtask")
     monkeypatch.setattr(task_context_module, "_global_agent_name_fallback", "wrong-agent")
 
-    logger = EnhancedAgentLogger(show_timestamp=False, show_trace_info=True)
+    logger = RichLoggerBackend(show_timestamp=False, show_trace_info=True)
     prefix = logger._build_prefix(AgentLoomLogLevel.INFO).plain
 
     assert "wrong-task" not in prefix

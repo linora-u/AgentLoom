@@ -65,8 +65,8 @@ _EVIDENCE_FILES = {
     ),
 }
 _EVIDENCE_PATTERN = re.compile(
-    r"goal|budget_limited|token_budget|workflow|continu|resume|checkpoint|"
-    r"supervisor|worker|manifest|schedule|tui|jsonl|目标|预算|恢复",
+    r"goal|workflow|continu|resume|checkpoint|"
+    r"supervisor|worker|manifest|schedule|status|tui|jsonl|目标|恢复",
     re.IGNORECASE,
 )
 _EVIDENCE_LINES_PER_FILE = 4
@@ -192,8 +192,8 @@ def run_goal_audit_batch(
     )
 
 
-def run_parallel_goal_budget_probe(tasks_json: str, concurrency: int = 6) -> str:
-    """Run parallel contract Workers, persist evidence, then enforce the Goal fence.
+def run_parallel_goal_probe(tasks_json: str, concurrency: int = 6) -> str:
+    """Run parallel contract Workers and persist evidence for the current Goal.
 
     Args:
         tasks_json: JSON array of contract-audit task objects.
@@ -203,7 +203,7 @@ def run_parallel_goal_budget_probe(tasks_json: str, concurrency: int = 6) -> str
     from agentloom.runtime.goal import get_current_goal_provider
 
     provider = get_current_goal_provider(required=True)
-    existing = json.loads(inspect_parallel_goal_budget_report())
+    existing = json.loads(inspect_parallel_goal_report())
     if existing["matches_current_goal"]:
         return json.dumps(
             {
@@ -222,7 +222,7 @@ def run_parallel_goal_budget_probe(tasks_json: str, concurrency: int = 6) -> str
     )
     results = json.loads(batch_json)
     lines = [
-        "# Parallel Goal Budget",
+        "# Parallel Goal Validation",
         "",
         "## Batch Results",
         "",
@@ -239,29 +239,23 @@ def run_parallel_goal_budget_probe(tasks_json: str, concurrency: int = 6) -> str
     state = provider.snapshot()
     lines.extend(
         [
-            "## Accounting",
+            "## Goal State",
             "",
             f"goal_id={state.goal_id}",
-            f"used_tokens={state.used_tokens}",
-            f"token_budget={state.token_budget}",
             f"status={state.status}",
             "",
             "## Resume Instructions",
             "",
-            "Increase or remove token_budget, resume the same task_id, verify this report, and complete the Goal without rerunning the batch.",
+            "Resume the same task_id, verify this report, and complete the Goal without rerunning the batch.",
         ]
     )
     persisted = persist_goal_validation_report(
-        "parallel_budget",
+        "parallel",
         "\n".join(lines),
     )
-    # This is intentionally after the durable report write. If the shared
-    # Worker tree crossed the soft limit, raise before model code can claim
-    # completion in the same in-flight Supervisor response.
-    provider.assert_request_allowed()
     return json.dumps(
         {
-            "status": "within_budget",
+            "status": "completed",
             "batch": results,
             "report": json.loads(persisted),
             "goal": provider.snapshot().to_dict(),
@@ -270,17 +264,17 @@ def run_parallel_goal_budget_probe(tasks_json: str, concurrency: int = 6) -> str
     )
 
 
-def inspect_parallel_goal_budget_report() -> str:
+def inspect_parallel_goal_report() -> str:
     """Report whether persisted parallel evidence belongs to the current Goal."""
 
     from agentloom.runtime.goal import get_current_goal_provider
 
     state = get_current_goal_provider(required=True).snapshot()
-    target = _OUTPUT_ROOT / "parallel_budget.md"
+    target = _OUTPUT_ROOT / "parallel.md"
     required = [
-        "# Parallel Goal Budget",
+        "# Parallel Goal Validation",
         "## Batch Results",
-        "## Accounting",
+        "## Goal State",
         "## Resume Instructions",
         f"goal_id={state.goal_id}",
     ]

@@ -35,8 +35,6 @@ context_engine:
 # Hook directories are never auto-discovered.
 
 # ============================================
-# Global Execution Environment Configuration
-# ============================================
 # LSP Language Server Configuration
 # ============================================
 # LSP servers start when agent initializes and remain alive for the session.
@@ -64,22 +62,6 @@ lsp_servers:
 #   timeout: 30               # connection timeout (seconds)
 #   tool_timeout: 60          # per-tool call timeout (seconds)
 #   tool_name_prefix: true    # add mcp__{server}__ prefix to tool names
-
-# ============================================
-# Global Execution Environment Configuration
-# ============================================
-execution_env:
-  type: "local"
-
-# ============================================
-# CodeAgent Execution Environment Configuration
-# ============================================
-code_agent:
-  # Additional importable modules allowed during Python code execution; "*" means all are allowed
-  additional_authorized_imports: "*"
-  
-  # Additional built-in functions allowed during Python code execution; "*" means all callable builtins are allowed
-  additional_functions: "*"
 
 # Current-task Todo capability: auto (model decides), on (strongly required
 # for non-trivial multi-step work), or off (tool and state are hidden).

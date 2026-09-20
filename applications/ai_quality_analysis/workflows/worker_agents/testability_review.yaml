@@ -1,6 +1,6 @@
 name: "testability_review"
+agent_runtime: smolagents
 description: "Assesses code testability: test structure, mock-friendliness, coverage gaps, and test quality."
-tool_call_type: "code_act"
 model_type: "powerful"
 toolsets:
   - "core_shell"

@@ -15,16 +15,16 @@ import time
 from unittest.mock import MagicMock
 
 import pytest
-from litellm.exceptions import RateLimitError, Timeout
-
-from agentloom.runtime.concurrency.rate_limiter import GlobalRateLimiterRegistry
-from agentloom.adapters.smolagents.models.litellm_retry import (
+from agentloom.adapters.litellm.litellm_retry import (
     ProviderCallBudgetExceeded,
     _is_rate_limit_error,
     _parse_retry_after,
     create_retry_wrapper,
     limit_provider_calls,
+    patch_litellm_completion,
 )
+from agentloom.runtime.concurrency.rate_limiter import GlobalRateLimiterRegistry
+from litellm.exceptions import RateLimitError, Timeout
 
 
 @pytest.fixture(autouse=True)
@@ -109,6 +109,32 @@ class TestIsRateLimitError:
 # ═══════════════════════════════════════════════════════════════════ #
 
 class TestRetryWrapperGlobalRateLimit:
+    def test_chat_and_responses_entrypoints_share_provider_call_governance(self):
+        class _LiteLLM:
+            @staticmethod
+            def completion(**kwargs):
+                return ("chat", kwargs)
+
+            @staticmethod
+            def responses(**kwargs):
+                return ("responses", kwargs)
+
+        litellm_module = _LiteLLM()
+        patch_litellm_completion(litellm_module)
+
+        for entrypoint in (
+            litellm_module.completion,
+            litellm_module.responses,
+        ):
+            with limit_provider_calls(1) as budget:
+                assert entrypoint(
+                    model="test",
+                    num_retries=0,
+                )[1]["num_retries"] == 0
+                with pytest.raises(ProviderCallBudgetExceeded):
+                    entrypoint(model="test", num_retries=0)
+            assert budget.calls == 1
+
     def test_exhausted_provider_budget_fails_before_global_retry_wait(self, monkeypatch):
         provider_calls = 0
         state = MagicMock()

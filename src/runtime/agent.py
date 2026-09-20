@@ -1,17 +1,12 @@
-"""AgentLoom Supervisor/Worker orchestration and per-invocation runtime assembly.
-
-The concrete smolagents subclasses live in ``adapters.smolagents.agents``;
-this owner binds Application configuration, tools, Hook Plans and Worker state.
-"""
+"""AgentLoom Supervisor/Worker orchestration and runtime-neutral assembly."""
 
 # Checkpoint / Resume support
 import hashlib as _hashlib
 import os
 import uuid
 from abc import ABC, abstractmethod
-from collections.abc import Callable
 from copy import deepcopy
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from enum import Enum
 from pathlib import Path
 from threading import RLock
@@ -20,36 +15,26 @@ from typing import TYPE_CHECKING, Any
 if TYPE_CHECKING:
     from agentloom.application.lifecycle import ApplicationRunLifecycle
 
-from smolagents import (
-    AgentLogger,
-    CodeAgent,
-    LogLevel,
-    RunResult,
-    Tool,
-)
-
-from agentloom.adapters.smolagents.agents import CodeAgentV2, ToolCallingAgentV2
-from agentloom.adapters.smolagents.models.model_manager import (
-    ModelConfigBuilder,
-    get_model,
-)
-from agentloom.adapters.smolagents.tool_shim import clone_tool_for_runtime, inject_hooks
-from agentloom.adapters.smolagents.tools.tools import ensure_tool_wrapped
 from agentloom.application.validation import (
     AgentConfigNormalizer,
-    NormalizedExecutionConfig,
     build_normalized_execution_config,
-    normalize_execution_prompt_template_path_value,
-    normalize_positive_int_value,
-    validate_execution_config_payload,
     validate_todo_config,
 )
 from agentloom.configuration import (
     C,
     build_effective_agent_config_snapshot,
-    get_code_agent_config,
 )
-from agentloom.configuration.defaults import DEFAULT_MAX_TOKENS
+from agentloom.runtime.agent_runtime import (
+    AgentRuntime,
+    AgentRuntimeRequest,
+    AgentRuntimeResult,
+    RuntimeCapabilities,
+    RuntimeCheckpointEnvelope,
+    RuntimeDefinition,
+    RuntimeEvent,
+    build_builtin_runtime_registry,
+    require_runtime_state,
+)
 from agentloom.runtime.hooks import (
     HookConfigLayer,
     HookEvent,
@@ -57,13 +42,21 @@ from agentloom.runtime.hooks import (
     HookPlanCompiler,
     builtin_hook_handlers,
 )
-from agentloom.runtime.invocation import current_worker_memory, require_successful_runtime_result
 from agentloom.runtime.logging import (
     get_global_logger,
     get_logger,
 )
-from agentloom.runtime.prompts.prompt_builder import build_prompt_templates
+from agentloom.runtime.model_binding import ModelTurnBinding
+from agentloom.runtime.prompts.environment import get_agent_environment_prompt
+from agentloom.runtime.prompts.prompt_builder import todo_policy_for_mode
 from agentloom.runtime.skills.catalog import SkillCatalog
+from agentloom.runtime.skills.parser import build_skills_prompt
+from agentloom.runtime.tool_gateway import (
+    AgentLoomToolGateway,
+    ToolBinding,
+    bind_tool,
+    final_answer_binding,
+)
 from agentloom.runtime.trace import (
     bind_local_run,
     bind_root_run,
@@ -94,9 +87,8 @@ class BaseAgent(ABC):
     and execution environment integration.
     """
 
-    # Default configuration, subclasses can override
-    tool_call_type = "tool_call"  # tool_call, code_act
     max_steps = 80
+    _config: dict[str, Any]
 
     @property
     @abstractmethod
@@ -122,54 +114,57 @@ class BaseAgent(ABC):
         pass
 
     def __init__(
-        self, model=None, execution_env: Any | None = None, logger: AgentLogger | None = None, model_cache: bool = True
+        self,
+        model_binding: ModelTurnBinding | None = None,
+        logger: Any | None = None,
+        model_cache: bool = True,
     ):
         """
         Initialize agent.
 
         Args:
-            model: Optional model instance. If omitted, the model manager selects one.
-            execution_env: Optional execution environment instance.
+            model_binding: Optional canonical model binding. If omitted, the
+                configured LiteLLM profile is resolved.
             logger: Optional logger instance.
             model_cache: Whether to enable model caching.
         """
-        # Initialize model
-        model_builder = self._build_model_config_builder()
-        if model is None:
-            self._model = get_model(
-                self.default_model_type,
-                "smolagents",
-                model_builder=model_builder,
-                model_cache=model_cache,
-                logger=logger,
-            )
-        else:
-            self._model = model
-
-        # Initialize execution environment
-        self._execution_env: Any | None = execution_env
+        self._model_binding = (
+            model_binding
+            if model_binding is not None
+            else self._resolve_model_binding(model_cache=model_cache)
+        )
+        if not isinstance(self._model_binding, ModelTurnBinding):
+            raise TypeError("model_binding must be a ModelTurnBinding")
 
         # Initialize logger
         self._logger = logger
 
-        # Callback list
-        self._before_run_callbacks = [self._emit_task_start]
-
         # Task ID
         self._task_id = None
 
-        # Supervisor runtimes are cached and smolagents agents keep mutable
-        # memory/state/python-executor objects. A single BaseAgent instance may
-        # therefore only drive its cached runtime once at a time. The lock is
-        # per BaseAgent, so independent agents and factory-created workers still
-        # run concurrently.
+        # A single Agent definition may only assemble and execute one runtime
+        # at a time. Independent Agents and factory-created Workers still run
+        # concurrently.
         self._cached_runtime_run_lock = RLock()
 
         # Generate unique agent ID
         self._agent_id = self._generate_agent_id()
 
-        self._final_answer_checks = []
         self._hook_plan = HookPlan(builtin_hook_handlers())
+
+    def _resolve_model_binding(
+        self,
+        *,
+        model_cache: bool,
+    ) -> ModelTurnBinding:
+        from agentloom.adapters.litellm.model_binding import (
+            resolve_litellm_model_turn_binding,
+        )
+
+        return resolve_litellm_model_turn_binding(
+            self.default_model_type,
+            model_cache=model_cache,
+        )
 
     def _generate_agent_id(self) -> str:
         """
@@ -192,14 +187,6 @@ class BaseAgent(ABC):
             str: Unique identifier of the agent.
         """
         return self._agent_id
-
-    def set_execution_env(self, execution_env: Any):
-        """Set execution environment."""
-        self._execution_env = execution_env
-
-    def set_final_answer_checks(self, check_func_list):
-        """Set final-answer validation callbacks."""
-        self._final_answer_checks = check_func_list
 
     def _emit_task_start(self, runtime_agent: Any, task: str, *args, **kwargs):
         """Broadcast a generic TaskCreated lifecycle event via the active Hook Run.
@@ -363,17 +350,6 @@ class BaseAgent(ABC):
             return tasks
         return [f"{snapshot}\n\n{tasks[0]}", *tasks[1:]]
 
-    def get_execution_tools(self) -> list:
-        """
-        Get tool list from execution environment.
-
-        Returns:
-            List: Execution environment tools.
-        """
-        if self._execution_env:
-            return self._execution_env.tools()
-        return []
-
     def get_all_tools(self, agent_type: str = "worker") -> list:
         """
         Get all available tools.
@@ -384,10 +360,7 @@ class BaseAgent(ABC):
         Returns:
             List: Merged tool list.
         """
-        execution_tools = self.get_execution_tools()
-        agent_tools = self._get_tools()
-
-        return agent_tools + execution_tools
+        return self._get_tools()
 
     @staticmethod
     def _resolve_runtime_logger_backend(provided_logger: Any) -> Any:
@@ -406,7 +379,11 @@ class BaseAgent(ABC):
         uniq_tools: list[Any] = []
         seen = set()
         for tool_item in tools:
-            key = tool_item.name if isinstance(tool_item, Tool) else tool_item
+            key = getattr(
+                tool_item,
+                "name",
+                getattr(tool_item, "__name__", tool_item),
+            )
             if key in seen:
                 continue
             seen.add(key)
@@ -414,23 +391,9 @@ class BaseAgent(ABC):
         return uniq_tools
 
     @staticmethod
-    def _emit_hook_user_message(runtime_agent: Any, runtime_logger: Any, message: str) -> None:
+    def _emit_hook_user_message(runtime_logger: Any, message: str) -> None:
         rendered = f"[hook] {message}"
-        agent_logger = getattr(runtime_agent, "logger", None)
-        if agent_logger is not None and hasattr(agent_logger, "log"):
-            agent_logger.log(rendered, level=LogLevel.INFO)
-            return
         runtime_logger.info(rendered)
-
-    def _build_runtime_final_answer_checks(self) -> list[Callable]:
-        checks = list(self._final_answer_checks)
-
-        def _run_scoped_stop_check(final_answer: Any, memory: Any, **kwargs: Any) -> bool:
-            hook_run = get_current_hook_run(required=True)
-            return hook_run.build_stop_check()(final_answer, memory, **kwargs)
-
-        checks.insert(0, _run_scoped_stop_check)
-        return checks
 
     def _validate_model(self) -> bool:
         """
@@ -440,7 +403,7 @@ class BaseAgent(ABC):
             bool: Whether model is available.
         """
 
-        return self._model is not None
+        return self._model_binding is not None
 
     def _get_agent_type(self) -> AgentType:
         """
@@ -451,18 +414,11 @@ class BaseAgent(ABC):
         """
         return AgentType.WORKER  # Default to worker agent
 
-    def _build_model_config_builder(self) -> ModelConfigBuilder | None:
-        """Model-config overlay hook. Subclasses can return a typed builder."""
-        return None
-
-
 @dataclass(frozen=True)
 class AgentRoleProfile:
     agent_type: AgentType
-    tool_call_type: str
     cache_runtime_agent: bool = False
     enable_sub_task_tracking: bool = False
-    additional_authorized_imports: list[str] | None = None
     inject_default_file_tools: bool = False
 
 
@@ -475,23 +431,18 @@ class RoleDrivenAgent(BaseAgent):
 
     COMMON_REQUIRED_FIELDS: tuple[str, ...] = ("name", "description", "workflow")
     REQUIRED_CONFIG_FIELDS: tuple[str, ...] = ()
-    ALLOWED_TOOL_CALL_TYPES: tuple[str, ...] = ("tool_call", "code_act")
-    DEFAULT_TOOL_CALL_TYPE: str = "tool_call"
-
     def __init__(
         self,
         config: dict | None = None,
         project_path: str = "",
-        model=None,
-        execution_env: Any | None = None,
-        logger: AgentLogger | None = None,
+        model_binding: ModelTurnBinding | None = None,
+        logger: Any | None = None,
         model_cache: bool = True,
         **kwargs,
     ):
         ensure_workspace_mounted_once()
 
         self._project_path = project_path
-        self._runtime_agent = None
         if config is None:
             self._config = {}
         elif isinstance(config, dict):
@@ -499,7 +450,6 @@ class RoleDrivenAgent(BaseAgent):
         else:
             raise ValueError(f"Agent config must be a dictionary, got {type(config).__name__}")
         self._normalized = None
-        self._execution_normalized: NormalizedExecutionConfig | None = None
         effective_snapshot = build_effective_agent_config_snapshot(
             self._config,
             source_name=str(self._config.get("_yaml_file_path") or self._config.get("name") or self.__class__.__name__),
@@ -518,8 +468,11 @@ class RoleDrivenAgent(BaseAgent):
             provided_logger=logger,
         )
 
-        super().__init__(model=model, execution_env=execution_env, logger=resolved_logger, model_cache=model_cache)
-        self.tool_call_type = self._role_profile().tool_call_type
+        super().__init__(
+            model_binding=model_binding,
+            logger=resolved_logger,
+            model_cache=model_cache,
+        )
 
         runtime_logger = self._effective_logger()
         self._skill_catalog = self._config.get("_skill_catalog_snapshot")
@@ -563,7 +516,7 @@ class RoleDrivenAgent(BaseAgent):
             return None
         return str(model_type)
 
-    def _effective_logger(self) -> AgentLogger | None:
+    def _effective_logger(self) -> Any | None:
         return getattr(self, "logger", None) or getattr(self, "_logger", None)
 
     def _before_config_validation(self, **kwargs) -> None:
@@ -577,13 +530,6 @@ class RoleDrivenAgent(BaseAgent):
     def _required_config_fields(self) -> tuple[str, ...]:
         return tuple(self.REQUIRED_CONFIG_FIELDS)
 
-    def _resolve_tool_call_type(self) -> str:
-        return AgentConfigNormalizer.resolve_tool_call_type(
-            self._config,
-            default_tool_call_type=self.DEFAULT_TOOL_CALL_TYPE,
-            allowed_tool_call_types=self.ALLOWED_TOOL_CALL_TYPES,
-        )
-
     def _validate_role_specific_config(self, normalized: Any | None) -> None:
         """Role-specific validation hook after common validation and normalization."""
 
@@ -592,12 +538,9 @@ class RoleDrivenAgent(BaseAgent):
         normalized = AgentConfigNormalizer.validate_role_driven_config(
             self._config,
             required_fields=self._required_config_fields(),
-            default_tool_call_type=self.DEFAULT_TOOL_CALL_TYPE,
-            allowed_tool_call_types=self.ALLOWED_TOOL_CALL_TYPES,
             build_normalized=self._build_normalized_config,
             validate_role_specific=self._validate_role_specific_config,
         )
-        self._execution_normalized = self._build_execution_normalized_config()
         return normalized
 
     def _build_normalized_config(self) -> Any | None:
@@ -609,32 +552,12 @@ class RoleDrivenAgent(BaseAgent):
             self._normalized = self._build_normalized_config()
         return self._normalized
 
-    def _execution_validation_agent_root(self) -> str:
-        return str(C.agent_root)
-
-    def _build_execution_normalized_config(self) -> NormalizedExecutionConfig:
-        cfg = dict(self._config)
-        effective = getattr(self, "_effective_agent_config", None)
-        if effective and "execution_env" in effective:
-            cfg["execution_env"] = effective["execution_env"]
-
-        return build_normalized_execution_config(
-            cfg,
-            source_name=self.__class__.__name__,
-            agent_root=self._execution_validation_agent_root(),
-        )
-
-    def _ensure_execution_normalized(self) -> NormalizedExecutionConfig:
-        if self._execution_normalized is None:
-            self._execution_normalized = self._build_execution_normalized_config()
-        return self._execution_normalized
-
     @staticmethod
     def resolve_agent_logger_from_config(
         config: dict,
         *,
-        provided_logger: AgentLogger | None = None,
-    ) -> AgentLogger | None:
+        provided_logger: Any | None = None,
+    ) -> Any | None:
         _ = config
         if provided_logger is not None:
             return provided_logger
@@ -647,7 +570,7 @@ class RoleDrivenAgent(BaseAgent):
             )
         return current_backend
 
-    def initialize_skill_catalog(self, logger: AgentLogger | None = None) -> SkillCatalog:
+    def initialize_skill_catalog(self, logger: Any | None = None) -> SkillCatalog:
         """Resolve conventional and explicitly configured Skill sources once."""
         log = get_logger(logger, __name__)
         from agentloom.application.definition import skill_catalog
@@ -662,36 +585,12 @@ class RoleDrivenAgent(BaseAgent):
         raise NotImplementedError
 
     def _runtime_agent_name(self) -> str | None:
-        """Optional runtime-level name passed to smolagents."""
+        """Optional runtime-level name passed to the selected runtime."""
         return None
 
     def _runtime_agent_description(self) -> str | None:
-        """Optional runtime-level description passed to smolagents."""
+        """Optional runtime-level description passed to the selected runtime."""
         return None
-
-    def _build_model_config_builder(self) -> ModelConfigBuilder | None:
-        return None
-
-    def _resolve_max_tokens_from_config(self) -> int:
-        try:
-            return C.llm.for_type(self.default_model_type).max_tokens
-        except Exception:
-            return DEFAULT_MAX_TOKENS
-
-    def _resolve_split_token_budget_from_config(self) -> tuple[int | None, int | None]:
-        try:
-            settings = C.llm.for_type(self.default_model_type)
-            context_window = getattr(settings, "context_window", None)
-            max_output_tokens = getattr(settings, "max_output_tokens", None)
-            if (
-                not isinstance(context_window, int)
-                or not isinstance(max_output_tokens, int)
-                or max_output_tokens >= context_window
-            ):
-                return None, None
-            return context_window, max_output_tokens
-        except Exception:
-            return None, None
 
     def _resolve_smart_summary_from_config(self) -> bool:
         effective_cfg = self._effective_agent_config
@@ -701,39 +600,6 @@ class RoleDrivenAgent(BaseAgent):
         effective_cfg = self._effective_agent_config
         config = effective_cfg if isinstance(effective_cfg, dict) else self._config
         return validate_todo_config(config, source=self.name)
-
-    def _build_execution_agent_kwargs(self, profile: AgentRoleProfile) -> dict[str, Any]:
-        """Build validated runtime kwargs for `_create_agent`."""
-        self._ensure_normalized()
-        execution_normalized = validate_execution_config_payload(self._ensure_execution_normalized())
-        log = get_logger(self._effective_logger(), __name__)
-        raw_planning_interval = self._config.get("planning_interval")
-        if raw_planning_interval is not None and execution_normalized.planning_interval is None:
-            log.warning(
-                "Ignored invalid '%s.planning_interval'=%r; expected a positive integer or numeric string.",
-                self.name,
-                raw_planning_interval,
-            )
-
-        code_agent_cfg = get_code_agent_config(self._effective_agent_config)
-        context_window, max_output_tokens = self._resolve_split_token_budget_from_config()
-        return {
-            "additional_authorized_imports": profile.additional_authorized_imports,
-            "additional_functions": code_agent_cfg.get("additional_functions", {}),
-            "enable_sub_task_tracking": profile.enable_sub_task_tracking,
-            "agent_name": self.name if profile.enable_sub_task_tracking else None,
-            "executor_type": execution_normalized.executor_type,
-            "executor_kwargs": dict(execution_normalized.executor_kwargs),
-            "prompt_template_path": execution_normalized.prompt_template_path,
-            "planning_interval": execution_normalized.planning_interval,
-            "max_tokens": self._resolve_max_tokens_from_config(),
-            "context_window": context_window,
-            "max_output_tokens": max_output_tokens,
-            "smart_summary": self._resolve_smart_summary_from_config(),
-            "runtime_name": self._runtime_agent_name(),
-            "runtime_description": self._runtime_agent_description(),
-            "todo_mode": self._resolve_todo_mode(),
-        }
 
     def _transform_task(self, task: str) -> str:
         """Task transformation hook."""
@@ -785,225 +651,84 @@ class RoleDrivenAgent(BaseAgent):
             tools = [*tools, resolve_tool_function("todo_write")]
         return tools
 
-    def build_runtime_agent(self) -> CodeAgent:
+    def _build_tool_gateway(self) -> AgentLoomToolGateway:
         profile = self._role_profile()
-
-        if profile.cache_runtime_agent and self._runtime_agent is not None:
-            # The smolagents runtime may be cached, but Tool instances are
-            # run-owned. Refresh them from shared definitions so mutable Tool
-            # state cannot survive into the next invocation.
-            fresh_tools = self._prepare_runtime_tools(self._build_runtime_tools(profile))
-            self._runtime_agent.tools = {tool.name: tool for tool in fresh_tools}
-            return self._runtime_agent
-
-        runtime_agent = self._create_agent(
-            tools=self._build_runtime_tools(profile),
-            **self._build_execution_agent_kwargs(profile),
+        tools = self._deduplicate_tools(self._build_runtime_tools(profile))
+        bindings: list[ToolBinding] = [bind_tool(tool) for tool in tools]
+        if not any(binding.definition.name == "final_answer" for binding in bindings):
+            bindings.append(final_answer_binding())
+        mcp_manager = getattr(self, "_mcp_manager", None)
+        resource_closers = (
+            (mcp_manager.disconnect_all,)
+            if mcp_manager is not None
+            and callable(getattr(mcp_manager, "disconnect_all", None))
+            else ()
+        )
+        return AgentLoomToolGateway(
+            bindings,
+            resource_closers=resource_closers,
         )
 
-        if profile.cache_runtime_agent:
-            self._runtime_agent = runtime_agent
+    def _build_runtime_instructions(self, gateway: AgentLoomToolGateway) -> str:
+        sections = [get_agent_environment_prompt()]
+        if any(item.name == "skill" for item in gateway.definitions):
+            if self._skill_catalog is None:
+                raise RuntimeError("Skill Tool requires a resolved Skill catalog")
+            sections.append(build_skills_prompt(self._skill_catalog.summaries()))
+        sections.append(todo_policy_for_mode(self._resolve_todo_mode()))
+        return "\n\n".join(section for section in sections if section.strip())
 
-        return runtime_agent
-
-    def _prepare_runtime_tools(self, tools: list[Any]) -> list[Tool]:
-        wrapped = ensure_tool_wrapped(self._deduplicate_tools(tools))
-        return [inject_hooks(clone_tool_for_runtime(tool)) for tool in wrapped]
-
-    def _resolve_effective_prompt_template_path(self) -> str | None:
-        # Priority: current agent effective config -> global system baseline.
-        effective_cfg = self._effective_agent_config
-        if isinstance(effective_cfg, dict):
-            prompt_cfg = effective_cfg.get("prompt")
-            if prompt_cfg is not None:
-                return normalize_execution_prompt_template_path_value(
-                    prompt_cfg,
-                    f"{self.name}.effective.prompt",
-                    agent_root=C.agent_root,
-                )
-
-        prompt_cfg = C.get("prompt")
-        if prompt_cfg is not None:
-            return normalize_execution_prompt_template_path_value(
-                prompt_cfg,
-                "config.prompt",
-                agent_root=C.agent_root,
-            )
-        return None
-
-    def _build_prompt_templates(
-        self,
-        *,
-        runtime_logger: Any,
-        use_customized_prompt: bool,
-        prompt_template_path: str | None,
-        skill_tool_enabled: bool,
-    ) -> Any:
-        if not use_customized_prompt:
-            return None
-
-        return build_prompt_templates(
-            prompt_template_path=prompt_template_path,
-            effective_prompt_path=self._resolve_effective_prompt_template_path(),
-            model_id=getattr(self._model, "model_id", None) if self._model else None,
+    def _build_runtime_definition(self) -> RuntimeDefinition:
+        runtime_id = AgentConfigNormalizer.validate_agent_runtime_config(
+            self._config
+        )
+        execution = build_normalized_execution_config(
+            self._effective_agent_config,
+            source_name=self.name,
             agent_root=C.agent_root,
-            skill_catalog=self._skill_catalog,
-            skill_tool_enabled=skill_tool_enabled,
-            logger=runtime_logger,
-            tool_call_type=self.tool_call_type,
-            use_structured_output=getattr(self._model, "supports_structured_output", "false") == "true",
+        )
+        gateway = self._build_tool_gateway()
+        return RuntimeDefinition(
+            runtime_id=runtime_id,
+            name=self._runtime_agent_name() or self.name,
+            description=self._runtime_agent_description() or self.description,
+            model=self._model_binding,
+            tool_gateway=gateway,
+            max_steps=self.max_steps,
+            instructions=self._build_runtime_instructions(gateway),
+            planning_interval=execution.planning_interval,
+            smart_summary=self._resolve_smart_summary_from_config(),
             todo_mode=self._resolve_todo_mode(),
+            prompt_template_path=execution.prompt_template_path,
+            project_root=str(C.agent_root),
+            max_consecutive_model_errors=self._config.get(
+                "max_consecutive_parse_errors",
+                5,
+            ),
         )
 
-    def _create_agent(
-        self,
-        tools: list | None = None,
-        *,
-        additional_authorized_imports: list[str] | None = None,
-        additional_functions: dict[str, Any] | None = None,
-        enable_sub_task_tracking: bool = False,
-        agent_name: str | None = None,
-        use_customized_prompt: bool = True,
-        prompt_template_path: str | None = None,
-        executor_type: str | None = None,
-        executor_kwargs: dict[str, Any] | None = None,
-        planning_interval: int | None = None,
-        max_tokens: int | None = None,
-        context_window: int | None = None,
-        max_output_tokens: int | None = None,
-        smart_summary: bool | None = None,
-        runtime_name: str | None = None,
-        runtime_description: str | None = None,
-        todo_mode: str = "auto",
-    ) -> CodeAgent:
-        """
-        Create configured agent instance.
+    def build_runtime(self) -> AgentRuntime:
+        """Build the configured complete-run Agent runtime adapter."""
 
-        Args:
-            tools: Tool list. If omitted, use get_all_tools().
-
-        Returns:
-            CodeAgent: Configured agent instance.
-        """
-        if tools is None:
-            tools = self.get_all_tools()
-
-        resolved_logger_backend = self._resolve_runtime_logger_backend(self._logger)
-        runtime_logger = get_logger(resolved_logger_backend, __name__)
-
-        hooked_tools = self._prepare_runtime_tools(tools)
-
-        normalized_planning_interval = normalize_positive_int_value(planning_interval)
-        if planning_interval is not None and normalized_planning_interval is None:
-            runtime_logger.warning(
-                "Ignored invalid planning_interval=%r; expected a positive integer or numeric string.",
-                planning_interval,
-            )
-
-        agent_kwargs: dict[str, Any] = {
-            "model": self._model,
-            "verbosity_level": LogLevel.INFO,
-            "max_steps": self.max_steps,
-            "logger": resolved_logger_backend,
-            "before_run_callbacks": list(self._before_run_callbacks),
-            "final_answer_checks": self._build_runtime_final_answer_checks(),
-        }
-        if executor_type is not None:
-            agent_kwargs["executor_type"] = executor_type
-        if executor_kwargs is not None:
-            agent_kwargs["executor_kwargs"] = dict(executor_kwargs)
-        if normalized_planning_interval is not None:
-            agent_kwargs["planning_interval"] = normalized_planning_interval
-        if max_tokens is not None:
-            agent_kwargs["max_tokens"] = max_tokens
-        if context_window is not None:
-            agent_kwargs["context_window"] = context_window
-        if max_output_tokens is not None:
-            agent_kwargs["max_output_tokens"] = max_output_tokens
-        if smart_summary is not None:
-            agent_kwargs["smart_summary"] = smart_summary
-        if runtime_name is not None:
-            agent_kwargs["name"] = runtime_name
-        if runtime_description is not None:
-            agent_kwargs["description"] = runtime_description
-
-        if additional_functions is not None:
-            if executor_type in {"docker", "e2b"}:
-                runtime_logger.info(
-                    "Skipped additional_functions injection for executor_type='%s' because the executor "
-                    "constructor does not support this key.",
-                    executor_type,
-                )
-            else:
-                agent_kwargs.setdefault("executor_kwargs", {})
-                agent_kwargs["executor_kwargs"]["additional_functions"] = dict(additional_functions)
-                runtime_logger.info(
-                    "Added additional_functions to executor_kwargs: %s",
-                    list(additional_functions.keys()),
-                )
-
-        resolved_additional_authorized_imports = additional_authorized_imports
-        if resolved_additional_authorized_imports is not None:
-            resolved_additional_authorized_imports = list(resolved_additional_authorized_imports)
-            if executor_type in {"docker", "e2b", "wasm"} and "*" in resolved_additional_authorized_imports:
-                resolved_additional_authorized_imports = [
-                    item for item in resolved_additional_authorized_imports if item != "*"
-                ]
-                runtime_logger.info(
-                    "Removed wildcard '*' from additional_authorized_imports for executor_type='%s' "
-                    "to avoid remote package-install side effects; keeping explicit imports: %s",
-                    executor_type,
-                    resolved_additional_authorized_imports,
-                )
-
-        prompt_templates = self._build_prompt_templates(
-            runtime_logger=runtime_logger,
-            use_customized_prompt=use_customized_prompt,
-            prompt_template_path=prompt_template_path,
-            skill_tool_enabled=any(getattr(tool, "name", None) == "skill" for tool in hooked_tools),
-        )
-
-        if self.tool_call_type == "tool_call":
-            agent = ToolCallingAgentV2(
-                tools=hooked_tools,
-                stream_outputs=False,
-                prompt_templates=prompt_templates,
-                **agent_kwargs,
-            )
-        else:
-            use_structured = getattr(self._model, "supports_structured_output", "false") == "true"
-            agent = CodeAgentV2(
-                tools=hooked_tools,
-                stream_outputs=False,
-                prompt_templates=prompt_templates,
-                additional_authorized_imports=resolved_additional_authorized_imports,
-                use_structured_outputs_internally=use_structured,
-                **agent_kwargs,
-            )
-
-        agent._agent_loom_todo_mode = todo_mode
-
-        # Apply circuit-breaker threshold from YAML config (default: 5 consecutive parse errors)
-        max_parse_errors = self._config.get("max_consecutive_parse_errors", 5)
-        agent._max_consecutive_parse_errors = max_parse_errors  # type: ignore[attr-defined]
-
-        if enable_sub_task_tracking:
-            resolved_agent_name = agent_name or self.name
-            agent = SubTaskTrackedAgent(agent, resolved_agent_name)
-
-        return agent
+        registry = build_builtin_runtime_registry()
+        definition = self._build_runtime_definition()
+        try:
+            runtime = registry.create(definition)
+        except BaseException:
+            definition.tool_gateway.close()
+            raise
+        profile = self._role_profile()
+        if profile.enable_sub_task_tracking:
+            return SubTaskTrackedAgent(runtime, self.name)
+        return runtime
 
     def _bind_hook_message_sink(self, runtime_agent: Any) -> None:
-        """Bind delivery to the current run, including cached runtimes."""
+        """Bind Hook user-message delivery to the current runtime-neutral run."""
 
         hook_run = get_current_hook_run(required=True)
-        runtime_logger = get_logger(
-            getattr(runtime_agent, "logger", None) or self._effective_logger(),
-            __name__,
-        )
+        runtime_logger = get_logger(self._effective_logger(), __name__)
         hook_run.set_user_message_sink(
             lambda message: self._emit_hook_user_message(
-                runtime_agent,
                 runtime_logger,
                 message,
             )
@@ -1045,64 +770,84 @@ class RoleDrivenAgent(BaseAgent):
                         owns_root_run=owns_root_run,
                     ).run()
 
-        role_profile_resolver = getattr(self, "_role_profile", None)
-        cache_runtime_agent = bool(
-            role_profile_resolver().cache_runtime_agent if callable(role_profile_resolver) else False
-        )
-        if cache_runtime_agent:
-            with self._cached_runtime_run_lock:
-                return _run_once()
-        return _run_once()
+        with self._cached_runtime_run_lock:
+            return _run_once()
 
 class SubTaskTrackedAgent:
     """
     Sub-task tracing wrapper that provides an isolated tracing chain for worker agents.
 
-    This class wraps the original CodeAgent/ToolCallingAgent and automatically
-    creates sub-task context during execution.
+    This class wraps a complete-run ``AgentRuntime`` and automatically creates
+    sub-task context during execution.
     Telemetry collection has been removed; agent_id is injected for LiteLLM/Langfuse tracing.
     """
 
-    def __init__(self, agent, agent_name: str):
+    def __init__(self, runtime: AgentRuntime, agent_name: str):
         """
         Initialize sub-task tracing wrapper.
 
         Args:
-            agent: Original CodeAgent or ToolCallingAgent instance.
+            runtime: Runtime-neutral complete-run Agent adapter.
             agent_name: Agent name, used to generate sub-task IDs.
         """
-        self._agent = agent
+        self._runtime = runtime
         self._agent_name = agent_name
-        self._log = get_logger(getattr(agent, "logger", None), __name__)
+        self._log = get_logger(getattr(runtime, "logger", None), __name__)
 
-        # Proxy all attributes to original agent (except overridden methods)
-        excluded_attrs = {"run", "__call__"}
-        for attr in dir(self._agent):
-            if (
-                not attr.startswith("_")
-                and attr not in excluded_attrs
-                and hasattr(self._agent, attr)
-                and not callable(getattr(self._agent, attr, None))
-            ):
-                setattr(self, attr, getattr(self._agent, attr))
+    @property
+    def runtime_id(self) -> str:
+        return self._runtime.runtime_id
+
+    @property
+    def capabilities(self) -> RuntimeCapabilities:
+        return self._runtime.capabilities
+
+    @property
+    def logger(self) -> Any:
+        return getattr(self._runtime, "logger", None)
 
     @staticmethod
     def _compute_input_hash(task_text: str) -> str:
         """Short hash of the worker input for skip-on-resume matching."""
         return _hashlib.sha256(str(task_text).encode()).hexdigest()[:16]
 
-    def _snapshot_worker_memory(self) -> list | None:
-        """Return the wrapped runtime agent memory at the lifecycle boundary."""
+    def _snapshot_runtime(self) -> RuntimeCheckpointEnvelope | None:
+        """Return the wrapped runtime's opaque state envelope."""
         try:
-            memory = getattr(self._agent, "memory", None)
-            steps = getattr(memory, "steps", None)
-            if steps is not None:
-                return list(steps)
+            return self._runtime.snapshot()
         except Exception:
-            pass
-        return current_worker_memory.get(None)
+            return None
 
-    def _execute_with_lifecycle(self, callable_fn, task, call_label, *args, **kwargs):
+    def _subagent_event(
+        self,
+        request: AgentRuntimeRequest,
+        *,
+        phase: str,
+        sub_task_id: str,
+        error: str | None = None,
+    ) -> RuntimeEvent:
+        details = {
+            "phase": phase,
+            "agent_name": self._agent_name,
+            "sub_task_id": sub_task_id,
+        }
+        if error is not None:
+            details["error"] = error
+        event = RuntimeEvent(
+            kind="subagent",
+            application_id=request.application_id,
+            task_id=request.task_id,
+            run_id=request.run_id,
+            details=details,
+        )
+        if request.event_sink is not None:
+            try:
+                request.event_sink(event)
+            except Exception:
+                pass
+        return event
+
+    def run(self, request: AgentRuntimeRequest) -> AgentRuntimeResult:
         """Run callable within sub-task context, broadcasting lifecycle events.
 
         Emits ``SubagentStart`` before execution and ``SubagentStop`` after
@@ -1116,10 +861,19 @@ class SubTaskTrackedAgent:
         from agentloom.runtime.checkpoint.coordinator import CheckpointCoordinator
 
         with sub_task_context(self._agent_name) as sub_task_id:
-            self._log.debug(f"Starting sub-task {sub_task_id} (agent: {self._agent_name}) via {call_label}")
+            started_event = self._subagent_event(
+                request,
+                phase="started",
+                sub_task_id=sub_task_id,
+            )
+            self._log.debug(
+                "Starting sub-task %s (agent: %s)",
+                sub_task_id,
+                self._agent_name,
+            )
 
             coord = CheckpointCoordinator.current()
-            input_hash = self._compute_input_hash(task)
+            input_hash = self._compute_input_hash(request.task)
 
             # Claim/allocate exactly one logical call before side effects.  The
             # explicit outcome distinguishes a cached ``None``/empty result
@@ -1128,8 +882,7 @@ class SubTaskTrackedAgent:
                 preparation = coord.prepare_worker_call(
                     self._agent_name,
                     input_hash,
-                    str(task),
-                    runtime_agent=self._agent,
+                    request.task,
                 )
                 if not preparation.should_execute:
                     self._log.info(
@@ -1137,21 +890,16 @@ class SubTaskTrackedAgent:
                         self._agent_name,
                         input_hash[:8],
                     )
-                    # The checkpoint stores the Worker output, not the upstream
-                    # execution envelope. Preserve the caller's requested return
-                    # shape when replaying a completed call without executing it.
-                    wants_full_result = kwargs.get("return_full_result")
-                    if wants_full_result is None:
-                        wants_full_result = getattr(self._agent, "return_full_result", False)
-                    if call_label == "run" and wants_full_result:
-                        return RunResult(
-                            output=preparation.cached_result,
-                            state="success",
-                            steps=[],
-                            token_usage=None,
-                            timing=None,
-                        )
-                    return preparation.cached_result
+                    completed_event = self._subagent_event(
+                        request,
+                        phase="completed",
+                        sub_task_id=sub_task_id,
+                    )
+                    return AgentRuntimeResult(
+                        state="success",
+                        output=preparation.cached_result,
+                        events=(started_event, completed_event),
+                    )
                 call_index = preparation.call_index
             else:
                 call_index = 0
@@ -1181,40 +929,69 @@ class SubTaskTrackedAgent:
             except Exception as hook_err:
                 self._log.warning("SubagentStart hook error: %s", hook_err)
 
-            worker_restored = (
-                coord.restore_worker(self._agent, self._agent_name, call_index) if coord is not None else False
+            checkpoint = (
+                coord.load_worker_runtime_checkpoint(
+                    self._agent_name,
+                    call_index,
+                )
+                if coord is not None
+                else None
             )
-            if worker_restored:
-                kwargs.setdefault("reset", False)
+            checkpoint_sink = (
+                coord.worker_checkpoint_sink(
+                    self._agent_name,
+                    call_index,
+                    input_hash,
+                    request.task,
+                )
+                if coord is not None
+                else request.checkpoint_sink
+            )
+            runtime_request = replace(
+                request,
+                continue_session=request.continue_session
+                or checkpoint is not None,
+                checkpoint=checkpoint or request.checkpoint,
+                checkpoint_sink=checkpoint_sink,
+            )
 
             try:
-                result = callable_fn(task, *args, **kwargs)
-                # RoleDrivenAgent requests a structured RunResult from its
-                # smolagents runtime.  Validate that result before crossing
-                # the checkpoint success boundary; the outer RoleDrivenAgent
-                # check is intentionally too late to prevent a completed
-                # worker checkpoint from being reused on resume.
-                if isinstance(result, RunResult):
-                    require_successful_runtime_result(result)
+                result = self._runtime.run(runtime_request)
+                require_runtime_state(
+                    result,
+                    allowed_states={"success"},
+                    error_prefix="Worker run did not complete successfully",
+                )
             except KeyboardInterrupt:
+                self._subagent_event(
+                    request,
+                    phase="interrupted",
+                    sub_task_id=sub_task_id,
+                )
                 if coord is not None:
                     coord.record_worker_interrupted(
                         self._agent_name,
                         call_index,
                         input_hash,
-                        str(task),
-                        self._snapshot_worker_memory(),
+                        request.task,
+                        self._snapshot_runtime(),
                     )
                 raise
             except Exception as exc:
+                self._subagent_event(
+                    request,
+                    phase="failed",
+                    sub_task_id=sub_task_id,
+                    error=str(exc),
+                )
                 if coord is not None:
                     coord.record_worker_failure(
                         self._agent_name,
                         call_index,
                         input_hash,
-                        str(task),
+                        request.task,
                         str(exc),
-                        self._snapshot_worker_memory(),
+                        self._snapshot_runtime(),
                     )
                 try:
                     lifecycle_run.dispatch(
@@ -1233,9 +1010,9 @@ class SubTaskTrackedAgent:
                     self._agent_name,
                     call_index,
                     input_hash,
-                    str(task),
-                    result.output if isinstance(result, RunResult) else result,
-                    self._snapshot_worker_memory(),
+                    request.task,
+                    result.output,
+                    result.checkpoint or self._snapshot_runtime(),
                 )
 
             try:
@@ -1248,38 +1025,19 @@ class SubTaskTrackedAgent:
             except Exception as hook_err:
                 self._log.warning("SubagentStop hook error: %s", hook_err)
 
-            self._log.debug(f"Finished sub-task {sub_task_id}")
-            return result
+            self._log.debug("Finished sub-task %s", sub_task_id)
+            completed_event = self._subagent_event(
+                request,
+                phase="completed",
+                sub_task_id=sub_task_id,
+            )
+            return replace(
+                result,
+                events=(started_event, *result.events, completed_event),
+            )
 
-    def run(self, task: str, *args, **kwargs):
-        """
-        Run task within sub-task context.
+    def snapshot(self) -> RuntimeCheckpointEnvelope:
+        return self._runtime.snapshot()
 
-        Args:
-            task: Task description.
-            *args, **kwargs: Arguments forwarded to original agent.
-
-        Returns:
-            Task execution result.
-        """
-        return self._execute_with_lifecycle(self._agent.run, task, "run", *args, **kwargs)
-
-    def __call__(self, task: str, **kwargs):
-        """
-        Call agent within sub-task context (method used by smolagents framework).
-
-        Args:
-            task: Task description.
-            **kwargs: Arguments forwarded to original agent.
-
-        Returns:
-            Task execution result.
-        """
-        return self._execute_with_lifecycle(self._agent, task, "__call__", **kwargs)
-
-    def __getattr__(self, name):
-        """Proxy undefined attributes to the original agent."""
-        # Do not proxy methods already overridden here
-        if name in ("run", "__call__"):
-            raise AttributeError(f"'{self.__class__.__name__}' object has no attribute '{name}'")
-        return getattr(self._agent, name)
+    def close(self) -> None:
+        self._runtime.close()

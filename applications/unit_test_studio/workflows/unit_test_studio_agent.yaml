@@ -1,20 +1,20 @@
 name: "unit_test_studio_agent"
+agent_runtime: smolagents
 description: |
   Orchestrate end-to-end pytest generation for function targets and return the final English report.
 
 model_type: "powerful"
-tool_call_type: "code_act"
 max_steps: 70
 
 workflow: |
-  # 0) CodeAct Execution Contract
-  - Every action MUST be emitted as a Python `<code>...</code>` block.
-  - Execute the Python code in section 4. Do not replace worker calls with inferred
-    outputs.
+  # 0) Structured Tool Execution Contract
+  - Invoke every Worker through its native structured tool schema.
+  - Do not replace Worker calls with inferred outputs.
   - `todo_write` is progress bookkeeping only. It is not evidence that a worker
     ran and it must not be used instead of the required worker call.
-  - Final output MUST be produced by `final_answer(...)` inside a `<code>` block.
-    Never return bare markdown, bare JSON, XML, or fenced code as the final response.
+  - Preserve each actual Worker return and pass it unchanged as the next Worker's
+    `query`.
+  - Final output MUST be produced through the `final_answer` tool.
 
   # 1) Background & Role
   You are the **Unit Test Studio Supervisor**.
@@ -55,30 +55,14 @@ workflow: |
   ```
 
   # 4) Step-by-Step Execution Details
-  The runtime code executor already provides a `task` variable containing the
-  full current task text. Do not copy the task text into a Python string literal.
-  Use `text = task` exactly.
-
-  Use Python code and follow this call pattern:
-  ```python
-  import json
-
-  text = task
-  marker = "Use this JSON payload exactly:"
-  _before_payload, marker_text, payload_text = text.rpartition(marker)
-  if not marker_text:
-      raise ValueError("Missing JSON payload marker in task text.")
-  payload_text = payload_text.lstrip()
-  payload, _ = json.JSONDecoder().raw_decode(payload_text)
-
-  intake = function_intake(query=json.dumps(payload, ensure_ascii=False))
-  plan = scenario_planner(query=intake)
-  generated = pytest_generator(query=plan)
-  refined = test_refiner(query=generated)
-  report = delivery_reporter(query=refined)
-
-  final_answer(report)
-  ```
+  1. Locate the JSON object after `Use this JSON payload exactly:` in the current
+     task. If the marker or JSON is missing, stop with an explicit error.
+  2. Call `function_intake` with that exact JSON serialized as its `query`.
+  3. Pass the exact returned string to `scenario_planner.query`.
+  4. Pass that exact return to `pytest_generator.query`.
+  5. Pass that exact return to `test_refiner.query`.
+  6. Pass that exact return to `delivery_reporter.query`.
+  7. Call `final_answer` with the exact report returned by `delivery_reporter`.
 
   Runtime guardrails:
   - If a stage expected to return JSON returns malformed JSON, raise:
@@ -97,8 +81,3 @@ worker_agents:
   - path: "applications/unit_test_studio/workflows/worker_agents/pytest_generator.yaml"
   - path: "applications/unit_test_studio/workflows/worker_agents/test_refiner.yaml"
   - path: "applications/unit_test_studio/workflows/worker_agents/delivery_reporter.yaml"
-
-execution_env:
-  type: "local"
-  executor_kwargs:
-    timeout_seconds: 1200

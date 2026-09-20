@@ -1,20 +1,14 @@
 """
-Generic tool call error recovery: classification, diagnosis, and progressive guidance.
-
-Provides error classification (4 categories), 3-level tool info extraction,
-progressive recovery message generation (4 levels), and error message
-consolidation for consecutive failures.
+Generic native tool-call error recovery and message consolidation.
 
 All public functions are framework-agnostic — they accept basic types (str,
-list, dict) and never import smolagents types.  The smolagents-specific data
-assembly lives in ``base_agent._consolidate_error_messages()``.
+list, dict) and never import smolagents types.
 """
 
 from __future__ import annotations
 
 import enum
-import re
-from typing import Any, Optional
+from typing import Any
 
 from agentloom.runtime.logging import get_logger
 
@@ -25,142 +19,33 @@ _LOG = get_logger(__name__)
 # ---------------------------------------------------------------------------
 
 NOW_LETS_RETRY_PREFIX = "Now let's retry"
+RUNTIME_FEEDBACK_RAW_KEY = "agentloom_runtime_feedback"
 
 
 class ErrorCategory(enum.Enum):
-    """Four mutually-exclusive categories for tool-call parsing errors."""
+    """Native tool-call protocol errors recoverable by another model turn."""
 
-    FORMAT_NOT_FOUND = "FORMAT_NOT_FOUND"
-    JSON_SYNTAX_ERROR = "JSON_SYNTAX_ERROR"
+    NATIVE_TOOL_CALL_REQUIRED = "NATIVE_TOOL_CALL_REQUIRED"
     UNKNOWN_TOOL = "UNKNOWN_TOOL"
     ARGUMENT_ERROR = "ARGUMENT_ERROR"
 
 
-# Tag used to encode the category inside ToolCallParseError messages.
-_CATEGORY_TAG_PATTERN = re.compile(r"\[CATEGORY:(\w+)\]")
+def extract_category_from_error(error_message: str) -> ErrorCategory | None:
+    """Classify a native tool-call validation error without parsing model text."""
 
-# Patterns for extracting partial tool names from raw LLM output (Level 3).
-PARTIAL_TOOL_NAME_PATTERNS = [
-    re.compile(r'"name"\s*:\s*"(\w+)"'),                                 # JSON
-    re.compile(r"<name>(\w+)</name>"),                                    # XML
-    re.compile(r'invoke\s+name="(\w+)"'),                                 # invoke
-    re.compile(r"<(?:minimax:)?tool_call>.*?<name>(\w+)</name>", re.DOTALL),  # MiniMax wrapper
-    re.compile(r"Calling tool:\s*'(\w+)'"),                               # Verbose
-    re.compile(r"<tool_name>(\w+)</tool_name>"),                          # Simple XML
-]
-
-# Pattern for extracting tool name from strategy-chain failures (Level 2).
-_FAILURE_TOOL_NAME_RE = re.compile(r"tool '(\w+)' not in")
-
-
-def classify_parse_error(
-    failures: list[str] | None,
-    partial_tool_name: str | None,
-    available_tool_names: list[str] | None,
-) -> ErrorCategory:
-    """Classify a parse error into one of 4 categories.
-
-    Args:
-        failures: Strategy-chain failure reasons (from ToolCallParseError msg).
-        partial_tool_name: Extracted tool name (may be None).
-        available_tool_names: Registered tool names for membership check.
-
-    Returns:
-        The most specific ``ErrorCategory`` that fits.
-    """
-    try:
-        if partial_tool_name and available_tool_names is not None:
-            if partial_tool_name in available_tool_names:
-                return ErrorCategory.ARGUMENT_ERROR
-            return ErrorCategory.UNKNOWN_TOOL
-
-        if failures:
-            joined = " ".join(failures).lower()
-            # Match actual JSON error indicators, not strategy names like "standard_json"
-            json_error_indicators = [
-                "jsondecode", "json.decoder", "unterminated", "expecting",
-                "invalid escape", "expecting property name",
-            ]
-            if any(indicator in joined for indicator in json_error_indicators):
-                return ErrorCategory.JSON_SYNTAX_ERROR
-
-        return ErrorCategory.FORMAT_NOT_FOUND
-    except Exception:
-        return ErrorCategory.FORMAT_NOT_FOUND
-
-
-def extract_tool_info(
-    failures: list[str] | None = None,
-    raw_text: str | None = None,
-    available_tool_names: list[str] | None = None,
-) -> Optional[str]:
-    """3-level extraction: strategy chain failures -> regex fallback.
-
-    Level 2 (strategy chain): scan *failures* for "tool 'X' not in …".
-    Level 3 (raw text regex): scan *raw_text* with PARTIAL_TOOL_NAME_PATTERNS.
-
-    Level 1 (structured data from native path) is handled by the caller, not
-    this function.
-
-    Returns:
-        Extracted tool name or ``None``.
-    """
-    try:
-        # Level 2: extract from failures list
-        if failures:
-            for f in failures:
-                m = _FAILURE_TOOL_NAME_RE.search(f)
-                if m:
-                    return m.group(1)
-
-        # Level 3: regex scan on raw LLM output
-        if raw_text:
-            for pattern in PARTIAL_TOOL_NAME_PATTERNS:
-                m = pattern.search(raw_text)
-                if m:
-                    name = m.group(1)
-                    # Optionally validate against available tools
-                    if available_tool_names is not None and name in available_tool_names:
-                        return name
-                    # Return even if not validated — diagnostics only
-                    if available_tool_names is None:
-                        return name
-                    # Keep searching for a matching name
-                    continue
-
-            # Second pass: accept any match if nothing validated
-            if available_tool_names is not None:
-                for pattern in PARTIAL_TOOL_NAME_PATTERNS:
-                    m = pattern.search(raw_text)
-                    if m:
-                        return m.group(1)
-
-        return None
-    except Exception:
-        return None
-
-
-def extract_category_from_error(error_message: str) -> Optional[ErrorCategory]:
-    """Extract ``[CATEGORY:XXX]`` tag from an error message string."""
-    try:
-        m = _CATEGORY_TAG_PATTERN.search(error_message)
-        if m:
-            tag = m.group(1)
-            try:
-                return ErrorCategory(tag)
-            except ValueError:
-                return None
-        return None
-    except Exception:
-        return None
+    normalized = (error_message or "").lower()
+    if "not found in registered tools" in normalized:
+        return ErrorCategory.UNKNOWN_TOOL
+    if "arguments must be a json object" in normalized:
+        return ErrorCategory.ARGUMENT_ERROR
+    if "native structured tool_calls" in normalized or "no tool call" in normalized:
+        return ErrorCategory.NATIVE_TOOL_CALL_REQUIRED
+    return None
 
 
 # ---------------------------------------------------------------------------
 #  Recovery message generation
 # ---------------------------------------------------------------------------
-
-_TOOL_CALL_JSON_EXAMPLE = '{"name": "<tool_name>", "arguments": {"<param>": "<value>"}}'
-
 
 def format_tool_list(
     tool_names: list[str] | None,
@@ -200,10 +85,9 @@ def build_recovery_message(
     """Build a progressive recovery message based on consecutive error count.
 
     Levels:
-        1 (1st error):  Category-aware format guidance (~150 tokens)
-        2 (2nd error):  Enhanced diagnosis (~300 tokens)
-        3 (3-4 errors): Approach switch suggestion (~200 tokens, shorter than L2)
-        4 (5+ errors):  Minimal reminder (~100 tokens)
+        1 (1st error): category-aware native-call guidance
+        2 (2nd error): diagnosis and available tools
+        3+ (later errors): concise native-call reminder
 
     Returns:
         Recovery message text, or empty string if *consecutive_errors* <= 0.
@@ -219,12 +103,9 @@ def build_recovery_message(
             return _level2_enhanced_diagnosis(
                 error_category, last_output_snippet, available_tool_names, tool_descriptions
             )
-        if consecutive_errors <= 4:
-            return _level3_approach_switch(consecutive_errors, available_tool_names)
-        return _level4_minimal_reminder(consecutive_errors)
+        return _level3_native_call_reminder(consecutive_errors, available_tool_names)
     except Exception:
-        # Absolute fallback — never block the main flow
-        return f"FORMAT: {_TOOL_CALL_JSON_EXAMPLE}"
+        return "Call one available tool using the provider's native structured tool-call mechanism."
 
 
 def _level1_format_guidance(
@@ -232,44 +113,31 @@ def _level1_format_guidance(
     available_tool_names: list[str] | None,
     partial_tool_name: str | None = None,
 ) -> str:
-    """Level 1: category-aware format guidance with JSON example and tool list.
-
-    Generates category-specific messages so the LLM gets actionable feedback
-    on the first error.  Falls back to a generic format reminder when no
-    category is available.
-    """
+    """Level 1: category-aware guidance for provider-native tool calls."""
     tool_list = ", ".join(available_tool_names) if available_tool_names else "N/A"
-    fmt = _TOOL_CALL_JSON_EXAMPLE
     suffix = f"\nAvailable tools: {tool_list}"
 
     if error_category == ErrorCategory.UNKNOWN_TOOL:
         tool_ref = f"'{partial_tool_name}' " if partial_tool_name else ""
         return (
             f"Tool {tool_ref}does not exist. "
-            f"Use one of the available tools.\n"
-            f"Correct format:\n{fmt}{suffix}"
+            f"Call one of the available tools using the provider's native "
+            f"structured tool-call mechanism.{suffix}"
         )
     if error_category == ErrorCategory.ARGUMENT_ERROR:
         tool_ref = f"'{partial_tool_name}' " if partial_tool_name else ""
         return (
             f"Tool {tool_ref}received invalid arguments. "
-            f"Check parameter names and types.\n"
-            f"Correct format:\n{fmt}{suffix}"
+            f"Check its schema, then issue a native structured tool call.{suffix}"
         )
-    if error_category == ErrorCategory.JSON_SYNTAX_ERROR:
+    if error_category == ErrorCategory.NATIVE_TOOL_CALL_REQUIRED:
         return (
-            f"Your tool call has JSON syntax errors. "
-            f"Correct format:\n{fmt}{suffix}"
+            "Your response did not contain a provider-native structured tool call. "
+            f"Do not describe or serialize a call in assistant text.{suffix}"
         )
-    if error_category == ErrorCategory.FORMAT_NOT_FOUND:
-        return (
-            f"Your output did not contain a valid tool call. "
-            f"You must respond with a JSON tool call:\n{fmt}{suffix}"
-        )
-    # None / unknown category — generic fallback
     return (
-        f"TOOL FORMAT REMINDER: You must output a JSON tool call:\n"
-        f"{fmt}{suffix}"
+        "Call one available tool using the provider's native structured "
+        f"tool-call mechanism.{suffix}"
     )
 
 
@@ -279,7 +147,7 @@ def _level2_enhanced_diagnosis(
     available_tool_names: list[str] | None,
     tool_descriptions: dict[str, str] | None,
 ) -> str:
-    """Level 2: enhanced diagnosis with error type, correct format only (no wrong examples)."""
+    """Level 2: concise diagnosis without any text-call encoding example."""
     parts: list[str] = []
 
     # Diagnosis
@@ -290,9 +158,10 @@ def _level2_enhanced_diagnosis(
         snippet = last_output_snippet[:200] + "..." if len(last_output_snippet) > 200 else last_output_snippet
         parts.append(f"Your output contained: {snippet}")
 
-    # Correct format example
-    parts.append("CORRECT format:")
-    parts.append(_TOOL_CALL_JSON_EXAMPLE)
+    parts.append(
+        "Issue the next call through the provider's native structured "
+        "tool-call mechanism; do not write JSON, XML, or prose that describes a call."
+    )
 
     # Tool list with descriptions
     if available_tool_names:
@@ -307,25 +176,16 @@ def _level2_enhanced_diagnosis(
     return "\n".join(parts)
 
 
-def _level3_approach_switch(
+def _level3_native_call_reminder(
     consecutive_errors: int,
     available_tool_names: list[str] | None,
 ) -> str:
-    """Level 3: approach switch suggestion — intentionally shorter than Level 2."""
+    """Level 3+: short native-call reminder."""
     tool_list = ", ".join(available_tool_names) if available_tool_names else "N/A"
     return (
-        f"CRITICAL: {consecutive_errors} consecutive format errors. "
-        f"You MUST change your approach.\n"
-        f"Try a DIFFERENT tool or simplify your request.\n"
-        f"Format: {_TOOL_CALL_JSON_EXAMPLE}\n"
+        f"{consecutive_errors} consecutive native tool-call errors. "
+        "Use the provider's structured tool-call mechanism, not assistant text.\n"
         f"Available tools: {tool_list}"
-    )
-
-
-def _level4_minimal_reminder(consecutive_errors: int) -> str:
-    """Level 4+: minimal format template, loop indefinitely (no forced final_answer)."""
-    return (
-        f"FORMAT: {_TOOL_CALL_JSON_EXAMPLE}"
     )
 
 
@@ -381,6 +241,9 @@ def consolidate_error_messages(
         if not error_indices:
             return messages
 
+        for idx in error_indices:
+            messages[idx] = _mark_runtime_feedback(messages[idx])
+
         # error_indices is in reverse order (newest first)
         # Keep the last max_full_errors in full, compress the rest
         to_keep = error_indices[:max_full_errors]
@@ -422,13 +285,10 @@ def _replace_retry_suffix(text: str, replacement: str) -> str:
 
 
 def _extract_error_category_from_text(text: str | None) -> str:
-    """Try to extract a [CATEGORY:…] tag; fall back to a generic label."""
-    if not text:
-        return "PARSE_ERROR"
-    m = _CATEGORY_TAG_PATTERN.search(text)
-    if m:
-        return m.group(1)
-    return "PARSE_ERROR"
+    """Classify a retained native tool-call error for compact history."""
+
+    category = extract_category_from_error(text or "")
+    return category.value if category is not None else "NATIVE_TOOL_CALL_ERROR"
 
 
 # ---------------------------------------------------------------------------
@@ -482,4 +342,27 @@ def _set_content_text(msg: Any, text: str) -> Any:
     return {
         "role": role_str,
         "content": [{"type": "text", "text": text}],
+        "raw": dict(getattr(msg, "raw", None) or {}),
+    }
+
+
+def _mark_runtime_feedback(msg: Any) -> Any:
+    """Mark a smolagents parsing-error message without changing provider text."""
+
+    if isinstance(msg, dict):
+        marked = dict(msg)
+        raw = marked.get("raw")
+        marked["raw"] = dict(raw) if isinstance(raw, dict) else {}
+        marked["raw"][RUNTIME_FEEDBACK_RAW_KEY] = True
+        return marked
+
+    role = msg.role if hasattr(msg, "role") else "tool-response"
+    role_str = role.value if hasattr(role, "value") else str(role)
+    raw = getattr(msg, "raw", None)
+    marked_raw = dict(raw) if isinstance(raw, dict) else {}
+    marked_raw[RUNTIME_FEEDBACK_RAW_KEY] = True
+    return {
+        "role": role_str,
+        "content": getattr(msg, "content", ""),
+        "raw": marked_raw,
     }

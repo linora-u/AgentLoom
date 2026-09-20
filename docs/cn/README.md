@@ -9,7 +9,7 @@
 </p>
 
 <p align="center">
-  类型化 Worker、权限确认、断点恢复、Goal 预算和经审核的记忆，都以同一套运行时权威状态为准。
+  类型化 Worker、权限确认、断点恢复、Goal 显式完成和经审核的记忆，都以同一套运行时权威状态为准。
 </p>
 
 <p align="center">
@@ -47,8 +47,7 @@ Worker 通过 `agent_function_schema` 声明接口，Runtime 将它转换成 Sup
 ### 长任务有明确的完成责任人
 
 Goal Mode 让根 Supervisor 跨 continuation 和 Worker 调用持续推进同一个目标。
-只有根 Supervisor 能携带证据完成 Goal。可选 token 预算覆盖整棵 Agent 树；启用
-checkpoint 时，达到预算后进入 `budget_limited` 并保留恢复状态。
+只有根 Supervisor 能携带证据完成 Goal；启用 checkpoint 时，中断后可恢复目标和已完成工作。
 
 ### 记忆有审核边界
 
@@ -181,9 +180,9 @@ Supervisor 引用 Worker 定义：
 
 ```yaml
 name: "release_review"
+agent_runtime: "smolagents"
 description: "Review an API release and its test evidence."
 model_type: "powerful"
-tool_call_type: "tool_call"
 
 worker_agents:
   - path: "applications/release_review/workflows/worker_agents/api_reviewer.yaml"
@@ -196,16 +195,15 @@ tools: []
 max_steps: 12
 goal:
   enabled: true
-  token_budget: 120000
 ```
 
 每个 Worker 声明 Supervisor 看到的接口：
 
 ```yaml
 name: "api_reviewer"
+agent_runtime: "smolagents"
 description: "Review API compatibility risks."
 model_type: "fast"
-tool_call_type: "tool_call"
 
 agent_function_schema:
   description: "Review one release request."
@@ -317,7 +315,7 @@ agentloom schedules --project /path/to/project serve
 | `unit_test_studio` | 通过确定性 Python 入口执行严格的 pytest 生成流程 |
 | `repo_map` | 确定性预处理、自底向上 Agent 分析、批处理和进度持久化 |
 | `codex_exec_demo` | 将本地 `codex exec` 作为带固定参数的普通 Agent Tool |
-| `goal_mode_validation` | Goal 显式完成、预算统计和可恢复终态 |
+| `goal_mode_validation` | Goal 显式完成、自动续跑和 checkpoint 恢复 |
 | `self_learning_smoke` | Session 历史、记忆提案、证据和审核边界 |
 
 ## 文档
@@ -329,7 +327,7 @@ agentloom schedules --project /path/to/project serve
 | [Tool Catalog](tool_catalog.md) | 延迟实现加载、Toolset、元数据和扩展规则 |
 | [Skills](skills_config.md) | 发现、按需激活与权限边界 |
 | [Hooks](hooks.md) | 显式授权、事件、输入转换和失败语义 |
-| [Goal Mode](goal_mode.md) | continuation、完成责任、预算、恢复与调度 |
+| [Goal Mode](goal_mode.md) | continuation、完成责任、恢复与调度 |
 | [Checkpoint 与 Runtime 存储](checkpoint.md) | Run/task 身份、证据、恢复和保留策略 |
 | [Self-Learning v6](self_learning.md) | 历史、候选、审核、审批与提升 |
 | [结构化 Run API](run_observability.md) | Python receipt、类型化失败、JSON 与 JSONL |

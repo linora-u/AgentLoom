@@ -4,8 +4,9 @@ Real-LLM validation for the built-in `self_learning` toolset plus Shell and
 file-read implementations. The workflow searches prior Run records, creates a
 memory proposal, creates a generated Skill proposal, and verifies a temporary
 file through actual tool calls.
-Its Application config disables default toolsets and global Skills, so only the
-six tools explicitly named in the Agent YAML are resolved.
+Its Application config disables default toolsets, global Skills, and Todo
+injection, so only the five tools explicitly named in the Agent YAML are
+resolved.
 
 Run it with an isolated runtime because it intentionally writes learning
 records:

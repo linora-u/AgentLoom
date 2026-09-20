@@ -1,9 +1,9 @@
 name: "test_agent"
+agent_runtime: smolagents
 description: |
   测试专用agent，用于调试代码。
 
 model_type: "powerful"
-tool_call_type: "code_act"
 
 workflow: |
   # Directory Inspection Workflow
@@ -29,6 +29,3 @@ worker_agents:
 skills:
   paths:
     - "skills"
-
-execution_env:
-  type: "local"

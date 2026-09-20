@@ -1,6 +1,6 @@
 name: "error_handling"
+agent_runtime: smolagents
 description: "Evaluates error handling robustness: uncaught exceptions, resource leaks, missing null checks, and error propagation patterns."
-tool_call_type: "code_act"
 model_type: "powerful"
 toolsets:
   - "core_shell"

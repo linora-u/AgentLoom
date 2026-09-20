@@ -1,69 +1,115 @@
-"""
-Tests for model_type passthrough chain:
-  model_manager → litellm_model → litellm_retry wrapper
-
-Verifies that _agent_loom_model_type flows correctly through the call chain.
-"""
+"""Model-type metadata from ModelManager to the LiteLLM retry boundary."""
 
 from __future__ import annotations
 
 from unittest.mock import MagicMock, patch
 
-import pytest
+from agentloom.adapters.smolagents.models.model_manager import (
+    ModelConfigBuilder,
+    ModelConfigOverlay,
+    ModelManager,
+)
+from agentloom.adapters.smolagents.models.model_types import (
+    ModelConfig,
+    ModelType,
+    ModelTypeManager,
+)
 
 
-class TestModelTypePassthrough:
-    def test_model_manager_sets_agent_loom_model_type(self):
-        """get_smolagents_model should set _agent_loom_model_type on the model."""
-        from agentloom.adapters.smolagents.models.model_manager import ModelManager
+def _manager_and_config():
+    manager = ModelManager.__new__(ModelManager)
+    manager._model_cache = {}
+    config = ModelConfig(
+        model_id="test-model",
+        adapter="openai_chat",
+        base_url="http://localhost",
+        api_key="test-key",
+        timeout=30,
+        max_tokens=1000,
+        context_window=32000,
+        max_output_tokens=1000,
+        input_token_limit=31000,
+        temperature=0.5,
+        requests_per_minute=10,
+        num_retries=3,
+        retry_delay=1.0,
+        max_retry_delay=60.0,
+        extra_headers=None,
+        context_cache=False,
+        system_prompt_boundary=None,
+        extra_completion_params=None,
+    )
+    return manager, config
 
-        manager = ModelManager.__new__(ModelManager)
-        manager._model_cache = {}
 
-        # Mock get_model_config to return a config-like object
-        mock_config = MagicMock()
-        mock_config.model_id = "test-model"
-        mock_config.base_url = "http://localhost"
-        mock_config.api_key = "test-key"
-        mock_config.timeout = 30
-        mock_config.max_tokens = 1000
-        mock_config.temperature = 0.5
-        mock_config.requests_per_minute = 10
-        mock_config.num_retries = 3
-        mock_config.retry_delay = 1.0
-        mock_config.max_retry_delay = 60.0
-        mock_config.extra_headers = None
-        mock_config.context_cache = False
+def test_model_manager_sets_model_type_on_binding_and_turn_options() -> None:
+    manager, config = _manager_and_config()
 
-        mock_logger = MagicMock()
-        with patch.object(manager, "get_model_config", return_value=mock_config):
-            from agentloom.adapters.smolagents.models.model_types import ModelType
-            model = manager.get_smolagents_model(ModelType.POWERFUL, model_cache=False, logger=mock_logger)
-            assert hasattr(model, "_agent_loom_model_type")
-            assert model._agent_loom_model_type == "powerful"
+    with patch.object(manager, "get_model_config", return_value=config):
+        model = manager.get_smolagents_model(
+            ModelType.POWERFUL,
+            model_cache=False,
+            logger=MagicMock(),
+        )
 
-    def test_litellm_model_passes_model_type_in_kwargs(self):
-        """_prepare_completion_kwargs should include _agent_loom_model_type."""
-        from agentloom.adapters.smolagents.models.litellm_model import LiteLLMModelV2
+    assert model.binding.model_type == "powerful"
+    assert model.binding.options["_agent_loom_model_type"] == "powerful"
 
-        model = LiteLLMModelV2.__new__(LiteLLMModelV2)
-        model.context_cache = False
-        model._agent_loom_model_type = "fast"
 
-        # Mock super()._prepare_completion_kwargs
-        with patch("smolagents.LiteLLMModel._prepare_completion_kwargs", return_value={"model": "test"}):
-            result = model._prepare_completion_kwargs()
-            assert "_agent_loom_model_type" in result
-            assert result["_agent_loom_model_type"] == "fast"
+def test_model_manager_litellm_config_carries_model_type_only_at_bridge_boundary() -> None:
+    manager, config = _manager_and_config()
 
-    def test_missing_model_type_no_error(self):
-        """If _agent_loom_model_type not set, _prepare_completion_kwargs still works."""
-        from agentloom.adapters.smolagents.models.litellm_model import LiteLLMModelV2
+    with patch.object(manager, "get_model_config", return_value=config):
+        ordinary = manager.get_litellm_config(
+            ModelType.POWERFUL,
+            model_cache=False,
+        )
+        bridge = manager.get_smolagents_model(
+            ModelType.POWERFUL,
+            model_cache=False,
+        )
 
-        model = LiteLLMModelV2.__new__(LiteLLMModelV2)
-        model.context_cache = False
-        # Deliberately NOT setting _agent_loom_model_type
+    assert "_agent_loom_model_type" not in ordinary
+    assert bridge.binding.options["_agent_loom_model_type"] == "powerful"
 
-        with patch("smolagents.LiteLLMModel._prepare_completion_kwargs", return_value={"model": "test"}):
-            result = model._prepare_completion_kwargs()
-            assert "_agent_loom_model_type" not in result
+
+def test_model_manager_projects_overlayed_profile_into_cached_binding() -> None:
+    manager, config = _manager_and_config()
+    builder = ModelConfigBuilder().apply_overlay(
+        ModelConfigOverlay(
+            temperature=0.9,
+            context_window=40_000,
+            max_output_tokens=2_000,
+            num_retries=0,
+            extra_headers={"X-Overlay": "yes"},
+            context_cache=True,
+        ),
+        source="test overlay",
+    )
+
+    with patch.object(
+        ModelTypeManager,
+        "get_llm_config",
+        return_value=config,
+    ):
+        first = manager.get_smolagents_model(
+            ModelType.POWERFUL,
+            model_builder=builder,
+        )
+        second = manager.get_smolagents_model(
+            ModelType.POWERFUL,
+            model_builder=builder,
+        )
+
+    assert first is second
+    assert first.model_id == "test-model"
+    assert first.binding.model_type == "powerful"
+    assert first.binding.adapter_id == "openai_chat"
+    assert first.binding.context_window == 40_000
+    assert first.binding.max_output_tokens == 2_000
+    assert first.binding.input_token_limit == 38_000
+    assert first.binding.requests_per_minute == 10
+    assert first.binding.options["temperature"] == 0.9
+    assert first.binding.options["num_retries"] == 0
+    assert first.binding.options["extra_headers"]["X-Overlay"] == "yes"
+    assert first.binding.adapter._context_cache is True

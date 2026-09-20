@@ -8,10 +8,9 @@ ensuring thread-safe concurrent execution (no memory.steps crosstalk).
 from __future__ import annotations
 
 import threading
-from unittest.mock import MagicMock, patch, PropertyMock
+from unittest.mock import MagicMock
 
 import pytest
-
 
 # ─── Helpers ────────────────────────────────────────────────────── #
 
@@ -22,7 +21,7 @@ def _make_minimal_config(concurrency=None):
         "description": "Test worker agent",
         "workflow": "Analyze the input and return a result.",
         "model_type": "powerful",
-        "tool_call_type": "code_act",
+        "agent_runtime": "smolagents",
         "agent_function_schema": {
             "description": "Test tool",
             "inputs": {
@@ -51,19 +50,17 @@ def _create_tool_with_mock_agent(config=None, agent_instances=None):
     if agent_instances is None:
         agent_instances = []
 
-    mock_model = MagicMock(name="shared_model")
+    mock_model_binding = MagicMock(name="shared_model_binding")
 
     class FakeAgent:
         """Lightweight fake that mimics YamlConfiguredAgent enough for agent_as_tool."""
 
         REQUIRED_CONFIG_FIELDS = ["name", "description", "workflow"]
 
-        def __init__(self, config, model=None, execution_env=None, logger=None, **kw):
+        def __init__(self, config, model_binding=None, logger=None, **kw):
             self._config = config
-            self._model = model
-            self.model = model
+            self._model_binding = model_binding
             self.logger = logger
-            self._execution_env = execution_env
             self.name = config["name"]
             self.description = config.get("description", "")
             self._id = id(self)
@@ -88,7 +85,7 @@ def _create_tool_with_mock_agent(config=None, agent_instances=None):
             real = YamlConfiguredAgent.__dict__['agent_as_tool']
             return real(self)
 
-    agent = FakeAgent(config, model=mock_model)
+    agent = FakeAgent(config, model_binding=mock_model_binding)
     tool = agent.agent_as_tool()
     assert tool is not None, "agent_as_tool() returned None"
     return tool, FakeAgent, config
@@ -116,8 +113,8 @@ class TestFactoryMode:
         call_agents = instances[1:]  # skip the setup agent
         assert call_agents[0]._id != call_agents[1]._id
 
-    def test_shared_model_same_instance(self):
-        """All Agent instances should share the same Model object."""
+    def test_shared_model_binding_same_instance(self):
+        """All Agent instances should share the same model binding."""
         instances = []
         tool, _, _ = _create_tool_with_mock_agent(agent_instances=instances)
 
@@ -125,8 +122,7 @@ class TestFactoryMode:
         tool(query="b")
 
         call_agents = instances[1:]
-        # Both should reference the same model
-        assert call_agents[0]._model is call_agents[1]._model
+        assert call_agents[0]._model_binding is call_agents[1]._model_binding
 
     def test_tool_inputs_are_passed_as_additional_args(self):
         """Schema inputs should become executor state, not just prompt text."""
@@ -178,10 +174,8 @@ class TestFactoryMode:
 
             def __init__(self, config, **kw):
                 self._config = config
-                self._model = kw.get("model")
-                self.model = self._model
+                self._model_binding = kw.get("model_binding")
                 self.logger = kw.get("logger")
-                self._execution_env = kw.get("execution_env")
                 self.name = config["name"]
                 self.description = config.get("description", "")
 
@@ -239,12 +233,12 @@ class TestFactoryMode:
         class LargeResultAgent:
             REQUIRED_CONFIG_FIELDS = ["name", "description", "workflow"]
 
-            def __init__(self, config, model=None, execution_env=None, logger=None, **kw):
+            def __init__(self, config, model_binding=None, logger=None, **kw):
                 self._config = config
-                self._model = model or MagicMock(name="model")
-                self.model = self._model
+                self._model_binding = (
+                    model_binding or MagicMock(name="model_binding")
+                )
                 self.logger = logger
-                self._execution_env = execution_env
                 self.name = config["name"]
                 self.description = config.get("description", "")
 

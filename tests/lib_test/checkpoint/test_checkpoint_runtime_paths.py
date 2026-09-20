@@ -9,14 +9,13 @@ import time
 from datetime import UTC, datetime, timedelta
 
 import pytest
-
+from agentloom.runtime import RuntimeHome
 from agentloom.runtime.checkpoint.checkpoint_manager import (
     CheckpointManager,
     cleanup_expired_tasks,
     list_all_tasks,
 )
 from agentloom.runtime.checkpoint.coordinator import CheckpointCoordinator
-from agentloom.runtime import RuntimeHome
 
 
 def _context(tmp_path, *, task_id: str = "task_123", run_id: str = "run_1"):
@@ -86,9 +85,15 @@ def test_checkpoint_payload_records_the_writing_run_id(tmp_path):
         run_id=context.run_id,
     )
 
-    manager.save_supervisor_checkpoint(
+    manager.save_supervisor_runtime_checkpoint(
         context.task_id,
-        memory_steps=[],
+        runtime_checkpoint={
+            "runtime_id": "test",
+            "runtime_version": "1",
+            "state_schema_version": 2,
+            "progress": 0,
+            "payload": {},
+        },
         task_text="search",
         status="interrupted",
     )
@@ -174,7 +179,7 @@ def test_list_all_tasks_does_not_treat_worker_checkpoints_as_tasks(tmp_path):
             "workers": {},
         },
     )
-    manager.save_worker_checkpoint(
+    manager.save_worker_runtime_checkpoint(
         context.task_id,
         "worker_a",
         call_index=0,
@@ -232,7 +237,7 @@ def test_worker_checkpoint_paths_reject_unsafe_worker_names(tmp_path, worker_nam
     )
 
     with pytest.raises(ValueError, match="worker_name"):
-        manager.save_worker_checkpoint(
+        manager.save_worker_runtime_checkpoint(
             context.task_id,
             worker_name,
             call_index=0,
@@ -400,9 +405,15 @@ def test_checkpoint_writes_stay_on_leased_inode_after_task_path_replacement(
     second.prepare_checkpoint()
     first_manager = CheckpointManager("first", checkpoint_dir=first.checkpoint_dir)
     second_manager = CheckpointManager("second", checkpoint_dir=second.checkpoint_dir)
-    second_manager.save_supervisor_checkpoint(
+    second_manager.save_supervisor_runtime_checkpoint(
         second.task_id,
-        memory_steps=[],
+        runtime_checkpoint={
+            "runtime_id": "test",
+            "runtime_version": "1",
+            "state_schema_version": 2,
+            "progress": 0,
+            "payload": {},
+        },
         task_text="second",
         status="failed",
     )
@@ -411,9 +422,15 @@ def test_checkpoint_writes_stay_on_leased_inode_after_task_path_replacement(
     with first_manager.task_lease():
         first.checkpoint_dir.rename(detached)
         first.checkpoint_dir.symlink_to(second.checkpoint_dir, target_is_directory=True)
-        first_manager.save_supervisor_checkpoint(
+        first_manager.save_supervisor_runtime_checkpoint(
             first.task_id,
-            memory_steps=[],
+            runtime_checkpoint={
+                "runtime_id": "test",
+                "runtime_version": "1",
+                "state_schema_version": 2,
+                "progress": 0,
+                "payload": {},
+            },
             task_text="FIRST-SECRET",
             status="interrupted",
         )

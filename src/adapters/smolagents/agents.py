@@ -1,52 +1,51 @@
 """Extensions of the pinned smolagents Agent and native Tool-call protocol."""
 
-import time
-import uuid
+import json
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from contextlib import nullcontext
 from contextvars import copy_context
 from typing import Any
 
+from agentloom.adapters.smolagents.monkey_patch import install_agentloom_runtime_adapters
+from agentloom.adapters.smolagents.tool_proxy import build_smolagents_tool_proxies
+from agentloom.runtime.agent_runtime import require_runtime_state
+from agentloom.runtime.model_protocol import ModelProtocolError
+from agentloom.runtime.tool_gateway import ToolGateway
+from agentloom.runtime.tool_protocol import ToolCallRecord
 from smolagents import (
     AgentAudio,
     AgentGenerationError,
     AgentImage,
     AgentParsingError,
-    CodeAgent,
     LogLevel,
     ToolCallingAgent,
 )
 from smolagents.agents import ToolOutput
 from smolagents.memory import ToolCall
 
-from agentloom.adapters.smolagents.models.tool_call_parser import ToolCallParseError, parse_json_with_repair
-from agentloom.adapters.smolagents.monkey_patch import install_agentloom_runtime_adapters
-from agentloom.adapters.smolagents.tool_argument_coercion import coerce_tool_arguments
-from agentloom.adapters.smolagents.tool_protocol import settle_tool_call
-from agentloom.runtime.invocation import require_successful_runtime_result
-from agentloom.runtime.tool_protocol import ToolCallRecord
-
 # Preserve installation at the first concrete Agent-runtime import, before the
 # mixin is loaded, rather than installing patches during definition inspection.
 install_agentloom_runtime_adapters()
 
-from agentloom.runtime.loom_mixin import LoomAgentMixin  # noqa: E402
+from agentloom.adapters.smolagents.loom_mixin import LoomAgentMixin  # noqa: E402
 
 
-def _normalize_tool_arguments_object(arguments: dict[str, Any] | str) -> dict[str, Any] | str:
-    if not isinstance(arguments, str):
-        return arguments
+def _decode_provider_tool_arguments(arguments: Any) -> dict[str, Any]:
+    """Normalize the provider's native JSON arguments field to one object."""
 
-    parsed: Any = arguments
+    decoded = arguments
     for _ in range(2):
-        if not isinstance(parsed, str):
+        if not isinstance(decoded, str):
             break
         try:
-            parsed = parse_json_with_repair(parsed)
-        except Exception:
-            return arguments
-
-    return parsed if isinstance(parsed, dict) else arguments
+            decoded = json.loads(decoded)
+        except (TypeError, json.JSONDecodeError) as exc:
+            raise ValueError(
+                "Provider Tool arguments must contain a valid JSON object"
+            ) from exc
+    if not isinstance(decoded, dict):
+        raise ValueError("Provider Tool arguments must resolve to an object mapping")
+    return decoded
 
 
 class _SuccessfulRunStateMixin:
@@ -88,43 +87,28 @@ class _SuccessfulRunStateMixin:
             return_full_result=True,
             **kwargs,
         )
-        require_successful_runtime_result(run_result)
-        return run_result if wants_full_result else run_result.output
-
-
-class CodeAgentV2(_SuccessfulRunStateMixin, LoomAgentMixin, CodeAgent):
-    def __init__(
-        self,
-        *args,
-        before_run_callbacks: list | None = None,
-        **kwargs,
-    ):
-        max_tokens = kwargs.pop("max_tokens", None)
-        context_window = kwargs.pop("context_window", None)
-        max_output_tokens = kwargs.pop("max_output_tokens", None)
-        smart_summary = kwargs.pop("smart_summary", True)
-        self._init_loom_agent(
-            before_run_callbacks,
-            max_tokens=max_tokens,
-            context_window=context_window,
-            max_output_tokens=max_output_tokens,
-            smart_summary=smart_summary,
+        require_runtime_state(
+            run_result,
+            allowed_states={"success"},
+            error_prefix="Agent run did not complete successfully",
         )
-        super().__init__(*args, **kwargs)
+        return run_result if wants_full_result else run_result.output
 
 
 class ToolCallingAgentV2(_SuccessfulRunStateMixin, LoomAgentMixin, ToolCallingAgent):
     def __init__(
         self,
         *args,
+        tool_gateway: ToolGateway,
         before_run_callbacks: list | None = None,
         **kwargs,
     ):
-        # Remove all code_act specific kwargs before calling ToolCallingAgent.__init__
-        # ToolCallingAgent does not support these parameters
-        kwargs.pop("executor_type", None)
-        kwargs.pop("executor_kwargs", None)
-
+        if args:
+            raise TypeError(
+                "ToolCallingAgentV2 requires keyword construction with tool_gateway"
+            )
+        self.tool_gateway = tool_gateway
+        kwargs["tools"] = build_smolagents_tool_proxies(tool_gateway)
         max_tokens = kwargs.pop("max_tokens", None)
         context_window = kwargs.pop("context_window", None)
         max_output_tokens = kwargs.pop("max_output_tokens", None)
@@ -146,12 +130,11 @@ class ToolCallingAgentV2(_SuccessfulRunStateMixin, LoomAgentMixin, ToolCallingAg
             with required_call_context:
                 yield from super()._step_stream(memory_step)
         except AgentGenerationError as exc:
-            # LiteLLMModelV2 validates native tool calls at the provider
-            # boundary. A bad tool name is model output, not an infrastructure
-            # or implementation failure, so feed it back as a recoverable
-            # parsing error and let the next ReAct step correct itself.
+            # Protocol-shape failures are model output, not infrastructure
+            # failures. Feed them back as recoverable parsing errors so the
+            # next ReAct step can correct itself.
             cause = exc.__cause__
-            if isinstance(cause, ToolCallParseError):
+            if isinstance(cause, ModelProtocolError):
                 raise AgentParsingError(
                     f"Error while parsing tool call from model output: {cause}",
                     self.logger,
@@ -235,61 +218,20 @@ class ToolCallingAgentV2(_SuccessfulRunStateMixin, LoomAgentMixin, ToolCallingAg
     def execute_tool_call_record(
         self,
         tool_name: str,
-        arguments: dict[str, str] | str,
+        arguments: dict[str, Any],
         *,
-        call_id: str | None = None,
+        call_id: str,
     ) -> ToolCallRecord:
-        """Settle one Tool invocation without exception-based terminal-state transport."""
+        """Route one provider Tool call through AgentLoom's only executor."""
 
-        available_tools = {**self.tools, **self.managed_agents}
-        stable_call_id = call_id or uuid.uuid4().hex
-        if tool_name not in available_tools:
-            return ToolCallRecord.blocked(
-                call_id=stable_call_id,
-                tool_name=tool_name,
-                input=arguments,
-                message=f"Unknown tool {tool_name}, should be one of: {', '.join(available_tools)}.",
-                kind="invalid_arguments",
-                stage="input_validation",
-                started_at=time.time(),
-                ended_at=time.time(),
-            )
-
-        tool = available_tools[tool_name]
-        try:
-            normalized = _normalize_tool_arguments_object(arguments)
-            normalized = self._substitute_state_variables(normalized)
-            normalized = coerce_tool_arguments(tool, normalized)
-        except Exception as error:
-            return ToolCallRecord.blocked(
-                call_id=stable_call_id,
-                tool_name=tool_name,
-                input=arguments,
-                message=str(error) or type(error).__name__,
-                kind="invalid_arguments",
-                stage="input_validation",
-                started_at=time.time(),
-                ended_at=time.time(),
-            )
-
-        return settle_tool_call(
-            tool,
-            normalized,
-            call_id=stable_call_id,
-            sanitize_inputs_outputs=tool_name not in self.managed_agents,
-        )
-
-    def execute_tool_call(
-        self,
-        tool_name: str,
-        arguments: dict[str, str] | str,
-        *,
-        call_id: str | None = None,
-    ) -> Any:
-        """Compatibility interface for callers that need the ordinary Tool value."""
-
-        return self.execute_tool_call_record(
-            tool_name,
-            arguments,
+        if not isinstance(call_id, str) or not call_id:
+            raise ValueError("Provider Tool call_id must be a non-empty string")
+        decoded_arguments = _decode_provider_tool_arguments(arguments)
+        substituted_arguments = self._substitute_state_variables(decoded_arguments)
+        if not isinstance(substituted_arguments, dict):
+            raise ValueError("Provider Tool arguments must resolve to an object mapping")
+        return self.tool_gateway.invoke(
             call_id=call_id,
-        ).direct_result()
+            tool_name=tool_name,
+            arguments=substituted_arguments,
+        )

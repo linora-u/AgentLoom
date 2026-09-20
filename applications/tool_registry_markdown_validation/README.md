@@ -1,9 +1,7 @@
 # Built-in Tool Catalog Markdown Validation
 
-Real-LLM CodeAct validation for explicit toolset replacement and lazy loading
-of the non-default `markdown_report` implementation group. The write and
-read-back run in one model step so Todo bookkeeping cannot interfere with the
-terminal answer.
+Real-LLM structured-tool validation for explicit toolset replacement and lazy
+loading of the non-default `markdown_report` implementation group.
 The Application-level config disables unrelated global Skills; Agent
 `toolsets:` is therefore the complete built-in capability list for this run.
 

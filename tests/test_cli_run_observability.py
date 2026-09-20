@@ -15,7 +15,6 @@ from litellm.exceptions import Timeout
 
 from agentloom.__main__ import main
 from agentloom.application.run import (
-    ApplicationRunBudgetLimited,
     ApplicationRunError,
     ApplicationRunInterrupted,
     RunInfo,
@@ -77,14 +76,12 @@ def test_run_accepts_task_override(monkeypatch: pytest.MonkeyPatch) -> None:
     assert observed["task_override"] == "inspect this repository"
 
 
-def test_text_run_displays_goal_status_and_usage(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_text_run_displays_goal_status(monkeypatch: pytest.MonkeyPatch) -> None:
     def succeed(*_args, **_kwargs):
         return SimpleNamespace(
             output="completed",
             goal={
                 "status": "complete",
-                "used_tokens": 123,
-                "token_budget": None,
             },
         )
 
@@ -93,53 +90,9 @@ def test_text_run_displays_goal_status_and_usage(monkeypatch: pytest.MonkeyPatch
     result = CliRunner().invoke(main, ["run", "unused.yaml"])
 
     assert result.exit_code == 0
-    assert result.stdout == "completed\nGoal: complete | tokens: 123/unlimited\n"
+    assert result.stdout == "completed\nGoal: complete\n"
 
 
-def test_jsonl_budget_limited_event_contains_structured_goal(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    goal = {
-        "status": "budget_limited",
-        "used_tokens": 105,
-        "token_budget": 100,
-        "remaining_tokens": 0,
-    }
-
-    def execute(*_args, event_sink=None, **_kwargs):
-        run = _run_info()
-        event_sink(_event("run.started"))
-        event_sink(
-            _event(
-                "run.budget_limited",
-                error="Goal token budget exhausted",
-                phase="execution",
-                goal=goal,
-            )
-        )
-        raise ApplicationRunBudgetLimited(
-            "Goal token budget exhausted",
-            run=run,
-            phase="execution",
-            original_error=RuntimeError("limited"),
-            goal=goal,
-        )
-
-    monkeypatch.setattr("agentloom.application.runner.execute_app", execute, raising=False)
-
-    result = CliRunner().invoke(
-        main,
-        ["run", "unused.yaml", "--output-format", "jsonl"],
-    )
-
-    assert result.exit_code == 1
-    records = [json.loads(line) for line in result.stdout.splitlines()]
-    assert [record["event"] for record in records] == [
-        "run.started",
-        "run.budget_limited",
-    ]
-    assert records[-1]["goal"] == goal
-    assert "Resume task task_123" in result.stderr
 
 
 def test_python_module_invocation_exposes_run_command() -> None:
@@ -166,9 +119,6 @@ def test_json_run_emits_one_terminal_object_with_structured_goal(
 ) -> None:
     goal = {
         "status": "complete",
-        "used_tokens": 123,
-        "token_budget": None,
-        "remaining_tokens": None,
     }
 
     def execute(*_args, event_sink=None, **_kwargs):

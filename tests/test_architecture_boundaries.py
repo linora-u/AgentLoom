@@ -32,11 +32,7 @@ def test_canonical_modules_own_configuration_and_context_state() -> None:
         with config.bind_config('bound'):
             assert agentloom.get_config() == 'bound'
         assert agentloom.get_config() is sentinel
-        token = invocation.current_worker_memory.set(['worker'])
-        try:
-            assert importlib.import_module('agentloom.runtime.invocation').current_worker_memory.get() == ['worker']
-        finally:
-            invocation.current_worker_memory.reset(token)
+        assert not hasattr(invocation, "current_worker_memory")
     """)
 
 
@@ -89,11 +85,37 @@ def test_definition_inspection_preserves_lazy_engine_patch_installation() -> Non
         assert 'agentloom.runtime.agent' not in sys.modules
         assert not any(name.startswith('agentloom.tools.shell') for name in sys.modules)
 
-        from agentloom.adapters.smolagents.agents import CodeAgentV2, ToolCallingAgentV2
+        from agentloom.adapters.smolagents.agents import ToolCallingAgentV2
         from agentloom.adapters.smolagents import monkey_patch
         from agentloom.runtime.agent import RoleDrivenAgent
-        assert CodeAgentV2.__module__ == 'agentloom.adapters.smolagents.agents'
         assert ToolCallingAgentV2.__module__ == 'agentloom.adapters.smolagents.agents'
         assert RoleDrivenAgent.__module__ == 'agentloom.runtime.agent'
         assert monkey_patch._INSTALLED is True
     """)
+
+
+def test_generic_runtime_modules_do_not_load_smolagents_adapter() -> None:
+    run_fresh("""
+        import sys
+        import agentloom.runtime.logging.levels
+        import agentloom.runtime.logging.logger_manager
+        import agentloom.runtime.migration
+        assert 'smolagents' not in sys.modules
+        assert not any(
+            name == 'agentloom.adapters.smolagents'
+            or name.startswith('agentloom.adapters.smolagents.')
+            for name in sys.modules
+        )
+    """)
+
+
+def test_smolagents_specific_implementations_have_no_generic_runtime_aliases() -> None:
+    legacy_paths = (
+        ROOT / "src/runtime/loom_mixin.py",
+        ROOT / "src/runtime/memory/context_compression.py",
+        ROOT / "src/runtime/logging/agent_logger.py",
+    )
+    assert not any(path.exists() for path in legacy_paths)
+
+    migration_source = (ROOT / "src/runtime/migration.py").read_text(encoding="utf-8")
+    assert "SmolagentsCheckpointCodec" not in migration_source

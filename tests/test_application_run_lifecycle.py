@@ -1,27 +1,39 @@
 from __future__ import annotations
 
-from types import SimpleNamespace
 from unittest.mock import MagicMock, call
 
 import pytest
-
 from agentloom.application.lifecycle import (
     ApplicationRunFinalization,
     ApplicationRunLifecycle,
     ApplicationRunResources,
+)
+from agentloom.runtime.agent_runtime import (
+    AgentRuntimeResult,
+    RuntimeCheckpointEnvelope,
+    RuntimeEvent,
 )
 
 
 def test_lifecycle_defers_agent_checkpoint_until_run_owner_commits() -> None:
     lifecycle = ApplicationRunLifecycle()
     coordinator = MagicMock()
-    runtime_agent = SimpleNamespace(memory=SimpleNamespace(steps=[]))
+    runtime_result = AgentRuntimeResult(
+        state="success",
+        output="done",
+        checkpoint=RuntimeCheckpointEnvelope(
+            runtime_id="smolagents",
+            runtime_version="1.26.0",
+            state_schema_version=1,
+            payload={"memory_steps": []},
+        ),
+    )
     manager = MagicMock()
 
     lifecycle.enter_execution()
     lifecycle.report_agent_invocation(
         coordinator=coordinator,
-        runtime_agent=runtime_agent,
+        runtime_result=runtime_result,
         result="done",
         error=None,
         goal={"status": "complete"},
@@ -36,8 +48,8 @@ def test_lifecycle_defers_agent_checkpoint_until_run_owner_commits() -> None:
         task_id="task-1",
     )
 
-    coordinator.save_supervisor.assert_called_once_with(
-        runtime_agent,
+    coordinator.save_runtime_checkpoint.assert_called_once_with(
+        runtime_result.checkpoint,
         "completed",
         result="done",
         error=None,
@@ -45,16 +57,52 @@ def test_lifecycle_defers_agent_checkpoint_until_run_owner_commits() -> None:
     assert lifecycle.goal == {"status": "complete"}
 
 
+def test_lifecycle_collects_events_returned_only_in_runtime_result() -> None:
+    lifecycle = ApplicationRunLifecycle()
+    event = RuntimeEvent(
+        kind="model",
+        timestamp=1.0,
+        application_id="application",
+        task_id="task",
+        run_id="run",
+        details={"phase": "completed"},
+    )
+
+    lifecycle.enter_execution()
+    lifecycle.report_agent_invocation(
+        coordinator=None,
+        runtime_result=AgentRuntimeResult(
+            state="success",
+            output="done",
+            events=(event,),
+        ),
+        result="done",
+        error=None,
+        goal=None,
+    )
+
+    assert lifecycle.runtime_events_snapshot() == (event,)
+
+
 def test_finalization_failure_replaces_provisional_success_checkpoint() -> None:
     lifecycle = ApplicationRunLifecycle()
     coordinator = MagicMock()
-    runtime_agent = SimpleNamespace(memory=SimpleNamespace(steps=[]))
+    runtime_result = AgentRuntimeResult(
+        state="success",
+        output="done",
+        checkpoint=RuntimeCheckpointEnvelope(
+            runtime_id="smolagents",
+            runtime_version="1.26.0",
+            state_schema_version=1,
+            payload={"memory_steps": []},
+        ),
+    )
     manager = MagicMock()
 
     lifecycle.enter_execution()
     lifecycle.report_agent_invocation(
         coordinator=coordinator,
-        runtime_agent=runtime_agent,
+        runtime_result=runtime_result,
         result="done",
         error=None,
         goal=None,
@@ -72,10 +120,10 @@ def test_finalization_failure_replaces_provisional_success_checkpoint() -> None:
         task_id="task-1",
     )
 
-    assert coordinator.save_supervisor.call_args_list == [
-        call(runtime_agent, "completed", result="done", error=None),
+    assert coordinator.save_runtime_checkpoint.call_args_list == [
+        call(runtime_result.checkpoint, "completed", result="done", error=None),
         call(
-            runtime_agent,
+            runtime_result.checkpoint,
             "failed",
             result=None,
             error="manifest commit failed",
@@ -124,6 +172,7 @@ def test_finalize_run_owns_evidence_manifest_and_success_cleanup(
         "task-1",
         result="done",
         event_start_offset=10,
+        runtime_events=(),
         manifest_updates=manifest_updates,
     )
     runtime_context.update_manifest.assert_called_once()
@@ -148,10 +197,21 @@ def test_terminal_checkpoint_precedes_coordinator_deactivation(monkeypatch) -> N
 
     lifecycle = ApplicationRunLifecycle()
     coordinator = MagicMock()
-    runtime_agent = SimpleNamespace(memory=SimpleNamespace(steps=[]))
+    runtime_result = AgentRuntimeResult(
+        state="success",
+        output="done",
+        checkpoint=RuntimeCheckpointEnvelope(
+            runtime_id="smolagents",
+            runtime_version="1.26.0",
+            state_schema_version=1,
+            payload={"memory_steps": []},
+        ),
+    )
     manager = MagicMock()
     observed: list[str] = []
-    coordinator.save_supervisor.side_effect = lambda *_args, **_kwargs: observed.append("checkpoint")
+    coordinator.save_runtime_checkpoint.side_effect = (
+        lambda *_args, **_kwargs: observed.append("checkpoint")
+    )
     monkeypatch.setattr(
         CheckpointCoordinator,
         "deactivate",
@@ -161,7 +221,7 @@ def test_terminal_checkpoint_precedes_coordinator_deactivation(monkeypatch) -> N
     lifecycle.enter_execution()
     lifecycle.report_agent_invocation(
         coordinator=coordinator,
-        runtime_agent=runtime_agent,
+        runtime_result=runtime_result,
         result="done",
         error=None,
         goal=None,
@@ -193,7 +253,7 @@ def test_checkpoint_resources_close_when_coordinator_deactivation_fails(
     lifecycle.enter_execution()
     lifecycle.report_agent_invocation(
         coordinator=coordinator,
-        runtime_agent=MagicMock(),
+        runtime_result=None,
         result=None,
         error=RuntimeError("agent failed"),
         goal=None,

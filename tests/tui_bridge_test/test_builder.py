@@ -6,16 +6,15 @@ import stat
 from pathlib import Path
 from types import SimpleNamespace
 
-import pytest
-
 import agentloom.tui_bridge.builder as builder_module
+import pytest
 from agentloom.tui_bridge.builder import BuilderService, DraftConflictError
 
 VALID_AGENT_YAML = """\
 name: report_agent
+agent_runtime: smolagents
 description: Build a concise report.
 model_type: powerful
-tool_call_type: tool_call
 workflow: |
   Ask for the report topic, collect the required facts, and return a concise report.
 """
@@ -27,7 +26,14 @@ def _configured_model_catalog(tmp_path: Path) -> None:
     config = tmp_path / "config"
     config.mkdir(exist_ok=True)
     (config / "llm.yaml").write_text(
-        "model:\n  summary:\n    model: openai/test-summary\n  default_model_type: powerful\n  powerful:\n    model: openai/test\n",
+        "model:\n"
+        "  summary:\n"
+        "    model: openai/test-summary\n"
+        "    adapter: openai_chat\n"
+        "  default_model_type: powerful\n"
+        "  powerful:\n"
+        "    model: openai/test\n"
+        "    adapter: openai_chat\n",
         encoding="utf-8",
     )
 
@@ -764,7 +770,7 @@ def test_validation_reports_missing_required_agent_fields(tmp_path: Path) -> Non
     _stage_yaml(
         service,
         "applications/reports/workflows/broken.yaml",
-        "name: broken\n",
+        "name: broken\nagent_runtime: smolagents\n",
     )
 
     result = _validate_draft(service)
@@ -779,7 +785,10 @@ def test_validation_rejects_numeric_description_before_runtime(tmp_path: Path) -
     _stage_yaml(
         service,
         "applications/reports/workflows/broken.yaml",
-        "name: broken\ndescription: 123\nworkflow: do the task\n",
+        "name: broken\n"
+        "agent_runtime: smolagents\n"
+        "description: 123\n"
+        "workflow: do the task\n",
     )
 
     result = _validate_draft(service)
@@ -789,27 +798,19 @@ def test_validation_rejects_numeric_description_before_runtime(tmp_path: Path) -
     assert "description must be a non-empty string" in errors
 
 
-def test_validation_rejects_invalid_execution_environment_before_runtime(tmp_path: Path) -> None:
-    service = BuilderService(tmp_path)
-    _stage_yaml(
-        service,
-        "applications/reports/workflows/broken.yaml",
-        VALID_AGENT_YAML + "execution_env: []\n",
-    )
-
-    result = _validate_draft(service)
-
-    errors = "\n".join(result["errors"])
-    assert result["valid"] is False
-    assert "execution_env must be a dictionary" in errors
-
-
 def test_validation_rejects_runtime_invalid_structure_model_and_worker_reference(
     tmp_path: Path,
 ) -> None:
     (tmp_path / "config").mkdir(exist_ok=True)
     (tmp_path / "config/llm.yaml").write_text(
-        "model:\n  summary:\n    model: openai/test-summary\n  default_model_type: powerful\n  powerful:\n    model: openai/test\n",
+        "model:\n"
+        "  summary:\n"
+        "    model: openai/test-summary\n"
+        "    adapter: openai_chat\n"
+        "  default_model_type: powerful\n"
+        "  powerful:\n"
+        "    model: openai/test\n"
+        "    adapter: openai_chat\n",
         encoding="utf-8",
     )
 
@@ -817,15 +818,13 @@ def test_validation_rejects_runtime_invalid_structure_model_and_worker_reference
     _stage_yaml(
         service,
         "applications/reports/workflows/broken.yaml",
-        VALID_AGENT_YAML.replace("tool_call_type: tool_call", "tool_call_type: unsupported")
-        .replace("model_type: powerful", "model_type: missing-model")
+        VALID_AGENT_YAML.replace("model_type: powerful", "model_type: missing-model")
         + "worker_agents:\n  - path: missing_worker.yaml\n",
     )
     result = _validate_draft(service)
 
     errors = "\n".join(result["errors"])
     assert result["valid"] is False
-    assert "tool_call_type" in errors
     assert "missing-model" in errors
     assert "missing_worker.yaml" in errors
 
@@ -836,6 +835,7 @@ def test_draft_validation_rejects_an_invalid_existing_worker_definition(tmp_path
     worker.write_text(
         """\
 name: broken_worker
+agent_runtime: smolagents
 description: invalid worker
 workflow: do the task
 max_steps: true
@@ -856,6 +856,7 @@ agent_function_schema:
         "applications/reports/workflows/supervisor.yaml",
         """\
 name: supervisor
+agent_runtime: smolagents
 description: delegate
 workflow: delegate the task
 worker_agents:
@@ -898,6 +899,7 @@ def test_draft_validation_rejects_invalid_staged_referenced_worker_definition(
         "applications/reports/workflows/supervisor.yaml",
         """\
 name: supervisor
+agent_runtime: smolagents
 description: delegate
 workflow: delegate the task
 worker_agents:
@@ -909,6 +911,7 @@ worker_agents:
         "applications/reports/workflows/worker_agents/staged_worker.yaml",
         """\
 name: staged_worker
+agent_runtime: smolagents
 description: staged worker
 workflow: do the task
 """

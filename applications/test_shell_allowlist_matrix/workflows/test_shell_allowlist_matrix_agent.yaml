@@ -1,8 +1,8 @@
 name: "test_shell_allowlist_matrix"
+agent_runtime: smolagents
 description: "Validate explicit partial shell allow-list enforcement and audit evidence"
 
 model_type: "powerful"
-tool_call_type: "code_act"
 
 tools:
   - name: "shell_tool"
@@ -21,179 +21,35 @@ shell_settings:
 workflow: |
   # Shell Allow-list Matrix Validation
 
-  You are a testing agent. Execute the harness below in one Python code block.
-  This agent intentionally allows only a small subset of shell commands:
-  cat, echo, grep, ls, printf, pwd, wc. It allows only the "|" and "&&"
-  operators.
+  This Agent intentionally allows only cat, echo, grep, ls, printf, pwd, and
+  wc, plus the `|` and `&&` operators. Use native structured `shell_tool` calls
+  and retain every actual result or error.
 
-  The test only passes if the real shell outputs and current run's audit/shell.jsonl
-  contain the expected evidence. Do not mark PASS from expectation alone.
-
-  ```python
-  import json
-  import os
-
-  rows = {}
-  notes = {}
-
-  def record(name, status, evidence):
-      rows[name] = status
-      notes[name] = evidence
-
-  def expect_success(name, command, expected_text):
-      try:
-          output = shell_tool(command=command, timeout=10)
-          status = "PASS" if expected_text in output else "FAIL"
-          record(name, status, output.strip()[:300])
-      except Exception as exc:
-          record(name, "FAIL", f"unexpected block: {exc}")
-
-  def expect_block(name, command, expected_text):
-      try:
-          output = shell_tool(command=command, timeout=10)
-          record(name, "FAIL", f"expected block, got: {output[:300]}")
-      except Exception as exc:
-          text = str(exc)
-          status = "PASS" if expected_text in text else "FAIL"
-          record(name, status, text)
-
-  expect_success("ALLOW_ECHO", "echo allow_matrix_ok", "allow_matrix_ok")
-  expect_success("ALLOW_PWD", "pwd", "/")
-  expect_success("ALLOW_PIPE_GREP", 'printf "alpha\nbeta\n" | grep beta', "beta")
-  expect_success("ALLOW_PIPE_WC", "echo allow_pipe_marker | wc -c", "18")
-
-  allowed_commands_text = "Allowed commands: cat, echo, grep, ls, printf, pwd, wc"
-  allowed_operators_text = "Allowed operators: &&, |"
-
-  expect_block("BLOCK_DATE", "date", allowed_commands_text)
-  expect_block("BLOCK_WHOAMI", "whoami", allowed_commands_text)
-  expect_block("BLOCK_UNAME", "uname -a", allowed_commands_text)
-  expect_block("BLOCK_SEMICOLON", "echo first ; echo second", allowed_operators_text)
-
-  # Use ls only (no head) so the audit lookup obeys this workflow's allow-list.
-  ls_output = shell_tool(
-      command="ls -dt .agentloom/runs/test_shell_allowlist_matrix/run_*/audit/shell.jsonl",
-      timeout=10,
-  )
-  audit_path = ls_output.strip().splitlines()[0]
-  audit_content = shell_tool(command=f"cat {audit_path}", timeout=10)
-  audit_events = []
-  for line in audit_content.splitlines():
-      try:
-          event = json.loads(line)
-      except json.JSONDecodeError:
-          continue
-      if isinstance(event, dict):
-          audit_events.append(event)
-  print("AUDIT_PATH", audit_path)
-  print(audit_content)
-
-  audit_run_dir = os.path.dirname(os.path.dirname(audit_path))
-  agent_log_path = os.path.join(audit_run_dir, "logs", "runtime.log")
-  same_parent = os.path.isfile(agent_log_path)
-  record(
-      "CO_LOCATION",
-      "PASS" if same_parent else "FAIL",
-      f"audit={audit_path}; agent={agent_log_path}",
-  )
-
-  policy_event = next(
-      (event for event in audit_events if event.get("event_type") == "POLICY_SNAPSHOT"),
-      None,
-  )
-  policy_details = policy_event.get("details", {}) if policy_event else {}
-  policy_ok = (
-      policy_details.get("allowed_commands") == "cat, echo, grep, ls, printf, pwd, wc"
-      and policy_details.get("allowed_operators") == "|, &&"
-      and policy_details.get("command_success_logging") == "false"
-  )
-  record(
-      "POLICY_SNAPSHOT",
-      "PASS" if policy_ok else "FAIL",
-      json.dumps(policy_event, ensure_ascii=False) if policy_event else "missing event",
-  )
-
-  def rejection(command):
-      return next(
-          (
-              event
-              for event in audit_events
-              if event.get("event_type") == "WHITELIST_REJECT"
-              and event.get("command") == command
-          ),
-          None,
-      )
-
-  for name, command, suggestion_key in [
-      ("AUDIT_DATE", "date", "allowed_commands"),
-      ("AUDIT_WHOAMI", "whoami", "allowed_commands"),
-      ("AUDIT_UNAME", "uname -a", "allowed_commands"),
-      ("AUDIT_SEMICOLON", "echo first ; echo second", "allowed_operators"),
-  ]:
-      event = rejection(command)
-      suggestion = str((event or {}).get("suggestion", ""))
-      record(
-          name,
-          "PASS" if event and suggestion_key in suggestion else "FAIL",
-          json.dumps(event, ensure_ascii=False) if event else "missing event",
-      )
-
-  semicolon_event = rejection("echo first ; echo second")
-  semicolon_suggestion = str((semicolon_event or {}).get("suggestion", ""))
-  record(
-      "NO_OPERATOR_COMMAND_SUGGESTION",
-      "PASS"
-      if semicolon_event and "allowed_commands" not in semicolon_suggestion
-      else "FAIL",
-      semicolon_suggestion or "missing event",
-  )
-  record(
-      "NO_SUCCESS_SPAM",
-      "PASS"
-      if not any(event.get("event_type") == "COMMAND_SUCCESS" for event in audit_events)
-      else "FAIL",
-      "COMMAND_SUCCESS absent because log_success=false",
-  )
-
-  ordered = [
-      "ALLOW_ECHO",
-      "ALLOW_PWD",
-      "ALLOW_PIPE_GREP",
-      "ALLOW_PIPE_WC",
-      "BLOCK_DATE",
-      "BLOCK_WHOAMI",
-      "BLOCK_UNAME",
-      "BLOCK_SEMICOLON",
-      "POLICY_SNAPSHOT",
-      "AUDIT_DATE",
-      "AUDIT_WHOAMI",
-      "AUDIT_UNAME",
-      "AUDIT_SEMICOLON",
-      "NO_OPERATOR_COMMAND_SUGGESTION",
-      "NO_SUCCESS_SPAM",
-      "CO_LOCATION",
-  ]
-  overall = "PASS" if all(rows.get(name) == "PASS" for name in ordered) else "FAIL"
-
-  summary_lines = [
-      f"Overall: {overall}",
-      f"shell.jsonl: {audit_path}",
-      f"runtime.log: {agent_log_path}",
-      f"allowed commands evidence: {allowed_commands_text}",
-      f"allowed operators evidence: {allowed_operators_text}",
-      "",
-      "| Check | Status | Evidence |",
-      "|---|---|---|",
-  ]
-  for name in ordered:
-      summary_lines.append(f"| {name} | {rows.get(name, 'FAIL')} | {notes.get(name, 'missing')} |")
-  summary = "\n".join(summary_lines)
-  print(summary)
-  final_answer(summary)
-  ```
+  1. Run these allowed commands once each and require the stated evidence:
+     - `echo allow_matrix_ok` contains `allow_matrix_ok`.
+     - `pwd` returns an absolute path.
+     - `printf "alpha\nbeta\n" | grep beta` contains `beta`.
+     - `echo allow_pipe_marker | wc -c` contains `18`.
+  2. Attempt these blocked commands once each:
+     - `date`, `whoami`, and `uname -a` must report
+       `Allowed commands: cat, echo, grep, ls, printf, pwd, wc`.
+     - `echo first ; echo second` must report `Allowed operators: &&, |`.
+  3. Locate the current audit with
+     `ls -dt .agentloom/runs/test_shell_allowlist_matrix/run_*/audit/shell.jsonl`
+     and use the first returned path. Read it with `cat`.
+  4. Parse every valid JSON line. Require one `POLICY_SNAPSHOT` whose details
+     contain the exact allowed command list, `allowed_operators="|, &&"`, and
+     `command_success_logging="false"`.
+  5. Require one `WHITELIST_REJECT` for each blocked command. Command rejects
+     must suggest `allowed_commands`; the semicolon reject must suggest
+     `allowed_operators` and must not suggest `allowed_commands`.
+  6. Require that no event has `event_type=COMMAND_SUCCESS`.
+  7. Derive the sibling `logs/runtime.log` path and call `ls` on that exact path
+     to prove co-location.
+  8. Call `final_answer` with the audit path, runtime log path, policy evidence,
+     and PASS/FAIL rows for all 16 named checks from the commands and audit
+     events. Overall is PASS only when every row is proven by actual evidence.
+     Never mark PASS from expectation alone.
 
 worker_agents: []
 max_steps: 24
-
-execution_env:
-  type: "local"

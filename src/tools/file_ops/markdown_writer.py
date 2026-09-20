@@ -2,28 +2,19 @@
 Markdown file writer tools for AI agents.
 
 Problem solved:
-    When a CodeAgent generates Python code to write long Markdown content,
-    the LLM often produces syntactically invalid Python due to complex string
-    escaping issues (unmatched quotes, missing '+' in concatenation, special
-    characters like em-dash, pipe, arrow, etc.). This causes ast.parse() to
-    fail with SyntaxError before the code can even execute.
+    Long Markdown content is awkward to transport through structured tool
+    arguments because quoting, escaping, tables, and other punctuation can
+    easily be malformed.
 
 Solution:
     Provide structured APIs that accept simple data structures (lists of dicts)
-    instead of requiring the LLM to embed raw Markdown in Python string literals.
-    The tool handles all formatting internally.
+    or encoded raw content. The tool handles formatting and file output.
 
     Three complementary approaches:
     1. write_markdown_file       - structured sections (heading + body dicts)
     2. write_markdown_file_raw   - base64 encoded content (zero escaping issues)
     3. append_markdown_sections  - incremental building across multiple LLM steps
 
-References:
-    - smolagents CodeAgent: LLM generates Python -> ast.parse() -> evaluate_ast()
-    - The SyntaxError happens at ast.parse() level, not at runtime string level
-    - Real failure case from logs:
-        "# 补充信息需求报告\\n\\n"     ^
-        Error: invalid syntax. Perhaps you forgot a comma?
 """
 
 import base64
@@ -47,12 +38,11 @@ def write_markdown_file(
     """
     Write a structured Markdown file from sections data.
 
-    This tool creates a Markdown file from structured section data, avoiding
-    the need for LLM to construct complex Markdown strings in Python code.
+    This tool creates a Markdown file from structured section data.
     Each section is a dict with 'heading', 'level', and 'body' keys.
 
-    This is the PREFERRED way for AI agents to write Markdown reports, as it
-    eliminates Python string escaping issues that cause SyntaxError in CodeAgent.
+    This is the preferred way for AI agents to write Markdown reports because
+    it keeps long-form content in structured tool arguments.
 
     Args:
         file_path: The absolute or relative path where the Markdown file should be created.

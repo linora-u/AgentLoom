@@ -17,13 +17,13 @@ from agentloom.application.validation import (
 )
 from agentloom.runtime.goal import normalize_goal_config
 
-REQUIRED_YAML_FIELDS = ("name", "workflow", "description")
+REQUIRED_YAML_FIELDS = ("name", "agent_runtime", "workflow", "description")
 
 
 def validate_required_yaml_fields(config: dict, yaml_path: Path | str) -> None:
     missing: list[str] = []
     invalid: list[str] = []
-    for field in ("name", "description"):
+    for field in ("name", "agent_runtime", "description"):
         value = config.get(field)
         if value is None or (isinstance(value, str) and not value.strip()):
             missing.append(field)
@@ -62,16 +62,12 @@ def validate_runtime_agent_config(
     agent_root: Path | str,
 ) -> None:
     AgentConfigNormalizer.validate_removed_fields(config)
+    AgentConfigNormalizer.validate_agent_runtime_config(config)
     validate_required_yaml_fields(config, yaml_path)
     AgentConfigNormalizer.validate_runtime_tool_references(config)
     AgentConfigNormalizer.validate_workflow_config(config)
     AgentConfigNormalizer.validate_skills_config(config)
     AgentConfigNormalizer.validate_max_steps_config(config)
-    AgentConfigNormalizer.validate_tool_call_type_config(
-        config,
-        default_tool_call_type="tool_call",
-        allowed_tool_call_types=("tool_call", "code_act"),
-    )
     AgentConfigNormalizer.validate_agent_function_schema(config)
     AgentConfigNormalizer.validate_worker_agents_config(config.get("worker_agents", []))
     validate_todo_config(config, source=str(yaml_path))

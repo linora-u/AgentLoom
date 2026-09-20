@@ -1,5 +1,5 @@
 """
-Tests for agentloom.runtime.checkpoint.conversation_recovery.
+Tests for the smolagents-owned conversation recovery pipeline.
 
 Covers:
 - filter_unresolved_tool_uses: normal, boundary, edge cases
@@ -11,11 +11,10 @@ Covers:
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Any, Optional
+from typing import Any
 
 import pytest
-
-from agentloom.runtime.checkpoint.conversation_recovery import (
+from agentloom.adapters.smolagents.conversation_recovery import (
     TurnInterruptionState,
     detect_turn_interruption,
     filter_empty_steps,
@@ -23,6 +22,7 @@ from agentloom.runtime.checkpoint.conversation_recovery import (
     filter_unresolved_tool_uses,
     prepare_steps_for_resume,
 )
+from smolagents.agents import AgentParsingError
 
 # ---------------------------------------------------------------------------
 # Lightweight step stubs — avoid heavy smolagents import for unit tests.
@@ -33,10 +33,11 @@ from agentloom.runtime.checkpoint.conversation_recovery import (
 @dataclass
 class _FakeActionStep:
     """Minimal ActionStep stub."""
-    tool_calls: Optional[list[dict[str, Any]]] = None
-    observations: Optional[str] = None
-    model_output: Optional[str] = None
-    action_output: Optional[str] = None
+    tool_calls: list[dict[str, Any]] | None = None
+    observations: str | None = None
+    model_output: str | None = None
+    action_output: str | None = None
+    error: Exception | None = None
     is_final_answer: bool = False
     step_number: int = 0
 
@@ -487,3 +488,40 @@ class TestPrepareStepsForResume:
         assert len(cleaned) == 1
         # Has no observations → interrupted_turn
         assert interruption.kind == "interrupted_turn"
+
+    @pytest.mark.parametrize(
+        ("tool_calls", "model_output", "message"),
+        [
+            ([{"name": "broken"}], None, "invalid arguments"),
+            (None, "invalid assistant text", "native tool call required"),
+            (None, None, "provider response rejected"),
+        ],
+    )
+    def test_error_feedback_steps_survive_resume_cleanup(
+        self,
+        tool_calls,
+        model_output,
+        message,
+    ):
+        logger = type(
+            "Logger",
+            (),
+            {"log_error": lambda self, text: None},
+        )()
+        step = _FakeActionStep(
+            tool_calls=tool_calls,
+            model_output=model_output,
+            error=AgentParsingError(message, logger),
+        )
+        cleaned, interruption = prepare_steps_for_resume([step])
+
+        assert cleaned == [step]
+        assert interruption.kind == "none"
+
+    def test_arbitrary_error_does_not_turn_an_empty_step_into_feedback(self):
+        step = _FakeActionStep(error=RuntimeError("not model-correctable"))
+
+        cleaned, interruption = prepare_steps_for_resume([step])
+
+        assert cleaned == []
+        assert interruption.kind == "none"

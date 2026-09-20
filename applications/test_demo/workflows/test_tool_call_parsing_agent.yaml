@@ -1,9 +1,9 @@
 name: "test_tool_call_parsing"
+agent_runtime: smolagents
 description: |
   Test agent for validating strict AgentLoom tool-call parsing behavior.
 
 model_type: "powerful"
-tool_call_type: "tool_call"
 max_steps: 4
 
 workflow: |

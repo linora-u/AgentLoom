@@ -1,10 +1,10 @@
 name: "file_processor"
+agent_runtime: smolagents
 description: |
   Worker agent for checkpoint integration test.
   Reads input files from a directory and produces a merged output.
 
 model_type: "powerful"
-tool_call_type: "code_act"
 
 workflow: |
   # File Processor Worker
@@ -32,6 +32,3 @@ tools:
 
 worker_agents: []
 max_steps: 10
-
-execution_env:
-  type: "local"

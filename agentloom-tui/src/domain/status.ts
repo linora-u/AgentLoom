@@ -5,7 +5,6 @@ export const runtimeStatuses = [
   "never_run",
   "running",
   "completed",
-  "budget_limited",
   "interrupted",
   "failed",
   "crashed",
@@ -23,7 +22,6 @@ const runtimeStatusAliases: Readonly<Record<string, RuntimeStatus>> = {
   succeeded: "completed",
   success: "completed",
   cached: "completed",
-  budget_limited: "budget_limited",
   interrupted: "interrupted",
   cancelled: "interrupted",
   canceled: "interrupted",
@@ -44,5 +42,5 @@ export function runtimeStatus(value: string): ObservedRuntimeStatus {
 }
 
 export function isProblemRuntimeStatus(value: string): boolean {
-  return ["budget_limited", "interrupted", "failed", "crashed", "unknown"].includes(runtimeStatus(value))
+  return ["interrupted", "failed", "crashed", "unknown"].includes(runtimeStatus(value))
 }

@@ -1,61 +1,27 @@
-# Goal Mode Validation Application
+# Goal Mode validation
 
-This Application exercises Goal Mode with real model and Worker calls against the
-current AgentLoom checkout. Generated reports go to ignored `outputs/`; durable
-Goal evidence lives in `.agentloom/runs` and `.agentloom/checkpoints`.
+These Applications exercise persistent objectives, Worker delegation, explicit
+completion, and checkpoint resume. Goal has no cost or token budget.
 
-## Scenarios
+| Workflow | Coverage |
+|---|---|
+| `goal_workflow_list_agent.yaml` | Numbered workflow list, four Workers, report verification, explicit completion |
+| `goal_parallel_agent.yaml` | Six parallel Workers, Goal-bound report reuse, explicit completion |
+| `goal_unlimited_endurance_agent.yaml` | Sixteen specialist audits and synthesis across continuation segments |
 
-| Workflow | Goal config | Purpose | Expected first outcome |
-|---|---|---|---|
-| `goal_unlimited_endurance_agent.yaml` | `goal: true` | 16 sequential specialist audits plus synthesis; intended 30-minute-class validation | `complete` |
-| `goal_bounded_list_agent.yaml` | mapping, 600000 tokens | workflow list merged into one context, Worker accounting, explicit completion | `complete` |
-| `goal_parallel_budget_agent.yaml` | mapping, 50000 tokens | six parallel Worker calls cross a shared soft budget | `budget_limited` |
-
-Only the endurance scenario is unlimited. The other Applications set explicit
-limits. Goal configuration appears only in Supervisor YAML; every Worker omits the
-key entirely.
-
-## Validation commands
+Run through the public Application entrypoint:
 
 ```bash
-uv run python agentloom-framework-skill/scripts/validate_application_yaml.py \
-  --app-root applications/goal_mode_validation
-
-uv run loom run \
-  applications/goal_mode_validation/workflows/goal_bounded_list_agent.yaml \
-  --output-format jsonl
-
-uv run loom run \
-  applications/goal_mode_validation/workflows/goal_parallel_budget_agent.yaml \
-  --output-format jsonl
+uv run loom run applications/goal_mode_validation/workflows/goal_workflow_list_agent.yaml
+uv run loom run applications/goal_mode_validation/workflows/goal_parallel_agent.yaml
 ```
 
-The parallel run should exit `1` with `run.budget_limited`. Record its `task_id`,
-then either increase `token_budget` above `used_tokens` or remove the field and run:
+Every successful run must have a completed Goal with evidence, persisted report
+markers, and completed Worker calls. Interrupted work resumes with `--resume
+<task_id>`; completed reports are reused for the same Goal. Legacy `token_budget`
+is silently ignored, including on resume. Ordinary model usage remains audited.
 
-```bash
-uv run loom run \
-  applications/goal_mode_validation/workflows/goal_parallel_budget_agent.yaml \
-  --resume <task_id> --output-format jsonl
-```
-
-Resume must retain the same `task_id`, create a new `run_id`, avoid rerunning the
-batch, and finish with the existing cumulative usage. An unchanged exhausted
-budget must remain `budget_limited`.
-
-For the long validation:
-
-```bash
-uv run loom run \
-  applications/goal_mode_validation/workflows/goal_unlimited_endurance_agent.yaml \
-  --output-format jsonl
-```
-
-After every run inspect `manifest.json`, `audit/goal.json`, runtime log, task
-events, Worker call checkpoints, and the report under this Application's
-`outputs/`. A successful Goal must contain non-empty completion evidence; a
-budget-limited Goal must retain its task checkpoint.
+The following results predate budget removal and are historical evidence only.
 
 ## Recorded real-model acceptance run
 

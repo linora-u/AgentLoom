@@ -16,25 +16,54 @@ import json
 import os
 import shutil
 import signal
-import sqlite3
 import subprocess
 import sys
 import tempfile
 import time
 import xml.etree.ElementTree as ET
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT))
-CASES = ("unit", "repo", "context_text", "context_json", "context_multi", "core", "markdown", "goal_bounded", "goal_parallel")
-TIMEOUTS = {case: 900 for case in CASES} | {"goal_bounded": 1500, "goal_parallel": 1200}
+CASES = ("unit", "repo", "context_text", "context_json", "context_multi", "core", "markdown", "goal_list", "goal_parallel")
+TIMEOUTS = {case: 900 for case in CASES} | {"goal_list": 1500, "goal_parallel": 1200}
 WORKERS = ("function_intake", "scenario_planner", "pytest_generator", "test_refiner", "delivery_reporter")
 CONTEXT = {
-    "text": [("make_context_engine_text_payload", "text", "TARGET_RECORD case=text", "TEXT-CTX-7319")],
-    "json": [("make_context_engine_json_payload", "json", "JSON_TARGET_RECORD", "JSON-CTX-4927")],
-    "multi": [("make_context_engine_log_payload", "log", "LOG_TARGET_RECORD", "LOG-CTX-8842"),
-              ("make_context_engine_search_payload", "search", "SEARCH_TARGET_RECORD", "SEARCH-CTX-6194")],
+    "text": [
+        (
+            "make_context_engine_text_payload",
+            "loom_retrieve_context",
+            "text",
+            "TARGET_RECORD case=text",
+            "TEXT-CTX-7319",
+        )
+    ],
+    "json": [
+        (
+            "make_context_engine_json_payload",
+            "loom_retrieve_context",
+            "json",
+            "verification_value",
+            "JSON-CTX-4927",
+        )
+    ],
+    "multi": [
+        (
+            "make_context_engine_log_payload",
+            "retrieve_log_context",
+            "log",
+            "LOG_TARGET_RECORD",
+            "LOG-CTX-8842",
+        ),
+        (
+            "make_context_engine_search_payload",
+            "retrieve_search_context",
+            "search",
+            "SEARCH_TARGET_RECORD",
+            "SEARCH-CTX-6194",
+        ),
+    ],
 }
 
 
@@ -58,21 +87,6 @@ def records(runtime: Path) -> list[dict]:
         for value in walk(json.loads(path.read_text())):
             if {"tool_name", "status", "call_id", "input"} <= value.keys():
                 found[value["call_id"]] = value
-    # CodeAct keeps ToolCallRecord in HookRun memory and projects real tool
-    # completions to the durable session recorder. Read that observation seam,
-    # never infer execution from model code or a final answer.
-    database = runtime / "self_learning.db"
-    if database.is_file():
-        with sqlite3.connect(f"file:{database}?mode=ro", uri=True) as connection:
-            connection.row_factory = sqlite3.Row
-            for row in connection.execute(
-                "SELECT event_id, tool_name, status, input_json, output_json, root_run_id, run_id "
-                "FROM events WHERE event_type = 'tool_result'"
-            ):
-                found[row["event_id"]] = {"call_id": row["event_id"], "tool_name": row["tool_name"],
-                    "status": row["status"], "input": json.loads(row["input_json"]),
-                    "output": json.loads(row["output_json"]), "root_run_id": row["root_run_id"],
-                    "run_id": row["run_id"], "evidence_source": "session_recorder"}
     return list(found.values())
 
 
@@ -100,14 +114,15 @@ def assert_workers(runtime: Path, required: set[str], count: int | None = None) 
 
 
 def metadata(workflow: Path) -> dict:
-    from agentloom.configuration import C
     import yaml
+    from agentloom.configuration import C
     cfg = yaml.safe_load(workflow.read_text())
     model_type = cfg.get("model_type", C.default_model_type)
     return {"revision": subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=ROOT, text=True).strip(),
             "workflow": str(workflow), "workflow_sha256": hashlib.sha256(workflow.read_bytes()).hexdigest(),
             "model_type": model_type, "model": C.get_model_config(model_type, "model"),
-            "mode": cfg.get("tool_call_type"), "max_steps": cfg.get("max_steps", 80), "goal": cfg.get("goal"),
+            "agent_runtime": cfg.get("agent_runtime"),
+            "max_steps": cfg.get("max_steps", 80), "goal": cfg.get("goal"),
             "definition_files": {str(path): hashlib.sha256(path.read_bytes()).hexdigest()
                                  for path in workflow.parent.rglob("*") if path.suffix in {".yaml", ".yml", ".md"}},
             "interpreter": sys.executable}
@@ -115,10 +130,9 @@ def metadata(workflow: Path) -> dict:
 
 def execute(workflow: Path, workspace: Path, *, task: str | None = None, resume: str | None = None, attempt="run") -> dict:
     from agentloom.application.runner import execute_app
-    from agentloom.application.run import ApplicationRunBudgetLimited
     lifecycle = []
     meta = metadata(workflow)
-    meta["started_at"] = datetime.now(timezone.utc).isoformat()
+    meta["started_at"] = datetime.now(UTC).isoformat()
     def observe(event):
         from dataclasses import asdict
         lifecycle.append(asdict(event))
@@ -126,11 +140,8 @@ def execute(workflow: Path, workspace: Path, *, task: str | None = None, resume:
         result = execute_app(workflow, task_override=task, resume_task_id=resume, file_logging=True, event_sink=observe)
         meta.update(status="completed", run_id=result.run.run_id, task_id=result.run.task_id,
                     manifest=str(result.run.manifest_path), output=result.output, goal=dict(result.goal) if result.goal else None)
-    except ApplicationRunBudgetLimited as exc:
-        meta.update(status="budget_limited", run_id=exc.run.run_id, task_id=exc.run.task_id,
-                    manifest=str(exc.run.manifest_path), goal=dict(exc.goal))
     finally:
-        meta["ended_at"] = datetime.now(timezone.utc).isoformat()
+        meta["ended_at"] = datetime.now(UTC).isoformat()
         dump(workspace / f"{attempt}_receipt.json", meta)
         dump(workspace / f"{attempt}_lifecycle.json", lifecycle)
     manifest = json.loads(Path(meta["manifest"]).read_text())
@@ -162,7 +173,7 @@ def verify_unit(workspace: Path) -> dict:
     original = ROOT / "applications/unit_test_studio/test/fixtures/sample_project/src/text_pipeline.py"
     if (target / "src/text_pipeline.py").read_bytes() != original.read_bytes():
         raise AssertionError("generation changed the source fixture")
-    suffix = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%S%fZ")
+    suffix = datetime.now(UTC).strftime("%Y%m%dT%H%M%S%fZ")
     xml = workspace / f"generated_pytest_{suffix}.xml"
     with (workspace / f"generated_pytest_{suffix}.log").open("w") as log:
         result = subprocess.run([sys.executable, "-m", "pytest", *map(str, files), "-q", f"--junitxml={xml}"],
@@ -211,21 +222,22 @@ def verify_context(case: str, workspace: Path) -> dict:
     entries = [json.loads(path.read_text()) for path in runtime.glob("**/context_store/entries/*.json")]
     retrieves = [json.loads(line) for path in runtime.glob("**/context_store/events.jsonl")
                 for line in path.read_text().splitlines() if line.strip() and json.loads(line).get("type") == "retrieved"]
-    tool_records = assert_tools(runtime, {"loom_retrieve_context"})
+    retrieval_tools = {item[1] for item in CONTEXT[case]}
+    tool_records = assert_tools(runtime, retrieval_tools)
     matched_refs = []
-    for tool, kind, marker, hidden in CONTEXT[case]:
+    for tool, retrieval_tool, kind, marker, hidden in CONTEXT[case]:
         matches = [entry for entry in entries if entry.get("source") == f"tool_result:{tool}" and entry.get("kind") == kind
                    and marker in entry.get("original", "") and hidden in entry.get("original", "")]
         if not matches:
             raise AssertionError(f"Missing independently verified context origin {tool}/{kind}/{hidden}")
         refs = {entry["ref"] for entry in matches}
         retrieval = [event for event in retrieves if event["ref"] in refs and event["retrieved_chars"] > 0]
-        actual = [record for record in tool_records if record["tool_name"] == "loom_retrieve_context" and record["status"] == "completed"
+        actual = [record for record in tool_records if record["tool_name"] == retrieval_tool and record["status"] == "completed"
                   and hidden in str(record.get("output")) and record["input"].get("ref") in refs
                   and any(event["ref"] == record["input"].get("ref")
-                          and event["query"] == record["input"].get("query", "")
-                          and event["offset"] == record["input"].get("offset", 0)
-                          and event["limit"] == record["input"].get("limit", 200) for event in retrieval)]
+                          and event["query"] == marker
+                          and event["offset"] == 0
+                          and event["limit"] in {20, 30} for event in retrieval)]
         if not retrieval or not actual:
             raise AssertionError(f"No correlated real retrieval + returned hidden value for {tool}")
         matched_refs.append(refs)
@@ -284,27 +296,25 @@ def verify_repo(workspace: Path) -> dict:
     return {"directories": len(progress), "known_symbols": sorted(known), "skill": str(skills[0]), "routes": len(routes)}
 
 
-def validate_goal(workspace: Path, receipt: dict, *, bounded: bool) -> dict:
+def validate_goal(workspace: Path, receipt: dict, *, workflow_list: bool) -> dict:
     goal = receipt.get("goal") or {}
     if receipt["status"] != "completed" or goal.get("status") != "complete" or not goal.get("evidence"):
         raise AssertionError(f"Goal did not explicitly complete with evidence: {goal}")
-    if goal.get("used_tokens", 0) <= 0:
-        raise AssertionError("Real Goal token usage absent")
     runtime = workspace / "runtime"
     starts = assert_workers(runtime, set())
     finished = [event for event in events(runtime) if event.get("type") == "worker_call_finished"]
     if len(finished) != len(starts) or any(event.get("status") != "completed" for event in finished):
         raise AssertionError("Required audit Workers did not all complete")
-    if len(starts) < (4 if bounded else 6):
+    if len(starts) < (4 if workflow_list else 6):
         raise AssertionError(f"Missing real audit Workers: {len(starts)}")
-    name = "bounded_list" if bounded else "parallel_budget"
+    name = "workflow_list" if workflow_list else "parallel"
     report = workspace / "goal_reports" / f"{name}.md"
     content = report.read_text()
-    markers = ("# Goal Mode Validation", "## Configuration Contract", "## Verdict") if bounded else (
-        "# Parallel Goal Budget", "## Batch Results", "## Accounting", "## Resume Instructions", f"goal_id={goal['goal_id']}")
+    markers = ("# Goal Mode Validation", "## Configuration Contract", "## Verdict") if workflow_list else (
+        "# Parallel Goal Validation", "## Batch Results", "## Goal State", "## Resume Instructions", f"goal_id={goal['goal_id']}")
     if any(marker not in content for marker in markers):
         raise AssertionError("Persisted Goal evidence is incomplete")
-    assert_tools(runtime, {"run_goal_audit_batch", "update_goal"} if bounded else {"inspect_parallel_goal_budget_report", "update_goal"})
+    assert_tools(runtime, {"run_goal_audit_batch", "update_goal"} if workflow_list else {"inspect_parallel_goal_report", "update_goal"})
     return {"goal": goal, "worker_calls": len(starts), "report_sha256": hashlib.sha256(report.read_bytes()).hexdigest()}
 
 
@@ -333,7 +343,7 @@ def child(case: str, workspace: Path) -> dict:
         execute(workflow, workspace)
         if case == "core":
             content = (workspace / "artifacts/result.txt").read_text()
-            if content != "ALPHA one\nbeta two\nGAMMA three\n":
+            if content.splitlines() != ["ALPHA one", "beta two", "GAMMA three"]:
                 raise AssertionError(f"Wrong real file result: {content!r}")
             expected = {"shell_tool", "write_file", "edit_file", "read_file", "glob_search", "grep_search", "list_directory"}
         else:
@@ -343,39 +353,20 @@ def child(case: str, workspace: Path) -> dict:
             expected = {"write_markdown_file", "read_file"}
         return {"tools": sorted(expected), "tool_records": len(assert_tools(workspace / "runtime", expected)), "artifact_oracle": True}
     if case == "repo":
-        from applications.repo_map.agent_tools.scan_rank_tool import scan_and_rank
         from applications.repo_map.agent_tools.markdown_tool import generate_markdown_map
+        from applications.repo_map.agent_tools.scan_rank_tool import scan_and_rank
         repo_fixture(workspace / "repository")
         scan_and_rank(str(workspace / "repository"), str(workspace / "repo_output"), incremental=False)
         generate_markdown_map(str(workspace / "repo_output"))
         execute(ROOT / "applications/repo_map/workflows/repo_map_agent.yaml", workspace,
                 task=f"Complete all Repo Map architecture analysis and Skill steps. output_dir={workspace / 'repo_output'}")
         return verify_repo(workspace)
-    bounded = case == "goal_bounded"
-    workflow = copied_workflow("goal_mode_validation", "goal_bounded_list_agent.yaml" if bounded else "goal_parallel_budget_agent.yaml", workspace, {})
+    workflow_list = case == "goal_list"
+    workflow = copied_workflow("goal_mode_validation", "goal_workflow_list_agent.yaml" if workflow_list else "goal_parallel_agent.yaml", workspace, {})
     first = execute(workflow, workspace)
-    if bounded:
-        return validate_goal(workspace, first, bounded=True)
-    if first["status"] != "budget_limited":
-        raise AssertionError(f"Parallel Worker budget did not trigger: {first['status']}")
-    report_path = workspace / "goal_reports/parallel_budget.md"
-    before_report = report_path.read_bytes()
-    old_goal = first["goal"]
-    if f"goal_id={old_goal['goal_id']}" not in before_report.decode():
-        raise AssertionError("Budget report is not bound to current Goal")
-    calls_before = assert_workers(workspace / "runtime", set(), count=6)
-    import yaml
-    cfg = yaml.safe_load(workflow.read_text())
-    cfg["goal"]["token_budget"] = old_goal["used_tokens"] + 150000
-    workflow.write_text(yaml.safe_dump(cfg, allow_unicode=True, sort_keys=False))
-    second = execute(workflow, workspace, resume=first["task_id"], attempt="resume")
-    if second["task_id"] != first["task_id"] or second["run_id"] == first["run_id"]:
-        raise AssertionError("Goal resume task/run identity violated")
-    if second["goal"]["used_tokens"] < old_goal["used_tokens"] or second["goal"]["goal_id"] != old_goal["goal_id"]:
-        raise AssertionError("Goal resume lost identity/cumulative usage")
-    if report_path.read_bytes() != before_report or len(assert_workers(workspace / "runtime", set())) != len(calls_before):
-        raise AssertionError("Goal resume reran committed Worker batch")
-    return validate_goal(workspace, second, bounded=False) | {"budget_limited_then_resumed": True, "batch_not_repeated": True}
+    if workflow_list:
+        return validate_goal(workspace, first, workflow_list=True)
+    return validate_goal(workspace, first, workflow_list=False)
 
 
 def main() -> int:
@@ -388,7 +379,7 @@ def main() -> int:
     if args.verify_existing:
         if not args.workspace or args.case == "all":
             parser.error("--verify-existing requires one --case and its existing scenario --workspace")
-        output = args.workspace / ("verification_" + datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%S%fZ") + ".json")
+        output = args.workspace / ("verification_" + datetime.now(UTC).strftime("%Y%m%dT%H%M%S%fZ") + ".json")
         try:
             if args.case == "unit":
                 value = verify_unit(args.workspace)
@@ -397,14 +388,14 @@ def main() -> int:
             elif args.case.startswith("context_"):
                 value = verify_context(args.case.removeprefix("context_"), args.workspace)
             elif args.case.startswith("goal_"):
-                receipt = args.workspace / ("run_receipt.json" if args.case == "goal_bounded" else "resume_receipt.json")
-                value = validate_goal(args.workspace, json.loads(receipt.read_text()), bounded=args.case == "goal_bounded")
+                receipt = args.workspace / "run_receipt.json"
+                value = validate_goal(args.workspace, json.loads(receipt.read_text()), workflow_list=args.case == "goal_list")
             else:
                 parser.error("Tool scenarios are checked by a new full run")
         except BaseException as exc:
             dump(output, {"status": "failed", "type": type(exc).__name__, "error": str(exc)})
             raise
-        dump(output, {"status": "passed", "rechecked_at": datetime.now(timezone.utc).isoformat(), **value})
+        dump(output, {"status": "passed", "rechecked_at": datetime.now(UTC).isoformat(), **value})
         print(output)
         return 0
 

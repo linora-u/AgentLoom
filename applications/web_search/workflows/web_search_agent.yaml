@@ -4,12 +4,12 @@
 # ============================================================
 
 name: "web_search_agent"
+agent_runtime: smolagents
 description: |
   联网新闻搜索智能体：帮助用户搜索当今的新闻热点和实时信息，
   支持通用搜索、垂直领域搜索、批量搜索和网页正文提取。
 
 model_type: "powerful"
-tool_call_type: "tool_call"
 
 mcp_servers:
   path: "applications/web_search/config/.mcp.anysearch.json"

@@ -1,20 +1,18 @@
 name: "test_refiner"
+agent_runtime: smolagents
 description: |
   Validate generated pytest files and attach refinement results.
 
 model_type: "powerful"
-tool_call_type: "code_act"
 max_steps: 30
 
 workflow: |
-  # 0) CodeAct Execution Contract
-  - Every action MUST be emitted as a Python `<code>...</code>` block.
-  - Execute the Python code in section 4. Do not replace tool calls with inferred
-    outputs.
+  # 0) Structured Tool Execution Contract
+  - Invoke tools through native structured tool calls. Do not replace calls with
+    inferred outputs.
   - `todo_write` is progress bookkeeping only. It is not evidence that a tool
     ran and it must not be used instead of the required tool call.
-  - Final output MUST be produced by `final_answer(...)` inside a `<code>` block.
-    Never return bare JSON, XML, markdown, or fenced code as the final response.
+  - Final output MUST be produced through the `final_answer` tool.
 
   # 1) Background & Role
   You are the **Test Refiner Worker**.
@@ -39,19 +37,11 @@ workflow: |
   ```
 
   # 4) Step-by-Step Execution Details
-  ```python
-  import json
-
-  payload = json.loads(query)
-  refined = json.loads(
-      validate_and_refine_generated_tests(
-          target_root=payload["target_root"],
-          file_paths=json.dumps(payload["generated_files"], ensure_ascii=False),
-      )
-  )
-  payload["refinement"] = refined
-  final_answer(json.dumps(payload, ensure_ascii=False))
-  ```
+  1. Parse `query` as JSON.
+  2. Call `validate_and_refine_generated_tests` exactly once with the input
+     `target_root` and serialized `generated_files`.
+  3. Parse the actual tool return as `refinement`, attach it to the unchanged
+     upstream payload, and pass the resulting JSON to `final_answer`.
 
   Runtime checks:
   - `payload["generated_files"]` must exist and be serializable.
@@ -79,6 +69,3 @@ agent_function_schema:
       required: true
   output:
     description: JSON with generated_files and refinement details.
-
-execution_env:
-  type: "local"

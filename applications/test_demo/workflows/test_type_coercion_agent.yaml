@@ -1,8 +1,8 @@
 name: "test_type_coercion"
+agent_runtime: smolagents
 description: "Validate LLM semantic type coercion for tool parameters"
 
 model_type: "powerful"
-tool_call_type: "code_act"
 
 workflow: |
   # Type Coercion Validation
@@ -32,6 +32,3 @@ tools:
 
 worker_agents: []
 max_steps: 10
-
-execution_env:
-  type: "local"

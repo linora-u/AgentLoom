@@ -1,8 +1,8 @@
 name: "test_shell_security"
+agent_runtime: smolagents
 description: "Validate shell_tool security checks block injection patterns while allowing safe commands"
 
 model_type: "powerful"
-tool_call_type: "code_act"
 
 workflow: |
   # Shell Security Validation
@@ -50,6 +50,3 @@ tools:
   - name: "shell_tool"
 
 max_steps: 15
-
-execution_env:
-  type: "local"
