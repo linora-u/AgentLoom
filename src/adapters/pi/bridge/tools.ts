@@ -1,0 +1,85 @@
+/** Official SDK executors guarded by AgentLoom's existing native tool contract. */
+import { isDeepStrictEqual } from "node:util";
+import { Ajv2020 } from "ajv/dist/2020.js";
+import { createReadToolDefinition, type ExtensionFactory, type ToolDefinition } from "@earendil-works/pi-coding-agent";
+
+type Obj = Record<string, any>;
+type Callback = (payload: Obj) => Promise<Obj>;
+
+export function nativeTools(manifest: Obj[], cwd: string, invoke: Callback, identity: (id: string) => Obj) {
+  const permits = new Map<string, Obj>();
+  const seen = new Set<string>();
+  const selected = new Map(manifest.map(tool => [tool.visible_name, tool]));
+  const ajv = new Ajv2020({strict: true, coerceTypes: false, useDefaults: false});
+  const validators = new Map(manifest.map(tool => [tool.visible_name, ajv.compile(tool.parameters)]));
+  const tools: ToolDefinition<any, any>[] = manifest.map(entry => {
+    if (entry.owner !== "runtime" || entry.provider !== "pi" || entry.visible_name !== "read" || entry.operation !== "read")
+      throw new Error("Unsupported native tool");
+    const official = createReadToolDefinition(cwd);
+    const parameters = {...official.parameters, additionalProperties: false};
+    // No lossy schema projection, silent aliases or alternate basic implementation.
+    if (!isDeepStrictEqual(JSON.parse(JSON.stringify(parameters)), entry.parameters)) throw new Error("Native tool schema mismatch");
+    return {...official, parameters, prepareArguments: undefined, renderCall: undefined, renderResult: undefined,
+      executionMode: "parallel",
+      execute: async (callId: string, args: any, signal: AbortSignal | undefined, onUpdate: any, ctx: any) => {
+        const permit = permits.get(callId);
+        permits.delete(callId);
+        if (!permit?.authorization || !isDeepStrictEqual(permit.authorization.final_arguments, args) ||
+            permit.authorization.tool.visible_name !== entry.visible_name) throw new Error("Missing native authorization");
+        const grant = permit.authorization;
+        let result: unknown;
+        let error: Obj | null = null;
+        try {
+          if (signal?.aborted) throw new Error("Interrupted");
+          result = await official.execute(callId, args, signal, onUpdate, ctx);
+        } catch {
+          error = {kind: "NativeToolError", message: "Pi native tool execution failed", stage: "tool_execution", retryable: false};
+        }
+        const settled = await invoke({method: "tool_settle", outcome: {identity: grant.identity,
+          authorization_id: grant.authorization_id, status: error ? "error" : "completed", output: error ? null : result, error}});
+        if (settled.state !== "committed" || !settled.commit_id || !isDeepStrictEqual(settled.identity, grant.identity) ||
+            settled.authorization_id !== grant.authorization_id) throw new Error("Native result not durably committed");
+        if (settled.record.status !== "completed") throw new Error(settled.record.error?.message || "Native tool failed");
+        return settled.record.output;
+      },
+    };
+  });
+  const extension: ExtensionFactory = pi => {
+    pi.on("message_end", async ({message}) => {
+      if (message.role !== "assistant") return;
+      const replacement = structuredClone(message);
+      const batch = new Set<string>();
+      for (const part of replacement.content) {
+        if (part.type !== "toolCall") continue;
+        if (seen.has(part.id) || batch.has(part.id) || !selected.has(part.name)) {
+          permits.clear();
+          throw new Error("Unselected or duplicate tool call");
+        }
+        batch.add(part.id);
+      }
+      for (const id of batch) seen.add(id);
+      for (const part of replacement.content) {
+        if (part.type !== "toolCall") continue;
+        permits.set(part.id, {});
+        const entry = selected.get(part.name)!;
+        const callIdentity = identity(part.id);
+        const prepared = await invoke({method: "tool_prepare", call: {identity: callIdentity, tool: entry, cwd,
+          raw_arguments: part.arguments}});
+        const grant = prepared.authorization;
+        if (grant && (!isDeepStrictEqual(grant.identity, callIdentity) || !isDeepStrictEqual(grant.tool, entry) ||
+            grant.cwd !== cwd || !validators.get(part.name)!(grant.final_arguments)))
+          throw new Error("Invalid native authorization");
+        permits.set(part.id, prepared);
+        if (grant) part.arguments = grant.final_arguments;
+      }
+      return {message: replacement};
+    });
+    pi.on("tool_call", ({toolCallId, toolName, input}) => {
+      const permit = permits.get(toolCallId);
+      if (!permit?.authorization || permit.authorization.tool.visible_name !== toolName ||
+          !isDeepStrictEqual(permit.authorization.final_arguments, input))
+        return {block: true, reason: permit?.rejection?.error?.message || "Missing or mismatched AgentLoom authorization"};
+    });
+  };
+  return {tools, extension};
+}

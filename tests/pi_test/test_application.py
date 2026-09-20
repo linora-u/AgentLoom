@@ -16,7 +16,7 @@ from agentloom.configuration.config import bind_config, load_project_config
 
 
 @contextmanager
-def model_service(*, responses=False, fail_count=0, error_status=500, stall=None, finish="stop", stall_stream=False):
+def model_service(*, responses=False, fail_count=0, error_status=500, stall=None, finish="stop", stall_stream=False, turns=None):
     requests = []
 
     class Handler(BaseHTTPRequestHandler):
@@ -44,6 +44,14 @@ def model_service(*, responses=False, fail_count=0, error_status=500, stall=None
                 {"choices": [{"index": 0, "delta": {"role": "assistant", "content": "Pi answer"}, "finish_reason": None}]},
                 {"choices": [{"index": 0, "delta": {}, "finish_reason": finish}], "usage": {"prompt_tokens": 12, "completion_tokens": 3, "total_tokens": 15}},
             ]
+            if turns is not None and len(requests) <= len(turns):
+                calls = turns[len(requests) - 1]
+                chunks[0]["choices"][0]["delta"] = {"role": "assistant", "tool_calls": [
+                    {"index": index, "id": call_id, "type": "function", "function": {
+                        "name": name, "arguments": json.dumps(arguments)}}
+                    for index, (call_id, name, arguments) in enumerate(calls)
+                ]}
+                chunks[1]["choices"][0]["finish_reason"] = "tool_calls"
             if finish == "tool_calls":
                 if len(requests) == 1:
                     chunks[0]["choices"][0]["delta"]["tool_calls"] = [{"index": 0, "id": "unavailable_call", "type": "function",

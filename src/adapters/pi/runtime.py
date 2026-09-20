@@ -2,9 +2,15 @@
 from __future__ import annotations
 
 from uuid import uuid4
+from pathlib import Path
 
 from agentloom.adapters.pi.metadata import CAPABILITIES, SDK_VERSION, validate_model, validate_options
-from agentloom.adapters.pi.protocol import Handshake, HandshakeResult, ModelSelection, Run, RunResult
+from agentloom.adapters.pi.protocol import (
+    Handshake, HandshakeResult, ModelSelection, Run, RunResult,
+    Prepare, PrepareResult, Settle, SettleResult, TerminalRecord,
+)
+from agentloom.runtime.native_tool_host import NativeReadToolHost
+from agentloom.runtime.native_tools import NativeCommitAck
 from agentloom.adapters.pi.transport import PiTransport
 from agentloom.runtime.agent_runtime import (
     AgentRuntimeError, AgentRuntimeRequest, AgentRuntimeResult, RuntimeDefinition, RuntimeEvent, RuntimeUsage,
@@ -25,8 +31,9 @@ class PiRuntime:
             validate_options(definition.runtime_options)
         except ValueError as exc:
             raise AgentRuntimeError(str(exc), category="configuration") from None
-        if definition.tool_manifest:
-            raise AgentRuntimeError("Pi tools are not enabled", category="unsupported_capability")
+        if any(tool.owner != "runtime" or tool.provider != "pi" or tool.visible_name != "read"
+               or tool.operation != "read" or tool.fixed_arguments for tool in definition.tool_manifest):
+            raise AgentRuntimeError("Unsupported Pi tool selection", category="unsupported_capability")
         self.definition = definition
         self.transport = PiTransport(definition.instance_id or uuid4().hex)
         try:
@@ -69,6 +76,24 @@ class PiRuntime:
         task = request.task
         max_stops = definition.runtime_options.get("max_stop_attempts", 3)
         run_id = request.run_id or uuid4().hex
+        cwd = str(Path(definition.project_root or ".").resolve())
+        native = NativeReadToolHost(tools=definition.tool_manifest, cwd=cwd) if definition.tool_manifest else None
+
+        def callback(payload):
+            if native is not None and isinstance(payload, Prepare):
+                prepared = native.prepare(payload.call)
+                return PrepareResult(method="tool_prepare",
+                    authorization=native.start_execution(prepared.authorization) if prepared.authorization else None,
+                    rejection=TerminalRecord(**prepared.rejection.to_dict()) if prepared.rejection else None)
+            if native is not None and isinstance(payload, Settle):
+                settled = native.settle(payload.outcome)
+                return SettleResult(method="tool_settle", identity=payload.outcome.identity,
+                    authorization_id=payload.outcome.authorization_id,
+                    state="committed" if isinstance(settled, NativeCommitAck) else "uncertain",
+                    commit_id=settled.commit_id if isinstance(settled, NativeCommitAck) else None,
+                    record=TerminalRecord(**settled.record.to_dict()) if isinstance(settled, NativeCommitAck) else None)
+            raise AgentRuntimeError("Unexpected Pi tool callback", category="internal")
+
         try:
             for attempt in range(max_stops):
                 if hook is not None:
@@ -76,12 +101,12 @@ class PiRuntime:
                     if context:
                         task += "\n" + "\n".join(context)
                 wire = Run(method="run", application_id=request.application_id or "standalone",
-                    task_id=request.task_id or "standalone", task=task, cwd=definition.project_root or ".",
+                    task_id=request.task_id or "standalone", task=task, cwd=cwd,
                     instructions=definition.instructions or "", model=ModelSelection(model_type=selection.model_type,
                         model_id=selection.model_id, protocol=selection.protocol, settings=dict(selection.settings),
-                        request_headers=dict(selection.request_headers)), tools=[], runtime_options=dict(definition.runtime_options),
+                        request_headers=dict(selection.request_headers)), tools=list(definition.tool_manifest), runtime_options=dict(definition.runtime_options),
                     continue_session=request.continue_session or attempt > 0, record_task=request.record_task)
-                response = self.transport.request(wire, run_id=run_id, observe=observe)
+                response = self.transport.request(wire, run_id=run_id, observe=observe, callback=callback)
                 result = response.payload
                 assert isinstance(result, RunResult)
                 part = RuntimeUsage.from_value(result.usage)
@@ -114,6 +139,9 @@ class PiRuntime:
         except AgentRuntimeError as error:
             emit("terminal", {"state": "interrupted" if error.category == "interrupted" else "failed", "category": error.category})
             raise
+        finally:
+            if native is not None:
+                native.close()
 
     def close(self):
         try:
