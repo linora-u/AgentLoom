@@ -308,6 +308,15 @@ class AgentInvocation:
                         )
                 finally:
                     try:
+                        from agentloom.runtime.resources import close_instance_resources
+
+                        close_instance_resources(agent_id)
+                    except BaseException as exc:
+                        if lifecycle_error is None:
+                            lifecycle_error = exc
+                        else:
+                            lifecycle_error.add_note(f"Resource close also failed: {exc}")
+                    try:
                         goal_binding.__exit__(None, None, None)
                     finally:
                         execution_binding.__exit__(None, None, None)

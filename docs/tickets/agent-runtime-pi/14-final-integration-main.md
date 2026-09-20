@@ -8,11 +8,15 @@
 
 **Required:** Yes — 本票属于最终交付必做项。
 
+**Unlocks:** 无；本票为最终交付。
+
 **Session:** 协调/集成 session 串行执行
 
 ## Scope
 
 contract 阶段与最终整合。只清理、修复集成缺陷和验收，不承担前票遗漏的产品能力；保留旧 YAML 的兼容解释。
+
+**Edit boundary:** 协调者在全部前置已集成的候选上串行收口；不得在仍有实现 session 写入时交付或删除其 worktree。保留候选提交与验收证据，再将成果展开到 main 的未提交、未暂存 Changes。
 
 ## Acceptance criteria
 

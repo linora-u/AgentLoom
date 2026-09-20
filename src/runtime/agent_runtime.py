@@ -439,6 +439,7 @@ class RuntimeModelSelection:
     model_id: str
     protocol: str
     settings: Mapping[str, JSONValue] = field(default_factory=dict, repr=False)
+    request_headers: Mapping[str, str] = field(default_factory=dict, repr=False)
 
     def __post_init__(self) -> None:
         for name in ("model_type", "model_id", "protocol"):
@@ -449,6 +450,12 @@ class RuntimeModelSelection:
         object.__setattr__(self, "settings", _frozen_json_mapping(
             self.settings, field_name="model selection settings",
         ))
+        for key, value in self.request_headers.items():
+            if not isinstance(key, str) or not isinstance(value, str):
+                raise ValueError("Model request headers must be strings")
+            if not key or ":" in key or any(c in key + value for c in "\r\n"):
+                raise ValueError("Invalid model request header")
+        object.__setattr__(self, "request_headers", MappingProxyType(dict(self.request_headers)))
 
 
 @dataclass(frozen=True, slots=True)

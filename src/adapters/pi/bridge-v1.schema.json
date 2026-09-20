@@ -1,0 +1,1355 @@
+{
+  "$defs": {
+    "BridgeError": {
+      "additionalProperties": false,
+      "properties": {
+        "category": {
+          "enum": [
+            "protocol",
+            "configuration",
+            "unsupported_capability",
+            "provider",
+            "tool",
+            "interrupted",
+            "internal"
+          ],
+          "title": "Category",
+          "type": "string"
+        },
+        "message": {
+          "title": "Message",
+          "type": "string"
+        },
+        "retryable": {
+          "default": false,
+          "title": "Retryable",
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "category",
+        "message"
+      ],
+      "title": "BridgeError",
+      "type": "object"
+    },
+    "Cancel": {
+      "additionalProperties": false,
+      "properties": {
+        "method": {
+          "const": "cancel",
+          "title": "Method",
+          "type": "string"
+        },
+        "target_request_id": {
+          "minLength": 1,
+          "title": "Target Request Id",
+          "type": "string"
+        }
+      },
+      "required": [
+        "method",
+        "target_request_id"
+      ],
+      "title": "Cancel",
+      "type": "object"
+    },
+    "Close": {
+      "additionalProperties": false,
+      "properties": {
+        "method": {
+          "const": "close",
+          "title": "Method",
+          "type": "string"
+        }
+      },
+      "required": [
+        "method"
+      ],
+      "title": "Close",
+      "type": "object"
+    },
+    "ControlResult": {
+      "additionalProperties": false,
+      "properties": {
+        "method": {
+          "enum": [
+            "cancel",
+            "close"
+          ],
+          "title": "Method",
+          "type": "string"
+        },
+        "accepted": {
+          "title": "Accepted",
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "method",
+        "accepted"
+      ],
+      "title": "ControlResult",
+      "type": "object"
+    },
+    "Event": {
+      "additionalProperties": false,
+      "properties": {
+        "version": {
+          "const": 1,
+          "title": "Version",
+          "type": "integer"
+        },
+        "instance_id": {
+          "minLength": 1,
+          "title": "Instance Id",
+          "type": "string"
+        },
+        "run_id": {
+          "minLength": 1,
+          "title": "Run Id",
+          "type": "string"
+        },
+        "kind": {
+          "const": "event",
+          "title": "Kind",
+          "type": "string"
+        },
+        "request_id": {
+          "minLength": 1,
+          "title": "Request Id",
+          "type": "string"
+        },
+        "sequence": {
+          "minimum": 1,
+          "title": "Sequence",
+          "type": "integer"
+        },
+        "event": {
+          "enum": [
+            "run",
+            "model",
+            "tool",
+            "subagent",
+            "usage",
+            "checkpoint",
+            "terminal"
+          ],
+          "title": "Event",
+          "type": "string"
+        },
+        "payload": {
+          "additionalProperties": {
+            "$ref": "#/$defs/JsonValue"
+          },
+          "title": "Payload",
+          "type": "object"
+        }
+      },
+      "required": [
+        "version",
+        "instance_id",
+        "run_id",
+        "kind",
+        "request_id",
+        "sequence",
+        "event",
+        "payload"
+      ],
+      "title": "Event",
+      "type": "object"
+    },
+    "Handshake": {
+      "additionalProperties": false,
+      "properties": {
+        "method": {
+          "const": "handshake",
+          "title": "Method",
+          "type": "string"
+        },
+        "native_tool_contract": {
+          "const": 1,
+          "title": "Native Tool Contract",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "method",
+        "native_tool_contract"
+      ],
+      "title": "Handshake",
+      "type": "object"
+    },
+    "HandshakeResult": {
+      "additionalProperties": false,
+      "properties": {
+        "method": {
+          "const": "handshake",
+          "title": "Method",
+          "type": "string"
+        },
+        "runtime_id": {
+          "const": "pi",
+          "title": "Runtime Id",
+          "type": "string"
+        },
+        "sdk_version": {
+          "minLength": 1,
+          "title": "Sdk Version",
+          "type": "string"
+        },
+        "node_version": {
+          "minLength": 1,
+          "title": "Node Version",
+          "type": "string"
+        },
+        "native_tool_contract": {
+          "const": 1,
+          "title": "Native Tool Contract",
+          "type": "integer"
+        },
+        "capabilities": {
+          "$ref": "#/$defs/RuntimeCapabilities"
+        }
+      },
+      "required": [
+        "method",
+        "runtime_id",
+        "sdk_version",
+        "node_version",
+        "native_tool_contract",
+        "capabilities"
+      ],
+      "title": "HandshakeResult",
+      "type": "object"
+    },
+    "JSONValue": {
+      "anyOf": [
+        {
+          "type": "boolean"
+        },
+        {
+          "type": "integer"
+        },
+        {
+          "type": "number"
+        },
+        {
+          "type": "string"
+        },
+        {
+          "items": {
+            "$ref": "#/$defs/JSONValue"
+          },
+          "type": "array"
+        },
+        {
+          "additionalProperties": {
+            "$ref": "#/$defs/JSONValue"
+          },
+          "type": "object"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "JsonValue": {},
+    "ModelSelection": {
+      "additionalProperties": false,
+      "properties": {
+        "model_type": {
+          "minLength": 1,
+          "title": "Model Type",
+          "type": "string"
+        },
+        "model_id": {
+          "minLength": 1,
+          "title": "Model Id",
+          "type": "string"
+        },
+        "protocol": {
+          "minLength": 1,
+          "title": "Protocol",
+          "type": "string"
+        },
+        "settings": {
+          "additionalProperties": {
+            "$ref": "#/$defs/JsonValue"
+          },
+          "title": "Settings",
+          "type": "object"
+        },
+        "request_headers": {
+          "additionalProperties": {
+            "type": "string"
+          },
+          "title": "Request Headers",
+          "type": "object"
+        }
+      },
+      "required": [
+        "model_type",
+        "model_id",
+        "protocol",
+        "settings",
+        "request_headers"
+      ],
+      "title": "ModelSelection",
+      "type": "object"
+    },
+    "NativeAuthorization": {
+      "properties": {
+        "authorization_id": {
+          "title": "Authorization Id",
+          "type": "string"
+        },
+        "identity": {
+          "$ref": "#/$defs/NativeCallIdentity"
+        },
+        "tool": {
+          "$ref": "#/$defs/ToolManifestEntry"
+        },
+        "cwd": {
+          "title": "Cwd",
+          "type": "string"
+        },
+        "final_arguments": {
+          "additionalProperties": true,
+          "title": "Final Arguments",
+          "type": "object"
+        }
+      },
+      "required": [
+        "authorization_id",
+        "identity",
+        "tool",
+        "cwd",
+        "final_arguments"
+      ],
+      "title": "NativeAuthorization",
+      "type": "object"
+    },
+    "NativeCallIdentity": {
+      "properties": {
+        "application_id": {
+          "title": "Application Id",
+          "type": "string"
+        },
+        "task_id": {
+          "title": "Task Id",
+          "type": "string"
+        },
+        "run_id": {
+          "title": "Run Id",
+          "type": "string"
+        },
+        "instance_id": {
+          "title": "Instance Id",
+          "type": "string"
+        },
+        "call_id": {
+          "title": "Call Id",
+          "type": "string"
+        },
+        "native_session_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Native Session Id"
+        },
+        "native_parent_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Native Parent Id"
+        }
+      },
+      "required": [
+        "application_id",
+        "task_id",
+        "run_id",
+        "instance_id",
+        "call_id"
+      ],
+      "title": "NativeCallIdentity",
+      "type": "object"
+    },
+    "NativeExecutionOutcome": {
+      "properties": {
+        "identity": {
+          "$ref": "#/$defs/NativeCallIdentity"
+        },
+        "authorization_id": {
+          "title": "Authorization Id",
+          "type": "string"
+        },
+        "status": {
+          "enum": [
+            "completed",
+            "error",
+            "uncertain"
+          ],
+          "title": "Status",
+          "type": "string"
+        },
+        "output": {
+          "default": null,
+          "title": "Output"
+        },
+        "error": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ToolErrorRecord"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        }
+      },
+      "required": [
+        "identity",
+        "authorization_id",
+        "status"
+      ],
+      "title": "NativeExecutionOutcome",
+      "type": "object"
+    },
+    "NativePrepareRequest": {
+      "properties": {
+        "identity": {
+          "$ref": "#/$defs/NativeCallIdentity"
+        },
+        "tool": {
+          "$ref": "#/$defs/ToolManifestEntry"
+        },
+        "cwd": {
+          "title": "Cwd",
+          "type": "string"
+        },
+        "raw_arguments": {
+          "additionalProperties": true,
+          "title": "Raw Arguments",
+          "type": "object"
+        }
+      },
+      "required": [
+        "identity",
+        "tool",
+        "cwd",
+        "raw_arguments"
+      ],
+      "title": "NativePrepareRequest",
+      "type": "object"
+    },
+    "PlatformInvoke": {
+      "additionalProperties": false,
+      "properties": {
+        "method": {
+          "const": "platform_invoke",
+          "title": "Method",
+          "type": "string"
+        },
+        "identity": {
+          "$ref": "#/$defs/NativeCallIdentity"
+        },
+        "tool_name": {
+          "minLength": 1,
+          "title": "Tool Name",
+          "type": "string"
+        },
+        "arguments": {
+          "additionalProperties": {
+            "$ref": "#/$defs/JsonValue"
+          },
+          "title": "Arguments",
+          "type": "object"
+        }
+      },
+      "required": [
+        "method",
+        "identity",
+        "tool_name",
+        "arguments"
+      ],
+      "title": "PlatformInvoke",
+      "type": "object"
+    },
+    "PlatformResult": {
+      "additionalProperties": false,
+      "properties": {
+        "method": {
+          "const": "platform_invoke",
+          "title": "Method",
+          "type": "string"
+        },
+        "record": {
+          "$ref": "#/$defs/TerminalRecord"
+        }
+      },
+      "required": [
+        "method",
+        "record"
+      ],
+      "title": "PlatformResult",
+      "type": "object"
+    },
+    "Prepare": {
+      "additionalProperties": false,
+      "properties": {
+        "method": {
+          "const": "tool_prepare",
+          "title": "Method",
+          "type": "string"
+        },
+        "call": {
+          "$ref": "#/$defs/NativePrepareRequest"
+        }
+      },
+      "required": [
+        "method",
+        "call"
+      ],
+      "title": "Prepare",
+      "type": "object"
+    },
+    "PrepareResult": {
+      "additionalProperties": false,
+      "properties": {
+        "method": {
+          "const": "tool_prepare",
+          "title": "Method",
+          "type": "string"
+        },
+        "authorization": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/NativeAuthorization"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "rejection": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/TerminalRecord"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        }
+      },
+      "required": [
+        "method"
+      ],
+      "title": "PrepareResult",
+      "type": "object"
+    },
+    "Request": {
+      "additionalProperties": false,
+      "properties": {
+        "version": {
+          "const": 1,
+          "title": "Version",
+          "type": "integer"
+        },
+        "instance_id": {
+          "minLength": 1,
+          "title": "Instance Id",
+          "type": "string"
+        },
+        "run_id": {
+          "anyOf": [
+            {
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Run Id"
+        },
+        "kind": {
+          "const": "request",
+          "title": "Kind",
+          "type": "string"
+        },
+        "request_id": {
+          "minLength": 1,
+          "title": "Request Id",
+          "type": "string"
+        },
+        "payload": {
+          "discriminator": {
+            "mapping": {
+              "cancel": "#/$defs/Cancel",
+              "close": "#/$defs/Close",
+              "handshake": "#/$defs/Handshake",
+              "platform_invoke": "#/$defs/PlatformInvoke",
+              "run": "#/$defs/Run",
+              "snapshot": "#/$defs/Snapshot",
+              "tool_prepare": "#/$defs/Prepare",
+              "tool_settle": "#/$defs/Settle"
+            },
+            "propertyName": "method"
+          },
+          "oneOf": [
+            {
+              "$ref": "#/$defs/Handshake"
+            },
+            {
+              "$ref": "#/$defs/Run"
+            },
+            {
+              "$ref": "#/$defs/Snapshot"
+            },
+            {
+              "$ref": "#/$defs/Cancel"
+            },
+            {
+              "$ref": "#/$defs/Close"
+            },
+            {
+              "$ref": "#/$defs/Prepare"
+            },
+            {
+              "$ref": "#/$defs/Settle"
+            },
+            {
+              "$ref": "#/$defs/PlatformInvoke"
+            }
+          ],
+          "title": "Payload"
+        }
+      },
+      "required": [
+        "version",
+        "instance_id",
+        "kind",
+        "request_id",
+        "payload"
+      ],
+      "title": "Request",
+      "type": "object"
+    },
+    "Response": {
+      "additionalProperties": false,
+      "properties": {
+        "version": {
+          "const": 1,
+          "title": "Version",
+          "type": "integer"
+        },
+        "instance_id": {
+          "minLength": 1,
+          "title": "Instance Id",
+          "type": "string"
+        },
+        "run_id": {
+          "anyOf": [
+            {
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Run Id"
+        },
+        "kind": {
+          "const": "response",
+          "title": "Kind",
+          "type": "string"
+        },
+        "request_id": {
+          "minLength": 1,
+          "title": "Request Id",
+          "type": "string"
+        },
+        "payload": {
+          "anyOf": [
+            {
+              "discriminator": {
+                "mapping": {
+                  "cancel": "#/$defs/ControlResult",
+                  "close": "#/$defs/ControlResult",
+                  "handshake": "#/$defs/HandshakeResult",
+                  "platform_invoke": "#/$defs/PlatformResult",
+                  "run": "#/$defs/RunResult",
+                  "snapshot": "#/$defs/SnapshotResult",
+                  "tool_prepare": "#/$defs/PrepareResult",
+                  "tool_settle": "#/$defs/SettleResult"
+                },
+                "propertyName": "method"
+              },
+              "oneOf": [
+                {
+                  "$ref": "#/$defs/HandshakeResult"
+                },
+                {
+                  "$ref": "#/$defs/RunResult"
+                },
+                {
+                  "$ref": "#/$defs/SnapshotResult"
+                },
+                {
+                  "$ref": "#/$defs/ControlResult"
+                },
+                {
+                  "$ref": "#/$defs/PrepareResult"
+                },
+                {
+                  "$ref": "#/$defs/SettleResult"
+                },
+                {
+                  "$ref": "#/$defs/PlatformResult"
+                }
+              ]
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Payload"
+        },
+        "error": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/BridgeError"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        }
+      },
+      "required": [
+        "version",
+        "instance_id",
+        "kind",
+        "request_id"
+      ],
+      "title": "Response",
+      "type": "object"
+    },
+    "Run": {
+      "additionalProperties": false,
+      "properties": {
+        "method": {
+          "const": "run",
+          "title": "Method",
+          "type": "string"
+        },
+        "application_id": {
+          "minLength": 1,
+          "title": "Application Id",
+          "type": "string"
+        },
+        "task_id": {
+          "minLength": 1,
+          "title": "Task Id",
+          "type": "string"
+        },
+        "task": {
+          "minLength": 1,
+          "title": "Task",
+          "type": "string"
+        },
+        "cwd": {
+          "minLength": 1,
+          "title": "Cwd",
+          "type": "string"
+        },
+        "instructions": {
+          "title": "Instructions",
+          "type": "string"
+        },
+        "model": {
+          "$ref": "#/$defs/ModelSelection"
+        },
+        "tools": {
+          "items": {
+            "$ref": "#/$defs/ToolManifestEntry"
+          },
+          "title": "Tools",
+          "type": "array"
+        },
+        "runtime_options": {
+          "additionalProperties": {
+            "$ref": "#/$defs/JsonValue"
+          },
+          "title": "Runtime Options",
+          "type": "object"
+        },
+        "continue_session": {
+          "default": false,
+          "title": "Continue Session",
+          "type": "boolean"
+        },
+        "record_task": {
+          "default": true,
+          "title": "Record Task",
+          "type": "boolean"
+        },
+        "additional_args": {
+          "additionalProperties": {
+            "$ref": "#/$defs/JsonValue"
+          },
+          "title": "Additional Args",
+          "type": "object"
+        },
+        "checkpoint": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/RuntimeCheckpointEnvelope"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        }
+      },
+      "required": [
+        "method",
+        "application_id",
+        "task_id",
+        "task",
+        "cwd",
+        "instructions",
+        "model",
+        "tools",
+        "runtime_options"
+      ],
+      "title": "Run",
+      "type": "object"
+    },
+    "RunResult": {
+      "additionalProperties": false,
+      "properties": {
+        "method": {
+          "const": "run",
+          "title": "Method",
+          "type": "string"
+        },
+        "state": {
+          "enum": [
+            "success",
+            "max_steps_error",
+            "interrupted",
+            "failed"
+          ],
+          "title": "State",
+          "type": "string"
+        },
+        "output": {
+          "$ref": "#/$defs/JsonValue",
+          "default": null
+        },
+        "usage": {
+          "additionalProperties": {
+            "$ref": "#/$defs/JsonValue"
+          },
+          "title": "Usage",
+          "type": "object"
+        },
+        "artifacts": {
+          "items": {
+            "additionalProperties": {
+              "$ref": "#/$defs/JsonValue"
+            },
+            "type": "object"
+          },
+          "title": "Artifacts",
+          "type": "array"
+        },
+        "checkpoint": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/RuntimeCheckpointEnvelope"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "error": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/BridgeError"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        }
+      },
+      "required": [
+        "method",
+        "state"
+      ],
+      "title": "RunResult",
+      "type": "object"
+    },
+    "RuntimeCapabilities": {
+      "properties": {
+        "structured_tools": {
+          "title": "Structured Tools",
+          "type": "boolean"
+        },
+        "parallel_tools": {
+          "title": "Parallel Tools",
+          "type": "boolean"
+        },
+        "checkpoint_resume": {
+          "title": "Checkpoint Resume",
+          "type": "boolean"
+        },
+        "subagents": {
+          "title": "Subagents",
+          "type": "boolean"
+        },
+        "goal": {
+          "default": false,
+          "title": "Goal",
+          "type": "boolean"
+        },
+        "stop_hooks": {
+          "default": false,
+          "title": "Stop Hooks",
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "structured_tools",
+        "parallel_tools",
+        "checkpoint_resume",
+        "subagents"
+      ],
+      "title": "RuntimeCapabilities",
+      "type": "object"
+    },
+    "RuntimeCheckpointEnvelope": {
+      "properties": {
+        "runtime_id": {
+          "title": "Runtime Id",
+          "type": "string"
+        },
+        "runtime_version": {
+          "title": "Runtime Version",
+          "type": "string"
+        },
+        "state_schema_version": {
+          "title": "State Schema Version",
+          "type": "integer"
+        },
+        "payload": {
+          "additionalProperties": {
+            "$ref": "#/$defs/JSONValue"
+          },
+          "title": "Payload",
+          "type": "object"
+        },
+        "task_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Task Id"
+        },
+        "run_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Run Id"
+        },
+        "progress": {
+          "default": 0,
+          "title": "Progress",
+          "type": "integer"
+        },
+        "audit_metadata": {
+          "additionalProperties": {
+            "$ref": "#/$defs/JSONValue"
+          },
+          "title": "Audit Metadata",
+          "type": "object"
+        }
+      },
+      "required": [
+        "runtime_id",
+        "runtime_version",
+        "state_schema_version",
+        "payload"
+      ],
+      "title": "RuntimeCheckpointEnvelope",
+      "type": "object"
+    },
+    "Settle": {
+      "additionalProperties": false,
+      "properties": {
+        "method": {
+          "const": "tool_settle",
+          "title": "Method",
+          "type": "string"
+        },
+        "outcome": {
+          "$ref": "#/$defs/NativeExecutionOutcome"
+        }
+      },
+      "required": [
+        "method",
+        "outcome"
+      ],
+      "title": "Settle",
+      "type": "object"
+    },
+    "SettleResult": {
+      "additionalProperties": false,
+      "properties": {
+        "method": {
+          "const": "tool_settle",
+          "title": "Method",
+          "type": "string"
+        },
+        "identity": {
+          "$ref": "#/$defs/NativeCallIdentity"
+        },
+        "authorization_id": {
+          "minLength": 1,
+          "title": "Authorization Id",
+          "type": "string"
+        },
+        "state": {
+          "enum": [
+            "committed",
+            "uncertain"
+          ],
+          "title": "State",
+          "type": "string"
+        },
+        "commit_id": {
+          "anyOf": [
+            {
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Commit Id"
+        },
+        "record": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/TerminalRecord"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        }
+      },
+      "required": [
+        "method",
+        "identity",
+        "authorization_id",
+        "state"
+      ],
+      "title": "SettleResult",
+      "type": "object"
+    },
+    "Snapshot": {
+      "additionalProperties": false,
+      "properties": {
+        "method": {
+          "const": "snapshot",
+          "title": "Method",
+          "type": "string"
+        }
+      },
+      "required": [
+        "method"
+      ],
+      "title": "Snapshot",
+      "type": "object"
+    },
+    "SnapshotResult": {
+      "additionalProperties": false,
+      "properties": {
+        "method": {
+          "const": "snapshot",
+          "title": "Method",
+          "type": "string"
+        },
+        "checkpoint": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/RuntimeCheckpointEnvelope"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "method",
+        "checkpoint"
+      ],
+      "title": "SnapshotResult",
+      "type": "object"
+    },
+    "TerminalRecord": {
+      "additionalProperties": false,
+      "properties": {
+        "call_id": {
+          "minLength": 1,
+          "title": "Call Id",
+          "type": "string"
+        },
+        "tool_name": {
+          "minLength": 1,
+          "title": "Tool Name",
+          "type": "string"
+        },
+        "input": {
+          "$ref": "#/$defs/JsonValue"
+        },
+        "status": {
+          "enum": [
+            "completed",
+            "error",
+            "blocked"
+          ],
+          "title": "Status",
+          "type": "string"
+        },
+        "output": {
+          "$ref": "#/$defs/JsonValue",
+          "default": null
+        },
+        "error": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ToolErrorRecord"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "metadata": {
+          "additionalProperties": {
+            "$ref": "#/$defs/JsonValue"
+          },
+          "title": "Metadata",
+          "type": "object"
+        },
+        "started_at": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Started At"
+        },
+        "ended_at": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Ended At"
+        }
+      },
+      "required": [
+        "call_id",
+        "tool_name",
+        "input",
+        "status"
+      ],
+      "title": "TerminalRecord",
+      "type": "object"
+    },
+    "ToolErrorRecord": {
+      "properties": {
+        "kind": {
+          "title": "Kind",
+          "type": "string"
+        },
+        "message": {
+          "title": "Message",
+          "type": "string"
+        },
+        "retryable": {
+          "title": "Retryable",
+          "type": "boolean"
+        },
+        "stage": {
+          "title": "Stage",
+          "type": "string"
+        }
+      },
+      "required": [
+        "kind",
+        "message",
+        "retryable",
+        "stage"
+      ],
+      "title": "ToolErrorRecord",
+      "type": "object"
+    },
+    "ToolManifestEntry": {
+      "properties": {
+        "logical_name": {
+          "title": "Logical Name",
+          "type": "string"
+        },
+        "visible_name": {
+          "title": "Visible Name",
+          "type": "string"
+        },
+        "owner": {
+          "enum": [
+            "runtime",
+            "platform",
+            "optional",
+            "external"
+          ],
+          "title": "Owner",
+          "type": "string"
+        },
+        "provider": {
+          "title": "Provider",
+          "type": "string"
+        },
+        "capability": {
+          "title": "Capability",
+          "type": "string"
+        },
+        "operation": {
+          "enum": [
+            "read",
+            "write",
+            "shell",
+            "platform",
+            "control"
+          ],
+          "title": "Operation",
+          "type": "string"
+        },
+        "parameters": {
+          "additionalProperties": true,
+          "title": "Parameters",
+          "type": "object"
+        },
+        "path_parameters": {
+          "default": [],
+          "items": {
+            "type": "string"
+          },
+          "title": "Path Parameters",
+          "type": "array"
+        },
+        "command_parameter": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Command Parameter"
+        },
+        "fixed_arguments": {
+          "additionalProperties": true,
+          "title": "Fixed Arguments",
+          "type": "object"
+        }
+      },
+      "required": [
+        "logical_name",
+        "visible_name",
+        "owner",
+        "provider",
+        "capability",
+        "operation",
+        "parameters"
+      ],
+      "title": "ToolManifestEntry",
+      "type": "object"
+    }
+  },
+  "discriminator": {
+    "mapping": {
+      "event": "#/$defs/Event",
+      "request": "#/$defs/Request",
+      "response": "#/$defs/Response"
+    },
+    "propertyName": "kind"
+  },
+  "oneOf": [
+    {
+      "$ref": "#/$defs/Request"
+    },
+    {
+      "$ref": "#/$defs/Response"
+    },
+    {
+      "$ref": "#/$defs/Event"
+    }
+  ]
+}

@@ -8,11 +8,15 @@
 
 **Required:** Yes — 本票属于最终交付必做项。
 
+**Unlocks:** 10、11、13
+
 **Session:** 沿用 Pi session；可与 06 并行
 
 ## Scope
 
 本票打通生产完整调用链，只开启已验证的只读和平台能力；文件修改/Shell 在 10 开放。消费 05 的接口，不修改 06 正在开发的治理实现。
+
+**Edit boundary:** 接收 07 的 Pi adapter/bridge 修改权，消费 05 的治理和 08 的中立工具入口。需要更改这些依赖时交对应所有者及协调者处理；公共 Goal/Worker/registry 接线在本票验收前完成。
 
 按 [工具归属](tool-ownership.md) 装配 Pi 官方基础工具、已选平台工具和本阶段允许的只读专业工具。Markdown 等文件修改专业工具需等 10 的保护接线；平台 memory/Goal 更新继续按各自已有规则执行。
 

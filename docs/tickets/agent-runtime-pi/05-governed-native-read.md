@@ -8,11 +8,15 @@
 
 **Required:** Yes — 本票属于最终交付必做项。
 
+**Unlocks:** 06、09
+
 **Session:** 工具治理 session；可与 04、07、08 并行
 
 ## Scope
 
 实现生产 Tool Gateway 的 native 准备/结算最小路径；独立验收只替换外部 executor，权限和结算必须使用生产实现。真 Pi 官方工具复验归 09。
+
+**Edit boundary:** 独占公共 Gateway 的 native 执行/结算实现及治理测试；消费 [03 合同](03-contracts.md)，不编辑 smol 基础工具、Pi bridge 或 08 的平台工具实现。新公共类型变更由协调者统一落地。
 
 按 [工具归属](tool-ownership.md)，本票只拥有公共治理路径，不搬迁或通用化 smol 的 read_file/grep/glob 实现，也不改 04 正在移动的基础工具文件。
 

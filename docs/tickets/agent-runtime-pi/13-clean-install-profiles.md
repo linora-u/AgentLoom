@@ -8,11 +8,17 @@
 
 **Required:** Yes — 本票属于最终交付必做项。
 
+**Unlocks:** 14
+
 **Session:** 独立发行 session；可与 10、11、12 并行
 
 ## Scope
 
 Python packaging、安装入口、CLI 失败路径和 CI。消费 Pi session 所有者维护的 bridge 产物，不共同修改其 Node manifest/lock。
+
+**Edit boundary:** 独占 Python manifest/lock、安装器、CLI 安装/失败路径及发行测试；Pi SDK/Node 依赖修改交 Pi 链所有者。公共 registry/readiness 的变化交协调者，安装范围以本票前置已支持的能力为准。
+
+本票以 09 已开放的无工具、只读和平台调用验证安装，不等待或假设 10/12 已完成。发行资源清单应覆盖 bridge 构建输出，不能靠手工复制开发目录；10/12 若改变构建入口或资源合同，先经协调者同步，14 再使用最终提交重建验收。
 
 按 [工具归属](tool-ownership.md) 验证依赖所有权：04 已完成基础工具迁移，08 已通过 09 集成。专业工具依赖按实际选择处理，不把 smol 基础工具包或 SDK 验证程序当作 Pi 生产资源。
 

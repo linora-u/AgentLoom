@@ -6,6 +6,12 @@ or implement AgentLoom's production Tool Gateway. Python is a governance/journal
 fixture. Pi owns the actual AgentSession, agent loop, native provider, official
 tools, session persistence, and automatic compaction.
 
+Ticket 03 relocated this proof from `experiments/pi-sdk-compatibility` to
+`tests/pi_sdk_compatibility`. `RESULT.json` remains the original authoring record;
+the preserved prior replay is `evidence/ticket01-replay.json`. New replays use the
+existing verifier and write `evidence/result.json`. This is still a test fixture,
+not the production adapter under `src/adapters/pi`.
+
 ## Reproduce
 
 From this directory, with Node >= 22.19.0 and Python 3:

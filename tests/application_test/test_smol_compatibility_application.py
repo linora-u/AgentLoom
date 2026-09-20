@@ -23,9 +23,11 @@ from agentloom.runtime.model_protocol import (
 class _CompatibilityProvider:
     adapter_id = "openai_chat"
 
-    def __init__(self, *, goal: bool, receipt: Path) -> None:
+    def __init__(self, *, goal: bool, receipt: Path, shell: bool = False) -> None:
         self.goal = goal
         self.requests: list[ModelTurnRequest] = []
+        self.background_tasks = []
+        self.run_context = None
         self.calls = [
             ("write_file", {"file_path": str(receipt), "content": "smol-tool-result"}),
             ("todo_write", {"todos": [{"content": "Pending work", "status": "pending"}]}),
@@ -37,11 +39,15 @@ class _CompatibilityProvider:
                     ("update_goal", {"status": "complete", "evidence": "The receipt was written and verified."}),
                 ]
             )
+        if shell:
+            self.calls.insert(1, ("shell_tool", {
+                "command": "sleep 60", "run_in_background": True, "load_profile": False,
+            }))
 
     def turn(self, request: ModelTurnRequest) -> ModelTurnResult:
         index = len(self.requests)
         self.requests.append(request)
-        if self.goal and index == 4:
+        if self.goal and index == len(self.calls):
             # Native smol asks for a final summary after Goal completion stops
             # further ordinary model/tool work.
             return ModelTurnResult(
@@ -67,6 +73,11 @@ class _CompatibilityProvider:
                 for item in request.items
             )
         name, arguments = self.calls[index]
+        if name == "final_answer":
+            from agentloom.runtime import get_current_run_context
+            from agentloom.tools.shell.background_task import BackgroundTaskRegistry
+            self.run_context = get_current_run_context()
+            self.background_tasks = BackgroundTaskRegistry.get_instance().list_running()
         return ModelTurnResult(
             items=(
                 FunctionCallItem(
@@ -79,11 +90,12 @@ class _CompatibilityProvider:
         )
 
 
-@pytest.mark.parametrize("goal", [False, True])
+@pytest.mark.parametrize("goal,shell", [(False, False), (True, False), (False, True)])
 def test_legacy_smol_yaml_executes_tools_todo_and_goal_through_application(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
     goal: bool,
+    shell: bool,
 ) -> None:
     config_dir = tmp_path / "config"
     config_dir.mkdir()
@@ -128,11 +140,11 @@ def test_legacy_smol_yaml_executes_tools_todo_and_goal_through_application(
                 "todo": {"mode": "auto"},
                 "goal": goal,
                 "toolsets": [],
-                "tools": [{"name": "write_file"}],
+                "tools": [{"name": "write_file"}, *([{"name": "shell_tool"}] if shell else [])],
             }
         )
     )
-    provider = _CompatibilityProvider(goal=goal, receipt=tmp_path / "receipt.txt")
+    provider = _CompatibilityProvider(goal=goal, receipt=tmp_path / "receipt.txt", shell=shell)
     binding = ModelTurnBinding(
         model_type="compatibility",
         model_id="compatibility-model",
@@ -153,7 +165,20 @@ def test_legacy_smol_yaml_executes_tools_todo_and_goal_through_application(
 
     assert result.output == "smol-complete"
     assert (tmp_path / "receipt.txt").read_text() == "smol-tool-result"
-    assert len(provider.requests) == (5 if goal else 3)
+    assert len(provider.requests) == len(provider.calls) + int(goal)
+    if shell:
+        import os
+        from agentloom.runtime import bind_run_context
+        from agentloom.tools.shell.background_task import BackgroundTaskRegistry
+        from agentloom.tools.shell.process import ShellProcessRegistry
+        assert len(provider.background_tasks) == 1
+        task = provider.background_tasks[0]
+        assert task.is_terminal
+        with pytest.raises(ProcessLookupError):
+            os.kill(task.pid, 0)
+        with bind_run_context(provider.run_context):
+            assert BackgroundTaskRegistry.get_instance().list_running() == []
+            assert ShellProcessRegistry.get_instance().registered_agent_ids() == []
     assert [event.event for event in events] == ["run.started", "run.completed"]
     manifest = json.loads(result.run.manifest_path.read_text())
     assert manifest["status"] == "completed"

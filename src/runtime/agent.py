@@ -134,12 +134,18 @@ class BaseAgent(ABC):
             if self._model_binding is None:
                 self._model_binding = self._resolve_model_binding(model_cache=model_cache)
         else:
+            from agentloom.configuration.model_request_headers import build_model_request_headers
+
             settings = C.llm.for_type(self.default_model_type)
             self._model_selection = RuntimeModelSelection(
                 model_type=(self.default_model_type or C.llm.default_model_type).strip().lower(),
                 model_id=settings.model,
                 protocol=settings.adapter,
                 settings=settings.model_dump(mode="json"),
+                request_headers=build_model_request_headers(
+                    settings.extra_headers,
+                    config_map=getattr(self, "_effective_agent_config", None),
+                ),
             )
         if self._model_binding is not None and not isinstance(self._model_binding, ModelTurnBinding):
             raise TypeError("model_binding must be a ModelTurnBinding")
@@ -383,18 +389,20 @@ class BaseAgent(ABC):
         return current_backend
 
     @staticmethod
-    def _deduplicate_tools(tools: list[Any]) -> list[Any]:
+    def _resolve_unique_tools(tools: list[Any]) -> list[Any]:
         uniq_tools: list[Any] = []
-        seen = set()
+        seen: dict[Any, Any] = {}
         for tool_item in tools:
-            key = getattr(
+            key = tool_item.definition.name if isinstance(tool_item, ToolBinding) else getattr(
                 tool_item,
                 "name",
                 getattr(tool_item, "__name__", tool_item),
             )
             if key in seen:
-                continue
-            seen.add(key)
+                if seen[key] is tool_item:
+                    continue
+                raise ValueError(f"Duplicate tool name: {key}")
+            seen[key] = tool_item
             uniq_tools.append(tool_item)
         return uniq_tools
 
@@ -636,13 +644,21 @@ class RoleDrivenAgent(BaseAgent):
             )
             if goal.enabled:
                 from agentloom.tools.goal import get_goal, update_goal
+                from agentloom.runtime.native_tools import ToolManifestEntry
 
-                tools = [*tools, get_goal, update_goal]
+                tools = list(tools)
+                for tool, capability in ((get_goal, "goal.read"), (update_goal, "goal.update")):
+                    binding = bind_tool(tool)
+                    tools.append(replace(binding, manifest_entry=ToolManifestEntry(
+                        logical_name=binding.definition.name, visible_name=binding.definition.name,
+                        owner="platform", provider="agentloom", capability=capability,
+                        operation="platform", parameters=binding.definition.parameters,
+                    )))
         return tools
 
     def _build_tool_gateway(self) -> AgentLoomToolGateway:
         profile = self._role_profile()
-        tools = self._deduplicate_tools(self._build_runtime_tools(profile))
+        tools = self._resolve_unique_tools(self._build_runtime_tools(profile))
         bindings: list[ToolBinding] = [bind_tool(tool) for tool in tools]
         mcp_manager = getattr(self, "_mcp_manager", None)
         resource_closers = (

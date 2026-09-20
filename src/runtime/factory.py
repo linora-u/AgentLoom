@@ -11,7 +11,7 @@ from typing import Any
 from agentloom.application.definition import extract_markdown_definition, load_agent_definition
 from agentloom.application.validation import AgentConfigNormalizer, NormalizedAgentConfig
 from agentloom.application.workflows import get_worker_agent_yaml_path, infer_category_from_yaml_path
-from agentloom.configuration import C, get_default_toolsets
+from agentloom.configuration import C
 from agentloom.configuration.yaml_loader import load_unique_yaml
 from agentloom.runtime.agent import AgentRoleProfile, AgentType, RoleDrivenAgent
 from agentloom.runtime.goal import normalize_goal_config, normalize_workflow_for_goal
@@ -19,7 +19,7 @@ from agentloom.runtime.logging import (
     get_logger,
 )
 from agentloom.runtime.tool_gateway import bind_tool
-from agentloom.tools.catalog import resolve_toolsets
+from agentloom.tools.selection import resolve_runtime_toolsets
 from agentloom.tools.loader import resolve_tool_function
 from agentloom.utils.dynamic_import import load_function
 
@@ -100,6 +100,7 @@ def _bind_fixed_tool_args(tool_func: Callable, tool_name: str, fixed_args: dict[
     fixed_args_tool.__annotations__ = annotations
     fixed_args_tool.__signature__ = visible_signature
     fixed_args_tool._agentloom_fixed_args = tuple(sorted(fixed_args))  # type: ignore[attr-defined]
+    fixed_args_tool._agentloom_fixed_values = copy.deepcopy(fixed_args)  # type: ignore[attr-defined]
     return fixed_args_tool
 
 
@@ -661,6 +662,13 @@ class YamlConfiguredAgent(RoleDrivenAgent):
             binding = bind_tool(dynamic_agent_tool)
             if binding.definition.name != function_name:
                 raise ValueError("generated Tool name does not match its schema")
+            from agentloom.runtime.native_tools import ToolManifestEntry
+
+            dynamic_agent_tool._agentloom_manifest_entry = ToolManifestEntry(  # type: ignore[attr-defined]
+                logical_name=function_name, visible_name=function_name,
+                owner="platform", provider="agentloom", capability="worker.invoke",
+                operation="platform", parameters=binding.definition.parameters,
+            )
         except Exception as e:
             raise ValueError(
                 f"Failed to generate agent tool schema for '{function_name}': {e}"
@@ -896,6 +904,7 @@ class YamlAgentFactory:
             when no MCP servers are configured.
         """
         log = get_logger(logger, __name__)
+        selected_toolsets = resolve_runtime_toolsets(config, effective_agent_config)
         config = dict(config)
         for key in ("tools", "toolsets"):
             if effective_agent_config is not None and key in effective_agent_config:
@@ -909,21 +918,10 @@ class YamlAgentFactory:
         def _append_tool(tool_obj, explicit_name: str | None = None):
             tool_name = explicit_name or _tool_name(tool_obj)
             if tool_name and tool_name in seen:
-                return
+                raise ValueError(f"Duplicate tool name: {tool_name}")
             if tool_name:
                 seen.add(tool_name)
             tools.append(tool_obj)
-
-        if "toolsets" in config:
-            raw_toolsets = config.get("toolsets", [])
-        else:
-            if isinstance(effective_agent_config, dict) and "default_toolsets" in effective_agent_config:
-                raw_toolsets = get_default_toolsets(effective_agent_config)
-            else:
-                raw_toolsets = None
-
-        if raw_toolsets is not None and not isinstance(raw_toolsets, list):
-            raise ValueError("toolsets/default_toolsets must be a list of toolset names")
 
         raw_tools = config.get("tools") or []
         AgentConfigNormalizer.validate_tools_config_entries(raw_tools)
@@ -932,7 +930,7 @@ class YamlAgentFactory:
             for tool_config in raw_tools
         }
 
-        for tool_name in resolve_toolsets(raw_toolsets):
+        for tool_name in selected_toolsets:
             if tool_name in explicit_tool_names:
                 continue
             tool_function = resolve_tool_function(tool_name)

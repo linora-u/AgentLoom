@@ -10,7 +10,7 @@
 
 | 票据 | 已验证行为 | 证据 |
 | --- | --- | --- |
-| 01 | 锁定 npm 发布版 Pi 0.79.4 及依赖；真实 AgentSession、原生 provider、官方工具和自动压缩 | [实验与重放说明](../../../experiments/pi-sdk-compatibility/README.md) |
+| 01 | 锁定 npm 发布版 Pi 0.79.4 及依赖；真实 AgentSession、原生 provider、官方工具和自动压缩 | [实验与重放说明](../../../tests/pi_sdk_compatibility/README.md) |
 | 01 | 非法原始参数经异步 Python Hook 修正后严格校验；拒绝、失败和身份错配没有副作用；批次顺序和一次授权 | 实验的 hooks 用例，13 项 SDK 测试中的 10 项 |
 | 01 | host 提交后、Pi 持久化前真实 SIGKILL；使用匹配的已提交结果恢复单调用且不重跑工具 | 实验的 recovery 用例及明确支持边界 |
 | 02 | 中立模型选择、后端选项及来源；不要求所有后端持有 Python model binding；能力由实际配置推导 | [实现与过渡接口清单](02-implementation.md) |

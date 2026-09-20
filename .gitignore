@@ -1,4 +1,6 @@
 # Byte-compiled / optimized / DLL files
+# A locally ignored upstream pi/ checkout must not hide the production adapter.
+!/src/adapters/pi/
 __pycache__/
 *.py[cod]
 *$py.class
