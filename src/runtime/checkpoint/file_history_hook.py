@@ -144,6 +144,8 @@ def record_active_file_history(
     tool_name: str,
     tool_input: dict[str, Any],
     step_number: int,
+    manifest: Any = None,
+    cwd: str | None = None,
 ) -> None:
     """Record the final validated input at the non-configurable tool boundary.
 
@@ -157,6 +159,16 @@ def record_active_file_history(
     coordinator = CheckpointCoordinator.current()
     file_history = getattr(coordinator, "_file_history", None) if coordinator else None
     if file_history is None:
+        return
+    if manifest is not None:
+        if manifest.operation != "write":
+            return
+        from pathlib import Path
+        for name in manifest.path_parameters:
+            value = tool_input.get(name)
+            if isinstance(value, str) and value:
+                path = Path(cwd or ".") / value
+                file_history.track_edit(str(path.absolute()), step_number)
         return
     FileHistoryHook(file_history, get_step_number=lambda: step_number)(
         tool_name=tool_name,
