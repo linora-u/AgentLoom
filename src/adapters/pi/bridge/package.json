@@ -3,11 +3,19 @@
   "version": "0.1.0",
   "private": true,
   "type": "module",
-  "engines": {"node": ">=22.19.0"},
+  "engines": {
+    "node": ">=22.19.0"
+  },
   "scripts": {
     "build": "tsc",
     "typecheck": "tsc --noEmit"
   },
-  "dependencies": {"@earendil-works/pi-coding-agent": "0.79.4"},
-  "devDependencies": {"@types/node": "22.19.0", "typescript": "5.9.3"}
+  "dependencies": {
+    "@earendil-works/pi-coding-agent": "0.79.4",
+    "ajv": "8.17.1"
+  },
+  "devDependencies": {
+    "@types/node": "22.19.0",
+    "typescript": "5.9.3"
+  }
 }
