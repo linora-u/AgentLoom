@@ -47,3 +47,21 @@
 登记删除、清理过渡断言后，模型依赖方向、全部 Pi 生命周期和发布清单检查合计 **14 passed**（37.89 秒）。这是失败项及相关用例的复验结果，不冒充另一次完整回归全部通过。本次没有运行远程模型验收。
 
 构建、安装、首轮回归、基线对照和复验日志保存在仓库外的 `AgentLoom-validation/migration-cleanup-20260920/`。
+
+## 磁盘残留补充清理
+
+维护者指出 `src/extensions` 仍出现在磁盘上。以 `e75e7a56` 为起点重新遍历项目工作目录后，确认上一轮只检查受跟踪文件，漏掉了 Git 忽略的迁移前 Python 字节码。这些源码已经删除，`__pycache__` 却让旧目录继续存在。
+
+本轮删除 354 个没有对应 `.py` 源文件的字节码、22 个 Finder `.DS_Store` 文件，并从叶子向上移除 118 个空目录，合计清理约 6.7 MiB。每个文件删除前确认未被 Git 跟踪；每个目录仅在实际为空时调用 `rmdir`，不递归删除含内容的目录。
+
+| 范围 | 已清理的主要目录 |
+| --- | --- |
+| 迁移前源码命名空间 | `src/extensions`、`src/lib`、`src/services`、`src/mcp`、`src/trace`、`src/workflows` |
+| 已移除工具和空包 | `src/tools/code_editor`、`src/tools/git`、`src/runtime/memory` |
+| 旧辅助目录 | 根目录 `hooks`、`scripts`、`cache`、`__pycache__`、`.scratch`；旧应用、测试和 Skill 的空子目录 |
+
+唯一仍被 Git 跟踪的纯空包是 `src/runtime/memory/__init__.py`，也已删除；该包没有其他源码，也没有导入或动态注册消费者。仍有真实子模块的空 `__init__.py` 和应用验收所需的空配置文件继续保留。离线记忆验收脚本中的历史路径映射用于读取旧 Git 提交，不依赖这些磁盘目录，保持原有能力。
+
+扫描排除了独立参考仓库、虚拟环境、已安装 Node 依赖及构建产物、运行数据和用户本地配置。完成后对相同范围重新遍历，空目录和无源码字节码均为 0。多数清理项原本被 Git 忽略，属于本机磁盘清理；Git 中记录空包删除和本次审计结果。
+
+架构导入边界、工具懒加载、记忆模型导入边界和外部安装探针共 **10 passed**（6.81 秒）。本轮只删除空包和生成残留，没有重复运行模型与工具全量回归。文件级删除清单及补充测试日志保存于仓库外的 `AgentLoom-validation/migration-cleanup-20260920/residual-cleanup.json`、`residual-cleanup-tests.log`。
