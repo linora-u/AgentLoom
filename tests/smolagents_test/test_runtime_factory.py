@@ -167,7 +167,7 @@ def test_factory_builds_native_runtime_from_complete_definition(
 
     assert isinstance(runtime, SmolagentsRuntimeAdapter)
     assert runtime._model_binding is definition.model
-    assert captured["tool_gateway"] is definition.tool_gateway
+    assert {tool.name for tool in captured["tool_gateway"].definitions} == {"proof_tool", "final_answer", "todo_write"}
     assert isinstance(captured["model"], SmolagentsModelTurnBridge)
     assert captured["model"].binding is definition.model
     assert captured["model"].model_id == "provider/opaque-model"
@@ -237,7 +237,7 @@ def test_factory_uses_smolagents_default_prompt_and_exact_proxy_definitions(
     assert native.prompt_templates["system_prompt"].count(
         definition.instructions
     ) == 1
-    assert tuple(native.tools) == ("proof_tool", "final_answer")
+    assert tuple(native.tools) == ("proof_tool", "final_answer", "todo_write")
     proof_proxy = native.tools["proof_tool"]
     assert isinstance(proof_proxy, SmolagentsToolGatewayProxy)
     assert proof_proxy._agentloom_tool_definition is (
@@ -398,9 +398,10 @@ def test_factory_loads_explicit_prompt_and_appends_instructions_once(
     SmolagentsRuntimeFactory()(definition)
 
     assert "instructions" not in captured
-    assert captured["prompt_templates"]["system_prompt"] == (
+    assert captured["prompt_templates"]["system_prompt"].startswith(
         "Custom base prompt.\n\nRuntime-owned instructions."
     )
+    assert captured["prompt_templates"]["system_prompt"].count("## Task Tracking") == 1
 
 
 def test_factory_uses_native_instructions_only_when_implicit_prompt_load_fails(
@@ -431,7 +432,8 @@ def test_factory_uses_native_instructions_only_when_implicit_prompt_load_fails(
 
     SmolagentsRuntimeFactory()(definition)
 
-    assert captured["instructions"] == "Fallback instructions."
+    assert captured["instructions"].startswith("Fallback instructions.")
+    assert captured["instructions"].count("## Task Tracking") == 1
     assert "prompt_templates" not in captured
 
 
@@ -449,3 +451,20 @@ def test_factory_rejects_non_smolagents_definition() -> None:
 
     with pytest.raises(ValueError, match="runtime_id='smolagents'"):
         SmolagentsRuntimeFactory()(wrong)
+
+
+@pytest.mark.parametrize("mode,present", [("auto", True), ("on", True), ("off", False)])
+def test_smol_adapter_owns_todo_and_terminal_tools(mode, present):
+    from dataclasses import replace
+    from agentloom.runtime.tool_gateway import AgentLoomToolGateway, bind_tool
+    from agentloom.tools.todo import todo_write
+
+    definition = replace(_definition(), todo_mode=mode, tool_gateway=AgentLoomToolGateway([bind_tool(todo_write)]))
+    runtime = SmolagentsRuntimeFactory()(definition)
+    try:
+        tools = runtime._native_runtime.tools
+        assert ("todo_write" in tools) is present
+        assert "final_answer" in tools
+        assert ("## Task Tracking" in runtime._native_runtime.prompt_templates["system_prompt"]) is present
+    finally:
+        runtime.close()

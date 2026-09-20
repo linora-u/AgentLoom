@@ -182,6 +182,7 @@ class AgentConfigNormalizer:
         config: dict,
         *,
         effective_config: dict[str, Any] | None = None,
+        hook_plan=None,
     ) -> str:
         """Return the explicitly selected, currently registered Agent runtime."""
 
@@ -194,32 +195,43 @@ class AgentConfigNormalizer:
                 "Configuration is missing required 'agent_runtime' field; "
                 f"available runtimes: {available}"
             )
-        effective = effective_config or config
-        checkpoint = effective.get("checkpoint")
-        checkpoint_resume = (
-            isinstance(checkpoint, dict)
-            and checkpoint.get("enabled") is True
-        )
-        concurrency = config.get("concurrency")
-        parallel_tools = (
-            concurrency == "auto"
-            or (
-                isinstance(concurrency, int)
-                and not isinstance(concurrency, bool)
-                and concurrency > 1
-            )
-        )
-        requirements = RuntimeRequirements(
-            structured_tools=True,
-            parallel_tools=parallel_tools,
-            checkpoint_resume=checkpoint_resume,
-            subagents=bool(config.get("worker_agents")),
+        requirements = AgentConfigNormalizer.runtime_requirements(
+            config, effective_config=effective_config, hook_plan=hook_plan,
         )
         build_builtin_runtime_registry().validate(
             runtime_id,
             requirements=requirements,
         )
         return runtime_id
+
+    @staticmethod
+    def runtime_requirements(config: dict, *, effective_config: dict | None = None, hook_plan=None) -> RuntimeRequirements:
+        """Derive requirements from selected functions, not from an engine assumption."""
+        from agentloom.tools.catalog import resolve_toolsets
+
+        effective = effective_config if effective_config is not None else config
+        selected_toolsets = effective.get("toolsets", effective.get("default_toolsets"))
+        tools_selected = bool(effective.get("tools") or resolve_toolsets(selected_toolsets))
+        checkpoint = effective.get("checkpoint", {})
+        concurrency = effective.get("concurrency", config.get("concurrency"))
+        goal = normalize_goal_config(config, source=str(config.get("name", "agent"))).enabled
+        subagents = bool(effective.get("worker_agents", config.get("worker_agents")))
+        mcp = effective.get("mcp_servers")
+        # smol's own terminal tool is installed by its adapter.
+        structured_tools = bool(tools_selected or mcp or subagents or goal or config.get("agent_runtime") == "smolagents")
+        return RuntimeRequirements(
+            structured_tools=structured_tools,
+            parallel_tools=structured_tools and (concurrency == "auto" or (
+                isinstance(concurrency, int) and not isinstance(concurrency, bool) and concurrency > 1
+            )),
+            checkpoint_resume=isinstance(checkpoint, dict) and checkpoint.get("enabled") is True,
+            subagents=subagents,
+            goal=goal,
+            stop_hooks=bool(hook_plan is not None and any(
+                handler.event.value == "Stop" and handler.source != "internal"
+                for handler in hook_plan.handlers
+            )),
+        )
 
     @staticmethod
     def validate_tools_config_entries(tool_configs: Any) -> None:

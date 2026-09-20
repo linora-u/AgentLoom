@@ -145,6 +145,15 @@ def _build_definition(agent, monkeypatch, root):
         "get_agent_environment_prompt",
         lambda: "",
     )
+    from agentloom.configuration.config import EffectiveAgentConfigSnapshot, ConfigLayerSnapshot
+    from agentloom.runtime.hooks import HookPlan
+    agent._effective_agent_config_snapshot = EffectiveAgentConfigSnapshot(
+        values=agent._effective_agent_config,
+        layers=(ConfigLayerSnapshot("agent", agent._effective_agent_config, root, root / "agent.yaml"),),
+    )
+    agent._model_selection = None
+    agent._agent_id = "test-instance"
+    agent._hook_plan = HookPlan()
     return agent._build_runtime_definition()
 
 
@@ -310,7 +319,7 @@ def test_worker_definition_uses_effective_smart_summary_override(
     worker._validate_config()
     definition = _build_definition(worker, monkeypatch, tmp_path)
 
-    assert definition.smart_summary is False
+    assert definition.runtime_options["smart_summary"] is False
 
 
 def test_worker_prompt_path_passthrough_from_mapping(monkeypatch, tmp_path):
@@ -320,7 +329,7 @@ def test_worker_prompt_path_passthrough_from_mapping(monkeypatch, tmp_path):
     worker = _make_worker(_worker_config_with_prompt({"path": "prompts/worker_prompt.yaml"}))
     definition = _build_definition(worker, monkeypatch, tmp_path)
 
-    assert definition.prompt_template_path == str(prompt_file.resolve())
+    assert definition.runtime_options["prompt_template_path"] == str(prompt_file.resolve())
 
 
 def test_supervisor_prompt_path_passthrough_from_string(monkeypatch, tmp_path):
@@ -330,7 +339,7 @@ def test_supervisor_prompt_path_passthrough_from_string(monkeypatch, tmp_path):
     supervisor = _make_supervisor(_supervisor_config(prompt="prompts/supervisor_prompt.yaml"))
     definition = _build_definition(supervisor, monkeypatch, tmp_path)
 
-    assert definition.prompt_template_path == str(prompt_file.resolve())
+    assert definition.runtime_options["prompt_template_path"] == str(prompt_file.resolve())
 
 
 def test_runtime_definition_autonormalizes_execution_config_without_validate(
@@ -345,7 +354,7 @@ def test_runtime_definition_autonormalizes_execution_config_without_validate(
     )
     assert worker._normalized is None
     worker_definition = _build_definition(worker, monkeypatch, tmp_path)
-    assert worker_definition.prompt_template_path == str(
+    assert worker_definition.runtime_options["prompt_template_path"] == str(
         worker_prompt.resolve()
     )
 
@@ -358,6 +367,6 @@ def test_runtime_definition_autonormalizes_execution_config_without_validate(
     )
     assert supervisor._normalized is None
     supervisor_definition = _build_definition(supervisor, monkeypatch, tmp_path)
-    assert supervisor_definition.prompt_template_path == str(
+    assert supervisor_definition.runtime_options["prompt_template_path"] == str(
         supervisor_prompt.resolve()
     )
