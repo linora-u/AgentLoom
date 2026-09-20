@@ -90,7 +90,7 @@ def install_pi(bridge: Path | None = None) -> Path:
         inputs = [bridge / name for name in ("package.json", "package-lock.json", "tsconfig.json")]
         inputs.extend(sorted(path for path in bridge.rglob("*.ts")
                              if not {"node_modules", "dist"} & set(path.relative_to(bridge).parts)))
-        inputs.append(bridge.parent / "bridge-v1.schema.json")
+        inputs.append(bridge.parent / "bridge-v2.schema.json")
         digest = hashlib.sha256()
         for path in inputs:
             digest.update(str(path.relative_to(bridge.parent)).encode() + b"\0" + path.read_bytes() + b"\0")

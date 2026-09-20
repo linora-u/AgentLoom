@@ -226,7 +226,7 @@ ResultPayload = Annotated[
 
 
 class Envelope(WireValue):
-    version: Literal[1]
+    version: Literal[2]
     instance_id: NonEmpty
 
 

@@ -139,12 +139,12 @@ for line in p.stdout:
   elif fault=='duplicate_terminal': damaged=line.decode()*2
   elif fault=='duplicate_after_close': damaged=(line+saved).decode()
   elif fault=='duplicate_callback':
-   value={{'version':1,'kind':'request','instance_id':value['instance_id'],'run_id':value['run_id'],'request_id':'pi:repeated',
+   value={{'version':2,'kind':'request','instance_id':value['instance_id'],'run_id':value['run_id'],'request_id':'pi:repeated',
      'payload':{{'method':'platform_invoke','identity':{{'application_id':'pi','task_id':'task','run_id':value['run_id'],'instance_id':value['instance_id'],'call_id':'call'}},'tool_name':'unavailable','arguments':{{}}}}}}
    damaged=json.dumps(value)+'\\n'
    sys.stdout.write(damaged);sys.stdout.flush()
    if not ack.wait(timeout=3):sys.exit(3)
-  elif fault=='duplicate_key': damaged=line.decode().replace('"version":1','"version":1,"version":1')
+  elif fault=='duplicate_key': damaged=line.decode().replace('"version":2','"version":2,"version":2')
   else:
    if fault=='sequence':value['sequence']+=1
    if fault=='identity':value['run_id']='wrong-run'

@@ -112,7 +112,7 @@ agentloom = "src"
 
 [tool.setuptools.package-data]
 agentloom = ["**/*.yaml", "**/*.yml", "**/*.j2", "**/*.md", "**/*.scm",
-    "adapters/pi/bridge-v1.schema.json", "adapters/pi/bridge/*.json", "adapters/pi/bridge/*.ts"]
+    "adapters/pi/bridge-v2.schema.json", "adapters/pi/bridge/*.json", "adapters/pi/bridge/*.ts"]
 
 [tool.setuptools.exclude-package-data]
 agentloom = ["**/node_modules/**", "**/dist/**", "**/.agentloom-install.*"]
