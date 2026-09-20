@@ -51,7 +51,7 @@ uv run --locked python tests/acceptance/mixed_runtime_validation.py --output /ab
 
 ## 交付
 
-本票经过独立 worktree 开发，验收后正式合入 main；保留阶段提交和 `refs/agentloom/ticket11-frozen`，再删除本票 worktree。源码冻结为 `be3c35daf29748b21696db1ac3f9c77dae46af3a`；完整真实矩阵在 `5778592b` 执行，二者差异只有 YAML 合同测试的一条断言，应用、runtime 和真实验收脚本内容一致。10/13 的 worktree 和未提交改动不在清理范围；14 仍须等待 12/13，不能把本票完成当作整体完成。
+本票已于 2026-09-21 正式合入 main：`2ec1412c` → `96db1542`（快进，保留全部阶段提交）。固定引用 `refs/agentloom/ticket11-frozen` 指向 `96db1542bf7c869cfa32672950209ef5815c93da`。本次 `/Users/bytedance/.codex/worktrees/pi-t11-mixed/AgentLoom` 已删除，实现分支和外部验证记录保留。合入后的源码和测试与受验版本相同；main 的 Python 导入路径仍指向 main。源码冻结为 `be3c35daf29748b21696db1ac3f9c77dae46af3a`；完整真实矩阵在 `5778592b` 执行，二者差异只有 YAML 合同测试的一条断言，应用、runtime 和真实验收脚本内容一致。10/13 的 worktree 和未提交改动不在清理范围；14 仍须等待 12/13，不能把本票完成当作整体完成。
 
 ## 验证边界
 
