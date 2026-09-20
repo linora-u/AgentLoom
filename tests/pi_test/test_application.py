@@ -16,7 +16,7 @@ from agentloom.configuration.config import bind_config, load_project_config
 
 
 @contextmanager
-def model_service(*, responses=False, fail_count=0, error_status=500, stall=None, finish="stop"):
+def model_service(*, responses=False, fail_count=0, error_status=500, stall=None, finish="stop", stall_stream=False):
     requests = []
 
     class Handler(BaseHTTPRequestHandler):
@@ -26,7 +26,7 @@ def model_service(*, responses=False, fail_count=0, error_status=500, stall=None
         def do_POST(self):
             request = json.loads(self.rfile.read(int(self.headers["Content-Length"])))
             requests.append((self.path, request, dict(self.headers)))
-            if stall is not None:
+            if stall is not None and not stall_stream:
                 stall.wait(timeout=10)
             if len(requests) <= fail_count:
                 self.send_response(error_status)
@@ -37,10 +37,19 @@ def model_service(*, responses=False, fail_count=0, error_status=500, stall=None
             self.send_response(200)
             self.send_header("Content-Type", "text/event-stream")
             self.end_headers()
+            if stall_stream:
+                self.wfile.flush()
+                stall.wait(timeout=5)
             chunks = [
                 {"choices": [{"index": 0, "delta": {"role": "assistant", "content": "Pi answer"}, "finish_reason": None}]},
                 {"choices": [{"index": 0, "delta": {}, "finish_reason": finish}], "usage": {"prompt_tokens": 12, "completion_tokens": 3, "total_tokens": 15}},
             ]
+            if finish == "tool_calls":
+                if len(requests) == 1:
+                    chunks[0]["choices"][0]["delta"]["tool_calls"] = [{"index": 0, "id": "unavailable_call", "type": "function",
+                        "function": {"name": "write", "arguments": '{"path":"should-not-exist","content":"bad"}'}}]
+                else:
+                    chunks[1]["choices"][0]["finish_reason"] = "stop"
             if responses:
                 message = {"type": "message", "id": "msg_1", "role": "assistant", "status": "completed",
                            "content": [{"type": "output_text", "text": "Pi answer", "annotations": []}]}
@@ -216,3 +225,31 @@ def test_project_pi_extensions_skills_and_context_files_are_not_discovered(tmp_p
         with bind_config(load_project_config(tmp_path)):
             assert execute_app(app, file_logging=False).output == "Pi answer"
     assert "UNSELECTED_CONTEXT" not in json.dumps(requests[0][1])
+
+
+@pytest.mark.parametrize("finish,match", [("length", "max_steps_error"), ("tool_calls", "unavailable tool")])
+def test_incomplete_or_unselected_tool_turn_does_not_report_success(tmp_path, finish, match):
+    from agentloom.application.run import ApplicationRunError
+    with model_service(finish=finish) as (url, requests):
+        app = project(tmp_path, url)
+        with bind_config(load_project_config(tmp_path)), pytest.raises(ApplicationRunError, match=match):
+            execute_app(app, file_logging=False)
+    assert len(requests) == 1
+    assert not (tmp_path / "should-not-exist").exists()
+
+
+def test_profile_timeout_bounds_an_open_sse_stream(tmp_path):
+    from threading import Event
+    from agentloom.application.run import ApplicationRunError
+    release = Event()
+    with model_service(stall=release, stall_stream=True) as (url, requests):
+        app = project(tmp_path, url)
+        change_model(tmp_path, timeout=1)
+        started = time.monotonic()
+        try:
+            with bind_config(load_project_config(tmp_path)), pytest.raises(ApplicationRunError, match="timed out"):
+                execute_app(app, file_logging=False)
+        finally:
+            release.set()
+        assert time.monotonic() - started < 4
+    assert len(requests) == 1

@@ -48,9 +48,7 @@ async function createSession(p: Obj): Promise<AgentSession> {
     model: registry.find("agentloom", modelId), thinkingLevel: "off", tools: [], noTools: "all", customTools: [],
     resourceLoader: loader, settingsManager: settings, sessionManager: SessionManager.inMemory(p.cwd)});
   const nativeStream = created.agent.streamFn;
-  created.agent.streamFn = async (model, context, options) => {
-    await delay(Math.max(0, nextRequestAt - performance.now()), undefined, {signal: options?.signal});
-    nextRequestAt = performance.now() + 60000 / s.requests_per_minute;
+  created.agent.streamFn = (model, context, options) => {
     return nativeStream(model, context, {...options,
       temperature: s.temperature, maxTokens: s.max_output_tokens, headers: p.model.request_headers,
       cacheRetention: s.context_cache ? "short" : "none", transport: "sse"});
@@ -74,6 +72,8 @@ async function run(frame: Frame, abort: AbortController) {
   const event = (kind: string, payload: Obj) => write({version: 1, kind: "event", instance_id: frame.instance_id,
     run_id: frame.run_id, request_id: frame.request_id, sequence: ++seq, event: kind, payload});
   const usage = {input_tokens: 0, output_tokens: 0, total_tokens: 0, cached_input_tokens: 0};
+  let unavailableTool = false;
+  let timedOut = false;
   let unsubscribe: (() => void) | undefined;
   try {
     if (p.tools.length || p.checkpoint || Object.keys(p.additional_args).length)
@@ -87,6 +87,10 @@ async function run(frame: Frame, abort: AbortController) {
     unsubscribe = session.subscribe(e => {
       if (e.type === "message_start" && e.message.role === "assistant") event("model", {phase: "started"});
       if (e.type === "message_end" && e.message.role === "assistant") {
+        if (e.message.content.some(block => block.type === "toolCall")) {
+          unavailableTool = true;
+          session!.agent.abort();
+        }
         const u = e.message.usage;
         usage.input_tokens += u.input + u.cacheRead + u.cacheWrite;
         usage.output_tokens += u.output;
@@ -103,23 +107,29 @@ async function run(frame: Frame, abort: AbortController) {
     for (let attempt = 0; ; attempt++) {
       if (abort.signal.aborted) throw new Error("Interrupted");
       if (attempt) session.agent.state.messages = before;
+      await delay(Math.max(0, nextRequestAt - performance.now()), undefined, {signal: abort.signal});
+      nextRequestAt = performance.now() + 60000 / settings.requests_per_minute;
+      timedOut = false;
+      status = 0;
+      const timeout = setTimeout(() => {timedOut = true; session!.agent.abort();}, settings.timeout * 1000);
       // Public AgentSession owns the complete provider call and turn lifecycle.
-      await session.prompt(p.task, {expandPromptTemplates: false});
+      try {await session.prompt(p.task, {expandPromptTemplates: false});}
+      finally {clearTimeout(timeout);}
       last = session.messages.at(-1);
-      if (last?.role !== "assistant" || last.stopReason !== "error") break;
+      if (!timedOut && (last?.role !== "assistant" || last.stopReason !== "error")) break;
       // Pi preserves SDK APIError status at the start of its private errorMessage.
       // Never publish the provider text (it can echo credentials or prompts).
-      const errorText = String(last.errorMessage || "");
+      const errorText = String(last?.errorMessage || "");
       const errorStatus = /^(\d{3})\b/.exec(errorText);
       if (errorStatus) status = Number(errorStatus[1]);
-      const retryable = status === 408 || status === 429 || status >= 500 ||
+      const retryable = timedOut || status === 408 || status === 429 || status >= 500 ||
         (!errorStatus && /connection|network|fetch failed|timed? out|timeout|stream ended/i.test(errorText));
       if (!retryable || attempt >= settings.num_retries) break;
       event("model", {phase: "retry", attempt: attempt + 1});
       await delay(Math.min(settings.max_retry_delay, settings.retry_delay * 2 ** Math.min(attempt, 30)) * 1000,
         undefined, {signal: abort.signal});
     }
-    if (abort.signal.aborted || last?.stopReason === "aborted") throw new Error("Interrupted");
+    if (timedOut || unavailableTool || abort.signal.aborted || last?.stopReason === "aborted") throw new Error("Interrupted");
     const state = last?.role !== "assistant" || last.stopReason === "error" ? "failed" :
       last.stopReason === "length" ? "max_steps_error" : "success";
     const output = last?.content?.filter((b: Obj) => b.type === "text").map((b: Obj) => b.text).join("") ?? "";
@@ -130,7 +140,7 @@ async function run(frame: Frame, abort: AbortController) {
   } catch {
     const interrupted = abort.signal.aborted;
     response(frame, {method: "run", state: interrupted ? "interrupted" : "failed", output: null, usage, artifacts: [], checkpoint: null,
-      error: {category: interrupted ? "interrupted" : "provider", message: interrupted ? "Pi run interrupted" : "Pi model request failed", retryable: false}});
+      error: {category: interrupted ? "interrupted" : "provider", message: unavailableTool ? "Pi model requested an unavailable tool" : interrupted ? "Pi run interrupted" : timedOut ? "Pi model request timed out" : "Pi model request failed", retryable: timedOut}});
   } finally {
     unsubscribe?.();
     current = undefined;

@@ -40,6 +40,8 @@ def validate_model(model: RuntimeModelSelection) -> None:
             raise ValueError(f"Pi model {name} must be a finite non-negative number")
     if type(settings["num_retries"]) is not int:
         raise ValueError("Pi model num_retries must be an integer")
+    if any(settings[name] > 2_147_483 for name in ("timeout", "retry_delay", "max_retry_delay")):
+        raise ValueError("Pi model timeout/retry delays exceed the Node timer limit")
     for name in ("base_url", "api_key"):
         if not isinstance(settings.get(name), str):
             raise ValueError(f"Pi model {name} must be a string")
