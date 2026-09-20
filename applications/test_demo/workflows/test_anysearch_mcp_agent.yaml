@@ -1,8 +1,8 @@
 name: "test_anysearch_mcp"
+agent_runtime: smolagents
 description: "Agent that connects to AnySearch MCP server and uses its search tools"
 
 model_type: "powerful"
-tool_call_type: "code_act"
 
 mcp_servers:
   path: "applications/test_demo/config/.mcp.anysearch.json"

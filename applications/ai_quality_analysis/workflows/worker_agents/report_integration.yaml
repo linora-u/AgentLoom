@@ -1,6 +1,6 @@
 name: "report_integration"
+agent_runtime: smolagents
 description: "Integrates all analysis stage outputs into a comprehensive final review report with executive summary and risk dashboard."
-tool_call_type: "code_act"
 model_type: "powerful"
 toolsets:
   - "core_shell"

@@ -9,7 +9,6 @@ Configuration precedence (low -> high):
 
 from __future__ import annotations
 
-import builtins
 import os
 from contextlib import contextmanager
 from contextvars import ContextVar
@@ -19,7 +18,6 @@ from pathlib import Path
 from typing import Any
 
 import yaml
-
 from agentloom.runtime.logging import get_logger
 
 from .config_validation import (
@@ -45,8 +43,6 @@ _WORKFLOW_OVERLAY_KEYS = {
     "smart_summary",
     "context_engine",
     "tool_access_control",
-    "execution_env",
-    "code_agent",
     "tools",
     "tool_metadata",
     "tool_output_limits",
@@ -721,53 +717,3 @@ def get_default_toolsets(config_map: dict[str, Any] | None = None) -> list[str]:
     if not isinstance(toolsets, list):
         return []
     return [toolset for toolset in toolsets if isinstance(toolset, str) and toolset.strip()]
-
-
-def get_code_agent_config(config_map: dict[str, Any] | None = None) -> dict[str, Any]:
-    if config_map is not None:
-        code_cfg = config_map.get("code_agent", {})
-    else:
-        code_cfg = C.get("code_agent", {})
-
-    if not isinstance(code_cfg, dict):
-        code_cfg = {}
-
-    def _normalize_string_entries(raw: Any) -> list[str]:
-        if isinstance(raw, str):
-            raw = [raw]
-        if not isinstance(raw, list):
-            return []
-        normalized: list[str] = []
-        for item in raw:
-            if isinstance(item, str):
-                cleaned = item.strip()
-                if cleaned:
-                    normalized.append(cleaned)
-        return normalized
-
-    result: dict[str, Any] = {
-        "additional_authorized_imports": [],
-        "additional_functions": {},
-    }
-
-    imports = _normalize_string_entries(code_cfg.get("additional_authorized_imports", []))
-    if "*" in imports:
-        result["additional_authorized_imports"] = ["*"]
-    else:
-        result["additional_authorized_imports"] = imports
-
-    func_names = _normalize_string_entries(code_cfg.get("additional_functions", []))
-    if "*" in func_names:
-        result["additional_functions"] = {
-            name: value for name, value in vars(builtins).items() if callable(value)
-        }
-        return result
-
-    for name in func_names:
-        try:
-            result["additional_functions"][name] = getattr(builtins, name)
-        except AttributeError as exc:
-            raise AttributeError(
-                f"Configuration error: '{name}' is not a valid Python built-in function."
-            ) from exc
-    return result

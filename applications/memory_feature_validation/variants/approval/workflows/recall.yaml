@@ -1,7 +1,7 @@
 name: "memory_review_approval_recall"
+agent_runtime: smolagents
 description: "Verify whether an approved or rejected fact appears in the next run."
 model_type: "summary"
-tool_call_type: "tool_call"
 max_steps: 5
 
 workflow: |

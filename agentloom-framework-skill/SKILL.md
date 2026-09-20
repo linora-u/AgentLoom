@@ -22,8 +22,7 @@ description: "当用户需要理解、开发、扩展或验证 AgentLoom 框架�
 - 用户说“有哪些配置 / 这个配置能不能写 / skill 漏了配置 / system.yaml、llm.yaml、Agent YAML 怎么配”：先读 [`references/configuration-surface.md`](references/configuration-surface.md)，再按需要读 `docs/en/*.md` 和对应代码交叉验证。
 - 需要生成或修改 `applications/<app_name>/`：读 [`references/application-generation.md`](references/application-generation.md)。
 - 需要写 Agent YAML / Worker YAML / `agent_function_schema` / `worker_agents`：读 [`references/yaml-contract.md`](references/yaml-contract.md)。
-- 需要配置或实现 Goal Mode、长期 continuation、根 Agent 树 token 预算或
-  `budget_limited` resume：读 [`references/yaml-contract.md`](references/yaml-contract.md)
+- 需要配置或实现 Goal Mode、长期 continuation 或 checkpoint resume：读 [`references/yaml-contract.md`](references/yaml-contract.md)
   的 Goal 契约和 [`references/validation-and-review.md`](references/validation-and-review.md)
   的真实 Goal 验证矩阵；用户语义以 `docs/en/goal_mode.md` 为准。
 - 需要为 Application 配置私有 Skill 或独立 Hook Bundle：读 [`references/configuration-surface.md`](references/configuration-surface.md) 的 Skills/Hook 配置，再读 [`references/application-generation.md`](references/application-generation.md) 的目录规范。

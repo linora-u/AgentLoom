@@ -1,7 +1,7 @@
 name: "memory_scope_app_b_recall"
+agent_runtime: smolagents
 description: "Recall scoped memory from validation Application B."
 model_type: "summary"
-tool_call_type: "tool_call"
 max_steps: 5
 
 workflow: |

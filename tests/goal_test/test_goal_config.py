@@ -1,17 +1,17 @@
 from pathlib import Path
 
 import pytest
-
-from agentloom.runtime.goal import GoalConfig, normalize_goal_config
 from agentloom.application.readiness import (
     validate_runtime_agent_config,
     validate_runtime_worker_config,
 )
+from agentloom.runtime.goal import GoalConfig, normalize_goal_config
 
 
 def _config(**overrides):
     return {
         "name": "goal-test",
+        "agent_runtime": "smolagents",
         "description": "Finish the requested work.",
         "workflow": "Inspect, implement, and verify.",
         "tools": [],
@@ -22,14 +22,14 @@ def _config(**overrides):
 @pytest.mark.parametrize(
     ("raw", "expected"),
     [
-        (None, GoalConfig(enabled=False, token_budget=None)),
-        (False, GoalConfig(enabled=False, token_budget=None)),
-        (True, GoalConfig(enabled=True, token_budget=None)),
-        ({"enabled": False}, GoalConfig(enabled=False, token_budget=None)),
-        ({"enabled": True}, GoalConfig(enabled=True, token_budget=None)),
+        (None, GoalConfig(enabled=False)),
+        (False, GoalConfig(enabled=False)),
+        (True, GoalConfig(enabled=True)),
+        ({"enabled": False}, GoalConfig(enabled=False)),
+        ({"enabled": True}, GoalConfig(enabled=True)),
         (
             {"enabled": True, "token_budget": 120_000},
-            GoalConfig(enabled=True, token_budget=120_000),
+            GoalConfig(enabled=True),
         ),
     ],
 )
@@ -44,12 +44,6 @@ def test_normalize_goal_config_accepts_only_supported_forms(raw, expected):
         {},
         {"token_budget": 10},
         {"enabled": "true"},
-        {"enabled": True, "token_budget": None},
-        {"enabled": True, "token_budget": True},
-        {"enabled": True, "token_budget": "10"},
-        {"enabled": True, "token_budget": 0},
-        {"enabled": True, "token_budget": -1},
-        {"enabled": False, "token_budget": 10},
         {"enabled": True, "unknown": 1},
         [],
         "true",

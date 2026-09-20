@@ -8,7 +8,7 @@ from dataclasses import replace
 from pathlib import Path
 
 import pytest
-
+from agentloom.adapters.smolagents.tools.tools import tool
 from agentloom.runtime import process as process_runtime
 from agentloom.runtime.hooks import (
     HOOK_EVENT_NAMES,
@@ -20,8 +20,7 @@ from agentloom.runtime.hooks import (
     HookResult,
     HookRun,
 )
-from agentloom.adapters.smolagents.tool_shim import inject_hooks
-from agentloom.adapters.smolagents.tools.tools import tool
+from agentloom.runtime.tool_gateway import AgentLoomToolGateway
 from agentloom.runtime.trace import bind_explicit_execution_context, capture_explicit_execution_context
 
 
@@ -192,11 +191,15 @@ def _bind(run: HookRun):
     return bind_explicit_execution_context(replace(current, hook_run=run))
 
 
-def test_hooked_tool_requires_explicit_hook_run() -> None:
-    add = inject_hooks(_add_tool())
+def test_tool_gateway_requires_explicit_hook_run() -> None:
+    gateway = AgentLoomToolGateway.from_tools([_add_tool()])
 
     with pytest.raises(RuntimeError, match="HookRun"):
-        add(a=1, b=2)
+        gateway.invoke(
+            call_id="missing-hook",
+            tool_name="add",
+            arguments={"a": 1, "b": 2},
+        )
 
 
 def test_real_tool_wrapper_applies_transform_and_queues_observer_effect() -> None:
@@ -220,10 +223,14 @@ def test_real_tool_wrapper_applies_transform_and_queues_observer_effect() -> Non
         ),
     )
     run.set_user_message_sink(delivered.append)
-    add = inject_hooks(_add_tool())
+    gateway = AgentLoomToolGateway.from_tools([_add_tool()])
 
     with _bind(run):
-        result = add(a=1, b=2)
+        result = gateway.invoke(
+            call_id="add-call",
+            tool_name="add",
+            arguments={"a": 1, "b": 2},
+        ).direct_result()
 
     assert result == 30
     assert run.consume_pending_agent_context() == ["calculation complete"]
@@ -232,7 +239,7 @@ def test_real_tool_wrapper_applies_transform_and_queues_observer_effect() -> Non
 
 
 def test_concurrent_tool_calls_do_not_share_hook_effect_queues() -> None:
-    add = inject_hooks(_add_tool())
+    gateway = AgentLoomToolGateway.from_tools([_add_tool()])
 
     def invoke(label: str) -> tuple[int, list[str]]:
         run = _run(
@@ -243,7 +250,11 @@ def test_concurrent_tool_calls_do_not_share_hook_effect_queues() -> None:
             )
         )
         with _bind(run):
-            value = add(a=1, b=2)
+            value = gateway.invoke(
+                call_id=f"add-{label}",
+                tool_name="add",
+                arguments={"a": 1, "b": 2},
+            ).direct_result()
         return value, run.consume_pending_agent_context()
 
     with ThreadPoolExecutor(max_workers=2) as pool:

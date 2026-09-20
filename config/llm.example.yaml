@@ -9,6 +9,9 @@ model:
 
   # 强大模型配置（用于复杂任务，如代码生成、复杂推理）
   powerful:
+    # Required wire protocol. Supported values:
+    # openai_chat, openai_responses, anthropic_messages.
+    adapter: openai_chat
     base_url: "xxxxxxx"
     api_key: "xxxxxxx"
     model: "openai/gpt-5_5"
@@ -32,6 +35,7 @@ model:
 
   # 快速模型配置（用于简单任务，如意图识别、分类）
   fast:
+    adapter: openai_chat
     # 使用 openai/ 前缀让 LiteLLM 识别这是 OpenAI 兼容端点
     base_url: "xxxxxxx"
     api_key: "xxxxxxx"
@@ -45,6 +49,7 @@ model:
   
   # 摘要模型配置（用于文本摘要、内容提取）
   summary:
+    adapter: openai_chat
     # Compact reads ModelType.SUMMARY directly. Configure this to any
     # compatible, working summary model endpoint for your environment.
     base_url: "xxxxxxx"

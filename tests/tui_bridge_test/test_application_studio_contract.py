@@ -1,12 +1,12 @@
 from __future__ import annotations
 
-from pathlib import Path
 import json
 import subprocess
 import sys
+from pathlib import Path
 
-from agentloom.tui_bridge.bridge import TuiBridge
 from agentloom.tui_bridge.application_studio import application_detail
+from agentloom.tui_bridge.bridge import TuiBridge
 
 
 def _write(path: Path, content: str) -> None:
@@ -33,9 +33,11 @@ hooks:
 model:
   summary:
     model: openai/test-summary
+    adapter: openai_chat
   default_model_type: powerful
   powerful:
     model: openai/test
+    adapter: openai_chat
     api_key: must-never-cross-the-bridge
     base_url: https://private.invalid
 """,
@@ -61,6 +63,7 @@ mcp_servers:
         tmp_path / "applications/reports/workflows/reports.yaml",
         """
 name: report-supervisor
+agent_runtime: smolagents
 description: Coordinates report creation
 model_type: powerful
 workflow: Delegate research, then assemble a report.
@@ -77,6 +80,7 @@ worker_agents:
         tmp_path / "applications/reports/workflows/worker_agents/researcher.yaml",
         """
 name: researcher
+agent_runtime: smolagents
 description: Finds evidence
 workflow: Find evidence for the requested report.
 agent_function_schema:
@@ -116,7 +120,14 @@ agent_function_schema:
 
 def test_application_detail_pins_running_revision_to_the_started_run(tmp_path: Path) -> None:
     workflow = tmp_path / "applications/demo/workflows/demo.yaml"
-    _write(workflow, "name: demo\ndescription: Demo\nworkflow: answer\nworker_agents: []\n")
+    _write(
+        workflow,
+        "name: demo\n"
+        "agent_runtime: smolagents\n"
+        "description: Demo\n"
+        "workflow: answer\n"
+        "worker_agents: []\n",
+    )
     systems = [{
         "path": "applications/demo/workflows/demo.yaml",
         "application_id": "demo",
@@ -133,7 +144,14 @@ def test_application_detail_pins_running_revision_to_the_started_run(tmp_path: P
             "application_revision": first["working_revision"],
         }),
     )
-    _write(workflow, "name: demo\ndescription: Changed\nworkflow: answer\nworker_agents: []\n")
+    _write(
+        workflow,
+        "name: demo\n"
+        "agent_runtime: smolagents\n"
+        "description: Changed\n"
+        "workflow: answer\n"
+        "worker_agents: []\n",
+    )
 
     changed = application_detail(tmp_path, "demo", systems=systems)
 
@@ -144,11 +162,23 @@ def test_application_detail_pins_running_revision_to_the_started_run(tmp_path: P
 def test_versioned_domain_cli_returns_json_envelopes_and_safe_errors(tmp_path: Path) -> None:
     _write(
         tmp_path / "config/llm.yaml",
-        "model:\n  summary:\n    model: openai/test-summary\n  default_model_type: test\n  test:\n    model: openai/test\n    api_key: secret-value\n",
+        "model:\n"
+        "  summary:\n"
+        "    model: openai/test-summary\n"
+        "    adapter: openai_chat\n"
+        "  default_model_type: test\n"
+        "  test:\n"
+        "    model: openai/test\n"
+        "    adapter: openai_chat\n"
+        "    api_key: secret-value\n",
     )
     _write(
         tmp_path / "applications/demo/workflows/demo.yaml",
-        "name: demo\ndescription: Demo\nworkflow: answer\nworker_agents: []\n",
+        "name: demo\n"
+        "agent_runtime: smolagents\n"
+        "description: Demo\n"
+        "workflow: answer\n"
+        "worker_agents: []\n",
     )
     command = [
         sys.executable,
@@ -192,7 +222,14 @@ def test_domain_application_detail_is_paginated_and_bounded_for_large_apps(
 ) -> None:
     _write(
         tmp_path / "config/llm.yaml",
-        "model:\n  summary:\n    model: openai/test-summary\n  default_model_type: test\n  test:\n    model: openai/test\n",
+        "model:\n"
+        "  summary:\n"
+        "    model: openai/test-summary\n"
+        "    adapter: openai_chat\n"
+        "  default_model_type: test\n"
+        "  test:\n"
+        "    model: openai/test\n"
+        "    adapter: openai_chat\n",
     )
     for index in range(8):
         skill_path = f"skills/shared-{index}"
@@ -205,6 +242,7 @@ def test_domain_application_detail_is_paginated_and_bounded_for_large_apps(
             tmp_path / f"applications/large/workflows/agent-{index:02d}.yaml",
             "\n".join([
                 f"name: agent-{index:02d}",
+                "agent_runtime: smolagents",
                 f"description: {'Large Application capability description. ' * 10}",
                 "model_type: test",
                 f"workflow: {'Inspect, reason, validate, and report. ' * 20}",
@@ -252,7 +290,11 @@ def test_domain_impact_distinguishes_one_application_from_global_changes(tmp_pat
     for application_id in ("alpha", "beta"):
         _write(
             tmp_path / f"applications/{application_id}/workflows/{application_id}.yaml",
-            f"name: {application_id}\ndescription: Demo\nworkflow: answer\nworker_agents: []\n",
+            f"name: {application_id}\n"
+            "agent_runtime: smolagents\n"
+            "description: Demo\n"
+            "workflow: answer\n"
+            "worker_agents: []\n",
         )
     command = [
         sys.executable,

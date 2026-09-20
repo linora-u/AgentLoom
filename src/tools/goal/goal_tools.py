@@ -31,10 +31,10 @@ def _require_root_goal_provider():
 
 @tool
 def get_goal() -> str:
-    """Return the root task's canonical Goal status and cumulative token usage.
+    """Return the root task's canonical objective, Goal status, and evidence.
 
-    Use this to inspect the objective, completion state, and remaining soft
-    token budget. This tool is restricted to the root Supervisor Agent.
+    Use this to inspect progress and completion evidence.
+    This tool is restricted to the root Supervisor Agent.
 
     Returns:
         JSON containing the complete canonical Goal snapshot.

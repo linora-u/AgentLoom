@@ -54,10 +54,10 @@ _TERMINAL_RUN_STATUS_ALIASES = {
     "failed": "failed",
     "error": "failed",
     "interrupted": "interrupted",
+    "budget_limited": "interrupted",  # Legacy budget stop is resumable.
     "cancelled": "interrupted",
     "canceled": "interrupted",
     "crashed": "crashed",
-    "budget_limited": "budget_limited",
     "unknown": "unknown",
 }
 
@@ -850,8 +850,6 @@ class TuiBridge:
         status = str(record["summary"].get("status") or "").strip().lower()
         if status == "interrupted":
             return "Execution was interrupted before completion."
-        if status == "budget_limited":
-            return "Goal token budget was reached; increase or remove token_budget before resume."
         if status == "crashed":
             return "Execution stopped unexpectedly before completion."
         if status == "unknown":
@@ -969,7 +967,6 @@ class TuiBridge:
                     "failed",
                     "interrupted",
                     "crashed",
-                    "budget_limited",
                 } and worker_status in {
                     "running",
                     "claimed",
@@ -1983,16 +1980,28 @@ class TuiBridge:
         task_id: str,
     ) -> dict[str, Any] | None:
         goal = manifest.get("goal")
-        if isinstance(goal, dict):
-            return copy.deepcopy(goal)
-        return self._read_json_object_bounded_secure(
-            runtime_root,
-            Path("checkpoints")
-            / Path(*application_id.split("/"))
-            / task_id
-            / "goal.json",
-            max_bytes=RUN_MANIFEST_MAX_BYTES,
-        )
+        if not isinstance(goal, dict):
+            goal = self._read_json_object_bounded_secure(
+                runtime_root,
+                Path("checkpoints")
+                / Path(*application_id.split("/"))
+                / task_id
+                / "goal.json",
+                max_bytes=RUN_MANIFEST_MAX_BYTES,
+            )
+        if goal is None:
+            return None
+        from agentloom.runtime.goal import GoalState
+
+        # Display historical snapshots without reviving their obsolete budget.
+        projection = {
+            key: copy.deepcopy(value)
+            for key, value in goal.items()
+            if key in GoalState.__dataclass_fields__
+        }
+        if projection.get("status") == "budget_limited":
+            projection["status"] = "active"
+        return projection
 
     def _task_events(
         self,

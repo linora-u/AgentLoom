@@ -4,34 +4,39 @@ from __future__ import annotations
 import argparse
 import contextlib
 import sys
+from collections.abc import Callable, Iterable
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Callable, Iterable
-
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
 
-from smolagents.models import ChatMessage, MessageRole
-
-from agentloom.runtime.factory import (
-    YamlAgentFactory,
-    YamlConfiguredSupervisorAgent,
-)
-from agentloom.runtime.logging import get_global_logger, initialize_global_logger_once
-from agentloom.runtime.memory.context_compression import (
+from agentloom.adapters.smolagents.context_compression import (  # noqa: E402
     FILE_DEDUP_PLACEHOLDER,
     OBSERVATION_MASKING_PLACEHOLDER,
     ConversationHistoryManager,
     InternalChatMessage,
     _extract_content_text,
 )
-from agentloom.adapters.smolagents.models.model_manager import model_manager
-from agentloom.adapters.smolagents.models.model_types import ModelType
-from agentloom.runtime.trace import generate_id
-
+from agentloom.adapters.smolagents.models.model_manager import model_manager  # noqa: E402
+from agentloom.adapters.smolagents.models.model_types import ModelType  # noqa: E402
+from agentloom.runtime.factory import (  # noqa: E402
+    YamlAgentFactory,
+    YamlConfiguredSupervisorAgent,
+)
+from agentloom.runtime.logging import (  # noqa: E402
+    get_global_logger,
+    initialize_global_logger_once,
+)
+from agentloom.runtime.trace import generate_id  # noqa: E402
+from smolagents.models import (  # noqa: E402
+    ChatMessage,
+    ChatMessageToolCall,
+    ChatMessageToolCallFunction,
+    MessageRole,
+)
 
 ScenarioBuilder = Callable[[], list[ChatMessage]]
 AgentValidator = Callable[["ScenarioResult"], None]
@@ -57,10 +62,24 @@ def _msg(role: MessageRole, text: str) -> ChatMessage:
     return ChatMessage(role=role, content=[{"type": "text", "text": text}])
 
 
-def _python_call(source: str) -> ChatMessage:
-    return _msg(
-        MessageRole.TOOL_CALL,
-        "{'name': 'python_interpreter', 'arguments': " + repr(source) + "}",
+def _tool_call(
+    call_id: str,
+    name: str,
+    arguments: dict,
+) -> ChatMessage:
+    return ChatMessage(
+        role=MessageRole.TOOL_CALL,
+        content="",
+        tool_calls=[
+            ChatMessageToolCall(
+                id=call_id,
+                type="function",
+                function=ChatMessageToolCallFunction(
+                    name=name,
+                    arguments=arguments,
+                ),
+            )
+        ],
     )
 
 
@@ -184,18 +203,18 @@ def _run_history_scenario(
 
 def _build_repeated_read_history() -> list[ChatMessage]:
     target = PROJECT_ROOT / "applications" / "test_demo" / "test_compression.py"
-    same_range = f'content = read_file(file_path="{target}", offset=1, limit=80)\nprint(content)'
-    later_range = f'content = read_file(file_path="{target}", offset=81, limit=80)\nprint(content)'
+    same_range = {"file_path": str(target), "offset": 1, "limit": 80}
+    later_range = {"file_path": str(target), "offset": 81, "limit": 80}
 
     return [
         _msg(MessageRole.SYSTEM, "system prompt for compact functional test"),
         _msg(MessageRole.USER, _large_text("repeated-read-input")),
-        _python_call(same_range),
+        _tool_call("read-1", "read_file", same_range),
         _msg(MessageRole.TOOL_RESPONSE, "same read old content " * 40),
         _msg(MessageRole.ASSISTANT, "I will verify the same range again."),
-        _python_call(same_range),
+        _tool_call("read-2", "read_file", same_range),
         _msg(MessageRole.TOOL_RESPONSE, "same read newest content " * 40),
-        _python_call(later_range),
+        _tool_call("read-3", "read_file", later_range),
         _msg(MessageRole.TOOL_RESPONSE, "different range content " * 50),
         _msg(MessageRole.ASSISTANT, _large_text("repeated-read-analysis", repeats=900)),
     ]
@@ -209,7 +228,17 @@ def _build_large_output_history() -> list[ChatMessage]:
     return [
         _msg(MessageRole.SYSTEM, "system prompt for compact functional test"),
         _msg(MessageRole.USER, _large_text("large-output-input")),
-        _python_call('result = shell_tool(commands=["python -c \\"print(\\\'x\\\' * 90000)\\""])\nprint(result)'),
+        _tool_call(
+            "shell-large",
+            "shell_tool",
+            {
+                "command": (
+                    "yes APP_LARGE_OUTPUT_SENTINEL_"
+                    "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx "
+                    "| head -n 1200"
+                )
+            },
+        ),
         _msg(MessageRole.TOOL_RESPONSE, large_output),
         _msg(MessageRole.ASSISTANT, _large_text("large-output-analysis", repeats=900)),
     ]
@@ -219,12 +248,17 @@ def _build_skill_load_history() -> list[ChatMessage]:
     return [
         _msg(MessageRole.SYSTEM, "system prompt for compact functional test"),
         _msg(MessageRole.USER, _large_text("skill-load-input")),
-        _msg(
-            MessageRole.TOOL_CALL,
-            "{'name': 'skill', 'arguments': {'name': 'agentloom-framework-skill'}}",
+        _tool_call(
+            "skill-load",
+            "skill",
+            {"name": "agentloom-framework-skill"},
         ),
         _msg(MessageRole.TOOL_RESPONSE, "SKILL_LOAD_SENTINEL " * 1000),
-        _python_call('result = shell_tool(commands=["printf old-output"])\nprint(result)'),
+        _tool_call(
+            "shell-old",
+            "shell_tool",
+            {"command": "printf old-output"},
+        ),
         _msg(MessageRole.TOOL_RESPONSE, "ordinary old output " * 1000),
         _msg(MessageRole.ASSISTANT, _large_text("skill-load-analysis", repeats=900)),
     ]
@@ -234,10 +268,18 @@ def _build_error_recovery_history() -> list[ChatMessage]:
     return [
         _msg(MessageRole.SYSTEM, "system prompt for compact functional test"),
         _msg(MessageRole.USER, _large_text("error-recovery-input")),
-        _python_call('result = shell_tool(commands=["printf old-output"])\nprint(result)'),
+        _tool_call(
+            "shell-old",
+            "shell_tool",
+            {"command": "printf old-output"},
+        ),
         _msg(MessageRole.TOOL_RESPONSE, "OLD_OUTPUT_SENTINEL " * 2000),
         _msg(MessageRole.ASSISTANT, "The first command was too broad; I will try a narrower command."),
-        _python_call('content = read_file(file_path="/tmp/definitely-missing.txt")\nprint(content)'),
+        _tool_call(
+            "read-missing",
+            "read_file",
+            {"file_path": "/tmp/definitely-missing.txt"},
+        ),
         _msg(MessageRole.TOOL_RESPONSE, "Error: file does not exist: /tmp/definitely-missing.txt ERROR_RECOVERY_SENTINEL"),
         _msg(MessageRole.ASSISTANT, _large_text("error-recovery-analysis", repeats=900)),
     ]
@@ -272,8 +314,11 @@ def _validate_large_output(result: ScenarioResult) -> None:
 
 def _validate_skill_load(result: ScenarioResult) -> None:
     for idx, internal_message in enumerate(result.internal_messages[:-1]):
-        call_text = _extract_content_text(internal_message.message.content)
-        if "skill" not in call_text:
+        tool_names = {
+            call.function.name
+            for call in internal_message.message.tool_calls or ()
+        }
+        if "skill" not in tool_names:
             continue
         response = result.internal_messages[idx + 1]
         response_text = _extract_content_text(response.message.content)
@@ -299,14 +344,13 @@ VALIDATORS: dict[str, Callable[[ScenarioResult], None]] = {
 }
 
 
-def _agent_task(title: str, code: str) -> str:
+def _agent_task(title: str, steps: str) -> str:
     return f"""
 Run the compact application scenario: {title}.
-Execute the Python tool block below. After it runs, provide a short final answer.
-Do not call tools outside this block.
+Call each structured tool below in order. After they run, provide a short final answer.
 
-Python tool block:
-{code.strip()}
+Required tool calls:
+{steps.strip()}
 """
 
 
@@ -315,68 +359,55 @@ def _build_agent_scenarios() -> dict[str, AgentScenario]:
     target = demo_dir / "test_compression.py"
     workflow = demo_dir / "workflows" / "compression_test_agent.yaml"
 
-    repeated_read_code = f"""
-dir_result = list_directory(directory_path={str(demo_dir)!r}, max_depth=2, show_file_info=True)
-first_read = read_file(file_path={str(target)!r}, offset=1, limit=120)
-second_read = read_file(file_path={str(target)!r}, offset=1, limit=120)
-third_read = read_file(file_path={str(target)!r}, offset=121, limit=80)
-search_result = grep_search(pattern="ConversationHistoryManager", path={str(target)!r}, max_results=20)
-print("APP_REPEATED_READ_SENTINEL")
-print(dir_result)
-print(first_read)
-print(second_read)
-print(third_read)
-print(search_result)
+    repeated_read_steps = f"""
+1. list_directory with {{"directory_path": {str(demo_dir)!r}, "max_depth": 2, "show_file_info": true}}
+2. read_file with {{"file_path": {str(target)!r}, "offset": 1, "limit": 120}}
+3. read_file again with the exact same arguments
+4. read_file with {{"file_path": {str(target)!r}, "offset": 121, "limit": 80}}
+5. grep_search with {{"pattern": "ConversationHistoryManager", "path": {str(target)!r}, "max_results": 20}}
+Include APP_REPEATED_READ_SENTINEL in final_answer.
 """
 
-    large_output_code = f"""
-large_output = shell_tool(command="yes APP_LARGE_OUTPUT_SENTINEL_xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx | head -n 1200", timeout=60)
-glob_result = glob_search(pattern="**/*.py", path={str(PROJECT_ROOT / "src" / "lib" / "smolagents")!r}, max_results=120)
-print("APP_LARGE_OUTPUT_START")
-print(large_output)
-print(glob_result)
+    large_output_steps = f"""
+1. shell_tool with {{"command": "yes APP_LARGE_OUTPUT_SENTINEL_xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx | head -n 1200", "timeout": 60}}
+2. glob_search with {{"pattern": "**/*.py", "path": {str(PROJECT_ROOT / "src")!r}, "max_results": 120}}
+Include APP_LARGE_OUTPUT_START in final_answer.
 """
 
-    search_mix_code = f"""
-glob_result = glob_search(pattern="workflows/*.yaml", path={str(demo_dir)!r}, max_results=80, sort_by="name")
-grep_result = grep_search(pattern="model_type|ConversationHistoryManager|smart_summary", path={str(demo_dir)!r}, include="*.py", max_results=100, context_lines=2)
-workflow_read = read_file(file_path={str(workflow)!r}, offset=1, limit=120)
-print("APP_SEARCH_MIX_SENTINEL")
-print(glob_result)
-print(grep_result)
-print(workflow_read)
+    search_mix_steps = f"""
+1. glob_search with {{"pattern": "workflows/*.yaml", "path": {str(demo_dir)!r}, "max_results": 80, "sort_by": "name"}}
+2. grep_search with {{"pattern": "model_type|ConversationHistoryManager|smart_summary", "path": {str(demo_dir)!r}, "include": "*.py", "max_results": 100, "context_lines": 2}}
+3. read_file with {{"file_path": {str(workflow)!r}, "offset": 1, "limit": 120}}
+Include APP_SEARCH_MIX_SENTINEL in final_answer.
 """
 
     missing_path = demo_dir / "definitely_missing_compact_file.txt"
-    error_recovery_code = f"""
-before = shell_tool(command="printf APP_ERROR_RECOVERY_BEFORE", timeout=30)
-missing = shell_tool(command="ls {str(missing_path)!r}", timeout=30)
-after = grep_search(pattern="def _run_history_scenario", path={str(target)!r}, max_results=10)
-print("APP_ERROR_RECOVERY_SENTINEL")
-print(before)
-print(missing)
-print(after)
+    error_recovery_steps = f"""
+1. shell_tool with {{"command": "printf APP_ERROR_RECOVERY_BEFORE", "timeout": 30}}
+2. shell_tool with {{"command": "ls {str(missing_path)!r}", "timeout": 30}}
+3. grep_search with {{"pattern": "def _run_history_scenario", "path": {str(target)!r}, "max_results": 10}}
+Include APP_ERROR_RECOVERY_SENTINEL in final_answer.
 """
 
     return {
         "agent-repeated-read": AgentScenario(
             name="agent-repeated-read",
-            task=_agent_task("repeated file reads plus grep", repeated_read_code),
+            task=_agent_task("repeated file reads plus grep", repeated_read_steps),
             validator=_validate_agent_repeated_read,
         ),
         "agent-large-output": AgentScenario(
             name="agent-large-output",
-            task=_agent_task("large shell output plus glob", large_output_code),
+            task=_agent_task("large shell output plus glob", large_output_steps),
             validator=_validate_agent_large_output,
         ),
         "agent-search-mix": AgentScenario(
             name="agent-search-mix",
-            task=_agent_task("glob, grep, and workflow read", search_mix_code),
+            task=_agent_task("glob, grep, and workflow read", search_mix_steps),
             validator=_validate_agent_search_mix,
         ),
         "agent-error-recovery": AgentScenario(
             name="agent-error-recovery",
-            task=_agent_task("failed command followed by recovery search", error_recovery_code),
+            task=_agent_task("failed command followed by recovery search", error_recovery_steps),
             validator=_validate_agent_error_recovery,
         ),
     }
@@ -423,7 +454,11 @@ def _run_consecutive_compact(max_tokens: int) -> ScenarioResult:
     first = _build_large_output_history()
     second = [
         _msg(MessageRole.USER, _large_text("consecutive-second-input")),
-        _python_call('result = shell_tool(commands=["printf second-run"])\nprint(result)'),
+        _tool_call(
+            "shell-second",
+            "shell_tool",
+            {"command": "printf second-run"},
+        ),
         _msg(MessageRole.TOOL_RESPONSE, "SECOND_RUN_SENTINEL " * 1500),
         _msg(MessageRole.ASSISTANT, _large_text("consecutive-second-analysis", repeats=900)),
     ]

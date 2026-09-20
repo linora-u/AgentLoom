@@ -1,8 +1,8 @@
 name: "shell_session_worker"
+agent_runtime: smolagents
 description: |
   一个工作 agent，负责验证 shell session 的 CWD 隔离和环境变量非持久化。
 model_type: "powerful"
-tool_call_type: "code_act"
 workflow: |
   # Shell Worker Workflow
   1. 接收 supervisor 的指令
@@ -25,6 +25,3 @@ tools:
   - name: "shell_tool"
 
 worker_agents: []
-execution_env:
-  type: "local"
-  bash_path: "zsh"

@@ -8,9 +8,9 @@ AgentLoom 的配置主要分为三大类，分别存放在不同的配置文件�
 
 | 配置文件 | 默认路径 | 作用与定位 |
 |----------|----------|------------|
-| `system.yaml` | `config/system.yaml` | **全局系统配置**。控制执行环境、工具列表、工作区路径、代码执行权限等系统级行为。 |
-| `llm.yaml` | `config/llm.yaml` | **全局模型配置**。独立管理所有 LLM 模型的参数（`api_key`、`base_url`、温度、超时、重试策略等）以及 Langfuse 观测配置。 |
-| `agent_xxx.yaml` | `applications/<app>/workflows/*.yaml` | **Agent 配置**。定义角色、workflow、工具和模型类型；顶层 Supervisor 还可配置 [Goal Mode](goal_mode.md)，Worker 不允许配置 Goal。 |
+| `system.yaml` | `config/system.yaml` | **全局系统配置**。控制工具、工作区、权限和运行时存储等系统级行为。 |
+| `llm.yaml` | `config/llm.yaml` | **全局模型配置**。每个模型类型显式选择 wire adapter，并独立管理模型名、凭据、网关和请求参数。 |
+| `agent_xxx.yaml` | `applications/<app>/workflows/*.yaml` | **Agent 配置**。定义角色、runtime、workflow、工具和模型类型；顶层 Supervisor 还可配置 [Goal Mode](goal_mode.md)，Worker 不允许配置 Goal。 |
 | *应用级系统配置* | `applications/<app>/config/system.yaml` | **可选的应用级覆盖**。用于覆盖特定应用的默认系统行为（例如修改工作区或替换默认工具）。 |
 
 > 详情参考：
@@ -45,7 +45,7 @@ flowchart TD
 
 #### Level 3: Agent 级覆盖
 单个 Agent 的 YAML 文件除了定义自身的工作流外，还可以覆盖系统的部分配置。支持覆盖的白名单字段（`_WORKFLOW_OVERLAY_KEYS`）包含：
-- `system`, `model_request_headers`, `smart_summary`, `context_engine`, `tool_access_control`, `execution_env`, `code_agent`, `tools`, `prompt`, `shell_settings`, `default_toolsets`, `toolsets`, `mcp_servers`, `self_learning`, `hooks`。
+- `system`, `model_request_headers`, `smart_summary`, `context_engine`, `tool_access_control`, `tools`, `prompt`, `shell_settings`, `default_toolsets`, `toolsets`, `mcp_servers`, `self_learning`, `hooks`。
 
 ### Runtime 存储归属
 
@@ -90,6 +90,10 @@ logging:
    `models[model_type].参数` → `代码内置默认值`。
    如果 Agent YAML 和 `model.default_model_type` 都没有提供模型类型，模型调用会直接以 `ValueError` 失败。
 
+每个模型类型（包括 `summary`）还必须配置 `adapter`。当前合法值为
+`openai_chat`、`openai_responses`、`anthropic_messages`。`model` 是传给
+LiteLLM 的不透明名字；框架不从模型名前缀推断协议，也不在 adapter 之间回退。
+
 ## 4. 全局 C 单例 (Unified Access)
 
 无论配置如何合并，开发者和框架底层都通过唯一的 `C` 单例对象来访问配置。`C` 封装了复杂的合并逻辑，提供了极其简洁的 API。
@@ -119,8 +123,7 @@ full_dict = C.raw
 Goal Mode 只能配置在顶层 Supervisor Agent YAML，不属于全局或 Application
 `system.yaml` overlay，Worker 也不能配置。Goal task checkpoint 额外包含
 `goal.json`；每个 run manifest 暴露相同的结构化状态，终态复制到
-`audit/goal.json`。`budget_limited` 保留 checkpoint，修改 YAML 预算后沿用同一
-`task_id` resume。完整字段、continuation、预算和调度语义见
+`audit/goal.json`。中断后沿用同一 `task_id` resume。完整字段、continuation 和调度语义见
 [Goal Mode](goal_mode.md)。
 
 ## 安装后的包与项目路径

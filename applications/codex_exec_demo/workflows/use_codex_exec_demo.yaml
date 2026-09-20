@@ -1,10 +1,10 @@
 name: "codex_exec_demo"
+agent_runtime: smolagents
 description: |
   Demonstrate AgentLoom registering two local Codex aliases and calling them
   sequentially through structured tool calls.
 
 model_type: "powerful"
-tool_call_type: "tool_call"
 
 workflow: |
   # Local Codex Exec Chain Demo
@@ -52,6 +52,3 @@ tools:
 
 worker_agents: []
 max_steps: 8
-
-execution_env:
-  type: "local"

@@ -7,7 +7,7 @@
 > Goal Mode 不属于全局配置，只能在顶层 Supervisor Agent YAML 启用；详见
 > [Goal Mode](goal_mode.md)。
 
-`config/system.yaml` 是 AgentLoom 框架的**核心全局配置文件**，控制系统元数据、上下文压缩策略、顶层 prompt、全局 Skills、执行环境、代码执行权限、日志、工具系统、工作空间等。
+`config/system.yaml` 是 AgentLoom 框架的**核心全局配置文件**，控制系统元数据、上下文压缩策略、顶层 prompt、全局 Skills、日志、工具系统、工作空间等。
 
 > ⚠️ **system.yaml 与 llm.yaml 的隔离**：所有 LLM 相关配置（`model`、`llm`、`langfuse`）**必须且只能**放在 `config/llm.yaml` 中。如果在 `system.yaml` 中写入这些键，框架会在加载时自动过滤并输出 warning 日志。详见 [LLM 配置文档](llm_config.md)。
 
@@ -26,8 +26,7 @@
 - [4.5 hooks — 独立 Hook Runtime](#45-hooks--独立-hook-runtime)
 - [5. lsp_servers — LSP 语言服务器配置](#5-lsp_servers--lsp-语言服务器配置)
 - [5.5 mcp_servers — MCP 外部工具集成](#55-mcp_servers--mcp-外部工具集成)
-- [6. execution_env — 执行环境配置](#6-execution_env--执行环境配置)
-- [6. code_agent — CodeAgent 代码执行权限](#6-code_agent--codeagent-代码执行权限)
+- [6. shell_tool — Shell 执行模型](#6-shell_tool--shell-执行模型)
 - [7. runtime 与 logging — 运行时存储与日志](#7-runtime-与-logging--运行时存储与日志)
 - [8. tools — 工具系统配置](#8-tools--工具系统配置)
 - [9. tool_access_control — 工具访问控制](#9-tool_access_control--工具访问控制)
@@ -70,20 +69,6 @@ smart_summary: false
 # ============================================
 prompt:
   path: "sysprompt/system_prompt.yaml"
-
-# ============================================
-# 执行环境全局配置
-# ============================================
-execution_env:
-  type: "local"
-  # executor_kwargs: {}
-
-# ============================================
-# CodeAgent 代码执行权限
-# ============================================
-code_agent:
-  additional_authorized_imports: "*"
-  additional_functions: "*"
 
 # ============================================
 # 运行时存储与保留策略
@@ -285,7 +270,7 @@ smart_summary: false
 
 ```yaml
 prompt:
-  path: "applications/my_app/sysprompt/code_agent.yaml"
+  path: "applications/my_app/sysprompt/system_prompt.yaml"
 ```
 
 ---
@@ -379,35 +364,11 @@ Agent YAML 中的 `mcp_servers` 会与此全局配置合并（同名 Server 以 
 
 ---
 
-## 6. execution_env — 执行环境配置
+## 6. shell_tool — Shell 执行模型
 
-决定 Python 代码与 Shell 指令在何种计算节点中运行。这是最重要的安全与环境隔离配置。
+Agent 只通过结构化 `shell_tool` 调用执行 Shell 命令。命令在本地受控子进程中运行；权限、路径和命令白名单分别由 `tool_access_control` 与 `shell_settings` 管理。框架不提供模型生成 Python 的独立执行模式。
 
-> ⚠️ **模式限制**：整个 `execution_env` 配置仅适用于 `tool_call_type: "code_act"` 模式的 Agent。在 `tool_call` 模式下，`executor_type` 和 `executor_kwargs` 会被静默忽略，因为 `ToolCallingAgentV2` 使用结构化工具调用而非代码执行。
-运行时 `executor_type` / `executor_kwargs` 由 Agent YAML 内的 `execution_env` 归一化得到；如果 Agent YAML 未配置该字段，会回退到 `local` + `{}`。Shell 路径通过智能检测链自动确定（参见下方 5.2 节）。
-
-**YAML 路径**：`execution_env.*`
-
-| 参数 | 类型 | 默认值 | 必选 | 说明 |
-|------|------|--------|------|------|
-| `execution_env.type` | `str` | `"local"` | ❌ 否 | 执行环境类型。**仅**允许：`"local"`, `"docker"`, `"e2b"`, `"wasm"`，其他任何值都会报错 |
-| `execution_env.executor_kwargs` | `dict` | `{}` | ❌ 否 | 透传给执行器构造函数的额外参数，具体接受的 key 取决于 `type` 选择的执行器 |
-
-> ⚠️ `type` 的值不区分大小写（框架会自动 `.strip().lower()`），但**必须**是上述 4 个值之一。传入不支持的值（如 `"host"`、`"ssh"` 等）会报错：
-> ```
-> execution_env.type must be one of ['local', 'e2b', 'docker', 'wasm'], current value: host
-> ```
-
-### 5.1 execution_env.type 总览
-
-| 值 | 底层执行器类 | 说明 | 安全性 | 适用场景 |
-|----|-------------|------|--------|----------|
-| `"local"` | `LocalPythonExecutor` | 在宿主机环境直接运行 Python 代码 | ⚠️ 低（可修改宿主机文件系统） | 开发调试、可信环境 |
-| `"docker"` | `DockerExecutor` | 在 Docker 容器中启动 Jupyter Kernel 运行 | ✅ 高（与宿主机隔离） | 生产环境、不可信代码 |
-| `"e2b"` | `E2BExecutor` | 部署到 [E2B](https://e2b.dev/) 云端沙箱运行 | ✅ 高（云端隔离） | 云端部署、SaaS 产品 |
-| `"wasm"` | `WasmExecutor` | 通过 Deno + Pyodide 在本地 WebAssembly 沙箱运行 | ✅ 高（进程级隔离） | 轻量级本地隔离 |
-
-### 5.2 Shell 路径自动检测
+### 6.1 Shell 路径自动检测
 
 Shell 路径通过智能检测链自动确定，无需手动配置。仅支持 **bash** 和 **zsh**（其他 shell 如 sh、fish、csh 等因语法差异不兼容而被排除）。
 
@@ -463,277 +424,6 @@ shell_settings:
 ```
 
 > 检测结果在进程生命周期内缓存，不会每次命令都重新检测。
-
-### 5.3 `local` — 本地执行器
-
-在宿主机环境中直接运行 AI 生成的 Python 代码。这是默认模式，无需任何额外依赖。
-
-**底层类**：`smolagents.local_python_executor.LocalPythonExecutor`
-
-#### executor_kwargs 参数
-
-| 参数 | 类型 | 默认值 | 说明 |
-|------|------|--------|------|
-| `max_print_outputs_length` | `int` | `50000` | 单次代码执行中 `print()` 输出的最大字符数。超出部分会被截断 |
-| `timeout_seconds` | `int \| null` | `30` | 单个生成 Python 代码块的墙钟超时阈值，包含同步 Worker 和工具调用的等待时间。`null` 关闭此超时 |
-
-调用方 Agent 的 YAML 应声明有限预算，覆盖同步 Worker 完整调用中的模型请求和工具执行。仓库的复杂 checkpoint Supervisor 与其他多 Worker Application 一样使用 `1200` 秒。Worker 自身的执行预算不会延长调用方的预算。
-
-该超时不代表取消执行。当前固定版本的本地执行器会等待 Python 线程结束，再返回超时错误；即使 Worker 或工具在超时阈值之后成功完成，调用方仍会收到错误，此时副作用可能已经提交。在同一次 attempt 内重试相同 Worker 输入仍会创建新调用；checkpoint resume 不提供通用的重试去重。
-
-> `additional_functions` 由框架根据 `code_agent.additional_functions` 配置自动注入，无需在 `executor_kwargs` 中手动指定。
-
-#### 配置示例
-
-```yaml
-# 最简配置（推荐开发环境使用）
-execution_env:
-  type: "local"
-```
-
-```yaml
-# 限制输出长度
-execution_env:
-  type: "local"
-  executor_kwargs:
-    max_print_outputs_length: 100000
-    timeout_seconds: 120
-```
-
-### 5.4 `docker` — Docker 容器执行器
-
-在 Docker 容器内启动 Jupyter Kernel，通过 HTTP 通信执行代码。代码运行在隔离的容器文件系统中，无法直接修改宿主机。
-
-**底层类**：`smolagents.remote_executors.DockerExecutor`
-
-#### 前置要求
-
-- 安装扩展依赖：`pip install 'smolagents[docker]'`
-- Docker daemon 已启动并可用
-
-#### executor_kwargs 参数
-
-| 参数 | 类型 | 默认值 | 说明 |
-|------|------|--------|------|
-| `host` | `str` | `"127.0.0.1"` | Docker 容器绑定的主机地址 |
-| `port` | `int` | `8888` | Docker 容器绑定的端口号 |
-| `image_name` | `str` | `"jupyter-kernel"` | 使用的 Docker 镜像名称 |
-| `build_new_image` | `bool` | `true` | 是否在启动时强制重新构建 Docker 镜像。设为 `false` 可复用已有镜像加快启动 |
-| `container_run_kwargs` | `dict` | `{}` | 透传给 `docker.containers.run()` 的额外参数（如 `mem_limit`、`network` 等） |
-
-> ⚠️ Docker 执行器**不支持** `additional_functions` 注入（框架会自动跳过）。
-> ⚠️ `code_agent.additional_authorized_imports` 中的通配符 `"*"` 会被自动剥离，仅保留显式列出的模块。
-
-#### 配置示例
-
-```yaml
-# 基础 Docker 配置
-execution_env:
-  type: "docker"
-  executor_kwargs:
-    image_name: "my-jupyter-kernel:latest"
-```
-
-```yaml
-# 完整 Docker 配置（复用已有镜像 + 自定义端口 + 内存限制）
-execution_env:
-  type: "docker"
-  executor_kwargs:
-    host: "127.0.0.1"
-    port: 9999
-    image_name: "agentloom-smolagents-jupyter-kernel:local"
-    build_new_image: false
-    container_run_kwargs:
-      mem_limit: "2g"
-      network: "host"
-```
-
-### 5.5 `e2b` — E2B 云端沙箱执行器
-
-将代码执行托管到 [E2B](https://e2b.dev/) 云端沙箱。适合 SaaS 产品或需要完全隔离的生产环境。
-
-**底层类**：`smolagents.remote_executors.E2BExecutor`
-
-#### 前置要求
-
-- 安装扩展依赖：`pip install 'smolagents[e2b]'`
-- 设置环境变量 `E2B_API_KEY`（从 [E2B Dashboard](https://e2b.dev/dashboard) 获取）
-
-#### executor_kwargs 参数
-
-`executor_kwargs` 中的所有参数会**直接透传**给 `e2b_code_interpreter.Sandbox` 构造函数。常用参数包括：
-
-| 参数 | 类型 | 默认值 | 说明 |
-|------|------|--------|------|
-| `timeout` | `int` | — | 沙箱超时时间（秒） |
-
-> 完整参数列表参见 [E2B 官方文档](https://e2b.dev/docs)。
-> ⚠️ 与 Docker 执行器类似，`additional_functions` 不会注入，通配符 `"*"` 会被自动剥离。
-
-#### 配置示例
-
-```yaml
-# 基础 E2B 配置
-execution_env:
-  type: "e2b"
-  executor_kwargs:
-    timeout: 300
-```
-
-```yaml
-# E2B 沙箱 + 长任务超时
-execution_env:
-  type: "e2b"
-  executor_kwargs:
-    timeout: 600
-```
-
-### 5.6 `wasm` — WebAssembly 本地沙箱执行器
-
-通过 Deno 运行 Pyodide（Python 的 WebAssembly 编译版本），在本地提供进程级隔离的 Python 执行环境。无需 Docker，也无需云端 API。
-
-**底层类**：`smolagents.remote_executors.WasmExecutor`
-
-#### 前置要求
-
-- 安装 [Deno](https://deno.land/)（`curl -fsSL https://deno.land/install.sh | sh`）
-
-#### executor_kwargs 参数
-
-| 参数 | 类型 | 默认值 | 说明 |
-|------|------|--------|------|
-| `deno_path` | `str` | `"deno"` | Deno 可执行文件路径。默认从 `$PATH` 中查找 |
-| `deno_permissions` | `list[str]` | *(见下方)* | Deno 运行时权限标志列表 |
-| `timeout` | `int` | `60` | 单次代码执行的超时时间（秒） |
-
-**`deno_permissions` 默认值**（允许 Pyodide 从 CDN 下载包和使用本地缓存）：
-
-```
---allow-net=0.0.0.0:8000,cdn.jsdelivr.net:443,pypi.org:443,files.pythonhosted.org:443
---allow-read=~/.cache/deno
---allow-write=~/.cache/deno
-```
-
-> ⚠️ 与 Docker/E2B 执行器不同，Wasm 执行器目前尚未被限制，`additional_functions` 会被注入。但通配符 `"*"` 依然会被自动剥离。
-
-#### 配置示例
-
-```yaml
-# 基础 WASM 配置
-execution_env:
-  type: "wasm"
-```
-
-```yaml
-# 自定义 Deno 路径 + 延长超时
-execution_env:
-  type: "wasm"
-  executor_kwargs:
-    deno_path: "/usr/local/bin/deno"
-    timeout: 120
-```
-
-```yaml
-# 完整 WASM 配置（限制网络权限）
-execution_env:
-  type: "wasm"
-  executor_kwargs:
-    deno_path: "/usr/local/bin/deno"
-    timeout: 90
-    deno_permissions:
-      - "--allow-net=cdn.jsdelivr.net:443,pypi.org:443"
-      - "--allow-read=~/.cache/deno"
-      - "--allow-write=~/.cache/deno"
-```
-
-### 5.7 远程执行器的通用行为
-
-当 `execution_env.type` 为 `"docker"`、`"e2b"` 或 `"wasm"` 时，框架会自动执行以下安全调整：
-
-| 行为 | 说明 |
-|------|------|
-| **剥离 `additional_functions`** | 远程执行器的构造函数不支持该参数，框架会自动跳过注入 |
-| **剥离通配符 `"*"` import** | `code_agent.additional_authorized_imports` 中的 `"*"` 会被移除，仅保留显式列出的模块名 |
-
-这意味着在远程执行器中，建议显式列出所需的导入模块：
-
-```yaml
-# ❌ 不推荐：通配符在远程执行器中会被自动剥离
-code_agent:
-  additional_authorized_imports: "*"
-
-# ✅ 推荐：显式列出需要的模块
-code_agent:
-  additional_authorized_imports:
-    - "json"
-    - "re"
-    - "math"
-    - "datetime"
-    - "pandas"
-    - "numpy"
-```
-
----
-
-## 6. code_agent — CodeAgent 代码执行权限
-
-控制 AI 自动生成并运行的 Python 代码的可用边界。仅在 `tool_call_type: "code_act"` 模式下生效。
-
-**YAML 路径**：`code_agent.*`
-
-| 参数 | 类型 | 默认值 | 必选 | 说明 |
-|------|------|--------|------|------|
-| `code_agent.additional_authorized_imports` | `str` \| `list[str]` | `[]`（框架 fallback） / `"*"`（仓库示例） | ❌ 否 | 允许 AI 代码导入的 Python 模块白名单 |
-| `code_agent.additional_functions` | `str` \| `list[str]` | `[]`（框架输入 fallback） / `"*"`（仓库示例） | ❌ 否 | 允许 AI 代码调用的 Python 内置函数白名单 |
-
-### 6.1 additional_authorized_imports
-
-| 配置值 | 行为 |
-|--------|------|
-| `"*"` 或 `["*"]` | 允许导入环境内所有模块（**最高权限**） |
-| `["json", "re", "os"]` | 仅允许白名单中的模块，其他 import 会报错 |
-
-### 6.2 additional_functions
-
-| 配置值 | 行为 |
-|--------|------|
-| `"*"` 或 `["*"]` | 允许调用所有 `builtins` 中的可调用对象（包括 `open`, `exec`, `eval` 等高危函数） |
-| `["print", "len", "range"]` | 仅允许白名单中的内置函数 |
-
-> ⚠️ 如果指定了不存在的内置函数名，会抛出 `AttributeError`：`'xxx' is not a valid Python built-in function.`
-
-### 6.3 通配符在远程执行器中的行为
-
-当 `execution_env.type` 为 `"docker"`, `"e2b"` 或 `"wasm"` 时，通配符 `"*"` 会在运行时被剥离（防止远程环境的副作用），仅保留显式列出的条目。
-
-**安全配置建议**：
-
-```yaml
-# 本地开发（可信环境）
-code_agent:
-  additional_authorized_imports: "*"
-  additional_functions: "*"
-
-# 生产环境（收紧权限）
-code_agent:
-  additional_authorized_imports:
-    - "json"
-    - "re"
-    - "math"
-    - "datetime"
-    - "collections"
-  additional_functions:
-    - "print"
-    - "len"
-    - "range"
-    - "sorted"
-    - "enumerate"
-    - "zip"
-    - "map"
-    - "filter"
-```
-
----
 
 ## 7. runtime 与 logging — 运行时存储与日志
 
@@ -1205,7 +895,7 @@ Run 证据与 task 恢复状态在同一个 runtime root 下保持独立生命�
 - 日志关闭、轮转和 runtime retention 不会删除 checkpoint
 - Agent workspace 与 run artifacts 保持独立；Application `output_dir` 仍由 Application 管理
 - Supervisor Goal 会增加 canonical `goal.json`；完成时先复制到 run
-  manifest/audit 再执行成功清理，`budget_limited` 则保留该文件用于 resume
+  manifest/audit 再执行成功清理，中断时保留该文件用于 resume
 
 完整存储契约见 [Checkpoint 恢复](checkpoint.md)，Goal 生命周期规则见
 [Goal Mode](goal_mode.md)。
@@ -1310,8 +1000,6 @@ checkpoint:
 | `smart_summary` | `bool` | `True` |
 | `context_engine` | `dict[str, Any]` | `{}` |
 | `model` | `dict[str, Any]` | `{}` |
-| `execution_env` | `dict[str, Any]` | `{}` |
-| `code_agent` | `dict[str, Any]` | `{}` |
 | `tools` | `list[Any]` | `[]` |
 | `default_toolsets` | `list[str]` | `[]` |
 | `toolsets` | `list[str]` | `[]` |
@@ -1389,8 +1077,6 @@ applications/my_app/
 | `logging` | ✅ 支持 | ❌ 拒绝 | ❌ 拒绝 |
 | `checkpoint` | ✅ 支持 | ✅ 支持 | ❌ 忽略 |
 | `tool_access_control` | ✅ 支持 | ✅ 支持 | ✅ 支持 |
-| `execution_env` | ✅ 支持 | ✅ 支持 | ✅ 支持 |
-| `code_agent` | ✅ 支持 | ✅ 支持 | ✅ 支持 |
 | `tools` | ✅ 支持 | ✅ 支持 | ✅ 支持 (覆盖字典) |
 | `prompt` | ✅ 支持 | ✅ 支持 | ✅ 支持 |
 

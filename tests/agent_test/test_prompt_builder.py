@@ -9,11 +9,11 @@ from __future__ import annotations
 import logging
 from pathlib import Path
 
-import pytest
-
 import agentloom.runtime.prompts.prompt_builder as pb_module
+import pytest
 from agentloom.runtime.prompts.prompt_builder import (
     build_prompt_templates,
+    load_base_prompt_templates,
     resolve_model_family_prompt_path,
     resolve_prompt_path,
 )
@@ -55,7 +55,7 @@ class TestResolveModelFamilyPromptPath:
     def test_returns_path_when_variant_exists(self, monkeypatch, tmp_path):
         family_dir = tmp_path / "myfamily"
         family_dir.mkdir()
-        variant = family_dir / "structured_code_agent.yaml"
+        variant = family_dir / "toolcalling_agent.yaml"
         variant.write_text("system_prompt: variant", encoding="utf-8")
 
         monkeypatch.setattr(pb_module, "_PROMPTS_DIR", tmp_path)
@@ -66,7 +66,7 @@ class TestResolveModelFamilyPromptPath:
     def test_family_is_case_insensitive(self, monkeypatch, tmp_path):
         family_dir = tmp_path / "anthropic"
         family_dir.mkdir()
-        variant = family_dir / "structured_code_agent.yaml"
+        variant = family_dir / "toolcalling_agent.yaml"
         variant.write_text("system_prompt: anthropic-variant", encoding="utf-8")
 
         monkeypatch.setattr(pb_module, "_PROMPTS_DIR", tmp_path)
@@ -111,7 +111,7 @@ class TestResolvePromptPath:
     def test_model_family_variant_when_no_config(self, monkeypatch, tmp_path):
         family_dir = tmp_path / "testfamily"
         family_dir.mkdir()
-        variant = family_dir / "structured_code_agent.yaml"
+        variant = family_dir / "toolcalling_agent.yaml"
         variant.write_text("system_prompt: family-variant", encoding="utf-8")
         monkeypatch.setattr(pb_module, "_PROMPTS_DIR", tmp_path)
 
@@ -138,6 +138,109 @@ class TestResolvePromptPath:
         )
         assert is_explicit is False
         assert path is None
+
+
+# ---------------------------------------------------------------------------
+# load_base_prompt_templates
+# ---------------------------------------------------------------------------
+
+
+class TestLoadBasePromptTemplates:
+    def test_explicit_template_loads_without_runtime_injections(
+        self,
+        monkeypatch,
+        tmp_path,
+    ):
+        prompt = tmp_path / "explicit.yaml"
+        prompt.write_text(
+            "system_prompt: Base only.\nplanning: {}\n",
+            encoding="utf-8",
+        )
+        monkeypatch.setattr(
+            pb_module,
+            "get_agent_environment_prompt",
+            lambda: pytest.fail("base loader injected environment"),
+        )
+        monkeypatch.setattr(
+            pb_module,
+            "build_skills_prompt",
+            lambda *_args, **_kwargs: pytest.fail("base loader injected skills"),
+        )
+        monkeypatch.setattr(
+            pb_module,
+            "todo_policy_for_mode",
+            lambda *_args, **_kwargs: pytest.fail("base loader injected Todo"),
+        )
+
+        result = load_base_prompt_templates(
+            prompt_template_path=str(prompt),
+            model_id="provider/model",
+            agent_root=tmp_path,
+            logger=_LOGGER,
+        )
+
+        assert result == {
+            "system_prompt": "Base only.",
+            "planning": {},
+        }
+
+    def test_model_family_and_local_override_order_is_preserved(
+        self,
+        monkeypatch,
+        tmp_path,
+    ):
+        family_dir = tmp_path / "provider"
+        family_dir.mkdir()
+        family = family_dir / "toolcalling_agent.yaml"
+        family.write_text("system_prompt: family\n", encoding="utf-8")
+        local = tmp_path / "toolcalling_agent.yaml"
+        local.write_text("system_prompt: local\n", encoding="utf-8")
+        monkeypatch.setattr(pb_module, "_PROMPTS_DIR", tmp_path)
+
+        selected_family = load_base_prompt_templates(
+            prompt_template_path=None,
+            model_id="provider/model",
+            agent_root=tmp_path,
+            logger=_LOGGER,
+        )
+        selected_local = load_base_prompt_templates(
+            prompt_template_path=None,
+            model_id="other/model",
+            agent_root=tmp_path,
+            logger=_LOGGER,
+        )
+
+        assert selected_family == {"system_prompt": "family"}
+        assert selected_local == {"system_prompt": "local"}
+
+    def test_explicit_missing_or_invalid_template_never_falls_back(
+        self,
+        monkeypatch,
+        tmp_path,
+    ):
+        monkeypatch.setattr(
+            pb_module,
+            "_load_smolagents_builtin",
+            lambda: pytest.fail("explicit prompt unexpectedly fell back"),
+        )
+
+        with pytest.raises(ValueError, match="does not exist"):
+            load_base_prompt_templates(
+                prompt_template_path=str(tmp_path / "missing.yaml"),
+                model_id=None,
+                agent_root=tmp_path,
+                logger=_LOGGER,
+            )
+
+        invalid = tmp_path / "invalid.yaml"
+        invalid.write_text("- not\n- a\n- mapping\n", encoding="utf-8")
+        with pytest.raises(ValueError, match="Failed to load"):
+            load_base_prompt_templates(
+                prompt_template_path=str(invalid),
+                model_id=None,
+                agent_root=tmp_path,
+                logger=_LOGGER,
+            )
 
 
 # ---------------------------------------------------------------------------
@@ -174,7 +277,6 @@ class TestBuildPromptTemplates:
             skill_catalog=SkillCatalog.empty(),
             skill_tool_enabled=False,
             logger=_LOGGER,
-            tool_call_type="code_act",
             todo_mode="auto",
         )
 
@@ -195,7 +297,6 @@ class TestBuildPromptTemplates:
             skill_catalog=SkillCatalog.empty(),
             skill_tool_enabled=False,
             logger=_LOGGER,
-            tool_call_type="tool_call",
             todo_mode="on",
         )
 
@@ -266,7 +367,7 @@ class TestBuildPromptTemplates:
     def test_returns_none_on_fallback_load_failure(self, monkeypatch, tmp_path):
         """When smolagents built-in fails to load, returns None."""
         # Make the extensions loader raise an error
-        def _broken_builtin(tool_call_type, use_structured_output=True):
+        def _broken_builtin():
             raise RuntimeError("simulated failure")
         monkeypatch.setattr(pb_module, "_load_smolagents_builtin", _broken_builtin)
 

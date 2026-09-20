@@ -1,8 +1,8 @@
 name: "test_background_task"
+agent_runtime: smolagents
 description: "Validate background task management: explicit background execution, task monitoring, task killing, and task listing"
 
 model_type: "powerful"
-tool_call_type: "code_act"
 
 workflow: |
   # Background Task Management Validation Workflow

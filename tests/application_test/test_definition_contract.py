@@ -12,7 +12,12 @@ def write(path: Path, content: str) -> Path:
     return path
 
 
-BASE = "name: demo\ndescription: Demo\nworkflow: Run the task.\n"
+BASE = (
+    "name: demo\n"
+    "agent_runtime: smolagents\n"
+    "description: Demo\n"
+    "workflow: Run the task.\n"
+)
 SCHEMA = """agent_function_schema:
   description: Work on one task.
   inputs:
@@ -87,7 +92,7 @@ def test_recursive_worker_topology_is_rejected(tmp_path):
         tmp_path,
         str(root.relative_to(tmp_path)),
         load_agent_definition(root),
-        catalog=("test", {"test": {"model": "openai/test"}}),
+        catalog=("test", {"test": {"model": "openai/test", "adapter": "openai_chat"}}),
     )
     assert any("cycle" in error.lower() and "root.yaml" in error for error in errors), errors
 
@@ -101,7 +106,7 @@ def project_config(root):
     )
     write(
         root / "config/llm.yaml",
-        "model:\n  default_model_type: test\n  test: {model: openai/test, api_key: hidden-key}\n  summary: {model: openai/test}\n",
+        "model:\n  default_model_type: test\n  test: {model: openai/test, adapter: openai_chat, api_key: hidden-key}\n  summary: {model: openai/test, adapter: openai_chat}\n",
     )
     return load_project_config(root)
 
@@ -175,7 +180,13 @@ def test_model_catalog_selection_preserves_case_and_empty_fallback(tmp_path):
     from agentloom.application.definition import selected_model_type
 
     project_config(tmp_path)
-    catalog = ("TEST", {"test": {"model": "openai/test"}, "summary": {"model": "openai/test"}})
+    catalog = (
+        "TEST",
+        {
+            "test": {"model": "openai/test", "adapter": "openai_chat"},
+            "summary": {"model": "openai/test", "adapter": "openai_chat"},
+        },
+    )
     assert selected_model_type({"model_type": "  TEST "}, catalog) == "test"
     assert selected_model_type({"model_type": ""}, catalog) == "test"
     assert selected_model_type({"model_type": "  "}, catalog) == "test"
@@ -186,7 +197,10 @@ def test_model_catalog_selection_preserves_case_and_empty_fallback(tmp_path):
 def test_summary_profile_requirement_matches_runtime_catalog(tmp_path):
     from agentloom.configuration.config import load_project_config
 
-    write(tmp_path / "config/llm.yaml", "model:\n  default_model_type: test\n  test: {model: openai/test}\n")
+    write(
+        tmp_path / "config/llm.yaml",
+        "model:\n  default_model_type: test\n  test: {model: openai/test, adapter: openai_chat}\n",
+    )
     path = write(tmp_path / "applications/demo/workflows/root.yaml", BASE)
     with pytest.raises(ValueError, match="summary.*required"):
         load_project_config(tmp_path)
@@ -296,7 +310,7 @@ def test_skill_instructions_are_pinned_for_each_runtime_definition_and_refresh_o
 
     class SnapshotAgent(RoleDrivenAgent):
         def _role_profile(self):
-            return AgentRoleProfile(agent_type=AgentType.WORKER, tool_call_type="tool_call")
+            return AgentRoleProfile(agent_type=AgentType.WORKER)
 
         def _get_tools(self):
             return []
@@ -588,7 +602,7 @@ def test_model_cache_tracks_profile_content_across_invocations(tmp_path):
         first = manager.get_litellm_config(ModelType("test"))
         write(
             tmp_path / "config/llm.yaml",
-            "model:\n  default_model_type: test\n  test: {model: openai/changed, api_key: updated-key}\n  summary: {model: openai/test}\n",
+            "model:\n  default_model_type: test\n  test: {model: openai/changed, adapter: openai_chat, api_key: updated-key}\n  summary: {model: openai/test, adapter: openai_chat}\n",
         )
         still_running = manager.get_litellm_config(ModelType("test"))
         assert still_running is first

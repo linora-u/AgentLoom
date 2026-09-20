@@ -1,9 +1,9 @@
 name: "fallback_demo_worker"
+agent_runtime: smolagents
 description: |
   默认 logger 回退演示用子 agent。
 
 model_type: "powerful"
-tool_call_type: "code_act"
 
 workflow: |
   # Worker Demo Workflow
@@ -27,5 +27,3 @@ tools:
   - name: "shell_tool"
 
 worker_agents: []
-execution_env:
-  type: "local"

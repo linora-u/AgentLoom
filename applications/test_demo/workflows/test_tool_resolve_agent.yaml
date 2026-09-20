@@ -1,40 +1,24 @@
 name: "test_tool_resolve"
+agent_runtime: smolagents
 description: "Validate explicit catalog-backed tool resolution and metadata loading"
 
 model_type: "powerful"
-tool_call_type: "code_act"
 max_steps: 5
 
 workflow: |
   # Tool Resolution Validation
 
-  Execute one Python code block that calls the tools below directly. Do not
-  split this into multiple code blocks. Do not output prose outside the code
-  block.
-
-  ```python
-  results = []
-
-  grep_result = grep_search(pattern="class ToolSpec", path="src/tools/catalog.py")
-  results.append(("grep_search", "ToolSpec" in grep_result, grep_result))
-
-  glob_result = glob_search(pattern="*.yaml", path="config/")
-  results.append(("glob_search", "system.yaml" in glob_result, glob_result))
-
-  shell_result = shell_tool(command="echo hello_from_shell")
-  results.append(("shell_tool", "hello_from_shell" in shell_result, shell_result))
-
-  read_result = read_file(file_path="config/system.yaml", offset=1, limit=20)
-  results.append(("read_file", "AgentLoom" in read_result and "System Information" in read_result, read_result))
-
-  ok = all(item[1] for item in results)
-  lines = ["TOOL_RESOLVE_VALIDATION: " + ("PASS" if ok else "FAIL")]
-  for name, passed, detail in results:
-      lines.append(f"{name}: {'PASS' if passed else 'FAIL'}")
-      if not passed:
-          lines.append(str(detail))
-  final_answer("\n".join(lines))
-  ```
+  Use native structured tool calls:
+  1. Call `grep_search(pattern="class ToolSpec", path="src/tools/catalog.py")`
+     and require `ToolSpec` in the actual result.
+  2. Call `glob_search(pattern="*.yaml", path="config/")` and require
+     `system.yaml`.
+  3. Call `shell_tool(command="echo hello_from_shell")` and require the marker.
+  4. Call `read_file(file_path="config/system.yaml", offset=1, limit=20)` and
+     require both `AgentLoom` and `System Information`.
+  5. Call `final_answer` with `TOOL_RESOLVE_VALIDATION: PASS` only if every
+     actual result passed. Include one PASS/FAIL row per tool and failing
+     evidence.
 
 tools:
   - name: "grep_search"
@@ -43,6 +27,3 @@ tools:
   - name: "read_file"
 
 worker_agents: []
-
-execution_env:
-  type: "local"

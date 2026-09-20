@@ -1,4 +1,5 @@
 name: "dir_architecture_analysis"
+agent_runtime: smolagents
 description: |
   对单个目录进行 LLM 架构分析。
   接收 dir_path 和 index_content（由调用方前置读取），
@@ -6,7 +7,6 @@ description: |
   不做文件读写，只做分析。
 
 model_type: "powerful"
-tool_call_type: "tool_call"
 concurrency: auto
 
 workflow: |

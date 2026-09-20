@@ -6,6 +6,7 @@
 
 ```yaml
 name: "<agent_name>"
+agent_runtime: "smolagents"
 description: "<一两句话角色定位>"
 workflow: |
   <完整执行协议>
@@ -23,9 +24,9 @@ schedule 目标与执行复用同一解析语义，包含嵌套 Application 和 
 
 ```yaml
 name: "<app_name>"
+agent_runtime: "smolagents"
 description: "<Supervisor 角色>"
 model_type: "powerful"
-tool_call_type: "tool_call"
 max_steps: 80
 worker_agents:
   - path: "applications/<app_name>/workflows/worker_agents/<worker>.yaml"
@@ -38,28 +39,27 @@ workflow: |
 
 - `worker_agents` 只支持 `path`，不要写 `name`。
 - `path` 支持绝对路径、AgentLoom 根目录相对路径、`worker_agents/` 下文件名、或不带后缀的 Worker 名；生成时推荐写完整项目相对路径。
-- Supervisor 推荐 `tool_call`，因为 Worker 调用、参数和结果可结构化审计；只有需要 Python 控制流时才用 `code_act`。
+- `agent_runtime` 必填；当前唯一已注册值为 `smolagents`。缺失、`langgraph` 或其他值都会在预检阶段失败，不会回退。
+- Agent 只通过 provider 原生结构化工具调用执行 Tool。
 
 长期目标可在顶层 Supervisor 配置：
 
 ```yaml
 goal:
   enabled: true
-  token_budget: 120000  # 可选；省略为无限制
 ```
 
-只接受 `goal: true/false` 或显式包含 `enabled: bool` 的 mapping；mapping 仅允许
-`enabled` 与正整数 `token_budget`。Goal 模式推荐单个多行 workflow；list 会按顺序
-编号并合并为一个目标上下文。Goal 的完成、预算、resume、checkpoint 和 schedule
+只接受 `goal: true/false` 或显式包含 `enabled: bool` 的 mapping；旧 `token_budget` 静默忽略。Goal 模式推荐单个多行 workflow；list 会按顺序
+编号并合并为一个目标上下文。Goal 的完成、resume、checkpoint 和 schedule
 语义见项目 `docs/cn/goal_mode.md`。
 
 ## Worker
 
 ```yaml
 name: "<worker_name>"
+agent_runtime: "smolagents"
 description: "<Worker 职责>"
 model_type: "powerful"
-tool_call_type: "code_act"
 max_steps: 40
 todo:
   mode: "auto"
@@ -92,17 +92,17 @@ workflow: |
 - `model_type` 必须存在于 `config/llm.yaml`。
 - 不写 `model_type` 时依赖 `model.default_model_type`，但生成新 Application 时推荐显式写出实际可用类型。
 - `summary` 模型类型是 `smart_summary` 依赖；`config/llm.yaml` 中只要配置了模型类型，就必须包含 `summary`。
-- `config/llm.yaml` 的模型类型支持 `supports_structured_output`；未知字段会作为 `extra_completion_params` 透传给 `litellm.completion()`。
-- `supports_native_tool_calls` 已删除，不能写进 `config/llm.yaml`。`tool_choice` 如需使用只能作为 provider 参数透传，不是能力探测或文本兜底开关。
-- `tool_call_type: tool_call` 使用结构化 tools schema；工具名必须来自本轮可用工具，参数只做 schema-bound 窄化转换。不要把 prose/free-text tool call 当成可执行格式。
-- `execution_env.type` 只支持 `local` / `docker` / `e2b` / `wasm`；`docker` / `e2b` 时默认工具不会自动加载。
+- 每个模型类型（包括 `summary`）必须显式声明 `adapter`，合法值为 `openai_chat`、`openai_responses`、`anthropic_messages`。
+- `model` 只是传给 LiteLLM 的不透明模型名；不能根据名称或前缀推断 `adapter`。
+- 未知字段会作为 `extra_completion_params` 透传给 LiteLLM；`adapter` 是已知字段，不会透传给 provider。
+- Agent 使用结构化 tools schema；工具名必须来自本轮可用工具，参数只做 schema-bound 窄化转换。不要把 prose/free-text tool call 当成可执行格式。
 - 完整配置面、覆盖层级、system/llm/Skill/Hook/MCP/checkpoint 字段见 `configuration-surface.md`。
 
 Agent YAML 当前可覆盖的系统配置白名单：
 
 ```text
 system, model_request_headers, smart_summary, context_engine,
-tool_access_control, execution_env, code_agent, tools, shell_settings,
+tool_access_control, tools, shell_settings,
 default_toolsets, toolsets, prompt, mcp_servers, self_learning, hooks
 ```
 

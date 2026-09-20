@@ -1,7 +1,7 @@
 name: "memory_review_off_analysis"
+agent_runtime: smolagents
 description: "Analyze one de-identified operational case as a normal Application."
 model_type: "summary"
-tool_call_type: "tool_call"
 max_steps: 6
 
 workflow: |

@@ -20,7 +20,6 @@ def _provider() -> GoalStateProvider:
         GoalState.create(
             objective="Ship Goal mode.",
             objective_fingerprint="abc123",
-            token_budget=None,
         )
     )
 

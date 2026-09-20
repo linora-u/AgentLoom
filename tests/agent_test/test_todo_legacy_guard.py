@@ -7,7 +7,7 @@ PROJECT_ROOT = Path(__file__).resolve().parents[2]
 
 def test_legacy_todo_runtime_and_prompt_contracts_are_absent() -> None:
     runtime_files = [
-        PROJECT_ROOT / "src/runtime/loom_mixin.py",
+        PROJECT_ROOT / "src/adapters/smolagents/loom_mixin.py",
         PROJECT_ROOT / "src/runtime/agent.py",
         PROJECT_ROOT / "src/tools/todo/todo_write.py",
     ]

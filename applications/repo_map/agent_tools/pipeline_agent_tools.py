@@ -14,7 +14,7 @@ Pipeline Agent Tools for repo_map.
 
 设计原则：
 - 子 Agent 通过 YamlAgentFactory.create_agent_as_tool() 懒加载，避免重复初始化
-- for 循环在 Python 层实现，比 LLM CodeAct 更可靠，错误处理精确
+- for 循环在确定性工具层实现，避免模型编排循环，错误处理更精确
 - 每次迭代立即写回 progress.json，防止进程崩溃丢失进度
 - 失败目录记录 error_msg + error_trace，主 Agent 读摘要后决策
 """

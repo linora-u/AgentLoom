@@ -6,11 +6,10 @@ import logging
 from pathlib import Path
 from typing import Any, Literal, get_args
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
-
 from agentloom.configuration.model_request_header_profiles import (
     MODEL_REQUEST_HEADER_PROFILE_NAMES,
 )
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 TodoMode = Literal["auto", "on", "off"]
 TODO_MODES = frozenset(get_args(TodoMode))
@@ -253,7 +252,7 @@ class ModelRequestHeadersSettings(BaseModel):
         return value
 
     @model_validator(mode="after")
-    def _validate_selected_profile(self) -> "ModelRequestHeadersSettings":
+    def _validate_selected_profile(self) -> ModelRequestHeadersSettings:
         builtin_profiles = {
             "agentloom",
             "generic",
@@ -436,8 +435,6 @@ class RootSettings(BaseModel):
     smart_summary: bool = True
     context_engine: dict[str, Any] = Field(default_factory=dict)
     model: dict[str, Any] = Field(default_factory=dict)
-    execution_env: dict[str, Any] = Field(default_factory=dict)
-    code_agent: dict[str, Any] = Field(default_factory=dict)
     tools: list[Any] = Field(default_factory=list)
     default_toolsets: list[str] = Field(default_factory=list)
     toolsets: list[str] = Field(default_factory=list)

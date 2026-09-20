@@ -327,6 +327,12 @@ class RuntimeMigration:
         if checkpoint is None:
             reason = "invalid checkpoint" if checkpoint_path.exists() else "missing checkpoint"
             return SkippedMigration(task_dir, task_id, reason)
+        if not isinstance(checkpoint.get("runtime_checkpoint"), dict):
+            return SkippedMigration(
+                task_dir,
+                task_id,
+                "unsupported legacy runtime checkpoint",
+            )
         task_created = next(
             (event for event in events if event.get("type") == "task_created"),
             {},
@@ -376,6 +382,12 @@ class RuntimeMigration:
                     task_dir,
                     task_id,
                     "invalid worker checkpoint",
+                )
+            if not isinstance(worker_checkpoint.get("runtime_checkpoint"), dict):
+                return SkippedMigration(
+                    task_dir,
+                    task_id,
+                    "unsupported legacy worker runtime checkpoint",
                 )
             metadata.append(worker_checkpoint)
         for heartbeat_path in (
@@ -456,8 +468,8 @@ class RuntimeMigration:
         # Use the exact loader and launch-time validation used by run_app.  In
         # particular, the full config (including explicit application_id/app/
         # application) must participate in application scope resolution.
-        from agentloom.runtime.factory import YamlAgentFactory
         from agentloom.application.runner import validate_required_yaml_fields
+        from agentloom.runtime.factory import YamlAgentFactory
 
         try:
             agent_config = YamlAgentFactory._load_config_from_file(path)
@@ -823,8 +835,17 @@ def _file_history_progress_state(task_dir: Path) -> str:
 
 
 def _checkpoint_has_memory(checkpoint: dict[str, Any]) -> bool:
-    steps = checkpoint.get("memory_steps")
-    return isinstance(steps, list) and len(steps) > 0
+    runtime_checkpoint = checkpoint.get("runtime_checkpoint")
+    if not isinstance(runtime_checkpoint, dict):
+        return False
+
+    from agentloom.runtime.agent_runtime import RuntimeCheckpointEnvelope
+
+    try:
+        envelope = RuntimeCheckpointEnvelope.from_dict(runtime_checkpoint)
+    except (TypeError, ValueError):
+        return False
+    return envelope.progress > 0
 
 
 def _application_id_from_workflow(workflow: Path, agent_root: Path) -> str:
@@ -920,9 +941,12 @@ def _worker_call_index(checkpoint: dict[str, Any], tree: dict[str, Any], worker_
     for call in calls:
         if not isinstance(call, dict):
             continue
+        value = call.get("call_index")
+        if isinstance(value, bool) or not isinstance(value, (int, str)):
+            continue
         try:
-            index = int(call.get("call_index"))
-        except (TypeError, ValueError):
+            index = int(value)
+        except ValueError:
             continue
         if index >= 0:
             indexes.append(index)
@@ -969,10 +993,8 @@ def validate_migrated_checkpoint(candidate: MigrationCandidate, destination: Pat
     if not progress:
         raise MigrationError(f"resumable progress missing for {candidate.task_id}")
 
-    from types import SimpleNamespace
-
+    from agentloom.runtime.agent_runtime import RuntimeCheckpointEnvelope
     from agentloom.runtime.checkpoint import CheckpointManager
-    from agentloom.runtime.checkpoint.coordinator import CheckpointCoordinator
 
     manager = CheckpointManager(
         "migration-validator",
@@ -985,19 +1007,17 @@ def validate_migrated_checkpoint(candidate: MigrationCandidate, destination: Pat
     if not isinstance(supervisor_checkpoint, dict):
         raise MigrationError(f"supervisor checkpoint unreadable for {candidate.task_id}")
 
-    sentinel = object()
-    holder = SimpleNamespace(memory=SimpleNamespace(steps=sentinel))
-    coordinator = CheckpointCoordinator(
-        manager,
-        candidate.task_id,
-        str(supervisor_checkpoint.get("task_text", "")),
-        resume=True,
-    )
-    coordinator.restore(holder)
-    if holder.memory.steps is sentinel:
-        raise MigrationError(f"supervisor restore failed for {candidate.task_id}")
-    if supervisor_checkpoint.get("memory_steps") and not holder.memory.steps:
-        raise MigrationError(f"supervisor memory was not restored for {candidate.task_id}")
+    raw_supervisor_runtime = supervisor_checkpoint.get("runtime_checkpoint")
+    if not isinstance(raw_supervisor_runtime, dict):
+        raise MigrationError(
+            f"supervisor runtime checkpoint missing for {candidate.task_id}"
+        )
+    try:
+        RuntimeCheckpointEnvelope.from_dict(raw_supervisor_runtime)
+    except (TypeError, ValueError) as exc:
+        raise MigrationError(
+            f"supervisor runtime checkpoint invalid for {candidate.task_id}"
+        ) from exc
 
     workers_dir = destination / "workers"
     if workers_dir.is_dir():
@@ -1018,11 +1038,19 @@ def validate_migrated_checkpoint(candidate: MigrationCandidate, destination: Pat
             )
             if not isinstance(worker_checkpoint, dict):
                 raise MigrationError(f"canonical worker checkpoint unreadable: {worker_path}")
-            raw_steps = worker_checkpoint.get("memory_steps") or []
-            if raw_steps and worker_checkpoint.get("status") != "completed":
-                worker_holder = SimpleNamespace(memory=SimpleNamespace(steps=[]))
-                if not coordinator.restore_worker(worker_holder, worker_name, call_index):
-                    raise MigrationError(f"worker restore failed for {worker_name} call {call_index}")
+            raw_worker_runtime = worker_checkpoint.get("runtime_checkpoint")
+            if not isinstance(raw_worker_runtime, dict):
+                raise MigrationError(
+                    f"worker runtime checkpoint missing for "
+                    f"{worker_name} call {call_index}"
+                )
+            try:
+                RuntimeCheckpointEnvelope.from_dict(raw_worker_runtime)
+            except (TypeError, ValueError) as exc:
+                raise MigrationError(
+                    f"worker runtime checkpoint invalid for "
+                    f"{worker_name} call {call_index}"
+                ) from exc
 
     context_store_dir = destination / "context_store"
     if context_store_dir.is_dir():

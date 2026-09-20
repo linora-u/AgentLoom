@@ -6,6 +6,8 @@
 > 关于 `config/llm.yaml`，请参阅 [LLM 配置文档](llm_config.md)。
 
 Agent YAML 是 AgentLoom 框架中**定义单个 Agent 行为**的配置文件，控制 Agent 的角色描述、工作流指令、可用工具、模型选择、执行环境、技能包等。Agent 分为 **Supervisor**（多 Agent 编排者）和 **Worker**（具体任务执行者）两种角色。
+Agent 运行时通过必填的 `agent_runtime` 选择；当前唯一已注册值是
+`smolagents`。所有 Tool 均通过模型原生结构化 tool call 调用。
 
 两种角色都支持 `.yaml`、`.yml` 和 `.md` 定义。Markdown 在 `yaml` 围栏代码块中
 声明配置，代码块外非空正文成为 `workflow`。Application Studio 的目录、详情、
@@ -26,8 +28,8 @@ Supervisor，并复用执行入口的定义读取器。Worker 仍通过 Supervis
   - [3.2 可选通用字段](#32-可选通用字段)
   - [3.3 Supervisor 专属字段](#33-supervisor-专属字段)
   - [3.4 Worker 专属字段](#34-worker-专属字段)
-  - [3.5 execution_env — 执行环境](#35-execution_env--执行环境)
-  - [3.6 tool_call_type — 交互模式](#36-tool_call_type--交互模式)
+  - [3.5 agent_runtime — Agent 运行时](#35-agent_runtime--agent-运行时)
+  - [3.6 结构化工具调用](#36-结构化工具调用)
   - [3.7 model_type — 模型选择](#37-model_type--模型选择)
   - [3.8 skills — 技能包配置](#38-skills--技能包配置)
   - [3.9 prompt — 自定义 Prompt](#39-prompt--自定义-prompt)
@@ -75,8 +77,9 @@ Supervisor (主 Agent)
 # 文件位置: applications/<app>/workflows/<agent_name>.yaml
 # ============================================================
 
-# ---- 必填字段 (3个) ----
+# ---- 必填字段 (4个) ----
 name: "my_check_agent"
+agent_runtime: "smolagents"
 description: |
   作为代码检查监督智能体，你的核心职责是...
 workflow: |
@@ -93,19 +96,14 @@ tools:
     function: "get_module_context"
 
 model_type: "powerful"                   # 可选: "powerful", "fast", "summary", 或自定义 key
-tool_call_type: "code_act"               # 可选: "code_act", "tool_call"
 
 # ---- Supervisor 专属 ----
 worker_agents:
   - path: "applications/my_app/workflows/worker_agents/project_scan.yaml"
   - path: "applications/my_app/workflows/worker_agents/data_analysis.yaml"
 
-# ---- 其他可选字段 ----
-execution_env:
-  type: "local"                          # 可选: "local", "docker", "e2b", "wasm"
-
 prompt:
-  path: "applications/my_app/sysprompt/code_agent.yaml"
+  path: "applications/my_app/sysprompt/agent_prompt.yaml"
 
 skills:
   paths:
@@ -120,8 +118,9 @@ skills:
 # 文件位置: applications/<app>/workflows/worker_agents/<name>.yaml
 # ============================================================
 
-# ---- 必填字段 (3个) ----
+# ---- 必填字段 (4个) ----
 name: "project_scan"
+agent_runtime: "smolagents"
 description: "项目结构扫描智能体"
 workflow: |
   你是一个资深工程师，负责...
@@ -139,7 +138,6 @@ tools:
     function: "get_module_context"
 
 model_type: "powerful"
-tool_call_type: "code_act"
 max_steps: 40                            # 最大执行步数 (默认: 80)
 planning_interval: 3                     # 每 N 步强制规划
 todo: {mode: "auto"}                     # auto | on | off
@@ -158,9 +156,6 @@ agent_function_schema:
       required: false
   output:
     description: "分析摘要文本，详细报告生成在 workspace 中"
-
-execution_env:
-  type: "local"
 ```
 
 ---
@@ -169,11 +164,12 @@ execution_env:
 
 ### 3.1 必填字段
 
-Supervisor 和 Worker 共有 3 个必填字段：
+Supervisor 和 Worker 共有 4 个必填字段：
 
 | 字段 | 类型 | 校验规则 | 说明 |
 |------|------|----------|------|
 | `name` | `str` | 非空字符串 | Agent 唯一标识符。Worker 中同时作为导出工具的函数名 |
+| `agent_runtime` | `str` | 必须是已注册值；当前仅 `smolagents` | 选择完整 Agent runtime。缺失或未知值在预检阶段失败 |
 | `description` | `str` | 非空字符串 | Agent 角色描述。Supervisor 的单字符串 workflow 会参与任务拼装；列表 workflow 项按用户编写内容直接执行 |
 | `workflow` | `str` 或 `list[str]` | 非空字符串，或非空且每项为非空字符串的列表 | 工作流指令文本。支持 Markdown 和 Mermaid 流程图。详见下方 [书写规范](#workflow-书写规范与建议) |
 
@@ -203,18 +199,16 @@ workflow:
 ```yaml
 goal:
   enabled: true
-  token_budget: 120000  # 可选；省略即无限制
 ```
 
-也可使用 `goal: true` / `goal: false`。Mapping 必须显式包含布尔 `enabled`，只允许
-可选正整数 `token_budget`，未知字段或宽松类型会直接失败。Worker YAML 不允许出现
-任何 `goal` key。
+也可使用 `goal: true` / `goal: false`。Mapping 必须显式包含布尔 `enabled`。
+旧 `token_budget` 字段静默忽略。Worker YAML 不允许出现任何 `goal` key。
 
 Goal 开启时，objective 由 `description + workflow + runtime task` 生成。推荐单个
 多行 workflow；如果配置 list，框架会按原顺序编号并合并成一个初始目标上下文，
 不会采用上面普通模式的逐项多 run 语义。普通 final 与 `max_steps` 只结束一个
 continuation segment；根 Supervisor 必须调用 `update_goal(complete, evidence)` 才会
-完成。Worker 模型用量计入同一可选软预算。配置、状态、恢复和可观测性详见
+完成。普通模型用量仍保留在运行时审计中。配置、状态、恢复和可观测性详见
 [Goal Mode](goal_mode.md)。
 
 #### Workflow 书写规范与建议
@@ -402,8 +396,6 @@ workflow: |
 |------|------|--------|------|
 | `tools` | `list[dict]` | `[]` | 工具列表。详见 [第 4 节](#4-工具配置详解) |
 | `model_type` | `str` | 已配置的全局 `default_model_type` | 模型选择。详见 [3.7](#37-model_type--模型选择) |
-| `tool_call_type` | `str` | `"code_act"` | Agent 交互模式。详见 [3.6](#36-tool_call_type--交互模式) |
-| `execution_env` | `dict` | `{type: "local"}` | 执行环境配置。详见 [3.5](#35-execution_env--执行环境) |
 | `prompt` | `str` 或 `dict` | 框架内置 | 自定义 System Prompt 模板。详见 [3.9](#39-prompt--自定义-prompt) |
 | `planning_interval` | `int` | 不设置 | 每 N 步强制规划。详见 [3.10](#310-planning_interval--规划间隔) |
 | `todo` | `dict` | `{mode: "auto"}` | 当前任务进度跟踪。详见 [3.11](#311-todomode--任务跟踪) |
@@ -428,78 +420,27 @@ workflow: |
 |------|------|--------|------|
 | `agent_function_schema` | `dict` | 不设置 | Worker 可调用工具契约。存在且合法时 Worker 被导出为工具。详见 [第 5 节](#5-worker-导出为可调用工具) |
 
-> ⚠️ **Worker 配置隔离**：Worker 的最终生效配置来自全局 / 应用配置叠加，再加上 **Worker 自己的 YAML**。它**不会**继承调用它的 Supervisor 的运行时覆盖项。如果 Worker 需要额外的文件系统或 Shell 权限，必须在 Worker YAML 中重复声明相应的白名单覆盖（例如 `tool_access_control.path_validation`）。
+> ⚠️ **Worker 配置隔离**：Worker 的最终生效配置来自全局 / 应用配置叠加，再加上 **Worker 自己的 YAML**。它**不会**继承调用它的 Supervisor 的权限覆盖项。如果 Worker 需要额外的文件系统或 Shell 权限，必须在 Worker YAML 中重复声明相应的白名单覆盖（例如 `tool_access_control.path_validation`）。
 
 ---
 
-### 3.5 `execution_env` — 执行环境
+### 3.5 `agent_runtime` — Agent 运行时
 
-| 子字段 | 类型 | 默认值 | 必填 | 可选值 | 说明 |
-|--------|------|--------|------|--------|------|
-| `type` | `str` | `"local"` | ❌ | `"local"` / `"docker"` / `"e2b"` / `"wasm"` | 执行器类型（自动转小写）。`"host"` 已移除 |
-| `executor_kwargs` | `dict` | `{}` | ❌ | 自由键值对 | 执行器参数，原样透传 |
-
-**`type` 各选项说明**：
-
-| 值 | 说明 | 默认工具加载 |
-|----|------|------------|
-| `"local"` | 本地执行，调用本机 Shell 和文件系统 | ✅ 加载 |
-| `"docker"` | Docker 容器执行 | ❌ 不加载 |
-| `"e2b"` | E2B 云端沙箱执行 | ❌ 不加载 |
-| `"wasm"` | WebAssembly 沙箱执行 | ❌ 不加载 |
-
-**校验规则**：`type` 必须是非空字符串且为上述 4 个值之一；`executor_kwargs` 必须是字典。Shell 路径自动从 `$SHELL` 环境变量检测。
-
-**示例**：
+每个 Supervisor 和 Worker 都必须显式配置：
 
 ```yaml
-# 本地执行
-execution_env:
-  type: "local"
-
-# Docker 远程执行
-execution_env:
-  type: "docker"
-  executor_kwargs:
-    host: "127.0.0.1"
-    port: 8888
-    image_name: "my-jupyter-kernel:local"
+agent_runtime: "smolagents"
 ```
 
-> 此字段可在 Agent YAML 中覆盖系统配置（属于 [overlay 白名单](#92-可覆盖字段白名单)）。
+当前唯一已注册值为 `smolagents`。缺失、空值、`langgraph` 或其他未知值都会在
+Application 预检阶段失败，不会默认选择或回退到其他 runtime。这个字段与
+`config/system.yaml` 中负责存储目录的全局 `runtime` mapping 无关。
 
-> ⚠️ **模式限制**：`execution_env` 仅在 `code_act` 模式下生效。在 `tool_call` 模式下，`executor_type` 和 `executor_kwargs` 会被静默忽略（`ToolCallingAgentV2` 不执行代码，因此执行环境配置不适用）。
+### 3.6 结构化工具调用
 
----
-
-### 3.6 `tool_call_type` — 交互模式
-
-| 可选值 | Agent 类型 | 调用方式 | 灵活性 | 推荐场景 |
-|--------|-----------|----------|--------|----------|
-| `"tool_call"` | `ToolCallingAgentV2` | 结构化 tool_call 消息 | 规范（每步调用一个工具，步骤清晰可追踪） | **Supervisor 推荐**、规范流程 Worker |
-| `"code_act"` | `CodeAgentV2` | 写 Python 代码调用工具 | 高（循环、条件、多步编排） | 需要写代码的 Worker、灵活度高的任务 |
-
-**默认值**：`"code_act"`
-**校验**：只允许 `"code_act"` 或 `"tool_call"`，其他值报错。
-
-#### 如何选择？
-
-| 场景 | 推荐模式 | 原因 |
-|------|---------|------|
-| **Supervisor 编排多个 Worker** | **`tool_call`** ✅ | 每步调用哪个 Worker、传了什么参数、返回了什么结果都是结构化记录，方便监控和审计每个 Worker 的执行情况 |
-| **规范流程 / 固定流水线** | **`tool_call`** ✅ | 结构化输出，可预测，易追踪，步骤清晰 |
-| **写代码 / 灵活度高的任务** | **`code_act`** ✅ | 需要循环、条件判断、异常处理、数据转换等 Python 编程能力 |
-| **开放性探索任务** | **`code_act`** ✅ | 不确定需要多少步，需要动态决策和复杂控制流 |
-
-> **核心原则**：`tool_call` 适合**规范度高**的场景（编排调度、固定流程），步骤清晰可追踪，对每个工具的执行情况一目了然；`code_act` 适合**灵活度高**的场景（写代码、复杂逻辑），能发挥 Python 的编程表达能力。
-
-> 💡 **模式相关参数**：以下配置仅在 `code_act` 模式下生效，在 `tool_call` 模式下会被静默忽略：
->
-> | 参数 | 原因 |
-> |------|------|
-> | `execution_env`（`executor_type` / `executor_kwargs`） | `tool_call` 模式不执行代码，无需执行环境 |
-> | `code_agent.additional_authorized_imports` | import 白名单仅适用于代码执行 |
-> | `code_agent.additional_functions` | 内置函数白名单仅适用于代码执行 |
+AgentLoom 只有一种 Tool 执行协议：模型返回 provider 原生的结构化 tool call，
+AgentLoom 按 schema 校验参数并执行已注册 Tool。框架不会从自然语言、XML 或 JSON
+文本里猜测一次工具调用；provider 或所选模型不支持结构化工具时，调用直接失败。
 
 ---
 
@@ -547,11 +488,11 @@ skills:
 
 ```yaml
 # 写法 1：直接字符串路径
-prompt: "applications/my_app/sysprompt/code_agent.yaml"
+prompt: "applications/my_app/sysprompt/agent_prompt.yaml"
 
 # 写法 2：字典形式（必须包含 path 键）
 prompt:
-  path: "applications/my_app/sysprompt/code_agent.yaml"
+  path: "applications/my_app/sysprompt/agent_prompt.yaml"
 ```
 
 #### 路径解析规则
@@ -566,14 +507,11 @@ prompt:
 | 1 | 函数参数 `prompt_template_path` | 代码中显式传入 |
 | 2 | Agent YAML `prompt` 字段 | 当前文档配置 |
 | 3 | 模型家族变体 | `<prompts_dir>/<family>/toolcalling_agent.yaml`（用户从 `.example.yaml` 去掉后缀激活） |
-| 4 | 本地覆盖 | `<prompts_dir>/structured_code_agent.yaml` 或 `toolcalling_agent.yaml`（用户从 `.example.yaml` 去掉后缀激活） |
+| 4 | 本地覆盖 | `<prompts_dir>/toolcalling_agent.yaml`（用户从 `.example.yaml` 去掉后缀激活） |
 | 5 | smolagents 内置默认 | smolagents 包自带的内置 prompt（无需任何文件） |
 
 > **自定义方式**：所有 `.example.yaml` 文件（包括 `anthropic/`、`openai/`、`gemini/` 目录下的）均为参考模板。要激活自定义 prompt，只需去掉 `.example` 后缀即可：
 > ```bash
-> # 激活全局自定义 prompt（code_act 模式）
-> mv structured_code_agent.example.yaml structured_code_agent.yaml
->
 > # 激活 anthropic 模型家族变体
 > mv anthropic/toolcalling_agent.example.yaml anthropic/toolcalling_agent.yaml
 > ```
@@ -671,6 +609,7 @@ checkpoint 时仅保存在当前 run 的内存中。文件损坏时会告警并�
 ```yaml
 # Worker Agent: 目录架构分析（支持并发批量调用）
 name: "dir_architecture_analysis"
+agent_runtime: "smolagents"
 model_type: "powerful"
 concurrency: auto          # 自动计算并发度
 
@@ -681,6 +620,7 @@ workflow: |
 ```yaml
 # Worker Agent: 固定 6 并发
 name: "file_processor"
+agent_runtime: "smolagents"
 model_type: "fast"
 concurrency: 6
 ```
@@ -832,8 +772,6 @@ toolset 归属、implementation 加载规则和真实验收矩阵见
 2. **Agent 工具**：Agent YAML 中 `tools` 列表的工具
 3. **去重规则**：同名工具后加载的覆盖先加载的
 
-> 当 `execution_env.type` 为 `"docker"` 或 `"e2b"` 时，默认工具**不会自动加载**。
-
 ### 4.4 高级模式：Agent 封装为 Python 工具函数
 
 当 Worker Agent 的调用需要**复杂的前置/后置处理**（如循环编排、断点续传、错误隔离、进度持久化）时，可以将 Agent 封装到一个普通的 Python 工具函数中，再通过 `module + function` 注册到 Supervisor 的 `tools` 字段。
@@ -846,7 +784,7 @@ toolset 归属、implementation 加载规则和真实验收矩阵见
 |------|----------|------|
 | 调用一次 Agent，直接返回结果 | `worker_agents` 自动注册 | 简单直接，YAML 声明即可 |
 | 调用 Agent 前需读文件/准备上下文 | **Python 封装** | 确定性操作不应浪费 LLM token |
-| 需要循环调用 Agent（批量处理） | **Python 封装** | Python for 循环比 LLM CodeAct 更可靠 |
+| 需要循环调用 Agent（批量处理） | **Python 封装** | 确定性 Python 循环更可靠 |
 | 需要断点续传 / 进度持久化 | **Python 封装** | 每次迭代立即写回进度文件，防崩溃 |
 | 需要错误隔离（单项失败不中断） | **Python 封装** | try-except 精确捕获，继续处理下一项 |
 | Agent 输出需要后处理（写文件、格式化、汇总） | **Python 封装** | 确定性操作在 Python 层完成 |
@@ -877,7 +815,6 @@ tools = YamlAgentFactory.create_agent_as_tool(
     config_path,        # str | Path | dict — Worker YAML 路径（相对于 AGENT_ROOT）或配置字典
     agent_class=None,   # 可选，自定义 Agent 类
     model=None,         # 可选，模型实例
-    execution_env=None, # 可选，执行环境实例
     logger=None,        # 可选，AgentLogger 实例
 )
 # 返回: List[Callable] — 包含一个可调用函数，签名由 Worker 的 agent_function_schema 定义
@@ -1060,6 +997,7 @@ def run_batch_analysis(progress_file: str, retry_failed: bool = False) -> str:
 ```yaml
 # Supervisor YAML
 name: "my_supervisor"
+agent_runtime: "smolagents"
 description: "编排多步骤分析流程"
 workflow: |
   1. 调用 run_batch_analysis 批量分析所有子任务
@@ -1291,8 +1229,8 @@ worker_agents:
 
 | 报错信息 | 修复 |
 |----------|------|
-| `tool_call_type must be 'tool_call' or 'code_act'` | 只允许这两个值 |
-| `execution_env.type='host' is no longer supported` | 改为 `"local"` |
+| `missing required 'agent_runtime'` | 添加 `agent_runtime: smolagents` |
+| `agent_runtime must name a registered runtime` | 当前只使用 `smolagents` |
 | `skills must be a list, dict, or string path` | 用列表/字典/字符串 |
 
 ---
@@ -1305,6 +1243,7 @@ worker_agents:
 
 ```yaml
 name: "repo_map_agent"
+agent_runtime: "smolagents"
 description: |
   Repo Map 架构分析 Supervisor。
   扫描和 Markdown 生成已由 repo_map_app.py 直接完成（纯 Python，零 LLM）。
@@ -1312,7 +1251,6 @@ description: |
   再调用 get_analysis_summary 输出总结报告。
 
 model_type: "powerful"
-tool_call_type: "code_act"
 
 workflow: |
   # Repo Map 架构分析工作流
@@ -1344,21 +1282,18 @@ tools:
 
 worker_agents:
   - path: "applications/repo_map/workflows/worker_agents/dir_architecture_analysis.yaml"
-
-execution_env:
-  type: "local"
 ```
 
 **Worker 示例**: `dir_architecture_analysis.yaml`
 
 ```yaml
 name: "dir_architecture_analysis"
+agent_runtime: "smolagents"
 description: |
   对单个目录进行 LLM 架构分析。
   接收 dir_path 和 index_content，返回 Markdown 格式的架构分析文本。
 
 model_type: "powerful"
-tool_call_type: "code_act"
 
 workflow: |
   # 单目录架构分析
@@ -1367,9 +1302,6 @@ workflow: |
   1. 核心功能  2. 关键模块  3. 设计模式  4. 依赖关系  5. 注意事项
 
 tools: []
-
-execution_env:
-  type: "local"
 
 agent_function_schema:
   description: |
@@ -1389,6 +1321,7 @@ agent_function_schema:
 
 ```yaml
 name: "simple_reader"
+agent_runtime: "smolagents"
 description: "读取并分析指定文件内容的简单 Agent"
 workflow: |
   1. 读取用户指定的文件
@@ -1405,6 +1338,7 @@ tools:
 ````markdown
 ```yaml
 name: "project_scan"
+agent_runtime: "smolagents"
 description: "项目结构扫描智能体"
 model_type: "powerful"
 tools:
@@ -1454,8 +1388,6 @@ Agent YAML 中以下顶层字段能覆盖系统配置（源码 `_WORKFLOW_OVERLA
 | `smart_summary` | `any` | 上下文压缩策略 |
 | `context_engine` | `dict` | 可逆上下文压缩限制 |
 | `tool_access_control` | `dict` | 工作目录和路径过滤 |
-| `execution_env` | `dict` | 执行环境类型和 Shell 路径 |
-| `code_agent` | `dict` | CodeAgent 代码执行权限 |
 | `tools` | `list` | Agent 工具列表及其最终配置覆盖 |
 | `shell_settings` | `any` | Shell 安全配置 |
 | `default_toolsets` / `toolsets` | `any` | 默认工具集或工具集替换 |
@@ -1464,7 +1396,7 @@ Agent YAML 中以下顶层字段能覆盖系统配置（源码 `_WORKFLOW_OVERLA
 | `self_learning` | `dict` | History 与可选 memory review 策略 |
 | `todo` | `dict` | Todo 模式（`auto`、`on` 或 `off`） |
 
-> ⚠️ **重要**：上面的白名单是按 **每个 Agent YAML 独立计算** 的，不是按调用链传递。Supervisor 调用 Worker 时，Worker 的 `tool_access_control`、`execution_env`、`prompt` 等覆盖项会从 Worker YAML 重新构建，而不是自动继承 Supervisor。
+> ⚠️ **重要**：上面的白名单是按 **每个 Agent YAML 独立计算** 的，不是按调用链传递。Supervisor 调用 Worker 时，Worker 的 `tool_access_control`、`shell_settings`、`prompt` 等覆盖项会从 Worker YAML 重新构建，而不是自动继承 Supervisor。
 >
 > ```yaml
 > # 如果 Supervisor 和 Worker 都要访问同一份 workspace 外部目录，
@@ -1486,7 +1418,7 @@ Agent YAML 中以下顶层字段能覆盖系统配置（源码 `_WORKFLOW_OVERLA
 | `tools`（`list[dict]`） | Agent 工具列表，与系统 `tools`（dict）不同 |
 | `worker_agents` / `agent_function_schema` | 角色专属属性 |
 | `skills` | 独立三层叠加加载（详见 [3.8](#38-skills--技能包配置)） |
-| `model_type` / `tool_call_type` | Agent 选择参数 |
+| `agent_runtime` / `model_type` | Agent runtime 与模型类型选择参数 |
 | `max_steps` / `planning_interval` | Agent 执行参数 |
 
 ### 9.4 LLM 配置隔离
@@ -1517,19 +1449,8 @@ WARNING: Ignoring top-level key 'model' in agent config;
 ### 9.6 覆盖示例
 
 ```yaml
-# Agent 级别切换执行环境
-execution_env:
-  type: "docker"
-  executor_kwargs:
-    host: "127.0.0.1"
-    port: 8888
-
 # Agent 级别禁用智能摘要
 smart_summary: false
-
-# Agent 级别执行环境
-execution_env:
-  type: "local"
 ```
 
 ### 9.7 Per-Agent Shell 安全配置覆盖
@@ -1545,9 +1466,9 @@ Agent YAML 使用**独立的顶层 key** 覆盖 Shell 安全配置：
 
 ```yaml
 name: "readonly_auditor"
+agent_runtime: "smolagents"
 description: "只读代码审计 Agent"
 model_type: "powerful"
-tool_call_type: "code_act"
 
 tools:
   - name: "shell_tool"
@@ -1577,9 +1498,9 @@ workflow: |
 
 ```yaml
 name: "developer"
+agent_runtime: "smolagents"
 description: "开发与测试 Agent"
 model_type: "powerful"
-tool_call_type: "code_act"
 
 tools:
   - name: "shell_tool"
@@ -1604,9 +1525,9 @@ workflow: |
 
 ```yaml
 name: "text_analyzer"
+agent_runtime: "smolagents"
 description: "纯文本分析 Agent，不需要 Shell"
 model_type: "fast"
-tool_call_type: "code_act"
 
 # 不声明 shell_tool，Agent 无法执行任何 Shell 命令
 # 无需设置 shell_settings
@@ -1741,13 +1662,12 @@ rg 'SECURITY_BLOCK|WHITELIST_REJECT|PATH_VIOLATION' "$run_dir/audit/shell.jsonl"
 | 字段 | 必填 | Supervisor | Worker | 类型 | 默认值 |
 |------|------|-----------|--------|------|--------|
 | `name` | ✅ | ✅ | ✅ | `str` | — |
+| `agent_runtime` | ✅ | ✅ | ✅ | `str` | `smolagents`（必须显式写出） |
 | `description` | ✅ | ✅ | ✅ | `str` | — |
 | `workflow` | ✅ | ✅ | ✅ | `str`/`list[str]` | — |
 | `goal` | ❌ | ✅ | ❌ | `bool`/`dict` | `false` |
 | `tools` | ❌ | ✅ | ✅ | `list[dict]` | `[]` |
 | `model_type` | ❌ | ✅ | ✅ | `str` | `config/llm.yaml` 中的 `model.default_model_type`；无隐式默认值 |
-| `tool_call_type` | ❌ | ✅ | ✅ | `str` | `"code_act"` |
-| `execution_env` | ❌ | ✅ | ✅ | `dict` | `{type: "local"}` |
 | `prompt` | ❌ | ✅ | ✅ | `str`/`dict` | 框架内置 |
 | `planning_interval` | ❌ | ✅ | ✅ | `int` | 不设置 |
 | `todo` | ❌ | ✅ | ✅ | `dict` | `{mode: "auto"}` |

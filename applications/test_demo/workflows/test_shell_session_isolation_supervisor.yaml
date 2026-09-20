@@ -1,9 +1,9 @@
 name: "shell_session_isolation_supervisor"
+agent_runtime: smolagents
 description: |
   主 agent，负责自身的 shell 操作并调度 worker agent，验证两者 shell session 互相隔离。
 
 model_type: "powerful"
-tool_call_type: "code_act"
 
 workflow: |
   # Shell Session Isolation Test
@@ -32,8 +32,3 @@ tools:
 
 worker_agents:
   - path: "applications/test_demo/workflows/worker_agents/test_shell_session_isolation_worker.yaml"
-
-execution_env:
-  type: "local"
-  executor_kwargs:
-    timeout_seconds: 120

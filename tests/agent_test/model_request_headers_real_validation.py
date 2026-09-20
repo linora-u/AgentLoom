@@ -25,13 +25,17 @@ PROJECT_ROOT = Path(__file__).resolve().parents[2]
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
-import agentloom.configuration.config as config_module
-from agentloom.configuration.model_request_header_profiles import (
+import agentloom.configuration.config as config_module  # noqa: E402
+from agentloom.adapters.litellm.request_headers import (  # noqa: E402
+    GENERIC_MODEL_USER_AGENT,
+)
+from agentloom.adapters.smolagents.models import (  # noqa: E402
+    model_manager as model_manager_module,
+)
+from agentloom.application.runner import run_app  # noqa: E402
+from agentloom.configuration.model_request_header_profiles import (  # noqa: E402
     MODEL_REQUEST_HEADER_PROFILES,
 )
-from agentloom.adapters.smolagents.models import model_manager as model_manager_module
-from agentloom.adapters.smolagents.models.request_headers import GENERIC_MODEL_USER_AGENT
-from agentloom.application.runner import run_app
 
 UUID_SENTINEL = "<uuid>"
 SESSION_TOKEN_SENTINEL = "<session-token>"
@@ -123,10 +127,10 @@ def _write_workflow(app_root: Path, name: str) -> Path:
     workflow_path = workflow_dir / f"{name}_agent.yaml"
     workflow_path.write_text(
         f"""name: "{name}"
+agent_runtime: "smolagents"
 description: |
   Return exactly HEADER_VALIDATION_PASS.
 model_type: "powerful"
-tool_call_type: "tool_call"
 workflow: |
   Return exactly HEADER_VALIDATION_PASS and do not call tools.
 tools: []

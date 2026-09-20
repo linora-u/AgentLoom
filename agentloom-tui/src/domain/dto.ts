@@ -31,12 +31,7 @@ export interface GoalStateDto {
   goal_id?: string
   objective?: string
   objective_fingerprint?: string
-  status: "active" | "budget_limited" | "complete"
-  token_budget: number | null
-  prompt_tokens?: number
-  completion_tokens?: number
-  used_tokens: number
-  remaining_tokens: number | null
+  status: "active" | "complete"
   evidence?: string | null
   goal_started?: boolean
   created_at?: string

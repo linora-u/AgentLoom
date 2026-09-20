@@ -1,8 +1,8 @@
 name: "test_path_access_control"
+agent_runtime: smolagents
 description: "Validate path_validation rules — verify include_paths and exclude_paths apply to shell_tool and file tools via path_validation"
 
 model_type: "powerful"
-tool_call_type: "code_act"
 
 # Path access control: include_paths in path_validation rules
 tool_access_control:

@@ -119,6 +119,34 @@ def _event_time(value) -> datetime:
     return parsed
 
 
+def _runtime_memory_steps(checkpoint: dict) -> list[dict]:
+    envelope = checkpoint.get("runtime_checkpoint")
+    if not isinstance(envelope, dict):
+        raise ValueError("checkpoint lacks a runtime checkpoint envelope")
+    if envelope.get("runtime_id") != "smolagents":
+        raise ValueError(
+            f"checkpoint runtime is not smolagents: {envelope.get('runtime_id')!r}"
+        )
+    if envelope.get("state_schema_version") != 2:
+        raise ValueError(
+            "checkpoint has unsupported smolagents state schema: "
+            f"{envelope.get('state_schema_version')!r}"
+        )
+    if not isinstance(envelope.get("runtime_version"), str) or not envelope["runtime_version"]:
+        raise ValueError("smolagents checkpoint lacks runtime_version")
+    payload = envelope.get("payload")
+    if not isinstance(payload, dict):
+        raise ValueError("smolagents checkpoint payload is not a mapping")
+    steps = payload.get("memory_steps")
+    if not isinstance(steps, list):
+        raise ValueError("smolagents checkpoint payload lacks memory_steps")
+    if not isinstance(payload.get("canonical_model_items"), list):
+        raise ValueError(
+            "smolagents checkpoint payload lacks canonical_model_items"
+        )
+    return steps
+
+
 def _completed_worker_calls(task_root, run_id, task_id, nonce, workspace, ledger):
     """Read only this receipt's calls; bind each to real start/finish and tool events."""
     if task_root is None:
@@ -167,7 +195,7 @@ def _completed_worker_calls(task_root, run_id, task_id, nonce, workspace, ledger
                 raise ValueError("call must correlate to one distinct Worker local run's tool events")
             if any(record["local_run_id"] in local_ids for record in records):
                 raise ValueError("distinct Worker calls must not reuse one local run identity")
-            steps = checkpoint.get("memory_steps", [])
+            steps = _runtime_memory_steps(checkpoint)
             if not any(sum((step.get("token_usage") or {}).get(key, 0) or 0
                            for key in ("input_tokens", "output_tokens")) > 0 for step in steps):
                 raise ValueError("no actual model usage in completed Worker memory")
@@ -213,7 +241,6 @@ def validate_trace(attempt: Path, receipt: dict[str, object]) -> dict[str, objec
         if not any(row.get("agent_name") == worker and row.get("operation") == "pytest"
                    and row.get("exit_code") == 0 for row in ledger):
             errors.append(f"no successful actual pytest execution by {worker}")
-    code_actions = []
     application_id = receipt.get("run", {}).get("application_id")
     supervisor_path = (attempt / "runtime/checkpoints" / application_id / task_id / "checkpoint.json"
                        if application_id and task_id else None)
@@ -233,12 +260,12 @@ def validate_trace(attempt: Path, receipt: dict[str, object]) -> dict[str, objec
         if checkpoint.get("task_id") != task_id or checkpoint.get("run_id") != root_run_id:
             errors.append("Supervisor checkpoint identity does not match receipt")
             checkpoint = {}
-    if checkpoint:
-        for step in checkpoint.get("memory_steps", []):
-            if step.get("code_action"):
-                code_actions.append(step["code_action"])
-    if receipt.get("mode") == "codeact" and not code_actions:
-        errors.append("CodeAct Supervisor has no persisted Python execution evidence")
+        else:
+            try:
+                _runtime_memory_steps(checkpoint)
+            except ValueError as exc:
+                errors.append(f"invalid Supervisor runtime checkpoint: {exc}")
+                checkpoint = {}
     # Both modes use the same canonical per-call input, result and lifecycle
     # evidence. Never pick a first call by filesystem or tool-result ordering.
     reachable = []
@@ -304,8 +331,7 @@ def validate_trace(attempt: Path, receipt: dict[str, object]) -> dict[str, objec
             "local_run_ids": sorted(str(item) for item in local_ids), "tool_events": len(ledger),
             "checkpoint_files": [str(p) for p in calls], "transfers": transfers,
             "corrective_transfers": selected["corrective_transfers"] if selected else [],
-            "supervisor_checkpoint": str(supervisor_path) if supervisor_path else None,
-            "supervisor_code_actions": len(code_actions)}
+            "supervisor_checkpoint": str(supervisor_path) if supervisor_path else None}
 
 
 def _structured(value):

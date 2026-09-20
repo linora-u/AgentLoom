@@ -22,10 +22,30 @@ def _make_workflow(repo_root: Path, application_id: str) -> Path:
     workflow = repo_root / "applications" / application_id / "workflows" / "agent.yaml"
     workflow.parent.mkdir(parents=True, exist_ok=True)
     workflow.write_text(
-        "name: supervisor\ndescription: migration test\nworkflow: resume safely\n",
+        "name: supervisor\n"
+        "agent_runtime: smolagents\n"
+        "description: migration test\n"
+        "workflow: resume safely\n",
         encoding="utf-8",
     )
     return workflow
+
+
+def _runtime_checkpoint(steps: list[dict]) -> dict:
+    return {
+        "runtime_id": "test-runtime",
+        "runtime_version": "test",
+        "state_schema_version": 1,
+        "task_id": None,
+        "run_id": None,
+        "progress": len(steps),
+        "audit_metadata": {
+            "entry_count": len(steps),
+        },
+        "payload": {
+            "entries": steps,
+        },
+    }
 
 
 def _make_legacy_task(
@@ -80,7 +100,11 @@ def _make_legacy_task(
             "agent_name": supervisor,
             "status": "interrupted",
             "saved_at": timestamp,
-            "memory_steps": ([{"_step_type": "TaskStep", "task": "resume me"}] if progress == "memory" else []),
+            "runtime_checkpoint": _runtime_checkpoint(
+                [{"_step_type": "TaskStep", "task": "resume me"}]
+                if progress == "memory"
+                else []
+            ),
             "step_count": (1 if progress == "memory" else 0),
         },
     )
@@ -304,6 +328,7 @@ def test_external_workflow_uses_the_same_application_id_for_migration_and_runner
     workflow = tmp_path / "external_workflow.yaml"
     workflow.write_text(
         "name: custom_supervisor\n"
+        "agent_runtime: smolagents\n"
         "application_id: explicit-app\n"
         "description: migration test\n"
         "workflow: resume safely\n",
@@ -324,6 +349,7 @@ def test_external_workflow_uses_the_same_application_id_for_migration_and_runner
     runner_id = resolve_application_id(
         {
             "name": "custom_supervisor",
+            "agent_runtime": "smolagents",
             "application_id": "explicit-app",
             "description": "migration test",
             "workflow": "resume safely",
@@ -618,7 +644,7 @@ def test_scan_requires_original_created_at_instead_of_fresh_saved_metadata(
     ]
 
 
-def test_scan_does_not_treat_step_count_without_memory_steps_as_progress(
+def test_scan_ignores_top_level_legacy_progress_outside_runtime_envelope(
     tmp_path: Path,
 ) -> None:
     from agentloom.runtime.migration import RuntimeMigration
@@ -635,7 +661,9 @@ def test_scan_does_not_treat_step_count_without_memory_steps_as_progress(
     )
     checkpoint = json.loads((task_dir / "checkpoint.json").read_text(encoding="utf-8"))
     checkpoint["step_count"] = 3
-    checkpoint["memory_steps"] = []
+    checkpoint["memory_steps"] = [
+        {"_step_type": "TaskStep", "task": "legacy progress"}
+    ]
     _write_json(task_dir / "checkpoint.json", checkpoint)
 
     plan = RuntimeMigration(
@@ -648,6 +676,40 @@ def test_scan_does_not_treat_step_count_without_memory_steps_as_progress(
     assert not plan.candidates
     assert [(item.task_id, item.reason) for item in plan.skipped] == [
         ("task_count_only", "no resumable progress")
+    ]
+
+
+def test_scan_skips_checkpoint_without_runtime_envelope(tmp_path: Path) -> None:
+    from agentloom.runtime.migration import RuntimeMigration
+
+    repo_root = tmp_path / "repo"
+    legacy_root = repo_root / ".logs"
+    workflow = _make_workflow(repo_root, "demo")
+    task_dir = _make_legacy_task(
+        legacy_root,
+        task_id="task_legacy_schema",
+        workflow=workflow,
+        age=timedelta(days=1),
+        progress="memory",
+    )
+    checkpoint = json.loads(
+        (task_dir / "checkpoint.json").read_text(encoding="utf-8")
+    )
+    legacy_steps = checkpoint["runtime_checkpoint"]["payload"]["entries"]
+    checkpoint.pop("runtime_checkpoint")
+    checkpoint["memory_steps"] = legacy_steps
+    _write_json(task_dir / "checkpoint.json", checkpoint)
+
+    plan = RuntimeMigration(
+        legacy_logs_dir=legacy_root,
+        runtime_root=repo_root / ".agentloom",
+        agent_root=repo_root,
+        now=NOW,
+    ).scan()
+
+    assert not plan.candidates
+    assert [(item.task_id, item.reason) for item in plan.skipped] == [
+        ("task_legacy_schema", "unsupported legacy runtime checkpoint")
     ]
 
 
@@ -668,9 +730,10 @@ def test_apply_uses_staging_verifies_context_ref_and_archives_whole_legacy_tree(
         age=timedelta(days=1),
     )
     checkpoint = json.loads((task_dir / "checkpoint.json").read_text(encoding="utf-8"))
+    supervisor_steps = [{"_step_type": "TaskStep", "task": "resume supervisor"}]
     checkpoint.update(
         {
-            "memory_steps": [{"_step_type": "TaskStep", "task": "resume supervisor"}],
+            "runtime_checkpoint": _runtime_checkpoint(supervisor_steps),
             "step_count": 1,
         }
     )
@@ -695,7 +758,9 @@ def test_apply_uses_staging_verifies_context_ref_and_archives_whole_legacy_tree(
             "call_index": 2,
             "status": "interrupted",
             "saved_at": (NOW - timedelta(days=1)).isoformat(),
-            "memory_steps": [{"_step_type": "TaskStep", "task": "resume worker"}],
+            "runtime_checkpoint": _runtime_checkpoint(
+                [{"_step_type": "TaskStep", "task": "resume worker"}]
+            ),
             "step_count": 1,
         },
     )
@@ -741,7 +806,18 @@ def test_apply_uses_staging_verifies_context_ref_and_archives_whole_legacy_tree(
     from agentloom.runtime.checkpoint import CheckpointManager
 
     manager = CheckpointManager("supervisor", checkpoint_dir=destination)
-    assert manager.load_worker_checkpoint("task_valid", "researcher", 2)["step_count"] == 1
+    supervisor_checkpoint = manager.load_supervisor_checkpoint("task_valid")
+    worker_payload = manager.load_worker_checkpoint(
+        "task_valid",
+        "researcher",
+        2,
+    )
+    assert supervisor_checkpoint["step_count"] == 1
+    assert supervisor_checkpoint["runtime_checkpoint"]["runtime_id"] == "test-runtime"
+    assert "memory_steps" not in supervisor_checkpoint
+    assert worker_payload["step_count"] == 1
+    assert worker_payload["runtime_checkpoint"]["runtime_id"] == "test-runtime"
+    assert "memory_steps" not in worker_payload
     assert ContextStore(destination / "context_store").retrieve(CONTEXT_REF) == CONTEXT_PAYLOAD
     assert not legacy_root.exists()
     assert result.archive_dir is not None
@@ -840,9 +916,14 @@ def test_source_change_during_staging_aborts_before_publish_or_archive(
     def append_legacy_progress(_candidate, _staged: Path) -> None:
         checkpoint_path = source / "checkpoint.json"
         checkpoint = json.loads(checkpoint_path.read_text(encoding="utf-8"))
-        checkpoint["memory_steps"].append(
+        payload = checkpoint["runtime_checkpoint"]["payload"]
+        payload["entries"].append(
             {"_step_type": "TaskStep", "task": "new legacy progress"}
         )
+        checkpoint["runtime_checkpoint"]["progress"] = 2
+        checkpoint["runtime_checkpoint"]["audit_metadata"] = {
+            "entry_count": 2,
+        }
         checkpoint["step_count"] = 2
         _write_json(checkpoint_path, checkpoint)
 

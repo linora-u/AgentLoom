@@ -11,8 +11,6 @@ from importlib.metadata import version
 from pathlib import Path
 
 import pytest
-from packaging.requirements import Requirement
-
 from agentloom.runtime.hooks import HookEvent, HookHandler, HookPlan, HookResult, HookRun
 from agentloom.runtime.trace import (
     ExplicitExecutionContext,
@@ -23,6 +21,7 @@ from agentloom.runtime.trace import (
     get_current_session_run_id,
     require_root_run_id,
 )
+from packaging.requirements import Requirement
 
 
 def test_smolagents_context_patch_dependency_is_exactly_pinned() -> None:
@@ -133,8 +132,8 @@ def test_session_search_excludes_explicit_root(
 
 
 def test_canonical_event_carries_hook_run_local_and_root_ids() -> None:
-    from agentloom.self_learning.session_recorder import event_from_hook_context
     from agentloom.runtime.hooks import HookContext
+    from agentloom.self_learning.session_recorder import event_from_hook_context
 
     event = event_from_hook_context(
         HookContext(
@@ -157,8 +156,8 @@ def test_canonical_event_carries_hook_run_local_and_root_ids() -> None:
 def test_application_disable_prevents_session_recorder_write(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    from agentloom.self_learning.session_recorder import SessionRecorder
     from agentloom.runtime.hooks import HookContext
+    from agentloom.self_learning.session_recorder import SessionRecorder
 
     recorder = SessionRecorder()
     monkeypatch.setattr(
@@ -265,9 +264,8 @@ def test_tool_wrapper_propagates_and_refreshes_root_across_executor_thread(
     monkeypatch.setenv(
         "AGENTLOOM_RUNTIME_ROOT", str(tmp_path / ".agentloom")
     )
+    from agentloom.runtime.tool_gateway import AgentLoomToolGateway
     from agentloom.self_learning.persistence.memory_store import MemoryStore
-    from agentloom.adapters.smolagents.tool_shim import inject_hooks
-    from agentloom.adapters.smolagents.tools.tools import ensure_tool_wrapped
     from agentloom.tools.self_learning import memory_tool
     from agentloom.tools.self_learning.memory_tool import memory
 
@@ -289,8 +287,7 @@ def test_tool_wrapper_propagates_and_refreshes_root_across_executor_thread(
         },
     }
     monkeypatch.setattr(memory_tool, "_current_agent_config", lambda: agent_config)
-    wrapped = ensure_tool_wrapped([memory])[0]
-    inject_hooks(wrapped)
+    gateway = AgentLoomToolGateway.from_tools([memory])
 
     def invoke(root_run_id: str, *, memory_key: str, text: str) -> dict:
         execution = ExplicitExecutionContext(
@@ -313,12 +310,16 @@ def test_tool_wrapper_propagates_and_refreshes_root_across_executor_thread(
         )
         with bind_explicit_execution_context(execution):
             return json.loads(
-                wrapped.forward(
-                    action="propose",
-                    scope="app",
-                    memory_key=memory_key,
-                    text=text,
-                )
+                gateway.invoke(
+                    call_id=f"call-{root_run_id}",
+                    tool_name="memory",
+                    arguments={
+                        "action": "propose",
+                        "scope": "app",
+                        "memory_key": memory_key,
+                        "text": text,
+                    },
+                ).direct_result()
             )
 
     with ThreadPoolExecutor(max_workers=1) as executor:
@@ -341,11 +342,15 @@ def test_tool_wrapper_propagates_and_refreshes_root_across_executor_thread(
 
         # An unbound call on the same worker must fail instead of inheriting B.
         future = executor.submit(
-            wrapped.forward,
-            action="propose",
-            scope="app",
-            memory_key="threaded:stale-root",
-            text="must not inherit a stale root",
+            gateway.invoke,
+            call_id="call-stale",
+            tool_name="memory",
+            arguments={
+                "action": "propose",
+                "scope": "app",
+                "memory_key": "threaded:stale-root",
+                "text": "must not inherit a stale root",
+            },
         )
         with pytest.raises(MissingRunContextError, match="HookRun"):
             future.result()

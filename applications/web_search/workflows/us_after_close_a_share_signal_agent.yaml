@@ -1,10 +1,10 @@
 name: "us_after_close_a_share_signal_agent"
+agent_runtime: smolagents
 description: |
   美股收盘后隔夜重点企业涨跌榜与 A 股行业映射 Agent。先从美股/海外市场发现涨幅前三、
   跌幅前三重点企业，再判断对应 A 股行业板块是否存在新增利好及持续周期。
 
 model_type: "powerful"
-tool_call_type: "tool_call"
 
 mcp_servers:
   path: "applications/web_search/config/.mcp.anysearch.json"

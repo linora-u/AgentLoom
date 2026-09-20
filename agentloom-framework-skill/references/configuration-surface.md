@@ -46,6 +46,7 @@ LLM 配置不参与这个链条。`model`、`llm`、`langfuse` 写进 `system.ya
 
 ```yaml
 name: "<agent_name>"
+agent_runtime: "smolagents"
 description: "<一两句话角色定位>"
 workflow: |
   <完整执行协议>
@@ -55,21 +56,19 @@ workflow: |
 
 | 字段 | 类型 | 说明 |
 |---|---|---|
+| `agent_runtime` | `smolagents` | 必填。选择完整 Agent runtime；缺失或未注册值在预检阶段失败 |
 | `tools` | `list[dict]` | Agent 额外工具列表；预定义工具只写 `name`，动态工具写 `name/module/function` |
 | `model_type` | `str` | 选择 `config/llm.yaml` 中定义的模型类型；缺失时使用 `model.default_model_type` |
-| `tool_call_type` | `code_act` 或 `tool_call` | `code_act` 让模型写 Python 调工具；`tool_call` 发送 provider/native tools schema，并只接受结构化 tool calls |
 | `max_steps` | `int` | smolagents 最大步数；默认 80 |
 | `planning_interval` | 正整数或数字字符串 | 仅控制周期性 planning，与 Todo 解耦 |
 | `todo` | `{mode: auto|on|off}` | 当前任务进度跟踪；默认 `auto`，`on` 强提示多步骤任务先建 Todo，`off` 完全隐藏 |
 | `concurrency` | 正整数或 `"auto"` | 仅影响同一 Worker 通过 `.batch()` 被多输入批量调用 |
-| `execution_env` | `dict` | `code_act` 的执行环境：`local`、`docker`、`e2b`、`wasm` |
 | `prompt` | `str` 或 `{path: ...}` | 自定义系统 prompt 模板路径 |
 | `skills` | `{paths: list[str]}` | 当前 Agent 的额外 Skill 发现目录 |
-| `goal` | `bool` 或 `{enabled: bool, token_budget?: int}` | 仅顶层 Supervisor；开启 continuation、显式完成和根 Agent 树软 token 预算 |
+| `goal` | `bool` 或 `{enabled: bool}` | 仅顶层 Supervisor；开启 continuation 和显式完成 |
 
-`tool_call` 模式的主路径是 provider/native tool calls。只要当前 Agent 有可用工具，AgentLoom 就发送结构化 tools schema；如果 provider 返回文本 fallback，也只接受明确结构化容器，例如 `{name, arguments}`、dump 出来的 native `tool_calls/function`、XML/invoke wrapper。不要设计依赖自由文本正则兜底的 workflow。
-
-`code_act` 的本地执行器默认对整个 Python 代码块使用 30 秒墙钟超时，包括同步 Worker 的模型请求与工具等待。长耗时编排应在调用方 Agent YAML 的 `execution_env.executor_kwargs.timeout_seconds` 声明足够的有限预算；复杂 checkpoint Supervisor 使用 `1200` 秒。超时不是取消：执行器等待线程结束后仍返回超时错误，期间工具或 Worker 可能已成功提交副作用。Worker 的预算不会延长调用方预算，同一次 attempt 内重试相同输入也不会自动去重。
+Agent 只接受 provider 原生结构化 tool calls。只要当前 Agent 有可用工具，
+AgentLoom 就发送结构化 tools schema；不会从 prose、XML 或 JSON 文本中猜测工具调用。
 
 Supervisor 专属：
 
@@ -81,9 +80,8 @@ worker_agents:
 规则：`worker_agents` item 只支持 `path`，不支持 `name`。路径可以是绝对路径、项目根相对路径、`worker_agents/` 下的文件名，或不带后缀的 worker 名。
 
 Supervisor 还可配置 `goal: true/false`，或显式 mapping。Goal mapping 不做类型宽松
-转换；`token_budget` 缺失表示无限制。开启后 workflow list 合并为一个目标上下文，
-并提供仅根 Supervisor 可见的 `get_goal` / `update_goal`。Schedule 可以使用同一 YAML，
-但无人值守 Goal 强烈建议设置预算。
+转换；旧 `token_budget` 静默忽略。开启后 workflow list 合并为一个目标上下文，
+并提供仅根 Supervisor 可见的 `get_goal` / `update_goal`。Schedule 可以使用同一 YAML。
 
 Worker 专属：
 
@@ -108,7 +106,7 @@ Worker YAML 如果出现任何 `goal` key 必须 fail-closed；不能用 `goal: 
 
 ```text
 system, model_request_headers, smart_summary, context_engine,
-tool_access_control, execution_env, code_agent, tools, shell_settings,
+tool_access_control, tools, shell_settings,
 default_toolsets, toolsets, prompt, mcp_servers, self_learning, hooks,
 todo, skills, tool_metadata, tool_output_limits
 ```
@@ -137,8 +135,6 @@ todo, skills, tool_metadata, tool_output_limits
 | `skills` | `{paths: [...]}` 额外 Skill 发现目录 |
 | `hooks` | 独立直接 Shell Hook 与显式 `HOOK.yaml` Bundle |
 | `lsp_servers` | LSP 服务开关、重启次数、语言列表 |
-| `execution_env` | 默认执行环境 |
-| `code_agent` | `code_act` 可 import 模块和可调用内置函数 |
 | `runtime` | 唯一 `.agentloom` root、run/artifact 保留天数和自动清理间隔；只允许全局配置 |
 | `logging` | `level/console_enabled/file_enabled/max_file_bytes/backup_count`；run-scoped 且只允许全局配置 |
 | `default_toolsets` | 默认加载 toolset 名列表 |
@@ -211,30 +207,6 @@ self_learning:
 - 在 `self_learning.review` 内，Application/Agent overlay 只能改变 `application`；`review.enabled`、Project policy 与 artifact policy 必须来自项目根配置。其他 `self_learning` 字段仍按普通 overlay 合并。
 - v5 字段 `self_learning.memory.review_model`、`write_approval` 会被校验器拒绝。迁移到 `review.application|project.review_model` 和各 scope 的 `approval.fact|experience`。
 
-### execution_env
-
-```yaml
-execution_env:
-  type: local       # local | docker | e2b | wasm
-  executor_kwargs: {}
-```
-
-只对 `tool_call_type: code_act` 生效。`tool_call` 模式不执行 Python code，因此 executor 设置无意义。`docker` / `e2b` 默认不自动加载本地文件工具；远程 executor 会跳过 `additional_functions`，并移除 `additional_authorized_imports` 里的 `"*"`。
-
-### code_agent
-
-```yaml
-code_agent:
-  additional_authorized_imports:
-    - json
-    - re
-  additional_functions:
-    - print
-    - len
-```
-
-`"*"` 表示最大权限。只在 `code_act` 有意义；生产或不可信环境不要随手开 `"*"`。
-
 ### shell_settings
 
 可配内容包括：
@@ -297,6 +269,7 @@ todo_write
 model:
   default_model_type: powerful
   powerful:
+    adapter: openai_chat
     model: "anthropic/claude-..."
     base_url: "https://..."
     api_key: "..."
@@ -304,6 +277,7 @@ model:
     max_tokens: 8192
     timeout: 300
   summary:
+    adapter: openai_chat
     model: "openai/gpt-..."
 ```
 
@@ -313,12 +287,13 @@ model:
 - `default_model_type` 和 `common` 是保留 key，不作为模型类型。
 - 模型类型名可自定义；`powerful`、`fast` 只是约定名。
 - Agent YAML 只能写 `model_type`，不能写 LLM 参数。
-- 每个模型类型必须有 `model`，且应使用 LiteLLM provider prefix，例如 `openai/...`、`anthropic/...`、`gemini/...`、`vertex_ai/...`、`azure/...`、`ollama/...`。
+- 每个模型类型必须有 `model` 和 `adapter`。`model` 是传给 LiteLLM 的不透明名字，不从前缀推断协议。
 
 模型类型字段：
 
 | 字段 | 说明 |
 |---|---|
+| `adapter` | Wire protocol，必填：`openai_chat`、`openai_responses`、`anthropic_messages` |
 | `model` | LiteLLM 模型 ID，必填 |
 | `base_url` | API 网关 |
 | `api_key` | API key |
@@ -332,12 +307,9 @@ model:
 | `context_cache` | 是否注入 cache control |
 | `system_prompt_boundary` | 静态/动态系统 prompt 分割 marker |
 | `requests_per_minute` | 模型类型级 RPM，用于限流与并发 auto |
-| `supports_structured_output` | `"true"` / `"false"`；影响 `code_act` 结构化输出路径 |
 | 其他未知字段 | 收进 `extra_completion_params` 并透传给 `litellm.completion()` |
 
-`supports_native_tool_calls` 已删除，写入 `config/llm.yaml` 会直接报错。不要用它、也不要新增等价的“兜底开关”。`tool_choice` 只是 provider/smolagents 请求参数；如果写在模型类型里，会作为未知字段透传给 `litellm.completion()`，不参与 native tool-call 能力探测。
-
-未知字段透传适合 provider 特性，例如 `reasoning_effort`、`tool_choice`、`extra_body`。写之前要确认目标 endpoint 支持；不要把业务配置误塞进模型类型里。
+未知字段透传适合 provider 特性，例如 `reasoning_effort`、`tool_choice`、`extra_body`。写之前要确认目标 endpoint 支持；不要把业务配置误塞进模型类型里。协议调用失败时原样向上抛出，不切换 adapter。
 
 `langfuse` 目前只是配置模型预留，未接入自动 tracing；不要为了“完整”强行配置。
 

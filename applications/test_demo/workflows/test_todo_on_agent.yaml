@@ -1,8 +1,8 @@
 name: "test_todo_on"
+agent_runtime: smolagents
 description: "Inspect three project sources and synthesize verified metadata"
 
 model_type: "powerful"
-tool_call_type: "tool_call"
 max_steps: 12
 
 todo:

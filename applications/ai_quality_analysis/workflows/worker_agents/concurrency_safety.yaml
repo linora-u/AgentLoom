@@ -1,6 +1,6 @@
 name: "concurrency_safety"
+agent_runtime: smolagents
 description: "Performs comprehensive concurrency safety audit: shared state identification, access interface mapping, synchronization analysis, and race/deadlock detection."
-tool_call_type: "code_act"
 model_type: "powerful"
 toolsets:
   - "core_shell"

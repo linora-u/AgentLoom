@@ -1,7 +1,7 @@
 name: "memory_foreground_analysis"
+agent_runtime: smolagents
 description: "Analyze one operational case with the normal persistent-memory tool available."
 model_type: "summary"
-tool_call_type: "tool_call"
 max_steps: 8
 
 workflow: |

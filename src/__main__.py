@@ -22,7 +22,6 @@ from datetime import UTC, datetime
 from typing import Any, TextIO
 
 import click
-
 from agentloom.schedules.cli import schedules as _schedules_command
 
 _MAIN_EPILOG = """\
@@ -78,12 +77,7 @@ def _run_event_payload(event: Any) -> dict[str, object]:
 
 
 def _goal_text(goal: Mapping[str, object]) -> str:
-    budget = goal.get("token_budget")
-    budget_text = "unlimited" if budget is None else str(budget)
-    return (
-        f"Goal: {goal.get('status')} | tokens: "
-        f"{goal.get('used_tokens', 0)}/{budget_text}"
-    )
+    return f"Goal: {goal.get('status')}"
 
 
 def _emit_jsonl_record(payload: dict[str, object], stream: TextIO) -> None:
@@ -176,6 +170,10 @@ def main():
 
 def _has_transient_provider_error(error: BaseException) -> bool:
     """Return true only for a trusted transient LiteLLM exception chain."""
+    from agentloom.adapters.litellm.litellm_retry import (
+        ProviderCallBudgetExceeded,
+    )
+    from agentloom.runtime.model_protocol import ModelProtocolError
     from litellm.exceptions import (
         APIConnectionError,
         AuthenticationError,
@@ -187,11 +185,6 @@ def _has_transient_provider_error(error: BaseException) -> bool:
         Timeout,
     )
     from smolagents import AgentMaxStepsError, AgentParsingError
-
-    from agentloom.adapters.smolagents.models.litellm_retry import (
-        ProviderCallBudgetExceeded,
-    )
-    from agentloom.adapters.smolagents.models.tool_call_parser import ToolCallParseError
 
     transient_types = (
         Timeout,
@@ -211,7 +204,7 @@ def _has_transient_provider_error(error: BaseException) -> bool:
         ProviderCallBudgetExceeded,
         AgentParsingError,
         AgentMaxStepsError,
-        ToolCallParseError,
+        ModelProtocolError,
     )
     current: BaseException | None = error
     visited: set[int] = set()
@@ -339,19 +332,6 @@ def run(
                 )
             raise click.exceptions.Exit(130) from exc
         except Exception as exc:
-            from agentloom.application.run import ApplicationRunBudgetLimited
-
-            if isinstance(exc, ApplicationRunBudgetLimited):
-                if not emitted_events:
-                    emit_rejected(exc, message=str(exc))
-                goal = exc.goal
-                click.echo(
-                    "\nGoal budget limited: "
-                    f"{goal.get('used_tokens')}/{goal.get('token_budget')} tokens used. "
-                    f"Resume task {exc.run.task_id} after increasing or removing token_budget.",
-                    err=True,
-                )
-                raise click.exceptions.Exit(1) from exc
             retryable = _has_transient_provider_error(exc)
             if not emitted_events:
                 emit_rejected(exc, retryable=retryable)

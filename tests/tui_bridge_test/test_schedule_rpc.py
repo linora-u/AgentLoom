@@ -4,7 +4,6 @@ from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 import pytest
-
 from agentloom.schedules.store import ScheduleStore
 from agentloom.tui_bridge.bridge import BridgeError, TuiBridge
 
@@ -18,9 +17,11 @@ def _write_agent(project_root: Path, relative_path: str, *, name: str = "schedul
 model:
   summary:
     model: openai/test-summary
+    adapter: openai_chat
   default_model_type: powerful
   powerful:
     model: openai/test-model
+    adapter: openai_chat
 """.strip(),
             encoding="utf-8",
         )
@@ -29,6 +30,7 @@ model:
     path.write_text(
         f"""
 name: {name}
+agent_runtime: smolagents
 description: A scheduled supervisor.
 workflow: |
   Complete the scheduled task.

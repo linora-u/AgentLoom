@@ -3,10 +3,9 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+import agentloom.tui_bridge.bridge as bridge_module
 import pytest
 import yaml
-
-import agentloom.tui_bridge.bridge as bridge_module
 from agentloom.runtime.context import RuntimeRunLease
 from agentloom.tui_bridge.bridge import BridgeError, TuiBridge
 
@@ -26,12 +25,13 @@ def _project(tmp_path: Path) -> TuiBridge:
     )
     _write(
         tmp_path / "config/llm.yaml",
-        "model:\n  summary:\n    model: openai/test-summary\n  default_model_type: test\n  test:\n    model: openai/test\n",
+        "model:\n  summary:\n    model: openai/test-summary\n    adapter: openai_chat\n  default_model_type: test\n  test:\n    model: openai/test\n    adapter: openai_chat\n",
     )
     _write(
         tmp_path / SYSTEM_ID,
         """\
 name: demo
+agent_runtime: smolagents
 description: Cached Agent identity
 model_type: test
 worker_agents: []
@@ -89,7 +89,7 @@ def _completed_run(tmp_path: Path) -> None:
     )
 
 
-def test_goal_status_and_usage_are_visible_in_runtime_summary_and_detail(
+def test_goal_status_and_evidence_are_visible_in_runtime_summary_and_detail(
     tmp_path: Path,
 ) -> None:
     bridge = _project(tmp_path)
@@ -97,12 +97,10 @@ def test_goal_status_and_usage_are_visible_in_runtime_summary_and_detail(
     run_dir = tmp_path / ".runtime-live/runs/demo/run-live"
     manifest_path = run_dir / "manifest.json"
     manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
-    manifest["status"] = "budget_limited"
+    manifest["status"] = "interrupted"
     manifest["goal"] = {
-        "status": "budget_limited",
-        "used_tokens": 105,
-        "token_budget": 100,
-        "remaining_tokens": 0,
+        "status": "active",
+        "evidence": None,
     }
     _write(manifest_path, json.dumps(manifest))
 
@@ -112,9 +110,9 @@ def test_goal_status_and_usage_are_visible_in_runtime_summary_and_detail(
         {"application_id": "demo", "run_id": "run-live"},
     )
 
-    assert bootstrap["runs"][0]["status"] == "budget_limited"
-    assert bootstrap["runs"][0]["goal"]["used_tokens"] == 105
-    assert detail["summary"]["status"] == "budget_limited"
+    assert bootstrap["runs"][0]["status"] == "interrupted"
+    assert bootstrap["runs"][0]["goal"]["status"] == "active"
+    assert detail["summary"]["status"] == "interrupted"
     assert detail["summary"]["goal"] == manifest["goal"]
 
 
@@ -129,9 +127,6 @@ def test_running_goal_is_loaded_from_checkpoint_for_tui_detail(tmp_path: Path) -
     _write(manifest_path, json.dumps(manifest))
     goal = {
         "status": "active",
-        "used_tokens": 50,
-        "token_budget": 1000,
-        "remaining_tokens": 950,
     }
     _write(
         tmp_path / ".runtime-live/checkpoints/demo/task-live/goal.json",
@@ -1192,3 +1187,30 @@ def test_runtime_summary_returns_fresh_independent_system_objects(tmp_path: Path
 
     assert second["systems"][0]["name"] == "demo"
     assert second["systems"][0]["validation"] == {"valid": True, "errors": []}
+
+
+@pytest.mark.parametrize("source", ["manifest", "checkpoint"])
+def test_legacy_goal_budget_is_silently_ignored_in_tui(tmp_path: Path, source: str) -> None:
+    bridge = _project(tmp_path)
+    _completed_run(tmp_path)
+    manifest_path = tmp_path / ".runtime-live/runs/demo/run-live/manifest.json"
+    manifest = json.loads(manifest_path.read_text())
+    manifest["status"] = "budget_limited"
+    legacy = {
+        "goal_id": "goal-legacy", "status": "budget_limited", "goal_started": True,
+        "objective": "Finish report", "token_budget": 1, "used_tokens": 100,
+        "remaining_tokens": 0, "prompt_tokens": 90, "completion_tokens": 10,
+    }
+    if source == "manifest":
+        manifest["goal"] = legacy
+    else:
+        manifest.pop("goal", None)
+        _write(tmp_path / ".runtime-live/checkpoints/demo/task-live/goal.json", json.dumps(legacy))
+    _write(manifest_path, json.dumps(manifest))
+    summary = bridge.dispatch("run.detail", {"application_id": "demo", "run_id": "run-live"})["summary"]
+    assert summary["status"] == "interrupted"
+    assert summary["goal"] == {
+        "goal_id": "goal-legacy", "status": "active", "goal_started": True,
+        "objective": "Finish report",
+    }
+    assert json.loads(manifest_path.read_text())["status"] == "budget_limited"

@@ -1,50 +1,26 @@
 name: "test_search_tools"
+agent_runtime: smolagents
 description: "Validate search & navigation tools (grep_search, glob_search, lsp_find_definition, lsp_find_references, lsp_get_document_symbols)"
 
 model_type: "powerful"
-tool_call_type: "code_act"
-max_steps: 5
+max_steps: 12
 
 workflow: |
   # Search Tools Validation Workflow
 
-  Execute one Python code block that calls the tools below directly. Do not
-  split this into multiple code blocks. Do not output prose outside the code
-  block.
-
-  ```python
-  file_path = "src/tools/search/grep_tool/grep_tool.py"
-  results = []
-
-  globbed = glob_search(pattern="**/*.py", path="src/tools/search/", max_results=50, sort_by="name")
-  results.append(("glob_search", "grep_tool.py" in globbed and "glob_tool.py" in globbed and "lsp_tool.py" in globbed, globbed))
-
-  grep_content = grep_search(pattern="def grep_search", path="src/tools/search/")
-  results.append(("grep_search content", "grep_tool.py" in grep_content and "def grep_search" in grep_content, grep_content))
-
-  grep_files = grep_search(pattern="import json", path="src/tools/search/", output_mode="files_with_matches")
-  results.append(("grep_search files_with_matches", ".py" in grep_files and " | " not in grep_files, grep_files))
-
-  grep_count = grep_search(pattern="def ", path="src/tools/search/", output_mode="count")
-  results.append(("grep_search count", ":" in grep_count and any(ch.isdigit() for ch in grep_count), grep_count))
-
-  symbols = lsp_get_document_symbols(file_path=file_path)
-  results.append(("lsp_get_document_symbols", "grep_search" in symbols, symbols))
-
-  refs = lsp_find_references(file_path=file_path, line=51, character=5)
-  results.append(("lsp_find_references", "references in" in refs and "src/tools/search/grep_tool/__init__.py" in refs, refs))
-
-  definition = lsp_find_definition(file_path=file_path, line=51, character=5)
-  results.append(("lsp_find_definition", "grep_tool.py" in definition and "51" in definition, definition))
-
-  ok = all(item[1] for item in results)
-  lines = ["SEARCH_TOOLS_VALIDATION: " + ("PASS" if ok else "FAIL")]
-  for name, passed, detail in results:
-      lines.append(f"{name}: {'PASS' if passed else 'FAIL'}")
-      if not passed:
-          lines.append(str(detail))
-  final_answer("\n".join(lines))
-  ```
+  Use native structured tool calls and preserve every actual return:
+  1. Call `glob_search` for `**/*.py` under `src/tools/search/`, sorted by name
+     with at most 50 results; require the grep, glob, and LSP tool files.
+  2. Call `grep_search` for `def grep_search`, `import json` in
+     `files_with_matches` mode, and `def ` in `count` mode. Verify each result
+     against its requested output contract.
+  3. Against `src/tools/search/grep_tool/grep_tool.py`, call
+     `lsp_get_document_symbols`, `lsp_find_references` at line 51 character 5,
+     and `lsp_find_definition` at the same position. Require the same evidence
+     named in this workflow's description.
+  4. Call `final_answer` with `SEARCH_TOOLS_VALIDATION: PASS` only if every
+     actual result passed; include one PASS/FAIL row per call and failing
+     evidence.
 
 tools:
   - name: "grep_search"
@@ -54,6 +30,3 @@ tools:
   - name: "lsp_get_document_symbols"
 
 worker_agents: []
-
-execution_env:
-  type: "local"

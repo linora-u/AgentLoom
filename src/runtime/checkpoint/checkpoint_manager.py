@@ -33,7 +33,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any
 
-from agentloom.runtime.checkpoint.serializer import CheckpointSerializer
+from agentloom.runtime import SecureDirectory, portable_runtime_component
 from agentloom.runtime.heartbeat.status import (
     detect_crashed_status as _detect_crashed_status,
 )
@@ -41,7 +41,6 @@ from agentloom.runtime.heartbeat.status import (
     detect_worker_call_crashed as _detect_worker_call_crashed,
 )
 from agentloom.runtime.logging import get_logger
-from agentloom.runtime import SecureDirectory, portable_runtime_component
 from agentloom.runtime.todo.model import (
     TODO_SCHEMA_VERSION,
     empty_todo_snapshot,
@@ -412,11 +411,13 @@ class CheckpointManager:
             raise ValueError("pass exactly one of checkpoint_dir or checkpoints_root")
         self._supervisor_name = supervisor_name
         self._run_id = run_id
+        self._checkpoint_dir: Path | None
         if checkpoint_dir is not None:
             self._checkpoint_dir = Path(os.path.abspath(os.fspath(Path(checkpoint_dir).expanduser())))
             self._checkpoints_root = self._checkpoint_dir.parent
             self._bound_task_id: str | None = self._checkpoint_dir.name
         else:
+            assert checkpoints_root is not None
             self._checkpoints_root = Path(os.path.abspath(os.fspath(Path(checkpoints_root).expanduser())))
             self._checkpoint_dir = None
             self._bound_task_id = None
@@ -1189,11 +1190,11 @@ class CheckpointManager:
 
     # ── supervisor checkpoint ────────────────────────────────────────────
 
-    def save_supervisor_checkpoint(
+    def save_supervisor_runtime_checkpoint(
         self,
         task_id: str,
         *,
-        memory_steps: list,
+        runtime_checkpoint: dict[str, Any],
         task_text: str,
         status: str,
         config_snapshot: dict | None = None,
@@ -1201,15 +1202,19 @@ class CheckpointManager:
         error: str | None = None,
         context_store: dict | None = None,
     ) -> Path:
-        """Save the supervisor's ``memory.steps`` plus metadata."""
+        """Save one runtime-neutral envelope plus task metadata."""
+
+        progress = runtime_checkpoint.get("progress", 0)
+        if isinstance(progress, bool) or not isinstance(progress, int):
+            progress = 0
         data = {
             "agent_name": self._supervisor_name,
             "agent_type": "supervisor",
             "task_id": task_id,
             "task_text": task_text,
             "status": status,
-            "step_count": len(memory_steps),
-            "memory_steps": CheckpointSerializer.serialize_memory_steps(memory_steps),
+            "step_count": progress,
+            "runtime_checkpoint": _jsonable(runtime_checkpoint),
             "saved_at": datetime.now().astimezone().isoformat(),
         }
         if self._run_id:
@@ -1222,26 +1227,26 @@ class CheckpointManager:
             data["error"] = error
         if context_store is not None:
             data["context_store"] = context_store
-        p = self._supervisor_ckpt(task_id)
-        self._write_json(p, data)
-        return p
+        path = self._supervisor_ckpt(task_id)
+        self._write_json(path, data)
+        return path
 
     def load_supervisor_checkpoint(self, task_id: str) -> dict | None:
         return self._read_json(self._supervisor_ckpt(task_id))
 
     # ── worker checkpoint ────────────────────────────────────────────────
 
-    def save_worker_checkpoint(
+    def save_worker_runtime_checkpoint(
         self,
         task_id: str,
         worker_name: str,
         *,
         call_index: int = 0,
         input_hash: str = "",
-        memory_steps: list | None = None,
+        runtime_checkpoint: dict[str, Any] | None = None,
         task_input: str = "",
         status: str = "completed",
-        result: str | None = None,
+        result: Any = None,
         error: str | None = None,
     ) -> Path:
         data: dict[str, Any] = {
@@ -1256,10 +1261,12 @@ class CheckpointManager:
         }
         if self._run_id:
             data["run_id"] = self._run_id
-        if memory_steps:
-            data["step_count"] = len(memory_steps)
-            data["memory_steps"] = CheckpointSerializer.serialize_memory_steps(memory_steps)
-        if result is not None:
+        if runtime_checkpoint is not None:
+            data["runtime_checkpoint"] = _jsonable(runtime_checkpoint)
+            progress = runtime_checkpoint.get("progress", 0)
+            if isinstance(progress, int) and not isinstance(progress, bool):
+                data["step_count"] = progress
+        if status == "completed" or result is not None:
             data["result"] = result
         if error is not None:
             data["error"] = error

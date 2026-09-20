@@ -24,7 +24,6 @@ print([event.event for event in events])
 配置在 preflight 被拒绝时尚未分配存储：Python 抛出原配置异常，sink 只收到一个包含 typed `RunRejection` 的 `run.rejected`，没有 `run` receipt。分配成功后，事件序列是 `run.started` 加且仅加一个终态：
 
 - `run.completed`，包含 `output`；
-- `run.budget_limited`，包含 canonical `goal`、`error` 与 `phase`，Python 抛出携带同一 `RunInfo`、Goal snapshot 和可恢复 task id 的 `ApplicationRunBudgetLimited`；
 - `run.failed`，包含 `error` 与 `phase`，Python 抛出携带同一 `RunInfo` 的 `ApplicationRunError`；
 - `run.interrupted`，包含 `error` 与 `phase`，Python 抛出 `ApplicationRunInterrupted`。提供 resume 前必须检查其 `resumable` 标志；尚未产生可恢复状态时，该值可能为 `false`。
 
@@ -49,11 +48,8 @@ uv run loom run applications/example/workflows/supervisor.yaml \
 {"schema_version":1,"event":"run.completed","run":{"application_id":"example","task_id":"task_...","run_id":"run_...","run_dir":"...","manifest_path":"...","log_path":"..."},"occurred_at":"...","output":"done"}
 ```
 
-Goal 事件的 `goal` 对象包含 `status`、`token_budget`、`prompt_tokens`、
-`completion_tokens`、`used_tokens`、`remaining_tokens`、objective 指纹、evidence 和
-时间戳。CLI 文本模式也会显示 `Goal: <status> | tokens: <used>/<budget>`。预算终态
-退出码为 `1`，但它不是 `run.failed`；自动化应读取 `run.budget_limited` 并提示修改
-YAML 后 resume。详见 [Goal Mode](goal_mode.md)。
+Goal 事件的 `goal` 对象包含身份、目标、状态、evidence 和时间戳。CLI 文本模式
+显示 `Goal: <status>`。普通模型用量仍保留在运行时审计记录中。详见 [Goal Mode](goal_mode.md)。
 
 Preflight 拒绝只产生 `run.rejected`，其中 `phase: "preflight"`、`error: {kind, message, retryable}`。因为没有创建 run 目录，所以不会伪造 `run` 对象。
 
