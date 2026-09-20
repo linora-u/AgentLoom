@@ -217,7 +217,7 @@ def validate_command(command: str, cwd: str | None = None):
     validate_command_security(command)
 
     from agentloom.runtime.tool_governance.search import validate_shell_query_scope
-    validate_shell_query_scope(command)
+    validate_shell_query_scope(command, cwd=cwd)
 
     # Stage 2: Path boundary validation
     check_path_constraints(command, cwd=cwd)

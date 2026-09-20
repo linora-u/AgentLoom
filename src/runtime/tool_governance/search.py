@@ -24,20 +24,35 @@ def load_exclude_paths(tool_name: str = "grep_search") -> List[str]:
 
 
 
-def validate_shell_query_scope(command: str) -> None:
-    """Refuse Shell traversal when exclusion-aware execution cannot be proved.
+def validate_shell_query_scope(command: str, cwd: str | None = None) -> None:
+    """Only admit proved literal operations when recursive exclusions apply.
 
-    Smol grep/glob have an exclusion-aware executor. Arbitrary Shell searches
-    must use that API when the query carries excluded paths; flags in untrusted
-    command strings are not accepted as evidence of enforced exclusions.
+    A wrapper deny-list cannot secure an arbitrary Shell program. Constrained
+    searches use the dedicated search API; this path admits only literal
+    no-query builtins and direct, exclusion-checked file reads.
     """
-    from agentloom.runtime.tool_governance.shell.shell_command_ast import analyze_shell_command
+    import os
+    import shlex
     from pathlib import Path
-    for invocation in analyze_shell_command(command).commands:
-        name = Path(invocation.name.strip("\"'")).name
-        tools = {"rg": ("grep_search", "glob_search"), "grep": ("grep_search",), "find": ("glob_search",), "ls": ("list_directory",)}.get(name, ())
-        if tools and any(load_exclude_paths(tool) for tool in (*tools, "shell_tool")):
-            raise ValueError("Shell query exclusions cannot be enforced by this executor; use an exclusion-aware search tool")
+    from agentloom.runtime.tool_governance.shell.shell_command_ast import analyze_shell_command
+    query_tools = ("grep_search", "glob_search", "list_directory", "shell_tool")
+    if not any(load_exclude_paths(tool) for tool in query_tools):
+        return
+    analysis = analyze_shell_command(command)
+    if any("<" in redirect.operator for redirect in analysis.redirections):
+        raise ValueError("Shell input redirection has no verified query exclusion mapping")
+    for invocation in analysis.commands:
+        name = invocation.name.strip("\"'")
+        if any(char in invocation.source for char in "$*?[]~`\\"):
+            raise ValueError("Shell expansion has no verified query exclusion mapping")
+        if name in {"printf", "echo", "pwd", "true", "false"}:
+            continue
+        if name == "cat":
+            paths = shlex.split(invocation.source)[1:]
+            root = Path(cwd or os.getcwd())
+            if paths and all(not path.startswith("-") and not any(search_path_excluded(root / path, root, tool) for tool in query_tools) for path in paths):
+                continue
+        raise ValueError("Shell query execution has no verified exclusion mapping; use an exclusion-aware search tool")
 
 
 def search_excludes(tool_name: str, root) -> list[str]:
@@ -48,17 +63,23 @@ def search_excludes(tool_name: str, root) -> list[str]:
     patterns = []
     for value in load_exclude_paths(tool_name):
         path = Path(os.path.expanduser(value))
-        if path.is_absolute():
-            try:
-                value = path.relative_to(root).as_posix() or "*"
-            except ValueError:
-                if root == path or path in root.parents:
-                    value = "*"
-                elif any(c in str(path) for c in "*?["):
-                    raise ValueError("Cannot safely map this absolute query exclusion to the search root")
-                else:
-                    continue
-        patterns.append(value)
+        candidates = [path]
+        if path.is_absolute() and not any(c in str(path) for c in "*?["):
+            candidates.append(path.resolve())
+        for candidate in dict.fromkeys(candidates):
+            value = str(candidate)
+            if candidate.is_absolute():
+                try:
+                    relative = candidate.relative_to(root)
+                    value = "*" if str(relative) == "." else relative.as_posix()
+                except ValueError:
+                    if candidate in root.parents:
+                        value = "*"
+                    elif any(c in str(candidate) for c in "*?["):
+                        raise ValueError("Cannot safely map this absolute query exclusion to the search root")
+                    else:
+                        continue
+            patterns.append(value)
     return patterns
 
 
@@ -71,11 +92,16 @@ def search_path_excluded(path, root, tool_name: str) -> bool:
         relative = path.relative_to(root).as_posix()
     except ValueError:
         return True
-    candidates = [relative, *[str(parent) for parent in Path(relative).parents if str(parent) != "."]]
+    try:
+        resolved_relative = path.resolve().relative_to(root.resolve()).as_posix()
+    except (ValueError, OSError, RuntimeError):
+        return True
+    relatives = (relative, resolved_relative)
+    candidates = [candidate for value in relatives for candidate in (value, *[str(parent) for parent in Path(value).parents if str(parent) != "."])]
     for pattern in search_excludes(tool_name, root):
         if pattern == "*":
             return True
-        if "/" not in pattern and any(fnmatch.fnmatch(part, pattern) for part in Path(relative).parts):
+        if "/" not in pattern and any(fnmatch.fnmatch(part, pattern) for value in relatives for part in Path(value).parts):
             return True
         if any(fnmatch.fnmatch(candidate, pattern) for candidate in candidates):
             return True
