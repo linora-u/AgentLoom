@@ -12,7 +12,7 @@ from pathlib import Path
 from threading import RLock
 from typing import Any, Callable
 
-from agentloom.adapters.pi.metadata import SDK_VERSION
+from agentloom.adapters.pi.metadata import BRIDGE_VERSION, SDK_VERSION
 from agentloom.runtime.agent_runtime import (
     AgentRuntimeError, RuntimeCheckpointEnvelope, RuntimeDefinition,
 )
@@ -22,7 +22,7 @@ from agentloom.runtime.native_tools import NativeCallIdentity
 from agentloom.runtime.storage import SecureDirectory
 from agentloom.runtime.tool_protocol import ToolCallRecord
 
-STATE_VERSION = 1
+STATE_VERSION = 2
 MAX_SESSION_BYTES = 128 * 1024 * 1024
 _DIGEST = re.compile(r"[0-9a-f]{64}")
 
@@ -74,9 +74,12 @@ class PiCheckpointStore:
         if truncated or _digest(raw) != digest:
             raise ValueError("Pi session artifact is incomplete or changed")
         bundle = json.loads(raw)
-        if not isinstance(bundle, dict) or set(bundle) != {"version", "sdk_version", "scope", "session", "calls", "phase"}:
+        if not isinstance(bundle, dict) or set(bundle) != {
+                "version", "bridge_version", "sdk_version", "scope", "session", "calls", "phase"}:
             raise ValueError("Unsupported Pi session artifact")
-        if bundle["version"] != STATE_VERSION or bundle["sdk_version"] != SDK_VERSION:
+        if (bundle["version"] != STATE_VERSION
+                or bundle["bridge_version"] != BRIDGE_VERSION
+                or bundle["sdk_version"] != SDK_VERSION):
             raise ValueError("Incompatible Pi session artifact version")
         scope = bundle["scope"]
         if not isinstance(scope, dict) or (scope.get("application_id"), scope.get("task_id")) != (
@@ -132,7 +135,8 @@ class PiCheckpointStore:
                 progress=len(bundle["session"]["entries"]),
                 payload={"artifact": digest, "configuration": self.configuration_key,
                          "session_id": bundle["session"]["header"]["id"],
-                         "source_instance_id": self.instance_id},
+                         "source_instance_id": self.instance_id,
+                         "bridge_version": BRIDGE_VERSION},
             )
             # Returning from this callback is the execution barrier. A sink
             # failure must propagate; an observer notification is insufficient.
@@ -143,7 +147,9 @@ class PiCheckpointStore:
     def load(self, checkpoint: RuntimeCheckpointEnvelope) -> dict[str, Any]:
         checkpoint.require_compatible(runtime_id="pi", runtime_version=SDK_VERSION,
                                       state_schema_version=STATE_VERSION)
-        if checkpoint.task_id != self.runtime.task_id or checkpoint.payload.get("configuration") != self.configuration_key:
+        if (checkpoint.payload.get("bridge_version") != BRIDGE_VERSION
+                or checkpoint.task_id != self.runtime.task_id
+                or checkpoint.payload.get("configuration") != self.configuration_key):
             raise AgentRuntimeError("Pi checkpoint task or definition is incompatible", category="configuration")
         digest = checkpoint.payload.get("artifact")
         if not isinstance(digest, str):
@@ -181,6 +187,20 @@ class PiCheckpointStore:
                 data["state"] = "uncertain"
                 self.storage.atomic_write_json(self._platform_key(identity), data)
             return data
+
+    def reconcile_platform(self, identity: NativeCallIdentity, record: ToolCallRecord) -> None:
+        """Replace executing with an independently proven durable Worker result."""
+        with self._lock:
+            data = self.platform_receipt(identity)
+            if (data["state"] != "executing" or record.status != "completed"
+                    or record.call_id != identity.call_id
+                    or record.tool_name != data["tool_name"]
+                    or record.input != data["arguments"]):
+                raise ValueError("Pi platform reconciliation does not match execution")
+            self.storage.atomic_write_json(
+                self._platform_key(identity),
+                {**data, "state": "committed", "record": record.to_dict()},
+            )
 
     def prepare_platform(self, identity: NativeCallIdentity, tool_name: str, arguments: dict[str, Any]) -> None:
         with self._lock:

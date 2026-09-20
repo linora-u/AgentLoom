@@ -101,21 +101,27 @@ in public errors because they may echo credentials or prompts.
 
 ## Lifecycle and limits
 
-- Selected native and platform tools, Worker and Goal are enabled. Unselected
-  tools fail immediately. Native grep/find/ls, optional professional writes and
-  checkpoint/resume remain unsupported; no implicit Markdown tools are injected.
+- Selected native and platform tools, Worker, Goal and compatible same-runtime
+  checkpoint resume are enabled. Unselected tools fail immediately. Native
+  grep/find/ls and optional professional writes remain unsupported; no implicit
+  Markdown tools are injected.
 - No implicit built-in tools, extensions, skills, prompt templates, context files,
   user settings, saved sessions or environment credentials are discovered.
 - Stop uses the invocation's AgentLoom Hook Run. A block continues the same native
   in-memory session with the reason/context. `runtime_options.max_stop_attempts`
   bounds attempts (default 3); persistent rejection fails the Application.
-- Sequential workflow tasks may continue the current in-memory session. This is
-  not persisted resume. `additional_args` is explicitly unsupported in this stage.
+- Sequential workflow tasks may continue the current in-memory session.
+  Persisted resume restores an SDK 0.79.4 session only for the same Application,
+  task, selected definition, bridge/state version and workspace. A resumed
+  attempt uses a new Run while preserving the original call identities.
+  `additional_args` is explicitly unsupported.
 - Bridge stdout contains only validated v2 frames. Application/CLI stdout follows
   its existing output contract. Cancellation, EOF, invalid frames and close settle
   pending requests and clean up the owned process group.
-- Model retries do not replay completed tools. Pi's persisted session and journal
-  recovery remain ticket 12; uncertain side effects must never be retried blindly.
+- Model retries do not replay completed tools. Committed native and Worker
+  results can be reconciled into the restored SDK session without invoking the
+  tool again. Calls interrupted before dispatch become explicit not-executed
+  results; executing or otherwise uncertain effects stop automatic resume.
 
 ## Verification
 
