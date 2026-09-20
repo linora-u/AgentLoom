@@ -62,7 +62,7 @@ class NativeCallJournal:
         self._lock = RLock()
 
     @contextmanager
-    def transaction(self, identity: NativeCallIdentity) -> Iterator[dict[str, Any]]:
+    def transaction(self, identity: NativeCallIdentity, *, confirm: bool = False) -> Iterator[dict[str, Any]]:
         # Parent/session anchors must match the stored identity, not form a new
         # namespace that would permit reuse of an already consumed call ID.
         key = hashlib.sha256(json.dumps([identity.instance_id, identity.call_id]).encode()).hexdigest()
@@ -74,7 +74,7 @@ class NativeCallJournal:
                 data = {}
             before = snapshot(data)
             yield data
-            if data != before:
+            if data != before or (confirm and data):
                 self._storage.atomic_write_json(name, snapshot(data))
 
     def close(self) -> None:
