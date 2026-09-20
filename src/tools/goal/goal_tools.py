@@ -4,8 +4,6 @@ from __future__ import annotations
 
 import json
 
-from agentloom.adapters.smolagents.tools.tools import tool
-
 
 def _require_root_goal_provider():
     from agentloom.runtime.goal import get_current_goal_provider, normalize_goal_config
@@ -29,7 +27,6 @@ def _require_root_goal_provider():
     return get_current_goal_provider(required=True)
 
 
-@tool
 def get_goal() -> str:
     """Return the root task's canonical objective, Goal status, and evidence.
 
@@ -48,7 +45,6 @@ def get_goal() -> str:
     )
 
 
-@tool
 def update_goal(status: str, evidence: str) -> str:
     """Mark the root Goal complete with durable, non-empty evidence.
 
