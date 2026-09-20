@@ -4,7 +4,7 @@
 
 **Blocked by:** 03：冻结基座与平台边界，交付可并行的公共基线
 
-**Status:** in-progress — 独立 worktree `AgentLoom-worktrees/t05`，分支 `codex/pi-t05-governance`。基线 `9d5a88915efbd402d0f2697318125933fc1500e0` 包含 03 冻结提交；两者间只有研究文档，无实现差异。按用户要求分阶段提交，并用私有模型配置运行真实 Application。
+**Status:** completed — 受检实现 `5b26985d`；完整回归 4262 passed、1 skipped，最终候选 40/40 真实 Application 通过。见 [实现与交接](05-implementation.md)、[验证记录](05-validation.json)。
 
 **Required:** Yes — 本票属于最终交付必做项。
 
@@ -22,13 +22,13 @@
 
 ## Acceptance criteria
 
-- [ ] 实际工具请求经过现有 Hook、变换后的严格校验、权限检查和稳定 call ID 记录；执行器获得最终参数。
-- [ ] 拒绝时 executor 没有执行，blocked 与工具异常区分；错误的 Run、实例、授权或参数摘要不能复用一次批准。
-- [ ] 同一个调用在返回成功前获得持久结算确认；执行 journal 与 ToolCallRecord 关联，而不是把 observer 回调当落盘屏障。
-- [ ] 真实文件读取结果及其原始/最终参数、来源和 call identity 可被独立验证；伪造、错配的可信记忆证据被拒绝。
-- [ ] 重复/晚到的结算或事件不能重复提交结果或修改已终结调用。
-- [ ] 旧 Python 工具调用路径及 Hook ADR 行为保持通过；fixture 不得自己实现被测试的权限或持久化逻辑。
-- [ ] executor 提供方与平台授权/结算分离；只读 native 测试不通过调用 smol read_file 伪装为基座工具。公共 metadata 的接线由协调者串行集成。
+- [x] 实际工具请求经过现有 Hook、变换后的严格校验、权限检查和稳定 call ID 记录；执行器获得最终参数。
+- [x] 拒绝时 executor 没有执行，blocked 与工具异常区分；错误的 Run、实例、授权或参数摘要不能复用一次批准。
+- [x] 同一个调用在返回成功前获得持久结算确认；执行 journal 与 ToolCallRecord 关联，而不是把 observer 回调当落盘屏障。
+- [x] 真实文件读取结果及其原始/最终参数、来源和 call identity 可被独立验证；伪造、错配的可信记忆证据被拒绝。
+- [x] 重复/晚到的结算或事件不能重复提交结果或修改已终结调用。
+- [x] 旧 Python 工具调用路径及 Hook ADR 行为保持通过；fixture 不得自己实现被测试的权限或持久化逻辑。
+- [x] executor 提供方与平台授权/结算分离；只读 native 测试不通过调用 smol read_file 伪装为基座工具。公共 metadata 的接线由协调者串行集成。
 
 ## Handoff
 
