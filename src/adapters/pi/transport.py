@@ -8,6 +8,7 @@ import os
 from pathlib import Path
 from queue import Queue, Empty
 import signal
+import sys
 import subprocess
 from tempfile import TemporaryDirectory
 from threading import Lock, RLock, Thread
@@ -131,7 +132,7 @@ class PiTransport:
             self._terminate()
 
     def request(self, payload: RequestPayload, *, run_id=None, observe: Callable[[Event], None] | None = None,
-                timeout: float | None = None, callback=None) -> Response:
+                timeout: float | None = None, callback=None, cancel_callbacks: Callable[[], None] | None = None) -> Response:
         request = Request(version=1, kind="request", instance_id=self.instance_id, run_id=run_id,
                           request_id=f"host:{uuid4().hex}", payload=payload)
         pending = Pending(request)
@@ -144,6 +145,7 @@ class PiTransport:
         self._write(request)
         deadline = time.monotonic() + timeout if timeout is not None else None
         executor = ThreadPoolExecutor(max_workers=8, thread_name_prefix=f"pi-callback-{self.process.pid}") if callback else None
+        completed = False
 
         def dispatch(message):
             try:
@@ -187,6 +189,7 @@ class PiTransport:
                     error = message.error
                     raise AgentRuntimeError(error.message, category="internal" if error.category == "protocol" else error.category,
                                             retryable=error.retryable)
+                completed = getattr(message.payload, "state", "success") not in {"failed", "interrupted"}
                 return message
         except KeyboardInterrupt:
             self.cancel()
@@ -198,6 +201,13 @@ class PiTransport:
             raise self._failure from None
         finally:
             if executor is not None:
+                if not completed and cancel_callbacks is not None:
+                    active_error = sys.exception()
+                    try:
+                        cancel_callbacks()
+                    except Exception as cleanup_error:
+                        if active_error is not None and active_error is not cleanup_error:
+                            active_error.add_note(f"Pi callback cleanup failed: {type(cleanup_error).__name__}")
                 # Never let a live Python callback mutate a finalized Application.
                 # Native process cancellation stays serviceable on the reader thread.
                 executor.shutdown(wait=True, cancel_futures=True)
