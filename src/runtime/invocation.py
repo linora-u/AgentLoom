@@ -99,10 +99,13 @@ class AgentInvocation:
         )
 
         owner = self.owner
-        transformed_tasks = owner._transform_tasks(self.task)
-        if not transformed_tasks:
+        lifecycle_tasks = owner._transform_tasks(self.task)
+        if not lifecycle_tasks:
             raise ValueError("Agent task transformation produced no tasks")
-        transformed_tasks = owner._inject_memory_snapshot(transformed_tasks)
+        # Memory is model context, not newly supplied task/evidence. Recording
+        # its trusted wrapper in lifecycle events would make the untrusted
+        # history sanitizer correctly treat the wrapper as a forged fence.
+        transformed_tasks = owner._inject_memory_snapshot(lifecycle_tasks)
         transformed_task = "\n\n".join(transformed_tasks)
 
         goal_config = normalize_goal_config(
@@ -174,7 +177,7 @@ class AgentInvocation:
             with ensure_task_context_engine(owner._effective_agent_config or owner._config):
                 return self._execute_bound(
                     transformed_tasks=transformed_tasks,
-                    transformed_task=transformed_task,
+                    lifecycle_tasks=lifecycle_tasks,
                     final_task_id=final_task_id,
                     goal_config=goal_config,
                     goal_provider=goal_provider,
@@ -192,7 +195,7 @@ class AgentInvocation:
         self,
         *,
         transformed_tasks: list[str],
-        transformed_task: str,
+        lifecycle_tasks: list[str],
         final_task_id: str,
         goal_config: Any,
         goal_provider: Any,
@@ -203,6 +206,7 @@ class AgentInvocation:
         from agentloom.runtime.goal import bind_goal_state_provider
 
         owner = self.owner
+        lifecycle_task = "\n\n".join(lifecycle_tasks)
         session_started = False
         session_result = None
         runtime_result = None
@@ -254,7 +258,7 @@ class AgentInvocation:
             owner._bind_hook_message_sink(runtime_agent)
             ensure_workspace_mounted_once()
             if self.owns_root_run:
-                owner._emit_session_lifecycle_event(HookEvent.SESSION_START, transformed_task)
+                owner._emit_session_lifecycle_event(HookEvent.SESSION_START, lifecycle_task)
                 session_started = True
 
             runtime_checkpoint, checkpoint_sink = self._prepare_checkpoint(
@@ -263,6 +267,7 @@ class AgentInvocation:
             result, runtime_result = self._run_runtime(
                 runtime_agent,
                 transformed_tasks=transformed_tasks,
+                lifecycle_tasks=lifecycle_tasks,
                 goal_provider=goal_provider,
                 lifecycle=lifecycle,
                 runtime_checkpoint=runtime_checkpoint,
@@ -270,7 +275,7 @@ class AgentInvocation:
             )
             owner._emit_task_lifecycle_event(
                 HookEvent.TASK_COMPLETED,
-                transformed_task,
+                lifecycle_task,
                 result=result,
             )
             session_result = result
@@ -280,7 +285,7 @@ class AgentInvocation:
             if isinstance(exc, Exception):
                 owner._emit_task_lifecycle_event(
                     HookEvent.STOP_FAILURE,
-                    transformed_task,
+                    lifecycle_task,
                     error=exc,
                 )
             raise
@@ -288,7 +293,7 @@ class AgentInvocation:
             lifecycle_error: BaseException | None = None
             try:
                 lifecycle_error = self._finalize(
-                    transformed_task=transformed_task,
+                    lifecycle_task=lifecycle_task,
                     final_task_id=final_task_id,
                     runtime_result=runtime_result,
                     coordinator=coordinator,
@@ -356,6 +361,7 @@ class AgentInvocation:
         runtime_agent: Any,
         *,
         transformed_tasks: list[str],
+        lifecycle_tasks: list[str],
         goal_provider: Any,
         lifecycle: ApplicationRunLifecycle | None,
         runtime_checkpoint: Any = None,
@@ -424,7 +430,7 @@ class AgentInvocation:
             for task_index, current_task in enumerate(transformed_tasks):
                 self.owner._emit_task_start(
                     runtime_agent,
-                    current_task,
+                    lifecycle_tasks[task_index],
                     additional_args=self.additional_args or {},
                 )
                 segment_start = len(runtime_events)
@@ -472,7 +478,7 @@ class AgentInvocation:
             try:
                 self.owner._emit_task_start(
                     runtime_agent,
-                    current_task,
+                    lifecycle_tasks[0] if use_initial_context else current_task,
                     additional_args=self.additional_args or {},
                 )
                 segment_start = len(runtime_events)
@@ -524,7 +530,7 @@ class AgentInvocation:
     def _finalize(
         self,
         *,
-        transformed_task: str,
+        lifecycle_task: str,
         final_task_id: str,
         runtime_result: Any,
         coordinator: Any,
@@ -559,7 +565,7 @@ class AgentInvocation:
             if session_started:
                 owner._emit_session_lifecycle_event(
                     HookEvent.SESSION_END,
-                    transformed_task,
+                    lifecycle_task,
                     result=session_result,
                     error=session_error,
                 )
