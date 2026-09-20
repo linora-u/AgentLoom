@@ -71,9 +71,16 @@ class NativeReadToolHost:
         self._execution = capture_explicit_execution_context()
         if self._execution.hook_run is None or not self._execution.agent_id:
             raise RuntimeError("Native tools require an explicit Hook Run and Agent instance")
+        if (
+            self._execution.local_run_id != self._execution.hook_run.local_run_id
+            or self._execution.root_run_id != self._execution.hook_run.root_run_id
+        ):
+            raise ValueError("Native host Hook Run identity mismatch")
         if self._execution.task_id != self._runtime.task_id:
             raise ValueError("Native host task mismatch")
         self._cwd = str(Path(cwd).resolve(strict=True))
+        if not Path(self._cwd).is_dir():
+            raise ValueError("Native cwd must be an existing directory")
         selected = tuple(tools)
         self._tools = {tool.visible_name: tool for tool in selected}
         if len(self._tools) != len(selected):
@@ -108,6 +115,8 @@ class NativeReadToolHost:
             get_current_run_context(required=True) != self._runtime
             or active.hook_run is not self._execution.hook_run
             or active.agent_id != self._execution.agent_id
+            or active.local_run_id != self._execution.local_run_id
+            or active.root_run_id != self._execution.root_run_id
             or active.task_id != self._runtime.task_id
             or (identity.application_id, identity.task_id, identity.run_id, identity.instance_id)
             != (self._runtime.application_id, self._runtime.task_id, self._runtime.run_id, self._execution.agent_id)
@@ -118,7 +127,16 @@ class NativeReadToolHost:
         if not data or data.get("version") != 1 or "authorization_id" not in data:
             raise ValueError("Unknown native call or journal version")
         entry = journal_entry(data)
-        if entry.authorization.identity != identity or data["hook_run_id"] != self._execution.local_run_id:
+        if (
+            self._tools.get(entry.authorization.tool.visible_name) != entry.authorization.tool
+            or entry.authorization.cwd != self._cwd
+        ):
+            raise ValueError("Native stored selection mismatch")
+        if (
+            entry.authorization.identity != identity
+            or data["hook_run_id"] != self._execution.local_run_id
+            or data["hook_root_id"] != self._execution.root_run_id
+        ):
             raise ValueError("Native call identity mismatch")
         return entry
 
@@ -144,6 +162,8 @@ class NativeReadToolHost:
                     for name in request.tool.path_parameters
                 ):
                     raise ValueError("Native read requires non-empty path arguments")
+                if any(final[name].startswith(("file://", "~")) for name in request.tool.path_parameters):
+                    raise ValueError("Native paths must use plain filesystem syntax relative to the bound cwd")
                 return final, final
 
             started = time.time()
@@ -166,6 +186,7 @@ class NativeReadToolHost:
                     request=snapshot(request),
                     rejection=prepared.to_dict(),
                     hook_run_id=self._execution.local_run_id,
+                    hook_root_id=self._execution.root_run_id,
                 )
                 return NativePreparation(rejection=prepared)
             grant = NativeAuthorization(uuid4().hex, request.identity, request.tool, request.cwd, prepared[0])
@@ -176,6 +197,7 @@ class NativeReadToolHost:
                 final_arguments=dict(grant.final_arguments),
                 state="authorized",
                 hook_run_id=self._execution.local_run_id,
+                hook_root_id=self._execution.root_run_id,
                 started_at=started,
             )
             self._owned.add(request.identity)
@@ -209,6 +231,7 @@ class NativeReadToolHost:
                 or data.get("version") != 1
                 or data["request"]["identity"] != snapshot(identity)
                 or data["hook_run_id"] != self._execution.local_run_id
+                or data["hook_root_id"] != self._execution.root_run_id
             ):
                 raise ValueError("Native receipt identity mismatch")
             return snapshot(data)
@@ -242,12 +265,14 @@ class NativeReadToolHost:
                 from agentloom.runtime.trusted_memory_evidence import extract_trusted_memory_evidence
 
                 try:
-                    evidence = extract_trusted_memory_evidence(_EvidenceCarrier(extractor), outcome.output)
+                    evidence = extract_trusted_memory_evidence(
+                        _EvidenceCarrier(lambda raw: extractor(snapshot(raw))), actual["output"]
+                    )
                     evidence_status = "verified"
                 except Exception:
                     evidence_status = "rejected"
 
-            output = outcome.output
+            output = snapshot(actual["output"])
             if outcome.status == "completed" and isinstance(output, str):
                 try:
                     output = _compress_tool_result(
@@ -256,7 +281,7 @@ class NativeReadToolHost:
                         result=output,
                     )
                 except Exception:
-                    output = outcome.output
+                    output = snapshot(actual["output"])
             commit_id = uuid4().hex
             output_digest = hashlib.sha256(
                 json.dumps(actual["output"], sort_keys=True, ensure_ascii=False).encode()
