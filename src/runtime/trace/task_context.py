@@ -506,8 +506,9 @@ def task_context(task_id: Optional[str] = None) -> Generator[str, None, None]:
     if task_id is None:
         task_id = generate_id()
 
-    # Save previous task ID.
-    previous_task_id = get_current_task_id()
+    # Only an explicit parent belongs to this context. A compatibility fallback
+    # may belong to another thread and must never become our explicit task ID.
+    previous_task_id = _current_task_id.get()
 
     try:
         # Set new task ID.

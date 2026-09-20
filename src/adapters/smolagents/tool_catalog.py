@@ -7,7 +7,7 @@ def tool_specs() -> tuple[ToolSpec, ...]:
     return (
         _spec(
             "shell_tool",
-            "agentloom.tools.shell.shell_tool",
+            "agentloom.adapters.smolagents.tools.shell.shell_tool",
             "core_shell",
             "Run a shell command with AgentLoom shell policy enforcement.",
             "shell",
@@ -24,7 +24,7 @@ def tool_specs() -> tuple[ToolSpec, ...]:
         ),
         _spec(
             "check_background_task",
-            "agentloom.tools.shell.background_task_tools",
+            "agentloom.adapters.smolagents.tools.shell.background_task_tools",
             "core_shell",
             "Read current output and status for a background shell task.",
             "shell",
@@ -39,7 +39,7 @@ def tool_specs() -> tuple[ToolSpec, ...]:
         ),
         _spec(
             "kill_background_task",
-            "agentloom.tools.shell.background_task_tools",
+            "agentloom.adapters.smolagents.tools.shell.background_task_tools",
             "core_shell",
             "Terminate a running background shell task.",
             "shell",
@@ -56,7 +56,7 @@ def tool_specs() -> tuple[ToolSpec, ...]:
         ),
         _spec(
             "list_background_tasks",
-            "agentloom.tools.shell.background_task_tools",
+            "agentloom.adapters.smolagents.tools.shell.background_task_tools",
             "core_shell",
             "List active and recent background shell tasks.",
             "shell",
@@ -71,7 +71,7 @@ def tool_specs() -> tuple[ToolSpec, ...]:
         ),
         _spec(
             "read_file",
-            "agentloom.tools.file_ops.read_file",
+            "agentloom.adapters.smolagents.tools.file_ops.read_file",
             "core_file",
             "Read a file with pagination and read-state tracking.",
             "file_ops",
@@ -87,7 +87,7 @@ def tool_specs() -> tuple[ToolSpec, ...]:
         ),
         _spec(
             "edit_file",
-            "agentloom.tools.file_ops.edit_file",
+            "agentloom.adapters.smolagents.tools.file_ops.edit_file",
             "core_file",
             "Apply one or more unique text edits to an existing file.",
             "file_ops",
@@ -103,7 +103,7 @@ def tool_specs() -> tuple[ToolSpec, ...]:
         ),
         _spec(
             "write_file",
-            "agentloom.tools.file_ops.write_file",
+            "agentloom.adapters.smolagents.tools.file_ops.write_file",
             "core_file",
             "Create or completely overwrite a file with read-state protection.",
             "file_ops",
@@ -119,7 +119,7 @@ def tool_specs() -> tuple[ToolSpec, ...]:
         ),
         _spec(
             "list_directory",
-            "agentloom.tools.file_ops.directory_browser",
+            "agentloom.adapters.smolagents.tools.file_ops.directory_browser",
             "core_file",
             "List a directory tree with repository-oriented filtering.",
             "file_ops",
@@ -144,7 +144,7 @@ def tool_specs() -> tuple[ToolSpec, ...]:
         ),
         _spec(
             "grep_search",
-            "agentloom.tools.search.grep_tool",
+            "agentloom.adapters.smolagents.tools.search.grep_tool",
             "core_search",
             "Search file contents using ripgrep-compatible regular expressions.",
             "search",
@@ -172,7 +172,7 @@ def tool_specs() -> tuple[ToolSpec, ...]:
         ),
         _spec(
             "glob_search",
-            "agentloom.tools.search.glob_tool",
+            "agentloom.adapters.smolagents.tools.search.glob_tool",
             "core_search",
             "Find files by glob pattern under a directory.",
             "search",
@@ -188,7 +188,7 @@ def tool_specs() -> tuple[ToolSpec, ...]:
         ),
         _spec(
             "todo_write",
-            "agentloom.tools.todo.todo_write",
+            "agentloom.adapters.smolagents.tools.todo.todo_write",
             "planning",
             "Write the current task plan.",
             "planning",
