@@ -221,9 +221,11 @@ class NativeToolHost:
             path = Path(self._cwd) / arguments[name]
             try:
                 stat = path.stat()
-                versions[str(path)] = [str(path.resolve()), stat.st_dev, stat.st_ino, stat.st_mtime_ns, stat.st_ctime_ns, stat.st_size]
+                versions[str(path)] = {"resolved_path": str(path.resolve()), "exists": True,
+                    "device": stat.st_dev, "inode": stat.st_ino, "mtime_ns": stat.st_mtime_ns,
+                    "ctime_ns": stat.st_ctime_ns, "size": stat.st_size}
             except FileNotFoundError:
-                versions[str(path)] = [str(path.resolve()), None]
+                versions[str(path)] = {"resolved_path": str(path.resolve()), "exists": False}
         return versions
 
     def _protect(self, tool: ToolManifestEntry, arguments: Mapping[str, Any]) -> None:
@@ -343,8 +345,8 @@ class NativeToolHost:
                 versions = self._file_versions(grant.tool, grant.final_arguments)
                 if versions == data.get("file_versions"):
                     for path, version in versions.items():
-                        if len(version) > 2:
-                            self._observed_files[str(Path(path).resolve())] = (version[3], None)
+                        if version["exists"]:
+                            self._observed_files[str(Path(path).resolve())] = (version["mtime_ns"], None)
             if grant.tool.operation == "write":
                 for name in grant.tool.path_parameters:
                     self._observed_files.pop(str((Path(grant.cwd) / grant.final_arguments[name]).resolve()), None)
@@ -377,6 +379,13 @@ class NativeToolHost:
             output_digest = hashlib.sha256(
                 json.dumps(actual["output"], sort_keys=True, ensure_ascii=False).encode()
             ).hexdigest()
+            result_scope = {
+                    "coverage": "executor_result_only" if outcome.status == "completed" else "none",
+                    "source_completeness": "unknown",
+                    "query_limits": {key: value for key, value in grant.final_arguments.items() if key in {"offset", "limit", "max_results", "max_count", "timeout"}},
+                    "display_truncated": output != actual["output"],
+                    "raw_artifact": {"journal": str(self.journal_directory), "path": str(self._journal.artifact_path(grant.identity)), "json_pointer": "/raw_output", "identity": snapshot(grant.identity), "sha256": output_digest},
+            }
             record = ToolCallRecord(
                 call_id=grant.identity.call_id,
                 tool_name=grant.tool.visible_name,
@@ -395,6 +404,7 @@ class NativeToolHost:
                         "commit_id": commit_id,
                         "cwd": grant.cwd,
                         "raw_output_sha256": output_digest,
+                        "result_scope": result_scope,
                     }
                 },
             )
@@ -403,13 +413,7 @@ class NativeToolHost:
                 commit_id=commit_id,
                 record=record.to_dict(),
                 raw_output=actual["output"],
-                result_scope={
-                    "coverage": "executor_result_only" if outcome.status == "completed" else "none",
-                    "source_completeness": "unknown",
-                    "query_limits": {key: value for key, value in grant.final_arguments.items() if key in {"offset", "limit", "max_results", "max_count", "timeout"}},
-                    "display_truncated": output != actual["output"],
-                    "raw_artifact": {"journal": str(self.journal_directory), "identity": snapshot(grant.identity), "sha256": output_digest},
-                },
+                result_scope=result_scope,
                 evidence=snapshot(evidence),
                 evidence_status=evidence_status,
             )

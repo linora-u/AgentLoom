@@ -114,8 +114,12 @@ class FileHistoryManager:
         # Phase 1: fast check under lock.
         with self._lock:
             current = self._get_or_create_snapshot(step_number)
-            if abs_path in current.tracked_file_backups:
-                return  # Already backed up for this step.
+            already_tracked = abs_path in current.tracked_file_backups
+        if already_tracked:
+            # A previous index write may have failed after the copy. Never let
+            # an in-memory entry turn that failed protection into a grant.
+            self._persist_index()
+            return
 
         # Phase 2: expensive I/O outside the lock.
         try:
@@ -125,7 +129,7 @@ class FileHistoryManager:
             backup = self._create_backup(abs_path, version=next_version)
         except Exception as exc:
             _logger.warning("FileHistory: backup failed for %s: %s", abs_path, exc)
-            return
+            raise
 
         # Phase 3: commit under lock (re-check for races).
         with self._lock:

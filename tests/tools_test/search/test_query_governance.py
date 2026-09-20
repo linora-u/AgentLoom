@@ -25,3 +25,43 @@ def test_absolute_exclusion_and_include_cannot_reintroduce_secret(tmp_path, back
     finally:
         module._RG_PATH = original
         clear_current_agent_config()
+
+@pytest.mark.parametrize("tool", ["grep", "glob"])
+def test_python_search_cannot_follow_alias_into_excluded_directory(tmp_path, tool):
+    module = import_module(f"agentloom.adapters.smolagents.tools.search.{tool}_tool.{tool}_tool")
+    (tmp_path / "secrets").mkdir()
+    secret = tmp_path / "secrets" / "hidden.txt"
+    secret.write_text("MATCH_SECRET")
+    (tmp_path / "alias.txt").symlink_to(secret)
+    (tmp_path / "public.txt").write_text("MATCH_PUBLIC")
+    set_current_agent_config({"tool_access_control": {"path_validation": [{"tools": [tool + "_search"], "exclude_paths": [str(tmp_path / "secrets")]}]}})
+    original = module._RG_PATH
+    try:
+        module._RG_PATH = None
+        result = module.grep_search("MATCH", path=str(tmp_path)) if tool == "grep" else module.glob_search("**/*.txt", path=str(tmp_path))
+        assert "public.txt" in result
+        assert "alias.txt" not in result and "MATCH_SECRET" not in result
+    finally:
+        module._RG_PATH = original
+        clear_current_agent_config()
+
+
+@pytest.mark.parametrize("backend", ["rg", "python"])
+def test_exclusion_alias_protects_canonical_directory(tmp_path, backend):
+    module = import_module("agentloom.adapters.smolagents.tools.search.grep_tool.grep_tool")
+    if backend == "rg" and not module._RG_PATH:
+        pytest.skip("ripgrep unavailable")
+    (tmp_path / "secrets").mkdir()
+    (tmp_path / "secrets" / "hidden.txt").write_text("MATCH_SECRET")
+    (tmp_path / "private-alias").symlink_to(tmp_path / "secrets", target_is_directory=True)
+    (tmp_path / "public.txt").write_text("MATCH_PUBLIC")
+    set_current_agent_config({"tool_access_control": {"path_validation": [{"tools": ["grep_search"], "exclude_paths": [str(tmp_path / "private-alias")]}]}})
+    original = module._RG_PATH
+    try:
+        if backend == "python":
+            module._RG_PATH = None
+        result = module.grep_search("MATCH", path=str(tmp_path))
+        assert "MATCH_PUBLIC" in result and "MATCH_SECRET" not in result
+    finally:
+        module._RG_PATH = original
+        clear_current_agent_config()
