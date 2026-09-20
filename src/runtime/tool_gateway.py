@@ -37,6 +37,7 @@ ToolInitialized = Callable[[], bool]
 ToolEvidenceExtractor = Callable[[Any], Iterable[Mapping[str, Any]] | None]
 ToolCloneFactory = Callable[[], Any]
 ToolOutputNormalizer = Callable[[Any, str | None], Any]
+ToolInputValidator = Callable[[dict[str, Any]], None]
 ToolResourceCloser = Callable[[], None]
 
 
@@ -62,6 +63,7 @@ class ToolBinding:
     output_normalizer: ToolOutputNormalizer | None = None
     compression_source: str | None = None
     manifest_entry: ToolManifestEntry | None = None
+    input_validator: ToolInputValidator | None = None
 
     def __post_init__(self) -> None:
         properties = deepcopy(dict(self.inputs_schema))
@@ -78,6 +80,7 @@ class ToolBinding:
             "evidence_extractor",
             "clone_factory",
             "output_normalizer",
+            "input_validator",
         ):
             value = getattr(self, name)
             if value is not None and not callable(value):
@@ -625,6 +628,12 @@ def _strict_decode_tool_input(
     decoded = deepcopy(tool_input)
     schema = dict(binding.inputs_schema)
     coerce_tool_parameters(decoded, schema)
+    if binding.input_validator is not None:
+        # Protocol tools may carry references and open object schemas that
+        # cannot be represented by the Python callable's property metadata.
+        # Validate after Hooks but before guards, history, or side effects.
+        binding.input_validator(decoded)
+        return decoded, _build_call_kwargs_from_input(binding.forward, decoded)
     unknown = sorted(set(decoded) - set(schema))
     if unknown:
         raise _ToolInputContractError(

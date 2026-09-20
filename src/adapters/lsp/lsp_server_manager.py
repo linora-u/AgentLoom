@@ -136,9 +136,11 @@ class LSPServerManager:
                 max_restarts=server_config.max_restarts,
             )
 
+            # Own the handle before start: the backend can create a child and
+            # then fail or be cancelled before initialization finishes.
+            self._servers[server_config.language] = instance
             try:
                 instance.start()
-                self._servers[server_config.language] = instance
 
                 # Build extension map for this language
                 for ext in _LANG_EXTENSIONS.get(server_config.language, []):
@@ -146,6 +148,8 @@ class LSPServerManager:
 
                 logger.info("LSP server pre-warmed: %s", server_config.language)
             except Exception as exc:
+                instance.stop()
+                self._servers.pop(server_config.language, None)
                 logger.warning(
                     "Failed to pre-warm LSP server %s: %s (tree-sitter fallback will be used)",
                     server_config.language, exc,

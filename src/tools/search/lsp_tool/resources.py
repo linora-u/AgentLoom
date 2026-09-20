@@ -26,12 +26,13 @@ def get_lsp_manager() -> LSPServerManager:
     from agentloom.configuration import C
     from agentloom.runtime import get_current_run_context
     from agentloom.runtime.resources import register_resource
-    from agentloom.runtime.trace import get_current_agent_config, get_current_agent_id
+    from agentloom.runtime.trace import capture_explicit_execution_context
 
     context = get_current_run_context()
     if context is None:
         return LSPServerManager.get_instance()
-    owner = get_current_agent_id()
+    execution = capture_explicit_execution_context()
+    owner = execution.agent_id
     if not owner:
         raise RuntimeError("LSP tools require a bound Agent instance")
     key = (context.runtime_key, owner)
@@ -51,7 +52,7 @@ def get_lsp_manager() -> LSPServerManager:
                 atexit.unregister(manager.shutdown)
 
         try:
-            config = get_current_agent_config() or {}
+            config = execution.agent_config or {}
             manager.initialize(
                 LSPConfig.from_yaml(config.get("lsp_servers", C.get("lsp_servers", {}))),
                 project_root=str(C.agent_root),
