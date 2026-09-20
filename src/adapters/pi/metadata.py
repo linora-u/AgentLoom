@@ -5,16 +5,24 @@ import math
 from agentloom.runtime.agent_runtime import RuntimeCapabilities, RuntimeModelSelection
 
 SDK_VERSION = "0.79.4"
-CAPABILITIES = RuntimeCapabilities(True, True, False, True, goal=True, stop_hooks=True)
+CAPABILITIES = RuntimeCapabilities(True, True, True, True, goal=True, stop_hooks=True)
 
 
 def validate_options(options: Mapping) -> None:
-    unknown = set(options) - {"max_stop_attempts"}
+    unknown = set(options) - {"max_stop_attempts", "compaction"}
     if unknown:
         raise ValueError("Unsupported pi runtime_options: " + ", ".join(sorted(unknown)))
     value = options.get("max_stop_attempts", 3)
     if type(value) is not int or not 1 <= value <= 100:
         raise ValueError("pi runtime_options.max_stop_attempts must be an integer from 1 to 100")
+    compaction = options.get("compaction", {})
+    if not isinstance(compaction, Mapping) or set(compaction) - {"enabled", "reserveTokens", "keepRecentTokens"}:
+        raise ValueError("Unsupported Pi compaction settings")
+    if "enabled" in compaction and type(compaction["enabled"]) is not bool:
+        raise ValueError("Pi compaction.enabled must be a boolean")
+    for name in ("reserveTokens", "keepRecentTokens"):
+        if name in compaction and (type(compaction[name]) is not int or compaction[name] < 1):
+            raise ValueError(f"Pi compaction.{name} must be a positive integer")
 
 
 def validate_model(model: RuntimeModelSelection) -> None:

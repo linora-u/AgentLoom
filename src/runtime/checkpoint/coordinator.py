@@ -238,6 +238,7 @@ class CheckpointCoordinator:
         *,
         result: str | None = None,
         error: str | None = None,
+        require_durable: bool = False,
     ) -> None:
         """Persist a runtime-owned state envelope without inspecting its payload."""
 
@@ -274,7 +275,7 @@ class CheckpointCoordinator:
                     "Marking checkpoint_degraded also failed: "
                     f"{type(degraded_error).__name__}: {degraded_error}"
                 )
-            if status in _TERMINAL_CHECKPOINT_STATUSES:
+            if require_durable or status in _TERMINAL_CHECKPOINT_STATUSES:
                 raise
             return
 
