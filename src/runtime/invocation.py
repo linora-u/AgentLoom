@@ -170,16 +170,18 @@ class AgentInvocation:
                 raise
 
         def execute() -> str:
-            return self._execute_bound(
-                transformed_tasks=transformed_tasks,
-                transformed_task=transformed_task,
-                final_task_id=final_task_id,
-                goal_config=goal_config,
-                goal_provider=goal_provider,
-                coordinator=coordinator,
-                lifecycle=lifecycle,
-                owns_lifecycle=owns_lifecycle,
-            )
+            from agentloom.runtime.context_engine.runtime import ensure_task_context_engine
+            with ensure_task_context_engine(owner._effective_agent_config or owner._config):
+                return self._execute_bound(
+                    transformed_tasks=transformed_tasks,
+                    transformed_task=transformed_task,
+                    final_task_id=final_task_id,
+                    goal_config=goal_config,
+                    goal_provider=goal_provider,
+                    coordinator=coordinator,
+                    lifecycle=lifecycle,
+                    owns_lifecycle=owns_lifecycle,
+                )
 
         if current_task_id:
             return execute()
