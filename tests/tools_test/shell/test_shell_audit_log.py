@@ -13,6 +13,7 @@ import threading
 from unittest.mock import MagicMock, patch
 
 import pytest
+from agentloom.runtime.tool_governance.shell.audit import policy_audit
 
 from agentloom.runtime import RuntimeHome, bind_run_context, copy_runtime_context
 from agentloom.tools.shell.shell_audit_log import (
@@ -601,8 +602,7 @@ class TestSecurityPipelineIntegration:
         from agentloom.tools.shell.security import check_command_security
 
         mock_audit = MagicMock()
-        with patch("agentloom.tools.shell.shell_audit_log.get_shell_audit_logger",
-                    return_value=mock_audit):
+        with policy_audit(mock_audit):
             with patch("agentloom.tools.shell.security._load_enabled_checks",
                         return_value={}):
                 # This command should trigger destructive_patterns check
@@ -616,8 +616,7 @@ class TestSecurityPipelineIntegration:
         from agentloom.tools.shell.path_validation import check_path_constraints
 
         mock_audit = MagicMock()
-        with patch("agentloom.tools.shell.shell_audit_log.get_shell_audit_logger",
-                    return_value=mock_audit):
+        with policy_audit(mock_audit):
             with patch("agentloom.tools.shell.path_validation._build_allowed_roots",
                         return_value=["."]):
                 with patch("agentloom.tools.shell.path_validation._load_dangerous_paths",
@@ -637,8 +636,7 @@ class TestSecurityPipelineIntegration:
         from agentloom.tools.shell.validator import validate_command
 
         mock_audit = MagicMock()
-        with patch("agentloom.tools.shell.shell_audit_log.get_shell_audit_logger",
-                    return_value=mock_audit):
+        with policy_audit(mock_audit):
 
             with patch("agentloom.tools.shell.validator.validate_command_security"):
                 with patch("agentloom.tools.shell.validator.check_path_constraints"):
@@ -660,10 +658,7 @@ class TestSecurityPipelineIntegration:
         """Rejected commands/operators should log the effective explicit allow-list."""
         from agentloom.tools.shell.validator import validate_command
 
-        with patch(
-            "agentloom.tools.shell.shell_audit_log.get_shell_audit_logger",
-            return_value=enabled_audit,
-        ):
+        with policy_audit(enabled_audit):
             with patch("agentloom.tools.shell.validator.validate_command_security"):
                 with patch("agentloom.tools.shell.validator.check_path_constraints"):
                     with patch(

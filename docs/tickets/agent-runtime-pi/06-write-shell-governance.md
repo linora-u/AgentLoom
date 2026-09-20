@@ -4,7 +4,7 @@
 
 **Blocked by:** 04：收拢自研 smol Agent 及其基础工具，保持旧应用行为；05：通过统一治理执行一次原生读取并持久记录
 
-**Status:** ready-for-agent — 04+05 已集成并验证；从 `refs/agentloom/ticket04-05-integrated` 解析准确 SHA 后可新建 worktree。先读 [04 保护调用点](04-implementation.md) 和 [05 接口交接](05-implementation.md)。本票尚未实施。
+**Status:** completed — 从 main `7965cc00` 经独立 worktree 完成，最终源码 `d3c37aa5` 全量 4382 passed、1 skipped；正式验收 107/108 次真实 Application 通过，1 个模型参数遗漏场景的失败与诊断保留。见 [06 实施、验证与限制](06-implementation.md)。阶段提交正式合入 main；10 仍须等 09。
 
 **Required:** Yes — 本票属于最终交付必做项。
 
@@ -20,13 +20,13 @@
 
 ## Acceptance criteria
 
-- [ ] 根据 04 移交清单提取已有的公共文件/Shell 保护，smol 与 native 路径消费同一公共规则；公共层不反向导入 smol 基础工具，Pi 不调用自研 smol 的读写/Shell 算法。
-- [ ] 文件操作按逻辑能力和实际参数匹配授权，不因 Pi 名称不同而绕过既有规则；必要备份先于修改。
-- [ ] Shell 命令策略、适用执行隔离和搜索范围限制在真实执行入口生效，不能以 top-level path 检查代替。
-- [ ] 拒绝写入、拒绝命令及搜索排除测试通过，禁止的副作用不存在。
-- [ ] 保留受授权查询限额约束的原始结果或完整产物引用，明确 coverage、query limit 与展示截断的差别。
-- [ ] 错误、取消、被拒绝调用不产生成功证据；不能把重查得到的新数据冒充第一次执行的原文。
-- [ ] 生产 Gateway 的 executor-fixture 测试与原有文件/Shell 回归通过，不修改 09 正在实现的 Pi 调用代码。
+- [x] 根据 04 移交清单提取已有的公共文件/Shell 保护，smol 与 native 路径消费同一公共规则；公共层不反向导入 smol 基础工具，Pi 不调用自研 smol 的读写/Shell 算法。
+- [x] 文件操作按逻辑能力和实际参数匹配授权，不因 Pi 名称不同而绕过既有规则；必要备份先于修改。
+- [x] Shell 命令策略、适用执行隔离和搜索范围限制在真实执行入口生效，不能以 top-level path 检查代替。
+- [x] 拒绝写入、拒绝命令及搜索排除测试通过，禁止的副作用不存在。
+- [x] 保留受授权查询限额约束的原始结果或完整产物引用，明确 coverage、query limit 与展示截断的差别。
+- [x] 错误、取消、被拒绝调用不产生成功证据；不能把重查得到的新数据冒充第一次执行的原文。
+- [x] 生产 Gateway 的 executor-fixture 测试与原有文件/Shell 回归通过，不修改 09 正在实现的 Pi 调用代码。
 
 ## Handoff
 

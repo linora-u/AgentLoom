@@ -20,6 +20,7 @@ from pathlib import Path
 from typing import List, Optional
 
 from agentloom.runtime.logging import get_logger
+from agentloom.runtime.tool_governance.search import search_path_excluded
 from agentloom.adapters.smolagents.tools.search.search_utils import (
     get_search_exclude_patterns,
     get_python_exclude_dirs,
@@ -38,7 +39,7 @@ _DEFAULT_MAX_RESULTS = 200
 _TIMEOUT_SECONDS = 30
 
 
-def _filter_excluded_paths(files: List[str]) -> List[str]:
+def _filter_excluded_paths(files: List[str], root=None) -> List[str]:
     """Remove results whose path components match configured exclude directories.
 
     This is Layer 2 exclude enforcement: even when the search root is allowed,
@@ -47,6 +48,8 @@ def _filter_excluded_paths(files: List[str]) -> List[str]:
     skip_dirs = get_python_exclude_dirs(tool_name="glob_search")
     filtered = []
     for rel in files:
+        if root is not None and search_path_excluded(Path(root) / rel, root, "glob_search"):
+            continue
         parts = Path(rel).parts
         if any(part in skip_dirs for part in parts):
             continue
@@ -115,7 +118,7 @@ def glob_search(
 
     # Post-filter: remove results from excluded directories.
     # This is the Layer 2 exclude enforcement for search tools.
-    files = _filter_excluded_paths(files)
+    files = _filter_excluded_paths(files, search_dir)
 
     duration_ms = int((time.monotonic() - start_time) * 1000)
     return _format_output(files, max_results, sort_by, duration_ms)
@@ -137,7 +140,7 @@ def _glob_with_ripgrep(pattern: str, search_dir: Path) -> List[str]:
     # Inject configured exclude patterns from tool_access_control.
     # Uses !**/dir/** format — the only format that works reliably with
     # rg --files and absolute search paths.
-    for excl_glob in get_search_exclude_patterns():
+    for excl_glob in get_search_exclude_patterns("glob_search", root=search_dir):
         args.extend(["--glob", excl_glob])
 
     args.append(str(search_dir))
