@@ -276,3 +276,16 @@ def test_two_hosts_cannot_consume_the_same_authorization(tmp_path):
         with ThreadPoolExecutor(max_workers=2) as pool:
             results = list(pool.map(lambda _: consume(), range(2)))
         assert sorted(results) == ["executed", "rejected"]
+
+
+def test_logical_tool_hook_cannot_be_bypassed_by_native_visible_name(tmp_path):
+    calls = []
+    handlers = [
+        HookHandler(HookEvent.PRE_TOOL_USE, "*", lambda context: calls.append("wildcard")),
+        HookHandler(
+            HookEvent.PRE_TOOL_USE, "read_file", lambda context: HookResult(decision="block", reason="logical rule")
+        ),
+    ]
+    with native_scope(tmp_path, handlers=handlers) as (host, request, _):
+        assert host.prepare(request).rejection.status == "blocked"
+        assert calls == ["wildcard"]

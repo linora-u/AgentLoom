@@ -864,6 +864,7 @@ def _prepare_tool_input(
             tool_call_id=call_id,
             tool_inputs_schema=schema_copy,
             **({"cwd": cwd} if cwd is not None else {}),
+            **({"tool_aliases": (manifest.logical_name,)} if manifest is not None else {}),
         )
         hook_run.flush_user_messages()
     except Exception as exc:
