@@ -936,4 +936,12 @@ def build_builtin_runtime_registry(
         capabilities=SMOLAGENTS_CAPABILITIES,
         factory=smolagents_factory,
     )
+    from agentloom.adapters.pi.metadata import CAPABILITIES as PI_CAPABILITIES
+
+    def pi_factory(definition: RuntimeDefinition) -> AgentRuntime:
+        from agentloom.adapters.pi.runtime import PiRuntime
+
+        return PiRuntime(definition)
+
+    registry.register("pi", capabilities=PI_CAPABILITIES, factory=pi_factory)
     return registry
