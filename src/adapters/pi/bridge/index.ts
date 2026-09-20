@@ -21,6 +21,7 @@ let instance: string | undefined;
 let session: AgentSession | undefined;
 let current: {frame: Frame; abort: AbortController} | undefined;
 let closing = false;
+let nativeIncomplete = false;
 let modelFailure = {timedOut: false, status: 0};
 let reportRetry: ((attempt: number) => void) | undefined;
 const seen = new Set<string>();
@@ -45,6 +46,7 @@ function rejectCallbacks() {
 }
 
 async function createSession(p: Obj): Promise<AgentSession> {
+  nativeIncomplete = false;
   const s = p.model.settings;
   const auth = AuthStorage.inMemory();
   auth.setRuntimeApiKey("agentloom", s.api_key || "no-key");
@@ -65,7 +67,7 @@ async function createSession(p: Obj): Promise<AgentSession> {
   const identity = (callId: string) => ({application_id: current!.frame.payload.application_id,
     task_id: current!.frame.payload.task_id, run_id: current!.frame.run_id, instance_id: instance, call_id: callId,
     native_session_id: manager.getSessionId(), native_parent_id: manager.getLeafId()});
-  const selected = nativeTools(p.tools, p.cwd, invoke, identity, () => !finalDelivery, p.serial_tools);
+  const selected = nativeTools(p.tools, p.cwd, invoke, identity, () => !finalDelivery, p.serial_tools, agentDir, () => {nativeIncomplete = true; session?.agent.abort();});
   const loader = new DefaultResourceLoader({cwd: p.cwd, agentDir, settingsManager: settings,
     noExtensions: true, noSkills: true, noPromptTemplates: true, noThemes: true, noContextFiles: true,
     systemPrompt: p.instructions, extensionFactories: [selected.extension]});
@@ -140,7 +142,7 @@ async function run(frame: Frame, abort: AbortController) {
     const task = Object.keys(p.additional_args).length ? `${p.task}\n\nAgentLoom task inputs (JSON):\n${JSON.stringify(p.additional_args)}` : p.task;
     await session.prompt(task, {expandPromptTemplates: false});
     const last = session.messages.at(-1);
-    if (modelFailure.timedOut || unavailableTool || abort.signal.aborted ||
+    if (nativeIncomplete || modelFailure.timedOut || unavailableTool || abort.signal.aborted ||
         (last?.role === "assistant" && last.stopReason === "aborted")) throw new Error("Interrupted");
     const state = last?.role !== "assistant" || last.stopReason === "error" ? "failed" :
       last.stopReason === "length" ? "max_steps_error" : "success";
@@ -152,7 +154,7 @@ async function run(frame: Frame, abort: AbortController) {
   } catch {
     const interrupted = abort.signal.aborted;
     response(frame, {method: "run", state: interrupted ? "interrupted" : "failed", output: null, usage, artifacts: [], checkpoint: null,
-      error: {category: interrupted ? "interrupted" : "provider", message: unavailableTool ? "Pi model requested an unavailable tool" : interrupted ? "Pi run interrupted" : modelFailure.timedOut ? "Pi model request timed out" : "Pi model request failed", retryable: modelFailure.timedOut}});
+      error: {category: interrupted ? "interrupted" : nativeIncomplete ? "tool" : "provider", message: nativeIncomplete ? "Pi native execution could not be durably completed" : unavailableTool ? "Pi model requested an unavailable tool" : interrupted ? "Pi run interrupted" : modelFailure.timedOut ? "Pi model request timed out" : "Pi model request failed", retryable: modelFailure.timedOut}});
   } finally {
     rejectCallbacks();
     unsubscribe?.();

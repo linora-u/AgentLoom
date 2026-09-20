@@ -178,6 +178,19 @@ class NativeExecutionOutcome:
 
 
 @dataclass(frozen=True, slots=True)
+class NativeResultCapture:
+    """Adapter-verified first query output, independent of the executor display."""
+    raw_output: Any = field(repr=False)
+    complete: bool = True
+    display_truncated: bool = False
+
+    def __post_init__(self) -> None:
+        if type(self.complete) is not bool or type(self.display_truncated) is not bool:
+            raise ValueError("Capture flags must be booleans")
+        object.__setattr__(self, "raw_output", json.loads(_json(self.raw_output)))
+
+
+@dataclass(frozen=True, slots=True)
 class NativeCommitAck:
     identity: NativeCallIdentity
     authorization_id: str
@@ -235,5 +248,5 @@ class NativeToolHost(Protocol):
     """
 
     def prepare(self, request: NativePrepareRequest) -> NativePreparation: ...
-    def settle(self, outcome: NativeExecutionOutcome) -> NativeCommitAck | NativeJournalEntry: ...
+    def settle(self, outcome: NativeExecutionOutcome, *, capture: NativeResultCapture | None = None) -> NativeCommitAck | NativeJournalEntry: ...
     def cancel(self, identity: NativeCallIdentity) -> NativeJournalEntry: ...

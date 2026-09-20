@@ -34,7 +34,7 @@ def resolve_runtime_toolsets(
     names = []
 
     def validate_selection(spec):
-        if runtime_id == "pi" and spec.operation in {"write", "shell"}:
+        if runtime_id == "pi" and spec.operation in {"write", "shell"} and spec.provider != "pi":
             raise ValueError(f"Pi does not yet support write/Shell tool '{spec.name}'")
 
     for name in resolve_toolsets(raw):

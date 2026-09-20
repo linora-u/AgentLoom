@@ -55,13 +55,16 @@ def calls(bridge):
     return [json.loads(line) for line in path.read_text().splitlines()] if path.exists() else []
 
 
-def test_install_downloads_lock_builds_once_and_rebuilds_changed_source(installation):
+@pytest.mark.parametrize("changed_file", ["index.ts", "tools.ts", "model.ts", "nested/helper.ts"])
+def test_install_downloads_lock_builds_once_and_rebuilds_changed_source(installation, changed_file):
     entry = install_pi(installation)
     assert entry.is_file()
     assert calls(installation) == [["ci", "--ignore-scripts", "--include=dev", "--no-audit", "--no-fund"]]
     assert install_pi(installation) == entry
     assert len(calls(installation)) == 1
-    with (installation / "index.ts").open("a") as stream:
+    changed = installation / changed_file
+    changed.parent.mkdir(exist_ok=True)
+    with changed.open("a") as stream:
         stream.write("\n// changed bridge source\n")
     assert install_pi(installation) == entry
     assert len(calls(installation)) == 2

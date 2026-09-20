@@ -24,6 +24,7 @@ from agentloom.runtime.native_tools import (
     NativeExecutionOutcome,
     NativeJournalEntry,
     NativePreparation,
+    NativeResultCapture,
     NativePrepareRequest,
     ToolManifestEntry,
 )
@@ -67,13 +68,16 @@ class NativeToolHost:
         cwd: str,
         evidence_extractors: Mapping[str, ToolEvidenceExtractor] | None = None,
     ):
-        self._runtime = get_current_run_context(required=True)
+        runtime = get_current_run_context(required=True)
+        assert runtime is not None
+        self._runtime = runtime
         self._execution = capture_explicit_execution_context()
         if self._execution.hook_run is None or not self._execution.agent_id:
             raise RuntimeError("Native tools require an explicit Hook Run and Agent instance")
+        self._hook = self._execution.hook_run
         if (
-            self._execution.local_run_id != self._execution.hook_run.local_run_id
-            or self._execution.root_run_id != self._execution.hook_run.root_run_id
+            self._execution.local_run_id != self._hook.local_run_id
+            or self._execution.root_run_id != self._hook.root_run_id
         ):
             raise ValueError("Native host Hook Run identity mismatch")
         if self._execution.task_id != self._runtime.task_id:
@@ -123,7 +127,7 @@ class NativeToolHost:
             raise RuntimeError("Native tool host is closed")
         if (
             get_current_run_context(required=True) != self._runtime
-            or active.hook_run is not self._execution.hook_run
+            or active.hook_run is not self._hook
             or active.agent_id != self._execution.agent_id
             or active.local_run_id != self._execution.local_run_id
             or active.root_run_id != self._execution.root_run_id
@@ -178,7 +182,7 @@ class NativeToolHost:
 
             started = time.time()
             prepared = _prepare_tool_input(
-                hook_run=self._execution.hook_run,
+                hook_run=self._hook,
                 call_id=request.identity.call_id,
                 tool_name=request.tool.visible_name,
                 arguments={**request.tool.fixed_arguments, **request.raw_arguments},
@@ -237,6 +241,7 @@ class NativeToolHost:
         if tool.operation == "shell":
             from agentloom.runtime.tool_governance.shell.validator import validate_command
             from agentloom.utils.sandbox import SandboxManager
+            assert tool.command_parameter is not None
             command = arguments.get(tool.command_parameter)
             if not isinstance(command, str) or not command.strip():
                 raise ValueError("Native Shell requires a non-empty command")
@@ -254,7 +259,7 @@ class NativeToolHost:
                     if reason:
                         raise ValueError(reason)
                 # Always preserve native pre-write history, even with checkpoints disabled.
-                self._history.track_edit(str(path), self._execution.hook_run.step_number)
+                self._history.track_edit(str(path), self._hook.step_number)
 
     def start_execution(self, grant: NativeAuthorization) -> NativeAuthorization:
         self._require_scope(grant.identity)
@@ -271,7 +276,7 @@ class NativeToolHost:
                 from agentloom.runtime.hooks.types import HookEvent
                 from agentloom.runtime.hooks.path_validators import enforce_core_tool_guard
                 context = _build_runtime_context(
-                    self._execution.hook_run, event=HookEvent.PRE_TOOL_USE,
+                    self._hook, event=HookEvent.PRE_TOOL_USE,
                     tool_name=expected.tool.visible_name, tool_input=dict(expected.final_arguments),
                     tool_call_id=expected.identity.call_id,
                     tool_inputs_schema=dict(expected.tool.parameters["properties"]), cwd=expected.cwd,
@@ -295,7 +300,7 @@ class NativeToolHost:
                 data["state"] = "executing"
         if data.get("dispatch_rejection"):
             from agentloom.runtime.tool_protocol import ToolPolicyBlockedError
-            self._execution.hook_run.record_tool_outcome(rejection)
+            self._hook.record_tool_outcome(rejection)
             raise ToolPolicyBlockedError(rejection.reason)
         # The fsync barrier above completes before the adapter can execute.
         return expected
@@ -319,7 +324,7 @@ class NativeToolHost:
                 raise ValueError("Native receipt identity mismatch")
             return snapshot(data)
 
-    def settle(self, outcome: NativeExecutionOutcome) -> NativeCommitAck | NativeJournalEntry:
+    def settle(self, outcome: NativeExecutionOutcome, *, capture: NativeResultCapture | None = None) -> NativeCommitAck | NativeJournalEntry:
         self._require_scope(outcome.identity)
         with self._journal.transaction(outcome.identity, confirm=True) as data:
             entry = self._existing(data, outcome.identity)
@@ -327,8 +332,10 @@ class NativeToolHost:
             if outcome.authorization_id != grant.authorization_id:
                 raise ValueError("Native settlement authorization mismatch")
             actual = snapshot(outcome)
+            captured = snapshot(capture) if capture is not None else None
+            raw_output = snapshot(capture.raw_output) if capture is not None else actual["output"]
             if entry.state == "committed":
-                if data["outcome"] != actual:
+                if data["outcome"] != actual or data.get("capture") != captured:
                     raise ValueError("Conflicting native settlement")
                 assert entry.commit is not None
                 return entry.commit
@@ -337,6 +344,7 @@ class NativeToolHost:
             if entry.state != "executing":
                 raise ValueError("Native settlement requires a consumed authorization")
             data["outcome"] = actual
+            data["capture"] = captured
             if outcome.status == "uncertain":
                 data["state"] = "uncertain"
                 return journal_entry(data)
@@ -359,31 +367,37 @@ class NativeToolHost:
 
                 try:
                     evidence = extract_trusted_memory_evidence(
-                        _EvidenceCarrier(lambda raw: extractor(snapshot(raw))), actual["output"]
+                        _EvidenceCarrier(lambda raw: extractor(snapshot(raw))), raw_output
                     )
                     evidence_status = "verified"
                 except Exception:
                     evidence_status = "rejected"
 
             output = snapshot(actual["output"])
-            if outcome.status == "completed" and isinstance(output, str):
+            compressible = raw_output if capture is not None else output
+            if outcome.status == "completed" and isinstance(compressible, str):
                 try:
-                    output = _compress_tool_result(
+                    compressed = _compress_tool_result(
                         tool_name=grant.tool.visible_name,
                         source=f"native:{grant.tool.provider}:{grant.identity.call_id}",
-                        result=output,
+                        result=compressible,
                     )
+                    if isinstance(output, dict) and isinstance(output.get("content"), list):
+                        if compressed != compressible:
+                            output = {**output, "content": [{"type": "text", "text": compressed}]}
+                    else:
+                        output = compressed
                 except Exception:
                     output = snapshot(actual["output"])
             commit_id = uuid4().hex
             output_digest = hashlib.sha256(
-                json.dumps(actual["output"], sort_keys=True, ensure_ascii=False).encode()
+                json.dumps(raw_output, sort_keys=True, ensure_ascii=False).encode()
             ).hexdigest()
             result_scope = {
-                    "coverage": "executor_result_only" if outcome.status == "completed" else "none",
-                    "source_completeness": "unknown",
+                    "coverage": ("complete_query" if capture.complete and outcome.status == "completed" else "partial_query") if capture is not None else ("executor_result_only" if outcome.status == "completed" else "none"),
+                    "source_completeness": ("complete" if capture.complete and outcome.status == "completed" else "partial") if capture is not None else "unknown",
                     "query_limits": {key: value for key, value in grant.final_arguments.items() if key in {"offset", "limit", "max_results", "max_count", "timeout"}},
-                    "display_truncated": output != actual["output"],
+                    "display_truncated": bool(capture and capture.display_truncated) or output != actual["output"],
                     "raw_artifact": {"journal": str(self.journal_directory), "path": str(self._journal.artifact_path(grant.identity)), "json_pointer": "/raw_output", "identity": snapshot(grant.identity), "sha256": output_digest},
             }
             record = ToolCallRecord(
@@ -412,7 +426,7 @@ class NativeToolHost:
                 state="committed",
                 commit_id=commit_id,
                 record=record.to_dict(),
-                raw_output=actual["output"],
+                raw_output=raw_output,
                 result_scope=result_scope,
                 evidence=snapshot(evidence),
                 evidence_status=evidence_status,
@@ -432,9 +446,9 @@ class NativeToolHost:
             TrustedMemoryEvidenceEnvelope,
         )
 
-        run = self._execution.hook_run
+        run = self._hook
         record = ack.record
-        response = {"result": record.output} if record.status == "completed" else {"error": record.reason}
+        response: dict[str, Any] = {"result": record.output} if record.status == "completed" else {"error": record.reason}
         if evidence:
             response[TRUSTED_MEMORY_EVIDENCE_RESPONSE_KEY] = TrustedMemoryEvidenceEnvelope(evidence)
         try:

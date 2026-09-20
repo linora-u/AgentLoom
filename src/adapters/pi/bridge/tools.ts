@@ -1,12 +1,13 @@
 /** Official SDK executors guarded by AgentLoom's existing native tool contract. */
+import { capturedExecutor } from "./capture.js";
 import { isDeepStrictEqual } from "node:util";
 import { Ajv2020 } from "ajv/dist/2020.js";
-import { createReadToolDefinition, type ExtensionFactory, type ToolDefinition } from "@earendil-works/pi-coding-agent";
+import { createReadToolDefinition, createWriteToolDefinition, createEditToolDefinition, createBashToolDefinition, type ExtensionFactory, type ToolDefinition } from "@earendil-works/pi-coding-agent";
 
 type Obj = Record<string, any>;
 type Callback = (payload: Obj) => Promise<Obj>;
 
-export function nativeTools(manifest: Obj[], cwd: string, invoke: Callback, identity: (id: string) => Obj, canUseTools: () => boolean, serialTools: string[]) {
+export function nativeTools(manifest: Obj[], cwd: string, invoke: Callback, identity: (id: string) => Obj, canUseTools: () => boolean, serialTools: string[], agentDir: string, failRun: () => void) {
   const permits = new Map<string, Obj>();
   const seen = new Set<string>();
   const serial = new Set(serialTools);
@@ -29,9 +30,9 @@ export function nativeTools(manifest: Obj[], cwd: string, invoke: Callback, iden
         },
       };
     }
-    if (entry.owner !== "runtime" || entry.provider !== "pi" || entry.visible_name !== "read" || entry.operation !== "read")
+    if (entry.owner !== "runtime" || entry.provider !== "pi" || !((entry.visible_name === "read" && entry.operation === "read") || (["write", "edit"].includes(entry.visible_name) && entry.operation === "write") || (entry.visible_name === "bash" && entry.operation === "shell")))
       throw new Error("Unsupported native tool");
-    const official = createReadToolDefinition(cwd);
+    const official: ToolDefinition<any, any> = entry.visible_name === "read" ? createReadToolDefinition(cwd) : entry.visible_name === "bash" ? createBashToolDefinition(cwd) : entry.visible_name === "edit" ? createEditToolDefinition(cwd) : createWriteToolDefinition(cwd);
     const parameters = {...official.parameters, additionalProperties: false};
     // No lossy schema projection, silent aliases or alternate basic implementation.
     if (!isDeepStrictEqual(JSON.parse(JSON.stringify(parameters)), entry.parameters)) throw new Error("Native tool schema mismatch");
@@ -42,21 +43,35 @@ export function nativeTools(manifest: Obj[], cwd: string, invoke: Callback, iden
         permits.delete(callId);
         if (!permit?.authorization || !isDeepStrictEqual(permit.authorization.final_arguments, args) ||
             permit.authorization.tool.visible_name !== entry.visible_name) throw new Error("Missing native authorization");
-        const grant = permit.authorization;
-        let result: unknown;
-        let error: Obj | null = null;
+        const dispatched = await invoke({method: "tool_dispatch", authorization: permit.authorization});
+        if (!dispatched.authorization) throw new Error(dispatched.rejection?.error?.message || "Native dispatch rejected");
+        if (!isDeepStrictEqual(dispatched.authorization, permit.authorization)) throw new Error("Native dispatch authorization mismatch");
+        const grant = dispatched.authorization;
+        let committed = false;
         try {
-          if (signal?.aborted) throw new Error("Interrupted");
-          result = await official.execute(callId, args, signal, onUpdate, ctx);
-        } catch {
-          error = {kind: "NativeToolError", message: "Pi native tool execution failed", stage: "tool_execution", retryable: false};
+          const captured = capturedExecutor(entry.visible_name, cwd, args);
+          let result: unknown;
+          let error: Obj | null = null;
+          try {
+            if (signal?.aborted) throw new Error("Interrupted");
+            result = await captured.tool.execute(callId, args, signal, onUpdate, ctx);
+          } catch {
+            error = {kind: "NativeToolError", message: "Pi native tool execution failed", stage: "tool_execution", retryable: false};
+          }
+          const uncertain = captured.isUncertain() || Boolean(signal?.aborted);
+          if (uncertain && !error) error = {kind: "NativeToolError", message: "Pi native execution outcome is uncertain", stage: "tool_execution", retryable: false};
+          const capture = await captured.save(grant, result, agentDir);
+          const settled = await invoke({method: "tool_settle", capture, outcome: {identity: grant.identity,
+            authorization_id: grant.authorization_id, status: uncertain ? "uncertain" : error ? "error" : "completed",
+            output: error || uncertain ? null : result, error}});
+          if (settled.state !== "committed" || !settled.commit_id || !isDeepStrictEqual(settled.identity, grant.identity) ||
+              settled.authorization_id !== grant.authorization_id) throw new Error("Native result not durably committed");
+          committed = true;
+          if (settled.record.status !== "completed") throw new Error(settled.record.error?.message || "Native tool failed");
+          return settled.record.output;
+        } finally {
+          if (!committed) failRun();
         }
-        const settled = await invoke({method: "tool_settle", outcome: {identity: grant.identity,
-          authorization_id: grant.authorization_id, status: error ? "error" : "completed", output: error ? null : result, error}});
-        if (settled.state !== "committed" || !settled.commit_id || !isDeepStrictEqual(settled.identity, grant.identity) ||
-            settled.authorization_id !== grant.authorization_id) throw new Error("Native result not durably committed");
-        if (settled.record.status !== "completed") throw new Error(settled.record.error?.message || "Native tool failed");
-        return settled.record.output;
       },
     };
   });

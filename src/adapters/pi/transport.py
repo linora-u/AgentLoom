@@ -24,6 +24,7 @@ from agentloom.adapters.pi.install import find_node
 from agentloom.runtime.agent_runtime import AgentRuntimeError, RuntimeErrorCategory
 from agentloom.runtime.resources import register_resource
 from agentloom.runtime.subprocess_env import build_subprocess_env
+from agentloom.runtime.process import terminate_process_tree
 
 
 @dataclass
@@ -54,6 +55,10 @@ class PiTransport:
             )
         self.instance_id = instance_id
         self._lock = RLock()
+        self._termination_lock = Lock()
+        self._terminated = False
+        self._process_token = uuid4().hex
+        env["AGENTLOOM_SUBPROCESS_RUN_TOKEN"] = self._process_token
         self._write_lock = Lock()
         self._pending: dict[str, Pending] = {}
         self._callbacks: set[str] = set()
@@ -61,7 +66,7 @@ class PiTransport:
         self._closed = False
         self._closing = False
         self._directory = TemporaryDirectory(prefix="agentloom-pi-")
-        env.update(HOME=self._directory.name, XDG_CONFIG_HOME=self._directory.name)
+        env.update(HOME=self._directory.name, XDG_CONFIG_HOME=self._directory.name, TMPDIR=self._directory.name)
         try:
             self.process = subprocess.Popen(
                 [node, str(entry), self._directory.name], stdin=subprocess.PIPE,
@@ -74,6 +79,10 @@ class PiTransport:
         self._reader = Thread(target=self._read, name=f"pi-reader-{self.process.pid}", daemon=True)
         self._reader.start()
         register_resource(f"pi:{self.process.pid}", self.close, instance_id=instance_id)
+
+    @property
+    def private_directory(self) -> Path:
+        return Path(self._directory.name)
 
     def _write(self, message: Request | Response):
         with self._write_lock:
@@ -105,7 +114,7 @@ class PiTransport:
                         raise ValueError()
                     if isinstance(message, Request):
                         if (not message.request_id.startswith("pi:") or message.request_id in self._callbacks or message.payload.method not in
-                            {"tool_prepare", "tool_settle", "platform_invoke", "model_prepare"} or not any(
+                            {"tool_prepare", "tool_dispatch", "tool_settle", "platform_invoke", "model_prepare"} or not any(
                                 item.request.run_id == message.run_id and item.request.payload.method == "run"
                                 for item in self._pending.values())):
                             raise ValueError()
@@ -226,11 +235,12 @@ class PiTransport:
         return accepted
 
     def _terminate(self):
-        if self.process.poll() is None:
-            try:
-                os.killpg(self.process.pid, signal.SIGKILL)
-            except ProcessLookupError:
-                pass
+        with self._termination_lock:
+            if not self._terminated:
+                # SDK bash starts its own sessions. The per-instance inherited
+                # marker also finds ordinary detached/reparented descendants.
+                terminate_process_tree(self.process, self._process_token)
+                self._terminated = True
 
     def close(self):
         with self._lock:
@@ -246,6 +256,7 @@ class PiTransport:
                     self._terminate()
                     self.process.wait(timeout=2)
         finally:
+            self._terminate()
             self._closed = True
             self._reader.join(timeout=2)
             for pipe in (self.process.stdin, self.process.stdout):
