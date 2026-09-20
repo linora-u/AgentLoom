@@ -4,7 +4,7 @@
 
 **Blocked by:** 09：Pi 调通原生读取、平台工具与 Goal
 
-**Status:** planned — 等待前置任务集成并验证，尚未实施。
+**Status:** in-progress — 在 `codex/pi-t11-mixed` 独立 worktree 开发，基线 `2ec1412c`。双向混合、并发隔离、Goal、跨 Worker ContextRef 和认可记忆交接的 10 个确定性 Application 场景已通过；真实模型验证和完整回归待完成。
 
 **Required:** Yes — 本票属于最终交付必做项。
 
