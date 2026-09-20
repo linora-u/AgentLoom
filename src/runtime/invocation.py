@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from contextlib import nullcontext
+from contextvars import ContextVar
 from copy import deepcopy
 from dataclasses import dataclass, replace
 from typing import TYPE_CHECKING, Any
@@ -13,6 +14,7 @@ from agentloom.runtime.agent_runtime import (
     AgentRuntimeRequest,
     AgentRuntimeResult,
     RuntimeEvent,
+    RuntimeEventSink,
     require_runtime_state,
 )
 from agentloom.runtime.hooks import HookEvent, HookRun
@@ -26,6 +28,9 @@ from agentloom.runtime.workspace import ensure_workspace_mounted_once
 
 if TYPE_CHECKING:
     from agentloom.application.lifecycle import ApplicationRunLifecycle
+
+
+_RUNTIME_EVENT_SINK: ContextVar[RuntimeEventSink | None] = ContextVar('agentloom_runtime_event_sink', default=None)
 
 
 def goal_continuation_prompt(state: Any) -> str:
@@ -391,11 +396,26 @@ class AgentInvocation:
             "requirements": requirements,
         }
         runtime_events: list[RuntimeEvent] = []
+        parent_event_sink = _RUNTIME_EVENT_SINK.get()
 
         def observe_runtime_event(event: RuntimeEvent) -> None:
             runtime_events.append(event)
             if lifecycle is not None:
                 lifecycle.observe_runtime_event(event)
+            elif parent_event_sink is not None:
+                parent_event_sink(event)
+
+        def invoke_runtime(request: AgentRuntimeRequest) -> AgentRuntimeResult:
+            start = len(runtime_events)
+            token = _RUNTIME_EVENT_SINK.set(observe_runtime_event)
+            try:
+                result = runtime_agent.run(request)
+                for event in result.events:
+                    if event not in runtime_events[start:]:
+                        observe_runtime_event(event)
+                return result
+            finally:
+                _RUNTIME_EVENT_SINK.reset(token)
 
         if goal_provider is None:
             result = None
@@ -406,7 +426,7 @@ class AgentInvocation:
                     additional_args=self.additional_args or {},
                 )
                 segment_start = len(runtime_events)
-                run_result = runtime_agent.run(
+                run_result = invoke_runtime(
                     AgentRuntimeRequest(
                         task=current_task,
                         **request_identity,
@@ -454,7 +474,7 @@ class AgentInvocation:
                     additional_args=self.additional_args or {},
                 )
                 segment_start = len(runtime_events)
-                run_result = runtime_agent.run(
+                run_result = invoke_runtime(
                     AgentRuntimeRequest(
                         task=current_task,
                         **request_identity,
