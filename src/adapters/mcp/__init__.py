@@ -2,7 +2,7 @@
 
 Provides configuration parsing, connection management, and tool wrapping
 for external MCP servers.  Tools discovered from MCP servers are adapted
-into standard smolagents ``Tool`` instances and injected alongside
+into runtime-neutral ``ToolBinding`` values and injected alongside
 locally-defined tools during agent startup.
 
 Public API

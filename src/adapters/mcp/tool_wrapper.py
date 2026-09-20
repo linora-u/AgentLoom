@@ -6,15 +6,15 @@ so that MCP tools coexist safely with local tools in the same agent.
 
 from __future__ import annotations
 
-import copy
 import re
+from dataclasses import replace
 from typing import TYPE_CHECKING
 
 from agentloom.runtime.logging import get_logger
+from agentloom.runtime.native_tools import ToolManifestEntry
+from agentloom.runtime.tool_gateway import ToolBinding
 
 if TYPE_CHECKING:
-    from smolagents import Tool
-
     from agentloom.adapters.mcp.config import McpSettings
 
 logger = get_logger(__name__)
@@ -29,9 +29,9 @@ def _sanitize_name(name: str) -> str:
 
 def wrap_mcp_tools(
     server_name: str,
-    tools: list["Tool"],
-    settings: "McpSettings",
-) -> list["Tool"]:
+    tools: list[ToolBinding],
+    settings: McpSettings,
+) -> list[ToolBinding]:
     """Apply name prefix and description enrichment to MCP tools.
 
     When ``settings.tool_name_prefix`` is ``True`` (default), each tool is
@@ -49,32 +49,40 @@ def wrap_mcp_tools(
 
     Returns
     -------
-    list[Tool]
-        Shallow-copied tools with updated names and descriptions.
+    list[ToolBinding]
+        New definitions sharing only their connection-owned callable.
     """
     sanitized = _sanitize_name(server_name)
-    wrapped: list["Tool"] = []
+    wrapped: list[ToolBinding] = []
 
     for tool in tools:
-        # Shallow copy to avoid mutating the original MCPClient tool.
-        t = copy.copy(tool)
-        original_name = getattr(t, "name", "unknown")
-
-        if settings.tool_name_prefix:
-            prefixed_name = f"mcp__{sanitized}__{original_name}"
-            t.name = prefixed_name
+        original_name = tool.definition.name
+        name = f"mcp__{sanitized}__{original_name}" if settings.tool_name_prefix else original_name
 
         # Enrich description with server origin hint (helps LLM context).
-        desc = getattr(t, "description", "") or ""
+        desc = tool.definition.description or ""
         origin_hint = f"[MCP:{server_name}] "
         if not desc.startswith(origin_hint):
-            t.description = f"{origin_hint}{desc}"
+            desc = f"{origin_hint}{desc}"
 
-        wrapped.append(t)
+        definition = replace(tool.definition, name=name, description=desc)
+        wrapped.append(replace(
+            tool,
+            definition=definition,
+            manifest_entry=ToolManifestEntry(
+                logical_name=name,
+                visible_name=name,
+                owner="external",
+                provider=f"mcp:{server_name}",
+                capability=f"mcp.{original_name}",
+                operation="control",
+                parameters=definition.parameters,
+            ),
+        ))
         logger.debug(
             "[MCP] Wrapped tool '%s' -> '%s'",
             original_name,
-            getattr(t, "name", original_name),
+            name,
         )
 
     return wrapped

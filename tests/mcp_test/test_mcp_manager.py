@@ -6,6 +6,8 @@ from unittest.mock import MagicMock, patch
 
 from agentloom.adapters.mcp.config import McpServerConfig, McpSettings
 from agentloom.adapters.mcp.manager import McpManager
+from agentloom.runtime.model_protocol import ToolDefinition
+from agentloom.runtime.tool_gateway import ToolBinding
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -19,11 +21,12 @@ def _settings(*configs: McpServerConfig, prefix: bool = True) -> McpSettings:
     return McpSettings(configs=list(configs), tool_name_prefix=prefix)
 
 
-def _fake_tool(name: str = "tool_a") -> MagicMock:
-    tool = MagicMock()
-    tool.name = name
-    tool.description = "A tool"
-    return tool
+def _fake_tool(name: str = "tool_a") -> ToolBinding:
+    return ToolBinding(
+        definition=ToolDefinition(name=name, description="A tool", parameters={"type": "object", "properties": {}}),
+        forward=lambda: "called",
+        inputs_schema={},
+    )
 
 
 def _mock_mcp_client(tools: list | None = None):
@@ -123,7 +126,7 @@ class TestGetAllTools:
 
         tools = manager.get_all_tools()
         assert len(tools) == 2
-        names = {t.name for t in tools}
+        names = {t.definition.name for t in tools}
         assert "mcp__srv_a__tool_a" in names
         assert "mcp__srv_b__tool_b" in names
 

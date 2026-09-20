@@ -18,7 +18,7 @@ from agentloom.runtime.goal import normalize_goal_config, normalize_workflow_for
 from agentloom.runtime.logging import (
     get_logger,
 )
-from agentloom.runtime.tool_gateway import bind_tool
+from agentloom.runtime.tool_gateway import ToolBinding, bind_tool
 from agentloom.tools.selection import resolve_runtime_toolsets
 from agentloom.tools.loader import resolve_tool_function
 from agentloom.utils.dynamic_import import load_function
@@ -837,7 +837,8 @@ def _load_mcp_tools(
     """Load MCP tools from ``mcp_servers`` config and append them via *append_tool*.
 
     Returns a :class:`McpManager` instance when at least one MCP server is
-    configured, or ``None`` otherwise.  Failures are logged — never raised.
+    configured, or ``None`` otherwise. Legacy connection failures are logged;
+    strict discovery and tool selection errors fail before returning tools.
     """
     strict = effective_agent_config is not None and "_mcp_settings_snapshot" in effective_agent_config
     global_raw = (effective_agent_config or {}).get("mcp_servers")
@@ -846,6 +847,7 @@ def _load_mcp_tools(
     if global_raw is None and agent_raw is None:
         return None
 
+    manager = None
     try:
         from agentloom.adapters.mcp.config import merge_mcp_configs, parse_mcp_yaml_value
         from agentloom.adapters.mcp.manager import McpManager
@@ -867,22 +869,30 @@ def _load_mcp_tools(
             failed = sorted(name for name, status in manager.get_server_status().items()
                             if not status.get("connected"))
             if failed:
-                manager.disconnect_all()
                 raise RuntimeError("MCP connection failed for server(s): " + ", ".join(failed))
-        for tool in manager.get_all_tools():
-            append_tool(tool)
-        return manager
 
     except ImportError as exc:
+        if manager is not None:
+            manager.disconnect_all()
         if strict:
             raise
         log.warning("[MCP] MCP support not available: %s", exc)
         return None
     except Exception as exc:
+        if manager is not None:
+            manager.disconnect_all()
         if strict:
             raise
         log.warning("[MCP] Unexpected error loading MCP tools: %s", exc)
         return None
+
+    try:
+        for tool in manager.get_all_tools():
+            append_tool(tool)
+    except BaseException:
+        manager.disconnect_all()
+        raise
+    return manager
 
 
 class YamlAgentFactory:
@@ -913,6 +923,8 @@ class YamlAgentFactory:
         seen = set()
 
         def _tool_name(tool_obj) -> str | None:
+            if isinstance(tool_obj, ToolBinding):
+                return tool_obj.definition.name
             return getattr(tool_obj, "name", None) or getattr(tool_obj, "__name__", None)
 
         def _append_tool(tool_obj, explicit_name: str | None = None):

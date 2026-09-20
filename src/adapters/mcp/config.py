@@ -300,7 +300,7 @@ def parse_mcp_yaml_value(
 
     # Option 3: dict with path/paths + options
     if isinstance(raw_value, dict):
-        paths: list[str] = []
+        paths = []
         if "path" in raw_value:
             p = raw_value["path"]
             if isinstance(p, str) and p.strip():
@@ -370,13 +370,13 @@ def merge_mcp_configs(
 
 
 # ---------------------------------------------------------------------------
-# Conversion to smolagents MCPClient parameters
+# Conversion to MCP transport parameters
 # ---------------------------------------------------------------------------
 
 
 def to_mcp_client_params(config: McpServerConfig) -> Any:
     """Convert :class:`McpServerConfig` to parameters accepted by
-    ``smolagents.MCPClient``.
+    ``AgentLoomMCPClient``.
 
     * ``stdio`` -> ``mcp.StdioServerParameters``
     * ``sse`` / ``streamable-http`` -> ``dict`` with ``url`` + ``transport``
@@ -387,7 +387,7 @@ def to_mcp_client_params(config: McpServerConfig) -> Any:
         except ImportError:  # pragma: no cover
             raise ImportError(
                 "mcp package is required for stdio transport. "
-                "Install with: uv pip install 'smolagents[mcp]'"
+                "Install with: uv pip install mcp mcpadapt"
             )
         params = StdioServerParameters(
             command=config.command,
@@ -403,10 +403,10 @@ def to_mcp_client_params(config: McpServerConfig) -> Any:
         return params
 
     # sse / streamable-http
-    params: dict[str, Any] = {
+    http_params: dict[str, Any] = {
         "url": config.url,
         "transport": config.type,
     }
     if config.headers:
-        params["headers"] = config.headers
-    return params
+        http_params["headers"] = config.headers
+    return http_params
