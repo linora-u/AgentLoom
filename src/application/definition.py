@@ -268,8 +268,14 @@ def _walk_definitions(
                         config,
                         effective_config=snapshots[path].values,
                     )
+                    from agentloom.application.runtime_options import normalize_runtime_options
+
+                    normalize_runtime_options(config, snapshot=snapshots[path], agent_root=project_root)
                     # These schema/path checks depend on effective lower layers.
-                    validate_effective_definition(snapshots[path], project_root, str(path))
+                    hook_plan = validate_effective_definition(snapshots[path], project_root, str(path))
+                    AgentConfigNormalizer.validate_agent_runtime_config(
+                        config, effective_config=snapshots[path].values, hook_plan=hook_plan,
+                    )
                 except (TypeError, ValueError, OSError, yaml.YAMLError) as exc:
                     errors.append(f"{path}: {definition_error(exc)}")
             raw_workers = config.get("worker_agents", [])
@@ -307,7 +313,7 @@ def _walk_definitions(
     return ApplicationDefinitionInspection(nodes, snapshots, tuple(errors), errors_by_path)
 
 
-def validate_effective_definition(snapshot: EffectiveAgentConfigSnapshot, root: Path, source: str) -> None:
+def validate_effective_definition(snapshot: EffectiveAgentConfigSnapshot, root: Path, source: str):
     from agentloom.application.validation import build_normalized_execution_config
     from agentloom.runtime.hooks.config import HookConfigLayer, HookPlanCompiler
 
@@ -315,7 +321,7 @@ def validate_effective_definition(snapshot: EffectiveAgentConfigSnapshot, root: 
     # capability (for example a tool reference) makes the definition invalid.
     skill_catalog(snapshot)
     # Compilation builds an immutable plan only; handlers are never invoked.
-    HookPlanCompiler().compile(
+    hook_plan = HookPlanCompiler().compile(
         tuple(
             HookConfigLayer(layer.name, layer.data, layer.root, layer.source_path, priority)
             for priority, layer in enumerate(snapshot.layers)
@@ -332,6 +338,8 @@ def validate_effective_definition(snapshot: EffectiveAgentConfigSnapshot, root: 
         strict=True,
     )
     AgentConfigNormalizer.validate_runtime_tool_references(snapshot.values)
+
+    return hook_plan
 
 
 def inspect_application_definition(
