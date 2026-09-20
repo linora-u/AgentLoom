@@ -164,3 +164,37 @@ def test_platform_transcript_record_metadata_must_match_host_receipt(tmp_path):
         _rewrite_native_result(tmp_path, corrupt)
         _assert_rejected_before_model(app, requests, first)
         assert _platform_calls == ["observed-once"]
+
+
+@pytest.mark.parametrize("decision", ["modify", "block"])
+def test_platform_preparation_runs_once_and_survives_recovery(tmp_path, decision):
+    _platform_calls.clear()
+    marker = tmp_path / 'hook-count.txt'
+    hook = tmp_path / 'prepare.py'
+    effect = ({'decision': 'modify', 'modified_input': {'label': 'observed-once'}}
+              if decision == 'modify' else {'decision': 'block', 'reason': 'preparation-blocked-proof'})
+    hook.write_text('import json\nfrom pathlib import Path\n'
+                    f'p=Path({str(marker)!r});p.write_text(p.read_text()+"x" if p.exists() else "x")\n'
+                    f'print(json.dumps({effect!r}))\n')
+    with model_service(turns=[[('prepared-call', 'receipt_probe', {'label': 19})]], fail_requests={2: 500}) as (url, requests):
+        app = project(tmp_path, url)
+        enable(app, tools=[{'name': 'receipt_probe', 'module': __name__, 'function': 'receipt_probe'}],
+               hooks={'PreToolUse': [{'id': 'prepare', 'matcher': 'receipt_probe', 'command': f'{sys.executable} {hook}'}]})
+        with bind_config(load_project_config(tmp_path)):
+            with pytest.raises(ApplicationRunError) as interrupted:
+                execute_app(app, file_logging=False)
+            assert len(requests) == 2 and marker.read_text() == 'x'
+            path, receipt = _receipt(tmp_path, platform=True)
+            assert receipt['state'] == 'committed'
+            assert receipt['record']['status'] == ('completed' if decision == 'modify' else 'blocked')
+            assert _platform_calls == (['observed-once'] if decision == 'modify' else [])
+            original = path.read_bytes()
+            resumed = execute_app(app, resume_task_id=interrupted.value.run.task_id, file_logging=False)
+        assert resumed.output == 'Pi answer' and len(requests) == 3
+        assert marker.read_text() == 'x' and path.read_bytes() == original
+        assert _platform_calls == (['observed-once'] if decision == 'modify' else [])
+        if decision == 'modify':
+            for captured in requests[1:]:
+                request = captured[1]
+                assistant = next(message for message in request['messages'] if message.get('tool_calls'))
+                assert json.loads(assistant['tool_calls'][0]['function']['arguments']) == {'label': 'observed-once'}
