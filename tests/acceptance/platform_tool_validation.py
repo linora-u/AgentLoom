@@ -220,11 +220,14 @@ def verify_case(case: str, workspace: Path, records: list[dict], result) -> dict
     return proof
 
 
-def run_case(case: str, workspace: Path) -> dict:
+def run_case(case: str, workspace: Path, *, model_type: str | None = None) -> dict:
     workspace.mkdir(parents=True, mode=0o700, exist_ok=False)
     revision = subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=ROOT, text=True).strip()
     dirty = bool(subprocess.check_output(["git", "status", "--porcelain"], cwd=ROOT, text=True).strip())
-    dump(workspace / "attempt.json", {"case": case, "revision": revision, "dirty": dirty, "status": "started"})
+    dump(workspace / "attempt.json", {
+        "case": case, "revision": revision, "dirty": dirty,
+        "model_type": model_type or "configured-default", "status": "started",
+    })
     config = workspace / "config"
     config.mkdir(mode=0o700)
     shutil.copyfile(ROOT / "config" / "llm.yaml", config / "llm.yaml")
@@ -243,6 +246,8 @@ def run_case(case: str, workspace: Path) -> dict:
         "name": f"validate_{case}", "agent_runtime": "smolagents", "max_steps": 10,
         "toolsets": [], "tools": [], "smart_summary": False,
     }
+    if model_type is not None:
+        definition["model_type"] = model_type
     mcp_events = workspace / "mcp-events.jsonl"
     mcp_config = config / "mcp.json"
     mcp_config.write_text(json.dumps({"mcpServers": {"facts": {
@@ -268,6 +273,7 @@ def run_case(case: str, workspace: Path) -> dict:
     report = {
         "case": case, "status": "passed", "provider": "real", "runtime": "smolagents",
         "revision": revision, "dirty": dirty,
+        "model_type": model_type or "configured-default",
         "started_at": started_at, "ended_at": datetime.now(UTC).isoformat(),
         "task_id": result.run.task_id, "run_id": result.run.run_id,
         "manifest": str(result.run.manifest_path), "output": result.output,
@@ -282,12 +288,13 @@ def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--case", choices=CASES, required=True)
     parser.add_argument("--workspace", type=Path, required=True)
+    parser.add_argument("--model-type", help="Use an existing llm.yaml profile for cross-provider validation")
     args = parser.parse_args()
     workspace = args.workspace.resolve()
     if workspace.exists():
         parser.error("Use a new workspace; existing evidence must not be overwritten")
     try:
-        report = run_case(args.case, workspace)
+        report = run_case(args.case, workspace, model_type=args.model_type)
     except Exception as error:
         if workspace.is_dir():
             dump(workspace / "failure.json", {
