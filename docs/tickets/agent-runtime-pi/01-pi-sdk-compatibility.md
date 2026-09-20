@@ -4,7 +4,7 @@
 
 **Blocked by:** None (can start immediately)
 
-**Status:** implemented — 隔离发布版 SDK 验证已完成；交由协调分支复核与集成，未注册生产 Pi。
+**Status:** completed — 已集成并经协调者独立复验；见 [集成验收](01-02-integration.md)。未注册生产 Pi。
 
 **Required:** Yes — 本票属于最终交付必做项。
 

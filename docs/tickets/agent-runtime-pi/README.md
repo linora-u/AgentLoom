@@ -2,16 +2,16 @@
 
 日期：2026-09-20。来源：[核心规格](../../specs/agent-runtime-pi-integration.md)、[worktree 计划](worktree-plan.md)。
 
-状态：14 张本地票据草稿，每票一个文件，尚未发布 GitHub，也未创建开发 session/worktree。项目配置的正式 tracker 是 GitHub Issues；依 to-tickets 流程，拆分确认后再发布并加 ready-for-agent。这里的 01–14 是本地任务号，不是 GitHub issue 号。
+状态：14 张本地票据，每票一个文件。01、02 已在独立 worktree 完成并合入 `codex/pi-integration`，全量测试与独立审查完成；03–14 待执行。见 [01/02 集成验收与交接](01-02-integration.md)。尚未发布 GitHub Issues；这里的 01–14 是本地任务号。
 
-**全部 14 项都是交付必做项。“可以并行”不代表可以省略。必须先完成 01/02，再由 03 冻结基线；后面的独立任务才可打开。**
+**全部 14 项都是完整 Pi 交付的必做项。“可以并行”不代表可以省略。本次仅实施 01/02，完成后按用户要求停止。未来继续时先做 03 冻结基线，之后 04、05、07、08 可以开新 session 并行。**
 
 ## 1. 每项做什么、被谁阻塞
 
 | 任务 | 交付结果 | 前置任务 | session 安排 |
 | --- | --- | --- | --- |
-| [01](01-pi-sdk-compatibility.md) | 验证发布版 Pi 的 Hook 与会话恢复接入 | 无，立即可开始 | 独立验证 session；可与 02 同时开始 |
-| [02](02-runtime-compatible-expansion.md) | 扩展运行契约，同时保持旧 smol 应用可运行 | 无，立即可开始 | 公共契约 session；可与 01 同时开始 |
+| [01](01-pi-sdk-compatibility.md) | 验证发布版 Pi 的 Hook 与会话恢复接入 | 无；已完成 | SDK worktree 已集成 |
+| [02](02-runtime-compatible-expansion.md) | 扩展运行契约，同时保持旧 smol 应用可运行 | 无；已完成 | 公共契约 worktree 已集成 |
 | [03](03-freeze-integration-contracts.md) | 汇合验证结果，冻结三路开发的公共基线 | 01、02 | 协调 session 执行；不可与未完成的 01/02 抢先推进 |
 | [04](04-smol-native-boundary.md) | 迁移 smol 专属实现，保持旧应用行为 | 03 | smol session；可与 05、07、08 并行 |
 | [05](05-governed-native-read.md) | 通过统一治理执行一次原生读取并持久记录 | 03 | 工具治理 session；可与 04、07、08 并行 |
@@ -29,13 +29,13 @@
 
 ## 2. 先开哪些 session
 
-### 现在：01 和 02 可以同时做
+### 本次完成：01 和 02，执行到此停止
 
-- 新 session A：01，隔离验证发布版 Pi SDK，不能改 02 的公共源码。
-- 新 session B 或当前协调 session：02，公共运行契约扩展且保持旧 smol 应用绿色。
-- 两项都完成并合入同一 integration 后，由协调 session 做 03。SDK必要合同未通过，不能跳过 01 直接冻结。
+- 01 在 `codex/pi-t01-sdk` 完成发布版 SDK 验证。
+- 02 在 `codex/pi-t02-contracts` 完成公共契约兼容扩展。
+- 两项已合入 `codex/pi-integration` 并通过全量验证。本次到此停止；未来继续时由协调 session 执行 03，不能提前启动依赖它的实现。
 
-第一次开工前，协调者先把已确认的 spec、计划和本地票据精确纳入准备提交，再创建 integration 分支并记录基线 SHA。当前这些文档尚未提交；只从 main 新建 worktree 不会带走它们。不要使用 git add . 把已有研究 checkout、临时目录和无关研究文档一起提交；若本地票据目录被忽略，应明确处理交付方式后再启动，不能让新 session 缺上下文。
+spec、计划和本地票据已纳入准备提交 `45ddbfdc`。01/02 的集成验收 revision 为 `42662ed6`；新 session 从包含已完成依赖的 integration 提交开始。已有研究 checkout、临时目录和无关研究文档未纳入提交，继续保留。
 
 ### 03 完成后：04、05、07、08 技术上都能并行
 
@@ -157,8 +157,8 @@ Blocked by 只表达真实技术门禁。比如 11 不需要等 04：02/03 已�
 
 ## 8. 发布与合并
 
-本轮先形成可审阅的一票一文件草稿。确认粒度、依赖和是否需要合并/再拆后，按项目配置发布到 GitHub Issues，按依赖顺序创建并使用实际issue标识写入阻塞关系；平台支持时使用原生blocking关系。发布不修改或关闭历史parent issue。
+本目录是一票一文件的本地执行记录。若后续发布到 GitHub Issues，按依赖顺序创建并使用实际 issue 标识写入阻塞关系；平台支持时使用原生 blocking 关系。发布不修改或关闭历史 parent issue。
 
 日常提交先合入 integration，依赖票合入且通过相关验证才解锁下一票。所有功能和安装机制就绪后由14清除过渡接口、验证最终树、处理main前进并合并。其他session不各自向main合入，更不能强推或丢弃别人的修改。
 
-当前没有任何票已完成，没有GitHub issue号，也没有实际开发worktree。打开新session前先检查票据和基线，避免把“拆分完成”误当成“前置任务已完成”。
+01、02 已完成且开发 worktree 保留；其余票据仍待执行，目前没有 GitHub issue 号。打开新 session 前检查本目录中的状态与已集成基线，只有真实完成的前置任务才能解锁后续任务。

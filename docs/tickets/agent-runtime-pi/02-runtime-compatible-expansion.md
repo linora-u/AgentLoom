@@ -4,7 +4,7 @@
 
 **Blocked by:** None (can start immediately)
 
-**Status:** implemented — 独立 worktree 已实现并通过针对性验证；等待集成分支完整 CI 与独立审查。
+**Status:** completed — 已集成，全量测试与独立审查完成；见 [集成验收](01-02-integration.md)。
 
 **Required:** Yes — 本票属于最终交付必做项。
 
