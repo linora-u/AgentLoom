@@ -482,7 +482,9 @@ class AgentInvocation:
                 from agentloom.runtime.goal import GoalCompleteError
 
                 terminal_state = goal_provider.snapshot()
-                if isinstance(exc, GoalCompleteError) or terminal_state.status == "complete":
+                # A completion commit does not authorize hiding a rejected Stop
+                # gate, failed tool settlement, or another runtime failure.
+                if isinstance(exc, GoalCompleteError):
                     return terminal_state.evidence, None
                 raise
             require_runtime_state(
