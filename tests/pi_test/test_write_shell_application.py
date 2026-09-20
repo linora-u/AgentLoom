@@ -243,3 +243,52 @@ def test_large_bash_artifact_is_retrievable_without_reexecution(tmp_path):
     scope = records["large-bash"]["metadata"]["native"]["result_scope"]
     assert scope["source_completeness"] == "complete"
     assert scope["display_truncated"] is True
+
+
+def test_timed_out_bash_stops_application_and_keeps_uncertain_journal(tmp_path):
+    from agentloom.application.run import ApplicationRunError
+    with model_service(turns=[[('timeout', 'bash', {'command': 'sleep 10', 'timeout': 0.1})]]) as (url, requests):
+        app = project(tmp_path, url)
+        select(app, tools=[{'name': 'bash'}], shell_settings={'allowed_commands': ['sleep'], 'sandbox': {'enabled': False}})
+        with bind_config(load_project_config(tmp_path)), pytest.raises(ApplicationRunError):
+            execute_app(app, file_logging=False)
+    entries = [json.loads(p.read_text()) for p in tmp_path.rglob('native-tools/**/*.json')]
+    assert len(entries) == 1 and entries[0]['state'] == 'uncertain'
+    assert 'record' not in entries[0]
+    assert len(requests) == 1
+
+
+def test_failed_bash_retains_partial_artifact_without_success_evidence(tmp_path):
+    with model_service(turns=[[('failure', 'bash', {'command': "printf 'partial-result-1031'; exit 7"})]]) as (url, requests):
+        app = project(tmp_path, url)
+        select(app, tools=[{'name': 'bash'}], shell_settings={'allowed_commands': ['printf', 'exit'], 'allowed_operators': ['*'], 'sandbox': {'enabled': False}})
+        with bind_config(load_project_config(tmp_path)):
+            result = execute_app(app, file_logging=False)
+    entries = [json.loads(p.read_text()) for p in (result.run.run_dir / 'native-tools').rglob('*.json')]
+    assert len(entries) == 1
+    entry = entries[0]
+    assert entry['record']['status'] == 'error' and entry['record']['output'] is None
+    assert entry['raw_output'] == 'partial-result-1031'
+    assert entry['result_scope']['source_completeness'] == 'partial'
+    assert entry['evidence'] == []
+
+
+def test_native_capture_larger_than_wire_limit_is_retained_without_reexecution(tmp_path):
+    import shlex
+    import sys
+    producer = tmp_path / 'large_producer.py'
+    producer.write_text("print('a'* (9 * 1024 * 1024))\nprint('FINAL_RECORD: first-result-1031')\n")
+    with model_service(turns=[[('large', 'bash', {'command': f'{shlex.quote(sys.executable)} {shlex.quote(str(producer))}'})]]) as (url, requests):
+        app = project(tmp_path, url)
+        select(app, tools=[{'name': 'bash'}], shell_settings={'allowed_commands': ['*'], 'sandbox': {'enabled': False}},
+               context_engine={'min_chars': 1000, 'preview_max_chars': 300})
+        with bind_config(load_project_config(tmp_path)):
+            result = execute_app(app, file_logging=False)
+    entries = [json.loads(p.read_text()) for p in (result.run.run_dir / 'native-tools').rglob('*.json')]
+    assert len(entries) == 1
+    entry = entries[0]
+    assert entry['record']['status'] == 'completed'
+    assert entry['result_scope']['source_completeness'] == 'complete'
+    assert entry['raw_output'] == 'a' * (9 * 1024 * 1024) + '\nFINAL_RECORD: first-result-1031\n'
+    assert '[ContextRef ' in json.dumps(entry['record']['output'])
+    assert len(requests) == 2

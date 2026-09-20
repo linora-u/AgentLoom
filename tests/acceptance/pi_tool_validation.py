@@ -94,7 +94,7 @@ def child(case: str, workspace: Path, profile: str):
         'manifest_path': str(result.run.manifest_path), 'completed_tools': sorted(completed), **proof})
 
 
-def campaign(destination: Path, cases: list[str], profiles: list[str], deadline: int):
+def campaign(destination: Path, cases: list[str], profiles: list[str], deadline: int, *, script: Path = Path(__file__)):
     destination.mkdir(parents=True, mode=0o700, exist_ok=False)
 
     def run(job):
@@ -104,7 +104,7 @@ def campaign(destination: Path, cases: list[str], profiles: list[str], deadline:
         started = time.monotonic()
         timed_out = False
         with (destination / f'{name}.log').open('w') as log:
-            process = subprocess.Popen([sys.executable, str(Path(__file__).resolve()), '--child', case,
+            process = subprocess.Popen([sys.executable, str(script.resolve()), '--child', case,
                 '--output', str(workspace), '--profiles', profile], stdout=log, stderr=subprocess.STDOUT, start_new_session=True)
             try:
                 process.wait(timeout=deadline)
