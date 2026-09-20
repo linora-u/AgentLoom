@@ -14,7 +14,7 @@ from agentloom.adapters.litellm.litellm_retry import patch_litellm_completion
 from agentloom.adapters.litellm.model_binding import (
     build_litellm_model_turn_binding,
 )
-from agentloom.adapters.litellm.request_headers import (
+from agentloom.configuration.model_request_headers import (
     build_model_request_headers,
     get_system_model_request_headers,
 )

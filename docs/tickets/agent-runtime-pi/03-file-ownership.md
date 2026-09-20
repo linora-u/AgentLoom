@@ -56,9 +56,11 @@
 
 ## 兼容入口与清理时机
 
+main 已按当前消费者清理一批迁移残留，见 [迁移清理记录](migration-cleanup.md)。本节的 03 冻结分工及历史移交表保留；后续开发以清理记录中的现存路径为准。
+
 - 旧 YAML 六组默认 toolset、旧 builtin 名称/固定参数及 smol 启动方式持续支持，不在 14 删除。
 - `agentloom.tools.catalog.ToolSpec` / `ToolImplementation` 保留原导入位置，新实现类型在 catalog_types；metadata 不引入 SDK。
-- `agentloom.tools.shell.subprocess_env` 与 `agentloom.adapters.litellm.request_headers` 为明确的临时兼容导出；03 保留现有调用者，后续由所属票迁移，14 按引用清单清理。
+- `agentloom.tools.shell.subprocess_env` 与 `agentloom.adapters.litellm.request_headers` 两个临时兼容导出已清理；调用者分别直接使用 `agentloom.runtime.subprocess_env`、`agentloom.configuration.model_request_headers`。
 - `runtime_options` 的 smol 旧字段和旧 terminal 入口仍为 02 的 expand 兼容项；04 移交清理状态，不提前破坏旧应用。
 - Goal 的旧 smol decorator 仍由 08 移除；03 只标明平台 manifest。Todo decorator 与状态由 04 处理。
 - SDK 原始 RESULT.json 和历史提交证据不改写；移动记录见 `03-sdk-relocation.json`。03 的新重放不冒充 01 的原始运行。

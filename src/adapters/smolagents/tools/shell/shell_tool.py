@@ -5,7 +5,7 @@ from agentloom.adapters.smolagents.tools.shell.command_semantics import interpre
 from agentloom.adapters.smolagents.tools.shell.output_interceptor import OutputInterceptor
 from agentloom.adapters.smolagents.tools.shell.process import ShellProcess, ShellProcessRegistry
 from agentloom.adapters.smolagents.tools.shell.should_use_sandbox import get_sandbox_manager, should_use_sandbox
-from agentloom.adapters.smolagents.tools.shell.validator import validate_command
+from agentloom.runtime.tool_governance.shell.validator import validate_command
 from agentloom.runtime.trace import capture_explicit_execution_context
 
 logger = get_logger(__name__)
