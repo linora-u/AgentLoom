@@ -7,6 +7,9 @@ import pytest
 from agentloom.runtime.model_binding import ModelTurnBinding
 from agentloom.runtime.model_protocol import (
     MessageItem,
+    ReasoningItem,
+    FunctionCallItem,
+    FunctionCallOutputItem,
     ModelTurnRequest,
     ModelTurnResult,
 )
@@ -171,8 +174,9 @@ def test_review_context_reader_is_an_injectable_persistence_boundary(
     assert orchestrator.collect("project", "project") == reader.project_context
 
 
+@pytest.mark.parametrize("item_kind", ["none", "reasoning", "tool", "tool_result", "user", "reasoning_only"])
 def test_review_model_only_returns_candidates_and_cannot_choose_scope_policy_or_mutation(
-    tmp_path: Path,
+    tmp_path: Path, item_kind: str,
 ) -> None:
     from agentloom.self_learning.review_orchestration import ReviewOrchestrator
 
@@ -196,6 +200,27 @@ def test_review_model_only_returns_candidates_and_cannot_choose_scope_policy_or_
         "context": [{"kind": "trusted_evidence", "text": "The page size is 100 rows."}],
     }
 
+    original_turn = model.turn
+
+    def turn_with_metadata(request):
+        result = original_turn(request)
+        extra = {
+            "reasoning": ReasoningItem(text="Not candidate JSON", summary=("Internal summary",)),
+            "tool": FunctionCallItem(call_id="bad-call", name="write_memory", arguments_json="{}"),
+            "tool_result": FunctionCallOutputItem(call_id="bad-call", output="{}"),
+            "user": MessageItem(role="user", text="{}"),
+            "reasoning_only": ReasoningItem(text='{"candidates":[]}'),
+        }.get(item_kind)
+        if item_kind == "reasoning_only":
+            return ModelTurnResult(items=(extra,))
+        return ModelTurnResult(items=((extra,) if extra else ()) + result.items)
+
+    model.turn = turn_with_metadata
+    if item_kind in {"tool", "tool_result", "user", "reasoning_only"}:
+        with pytest.raises(ValueError):
+            orchestrator.run_review("application", "app-a")
+        assert engine.calls == []
+        return
     result = orchestrator.run_review("application", "app-a")
 
     assert result.review_id == "review-1"
