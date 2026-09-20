@@ -61,8 +61,11 @@ def validate(output, profiles, node):
     sdist = next(dist.glob("*.tar.gz"))
     with ZipFile(wheel) as archive:
         names = archive.namelist()
-        assert "agentloom/adapters/pi/bridge-v1.schema.json" in names
-        for name in ("package.json", "package-lock.json", "tsconfig.json", "index.ts", "protocol.ts", "tools.ts", "model.ts"):
+        schemas = list((ROOT / "src/adapters/pi").glob("bridge-v*.schema.json"))
+        assert schemas
+        assert all("agentloom/adapters/pi/" + path.name in names for path in schemas)
+        sources = [path.name for path in (ROOT / "src/adapters/pi/bridge").glob("*.ts")]
+        for name in ("package.json", "package-lock.json", "tsconfig.json", *sources):
             assert "agentloom/adapters/pi/bridge/" + name in names, name
         assert len([name for name in names if "/tools/queries/" in name and name.endswith(".scm")]) == 56
         assert not any("/node_modules/" in name or "/dist/" in name or ".agentloom-install." in name for name in names)
