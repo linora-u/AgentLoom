@@ -32,6 +32,9 @@ workflow: |
   - Write the marker to /tmp through shell_tool and verify it with read_file.
   - Return a JSON object with marker, prior_session_count, memory_proposal,
     skill_proposal_path, reference_file_written, tmp_file_verified, and ok.
+    The fields memory_proposal, reference_file_written, tmp_file_verified,
+    and ok must be JSON booleans. Set memory_proposal from the actual memory
+    result's ok field; retain the full memory result in references/run.json.
 
   Required structured call sequence:
   1. Call `shell_tool` with a short non-interactive command that prints one
