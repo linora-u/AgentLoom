@@ -43,9 +43,9 @@ def test_root_supervisor_can_read_and_complete_goal():
             agent_config={"goal": {"enabled": True}},
         )
         with bind_explicit_execution_context(context):
-            initial = json.loads(get_goal.forward())
+            initial = json.loads(get_goal())
             completed = json.loads(
-                update_goal.forward(status="complete", evidence="Tests passed.")
+                update_goal(status="complete", evidence="Tests passed.")
             )
             assert provider.assert_request_allowed(
                 local_run_id="root",
@@ -63,9 +63,9 @@ def test_update_goal_requires_complete_and_evidence():
         context = replace(capture_explicit_execution_context(), hook_run=_hook())
         with bind_explicit_execution_context(context):
             with pytest.raises(ValueError, match="must be 'complete'"):
-                update_goal.forward(status="active", evidence="no")
+                update_goal(status="active", evidence="no")
             with pytest.raises(ValueError, match="evidence"):
-                update_goal.forward(status="complete", evidence="  ")
+                update_goal(status="complete", evidence="  ")
 
 
 def test_worker_cannot_call_goal_tools_even_when_provider_is_inherited():
@@ -79,4 +79,4 @@ def test_worker_cannot_call_goal_tools_even_when_provider_is_inherited():
         )
         with bind_explicit_execution_context(context):
             with pytest.raises(PermissionError, match="root Supervisor"):
-                get_goal.forward()
+                get_goal()
