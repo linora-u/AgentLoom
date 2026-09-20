@@ -128,6 +128,19 @@ def enable_lsp(root):
     config.write_text(yaml.safe_dump(system))
 
 
+def test_duplicate_lsp_configuration_rejected_before_starting_any_server(language_servers):
+    from agentloom.adapters.lsp.config import LSPConfig
+    from agentloom.adapters.lsp.lsp_server_manager import LSPServerManager
+
+    manager = LSPServerManager()
+    try:
+        with pytest.raises(ValueError, match="Duplicate LSP server"):
+            manager.initialize(LSPConfig.from_yaml({"servers": ["python", "python"]}), project_root=".")
+        assert language_servers == []
+    finally:
+        manager.shutdown()
+
+
 def test_selected_lsp_runs_lazily_and_releases_its_server(platform_project, language_servers):
     root, _, programs, _, run = platform_project
     source = root / "answer.py"

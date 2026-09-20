@@ -120,6 +120,14 @@ class LSPServerManager:
             self._initialized = True
             return
 
+        languages: set[str] = set()
+        for server_config in config.servers:
+            if not server_config.enabled or not server_config.language:
+                continue
+            if server_config.language in languages:
+                raise ValueError(f"Duplicate LSP server language: {server_config.language}")
+            languages.add(server_config.language)
+
         # Ensure .venv/bin and ~/go/bin are in PATH
         ensure_lsp_paths()
 
