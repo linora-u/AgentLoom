@@ -26,8 +26,8 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT))
-CASES = ("unit", "repo", "context_text", "context_json", "context_multi", "core", "markdown")
-TIMEOUTS = {case: 900 for case in CASES}
+CASES = ("unit", "repo", "context_text", "context_json", "context_multi", "core", "markdown", "goal_list", "goal_parallel")
+TIMEOUTS = {case: 900 for case in CASES} | {"goal_list": 1500, "goal_parallel": 1200}
 WORKERS = ("function_intake", "scenario_planner", "pytest_generator", "test_refiner", "delivery_reporter")
 CONTEXT = {
     "text": [
@@ -122,7 +122,7 @@ def metadata(workflow: Path) -> dict:
             "workflow": str(workflow), "workflow_sha256": hashlib.sha256(workflow.read_bytes()).hexdigest(),
             "model_type": model_type, "model": C.get_model_config(model_type, "model"),
             "agent_runtime": cfg.get("agent_runtime"),
-            "max_steps": cfg.get("max_steps", 80),
+            "max_steps": cfg.get("max_steps", 80), "goal": cfg.get("goal"),
             "definition_files": {str(path): hashlib.sha256(path.read_bytes()).hexdigest()
                                  for path in workflow.parent.rglob("*") if path.suffix in {".yaml", ".yml", ".md"}},
             "interpreter": sys.executable}
@@ -139,7 +139,7 @@ def execute(workflow: Path, workspace: Path, *, task: str | None = None, resume:
     try:
         result = execute_app(workflow, task_override=task, resume_task_id=resume, file_logging=True, event_sink=observe)
         meta.update(status="completed", run_id=result.run.run_id, task_id=result.run.task_id,
-                    manifest=str(result.run.manifest_path), output=result.output)
+                    manifest=str(result.run.manifest_path), output=result.output, goal=dict(result.goal) if result.goal else None)
     finally:
         meta["ended_at"] = datetime.now(UTC).isoformat()
         dump(workspace / f"{attempt}_receipt.json", meta)
@@ -296,11 +296,34 @@ def verify_repo(workspace: Path) -> dict:
     return {"directories": len(progress), "known_symbols": sorted(known), "skill": str(skills[0]), "routes": len(routes)}
 
 
+def validate_goal(workspace: Path, receipt: dict, *, workflow_list: bool) -> dict:
+    goal = receipt.get("goal") or {}
+    if receipt["status"] != "completed" or goal.get("status") != "complete" or not goal.get("evidence"):
+        raise AssertionError(f"Goal did not explicitly complete with evidence: {goal}")
+    runtime = workspace / "runtime"
+    starts = assert_workers(runtime, set())
+    finished = [event for event in events(runtime) if event.get("type") == "worker_call_finished"]
+    if len(finished) != len(starts) or any(event.get("status") != "completed" for event in finished):
+        raise AssertionError("Required audit Workers did not all complete")
+    if len(starts) < (4 if workflow_list else 6):
+        raise AssertionError(f"Missing real audit Workers: {len(starts)}")
+    name = "workflow_list" if workflow_list else "parallel"
+    report = workspace / "goal_reports" / f"{name}.md"
+    content = report.read_text()
+    markers = ("# Goal Mode Validation", "## Configuration Contract", "## Verdict") if workflow_list else (
+        "# Parallel Goal Validation", "## Batch Results", "## Goal State", "## Resume Instructions", f"goal_id={goal['goal_id']}")
+    if any(marker not in content for marker in markers):
+        raise AssertionError("Persisted Goal evidence is incomplete")
+    assert_tools(runtime, {"run_goal_audit_batch", "update_goal"} if workflow_list else {"inspect_parallel_goal_report", "update_goal"})
+    return {"goal": goal, "worker_calls": len(starts), "report_sha256": hashlib.sha256(report.read_bytes()).hexdigest()}
+
+
 def child(case: str, workspace: Path) -> dict:
     from agentloom.configuration import C
     C.raw.setdefault("runtime", {})["root_dir"] = str(workspace / "runtime")
     C.raw.setdefault("checkpoint", {})["cleanup_on_success"] = False
     C.raw.setdefault("lsp_servers", {})["enabled"] = False
+    os.environ["AGENTLOOM_GOAL_VALIDATION_OUTPUT_ROOT"] = str(workspace / "goal_reports")
     if case == "unit":
         target = workspace / "fixture"
         shutil.copytree(ROOT / "applications/unit_test_studio/test/fixtures/sample_project", target)
@@ -338,7 +361,12 @@ def child(case: str, workspace: Path) -> dict:
         execute(ROOT / "applications/repo_map/workflows/repo_map_agent.yaml", workspace,
                 task=f"Complete all Repo Map architecture analysis and Skill steps. output_dir={workspace / 'repo_output'}")
         return verify_repo(workspace)
-    raise ValueError(f"Unknown validation case: {case}")
+    workflow_list = case == "goal_list"
+    workflow = copied_workflow("goal_mode_validation", "goal_workflow_list_agent.yaml" if workflow_list else "goal_parallel_agent.yaml", workspace, {})
+    first = execute(workflow, workspace)
+    if workflow_list:
+        return validate_goal(workspace, first, workflow_list=True)
+    return validate_goal(workspace, first, workflow_list=False)
 
 
 def main() -> int:
@@ -359,6 +387,9 @@ def main() -> int:
                 value = verify_repo(args.workspace)
             elif args.case.startswith("context_"):
                 value = verify_context(args.case.removeprefix("context_"), args.workspace)
+            elif args.case.startswith("goal_"):
+                receipt = args.workspace / "run_receipt.json"
+                value = validate_goal(args.workspace, json.loads(receipt.read_text()), workflow_list=args.case == "goal_list")
             else:
                 parser.error("Tool scenarios are checked by a new full run")
         except BaseException as exc:

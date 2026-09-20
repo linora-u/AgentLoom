@@ -195,6 +195,7 @@
 | F4 | Repo Map | 对包含至少三层目录、多个 module 和跨目录引用的受控仓库完成扫描、排名、Worker 架构分析和 Skill 产物；独立核对符号与引用可解析，关键已知关系被覆盖，报告与产物非空。不得只执行不调用 Agent 的前两步 |
 | F5 | ContextEngine 的 text / json / multi-worker 验收 Application | 全部三类真实执行；确认预期隐藏记录可通过实际 ContextRef 检索，引用独立且来源正确，检索事件和结果对应，而不只匹配最终 PASS 文本 |
 | F6 | 复杂 checkpoint Supervisor / Worker 场景 | 分别在 Supervisor 和 Worker 已提交进度处中断，再经公开运行入口恢复；同一 task_id、新 run_id，历史上下文与产物可用，已有写入和已完成 Worker 不重复执行，最终 manifest 与副作用 ledger 正确 |
+| F7 | Goal bounded 与 parallel budget 场景 | 有限预算的多阶段任务正常完成；并行 Worker 共享预算触发 budget_limited 后保留恢复材料，再调整本次验收配置并恢复完成；累计 usage 保留，已完成批次不重跑 |
 | F8 | Tool Catalog Core 与 Markdown 验收 Application | 两个 Application 都真实执行，覆盖默认工具集和显式替换、Shell / 文件 / 搜索 / Markdown 的实际工具行为，独立读取产物并核对内容及调用证据 |
 | F9 | 新建 Application 的拒绝与策略阻断变体 | 静态无效定义在模型调用前拒绝；配置合法而工具被策略阻断时，真实运行产生 blocked 结果且不发生被阻断副作用，状态与诊断一致 |
 

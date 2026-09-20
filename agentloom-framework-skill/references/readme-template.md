@@ -42,6 +42,9 @@ applications/<app_name>/
 .venv/bin/loom run applications/<app_name>/workflows/<agent>.yaml
 ```
 
+如果 Supervisor 开启 Goal Mode，README 必须列出 `goal.enabled`、中断后的 resume
+命令、完成 evidence 在 manifest/audit 中的位置。
+
 如果应用提供了自定义 Python wrapper，再补充 wrapper 用法：
 
 ```bash

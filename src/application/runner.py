@@ -45,6 +45,7 @@ from agentloom.runtime.checkpoint import CheckpointManager
 from agentloom.runtime.checkpoint.file_history import FileHistoryManager
 from agentloom.configuration import C, build_effective_agent_config, get_config
 from agentloom.configuration.config import bind_config, fresh_invocation_config
+from agentloom.runtime.goal import normalize_goal_config
 from agentloom.runtime.heartbeat import SupervisorHeartbeat
 from agentloom.runtime.logging import (
     LoggingConfigBuilder,
@@ -405,7 +406,6 @@ def _execute_app(
                         event_start_offset = _task_events_size(checkpoint_mgr, task_id)
 
                     if is_resume and checkpoint_mgr is not None:
-                        checkpoint_mgr.validate_task_resume(task_id)
                         tree = checkpoint_mgr.load_task_tree(task_id)
                         if tree is None:
                             raise FileNotFoundError(
@@ -441,11 +441,22 @@ def _execute_app(
                             "interrupted",
                             "failed",
                             "crashed",
+                            "budget_limited",
                         }
                         if tree_status not in resumable_statuses:
                             raise ValueError(
                                 f"Checkpoint {task_id} is not resumable "
                                 f"(status={tree_status}); start a new task instead"
+                            )
+                        persisted_goal = checkpoint_mgr.load_goal(task_id)
+                        current_goal = normalize_goal_config(
+                            config,
+                            source=str(resolved_path),
+                        )
+                        if persisted_goal is not None and not current_goal.enabled:
+                            raise ValueError(
+                                "Cannot resume: checkpoint contains an active Goal but "
+                                "Goal mode is disabled in YAML"
                             )
                         if task_override is None:
                             persisted_task = tree.get("task_text")
@@ -631,6 +642,7 @@ def _execute_app(
                     occurred_at=ended_at,
                     error=str(interrupted),
                     phase=lifecycle.phase,
+                    goal=durable_manifest_updates.get("goal"),
                 ),
             )
             raise interrupted from terminal_error
@@ -661,6 +673,7 @@ def _execute_app(
                 occurred_at=ended_at,
                 error=message,
                 phase=lifecycle.phase,
+                goal=durable_manifest_updates.get("goal"),
             ),
         )
         raise failure from terminal_error
@@ -670,6 +683,7 @@ def _execute_app(
         run=public_run,
         started_at=started_at,
         ended_at=ended_at,
+        goal=durable_manifest_updates.get("goal"),
     )
     _emit_lifecycle_event(
         event_sink,
@@ -678,6 +692,7 @@ def _execute_app(
             run=public_run,
             occurred_at=ended_at,
             output=lifecycle.result,
+            goal=durable_manifest_updates.get("goal"),
         ),
     )
     return application_result

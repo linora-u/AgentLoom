@@ -2,9 +2,11 @@
 
 from __future__ import annotations
 
+from collections.abc import Iterator, Mapping
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
+from types import MappingProxyType
 from typing import Literal, Protocol
 
 RunEventType = Literal[
@@ -19,6 +21,29 @@ RunPhase = Literal[
     "finalization",
     "cleanup",
 ]
+
+
+@dataclass(frozen=True, slots=True)
+class GoalSnapshot(Mapping[str, object]):
+    """Immutable copy of one public Goal projection."""
+
+    _values: Mapping[str, object]
+
+    def __init__(self, value: Mapping[str, object]) -> None:
+        object.__setattr__(self, "_values", MappingProxyType(dict(value)))
+
+    def __getitem__(self, key: str) -> object:
+        return self._values[key]
+
+    def __iter__(self) -> Iterator[str]:
+        return iter(self._values)
+
+    def __len__(self) -> int:
+        return len(self._values)
+
+
+def _goal_snapshot(value: Mapping[str, object] | None) -> GoalSnapshot | None:
+    return None if value is None else GoalSnapshot(value)
 
 
 @dataclass(frozen=True, slots=True)
@@ -41,6 +66,10 @@ class ApplicationRunResult:
     run: RunInfo
     started_at: datetime
     ended_at: datetime
+    goal: GoalSnapshot | None = None
+
+    def __post_init__(self) -> None:
+        object.__setattr__(self, "goal", _goal_snapshot(self.goal))
 
 
 @dataclass(frozen=True, slots=True)
@@ -53,7 +82,11 @@ class RunLifecycleEvent:
     output: str | None = None
     error: str | None = None
     phase: RunPhase | None = None
+    goal: GoalSnapshot | None = None
     schema_version: int = 1
+
+    def __post_init__(self) -> None:
+        object.__setattr__(self, "goal", _goal_snapshot(self.goal))
 
 
 @dataclass(frozen=True, slots=True)

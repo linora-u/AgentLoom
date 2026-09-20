@@ -16,7 +16,7 @@ from __future__ import annotations
 import json
 import os
 import sys
-from collections.abc import Iterator
+from collections.abc import Iterator, Mapping
 from contextlib import contextmanager, nullcontext, redirect_stdout
 from datetime import UTC, datetime
 from typing import Any, TextIO
@@ -69,11 +69,15 @@ def _run_event_payload(event: Any) -> dict[str, object]:
         "occurred_at": occurred_at.isoformat(),
         "run": _run_info_payload(event.run),
     }
-    for field in ("output", "error", "phase"):
+    for field in ("output", "error", "phase", "goal"):
         value = getattr(event, field, None)
         if value is not None:
-            payload[field] = value
+            payload[field] = dict(value) if field == "goal" else value
     return payload
+
+
+def _goal_text(goal: Mapping[str, object]) -> str:
+    return f"Goal: {goal.get('status')}"
 
 
 def _emit_jsonl_record(payload: dict[str, object], stream: TextIO) -> None:
@@ -311,6 +315,9 @@ def run(
                     task_override=task_override,
                 )
                 click.echo(completed.output)
+                completed_goal = getattr(completed, "goal", None)
+                if isinstance(completed_goal, Mapping):
+                    click.echo(_goal_text(completed_goal))
         except KeyboardInterrupt as exc:
             if not emitted_events:
                 emit_rejected(exc, message="interrupted before run started")

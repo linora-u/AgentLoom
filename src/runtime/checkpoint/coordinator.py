@@ -74,8 +74,6 @@ class CheckpointCoordinator:
         *,
         resume: bool = False,
     ) -> None:
-        if resume:
-            checkpoint_manager.validate_task_resume(task_id)
         self._cm = checkpoint_manager
         self._task_id = task_id
         self._task_text = task_text
@@ -130,6 +128,15 @@ class CheckpointCoordinator:
 
         return self._cm.replace_todos(self._task_id, agent_path, items)
 
+    def load_goal(self) -> dict[str, Any] | None:
+        """Load the root task's durable Goal state."""
+
+        return self._cm.load_goal(self._task_id)
+
+    def save_goal(self, state: Any) -> dict[str, Any]:
+        """Atomically replace the root task's durable Goal state."""
+
+        return self._cm.save_goal(self._task_id, state)
 
     # ── ContextVar lifecycle ─────────────────────────────────────────
 

@@ -1364,45 +1364,7 @@ def test_structured_run_api_is_publicly_exported():
     )
 
 
-@pytest.mark.parametrize("goal_yaml", ["true", "false", "{enabled: true, token_budget: 100}"])
-def test_removed_goal_is_rejected_before_agent_construction(fake_yaml: Path, goal_yaml: str):
-    from agentloom.application.runner import execute_app
-
-    fake_yaml.write_text(_SAMPLE_YAML + f"\ngoal: {goal_yaml}\n", encoding="utf-8")
-    events = []
-    with patch("agentloom.application.runner.YamlConfiguredSupervisorAgent") as agent:
-        with pytest.raises(ValueError, match="goal was removed"):
-            execute_app(str(fake_yaml), file_logging=False, event_sink=events.append)
-    agent.assert_not_called()
-    assert [event.event for event in events] == ["run.rejected"]
-
-
 class TestExecuteApp:
-    @pytest.mark.parametrize("legacy_state", ["active", "budget_limited", "complete"])
-    @patch("agentloom.application.runner.YamlConfiguredSupervisorAgent")
-    def test_removed_goal_checkpoint_cannot_resume_as_an_ordinary_task(
-        self, mock_cls, fake_yaml: Path, legacy_state: str,
-    ) -> None:
-        from agentloom.application.run import ApplicationRunError
-        from agentloom.application.runner import execute_app
-
-        def leave_legacy_checkpoint(_task, **kwargs):
-            with kwargs["checkpoint_manager"].task_storage(kwargs["task_id"]) as storage:
-                storage.atomic_write_json("goal.json", {"status": legacy_state})
-            raise RuntimeError("interrupted legacy work")
-
-        mock_cls.return_value.run.side_effect = leave_legacy_checkpoint
-        with pytest.raises(ApplicationRunError) as first:
-            execute_app(str(fake_yaml), file_logging=False)
-
-        with pytest.raises(ApplicationRunError, match="removed Goal-mode checkpoint"):
-            execute_app(
-                str(fake_yaml), file_logging=False,
-                resume_task_id=first.value.run.task_id,
-            )
-        assert mock_cls.call_count == 1
-        assert mock_cls.return_value.run.call_count == 1
-
     @patch("agentloom.application.runner.YamlConfiguredSupervisorAgent")
     def test_application_run_owns_successful_checkpoint_terminal_state(
         self,
@@ -1464,6 +1426,86 @@ class TestExecuteApp:
         ).is_dir()
 
     @patch("agentloom.application.runner.YamlConfiguredSupervisorAgent")
+    def test_resume_rejects_disabling_a_persisted_active_goal(
+        self,
+        mock_cls,
+        fake_yaml: Path,
+    ) -> None:
+        from agentloom.application.run import (
+            ApplicationRunInterrupted,
+            ApplicationRunError,
+        )
+        from agentloom.application.runner import execute_app
+        from agentloom.runtime.goal import GoalState
+
+        fake_yaml.write_text(_SAMPLE_YAML + "\ngoal:\n  enabled: true\n  token_budget: 100\n")
+        state = GoalState.create(
+            objective="Finish the application.",
+            objective_fingerprint="fingerprint",
+        )
+
+        def _limit(_task, **kwargs):
+            manager = kwargs["checkpoint_manager"]
+            manager.save_goal(kwargs["task_id"], state.to_dict())
+            manager.record_task_status_changed(kwargs["task_id"], "interrupted")
+            raise KeyboardInterrupt("pause for resume")
+
+        mock_cls.return_value.run.side_effect = _limit
+        with pytest.raises(ApplicationRunInterrupted) as limited:
+            execute_app(str(fake_yaml), file_logging=False)
+
+        fake_yaml.write_text(_SAMPLE_YAML + "\ngoal: false\n", encoding="utf-8")
+        with pytest.raises(ApplicationRunError) as rejected:
+            execute_app(
+                str(fake_yaml),
+                file_logging=False,
+                resume_task_id=limited.value.run.task_id,
+            )
+
+        assert isinstance(rejected.value.original_error, ValueError)
+        assert "Goal mode is disabled" in str(rejected.value.original_error)
+
+
+    @patch("agentloom.application.runner.YamlConfiguredSupervisorAgent")
+    def test_completed_goal_is_copied_before_checkpoint_cleanup(
+        self,
+        mock_cls,
+        fake_yaml: Path,
+    ) -> None:
+        from agentloom.application.runner import execute_app
+        from agentloom.runtime.goal import GoalState
+
+        state = GoalState.create(
+            objective="Finish the application.",
+            objective_fingerprint="fingerprint",
+        ).with_completion("Delivered and verified.")
+
+        def _run(_task, **kwargs):
+            manager = kwargs["checkpoint_manager"]
+            manager.save_goal(kwargs["task_id"], state.to_dict())
+            manager.record_task_status_changed(
+                kwargs["task_id"],
+                "completed",
+                result=state.evidence,
+            )
+            return state.evidence
+
+        mock_cls.return_value.run.side_effect = _run
+
+        result = execute_app(str(fake_yaml), file_logging=False)
+
+        manifest = json.loads(result.run.manifest_path.read_text(encoding="utf-8"))
+        assert result.goal["status"] == "complete"
+        with pytest.raises(TypeError):
+            result.goal["status"] = "active"
+        assert manifest["goal"]["evidence"] == "Delivered and verified."
+        assert json.loads(
+            (result.run.run_dir / manifest["goal_artifact"]).read_text(
+                encoding="utf-8"
+            )
+        )["status"] == "complete"
+
+    @patch("agentloom.application.runner.YamlConfiguredSupervisorAgent")
     def test_returns_canonical_receipt_after_durable_finalization(
         self,
         mock_cls,
@@ -1478,7 +1520,7 @@ class TestExecuteApp:
         result = execute_app(str(fake_yaml), file_logging=False)
 
         assert result.output == "structured-output"
-        assert not hasattr(result, "goal")
+        assert result.goal is None
         assert "goal" not in json.loads(
             result.run.manifest_path.read_text(encoding="utf-8")
         )
@@ -1539,6 +1581,13 @@ class TestExecuteApp:
         from agentloom.application.runner import execute_app
         from agentloom.runtime import get_current_run_context
         from agentloom.runtime.agent_runtime import RuntimeEvent
+        from agentloom.runtime.goal import GoalState
+
+        fake_yaml.write_text(_SAMPLE_YAML + "\ngoal: true\n", encoding="utf-8")
+        state = GoalState.create(
+            objective="Finish the application.",
+            objective_fingerprint="fingerprint",
+        )
 
         def _fail(_task, **kwargs):
             context = get_current_run_context(required=True)
@@ -1551,6 +1600,9 @@ class TestExecuteApp:
                     run_id=context.run_id,
                     details={"phase": "failed"},
                 )
+            )
+            kwargs["checkpoint_manager"].save_goal(
+                kwargs["task_id"], state.to_dict()
             )
             raise RuntimeError("boom")
 
@@ -1567,6 +1619,7 @@ class TestExecuteApp:
         assert caught.value.phase == "execution"
         assert [event.event for event in events] == ["run.started", "run.failed"]
         assert events[0].run == events[1].run == caught.value.run
+        assert events[-1].goal["status"] == "active"
         manifest = json.loads(
             caught.value.run.manifest_path.read_text(encoding="utf-8")
         )
@@ -1602,6 +1655,13 @@ class TestExecuteApp:
         from agentloom.application.runner import execute_app
         from agentloom.runtime import get_current_run_context
         from agentloom.runtime.agent_runtime import RuntimeEvent
+        from agentloom.runtime.goal import GoalState
+
+        fake_yaml.write_text(_SAMPLE_YAML + "\ngoal: true\n", encoding="utf-8")
+        state = GoalState.create(
+            objective="Finish the application.",
+            objective_fingerprint="fingerprint",
+        )
 
         def _interrupt(_task, **kwargs):
             context = get_current_run_context(required=True)
@@ -1614,6 +1674,9 @@ class TestExecuteApp:
                     run_id=context.run_id,
                     details={"call_id": "interrupted-call"},
                 )
+            )
+            kwargs["checkpoint_manager"].save_goal(
+                kwargs["task_id"], state.to_dict()
             )
             raise KeyboardInterrupt()
 
@@ -1633,6 +1696,7 @@ class TestExecuteApp:
             "run.interrupted",
         ]
         assert events[-1].run == caught.value.run
+        assert events[-1].goal["status"] == "active"
         manifest = json.loads(
             caught.value.run.manifest_path.read_text(encoding="utf-8")
         )

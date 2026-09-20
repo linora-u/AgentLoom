@@ -3,14 +3,13 @@
 `agentloom` is an Applications-first terminal control plane. A dedicated Studio
 Agent can inspect and edit an Application, while AgentLoom's Python runtime
 remains authoritative for Effective Config, topology, validation, Run lifecycle,
-and evidence.
+Goal state, and evidence.
 
 ![AgentLoom Application Studio in a real terminal](../docs/assets/agentloom-studio.svg)
 
 The image above comes from a real reduced-motion terminal session. The Studio
 indexed the checkout and rendered its Applications, global Skills, validation
-state, Runs, and command input. The Goal example visible in this historical
-recording has since been removed.
+state, Runs, and command input. It is not a static product mockup.
 
 ## Install and open
 
@@ -81,7 +80,7 @@ inspect project and Effective Config
 Studio must distinguish static validation from execution. If Run permission is
 rejected, the result is “configuration validated, not run.” A process exit or a
 plausible final answer is also insufficient proof; Studio reads the manifest,
-terminal state and available audit evidence.
+terminal state, Goal projection, and available audit evidence.
 
 Tool and Diff cards are visible in the parent conversation. Task sub-Agent text
 remains visible until the next turn and can be selected and copied with
@@ -130,7 +129,7 @@ changes the Studio model for the current Session; it never changes an
 Application Agent's YAML `model_type`. Missing or invalid configuration is an
 explicit startup error, not a fallback to ambient credentials.
 
-## Revisions and Runs
+## Revisions, Runs, and Goals
 
 Every Run pins the Application content hash in `manifest.json`. Editing YAML
 changes the Working Revision; an active Run continues using its Running Revision.
@@ -139,6 +138,17 @@ A restart or new Run is required to execute new configuration.
 Recent Runs are secondary navigation. Their default view is a bounded,
 decision-ready summary rather than a raw event dump. Problem Runs expose an
 `a` action that asks Studio to diagnose the stored evidence.
+
+Goal-aware Run details display:
+
+- `active` or `complete` state;
+- objective and completion evidence;
+- resume eligibility and the current task identifier.
+
+While a Run is active, the bridge reads canonical checkpoint `goal.json`.
+Terminal Runs use the manifest and audit copy. This keeps the TUI aligned with
+CLI JSON/JSONL and Python `ApplicationRunResult` instead of deriving state from
+terminal output.
 
 ## Navigation
 
@@ -173,7 +183,7 @@ agentloom schedules --project /path/to/project serve
 
 Closing the TUI therefore does not leave a hidden scheduler daemon. The workspace
 shows whether the service is running, while scheduled Runs use the same Run,
-checkpoint, and evidence contracts as manually started Runs.
+Goal, checkpoint, and evidence contracts as manually started Runs.
 
 ## Architecture
 

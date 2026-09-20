@@ -48,6 +48,9 @@ uv run loom run applications/example/workflows/supervisor.yaml \
 {"schema_version":1,"event":"run.completed","run":{"application_id":"example","task_id":"task_...","run_id":"run_...","run_dir":"...","manifest_path":"...","log_path":"..."},"occurred_at":"...","output":"done"}
 ```
 
+Goal 事件的 `goal` 对象包含身份、目标、状态、evidence 和时间戳。CLI 文本模式
+显示 `Goal: <status>`。普通模型用量仍保留在运行时审计记录中。详见 [Goal Mode](goal_mode.md)。
+
 Preflight 拒绝只产生 `run.rejected`，其中 `phase: "preflight"`、`error: {kind, message, retryable}`。因为没有创建 run 目录，所以不会伪造 `run` 对象。
 
 退出码：成功为 `0`，普通失败或拒绝为 `1`，可信的暂时性 Provider 失败为 `75`，中断为 `130`。调用方应按事件类型和结构化 error 字段决策，不要解析日志。Receipt 路径可以定位 manifest、有限日志和[持久化运行证据](checkpoint.md#检查真实运行证据)。

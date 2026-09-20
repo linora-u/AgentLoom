@@ -195,8 +195,23 @@ workflow:
     Continue from the previous run's memory and produce the final answer.
 ```
 
+#### Goal Mode (Supervisor only)
 
-The former `goal` field is no longer supported, including `goal: false`. Remove it from Supervisor and Worker YAML. Tasks return when they finish; `max_steps` remains the per-run limit. Checkpoints from Goal-mode tasks cannot be resumed; start a new ordinary task.
+```yaml
+goal:
+  enabled: true
+```
+
+`goal: true` and `goal: false` are also accepted. Mapping form requires a boolean
+`enabled`. Legacy `token_budget` is silently ignored. Worker YAML must not contain
+any `goal` key.
+
+When enabled, the objective is derived from `description + workflow + runtime
+task`. Prefer one multiline workflow. A list is numbered and merged into one
+initial objective context instead of using the ordinary sequential multi-run
+semantics above. Normal final answers and `max_steps` end only one continuation
+segment; the root Supervisor must call `update_goal(complete, evidence)`. Ordinary model usage remains in runtime audit records. See [Goal Mode](goal_mode.md)
+for lifecycle, resume, persistence, CLI, TUI, and schedule behavior.
 
 #### Workflow Writing Guidelines and Recommendations
 
@@ -1625,6 +1640,7 @@ These tolerance mechanisms significantly reduce wasted retries caused by LLM out
 | `agent_runtime` | ✅ | ✅ | ✅ | `str` | `smolagents` (must be explicit) |
 | `description` | ✅ | ✅ | ✅ | `str` | — |
 | `workflow` | ✅ | ✅ | ✅ | `str`/`list[str]` | — |
+| `goal` | ❌ | ✅ | ❌ | `bool`/`dict` | `false` |
 | `tools` | ❌ | ✅ | ✅ | `list[dict]` | `[]` |
 | `model_type` | ❌ | ✅ | ✅ | `str` | `model.default_model_type` from `config/llm.yaml`; no implicit default |
 | `prompt` | ❌ | ✅ | ✅ | `str`/`dict` | Framework built-in |
