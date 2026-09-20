@@ -427,5 +427,12 @@
     ],
     "distribution_ticket": "13",
     "scope": "no-tools native Pi Application only"
+  },
+  "main_delivery": {
+    "record": "07-delivery.json",
+    "tests_passed": 97,
+    "live_applications_passed": 1,
+    "worktree_removed": true,
+    "frozen_commit": "eca311eeca103dc6cd64eef959428e8b01eb22b2"
   }
 }

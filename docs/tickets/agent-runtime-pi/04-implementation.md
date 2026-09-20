@@ -87,5 +87,8 @@ Shell process/session/background/watchdog/output、退出码解释和审计资�
 | `7b775ed3` | 实例读取状态隔离、跨线程任务上下文修复 |
 | `95069804` | 真实 Todo on/auto/off Application 验收 |
 | `7885ac2a` | 显式旧模板路径兼容修复 |
+| `49eba895` | 工具归属清单、完整验收与 catalog 断言 |
 
 最终测试归属断言、工具清单和验收报告单独提交；不 squash 上述历史。交付 main 时保留同期 05 和票据修订，main 保持未提交、未暂存；集成验证及 worktree 清理另记交付报告。
+
+组合验证与已执行的清理结果见 [04/05 集成交付](04-05-integration.md)。

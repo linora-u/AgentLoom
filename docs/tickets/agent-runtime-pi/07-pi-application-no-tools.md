@@ -4,7 +4,7 @@
 
 **Blocked by:** 03：冻结基座与平台边界，交付可并行的公共基线
 
-**Status:** completed — 8 条验收已完成；见 [实现与交接](07-implementation.md)、[验证记录](07-validation.json)。增量历史与固定交接引用保留，main Changes 交付后清理本票 worktree。
+**Status:** completed — 8 条验收已完成；见 [实现与交接](07-implementation.md)、[验证记录](07-validation.json)。已交付 main 未暂存 Changes，6 个增量提交和冻结引用保留；t07 worktree 已清理。
 
 **Required:** Yes — 本票属于最终交付必做项。
 
