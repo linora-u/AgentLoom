@@ -101,6 +101,11 @@ class PiRuntime:
             **tool.parameters, "description": descriptions[tool.visible_name]}) for tool in definition.tool_manifest]
         platform_calls = set()
         platform_lock = Lock()
+        emitted_commits = set()
+
+        def record_tool(record, entry, identity):
+            emit("tool", {"record": record.to_dict(), "owner": entry.owner, "provider": entry.provider,
+                          "instance_id": identity.instance_id, "hook_run_id": execution.local_run_id})
 
         def callback(payload):
             if isinstance(payload, PlatformInvoke):
@@ -113,14 +118,23 @@ class PiRuntime:
                     platform_calls.add(identity.call_id)
                 record = definition.tool_gateway.invoke(call_id=identity.call_id, tool_name=payload.tool_name,
                                                         arguments=payload.arguments)
+                record_tool(record, platform_entries[payload.tool_name], identity)
                 return PlatformResult(method="platform_invoke", record=_terminal(record))
             if native is not None and isinstance(payload, Prepare):
                 prepared = native.prepare(payload.call)
+                if prepared.rejection is not None:
+                    record_tool(prepared.rejection, payload.call.tool, payload.call.identity)
                 return PrepareResult(method="tool_prepare",
                     authorization=native.start_execution(prepared.authorization) if prepared.authorization else None,
                     rejection=_terminal(prepared.rejection) if prepared.rejection else None)
             if native is not None and isinstance(payload, Settle):
                 settled = native.settle(payload.outcome)
+                if isinstance(settled, NativeCommitAck):
+                    with platform_lock:
+                        if settled.commit_id not in emitted_commits:
+                            entry = next(tool for tool in native_entries if tool.visible_name == settled.record.tool_name)
+                            record_tool(settled.record, entry, settled.identity)
+                            emitted_commits.add(settled.commit_id)
                 return SettleResult(method="tool_settle", identity=payload.outcome.identity,
                     authorization_id=payload.outcome.authorization_id,
                     state="committed" if isinstance(settled, NativeCommitAck) else "uncertain",
