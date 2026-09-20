@@ -1,0 +1,341 @@
+{
+  "ticket": "09",
+  "status": "passed",
+  "source_revision": "2bfcde134b7e81fc232d30148d687acd496be539",
+  "initial_base": "7965cc007d4348e2a1e67a0c0768037352b2e281",
+  "integrated_main_base": "8d7ba7bf2c938e1afe22b892a22072efdec829ba",
+  "sdk": {
+    "pi_coding_agent": "0.79.4",
+    "pi_ai": "0.79.4",
+    "installer": "uv run --locked loom install-runtime pi",
+    "dependency_install": "npm ci",
+    "vendored_sdk": false
+  },
+  "checks": {
+    "full_suite": {
+      "command": "uv run --locked python -m pytest tests/ applications/memory_feature_validation/scripts/test_memory_review_campaign_capsule.py applications/memory_feature_validation/scripts/test_memory_review_campaign_contract.py -q --tb=short",
+      "exit_code": 0,
+      "passed": 4408,
+      "skipped": 1,
+      "warnings": 3,
+      "seconds": 395.89,
+      "log": "/Users/bytedance/code/data_clear/AgentLoom-validation/t09/verification/full-integrated.log"
+    },
+    "python_types": {
+      "tool": "pyright 1.1.403",
+      "files": 12,
+      "errors": 0,
+      "warnings": 0,
+      "scope": "Pi adapter plus changed process/resources/ContextRef/tool metadata seams; not a repository-wide typecheck",
+      "evidence": "/Users/bytedance/code/data_clear/AgentLoom-validation/t09/verification/pyright.json"
+    },
+    "typescript": {
+      "command": "node node_modules/typescript/bin/tsc",
+      "cwd": "src/adapters/pi/bridge",
+      "exit_code": 0
+    },
+    "review": {
+      "standards": "passed after fixes",
+      "spec": "passed after fixes",
+      "remaining_actionable_findings": 0
+    },
+    "live_final": {
+      "command": "uv run --locked python tests/acceptance/pi_tool_validation.py --output <new-private-evidence-directory> --profiles powerful responses_powerful",
+      "passed": 40,
+      "total": 40,
+      "profiles": [
+        "powerful",
+        "responses_powerful"
+      ],
+      "all_attempts_at_source_revision": true,
+      "all_attempts_clean": true,
+      "cases": [
+        {
+          "case": "native_read",
+          "profile": "powerful",
+          "passed": true
+        },
+        {
+          "case": "mcp",
+          "profile": "powerful",
+          "passed": true
+        },
+        {
+          "case": "mcp_nested",
+          "profile": "powerful",
+          "passed": true
+        },
+        {
+          "case": "mcp_error",
+          "profile": "powerful",
+          "passed": true
+        },
+        {
+          "case": "goal",
+          "profile": "powerful",
+          "passed": true
+        },
+        {
+          "case": "skill",
+          "profile": "powerful",
+          "passed": true
+        },
+        {
+          "case": "skill_proposal",
+          "profile": "powerful",
+          "passed": true
+        },
+        {
+          "case": "memory",
+          "profile": "powerful",
+          "passed": true
+        },
+        {
+          "case": "context",
+          "profile": "powerful",
+          "passed": true
+        },
+        {
+          "case": "outline_python",
+          "profile": "powerful",
+          "passed": true
+        },
+        {
+          "case": "outline_json",
+          "profile": "powerful",
+          "passed": true
+        },
+        {
+          "case": "ast",
+          "profile": "powerful",
+          "passed": true
+        },
+        {
+          "case": "lsp_symbols",
+          "profile": "powerful",
+          "passed": true
+        },
+        {
+          "case": "lsp_definition",
+          "profile": "powerful",
+          "passed": true
+        },
+        {
+          "case": "lsp_references",
+          "profile": "powerful",
+          "passed": true
+        },
+        {
+          "case": "lsp_workspace",
+          "profile": "powerful",
+          "passed": true
+        },
+        {
+          "case": "lsp_hover",
+          "profile": "powerful",
+          "passed": true
+        },
+        {
+          "case": "worker",
+          "profile": "powerful",
+          "passed": true
+        },
+        {
+          "case": "parallel_workers",
+          "profile": "powerful",
+          "passed": true
+        },
+        {
+          "case": "goal_worker",
+          "profile": "powerful",
+          "passed": true
+        },
+        {
+          "case": "native_read",
+          "profile": "responses_powerful",
+          "passed": true
+        },
+        {
+          "case": "mcp",
+          "profile": "responses_powerful",
+          "passed": true
+        },
+        {
+          "case": "mcp_nested",
+          "profile": "responses_powerful",
+          "passed": true
+        },
+        {
+          "case": "mcp_error",
+          "profile": "responses_powerful",
+          "passed": true
+        },
+        {
+          "case": "goal",
+          "profile": "responses_powerful",
+          "passed": true
+        },
+        {
+          "case": "skill",
+          "profile": "responses_powerful",
+          "passed": true
+        },
+        {
+          "case": "skill_proposal",
+          "profile": "responses_powerful",
+          "passed": true
+        },
+        {
+          "case": "memory",
+          "profile": "responses_powerful",
+          "passed": true
+        },
+        {
+          "case": "context",
+          "profile": "responses_powerful",
+          "passed": true
+        },
+        {
+          "case": "outline_python",
+          "profile": "responses_powerful",
+          "passed": true
+        },
+        {
+          "case": "outline_json",
+          "profile": "responses_powerful",
+          "passed": true
+        },
+        {
+          "case": "ast",
+          "profile": "responses_powerful",
+          "passed": true
+        },
+        {
+          "case": "lsp_symbols",
+          "profile": "responses_powerful",
+          "passed": true
+        },
+        {
+          "case": "lsp_definition",
+          "profile": "responses_powerful",
+          "passed": true
+        },
+        {
+          "case": "lsp_references",
+          "profile": "responses_powerful",
+          "passed": true
+        },
+        {
+          "case": "lsp_workspace",
+          "profile": "responses_powerful",
+          "passed": true
+        },
+        {
+          "case": "lsp_hover",
+          "profile": "responses_powerful",
+          "passed": true
+        },
+        {
+          "case": "worker",
+          "profile": "responses_powerful",
+          "passed": true
+        },
+        {
+          "case": "parallel_workers",
+          "profile": "responses_powerful",
+          "passed": true
+        },
+        {
+          "case": "goal_worker",
+          "profile": "responses_powerful",
+          "passed": true
+        }
+      ]
+    }
+  },
+  "live_history": [
+    {
+      "name": "smoke-01",
+      "passed": 5,
+      "total": 6,
+      "revisions": [
+        "3047be680c3dab8c43d2ca9603dfe1ad0c9c8b8b"
+      ],
+      "all_attempts_clean": true,
+      "evidence": "/Users/bytedance/code/data_clear/AgentLoom-validation/t09/smoke-01/campaign.json"
+    },
+    {
+      "name": "campaign-01",
+      "passed": 38,
+      "total": 40,
+      "revisions": [
+        "69c593a5c6ceb67476113885fcd2f74e9d0b8925"
+      ],
+      "all_attempts_clean": false,
+      "evidence": "/Users/bytedance/code/data_clear/AgentLoom-validation/t09/campaign-01/campaign.json"
+    },
+    {
+      "name": "context-02",
+      "passed": 2,
+      "total": 2,
+      "revisions": [
+        "3fa3cd7541cf57a69ec26711fe47d1b0d3710697"
+      ],
+      "all_attempts_clean": true,
+      "evidence": "/Users/bytedance/code/data_clear/AgentLoom-validation/t09/context-02/campaign.json"
+    },
+    {
+      "name": "campaign-final-01",
+      "passed": 40,
+      "total": 40,
+      "revisions": [
+        "4c23130f4ea19d6088a896232671c1405d3f52a6"
+      ],
+      "all_attempts_clean": true,
+      "evidence": "/Users/bytedance/code/data_clear/AgentLoom-validation/t09/campaign-final-01/campaign.json"
+    },
+    {
+      "name": "campaign-integrated-02",
+      "passed": 40,
+      "total": 40,
+      "revisions": [
+        "2bfcde134b7e81fc232d30148d687acd496be539"
+      ],
+      "all_attempts_clean": true,
+      "evidence": "/Users/bytedance/code/data_clear/AgentLoom-validation/t09/campaign-integrated-02/campaign.json"
+    }
+  ],
+  "live_history_totals": {
+    "passed": 125,
+    "total": 128,
+    "historical_failures_retained": 3
+  },
+  "acceptance_evidence": {
+    "ownership_selection_and_preflight": [
+      "tests/pi_test/test_governance_application.py",
+      "tests/tools_test/test_tool_catalog_boundaries.py"
+    ],
+    "official_read_platform_callbacks_goal_workers": [
+      "tests/pi_test/test_tools_application.py",
+      "tests/acceptance/pi_tool_validation.py"
+    ],
+    "hook_context_tool_concurrency_cancellation": [
+      "tests/pi_test/test_hook_execution_application.py",
+      "tests/lib_test/runtime/test_execution_resources.py"
+    ],
+    "durable_native_settlement_failures": [
+      "tests/pi_test/test_native_fault_application.py"
+    ],
+    "mcp_skill_contextref": [
+      "tests/pi_test/test_governance_application.py",
+      "tests/acceptance/pi_tool_validation.py"
+    ]
+  },
+  "limits": [
+    "Native tools: only explicit official read/pi_read enabled; grep/find/ls excluded until descendant scope mapping is validated.",
+    "Pi write/Shell and file-mutating specialist tools remain blocked until ticket 10; checkpoint/resume remains blocked until ticket 12.",
+    "Arbitrary in-host Python extensions need finite operations or registered resource handles for cooperative cancellation; forced termination covers managed subprocesses.",
+    "Mixed smol/Pi verification and clean packaging validation remain tickets 11 and 13.",
+    "SDK model-phase events are supported; no token-stream API added."
+  ]
+}
