@@ -60,9 +60,10 @@ class ContractHostFixture:
         return NativePreparation(authorization=grant)
 
     def start_execution(self, grant):
-        grant.require_match(
-            self.journal.request.identity, self.journal.request.tool, self.journal.request.cwd, grant.final_arguments
-        )
+        expected = self.journal.authorization
+        if grant.authorization_id != expected.authorization_id:
+            raise ValueError("Native authorization mismatch")
+        expected.require_match(grant.identity, grant.tool, grant.cwd, grant.final_arguments)
         if grant.authorization_id in self.consumed or self.journal.state != "authorized":
             raise ValueError("Authorization already consumed or cancelled")
         self.consumed.add(grant.authorization_id)

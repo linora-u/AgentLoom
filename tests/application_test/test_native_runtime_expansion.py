@@ -229,3 +229,22 @@ def test_native_model_projection_contains_effective_private_headers(native_proje
     }
     assert "fixture-header-secret" not in repr(definitions[0])
     assert "fixture-header-secret" not in repr(selection)
+
+
+@pytest.mark.parametrize("custom_profile", [False, True])
+def test_header_layer_priority_is_case_insensitive(native_project, custom_profile):
+    path, definitions, _ = native_project
+    from agentloom.configuration.config import get_config
+
+    root = get_config().agent_root
+    prefix = "model_request_headers:\n  "
+    if custom_profile:
+        prefix += "profile: custom\n  profiles:\n    custom:\n      "
+    else:
+        prefix += "profile: none\n  "
+    system = root / "config/system.yaml"
+    system.write_text(system.read_text() + prefix + "headers: {X-Level: global}\n")
+    write(path.parent.parent / "config/system.yaml", prefix + "headers: {x-level: app}\n")
+    path.write_text(path.read_text() + prefix + "headers: {X-Level: agent}\n")
+    assert execute_app(path, file_logging=False).output == "native answer"
+    assert definitions[0].model_selection.request_headers == {"X-Level": "agent"}

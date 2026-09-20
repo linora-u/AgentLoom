@@ -146,3 +146,38 @@ def test_shared_contract_cancellation_distinguishes_unstarted_and_uncertain(writ
     with pytest.raises(ValueError, match="cancelled"):
         host.start_execution(grant)
     assert not target.exists()
+
+
+@pytest.mark.parametrize("tampering", ["arguments", "authorization_id"])
+def test_shared_execution_gate_rejects_tampered_authorization(write_contract, tampering):
+    host, request, target = write_contract
+    grant = host.prepare(request).authorization
+    forged = replace(
+        grant,
+        **(
+            {"final_arguments": {"path": "denied.txt", "content": "never"}}
+            if tampering == "arguments"
+            else {"authorization_id": "unknown"}
+        ),
+    )
+    with pytest.raises(ValueError, match="authorization mismatch"):
+        host.start_execution(forged)
+    assert host.journal.state == "authorized"
+    assert "execute" not in host.trace
+    assert not target.exists()
+    host.start_execution(grant)
+    assert host.journal.state == "executing"
+
+
+def test_gateway_projects_execution_metadata_without_recognizing_tool_names():
+    from agentloom.runtime.tool_gateway import bind_tool
+    from agentloom.tools.catalog import get_tool_spec
+
+    def backend_command(command: str) -> str:
+        """Run the requested command."""
+        return command
+
+    backend_command._agentloom_catalog_spec = replace(get_tool_spec("shell_tool"), name="backend_command")
+    entry = bind_tool(backend_command).manifest_entry
+    assert entry.operation == "shell"
+    assert entry.command_parameter == "command"

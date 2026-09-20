@@ -33,6 +33,8 @@ class ToolSpec:
     owner: Literal["runtime", "platform", "optional"] = "platform"
     provider: str = "agentloom"
     capability: str = ""
+    operation: Literal["read", "write", "shell", "platform", "control"] = "control"
+    command_parameter: str | None = None
 
 
 def _spec(
@@ -53,12 +55,16 @@ def _spec(
     owner: Literal["runtime", "platform", "optional"],
     provider: str,
     capability: str,
+    operation: Literal["read", "write", "shell", "platform", "control"],
+    command_parameter: str | None = None,
 ) -> ToolSpec:
     return ToolSpec(
         name=name,
         owner=owner,
         provider=provider,
         capability=capability,
+        operation=operation,
+        command_parameter=command_parameter,
         implementation=ToolImplementation(
             module=implementation_module,
             attribute=name,

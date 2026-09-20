@@ -10,7 +10,8 @@ from types import MappingProxyType
 from typing import Literal, Protocol, cast, runtime_checkable
 
 from agentloom.runtime.model_binding import ModelTurnBinding
-from agentloom.runtime.tool_gateway import ToolGateway
+from agentloom.runtime.native_tools import ToolManifestEntry
+from agentloom.runtime.tool_gateway import ToolGateway, tool_manifest_snapshot
 
 RuntimeState = Literal[
     "success",
@@ -466,6 +467,7 @@ class RuntimeDefinition:
     name: str
     description: str
     tool_gateway: ToolGateway
+    tool_manifest: tuple[ToolManifestEntry, ...] = field(init=False, repr=False)
     model: ModelTurnBinding | None = None
     model_selection: RuntimeModelSelection | None = None
     instance_id: str | None = None
@@ -508,6 +510,7 @@ class RuntimeDefinition:
             raise TypeError("requirements must be RuntimeRequirements")
         if not isinstance(self.tool_gateway, ToolGateway):
             raise TypeError("tool_gateway must satisfy ToolGateway")
+        object.__setattr__(self, "tool_manifest", tool_manifest_snapshot(self.tool_gateway))
         if self.max_steps is not None and (
             isinstance(self.max_steps, bool)
             or not isinstance(self.max_steps, int)

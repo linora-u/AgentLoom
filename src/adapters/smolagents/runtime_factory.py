@@ -23,7 +23,7 @@ from agentloom.runtime.prompts.prompt_builder import (
     todo_policy_for_mode,
 )
 from agentloom.runtime.trace import get_current_hook_run
-from agentloom.runtime.tool_gateway import AgentLoomToolGateway, bind_tool
+from agentloom.runtime.tool_gateway import AgentLoomToolGateway, bind_tool, tool_manifest_snapshot
 from agentloom.adapters.smolagents.terminal import final_answer_binding
 from agentloom.tools.loader import resolve_tool_function
 from smolagents import LogLevel
@@ -70,7 +70,7 @@ class _SmolToolGateway:
     @property
     def manifest(self):
         return (
-            *(entry for entry in getattr(self.delegate, "manifest", ())
+            *(entry for entry in tool_manifest_snapshot(self.delegate)
               if entry.visible_name in self._names),
             *self.extra.manifest,
         )

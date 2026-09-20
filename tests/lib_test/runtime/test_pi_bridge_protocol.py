@@ -5,6 +5,16 @@ import json
 import pytest
 
 
+def test_published_bridge_schema_matches_the_python_codec():
+    from pathlib import Path
+
+    from agentloom.adapters.pi.protocol import protocol_schema
+
+    root = Path(__file__).resolve().parents[3]
+    published = json.loads((root / "src/adapters/pi/bridge-v1.schema.json").read_text())
+    assert published == protocol_schema()
+
+
 def test_pi_handshake_roundtrip_and_rejects_unknown_protocol():
     from agentloom.adapters.pi.protocol import decode_message, encode_message
 

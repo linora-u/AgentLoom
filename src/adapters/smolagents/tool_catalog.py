@@ -19,6 +19,8 @@ def tool_specs() -> tuple[ToolSpec, ...]:
             owner="runtime",
             provider="smolagents",
             capability="shell.execute",
+            operation="shell",
+            command_parameter="command",
         ),
         _spec(
             "check_background_task",
@@ -33,6 +35,7 @@ def tool_specs() -> tuple[ToolSpec, ...]:
             owner="runtime",
             provider="smolagents",
             capability="shell.status",
+            operation="control",
         ),
         _spec(
             "kill_background_task",
@@ -49,6 +52,7 @@ def tool_specs() -> tuple[ToolSpec, ...]:
             owner="runtime",
             provider="smolagents",
             capability="shell.cancel",
+            operation="control",
         ),
         _spec(
             "list_background_tasks",
@@ -63,6 +67,7 @@ def tool_specs() -> tuple[ToolSpec, ...]:
             owner="runtime",
             provider="smolagents",
             capability="shell.list",
+            operation="control",
         ),
         _spec(
             "read_file",
@@ -78,6 +83,7 @@ def tool_specs() -> tuple[ToolSpec, ...]:
             owner="runtime",
             provider="smolagents",
             capability="file.read",
+            operation="read",
         ),
         _spec(
             "edit_file",
@@ -93,6 +99,7 @@ def tool_specs() -> tuple[ToolSpec, ...]:
             owner="runtime",
             provider="smolagents",
             capability="file.edit",
+            operation="write",
         ),
         _spec(
             "write_file",
@@ -108,6 +115,7 @@ def tool_specs() -> tuple[ToolSpec, ...]:
             owner="runtime",
             provider="smolagents",
             capability="file.write",
+            operation="write",
         ),
         _spec(
             "list_directory",
@@ -132,6 +140,7 @@ def tool_specs() -> tuple[ToolSpec, ...]:
             owner="runtime",
             provider="smolagents",
             capability="file.list",
+            operation="read",
         ),
         _spec(
             "grep_search",
@@ -159,6 +168,7 @@ def tool_specs() -> tuple[ToolSpec, ...]:
             owner="runtime",
             provider="smolagents",
             capability="search.grep",
+            operation="read",
         ),
         _spec(
             "glob_search",
@@ -174,6 +184,7 @@ def tool_specs() -> tuple[ToolSpec, ...]:
             owner="runtime",
             provider="smolagents",
             capability="search.glob",
+            operation="read",
         ),
         _spec(
             "todo_write",
@@ -191,5 +202,6 @@ def tool_specs() -> tuple[ToolSpec, ...]:
             owner="runtime",
             provider="smolagents",
             capability="planning.todo",
+            operation="control",
         ),
     )
