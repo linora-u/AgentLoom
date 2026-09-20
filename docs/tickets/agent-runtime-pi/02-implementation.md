@@ -1,7 +1,7 @@
 # Ticket 02 implementation and handoff
 
 Date: 2026-09-20. Branch: `codex/pi-t02-contracts`. Base: `45ddbfdc`.
-Status: implemented; awaiting integration-wide CI and independent review.
+Status: completed; integration-wide CI and independent review passed. See [integrated acceptance](01-02-integration.md).
 
 ## Delivered
 
@@ -22,7 +22,7 @@ Tests used Python 3.12.13 and the existing locked Python dependencies. `PYTHONPA
 - Red/green evidence included binding-free RuntimeDefinition, no-tool native Application, fresh Worker instances and contradictory model selections.
 - Mypy 2.3.1 checked all 13 changed production modules with `--follow-imports=silent --ignore-missing-imports --python-executable <Python 3.12 environment>`: 12 existing diagnostics in ToolGateway schema inference (6), factory typing (2), application definition iterable typing (2), and configuration cached attributes (2). Running the same check on the unchanged baseline produced the identical 12 diagnostics, with only shifted line numbers; no new diagnostics. The two new modules are included in the changed check. Repository typechecking is not claimed globally clean.
 - Ruff F checks on changed assembly/contracts/new modules and native acceptance test passed after removing unused imports. `git diff --check` passed.
-- Complete repository CI and parallel standards/spec review are owned by the integration coordinator and have not been claimed completed here. No live provider run or Pi integration is claimed.
+- The integration coordinator subsequently completed the full suite (4,164 passed, 1 Windows-only skip) and parallel Standards/Spec review (0 findings each); exact revisions and evidence are in [integrated acceptance](01-02-integration.md). No live provider run or production Pi integration is claimed.
 
 ## Temporary compatibility forms for ticket 14
 

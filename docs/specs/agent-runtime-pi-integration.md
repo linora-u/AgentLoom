@@ -2,7 +2,7 @@
 
 规格日期：2026-09-20。研究基线：main，c697b24f602e71d56c9aa2c532e6079c0db5aa9d。
 
-状态：开发规格，尚未实现或验收。根据本次架构讨论整理；配套《Pi 并行开发与合并计划》定义 worktree、文件所有权、依赖和合并门禁。本次交付只生成项目内文档，不创建功能 worktree、不发布 issue、不修改产品实现。
+状态：开发规格，部分实施完成。编号票据 01、02 已完成 SDK 验证与公共契约兼容扩展；03–14 待执行，生产 Pi 尚未接入。所有票据和执行计划集中在 [独立目录](../tickets/agent-runtime-pi/README.md)，已完成部分见 [01/02 集成验收](../tickets/agent-runtime-pi/01-02-integration.md)。
 
 ## Problem Statement
 
