@@ -209,7 +209,7 @@ if [ "${1:-}" = "update" ]; then
     printf '%s\n' 'agentloom: the trusted source directory is unavailable; update from a checkout with ./install' >&2
     exit 1
   fi
-  exec "$AGENTLOOM_SOURCE_ROOT/install" --no-modify-path "$@"
+  AGENTLOOM_INSTALL_DIR="$install_root" exec "$AGENTLOOM_SOURCE_ROOT/install" --no-modify-path "$@"
 fi
 if [ "${1:-}" = "schedules" ]; then
   shift
