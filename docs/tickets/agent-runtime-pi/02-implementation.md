@@ -35,3 +35,7 @@ Tests used Python 3.12.13 and the existing locked Python dependencies. `PYTHONPA
 ## Prompt normalization follow-up
 
 A post-implementation review found that equivalent old/new prompt paths could be compared before both were resolved, and historical global smol prompt paths were still checked for native runtimes. Both were first reproduced as failures, then corrected. Preflight now validates the selected smol option path, while native preflight skips historical smol prompt defaults. The three affected application/config suites passed (88 tests); focused mypy retains only the same two pre-existing definition iterable diagnostics.
+
+## Integration preflight diagnostic fix
+
+The integration suite exposed `toolsets: core_shell` reaching capability derivation before list-shape validation, producing a misleading unknown-single-character-toolset error. Requirements now validate the selected toolset list shape before resolving it. The existing six runner preflight cases reproduce the regression and all pass after the fix.
