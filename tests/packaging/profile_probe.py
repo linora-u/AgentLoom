@@ -10,10 +10,12 @@ from contextlib import contextmanager
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import importlib.metadata
 import importlib.util
+import hashlib
 import json
 import os
 from pathlib import Path
 import signal
+import shutil
 import subprocess
 import sys
 from threading import Thread
@@ -24,7 +26,7 @@ import yaml
 
 
 @contextmanager
-def model_service(profile, calls, failure=None):
+def model_service(profile, calls, failure=None, answer="PROFILE-APPLICATION-OK"):
     requests = []
     killed_children = []
 
@@ -49,8 +51,8 @@ def model_service(profile, calls, failure=None):
             index = len(requests) - 1
             call = calls[index] if index < len(calls) else None
             if call is None and profile == "smol":
-                call = ("final_answer", {"answer": "PROFILE-APPLICATION-OK"})
-            message: dict[str, Any] = {"role": "assistant", "content": "PROFILE-APPLICATION-OK"}
+                call = ("final_answer", {"answer": answer})
+            message: dict[str, Any] = {"role": "assistant", "content": answer}
             finish = "stop"
             if call is not None:
                 name, arguments = call
@@ -87,19 +89,25 @@ def model_service(profile, calls, failure=None):
         thread.join()
 
 
-def identity(profile):
+def identity(profile, code_tools=False):
     import agentloom
     origin = Path(agentloom.__file__).resolve()
     assert "site-packages" in origin.parts, origin
     assert not importlib.util.find_spec("src"), "source tree leaked into environment"
     distributions = {d.metadata["Name"].lower().replace("_", "-") for d in importlib.metadata.distributions()}
+    professional = {"serena-agent", "ast-grep-cli", "grep-ast", "tree-sitter-language-pack",
+                    "go-bin", "nodejs-bin", "libclang", "tree-sitter-c", "networkx"}
+    if code_tools:
+        assert professional <= distributions, professional - distributions
+    elif profile == "pi":
+        assert not professional & distributions, professional & distributions
     if profile == "pi":
         assert "smolagents" not in distributions
         assert "openinference-instrumentation-smolagents" not in distributions
         assert importlib.util.find_spec("smolagents") is None
     else:
         assert importlib.metadata.version("smolagents") == "1.26.0"
-    return {"package_origin": str(origin), "python": sys.version, "profile": profile,
+    return {"package_origin": str(origin), "python": sys.version, "profile": profile, "code_tools": code_tools,
             "installed_distributions": sorted(distributions)}
 
 
@@ -118,8 +126,11 @@ def configure(workspace, profile, case, url):
     model = {"model": "openai/profile-fixture", "adapter": "openai_chat", "base_url": url,
         "api_key": "synthetic-fixture", "context_window": 32768, "max_output_tokens": 1000,
         "timeout": 10, "num_retries": 0, "requests_per_minute": 2000000}
+    if case == "existing_yaml":
+        system.pop("default_toolsets")  # Exercise the original default toolsets.
     (config / "system.yaml").write_text(yaml.safe_dump(system))
-    (config / "llm.yaml").write_text(yaml.safe_dump({"model": {"default_model_type": "probe", "probe": model, "summary": model}}))
+    (config / "llm.yaml").write_text(yaml.safe_dump({"model": {
+        "default_model_type": "probe", "probe": model, "summary": model, "powerful": model}}))
     definition = {"name": "installed_profile", "agent_runtime": "pi" if profile == "pi" else "smolagents",
         "description": "Verify installed Application tools.", "workflow": "Execute the selected tool and report its result.",
         "tools": [], "toolsets": []}
@@ -160,16 +171,19 @@ def configure(workspace, profile, case, url):
     app = workspace / "applications/probe/workflows/root.yaml"
     app.parent.mkdir(parents=True)
     app.write_text(yaml.safe_dump(definition))
+    if case == "existing_yaml":
+        shutil.copyfile(Path(__file__).with_name("existing-smol.yaml"), app)
     return app, calls, marker
 
 
-def run(profile, case, workspace):
+def run(profile, case, workspace, code_tools=False):
     workspace.mkdir(parents=True, exist_ok=False)
-    evidence = identity(profile)
+    evidence = identity(profile, code_tools)
     os.chdir(workspace)
     failure = {"provider_failure": "provider", "child_failure": "child"}.get(case)
     calls = []
-    with model_service(profile, calls, failure) as (url, requests, killed_children):
+    answer = "TODO_OFF_OK MOOL-4" if case == "existing_yaml" else "PROFILE-APPLICATION-OK"
+    with model_service(profile, calls, failure, answer) as (url, requests, killed_children):
         app, planned, marker = configure(workspace, profile, case, url)
         calls.extend(planned)
         if case in {"missing_yaml", "missing_smol", "missing_sdk", "stale_bridge", "missing_asset", "provider_failure", "child_failure", "help"}:
@@ -219,7 +233,12 @@ def run(profile, case, workspace):
             from agentloom.configuration.config import bind_config, load_project_config
             with bind_config(load_project_config(workspace)):
                 result = execute_app(app, file_logging=True)
-            assert result.output == "PROFILE-APPLICATION-OK", result.output
+            assert result.output == answer, result.output
+            if case == "existing_yaml":
+                assert app.read_bytes() == Path(__file__).with_name("existing-smol.yaml").read_bytes()
+                evidence["yaml_sha256"] = hashlib.sha256(app.read_bytes()).hexdigest()
+                offered = {tool["function"]["name"] for tool in requests[0].get("tools", [])}
+                assert {"read_file", "write_file", "shell_tool", "grep_search", "glob_search"} <= offered, offered
             events = [json.loads(line) for line in (result.run.run_dir / "audit/runtime_events.jsonl").read_text().splitlines()]
             records = [event["details"]["record"] for event in events if event["kind"] == "tool"
                        and "record" in event["details"]]
@@ -272,6 +291,7 @@ if __name__ == "__main__":
     parser.add_argument("--profile", choices=["pi", "smol"], required=True)
     parser.add_argument("--case", required=True)
     parser.add_argument("--workspace", type=Path, required=True)
+    parser.add_argument("--code-tools", action="store_true")
     args = parser.parse_args()
-    result = run(args.profile, args.case, args.workspace.resolve())
+    result = run(args.profile, args.case, args.workspace.resolve(), args.code_tools)
     print(json.dumps({key: value for key, value in result.items() if key != "installed_distributions"}))

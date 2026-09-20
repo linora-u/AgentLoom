@@ -314,7 +314,7 @@ Framework source lives directly in `src/application/`, `src/runtime/`,
 `src/adapters/`, and the other responsibility modules. Installation maps `src/`
 to the Python package name `agentloom`: the import above loads
 `src/application/runner.py`. There is no extra `agentloom` source directory.
-Use `uv sync --python 3.12 --locked --all-groups --extra smol` to install the checkout before
+Use `uv sync --python 3.12 --locked --all-groups --extra smol --extra code` to install the checkout before
 calling Python APIs. The old `src.*` imports and module commands are removed;
 supported commands are `loom` and `python -m agentloom`. See the
 [architecture and migration map](docs/specs/architecture-migration-inventory.md)
