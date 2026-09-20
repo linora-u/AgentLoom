@@ -107,6 +107,12 @@ def test_parallel_and_repeated_workers_have_separate_sessions_and_hook_owners(tm
     committed = [entry for entry in entries if entry.get('state') == 'committed']
     assert len(committed) == (3 if worker == 'pi' else 0)
     assert len({entry['request']['identity']['instance_id'] for entry in committed}) == len(committed)
+    if worker == 'pi':
+        identities = [entry['request']['identity'] for entry in committed]
+        assert len({identity['native_session_id'] for identity in identities} - {None, ''}) == 3
+        assert {identity['call_id'] for identity in identities} == {'same-provider-call'}
+        assert {identity['instance_id'] for identity in identities} == {o['instance_id'] for o in observations}
+        assert all(identity['run_id'] == result.run.run_id and identity['task_id'] == result.run.task_id for identity in identities)
 
 
 @pytest.mark.parametrize('supervisor,worker', [('smolagents', 'pi'), ('pi', 'smolagents')])
