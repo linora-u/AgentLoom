@@ -1,0 +1,88 @@
+# Pi runtime (ticket 07)
+
+This adapter runs real `@earendil-works/pi-coding-agent` **0.79.4** AgentSessions.
+Python owns Application identity, receipts, Hook Run/Stop and resource cleanup;
+Pi owns its in-memory conversation and native provider protocol. No smol model,
+Tool, Todo, final_answer implementation or message format is required.
+
+## Build and run from a source checkout
+
+Node **22.19+** and the existing Python environment are required:
+
+```sh
+cd src/adapters/pi/bridge
+npm ci --ignore-scripts
+npm run build
+```
+
+Use the existing `config/llm.yaml`, then select Pi in an Application workflow:
+
+```yaml
+name: direct_answer
+agent_runtime: pi
+description: Answer the user's question directly.
+workflow: Give a concise answer.
+tools: []
+toolsets: []
+```
+
+Disable checkpoint and Goal for this Application. Run with the existing
+`loom run applications/<app>/workflows/root.yaml` or `execute_app` entry.
+Dependency installation is explicit; Application execution never runs npm.
+Distribution/wheel assembly is ticket 13 and consumes this bridge and its lock.
+
+## Model projection
+
+| Profile setting | Pi behavior |
+| --- | --- |
+| `adapter: openai_chat` / `openai_responses` | Native OpenAI Completions / Responses SDK transport, SSE |
+| `model` | Preserve the model ID, removing the legacy `openai/` or `gemini/` routing prefix |
+| `base_url`, `api_key` | Selected endpoint and in-memory credentials; no user auth discovery |
+| Effective request headers | Literal private headers; no Pi command/env interpolation |
+| `temperature`, `max_output_tokens` | Native stream options; protocol-appropriate output budget |
+| `context_window`, `input_token_limit`, legacy `max_tokens` | Resolved context metadata; `max_output_tokens` is the generation limit |
+| `timeout` | Seconds per model attempt, including an already-open SSE stream; cancellation remains immediate |
+| `num_retries`, `retry_delay`, `max_retry_delay` | Bounded exponential retry of transient failed no-tool turns; native nested retries disabled |
+| `requests_per_minute` | Minimum interval per Pi instance, including retry/Stop continuation attempts |
+| `context_cache` | Pi's native short/none cache hint; actual cache support is provider-dependent |
+| `extra_body` | Explicit vendor request fields; cannot override model, conversation, tools or mapped generation fields |
+| `top_p`, `seed`, `reasoning_effort` | Explicit provider parameters; Responses maps reasoning effort into `reasoning.effort` |
+| `tool_choice: auto/none`, `parallel_tool_calls: false` | Compatible no-tool settings; no tool schema is emitted |
+
+Other protocols/settings fail explicitly. `system_prompt_boundary` is unsupported.
+Tool forcing/parallel tools are rejected. Provider error bodies are never exposed
+in public errors because they may echo credentials or prompts.
+
+## Lifecycle and limits
+
+- Tools, Worker, Goal and checkpoint/resume are **not enabled**. A model returning
+  an unselected tool call fails immediately, even though no tools can execute.
+- No implicit built-in tools, extensions, skills, prompt templates, context files,
+  user settings, saved sessions or environment credentials are discovered.
+- Stop uses the invocation's AgentLoom Hook Run. A block continues the same native
+  in-memory session with the reason/context. `runtime_options.max_stop_attempts`
+  bounds attempts (default 3); persistent rejection fails the Application.
+- Sequential workflow tasks may continue the current in-memory session. This is
+  not persisted resume. `additional_args` is explicitly unsupported in this stage.
+- Bridge stdout contains only validated v1 frames. Application/CLI stdout follows
+  its existing output contract. Cancellation, EOF, invalid frames and close settle
+  pending requests and clean up the owned process group.
+- Bidirectional tool requests are recognized and explicitly rejected until 09.
+  09 adds callbacks and tool governance; it must revisit retry semantics before
+  permitting any tool side effects to be replayed.
+
+## Verification
+
+```sh
+.venv/bin/python -m pytest tests/pi_test -q
+cd src/adapters/pi/bridge && npm run typecheck
+```
+
+The tests use real Application assembly, registry, SDK and HTTP requests. Only
+the remote model service is replaced by deterministic SSE fixtures. Process
+failure tests corrupt/terminate actual child processes at the OS boundary.
+
+`tests/pi_test/run_live_applications.py` is an opt-in live campaign. It copies a
+private `llm.yaml` into isolated projects with mode 0600, runs 32 Applications
+across eight named profiles, and records receipts/answers separately from secrets.
+Never commit campaign private configurations or execution logs.
