@@ -35,5 +35,16 @@
   "src/tools/file_ops/_read_file_state.py": "src/adapters/smolagents/tools/file_ops/_read_file_state.py",
   "src/tools/file_ops/directory_browser.py": "src/adapters/smolagents/tools/file_ops/directory_browser.py",
   "src/tools/file_ops/path_existence.py": "src/adapters/smolagents/tools/file_ops/path_existence.py",
-  "src/tools/search/search_utils.py": "src/adapters/smolagents/tools/search/search_utils.py"
+  "src/tools/search/search_utils.py": "src/adapters/smolagents/tools/search/search_utils.py",
+  "src/runtime/todo/provider.py": "src/adapters/smolagents/todo/provider.py",
+  "src/runtime/todo/__init__.py": "src/adapters/smolagents/todo/__init__.py",
+  "src/runtime/todo/model.py": "src/adapters/smolagents/todo/model.py",
+  "src/tools/todo/__init__.py": "src/adapters/smolagents/tools/todo/__init__.py",
+  "src/tools/todo/todo_write.py": "src/adapters/smolagents/tools/todo/todo_write.py",
+  "src/runtime/prompts/prompt_builder.py": "src/adapters/smolagents/prompts/prompt_builder.py",
+  "src/runtime/prompts/toolcalling_agent.example.yaml": "src/adapters/smolagents/prompts/toolcalling_agent.example.yaml",
+  "src/runtime/prompts/gemini/toolcalling_agent.example.yaml": "src/adapters/smolagents/prompts/gemini/toolcalling_agent.example.yaml",
+  "src/runtime/prompts/anthropic/toolcalling_agent.example.yaml": "src/adapters/smolagents/prompts/anthropic/toolcalling_agent.example.yaml",
+  "src/runtime/prompts/openai/toolcalling_agent.example.yaml": "src/adapters/smolagents/prompts/openai/toolcalling_agent.example.yaml",
+  "src/runtime/error_recovery.py": "src/adapters/smolagents/error_recovery.py"
 }

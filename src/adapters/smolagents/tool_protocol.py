@@ -8,7 +8,7 @@ from typing import Any
 from agentloom.adapters.smolagents.recoverable_errors import (
     is_recoverable_agent_error,
 )
-from agentloom.runtime.error_recovery import RUNTIME_FEEDBACK_RAW_KEY
+from agentloom.adapters.smolagents.error_recovery import RUNTIME_FEEDBACK_RAW_KEY
 from agentloom.runtime.model_protocol import (
     MODEL_ITEMS_RAW_KEY,
     MODEL_RESPONSE_ID_RAW_KEY,
