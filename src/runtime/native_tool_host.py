@@ -324,6 +324,7 @@ class NativeToolHost:
                 data["state"] = "executing"
         if data.get("dispatch_rejection"):
             from agentloom.runtime.tool_protocol import ToolPolicyBlockedError
+            rejection = ToolCallRecord.from_dict(data["dispatch_rejection"])
             self._hook.record_tool_outcome(rejection)
             raise ToolPolicyBlockedError(rejection.reason)
         # The fsync barrier above completes before the adapter can execute.

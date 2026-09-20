@@ -195,7 +195,7 @@ class TestWorkerCheckpoint:
             input_hash="hash",
             task_input="task",
             run_id="run-original",
-        ) == "durable-result"
+        ) == (True, "durable-result")
         for changed in (
             {"agent_name": "other"},
             {"input_hash": "other"},
@@ -209,7 +209,27 @@ class TestWorkerCheckpoint:
                 "run_id": "run-original",
                 **changed,
             }
-            assert coordinator.completed_worker_result(**arguments) is None
+            assert coordinator.completed_worker_result(**arguments) == (False, "")
+
+        for result in ("", None):
+            manager.update_task_tree(
+                task_id,
+                lambda tree, value=result: {
+                    **tree,
+                    "workers": {
+                        **tree["workers"],
+                        "worker": [
+                            dict(tree["workers"]["worker"][0], result=value),
+                        ],
+                    },
+                },
+            )
+            assert coordinator.completed_worker_result(
+                agent_name="worker",
+                input_hash="hash",
+                task_input="task",
+                run_id="run-original",
+            ) == (True, "")
 
         manager.update_task_tree(
             task_id,

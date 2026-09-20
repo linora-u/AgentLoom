@@ -40,7 +40,7 @@ def _interrupted_after_tool(root, kind):
         tools = [{"name": "read"}]
     with model_service(turns=[[call]], fail_requests={2: 500}) as (url, requests):
         app = project(root, url)
-        options = {"tools": tools}
+        options: dict = {"tools": tools}
         if kind == "rejection":
             hook = root / "reject_read.py"
             hook.write_text('import json\nprint(json.dumps({"decision": "block", "reason": "blocked-receipt-proof"}))\n')
@@ -198,6 +198,26 @@ def test_platform_preparation_runs_once_and_survives_recovery(tmp_path, decision
                 request = captured[1]
                 assistant = next(message for message in request['messages'] if message.get('tool_calls'))
                 assert json.loads(assistant['tool_calls'][0]['function']['arguments']) == {'label': 'observed-once'}
+
+
+def test_platform_call_id_can_be_reused_at_a_later_native_position(tmp_path):
+    _platform_calls.clear()
+    call = [('reused-platform-id', 'receipt_probe', {'label': 'same-id'})]
+    with model_service(turns=[call, call]) as (url, requests):
+        app = project(tmp_path, url)
+        enable(app, tools=[
+            {'name': 'receipt_probe', 'module': __name__, 'function': 'receipt_probe'},
+        ])
+        with bind_config(load_project_config(tmp_path)):
+            result = execute_app(app, file_logging=False)
+    assert result.output == 'Pi answer'
+    assert _platform_calls == ['same-id', 'same-id']
+    receipts = [json.loads(path.read_text()) for path in tmp_path.rglob('pi/platform/*.json')]
+    assert len(receipts) == 2
+    identities = [receipt['identity'] for receipt in receipts]
+    assert {identity['call_id'] for identity in identities} == {'reused-platform-id'}
+    assert len({identity['native_parent_id'] for identity in identities}) == 2
+    assert len(requests) == 3
 
 
 @pytest.mark.parametrize(
