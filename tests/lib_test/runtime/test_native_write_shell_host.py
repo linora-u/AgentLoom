@@ -183,3 +183,10 @@ def test_query_limit_is_not_display_truncation_and_artifact_is_original(tmp_path
         artifact = json.loads(Path(scope["raw_artifact"]["path"]).read_text())
         assert artifact["raw_output"] == "first\n"
         assert scope["raw_artifact"]["json_pointer"] == "/raw_output"
+
+@pytest.mark.parametrize("excluded,command", [("/", "cat hidden.txt"), (".", "cat hidden.txt"), ("secrets", "cat {secrets,public}/hidden.txt"), ("secrets", "echo {secrets,public}/*")])
+def test_literal_shell_scope_rejects_root_exclusions_and_expansion(tmp_path, excluded, command):
+    config = {"shell_settings": {"allowed_commands": ["*"], "allowed_operators": ["*"], "sandbox": {"enabled": False}}, "tool_access_control": {"path_validation": [{"tools": ["grep_search"], "exclude_paths": [excluded]}]}}
+    with native_scope(tmp_path, manifest=shell_manifest(), config_extra=config) as (host, request, _):
+        result = host.prepare(replace(request, raw_arguments={"command": command}))
+        assert result.authorization is None and result.rejection.status == "blocked"
