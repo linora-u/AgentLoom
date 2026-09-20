@@ -4,7 +4,7 @@
 
 **Blocked by:** 03：冻结基座与平台边界，交付可并行的公共基线
 
-**Status:** ready-for-agent — 03 已验收；从 `refs/agentloom/ticket03-frozen` 解析准确 SHA 后可新建独立 worktree。本票尚未实施。
+**Status:** in-progress — 独立 worktree `AgentLoom-worktrees/t05`，分支 `codex/pi-t05-governance`。基线 `9d5a88915efbd402d0f2697318125933fc1500e0` 包含 03 冻结提交；两者间只有研究文档，无实现差异。按用户要求分阶段提交，并用私有模型配置运行真实 Application。
 
 **Required:** Yes — 本票属于最终交付必做项。
 
