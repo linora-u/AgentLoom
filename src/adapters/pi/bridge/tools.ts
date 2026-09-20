@@ -94,6 +94,16 @@ export function nativeTools(manifest: Obj[], cwd: string, invoke: Callback, iden
       try {await persistence.save();} catch (error) {failRun(); throw error;}
     });
     pi.on("message_end", async ({message}) => {
+      if (message.role === "toolResult") {
+        const permit = permits.get(message.toolCallId);
+        if (!permit?.rejection) return;
+        if (permit.rejection.call_id !== message.toolCallId ||
+            permit.rejection.tool_name !== message.toolName)
+          throw new Error("AgentLoom rejection identity mismatch");
+        permits.delete(message.toolCallId);
+        const text = permit.rejection.error?.message || "AgentLoom preparation rejected";
+        return {message: {...message, content: [{type: "text", text}], details: {}, isError: true}};
+      }
       if (message.role !== "assistant") return;
       const replacement = structuredClone(message);
       const batch = new Set<string>();

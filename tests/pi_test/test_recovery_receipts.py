@@ -198,3 +198,88 @@ def test_platform_preparation_runs_once_and_survives_recovery(tmp_path, decision
                 request = captured[1]
                 assistant = next(message for message in request['messages'] if message.get('tool_calls'))
                 assert json.loads(assistant['tool_calls'][0]['function']['arguments']) == {'label': 'observed-once'}
+
+
+@pytest.mark.parametrize(
+    ("owner", "arguments"),
+    [
+        ("native", {}),
+        ("native", {"path": []}),
+        ("platform", {}),
+        ("platform", {"label": []}),
+    ],
+    ids=[
+        "native-missing-field",
+        "native-wrong-type",
+        "platform-missing-field",
+        "platform-wrong-type",
+    ],
+)
+def test_invalid_arguments_reuse_the_durable_rejection_across_resume(
+    tmp_path, owner, arguments,
+):
+    """Pi's first result and recovery must project one host-owned rejection."""
+    _platform_calls.clear()
+    if owner == "native":
+        tool_name = "read"
+        tools = [{"name": tool_name}]
+    else:
+        tool_name = "receipt_probe"
+        tools = [
+            {
+                "name": tool_name,
+                "module": __name__,
+                "function": "receipt_probe",
+            }
+        ]
+
+    with model_service(
+        turns=[[("invalid-call", tool_name, arguments)]],
+        fail_requests={2: 500},
+    ) as (url, requests):
+        app = project(tmp_path, url)
+        enable(app, tools=tools)
+        with bind_config(load_project_config(tmp_path)):
+            with pytest.raises(ApplicationRunError) as interrupted:
+                execute_app(app, file_logging=False)
+
+            receipt_path, receipt = _receipt(
+                tmp_path,
+                platform=owner == "platform",
+            )
+            record = (
+                receipt["record"]
+                if owner == "platform"
+                else receipt["rejection"]
+            )
+            assert record["status"] == "blocked"
+            expected_text = record["error"]["message"]
+            [(checkpoint_path, checkpoint)] = checkpoints(tmp_path)
+            envelope = checkpoint["runtime_checkpoint"]
+            artifact = checkpoint_path.parent / "pi/sessions" / (
+                envelope["payload"]["artifact"] + ".json"
+            )
+            bundle = json.loads(artifact.read_text())
+            tool_results = [
+                entry["message"]
+                for entry in bundle["session"]["entries"]
+                if entry.get("message", {}).get("role") == "toolResult"
+            ]
+            assert len(tool_results) == 1
+            assert tool_results[0]["isError"] is True
+            assert tool_results[0]["content"] == [
+                {"type": "text", "text": expected_text}
+            ]
+            assert tool_results[0]["details"] == {}
+            receipt_before = receipt_path.read_bytes()
+
+            resumed = execute_app(
+                app,
+                resume_task_id=interrupted.value.run.task_id,
+                file_logging=False,
+            )
+
+    assert resumed.output == "Pi answer"
+    assert len(requests) == 3
+    assert receipt_path.read_bytes() == receipt_before
+    assert _platform_calls == []
