@@ -181,12 +181,15 @@ class NativeExecutionOutcome:
 class NativeResultCapture:
     """Adapter-verified first query output, independent of the executor display."""
     raw_output: Any = field(repr=False)
-    complete: bool = True
+    complete: bool | None = True
     display_truncated: bool = False
+    limitations: tuple[str, ...] = ()
 
     def __post_init__(self) -> None:
-        if type(self.complete) is not bool or type(self.display_truncated) is not bool:
-            raise ValueError("Capture flags must be booleans")
+        if (self.complete is not None and type(self.complete) is not bool) or type(self.display_truncated) is not bool:
+            raise ValueError("Invalid capture completeness or display flag")
+        if not isinstance(self.limitations, tuple) or any(not isinstance(item, str) or not item for item in self.limitations):
+            raise ValueError("Capture limitations must be nonempty strings")
         object.__setattr__(self, "raw_output", json.loads(_json(self.raw_output)))
 
 

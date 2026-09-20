@@ -4,11 +4,12 @@ import json
 import os
 import stat
 from pathlib import Path
+from typing import Any
 
 from agentloom.runtime.native_tools import NativeResultCapture
 
 
-def read_capture(directory: Path, authorization_id: str, digest: str, *, completed: bool) -> NativeResultCapture:
+def read_capture(directory: Path, authorization_id: str, digest: str, *, completed: bool) -> tuple[Any, NativeResultCapture]:
     if len(authorization_id) != 32 or any(c not in "0123456789abcdef" for c in authorization_id):
         raise ValueError("Invalid native capture authorization")
     path = directory / f"capture-{authorization_id}.json"
@@ -20,8 +21,15 @@ def read_capture(directory: Path, authorization_id: str, digest: str, *, complet
     if hashlib.sha256(data).hexdigest() != digest:
         raise ValueError("Native capture digest mismatch")
     value = json.loads(data)
-    if set(value) != {"raw_output", "format", "display_truncated"} or value["format"] not in {"text", "json"}:
+    if set(value) != {"raw_output", "result", "format", "display_truncated", "complete", "limitations"} or value["format"] not in {"text", "json"}:
         raise ValueError("Invalid native capture format")
     if value["format"] == "text" and not isinstance(value["raw_output"], str):
         raise ValueError("Invalid native text capture")
-    return NativeResultCapture(value["raw_output"], complete=completed, display_truncated=value["display_truncated"])
+    if not isinstance(value["limitations"], list):
+        raise ValueError("Invalid native capture limitations")
+    capture = NativeResultCapture(value["raw_output"], complete=value["complete"],
+        display_truncated=value["display_truncated"], limitations=tuple(value["limitations"]))
+    if not completed:
+        from dataclasses import replace
+        capture = replace(capture, complete=False)
+    return value["result"] if completed else None, capture

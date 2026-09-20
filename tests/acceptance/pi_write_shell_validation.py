@@ -81,6 +81,7 @@ def configure(case, workspace, definition):
         calls = [('bash', {'command': f'{shlex.quote(sys.executable)} {shlex.quote(str(producer))}', 'timeout': 10})]
     task = 'Call the following tools in order, each exactly once. Wait for each result before the next call; do not batch dependent calls.\n'
     task += '\n'.join(f'{name}({json.dumps(arguments)})' for name, arguments in calls)
+    task += '\nHooks may intentionally rewrite the destination or content. A successful tool receipt is final; do not repeat or repair that call even if the receipt differs from the requested arguments.'
     task += '\nIf blocked or errored, report that result accurately and stop; do not retry, read extra files, or use alternative commands.'
     if case in {'read_large', 'shell_large'}:
         definition['context_engine'] = {'min_chars': 1000, 'preview_max_chars': 300}
@@ -115,7 +116,7 @@ def verify(case, workspace, target, original, records, entries, failed):
     for record in native:
         metadata = record['metadata']['native']
         assert metadata['provider'] == 'pi' and metadata['identity']['call_id'] == record['call_id']
-        assert metadata['result_scope']['source_completeness'] == 'complete'
+        assert metadata['result_scope']['source_completeness'] == ('unknown' if record['tool_name'] == 'bash' else 'complete')
     if case == 'create': assert target.read_text() == 'created-live-1031'
     if case == 'edit': assert target.read_text() == 'version = 2042\nkeep = true\n'
     if case == 'overwrite': assert target.read_text() == 'replaced-live-1031'
@@ -131,7 +132,7 @@ def verify(case, workspace, target, original, records, entries, failed):
         retrieved = [r for r in records if r['tool_name'] == 'loom_retrieve_context' and r['status'] == 'completed']
         assert any('ORIGINAL-LIVE-1031' in str(r['output']) for r in retrieved)
         scope = native[0]['metadata']['native']['result_scope']
-        assert scope['display_truncated'] and scope['coverage'] == 'complete_query'
+        assert scope['display_truncated'] and scope['coverage'] == ('captured_stream' if case == 'shell_large' else 'complete_query')
         if case == 'read_large':
             raw = json.loads(Path(scope['raw_artifact']['path']).read_text())['raw_output']
             assert 'OUTSIDE-QUERY-LIVE-SECRET' not in raw
