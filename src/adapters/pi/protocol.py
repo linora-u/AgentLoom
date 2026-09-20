@@ -24,7 +24,7 @@ from pydantic import BaseModel, ConfigDict, Field, JsonValue, TypeAdapter, model
 
 PI_BRIDGE_PROTOCOL_VERSION = 1
 NonEmpty = Annotated[str, Field(min_length=1)]
-Method = Literal["handshake", "run", "snapshot", "cancel", "close", "tool_prepare", "tool_settle", "platform_invoke", "model_prepare"]
+Method = Literal["handshake", "run", "snapshot", "cancel", "close", "tool_prepare", "tool_settle", "tool_dispatch", "platform_invoke", "model_prepare"]
 
 
 class WireValue(BaseModel):
@@ -79,9 +79,19 @@ class Prepare(WireValue):
     call: NativePrepareRequest = Field(repr=False)
 
 
+class Dispatch(WireValue):
+    method: Literal["tool_dispatch"]
+    authorization: NativeAuthorization = Field(repr=False)
+
+
+class CaptureFile(WireValue):
+    sha256: Annotated[str, Field(pattern="^[0-9a-f]{64}$")]
+
+
 class Settle(WireValue):
     method: Literal["tool_settle"]
     outcome: NativeExecutionOutcome = Field(repr=False)
+    capture: CaptureFile | None = None
 
 
 class ModelPrepare(WireValue):
@@ -97,7 +107,7 @@ class PlatformInvoke(WireValue):
 
 
 RequestPayload = Annotated[
-    Union[Handshake, Run, Snapshot, Cancel, Close, Prepare, Settle, PlatformInvoke, ModelPrepare], Field(discriminator="method")
+    Union[Handshake, Run, Snapshot, Cancel, Close, Prepare, Dispatch, Settle, PlatformInvoke, ModelPrepare], Field(discriminator="method")
 ]
 
 
@@ -164,7 +174,7 @@ class ControlResult(WireValue):
 
 
 class PrepareResult(WireValue):
-    method: Literal["tool_prepare"]
+    method: Literal["tool_prepare", "tool_dispatch"]
     authorization: NativeAuthorization | None = Field(default=None, repr=False)
     rejection: TerminalRecord | None = None
 
@@ -233,6 +243,8 @@ class Request(Envelope):
         identity = (
             self.payload.call.identity
             if isinstance(self.payload, Prepare)
+            else self.payload.authorization.identity
+            if isinstance(self.payload, Dispatch)
             else self.payload.outcome.identity
             if isinstance(self.payload, Settle)
             else self.payload.identity

@@ -57,8 +57,8 @@ def test_native_read_preserves_policy_block_and_execution_error(tmp_path, scenar
 
 
 @pytest.mark.parametrize('name', ['read_file', 'grep_search', 'glob_search', 'shell_tool', 'todo_write',
-                                 'write_markdown_file', 'write', 'bash', 'grep', 'find'])
-def test_unsupported_basics_and_writes_are_rejected_before_application_execution(tmp_path, name):
+                                 'write_markdown_file', 'grep', 'find'])
+def test_unmapped_basics_and_specialist_writes_are_rejected_before_application_execution(tmp_path, name):
     with model_service() as (url, requests):
         app = project(tmp_path, url)
         select(app, tools=[{'name': name}])

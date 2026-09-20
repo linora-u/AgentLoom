@@ -4,7 +4,7 @@
 
 **Blocked by:** 06：补齐文件修改和 Shell 的治理与保护；09：Pi 调通原生读取、平台工具与 Goal
 
-**Status:** planned — 06 已交付，见 [公共治理接口及拒绝边界](06-implementation.md)；仍须等待 09 集成并验证，尚未实施。
+**Status:** in-progress — 基于 main `2ec1412c`，在独立 `codex/pi-t10-write-shell` worktree 开发；06、09 已验证并正式集成。
 
 **Required:** Yes — 本票属于最终交付必做项。
 

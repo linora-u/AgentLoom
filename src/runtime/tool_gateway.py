@@ -462,7 +462,7 @@ def bind_tool(
         compression_source=compression_source,
         manifest_entry=(
             ToolManifestEntry(
-                logical_name=catalog_spec.name,
+                logical_name=catalog_spec.logical_name or catalog_spec.name,
                 visible_name=definition.name,
                 owner=catalog_spec.owner,
                 provider=catalog_spec.provider,

@@ -87,11 +87,13 @@ def install_pi(bridge: Path | None = None) -> Path:
                 or lock["packages"][""]["dependencies"][SDK_PACKAGE] != SDK_VERSION
                 or lock["packages"]["node_modules/" + SDK_PACKAGE]["version"] != SDK_VERSION):
             raise RuntimeError("Pi SDK version and its committed dependency lock do not match.")
-        inputs = [bridge / name for name in ("package.json", "package-lock.json", "tsconfig.json", "index.ts", "protocol.ts")]
+        inputs = [bridge / name for name in ("package.json", "package-lock.json", "tsconfig.json")]
+        inputs.extend(sorted(path for path in bridge.rglob("*.ts")
+                             if not {"node_modules", "dist"} & set(path.relative_to(bridge).parts)))
         inputs.append(bridge.parent / "bridge-v1.schema.json")
         digest = hashlib.sha256()
         for path in inputs:
-            digest.update(path.name.encode() + b"\0" + path.read_bytes() + b"\0")
+            digest.update(str(path.relative_to(bridge.parent)).encode() + b"\0" + path.read_bytes() + b"\0")
         fingerprint = digest.hexdigest()
         with (bridge / ".agentloom-install.lock").open("a") as guard:
             fcntl.flock(guard, fcntl.LOCK_EX)

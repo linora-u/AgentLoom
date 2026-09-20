@@ -10,10 +10,10 @@ from typing import cast
 from agentloom.adapters.pi.metadata import CAPABILITIES, SDK_VERSION, validate_model, validate_options
 from agentloom.adapters.pi.protocol import (
     Handshake, HandshakeResult, ModelSelection, Run, RunResult,
-    Prepare, PrepareResult, Settle, SettleResult, TerminalRecord,
+    Prepare, Dispatch, PrepareResult, Settle, SettleResult, TerminalRecord,
     PlatformInvoke, PlatformResult, ModelPrepare, ModelPermit,
 )
-from agentloom.runtime.native_tool_host import NativeReadToolHost
+from agentloom.runtime.native_tool_host import NativeToolHost
 from agentloom.runtime.native_tools import NativeCommitAck
 from agentloom.runtime.tool_protocol import ToolCallRecord
 from agentloom.adapters.pi.transport import PiTransport
@@ -45,8 +45,8 @@ class PiRuntime:
             validate_options(definition.runtime_options)
         except ValueError as exc:
             raise AgentRuntimeError(str(exc), category="configuration") from None
-        if any(tool.operation in {"write", "shell"} or (tool.owner == "runtime" and (
-               tool.provider != "pi" or tool.visible_name != "read" or tool.operation != "read" or tool.fixed_arguments))
+        if any((tool.owner != "runtime" and tool.operation in {"write", "shell"}) or (tool.owner == "runtime" and (
+               tool.provider != "pi" or (tool.visible_name, tool.operation) not in {("read", "read"), ("write", "write"), ("edit", "write"), ("bash", "shell")} or tool.fixed_arguments))
                for tool in definition.tool_manifest):
             raise AgentRuntimeError("Unsupported Pi tool selection", category="unsupported_capability")
         self.definition = definition
@@ -98,14 +98,14 @@ class PiRuntime:
         shared_goal = get_current_goal_provider()
         goal = shared_goal if execution.local_run_id == execution.root_run_id else None
         serial_tools = [tool.visible_name for tool in definition.tool_manifest
-                        if not tool_is_concurrency_safe(tool.logical_name, execution.agent_config)]
+                        if not tool_is_concurrency_safe(tool.visible_name, execution.agent_config)]
         task = request.task
         max_stops = cast(int, definition.runtime_options.get("max_stop_attempts", 3))
         run_id = request.run_id or uuid4().hex
         cwd = str(Path(definition.project_root or ".").resolve())
         native_entries = tuple(tool for tool in definition.tool_manifest if tool.owner == "runtime")
         platform_entries = {tool.visible_name: tool for tool in definition.tool_manifest if tool.owner != "runtime"}
-        native = NativeReadToolHost(tools=native_entries, cwd=cwd) if native_entries else None
+        native = NativeToolHost(tools=native_entries, cwd=cwd) if native_entries else None
         descriptions = {tool.name: tool.description for tool in definition.tool_gateway.definitions}
         wire_tools = [tool if tool.owner == "runtime" else replace(tool, parameters={
             **tool.parameters, "description": descriptions[tool.visible_name]}) for tool in definition.tool_manifest]
@@ -145,7 +145,7 @@ class PiRuntime:
                         state = "denied"
                 return ModelPermit(method="model_prepare", identity=identity, state=state,
                     agent_context=hook.consume_pending_agent_context() if hook is not None and state != "denied" else [])
-            if isinstance(payload, (PlatformInvoke, Prepare)) and shared_goal is not None:
+            if isinstance(payload, (PlatformInvoke, Prepare, Dispatch)) and shared_goal is not None:
                 if shared_goal.snapshot().status == "complete":
                     raise AgentRuntimeError("Goal is complete; further tool work is forbidden", category="tool")
             if isinstance(payload, PlatformInvoke):
@@ -165,10 +165,23 @@ class PiRuntime:
                 if prepared.rejection is not None:
                     record_tool(prepared.rejection, payload.call.tool, payload.call.identity)
                 return PrepareResult(method="tool_prepare",
-                    authorization=native.start_execution(prepared.authorization) if prepared.authorization else None,
+                    authorization=prepared.authorization,
                     rejection=_terminal(prepared.rejection) if prepared.rejection else None)
+            if native is not None and isinstance(payload, Dispatch):
+                from agentloom.runtime.tool_protocol import ToolPolicyBlockedError
+                try:
+                    grant = native.start_execution(payload.authorization)
+                except ToolPolicyBlockedError:
+                    raw = native.receipt(payload.authorization.identity)["dispatch_rejection"]
+                    rejected = ToolCallRecord.from_dict(raw)
+                    record_tool(rejected, payload.authorization.tool, payload.authorization.identity)
+                    return PrepareResult(method="tool_dispatch", rejection=_terminal(rejected))
+                return PrepareResult(method="tool_dispatch", authorization=grant)
             if native is not None and isinstance(payload, Settle):
-                settled = native.settle(payload.outcome)
+                from agentloom.adapters.pi.capture import read_capture
+                capture = read_capture(self.transport.private_directory, payload.outcome.authorization_id,
+                    payload.capture.sha256, completed=payload.outcome.status == "completed") if payload.capture else None
+                settled = native.settle(payload.outcome, capture=capture)
                 if isinstance(settled, NativeCommitAck):
                     with platform_lock:
                         if settled.commit_id not in emitted_commits:

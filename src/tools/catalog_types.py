@@ -34,6 +34,7 @@ class ToolSpec:
     provider: str = "agentloom"
     capability: str = ""
     operation: Literal["read", "write", "shell", "platform", "control"] = "control"
+    logical_name: str | None = None
     command_parameter: str | None = None
 
 
@@ -56,10 +57,12 @@ def _spec(
     provider: str,
     capability: str,
     operation: Literal["read", "write", "shell", "platform", "control"],
+    logical_name: str | None = None,
     command_parameter: str | None = None,
 ) -> ToolSpec:
     return ToolSpec(
         name=name,
+        logical_name=logical_name,
         owner=owner,
         provider=provider,
         capability=capability,
