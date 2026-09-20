@@ -241,7 +241,7 @@ def test_large_bash_artifact_is_retrievable_without_reexecution(tmp_path):
     records = {e["details"]["record"]["call_id"]: e["details"]["record"] for e in audit(result) if e["kind"] == "tool"}
     assert "first-execution-1031" in records["retrieve"]["output"]
     scope = records["large-bash"]["metadata"]["native"]["result_scope"]
-    assert scope["source_completeness"] == "complete"
+    assert scope["source_completeness"] == "unknown"
     assert scope["display_truncated"] is True
 
 
@@ -288,7 +288,50 @@ def test_native_capture_larger_than_wire_limit_is_retained_without_reexecution(t
     assert len(entries) == 1
     entry = entries[0]
     assert entry['record']['status'] == 'completed'
-    assert entry['result_scope']['source_completeness'] == 'complete'
+    assert entry['result_scope']['source_completeness'] == 'unknown'
     assert entry['raw_output'] == 'a' * (9 * 1024 * 1024) + '\nFINAL_RECORD: first-result-1031\n'
     assert '[ContextRef ' in json.dumps(entry['record']['output'])
     assert len(requests) == 2
+
+
+def test_large_edit_result_is_durable_and_retrievable_without_reexecution(tmp_path):
+    import re
+    source = tmp_path / 'large.txt'
+    source.write_text('x' * 4_300_000 + '\nold\n')
+    def retrieve(request):
+        content = [m['content'] for m in request['messages'] if m['role'] == 'tool'][-1]
+        match = re.search(r'\[ContextRef (ctx_[a-zA-Z0-9]+)', content)
+        assert match is not None
+        return [('retrieve', 'loom_retrieve_context', {'ref': match.group(1), 'query': 'firstChangedLine', 'offset': 0, 'limit': 5})]
+    with model_service(turns=[[('read', 'read', {'path': str(source), 'offset': 2, 'limit': 1})],
+                             [('edit', 'edit', {'path': str(source), 'edits': [{'oldText': 'old', 'newText': 'new-proof-1031'}]})], retrieve]) as (url, requests):
+        app = project(tmp_path, url)
+        select(app, tools=[{'name': name} for name in ('read', 'edit', 'loom_retrieve_context')],
+               context_engine={'min_chars': 1000, 'preview_max_chars': 300})
+        with bind_config(load_project_config(tmp_path)):
+            result = execute_app(app, file_logging=False)
+    assert source.read_text() == 'x' * 4_300_000 + '\nnew-proof-1031\n'
+    records = {e['details']['record']['call_id']: e['details']['record'] for e in audit(result) if e['kind'] == 'tool'}
+    assert records['edit']['status'] == 'completed'
+    assert 'firstChangedLine' in records['retrieve']['output']
+    assert len(json.dumps(records['edit']['output'])) < 20000
+    entries = [json.loads(p.read_text()) for p in (result.run.run_dir / 'native-tools').rglob('*.json')]
+    edit = next(e for e in entries if e['request']['identity']['call_id'] == 'edit')
+    assert len(json.dumps(edit['raw_output'])) > 8 * 1024 * 1024
+    assert edit['result_scope']['display_truncated'] is True
+
+
+def test_bash_cannot_claim_complete_capture_of_background_output(tmp_path):
+    with model_service(turns=[[('background', 'bash', {'command': '(sleep 0.5; printf tail) & printf head'})]]) as (url, requests):
+        app = project(tmp_path, url)
+        select(app, tools=[{'name': 'bash'}], shell_settings={'allowed_commands': ['*'], 'allowed_operators': ['*'], 'sandbox': {'enabled': False}})
+        with bind_config(load_project_config(tmp_path)):
+            result = execute_app(app, file_logging=False)
+    entries = [json.loads(p.read_text()) for p in (result.run.run_dir / 'native-tools').rglob('*.json')]
+    assert len(entries) == 1
+    assert entries[0]['record']['status'] == 'completed'
+    assert entries[0]['raw_output'] == 'head'
+    assert entries[0]['result_scope']['source_completeness'] == 'unknown'
+    assert entries[0]['result_scope']['coverage'] == 'captured_stream'
+    assert entries[0]['result_scope']['limitations']
+    assert entries[0]['evidence'] == []

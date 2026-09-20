@@ -1,4 +1,4 @@
-# Pi runtime (ticket 07)
+# Pi runtime (tickets 07, 09, 10)
 
 This adapter runs real `@earendil-works/pi-coding-agent` **0.79.4** AgentSessions.
 Python owns Application identity, receipts, Hook Run/Stop and resource cleanup;
@@ -42,12 +42,40 @@ tools: []
 toolsets: []
 ```
 
-Disable checkpoint and Goal for this Application. Run with the existing
+Disable checkpoint for this Application. Run with the existing
 `loom run applications/<app>/workflows/root.yaml` or `execute_app` entry.
 Dependency installation is explicit; Application execution never runs npm.
 Python packages include our bridge sources, schema and lock, not `node_modules`
 or build artifacts. The same installer prepares the package's Pi directory.
 Pi-only dependency profiles and final clean-install acceptance remain ticket 13.
+The installer fingerprints every bridge TypeScript source, the schema and locks;
+adding a helper file also invalidates an old build. The downloaded SDK stays in
+the adapter's ignored dependency directory and is never vendored into Git.
+
+## Selected tools and artifacts
+
+Select official native tools explicitly with `tools: [{name: read}, {name: edit},
+{name: write}, {name: bash}]`, or the `pi_read`, `pi_edit`, `pi_write`, `pi_bash`
+toolsets. AgentLoom authorizes final Hook-adjusted arguments and rechecks them
+immediately before the official SDK executor runs. Read an existing file first,
+then wait for that result before editing or overwriting it. File history and
+Shell command policies use the shared NativeToolHost; smol executors are not used.
+
+Complete SDK results and first captured query output travel through private,
+digest-checked files. Missing captures fail the Application. The public journal
+persists the original before acknowledging a tool result; large results have a
+bounded display and a ContextRef when context storage is available. Select
+`loom_retrieve_context` when the agent needs to inspect those artifacts. Read
+offset/limit remain the original query boundary, not a license to reread the file.
+
+For Bash, the original **collected** stdout/stderr is preserved. SDK 0.79.4 does
+not expose pipe EOF and may close a quiet pipe inherited by a background process.
+Its coverage is therefore `captured_stream`, completeness `unknown`, with an
+explicit limitation; exit 0 never establishes complete output or trusted memory
+evidence. Timeout, abort and missing exit status are uncertain, not success.
+Cancellation cleans managed descendants using the instance's inherited process
+token. This is not an OS sandbox; configurations requiring an unsupported sandbox
+or protected Shell query mapping are rejected before execution.
 
 ## Model projection
 
@@ -73,8 +101,9 @@ in public errors because they may echo credentials or prompts.
 
 ## Lifecycle and limits
 
-- Tools, Worker, Goal and checkpoint/resume are **not enabled**. A model returning
-  an unselected tool call fails immediately, even though no tools can execute.
+- Selected native and platform tools, Worker and Goal are enabled. Unselected
+  tools fail immediately. Native grep/find/ls, optional professional writes and
+  checkpoint/resume remain unsupported; no implicit Markdown tools are injected.
 - No implicit built-in tools, extensions, skills, prompt templates, context files,
   user settings, saved sessions or environment credentials are discovered.
 - Stop uses the invocation's AgentLoom Hook Run. A block continues the same native
@@ -85,9 +114,8 @@ in public errors because they may echo credentials or prompts.
 - Bridge stdout contains only validated v1 frames. Application/CLI stdout follows
   its existing output contract. Cancellation, EOF, invalid frames and close settle
   pending requests and clean up the owned process group.
-- Bidirectional tool requests are recognized and explicitly rejected until 09.
-  09 adds callbacks and tool governance; it must revisit retry semantics before
-  permitting any tool side effects to be replayed.
+- Model retries do not replay completed tools. Pi's persisted session and journal
+  recovery remain ticket 12; uncertain side effects must never be retried blindly.
 
 ## Verification
 

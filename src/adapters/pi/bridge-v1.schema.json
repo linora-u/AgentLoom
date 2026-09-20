@@ -1148,20 +1148,13 @@
           "$ref": "#/$defs/NativeExecutionOutcome"
         },
         "capture": {
-          "anyOf": [
-            {
-              "$ref": "#/$defs/CaptureFile"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null
+          "$ref": "#/$defs/CaptureFile"
         }
       },
       "required": [
         "method",
-        "outcome"
+        "outcome",
+        "capture"
       ],
       "title": "Settle",
       "type": "object"

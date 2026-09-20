@@ -50,9 +50,22 @@ class ContextEngine:
     ) -> str | None:
         if not self.should_compress_tool_result(text, tool_name):
             return None
+        return self.capture_tool_result(text, tool_name=tool_name, source=source)
+
+    def capture_tool_result(
+        self, text: str, *, tool_name: str, source: str, max_preview_chars: int | None = None,
+    ) -> str | None:
+        """Persist an explicit artifact, independent of automatic compression rules.
+
+        Native bridge results use this when a result cannot fit a wire frame.
+        Skipping automatic compression must not discard that original result.
+        """
+        preview_limit = self.config.preview_max_chars
+        if max_preview_chars is not None:
+            preview_limit = max(1, min(preview_limit or max_preview_chars, max_preview_chars))
 
         kind = route_content(text, tool_name=tool_name)
-        compressed = compress_content(text, kind, self.config.preview_max_chars)
+        compressed = compress_content(text, kind, preview_limit)
         ref = make_context_ref(text, tool_name=tool_name, source=source)
         entry = ContextEntry(
             ref=ref,

@@ -59,7 +59,12 @@ export function capturedExecutor(name: string, cwd: string, args: Obj) {
         format = "text";
       }
     } else if (name === "bash") {raw = Buffer.concat(chunks).toString("utf8"); format = "text";}
-    const value = JSON.stringify({raw_output: raw, format, display_truncated: Boolean(result?.details?.truncation?.truncated)});
+    // The SDK reports exitCode, not stream EOF. Its idle drain may close pipes
+    // held by background descendants; never infer complete coverage from exit 0.
+    const value = JSON.stringify({raw_output: raw, result: result ?? null, format,
+      complete: name === "bash" ? null : true,
+      limitations: name === "bash" ? ["SDK does not expose stream EOF; background descendant output may be missing"] : [],
+      display_truncated: Boolean(result?.details?.truncation?.truncated)});
     const filename = `capture-${authorization.authorization_id}.json`;
     await writeFile(resolve(agentDir, filename), value, {encoding: "utf8", mode: 0o600, flag: "wx"});
     return {sha256: createHash("sha256").update(value).digest("hex")};
