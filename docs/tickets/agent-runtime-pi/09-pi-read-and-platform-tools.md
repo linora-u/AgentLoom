@@ -4,7 +4,7 @@
 
 **Blocked by:** 05：通过统一治理执行一次原生读取并持久记录；07：从现有应用入口运行一个无工具 Pi Agent；08：解耦平台工具、可选专业工具与 MCP
 
-**Status:** ready-for-agent — 05/07/08 已在同一基线集成验证；从 `refs/agentloom/ticket08-frozen` 解析准确 SHA 后可创建独立 worktree，与 06 并行。本票尚未实施。
+**Status:** in-progress — 在 `codex/pi-t09-tools` 独立 worktree 开发，基线 `7965cc00`，消费 05/07/08 及固定版本 SDK 安装入口；与 06 并行，不修改其治理实现。
 
 **Required:** Yes — 本票属于最终交付必做项。
 
