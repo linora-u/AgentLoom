@@ -4,9 +4,20 @@
 
 ## 1. 当前基线
 
-01/02/03 已完成。01/02 的历史提交 45ddbfdc、42662ed6、8d63be5f 保留；03 受检实现为 `9f08aa09ce3784d9c55eb82b01571256ded36ecf`。最终交接引用为 `refs/agentloom/ticket03-frozen`，交付时 codex/pi-integration 指向同一版本。主工作区仍在 main，HEAD 为 `c697b24f602e71d56c9aa2c532e6079c0db5aa9d`，成果保持未提交、未暂存 Changes。
+01/02/03 已完成。01/02 的历史提交 45ddbfdc、42662ed6、8d63be5f 保留；03 受检实现为 `9f08aa09ce3784d9c55eb82b01571256ded36ecf`，冻结引用 `refs/agentloom/ticket03-frozen` 为 `9e19d18285f2d2ea8e7b7d11c26e315760d153a3`。main HEAD 为 `9d5a88915efbd402d0f2697318125933fc1500e0`，相对冻结提交只增加七份研究文档；当前工作目录另有未提交的源码和文档成果。
 
-03 的完整回归为 4225 passed、1 skipped，SDK 为 13 passed；逐项证据见 [实现报告](03-implementation.md) 和 [验证记录](03-validation.json)。03 没有新建 worktree，01/02 的历史开发/验证 worktree 已清理。现在可开 04/05/07/08，但必须先解析固定引用取得准确 SHA，不能从 main HEAD 或旧 8d63be5f 开分支。
+07 交付时，`codex/pi-integration` 更新到 `0b5c4f4ed32244ef97b107361dcb45dbe2be149e`，包含 03、05、07；07 固定引用为 `refs/agentloom/ticket07-frozen`（`eca311eeca103dc6cd64eef959428e8b01eb22b2`）。04 已完成集成交付；当前 integration 包含 04+05+07，冻结入口为 `refs/agentloom/ticket04-05-integrated`。08 开发中。**新 worktree 基于提交创建，不会自动获得 main 的未提交 Changes。** 06 的 04+05 前置已集成验证，现在可新开 worktree，与 08 并行；09 还要等 08，与 05+07 一起集成。领取前重新解析 integration，不能把此处记录的交付 SHA 当成永远不变的分支头。
+
+03 记录的完整回归为 4225 passed、1 skipped，SDK 为 13 passed；逐项证据见 [实现报告](03-implementation.md) 和 [验证记录](03-validation.json)。历史报告中的 main Changes 状态保留为当时的交付记录，不代表现在的 Git 状态。已有工作区的本次核对快照如下；领取或清理前重新检查，不把表内路径存在当作任务待开发。
+
+| 票据 | 已有分支 | 本次核对到的 worktree |
+| --- | --- | --- |
+| 04 | `codex/pi-t04-smol` | 已验收并清理 t04；6 个阶段提交、冻结引用和外部证据保留 |
+| 05 | `codex/pi-t05-governance` | 已验收并清理原 t05 工作区；提交保留，见 [05 交接](05-implementation.md) |
+| 07 | `codex/pi-t07-runtime` | 已交付 main Changes 并清理 t07；6 个增量提交及冻结引用保留，见 [07 交接](07-implementation.md) |
+| 08 | `codex/pi-t08-platform` | `/Users/bytedance/.codex/worktrees/pi-t08-platform/AgentLoom`；开发中 |
+
+这是工作区登记，不是完成声明。重新领取前运行 `git worktree list` 并核对原 session；不得新建另一份同票工作区抢改，也不重置已有分支。冻结引用是必须包含的最低基线；可使用经检查的后继提交，后续任务还必须包含各自已验收的前置。
 
 不使用 git add . 纳入既有 codex/、temp/、参考 pi/、私有配置或无关研究文件。凭证、用户 memory DB、运行数据和既有 stash 均不属于迁移清理范围。
 
@@ -15,7 +26,7 @@
 | 阶段 | 可执行票据 | 必须已集成的前置 |
 | --- | --- | --- |
 | 串行准备，已完成 | 03 | 01、02，以及最新工具归属修订 |
-| 四路并行，现可开始 | 04 / 05 / 07 / 08 | 03 同一冻结提交 |
+| 03 后的首个并行窗口 | 04 / 05 / 07 / 08；已完成票不重开 | 包含 03 的已核对基线 |
 | 治理续接 | 06 | 04、05 |
 | Pi 工具续接 | 09 | 05、07、08 |
 | 并行应用/工具/发行 | 10 / 11 / 13 | 分别为 06+09 / 09 / 04+09 |
@@ -24,7 +35,7 @@
 
 这些是按前置解锁的窗口，不要求每个横向阶段一起结束。例如 06 与 09 可并行，11 也不必等 10。全部依赖图见 README。
 
-新增 04→06 的原因：04 搬迁自研 smol 的文件/Shell 实现；06 会抽取其中的平台保护策略并修改调用点。必须先形成稳定布局，再提取策略，避免两个 worktree 修改或删除同一批文件。05 只改公共 native 读取治理，不依赖这次搬迁，仍可与 04 并行。
+保留 04→06 依赖的原因：04 搬迁自研 smol 的文件/Shell 实现；06 会抽取其中的平台保护策略并修改调用点。必须先形成稳定布局，再提取策略，避免两个 worktree 修改或删除同一批文件。05 只改公共 native 读取治理，不依赖这次搬迁，仍可与 04 并行。
 
 ## 3. 03 已交付的公共基线
 
@@ -41,11 +52,11 @@
 
 ## 4. 分支与环境
 
-worktree 放在仓库外同级 AgentLoom-worktrees/tNN，分支使用 codex/pi-tNN-主题。03 产出的冻结提交作为 04/05/07/08 的共同起点；其他票从已包含全部前置的 integration 提交开始。
+新建 worktree 可放在仓库外同级 AgentLoom-worktrees/tNN，也可使用 Codex 管理目录；分支使用 codex/pi-tNN-主题。已有路径保持不动。04/05/07/08 的基线必须包含 03；其他票从已包含全部前置的已验证 integration 提交开始。
 
 每个 worktree 独立配置 Python/Node 依赖与运行目录。验证 agentloom 实际导入路径；测试用默认配置来自示例，不复制用户凭证到仓库。所有本地锁定包使用可复现安装；不依赖主工作区已装的 smol 或 node_modules。
 
-一个 session 可连续处理同一链，例如 07→09→10→12，但每票开始前必须合入其新前置。三个实现者时先安排 04、05、07，04 完成后转 08；不要为人员不足伪造技术依赖。
+一个 session 可连续处理同一链，例如 07→09→10→12，但每票开始前必须取得包含其全部前置的已验证提交。已完成票保留历史；08 继续原工作区，空闲 session 按解锁状态领取后续票，不为人员安排伪造技术依赖。
 
 ### 一个协调 session，按需创建实现 worktree
 
@@ -97,20 +108,23 @@ worktree 放在仓库外同级 AgentLoom-worktrees/tNN，分支使用 codex/pi-t
 
 ### 新 session 直接使用的领取说明
 
-03 已完成，无需重开。现在每个新 session 使用下面的共用模板，并从表中选择一行：
+01–05、07 不重开，08 继续已有工作区。后续新 session 使用下面的共用模板。表中的建议目录只用于尚未创建的工作区，创建前核对依赖已验收且已进入起始提交。
 
-> 实现本目录 NN 号票据，只做这一票。读取 README、tool-ownership、03-contracts、03-file-ownership、worktree-plan 和本票。先验证协调者提供的基线 SHA 已包含全部 Blocked by 的已验收提交，再从该 SHA 创建独立分支/worktree。仅修改本票拥有的文件；共享入口由协调者串行接线，本票必须在真实入口验证后才算完成。返回基线 SHA、成果 SHA、变更文件、验收结果及移交项。不要自行交付 main 或开发下一票。
+> 实现本目录 NN 号票据，只做这一票。读取 README、tool-ownership、03-contracts、03-file-ownership、worktree-plan 和本票的最新修订。核对该票是否已有 session/worktree，并保证只有一个修改者。验证基线 SHA 已包含全部 Blocked by 的已验收提交；没有工作区时才从该 SHA 创建。仅修改本票拥有的文件；共享入口由协调者串行接线，本票必须在真实入口验证后才算完成。返回基线 SHA、成果 SHA、变更文件、验收结果及移交项。不要自行交付 main 或开发下一票。
 
-| NN | 建议分支 | 建议 worktree（仓库同级） | 实现重点 |
+| NN | 建议分支 | 建议 worktree（仓库同级） | 创建前必须包含 |
 | --- | --- | --- | --- |
-| 04 | `codex/pi-t04-smol` | `AgentLoom-worktrees/t04` | 完整自研 smol Agent 与基础工具；移交保护调用点给 06 |
-| 05 | `codex/pi-t05-governance` | `AgentLoom-worktrees/t05` | 公共 native 只读执行与持久结算 |
-| 07 | `codex/pi-t07-runtime` | `AgentLoom-worktrees/t07` | 正式 Pi adapter/bridge；真实无工具 Application |
-| 08 | `codex/pi-t08-platform` | `AgentLoom-worktrees/t08` | 平台工具、按需专业工具、MCP 与 Skill 入口 |
+| 06 | `codex/pi-t06-protection` | `AgentLoom-worktrees/t06` | 04+05 及保护调用点移交 |
+| 09 | `codex/pi-t09-tools` | `AgentLoom-worktrees/t09` | 05+07+08 |
+| 10 | `codex/pi-t10-effects` | `AgentLoom-worktrees/t10` | 06+09 |
+| 11 | `codex/pi-t11-mixed` | `AgentLoom-worktrees/t11` | 09 |
+| 12 | `codex/pi-t12-recovery` | `AgentLoom-worktrees/t12` | 10 |
+| 13 | `codex/pi-t13-packaging` | `AgentLoom-worktrees/t13` | 04+09 |
+| 14 | `codex/pi-t14-integration` | `AgentLoom-worktrees/t14` | 11+12+13 及全部传递依赖；协调者串行收口 |
 
 后续 06、09、10、11、12、13 同样可以开新 session，但必须等各自 Blocked by 已集成。05→06 和 07→09→10→12 建议复用负责该方向的 session；这是保持上下文的安排，不要求始终使用同一会话。分支或目录已存在时先核对所属任务，不覆盖重用。
 
-main 的未提交 Changes 不会自动进入新 worktree。冻结应在隔离索引/准备区中精确纳入本项目成果，并保留为可取出的提交；这不要求在 main 自动提交。03 交付记录必须写出实际 SHA，不能只写随时会移动的分支名。
+main 的未提交 Changes 不会自动进入其他 worktree。本次票据修订已随冻结入口形成独立文档提交；继续开发的分支按文件所有权同步并记录 SHA。这不要求自动提交 main，也不重写 03 的历史验收记录。
 
 ## 6. 逐票集成与能力开放
 
@@ -123,6 +137,20 @@ main 的未提交 Changes 不会自动进入新 worktree。冻结应在隔离索
 - 只改配置中的后端，不承诺底层消息或会话跨基座转换。长期记忆、协作定义和应用身份保持平台所有。
 
 公共合同变更由协调者形成独立提交并更新共享 fixture，再让受影响分支同步。各分支不能各加临时私有字段，也不能重复 cherry-pick 同一个功能补丁。
+
+依赖放行需要这些具体交接物：
+
+| 下游 | 必须先拿到什么 | 为什么不能提前做 |
+| --- | --- | --- |
+| 06 | 04 的迁移后保护调用点清单；05 的 native prepare/settle 实现 | 避免边搬基础工具、边提取同一批保护代码 |
+| 09 | 05 治理入口、07 真实 Pi Application、08 中立工具与生命周期 | 三者缺一，都无法验收真实 Pi 双向工具调用 |
+| 10 | 06 写入/Shell 保护；09 双向桥接 | 先有授权与结算，再开放有副作用的原生工具 |
+| 11 | 09 已验证的只读、Worker、记忆/Goal 入口 | 验收混合协作不需要等 Pi 写入或恢复 |
+| 12 | 10 的真实副作用及 journal 证据 | 恢复必须验证已执行效果不被重做 |
+| 13 | 04 的依赖收口；09 可独立运行的 Pi 入口 | 具备无 smol 安装和平台工具验证条件；不等 10/12 |
+| 14 | 11/12/13 的已集成成果及传递依赖 | 在同一最终版本上验证组合行为、发行和交付 |
+
+同一窗口里的合入没有固定票号顺序；谁先验收完成就由协调者先合入，再检查下游是否解锁。共享入口接线也纳入本票验收，不能用“等待最后合并”掩盖未完成实现。
 
 ## 7. 验证与证据
 
@@ -151,4 +179,4 @@ uv run pytest tests/test_runner.py tests/test_cli_run_observability.py tests/tes
 5. 核对每个本次创建的 worktree：提交已集成，未提交源码/配置已处理，所需证据已保存；随后删除这些 worktree。共享虚拟环境引用、用户数据和其他任务的 worktree 不在清理范围。
 6. 保留实现分支和仓库外验收日志作为可恢复来源。最终报告说明 Changes 位置、验证范围和清理结果。
 
-未来只有维护者明确改变交付方式时，才改为提交/PR/推送 main。当前仅 01/02/03 完成，不把已有记录解释为 04 之后的能力已经交付。
+未来只有维护者明确改变交付方式时，才改为提交/PR/推送 main。单票完成、合入 integration、交付 main Changes 和清理 worktree 分别记录；不能用其中一步替代其余步骤，也不能用历史状态覆盖已经新增的验收报告。

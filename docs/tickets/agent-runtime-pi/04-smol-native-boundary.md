@@ -4,7 +4,7 @@
 
 **Blocked by:** 03：冻结基座与平台边界，交付可并行的公共基线
 
-**Status:** ready-for-agent — 03 已验收；从 `refs/agentloom/ticket03-frozen` 解析准确 SHA 后可新建独立 worktree。本票尚未实施。
+**Status:** completed — 独立分支 `codex/pi-t04-smol` 分阶段完成；受检源码 `7885ac2a9971a296d220a78c06d426d9219fedb1`。工具清单、保护移交及完整验收见 [实施记录](04-implementation.md) 与 [验证记录](04-validation.json)。
 
 **Required:** Yes — 本票属于最终交付必做项。
 
@@ -22,19 +22,20 @@ migrate 阶段，按 [工具归属](tool-ownership.md) 收拢自研 Agent 的完
 
 ## Acceptance criteria
 
-- [ ] smol 专属规划参数、摘要、模板和错误恢复在适配器内部解释，公共定义没有新增 smol 专属假设。
-- [ ] read/write/edit/list_directory、grep/glob、Shell 与后台任务工具迁到 smol 所属实现，使用 03 的基座 manifest 登记；只选平台工具或 native fixture 时不会导入这些基础工具。
-- [ ] smol 的 todo_write、final_answer、Todo 状态与回填由本票统一迁移；08 只负责平台 Goal，不同时改 Todo。尚有消费者的旧内部入口保留明确过渡清单。
-- [ ] 私有 Shell 会话、后台任务与运行资源通过 03 的关闭合同回收；公共 Application 不直接访问其注册表，并发 Worker 关闭不影响其他实例。
-- [ ] 读取去重、输出解释等基座实现与应由公共层承担的写前保护分别登记；保护效果不丢失，不复制现有公共治理引擎。
-- [ ] 旧 YAML 的实际效果、原生结构化工具、Stop/Goal 行为及模型协议回放不回归。
-- [ ] smol 的消息状态、对话压缩、Todo 回填与同基座恢复保持可用。
-- [ ] 公共调用者收到规范结果和 checkpoint envelope，不依赖 smol step/message/result 类型。
-- [ ] 旧 YAML 的 core_file/core_shell/core_search、显式工具名和固定参数保持效果；专业工具/MCP 经现有兼容入口仍可使用，不等待 08 才恢复旧应用。
-- [ ] 定向测试和真实 smol 循环验证通过；尚有兼容入口消费者时保留该入口并记录，不靠提前删测试变绿。
+- [x] smol 专属规划参数、摘要、模板和错误恢复在适配器内部解释，公共定义没有新增 smol 专属假设。
+- [x] read/write/edit/list_directory、grep/glob、Shell 与后台任务工具迁到 smol 所属实现，使用 03 的基座 manifest 登记；只选平台工具或 native fixture 时不会导入这些基础工具。
+- [x] 交付工具归属清单，区分自研 Agent 实现、平台接线和待 06 提取的保护规则；不以统一基础工具基类或公共 read/write/Shell 实现要求 Pi 模仿 smol。
+- [x] smol 的 todo_write、final_answer、Todo 状态与回填由本票统一迁移；08 只负责平台 Goal，不同时改 Todo。尚有消费者的旧内部入口保留明确过渡清单。
+- [x] 私有 Shell 会话、后台任务与运行资源通过 03 的关闭合同回收；公共 Application 不直接访问其注册表，并发 Worker 关闭不影响其他实例。
+- [x] 读取去重、输出解释等基座实现与应由公共层承担的写前保护分别登记；保护效果不丢失，不复制现有公共治理引擎。
+- [x] 旧 YAML 的实际效果、原生结构化工具、Stop/Goal 行为及模型协议回放不回归。
+- [x] smol 的消息状态、对话压缩、Todo 回填与同基座恢复保持可用。
+- [x] 公共调用者收到规范结果和 checkpoint envelope，不依赖 smol step/message/result 类型。
+- [x] 旧 YAML 的 core_file/core_shell/core_search、显式工具名和固定参数保持效果；专业工具/MCP 经现有兼容入口仍可使用，不等待 08 才恢复旧应用。
+- [x] 定向测试和真实 smol 循环验证通过；尚有兼容入口消费者时保留该入口并记录，不靠提前删测试变绿。
 
 ## Handoff
 
-交付迁移后的 smol 基础工具行为证据及准确文件移交清单。04 与 05 均完成并集成后才启动 06，06 随后拥有列出的公共保护提取/调用点；04 不再继续改这些文件。剩余内部兼容消费者供 13 检查无 smol 安装、14 执行最终清理。
+交付迁移后的 smol 基础工具行为证据及准确文件移交清单：旧→新路径、保护函数、调用者、相关测试、兼容入口及剩余消费者。04 与 05 均完成并集成后才启动 06，06 随后拥有列出的公共保护提取/调用点；04 不再继续改这些文件。剩余内部兼容消费者供 13 检查无 smol 安装、14 执行最终清理。
 
 实施遵循 Pi 接入规格及本目录最新的 [工具归属](tool-ownership.md)、[执行索引](README.md) 与 [worktree 计划](worktree-plan.md)。只认已集成、已验证的依赖提交；不要自行跳过阻塞任务，也不要从其他 worktree 复制未提交改动。

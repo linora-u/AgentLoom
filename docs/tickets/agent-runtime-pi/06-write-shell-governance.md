@@ -4,7 +4,7 @@
 
 **Blocked by:** 04：收拢自研 smol Agent 及其基础工具，保持旧应用行为；05：通过统一治理执行一次原生读取并持久记录
 
-**Status:** planned — 等待前置任务集成并验证，尚未实施。
+**Status:** ready-for-agent — 04+05 已集成并验证；从 `refs/agentloom/ticket04-05-integrated` 解析准确 SHA 后可新建 worktree。先读 [04 保护调用点](04-implementation.md) 和 [05 接口交接](05-implementation.md)。本票尚未实施。
 
 **Required:** Yes — 本票属于最终交付必做项。
 
