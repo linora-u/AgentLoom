@@ -187,8 +187,16 @@ def probe(workspace: Path) -> dict:
         assert load_function('agentloom.tools.file_ops.read_file.read_file', 'read_file') is resolve_tool_function('read_file')
         root = files('agentloom')
         assert root.joinpath('adapters/smolagents/prompts/toolcalling_agent.example.yaml').read_text()
-        queries = list(root.joinpath('tools/queries').rglob('*.scm'))
-        assert len(queries) == 112, len(queries)
+        query_root = root.joinpath('tools/queries')
+        queries = list(query_root.rglob('*.scm'))
+        assert len(queries) == 56, len(queries)
+        assert not query_root.joinpath('queries').exists()
+        from agentloom.tools.file_ops.file_outliner import _get_scm_path as outline_query
+        from agentloom.tools.search.lsp_tool.treesitter_fallback import _get_scm_path as lsp_query
+        for language in ('python', 'typescript'):
+            outline_path = outline_query(language)
+            assert outline_path == lsp_query(language)
+            assert outline_path is not None and outline_path.read_text()
         print(json.dumps({'package_origin': agentloom.__file__, 'project_root': str(C.agent_root), 'queries': len(queries)}))
     ''')]))
     assert identity["project_root"] == str(project)
