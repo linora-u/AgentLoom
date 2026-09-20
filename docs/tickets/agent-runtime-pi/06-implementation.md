@@ -1,4 +1,4 @@
-# 06 实施与交接（验证中）
+# 06 实施与交接
 
 基线：main `7965cc00`。分支：`codex/pi-t06-governance`。本票不修改 Pi bridge、09 SDK 调用或 wire v1 合同。
 
@@ -37,4 +37,38 @@
 - 原始产物引用提供实际 snapshot 路径与 `/raw_output` JSON pointer，写入 receipt 和 ToolCallRecord metadata。限额内的第一份原始结果可直接取回，后续文件变更不会改写它。
 - 命名文件版本字段用于核对 inode、时间、大小和解析后路径。
 
-最终全量检查和实际模型运行统计在交付前补齐。
+## 真实 Application 验证
+
+两个实际配置的模型 profile：`powerful`、`powerful2`。生产入口均为 `execute_app`；原生场景使用真实模型 + 独立文件/子进程 executor fixture，smol 场景使用真实 smol runtime。原生全部通过不等于 Pi SDK 端到端通过。
+
+| 批次 | 验证内容 | 通过 / 总数 |
+| --- | --- | --- |
+| campaign-1 | 14 场景 × 2 模型 × 2 次，另有 8 次 smol 读取对照 | 64 / 64 |
+| smol-1 | 创建、读取后覆盖、拒绝命令、排除搜索 × 2 模型 | 8 / 8 |
+| campaign-final | 审查修复后的覆盖/stale/命令/查询/隔离/大输出 | 14 / 14 |
+| campaign-after-review | 最终代码 `d3c37aa5` 的相同关键场景 | 14 / 14 |
+| smol-after-review | 最终代码的 8 次真实 smol 对照 | 7 / 8 |
+
+正式验收合计 **107 / 108**。原始结果位于项目外 `AgentLoom-validation/t06/`；凭证配置不纳入 Git。
+
+失败没有删除或算作通过：`smol_powerful2_search_excluded` 达到 5 步上限。另行诊断重放再次失败（独立于上述 108 次），Hook ToolCallRecord 显示 5 次调用都只含 `pattern`，省略要求的可选 `path/include`，因此搜索默认 workspace，随后重复调用而未结束。诊断原始结果未包含该应用明确排除的 `files/secrets/hidden.txt`，也未包含凭证配置文件；排除规则生效，但此模型的整次任务完成能力仍有限制。工具层之外在哪一层省略参数，本票未作未经验证的归因，也没有通过改掉旧 YAML/default 参数语义来掩盖问题。
+
+## Standards
+
+两路独立 code-review 中的 Standards 复核通过：未发现剩余硬性规范问题。公共治理无 smol 反向依赖，资源按实例/Run 关闭，位置数组已改为命名文件版本字段；原先的备份失败与查询范围问题已由公开入口回归关闭。
+
+## Spec
+
+Spec 复核通过：未发现剩余本票规格阻塞。备份存储故障、索引失败重试、包装命令、符号链接、相对/绝对排除别名、`/`/`.` 与 Shell 展开均有定向覆盖。真 Pi 映射仍归 10，并明确保留未验证映射的拒绝行为。
+
+审查余项：Standards 0，Spec 0；两轴均无剩余最高级别问题。
+
+## 最终验证与交付
+
+- 最终源码提交：`d3c37aa552a0c089a4c88526571ec32d44a4430e`；随后只补交付文档。
+- 全量回归：**4382 passed、1 skipped、3 warnings，328.61 秒**。命令：`.venv/bin/python -m pytest tests/ applications/memory_feature_validation/scripts/test_memory_review_campaign_capsule.py applications/memory_feature_validation/scripts/test_memory_review_campaign_contract.py -q --tb=short`。
+- 原候选全量为 4376 passed、1 skipped；最后审查新增路径边界修复后重跑最终全量，未用旧结果代替。
+- `uv run --with mypy mypy src/runtime/native_tool_host.py src/runtime/tool_governance/files.py src/runtime/tool_governance/search.py --follow-imports=silent --ignore-missing-imports`：通过。
+- 独立 worktree 使用 `uv sync --locked --all-groups`；Pi 依赖经 `uv run --locked loom install-runtime pi` 安装，SDK `0.79.4`，未依赖主目录 node_modules。
+- 三个源码阶段提交 `6e946190`、`f70eb8ec`、`d3c37aa5` 保留，正式合入 main；冻结入口 `refs/agentloom/ticket06-frozen`。本票 worktree 在合入后清理，不清理其他票据的工作区。
+- 10 的 06 前置已满足，仍必须等待 09 的已验证集成提交；不提前宣告真 Pi 写入/Shell 已完成。

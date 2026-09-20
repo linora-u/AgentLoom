@@ -4,7 +4,7 @@
 
 **Blocked by:** 06：补齐文件修改和 Shell 的治理与保护；09：Pi 调通原生读取、平台工具与 Goal
 
-**Status:** planned — 等待前置任务集成并验证，尚未实施。
+**Status:** planned — 06 已交付，见 [公共治理接口及拒绝边界](06-implementation.md)；仍须等待 09 集成并验证，尚未实施。
 
 **Required:** Yes — 本票属于最终交付必做项。
 
