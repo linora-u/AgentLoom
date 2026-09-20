@@ -26,7 +26,9 @@ from openai.types.responses import (
     ResponseFunctionToolCall,
     ResponseReasoningItem,
 )
+from openai.types.responses.response_input_param import FunctionCallOutput
 from openai.types.responses.response_reasoning_item import Summary
+from pydantic import TypeAdapter
 
 
 class _RecordingTransport:
@@ -422,6 +424,37 @@ def test_openai_responses_preserves_order_reasoning_and_replay_payload() -> None
     assert result.usage.total_tokens == 16
     assert result.usage.cached_input_tokens == 4
     assert result.usage.reasoning_tokens == 2
+
+
+@pytest.mark.parametrize("status", ["completed", "error", "blocked"])
+def test_openai_responses_replays_tool_outcomes_with_valid_wire_status(status: str) -> None:
+    output = f'{{"status":"{status}","message":"tool outcome"}}'
+    item = FunctionCallOutputItem(
+        call_id="call_outcome",
+        output=output,
+        status=status,
+        is_error=status != "completed",
+    )
+
+    def transport(**request: Any) -> dict[str, Any]:
+        wire = TypeAdapter(FunctionCallOutput).validate_python(request["input"][1])
+        assert wire["call_id"] == "call_outcome"
+        assert wire["output"] == output
+        return {"id": "resp_recovered", "output": []}
+
+    result = OpenAIResponsesModelTurnAdapter(transport=transport).turn(
+        ModelTurnRequest(
+            model="opaque-model",
+            items=(
+                FunctionCallItem(call_id="call_outcome", name="probe", arguments_json="{}"),
+                item,
+            ),
+        )
+    )
+
+    assert result.response_id == "resp_recovered"
+    assert item.status == status
+    assert item.is_error is (status != "completed")
 
 
 def test_openai_responses_rejects_unknown_executable_output() -> None:

@@ -426,12 +426,13 @@ class SmolagentsRuntimeAdapter:
             if request.checkpoint is not None:
                 self.restore(request.checkpoint)
 
+            continue_session = request.continue_session or request.checkpoint is not None
             run_kwargs: dict[str, Any] = {
                 "task": request.task,
                 "return_full_result": True,
-                "reset": not request.continue_session,
+                "reset": not continue_session,
             }
-            if request.continue_session and request.record_task:
+            if continue_session and request.record_task:
                 run_kwargs["_skip_task_step_on_reset_false"] = False
             if request.additional_args:
                 run_kwargs["additional_args"] = dict(request.additional_args)
