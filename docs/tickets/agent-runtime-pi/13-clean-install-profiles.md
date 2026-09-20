@@ -4,7 +4,7 @@
 
 **Blocked by:** 04：收拢自研 smol Agent 及其基础工具，保持旧应用行为；09：Pi 调通原生读取、平台工具与 Goal
 
-**Status:** in-progress — 在 `codex/pi-t13-packaging` 独立 worktree 实施，起点 `2ec1412c` 已包含 04/09。初轮锁定 wheel 安装的 Pi 与 smol Application/CLI 共 23 项通过；最终候选验收及审查进行中。
+**Status:** done — 起点 `2ec1412c` 已包含 04/09。候选 `37dc69ed` 三个干净安装环境 29/29、真实 provider 3/3；完整回归 4412 passed、1 skipped，双路复审通过。见 [实现与验收](13-implementation.md)、[证据摘要](13-validation.json)。冻结入口为 `refs/agentloom/ticket13-frozen`。
 
 **Required:** Yes — 本票属于最终交付必做项。
 
@@ -24,17 +24,17 @@ Python packaging、安装入口、CLI 失败路径和 CI。消费 Pi session 所
 
 ## Acceptance criteria
 
-- [ ] 从锁定依赖和明确 Node 版本生成可复现 bridge/发行物，不依赖源码 checkout、全局 pi 命令或运行中临时 npm install。
-- [ ] Pi-only 干净环境不存在直接或 instrumentation 等间接 smol 依赖，能在 checkout 外运行真实 Pi Application。
-- [ ] Pi-only 环境实际构造并执行选定的平台/专业工具，不导入 smol Tool、基础工具或私有进程注册表；同时验证 09 所用专业工具的查询资源随发行物可用，未选工具不被默认加载。
-- [ ] smol profile 在另一干净环境实际安装并启动旧 YAML，不能仅以本机已有 smol 或 import 成功证明兼容。
-- [ ] 安装器和 CI 显式选择相应 extra/profile；给出真实验证过的命令，不能假设 all-groups 自动选择 extras。
-- [ ] 无 smol 环境覆盖 CLI help、provider/child failure 和缺依赖错误，普通失败分类不再硬导入 smol。
-- [ ] 发行包包含自有 bridge 源码、schema 和锁文件；安装入口下载固定版本 SDK、构建 JavaScript 并校验所需 assets。SDK、node_modules 与本地构建产物不随 Python 包重复分发，记录版本、lock/hash 和构建来源。
-- [ ] 明确本票只是发行机制初验；14 必须用包含 10/12 的最终候选重新构建、重新执行干净安装验证。
+- [x] 从锁定依赖和明确 Node 版本生成可复现 bridge/发行物，不依赖源码 checkout、全局 pi 命令或运行中临时 npm install。
+- [x] Pi-only 干净环境不存在直接或 instrumentation 等间接 smol 依赖，能在 checkout 外运行真实 Pi Application。
+- [x] Pi-only 环境实际构造并执行选定的平台/专业工具，不导入 smol Tool、基础工具或私有进程注册表；同时验证 09 所用专业工具的查询资源随发行物可用，未选工具不被默认加载。
+- [x] smol profile 在另一干净环境实际安装并启动旧 YAML，不能仅以本机已有 smol 或 import 成功证明兼容。
+- [x] 安装器和 CI 显式选择相应 extra/profile；给出真实验证过的命令，不能假设 all-groups 自动选择 extras。
+- [x] 无 smol 环境覆盖 CLI help、provider/child failure 和缺依赖错误，普通失败分类不再硬导入 smol。
+- [x] 发行包包含自有 bridge 源码、schema 和锁文件；安装入口下载固定版本 SDK、构建 JavaScript 并校验所需 assets。SDK、node_modules 与本地构建产物不随 Python 包重复分发，记录版本、lock/hash 和构建来源。
+- [x] 明确本票只是发行机制初验；14 必须用包含 10/12 的最终候选重新构建、重新执行干净安装验证。
 
 ## Handoff
 
-交付两类安装命令、构建流程和证据；Python manifest/lock 的生成只有本票负责人执行。
+交付 `pi`、`smol` runtime extras 与按需 `code` extra；原 `./install` 保持 smol + code，新 `./install --runtime pi` 自动下载固定 SDK，更新保留安装目录和 profile。Python manifest/lock 的生成只有本票负责人执行。14 需在最终集成提交重建并运行三个 profile。
 
 实施遵循 Pi 接入规格及本目录最新的 [工具归属](tool-ownership.md)、[执行索引](README.md) 与 [worktree 计划](worktree-plan.md)。只认已集成、已验证的依赖提交；不要自行跳过阻塞任务，也不要从其他 worktree 复制未提交改动。
