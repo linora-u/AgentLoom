@@ -337,5 +337,23 @@
     "Arbitrary in-host Python extensions need finite operations or registered resource handles for cooperative cancellation; forced termination covers managed subprocesses.",
     "Mixed smol/Pi verification and clean packaging validation remain tickets 11 and 13.",
     "SDK model-phase events are supported; no token-stream API added."
-  ]
+  ],
+  "delivery": {
+    "main_before": "8d7ba7bf2c938e1afe22b892a22072efdec829ba",
+    "main_merge": "cc0edeb18aeedb29e1c40e0c44ead449fc1223dc",
+    "merge": "fast-forward with all stage commits preserved",
+    "source_test_tree_matches_verified_candidate": true,
+    "frozen_ref": "refs/agentloom/ticket09-frozen",
+    "main_installer": "passed; SDK 0.79.4 ready",
+    "main_import_path": "/Users/bytedance/code/data_clear/AgentLoom/src/__init__.py",
+    "worktree_removed": "/Users/bytedance/.codex/worktrees/pi-t09-tools/AgentLoom",
+    "implementation_branch_preserved": "codex/pi-t09-tools",
+    "unrelated_untracked_paths_preserved": [
+      "codex/",
+      "temp/"
+    ],
+    "ignored_reference_pi_preserved": true,
+    "existing_stashes_preserved": true,
+    "pushed": false
+  }
 }
