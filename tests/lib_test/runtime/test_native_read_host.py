@@ -398,3 +398,20 @@ def test_another_hook_run_cannot_reuse_the_same_application_call(tmp_path):
             with NativeReadToolHost(tools=(request.tool,), cwd=request.cwd) as other:
                 with pytest.raises(ValueError, match="identity"):
                     other.start_execution(grant)
+
+
+def test_journal_path_uses_the_complete_native_call_identity(tmp_path):
+    with native_scope(tmp_path) as (host, request, _):
+        same_provider_id_at_new_parent = replace(
+            request.identity,
+            native_session_id="session",
+            native_parent_id="parent-two",
+        )
+        first = replace(
+            request.identity,
+            native_session_id="session",
+            native_parent_id="parent-one",
+        )
+        assert host._journal.artifact_path(first) != host._journal.artifact_path(
+            same_provider_id_at_new_parent
+        )

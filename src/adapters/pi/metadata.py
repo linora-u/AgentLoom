@@ -5,6 +5,7 @@ import math
 from agentloom.runtime.agent_runtime import RuntimeCapabilities, RuntimeModelSelection
 
 SDK_VERSION = "0.79.4"
+BRIDGE_VERSION = 1
 CAPABILITIES = RuntimeCapabilities(True, True, True, True, goal=True, stop_hooks=True)
 
 

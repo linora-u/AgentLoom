@@ -656,6 +656,13 @@ class YamlConfiguredAgent(RoleDrivenAgent):
             parameters=signature_params,
             return_annotation=str,
         )
+        dynamic_agent_tool._agentloom_recovery_descriptor = lambda arguments: {  # type: ignore[attr-defined]
+            "agent_name": function_name,
+            "input_hash": hashlib.sha256(
+                _build_formatted_query(dict(arguments)).encode()
+            ).hexdigest()[:16],
+            "task_input": _build_formatted_query(dict(arguments)),
+        }
 
         # Fail fast through AgentLoom's runtime-neutral Tool schema seam.
         try:

@@ -23,12 +23,45 @@ def test_pi_handshake_roundtrip_and_rejects_unknown_protocol():
         "kind": "request",
         "request_id": "host:1",
         "instance_id": "worker-a",
-        "payload": {"method": "handshake", "native_tool_contract": 1},
+        "payload": {
+            "method": "handshake",
+            "protocol_version": 2,
+            "bridge_version": 1,
+            "native_tool_contract": 1,
+        },
     }
     parsed = decode_message(json.dumps(message))
     assert json.loads(encode_message(parsed))["payload"] == message["payload"]
     with pytest.raises(ValueError, match="Invalid Pi bridge message"):
         decode_message(json.dumps({**message, "version": 1}))
+
+    response = {
+        "version": 2,
+        "kind": "response",
+        "request_id": "host:1",
+        "instance_id": "worker-a",
+        "payload": {
+            "method": "handshake",
+            "runtime_id": "pi",
+            "protocol_version": 2,
+            "bridge_version": 1,
+            "sdk_version": "0.79.4",
+            "node_version": "v22.19.0",
+            "native_tool_contract": 1,
+            "capabilities": {
+                "structured_tools": True,
+                "parallel_tools": True,
+                "checkpoint_resume": True,
+                "subagents": True,
+                "goal": True,
+                "stop_hooks": True,
+            },
+        },
+        "error": None,
+    }
+    roundtrip = json.loads(encode_message(decode_message(json.dumps(response))))
+    assert roundtrip["payload"] == response["payload"]
+    assert roundtrip["run_id"] is None
 
 
 def test_snapshot_can_acknowledge_no_checkpoint():

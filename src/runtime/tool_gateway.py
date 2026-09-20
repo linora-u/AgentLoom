@@ -39,6 +39,7 @@ ToolCloneFactory = Callable[[], Any]
 ToolOutputNormalizer = Callable[[Any, str | None], Any]
 ToolInputValidator = Callable[[dict[str, Any]], None]
 ToolResourceCloser = Callable[[], None]
+ToolRecoveryDescriptor = Callable[[Mapping[str, Any]], Mapping[str, str]]
 
 
 def final_answer_binding() -> ToolBinding:
@@ -64,6 +65,7 @@ class ToolBinding:
     compression_source: str | None = None
     manifest_entry: ToolManifestEntry | None = None
     input_validator: ToolInputValidator | None = None
+    recovery_descriptor: ToolRecoveryDescriptor | None = None
 
     def __post_init__(self) -> None:
         properties = deepcopy(dict(self.inputs_schema))
@@ -81,6 +83,7 @@ class ToolBinding:
             "clone_factory",
             "output_normalizer",
             "input_validator",
+            "recovery_descriptor",
         ):
             value = getattr(self, name)
             if value is not None and not callable(value):
@@ -474,6 +477,7 @@ def bind_tool(
                 fixed_arguments=getattr(tool, "_agentloom_fixed_values", {}),
             ) if catalog_spec is not None else getattr(tool, "_agentloom_manifest_entry", None)
         ),
+        recovery_descriptor=getattr(tool, "_agentloom_recovery_descriptor", None),
     )
 
 
@@ -833,6 +837,20 @@ class PreparedToolGateway(ToolGateway, Protocol):
     ) -> PreparedToolCall | ToolCallRecord: ...
 
     def execute_prepared(self, prepared: PreparedToolCall) -> ToolCallRecord: ...
+
+
+@runtime_checkable
+class RecoverablePreparedToolGateway(PreparedToolGateway, Protocol):
+    """Optional durable-result reconciliation for platform-owned effects."""
+
+    def reconcile_committed(
+        self,
+        *,
+        call_id: str,
+        tool_name: str,
+        arguments: Mapping[str, Any],
+        run_id: str,
+    ) -> ToolCallRecord | None: ...
 
 @runtime_checkable
 class ToolManifestSource(Protocol):
@@ -1422,6 +1440,47 @@ class AgentLoomToolGateway:
         except Exception as exc:
             logger.warning("PostToolUse observer dispatch failed open: %s", exc)
         return completed
+
+    def reconcile_committed(
+        self,
+        *,
+        call_id: str,
+        tool_name: str,
+        arguments: Mapping[str, Any],
+        run_id: str,
+    ) -> ToolCallRecord | None:
+        """Read an independently committed Worker result without running hooks."""
+        if not isinstance(run_id, str) or not run_id:
+            raise ValueError("Recovered platform result requires its original Run")
+        binding = self._bindings.get(tool_name)
+        if binding is None:
+            raise ValueError("Recovered platform Tool is no longer selected")
+        descriptor = binding.recovery_descriptor
+        if descriptor is None:
+            return None
+        expected = dict(descriptor(arguments))
+        if set(expected) != {"agent_name", "input_hash", "task_input"}:
+            raise ValueError("Worker recovery descriptor is invalid")
+        from agentloom.runtime.checkpoint.coordinator import CheckpointCoordinator
+
+        coordinator = CheckpointCoordinator.current()
+        if coordinator is None:
+            return None
+        result = coordinator.completed_worker_result(
+            agent_name=expected["agent_name"],
+            input_hash=expected["input_hash"],
+            task_input=expected["task_input"],
+            run_id=run_id,
+        )
+        if result is None:
+            return None
+        return ToolCallRecord.completed(
+            call_id=call_id,
+            tool_name=tool_name,
+            input=dict(arguments),
+            output=result,
+            ended_at=time.time(),
+        )
 
     def close(self) -> None:
         """Release run-owned Tool resources once, even after close failures."""

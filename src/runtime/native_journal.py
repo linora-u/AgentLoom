@@ -124,7 +124,7 @@ class NativeCallJournal:
 
     def artifact_path(self, identity: NativeCallIdentity) -> Path:
         """Stable reference to the snapshot containing the original raw output."""
-        key = hashlib.sha256(json.dumps([identity.instance_id, identity.call_id]).encode()).hexdigest()
+        key = hashlib.sha256(json.dumps(snapshot(identity), sort_keys=True).encode()).hexdigest()
         return self.directory / f"{key}.json"
 
     @contextmanager

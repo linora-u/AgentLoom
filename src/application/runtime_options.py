@@ -7,14 +7,14 @@ from agentloom.configuration.config import EffectiveAgentConfigSnapshot
 
 def runtime_config_layers(config: dict, snapshot: EffectiveAgentConfigSnapshot | None):
     source = str(config.get("_yaml_file_path") or config.get("name", "agent"))
-    layers = [(source, config, False)] if snapshot is None else [
-        (str(layer.source_path), layer.data, layer.name == "global_system")
+    layers = [(source, config)] if snapshot is None else [
+        (str(layer.source_path), layer.data)
         for layer in snapshot.layers
     ]
-    # Fields outside the system overlay (for example max_steps) still belong
-    # to the Agent YAML and must not lose their explicitness.
+    # The effective snapshot contains project/application overlays. Append the
+    # Agent definition so its runtime_options retain highest precedence.
     if snapshot is not None:
-        layers.append((source, config, False))
+        layers.append((source, config))
     return source, layers
 
 
@@ -30,7 +30,7 @@ def normalize_runtime_options(
     _, layers = runtime_config_layers(config, snapshot)
     options: dict[str, Any] = {}
     sources: dict[str, str] = {}
-    for layer_source, data, _ in layers:
+    for layer_source, data in layers:
         raw = data.get("runtime_options", {})
         if not isinstance(raw, dict):
             raise ValueError(f"{layer_source}:runtime_options must be a mapping")

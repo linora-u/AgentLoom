@@ -36,7 +36,7 @@ def normalize_runtime_options(
     source, layers = runtime_config_layers(config, snapshot)
     options: dict[str, Any] = dict(SMOL_DEFAULTS)
     sources = {name: "default:smolagents" for name in options}
-    for layer_source, data, _ in layers:
+    for layer_source, data in layers:
         raw = data.get("runtime_options", {})
         if not isinstance(raw, dict):
             raise ValueError(f"{layer_source}:runtime_options must be a mapping")

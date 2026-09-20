@@ -98,9 +98,22 @@ def reconcile(store: PiCheckpointStore, bundle: dict[str, Any]) -> dict[str, Any
                 raise ValueError("Pi native journal inputs or mapping changed")
             record = data.get("record") or data.get("rejection") or data.get("dispatch_rejection")
         else:
-            data = store.platform_receipt(identity, recovering=True)
+            data = store.platform_receipt(identity)
             if data["tool_name"] != call["tool_name"] or data["arguments"] != call["arguments"]:
                 raise ValueError("Pi platform journal inputs changed")
+            if data["state"] == "executing":
+                from agentloom.runtime.tool_gateway import RecoverablePreparedToolGateway
+                recovered = store.definition.tool_gateway.reconcile_committed(
+                    call_id=identity.call_id,
+                    tool_name=call["tool_name"],
+                    arguments=call["arguments"],
+                    run_id=identity.run_id,
+                ) if isinstance(store.definition.tool_gateway, RecoverablePreparedToolGateway) else None
+                if recovered is not None:
+                    store.reconcile_platform(identity, recovered)
+                    data = store.platform_receipt(identity)
+            if data["state"] == "executing":
+                data = store.platform_receipt(identity, recovering=True)
             record = data.get("record")
         if data.get("state") in {"executing", "uncertain"}:
             raise AgentRuntimeError("Pi recovery has an uncertain tool effect; automatic replay is forbidden", category="tool")
