@@ -69,7 +69,7 @@ def child(case: str, workspace: Path, profile: str):
         for worker in workflow.parent.glob('worker_agents/*.yaml'):
             worker_config = yaml.safe_load(worker.read_text())
             worker_config.update(agent_runtime='pi', model_type=profile)
-            worker_config.pop('max_steps', None)
+            worker_config.pop('runtime_options', None)
             worker_config['workflow'] = worker_config['workflow'].replace('final_answer', 'your final response')
             worker.write_text(yaml.safe_dump(worker_config))
     (config / 'system.yaml').write_text(yaml.safe_dump(system))

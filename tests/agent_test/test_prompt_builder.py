@@ -22,33 +22,33 @@ from agentloom.runtime.skills.catalog import SkillCatalog, SkillSource
 
 @pytest.mark.parametrize("family", ["", "anthropic", "openai", "gemini"])
 @pytest.mark.parametrize("absolute", [False, True])
-def test_old_explicit_shipped_template_paths_remain_loadable(family, absolute):
-    from agentloom.application.validation import normalize_execution_prompt_template_path_value
-    from agentloom.runtime.prompts.prompt_builder import load_base_prompt_templates
+def test_canonical_shipped_template_paths_are_loadable(family, absolute):
+    from agentloom.adapters.smolagents.options import normalize_runtime_options
 
     root = Path(__file__).resolve().parents[2]
-    old = Path("src/runtime/prompts") / family / "toolcalling_agent.example.yaml"
-    configured = str(root / old if absolute else old)
-    normalized = normalize_execution_prompt_template_path_value(configured, "legacy.prompt", agent_root=root)
-    assert Path(normalized).is_file()
+    relative = Path("src/adapters/smolagents/prompts") / family / "toolcalling_agent.example.yaml"
+    configured = str(root / relative if absolute else relative)
+    options, _ = normalize_runtime_options(
+        {"runtime_options": {"prompt_template_path": configured}}, agent_root=root,
+    )
+    assert Path(options["prompt_template_path"]) == root / relative
     templates = load_base_prompt_templates(
-        prompt_template_path=configured, model_id=None, agent_root=root,
+        prompt_template_path=options["prompt_template_path"], model_id=None, agent_root=root,
         logger=logging.getLogger(__name__),
     )
     assert templates and templates["system_prompt"]
 
 
-def test_existing_user_template_at_legacy_path_has_priority(tmp_path):
-    from agentloom.runtime.prompts.prompt_builder import load_base_prompt_templates
-
-    legacy = tmp_path / "src/runtime/prompts/toolcalling_agent.example.yaml"
-    legacy.parent.mkdir(parents=True)
-    legacy.write_text("system_prompt: Keep my exact custom prompt\n")
+def test_explicit_user_template_is_loaded_without_path_remapping(tmp_path):
+    custom = tmp_path / "custom/prompts/agent.yaml"
+    custom.parent.mkdir(parents=True)
+    custom.write_text("system_prompt: Keep my exact custom prompt\n")
     templates = load_base_prompt_templates(
-        prompt_template_path=str(legacy), model_id=None, agent_root=tmp_path,
+        prompt_template_path=str(custom), model_id=None, agent_root=tmp_path,
         logger=logging.getLogger(__name__),
     )
     assert templates == {"system_prompt": "Keep my exact custom prompt"}
+
 
 # ---------------------------------------------------------------------------
 # Helpers

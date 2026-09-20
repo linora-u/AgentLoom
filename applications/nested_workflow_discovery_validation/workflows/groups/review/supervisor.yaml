@@ -2,7 +2,9 @@ name: "nested_discovery_acceptance_supervisor"
 agent_runtime: smolagents
 description: "Exercise nested workflow discovery and one real Worker call."
 model_type: "powerful"
-max_steps: 5
+runtime_options:
+  max_steps: 5
+  smart_summary: false
 
 workflow: |
   Call nested_discovery_acceptance_worker exactly once with:

@@ -1,5 +1,7 @@
 name: "compression_test_agent"
 agent_runtime: smolagents
+runtime_options:
+  smart_summary: false
 description: |
   压缩功能测试专用agent，用于验证ConversationHistoryManager的完整工作流程。
 

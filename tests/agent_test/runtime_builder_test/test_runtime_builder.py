@@ -475,12 +475,11 @@ def test_runtime_definition_contains_complete_neutral_runtime_input(
             "name": "definition_agent",
             "description": "Complete neutral definition.",
             "workflow": "Use the proof tool.",
-            "prompt": {"path": "prompts/custom.yaml"},
-            "planning_interval": 3,
-            "smart_summary": False,
-            "todo": {"mode": "on"},
-            "max_steps": 11,
-            "max_consecutive_parse_errors": 7,
+            "runtime_options": {
+                "prompt_template_path": "prompts/custom.yaml", "planning_interval": 3,
+                "smart_summary": False, "todo_mode": "on", "max_steps": 11,
+                "max_consecutive_model_errors": 7,
+            },
         },
         model_binding=model_binding,
         logger=DummyLoggerBackend(),
@@ -492,8 +491,7 @@ def test_runtime_definition_contains_complete_neutral_runtime_input(
     )
     agent._effective_agent_config = {
         **agent._effective_agent_config,
-        "prompt": {"path": "prompts/custom.yaml"},
-        "planning_interval": 3,
+        "runtime_options": {"prompt_template_path": "prompts/custom.yaml", "planning_interval": 3},
     }
 
     @tool
@@ -573,7 +571,7 @@ def test_task_created_is_emitted_once_through_runtime_request(monkeypatch):
 @pytest.mark.parametrize("mode", ["auto", "on", "off"])
 def test_common_runtime_does_not_inject_smol_tools(monkeypatch, mode):
     agent = DummyAgent(
-        config={"name": "runtime_dummy", "todo": {"mode": mode}},
+        config={"name": "runtime_dummy", "runtime_options": {"todo_mode": mode}},
         model_binding=_model_binding(), logger=DummyLoggerBackend(),
     )
     monkeypatch.setattr(agent, "get_all_tools", lambda agent_type: [])
@@ -2196,7 +2194,7 @@ def test_goal_tools_are_absent_when_goal_mode_is_disabled(monkeypatch, goal):
         "name": "goal-runtime",
         "description": "Finish all work.",
         "workflow": "Implement and verify.",
-        "todo": {"mode": "off"},
+        "runtime_options": {"todo_mode": "off"},
     }
     if goal is not None:
         config["goal"] = goal
@@ -2217,7 +2215,7 @@ def test_goal_tools_are_added_only_for_enabled_root_supervisor(monkeypatch):
             "description": "Finish all work.",
             "workflow": "Implement and verify.",
             "goal": True,
-            "todo": {"mode": "off"},
+            "runtime_options": {"todo_mode": "off"},
         },
         model_binding=_model_binding(),
         logger=DummyLoggerBackend(),

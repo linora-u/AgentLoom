@@ -1,5 +1,7 @@
 name: inspect_note
 agent_runtime: smolagents
+runtime_options:
+  smart_summary: false
 description: Read the requested release note using your native read tool.
 workflow: Read the file in query using read_file. Use an absolute file path. Return
   the actual file token with final_answer.

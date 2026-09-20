@@ -1,5 +1,7 @@
 name: "shell_session_worker"
 agent_runtime: smolagents
+runtime_options:
+  smart_summary: false
 description: |
   一个工作 agent，负责验证 shell session 的 CWD 隔离和环境变量非持久化。
 model_type: "powerful"

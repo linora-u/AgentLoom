@@ -1,5 +1,7 @@
 name: "scenario_coverage"
 agent_runtime: smolagents
+runtime_options:
+  smart_summary: false
 description: "Validates risk coverage across runtime scenarios, identifies blind spots, and analyzes edge cases."
 model_type: "powerful"
 toolsets:

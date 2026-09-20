@@ -3,10 +3,11 @@ agent_runtime: smolagents
 description: "Transform a word through multiple internal steps"
 
 model_type: "powerful"
-max_steps: 6
+runtime_options:
+  max_steps: 6
+  todo_mode: "off"
+  smart_summary: false
 
-todo:
-  mode: "off"
 
 workflow: |
   Complete these steps internally: reverse the word loom, uppercase it, then

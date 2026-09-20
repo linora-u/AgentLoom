@@ -1,5 +1,7 @@
 name: "step0_preparation"
 agent_runtime: smolagents
+runtime_options:
+  smart_summary: false
 description: "代码质量检查智能体，负责分析模块级代码质量、依赖关系及潜在问题。"
 model_type: "powerful"
 tools: []

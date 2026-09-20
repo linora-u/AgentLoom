@@ -49,4 +49,6 @@ workflow: |
 tools:
   - name: "shell_tool"
 
-max_steps: 15
+runtime_options:
+  max_steps: 15
+  smart_summary: false

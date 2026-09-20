@@ -5,14 +5,6 @@ from pathlib import Path
 from typing import Any
 from agentloom.configuration.config import EffectiveAgentConfigSnapshot
 
-# These historical YAML fields belonged to smol before runtime_options existed.
-# Other runtimes must reject explicit use rather than silently accepting them.
-_LEGACY_SMOL_FIELDS = frozenset({
-    "max_steps", "planning_interval", "smart_summary", "todo", "prompt",
-    "max_consecutive_parse_errors",
-})
-
-
 def runtime_config_layers(config: dict, snapshot: EffectiveAgentConfigSnapshot | None):
     source = str(config.get("_yaml_file_path") or config.get("name", "agent"))
     layers = [(source, config, False)] if snapshot is None else [
@@ -38,13 +30,7 @@ def normalize_runtime_options(
     _, layers = runtime_config_layers(config, snapshot)
     options: dict[str, Any] = {}
     sources: dict[str, str] = {}
-    for layer_source, data, historical_global in layers:
-        if not historical_global:
-            for key in sorted(_LEGACY_SMOL_FIELDS.intersection(data)):
-                raise ValueError(
-                    f"{layer_source}:{key} is a smolagents-only option; "
-                    f"agent_runtime={runtime_id!r} must use its own runtime_options"
-                )
+    for layer_source, data, _ in layers:
         raw = data.get("runtime_options", {})
         if not isinstance(raw, dict):
             raise ValueError(f"{layer_source}:runtime_options must be a mapping")
@@ -58,11 +44,3 @@ def normalize_runtime_options(
 
         validate_options(options)
     return options, sources
-
-
-def __getattr__(name: str):
-    # Transitional constants for direct Python callers; no executable imports.
-    if name in {"SMOL_DEFAULTS", "LEGACY_OPTIONS"}:
-        from agentloom.adapters.smolagents import options
-        return getattr(options, name)
-    raise AttributeError(name)

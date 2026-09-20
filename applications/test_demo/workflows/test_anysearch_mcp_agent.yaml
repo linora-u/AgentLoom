@@ -63,4 +63,6 @@ workflow: |
   - Summary of the extracted URL content
   - Any errors or limitations encountered
 
-max_steps: 20
+runtime_options:
+  max_steps: 20
+  smart_summary: false

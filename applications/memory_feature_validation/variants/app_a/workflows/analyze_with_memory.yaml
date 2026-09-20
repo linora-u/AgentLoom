@@ -2,7 +2,9 @@ name: "memory_scope_app_a_analysis"
 agent_runtime: smolagents
 description: "Analyze a scoped operational case in validation Application A."
 model_type: "summary"
-max_steps: 8
+runtime_options:
+  max_steps: 8
+  smart_summary: false
 
 workflow: |
   Load the case with `validation_memory_case`, investigate it, and return a

@@ -2,7 +2,7 @@
 
 规格日期：2026-09-20。研究基线：main，c697b24f602e71d56c9aa2c532e6079c0db5aa9d。
 
-状态：开发规格，部分实施完成。编号票据 01、02 已完成 SDK 验证与公共契约兼容扩展；03–14 待执行，生产 Pi 尚未接入。所有票据和执行计划集中在 [独立目录](../tickets/agent-runtime-pi/README.md)，已完成部分见 [01/02 集成验收](../tickets/agent-runtime-pi/01-02-integration.md)。
+状态：开发规格，01–11、13 已有交付记录，12/14 正在串行收口；当前进度以 [票据索引](../tickets/agent-runtime-pi/README.md) 为准。2026-09-21 维护者取消旧 smol YAML 字段兼容：`runtime_options` 是唯一解释的后端配置；旧顶层字段静默忽略，不转换、不拒绝。历史验收记录保留当时事实。
 
 ## Problem Statement
 
@@ -20,7 +20,7 @@ AgentLoom 拥有应用定义、Supervisor/Worker 协作、task/Run 身份、工�
 
 第二个真实基座确定为 Pi。接入 Pi coding-agent SDK 的 AgentSession，通过受控 Node 子进程运行；复用其原生模型接口、自动会话压缩和官方基础工具。AgentLoom 的记忆、Worker 调用、产物检索、MCP 和专业工具经适配器提供给 Pi。两类工具都遵循 AgentLoom 的权限、Hook、文件保护和证据规则。
 
-已有 smolagents 应用保持 YAML 和启动方式兼容。smolagents 专属实现收进自己的 adapter，其他基座不必复刻。更换基座时保留业务定义与工具权限，允许修改后端专属参数、调整提示词并重新验证任务质量；不承诺模型行为相同或运行中跨基座迁移。
+仓库 smolagents 应用迁移到 `runtime_options`，启动方式保持不变。旧顶层 smol 参数不再解释，外部应用需自行迁移才能保留这些参数的效果。smolagents 专属实现收进自己的 adapter，其他基座不必复刻。更换基座时保留业务定义与工具权限，允许修改后端专属参数、调整提示词并重新验证任务质量；不承诺模型行为相同或运行中跨基座迁移。
 
 记忆保留现有 Application/Project 范围、持久化和审核行为，不新增必填记忆配置，也不借此次接入重做记忆产品。Pi 会话摘要不会自动成为 AgentLoom 长期记忆。
 
@@ -30,9 +30,9 @@ AgentLoom 拥有应用定义、Supervisor/Worker 协作、task/Run 身份、工�
 
 1. As an Application author, I want to keep defining Supervisor and Worker roles in YAML, so that changing an Agent runtime does not require rewriting my application.
 2. As an Application author, I want to select smolagents or Pi for each Agent, so that I can replace one executor at a time.
-3. As an Application author, I want existing smolagents definitions and launch commands to remain usable, so that the migration does not interrupt established applications.
+3. As an Application author, I want one canonical runtime_options schema and unchanged launch commands, so that backend settings have a single owner. Old top-level smol fields are silently ignored without conversion or rejection.
 4. As an Application author, I want backend-specific options separated from application semantics, so that one runtime does not have to imitate another runtime's algorithms.
-5. As an Application author, I want unsupported explicit options diagnosed before execution, so that configuration does not silently lose its meaning.
+5. As an Application author, I want invalid or unsupported runtime_options diagnosed before execution; historical top-level smol fields remain ignored.
 6. As an Application author, I want to retain role descriptions, Worker input contracts and collaboration relationships, so that changing a backend preserves my business design.
 7. As an Application author, I want unknown or unavailable runtimes rejected explicitly, so that a requested Pi run never silently falls back to smolagents.
 8. As an Application author, I want existing model profiles mapped into Pi's native provider configuration, so that I do not maintain a second model catalog.
@@ -110,8 +110,8 @@ Existing directories are retained. Move implementation only where ownership actu
 - Normalize role, instructions, model profile, visible tool contracts, instance identity, runtime requirements and backend options before construction. Model selection is data; a Python ModelTurnBinding is not mandatory for all runtimes.
 - Keep shared Python model adapters for smol and existing framework-owned background operations where they are still needed. Native Pi provider support does not require deleting them.
 - Backend selection remains explicit through agent_runtime. Unknown, uninstalled or unsupported choices fail without fallback. Validation and construction consume the same registry semantics.
-- Introduce one backend-owned runtime_options mapping only as needed for backend-specific values; do not add memory configuration. Preserve existing smol top-level fields through normalization into smol options. Conflicting old/new values receive a source-aware diagnostic rather than arbitrary precedence.
-- Legacy defaults must not leak into Pi: derive explicitness from configuration provenance. A smol-only default does not become a Pi requirement; an explicitly selected incompatible option is diagnosed. Existing smol max_steps retains its counting semantics; Pi turn limits are not falsely declared equivalent.
+- Use backend-owned runtime_options as the sole interpreted backend configuration; do not add memory configuration. Ignore historical top-level max_steps, planning_interval, smart_summary, todo, prompt and max_consecutive_parse_errors silently, without conversion, rejection or old/new conflict checks. Migrate maintained applications and examples to canonical options.
+- Backend defaults belong to each adapter. A smol-only default does not become a Pi requirement; an incompatible key inside runtime_options is diagnosed. runtime_options.max_steps retains smol counting semantics; Pi turn limits are not falsely declared equivalent. Smol uses todo_mode as a quoted string, prompt_template_path as a string path, and max_consecutive_model_errors as a positive integer.
 - Results identify completion, interruption, execution-limit termination and failure through the existing result/error model, with final output, usage, artifacts and optional native checkpoint. A native final response does not itself settle an AgentLoom Goal.
 - Preserve observable Stop policy while removing universal final_answer injection. smol may continue using its native terminal tool; Pi maps native completion into the same external result contract.
 - Runtime capabilities describe tested behavior, including structured tools, platform Worker tools, parallel calls and same-runtime recovery. Additional requirements such as Goal support are enforced where requested; unsupported behavior is rejected, not silently disabled.
@@ -199,7 +199,7 @@ Good tests assert externally observable results, effects, isolation, records and
 
 | ID | Scenario | Required evidence |
 | --- | --- | --- |
-| A01 | Existing smol compatibility | Existing YAML/CLI still run; model profiles, smol options, committed Worker reuse and ordinary Goal behavior remain correct |
+| A01 | Canonical smol Application | Migrated runtime_options YAML/CLI run; old top-level smol fields are ignored without conversion or rejection; model profiles, committed Worker reuse and ordinary Goal behavior remain correct |
 | A02 | Pi-only Application | Real Pi SDK loop and native provider path execute through execute_app; no hidden smol construction |
 | A03 | Mixed-runtime collaboration | smol Supervisor calls a Pi Worker and Pi Supervisor calls a smol Worker through AgentLoom Worker tools; parallel Workers retain independent instance/session/Hook identity |
 | A04 | Native and AgentLoom tools | Real official basic-tool implementation and real platform tool complete under one correlated tool/evidence contract; no duplicate basic tools |

@@ -320,7 +320,6 @@ def validate_effective_definition(
     snapshot: EffectiveAgentConfigSnapshot, root: Path, source: str, *,
     runtime_id: object = "smolagents", runtime_options: dict | None = None,
 ):
-    from agentloom.application.validation import build_normalized_execution_config
     from agentloom.runtime.hooks.config import HookConfigLayer, HookPlanCompiler
 
     # Keep the parsed catalog available for inspection even if another
@@ -336,7 +335,7 @@ def validate_effective_definition(
     if runtime_id == "smolagents":
         prompt_path = (
             runtime_options.get("prompt_template_path") if runtime_options is not None
-            else build_normalized_execution_config(snapshot.values, source_name=source, agent_root=root).prompt_template_path
+            else None
         )
         if prompt_path and not Path(prompt_path).is_file():
             raise ValueError(f"Prompt template does not exist: {prompt_path}")

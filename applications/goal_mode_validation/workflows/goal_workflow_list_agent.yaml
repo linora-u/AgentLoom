@@ -2,7 +2,9 @@ name: "goal_workflow_list_agent"
 agent_runtime: smolagents
 description: "Validate explicit Goal completion and Goal-mode workflow-list merging."
 model_type: "powerful"
-max_steps: 20
+runtime_options:
+  max_steps: 20
+  smart_summary: false
 goal:
   enabled: true
 

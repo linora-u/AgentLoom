@@ -1,5 +1,7 @@
 name: "performance_analysis"
 agent_runtime: smolagents
+runtime_options:
+  smart_summary: false
 description: "Identifies performance issues: algorithmic complexity hotspots, unnecessary copies, memory allocation patterns, and I/O bottlenecks."
 model_type: "powerful"
 toolsets:

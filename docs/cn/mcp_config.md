@@ -243,7 +243,8 @@ workflow: |
   You have access to web_search from MCP.
   Use mcp__MiniMax__web_search to search for information.
 
-max_steps: 10
+runtime_options:
+  max_steps: 10
 ```
 
 ### 运行

@@ -3,7 +3,9 @@ agent_runtime: smolagents
 description: "Create and verify a proposal-only Application memory candidate."
 
 model_type: "powerful"
-max_steps: 8
+runtime_options:
+  max_steps: 8
+  smart_summary: false
 
 toolsets: []
 worker_agents: []

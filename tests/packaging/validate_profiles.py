@@ -76,9 +76,9 @@ def validate(output, profiles, node):
     probe = output / "profile_probe.py"
     shutil.copyfile(ROOT / "tests/packaging/profile_probe.py", probe)
     shutil.copyfile(ROOT / "tests/mcp_test/fixtures/stdio_server.py", output / "stdio_server.py")
-    legacy = ROOT / "applications/test_demo/workflows/test_todo_off_agent.yaml"
-    shutil.copyfile(legacy, output / "existing-smol.yaml")
-    report["existing_yaml"] = {"source": str(legacy.relative_to(ROOT)), "sha256": digest(legacy)}
+    sample = ROOT / "applications/test_demo/workflows/test_todo_off_agent.yaml"
+    shutil.copyfile(sample, output / "shipped-smol.yaml")
+    report["shipped_yaml"] = {"source": str(sample.relative_to(ROOT)), "sha256": digest(sample)}
     for profile in profiles:
         runtime = "pi" if profile.startswith("pi") else "smol"
         code_tools = profile != "pi"
@@ -111,7 +111,7 @@ def validate(output, profiles, node):
                      if code_tools else ("help", "missing_yaml", "missing_smol", "no_tools", "read",
                                          "mcp", "memory", "goal", "provider_failure", "child_failure"))
         else:
-            cases = ("help", "missing_yaml", "legacy", "existing_yaml", "outline_python", "mcp", "memory")
+            cases = ("help", "missing_yaml", "smol_read", "shipped_yaml", "outline_python", "mcp", "memory")
         with ThreadPoolExecutor(max_workers=3) as pool:
             results.extend(pool.map(run_case, cases))
         report["profiles"][profile] = {"requirements_sha256": digest(requirements), "cases": results}

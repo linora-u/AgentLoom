@@ -46,7 +46,7 @@
 
 | 所有者 | 03 已有的基线与后续要求 |
 | --- | --- |
-| 协调者 | `tests/application_test/test_native_runtime_expansion.py`、`test_smol_compatibility_application.py`；catalog boundary 与旧 YAML 默认/固定参数测试。公共入口改动需重跑对应用例 |
+| 协调者 | `tests/application_test/test_native_runtime_expansion.py`、`test_smol_compatibility_application.py`；catalog boundary、canonical `runtime_options`、旧 smol 字段静默忽略与工具固定参数测试。公共入口改动需重跑对应用例 |
 | 04 | `tests/tools_test/shell/`、基础 file_ops/grep/glob/Todo 测试与 smol 测试；保留真实 Shell 调用、后台进程终止及实例隔离用例 |
 | 05/06 | `tests/lib_test/runtime/test_native_tool_contract.py` 和 `native_contract_fixture.py` 的场景，迁接生产 Gateway；既有 Gateway/Hook/权限、文件保护和证据测试 |
 | 07/09/10/12 | `test_pi_bridge_protocol.py` 与协议 schema；`tests/pi_sdk_compatibility/` 的真实 SDK 接入结论；逐票增加实际公开入口测试 |
@@ -58,10 +58,10 @@
 
 main 已按当前消费者清理一批迁移残留，见 [迁移清理记录](migration-cleanup.md)。本节的 03 冻结分工及历史移交表保留；后续开发以清理记录中的现存路径为准。
 
-- 旧 YAML 六组默认 toolset、旧 builtin 名称/固定参数及 smol 启动方式持续支持，不在 14 删除。
+- 工具默认集合、builtin 名称/固定参数及启动方式保持既有契约；这不包含旧顶层 smol 执行参数。后端参数只解释 `runtime_options`，旧字段静默忽略。
 - `agentloom.tools.catalog.ToolSpec` / `ToolImplementation` 保留原导入位置，新实现类型在 catalog_types；metadata 不引入 SDK。
 - `agentloom.tools.shell.subprocess_env` 与 `agentloom.adapters.litellm.request_headers` 两个临时兼容导出已清理；调用者分别直接使用 `agentloom.runtime.subprocess_env`、`agentloom.configuration.model_request_headers`。
-- `runtime_options` 的 smol 旧字段和旧 terminal 入口仍为 02 的 expand 兼容项；04 移交清理状态，不提前破坏旧应用。
+- 14 按维护者最新要求删除 smol 顶层旧字段解释与公共 RuntimeDefinition 的过渡参数；仓库应用、生成指南和测试使用 `runtime_options`。旧 terminal 入口仍按实际消费者独立核对，不借 YAML 变更扩大删除范围。
 - Goal 的旧 smol decorator 仍由 08 移除；03 只标明平台 manifest。Todo decorator 与状态由 04 处理。
 - SDK 原始 RESULT.json 和历史提交证据不改写；移动记录见 `03-sdk-relocation.json`。03 的新重放不冒充 01 的原始运行。
 

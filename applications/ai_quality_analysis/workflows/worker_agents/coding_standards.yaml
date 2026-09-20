@@ -1,5 +1,7 @@
 name: "coding_standards"
 agent_runtime: smolagents
+runtime_options:
+  smart_summary: false
 description: "Analyzes code for naming conventions, formatting, magic numbers, dead code, and duplication issues."
 model_type: "powerful"
 toolsets:

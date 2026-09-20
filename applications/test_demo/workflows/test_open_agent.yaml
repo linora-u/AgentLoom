@@ -14,5 +14,6 @@ workflow: |
 
 tools: []
 
-max_steps: 5
-smart_summary: false
+runtime_options:
+  max_steps: 5
+  smart_summary: false

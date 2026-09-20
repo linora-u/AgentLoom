@@ -1,6 +1,7 @@
 import agentloom.runtime.agent as base_agent_module
 from agentloom.adapters.smolagents.loom_mixin import LoomAgentMixin
-from agentloom.application.validation import build_normalized_execution_config
+import pytest
+from agentloom.adapters.smolagents.options import normalize_runtime_options
 from agentloom.runtime.factory import (
     YamlConfiguredAgent,
     YamlConfiguredSupervisorAgent,
@@ -22,6 +23,14 @@ from agentloom.runtime.trace.task_context import (
     set_current_hook_run,
 )
 from smolagents.models import ChatMessage, MessageRole
+
+
+@pytest.fixture(autouse=True)
+def isolated_project_config(tmp_path):
+    from agentloom.configuration.config import LLMConfig, UnifiedConfig, bind_config
+
+    with bind_config(UnifiedConfig({}, agent_root=tmp_path, llm_config=LLMConfig())):
+        yield
 
 _UNSET = object()
 
@@ -95,7 +104,7 @@ def _worker_config(
         "workflow": "wf",
     }
     if planning_interval is not _UNSET:
-        config["planning_interval"] = planning_interval
+        config.setdefault("runtime_options", {})["planning_interval"] = planning_interval
     if max_tokens is not _UNSET:
         config["max_tokens"] = max_tokens
     if llm_max_tokens is not _UNSET:
@@ -118,9 +127,9 @@ def _supervisor_config(
         "worker_agents": [],
     }
     if prompt is not None:
-        config["prompt"] = prompt
+        config.setdefault("runtime_options", {})["prompt_template_path"] = prompt
     if planning_interval is not _UNSET:
-        config["planning_interval"] = planning_interval
+        config.setdefault("runtime_options", {})["planning_interval"] = planning_interval
     if max_tokens is not _UNSET:
         config["max_tokens"] = max_tokens
     if llm_max_tokens is not _UNSET:
@@ -130,7 +139,7 @@ def _supervisor_config(
 
 def _worker_config_with_prompt(prompt) -> dict:
     config = _worker_config()
-    config["prompt"] = prompt
+    config.setdefault("runtime_options", {})["prompt_template_path"] = prompt
     return config
 
 
@@ -157,34 +166,31 @@ def _build_definition(agent, monkeypatch, root):
     return agent._build_runtime_definition()
 
 
-def test_worker_planning_interval_passthrough_from_int(tmp_path):
-    config = build_normalized_execution_config(
-        _worker_config(planning_interval=3),
-        source_name="worker",
-        agent_root=tmp_path,
+@pytest.mark.parametrize("config_builder", [_worker_config, _supervisor_config])
+@pytest.mark.parametrize("interval", [None, 2, 3])
+def test_planning_interval_uses_canonical_value(config_builder, interval, tmp_path):
+    options, _ = normalize_runtime_options(
+        config_builder(planning_interval=interval), agent_root=tmp_path,
     )
-
-    assert config.planning_interval == 3
-
-
-def test_supervisor_planning_interval_passthrough_from_numeric_string(tmp_path):
-    config = build_normalized_execution_config(
-        _supervisor_config(planning_interval="2"),
-        source_name="supervisor",
-        agent_root=tmp_path,
-    )
-
-    assert config.planning_interval == 2
+    assert options["planning_interval"] == interval
 
 
-def test_invalid_planning_interval_falls_back_to_none(tmp_path):
-    config = build_normalized_execution_config(
-        _worker_config(planning_interval="abc"),
-        source_name="worker",
-        agent_root=tmp_path,
-    )
+@pytest.mark.parametrize("interval", ["2", "abc", True, 0, -1])
+def test_canonical_planning_interval_rejects_nonpositive_or_noninteger_values(interval, tmp_path):
+    with pytest.raises(ValueError, match="planning_interval"):
+        normalize_runtime_options(_worker_config(planning_interval=interval), agent_root=tmp_path)
 
-    assert config.planning_interval is None
+
+@pytest.mark.parametrize("legacy", [
+    {"planning_interval": 3}, {"planning_interval": "abc"},
+    {"max_steps": 1, "smart_summary": False, "max_consecutive_parse_errors": 1},
+    {"max_steps": [], "smart_summary": {}, "max_consecutive_parse_errors": "bad"},
+])
+def test_top_level_smol_execution_fields_are_ignored(legacy, tmp_path):
+    expected, _ = normalize_runtime_options(_worker_config(), agent_root=tmp_path)
+    actual, sources = normalize_runtime_options({**_worker_config(), **legacy}, agent_root=tmp_path)
+    assert actual == expected
+    assert all(source == "default:smolagents" for source in sources.values())
 
 
 def test_worker_definition_ignores_agent_max_tokens_fields(monkeypatch, tmp_path):
@@ -314,7 +320,7 @@ def test_worker_definition_uses_effective_smart_summary_override(
     tmp_path,
 ):
     worker = _make_worker(_worker_config())
-    worker._effective_agent_config = {"smart_summary": False}
+    worker._effective_agent_config = {**worker._config, "runtime_options": {"smart_summary": False}}
 
     worker._validate_config()
     definition = _build_definition(worker, monkeypatch, tmp_path)
@@ -322,11 +328,11 @@ def test_worker_definition_uses_effective_smart_summary_override(
     assert definition.runtime_options["smart_summary"] is False
 
 
-def test_worker_prompt_path_passthrough_from_mapping(monkeypatch, tmp_path):
+def test_worker_prompt_path_passthrough_from_canonical_string(monkeypatch, tmp_path):
     prompt_file = tmp_path / "prompts" / "worker_prompt.yaml"
     prompt_file.parent.mkdir(parents=True, exist_ok=True)
     prompt_file.write_text("system_prompt: worker", encoding="utf-8")
-    worker = _make_worker(_worker_config_with_prompt({"path": "prompts/worker_prompt.yaml"}))
+    worker = _make_worker(_worker_config_with_prompt("prompts/worker_prompt.yaml"))
     definition = _build_definition(worker, monkeypatch, tmp_path)
 
     assert definition.runtime_options["prompt_template_path"] == str(prompt_file.resolve())

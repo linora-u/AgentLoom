@@ -30,8 +30,8 @@ def test_self_learning_smoke_declares_a_bounded_tool_sequence() -> None:
     config = yaml.safe_load(workflow_path.read_text(encoding="utf-8"))
     workflow = config["workflow"]
 
-    assert config["max_steps"] == 16
-    assert config["todo"] == {"mode": "off"}
+    assert config["runtime_options"]["max_steps"] == 16
+    assert config["runtime_options"]["todo_mode"] == "off"
     assert [tool["name"] for tool in config["tools"]] == [
         "session_search",
         "memory",

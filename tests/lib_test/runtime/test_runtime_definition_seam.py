@@ -111,7 +111,7 @@ def _complete_runtime_definition(
         instructions="Use the supplied tool, then finish.",
         model=model,
         tool_gateway=gateway,
-        max_steps=7,
+        runtime_options={'max_steps': 7},
     )
 
 
@@ -313,9 +313,9 @@ def test_native_runtime_definition_needs_model_selection_not_python_binding() ->
 
     assert definition.model is None
     assert definition.model_selection.model_id == "native/model"
-    assert definition.max_steps is None
-    assert definition.todo_mode is None
-    assert definition.smart_summary is None
+    assert not hasattr(definition, "max_steps")
+    assert not hasattr(definition, "todo_mode")
+    assert not hasattr(definition, "smart_summary")
     assert definition.runtime_options == {"thinking": "low"}
 
 
