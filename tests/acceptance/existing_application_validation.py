@@ -26,8 +26,8 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT))
-CASES = ("unit", "repo", "context_text", "context_json", "context_multi", "core", "markdown", "goal_bounded", "goal_parallel")
-TIMEOUTS = {case: 900 for case in CASES} | {"goal_bounded": 1500, "goal_parallel": 1200}
+CASES = ("unit", "repo", "context_text", "context_json", "context_multi", "core", "markdown")
+TIMEOUTS = {case: 900 for case in CASES}
 WORKERS = ("function_intake", "scenario_planner", "pytest_generator", "test_refiner", "delivery_reporter")
 CONTEXT = {
     "text": [
@@ -122,14 +122,13 @@ def metadata(workflow: Path) -> dict:
             "workflow": str(workflow), "workflow_sha256": hashlib.sha256(workflow.read_bytes()).hexdigest(),
             "model_type": model_type, "model": C.get_model_config(model_type, "model"),
             "agent_runtime": cfg.get("agent_runtime"),
-            "max_steps": cfg.get("max_steps", 80), "goal": cfg.get("goal"),
+            "max_steps": cfg.get("max_steps", 80),
             "definition_files": {str(path): hashlib.sha256(path.read_bytes()).hexdigest()
                                  for path in workflow.parent.rglob("*") if path.suffix in {".yaml", ".yml", ".md"}},
             "interpreter": sys.executable}
 
 
 def execute(workflow: Path, workspace: Path, *, task: str | None = None, resume: str | None = None, attempt="run") -> dict:
-    from agentloom.application.run import ApplicationRunBudgetLimited
     from agentloom.application.runner import execute_app
     lifecycle = []
     meta = metadata(workflow)
@@ -140,10 +139,7 @@ def execute(workflow: Path, workspace: Path, *, task: str | None = None, resume:
     try:
         result = execute_app(workflow, task_override=task, resume_task_id=resume, file_logging=True, event_sink=observe)
         meta.update(status="completed", run_id=result.run.run_id, task_id=result.run.task_id,
-                    manifest=str(result.run.manifest_path), output=result.output, goal=dict(result.goal) if result.goal else None)
-    except ApplicationRunBudgetLimited as exc:
-        meta.update(status="budget_limited", run_id=exc.run.run_id, task_id=exc.run.task_id,
-                    manifest=str(exc.run.manifest_path), goal=dict(exc.goal))
+                    manifest=str(result.run.manifest_path), output=result.output)
     finally:
         meta["ended_at"] = datetime.now(UTC).isoformat()
         dump(workspace / f"{attempt}_receipt.json", meta)
@@ -300,36 +296,11 @@ def verify_repo(workspace: Path) -> dict:
     return {"directories": len(progress), "known_symbols": sorted(known), "skill": str(skills[0]), "routes": len(routes)}
 
 
-def validate_goal(workspace: Path, receipt: dict, *, bounded: bool) -> dict:
-    goal = receipt.get("goal") or {}
-    if receipt["status"] != "completed" or goal.get("status") != "complete" or not goal.get("evidence"):
-        raise AssertionError(f"Goal did not explicitly complete with evidence: {goal}")
-    if goal.get("used_tokens", 0) <= 0:
-        raise AssertionError("Real Goal token usage absent")
-    runtime = workspace / "runtime"
-    starts = assert_workers(runtime, set())
-    finished = [event for event in events(runtime) if event.get("type") == "worker_call_finished"]
-    if len(finished) != len(starts) or any(event.get("status") != "completed" for event in finished):
-        raise AssertionError("Required audit Workers did not all complete")
-    if len(starts) < (4 if bounded else 6):
-        raise AssertionError(f"Missing real audit Workers: {len(starts)}")
-    name = "bounded_list" if bounded else "parallel_budget"
-    report = workspace / "goal_reports" / f"{name}.md"
-    content = report.read_text()
-    markers = ("# Goal Mode Validation", "## Configuration Contract", "## Verdict") if bounded else (
-        "# Parallel Goal Budget", "## Batch Results", "## Accounting", "## Resume Instructions", f"goal_id={goal['goal_id']}")
-    if any(marker not in content for marker in markers):
-        raise AssertionError("Persisted Goal evidence is incomplete")
-    assert_tools(runtime, {"run_goal_audit_batch", "update_goal"} if bounded else {"inspect_parallel_goal_budget_report", "update_goal"})
-    return {"goal": goal, "worker_calls": len(starts), "report_sha256": hashlib.sha256(report.read_bytes()).hexdigest()}
-
-
 def child(case: str, workspace: Path) -> dict:
     from agentloom.configuration import C
     C.raw.setdefault("runtime", {})["root_dir"] = str(workspace / "runtime")
     C.raw.setdefault("checkpoint", {})["cleanup_on_success"] = False
     C.raw.setdefault("lsp_servers", {})["enabled"] = False
-    os.environ["AGENTLOOM_GOAL_VALIDATION_OUTPUT_ROOT"] = str(workspace / "goal_reports")
     if case == "unit":
         target = workspace / "fixture"
         shutil.copytree(ROOT / "applications/unit_test_studio/test/fixtures/sample_project", target)
@@ -367,31 +338,7 @@ def child(case: str, workspace: Path) -> dict:
         execute(ROOT / "applications/repo_map/workflows/repo_map_agent.yaml", workspace,
                 task=f"Complete all Repo Map architecture analysis and Skill steps. output_dir={workspace / 'repo_output'}")
         return verify_repo(workspace)
-    bounded = case == "goal_bounded"
-    workflow = copied_workflow("goal_mode_validation", "goal_bounded_list_agent.yaml" if bounded else "goal_parallel_budget_agent.yaml", workspace, {})
-    first = execute(workflow, workspace)
-    if bounded:
-        return validate_goal(workspace, first, bounded=True)
-    if first["status"] != "budget_limited":
-        raise AssertionError(f"Parallel Worker budget did not trigger: {first['status']}")
-    report_path = workspace / "goal_reports/parallel_budget.md"
-    before_report = report_path.read_bytes()
-    old_goal = first["goal"]
-    if f"goal_id={old_goal['goal_id']}" not in before_report.decode():
-        raise AssertionError("Budget report is not bound to current Goal")
-    calls_before = assert_workers(workspace / "runtime", set(), count=6)
-    import yaml
-    cfg = yaml.safe_load(workflow.read_text())
-    cfg["goal"]["token_budget"] = old_goal["used_tokens"] + 150000
-    workflow.write_text(yaml.safe_dump(cfg, allow_unicode=True, sort_keys=False))
-    second = execute(workflow, workspace, resume=first["task_id"], attempt="resume")
-    if second["task_id"] != first["task_id"] or second["run_id"] == first["run_id"]:
-        raise AssertionError("Goal resume task/run identity violated")
-    if second["goal"]["used_tokens"] < old_goal["used_tokens"] or second["goal"]["goal_id"] != old_goal["goal_id"]:
-        raise AssertionError("Goal resume lost identity/cumulative usage")
-    if report_path.read_bytes() != before_report or len(assert_workers(workspace / "runtime", set())) != len(calls_before):
-        raise AssertionError("Goal resume reran committed Worker batch")
-    return validate_goal(workspace, second, bounded=False) | {"budget_limited_then_resumed": True, "batch_not_repeated": True}
+    raise ValueError(f"Unknown validation case: {case}")
 
 
 def main() -> int:
@@ -412,9 +359,6 @@ def main() -> int:
                 value = verify_repo(args.workspace)
             elif args.case.startswith("context_"):
                 value = verify_context(args.case.removeprefix("context_"), args.workspace)
-            elif args.case.startswith("goal_"):
-                receipt = args.workspace / ("run_receipt.json" if args.case == "goal_bounded" else "resume_receipt.json")
-                value = validate_goal(args.workspace, json.loads(receipt.read_text()), bounded=args.case == "goal_bounded")
             else:
                 parser.error("Tool scenarios are checked by a new full run")
         except BaseException as exc:

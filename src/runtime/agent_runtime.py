@@ -17,14 +17,12 @@ RuntimeState = Literal[
     "max_steps_error",
     "interrupted",
     "failed",
-    "budget_limited",
 ]
 RUNTIME_STATES: tuple[RuntimeState, ...] = (
     "success",
     "max_steps_error",
     "interrupted",
     "failed",
-    "budget_limited",
 )
 
 type JSONValue = (
@@ -60,7 +58,6 @@ type RuntimeErrorCategory = Literal[
     "provider",
     "tool",
     "interrupted",
-    "budget_limited",
     "internal",
 ]
 RUNTIME_ERROR_CATEGORIES: tuple[RuntimeErrorCategory, ...] = (
@@ -69,7 +66,6 @@ RUNTIME_ERROR_CATEGORIES: tuple[RuntimeErrorCategory, ...] = (
     "provider",
     "tool",
     "interrupted",
-    "budget_limited",
     "internal",
 )
 
@@ -184,8 +180,6 @@ def require_runtime_state(
         category: RuntimeErrorCategory = "internal"
         if state == "interrupted":
             category = "interrupted"
-        elif state == "budget_limited":
-            category = "budget_limited"
         raise AgentRuntimeError(
             f"{error_prefix}: {state or 'missing_runtime_state'}",
             category=category,

@@ -3,7 +3,6 @@ from __future__ import annotations
 import inspect
 from collections.abc import Callable
 from dataclasses import dataclass
-from dataclasses import field as dataclass_field
 from pathlib import Path
 from typing import Any
 
@@ -12,13 +11,11 @@ from agentloom.runtime.agent_runtime import (
     RuntimeRequirements,
     build_builtin_runtime_registry,
 )
-from agentloom.runtime.goal import GoalConfig, normalize_goal_config
 
 
 @dataclass
 class NormalizedAgentConfig:
     agent_function_schema: dict | None = None
-    goal: GoalConfig = dataclass_field(default_factory=GoalConfig)
 
 
 _WORKFLOW_VALIDATION_ERROR = (
@@ -372,6 +369,8 @@ class AgentConfigNormalizer:
     @staticmethod
     def validate_removed_fields(config: dict) -> None:
         """Keep removed-field rejection identical in preflight and construction."""
+        if "goal" in config:
+            raise ValueError("Configuration error: goal was removed; use ordinary task execution")
         if "tools_mapping" in config:
             raise ValueError(
                 "Configuration error: tools_mapping was removed; Skills do not grant tools"
@@ -545,14 +544,8 @@ class AgentConfigNormalizer:
         source_name: str,
     ) -> NormalizedAgentConfig:
         _ = agent_root
-        if "goal" in config:
-            raise ValueError(
-                f"Worker Agent configuration {source_name} must not define goal; "
-                "Goal mode is Supervisor-only"
-            )
         return NormalizedAgentConfig(
             agent_function_schema=cls.validate_agent_function_schema(config),
-            goal=GoalConfig(),
         )
 
     @classmethod
@@ -564,8 +557,4 @@ class AgentConfigNormalizer:
         source_name: str,
     ) -> NormalizedAgentConfig:
         _ = agent_root
-        name = str(config.get("name", source_name))
-        return NormalizedAgentConfig(
-            agent_function_schema=None,
-            goal=normalize_goal_config(config, source=name),
-        )
+        return NormalizedAgentConfig(agent_function_schema=None)

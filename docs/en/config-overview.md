@@ -10,7 +10,7 @@ The configuration of AgentLoom is primarily divided into three major categories,
 |----------|----------|------------|
 | `system.yaml` | `config/system.yaml` | **Global system configuration**. Controls tools, workspace policy, permissions, and runtime storage. |
 | `llm.yaml` | `config/llm.yaml` | **Global model configuration**. Every model type explicitly selects a wire adapter and independently configures its model name, credentials, endpoint, and request parameters. |
-| `agent_xxx.yaml` | `applications/<app>/workflows/*.yaml` | **Agent configuration**. Defines role, runtime, workflow, tools, and model type. A top-level Supervisor may also enable [Goal Mode](goal_mode.md); Workers cannot own Goals. |
+| `agent_xxx.yaml` | `applications/<app>/workflows/*.yaml` | **Agent configuration**. Defines role, runtime, workflow, tools, and model type. |
 | *Application-level system configuration* | `applications/<app>/config/system.yaml` | **Optional application-level override**. Used to override default system behaviors for specific applications (e.g., modifying tool access control or replacing default tools). |
 
 > For more information, refer to:
@@ -129,15 +129,6 @@ full_dict = C.raw
 2. **Global caching**: The parsed results are cached in `_ACTIVE_CONFIG`, ensuring configuration consistency throughout the lifecycle.
 3. **Dual storage**: The `UnifiedConfig` object internally maintains both the merged `_raw` dictionary and an independent `_llm_config` (Pydantic object).
 
-## 5. Goal Mode configuration boundary
-
-Goal Mode is configured only in a top-level Supervisor Agent YAML. It is not a
-global or Application `system.yaml` overlay, and Workers cannot configure it.
-Goal task checkpoints add `goal.json`; every run manifest projects the same
-structured state and terminal evidence is copied to `audit/goal.json`.
-`budget_limited` preserves the checkpoint so a YAML budget change can resume the
-same `task_id`. See [Goal Mode](goal_mode.md) for configuration, continuation,
-budget, and schedule behavior.
 
 ## Installed package and project context
 

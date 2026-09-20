@@ -36,7 +36,6 @@ effective metadata ───────────┘
 
 catalog 是唯一事实源。函数即使存在于 `src/tools/`，没有 catalog 中的
 `ToolSpec` 也不是内置工具。YAML 动态工具、生成的 Worker 工具不进入该 catalog；
-Goal 工具由 Goal Mode 注入，也不属于默认 catalog。
 
 ## Toolsets
 

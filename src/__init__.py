@@ -17,10 +17,6 @@ _LAZY_EXPORTS = {
     "get_default_toolsets": ("agentloom.configuration", "get_default_toolsets"),
     "get_model_config": ("agentloom.configuration", "get_model_config"),
     "ApplicationRunError": ("agentloom.application.run", "ApplicationRunError"),
-    "ApplicationRunBudgetLimited": (
-        "agentloom.application.run",
-        "ApplicationRunBudgetLimited",
-    ),
     "ApplicationRunInterrupted": ("agentloom.application.run", "ApplicationRunInterrupted"),
     "ApplicationRunResult": ("agentloom.application.run", "ApplicationRunResult"),
     "RunEventSink": ("agentloom.application.run", "RunEventSink"),
@@ -57,7 +53,6 @@ __all__ = [
     "get_default_toolsets",
     "get_model_config",
     "ApplicationRunError",
-    "ApplicationRunBudgetLimited",
     "ApplicationRunInterrupted",
     "ApplicationRunResult",
     "RunEventSink",

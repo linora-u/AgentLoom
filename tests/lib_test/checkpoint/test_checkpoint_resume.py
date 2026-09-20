@@ -263,7 +263,7 @@ class TestWorkerCheckpoint:
 class TestSupervisorCheckpoint:
     @pytest.mark.parametrize(
         "status",
-        ["completed", "failed", "interrupted", "budget_limited"],
+        ["completed", "failed", "interrupted"],
     )
     def test_terminal_checkpoint_write_failure_propagates(
         self,
