@@ -88,6 +88,12 @@ agentloom --version
 agentloom --snapshot
 ```
 
+The source installer defaults to `smol` plus professional `code` tools. For Pi
+without smol, use `./install --runtime pi` with Node 22.19+ and npm available;
+it automatically downloads the pinned SDK and builds AgentLoom's bridge. See
+[runtime installation profiles](docs/en/runtime_installation.md) for locked
+checkout/release commands and clean Application verification.
+
 Create the local model configuration:
 
 ```bash
@@ -239,7 +245,7 @@ max_steps: 8
 Run the Supervisor directly:
 
 ```bash
-uv run loom run applications/release_review/workflows/release_review_agent.yaml
+uv run --locked --extra smol --extra code loom run applications/release_review/workflows/release_review_agent.yaml
 ```
 
 Or ask a Skill-aware coding assistant to read
@@ -285,14 +291,14 @@ corresponding feature is configured or used.
 Run the included code-review Application without creating a new Application:
 
 ```bash
-uv run loom run applications/ai_quality_analysis/workflows/code_review_agent.yaml
+uv run --locked --extra smol --extra code loom run applications/ai_quality_analysis/workflows/code_review_agent.yaml
 ```
 
 Use machine-readable lifecycle events when another program owns execution:
 
 ```bash
-uv run loom run <workflow> --output-format json
-uv run loom run <workflow> --output-format jsonl
+uv run --locked --extra smol --extra code loom run <workflow> --output-format json
+uv run --locked --extra smol --extra code loom run <workflow> --output-format jsonl
 ```
 
 For programmatic execution, `execute_app()` returns an `ApplicationRunResult`
@@ -309,7 +315,7 @@ Framework source lives directly in `src/application/`, `src/runtime/`,
 `src/adapters/`, and the other responsibility modules. Installation maps `src/`
 to the Python package name `agentloom`: the import above loads
 `src/application/runner.py`. There is no extra `agentloom` source directory.
-Use `uv sync --python 3.12 --locked --all-groups` to install the checkout before
+Use `uv sync --python 3.12 --locked --all-groups --extra smol --extra code` to install the checkout before
 calling Python APIs. The old `src.*` imports and module commands are removed;
 supported commands are `loom` and `python -m agentloom`. See the
 [architecture and migration map](docs/specs/architecture-migration-inventory.md)
@@ -355,7 +361,7 @@ agentloom schedules --project /path/to/project serve
 
 ```bash
 # Framework
-uv run pytest tests -q
+uv run --locked --extra smol --extra code pytest tests -q
 
 # TUI
 cd agentloom-tui

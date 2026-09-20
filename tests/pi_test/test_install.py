@@ -22,9 +22,12 @@ def installation(tmp_path, monkeypatch):
     source = Path(install.__file__).parent
     bridge = tmp_path / "pi/bridge"
     bridge.mkdir(parents=True)
-    for name in ("package.json", "package-lock.json", "tsconfig.json", "index.ts", "protocol.ts"):
-        shutil.copyfile(source / "bridge" / name, bridge / name)
-    shutil.copyfile(source / "bridge-v2.schema.json", bridge.parent / "bridge-v2.schema.json")
+    sources = [source / "bridge" / name for name in ("package.json", "package-lock.json", "tsconfig.json")]
+    sources.extend((source / "bridge").glob("*.ts"))
+    for path in sources:
+        shutil.copyfile(path, bridge / path.name)
+    for schema in source.glob("bridge-v*.schema.json"):
+        shutil.copyfile(schema, bridge.parent / schema.name)
     binary = tmp_path / "bin"
     binary.mkdir()
     node = install.find_node(os.environ.copy())
@@ -43,7 +46,7 @@ sdk=root/'node_modules/@earendil-works/pi-coding-agent';sdk.mkdir(parents=True,e
 (sdk/'package.json').write_text(json.dumps({{'version':'0.79.4','type':'module','main':'index.js'}}))
 (sdk/'index.js').write_text('export const fixture = true;')
 tsc=root/'node_modules/typescript/bin/tsc';tsc.parent.mkdir(parents=True,exist_ok=True)
-tsc.write_text("const fs=require('node:fs');fs.mkdirSync('dist',{{recursive:true}});fs.writeFileSync('dist/index.js','export const fixture=true;');fs.writeFileSync('dist/protocol.js','export const fixture=true;');")
+tsc.write_text("const fs=require('node:fs');fs.mkdirSync('dist',{{recursive:true}});for (const p of fs.readdirSync('.').filter(p=>p.endsWith('.ts'))) fs.writeFileSync('dist/'+p.replace(/\\\\.ts$/,'.js'),'export const fixture=true;');")
 ''')
     npm.chmod(0o755)
     monkeypatch.setenv("PATH", str(binary) + os.pathsep + os.environ["PATH"])
@@ -76,6 +79,40 @@ def test_version_mismatch_fails_before_download(installation):
     data["dependencies"]["@earendil-works/pi-coding-agent"] = "0.0.1"
     manifest.write_text(json.dumps(data))
     with pytest.raises(RuntimeError, match="version.*lock"):
+        install_pi(installation)
+    assert not calls(installation)
+
+
+@pytest.mark.parametrize("source", ["model.ts", "tools.ts"])
+def test_installer_rebuilds_when_a_tool_or_model_bridge_changes(installation, source):
+    install_pi(installation)
+    with (installation / source).open("a") as stream:
+        stream.write("\n// changed installed bridge behavior\n")
+    install_pi(installation)
+    assert len(calls(installation)) == 2
+
+
+def test_installer_repairs_a_missing_compiled_tool_module(installation):
+    install_pi(installation)
+    (installation / "dist/tools.js").unlink()
+    install_pi(installation)
+    assert (installation / "dist/tools.js").is_file()
+    assert len(calls(installation)) == 2
+
+
+def test_installer_tracks_a_renamed_protocol_schema(installation):
+    install_pi(installation)
+    schema = next(installation.parent.glob("bridge-v*.schema.json"))
+    version = int(schema.name.split("-v")[1].split(".")[0])
+    schema.rename(schema.with_name(f"bridge-v{version + 1}.schema.json"))
+    assert install_pi(installation).is_file()
+    assert len(calls(installation)) == 2
+
+
+def test_missing_protocol_schema_fails_before_download(installation):
+    for schema in installation.parent.glob("bridge-v*.schema.json"):
+        schema.unlink()
+    with pytest.raises(RuntimeError, match="schema"):
         install_pi(installation)
     assert not calls(installation)
 

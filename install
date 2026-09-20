@@ -6,6 +6,7 @@ MUTED='\033[0;2m'
 RED='\033[0;31m'
 NC='\033[0m'
 NO_MODIFY_PATH=false
+RUNTIME_PROFILE=""
 EXPECTED_OPENCODE_VERSION="1.18.3"
 
 usage() {
@@ -15,6 +16,7 @@ AgentLoom source installer
 Usage: ./install [options]
 
 Options:
+  --runtime pi|smol Select the Agent runtime (default: saved profile, or smol)
   --no-modify-path  Do not update the current shell configuration
   -h, --help        Show this help
 
@@ -25,6 +27,13 @@ EOF
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
+    --runtime)
+      case "${2:-}" in
+        pi|smol) RUNTIME_PROFILE=$2 ;;
+        *) printf '%s\n' 'Error: --runtime requires pi or smol.' >&2; exit 2 ;;
+      esac
+      shift 2
+      ;;
     --no-modify-path)
       NO_MODIFY_PATH=true
       shift
@@ -46,6 +55,14 @@ TUI_ROOT="$REPO_ROOT/agentloom-tui"
 INSTALL_ROOT=${AGENTLOOM_INSTALL_DIR:-"$HOME/.agentloom"}
 mkdir -p "$INSTALL_ROOT"
 INSTALL_ROOT=$(cd -- "$INSTALL_ROOT" && pwd -P)
+if [[ -z "$RUNTIME_PROFILE" ]] && [[ -f "$INSTALL_ROOT/runtime-profile" ]]; then
+  RUNTIME_PROFILE=$(cat "$INSTALL_ROOT/runtime-profile")
+fi
+RUNTIME_PROFILE=${RUNTIME_PROFILE:-smol}
+case "$RUNTIME_PROFILE" in
+  pi|smol) ;;
+  *) printf '%s\n' 'Error: invalid saved runtime profile; select --runtime pi or smol.' >&2; exit 2 ;;
+esac
 VENV_DIR="$INSTALL_ROOT/venv"
 BIN_DIR="$INSTALL_ROOT/bin"
 mkdir -p "$BIN_DIR"
@@ -106,12 +123,23 @@ if ! BUN_BIN=$(find_bun); then
 fi
 
 printf '%b\n' "${MUTED}Creating the locked AgentLoom Python environment...${NC}"
+RUNTIME_EXTRAS=(--extra "$RUNTIME_PROFILE")
+if [[ "$RUNTIME_PROFILE" == smol ]]; then
+  # Preserve the original source installer's complete code-tool environment.
+  RUNTIME_EXTRAS+=(--extra code)
+fi
 UV_PROJECT_ENVIRONMENT="$VENV_DIR" "$UV_BIN" sync \
   --frozen \
+  "${RUNTIME_EXTRAS[@]}" \
   --no-editable \
   --no-dev \
   --reinstall-package agentloom \
   --project "$REPO_ROOT"
+
+if [[ "$RUNTIME_PROFILE" == pi ]]; then
+  printf '%b\n' "${MUTED}Downloading the locked Pi SDK and building the bridge...${NC}"
+  "$VENV_DIR/bin/python" -I -m agentloom install-runtime pi
+fi
 
 BUILD_DIR=$(mktemp -d "${TMPDIR:-/tmp}/agentloom-install.XXXXXX")
 cleanup() {
@@ -181,7 +209,7 @@ if [ "${1:-}" = "update" ]; then
     printf '%s\n' 'agentloom: the trusted source directory is unavailable; update from a checkout with ./install' >&2
     exit 1
   fi
-  exec "$AGENTLOOM_SOURCE_ROOT/install" --no-modify-path "$@"
+  AGENTLOOM_INSTALL_DIR="$install_root" exec "$AGENTLOOM_SOURCE_ROOT/install" --no-modify-path "$@"
 fi
 if [ "${1:-}" = "schedules" ]; then
   shift
@@ -193,6 +221,8 @@ chmod 755 "$WRAPPER_TMP"
 mv -f "$WRAPPER_TMP" "$BIN_DIR/agentloom"
 date +%s > "$INSTALL_ROOT/.installed-at.$$.tmp"
 mv -f "$INSTALL_ROOT/.installed-at.$$.tmp" "$INSTALL_ROOT/installed-at"
+printf '%s\n' "$RUNTIME_PROFILE" > "$INSTALL_ROOT/.runtime-profile.$$.tmp"
+mv -f "$INSTALL_ROOT/.runtime-profile.$$.tmp" "$INSTALL_ROOT/runtime-profile"
 
 add_to_path() {
   local config_file=$1
