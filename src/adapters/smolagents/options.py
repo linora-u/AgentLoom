@@ -26,6 +26,14 @@ def _resolve_agent_root(agent_root: Path | str) -> Path:
     return Path(agent_root).expanduser().resolve()
 
 
+_MOVED_TEMPLATE_FILES = frozenset({
+    "toolcalling_agent.example.yaml",
+    "anthropic/toolcalling_agent.example.yaml",
+    "openai/toolcalling_agent.example.yaml",
+    "gemini/toolcalling_agent.example.yaml",
+})
+
+
 def resolve_execution_prompt_template_path(
     raw_path: str,
     source: str,
@@ -39,6 +47,15 @@ def resolve_execution_prompt_template_path(
         path_obj = (_resolve_agent_root(agent_root) / path_obj).resolve()
     else:
         path_obj = path_obj.resolve()
+    if not path_obj.exists():
+        package_root = Path(__file__).resolve().parents[2]
+        for legacy_root in (package_root / "runtime/prompts", _resolve_agent_root(agent_root) / "src/runtime/prompts"):
+            try:
+                relative = path_obj.relative_to(legacy_root)
+            except ValueError:
+                continue
+            if relative.as_posix() in _MOVED_TEMPLATE_FILES:
+                return Path(__file__).resolve().parent / "prompts" / relative
     return path_obj
 
 
