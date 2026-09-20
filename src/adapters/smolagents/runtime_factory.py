@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-from dataclasses import replace
 from typing import Any
 
 from agentloom.adapters.smolagents.agent_logger import (
@@ -17,7 +16,8 @@ from agentloom.adapters.smolagents.runtime_adapter import (
 )
 from agentloom.runtime.agent_runtime import RuntimeDefinition
 from agentloom.runtime.logging import get_global_logger, get_logger
-from agentloom.runtime.prompts.prompt_builder import (
+from agentloom.adapters.smolagents.options import options_from_definition
+from agentloom.adapters.smolagents.prompts.prompt_builder import (
     _append_to_system_prompt,
     load_base_prompt_templates,
     todo_policy_for_mode,
@@ -42,12 +42,6 @@ def _run_scoped_stop_check(
     return hook_run.build_stop_check()(final_answer, memory, **kwargs)
 
 
-def _prompt_metadata(definition: RuntimeDefinition) -> tuple[str | None, str]:
-    if definition.project_root is None:
-        raise ValueError(
-            "Smolagents runtime requires RuntimeDefinition.project_root"
-        )
-    return definition.prompt_template_path, definition.project_root
 
 
 class _SmolToolGateway:
@@ -107,42 +101,29 @@ class SmolagentsRuntimeFactory:
 
         if definition.model is None:
             raise ValueError("smolagents requires a Python model binding")
-        from agentloom.application.runtime_options import SMOL_DEFAULTS
-
-        options = dict(SMOL_DEFAULTS)
-        for name in SMOL_DEFAULTS:
-            value = getattr(definition, name)
-            if value is not None:
-                options[name] = value
-        for name, value in definition.runtime_options.items():
-            if name not in SMOL_DEFAULTS:
-                raise ValueError(f"Unsupported smolagents runtime option: {name}")
-            legacy = getattr(definition, name)
-            if legacy is not None and legacy != value:
-                raise ValueError(f"Conflicting smolagents runtime option: {name}")
-            options[name] = value
-        definition = replace(definition, **options)
-        gateway = _SmolToolGateway(definition.tool_gateway, definition.todo_mode)
+        if definition.project_root is None:
+            raise ValueError("Smolagents runtime requires RuntimeDefinition.project_root")
+        options = options_from_definition(definition)
+        gateway = _SmolToolGateway(definition.tool_gateway, options["todo_mode"])
         try:
             instructions = "\n\n".join(filter(None, (
-                definition.instructions, todo_policy_for_mode(definition.todo_mode),
+                definition.instructions, todo_policy_for_mode(options["todo_mode"]),
             )))
             model = SmolagentsModelTurnBridge(binding=definition.model)
-            prompt_path, agent_root = _prompt_metadata(definition)
             prompt_templates = load_base_prompt_templates(
-                prompt_template_path=prompt_path,
+                prompt_template_path=options["prompt_template_path"],
                 model_id=definition.model.model_id,
-                agent_root=agent_root,
+                agent_root=definition.project_root,
                 logger=logger,
             )
             agent_kwargs: dict[str, Any] = {
                 "tool_gateway": gateway,
                 "model": model,
-                "max_steps": definition.max_steps,
+                "max_steps": options["max_steps"],
                 "max_tokens": definition.model.max_tokens,
                 "context_window": definition.model.context_window,
                 "max_output_tokens": definition.model.max_output_tokens,
-                "smart_summary": definition.smart_summary,
+                "smart_summary": options["smart_summary"],
                 "stream_outputs": False,
                 "verbosity_level": LogLevel.INFO,
                 "name": definition.name,
@@ -160,13 +141,13 @@ class SmolagentsRuntimeFactory:
                     instructions,
                 )
                 agent_kwargs["prompt_templates"] = prompt_templates
-            if definition.planning_interval is not None:
-                agent_kwargs["planning_interval"] = definition.planning_interval
+            if options["planning_interval"] is not None:
+                agent_kwargs["planning_interval"] = options["planning_interval"]
 
             native_runtime = ToolCallingAgentV2(**agent_kwargs)
-            native_runtime._agent_loom_todo_mode = definition.todo_mode
+            native_runtime._agent_loom_todo_mode = options["todo_mode"]
             native_runtime._max_consecutive_parse_errors = (
-                definition.max_consecutive_model_errors
+                options["max_consecutive_model_errors"]
             )
             return SmolagentsRuntimeAdapter(
                 native_runtime,

@@ -17,6 +17,16 @@
 
 文件/搜索混合包只迁移登记的基础工具；AST/LSP、大纲和 Markdown 仍由 08 处理。子进程环境直接复用 `runtime/subprocess_env.py`，旧 `tools.shell.subprocess_env` 继续兼容。
 
+## 私有状态与公共接线
+
+- smol 的 `options.py` 解释规划、摘要、Todo、模板与恢复参数；Application 只做层级投影和旧字段兼容分派。RuntimeFactory 消费解析后的私有选项，不再把这些选项写回公共 RuntimeDefinition。
+- 原生模板和模型反馈恢复移到 smol；公共环境、Skill 目录、任务协议及 ContextRef 服务继续留在框架层。旧提示目录中用户未跟踪的本地覆盖仍可被读取。
+- Todo schema/provider/store 位于 smol。生产 provider 只借用公共 `task_storage` 安全存储句柄；保持 `todos.json` 格式、跨进程文件锁、损坏隔离和恢复。CheckpointManager/Coordinator 的旧 Todo 方法仅作懒加载兼容转发。
+- Shell 审计按需登记日志资源；logger 不再导入 smol。共享日志 scope 保证 Worker 第一次使用时也复用同一日志资源，日志关闭和 Run 资源关闭均可回收它；迟到的线程不能重新打开已关闭日志。
+- 现有 native checkpoint envelope、模型协议和 smol 压缩逻辑保持原有格式。旧 smol Python 字段是 02 的过渡合同，14 根据消费者再清理；本票不破坏这些入口。
+
+目前定向回归通过：工具/catalog/读取/资源 61 项；私有执行、Todo、提示词、Application 163 项；Shell 审计和导入隔离 63 项。阶段 2 的 14 个改动模块通过 mypy。大组工具回归 969 通过、1 跳过，后置 Application 的 3 个失败与遗留任务上下文有关，独立 Application 回归 3 项通过，继续查根因。
+
 ## 验收计划
 
 运行原有工具、保护、Todo、提示词、协议回放、checkpoint 与应用兼容测试，不删除已有行为断言。最终代码候选固定后，运行：
