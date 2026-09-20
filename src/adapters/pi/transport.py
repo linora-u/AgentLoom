@@ -101,13 +101,15 @@ class PiTransport:
                     if message.instance_id != self.instance_id:
                         raise ValueError()
                     if isinstance(message, Request):
-                        # Ticket 09 supplies callbacks. Reject them while continuing to service the reader.
                         if (not message.request_id.startswith("pi:") or message.request_id in self._callbacks or message.payload.method not in
                             {"tool_prepare", "tool_settle", "platform_invoke"} or not any(
                                 item.request.run_id == message.run_id and item.request.payload.method == "run"
                                 for item in self._pending.values())):
                             raise ValueError()
                         self._callbacks.add(message.request_id)
+                        pending = next(item for item in self._pending.values()
+                                       if item.request.run_id == message.run_id and item.request.payload.method == "run")
+                        pending.queue.put(message)
                     else:
                         pending = self._pending.get(message.request_id)
                         if pending is None or message.run_id != pending.request.run_id:
@@ -121,17 +123,13 @@ class PiTransport:
                                 raise ValueError()
                             del self._pending[message.request_id]
                         pending.queue.put(message)
-                if isinstance(message, Request):
-                    self._write(Response(version=1, kind="response", instance_id=self.instance_id,
-                        run_id=message.run_id, request_id=message.request_id,
-                        error=BridgeError(category="unsupported_capability", message="Pi tools are not enabled")))
             self._fail("Pi bridge exited before request completion", "interrupted" if self._closing else "internal")
         except Exception:
             self._fail("Pi bridge protocol failure")
             self._terminate()
 
     def request(self, payload: RequestPayload, *, run_id=None, observe: Callable[[Event], None] | None = None,
-                timeout: float | None = None) -> Response:
+                timeout: float | None = None, callback=None) -> Response:
         request = Request(version=1, kind="request", instance_id=self.instance_id, run_id=run_id,
                           request_id=f"host:{uuid4().hex}", payload=payload)
         pending = Pending(request)
@@ -149,6 +147,15 @@ class PiTransport:
                 message = pending.queue.get(timeout=remaining)
                 if isinstance(message, BaseException):
                     raise message
+                if isinstance(message, Request):
+                    reply = dict(version=1, kind="response", instance_id=self.instance_id,
+                                 run_id=message.run_id, request_id=message.request_id)
+                    if callback is None:
+                        self._write(Response(**reply, error=BridgeError(category="unsupported_capability",
+                                                                      message="Pi tools are not enabled")))
+                    else:
+                        self._write(Response(**reply, payload=callback(message.payload)))
+                    continue
                 if isinstance(message, Event):
                     if observe:
                         observe(message)

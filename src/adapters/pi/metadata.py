@@ -5,7 +5,7 @@ import math
 from agentloom.runtime.agent_runtime import RuntimeCapabilities, RuntimeModelSelection
 
 SDK_VERSION = "0.79.4"
-CAPABILITIES = RuntimeCapabilities(False, False, False, False, stop_hooks=True)
+CAPABILITIES = RuntimeCapabilities(True, True, False, False, stop_hooks=True)
 
 
 def validate_options(options: Mapping) -> None:
