@@ -1,6 +1,6 @@
 {
   "ticket": "10",
-  "status": "verified_pending_main_delivery",
+  "status": "delivered_with_documented_regression_timing_risk",
   "sdk_version": "0.79.4",
   "pi_bridge_protocol_version": 2,
   "native_tool_contract": 1,
@@ -1271,8 +1271,29 @@
     "Latest full suite had one unchanged memory-lock child startup timeout; isolated module7/7 passed without edits or environment changes. Keep as timing risk for Ticket14, not a fully-green full run."
   ],
   "delivery": {
-    "status": "pending main merge and own worktree cleanup",
-    "pushed": false
+    "status": "completed",
+    "main_before": "7ec14ae2e827257ed29f44df35a95fc273969279",
+    "main_after_merge": "ab48014e1e170ba93c95892fdf579052e53386ec",
+    "frozen_ref": "refs/agentloom/ticket10-frozen",
+    "frozen_sha": "ab48014e1e170ba93c95892fdf579052e53386ec",
+    "main_install_command": "uv run --locked --all-extras --all-groups loom install-runtime pi",
+    "main_install_exit_code": 0,
+    "main_install_log": "/Users/bytedance/code/data_clear/AgentLoom-validation/t10/verification/main-pi-install.log",
+    "main_readiness": {
+      "import_path": "/Users/bytedance/code/data_clear/AgentLoom/src/__init__.py",
+      "entry": "/Users/bytedance/code/data_clear/AgentLoom/src/adapters/pi/bridge/dist/index.js",
+      "sdk": "0.79.4",
+      "bridge_protocol": 2,
+      "native_tool_contract": 1
+    },
+    "own_worktree_removed": true,
+    "implementation_branch_retained": true,
+    "pushed": false,
+    "remaining_ticket_order": [
+      "12",
+      "14"
+    ],
+    "external_final_audit": "/Users/bytedance/code/data_clear/AgentLoom-validation/t10/delivery.json"
   },
   "verified_regression_candidate": "ef15789b80f5fc3ddb56e8ce8f1729ee39511b41"
 }

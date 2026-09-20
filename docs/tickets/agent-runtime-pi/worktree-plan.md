@@ -18,7 +18,7 @@
 | 07 | `codex/pi-t07-runtime` | 已交付 main Changes 并清理 t07；6 个增量提交及冻结引用保留，见 [07 交接](07-implementation.md) |
 | 08 | `codex/pi-t08-platform` | 已验收交付后清理本次 t08；阶段提交、冻结引用和外部证据保留，见 [08 交接](08-implementation.md) |
 | 09 | `codex/pi-t09-tools` | 已正式合入 main（`cc0edeb1`）并删除本次 t09；分支、冻结引用与项目外证据保留，见 [09 交接](09-implementation.md) |
-| 10 | `codex/pi-t10-write-shell` | 已验收，冻结入口 `refs/agentloom/ticket10-frozen`；正式 main 交付和工作区清理见 [10 交接](10-implementation.md) |
+| 10 | `codex/pi-t10-write-shell` | 已正式合入 main（`ab48014e`）并删除本次 `pi-t10-write-shell/AgentLoom`；冻结入口 `refs/agentloom/ticket10-frozen`，见 [10 交接](10-implementation.md) |
 | 11 | `codex/pi-t11-mixed` | 已正式合入 main（`96db1542`）并删除本次 `pi-t11-mixed`；源码 `be3c35da`、分支与证据保留，见 [11 交接](11-implementation.md) |
 | 13 | `codex/pi-t13-packaging` | 已正式合入 main（`7ec14ae2`）并清理本次 t13；冻结入口 `refs/agentloom/ticket13-frozen`；见 [13 交接](13-implementation.md) |
 

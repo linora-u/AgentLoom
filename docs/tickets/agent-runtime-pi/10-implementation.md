@@ -86,4 +86,6 @@ workflow: 先读取指定文件并等待结果，再修改；核对工具回执�
 
 12 可消费真实副作用及 journal：`tests/pi_test/test_write_shell_faults.py` 在 dispatch 前、settle 前、持久 commit 后确认前及捕获损坏处注入 OS 故障。executing/uncertain 不自动重跑；commit 已持久保存却丢确认时，Application 失败但记录仍可用于恢复对账。Pi snapshot/resume 仍由 12 实现，本票不开放。
 
-11、13 已完成并纳入本票候选；10 交付后可开始 12，14 等 12 完成后串行收口。正式合入 main 后删除本次 worktree，保留阶段提交和外部验证证据，不推送远端。交付结果待实际核对后补记。
+11、13 已完成并纳入本票。main 已从 `7ec14ae2` 快进至 `ab48014e`，保留所有阶段提交；冻结入口 `refs/agentloom/ticket10-frozen` 指向该交付提交。main 上执行 `uv run --locked --all-extras --all-groups loom install-runtime pi` 成功，确认导入来自 main 的 `src`、SDK 0.79.4、Pi JSONL v2 和 native contract 1。本次 `pi-t10-write-shell/AgentLoom` worktree 已删除，实现分支、冻结引用和项目外证据保留；SDK 安装产物不进入 Git。源码和测试与受检 `ef15789b` 一致，后续仅补交付文档。原有 `codex/`、`temp/`、参考 `pi/` 及两个 stash 保留，未推送远端。
+
+12 现在可从当前 main 创建新的 session/worktree；14 在 12 完成并集成后串行执行，仍需检查已记录的记忆子进程启动稳定性。
