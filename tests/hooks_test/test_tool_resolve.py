@@ -150,7 +150,12 @@ class TestCatalogInvariants:
     def test_all_specs_have_explicit_implementation_references(self):
         for spec in list_tool_specs():
             assert get_tool_spec(spec.name) is spec
-            assert spec.implementation.module.startswith("agentloom.tools.")
+            if spec.owner == "runtime":
+                assert spec.provider == "smolagents"
+                assert spec.implementation.module.startswith("agentloom.adapters.smolagents.tools.")
+            else:
+                assert spec.owner in {"platform", "optional"}
+                assert spec.implementation.module.startswith("agentloom.tools.")
             assert spec.implementation.attribute == spec.name
 
     def test_case_sensitive(self):

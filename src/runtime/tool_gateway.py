@@ -552,7 +552,7 @@ def _validate_schema_value(
     if not isinstance(value, dict):
         return
 
-    properties = schema.get("properties")
+    properties = schema.get("properties", {})
     if isinstance(properties, Mapping):
         required = schema.get("required", [])
         if isinstance(required, list):
@@ -668,6 +668,7 @@ def _build_runtime_context(
     tool_call_id: str,
     tool_inputs_schema: Mapping[str, Any],
     tool_response: dict[str, Any] | None = None,
+    cwd: str | None = None,
 ) -> Any:
     try:
         from agentloom.runtime.trace import capture_explicit_execution_context
@@ -683,7 +684,7 @@ def _build_runtime_context(
     return HookContext(
         local_run_id=hook_run.local_run_id,
         root_run_id=hook_run.root_run_id,
-        cwd=os.getcwd(),
+        cwd=cwd if cwd is not None else os.getcwd(),
         hook_event_name=event.value,
         tool_name=tool_name,
         tool_input=deepcopy(tool_input),
@@ -817,6 +818,176 @@ def tool_manifest_snapshot(gateway: ToolGateway) -> tuple[ToolManifestEntry, ...
     return tuple(by_name[definition.name] for definition in definitions)
 
 
+def _prepare_tool_input(
+    *, hook_run: Any, call_id: str, tool_name: str,
+    arguments: Mapping[str, Any], inputs_schema: Mapping[str, Any],
+    decode: Callable[[dict[str, Any]], tuple[dict[str, Any], dict[str, Any]]],
+    started_at: float, coerce: bool = True, cwd: str | None = None,
+    manifest: ToolManifestEntry | None = None,
+) -> tuple[dict[str, Any], dict[str, Any]] | ToolCallRecord:
+    """Shared Python/native gate; executors never implement permission policy."""
+    from agentloom.runtime.hooks.types import HookEvent, HookResult
+
+    def blocked(run: Any, **kwargs: Any) -> ToolCallRecord:
+        record = ToolCallRecord.blocked(
+            input=kwargs.pop("arguments"), ended_at=time.time(),
+            kind=kwargs.pop("kind", "invalid_arguments"), **kwargs,
+        )
+        run.record_tool_outcome(record)
+        return record
+
+    if not isinstance(arguments, Mapping):
+        return blocked(
+            hook_run,
+            call_id=call_id,
+            tool_name=tool_name,
+            arguments=arguments,
+            message="Tool arguments must be an object mapping",
+            stage="initial_decode",
+            started_at=started_at,
+        )
+
+    from agentloom.runtime.hooks.type_coercion import coerce_tool_parameters
+
+    try:
+        tool_input = deepcopy(dict(arguments))
+        if coerce:
+            coerce_tool_parameters(tool_input, deepcopy(dict(inputs_schema)))
+    except Exception as exc:
+        return blocked(
+            hook_run,
+            call_id=call_id,
+            tool_name=tool_name,
+            arguments={},
+            message=str(exc),
+            stage="initial_decode",
+            started_at=started_at,
+        )
+
+    schema_copy = deepcopy(dict(inputs_schema))
+    try:
+        pre_result = hook_run.dispatch(
+            HookEvent.PRE_TOOL_USE,
+            tool_name,
+            tool_input,
+            tool_call_id=call_id,
+            tool_inputs_schema=schema_copy,
+            **({"cwd": cwd} if cwd is not None else {}),
+            **({"tool_aliases": (manifest.logical_name,)} if manifest is not None else {}),
+        )
+        hook_run.flush_user_messages()
+    except Exception as exc:
+        return blocked(
+            hook_run,
+            call_id=call_id,
+            tool_name=tool_name,
+            arguments=tool_input,
+            message=f"PreToolUse failed closed: {exc}",
+            stage="pre_tool_use",
+            kind="policy_blocked",
+            started_at=started_at,
+        )
+    candidate_input = (
+        deepcopy(pre_result.modified_input)
+        if isinstance(pre_result.modified_input, dict)
+        else deepcopy(tool_input)
+    )
+    if pre_result.should_block():
+        return blocked(
+            hook_run,
+            call_id=call_id,
+            tool_name=tool_name,
+            arguments=candidate_input,
+            message=pre_result.get_blocked_response(),
+            stage="pre_tool_use",
+            kind="policy_blocked",
+            started_at=started_at,
+        )
+
+    try:
+        effective_input, call_kwargs = decode(candidate_input)
+    except Exception as exc:
+        return blocked(
+            hook_run,
+            call_id=call_id,
+            tool_name=tool_name,
+            arguments=candidate_input,
+            message=str(exc),
+            stage="final_decode",
+            started_at=started_at,
+        )
+
+    final_context = _build_runtime_context(
+        hook_run,
+        event=HookEvent.PRE_TOOL_USE,
+        tool_name=tool_name,
+        tool_input=effective_input,
+        tool_call_id=call_id,
+        tool_inputs_schema=inputs_schema,
+        cwd=cwd,
+    )
+    from agentloom.runtime.hooks.path_validators import enforce_core_tool_guard
+
+    try:
+        guard_result = enforce_core_tool_guard(
+            final_context, **({"manifest": manifest} if manifest is not None else {})
+        )
+        if not isinstance(guard_result, HookResult):
+            raise TypeError("CoreToolGuard returned an invalid result")
+        if guard_result.decision not in {"allow", "block"}:
+            raise ValueError("CoreToolGuard may only allow or block")
+        if guard_result.modified_input is not None:
+            raise ValueError("CoreToolGuard may not transform tool input")
+    except Exception as exc:
+        return blocked(
+            hook_run,
+            call_id=call_id,
+            tool_name=tool_name,
+            arguments=effective_input,
+            message=f"Core tool guard failed closed: {exc}",
+            stage="core_tool_guard",
+            kind="policy_blocked",
+            started_at=started_at,
+        )
+    if guard_result.should_block():
+        return blocked(
+            hook_run,
+            call_id=call_id,
+            tool_name=tool_name,
+            arguments=effective_input,
+            message=guard_result.get_blocked_response(),
+            stage="core_tool_guard",
+            kind="policy_blocked",
+            started_at=started_at,
+        )
+
+    from agentloom.runtime.checkpoint.file_history_hook import (
+        record_active_file_history,
+    )
+
+    try:
+        record_active_file_history(
+            tool_name=tool_name,
+            tool_input=effective_input,
+            step_number=hook_run.step_number,
+        )
+    except Exception as exc:
+        return blocked(
+            hook_run,
+            call_id=call_id,
+            tool_name=tool_name,
+            arguments=effective_input,
+            message=f"File history protection failed closed: {exc}",
+            stage="file_history",
+            kind="policy_blocked",
+            started_at=started_at,
+        )
+
+    _observe_final_tool_input(final_context)
+
+    return effective_input, call_kwargs
+
+
 class AgentLoomToolGateway:
     """Run-scoped Tool registry and AgentLoom-owned governance pipeline."""
 
@@ -937,7 +1108,7 @@ class AgentLoomToolGateway:
         if self._closed:
             raise RuntimeError("Tool Gateway is closed")
 
-        from agentloom.runtime.hooks.types import HookEvent, HookResult
+        from agentloom.runtime.hooks.types import HookEvent
         from agentloom.runtime.trace import get_current_hook_run
 
         hook_run = get_current_hook_run(required=True)
@@ -956,154 +1127,15 @@ class AgentLoomToolGateway:
                 stage="input_validation",
                 started_at=started_at,
             )
-        if not isinstance(arguments, Mapping):
-            return self._blocked(
-                hook_run,
-                call_id=call_id,
-                tool_name=tool_name,
-                arguments=arguments,
-                message="Tool arguments must be an object mapping",
-                stage="initial_decode",
-                started_at=started_at,
-            )
-
-        from agentloom.runtime.hooks.type_coercion import coerce_tool_parameters
-
-        try:
-            tool_input = deepcopy(dict(arguments))
-            coerce_tool_parameters(
-                tool_input,
-                deepcopy(dict(binding.inputs_schema)),
-            )
-        except Exception as exc:
-            return self._blocked(
-                hook_run,
-                call_id=call_id,
-                tool_name=tool_name,
-                arguments={},
-                message=str(exc),
-                stage="initial_decode",
-                started_at=started_at,
-            )
-
-        schema_copy = deepcopy(dict(binding.inputs_schema))
-        try:
-            pre_result = hook_run.dispatch(
-                HookEvent.PRE_TOOL_USE,
-                tool_name,
-                tool_input,
-                tool_call_id=call_id,
-                tool_inputs_schema=schema_copy,
-            )
-            hook_run.flush_user_messages()
-        except Exception as exc:
-            return self._blocked(
-                hook_run,
-                call_id=call_id,
-                tool_name=tool_name,
-                arguments=tool_input,
-                message=f"PreToolUse failed closed: {exc}",
-                stage="pre_tool_use",
-                kind="policy_blocked",
-                started_at=started_at,
-            )
-        candidate_input = (
-            deepcopy(pre_result.modified_input)
-            if isinstance(pre_result.modified_input, dict)
-            else deepcopy(tool_input)
+        prepared = _prepare_tool_input(
+            hook_run=hook_run, call_id=call_id, tool_name=tool_name,
+            arguments=arguments, inputs_schema=binding.inputs_schema,
+            decode=lambda value: _strict_decode_tool_input(binding, value),
+            started_at=started_at,
         )
-        if pre_result.should_block():
-            return self._blocked(
-                hook_run,
-                call_id=call_id,
-                tool_name=tool_name,
-                arguments=candidate_input,
-                message=pre_result.get_blocked_response(),
-                stage="pre_tool_use",
-                kind="policy_blocked",
-                started_at=started_at,
-            )
-
-        try:
-            effective_input, call_kwargs = _strict_decode_tool_input(
-                binding,
-                candidate_input,
-            )
-        except Exception as exc:
-            return self._blocked(
-                hook_run,
-                call_id=call_id,
-                tool_name=tool_name,
-                arguments=candidate_input,
-                message=str(exc),
-                stage="final_decode",
-                started_at=started_at,
-            )
-
-        final_context = _build_runtime_context(
-            hook_run,
-            event=HookEvent.PRE_TOOL_USE,
-            tool_name=tool_name,
-            tool_input=effective_input,
-            tool_call_id=call_id,
-            tool_inputs_schema=binding.inputs_schema,
-        )
-        from agentloom.runtime.hooks.path_validators import enforce_core_tool_guard
-
-        try:
-            guard_result = enforce_core_tool_guard(final_context)
-            if not isinstance(guard_result, HookResult):
-                raise TypeError("CoreToolGuard returned an invalid result")
-            if guard_result.decision not in {"allow", "block"}:
-                raise ValueError("CoreToolGuard may only allow or block")
-            if guard_result.modified_input is not None:
-                raise ValueError("CoreToolGuard may not transform tool input")
-        except Exception as exc:
-            return self._blocked(
-                hook_run,
-                call_id=call_id,
-                tool_name=tool_name,
-                arguments=effective_input,
-                message=f"Core tool guard failed closed: {exc}",
-                stage="core_tool_guard",
-                kind="policy_blocked",
-                started_at=started_at,
-            )
-        if guard_result.should_block():
-            return self._blocked(
-                hook_run,
-                call_id=call_id,
-                tool_name=tool_name,
-                arguments=effective_input,
-                message=guard_result.get_blocked_response(),
-                stage="core_tool_guard",
-                kind="policy_blocked",
-                started_at=started_at,
-            )
-
-        from agentloom.runtime.checkpoint.file_history_hook import (
-            record_active_file_history,
-        )
-
-        try:
-            record_active_file_history(
-                tool_name=tool_name,
-                tool_input=effective_input,
-                step_number=hook_run.step_number,
-            )
-        except Exception as exc:
-            return self._blocked(
-                hook_run,
-                call_id=call_id,
-                tool_name=tool_name,
-                arguments=effective_input,
-                message=f"File history protection failed closed: {exc}",
-                stage="file_history",
-                kind="policy_blocked",
-                started_at=started_at,
-            )
-
-        _observe_final_tool_input(final_context)
+        if isinstance(prepared, ToolCallRecord):
+            return prepared
+        effective_input, call_kwargs = prepared
 
         try:
             if binding.setup is not None and (
