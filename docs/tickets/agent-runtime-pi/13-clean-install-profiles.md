@@ -4,7 +4,7 @@
 
 **Blocked by:** 04：收拢自研 smol Agent 及其基础工具，保持旧应用行为；09：Pi 调通原生读取、平台工具与 Goal
 
-**Status:** planned — 等待前置任务集成并验证，尚未实施。
+**Status:** in-progress — 在 `codex/pi-t13-packaging` 独立 worktree 实施，起点 `2ec1412c` 已包含 04/09。初轮锁定 wheel 安装的 Pi 与 smol Application/CLI 共 23 项通过；最终候选验收及审查进行中。
 
 **Required:** Yes — 本票属于最终交付必做项。
 
