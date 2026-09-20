@@ -79,7 +79,14 @@ def configure(case, workspace, definition):
         definition['shell_settings']['allowed_commands'] = ['*']
         tools = ['bash', 'loom_retrieve_context']
         calls = [('bash', {'command': f'{shlex.quote(sys.executable)} {shlex.quote(str(producer))}', 'timeout': 10})]
-    task = 'Call the following tools in order, each exactly once. Wait for each result before the next call; do not batch dependent calls.\n'
+    # Keep real-model validation inside its own disposable workspace. Relative
+    # arguments also avoid mistyping a long machine-specific absolute prefix.
+    rules = definition.setdefault('tool_access_control', {}).setdefault('path_validation', [])
+    rules.append({'tools': ['read_file', 'write_file', 'edit_file'], 'include_paths': [str(workspace)]})
+    for name, arguments in calls:
+        if name in {'read', 'write', 'edit'}:
+            arguments['path'] = str(Path(arguments['path']).relative_to(workspace))
+    task = 'Call the following tools in order, each exactly once. Use the exact relative paths shown, relative to the current workspace. Wait for each result before the next call; do not batch dependent calls.\n'
     task += '\n'.join(f'{name}({json.dumps(arguments)})' for name, arguments in calls)
     task += '\nHooks may intentionally rewrite the destination or content. A successful tool receipt is final; do not repeat or repair that call even if the receipt differs from the requested arguments.'
     task += '\nIf blocked or errored, report that result accurately and stop; do not retry, read extra files, or use alternative commands.'
@@ -99,6 +106,9 @@ def verify(case, workspace, target, original, records, entries, failed):
     assert not failed
     native = [r for r in records if r['tool_name'] in {'read', 'edit', 'write', 'bash'}]
     assert native, 'The real model did not invoke the requested native tool'
+    for record in native:
+        if record['tool_name'] in {'read', 'write', 'edit'}:
+            assert (workspace / record['input']['path']).resolve() == target.resolve(), 'Model invoked the wrong file'
     if case in blocked:
         assert native[-1]['status'] == 'blocked'
         assert native[-1]['output'] is None
