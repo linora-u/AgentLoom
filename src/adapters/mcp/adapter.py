@@ -99,4 +99,5 @@ class AgentLoomMCPAdapter(ToolAdapter):
             forward=forward,
             inputs_schema=inputs,
             output_type="object",
+            input_validator=validator.validate,
         )

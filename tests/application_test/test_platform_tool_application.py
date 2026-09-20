@@ -209,6 +209,39 @@ def test_closing_one_worker_keeps_the_other_workers_lsp_alive(platform_project, 
     assert sorted(len(server.requests) for server in language_servers) == [1, 2]
 
 
+@pytest.mark.parametrize("failure", [RuntimeError, KeyboardInterrupt])
+def test_application_releases_lsp_created_before_startup_failure(platform_project, language_servers, monkeypatch, failure):
+    from agentloom.adapters.lsp.lsp_server_manager import LSPServerInstance
+
+    root, _, programs, _, run = platform_project
+    source = root / "answer.py"
+    source.write_text("answer = 42\n")
+    enable_lsp(root)
+    original_start = LSPServerInstance.start
+
+    def fail_after_start(instance):
+        original_start(instance)
+        raise failure("Language server initialization interrupted after starting")
+
+    monkeypatch.setattr(LSPServerInstance, "start", fail_after_start)
+
+    def inspect(definition, request):
+        result = definition.tool_gateway.invoke(call_id="hover", tool_name="lsp_hover", arguments={
+            "file_path": str(source), "line": 1, "character": 1,
+        })
+        assert "requires a running language server" in result.output
+        return "server unavailable"
+
+    programs["platform"] = inspect
+    if failure is KeyboardInterrupt:
+        with pytest.raises(KeyboardInterrupt):
+            run(tools=[{"name": "lsp_hover"}])
+    else:
+        assert run(tools=[{"name": "lsp_hover"}]).output == "server unavailable"
+    assert len(language_servers) == 1
+    assert not language_servers[0].is_healthy
+
+
 def test_parallel_worker_applications_own_mcp_connections_and_run_context(platform_project):
     root, workflow, programs, definitions, run = platform_project
     server = Path(__file__).parents[1] / "mcp_test" / "fixtures" / "stdio_server.py"
