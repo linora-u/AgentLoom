@@ -30,29 +30,10 @@ SKIP_DIRS = frozenset({
 })
 
 
-def _load_exclude_paths(tool_name: str = "grep_search") -> List[str]:
-    """Read ``exclude_paths`` from ``path_validation`` rules for *tool_name*.
-
-    Uses the unified permissions library to get exclude_paths from
-    all matching rules for the given tool.  Supports glob patterns
-    and ``"*"`` (deny all).
-
-    Returns plain directory names, e.g. ``["secrets", "build/dist"]``.
-    """
-    dirs: List[str] = []
-
-    try:
-        from agentloom.runtime.permissions.workspace import get_rule_exclude_paths
-        for excl in get_rule_exclude_paths(tool_name):
-            if excl.strip():
-                dirs.append(excl.strip().rstrip("/"))
-    except ImportError:
-        pass
-
-    return list(dict.fromkeys(dirs))  # deduplicate preserving order
+from agentloom.runtime.tool_governance.search import load_exclude_paths as _load_exclude_paths
 
 
-def get_search_exclude_patterns(tool_name: str = "grep_search") -> List[str]:
+def get_search_exclude_patterns(tool_name: str = "grep_search", root=None) -> List[str]:
     """Return ripgrep-compatible glob exclusion patterns.
 
     Format: ``["!**/secrets/**"]`` — the ``!**/`` prefix ensures the pattern
@@ -63,7 +44,16 @@ def get_search_exclude_patterns(tool_name: str = "grep_search") -> List[str]:
     ripgrep invocation modes (verified empirically; ``!secrets/**`` and
     ``!/secrets/**`` do NOT work with absolute search paths).
     """
-    return [f"!**/{d}/**" for d in _load_exclude_paths(tool_name)]
+    if root is None:
+        return [f"!**/{d}/**" for d in _load_exclude_paths(tool_name)]
+    from agentloom.runtime.tool_governance.search import search_excludes
+    patterns = []
+    for value in search_excludes(tool_name, root):
+        if value == "*":
+            patterns.append("!**")
+        else:
+            patterns.extend((f"!**/{value}", f"!**/{value}/**"))
+    return patterns
 
 
 def get_python_exclude_dirs(tool_name: str = "grep_search") -> frozenset:

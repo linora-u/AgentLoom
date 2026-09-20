@@ -160,36 +160,10 @@ class ReadFileState:
 
         Returns ``None`` when the edit is safe to proceed.
         """
-        key = self._key(path)
-        resolved = Path(path).resolve()
-
+        from agentloom.runtime.tool_governance.files import check_staleness
         with self._lock:
-            entry = self._cache.get(key)
-
-        if entry is None:
-            return (
-                f"File '{resolved}' has not been read yet. "
-                "Use read_file first before editing."
-            )
-
-        current_mtime = self._mtime_ns(resolved)
-        if current_mtime != entry.mtime_ns:
-            # Content comparison fallback (handles cloud-sync timestamp drift)
-            try:
-                disk_content = resolved.read_text(encoding="utf-8")
-            except (OSError, UnicodeDecodeError):
-                disk_content = None
-
-            if disk_content is not None and disk_content == entry.content:
-                # Content identical despite mtime difference — safe
-                return None
-
-            return (
-                f"File '{resolved}' has been modified since the last read. "
-                "Read the file again before editing."
-            )
-
-        return None
+            entry = self._cache.get(self._key(path))
+        return check_staleness(path, entry.mtime_ns if entry else None, entry.content if entry else None)
 
     def update_after_write(
         self,
