@@ -29,6 +29,7 @@ def test_tools_package_is_not_a_public_export_facade() -> None:
         import agentloom.tools as tools
 
         implementation_prefixes = (
+            "agentloom.adapters.smolagents.tools",
             "agentloom.tools.context",
             "agentloom.tools.file_ops",
             "agentloom.tools.search",
@@ -69,6 +70,7 @@ def test_catalog_metadata_does_not_load_tool_implementations() -> None:
 
         specs = list_tool_specs()
         implementation_prefixes = (
+            "agentloom.adapters.smolagents.tools",
             "agentloom.tools.context",
             "agentloom.tools.file_ops",
             "agentloom.tools.search",
@@ -108,6 +110,7 @@ def test_loader_imports_only_the_selected_tool_implementation() -> None:
         sibling_prefixes = (
             "agentloom.tools.search.ast_grep_tool",
             "agentloom.tools.search.glob_tool",
+            "agentloom.adapters.smolagents.tools.search.glob_tool",
             "agentloom.tools.search.lsp_tool",
         )
         loaded_siblings = sorted(
@@ -125,7 +128,7 @@ def test_loader_imports_only_the_selected_tool_implementation() -> None:
 
     assert state == {
         "name": "grep_search",
-        "module": "agentloom.tools.search.grep_tool.grep_tool",
+        "module": "agentloom.adapters.smolagents.tools.search.grep_tool.grep_tool",
         "loaded_siblings": [],
     }
 
@@ -210,6 +213,7 @@ def test_tui_definition_validation_does_not_load_implementations() -> None:
             catalog=("powerful", {"powerful": {"model": "openai/test"}}),
         )
         implementation_prefixes = (
+            "agentloom.adapters.smolagents.tools",
             "agentloom.tools.context",
             "agentloom.tools.file_ops",
             "agentloom.tools.search",
@@ -248,6 +252,7 @@ def test_context_engine_metadata_lookup_does_not_load_implementations() -> None:
 
         config = ContextEngineConfig()
         implementation_prefixes = (
+            "agentloom.adapters.smolagents.tools",
             "agentloom.tools.context",
             "agentloom.tools.file_ops",
             "agentloom.tools.search",
