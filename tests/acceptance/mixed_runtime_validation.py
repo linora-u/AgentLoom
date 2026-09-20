@@ -4,6 +4,7 @@ from __future__ import annotations
 import argparse
 from concurrent.futures import ThreadPoolExecutor
 from datetime import UTC, datetime
+from dataclasses import replace
 import json
 import os
 from pathlib import Path
@@ -39,6 +40,23 @@ def review_settings(profile: str) -> dict:
            for scope in ['application', 'project']}}}
 
 
+def recorded_review_model(workspace: Path, profile: str):
+    """Retain real provider review output without request settings or credentials."""
+    from agentloom.runtime.model_protocol import MessageItem
+    from agentloom.adapters.litellm.model_binding import ModelProfileOverlay, resolve_litellm_model_turn_binding
+    binding = resolve_litellm_model_turn_binding(profile, profile_overlay=ModelProfileOverlay(num_retries=0))
+
+    class Recorder:
+        adapter_id = binding.adapter.adapter_id
+
+        def turn(self, request):
+            result = binding.adapter.turn(request)
+            dump(workspace / 'review-model-output.json', [{'role': item.role, 'text': item.text} for item in result.items if isinstance(item, MessageItem)])
+            return result
+
+    return replace(binding, adapter=Recorder())
+
+
 def evidence(result, workspace: Path) -> dict:
     from agentloom.self_learning.persistence.ledger import SelfLearningLedger
     context = SelfLearningLedger(workspace / 'runtime/self_learning.db').completed_review_context(
@@ -71,7 +89,8 @@ def run_memory(workspace: Path, profile: str, workflow: Path) -> list[dict]:
     store = MemoryStore(db, agent_config=config)
     engine = ReviewEngine(db, evidence_gate=SQLiteEvidenceGate(db))
     assert not store.list('app', scope_id=APP)
-    batch = ReviewOrchestrator(engine=engine, agent_config=config).run_review('application', APP)
+    batch = ReviewOrchestrator(engine=engine, agent_config=config,
+        model_resolver=lambda selected: recorded_review_model(workspace, selected)).run_review('application', APP)
     dump(workspace / 'review-batch.json', batch.to_dict())
     candidates = [candidate for candidate in batch.candidates if candidate.payload == {'text': FACT}]
     assert len(candidates) == 1, 'Review model did not retain the exact trusted domain fact'
@@ -144,14 +163,15 @@ def run_mixed(case: str, workspace: Path, profile: str) -> list[dict]:
         assert len(reads) >= len(tokens)
         assert all(any(token in str(row['output_json']) for row in reads) for token in tokens)
         if mode == 'parallel':
-            assert len({row['run_id'] for row in reads}) >= 3, 'Repeated Worker reused its local Run'
+            worker_ids = {json.loads(row['metadata_json']).get('sub_task_id') for row in reads}
+            assert len(worker_ids - {None, ''}) >= 3, 'Repeated Worker reused its instance'
         if native == 'read':
             commits = [json.loads(p.read_text()) for p in (result.run.run_dir / 'native-tools').rglob('*.json')]
             committed = [entry for entry in commits if entry.get('state') == 'committed']
             assert len(committed) >= len(tokens)
             assert all(entry['request']['tool']['provider'] == 'pi' for entry in committed)
         if mode == 'goal':
-            assert result.goal and result.goal['status'] == 'complete' and tokens[0] in result.goal['evidence']
+            assert result.goal and result.goal['status'] == 'complete' and tokens[0] in str(result.goal['evidence'])
     return [proof]
 
 

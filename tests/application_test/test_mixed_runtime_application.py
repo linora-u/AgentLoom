@@ -121,14 +121,18 @@ def test_contextref_from_worker_retains_original_after_source_changes(tmp_path, 
         if request['model'] == 'worker':
             if not messages:
                 return [('large-outline', 'get_file_outline', {'file_path': str(source), 'max_items_per_section': 250})]
-            ref = re.search(r'ctx_[0-9a-f]{16}', messages[-1]['content']).group()
+            match = re.search(r'ctx_[0-9a-f]{16}', messages[-1]['content'])
+            assert match is not None
+            ref = match.group()
             refs.append(ref)
             source.write_text('Changed after Worker read: WRONG-NEW-CONTENT\n')
             return finish(request, ref)
         if not messages:
             return [('delegate', 'inspect_note', {'query': 'large-note.py'})]
         if len(messages) == 1:
-            ref = re.search(r'ctx_[0-9a-f]{16}', messages[0]['content']).group()
+            match = re.search(r'ctx_[0-9a-f]{16}', messages[0]['content'])
+            assert match is not None
+            ref = match.group()
             return [('retrieve', 'loom_retrieve_context', {'ref': ref, 'query': 'TARGET_RECORD', 'limit': 3})]
         assert 'CORIANDER_5287' in messages[-1]['content']
         assert 'WRONG-NEW-CONTENT' not in messages[-1]['content']
@@ -195,5 +199,5 @@ def test_only_root_can_complete_goal_after_mixed_worker_evidence(tmp_path, super
         write_yaml(worker_path, definition)
         with bind_config(load_project_config(tmp_path)):
             result = execute_app(workflow, file_logging=True)
-    assert result.goal['status'] == 'complete'
-    assert 'GOAL-6257' in result.goal['evidence']
+    assert result.goal is not None and result.goal['status'] == 'complete'
+    assert 'GOAL-6257' in str(result.goal['evidence'])
