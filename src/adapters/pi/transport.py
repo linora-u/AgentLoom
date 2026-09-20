@@ -2,6 +2,8 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from concurrent.futures import ThreadPoolExecutor
+from contextvars import copy_context
 import os
 from pathlib import Path
 from queue import Queue, Empty
@@ -18,7 +20,7 @@ from agentloom.adapters.pi.protocol import (
     decode_message, encode_message,
 )
 from agentloom.adapters.pi.install import find_node
-from agentloom.runtime.agent_runtime import AgentRuntimeError
+from agentloom.runtime.agent_runtime import AgentRuntimeError, RuntimeErrorCategory
 from agentloom.runtime.resources import register_resource
 from agentloom.runtime.subprocess_env import build_subprocess_env
 
@@ -83,7 +85,7 @@ class PiTransport:
                 assert self._failure is not None
                 raise self._failure from None
 
-    def _fail(self, message: str, category="internal"):
+    def _fail(self, message: str, category: RuntimeErrorCategory = "internal"):
         with self._lock:
             if self._failure is None:
                 self._failure = AgentRuntimeError(message, category=category)
@@ -141,20 +143,41 @@ class PiTransport:
             self._pending[request.request_id] = pending
         self._write(request)
         deadline = time.monotonic() + timeout if timeout is not None else None
+        executor = ThreadPoolExecutor(max_workers=8, thread_name_prefix=f"pi-callback-{self.process.pid}") if callback else None
+
+        def dispatch(message):
+            try:
+                assert callback is not None
+                result = callback(message.payload)
+                response = Response(version=1, kind="response", instance_id=self.instance_id,
+                    run_id=message.run_id, request_id=message.request_id, payload=result)
+                pending.queue.put((message, response))
+            except BaseException as error:
+                category = "protocol" if isinstance(error, AgentRuntimeError) and error.category == "internal" else "tool"
+                pending.queue.put((message, Response(version=1, kind="response", instance_id=self.instance_id,
+                    run_id=message.run_id, request_id=message.request_id,
+                    error=BridgeError(category=category, message="Pi tool callback failed"))))
+
         try:
             while True:
                 remaining = max(0, deadline - time.monotonic()) if deadline else None
                 message = pending.queue.get(timeout=remaining)
                 if isinstance(message, BaseException):
                     raise message
+                if isinstance(message, tuple):
+                    self._write(message[1])
+                    if message[1].error:
+                        self._fail("Pi bridge protocol failure" if message[1].error.category == "protocol" else "Pi tool callback failed")
+                        self._terminate()
+                    continue
                 if isinstance(message, Request):
-                    reply = dict(version=1, kind="response", instance_id=self.instance_id,
-                                 run_id=message.run_id, request_id=message.request_id)
                     if callback is None:
-                        self._write(Response(**reply, error=BridgeError(category="unsupported_capability",
-                                                                      message="Pi tools are not enabled")))
+                        self._write(Response(version=1, kind="response", instance_id=self.instance_id,
+                            run_id=message.run_id, request_id=message.request_id,
+                            error=BridgeError(category="unsupported_capability", message="Pi tools are not enabled")))
                     else:
-                        self._write(Response(**reply, payload=callback(message.payload)))
+                        assert executor is not None
+                        executor.submit(copy_context().run, dispatch, message)
                     continue
                 if isinstance(message, Event):
                     if observe:
@@ -165,11 +188,19 @@ class PiTransport:
                     raise AgentRuntimeError(error.message, category="internal" if error.category == "protocol" else error.category,
                                             retryable=error.retryable)
                 return message
+        except KeyboardInterrupt:
+            self.cancel()
+            raise
         except Empty:
             self._fail("Pi bridge request timed out")
             self.close()
             assert self._failure is not None
             raise self._failure from None
+        finally:
+            if executor is not None:
+                # Never let a live Python callback mutate a finalized Application.
+                # Native process cancellation stays serviceable on the reader thread.
+                executor.shutdown(wait=True, cancel_futures=True)
 
     def cancel(self) -> bool:
         with self._lock:

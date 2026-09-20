@@ -5,7 +5,7 @@ import math
 from agentloom.runtime.agent_runtime import RuntimeCapabilities, RuntimeModelSelection
 
 SDK_VERSION = "0.79.4"
-CAPABILITIES = RuntimeCapabilities(True, True, False, False, stop_hooks=True)
+CAPABILITIES = RuntimeCapabilities(True, True, False, True, goal=True, stop_hooks=True)
 
 
 def validate_options(options: Mapping) -> None:
@@ -32,15 +32,17 @@ def validate_model(model: RuntimeModelSelection) -> None:
     if settings.get("system_prompt_boundary"):
         raise ValueError("Pi does not support system_prompt_boundary")
     for name in ("timeout", "context_window", "max_output_tokens", "requests_per_minute"):
-        if type(settings.get(name)) is not int or settings[name] <= 0:
+        value = settings.get(name)
+        if not isinstance(value, int) or isinstance(value, bool) or value <= 0:
             raise ValueError(f"Pi model {name} must be a positive integer")
     for name in ("temperature", "retry_delay", "max_retry_delay", "num_retries"):
         value = settings.get(name)
-        if type(value) not in (int, float) or not math.isfinite(value) or value < 0:
+        if not isinstance(value, (int, float)) or isinstance(value, bool) or not math.isfinite(value) or value < 0:
             raise ValueError(f"Pi model {name} must be a finite non-negative number")
     if type(settings["num_retries"]) is not int:
         raise ValueError("Pi model num_retries must be an integer")
-    if any(settings[name] > 2_147_483 for name in ("timeout", "retry_delay", "max_retry_delay")):
+    if any(isinstance(value, (int, float)) and value > 2_147_483
+           for value in (settings[name] for name in ("timeout", "retry_delay", "max_retry_delay"))):
         raise ValueError("Pi model timeout/retry delays exceed the Node timer limit")
     for name in ("base_url", "api_key"):
         if not isinstance(settings.get(name), str):
@@ -48,8 +50,8 @@ def validate_model(model: RuntimeModelSelection) -> None:
     extra = settings.get("extra_completion_params") or {}
     if not isinstance(extra, Mapping) or set(extra) - {"extra_body", "tool_choice", "parallel_tool_calls", "top_p", "seed", "reasoning_effort"}:
         raise ValueError("Pi model extra_completion_params contains unsupported parameters")
-    if extra.get("tool_choice", "auto") not in ("auto", "none") or extra.get("parallel_tool_calls", False) is not False:
-        raise ValueError("Pi no-tools runtime requires tool_choice auto/none and parallel_tool_calls false")
+    if extra.get("tool_choice", "auto") not in ("auto", "none") or type(extra.get("parallel_tool_calls", False)) is not bool:
+        raise ValueError("Pi requires tool_choice auto/none and boolean parallel_tool_calls")
     body = extra.get("extra_body") or {}
     protected = {"model", "messages", "input", "instructions", "tools", "tool_choice", "parallel_tool_calls",
                  "stream", "stream_options", "max_tokens", "max_completion_tokens", "max_output_tokens", "temperature"}

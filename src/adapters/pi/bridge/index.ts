@@ -14,7 +14,7 @@ type Obj = Record<string, any>;
 type Frame = {version: 1; kind: string; instance_id: string; run_id: string | null; request_id: string; payload: Obj};
 const sdkPackage = new URL("../package.json", import.meta.resolve("@earendil-works/pi-coding-agent"));
 const sdkVersion = JSON.parse(readFileSync(sdkPackage, "utf8")).version as string;
-const capabilities = {structured_tools: true, parallel_tools: true, checkpoint_resume: false, subagents: false, goal: false, stop_hooks: true};
+const capabilities = {structured_tools: true, parallel_tools: true, checkpoint_resume: false, subagents: true, goal: true, stop_hooks: true};
 const agentDir = process.argv[2];
 let instance: string | undefined;
 let session: AgentSession | undefined;
@@ -83,6 +83,8 @@ async function createSession(p: Obj): Promise<AgentSession> {
     const result = {...payload as Obj};
     const extra = s.extra_completion_params || {};
     for (const key of ["top_p", "seed"]) if (extra[key] !== undefined) result[key] = extra[key];
+    if (p.tools.length) for (const key of ["tool_choice", "parallel_tool_calls"])
+      if (extra[key] !== undefined) result[key] = extra[key];
     if (extra.reasoning_effort !== undefined) {
       if (api === "openai-responses") result.reasoning = {effort: extra.reasoning_effort};
       else result.reasoning_effort = extra.reasoning_effort;
@@ -102,7 +104,7 @@ async function run(frame: Frame, abort: AbortController) {
   let timedOut = false;
   let unsubscribe: (() => void) | undefined;
   try {
-    if (p.checkpoint || Object.keys(p.additional_args).length)
+    if (p.checkpoint)
       throw new Error("Unsupported request");
     if (!p.continue_session || !session) {
       session?.dispose();
@@ -139,7 +141,8 @@ async function run(frame: Frame, abort: AbortController) {
       status = 0;
       const timeout = setTimeout(() => {timedOut = true; session!.agent.abort();}, settings.timeout * 1000);
       // Public AgentSession owns the complete provider call and turn lifecycle.
-      try {await session.prompt(p.task, {expandPromptTemplates: false});}
+      const task = Object.keys(p.additional_args).length ? `${p.task}\n\nAgentLoom task inputs (JSON):\n${JSON.stringify(p.additional_args)}` : p.task;
+      try {await session.prompt(task, {expandPromptTemplates: false});}
       finally {clearTimeout(timeout);}
       last = session.messages.at(-1);
       if (!timedOut && (last?.role !== "assistant" || last.stopReason !== "error")) break;
