@@ -6,7 +6,7 @@
 
 01/02/03 已完成。01/02 的历史提交 45ddbfdc、42662ed6、8d63be5f 保留；03 受检实现为 `9f08aa09ce3784d9c55eb82b01571256ded36ecf`，冻结引用 `refs/agentloom/ticket03-frozen` 为 `9e19d18285f2d2ea8e7b7d11c26e315760d153a3`。main HEAD 为 `9d5a88915efbd402d0f2697318125933fc1500e0`，相对冻结提交只增加七份研究文档；当前工作目录另有未提交的源码和文档成果。
 
-07 交付时，`codex/pi-integration` 更新到 `0b5c4f4ed32244ef97b107361dcb45dbe2be149e`，包含 03、05、07；07 固定引用为 `refs/agentloom/ticket07-frozen`（`eca311eeca103dc6cd64eef959428e8b01eb22b2`）。04 已完成集成交付；当前 integration 包含 04+05+07，冻结入口为 `refs/agentloom/ticket04-05-integrated`。08 开发中。**新 worktree 基于提交创建，不会自动获得 main 的未提交 Changes。** 06 的 04+05 前置已集成验证，现在可新开 worktree，与 08 并行；09 还要等 08，与 05+07 一起集成。领取前重新解析 integration，不能把此处记录的交付 SHA 当成永远不变的分支头。
+07 交付时，`codex/pi-integration` 更新到 `0b5c4f4ed32244ef97b107361dcb45dbe2be149e`，包含 03、05、07；07 固定引用为 `refs/agentloom/ticket07-frozen`（`eca311eeca103dc6cd64eef959428e8b01eb22b2`）。04 交付时 integration 包含 04+05+07，历史冻结入口为 `refs/agentloom/ticket04-05-integrated`。08 已完成，见 [实施与验证](08-implementation.md)；共同冻结入口 `refs/agentloom/ticket08-frozen` 包含 04/05/07/08。**新 worktree 基于提交创建，不会自动获得 main 的未提交 Changes。** 06 的 04+05 与 09 的 05+07+08 前置均已集成验证，现在可以分别新开 worktree 并行；建议两者使用 08 冻结入口，避免遗漏最新公共校验接线。领取前重新解析 integration，不能把此处记录的交付 SHA 当成永远不变的分支头。
 
 03 记录的完整回归为 4225 passed、1 skipped，SDK 为 13 passed；逐项证据见 [实现报告](03-implementation.md) 和 [验证记录](03-validation.json)。历史报告中的 main Changes 状态保留为当时的交付记录，不代表现在的 Git 状态。已有工作区的本次核对快照如下；领取或清理前重新检查，不把表内路径存在当作任务待开发。
 
@@ -15,7 +15,7 @@
 | 04 | `codex/pi-t04-smol` | 已验收并清理 t04；6 个阶段提交、冻结引用和外部证据保留 |
 | 05 | `codex/pi-t05-governance` | 已验收并清理原 t05 工作区；提交保留，见 [05 交接](05-implementation.md) |
 | 07 | `codex/pi-t07-runtime` | 已交付 main Changes 并清理 t07；6 个增量提交及冻结引用保留，见 [07 交接](07-implementation.md) |
-| 08 | `codex/pi-t08-platform` | `/Users/bytedance/.codex/worktrees/pi-t08-platform/AgentLoom`；开发中 |
+| 08 | `codex/pi-t08-platform` | 已验收交付后清理本次 t08；阶段提交、冻结引用和外部证据保留，见 [08 交接](08-implementation.md) |
 
 这是工作区登记，不是完成声明。重新领取前运行 `git worktree list` 并核对原 session；不得新建另一份同票工作区抢改，也不重置已有分支。冻结引用是必须包含的最低基线；可使用经检查的后继提交，后续任务还必须包含各自已验收的前置。
 
@@ -56,7 +56,7 @@
 
 每个 worktree 独立配置 Python/Node 依赖与运行目录。验证 agentloom 实际导入路径；测试用默认配置来自示例，不复制用户凭证到仓库。所有本地锁定包使用可复现安装；不依赖主工作区已装的 smol 或 node_modules。
 
-一个 session 可连续处理同一链，例如 07→09→10→12，但每票开始前必须取得包含其全部前置的已验证提交。已完成票保留历史；08 继续原工作区，空闲 session 按解锁状态领取后续票，不为人员安排伪造技术依赖。
+一个 session 可连续处理同一链，例如 07→09→10→12，但每票开始前必须取得包含其全部前置的已验证提交。已完成票保留历史；08 已完成，空闲 session 按解锁状态领取 06、09 等后续票，不为人员安排伪造技术依赖。
 
 ### 一个协调 session，按需创建实现 worktree
 

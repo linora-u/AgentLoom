@@ -4,7 +4,7 @@
 
 **Blocked by:** 03：冻结基座与平台边界，交付可并行的公共基线
 
-**Status:** in-progress — 03 已验收；当前在 `codex/pi-t08-platform` 的已有 worktree 开发，见 [当前登记](worktree-plan.md)。本票尚未完成验收，不重复创建实现 session，不能据此放行 09。
+**Status:** completed — 中立工具与 Application 验收通过，已集成 04/05/07。见 [实施记录](08-implementation.md)、[完整验证与真实 provider 限制](08-validation.json)、[逐工具清单](08-tool-inventory.md)。交接入口为 `refs/agentloom/ticket08-frozen`；不重开本票。
 
 **Required:** Yes — 本票属于最终交付必做项。
 
@@ -20,16 +20,16 @@
 
 ## Acceptance criteria
 
-- [ ] MCP 发现、参数验证、调用和清理通过中立工具合同完成，工具构造不加载 smol adapter。
-- [ ] memory/history、ContextRef、Goal 和 Worker 工具可供任意 runtime 使用；只移除 smol 定义依赖，原数据与审核行为不变。
-- [ ] 保持已有 YAML 和记忆默认规则，不增加必填记忆配置；基座对话历史、压缩摘要和 Todo 不被当作平台共享记忆或 Goal 状态。
-- [ ] 保留新 Worker 实例、运行上下文与 MCP 连接隔离，错误和取消时资源释放。
-- [ ] 平台 Goal 的旧 smol decorator 消费迁移完成；Todo 的迁移由 04 负责，Pi 不被额外注入自研 smol Todo。
-- [ ] AST/LSP、代码大纲、Markdown 报告及其共享资源作为独立可选工具集合构造和执行，未选择时不加载；构造入口不依赖 smol 类型或基础工具实现。
-- [ ] 从实际 Application 入口验证专业工具的按需生命周期：未选择 LSP 时不预热服务，选择后可调用；关闭一个 Worker 不影响其他实例。仅 catalog 的惰性导入测试不算通过。
-- [ ] SkillCatalog、scope、提案/审核和中立激活入口归平台；原生加载/提示词呈现留给基座接线。Pi 09 接入时不得同时启用两套自动发现或激活路径。
-- [ ] 普通 smol 应用仍能使用这些平台工具；无 smol 环境的工具构造与执行定向验证通过。
-- [ ] 只维护 03 划定的平台/专业工具分区；04 维护 smol 分区，公共 catalog 聚合/loader 接线由协调者串行处理。不把 core_file/core_shell/core_search 加入 Pi 的平台默认集合。
+- [x] MCP 发现、参数验证、调用和清理通过中立工具合同完成，工具构造不加载 smol adapter。
+- [x] memory/history、ContextRef、Goal 和 Worker 工具可供任意 runtime 使用；只移除 smol 定义依赖，原数据与审核行为不变。
+- [x] 保持已有 YAML 和记忆默认规则，不增加必填记忆配置；基座对话历史、压缩摘要和 Todo 不被当作平台共享记忆或 Goal 状态。
+- [x] 保留新 Worker 实例、运行上下文与 MCP 连接隔离，错误和取消时资源释放。
+- [x] 平台 Goal 的旧 smol decorator 消费迁移完成；Todo 的迁移由 04 负责，Pi 不被额外注入自研 smol Todo。
+- [x] AST/LSP、代码大纲、Markdown 报告及其共享资源作为独立可选工具集合构造和执行，未选择时不加载；构造入口不依赖 smol 类型或基础工具实现。
+- [x] 从实际 Application 入口验证专业工具的按需生命周期：未选择 LSP 时不预热服务，选择后可调用；关闭一个 Worker 不影响其他实例。仅 catalog 的惰性导入测试不算通过。
+- [x] SkillCatalog、scope、提案/审核和中立激活入口归平台；原生加载/提示词呈现留给基座接线。Pi 09 接入时不得同时启用两套自动发现或激活路径。
+- [x] 普通 smol 应用仍能使用这些平台工具；无 smol 环境的工具构造与执行定向验证通过。
+- [x] 只维护 03 划定的平台/专业工具分区；04 维护 smol 分区，公共 catalog 聚合/loader 接线由协调者串行处理。不把 core_file/core_shell/core_search 加入 Pi 的平台默认集合。
 
 ## Handoff
 

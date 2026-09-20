@@ -4,7 +4,7 @@
 
 **Blocked by:** 05：通过统一治理执行一次原生读取并持久记录；07：从现有应用入口运行一个无工具 Pi Agent；08：解耦平台工具、可选专业工具与 MCP
 
-**Status:** planned — 等待前置任务集成并验证，尚未实施。
+**Status:** ready-for-agent — 05/07/08 已在同一基线集成验证；从 `refs/agentloom/ticket08-frozen` 解析准确 SHA 后可创建独立 worktree，与 06 并行。本票尚未实施。
 
 **Required:** Yes — 本票属于最终交付必做项。
 
@@ -32,6 +32,8 @@
 - [ ] Pi 原生 final 不绕过 Goal：未完成时依照平台规则继续，只有根 Supervisor 能完成目标，Stop 阻断和完成证据生效且只有一个根终态。
 - [ ] 平台回调期间取消或进程死亡能结束请求并清理；未支持的 write/Shell/resume 配置在执行前明确拒绝。
 - [ ] 本票所需公共 registry/readiness/Goal 接线由协调者同次合入，不能留给最终验收补功能。
+
+08 的中立工具、实例资源和 Skill 边界见 [工具清单](08-tool-inventory.md)，真实 provider 漏参与验证范围见 [08 实施记录](08-implementation.md)。消费既有 Gateway 校验扩展，不在 Pi 侧补造参数或重复治理。
 
 ## Handoff
 
