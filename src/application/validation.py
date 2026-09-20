@@ -210,7 +210,10 @@ class AgentConfigNormalizer:
         from agentloom.tools.catalog import resolve_toolsets
 
         effective = effective_config if effective_config is not None else config
-        selected_toolsets = effective.get("toolsets", effective.get("default_toolsets"))
+        toolset_key = "toolsets" if "toolsets" in effective else "default_toolsets"
+        selected_toolsets = effective.get(toolset_key)
+        if toolset_key in effective and not isinstance(selected_toolsets, list):
+            raise ValueError(f"{toolset_key} must be a list of toolset names when provided")
         tools_selected = bool(effective.get("tools") or resolve_toolsets(selected_toolsets))
         checkpoint = effective.get("checkpoint", {})
         concurrency = effective.get("concurrency", config.get("concurrency"))
