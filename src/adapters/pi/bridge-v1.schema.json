@@ -274,6 +274,13 @@
           ],
           "title": "State",
           "type": "string"
+        },
+        "agent_context": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Agent Context",
+          "type": "array"
         }
       },
       "required": [
@@ -853,6 +860,14 @@
             "$ref": "#/$defs/ToolManifestEntry"
           },
           "title": "Tools",
+          "type": "array"
+        },
+        "serial_tools": {
+          "items": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "title": "Serial Tools",
           "type": "array"
         },
         "runtime_options": {

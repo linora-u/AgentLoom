@@ -52,7 +52,12 @@ def resolve_runtime_toolsets(
             if item["name"] in names:
                 raise ValueError(f"Duplicate tool name: {item['name']}")
             continue
-        spec = get_tool_spec(item["name"])
+        try:
+            spec = get_tool_spec(item["name"])
+        except ValueError:
+            # The implementation resolver owns unknown-name diagnostics. This
+            # early pass validates ownership of catalogued native selections.
+            continue
         if spec.owner == "runtime" and spec.provider != runtime_id:
             raise ValueError(f"Tool '{spec.name}' has no compatible mapping for runtime '{runtime_id}'")
         validate_selection(spec)

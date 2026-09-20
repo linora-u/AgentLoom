@@ -218,3 +218,12 @@ def test_reused_call_id_in_a_later_sdk_turn_cannot_execute_again(tmp_path):
     assert len(entries) == 1
     assert json.loads(entries[0].read_text())['state'] == 'committed'
     assert len(requests) == 2
+
+
+def test_pi_native_fixed_arguments_are_explicitly_unsupported(tmp_path):
+    with model_service() as (url, requests):
+        app = project(tmp_path, url)
+        select(app, tools=[{'name': 'read', 'fixed_args': {'path': 'note.txt'}}])
+        with bind_config(load_project_config(tmp_path)), pytest.raises(ValueError, match='fixed_args'):
+            execute_app(app, file_logging=False)
+    assert not requests
