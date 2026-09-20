@@ -51,7 +51,7 @@ def recorded_review_model(workspace: Path, profile: str):
 
         def turn(self, request):
             result = binding.adapter.turn(request)
-            dump(workspace / 'review-model-output.json', [{'role': item.role, 'text': item.text} for item in result.items if isinstance(item, MessageItem)])
+            dump(workspace / 'review-model-output.json', [{'type': type(item).__name__, **({'role': item.role, 'text': item.text} if isinstance(item, MessageItem) else {})} for item in result.items])
             return result
 
     return replace(binding, adapter=Recorder())
@@ -103,8 +103,8 @@ def run_memory(workspace: Path, profile: str, workflow: Path) -> list[dict]:
     assert applied['results'][0]['state'] == 'active_confirmed'
     assert {p['root_run_id'] for p in candidate.provenance} == {first.run.run_id}
     policy.unlink()
-    definition.update(agent_runtime='pi', tools=[{'name': 'memory'}, {'name': 'session_search'}],
-        workflow='Use memory(action="list", scope="app") and session_search(query="Release export format", scope="current_app"). State the exact approved release format fact and mention the prior verified run. The source file is no longer available.')
+    definition.update(agent_runtime='pi', tools=[{'name': 'memory'}, {'name': 'session_search'}, {'name': 'loom_retrieve_context'}],
+        workflow='Use memory(action="list", scope="app") and session_search(query="Release export format", scope="current_app"). If a tool returns ContextRef, use loom_retrieve_context to read its original result. State the exact approved release format fact and the prior verified run ID. The source file is no longer available.')
     write_yaml(workflow, definition)
     second = execute_app(workflow, file_logging=True)
     proofs.append(evidence(second, workspace))
@@ -112,7 +112,8 @@ def run_memory(workspace: Path, profile: str, workflow: Path) -> list[dict]:
     rows = proofs[-1]['ledger']['tool_results']
     assert {'memory', 'session_search'} <= {row['tool_name'] for row in rows}
     assert any(row['tool_name'] == 'memory' and FACT in str(row['output_json']) for row in rows)
-    assert any(row['tool_name'] == 'session_search' and first.run.run_id in str(row['output_json']) for row in rows)
+    assert any(row['tool_name'] in {'session_search', 'loom_retrieve_context'} and first.run.run_id in str(row['output_json']) for row in rows)
+    assert first.run.run_id in second.output
     assert first.run.run_id != second.run.run_id
     dump(workspace / 'approved-memory.json', store.list('app', scope_id=APP))
     return proofs
