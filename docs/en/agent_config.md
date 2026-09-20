@@ -1,13 +1,16 @@
 # AgentLoom Agent YAML Configuration Complete Reference
 
+**Backend configuration:** Only `runtime_options` is interpreted. Historical top-level `max_steps`, `planning_interval`, `smart_summary`, `todo`, `prompt`, and `max_consecutive_parse_errors` are silently ignored without conversion or rejection. Keep smol options out of Pi definitions.
+
+
 > **Document scope**: This document details **every** configuration parameter in Agent YAML.
 > For override relationships between configuration files, see [Configuration System Overview](config-overview.md).
 > For `config/system.yaml`, see [System Configuration Reference](system_config.md).
 > For `config/llm.yaml`, see [LLM Configuration Reference](llm_config.md).
 
 Agent YAML is the configuration file in the AgentLoom framework that **defines the behavior of a single Agent**, controlling the Agent's role description, runtime, workflow instructions, available tools, model selection, skill packages, and more. Agents are divided into two roles: **Supervisor** (multi-Agent orchestrator) and **Worker** (specific task executor).
-The required `agent_runtime` field selects the Agent runtime; the only currently
-registered value is `smolagents`. All Tools are invoked through native structured
+The required `agent_runtime` field selects the Agent runtime; registered values
+are `smolagents` and `pi`. All Tools are invoked through native structured
 tool calls.
 
 Both roles support `.yaml`, `.yml`, and `.md` definitions. Markdown uses a fenced
@@ -35,9 +38,9 @@ the same validation diagnostics. Reading these views does not start a Run or mod
   - [3.6 Structured Tool Calls](#36-structured-tool-calls)
   - [3.7 model_type — Model Selection](#37-model_type--model-selection)
   - [3.8 skills — Skill Package Configuration](#38-skills--skill-package-configuration)
-  - [3.9 prompt — Custom Prompt](#39-prompt--custom-prompt)
-  - [3.10 planning_interval — Planning Interval](#310-planning_interval--planning-interval)
-  - [3.11 todo.mode — Task Tracking](#311-todomode--task-tracking)
+  - [3.9 runtime_options.prompt_template_path — Custom Prompt](#39-runtime_optionsprompt_template_path--custom-prompt)
+  - [3.10 runtime_options.planning_interval — Planning Interval](#310-runtime_optionsplanning_interval--planning-interval)
+  - [3.11 runtime_options.todo_mode — Task Tracking](#311-runtime_optionstodo_mode--task-tracking)
   - [3.11 concurrency — Concurrency Configuration](#311-concurrency--concurrency-configuration)
 - [4. Tool Configuration Details](#4-tool-configuration-details)
   - [4.4 Advanced Pattern: Wrapping Agent as a Python Tool Function](#44-advanced-pattern-wrapping-agent-as-a-python-tool-function)
@@ -103,8 +106,8 @@ worker_agents:
   - path: "applications/my_app/workflows/worker_agents/project_scan.yaml"
   - path: "applications/my_app/workflows/worker_agents/data_analysis.yaml"
 
-prompt:
-  path: "applications/my_app/sysprompt/agent_prompt.yaml"
+runtime_options:
+  prompt_template_path: "applications/my_app/sysprompt/agent_prompt.yaml"
 
 skills:
   paths:
@@ -139,9 +142,10 @@ tools:
     function: "get_module_context"
 
 model_type: "powerful"
-max_steps: 40                            # Maximum execution steps (default: 80)
-planning_interval: 3                     # Force re-planning every N steps
-todo: {mode: "auto"}                     # auto | on | off
+runtime_options:
+  max_steps: 40                            # Maximum execution steps (default: 80)
+  planning_interval: 3                     # Force re-planning every N steps
+  todo_mode: "auto"                     # auto | on | off
 
 # ---- Worker-Specific: Callable Tool Contract ----
 # Note: Parameter names under inputs are customizable, as long as they are valid Python identifiers
@@ -170,7 +174,7 @@ Supervisor and Worker share 4 required fields:
 | Field | Type | Validation Rule | Description |
 |------|------|----------|------|
 | `name` | `str` | Non-empty string | Agent unique identifier. In Worker, also serves as the exported tool function name |
-| `agent_runtime` | `str` | Must be registered; currently only `smolagents` | Selects the complete Agent runtime. Missing and unknown values fail during preflight |
+| `agent_runtime` | `str` | Must be registered: `smolagents` / `pi` | Selects the complete Agent runtime. Missing and unknown values fail during preflight |
 | `description` | `str` | Non-empty string | Agent role description. In Supervisor single-string workflows, participates in task assembly; list workflow items are executed as authored |
 | `workflow` | `str` or `list[str]` | Non-empty string, or non-empty list of non-empty strings | Workflow instruction text. Supports Markdown and Mermaid flowcharts. See [Writing Guidelines](#workflow-writing-guidelines-and-recommendations) below |
 
@@ -398,15 +402,17 @@ workflow: |
 |------|------|--------|------|
 | `tools` | `list[dict]` | `[]` | Tool list. See [Section 4](#4-tool-configuration-details) |
 | `model_type` | `str` | Configured global `default_model_type` | Model selection. See [3.7](#37-model_type--model-selection) |
-| `prompt` | `str` or `dict` | Framework built-in | Custom System Prompt template. See [3.9](#39-prompt--custom-prompt) |
-| `planning_interval` | `int` | Not set | Force re-planning every N steps. See [3.10](#310-planning_interval--planning-interval) |
-| `todo` | `dict` | `{mode: "auto"}` | Current-task progress tracking. See [3.11](#311-todomode--task-tracking) |
+| `runtime_options.prompt_template_path` | `str` | Not set | Smol template path, string only |
+| `runtime_options.planning_interval` | `int` | Not set | Force re-planning every N steps. See [3.10](#310-runtime_optionsplanning_interval--planning-interval) |
+| `runtime_options.todo_mode` | `str` | "auto" | Smol task tracking; quote "on" / "off" |
 | `concurrency` | `int`/`str` | Not set | Concurrency level when this Agent is batch-invoked. See [3.11](#311-concurrency--concurrency-configuration) |
 | `skills` | `list`/`dict`/`str` | Not set | Private skill package configuration. See [3.8](#38-skills--skill-package-configuration) |
 | `hooks` | `dict` | Not set | Independent direct Hooks and explicit Hook Bundles. See [Hooks](hooks.md) |
-| `max_steps` | `int` | `80` | Maximum execution steps. Agent is forcefully terminated when exceeded |
+| `runtime_options.max_steps` | `int` | `80` | Maximum execution steps. Agent is forcefully terminated when exceeded |
 
 ---
+
+The `runtime_options.*` fields above belong to smol. `smart_summary` accepts a bool and defaults to `true`; `max_consecutive_model_errors` accepts a positive integer and defaults to `5`. Pi has its own option schema.
 
 ### 3.3 Supervisor-Specific Fields
 
@@ -434,7 +440,7 @@ Every Supervisor and Worker declares:
 agent_runtime: "smolagents"
 ```
 
-The only currently registered value is `smolagents`. A missing value,
+Registered values are `smolagents` and `pi`; install the selected backend. A missing value,
 `langgraph`, or any unknown value fails during Application preflight; AgentLoom
 does not select or fall back to another runtime. This field is independent from
 the global `runtime` mapping in `config/system.yaml`, which controls storage.
@@ -485,87 +491,41 @@ See [Skills](skills_config.md) for discovery and precedence details.
 
 ---
 
-### 3.9 `prompt` — Custom Prompt
+### 3.9 `runtime_options.prompt_template_path` — Custom Prompt
 
-Used to override the framework's built-in System Prompt template.
-
-#### Two Formats
+Configure a non-empty string path for the smol System Prompt template. A `{path: ...}` mapping is not accepted:
 
 ```yaml
-# Format 1: Direct string path
-prompt: "applications/my_app/sysprompt/agent_prompt.yaml"
-
-# Format 2: Dictionary form (must include path key)
-prompt:
-  path: "applications/my_app/sysprompt/agent_prompt.yaml"
+runtime_options:
+  prompt_template_path: "applications/my_app/sysprompt/agent_prompt.yaml"
 ```
 
-#### Path Resolution Rules
-
-- **Relative path**: Resolved based on `AGENT_ROOT` (project root directory containing `config/system.yaml`)
-- **Absolute path**: Used directly
-
-#### Prompt Resolution Priority (highest to lowest)
-
-| Priority | Source | Description |
-|--------|------|------|
-| 1 | Function parameter `prompt_template_path` | Explicitly passed in code |
-| 2 | Agent YAML `prompt` field | Current document configuration |
-| 3 | Model family variant | `<prompts_dir>/<family>/toolcalling_agent.yaml` (user activates by removing `.example` suffix) |
-| 4 | Local override | `<prompts_dir>/toolcalling_agent.yaml` (user activates by removing `.example` suffix) |
-| 5 | smolagents built-in default | smolagents package's built-in prompt (no file needed) |
-
-> **Customization**: All `.example.yaml` files (including those under `anthropic/`, `openai/`, `gemini/` directories) are reference templates. To activate a custom prompt, simply remove the `.example` suffix:
-> ```bash
-> # Activate anthropic model-family variant
-> mv anthropic/toolcalling_agent.example.yaml anthropic/toolcalling_agent.yaml
-> ```
-> To revert to defaults, add the `.example` suffix back.
-
-**Validation**: Dictionary form must include the `path` key; otherwise raises `must include 'path' when prompt is a mapping`. Prompt file must be a valid YAML mapping.
-
-> This field can override system configuration in Agent YAML (part of the [overlay whitelist](#92-overridable-field-whitelist)).
+Relative paths resolve from the project root; absolute paths are used directly. The file must contain a YAML mapping. An explicit path takes precedence. Otherwise the smol adapter selects an activated model-family template, a local template under `src/adapters/smolagents/prompts/`, then the built-in smolagents template. `.example.yaml` files are reference assets.
 
 ---
 
-### 3.10 `planning_interval` — Planning Interval
+### 3.10 `runtime_options.planning_interval` — Planning Interval
 
-When set, the Agent is forced to perform a planning step every N steps.
-
-**Type**: `int` (positive integer)
-**Default**: Not set (periodic planning not enabled)
-
-**Validation rules**:
-
-| Input Value | Parse Result | Description |
-|--------|---------|------|
-| `3` | `3` | Normal positive integer |
-| `"3"` | `3` | String integer auto-conversion supported |
-| `0` / `-1` | Not set | Zero and negatives are equivalent to not set |
-| `null` / omitted | Not set | Not enabled |
-| `true` / `false` | Not set | Bool type is ignored (`true` doesn't become `1`) |
-| `""` / `"abc"` | Not set | Empty or non-numeric strings are ignored |
-
-**Example**:
+Smol only. A positive integer requests planning every N steps; omission or `null` disables periodic planning. Strings, booleans, zero and negative values are rejected.
 
 ```yaml
-planning_interval: 3    # Force re-planning every 3 steps
+runtime_options:
+  planning_interval: 3
 ```
 
-`planning_interval` only controls periodic model planning. It does not enable,
-disable, or schedule Todo calls. Configure Todo independently with [`todo.mode`](#311-todomode--task-tracking).
+Planning is independent from `runtime_options.todo_mode`.
 
 ---
 
-### 3.11 `todo.mode` — Task Tracking
+### 3.11 `runtime_options.todo_mode` — Task Tracking
 
 Todo tracks the current Agent's progress for the current task. It is not a
 long-term project manager and is independent from `planning_interval` and the
 Agent's explicit `tools` list.
 
 ```yaml
-todo:
-  mode: "auto"  # auto | on | off; quote on/off for YAML 1.1 loaders
+runtime_options:
+  todo_mode: "auto"  # auto | on | off; quote on/off for YAML 1.1 loaders
 ```
 
 | Mode | Behavior |
@@ -574,9 +534,7 @@ todo:
 | `on` | `todo_write` is available. For a non-trivial multi-step task whose scope is already clear, the model is strongly instructed to make a standalone `todo_write` its first tool call. Minimal read-only discovery may happen first only when needed to ground the list. |
 | `off` | The tool, Todo prompt policy, and current Todo snapshot are hidden from the model. |
 
-The value may be set globally in `config/system.yaml`, in an Application YAML,
-or in an Agent YAML. The more specific layer wins. Only `auto`, `on`, and `off`
-are valid.
+`runtime_options` merges through configuration layers. For mixed applications, set `todo_mode` on each smol Agent. Only the strings `"auto"`, `"on"`, and `"off"` are accepted; quote `on` and `off`.
 
 `todo_write` replaces the complete list atomically. Each item contains
 `content` and one of `pending`, `in_progress`, `completed`, or `cancelled`.
@@ -1218,7 +1176,7 @@ The system performs a full pre-check on **all** entries before loading (director
 | Error Message | Fix |
 |----------|------|
 | `missing required 'agent_runtime'` | Add `agent_runtime: smolagents` |
-| `agent_runtime must name a registered runtime` | Currently use only `smolagents` |
+| `agent_runtime must name a registered runtime` | Select installed `smolagents` or `pi` |
 | `skills must be a list, dict, or string path` | Use list/dict/string |
 
 ---
@@ -1363,18 +1321,16 @@ The following top-level fields in Agent YAML can override system configuration (
 |------|----------|------|
 | `system` | `dict` | System metadata (name, version, user_agent) |
 | `model_request_headers` | `dict` | Model request header profiles |
-| `smart_summary` | `any` | Context compression strategy |
+| `runtime_options` | `dict` | Options interpreted by the selected backend; rebuilt per Worker |
 | `context_engine` | `dict` | Reversible context compression limits |
 | `tool_access_control` | `dict` | Working directory and path filtering |
 | `tools` | `list` | Agent tool list and its effective-config overlay |
 | `shell_settings` | `any` | Shell safety settings |
 | `default_toolsets` / `toolsets` | `any` | Toolset defaults or replacement |
-| `prompt` | `str`/`dict` | Custom System Prompt template path |
 | `mcp_servers` | `str`/`list`/`dict` | MCP server configuration |
 | `self_learning` | `dict` | History and optional memory-review policy |
-| `todo` | `dict` | Todo mode (`auto`, `on`, or `off`) |
 
-> ⚠️ **Important**: The whitelist above is evaluated **per Agent YAML**, not per call chain. When a Supervisor invokes a Worker, the Worker's `tool_access_control`, `shell_settings`, `prompt`, and other whitelisted overrides are rebuilt from the Worker YAML instead of being inherited from the Supervisor.
+> ⚠️ **Important**: The whitelist above is evaluated **per Agent YAML**, not per call chain. When a Supervisor invokes a Worker, the Worker's `tool_access_control`, `shell_settings`, `runtime_options`, and other whitelisted overrides are rebuilt from the Worker YAML instead of being inherited from the Supervisor.
 >
 > ```yaml
 > # If both Supervisor and Worker access the same external directory,
@@ -1397,7 +1353,6 @@ The following fields are processed independently as Agent properties and are not
 | `worker_agents` / `agent_function_schema` | Role-specific properties |
 | `skills` | Independent three-layer stacking loading (see [3.8](#38-skills--skill-package-configuration)) |
 | `agent_runtime` / `model_type` | Agent runtime and model-type selectors |
-| `max_steps` / `planning_interval` | Agent execution parameters |
 
 ### 9.4 LLM Configuration Isolation
 
@@ -1428,7 +1383,8 @@ WARNING: Ignoring top-level key 'model' in agent config;
 
 ```yaml
 # Agent-level disable smart summary
-smart_summary: false
+runtime_options:
+  smart_summary: false
 ```
 
 ### 9.7 Per-Agent Shell Security Configuration Override
@@ -1637,17 +1593,19 @@ These tolerance mechanisms significantly reduce wasted retries caused by LLM out
 | Field | Required | Supervisor | Worker | Type | Default |
 |------|------|-----------|--------|------|--------|
 | `name` | ✅ | ✅ | ✅ | `str` | — |
-| `agent_runtime` | ✅ | ✅ | ✅ | `str` | `smolagents` (must be explicit) |
+| `agent_runtime` | ✅ | ✅ | ✅ | `str` | None; select `smolagents` / `pi` explicitly |
 | `description` | ✅ | ✅ | ✅ | `str` | — |
 | `workflow` | ✅ | ✅ | ✅ | `str`/`list[str]` | — |
 | `goal` | ❌ | ✅ | ❌ | `bool`/`dict` | `false` |
 | `tools` | ❌ | ✅ | ✅ | `list[dict]` | `[]` |
 | `model_type` | ❌ | ✅ | ✅ | `str` | `model.default_model_type` from `config/llm.yaml`; no implicit default |
-| `prompt` | ❌ | ✅ | ✅ | `str`/`dict` | Framework built-in |
-| `planning_interval` | ❌ | ✅ | ✅ | `int` | Not set |
-| `todo` | ❌ | ✅ | ✅ | `dict` | `{mode: "auto"}` |
+| `runtime_options.prompt_template_path` | ❌ | ✅ | ✅ | `str` | Not set |
+| `runtime_options.planning_interval` | ❌ | ✅ | ✅ | `int` | Not set |
+| `runtime_options.todo_mode` | ❌ | ✅ | ✅ | `str` | `"auto"` |
 | `concurrency` | ❌ | ✅ | ✅ | `int`/`str` | Not set (`auto`) |
 | `skills` | ❌ | ✅ | ✅ | `list`/`dict`/`str` | Auto-loaded |
 | `worker_agents` | ❌ | ✅ | ❌ | `list[dict]` | `[]` |
-| `max_steps` | ❌ | ✅ | ✅ | `int` | `80` |
+| `runtime_options.smart_summary` | ❌ | ✅ | ✅ | `bool` | `true` |
+| `runtime_options.max_consecutive_model_errors` | ❌ | ✅ | ✅ | `int` | `5` |
+| `runtime_options.max_steps` | ❌ | ✅ | ✅ | `int` | `80` |
 | `agent_function_schema` | ❌ | ❌ | ✅ | `dict` | Not set |

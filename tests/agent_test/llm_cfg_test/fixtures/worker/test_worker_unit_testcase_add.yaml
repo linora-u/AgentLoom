@@ -1,4 +1,6 @@
-max_steps: 80
+runtime_options:
+  max_steps: 80
+  smart_summary: false
 
 name: "unit_test_studio_append"
 agent_runtime: smolagents

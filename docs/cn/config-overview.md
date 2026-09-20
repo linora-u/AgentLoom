@@ -45,7 +45,7 @@ flowchart TD
 
 #### Level 3: Agent 级覆盖
 单个 Agent 的 YAML 文件除了定义自身的工作流外，还可以覆盖系统的部分配置。支持覆盖的白名单字段（`_WORKFLOW_OVERLAY_KEYS`）包含：
-- `system`, `model_request_headers`, `smart_summary`, `context_engine`, `tool_access_control`, `tools`, `prompt`, `shell_settings`, `default_toolsets`, `toolsets`, `mcp_servers`, `self_learning`, `hooks`。
+- `system`, `model_request_headers`, `runtime_options`, `context_engine`, `tool_access_control`, `tools`, `shell_settings`, `default_toolsets`, `toolsets`, `mcp_servers`, `self_learning`, `hooks`。
 
 ### Runtime 存储归属
 
@@ -103,7 +103,7 @@ from agentloom.configuration import C
 
 # 1. 访问系统配置
 tools_list = C.get_nested("tools", "default", default=[])
-is_summary_enabled = C.get("smart_summary")
+context_preview_chars = C.get_nested("context_engine", "preview_max_chars", default=3000)
 
 # 2. 访问 LLM 配置
 api_key = C.llm_api_key                # 读取默认模型类型的 api_key

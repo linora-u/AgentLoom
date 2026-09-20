@@ -20,8 +20,8 @@ The configuration loading order is `config/system.yaml` → `config/llm.yaml` �
 - [Quick Reference: Representative YAML Structure](#quick-reference-representative-yaml-structure)
 - [1. system — System Metadata](#1-system--system-metadata)
 - [1.5 model_request_headers — Model Request Header Privacy](#15-model_request_headers--model-request-header-privacy)
-- [2. smart_summary — Context Compression Strategy](#2-smart_summary--context-compression-strategy)
-- [3. prompt — Top-Level System Prompt Override](#3-prompt--top-level-system-prompt-override)
+- [2. runtime_options — Backend Options](#2-runtime_options--backend-options)
+- [3. Historical Execution Fields](#3-historical-execution-fields)
 - [4. skills — Global Skills Configuration](#4-skills--global-skills-configuration)
 - [4.5 hooks — Independent Hook Runtime](#45-hooks--independent-hook-runtime)
 - [5. lsp_servers — LSP Language Server Configuration](#5-lsp_servers--lsp-language-server-configuration)
@@ -57,17 +57,6 @@ system:
 model_request_headers:
   profile: "opencode"  # agentloom | none | kimicode | openclaw | opencode
   headers: {}
-
-# ============================================
-# Context Compression Strategy
-# ============================================
-smart_summary: false
-
-# ============================================
-# Top-Level Prompt Configuration (supports overlay)
-# ============================================
-prompt:
-  path: "sysprompt/system_prompt.yaml"
 
 # ============================================
 # Runtime Storage and Retention
@@ -235,45 +224,25 @@ Later layers override earlier layers case-insensitively. This feature only contr
 
 ---
 
-## 2. smart_summary — Context Compression Strategy
+## 2. runtime_options — Backend Options
 
-Controls the context compression behavior for conversation history. When tokens exceed the limit, determines whether to use LLM smart summary or simple truncation.
-This field is passed through as-is to the final configuration after system config and application-level override merging; use `true` / `false` directly, as string values may cause ambiguity across different parsing paths.
-
-**YAML path**: `smart_summary` (top-level field)
-**Pydantic field**: `RootSettings.smart_summary`
-
-| Parameter | Type | Default | Required | Description |
-|------|------|--------|------|------|
-| `smart_summary` | `bool` | `true` | ❌ No | `true`: Uses LLM smart summary compression when conversation history exceeds the limit; `false`: Falls back to simple truncation |
-
-**Example**:
+Only `runtime_options` is interpreted for backend settings. Planning, summary, Todo and templates belong to the selected runtime. Configure them on each Agent in mixed applications so smol options do not become Pi requirements.
 
 ```yaml
-# Enable smart summary (recommended for long conversation tasks)
-smart_summary: true
-
-# Disable smart summary (falls back to truncation, reduces LLM calls)
-smart_summary: false
+# smol Agent YAML
+agent_runtime: smolagents
+runtime_options:
+  smart_summary: false
+  todo_mode: "off"
 ```
 
-## 3. prompt — Top-Level System Prompt Override
+Options merge through system, Application and Agent layers, with validation owned by the selected adapter. See [Agent configuration](agent_config.md) for smol fields.
 
-`prompt` is a top-level overlay configuration key. The code preserves it in `build_effective_agent_config()` and passes it through to the final merged result. It supports a string path or a mapping containing a `path` key, providing custom System Prompt templates for Agents.
+## 3. Historical Execution Fields
 
-**YAML path**: `prompt` (top-level field)
-**Pydantic perspective**: Extra key in `RootSettings`; not modeled separately but participates in overlay merging
+Historical top-level `smart_summary`, `prompt`, `todo`, `max_steps`, `planning_interval`, and `max_consecutive_parse_errors` are silently ignored, without conversion or rejection. They no longer provide system defaults.
 
-| Parameter | Type | Default | Required | Description |
-|------|------|--------|------|------|
-| `prompt` | `str` \| `dict` | — | ❌ No | Custom System Prompt template path. String form specifies the path directly; mapping form uses the `path` key. Final value enters the effective config as-is |
-
-**Example**:
-
-```yaml
-prompt:
-  path: "applications/my_app/sysprompt/system_prompt.yaml"
-```
+Set a custom smol template with a string `runtime_options.prompt_template_path` in Agent YAML. Bundled reference templates live under `src/adapters/smolagents/prompts/`.
 
 ---
 
@@ -972,7 +941,6 @@ The framework uses Pydantic to validate system configuration. The following show
 | `tool_access_control` | `ToolAccessControlSettings` | `ToolAccessControlSettings()` |
 | `runtime` | `RuntimeSettings` | `RuntimeSettings()` |
 | `logging` | `LoggingSettings` | `LoggingSettings()` |
-| `smart_summary` | `bool` | `True` |
 | `context_engine` | `dict[str, Any]` | `{}` |
 | `model` | `dict[str, Any]` | `{}` |
 | `tools` | `list[Any]` | `[]` |
@@ -984,7 +952,7 @@ The framework uses Pydantic to validate system configuration. The following show
 | `self_learning` | `SelfLearningSettings` | `SelfLearningSettings()` |
 | `hooks` | `dict[str, Any]` | `{}` |
 
-> `RootSettings` allows extension fields, so top-level fields such as `prompt` can participate in overlay merging. `RuntimeSettings` and `LoggingSettings` deliberately use `extra="forbid"`; removed runtime/logging keys fail validation instead of silently selecting a second storage path.
+> `RootSettings` allows extension fields; the selected backend validates `runtime_options`. Historical top-level smol fields such as `prompt` are not interpreted even when retained in raw configuration. `RuntimeSettings` and `LoggingSettings` deliberately use `extra="forbid"`; removed runtime/logging keys fail validation instead of silently selecting a second storage path.
 
 **Fault-tolerant parsing tool set**:
 
@@ -1046,14 +1014,13 @@ The following table shows the support status of each configuration key at differ
 | Config Key | Global system.yaml | App-level system.yaml | Agent YAML |
 |--------|----------------|-----------------|-----------|
 | `system` | ✅ Supported | ✅ Supported | ✅ Supported |
-| `smart_summary` | ✅ Supported | ✅ Supported | ✅ Supported |
+| `runtime_options` | ✅ Supported | ✅ Supported | ✅ Supported, backend validated |
 | `skills` | ✅ Supported | ✅ Supported | ✅ Supported (Agent private) |
 | `runtime` | ✅ Supported | ❌ Rejected | ❌ Rejected |
 | `logging` | ✅ Supported | ❌ Rejected | ❌ Rejected |
 | `checkpoint` | ✅ Supported | ✅ Supported | ❌ Ignored |
 | `tool_access_control` | ✅ Supported | ✅ Supported | ✅ Supported |
 | `tools` | ✅ Supported | ✅ Supported | ✅ Supported (dict override) |
-| `prompt` | ✅ Supported | ✅ Supported | ✅ Supported |
 
 ```yaml
 # applications/my_app/config/system.yaml

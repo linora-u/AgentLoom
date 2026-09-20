@@ -474,15 +474,8 @@ class RuntimeDefinition:
     runtime_options: Mapping[str, JSONValue] = field(default_factory=dict, repr=False)
     option_sources: Mapping[str, JSONValue] = field(default_factory=dict)
     requirements: RuntimeRequirements = field(default_factory=RuntimeRequirements)
-    # Transitional smol constructor fields; removed after callers migrate.
-    max_steps: int | None = None
     instructions: str = ""
-    planning_interval: int | None = None
-    smart_summary: bool | None = None
-    todo_mode: Literal["auto", "on", "off"] | None = None
-    prompt_template_path: str | None = None
     project_root: str | None = None
-    max_consecutive_model_errors: int | None = None
     metadata: Mapping[str, JSONValue] = field(default_factory=dict, repr=False)
 
     def __post_init__(self) -> None:
@@ -511,42 +504,10 @@ class RuntimeDefinition:
         if not isinstance(self.tool_gateway, ToolGateway):
             raise TypeError("tool_gateway must satisfy ToolGateway")
         object.__setattr__(self, "tool_manifest", tool_manifest_snapshot(self.tool_gateway))
-        if self.max_steps is not None and (
-            isinstance(self.max_steps, bool)
-            or not isinstance(self.max_steps, int)
-            or self.max_steps < 1
-        ):
-            raise ValueError("max_steps must be a positive integer")
-        if self.planning_interval is not None and (
-            isinstance(self.planning_interval, bool)
-            or not isinstance(self.planning_interval, int)
-            or self.planning_interval < 1
-        ):
-            raise ValueError(
-                "planning_interval must be a positive integer when provided"
-            )
-        if self.smart_summary is not None and not isinstance(self.smart_summary, bool):
-            raise TypeError("smart_summary must be a boolean")
-        if self.todo_mode not in {None, "auto", "on", "off"}:
-            raise ValueError("todo_mode must be one of: auto, on, off")
-        for field_name in ("prompt_template_path", "project_root"):
-            value = getattr(self, field_name)
-            if value is not None and (
-                not isinstance(value, str) or not value.strip()
-            ):
-                raise ValueError(
-                    f"{field_name} must be a non-empty string when provided"
-                )
-            if isinstance(value, str):
-                object.__setattr__(self, field_name, value.strip())
-        if self.max_consecutive_model_errors is not None and (
-            isinstance(self.max_consecutive_model_errors, bool)
-            or not isinstance(self.max_consecutive_model_errors, int)
-            or self.max_consecutive_model_errors < 1
-        ):
-            raise ValueError(
-                "max_consecutive_model_errors must be a positive integer"
-            )
+        if self.project_root is not None:
+            if not isinstance(self.project_root, str) or not self.project_root.strip():
+                raise ValueError("project_root must be a non-empty string when provided")
+            object.__setattr__(self, "project_root", self.project_root.strip())
         for name in ("runtime_options", "option_sources"):
             object.__setattr__(self, name, _frozen_json_mapping(getattr(self, name), field_name=name))
         if not isinstance(self.metadata, Mapping):
@@ -921,7 +882,7 @@ def build_builtin_runtime_registry(
     """
 
     if smolagents_factory is None:
-        def smolagents_factory(
+        def build_smolagents(
             definition: RuntimeDefinition,
         ) -> AgentRuntime:
             from agentloom.adapters.smolagents.runtime_factory import (
@@ -929,6 +890,8 @@ def build_builtin_runtime_registry(
             )
 
             return SmolagentsRuntimeFactory()(definition)
+
+        smolagents_factory = build_smolagents
 
     registry = RuntimeRegistry()
     registry.register(

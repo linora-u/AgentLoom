@@ -4,7 +4,7 @@
 
 **Blocked by:** 11：双向混合基座协作并复用长期记忆；12：Pi 中断恢复与工具双日志对齐；13：交付干净 Pi-only 与 smol 安装路径
 
-**Status:** planned — 等待前置任务集成并验证，尚未实施。
+**Status:** in-progress — 与 12 在串行集成分支上收口。公共 RuntimeDefinition 的 smol 过渡参数已迁入 runtime_options，后端仅解释 runtime_options，旧顶层 smol 字段静默忽略；等待最终功能、发行及全量回归验收。
 
 维护者已要求直接在 main 清理当前可确认的迁移残留，范围见 [迁移清理记录](migration-cleanup.md)。这次局部清理不代表本票最终整合完成；仍需按所有票据集成后的消费者和发行物重新验收。
 
@@ -16,14 +16,14 @@
 
 ## Scope
 
-contract 阶段与最终整合。只清理、修复集成缺陷和验收，不承担前票遗漏的产品能力；保留旧 YAML 的兼容解释。
+contract 阶段与最终整合。只清理、修复集成缺陷和验收，不承担前票遗漏的产品能力；按维护者最新要求移除旧顶层 smol 字段的解释、兼容转换和拒绝校验；仓库定义与指南迁移到 `runtime_options`。
 
 **Edit boundary:** 协调者在全部前置已集成的候选上串行收口；不得在仍有实现 session 写入时交付或删除其 worktree。保留候选提交与验收证据，再将候选提交正式合入 main。
 
 ## Acceptance criteria
 
 - [ ] 所有必做任务的实际提交已经进入同一 integration 分支，登记每票验证 revision；阻塞关系通过提交证据解除，不以口头完成代替。
-- [ ] 确认所有内部旧形式消费者已迁移，再删除 expand 阶段兼容入口；不删除仍需保留的旧 YAML 支持。
+- [ ] 确认所有内部旧形式消费者已迁移，再删除 expand 阶段兼容入口；后端只解释 `runtime_options`，旧顶层 smol 字段即使无效也静默忽略。A01 验证 canonical smol Application、原有工具/Todo/Goal 行为及旧字段不影响新配置。
 - [ ] 复验 [工具归属](tool-ownership.md)：基础工具随各自基座、平台能力保持中立、专业工具按需加载；公共构造、Hook 与生命周期不反向依赖 smol 基础工具，混合实例清理互不影响。
 - [ ] 最终同一候选通过 A01–A14 和既有必需 CI，使用真实 Pi SDK 与真实工具，只在确定性测试中替换 provider 响应。
 - [ ] 从最终候选重建发行物并复跑 Pi-only/smol 干净安装、CLI 失败路径，不能拿 13 的早期构建日志盖章。

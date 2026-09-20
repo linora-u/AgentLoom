@@ -1,5 +1,7 @@
 name: "code_review_agent"
 agent_runtime: smolagents
+runtime_options:
+  smart_summary: false
 description: |
   Universal Code Review Supervisor Agent. Orchestrates a comprehensive, multi-dimensional
   code quality review by coordinating specialized worker agents across 12 analysis stages:

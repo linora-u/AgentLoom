@@ -21,7 +21,7 @@
 
 | 配置面 | 写在哪里 | 用途 | 关键规则 |
 |---|---|---|---|
-| 全局系统配置 | `config/system.yaml` | runtime root、日志、工具、权限、shell、prompt、skills、checkpoint 等系统行为 | `runtime`/`logging` 只在此处生效；其他字段参与 deep merge；列表整段替换 |
+| 全局系统配置 | `config/system.yaml` | runtime root、日志、工具、权限、shell、skills、checkpoint 等系统行为 | `runtime`/`logging` 只在此处生效；其他字段参与 deep merge；列表整段替换 |
 | 本地模型配置 | `config/llm.yaml` | 模型类型、密钥、网关、推理参数、限流、重试 | 独立加载，不被 app/Agent YAML 覆盖；通常被 `.gitignore` 忽略 |
 | 应用级系统覆盖 | `applications/<app>/config/system.yaml` | 当前应用专属的系统行为覆盖 | 从 Agent YAML 路径向上找到最近 `workflows/`，其父目录即 app root |
 | Agent YAML | `applications/<app>/workflows/*.yaml` | 单个 Agent 的角色、workflow、工具、模型类型、运行模式 | 只有白名单字段会 overlay 到系统配置，其余是 Agent 自身属性 |
@@ -56,16 +56,20 @@ workflow: |
 
 | 字段 | 类型 | 说明 |
 |---|---|---|
-| `agent_runtime` | `smolagents` | 必填。选择完整 Agent runtime；缺失或未注册值在预检阶段失败 |
+| `agent_runtime` | `smolagents` / `pi` | 必填。选择完整 Agent runtime；缺失或未注册值在预检阶段失败 |
 | `tools` | `list[dict]` | Agent 额外工具列表；预定义工具只写 `name`，动态工具写 `name/module/function` |
 | `model_type` | `str` | 选择 `config/llm.yaml` 中定义的模型类型；缺失时使用 `model.default_model_type` |
-| `max_steps` | `int` | smolagents 最大步数；默认 80 |
-| `planning_interval` | 正整数或数字字符串 | 仅控制周期性 planning，与 Todo 解耦 |
-| `todo` | `{mode: auto|on|off}` | 当前任务进度跟踪；默认 `auto`，`on` 强提示多步骤任务先建 Todo，`off` 完全隐藏 |
+| `runtime_options.smart_summary` | `bool` | smol 智能摘要；默认 `true` |
+| `runtime_options.max_consecutive_model_errors` | 正整数 | smol 连续模型错误上限；默认 `5` |
+| `runtime_options.max_steps` | 正整数 | smolagents 最大步数；默认 80 |
+| `runtime_options.planning_interval` | 正整数或 `null` | 仅控制周期性 planning，与 Todo 解耦 |
+| `runtime_options.todo_mode` | `"auto"` / `"on"` / `"off"` | 当前任务进度跟踪；默认 `auto`，`on` 强提示多步骤任务先建 Todo，`off` 完全隐藏 |
 | `concurrency` | 正整数或 `"auto"` | 仅影响同一 Worker 通过 `.batch()` 被多输入批量调用 |
-| `prompt` | `str` 或 `{path: ...}` | 自定义系统 prompt 模板路径 |
+| `runtime_options.prompt_template_path` | 非空字符串 | smol 系统 prompt 模板路径；不接受 mapping |
 | `skills` | `{paths: list[str]}` | 当前 Agent 的额外 Skill 发现目录 |
 | `goal` | `bool` 或 `{enabled: bool}` | 仅顶层 Supervisor；开启 continuation 和显式完成 |
+
+后端参数仅解释 `runtime_options`；旧顶层 smol 参数静默忽略，不转换、不拒绝。生成应用必须使用上面的 canonical 参数，`on` / `off` 必须加引号，`prompt_template_path` 必须是字符串。smol 专属参数不要复制到 Pi。
 
 Agent 只接受 provider 原生结构化 tool calls。只要当前 Agent 有可用工具，
 AgentLoom 就发送结构化 tools schema；不会从 prose、XML 或 JSON 文本中猜测工具调用。
@@ -105,10 +109,10 @@ Worker YAML 如果出现任何 `goal` key 必须 fail-closed；不能用 `goal: 
 当前代码里的 `_WORKFLOW_OVERLAY_KEYS` 是：
 
 ```text
-system, model_request_headers, smart_summary, context_engine,
+system, model_request_headers, runtime_options, context_engine,
 tool_access_control, tools, shell_settings,
-default_toolsets, toolsets, prompt, mcp_servers, self_learning, hooks,
-todo, skills, tool_metadata, tool_output_limits
+default_toolsets, toolsets, mcp_servers, self_learning, hooks,
+skills, tool_metadata, tool_output_limits
 ```
 
 注意：
@@ -129,9 +133,8 @@ todo, skills, tool_metadata, tool_output_limits
 | 字段 | 说明 |
 |---|---|
 | `system` | `name/version/user_agent` 元信息 |
-| `smart_summary` | 是否启用智能上下文压缩 |
+| `runtime_options` | 由选中基座解释；混合应用推荐在各 Agent 定义中配置 |
 | `context_engine` | 可逆上下文压缩：工具原文进本地 store，模型可见压缩预览和 `ContextRef` |
-| `prompt` | 顶层系统 prompt 覆盖，字符串或 `{path: ...}` |
 | `skills` | `{paths: [...]}` 额外 Skill 发现目录 |
 | `hooks` | 独立直接 Shell Hook 与显式 `HOOK.yaml` Bundle |
 | `lsp_servers` | LSP 服务开关、重启次数、语言列表 |

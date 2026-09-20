@@ -80,7 +80,7 @@ def _runtime_definition(
             adapter=_ModelAdapter(),
         ),
         tool_gateway=gateway,
-        max_steps=5,
+        runtime_options={'max_steps': 5},
     )
     return definition, gateway
 
@@ -459,41 +459,44 @@ def test_context_engine_supervisors_fix_retrieval_parameters(
     assert configured_tools == expected_tools
 
 
-def test_smol_runtime_options_keep_legacy_meaning_and_source(tmp_path):
+def test_smol_runtime_options_keep_explicit_layers_and_source(tmp_path):
     from agentloom.application.runtime_options import normalize_runtime_options
     from agentloom.configuration.config import ConfigLayerSnapshot, EffectiveAgentConfigSnapshot
 
-    config = _agent_config(agent_runtime="smolagents", max_steps=6, planning_interval=2)
+    config = _agent_config(agent_runtime="smolagents", runtime_options={"max_steps": 6, "planning_interval": 2})
     config["_yaml_file_path"] = str(tmp_path / "agent.yaml")
     snapshot = EffectiveAgentConfigSnapshot(
-        values={"smart_summary": False},
-        layers=(ConfigLayerSnapshot("global_system", {"smart_summary": False}, tmp_path, tmp_path / "system.yaml"),),
+        values={"runtime_options": {"smart_summary": False}},
+        layers=(ConfigLayerSnapshot("global_system", {"runtime_options": {"smart_summary": False}}, tmp_path, tmp_path / "system.yaml"),),
     )
     options, sources = normalize_runtime_options(config, snapshot=snapshot, agent_root=tmp_path)
     assert options["max_steps"] == 6
     assert options["planning_interval"] == 2
     assert options["smart_summary"] is False
-    assert sources["smart_summary"] == f"{tmp_path / 'system.yaml'}:smart_summary"
-    assert sources["max_steps"] == f"{tmp_path / 'agent.yaml'}:max_steps"
+    assert sources["smart_summary"] == f"{tmp_path / 'system.yaml'}:runtime_options.smart_summary"
+    assert sources["max_steps"] == f"{tmp_path / 'agent.yaml'}:runtime_options.max_steps"
     assert sources["todo_mode"] == "default:smolagents"
 
 
-def test_conflicting_smol_options_report_both_configuration_sources(tmp_path):
+def test_old_smol_options_are_ignored_even_when_conflicting(tmp_path):
     from agentloom.application.runtime_options import normalize_runtime_options
 
-    config = _agent_config(agent_runtime="smolagents", max_steps=6, runtime_options={"max_steps": 7})
-    config["_yaml_file_path"] = str(tmp_path / "agent.yaml")
-    with pytest.raises(ValueError, match="Conflicting runtime option") as error:
-        normalize_runtime_options(config, agent_root=tmp_path)
-    assert f"{tmp_path / 'agent.yaml'}:max_steps" in str(error.value)
-    assert f"{tmp_path / 'agent.yaml'}:runtime_options.max_steps" in str(error.value)
+    config = _agent_config(agent_runtime="smolagents", max_steps={"invalid": True},
+                          todo=False, prompt=["missing"], smart_summary="invalid",
+                          runtime_options={"max_steps": 7})
+    options, sources = normalize_runtime_options(config, agent_root=tmp_path)
+    assert options["max_steps"] == 7
+    assert options["todo_mode"] == "auto"
+    assert options["prompt_template_path"] is None
+    assert options["smart_summary"] is True
+    assert sources["todo_mode"] == "default:smolagents"
 
 
-def test_equivalent_legacy_and_new_smol_prompt_paths_do_not_conflict(tmp_path):
+def test_legacy_prompt_does_not_affect_canonical_template_path(tmp_path):
     from agentloom.application.runtime_options import normalize_runtime_options
 
     options, _ = normalize_runtime_options(_agent_config(
-        agent_runtime="smolagents", prompt={"path": "prompts/custom.yaml"},
+        agent_runtime="smolagents", prompt={"path": "missing/ignored.yaml"},
         runtime_options={"prompt_template_path": "prompts/custom.yaml"},
     ), agent_root=tmp_path)
     assert options["prompt_template_path"] == str(tmp_path / "prompts/custom.yaml")

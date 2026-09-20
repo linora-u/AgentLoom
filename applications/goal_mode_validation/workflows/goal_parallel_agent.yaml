@@ -2,7 +2,9 @@ name: "goal_parallel_agent"
 agent_runtime: smolagents
 description: "Exercise parallel Workers, durable Goal evidence, and explicit completion."
 model_type: "powerful"
-max_steps: 16
+runtime_options:
+  max_steps: 16
+  smart_summary: false
 goal:
   enabled: true
 

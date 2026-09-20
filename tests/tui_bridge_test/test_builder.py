@@ -838,7 +838,7 @@ name: broken_worker
 agent_runtime: smolagents
 description: invalid worker
 workflow: do the task
-max_steps: true
+runtime_options: {max_steps: true}
 agent_function_schema:
   description: Handle one task.
   inputs:

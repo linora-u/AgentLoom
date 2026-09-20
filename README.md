@@ -196,6 +196,8 @@ applications/release_review/
 └── sysprompt/                  # optional prompt templates
 ```
 
+Backend-specific execution settings belong only in `runtime_options`. Historical top-level smol fields are silently ignored without conversion or rejection.
+
 A Supervisor references Worker definitions:
 
 ```yaml
@@ -212,7 +214,8 @@ workflow: |
   Ask both Workers for evidence, reconcile conflicts, and return one release decision.
 
 tools: []
-max_steps: 12
+runtime_options:
+  max_steps: 12
 goal:
   enabled: true
 ```
@@ -239,7 +242,8 @@ workflow: |
 
 tools: []
 worker_agents: []
-max_steps: 8
+runtime_options:
+  max_steps: 8
 ```
 
 Run the Supervisor directly:

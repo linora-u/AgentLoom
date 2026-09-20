@@ -40,8 +40,9 @@ print(scan_app_structure('applications/<app_name>'))
 - Worker 数量是否符合设计。
 - 每个 Worker 是否有 `agent_function_schema`。
 - `tools` 是否与 workflow 动作匹配。
-- `agent_runtime`、`model_type`、`max_steps` 是否合理。
-- Agent YAML 是否误写 LLM 参数、无效 `planning_interval`/`todo.mode`/`concurrency`、错误 `prompt`、错误 `fixed_args`、错误 `mcp_servers`。
+- `agent_runtime`、`model_type`、所选基座的 `runtime_options` 是否合理。
+- Agent YAML 是否误写 LLM 参数、无效 `runtime_options.planning_interval` / `runtime_options.todo_mode` / `concurrency`、非字符串 `runtime_options.prompt_template_path`、错误 `fixed_args` 或 `mcp_servers`。
+- 生成器不得输出旧顶层 smol 参数：运行时会静默忽略，不会替作者转换或拒绝。`todo_mode` 的 `"on"` / `"off"` 必须加引号。
 - Goal mapping 是否显式配置 `enabled`、Worker 是否错误配置 Goal；Goal workflow list 是否按一个编号上下文运行。
 
 ```bash

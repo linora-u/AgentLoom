@@ -2,7 +2,9 @@ name: "browser_harness_probe"
 agent_runtime: smolagents
 description: "Run browser-harness doctor, then verify both isolated Chrome and real Chrome demo probes."
 model_type: "powerful"
-max_steps: 8
+runtime_options:
+  max_steps: 8
+  smart_summary: false
 toolsets: []
 skills: []
 

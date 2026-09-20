@@ -2,7 +2,9 @@ name: "memory_global_review_application_opt_out"
 agent_runtime: smolagents
 description: "Validate that one Application can opt out of inherited review."
 model_type: "summary"
-max_steps: 6
+runtime_options:
+  max_steps: 6
+  smart_summary: false
 
 workflow: |
   Load the assigned case with `validation_memory_case`. Treat its evidence as

@@ -43,4 +43,6 @@ workflow: |
      PASS only when every row is proven by the actual call or audit event.
 
 worker_agents: []
-max_steps: 12
+runtime_options:
+  max_steps: 12
+  smart_summary: false

@@ -79,9 +79,9 @@ def test_no_tools_no_goal_application_uses_native_model_selection(native_project
     assert "fixture-secret" not in repr(definition)
     assert definition.runtime_options == {"thinking": "low"}
     assert definition.tool_gateway.definitions == ()
-    assert definition.max_steps is None
-    assert definition.smart_summary is None
-    assert definition.todo_mode is None
+    assert not hasattr(definition, "max_steps")
+    assert not hasattr(definition, "smart_summary")
+    assert not hasattr(definition, "todo_mode")
     assert "todo_write" not in definition.instructions
     assert "final_answer" not in definition.instructions
     assert requests
@@ -117,13 +117,11 @@ def test_binding_free_workers_have_fresh_instances_and_hook_runs(native_project,
 
 
 @pytest.mark.parametrize("option", ["max_steps: 4", "todo: {mode: off}", "planning_interval: 3", "smart_summary: true"])
-def test_explicit_smol_options_are_rejected_before_native_construction(native_project, option):
+def test_legacy_smol_options_are_ignored_by_native_construction(native_project, option):
     path, definitions, _ = native_project
     path.write_text(path.read_text() + option + "\n")
-    with pytest.raises(ValueError, match="smolagents-only option") as error:
-        execute_app(path, file_logging=False)
-    assert str(path) in str(error.value)
-    assert definitions == []
+    assert execute_app(path, file_logging=False).output == "native answer"
+    assert definitions[0].runtime_options == {"thinking": "low"}
 
 
 @pytest.mark.parametrize("selection, capability", [

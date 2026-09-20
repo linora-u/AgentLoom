@@ -1166,8 +1166,8 @@ class TestRunApp:
                 "tools:\n  - name: read_file\n    fixed_args:\n      definitely_unknown: 1\n",
                 "Unknown fixed_args for tool 'read_file': definitely_unknown",
             ),
-            ("max_steps: 0\n", "max_steps must be a positive integer"),
-            ("max_steps: true\n", "max_steps must be a positive integer"),
+            ("runtime_options: {max_steps: 0}\n", "max_steps must be a positive integer"),
+            ("runtime_options: {max_steps: true}\n", "max_steps must be a positive integer"),
         ],
     )
     @patch("agentloom.application.runner.YamlConfiguredSupervisorAgent")

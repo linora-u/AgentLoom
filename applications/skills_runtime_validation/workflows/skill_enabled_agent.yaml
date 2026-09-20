@@ -5,9 +5,10 @@ description: "Validate on-demand Skill activation and Agent-scope precedence wit
 model_type: "powerful"
 toolsets:
   - "skills"
-todo:
-  mode: "off"
-max_steps: 5
+runtime_options:
+  todo_mode: "off"
+  max_steps: 5
+  smart_summary: false
 
 skills:
   paths:
