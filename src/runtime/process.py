@@ -10,6 +10,7 @@ import time
 import uuid
 from dataclasses import dataclass
 from typing import Any
+from threading import Lock
 
 import psutil
 
@@ -178,25 +179,40 @@ def run_captured_process(
     with tempfile.TemporaryFile(mode="w+b") as stdout_stream, tempfile.TemporaryFile(
         mode="w+b"
     ) as stderr_stream:
-        process = subprocess.Popen(
-            command,
-            shell=shell,
-            cwd=cwd,
-            env=process_env,
-            stdin=subprocess.PIPE,
-            stdout=stdout_stream,
-            stderr=stderr_stream,
-            start_new_session=os.name == "posix",
-        )
+        from agentloom.runtime.resources import register_resource, unregister_resource
+        resource_key = f"captured-process:{run_token}"
+        process = None
+        cancelled = False
+        admission = Lock()
+
+        def close_process():
+            nonlocal cancelled
+            with admission:
+                cancelled = True
+                if process is not None and process.poll() is None:
+                    terminate_process_tree(process, run_token)
+
+        # Register before spawning. Cancellation either prevents admission or
+        # waits for this concrete handle and kills its entire owned process tree.
+        register_resource(resource_key, close_process)
         try:
+            with admission:
+                if cancelled:
+                    raise InterruptedError("Execution resources are closed")
+                process = subprocess.Popen(
+                    command, shell=shell, cwd=cwd, env=process_env,
+                    stdin=subprocess.PIPE, stdout=stdout_stream, stderr=stderr_stream,
+                    start_new_session=os.name == "posix",
+                )
             process.communicate(input=stdin, timeout=timeout)
         except subprocess.TimeoutExpired as exc:
-            terminate_process_tree(process, run_token)
+            close_process()
             raise CapturedProcessTimeout(f"process timed out after {timeout:g}s") from exc
         except BaseException:
-            if process.poll() is None:
-                terminate_process_tree(process, run_token)
+            close_process()
             raise
+        finally:
+            unregister_resource(resource_key)
 
         stdout, stdout_bytes, stdout_truncated = _read_preview(
             stdout_stream,

@@ -65,7 +65,7 @@ async function createSession(p: Obj): Promise<AgentSession> {
   const identity = (callId: string) => ({application_id: current!.frame.payload.application_id,
     task_id: current!.frame.payload.task_id, run_id: current!.frame.run_id, instance_id: instance, call_id: callId,
     native_session_id: manager.getSessionId(), native_parent_id: manager.getLeafId()});
-  const selected = nativeTools(p.tools, p.cwd, invoke, identity, () => !finalDelivery);
+  const selected = nativeTools(p.tools, p.cwd, invoke, identity, () => !finalDelivery, p.serial_tools);
   const loader = new DefaultResourceLoader({cwd: p.cwd, agentDir, settingsManager: settings,
     noExtensions: true, noSkills: true, noPromptTemplates: true, noThemes: true, noContextFiles: true,
     systemPrompt: p.instructions, extensionFactories: [selected.extension]});
@@ -80,7 +80,7 @@ async function createSession(p: Obj): Promise<AgentSession> {
     const permit = await invoke({method: "model_prepare", identity: requestIdentity});
     if (!isDeepStrictEqual(permit.identity, requestIdentity)) throw new Error("Invalid model permission identity");
     finalDelivery = permit.state === "final";
-    return permit.state;
+    return {state: permit.state, agent_context: permit.agent_context};
   }, attempt => reportRetry?.(attempt));
   const nativePayload = created.agent.onPayload;
   created.agent.onPayload = async (payload, model) => {

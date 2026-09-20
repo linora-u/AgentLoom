@@ -858,9 +858,11 @@ def get_current_run_context(*, required: bool = False) -> RuntimeContext | None:
 
 @contextmanager
 def bind_run_context(context: RuntimeContext) -> Iterator[RuntimeContext]:
+    from agentloom.runtime.resources import bind_resource_scope
     token = _CURRENT_RUN_CONTEXT.set(context)
     try:
-        yield context
+        with bind_resource_scope(context.runtime_key):
+            yield context
     finally:
         _CURRENT_RUN_CONTEXT.reset(token)
 

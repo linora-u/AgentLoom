@@ -1148,6 +1148,10 @@ class AgentLoomToolGateway:
         if isinstance(prepared, ToolCallRecord):
             return prepared
         effective_input, call_kwargs = prepared
+        if self._closed:
+            return self._blocked(hook_run, call_id=call_id, tool_name=tool_name,
+                arguments=effective_input, message="Tool Gateway closed during preparation",
+                stage="cancellation", started_at=started_at)
 
         try:
             if binding.setup is not None and (
@@ -1156,6 +1160,9 @@ class AgentLoomToolGateway:
                 with self._setup_locks[tool_name]:
                     if binding.initialized is None or not binding.initialized():
                         binding.setup()
+            if self._closed:
+                from agentloom.runtime.tool_protocol import ToolPolicyBlockedError
+                raise ToolPolicyBlockedError("Tool Gateway closed during setup")
             raw_result = binding.forward(**call_kwargs)
         except Exception as tool_error:
             failed = ToolCallRecord.from_exception(

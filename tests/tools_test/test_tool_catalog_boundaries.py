@@ -174,7 +174,14 @@ def test_catalog_fixed_arg_contract_matches_implementations() -> None:
             parameter.kind == inspect.Parameter.VAR_KEYWORD
             for parameter in parameters.values()
         )
-        assert spec.fixed_arg_names == keyword_names, spec.name
+        if spec.provider == "pi":
+            # Pi's Python declaration publishes the official schema. Fixed argument
+            # projection is not yet enabled for its native executor.
+            assert spec.fixed_arg_names == ()
+            declared = resolve_tool_function(spec.name)._agentloom_tool_definition
+            assert keyword_names == tuple(declared.parameters["properties"])
+        else:
+            assert spec.fixed_arg_names == keyword_names, spec.name
         assert spec.accepts_extra_fixed_args is accepts_extra, spec.name
 
 

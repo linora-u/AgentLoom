@@ -151,8 +151,10 @@ class TestCatalogInvariants:
         for spec in list_tool_specs():
             assert get_tool_spec(spec.name) is spec
             if spec.owner == "runtime":
-                assert spec.provider == "smolagents"
-                assert spec.implementation.module.startswith("agentloom.adapters.smolagents.tools.")
+                providers = {"smolagents": "agentloom.adapters.smolagents.tools.",
+                             "pi": "agentloom.adapters.pi.native_tools"}
+                assert spec.provider in providers
+                assert spec.implementation.module.startswith(providers[spec.provider])
             else:
                 assert spec.owner in {"platform", "optional"}
                 assert spec.implementation.module.startswith("agentloom.tools.")

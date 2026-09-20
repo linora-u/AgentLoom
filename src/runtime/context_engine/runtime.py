@@ -55,7 +55,7 @@ def ensure_task_context_engine(effective_config: dict) -> Iterator[ContextEngine
     if current is not None or context is None:
         yield current
         return
-    root = SecureDirectory(context.root_dir, create=False)
+    root = SecureDirectory(context.root_dir, create=True)
     try:
         storage = root.child(context.context_store_dir.relative_to(context.root_dir), create=True)
     finally:
