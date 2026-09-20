@@ -8,7 +8,6 @@ from __future__ import annotations
 import hashlib
 import json
 import re
-from dataclasses import replace
 from pathlib import Path
 from threading import RLock
 from typing import Any, Callable
@@ -17,8 +16,8 @@ from agentloom.adapters.pi.metadata import SDK_VERSION
 from agentloom.runtime.agent_runtime import (
     AgentRuntimeError, RuntimeCheckpointEnvelope, RuntimeDefinition,
 )
-from agentloom.runtime.context import RuntimeContext, validate_runtime_owned_path
-from agentloom.runtime.native_journal import NativeCallJournal, snapshot
+from agentloom.runtime.context import RuntimeContext
+from agentloom.runtime.native_journal import recovery_receipt, snapshot
 from agentloom.runtime.native_tools import NativeCallIdentity
 from agentloom.runtime.storage import SecureDirectory
 from agentloom.runtime.tool_protocol import ToolCallRecord
@@ -102,9 +101,10 @@ class PiCheckpointStore:
                 raise ValueError("Invalid Pi session call descriptor")
             identity = NativeCallIdentity(**call["identity"])
             self._require_identity(identity, session["header"]["id"])
-            if identity.call_id in seen:
+            key = (identity.native_parent_id, identity.call_id)
+            if key in seen:
                 raise ValueError("Duplicate Pi session call identity")
-            seen.add(identity.call_id)
+            seen.add(key)
         return raw, bundle
 
     def _require_identity(self, identity: NativeCallIdentity, session_id: str | None = None) -> None:
@@ -157,22 +157,7 @@ class PiCheckpointStore:
 
     def native_receipt(self, identity: NativeCallIdentity) -> dict[str, Any]:
         """Read old-Run evidence without rebinding it to a new call identity."""
-        self._require_identity(identity)
-        old = replace(self.runtime, run_id=identity.run_id)
-        directory = old.run_dir / "native-tools"
-        validate_runtime_owned_path(directory, root=old.root_dir)
-        if not directory.is_dir():
-            raise ValueError("Pi recovery native journal is missing")
-        journal = NativeCallJournal(directory)
-        try:
-            with journal.transaction(identity) as data:
-                if data.get("version") != 1 or data.get("request", {}).get("identity") != snapshot(identity):
-                    raise ValueError("Pi recovery native journal identity mismatch")
-                if data.get("state") == "executing":
-                    data["state"] = "uncertain"
-                return snapshot(data)
-        finally:
-            journal.close()
+        return recovery_receipt(self.runtime, identity)
 
     def _platform_key(self, identity: NativeCallIdentity) -> str:
         self._require_identity(identity)

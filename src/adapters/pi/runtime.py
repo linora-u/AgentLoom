@@ -22,7 +22,7 @@ from agentloom.runtime.native_tools import NativeCallIdentity, NativeCommitAck
 from agentloom.runtime.tool_protocol import ToolCallRecord
 from agentloom.adapters.pi.transport import PiTransport
 from agentloom.runtime.agent_runtime import (
-    AgentRuntimeError, AgentRuntimeRequest, AgentRuntimeResult, RuntimeDefinition, RuntimeEvent, RuntimeUsage,
+    AgentRuntimeError, AgentRuntimeRequest, AgentRuntimeResult, RuntimeCheckpointEnvelope, RuntimeDefinition, RuntimeEvent, RuntimeUsage,
 )
 from agentloom.runtime.hooks import HookEvent
 from agentloom.runtime.trace import capture_explicit_execution_context
@@ -54,7 +54,7 @@ class PiRuntime:
                for tool in definition.tool_manifest):
             raise AgentRuntimeError("Unsupported Pi tool selection", category="unsupported_capability")
         self.definition = definition
-        self._checkpoint = None
+        self._checkpoint: RuntimeCheckpointEnvelope | None = None
         self.transport = PiTransport(definition.instance_id or uuid4().hex)
         try:
             response = self.transport.request(Handshake(method="handshake", native_tool_contract=1), timeout=15)
@@ -68,7 +68,9 @@ class PiRuntime:
         register_resource(f"pi-runtime:{self.transport.instance_id}", self.close,
                           instance_id=self.transport.instance_id)
 
-    def snapshot(self):
+    def snapshot(self) -> RuntimeCheckpointEnvelope:
+        if self._checkpoint is None:
+            raise AgentRuntimeError("Pi has no durable checkpoint yet", category="configuration")
         return self._checkpoint
 
     def run(self, request: AgentRuntimeRequest) -> AgentRuntimeResult:
@@ -227,7 +229,9 @@ class PiRuntime:
                                 if call["owner"] == "runtime":
                                     native.restore_observation(NativeCallIdentity(**call["identity"]))
                         store.private.atomic_write_json("restore.json", plan)
-                    except (ValueError, TypeError, KeyError, AttributeError, OSError) as exc:
+                    except AgentRuntimeError:
+                        raise
+                    except Exception as exc:
                         raise AgentRuntimeError("Pi checkpoint cannot be safely restored", category="configuration") from exc
             attempt = 0
             stop_blocks = 0

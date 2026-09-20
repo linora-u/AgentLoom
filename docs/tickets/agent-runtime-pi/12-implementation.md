@@ -1,6 +1,6 @@
 # 12 实施记录
 
-状态：开发中，功能验收尚未执行。基线为 main `36a7e6a14c75e72f4420851e6120dac38a90269d`，实现分支 `codex/pi-t12-recovery`。
+状态：恢复功能已实现并通过针对性验证，等待 14 在同一最终候选完成全量及发行验收。基线为 main `36a7e6a14c75e72f4420851e6120dac38a90269d`，实现分支 `codex/pi-t12-recovery`。
 
 ## 恢复边界
 
@@ -20,6 +20,13 @@ Pi JSONL v2 增补 `session_checkpoint` 回调和可选 checkpoint_enabled 字�
 
 ## 当前验证范围
 
-Python 类型检查、官方 SDK 安装和 TypeScript 构建通过。按维护者要求，先完成剩余开发，再集中运行功能测试；本记录不表示恢复、崩溃窗口、压缩取消或 A01–A14 已验收，12 的验收项尚未勾选。
+Python 类型检查（10 文件，0 errors / 0 warnings）、官方 SDK 安装和 TypeScript 构建通过。按维护者要求先开发后测试，已完成 23 项真实 SDK 功能测试，仅 HTTP 模型响应使用 fixture：
+
+- 20 项 Application 恢复：新 Run 恢复已提交 read；真实进程在派发前、执行后提交前、host 提交后被杀死；独立文件计数证明未重跑副作用；不兼容版本、跨 runtime/task、摘要/父节点/参数/结果损坏与 symlink 拒绝；旧 read 证据只允许写入未变化的文件；Pi/smol Worker 结果复用；checkpoint 存储失败阻止副作用。
+- 3 项原生压缩与恢复中取消：真实 SDK compaction HTTP 等待期间 SIGINT；从 assistant 尾部恢复并再次自动压缩；恢复模型等待期间 SIGINT/SIGKILL；检查唯一终态及真实 SDK PID 退出。
+
+首次两轴审查发现恢复直接调用底层 Agent 绕过完整会话生命周期、跨 Run 重用 provider call ID 被误拒，以及 journal 恢复解释重复和异常终态缺口。已改为 SDK `sendCustomMessage(..., {triggerTurn: true})`，使用不可见的恢复控制消息进入原生完整循环；持久调用按 native parent + provider ID 定位，公共 journal 独立校验原始 Run 凭据。损坏存储统一映射为恢复失败并保留异常链。
+
+测试开发中的失败保留在外部日志：最初 pytest 入口缺 tests namespace，改用 python -m；测试 checkpoint 开关最初误放 Agent YAML，改为公共 system 配置；随后发现 transport 回调白名单漏 session_checkpoint，已修复。上述 23 项是修复后结果，不代表最终 A01–A14 / 发行 / 全量测试已通过。
 
 后续在最终候选执行恢复/故障窗口测试、既有 CI、干净安装与真实 provider 验证；记录结果后合入 main 并清理本次 worktree。
