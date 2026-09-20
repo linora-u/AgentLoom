@@ -3,11 +3,12 @@ from __future__ import annotations
 import contextvars
 import logging
 import os
-from collections.abc import Iterator
+from collections.abc import Callable, Iterator
 from contextlib import contextmanager
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Protocol, runtime_checkable
+from threading import RLock
+from typing import Any, Protocol, TypeVar, cast, runtime_checkable
 
 from agentloom.configuration.config_validation import BoolParser
 from agentloom.runtime import RuntimeContext, get_current_run_context
@@ -29,15 +30,59 @@ _ALLOWED_LOGGING_KEYS = {
 _MEMORY_CAMPAIGN_SAFE_ARTIFACTS_ENV = "AGENTLOOM_MEMORY_CAMPAIGN_SAFE_ARTIFACTS"
 
 
-@dataclass(frozen=True)
+class LogResource(Protocol):
+    def close(self) -> None: ...
+
+
+_LogResourceT = TypeVar("_LogResourceT", bound=LogResource)
+
+
+@dataclass
 class _LoggerBinding:
     backend: Any
     runtime_key: tuple[str, str, str, str] | None
+    resources: dict[str, LogResource] = field(default_factory=dict)
+    lock: Any = field(default_factory=RLock)
+    closed: bool = False
+
+    def close_resources(self) -> None:
+        with self.lock:
+            self.closed = True
+            resources = tuple(self.resources.values())
+        for resource in reversed(resources):
+            try:
+                resource.close()
+            except Exception:
+                # Observational cleanup must not replace the run's outcome.
+                pass
 
 
 _CURRENT_LOGGER_BINDING: contextvars.ContextVar[_LoggerBinding | None] = (
     contextvars.ContextVar("agentloom_logger_backend", default=None)
 )
+
+
+class LogScopeClosed(RuntimeError):
+    """A copied execution context outlived its logging scope."""
+
+
+def get_logger_resource(
+    key: str, factory: Callable[[], _LogResourceT],
+) -> _LogResourceT | None:
+    """Lazily share an adapter's sink across workers and close it with this log scope.
+
+    No backend is imported here. Without a matching logger binding the caller
+    owns its resource and must use the normal run resource registration API.
+    """
+    binding = _CURRENT_LOGGER_BINDING.get()
+    if binding is None or binding.runtime_key != _runtime_key(get_current_run_context()):
+        return None
+    with binding.lock:
+        if binding.closed:
+            raise LogScopeClosed("logging scope is closed")
+        if key not in binding.resources:
+            binding.resources[key] = factory()
+        return cast(_LogResourceT, binding.resources[key])
 
 
 def _memory_campaign_safe_artifacts_enabled() -> bool:
@@ -380,27 +425,12 @@ def bind_logger_backend(
     """Bind a backend to exactly one RuntimeContext and close it on exit."""
     effective_context = context or get_current_run_context()
     _tag_backend_runtime(logger_backend, effective_context)
-    token = _CURRENT_LOGGER_BINDING.set(
-        _LoggerBinding(logger_backend, _runtime_key(effective_context))
-    )
+    binding = _LoggerBinding(logger_backend, _runtime_key(effective_context))
+    token = _CURRENT_LOGGER_BINDING.set(binding)
     try:
-        if effective_context is not None:
-            from agentloom.tools.shell.shell_audit_log import (
-                initialize_shell_audit_scope,
-            )
-
-            initialize_shell_audit_scope(effective_context)
         yield logger_backend
     finally:
-        try:
-            from agentloom.tools.shell.shell_audit_log import (
-                close_current_shell_audit_loggers,
-            )
-
-            close_current_shell_audit_loggers()
-        except Exception:
-            # Audit cleanup is best-effort and must not mask run failures.
-            pass
+        binding.close_resources()
         _CURRENT_LOGGER_BINDING.reset(token)
         close_run_logger(logger_backend)
 
