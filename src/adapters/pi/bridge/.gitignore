@@ -1,2 +1,4 @@
 node_modules/
 dist/
+.agentloom-install.json
+.agentloom-install.lock

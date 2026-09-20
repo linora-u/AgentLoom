@@ -5,10 +5,8 @@ from dataclasses import dataclass, field
 import os
 from pathlib import Path
 from queue import Queue, Empty
-import shutil
 import signal
 import subprocess
-import re
 from tempfile import TemporaryDirectory
 from threading import Lock, RLock, Thread
 import time
@@ -19,6 +17,7 @@ from agentloom.adapters.pi.protocol import (
     BridgeError, Cancel, Close, Event, Request, RequestPayload, Response,
     decode_message, encode_message,
 )
+from agentloom.adapters.pi.install import find_node
 from agentloom.runtime.agent_runtime import AgentRuntimeError
 from agentloom.runtime.resources import register_resource
 from agentloom.runtime.subprocess_env import build_subprocess_env
@@ -41,25 +40,13 @@ class PiTransport:
                 env.pop(name)
         # AgentLoom's other tools may prepend their bundled Node 18. Select a
         # compatible executable without mutating the process-wide PATH.
-        node = None
-        inspected = set()
-        for directory in os.get_exec_path(env):
-            candidate = shutil.which("node", path=directory)
-            if candidate is None or candidate in inspected:
-                continue
-            inspected.add(candidate)
-            try:
-                probe = subprocess.run([candidate, "--version"], cwd=bridge, env=env,
-                    capture_output=True, timeout=5, text=True, check=True)
-                version = re.fullmatch(r"v(\d+)\.(\d+)\.\d+\s*", probe.stdout)
-                if version and (int(version[1]), int(version[2])) >= (22, 19):
-                    node = candidate
-                    break
-            except (OSError, subprocess.SubprocessError):
-                continue
-        if not node or not entry.is_file() or not (bridge / "node_modules/@earendil-works/pi-coding-agent").is_dir():
+        try:
+            node = find_node(env)
+        except RuntimeError as exc:
+            raise AgentRuntimeError(str(exc), category="configuration") from None
+        if not entry.is_file() or not (bridge / "node_modules/@earendil-works/pi-coding-agent").is_dir():
             raise AgentRuntimeError(
-                f"Pi requires Node >=22.19 and a built bridge. Run npm ci --ignore-scripts && npm run build in {bridge}",
+                "Pi SDK is not installed. Run uv run loom install-runtime pi.",
                 category="configuration",
             )
         self.instance_id = instance_id
