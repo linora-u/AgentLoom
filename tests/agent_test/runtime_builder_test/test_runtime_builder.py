@@ -276,6 +276,7 @@ def test_invocation_uses_runtime_neutral_request(monkeypatch):
     assert request.task_id == "task-runtime-neutral"
     assert request.run_id
     assert request.requirements == RuntimeRequirements(
+        structured_tools=True,
         checkpoint_resume=True,
     )
     assert callable(request.event_sink)
@@ -511,11 +512,6 @@ def test_runtime_definition_contains_complete_neutral_runtime_input(
         "get_agent_environment_prompt",
         lambda: "environment",
     )
-    monkeypatch.setattr(
-        base_agent_module,
-        "todo_policy_for_mode",
-        lambda mode: f"todo:{mode}",
-    )
 
     definition = agent._build_runtime_definition()
 
@@ -523,19 +519,17 @@ def test_runtime_definition_contains_complete_neutral_runtime_input(
     assert definition.name == "definition_agent"
     assert definition.description == "Complete neutral definition."
     assert definition.model is model_binding
-    assert definition.max_steps == 11
-    assert definition.planning_interval == 3
-    assert definition.smart_summary is False
-    assert definition.todo_mode == "on"
-    assert definition.instructions == "environment\n\ntodo:on"
-    assert definition.prompt_template_path == str(prompt_path.resolve())
+    assert definition.runtime_options["max_steps"] == 11
+    assert definition.runtime_options["planning_interval"] == 3
+    assert definition.runtime_options["smart_summary"] is False
+    assert definition.runtime_options["todo_mode"] == "on"
+    assert definition.instructions == "environment"
+    assert definition.runtime_options["prompt_template_path"] == str(prompt_path.resolve())
     assert definition.project_root == str(tmp_path)
-    assert definition.max_consecutive_model_errors == 7
+    assert definition.runtime_options["max_consecutive_model_errors"] == 7
     assert definition.metadata == {}
     assert tuple(item.name for item in definition.tool_gateway.definitions) == (
         "proof",
-        "todo_write",
-        "final_answer",
     )
 
 
@@ -576,47 +570,14 @@ def test_task_created_is_emitted_once_through_runtime_request(monkeypatch):
     assert [request.task for request in runtime.requests] == ["one task"]
 
 
-@pytest.mark.parametrize("mode", ["auto", "on"])
-def test_todo_enabled_modes_expose_tool_independent_of_planning_interval(
-    monkeypatch,
-    mode: str,
-) -> None:
+@pytest.mark.parametrize("mode", ["auto", "on", "off"])
+def test_common_runtime_does_not_inject_smol_tools(monkeypatch, mode):
     agent = DummyAgent(
         config={"name": "runtime_dummy", "todo": {"mode": mode}},
-        model_binding=_model_binding(),
-        logger=DummyLoggerBackend(),
+        model_binding=_model_binding(), logger=DummyLoggerBackend(),
     )
-    sentinel = type("TodoTool", (), {"name": "todo_write"})()
     monkeypatch.setattr(agent, "get_all_tools", lambda agent_type: [])
-    monkeypatch.setattr(
-        base_agent_module,
-        "resolve_tool_function",
-        lambda name: sentinel,
-    )
-
-    tools = agent._build_runtime_tools(agent._role_profile())
-
-    assert tools == [sentinel]
-    assert "planning_interval" not in agent._config
-
-
-def test_todo_off_hides_even_explicit_tool_with_planning_enabled(monkeypatch) -> None:
-    agent = DummyAgent(
-        config={
-            "name": "runtime_dummy",
-            "todo": {"mode": "off"},
-            "planning_interval": 2,
-        },
-        model_binding=_model_binding(),
-        logger=DummyLoggerBackend(),
-    )
-    explicit = type("TodoTool", (), {"name": "todo_write"})()
-    other = type("OtherTool", (), {"name": "read_file"})()
-    monkeypatch.setattr(agent, "get_all_tools", lambda agent_type: [explicit, other])
-
-    tools = agent._build_runtime_tools(agent._role_profile())
-
-    assert tools == [other]
+    assert agent._build_tool_gateway().definitions == ()
 
 
 def test_base_run_emits_task_complete_on_success(monkeypatch):
@@ -647,6 +608,7 @@ def test_base_run_emits_task_complete_on_success(monkeypatch):
     assert request.task_id == "task-complete"
     assert request.run_id
     assert request.requirements == RuntimeRequirements(
+        structured_tools=True,
         checkpoint_resume=True,
     )
     assert callable(request.event_sink)
@@ -1986,7 +1948,7 @@ def test_base_run_executes_transformed_tasks_sequentially_with_reset_false(tmp_p
     assert all(request.run_id for request in runtime_agent.requests)
     assert all(
         request.requirements
-        == RuntimeRequirements(checkpoint_resume=True)
+        == RuntimeRequirements(structured_tools=True, checkpoint_resume=True)
         for request in runtime_agent.requests
     )
     assert all(

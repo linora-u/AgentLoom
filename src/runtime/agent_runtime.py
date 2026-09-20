@@ -194,16 +194,20 @@ class RuntimeCapabilities:
     parallel_tools: bool
     checkpoint_resume: bool
     subagents: bool
+    goal: bool = False
+    stop_hooks: bool = False
 
 
 @dataclass(frozen=True, slots=True)
 class RuntimeRequirements:
     """Semantic features an Application requires from its selected runtime."""
 
-    structured_tools: bool = True
+    structured_tools: bool = False
     parallel_tools: bool = False
     checkpoint_resume: bool = False
     subagents: bool = False
+    goal: bool = False
+    stop_hooks: bool = False
 
     def unsupported_by(
         self,
@@ -216,6 +220,8 @@ class RuntimeRequirements:
                 "parallel_tools",
                 "checkpoint_resume",
                 "subagents",
+                "goal",
+                "stop_hooks",
             )
             if getattr(self, name) and not getattr(capabilities, name)
         )
@@ -422,22 +428,52 @@ class RuntimeEventSink(Protocol):
 
 
 @dataclass(frozen=True, slots=True)
+class RuntimeModelSelection:
+    """Resolved profile data; constructing it never loads a provider SDK.
+
+    Settings can contain credentials and therefore never enter repr, events,
+    checkpoints or public configuration projections.
+    """
+
+    model_type: str
+    model_id: str
+    protocol: str
+    settings: Mapping[str, JSONValue] = field(default_factory=dict, repr=False)
+
+    def __post_init__(self) -> None:
+        for name in ("model_type", "model_id", "protocol"):
+            value = getattr(self, name)
+            if not isinstance(value, str) or not value.strip():
+                raise ValueError(f"{name} must be a non-empty string")
+            object.__setattr__(self, name, value.strip())
+        object.__setattr__(self, "settings", _frozen_json_mapping(
+            self.settings, field_name="model selection settings",
+        ))
+
+
+@dataclass(frozen=True, slots=True)
 class RuntimeDefinition:
     """Complete, runtime-neutral definition used to construct one Agent runtime."""
 
     runtime_id: str
     name: str
     description: str
-    model: ModelTurnBinding
     tool_gateway: ToolGateway
-    max_steps: int
+    model: ModelTurnBinding | None = None
+    model_selection: RuntimeModelSelection | None = None
+    instance_id: str | None = None
+    runtime_options: Mapping[str, JSONValue] = field(default_factory=dict, repr=False)
+    option_sources: Mapping[str, JSONValue] = field(default_factory=dict)
+    requirements: RuntimeRequirements = field(default_factory=RuntimeRequirements)
+    # Transitional smol constructor fields; removed after callers migrate.
+    max_steps: int | None = None
     instructions: str = ""
     planning_interval: int | None = None
-    smart_summary: bool = True
-    todo_mode: Literal["auto", "on", "off"] = "auto"
+    smart_summary: bool | None = None
+    todo_mode: Literal["auto", "on", "off"] | None = None
     prompt_template_path: str | None = None
     project_root: str | None = None
-    max_consecutive_model_errors: int = 5
+    max_consecutive_model_errors: int | None = None
     metadata: Mapping[str, JSONValue] = field(default_factory=dict, repr=False)
 
     def __post_init__(self) -> None:
@@ -449,11 +485,23 @@ class RuntimeDefinition:
             raise ValueError("runtime_id must be non-empty")
         if not self.name.strip():
             raise ValueError("name must be non-empty")
-        if not isinstance(self.model, ModelTurnBinding):
+        if self.model is not None and not isinstance(self.model, ModelTurnBinding):
             raise TypeError("model must be a ModelTurnBinding")
+        object.__setattr__(self, "instance_id", _optional_identity(self.instance_id, field_name="instance_id"))
+        if self.model_selection is not None and not isinstance(self.model_selection, RuntimeModelSelection):
+            raise TypeError("model_selection must be a RuntimeModelSelection")
+        if self.model is not None and self.model_selection is not None:
+            if (self.model.model_type, self.model.model_id, self.model.adapter_id) != (
+                self.model_selection.model_type, self.model_selection.model_id, self.model_selection.protocol,
+            ):
+                raise ValueError("model_selection conflicts with legacy model binding identity/protocol")
+        if self.model is None and self.model_selection is None:
+            raise ValueError("runtime definition requires model_selection or a legacy model binding")
+        if not isinstance(self.requirements, RuntimeRequirements):
+            raise TypeError("requirements must be RuntimeRequirements")
         if not isinstance(self.tool_gateway, ToolGateway):
             raise TypeError("tool_gateway must satisfy ToolGateway")
-        if (
+        if self.max_steps is not None and (
             isinstance(self.max_steps, bool)
             or not isinstance(self.max_steps, int)
             or self.max_steps < 1
@@ -467,9 +515,9 @@ class RuntimeDefinition:
             raise ValueError(
                 "planning_interval must be a positive integer when provided"
             )
-        if not isinstance(self.smart_summary, bool):
+        if self.smart_summary is not None and not isinstance(self.smart_summary, bool):
             raise TypeError("smart_summary must be a boolean")
-        if self.todo_mode not in {"auto", "on", "off"}:
+        if self.todo_mode not in {None, "auto", "on", "off"}:
             raise ValueError("todo_mode must be one of: auto, on, off")
         for field_name in ("prompt_template_path", "project_root"):
             value = getattr(self, field_name)
@@ -481,7 +529,7 @@ class RuntimeDefinition:
                 )
             if isinstance(value, str):
                 object.__setattr__(self, field_name, value.strip())
-        if (
+        if self.max_consecutive_model_errors is not None and (
             isinstance(self.max_consecutive_model_errors, bool)
             or not isinstance(self.max_consecutive_model_errors, int)
             or self.max_consecutive_model_errors < 1
@@ -489,6 +537,8 @@ class RuntimeDefinition:
             raise ValueError(
                 "max_consecutive_model_errors must be a positive integer"
             )
+        for name in ("runtime_options", "option_sources"):
+            object.__setattr__(self, name, _frozen_json_mapping(getattr(self, name), field_name=name))
         if not isinstance(self.metadata, Mapping):
             raise TypeError("metadata must be a mapping")
         object.__setattr__(self, "runtime_id", self.runtime_id.strip())
@@ -736,6 +786,8 @@ SMOLAGENTS_CAPABILITIES = RuntimeCapabilities(
     parallel_tools=True,
     checkpoint_resume=True,
     subagents=True,
+    goal=True,
+    stop_hooks=True,
 )
 
 
@@ -796,7 +848,13 @@ class RuntimeRegistry:
     def create(self, definition: RuntimeDefinition) -> AgentRuntime:
         if not isinstance(definition, RuntimeDefinition):
             raise TypeError("runtime definition must be a RuntimeDefinition")
-        registration = self.validate(definition.runtime_id)
+        from dataclasses import replace
+
+        requirements = replace(
+            definition.requirements,
+            structured_tools=(definition.requirements.structured_tools or bool(definition.tool_gateway.definitions)),
+        )
+        registration = self.validate(definition.runtime_id, requirements=requirements)
         if registration.factory is None:
             raise UnsupportedRuntimeError(
                 f"Agent runtime '{definition.runtime_id}' is registered for validation "

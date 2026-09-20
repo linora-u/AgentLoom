@@ -463,19 +463,11 @@ class YamlConfiguredAgent(RoleDrivenAgent):
         _shared_logger = getattr(self, "logger", None) or getattr(self, "_logger", None)
         _frozen_config = self._config  # read-only dict
         _AgentClass = self.__class__
-        _self_ref = self
         _yaml_concurrency = self._config.get("concurrency")  # "auto" / int / None
         _model_type = self._config.get("model_type", "powerful")
 
-        # A missing binding means the caller is using an already-constructed
-        # test/mock agent.
-        # Reusing that instance keeps the call on the patched run() implementation.
-        _factory_mode = _shared_model_binding is not None
-
         def _create_fresh_agent():
-            """Create a new Agent instance for thread-safe execution."""
-            if not _factory_mode:
-                return _self_ref
+            """Every Worker call constructs a new owner, including native providers."""
             return _AgentClass(
                 config=_frozen_config,
                 model_binding=_shared_model_binding,

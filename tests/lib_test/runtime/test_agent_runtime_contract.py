@@ -95,6 +95,8 @@ class _RecordingRuntime:
             parallel_tools=True,
             checkpoint_resume=True,
             subagents=True,
+            goal=True,
+            stop_hooks=True,
         )
 
     def run(self, request: AgentRuntimeRequest) -> AgentRuntimeResult:
@@ -125,7 +127,7 @@ def test_registry_resolves_a_complete_runtime_without_exposing_native_types() ->
 
     registry.register(
         "smolagents",
-        capabilities=RuntimeCapabilities(True, True, True, True),
+        capabilities=RuntimeCapabilities(True, True, True, True, goal=True, stop_hooks=True),
         factory=factory,
     )
     definition = _definition("smolagents")
@@ -153,7 +155,7 @@ def test_registry_rejects_unknown_runtime_without_fallback() -> None:
     registry = RuntimeRegistry()
     registry.register(
         "smolagents",
-        capabilities=RuntimeCapabilities(True, True, True, True),
+        capabilities=RuntimeCapabilities(True, True, True, True, goal=True, stop_hooks=True),
         factory=lambda _definition: _RecordingRuntime("smolagents", []),
     )
 
@@ -247,7 +249,7 @@ def test_registry_closes_runtime_whose_capabilities_drift_from_registration() ->
     registry = RuntimeRegistry()
     registry.register(
         "smolagents",
-        capabilities=RuntimeCapabilities(True, True, True, True),
+        capabilities=RuntimeCapabilities(True, True, True, True, goal=True, stop_hooks=True),
         factory=lambda _definition: runtime,
     )
 
@@ -274,7 +276,7 @@ def test_registry_closes_runtime_whose_identity_drifted_from_registration() -> N
     registry = RuntimeRegistry()
     registry.register(
         "smolagents",
-        capabilities=RuntimeCapabilities(True, True, True, True),
+        capabilities=RuntimeCapabilities(True, True, True, True, goal=True, stop_hooks=True),
         factory=lambda _definition: runtime,
     )
 
