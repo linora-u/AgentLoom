@@ -2,9 +2,9 @@
 
 **What to build:** 一个真实 Pi Application 在运行中调用官方只读工具和 AgentLoom 平台工具，双向通信、权限、结果证据及 Goal/Stop 完成规则全部生效。
 
-**Blocked by:** 05：通过统一治理执行一次原生读取并持久记录；07：从现有应用入口运行一个无工具 Pi Agent；08：让平台工具和 MCP 脱离 smol 构造
+**Blocked by:** 05：通过统一治理执行一次原生读取并持久记录；07：从现有应用入口运行一个无工具 Pi Agent；08：解耦平台工具、可选专业工具与 MCP
 
-**Status:** draft — 拆分待确认，尚未发布 GitHub；不代表已开工或已完成。
+**Status:** planned — 等待前置任务集成并验证，尚未实施。
 
 **Required:** Yes — 本票属于最终交付必做项。
 
@@ -14,9 +14,13 @@
 
 本票打通生产完整调用链，只开启已验证的只读和平台能力；文件修改/Shell 在 10 开放。消费 05 的接口，不修改 06 正在开发的治理实现。
 
+按 [工具归属](tool-ownership.md) 装配 Pi 官方基础工具、已选平台工具和本阶段允许的只读专业工具。Markdown 等文件修改专业工具需等 10 的保护接线；平台 memory/Goal 更新继续按各自已有规则执行。
+
 ## Acceptance criteria
 
 - [ ] 在 execute_app 内实际调用 Pi 官方只读工具及 AgentLoom 工具，工具选择明确、无重复基础工具或隐式同名覆盖。
+- [ ] 默认不注入自研 smol 的 read_file/grep/glob/Shell/Todo；至少实际调用一个显式选择的只读专业工具，并验证未选择时不出现。显式旧工具选择无有效映射时 preflight 拒绝。
+- [ ] 平台 Skill 目录与 Pi 激活方式只有一条已选接入路径，不重复扫描或注入；不开放未授权的本机资源发现。
 - [ ] 原始非法参数经过已验证的异步 Hook 入口修正，失败不执行；实际参数和规范 ToolCallRecord 对应。
 - [ ] Python 等待 run 期间仍能处理 Pi 的平台工具回调，工具返回后 Pi 继续；并行批次正确绑定 call ID、Hook Run 和实例，不能靠单独 invoke 探针证明无死锁。
 - [ ] native prepare/settle 在真实 Pi SDK 上复验 05 的治理样例，成功返回前结果已经提交。
@@ -28,5 +32,4 @@
 
 交付真 Pi 双向工具和 Goal Application 证据；解锁 10、11，并在 04 完成后解锁 13。
 
-实施遵循已生成的 Pi 接入规格、并行开发计划及本轮票据执行索引。只认已集成、已验证的依赖提交；不要自行跳过阻塞任务，也不要从其他 worktree 复制未提交改动。
-
+实施遵循 Pi 接入规格及本目录最新的 [工具归属](tool-ownership.md)、[执行索引](README.md) 与 [worktree 计划](worktree-plan.md)。只认已集成、已验证的依赖提交；不要自行跳过阻塞任务，也不要从其他 worktree 复制未提交改动。

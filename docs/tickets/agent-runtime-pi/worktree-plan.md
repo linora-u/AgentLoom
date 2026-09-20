@@ -1,279 +1,113 @@
-# Pi 并行开发与合并计划
+# Pi 并行开发与 main Changes 交付计划
 
-日期：2026-09-20。配套规格：[AgentLoom 可替换 Agent 基座与 Pi 接入](../../specs/agent-runtime-pi-integration.md)。
+更新：2026-09-20。配套：[核心规格](../../specs/agent-runtime-pi-integration.md)、[执行索引](README.md)、[工具归属](tool-ownership.md)。本文件使用 01–14 票号；旧 C0/S1/G1/P1 宽阶段不再作为另一套排期依据。
 
-执行细分：见 [14 张编号票据与 session 执行指南](README.md)。该索引将本计划的宽阶段拆成可独立验收的任务，并细化阻塞关系与文件所有权。07 可先接通能力受限的无工具 Pi；09/10 通过治理验收后逐步启用工具，12 通过后启用恢复。下文关于完整 Pi 注册的要求不禁止这种明确受限的阶段交付。
+## 1. 当前基线
 
-本文件是执行计划。01、02 已在独立 worktree 实现、合入 integration 并验收，见 [完成记录](01-02-integration.md)；03 及后续任务尚未执行。下文的宽阶段分支建议以执行索引中的逐票分支安排为准。
+01/02 已完成。准备提交 45ddbfdc、最终代码验收 42662ed6、历史收尾提交 8d63be5f 保留在 codex/pi-integration。主工作区现为 main，成果展开为未提交 Changes；历史开发/验证 worktree 已删除。原 main 提交为 c697b24f602e71d56c9aa2c532e6079c0db5aa9d，未来启动时必须重查。
 
-## 1. 基线与约束
+本次只更新票据，没有新建 worktree 或启动 03。本轮工具归属修订不在旧 integration 提交中。下一次开工需精确纳入现有实现和本目录最新版本，避免只从 main HEAD 或旧 integration 开分支而丢失上下文。
 
-- 当前主分支：main；远端主分支引用：origin/main。
-- 研究 revision：c697b24f602e71d56c9aa2c532e6079c0db5aa9d。
-- 仓库：/Users/bytedance/code/data_clear/AgentLoom。
-- 实施开始时重新检查 HEAD、工作区和分支，记录包含已审阅 spec 的实际起始提交，不直接假定研究 revision 仍是最新主线。
-- 检查时 tracked 文件干净；codex/、temp/ 和七份研究 Markdown 是已有 untracked，不能纳入本任务提交或清理。
-- pi/ 是被本地 exclude 忽略的独立 checkout，不是 submodule，不会自动出现在新 worktree。当前参考提交为 1aa3c02d56635ec40e7c8448d7eff35022e95740。
-- 参考 Pi 包为 @earendil-works/pi-coding-agent 0.79.4，Node 至少 22.19.0。npm 版本/engine 元数据已核对；发布 tarball 的接口与资源仍需实际验证。
-- 只改本规格涉及的产品代码。保留 Studio、上游参考仓库、用户配置、既有 memory DB 和运行数据。
+不使用 git add . 纳入既有 codex/、temp/、参考 pi/、私有配置或无关研究文件。凭证、用户 memory DB、运行数据和既有 stash 均不属于迁移清理范围。
 
-## 2. 任务图：先契约，再三路并行
+## 2. 串行门禁与并行窗口
 
-~~~mermaid
-flowchart TD
-  B[确认基线与spec提交] --> C0[C0 公共契约和smol过渡适配]
-  B --> D[Pi发布包接口验证与依赖锁定准备]
-  C0 --> F[冻结绿色公共提交]
-  D --> F
-  F --> S1[S1 smol专属实现收口]
-  F --> G1[G1 工具治理/MCP/公共服务]
-  F --> P1[P1 Pi SDK/bridge/runtime adapter]
-  F --> V1[V1 验收fixture与独立oracle]
-  S1 --> I0[I0 串行集成与发行接线]
-  G1 --> I0
-  P1 --> I0
-  V1 --> A[最终Application/安装/故障验收]
-  I0 --> A
-  A --> M[合并main并核对交付revision]
-~~~
-
-关键路径：C0 → 较慢的 G1/P1 → I0 → 最终验收 → main。S1 与测试准备不必等待 Pi 实现完成。
-
-建议同时运行三个实现者：S1、G1、P1；集成负责人维护契约和 V1。若有独立测试开发者，V1 可使用单独 worktree，但共用验收资产仍只有这一个所有者。开发资源不足时，先结束 S1，再将该实现者转到 V1。
-
-Pi 发布包验证可与 C0 的代码调查、测试基线同时进行。它必须在契约冻结前完成，防止根据本地源码里未发布的接口设计整个桥接器。
-
-## 3. 分支和 worktree
-
-建议将 worktree 放在仓库外的同级目录 /Users/bytedance/code/data_clear/AgentLoom-worktrees，避免被 Application 搜索、打包或工具索引误纳入。
-
-| 角色 | 分支 | worktree 目录名 | 从哪里创建 |
-| --- | --- | --- | --- |
-| 集成负责人 | codex/pi-integration | integration | 实施开始时确认的 main |
-| C0 契约 | codex/pi-contracts | contracts | integration 起始提交 |
-| S1 smol | codex/pi-smol-boundary | smol | C0 合入后的同一冻结提交 |
-| G1 工具与服务 | codex/pi-tool-governance | tools | 同一冻结提交 |
-| P1 Pi | codex/pi-runtime | pi-runtime | 同一冻结提交 |
-| V1 验收，可选独立人员 | codex/pi-acceptance | acceptance | 同一冻结提交 |
-
-只在依赖门禁通过后创建对应功能分支；不要现在把所有分支从未经 C0 改造的 main 拉出去。
-
-每个 worktree 拥有独立虚拟环境、Node 安装目录和测试缓存。使用该 worktree 自身的源码安装，记录实际 import origin，避免 editable install 指向其他 worktree。uv 下载缓存可以共享，运行数据库、checkpoint、Pi session 和工具工作目录不能共享。
-
-开发证据放在 worktree 外独立目录，按任务 ID、revision、attempt 区分。真实模型凭证通过现有未跟踪配置机制提供，不提交或输出到验证报告；只给对应 Worker/bridge 所需的凭证。
-
-## 4. C0：公共契约与可运行过渡
-
-**必须先完成，验收通过才能开放 S1/G1/P1。**
-
-目标：让 Pi 可以接入，而现有 smol 应用在此提交仍然可运行。这里是实现公共接口和最小过渡代码，不是只写一份接口文档。
-
-必须交付：
-
-1. 更新完整运行定义：模型选择与 ModelTurnBinding 解耦；backend options 与公共语义分离；统一调用结果、取消、checkpoint/能力要求。
-2. 确定 runtime_options 的默认、旧字段兼容、来源和冲突语义；防止 smol 全局默认流入 Pi。不得新增记忆配置。
-3. 同时调整公共构造、validation/readiness 和 runtime registry，并完成 smol factory 的最小消费适配。不允许先破坏 smol，再留给 S1 修复。
-4. 去掉 fresh Worker 对“有没有 Python model binding”的判断；真实 Worker 创建和隔离不能在 Pi 路径退化为共用对象。
-5. 冻结 native tool prepare/settle 与普通 AgentLoom tool invoke 的共同语义、工具 provider/operation metadata、身份关联和错误类别。
-6. 冻结 Python/Node JSONL 协议版本及 golden fixtures。明确最终参数、拒绝、结果提交确认、取消、native 状态引用及进程死亡语义。
-7. 明确公共 Goal/Stop 与 native completion 的边界；保持 smol 当前完成规则，Pi 不强制 final_answer 或 smol Todo。C0 同批移走 tool_gateway 中的 final_answer_binding 并调整 agent 构造的通用注入，让 smol 自己提供 terminal 工具；同时修正所有依赖旧入口的现有测试，不留给 S1/G1 互相等待。
-8. 对实际发布 Pi 包验证 SDK 导出、工具包装/覆盖、受控资源加载、原生模型接口、自动压缩和 session 恢复；将准确版本、Node版本、包 integrity 和验证结果交给 P1。
-9. 将后续需要移动的公共 smol-only prompt/error-recovery 文件整文件移交 S1，或者在本阶段搬完。写清移交清单。
-10. 冻结独立调用结算日志的公共合同：保留 ToolCallRecord 的 completed/error/blocked 终态；pending、执行中、已提交和 uncertain 在单独的 task-scoped journal 表达。提交确认不依赖 fail-open observer。G1 实现持久化结算，I0 串行接入原生会话与 checkpoint 恢复。
-
-发布包 PoC 还有两个必须明确的兼容门禁：
-
-- Pi 当前先校验参数、再执行 beforeToolCall；普通 tool_call/execute 包装不能自动满足现有 Hook 的顺序。用“原始参数不合法→Hook修正→最终参数合法”的案例验证真正可行的入口。仅修改原本合法的参数不够。若选定SDK无法满足，C0不能以绿色完成，须先明确SDK/合同调整方案；不能让S1/G1/P1各自绕过ADR。
-- 源码中已找到两个初验前候选：同步 prepareArguments 不能直接等待 Python IPC；异步 message_end 扩展可返回替换后的 assistant message，发生在工具初验前。后者可作为 PoC 起点，但扩展异常会被捕获，执行门必须独立核验变换/授权状态。验收保持严格模型 schema，覆盖非法参数被异步修正、失败不执行、Hook不重复运行、多工具批次时序和原始/最终参数证据。源码可行不等于发布包 gate 已通过。
-- 模拟 Python 已提交工具结果、Pi 尚未写入对应 toolResult 的崩溃；验证可用已提交结果补齐原生会话而不再次执行。无法安全对齐的状态应明确拒绝自动恢复，并作为支持边界记录。
-
-这两个PoC可使用治理fixture与真SDK，不要求提前完成G1整个生产管线。实际Pi发布物的每一种启用工具还须记录查询限额、展示截断和原文捕获入口；未收集到的搜索结果不能宣称可从artifact恢复。
-
-冻结产物至少覆盖以下字段/语义：
-
-| 合同 | 最少内容 |
-| --- | --- |
-| Runtime | Agent角色/描述、模型profile、backend options、工具manifest、task/Run/instance、requirements、result/error、checkpoint |
-| Model projection | 显式协议/API、provider/model、endpoint、支持参数、每实例凭证来源、不支持映射的诊断 |
-| Tools | logical ID、native visible name、provider、schema、操作类型/目标参数、证据与完整产物处理 |
-| Native prepare | call身份、原始输入、最终允许输入、实现提供方、工作目录、一次性授权或拒绝 |
-| Native settle | 授权关联、实际执行结果/error、完整artifact引用、证据、task-scoped journal提交确认/不确定结果、native session位置 |
-| IPC | handshake、request/response/event、版本、关联ID、序号、启动与终态区别、snapshot/cancel/close、超时和进程死亡 |
-
-C0 验收：
-
-- 现有 smol runtime/config/模型协议与工具管线定向测试通过；公共改造没有破坏已有 smol Application。
-- 受控 native runtime fixture 不构造 ModelTurnBinding 也能被创建和调用；并发 Worker 确实得到不同实例与上下文。
-- 协议 fixture/合同状态转换测试表达拒绝不执行、最终参数、稳定 call ID、blocked/error 和写前保护顺序；现有 Python 工具治理保持通过。此阶段不宣称真实 native prepare/settle 生产管线已经实现，真实执行门禁归 G1。
-- 尚未完成 Pi 时不宣称生产可用；smol 正常注册，Pi 未就绪明确失败，没有偷偷回退。
-- 公共协议和包版本验证可复现；三条后续分支从同一个绿色提交出发。
-- fake runtime 在此仅证明合同，不计入 Pi 功能完成度。
-
-## 5. 三条并行实现线
-
-### S1：smol 专属实现收口
-
-依赖：C0。分支：codex/pi-smol-boundary。
-
-交付：
-
-- 将 planning_interval、smart_summary、smol prompt template、模型错误恢复和原生 terminal 实现收进 smol adapter。
-- 保持 smol 的原生消息/模型协议回放、现有 Todo 回填、上下文压缩和同基座恢复行为。
-- 清理 C0 指定移交的公共 smol-only 文件及内部引用，不顺手移动平台记忆、ContextRef 或 Goal 所有权。
-- 适配器返回共同结果，不向公共调用者暴露 smol 类型。
-
-完成证据：smol 定向测试、公共 import 边界测试、旧 YAML 兼容与现有 checkpoint/Goal 行为回归。不得以删除原验收来获得绿色。
-
-### G1：工具治理、MCP 与公共服务接入
-
-依赖：C0。分支：codex/pi-tool-governance。
-
-交付：
-
-- 在现有 Tool Gateway 实现 native executor 的 prepare/settle 路径，共用 Hook、解码、权限、文件历史、记录、产物和可信证据规则。
-- 明确逻辑工具与 Pi native name/schema 的映射；排除重复工具，拒绝意外覆盖。无需 Node 即可用 executor fixture 验证治理。
-- 处理名称变化下的 path metadata、写前备份、Shell 命令限制和递归搜索过滤。不得把只检查显式 path 参数当作 Shell 隔离。
-- 去掉 MCP 工具构造的 smol 前置依赖，保留连接/工具实例隔离和清理。
-- 让 Goal、memory/history、ContextRef、Worker 工具的定义与执行可供 Pi 桥接。Goal/Todo 的少量 smol decorator 迁移由本任务负责。
-- 长期记忆保持当前存储、scope、候选和审核规则；只改确需的 runtime 接入，不新增 policy 产品。
-- native 完整输出、失败、blocked 和证据的处理有测试，不将截断文本冒充完整原文。完整性限定在本次授权查询及其限额内，保留coverage/limit信息；输出重查不冒充原产物。
-
-完成证据：治理契约、MCP隔离、文件/Shell保护、完整artifact检索、可信证据和跨应用边界测试。
-
-### P1：Pi adapter、原生 provider 和 Node bridge
-
-依赖：C0 及发布包验证。分支：codex/pi-runtime。
-
-交付：
-
-- 自有 Pi adapter 与独立 bridge package，精确 dependency/lock；不依赖本机 pi/ checkout 或 TUI 的 Node 环境。
-- 使用实际发布的 AgentSession SDK；模型配置转换给 Pi native provider，原生上下文与自动压缩留 Pi。
-- 显式控制工具、资源、auth、settings；为官方基础工具包装 native prepare/settle，为 AgentLoom 工具实现跨进程 invoke。
-- 提供声明式原生工具manifest与参数映射，由 G1 的共同合同校验；不能在 Node 私写另一套权限引擎。
-- 实现协议持续读帧、双向回调、事件/终态、进程隔离、取消、清理、原生session artifact及同基座恢复。
-- 使用协议 fixture 模拟 Python 服务独立开发，使用真实 Pi SDK 和确定性 provider 驱动 native 循环；不能把返回固定答案的假 runtime 作为交付。
-
-完成证据：真 SDK 的基础文件/Shell工具、平台工具回调、原生provider映射、压缩/session恢复、双向调用与取消测试；构建和锁文件可复现。
-
-## 6. V1：并行准备验收，集成后执行全矩阵
-
-依赖：C0 后可以准备；G1/P1/S1 集成后才能完成最终验证。
-
-唯一所有者准备：
-
-- 一个经 execute_app 执行的最小真实 Application 及可切换 runtime 的变体。
-- smol Supervisor/Pi Worker 和 Pi Supervisor/smol Worker 两个混合方向，均通过平台 Worker 工具调用，以及并发身份隔离。
-- 真 Pi SDK＋确定性 provider 响应；文件、Shell、平台工具、记忆与产物使用真实实现。
-- 独立 oracle 检查实际文件、记录、工具参数、call identity、产物原文和 memory，不接受模型自述成功。
-- 每个尝试独立 evidence 目录和结果摘要，区分 PASS、FAIL、NOT-RUN。
-- cancellation、进程退出、协议损坏、副作用已发生但未提交，以及host已提交但native toolResult尚未持久化这两个不同窗口的可复现故障点。
-
-最终必过项与 spec 的 A01–A14 一一对应。真实 provider smoke 单独报告；凭证不可用不能算通过，也不能阻塞可独立完成的确定性测试准备。
-
-## 7. 文件唯一所有权与移交
-
-下表路径相对仓库根目录，用于开发调度；规范正文只约束 module 和行为，不把这些路径当稳定 API。
-
-| 所有者 | 独占范围 | 不得自行修改 |
+| 阶段 | 可执行票据 | 必须已集成的前置 |
 | --- | --- | --- |
-| C0，结束后移交 I0 | src/runtime/agent_runtime.py、agent.py、factory.py、invocation.py、tool_protocol.py；src/application/definition.py、validation.py、readiness.py、runner.py；src/configuration/**；共享 runtime/结算journal 合约和协议 fixtures | 其他任务拥有的功能实现，除明确约定的最小 smol 过渡及 terminal 入口拆分补丁 |
-| S1 | src/adapters/smolagents/**；tests/smolagents_test/**；C0 明确整文件移交的 runtime/prompts 中 smol-only 文件及 runtime/error_recovery.py | tool_gateway、公共构造/registry/configuration、self_learning、MCP、锁文件 |
-| G1 | src/runtime/tool_gateway.py、hooks/path_validators.py、hooks/runtime.py、trusted_memory_evidence.py、checkpoint/file_history_hook.py、context_engine/**；新 runtime/checkpoint/tool_journal.py 的持久化实现；src/tools/catalog.py、tool_meta.py、loader.py、goal/、todo/ 和确需的基础工具治理提取；src/adapters/mcp/**；确需的 src/self_learning/** 适配 | smol adapter、Pi实现、共享 runtime/结算合同、注册和模型选择、锁文件 |
-| P1 | 新 src/adapters/pi/**；该目录下独立 bridge manifest/lock/build；Pi 专属测试 | 公共 gateway/config/registry、Python manifest/lock、TUI manifest/lock |
-| V1 | 新 tests/pi_acceptance_test/**、applications/pi_runtime_validation/** 与独立oracle/fixtures | 生产模块、各adapter专属单测、公共contract fixture |
-| I0 | C0 移交范围；src/__main__.py；src/runtime/checkpoint/coordinator.py、checkpoint_manager.py；pyproject.toml、uv.lock、安装/CI；公共验收接线、文档 | 未接收的开发分支内部修改 |
+| 串行准备 | 03 | 01、02，以及最新工具归属修订 |
+| 四路并行 | 04 / 05 / 07 / 08 | 03 同一冻结提交 |
+| 治理续接 | 06 | 04、05 |
+| Pi 工具续接 | 09 | 05、07、08 |
+| 并行应用/工具/发行 | 10 / 11 / 13 | 分别为 06+09 / 09 / 04+09 |
+| Pi 恢复 | 12 | 10，可与未结束的 11/13 并行 |
+| 串行收口 | 14 | 11、12、13 |
 
-细化规则：
+这些是按前置解锁的窗口，不要求每个横向阶段一起结束。例如 06 与 09 可并行，11 也不必等 10。全部依赖图见 README。
 
-- G1 如需提取 Shell 或搜索中的治理逻辑，在开工清单中明确整文件所有权；S1/P1 不触碰这些文件。
-- C0→S1 的公共旧文件移交在分支创建前登记，不允许 G1 同时修改其中 Goal/Todo 引用。公共 orchestration 的剩余接线统一提交给 I0。
-- 现有 tests/agent_test、tests/skills_test、根级恢复测试中依赖旧 terminal/prompt 入口的地方由 C0 先修正；需继续交给 S1 的测试必须列入整文件移交清单。其余公共测试归 I0，G1 独占自己的 hooks/tools/MCP/self_learning 定向测试，避免共同修改宽泛的测试目录。
-- 不通过一次“全局格式化”“批量rename”跨越所有权边界。
-- P1 可在自己的 bridge 中增加 Node 依赖；Python dependency/lock 与 installer 由 I0 一次整合。C0 的包验证使用临时隔离环境，不修改 TUI 锁文件。
-- 合同修订由 I0/C0 生成独立提交和新fixture。受影响分支统一更新到该提交，再继续；禁止三条分支各加私有临时字段。
-- 不在多个分支重复 cherry-pick 功能补丁。共用合同通过统一祖先/集成提交传播；功能提交只合入一次。
+新增 04→06 的原因：04 搬迁自研 smol 的文件/Shell 实现；06 会抽取其中的平台保护策略并修改调用点。必须先形成稳定布局，再提取策略，避免两个 worktree 修改或删除同一批文件。05 只改公共 native 读取治理，不依赖这次搬迁，仍可与 04 并行。
 
-## 8. I0：串行集成、依赖和发行
+## 3. 03 必须先做出的内容
 
-集成不是最后一次大合并。每条任务完成后就合入 integration 并跑受影响检查，较早暴露接线问题。
+- 根据实际调用者登记基座基础工具、平台工具、可选专业工具；拆分 catalog 的登记所有权，保留公共只读聚合。
+- 兼容装配通过旧 smol Application、显式无工具 native fixture 和非法选择用例验证；新后端不自动收到 smol 基础工具。
+- 将已有公共消费者需要的进程环境辅助入口和资源关闭接线从 smol 工具细节中分离。基础工具算法不在这里整体搬迁。
+- 冻结完整调用合同、模型投影、工具 manifest、native prepare/settle、错误/终态及 capability；Pi JSONL 是其中一个 adapter 的桥接协议，不要求其他基座使用同样的进程形式。
+- 模型投影包含所选 profile 与有效请求 headers 的优先级；凭证不进入公开元数据、日志或指纹。
+- 原始参数、变换后严格校验、一次授权、持久结算与 uncertain 状态有共享 fixture。ToolCallRecord 的既有终态不变，未结算状态由独立 journal 表达。
+- 逐文件登记混合模块和测试的唯一所有者，尤其是 search 辅助文件、基础 file_ops 与报告/大纲、Todo 与 Goal、SkillCatalog 与原生激活。
+- 整理 01 的验证程序到测试目录并重放，保留原始结果；不把 PoC 当作正式 Pi adapter。
 
-建议顺序：
+03 的模型映射与 SDK 接入结论复用 01 的发布物验证；不得仅依赖本机上游 checkout。冻结以实际测试通过的提交为准，不能只写合同文档。
 
-1. C0 合入 integration，记录绿色 commit 和协议版本，建立 S1/G1/P1 worktree。
-2. S1 完成即可合入；它和 G1 没有功能依赖，先完成的可以先合，合后保住 smol。
-3. G1 合入后验证现有 smol 工具治理与平台记忆仍正确。
-4. P1 在 G1 协议已落地后合入。同次由 I0 更新注册、配置/readiness、平台服务注入和 native checkpoint 协调，并验证一个真实 Pi Application。P1 可以提前完成SDK实现，但不能在缺治理时以生产可用状态注册。
-5. I0 拆分可选 smol 依赖、移除 CLI 失败路径的硬依赖，完成 bridge 构建/分发、干净安装与 Node readiness。保留现有推荐 smol 安装路径的体验；smol 专属 instrumentation 等间接依赖也必须一起归入其安装profile。
-6. 接入 V1，全量执行 A01–A14、既有必需 CI 和安装矩阵，形成最终revision报告。
+## 4. 分支与环境
 
-Pi注册、依赖、shared construction 接线不能拖到“测试之后”。只对实现、依赖和治理均已就绪的 backend 宣告能力；未知或未装runtime仍在preflight失败。
+worktree 放在仓库外同级 AgentLoom-worktrees/tNN，分支使用 codex/pi-tNN-主题。03 产出的冻结提交作为 04/05/07/08 的共同起点；其他票从已包含全部前置的 integration 提交开始。
 
-目标安装profile在I0落地：保留推荐smol路径，显式选择 smolagents extra；新增Pi-only路径，选择 pi extra而不选择smol或携带smol的开发group。现有 uv sync --locked --all-groups 不会自动安装新增extra，installer和CI须同步修改。新增profile命令在I0文档中给出并实际执行，不能冒称当前仓库已经支持；两种profile都要在干净环境验证已安装分发物，而不是复用开发机已装依赖。
+每个 worktree 独立配置 Python/Node 依赖与运行目录。验证 agentloom 实际导入路径；测试用默认配置来自示例，不复制用户凭证到仓库。所有本地锁定包使用可复现安装；不依赖主工作区已装的 smol 或 node_modules。
 
-## 9. 测试执行与证据
+一个 session 可连续处理同一链，例如 07→09→10→12，但每票开始前必须合入其新前置。三个实现者时先安排 04、05、07，04 完成后转 08；不要为人员不足伪造技术依赖。
 
-以下命令在当前基线已存在，实施时按实际受影响范围选择。它们是计划，不是本轮已经运行的测试。
+## 5. 文件唯一所有权与移交
 
-从待验证 worktree 根目录执行契约与配置检查：
+路径仅用于分工定位；03 开工调查后补全准确清单。未列明的共享文件先由协调者决定归属，不得自行跨目录批量替换。
 
-~~~sh
+| 所有者 | 独占范围 | 接线与限制 |
+| --- | --- | --- |
+| 03，完成后协调者接收 | 公共 agent_runtime/agent/factory/invocation、Application 定义/校验/readiness/lifecycle、配置、catalog 聚合、公共合同 fixture | 先做最小公共依赖拆分；以后各票接线仍在当票完成前串行集成 |
+| 04 | adapters/smolagents、自研基础 read/write/edit/list_directory、grep/glob、Shell/后台任务、Todo、smol prompt 与私有状态；对应整文件测试 | 从原 tools 目录迁出指定实现；不移动 Markdown/大纲/AST/LSP、平台记忆或 Goal；不改 Gateway |
+| 05，随后 06 | Tool Gateway、native journal 实现、Hook/授权与证据、ContextRef/产物接线及对应治理测试 | 05 不修改 04 正在搬的文件；06 等 04/05 合入后接收保护提取与调用点 |
+| 08 | 平台 Goal、memory/history、ContextRef 工具入口、SkillCatalog/提案/激活入口、AST/LSP/大纲/Markdown、MCP、平台/专业 manifest | 不改 smol 基础工具和 Todo；不改公共 Gateway；共享 helper 按 03 划定边界复用 |
+| 07→09→10→12 | adapters/pi、独立 Node manifest/lock/build、Pi 专属测试 | 不改 Python lock、smol adapter 或公共治理；09 消费 05，不与 06 共改治理实现 |
+| 11 | 混合应用与独立 oracle、协作/记忆验收 | 公共编排接线由协调者完成；不改 Pi bridge 或治理代码 |
+| 13 | Python manifest/lock、installer、CLI 安装/错误路径、CI 与发行检查 | 消费 Pi bridge 产物；不共同改 Node lock，不搬 04/08 的文件 |
+| 14 | 已完成分支的集成清理、最终验收与交付记录 | 不补前票遗漏的大功能，不删除仍有消费者的兼容接口 |
+
+重点处理：
+
+- 原 tools/file_ops 中的基础读写归 04，Markdown 和大纲归 08；原 tools/search 中 grep/glob 归 04，AST/LSP 与查询资源归 08。不能把两个目录整体交给任一方。
+- 原 tools/todo 与 runtime/todo 属于自研 Agent，归 04；tools/goal 与应用 Goal 归公共平台，08 只处理工具入口。
+- 读取去重等基座优化随 04 迁移；写前保护、文件历史和 Shell 公共政策的行为先保留，06 再按清单提取共用部分并接回 smol。公共层不能新增对 smol 工具包的反向依赖。
+- Hook 的进程环境辅助依赖、Application 对 Shell 注册表的直接调用由 03 先建立公共接线；04 实现正确的实例/Run 清理，避免两个任务共同修改 lifecycle。
+- 所有 catalog 聚合、旧 YAML 默认解释和注册/readiness 补丁交协调者串行合入。04 与 08 只提交自己的登记分区，不同时编辑全局工具表。
+- 03 需登记旧测试和内部入口的移交；04/08 不通过删除仍有消费者的装饰器/别名获得“无依赖”。最终清理由 14 做，旧 YAML 支持保留。
+
+## 6. 逐票集成与能力开放
+
+完成一票就合入 integration，并验证旧 smol 和该票的实际入口。合并串行，分支实现可并行。
+
+- 07 当票注册真实无工具 Pi Application，只开放本票验证过的能力。
+- 09 当票接通只读、平台工具回调、Worker 所需能力与 Goal，不提前开放文件修改/Shell。
+- 10 才开放验证过的官方写入/Shell 映射；12 才声明已验证的恢复能力。
+- 平台功能要求某项 Hook/授权能力而基座无法落实时，preflight 明确拒绝；不能通过提示词假装已经落实，也不能偷偷回退 smol。
+- 只改配置中的后端，不承诺底层消息或会话跨基座转换。长期记忆、协作定义和应用身份保持平台所有。
+
+公共合同变更由协调者形成独立提交并更新共享 fixture，再让受影响分支同步。各分支不能各加临时私有字段，也不能重复 cherry-pick 同一个功能补丁。
+
+## 7. 验证与证据
+
+现有检查示例，按受影响范围选用；本轮文档更新没有重新执行产品测试：
+
+```sh
 uv run pytest tests/application_test/test_runtime_adapter_config.py tests/lib_test/runtime/test_agent_runtime_contract.py tests/lib_test/runtime/test_runtime_definition_seam.py -q
-~~~
-
-治理与记忆先例：
-
-~~~sh
 uv run pytest tests/lib_test/runtime/test_tool_gateway_pipeline.py tests/hooks_test/test_tool_runtime_boundary.py tests/self_learning_test/test_evidence_gate_v6.py tests/self_learning_test/test_session_event_importer.py -q
-~~~
-
-生命周期与CLI先例：
-
-~~~sh
 uv run pytest tests/test_runner.py tests/test_cli_run_observability.py tests/test_cli_run_transport_exit.py -q
-~~~
+```
 
-新增 Pi acceptance 命令由 V1 交付并接入 CI，不把尚不存在的测试文件写成已可执行命令。Pi suite 必须安装锁定的真实 SDK；跳过 Pi suite 不能让新增功能显示绿色。
+每票提供测试命令、退出码、revision、实际依赖版本和独立文件/产物 oracle。Pi 测试使用真实发布 SDK；模型响应可确定性替换，Agent 循环和实际工具不能伪造。共享 fixture 不能代替 09/10 的真实 SDK 接线。
 
-现有高成本真实模型检查可选取受影响场景在最终集成执行：
+必须覆盖的边界：旧 smol YAML 与基础工具行为；Pi 不加载 smol 基础工具；专业工具按需启用；Hook 与保护在副作用前生效；长期记忆保持原 scope/审核并跨基座复用；ContextRef 对应第一次执行的受限原文；取消不串用 Worker；恢复不重跑已提交副作用。
 
-~~~sh
-python tests/acceptance/existing_application_validation.py --case all --workspace /new/private/evidence
-python tests/agent_test/real_checkpoint_validation.py --scenario all --workspace /new/private/checkpoints
-~~~
+13 可以早做发行机制初验；14 必须用包含 10/12 的最终候选重建发行物，重跑 Pi-only/smol 安装及 CLI 失败路径。不能用开发机 import 成功代替干净安装；all-groups 不等于自动安装新增 extras。
 
-上面的证据路径是占位符，执行时必须换成新的私有目录，不复用用户已有运行目录。真实模型调用需要实际配置；不可用则记录 NOT-RUN 和原因。不要照搬旧文档中已删除的 CodeAct 或 Goal budget 场景。
+真实 provider smoke 按实际配置单独记录 PASS/FAIL/NOT-RUN。未运行不能算通过；已失败要修复或撤回对应支持后复验，不能重新标为 NOT-RUN。所有尝试用新的私有证据目录，不复用用户运行目录。
 
-验收层级：
+## 8. main Changes 交付与 worktree 清理
 
-- 分支门禁：所属模块定向测试、既有公开合同；P1 必须包含真 Pi SDK 测试。
-- 集成门禁：A01–A14 确定性端到端、已有全套要求、Python/Node构建、发行资源、Pi-only无smol环境。
-- 真实provider验证：按实际可用配置运行并保留证据；不能用旧revision成功记录替代。未运行时交付说明必须明确写出限制。已运行而失败必须修复后复验，或撤回该映射的支持声明并验证明确拒绝；不得以“可选”或 NOT-RUN 掩盖已知失败。
-- 最终smol和Pi状态：主入口返回值、持久化Run receipt、真实tool ledger和独立文件检查一致。
+1. 各实现者提交自己范围的成果，协调者逐票合入 integration，保留提交与验收证据。
+2. 开始 14 前确认全部依赖已集成，清理没有消费者的内部过渡形式，在同一候选上完成 A01–A14、既有必需 CI 和最终安装验证。
+3. 交付前重新检查 main 及其未提交用户改动。需要时先将新的 main 变化并入候选并复验，不能覆盖现有 Changes 或用重置消除冲突。
+4. 按维护者最新要求，把已验证成果展开到主工作区 main 的未提交、未暂存 Changes；不自动新增 main 提交、不推送。记录候选 SHA、main 基线、交付差异和内容核对结果。
+5. 核对每个本次创建的 worktree：提交已集成，未提交源码/配置已处理，所需证据已保存；随后删除这些 worktree。共享虚拟环境引用、用户数据和其他任务的 worktree 不在清理范围。
+6. 保留实现分支和仓库外验收日志作为可恢复来源。最终报告说明 Changes 位置、验证范围和清理结果。
 
-重点回归不是逐个私有函数重测：旧应用兼容、治理在副作用前生效、长期记忆可跨基座复用、完整产物可检索、同基座恢复不重跑已提交工作、进程故障不会伪造成功。
-
-## 10. 合并 main 的流程
-
-1. 各实现者在自己的 worktree 提交范围明确的 commit，附测试命令、退出码、revision、Node/Pi版本和未完成项。
-2. I0 检查分支基于约定合同且没有越界改共享文件。冲突由该文件所有者和I0解决，不能用 ours/theirs 批量覆盖。
-3. 功能分支逐一 merge 到 integration，保留任务边界；不要让每个开发者分别 merge main。
-4. 锁文件由唯一所有者根据合并后的manifest重新生成并验证，不手工拼冲突片段。
-5. 所有修改完成后记录候选提交，运行最终门禁。验证中发生修复，要在修复后的候选重新运行受影响检查；不得引用修复前的报告宣称完成。
-6. 合并前重新检查 main 是否前进。若已前进，先把最新 main 合入 integration，解决冲突并验证最终树；不能将旧 main 上的测试视为最终结果。
-7. main 未前进时优先将已验证 integration fast-forward 到 main。仓库若要求 PR/merge commit，则验证最终合并树与候选一致，并保留候选和merge SHA的对应关系。
-8. 合并后核对 main 的内容、来源revision、版本和验收报告；先保留worktree与证据，确认无未提交成果后再单独清理。
-
-禁止用重置 main、强推或删除用户运行数据来消除冲突。该条保护实际协作状态，不引入本轮之外的发布流程。
-
-## 11. 交付清单
-
-- [ ] C0绿色合同提交与Pi实际发布包验证记录。
-- [ ] S1旧smol兼容证据。
-- [ ] G1权限、备份、完整产物、MCP和memory证据。
-- [ ] P1真Pi SDK、协议、模型、取消与恢复证据。
-- [ ] V1独立Application验收及A01–A14映射。
-- [ ] I0安装/注册/分发接线和Pi-only无smol环境结果。
-- [ ] 最终集成revision及真实provider PASS/FAIL/NOT-RUN说明。
-- [ ] main合并记录与旧规范替代关系。
-
-全部复选框保持未勾选，直到对应实现和验证真实完成。当前只完成本规格及开发计划的编写。
+未来只有维护者明确改变交付方式时，才改为提交/PR/推送 main。当前只修订计划；01/02 已有记录不改写为后续任务完成。
