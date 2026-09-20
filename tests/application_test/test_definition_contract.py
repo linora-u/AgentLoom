@@ -102,7 +102,7 @@ def project_config(root):
 
     write(
         root / "config/system.yaml",
-        'todo: {mode: auto}\nsmart_summary: "true"\ncontext_engine: {min_chars: 123, preview_max_chars: 456}\ntoolsets: [core_file]\n',
+        'runtime_options: {todo_mode: "auto", smart_summary: true}\ncontext_engine: {min_chars: 123, preview_max_chars: 456}\ntoolsets: [core_file]\n',
     )
     write(
         root / "config/llm.yaml",
@@ -118,13 +118,14 @@ def test_effective_values_sources_and_secret_projection_are_independent(tmp_path
     base = project_config(tmp_path)
     app = tmp_path / "applications/group/demo"
     write(
-        app / "config/system.yaml", "todo: {mode: on}\ncontext_engine: {min_chars: 789}\ntoolsets: [markdown_report]\n"
+        app / "config/system.yaml", 'runtime_options: {todo_mode: "on"}\ncontext_engine: {min_chars: 789}\ntoolsets: [markdown_report]\n'
     )
     path = write(
         app / "workflows/root.yaml",
         BASE
-        + """todo: {mode: off}
-smart_summary: "false"
+        + """runtime_options:
+  todo_mode: "off"
+  smart_summary: false
 toolsets: []
 model_request_headers:
   headers: {Authorization: private-header-token}
@@ -136,13 +137,12 @@ model_request_headers:
         tmp_path, "group/demo", systems=[{"path": str(path.relative_to(tmp_path)), "application_id": "group/demo"}]
     )
     public = detail["agents"][0]["effective_config"]
-    assert snapshot.values["todo"] == {"mode": "off"}
-    assert snapshot.values["smart_summary"] is False
+    assert snapshot.values["runtime_options"] == {"todo_mode": "off", "smart_summary": False}
     assert snapshot.values["toolsets"] == []
     assert snapshot.values["context_engine"] == {"min_chars": 789, "preview_max_chars": 456}
-    assert public["values"]["todo"] == {"mode": "off"}
+    assert public["values"]["runtime_options"] == {"todo_mode": "off", "smart_summary": False}
     assert public["values"]["context_engine"] == {"min_chars": 789, "preview_max_chars": 456}
-    assert public["sources"]["todo.mode"]["source"] == "agent"
+    assert public["sources"]["runtime_options.todo_mode"]["source"] == "agent"
     assert public["sources"]["context_engine.min_chars"]["source"] == "application"
     assert public["sources"]["context_engine.preview_max_chars"]["source"] == "global"
     assert "private-header-token" not in str(detail) and "hidden-key" not in str(detail)
@@ -150,17 +150,15 @@ model_request_headers:
     public["values"]["context_engine"]["min_chars"] = -1
     snapshot.values["context_engine"]["min_chars"] = -2
     assert base.raw["context_engine"]["min_chars"] == 123
-    assert parsed["todo"]["mode"] is False  # Original YAML source retained.
+    assert parsed["runtime_options"] == {"todo_mode": "off", "smart_summary": False}
 
 
 @pytest.mark.parametrize(
     "field,value",
     [
-        ("todo", "[]"),
         ("context_engine", "wrong"),
         ("skills", "[]"),
         ("hooks", "null"),
-        ("smart_summary", "wrong"),
         ("tool_access_control", "false"),
     ],
 )
@@ -174,6 +172,48 @@ def test_invalid_overrides_are_never_dropped(tmp_path, field, value):
         build_effective_agent_config_snapshot(parsed, base_config=base)
     errors = validate_agent_definition(tmp_path, str(path), parsed)
     assert any(field in error for error in errors)
+
+
+@pytest.mark.parametrize(
+    "value",
+    ["[]", "wrong", "{todo_mode: unsupported}", "{todo_mode: off}", "{smart_summary: wrong}"],
+)
+def test_invalid_runtime_options_are_preserved_for_backend_validation(tmp_path, value):
+    from agentloom.configuration.config import build_effective_agent_config_snapshot
+
+    base = project_config(tmp_path)
+    path = write(tmp_path / "applications/demo/workflows/root.yaml", BASE + f"runtime_options: {value}\n")
+    parsed = load_agent_definition(path)
+    snapshot = build_effective_agent_config_snapshot(parsed, base_config=base)
+    invalid = parsed["runtime_options"]
+    if isinstance(invalid, dict):
+        for key, setting in invalid.items():
+            assert snapshot.values["runtime_options"][key] == setting
+    else:
+        assert snapshot.values["runtime_options"] == invalid
+    errors = validate_agent_definition(tmp_path, str(path), parsed)
+    assert any("runtime_options" in error for error in errors), errors
+
+
+@pytest.mark.parametrize("field,value", [("todo", "[]"), ("smart_summary", "wrong")])
+def test_historical_smol_fields_are_ignored_without_conversion_or_rejection(tmp_path, field, value):
+    from agentloom.application.runtime_options import normalize_runtime_options
+    from agentloom.configuration.config import build_effective_agent_config_snapshot
+
+    base = project_config(tmp_path)
+    path = write(
+        tmp_path / "applications/demo/workflows/root.yaml",
+        BASE + f'{field}: {value}\nruntime_options: {{todo_mode: "off", smart_summary: false}}\n',
+    )
+    parsed = load_agent_definition(path)
+    snapshot = build_effective_agent_config_snapshot(parsed, base_config=base)
+    assert field not in snapshot.values
+    options, sources = normalize_runtime_options(parsed, snapshot=snapshot, agent_root=tmp_path)
+    assert options["todo_mode"] == "off"
+    assert options["smart_summary"] is False
+    assert sources["todo_mode"].endswith(":runtime_options.todo_mode")
+    assert sources["smart_summary"].endswith(":runtime_options.smart_summary")
+    assert validate_agent_definition(tmp_path, str(path), parsed) == []
 
 
 def test_model_catalog_selection_preserves_case_and_empty_fallback(tmp_path):
@@ -215,17 +255,17 @@ def test_running_graph_and_config_remain_pinned_while_next_call_observes_edits(t
     app = tmp_path / "applications/nested/demo"
     path = write(app / "workflows/root.yaml", BASE + "worker_agents: [{path: child.md}]\n")
     worker = write(path.parent / "worker_agents/child.md", "```yaml\n" + BASE + SCHEMA + "```\nOriginal task.\n")
-    app_config = write(app / "config/system.yaml", "todo: {mode: on}\n")
+    app_config = write(app / "config/system.yaml", 'runtime_options: {todo_mode: "on"}\n')
     first = prepare_application_definition(tmp_path, path, load_agent_definition(path), base_config=base)
     worker.write_text("```yaml\n" + BASE + SCHEMA + "```\nEdited task.\n")
-    app_config.write_text("todo: {mode: off}\n")
+    app_config.write_text('runtime_options: {todo_mode: "off"}\n')
     second = prepare_application_definition(tmp_path, path, load_agent_definition(path), base_config=base)
     first_worker = first["_worker_definitions"][str(worker)]
     second_worker = second["_worker_definitions"][str(worker)]
     assert first_worker["workflow"] == "Original task."
     assert second_worker["workflow"] == "Edited task."
-    assert first_worker["_effective_agent_config_snapshot"].values["todo"]["mode"] == "on"
-    assert second_worker["_effective_agent_config_snapshot"].values["todo"]["mode"] == "off"
+    assert first_worker["_effective_agent_config_snapshot"].values["runtime_options"]["todo_mode"] == "on"
+    assert second_worker["_effective_agent_config_snapshot"].values["runtime_options"]["todo_mode"] == "off"
 
 
 def test_invalid_worker_is_rejected_before_any_run_allocation(tmp_path, monkeypatch):
@@ -565,10 +605,10 @@ def test_execute_app_refreshes_global_config_between_calls_but_pins_running_read
 
     def inspect_allocation(kind):
         current = config_module.get_config()
-        seen.append(config_module.build_effective_agent_config(load_agent_definition(path))["todo"]["mode"])
-        write(tmp_path / "config/system.yaml", "todo: {mode: on}\ntoolsets: []\n")
+        seen.append(config_module.build_effective_agent_config(load_agent_definition(path))["runtime_options"]["todo_mode"])
+        write(tmp_path / "config/system.yaml", 'runtime_options: {todo_mode: "on"}\ntoolsets: []\n')
         assert config_module.get_config() is current
-        assert config_module.build_effective_agent_config(load_agent_definition(path))["todo"]["mode"] == seen[-1]
+        assert config_module.build_effective_agent_config(load_agent_definition(path))["runtime_options"]["todo_mode"] == seen[-1]
         raise StopAfterPreflight
 
     monkeypatch.setattr(runner, "generate_runtime_id", inspect_allocation)
@@ -577,17 +617,17 @@ def test_execute_app_refreshes_global_config_between_calls_but_pins_running_read
             runner.execute_app(path)
     assert seen == ["auto", "on"]
     assert config_module.get_config() is base
-    assert base.raw["todo"]["mode"] == "auto"
+    assert base.raw["runtime_options"]["todo_mode"] == "auto"
 
 
 def test_programmatic_config_override_remains_authoritative(tmp_path):
     from agentloom.configuration.config import fresh_invocation_config
 
     base = project_config(tmp_path)
-    base.raw["todo"]["mode"] = "off"
-    write(tmp_path / "config/system.yaml", "todo: {mode: on}\n")
+    base.raw["runtime_options"]["todo_mode"] = "off"
+    write(tmp_path / "config/system.yaml", 'runtime_options: {todo_mode: "on"}\n')
     snapshot = fresh_invocation_config(base)
-    assert snapshot.raw["todo"]["mode"] == "off"
+    assert snapshot.raw["runtime_options"]["todo_mode"] == "off"
     assert snapshot is not base
 
 
