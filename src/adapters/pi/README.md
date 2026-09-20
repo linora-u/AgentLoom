@@ -111,7 +111,7 @@ in public errors because they may echo credentials or prompts.
   bounds attempts (default 3); persistent rejection fails the Application.
 - Sequential workflow tasks may continue the current in-memory session. This is
   not persisted resume. `additional_args` is explicitly unsupported in this stage.
-- Bridge stdout contains only validated v1 frames. Application/CLI stdout follows
+- Bridge stdout contains only validated v2 frames. Application/CLI stdout follows
   its existing output contract. Cancellation, EOF, invalid frames and close settle
   pending requests and clean up the owned process group.
 - Model retries do not replay completed tools. Pi's persisted session and journal

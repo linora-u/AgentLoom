@@ -130,7 +130,7 @@
       "additionalProperties": false,
       "properties": {
         "version": {
-          "const": 1,
+          "const": 2,
           "title": "Version",
           "type": "integer"
         },
@@ -660,7 +660,7 @@
       "additionalProperties": false,
       "properties": {
         "version": {
-          "const": 1,
+          "const": 2,
           "title": "Version",
           "type": "integer"
         },
@@ -757,7 +757,7 @@
       "additionalProperties": false,
       "properties": {
         "version": {
-          "const": 1,
+          "const": 2,
           "title": "Version",
           "type": "integer"
         },

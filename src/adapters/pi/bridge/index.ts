@@ -12,7 +12,7 @@ import {
 } from "@earendil-works/pi-coding-agent";
 
 type Obj = Record<string, any>;
-type Frame = {version: 1; kind: string; instance_id: string; run_id: string | null; request_id: string; payload: Obj};
+type Frame = {version: 2; kind: string; instance_id: string; run_id: string | null; request_id: string; payload: Obj};
 const sdkPackage = new URL("../package.json", import.meta.resolve("@earendil-works/pi-coding-agent"));
 const sdkVersion = JSON.parse(readFileSync(sdkPackage, "utf8")).version as string;
 const capabilities = {structured_tools: true, parallel_tools: true, checkpoint_resume: false, subagents: true, goal: true, stop_hooks: true};
@@ -27,8 +27,8 @@ let reportRetry: ((attempt: number) => void) | undefined;
 const seen = new Set<string>();
 const callbacks = new Map<string, {runId: string | null; method: string; resolve: (value: Obj) => void; reject: (error: Error) => void}>();
 const write = (value: unknown) => process.stdout.write(JSON.stringify(value) + "\n");
-const response = (frame: Frame, payload: Obj) => write({version: 1, kind: "response", instance_id: frame.instance_id, run_id: frame.run_id, request_id: frame.request_id, payload, error: null});
-const failure = (frame: Frame, category: string, message: string) => write({version: 1, kind: "response", instance_id: frame.instance_id, run_id: frame.run_id, request_id: frame.request_id, payload: null, error: {category, message, retryable: false}});
+const response = (frame: Frame, payload: Obj) => write({version: 2, kind: "response", instance_id: frame.instance_id, run_id: frame.run_id, request_id: frame.request_id, payload, error: null});
+const failure = (frame: Frame, category: string, message: string) => write({version: 2, kind: "response", instance_id: frame.instance_id, run_id: frame.run_id, request_id: frame.request_id, payload: null, error: {category, message, retryable: false}});
 
 function invoke(payload: Obj): Promise<Obj> {
   const active = current;
@@ -36,7 +36,7 @@ function invoke(payload: Obj): Promise<Obj> {
   const requestId = `pi:${randomUUID()}`;
   return new Promise((resolve, reject) => {
     callbacks.set(requestId, {runId: active.frame.run_id, method: payload.method, resolve, reject});
-    write({version: 1, kind: "request", instance_id: instance, run_id: active.frame.run_id, request_id: requestId, payload});
+    write({version: 2, kind: "request", instance_id: instance, run_id: active.frame.run_id, request_id: requestId, payload});
   });
 }
 
@@ -109,7 +109,7 @@ async function createSession(p: Obj): Promise<AgentSession> {
 async function run(frame: Frame, abort: AbortController) {
   const p = frame.payload;
   let seq = 0;
-  const event = (kind: string, payload: Obj) => write({version: 1, kind: "event", instance_id: frame.instance_id,
+  const event = (kind: string, payload: Obj) => write({version: 2, kind: "event", instance_id: frame.instance_id,
     run_id: frame.run_id, request_id: frame.request_id, sequence: ++seq, event: kind, payload});
   const usage = {input_tokens: 0, output_tokens: 0, total_tokens: 0, cached_input_tokens: 0};
   let unavailableTool = false;
@@ -173,7 +173,7 @@ async function accept(frame: Frame) {
     else pending.resolve(frame.payload);
     return;
   }
-  if (frame.version !== 1 || frame.kind !== "request" || !frame.request_id?.startsWith("host:") ||
+  if (frame.version !== 2 || frame.kind !== "request" || !frame.request_id?.startsWith("host:") ||
       !frame.instance_id || (instance && instance !== frame.instance_id) || seen.has(frame.request_id)) throw new Error();
   if (closing) throw new Error();
   seen.add(frame.request_id);
