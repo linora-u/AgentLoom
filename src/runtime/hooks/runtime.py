@@ -392,6 +392,7 @@ class HookRun:
         tool_call_id: str | None = None,
         tool_response: dict[str, Any] | None = None,
         tool_inputs_schema: dict[str, Any] | None = None,
+        cwd: str | None = None,
     ) -> HookResult:
         """Run matching handlers in order under event-specific semantics."""
 
@@ -410,7 +411,7 @@ class HookRun:
             context = HookContext(
                 local_run_id=self.local_run_id,
                 root_run_id=self.root_run_id,
-                cwd=os.getcwd(),
+                cwd=cwd if cwd is not None else os.getcwd(),
                 hook_event_name=event.value,
                 tool_name=tool_name,
                 tool_input=deepcopy(current_input),
