@@ -17,7 +17,7 @@
 | 06 | `codex/pi-t06-governance` | 已验收；交付后清理本次 t06，源码阶段提交与失败记录保留 |
 | 07 | `codex/pi-t07-runtime` | 已交付 main Changes 并清理 t07；6 个增量提交及冻结引用保留，见 [07 交接](07-implementation.md) |
 | 08 | `codex/pi-t08-platform` | 已验收交付后清理本次 t08；阶段提交、冻结引用和外部证据保留，见 [08 交接](08-implementation.md) |
-| 09 | `codex/pi-t09-tools` | 已验收；正式交付后清理本次 t09，分支、冻结引用与项目外证据保留，见 [09 交接](09-implementation.md) |
+| 09 | `codex/pi-t09-tools` | 已正式合入 main（`cc0edeb1`）并删除本次 t09；分支、冻结引用与项目外证据保留，见 [09 交接](09-implementation.md) |
 
 这是工作区登记，不是完成声明。重新领取前运行 `git worktree list` 并核对原 session；不得新建另一份同票工作区抢改，也不重置已有分支。冻结引用是必须包含的最低基线；可使用经检查的后继提交，后续任务还必须包含各自已验收的前置。
 

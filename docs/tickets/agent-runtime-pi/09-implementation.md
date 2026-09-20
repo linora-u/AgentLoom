@@ -66,6 +66,8 @@ workflow: 读取指定源码，并使用 get_file_outline 核对结构后给出�
 
 06 和后续目录清理已通过 `e26bfa7e` 合入 09 worktree，阶段提交保留。审查修复后的代码候选为 `2bfcde13`；完整回归及最终真实应用结果见 [09-validation.json](09-validation.json)。首次完整检查的 7 个失败也保留：早期目录归属校验拦截已有 resolver 的固定参数校验/只读详情、catalog 测试假定全部 native 为 smol、直接运行缺少 ContextRef 根目录；已分别修复或更新对应能力断言，没有新增 Studio 功能。
 
-验收完成，交付使用正式 Git 合入并保留阶段提交，冻结入口为 `refs/agentloom/ticket09-frozen`。合入及 worktree 清理结果在交付后补记；不推送远端。
+2026-09-20 已将 main 从 `8d7ba7bf` 正式快进到 `cc0edeb18aeedb29e1c40e0c44ead449fc1223dc`，保留全部阶段提交。冻结入口 `refs/agentloom/ticket09-frozen` 指向该交付提交；其中源码/测试与受检 `2bfcde13` 完全一致，后续只有交付文档补记。
+
+main 已执行 `uv run --locked loom install-runtime pi` 并确认 0.79.4 ready，Python 导入路径也指向 main。本票 worktree `/Users/bytedance/.codex/worktrees/pi-t09-tools/AgentLoom` 已删除，实现分支和外部验收证据保留。现有 `codex/`、`temp/`、参考 `pi/` 及两个 stash 未动；没有推送远端。
 
 06 与 09 已完成，因此 **10、11、13 可分别新建 session/worktree 并行**；10 完成后再做 12；11、12、13 完成后串行做 14。Pi adapter/bridge/Node lock 的修改权移交 10，13 不共改该锁文件。
