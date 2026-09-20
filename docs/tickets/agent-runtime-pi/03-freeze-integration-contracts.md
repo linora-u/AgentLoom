@@ -17,7 +17,7 @@
 ## Acceptance criteria
 
 - [ ] 集成 01/02 的实际提交，原 smol Application 和公共合约测试通过，记录准确的冻结 commit。
-- [ ] 固定 runtime options、模型投影、工具 manifest、逻辑工具与 native 名称映射、结果状态和能力声明；后续分支不得各自添加不兼容私有字段。
+- [ ] 固定 runtime options、模型投影、工具 manifest、逻辑工具与 native 名称映射、结果状态和能力声明；模型投影同时覆盖所选 profile 与实例实际生效的请求 headers 策略，保留来源优先级且不把凭证写入公开元数据；后续分支不得各自添加不兼容私有字段。
 - [ ] 冻结双向 JSONL 请求、响应、事件及 handshake、run、snapshot、cancel、close 的身份与错误语义。
 - [ ] 冻结 native prepare/settle：最终参数、执行提供方、授权关联、持久提交确认和不确定结果；ToolCallRecord 保持既有终态，执行 journal 独立表达未结算状态。
 - [ ] 通过共享 fixture 表达参数修正、拒绝、写前保护顺序、双日志窗口及取消；不将 fixture 通过算作真实 native 生产管线完成。
@@ -29,4 +29,3 @@
 04、05、07、08 都必须从这个已集成、已验证的 commit 开始；共享入口变更由协调 session 串行处理。
 
 实施遵循已生成的 Pi 接入规格、并行开发计划及本轮票据执行索引。只认已集成、已验证的依赖提交；不要自行跳过阻塞任务，也不要从其他 worktree 复制未提交改动。
-

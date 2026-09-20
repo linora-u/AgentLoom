@@ -32,6 +32,10 @@ Tests used Python 3.12.13 and the existing locked Python dependencies. `PYTHONPA
 4. Old execution-config helpers remain for existing read-only tooling and callers. The new option normalization is the construction path; broad smol cleanup remains ticket 04.
 5. Only smol is production-registered. Native fixture registration exists solely in tests. Ticket 03 must freeze the capabilities/options against the Pi SDK proof; ticket 07 supplies actual Pi execution, and ticket 09 supplies Pi Goal/Stop behavior.
 
+## Model policy handoff
+
+`RuntimeModelSelection.settings` snapshots the selected LLM profile. The separate effective `model_request_headers` policy must also be resolved per instance when ticket 03 freezes the native model projection and ticket 07 implements Pi translation. Preserve configured header precedence without putting credentials into public metadata, logs or fingerprints; the native fixture in ticket 02 does not claim provider/header interoperability.
+
 ## Prompt normalization follow-up
 
 A post-implementation review found that equivalent old/new prompt paths could be compared before both were resolved, and historical global smol prompt paths were still checked for native runtimes. Both were first reproduced as failures, then corrected. Preflight now validates the selected smol option path, while native preflight skips historical smol prompt defaults. The three affected application/config suites passed (88 tests); focused mypy retains only the same two pre-existing definition iterable diagnostics.
