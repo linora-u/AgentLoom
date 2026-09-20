@@ -1,6 +1,6 @@
 """MCP connection lifecycle manager.
 
-:class:`McpManager` creates one ``smolagents.MCPClient`` per configured MCP
+:class:`McpManager` creates one ``AgentLoomMCPClient`` per configured MCP
 server, aggregates the discovered tools, and ensures graceful shutdown.
 A server that fails to connect is logged as a warning and skipped — it
 never blocks agent startup.
@@ -14,6 +14,7 @@ from agentloom.runtime.logging import get_logger
 from agentloom.adapters.mcp.client import AgentLoomMCPClient as MCPClient
 from agentloom.adapters.mcp.config import McpServerConfig, McpSettings, to_mcp_client_params
 from agentloom.adapters.mcp.tool_wrapper import wrap_mcp_tools
+from agentloom.runtime.tool_gateway import ToolBinding
 
 logger = get_logger(__name__)
 
@@ -38,9 +39,9 @@ class McpManager:
     def __init__(self, settings: McpSettings) -> None:
         self._settings = settings
         # MCPClient instances keyed by server name.
-        self._clients: dict[str, Any] = {}
+        self._clients: dict[str, MCPClient] = {}
         # Raw tools per server (before wrapping).
-        self._raw_tools: dict[str, list] = {}
+        self._raw_tools: dict[str, list[ToolBinding]] = {}
         # Connection errors per server.
         self._errors: dict[str, str] = {}
 
@@ -58,21 +59,39 @@ class McpManager:
             logger.debug("[MCP] No MCP servers configured")
             return
 
-        for cfg in self._settings.configs:
-            self._connect_one(cfg)
+        try:
+            for cfg in self._settings.configs:
+                self._connect_one(cfg)
+        except BaseException:
+            self.disconnect_all()
+            raise
 
     def _connect_one(self, cfg: McpServerConfig) -> None:
-        """Connect to a single MCP server.  Never raises."""
+        """Record ordinary connection errors; propagate process interruption."""
+        if cfg.name in self._clients:
+            return
+        client = None
         try:
             params = to_mcp_client_params(cfg)
-            client = MCPClient(params)
+            client = MCPClient(params, adapter_kwargs={
+                "connect_timeout": self._settings.timeout,
+                "client_session_timeout_seconds": float(self._settings.tool_timeout),
+            })
             tools = client.get_tools()
             self._clients[cfg.name] = client
             self._raw_tools[cfg.name] = list(tools)
+            self._errors.pop(cfg.name, None)
             logger.info(
                 "[MCP] Connected to '%s': %d tools", cfg.name, len(tools)
             )
-        except Exception as exc:
+        except BaseException as exc:
+            if client is not None:
+                try:
+                    client.disconnect()
+                except Exception as close_error:
+                    logger.warning("[MCP] Error closing failed connection '%s': %s", cfg.name, close_error)
+            if not isinstance(exc, Exception):
+                raise
             logger.warning("[MCP] Failed to connect to '%s': %s", cfg.name, exc)
             self._errors[cfg.name] = str(exc)
 
@@ -80,9 +99,9 @@ class McpManager:
     # Tool access
     # ------------------------------------------------------------------
 
-    def get_all_tools(self) -> list:
+    def get_all_tools(self) -> list[ToolBinding]:
         """Return flattened, wrapped tool list from all connected servers."""
-        all_tools: list = []
+        all_tools: list[ToolBinding] = []
         for server_name, raw_tools in self._raw_tools.items():
             wrapped = wrap_mcp_tools(server_name, raw_tools, self._settings)
             all_tools.extend(wrapped)
