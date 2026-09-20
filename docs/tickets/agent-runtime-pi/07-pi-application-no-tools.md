@@ -4,7 +4,7 @@
 
 **Blocked by:** 03：冻结基座与平台边界，交付可并行的公共基线
 
-**Status:** planned — 等待前置任务集成并验证，尚未实施。
+**Status:** ready-for-agent — 03 已验收；从 `refs/agentloom/ticket03-frozen` 解析准确 SHA 后可新建独立 worktree。本票尚未实施。
 
 **Required:** Yes — 本票属于最终交付必做项。
 
