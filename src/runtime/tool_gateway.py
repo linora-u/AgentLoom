@@ -760,6 +760,37 @@ def _compress_tool_result(
     )
 
 
+@dataclass(frozen=True, slots=True, eq=False)
+class PreparedToolCall:
+    """An opaque, one-use gateway handle with a detached input snapshot.
+
+    Only the issuing gateway can execute this handle. Reading ``arguments``
+    cannot mutate the input that will reach its executor.
+    """
+
+    call_id: str
+    tool_name: str
+    _arguments: Mapping[str, Any]
+
+    def __post_init__(self) -> None:
+        object.__setattr__(self, "_arguments", deepcopy(dict(self._arguments)))
+
+    @property
+    def arguments(self) -> Mapping[str, Any]:
+        return MappingProxyType(deepcopy(dict(self._arguments)))
+
+
+@dataclass(frozen=True, slots=True)
+class _PreparedToolExecution:
+    call_id: str
+    tool_name: str
+    arguments: dict[str, Any]
+    call_kwargs: dict[str, Any]
+    binding: ToolBinding
+    hook_run: Any
+    started_at: float
+
+
 @runtime_checkable
 class ToolGateway(Protocol):
     """The only Tool execution seam exposed to an Agent runtime adapter.
@@ -769,6 +800,8 @@ class ToolGateway(Protocol):
     ``call_id`` in its terminal :class:`ToolCallRecord`; implementations do
     not generate or replace provider call IDs.  ``close`` releases any
     Tool-owned resources and must be safe to call more than once.
+    ``prepare`` finalizes input without authorizing or executing the tool;
+    ``execute_prepared`` consumes that gateway-owned handle exactly once.
     """
 
     @property
@@ -781,6 +814,16 @@ class ToolGateway(Protocol):
         tool_name: str,
         arguments: Mapping[str, Any],
     ) -> ToolCallRecord: ...
+
+    def prepare(
+        self,
+        *,
+        call_id: str,
+        tool_name: str,
+        arguments: Mapping[str, Any],
+    ) -> PreparedToolCall | ToolCallRecord: ...
+
+    def execute_prepared(self, prepared: PreparedToolCall) -> ToolCallRecord: ...
 
     def close(self) -> None: ...
 
@@ -818,27 +861,27 @@ def tool_manifest_snapshot(gateway: ToolGateway) -> tuple[ToolManifestEntry, ...
     return tuple(by_name[definition.name] for definition in definitions)
 
 
-def _prepare_tool_input(
+def _blocked_tool_input(hook_run: Any, **kwargs: Any) -> ToolCallRecord:
+    record = ToolCallRecord.blocked(
+        input=kwargs.pop("arguments"), ended_at=time.time(),
+        kind=kwargs.pop("kind", "invalid_arguments"), **kwargs,
+    )
+    hook_run.record_tool_outcome(record)
+    return record
+
+
+def _transform_tool_input(
     *, hook_run: Any, call_id: str, tool_name: str,
     arguments: Mapping[str, Any], inputs_schema: Mapping[str, Any],
     decode: Callable[[dict[str, Any]], tuple[dict[str, Any], dict[str, Any]]],
     started_at: float, coerce: bool = True, cwd: str | None = None,
     manifest: ToolManifestEntry | None = None,
-    protect: Callable[[dict[str, Any]], None] | None = None,
 ) -> tuple[dict[str, Any], dict[str, Any]] | ToolCallRecord:
-    """Shared Python/native gate; executors never implement permission policy."""
-    from agentloom.runtime.hooks.types import HookEvent, HookResult
-
-    def blocked(run: Any, **kwargs: Any) -> ToolCallRecord:
-        record = ToolCallRecord.blocked(
-            input=kwargs.pop("arguments"), ended_at=time.time(),
-            kind=kwargs.pop("kind", "invalid_arguments"), **kwargs,
-        )
-        run.record_tool_outcome(record)
-        return record
+    """Run configurable input repair, then strictly decode its final result."""
+    from agentloom.runtime.hooks.types import HookEvent
 
     if not isinstance(arguments, Mapping):
-        return blocked(
+        return _blocked_tool_input(
             hook_run,
             call_id=call_id,
             tool_name=tool_name,
@@ -855,7 +898,7 @@ def _prepare_tool_input(
         if coerce:
             coerce_tool_parameters(tool_input, deepcopy(dict(inputs_schema)))
     except Exception as exc:
-        return blocked(
+        return _blocked_tool_input(
             hook_run,
             call_id=call_id,
             tool_name=tool_name,
@@ -878,7 +921,7 @@ def _prepare_tool_input(
         )
         hook_run.flush_user_messages()
     except Exception as exc:
-        return blocked(
+        return _blocked_tool_input(
             hook_run,
             call_id=call_id,
             tool_name=tool_name,
@@ -894,7 +937,7 @@ def _prepare_tool_input(
         else deepcopy(tool_input)
     )
     if pre_result.should_block():
-        return blocked(
+        return _blocked_tool_input(
             hook_run,
             call_id=call_id,
             tool_name=tool_name,
@@ -908,7 +951,7 @@ def _prepare_tool_input(
     try:
         effective_input, call_kwargs = decode(candidate_input)
     except Exception as exc:
-        return blocked(
+        return _blocked_tool_input(
             hook_run,
             call_id=call_id,
             tool_name=tool_name,
@@ -917,6 +960,19 @@ def _prepare_tool_input(
             stage="final_decode",
             started_at=started_at,
         )
+
+    return effective_input, call_kwargs
+
+
+def _guard_tool_input(
+    *, hook_run: Any, call_id: str, tool_name: str,
+    effective_input: dict[str, Any], inputs_schema: Mapping[str, Any],
+    started_at: float, cwd: str | None = None,
+    manifest: ToolManifestEntry | None = None,
+    protect: Callable[[dict[str, Any]], None] | None = None,
+) -> ToolCallRecord | None:
+    """Authorize final input and capture pre-execution history at dispatch."""
+    from agentloom.runtime.hooks.types import HookEvent, HookResult
 
     final_context = _build_runtime_context(
         hook_run,
@@ -940,7 +996,7 @@ def _prepare_tool_input(
         if guard_result.modified_input is not None:
             raise ValueError("CoreToolGuard may not transform tool input")
     except Exception as exc:
-        return blocked(
+        return _blocked_tool_input(
             hook_run,
             call_id=call_id,
             tool_name=tool_name,
@@ -951,7 +1007,7 @@ def _prepare_tool_input(
             started_at=started_at,
         )
     if guard_result.should_block():
-        return blocked(
+        return _blocked_tool_input(
             hook_run,
             call_id=call_id,
             tool_name=tool_name,
@@ -966,7 +1022,7 @@ def _prepare_tool_input(
         try:
             protect(effective_input)
         except Exception as exc:
-            return blocked(
+            return _blocked_tool_input(
                 hook_run, call_id=call_id, tool_name=tool_name,
                 arguments=effective_input, message=str(exc), stage="operation_policy",
                 kind="policy_blocked", started_at=started_at,
@@ -984,7 +1040,7 @@ def _prepare_tool_input(
             **({"manifest": manifest, "cwd": cwd} if manifest is not None else {}),
         )
     except Exception as exc:
-        return blocked(
+        return _blocked_tool_input(
             hook_run,
             call_id=call_id,
             tool_name=tool_name,
@@ -997,7 +1053,31 @@ def _prepare_tool_input(
 
     _observe_final_tool_input(final_context)
 
-    return effective_input, call_kwargs
+    return None
+
+
+def _prepare_tool_input(
+    *, hook_run: Any, call_id: str, tool_name: str,
+    arguments: Mapping[str, Any], inputs_schema: Mapping[str, Any],
+    decode: Callable[[dict[str, Any]], tuple[dict[str, Any], dict[str, Any]]],
+    started_at: float, coerce: bool = True, cwd: str | None = None,
+    manifest: ToolManifestEntry | None = None,
+    protect: Callable[[dict[str, Any]], None] | None = None,
+) -> tuple[dict[str, Any], dict[str, Any]] | ToolCallRecord:
+    """Keep native preparation's transform, guard and history gate together."""
+    prepared = _transform_tool_input(
+        hook_run=hook_run, call_id=call_id, tool_name=tool_name,
+        arguments=arguments, inputs_schema=inputs_schema, decode=decode,
+        started_at=started_at, coerce=coerce, cwd=cwd, manifest=manifest,
+    )
+    if isinstance(prepared, ToolCallRecord):
+        return prepared
+    rejection = _guard_tool_input(
+        hook_run=hook_run, call_id=call_id, tool_name=tool_name,
+        effective_input=prepared[0], inputs_schema=inputs_schema,
+        started_at=started_at, cwd=cwd, manifest=manifest, protect=protect,
+    )
+    return rejection if rejection is not None else prepared
 
 
 class AgentLoomToolGateway:
@@ -1027,6 +1107,7 @@ class AgentLoomToolGateway:
         self._resource_closers = closers
         self._close_lock = RLock()
         self._closed = False
+        self._prepared: dict[PreparedToolCall, _PreparedToolExecution] = {}
         self._setup_locks = {
             name: RLock()
             for name in by_name
@@ -1112,7 +1193,21 @@ class AgentLoomToolGateway:
         arguments: Mapping[str, Any],
     ) -> ToolCallRecord:
         """Settle one Tool call through the complete governance pipeline."""
+        prepared = self.prepare(
+            call_id=call_id, tool_name=tool_name, arguments=arguments,
+        )
+        if isinstance(prepared, ToolCallRecord):
+            return prepared
+        return self.execute_prepared(prepared)
 
+    def prepare(
+        self,
+        *,
+        call_id: str,
+        tool_name: str,
+        arguments: Mapping[str, Any],
+    ) -> PreparedToolCall | ToolCallRecord:
+        """Finalize input once, without guard, history, setup or tool effects."""
         if not isinstance(call_id, str) or not call_id:
             raise ValueError("Tool call_id must be a non-empty string")
         if not isinstance(tool_name, str) or not tool_name:
@@ -1120,7 +1215,6 @@ class AgentLoomToolGateway:
         if self._closed:
             raise RuntimeError("Tool Gateway is closed")
 
-        from agentloom.runtime.hooks.types import HookEvent
         from agentloom.runtime.trace import get_current_hook_run
 
         hook_run = get_current_hook_run(required=True)
@@ -1139,7 +1233,7 @@ class AgentLoomToolGateway:
                 stage="input_validation",
                 started_at=started_at,
             )
-        prepared = _prepare_tool_input(
+        prepared = _transform_tool_input(
             hook_run=hook_run, call_id=call_id, tool_name=tool_name,
             arguments=arguments, inputs_schema=binding.inputs_schema,
             decode=lambda value: _strict_decode_tool_input(binding, value),
@@ -1148,10 +1242,52 @@ class AgentLoomToolGateway:
         if isinstance(prepared, ToolCallRecord):
             return prepared
         effective_input, call_kwargs = prepared
+        with self._close_lock:
+            if self._closed:
+                return self._blocked(
+                    hook_run, call_id=call_id, tool_name=tool_name,
+                    arguments=effective_input, message="Tool Gateway closed during preparation",
+                    stage="cancellation", started_at=started_at,
+                )
+            handle = PreparedToolCall(call_id, tool_name, effective_input)
+            self._prepared[handle] = _PreparedToolExecution(
+                call_id, tool_name, effective_input, deepcopy(call_kwargs),
+                binding, hook_run, started_at,
+            )
+        return handle
+
+    def execute_prepared(self, prepared: PreparedToolCall) -> ToolCallRecord:
+        """Consume an owned handle in its original Hook Run before dispatch."""
+        from agentloom.runtime.hooks.types import HookEvent
+        from agentloom.runtime.trace import get_current_hook_run
+
+        with self._close_lock:
+            if self._closed:
+                raise RuntimeError("Tool Gateway is closed")
+            if not isinstance(prepared, PreparedToolCall) or prepared not in self._prepared:
+                raise ValueError("Prepared Tool call is foreign or already consumed")
+            execution = self._prepared[prepared]
+            if get_current_hook_run(required=True) is not execution.hook_run:
+                raise ValueError("Prepared Tool call belongs to a different HookRun")
+            del self._prepared[prepared]
+
+        call_id, tool_name = execution.call_id, execution.tool_name
+        effective_input, call_kwargs = execution.arguments, execution.call_kwargs
+        binding, hook_run = execution.binding, execution.hook_run
+        started_at = execution.started_at
+        rejection = _guard_tool_input(
+            hook_run=hook_run, call_id=call_id, tool_name=tool_name,
+            effective_input=effective_input, inputs_schema=binding.inputs_schema,
+            started_at=started_at,
+        )
+        if rejection is not None:
+            return rejection
         if self._closed:
-            return self._blocked(hook_run, call_id=call_id, tool_name=tool_name,
-                arguments=effective_input, message="Tool Gateway closed during preparation",
-                stage="cancellation", started_at=started_at)
+            return self._blocked(
+                hook_run, call_id=call_id, tool_name=tool_name,
+                arguments=effective_input, message="Tool Gateway closed before execution",
+                stage="cancellation", started_at=started_at,
+            )
 
         try:
             if binding.setup is not None and (
@@ -1288,6 +1424,7 @@ class AgentLoomToolGateway:
             if self._closed:
                 return
             self._closed = True
+            self._prepared.clear()
         first_error: Exception | None = None
         for closer in reversed(self._resource_closers):
             try:
