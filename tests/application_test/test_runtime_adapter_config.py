@@ -343,7 +343,8 @@ def test_live_agent_definitions_use_the_current_runtime_contract() -> None:
 
     assert definitions
     for path, definition in definitions:
-        assert definition.get("agent_runtime") == "smolagents", path
+        # Shipped mixed Applications can select either supported native runtime.
+        assert definition.get("agent_runtime") in {"smolagents", "pi"}, path
         assert "tool_call_type" not in definition, path
         assert "execution_env" not in definition, path
         assert "code_agent" not in definition, path

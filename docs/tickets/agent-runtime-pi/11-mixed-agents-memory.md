@@ -4,7 +4,7 @@
 
 **Blocked by:** 09：Pi 调通原生读取、平台工具与 Goal
 
-**Status:** planned — 等待前置任务集成并验证，尚未实施。
+**Status:** completed — 在 `codex/pi-t11-mixed` 独立 worktree 实现并验收，源码 `be3c35da`。双向协作、隔离、Goal、ContextRef、认可记忆及公共接线已验证；见 [实施记录](11-implementation.md) 和 [机器可读验收](11-validation.json)。已正式合入 main（`96db1542`），本票 worktree 已删除。
 
 **Required:** Yes — 本票属于最终交付必做项。
 
@@ -22,14 +22,14 @@
 
 ## Acceptance criteria
 
-- [ ] 两个混合方向都通过 execute_app 调用真实 runtime，不能以 Pi→Pi 或固定 Worker 回答代替。
-- [ ] 根据 [工具归属](tool-ownership.md)，混合调用的 smol Worker 实际使用自研基础工具，Pi Worker 实际使用官方基础工具；平台记忆/历史/ContextRef 保持共用语义，不能靠两者都调用同一 smol 工具伪装基座替换。
-- [ ] 并发与重复 Worker 调用保留独立 native session、root/local run、输入输出和工具记录；无实例、Hook 或记忆作用域串用。
-- [ ] 第一次 smol 运行产生真实工具证据，经现有候选/认可流程形成记忆；第二次 Pi Run 实际读取和使用该记忆，禁止直接向 DB 塞入已认可结果。
-- [ ] 保持现有 Application/Project scope、root-run snapshot 和审核默认规则，不引入新配置或实时广播。
-- [ ] 独立 oracle 校验共享产物与 ContextRef 的来源和内容；模型宣称已经记住不算通过。
-- [ ] 多 Agent 场景复验 Goal root ownership 与实际完成证据，不把 Worker 的 native final 当作根完成。
-- [ ] 公共 orchestration/self-learning 接线需求由协调者串行落地；本票不修改 10/12 的 Pi 源码。
+- [x] 两个混合方向都通过 execute_app 调用真实 runtime，不能以 Pi→Pi 或固定 Worker 回答代替。
+- [x] 根据 [工具归属](tool-ownership.md)，混合调用的 smol Worker 实际使用自研基础工具，Pi Worker 实际使用官方基础工具；平台记忆/历史/ContextRef 保持共用语义，不能靠两者都调用同一 smol 工具伪装基座替换。
+- [x] 并发与重复 Worker 调用保留独立 native session、root/local run、输入输出和工具记录；无实例、Hook 或记忆作用域串用。
+- [x] 第一次 smol 运行产生真实工具证据，经现有候选/认可流程形成记忆；第二次 Pi Run 实际读取和使用该记忆，禁止直接向 DB 塞入已认可结果。
+- [x] 保持现有 Application/Project scope、root-run snapshot 和审核默认规则，不引入新配置或实时广播。
+- [x] 独立 oracle 校验共享产物与 ContextRef 的来源和内容；模型宣称已经记住不算通过。
+- [x] 多 Agent 场景复验 Goal root ownership 与实际完成证据，不把 Worker 的 native final 当作根完成。
+- [x] 公共 orchestration/self-learning 接线需求由协调者串行落地；本票不修改 10/12 的 Pi 源码。
 
 ## Handoff
 
