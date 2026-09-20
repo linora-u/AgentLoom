@@ -87,7 +87,7 @@
 | platform_invoke | Pi → host | 调用已选的平台/专业/MCP 工具；由 host 绑定正确 Hook Run 和 Worker 上下文 |
 | event | Pi → host | run/model/tool/subagent/usage/checkpoint/terminal 等运行观察；不承担提交确认 |
 
-model_prepare 是 09 的桥接增补，不改变公共 AgentRuntime 或 native tool contract。协议两端与 schema 同次交付；安装指纹检查会阻止旧构建混用。模型内部 HTTP 重试沿用本次许可，不重放工具；新模型 turn 必须重新检查 Goal。
+model_prepare 是 09 的桥接增补，不改变公共 AgentRuntime 或 native tool contract。协议两端与 schema 同次交付；安装指纹检查会阻止旧构建混用。模型内部 HTTP 重试沿用本次许可，不重放工具；新模型 turn 必须重新检查 Goal。 `model_prepare` 回执的 `agent_context` 仅注入下一次模型请求；Run 的 `serial_tools` 来自公共 catalog 与 Agent 有效 metadata，平台回调发生前就按该集合串行调度，不能只串行消费已执行的回执。
 
 07 的 transport 必须持续收取双向请求：host 等待 run 时仍处理 tool/platform 回调；09 验证实际回调继续与并发关联。不得用阻塞读取一个响应的方式造成相互等待。
 
@@ -103,6 +103,7 @@ EOF、进程死亡或协议故障必须结清 pending 请求；不能虚构成�
 - `RuntimeInvocation` 在运行时关闭后清理该实例；即使 runtime.close 失败也继续清理并报告错误。
 - Application 最终化调用公共 Run 关闭入口，不再导入 Shell 注册表。注册函数在没有绑定 Run 时不接管资源，调用方仍负责其生命周期。
 - `src/runtime/subprocess_env.py` 是 Hook/执行器共用的环境规则。旧 Shell 路径暂为兼容导出，不再拥有实现。
+- 09 增补：关闭 Run/实例先标记该 owner 已关闭，再取资源快照；共享执行上下文中的迟到登记立即关闭。受管 Hook 子进程在创建前登记，取消先停止排队回调，再关闭句柄并排空活跃回调。普通宿主 Python 扩展需使用有限操作或登记可关闭资源协作退出，不能宣称框架可强制终止任意宿主函数。
 
 04 按此合同迁移具体句柄、会话和资源状态；07 的 Node 进程也必须服从同一实例关闭边界。
 
