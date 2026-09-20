@@ -723,7 +723,7 @@ class RoleDrivenAgent(BaseAgent):
             raise
         profile = self._role_profile()
         if profile.enable_sub_task_tracking:
-            return SubTaskTrackedAgent(runtime, self.name)
+            return SubTaskTrackedAgent(runtime, self.name, instance_id=self._agent_id)
         return runtime
 
     def _bind_hook_message_sink(self, runtime_agent: Any) -> None:
@@ -786,16 +786,18 @@ class SubTaskTrackedAgent:
     Telemetry collection has been removed; agent_id is injected for LiteLLM/Langfuse tracing.
     """
 
-    def __init__(self, runtime: AgentRuntime, agent_name: str):
+    def __init__(self, runtime: AgentRuntime, agent_name: str, *, instance_id: str | None = None):
         """
         Initialize sub-task tracing wrapper.
 
         Args:
             runtime: Runtime-neutral complete-run Agent adapter.
             agent_name: Agent name, used to generate sub-task IDs.
+            instance_id: Stable invocation identity for owned tool resources.
         """
         self._runtime = runtime
         self._agent_name = agent_name
+        self._instance_id = instance_id
         self._log = get_logger(getattr(runtime, "logger", None), __name__)
 
     @property
@@ -864,7 +866,7 @@ class SubTaskTrackedAgent:
         """
         from agentloom.runtime.checkpoint.coordinator import CheckpointCoordinator
 
-        with sub_task_context(self._agent_name) as sub_task_id:
+        with sub_task_context(self._agent_name, agent_id=self._instance_id) as sub_task_id:
             started_event = self._subagent_event(
                 request,
                 phase="started",

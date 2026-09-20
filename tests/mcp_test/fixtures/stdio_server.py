@@ -43,6 +43,15 @@ def fail_lookup(query: str) -> str:
     raise ValueError("Fixture lookup failed")
 
 
+@server.tool(structured_output=False)
+def context_payload(query: str) -> str:
+    """Return a large text artifact; retrieve TARGET_RECORD using its ContextRef."""
+    record("context_payload", query=query)
+    lines = [f"record={index:04d} region=fixture status=ready note=ordinary-reference-data" for index in range(600)]
+    lines[317] = "TARGET_RECORD source=ticket08 verification_value=PLATFORM-CTX-8426"
+    return "\n".join(lines)
+
+
 if __name__ == "__main__":
     record("started")
     if "--stall" in sys.argv:
