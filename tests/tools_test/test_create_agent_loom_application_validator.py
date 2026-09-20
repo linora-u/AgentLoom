@@ -151,9 +151,9 @@ def test_validator_rejects_invalid_list_workflow_item(tmp_path: Path) -> None:
 
 @pytest.mark.parametrize(
     "goal",
-    [True, False, {"enabled": True}, {"enabled": False}, {"enabled": True, "token_budget": 1000}],
+    [True, False, {"enabled": True}, {"enabled": False}, {"enabled": True, "token_budget": 1000}, {"enabled": True, "token_budget": "10"}],
 )
-def test_validator_rejects_removed_goal_supervisor_forms(tmp_path: Path, goal) -> None:
+def test_validator_accepts_goal_supervisor_forms(tmp_path: Path, goal) -> None:
     app_root = _create_min_project(tmp_path)
     workflow_file = app_root / "workflows" / "demo_agent.yaml"
     config = yaml.safe_load(workflow_file.read_text(encoding="utf-8"))
@@ -162,14 +162,13 @@ def test_validator_rejects_removed_goal_supervisor_forms(tmp_path: Path, goal) -
 
     completed, payload = _run_validator(tmp_path)
 
-    assert completed.returncode == 1
-    assert payload["summary"]["valid"] is False
-    assert "goal was removed" in _messages(payload)
+    assert completed.returncode == 0
+    assert payload["summary"]["valid"] is True
 
 
 @pytest.mark.parametrize(
     "goal",
-    [None, {}, {"token_budget": 10}, {"enabled": True, "token_budget": "10"}, {"enabled": True, "extra": 1}],
+    [None, {}, {"token_budget": 10}, {"enabled": True, "extra": 1}],
 )
 def test_validator_rejects_invalid_goal_forms(tmp_path: Path, goal) -> None:
     app_root = _create_min_project(tmp_path)
@@ -206,7 +205,8 @@ def test_validator_rejects_goal_on_worker(tmp_path: Path) -> None:
     completed, payload = _run_validator(tmp_path)
 
     assert completed.returncode == 1
-    assert "goal was removed" in _messages(payload)
+    assert "must not define goal" in _messages(payload)
+    assert "Supervisor-only" in _messages(payload)
 
 
 @pytest.mark.parametrize("mode", ["auto", "on", "off"])
@@ -567,7 +567,7 @@ Run the nested workflow.
     assert payload["summary"]["files_checked"] == 3
     messages = _messages(payload)
     assert "tools_mapping was removed" in messages
-    assert "goal was removed" in messages
+    assert "must not define goal" in messages
 
 
 def test_validator_does_not_follow_symlinked_definition_files_or_directories(tmp_path: Path) -> None:

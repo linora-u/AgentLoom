@@ -56,6 +56,19 @@ def _exception_chain(error: Exception) -> tuple[Exception, ...]:
     return tuple(chain)
 
 
+def _goal_control_error(error: Exception) -> Exception | None:
+    from agentloom.runtime.goal import GoalCompleteError
+
+    return next(
+        (
+            item
+            for item in _exception_chain(error)
+            if isinstance(item, GoalCompleteError)
+        ),
+        None,
+    )
+
+
 def _provider_cause(error: Exception) -> Exception | None:
     from litellm.exceptions import (
         APIConnectionError,
@@ -473,6 +486,11 @@ class SmolagentsRuntimeAdapter:
                 checkpoint=checkpoint,
             )
         except Exception as exc:
+            control_error = _goal_control_error(exc)
+            if control_error is not None:
+                if control_error is exc:
+                    raise
+                raise control_error from exc
             error = _runtime_error(exc)
             self._emit_event(
                 "terminal",

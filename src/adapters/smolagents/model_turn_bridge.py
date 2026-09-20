@@ -255,6 +255,33 @@ class SmolagentsModelTurnBridge(Model):
         tools_to_call_from: list[Any] | None = None,
         **kwargs: Any,
     ) -> ChatMessage:
+        from agentloom.runtime.goal import get_current_goal_provider
+        from agentloom.runtime.trace import get_current_local_run_id
+
+        goal_provider = get_current_goal_provider()
+        if goal_provider is not None:
+            local_run_id = get_current_local_run_id()
+            is_planning_request = "<end_plan>" in (stop_sequences or [])
+            if is_planning_request and goal_provider.completion_settlement_pending(
+                local_run_id=local_run_id,
+            ):
+                return ChatMessage(
+                    role=MessageRole.ASSISTANT,
+                    content="Goal is complete. Skip planning and deliver the final answer now.",
+                    token_usage=TokenUsage(input_tokens=0, output_tokens=0),
+                )
+            completion_settlement = goal_provider.assert_request_allowed(
+                local_run_id=local_run_id,
+                allow_completion_settlement=not is_planning_request,
+            )
+            if completion_settlement and tools_to_call_from is not None:
+                tools_to_call_from = [
+                    tool
+                    for tool in tools_to_call_from
+                    if getattr(tool, "name", None) == "final_answer"
+                ]
+            goal_provider.mark_started()
+
         if response_format is not None:
             raise ModelProtocolError("structured response_format is not supported by the tool runtime")
         options = dict(kwargs)

@@ -2,7 +2,7 @@
 
 The runner allocates resources and the Supervisor performs model work, but
 neither owns terminal checkpoint state independently.  Both report into this
-module so checkpoint state and the final Run outcome are
+module so checkpoint state, Goal projection, and the final Run outcome are
 settled by one lifecycle object.
 """
 
@@ -77,6 +77,7 @@ class ApplicationRunLifecycle:
 
     def __init__(self) -> None:
         self._invocation: _AgentInvocation | None = None
+        self._goal: dict[str, object] | None = None
         self._checkpoint_outcome: ApplicationRunOutcome | None = None
         self._phase: RunPhase = "initialization"
         self._outcome: ApplicationRunOutcome | None = None
@@ -120,6 +121,10 @@ class ApplicationRunLifecycle:
     def resumable(self) -> bool:
         return self._resumable
 
+    @property
+    def goal(self) -> dict[str, object] | None:
+        return None if self._goal is None else dict(self._goal)
+
     def observe_runtime_event(self, event: RuntimeEvent) -> None:
         """Retain one ordered runtime-neutral event for durable Run evidence."""
 
@@ -141,6 +146,7 @@ class ApplicationRunLifecycle:
         runtime_result: AgentRuntimeResult | None,
         result: object | None,
         error: BaseException | None,
+        goal: Mapping[str, object] | None,
     ) -> None:
         """Capture the root Agent's final in-memory state without committing it."""
 
@@ -157,6 +163,8 @@ class ApplicationRunLifecycle:
                 for event in runtime_result.events:
                     if event not in self._runtime_events:
                         self._runtime_events.append(event)
+        if goal is not None:
+            self._goal = dict(goal)
 
     def settle_reported_agent_invocation(self) -> None:
         """Settle a standalone Agent invocation from its captured return state."""
@@ -256,6 +264,9 @@ class ApplicationRunLifecycle:
         """Commit checkpoint, evidence, manifest, and optional success cleanup."""
 
         try:
+            goal_snapshot = self.goal
+            if goal_snapshot is not None:
+                finalization.manifest_updates["goal"] = goal_snapshot
             self.commit_checkpoint(
                 checkpoint_manager=finalization.checkpoint_manager,
                 task_id=finalization.task_id,
@@ -562,6 +573,22 @@ def _persist_run_observability(
 
     if checkpoint_manager is None:
         return manifest_updates
+
+    goal = checkpoint_manager.load_goal(task_id)
+    if goal is not None:
+        runtime_context.atomic_write_run_file(
+            runtime_context.audit_dir / "goal.json",
+            json.dumps(
+                goal,
+                ensure_ascii=False,
+                sort_keys=True,
+                separators=(",", ":"),
+            ),
+        )
+        manifest_updates.update(
+            goal=goal,
+            goal_artifact="audit/goal.json",
+        )
 
     try:
         runtime_context.atomic_write_run_file_chunks(

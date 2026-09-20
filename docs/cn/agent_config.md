@@ -194,8 +194,22 @@ workflow:
     基于上一轮记忆继续执行，并输出最终结果。
 ```
 
+#### Goal Mode（仅 Supervisor）
 
-`goal` 字段已删除，包括 `goal: false`；请从 Supervisor 和 Worker YAML 中移除。普通任务完成后返回，`max_steps` 仍限制单次运行步数。旧 Goal 模式 checkpoint 不再支持恢复，请新建普通任务。
+```yaml
+goal:
+  enabled: true
+```
+
+也可使用 `goal: true` / `goal: false`。Mapping 必须显式包含布尔 `enabled`。
+旧 `token_budget` 字段静默忽略。Worker YAML 不允许出现任何 `goal` key。
+
+Goal 开启时，objective 由 `description + workflow + runtime task` 生成。推荐单个
+多行 workflow；如果配置 list，框架会按原顺序编号并合并成一个初始目标上下文，
+不会采用上面普通模式的逐项多 run 语义。普通 final 与 `max_steps` 只结束一个
+continuation segment；根 Supervisor 必须调用 `update_goal(complete, evidence)` 才会
+完成。普通模型用量仍保留在运行时审计中。配置、状态、恢复和可观测性详见
+[Goal Mode](goal_mode.md)。
 
 #### Workflow 书写规范与建议
 
@@ -1651,6 +1665,7 @@ rg 'SECURITY_BLOCK|WHITELIST_REJECT|PATH_VIOLATION' "$run_dir/audit/shell.jsonl"
 | `agent_runtime` | ✅ | ✅ | ✅ | `str` | `smolagents`（必须显式写出） |
 | `description` | ✅ | ✅ | ✅ | `str` | — |
 | `workflow` | ✅ | ✅ | ✅ | `str`/`list[str]` | — |
+| `goal` | ❌ | ✅ | ❌ | `bool`/`dict` | `false` |
 | `tools` | ❌ | ✅ | ✅ | `list[dict]` | `[]` |
 | `model_type` | ❌ | ✅ | ✅ | `str` | `config/llm.yaml` 中的 `model.default_model_type`；无隐式默认值 |
 | `prompt` | ❌ | ✅ | ✅ | `str`/`dict` | 框架内置 |

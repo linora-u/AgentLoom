@@ -49,6 +49,10 @@ output is redirected to stderr so it cannot corrupt either protocol.
 {"schema_version":1,"event":"run.completed","run":{"application_id":"example","task_id":"task_...","run_id":"run_...","run_dir":"...","manifest_path":"...","log_path":"..."},"occurred_at":"...","output":"done"}
 ```
 
+Goal events include a structured `goal` object with identity, objective, status,
+evidence, and timestamps. Text mode prints `Goal: <status>`. Ordinary model
+usage remains in runtime audit records. See [Goal Mode](goal_mode.md).
+
 A rejected preflight emits only `run.rejected`, with `phase: "preflight"` and `error: {kind, message, retryable}`. It deliberately has no `run` object because no run directory exists.
 
 Exit codes are `0` for success, `1` for ordinary or rejected failure, `75` for a trusted transient provider failure, and `130` for interruption. Consumers should branch on event type and structured error fields instead of parsing logs. The receipt paths lead to the manifest, bounded log, and [persisted run evidence](checkpoint.md#inspecting-real-run-evidence).
