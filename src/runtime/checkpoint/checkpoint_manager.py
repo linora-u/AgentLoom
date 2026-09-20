@@ -442,6 +442,17 @@ class CheckpointManager:
     def checkpoint_dir(self) -> Path | None:
         return self._checkpoint_dir
 
+    def validate_task_resume(self, task_id: str) -> None:
+        """Reject checkpoints whose removed execution semantics cannot be resumed."""
+        with self.task_storage(task_id) as storage:
+            try:
+                storage.stat_file("goal.json")
+            except FileNotFoundError:
+                return
+        raise ValueError(
+            "Cannot resume a removed Goal-mode checkpoint; start a new ordinary task"
+        )
+
     def task_lease(self, *, require_exists: bool = False) -> CheckpointTaskLease:
         """Return an exclusive lease for this manager's bound task."""
         if self._checkpoint_dir is None:

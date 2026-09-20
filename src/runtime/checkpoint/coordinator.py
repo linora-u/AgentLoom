@@ -74,6 +74,8 @@ class CheckpointCoordinator:
         *,
         resume: bool = False,
     ) -> None:
+        if resume:
+            checkpoint_manager.validate_task_resume(task_id)
         self._cm = checkpoint_manager
         self._task_id = task_id
         self._task_text = task_text
