@@ -16,7 +16,11 @@ import threading
 import time
 import uuid
 from dataclasses import dataclass, field
-from typing import Dict, List, Literal, Optional
+from typing import TYPE_CHECKING, Any, Dict, List, Literal, Optional
+
+if TYPE_CHECKING:
+    from subprocess import Popen
+    from agentloom.tools.shell.stall_watchdog import StallWatchdog
 
 from agentloom.configuration import C
 from agentloom.runtime.logging import get_logger
@@ -66,9 +70,9 @@ class BackgroundTaskState:
     stall_message: Optional[str] = None
 
     # Internal references — not serialised.
-    _process: Optional[object] = field(default=None, repr=False)
+    _process: Optional["Popen[Any]"] = field(default=None, repr=False)
     _size_watchdog: Optional[SizeWatchdog] = field(default=None, repr=False)
-    _stall_watchdog: Optional[object] = field(default=None, repr=False)
+    _stall_watchdog: Optional["StallWatchdog"] = field(default=None, repr=False)
     _runtime_key: RuntimeKey = field(default=None, repr=False)
     _output_reader: Optional[AnchoredOutputReader] = field(default=None, repr=False)
 
@@ -130,12 +134,14 @@ class BackgroundTaskRegistry:
 
     _instance: Optional["BackgroundTaskRegistry"] = None
     _instance_lock: threading.Lock = threading.Lock()
+    _tasks: Dict[tuple[RuntimeKey, str], BackgroundTaskState]
+    _lock: threading.Lock
 
     def __new__(cls) -> "BackgroundTaskRegistry":
         with cls._instance_lock:
             if cls._instance is None:
                 inst = super().__new__(cls)
-                inst._tasks: Dict[tuple[RuntimeKey, str], BackgroundTaskState] = {}
+                inst._tasks = {}
                 inst._lock = threading.Lock()
                 cls._instance = inst
         return cls._instance
@@ -338,6 +344,16 @@ class BackgroundTaskRegistry:
         )
         monitor.start()
 
+        from agentloom.runtime.resources import register_resource
+
+        def close_task() -> None:
+            self._terminate_keys([self._task_key(task_id, runtime_key)])
+
+        register_resource(
+            f"smol.background.{task_id}",
+            close_task,
+        )
+
         logger.info(
             "Background task %s registered: pid=%d, command=%s",
             task_id,
@@ -442,7 +458,12 @@ class BackgroundTaskRegistry:
 
         with self._lock:
             owned_keys = [key for key in self._tasks if key[0] == runtime_key]
-            tasks = [self._tasks.pop(key) for key in owned_keys]
+        return self._terminate_keys(owned_keys)
+
+    def _terminate_keys(self, keys: list[tuple[RuntimeKey, str]]) -> int:
+        """Close captured task handles without consulting another Agent's trace."""
+        with self._lock:
+            tasks = [self._tasks.pop(key) for key in keys if key in self._tasks]
             now = time.monotonic()
             for task in tasks:
                 if not task.is_terminal:

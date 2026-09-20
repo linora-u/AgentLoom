@@ -424,17 +424,11 @@ class ApplicationRunLifecycle:
         """Close all resources scoped to active Agent execution."""
 
         try:
-            from agentloom.tools.shell.background_task import BackgroundTaskRegistry
+            from agentloom.runtime.resources import close_run_resources
 
-            BackgroundTaskRegistry.get_instance().terminate_current_run()
+            close_run_resources()
         except Exception as exc:
-            log.debug("Background task teardown skipped: %s", exc)
-        try:
-            from agentloom.tools.shell.process import ShellProcessRegistry
-
-            ShellProcessRegistry.get_instance().release_current_run()
-        except Exception as exc:
-            log.debug("Shell session teardown skipped: %s", exc)
+            log.debug("Execution resource teardown failed: %s", exc)
         if heartbeat is not None:
             try:
                 heartbeat.stop()

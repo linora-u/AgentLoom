@@ -270,3 +270,27 @@ def test_context_engine_metadata_lookup_does_not_load_implementations() -> None:
 
     assert "edit_file" in state["skip_tools"]
     assert state["loaded"] == []
+
+
+def test_catalog_partitions_expose_ownership_without_loading_executors() -> None:
+    state = _run_in_fresh_interpreter('''
+        import json, sys
+        from agentloom.tools.catalog import get_tool_spec, list_tool_specs
+        specs = list_tool_specs()
+        print(json.dumps({
+            "owners": {name: [get_tool_spec(name).owner, get_tool_spec(name).provider,
+                              get_tool_spec(name).capability]
+                       for name in ("read_file", "todo_write", "memory", "get_file_outline")},
+            "loaded": [spec.implementation.module for spec in specs
+                       if spec.implementation.module in sys.modules],
+        }))
+    ''')
+    assert state == {
+        "owners": {
+            "read_file": ["runtime", "smolagents", "file.read"],
+            "todo_write": ["runtime", "smolagents", "planning.todo"],
+            "memory": ["platform", "agentloom", "memory"],
+            "get_file_outline": ["optional", "agentloom", "get_file_outline"],
+        },
+        "loaded": [],
+    }

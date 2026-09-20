@@ -8,11 +8,15 @@
 
 **Required:** Yes — 本票属于最终交付必做项。
 
+**Unlocks:** 09
+
 **Session:** 平台工具 session；技术上可与 04、05、07 并行
 
 ## Scope
 
 按 [工具归属](tool-ownership.md) 处理平台工具、可选专业工具和 MCP。不是把全部现有工具平台化：基础文件、Shell、grep/glob、Todo 由 04 收进 smol；本票不共同搬迁它们，不改 memory scope、审核政策或 05/06 的治理管线。
+
+**Edit boundary:** 独占平台/专业工具登记、工具入口、MCP 和已划定的 SkillCatalog 文件，见 [03 文件交接](03-file-ownership.md)。Skill parser、公共 prompt、workspace 预热、全局 loader/catalog 和 smol 兼容接线交协调者串行修改；不把旧 `file_ops/`、`search/` 整包搬走。
 
 ## Acceptance criteria
 

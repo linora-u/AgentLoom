@@ -31,8 +31,8 @@
 
 ## Implementation evidence
 
-- 隔离验证程序与接入边界：[README](../../../experiments/pi-sdk-compatibility/README.md)。
-- 精确版本、完整依赖锁与 tarball integrity 均随实验提交；Node/平台/Python 版本和源码 SHA-256 见 [验证报告](../../../experiments/pi-sdk-compatibility/RESULT.json)。
+- 隔离验证程序与接入边界：[README](../../../tests/pi_sdk_compatibility/README.md)。
+- 精确版本、完整依赖锁与 tarball integrity 均随实验提交；Node/平台/Python 版本和源码 SHA-256 见 [验证报告](../../../tests/pi_sdk_compatibility/RESULT.json)。
 - `npm ci --ignore-scripts --no-audit --no-fund` 可复现安装；`npm run verify` 执行类型检查及 13 个真实 SDK 用例。
 - 已证明异步非法参数修正、独立 fail-closed 执行门、原生 provider/官方工具/自动压缩、真实 SIGKILL 提交窗口和不重复执行的单调用恢复。恢复范围与其余未覆盖状态在 README 明确列出，后续 12 仍负责生产恢复矩阵。
 - 真实线上 provider：NOT-RUN；生产工具治理与 Application 接入不属于本票完成声明。

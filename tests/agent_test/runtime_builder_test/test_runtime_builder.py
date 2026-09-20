@@ -2224,9 +2224,11 @@ def test_goal_tools_are_added_only_for_enabled_root_supervisor(monkeypatch):
     )
     monkeypatch.setattr(agent, "get_all_tools", lambda agent_type: [])
 
-    names = {tool.name for tool in agent._build_runtime_tools(agent._role_profile())}
+    gateway = agent._build_tool_gateway()
+    names = {tool.name for tool in gateway.definitions}
 
     assert names == {"get_goal", "update_goal"}
+    assert {entry.owner for entry in gateway.manifest} == {"platform"}
 
 
 def test_loom_runtime_can_keep_task_step_for_sequential_reset_false():

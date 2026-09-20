@@ -67,6 +67,14 @@ class _SmolToolGateway:
         self._extra_names = {tool.name for tool in self.extra.definitions}
         self._names = {tool.name for tool in self.definitions}
 
+    @property
+    def manifest(self):
+        return (
+            *(entry for entry in getattr(self.delegate, "manifest", ())
+              if entry.visible_name in self._names),
+            *self.extra.manifest,
+        )
+
     def invoke(self, *, call_id, tool_name, arguments):
         if tool_name not in self._names:
             raise ValueError(f"Unknown smol tool: {tool_name}")
