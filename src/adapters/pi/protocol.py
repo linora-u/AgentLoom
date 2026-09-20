@@ -22,7 +22,7 @@ from agentloom.runtime.native_tools import (
 from agentloom.runtime.tool_protocol import ToolCallRecord, ToolErrorRecord
 from pydantic import BaseModel, ConfigDict, Field, JsonValue, TypeAdapter, model_validator
 
-PI_BRIDGE_PROTOCOL_VERSION = 1
+PI_BRIDGE_PROTOCOL_VERSION = 2
 NonEmpty = Annotated[str, Field(min_length=1)]
 Method = Literal["handshake", "run", "snapshot", "cancel", "close", "tool_prepare", "tool_settle", "tool_dispatch", "platform_invoke", "model_prepare"]
 
