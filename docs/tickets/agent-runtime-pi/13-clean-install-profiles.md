@@ -18,7 +18,7 @@ Python packaging、安装入口、CLI 失败路径和 CI。消费 Pi session 所
 
 **Edit boundary:** 独占 Python manifest/lock、安装器、CLI 安装/失败路径及发行测试；Pi SDK/Node 依赖修改交 Pi 链所有者。公共 registry/readiness 的变化交协调者，安装范围以本票前置已支持的能力为准。
 
-本票以 09 已开放的无工具、只读和平台调用验证安装，不等待或假设 10/12 已完成。发行资源清单应覆盖 bridge 构建输出，不能靠手工复制开发目录；10/12 若改变构建入口或资源合同，先经协调者同步，14 再使用最终提交重建验收。
+本票以 09 已开放的无工具、只读和平台调用验证安装，不等待或假设 10/12 已完成。维护者已明确 SDK 按固定版本自动下载，不把 SDK 源码塞进仓库或 Python 发行包。已有 `uv run loom install-runtime pi` 安装入口消费 bridge 源码、schema 与 npm lock，在 Pi 目录下载依赖并构建；本票复用它，验证发行资源完整性和独立环境安装。10/12 若改变构建入口或资源合同，先经协调者同步，14 再使用最终提交重建验收。
 
 按 [工具归属](tool-ownership.md) 验证依赖所有权：04 已完成基础工具迁移，08 已通过 09 集成。专业工具依赖按实际选择处理，不把 smol 基础工具包或 SDK 验证程序当作 Pi 生产资源。
 
@@ -30,7 +30,7 @@ Python packaging、安装入口、CLI 失败路径和 CI。消费 Pi session 所
 - [ ] smol profile 在另一干净环境实际安装并启动旧 YAML，不能仅以本机已有 smol 或 import 成功证明兼容。
 - [ ] 安装器和 CI 显式选择相应 extra/profile；给出真实验证过的命令，不能假设 all-groups 自动选择 extras。
 - [ ] 无 smol 环境覆盖 CLI help、provider/child failure 和缺依赖错误，普通失败分类不再硬导入 smol。
-- [ ] 发行包包含 bridge JavaScript、依赖及所需 SDK assets，记录版本、lock/hash 和构建来源。
+- [ ] 发行包包含自有 bridge 源码、schema 和锁文件；安装入口下载固定版本 SDK、构建 JavaScript 并校验所需 assets。SDK、node_modules 与本地构建产物不随 Python 包重复分发，记录版本、lock/hash 和构建来源。
 - [ ] 明确本票只是发行机制初验；14 必须用包含 10/12 的最终候选重新构建、重新执行干净安装验证。
 
 ## Handoff
