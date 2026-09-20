@@ -163,6 +163,8 @@ def test_pi_final_waits_for_root_goal_completion_and_emits_one_terminal(tmp_path
             result = execute_app(app, file_logging=False)
     assert result.output == 'Pi answer'
     assert result.goal['status'] == 'complete'
+    assert result.goal['goal_started'] is True
+    assert not requests[-1][1].get('tools')
     assert len(requests) == 4
     assert any('Verified saffron' in str(m) for m in requests[3][1]['messages'] if m['role'] == 'tool')
     events = [json.loads(line) for line in (result.run.run_dir / 'audit/runtime_events.jsonl').read_text().splitlines()]
@@ -256,3 +258,80 @@ def test_application_cancels_and_reaps_a_pending_platform_callback(tmp_path, fau
     assert records[-1]['event'] == ('run.interrupted' if fault == 'keyboard' else 'run.failed')
     assert len(requests) == 1
     assert_gone(pid)
+
+
+def test_completed_goal_final_delivery_cannot_execute_another_selected_tool(tmp_path):
+    from agentloom.application.run import ApplicationRunError
+    (tmp_path / 'after-complete.txt').write_text('Must not enter another tool result')
+    marker = tmp_path / 'read-hook-started'
+    hook = tmp_path / 'read_hook.py'
+    hook.write_text(f'from pathlib import Path\nPath({str(marker)!r}).touch()\nprint("{{}}")\n')
+    with model_service(turns=[
+        [('complete', 'update_goal', {'status': 'complete', 'evidence': 'Already verified the objective.'})],
+        [('extra-work', 'read', {'path': 'after-complete.txt'})],
+    ]) as (url, requests):
+        app = project(tmp_path, url)
+        select(app, goal=True, tools=[{'name': 'read'}], hooks={'PreToolUse': [
+            {'id': 'read-marker', 'matcher': 'read', 'command': f'{sys.executable} {hook}'}]})
+        with bind_config(load_project_config(tmp_path)), pytest.raises(ApplicationRunError):
+            execute_app(app, file_logging=False)
+    assert len(requests) == 2
+    assert not requests[1][1].get('tools')
+    assert not marker.exists()
+
+
+def slow_tool(label: str) -> str:
+    """Complete tool work independently of the configured model timeout.
+
+    Args:
+        label: Evidence returned after the tool work completes.
+    """
+    import time
+    time.sleep(1.2)
+    return label
+
+
+def test_model_retry_after_native_tool_does_not_repeat_the_tool(tmp_path):
+    from tests.pi_test.test_application import change_model
+    (tmp_path / 'note.txt').write_text('Persisted before provider retry')
+    with model_service(turns=[[('read-once', 'read', {'path': 'note.txt'})]], fail_requests={2: 500}) as (url, requests):
+        app = project(tmp_path, url)
+        select(app, tools=[{'name': 'read'}])
+        change_model(tmp_path, num_retries=1, retry_delay=0.01, max_retry_delay=0.01)
+        with bind_config(load_project_config(tmp_path)):
+            result = execute_app(app, file_logging=False)
+    assert result.output == 'Pi answer'
+    assert len(requests) == 3
+    assert requests[1][1]['messages'] == requests[2][1]['messages']
+    entries = list((result.run.run_dir / 'native-tools').rglob('*.json'))
+    assert len(entries) == 1
+    assert json.loads(entries[0].read_text())['state'] == 'committed'
+
+
+def test_model_timeout_excludes_platform_callback_time(tmp_path):
+    from tests.pi_test.test_application import change_model
+    with model_service(turns=[[('slow', 'slow_tool', {'label': 'Tool completed'})]]) as (url, requests):
+        app = project(tmp_path, url)
+        select(app, tools=[{'name': 'slow_tool', 'module': __name__, 'function': 'slow_tool'}])
+        change_model(tmp_path, timeout=1)
+        with bind_config(load_project_config(tmp_path)):
+            result = execute_app(app, file_logging=False)
+    assert result.output == 'Pi answer'
+    assert len(requests) == 2
+    assert any(m.get('content') == 'Tool completed' for m in requests[1][1]['messages'])
+
+
+def test_profile_request_rate_applies_between_internal_pi_model_turns(tmp_path):
+    import time
+    from tests.pi_test.test_application import change_model
+    times = []
+    (tmp_path / 'note.txt').write_text('Read before next paced model call')
+    with model_service(turns=[[('paced-read', 'read', {'path': 'note.txt'})]],
+                       on_request=lambda *_: times.append(time.monotonic())) as (url, requests):
+        app = project(tmp_path, url)
+        select(app, tools=[{'name': 'read'}])
+        change_model(tmp_path, requests_per_minute=60)
+        with bind_config(load_project_config(tmp_path)):
+            execute_app(app, file_logging=False)
+    assert len(requests) == 2
+    assert times[1] - times[0] >= 0.95

@@ -6,7 +6,7 @@ import { createReadToolDefinition, type ExtensionFactory, type ToolDefinition } 
 type Obj = Record<string, any>;
 type Callback = (payload: Obj) => Promise<Obj>;
 
-export function nativeTools(manifest: Obj[], cwd: string, invoke: Callback, identity: (id: string) => Obj) {
+export function nativeTools(manifest: Obj[], cwd: string, invoke: Callback, identity: (id: string) => Obj, canUseTools: () => boolean) {
   const permits = new Map<string, Obj>();
   const seen = new Set<string>();
   const selected = new Map(manifest.map(tool => [tool.visible_name, tool]));
@@ -66,7 +66,7 @@ export function nativeTools(manifest: Obj[], cwd: string, invoke: Callback, iden
       const batch = new Set<string>();
       for (const part of replacement.content) {
         if (part.type !== "toolCall") continue;
-        if (seen.has(part.id) || batch.has(part.id) || !selected.has(part.name)) {
+        if (!canUseTools() || seen.has(part.id) || batch.has(part.id) || !selected.has(part.name)) {
           permits.clear();
           throw new Error("Unselected or duplicate tool call");
         }

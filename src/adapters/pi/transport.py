@@ -105,7 +105,7 @@ class PiTransport:
                         raise ValueError()
                     if isinstance(message, Request):
                         if (not message.request_id.startswith("pi:") or message.request_id in self._callbacks or message.payload.method not in
-                            {"tool_prepare", "tool_settle", "platform_invoke"} or not any(
+                            {"tool_prepare", "tool_settle", "platform_invoke", "model_prepare"} or not any(
                                 item.request.run_id == message.run_id and item.request.payload.method == "run"
                                 for item in self._pending.values())):
                             raise ValueError()
