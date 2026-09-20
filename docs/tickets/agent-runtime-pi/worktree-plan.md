@@ -1,12 +1,12 @@
 # Pi 并行开发与 main 合入计划
 
-更新：2026-09-20。配套：[核心规格](../../specs/agent-runtime-pi-integration.md)、[执行索引](README.md)、[工具归属](tool-ownership.md)。本文件使用 01–14 票号；旧 C0/S1/G1/P1 宽阶段不再作为另一套排期依据。
+更新：2026-09-21。配套：[核心规格](../../specs/agent-runtime-pi-integration.md)、[执行索引](README.md)、[工具归属](tool-ownership.md)。本文件使用 01–14 票号；旧 C0/S1/G1/P1 宽阶段不再作为另一套排期依据。
 
 ## 1. 当前基线
 
 01/02/03 已完成。01/02 的历史提交 45ddbfdc、42662ed6、8d63be5f 保留；03 受检实现为 `9f08aa09ce3784d9c55eb82b01571256ded36ecf`，冻结引用 `refs/agentloom/ticket03-frozen` 为 `9e19d18285f2d2ea8e7b7d11c26e315760d153a3`。此前 main 基线为 `9d5a88915efbd402d0f2697318125933fc1500e0`。2026-09-20 按维护者最新要求，main 已快进到 `da4a049d`，纳入 04/05/07/08 的全部已验收改动并保留分阶段提交；源码、测试和交接文档已正式进入分支历史。
 
-07 交付时，`codex/pi-integration` 更新到 `0b5c4f4ed32244ef97b107361dcb45dbe2be149e`，包含 03、05、07；07 固定引用为 `refs/agentloom/ticket07-frozen`（`eca311eeca103dc6cd64eef959428e8b01eb22b2`）。04 交付时 integration 包含 04+05+07，历史冻结入口为 `refs/agentloom/ticket04-05-integrated`。08 已完成，见 [实施与验证](08-implementation.md)；共同冻结入口 `refs/agentloom/ticket08-frozen` 包含 04/05/07/08。**新 worktree 基于提交创建，不会自动获得 main 的未提交 Changes。** 06 已在独立 worktree 完成并正式交付 main，见 [06 交接](06-implementation.md)；冻结入口 `refs/agentloom/ticket06-frozen`。09 已在 `codex/pi-t09-tools` 完成，与 main 的 06 及目录清理集成后，全量 4408 passed、1 skipped，真实模型 40/40，见 [09 交接](09-implementation.md)。冻结入口 `refs/agentloom/ticket09-frozen`。10、11、13 可从包含该引用的 main 分别新建 worktree 并行；12 必须等 10，14 必须等 11+12+13。领取前重新解析 integration，不能把此处记录的交付 SHA 当成永远不变的分支头。
+07 交付时，`codex/pi-integration` 更新到 `0b5c4f4ed32244ef97b107361dcb45dbe2be149e`，包含 03、05、07；07 固定引用为 `refs/agentloom/ticket07-frozen`（`eca311eeca103dc6cd64eef959428e8b01eb22b2`）。04 交付时 integration 包含 04+05+07，历史冻结入口为 `refs/agentloom/ticket04-05-integrated`。08 已完成，见 [实施与验证](08-implementation.md)；共同冻结入口 `refs/agentloom/ticket08-frozen` 包含 04/05/07/08。**新 worktree 基于提交创建，不会自动获得 main 的未提交 Changes。** 06 已在独立 worktree 完成并正式交付 main，见 [06 交接](06-implementation.md)；冻结入口 `refs/agentloom/ticket06-frozen`。09 已在 `codex/pi-t09-tools` 完成，与 main 的 06 及目录清理集成后，全量 4408 passed、1 skipped，真实模型 40/40，见 [09 交接](09-implementation.md)。冻结入口 `refs/agentloom/ticket09-frozen`。11 已从该基线完成混合 Application 与记忆验证，见 [11 交接](11-implementation.md)。10、13 已有独立工作区；12 必须等 10，14 仍须等 12+13 全部集成。领取前重新解析 integration，不能把此处记录的交付 SHA 当成永远不变的分支头。
 
 03 记录的完整回归为 4225 passed、1 skipped，SDK 为 13 passed；逐项证据见 [实现报告](03-implementation.md) 和 [验证记录](03-validation.json)。历史报告中的 main Changes 状态保留为当时的交付记录，不代表现在的 Git 状态。已有工作区的本次核对快照如下；领取或清理前重新检查，不把表内路径存在当作任务待开发。
 
@@ -18,6 +18,7 @@
 | 07 | `codex/pi-t07-runtime` | 已交付 main Changes 并清理 t07；6 个增量提交及冻结引用保留，见 [07 交接](07-implementation.md) |
 | 08 | `codex/pi-t08-platform` | 已验收交付后清理本次 t08；阶段提交、冻结引用和外部证据保留，见 [08 交接](08-implementation.md) |
 | 09 | `codex/pi-t09-tools` | 已正式合入 main（`cc0edeb1`）并删除本次 t09；分支、冻结引用与项目外证据保留，见 [09 交接](09-implementation.md) |
+| 11 | `codex/pi-t11-mixed` | 本票已验收，源码 `be3c35da`；正式合入 main 后清理本次 `pi-t11-mixed`，见 [11 交接](11-implementation.md) |
 
 这是工作区登记，不是完成声明。重新领取前运行 `git worktree list` 并核对原 session；不得新建另一份同票工作区抢改，也不重置已有分支。冻结引用是必须包含的最低基线；可使用经检查的后继提交，后续任务还必须包含各自已验收的前置。
 
@@ -31,7 +32,8 @@
 | 03 后的首个并行窗口 | 04 / 05 / 07 / 08；已完成票不重开 | 包含 03 的已核对基线 |
 | 治理续接，已完成 | 06 | 04、05 |
 | Pi 工具续接，已完成 | 09 | 05、07、08 |
-| 当前可并行：应用/工具/发行 | 10 / 11 / 13 | 分别为 06+09 / 09 / 04+09，均已满足 |
+| 混合应用，已完成 | 11 | 09；验收完成后正式合入 main |
+| 当前可并行：工具/发行 | 10 / 13 | 分别为 06+09 / 04+09；已有工作区，继续前核对所属 session |
 | Pi 恢复 | 12 | 10，可与未结束的 11/13 并行 |
 | 串行收口 | 14 | 11、12、13 |
 
@@ -110,7 +112,7 @@
 
 ### 新 session 直接使用的领取说明
 
-01–05、07 不重开，08 继续已有工作区。后续新 session 使用下面的共用模板。表中的建议目录只用于尚未创建的工作区，创建前核对依赖已验收且已进入起始提交。
+01–09、11 不重开；10、13 继续各自已有工作区。后续新 session 使用下面的共用模板。表中的建议目录只用于尚未创建的工作区，创建前核对依赖已验收且已进入起始提交。
 
 > 实现本目录 NN 号票据，只做这一票。读取 README、tool-ownership、03-contracts、03-file-ownership、worktree-plan 和本票的最新修订。核对该票是否已有 session/worktree，并保证只有一个修改者。验证基线 SHA 已包含全部 Blocked by 的已验收提交；没有工作区时才从该 SHA 创建。仅修改本票拥有的文件；共享入口由协调者串行接线，本票必须在真实入口验证后才算完成。返回基线 SHA、成果 SHA、变更文件、验收结果及移交项。不要自行交付 main 或开发下一票。
 
@@ -124,7 +126,7 @@
 | 13 | `codex/pi-t13-packaging` | `AgentLoom-worktrees/t13` | 04+09 |
 | 14 | `codex/pi-t14-integration` | `AgentLoom-worktrees/t14` | 11+12+13 及全部传递依赖；协调者串行收口 |
 
-06 已完成；后续 09、10、11、12、13 可以按实际领取状态开新 session，但必须等各自 Blocked by 已集成。05→06 和 07→09→10→12 建议复用负责该方向的 session；这是保持上下文的安排，不要求始终使用同一会话。分支或目录已存在时先核对所属任务，不覆盖重用。
+06、09、11 已完成；10、13 继续已有 session，12 必须等 10 的验收提交已集成再创建。05→06 和 07→09→10→12 建议复用负责该方向的 session；这是保持上下文的安排，不要求始终使用同一会话。分支或目录已存在时先核对所属任务，不覆盖重用。
 
 main 的未提交 Changes 不会自动进入其他 worktree。本次票据修订已随冻结入口形成独立文档提交；继续开发的分支按文件所有权同步并记录 SHA。最新交付规则要求正式合入 main；03 等历史验收记录仍保留当时的状态，不倒改历史。
 
