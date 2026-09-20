@@ -29,7 +29,9 @@ def test_built_wheel_selects_smol_only_through_its_explicit_profile(tmp_path):
                        or ".agentloom-install." in name for name in names_in_wheel)
         assert "agentloom/adapters/pi/bridge/tools.ts" in names_in_wheel
         assert "agentloom/adapters/pi/bridge/model.ts" in names_in_wheel
-        assert "agentloom/adapters/pi/bridge-v1.schema.json" in names_in_wheel
+        schemas = list((root / "src/adapters/pi").glob("bridge-v*.schema.json"))
+        assert schemas
+        assert all("agentloom/adapters/pi/" + path.name in names_in_wheel for path in schemas)
         metadata = BytesParser().parsebytes(wheel.read(next(
             name for name in wheel.namelist() if name.endswith(".dist-info/METADATA")
         )))
