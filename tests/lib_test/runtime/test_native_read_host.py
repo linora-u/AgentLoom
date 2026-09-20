@@ -289,3 +289,111 @@ def test_logical_tool_hook_cannot_be_bypassed_by_native_visible_name(tmp_path):
     with native_scope(tmp_path, handlers=handlers) as (host, request, _):
         assert host.prepare(request).rejection.status == "blocked"
         assert calls == ["wildcard"]
+
+
+def test_a_host_with_different_selected_provider_cannot_consume_old_grant(tmp_path):
+    with native_scope(tmp_path) as (host, request, _):
+        grant = host.prepare(request).authorization
+        changed = replace(request.tool, provider="unselected-provider")
+        with NativeReadToolHost(tools=(changed,), cwd=request.cwd) as other:
+            with pytest.raises(ValueError, match="selection"):
+                other.start_execution(grant)
+        assert host.inspect(request.identity).state == "authorized"
+
+
+def test_evidence_extractor_cannot_mutate_the_original_receipt(tmp_path):
+    from agentloom.runtime.native_tools import NativeExecutionOutcome
+
+    def extract(output):
+        output["text"] = "injected claim"
+        return [{"kind": "durable_fact", "scope": "project", "source": "reader", "text": "injected claim"}]
+
+    with native_scope(tmp_path, extractors={"native_read": extract}) as (host, request, _):
+        grant = host.start_execution(host.prepare(request).authorization)
+        ack = host.settle(
+            NativeExecutionOutcome(grant.identity, grant.authorization_id, "completed", {"text": "original"})
+        )
+        receipt = host.receipt(request.identity)
+        assert receipt["evidence_status"] == "rejected"
+        assert receipt["evidence"] == []
+        assert receipt["raw_output"] == ack.record.output == {"text": "original"}
+
+
+def test_nested_closed_schema_rejects_undeclared_options(tmp_path):
+    tool = read_manifest(
+        parameters={
+            "type": "object",
+            "properties": {
+                "path": {"type": "string"},
+                "options": {"type": "object", "additionalProperties": False},
+            },
+            "required": ["path"],
+            "additionalProperties": False,
+        }
+    )
+    with native_scope(tmp_path, manifest=tool) as (host, request, _):
+        result = host.prepare(replace(request, raw_arguments={"path": "source.txt", "options": {"undeclared": True}}))
+        assert result.rejection.status == "blocked"
+
+
+@pytest.mark.parametrize("syntax", ["uri", "tilde"])
+def test_executor_path_interpretation_cannot_differ_from_the_guard(tmp_path, syntax):
+    with native_scope(tmp_path) as (host, request, _):
+        cwd = Path(request.cwd)
+        (cwd / "denied.txt").mkdir()
+        if syntax == "uri":
+            (cwd / "file:").symlink_to(cwd / "denied.txt", target_is_directory=True)
+            path = "file://" + str(cwd / "source.txt")
+        else:
+            (cwd / "~").symlink_to(cwd / "denied.txt", target_is_directory=True)
+            path = "~/source.txt"
+        literal_target = cwd / path
+        literal_target.parent.mkdir(parents=True, exist_ok=True)
+        literal_target.write_text("MUST_NOT_READ")
+        result = host.prepare(replace(request, raw_arguments={"path": path}))
+        assert result.authorization is None
+        assert result.rejection.stage == "final_decode"
+
+
+def test_new_journal_directory_is_durable_before_authorization(tmp_path, monkeypatch):
+    import os
+    import stat
+
+    synced = set()
+    real_fsync = os.fsync
+
+    def fsync(fd):
+        info = os.fstat(fd)
+        if stat.S_ISDIR(info.st_mode):
+            synced.add((info.st_dev, info.st_ino))
+        real_fsync(fd)
+
+    monkeypatch.setattr(os, "fsync", fsync)
+    with native_scope(tmp_path) as (host, request, _):
+        assert host.prepare(request).authorization is not None
+        for directory in (host.journal_directory, host.journal_directory.parent, tmp_path / "runtime"):
+            info = directory.stat()
+            assert (info.st_dev, info.st_ino) in synced
+
+
+def test_another_hook_run_cannot_reuse_the_same_application_call(tmp_path):
+    from agentloom.runtime.trace import capture_explicit_execution_context
+
+    with native_scope(tmp_path) as (host, request, run):
+        grant = host.prepare(request).authorization
+        other_run = HookRun(
+            run.plan,
+            local_run_id="another-invocation",
+            root_run_id=run.root_run_id,
+            agent_config=run.agent_config,
+            project_root=run.project_root,
+        )
+        execution = replace(
+            capture_explicit_execution_context(), hook_run=other_run, local_run_id=other_run.local_run_id
+        )
+        with bind_explicit_execution_context(execution):
+            with pytest.raises(ValueError, match="scope"):
+                host.start_execution(grant)
+            with NativeReadToolHost(tools=(request.tool,), cwd=request.cwd) as other:
+                with pytest.raises(ValueError, match="identity"):
+                    other.start_execution(grant)
