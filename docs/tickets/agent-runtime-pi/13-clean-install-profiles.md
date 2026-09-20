@@ -4,7 +4,7 @@
 
 **Blocked by:** 04：收拢自研 smol Agent 及其基础工具，保持旧应用行为；09：Pi 调通原生读取、平台工具与 Goal
 
-**Status:** done — 起点 `2ec1412c` 已包含 04/09。候选 `37dc69ed` 三个干净安装环境 29/29、真实 provider 3/3；完整回归 4412 passed、1 skipped，双路复审通过。见 [实现与验收](13-implementation.md)、[证据摘要](13-validation.json)。冻结入口为 `refs/agentloom/ticket13-frozen`。
+**Status:** done — 起点 `2ec1412c` 已包含 04/09。候选 `0b5279c4` 已组合 11；三个干净安装环境 29/29、真实 provider 3/3。基础全量 4412 passed、1 skipped，后续组合 95、最终安装/打包 12 项通过，双路复审通过。见 [实现与验收](13-implementation.md)、[证据摘要](13-validation.json)。冻结入口为 `refs/agentloom/ticket13-frozen`。
 
 **Required:** Yes — 本票属于最终交付必做项。
 
