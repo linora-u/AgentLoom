@@ -522,13 +522,19 @@ def task_context(task_id: Optional[str] = None) -> Generator[str, None, None]:
 
 
 @contextmanager
-def sub_task_context(agent_name: str, sub_task_id: Optional[str] = None) -> Generator[str, None, None]:
+def sub_task_context(
+    agent_name: str,
+    sub_task_id: Optional[str] = None,
+    *,
+    agent_id: Optional[str] = None,
+) -> Generator[str, None, None]:
     """
     Sub-task context manager that creates an independent tracing chain for worker agents.
 
     Args:
         agent_name: Agent name.
         sub_task_id: Optional sub-task ID. If omitted, one is generated automatically.
+        agent_id: Concrete runtime instance identity. Legacy direct callers use the name.
 
     Yields:
         str: Current sub-task ID.
@@ -549,7 +555,7 @@ def sub_task_context(agent_name: str, sub_task_id: Optional[str] = None) -> Gene
     try:
         # Set new sub-task and agent context.
         set_current_sub_task_id(sub_task_id)
-        set_current_agent_id(agent_name)
+        set_current_agent_id(agent_id or agent_name)
         set_current_agent_name(agent_name)
         yield sub_task_id
     finally:

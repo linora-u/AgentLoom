@@ -520,20 +520,6 @@ def _execute_app(
                             "File history manager prepared for pre-edit backups"
                         )
 
-                    try:
-                        from agentloom.adapters.lsp import LSPServerManager
-                        from agentloom.adapters.lsp.config import LSPConfig
-
-                        lsp_config = LSPConfig.from_yaml(
-                            C.get("lsp_servers", {})
-                        )
-                        LSPServerManager.get_instance().initialize(
-                            lsp_config,
-                            project_root=str(C.agent_root),
-                        )
-                    except Exception as exc:
-                        log.debug("LSP pre-warm skipped: %s", exc)
-
                     supervisor = YamlConfiguredSupervisorAgent(
                         config=config,
                         logger=logger_backend,
