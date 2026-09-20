@@ -758,5 +758,18 @@
     "Snapshot timing, scope promotion, and source replacement after ContextRef creation are deterministic-model real-runtime Application checks; live matrix verifies ordinary tool and memory/history flows",
     "Historical model format/argument failures and one provider HTTP timeout are retained; latest rechecks passed",
     "Ticket14 must rerun combined acceptance after all dependencies merge"
-  ]
+  ],
+  "delivery": {
+    "main_before": "2ec1412cd684bebb313b320fd0b9332050efeaaf",
+    "main_after": "96db1542bf7c869cfa32672950209ef5815c93da",
+    "source_revision": "be3c35daf29748b21696db1ac3f9c77dae46af3a",
+    "frozen_ref": "refs/agentloom/ticket11-frozen",
+    "source_tests_equal_to_validated_revision": true,
+    "stash_ids": [
+      "f0b8874518f11d588436092a8f3540ba3c7fe014",
+      "cbda760895c1d369ef3c945993d7918b1beacd6e"
+    ],
+    "worktree_removed": "/Users/bytedance/.codex/worktrees/pi-t11-mixed/AgentLoom",
+    "main_import_path": "/Users/bytedance/code/data_clear/AgentLoom/src/runtime/invocation.py"
+  }
 }

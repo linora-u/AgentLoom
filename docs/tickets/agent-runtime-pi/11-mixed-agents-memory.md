@@ -4,7 +4,7 @@
 
 **Blocked by:** 09：Pi 调通原生读取、平台工具与 Goal
 
-**Status:** completed — 在 `codex/pi-t11-mixed` 独立 worktree 实现并验收，源码 `be3c35da`。双向协作、隔离、Goal、ContextRef、认可记忆及公共接线已验证；见 [实施记录](11-implementation.md) 和 [机器可读验收](11-validation.json)。交付时正式合入 main 并清理本票 worktree。
+**Status:** completed — 在 `codex/pi-t11-mixed` 独立 worktree 实现并验收，源码 `be3c35da`。双向协作、隔离、Goal、ContextRef、认可记忆及公共接线已验证；见 [实施记录](11-implementation.md) 和 [机器可读验收](11-validation.json)。已正式合入 main（`96db1542`），本票 worktree 已删除。
 
 **Required:** Yes — 本票属于最终交付必做项。
 
