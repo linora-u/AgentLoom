@@ -29,14 +29,25 @@ def start_cli(root: Path, app: Path, env=None):
 
 def node_launcher(root: Path):
     """Record the actual managed bridge PID without replacing its SDK or protocol."""
-    binary = shutil.which("node")
-    assert binary
+    binary = sdk_node()
     launcher = root / "bin/node"
     launcher.parent.mkdir()
     marker = root / "bridge.pid"
     launcher.write_text(f'#!/bin/sh\necho $$ > "{marker}"\nexec "{binary}" "$@"\n')
     launcher.chmod(0o755)
     return {**os.environ, "PATH": str(launcher.parent) + os.pathsep + os.environ["PATH"]}, marker
+
+
+def sdk_node():
+    """Select an installed SDK-compatible binary for the external fault shim."""
+    for directory in os.get_exec_path():
+        binary = shutil.which("node", path=directory)
+        if binary:
+            result = subprocess.run([binary, "--version"], capture_output=True, text=True, timeout=5)
+            parts = result.stdout.strip().removeprefix("v").split(".")
+            if result.returncode == 0 and len(parts) == 3 and tuple(map(int, parts[:2])) >= (22, 19):
+                return binary
+    raise AssertionError("Install Node >=22.19 before running Pi SDK process tests")
 
 
 def until(predicate, *, timeout=15):
@@ -89,29 +100,51 @@ def test_pending_model_call_terminates_and_cleans_process(tmp_path, interrupt):
     assert "fixture-secret" not in stdout + stderr
 
 
-def test_protocol_corruption_fails_application_and_reaps_real_bridge(tmp_path):
+@pytest.mark.parametrize("fault", ["malformed", "sequence", "identity", "duplicate_key", "duplicate_terminal", "duplicate_callback"])
+def test_protocol_corruption_fails_application_and_reaps_real_bridge(tmp_path, fault):
     """The OS shim corrupts a real SDK event; it never manufactures model responses."""
     with model_service() as (url, requests):
         app = project(tmp_path, url)
-        binary = shutil.which("node")
+        binary = sdk_node()
         launcher = tmp_path / "bin/node"
         launcher.parent.mkdir()
         marker = tmp_path / "bridge.pid"
         launcher.write_text(f'''#!{sys.executable}
 import subprocess,sys,threading,json
+import os
 from pathlib import Path
+if sys.argv[1:]==['--version']:os.execv({binary!r},[{binary!r},'--version'])
 p=subprocess.Popen([{binary!r},*sys.argv[1:]],stdin=subprocess.PIPE,stdout=subprocess.PIPE,stderr=subprocess.DEVNULL)
 Path({str(marker)!r}).write_text(str(p.pid))
+ack=threading.Event()
 def forward():
  try:
   for line in sys.stdin.buffer:
+   value=json.loads(line)
+   if value.get('kind')=='response' and value.get('request_id')=='pi:repeated':
+    ack.set();continue
    p.stdin.write(line);p.stdin.flush()
  except (BrokenPipeError,ValueError):pass
 threading.Thread(target=forward,daemon=True).start()
 for line in p.stdout:
  value=json.loads(line)
- if value.get('kind')=='event':
-  sys.stdout.write('{{malformed frame}}\\n');sys.stdout.flush()
+ fault={fault!r}
+ trigger=(value.get('kind')=='response' and value.get('payload',{{}}).get('method')=='run') if fault=='duplicate_terminal' else value.get('kind')=='event'
+ if trigger:
+  if fault=='malformed': damaged='{{malformed frame}}\\n'
+  elif fault=='duplicate_terminal': damaged=line.decode()*2
+  elif fault=='duplicate_callback':
+   value={{'version':1,'kind':'request','instance_id':value['instance_id'],'run_id':value['run_id'],'request_id':'pi:repeated',
+     'payload':{{'method':'platform_invoke','identity':{{'application_id':'pi','task_id':'task','run_id':value['run_id'],'instance_id':value['instance_id'],'call_id':'call'}},'tool_name':'unavailable','arguments':{{}}}}}}
+   damaged=json.dumps(value)+'\\n'
+   sys.stdout.write(damaged);sys.stdout.flush()
+   if not ack.wait(timeout=3):sys.exit(3)
+  elif fault=='duplicate_key': damaged=line.decode().replace('"version":1','"version":1,"version":1')
+  else:
+   if fault=='sequence':value['sequence']+=1
+   if fault=='identity':value['run_id']='wrong-run'
+   damaged=json.dumps(value)+'\\n'
+  sys.stdout.write(damaged);sys.stdout.flush()
   p.kill();p.wait();sys.exit(2)
  sys.stdout.buffer.write(line);sys.stdout.buffer.flush()
 p.wait()
@@ -134,3 +167,16 @@ def test_missing_node_is_a_clear_configuration_failure(tmp_path):
     assert child.returncode != 0
     assert "Pi requires Node" in stdout + stderr
     assert not requests
+
+
+def test_older_bundled_node_does_not_hide_compatible_node(tmp_path):
+    with model_service() as (url, _):
+        app = project(tmp_path, url)
+        old = tmp_path / "old-bin/node"
+        old.parent.mkdir()
+        old.write_text('#!/bin/sh\necho v18.4.0\n')
+        old.chmod(0o755)
+        child = start_cli(tmp_path, app, {**os.environ, "PATH": str(old.parent) + os.pathsep + os.environ["PATH"]})
+        stdout, stderr = child.communicate(timeout=20)
+    assert child.returncode == 0, stderr
+    assert json.loads(stdout.splitlines()[-1])["event"] == "run.completed"
