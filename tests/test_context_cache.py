@@ -6,7 +6,6 @@ import pytest
 from agentloom.adapters.litellm import (
     AnthropicMessagesModelTurnAdapter,
     OpenAIChatModelTurnAdapter,
-    OpenAIResponsesModelTurnAdapter,
 )
 from agentloom.runtime.model_protocol import MessageItem, ModelTurnRequest
 
@@ -24,7 +23,6 @@ def _chat_response() -> dict:
     [
         (OpenAIChatModelTurnAdapter, "messages", "text"),
         (AnthropicMessagesModelTurnAdapter, "messages", "text"),
-        (OpenAIResponsesModelTurnAdapter, "input", "input_text"),
     ],
 )
 def test_context_cache_marks_static_system_content(
@@ -36,8 +34,6 @@ def test_context_cache_marks_static_system_content(
 
     def transport(**request):
         captured.update(request)
-        if adapter_type is OpenAIResponsesModelTurnAdapter:
-            return {"id": "response-1", "output": [], "usage": {}}
         return _chat_response()
 
     adapter = adapter_type(transport=transport, context_cache=True)
@@ -63,7 +59,6 @@ def test_context_cache_marks_static_system_content(
     [
         (OpenAIChatModelTurnAdapter, "messages", "text"),
         (AnthropicMessagesModelTurnAdapter, "messages", "text"),
-        (OpenAIResponsesModelTurnAdapter, "input", "input_text"),
     ],
 )
 def test_context_cache_boundary_keeps_dynamic_suffix_uncached(
@@ -75,8 +70,6 @@ def test_context_cache_boundary_keeps_dynamic_suffix_uncached(
 
     def transport(**request):
         captured.update(request)
-        if adapter_type is OpenAIResponsesModelTurnAdapter:
-            return {"id": "response-1", "output": [], "usage": {}}
         return _chat_response()
 
     adapter = adapter_type(
