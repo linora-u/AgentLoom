@@ -1,10 +1,10 @@
-# 08: 让平台工具和 MCP 脱离 smol 构造
+# 08: 解耦平台工具、可选专业工具与 MCP
 
-**What to build:** 记忆、历史、产物检索、Goal、Worker 调用与 MCP 工具通过中立定义和平台执行入口工作，不再以加载 smol 工具类型为前提。
+**What to build:** 记忆、历史、产物检索、Goal、Worker 调用、Skill 服务及选中的专业/MCP 工具通过中立定义和平台入口执行，不加载自研 smol 基础工具也能使用这些能力。
 
-**Blocked by:** 03：汇合验证结果，冻结三路开发的公共基线
+**Blocked by:** 03：冻结基座与平台边界，交付可并行的公共基线
 
-**Status:** draft — 拆分待确认，尚未发布 GitHub；不代表已开工或已完成。
+**Status:** planned — 等待 03 的实际冻结提交，尚未实施。
 
 **Required:** Yes — 本票属于最终交付必做项。
 
@@ -12,20 +12,21 @@
 
 ## Scope
 
-平台工具定义/加载和 MCP 转换；不改 memory scope、审核政策或原生规划，不与 05/06 共同改治理管线。
+按 [工具归属](tool-ownership.md) 处理平台工具、可选专业工具和 MCP。不是把全部现有工具平台化：基础文件、Shell、grep/glob、Todo 由 04 收进 smol；本票不共同搬迁它们，不改 memory scope、审核政策或 05/06 的治理管线。
 
 ## Acceptance criteria
 
 - [ ] MCP 发现、参数验证、调用和清理通过中立工具合同完成，工具构造不加载 smol adapter。
 - [ ] memory/history、ContextRef、Goal 和 Worker 工具可供任意 runtime 使用；只移除 smol 定义依赖，原数据与审核行为不变。
 - [ ] 保留新 Worker 实例、运行上下文与 MCP 连接隔离，错误和取消时资源释放。
-- [ ] Goal/Todo 的旧 smol decorator 消费迁移完成；Pi 不被额外注入一套重复的 Agent-local Todo。
+- [ ] 平台 Goal 的旧 smol decorator 消费迁移完成；Todo 的迁移由 04 负责，Pi 不被额外注入自研 smol Todo。
+- [ ] AST/LSP、代码大纲、Markdown 报告及其共享资源作为独立可选工具集合构造和执行，未选择时不加载；构造入口不依赖 smol 类型或基础工具实现。
+- [ ] SkillCatalog、scope、提案/审核和中立激活入口归平台；原生加载/提示词呈现留给基座接线。Pi 09 接入时不得同时启用两套自动发现或激活路径。
 - [ ] 普通 smol 应用仍能使用这些平台工具；无 smol 环境的工具构造与执行定向验证通过。
-- [ ] 新增 catalog/metadata 使用 03 已固定的合同，必要的公共 catalog 合并由协调者处理，不擅自扩张 05 正在使用的接口。
+- [ ] 只维护 03 划定的平台/专业工具分区；04 维护 smol 分区，公共 catalog 聚合/loader 接线由协调者串行处理。不把 core_file/core_shell/core_search 加入 Pi 的平台默认集合。
 
 ## Handoff
 
-向 09 提供可调用的中立工具 manifest、平台 invoke 和资源清理；该票不宣称 Pi Goal 完成语义已经成立。
+向 09 提供可调用的平台/可选工具 manifest、invoke、Skill 接入选择和资源清理；本票用 smol 与 native fixture 验证实际工具行为，真实 Pi 接线与 Goal 完成语义由 09 验收。
 
-实施遵循已生成的 Pi 接入规格、并行开发计划及本轮票据执行索引。只认已集成、已验证的依赖提交；不要自行跳过阻塞任务，也不要从其他 worktree 复制未提交改动。
-
+实施遵循 Pi 接入规格及本目录最新的 [工具归属](tool-ownership.md)、[执行索引](README.md) 与 [worktree 计划](worktree-plan.md)。只认已集成、已验证的依赖提交；不要自行跳过阻塞任务，也不要从其他 worktree 复制未提交改动。

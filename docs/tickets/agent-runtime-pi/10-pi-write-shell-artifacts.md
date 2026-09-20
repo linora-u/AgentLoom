@@ -4,7 +4,7 @@
 
 **Blocked by:** 06：补齐文件修改和 Shell 的治理与保护；09：Pi 调通原生读取、平台工具与 Goal
 
-**Status:** draft — 拆分待确认，尚未发布 GitHub；不代表已开工或已完成。
+**Status:** planned — 等待前置任务集成并验证，尚未实施。
 
 **Required:** Yes — 本票属于最终交付必做项。
 
@@ -14,9 +14,12 @@
 
 把 06 的治理接入实际官方工具，不重写编辑器/压缩算法，不改新的长期记忆策略。
 
+遵循 [工具归属](tool-ownership.md)：Pi 的基础写入/Shell 使用官方实现，自研 smol 基础工具留在 smol。可选专业写入工具只在显式选择且同样满足平台保护时开放。
+
 ## Acceptance criteria
 
 - [ ] 通过 execute_app 实际执行官方 read/edit/write/bash 中启用的能力；同名 wrapper 明确委托官方实现。
+- [ ] 工具 manifest/调用证据能区分 Pi 基础工具与平台/专业工具；不把 smol write_file/shell_tool 作为 Pi 原生工具的执行后门，未选择的 Markdown 等专业写入工具不自动注入。
 - [ ] 实际 Pi 调用复验拒绝写入、Shell 命令约束、变换后的最终参数和写前备份，独立检查禁止副作用未发生。
 - [ ] 模型可见截断不丢失本次受限查询的原始产物；ContextRef 检索、来源和 coverage 与第一次执行一致。
 - [ ] 成功证据绑定真正的工具输入、输出和 Run/call identity；失败/blocked/截断文本不能伪造完整成功证据。
@@ -27,5 +30,4 @@
 
 向 12 提供真实有副作用工具、产物与 journal 的故障注入入口；最终发行验收须包含这些提交。
 
-实施遵循已生成的 Pi 接入规格、并行开发计划及本轮票据执行索引。只认已集成、已验证的依赖提交；不要自行跳过阻塞任务，也不要从其他 worktree 复制未提交改动。
-
+实施遵循 Pi 接入规格及本目录最新的 [工具归属](tool-ownership.md)、[执行索引](README.md) 与 [worktree 计划](worktree-plan.md)。只认已集成、已验证的依赖提交；不要自行跳过阻塞任务，也不要从其他 worktree 复制未提交改动。

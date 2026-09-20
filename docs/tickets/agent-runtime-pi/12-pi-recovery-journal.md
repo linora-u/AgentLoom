@@ -4,7 +4,7 @@
 
 **Blocked by:** 10：Pi 官方写入和 Shell 产生可保护、可检索的结果
 
-**Status:** draft — 拆分待确认，尚未发布 GitHub；不代表已开工或已完成。
+**Status:** planned — 等待前置任务集成并验证，尚未实施。
 
 **Required:** Yes — 本票属于最终交付必做项。
 
@@ -14,6 +14,8 @@
 
 集中实现同基座恢复、host/native journal 对齐和两个精确 crash window；不重复开发前面已经覆盖的全部取消机制。
 
+遵循 [工具归属](tool-ownership.md)：应用 task/Run、已提交 Worker 结果与证据由平台持有，Pi session/payload 由 Pi adapter 解释；不导入 smol 的消息、Todo、Shell 私有状态来实现 Pi 恢复。
+
 ## Acceptance criteria
 
 - [ ] 正常 Pi session 重启后用同一 task、新 Run 继续，已完成 Worker 结果和已提交工具结果可复用。
@@ -22,11 +24,10 @@
 - [ ] 不兼容版本、跨 runtime 或无法安全对齐的状态明确拒绝；不能通过一律拒绝恢复来让正常恢复用例通过。
 - [ ] 恢复/compaction/等待结果期间可取消，协议损坏与子进程死亡能释放 pending 请求及受管子进程。
 - [ ] checkpoint、journal 和 native session 的关联、持久化顺序、版本以及终态唯一性可被独立验证。
-- [ ] 公共 checkpoint 协调的修改由本票独占经协调者接线，G1 已固定的 journal 合同如需变更须先升级共享合同。
+- [ ] 公共 checkpoint 协调的修改由本票独占经协调者接线，05/06 已固定的 journal 合同如需变更须先升级共享合同。
 
 ## Handoff
 
 交付可复现恢复材料、故障点与独立 oracle；14 不再承担遗漏的恢复功能开发。
 
-实施遵循已生成的 Pi 接入规格、并行开发计划及本轮票据执行索引。只认已集成、已验证的依赖提交；不要自行跳过阻塞任务，也不要从其他 worktree 复制未提交改动。
-
+实施遵循 Pi 接入规格及本目录最新的 [工具归属](tool-ownership.md)、[执行索引](README.md) 与 [worktree 计划](worktree-plan.md)。只认已集成、已验证的依赖提交；不要自行跳过阻塞任务，也不要从其他 worktree 复制未提交改动。
