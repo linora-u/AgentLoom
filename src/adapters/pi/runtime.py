@@ -75,7 +75,10 @@ class PiRuntime:
 
         def emit(kind, details):
             event = RuntimeEvent(kind=kind, application_id=request.application_id, task_id=request.task_id,
-                                 run_id=request.run_id, details=details)
+                                 run_id=request.run_id, details={**details,
+                                     "instance_id": self.transport.instance_id, "hook_run_id": execution.local_run_id,
+                                     "root_run_id": execution.root_run_id,
+                                     "root_agent": execution.local_run_id == execution.root_run_id})
             events.append(event)
             if request.event_sink:
                 try:
@@ -106,6 +109,13 @@ class PiRuntime:
         def record_tool(record, entry, identity):
             emit("tool", {"record": record.to_dict(), "owner": entry.owner, "provider": entry.provider,
                           "instance_id": identity.instance_id, "hook_run_id": execution.local_run_id})
+
+        def cancel_callbacks():
+            from agentloom.runtime.resources import close_instance_resources, close_run_resources
+            if execution.local_run_id == execution.root_run_id:
+                close_run_resources()
+            else:
+                close_instance_resources(self.transport.instance_id)
 
         def callback(payload):
             if isinstance(payload, PlatformInvoke):
@@ -155,9 +165,10 @@ class PiRuntime:
                     instructions=definition.instructions or "", model=ModelSelection(model_type=selection.model_type,
                         model_id=selection.model_id, protocol=selection.protocol, settings=dict(selection.settings),
                         request_headers=dict(selection.request_headers)), tools=wire_tools, runtime_options=dict(definition.runtime_options),
-                    continue_session=request.continue_session or attempt > 0, record_task=request.record_task)
-                wire = wire.model_copy(update={"additional_args": dict(request.additional_args)})
-                response = self.transport.request(wire, run_id=run_id, observe=observe, callback=callback)
+                    continue_session=request.continue_session or attempt > 0, record_task=request.record_task,
+                    additional_args=dict(request.additional_args))
+                response = self.transport.request(wire, run_id=run_id, observe=observe, callback=callback,
+                                                  cancel_callbacks=cancel_callbacks)
                 result = response.payload
                 assert isinstance(result, RunResult)
                 part = RuntimeUsage.from_value(result.usage)

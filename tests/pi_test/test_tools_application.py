@@ -30,6 +30,28 @@ def parallel_probe(label: str) -> str:
                        'instance_id': execution.agent_id, 'hook_run_id': execution.hook_run.local_run_id})
 
 
+def wait_for_cleanup(marker: str) -> str:
+    """Wait on a run-owned resource until Application cancellation closes it.
+
+    Args:
+        marker: Path where this application reports that the wait has started.
+    """
+    from pathlib import Path
+    from threading import Event
+    from agentloom.runtime.resources import register_resource
+    released = Event()
+
+    def close():
+        Path(marker + '.closed').write_text('closed')
+        released.set()
+
+    register_resource('pi-acceptance-wait', close)
+    Path(marker).write_text('waiting')
+    if not released.wait(timeout=30):
+        raise RuntimeError('Run-owned resource was not closed')
+    return 'closed'
+
+
 def select(app, **values):
     config = yaml.safe_load(app.read_text())
     config.update(values)
@@ -179,6 +201,11 @@ def test_pi_supervisor_runs_two_independent_pi_workers_with_callbacks(tmp_path):
     assert len({observation['instance_id'] for observation in observations}) == 2
     assert len({observation['hook_run_id'] for observation in observations}) == 2
     assert {observation['run_id'] for observation in observations} == {result.run.run_id}
+    events = [json.loads(line) for line in (result.run.run_dir / 'audit/runtime_events.jsonl').read_text().splitlines()]
+    worker_records = [event['details'] for event in events if event['kind'] == 'tool'
+                      and event['details']['record']['tool_name'] == 'parallel_probe']
+    assert len(worker_records) == 2
+    assert len({record['instance_id'] for record in worker_records}) == 2
 
 
 def test_completed_goal_cannot_hide_stop_rejection(tmp_path):
@@ -191,3 +218,41 @@ def test_completed_goal_cannot_hide_stop_rejection(tmp_path):
             {'id': 'reject-final', 'command': f'{sys.executable} {hook}'}]})
         with bind_config(load_project_config(tmp_path)), pytest.raises(ApplicationRunError, match='Stop gate remained blocked'):
             execute_app(app, file_logging=False)
+
+
+@pytest.mark.parametrize('fault', ['keyboard', 'bridge_exit'])
+def test_application_cancels_and_reaps_a_pending_platform_callback(tmp_path, fault):
+    import os
+    from pathlib import Path
+    import signal
+    from tests.pi_test.test_process_lifecycle import assert_gone, node_launcher, start_cli, until
+    marker = tmp_path / 'callback-started'
+    with model_service(turns=[[('pending-platform', 'wait_for_cleanup', {'marker': str(marker)})]]) as (url, requests):
+        app = project(tmp_path, url)
+        select(app, tools=[{'name': 'wait_for_cleanup', 'module': 'tests.pi_test.test_tools_application',
+                           'function': 'wait_for_cleanup'}])
+        env, pid_file = node_launcher(tmp_path)
+        env['PYTHONPATH'] = str(Path(__file__).resolve().parents[2])
+        child = start_cli(tmp_path, app, env)
+        pid = None
+        try:
+            until(marker.exists)
+            pid = int(pid_file.read_text())
+            os.kill(child.pid if fault == 'keyboard' else pid,
+                    signal.SIGINT if fault == 'keyboard' else signal.SIGKILL)
+            stdout, stderr = child.communicate(timeout=8)
+        finally:
+            if child.poll() is None:
+                child.kill()
+                child.wait()
+            if pid is not None:
+                try:
+                    os.kill(pid, signal.SIGKILL)
+                except ProcessLookupError:
+                    pass
+    assert child.returncode != 0
+    assert Path(str(marker) + '.closed').read_text() == 'closed'
+    records = [json.loads(line) for line in stdout.splitlines()]
+    assert records[-1]['event'] == ('run.interrupted' if fault == 'keyboard' else 'run.failed')
+    assert len(requests) == 1
+    assert_gone(pid)
