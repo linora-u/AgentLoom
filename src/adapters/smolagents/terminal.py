@@ -37,5 +37,3 @@ def final_answer_binding() -> ToolBinding:
         inputs_schema=inputs_schema,
         output_type="string",
     )
-
-
