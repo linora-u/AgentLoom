@@ -76,6 +76,13 @@ def test_platform_outline_repairs_raw_input_and_returns_to_same_pi_application(t
     assert 'saffron_entrypoint' in next(message['content'] for message in messages if message['role'] == 'tool')
     call = next(message['tool_calls'][0] for message in messages if message.get('tool_calls'))
     assert json.loads(call['function']['arguments'])['file_path'] == str(source)
+    events = [json.loads(line) for line in (result.run.run_dir / 'audit/runtime_events.jsonl').read_text().splitlines()]
+    records = [event['details']['record'] for event in events if event['kind'] == 'tool']
+    assert len(records) == 1
+    assert records[0]['call_id'] == 'outline-1'
+    assert records[0]['input'] == {'file_path': str(source)}
+    assert records[0]['status'] == 'completed'
+    assert 'saffron_entrypoint' in records[0]['output']
 
 
 def test_parallel_platform_batch_keeps_run_and_hook_context_without_deadlock(tmp_path):
@@ -172,3 +179,15 @@ def test_pi_supervisor_runs_two_independent_pi_workers_with_callbacks(tmp_path):
     assert len({observation['instance_id'] for observation in observations}) == 2
     assert len({observation['hook_run_id'] for observation in observations}) == 2
     assert {observation['run_id'] for observation in observations} == {result.run.run_id}
+
+
+def test_completed_goal_cannot_hide_stop_rejection(tmp_path):
+    from agentloom.application.run import ApplicationRunError
+    hook = tmp_path / 'stop.py'
+    hook.write_text('import json\nprint(json.dumps({"decision":"block", "reason":"Delivery rejected by Stop gate"}))\n')
+    with model_service(turns=[[('complete-before-stop', 'update_goal', {'status': 'complete', 'evidence': 'Checked the work.'})]]) as (url, requests):
+        app = project(tmp_path, url)
+        select(app, goal=True, runtime_options={'max_stop_attempts': 2}, hooks={'Stop': [
+            {'id': 'reject-final', 'command': f'{sys.executable} {hook}'}]})
+        with bind_config(load_project_config(tmp_path)), pytest.raises(ApplicationRunError, match='Stop gate remained blocked'):
+            execute_app(app, file_logging=False)
