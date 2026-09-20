@@ -22,9 +22,12 @@ def installation(tmp_path, monkeypatch):
     source = Path(install.__file__).parent
     bridge = tmp_path / "pi/bridge"
     bridge.mkdir(parents=True)
-    for name in ("package.json", "package-lock.json", "tsconfig.json", "index.ts", "protocol.ts", "model.ts", "tools.ts"):
-        shutil.copyfile(source / "bridge" / name, bridge / name)
-    shutil.copyfile(source / "bridge-v1.schema.json", bridge.parent / "bridge-v1.schema.json")
+    sources = [source / "bridge" / name for name in ("package.json", "package-lock.json", "tsconfig.json")]
+    sources.extend((source / "bridge").glob("*.ts"))
+    for path in sources:
+        shutil.copyfile(path, bridge / path.name)
+    for schema in source.glob("bridge-v*.schema.json"):
+        shutil.copyfile(schema, bridge.parent / schema.name)
     binary = tmp_path / "bin"
     binary.mkdir()
     node = install.find_node(os.environ.copy())
@@ -92,6 +95,23 @@ def test_installer_repairs_a_missing_compiled_tool_module(installation):
     install_pi(installation)
     assert (installation / "dist/tools.js").is_file()
     assert len(calls(installation)) == 2
+
+
+def test_installer_tracks_a_renamed_protocol_schema(installation):
+    install_pi(installation)
+    schema = next(installation.parent.glob("bridge-v*.schema.json"))
+    version = int(schema.name.split("-v")[1].split(".")[0])
+    schema.rename(schema.with_name(f"bridge-v{version + 1}.schema.json"))
+    assert install_pi(installation).is_file()
+    assert len(calls(installation)) == 2
+
+
+def test_missing_protocol_schema_fails_before_download(installation):
+    for schema in installation.parent.glob("bridge-v*.schema.json"):
+        schema.unlink()
+    with pytest.raises(RuntimeError, match="schema"):
+        install_pi(installation)
+    assert not calls(installation)
 
 
 def test_failed_install_can_retry_without_a_false_ready_marker(installation, monkeypatch):

@@ -27,7 +27,10 @@ def _fingerprint(bridge: Path) -> str:
     inputs = [bridge / name for name in ("package.json", "package-lock.json", "tsconfig.json", "index.ts", "protocol.ts")]
     # Include modules added by later runtime tickets without including SDK code.
     inputs.extend(path for path in sorted(bridge.glob("*.ts")) if path not in inputs)
-    inputs.append(bridge.parent / "bridge-v1.schema.json")
+    schemas = sorted(bridge.parent.glob("bridge-v*.schema.json"))
+    if not schemas:
+        raise RuntimeError("Pi bridge protocol schema is missing from the installation.")
+    inputs.extend(schemas)
     digest = hashlib.sha256()
     for path in inputs:
         digest.update(path.name.encode() + b"\0" + path.read_bytes() + b"\0")
