@@ -4,7 +4,7 @@
 
 ## 当前状态与开发边界
 
-**先看当前进度，再看依赖图。** 01–09、11、13 已有本票完成记录，10、12、14 按前置继续推进。04、05、06、07、08、09、11 已正式合入 main，保留分阶段提交；09 的交付提交为 `cc0edeb1`，11 为 `96db1542`，两票 worktree 均已清理。13 已完成安装与发行初验；10 继续已有工作区，12 等 10，14 在前票全部集成后串行收口。14 项都是完整交付的必做项，“可并行”不表示可省略。
+**先看当前进度，再看依赖图。** 01–11、13 已有本票完成记录，剩余 12→14 按前置串行推进。04、05、06、07、08、09、11 已正式合入 main，保留分阶段提交；09 的交付提交为 `cc0edeb1`，11 为 `96db1542`，两票 worktree 均已清理。13 已完成安装与发行初验；10 已完成官方写入/Shell、原文产物和真实 Application 验证。12 从包含 10 冻结入口的 main 新建 worktree，14 等 12 完成后串行收口。14 项都是完整交付的必做项，“可并行”不表示可省略。
 
 - 01、02、03 已完成；保留 [01/02 集成验收](01-02-integration.md) 和 [03 实现与验收](03-implementation.md)，本轮不重做。03 记录的回归结果为 4225 passed、1 skipped，真实 Pi SDK 13 passed；这是历史基线结果，不是本次文档修改重新运行的结果。
 - 2026-09-20 按维护者最新要求，main 从 `9d5a8891` 快进到 `da4a049d`，纳入已验收的 04/05/07/08 源码、测试和文档。源码与组合验收版本一致（4329 passed、1 skipped），真实 provider 限制继续保留；后续交付也应正式合入 main。
@@ -18,8 +18,8 @@
 | 09：Pi 工具调用 | 已完成，不重开 | [验收](09-implementation.md)：4408 passed、1 skipped，最终真实模型 40/40 |
 | 11：混合协作与记忆 | 已完成，不重开 | [验收](11-implementation.md)：双向 Application、Worker 隔离、Goal、ContextRef 与认可记忆交接已验证 |
 | 13：干净安装 | 已完成，不重开 | [验收](13-implementation.md)：4412 passed、1 skipped；安装 29/29、真实模型 3/3；14 仍需重建最终发行物 |
-| 10 | 继续已有 session/worktree | 核对所属 session，不复制另一分支未提交内容 |
-| 12 | 等 10 完成后启动 | Pi adapter 链按 10→12 串行 |
+| 10：Pi 写入/Shell | 已完成，不重开 | [验收](10-implementation.md)：全量 4464 passed、1 skipped，1 项进程就绪超时后模块复验 7/7；最终真实模型 30/30；SDK 0.79.4 自动安装，冻结入口 `refs/agentloom/ticket10-frozen` |
+| 12 | 可以开新 session/worktree | 起始 main 必须包含 10 冻结入口；消费真实副作用和 journal 故障入口 |
 | 14 | 最后串行收口 | 11、13 已完成本票验收；等 12 及全部前票集成，不提前开旧基线工作区 |
 
 职责按下面的表落实，完整约束见 [工具归属](tool-ownership.md)：
@@ -60,7 +60,7 @@
 | [07](07-pi-application-no-tools.md) | 真实无工具 Pi Application、原生模型与取消 | 03 | 独立 worktree；可与 04、05、08 并行 |
 | [08](08-portable-platform-tools.md) | 平台工具、可选专业工具及 MCP 脱离 smol 构造 | 03 | 独立 worktree；可与 04、05、07 并行 |
 | [09](09-pi-read-and-platform-tools.md) | Pi 原生读取、平台/可选工具回调与 Goal | 05、07、08 | Pi 链串行；可与 06 并行 |
-| [10](10-pi-write-shell-artifacts.md) | Pi 官方写入/Shell 的保护、产物和证据 | 06、09 | Pi 链串行；可与 11、13 并行 |
+| [10](10-pi-write-shell-artifacts.md) | Pi 官方写入/Shell 的保护、产物和证据 | 06、09；已完成 | 不重开；见 [实施与验收](10-implementation.md) |
 | [11](11-mixed-agents-memory.md) | 双向混合基座、多 Worker 隔离与长期记忆复用 | 09；已完成 | 不重开；见 [实施与验收](11-implementation.md) |
 | [12](12-pi-recovery-journal.md) | 原生会话与工具双日志恢复 | 10 | Pi 链串行；可与 11、13 并行 |
 | [13](13-clean-install-profiles.md) | Pi-only/smol 干净安装、发行资源和失败路径 | 04、09 | 独立 worktree；可与 10、11、12 并行 |
