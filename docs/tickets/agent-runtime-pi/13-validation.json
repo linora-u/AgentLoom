@@ -1,6 +1,6 @@
 {
   "baseline": "2ec1412cd684bebb313b320fd0b9332050efeaaf",
-  "runtime_candidate": "37dc69edf0f6aad28db9b879453959be695d86b8",
+  "runtime_candidate": "0b5279c41273d3f8bd8dbc9873b145c580bc9af9",
   "candidate_dirty": false,
   "status": "passed",
   "versions": {
@@ -11,13 +11,13 @@
   "lock_sha256": "2010c478a6eb8c3d889f72ba3bb78925ecd745b94b9ce6ea7e006799fbb7c774",
   "build_constraints_sha256": "341fc6a56871e27298da32586b6d5e4a974b82ee113da0b7079ec521f38e36aa",
   "artifacts": {
-    "agentloom-1.0.1-py3-none-any.whl": "0497565cbfdb5f5ed3714c30e7539a216e5d79ae51ecb93d7a5e62d1641c4f20",
-    "agentloom-1.0.1.tar.gz": "534bbd49449127f89f858eb3fc64584d1344d88eb83e6b06828292031aa7218e"
+    "agentloom-1.0.1-py3-none-any.whl": "cb15b9e4675117bf186994178f40cdf19ef3320e1dbd88a7894a83733947f15c",
+    "agentloom-1.0.1.tar.gz": "f3a5fa38e6cc3a916ea51c39c261f18946ded72917795a2809b444b4860836fe"
   },
   "reproducibility": {
-    "source_sdist_sha256": "534bbd49449127f89f858eb3fc64584d1344d88eb83e6b06828292031aa7218e",
-    "wheel_sha256": "0497565cbfdb5f5ed3714c30e7539a216e5d79ae51ecb93d7a5e62d1641c4f20",
-    "rebuilt_wheel_sha256": "0497565cbfdb5f5ed3714c30e7539a216e5d79ae51ecb93d7a5e62d1641c4f20",
+    "source_sdist_sha256": "f3a5fa38e6cc3a916ea51c39c261f18946ded72917795a2809b444b4860836fe",
+    "wheel_sha256": "cb15b9e4675117bf186994178f40cdf19ef3320e1dbd88a7894a83733947f15c",
+    "rebuilt_wheel_sha256": "cb15b9e4675117bf186994178f40cdf19ef3320e1dbd88a7894a83733947f15c",
     "same_bytes": true
   },
   "installed_profiles": {
@@ -64,31 +64,31 @@
         {
           "case": "no_tools",
           "status": "passed",
-          "run_id": "run_20260920T160905073585Z_ca7aac7af7d4",
+          "run_id": "run_20260920T162615083135Z_5eed8bbf5658",
           "yaml_sha256": null
         },
         {
           "case": "read",
           "status": "passed",
-          "run_id": "run_20260920T160906874305Z_383aa0bd8850",
+          "run_id": "run_20260920T162615083171Z_4901f9569c35",
           "yaml_sha256": null
         },
         {
           "case": "mcp",
           "status": "passed",
-          "run_id": "run_20260920T160907080619Z_373258751e44",
+          "run_id": "run_20260920T162616782871Z_16c579a133c8",
           "yaml_sha256": null
         },
         {
           "case": "memory",
           "status": "passed",
-          "run_id": "run_20260920T160907080603Z_02fc5cf54e5f",
+          "run_id": "run_20260920T162616782848Z_b1c2c5c577d1",
           "yaml_sha256": null
         },
         {
           "case": "goal",
           "status": "passed",
-          "run_id": "run_20260920T160908620828Z_877830cf73e6",
+          "run_id": "run_20260920T162618660662Z_3d2029518d84",
           "yaml_sha256": null
         },
         {
@@ -130,37 +130,37 @@
         {
           "case": "no_tools",
           "status": "passed",
-          "run_id": "run_20260920T160942443121Z_d73ecc8ef2c8",
+          "run_id": "run_20260920T162635079518Z_603f8afb4c5c",
           "yaml_sha256": null
         },
         {
           "case": "read",
           "status": "passed",
-          "run_id": "run_20260920T160942443136Z_4cf71edfc5b5",
+          "run_id": "run_20260920T162635079505Z_195f089d9a4e",
           "yaml_sha256": null
         },
         {
           "case": "outline_python",
           "status": "passed",
-          "run_id": "run_20260920T160942443147Z_8f9f94c14929",
+          "run_id": "run_20260920T162635079485Z_bc9ac481a613",
           "yaml_sha256": null
         },
         {
           "case": "outline_typescript",
           "status": "passed",
-          "run_id": "run_20260920T160944324561Z_24d8f6b04883",
+          "run_id": "run_20260920T162636869273Z_753a72c3f11d",
           "yaml_sha256": null
         },
         {
           "case": "ast",
           "status": "passed",
-          "run_id": "run_20260920T160944324577Z_09d2a732fea0",
+          "run_id": "run_20260920T162636869251Z_6ff3a748a1ce",
           "yaml_sha256": null
         },
         {
           "case": "lsp",
           "status": "passed",
-          "run_id": "run_20260920T160945511392Z_18d446dbb4ad",
+          "run_id": "run_20260920T162638125733Z_718571401696",
           "yaml_sha256": null
         }
       ]
@@ -184,31 +184,31 @@
         {
           "case": "legacy",
           "status": "passed",
-          "run_id": "run_20260920T160953739311Z_cbdde98b8d40",
+          "run_id": "run_20260920T162643829859Z_ac0844900a6b",
           "yaml_sha256": null
         },
         {
           "case": "existing_yaml",
           "status": "passed",
-          "run_id": "run_20260920T160953838896Z_319beb295eb0",
+          "run_id": "run_20260920T162644005655Z_62bf82c2d739",
           "yaml_sha256": "df2163ec61c37b31d6782d70a5d6497314de0a2e2f0e5294728e7e6b31507163"
         },
         {
           "case": "outline_python",
           "status": "passed",
-          "run_id": "run_20260920T161002345324Z_7a8abcb77504",
+          "run_id": "run_20260920T162644548158Z_89119339ecf6",
           "yaml_sha256": null
         },
         {
           "case": "mcp",
           "status": "passed",
-          "run_id": "run_20260920T161008515664Z_2c9f7723be30",
+          "run_id": "run_20260920T162658155656Z_9e801fead007",
           "yaml_sha256": null
         },
         {
           "case": "memory",
           "status": "passed",
-          "run_id": "run_20260920T161008515683Z_70b73bd8520e",
+          "run_id": "run_20260920T162658155681Z_d06f9f46087a",
           "yaml_sha256": null
         }
       ]
@@ -225,9 +225,9 @@
       "model_profile": "powerful",
       "provider": "real",
       "status": "passed",
-      "package_origin": "/Users/bytedance/code/data_clear/AgentLoom-validation/t13/campaign-final-07/pi-env/lib/python3.12/site-packages/agentloom/__init__.py",
-      "run_id": "run_20260920T160937261102Z_9d41b4142e6d",
-      "manifest_path": "/Users/bytedance/code/data_clear/AgentLoom-validation/t13/live-final-07/pi-powerful/runtime/runs/probe/run_20260920T160937261102Z_9d41b4142e6d/manifest.json"
+      "package_origin": "/Users/bytedance/code/data_clear/AgentLoom-validation/t13/campaign-final-08/pi-env/lib/python3.12/site-packages/agentloom/__init__.py",
+      "run_id": "run_20260920T162648152143Z_aed151ce6646",
+      "manifest_path": "/Users/bytedance/code/data_clear/AgentLoom-validation/t13/live-final-08/pi-powerful/runtime/runs/probe/run_20260920T162648152143Z_aed151ce6646/manifest.json"
     },
     {
       "profile": "pi",
@@ -235,9 +235,9 @@
       "model_profile": "responses_powerful",
       "provider": "real",
       "status": "passed",
-      "package_origin": "/Users/bytedance/code/data_clear/AgentLoom-validation/t13/campaign-final-07/pi-env/lib/python3.12/site-packages/agentloom/__init__.py",
-      "run_id": "run_20260920T160937261128Z_c7b4bde38c18",
-      "manifest_path": "/Users/bytedance/code/data_clear/AgentLoom-validation/t13/live-final-07/pi-responses_powerful/runtime/runs/probe/run_20260920T160937261128Z_c7b4bde38c18/manifest.json"
+      "package_origin": "/Users/bytedance/code/data_clear/AgentLoom-validation/t13/campaign-final-08/pi-env/lib/python3.12/site-packages/agentloom/__init__.py",
+      "run_id": "run_20260920T162648152122Z_5d9a0af02044",
+      "manifest_path": "/Users/bytedance/code/data_clear/AgentLoom-validation/t13/live-final-08/pi-responses_powerful/runtime/runs/probe/run_20260920T162648152122Z_5d9a0af02044/manifest.json"
     },
     {
       "profile": "smol",
@@ -245,9 +245,9 @@
       "model_profile": "powerful",
       "provider": "real",
       "status": "passed",
-      "package_origin": "/Users/bytedance/code/data_clear/AgentLoom-validation/t13/campaign-final-07/smol-env/lib/python3.12/site-packages/agentloom/__init__.py",
-      "run_id": "run_20260920T161024274362Z_2b1a5ee9eb88",
-      "manifest_path": "/Users/bytedance/code/data_clear/AgentLoom-validation/t13/live-final-07/smol-powerful/runtime/runs/probe/run_20260920T161024274362Z_2b1a5ee9eb88/manifest.json"
+      "package_origin": "/Users/bytedance/code/data_clear/AgentLoom-validation/t13/campaign-final-08/smol-env/lib/python3.12/site-packages/agentloom/__init__.py",
+      "run_id": "run_20260920T162821805546Z_3c7de8a1622a",
+      "manifest_path": "/Users/bytedance/code/data_clear/AgentLoom-validation/t13/live-final-08/smol-powerful/runtime/runs/probe/run_20260920T162821805546Z_3c7de8a1622a/manifest.json"
     }
   ],
   "checks": {
@@ -257,8 +257,9 @@
       "log": "/tmp/agentloom-t13-update-root-green.log"
     },
     "packaging_and_sdk": {
-      "passed": 9,
-      "log": "/tmp/agentloom-t13-focused-03.log"
+      "passed": 12,
+      "log": "/tmp/agentloom-t13-next-schema-green.log",
+      "note": "Includes actual wheel builds with current and renamed schema filenames."
     },
     "context_pin_extra": {
       "passed": 17,
@@ -268,7 +269,7 @@
       "files": 5,
       "errors": 0,
       "warnings": 0,
-      "log": "/tmp/agentloom-t13-types-06.json"
+      "log": "/tmp/agentloom-t13-types-09.json"
     },
     "full_regression": {
       "status": "passed",
@@ -279,10 +280,22 @@
       "test_revision": "07dfbe76d65fb92693648e88bd0b4d3ec6e173bf",
       "log": "/tmp/agentloom-t13-full-03.log",
       "command": "uv run --locked --extra smol --extra code pytest tests/ applications/memory_feature_validation/scripts/test_memory_review_campaign_capsule.py applications/memory_feature_validation/scripts/test_memory_review_campaign_contract.py -q"
+    },
+    "cli_no_cold_import": {
+      "passed": 42,
+      "log": "/tmp/agentloom-t13-cold-cli-green.log",
+      "commit": "fdff67c7"
+    },
+    "combined_ticket11": {
+      "passed": 95,
+      "warnings": 22,
+      "seconds": 23.44,
+      "log": "/tmp/agentloom-t13-11-combined-02.log",
+      "note": "Same PYTHONPATH=. as CI; includes all new mixed Application and memory tests plus CLI regression."
     }
   },
   "evidence_root": "/Users/bytedance/code/data_clear/AgentLoom-validation/t13",
-  "clean_install_report": "/Users/bytedance/code/data_clear/AgentLoom-validation/t13/campaign-final-07/report.json",
+  "clean_install_report": "/Users/bytedance/code/data_clear/AgentLoom-validation/t13/campaign-final-08/report.json",
   "limitations": [
     "Controlled HTTP peer in the 29 release probes; runtime SDKs, Application and tools are real.",
     "The LSP tool probe validates the tree-sitter fallback, not a live language server.",
@@ -291,13 +304,13 @@
   ],
   "reviews": {
     "standards": {
-      "candidate": "37dc69ed",
+      "candidate": "4fe90d3",
       "hard_findings": 0,
       "smells": 0,
       "status": "passed"
     },
     "spec": {
-      "candidate": "83d76fca",
+      "candidate": "05ea52c1eeb5ce0c817f46601eb33112093e28d8",
       "findings": 0,
       "status": "passed"
     }
@@ -313,5 +326,9 @@
       "fingerprint": "4eb4253fde7f1d7735a7ea48e1eb59f61df62890e9b598d032d6d2a24810c411",
       "sdk_version": "0.79.4"
     }
-  }
+  },
+  "prior_release_candidate": "37dc69edf0f6aad28db9b879453959be695d86b8",
+  "packaging_candidate": "05ea52c1eeb5ce0c817f46601eb33112093e28d8",
+  "integrated_main": "87d4a287",
+  "packaging_followup": "Only package-data schema filename matching changed after the clean Application campaign. Both current and renamed-schema wheels were built and checked by the final packaging tests."
 }
