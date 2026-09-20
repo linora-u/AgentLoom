@@ -740,7 +740,6 @@ describe("AgentLoom TUI view", () => {
   test("Workspace separates explicit Run outcomes instead of combining or inferring them", async () => {
     const statuses = [
       "completed",
-      "budget_limited",
       "failed",
       "crashed",
       "interrupted",
@@ -771,8 +770,8 @@ describe("AgentLoom TUI view", () => {
     await setup.renderOnce()
 
     const frame = setup.captureCharFrame()
-    expect(frame).toContain("7 次 · 1 成功 · 1 失败")
-    expect(frame).toContain("1 预算受限 · 1 崩溃 · 1 中断 · 1")
+    expect(frame).toContain("6 次 · 1 成功 · 1 失败")
+    expect(frame).toContain("1 崩溃 · 1 中断 · 1")
     expect(frame).toContain("运行中")
     expect(frame).toContain("1 状态未知")
     expect(frame).not.toContain("failed/crashed")

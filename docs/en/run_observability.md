@@ -24,7 +24,6 @@ print([event.event for event in events])
 Preflight configuration rejection happens before storage is allocated: the original configuration exception is raised and the sink receives one `run.rejected` event with a typed `RunRejection`; it has no `run` receipt. Once allocation succeeds, the sink receives `run.started` followed by exactly one terminal event:
 
 - `run.completed` with `output`;
-- `run.budget_limited` with canonical `goal`, `error`, and `phase`, while Python raises `ApplicationRunBudgetLimited` containing the same `RunInfo`, Goal snapshot, and resumable task id;
 - `run.failed` with `error` and `phase`, while Python raises `ApplicationRunError` containing the same `RunInfo`;
 - `run.interrupted` with `error` and `phase`, while Python raises `ApplicationRunInterrupted`. Inspect its `resumable` flag before offering resume; an interruption before recoverable state exists can set it to `false`.
 
@@ -49,13 +48,6 @@ output is redirected to stderr so it cannot corrupt either protocol.
 {"schema_version":1,"event":"run.started","run":{"application_id":"example","task_id":"task_...","run_id":"run_...","run_dir":"...","manifest_path":"...","log_path":"..."},"occurred_at":"..."}
 {"schema_version":1,"event":"run.completed","run":{"application_id":"example","task_id":"task_...","run_id":"run_...","run_dir":"...","manifest_path":"...","log_path":"..."},"occurred_at":"...","output":"done"}
 ```
-
-Goal events include a structured `goal` object with `status`, `token_budget`,
-prompt/completion/total usage, `remaining_tokens`, objective fingerprint,
-evidence, and timestamps. Text mode also prints
-`Goal: <status> | tokens: <used>/<budget>`. Budget exhaustion exits `1` but is
-not `run.failed`; automation should handle `run.budget_limited`, edit YAML, and
-resume. See [Goal Mode](goal_mode.md).
 
 A rejected preflight emits only `run.rejected`, with `phase: "preflight"` and `error: {kind, message, retryable}`. It deliberately has no `run` object because no run directory exists.
 

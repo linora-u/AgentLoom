@@ -9,7 +9,7 @@ English | <a href="docs/cn/README.md">简体中文</a>
 </p>
 
 <p align="center">
-  Typed Workers, permissioned edits, resumable Runs, explicit Goal budgets, and review-gated memory share one runtime truth.
+  Typed Workers, permissioned edits, resumable Runs, and review-gated memory share one runtime truth.
 </p>
 
 <p align="center">
@@ -46,14 +46,6 @@ lifecycle events, with bounded file logs when enabled plus audit records and
 artifacts. A logical `task_id` survives resume. The TUI, CLI JSON/JSONL, and
 Python API read the same canonical state. Preflight rejection occurs before a
 Run or its storage is allocated.
-
-### Long-running work has an explicit owner
-
-Goal Mode keeps one root Supervisor objective active across continuation
-segments and Worker delegation. Only that Supervisor can mark the Goal complete
-with evidence. An optional token budget covers the whole Agent tree. When
-checkpointing is enabled, `budget_limited` preserves recovery state for a later
-resume.
 
 ### Memory has review boundaries
 
@@ -157,8 +149,7 @@ The TUI is an Applications-first control plane, not a thin log viewer.
   preserving completed file changes and durable history.
 - **Revision safety:** each Run pins its Application content hash. Later edits
   change the Working Revision but never hot-switch an active Running Revision.
-- **Run diagnostics:** summaries expose terminal state, Goal progress, token
-  usage, completion evidence, and recovery actions without dumping raw events.
+- **Run diagnostics:** summaries expose terminal state, completion evidence, and recovery actions without dumping raw events.
 
 | Action | Key / command |
 |---|---|
@@ -208,9 +199,6 @@ workflow: |
 
 tools: []
 max_steps: 12
-goal:
-  enabled: true
-  token_budget: 120000
 ```
 
 Each Worker exposes the contract seen by its Supervisor:
@@ -271,7 +259,6 @@ Runtime storage separates attempts from recoverable tasks:
 │   ├── checkpoint.json
 │   ├── workers/<worker>/calls/<index>/checkpoint.json
 │   ├── todos.json
-│   ├── goal.json
 │   ├── context_store/
 │   └── file-history/
 └── workspaces/agents/<application_id>/<agent_path>/
@@ -279,7 +266,7 @@ Runtime storage separates attempts from recoverable tasks:
     └── tasks/<task_id>/{context.md,trace.md}
 ```
 
-Goal, Todo, context-store, file-history, and Recall files appear only when the
+Todo, context-store, file-history, and Recall files appear only when the
 corresponding feature is configured or used.
 
 ## Run and integrate
@@ -298,7 +285,7 @@ uv run loom run <workflow> --output-format jsonl
 ```
 
 For programmatic execution, `execute_app()` returns an `ApplicationRunResult`
-with output, timestamps, structured Goal state, and a `RunInfo` receipt:
+with output, timestamps, and a `RunInfo` receipt:
 
 ```python
 from agentloom.application.runner import execute_app
@@ -337,7 +324,6 @@ agentloom schedules --project /path/to/project serve
 | `unit_test_studio` | Strict pytest generation with a deterministic Python entrypoint |
 | `repo_map` | Deterministic preprocessing, bottom-up Agent analysis, batching, and progress persistence |
 | `codex_exec_demo` | Local `codex exec` exposed as normal Agent tools with fixed arguments |
-| `goal_mode_validation` | Explicit Goal completion, budget accounting, and resumable terminal states |
 | `self_learning_smoke` | Session history, memory proposals, evidence, and review boundaries |
 
 ## Documentation
@@ -349,7 +335,6 @@ agentloom schedules --project /path/to/project serve
 | [Tool Catalog](docs/en/tool_catalog.md) | Lazy implementation loading, toolsets, metadata, and extension rules |
 | [Skills](docs/en/skills_config.md) | Discovery, on-demand activation, and permission boundaries |
 | [Hooks](docs/en/hooks.md) | Explicit authorization, events, transforms, and failure semantics |
-| [Goal Mode](docs/en/goal_mode.md) | Continuation, completion ownership, budgets, resume, and schedules |
 | [Checkpoint and Runtime Storage](docs/en/checkpoint.md) | Run/task identity, evidence, recovery, and retention |
 | [Self-Learning v6](docs/en/self_learning.md) | History, candidates, review, approval, and promotion |
 | [Structured Run API](docs/en/run_observability.md) | Python receipts, typed failures, JSON, and JSONL |

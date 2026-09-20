@@ -24,7 +24,6 @@ from typing import Any
 from agentloom.application.definition import prepare_application_definition
 from agentloom.application.revision import application_revision
 from agentloom.application.run import (
-    ApplicationRunBudgetLimited,
     ApplicationRunError,
     ApplicationRunInterrupted,
     ApplicationRunResult,
@@ -46,7 +45,6 @@ from agentloom.runtime.checkpoint import CheckpointManager
 from agentloom.runtime.checkpoint.file_history import FileHistoryManager
 from agentloom.configuration import C, build_effective_agent_config, get_config
 from agentloom.configuration.config import bind_config, fresh_invocation_config
-from agentloom.runtime.goal import GoalBudgetLimitedError, normalize_goal_config
 from agentloom.runtime.heartbeat import SupervisorHeartbeat
 from agentloom.runtime.logging import (
     LoggingConfigBuilder,
@@ -407,6 +405,16 @@ def _execute_app(
                         event_start_offset = _task_events_size(checkpoint_mgr, task_id)
 
                     if is_resume and checkpoint_mgr is not None:
+                        with checkpoint_mgr.task_storage(task_id) as storage:
+                            try:
+                                storage.stat_file("goal.json")
+                            except FileNotFoundError:
+                                pass
+                            else:
+                                raise ValueError(
+                                    "Cannot resume a removed Goal-mode checkpoint; "
+                                    "start a new ordinary task"
+                                )
                         tree = checkpoint_mgr.load_task_tree(task_id)
                         if tree is None:
                             raise FileNotFoundError(
@@ -442,22 +450,11 @@ def _execute_app(
                             "interrupted",
                             "failed",
                             "crashed",
-                            "budget_limited",
                         }
                         if tree_status not in resumable_statuses:
                             raise ValueError(
                                 f"Checkpoint {task_id} is not resumable "
                                 f"(status={tree_status}); start a new task instead"
-                            )
-                        persisted_goal = checkpoint_mgr.load_goal(task_id)
-                        current_goal = normalize_goal_config(
-                            config,
-                            source=str(resolved_path),
-                        )
-                        if persisted_goal is not None and not current_goal.enabled:
-                            raise ValueError(
-                                "Cannot resume: checkpoint contains an active Goal but "
-                                "Goal mode is disabled in YAML"
                             )
                         if task_override is None:
                             persisted_task = tree.get("task_text")
@@ -560,13 +557,6 @@ def _execute_app(
                     log.info("Execution completed successfully.")
                     log.info("=" * 70)
                     lifecycle.complete_execution(agent_result)
-                except GoalBudgetLimitedError as exc:
-                    lifecycle.fail_execution(exc)
-                    log.warning(
-                        "Goal token budget reached. Checkpoint preserved for task_id=%s",
-                        task_id,
-                    )
-                    raise
                 except KeyboardInterrupt as exc:
                     lifecycle.fail_execution(exc)
                     raise
@@ -650,32 +640,9 @@ def _execute_app(
                     occurred_at=ended_at,
                     error=str(interrupted),
                     phase=lifecycle.phase,
-                    goal=durable_manifest_updates.get("goal"),
                 ),
             )
             raise interrupted from terminal_error
-
-        if isinstance(terminal_error, GoalBudgetLimitedError):
-            goal = dict(terminal_error.state.to_dict())
-            limited = ApplicationRunBudgetLimited(
-                str(terminal_error),
-                run=public_run,
-                phase=lifecycle.phase,
-                original_error=terminal_error,
-                goal=goal,
-            )
-            _emit_lifecycle_event(
-                event_sink,
-                RunLifecycleEvent(
-                    event="run.budget_limited",
-                    run=public_run,
-                    occurred_at=ended_at,
-                    error=str(limited),
-                    phase=lifecycle.phase,
-                    goal=goal,
-                ),
-            )
-            raise limited from terminal_error
 
         if not isinstance(terminal_error, Exception):
             detail = str(terminal_error)
@@ -703,7 +670,6 @@ def _execute_app(
                 occurred_at=ended_at,
                 error=message,
                 phase=lifecycle.phase,
-                goal=durable_manifest_updates.get("goal"),
             ),
         )
         raise failure from terminal_error
@@ -713,7 +679,6 @@ def _execute_app(
         run=public_run,
         started_at=started_at,
         ended_at=ended_at,
-        goal=durable_manifest_updates.get("goal"),
     )
     _emit_lifecycle_event(
         event_sink,
@@ -722,7 +687,6 @@ def _execute_app(
             run=public_run,
             occurred_at=ended_at,
             output=lifecycle.result,
-            goal=durable_manifest_updates.get("goal"),
         ),
     )
     return application_result
@@ -748,8 +712,6 @@ def run_app(
             file_logging=file_logging,
         ).output
     except ApplicationRunInterrupted as exc:
-        raise exc.original_error from exc
-    except ApplicationRunBudgetLimited as exc:
         raise exc.original_error from exc
     except ApplicationRunError as exc:
         if exc.phase != "execution" or isinstance(

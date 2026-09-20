@@ -33,7 +33,6 @@ from agentloom.runtime.agent_runtime import (
     RuntimeRequirements,
 )
 from agentloom.runtime.error_recovery import RUNTIME_FEEDBACK_RAW_KEY
-from agentloom.runtime.goal import GoalCompleteError, GoalState
 from agentloom.runtime.model_binding import ModelTurnBinding
 from agentloom.runtime.model_protocol import (
     FunctionCallItem,
@@ -406,16 +405,8 @@ def test_adapter_rejects_unsupported_requirements_before_native_execution() -> N
     assert observed[0].details["category"] == "unsupported_capability"
 
 
-def test_adapter_preserves_goal_and_keyboard_interrupt_control_flow() -> None:
-    goal_error = GoalCompleteError(
-        GoalState.create(
-            objective="finish",
-            objective_fingerprint="test",
-            token_budget=None,
-        )
-    )
-
-    for control_error in (goal_error, KeyboardInterrupt()):
+def test_adapter_preserves_keyboard_interrupt_control_flow() -> None:
+    for control_error in (KeyboardInterrupt(),):
         native = _NativeRuntime(_NativeResult(output=None))
 
         def fail(
@@ -457,7 +448,7 @@ def test_adapter_rejects_unsuccessful_native_state() -> None:
         runtime.run(AgentRuntimeRequest(task="inspect"))
 
 
-def test_adapter_preserves_max_steps_for_goal_owner_to_settle() -> None:
+def test_adapter_preserves_max_steps_terminal_state() -> None:
     native = _NativeRuntime(_NativeResult(output=None, state="max_steps_error"))
     runtime = _runtime(native)
 

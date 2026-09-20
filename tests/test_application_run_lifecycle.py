@@ -36,7 +36,6 @@ def test_lifecycle_defers_agent_checkpoint_until_run_owner_commits() -> None:
         runtime_result=runtime_result,
         result="done",
         error=None,
-        goal={"status": "complete"},
     )
     lifecycle.settle_reported_agent_invocation()
 
@@ -54,7 +53,6 @@ def test_lifecycle_defers_agent_checkpoint_until_run_owner_commits() -> None:
         result="done",
         error=None,
     )
-    assert lifecycle.goal == {"status": "complete"}
 
 
 def test_lifecycle_collects_events_returned_only_in_runtime_result() -> None:
@@ -78,7 +76,6 @@ def test_lifecycle_collects_events_returned_only_in_runtime_result() -> None:
         ),
         result="done",
         error=None,
-        goal=None,
     )
 
     assert lifecycle.runtime_events_snapshot() == (event,)
@@ -105,7 +102,6 @@ def test_finalization_failure_replaces_provisional_success_checkpoint() -> None:
         runtime_result=runtime_result,
         result="done",
         error=None,
-        goal=None,
     )
     lifecycle.complete_execution("done")
     lifecycle.commit_checkpoint(
@@ -224,7 +220,6 @@ def test_terminal_checkpoint_precedes_coordinator_deactivation(monkeypatch) -> N
         runtime_result=runtime_result,
         result="done",
         error=None,
-        goal=None,
     )
     lifecycle.complete_execution("done")
     lifecycle.commit_checkpoint(
@@ -256,7 +251,6 @@ def test_checkpoint_resources_close_when_coordinator_deactivation_fails(
         runtime_result=None,
         result=None,
         error=RuntimeError("agent failed"),
-        goal=None,
     )
     lifecycle.settle_reported_agent_invocation()
     monkeypatch.setattr(

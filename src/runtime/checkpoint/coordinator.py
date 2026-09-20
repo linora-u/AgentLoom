@@ -41,7 +41,7 @@ from agentloom.runtime.logging import get_logger
 
 _logger = get_logger(__name__)
 _TERMINAL_CHECKPOINT_STATUSES = frozenset(
-    {"completed", "failed", "interrupted", "budget_limited"}
+    {"completed", "failed", "interrupted"}
 )
 
 # Single ContextVar — replaces the previous two (_current_checkpoint_manager
@@ -128,15 +128,6 @@ class CheckpointCoordinator:
 
         return self._cm.replace_todos(self._task_id, agent_path, items)
 
-    def load_goal(self) -> dict[str, Any] | None:
-        """Load the root task's durable Goal state."""
-
-        return self._cm.load_goal(self._task_id)
-
-    def save_goal(self, state: Any) -> dict[str, Any]:
-        """Atomically replace the root task's durable Goal state."""
-
-        return self._cm.save_goal(self._task_id, state)
 
     # ── ContextVar lifecycle ─────────────────────────────────────────
 
