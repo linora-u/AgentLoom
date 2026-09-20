@@ -151,7 +151,10 @@ async function run(frame: Frame, abort: AbortController) {
     reportRetry = attempt => event("model", {phase: "retry", attempt});
     const task = Object.keys(p.additional_args).length ? `${p.task}\n\nAgentLoom task inputs (JSON):\n${JSON.stringify(p.additional_args)}` : p.task;
     if (p.checkpoint && !p.record_task) {
-      if (restoredPhase !== "complete") await session.agent.continue();
+      if (restoredPhase !== "complete") await session.sendCustomMessage({
+        customType: "agentloom_resume", display: false,
+        content: "Resume the interrupted task from the restored conversation and committed tool results. Do not repeat completed work.",
+      }, {triggerTurn: true});
     } else await session.prompt(task, {expandPromptTemplates: false});
     const last = session.messages.at(-1);
     if (nativeIncomplete || modelFailure.timedOut || unavailableTool || abort.signal.aborted ||

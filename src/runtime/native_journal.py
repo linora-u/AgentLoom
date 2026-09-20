@@ -12,7 +12,7 @@ import json
 import os
 from collections.abc import Iterator, Mapping
 from contextlib import contextmanager
-from dataclasses import asdict
+from dataclasses import asdict, replace
 from pathlib import Path
 from threading import RLock
 from typing import Any
@@ -27,6 +27,7 @@ from agentloom.runtime.native_tools import (
 )
 from agentloom.runtime.storage import SecureDirectory
 from agentloom.runtime.tool_protocol import ToolCallRecord
+from agentloom.runtime.context import RuntimeContext, validate_runtime_owned_path
 
 
 def snapshot(value: Any) -> Any:
@@ -54,6 +55,26 @@ def journal_entry(data: dict[str, Any]) -> NativeJournalEntry:
     return NativeJournalEntry(
         grant, data["state"], NativePrepareRequest(identity, tool, request["cwd"], request["raw_arguments"]), ack
     )
+
+
+def recovery_receipt(runtime: RuntimeContext, identity: NativeCallIdentity) -> dict[str, Any]:
+    """Read original-Run evidence and conservatively settle abandoned execution."""
+    if (identity.application_id, identity.task_id) != (runtime.application_id, runtime.task_id):
+        raise ValueError("Recovered native call belongs to another task")
+    directory = replace(runtime, run_id=identity.run_id).run_dir / "native-tools"
+    validate_runtime_owned_path(directory, root=runtime.root_dir)
+    if not directory.is_dir():
+        raise ValueError("Recovered native journal is missing")
+    journal = NativeCallJournal(directory)
+    try:
+        with journal.transaction(identity) as data:
+            if data.get("version") != 1 or data.get("request", {}).get("identity") != snapshot(identity):
+                raise ValueError("Recovered native journal identity mismatch")
+            if data.get("state") == "executing":
+                data["state"] = "uncertain"
+            return snapshot(data)
+    finally:
+        journal.close()
 
 
 class NativeCallJournal:

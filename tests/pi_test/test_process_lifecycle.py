@@ -16,14 +16,14 @@ import pytest
 from tests.pi_test.test_application import model_service, project
 
 
-def start_cli(root: Path, app: Path, env=None):
+def start_cli(root: Path, app: Path, env=None, *, resume=None):
     code = (
         "from pathlib import Path\nfrom agentloom.configuration.config import bind_config,load_project_config\n"
         "from agentloom.__main__ import main\n"
         "import sys\nwith bind_config(load_project_config(Path(sys.argv[1]))):\n"
-        " main(['run',sys.argv[2],'--no-file-log','--output-format','jsonl'])\n"
+        " main(['run',sys.argv[2],'--no-file-log','--output-format','jsonl',*sys.argv[3:]])\n"
     )
-    return subprocess.Popen([sys.executable, "-c", code, str(root), str(app)], stdout=subprocess.PIPE,
+    return subprocess.Popen([sys.executable, "-c", code, str(root), str(app), *(['--resume', resume] if resume else [])], stdout=subprocess.PIPE,
                             stderr=subprocess.PIPE, text=True, env=env, start_new_session=True)
 
 
