@@ -23,15 +23,20 @@ class SmolagentsToolGatewayProxy(Tool):
         definition: ToolDefinition,
     ) -> None:
         parameters = dict(definition.parameters)
-        properties = parameters.get("properties")
+        properties = parameters.get("properties", {})
         if not isinstance(properties, dict):
             raise ValueError(
                 f"Tool {definition.name!r} parameters must contain object properties"
             )
         proxy_inputs = deepcopy(properties)
-        for schema in proxy_inputs.values():
-            if isinstance(schema, dict):
-                schema.setdefault("description", "")
+        for name, schema in proxy_inputs.items():
+            if not isinstance(schema, dict):
+                schema = proxy_inputs[name] = {}
+            # smol requires local type metadata even for $ref/anyOf/boolean
+            # schemas. The provider still receives the exact canonical schema
+            # below, and the Gateway enforces it before tool execution.
+            schema.setdefault("type", "any")
+            schema.setdefault("description", "")
         self.name = definition.name
         self.description = definition.description
         self.inputs = proxy_inputs
