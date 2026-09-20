@@ -4,7 +4,7 @@
 
 **Blocked by:** 03：冻结基座与平台边界，交付可并行的公共基线
 
-**Status:** ready-for-agent — 03 已验收；从 `refs/agentloom/ticket03-frozen` 解析准确 SHA 后可新建独立 worktree。本票尚未实施。
+**Status:** completed — 8 条验收已完成；见 [实现与交接](07-implementation.md)、[验证记录](07-validation.json)。增量历史与固定交接引用保留，main Changes 交付后清理本票 worktree。
 
 **Required:** Yes — 本票属于最终交付必做项。
 
@@ -22,14 +22,14 @@
 
 ## Acceptance criteria
 
-- [ ] 使用锁定的真实发布 SDK 和原生 AgentSession；仅模型响应可以确定性替换，不能 mock runtime 或 monkeypatch 主入口绕过注册。
-- [ ] 现有模型 profile 转换为 Pi 原生请求，支持项准确生效，不支持参数/协议和缺依赖明确失败。
-- [ ] 由协调 session 在本票完成前纳入 registry/readiness 小型接线；配置经真实公共校验，调用经 execute_app 返回正常 Run receipt。
-- [ ] 明确无工具的 manifest 传入 Pi，不自动发现基础工具、扩展、用户目录配置或 smol Todo/final_answer。
-- [ ] 无工具应用经过真实 YAML 装配后仍不加载历史 smol 默认基础工具；不通过复制自研 read/write/Shell 实现来满足 Pi 入口。
-- [ ] 模型调用期间的取消、进程退出和协议损坏能终结请求并清理本票创建的进程，CLI stdout 不被协议或诊断污染。
-- [ ] 无 Goal 情形的 Stop/终态映射正确；不得提前宣告工具、Worker、Goal 或恢复可用。
-- [ ] 建立独立 bridge manifest、完整 lock 与构建入口，后续发行任务消费这一产物而不接管或重写其锁文件。
+- [x] 使用锁定的真实发布 SDK 和原生 AgentSession；仅模型响应可以确定性替换，不能 mock runtime 或 monkeypatch 主入口绕过注册。
+- [x] 现有模型 profile 转换为 Pi 原生请求，支持项准确生效，不支持参数/协议和缺依赖明确失败。
+- [x] 由协调 session 在本票完成前纳入 registry/readiness 小型接线；配置经真实公共校验，调用经 execute_app 返回正常 Run receipt。
+- [x] 明确无工具的 manifest 传入 Pi，不自动发现基础工具、扩展、用户目录配置或 smol Todo/final_answer。
+- [x] 无工具应用经过真实 YAML 装配后仍不加载历史 smol 默认基础工具；不通过复制自研 read/write/Shell 实现来满足 Pi 入口。
+- [x] 模型调用期间的取消、进程退出和协议损坏能终结请求并清理本票创建的进程，CLI stdout 不被协议或诊断污染。
+- [x] 无 Goal 情形的 Stop/终态映射正确；不得提前宣告工具、Worker、Goal 或恢复可用。
+- [x] 建立独立 bridge manifest、完整 lock 与构建入口，后续发行任务消费这一产物而不接管或重写其锁文件。
 
 ## Handoff
 
