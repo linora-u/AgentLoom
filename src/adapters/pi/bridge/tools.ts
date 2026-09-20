@@ -63,7 +63,7 @@ export function nativeTools(manifest: Obj[], cwd: string, invoke: Callback, iden
           const capture = await captured.save(grant, result, agentDir);
           const settled = await invoke({method: "tool_settle", capture, outcome: {identity: grant.identity,
             authorization_id: grant.authorization_id, status: uncertain ? "uncertain" : error ? "error" : "completed",
-            output: error || uncertain ? null : result, error}});
+            output: null, error}});
           if (settled.state !== "committed" || !settled.commit_id || !isDeepStrictEqual(settled.identity, grant.identity) ||
               settled.authorization_id !== grant.authorization_id) throw new Error("Native result not durably committed");
           committed = true;

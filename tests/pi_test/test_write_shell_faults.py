@@ -13,7 +13,7 @@ from tests.pi_test.test_process_lifecycle import sdk_node, start_cli, assert_gon
 
 
 @pytest.mark.parametrize('tool', ['write', 'bash'])
-@pytest.mark.parametrize('boundary', ['before_dispatch', 'before_settle', 'after_commit', 'missing_capture'])
+@pytest.mark.parametrize('boundary', ['before_dispatch', 'before_settle', 'after_commit', 'missing_capture', 'omitted_capture', 'null_capture'])
 def test_sdk_side_effect_and_journal_agree_after_fault(tmp_path, tool, boundary):
     target = tmp_path / 'effect.txt'
     binary = sdk_node()
@@ -43,6 +43,11 @@ for line in p.stdout:
    stop(value);break
   if {boundary!r}=='missing_capture' and method=='tool_settle':
    Path(sys.argv[-1], 'capture-'+value['payload']['outcome']['authorization_id']+'.json').unlink()
+   Path({str(marker)!r}).write_text(json.dumps({{'pid':p.pid,'frame':value}}))
+  if {boundary!r} in ('omitted_capture','null_capture') and method=='tool_settle':
+   if {boundary!r}=='omitted_capture':value['payload'].pop('capture')
+   else:value['payload']['capture']=None
+   line=(json.dumps(value)+'\\n').encode()
    Path({str(marker)!r}).write_text(json.dumps({{'pid':p.pid,'frame':value}}))
  sys.stdout.buffer.write(line);sys.stdout.buffer.flush()
 p.wait()
@@ -79,7 +84,7 @@ os._exit(p.returncode if p.returncode >= 0 else 1)
             assert entry['state'] == ack['state'] == 'committed'
             assert entry['record'] == ack['record']
             assert entry['commit_id'] == ack['commit_id']
-            assert entry['record']['metadata']['native']['result_scope']['source_completeness'] == 'complete'
+            assert entry['record']['metadata']['native']['result_scope']['source_completeness'] == ('unknown' if tool == 'bash' else 'complete')
         else:
             assert entry['state'] == 'uncertain'
             assert 'record' not in entry

@@ -91,7 +91,7 @@ class CaptureFile(WireValue):
 class Settle(WireValue):
     method: Literal["tool_settle"]
     outcome: NativeExecutionOutcome = Field(repr=False)
-    capture: CaptureFile | None = None
+    capture: CaptureFile
 
 
 class ModelPrepare(WireValue):

@@ -362,7 +362,7 @@ class NativeToolHost:
             evidence: tuple[dict[str, str], ...] = ()
             evidence_status = "none"
             extractor = self._extractors.get(grant.tool.visible_name)
-            if outcome.status == "completed" and extractor is not None:
+            if outcome.status == "completed" and extractor is not None and (capture is None or capture.complete is True):
                 from agentloom.runtime.trusted_memory_evidence import extract_trusted_memory_evidence
 
                 try:
@@ -375,27 +375,41 @@ class NativeToolHost:
 
             output = snapshot(actual["output"])
             compressible = raw_output if capture is not None else output
+            if capture is not None and not isinstance(compressible, str) and len(json.dumps(output)) > 262144:
+                compressible = json.dumps(raw_output, ensure_ascii=False, indent=2)
             if outcome.status == "completed" and isinstance(compressible, str):
                 try:
-                    compressed = _compress_tool_result(
-                        tool_name=grant.tool.visible_name,
-                        source=f"native:{grant.tool.provider}:{grant.identity.call_id}",
-                        result=compressible,
-                    )
+                    from agentloom.runtime.context_engine.runtime import get_active_context_engine
+                    engine = get_active_context_engine()
+                    source = f"native:{grant.tool.provider}:{grant.identity.call_id}"
+                    if capture is not None and len(json.dumps(output).encode()) > 262144 and engine is not None:
+                        compressed = engine.capture_tool_result(compressible, tool_name=grant.tool.visible_name,
+                            source=source, max_preview_chars=16384) or compressible
+                    else:
+                        compressed = _compress_tool_result(tool_name=grant.tool.visible_name,
+                            source=source, result=compressible)
                     if isinstance(output, dict) and isinstance(output.get("content"), list):
                         if compressed != compressible:
-                            output = {**output, "content": [{"type": "text", "text": compressed}]}
+                            output = {"content": [{"type": "text", "text": compressed}]}
                     else:
                         output = compressed
                 except Exception:
                     output = snapshot(actual["output"])
+            # Even with compression disabled or failed, a terminal display must
+            # not overflow a bridge frame after the side effect has occurred.
+            # The complete result is committed below and remains addressable.
+            if capture is not None and len(json.dumps(output).encode()) > 262144:
+                output = {"content": [{"type": "text", "text":
+                    "Result display omitted due to size. Original result: "
+                    + str(self._journal.artifact_path(grant.identity)) + "#/raw_output"}]}
             commit_id = uuid4().hex
             output_digest = hashlib.sha256(
                 json.dumps(raw_output, sort_keys=True, ensure_ascii=False).encode()
             ).hexdigest()
             result_scope = {
-                    "coverage": ("complete_query" if capture.complete and outcome.status == "completed" else "partial_query") if capture is not None else ("executor_result_only" if outcome.status == "completed" else "none"),
-                    "source_completeness": ("complete" if capture.complete and outcome.status == "completed" else "partial") if capture is not None else "unknown",
+                    "coverage": ("captured_stream" if capture.complete is None else "complete_query" if capture.complete and outcome.status == "completed" else "partial_query") if capture is not None else ("executor_result_only" if outcome.status == "completed" else "none"),
+                    "source_completeness": ("unknown" if capture.complete is None else "complete" if capture.complete and outcome.status == "completed" else "partial") if capture is not None else "unknown",
+                    "limitations": list(capture.limitations) if capture is not None else [],
                     "query_limits": {key: value for key, value in grant.final_arguments.items() if key in {"offset", "limit", "max_results", "max_count", "timeout"}},
                     "display_truncated": bool(capture and capture.display_truncated) or output != actual["output"],
                     "raw_artifact": {"journal": str(self.journal_directory), "path": str(self._journal.artifact_path(grant.identity)), "json_pointer": "/raw_output", "identity": snapshot(grant.identity), "sha256": output_digest},

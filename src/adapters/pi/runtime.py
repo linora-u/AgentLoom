@@ -179,9 +179,11 @@ class PiRuntime:
                 return PrepareResult(method="tool_dispatch", authorization=grant)
             if native is not None and isinstance(payload, Settle):
                 from agentloom.adapters.pi.capture import read_capture
-                capture = read_capture(self.transport.private_directory, payload.outcome.authorization_id,
-                    payload.capture.sha256, completed=payload.outcome.status == "completed") if payload.capture else None
-                settled = native.settle(payload.outcome, capture=capture)
+                if payload.outcome.output is not None:
+                    raise AgentRuntimeError("Pi results must use the capture artifact", category="internal")
+                output, capture = read_capture(self.transport.private_directory, payload.outcome.authorization_id,
+                    payload.capture.sha256, completed=payload.outcome.status == "completed")
+                settled = native.settle(replace(payload.outcome, output=output), capture=capture)
                 if isinstance(settled, NativeCommitAck):
                     with platform_lock:
                         if settled.commit_id not in emitted_commits:
