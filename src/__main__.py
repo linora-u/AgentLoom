@@ -184,40 +184,34 @@ def install_runtime(runtime: str):
 
 
 def _has_transient_provider_error(error: BaseException) -> bool:
-    """Return true only for a trusted transient LiteLLM exception chain."""
-    from agentloom.adapters.litellm.litellm_retry import (
-        ProviderCallBudgetExceeded,
-    )
+    """Classify trusted provider failures without loading a provider SDK."""
+    from agentloom.runtime.agent_runtime import AgentRuntimeError
     from agentloom.runtime.model_protocol import ModelProtocolError
-    from litellm.exceptions import (
-        APIConnectionError,
-        AuthenticationError,
-        BadRequestError,
-        InternalServerError,
-        PermissionDeniedError,
-        RateLimitError,
-        ServiceUnavailableError,
-        Timeout,
-    )
 
-    transient_types = (
-        Timeout,
-        APIConnectionError,
-        InternalServerError,
-        ServiceUnavailableError,
-        RateLimitError,
+    # These exception instances can only exist if their modules were loaded
+    # during execution. Cold-importing LiteLLM here can fetch its cost map and
+    # delay an already terminated Pi invocation during failure reporting.
+    litellm_errors = sys.modules.get("litellm.exceptions")
+    transient_types = () if litellm_errors is None else (
+        litellm_errors.Timeout,
+        litellm_errors.APIConnectionError,
+        litellm_errors.InternalServerError,
+        litellm_errors.ServiceUnavailableError,
+        litellm_errors.RateLimitError,
     )
     denied_types = (
         SystemExit,
         KeyboardInterrupt,
         click.ClickException,
         click.exceptions.Exit,
-        AuthenticationError,
-        PermissionDeniedError,
-        BadRequestError,
-        ProviderCallBudgetExceeded,
         ModelProtocolError,
     )
+    if litellm_errors is not None:
+        denied_types += (litellm_errors.AuthenticationError, litellm_errors.PermissionDeniedError,
+                         litellm_errors.BadRequestError)
+    retry_module = sys.modules.get("agentloom.adapters.litellm.litellm_retry")
+    if retry_module is not None:
+        denied_types += (retry_module.ProviderCallBudgetExceeded,)
     # A smol exception can only exist if its SDK is already loaded. Do not
     # import an optional runtime just to classify another runtime's failure.
     smol = sys.modules.get("smolagents")
@@ -233,6 +227,10 @@ def _has_transient_provider_error(error: BaseException) -> bool:
         visited.add(identity)
         if isinstance(current, denied_types):
             return False
+        if isinstance(current, AgentRuntimeError):
+            if current.category != "provider" or not current.retryable:
+                return False
+            transient_seen = True
         if isinstance(current, transient_types):
             transient_seen = True
         if current.__cause__ is not None:
