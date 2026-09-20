@@ -270,9 +270,12 @@ def _walk_definitions(
                     )
                     from agentloom.application.runtime_options import normalize_runtime_options
 
-                    normalize_runtime_options(config, snapshot=snapshots[path], agent_root=project_root)
+                    runtime_options, _ = normalize_runtime_options(config, snapshot=snapshots[path], agent_root=project_root)
                     # These schema/path checks depend on effective lower layers.
-                    hook_plan = validate_effective_definition(snapshots[path], project_root, str(path))
+                    hook_plan = validate_effective_definition(
+                        snapshots[path], project_root, str(path),
+                        runtime_id=config.get("agent_runtime"), runtime_options=runtime_options,
+                    )
                     AgentConfigNormalizer.validate_agent_runtime_config(
                         config, effective_config=snapshots[path].values, hook_plan=hook_plan,
                     )
@@ -313,7 +316,10 @@ def _walk_definitions(
     return ApplicationDefinitionInspection(nodes, snapshots, tuple(errors), errors_by_path)
 
 
-def validate_effective_definition(snapshot: EffectiveAgentConfigSnapshot, root: Path, source: str):
+def validate_effective_definition(
+    snapshot: EffectiveAgentConfigSnapshot, root: Path, source: str, *,
+    runtime_id: object = "smolagents", runtime_options: dict | None = None,
+):
     from agentloom.application.validation import build_normalized_execution_config
     from agentloom.runtime.hooks.config import HookConfigLayer, HookPlanCompiler
 
@@ -327,9 +333,13 @@ def validate_effective_definition(snapshot: EffectiveAgentConfigSnapshot, root: 
             for priority, layer in enumerate(snapshot.layers)
         )
     )
-    normalized = build_normalized_execution_config(snapshot.values, source_name=source, agent_root=root)
-    if normalized.prompt_template_path and not Path(normalized.prompt_template_path).is_file():
-        raise ValueError(f"Prompt template does not exist: {normalized.prompt_template_path}")
+    if runtime_id == "smolagents":
+        prompt_path = (
+            runtime_options.get("prompt_template_path") if runtime_options is not None
+            else build_normalized_execution_config(snapshot.values, source_name=source, agent_root=root).prompt_template_path
+        )
+        if prompt_path and not Path(prompt_path).is_file():
+            raise ValueError(f"Prompt template does not exist: {prompt_path}")
     from agentloom.adapters.mcp.config import parse_mcp_yaml_value
 
     snapshot.values["_mcp_settings_snapshot"] = parse_mcp_yaml_value(
