@@ -1,12 +1,12 @@
-# Pi 并行开发与 main Changes 交付计划
+# Pi 并行开发与 main 合入计划
 
 更新：2026-09-20。配套：[核心规格](../../specs/agent-runtime-pi-integration.md)、[执行索引](README.md)、[工具归属](tool-ownership.md)。本文件使用 01–14 票号；旧 C0/S1/G1/P1 宽阶段不再作为另一套排期依据。
 
 ## 1. 当前基线
 
-01/02/03 已完成。01/02 的历史提交 45ddbfdc、42662ed6、8d63be5f 保留；03 受检实现为 `9f08aa09ce3784d9c55eb82b01571256ded36ecf`，冻结引用 `refs/agentloom/ticket03-frozen` 为 `9e19d18285f2d2ea8e7b7d11c26e315760d153a3`。main HEAD 为 `9d5a88915efbd402d0f2697318125933fc1500e0`，相对冻结提交只增加七份研究文档；当前工作目录另有未提交的源码和文档成果。
+01/02/03 已完成。01/02 的历史提交 45ddbfdc、42662ed6、8d63be5f 保留；03 受检实现为 `9f08aa09ce3784d9c55eb82b01571256ded36ecf`，冻结引用 `refs/agentloom/ticket03-frozen` 为 `9e19d18285f2d2ea8e7b7d11c26e315760d153a3`。此前 main 基线为 `9d5a88915efbd402d0f2697318125933fc1500e0`。2026-09-20 按维护者最新要求，main 已快进到 `da4a049d`，纳入 04/05/07/08 的全部已验收改动并保留分阶段提交；源码、测试和交接文档已正式进入分支历史。
 
-07 交付时，`codex/pi-integration` 更新到 `0b5c4f4ed32244ef97b107361dcb45dbe2be149e`，包含 03、05、07；07 固定引用为 `refs/agentloom/ticket07-frozen`（`eca311eeca103dc6cd64eef959428e8b01eb22b2`）。04 交付时 integration 包含 04+05+07，历史冻结入口为 `refs/agentloom/ticket04-05-integrated`。08 已完成，见 [实施与验证](08-implementation.md)；共同冻结入口 `refs/agentloom/ticket08-frozen` 包含 04/05/07/08。**新 worktree 基于提交创建，不会自动获得 main 的未提交 Changes。** 06 的 04+05 与 09 的 05+07+08 前置均已集成验证，现在可以分别新开 worktree 并行；建议两者使用 08 冻结入口，避免遗漏最新公共校验接线。领取前重新解析 integration，不能把此处记录的交付 SHA 当成永远不变的分支头。
+07 交付时，`codex/pi-integration` 更新到 `0b5c4f4ed32244ef97b107361dcb45dbe2be149e`，包含 03、05、07；07 固定引用为 `refs/agentloom/ticket07-frozen`（`eca311eeca103dc6cd64eef959428e8b01eb22b2`）。04 交付时 integration 包含 04+05+07，历史冻结入口为 `refs/agentloom/ticket04-05-integrated`。08 已完成，见 [实施与验证](08-implementation.md)；共同冻结入口 `refs/agentloom/ticket08-frozen` 包含 04/05/07/08。**新 worktree 基于提交创建，不会自动获得 main 的未提交 Changes。** 06 的 04+05 与 09 的 05+07+08 前置均已集成验证，现在可以分别新开 worktree 并行；建议两者从包含 08 冻结提交的最新 main 开工，同时获得最新交付规则与公共校验接线。领取前重新解析 integration，不能把此处记录的交付 SHA 当成永远不变的分支头。
 
 03 记录的完整回归为 4225 passed、1 skipped，SDK 为 13 passed；逐项证据见 [实现报告](03-implementation.md) 和 [验证记录](03-validation.json)。历史报告中的 main Changes 状态保留为当时的交付记录，不代表现在的 Git 状态。已有工作区的本次核对快照如下；领取或清理前重新检查，不把表内路径存在当作任务待开发。
 
@@ -124,7 +124,7 @@
 
 后续 06、09、10、11、12、13 同样可以开新 session，但必须等各自 Blocked by 已集成。05→06 和 07→09→10→12 建议复用负责该方向的 session；这是保持上下文的安排，不要求始终使用同一会话。分支或目录已存在时先核对所属任务，不覆盖重用。
 
-main 的未提交 Changes 不会自动进入其他 worktree。本次票据修订已随冻结入口形成独立文档提交；继续开发的分支按文件所有权同步并记录 SHA。这不要求自动提交 main，也不重写 03 的历史验收记录。
+main 的未提交 Changes 不会自动进入其他 worktree。本次票据修订已随冻结入口形成独立文档提交；继续开发的分支按文件所有权同步并记录 SHA。最新交付规则要求正式合入 main；03 等历史验收记录仍保留当时的状态，不倒改历史。
 
 ## 6. 逐票集成与能力开放
 
@@ -170,13 +170,13 @@ uv run pytest tests/test_runner.py tests/test_cli_run_observability.py tests/tes
 
 真实 provider smoke 按实际配置单独记录 PASS/FAIL/NOT-RUN。未运行不能算通过；已失败要修复或撤回对应支持后复验，不能重新标为 NOT-RUN。所有尝试用新的私有证据目录，不复用用户运行目录。
 
-## 8. main Changes 交付与 worktree 清理
+## 8. 正式合入 main 与 worktree 清理
 
 1. 各实现者提交自己范围的成果，协调者逐票合入 integration，保留提交与验收证据。
 2. 开始 14 前确认全部依赖已集成，清理没有消费者的内部过渡形式，在同一候选上完成 A01–A14、既有必需 CI 和最终安装验证。
 3. 交付前重新检查 main 及其未提交用户改动。需要时先将新的 main 变化并入候选并复验，不能覆盖现有 Changes 或用重置消除冲突。
-4. 按维护者最新要求，把已验证成果展开到主工作区 main 的未提交、未暂存 Changes；不自动新增 main 提交、不推送。记录候选 SHA、main 基线、交付差异和内容核对结果。
+4. 按维护者 2026-09-20 最新要求，将已验收提交正式合入 main，保留分阶段提交；可快进时直接快进，有分歧则集成验证后合并。不要只把成果留在 Changes。记录候选 SHA、main 合入前后提交及内容校验；未获额外指令不推送远端。
 5. 核对每个本次创建的 worktree：提交已集成，未提交源码/配置已处理，所需证据已保存；随后删除这些 worktree。共享虚拟环境引用、用户数据和其他任务的 worktree 不在清理范围。
-6. 保留实现分支和仓库外验收日志作为可恢复来源。最终报告说明 Changes 位置、验证范围和清理结果。
+6. 保留实现分支和仓库外验收日志作为可恢复来源。最终报告说明 main 提交、验证范围和清理结果。
 
-未来只有维护者明确改变交付方式时，才改为提交/PR/推送 main。单票完成、合入 integration、交付 main Changes 和清理 worktree 分别记录；不能用其中一步替代其余步骤，也不能用历史状态覆盖已经新增的验收报告。
+此次要求已替代先前“只交付 main Changes”的规则；PR 与远端推送仍需另有指令。单票完成、合入 integration、正式合入 main 和清理 worktree 分别记录；不能用其中一步替代其余步骤，也不能用历史状态覆盖已经新增的验收报告。
