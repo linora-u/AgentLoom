@@ -9,7 +9,9 @@
 公共入口仍是 `AgentRuntime.run(AgentRuntimeRequest)`、`snapshot()`、`close()`，类型位于 `src/runtime/agent_runtime.py`。Application 不消费 smol step 或 Pi message，也不要求未来 CLI/SDK 基座采用 Node/JSONL。
 
 - `RuntimeDefinition` 给出实例、角色、指令、模型选择、已选工具、能力要求和后端 options；模型选择不要求 Python `ModelTurnBinding`。
+- `RuntimeDefinition.tool_manifest` 是与已选工具逐项匹配的冻结快照，供 adapter 直接消费。公共 `tool_manifest_snapshot` 校验名称唯一、集合与 schema 一致；旧 ToolGateway 没有 metadata 扩展时，从 definitions 生成明确的 external/python 条目，不猜测提供方，也不丢失已选工具。
 - `RuntimeModelSelection.settings` 是所选 profile 的私有快照；`request_headers` 是实例真正生效的 headers，优先级为全局 → Application → Agent → 模型 profile，header 名按大小写不敏感覆盖。解析实现共用 `configuration/model_request_headers.py`。
+- header 合并在有效配置构造时逐层完成，同时覆盖直接 headers 和自定义 header profile。不能先按大小写敏感的字典深合并，再依靠最终字典顺序判断来源优先级。
 - settings、headers、固定参数和原始工具参数可能含私密数据。它们只进入授权的实例传输/执行，不进入公开 metadata、repr、日志或指纹。协议解析错误不回显输入。
 - `runtime_options` 继续使用 02 的来源归一化与 smol 旧字段兼容；其他基座不必理解 smol 的规划、Todo 或摘要参数。
 - 结果状态仍为 success / max_steps_error / interrupted / failed；错误分类、usage、checkpoint envelope 继续使用现有合同。工具终态仍为 completed / error / blocked。
@@ -26,6 +28,8 @@
 | `src/tools/optional_catalog.py` | 08 | 10 个专业工具，含 AST/LSP、大纲和 Markdown |
 
 `src/tools/catalog.py` 聚合登记，不加载执行实现；`loader.py` 仅加载选中的实现，并把其不可变归属信息带到 binding。Goal、Worker 是应用装配时产生的平台工具；final_answer 是 smol 注入的基础工具。动态外部 Python 工具未声明归属时标记为 external/python，不按同名 builtin 猜测提供方。
+
+各登记分区显式声明 operation 与 command_parameter。公共 Gateway 只投影 metadata，不通过 shell_tool 等基座工具名推导执行类别；Todo 和后台任务控制也不冒充文件写入。
 
 `ToolManifestEntry` 位于 `src/runtime/native_tools.py`。字段包括 logical_name、visible_name、owner、provider、capability、operation、parameters、path_parameters、command_parameter 和私有 fixed_arguments。`AgentLoomToolGateway.manifest` 只包含实际选择的工具；smol 的包装 Gateway 补上自己的 Todo/terminal metadata。模型看到的 schema 仍来自原 `ToolDefinition`。
 
@@ -49,7 +53,7 @@
 2. host 依次执行已配置的 PreToolUse 变换、严格 schema 校验、CoreToolGuard/授权和必要写前保护。任何失败都不给执行授权。
 3. `NativePreparation` 要么返回 `NativeAuthorization`，要么返回 blocked/error `ToolCallRecord`，两者不能同时存在。
 4. 授权绑定 Application、task、Run、instance、call、提供方、完整 manifest、cwd 与最终参数；原生 session/parent 锚点在可提供时一起绑定。`require_match` 拒绝任一错配。JSON 参数快照不会因为调用方随后改了原 dict 而改变。
-5. **授权值本身不是一次性存储。** 05 必须持久保存消费状态，在授权发往执行器之前记录 executing，独立执行门检查并消费一次批准。不能依赖 Pi 吞异常的 observer 去阻止执行。
+5. **授权值本身不是一次性存储。** 05 必须持久保存消费状态，在授权发往执行器之前记录 executing，独立执行门以 host 保存的批准为权威，校验 authorization_id 和完整最终参数，再消费一次批准。不能拿收到的参数自我校验，也不能依赖 Pi 吞异常的 observer 去阻止执行。
 6. `NativeExecutionOutcome` 的 completed/error 经过 host 原文产物与证据提交后，才返回带 commit_id 的 `NativeCommitAck`。观察者日志不是持久提交屏障。
 7. 执行结果无法确定时，返回 journal 的 uncertain 状态，没有成功输出或伪造 ToolCallRecord。`NativeJournalEntry` 同时保存原始 request、最终授权以及可选的已提交结果。
 

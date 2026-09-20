@@ -27,6 +27,7 @@ def tool_specs() -> tuple[ToolSpec, ...]:
             owner="optional",
             provider="agentloom",
             capability="write_markdown_file",
+            operation="write",
         ),
         _spec(
             "write_markdown_file_raw",
@@ -49,6 +50,7 @@ def tool_specs() -> tuple[ToolSpec, ...]:
             owner="optional",
             provider="agentloom",
             capability="write_markdown_file_raw",
+            operation="write",
         ),
         _spec(
             "append_markdown_sections",
@@ -64,6 +66,7 @@ def tool_specs() -> tuple[ToolSpec, ...]:
             owner="optional",
             provider="agentloom",
             capability="append_markdown_sections",
+            operation="write",
         ),
         _spec(
             "get_file_outline",
@@ -85,6 +88,7 @@ def tool_specs() -> tuple[ToolSpec, ...]:
             owner="optional",
             provider="agentloom",
             capability="get_file_outline",
+            operation="read",
         ),
         _spec(
             "ast_grep_search_file",
@@ -99,6 +103,7 @@ def tool_specs() -> tuple[ToolSpec, ...]:
             owner="optional",
             provider="agentloom",
             capability="ast_grep_search_file",
+            operation="read",
         ),
         _spec(
             "lsp_find_definition",
@@ -113,6 +118,7 @@ def tool_specs() -> tuple[ToolSpec, ...]:
             owner="optional",
             provider="agentloom",
             capability="lsp_find_definition",
+            operation="read",
         ),
         _spec(
             "lsp_find_references",
@@ -127,6 +133,7 @@ def tool_specs() -> tuple[ToolSpec, ...]:
             owner="optional",
             provider="agentloom",
             capability="lsp_find_references",
+            operation="read",
         ),
         _spec(
             "lsp_get_document_symbols",
@@ -141,6 +148,7 @@ def tool_specs() -> tuple[ToolSpec, ...]:
             owner="optional",
             provider="agentloom",
             capability="lsp_get_document_symbols",
+            operation="read",
         ),
         _spec(
             "lsp_hover",
@@ -155,6 +163,7 @@ def tool_specs() -> tuple[ToolSpec, ...]:
             owner="optional",
             provider="agentloom",
             capability="lsp_hover",
+            operation="read",
         ),
         _spec(
             "lsp_get_workspace_symbols",
@@ -169,5 +178,6 @@ def tool_specs() -> tuple[ToolSpec, ...]:
             owner="optional",
             provider="agentloom",
             capability="lsp_get_workspace_symbols",
+            operation="read",
         ),
     )

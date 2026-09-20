@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import os
-from collections.abc import Mapping
+from collections.abc import Iterable, Mapping
 from typing import Any
 from uuid import uuid4
 
@@ -20,10 +20,7 @@ _AGENTLOOM_SESSION_UUID = os.environ.get("AGENTLOOM_SESSION_UUID") or str(uuid4(
 _AGENTLOOM_SESSION_TOKEN = os.environ.get("AGENTLOOM_SESSION_TOKEN") or (
     "ses_" + _AGENTLOOM_SESSION_UUID.replace("-", "")[:24]
 )
-ALLOWED_MODEL_REQUEST_HEADER_PROFILES = frozenset(
-    {"agentloom", "generic", "none"}
-    | MODEL_REQUEST_HEADER_PROFILE_NAMES
-)
+ALLOWED_MODEL_REQUEST_HEADER_PROFILES = frozenset({"agentloom", "generic", "none"} | MODEL_REQUEST_HEADER_PROFILE_NAMES)
 
 
 def _validate_header_part(value: str, *, field_name: str) -> None:
@@ -32,9 +29,8 @@ def _validate_header_part(value: str, *, field_name: str) -> None:
 
 
 def _render_header_value(value: str) -> str:
-    return (
-        value.replace(AGENTLOOM_SESSION_UUID_TOKEN, _AGENTLOOM_SESSION_UUID)
-        .replace(AGENTLOOM_SESSION_TOKEN_TOKEN, _AGENTLOOM_SESSION_TOKEN)
+    return value.replace(AGENTLOOM_SESSION_UUID_TOKEN, _AGENTLOOM_SESSION_UUID).replace(
+        AGENTLOOM_SESSION_TOKEN_TOKEN, _AGENTLOOM_SESSION_TOKEN
     )
 
 
@@ -109,6 +105,22 @@ def _headers_from_custom_profile(
     return profile_config
 
 
+def merge_model_request_header_layers(layers: Iterable[Mapping[str, Any]]) -> dict[str, Any]:
+    """Merge HTTP names within each source layer, before dict merging loses order."""
+    settings: dict[str, Any] = {}
+    headers: dict[str, str] = {}
+    profiles: dict[str, dict[str, str]] = {}
+    for layer in layers:
+        raw = layer.get("model_request_headers", {})
+        if not isinstance(raw, Mapping):
+            continue
+        settings.update({key: value for key, value in raw.items() if key not in {"headers", "profiles"}})
+        headers = merge_headers(headers, raw.get("headers"))
+        for name, profile in _configured_profiles(raw.get("profiles")).items():
+            profiles[name] = merge_headers(profiles.get(name), _headers_from_custom_profile(profile))
+    return {**settings, "headers": headers, "profiles": {name: {"headers": value} for name, value in profiles.items()}}
+
+
 def get_system_model_request_headers(
     config_map: Mapping[str, Any] | None = None,
     *,
@@ -117,34 +129,20 @@ def get_system_model_request_headers(
     """Resolve system-level default headers for model API requests."""
 
     root = config_map if config_map is not None else C.raw
-    raw_cfg = (
-        root.get("model_request_headers", {})
-        if isinstance(root, Mapping)
-        else {}
-    )
+    raw_cfg = root.get("model_request_headers", {}) if isinstance(root, Mapping) else {}
     cfg = raw_cfg if isinstance(raw_cfg, Mapping) else {}
 
     profile = _normalize_profile_name(cfg.get("profile"))
     custom_profiles = _configured_profiles(cfg.get("profiles", {}))
-    if (
-        profile not in ALLOWED_MODEL_REQUEST_HEADER_PROFILES
-        and profile not in custom_profiles
-    ):
-        allowed = ", ".join(
-            sorted(
-                ALLOWED_MODEL_REQUEST_HEADER_PROFILES
-                | set(custom_profiles)
-            )
-        )
+    if profile not in ALLOWED_MODEL_REQUEST_HEADER_PROFILES and profile not in custom_profiles:
+        allowed = ", ".join(sorted(ALLOWED_MODEL_REQUEST_HEADER_PROFILES | set(custom_profiles)))
         raise ValueError(
             "model_request_headers.profile must be built-in or configured under "
             f"model_request_headers.profiles: {allowed}"
         )
 
     if profile in custom_profiles:
-        profile_headers = normalize_headers(
-            _headers_from_custom_profile(custom_profiles[profile])
-        )
+        profile_headers = normalize_headers(_headers_from_custom_profile(custom_profiles[profile]))
     elif profile == "agentloom":
         profile_headers = {"User-Agent": user_agent or C.user_agent}
     elif profile == "generic":

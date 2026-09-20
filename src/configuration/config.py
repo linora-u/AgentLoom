@@ -675,6 +675,10 @@ def build_effective_agent_config_snapshot(
                 )
             )
     merged = layered_builder.build()
+    if any("model_request_headers" in layer.data for layer in layers):
+        from .model_request_headers import merge_model_request_header_layers
+
+        merged["model_request_headers"] = merge_model_request_header_layers(layer.data for layer in layers)
     normalized = RootSettings.model_validate(merged).model_dump(exclude_unset=True)
     merged.update(normalized)
     normalize_tool_access_control_section(merged, base.agent_root)
