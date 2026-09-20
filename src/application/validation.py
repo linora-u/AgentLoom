@@ -7,7 +7,6 @@ from dataclasses import field as dataclass_field
 from pathlib import Path
 from typing import Any
 
-from agentloom.configuration.config_validation import TODO_MODES, normalize_todo_mode_value
 from agentloom.runtime.agent_runtime import (
     RuntimeRequirements,
     build_builtin_runtime_registry,
@@ -26,154 +25,18 @@ _WORKFLOW_VALIDATION_ERROR = (
 )
 
 
-@dataclass(frozen=True)
-class NormalizedExecutionConfig:
-    """Supported execution settings shared by preflight and construction."""
-
-    prompt_template_path: str | None
-    planning_interval: int | None = None
-
-
-def _resolve_agent_root(agent_root: Path | str) -> Path:
-    return Path(agent_root).expanduser().resolve()
-
-
-def resolve_execution_prompt_template_path(
-    raw_path: str,
-    source: str,
-    *,
-    agent_root: Path | str,
-) -> Path:
-    if not isinstance(raw_path, str) or not raw_path.strip():
-        raise ValueError(f"{source} must be a non-empty string path")
-    path_obj = Path(raw_path.strip()).expanduser()
-    if not path_obj.is_absolute():
-        path_obj = (_resolve_agent_root(agent_root) / path_obj).resolve()
-    else:
-        path_obj = path_obj.resolve()
-    return path_obj
-
-
-def normalize_execution_prompt_template_path_value(
-    raw_prompt: Any,
-    source: str,
-    *,
-    agent_root: Path | str,
-) -> str | None:
-    if raw_prompt is None:
-        return None
-
-    raw_path: Any
-    if isinstance(raw_prompt, str):
-        raw_path = raw_prompt
-    elif isinstance(raw_prompt, dict):
-        if "path" not in raw_prompt:
-            raise ValueError(f"{source} must include 'path' when prompt is a mapping")
-        raw_path = raw_prompt.get("path")
-    else:
-        raise ValueError(f"{source} must be a string or mapping with 'path'")
-
-    resolved = resolve_execution_prompt_template_path(
-        raw_path,
-        f"{source} path",
-        agent_root=agent_root,
-    )
-    return str(resolved)
-
-
-def normalize_execution_prompt_template_path(
-    config: dict,
-    source: str,
-    *,
-    agent_root: Path | str,
-) -> str | None:
-    return normalize_execution_prompt_template_path_value(
-        config.get("prompt"),
-        source,
-        agent_root=agent_root,
-    )
-
-
-def normalize_execution_planning_interval_value(raw_value: Any) -> int | None:
-    return normalize_positive_int_value(raw_value)
-
-
-def validate_todo_config(config: dict, *, source: str) -> str:
-    """Validate and return the effective current-task Todo mode."""
-
-    raw_todo = config.get("todo", {})
-    if not isinstance(raw_todo, dict):
-        raise ValueError(f"{source}.todo must be a mapping")
-    unexpected = sorted(set(raw_todo) - {"mode"})
-    if unexpected:
-        raise ValueError(
-            f"{source}.todo has unsupported field(s): {', '.join(unexpected)}"
-        )
-    raw_mode = normalize_todo_mode_value(raw_todo.get("mode", "auto"))
-    if not isinstance(raw_mode, str) or raw_mode not in TODO_MODES:
-        allowed = ", ".join(sorted(TODO_MODES))
-        raise ValueError(f"{source}.todo.mode must be one of: {allowed}")
-    return raw_mode
-
-
-def normalize_positive_int_value(raw_value: Any) -> int | None:
-    if raw_value is None:
-        return None
-    if isinstance(raw_value, bool):
-        return None
-    if isinstance(raw_value, int):
-        return raw_value if raw_value > 0 else None
-    if isinstance(raw_value, str):
-        text = raw_value.strip()
-        if not text:
-            return None
-        try:
-            parsed = int(text)
-        except ValueError:
-            return None
-        return parsed if parsed > 0 else None
-    return None
-
-
-def build_normalized_execution_config(
-    config: dict,
-    *,
-    source_name: str,
-    agent_root: Path | str,
-) -> NormalizedExecutionConfig:
-    name = str(config.get("name", source_name))
-    prompt_template_path = normalize_execution_prompt_template_path(
-        config,
-        source=f"{name}.prompt",
-        agent_root=agent_root,
-    )
-    planning_interval = normalize_execution_planning_interval_value(config.get("planning_interval"))
-
-    return NormalizedExecutionConfig(
-        prompt_template_path=prompt_template_path,
-        planning_interval=planning_interval,
-    )
-
-
-def validate_execution_config_payload(normalized: Any) -> NormalizedExecutionConfig:
-    if not isinstance(normalized, NormalizedExecutionConfig):
-        raise ValueError("execution normalized config must be NormalizedExecutionConfig")
-
-    prompt_template_path = normalized.prompt_template_path
-    if prompt_template_path is not None:
-        if not isinstance(prompt_template_path, str) or not prompt_template_path.strip():
-            raise ValueError("execution normalized prompt_template_path must be a non-empty string when provided")
-        prompt_template_path = prompt_template_path.strip()
-
-    planning_interval = normalized.planning_interval
-    if planning_interval is not None:
-        if isinstance(planning_interval, bool) or not isinstance(planning_interval, int) or planning_interval <= 0:
-            raise ValueError("execution normalized planning_interval must be a positive integer when provided")
-
-    return NormalizedExecutionConfig(
-        prompt_template_path=prompt_template_path,
-        planning_interval=planning_interval,
-    )
+# Legacy public imports remain available while callers migrate to smol options.
+from agentloom.adapters.smolagents.options import (
+    NormalizedExecutionConfig,
+    resolve_execution_prompt_template_path,
+    normalize_execution_prompt_template_path_value,
+    normalize_execution_prompt_template_path,
+    normalize_execution_planning_interval_value,
+    validate_todo_config,
+    normalize_positive_int_value,
+    build_normalized_execution_config,
+    validate_execution_config_payload,
+)
 
 
 class AgentConfigNormalizer:

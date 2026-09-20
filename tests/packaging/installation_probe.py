@@ -186,7 +186,7 @@ def probe(workspace: Path) -> dict:
         assert not any(type(f).__name__ == '_LegacyFinder' for f in sys.meta_path)
         assert load_function('agentloom.tools.file_ops.read_file.read_file', 'read_file') is resolve_tool_function('read_file')
         root = files('agentloom')
-        assert root.joinpath('runtime/prompts/toolcalling_agent.example.yaml').read_text()
+        assert root.joinpath('adapters/smolagents/prompts/toolcalling_agent.example.yaml').read_text()
         queries = list(root.joinpath('tools/queries').rglob('*.scm'))
         assert len(queries) == 112, len(queries)
         print(json.dumps({'package_origin': agentloom.__file__, 'project_root': str(C.agent_root), 'queries': len(queries)}))
