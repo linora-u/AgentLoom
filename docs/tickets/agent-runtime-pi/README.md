@@ -4,18 +4,18 @@
 
 ## 当前状态与开发边界
 
-**先看当前进度，再看依赖图。** 01–05、07、08 已有本票完成记录，06、09–14 尚待执行。04、05、07、08 已合入同一 integration，06 与 09 的前置均已满足，可以各开一个 worktree 并行。14 项都是完整交付的必做项，“可并行”不表示可省略。
+**先看当前进度，再看依赖图。** 01–05、07、08 已有本票完成记录，06、09–14 尚待执行。04、05、07、08 已正式合入 main，保留原分阶段提交；06 与 09 的前置均已满足，可以各开一个 worktree 并行。14 项都是完整交付的必做项，“可并行”不表示可省略。
 
 - 01、02、03 已完成；保留 [01/02 集成验收](01-02-integration.md) 和 [03 实现与验收](03-implementation.md)，本轮不重做。03 记录的回归结果为 4225 passed、1 skipped，真实 Pi SDK 13 passed；这是历史基线结果，不是本次文档修改重新运行的结果。
-- 本次核对时，03 冻结引用为 `9e19d18285f2d2ea8e7b7d11c26e315760d153a3`；main HEAD 为 `9d5a88915efbd402d0f2697318125933fc1500e0`。两个提交之间只增加研究文档；当前 main 另有未提交源码和文档 Changes，不能把 HEAD 与工作目录混为一谈。
+- 2026-09-20 按维护者最新要求，main 从 `9d5a8891` 快进到 `da4a049d`，纳入已验收的 04/05/07/08 源码、测试和文档。源码与组合验收版本一致（4329 passed、1 skipped），真实 provider 限制继续保留；后续交付也应正式合入 main。
 - 05、07 已交付 main Changes，t05、t07 worktree 已清理。07 固定引用 `refs/agentloom/ticket07-frozen` 为 `eca311eeca103dc6cd64eef959428e8b01eb22b2`；集成提交 `0b5c4f4ed32244ef97b107361dcb45dbe2be149e` 包含 05+07。07 在 main 上与 04/05 组合的 97 项测试及 1 个真实 Application 均通过，见 [07 交接](07-implementation.md)。
-- 04 已完成集成交付，t04 worktree 已清理；6 个阶段提交保留。`refs/agentloom/ticket04-05-integrated` 提供包含 04/05/07 与最新票据的冻结入口，见 [集成交付](04-05-integration.md)。08 已完成集成交付，阶段提交与真实模型的失败记录均保留；见 [08 实施与限制](08-implementation.md)、[逐工具清单](08-tool-inventory.md)。新的共同起点为 `refs/agentloom/ticket08-frozen`，包含 04/05/07/08。
+- 04 已完成集成交付，t04 worktree 已清理；6 个阶段提交保留。`refs/agentloom/ticket04-05-integrated` 提供包含 04/05/07 与最新票据的冻结入口，见 [集成交付](04-05-integration.md)。08 已完成集成交付，阶段提交与真实模型的失败记录均保留；见 [08 实施与限制](08-implementation.md)、[逐工具清单](08-tool-inventory.md)。共同源码基线为 `refs/agentloom/ticket08-frozen`，包含 04/05/07/08；新 session 推荐使用包含最新票据规则的 main。
 
 | 当前下一步 | 能否开新实现 session | 放行条件 |
 | --- | --- | --- |
-| 06：公共写入/Shell 保护 | 现在可新开 worktree，与 09 并行 | 推荐从 `refs/agentloom/ticket08-frozen` 解析 SHA，接收 04 保护调用点、05 接口及 08 校验扩展 |
-| 08：平台与可选工具解耦 | 已完成，不重开 | 交付 main Changes；阶段提交、验收和 provider 限制保留 |
-| 09：Pi 工具调用 | 现在可新开 worktree，与 06 并行 | 从 `refs/agentloom/ticket08-frozen` 开始，消费 05/07/08 |
+| 06：公共写入/Shell 保护 | 现在可新开 worktree，与 09 并行 | 推荐从 main 解析 SHA，接收 04 保护调用点、05 接口及 08 校验扩展 |
+| 08：平台与可选工具解耦 | 已完成，不重开 | 已正式合入 main；阶段提交、验收和 provider 限制保留 |
+| 09：Pi 工具调用 | 现在可新开 worktree，与 06 并行 | 从包含 08 冻结提交的 main 开始，消费 05/07/08 |
 | 10–14 | 按各票前置依次解锁 | 不提前建一批停在旧基线上的工作区 |
 
 职责按下面的表落实，完整约束见 [工具归属](tool-ownership.md)：
@@ -39,7 +39,7 @@
 | 各自前置完成 | 06 与 09 可并行 | 06 等 04+05；09 等 05+07+08 |
 | 09 完成后 | 11 可启动；10、13 按各自前置启动 | 10 还等 06；13 还等 04；三者可并行 |
 | 10 完成 | Pi session 继续做 12 | 可与仍在进行的 11、13 并行 |
-| 全部分支完成 | 协调 session 做 14 | 等 11+12+13，验收后交付 main Changes 并清理 worktree |
+| 全部分支完成 | 协调 session 做 14 | 等 11+12+13，验收后正式合入 main 并清理 worktree |
 
 这是开工窗口，不是要求整批等待的阶段。每张票的 **Blocked by** 定义任务依赖，03–14 的 **Unlocks** 列出它完成后推进的直接下游；下游的其他前置仍需满足。
 
@@ -60,7 +60,7 @@
 | [11](11-mixed-agents-memory.md) | 双向混合基座、多 Worker 隔离与长期记忆复用 | 09 | 独立 worktree；可与 10、12、13 并行 |
 | [12](12-pi-recovery-journal.md) | 原生会话与工具双日志恢复 | 10 | Pi 链串行；可与 11、13 并行 |
 | [13](13-clean-install-profiles.md) | Pi-only/smol 干净安装、发行资源和失败路径 | 04、09 | 独立 worktree；可与 10、11、12 并行 |
-| [14](14-final-integration-main.md) | 清理过渡接口、最终验收、交付 main Changes | 11、12、13 | 最后串行收口 |
+| [14](14-final-integration-main.md) | 清理过渡接口、最终验收、正式合入 main | 11、12、13 | 最后串行收口 |
 
 完成前置意味着已合入同一 integration 基线且通过验证，不只是另一个 session 说“写完了”。每票自己的公开入口接线和验收必须当票完成，不能拖到 14。
 
@@ -135,7 +135,7 @@ flowchart TD
 
 ## 5. 新 session 启动模板
 
-> 实现 NN 号票据。先读本目录 README、tool-ownership、03-contracts、03-file-ownership、worktree-plan 和本票。核对所有 Blocked by 任务已集成且验证通过，并取得最新票据修订。先检查该票是否已有 session/worktree；已有则在确认单一修改者后接续，没有才从已验证 SHA 建立独立 codex/ 分支和 worktree。只改本票拥有的文件；共享入口补丁由协调者串行处理并在本票验收前集成。完成后交付提交 SHA、测试命令/结果、实际工具副作用与产物证据、未完成项。不要自动做下一票，不发布 issue、不推送、不自行提交 main。交付采用 main Changes 与 worktree 清理流程，按协调者安排执行。
+> 实现 NN 号票据。先读本目录 README、tool-ownership、03-contracts、03-file-ownership、worktree-plan 和本票。核对所有 Blocked by 任务已集成且验证通过，并取得最新票据修订。先检查该票是否已有 session/worktree；已有则在确认单一修改者后接续，没有才从已验证 SHA 建立独立 codex/ 分支和 worktree。只改本票拥有的文件；共享入口补丁由协调者串行处理并在本票验收前集成。完成后交付提交 SHA、测试命令/结果、实际工具副作用与产物证据、未完成项。不要自动做下一票，不发布 issue、不推送；协调者串行将已验收提交正式合入 main，再按清理流程删除 worktree。
 
 交接四项：票号、起始基线 SHA、本票提交 SHA、验收证据。合同版本、Node/Pi 版本及能力声明变更也要记录。
 
@@ -164,6 +164,6 @@ flowchart TD
 
 ## 7. 集成与交付
 
-各票提交先串行合入 integration，并验证受影响行为。按维护者最新要求，交付时把已验证内容放入主工作区 main 的未提交、未暂存 Changes；main 不自动新增提交，不推送。记录候选 SHA 与交付内容的对应关系，保留既有用户改动。
+各票提交先串行合入 integration，并验证受影响行为。按维护者 2026-09-20 的最新要求，交付时将已验收提交正式合入 main，保留分阶段提交历史，不再停留在未提交 Changes。记录候选 SHA 与 main 提交的对应关系，保护其他用户改动；没有额外指令时不推送远端。
 
 只有确认提交已集成、未提交成果已保全后才删除本次创建的 worktree；保留验收证据。01/02 已按此完成清理；03 历史交接记录保留。此次票据修订的分发方式见 worktree 计划，已有工作区不会自动收到 main 的未提交修改。
