@@ -138,15 +138,16 @@ class HookPlan:
         object.__setattr__(self, "handlers", tuple(handlers))
         object.__setattr__(self, "fingerprint", str(fingerprint))
 
-    def matching(self, event: HookEvent, tool_name: str) -> tuple[HookHandler, ...]:
+    def matching(self, event: HookEvent, tool_name: str, *, tool_aliases: tuple[str, ...] = ()) -> tuple[HookHandler, ...]:
         return tuple(
             handler
             for handler in self.handlers
             if handler.event is event
-            and (
-                handler.shell_spec.matches(tool_name)
+            and any(
+                handler.shell_spec.matches(name)
                 if handler.shell_spec is not None
-                else matches_pattern(tool_name, handler.pattern)
+                else matches_pattern(name, handler.pattern)
+                for name in (tool_name, *tool_aliases)
             )
         )
 
@@ -392,6 +393,8 @@ class HookRun:
         tool_call_id: str | None = None,
         tool_response: dict[str, Any] | None = None,
         tool_inputs_schema: dict[str, Any] | None = None,
+        cwd: str | None = None,
+        tool_aliases: tuple[str, ...] = (),
     ) -> HookResult:
         """Run matching handlers in order under event-specific semantics."""
 
@@ -405,12 +408,12 @@ class HookRun:
         current_input = deepcopy(tool_input)
         final = HookResult()
         errors: list[dict[str, str]] = []
-        for handler in self.plan.matching(event, tool_name):
+        for handler in self.plan.matching(event, tool_name, tool_aliases=tool_aliases):
             runtime_agent_path = getattr(execution, "runtime_agent_path", None)
             context = HookContext(
                 local_run_id=self.local_run_id,
                 root_run_id=self.root_run_id,
-                cwd=os.getcwd(),
+                cwd=cwd if cwd is not None else os.getcwd(),
                 hook_event_name=event.value,
                 tool_name=tool_name,
                 tool_input=deepcopy(current_input),

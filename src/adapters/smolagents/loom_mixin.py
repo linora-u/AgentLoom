@@ -24,7 +24,7 @@ def append_current_todo_state(messages: list, *, todo_mode: str) -> list:
 
     if todo_mode == "off":
         return messages
-    from agentloom.runtime.todo import get_current_todo_provider
+    from agentloom.adapters.smolagents.todo import get_current_todo_provider
 
     provider = get_current_todo_provider()
     if provider is None:
@@ -224,7 +224,7 @@ class LoomAgentMixin:
                 return messages
 
             # Gather data from smolagents runtime
-            from agentloom.runtime.error_recovery import (
+            from agentloom.adapters.smolagents.error_recovery import (
                 build_recovery_message,
                 consolidate_error_messages,
                 extract_category_from_error,

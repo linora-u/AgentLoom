@@ -17,7 +17,6 @@ if TYPE_CHECKING:
 
 from agentloom.application.validation import (
     AgentConfigNormalizer,
-    validate_todo_config,
 )
 from agentloom.configuration import (
     C,
@@ -607,15 +606,6 @@ class RoleDrivenAgent(BaseAgent):
     def _runtime_agent_description(self) -> str | None:
         """Optional runtime-level description passed to the selected runtime."""
         return None
-
-    def _resolve_smart_summary_from_config(self) -> bool:
-        effective_cfg = self._effective_agent_config
-        return effective_cfg.get("smart_summary", True) if isinstance(effective_cfg, dict) else True
-
-    def _resolve_todo_mode(self) -> str:
-        effective_cfg = self._effective_agent_config
-        config = effective_cfg if isinstance(effective_cfg, dict) else self._config
-        return validate_todo_config(config, source=self.name)
 
     def _transform_task(self, task: str) -> str:
         """Task transformation hook."""
