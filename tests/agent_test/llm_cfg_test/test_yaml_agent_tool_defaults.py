@@ -45,12 +45,15 @@ WORKFLOW_GUIDANCE = yaml_agent_factory.TASK_SPEC_WORKFLOW_GUIDANCE
 
 
 def _make_worker(config: dict) -> YamlConfiguredAgent:
-    worker = object.__new__(YamlConfiguredAgent)
-    worker._config = config
-    worker._normalized = None
-    worker.run = lambda q, additional_args=None: f"RUN::{q}"
-    worker.process_tool_query = lambda q: q
-    return worker
+    class WorkerFixture(YamlConfiguredAgent):
+        def __init__(self, config, **kwargs):
+            self._config = config
+            self._normalized = None
+
+        def run(self, query, additional_args=None):
+            return f"RUN::{query}"
+
+    return WorkerFixture(config)
 
 
 def _basic_schema(description: str = "callable tool doc") -> dict:
@@ -355,7 +358,7 @@ def test_generated_tool_serializes_structured_agent_results_as_json():
         "agent_function_schema": _basic_schema(),
     }
     worker = _make_worker(config)
-    worker.run = lambda _query, additional_args=None: {
+    type(worker).run = lambda self, _query, additional_args=None: {
         "answer": '用户说"拍照"，工具返回成功。',
     }
     worker._validate_config()

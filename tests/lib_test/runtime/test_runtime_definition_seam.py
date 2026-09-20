@@ -293,3 +293,50 @@ def test_fake_runtime_invokes_through_registry_with_the_same_definition() -> Non
     assert invocations[0][0] is definition
     assert result.state == "success"
     assert result.output == "proof-agent:perform the proof:opaque-model:proof_tool"
+
+
+def test_native_runtime_definition_needs_model_selection_not_python_binding() -> None:
+    from agentloom.runtime.agent_runtime import RuntimeModelSelection
+
+    definition = RuntimeDefinition(
+        runtime_id="native-fixture",
+        name="native",
+        description="A backend owns its provider calls.",
+        model_selection=RuntimeModelSelection(
+            model_type="test", model_id="native/model", protocol="openai_chat",
+            settings={"temperature": 0.2},
+        ),
+        tool_gateway=_StubToolGateway(),
+        runtime_options={"thinking": "low"},
+        option_sources={"thinking": "agent.yaml:runtime_options.thinking"},
+    )
+
+    assert definition.model is None
+    assert definition.model_selection.model_id == "native/model"
+    assert definition.max_steps is None
+    assert definition.todo_mode is None
+    assert definition.smart_summary is None
+    assert definition.runtime_options == {"thinking": "low"}
+
+
+def test_conflicting_model_selection_and_legacy_binding_are_rejected() -> None:
+    import pytest
+    from dataclasses import replace
+    from agentloom.runtime.agent_runtime import RuntimeModelSelection
+
+    with pytest.raises(ValueError, match="model_selection.*legacy model binding"):
+        replace(_complete_runtime_definition(), model_selection=RuntimeModelSelection(
+            model_type="proof", model_id="different-model", protocol="openai_chat",
+        ))
+
+
+def test_registry_rejects_actual_tools_even_when_requirements_omitted() -> None:
+    import pytest
+    from agentloom.runtime.agent_runtime import UnsupportedRuntimeError
+
+    calls = []
+    registry = RuntimeRegistry()
+    registry.register("fake", capabilities=RuntimeCapabilities(False, False, False, False), factory=calls.append)
+    with pytest.raises(UnsupportedRuntimeError, match="structured_tools"):
+        registry.create(_complete_runtime_definition())
+    assert calls == []
