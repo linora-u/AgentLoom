@@ -5,7 +5,7 @@ from contextlib import contextmanager
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import json
 from pathlib import Path
-from threading import Lock, Thread
+from threading import Barrier, Lock, Thread
 from typing import Any, Callable
 
 import yaml
@@ -117,7 +117,7 @@ def runtime_events(result) -> list[dict]:
     return [json.loads(line) for line in (result.run.run_dir / 'audit/runtime_events.jsonl').read_text().splitlines()]
 
 
-parallel_gate = None
+parallel_gate: Barrier | None = None
 
 
 def inspect_invocation(label: str, synchronize: bool = False) -> str:
@@ -130,9 +130,11 @@ def inspect_invocation(label: str, synchronize: bool = False) -> str:
     from agentloom.runtime import get_current_run_context
     from agentloom.runtime.trace import capture_explicit_execution_context
     context = get_current_run_context(required=True)
+    assert context is not None
     execution = capture_explicit_execution_context()
     assert execution.hook_run is not None
     if synchronize:
+        assert parallel_gate is not None
         parallel_gate.wait(timeout=8)
     return json.dumps({'label': label, 'run_id': context.run_id, 'task_id': execution.task_id,
         'application_id': context.application_id, 'instance_id': execution.agent_id,
