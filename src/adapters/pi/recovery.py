@@ -41,11 +41,13 @@ def _result(call: dict[str, Any], record: dict[str, Any] | None) -> dict[str, An
 def reconcile(store: PiCheckpointStore, bundle: dict[str, Any]) -> dict[str, Any]:
     """Produce an all-checked append plan; never invoke an executor here."""
     entries = bundle["session"]["entries"]
-    calls = {call["identity"]["call_id"]: call for call in bundle["calls"]}
+    calls = {(call["identity"]["native_parent_id"], call["identity"]["call_id"]): call
+             for call in bundle["calls"]}
     manifests = {tool.visible_name: tool for tool in store.definition.tool_manifest}
-    observed: set[str] = set()
-    results: dict[str, Any] = {}
-    assistants: dict[str, Any] = {}
+    observed: set[tuple[str | None, str]] = set()
+    active: dict[str, tuple[str | None, str]] = {}
+    results: dict[tuple[str | None, str], Any] = {}
+    assistants: dict[tuple[str | None, str], Any] = {}
     previous = None
     entry_ids: set[str] = set()
     for entry in entries:
@@ -61,24 +63,28 @@ def reconcile(store: PiCheckpointStore, bundle: dict[str, Any]) -> dict[str, Any
             for part in message.get("content", []):
                 if part.get("type") != "toolCall":
                     continue
-                call = calls.get(part["id"])
-                if (call is None or part["id"] in observed or call["tool_name"] != part["name"]
+                key = (entry["parentId"], part["id"])
+                call = calls.get(key)
+                if (call is None or key in observed or part["id"] in active or call["tool_name"] != part["name"]
                         or call["arguments"] != part["arguments"]
                         or call["identity"]["native_parent_id"] != entry["parentId"]):
                     raise ValueError("Pi assistant and host call anchors do not align")
-                observed.add(part["id"])
-                assistants[part["id"]] = entry
+                observed.add(key)
+                active[part["id"]] = key
+                assistants[key] = entry
         elif message.get("role") == "toolResult":
             call_id = message["toolCallId"]
-            if call_id not in observed or call_id in results:
+            key = active.pop(call_id, None)
+            if key is None or key in results:
                 raise ValueError("Pi session has an unmatched or duplicate tool result")
-            results[call_id] = message
+            results[key] = message
     if set(calls) != observed:
         raise ValueError("Pi checkpoint contains calls outside its native session")
 
     append = []
-    for call_id in assistants:
-        call = calls[call_id]
+    for key in assistants:
+        call = calls[key]
+        call_id = key[1]
         identity = NativeCallIdentity(**call["identity"])
         manifest = manifests.get(call["tool_name"])
         if manifest is None or manifest.owner != call["owner"]:
@@ -101,7 +107,7 @@ def reconcile(store: PiCheckpointStore, bundle: dict[str, Any]) -> dict[str, Any
         if record is not None and (record["call_id"] != call_id or record["tool_name"] != call["tool_name"]):
             raise ValueError("Pi committed result identity mismatch")
         expected = _result(call, record)
-        existing = results.get(call_id)
+        existing = results.get(key)
         if existing is not None:
             if existing.get("toolName") != call["tool_name"] or existing.get("isError") != expected["isError"]:
                 raise ValueError("Pi native result conflicts with host outcome")
@@ -112,7 +118,7 @@ def reconcile(store: PiCheckpointStore, bundle: dict[str, Any]) -> dict[str, Any
             continue
         # Appending behind a later assistant would change which turn the
         # result belongs to. Such corruption is rejected before SDK mutation.
-        assistant = assistants[call_id]
+        assistant = assistants[key]
         if any(entry.get("type") == "message" and entry["message"].get("role") in {"user", "assistant"}
                for entry in entries[entries.index(assistant) + 1:]):
             raise ValueError("Pi missing result is not at a recoverable session tail")

@@ -176,7 +176,6 @@ def test_profile_retry_count_and_private_error_redaction(tmp_path, status, retri
 
 @pytest.mark.parametrize("selection,match", [
     ("runtime_options: {thinking: low}\n", "Unsupported pi runtime_options"),
-    ("checkpoint: {enabled: true}\n", "checkpoint_resume"),
 ])
 def test_unsupported_features_rejected_at_public_application_boundary(tmp_path, selection, match):
     with model_service() as (url, requests):

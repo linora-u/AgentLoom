@@ -32,12 +32,15 @@ export class SessionPersistence {
   constructor(readonly manager: SessionManager, private agentDir: string,
       private enabled: () => boolean, private scope: () => Obj,
       private invoke: (payload: Obj) => Promise<Obj>, restored?: Obj) {
-    for (const call of restored?.calls ?? []) this.calls.set(call.identity.call_id, call);
+    for (const call of restored?.calls ?? []) this.calls.set(this.key(call.identity), call);
   }
 
+  private key(identity: Obj) {return JSON.stringify([identity.native_parent_id, identity.call_id]);}
+
   register(identity: Obj, toolName: string, args: Obj, owner: string) {
-    if (this.calls.has(identity.call_id)) throw new Error("Duplicate session tool call");
-    this.calls.set(identity.call_id, {identity, tool_name: toolName, arguments: structuredClone(args), owner});
+    const key = this.key(identity);
+    if (this.calls.has(key)) throw new Error("Duplicate session tool call");
+    this.calls.set(key, {identity, tool_name: toolName, arguments: structuredClone(args), owner});
   }
 
   save(phase: "running" | "complete" = "running"): Promise<void> {
