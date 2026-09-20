@@ -701,6 +701,7 @@
               "model_prepare": "#/$defs/ModelPrepare",
               "platform_invoke": "#/$defs/PlatformInvoke",
               "run": "#/$defs/Run",
+              "session_checkpoint": "#/$defs/SessionCheckpoint",
               "snapshot": "#/$defs/Snapshot",
               "tool_dispatch": "#/$defs/Dispatch",
               "tool_prepare": "#/$defs/Prepare",
@@ -738,6 +739,9 @@
             },
             {
               "$ref": "#/$defs/ModelPrepare"
+            },
+            {
+              "$ref": "#/$defs/SessionCheckpoint"
             }
           ],
           "title": "Payload"
@@ -800,6 +804,7 @@
                   "model_prepare": "#/$defs/ModelPermit",
                   "platform_invoke": "#/$defs/PlatformResult",
                   "run": "#/$defs/RunResult",
+                  "session_checkpoint": "#/$defs/SessionCheckpointResult",
                   "snapshot": "#/$defs/SnapshotResult",
                   "tool_dispatch": "#/$defs/PrepareResult",
                   "tool_prepare": "#/$defs/PrepareResult",
@@ -831,6 +836,9 @@
                 },
                 {
                   "$ref": "#/$defs/ModelPermit"
+                },
+                {
+                  "$ref": "#/$defs/SessionCheckpointResult"
                 }
               ]
             },
@@ -946,6 +954,11 @@
             }
           ],
           "default": null
+        },
+        "checkpoint_enabled": {
+          "default": false,
+          "title": "Checkpoint Enabled",
+          "type": "boolean"
         }
       },
       "required": [
@@ -1134,6 +1147,46 @@
         "payload"
       ],
       "title": "RuntimeCheckpointEnvelope",
+      "type": "object"
+    },
+    "SessionCheckpoint": {
+      "additionalProperties": false,
+      "properties": {
+        "method": {
+          "const": "session_checkpoint",
+          "title": "Method",
+          "type": "string"
+        },
+        "sha256": {
+          "pattern": "^[0-9a-f]{64}$",
+          "title": "Sha256",
+          "type": "string"
+        }
+      },
+      "required": [
+        "method",
+        "sha256"
+      ],
+      "title": "SessionCheckpoint",
+      "type": "object"
+    },
+    "SessionCheckpointResult": {
+      "additionalProperties": false,
+      "properties": {
+        "method": {
+          "const": "session_checkpoint",
+          "title": "Method",
+          "type": "string"
+        },
+        "checkpoint": {
+          "$ref": "#/$defs/RuntimeCheckpointEnvelope"
+        }
+      },
+      "required": [
+        "method",
+        "checkpoint"
+      ],
+      "title": "SessionCheckpointResult",
       "type": "object"
     },
     "Settle": {

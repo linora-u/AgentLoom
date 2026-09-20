@@ -79,6 +79,7 @@
 | handshake | host → Pi | 返回实际 SDK/Node 版本、native contract 版本和实测能力；不匹配则停止构造 |
 | run | host → Pi | 含任务、模型私有投影、指令、精确工具集合、options 与可选 checkpoint；返回一次完整调用结果 |
 | snapshot | host → Pi | 返回 native checkpoint envelope 或显式 null；仅在支持的安全点取快照 |
+| session_checkpoint | Pi → host | 12 增补：私有原生会话文件的 SHA-256；host 保存 task artifact 与 checkpoint 后返回 envelope，工具副作用必须等待确认 |
 | cancel | host → Pi | 指明被取消的 request_id；accepted 仅确认收到，终结仍由原请求响应表达 |
 | close | host → Pi | 关闭该实例进程、工具和 pending 请求；重复调用幂等 |
 | tool_prepare | Pi → host | 使用原始输入与 call identity 请求变换、授权、写前保护 |

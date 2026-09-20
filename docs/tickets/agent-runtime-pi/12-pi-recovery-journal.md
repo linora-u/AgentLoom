@@ -4,7 +4,7 @@
 
 **Blocked by:** 10：Pi 官方写入和 Shell 产生可保护、可检索的结果
 
-**Status:** planned — 等待前置任务集成并验证，尚未实施。
+**Status:** in-progress — 从包含 10/11/13 的 main `36a7e6a1` 开始，在 `codex/pi-t12-recovery` 独立 worktree 实施；按维护者要求先完成剩余开发，再集中功能验收。
 
 **Required:** Yes — 本票属于最终交付必做项。
 

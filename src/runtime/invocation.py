@@ -351,7 +351,7 @@ class AgentInvocation:
         checkpoint_sink = None
         if self.checkpoint_manager is not None:
             def save_running_checkpoint(checkpoint: Any) -> None:
-                coordinator.save_runtime_checkpoint(checkpoint, "running")
+                coordinator.save_runtime_checkpoint(checkpoint, "running", require_durable=True)
 
             checkpoint_sink = save_running_checkpoint
         return runtime_checkpoint, checkpoint_sink

@@ -121,6 +121,43 @@ class NativeToolHost:
     def journal_directory(self) -> Path:
         return self._journal.directory
 
+    def restore_observation(self, identity: NativeCallIdentity) -> None:
+        """Reuse a committed read only while its original file version holds.
+
+        The adapter first aligns its native session to this call. The host
+        independently reads the persisted receipt and applies its existing
+        file-version policy; restored model text alone cannot authorize a write.
+        """
+        from dataclasses import replace
+        from agentloom.runtime.context import validate_runtime_owned_path
+
+        if (identity.application_id, identity.task_id) != (self._runtime.application_id, self._runtime.task_id):
+            raise ValueError("Recovered observation belongs to another task")
+        directory = replace(self._runtime, run_id=identity.run_id).run_dir / "native-tools"
+        validate_runtime_owned_path(directory, root=self._runtime.root_dir)
+        if not directory.is_dir():
+            raise ValueError("Recovered observation journal is missing")
+        journal = NativeCallJournal(directory)
+        try:
+            with journal.transaction(identity) as data:
+                request = data.get("request", {})
+                if data.get("version") != 1 or request.get("identity") != snapshot(identity):
+                    raise ValueError("Recovered observation identity mismatch")
+                name = request.get("tool", {}).get("visible_name")
+                tool = self._tools.get(name)
+                if tool is None or snapshot(tool) != request.get("tool") or request.get("cwd") != self._cwd:
+                    raise ValueError("Recovered observation mapping changed")
+                if (tool.logical_name != "read_file" or data.get("state") != "committed"
+                        or data.get("outcome", {}).get("status") != "completed"):
+                    return
+                versions = self._file_versions(tool, data["final_arguments"])
+                if versions == data.get("file_versions"):
+                    for path, version in versions.items():
+                        if version["exists"]:
+                            self._observed_files[str(Path(path).resolve())] = (version["mtime_ns"], None)
+        finally:
+            journal.close()
+
     def _require_scope(self, identity: NativeCallIdentity) -> None:
         active = capture_explicit_execution_context()
         if self._closed:

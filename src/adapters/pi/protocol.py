@@ -1,4 +1,4 @@
-"""Pi-specific JSONL protocol v1, independent of the AgentRuntime interface.
+"""Pi-specific JSONL protocol v2, independent of the AgentRuntime interface.
 
 Only framing and value validation live here. Ticket 07 owns transport, request
 correlation, liveness and capability negotiation; tickets 09/10 own tool wiring.
@@ -24,7 +24,7 @@ from pydantic import BaseModel, ConfigDict, Field, JsonValue, TypeAdapter, model
 
 PI_BRIDGE_PROTOCOL_VERSION = 2
 NonEmpty = Annotated[str, Field(min_length=1)]
-Method = Literal["handshake", "run", "snapshot", "cancel", "close", "tool_prepare", "tool_settle", "tool_dispatch", "platform_invoke", "model_prepare"]
+Method = Literal["handshake", "run", "snapshot", "cancel", "close", "tool_prepare", "tool_settle", "tool_dispatch", "platform_invoke", "model_prepare", "session_checkpoint"]
 
 
 class WireValue(BaseModel):
@@ -59,6 +59,7 @@ class Run(WireValue):
     record_task: bool = True
     additional_args: dict[str, JsonValue] = Field(default_factory=dict, repr=False)
     checkpoint: RuntimeCheckpointEnvelope | None = Field(default=None, repr=False)
+    checkpoint_enabled: bool = False
 
 
 class Snapshot(WireValue):
@@ -88,6 +89,11 @@ class CaptureFile(WireValue):
     sha256: Annotated[str, Field(pattern="^[0-9a-f]{64}$")]
 
 
+class SessionCheckpoint(WireValue):
+    method: Literal["session_checkpoint"]
+    sha256: Annotated[str, Field(pattern="^[0-9a-f]{64}$")]
+
+
 class Settle(WireValue):
     method: Literal["tool_settle"]
     outcome: NativeExecutionOutcome = Field(repr=False)
@@ -107,7 +113,7 @@ class PlatformInvoke(WireValue):
 
 
 RequestPayload = Annotated[
-    Union[Handshake, Run, Snapshot, Cancel, Close, Prepare, Dispatch, Settle, PlatformInvoke, ModelPrepare], Field(discriminator="method")
+    Union[Handshake, Run, Snapshot, Cancel, Close, Prepare, Dispatch, Settle, PlatformInvoke, ModelPrepare, SessionCheckpoint], Field(discriminator="method")
 ]
 
 
@@ -168,6 +174,11 @@ class SnapshotResult(WireValue):
     checkpoint: RuntimeCheckpointEnvelope | None = Field(repr=False)
 
 
+class SessionCheckpointResult(WireValue):
+    method: Literal["session_checkpoint"]
+    checkpoint: RuntimeCheckpointEnvelope = Field(repr=False)
+
+
 class ControlResult(WireValue):
     method: Literal["cancel", "close"]
     accepted: bool
@@ -220,7 +231,7 @@ class PlatformResult(WireValue):
 
 
 ResultPayload = Annotated[
-    Union[HandshakeResult, RunResult, SnapshotResult, ControlResult, PrepareResult, SettleResult, PlatformResult, ModelPermit],
+    Union[HandshakeResult, RunResult, SnapshotResult, ControlResult, PrepareResult, SettleResult, PlatformResult, ModelPermit, SessionCheckpointResult],
     Field(discriminator="method"),
 ]
 
