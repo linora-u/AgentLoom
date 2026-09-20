@@ -34,7 +34,7 @@ jobs:
         run: uv python install 3.12
 
       - name: Install dependencies
-        run: uv sync --locked --all-groups --extra smol
+        run: uv sync --locked --all-groups --extra smol --extra code
 
       - name: Set up the supported Node runtime
         uses: actions/setup-node@v6
@@ -42,7 +42,7 @@ jobs:
           node-version: '22.19.0'
 
       - name: Install the locked Pi SDK
-        run: uv run --locked --extra smol loom install-runtime pi
+        run: uv run --locked --extra smol --extra code loom install-runtime pi
 
       - name: Prepare test LLM config
         run: cp config/llm.example.yaml config/llm.yaml
@@ -51,7 +51,7 @@ jobs:
         env:
           PYTHONPATH: .
         run: >-
-          uv run --locked --extra smol pytest tests/
+          uv run --locked --extra smol --extra code pytest tests/
           applications/memory_feature_validation/scripts/test_memory_review_campaign_capsule.py
           applications/memory_feature_validation/scripts/test_memory_review_campaign_contract.py
           -v --tb=short --color=yes
@@ -63,7 +63,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        profile: [pi, smol]
+        profile: [pi, pi-code, smol]
     steps:
       - uses: actions/checkout@v6
       - uses: astral-sh/setup-uv@v8.1.0

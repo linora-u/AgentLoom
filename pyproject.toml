@@ -46,19 +46,9 @@ dependencies = [
     "requests>=2.32.3",
     "aiohttp>=3.11.11",
     "beautifulsoup4>=4.14.2",
-    # Code analysis
+    # Shared Shell governance, including native runtime tool calls.
     "tree-sitter>=0.25.2",
-    "tree-sitter-c==0.23.1",
     "tree-sitter-bash>=0.25.1",
-    "libclang>=18.1.1",
-    "ast-grep-cli>=0.40.5",
-    "ripgrep>=15.0.0",
-    "networkx>=3.0,<4.0",
-    "grep-ast>=0.3.0",
-    "tree-sitter-language-pack>=0.13.0",
-    "serena-agent>=1.0.0",
-    "go-bin>=1.23",
-    "nodejs-bin[cmd]>=18.0",
     "pathspec>=0.12.0",
     # CLI
     "click>=8.1.0",
@@ -97,6 +87,20 @@ smol = [
     # Context propagation patches a verified 1.26.0 private timeout boundary.
     "smolagents[litellm,mcp,openai,telemetry]==1.26.0",
     "openinference-instrumentation-smolagents>=0.1.4",
+    "ripgrep>=15.0.0",
+]
+# Professional code tools are selected independently of the Agent runtime.
+code = [
+    "tree-sitter-c==0.23.1",
+    "libclang>=18.1.1",
+    "ast-grep-cli>=0.40.5",
+    "ripgrep>=15.0.0",
+    "networkx>=3.0,<4.0",
+    "grep-ast>=0.3.0",
+    "tree-sitter-language-pack>=0.13.0",
+    "serena-agent>=1.0.0",
+    "go-bin>=1.23",
+    "nodejs-bin[cmd]>=18.0",
 ]
 dev = [
     "pytest>=8.3.5",
