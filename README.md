@@ -334,7 +334,6 @@ agentloom schedules --project /path/to/project serve
 | `ai_quality_analysis` | Twelve specialized Workers coordinated into staged code review |
 | `unit_test_studio` | Strict pytest generation with a deterministic Python entrypoint |
 | `repo_map` | Deterministic preprocessing, bottom-up Agent analysis, batching, and progress persistence |
-| `codex_exec_demo` | Local `codex exec` exposed as normal Agent tools with fixed arguments |
 | `goal_mode_validation` | Explicit Goal completion, continuation, and checkpoint resume |
 | `self_learning_smoke` | Session history, memory proposals, evidence, and review boundaries |
 

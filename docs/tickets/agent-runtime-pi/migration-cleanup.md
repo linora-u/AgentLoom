@@ -65,3 +65,13 @@
 扫描排除了独立参考仓库、虚拟环境、已安装 Node 依赖及构建产物、运行数据和用户本地配置。完成后对相同范围重新遍历，空目录和无源码字节码均为 0。多数清理项原本被 Git 忽略，属于本机磁盘清理；Git 中记录空包删除和本次审计结果。
 
 架构导入边界、工具懒加载、记忆模型导入边界和外部安装探针共 **10 passed**（6.81 秒）。本轮只删除空包和生成残留，没有重复运行模型与工具全量回归。文件级删除清单及补充测试日志保存于仓库外的 `AgentLoom-validation/migration-cleanup-20260920/residual-cleanup.json`、`residual-cleanup-tests.log`。
+
+## 移除旧 Codex CLI 工具
+
+以 `be866b16` 为起点，按维护者要求删除 `src/tools/codex/`。该实现仅将本地 `codex exec` 包为普通函数工具，未接入 Agent runtime 合同；仓库内只有专属 demo 和测试使用。同步删除 `applications/codex_exec_demo/`、`tests/tools_test/codex/` 及中英文 README 的示例入口，共删除 5 个受跟踪文件，并清理 4 个字节码缓存和空目录。
+
+通用 YAML `fixed_args` 测试保留，改用现有 `sample_tool`，动态工具用例直接调用真实模块加载器。固定参数覆盖、LLM schema 隐藏参数和多别名能力不受影响。模型 header 自定义 profile 中的 Codex 示例与这个 CLI 工具无关，继续保留。
+
+相关 YAML、catalog、应用定义和安装回归 **74 passed、2 warnings**（8.56 秒）；全仓活动源码/配置/测试已无旧模块及 demo 引用，fresh import 确认旧包不存在。干净源码构建的 wheel 不含旧 Codex 工具，Pi 和 smol runtime 仍在包内；Ruff `F,E9` 及 diff 检查通过。旧的 `agentloom.tools.codex.codex_tool` YAML 调用入口不再支持，未来基座接入按 [工具归属](tool-ownership.md) 中的 adapter 边界实现。本次没有运行外部 Codex CLI。
+
+测试和构建日志保存在仓库外的 `AgentLoom-validation/migration-cleanup-20260920/codex-removal/`。
