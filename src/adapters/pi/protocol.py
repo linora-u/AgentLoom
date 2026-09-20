@@ -53,6 +53,7 @@ class Run(WireValue):
     instructions: str
     model: ModelSelection = Field(repr=False)
     tools: list[ToolManifestEntry]
+    serial_tools: list[NonEmpty] = Field(default_factory=list)
     runtime_options: dict[str, JsonValue] = Field(repr=False)
     continue_session: bool = False
     record_task: bool = True
@@ -200,6 +201,7 @@ class ModelPermit(WireValue):
     method: Literal["model_prepare"]
     identity: NativeCallIdentity
     state: Literal["work", "final", "denied"]
+    agent_context: list[str] = Field(default_factory=list, repr=False)
 
 
 class PlatformResult(WireValue):

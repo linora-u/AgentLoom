@@ -19,14 +19,16 @@ function failedStream(model: Model<Api>, interrupted: boolean) {
 }
 
 export function configureModel(session: AgentSession, settings: Obj, headers: Obj,
-    prepare: () => Promise<"work" | "final" | "denied">, retry: (attempt: number) => void) {
+    prepare: () => Promise<{state: "work" | "final" | "denied"; agent_context: string[]}>, retry: (attempt: number) => void) {
   const nativeStream = session.agent.streamFn;
   const failure = {timedOut: false, status: 0};
   session.agent.streamFn = async (model, context, options) => {
     try {
       const permit = await prepare();
-      if (permit === "denied") return failedStream(model, false);
-      const selectedContext = permit === "final" ? {...context, tools: []} : context;
+      if (permit.state === "denied") return failedStream(model, false);
+      const selectedContext = {...context, tools: permit.state === "final" ? [] : context.tools,
+        messages: permit.agent_context.length ? [...context.messages,
+          {role: "user" as const, content: permit.agent_context.join("\n"), timestamp: Date.now()}] : context.messages};
       for (let attempt = 0; ; attempt++) {
         await delay(Math.max(0, nextRequestAt - performance.now()), undefined, {signal: options?.signal});
         nextRequestAt = performance.now() + 60000 / settings.requests_per_minute;

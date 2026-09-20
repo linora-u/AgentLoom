@@ -24,6 +24,7 @@ from agentloom.runtime.hooks import HookEvent
 from agentloom.runtime.trace import capture_explicit_execution_context
 from agentloom.runtime.goal import GoalCompleteError, get_current_goal_provider
 from agentloom.runtime.invocation import goal_continuation_prompt
+from agentloom.tools.tool_meta import tool_is_concurrency_safe
 
 
 def _terminal(record: ToolCallRecord) -> TerminalRecord:
@@ -96,6 +97,8 @@ class PiRuntime:
         hook = execution.hook_run
         shared_goal = get_current_goal_provider()
         goal = shared_goal if execution.local_run_id == execution.root_run_id else None
+        serial_tools = [tool.visible_name for tool in definition.tool_manifest
+                        if not tool_is_concurrency_safe(tool.logical_name, execution.agent_config)]
         task = request.task
         max_stops = cast(int, definition.runtime_options.get("max_stop_attempts", 3))
         run_id = request.run_id or uuid4().hex
@@ -140,7 +143,8 @@ class PiRuntime:
                         state = "final" if final else "work"
                     except GoalCompleteError:
                         state = "denied"
-                return ModelPermit(method="model_prepare", identity=identity, state=state)
+                return ModelPermit(method="model_prepare", identity=identity, state=state,
+                    agent_context=hook.consume_pending_agent_context() if hook is not None and state != "denied" else [])
             if isinstance(payload, (PlatformInvoke, Prepare)) and shared_goal is not None:
                 if shared_goal.snapshot().status == "complete":
                     raise AgentRuntimeError("Goal is complete; further tool work is forbidden", category="tool")
@@ -190,7 +194,7 @@ class PiRuntime:
                     task_id=request.task_id or "standalone", task=task, cwd=cwd,
                     instructions=definition.instructions or "", model=ModelSelection(model_type=selection.model_type,
                         model_id=selection.model_id, protocol=selection.protocol, settings=dict(selection.settings),
-                        request_headers=dict(selection.request_headers)), tools=wire_tools, runtime_options=dict(definition.runtime_options),
+                        request_headers=dict(selection.request_headers)), tools=wire_tools, serial_tools=serial_tools, runtime_options=dict(definition.runtime_options),
                     continue_session=request.continue_session or attempt > 0, record_task=request.record_task,
                     additional_args=dict(request.additional_args))
                 response = self.transport.request(wire, run_id=run_id, observe=observe, callback=callback,

@@ -6,9 +6,10 @@ import { createReadToolDefinition, type ExtensionFactory, type ToolDefinition } 
 type Obj = Record<string, any>;
 type Callback = (payload: Obj) => Promise<Obj>;
 
-export function nativeTools(manifest: Obj[], cwd: string, invoke: Callback, identity: (id: string) => Obj, canUseTools: () => boolean) {
+export function nativeTools(manifest: Obj[], cwd: string, invoke: Callback, identity: (id: string) => Obj, canUseTools: () => boolean, serialTools: string[]) {
   const permits = new Map<string, Obj>();
   const seen = new Set<string>();
+  const serial = new Set(serialTools);
   const selected = new Map(manifest.map(tool => [tool.visible_name, tool]));
   const ajv = new Ajv2020({strict: true, coerceTypes: false, useDefaults: false});
   const validators = new Map(manifest.filter(tool => tool.owner === "runtime").map(tool => [tool.visible_name, ajv.compile(tool.parameters)]));
@@ -16,7 +17,7 @@ export function nativeTools(manifest: Obj[], cwd: string, invoke: Callback, iden
     if (entry.owner !== "runtime") {
       if (entry.operation === "write" || entry.operation === "shell") throw new Error("Unsupported platform tool");
       return {name: entry.visible_name, label: entry.visible_name, description: entry.parameters.description || entry.capability,
-        parameters: entry.parameters, executionMode: "parallel",
+        parameters: entry.parameters, executionMode: serial.has(entry.visible_name) ? "sequential" : "parallel",
         execute: async (callId: string, args: any) => {
           const record = permits.get(callId)?.record;
           permits.delete(callId);
@@ -35,7 +36,7 @@ export function nativeTools(manifest: Obj[], cwd: string, invoke: Callback, iden
     // No lossy schema projection, silent aliases or alternate basic implementation.
     if (!isDeepStrictEqual(JSON.parse(JSON.stringify(parameters)), entry.parameters)) throw new Error("Native tool schema mismatch");
     return {...official, parameters, prepareArguments: undefined, renderCall: undefined, renderResult: undefined,
-      executionMode: "parallel",
+      executionMode: serial.has(entry.visible_name) ? "sequential" : "parallel",
       execute: async (callId: string, args: any, signal: AbortSignal | undefined, onUpdate: any, ctx: any) => {
         const permit = permits.get(callId);
         permits.delete(callId);
@@ -73,7 +74,7 @@ export function nativeTools(manifest: Obj[], cwd: string, invoke: Callback, iden
         batch.add(part.id);
       }
       for (const id of batch) seen.add(id);
-      await Promise.all(replacement.content.map(async part => {
+      const prepare = async (part: typeof replacement.content[number]) => {
         if (part.type !== "toolCall") return;
         permits.set(part.id, {});
         const entry = selected.get(part.name)!;
@@ -95,7 +96,17 @@ export function nativeTools(manifest: Obj[], cwd: string, invoke: Callback, iden
           throw new Error("Invalid native authorization");
         permits.set(part.id, prepared);
         if (grant) part.arguments = grant.final_arguments;
-      }));
+      };
+      let parallel: Promise<void>[] = [];
+      for (const part of replacement.content) {
+        if (part.type !== "toolCall") continue;
+        if (serial.has(part.name)) {
+          await Promise.all(parallel);
+          parallel = [];
+          await prepare(part);
+        } else parallel.push(prepare(part));
+      }
+      await Promise.all(parallel);
       return {message: replacement};
     });
     pi.on("tool_call", ({toolCallId, toolName, input}) => {

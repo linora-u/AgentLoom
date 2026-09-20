@@ -201,6 +201,10 @@ class PiTransport:
             raise self._failure from None
         finally:
             if executor is not None:
+                # Stop queued work before releasing running callbacks' resources.
+                # Otherwise a freed worker can start a new Hook during cleanup.
+                if not completed:
+                    executor.shutdown(wait=False, cancel_futures=True)
                 if not completed and cancel_callbacks is not None:
                     active_error = sys.exception()
                     try:

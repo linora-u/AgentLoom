@@ -73,3 +73,32 @@ def test_instance_cleanup_kills_only_its_real_background_process(tmp_path):
                 if child.poll() is None:
                     child.kill()
                 child.wait(timeout=5)
+
+
+def test_late_resource_registration_is_closed_within_its_cancelled_owner(tmp_path):
+    from agentloom.runtime.resources import register_resource, close_instance_resources, close_run_resources
+    context = RuntimeHome(tmp_path / '.agentloom').context(application_id='resources', task_id='late', run_id='run')
+    closed = []
+    with bind_run_context(context):
+        close_instance_resources('worker-a')
+        register_resource('late-a', lambda: closed.append('a'), instance_id='worker-a')
+        register_resource('live-b', lambda: closed.append('b'), instance_id='worker-b')
+        assert closed == ['a']
+        close_run_resources()
+        register_resource('late-b', lambda: closed.append('late-b'), instance_id='worker-b')
+        assert closed == ['a', 'b', 'late-b']
+
+
+def test_cancelled_run_cannot_start_a_new_captured_process(tmp_path):
+    import os
+    import pytest
+    from agentloom.runtime.process import run_captured_process
+    from agentloom.runtime.resources import close_run_resources
+    context = RuntimeHome(tmp_path / '.agentloom').context(application_id='resources', task_id='no-spawn', run_id='run')
+    marker = tmp_path / 'must-not-start'
+    with bind_run_context(context):
+        close_run_resources()
+        with pytest.raises(InterruptedError):
+            run_captured_process(f'touch {marker}', cwd=str(tmp_path), env=dict(os.environ), stdin=b'',
+                                 timeout=2, stdout_limit=100, stderr_limit=100)
+    assert not marker.exists()
