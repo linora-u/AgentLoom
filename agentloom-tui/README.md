@@ -9,7 +9,8 @@ and evidence.
 
 The image above comes from a real reduced-motion terminal session. The Studio
 indexed the checkout and rendered its Applications, global Skills, validation
-state, Runs, and command input. It is not a static product mockup.
+state, Runs, and command input. The Goal example visible in this historical
+recording has since been removed.
 
 ## Install and open
 

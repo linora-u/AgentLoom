@@ -405,16 +405,7 @@ def _execute_app(
                         event_start_offset = _task_events_size(checkpoint_mgr, task_id)
 
                     if is_resume and checkpoint_mgr is not None:
-                        with checkpoint_mgr.task_storage(task_id) as storage:
-                            try:
-                                storage.stat_file("goal.json")
-                            except FileNotFoundError:
-                                pass
-                            else:
-                                raise ValueError(
-                                    "Cannot resume a removed Goal-mode checkpoint; "
-                                    "start a new ordinary task"
-                                )
+                        checkpoint_mgr.validate_task_resume(task_id)
                         tree = checkpoint_mgr.load_task_tree(task_id)
                         if tree is None:
                             raise FileNotFoundError(
