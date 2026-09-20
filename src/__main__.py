@@ -32,6 +32,7 @@ Examples:
   loom create applications/<app>/workflows/<agent>.yaml -o my_app.py
   loom schedules add applications/<app>/workflows/<agent>.yaml --every 1h
   loom schedules serve
+  loom install-runtime pi
 
 Use 'loom <command> -h' for more details on each command.
 """
@@ -166,6 +167,20 @@ def main():
             os.chdir(agent_root)
     except Exception:
         pass  # discovery may fail here; let sub-commands report the real error
+
+
+@main.command("install-runtime")
+@click.argument("runtime", type=click.Choice(["pi"]))
+def install_runtime(runtime: str):
+    """Download locked dependencies and build the selected Agent runtime."""
+    from agentloom.adapters.pi.install import install_pi
+    from agentloom.adapters.pi.metadata import SDK_VERSION
+
+    try:
+        entry = install_pi()
+    except RuntimeError as exc:
+        raise click.ClickException(str(exc)) from None
+    click.echo(f"Pi SDK {SDK_VERSION} ready: {entry}")
 
 
 def _has_transient_provider_error(error: BaseException) -> bool:
