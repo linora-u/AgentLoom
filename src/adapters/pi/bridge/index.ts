@@ -72,9 +72,9 @@ async function createSession(p: Obj): Promise<AgentSession> {
     () => ({application_id: current!.frame.payload.application_id, task_id: current!.frame.payload.task_id,
       run_id: current!.frame.run_id, instance_id: instance}), invoke, restored?.bundle);
   let finalDelivery = false;
-  const identity = (callId: string) => ({application_id: current!.frame.payload.application_id,
+  const identity = (callId: string, nativeParentId?: string | null) => ({application_id: current!.frame.payload.application_id,
     task_id: current!.frame.payload.task_id, run_id: current!.frame.run_id, instance_id: instance, call_id: callId,
-    native_session_id: manager.getSessionId(), native_parent_id: manager.getLeafId()});
+    native_session_id: manager.getSessionId(), native_parent_id: nativeParentId === undefined ? manager.getLeafId() : nativeParentId});
   const selected = nativeTools(p.tools, p.cwd, invoke, identity, () => !finalDelivery, p.serial_tools, agentDir, () => {nativeIncomplete = true; session?.agent.abort();}, persistence);
   const loader = new DefaultResourceLoader({cwd: p.cwd, agentDir, settingsManager: settings,
     noExtensions: true, noSkills: true, noPromptTemplates: true, noThemes: true, noContextFiles: true,
@@ -105,6 +105,15 @@ async function createSession(p: Obj): Promise<AgentSession> {
       else result.reasoning_effort = extra.reasoning_effort;
     }
     const projected = {...result, ...extra.extra_body};
+    const publicSchemas = new Map(p.tools.map((tool: Obj) => [tool.visible_name, tool.parameters]));
+    if (Array.isArray(projected.tools)) projected.tools = projected.tools.map((tool: Obj) => {
+      const name = tool.function?.name ?? tool.name;
+      const parameters = publicSchemas.get(name);
+      if (!parameters) return tool;
+      return tool.function
+        ? {...tool, function: {...tool.function, parameters}}
+        : {...tool, parameters};
+    });
     if (finalDelivery) {
       delete projected.tools;
       delete projected.tool_choice;
@@ -195,11 +204,11 @@ async function accept(frame: Frame) {
   seen.add(frame.request_id);
   const p = frame.payload;
   if (p.method === "handshake") {
-    if (instance || p.native_tool_contract !== 1) throw new Error();
+    if (instance || p.protocol_version !== 2 || p.bridge_version !== 1 || p.native_tool_contract !== 1) throw new Error();
     instance = frame.instance_id;
     const [major, minor] = process.versions.node.split(".").map(Number);
     if (major < 22 || (major === 22 && minor < 19)) throw new Error();
-    response(frame, {method: "handshake", runtime_id: "pi", sdk_version: sdkVersion,
+    response(frame, {method: "handshake", runtime_id: "pi", protocol_version: 2, bridge_version: 1, sdk_version: sdkVersion,
       node_version: process.versions.node, native_tool_contract: 1, capabilities});
     return;
   }

@@ -7,7 +7,8 @@ from dataclasses import replace
 from threading import Lock
 from typing import cast
 
-from agentloom.adapters.pi.metadata import CAPABILITIES, SDK_VERSION, validate_model, validate_options
+from agentloom.adapters.pi.metadata import BRIDGE_VERSION, CAPABILITIES, SDK_VERSION, validate_model, validate_options
+from agentloom.adapters.pi.protocol import PI_BRIDGE_PROTOCOL_VERSION
 from agentloom.adapters.pi.protocol import (
     Handshake, HandshakeResult, ModelSelection, Run, RunResult,
     Prepare, Dispatch, PrepareResult, Settle, SettleResult, TerminalRecord,
@@ -60,9 +61,18 @@ class PiRuntime:
         self._checkpoint: RuntimeCheckpointEnvelope | None = None
         self.transport = PiTransport(definition.instance_id or uuid4().hex)
         try:
-            response = self.transport.request(Handshake(method="handshake", native_tool_contract=1), timeout=15)
+            response = self.transport.request(Handshake(
+                method="handshake",
+                protocol_version=PI_BRIDGE_PROTOCOL_VERSION,
+                bridge_version=BRIDGE_VERSION,
+                native_tool_contract=1,
+            ), timeout=15)
             result = response.payload
-            if not isinstance(result, HandshakeResult) or result.sdk_version != SDK_VERSION or result.capabilities != self.capabilities:
+            if (not isinstance(result, HandshakeResult)
+                    or result.protocol_version != PI_BRIDGE_PROTOCOL_VERSION
+                    or result.bridge_version != BRIDGE_VERSION
+                    or result.sdk_version != SDK_VERSION
+                    or result.capabilities != self.capabilities):
                 raise AgentRuntimeError("Pi bridge SDK or capabilities mismatch", category="configuration")
         except BaseException:
             self.transport.close()

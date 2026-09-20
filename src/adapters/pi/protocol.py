@@ -33,6 +33,8 @@ class WireValue(BaseModel):
 
 class Handshake(WireValue):
     method: Literal["handshake"]
+    protocol_version: Literal[2]
+    bridge_version: Literal[1]
     native_tool_contract: Literal[1]
 
 
@@ -152,6 +154,8 @@ class TerminalRecord(WireValue):
 class HandshakeResult(WireValue):
     method: Literal["handshake"]
     runtime_id: Literal["pi"]
+    protocol_version: Literal[2]
+    bridge_version: Literal[1]
     sdk_version: NonEmpty
     node_version: NonEmpty
     native_tool_contract: Literal[1]

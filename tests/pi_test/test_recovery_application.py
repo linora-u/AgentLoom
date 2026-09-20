@@ -15,7 +15,13 @@ from agentloom.application.runner import execute_app
 from agentloom.configuration.config import bind_config, load_project_config
 from tests.pi_test.test_application import model_service, project
 from tests.pi_test.test_tools_application import select
-from tests.pi_test.test_process_lifecycle import sdk_node, start_cli, assert_gone
+from tests.pi_test.test_process_lifecycle import (
+    assert_gone,
+    node_launcher,
+    sdk_node,
+    start_cli,
+    until,
+)
 
 
 def checkpoints(root):
@@ -33,6 +39,14 @@ def enable(app, **kwargs):
 
 def audit(run):
     return [json.loads(line) for line in (run.run_dir / 'audit/runtime_events.jsonl').read_text().splitlines()]
+
+
+def _process_gone(pid):
+    try:
+        os.kill(pid, 0)
+    except ProcessLookupError:
+        return True
+    return False
 
 
 def test_resume_new_run_preserves_committed_read_and_native_session(tmp_path):
@@ -148,7 +162,27 @@ def test_new_run_can_reuse_provider_call_id_at_new_native_position(tmp_path):
         assert len(requests) == 4
 
 
-@pytest.mark.parametrize('damage', ['sdk', 'runtime', 'state_version', 'task', 'digest', 'symlink', 'parent', 'arguments', 'result_details', 'missing_journal'])
+def test_same_run_can_reuse_provider_call_id_at_new_native_position(tmp_path):
+    (tmp_path / 'proof.txt').write_text('same-id-same-run')
+    call = [('reused-id', 'read', {'path': 'proof.txt'})]
+    with model_service(turns=[call, call]) as (url, requests):
+        app = project(tmp_path, url)
+        enable(app, tools=[{'name': 'read'}])
+        with bind_config(load_project_config(tmp_path)):
+            result = execute_app(app, file_logging=False)
+    assert result.output == 'Pi answer'
+    receipts = [json.loads(p.read_text()) for p in tmp_path.rglob('native-tools/*.json')]
+    assert len(receipts) == 2
+    identities = [receipt['request']['identity'] for receipt in receipts]
+    assert {identity['call_id'] for identity in identities} == {'reused-id'}
+    assert len({identity['run_id'] for identity in identities}) == 1
+    assert len({identity['instance_id'] for identity in identities}) == 1
+    assert len({identity['native_session_id'] for identity in identities}) == 1
+    assert len({identity['native_parent_id'] for identity in identities}) == 2
+    assert len(requests) == 3
+
+
+@pytest.mark.parametrize('damage', ['sdk', 'runtime', 'bridge_version', 'state_version', 'task', 'digest', 'symlink', 'parent', 'arguments', 'result_details', 'missing_journal'])
 def test_incompatible_or_unaligned_recovery_stops_before_model_or_tools(tmp_path, damage):
     (tmp_path / 'proof.txt').write_text('unaltered-proof')
     with model_service(turns=[[('read-proof', 'read', {'path': 'proof.txt'})]], fail_requests={2: 500}) as (url, requests):
@@ -162,6 +196,7 @@ def test_incompatible_or_unaligned_recovery_stops_before_model_or_tools(tmp_path
             artifact = path.parent / 'pi/sessions' / (envelope['payload']['artifact'] + '.json')
             if damage == 'sdk': envelope['runtime_version'] = '0.0.0'
             elif damage == 'runtime': envelope['runtime_id'] = 'smolagents'
+            elif damage == 'bridge_version': envelope['payload']['bridge_version'] = 999
             elif damage == 'state_version': envelope['state_schema_version'] = 999
             elif damage == 'task': envelope['task_id'] = 'another-task'
             elif damage == 'digest': artifact.write_text('{}')
@@ -248,6 +283,79 @@ def test_committed_worker_result_is_appended_without_invoking_worker_again(tmp_p
         assert result.output == 'Verified worker-proof-627'
         assert [r for r in requests if r['model'] == 'worker'] == worker_calls
         assert len([r for r in requests if r['model'] == 'supervisor']) == 2
+
+
+@pytest.mark.parametrize('worker', ['pi', 'smolagents'])
+def test_worker_completion_before_platform_receipt_recovers_without_reexecution(
+    tmp_path, worker,
+):
+    from tests.application_test.mixed_runtime_support import (
+        finish,
+        model_service as mixed_service,
+        project as mixed_project,
+        tool_messages,
+    )
+    (tmp_path / 'note.txt').write_text('worker-window-proof-739')
+
+    def program(request):
+        messages = tool_messages(request)
+        if request['model'] == 'worker':
+            if not messages:
+                return [('read-note', 'read' if worker == 'pi' else 'read_file',
+                         {'path': 'note.txt'} if worker == 'pi'
+                         else {'file_path': str(tmp_path / 'note.txt')})]
+            return finish(request, 'worker-window-proof-739')
+        if not messages:
+            return [('delegate', 'inspect_note', {'query': 'note.txt'})]
+        return 'Verified worker-window-proof-739'
+
+    with mixed_service(program) as (url, requests):
+        app = mixed_project(tmp_path, url, supervisor='pi', worker=worker)
+        enable(app)
+        env, bridge_marker = node_launcher(tmp_path)
+        marker = tmp_path / 'fault.json'
+        faultsite = tmp_path / 'faultsite'
+        faultsite.mkdir()
+        (faultsite / 'sitecustomize.py').write_text(
+            'import json,os\n'
+            'from pathlib import Path\n'
+            'from agentloom.adapters.pi.checkpoint import PiCheckpointStore\n'
+            '_commit=PiCheckpointStore.commit_platform\n'
+            'def crash(self,identity,record):\n'
+            " if record.tool_name=='inspect_note':\n"
+            f"  Path({str(marker)!r}).write_text(json.dumps({{'pid':os.getpid(),'tool':record.tool_name}}));os._exit(91)\n"
+            ' return _commit(self,identity,record)\n'
+            'PiCheckpointStore.commit_platform=crash\n'
+        )
+        env['PYTHONPATH'] = str(faultsite)
+        child = start_cli(tmp_path, app, env)
+        try:
+            stdout, stderr = child.communicate(timeout=40)
+        finally:
+            if child.poll() is None:
+                child.kill()
+                child.wait()
+        assert child.returncode != 0, stdout + stderr
+        assert json.loads(marker.read_text())['tool'] == 'inspect_note'
+        bridge_pid = int(bridge_marker.read_text())
+        until(lambda: _process_gone(bridge_pid))
+        assert_gone(bridge_pid)
+        task_id = json.loads(next(tmp_path.rglob('task_tree.json')).read_text())['task_id']
+        worker_requests = [request for request in requests if request['model'] == 'worker']
+        assert len(worker_requests) == 2
+        [(receipt_path, receipt)] = [
+            (path, json.loads(path.read_text()))
+            for path in tmp_path.rglob('pi/platform/*.json')
+        ]
+        assert receipt['state'] == 'executing'
+
+        with bind_config(load_project_config(tmp_path)):
+            result = execute_app(app, resume_task_id=task_id, file_logging=False)
+
+        assert result.output == 'Verified worker-window-proof-739'
+        assert [request for request in requests if request['model'] == 'worker'] == worker_requests
+        assert json.loads(receipt_path.read_text())['state'] == 'committed'
+        assert len([request for request in requests if request['model'] == 'supervisor']) == 2
 
 
 def test_checkpoint_storage_failure_prevents_first_tool_side_effect(tmp_path):

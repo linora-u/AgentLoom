@@ -14,6 +14,11 @@ from tests.pi_test.test_tools_application import select
 from tests.pi_test.test_process_lifecycle import node_launcher, start_cli, until, assert_gone
 
 
+def ordered_probe(label: str) -> str:
+    """Return the label for mixed serial scheduling verification."""
+    return label
+
+
 def test_tool_hook_context_enters_exactly_the_next_internal_model_request(tmp_path):
     source = tmp_path / 'note.txt'
     source.write_text('Hook context source')
@@ -48,6 +53,51 @@ def test_unsafe_tool_metadata_serializes_actual_platform_callbacks(tmp_path):
         with bind_config(load_project_config(tmp_path)):
             result = execute_app(app, file_logging=False)
     assert trace.read_text().splitlines() == ['begin', 'end', 'begin', 'end']
+    assert result.output == 'Pi answer'
+    assert len(requests) == 2
+    schema = requests[0][1]['tools'][0]['function']['parameters']
+    assert schema['properties']['file_path']['type'] == 'string'
+    assert schema['required'] == ['file_path']
+
+
+def test_unsafe_tool_serializes_the_entire_mixed_platform_batch(tmp_path):
+    source = tmp_path / 'source.py'
+    source.write_text('def mixed_order_result():\n    return 1\n')
+    trace = tmp_path / 'trace.txt'
+    hook = tmp_path / 'mixed_order.py'
+    hook.write_text(
+        'import json,sys,time\nfrom pathlib import Path\njson.load(sys.stdin)\n'
+        f'with Path({str(trace)!r}).open("a") as f:f.write(sys.argv[1]+"\\n")\n'
+        'time.sleep(0.1 if sys.argv[1].endswith("begin") else 0)\nprint("{}")\n'
+    )
+    with model_service(turns=[[('unsafe', 'get_file_outline', {'file_path': str(source)}),
+                               ('safe', 'ordered_probe', {'label': 'safe'})]]) as (url, requests):
+        app = project(tmp_path, url)
+        select(
+            app,
+            tools=[
+                {'name': 'get_file_outline'},
+                {'name': 'ordered_probe', 'module': __name__, 'function': 'ordered_probe'},
+            ],
+            tool_metadata={
+                'get_file_outline': {'is_concurrency_safe': False},
+                'ordered_probe': {'is_concurrency_safe': True},
+            },
+            hooks={
+                event: [
+                    {'id': f'{event}-outline', 'matcher': 'get_file_outline',
+                     'command': f'{sys.executable} {hook} outline-{label}'},
+                    {'id': f'{event}-probe', 'matcher': 'ordered_probe',
+                     'command': f'{sys.executable} {hook} probe-{label}'},
+                ]
+                for event, label in [('PreToolUse', 'begin'), ('PostToolUse', 'end')]
+            },
+        )
+        with bind_config(load_project_config(tmp_path)):
+            result = execute_app(app, file_logging=False)
+    assert trace.read_text().splitlines() == [
+        'outline-begin', 'outline-end', 'probe-begin', 'probe-end',
+    ]
     assert result.output == 'Pi answer'
     assert len(requests) == 2
 
