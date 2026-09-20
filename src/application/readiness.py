@@ -63,6 +63,9 @@ def validate_runtime_agent_config(
 ) -> None:
     AgentConfigNormalizer.validate_removed_fields(config)
     AgentConfigNormalizer.validate_agent_runtime_config(config)
+    from agentloom.application.runtime_options import normalize_runtime_options
+
+    normalize_runtime_options(config, agent_root=agent_root)
     validate_required_yaml_fields(config, yaml_path)
     AgentConfigNormalizer.validate_runtime_tool_references(config)
     AgentConfigNormalizer.validate_workflow_config(config)

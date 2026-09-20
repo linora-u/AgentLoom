@@ -17,7 +17,6 @@ if TYPE_CHECKING:
 
 from agentloom.application.validation import (
     AgentConfigNormalizer,
-    build_normalized_execution_config,
     validate_todo_config,
 )
 from agentloom.configuration import (
@@ -32,6 +31,7 @@ from agentloom.runtime.agent_runtime import (
     RuntimeCheckpointEnvelope,
     RuntimeDefinition,
     RuntimeEvent,
+    RuntimeModelSelection,
     build_builtin_runtime_registry,
     require_runtime_state,
 )
@@ -48,14 +48,12 @@ from agentloom.runtime.logging import (
 )
 from agentloom.runtime.model_binding import ModelTurnBinding
 from agentloom.runtime.prompts.environment import get_agent_environment_prompt
-from agentloom.runtime.prompts.prompt_builder import todo_policy_for_mode
 from agentloom.runtime.skills.catalog import SkillCatalog
 from agentloom.runtime.skills.parser import build_skills_prompt
 from agentloom.runtime.tool_gateway import (
     AgentLoomToolGateway,
     ToolBinding,
     bind_tool,
-    final_answer_binding,
 )
 from agentloom.runtime.trace import (
     bind_local_run,
@@ -67,7 +65,6 @@ from agentloom.runtime.trace import (
     sub_task_context,
 )
 from agentloom.runtime.workspace import ensure_workspace_mounted_once
-from agentloom.tools.loader import resolve_tool_function
 
 
 class AgentType(Enum):
@@ -128,12 +125,23 @@ class BaseAgent(ABC):
             logger: Optional logger instance.
             model_cache: Whether to enable model caching.
         """
-        self._model_binding = (
-            model_binding
-            if model_binding is not None
-            else self._resolve_model_binding(model_cache=model_cache)
-        )
-        if not isinstance(self._model_binding, ModelTurnBinding):
+        runtime_id = getattr(self, "_config", {}).get("agent_runtime", "smolagents")
+        # Transitional smol binding path. Native runtimes receive profile data
+        # without constructing a Python provider adapter.
+        self._model_binding = model_binding
+        self._model_selection = None
+        if runtime_id == "smolagents":
+            if self._model_binding is None:
+                self._model_binding = self._resolve_model_binding(model_cache=model_cache)
+        else:
+            settings = C.llm.for_type(self.default_model_type)
+            self._model_selection = RuntimeModelSelection(
+                model_type=(self.default_model_type or C.llm.default_model_type).strip().lower(),
+                model_id=settings.model,
+                protocol=settings.adapter,
+                settings=settings.model_dump(mode="json"),
+            )
+        if self._model_binding is not None and not isinstance(self._model_binding, ModelTurnBinding):
             raise TypeError("model_binding must be a ModelTurnBinding")
 
         # Initialize logger
@@ -403,7 +411,7 @@ class BaseAgent(ABC):
             bool: Whether model is available.
         """
 
-        return self._model_binding is not None
+        return self._model_binding is not None or self._model_selection is not None
 
     def _get_agent_type(self) -> AgentType:
         """
@@ -630,33 +638,12 @@ class RoleDrivenAgent(BaseAgent):
                 from agentloom.tools.goal import get_goal, update_goal
 
                 tools = [*tools, get_goal, update_goal]
-        todo_mode = self._resolve_todo_mode()
-        if todo_mode == "off":
-            return [
-                runtime_tool
-                for runtime_tool in tools
-                if getattr(
-                    runtime_tool,
-                    "name",
-                    getattr(runtime_tool, "__name__", None),
-                )
-                != "todo_write"
-            ]
-
-        tool_names = {
-            getattr(runtime_tool, "name", getattr(runtime_tool, "__name__", None))
-            for runtime_tool in tools
-        }
-        if "todo_write" not in tool_names:
-            tools = [*tools, resolve_tool_function("todo_write")]
         return tools
 
     def _build_tool_gateway(self) -> AgentLoomToolGateway:
         profile = self._role_profile()
         tools = self._deduplicate_tools(self._build_runtime_tools(profile))
         bindings: list[ToolBinding] = [bind_tool(tool) for tool in tools]
-        if not any(binding.definition.name == "final_answer" for binding in bindings):
-            bindings.append(final_answer_binding())
         mcp_manager = getattr(self, "_mcp_manager", None)
         resource_closers = (
             (mcp_manager.disconnect_all,)
@@ -675,36 +662,37 @@ class RoleDrivenAgent(BaseAgent):
             if self._skill_catalog is None:
                 raise RuntimeError("Skill Tool requires a resolved Skill catalog")
             sections.append(build_skills_prompt(self._skill_catalog.summaries()))
-        sections.append(todo_policy_for_mode(self._resolve_todo_mode()))
         return "\n\n".join(section for section in sections if section.strip())
 
     def _build_runtime_definition(self) -> RuntimeDefinition:
         runtime_id = AgentConfigNormalizer.validate_agent_runtime_config(
             self._config
         )
-        execution = build_normalized_execution_config(
-            self._effective_agent_config,
-            source_name=self.name,
+        from agentloom.application.runtime_options import normalize_runtime_options
+
+        options, sources = normalize_runtime_options(
+            self._config, snapshot=self._effective_agent_config_snapshot,
             agent_root=C.agent_root,
         )
+        if runtime_id == "smolagents" and sources["max_steps"] == "default:smolagents":
+            options["max_steps"] = self.max_steps
         gateway = self._build_tool_gateway()
         return RuntimeDefinition(
             runtime_id=runtime_id,
             name=self._runtime_agent_name() or self.name,
             description=self._runtime_agent_description() or self.description,
             model=self._model_binding,
+            model_selection=self._model_selection,
+            instance_id=self._agent_id,
             tool_gateway=gateway,
-            max_steps=self.max_steps,
-            instructions=self._build_runtime_instructions(gateway),
-            planning_interval=execution.planning_interval,
-            smart_summary=self._resolve_smart_summary_from_config(),
-            todo_mode=self._resolve_todo_mode(),
-            prompt_template_path=execution.prompt_template_path,
-            project_root=str(C.agent_root),
-            max_consecutive_model_errors=self._config.get(
-                "max_consecutive_parse_errors",
-                5,
+            runtime_options=options,
+            option_sources=sources,
+            requirements=AgentConfigNormalizer.runtime_requirements(
+                self._config, effective_config=self._effective_agent_config,
+                hook_plan=self._hook_plan,
             ),
+            instructions=self._build_runtime_instructions(gateway),
+            project_root=str(C.agent_root),
         )
 
     def build_runtime(self) -> AgentRuntime:

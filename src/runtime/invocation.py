@@ -13,7 +13,6 @@ from agentloom.runtime.agent_runtime import (
     AgentRuntimeRequest,
     AgentRuntimeResult,
     RuntimeEvent,
-    RuntimeRequirements,
     require_runtime_state,
 )
 from agentloom.runtime.hooks import HookEvent, HookRun
@@ -51,37 +50,6 @@ def goal_completion_output(segment_output: Any, evidence: str | None) -> Any:
     ):
         return evidence
     return segment_output if segment_output is not None else evidence
-
-
-def _runtime_requirements(
-    config: dict[str, Any],
-    *,
-    checkpoint_active: bool,
-) -> RuntimeRequirements:
-    """Compile only semantic features exercised by this invocation."""
-
-    concurrency = config.get("concurrency")
-    parallel_tools = (
-        concurrency == "auto"
-        or (
-            isinstance(concurrency, int)
-            and not isinstance(concurrency, bool)
-            and concurrency > 1
-        )
-    )
-    checkpoint = config.get("checkpoint")
-    return RuntimeRequirements(
-        structured_tools=True,
-        parallel_tools=parallel_tools,
-        checkpoint_resume=(
-            checkpoint_active
-            or (
-                isinstance(checkpoint, dict)
-                and checkpoint.get("enabled") is True
-            )
-        ),
-        subagents=bool(config.get("worker_agents")),
-    )
 
 
 def _merge_runtime_events(
@@ -226,7 +194,6 @@ class AgentInvocation:
         owns_lifecycle: bool,
     ) -> str:
         from agentloom.runtime.goal import bind_goal_state_provider
-        from agentloom.runtime.todo import ensure_todo_state_provider
 
         owner = self.owner
         session_started = False
@@ -274,8 +241,6 @@ class AgentInvocation:
             else nullcontext(None)
         )
         goal_binding.__enter__()
-        todo_binding = ensure_todo_state_provider()
-        todo_binding.__enter__()
 
         try:
             runtime_agent = owner.build_runtime()
@@ -343,12 +308,9 @@ class AgentInvocation:
                         )
                 finally:
                     try:
-                        todo_binding.__exit__(None, None, None)
+                        goal_binding.__exit__(None, None, None)
                     finally:
-                        try:
-                            goal_binding.__exit__(None, None, None)
-                        finally:
-                            execution_binding.__exit__(None, None, None)
+                        execution_binding.__exit__(None, None, None)
             if lifecycle_error is not None:
                 if session_error is None:
                     raise lifecycle_error
@@ -388,14 +350,16 @@ class AgentInvocation:
         effective_config = (
             self.owner._effective_agent_config or self.owner._config
         )
-        requirements = _runtime_requirements(
-            effective_config,
-            checkpoint_active=(
-                runtime_checkpoint is not None
-                or checkpoint_sink is not None
-                or self.resume
-            ),
+        from agentloom.application.validation import AgentConfigNormalizer
+
+        requirements = AgentConfigNormalizer.runtime_requirements(
+            self.owner._config, effective_config=effective_config,
+            hook_plan=self.owner._hook_plan,
         )
+        requirements = replace(requirements, checkpoint_resume=(
+            requirements.checkpoint_resume or runtime_checkpoint is not None
+            or checkpoint_sink is not None or self.resume
+        ))
         request_identity = {
             "application_id": (
                 runtime_context.application_id

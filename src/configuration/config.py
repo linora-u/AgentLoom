@@ -41,6 +41,7 @@ _WORKFLOW_OVERLAY_KEYS = {
     "system",
     "model_request_headers",
     "smart_summary",
+    "runtime_options",
     "context_engine",
     "tool_access_control",
     "tools",
