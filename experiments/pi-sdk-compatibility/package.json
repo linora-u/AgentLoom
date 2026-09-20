@@ -1,0 +1,22 @@
+{
+  "name": "agentloom-pi-sdk-compatibility",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "engines": {
+    "node": ">=22.19.0"
+  },
+  "scripts": {
+    "test": "node --test --test-concurrency=1 test/*.test.mjs",
+    "typecheck": "tsc --noEmit",
+    "verify": "node verify.mjs"
+  },
+  "dependencies": {
+    "@earendil-works/pi-coding-agent": "0.79.4",
+    "typebox": "1.1.38"
+  },
+  "devDependencies": {
+    "@types/node": "22.19.0",
+    "typescript": "5.9.3"
+  }
+}

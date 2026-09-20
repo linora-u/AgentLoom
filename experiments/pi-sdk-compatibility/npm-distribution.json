@@ -1,0 +1,25 @@
+{
+  "version": "0.79.4",
+  "dist": {
+    "shasum": "b3d099d90640742b9ee78bafbf236d8f0a8505f1",
+    "tarball": "https://registry.npmjs.org/@earendil-works/pi-coding-agent/-/pi-coding-agent-0.79.4.tgz",
+    "fileCount": 792,
+    "integrity": "sha512-PthzVzM5m4XH/hrU+2fVjuwuH5M4eMFWbd0NCRScH14XKpwlPc8/Fh6JDz0jQb5kTBT9oQT183YLTHVVulFL9A==",
+    "signatures": [
+      {
+        "sig": "MEUCIQDXXYJSXsCkTlbsoYKbmN9kGhtlJpoL0dC7M0OkiNVPWAIgLwEK2wUnMa2z8ON3Ht415OapFFqRwYq8YLC55IwoSw4=",
+        "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U"
+      }
+    ],
+    "attestations": {
+      "url": "https://registry.npmjs.org/-/npm/v1/attestations/@earendil-works%2fpi-coding-agent@0.79.4",
+      "provenance": {
+        "predicateType": "https://slsa.dev/provenance/v1"
+      }
+    },
+    "unpackedSize": 12026694
+  },
+  "engines": {
+    "node": ">=22.19.0"
+  }
+}
