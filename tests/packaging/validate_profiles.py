@@ -49,9 +49,14 @@ def validate(output, profiles, node):
               "lock_sha256": digest(ROOT / "uv.lock"), "profiles": {}}
     (output / "attempt.json").write_text(json.dumps(report, indent=2) + "\n")
     dist = output / "dist"
-    # uv builds the wheel from the sdist by default: the wheel cannot rely on
-    # an unshipped source resource. Build tools are fixed in pyproject.toml.
-    command("build", ["uv", "build", "--out-dir", dist], cwd=ROOT)
+    # Lock the complete build environment, including transitive dependencies.
+    constraints = output / "build-constraints.txt"
+    command("build-export", ["uv", "export", "--locked", "--only-group", "build",
+                             "--no-emit-project", "-o", constraints], cwd=ROOT)
+    report["build_constraints_sha256"] = digest(constraints)
+    # Build the wheel from the sdist so unshipped resources cannot leak in.
+    command("build", ["uv", "build", "--out-dir", dist, "--build-constraints", constraints,
+                      "--require-hashes"], cwd=ROOT)
     wheel = next(dist.glob("*.whl"))
     sdist = next(dist.glob("*.tar.gz"))
     with ZipFile(wheel) as archive:
@@ -68,9 +73,15 @@ def validate(output, profiles, node):
     probe = output / "profile_probe.py"
     shutil.copyfile(ROOT / "tests/packaging/profile_probe.py", probe)
     shutil.copyfile(ROOT / "tests/mcp_test/fixtures/stdio_server.py", output / "stdio_server.py")
+    legacy = ROOT / "applications/test_demo/workflows/test_todo_off_agent.yaml"
+    shutil.copyfile(legacy, output / "existing-smol.yaml")
+    report["existing_yaml"] = {"source": str(legacy.relative_to(ROOT)), "sha256": digest(legacy)}
     for profile in profiles:
+        runtime = "pi" if profile.startswith("pi") else "smol"
+        code_tools = profile != "pi"
+        extras = ["--extra", runtime] + (["--extra", "code"] if code_tools else [])
         requirements = output / (profile + "-requirements.txt")
-        command(profile + "-export", ["uv", "export", "--locked", "--extra", profile, "--no-dev", "--no-emit-project", "-o", requirements], cwd=ROOT)
+        command(profile + "-export", ["uv", "export", "--locked", *extras, "--no-dev", "--no-emit-project", "-o", requirements], cwd=ROOT)
         prefix = output / (profile + "-env")
         command(profile + "-venv", ["uv", "venv", "--python", "3.12", prefix])
         python = prefix / "bin/python"
@@ -81,21 +92,23 @@ def validate(output, profiles, node):
 
         def run_case(case):
             workspace = output / (profile + "-" + case)
-            command(profile + "-" + case, [python, "-I", probe, "--profile", profile,
-                                          "--case", case, "--workspace", workspace], timeout=180)
+            command(profile + "-" + case, [python, "-I", probe, "--profile", runtime,
+                                          "--case", case, "--workspace", workspace,
+                                          *(["--code-tools"] if code_tools else [])], timeout=180)
             proof = json.loads((workspace / "report.json").read_text())
             print(json.dumps({"profile": profile, "case": case, "status": proof["status"]}), flush=True)
             return proof
 
-        if profile == "pi":
+        if runtime == "pi":
             results.append(run_case("missing_sdk"))
-            command("pi-sdk-install", [python, "-I", "-m", "agentloom", "install-runtime", "pi"])
-            command("pi-sdk-idempotent", [python, "-I", "-m", "agentloom", "install-runtime", "pi"])
+            command(profile + "-sdk-install", [python, "-I", "-m", "agentloom", "install-runtime", "pi"])
+            command(profile + "-sdk-idempotent", [python, "-I", "-m", "agentloom", "install-runtime", "pi"])
             results.extend(run_case(case) for case in ("stale_bridge", "missing_asset"))
-            cases = ("help", "missing_yaml", "missing_smol", "no_tools", "read", "outline_python",
-                     "outline_typescript", "ast", "lsp", "mcp", "memory", "goal", "provider_failure", "child_failure")
+            cases = (("no_tools", "read", "outline_python", "outline_typescript", "ast", "lsp")
+                     if code_tools else ("help", "missing_yaml", "missing_smol", "no_tools", "read",
+                                         "mcp", "memory", "goal", "provider_failure", "child_failure"))
         else:
-            cases = ("help", "missing_yaml", "legacy", "outline_python", "mcp", "memory")
+            cases = ("help", "missing_yaml", "legacy", "existing_yaml", "outline_python", "mcp", "memory")
         with ThreadPoolExecutor(max_workers=3) as pool:
             results.extend(pool.map(run_case, cases))
         report["profiles"][profile] = {"requirements_sha256": digest(requirements), "cases": results}
@@ -107,7 +120,7 @@ def validate(output, profiles, node):
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--output", type=Path, required=True)
-    parser.add_argument("--profiles", nargs="+", choices=["pi", "smol"], default=["pi", "smol"])
+    parser.add_argument("--profiles", nargs="+", choices=["pi", "pi-code", "smol"], default=["pi", "pi-code", "smol"])
     parser.add_argument("--node", type=Path, default=Path(shutil.which("node") or "node"))
     args = parser.parse_args()
     validate(args.output.resolve(), args.profiles, args.node.resolve())

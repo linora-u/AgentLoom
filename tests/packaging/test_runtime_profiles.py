@@ -11,8 +11,15 @@ from packaging.requirements import Requirement
 
 def test_built_wheel_selects_smol_only_through_its_explicit_profile(tmp_path):
     root = Path(__file__).resolve().parents[2]
+    constraints = tmp_path / "build-constraints.txt"
+    exported = subprocess.run(
+        ["uv", "export", "--locked", "--only-group", "build", "--no-emit-project", "-o", str(constraints)],
+        cwd=root, capture_output=True, text=True, timeout=60,
+    )
+    assert exported.returncode == 0, exported.stdout + exported.stderr
     built = subprocess.run(
-        ["uv", "build", "--wheel", str(root), "--out-dir", str(tmp_path)],
+        ["uv", "build", "--wheel", str(root), "--out-dir", str(tmp_path),
+         "--build-constraints", str(constraints), "--require-hashes"],
         capture_output=True, text=True, timeout=120,
     )
     assert built.returncode == 0, built.stdout + built.stderr
@@ -32,4 +39,9 @@ def test_built_wheel_selects_smol_only_through_its_explicit_profile(tmp_path):
     assert "smolagents" not in names("pi")
     assert "openinference-instrumentation-smolagents" not in names("pi")
     assert {"smolagents", "openinference-instrumentation-smolagents"} <= names("smol")
-    assert {"pi", "smol"} <= set(metadata.get_all("Provides-Extra") or [])
+    professional = {"serena-agent", "ast-grep-cli", "grep-ast", "tree-sitter-language-pack",
+                    "go-bin", "nodejs-bin", "libclang", "tree-sitter-c", "networkx"}
+    assert not professional & names("pi")
+    assert professional <= names("code")
+    assert {"tree-sitter", "tree-sitter-bash"} <= names("pi")  # Shared Shell governance.
+    assert {"pi", "smol", "code"} <= set(metadata.get_all("Provides-Extra") or [])
