@@ -18,7 +18,7 @@ from agentloom.adapters.litellm.model_binding import (
     resolve_litellm_model_turn_binding,
 )
 from agentloom.runtime.model_binding import ModelTurnBinding
-from agentloom.runtime.model_protocol import MessageItem, ModelTurnResult
+from agentloom.runtime.model_protocol import MessageItem, ModelTurnResult, ReasoningItem
 
 from .application_scope import safe_application_id
 from .paths import review_config, self_learning_root
@@ -73,6 +73,10 @@ def _resolve_review_model(model_type: str) -> ModelTurnBinding:
 def _model_output_text(result: ModelTurnResult) -> str:
     text: list[str] = []
     for item in result.items:
+        # Responses providers may include replay metadata alongside final text.
+        # It is neither a candidate nor a tool call and must not enter the JSON.
+        if isinstance(item, ReasoningItem):
+            continue
         if not isinstance(item, MessageItem) or item.role != "assistant":
             raise ValueError(
                 "review model must return assistant text without Tool calls"

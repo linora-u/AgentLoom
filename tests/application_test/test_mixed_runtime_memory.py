@@ -13,6 +13,7 @@ from agentloom.application.runner import execute_app
 from agentloom.configuration.config import bind_config, load_project_config
 from agentloom.self_learning.persistence.evidence_gate import SQLiteEvidenceGate
 from agentloom.self_learning.persistence.memory_store import MemoryStore
+from agentloom.self_learning.persistence.ledger import SelfLearningLedger
 from agentloom.self_learning.persistence.review_engine import ReviewEngine
 from agentloom.self_learning.review_orchestration import ReviewOrchestrator
 from tests.application_test.mixed_runtime_support import finish, model_service, project, tool_messages, write_yaml
@@ -150,6 +151,11 @@ def test_smol_evidence_is_reviewed_then_used_by_a_new_pi_run(tmp_path, approval_
             write_yaml(workflow, definition)
             phase = 'recall'
             second = execute_app(workflow, file_logging=True)
+            recalled = SelfLearningLedger(db).completed_review_context(second.run.run_id, tool_result_limit=100)
+            assert recalled is not None
+            assert any(row['tool_name'] == 'memory' and FACT in row['output_json']
+                       for row in recalled['tool_results']), 'Injected memory must not taint the next Run ledger'
+
             other = tmp_path / 'applications/other/workflows/root.yaml'
             write_yaml(other, {**definition, 'name': 'other', 'workflow': 'Inspect both memory scopes.'})
             phase = 'other_before_promotion'
