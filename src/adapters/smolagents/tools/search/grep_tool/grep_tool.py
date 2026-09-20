@@ -22,6 +22,7 @@ from pathlib import Path
 from typing import Dict, List, Optional, Tuple
 
 from agentloom.runtime.logging import get_logger
+from agentloom.runtime.tool_governance.search import search_path_excluded
 
 logger = get_logger(__name__)
 
@@ -114,6 +115,8 @@ def grep_search(
     if not search_path.is_file() and not search_path.is_dir():
         raise ValueError(f"Search path must be a file or directory: {path}")
 
+    if search_path.is_file() and search_path_excluded(search_path, search_path.parent, "grep_search"):
+        return "No matches found."
     start_time = time.monotonic()
 
     if _RG_PATH:
@@ -160,9 +163,6 @@ def _build_rg_args(
     for g in _VCS_EXCLUDE_GLOBS:
         args.extend(["--glob", g])
 
-    # Inject configured exclude patterns from tool_access_control
-    for excl_glob in get_search_exclude_patterns():
-        args.extend(["--glob", excl_glob])
 
     if output_mode == "files_with_matches":
         args.append("-l")
@@ -188,6 +188,9 @@ def _build_rg_args(
         args.extend(["-U", "--multiline-dotall"])
     if include:
         args.extend(["-g", include])
+    # Denials come after user include globs: rg uses the last matching glob.
+    for excl_glob in get_search_exclude_patterns("grep_search", root=search_dir if search_dir.is_dir() else search_dir.parent):
+        args.extend(["--glob", excl_glob])
     if output_mode == "content":
         args.append("-n")
 
@@ -417,13 +420,15 @@ def _search_with_python(
     else:
         file_list = []
         for root, dirs, filenames in os.walk(search_dir):
-            dirs[:] = sorted(d for d in dirs if d not in skip_dirs)
+            dirs[:] = sorted(d for d in dirs if d not in skip_dirs and not search_path_excluded(Path(root) / d, search_dir, "grep_search"))
             for fname in sorted(filenames):
                 if include_fn and not include_fn(fname):
                     continue
                 file_list.append((os.path.join(root, fname), fname, search_dir))
 
     for fpath, _fname, base_dir in file_list:
+        if search_path_excluded(fpath, base_dir, "grep_search"):
+            continue
         rel_path = os.path.relpath(fpath, base_dir)
         try:
             with open(fpath, "r", encoding="utf-8", errors="replace") as fh:
@@ -447,12 +452,14 @@ def _search_with_python(
         else:
             count_file_list = []
             for root, dirs, filenames in os.walk(search_dir):
-                dirs[:] = sorted(d for d in dirs if d not in skip_dirs)
+                dirs[:] = sorted(d for d in dirs if d not in skip_dirs and not search_path_excluded(Path(root) / d, search_dir, "grep_search"))
                 for fname in sorted(filenames):
                     if include_fn and not include_fn(fname):
                         continue
                     count_file_list.append((os.path.join(root, fname), fname, search_dir))
         for fpath, _fname, base_dir in count_file_list:
+            if search_path_excluded(fpath, base_dir, "grep_search"):
+                continue
             rel_path = os.path.relpath(fpath, base_dir)
             try:
                 with open(fpath, "r", encoding="utf-8", errors="replace") as fh:

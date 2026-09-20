@@ -40,7 +40,10 @@ class SandboxConfig:
 
 def _load_sandbox_config() -> SandboxConfig:
     """Load sandbox configuration from system.yaml."""
-    raw = C.get_nested("shell_settings", "sandbox", default=None)
+    from agentloom.runtime.trace import get_current_agent_config
+    config = get_current_agent_config()
+    shell = config.get("shell_settings", {}) if isinstance(config, dict) else {}
+    raw = shell.get("sandbox") if "sandbox" in shell else C.get_nested("shell_settings", "sandbox", default=None)
     if raw is None or not isinstance(raw, dict):
         return SandboxConfig()
 
