@@ -6,7 +6,7 @@
 
 配置相关改动至少交叉看这几类文件：
 
-- 用户文档：`docs/en/config-overview.md`、`agent_config.md`、`system_config.md`、`llm_config.md`、`skills_config.md`、`hooks.md`、`checkpoint.md`。
+- 用户文档：`docs/en/config-overview.md`、`agent_config.md`、`goal_mode.md`、`system_config.md`、`llm_config.md`、`skills_config.md`、`hooks.md`、`checkpoint.md`。
 - 系统配置加载：`src/configuration/config.py`、`layered_builder.py`、`config_validation.py`。
 - LLM 配置：`src/configuration/llm_config.py`、`src/adapters/smolagents/models/model_types.py`、`model_manager.py`。
 - Agent 定义与校验：`src/application/definition.py`、`src/application/validation.py`；执行构造：`src/runtime/factory.py`、`src/runtime/agent.py`。
@@ -65,6 +65,7 @@ workflow: |
 | `concurrency` | 正整数或 `"auto"` | 仅影响同一 Worker 通过 `.batch()` 被多输入批量调用 |
 | `prompt` | `str` 或 `{path: ...}` | 自定义系统 prompt 模板路径 |
 | `skills` | `{paths: list[str]}` | 当前 Agent 的额外 Skill 发现目录 |
+| `goal` | `bool` 或 `{enabled: bool}` | 仅顶层 Supervisor；开启 continuation 和显式完成 |
 
 Agent 只接受 provider 原生结构化 tool calls。只要当前 Agent 有可用工具，
 AgentLoom 就发送结构化 tools schema；不会从 prose、XML 或 JSON 文本中猜测工具调用。
@@ -77,6 +78,10 @@ worker_agents:
 ```
 
 规则：`worker_agents` item 只支持 `path`，不支持 `name`。路径可以是绝对路径、项目根相对路径、`worker_agents/` 下的文件名，或不带后缀的 worker 名。
+
+Supervisor 还可配置 `goal: true/false`，或显式 mapping。Goal mapping 不做类型宽松
+转换；旧 `token_budget` 静默忽略。开启后 workflow list 合并为一个目标上下文，
+并提供仅根 Supervisor 可见的 `get_goal` / `update_goal`。Schedule 可以使用同一 YAML。
 
 Worker 专属：
 
@@ -93,6 +98,7 @@ agent_function_schema:
 
 规则：`inputs` 的 key 必须是合法 Python 标识符；`required` 只能是 bool；runtime 会把所有参数类型归一为 `"string"`，不要用 `Optional[...]` 或 `Union[...]` 表达可选性。
 
+Worker YAML 如果出现任何 `goal` key 必须 fail-closed；不能用 `goal: false` 占位。
 
 ## Agent YAML 白名单覆盖
 

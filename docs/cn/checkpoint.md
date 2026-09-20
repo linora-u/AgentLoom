@@ -25,6 +25,7 @@ AgentLoom 将“一次执行尝试”和“需要恢复的逻辑任务”分开�
 │   │   ├── shell.jsonl.1 ... shell.jsonl.2
 │   │   ├── task_tree.json
 │   │   ├── task_events.jsonl
+│   │   └── goal.json            # Goal Mode 运行证据（存在时）
 │   └── artifacts/
 │       ├── result.txt
 │       ├── shell/
@@ -37,6 +38,8 @@ AgentLoom 将“一次执行尝试”和“需要恢复的逻辑任务”分开�
 │   ├── heartbeat.json
 │   ├── todos.json
 │   ├── todos.lock
+│   ├── goal.json                # canonical Goal 状态（存在时）
+│   ├── goal.lock
 │   ├── workers/<worker_name>/
 │   │   ├── calls/<call_index>/checkpoint.json
 │   │   └── heartbeat.json
@@ -57,11 +60,12 @@ AgentLoom 将“一次执行尝试”和“需要恢复的逻辑任务”分开�
 - Checkpoint 直接按 `<application_id>/<task_id>` 定位，不依赖日志目录、`.task_index.json` 或历史 run 扫描。
 - 用户交付物仍由 Application 的 `output_dir` 管理，runtime 清理不会遍历 Application output 目录。
 - Agent 的持久 recall 使用 `.agentloom/workspaces/agents/<application_id>/<agent_path>/` 下、归 Application 所有的 `insights.md`。当前任务的 Todo 在启用 checkpoint 时随 `<application_id>/<task_id>/todos.json` 共同恢复和清理；未启用 checkpoint 时只保存在本次 run 的内存中。它既不是 run artifact，也不承担长期项目管理。
+- Goal Mode 使用 task-scoped `goal.json` 保存 objective 指纹、`goal_started`、状态和 evidence。`active`、`interrupted`、`failed`、`crashed` 都保留 checkpoint；只有显式完成后才进入现有成功清理流程。清理前状态会复制到 run manifest 和 `audit/goal.json`。
 
 ### 终态 lifecycle ownership
 
 一个 Application Run owner 统一结算终态。Supervisor 只上报 output、memory
-snapshot 和 error，不再独立提交第二套 Application 终态。
+snapshot、error 和可选 Goal projection，不再独立提交第二套 Application 终态。
 owner 按固定顺序完成一次事务：
 
 ```text
@@ -119,6 +123,10 @@ loom run applications/<app>/workflows/<agent>.yaml --no-file-log
 # 新执行 attempt + 原逻辑任务/checkpoint
 loom run applications/<app>/workflows/<agent>.yaml --resume task_xxx
 ```
+
+Goal resume 额外校验 description、规范化 workflow 和原 runtime task 的指纹。
+旧预算字段静默忽略，旧 `budget_limited` Goal 按活动状态恢复。活动 Goal 对应 YAML
+改为禁用或目标内容改变仍会拒绝恢复。详见 [Goal Mode](goal_mode.md)。
 
 CLI 不再提供 `--log-to-file`。默认是否写文件由 `logging.file_enabled` 决定，`--no-file-log` 是单次运行的关闭开关。
 

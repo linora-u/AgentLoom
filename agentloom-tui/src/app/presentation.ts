@@ -597,6 +597,15 @@ export function runDetailSections(detail: RunDetailResultDto): DetailSection[] {
       ],
     },
     ...(issue ? [{ title: "关键问题", lines: [issue] }] : []),
+    ...(summary.goal ? [{
+      title: "Goal",
+      lines: [
+        `状态: ${goalStatusLabel(summary.goal.status)}`,
+        ...(summary.goal.goal_id ? [`Goal ID: ${summary.goal.goal_id}`] : []),
+        ...(summary.goal.objective ? [`目标: ${previewText(summary.goal.objective, 600)}`] : []),
+        ...(summary.goal.evidence ? [`完成证据: ${previewText(summary.goal.evidence, 600)}`] : []),
+      ],
+    }] : []),
     ...(["failed", "crashed", "interrupted", "unknown"].includes(summary.status)
       ? [{
           title: "AI 分析",
@@ -776,6 +785,12 @@ function runStatusLabel(status: RunDetailResultDto["summary"]["status"]): string
   }[status]
 }
 
+function goalStatusLabel(status: "active" | "complete"): string {
+  return {
+    active: "进行中",
+    complete: "已完成",
+  }[status]
+}
 
 function runDuration(startedAt: string | null, endedAt: string | null): string | null {
   if (!startedAt || !endedAt) return null

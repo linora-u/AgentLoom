@@ -54,6 +54,7 @@ _TERMINAL_RUN_STATUS_ALIASES = {
     "failed": "failed",
     "error": "failed",
     "interrupted": "interrupted",
+    "budget_limited": "interrupted",  # Legacy budget stop is resumable.
     "cancelled": "interrupted",
     "canceled": "interrupted",
     "crashed": "crashed",
@@ -755,6 +756,12 @@ class TuiBridge:
             application_id=application_id,
             system_id=system_id,
         )
+        goal = self._goal_projection(
+            manifest,
+            runtime_root=runtime_root,
+            application_id=application_id,
+            task_id=task_id,
+        )
         summary = {
             "run_id": run_id,
             "system_id": linked_system_id,
@@ -765,6 +772,8 @@ class TuiBridge:
             "started_at": self._optional_string(manifest.get("started_at")),
             "ended_at": self._optional_string(manifest.get("ended_at")),
         }
+        if goal is not None:
+            summary["goal"] = goal
         return {
             "summary": summary,
             "manifest": manifest,
@@ -1604,6 +1613,12 @@ class TuiBridge:
             systems_by_application=systems_by_application,
         )
         status = self._run_status(manifest, task=task, run_dir=run_dir)
+        goal = self._goal_projection(
+            manifest,
+            runtime_root=runtime_root,
+            application_id=application_id,
+            task_id=task_id,
+        )
         summary = {
             "run_id": run_id,
             "system_id": system_id,
@@ -1614,6 +1629,8 @@ class TuiBridge:
             "started_at": self._optional_string(manifest.get("started_at")),
             "ended_at": self._optional_string(manifest.get("ended_at")),
         }
+        if goal is not None:
+            summary["goal"] = goal
         return (
             (application_id, run_id),
             {
@@ -1953,6 +1970,38 @@ class TuiBridge:
         if status == "running":
             return "crashed"
         return "unknown"
+
+    def _goal_projection(
+        self,
+        manifest: dict[str, Any],
+        *,
+        runtime_root: Path,
+        application_id: str,
+        task_id: str,
+    ) -> dict[str, Any] | None:
+        goal = manifest.get("goal")
+        if not isinstance(goal, dict):
+            goal = self._read_json_object_bounded_secure(
+                runtime_root,
+                Path("checkpoints")
+                / Path(*application_id.split("/"))
+                / task_id
+                / "goal.json",
+                max_bytes=RUN_MANIFEST_MAX_BYTES,
+            )
+        if goal is None:
+            return None
+        from agentloom.runtime.goal import GoalState
+
+        # Display historical snapshots without reviving their obsolete budget.
+        projection = {
+            key: copy.deepcopy(value)
+            for key, value in goal.items()
+            if key in GoalState.__dataclass_fields__
+        }
+        if projection.get("status") == "budget_limited":
+            projection["status"] = "active"
+        return projection
 
     def _task_events(
         self,

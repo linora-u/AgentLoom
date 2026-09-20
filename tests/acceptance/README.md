@@ -11,7 +11,7 @@ python tests/agent_test/real_checkpoint_validation.py --scenario all --workspace
 python tests/acceptance/model_protocol_matrix.py --workspace /new/protocol-matrix
 ```
 
-The first command runs F3, F4, all three F5 cases and both F8 cases.
+The first command runs F3, F4, all three F5 cases, both F7 cases and both F8 cases.
 F1/F2/F9 belong to `architecture_contract_validation`. Each scenario uses the
 public `execute_app` interface. Original Workflows remain intact; required output
 path adaptations are copied to ignored `applications/architecture_acceptance_*`
@@ -35,6 +35,8 @@ are excluded or redacted from reports and process logs.
 | `unit` | Five Worker calls, actual tool completions, unchanged two-function fixture, newly generated pytest executed by host, collected > 0 and no failures/errors/skips, manual normal/boundary/exception oracle | 900 s |
 | `repo` | Three nested directory levels, known definitions/references, ranking, completed per-directory Worker analysis, resolvable nonempty Skill routes and cross-module dependencies | 900 s |
 | `context_text`, `context_json`, `context_multi` | Stored original source/kind/hidden values, independent ContextRefs, matching retrieval event arguments and returned hidden values, actual Worker count | 900 s each |
+| `goal_list` | Completed Goal, four completed Workers, merged workflow list and persisted verified report | 1500 s |
+| `goal_parallel` | Six concurrent Workers, verified Goal-bound report and explicit completion | 1200 s |
 | `core`, `markdown` | Exact independently read artifacts plus actual completed shell/file/search/Markdown tools, existing default versus explicit replacement toolset Workflows | 900 s each |
 | checkpoint `main`, `worker`, `completed` | Signal after committed progress, same task/new run, exactly-once ledger, one completed Worker, complete file manifest, historical ContextRef and file-history recovery | Initial 180/240/240 s; resume 360 s each |
 

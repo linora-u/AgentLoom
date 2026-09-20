@@ -1,0 +1,37 @@
+name: "goal_parallel_agent"
+agent_runtime: smolagents
+description: "Exercise parallel Workers, durable Goal evidence, and explicit completion."
+model_type: "powerful"
+max_steps: 16
+goal:
+  enabled: true
+
+workflow: |
+  Call get_goal and inspect_parallel_goal_report using their native tool schemas.
+  If the report already belongs to this Goal, verify it and complete without
+  rerunning its Worker batch. Otherwise call run_parallel_goal_probe with six
+  distinct contract-audit tasks as a JSON array, concurrency=6. Cover config,
+  state identity, continuation, explicit completion, resume, and tool permissions.
+  Require every Worker result to be completed. Verify the persisted report has
+  # Parallel Goal Validation, ## Batch Results, ## Goal State, and
+  ## Resume Instructions. Then call update_goal(status="complete", evidence=
+  <report path and verification result>). A normal final answer is not completion.
+
+tools:
+  - name: "inspect_parallel_goal_report"
+    module: "applications.goal_mode_validation.agent_tools.report_tools"
+    function: "inspect_parallel_goal_report"
+  - name: "run_parallel_goal_probe"
+    module: "applications.goal_mode_validation.agent_tools.report_tools"
+    function: "run_parallel_goal_probe"
+  - name: "run_goal_audit_batch"
+    module: "applications.goal_mode_validation.agent_tools.report_tools"
+    function: "run_goal_audit_batch"
+  - name: "persist_goal_validation_report"
+    module: "applications.goal_mode_validation.agent_tools.report_tools"
+    function: "persist_goal_validation_report"
+  - name: "verify_goal_validation_report"
+    module: "applications.goal_mode_validation.agent_tools.report_tools"
+    function: "verify_goal_validation_report"
+
+worker_agents: []

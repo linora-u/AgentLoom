@@ -17,7 +17,7 @@ AgentLoom 建立两个正交 seam：
 
 smolagents 不再是 AgentLoom 的永久 superclass 或公共类型系统，而是第一个 runtime adapter。因为 `agent_runtime` 必填，所以不存在隐式默认 runtime。LangGraph 是第二阶段用于验证 seam 的真实 runtime adapter；在它实现前，配置 `agent_runtime: langgraph` 必须明确失败，不能回退到 smolagents。
 
-AgentLoom 永久拥有 Application 定义、Supervisor/Worker 拓扑、Run 和 task identity、Hook Plan/Hook Run、Tool Gateway、权限和路径验证、`ToolCallRecord`、Todo、runtime-neutral 审计事件、checkpoint envelope 和 `ApplicationRunResult`。任何 runtime adapter 的工具调用都必须经过 AgentLoom Tool Gateway，不能直接执行第三方 runtime 的原生工具实现。
+AgentLoom 永久拥有 Application 定义、Supervisor/Worker 拓扑、Run 和 task identity、Hook Plan/Hook Run、Tool Gateway、权限和路径验证、`ToolCallRecord`、Goal、Todo、runtime-neutral 审计事件、checkpoint envelope 和 `ApplicationRunResult`。任何 runtime adapter 的工具调用都必须经过 AgentLoom Tool Gateway，不能直接执行第三方 runtime 的原生工具实现。
 
 runtime adapter 拥有其内部 Agent loop、conversation/session state、loop cursor、底层 step 或 graph node、pending interrupt、runtime-specific handoff 状态及无损恢复所需 payload。AgentLoom 不尝试把 smolagents `ActionStep` 与 LangGraph graph state 强制改造成同一种内部 step。模型历史则统一为 AgentLoom canonical items；在当前 smolagents adapter 中，这些 items 是模型回放的唯一真相，不能再从 observation 文本反向拼出下一轮历史。
 
@@ -47,7 +47,7 @@ Agent YAML 使用必填 `agent_runtime` 字段选择基座，避免和现有全�
 18. As a maintainer, I want the current smolagents adapter and future LangGraph adapter to emit the same minimum runtime event vocabulary, so that logging, audit and observability remain stable.
 19. As a maintainer, I want AgentLoom to own tool authorization and side-effect governance, so that changing runtime cannot bypass Hook or permission rules.
 20. As a maintainer, I want every tool invocation to retain a stable call ID and a canonical `ToolCallRecord`, so that audit, replay and error handling remain correlated.
-21. As a maintainer, I want `final_answer` to retain its terminal semantics across runtimes, so that output checks and completion remain consistent.
+21. As a maintainer, I want `final_answer` to retain its terminal semantics across runtimes, so that output checks and Goal settlement remain consistent.
 22. As a maintainer, I want AgentLoom to own subagent lifecycle events, so that Worker observability does not depend on a vendor-specific handoff representation.
 23. As a maintainer, I want runtime capabilities to be explicit and small, so that unsupported topology or checkpoint behavior fails rather than silently changing semantics.
 24. As a maintainer, I want the first capability set limited to structured tools, parallel tools, checkpoint/resume and subagents, so that the interface does not become a bag of framework-specific flags.
@@ -95,7 +95,7 @@ Agent YAML 使用必填 `agent_runtime` 字段选择基座，避免和现有全�
 - The execution request contains a runtime-neutral Agent definition, task and run identities, additional arguments, limits, runtime requirements, Tool Gateway, model turn adapter, event sink and optional checkpoint.
 - The result contains a normalized terminal state, final output, usage, artifacts, normalized event summary and a runtime checkpoint envelope. A raw runtime result may be retained only for diagnostics and is not part of the stable caller contract.
 - The interface does not expose step, graph node, message bus, native session or framework-specific callback objects.
-- Runtime errors normalize into configuration, unsupported capability, provider, tool, interrupted, budget-limited and internal failure categories without erasing their causal error. LiteLLM/provider errors are passed through as causes; AgentLoom does not inspect or police LiteLLM's private internal routing.
+- Runtime errors normalize into configuration, unsupported capability, provider, tool, interrupted and internal failure categories without erasing their causal error. LiteLLM/provider errors are passed through as causes; AgentLoom does not inspect or police LiteLLM's private internal routing.
 
 ### Configuration
 
@@ -109,7 +109,7 @@ Agent YAML 使用必填 `agent_runtime` 字段选择基座，避免和现有全�
 
 ### AgentLoom ownership
 
-- AgentLoom owns Application interpretation, Supervisor/Worker topology, run/task identity, Hook Plan and Hook Run, Todo, workspace policy, Tool Gateway, ToolCallRecord, audit events, checkpoint envelope and Application run result.
+- AgentLoom owns Application interpretation, Supervisor/Worker topology, run/task identity, Hook Plan and Hook Run, Goal, Todo, workspace policy, Tool Gateway, ToolCallRecord, audit events, checkpoint envelope and Application run result.
 - Tool Gateway is the only route to a side-effecting tool. Runtime adapters receive proxy tools whose calls settle through AgentLoom authorization, Hook and audit behavior.
 - AgentLoom owns a small normalized runtime event vocabulary for run, model, tool, subagent, usage, checkpoint and terminal observations.
 - AgentLoom model interaction items are the canonical provider-neutral model history used by ModelTurnAdapter, checkpoint replay, audit and context features. They do not attempt to encode every runtime’s non-model loop state.
@@ -186,7 +186,7 @@ Each Stage 1 item is part of the current delivery. Work proceeds in order; a lat
 1. Add the LangGraph dependency and register a real `langgraph` runtime; until then, selecting it remains an explicit unsupported-runtime error.
 2. Build an AgentLoom-controlled fixed StateGraph with a model node, Tool Gateway node and `final_answer` termination.
 3. Run the same minimal Application through smolagents and LangGraph and compare normalized results, Hook behavior, ToolCallRecord, events and checkpoint envelopes.
-4. Add same-runtime LangGraph checkpoint/resume, then Worker-as-Tool, Supervisor/Worker topology, parallel Workers.
+4. Add same-runtime LangGraph checkpoint/resume, then Worker-as-Tool, Supervisor/Worker topology, parallel Workers and Goal continuation.
 5. Run the two-runtime by three-protocol matrix wherever credentials and provider support are available.
 
 Stage 2 uses the Stage 1 `AgentRuntime` contract without adding smolagents concepts to it. If LangGraph cannot implement the contract without such leakage, the seam is revised explicitly rather than patched with framework-specific optional fields.
@@ -200,7 +200,7 @@ Stage 2 uses the Stage 1 `AgentRuntime` contract without adding smolagents conce
 - Runtime registry tests verify explicit selection, missing runtime, unknown runtime, construction through the registry and missing optional runtime dependency.
 - Capability tests verify that unsupported Application requirements fail before model or tool execution.
 - Tool governance tests verify that the current smolagents adapter, and later LangGraph adapter, invoke tools only through AgentLoom Tool Gateway and preserve call IDs, error/blocked states and audit order.
-- Smolagents adapter regression tests preserve established run, Worker, Todo, Hook and checkpoint behavior after mechanical migration.
+- Smolagents adapter regression tests preserve established run, Worker, Goal, Todo, Hook and checkpoint behavior after mechanical migration.
 - Registry tests reserve `langgraph` as an uninstalled or unsupported runtime in this delivery and require a clear preflight failure rather than fallback to smolagents.
 - Checkpoint-envelope tests reject runtime IDs or state schemas that do not match the selected adapter. Stage 1 also proves that a checkpoint round-trip restores the same ordered canonical items, call IDs and replay payloads used by the next model request, without observation-text reconstruction.
 - Worker checkpoint tests cover falsey results, repeated and parallel same-name calls, call indexes, cache behavior and resume without exposing native runtime memory to the caller.

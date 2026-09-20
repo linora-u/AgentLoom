@@ -89,6 +89,58 @@ def _completed_run(tmp_path: Path) -> None:
     )
 
 
+def test_goal_status_and_evidence_are_visible_in_runtime_summary_and_detail(
+    tmp_path: Path,
+) -> None:
+    bridge = _project(tmp_path)
+    _completed_run(tmp_path)
+    run_dir = tmp_path / ".runtime-live/runs/demo/run-live"
+    manifest_path = run_dir / "manifest.json"
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    manifest["status"] = "interrupted"
+    manifest["goal"] = {
+        "status": "active",
+        "evidence": None,
+    }
+    _write(manifest_path, json.dumps(manifest))
+
+    bootstrap = bridge.bootstrap()
+    detail = bridge.dispatch(
+        "run.detail",
+        {"application_id": "demo", "run_id": "run-live"},
+    )
+
+    assert bootstrap["runs"][0]["status"] == "interrupted"
+    assert bootstrap["runs"][0]["goal"]["status"] == "active"
+    assert detail["summary"]["status"] == "interrupted"
+    assert detail["summary"]["goal"] == manifest["goal"]
+
+
+def test_running_goal_is_loaded_from_checkpoint_for_tui_detail(tmp_path: Path) -> None:
+    bridge = _project(tmp_path)
+    _completed_run(tmp_path)
+    run_dir = tmp_path / ".runtime-live/runs/demo/run-live"
+    manifest_path = run_dir / "manifest.json"
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    manifest["status"] = "running"
+    manifest.pop("ended_at", None)
+    _write(manifest_path, json.dumps(manifest))
+    goal = {
+        "status": "active",
+    }
+    _write(
+        tmp_path / ".runtime-live/checkpoints/demo/task-live/goal.json",
+        json.dumps(goal),
+    )
+
+    detail = bridge.dispatch(
+        "run.detail",
+        {"application_id": "demo", "run_id": "run-live"},
+    )
+
+    assert detail["summary"]["goal"] == goal
+
+
 def _schedule_document(tmp_path: Path) -> None:
     _write(
         tmp_path / ".agentloom/schedules/jobs.json",
@@ -1135,3 +1187,30 @@ def test_runtime_summary_returns_fresh_independent_system_objects(tmp_path: Path
 
     assert second["systems"][0]["name"] == "demo"
     assert second["systems"][0]["validation"] == {"valid": True, "errors": []}
+
+
+@pytest.mark.parametrize("source", ["manifest", "checkpoint"])
+def test_legacy_goal_budget_is_silently_ignored_in_tui(tmp_path: Path, source: str) -> None:
+    bridge = _project(tmp_path)
+    _completed_run(tmp_path)
+    manifest_path = tmp_path / ".runtime-live/runs/demo/run-live/manifest.json"
+    manifest = json.loads(manifest_path.read_text())
+    manifest["status"] = "budget_limited"
+    legacy = {
+        "goal_id": "goal-legacy", "status": "budget_limited", "goal_started": True,
+        "objective": "Finish report", "token_budget": 1, "used_tokens": 100,
+        "remaining_tokens": 0, "prompt_tokens": 90, "completion_tokens": 10,
+    }
+    if source == "manifest":
+        manifest["goal"] = legacy
+    else:
+        manifest.pop("goal", None)
+        _write(tmp_path / ".runtime-live/checkpoints/demo/task-live/goal.json", json.dumps(legacy))
+    _write(manifest_path, json.dumps(manifest))
+    summary = bridge.dispatch("run.detail", {"application_id": "demo", "run_id": "run-live"})["summary"]
+    assert summary["status"] == "interrupted"
+    assert summary["goal"] == {
+        "goal_id": "goal-legacy", "status": "active", "goal_started": True,
+        "objective": "Finish report",
+    }
+    assert json.loads(manifest_path.read_text())["status"] == "budget_limited"

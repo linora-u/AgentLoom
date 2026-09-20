@@ -14,6 +14,7 @@ from agentloom.application.workflows import get_worker_agent_yaml_path, infer_ca
 from agentloom.configuration import C, get_default_toolsets
 from agentloom.configuration.yaml_loader import load_unique_yaml
 from agentloom.runtime.agent import AgentRoleProfile, AgentType, RoleDrivenAgent
+from agentloom.runtime.goal import normalize_goal_config, normalize_workflow_for_goal
 from agentloom.runtime.logging import (
     get_logger,
 )
@@ -719,8 +720,12 @@ class YamlConfiguredSupervisorAgent(RoleDrivenAgent):
             inject_default_file_tools=False,
         )
 
-    def _transform_task(self, task: str) -> str:
-        workflow_content = _workflow_to_task_spec_source(self._config['workflow'])
+    def _transform_task(self, task: str, *, workflow_override: str | None = None) -> str:
+        workflow_content = (
+            workflow_override
+            if workflow_override is not None
+            else _workflow_to_task_spec_source(self._config['workflow'])
+        )
         description = self._config.get('description', '').strip()
         task_spec_source = workflow_content.strip()
         if description:
@@ -744,6 +749,10 @@ class YamlConfiguredSupervisorAgent(RoleDrivenAgent):
 
     def _transform_tasks(self, task: str) -> list[str]:
         workflow_content = self._config['workflow']
+        goal = normalize_goal_config(self._config, source=self._config.get("name", "supervisor"))
+        if goal.enabled:
+            merged_workflow = normalize_workflow_for_goal(workflow_content)
+            return [self._transform_task(task, workflow_override=merged_workflow)]
         if isinstance(workflow_content, list):
             # List workflows are executed sequentially: each item becomes a
             # separate runtime_agent.run() call with reset=False preserving
@@ -1124,6 +1133,7 @@ class YamlAgentFactory:
         else:
             log.error(f"[YamlAgentFactory] Failed to create agent tool from {config_path if not isinstance(config_path, dict) else 'dict'} (disabled or missing config)")
         return tool
+
 
     @staticmethod
     def run_agents_parallel(
