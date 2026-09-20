@@ -1,8 +1,6 @@
 lsp_servers:
   enabled: false
 mcp_servers: null
-todo:
-  mode: 'off'
 checkpoint:
   enabled: true
   cleanup_on_success: false

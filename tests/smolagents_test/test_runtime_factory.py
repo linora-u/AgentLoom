@@ -130,13 +130,8 @@ def _definition(
             requests_per_minute=30,
         ),
         tool_gateway=resolved_gateway,
-        max_steps=7,
-        planning_interval=planning_interval,
-        smart_summary=False,
-        todo_mode="on",
-        prompt_template_path=prompt_template_path,
+        runtime_options={'max_steps': 7, 'planning_interval': planning_interval, 'smart_summary': False, 'todo_mode': "on", 'prompt_template_path': prompt_template_path, 'max_consecutive_model_errors': max_consecutive_model_errors},
         project_root=project_root or str(Path.cwd()),
-        max_consecutive_model_errors=max_consecutive_model_errors,
         metadata=metadata or {},
     )
 
@@ -359,9 +354,9 @@ def test_runtime_close_releases_gateway_after_native_close_failure() -> None:
     "value",
     [0, True, "5"],
 )
-def test_definition_rejects_invalid_model_error_limit(value) -> None:
+def test_adapter_rejects_invalid_model_error_limit(value) -> None:
     with pytest.raises(ValueError, match="positive integer"):
-        _definition(max_consecutive_model_errors=value)
+        SmolagentsRuntimeFactory()(_definition(max_consecutive_model_errors=value))
 
 
 def test_factory_loads_explicit_prompt_and_appends_instructions_once(
@@ -446,7 +441,7 @@ def test_factory_rejects_non_smolagents_definition() -> None:
         instructions=definition.instructions,
         model=definition.model,
         tool_gateway=definition.tool_gateway,
-        max_steps=definition.max_steps,
+        runtime_options=definition.runtime_options,
     )
 
     with pytest.raises(ValueError, match="runtime_id='smolagents'"):
@@ -459,7 +454,9 @@ def test_smol_adapter_owns_todo_and_terminal_tools(mode, present):
     from agentloom.runtime.tool_gateway import AgentLoomToolGateway, bind_tool
     from agentloom.tools.todo import todo_write
 
-    definition = replace(_definition(), todo_mode=mode, tool_gateway=AgentLoomToolGateway([bind_tool(todo_write)]))
+    definition = _definition()
+    definition = replace(definition, runtime_options={**definition.runtime_options, "todo_mode": mode},
+                         tool_gateway=AgentLoomToolGateway([bind_tool(todo_write)]))
     runtime = SmolagentsRuntimeFactory()(definition)
     try:
         tools = runtime._native_runtime.tools

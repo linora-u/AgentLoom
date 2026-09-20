@@ -116,8 +116,6 @@ def probe(workspace: Path) -> dict:
         lsp_servers:
           enabled: false
         default_toolsets: []
-        todo:
-          mode: off
     """))
     (config / "llm.yaml").write_text(
         "model:\n"
@@ -154,7 +152,9 @@ def probe(workspace: Path) -> dict:
         agent_runtime: smolagents
         description: Exercise installed Application execution.
         model_type: probe
-        max_steps: 3
+        runtime_options:
+          max_steps: 3
+          todo_mode: "off"
         toolsets: []
         tools:
           - name: write_probe

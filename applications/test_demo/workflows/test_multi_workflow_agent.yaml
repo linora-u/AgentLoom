@@ -4,7 +4,9 @@ description: |
   Demo agent for sequential list workflows.
 
 model_type: "powerful"
-max_steps: 3
+runtime_options:
+  max_steps: 3
+  smart_summary: false
 
 workflow:
   - |

@@ -45,7 +45,7 @@ When loading an Agent YAML, the system automatically searches upward for its par
 
 #### Level 3: Agent-level Override
 In addition to defining its own workflow, a single Agent's YAML file can override selected system configurations. The whitelisted fields that support override (`_WORKFLOW_OVERLAY_KEYS`) are:
-- `system`, `model_request_headers`, `smart_summary`, `context_engine`, `tool_access_control`, `tools`, `shell_settings`, `default_toolsets`, `toolsets`, `prompt`, `mcp_servers`, `self_learning`, `hooks`.
+- `system`, `model_request_headers`, `runtime_options`, `context_engine`, `tool_access_control`, `tools`, `shell_settings`, `default_toolsets`, `toolsets`, `mcp_servers`, `self_learning`, `hooks`.
 
 `context_engine` is intentionally small. It is enabled by the task runtime and uses the task-scoped checkpoint context store; normal overrides should only tune:
 
@@ -114,7 +114,7 @@ from agentloom.configuration import C
 
 # 1. Access system configuration
 tools_list = C.get_nested("tools", "default", default=[])
-is_summary_enabled = C.get("smart_summary")
+context_preview_chars = C.get_nested("context_engine", "preview_max_chars", default=3000)
 
 # 2. Access LLM configuration
 api_key = C.llm_api_key                # Reads api_key from the default model type

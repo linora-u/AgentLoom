@@ -83,7 +83,6 @@ class BaseAgent(ABC):
     and execution environment integration.
     """
 
-    max_steps = 80
     _config: dict[str, Any]
 
     @property
@@ -539,8 +538,6 @@ class RoleDrivenAgent(BaseAgent):
 
     def _after_role_init(self, **kwargs) -> None:
         """Hook: run after role-driven initialization."""
-        if "max_steps" in self._config:
-            self.max_steps = self._config["max_steps"]
 
     def _required_config_fields(self) -> tuple[str, ...]:
         return tuple(self.REQUIRED_CONFIG_FIELDS)
@@ -688,8 +685,6 @@ class RoleDrivenAgent(BaseAgent):
             self._config, snapshot=self._effective_agent_config_snapshot,
             agent_root=C.agent_root,
         )
-        if runtime_id == "smolagents" and sources["max_steps"] == "default:smolagents":
-            options["max_steps"] = self.max_steps
         gateway = self._build_tool_gateway()
         return RuntimeDefinition(
             runtime_id=runtime_id,

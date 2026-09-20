@@ -3,7 +3,9 @@ agent_runtime: smolagents
 description: "Validate edit_file tool: multi-edit schema, unique matches, and error handling"
 
 model_type: "powerful"
-max_steps: 10
+runtime_options:
+  max_steps: 10
+  smart_summary: false
 
 workflow: |
   # edit_file Tool Validation Workflow

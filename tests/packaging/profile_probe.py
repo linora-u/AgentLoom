@@ -122,21 +122,23 @@ def configure(workspace, profile, case, url):
     system = {"runtime": {"root_dir": str(workspace / "runtime")},
         "checkpoint": {"enabled": False}, "logging": {"console_enabled": False},
         "self_learning": {"enabled": case == "memory"}, "lsp_servers": {"enabled": False},
-        "default_toolsets": [], "todo": {"mode": "off"}, "smart_summary": False}
+        "default_toolsets": []}
     model = {"model": "openai/profile-fixture", "adapter": "openai_chat", "base_url": url,
         "api_key": "synthetic-fixture", "context_window": 32768, "max_output_tokens": 1000,
         "timeout": 10, "num_retries": 0, "requests_per_minute": 2000000}
-    if case == "existing_yaml":
-        system.pop("default_toolsets")  # Exercise the original default toolsets.
+    if case == "shipped_yaml":
+        system.pop("default_toolsets")  # Exercise the shipped sample's default toolsets.
     (config / "system.yaml").write_text(yaml.safe_dump(system))
     (config / "llm.yaml").write_text(yaml.safe_dump({"model": {
         "default_model_type": "probe", "probe": model, "summary": model, "powerful": model}}))
     definition = {"name": "installed_profile", "agent_runtime": "pi" if profile == "pi" else "smolagents",
         "description": "Verify installed Application tools.", "workflow": "Execute the selected tool and report its result.",
         "tools": [], "toolsets": []}
+    if profile == "smol":
+        definition["runtime_options"] = {"smart_summary": False, "todo_mode": "off"}
     calls = []
     marker = None
-    if case in {"read", "legacy"}:
+    if case in {"read", "smol_read"}:
         name = "read" if profile == "pi" else "read_file"
         arguments = {"path" if profile == "pi" else "file_path": str(workspace / "note.txt")}
         calls = [(name, arguments)]
@@ -166,13 +168,14 @@ def configure(workspace, profile, case, url):
         marker = "installed-mcp"
     definition["tools"] = [{"name": name} for name in sorted({call[0] for call in calls})
                            if name not in {"get_goal", "update_goal"} and not name.startswith("mcp__")]
-    if case in {"legacy", "missing_smol"}:
-        definition.update(agent_runtime="smolagents", max_steps=3)
+    if case in {"smol_read", "missing_smol"}:
+        definition.update(agent_runtime="smolagents",
+                          runtime_options={"max_steps": 3, "smart_summary": False, "todo_mode": "off"})
     app = workspace / "applications/probe/workflows/root.yaml"
     app.parent.mkdir(parents=True)
     app.write_text(yaml.safe_dump(definition))
-    if case == "existing_yaml":
-        shutil.copyfile(Path(__file__).with_name("existing-smol.yaml"), app)
+    if case == "shipped_yaml":
+        shutil.copyfile(Path(__file__).with_name("shipped-smol.yaml"), app)
     return app, calls, marker
 
 
@@ -182,7 +185,7 @@ def run(profile, case, workspace, code_tools=False):
     os.chdir(workspace)
     failure = {"provider_failure": "provider", "child_failure": "child"}.get(case)
     calls = []
-    answer = "TODO_OFF_OK MOOL-4" if case == "existing_yaml" else "PROFILE-APPLICATION-OK"
+    answer = "TODO_OFF_OK MOOL-4" if case == "shipped_yaml" else "PROFILE-APPLICATION-OK"
     with model_service(profile, calls, failure, answer) as (url, requests, killed_children):
         app, planned, marker = configure(workspace, profile, case, url)
         calls.extend(planned)
@@ -234,11 +237,14 @@ def run(profile, case, workspace, code_tools=False):
             with bind_config(load_project_config(workspace)):
                 result = execute_app(app, file_logging=True)
             assert result.output == answer, result.output
-            if case == "existing_yaml":
-                assert app.read_bytes() == Path(__file__).with_name("existing-smol.yaml").read_bytes()
+            if case == "shipped_yaml":
+                assert app.read_bytes() == Path(__file__).with_name("shipped-smol.yaml").read_bytes()
                 evidence["yaml_sha256"] = hashlib.sha256(app.read_bytes()).hexdigest()
+                sample = yaml.safe_load(app.read_text())
+                assert sample["runtime_options"] == {"max_steps": 6, "todo_mode": "off", "smart_summary": False}
                 offered = {tool["function"]["name"] for tool in requests[0].get("tools", [])}
                 assert {"read_file", "write_file", "shell_tool", "grep_search", "glob_search"} <= offered, offered
+                assert "todo_write" not in offered, offered
             events = [json.loads(line) for line in (result.run.run_dir / "audit/runtime_events.jsonl").read_text().splitlines()]
             records = [event["details"]["record"] for event in events if event["kind"] == "tool"
                        and "record" in event["details"]]

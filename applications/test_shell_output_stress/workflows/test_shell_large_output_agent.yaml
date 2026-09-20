@@ -65,4 +65,6 @@ workflow: |
   Include the full-output artifact path you inspected.
 
 worker_agents: []
-max_steps: 12
+runtime_options:
+  max_steps: 12
+  smart_summary: false

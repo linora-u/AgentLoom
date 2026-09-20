@@ -33,4 +33,6 @@ tools:
   - name: "glob_search"
 
 worker_agents: []
-max_steps: 10
+runtime_options:
+  max_steps: 10
+  smart_summary: false

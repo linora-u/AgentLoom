@@ -2,7 +2,9 @@ name: "memory_review_off_analysis"
 agent_runtime: smolagents
 description: "Analyze one de-identified operational case as a normal Application."
 model_type: "summary"
-max_steps: 6
+runtime_options:
+  max_steps: 6
+  smart_summary: false
 
 workflow: |
   Load the assigned case with `validation_memory_case`. Treat its evidence as

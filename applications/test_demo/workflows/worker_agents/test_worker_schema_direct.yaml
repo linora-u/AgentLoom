@@ -1,5 +1,7 @@
 name: "worker_schema_direct"
 agent_runtime: smolagents
+runtime_options:
+  smart_summary: false
 description: |
   直连测试 worker，用于验证 agent_function_schema 是否驱动 tool 注册，以及工具调用时是否收到了输入并返回输出。
 model_type: "powerful"

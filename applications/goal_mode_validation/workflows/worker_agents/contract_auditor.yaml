@@ -2,7 +2,9 @@ name: "goal_contract_auditor"
 agent_runtime: smolagents
 description: "Audit one Goal Mode configuration or state-contract slice against code and tests."
 model_type: "summary"
-max_steps: 2
+runtime_options:
+  max_steps: 2
+  smart_summary: false
 concurrency: 1
 
 workflow: |

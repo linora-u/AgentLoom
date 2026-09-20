@@ -132,7 +132,8 @@ def configure_case(case: str, workspace: Path, workflow: Path, system: dict, def
         worker = workflow.parent / "worker_agents" / "fact_worker.yaml"
         worker.parent.mkdir()
         worker.write_text(yaml.safe_dump({
-            "name": "fact_worker", "agent_runtime": "smolagents", "max_steps": 6,
+            "name": "fact_worker", "agent_runtime": "smolagents",
+            "runtime_options": {"max_steps": 6, "smart_summary": False, "todo_mode": "off"},
             "description": "Look up one fact from the service.",
             "workflow": "Call mcp__facts__lookup with query equal to the supplied query input, then report its actual result using final_answer.",
             "tools": [], "toolsets": [], "mcp_servers": definition["mcp_servers"],
@@ -237,14 +238,14 @@ def run_case(case: str, workspace: Path, *, model_type: str | None = None) -> di
         "checkpoint": {"enabled": True, "cleanup_on_success": False},
         "logging": {"console_enabled": False},
         "self_learning": {"enabled": False},
-        "default_toolsets": [], "smart_summary": False,
-        "todo": {"mode": "off"}, "lsp_servers": {"enabled": False},
+        "default_toolsets": [], "lsp_servers": {"enabled": False},
     }
     workflow = workspace / "applications" / case / "workflows" / "supervisor.yaml"
     workflow.parent.mkdir(parents=True)
     definition = {
-        "name": f"validate_{case}", "agent_runtime": "smolagents", "max_steps": 10,
-        "toolsets": [], "tools": [], "smart_summary": False,
+        "name": f"validate_{case}", "agent_runtime": "smolagents",
+        "runtime_options": {"max_steps": 10, "smart_summary": False, "todo_mode": "off"},
+        "toolsets": [], "tools": [],
     }
     if model_type is not None:
         definition["model_type"] = model_type

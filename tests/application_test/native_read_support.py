@@ -174,7 +174,7 @@ def write_application(root: Path, name: str, profile: str, scenario: str, *, smo
         },
     }
     if smol:
-        config.update(max_steps=4, smart_summary=False, todo={"mode": "off"})
+        config["runtime_options"] = {"max_steps": 4, "smart_summary": False, "todo_mode": "off"}
     else:
         config["runtime_options"] = {"native_tools": ["native_read"], "scenario": scenario, "cwd": str(cwd)}
     if scenario in {"transformed", "hook_blocked", "invalid_final"}:

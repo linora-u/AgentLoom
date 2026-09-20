@@ -4,7 +4,9 @@ description: |
   Run a deep, read-only, multi-Worker acceptance audit of the AgentLoom Goal Mode
   implementation and persist a reproducible evidence report.
 model_type: "powerful"
-max_steps: 30
+runtime_options:
+  max_steps: 30
+  smart_summary: false
 goal: true
 
 workflow: |

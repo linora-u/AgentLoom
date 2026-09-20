@@ -40,7 +40,6 @@ _PROJECT_NAME = "AgentLoom"
 _WORKFLOW_OVERLAY_KEYS = {
     "system",
     "model_request_headers",
-    "smart_summary",
     "runtime_options",
     "context_engine",
     "tool_access_control",
@@ -50,11 +49,9 @@ _WORKFLOW_OVERLAY_KEYS = {
     "shell_settings",
     "default_toolsets",
     "toolsets",
-    "prompt",
     "mcp_servers",
     "self_learning",
     "hooks",
-    "todo",
     "skills",
 }
 _LLM_ONLY_TOP_LEVEL_KEYS = {"model", "llm", "langfuse"}

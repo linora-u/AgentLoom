@@ -122,7 +122,7 @@ def _definition(runtime_id: str) -> RuntimeDefinition:
             adapter=_ModelAdapter(),
         ),
         tool_gateway=gateway,
-        max_steps=5,
+        runtime_options={'max_steps': 5},
     )
 
 
@@ -341,7 +341,7 @@ def test_runtime_definition_requires_neutral_model_and_tool_gateway() -> None:
             description="Do not accept an arbitrary model.",
             model=object(),  # type: ignore[arg-type]
             tool_gateway=valid.tool_gateway,
-            max_steps=5,
+            runtime_options={'max_steps': 5},
         )
     with pytest.raises(TypeError, match="ToolGateway"):
         RuntimeDefinition(
@@ -350,7 +350,7 @@ def test_runtime_definition_requires_neutral_model_and_tool_gateway() -> None:
             description="Do not accept a tuple of arbitrary tools.",
             model=valid.model,
             tool_gateway=(),  # type: ignore[arg-type]
-            max_steps=5,
+            runtime_options={'max_steps': 5},
         )
     with pytest.raises(TypeError):
         RuntimeDefinition(  # type: ignore[call-arg]
@@ -360,7 +360,7 @@ def test_runtime_definition_requires_neutral_model_and_tool_gateway() -> None:
             model=valid.model,
             tool_gateway=valid.tool_gateway,
             tools=(),
-            max_steps=5,
+            runtime_options={'max_steps': 5},
         )
 
 
@@ -372,10 +372,7 @@ def test_runtime_definition_freezes_json_safe_metadata() -> None:
         description="Freeze caller-owned metadata.",
         model=_definition("test").model,
         tool_gateway=_definition("test").tool_gateway,
-        max_steps=3,
-        planning_interval=2,
-        smart_summary=False,
-        todo_mode="off",
+        runtime_options={'max_steps': 3, 'planning_interval': 2, 'smart_summary': False, 'todo_mode': "off"},
         metadata=original,
     )
     original["labels"].append("mutated")
@@ -388,7 +385,7 @@ def test_runtime_definition_freezes_json_safe_metadata() -> None:
             description="Reject opaque metadata.",
             model=definition.model,
             tool_gateway=definition.tool_gateway,
-            max_steps=3,
+            runtime_options={'max_steps': 3},
             metadata={"opaque": object()},
         )
 
@@ -401,24 +398,21 @@ def test_runtime_definition_validates_typed_execution_context() -> None:
         description="Expose shared runtime construction context.",
         model=valid.model,
         tool_gateway=valid.tool_gateway,
-        max_steps=3,
-        prompt_template_path=" prompts/custom.yaml ",
+        runtime_options={'max_steps': 3, 'prompt_template_path': " prompts/custom.yaml ", 'max_consecutive_model_errors': 7},
         project_root=" /workspace ",
-        max_consecutive_model_errors=7,
     )
 
-    assert definition.prompt_template_path == "prompts/custom.yaml"
+    assert definition.runtime_options["prompt_template_path"] == " prompts/custom.yaml "
     assert definition.project_root == "/workspace"
-    assert definition.max_consecutive_model_errors == 7
-    with pytest.raises(ValueError, match="max_consecutive_model_errors"):
+    assert definition.runtime_options["max_consecutive_model_errors"] == 7
+    with pytest.raises(ValueError, match="project_root"):
         RuntimeDefinition(
             runtime_id="test",
             name="bad-model-error-limit",
             description="Reject invalid typed execution context.",
             model=valid.model,
             tool_gateway=valid.tool_gateway,
-            max_steps=3,
-            max_consecutive_model_errors=0,
+            project_root=" ",
         )
 
 
@@ -442,7 +436,7 @@ def test_runtime_definition_rejects_non_json_metadata(
             description="Reject values outside the JSON contract.",
             model=valid.model,
             tool_gateway=valid.tool_gateway,
-            max_steps=3,
+            runtime_options={'max_steps': 3},
             metadata=invalid_metadata,  # type: ignore[arg-type]
         )
 

@@ -25,20 +25,6 @@ _WORKFLOW_VALIDATION_ERROR = (
 )
 
 
-# Legacy public imports remain available while callers migrate to smol options.
-from agentloom.adapters.smolagents.options import (
-    NormalizedExecutionConfig,
-    resolve_execution_prompt_template_path,
-    normalize_execution_prompt_template_path_value,
-    normalize_execution_prompt_template_path,
-    normalize_execution_planning_interval_value,
-    validate_todo_config,
-    normalize_positive_int_value,
-    build_normalized_execution_config,
-    validate_execution_config_payload,
-)
-
-
 class AgentConfigNormalizer:
     @staticmethod
     def validate_agent_runtime_config(
@@ -205,14 +191,6 @@ class AgentConfigNormalizer:
         if unknown_args:
             joined_args = ", ".join(sorted(unknown_args))
             raise ValueError(f"Unknown fixed_args for tool '{tool_name}': {joined_args}")
-
-    @staticmethod
-    def validate_max_steps_config(config: dict) -> None:
-        if "max_steps" not in config:
-            return
-        max_steps = config["max_steps"]
-        if isinstance(max_steps, bool) or not isinstance(max_steps, int) or max_steps <= 0:
-            raise ValueError("max_steps must be a positive integer when provided")
 
     @staticmethod
     def validate_workflow_config(config: dict) -> None:

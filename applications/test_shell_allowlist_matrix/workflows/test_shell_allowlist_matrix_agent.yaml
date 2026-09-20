@@ -52,4 +52,6 @@ workflow: |
      Never mark PASS from expectation alone.
 
 worker_agents: []
-max_steps: 24
+runtime_options:
+  max_steps: 24
+  smart_summary: false

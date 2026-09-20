@@ -1,5 +1,7 @@
 name: "security_scan"
 agent_runtime: smolagents
+runtime_options:
+  smart_summary: false
 description: "Scans for security vulnerabilities: input validation gaps, injection risks, buffer overflows, hardcoded secrets, and cryptographic misuse."
 model_type: "powerful"
 toolsets:

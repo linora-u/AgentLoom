@@ -24,4 +24,6 @@ tools:
   - name: "lsp_hover"
 
 worker_agents: []
-max_steps: 10
+runtime_options:
+  max_steps: 10
+  smart_summary: false

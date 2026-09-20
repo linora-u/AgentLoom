@@ -13,7 +13,7 @@
 - `RuntimeModelSelection.settings` 是所选 profile 的私有快照；`request_headers` 是实例真正生效的 headers，优先级为全局 → Application → Agent → 模型 profile，header 名按大小写不敏感覆盖。解析实现共用 `configuration/model_request_headers.py`。
 - header 合并在有效配置构造时逐层完成，同时覆盖直接 headers 和自定义 header profile。不能先按大小写敏感的字典深合并，再依靠最终字典顺序判断来源优先级。
 - settings、headers、固定参数和原始工具参数可能含私密数据。它们只进入授权的实例传输/执行，不进入公开 metadata、repr、日志或指纹。协议解析错误不回显输入。
-- `runtime_options` 继续使用 02 的来源归一化与 smol 旧字段兼容；其他基座不必理解 smol 的规划、Todo 或摘要参数。
+- 2026-09-21 维护者更新：`runtime_options` 是唯一解释的后端参数入口。旧顶层 `max_steps`、`planning_interval`、`smart_summary`、`todo`、`prompt`、`max_consecutive_parse_errors` 静默忽略，不转换、不拒绝、不参与新旧冲突判断。smol 使用 `todo_mode: "off"`、字符串 `prompt_template_path` 和 `max_consecutive_model_errors`；其他基座不必理解这些参数。02/03 原有兼容验收保留为历史记录。
 - 结果状态仍为 success / max_steps_error / interrupted / failed；错误分类、usage、checkpoint envelope 继续使用现有合同。工具终态仍为 completed / error / blocked。
 - Application Run 与 Hook local Run 不混为一谈：公共请求的 `run_id` 为 Application Run，Hook local Run 由 host 的实例调用上下文持有；adapter 不能自行选择其他 Worker 的 Hook Run。
 

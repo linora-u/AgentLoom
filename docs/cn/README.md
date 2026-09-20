@@ -178,6 +178,8 @@ applications/release_review/
 
 Supervisor 引用 Worker 定义：
 
+基座执行参数只写在 `runtime_options` 中。旧顶层 smol 字段静默忽略，不转换、不拒绝。
+
 ```yaml
 name: "release_review"
 agent_runtime: "smolagents"
@@ -192,7 +194,8 @@ workflow: |
   Ask both Workers for evidence, reconcile conflicts, and return one release decision.
 
 tools: []
-max_steps: 12
+runtime_options:
+  max_steps: 12
 goal:
   enabled: true
 ```
@@ -219,7 +222,8 @@ workflow: |
 
 tools: []
 worker_agents: []
-max_steps: 8
+runtime_options:
+  max_steps: 8
 ```
 
 直接运行 Supervisor：

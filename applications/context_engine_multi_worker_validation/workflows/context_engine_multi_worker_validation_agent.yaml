@@ -2,7 +2,9 @@ name: "context_engine_multi_worker_validation"
 agent_runtime: smolagents
 description: "Validate multiple worker ContextRefs and retrievals in one supervisor run."
 model_type: "powerful"
-max_steps: 12
+runtime_options:
+  max_steps: 12
+  smart_summary: false
 
 workflow: |
   # ContextEngine Multi-Worker Validation

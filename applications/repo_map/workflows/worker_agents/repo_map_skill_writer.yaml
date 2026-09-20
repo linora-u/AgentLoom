@@ -1,5 +1,7 @@
 name: "repo_map_skill_writer"
 agent_runtime: smolagents
+runtime_options:
+  smart_summary: false
 description: |
   写入 repo_map 导航技能文档。
   输入仅为 output_dir，读取工具层准备的 context 后，

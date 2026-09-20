@@ -1,4 +1,4 @@
-"""Keep the real smol loop compatible at the public Application boundary."""
+"""Execute smol runtime options at the public Application boundary."""
 
 from __future__ import annotations
 
@@ -91,7 +91,7 @@ class _CompatibilityProvider:
 
 
 @pytest.mark.parametrize("goal,shell", [(False, False), (True, False), (False, True)])
-def test_legacy_smol_yaml_executes_tools_todo_and_goal_through_application(
+def test_smol_runtime_options_execute_tools_todo_and_goal_through_application(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
     goal: bool,
@@ -135,9 +135,7 @@ def test_legacy_smol_yaml_executes_tools_todo_and_goal_through_application(
                 "description": "Write the receipt, track a pending Todo, and finish.",
                 "workflow": "Use the supplied tools to complete the requested task.",
                 "model_type": "compatibility",
-                "max_steps": 8,
-                "smart_summary": False,
-                "todo": {"mode": "auto"},
+                "runtime_options": {"max_steps": 8, "smart_summary": False, "todo_mode": "auto"},
                 "goal": goal,
                 "toolsets": [],
                 "tools": [{"name": "write_file"}, *([{"name": "shell_tool"}] if shell else [])],

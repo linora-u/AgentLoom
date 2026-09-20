@@ -17,7 +17,9 @@ mcp_servers:
   tool_timeout: 60
   tool_name_prefix: true
 
-max_steps: 15
+runtime_options:
+  max_steps: 15
+  smart_summary: false
 
 workflow: |
   # 联网新闻热点搜索工作流

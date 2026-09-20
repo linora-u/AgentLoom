@@ -3,10 +3,11 @@ agent_runtime: smolagents
 description: "Real-LLM smoke test for AgentLoom self-learning foundation tools."
 
 model_type: "powerful"
-max_steps: 16
+runtime_options:
+  max_steps: 16
+  todo_mode: "off"
+  smart_summary: false
 
-todo:
-  mode: "off"
 
 tools:
   - name: "session_search"
