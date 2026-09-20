@@ -7,7 +7,7 @@ from uuid import UUID
 import agentloom.configuration.config as config_module
 import pytest
 import yaml
-from agentloom.adapters.litellm.request_headers import (
+from agentloom.configuration.model_request_headers import (
     AGENTLOOM_SESSION_TOKEN_TOKEN,
     AGENTLOOM_SESSION_UUID_TOKEN,
     GENERIC_MODEL_USER_AGENT,
