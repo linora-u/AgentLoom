@@ -5,15 +5,31 @@ Python owns Application identity, receipts, Hook Run/Stop and resource cleanup;
 Pi owns its in-memory conversation and native provider protocol. No smol model,
 Tool, Todo, final_answer implementation or message format is required.
 
-## Build and run from a source checkout
+## Install and run
 
-Node **22.19+** and the existing Python environment are required:
+Node **22.19+** with npm is required. Use uv as the Python environment and
+installation entry point:
 
 ```sh
-cd src/adapters/pi/bridge
-npm ci --ignore-scripts
-npm run build
+uv run --locked loom install-runtime pi
 ```
+
+This downloads the published SDK using `npm ci --ignore-scripts`, then builds
+AgentLoom's bridge and verifies its imports. `package.json` fixes the SDK at
+**0.79.4**; `package-lock.json` fixes transitive versions and integrity hashes.
+uv manages Python dependencies; npm installs this Node package. No SDK source
+checkout, global Pi command, or manual npm build is needed.
+
+The SDK is installed in `bridge/node_modules/`; generated JavaScript is in
+`bridge/dist/`. Both remain local and ignored by Git. Only our adapter/bridge
+source and dependency declarations are committed. The repository-root `pi/`
+reference checkout is not used by the production runtime or installer.
+
+Repeated installation reuses a successful result unless the source, schema or
+lock changes. Concurrent installers share a process lock; failures leave no
+success marker and can be retried with the same command. Install before starting
+Applications; Node/npm and network access are needed for the initial download.
+The equivalent Python entry point is `python -m agentloom.adapters.pi.install`.
 
 Use the existing `config/llm.yaml`, then select Pi in an Application workflow:
 
@@ -29,7 +45,9 @@ toolsets: []
 Disable checkpoint and Goal for this Application. Run with the existing
 `loom run applications/<app>/workflows/root.yaml` or `execute_app` entry.
 Dependency installation is explicit; Application execution never runs npm.
-Distribution/wheel assembly is ticket 13 and consumes this bridge and its lock.
+Python packages include our bridge sources, schema and lock, not `node_modules`
+or build artifacts. The same installer prepares the package's Pi directory.
+Pi-only dependency profiles and final clean-install acceptance remain ticket 13.
 
 ## Model projection
 
