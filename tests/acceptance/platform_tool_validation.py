@@ -9,6 +9,7 @@ report. Run this script with the worktree's own interpreter.
 from __future__ import annotations
 
 import argparse
+import base64
 import json
 import os
 import re
@@ -23,7 +24,7 @@ import yaml
 
 ROOT = Path(__file__).resolve().parents[2]
 CASES = (
-    "mcp", "mcp_error", "goal", "skill", "skill_proposal", "memory", "context",
+    "mcp", "mcp_nested", "mcp_error", "goal", "skill", "skill_proposal", "memory", "context",
     "outline_python", "outline_json", "ast", "lsp_symbols", "lsp_definition", "lsp_references",
     "lsp_workspace", "lsp_hover", "markdown_structured", "markdown_raw", "markdown_append",
     "worker", "parallel_workers", "goal_worker",
@@ -57,7 +58,7 @@ def configure_case(case: str, workspace: Path, workflow: Path, system: dict, def
     source = workspace / "sample.py"
     source.write_text("class Invoice:\n    def total(self, values):\n        return sum(values)\n\ndef compute_total(values):\n    return Invoice().total(values)\n\nRESULT = compute_total([19, 23])\n")
     report = workspace / "report.md"
-    uses_mcp = {"mcp", "mcp_error", "goal", "context", "worker", "parallel_workers", "goal_worker"}
+    uses_mcp = {"mcp", "mcp_nested", "mcp_error", "goal", "context", "worker", "parallel_workers", "goal_worker"}
     if case not in uses_mcp:
         definition.pop("mcp_servers", None)
     expected = set()
@@ -65,6 +66,9 @@ def configure_case(case: str, workspace: Path, workflow: Path, system: dict, def
     if case == "mcp":
         task = "Call mcp__facts__lookup exactly once with query='ticket08-live-mcp'. Report its returned answer and query."
         expected = {"mcp__facts__lookup"}
+    elif case == "mcp_nested":
+        task = "Call mcp__facts__nested_lookup(request={'query':'ticket08-nested-query','limit':1}) exactly once. Report its actual answer and query."
+        expected = {"mcp__facts__nested_lookup"}
     elif case == "mcp_error":
         task = "Call mcp__facts__fail_lookup with query='intentional failure'. After observing the actual error, recover by calling mcp__facts__lookup with query='recovered'. Report both results accurately."
         expected = {"mcp__facts__lookup"}
@@ -117,7 +121,8 @@ def configure_case(case: str, workspace: Path, workflow: Path, system: dict, def
             task = f"Call write_markdown_file(file_path={str(report)!r}, title='Ticket 08', sections=[{{'heading':'Result','level':2,'body':'Validated structured output.'}}])."
             expected = {"write_markdown_file"}
         elif case == "markdown_raw":
-            task = f"Call write_markdown_file_raw(file_path={str(report)!r}, content_plain='# Ticket 08\\n\\nValidated raw output.\\n') using actual newlines in the content."
+            encoded = base64.b64encode(b"# Ticket 08\n\nValidated raw output.\n").decode()
+            task = f"Call write_markdown_file_raw with file_path={str(report)!r} and content_b64={encoded!r}. The content_b64 argument is essential: it is the full Markdown report."
             expected = {"write_markdown_file_raw"}
         else:
             report.write_text("# Ticket 08\n\nExisting content.\n")
@@ -170,6 +175,8 @@ def verify_case(case: str, workspace: Path, records: list[dict], result) -> dict
         proof["mcp_server_count"] = len(pids)
         if case == "mcp":
             assert any(item["event"] == "lookup" and item["query"] == "ticket08-live-mcp" for item in events)
+        if case == "mcp_nested":
+            assert any(item["event"] == "lookup" and item["query"] == "ticket08-nested-query" for item in events)
         if case == "parallel_workers":
             assert len(pids) >= 2
             assert {item["query"] for item in events if item["event"] == "lookup"} >= {"worker-one", "worker-two"}
@@ -233,7 +240,7 @@ def run_case(case: str, workspace: Path) -> dict:
     workflow = workspace / "applications" / case / "workflows" / "supervisor.yaml"
     workflow.parent.mkdir(parents=True)
     definition = {
-        "name": case, "agent_runtime": "smolagents", "max_steps": 10,
+        "name": f"validate_{case}", "agent_runtime": "smolagents", "max_steps": 10,
         "toolsets": [], "tools": [], "smart_summary": False,
     }
     mcp_events = workspace / "mcp-events.jsonl"
