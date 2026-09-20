@@ -111,4 +111,8 @@ def normalize_runtime_options(
             options["prompt_template_path"] = normalize_execution_prompt_template_path_value(
                 prompt, sources["prompt_template_path"], agent_root=agent_root,
             )
+    if runtime_id == "pi":
+        from agentloom.adapters.pi.metadata import validate_options
+
+        validate_options(options)
     return options, sources
