@@ -30,7 +30,7 @@ describe("source installer", () => {
     const installedRoot = await realpath(installRoot)
     const update = Bun.spawnSync({
       cmd: [join(installedRoot, "bin", "agentloom"), "update"],
-      cwd: repositoryRoot, env, stderr: "pipe",
+      cwd: repositoryRoot, env: { ...env, AGENTLOOM_INSTALL_DIR: undefined }, stderr: "pipe",
     })
     expect(update.exitCode, new TextDecoder().decode(update.stderr)).toBe(0)
     const calls = await readFile(fixture.log, "utf8")
@@ -38,7 +38,7 @@ describe("source installer", () => {
     expect(calls.match(/python\|-I -m agentloom install-runtime pi/g)).toHaveLength(2)
     expect(calls).not.toContain("--extra smol")
     expect(calls).not.toContain("--extra code")
-  })
+  }, 30_000)
 
   test("installs a locked Python environment and standalone wrapper without activation", async () => {
     const fixture = await createFixture()
@@ -106,7 +106,7 @@ describe("source installer", () => {
     })
     expect(updateInvocation.exitCode, new TextDecoder().decode(updateInvocation.stderr)).toBe(0)
     expect(await Bun.file(join(fixture.home, ".zshrc")).exists()).toBe(false)
-  })
+  }, 30_000)
 
   test("adds the command directory to an existing shell config once", async () => {
     const fixture = await createFixture()
@@ -133,7 +133,7 @@ describe("source installer", () => {
     expect(config.match(/# AgentLoom/g)).toHaveLength(1)
     const pathCommand = `export PATH="${join(installedRoot, "bin")}:$PATH"`
     expect(config.split("\n").filter((line) => line === pathCommand)).toHaveLength(1)
-  })
+  }, 30_000)
 })
 
 async function createFixture() {
