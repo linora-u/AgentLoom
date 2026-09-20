@@ -11,7 +11,10 @@ For backward-compatibility, the security functions are re-exported so that
 existing test imports continue to work.
 """
 
+import os
 from typing import Any
+
+from agentloom.runtime.native_tools import ToolManifestEntry
 
 from agentloom.configuration import C
 from agentloom.runtime.logging import get_logger
@@ -130,6 +133,7 @@ def _evaluate_workspace_path(
     context: HookContext,
     *,
     explicit_runtime_policy: bool = False,
+    manifest: ToolManifestEntry | None = None,
 ) -> HookResult:
     """Evaluate rules-driven tool access control for one final tool input.
 
@@ -150,6 +154,8 @@ def _evaluate_workspace_path(
         tool_inputs_schema,
         list(DEFAULT_PATH_PARAM_PATTERNS),
     )
+    if manifest is not None:
+        potential_path_params = list(dict.fromkeys([*potential_path_params, *manifest.path_parameters]))
     if explicit_runtime_policy:
         if not isinstance(context.agent_config, dict):
             if not potential_path_params:
@@ -171,6 +177,8 @@ def _evaluate_workspace_path(
         return HookResult(decision="allow")
 
     matching_rules = _find_rules_for_tool(tool_name, rules)
+    if manifest is not None and manifest.logical_name != tool_name:
+        matching_rules += _find_rules_for_tool(manifest.logical_name, rules)
     if not matching_rules:
         return HookResult(decision="allow")
 
@@ -189,6 +197,8 @@ def _evaluate_workspace_path(
 
     # Resolve path params from tool schema
     path_params = _resolve_path_params(tool_name, tool_inputs_schema, effective_patterns)
+    if manifest is not None:
+        path_params = list(dict.fromkeys([*path_params, *manifest.path_parameters]))
     if not path_params:
         return HookResult(decision="allow")
 
@@ -211,6 +221,13 @@ def _evaluate_workspace_path(
     # inside validate_path() using tool_name.
     for p_str in paths_to_check:
         try:
+            if manifest is not None:
+                # Validate exactly the executor's cwd without changing process cwd.
+                # Leave UNC/Windows forms intact for the common validator to reject.
+                if not is_vulnerable_unc_path(p_str) and not has_suspicious_windows_pattern(p_str):
+                    p_str = os.path.expanduser(p_str.removeprefix("file://"))
+                    if p_str and not os.path.isabs(p_str):
+                        p_str = os.path.join(context.cwd, p_str)
             result = validate_path(
                 p_str,
                 tool_name=None if explicit_runtime_policy else tool_name,
@@ -237,7 +254,7 @@ def _evaluate_workspace_path(
     return HookResult(decision="allow")
 
 
-def enforce_core_tool_guard(context: HookContext) -> HookResult:
+def enforce_core_tool_guard(context: HookContext, *, manifest: ToolManifestEntry | None = None) -> HookResult:
     """Run the non-configurable final path guard.
 
     The tool runtime calls this function directly after all configurable
@@ -246,7 +263,7 @@ def enforce_core_tool_guard(context: HookContext) -> HookResult:
     configured Hook declarations.
     """
 
-    return _evaluate_workspace_path(context, explicit_runtime_policy=True)
+    return _evaluate_workspace_path(context, explicit_runtime_policy=True, manifest=manifest)
 
 
 def validate_workspace_path(context: HookContext) -> HookResult:
