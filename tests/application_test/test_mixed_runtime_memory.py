@@ -71,7 +71,6 @@ def configure_memory(root: Path, workflow: Path):
 def test_smol_evidence_is_reviewed_then_used_by_a_new_pi_run(tmp_path, approval_timing):
     phase = 'learn'
     policy_path = None
-    approve = None
 
     def program(request):
         if request['model'] == 'summary':
