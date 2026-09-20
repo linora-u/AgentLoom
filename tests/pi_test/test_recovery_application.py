@@ -286,8 +286,9 @@ def test_committed_worker_result_is_appended_without_invoking_worker_again(tmp_p
 
 
 @pytest.mark.parametrize('worker', ['pi', 'smolagents'])
+@pytest.mark.parametrize('worker_result', ['worker-window-proof-739', ''])
 def test_worker_completion_before_platform_receipt_recovers_without_reexecution(
-    tmp_path, worker,
+    tmp_path, worker, worker_result,
 ):
     from tests.application_test.mixed_runtime_support import (
         finish,
@@ -304,9 +305,16 @@ def test_worker_completion_before_platform_receipt_recovers_without_reexecution(
                 return [('read-note', 'read' if worker == 'pi' else 'read_file',
                          {'path': 'note.txt'} if worker == 'pi'
                          else {'file_path': str(tmp_path / 'note.txt')})]
-            return finish(request, 'worker-window-proof-739')
+            return finish(request, worker_result)
         if not messages:
             return [('delegate', 'inspect_note', {'query': 'note.txt'})]
+        expected = (
+            worker_result
+            or '(inspect_note completed with no output)'
+            if worker == 'pi'
+            else worker_result or '(final_answer completed with no output)'
+        )
+        assert expected in str(messages)
         return 'Verified worker-window-proof-739'
 
     with mixed_service(program) as (url, requests):
