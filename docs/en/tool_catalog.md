@@ -41,7 +41,6 @@ effective metadata ────────────┘
 The catalog is the single source of truth. A function that exists under
 `src/tools/` is not a built-in tool until it has a `ToolSpec` in the catalog.
 Dynamic YAML tools and generated Worker tools do not belong in this catalog.
-Goal tools are injected by Goal Mode and are also outside the default catalog.
 
 ## Toolsets
 

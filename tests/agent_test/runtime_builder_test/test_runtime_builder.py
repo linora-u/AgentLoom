@@ -175,13 +175,6 @@ class DummyAgent(base_agent_module.RoleDrivenAgent):
         return []
 
 
-class DummyGoalAgent(DummyAgent):
-    def _role_profile(self) -> base_agent_module.AgentRoleProfile:
-        return base_agent_module.AgentRoleProfile(
-            agent_type=base_agent_module.AgentType.SUPERVISOR,
-        )
-
-
 def _make_agent(*, logger=None) -> DummyAgent:
     agent = DummyAgent(
         config={"name": "runtime_dummy"},
@@ -231,7 +224,6 @@ def test_role_driven_agent_reports_to_application_lifecycle(monkeypatch):
     assert report["runtime_result"].checkpoint.runtime_id == "smolagents"
     assert report["result"] == "reported-result"
     assert report["error"] is None
-    assert report["goal"] is None
     assert runtime.close_calls == 1
 
 
@@ -1063,10 +1055,7 @@ def test_max_steps_worker_is_failed_before_checkpoint_success(tmp_path, monkeypa
 def test_completed_worker_resume_replays_output_in_requested_shape(tmp_path, monkeypatch, output):
     from agentloom.runtime.checkpoint import CheckpointManager
     from agentloom.runtime.checkpoint.coordinator import CheckpointCoordinator
-    from agentloom.runtime.goal import GoalState
-    from agentloom.runtime.goal.provider import GoalStateProvider
 
-    provider = GoalStateProvider(GoalState.create(objective="delegate", objective_fingerprint="test", token_budget=1000))
 
     class SuccessfulRuntime:
         runtime_id = "test"
@@ -1082,8 +1071,7 @@ def test_completed_worker_resume_replays_output_in_requested_shape(tmp_path, mon
 
         def run(self, request):
             self.calls += 1
-            provider.record_usage(prompt_tokens=20, completion_tokens=11)
-            return AgentRuntimeResult(output=output, state="success")
+            return AgentRuntimeResult(output=output, state="success", usage=RuntimeUsage(input_tokens=20, output_tokens=11))
 
         def snapshot(self):
             return None
@@ -1099,9 +1087,9 @@ def test_completed_worker_resume_replays_output_in_requested_shape(tmp_path, mon
 
     initial = worker.run(AgentRuntimeRequest(task="delegate"))
     assert initial.output == output
+    assert initial.usage == RuntimeUsage(input_tokens=20, output_tokens=11)
     checkpoint = manager.load_worker_checkpoint("task-completed-worker", "completed_worker", call_index=0)
     assert checkpoint.get("result") == output
-    assert provider.snapshot().used_tokens == 31
     manager.close()
     manager = CheckpointManager("supervisor", checkpoints_root=tmp_path, run_id="run_resume")
 
@@ -1114,7 +1102,6 @@ def test_completed_worker_resume_replays_output_in_requested_shape(tmp_path, mon
     )
     assert resumed.output == initial.output
     assert resumed.usage == RuntimeUsage()
-    assert provider.snapshot().used_tokens == 31
     assert runtime.calls == 1
     assert len(manager.load_task_tree("task-completed-worker")["workers"]["completed_worker"]) == 1
 
@@ -1123,7 +1110,6 @@ def test_completed_worker_resume_replays_output_in_requested_shape(tmp_path, mon
     coordinator = CheckpointCoordinator(manager, "task-completed-worker", "delegate", resume=True)
     assert worker.run(AgentRuntimeRequest(task="delegate")).output == output
     assert runtime.calls == 1
-    assert provider.snapshot().used_tokens == 31
     manager.close()
 
 
@@ -2053,225 +2039,6 @@ def test_invocation_collects_ordered_runtime_events_without_sink_duplicates(
     assert [
         event.details["segment"] for event in observed_by_lifecycle
     ] == [1, 2]
-
-
-def test_goal_mode_continues_after_normal_final_until_update_goal(monkeypatch):
-    from agentloom.runtime.goal import get_current_goal_provider
-
-    agent = DummyGoalAgent(
-        config={
-            "name": "goal-runtime",
-            "description": "Finish all work.",
-            "workflow": "Implement and verify.",
-            "goal": {"enabled": True},
-        },
-        model_binding=_model_binding(),
-        logger=DummyLoggerBackend(),
-    )
-    def _run(_request: AgentRuntimeRequest) -> AgentRuntimeResult:
-        if len(runtime.requests) == 2:
-            get_current_goal_provider(required=True).complete("implemented; tests passed")
-        return AgentRuntimeResult(
-            state="success",
-            output=f"segment-{len(runtime.requests)}",
-        )
-
-    runtime = RecordingAgentRuntime(side_effect=_run)
-    monkeypatch.setattr(agent, "build_runtime", lambda: runtime)
-    monkeypatch.setattr(agent, "_inject_memory_snapshot", lambda tasks: tasks)
-
-    result = agent.run("Add Goal mode", task_id="goal-task")
-
-    assert result == "segment-2"
-    assert len(runtime.requests) == 2
-    assert runtime.requests[0].task == "Add Goal mode"
-    assert "Continue working toward the active Goal" in runtime.requests[1].task
-    assert "Implement and verify." not in runtime.requests[1].task
-    assert "Goal ID: goal_" in runtime.requests[1].task
-    assert runtime.requests[1].continue_session is True
-    assert runtime.requests[1].record_task is True
-
-
-def test_goal_mode_treats_max_steps_as_continuation_boundary(monkeypatch):
-    from agentloom.runtime.goal import get_current_goal_provider
-
-    agent = DummyGoalAgent(
-        config={
-            "name": "goal-runtime",
-            "description": "Finish all work.",
-            "workflow": "Implement and verify.",
-            "goal": True,
-        },
-        model_binding=_model_binding(),
-        logger=DummyLoggerBackend(),
-    )
-    def _run(_request: AgentRuntimeRequest) -> AgentRuntimeResult:
-        if len(runtime.requests) == 2:
-            get_current_goal_provider(required=True).complete("done")
-        state = "max_steps_error" if len(runtime.requests) == 1 else "success"
-        output = "segment" if len(runtime.requests) == 1 else "done"
-        return AgentRuntimeResult(output=output, state=state)
-
-    runtime = RecordingAgentRuntime(side_effect=_run)
-    monkeypatch.setattr(agent, "build_runtime", lambda: runtime)
-    monkeypatch.setattr(agent, "_inject_memory_snapshot", lambda tasks: tasks)
-
-    assert agent.run("Add Goal mode", task_id="goal-task") == "done"
-    assert len(runtime.requests) == 2
-
-
-def test_goal_mode_uses_evidence_when_max_steps_final_delivery_failed(monkeypatch):
-    from agentloom.runtime.goal import get_current_goal_provider
-
-    agent = DummyGoalAgent(
-        config={
-            "name": "goal-runtime",
-            "description": "Finish all work.",
-            "workflow": "Implement and verify.",
-            "goal": True,
-        },
-        model_binding=_model_binding(),
-        logger=DummyLoggerBackend(),
-    )
-    def _run(_request: AgentRuntimeRequest) -> AgentRuntimeResult:
-        get_current_goal_provider(required=True).complete("durable evidence")
-        return AgentRuntimeResult(
-            state="max_steps_error",
-            output="Error in generating final LLM output: Goal is already complete",
-        )
-
-    runtime = RecordingAgentRuntime(side_effect=_run)
-    monkeypatch.setattr(agent, "build_runtime", lambda: runtime)
-    monkeypatch.setattr(agent, "_inject_memory_snapshot", lambda tasks: tasks)
-
-    assert agent.run("Add Goal mode", task_id="goal-task") == "durable evidence"
-
-
-def test_goal_mode_stops_before_next_segment_after_soft_budget_crossing(monkeypatch):
-    from agentloom.runtime.goal import GoalBudgetLimitedError, get_current_goal_provider
-
-    agent = DummyGoalAgent(
-        config={
-            "name": "goal-runtime",
-            "description": "Finish all work.",
-            "workflow": "Implement and verify.",
-            "goal": {"enabled": True, "token_budget": 100},
-        },
-        model_binding=_model_binding(),
-        logger=DummyLoggerBackend(),
-    )
-    def _run(_request: AgentRuntimeRequest) -> AgentRuntimeResult:
-        get_current_goal_provider(required=True).record_usage(
-            prompt_tokens=90,
-            completion_tokens=20,
-        )
-        return AgentRuntimeResult(state="success", output="ordinary final")
-
-    runtime = RecordingAgentRuntime(side_effect=_run)
-    monkeypatch.setattr(agent, "build_runtime", lambda: runtime)
-    monkeypatch.setattr(agent, "_inject_memory_snapshot", lambda tasks: tasks)
-
-    with pytest.raises(GoalBudgetLimitedError):
-        agent.run("Add Goal mode", task_id="goal-task")
-    assert len(runtime.requests) == 1
-
-
-def test_goal_mode_resume_after_completion_commit_does_not_restart_work(
-    tmp_path,
-    monkeypatch,
-):
-    from agentloom.runtime.checkpoint import CheckpointManager
-    from agentloom.runtime.goal import get_current_goal_provider
-
-    config = {
-        "name": "goal-runtime",
-        "description": "Finish all work.",
-        "workflow": "Implement and verify.",
-        "goal": True,
-    }
-    manager = CheckpointManager("goal-runtime", checkpoints_root=tmp_path)
-    first_agent = DummyGoalAgent(
-        config=config,
-        model_binding=_model_binding(),
-        logger=DummyLoggerBackend(),
-    )
-    def _commit_then_interrupt(_request: AgentRuntimeRequest) -> AgentRuntimeResult:
-        get_current_goal_provider(required=True).complete("delivered; tests passed")
-        raise KeyboardInterrupt("crash after completion commit")
-
-    first_runtime = RecordingAgentRuntime(side_effect=_commit_then_interrupt)
-    monkeypatch.setattr(first_agent, "build_runtime", lambda: first_runtime)
-    monkeypatch.setattr(first_agent, "_inject_memory_snapshot", lambda tasks: tasks)
-
-    with pytest.raises(KeyboardInterrupt):
-        first_agent.run(
-            "Add Goal mode",
-            task_id="goal-complete-crash",
-            checkpoint_manager=manager,
-        )
-
-    persisted = manager.load_goal("goal-complete-crash")
-    assert persisted["status"] == "complete"
-    assert persisted["evidence"] == "delivered; tests passed"
-
-    resumed_agent = DummyGoalAgent(
-        config=config,
-        model_binding=_model_binding(),
-        logger=DummyLoggerBackend(),
-    )
-    resumed_runtime = RecordingAgentRuntime()
-    monkeypatch.setattr(resumed_agent, "build_runtime", lambda: resumed_runtime)
-    monkeypatch.setattr(resumed_agent, "_inject_memory_snapshot", lambda tasks: tasks)
-
-    result = resumed_agent.run(
-        "Add Goal mode",
-        task_id="goal-complete-crash",
-        checkpoint_manager=manager,
-        resume=True,
-    )
-
-    assert result == "delivered; tests passed"
-    assert resumed_runtime.requests == []
-    assert manager.load_goal("goal-complete-crash")["goal_id"] == persisted["goal_id"]
-
-
-@pytest.mark.parametrize("goal", [None, False, {"enabled": False}])
-def test_goal_tools_are_absent_when_goal_mode_is_disabled(monkeypatch, goal):
-    config = {
-        "name": "goal-runtime",
-        "description": "Finish all work.",
-        "workflow": "Implement and verify.",
-        "todo": {"mode": "off"},
-    }
-    if goal is not None:
-        config["goal"] = goal
-    agent = DummyGoalAgent(
-        config=config,
-        model_binding=_model_binding(),
-        logger=DummyLoggerBackend(),
-    )
-    monkeypatch.setattr(agent, "get_all_tools", lambda agent_type: [])
-
-    assert agent._build_runtime_tools(agent._role_profile()) == []
-
-
-def test_goal_tools_are_added_only_for_enabled_root_supervisor(monkeypatch):
-    agent = DummyGoalAgent(
-        config={
-            "name": "goal-runtime",
-            "description": "Finish all work.",
-            "workflow": "Implement and verify.",
-            "goal": True,
-            "todo": {"mode": "off"},
-        },
-        model_binding=_model_binding(),
-        logger=DummyLoggerBackend(),
-    )
-    monkeypatch.setattr(agent, "get_all_tools", lambda agent_type: [])
-
-    names = {tool.name for tool in agent._build_runtime_tools(agent._role_profile())}
-
-    assert names == {"get_goal", "update_goal"}
 
 
 def test_loom_runtime_can_keep_task_step_for_sequential_reset_false():

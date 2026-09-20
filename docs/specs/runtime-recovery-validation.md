@@ -1,5 +1,7 @@
 # Responses runtime 修复与真实 Application 验证
 
+> 历史验证记录：本轮验证后，维护者要求删除整个 Goal 模式。下文 Goal 结果仅记录删除前的行为，不表示当前功能仍受支持。
+
 2026-09-20，分支 `codex/remove-code-act-responses-runtime`。
 三个确定性运行时问题已修复，最终 Python 全量测试通过。真实 Responses 请求、
 工具执行和恢复路径已验证；复杂模型任务仍有失败记录，不能将本轮写成全部验收通过。

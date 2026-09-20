@@ -16,7 +16,7 @@ from __future__ import annotations
 import json
 import os
 import sys
-from collections.abc import Iterator, Mapping
+from collections.abc import Iterator
 from contextlib import contextmanager, nullcontext, redirect_stdout
 from datetime import UTC, datetime
 from typing import Any, TextIO
@@ -69,20 +69,11 @@ def _run_event_payload(event: Any) -> dict[str, object]:
         "occurred_at": occurred_at.isoformat(),
         "run": _run_info_payload(event.run),
     }
-    for field in ("output", "error", "phase", "goal"):
+    for field in ("output", "error", "phase"):
         value = getattr(event, field, None)
         if value is not None:
-            payload[field] = dict(value) if field == "goal" else value
+            payload[field] = value
     return payload
-
-
-def _goal_text(goal: Mapping[str, object]) -> str:
-    budget = goal.get("token_budget")
-    budget_text = "unlimited" if budget is None else str(budget)
-    return (
-        f"Goal: {goal.get('status')} | tokens: "
-        f"{goal.get('used_tokens', 0)}/{budget_text}"
-    )
 
 
 def _emit_jsonl_record(payload: dict[str, object], stream: TextIO) -> None:
@@ -320,9 +311,6 @@ def run(
                     task_override=task_override,
                 )
                 click.echo(completed.output)
-                completed_goal = getattr(completed, "goal", None)
-                if isinstance(completed_goal, Mapping):
-                    click.echo(_goal_text(completed_goal))
         except KeyboardInterrupt as exc:
             if not emitted_events:
                 emit_rejected(exc, message="interrupted before run started")
@@ -337,19 +325,6 @@ def run(
                 )
             raise click.exceptions.Exit(130) from exc
         except Exception as exc:
-            from agentloom.application.run import ApplicationRunBudgetLimited
-
-            if isinstance(exc, ApplicationRunBudgetLimited):
-                if not emitted_events:
-                    emit_rejected(exc, message=str(exc))
-                goal = exc.goal
-                click.echo(
-                    "\nGoal budget limited: "
-                    f"{goal.get('used_tokens')}/{goal.get('token_budget')} tokens used. "
-                    f"Resume task {exc.run.task_id} after increasing or removing token_budget.",
-                    err=True,
-                )
-                raise click.exceptions.Exit(1) from exc
             retryable = _has_transient_provider_error(exc)
             if not emitted_events:
                 emit_rejected(exc, retryable=retryable)

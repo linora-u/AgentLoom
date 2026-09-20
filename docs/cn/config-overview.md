@@ -10,7 +10,7 @@ AgentLoom 的配置主要分为三大类，分别存放在不同的配置文件�
 |----------|----------|------------|
 | `system.yaml` | `config/system.yaml` | **全局系统配置**。控制工具、工作区、权限和运行时存储等系统级行为。 |
 | `llm.yaml` | `config/llm.yaml` | **全局模型配置**。每个模型类型显式选择 wire adapter，并独立管理模型名、凭据、网关和请求参数。 |
-| `agent_xxx.yaml` | `applications/<app>/workflows/*.yaml` | **Agent 配置**。定义角色、runtime、workflow、工具和模型类型；顶层 Supervisor 还可配置 [Goal Mode](goal_mode.md)，Worker 不允许配置 Goal。 |
+| `agent_xxx.yaml` | `applications/<app>/workflows/*.yaml` | **Agent 配置**。定义角色、runtime、workflow、工具和模型类型。 |
 | *应用级系统配置* | `applications/<app>/config/system.yaml` | **可选的应用级覆盖**。用于覆盖特定应用的默认系统行为（例如修改工作区或替换默认工具）。 |
 
 > 详情参考：
@@ -118,14 +118,6 @@ full_dict = C.raw
 2. **全局缓存**：解析结果被缓存在 `_ACTIVE_CONFIG` 中，保证全生命周期配置一致。
 3. **双轨存储**：`UnifiedConfig` 对象内部同时维护了合并后的 `_raw` 字典以及独立的 `_llm_config` (Pydantic 对象)。
 
-## 5. Goal Mode 的配置边界
-
-Goal Mode 只能配置在顶层 Supervisor Agent YAML，不属于全局或 Application
-`system.yaml` overlay，Worker 也不能配置。Goal task checkpoint 额外包含
-`goal.json`；每个 run manifest 暴露相同的结构化状态，终态复制到
-`audit/goal.json`。`budget_limited` 保留 checkpoint，修改 YAML 预算后沿用同一
-`task_id` resume。完整字段、continuation、预算和调度语义见
-[Goal Mode](goal_mode.md)。
 
 ## 安装后的包与项目路径
 

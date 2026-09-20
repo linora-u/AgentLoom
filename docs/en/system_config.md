@@ -4,8 +4,6 @@
 > For override relationships between configuration files, see [Configuration System Overview](config-overview.md).
 > For LLM model parameters, see [LLM Configuration Reference](llm_config.md).
 > For Agent YAML parameters, see [Agent Configuration Reference](agent_config.md).
-> Goal Mode is not global configuration and can be enabled only in a top-level
-> Supervisor Agent YAML; see [Goal Mode](goal_mode.md).
 
 `config/system.yaml` is the AgentLoom framework's **core global configuration file**, controlling system metadata, context compression strategy, top-level prompts, global Skills, logging, tool system, tool access control, and more.
 
@@ -848,13 +846,12 @@ Run evidence and task recovery state have independent lifecycles under the same 
 ├── runs/<application_id>/<run_id>/
 │   ├── manifest.json
 │   ├── logs/runtime.log[.1-.3]
-│   ├── audit/{shell.jsonl[.1-.2],task_tree.json,task_events.jsonl,goal.json}
+│   ├── audit/{shell.jsonl[.1-.2],task_tree.json,task_events.jsonl}
 │   └── artifacts/{result.txt,shell,background,skills}/
 └── checkpoints/<application_id>/<task_id>/
     ├── task_events.jsonl
     ├── task_tree.json
     ├── checkpoint.json
-    ├── goal.json
     ├── heartbeat.json
     ├── workers/<worker_name>/calls/<call_index>/checkpoint.json
     ├── context_store/
@@ -869,12 +866,8 @@ Except for `manifest.json`, these run entries are conditional on logging being e
 - Checkpoint lookup uses the canonical Application/task path and never depends on logs, `.task_index.json`, or a legacy scan
 - Log closing, rotation, and runtime retention cannot remove checkpoint state
 - Agent workspaces remain separate from run artifacts; Application `output_dir` remains Application-owned
-- A Supervisor-owned Goal adds canonical `goal.json`; completion copies it to
-  the run manifest/audit before normal success cleanup, while
-  `budget_limited` keeps it resumable
 
-> See [Checkpoint & Resume](checkpoint.md) for the storage contract and
-> [Goal Mode](goal_mode.md) for Goal-specific lifecycle rules.
+> See [Checkpoint & Resume](checkpoint.md) for the storage contract.
 
 ### 12.2 Heartbeat Mechanism & Crash Detection
 

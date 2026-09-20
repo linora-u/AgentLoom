@@ -619,17 +619,6 @@ class RoleDrivenAgent(BaseAgent):
 
     def _build_runtime_tools(self, profile: AgentRoleProfile) -> list:
         tools = self.get_all_tools(agent_type=profile.agent_type.value.lower())
-        if profile.agent_type is AgentType.SUPERVISOR:
-            from agentloom.runtime.goal import normalize_goal_config
-
-            goal = normalize_goal_config(
-                self._config,
-                source=self._config.get("name", "supervisor"),
-            )
-            if goal.enabled:
-                from agentloom.tools.goal import get_goal, update_goal
-
-                tools = [*tools, get_goal, update_goal]
         todo_mode = self._resolve_todo_mode()
         if todo_mode == "off":
             return [

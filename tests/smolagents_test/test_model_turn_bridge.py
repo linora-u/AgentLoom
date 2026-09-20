@@ -6,11 +6,6 @@ from dataclasses import dataclass
 import pytest
 from agentloom.adapters.smolagents.model_turn_bridge import SmolagentsModelTurnBridge
 from agentloom.runtime.error_recovery import RUNTIME_FEEDBACK_RAW_KEY
-from agentloom.runtime.goal import GoalBudgetLimitedError, GoalCompleteError, GoalState
-from agentloom.runtime.goal.provider import (
-    GoalStateProvider,
-    bind_goal_state_provider,
-)
 from agentloom.runtime.model_binding import ModelTurnBinding
 from agentloom.runtime.model_protocol import (
     FunctionCallItem,
@@ -298,63 +293,3 @@ def test_bridge_rejects_unmarked_smolagents_tool_observation(feedback: str) -> N
             ],
             tools_to_call_from=[_Tool()],
         )
-
-
-def test_bridge_accounts_usage_and_fences_the_next_goal_request() -> None:
-    adapter = _RecordingTurnAdapter()
-    model = SmolagentsModelTurnBridge(
-        binding=_binding(adapter),
-    )
-    provider = GoalStateProvider(
-        GoalState.create(
-            objective="Ship.",
-            objective_fingerprint="goal",
-            token_budget=15,
-        )
-    )
-
-    with bind_goal_state_provider(provider):
-        model.generate(
-            [ChatMessage(role=MessageRole.USER, content="Run")],
-            tools_to_call_from=[_Tool()],
-        )
-        with pytest.raises(GoalBudgetLimitedError):
-            model.generate(
-                [ChatMessage(role=MessageRole.USER, content="Run again")],
-                tools_to_call_from=[_Tool()],
-            )
-
-    assert len(adapter.requests) == 1
-    assert provider.snapshot().used_tokens == 16
-
-
-def test_bridge_completion_settlement_exposes_only_final_answer_once() -> None:
-    adapter = _RecordingTurnAdapter()
-    model = SmolagentsModelTurnBridge(
-        binding=_binding(adapter),
-    )
-    provider = GoalStateProvider(
-        GoalState.create(
-            objective="Ship.",
-            objective_fingerprint="goal",
-            token_budget=None,
-        )
-    )
-    provider.complete("done", settlement_run_id="root")
-    tools = [
-        _Tool(),
-        _Tool(name="final_answer", description="Finish."),
-    ]
-
-    with bind_goal_state_provider(provider), bind_local_run("root"):
-        model.generate(
-            [ChatMessage(role=MessageRole.USER, content="Finish")],
-            tools_to_call_from=tools,
-        )
-        with pytest.raises(GoalCompleteError):
-            model.generate(
-                [ChatMessage(role=MessageRole.USER, content="Again")],
-                tools_to_call_from=tools,
-            )
-
-    assert [tool.name for tool in adapter.requests[0].tools] == ["final_answer"]

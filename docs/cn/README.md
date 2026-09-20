@@ -9,7 +9,7 @@
 </p>
 
 <p align="center">
-  类型化 Worker、权限确认、断点恢复、Goal 预算和经审核的记忆，都以同一套运行时权威状态为准。
+  类型化 Worker、权限确认、断点恢复和经审核的记忆，都以同一套运行时权威状态为准。
 </p>
 
 <p align="center">
@@ -43,12 +43,6 @@ Worker 通过 `agent_function_schema` 声明接口，Runtime 将它转换成 Sup
 启用文件日志时还会生成有界日志，并保留审计记录和产物。逻辑任务使用稳定的
 `task_id` 恢复。TUI、CLI JSON/JSONL 和 Python API 读取同一份权威状态。预检
 拒绝发生在 Run 及其存储分配之前。
-
-### 长任务有明确的完成责任人
-
-Goal Mode 让根 Supervisor 跨 continuation 和 Worker 调用持续推进同一个目标。
-只有根 Supervisor 能携带证据完成 Goal。可选 token 预算覆盖整棵 Agent 树；启用
-checkpoint 时，达到预算后进入 `budget_limited` 并保留恢复状态。
 
 ### 记忆有审核边界
 
@@ -144,7 +138,7 @@ TUI 是围绕 Application 设计的控制面，不是简单的日志查看器。
   对话，`/compact` 在保留已完成文件修改和持久历史的前提下压缩当前上下文。
 - **Revision 安全：**每个 Run 固定 Application 内容哈希。后续修改只改变
   Working Revision，不会热切换正在执行的 Running Revision。
-- **Run 诊断：**摘要展示终态、Goal 进度、token 用量、完成证据和恢复操作，默认
+- **Run 诊断：**摘要展示终态、完成证据和恢复操作，默认
   不展示全部底层事件。
 
 | 操作 | 按键 / 命令 |
@@ -194,9 +188,6 @@ workflow: |
 
 tools: []
 max_steps: 12
-goal:
-  enabled: true
-  token_budget: 120000
 ```
 
 每个 Worker 声明 Supervisor 看到的接口：
@@ -256,7 +247,6 @@ Runtime 存储将执行尝试和可恢复任务分开：
 │   ├── checkpoint.json
 │   ├── workers/<worker>/calls/<index>/checkpoint.json
 │   ├── todos.json
-│   ├── goal.json
 │   ├── context_store/
 │   └── file-history/
 └── workspaces/agents/<application_id>/<agent_path>/
@@ -264,7 +254,7 @@ Runtime 存储将执行尝试和可恢复任务分开：
     └── tasks/<task_id>/{context.md,trace.md}
 ```
 
-Goal、Todo、context-store、file-history 和 Recall 文件只会在对应能力已配置或被使用
+Todo、context-store、file-history 和 Recall 文件只会在对应能力已配置或被使用
 时出现。
 
 ## 运行与集成
@@ -282,7 +272,7 @@ uv run loom run <workflow> --output-format json
 uv run loom run <workflow> --output-format jsonl
 ```
 
-在 Python 中调用 `execute_app()`，会返回包含输出、时间、结构化 Goal 状态和
+在 Python 中调用 `execute_app()`，会返回包含输出、时间和
 `RunInfo` receipt 的 `ApplicationRunResult`：
 
 ```python
@@ -317,7 +307,6 @@ agentloom schedules --project /path/to/project serve
 | `unit_test_studio` | 通过确定性 Python 入口执行严格的 pytest 生成流程 |
 | `repo_map` | 确定性预处理、自底向上 Agent 分析、批处理和进度持久化 |
 | `codex_exec_demo` | 将本地 `codex exec` 作为带固定参数的普通 Agent Tool |
-| `goal_mode_validation` | Goal 显式完成、预算统计和可恢复终态 |
 | `self_learning_smoke` | Session 历史、记忆提案、证据和审核边界 |
 
 ## 文档
@@ -329,7 +318,6 @@ agentloom schedules --project /path/to/project serve
 | [Tool Catalog](tool_catalog.md) | 延迟实现加载、Toolset、元数据和扩展规则 |
 | [Skills](skills_config.md) | 发现、按需激活与权限边界 |
 | [Hooks](hooks.md) | 显式授权、事件、输入转换和失败语义 |
-| [Goal Mode](goal_mode.md) | continuation、完成责任、预算、恢复与调度 |
 | [Checkpoint 与 Runtime 存储](checkpoint.md) | Run/task 身份、证据、恢复和保留策略 |
 | [Self-Learning v6](self_learning.md) | 历史、候选、审核、审批与提升 |
 | [结构化 Run API](run_observability.md) | Python receipt、类型化失败、JSON 与 JSONL |

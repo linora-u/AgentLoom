@@ -1282,22 +1282,6 @@ def summarize_conversation(
     """
     log = get_logger(None, __name__)
 
-    # A completed Goal may owe the root exactly one final-delivery request.
-    # Smart summary runs under the same ContextVars but is only scaffolding;
-    # skip its model call so it cannot consume that ephemeral allowance.
-    from agentloom.runtime.goal import get_current_goal_provider
-    from agentloom.runtime.trace import get_current_local_run_id
-
-    goal_provider = get_current_goal_provider()
-    if goal_provider is not None and goal_provider.completion_settlement_pending(
-        local_run_id=get_current_local_run_id(),
-    ):
-        return SummarizeResponse(
-            messages=messages,
-            summary="",
-            error="Goal completion settlement pending; smart summary skipped",
-        )
-
     messages_to_summarize = get_messages_since_last_summary(messages)
     summarizable_messages, recent_tail = _split_summary_head_and_recent_tail(
         messages_to_summarize,
@@ -1979,7 +1963,6 @@ class ConversationHistoryManager:
 
     def get_internal_messages(self) -> list[InternalChatMessage]:
         return self._internal_message_history
-
 
     def clear(self):
         self._internal_message_history = []
