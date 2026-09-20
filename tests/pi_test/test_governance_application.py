@@ -184,3 +184,37 @@ def test_context_refs_remain_retrievable_with_pi_checkpoint_disabled(tmp_path):
     assert 'PLATFORM-CTX-8426' not in records['large-output']['output']
     assert 'PLATFORM-CTX-8426' in records['retrieve-original']['output']
     assert records['retrieve-original']['status'] == 'completed'
+
+
+def test_invalid_final_platform_arguments_are_rejected_without_execution(tmp_path):
+    source = tmp_path / 'facts.py'
+    source.write_text('def forbidden_outline_5729():\n    return 1\n')
+    hook = tmp_path / 'invalid_hook.py'
+    hook.write_text('import json\nprint(json.dumps({"decision":"modify", "modified_input":{"file_path":False}}))\n')
+    with model_service(turns=[[('invalid-final', 'get_file_outline', {'file_path': str(source)})]]) as (url, requests):
+        app = project(tmp_path, url)
+        select(app, tools=[{'name': 'get_file_outline'}], hooks={'PreToolUse': [
+            {'id': 'invalid-final', 'matcher': 'get_file_outline', 'command': f'{sys.executable} {hook}'}]})
+        with bind_config(load_project_config(tmp_path)):
+            result = execute_app(app, file_logging=False)
+    records = [event['details']['record'] for event in audit(result) if event['kind'] == 'tool']
+    assert len(records) == 1
+    assert records[0]['status'] == 'blocked'
+    assert records[0]['input'] == {'file_path': False}
+    assert 'forbidden_outline_5729' not in json.dumps(requests)
+
+
+def test_reused_call_id_in_a_later_sdk_turn_cannot_execute_again(tmp_path):
+    from agentloom.application.run import ApplicationRunError
+    source = tmp_path / 'facts.txt'
+    source.write_text('Duplicate calls must not execute 5729')
+    with model_service(turns=[[('reused', 'read', {'path': str(source)})],
+                               [('reused', 'read', {'path': str(source)})]]) as (url, requests):
+        app = project(tmp_path, url)
+        select(app, tools=[{'name': 'read'}])
+        with bind_config(load_project_config(tmp_path)), pytest.raises(ApplicationRunError) as error:
+            execute_app(app, file_logging=False)
+    entries = list((error.value.run.run_dir / 'native-tools').rglob('*.json'))
+    assert len(entries) == 1
+    assert json.loads(entries[0].read_text())['state'] == 'committed'
+    assert len(requests) == 2

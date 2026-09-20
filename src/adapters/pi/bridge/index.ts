@@ -1,7 +1,8 @@
 /** One SDK session per managed process. stdout is exclusively protocol JSONL. */
 import { createInterface } from "node:readline";
 import { readFileSync } from "node:fs";
-import { setTimeout as delay } from "node:timers/promises";
+import { isDeepStrictEqual } from "node:util";
+import { configureModel } from "./model.js";
 import { decode } from "./protocol.js";
 import { nativeTools } from "./tools.js";
 import { randomUUID } from "node:crypto";
@@ -20,10 +21,10 @@ let instance: string | undefined;
 let session: AgentSession | undefined;
 let current: {frame: Frame; abort: AbortController} | undefined;
 let closing = false;
-let nextRequestAt = 0;
+let modelFailure = {timedOut: false, status: 0};
+let reportRetry: ((attempt: number) => void) | undefined;
 const seen = new Set<string>();
 const callbacks = new Map<string, {runId: string | null; method: string; resolve: (value: Obj) => void; reject: (error: Error) => void}>();
-let calledTool = false;
 const write = (value: unknown) => process.stdout.write(JSON.stringify(value) + "\n");
 const response = (frame: Frame, payload: Obj) => write({version: 1, kind: "response", instance_id: frame.instance_id, run_id: frame.run_id, request_id: frame.request_id, payload, error: null});
 const failure = (frame: Frame, category: string, message: string) => write({version: 1, kind: "response", instance_id: frame.instance_id, run_id: frame.run_id, request_id: frame.request_id, payload: null, error: {category, message, retryable: false}});
@@ -31,7 +32,6 @@ const failure = (frame: Frame, category: string, message: string) => write({vers
 function invoke(payload: Obj): Promise<Obj> {
   const active = current;
   if (!active || active.abort.signal.aborted) return Promise.reject(new Error("Inactive Pi run"));
-  calledTool = true;
   const requestId = `pi:${randomUUID()}`;
   return new Promise((resolve, reject) => {
     callbacks.set(requestId, {runId: active.frame.run_id, method: payload.method, resolve, reject});
@@ -61,9 +61,11 @@ async function createSession(p: Obj): Promise<AgentSession> {
   const settings = SettingsManager.inMemory({retry: {enabled: false, provider: {maxRetries: 0, timeoutMs: s.timeout * 1000}},
     compaction: {enabled: false}, enableAnalytics: false, enableInstallTelemetry: false, packages: []});
   const manager = SessionManager.inMemory(p.cwd);
-  const selected = nativeTools(p.tools, p.cwd, invoke, callId => ({application_id: current!.frame.payload.application_id,
+  let finalDelivery = false;
+  const identity = (callId: string) => ({application_id: current!.frame.payload.application_id,
     task_id: current!.frame.payload.task_id, run_id: current!.frame.run_id, instance_id: instance, call_id: callId,
-    native_session_id: manager.getSessionId(), native_parent_id: manager.getLeafId()}));
+    native_session_id: manager.getSessionId(), native_parent_id: manager.getLeafId()});
+  const selected = nativeTools(p.tools, p.cwd, invoke, identity, () => !finalDelivery);
   const loader = new DefaultResourceLoader({cwd: p.cwd, agentDir, settingsManager: settings,
     noExtensions: true, noSkills: true, noPromptTemplates: true, noThemes: true, noContextFiles: true,
     systemPrompt: p.instructions, extensionFactories: [selected.extension]});
@@ -73,14 +75,16 @@ async function createSession(p: Obj): Promise<AgentSession> {
     noTools: "all", customTools: selected.tools,
     resourceLoader: loader, settingsManager: settings, sessionManager: manager});
   await created.bindExtensions({onError: () => created.agent.abort()});
-  const nativeStream = created.agent.streamFn;
-  created.agent.streamFn = (model, context, options) => {
-    return nativeStream(model, context, {...options,
-      temperature: s.temperature, maxTokens: s.max_output_tokens, headers: p.model.request_headers,
-      cacheRetention: s.context_cache ? "short" : "none", transport: "sse"});
-  };
-  created.agent.onPayload = (payload) => {
-    const result = {...payload as Obj};
+  modelFailure = configureModel(created, s, p.model.request_headers, async () => {
+    const requestIdentity = identity(`model:${randomUUID()}`);
+    const permit = await invoke({method: "model_prepare", identity: requestIdentity});
+    if (!isDeepStrictEqual(permit.identity, requestIdentity)) throw new Error("Invalid model permission identity");
+    finalDelivery = permit.state === "final";
+    return permit.state;
+  }, attempt => reportRetry?.(attempt));
+  const nativePayload = created.agent.onPayload;
+  created.agent.onPayload = async (payload, model) => {
+    const result = {...(await nativePayload?.(payload, model) ?? payload) as Obj};
     const extra = s.extra_completion_params || {};
     for (const key of ["top_p", "seed"]) if (extra[key] !== undefined) result[key] = extra[key];
     if (p.tools.length) for (const key of ["tool_choice", "parallel_tool_calls"])
@@ -89,7 +93,13 @@ async function createSession(p: Obj): Promise<AgentSession> {
       if (api === "openai-responses") result.reasoning = {effort: extra.reasoning_effort};
       else result.reasoning_effort = extra.reasoning_effort;
     }
-    return {...result, ...extra.extra_body};
+    const projected = {...result, ...extra.extra_body};
+    if (finalDelivery) {
+      delete projected.tools;
+      delete projected.tool_choice;
+      delete projected.parallel_tool_calls;
+    }
+    return projected;
   };
   return created;
 }
@@ -101,7 +111,6 @@ async function run(frame: Frame, abort: AbortController) {
     run_id: frame.run_id, request_id: frame.request_id, sequence: ++seq, event: kind, payload});
   const usage = {input_tokens: 0, output_tokens: 0, total_tokens: 0, cached_input_tokens: 0};
   let unavailableTool = false;
-  let timedOut = false;
   let unsubscribe: (() => void) | undefined;
   try {
     if (p.checkpoint)
@@ -127,53 +136,28 @@ async function run(frame: Frame, abort: AbortController) {
         event("model", {phase: "completed", stop_reason: e.message.stopReason});
       }
     });
-    const before = [...session.agent.state.messages];
-    let last: any;
-    let status = 0;
-    session.agent.onResponse = response => {status = response.status;};
-    const settings = p.model.settings;
-    for (let attempt = 0; ; attempt++) {
-      if (abort.signal.aborted) throw new Error("Interrupted");
-      if (attempt) session.agent.state.messages = before;
-      await delay(Math.max(0, nextRequestAt - performance.now()), undefined, {signal: abort.signal});
-      nextRequestAt = performance.now() + 60000 / settings.requests_per_minute;
-      timedOut = false;
-      status = 0;
-      const timeout = setTimeout(() => {timedOut = true; session!.agent.abort();}, settings.timeout * 1000);
-      // Public AgentSession owns the complete provider call and turn lifecycle.
-      const task = Object.keys(p.additional_args).length ? `${p.task}\n\nAgentLoom task inputs (JSON):\n${JSON.stringify(p.additional_args)}` : p.task;
-      try {await session.prompt(task, {expandPromptTemplates: false});}
-      finally {clearTimeout(timeout);}
-      last = session.messages.at(-1);
-      if (!timedOut && (last?.role !== "assistant" || last.stopReason !== "error")) break;
-      // Pi preserves SDK APIError status at the start of its private errorMessage.
-      // Never publish the provider text (it can echo credentials or prompts).
-      const errorText = String(last?.errorMessage || "");
-      const errorStatus = /^(\d{3})\b/.exec(errorText);
-      if (errorStatus) status = Number(errorStatus[1]);
-      const retryable = timedOut || status === 408 || status === 429 || status >= 500 ||
-        (!errorStatus && /connection|network|fetch failed|timed? out|timeout|stream ended/i.test(errorText));
-      if (!retryable || calledTool || attempt >= settings.num_retries) break;
-      event("model", {phase: "retry", attempt: attempt + 1});
-      await delay(Math.min(settings.max_retry_delay, settings.retry_delay * 2 ** Math.min(attempt, 30)) * 1000,
-        undefined, {signal: abort.signal});
-    }
-    if (timedOut || unavailableTool || abort.signal.aborted || last?.stopReason === "aborted") throw new Error("Interrupted");
+    reportRetry = attempt => event("model", {phase: "retry", attempt});
+    const task = Object.keys(p.additional_args).length ? `${p.task}\n\nAgentLoom task inputs (JSON):\n${JSON.stringify(p.additional_args)}` : p.task;
+    await session.prompt(task, {expandPromptTemplates: false});
+    const last = session.messages.at(-1);
+    if (modelFailure.timedOut || unavailableTool || abort.signal.aborted ||
+        (last?.role === "assistant" && last.stopReason === "aborted")) throw new Error("Interrupted");
     const state = last?.role !== "assistant" || last.stopReason === "error" ? "failed" :
       last.stopReason === "length" ? "max_steps_error" : "success";
-    const output = last?.content?.filter((b: Obj) => b.type === "text").map((b: Obj) => b.text).join("") ?? "";
+    const output = last?.role === "assistant" ? last.content.filter((b: Obj) => b.type === "text").map((b: Obj) => b.text).join("") : "";
     event("usage", usage);
     // Host emits the public terminal event only after its Stop gate.
     response(frame, {method: "run", state, output, usage, artifacts: [], checkpoint: null,
-      error: state === "failed" ? {category: "provider", message: "Pi model request failed", retryable: status === 429 || status >= 500} : null});
+      error: state === "failed" ? {category: "provider", message: "Pi model request failed", retryable: modelFailure.status === 429 || modelFailure.status >= 500} : null});
   } catch {
     const interrupted = abort.signal.aborted;
     response(frame, {method: "run", state: interrupted ? "interrupted" : "failed", output: null, usage, artifacts: [], checkpoint: null,
-      error: {category: interrupted ? "interrupted" : "provider", message: unavailableTool ? "Pi model requested an unavailable tool" : interrupted ? "Pi run interrupted" : timedOut ? "Pi model request timed out" : "Pi model request failed", retryable: timedOut}});
+      error: {category: interrupted ? "interrupted" : "provider", message: unavailableTool ? "Pi model requested an unavailable tool" : interrupted ? "Pi run interrupted" : modelFailure.timedOut ? "Pi model request timed out" : "Pi model request failed", retryable: modelFailure.timedOut}});
   } finally {
     rejectCallbacks();
     unsubscribe?.();
     current = undefined;
+    reportRetry = undefined;
   }
 }
 
@@ -205,7 +189,6 @@ async function accept(frame: Frame) {
   if (p.method === "run") {
     if (current || !frame.run_id || !Array.isArray(p.tools)) throw new Error();
     current = {frame, abort: new AbortController()};
-    calledTool = false;
     void run(frame, current.abort);
   } else if (p.method === "cancel") {
     const target = current?.frame;

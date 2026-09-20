@@ -12,7 +12,8 @@
   },
   "dependencies": {
     "@earendil-works/pi-coding-agent": "0.79.4",
-    "ajv": "8.17.1"
+    "ajv": "8.17.1",
+    "@earendil-works/pi-ai": "0.79.4"
   },
   "devDependencies": {
     "@types/node": "22.19.0",
