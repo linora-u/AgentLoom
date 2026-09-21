@@ -303,18 +303,19 @@ class ScheduleStore:
         serialized = json.dumps(payload, ensure_ascii=False, indent=2, sort_keys=True)
         self._storage.atomic_write_text(relative, serialized + "\n")
 
-    @staticmethod
-    def _execution_log_paths(execution_id: str) -> tuple[str, str]:
+    def execution_log_paths(self, execution_id: str) -> tuple[str, str]:
+        """Return canonical absolute log paths beneath the active runtime home."""
+
         if not execution_id or Path(execution_id).name != execution_id or execution_id in {".", ".."}:
             raise ValueError(f"unsafe schedule execution id: {execution_id}")
-        prefix = f".agentloom/schedules/executions/{execution_id}"
+        prefix = self.executions_dir / execution_id
         return f"{prefix}.stdout.log", f"{prefix}.stderr.log"
 
     @contextmanager
     def open_execution_logs(self, execution_id: str) -> Iterator[tuple[BinaryIO, BinaryIO]]:
         """Create one execution's output files under the pinned log directory."""
 
-        self._execution_log_paths(execution_id)
+        self.execution_log_paths(execution_id)
         stdout_name = f"{execution_id}.stdout.log"
         stderr_name = f"{execution_id}.stderr.log"
         with self._executions_storage.open_binary_writer(
@@ -590,7 +591,7 @@ class ScheduleStore:
         now: datetime | None = None,
     ) -> dict[str, Any]:
         started_at = _as_utc(now)
-        expected_stdout, expected_stderr = self._execution_log_paths(execution_id)
+        expected_stdout, expected_stderr = self.execution_log_paths(execution_id)
         if (stdout_path, stderr_path) != (expected_stdout, expected_stderr):
             raise ValueError("stdout_path and stderr_path must be canonical execution log paths")
         with self._locked(exclusive=True):
@@ -636,7 +637,7 @@ class ScheduleStore:
         now: datetime | None = None,
     ) -> dict[str, Any]:
         finished_at = _as_utc(now)
-        expected_stdout, expected_stderr = self._execution_log_paths(execution_id)
+        expected_stdout, expected_stderr = self.execution_log_paths(execution_id)
         if (stdout_path, stderr_path) != (expected_stdout, expected_stderr):
             raise ValueError("stdout_path and stderr_path must be canonical execution log paths")
         with self._locked(exclusive=True):

@@ -40,6 +40,7 @@ def platform_project(tmp_path, monkeypatch):
         "description": "Execute the selected platform tools.",
         "workflow": "Use the selected tools.", "tools": [], "toolsets": [],
     }
+    workflow.write_text(yaml.safe_dump(definition))
     programs = {}
     definitions = []
 
@@ -475,6 +476,9 @@ json.dump({"decision": "allow"}, sys.stdout)
         return "worker storage verified"
 
     def supervisor_program(definition, request):
+        if request.checkpoint is not None:
+            assert request.continue_session is True
+            assert request.checkpoint.payload == {"phase": "ready-to-resume"}
         activated = definition.tool_gateway.invoke(
             call_id="activate-skill",
             tool_name="skill",
@@ -495,16 +499,44 @@ json.dump({"decision": "allow"}, sys.stdout)
         )
         assert delegated.status == "completed", delegated.model_content()
         assert delegated.output == "worker storage verified"
+        if request.checkpoint is None:
+            assert request.checkpoint_sink is not None
+            request.checkpoint_sink(
+                RuntimeCheckpointEnvelope(
+                    runtime_id="platform-fixture",
+                    runtime_version="fixture",
+                    state_schema_version=1,
+                    payload={"phase": "ready-to-resume"},
+                    task_id=request.task_id,
+                    run_id=request.run_id,
+                    progress=1,
+                )
+            )
+            raise KeyboardInterrupt("simulate an interrupted Application")
         return "canonical storage verified"
 
     programs.update(platform=supervisor_program, storage_worker=worker_program)
-    result = run(
-        tools=[{"name": "skill"}, {"name": "memory"}],
-        worker_agents=[{"path": "storage_worker.yaml"}],
-    )
+    run_config = {
+        "tools": [
+            {"name": "skill"},
+            {"name": "memory"},
+        ],
+        "worker_agents": [{"path": "storage_worker.yaml"}],
+    }
+    files_before_run = {path for path in root.rglob("*") if path.is_file()}
+    with pytest.raises(ApplicationRunInterrupted) as interrupted:
+        run(**run_config)
+
+    first_run = interrupted.value.run
+    result = run(resume_task_id=first_run.task_id, **run_config)
 
     assert result.output == "canonical storage verified"
+    assert result.run.task_id == first_run.task_id
+    assert result.run.run_id != first_run.run_id
+    assert result.run.run_dir != first_run.run_dir
+    assert first_run.run_dir.is_relative_to(runtime_root / "runs" / "platform")
     assert result.run.run_dir.is_relative_to(runtime_root / "runs" / "platform")
+    assert first_run.manifest_path.is_file()
     assert result.run.manifest_path.is_file()
     checkpoint_dir = (
         runtime_root
@@ -517,6 +549,13 @@ json.dump({"decision": "allow"}, sys.stdout)
     assert (result.run.run_dir / "artifacts" / "result.txt").read_text(
         encoding="utf-8"
     ) == result.output
+    for run_dir in (first_run.run_dir, result.run.run_dir):
+        skill_artifacts = list((run_dir / "artifacts" / "skills").glob("*.md"))
+        assert skill_artifacts
+        assert "canonical runtime evidence" in skill_artifacts[-1].read_text(
+            encoding="utf-8"
+        )
+        assert (run_dir / "audit" / "task_events.jsonl").is_file()
     assert hook_evidence.is_file()
     hook_records = [
         json.loads(line)
@@ -540,62 +579,17 @@ json.dump({"decision": "allow"}, sys.stdout)
     )
     assert hook_evidence.is_relative_to(root / "applications" / "platform" / "outputs")
     assert not hook_evidence.is_relative_to(runtime_root)
-    assert not (root / ".runtime").exists()
-    assert not (root / ".logs").exists()
-
-
-def test_application_resumes_from_canonical_checkpoint(platform_project):
-    root, _, programs, _, run = platform_project
-    runtime_root = root / ".agentloom"
-    system_path = root / "config" / "system.yaml"
-    system = yaml.safe_load(system_path.read_text(encoding="utf-8"))
-    system["checkpoint"] = {"enabled": True, "cleanup_on_success": False}
-    system_path.write_text(yaml.safe_dump(system), encoding="utf-8")
-
-    requests = []
-
-    def interrupt_then_resume(_definition, request):
-        requests.append(request)
-        if request.checkpoint is None:
-            assert request.checkpoint_sink is not None
-            request.checkpoint_sink(
-                RuntimeCheckpointEnvelope(
-                    runtime_id="platform-fixture",
-                    runtime_version="fixture",
-                    state_schema_version=1,
-                    payload={"phase": "ready-to-resume"},
-                    task_id=request.task_id,
-                    run_id=request.run_id,
-                    progress=1,
-                )
-            )
-            raise KeyboardInterrupt("simulate an interrupted Application")
-        assert request.continue_session is True
-        assert request.checkpoint.payload == {"phase": "ready-to-resume"}
-        return "resumed from canonical checkpoint"
-
-    programs["platform"] = interrupt_then_resume
-    with pytest.raises(ApplicationRunInterrupted) as interrupted:
-        run()
-
-    first_run = interrupted.value.run
-    resumed = run(resume_task_id=first_run.task_id)
-
-    assert resumed.output == "resumed from canonical checkpoint"
-    assert resumed.run.task_id == first_run.task_id
-    assert resumed.run.run_id != first_run.run_id
-    assert resumed.run.run_dir != first_run.run_dir
-    checkpoint_dir = (
-        runtime_root
-        / "checkpoints"
-        / resumed.run.application_id
-        / resumed.run.task_id
-    )
-    assert checkpoint_dir.is_dir()
-    assert all(
-        request.task_id == resumed.run.task_id
-        for request in requests
-    )
+    files_created_by_run = {
+        path for path in root.rglob("*") if path.is_file()
+    } - files_before_run
+    assert files_created_by_run
+    unexpected_files = {
+        path
+        for path in files_created_by_run
+        if not path.is_relative_to(runtime_root)
+        and not path.is_relative_to(root / "applications" / "platform" / "outputs")
+    }
+    assert unexpected_files == set()
     assert not (root / ".runtime").exists()
     assert not (root / ".logs").exists()
 
