@@ -8,6 +8,7 @@ from pathlib import Path
 import shutil
 import subprocess
 import sys
+import tempfile
 
 from click.testing import CliRunner
 import pytest
@@ -31,10 +32,41 @@ def installation(tmp_path, monkeypatch):
     binary = tmp_path / "bin"
     binary.mkdir()
     log = tmp_path / "npm-calls.jsonl"
+    tsc_log = tmp_path / "tsc-calls.jsonl"
     node = install.find_node(os.environ.copy())
     launcher = binary / "node"
     launcher.write_text(f"#!{sys.executable}\nimport os,sys\nos.execv({node!r}, [{node!r}, *sys.argv[1:]])\n")
     launcher.chmod(0o755)
+    tsc_script = r"""
+const fs = require('node:fs');
+fs.appendFileSync(process.env.TEST_TSC_CALLS, JSON.stringify(process.argv.slice(2)) + '\n');
+fs.mkdirSync('dist', {recursive: true});
+const sources = fs.readdirSync('.').filter(path => path.endsWith('.ts'));
+for (const source of sources) {
+  fs.writeFileSync('dist/' + source.replace(/\.ts$/, '.js'), 'export const fixture=true;');
+}
+const sourceText = sources.map(source => fs.readFileSync(source, 'utf8')).join('\n');
+const mismatch = sourceText.includes('TEST_HANDSHAKE_SDK_MISMATCH');
+const missingNewline = sourceText.includes('TEST_HANDSHAKE_MISSING_NEWLINE');
+const oversized = sourceText.includes('TEST_HANDSHAKE_OVERSIZED');
+const sdkVersion = mismatch ? '0.0.0' : '0.79.4';
+fs.writeFileSync('dist/index.js', `import {createInterface} from 'node:readline';
+import {realpathSync} from 'node:fs';
+const input=createInterface({input:process.stdin,crlfDelay:Infinity});
+input.on('line',line=>{
+ if(process.env.TEST_HANDSHAKE_FAIL) process.exit(4);
+ const privateDir=realpathSync(process.argv[2]);
+ if(realpathSync(process.cwd())!==privateDir ||
+    realpathSync(process.env.HOME)!==privateDir ||
+    realpathSync(process.env.XDG_CONFIG_HOME)!==privateDir ||
+    realpathSync(process.env.TMPDIR)!==privateDir) process.exit(5);
+ const frame=JSON.parse(line);
+ const payload={method:'handshake',runtime_id:'pi',protocol_version:2,bridge_version:1,sdk_version:'${sdkVersion}',node_version:process.versions.node,native_tool_contract:1,capabilities:{structured_tools:true,parallel_tools:true,checkpoint_resume:true,subagents:true,goal:true,stop_hooks:true}};
+ const response=JSON.stringify({version:2,kind:'response',instance_id:frame.instance_id,run_id:null,request_id:frame.request_id,payload,error:null});
+ process.stdout.write(response+(${oversized} ? ' '.repeat(8*1024*1024) : '')+(${missingNewline} ? '' : '\\n'));
+});
+`);
+"""
     npm = binary / "npm"
     npm.write_text(f'''#!{sys.executable}
 import json,os,sys
@@ -47,12 +79,13 @@ sdk=root/'node_modules/@earendil-works/pi-coding-agent';sdk.mkdir(parents=True,e
 (sdk/'package.json').write_text(json.dumps({{'version':'0.79.4','type':'module','main':'index.js'}}))
 (sdk/'index.js').write_text('export const fixture = true;')
 tsc=root/'node_modules/typescript/bin/tsc';tsc.parent.mkdir(parents=True,exist_ok=True)
-tsc.write_text("const fs=require('node:fs');fs.mkdirSync('dist',{{recursive:true}});for (const p of fs.readdirSync('.').filter(p=>p.endsWith('.ts'))) fs.writeFileSync('dist/'+p.replace(/\\\\.ts$/,'.js'),'export const fixture=true;');")
+tsc.write_text({tsc_script!r})
 ''')
     npm.chmod(0o755)
     monkeypatch.setenv("PATH", str(binary) + os.pathsep + os.environ["PATH"])
     monkeypatch.setenv("TEST_NPM_CALLS", str(log))
-    return bridge, tmp_path / "runtime", log
+    monkeypatch.setenv("TEST_TSC_CALLS", str(tsc_log))
+    return bridge, tmp_path / "runtime", log, tsc_log
 
 
 def source_bridge(installation):
@@ -67,6 +100,10 @@ def npm_log(installation):
     return installation[2]
 
 
+def tsc_log(installation):
+    return installation[3]
+
+
 def installed_bridge(installation):
     return runtime_root(installation) / "bridge"
 
@@ -76,6 +113,47 @@ def calls(installation):
     return [json.loads(line) for line in path.read_text().splitlines()] if path.exists() else []
 
 
+def tsc_calls(installation):
+    path = tsc_log(installation)
+    return [json.loads(line) for line in path.read_text().splitlines()] if path.exists() else []
+
+
+def assert_installed_entry_handshakes(entry: Path) -> None:
+    request = {
+        "version": 2,
+        "kind": "request",
+        "instance_id": "installed-runtime-probe",
+        "run_id": None,
+        "request_id": "host:installed-runtime-probe",
+        "payload": {
+            "method": "handshake",
+            "protocol_version": 2,
+            "bridge_version": 1,
+            "native_tool_contract": 1,
+        },
+    }
+    with tempfile.TemporaryDirectory() as private_dir:
+        env = os.environ.copy()
+        env.update(
+            HOME=private_dir,
+            XDG_CONFIG_HOME=private_dir,
+            TMPDIR=private_dir,
+        )
+        result = subprocess.run(
+            ["node", str(entry), private_dir],
+            cwd=private_dir,
+            env=env,
+            input=json.dumps(request) + "\n",
+            capture_output=True,
+            text=True,
+            timeout=10,
+            check=True,
+        )
+    response = json.loads(result.stdout)
+    assert response["payload"]["runtime_id"] == "pi"
+    assert response["payload"]["sdk_version"] == "0.79.4"
+
+
 @pytest.mark.parametrize("changed_file", ["index.ts", "tools.ts", "model.ts", "nested/helper.ts"])
 def test_install_downloads_lock_builds_once_and_rebuilds_changed_source(installation, changed_file):
     entry = install_pi(source_bridge(installation), runtime_root(installation))
@@ -83,14 +161,17 @@ def test_install_downloads_lock_builds_once_and_rebuilds_changed_source(installa
     assert not (source_bridge(installation) / "node_modules").exists()
     assert not (source_bridge(installation) / "dist").exists()
     assert calls(installation) == [["ci", "--ignore-scripts", "--include=dev", "--no-audit", "--no-fund"]]
+    assert len(tsc_calls(installation)) == 1
     assert install_pi(source_bridge(installation), runtime_root(installation)) == entry
     assert len(calls(installation)) == 1
+    assert len(tsc_calls(installation)) == 1
     changed = source_bridge(installation) / changed_file
     changed.parent.mkdir(exist_ok=True)
     with changed.open("a") as stream:
         stream.write("\n// changed bridge source\n")
     assert install_pi(source_bridge(installation), runtime_root(installation)) == entry
     assert len(calls(installation)) == 2
+    assert len(tsc_calls(installation)) == 2
 
 
 def test_version_mismatch_fails_before_download(installation):
@@ -146,6 +227,60 @@ def test_failed_install_can_retry_without_a_false_ready_marker(installation, mon
     monkeypatch.delenv("TEST_NPM_FAIL")
     assert install_pi(source_bridge(installation), runtime_root(installation)).is_file()
     assert len(calls(installation)) == 2
+
+
+def test_failed_bridge_handshake_never_publishes_ready_runtime(
+    installation,
+    monkeypatch,
+):
+    monkeypatch.setenv("TEST_HANDSHAKE_FAIL", "1")
+
+    with pytest.raises(RuntimeError, match="handshake"):
+        install_pi(source_bridge(installation), runtime_root(installation))
+
+    assert not runtime_root(installation).exists()
+    monkeypatch.delenv("TEST_HANDSHAKE_FAIL")
+    assert install_pi(source_bridge(installation), runtime_root(installation)).is_file()
+    assert len(calls(installation)) == 2
+
+
+@pytest.mark.parametrize(
+    ("failure_marker", "error"),
+    [
+        ("TEST_HANDSHAKE_SDK_MISMATCH", "handshake mismatch"),
+        ("TEST_HANDSHAKE_MISSING_NEWLINE", "handshake process failed"),
+        ("TEST_HANDSHAKE_OVERSIZED", "exceeds 8 MiB"),
+    ],
+)
+def test_invalid_staged_handshake_preserves_the_ready_runtime(
+    installation,
+    failure_marker,
+    error,
+):
+    old_entry = install_pi(source_bridge(installation), runtime_root(installation))
+    ready = runtime_root(installation) / "ready.json"
+    old_ready = ready.read_bytes()
+    old_entry_contents = old_entry.read_bytes()
+    source = source_bridge(installation) / "index.ts"
+    with source.open("a") as stream:
+        stream.write(f"\n// {failure_marker}\n")
+
+    with pytest.raises(RuntimeError, match=error):
+        install_pi(source_bridge(installation), runtime_root(installation))
+
+    assert ready.read_bytes() == old_ready
+    assert old_entry.read_bytes() == old_entry_contents
+    assert_installed_entry_handshakes(old_entry)
+    assert not list(runtime_root(installation).parent.glob(".pi-staging-*"))
+
+    source.write_text(
+        source.read_text().replace(f"// {failure_marker}", "// corrected bridge handshake")
+    )
+    assert install_pi(source_bridge(installation), runtime_root(installation)) == old_entry
+    assert len(calls(installation)) == 3
+    assert len(tsc_calls(installation)) == 3
+    assert not list(runtime_root(installation).parent.glob(".pi-old-*"))
+    assert_installed_entry_handshakes(old_entry)
 
 
 def test_concurrent_processes_share_one_installation(installation):
