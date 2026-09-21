@@ -457,7 +457,7 @@ def clean_tasks(clean_all: bool, before_days: int | None):
 
 
 # ─────────────────────────────────────────────
-# loom clean-runtime / migrate-runtime
+# loom clean-runtime
 # ─────────────────────────────────────────────
 
 @main.command("clean-runtime")
@@ -489,77 +489,6 @@ def clean_runtime_command() -> None:
     )
     for error in result.errors:
         click.echo(f"warning: {error}", err=True)
-
-
-@main.command("migrate-runtime")
-@click.option(
-    "--dry-run/--apply",
-    default=True,
-    show_default=True,
-    help="Preview or migrate legacy checkpoints, .logs, and .runtime workspaces.",
-)
-def migrate_runtime_command(dry_run: bool) -> None:
-    """Migrate legacy checkpoints and archive the unscoped agent workspace."""
-    from datetime import timedelta as _timedelta
-    from pathlib import Path as _Path
-
-    from agentloom.configuration import C
-    from agentloom.runtime.migration import migrate_runtime
-    from agentloom.runtime.workspace_migration import (
-        archive_legacy_agent_workspaces,
-        preview_legacy_agent_workspaces,
-    )
-
-    max_age = _timedelta(days=7)
-
-    home = _configured_runtime_home()
-    try:
-        home.validate_root()
-    except RuntimeError as exc:
-        raise click.ClickException(str(exc)) from exc
-    legacy_logs = _Path(C.agent_root) / ".logs"
-    legacy_workspace = _Path(C.agent_root) / ".runtime"
-    try:
-        result = migrate_runtime(
-            legacy_logs,
-            home.root_dir,
-            dry_run=dry_run,
-            archive_legacy=not dry_run,
-            agent_root=C.agent_root,
-            max_age=max_age,
-        )
-        workspace_result = (
-            preview_legacy_agent_workspaces(legacy_workspace)
-            if dry_run
-            else archive_legacy_agent_workspaces(legacy_workspace, home.root_dir)
-        )
-    except Exception as exc:
-        raise click.ClickException(str(exc)) from exc
-
-    click.echo(
-        f"Runtime migration ({'dry-run' if dry_run else 'apply'}): "
-        f"candidates={result.plan.candidate_count}, "
-        f"skipped={result.plan.skipped_count}, "
-        f"migrated={result.migrated_count}, "
-        f"already_migrated={result.already_migrated_count}."
-    )
-    for candidate in result.plan.candidates:
-        progress = ",".join(candidate.progress_kinds)
-        click.echo(
-            f"  migrate {candidate.task_id} -> {candidate.application_id} "
-            f"[{progress}]"
-        )
-    for skipped in result.plan.skipped:
-        click.echo(f"  skip {skipped.task_id}: {skipped.reason}")
-    if result.archive_dir is not None:
-        click.echo(f"Archived legacy logs: {result.archive_dir}")
-    click.echo(
-        "Legacy agent workspace: "
-        f"files={workspace_result.file_count}, "
-        f"bytes={workspace_result.total_bytes}, "
-        f"archived={workspace_result.archive_dir or 'no'}."
-    )
-
 
 # ─────────────────────────────────────────────
 # loom sessions

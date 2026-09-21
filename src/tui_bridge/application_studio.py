@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import json
-import os
 from collections.abc import Mapping
 from datetime import UTC, datetime
 from pathlib import Path
@@ -23,6 +22,7 @@ from agentloom.application.presentation import configuration_projection, display
 from agentloom.application.revision import application_revision
 from agentloom.configuration.config import load_project_config
 from agentloom.configuration.yaml_loader import load_unique_yaml
+from agentloom.runtime.context import resolve_runtime_home
 
 _MAX_REVISION_FILES = 4096
 _MAX_REVISION_BYTES = 64 * 1024 * 1024
@@ -227,12 +227,7 @@ def _running_revision(
 
 def _runtime_root(root: Path) -> Path:
     system = _safe_runtime_config(root / "config" / "system.yaml")
-    runtime = system.get("runtime") if isinstance(system, Mapping) else None
-    configured = os.environ.get("AGENTLOOM_RUNTIME_ROOT", "").strip()
-    if not configured and isinstance(runtime, Mapping):
-        configured = str(runtime.get("root_dir") or "")
-    path = Path(configured or ".agentloom").expanduser()
-    return path.absolute() if path.is_absolute() else (root / path).absolute()
+    return resolve_runtime_home(system, agent_root=root).root_dir
 
 
 def _safe_runtime_config(path: Path) -> dict[str, Any]:

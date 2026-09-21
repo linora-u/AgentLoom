@@ -143,7 +143,7 @@ def test_running_goal_is_loaded_from_checkpoint_for_tui_detail(tmp_path: Path) -
 
 def _schedule_document(tmp_path: Path) -> None:
     _write(
-        tmp_path / ".agentloom/schedules/jobs.json",
+        tmp_path / ".runtime-live/schedules/jobs.json",
         json.dumps(
             {
                 "version": 1,
@@ -170,7 +170,7 @@ def _schedule_document(tmp_path: Path) -> None:
         ),
     )
     _write(
-        tmp_path / ".agentloom/schedules/serve-status.json",
+        tmp_path / ".runtime-live/schedules/serve-status.json",
         json.dumps(
             {
                 "pid": 123,

@@ -97,10 +97,10 @@ def _runtime_workspace_fields(runtime_agent_path: str | None) -> dict[str, str |
     """Project canonical RuntimeContext paths into a Hook payload.
 
     Shell Hooks receive exact trusted paths instead of reconstructing the
-    application/task identity or falling back to the legacy ``.runtime`` tree.
+    application/task identity or inventing a process-local storage root.
     """
 
-    empty = {
+    empty: dict[str, str | None] = {
         "agent_task_workspace": None,
         "agent_insights_path": None,
     }

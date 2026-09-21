@@ -45,10 +45,10 @@ This boundary prevents log rotation or run cleanup from damaging resumable state
 │   │   └── heartbeat.json
 │   ├── context_store/
 │   └── file-history/
+├── schedules/{jobs.json,serve-status.json,executions/}
 ├── sessions/
 ├── learning/
-├── self_learning.db
-└── legacy/logs-v1-<timestamp>/
+└── self_learning.db
 ```
 
 Important boundaries:
@@ -59,6 +59,7 @@ Important boundaries:
 - These compact evidence files remain inspectable after `cleanup_on_success` removes the resumable checkpoint. Raw artifact retention can still clean bulk shell/background/skill artifacts.
 - Checkpoint lookup uses the canonical `<application_id>/<task_id>` path. It does not depend on a log directory, `.task_index.json`, or a scan of historical runs.
 - User deliverables remain under the Application's configured `output_dir`. Runtime cleanup never traverses Application output directories.
+- Durable schedules and scheduler service state use `schedules/` under the same runtime root, including when the root is overridden.
 - Persistent Agent recall uses application-scoped `insights.md` under `.agentloom/workspaces/agents/<application_id>/<agent_path>/`. Current-task Todo state follows the checkpoint lifecycle in `<application_id>/<task_id>/todos.json` when checkpointing is enabled; otherwise it remains in run-scoped memory. It is neither a run artifact nor long-term project state.
 - Goal Mode stores the objective fingerprint, `goal_started`, state and evidence in task-scoped `goal.json`. `active`, interrupted, failed, and crashed work retains the checkpoint. Only explicit Goal completion enters normal success cleanup, after copying Goal state into the run manifest and `audit/goal.json`.
 
@@ -174,7 +175,7 @@ Automatic runtime cleanup is throttled to at most once per `runtime.cleanup_inte
 - failed/interrupted runs: 30 days by default;
 - raw `artifacts/`: 3 days by default;
 - running or unknown-status manifests: preserved;
-- `.agentloom/legacy/`, checkpoints, workspaces, and Application outputs: never deleted by run cleanup.
+- checkpoints, workspaces, self-learning state, and Application outputs: never deleted by run cleanup.
 
 Run the same policy explicitly with:
 
@@ -183,26 +184,6 @@ loom clean-runtime
 ```
 
 Checkpoint expiry and deletion remain task-scoped: `max_resume_age` controls whether a task may resume, `cleanup_on_success` removes completed task state, and `loom clean-tasks` provides explicit checkpoint cleanup.
-
-## One-Time Migration from `.logs`
-
-Preview the migration first:
-
-```bash
-loom migrate-runtime --dry-run
-```
-
-The scan ignores every legacy `.task_index.json`. It reads real checkpoint directories and their task events/tree, excludes tests and expired tasks, and selects only tasks with resumable memory, ContextStore, or file-history progress.
-
-Apply after reviewing the candidates:
-
-```bash
-loom migrate-runtime --apply
-```
-
-Apply copies each candidate through staging, verifies checksums and resumable progress, and atomically renames it into `.agentloom/checkpoints/<application_id>/<task_id>/`. After all candidates validate, the complete old `.logs` tree is atomically archived under `.agentloom/legacy/logs-v1-<timestamp>/`. New runtime code does not dual-read that archive.
-
-After migration, run a real resume for each important task and verify both an old ContextRef retrieval and file-history state before treating the migration as accepted.
 
 ## Inspecting Real Run Evidence
 
@@ -231,12 +212,8 @@ Run `loom list-tasks --detail` and confirm the task is under the same `applicati
 
 ### Resume fails: `Checkpoint expired`
 
-The logical task's original `created_at` exceeds `checkpoint.max_resume_age`. Migration and resume do not rewrite `created_at` to revive expired work.
+The logical task's original `created_at` exceeds `checkpoint.max_resume_age`. Resume does not rewrite `created_at` to revive expired work.
 
 ### `runtime.log` is absent
 
 Check `logging.file_enabled` and whether the attempt used `--no-file-log`. A missing file log does not disable checkpoints or the Shell audit.
-
-### `.logs` still exists
-
-New runs do not write `.logs`. Use `loom migrate-runtime --dry-run`, review the result, then `--apply` to archive the legacy tree. Do not delete it before validating resumable tasks.

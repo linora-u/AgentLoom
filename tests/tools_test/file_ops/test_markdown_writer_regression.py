@@ -1,8 +1,7 @@
 """
-Regression test: reproduce the EXACT SyntaxError from ai_quality_analysis_demo log.
+Regression test: reproduce an observed SyntaxError from ai_quality_analysis_demo.
 
-Log reference:
-    .logs/ai_quality_analysis/ai_quality_analysis_demo_20260308_192124.log, lines 10217-10440
+Original evidence reference: lines 10217-10440 of the captured run log.
     Step 35: LLM generated Python code with a huge string concatenation for
     CAN_Scenarios.md. ast.parse() failed at line 2 with:
         "# CAN 通信栈 — 典型运行场景与补充信息需求报告\\n\\n"     ^

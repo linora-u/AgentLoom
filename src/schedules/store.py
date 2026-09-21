@@ -11,7 +11,8 @@ from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any, BinaryIO
 
-from agentloom.runtime import SecureDirectory
+from agentloom.configuration.yaml_loader import load_unique_yaml
+from agentloom.runtime import SecureDirectory, resolve_runtime_home
 
 from .schedule import next_run, parse_datetime, validate_schedule
 
@@ -61,8 +62,19 @@ def _parse(value: str) -> datetime:
     return parse_datetime(value, timezone="UTC")
 
 
+def _project_runtime_home(project_root: Path):
+    config_path = project_root / "config" / "system.yaml"
+    try:
+        raw = load_unique_yaml(config_path.read_text(encoding="utf-8")) or {}
+    except FileNotFoundError:
+        raw = {}
+    if not isinstance(raw, dict):
+        raise ValueError(f"System config must be a mapping: {config_path}")
+    return resolve_runtime_home(raw, agent_root=project_root)
+
+
 class ScheduleStore:
-    """Project-local jobs and executions guarded by an advisory ``flock``."""
+    """Canonical-runtime jobs and executions guarded by an advisory ``flock``."""
 
     VERSION = 1
     EXECUTION_RETENTION_GLOBAL = DEFAULT_EXECUTION_RETENTION_GLOBAL
@@ -81,18 +93,20 @@ class ScheduleStore:
         execution_retention_per_job: int = DEFAULT_EXECUTION_RETENTION_PER_JOB,
     ):
         self.project_root = Path(project_root).expanduser().resolve()
-        self.schedules_dir = self.project_root / ".agentloom" / "schedules"
+        runtime_home = _project_runtime_home(self.project_root)
+        runtime_home.validate_root()
+        self.schedules_dir = runtime_home.root_dir / "schedules"
         self.jobs_path = self.schedules_dir / "jobs.json"
         self.lock_path = self.schedules_dir / "jobs.lock"
         self.executions_dir = self.schedules_dir / "executions"
         self.claim_lease_seconds = max(float(claim_lease_seconds), 1.0)
         self.execution_retention_global = max(int(execution_retention_global), 1)
         self.execution_retention_per_job = max(int(execution_retention_per_job), 1)
-        project_storage = SecureDirectory(self.project_root, create=True)
+        runtime_storage = SecureDirectory(runtime_home.root_dir, create=True)
         try:
-            self._storage = project_storage.child(".agentloom/schedules", create=True)
+            self._storage = runtime_storage.child("schedules", create=True)
         finally:
-            project_storage.close()
+            runtime_storage.close()
         try:
             # Keep both directory inodes open for the store lifetime. A later
             # rename/symlink swap of any pathname component cannot redirect
