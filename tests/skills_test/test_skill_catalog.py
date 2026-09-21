@@ -2,6 +2,7 @@ import logging
 from pathlib import Path
 from types import SimpleNamespace
 
+from agentloom.runtime import RuntimeHome, bind_run_context
 from agentloom.runtime.agent import AgentRoleProfile, AgentType, RoleDrivenAgent
 from agentloom.runtime.prompts.prompt_builder import build_prompt_templates
 from agentloom.runtime.skills.catalog import SkillCatalog, SkillSource
@@ -70,6 +71,29 @@ def test_skill_tool_injects_selected_instructions_and_resource_locations(tmp_pat
     assert "Incident-only instructions" not in output
     assert f"Base directory for this skill: {skills_root / 'release-review'}" in output
     assert str(skills_root / "release-review" / "references" / "guide.md") in output
+
+
+def test_skill_activation_is_a_run_scoped_artifact(tmp_path: Path) -> None:
+    skills_root = tmp_path / "skills"
+    _write_skill(skills_root, "release-review", "# Release-only instructions\n")
+    catalog = SkillCatalog.discover([SkillSource(path=skills_root, scope="project")])
+    context = RuntimeHome(tmp_path / "runtime").context(
+        application_id="review",
+        task_id="task-proof",
+        run_id="run-proof",
+    )
+    context.prepare_run()
+    set_current_skill_catalog(catalog)
+
+    try:
+        with bind_run_context(context):
+            output = skill("release-review")
+    finally:
+        clear_current_skill_catalog()
+
+    artifacts = list(context.skills_artifacts_dir.glob("release-review-*.md"))
+    assert len(artifacts) == 1
+    assert artifacts[0].read_text(encoding="utf-8") == output + "\n"
 
 
 def test_prompt_exposes_catalogue_only_when_skill_tool_is_available(monkeypatch, tmp_path: Path) -> None:

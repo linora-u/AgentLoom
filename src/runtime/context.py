@@ -381,6 +381,10 @@ class RuntimeContext:
         return self.artifacts_dir / "background"
 
     @property
+    def skills_artifacts_dir(self) -> Path:
+        return self.artifacts_dir / "skills"
+
+    @property
     def agent_workspaces_dir(self) -> Path:
         """Canonical root for persistent and task-scoped agent workspaces."""
 
@@ -433,6 +437,7 @@ class RuntimeContext:
         directories = {
             "shell": self.shell_artifacts_dir,
             "background": self.background_artifacts_dir,
+            "skills": self.skills_artifacts_dir,
         }
         try:
             directory = directories[kind]
@@ -697,6 +702,7 @@ class RuntimeContext:
         for path in (
             self.shell_artifacts_dir,
             self.background_artifacts_dir,
+            self.skills_artifacts_dir,
         ):
             _ensure_runtime_directory(path, root=self.root_dir)
 

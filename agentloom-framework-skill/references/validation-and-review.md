@@ -129,6 +129,7 @@ export AGENTLOOM_RUNTIME_ROOT=/tmp/agentloom-runtime-checkpoint
 - 涉及 subagent/Worker checkpoint 时，要分别验证 Supervisor 中断恢复和 Worker 半路中断恢复；Worker 恢复必须证明没有新开重复 `call_index`，且能从 per-call memory checkpoint 继续。
 - file-history 场景要检查 `file-history/snapshots.json` 和备份文件，确认早期备份没有被后续 snapshot 覆盖。
 - Checkpoint 清理场景要实际跑 `loom clean-tasks --all`；run retention 要跑 `loom clean-runtime`，证明不会删除 checkpoint、`.agentloom/workspaces/`、self-learning 状态或 Application outputs。
+- 存储根或运行路径改动完成后，运行 `uv run python tests/acceptance/clean_checkout_storage_validation.py --revision HEAD`；它在干净临时 worktree 跑受支持全量套件，并拒绝重新生成顶层 `.runtime` 或 `.logs`。
 
 ContextEngine/CCR 额外必须验证：
 

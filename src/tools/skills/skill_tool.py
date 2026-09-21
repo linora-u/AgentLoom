@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 import html
+import os
 
+from agentloom.runtime import get_current_run_context, portable_runtime_component
 from agentloom.runtime.skills.catalog import SkillCatalog
 from agentloom.runtime.trace.task_context import get_current_skill_catalog
 
@@ -41,4 +43,22 @@ def skill(name: str) -> str:
         "</skill_files>",
         "</skill_content>",
     ]
-    return "\n".join(parts)
+    content = "\n".join(parts)
+    runtime_context = get_current_run_context()
+    if runtime_context is not None:
+        fd, artifact_path = runtime_context.allocate_artifact(
+            "skills",
+            prefix=f"{portable_runtime_component(activation.name)}-",
+            suffix=".md",
+        )
+        try:
+            with os.fdopen(fd, "w", encoding="utf-8") as stream:
+                stream.write(content)
+                stream.write("\n")
+        except BaseException:
+            try:
+                runtime_context.remove_run_file(artifact_path)
+            except (OSError, RuntimeError):
+                pass
+            raise
+    return content

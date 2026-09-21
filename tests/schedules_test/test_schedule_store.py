@@ -38,8 +38,7 @@ def _finish_manual_execution(
     claimed_at = NOW + timedelta(seconds=sequence * 2)
     claim = store.claim_now(job_id, owner="retention-test", now=claimed_at)
     execution_id = str(claim["execution"]["id"])
-    stdout_path = f".agentloom/schedules/executions/{execution_id}.stdout.log"
-    stderr_path = f".agentloom/schedules/executions/{execution_id}.stderr.log"
+    stdout_path, stderr_path = store.execution_log_paths(execution_id)
     if with_logs:
         with store.open_execution_logs(execution_id) as (stdout, stderr):
             stdout.write(f"stdout-{sequence}".encode())
@@ -148,9 +147,12 @@ def test_store_follows_configured_canonical_runtime_home(tmp_path: Path) -> None
 
     store = ScheduleStore(tmp_path)
     _add_due_job(store, yaml_path)
+    stdout_path, stderr_path = store.execution_log_paths("exec-proof")
 
     assert store.jobs_path == tmp_path / "state/runtime/schedules/jobs.json"
     assert store.jobs_path.is_file()
+    assert Path(stdout_path).parent == store.executions_dir
+    assert Path(stderr_path).parent == store.executions_dir
     assert not (tmp_path / ".agentloom").exists()
 
 
@@ -271,11 +273,12 @@ def test_pause_resume_and_manual_claim_preserve_the_scheduled_fire(tmp_path: Pat
     with pytest.raises(JobBusyError):
         store.claim_now(job["id"], owner="another", now=NOW + timedelta(hours=2))
     execution_id = claim["execution"]["id"]
+    stdout_path, stderr_path = store.execution_log_paths(execution_id)
     finished = store.finish_execution(
         execution_id,
         exit_code=0,
-        stdout_path=f".agentloom/schedules/executions/{execution_id}.stdout.log",
-        stderr_path=f".agentloom/schedules/executions/{execution_id}.stderr.log",
+        stdout_path=stdout_path,
+        stderr_path=stderr_path,
         now=NOW + timedelta(hours=2, seconds=2),
     )
 
@@ -299,11 +302,12 @@ def test_scheduled_completion_advances_recurring_job_and_consumes_once(tmp_path:
     assert {claim["job"]["id"] for claim in claims} == {recurring["id"], once["id"]}
     for claim in claims:
         execution_id = claim["execution"]["id"]
+        stdout_path, stderr_path = store.execution_log_paths(execution_id)
         store.finish_execution(
             execution_id,
             exit_code=0,
-            stdout_path=f".agentloom/schedules/executions/{execution_id}.stdout.log",
-            stderr_path=f".agentloom/schedules/executions/{execution_id}.stderr.log",
+            stdout_path=stdout_path,
+            stderr_path=stderr_path,
             now=NOW + timedelta(seconds=2),
         )
 
@@ -321,11 +325,12 @@ def test_remove_deletes_job_but_retains_its_execution_ledger(tmp_path: Path) -> 
     job = _add_due_job(store, yaml_path)
     claim = store.claim_due(now=NOW, owner="ticker")[0]
     execution_id = claim["execution"]["id"]
+    stdout_path, stderr_path = store.execution_log_paths(execution_id)
     store.finish_execution(
         execution_id,
         exit_code=1,
-        stdout_path=f".agentloom/schedules/executions/{execution_id}.stdout.log",
-        stderr_path=f".agentloom/schedules/executions/{execution_id}.stderr.log",
+        stdout_path=stdout_path,
+        stderr_path=stderr_path,
         error="agent failed",
         now=NOW + timedelta(seconds=1),
     )
@@ -419,11 +424,12 @@ def test_active_execution_survives_retention_and_can_finish(tmp_path: Path) -> N
     assert len(store.snapshot()["executions"]) == 3
     assert store.get_execution(execution_id)["status"] == "claimed"
     assert store.heartbeat_claim(execution_id, now=NOW + timedelta(minutes=1, seconds=1))
+    stdout_path, stderr_path = store.execution_log_paths(execution_id)
     finished = store.finish_execution(
         execution_id,
         exit_code=0,
-        stdout_path=f".agentloom/schedules/executions/{execution_id}.stdout.log",
-        stderr_path=f".agentloom/schedules/executions/{execution_id}.stderr.log",
+        stdout_path=stdout_path,
+        stderr_path=stderr_path,
         now=NOW + timedelta(minutes=1, seconds=2),
     )
     assert finished["status"] == "succeeded"
@@ -521,8 +527,7 @@ def test_execution_fields_are_bounded_and_log_paths_are_canonical(
     )
     claim = store.claim_now(job["id"], owner="bounds", now=NOW)
     execution_id = str(claim["execution"]["id"])
-    stdout_path = f".agentloom/schedules/executions/{execution_id}.stdout.log"
-    stderr_path = f".agentloom/schedules/executions/{execution_id}.stderr.log"
+    stdout_path, stderr_path = store.execution_log_paths(execution_id)
 
     with pytest.raises(ValueError, match="canonical execution log paths"):
         store.mark_running(
@@ -566,6 +571,7 @@ def test_default_retention_keeps_maximum_sized_execution_ledger_below_tui_limit(
     payload = store._empty()
     for sequence in range(600):
         execution_id = f"exec_{sequence:032x}"
+        stdout_path, stderr_path = store.execution_log_paths(execution_id)
         payload["executions"].append(
             {
                 "id": execution_id,
@@ -581,8 +587,8 @@ def test_default_retention_keeps_maximum_sized_execution_ledger_below_tui_limit(
                 "command": ["c" * store.EXECUTION_COMMAND_MAX_BYTES],
                 "pid": 1,
                 "exit_code": 1,
-                "stdout_path": f".agentloom/schedules/executions/{execution_id}.stdout.log",
-                "stderr_path": f".agentloom/schedules/executions/{execution_id}.stderr.log",
+                "stdout_path": stdout_path,
+                "stderr_path": stderr_path,
                 "error": "e" * store.EXECUTION_ERROR_MAX_BYTES,
             }
         )
