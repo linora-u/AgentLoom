@@ -73,6 +73,14 @@ def test_tool_gateway_does_not_export_smolagents_final_answer_binding() -> None:
     """)
 
 
+def test_invocation_does_not_reexport_goal_rendering_helpers() -> None:
+    run_fresh("""
+        from agentloom.runtime import invocation
+        assert not hasattr(invocation, "goal_continuation_prompt")
+        assert not hasattr(invocation, "goal_completion_output")
+    """)
+
+
 def test_tool_terminal_records_and_hook_outcomes_do_not_load_the_engine() -> None:
     run_fresh("""
         import sys
