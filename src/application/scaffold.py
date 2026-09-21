@@ -10,7 +10,7 @@ Usage (CLI)::
 
 Usage (Python API)::
 
-    from agentloom.scaffold import create_demo_script
+    from agentloom.application.scaffold import create_demo_script
     create_demo_script("applications/<app>/workflows/<agent>.yaml")
 """
 

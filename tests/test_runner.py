@@ -1,5 +1,5 @@
 """
-Tests for agentloom.application.runner and agentloom.scaffold.
+Tests for agentloom.application.runner and agentloom.application.scaffold.
 
 These tests validate the one-liner application launcher without
 instantiating real LLM-backed agents.
@@ -86,7 +86,7 @@ def fake_yaml(tmp_path: Path, monkeypatch) -> Path:
     # Patch the C object in the modules that import it.
     fake = _fake_c(tmp_path)
     monkeypatch.setattr("agentloom.application.runner.C", fake)
-    monkeypatch.setattr("agentloom.scaffold.C", fake)
+    monkeypatch.setattr("agentloom.application.scaffold.C", fake)
     return yaml_file
 
 
@@ -100,7 +100,7 @@ def fake_yaml_no_desc(tmp_path: Path, monkeypatch) -> Path:
 
     fake = _fake_c(tmp_path)
     monkeypatch.setattr("agentloom.application.runner.C", fake)
-    monkeypatch.setattr("agentloom.scaffold.C", fake)
+    monkeypatch.setattr("agentloom.application.scaffold.C", fake)
     return yaml_file
 
 
@@ -1254,7 +1254,7 @@ class TestCreateDemoScript:
     """Tests for create_demo_script."""
 
     def test_generates_demo(self, fake_yaml: Path, tmp_path: Path):
-        from agentloom.scaffold import create_demo_script
+        from agentloom.application.scaffold import create_demo_script
 
         generated = create_demo_script(str(fake_yaml))
         assert generated.exists()
@@ -1267,7 +1267,7 @@ class TestCreateDemoScript:
         assert "test_app_agent.yaml" in content
 
     def test_custom_output_path(self, fake_yaml: Path, tmp_path: Path):
-        from agentloom.scaffold import create_demo_script
+        from agentloom.application.scaffold import create_demo_script
 
         custom_out = tmp_path / "my_demo.py"
         generated = create_demo_script(str(fake_yaml), output_path=str(custom_out))
@@ -1275,7 +1275,7 @@ class TestCreateDemoScript:
         assert custom_out.exists()
 
     def test_no_overwrite_raises_by_default(self, fake_yaml: Path, tmp_path: Path):
-        from agentloom.scaffold import create_demo_script
+        from agentloom.application.scaffold import create_demo_script
 
         # First call succeeds.
         create_demo_script(str(fake_yaml))
@@ -1284,9 +1284,9 @@ class TestCreateDemoScript:
         with pytest.raises(FileExistsError, match="already exists"):
             create_demo_script(str(fake_yaml))
 
-    @patch("agentloom.scaffold.click")
+    @patch("agentloom.application.scaffold.click")
     def test_interactive_overwrite_confirmed(self, mock_click, fake_yaml: Path, tmp_path: Path):
-        from agentloom.scaffold import create_demo_script
+        from agentloom.application.scaffold import create_demo_script
 
         mock_click.echo = MagicMock()
         mock_click.confirm = MagicMock(return_value=True)
@@ -1297,9 +1297,9 @@ class TestCreateDemoScript:
         assert generated.exists()
         mock_click.confirm.assert_called_once()
 
-    @patch("agentloom.scaffold.click")
+    @patch("agentloom.application.scaffold.click")
     def test_interactive_overwrite_declined(self, mock_click, fake_yaml: Path, tmp_path: Path):
-        from agentloom.scaffold import create_demo_script
+        from agentloom.application.scaffold import create_demo_script
 
         mock_click.echo = MagicMock()
         mock_click.confirm = MagicMock(return_value=False)
@@ -1310,7 +1310,7 @@ class TestCreateDemoScript:
             create_demo_script(str(fake_yaml), interactive=True)
 
     def test_infers_category(self, fake_yaml: Path, tmp_path: Path):
-        from agentloom.scaffold import create_demo_script
+        from agentloom.application.scaffold import create_demo_script
 
         generated = create_demo_script(str(fake_yaml))
         # Output is placed inside applications/test_app/.
@@ -1318,7 +1318,7 @@ class TestCreateDemoScript:
         assert "test_app" in str(generated)
 
     def test_generated_script_contains_agent_name(self, fake_yaml: Path):
-        from agentloom.scaffold import create_demo_script
+        from agentloom.application.scaffold import create_demo_script
 
         generated = create_demo_script(str(fake_yaml))
         content = generated.read_text(encoding="utf-8")
