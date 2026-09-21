@@ -975,7 +975,7 @@ Examples:
 @click.option("-o", "--output", default=None, help="Output file path. Defaults to applications/{category}/{name}_app.py.")
 def create(yaml_path: str, output: str | None):
     """Generate a minimal demo script for a supervisor YAML config."""
-    from agentloom.scaffold import create_demo_script
+    from agentloom.application.scaffold import create_demo_script
 
     try:
         generated = create_demo_script(yaml_path, output_path=output, interactive=True)
