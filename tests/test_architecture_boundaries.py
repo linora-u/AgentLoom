@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import ast
 import subprocess
 import sys
 import textwrap
@@ -79,6 +80,72 @@ def test_runtime_contract_does_not_export_smolagents_capabilities() -> None:
         assert not hasattr(agent_runtime, "SMOLAGENTS_CAPABILITIES")
     """)
 
+
+def test_configuration_does_not_load_runtime_implementations() -> None:
+    run_fresh("""
+        import sys
+        from agentloom.configuration import config, llm_config
+        from agentloom.configuration import model_adapters, runtime_options
+        assert config.__spec__.name == "agentloom.configuration.config"
+        assert llm_config.__spec__.name == "agentloom.configuration.llm_config"
+        assert model_adapters.MODEL_ADAPTERS
+        assert runtime_options.runtime_config_layers
+        assert not any(
+            name == "agentloom.runtime" or name.startswith("agentloom.runtime.")
+            for name in sys.modules
+        )
+    """)
+
+def test_configuration_owns_its_vocabulary_without_reverse_imports() -> None:
+    offenders: list[str] = []
+    for source_path in (ROOT / "src").rglob("*.py"):
+        tree = ast.parse(source_path.read_text(encoding="utf-8"))
+        for node in ast.walk(tree):
+            if isinstance(node, ast.Import):
+                imports = [(alias.name, None) for alias in node.names]
+            elif isinstance(node, ast.ImportFrom) and node.module is not None:
+                imports = [(node.module, alias.name) for alias in node.names]
+            else:
+                continue
+            for module, name in imports:
+                if (
+                    "configuration" in source_path.relative_to(ROOT / "src").parts
+                    and (
+                        module == "agentloom.runtime"
+                        or module.startswith("agentloom.runtime.")
+                        or module == "agentloom.execution"
+                        or module.startswith("agentloom.execution.")
+                    )
+                ):
+                    offenders.append(
+                        f"{source_path.relative_to(ROOT)}:{node.lineno}:{module}"
+                    )
+                if (
+                    module == "agentloom.runtime.model_protocol"
+                    and name in {"AdapterKind", "MODEL_ADAPTERS"}
+                ):
+                    offenders.append(
+                        f"{source_path.relative_to(ROOT)}:{node.lineno}:"
+                        f"{module}.{name}"
+                    )
+                if (
+                    module == "agentloom.application.runtime_options"
+                    and name == "runtime_config_layers"
+                ):
+                    offenders.append(
+                        f"{source_path.relative_to(ROOT)}:{node.lineno}:"
+                        f"{module}.{name}"
+                    )
+    assert offenders == []
+
+def test_model_protocol_does_not_reexport_configuration_vocabulary() -> None:
+    run_fresh("""
+        from agentloom.application import runtime_options
+        from agentloom.runtime import model_protocol
+        assert not hasattr(runtime_options, "runtime_config_layers")
+        assert not hasattr(model_protocol, "AdapterKind")
+        assert not hasattr(model_protocol, "MODEL_ADAPTERS")
+    """)
 
 def test_tool_gateway_does_not_export_smolagents_final_answer_binding() -> None:
     run_fresh("""

@@ -18,8 +18,8 @@ from agentloom.configuration.defaults import (
     DEFAULT_MODEL_TEMPERATURE,
     DEFAULT_MODEL_TIMEOUT,
 )
+from agentloom.configuration.model_adapters import AdapterKind
 from agentloom.runtime.logging import get_logger
-from agentloom.runtime.model_protocol import AdapterKind
 
 logger = get_logger(__name__)
 
