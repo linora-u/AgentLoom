@@ -1,11 +1,9 @@
 from __future__ import annotations
 
-import json
-import os
 import subprocess
 import sys
 from collections import Counter
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, datetime
 from pathlib import Path
 
 from agentloom.application.studio.bridge import TuiBridge
@@ -308,146 +306,6 @@ worker_agents:
     assert catalog["applications"][0]["worker_count"] == 0
 
 
-def test_schedule_projection_includes_target_trigger_last_execution_and_service(tmp_path: Path) -> None:
-    schedules_dir = tmp_path / ".agentloom/schedules"
-    schedules_dir.mkdir(parents=True)
-    next_run = (NOW + timedelta(hours=1)).isoformat()
-    old_execution = {
-        "id": "exec-old",
-        "job_id": "job-report",
-        "status": "failed",
-        "trigger": "scheduled",
-        "claimed_at": (NOW - timedelta(days=1)).isoformat(),
-        "started_at": (NOW - timedelta(days=1)).isoformat(),
-        "finished_at": (NOW - timedelta(days=1) + timedelta(seconds=3)).isoformat(),
-        "exit_code": 1,
-        "error": "old failure",
-    }
-    latest_execution = {
-        "id": "exec-latest",
-        "job_id": "job-report",
-        "status": "succeeded",
-        "trigger": "manual",
-        "claimed_at": (NOW - timedelta(minutes=10)).isoformat(),
-        "started_at": (NOW - timedelta(minutes=10)).isoformat(),
-        "finished_at": (NOW - timedelta(minutes=9)).isoformat(),
-        "exit_code": 0,
-        "error": None,
-    }
-    (schedules_dir / "jobs.json").write_text(
-        json.dumps(
-            {
-                "version": 1,
-                "jobs": [
-                    {
-                        "id": "job-report",
-                        "name": "hourly report",
-                        "yaml_path": "applications/demo/workflows/demo.yaml",
-                        "schedule": {
-                            "kind": "interval",
-                            "seconds": 3600,
-                            "timezone": "UTC",
-                        },
-                        "state": "scheduled",
-                        "next_run_at": next_run,
-                        "last_run_at": latest_execution["finished_at"],
-                        "last_status": "succeeded",
-                        "run_count": 2,
-                        "claim": None,
-                    }
-                ],
-                "executions": [old_execution, latest_execution],
-            }
-        ),
-        encoding="utf-8",
-    )
-    (schedules_dir / "serve-status.json").write_text(
-        json.dumps(
-            {
-                "pid": os.getpid(),
-                "started_at": (NOW - timedelta(hours=1)).isoformat(),
-                "last_tick_at": NOW.isoformat(),
-                "last_success_at": NOW.isoformat(),
-                "last_error": None,
-                "tick_seconds": 1.0,
-                "stopped_at": None,
-            }
-        ),
-        encoding="utf-8",
-    )
-
-    catalog = project_catalog(tmp_path, [], [], now=NOW)
-
-    assert catalog["schedules"]["items"] == [
-        {
-            "id": "job-report",
-            "name": "hourly report",
-            "enabled": True,
-            "state": "scheduled",
-            "yaml_path": "applications/demo/workflows/demo.yaml",
-            "trigger": {
-                "kind": "interval",
-                "seconds": 3600,
-                "timezone": "UTC",
-            },
-            "next_run_at": next_run,
-            "last_run_at": latest_execution["finished_at"],
-            "last_status": "succeeded",
-            "run_count": 2,
-            "last_execution": latest_execution,
-        }
-    ]
-    assert catalog["schedules"]["service"] == {
-        "state": "running",
-        "pid": os.getpid(),
-        "started_at": (NOW - timedelta(hours=1)).isoformat(),
-        "last_tick_at": NOW.isoformat(),
-        "last_success_at": NOW.isoformat(),
-        "last_error": None,
-        "job_count": 1,
-        "due_count": 0,
-        "claimed_count": 0,
-        "execution_count": 2,
-    }
-
-
-def test_schedule_projection_follows_configured_canonical_runtime_home(
-    tmp_path: Path,
-) -> None:
-    _write(tmp_path / "config/system.yaml", "runtime:\n  root_dir: state/runtime\n")
-    schedules_dir = tmp_path / "state/runtime/schedules"
-    schedules_dir.mkdir(parents=True)
-    (schedules_dir / "jobs.json").write_text(
-        json.dumps(
-            {
-                "version": 1,
-                "jobs": [
-                    {
-                        "id": "job-canonical",
-                        "name": "canonical schedule",
-                        "yaml_path": "applications/demo/workflows/demo.yaml",
-                        "schedule": {"kind": "interval", "seconds": 3600},
-                        "state": "scheduled",
-                        "next_run_at": (NOW + timedelta(hours=1)).isoformat(),
-                        "last_run_at": None,
-                        "last_status": None,
-                        "run_count": 0,
-                        "claim": None,
-                    }
-                ],
-                "executions": [],
-            }
-        ),
-        encoding="utf-8",
-    )
-
-    catalog = project_catalog(tmp_path, [], [], now=NOW)
-
-    assert [item["id"] for item in catalog["schedules"]["items"]] == [
-        "job-canonical"
-    ]
-
-
 def test_empty_catalog_is_read_only_and_does_not_create_schedule_storage(tmp_path: Path) -> None:
     catalog = project_catalog(tmp_path, [], [], now=NOW)
 
@@ -474,6 +332,12 @@ def test_empty_catalog_is_read_only_and_does_not_create_schedule_storage(tmp_pat
     assert not (tmp_path / ".agentloom").exists()
 
 
+def test_catalog_does_not_reexport_schedule_projection() -> None:
+    from agentloom.application.studio import catalog
+
+    assert not hasattr(catalog, "schedule_catalog")
+
+
 def test_catalog_import_does_not_load_agent_or_model_runtime() -> None:
     completed = subprocess.run(
         [
@@ -485,6 +349,9 @@ def test_catalog_import_does_not_load_agent_or_model_runtime() -> None:
                 "assert project_catalog; "
                 "assert 'agentloom.application.agent' not in sys.modules; "
                 "assert 'agentloom.application.runner' not in sys.modules; "
+                "assert 'agentloom.schedules.runner' not in sys.modules; "
+                "assert 'agentloom.schedules.service' not in sys.modules; "
+                "assert 'agentloom.schedules.store' not in sys.modules; "
                 "assert 'litellm' not in sys.modules"
             ),
         ],

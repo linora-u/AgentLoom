@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-import json
+import math
 import os
 import signal
 import time
@@ -11,8 +11,9 @@ from datetime import UTC, datetime
 from threading import Event
 from typing import Any
 
-from .runner import ScheduleRunner, StopCallback
+from .runner import ProgressCallback, ScheduleRunner, StopCallback
 from .schedule import parse_datetime
+from .schema import MAX_HEARTBEAT_TICK_SECONDS, heartbeat_state
 from .store import ScheduleStore
 
 
@@ -59,20 +60,39 @@ class ScheduleService:
         limit: int | None = None,
         should_stop: StopCallback | None = None,
     ) -> list[dict[str, Any]]:
-        self._write_heartbeat()
+        """Run due jobs once without claiming persistent-service liveness."""
+
+        return self._tick(
+            now=now,
+            limit=limit,
+            should_stop=should_stop,
+            progress=None,
+        )
+
+    def _tick(
+        self,
+        *,
+        now: datetime | None,
+        limit: int | None,
+        should_stop: StopCallback | None,
+        progress: ProgressCallback | None,
+    ) -> list[dict[str, Any]]:
+        if progress is not None:
+            progress()
         executions = self.runner.run_due(
             now=now,
             limit=limit,
-            progress=self._write_heartbeat,
+            progress=progress,
             should_stop=should_stop,
         )
-        self._last_success_at = _utc_now().isoformat()
-        self._last_error = None
-        self._write_heartbeat(force=True)
+        if progress is not None:
+            self._last_success_at = _utc_now().isoformat()
+            self._last_error = None
+            progress()
         return executions
 
     def run_now(self, job_id: str) -> dict[str, Any]:
-        return self.runner.run_now(job_id, progress=self._write_heartbeat)
+        return self.runner.run_now(job_id)
 
     def serve(
         self,
@@ -82,13 +102,26 @@ class ScheduleService:
         max_ticks: int | None = None,
     ) -> None:
         """Run a foreground persistent ticker until signalled or stopped."""
+        try:
+            normalized_tick_seconds = float(tick_seconds)
+        except (OverflowError, TypeError, ValueError) as exc:
+            raise ValueError("tick_seconds must be a finite positive number") from exc
+        if (
+            not math.isfinite(normalized_tick_seconds)
+            or normalized_tick_seconds <= 0
+            or normalized_tick_seconds > MAX_HEARTBEAT_TICK_SECONDS
+        ):
+            raise ValueError(f"tick_seconds must be between 0 and {MAX_HEARTBEAT_TICK_SECONDS}")
         with ExitStack() as stack:
             try:
                 stack.enter_context(self.store.file_lock("serve.lock", exclusive=True, blocking=False))
             except BlockingIOError as exc:
                 raise ScheduleServerAlreadyRunning(f"A schedule server already owns {self.server_lock_path}") from exc
-            self._tick_seconds = max(float(tick_seconds), 0.1)
+            self._tick_seconds = max(normalized_tick_seconds, 0.1)
             self._started_at = _utc_now().isoformat()
+            self._last_success_at = None
+            self._last_error = None
+            self._last_heartbeat_monotonic = 0.0
             stopping = stop_event or Event()
             previous_handlers: dict[int, Any] = {}
 
@@ -106,9 +139,17 @@ class ScheduleService:
             try:
                 while not stopping.is_set():
                     try:
-                        self.tick(should_stop=stopping.is_set)
+                        self._tick(
+                            now=None,
+                            limit=None,
+                            should_stop=stopping.is_set,
+                            progress=self._write_heartbeat,
+                        )
                     except Exception as exc:
-                        self._last_error = f"{type(exc).__name__}: {exc}"
+                        self._last_error = self.store._bounded_text(
+                            f"{type(exc).__name__}: {exc}",
+                            self.store.EXECUTION_ERROR_MAX_BYTES,
+                        )
                         self._write_heartbeat(force=True)
                     ticks += 1
                     if max_ticks is not None and ticks >= max_ticks:
@@ -142,34 +183,33 @@ class ScheduleService:
             return False
 
     def status(self, *, now: datetime | None = None) -> dict[str, Any]:
-        checked_at = (now or _utc_now()).astimezone(UTC)
+        checked_at = now or _utc_now()
+        if checked_at.tzinfo is None:
+            checked_at = checked_at.replace(tzinfo=UTC)
+        checked_at = checked_at.astimezone(UTC)
         snapshot = self.store.snapshot()
         jobs = snapshot["jobs"]
         heartbeat: dict[str, Any] = {}
+        heartbeat_error = False
         try:
             stored_heartbeat = self.store.read_state_json("serve-status.json")
             if isinstance(stored_heartbeat, dict):
                 heartbeat = stored_heartbeat
-        except (FileNotFoundError, json.JSONDecodeError, OSError, RuntimeError):
+            else:
+                heartbeat_error = True
+        except FileNotFoundError:
             pass
-        pid = int(heartbeat.get("pid") or 0)
-        last_tick_raw = heartbeat.get("last_tick_at")
-        recent = False
-        if last_tick_raw:
-            try:
-                age = (checked_at - parse_datetime(str(last_tick_raw))).total_seconds()
-                recent = age <= max(float(heartbeat.get("tick_seconds") or 1.0) * 3, 5.0)
-            except (TypeError, ValueError):
-                recent = False
-        alive = self._pid_is_alive(pid)
-        if heartbeat.get("stopped_at"):
-            state = "stopped"
-        elif alive and recent:
-            state = "running"
+        except (OSError, RuntimeError, ValueError):
+            heartbeat_error = True
+        if heartbeat_error:
+            state, pid = "error", None
         elif heartbeat:
-            state = "stale"
+            try:
+                state, pid = heartbeat_state(heartbeat, checked_at=checked_at)
+            except ValueError:
+                state, pid = "error", None
         else:
-            state = "stopped"
+            state, pid = "stopped", None
         due_count = 0
         claimed_count = 0
         for job in jobs:

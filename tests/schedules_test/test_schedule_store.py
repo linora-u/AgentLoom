@@ -2,13 +2,21 @@ from __future__ import annotations
 
 import json
 import multiprocessing
+import os
 import threading
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 import pytest
 from agentloom.schedules.schedule import interval_schedule, once_schedule
-from agentloom.schedules.store import JobBusyError, ScheduleStore
+from agentloom.schedules.schema import (
+    JOB_NAME_MAX_BYTES,
+    MAX_PID,
+    MAX_SAFE_INTEGER,
+    SCHEDULE_DOCUMENT_MAX_BYTES,
+    SCHEDULE_HEARTBEAT_MAX_BYTES,
+)
+from agentloom.schedules.store import JobBusyError, ScheduleStore, ScheduleStoreError
 
 NOW = datetime(2026, 7, 18, 8, 0, tzinfo=UTC)
 
@@ -559,6 +567,7 @@ def test_execution_fields_are_bounded_and_log_paths_are_canonical(
     assert sum(len(item.encode()) for item in running["command"]) <= store.EXECUTION_COMMAND_MAX_BYTES
     assert len(running["command"]) <= store.EXECUTION_COMMAND_MAX_ITEMS
     assert len(finished["error"].encode()) <= store.EXECUTION_ERROR_MAX_BYTES
+    assert len(job["name"].encode()) <= JOB_NAME_MAX_BYTES
     assert len(finished["job_name"].encode()) <= store.EXECUTION_JOB_NAME_MAX_BYTES
     assert finished["stdout_path"] == stdout_path
     assert finished["stderr_path"] == stderr_path
@@ -584,7 +593,10 @@ def test_default_retention_keeps_maximum_sized_execution_ledger_below_tui_limit(
                 "claimed_at": (NOW + timedelta(seconds=sequence)).isoformat(),
                 "started_at": (NOW + timedelta(seconds=sequence)).isoformat(),
                 "finished_at": (NOW + timedelta(seconds=sequence + 1)).isoformat(),
-                "command": ["c" * store.EXECUTION_COMMAND_MAX_BYTES],
+                "command": [
+                    "c" * store.EXECUTION_COMMAND_ITEM_MAX_BYTES
+                    for _ in range(store.EXECUTION_COMMAND_MAX_BYTES // store.EXECUTION_COMMAND_ITEM_MAX_BYTES)
+                ],
                 "pid": 1,
                 "exit_code": 1,
                 "stdout_path": stdout_path,
@@ -599,3 +611,521 @@ def test_default_retention_keeps_maximum_sized_execution_ledger_below_tui_limit(
     persisted = store.snapshot()
     assert len(persisted["executions"]) == 512
     assert store.jobs_path.stat().st_size < 8 * 1024 * 1024
+
+
+def test_store_rejects_exhausted_execution_sequence(
+    tmp_path: Path,
+) -> None:
+    store = ScheduleStore(tmp_path)
+    payload = store._empty()
+    payload["executions"].append(
+        {
+            "id": "legacy-max",
+            "sequence": MAX_SAFE_INTEGER,
+        }
+    )
+
+    with pytest.raises(ScheduleStoreError, match="sequence is exhausted"):
+        store._next_execution_sequence(payload)
+
+
+@pytest.mark.parametrize(
+    ("operation", "value", "message"),
+    [
+        ("pid", MAX_PID + 1, "pid must be"),
+        ("exit_code", MAX_SAFE_INTEGER + 1, "exit_code must be"),
+    ],
+)
+def test_store_rejects_process_numbers_outside_javascript_safe_range(
+    tmp_path: Path,
+    operation: str,
+    value: int,
+    message: str,
+) -> None:
+    yaml_path = tmp_path / "agent.yaml"
+    yaml_path.write_text("name: test\n", encoding="utf-8")
+    store = ScheduleStore(tmp_path)
+    job = _add_due_job(store, yaml_path)
+    claim = store.claim_now(job["id"], owner="range-test", now=NOW)
+    execution_id = claim["execution"]["id"]
+    stdout_path, stderr_path = store.execution_log_paths(execution_id)
+
+    if operation == "pid":
+        with pytest.raises(ValueError, match=message):
+            store.mark_running(
+                execution_id,
+                command=["true"],
+                pid=value,
+                stdout_path=stdout_path,
+                stderr_path=stderr_path,
+                now=NOW,
+            )
+    else:
+        with pytest.raises(ValueError, match=message):
+            store.finish_execution(
+                execution_id,
+                exit_code=value,
+                stdout_path=stdout_path,
+                stderr_path=stderr_path,
+                now=NOW,
+            )
+
+
+def test_finish_execution_preserves_version_one_unknown_failure_shape(
+    tmp_path: Path,
+) -> None:
+    yaml_path = tmp_path / "agent.yaml"
+    yaml_path.write_text("name: test\n", encoding="utf-8")
+    store = ScheduleStore(tmp_path)
+    job = _add_due_job(store, yaml_path)
+    claim = store.claim_now(job["id"], owner="failure-shape", now=NOW)
+    execution_id = str(claim["execution"]["id"])
+    stdout_path, stderr_path = store.execution_log_paths(execution_id)
+
+    execution = store.finish_execution(
+        execution_id,
+        exit_code=None,
+        error=None,
+        stdout_path=stdout_path,
+        stderr_path=stderr_path,
+        now=NOW + timedelta(seconds=1),
+    )
+
+    assert execution["status"] == "failed"
+    assert execution["exit_code"] is None
+    assert execution["error"] is None
+    assert store.get_job(job["id"])["claim"] is None
+    assert store.get_job(job["id"])["run_count"] == 1
+
+
+def test_finish_execution_preserves_version_one_nul_error_text(
+    tmp_path: Path,
+) -> None:
+    yaml_path = tmp_path / "agent.yaml"
+    yaml_path.write_text("name: test\n", encoding="utf-8")
+    store = ScheduleStore(tmp_path)
+    job = _add_due_job(store, yaml_path)
+    claim = store.claim_now(job["id"], owner="nul-error", now=NOW)
+    execution_id = str(claim["execution"]["id"])
+    stdout_path, stderr_path = store.execution_log_paths(execution_id)
+
+    execution = store.finish_execution(
+        execution_id,
+        exit_code=None,
+        error="bad\x00message",
+        stdout_path=stdout_path,
+        stderr_path=stderr_path,
+        now=NOW + timedelta(seconds=1),
+    )
+
+    assert execution["status"] == "failed"
+    assert execution["error"] == "bad\x00message"
+    assert store.get_job(job["id"])["claim"] is None
+
+
+def test_store_rejects_exhausted_job_run_count(tmp_path: Path) -> None:
+    yaml_path = tmp_path / "agent.yaml"
+    yaml_path.write_text("name: test\n", encoding="utf-8")
+    store = ScheduleStore(tmp_path)
+    job = _add_due_job(store, yaml_path)
+    claim = store.claim_now(job["id"], owner="range-test", now=NOW)
+    execution_id = claim["execution"]["id"]
+    stdout_path, stderr_path = store.execution_log_paths(execution_id)
+    with store._locked(exclusive=True):
+        payload = store._read_unlocked()
+        payload["jobs"][0]["run_count"] = MAX_SAFE_INTEGER
+        payload["jobs"][0]["last_run_at"] = (NOW - timedelta(seconds=1)).isoformat()
+        payload["jobs"][0]["last_status"] = "succeeded"
+        store._write_unlocked(payload)
+
+    with pytest.raises(ScheduleStoreError, match="run_count is exhausted"):
+        store.finish_execution(
+            execution_id,
+            exit_code=0,
+            stdout_path=stdout_path,
+            stderr_path=stderr_path,
+            now=NOW,
+        )
+
+    persisted = store.get_job(job["id"])
+    assert persisted["run_count"] == MAX_SAFE_INTEGER
+
+
+def test_store_rejects_oversized_final_document_without_publishing(
+    tmp_path: Path,
+) -> None:
+    store = ScheduleStore(tmp_path)
+    payload = store._empty()
+    payload["padding"] = "x" * (8 * 1024 * 1024)
+
+    with pytest.raises(ScheduleStoreError, match="size limit"):
+        with store._locked(exclusive=True):
+            store._write_unlocked(payload)
+
+    assert not store.jobs_path.exists()
+
+
+def test_store_size_limit_counts_trailing_newline(tmp_path: Path) -> None:
+    store = ScheduleStore(tmp_path)
+    payload = store._empty()
+    fixed = json.dumps(
+        payload,
+        ensure_ascii=False,
+        indent=2,
+        sort_keys=True,
+    )
+    payload["padding"] = "x" * ((8 * 1024 * 1024) - len(fixed.encode("utf-8")))
+
+    with pytest.raises(ScheduleStoreError, match="size limit"):
+        with store._locked(exclusive=True):
+            store._write_unlocked(payload)
+
+    assert not store.jobs_path.exists()
+
+
+def test_store_rejects_oversized_durable_state_without_unbounded_reads(
+    tmp_path: Path,
+) -> None:
+    store = ScheduleStore(tmp_path)
+    store._storage.atomic_write(
+        "jobs.json",
+        b"{" + (b" " * SCHEDULE_DOCUMENT_MAX_BYTES),
+    )
+    store._storage.atomic_write(
+        "serve-status.json",
+        b"{" + (b" " * SCHEDULE_HEARTBEAT_MAX_BYTES),
+    )
+
+    with pytest.raises(ScheduleStoreError, match="size limit"):
+        store.snapshot()
+    with pytest.raises(ValueError, match="size limit"):
+        store.read_state_json("serve-status.json")
+
+
+def test_store_rejects_ghost_claim_and_orphan_active_execution(
+    tmp_path: Path,
+) -> None:
+    yaml_path = tmp_path / "agent.yaml"
+    yaml_path.write_text("name: test\n", encoding="utf-8")
+    store = ScheduleStore(tmp_path)
+    job = store.add_job(
+        name="active",
+        yaml_path=yaml_path,
+        schedule=interval_schedule("1h"),
+        now=NOW,
+    )
+    claim = store.claim_now(job["id"], owner="schema-test", now=NOW)
+
+    with store._locked(exclusive=True):
+        payload = store._read_unlocked()
+        payload["jobs"][0]["claim"]["execution_id"] = "exec_missing"
+        with pytest.raises(ScheduleStoreError, match="job claim"):
+            store._write_unlocked(payload)
+
+    with store._locked(exclusive=True):
+        payload = store._read_unlocked()
+        payload["jobs"][0]["claim"] = None
+        with pytest.raises(ScheduleStoreError, match="active execution"):
+            store._write_unlocked(payload)
+
+    assert store.get_job(job["id"])["claim"]["execution_id"] == claim["execution"]["id"]
+
+
+def test_store_preserves_version_one_long_owner_and_empty_command(
+    tmp_path: Path,
+) -> None:
+    yaml_path = tmp_path / "agent.yaml"
+    yaml_path.write_text("name: test\n", encoding="utf-8")
+    store = ScheduleStore(tmp_path)
+    job = store.add_job(
+        name="compatibility",
+        yaml_path=yaml_path,
+        schedule=interval_schedule("1h"),
+        now=NOW,
+    )
+    owner = "x" * 4097
+    claim = store.claim_now(job["id"], owner=owner, now=NOW)
+    execution_id = str(claim["execution"]["id"])
+    stdout_path, stderr_path = store.execution_log_paths(execution_id)
+
+    running = store.mark_running(
+        execution_id,
+        command=[],
+        pid=123,
+        stdout_path=stdout_path,
+        stderr_path=stderr_path,
+        now=NOW + timedelta(seconds=1),
+    )
+
+    assert store.get_job(job["id"])["claim"]["owner"] == owner
+    assert running["command"] == []
+    assert store.snapshot()["executions"][0]["command"] == []
+
+
+@pytest.mark.parametrize("legacy_name", ["legacy\njob", "legacy\rjob", "legacy\x00job"])
+def test_store_reads_version_one_execution_name_with_control_characters(
+    tmp_path: Path,
+    legacy_name: str,
+) -> None:
+    yaml_path = tmp_path / "agent.yaml"
+    yaml_path.write_text("name: test\n", encoding="utf-8")
+    store = ScheduleStore(tmp_path)
+    job = store.add_job(
+        name="legacy",
+        yaml_path=yaml_path,
+        schedule=interval_schedule("1h"),
+        now=NOW,
+    )
+    claim = store.claim_now(job["id"], owner="legacy-name", now=NOW)
+    with store._locked(exclusive=True):
+        payload = store._read_unlocked()
+        payload["executions"][0]["job_name"] = legacy_name
+        store._storage.atomic_write(
+            "jobs.json",
+            (json.dumps(payload) + "\n").encode(),
+        )
+
+    assert store.get_execution(claim["execution"]["id"])["job_name"] == legacy_name
+
+
+def test_store_reads_legacy_version_one_job_name_beyond_new_write_limit(
+    tmp_path: Path,
+) -> None:
+    yaml_path = tmp_path / "agent.yaml"
+    yaml_path.write_text("name: test\n", encoding="utf-8")
+    store = ScheduleStore(tmp_path)
+    job = store.add_job(
+        name="short",
+        yaml_path=yaml_path,
+        schedule=interval_schedule("1h"),
+        now=NOW,
+    )
+    with store._locked(exclusive=True):
+        payload = store._read_unlocked()
+        payload["jobs"][0]["name"] = "x" * (JOB_NAME_MAX_BYTES + 1)
+        store._storage.atomic_write(
+            "jobs.json",
+            (json.dumps(payload) + "\n").encode(),
+        )
+
+    persisted = store.get_job(job["id"])
+
+    assert persisted["name"] == "x" * (JOB_NAME_MAX_BYTES + 1)
+
+
+@pytest.mark.skipif(os.name == "nt", reason="characters follow Windows path rules")
+@pytest.mark.parametrize("special_character", ["\\", "\n", "\r"])
+def test_store_preserves_version_one_absolute_path_special_characters(
+    tmp_path: Path,
+    special_character: str,
+) -> None:
+    outside = tmp_path.parent / f"{tmp_path.name}-outside{special_character}agent.yaml"
+    outside.write_text("name: outside\n", encoding="utf-8")
+    store = ScheduleStore(tmp_path)
+
+    job = store.add_job(
+        name="outside",
+        yaml_path=outside,
+        schedule=interval_schedule("1h"),
+        now=NOW,
+    )
+
+    assert job["yaml_path"] == str(outside.resolve())
+    assert store.get_job(job["id"])["yaml_path"] == str(outside.resolve())
+
+
+def test_store_wraps_oversized_persisted_timezone_as_document_error(
+    tmp_path: Path,
+) -> None:
+    yaml_path = tmp_path / "agent.yaml"
+    yaml_path.write_text("name: test\n", encoding="utf-8")
+    store = ScheduleStore(tmp_path)
+    store.add_job(
+        name="timezone",
+        yaml_path=yaml_path,
+        schedule=interval_schedule("1h"),
+        now=NOW,
+    )
+    with store._locked(exclusive=True):
+        payload = store._read_unlocked()
+        payload["jobs"][0]["schedule"]["timezone"] = "x" * 5000
+        store._storage.atomic_write(
+            "jobs.json",
+            (json.dumps(payload) + "\n").encode(),
+        )
+
+    with pytest.raises(ScheduleStoreError, match="Invalid schedule store document"):
+        store.snapshot()
+
+
+@pytest.mark.parametrize(
+    ("run_count", "last_run_at", "last_status"),
+    [
+        (0, None, "succeeded"),
+        (0, NOW.isoformat(), None),
+        (1, None, None),
+        (1, NOW.isoformat(), None),
+    ],
+)
+def test_store_rejects_inconsistent_job_run_summary(
+    tmp_path: Path,
+    run_count: int,
+    last_run_at: str | None,
+    last_status: str | None,
+) -> None:
+    yaml_path = tmp_path / "agent.yaml"
+    yaml_path.write_text("name: test\n", encoding="utf-8")
+    store = ScheduleStore(tmp_path)
+    store.add_job(
+        name="summary",
+        yaml_path=yaml_path,
+        schedule=interval_schedule("1h"),
+        now=NOW,
+    )
+    with store._locked(exclusive=True):
+        payload = store._read_unlocked()
+        payload["jobs"][0].update(
+            {
+                "run_count": run_count,
+                "last_run_at": last_run_at,
+                "last_status": last_status,
+            }
+        )
+        with pytest.raises(ScheduleStoreError, match="last run"):
+            store._write_unlocked(payload)
+
+
+@pytest.mark.parametrize(
+    ("target", "field"),
+    [
+        ("job", "state"),
+        ("job", "last_status"),
+        ("execution", "trigger"),
+        ("execution", "status"),
+    ],
+)
+def test_store_rejects_noncanonical_durable_enums(
+    tmp_path: Path,
+    target: str,
+    field: str,
+) -> None:
+    yaml_path = tmp_path / "agent.yaml"
+    yaml_path.write_text("name: test\n", encoding="utf-8")
+    store = ScheduleStore(tmp_path)
+    job = _add_due_job(store, yaml_path)
+    claim = store.claim_now(job["id"], owner="enum-test", now=NOW)
+
+    with store._locked(exclusive=True):
+        payload = store._read_unlocked()
+        if target == "job":
+            if field == "last_status":
+                payload["jobs"][0].update(
+                    {
+                        "run_count": 1,
+                        "last_run_at": NOW.isoformat(),
+                        "last_status": " succeeded ",
+                    }
+                )
+            else:
+                payload["jobs"][0][field] = " scheduled "
+        else:
+            value = payload["executions"][0][field]
+            payload["executions"][0][field] = f" {value} "
+        with pytest.raises(ScheduleStoreError, match=f"invalid .*{field}"):
+            store._write_unlocked(payload)
+
+    assert store.get_execution(claim["execution"]["id"])["status"] == "claimed"
+
+
+@pytest.mark.parametrize(
+    ("target", "field"),
+    [
+        ("job", "id"),
+        ("claim", "execution_id"),
+        ("execution", "id"),
+        ("execution", "job_id"),
+    ],
+)
+def test_store_rejects_noncanonical_durable_identities(
+    tmp_path: Path,
+    target: str,
+    field: str,
+) -> None:
+    yaml_path = tmp_path / "agent.yaml"
+    yaml_path.write_text("name: test\n", encoding="utf-8")
+    store = ScheduleStore(tmp_path)
+    job = _add_due_job(store, yaml_path)
+    claim = store.claim_now(job["id"], owner="identity-test", now=NOW)
+
+    with store._locked(exclusive=True):
+        payload = store._read_unlocked()
+        if target == "job":
+            value = payload["jobs"][0][field]
+            payload["jobs"][0][field] = f" {value} "
+        elif target == "claim":
+            value = payload["jobs"][0]["claim"][field]
+            payload["jobs"][0]["claim"][field] = f" {value} "
+        else:
+            value = payload["executions"][0][field]
+            payload["executions"][0][field] = f" {value} "
+        with pytest.raises(ScheduleStoreError, match=f"invalid .*{field}"):
+            store._write_unlocked(payload)
+
+    assert store.get_execution(claim["execution"]["id"])["status"] == "claimed"
+
+
+@pytest.mark.parametrize("seconds", [1.0, True])
+def test_store_rejects_noninteger_persisted_interval_seconds(
+    tmp_path: Path,
+    seconds: object,
+) -> None:
+    yaml_path = tmp_path / "agent.yaml"
+    yaml_path.write_text("name: test\n", encoding="utf-8")
+    store = ScheduleStore(tmp_path)
+    store.add_job(
+        name="interval",
+        yaml_path=yaml_path,
+        schedule=interval_schedule("1h"),
+        now=NOW,
+    )
+
+    with store._locked(exclusive=True):
+        payload = store._read_unlocked()
+        payload["jobs"][0]["schedule"]["seconds"] = seconds
+        with pytest.raises(ScheduleStoreError, match="seconds must be an integer"):
+            store._write_unlocked(payload)
+
+
+def test_store_rejects_impossible_job_and_execution_lifecycle_fields(
+    tmp_path: Path,
+) -> None:
+    yaml_path = tmp_path / "agent.yaml"
+    yaml_path.write_text("name: test\n", encoding="utf-8")
+    store = ScheduleStore(tmp_path)
+    job = store.add_job(
+        name="active",
+        yaml_path=yaml_path,
+        schedule=interval_schedule("1h"),
+        now=NOW,
+    )
+    claim = store.claim_now(job["id"], owner="schema-test", now=NOW)
+
+    with store._locked(exclusive=True):
+        payload = store._read_unlocked()
+        payload["jobs"][0]["state"] = "completed"
+        with pytest.raises(ScheduleStoreError, match="completed job"):
+            store._write_unlocked(payload)
+
+    with store._locked(exclusive=True):
+        payload = store._read_unlocked()
+        execution = payload["executions"][0]
+        execution["status"] = "running"
+        execution["started_at"] = NOW.isoformat()
+        execution["finished_at"] = (NOW + timedelta(seconds=1)).isoformat()
+        execution["command"] = ["agentloom"]
+        execution["pid"] = 123
+        execution["stdout_path"], execution["stderr_path"] = store.execution_log_paths(str(execution["id"]))
+        with pytest.raises(ScheduleStoreError, match="running execution"):
+            store._write_unlocked(payload)
+
+    assert store.get_execution(claim["execution"]["id"])["status"] == "claimed"

@@ -10,6 +10,8 @@ from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from croniter import CroniterBadCronError, croniter
 
+from .schema import MAX_INTERVAL_SECONDS
+
 Schedule = dict[str, Any]
 
 _DURATION_RE = re.compile(r"^\s*(\d+(?:\.\d+)?)\s*([smhdw])\s*$", re.IGNORECASE)
@@ -25,7 +27,7 @@ _DURATION_SECONDS = {
 def _zone(timezone: str) -> ZoneInfo:
     try:
         return ZoneInfo(str(timezone).strip())
-    except (ZoneInfoNotFoundError, ValueError) as exc:
+    except (OSError, ZoneInfoNotFoundError, ValueError) as exc:
         raise ValueError(f"Unknown IANA timezone: {timezone!r}") from exc
 
 
@@ -37,36 +39,41 @@ def _aware(value: datetime, *, timezone: str = "UTC") -> datetime:
 
 def parse_datetime(value: str | datetime, *, timezone: str = "UTC") -> datetime:
     """Parse an instant, interpreting a naive value as wall time in *timezone*."""
-    _zone(timezone)
-    if isinstance(value, datetime):
-        parsed = value
-    else:
-        raw = str(value).strip()
-        if raw.endswith(("Z", "z")):
-            raw = raw[:-1] + "+00:00"
-        try:
+    try:
+        _zone(timezone)
+        if isinstance(value, datetime):
+            parsed = value
+        else:
+            raw = str(value).strip()
+            if raw.endswith(("Z", "z")):
+                raw = raw[:-1] + "+00:00"
             parsed = datetime.fromisoformat(raw)
-        except ValueError as exc:
-            raise ValueError(f"Invalid ISO timestamp: {value!r}") from exc
-    return _aware(parsed, timezone=timezone).astimezone(UTC)
+        return _aware(parsed, timezone=timezone).astimezone(UTC)
+    except (OverflowError, ValueError) as exc:
+        raise ValueError(f"Invalid ISO timestamp: {value!r}") from exc
 
 
 def parse_duration(value: str | int | float) -> int:
     """Return a positive duration in whole seconds."""
     if isinstance(value, bool):
         raise ValueError("A schedule duration must be positive")
-    if isinstance(value, (int, float)):
-        seconds = float(value)
-    else:
-        match = _DURATION_RE.fullmatch(str(value))
-        if match is None:
-            raise ValueError("Invalid duration; use forms such as 30s, 15m, 2h, or 1d")
-        seconds = float(match.group(1)) * _DURATION_SECONDS[match.group(2).lower()]
+    try:
+        if isinstance(value, (int, float)):
+            seconds = float(value)
+        else:
+            match = _DURATION_RE.fullmatch(str(value))
+            if match is None:
+                raise ValueError("Invalid duration; use forms such as 30s, 15m, 2h, or 1d")
+            seconds = float(match.group(1)) * _DURATION_SECONDS[match.group(2).lower()]
+    except (OverflowError, ValueError) as exc:
+        raise ValueError("A schedule duration must be positive") from exc
     if not math.isfinite(seconds) or seconds <= 0:
         raise ValueError("A schedule duration must be positive")
     rounded = int(seconds)
     if rounded <= 0:
         raise ValueError("A schedule duration must be at least one second")
+    if rounded > MAX_INTERVAL_SECONDS:
+        raise ValueError("A schedule duration exceeds the supported range")
     return rounded
 
 
@@ -123,30 +130,30 @@ def next_run(
     the previous scheduled fire, so process runtime does not cause drift.
     Returned datetimes are always UTC.
     """
-    normalized = validate_schedule(schedule)
-    after_utc = _aware(after).astimezone(UTC)
-    previous_utc = _aware(previous).astimezone(UTC) if previous is not None else None
-    kind = normalized["kind"]
-
-    if kind == "once":
-        if previous_utc is not None:
-            return None
-        return parse_datetime(normalized["at"], timezone=normalized["timezone"])
-
-    if kind == "interval":
-        seconds = int(normalized["seconds"])
-        if previous_utc is None:
-            return after_utc + timedelta(seconds=seconds)
-        elapsed = (after_utc - previous_utc).total_seconds()
-        slots = max(1, math.floor(elapsed / seconds) + 1)
-        return previous_utc + timedelta(seconds=slots * seconds)
-
-    zone = _zone(normalized["timezone"])
-    base_local = after_utc.astimezone(zone)
     try:
+        normalized = validate_schedule(schedule)
+        after_utc = _aware(after).astimezone(UTC)
+        previous_utc = _aware(previous).astimezone(UTC) if previous is not None else None
+        kind = normalized["kind"]
+
+        if kind == "once":
+            if previous_utc is not None:
+                return None
+            return parse_datetime(normalized["at"], timezone=normalized["timezone"])
+
+        if kind == "interval":
+            seconds = int(normalized["seconds"])
+            if previous_utc is None:
+                return after_utc + timedelta(seconds=seconds)
+            elapsed = (after_utc - previous_utc).total_seconds()
+            slots = max(1, math.floor(elapsed / seconds) + 1)
+            return previous_utc + timedelta(seconds=slots * seconds)
+
+        zone = _zone(normalized["timezone"])
+        base_local = after_utc.astimezone(zone)
         result = croniter(normalized["expression"], base_local).get_next(datetime)
-    except (CroniterBadCronError, KeyError, TypeError, ValueError) as exc:
-        raise ValueError(f"Invalid cron expression: {normalized['expression']!r}") from exc
-    if result.tzinfo is None:
-        result = result.replace(tzinfo=zone)
-    return result.astimezone(UTC)
+        if result.tzinfo is None:
+            result = result.replace(tzinfo=zone)
+        return result.astimezone(UTC)
+    except (CroniterBadCronError, KeyError, OverflowError, TypeError, ValueError) as exc:
+        raise ValueError("Schedule cannot produce a valid next run") from exc

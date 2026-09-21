@@ -3,13 +3,14 @@ from __future__ import annotations
 from datetime import UTC, datetime, timedelta
 
 import pytest
-
 from agentloom.schedules.schedule import (
     cron_schedule,
     interval_schedule,
     next_run,
     once_schedule,
+    parse_datetime,
 )
+from agentloom.schedules.schema import MAX_INTERVAL_SECONDS
 
 
 def test_once_normalizes_a_naive_wall_clock_in_the_requested_timezone() -> None:
@@ -42,6 +43,12 @@ def test_cron_uses_iana_timezone_wall_clock_and_returns_utc() -> None:
     assert result == datetime(2026, 7, 19, 1, 0, tzinfo=UTC)
 
 
+def test_cron_preserves_preexisting_croniter_six_field_grammar() -> None:
+    schedule = cron_schedule("*/5 * * * * *", timezone="UTC")
+
+    assert schedule["expression"] == "*/5 * * * * *"
+
+
 @pytest.mark.parametrize(
     ("factory", "value", "timezone"),
     [
@@ -53,6 +60,26 @@ def test_cron_uses_iana_timezone_wall_clock_and_returns_utc() -> None:
 def test_invalid_schedule_inputs_fail_at_creation(factory, value, timezone) -> None:
     with pytest.raises(ValueError):
         factory(value, timezone=timezone)
+
+
+def test_interval_schedule_rejects_seconds_above_javascript_safe_integer() -> None:
+    with pytest.raises(ValueError, match="supported range"):
+        interval_schedule(MAX_INTERVAL_SECONDS + 1)
+
+
+def test_next_run_reports_datetime_overflow_as_value_error() -> None:
+    schedule = interval_schedule(MAX_INTERVAL_SECONDS)
+
+    with pytest.raises(ValueError, match="valid next run"):
+        next_run(
+            schedule,
+            after=datetime.max.replace(tzinfo=UTC),
+        )
+
+
+def test_parse_datetime_reports_utc_conversion_overflow_as_value_error() -> None:
+    with pytest.raises(ValueError, match="Invalid ISO timestamp"):
+        parse_datetime("0001-01-01T00:00:00+14:00")
 
 
 def test_once_is_consumed_after_its_previous_fire() -> None:
