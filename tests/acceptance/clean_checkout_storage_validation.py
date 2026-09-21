@@ -73,6 +73,7 @@ def validate(revision: str) -> dict[str, object]:
                     "code",
                     "pytest",
                     "tests/",
+                    "applications/memory_feature_validation/scripts/test_offline_memory_campaign_contract.py",
                     "applications/memory_feature_validation/scripts/test_memory_review_campaign_capsule.py",
                     "applications/memory_feature_validation/scripts/test_memory_review_campaign_contract.py",
                     "-q",

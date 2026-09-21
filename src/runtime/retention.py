@@ -1,8 +1,9 @@
 """Bounded retention for run-scoped runtime data.
 
 Only ``<runtime-root>/runs`` is eligible for deletion.  Checkpoints have their
-own resume lifecycle, while ``legacy`` and application-owned output trees are
-deliberately outside this cleaner's traversal boundary.
+own resume lifecycle; schedules, reviews, and self-learning state are also
+outside this cleaner's traversal boundary. Application-owned outputs live
+outside the runtime root entirely.
 """
 
 from __future__ import annotations

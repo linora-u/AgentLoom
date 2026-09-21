@@ -328,6 +328,8 @@ class UnifiedConfig:
         )
         self._agent_root = agent_root
         self._llm_config = llm_config
+        self._loaded_raw: dict[str, Any] | None = None
+        self._loaded_llm: dict[str, Any] | None = None
 
     @property
     def raw(self) -> dict[str, Any]:
@@ -432,18 +434,8 @@ def load_project_config(project_root: Path | str) -> UnifiedConfig:
     """Read an explicit project without mutating the process-wide config."""
     agent_root = Path(project_root).expanduser().resolve()
     config_root = agent_root / "config"
-    layered_builder = LayeredConfigBuilder(
-        validate_hook=lambda snapshot, overlay: validate_system_snapshot(snapshot, overlay.name)
-    )
-    system_yaml = _filter_llm_only_top_level_keys(
-        _load_yaml(config_root / SYSTEM_CONFIG_NAME),
-        source_name="config/system.yaml",
-    )
+    merged = load_project_system_config(agent_root, require_exists=False)
     llm_config = _load_llm_config(config_root / LLM_CONFIG_NAME)
-
-    layered_builder.apply_mapping("config/system.yaml", system_yaml)
-
-    merged = layered_builder.build()
     config = UnifiedConfig(merged, agent_root=agent_root, llm_config=llm_config)
     # Programmatic configs and the credential-pipe campaign are explicit
     # overrides. Only unchanged disk-loaded bases may be refreshed for a Run.
@@ -451,6 +443,33 @@ def load_project_config(project_root: Path | str) -> UnifiedConfig:
         config._loaded_raw = deepcopy(config.raw)
         config._loaded_llm = config.llm.model_dump()
     return config
+
+
+def load_project_system_config(
+    project_root: Path | str,
+    *,
+    require_exists: bool = True,
+) -> dict[str, Any]:
+    """Load and validate one project's system config without reading LLM secrets."""
+
+    agent_root = Path(project_root).expanduser().resolve()
+    system_path = agent_root / "config" / SYSTEM_CONFIG_NAME
+    if not system_path.is_file():
+        if require_exists:
+            raise FileNotFoundError(f"Project system config does not exist: {system_path}")
+        return {}
+    system_yaml = _filter_llm_only_top_level_keys(
+        _load_yaml(system_path),
+        source_name="config/system.yaml",
+    )
+    layered_builder = LayeredConfigBuilder(
+        validate_hook=lambda snapshot, overlay: validate_system_snapshot(
+            snapshot,
+            overlay.name,
+        )
+    )
+    layered_builder.apply_mapping("config/system.yaml", system_yaml)
+    return layered_builder.build()
 
 
 def get_config() -> UnifiedConfig:

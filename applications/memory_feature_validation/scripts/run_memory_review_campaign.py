@@ -68,17 +68,10 @@ from applications.memory_feature_validation.scripts.memory_review_campaign_commo
     select_runs,
     workflow_application_id,
 )
-from applications.memory_feature_validation.scripts.runtime_paths import (  # noqa: E402
-    canonical_runtime_root,
-)
-
-
-def _runtime_root() -> Path:
-    return canonical_runtime_root(REPO_ROOT)
 
 
 def _default_output_root() -> Path:
-    return _runtime_root() / "validation" / "memory_feature_validation"
+    return REPO_ROOT / "applications" / "memory_feature_validation" / "outputs"
 
 _LOG_RECORD_RE = re.compile(r"^\s*(?:\[[^\]\r\n]*\])+\s*")
 _INPUT_TOKEN_RE = re.compile(r"Input tokens:\s*[0-9,]+\s*\(\+([0-9,]+)\)")

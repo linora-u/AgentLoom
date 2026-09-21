@@ -80,7 +80,7 @@ def _runtime_root() -> Path:
 
 
 def _default_output_root() -> Path:
-    return _runtime_root() / "validation" / "memory_feature_validation"
+    return REPO_ROOT / "applications" / "memory_feature_validation" / "outputs"
 
 
 def _default_source_db() -> Path:
@@ -126,6 +126,7 @@ _SOURCE_FILES = (
     "applications/memory_feature_validation/scripts/campaign_identity.py",
     "applications/memory_feature_validation/scripts/offline_memory_campaign_common.py",
     "applications/memory_feature_validation/scripts/run_offline_memory_campaign.py",
+    "applications/memory_feature_validation/scripts/runtime_paths.py",
     "src/extensions/self_learning/event_schema.py",
     "src/extensions/self_learning/persistence/database.py",
     "src/extensions/self_learning/persistence/ledger.py",
@@ -139,12 +140,14 @@ _SOURCE_FILES = (
     "src/lib/runtime/context.py",
     "src/lib/runtime/storage.py",
     "src/lib/config/config_validation.py",
+    "src/lib/config/config.py",
     "src/lib/config/model_request_header_profiles.py",
+    "src/lib/config/yaml_loader.py",
     "src/lib/logging/__init__.py",
     "src/lib/logging/logger_manager.py",
     "src/lib/trusted_memory_evidence.py",
 )
-_TRUSTED_DRIVER_FILES = frozenset(_SOURCE_FILES[:3])
+_TRUSTED_DRIVER_FILES = frozenset(_SOURCE_FILES[:4])
 # Preserve the baseline paths for historical Git blobs. The same semantic
 # sources have moved twice; choose one complete layout for each source tree,
 # never substitute another revision's content when a bound file is missing.
