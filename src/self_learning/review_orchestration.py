@@ -12,8 +12,8 @@ from collections.abc import Callable, Mapping
 from pathlib import Path
 from typing import Any, Protocol
 
-from agentloom.adapters.litellm.litellm_retry import limit_provider_calls
-from agentloom.adapters.litellm.model_binding import (
+from agentloom.integrations.litellm.litellm_retry import limit_provider_calls
+from agentloom.integrations.litellm.model_binding import (
     ModelProfileOverlay,
     resolve_litellm_model_turn_binding,
 )

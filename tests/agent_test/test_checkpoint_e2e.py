@@ -15,7 +15,7 @@ import os
 from dataclasses import dataclass
 from datetime import UTC
 
-from agentloom.adapters.smolagents.conversation_recovery import (
+from agentloom.runtimes.smolagents.conversation_recovery import (
     prepare_steps_for_resume,
 )
 from agentloom.runtime.agent_runtime import RuntimeCheckpointEnvelope
@@ -117,7 +117,7 @@ class TestCheckpointSaveAndResume:
         assert len(ckpt["memory_steps"]) == 3
 
         # Simulate resume: deserialize then run pipeline
-        from agentloom.adapters.smolagents.checkpoint_codec import (
+        from agentloom.runtimes.smolagents.checkpoint_codec import (
             SmolagentsCheckpointCodec as CheckpointSerializer,
         )
         deserialized = CheckpointSerializer.deserialize_memory_steps(ckpt["memory_steps"])

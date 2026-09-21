@@ -8,9 +8,9 @@ from pathlib import Path
 
 import psutil
 import pytest
-from agentloom.adapters.mcp.client import AgentLoomMCPClient
-from agentloom.adapters.mcp.config import McpServerConfig, McpSettings
-from agentloom.adapters.mcp.manager import McpManager
+from agentloom.integrations.mcp.client import AgentLoomMCPClient
+from agentloom.integrations.mcp.config import McpServerConfig, McpSettings
+from agentloom.integrations.mcp.manager import McpManager
 from mcp import StdioServerParameters
 
 SERVER = Path(__file__).parent / "fixtures" / "stdio_server.py"

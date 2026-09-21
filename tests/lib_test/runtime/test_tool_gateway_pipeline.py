@@ -212,7 +212,7 @@ def test_gateway_close_is_idempotent() -> None:
 
 
 def test_plain_callable_binding_resolves_postponed_annotations() -> None:
-    from agentloom.tools.file_ops.read_file import read_file
+    from agentloom.runtimes.smolagents.tools.file_ops.read_file import read_file
 
     binding = bind_tool(read_file)
 

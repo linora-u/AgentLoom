@@ -13,14 +13,14 @@ def test_mcp_constructs_and_calls_without_smol_using_full_input_schema():
 
             class NoSmol(importlib.abc.MetaPathFinder):
                 def find_spec(self, fullname, path=None, target=None):
-                    if fullname == 'smolagents' or fullname.startswith(('smolagents.', 'agentloom.adapters.smolagents')):
+                    if fullname == 'smolagents' or fullname.startswith(('smolagents.', 'agentloom.runtimes.smolagents')):
                         raise ImportError(f'Runtime dependency in MCP: {fullname}')
 
             sys.meta_path.insert(0, NoSmol())
             from mcp.types import CallToolResult, Tool
-            from agentloom.adapters.mcp.adapter import AgentLoomMCPAdapter
-            from agentloom.adapters.mcp.config import McpSettings
-            from agentloom.adapters.mcp.tool_wrapper import wrap_mcp_tools
+            from agentloom.integrations.mcp.adapter import AgentLoomMCPAdapter
+            from agentloom.integrations.mcp.config import McpSettings
+            from agentloom.integrations.mcp.tool_wrapper import wrap_mcp_tools
             from agentloom.runtime.tool_gateway import ToolBinding
             from jsonschema import ValidationError
 

@@ -53,8 +53,10 @@ def test_legacy_package_and_alias_loader_are_absent() -> None:
         assert not any(name == 'src' or name.startswith('src.') for name in sys.modules)
     """)
     assert not (ROOT / 'agentloom').exists()
-    for package in ('application', 'configuration', 'runtime', 'adapters', 'tools'):
+    for package in ('application', 'configuration', 'runtime', 'runtimes', 'integrations', 'tools'):
         assert (ROOT / 'src' / package).is_dir()
+    for removed in ('adapters', 'encoding', 'ui', 'utils', 'tui_bridge'):
+        assert not (ROOT / 'src' / removed).exists()
 
 
 def test_tool_terminal_records_and_hook_outcomes_do_not_load_the_engine() -> None:
@@ -70,7 +72,7 @@ def test_tool_terminal_records_and_hook_outcomes_do_not_load_the_engine() -> Non
         assert HookRun(HookPlan(), local_run_id='local', root_run_id='root').step_number == 0
         assert 'smolagents' not in sys.modules
         assert 'litellm' not in sys.modules
-        assert not any(name.startswith('agentloom.tools.shell') for name in sys.modules)
+        assert not any(name.startswith('agentloom.runtimes.smolagents.tools.shell') for name in sys.modules)
     """)
 
 
@@ -80,15 +82,15 @@ def test_definition_inspection_preserves_lazy_engine_patch_installation() -> Non
         from agentloom.application.definition import read_agent_definition
         from agentloom.application.validation import AgentConfigNormalizer
         from agentloom.tools import catalog
-        assert 'agentloom.adapters.smolagents.agents' not in sys.modules
-        assert 'agentloom.adapters.smolagents.monkey_patch' not in sys.modules
+        assert 'agentloom.runtimes.smolagents.agents' not in sys.modules
+        assert 'agentloom.runtimes.smolagents.monkey_patch' not in sys.modules
         assert 'agentloom.runtime.agent' not in sys.modules
-        assert not any(name.startswith('agentloom.tools.shell') for name in sys.modules)
+        assert not any(name.startswith('agentloom.runtimes.smolagents.tools.shell') for name in sys.modules)
 
-        from agentloom.adapters.smolagents.agents import ToolCallingAgentV2
-        from agentloom.adapters.smolagents import monkey_patch
+        from agentloom.runtimes.smolagents.agents import ToolCallingAgentV2
+        from agentloom.runtimes.smolagents import monkey_patch
         from agentloom.runtime.agent import RoleDrivenAgent
-        assert ToolCallingAgentV2.__module__ == 'agentloom.adapters.smolagents.agents'
+        assert ToolCallingAgentV2.__module__ == 'agentloom.runtimes.smolagents.agents'
         assert RoleDrivenAgent.__module__ == 'agentloom.runtime.agent'
         assert monkey_patch._INSTALLED is True
     """)
@@ -101,8 +103,8 @@ def test_generic_runtime_modules_do_not_load_smolagents_adapter() -> None:
         import agentloom.runtime.logging.logger_manager
         assert 'smolagents' not in sys.modules
         assert not any(
-            name == 'agentloom.adapters.smolagents'
-            or name.startswith('agentloom.adapters.smolagents.')
+            name == 'agentloom.runtimes.smolagents'
+            or name.startswith('agentloom.runtimes.smolagents.')
             for name in sys.modules
         )
     """)

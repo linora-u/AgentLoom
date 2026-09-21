@@ -75,7 +75,7 @@ class _CompatibilityProvider:
         name, arguments = self.calls[index]
         if name == "final_answer":
             from agentloom.runtime import get_current_run_context
-            from agentloom.tools.shell.background_task import BackgroundTaskRegistry
+            from agentloom.runtimes.smolagents.tools.shell.background_task import BackgroundTaskRegistry
             self.run_context = get_current_run_context()
             self.background_tasks = BackgroundTaskRegistry.get_instance().list_running()
         return ModelTurnResult(
@@ -154,7 +154,7 @@ def test_smol_runtime_options_execute_tools_todo_and_goal_through_application(
         requests_per_minute=60,
     )
     monkeypatch.setattr(
-        "agentloom.adapters.litellm.model_binding.resolve_litellm_model_turn_binding",
+        "agentloom.integrations.litellm.model_binding.resolve_litellm_model_turn_binding",
         lambda *_args, **_kwargs: binding,
     )
     events: list[RunEvent] = []
@@ -167,8 +167,8 @@ def test_smol_runtime_options_execute_tools_todo_and_goal_through_application(
     if shell:
         import os
         from agentloom.runtime import bind_run_context
-        from agentloom.tools.shell.background_task import BackgroundTaskRegistry
-        from agentloom.tools.shell.process import ShellProcessRegistry
+        from agentloom.runtimes.smolagents.tools.shell.background_task import BackgroundTaskRegistry
+        from agentloom.runtimes.smolagents.tools.shell.process import ShellProcessRegistry
         assert len(provider.background_tasks) == 1
         task = provider.background_tasks[0]
         assert task.is_terminal

@@ -1,0 +1,330 @@
+from __future__ import annotations
+
+import json
+import subprocess
+import sys
+from pathlib import Path
+
+from agentloom.application.studio.application_studio import application_detail
+from agentloom.application.studio.bridge import TuiBridge
+
+
+def _write(path: Path, content: str) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(content, encoding="utf-8")
+
+
+def test_application_detail_exposes_effective_capabilities_with_sources(
+    tmp_path: Path,
+) -> None:
+    _write(
+        tmp_path / "config/system.yaml",
+        """
+tools: []
+tool_access_control:
+  path_validation: []
+hooks:
+  SessionStart: []
+""",
+    )
+    _write(
+        tmp_path / "config/llm.yaml",
+        """
+model:
+  summary:
+    model: openai/test-summary
+    adapter: openai_chat
+  default_model_type: powerful
+  powerful:
+    model: openai/test
+    adapter: openai_chat
+    api_key: must-never-cross-the-bridge
+    base_url: https://private.invalid
+""",
+    )
+    _write(
+        tmp_path / "skills/global-review/SKILL.md",
+        "---\nname: global-review\ndescription: Shared review\n---\n",
+    )
+    _write(
+        tmp_path / "applications/reports/config/system.yaml",
+        """
+tool_access_control:
+  path_validation: []
+mcp_servers:
+  - config/reports-mcp.json
+""",
+    )
+    _write(
+        tmp_path / "applications/reports/skills/local-writer/SKILL.md",
+        "---\nname: local-writer\ndescription: Writes reports\n---\n",
+    )
+    _write(
+        tmp_path / "applications/reports/workflows/reports.yaml",
+        """
+name: report-supervisor
+agent_runtime: smolagents
+description: Coordinates report creation
+model_type: powerful
+workflow: Delegate research, then assemble a report.
+tools:
+  - name: web_search
+skills:
+  paths:
+    - skills/local-writer
+worker_agents:
+  - path: researcher.yaml
+""",
+    )
+    _write(
+        tmp_path / "applications/reports/workflows/worker_agents/researcher.yaml",
+        """
+name: researcher
+agent_runtime: smolagents
+description: Finds evidence
+workflow: Find evidence for the requested report.
+agent_function_schema:
+  description: Research one topic.
+  inputs:
+    task:
+      description: Topic to research.
+  output:
+    description: Evidence summary.
+""",
+    )
+
+    _write(tmp_path / "config/reports-mcp.json", '{"mcpServers":{}}')
+
+    detail = TuiBridge(tmp_path).dispatch(
+        "application.detail",
+        {"application_id": "reports"},
+    )
+
+    assert detail["application"]["id"] == "reports"
+    assert detail["working_revision"].startswith("sha256:")
+    supervisor = detail["agents"][0]
+    assert supervisor["role"] == "supervisor"
+    assert supervisor["model"] == {"type": "powerful", "source": "agent"}
+    assert supervisor["tools"] == [{"name": "web_search", "source": "agent"}]
+    assert [(skill["name"], skill["source"]) for skill in supervisor["skills"]] == [
+        ("global-review", "global"),
+        ("local-writer", "application"),
+    ]
+    assert supervisor["permissions"]["source"] == "application"
+    assert supervisor["hooks"]["source"] == "global"
+    assert supervisor["mcp"]["source"] == "application"
+    assert [worker["name"] for worker in supervisor["workers"]] == ["researcher"]
+    assert "must-never-cross-the-bridge" not in str(detail)
+    assert "private.invalid" not in str(detail)
+
+
+def test_application_detail_pins_running_revision_to_the_started_run(tmp_path: Path) -> None:
+    workflow = tmp_path / "applications/demo/workflows/demo.yaml"
+    _write(
+        workflow,
+        "name: demo\n"
+        "agent_runtime: smolagents\n"
+        "description: Demo\n"
+        "workflow: answer\n"
+        "worker_agents: []\n",
+    )
+    systems = [{
+        "path": "applications/demo/workflows/demo.yaml",
+        "application_id": "demo",
+        "validation": {"valid": True, "errors": []},
+        "latest_run": {"run_id": "run_active", "status": "running"},
+    }]
+    first = application_detail(tmp_path, "demo", systems=systems)
+    _write(
+        tmp_path / ".agentloom/runs/demo/run_active/manifest.json",
+        json.dumps({
+            "application_id": "demo",
+            "run_id": "run_active",
+            "status": "running",
+            "application_revision": first["working_revision"],
+        }),
+    )
+    _write(
+        workflow,
+        "name: demo\n"
+        "agent_runtime: smolagents\n"
+        "description: Changed\n"
+        "workflow: answer\n"
+        "worker_agents: []\n",
+    )
+
+    changed = application_detail(tmp_path, "demo", systems=systems)
+
+    assert changed["working_revision"] != first["working_revision"]
+    assert changed["running_revision"] == first["working_revision"]
+
+
+def test_versioned_domain_cli_returns_json_envelopes_and_safe_errors(tmp_path: Path) -> None:
+    _write(
+        tmp_path / "config/llm.yaml",
+        "model:\n"
+        "  summary:\n"
+        "    model: openai/test-summary\n"
+        "    adapter: openai_chat\n"
+        "  default_model_type: test\n"
+        "  test:\n"
+        "    model: openai/test\n"
+        "    adapter: openai_chat\n"
+        "    api_key: secret-value\n",
+    )
+    _write(
+        tmp_path / "applications/demo/workflows/demo.yaml",
+        "name: demo\n"
+        "agent_runtime: smolagents\n"
+        "description: Demo\n"
+        "workflow: answer\n"
+        "worker_agents: []\n",
+    )
+    command = [
+        sys.executable,
+        "-m",
+        "agentloom.application.studio.domain_cli",
+        "--project",
+        str(tmp_path),
+    ]
+
+    success = subprocess.run(
+        [*command, "application.detail", '{"application_id":"demo"}'],
+        cwd=Path(__file__).resolve().parents[2],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    failure = subprocess.run(
+        [*command, "application.detail", '{"application_id":"missing"}'],
+        cwd=Path(__file__).resolve().parents[2],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+    assert success.returncode == 0
+    success_payload = json.loads(success.stdout)
+    assert success_payload["contract_version"] == 1
+    assert success_payload["ok"] is True
+    assert success_payload["result"]["application"]["id"] == "demo"
+    assert "secret-value" not in success.stdout
+    assert failure.returncode == 2
+    assert json.loads(failure.stdout) == {
+        "contract_version": 1,
+        "ok": False,
+        "error": {"code": "not_found", "message": "application not found: missing"},
+    }
+
+
+def test_domain_application_detail_is_paginated_and_bounded_for_large_apps(
+    tmp_path: Path,
+) -> None:
+    _write(
+        tmp_path / "config/llm.yaml",
+        "model:\n"
+        "  summary:\n"
+        "    model: openai/test-summary\n"
+        "    adapter: openai_chat\n"
+        "  default_model_type: test\n"
+        "  test:\n"
+        "    model: openai/test\n"
+        "    adapter: openai_chat\n",
+    )
+    for index in range(8):
+        skill_path = f"skills/shared-{index}"
+        _write(
+            tmp_path / skill_path / "SKILL.md",
+            f"---\nname: shared-{index}\ndescription: {'shared capability ' * 12}\n---\n",
+        )
+    for index in range(32):
+        _write(
+            tmp_path / f"applications/large/workflows/agent-{index:02d}.yaml",
+            "\n".join([
+                f"name: agent-{index:02d}",
+                "agent_runtime: smolagents",
+                f"description: {'Large Application capability description. ' * 10}",
+                "model_type: test",
+                f"workflow: {'Inspect, reason, validate, and report. ' * 20}",
+                "tools:",
+                "  - name: read_file",
+                "  - name: grep_search",
+                "worker_agents: []",
+                "",
+            ]),
+        )
+    command = [
+        sys.executable,
+        "-m",
+        "agentloom.application.studio.domain_cli",
+        "--project",
+        str(tmp_path),
+        "application.detail",
+        '{"application_id":"large"}',
+    ]
+
+    completed = subprocess.run(
+        command,
+        cwd=Path(__file__).resolve().parents[2],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+    assert completed.returncode == 0
+    assert len(completed.stdout.encode("utf-8")) < 24 * 1024
+    result = json.loads(completed.stdout)["result"]
+    assert result["overview"]["supervisor_count"] == 32
+    assert result["page"] == {
+        "offset": 0,
+        "limit": 10,
+        "returned": 10,
+        "total": 32,
+        "next_offset": 10,
+    }
+    assert len(result["effective_capabilities"]["skills"]) == 8
+    assert all("skill_names" in agent and "skills" not in agent for agent in result["agents"])
+
+
+def test_domain_impact_distinguishes_one_application_from_global_changes(tmp_path: Path) -> None:
+    for application_id in ("alpha", "beta"):
+        _write(
+            tmp_path / f"applications/{application_id}/workflows/{application_id}.yaml",
+            f"name: {application_id}\n"
+            "agent_runtime: smolagents\n"
+            "description: Demo\n"
+            "workflow: answer\n"
+            "worker_agents: []\n",
+        )
+    command = [
+        sys.executable,
+        "-m",
+        "agentloom.application.studio.domain_cli",
+        "--project",
+        str(tmp_path),
+        "application.impact",
+    ]
+
+    local = subprocess.run(
+        [*command, '{"paths":["applications/alpha/workflows/alpha.yaml"]}'],
+        cwd=Path(__file__).resolve().parents[2],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    global_change = subprocess.run(
+        [*command, '{"paths":["skills/shared/SKILL.md"]}'],
+        cwd=Path(__file__).resolve().parents[2],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+    assert json.loads(local.stdout)["result"] == {
+        "paths": ["applications/alpha/workflows/alpha.yaml"],
+        "scope": "application",
+        "affected_applications": ["alpha"],
+        "count": 1,
+    }
+    assert json.loads(global_change.stdout)["result"]["affected_applications"] == ["alpha", "beta"]
+    assert json.loads(global_change.stdout)["result"]["scope"] == "global"

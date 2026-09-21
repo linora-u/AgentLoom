@@ -578,7 +578,7 @@ import importlib.util, json, sys
 from pathlib import Path
 from agentloom.application.definition import load_agent_definition, validate_agent_definition
 from agentloom.configuration import C
-from agentloom.utils.dynamic_import import load_function
+from agentloom.application.imports.dynamic_import import load_function
 definition, outside = map(Path, sys.argv[1:])
 config = load_agent_definition(definition)
 assert validate_agent_definition(C.agent_root, str(definition.relative_to(C.agent_root)), config) == []

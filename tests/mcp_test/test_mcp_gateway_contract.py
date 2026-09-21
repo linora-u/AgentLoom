@@ -3,7 +3,7 @@
 from dataclasses import replace
 
 import pytest
-from agentloom.adapters.mcp.adapter import AgentLoomMCPAdapter
+from agentloom.integrations.mcp.adapter import AgentLoomMCPAdapter
 from agentloom.runtime.hooks import HookEvent, HookHandler, HookPlan, HookResult, HookRun
 from agentloom.runtime.tool_gateway import AgentLoomToolGateway
 from agentloom.runtime.trace import bind_explicit_execution_context, capture_explicit_execution_context
@@ -63,8 +63,8 @@ def test_mcp_hook_repairs_input_before_full_validation_and_allows_declared_extra
 ])
 def test_smol_projection_accepts_mcp_schema_without_changing_canonical_definition(property_schema):
     pytest.importorskip("smolagents")
-    from agentloom.adapters.smolagents.model_turn_bridge import _tool_definition
-    from agentloom.adapters.smolagents.tool_proxy import SmolagentsToolGatewayProxy
+    from agentloom.runtimes.smolagents.model_turn_bridge import _tool_definition
+    from agentloom.runtimes.smolagents.tool_proxy import SmolagentsToolGatewayProxy
 
     schema = {**SCHEMA, "properties": {"query": property_schema}}
     binding = AgentLoomMCPAdapter().adapt(lambda _: CallToolResult(content=[]), Tool(name="lookup", inputSchema=schema))

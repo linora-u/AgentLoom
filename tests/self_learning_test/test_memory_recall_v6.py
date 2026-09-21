@@ -130,7 +130,7 @@ def test_model_facing_write_submits_candidate_and_never_directly_activates(
 
 
 def test_model_memory_tool_exposes_candidate_only_contract() -> None:
-    from agentloom.adapters.smolagents.tools.tools import ensure_tool_wrapped
+    from agentloom.runtimes.smolagents.tools.tools import ensure_tool_wrapped
     from agentloom.tools.self_learning.memory_tool import memory
 
     tool = ensure_tool_wrapped([memory])[0]

@@ -74,7 +74,7 @@ def test_native_write_rechecks_file_after_preparation_before_sdk_execution(tmp_p
     launcher.write_text(f'''#!{sys.executable}
 import json,os,subprocess,sys,threading
 from pathlib import Path
-if sys.argv[1:]==['--version']:os.execv({binary!r},[{binary!r},'--version'])
+if sys.argv[1:]==['--version'] or sys.argv[1:3]==['-p','process.versions.modules']:os.execv({binary!r},[{binary!r},*sys.argv[1:]])
 p=subprocess.Popen([{binary!r},*sys.argv[1:]],stdin=subprocess.PIPE,stdout=subprocess.PIPE,stderr=subprocess.DEVNULL)
 def forward():
  try:

@@ -80,7 +80,7 @@ def fault_launcher(root, boundary):
     launcher.write_text(f'''#!{sys.executable}
 import subprocess,sys,threading,json,os
 from pathlib import Path
-if sys.argv[1:]==['--version']:os.execv({binary!r},[{binary!r},'--version'])
+if sys.argv[1:]==['--version'] or sys.argv[1:3]==['-p','process.versions.modules']:os.execv({binary!r},[{binary!r},*sys.argv[1:]])
 p=subprocess.Popen([{binary!r},*sys.argv[1:]],stdin=subprocess.PIPE,stdout=subprocess.PIPE,stderr=subprocess.DEVNULL)
 def stop(value):
  Path({str(marker)!r}).write_text(json.dumps({{'pid':p.pid,'frame':value}}));p.kill()
@@ -327,7 +327,7 @@ def test_worker_completion_before_platform_receipt_recovers_without_reexecution(
         (faultsite / 'sitecustomize.py').write_text(
             'import json,os\n'
             'from pathlib import Path\n'
-            'from agentloom.adapters.pi.checkpoint import PiCheckpointStore\n'
+            'from agentloom.runtimes.pi.checkpoint import PiCheckpointStore\n'
             '_commit=PiCheckpointStore.commit_platform\n'
             'def crash(self,identity,record):\n'
             " if record.tool_name=='inspect_note':\n"

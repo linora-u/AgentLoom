@@ -1,6 +1,6 @@
 """Tests for canonical context-compression tool-name constants."""
 
-from agentloom.adapters.smolagents.context_compression import (
+from agentloom.runtimes.smolagents.context_compression import (
     FILE_READ_TOOL_NAMES,
     TOOL_MAX_RETAIN_CHARS,
 )

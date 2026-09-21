@@ -12,9 +12,9 @@ import agentloom.runtime.agent as base_agent_module
 import agentloom.runtime.invocation as invocation_module
 import pytest
 import yaml
-from agentloom.adapters.smolagents.agents import ToolCallingAgentV2
-from agentloom.adapters.smolagents.loom_mixin import LoomAgentMixin
-from agentloom.adapters.smolagents.tools.tools import tool
+from agentloom.runtimes.smolagents.agents import ToolCallingAgentV2
+from agentloom.runtimes.smolagents.loom_mixin import LoomAgentMixin
+from agentloom.runtimes.smolagents.tools.tools import tool
 from agentloom.runtime import RuntimeHome, bind_run_context
 from agentloom.runtime.agent_runtime import (
     AgentRuntimeRequest,
@@ -1117,7 +1117,7 @@ def test_max_steps_managed_worker_fails_before_call_discards_state(
         "task-max-steps-managed-worker",
         "delegate managed work",
     )
-    from agentloom.adapters.smolagents.runtime_adapter import (
+    from agentloom.runtimes.smolagents.runtime_adapter import (
         SmolagentsRuntimeAdapter,
     )
     worker = base_agent_module.SubTaskTrackedAgent(

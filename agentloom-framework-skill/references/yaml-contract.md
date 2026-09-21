@@ -102,7 +102,7 @@ runtime_options:
   max_consecutive_model_errors: 5
 ```
 
-`prompt_template_path` 只接受非空字符串，不接受 `{path: ...}`；模板可省略，内置参考资源位于 `src/adapters/smolagents/prompts/`。整数参数只接受正整数；`planning_interval` 还可省略或设 `null`。切换到 Pi 时删除 smol `runtime_options` 并按 Pi 契约配置，不能透传整份旧参数。
+`prompt_template_path` 只接受非空字符串，不接受 `{path: ...}`；模板可省略，内置参考资源位于 `src/runtimes/smolagents/prompts/`。整数参数只接受正整数；`planning_interval` 还可省略或设 `null`。切换到 Pi 时删除 smol `runtime_options` 并按 Pi 契约配置，不能透传整份旧参数。
 
 ## 模型与配置
 

@@ -5,11 +5,11 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 import pytest
-from agentloom.adapters.smolagents.context_compression import (
+from agentloom.runtimes.smolagents.context_compression import (
     InternalChatMessage,
     summarize_conversation,
 )
-from agentloom.adapters.smolagents.model_turn_bridge import SmolagentsModelTurnBridge
+from agentloom.runtimes.smolagents.model_turn_bridge import SmolagentsModelTurnBridge
 from agentloom.runtime.goal import GoalCompleteError, GoalState
 from agentloom.runtime.goal.provider import GoalStateProvider, bind_goal_state_provider
 from agentloom.runtime.model_binding import ModelTurnBinding
@@ -118,7 +118,7 @@ def test_completion_skips_planning_before_claiming_final_settlement() -> None:
 
 
 def test_smart_summary_cannot_consume_completion_settlement(monkeypatch) -> None:
-    from agentloom.adapters.smolagents import context_compression
+    from agentloom.runtimes.smolagents import context_compression
 
     monkeypatch.setattr(
         context_compression,

@@ -6,7 +6,7 @@ from threading import Barrier, Lock
 from unittest.mock import MagicMock, patch
 
 import pytest
-from agentloom.adapters.smolagents.tools.tools import tool
+from agentloom.runtimes.smolagents.tools.tools import tool
 from agentloom.runtime.hooks import HookEvent, HookHandler, HookPlan, HookResult, HookRun
 from agentloom.runtime.hooks.types import Blocked
 from agentloom.runtime.tool_gateway import AgentLoomToolGateway

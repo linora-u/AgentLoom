@@ -4,7 +4,7 @@ import textwrap
 
 import pytest
 
-from agentloom.tools.search.grep_tool.grep_tool import grep_search
+from agentloom.runtimes.smolagents.tools.search.grep_tool.grep_tool import grep_search
 
 
 # ---------------------------------------------------------------------------

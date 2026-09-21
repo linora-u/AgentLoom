@@ -500,7 +500,7 @@ runtime_options:
   prompt_template_path: "applications/my_app/sysprompt/agent_prompt.yaml"
 ```
 
-Relative paths resolve from the project root; absolute paths are used directly. The file must contain a YAML mapping. An explicit path takes precedence. Otherwise the smol adapter selects an activated model-family template, a local template under `src/adapters/smolagents/prompts/`, then the built-in smolagents template. `.example.yaml` files are reference assets.
+Relative paths resolve from the project root; absolute paths are used directly. The file must contain a YAML mapping. An explicit path takes precedence. Otherwise the smol adapter selects an activated model-family template, a local template under `src/runtimes/smolagents/prompts/`, then the built-in smolagents template. `.example.yaml` files are reference assets.
 
 ---
 
@@ -605,7 +605,7 @@ tool = YamlAgentFactory.create_agent_as_tool("worker.yaml")
 # Build task list
 tasks = [
     {"dir_path": "src/api", "index_content": "..."},
-    {"dir_path": "src/utils", "index_content": "..."},
+    {"dir_path": "src/application/imports", "index_content": "..."},
     {"dir_path": "src/core", "index_content": "..."},
 ]
 
@@ -1244,7 +1244,7 @@ agent_function_schema:
     Perform LLM architecture analysis on a single directory, returning Markdown analysis text.
   inputs:
     dir_path:
-      description: "Relative directory path to analyze, e.g. src/utils"
+      description: "Relative directory path to analyze, e.g. src/application/imports"
       required: true
     index_content:
       description: "Complete text content of the directory's index.md"

@@ -1,4 +1,4 @@
-"""Unit tests for agentloom.runtime.prompts.prompt_builder.
+"""Unit tests for agentloom.runtimes.smolagents.prompts.prompt_builder.
 
 These tests verify the prompt resolution chain and assembly logic
 independently of BaseAgent.
@@ -9,9 +9,9 @@ from __future__ import annotations
 import logging
 from pathlib import Path
 
-import agentloom.runtime.prompts.prompt_builder as pb_module
+import agentloom.runtimes.smolagents.prompts.prompt_builder as pb_module
 import pytest
-from agentloom.runtime.prompts.prompt_builder import (
+from agentloom.runtimes.smolagents.prompts.prompt_builder import (
     build_prompt_templates,
     load_base_prompt_templates,
     resolve_model_family_prompt_path,
@@ -23,10 +23,10 @@ from agentloom.runtime.skills.catalog import SkillCatalog, SkillSource
 @pytest.mark.parametrize("family", ["", "anthropic", "openai", "gemini"])
 @pytest.mark.parametrize("absolute", [False, True])
 def test_canonical_shipped_template_paths_are_loadable(family, absolute):
-    from agentloom.adapters.smolagents.options import normalize_runtime_options
+    from agentloom.runtimes.smolagents.options import normalize_runtime_options
 
     root = Path(__file__).resolve().parents[2]
-    relative = Path("src/adapters/smolagents/prompts") / family / "toolcalling_agent.example.yaml"
+    relative = Path("src/runtimes/smolagents/prompts") / family / "toolcalling_agent.example.yaml"
     configured = str(root / relative if absolute else relative)
     options, _ = normalize_runtime_options(
         {"runtime_options": {"prompt_template_path": configured}}, agent_root=root,

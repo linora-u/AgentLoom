@@ -10,7 +10,7 @@ Ticket 03 relocated this proof from `experiments/pi-sdk-compatibility` to
 `tests/pi_sdk_compatibility`. `RESULT.json` remains the original authoring record;
 the preserved prior replay is `evidence/ticket01-replay.json`. New replays use the
 existing verifier and write `evidence/result.json`. This is still a test fixture,
-not the production adapter under `src/adapters/pi`.
+not the production adapter under `src/runtimes/pi`.
 
 ## Reproduce
 

@@ -32,7 +32,7 @@ Examples:
   loom create applications/<app>/workflows/<agent>.yaml -o my_app.py
   loom schedules add applications/<app>/workflows/<agent>.yaml --every 1h
   loom schedules serve
-  loom install-runtime pi
+  loom runtime install pi
 
 Use 'loom <command> -h' for more details on each command.
 """
@@ -169,18 +169,44 @@ def main():
         pass  # discovery may fail here; let sub-commands report the real error
 
 
-@main.command("install-runtime")
+@main.group("runtime")
+def runtime_group() -> None:
+    """Install, inspect and remove Agent runtime assets."""
+
+
+@runtime_group.command("install")
 @click.argument("runtime", type=click.Choice(["pi"]))
-def install_runtime(runtime: str):
+def runtime_install(runtime: str) -> None:
     """Download locked dependencies and build the selected Agent runtime."""
-    from agentloom.adapters.pi.install import install_pi
-    from agentloom.adapters.pi.metadata import SDK_VERSION
+    from agentloom.runtimes.pi.install import install_pi
+    from agentloom.runtimes.pi.metadata import SDK_VERSION
 
     try:
         entry = install_pi()
     except RuntimeError as exc:
         raise click.ClickException(str(exc)) from None
     click.echo(f"Pi SDK {SDK_VERSION} ready: {entry}")
+
+
+@runtime_group.command("status")
+@click.argument("runtime", type=click.Choice(["pi"]))
+def runtime_status(runtime: str) -> None:
+    """Report whether the selected Agent runtime is installed and ready."""
+    import json as _json
+
+    from agentloom.runtimes.pi.install import pi_runtime_status
+
+    click.echo(_json.dumps(pi_runtime_status(), ensure_ascii=False, indent=2, default=str))
+
+
+@runtime_group.command("uninstall")
+@click.argument("runtime", type=click.Choice(["pi"]))
+def runtime_uninstall(runtime: str) -> None:
+    """Remove installed assets for the selected Agent runtime."""
+    from agentloom.runtimes.pi.install import uninstall_pi
+
+    removed = uninstall_pi()
+    click.echo(f"Removed Pi runtime assets: {removed}")
 
 
 def _has_transient_provider_error(error: BaseException) -> bool:
@@ -209,7 +235,7 @@ def _has_transient_provider_error(error: BaseException) -> bool:
     if litellm_errors is not None:
         denied_types += (litellm_errors.AuthenticationError, litellm_errors.PermissionDeniedError,
                          litellm_errors.BadRequestError)
-    retry_module = sys.modules.get("agentloom.adapters.litellm.litellm_retry")
+    retry_module = sys.modules.get("agentloom.integrations.litellm.litellm_retry")
     if retry_module is not None:
         denied_types += (retry_module.ProviderCallBudgetExceeded,)
     # A smol exception can only exist if its SDK is already loaded. Do not
@@ -934,17 +960,6 @@ def skill_proposals_archive(proposal_id: str):
     result = ProposalWriter().archive(proposal_id)
     click.echo(_json.dumps(result, ensure_ascii=False, indent=2, default=str))
 
-
-# ─────────────────────────────────────────────
-# loom dashboard
-# ─────────────────────────────────────────────
-
-@main.command("dashboard")
-def dashboard():
-    """Launch the terminal TUI task monitoring dashboard (Textual)."""
-    from agentloom.ui.dashboard import run_dashboard
-
-    run_dashboard()
 
 
 _CREATE_EPILOG = """\

@@ -200,7 +200,7 @@ def _runtime_memory_steps(checkpoint: dict) -> list[dict]:
 
 
 def _current_runtime_contract() -> dict[str, object]:
-    from agentloom.adapters.smolagents.runtime_adapter import (
+    from agentloom.runtimes.smolagents.runtime_adapter import (
         SmolagentsRuntimeAdapter,
     )
     from agentloom.configuration import C

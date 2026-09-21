@@ -71,7 +71,6 @@ dependencies = [
     # Platform specific
     "pexpect>=4.9.0",
     "wexpect>=4.0.0 ; sys_platform == 'win32'",
-    "textual",
 ]
 
 [project.urls]
@@ -81,7 +80,7 @@ Issues = "https://github.com/linora-u/AgentLoom/issues"
 Documentation = "https://github.com/linora-u/AgentLoom/tree/main/docs/en"
 
 [project.optional-dependencies]
-# Pi's Node SDK is installed separately with `loom install-runtime pi`.
+# Pi's Node SDK is installed separately with `loom runtime install pi`.
 pi = []
 smol = [
     # Context propagation patches a verified 1.26.0 private timeout boundary.
@@ -120,16 +119,17 @@ include-package-data = true
 
 [tool.setuptools.package-dir]
 agentloom = "src"
+agentloom_tui_bridge = "agentloom-tui/python/agentloom_tui_bridge"
 
 [tool.setuptools.package-data]
 agentloom = ["**/*.yaml", "**/*.yml", "**/*.j2", "**/*.md", "**/*.scm",
-    "adapters/pi/bridge-v*.schema.json", "adapters/pi/bridge/*.json", "adapters/pi/bridge/*.ts"]
+    "runtimes/pi/bridge-v*.schema.json", "runtimes/pi/bridge/*.json", "runtimes/pi/bridge/*.ts"]
 
 [tool.setuptools.exclude-package-data]
 agentloom = ["**/node_modules/**", "**/dist/**", "**/.agentloom-install.*"]
 
 [tool.pytest.ini_options]
-testpaths = ["tests"]
+testpaths = ["tests", "agentloom-tui/python/tests"]
 python_files = ["test_*.py"]
 addopts = ["-v", "--tb=short"]
 markers = ["timeout(seconds): declare the maximum expected duration for a test"]

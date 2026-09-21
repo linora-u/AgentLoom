@@ -9,7 +9,7 @@ from typing import TYPE_CHECKING
 from agentloom.runtime.resources import RuntimeKey
 
 if TYPE_CHECKING:
-    from agentloom.adapters.lsp import LSPServerManager
+    from agentloom.integrations.lsp import LSPServerManager
 
 _lock = RLock()
 _managers: dict[tuple[RuntimeKey, str], LSPServerManager] = {}
@@ -21,8 +21,8 @@ def get_lsp_manager() -> LSPServerManager:
     Direct callers outside an Application retain the explicit singleton API.
     Application tools initialize lazily and register concrete close callbacks.
     """
-    from agentloom.adapters.lsp import LSPServerManager
-    from agentloom.adapters.lsp.config import LSPConfig
+    from agentloom.integrations.lsp import LSPServerManager
+    from agentloom.integrations.lsp.config import LSPConfig
     from agentloom.configuration import C
     from agentloom.runtime import get_current_run_context
     from agentloom.runtime.resources import register_resource

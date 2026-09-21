@@ -24,7 +24,7 @@ def normalize_runtime_options(
 ) -> tuple[dict[str, Any], dict[str, str]]:
     runtime_id = config.get("agent_runtime")
     if runtime_id == "smolagents":
-        from agentloom.adapters.smolagents.options import normalize_runtime_options as normalize_smol
+        from agentloom.runtimes.smolagents.options import normalize_runtime_options as normalize_smol
 
         return normalize_smol(config, snapshot=snapshot, agent_root=agent_root)
     _, layers = runtime_config_layers(config, snapshot)
@@ -40,7 +40,7 @@ def normalize_runtime_options(
             options[key] = value
             sources[key] = f"{layer_source}:runtime_options.{key}"
     if runtime_id == "pi":
-        from agentloom.adapters.pi.metadata import validate_options
+        from agentloom.runtimes.pi.metadata import validate_options
 
         validate_options(options)
     return options, sources

@@ -576,7 +576,7 @@ class CheckpointManager:
         """Return the lazily initialized smolagents Todo store."""
         with self._tree_lock:
             if self._todos is None:
-                from agentloom.adapters.smolagents.todo.store import TodoStore
+                from agentloom.runtimes.smolagents.todo.store import TodoStore
 
                 self._todos = TodoStore(self.task_storage)
             return self._todos

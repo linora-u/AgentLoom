@@ -5,6 +5,7 @@ from dataclasses import dataclass
 from typing import Any
 
 import pytest
+from agentloom.application.composition import build_builtin_runtime_registry
 from agentloom.runtime.agent_runtime import (
     RUNTIME_EVENT_KINDS,
     AgentRuntimeError,
@@ -20,7 +21,6 @@ from agentloom.runtime.agent_runtime import (
     RuntimeRequirements,
     RuntimeUsage,
     UnsupportedRuntimeError,
-    build_builtin_runtime_registry,
     require_runtime_state,
 )
 from agentloom.runtime.model_binding import ModelTurnBinding

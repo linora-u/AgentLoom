@@ -13,7 +13,7 @@ import pytest
 from pathlib import Path
 from unittest.mock import patch, MagicMock
 
-from agentloom.tools.shell.path_validation import (
+from agentloom.runtime.tool_governance.shell.path_validation import (
     check_path_constraints,
     _build_allowed_roots,
 )
@@ -41,7 +41,7 @@ def _make_config_mock(
 def _patch_config(mock_fn):
     """Return a patch decorator for the shell config path."""
     return patch(
-        "agentloom.tools.shell.path_validation._get_shell_config_path",
+        "agentloom.runtime.tool_governance.shell.path_validation._get_shell_config_path",
         side_effect=mock_fn,
     )
 
@@ -54,7 +54,7 @@ def _patch_allowed_dirs(*dirs):
     """
     resolved = [Path(d).resolve() for d in dirs]
     return patch(
-        "agentloom.tools.shell.path_validation.get_allowed_directories",
+        "agentloom.runtime.tool_governance.shell.path_validation.get_allowed_directories",
         return_value=resolved,
     )
 
@@ -438,20 +438,20 @@ class TestShellToolCwdPlumbing:
         from unittest.mock import patch as mp
 
         with mp(
-                 "agentloom.tools.shell.shell_tool.capture_explicit_execution_context",
+                 "agentloom.runtimes.smolagents.tools.shell.shell_tool.capture_explicit_execution_context",
                  return_value=MagicMock(agent_id="agent-1"),
              ), \
-             mp("agentloom.tools.shell.shell_tool.get_current_run_context", return_value=MagicMock()), \
-             mp("agentloom.tools.shell.shell_tool.ShellProcessRegistry") as mock_registry_cls:
+             mp("agentloom.runtimes.smolagents.tools.shell.shell_tool.get_current_run_context", return_value=MagicMock()), \
+             mp("agentloom.runtimes.smolagents.tools.shell.shell_tool.ShellProcessRegistry") as mock_registry_cls:
 
             mock_registry = MagicMock()
             mock_registry.get_session_cwd.return_value = "/fake/session/cwd"
             mock_registry_cls.get_instance.return_value = mock_registry
 
-            with mp("agentloom.tools.shell.shell_tool.validate_command") as mock_validate:
+            with mp("agentloom.runtimes.smolagents.tools.shell.shell_tool.validate_command") as mock_validate:
                 mock_validate.side_effect = ValueError("blocked for test")
 
-                from agentloom.tools.shell.shell_tool import shell_tool
+                from agentloom.runtimes.smolagents.tools.shell.shell_tool import shell_tool
                 try:
                     shell_tool("echo hello")
                 except ValueError:
@@ -467,15 +467,15 @@ class TestShellToolCwdPlumbing:
         from unittest.mock import patch as mp
 
         with mp(
-                 "agentloom.tools.shell.shell_tool.capture_explicit_execution_context",
+                 "agentloom.runtimes.smolagents.tools.shell.shell_tool.capture_explicit_execution_context",
                  return_value=MagicMock(agent_id="fallback-must-not-be-used"),
              ), \
-             mp("agentloom.tools.shell.shell_tool.get_current_run_context", return_value=None), \
-             mp("agentloom.tools.shell.shell_tool.validate_command") as mock_validate:
+             mp("agentloom.runtimes.smolagents.tools.shell.shell_tool.get_current_run_context", return_value=None), \
+             mp("agentloom.runtimes.smolagents.tools.shell.shell_tool.validate_command") as mock_validate:
 
             mock_validate.side_effect = ValueError("blocked for test")
 
-            from agentloom.tools.shell.shell_tool import shell_tool
+            from agentloom.runtimes.smolagents.tools.shell.shell_tool import shell_tool
             try:
                 shell_tool("echo hello")
             except ValueError:

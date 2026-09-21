@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import pytest
-from agentloom.adapters.mcp.adapter import AgentLoomMCPAdapter, McpToolExecutionError
+from agentloom.integrations.mcp.adapter import AgentLoomMCPAdapter, McpToolExecutionError
 from agentloom.runtime.hooks import HookPlan, HookRun
 from agentloom.runtime.tool_gateway import AgentLoomToolGateway
 from agentloom.runtime.trace import ExplicitExecutionContext, bind_explicit_execution_context

@@ -25,9 +25,11 @@ def test_built_wheel_selects_smol_only_through_its_explicit_profile(tmp_path, re
         source = tmp_path / "future-package"
         shutil.copytree(root / "src", source / "src", ignore=shutil.ignore_patterns(
             "node_modules", "dist", "__pycache__", "*.pyc", ".agentloom-install.*"))
+        shutil.copytree(root / "agentloom-tui/python", source / "agentloom-tui/python", ignore=shutil.ignore_patterns(
+            "__pycache__", "*.pyc"))
         for name in ("pyproject.toml", "README.md"):
             shutil.copyfile(root / name, source / name)
-        schema = next((source / "src/adapters/pi").glob("bridge-v*.schema.json"))
+        schema = next((source / "src/runtimes/pi").glob("bridge-v*.schema.json"))
         version = int(schema.name.split("-v")[1].split(".")[0])
         schema.rename(schema.with_name(f"bridge-v{version + 1}.schema.json"))
     built = subprocess.run(
@@ -40,11 +42,12 @@ def test_built_wheel_selects_smol_only_through_its_explicit_profile(tmp_path, re
         names_in_wheel = wheel.namelist()
         assert not any("/node_modules/" in name or "/bridge/dist/" in name
                        or ".agentloom-install." in name for name in names_in_wheel)
-        assert "agentloom/adapters/pi/bridge/tools.ts" in names_in_wheel
-        assert "agentloom/adapters/pi/bridge/model.ts" in names_in_wheel
-        schemas = list((source / "src/adapters/pi").glob("bridge-v*.schema.json"))
+        assert "agentloom/runtimes/pi/bridge/tools.ts" in names_in_wheel
+        assert "agentloom/runtimes/pi/bridge/model.ts" in names_in_wheel
+        schemas = list((source / "src/runtimes/pi").glob("bridge-v*.schema.json"))
         assert schemas
-        assert all("agentloom/adapters/pi/" + path.name in names_in_wheel for path in schemas)
+        assert all("agentloom/runtimes/pi/" + path.name in names_in_wheel for path in schemas)
+        assert "agentloom_tui_bridge/__main__.py" in names_in_wheel
         metadata = BytesParser().parsebytes(wheel.read(next(
             name for name in wheel.namelist() if name.endswith(".dist-info/METADATA")
         )))
