@@ -11,6 +11,7 @@ from agentloom.configuration.model_request_header_profiles import (
 )
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
+
 class BoolParser:
     """Utility for tolerant boolean parsing."""
 
@@ -41,9 +42,7 @@ class BoolParser:
             return default
 
         if logger is not None:
-            from agentloom.runtime.logging.logger_manager import get_logger
-            log = get_logger(logger, __name__)
-            log.warning(
+            logger.warning(
                 "Unrecognised boolean for '%s': %r — defaulting to %s",
                 field_name,
                 value,
@@ -80,9 +79,7 @@ class IntParser:
                 pass
 
         if logger is not None:
-            from agentloom.runtime.logging.logger_manager import get_logger
-            log = get_logger(logger, __name__)
-            log.warning(
+            logger.warning(
                 "Unrecognised integer for '%s': %r — defaulting to %s",
                 field_name,
                 value,
@@ -117,9 +114,7 @@ class FloatParser:
                 pass
 
         if logger is not None:
-            from agentloom.runtime.logging.logger_manager import get_logger
-            log = get_logger(logger, __name__)
-            log.warning(
+            logger.warning(
                 "Unrecognised float for '%s': %r — defaulting to %s",
                 field_name,
                 value,
@@ -159,9 +154,7 @@ class EnumParser:
             pass
 
         if logger is not None:
-            from agentloom.runtime.logging.logger_manager import get_logger
-            log = get_logger(logger, __name__)
-            log.warning(
+            logger.warning(
                 "Unrecognised choice for '%s': %r — defaulting to %r",
                 field_name,
                 value,
@@ -197,9 +190,7 @@ class LogLevelParser:
                 return int(logging._nameToLevel[normalized])
 
         if logger is not None:
-            from agentloom.runtime.logging.logger_manager import get_logger
-            log = get_logger(logger, __name__)
-            log.warning(
+            logger.warning(
                 "Unrecognised log level for '%s': %r — defaulting to %r",
                 field_name,
                 value,

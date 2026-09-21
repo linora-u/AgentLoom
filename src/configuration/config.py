@@ -9,6 +9,7 @@ Configuration precedence (low -> high):
 
 from __future__ import annotations
 
+import logging
 import os
 from contextlib import contextmanager
 from contextvars import ContextVar
@@ -18,7 +19,6 @@ from pathlib import Path
 from typing import Any
 
 import yaml
-from agentloom.runtime.logging import get_logger
 
 from .config_validation import (
     RootSettings,
@@ -61,7 +61,7 @@ _WORKFLOW_OVERLAY_KEYS = {
 }
 _GLOBAL_ONLY_TOP_LEVEL_KEYS = {"runtime", "logging"}
 
-logger = get_logger(__name__)
+logger = logging.getLogger(__name__)
 
 
 def _validate_review_model_references(

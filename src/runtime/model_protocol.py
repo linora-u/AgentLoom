@@ -11,15 +11,11 @@ import json
 from collections.abc import Mapping
 from dataclasses import dataclass, field
 from types import MappingProxyType
-from typing import Any, Literal, Protocol, get_args
+from typing import Any, Literal, Protocol
+
+from agentloom.configuration.model_adapters import AdapterKind as _AdapterKind
 
 type MessageRole = Literal["system", "developer", "user", "assistant"]
-type AdapterKind = Literal[
-    "openai_chat",
-    "openai_responses",
-    "anthropic_messages",
-]
-MODEL_ADAPTERS: tuple[AdapterKind, ...] = get_args(AdapterKind.__value__)
 
 MODEL_ITEMS_RAW_KEY = "agentloom_model_items"
 MODEL_RESPONSE_ID_RAW_KEY = "agentloom_model_response_id"
@@ -337,6 +333,6 @@ class ModelTurnResult:
 class ModelTurnAdapter(Protocol):
     """Deep seam for exactly one model request and response."""
 
-    adapter_id: AdapterKind
+    adapter_id: _AdapterKind
 
     def turn(self, request: ModelTurnRequest) -> ModelTurnResult: ...

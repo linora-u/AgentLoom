@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Any, TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from agentloom.configuration.config import EffectiveAgentConfigSnapshot
 
@@ -31,7 +31,7 @@ def normalize_runtime_options(
     config: dict, *, snapshot: EffectiveAgentConfigSnapshot | None = None,
     agent_root: Path | str,
 ) -> tuple[dict[str, Any], dict[str, str]]:
-    from agentloom.application.runtime_options import runtime_config_layers
+    from agentloom.configuration.runtime_options import runtime_config_layers
 
     source, layers = runtime_config_layers(config, snapshot)
     options: dict[str, Any] = dict(SMOL_DEFAULTS)
