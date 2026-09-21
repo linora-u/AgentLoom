@@ -884,8 +884,8 @@ def test_real_campaign_release_sources_bind_harness_workflows_and_runtime() -> N
         "src/runtime/trusted_memory_evidence.py",
         "src/application/runner.py",
         "src/runtime/factory.py",
-        "src/adapters/smolagents/models/model_manager.py",
-        "src/adapters/smolagents/model_turn_bridge.py",
+        "src/runtimes/smolagents/models/model_manager.py",
+        "src/runtimes/smolagents/model_turn_bridge.py",
         "src/runtime/model_protocol.py",
         "src/configuration/llm_config.py",
         "pyproject.toml",
@@ -981,7 +981,7 @@ from agentloom.runtime.workspace import ensure_workspace_mounted_once
 ensure_workspace_mounted_once()
 workflow = yaml.safe_load(Path({workflow_relative!r}).read_text(encoding="utf-8"))
 tool = next(item for item in workflow["tools"] if item["name"] == "validation_memory_case")
-from agentloom.utils.dynamic_import import load_function
+from agentloom.application.imports.dynamic_import import load_function
 function = load_function(tool["module"], tool["function"])
 payload = json.loads(function())
 assert payload["case_id"] == {spec.case_id!r}

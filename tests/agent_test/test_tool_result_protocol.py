@@ -3,12 +3,12 @@ from __future__ import annotations
 import time
 
 import pytest
-from agentloom.adapters.litellm import OpenAIChatModelTurnAdapter
-from agentloom.adapters.litellm.tool_error_projection import (
+from agentloom.integrations.litellm import OpenAIChatModelTurnAdapter
+from agentloom.integrations.litellm.tool_error_projection import (
     patch_litellm_tool_error_projection,
 )
-from agentloom.adapters.smolagents.agents import ToolCallingAgentV2
-from agentloom.adapters.smolagents.model_turn_bridge import SmolagentsModelTurnBridge
+from agentloom.runtimes.smolagents.agents import ToolCallingAgentV2
+from agentloom.runtimes.smolagents.model_turn_bridge import SmolagentsModelTurnBridge
 from agentloom.runtime.hooks import HookEvent, HookHandler, HookPlan, HookResult, HookRun
 from agentloom.runtime.model_binding import ModelTurnBinding
 from agentloom.runtime.tool_gateway import (

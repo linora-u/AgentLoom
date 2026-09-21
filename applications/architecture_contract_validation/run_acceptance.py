@@ -200,7 +200,7 @@ def _policy_definition(attempt: Path, request: dict) -> Path:
 def _rejection_child(attempt: Path, request: dict) -> int:
     """Negative case: audit network attempts and require run-less preflight rejection."""
     from agentloom.application.runner import execute_app
-    from agentloom.tui_bridge.domain_cli import _dispatch
+    from agentloom.application.studio.domain_cli import _dispatch
 
     project = Path(request["project"])
     base = Path(request["definition"])

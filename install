@@ -138,7 +138,7 @@ UV_PROJECT_ENVIRONMENT="$VENV_DIR" "$UV_BIN" sync \
 
 if [[ "$RUNTIME_PROFILE" == pi ]]; then
   printf '%b\n' "${MUTED}Downloading the locked Pi SDK and building the bridge...${NC}"
-  "$VENV_DIR/bin/python" -I -m agentloom install-runtime pi
+  "$VENV_DIR/bin/python" -I -m agentloom runtime install pi
 fi
 
 BUILD_DIR=$(mktemp -d "${TMPDIR:-/tmp}/agentloom-install.XXXXXX")

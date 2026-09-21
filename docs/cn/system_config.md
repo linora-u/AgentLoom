@@ -240,7 +240,7 @@ runtime_options:
 
 旧顶层 `smart_summary`、`prompt`、`todo`、`max_steps`、`planning_interval` 和 `max_consecutive_parse_errors` 静默忽略，不转换、不拒绝。它们不再是有效的系统默认参数。
 
-自定义 smol 模板使用 Agent YAML 的 `runtime_options.prompt_template_path`，且值必须是字符串路径。内置参考资源在 `src/adapters/smolagents/prompts/`。
+自定义 smol 模板使用 Agent YAML 的 `runtime_options.prompt_template_path`，且值必须是字符串路径。内置参考资源在 `src/runtimes/smolagents/prompts/`。
 
 ---
 
@@ -302,7 +302,7 @@ lsp_servers:
 | `max_restarts` | `int` | `3` | 服务器崩溃后自动重启的最大次数 |
 | `servers` | `list` | `[python]` | 语言列表，支持 40+ 种语言 |
 
-> 服务器由 `agentloom.adapters.lsp.lsp_server_manager.LSPServerManager` 统一管理，采用三层架构（Manager → Instance → solidlsp）。
+> 服务器由 `agentloom.integrations.lsp.lsp_server_manager.LSPServerManager` 统一管理，采用三层架构（Manager → Instance → solidlsp）。
 > 不支持的语言自动回退到 tree-sitter AST 分析（46+ 语言）。
 
 ---

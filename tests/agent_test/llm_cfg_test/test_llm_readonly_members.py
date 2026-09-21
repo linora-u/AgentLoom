@@ -104,7 +104,7 @@ def test_llm_no_default_model_type_raises_for_implicit_request(monkeypatch):
     assert "the model call was not started" in message
     assert "Agent YAML" in message
 
-    from agentloom.adapters.smolagents.models.model_types import ModelTypeManager
+    from agentloom.runtimes.smolagents.models.model_types import ModelTypeManager
 
     with pytest.raises(ValueError) as exc_info:
         ModelTypeManager.resolve_model_type(None)

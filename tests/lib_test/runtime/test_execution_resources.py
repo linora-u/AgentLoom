@@ -1,7 +1,7 @@
 """The public cleanup boundary closes real smol resources by Run and instance."""
 
 from agentloom.runtime import RuntimeHome, bind_run_context
-from agentloom.tools.shell.process import ShellProcessRegistry
+from agentloom.runtimes.smolagents.tools.shell.process import ShellProcessRegistry
 
 
 def test_closing_one_instance_preserves_other_shell_session(tmp_path):
@@ -36,7 +36,7 @@ def test_instance_cleanup_kills_only_its_real_background_process(tmp_path):
 
     from agentloom.runtime.resources import close_instance_resources, close_run_resources
     from agentloom.runtime.trace import bind_explicit_execution_context, capture_explicit_execution_context
-    from agentloom.tools.shell.background_task import BackgroundTaskRegistry
+    from agentloom.runtimes.smolagents.tools.shell.background_task import BackgroundTaskRegistry
 
     context = RuntimeHome(tmp_path / ".agentloom").context(
         application_id="resources",

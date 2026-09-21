@@ -197,7 +197,7 @@ def run(profile, case, workspace, code_tools=False):
             original = None
             if case in {"stale_bridge", "missing_asset"}:
                 import agentloom
-                bridge = Path(agentloom.__file__).parent / "adapters/pi/bridge"
+                bridge = Path(agentloom.__file__).parent / "runtimes/pi/bridge"
                 damaged = bridge / ("tools.ts" if case == "stale_bridge" else "dist/tools.js")
                 original = damaged.read_bytes()
                 if case == "stale_bridge":
@@ -220,7 +220,7 @@ def run(profile, case, workspace, code_tools=False):
             if case == "missing_smol":
                 assert "AgentLoom[smol]" in result.stderr, result.stderr
             if case in {"missing_sdk", "stale_bridge", "missing_asset"}:
-                assert "install-runtime pi" in result.stderr, result.stderr
+                assert "runtime install pi" in result.stderr, result.stderr
                 assert not requests
             if failure:
                 assert len(requests) == 1, requests
@@ -281,8 +281,8 @@ def run(profile, case, workspace, code_tools=False):
                             completed_tools=sorted(completed), model_requests=len(requests))
     if profile == "pi":
         forbidden = [name for name in sys.modules if name == "smolagents" or name.startswith((
-            "smolagents.", "agentloom.adapters.smolagents.tools", "agentloom.adapters.smolagents.runtime",
-            "agentloom.adapters.smolagents.agents", "agentloom.adapters.smolagents.monkey_patch"))]
+            "smolagents.", "agentloom.runtimes.smolagents.tools", "agentloom.runtimes.smolagents.runtime",
+            "agentloom.runtimes.smolagents.agents", "agentloom.runtimes.smolagents.monkey_patch"))]
         assert not forbidden, forbidden
         if case in {"no_tools", "read"}:
             assert "agentloom.tools.file_ops.file_outliner" not in sys.modules

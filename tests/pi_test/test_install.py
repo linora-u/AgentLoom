@@ -12,12 +12,12 @@ import sys
 from click.testing import CliRunner
 import pytest
 
-from agentloom.adapters.pi.install import install_pi
+from agentloom.runtimes.pi.install import install_pi
 
 
 @pytest.fixture
 def installation(tmp_path, monkeypatch):
-    from agentloom.adapters.pi import install
+    from agentloom.runtimes.pi import install
 
     source = Path(install.__file__).parent
     bridge = tmp_path / "pi/bridge"
@@ -30,6 +30,7 @@ def installation(tmp_path, monkeypatch):
         shutil.copyfile(schema, bridge.parent / schema.name)
     binary = tmp_path / "bin"
     binary.mkdir()
+    log = tmp_path / "npm-calls.jsonl"
     node = install.find_node(os.environ.copy())
     launcher = binary / "node"
     launcher.write_text(f"#!{sys.executable}\nimport os,sys\nos.execv({node!r}, [{node!r}, *sys.argv[1:]])\n")
@@ -39,7 +40,7 @@ def installation(tmp_path, monkeypatch):
 import json,os,sys
 from pathlib import Path
 root=Path.cwd()
-with (root/'npm-calls.jsonl').open('a') as f:f.write(json.dumps(sys.argv[1:])+'\\n')
+with Path(os.environ['TEST_NPM_CALLS']).open('a') as f:f.write(json.dumps(sys.argv[1:])+'\\n')
 if os.environ.get('TEST_NPM_FAIL'):
  print('PRIVATE-REGISTRY-CREDENTIAL');sys.exit(3)
 sdk=root/'node_modules/@earendil-works/pi-coding-agent';sdk.mkdir(parents=True,exist_ok=True)
@@ -50,86 +51,105 @@ tsc.write_text("const fs=require('node:fs');fs.mkdirSync('dist',{{recursive:true
 ''')
     npm.chmod(0o755)
     monkeypatch.setenv("PATH", str(binary) + os.pathsep + os.environ["PATH"])
-    return bridge
+    monkeypatch.setenv("TEST_NPM_CALLS", str(log))
+    return bridge, tmp_path / "runtime", log
 
 
-def calls(bridge):
-    path = bridge / "npm-calls.jsonl"
+def source_bridge(installation):
+    return installation[0]
+
+
+def runtime_root(installation):
+    return installation[1]
+
+
+def npm_log(installation):
+    return installation[2]
+
+
+def installed_bridge(installation):
+    return runtime_root(installation) / "bridge"
+
+
+def calls(installation):
+    path = npm_log(installation)
     return [json.loads(line) for line in path.read_text().splitlines()] if path.exists() else []
 
 
 @pytest.mark.parametrize("changed_file", ["index.ts", "tools.ts", "model.ts", "nested/helper.ts"])
 def test_install_downloads_lock_builds_once_and_rebuilds_changed_source(installation, changed_file):
-    entry = install_pi(installation)
+    entry = install_pi(source_bridge(installation), runtime_root(installation))
     assert entry.is_file()
+    assert not (source_bridge(installation) / "node_modules").exists()
+    assert not (source_bridge(installation) / "dist").exists()
     assert calls(installation) == [["ci", "--ignore-scripts", "--include=dev", "--no-audit", "--no-fund"]]
-    assert install_pi(installation) == entry
+    assert install_pi(source_bridge(installation), runtime_root(installation)) == entry
     assert len(calls(installation)) == 1
-    changed = installation / changed_file
+    changed = source_bridge(installation) / changed_file
     changed.parent.mkdir(exist_ok=True)
     with changed.open("a") as stream:
         stream.write("\n// changed bridge source\n")
-    assert install_pi(installation) == entry
+    assert install_pi(source_bridge(installation), runtime_root(installation)) == entry
     assert len(calls(installation)) == 2
 
 
 def test_version_mismatch_fails_before_download(installation):
-    manifest = installation / "package.json"
+    manifest = source_bridge(installation) / "package.json"
     data = json.loads(manifest.read_text())
     data["dependencies"]["@earendil-works/pi-coding-agent"] = "0.0.1"
     manifest.write_text(json.dumps(data))
     with pytest.raises(RuntimeError, match="version.*lock"):
-        install_pi(installation)
+        install_pi(source_bridge(installation), runtime_root(installation))
     assert not calls(installation)
 
 
 @pytest.mark.parametrize("source", ["model.ts", "tools.ts"])
 def test_installer_rebuilds_when_a_tool_or_model_bridge_changes(installation, source):
-    install_pi(installation)
-    with (installation / source).open("a") as stream:
+    install_pi(source_bridge(installation), runtime_root(installation))
+    with (source_bridge(installation) / source).open("a") as stream:
         stream.write("\n// changed installed bridge behavior\n")
-    install_pi(installation)
+    install_pi(source_bridge(installation), runtime_root(installation))
     assert len(calls(installation)) == 2
 
 
 def test_installer_repairs_a_missing_compiled_tool_module(installation):
-    install_pi(installation)
-    (installation / "dist/tools.js").unlink()
-    install_pi(installation)
-    assert (installation / "dist/tools.js").is_file()
+    install_pi(source_bridge(installation), runtime_root(installation))
+    (installed_bridge(installation) / "dist/tools.js").unlink()
+    install_pi(source_bridge(installation), runtime_root(installation))
+    assert (installed_bridge(installation) / "dist/tools.js").is_file()
     assert len(calls(installation)) == 2
 
 
 def test_installer_tracks_a_renamed_protocol_schema(installation):
-    install_pi(installation)
-    schema = next(installation.parent.glob("bridge-v*.schema.json"))
+    install_pi(source_bridge(installation), runtime_root(installation))
+    schema = next(source_bridge(installation).parent.glob("bridge-v*.schema.json"))
     version = int(schema.name.split("-v")[1].split(".")[0])
     schema.rename(schema.with_name(f"bridge-v{version + 1}.schema.json"))
-    assert install_pi(installation).is_file()
+    assert install_pi(source_bridge(installation), runtime_root(installation)).is_file()
     assert len(calls(installation)) == 2
 
 
 def test_missing_protocol_schema_fails_before_download(installation):
-    for schema in installation.parent.glob("bridge-v*.schema.json"):
+    for schema in source_bridge(installation).parent.glob("bridge-v*.schema.json"):
         schema.unlink()
     with pytest.raises(RuntimeError, match="schema"):
-        install_pi(installation)
+        install_pi(source_bridge(installation), runtime_root(installation))
     assert not calls(installation)
 
 
 def test_failed_install_can_retry_without_a_false_ready_marker(installation, monkeypatch):
     monkeypatch.setenv("TEST_NPM_FAIL", "1")
     with pytest.raises(RuntimeError) as caught:
-        install_pi(installation)
+        install_pi(source_bridge(installation), runtime_root(installation))
     assert "PRIVATE-REGISTRY-CREDENTIAL" not in str(caught.value)
-    assert not (installation / ".agentloom-install.json").exists()
+    assert not (runtime_root(installation) / "ready.json").exists()
     monkeypatch.delenv("TEST_NPM_FAIL")
-    assert install_pi(installation).is_file()
+    assert install_pi(source_bridge(installation), runtime_root(installation)).is_file()
     assert len(calls(installation)) == 2
 
 
 def test_concurrent_processes_share_one_installation(installation):
-    command = [sys.executable, "-c", "from pathlib import Path; from agentloom.adapters.pi.install import install_pi; import sys; install_pi(Path(sys.argv[1]))", str(installation)]
+    command = [sys.executable, "-c", "from pathlib import Path; from agentloom.runtimes.pi.install import install_pi; import sys; install_pi(Path(sys.argv[1]), Path(sys.argv[2]))", str(source_bridge(installation)), str(runtime_root(installation))]
     with ThreadPoolExecutor(max_workers=2) as pool:
         results = list(pool.map(lambda _: subprocess.run(command, capture_output=True, text=True, timeout=30), range(2)))
     assert all(result.returncode == 0 for result in results), [r.stderr for r in results]
@@ -140,5 +160,6 @@ def test_install_runtime_command_is_discoverable_and_rejects_unknown_runtime():
     from agentloom.__main__ import main
 
     runner = CliRunner()
-    assert "install-runtime" in runner.invoke(main, ["--help"]).output
-    assert runner.invoke(main, ["install-runtime", "unknown"]).exit_code == 2
+    assert "runtime" in runner.invoke(main, ["--help"]).output
+    assert "install" in runner.invoke(main, ["runtime", "--help"]).output
+    assert runner.invoke(main, ["runtime", "install", "unknown"]).exit_code == 2

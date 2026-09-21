@@ -1,11 +1,11 @@
-"""Unit tests for agentloom.adapters.mcp.tool_wrapper — name prefixing, sanitization, description enrichment."""
+"""Unit tests for agentloom.integrations.mcp.tool_wrapper — name prefixing, sanitization, description enrichment."""
 
 from __future__ import annotations
 
-from agentloom.adapters.mcp.config import McpSettings
+from agentloom.integrations.mcp.config import McpSettings
 from agentloom.runtime.model_protocol import ToolDefinition
 from agentloom.runtime.tool_gateway import ToolBinding
-from agentloom.adapters.mcp.tool_wrapper import wrap_mcp_tools, _sanitize_name
+from agentloom.integrations.mcp.tool_wrapper import wrap_mcp_tools, _sanitize_name
 
 
 # ---------------------------------------------------------------------------

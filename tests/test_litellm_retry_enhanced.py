@@ -18,7 +18,7 @@ import time
 from unittest.mock import MagicMock
 
 import pytest
-from agentloom.adapters.litellm.litellm_retry import (
+from agentloom.integrations.litellm.litellm_retry import (
     ProviderCallBudgetExceeded,
     _is_rate_limit_error,
     _parse_retry_after,
@@ -46,7 +46,7 @@ def test_agentloom_import_defaults_litellm_to_the_packaged_cost_map(tmp_path):
         [
             sys.executable,
             "-c",
-            "import agentloom.adapters.litellm.litellm_retry;"
+            "import agentloom.integrations.litellm.litellm_retry;"
             "import os;"
             "assert os.environ['LITELLM_LOCAL_MODEL_COST_MAP']=='True'",
         ],

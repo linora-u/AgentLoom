@@ -8,7 +8,7 @@ from dataclasses import replace
 from pathlib import Path
 
 import pytest
-from agentloom.adapters.smolagents.tools.tools import tool
+from agentloom.runtimes.smolagents.tools.tools import tool
 from agentloom.runtime import process as process_runtime
 from agentloom.runtime.hooks import (
     HOOK_EVENT_NAMES,

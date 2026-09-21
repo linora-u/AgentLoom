@@ -61,12 +61,12 @@ def validate(output, profiles, node):
     sdist = next(dist.glob("*.tar.gz"))
     with ZipFile(wheel) as archive:
         names = archive.namelist()
-        schemas = list((ROOT / "src/adapters/pi").glob("bridge-v*.schema.json"))
+        schemas = list((ROOT / "src/runtimes/pi").glob("bridge-v*.schema.json"))
         assert schemas
-        assert all("agentloom/adapters/pi/" + path.name in names for path in schemas)
-        sources = [path.name for path in (ROOT / "src/adapters/pi/bridge").glob("*.ts")]
+        assert all("agentloom/runtimes/pi/" + path.name in names for path in schemas)
+        sources = [path.name for path in (ROOT / "src/runtimes/pi/bridge").glob("*.ts")]
         for name in ("package.json", "package-lock.json", "tsconfig.json", *sources):
-            assert "agentloom/adapters/pi/bridge/" + name in names, name
+            assert "agentloom/runtimes/pi/bridge/" + name in names, name
         assert len([name for name in names if "/tools/queries/" in name and name.endswith(".scm")]) == 56
         assert not any("/node_modules/" in name or "/dist/" in name or ".agentloom-install." in name for name in names)
         assert "agentloom/adapters/smolagents/prompts/toolcalling_agent.example.yaml" in names
@@ -104,8 +104,8 @@ def validate(output, profiles, node):
 
         if runtime == "pi":
             results.append(run_case("missing_sdk"))
-            command(profile + "-sdk-install", [python, "-I", "-m", "agentloom", "install-runtime", "pi"])
-            command(profile + "-sdk-idempotent", [python, "-I", "-m", "agentloom", "install-runtime", "pi"])
+            command(profile + "-sdk-install", [python, "-I", "-m", "agentloom", "runtime", "install", "pi"])
+            command(profile + "-sdk-idempotent", [python, "-I", "-m", "agentloom", "runtime", "install", "pi"])
             results.extend(run_case(case) for case in ("stale_bridge", "missing_asset"))
             cases = (("no_tools", "read", "outline_python", "outline_typescript", "ast", "lsp")
                      if code_tools else ("help", "missing_yaml", "missing_smol", "no_tools", "read",

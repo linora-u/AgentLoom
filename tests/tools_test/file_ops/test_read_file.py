@@ -5,8 +5,8 @@ import unittest
 import tempfile
 from pathlib import Path
 
-from agentloom.tools.file_ops.read_file import read_file
-from agentloom.tools.file_ops._read_file_state import get_read_file_state, FILE_UNCHANGED_STUB
+from agentloom.runtimes.smolagents.tools.file_ops.read_file import read_file
+from agentloom.runtimes.smolagents.tools.file_ops._read_file_state import get_read_file_state, FILE_UNCHANGED_STUB
 
 
 class TestReadFileBasic(unittest.TestCase):

@@ -8,8 +8,8 @@ import time
 from concurrent.futures import ThreadPoolExecutor
 
 import pytest
-from agentloom.adapters.smolagents.agents import ToolCallingAgentV2
-from agentloom.adapters.smolagents.model_turn_bridge import SmolagentsModelTurnBridge
+from agentloom.runtimes.smolagents.agents import ToolCallingAgentV2
+from agentloom.runtimes.smolagents.model_turn_bridge import SmolagentsModelTurnBridge
 from agentloom.runtime.hooks import HookPlan, HookRun
 from agentloom.runtime.logging import NullLoggerBackend
 from agentloom.runtime.model_binding import ModelTurnBinding

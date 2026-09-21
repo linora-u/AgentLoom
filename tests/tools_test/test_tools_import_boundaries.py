@@ -11,7 +11,7 @@ def test_shell_audit_module_imports_without_preloading_agent_packages() -> None:
         [
             sys.executable,
             "-c",
-            "from agentloom.tools.shell.shell_audit_log import ShellAuditLogger",
+            "from agentloom.runtimes.smolagents.tools.shell.shell_audit_log import ShellAuditLogger",
         ],
         check=False,
         capture_output=True,

@@ -27,14 +27,14 @@ supported aliases.
 | `src.lib.config` | `src/configuration/` | `agentloom.configuration`: project/model configuration, normalization, provenance and invocation binding |
 | `src.lib.smolagents.agent` orchestration and assembly | `src/runtime/{agent,factory,invocation,loom_mixin}.py` | `agentloom.runtime`: Supervisor/Worker construction, delegation and runtime ownership |
 | Hook policy, Skills, prompts, checkpoint, Goal, Todo, ContextEngine, storage/context | `src/runtime/` responsibility modules | `agentloom.runtime`: invocation state, authorization, recovery, usage, context and persistence |
-| `src.lib.smolagents` upstream Agent subclasses, model adapters, patches and Tool conversion | `src/adapters/smolagents/` | `agentloom.adapters.smolagents`: actual coupling to fixed smolagents 1.26.0 |
-| `src.mcp`, `src.services.lsp` | `src/adapters/{mcp,lsp}/` | `agentloom.adapters.mcp`, `agentloom.adapters.lsp`: external protocol connections |
+| `src.lib.smolagents` upstream Agent subclasses, model adapters, patches and Tool conversion | `src/runtimes/smolagents/` | `agentloom.runtimes.smolagents`: actual coupling to fixed smolagents 1.26.0 |
+| `src.mcp`, `src.services.lsp` | `src/adapters/{mcp,lsp}/` | `agentloom.integrations.mcp`, `agentloom.integrations.lsp`: external protocol connections |
 | `src.tools` | `src/tools/` | `agentloom.tools`: lightweight catalog and selective implementation loading |
 | `src.extensions.self_learning` | `src/self_learning/` | `agentloom.self_learning`: existing persistence, recording and review responsibilities |
-| `src.__main__`, scaffold, TUI bridge, schedules | `src/__main__.py`, `src/scaffold.py`, `src/tui_bridge/`, `src/schedules/` | Canonical CLI, Studio and scheduling adapters consume Application and Run owners |
+| `src.__main__`, scaffold, TUI bridge, schedules | `src/__main__.py`, `src/scaffold.py`, `agentloom-tui/python/agentloom_tui_bridge/`, `src/schedules/` | Canonical CLI, Studio and scheduling adapters consume Application and Run owners |
 
 `agentloom.runtime.agent` owns orchestration; upstream CodeAgent/ToolCallingAgent
-subclasses live in `agentloom.adapters.smolagents.agents`.
+subclasses live in `agentloom.runtimes.smolagents.agents`.
 `agentloom.runtime.tool_protocol` owns terminal ToolCallRecord values without
 importing smolagents. Tool execution and provider-message conversion stay in the
 smolagents adapter and use those same values. Hook configuration and Run policy
@@ -54,9 +54,9 @@ removed when the user rejected compatibility. It is not part of the final layout
 - Supported commands are `loom` and `python -m agentloom`. CLI parameters, exit
   states, JSONL output and resume/task semantics are preserved. Old
   `python -m src` and `src.tui_bridge` commands are unsupported.
-- TUI uses `python -I -u -m agentloom.tui_bridge`; installed-interpreter and
+- TUI uses `python -I -u -m agentloom_tui_bridge`; installed-interpreter and
   project/uv selection must both resolve the installed package. The domain CLI
-  uses `agentloom.tui_bridge.domain_cli` with explicit project context.
+  uses `agentloom_tui_bridge.domain_cli` with explicit project context.
 - Framework Tool strings and generated scaffolds use `agentloom.*`. Tools owned
   by Applications retain `applications.*` imports resolved from explicit project
   context. External integrations must migrate old framework import strings.

@@ -629,7 +629,7 @@ except SystemExit as exc:
     assert exc.code == 0, exc.code
 scanner = runpy.run_path(str(script.with_name('scan_tools.py')))
 assert 'should_not_import.py' in scanner['scan_app_structure'](str(app))
-for prefix in ('litellm', 'agentloom.runtime.agent', 'agentloom.tools.file_ops', 'agentloom.tools.shell', 'agentloom.tools.search'):
+for prefix in ('litellm', 'agentloom.runtime.agent', 'agentloom.runtimes.smolagents.tools.file_ops', 'agentloom.runtimes.smolagents.tools.shell', 'agentloom.runtimes.smolagents.tools.search'):
     assert not any(name == prefix or name.startswith(prefix + '.') for name in sys.modules), prefix
 assert not Path('.agentloom').exists()
 assert not Path('must-not-exist').exists()

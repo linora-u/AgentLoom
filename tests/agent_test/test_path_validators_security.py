@@ -186,7 +186,7 @@ class TestHasSuspiciousWindowsPattern:
         assert has_suspicious_windows_pattern("/home/user/project/src/main.py") is False
 
     def test_normal_relative_path(self):
-        assert has_suspicious_windows_pattern("src/utils/helpers.py") is False
+        assert has_suspicious_windows_pattern("src/application/imports/helpers.py") is False
 
     def test_empty_string(self):
         assert has_suspicious_windows_pattern("") is False

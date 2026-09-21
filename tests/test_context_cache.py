@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import pytest
-from agentloom.adapters.litellm import (
+from agentloom.integrations.litellm import (
     AnthropicMessagesModelTurnAdapter,
     OpenAIChatModelTurnAdapter,
 )

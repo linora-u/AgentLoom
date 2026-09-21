@@ -160,7 +160,7 @@ def lsp_find_references(
     falls back to ripgrep word-boundary search.
 
     Examples:
-        lsp_find_references("src/utils.py", line=10, character=5)
+        lsp_find_references("src/application/imports.py", line=10, character=5)
 
     Args:
         file_path: Path to the file containing the symbol.

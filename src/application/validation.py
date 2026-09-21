@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from agentloom.application.composition import build_builtin_runtime_registry
 import inspect
 from collections.abc import Callable
 from dataclasses import dataclass
@@ -9,7 +10,6 @@ from typing import Any
 
 from agentloom.runtime.agent_runtime import (
     RuntimeRequirements,
-    build_builtin_runtime_registry,
 )
 from agentloom.runtime.goal import GoalConfig, normalize_goal_config
 

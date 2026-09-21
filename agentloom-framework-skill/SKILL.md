@@ -12,7 +12,7 @@ description: "当用户需要理解、开发、扩展或验证 AgentLoom 框架�
 - 先进入 AgentLoom 根目录。运行时代码用 `pyproject.toml` 中 `[project].name == "AgentLoom"` 发现项目根；本 Skill 的操作前置检查额外要求 `config/llm.yaml` 存在，因为它是被忽略的本地模型配置，也是生成/验证 Application 前必须确认的环境条件。不要只用 `config/system.yaml` 判定环境可用。
 - 新建 worktree 或干净 checkout 后先检查 `config/llm.yaml`；该文件通常被 `.gitignore` 忽略，不会随 worktree 自动生成。缺失时从同机可信工作区复制，或让用户提供本地配置；不要提交该文件，也不要凭空生成模型配置。
 - 当前本地环境可能没有 `uv`；验证优先用 `.venv/bin/python` 和 `.venv/bin/loom`。
-- 框架 Python 导入统一使用 `agentloom.*`；职责模块的物理源码直接位于 `src/application/`、`src/runtime/`、`src/adapters/` 等目录，由安装配置映射为 `agentloom`。不要新增 `src.*` 导入或旧路径转发。
+- 框架 Python 导入统一使用 `agentloom.*`；职责模块的物理源码直接位于 `src/application/`、`src/runtime/`、`src/runtimes/`、`src/integrations/` 等目录，由安装配置映射为 `agentloom`。不要新增 `src.*` 导入或旧路径转发。
 - 写 Application 前先读真实仓库结构与 `config/llm.yaml`，`model_type` 只能来自项目配置。
 - 如果用户目标不清晰，先问清“功能目标、输入、输出、验收标准”；不要为了显得完整而发明需求。
 
@@ -83,15 +83,15 @@ Studio 检查和 Run 准备共用 `agentloom.application.definition` 的完整�
 调用格式：
 
 ```bash
-.venv/bin/python -I -m agentloom.tui_bridge.domain_cli \
+.venv/bin/python -I -m agentloom_tui_bridge.domain_cli \
   --project "$PWD" application.detail '{"application_id":"<app>"}'
 
 # Application 很大时继续读取下一页；不要读取 OpenCode managed tool-output 全文
-.venv/bin/python -I -m agentloom.tui_bridge.domain_cli \
+.venv/bin/python -I -m agentloom_tui_bridge.domain_cli \
   --project "$PWD" application.detail \
   '{"application_id":"<app>","offset":10,"limit":10}'
 
-.venv/bin/python -I -m agentloom.tui_bridge.domain_cli \
+.venv/bin/python -I -m agentloom_tui_bridge.domain_cli \
   --project "$PWD" application.validate '{"application_id":"<app>"}'
 ```
 
@@ -131,9 +131,9 @@ print(scan_app_structure('applications/<app_name>'))
 "
 
 # Studio/Codex 共用的 Effective Config 与领域校验
-.venv/bin/python -I -m agentloom.tui_bridge.domain_cli \
+.venv/bin/python -I -m agentloom_tui_bridge.domain_cli \
   --project "$PWD" application.detail '{"application_id":"<app_name>"}'
-.venv/bin/python -I -m agentloom.tui_bridge.domain_cli \
+.venv/bin/python -I -m agentloom_tui_bridge.domain_cli \
   --project "$PWD" application.validate '{"application_id":"<app_name>"}'
 
 # Python 编译校验

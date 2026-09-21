@@ -21,7 +21,7 @@ from agentloom.runtime.logging import (
 from agentloom.runtime.tool_gateway import ToolBinding, bind_tool
 from agentloom.tools.selection import resolve_runtime_toolsets
 from agentloom.tools.loader import resolve_tool_function
-from agentloom.utils.dynamic_import import load_function
+from agentloom.application.imports.dynamic_import import load_function
 
 # Prompt protocol constants are externalized in prompts/ YAML to keep wording/template
 # configuration centralized and editable without changing implementation logic.
@@ -856,8 +856,8 @@ def _load_mcp_tools(
 
     manager = None
     try:
-        from agentloom.adapters.mcp.config import merge_mcp_configs, parse_mcp_yaml_value
-        from agentloom.adapters.mcp.manager import McpManager
+        from agentloom.integrations.mcp.config import merge_mcp_configs, parse_mcp_yaml_value
+        from agentloom.integrations.mcp.manager import McpManager
 
         if effective_agent_config is not None and "_mcp_settings_snapshot" in effective_agent_config:
             merged = effective_agent_config["_mcp_settings_snapshot"]

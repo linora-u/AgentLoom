@@ -14,7 +14,7 @@ import pytest
 from pathlib import Path
 from unittest.mock import patch, MagicMock
 
-from agentloom.tools.file_ops._safety import validate_file_access
+from agentloom.runtimes.smolagents.tools.file_ops._safety import validate_file_access
 
 
 def _mock_agent_context():

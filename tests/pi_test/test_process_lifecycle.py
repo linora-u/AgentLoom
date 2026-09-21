@@ -113,7 +113,7 @@ def test_protocol_corruption_fails_application_and_reaps_real_bridge(tmp_path, f
 import subprocess,sys,threading,json
 import os
 from pathlib import Path
-if sys.argv[1:]==['--version']:os.execv({binary!r},[{binary!r},'--version'])
+if sys.argv[1:]==['--version'] or sys.argv[1:3]==['-p','process.versions.modules']:os.execv({binary!r},[{binary!r},*sys.argv[1:]])
 p=subprocess.Popen([{binary!r},*sys.argv[1:]],stdin=subprocess.PIPE,stdout=subprocess.PIPE,stderr=subprocess.DEVNULL)
 Path({str(marker)!r}).write_text(str(p.pid))
 ack=threading.Event()

@@ -11,7 +11,7 @@ Run deterministic validation from the repository root:
 .venv/bin/python agentloom-framework-skill/scripts/validate_application_yaml.py \
   --app-root applications/nested_workflow_discovery_validation
 
-.venv/bin/python -m agentloom.tui_bridge.domain_cli \
+.venv/bin/python -m agentloom_tui_bridge.domain_cli \
   --project "$PWD" application.validate \
   '{"application_id":"nested_workflow_discovery_validation"}'
 ```

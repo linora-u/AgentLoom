@@ -196,7 +196,7 @@ OpenTUI / SolidJS
        └─ AgentLoom Effective Config / catalog / Run evidence
 
 agentloom_domain
-  └─ python -I -m agentloom.tui_bridge.domain_cli
+  └─ python -I -m agentloom_tui_bridge.domain_cli
        ├─ application.detail / validate / impact
        └─ run.start / stop / resume / restart / detail
 ```
@@ -217,5 +217,5 @@ bun run typecheck
 bun run build
 
 cd ..
-.venv/bin/pytest -q tests/tui_bridge_test
+.venv/bin/pytest -q tests/application_studio_test agentloom-tui/python/tests
 ```

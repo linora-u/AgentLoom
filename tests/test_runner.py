@@ -673,8 +673,8 @@ class TestRunApp:
         from agentloom.application.runner import run_app
         from agentloom.runtime import bind_run_context, get_current_run_context
         from agentloom.runtime.trace import clear_current_agent_id, set_current_agent_id
-        from agentloom.tools.shell.background_task import BackgroundTaskRegistry
-        from agentloom.tools.shell.process import ShellProcessRegistry
+        from agentloom.runtimes.smolagents.tools.shell.background_task import BackgroundTaskRegistry
+        from agentloom.runtimes.smolagents.tools.shell.process import ShellProcessRegistry
 
         BackgroundTaskRegistry._reset_instance()
         observed = {}

@@ -1,7 +1,7 @@
 from __future__ import annotations
 
-import agentloom.adapters.smolagents.context_compression as compression_module
-from agentloom.adapters.smolagents.context_compression import (
+import agentloom.runtimes.smolagents.context_compression as compression_module
+from agentloom.runtimes.smolagents.context_compression import (
     ConversationHistoryManager,
     InternalChatMessage,
     _extract_content_text,

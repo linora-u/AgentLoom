@@ -1,12 +1,10 @@
-"""Search tool compatibility exports, loaded one implementation module at a time."""
+"""AgentLoom-owned search and code-navigation tools."""
 
 from typing import Any
 
 from agentloom.tools._lazy_exports import install_lazy_exports, resolve_lazy_export
 
 _EXPORTS = {
-    "grep_search": (".grep_tool", "grep_search"),
-    "glob_search": (".glob_tool", "glob_search"),
     "ast_grep_search_file": (".ast_grep_tool", "ast_grep_search_file"),
     "lsp_find_definition": (".lsp_tool", "lsp_find_definition"),
     "lsp_find_references": (".lsp_tool", "lsp_find_references"),

@@ -113,7 +113,7 @@ def project_config(root):
 
 def test_effective_values_sources_and_secret_projection_are_independent(tmp_path):
     from agentloom.configuration.config import build_effective_agent_config_snapshot
-    from agentloom.tui_bridge.application_studio import application_detail
+    from agentloom.application.studio.application_studio import application_detail
 
     base = project_config(tmp_path)
     app = tmp_path / "applications/group/demo"
@@ -307,7 +307,7 @@ def test_invalid_discovered_skill_is_rejected_before_any_run_allocation(tmp_path
     from types import SimpleNamespace
 
     import agentloom.application.runner as runner
-    from agentloom.tui_bridge.application_studio import application_detail
+    from agentloom.application.studio.application_studio import application_detail
 
     base = project_config(tmp_path)
     app = tmp_path / "applications/demo"
@@ -388,7 +388,7 @@ def test_studio_uses_the_catalog_parsed_during_its_single_definition_inspection(
     import json
 
     from agentloom.runtime.skills.catalog import SkillCatalog
-    from agentloom.tui_bridge.application_studio import application_detail
+    from agentloom.application.studio.application_studio import application_detail
 
     project_config(tmp_path)
     app = tmp_path / "applications/demo"
@@ -477,7 +477,7 @@ mcp_servers: config/test.mcp.json
     program = """
 import json, sys
 from pathlib import Path
-from agentloom.tui_bridge.bridge import TuiBridge
+from agentloom.application.studio.bridge import TuiBridge
 root = Path(sys.argv[1])
 detail = TuiBridge(root).dispatch('application.detail', {'application_id':'demo'})
 assert detail['agents'][0]['validation']['valid'], detail
@@ -488,7 +488,7 @@ from agentloom.configuration.config import load_project_config
 path = root / 'applications/demo/workflows/root.yaml'
 prepared = prepare_application_definition(root, path, load_agent_definition(path), base_config=load_project_config(root))
 assert prepared['_skill_catalog_snapshot'].activate('review').instructions == 'Private review instructions.\\n'
-for prefix in ('litellm', 'agentloom.runtime.agent', 'agentloom.tools.file_ops', 'agentloom.tools.shell', 'agentloom.tools.search'):
+for prefix in ('litellm', 'agentloom.runtime.agent', 'agentloom.runtimes.smolagents.tools.file_ops', 'agentloom.runtimes.smolagents.tools.shell', 'agentloom.runtimes.smolagents.tools.search'):
     assert not any(name == prefix or name.startswith(prefix + '.') for name in sys.modules), prefix
 assert not (root / '.agentloom').exists()
 assert not (root / 'must-not-exist').exists()
@@ -565,9 +565,9 @@ def test_hook_projection_uses_complete_id_replacement_and_disabling(tmp_path):
 def test_mcp_connection_failure_is_reported_in_execution_stage(tmp_path, monkeypatch):
     from unittest.mock import MagicMock
 
-    import agentloom.adapters.mcp.manager as manager_module
+    import agentloom.integrations.mcp.manager as manager_module
     from agentloom.runtime.factory import YamlAgentFactory
-    from agentloom.adapters.mcp.config import McpServerConfig, McpSettings
+    from agentloom.integrations.mcp.config import McpServerConfig, McpSettings
 
     manager = MagicMock()
     manager.get_server_status.return_value = {
@@ -633,8 +633,8 @@ def test_programmatic_config_override_remains_authoritative(tmp_path):
 
 def test_model_cache_tracks_profile_content_across_invocations(tmp_path):
     from agentloom.configuration.config import bind_config, fresh_invocation_config
-    from agentloom.adapters.smolagents.models.model_manager import ModelManager
-    from agentloom.adapters.smolagents.models.model_types import ModelType
+    from agentloom.runtimes.smolagents.models.model_manager import ModelManager
+    from agentloom.runtimes.smolagents.models.model_types import ModelType
 
     base = project_config(tmp_path)
     with bind_config(fresh_invocation_config(base)):
@@ -656,7 +656,7 @@ def test_model_cache_tracks_profile_content_across_invocations(tmp_path):
 def test_public_connection_urls_never_expose_authentication(tmp_path):
     import json
     from agentloom.configuration.config import build_effective_agent_config_snapshot
-    from agentloom.tui_bridge.application_studio import application_detail
+    from agentloom.application.studio.application_studio import application_detail
 
     base = project_config(tmp_path)
     url = 'https://synthetic-user:synthetic-password@example.invalid/mcp?access_token=synthetic-token'
@@ -686,8 +686,8 @@ def test_removed_fields_reject_consistently_before_run_allocation(tmp_path, monk
     from agentloom.application.definition import prepare_application_definition
     from agentloom.application.readiness import validate_runtime_agent_config, validate_runtime_worker_config
     from agentloom.runtime.factory import YamlConfiguredAgent, YamlConfiguredSupervisorAgent
-    from agentloom.tui_bridge.bridge import TuiBridge
-    from agentloom.tui_bridge.domain_cli import main as domain_main
+    from agentloom.application.studio.bridge import TuiBridge
+    from agentloom.application.studio.domain_cli import main as domain_main
 
     base = project_config(tmp_path)
     path = tmp_path / f"applications/demo/workflows/root{suffix}"

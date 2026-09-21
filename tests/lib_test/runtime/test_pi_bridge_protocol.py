@@ -8,15 +8,15 @@ import pytest
 def test_published_bridge_schema_matches_the_python_codec():
     from pathlib import Path
 
-    from agentloom.adapters.pi.protocol import protocol_schema
+    from agentloom.runtimes.pi.protocol import protocol_schema
 
     root = Path(__file__).resolve().parents[3]
-    published = json.loads((root / "src/adapters/pi/bridge-v2.schema.json").read_text())
+    published = json.loads((root / "src/runtimes/pi/bridge-v2.schema.json").read_text())
     assert published == protocol_schema()
 
 
 def test_pi_handshake_roundtrip_and_rejects_unknown_protocol():
-    from agentloom.adapters.pi.protocol import decode_message, encode_message
+    from agentloom.runtimes.pi.protocol import decode_message, encode_message
 
     message = {
         "version": 2,
@@ -65,7 +65,7 @@ def test_pi_handshake_roundtrip_and_rejects_unknown_protocol():
 
 
 def test_snapshot_can_acknowledge_no_checkpoint():
-    from agentloom.adapters.pi.protocol import decode_message, encode_message
+    from agentloom.runtimes.pi.protocol import decode_message, encode_message
 
     message = {
         "version": 2,
@@ -86,14 +86,14 @@ def test_snapshot_can_acknowledge_no_checkpoint():
     ],
 )
 def test_ambiguous_or_coerced_protocol_version_is_rejected(frame):
-    from agentloom.adapters.pi.protocol import decode_message
+    from agentloom.runtimes.pi.protocol import decode_message
 
     with pytest.raises(ValueError, match="Invalid Pi bridge message"):
         decode_message(frame)
 
 
 def test_tool_settlement_cannot_cross_run_or_claim_uncertain_success():
-    from agentloom.adapters.pi.protocol import decode_message
+    from agentloom.runtimes.pi.protocol import decode_message
 
     identity = dict(application_id="app", task_id="task", run_id="different", instance_id="worker-a", call_id="call")
     message = {
@@ -109,7 +109,7 @@ def test_tool_settlement_cannot_cross_run_or_claim_uncertain_success():
 
 
 def test_run_frame_keeps_native_tool_schema_and_private_model_settings():
-    from agentloom.adapters.pi.protocol import decode_message, encode_message
+    from agentloom.runtimes.pi.protocol import decode_message, encode_message
 
     message = {
         "version": 2,

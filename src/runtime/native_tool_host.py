@@ -264,7 +264,7 @@ class NativeToolHost:
                 raise ValueError("Native query exclusion mapping is not verified; refusing execution")
         if tool.operation == "shell":
             from agentloom.runtime.tool_governance.shell.validator import validate_command
-            from agentloom.utils.sandbox import SandboxManager
+            from agentloom.runtime.tool_governance.shell.sandbox import SandboxManager
             assert tool.command_parameter is not None
             command = arguments.get(tool.command_parameter)
             if not isinstance(command, str) or not command.strip():

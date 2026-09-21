@@ -35,7 +35,7 @@ describe("source installer", () => {
     expect(update.exitCode, new TextDecoder().decode(update.stderr)).toBe(0)
     const calls = await readFile(fixture.log, "utf8")
     expect(calls.match(/uv\|sync --frozen --extra pi /g)).toHaveLength(2)
-    expect(calls.match(/python\|-I -m agentloom install-runtime pi/g)).toHaveLength(2)
+    expect(calls.match(/python\|-I -m agentloom runtime install pi/g)).toHaveLength(2)
     expect(calls).not.toContain("--extra smol")
     expect(calls).not.toContain("--extra code")
   }, 30_000)

@@ -24,7 +24,7 @@ def _config(*, project_budget: int = 8000) -> dict:
 
 
 def test_model_facing_memory_schema_has_one_canonical_write_contract() -> None:
-    from agentloom.adapters.smolagents.tools.tools import ensure_tool_wrapped
+    from agentloom.runtimes.smolagents.tools.tools import ensure_tool_wrapped
     from agentloom.tools.self_learning.memory_tool import memory
 
     model_tool = ensure_tool_wrapped([memory])[0]
