@@ -59,11 +59,14 @@ def test_legacy_package_and_alias_loader_are_absent() -> None:
         assert not (ROOT / 'src' / removed).exists()
     for removed in ("agent.py", "factory.py", "invocation.py"):
         assert not (ROOT / "src" / "runtime" / removed).exists()
+    assert not (ROOT / "src" / "scaffold.py").exists()
     run_fresh("""
         import importlib.util
         assert importlib.util.find_spec("agentloom.runtime.agent") is None
         assert importlib.util.find_spec("agentloom.runtime.factory") is None
         assert importlib.util.find_spec("agentloom.runtime.invocation") is None
+        assert importlib.util.find_spec("agentloom.scaffold") is None
+        assert importlib.util.find_spec("agentloom.application.scaffold") is not None
         assert importlib.util.find_spec("agentloom.application.agent") is not None
         assert importlib.util.find_spec("agentloom.application.factory") is not None
         assert importlib.util.find_spec("agentloom.application.invocation") is not None

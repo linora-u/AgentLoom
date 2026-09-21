@@ -32,7 +32,7 @@ supported aliases.
 | `src.mcp`, `src.services.lsp` | `src/adapters/{mcp,lsp}/` | `agentloom.integrations.mcp`, `agentloom.integrations.lsp`: external protocol connections |
 | `src.tools` | `src/tools/` | `agentloom.tools`: lightweight catalog and selective implementation loading |
 | `src.extensions.self_learning` | `src/self_learning/` | `agentloom.self_learning`: existing persistence, recording and review responsibilities |
-| `src.__main__`, scaffold, TUI bridge, schedules | `src/__main__.py`, `src/scaffold.py`, `agentloom-tui/python/agentloom_tui_bridge/`, `src/schedules/` | Canonical CLI, Studio and scheduling adapters consume Application and Run owners |
+| `src.__main__`, scaffold, TUI bridge, schedules | `src/__main__.py`, `src/application/scaffold.py`, `agentloom-tui/python/agentloom_tui_bridge/`, `src/schedules/` | Canonical CLI, Studio and scheduling adapters consume Application and Run owners |
 
 `agentloom.application.agent` owns orchestration; upstream CodeAgent/ToolCallingAgent
 subclasses live in `agentloom.runtimes.smolagents.agents`.
