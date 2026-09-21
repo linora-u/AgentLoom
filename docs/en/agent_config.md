@@ -755,7 +755,7 @@ The core idea of this pattern is: **Python control flow + Agent intelligence** â
 #### 4.4.3 Core API: `YamlAgentFactory.create_agent_as_tool()`
 
 ```python
-from agentloom.runtime.factory import YamlAgentFactory
+from agentloom.application.factory import YamlAgentFactory
 
 tools = YamlAgentFactory.create_agent_as_tool(
     config_path,        # str | Path | dict â€” Worker YAML path (relative to AGENT_ROOT) or config dict
@@ -791,7 +791,7 @@ from __future__ import annotations
 from pathlib import Path
 
 from agentloom.runtime.logging import get_logger
-from agentloom.runtime.factory import YamlAgentFactory
+from agentloom.application.factory import YamlAgentFactory
 
 _AGENT_YAML = "applications/<app>/workflows/worker_agents/<worker>.yaml"
 
@@ -849,7 +849,7 @@ import traceback
 from pathlib import Path
 
 from agentloom.runtime.logging import get_logger
-from agentloom.runtime.factory import YamlAgentFactory
+from agentloom.application.factory import YamlAgentFactory
 
 _AGENT_YAML = "applications/<app>/workflows/worker_agents/<worker>.yaml"
 

@@ -22,7 +22,7 @@ from agentloom.runtimes.smolagents.context_compression import (  # noqa: E402
 )
 from agentloom.runtimes.smolagents.models.model_manager import model_manager  # noqa: E402
 from agentloom.runtimes.smolagents.models.model_types import ModelType  # noqa: E402
-from agentloom.runtime.factory import (  # noqa: E402
+from agentloom.application.factory import (  # noqa: E402
     YamlAgentFactory,
     YamlConfiguredSupervisorAgent,
 )

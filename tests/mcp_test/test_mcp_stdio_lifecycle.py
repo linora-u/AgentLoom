@@ -99,7 +99,7 @@ def test_connection_timeout_releases_the_started_server(tmp_path):
 
 
 def test_yaml_tool_loading_rejects_duplicate_mcp_names_and_closes_both_servers(tmp_path):
-    from agentloom.runtime.factory import YamlAgentFactory
+    from agentloom.application.factory import YamlAgentFactory
 
     events = tmp_path / "duplicates.jsonl"
     configuration = tmp_path / "mcp.json"

@@ -80,7 +80,7 @@ def _create_tool_with_mock_agent(config=None, agent_instances=None):
             return f"result_from_{self._id}"
 
         def agent_as_tool(self):
-            from agentloom.runtime.factory import YamlConfiguredAgent
+            from agentloom.application.factory import YamlConfiguredAgent
             # Delegate to the real agent_as_tool logic but with our class
             real = YamlConfiguredAgent.__dict__['agent_as_tool']
             return real(self)
@@ -197,7 +197,7 @@ class TestFactoryMode:
                 return f"ok_{n}"
 
             def agent_as_tool(self):
-                from agentloom.runtime.factory import YamlConfiguredAgent
+                from agentloom.application.factory import YamlConfiguredAgent
                 return YamlConfiguredAgent.__dict__['agent_as_tool'](self)
 
         agent = FailOnSecond(config)
@@ -224,9 +224,9 @@ class TestFactoryMode:
         assert len(results) == 3
 
     def test_large_worker_result_returns_context_ref(self, tmp_path):
+        from agentloom.application.factory import YamlConfiguredAgent
         from agentloom.runtime.context_engine import ContextEngine, ContextEngineConfig
         from agentloom.runtime.context_engine.runtime import clear_current_context_engine, set_current_context_engine
-        from agentloom.runtime.factory import YamlConfiguredAgent
 
         config = _make_minimal_config()
 

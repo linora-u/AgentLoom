@@ -1,4 +1,4 @@
-"""One Agent invocation's ordering, bindings, and runtime-resource ownership."""
+"""One Application Agent invocation and its owned runtime resources."""
 
 from __future__ import annotations
 
@@ -32,7 +32,10 @@ if TYPE_CHECKING:
     from agentloom.application.lifecycle import ApplicationRunLifecycle
 
 
-_RUNTIME_EVENT_SINK: ContextVar[RuntimeEventSink | None] = ContextVar('agentloom_runtime_event_sink', default=None)
+_RUNTIME_EVENT_SINK: ContextVar[RuntimeEventSink | None] = ContextVar(
+    "agentloom_runtime_event_sink",
+    default=None,
+)
 
 
 def _merge_runtime_events(

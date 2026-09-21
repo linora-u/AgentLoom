@@ -69,7 +69,7 @@ def platform_project(tmp_path, monkeypatch):
     registry = build_builtin_runtime_registry()
     registry.register("platform-fixture", capabilities=PlatformRuntime.capabilities, factory=PlatformRuntime)
     monkeypatch.setattr("agentloom.application.validation.build_builtin_runtime_registry", lambda: registry)
-    monkeypatch.setattr("agentloom.runtime.agent.build_builtin_runtime_registry", lambda: registry)
+    monkeypatch.setattr("agentloom.application.agent.build_builtin_runtime_registry", lambda: registry)
 
     def run(*, resume_task_id=None, **updates):
         workflow.write_text(yaml.safe_dump({**definition, **updates}))

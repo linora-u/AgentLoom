@@ -9,7 +9,7 @@
 - 用户文档：`docs/en/config-overview.md`、`agent_config.md`、`goal_mode.md`、`system_config.md`、`llm_config.md`、`skills_config.md`、`hooks.md`、`checkpoint.md`。
 - 系统配置加载：`src/configuration/config.py`、`layered_builder.py`、`config_validation.py`。
 - LLM 配置：`src/configuration/llm_config.py`、`src/runtimes/smolagents/models/model_types.py`、`model_manager.py`。
-- Agent 定义与校验：`src/application/definition.py`、`src/application/validation.py`；执行构造：`src/runtime/factory.py`、`src/runtime/agent.py`。
+- Agent 定义与校验：`src/application/definition.py`、`src/application/validation.py`；执行构造：`src/application/factory.py`、`src/application/agent.py`。
 - Skill/Hook：`src/runtime/skills/parser.py`、`src/runtime/skills/catalog.py`、`src/runtime/hooks/*`。
 - MCP：`src/integrations/mcp/config.py`、`tests/mcp_test/*`。
 

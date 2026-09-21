@@ -343,9 +343,9 @@ def test_skill_instructions_are_pinned_for_each_runtime_definition_and_refresh_o
     import json
     import logging
 
+    from agentloom.application.agent import AgentRoleProfile, AgentType, RoleDrivenAgent
     from agentloom.application.definition import prepare_application_definition
     from agentloom.application.presentation import configuration_projection
-    from agentloom.runtime.agent import AgentRoleProfile, AgentType, RoleDrivenAgent
     from agentloom.runtime.skills.catalog import SkillCatalog
 
     class SnapshotAgent(RoleDrivenAgent):
@@ -415,7 +415,7 @@ def test_studio_uses_the_catalog_parsed_during_its_single_definition_inspection(
 
 
 def test_fresh_file_tool_definition_preserves_existing_callable(tmp_path):
-    from agentloom.runtime.factory import YamlAgentFactory
+    from agentloom.application.factory import YamlAgentFactory
 
     class DefinitionTool:
         def __init__(self, config, **kwargs):
@@ -488,7 +488,7 @@ from agentloom.configuration.config import load_project_config
 path = root / 'applications/demo/workflows/root.yaml'
 prepared = prepare_application_definition(root, path, load_agent_definition(path), base_config=load_project_config(root))
 assert prepared['_skill_catalog_snapshot'].activate('review').instructions == 'Private review instructions.\\n'
-for prefix in ('litellm', 'agentloom.runtime.agent', 'agentloom.runtimes.smolagents.tools.file_ops', 'agentloom.runtimes.smolagents.tools.shell', 'agentloom.runtimes.smolagents.tools.search'):
+for prefix in ('litellm', 'agentloom.application.agent', 'agentloom.runtimes.smolagents.tools.file_ops', 'agentloom.runtimes.smolagents.tools.shell', 'agentloom.runtimes.smolagents.tools.search'):
     assert not any(name == prefix or name.startswith(prefix + '.') for name in sys.modules), prefix
 assert not (root / '.agentloom').exists()
 assert not (root / 'must-not-exist').exists()
@@ -566,7 +566,7 @@ def test_mcp_connection_failure_is_reported_in_execution_stage(tmp_path, monkeyp
     from unittest.mock import MagicMock
 
     import agentloom.integrations.mcp.manager as manager_module
-    from agentloom.runtime.factory import YamlAgentFactory
+    from agentloom.application.factory import YamlAgentFactory
     from agentloom.integrations.mcp.config import McpServerConfig, McpSettings
 
     manager = MagicMock()
@@ -685,7 +685,7 @@ def test_removed_fields_reject_consistently_before_run_allocation(tmp_path, monk
     import agentloom.application.runner as runner
     from agentloom.application.definition import prepare_application_definition
     from agentloom.application.readiness import validate_runtime_agent_config, validate_runtime_worker_config
-    from agentloom.runtime.factory import YamlConfiguredAgent, YamlConfiguredSupervisorAgent
+    from agentloom.application.factory import YamlConfiguredAgent, YamlConfiguredSupervisorAgent
     from agentloom.application.studio.bridge import TuiBridge
     from agentloom.application.studio.domain_cli import main as domain_main
 

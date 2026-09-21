@@ -15,7 +15,7 @@ def test_read_only_validation_import_does_not_load_agent_runtime() -> None:
             (
                 "import sys; "
                 "import agentloom.application.validation; "
-                "assert 'agentloom.runtime.agent' not in sys.modules; "
+                "assert 'agentloom.application.agent' not in sys.modules; "
                 "assert 'litellm' not in sys.modules"
             ),
         ],
@@ -38,7 +38,7 @@ def test_read_only_tui_bridge_import_does_not_load_model_runtime() -> None:
                 "import sys; "
                 "from agentloom.application.studio.bridge import TuiBridge; "
                 "assert TuiBridge; "
-                "assert 'agentloom.runtime.agent' not in sys.modules; "
+                "assert 'agentloom.application.agent' not in sys.modules; "
                 "assert 'litellm' not in sys.modules"
             ),
         ],

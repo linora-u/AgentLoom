@@ -514,8 +514,8 @@ def test_json_query_envelopes_cannot_disguise_changed_or_unreadable_original_dat
 
 
 def test_native_definition_has_four_real_typed_workers():
+    from agentloom.application.factory import YamlAgentFactory
     from agentloom.application.readiness import validate_runtime_agent_config
-    from agentloom.runtime.factory import YamlAgentFactory
 
     source = APP_ROOT / "workflows/native.yaml"
     definition = YamlAgentFactory._load_config_from_file(source)

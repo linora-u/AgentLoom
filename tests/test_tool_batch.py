@@ -67,7 +67,7 @@ def _create_tool(config):
             return "mock_result"
 
         def agent_as_tool(self):
-            from agentloom.runtime.factory import YamlConfiguredAgent
+            from agentloom.application.factory import YamlConfiguredAgent
             return YamlConfiguredAgent.__dict__['agent_as_tool'](self)
 
     agent = SimpleAgent(config, model_binding=MagicMock())
