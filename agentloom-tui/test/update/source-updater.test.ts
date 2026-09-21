@@ -11,7 +11,7 @@ afterEach(async () => {
 })
 
 describe("trusted source updates", () => {
-  test.each(["src/runtime/agent.py", "agentloom-tui/src/main.ts"])(
+  test.each(["src/application/agent.py", "agentloom-tui/src/main.ts"])(
     "detects %s changes newer than the installed compatible unit", async (relativeSource) => {
     const root = await mkdtemp(join(tmpdir(), "agentloom-update-"))
     temporaryDirectories.push(root)

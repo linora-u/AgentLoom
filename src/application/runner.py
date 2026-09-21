@@ -22,6 +22,10 @@ from pathlib import Path
 from typing import Any
 
 from agentloom.application.definition import prepare_application_definition
+from agentloom.application.factory import (
+    YamlAgentFactory,
+    YamlConfiguredSupervisorAgent,
+)
 from agentloom.application.lifecycle import (
     ApplicationRunFinalization,
     ApplicationRunLifecycle,
@@ -55,10 +59,6 @@ from agentloom.runtime import (
 )
 from agentloom.runtime.checkpoint import CheckpointManager
 from agentloom.runtime.checkpoint.file_history import FileHistoryManager
-from agentloom.runtime.factory import (
-    YamlAgentFactory,
-    YamlConfiguredSupervisorAgent,
-)
 from agentloom.runtime.goal import normalize_goal_config
 from agentloom.runtime.heartbeat import SupervisorHeartbeat
 from agentloom.runtime.logging import (

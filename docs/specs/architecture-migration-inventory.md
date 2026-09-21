@@ -25,7 +25,8 @@ supported aliases.
 | --- | --- | --- |
 | `src.runner`, `src.application_run*`, `src.application_revision`, scattered definition interpretation | `src/application/` | `agentloom.application`: shared definition, paths, validation, presentation, Run identity, revision, lifecycle and execution |
 | `src.lib.config` | `src/configuration/` | `agentloom.configuration`: project/model configuration, normalization, provenance and invocation binding |
-| `src.lib.smolagents.agent` orchestration and assembly | `src/runtime/{agent,factory,invocation,loom_mixin}.py` | `agentloom.runtime`: Supervisor/Worker construction, delegation and runtime ownership |
+| `src.lib.smolagents.agent` orchestration and assembly | `src/application/{agent,factory,invocation}.py` | `agentloom.application`: Supervisor/Worker construction, delegation and Application-owned orchestration |
+| `src.lib.smolagents.agent` runtime-specific mixin | `src/runtimes/smolagents/loom_mixin.py` | `agentloom.runtimes.smolagents`: smolagents-specific execution behavior |
 | Hook policy, Skills, prompts, checkpoint, Goal, Todo, ContextEngine, storage/context | `src/runtime/` responsibility modules | `agentloom.runtime`: invocation state, authorization, recovery, usage, context and persistence |
 | `src.lib.smolagents` upstream Agent subclasses, model adapters, patches and Tool conversion | `src/runtimes/smolagents/` | `agentloom.runtimes.smolagents`: actual coupling to fixed smolagents 1.26.0 |
 | `src.mcp`, `src.services.lsp` | `src/adapters/{mcp,lsp}/` | `agentloom.integrations.mcp`, `agentloom.integrations.lsp`: external protocol connections |
@@ -33,7 +34,7 @@ supported aliases.
 | `src.extensions.self_learning` | `src/self_learning/` | `agentloom.self_learning`: existing persistence, recording and review responsibilities |
 | `src.__main__`, scaffold, TUI bridge, schedules | `src/__main__.py`, `src/scaffold.py`, `agentloom-tui/python/agentloom_tui_bridge/`, `src/schedules/` | Canonical CLI, Studio and scheduling adapters consume Application and Run owners |
 
-`agentloom.runtime.agent` owns orchestration; upstream CodeAgent/ToolCallingAgent
+`agentloom.application.agent` owns orchestration; upstream CodeAgent/ToolCallingAgent
 subclasses live in `agentloom.runtimes.smolagents.agents`.
 `agentloom.runtime.tool_protocol` owns terminal ToolCallRecord values without
 importing smolagents. Tool execution and provider-message conversion stay in the

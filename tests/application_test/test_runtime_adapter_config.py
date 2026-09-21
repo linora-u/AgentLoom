@@ -5,10 +5,11 @@ from collections.abc import Mapping
 from pathlib import Path
 from typing import Any
 
+import agentloom.application.agent as agent_module
 import agentloom.application.validation as validation_module
-import agentloom.runtime.agent as agent_module
 import pytest
 from agentloom.application.definition import load_agent_definition
+from agentloom.application.factory import YamlAgentFactory
 from agentloom.application.readiness import validate_runtime_agent_config
 from agentloom.configuration.llm_config import LLMConfig
 from agentloom.runtime.agent_runtime import (
@@ -18,7 +19,6 @@ from agentloom.runtime.agent_runtime import (
     RuntimeRequirements,
     UnsupportedRuntimeError,
 )
-from agentloom.runtime.factory import YamlAgentFactory
 from agentloom.runtime.model_binding import ModelTurnBinding
 from agentloom.runtime.model_protocol import (
     MessageItem,

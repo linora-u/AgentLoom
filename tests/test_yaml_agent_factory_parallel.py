@@ -28,7 +28,7 @@ class TestRunAgentsParallel:
 
         return (
             patch(
-                "agentloom.runtime.factory.YamlAgentFactory.create_agent_as_tool",
+                "agentloom.application.factory.YamlAgentFactory.create_agent_as_tool",
                 return_value=mock_tool,
             ),
             patch(
@@ -39,7 +39,7 @@ class TestRunAgentsParallel:
         )
 
     def test_creates_tool_and_executes(self):
-        from agentloom.runtime.factory import YamlAgentFactory
+        from agentloom.application.factory import YamlAgentFactory
 
         cm_create, cm_exec, mock_tool = self._patch_factory()
         with cm_create as m_create, cm_exec as m_exec:
@@ -52,7 +52,7 @@ class TestRunAgentsParallel:
             assert len(results) == 1
 
     def test_reads_model_type_from_dict(self):
-        from agentloom.runtime.factory import YamlAgentFactory
+        from agentloom.application.factory import YamlAgentFactory
 
         mock_tool = MagicMock()
         mock_tool.__name__ = "t"
@@ -68,7 +68,7 @@ class TestRunAgentsParallel:
                     assert init_mock.call_args.kwargs["model_type"] == "summary"
 
     def test_default_model_type_powerful(self):
-        from agentloom.runtime.factory import YamlAgentFactory
+        from agentloom.application.factory import YamlAgentFactory
 
         mock_tool = MagicMock()
         mock_tool.__name__ = "t"
@@ -82,7 +82,7 @@ class TestRunAgentsParallel:
                     assert init_mock.call_args.kwargs["model_type"] == "powerful"
 
     def test_raises_on_empty_tools(self):
-        from agentloom.runtime.factory import YamlAgentFactory
+        from agentloom.application.factory import YamlAgentFactory
 
         with patch.object(YamlAgentFactory, "create_agent_as_tool", return_value=None):
             with pytest.raises(RuntimeError, match="Failed to create"):
@@ -92,7 +92,7 @@ class TestRunAgentsParallel:
                 )
 
     def test_max_workers_passed(self):
-        from agentloom.runtime.factory import YamlAgentFactory
+        from agentloom.application.factory import YamlAgentFactory
 
         mock_tool = MagicMock()
         mock_tool.__name__ = "t"

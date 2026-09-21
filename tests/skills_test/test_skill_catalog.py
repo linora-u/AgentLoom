@@ -3,7 +3,7 @@ from pathlib import Path
 from types import SimpleNamespace
 
 from agentloom.runtime import RuntimeHome, bind_run_context
-from agentloom.runtime.agent import AgentRoleProfile, AgentType, RoleDrivenAgent
+from agentloom.application.agent import AgentRoleProfile, AgentType, RoleDrivenAgent
 from agentloom.runtimes.smolagents.prompts.prompt_builder import build_prompt_templates
 from agentloom.runtime.skills.catalog import SkillCatalog, SkillSource
 from agentloom.runtime.skills.parser import build_skills_prompt

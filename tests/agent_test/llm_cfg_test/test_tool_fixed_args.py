@@ -6,8 +6,8 @@ import inspect
 
 import pytest
 
-from agentloom.runtime import factory as yaml_agent_factory
-from agentloom.runtime.factory import YamlAgentFactory
+from agentloom.application import factory as yaml_agent_factory
+from agentloom.application.factory import YamlAgentFactory
 from agentloom.runtimes.smolagents.tools.tools import ensure_tool_wrapped
 
 

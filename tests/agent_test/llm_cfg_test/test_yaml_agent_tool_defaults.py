@@ -2,10 +2,10 @@ import copy
 import json
 from pathlib import Path
 
-import agentloom.runtime.factory as yaml_agent_factory
+import agentloom.application.factory as yaml_agent_factory
 import pytest
 import yaml
-from agentloom.runtime.factory import (
+from agentloom.application.factory import (
     YamlAgentFactory,
     YamlConfiguredAgent,
     YamlConfiguredSupervisorAgent,

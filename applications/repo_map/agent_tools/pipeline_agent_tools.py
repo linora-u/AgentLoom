@@ -655,7 +655,7 @@ def run_analysis_loop(
 
     # create_agent_as_tool 内置缓存，同一 YAML 文件只创建一次
     # logger=None 让框架使用全局 AgentLogger（由 runner 初始化）
-    from agentloom.runtime.factory import YamlAgentFactory
+    from agentloom.application.factory import YamlAgentFactory
     tool = YamlAgentFactory.create_agent_as_tool(_DIR_ANALYSIS_YAML)
     if tool is None:
         raise RuntimeError(f"Failed to create agent tool from {_DIR_ANALYSIS_YAML}")

@@ -13,7 +13,7 @@ from agentloom.application.validation import AgentConfigNormalizer, NormalizedAg
 from agentloom.application.workflows import get_worker_agent_yaml_path, infer_category_from_yaml_path
 from agentloom.configuration import C
 from agentloom.configuration.yaml_loader import load_unique_yaml
-from agentloom.runtime.agent import AgentRoleProfile, AgentType, RoleDrivenAgent
+from agentloom.application.agent import AgentRoleProfile, AgentType, RoleDrivenAgent
 from agentloom.runtime.goal import normalize_goal_config, normalize_workflow_for_goal
 from agentloom.runtime.logging import (
     get_logger,
@@ -25,7 +25,11 @@ from agentloom.application.imports.dynamic_import import load_function
 
 # Prompt protocol constants are externalized in prompts/ YAML to keep wording/template
 # configuration centralized and editable without changing implementation logic.
-_PROMPT_PROTOCOL_PATH = (Path(__file__).resolve().parent / "prompts" / "agent_tool_behavior_spec.yaml").resolve()
+_PROMPT_PROTOCOL_PATH = (
+    Path(__file__).resolve().parent
+    / "prompts"
+    / "agent_tool_behavior_spec.yaml"
+).resolve()
 _PROMPT_PROTOCOL_REQUIRED_STRING_KEYS = (
     "task_spec_section_header",
     "task_spec_section_guidance_base",

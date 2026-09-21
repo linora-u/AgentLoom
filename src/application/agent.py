@@ -1,4 +1,4 @@
-"""AgentLoom Supervisor/Worker orchestration and runtime-neutral assembly."""
+"""Application-owned Supervisor and Worker orchestration."""
 
 # Checkpoint / Resume support
 import hashlib as _hashlib
@@ -749,7 +749,7 @@ class RoleDrivenAgent(BaseAgent):
         """
 
         def _run_once() -> str:
-            from agentloom.runtime.invocation import AgentInvocation
+            from agentloom.application.invocation import AgentInvocation
 
             # Every invocation gets a fresh local id. The outermost invocation
             # also owns it as the root; delegated workers keep their own local id.

@@ -136,7 +136,7 @@ def external_read_runtime(model_factory, observations):
     )
     with (
         patch("agentloom.application.validation.build_builtin_runtime_registry", lambda: registry),
-        patch("agentloom.runtime.agent.build_builtin_runtime_registry", lambda: registry),
+        patch("agentloom.application.agent.build_builtin_runtime_registry", lambda: registry),
     ):
         yield
 

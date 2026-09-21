@@ -23,7 +23,7 @@ def test_canonical_modules_own_configuration_and_context_state() -> None:
         import importlib
         import agentloom
         from agentloom.configuration import config
-        from agentloom.runtime import invocation
+        from agentloom.application import invocation
         assert agentloom.C is importlib.import_module('agentloom.configuration').C
         assert config.__spec__.name == 'agentloom.configuration.config'
         sentinel = object()
@@ -57,6 +57,17 @@ def test_legacy_package_and_alias_loader_are_absent() -> None:
         assert (ROOT / 'src' / package).is_dir()
     for removed in ('adapters', 'encoding', 'ui', 'utils', 'tui_bridge'):
         assert not (ROOT / 'src' / removed).exists()
+    for removed in ("agent.py", "factory.py", "invocation.py"):
+        assert not (ROOT / "src" / "runtime" / removed).exists()
+    run_fresh("""
+        import importlib.util
+        assert importlib.util.find_spec("agentloom.runtime.agent") is None
+        assert importlib.util.find_spec("agentloom.runtime.factory") is None
+        assert importlib.util.find_spec("agentloom.runtime.invocation") is None
+        assert importlib.util.find_spec("agentloom.application.agent") is not None
+        assert importlib.util.find_spec("agentloom.application.factory") is not None
+        assert importlib.util.find_spec("agentloom.application.invocation") is not None
+    """)
 
 
 def test_runtime_contract_does_not_export_smolagents_capabilities() -> None:
@@ -73,9 +84,9 @@ def test_tool_gateway_does_not_export_smolagents_final_answer_binding() -> None:
     """)
 
 
-def test_invocation_does_not_reexport_goal_rendering_helpers() -> None:
+def test_application_invocation_does_not_reexport_goal_rendering_helpers() -> None:
     run_fresh("""
-        from agentloom.runtime import invocation
+        from agentloom.application import invocation
         assert not hasattr(invocation, "goal_continuation_prompt")
         assert not hasattr(invocation, "goal_completion_output")
     """)
@@ -106,14 +117,14 @@ def test_definition_inspection_preserves_lazy_engine_patch_installation() -> Non
         from agentloom.tools import catalog
         assert 'agentloom.runtimes.smolagents.agents' not in sys.modules
         assert 'agentloom.runtimes.smolagents.monkey_patch' not in sys.modules
-        assert 'agentloom.runtime.agent' not in sys.modules
+        assert 'agentloom.application.agent' not in sys.modules
         assert not any(name.startswith('agentloom.runtimes.smolagents.tools.shell') for name in sys.modules)
 
         from agentloom.runtimes.smolagents.agents import ToolCallingAgentV2
         from agentloom.runtimes.smolagents import monkey_patch
-        from agentloom.runtime.agent import RoleDrivenAgent
+        from agentloom.application.agent import RoleDrivenAgent
         assert ToolCallingAgentV2.__module__ == 'agentloom.runtimes.smolagents.agents'
-        assert RoleDrivenAgent.__module__ == 'agentloom.runtime.agent'
+        assert RoleDrivenAgent.__module__ == 'agentloom.application.agent'
         assert monkey_patch._INSTALLED is True
     """)
 

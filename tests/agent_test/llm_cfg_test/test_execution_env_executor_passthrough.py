@@ -1,9 +1,9 @@
-import agentloom.runtime.agent as base_agent_module
+import agentloom.application.agent as base_agent_module
 from agentloom.runtimes.smolagents.loom_mixin import LoomAgentMixin
 from agentloom.runtimes.smolagents.terminal import final_answer_binding
 import pytest
 from agentloom.runtimes.smolagents.options import normalize_runtime_options
-from agentloom.runtime.factory import (
+from agentloom.application.factory import (
     YamlConfiguredAgent,
     YamlConfiguredSupervisorAgent,
 )

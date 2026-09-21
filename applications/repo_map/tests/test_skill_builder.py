@@ -249,7 +249,7 @@ def test_analysis_loop_prepare_validate_integration(tmp_path, monkeypatch):
         return f"# 架构分析: {kwargs['dir_path']}\n\nmock"
     _mock_tool.__name__ = "mock_dir_analysis"
     monkeypatch.setattr(
-        "agentloom.runtime.factory.YamlAgentFactory.create_agent_as_tool",
+        "agentloom.application.factory.YamlAgentFactory.create_agent_as_tool",
         lambda *args, **kwargs: _mock_tool,
     )
 

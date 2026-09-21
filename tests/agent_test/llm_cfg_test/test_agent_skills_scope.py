@@ -1,7 +1,7 @@
 import logging
 from pathlib import Path
 
-import agentloom.runtime.agent as base_agent_module
+import agentloom.application.agent as base_agent_module
 import pytest
 from agentloom.runtime.agent_runtime import AgentRuntimeResult
 from agentloom.runtime.hooks import HookPlan

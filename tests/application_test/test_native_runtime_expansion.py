@@ -31,7 +31,7 @@ def native_project(tmp_path, monkeypatch):
 
     def forbidden_binding(*args, **kwargs):
         raise AssertionError("native runtime attempted Python provider binding")
-    monkeypatch.setattr("agentloom.runtime.agent.BaseAgent._resolve_model_binding", forbidden_binding)
+    monkeypatch.setattr("agentloom.application.agent.BaseAgent._resolve_model_binding", forbidden_binding)
 
     class NativeRuntime:
         runtime_id = "native-fixture"
@@ -62,7 +62,7 @@ def native_project(tmp_path, monkeypatch):
     registry = build_builtin_runtime_registry()
     registry.register("native-fixture", capabilities=NativeRuntime.capabilities, factory=NativeRuntime)
     monkeypatch.setattr("agentloom.application.validation.build_builtin_runtime_registry", lambda: registry)
-    monkeypatch.setattr("agentloom.runtime.agent.build_builtin_runtime_registry", lambda: registry)
+    monkeypatch.setattr("agentloom.application.agent.build_builtin_runtime_registry", lambda: registry)
     with bind_config(load_project_config(tmp_path)):
         yield path, definitions, requests
 
@@ -89,7 +89,7 @@ def test_no_tools_no_goal_application_uses_native_model_selection(native_project
 
 def test_binding_free_workers_have_fresh_instances_and_hook_runs(native_project, monkeypatch):
     from agentloom.application.definition import load_agent_definition
-    from agentloom.runtime.factory import YamlConfiguredAgent
+    from agentloom.application.factory import YamlConfiguredAgent
     from agentloom.runtime.logging import RichLoggerBackend
     from rich.console import Console
     from io import StringIO

@@ -1,12 +1,12 @@
 from pathlib import Path
 
-import agentloom.runtime.factory as yaml_factory_module
+import agentloom.application.factory as yaml_factory_module
 import pytest
+from agentloom.application.factory import YamlConfiguredAgent, YamlConfiguredSupervisorAgent
 from agentloom.application.validation import (
     AgentConfigNormalizer,
     NormalizedAgentConfig,
 )
-from agentloom.runtime.factory import YamlConfiguredAgent, YamlConfiguredSupervisorAgent
 from agentloom.runtimes.smolagents.options import normalize_runtime_options
 
 
@@ -367,7 +367,7 @@ def test_validate_config_accepts_missing_tools_field(maker, config_builder):
 ])
 def test_get_tools_from_config_returns_list_when_tools_missing(config_builder):
     """When ``tools`` key is absent, ``get_tools_from_config`` should return a (list, manager) tuple."""
-    from agentloom.runtime.factory import YamlAgentFactory
+    from agentloom.application.factory import YamlAgentFactory
 
     result = YamlAgentFactory.get_tools_from_config(config_builder())
     assert isinstance(result, tuple)
