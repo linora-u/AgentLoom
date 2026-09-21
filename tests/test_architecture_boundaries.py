@@ -99,7 +99,6 @@ def test_generic_runtime_modules_do_not_load_smolagents_adapter() -> None:
         import sys
         import agentloom.runtime.logging.levels
         import agentloom.runtime.logging.logger_manager
-        import agentloom.runtime.migration
         assert 'smolagents' not in sys.modules
         assert not any(
             name == 'agentloom.adapters.smolagents'
@@ -116,6 +115,3 @@ def test_smolagents_specific_implementations_have_no_generic_runtime_aliases() -
         ROOT / "src/runtime/logging/agent_logger.py",
     )
     assert not any(path.exists() for path in legacy_paths)
-
-    migration_source = (ROOT / "src/runtime/migration.py").read_text(encoding="utf-8")
-    assert "SmolagentsCheckpointCodec" not in migration_source

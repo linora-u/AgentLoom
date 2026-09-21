@@ -7,7 +7,6 @@ from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 import pytest
-
 from agentloom.schedules.schedule import interval_schedule, once_schedule
 from agentloom.schedules.store import JobBusyError, ScheduleStore
 
@@ -137,6 +136,38 @@ def test_store_is_project_scoped_and_writes_a_versioned_json_document(tmp_path: 
     assert payload["jobs"][0]["id"] == job["id"]
     assert payload["jobs"][0]["yaml_path"] == "applications/demo/workflows/report.yaml"
     assert payload["executions"] == []
+
+
+def test_store_follows_configured_canonical_runtime_home(tmp_path: Path) -> None:
+    config = tmp_path / "config" / "system.yaml"
+    config.parent.mkdir()
+    config.write_text("runtime:\n  root_dir: state/runtime\n", encoding="utf-8")
+    yaml_path = tmp_path / "applications/demo/workflows/report.yaml"
+    yaml_path.parent.mkdir(parents=True)
+    yaml_path.write_text("name: report\n", encoding="utf-8")
+
+    store = ScheduleStore(tmp_path)
+    _add_due_job(store, yaml_path)
+
+    assert store.jobs_path == tmp_path / "state/runtime/schedules/jobs.json"
+    assert store.jobs_path.is_file()
+    assert not (tmp_path / ".agentloom").exists()
+
+
+def test_store_follows_complete_runtime_environment_override(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    config = tmp_path / "config" / "system.yaml"
+    config.parent.mkdir()
+    config.write_text("runtime:\n  root_dir: configured/runtime\n", encoding="utf-8")
+    override = tmp_path / "isolated/runtime"
+    monkeypatch.setenv("AGENTLOOM_RUNTIME_ROOT", str(override))
+
+    store = ScheduleStore(tmp_path)
+
+    assert store.schedules_dir == override / "schedules"
+    assert not (tmp_path / "configured/runtime").exists()
 
 
 def test_add_validation_failure_is_never_visible_to_a_concurrent_ticker(tmp_path: Path) -> None:

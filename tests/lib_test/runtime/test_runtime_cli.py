@@ -5,13 +5,19 @@ import json
 import os
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
-from types import SimpleNamespace
-
-from click.testing import CliRunner
 
 from agentloom.__main__ import main
-from agentloom.runtime.checkpoint import CheckpointManager
 from agentloom.runtime import RuntimeHome
+from agentloom.runtime.checkpoint import CheckpointManager
+from click.testing import CliRunner
+
+
+def test_runtime_cli_exposes_only_canonical_storage_commands() -> None:
+    result = CliRunner().invoke(main, ["--help"])
+
+    assert result.exit_code == 0, result.output
+    assert "clean-runtime" in result.output
+    assert "migrate-runtime" not in result.output
 
 
 def test_clean_runtime_command_applies_configured_retention(
@@ -87,82 +93,3 @@ def test_clean_runtime_command_reports_lock_contention_as_failure(
     assert "cleanup skipped" in result.output
     assert "already in progress" in result.output
     assert "Cleaned runtime" not in result.output
-
-
-def test_migrate_runtime_command_defaults_to_dry_run(
-    tmp_path: Path,
-    monkeypatch,
-) -> None:
-    home = RuntimeHome(tmp_path / ".agentloom")
-    observed = {}
-
-    def _migrate(legacy_logs_dir, runtime_root, **kwargs):
-        observed.update(
-            legacy_logs_dir=Path(legacy_logs_dir),
-            runtime_root=Path(runtime_root),
-            **kwargs,
-        )
-        return SimpleNamespace(
-            dry_run=kwargs["dry_run"],
-            plan=SimpleNamespace(candidate_count=0, skipped_count=0, candidates=[], skipped=[]),
-            migrated_count=0,
-            already_migrated_count=0,
-            archive_dir=None,
-        )
-
-    monkeypatch.setattr("agentloom.__main__._configured_runtime_home", lambda: home)
-    monkeypatch.setattr("agentloom.runtime.migration.migrate_runtime", _migrate)
-    monkeypatch.setattr(
-        "agentloom.runtime.workspace_migration.preview_legacy_agent_workspaces",
-        lambda source: SimpleNamespace(
-            source_dir=Path(source), file_count=3, total_bytes=42, archive_dir=None
-        ),
-    )
-
-    result = CliRunner().invoke(main, ["migrate-runtime", "--dry-run"])
-
-    assert result.exit_code == 0, result.output
-    assert observed["dry_run"] is True
-    assert observed["archive_legacy"] is False
-    assert "candidates=0" in result.output
-    assert "files=3" in result.output
-    assert "archived=no" in result.output
-
-
-def test_migrate_runtime_apply_requests_atomic_legacy_archive(
-    tmp_path: Path,
-    monkeypatch,
-) -> None:
-    home = RuntimeHome(tmp_path / ".agentloom")
-    observed = {}
-
-    def _migrate(_legacy_logs_dir, _runtime_root, **kwargs):
-        observed.update(kwargs)
-        return SimpleNamespace(
-            dry_run=False,
-            plan=SimpleNamespace(candidate_count=1, skipped_count=0, candidates=[], skipped=[]),
-            migrated_count=1,
-            already_migrated_count=0,
-            archive_dir=home.root_dir / "legacy" / "logs-v1-now",
-        )
-
-    monkeypatch.setattr("agentloom.__main__._configured_runtime_home", lambda: home)
-    monkeypatch.setattr("agentloom.runtime.migration.migrate_runtime", _migrate)
-    archived_workspace = home.root_dir / "workspaces" / "legacy-unscoped" / "workspace-v1-now"
-    monkeypatch.setattr(
-        "agentloom.runtime.workspace_migration.archive_legacy_agent_workspaces",
-        lambda source, runtime_root: SimpleNamespace(
-            source_dir=Path(source),
-            file_count=4,
-            total_bytes=84,
-            archive_dir=archived_workspace,
-        ),
-    )
-
-    result = CliRunner().invoke(main, ["migrate-runtime", "--apply"])
-
-    assert result.exit_code == 0, result.output
-    assert observed["dry_run"] is False
-    assert observed["archive_legacy"] is True
-    assert "migrated=1" in result.output
-    assert f"archived={archived_workspace}" in result.output

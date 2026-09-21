@@ -420,9 +420,9 @@ There is no `--log-to-file`, `logging.enabled`, `logging.dir`, or `logging.file_
 
 ### 7.2 Retention and storage boundaries
 
-Automatic cleanup runs at most once per configured interval. `loom clean-runtime` applies the policy explicitly. It only deletes eligible run directories or their raw artifacts; it never traverses checkpoints, `.agentloom/legacy/`, `.agentloom/workspaces/`, or Application-owned output directories.
+Automatic cleanup runs at most once per configured interval. `loom clean-runtime` applies the policy explicitly. It only deletes eligible run directories or their raw artifacts; it never traverses checkpoints, workspaces, self-learning state, or Application-owned output directories.
 
-Persistent Agent recall uses `.agentloom/workspaces/agents/<application_id>/<agent_path>/`. Current-task Todo state uses `todos.json` inside the canonical checkpoint and is not migrated from the removed Markdown mechanism. `loom migrate-runtime --dry-run` previews valid legacy checkpoint candidates and the old unscoped `.runtime` tree; `loom migrate-runtime --apply` migrates checkpoints, archives `.logs` under `.agentloom/legacy/`, and atomically moves `.runtime` under `.agentloom/workspaces/legacy-unscoped/` because the old files do not contain reliable application/task provenance.
+Persistent Agent recall uses `.agentloom/workspaces/agents/<application_id>/<agent_path>/`. Current-task Todo state uses `todos.json` inside the canonical checkpoint. Durable schedules and scheduler service state use `.agentloom/schedules/`. Every framework-owned runtime consumer follows the same `runtime.root_dir`; Application-owned output directories remain separate.
 
 To verify a real attempt, read `manifest.json` and its referenced logs, audits, and artifacts; an exit code alone is not sufficient.
 
@@ -819,7 +819,7 @@ Run evidence and task recovery state have independent lifecycles under the same 
 │   ├── logs/runtime.log[.1-.3]
 │   ├── audit/{shell.jsonl[.1-.2],task_tree.json,task_events.jsonl,goal.json}
 │   └── artifacts/{result.txt,shell,background,skills}/
-└── checkpoints/<application_id>/<task_id>/
+├── checkpoints/<application_id>/<task_id>/
     ├── task_events.jsonl
     ├── task_tree.json
     ├── checkpoint.json
@@ -827,7 +827,8 @@ Run evidence and task recovery state have independent lifecycles under the same 
     ├── heartbeat.json
     ├── workers/<worker_name>/calls/<call_index>/checkpoint.json
     ├── context_store/
-    └── file-history/
+│   └── file-history/
+└── schedules/{jobs.json,serve-status.json,executions/}
 ```
 
 Except for `manifest.json`, these run entries are conditional on logging being enabled or the corresponding evidence existing.

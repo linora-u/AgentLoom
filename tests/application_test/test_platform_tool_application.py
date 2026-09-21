@@ -3,6 +3,7 @@
 import importlib.abc
 import json
 import re
+import shlex
 import sys
 from concurrent.futures import ThreadPoolExecutor
 from contextvars import copy_context
@@ -12,6 +13,7 @@ from threading import Barrier, Event
 import psutil
 import pytest
 import yaml
+from agentloom.application.run import ApplicationRunInterrupted
 from agentloom.application.runner import execute_app
 from agentloom.configuration.config import bind_config, load_project_config
 from agentloom.runtime.agent_runtime import AgentRuntimeResult, RuntimeCapabilities, RuntimeCheckpointEnvelope
@@ -67,10 +69,14 @@ def platform_project(tmp_path, monkeypatch):
     monkeypatch.setattr("agentloom.application.validation.build_builtin_runtime_registry", lambda: registry)
     monkeypatch.setattr("agentloom.runtime.agent.build_builtin_runtime_registry", lambda: registry)
 
-    def run(**updates):
+    def run(*, resume_task_id=None, **updates):
         workflow.write_text(yaml.safe_dump({**definition, **updates}))
         with bind_config(load_project_config(tmp_path)):
-            return execute_app(workflow, file_logging=False)
+            return execute_app(
+                workflow,
+                file_logging=False,
+                resume_task_id=resume_task_id,
+            )
 
     return tmp_path, workflow, programs, definitions, run
 
@@ -385,6 +391,213 @@ def test_memory_and_history_tools_use_existing_application_scope(platform_projec
 
     programs["platform"] = inspect_memory
     assert run(tools=[{"name": "memory"}, {"name": "session_search"}], self_learning={"enabled": True}).output == "memory and history scope retained"
+
+
+def test_application_uses_one_canonical_runtime_home(platform_project):
+    root, workflow, programs, _, run = platform_project
+    runtime_root = root / ".agentloom"
+    hook_evidence = workflow.parents[1] / "outputs" / "hook-events.jsonl"
+    hook_script = root / "hooks" / "capture_runtime_paths.py"
+    hook_script.parent.mkdir()
+    hook_script.write_text(
+        """\
+import json
+import sys
+from pathlib import Path
+
+payload = json.load(sys.stdin)
+target = Path(sys.argv[1])
+target.parent.mkdir(parents=True, exist_ok=True)
+with target.open("a", encoding="utf-8") as stream:
+    stream.write(json.dumps({
+        "tool_name": payload["tool_name"],
+        "agent_task_workspace": payload["agent_task_workspace"],
+        "agent_insights_path": payload["agent_insights_path"],
+    }) + "\\n")
+json.dump({"decision": "allow"}, sys.stdout)
+""",
+        encoding="utf-8",
+    )
+    system_path = root / "config" / "system.yaml"
+    system = yaml.safe_load(system_path.read_text(encoding="utf-8"))
+    system.update(
+        checkpoint={"enabled": True, "cleanup_on_success": False},
+        self_learning={"enabled": True},
+        hooks={
+            "PreToolUse": [
+                {
+                    "id": "capture-runtime-paths",
+                    "matcher": "*",
+                    "command": shlex.join(
+                        [sys.executable, str(hook_script), str(hook_evidence)]
+                    ),
+                }
+            ]
+        },
+    )
+    system_path.write_text(yaml.safe_dump(system), encoding="utf-8")
+
+    skill = workflow.parents[1] / "skills" / "storage-proof"
+    skill.mkdir(parents=True)
+    (skill / "SKILL.md").write_text(
+        "---\nname: storage-proof\ndescription: Verify canonical runtime storage.\n---\n"
+        "Use the canonical runtime evidence.\n",
+        encoding="utf-8",
+    )
+    worker = workflow.parent / "worker_agents" / "storage_worker.yaml"
+    worker.parent.mkdir()
+    worker.write_text(
+        yaml.safe_dump(
+            {
+                "name": "storage_worker",
+                "agent_runtime": "platform-fixture",
+                "description": "Read Application memory in an isolated Worker.",
+                "workflow": "List Application memory and return.",
+                "tools": [{"name": "memory"}],
+                "toolsets": [],
+                "agent_function_schema": {
+                    "description": "Verify Worker runtime storage.",
+                    "inputs": {"query": {"description": "Verification request."}},
+                    "output": {"description": "Verification result."},
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    def worker_program(definition, request):
+        observed = definition.tool_gateway.invoke(
+            call_id="worker-memory",
+            tool_name="memory",
+            arguments={"action": "list", "scope": "app"},
+        )
+        assert observed.status == "completed", observed.model_content()
+        return "worker storage verified"
+
+    def supervisor_program(definition, request):
+        activated = definition.tool_gateway.invoke(
+            call_id="activate-skill",
+            tool_name="skill",
+            arguments={"name": "storage-proof"},
+        )
+        assert activated.status == "completed", activated.model_content()
+        assert "canonical runtime evidence" in activated.output
+        memory = definition.tool_gateway.invoke(
+            call_id="supervisor-memory",
+            tool_name="memory",
+            arguments={"action": "list", "scope": "app"},
+        )
+        assert memory.status == "completed", memory.model_content()
+        delegated = definition.tool_gateway.invoke(
+            call_id="delegate-storage",
+            tool_name="storage_worker",
+            arguments={"query": "verify storage"},
+        )
+        assert delegated.status == "completed", delegated.model_content()
+        assert delegated.output == "worker storage verified"
+        return "canonical storage verified"
+
+    programs.update(platform=supervisor_program, storage_worker=worker_program)
+    result = run(
+        tools=[{"name": "skill"}, {"name": "memory"}],
+        worker_agents=[{"path": "storage_worker.yaml"}],
+    )
+
+    assert result.output == "canonical storage verified"
+    assert result.run.run_dir.is_relative_to(runtime_root / "runs" / "platform")
+    assert result.run.manifest_path.is_file()
+    checkpoint_dir = (
+        runtime_root
+        / "checkpoints"
+        / result.run.application_id
+        / result.run.task_id
+    )
+    assert checkpoint_dir.is_dir()
+    assert (runtime_root / "self_learning.db").is_file()
+    assert (result.run.run_dir / "artifacts" / "result.txt").read_text(
+        encoding="utf-8"
+    ) == result.output
+    assert hook_evidence.is_file()
+    hook_records = [
+        json.loads(line)
+        for line in hook_evidence.read_text(encoding="utf-8").splitlines()
+    ]
+    assert {record["tool_name"] for record in hook_records} >= {
+        "skill",
+        "memory",
+        "storage_worker",
+    }
+    task_workspaces = {
+        Path(record["agent_task_workspace"])
+        for record in hook_records
+        if record["agent_task_workspace"]
+    }
+    assert len(task_workspaces) >= 2
+    assert all(
+        path.is_dir()
+        and path.is_relative_to(runtime_root / "workspaces" / "agents" / "platform")
+        for path in task_workspaces
+    )
+    assert hook_evidence.is_relative_to(root / "applications" / "platform" / "outputs")
+    assert not hook_evidence.is_relative_to(runtime_root)
+    assert not (root / ".runtime").exists()
+    assert not (root / ".logs").exists()
+
+
+def test_application_resumes_from_canonical_checkpoint(platform_project):
+    root, _, programs, _, run = platform_project
+    runtime_root = root / ".agentloom"
+    system_path = root / "config" / "system.yaml"
+    system = yaml.safe_load(system_path.read_text(encoding="utf-8"))
+    system["checkpoint"] = {"enabled": True, "cleanup_on_success": False}
+    system_path.write_text(yaml.safe_dump(system), encoding="utf-8")
+
+    requests = []
+
+    def interrupt_then_resume(_definition, request):
+        requests.append(request)
+        if request.checkpoint is None:
+            assert request.checkpoint_sink is not None
+            request.checkpoint_sink(
+                RuntimeCheckpointEnvelope(
+                    runtime_id="platform-fixture",
+                    runtime_version="fixture",
+                    state_schema_version=1,
+                    payload={"phase": "ready-to-resume"},
+                    task_id=request.task_id,
+                    run_id=request.run_id,
+                    progress=1,
+                )
+            )
+            raise KeyboardInterrupt("simulate an interrupted Application")
+        assert request.continue_session is True
+        assert request.checkpoint.payload == {"phase": "ready-to-resume"}
+        return "resumed from canonical checkpoint"
+
+    programs["platform"] = interrupt_then_resume
+    with pytest.raises(ApplicationRunInterrupted) as interrupted:
+        run()
+
+    first_run = interrupted.value.run
+    resumed = run(resume_task_id=first_run.task_id)
+
+    assert resumed.output == "resumed from canonical checkpoint"
+    assert resumed.run.task_id == first_run.task_id
+    assert resumed.run.run_id != first_run.run_id
+    assert resumed.run.run_dir != first_run.run_dir
+    checkpoint_dir = (
+        runtime_root
+        / "checkpoints"
+        / resumed.run.application_id
+        / resumed.run.task_id
+    )
+    assert checkpoint_dir.is_dir()
+    assert all(
+        request.task_id == resumed.run.task_id
+        for request in requests
+    )
+    assert not (root / ".runtime").exists()
+    assert not (root / ".logs").exists()
 
 
 def test_native_application_retrieves_original_mcp_content_with_context_ref(platform_project):

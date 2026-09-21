@@ -64,7 +64,7 @@ run_with_deadline() {
 
 cleanup() {
     rm -rf "$TEST_DIR" "$MULTI_DIR"
-    # Don't remove .runtime — keep for inspection if tests fail
+    # Keep canonical runtime evidence for inspection if tests fail.
 }
 
 # =============================================================================

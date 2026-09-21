@@ -40,7 +40,7 @@ def _make_run(
     return run_dir
 
 
-def test_clean_runtime_applies_status_and_artifact_retention_without_touching_legacy_or_outputs(
+def test_clean_runtime_applies_status_and_artifact_retention_without_touching_workspaces_or_outputs(
     tmp_path: Path,
 ) -> None:
     from agentloom.runtime.retention import clean_runtime
@@ -52,9 +52,9 @@ def test_clean_runtime_applies_status_and_artifact_retention_without_touching_le
     completed_recent = _make_run(runtime_root, run_id="completed-recent", status="success", age=timedelta(days=4))
     fresh = _make_run(runtime_root, run_id="fresh", status="failed", age=timedelta(days=2))
 
-    legacy_file = runtime_root / "legacy" / "logs-v1-old" / "runtime.log"
-    legacy_file.parent.mkdir(parents=True)
-    legacy_file.write_text("legacy", encoding="utf-8")
+    workspace_file = runtime_root / "workspaces" / "agents" / "demo" / "insights.md"
+    workspace_file.parent.mkdir(parents=True)
+    workspace_file.write_text("remembered", encoding="utf-8")
     output_file = tmp_path / "applications" / "demo" / "outputs" / "report.md"
     output_file.parent.mkdir(parents=True)
     output_file.write_text("deliverable", encoding="utf-8")
@@ -68,7 +68,7 @@ def test_clean_runtime_applies_status_and_artifact_retention_without_touching_le
     assert not (completed_recent / "artifacts").exists()
     assert fresh.exists()
     assert (fresh / "artifacts" / "shell" / "stdout.txt").exists()
-    assert legacy_file.read_text(encoding="utf-8") == "legacy"
+    assert workspace_file.read_text(encoding="utf-8") == "remembered"
     assert output_file.read_text(encoding="utf-8") == "deliverable"
     assert result.removed_run_count == 2
     assert result.removed_artifact_count == 2
