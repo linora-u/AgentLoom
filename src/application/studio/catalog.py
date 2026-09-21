@@ -7,23 +7,21 @@ runtime, or create runtime storage.
 
 from __future__ import annotations
 
-import json
 import os
 import stat
 from collections.abc import Iterable, Mapping
-from datetime import UTC, datetime
+from datetime import datetime
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 import yaml
-from agentloom.runtime.context import RuntimeHome, resolve_runtime_home
+from agentloom.schedules import presentation as schedule_presentation
 
 if TYPE_CHECKING:
     from agentloom.application.definition import AgentDefinitionCache
 
 AGENT_YAML_MAX_BYTES = 1024 * 1024
 SKILL_MANIFEST_MAX_BYTES = 128 * 1024
-SCHEDULE_DOCUMENT_MAX_BYTES = 8 * 1024 * 1024
 MAX_WORKER_DEPTH = 16
 
 
@@ -96,7 +94,11 @@ def project_catalog(
         "applications": applications,
         "agents": agents,
         "skills": skills,
-        "schedules": schedule_catalog(root, now=now, runtime_root=runtime_root),
+        "schedules": schedule_presentation.schedule_catalog(
+            root,
+            now=now,
+            runtime_root=runtime_root,
+        ),
     }
 
 
@@ -463,214 +465,6 @@ def _skill_metadata(root: Path, manifest: Path) -> dict[str, Any]:
     return dict(metadata) if isinstance(metadata, Mapping) else {}
 
 
-def schedule_catalog(
-    project_root: str | Path,
-    *,
-    now: datetime | None = None,
-    runtime_root: Path | None = None,
-) -> dict[str, Any]:
-    """Return only durable schedule and service-heartbeat projections."""
-
-    root = Path(project_root).expanduser().resolve()
-    checked_at = _as_utc(now)
-    if runtime_root is None:
-        system = _read_yaml_object(root, root / "config" / "system.yaml")
-        runtime_home = resolve_runtime_home(system, agent_root=root)
-    else:
-        runtime_home = RuntimeHome(runtime_root)
-    try:
-        runtime_root = runtime_home.validate_root()
-    except RuntimeError:
-        return {
-            "items": [],
-            "service": _schedule_service_summary(
-                [],
-                [],
-                {},
-                checked_at=checked_at,
-                document_error="Schedule storage is unreadable.",
-            ),
-        }
-    schedules_dir = runtime_root / "schedules"
-    document, document_error = _read_json_object(
-        runtime_root,
-        schedules_dir / "jobs.json",
-        max_bytes=SCHEDULE_DOCUMENT_MAX_BYTES,
-    )
-    heartbeat, _ = _read_json_object(
-        runtime_root,
-        schedules_dir / "serve-status.json",
-        max_bytes=128 * 1024,
-    )
-    if document is not None and (
-        document.get("version") != 1
-        or not isinstance(document.get("jobs"), list)
-        or not isinstance(document.get("executions"), list)
-    ):
-        document = None
-        document_error = "Schedule storage is unreadable."
-    if document is None:
-        document = {"jobs": [], "executions": []}
-    raw_jobs = document.get("jobs")
-    raw_executions = document.get("executions")
-    jobs = [item for item in raw_jobs if isinstance(item, Mapping)] if isinstance(raw_jobs, list) else []
-    executions = (
-        [item for item in raw_executions if isinstance(item, Mapping)]
-        if isinstance(raw_executions, list)
-        else []
-    )
-
-    executions_by_job: dict[str, list[Mapping[str, Any]]] = {}
-    for execution in executions:
-        job_id = execution.get("job_id")
-        if isinstance(job_id, str) and job_id:
-            executions_by_job.setdefault(job_id, []).append(execution)
-
-    items: list[dict[str, Any]] = []
-    for job in jobs:
-        job_id = _display_text(job.get("id"))
-        if not job_id:
-            continue
-        history = executions_by_job.get(job_id, [])
-        latest = max(history, key=_execution_sort_key) if history else None
-        state = _display_text(job.get("state")) or "unknown"
-        items.append(
-            {
-                "id": job_id,
-                "name": _display_text(job.get("name")) or job_id,
-                "enabled": state == "scheduled",
-                "state": state,
-                "yaml_path": _safe_stored_path(job.get("yaml_path")),
-                "trigger": _trigger_summary(job.get("schedule")),
-                "next_run_at": _optional_text(job.get("next_run_at")),
-                "last_run_at": _optional_text(job.get("last_run_at")),
-                "last_status": _optional_text(job.get("last_status")),
-                "run_count": _nonnegative_int(job.get("run_count")),
-                "last_execution": _execution_summary(latest) if latest is not None else None,
-            }
-        )
-    items.sort(key=lambda item: (item["next_run_at"] or "~", item["name"], item["id"]))
-
-    return {
-        "items": items,
-        "service": _schedule_service_summary(
-            jobs,
-            executions,
-            heartbeat if isinstance(heartbeat, Mapping) else {},
-            checked_at=checked_at,
-            document_error=document_error,
-        ),
-    }
-
-
-def _schedule_service_summary(
-    jobs: list[Mapping[str, Any]],
-    executions: list[Mapping[str, Any]],
-    heartbeat: Mapping[str, Any],
-    *,
-    checked_at: datetime,
-    document_error: str | None,
-) -> dict[str, Any]:
-    pid = heartbeat.get("pid")
-    if isinstance(pid, bool) or not isinstance(pid, int) or pid <= 0:
-        pid = None
-    last_tick_at = _optional_text(heartbeat.get("last_tick_at"))
-    recent = False
-    parsed_tick = _parse_iso(last_tick_at)
-    if parsed_tick is not None:
-        tick_seconds = heartbeat.get("tick_seconds")
-        if isinstance(tick_seconds, bool) or not isinstance(tick_seconds, (int, float)):
-            tick_seconds = 1.0
-        age = (checked_at - parsed_tick).total_seconds()
-        recent = age <= max(float(tick_seconds) * 3, 5.0)
-
-    if document_error is not None:
-        state = "error"
-    elif heartbeat.get("stopped_at"):
-        state = "stopped"
-    elif pid is not None and _pid_is_alive(pid) and recent:
-        state = "running"
-    elif heartbeat:
-        state = "stale"
-    else:
-        state = "stopped"
-
-    due_count = 0
-    claimed_count = 0
-    for job in jobs:
-        claim = job.get("claim")
-        claim_live = False
-        if isinstance(claim, Mapping):
-            expires_at = _parse_iso(_optional_text(claim.get("expires_at")))
-            claim_live = expires_at is not None and expires_at > checked_at
-        if claim_live:
-            claimed_count += 1
-        next_run_at = _parse_iso(_optional_text(job.get("next_run_at")))
-        if not claim_live and job.get("state") == "scheduled" and next_run_at is not None and next_run_at <= checked_at:
-            due_count += 1
-
-    heartbeat_error = _optional_text(heartbeat.get("last_error"))
-    return {
-        "state": state,
-        "pid": pid,
-        "started_at": _optional_text(heartbeat.get("started_at")),
-        "last_tick_at": last_tick_at,
-        "last_success_at": _optional_text(heartbeat.get("last_success_at")),
-        "last_error": document_error or heartbeat_error,
-        "job_count": len(jobs),
-        "due_count": due_count,
-        "claimed_count": claimed_count,
-        "execution_count": len(executions),
-    }
-
-
-def _trigger_summary(raw: Any) -> dict[str, Any]:
-    if not isinstance(raw, Mapping):
-        return {}
-    result: dict[str, Any] = {}
-    for key in ("kind", "at", "seconds", "expression", "timezone"):
-        value = raw.get(key)
-        if isinstance(value, (str, int, float)) and not isinstance(value, bool):
-            result[key] = value
-    return result
-
-
-def _execution_summary(execution: Mapping[str, Any]) -> dict[str, Any]:
-    exit_code = execution.get("exit_code")
-    if isinstance(exit_code, bool) or not isinstance(exit_code, int):
-        exit_code = None
-    return {
-        "id": _display_text(execution.get("id")),
-        "job_id": _display_text(execution.get("job_id")),
-        "status": _display_text(execution.get("status")) or "unknown",
-        "trigger": _display_text(execution.get("trigger")) or "unknown",
-        "claimed_at": _optional_text(execution.get("claimed_at")),
-        "started_at": _optional_text(execution.get("started_at")),
-        "finished_at": _optional_text(execution.get("finished_at")),
-        "exit_code": exit_code,
-        "error": _optional_text(execution.get("error")),
-    }
-
-
-def _execution_sort_key(execution: Mapping[str, Any]) -> tuple[datetime, str]:
-    for key in ("finished_at", "started_at", "claimed_at"):
-        parsed = _parse_iso(_optional_text(execution.get(key)))
-        if parsed is not None:
-            return parsed, _display_text(execution.get("id"))
-    return datetime.min.replace(tzinfo=UTC), _display_text(execution.get("id"))
-
-
-def _read_yaml_object(root: Path, path: Path) -> dict[str, Any]:
-    text = _read_text_bounded(root, path, max_bytes=AGENT_YAML_MAX_BYTES)
-    if text is None:
-        return {}
-    try:
-        value = yaml.safe_load(text) or {}
-    except (TypeError, ValueError, yaml.YAMLError):
-        return {}
-    return dict(value) if isinstance(value, Mapping) else {}
-
-
 def _read_agent_definition_object(
     root: Path,
     path: Path,
@@ -693,26 +487,6 @@ def _read_agent_definition_object(
     if result.definition is None:
         return {}
     return result.definition
-
-
-def _read_json_object(
-    root: Path,
-    path: Path,
-    *,
-    max_bytes: int,
-) -> tuple[dict[str, Any] | None, str | None]:
-    if not path.exists():
-        return None, None
-    text = _read_text_bounded(root, path, max_bytes=max_bytes)
-    if text is None:
-        return None, "Schedule storage is unreadable."
-    try:
-        value = json.loads(text)
-    except (TypeError, ValueError, json.JSONDecodeError):
-        return None, "Schedule storage is unreadable."
-    if not isinstance(value, dict):
-        return None, "Schedule storage is unreadable."
-    return value, None
 
 
 def _read_text_bounded(root: Path, path: Path, *, max_bytes: int) -> str | None:
@@ -815,60 +589,7 @@ def _application_id_value(raw: Any) -> str | None:
     return path.as_posix()
 
 
-def _safe_stored_path(raw: Any) -> str:
-    if not isinstance(raw, str):
-        return ""
-    value = raw.strip()
-    if not value or "\x00" in value or "\n" in value or "\r" in value:
-        return ""
-    candidate = Path(value)
-    if candidate.is_absolute() or ".." in candidate.parts:
-        return ""
-    return candidate.as_posix()
-
-
 def _display_text(raw: Any) -> str:
     if not isinstance(raw, (str, int, float)) or isinstance(raw, bool):
         return ""
     return str(raw).strip().replace("\x00", "")[:4096]
-
-
-def _optional_text(raw: Any) -> str | None:
-    value = _display_text(raw)
-    return value or None
-
-
-def _nonnegative_int(raw: Any) -> int:
-    if isinstance(raw, bool) or not isinstance(raw, int):
-        return 0
-    return max(raw, 0)
-
-
-def _as_utc(value: datetime | None) -> datetime:
-    value = value or datetime.now(UTC)
-    if value.tzinfo is None:
-        value = value.replace(tzinfo=UTC)
-    return value.astimezone(UTC)
-
-
-def _parse_iso(value: str | None) -> datetime | None:
-    if value is None:
-        return None
-    raw = value.strip()
-    if raw.endswith(("Z", "z")):
-        raw = raw[:-1] + "+00:00"
-    try:
-        parsed = datetime.fromisoformat(raw)
-    except ValueError:
-        return None
-    if parsed.tzinfo is None:
-        parsed = parsed.replace(tzinfo=UTC)
-    return parsed.astimezone(UTC)
-
-
-def _pid_is_alive(pid: int) -> bool:
-    try:
-        os.kill(pid, 0)
-        return True
-    except (OSError, ValueError):
-        return False

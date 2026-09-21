@@ -109,6 +109,8 @@ class TuiBridge:
             | None
         ) = None
         self._runtime_index: _RuntimeLiveIndex | None = None
+        self._schedule_runtime_root: Path | None = None
+        self._schedule_bootstrap_error: dict[str, Any] | None = None
 
     def _builder_service(self) -> Any:
         if self._builder is None:
@@ -468,13 +470,19 @@ class TuiBridge:
             runtime_root=runtime_root,
         )
         from agentloom.application.studio.catalog import project_catalog
+        from agentloom.schedules.presentation import resolve_schedule_runtime_root
+
+        try:
+            schedule_runtime_root = resolve_schedule_runtime_root(self.project_root)
+        except (OSError, RuntimeError, TypeError, ValueError):
+            schedule_runtime_root = None
 
         catalog = project_catalog(
             self.project_root,
             systems,
             runs,
             definition_cache=definition_cache,
-            runtime_root=runtime_root,
+            runtime_root=schedule_runtime_root,
         )
         worker_invocations, worker_invocations_incomplete = self._latest_worker_invocations(
             runs,
@@ -503,6 +511,12 @@ class TuiBridge:
             static_systems,
             runtime_root,
             self._system_identity_paths(static_systems),
+        )
+        self._schedule_runtime_root = schedule_runtime_root
+        self._schedule_bootstrap_error = (
+            copy.deepcopy(catalog["schedules"])
+            if schedule_runtime_root is None
+            else None
         )
         self._runtime_index = self._build_runtime_live_index(
             systems=static_systems,
@@ -548,7 +562,15 @@ class TuiBridge:
             index.worker_invocations = copy.deepcopy(worker_invocations)
             index.worker_invocations_incomplete = worker_invocations_incomplete
 
-        from agentloom.application.studio.catalog import schedule_catalog
+        from agentloom.schedules.presentation import schedule_catalog
+
+        if self._schedule_runtime_root is None:
+            schedules = copy.deepcopy(self._schedule_bootstrap_error)
+        else:
+            schedules = schedule_catalog(
+                self.project_root,
+                runtime_root=self._schedule_runtime_root,
+            )
 
         return {
             "systems": systems,
@@ -559,10 +581,7 @@ class TuiBridge:
             ],
             "worker_invocations": copy.deepcopy(index.worker_invocations),
             "worker_invocations_incomplete": (index.worker_invocations_incomplete or discovery_incomplete),
-            "schedules": schedule_catalog(
-                self.project_root,
-                runtime_root=runtime_root,
-            ),
+            "schedules": schedules,
         }
 
     def system_detail(self, system_id: str) -> dict[str, Any]:

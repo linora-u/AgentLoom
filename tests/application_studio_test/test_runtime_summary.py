@@ -6,8 +6,8 @@ from pathlib import Path
 import agentloom.application.studio.bridge as bridge_module
 import pytest
 import yaml
-from agentloom.runtime.context import RuntimeRunLease
 from agentloom.application.studio.bridge import BridgeError, TuiBridge
+from agentloom.runtime.context import RuntimeRunLease
 
 SYSTEM_ID = "applications/demo/workflows/demo.yaml"
 
@@ -158,6 +158,8 @@ def _schedule_document(tmp_path: Path) -> None:
                             "timezone": "Asia/Shanghai",
                         },
                         "state": "paused",
+                        "created_at": "2026-07-17T07:00:00+00:00",
+                        "updated_at": "2026-07-18T07:00:00+00:00",
                         "next_run_at": None,
                         "last_run_at": None,
                         "last_status": None,
@@ -173,9 +175,12 @@ def _schedule_document(tmp_path: Path) -> None:
         tmp_path / ".runtime-live/schedules/serve-status.json",
         json.dumps(
             {
-                "pid": 123,
+                "pid": None,
                 "started_at": "2026-07-18T07:00:00+00:00",
                 "last_tick_at": "2026-07-18T07:01:00+00:00",
+                "last_success_at": "2026-07-18T07:01:00+00:00",
+                "last_error": None,
+                "tick_seconds": 1.0,
                 "stopped_at": "2026-07-18T07:02:00+00:00",
             }
         ),
@@ -1075,6 +1080,7 @@ def test_runtime_summary_reuses_bootstrap_identity_without_parsing_configuration
 
     _completed_run(tmp_path)
     _schedule_document(tmp_path)
+    _write(tmp_path / "config/system.yaml", "{invalid")
     (tmp_path / SYSTEM_ID).unlink()
     loop_path = tmp_path / "applications/demo/workflows/loop.yaml"
     (tmp_path / SYSTEM_ID).symlink_to(loop_path.name)
@@ -1162,10 +1168,10 @@ def test_runtime_summary_reuses_bootstrap_identity_without_parsing_configuration
         ],
         "service": {
             "state": "stopped",
-            "pid": 123,
+            "pid": None,
             "started_at": "2026-07-18T07:00:00+00:00",
             "last_tick_at": "2026-07-18T07:01:00+00:00",
-            "last_success_at": None,
+            "last_success_at": "2026-07-18T07:01:00+00:00",
             "last_error": None,
             "job_count": 1,
             "due_count": 0,
@@ -1173,6 +1179,23 @@ def test_runtime_summary_reuses_bootstrap_identity_without_parsing_configuration
             "execution_count": 0,
         },
     }
+
+
+def test_bootstrap_projects_invalid_system_config_as_schedule_error(
+    tmp_path: Path,
+) -> None:
+    bridge = _project(tmp_path)
+    _write(tmp_path / "config/system.yaml", "{invalid")
+
+    result = bridge.bootstrap()
+    refreshed = bridge.dispatch("runtime.summary", {})
+
+    assert result["schedules"]["items"] == []
+    assert result["schedules"]["service"]["state"] == "error"
+    assert result["schedules"]["service"]["last_error"] == (
+        "Schedule storage is unreadable."
+    )
+    assert refreshed["schedules"] == result["schedules"]
 
 
 def test_runtime_summary_returns_fresh_independent_system_objects(tmp_path: Path) -> None:
