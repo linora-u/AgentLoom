@@ -1,7 +1,7 @@
 """Human-review artifacts for typed self-learning candidates.
 
 The database remains authoritative.  This module only projects an immutable
-batch audit and an editable decision inbox into ``.agentloom/reviews``.
+batch audit and an editable decision inbox into ``{runtime.root_dir}/reviews``.
 """
 
 from __future__ import annotations

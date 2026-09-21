@@ -47,6 +47,21 @@ def validate(revision: str) -> dict[str, object]:
                 ],
                 cwd=checkout,
             )
+            _run(
+                [
+                    "uv",
+                    "run",
+                    "--locked",
+                    "--extra",
+                    "smol",
+                    "--extra",
+                    "code",
+                    "loom",
+                    "install-runtime",
+                    "pi",
+                ],
+                cwd=checkout,
+            )
             suite = subprocess.run(
                 [
                     "uv",

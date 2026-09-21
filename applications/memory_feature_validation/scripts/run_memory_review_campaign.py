@@ -68,6 +68,17 @@ from applications.memory_feature_validation.scripts.memory_review_campaign_commo
     select_runs,
     workflow_application_id,
 )
+from applications.memory_feature_validation.scripts.runtime_paths import (  # noqa: E402
+    canonical_runtime_root,
+)
+
+
+def _runtime_root() -> Path:
+    return canonical_runtime_root(REPO_ROOT)
+
+
+def _default_output_root() -> Path:
+    return _runtime_root() / "validation" / "memory_feature_validation"
 
 _LOG_RECORD_RE = re.compile(r"^\s*(?:\[[^\]\r\n]*\])+\s*")
 _INPUT_TOKEN_RE = re.compile(r"Input tokens:\s*[0-9,]+\s*\(\+([0-9,]+)\)")
@@ -1351,10 +1362,6 @@ def _run_attempt(
         raise RuntimeError("campaign Application escaped its committed agent root") from exc
     if not (agent_root / "pyproject.toml").is_file() or not workflow_path.is_file():
         raise RuntimeError("campaign Application agent root was incomplete")
-    runtime_root = (
-        execution_root / "runtime" / spec.run_id / f"attempt-{attempt_number}"
-    )
-    runtime_root.mkdir(parents=True, exist_ok=True)
     db_path = state_root / "self_learning.db"
     before = _db_snapshot(db_path, markers)
     env = os.environ.copy()
@@ -1362,7 +1369,6 @@ def _run_attempt(
     env.pop(CAMPAIGN_LLM_CONFIG_FD_ENV, None)
     env.update(
         {
-            "AGENT_LOOM_RUNTIME_ROOT": str(runtime_root),
             "AGENTLOOM_RUNTIME_ROOT": str(state_root),
             "AGENTLOOM_MEMORY_CASE_ID": spec.case_id,
             "AGENTLOOM_MEMORY_CASE_PHASE": spec.phase,
@@ -1435,7 +1441,7 @@ def _run_attempt(
     model["root_identity_valid"] = after.get("root_identity_valid") is True
     model["review_batch_delta"] = _review_batch_delta(before, after)
 
-    private_findings = _privacy_findings([state_root, runtime_root], oracle)
+    private_findings = _privacy_findings([state_root], oracle)
     if execution_root != campaign_dir:
         private_findings = _private_finding_paths(
             private_findings,
@@ -1462,7 +1468,7 @@ def _run_attempt(
         "duration_seconds": elapsed,
         "command": ["loom", "run", spec.workflow],
         "agent_root": spec.agent_root,
-        "runtime_root": runtime_root.relative_to(execution_root).as_posix(),
+        "runtime_root": state_root.relative_to(execution_root).as_posix(),
         "state_root": state_root.relative_to(execution_root).as_posix(),
         "log_path": str(log_path),
         "completion_marker_seen": _COMPLETION_MARKER in _ANSI_RE.sub("", raw_output),
@@ -2208,7 +2214,7 @@ def main() -> int:
     parser.add_argument(
         "--output-root",
         type=Path,
-        default=REPO_ROOT / ".agentloom" / "validation" / "memory_feature_validation",
+        default=_default_output_root(),
     )
     args = parser.parse_args()
 

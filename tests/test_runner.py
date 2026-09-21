@@ -897,12 +897,12 @@ class TestRunApp:
             ("", "invalid created_at"),
             (
                 (datetime.now(UTC) - timedelta(days=30)).replace(tzinfo=None).isoformat(),
-                "expired",
+                "invalid created_at",
             ),
         ],
     )
     @patch("agentloom.application.runner.YamlConfiguredSupervisorAgent")
-    def test_resume_rejects_invalid_or_expired_naive_created_at(
+    def test_resume_rejects_invalid_or_timezone_naive_created_at(
         self,
         mock_cls,
         fake_yaml: Path,
@@ -1432,8 +1432,8 @@ class TestExecuteApp:
         fake_yaml: Path,
     ) -> None:
         from agentloom.application.run import (
-            ApplicationRunInterrupted,
             ApplicationRunError,
+            ApplicationRunInterrupted,
         )
         from agentloom.application.runner import execute_app
         from agentloom.runtime.goal import GoalState
