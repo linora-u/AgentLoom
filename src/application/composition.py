@@ -6,7 +6,6 @@ from agentloom.runtime.agent_runtime import (
     RuntimeDefinition,
     RuntimeFactory,
     RuntimeRegistry,
-    SMOLAGENTS_CAPABILITIES,
 )
 
 
@@ -25,6 +24,10 @@ def build_builtin_runtime_registry(
         smolagents_factory = build_smolagents
 
     registry = RuntimeRegistry()
+    from agentloom.runtimes.smolagents.metadata import (
+        CAPABILITIES as SMOLAGENTS_CAPABILITIES,
+    )
+
     registry.register(
         "smolagents",
         capabilities=SMOLAGENTS_CAPABILITIES,

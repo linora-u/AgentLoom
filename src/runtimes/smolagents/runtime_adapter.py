@@ -15,6 +15,7 @@ from agentloom.runtimes.smolagents.checkpoint_codec import (
 from agentloom.runtimes.smolagents.conversation_recovery import (
     prepare_steps_for_resume,
 )
+from agentloom.runtimes.smolagents.metadata import CAPABILITIES
 from agentloom.runtimes.smolagents.recoverable_errors import (
     is_recoverable_agent_error,
 )
@@ -175,14 +176,7 @@ class SmolagentsRuntimeAdapter:
 
     @property
     def capabilities(self) -> RuntimeCapabilities:
-        return RuntimeCapabilities(
-            structured_tools=True,
-            parallel_tools=True,
-            checkpoint_resume=True,
-            subagents=True,
-            goal=True,
-            stop_hooks=True,
-        )
+        return CAPABILITIES
 
     @staticmethod
     def _is_committed_step(step: Any) -> bool:
