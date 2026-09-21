@@ -28,6 +28,7 @@ def platform_project(tmp_path, monkeypatch):
         "default_toolsets": [], "smart_summary": False,
         "lsp_servers": {"enabled": False},
         "logging": {"console_enabled": False},
+        "runtime": {"root_dir": "state/runtime"},
     }))
     (config / "llm.yaml").write_text(yaml.safe_dump({"model": {
         "default_model_type": "fixture", "fixture": {"model": "fixture/model", "adapter": "openai_chat"},
@@ -396,7 +397,7 @@ def test_memory_and_history_tools_use_existing_application_scope(platform_projec
 
 def test_application_uses_one_canonical_runtime_home(platform_project):
     root, workflow, programs, _, run = platform_project
-    runtime_root = root / ".agentloom"
+    runtime_root = root / "state" / "runtime"
     hook_evidence = workflow.parents[1] / "outputs" / "hook-events.jsonl"
     hook_script = root / "hooks" / "capture_runtime_paths.py"
     hook_script.parent.mkdir()

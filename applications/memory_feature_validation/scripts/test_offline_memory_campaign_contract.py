@@ -218,7 +218,21 @@ def test_cli_defaults_are_the_only_release_eligible_shape() -> None:
     assert args.seed == DEFAULT_SEED
     assert args.only_case is None
     assert args.source_db == REPO_ROOT / ".agentloom" / "self_learning.db"
+    assert args.output_root == REPO_ROOT / ".agentloom" / "validation" / "memory_feature_validation"
     assert args.baseline_metrics is None
+
+
+def test_cli_defaults_follow_the_canonical_runtime_override(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    runtime_root = tmp_path / "configured-runtime"
+    monkeypatch.setenv("AGENTLOOM_RUNTIME_ROOT", str(runtime_root))
+
+    args = _parser().parse_args([])
+
+    assert args.source_db == runtime_root / "self_learning.db"
+    assert args.output_root == runtime_root / "validation" / "memory_feature_validation"
 
 
 @pytest.mark.parametrize("layout", ["historical", "responsibility", "canonical"])

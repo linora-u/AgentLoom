@@ -73,6 +73,18 @@ from applications.memory_feature_validation.scripts.run_memory_review_campaign i
 )
 
 
+def test_campaign_default_output_follows_canonical_runtime_override(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    runtime_root = tmp_path / "configured-runtime"
+    monkeypatch.setenv("AGENTLOOM_RUNTIME_ROOT", str(runtime_root))
+
+    assert campaign_runner._default_output_root() == (
+        runtime_root / "validation" / "memory_feature_validation"
+    )
+
+
 def _empty_v6_database() -> dict:
     return {
         "integrity": "ok",
