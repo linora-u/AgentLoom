@@ -8,18 +8,34 @@ import os
 import platform
 from pathlib import Path
 import re
+import selectors
 import shutil
 import signal
 import subprocess
 import sys
 import tempfile
+import time
+from uuid import uuid4
 
-from agentloom.runtimes.pi.metadata import BRIDGE_VERSION, SDK_VERSION
+from agentloom.runtimes.pi.metadata import (
+    BRIDGE_VERSION,
+    CAPABILITIES,
+    SDK_VERSION,
+)
+from agentloom.runtimes.pi.protocol import (
+    Handshake,
+    HandshakeResult,
+    PI_BRIDGE_PROTOCOL_VERSION,
+    Request,
+    Response,
+    decode_message,
+    encode_message,
+)
 from agentloom.runtime.subprocess_env import build_subprocess_env
 
 SDK_PACKAGE = "@earendil-works/pi-coding-agent"
-PROTOCOL_VERSION = 2
 READY_MANIFEST = "ready.json"
+MAX_FRAME_BYTES = 8 * 1024 * 1024
 
 
 def source_bridge_dir() -> Path:
@@ -77,7 +93,7 @@ def _identity(source_bridge: Path, *, node: str, env: dict[str, str]) -> dict[st
     return {
         "sdk_version": SDK_VERSION,
         "bridge_version": str(BRIDGE_VERSION),
-        "protocol_version": str(PROTOCOL_VERSION),
+        "protocol_version": str(PI_BRIDGE_PROTOCOL_VERSION),
         "fingerprint": _fingerprint(source_bridge),
         "platform": platform.system().lower(),
         "machine": platform.machine().lower(),
@@ -162,6 +178,115 @@ def _run(command: list[str], bridge: Path, env: dict[str, str]) -> None:
             raise RuntimeError(f"Pi dependency installation failed during {Path(command[0]).name} (exit {process.returncode}).")
 
 
+def _verify_handshake(
+    *,
+    node: str,
+    bridge: Path,
+    staging_root: Path,
+    env: dict[str, str],
+) -> None:
+    """Start the staged bridge and require its exact production handshake."""
+
+    instance_id = f"install-{uuid4().hex}"
+    request_id = f"host:{uuid4().hex}"
+    request = Request(
+        version=2,
+        kind="request",
+        instance_id=instance_id,
+        request_id=request_id,
+        payload=Handshake(
+            method="handshake",
+            protocol_version=PI_BRIDGE_PROTOCOL_VERSION,
+            bridge_version=BRIDGE_VERSION,
+            native_tool_contract=1,
+        ),
+    )
+    with tempfile.TemporaryDirectory(
+        prefix=".pi-handshake-",
+        dir=staging_root.parent,
+    ) as private_dir:
+        handshake_env = env.copy()
+        handshake_env.update(
+            HOME=private_dir,
+            XDG_CONFIG_HOME=private_dir,
+            TMPDIR=private_dir,
+        )
+        with subprocess.Popen(
+            [node, str(bridge / "dist" / "index.js"), private_dir],
+            cwd=private_dir,
+            env=handshake_env,
+            stdin=subprocess.PIPE,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.DEVNULL,
+            start_new_session=True,
+        ) as process:
+            try:
+                assert process.stdin is not None
+                assert process.stdout is not None
+                process.stdin.write(encode_message(request).encode("utf-8"))
+                process.stdin.close()
+                process.stdin = None
+                deadline = time.monotonic() + 15
+                output = bytearray()
+                with selectors.DefaultSelector() as selector:
+                    selector.register(process.stdout, selectors.EVENT_READ)
+                    while True:
+                        remaining = deadline - time.monotonic()
+                        if remaining <= 0 or not selector.select(remaining):
+                            raise subprocess.TimeoutExpired(process.args, 15)
+                        chunk = os.read(
+                            process.stdout.fileno(),
+                            min(64 * 1024, MAX_FRAME_BYTES + 1 - len(output)),
+                        )
+                        if not chunk:
+                            break
+                        output.extend(chunk)
+                        if len(output) > MAX_FRAME_BYTES:
+                            raise ValueError("Pi bridge handshake frame exceeds 8 MiB.")
+                process.wait(timeout=max(0, deadline - time.monotonic()))
+                stdout = bytes(output)
+            except subprocess.TimeoutExpired as exc:
+                try:
+                    os.killpg(process.pid, signal.SIGKILL)
+                except ProcessLookupError:
+                    pass
+                process.wait()
+                raise RuntimeError(
+                    "Pi bridge handshake timed out."
+                ) from exc
+            except BaseException:
+                try:
+                    os.killpg(process.pid, signal.SIGKILL)
+                except ProcessLookupError:
+                    pass
+                process.wait()
+                raise
+    if (
+        process.returncode != 0
+        or not stdout.endswith(b"\n")
+        or stdout.count(b"\n") != 1
+    ):
+        raise RuntimeError("Pi bridge handshake process failed.")
+    try:
+        response = decode_message(stdout.decode("utf-8"))
+    except (UnicodeError, ValueError) as exc:
+        raise RuntimeError("Pi bridge returned an invalid handshake.") from exc
+    result = response.payload if isinstance(response, Response) else None
+    if (
+        response.instance_id != instance_id
+        or response.request_id != request_id
+        or response.run_id is not None
+        or not isinstance(result, HandshakeResult)
+        or result.runtime_id != "pi"
+        or result.protocol_version != PI_BRIDGE_PROTOCOL_VERSION
+        or result.bridge_version != BRIDGE_VERSION
+        or result.sdk_version != SDK_VERSION
+        or result.native_tool_contract != 1
+        or result.capabilities != CAPABILITIES
+    ):
+        raise RuntimeError("Pi bridge SDK, protocol or capabilities handshake mismatch.")
+
+
 def _copy_inputs(source_bridge: Path, staging_root: Path) -> Path:
     destination_bridge = staging_root / "bridge"
     ignore = shutil.ignore_patterns("node_modules", "dist", ".agentloom-install.*")
@@ -227,6 +352,12 @@ def install_pi(source_bridge: Path | None = None, runtime_root: Path | None = No
                 for source in bridge.glob("*.ts")
             ):
                 raise RuntimeError("Pi installation did not produce the locked SDK and bridge.")
+            _verify_handshake(
+                node=node,
+                bridge=bridge,
+                staging_root=staging_root,
+                env=env,
+            )
             (staging_root / READY_MANIFEST).write_text(
                 json.dumps(
                     {"identity": identity, "entry": "bridge/dist/index.js"},
