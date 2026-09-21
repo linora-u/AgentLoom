@@ -59,6 +59,13 @@ def test_legacy_package_and_alias_loader_are_absent() -> None:
         assert not (ROOT / 'src' / removed).exists()
 
 
+def test_runtime_contract_does_not_export_smolagents_capabilities() -> None:
+    run_fresh("""
+        from agentloom.runtime import agent_runtime
+        assert not hasattr(agent_runtime, "SMOLAGENTS_CAPABILITIES")
+    """)
+
+
 def test_tool_terminal_records_and_hook_outcomes_do_not_load_the_engine() -> None:
     run_fresh("""
         import sys
