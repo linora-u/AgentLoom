@@ -5,7 +5,7 @@ from __future__ import annotations
 import copy
 import json
 import uuid
-from collections.abc import Callable, Iterator
+from collections.abc import Callable, Iterator, Mapping
 from contextlib import contextmanager
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
@@ -15,6 +15,18 @@ from agentloom.configuration.yaml_loader import load_unique_yaml
 from agentloom.runtime import SecureDirectory, resolve_runtime_home
 
 from .schedule import next_run, parse_datetime, validate_schedule
+from .schema import (
+    JOB_NAME_MAX_BYTES,
+    MAX_PID,
+    MAX_SAFE_INTEGER,
+    SCHEDULE_DOCUMENT_MAX_BYTES,
+    SCHEDULE_HEARTBEAT_MAX_BYTES,
+    decode_json_object,
+    execution_rank,
+    execution_sequence,
+    validate_heartbeat,
+    validate_schedule_document,
+)
 
 Document = dict[str, Any]
 
@@ -24,7 +36,7 @@ EXECUTION_COMMAND_MAX_ITEMS = 32
 EXECUTION_COMMAND_MAX_BYTES = 4 * 1024
 EXECUTION_COMMAND_ITEM_MAX_BYTES = 1024
 EXECUTION_ERROR_MAX_BYTES = 4 * 1024
-EXECUTION_JOB_NAME_MAX_BYTES = 512
+EXECUTION_JOB_NAME_MAX_BYTES = JOB_NAME_MAX_BYTES
 
 
 class ScheduleStoreError(RuntimeError):
@@ -81,6 +93,7 @@ class ScheduleStore:
     EXECUTION_RETENTION_PER_JOB = DEFAULT_EXECUTION_RETENTION_PER_JOB
     EXECUTION_COMMAND_MAX_ITEMS = EXECUTION_COMMAND_MAX_ITEMS
     EXECUTION_COMMAND_MAX_BYTES = EXECUTION_COMMAND_MAX_BYTES
+    EXECUTION_COMMAND_ITEM_MAX_BYTES = EXECUTION_COMMAND_ITEM_MAX_BYTES
     EXECUTION_ERROR_MAX_BYTES = EXECUTION_ERROR_MAX_BYTES
     EXECUTION_JOB_NAME_MAX_BYTES = EXECUTION_JOB_NAME_MAX_BYTES
 
@@ -150,28 +163,72 @@ class ScheduleStore:
 
     def _read_unlocked(self) -> Document:
         try:
-            payload = self._storage.read_json("jobs.json")
+            raw, truncated = self._storage.read_bytes_up_to(
+                "jobs.json",
+                SCHEDULE_DOCUMENT_MAX_BYTES,
+            )
+            if truncated:
+                raise ValueError("schedule document exceeds the storage size limit")
+            payload = decode_json_object(raw)
         except FileNotFoundError:
             return self._empty()
-        except (OSError, RuntimeError, UnicodeDecodeError, json.JSONDecodeError) as exc:
+        except (OSError, RuntimeError, ValueError) as exc:
             raise ScheduleStoreError(f"Cannot read schedule store {self.jobs_path}: {exc}") from exc
-        if not isinstance(payload, dict) or payload.get("version") != self.VERSION:
-            raise ScheduleStoreError(f"Unsupported schedule store format: {self.jobs_path}")
-        if not isinstance(payload.get("jobs"), list) or not isinstance(payload.get("executions"), list):
-            raise ScheduleStoreError(f"Invalid schedule store document: {self.jobs_path}")
+        try:
+            validate_schedule_document(
+                payload,
+                schedule_validator=self._validate_persisted_schedule,
+            )
+        except ValueError as exc:
+            raise ScheduleStoreError(f"Invalid schedule store document {self.jobs_path}: {exc}") from exc
         return payload
 
     def _write_unlocked(self, payload: Document) -> None:
         self._ensure_dir()
+        try:
+            validate_schedule_document(
+                payload,
+                schedule_validator=self._validate_persisted_schedule,
+            )
+        except ValueError as exc:
+            raise ScheduleStoreError(f"Refusing to write invalid schedule document: {exc}") from exc
         removed_executions = self._prune_executions(payload)
-        serialized = json.dumps(
-            payload,
-            ensure_ascii=False,
-            indent=2,
-            sort_keys=True,
-        )
-        self._storage.atomic_write_text("jobs.json", serialized + "\n")
+        try:
+            validate_schedule_document(
+                payload,
+                schedule_validator=self._validate_persisted_schedule,
+            )
+        except ValueError as exc:
+            raise ScheduleStoreError(f"Retention produced an invalid schedule document: {exc}") from exc
+        try:
+            serialized = (
+                json.dumps(
+                    payload,
+                    ensure_ascii=False,
+                    indent=2,
+                    sort_keys=True,
+                    allow_nan=False,
+                )
+                + "\n"
+            )
+            encoded = serialized.encode("utf-8")
+            decoded = decode_json_object(encoded)
+            validate_schedule_document(
+                decoded,
+                schedule_validator=self._validate_persisted_schedule,
+            )
+        except (TypeError, ValueError) as exc:
+            raise ScheduleStoreError(f"Refusing to serialize invalid schedule document: {exc}") from exc
+        if len(encoded) > SCHEDULE_DOCUMENT_MAX_BYTES:
+            raise ScheduleStoreError("Schedule document exceeds the storage size limit")
+        self._storage.atomic_write("jobs.json", encoded)
         self._cleanup_execution_logs(removed_executions)
+
+    @staticmethod
+    def _validate_persisted_schedule(schedule: Mapping[str, Any]) -> None:
+        normalized = validate_schedule(dict(schedule))
+        if normalized != dict(schedule):
+            raise ValueError("schedule is not in canonical persisted form")
 
     @staticmethod
     def _bounded_text(value: Any, max_bytes: int) -> str:
@@ -195,34 +252,17 @@ class ScheduleStore:
             bounded.append(item)
         return bounded
 
-    @staticmethod
-    def _execution_sequence(execution: dict[str, Any]) -> int:
-        sequence = execution.get("sequence")
-        if isinstance(sequence, int) and not isinstance(sequence, bool) and sequence >= 0:
-            return sequence
-        return -1
-
-    @classmethod
-    def _execution_rank(cls, execution: dict[str, Any]) -> tuple[int, str, str]:
-        observed_at = execution.get("finished_at") or execution.get("started_at") or execution.get("claimed_at") or ""
-        return (
-            cls._execution_sequence(execution),
-            str(observed_at),
-            str(execution.get("id") or ""),
-        )
-
     def _next_execution_sequence(self, payload: Document) -> int:
-        return (
-            max(
-                (
-                    self._execution_sequence(execution)
-                    for execution in payload["executions"]
-                    if isinstance(execution, dict)
-                ),
-                default=0,
-            )
-            + 1
+        for execution in payload["executions"]:
+            if isinstance(execution, dict) and "sequence" in execution and execution_sequence(execution) < 0:
+                raise ScheduleStoreError("Schedule execution sequence is invalid")
+        current = max(
+            (execution_sequence(execution) for execution in payload["executions"] if isinstance(execution, dict)),
+            default=0,
         )
+        if current >= MAX_SAFE_INTEGER:
+            raise ScheduleStoreError("Schedule execution sequence is exhausted")
+        return current + 1
 
     def _prune_executions(self, payload: Document) -> list[dict[str, Any]]:
         executions = payload["executions"]
@@ -251,7 +291,7 @@ class ScheduleStore:
         for candidates in terminal_by_job.values():
             newest = sorted(
                 candidates,
-                key=lambda item: self._execution_rank(item[1]),
+                key=lambda item: execution_rank(item[1]),
                 reverse=True,
             )[: self.execution_retention_per_job]
             per_job_indexes.update(index for index, _ in newest)
@@ -260,7 +300,7 @@ class ScheduleStore:
             index
             for index, _ in sorted(
                 ((index, executions[index]) for index in per_job_indexes if isinstance(executions[index], dict)),
-                key=lambda item: self._execution_rank(item[1]),
+                key=lambda item: execution_rank(item[1]),
                 reverse=True,
             )[: self.execution_retention_global]
         }
@@ -290,18 +330,47 @@ class ScheduleStore:
                     # schedule mutation because a log was swapped or malformed.
                     continue
 
-    def read_state_json(self, relative: str | Path) -> Any:
+    def read_state_json(
+        self,
+        relative: str | Path,
+        *,
+        max_bytes: int = SCHEDULE_HEARTBEAT_MAX_BYTES,
+    ) -> Any:
         """Read schedule-owned state through the pinned directory inode."""
 
         self._ensure_dir()
-        return self._storage.read_json(relative)
+        payload, truncated = self._storage.read_bytes_up_to(relative, max_bytes)
+        if truncated:
+            raise ValueError("schedule state exceeds the storage size limit")
+        return decode_json_object(payload)
 
     def write_state_json(self, relative: str | Path, payload: Any) -> None:
         """Atomically write schedule-owned state without pathname traversal."""
 
         self._ensure_dir()
-        serialized = json.dumps(payload, ensure_ascii=False, indent=2, sort_keys=True)
-        self._storage.atomic_write_text(relative, serialized + "\n")
+        try:
+            if Path(relative).as_posix() == "serve-status.json":
+                if not isinstance(payload, Mapping):
+                    raise ValueError("schedule heartbeat must be an object")
+                validate_heartbeat(payload)
+            serialized = (
+                json.dumps(
+                    payload,
+                    ensure_ascii=False,
+                    indent=2,
+                    sort_keys=True,
+                    allow_nan=False,
+                )
+                + "\n"
+            )
+            encoded = serialized.encode("utf-8")
+            if Path(relative).as_posix() == "serve-status.json":
+                if len(encoded) > SCHEDULE_HEARTBEAT_MAX_BYTES:
+                    raise ValueError("schedule heartbeat exceeds the storage size limit")
+                validate_heartbeat(decode_json_object(encoded))
+        except (TypeError, ValueError) as exc:
+            raise ValueError(f"invalid schedule state: {exc}") from exc
+        self._storage.atomic_write(relative, encoded)
 
     def execution_log_paths(self, execution_id: str) -> tuple[str, str]:
         """Return canonical absolute log paths beneath the active runtime home."""
@@ -370,7 +439,7 @@ class ScheduleStore:
         executions = [item for item in self.snapshot()["executions"] if isinstance(item, dict)]
         if job_id is not None:
             executions = [item for item in executions if item.get("job_id") == job_id]
-        return sorted(executions, key=self._execution_rank, reverse=True)
+        return sorted(executions, key=execution_rank, reverse=True)
 
     def get_job(self, job_id: str) -> dict[str, Any]:
         with self._locked(exclusive=False):
@@ -405,9 +474,16 @@ class ScheduleStore:
         created = _as_utc(now)
         first = next_run(normalized, after=created)
         with self._locked(exclusive=True):
+            raw_name = str(name).strip() or Path(yaml_path).stem
+            if any(character in raw_name for character in ("\x00", "\n", "\r")):
+                raise ValueError("Schedule name contains unsupported control characters")
+            job_name = self._bounded_text(
+                raw_name,
+                JOB_NAME_MAX_BYTES,
+            )
             job = {
                 "id": f"job_{uuid.uuid4().hex[:12]}",
-                "name": str(name).strip() or Path(yaml_path).stem,
+                "name": job_name,
                 "yaml_path": self._stored_yaml_path(yaml_path),
                 "schedule": normalized,
                 "state": "scheduled",
@@ -591,6 +667,8 @@ class ScheduleStore:
         now: datetime | None = None,
     ) -> dict[str, Any]:
         started_at = _as_utc(now)
+        if isinstance(pid, bool) or not isinstance(pid, int) or not 0 < pid <= MAX_PID:
+            raise ValueError("pid must be a positive safe integer")
         expected_stdout, expected_stderr = self.execution_log_paths(execution_id)
         if (stdout_path, stderr_path) != (expected_stdout, expected_stderr):
             raise ValueError("stdout_path and stderr_path must be canonical execution log paths")
@@ -637,6 +715,12 @@ class ScheduleStore:
         now: datetime | None = None,
     ) -> dict[str, Any]:
         finished_at = _as_utc(now)
+        if exit_code is not None and (
+            isinstance(exit_code, bool)
+            or not isinstance(exit_code, int)
+            or not -MAX_SAFE_INTEGER <= exit_code <= MAX_SAFE_INTEGER
+        ):
+            raise ValueError("exit_code must be a safe integer or None")
         expected_stdout, expected_stderr = self.execution_log_paths(execution_id)
         if (stdout_path, stderr_path) != (expected_stdout, expected_stderr):
             raise ValueError("stdout_path and stderr_path must be canonical execution log paths")
@@ -666,7 +750,10 @@ class ScheduleStore:
             job["claim"] = None
             job["last_run_at"] = finished_at.isoformat()
             job["last_status"] = execution["status"]
-            job["run_count"] = int(job.get("run_count") or 0) + 1
+            run_count = int(job.get("run_count") or 0)
+            if not 0 <= run_count < MAX_SAFE_INTEGER:
+                raise ScheduleStoreError("Schedule run_count is exhausted")
+            job["run_count"] = run_count + 1
             job["updated_at"] = finished_at.isoformat()
             if execution.get("trigger") == "scheduled":
                 previous = _parse(str(execution["scheduled_for"]))
