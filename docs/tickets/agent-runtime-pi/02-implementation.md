@@ -28,7 +28,7 @@ Tests used Python 3.12.13 and the existing locked Python dependencies. `PYTHONPA
 
 1. `RuntimeDefinition.model` and smol constructor fields (`max_steps`, `planning_interval`, `smart_summary`, `todo_mode`, `prompt_template_path`, `max_consecutive_model_errors`) remain available for old direct callers. New application assembly supplies `runtime_options` and `option_sources` instead. smol reconciles these and rejects conflicting values.
 2. BaseAgent retains smol-only Python binding resolution and injection for existing framework callers; native runtimes resolve catalog data without the Python provider adapter. Other framework-owned background model operations are unchanged.
-3. `runtime.tool_gateway.final_answer_binding` is a lazy compatibility import; its implementation belongs to `adapters.smolagents.terminal`. Future runtime adapters must not use it as a universal completion mechanism.
+3. At this ticket's integration point, `runtime.tool_gateway.final_answer_binding` was a lazy compatibility import. The final source-layout migration removed that compatibility entry after all callers moved to the canonical owner, `runtimes.smolagents.terminal`. Other runtime adapters must not use it as a universal completion mechanism.
 4. Old execution-config helpers remain for existing read-only tooling and callers. The new option normalization is the construction path; broad smol cleanup remains ticket 04.
 5. Only smol is production-registered. Native fixture registration exists solely in tests. Ticket 03 must freeze the capabilities/options against the Pi SDK proof; ticket 07 supplies actual Pi execution, and ticket 09 supplies Pi Goal/Stop behavior.
 

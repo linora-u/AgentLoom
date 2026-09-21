@@ -1,4 +1,4 @@
-"""smolagents terminal Tool contract (temporary old import remains supported)."""
+"""smolagents-owned terminal Tool contract."""
 from typing import Any
 from dataclasses import replace
 

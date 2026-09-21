@@ -66,6 +66,13 @@ def test_runtime_contract_does_not_export_smolagents_capabilities() -> None:
     """)
 
 
+def test_tool_gateway_does_not_export_smolagents_final_answer_binding() -> None:
+    run_fresh("""
+        from agentloom.runtime import tool_gateway
+        assert not hasattr(tool_gateway, "final_answer_binding")
+    """)
+
+
 def test_tool_terminal_records_and_hook_outcomes_do_not_load_the_engine() -> None:
     run_fresh("""
         import sys
