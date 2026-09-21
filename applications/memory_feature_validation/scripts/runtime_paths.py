@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from agentloom.configuration import load_project_system_config
+from agentloom.configuration.system_loader import load_project_system_config
 from agentloom.runtime import resolve_runtime_home
 
 

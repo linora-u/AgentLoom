@@ -29,6 +29,11 @@ from .config_validation import (
 from .defaults import DEFAULT_MODEL_REQUESTS_PER_MINUTE
 from .layered_builder import LayeredConfigBuilder
 from .llm_config import LLMConfig
+from .system_loader import (
+    filter_llm_only_top_level_keys as _filter_llm_only_top_level_keys,
+)
+from .system_loader import load_config_mapping as _load_yaml
+from .system_loader import load_project_system_config
 from .yaml_loader import load_unique_yaml
 
 SYSTEM_CONFIG_NAME = "system.yaml"
@@ -54,7 +59,6 @@ _WORKFLOW_OVERLAY_KEYS = {
     "hooks",
     "skills",
 }
-_LLM_ONLY_TOP_LEVEL_KEYS = {"model", "llm", "langfuse"}
 _GLOBAL_ONLY_TOP_LEVEL_KEYS = {"runtime", "logging"}
 
 logger = get_logger(__name__)
@@ -103,16 +107,6 @@ class EffectiveAgentConfigSnapshot:
     layers: tuple[ConfigLayerSnapshot, ...]
 
 
-def _load_yaml(path: Path) -> dict[str, Any]:
-    if not path.exists():
-        return {}
-    with path.open("r", encoding="utf-8") as f:
-        loaded = load_unique_yaml(f) or {}
-    if not isinstance(loaded, dict):
-        raise ValueError(f"Configuration file must contain a mapping: {path}")
-    return loaded
-
-
 def _load_llm_config(path: Path) -> LLMConfig:
     """Load one capsule-only config pipe, otherwise use the normal disk file.
 
@@ -142,28 +136,6 @@ def _load_llm_config(path: Path) -> LLMConfig:
     if not isinstance(raw, dict):
         raise ValueError("in-memory campaign LLM configuration must be a mapping")
     return LLMConfig.from_dict(raw)
-
-
-def _filter_llm_only_top_level_keys(
-    config_map: dict[str, Any] | None,
-    *,
-    source_name: str,
-) -> dict[str, Any]:
-    if not config_map:
-        return {}
-
-    filtered: dict[str, Any] = {}
-    for key, value in config_map.items():
-        if key in _LLM_ONLY_TOP_LEVEL_KEYS:
-            logger.warning(
-                "Ignoring top-level key '%s' in %s; LLM settings must come from config/%s only.",
-                key,
-                source_name,
-                LLM_CONFIG_NAME,
-            )
-            continue
-        filtered[key] = value
-    return filtered
 
 
 def _reject_application_global_only_keys(
@@ -443,33 +415,6 @@ def load_project_config(project_root: Path | str) -> UnifiedConfig:
         config._loaded_raw = deepcopy(config.raw)
         config._loaded_llm = config.llm.model_dump()
     return config
-
-
-def load_project_system_config(
-    project_root: Path | str,
-    *,
-    require_exists: bool = True,
-) -> dict[str, Any]:
-    """Load and validate one project's system config without reading LLM secrets."""
-
-    agent_root = Path(project_root).expanduser().resolve()
-    system_path = agent_root / "config" / SYSTEM_CONFIG_NAME
-    if not system_path.is_file():
-        if require_exists:
-            raise FileNotFoundError(f"Project system config does not exist: {system_path}")
-        return {}
-    system_yaml = _filter_llm_only_top_level_keys(
-        _load_yaml(system_path),
-        source_name="config/system.yaml",
-    )
-    layered_builder = LayeredConfigBuilder(
-        validate_hook=lambda snapshot, overlay: validate_system_snapshot(
-            snapshot,
-            overlay.name,
-        )
-    )
-    layered_builder.apply_mapping("config/system.yaml", system_yaml)
-    return layered_builder.build()
 
 
 def get_config() -> UnifiedConfig:
