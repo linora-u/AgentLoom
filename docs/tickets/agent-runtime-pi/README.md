@@ -6,7 +6,11 @@
 
 **2026-09-21 配置决策更新：** 后端配置只解释 `runtime_options`。旧顶层 smol 参数静默忽略，不兼容转换、不校验拒绝；仓库应用已迁移。A01 改为 canonical smol Application 验收，已完成票据的旧兼容结果仅代表历史基线。
 
-**先看当前进度，再看依赖图。** 01–11、13 已有本票完成记录，剩余 12→14 按前置串行推进。04、05、06、07、08、09、11 已正式合入 main，保留分阶段提交；09 的交付提交为 `cc0edeb1`，11 为 `96db1542`，两票 worktree 均已清理。13 已完成安装与发行初验；10 已正式合入 main（`ab48014e`）并清理工作区，官方写入/Shell、原文产物和真实 Application 验证见本票记录。12 从包含 10 冻结入口的 main 新建 worktree，14 等 12 完成后串行收口。14 项都是完整交付的必做项，“可并行”不表示可省略。
+**先看当前进度，再看依赖图。** 01–14 的实现和候选验收均已完成；
+12/14 的最终代码候选为 `f5b8a0f`，完整测试 4557 passed、1 skipped，
+非 editable 安装 29/29，真实 provider 正常与恢复 campaign 合计 6/6。
+当前仅剩把验收记录提交、快进 main 和清理本次 worktree；正式结果见
+[12 验收](12-implementation.md) 与 [14 验收](14-implementation.md)。
 
 - 01、02、03 已完成；保留 [01/02 集成验收](01-02-integration.md) 和 [03 实现与验收](03-implementation.md)，本轮不重做。03 记录的回归结果为 4225 passed、1 skipped，真实 Pi SDK 13 passed；这是历史基线结果，不是本次文档修改重新运行的结果。
 - 2026-09-20 按维护者最新要求，main 从 `9d5a8891` 快进到 `da4a049d`，纳入已验收的 04/05/07/08 源码、测试和文档。源码与组合验收版本一致（4329 passed、1 skipped），真实 provider 限制继续保留；后续交付也应正式合入 main。
@@ -21,8 +25,8 @@
 | 11：混合协作与记忆 | 已完成，不重开 | [验收](11-implementation.md)：双向 Application、Worker 隔离、Goal、ContextRef 与认可记忆交接已验证 |
 | 13：干净安装 | 已完成，不重开 | [验收](13-implementation.md)：4412 passed、1 skipped；安装 29/29、真实模型 3/3；14 仍需重建最终发行物 |
 | 10：Pi 写入/Shell | 已完成，不重开 | [验收](10-implementation.md)：全量 4464 passed、1 skipped，1 项进程就绪超时后模块复验 7/7；最终真实模型 30/30；SDK 0.79.4 自动安装，冻结入口 `refs/agentloom/ticket10-frozen` |
-| 12 | 可以开新 session/worktree | 起始 main 必须包含 10 冻结入口；消费真实副作用和 journal 故障入口 |
-| 14 | 最后串行收口 | 11、13 已完成本票验收；等 12 及全部前票集成，不提前开旧基线工作区 |
+| 12：Pi 恢复 | 已完成，不重开 | [验收](12-implementation.md)：同 task/new Run、双日志、崩溃窗口、版本/身份与取消均已验证 |
+| 14：最终集成 | 候选已验证 | [验收](14-implementation.md)：A01–A14、完整测试、发行矩阵和 live smoke 已完成；等待 main 交付记录 |
 
 职责按下面的表落实，完整约束见 [工具归属](tool-ownership.md)：
 
@@ -64,9 +68,9 @@
 | [09](09-pi-read-and-platform-tools.md) | Pi 原生读取、平台/可选工具回调与 Goal | 05、07、08 | Pi 链串行；可与 06 并行 |
 | [10](10-pi-write-shell-artifacts.md) | Pi 官方写入/Shell 的保护、产物和证据 | 06、09；已完成 | 不重开；见 [实施与验收](10-implementation.md) |
 | [11](11-mixed-agents-memory.md) | 双向混合基座、多 Worker 隔离与长期记忆复用 | 09；已完成 | 不重开；见 [实施与验收](11-implementation.md) |
-| [12](12-pi-recovery-journal.md) | 原生会话与工具双日志恢复 | 10 | Pi 链串行；可与 11、13 并行 |
+| [12](12-pi-recovery-journal.md) | 原生会话与工具双日志恢复 | 10；已完成 | 不重开；见 [实施与验收](12-implementation.md) |
 | [13](13-clean-install-profiles.md) | Pi-only/smol 干净安装、发行资源和失败路径 | 04、09 | 独立 worktree；可与 10、11、12 并行 |
-| [14](14-final-integration-main.md) | 清理过渡接口、最终验收、正式合入 main | 11、12、13 | 最后串行收口 |
+| [14](14-final-integration-main.md) | 清理过渡接口、最终验收、正式合入 main | 11、12、13；候选已验证 | 仅剩 main 交付与清理记录 |
 
 完成前置意味着已合入同一 integration 基线且通过验证，不只是另一个 session 说“写完了”。每票自己的公开入口接线和验收必须当票完成，不能拖到 14。
 
