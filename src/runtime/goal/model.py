@@ -197,3 +197,34 @@ def validate_goal_state(raw: Any) -> GoalState:
         updated_at=raw["updated_at"],
         completed_at=completed_at,
     )
+
+
+def goal_continuation_prompt(state: Any) -> str:
+    """Render the runtime-neutral continuation request for an active Goal."""
+
+    return (
+        "Continue working toward the active Goal using the existing conversation "
+        "and tool state. Do not restart or repeat completed work.\n\n"
+        f"Goal ID: {state.goal_id}\n"
+        "Objective: unchanged from the initial task context; call get_goal only "
+        "if you need to inspect the canonical objective again.\n"
+        f"Goal status: {state.status}\n"
+        "\n"
+        "A normal final answer does not complete the Goal. Only after the entire "
+        "objective is delivered and verified, call update_goal with status="
+        "'complete' and concise evidence."
+    )
+
+
+def goal_completion_output(
+    segment_output: Any,
+    evidence: str | None,
+) -> Any:
+    """Choose the canonical final output after a Goal completion commit."""
+
+    if (
+        isinstance(segment_output, str)
+        and segment_output.startswith("Error in generating final LLM output:")
+    ):
+        return evidence
+    return segment_output if segment_output is not None else evidence

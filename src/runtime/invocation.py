@@ -17,6 +17,8 @@ from agentloom.runtime.agent_runtime import (
     RuntimeEventSink,
     require_runtime_state,
 )
+from agentloom.runtime.goal import goal_completion_output as _goal_completion_output
+from agentloom.runtime.goal import goal_continuation_prompt as _goal_continuation_prompt
 from agentloom.runtime.hooks import HookEvent, HookRun
 from agentloom.runtime.trace import (
     bind_explicit_execution_context,
@@ -31,30 +33,6 @@ if TYPE_CHECKING:
 
 
 _RUNTIME_EVENT_SINK: ContextVar[RuntimeEventSink | None] = ContextVar('agentloom_runtime_event_sink', default=None)
-
-
-def goal_continuation_prompt(state: Any) -> str:
-    return (
-        "Continue working toward the active Goal using the existing conversation "
-        "and tool state. Do not restart or repeat completed work.\n\n"
-        f"Goal ID: {state.goal_id}\n"
-        "Objective: unchanged from the initial task context; call get_goal only "
-        "if you need to inspect the canonical objective again.\n"
-        f"Goal status: {state.status}\n"
-        "\n"
-        "A normal final answer does not complete the Goal. Only after the entire "
-        "objective is delivered and verified, call update_goal with status="
-        "'complete' and concise evidence."
-    )
-
-
-def goal_completion_output(segment_output: Any, evidence: str | None) -> Any:
-    if (
-        isinstance(segment_output, str)
-        and segment_output.startswith("Error in generating final LLM output:")
-    ):
-        return evidence
-    return segment_output if segment_output is not None else evidence
 
 
 def _merge_runtime_events(
@@ -473,7 +451,7 @@ class AgentInvocation:
             current_task = (
                 transformed_tasks[0]
                 if use_initial_context
-                else goal_continuation_prompt(state)
+                else _goal_continuation_prompt(state)
             )
             try:
                 self.owner._emit_task_start(
@@ -524,7 +502,7 @@ class AgentInvocation:
             segment_index += 1
             state = goal_provider.snapshot()
             if state.status == "complete":
-                return goal_completion_output(segment_output, state.evidence), run_result
+                return _goal_completion_output(segment_output, state.evidence), run_result
             goal_provider.assert_request_allowed()
 
     def _finalize(
