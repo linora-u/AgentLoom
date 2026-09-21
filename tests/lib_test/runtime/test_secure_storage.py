@@ -2,10 +2,12 @@ from __future__ import annotations
 
 import os
 import stat
+import subprocess
+import sys
+import textwrap
 from pathlib import Path
 
 import pytest
-
 from agentloom.runtime import SecureDirectory
 
 
@@ -146,3 +148,108 @@ def test_open_binary_writer_exclusively_creates_and_rejects_symlink_target(
 
     assert (tmp_path / "state" / "safe.log").read_bytes() == b"safe"
     assert outside.read_bytes() == b"sentinel"
+
+
+@pytest.mark.parametrize(
+    "operation",
+    ["read_bytes", "open_binary_reader", "copy_to", "same_content_as"],
+)
+def test_secure_reader_rejects_fifo_without_blocking(
+    tmp_path: Path,
+    operation: str,
+) -> None:
+    state = tmp_path / "state"
+    state.mkdir()
+    os.mkfifo(state / "events.fifo")
+    (state / "regular.bin").write_bytes(b"")
+
+    completed = subprocess.run(
+        [
+            sys.executable,
+            "-c",
+            textwrap.dedent(
+                """
+                import sys
+                from pathlib import Path
+                from agentloom.runtime import SecureDirectory
+
+                with SecureDirectory(Path(sys.argv[1]), create=False) as storage:
+                    try:
+                        if sys.argv[2] == "read_bytes":
+                            storage.read_bytes("events.fifo")
+                        elif sys.argv[2] == "open_binary_reader":
+                            with storage.open_binary_reader("events.fifo"):
+                                raise AssertionError("FIFO was accepted as a regular file")
+                        elif sys.argv[2] == "copy_to":
+                            storage.copy_to("events.fifo", Path(sys.argv[1]) / "copy.bin")
+                        else:
+                            assert not storage.same_content_as(
+                                "events.fifo",
+                                Path(sys.argv[1]) / "regular.bin",
+                            )
+                            raise SystemExit(0)
+                        raise AssertionError("FIFO was accepted as a regular file")
+                    except RuntimeError as error:
+                        assert "not regular" in str(error)
+                """
+            ),
+            str(state),
+            operation,
+        ],
+        text=True,
+        capture_output=True,
+        check=False,
+        timeout=1,
+    )
+
+    assert completed.returncode == 0, completed.stdout + completed.stderr
+    assert not (state / "copy.bin").exists()
+
+
+@pytest.mark.parametrize("operation", ["copy_from", "same_content_as"])
+def test_external_reader_rejects_fifo_without_blocking(
+    tmp_path: Path,
+    operation: str,
+) -> None:
+    state = tmp_path / "state"
+    state.mkdir()
+    (state / "stored.bin").write_bytes(b"")
+    fifo = tmp_path / "source.fifo"
+    os.mkfifo(fifo)
+
+    completed = subprocess.run(
+        [
+            sys.executable,
+            "-c",
+            textwrap.dedent(
+                """
+                import sys
+                from pathlib import Path
+                from agentloom.runtime import SecureDirectory
+
+                state = Path(sys.argv[1])
+                source = Path(sys.argv[2])
+                with SecureDirectory(state, create=False) as storage:
+                    try:
+                        if sys.argv[3] == "copy_from":
+                            storage.copy_from(source, "copied.bin")
+                        else:
+                            assert not storage.same_content_as("stored.bin", source)
+                            raise SystemExit(0)
+                        raise AssertionError("FIFO was accepted as a regular file")
+                    except RuntimeError as error:
+                        assert "not regular" in str(error)
+                """
+            ),
+            str(state),
+            str(fifo),
+            operation,
+        ],
+        text=True,
+        capture_output=True,
+        check=False,
+        timeout=1,
+    )
+
+    assert completed.returncode == 0, completed.stdout + completed.stderr
+    assert not (state / "copied.bin").exists()
