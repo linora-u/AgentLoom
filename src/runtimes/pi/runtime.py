@@ -29,9 +29,11 @@ from agentloom.runtime.agent_runtime import (
     RuntimeEvent,
     RuntimeUsage,
 )
-from agentloom.runtime.goal import get_current_goal_provider
+from agentloom.runtime.goal import (
+    get_current_goal_provider,
+    goal_continuation_prompt,
+)
 from agentloom.runtime.hooks import HookEvent
-from agentloom.runtime.invocation import goal_continuation_prompt
 from agentloom.runtime.native_tool_host import NativeToolHost
 from agentloom.runtime.native_tools import NativeCallIdentity
 from agentloom.runtime.tool_gateway import PreparedToolGateway
