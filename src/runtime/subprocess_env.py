@@ -119,4 +119,20 @@ def build_subprocess_env() -> dict[str, str]:
     # Inject protective overrides
     env.update(_INJECT)
 
+    # Shell commands and Hooks receive concrete paths from the bound runtime
+    # context. They must never reconstruct storage from the current directory
+    # or assume the default ``.agentloom`` root.
+    from agentloom.runtime.context import get_current_run_context
+
+    runtime_context = get_current_run_context()
+    if runtime_context is not None:
+        env.update(
+            {
+                "AGENTLOOM_RUNTIME_ROOT": str(runtime_context.root_dir),
+                "AGENTLOOM_RUN_DIR": str(runtime_context.run_dir),
+                "AGENTLOOM_CHECKPOINT_DIR": str(runtime_context.checkpoint_dir),
+                "AGENTLOOM_SHELL_AUDIT_PATH": str(runtime_context.shell_audit_path),
+            }
+        )
+
     return env

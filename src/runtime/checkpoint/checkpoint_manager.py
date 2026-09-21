@@ -27,7 +27,6 @@ import math
 import os
 import shutil
 import time
-import uuid
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
@@ -126,30 +125,25 @@ class CheckpointTaskLease:
 
 
 # =========================================================================
-# Task-tree migration helpers
+# Task-tree schema
 # =========================================================================
 
 
-def _migrate_task_tree_workers(tree: dict) -> dict:
-    """Auto-upgrade workers from v1 (single dict) to v2 (list of calls).
+def _require_current_task_tree(tree: dict) -> dict:
+    """Reject checkpoint trees that do not use the current worker-call schema."""
 
-    v1 format::
-
-        "workers": {"w1": {"status": "completed", ...}}
-
-    v2 format::
-
-        "workers": {"w1": [{"call_index": 0, "status": "completed", ...}]}
-    """
-    workers = tree.get("workers")
+    workers = tree.get("workers", {})
     if not isinstance(workers, dict):
-        return tree
-    for name, entry in list(workers.items()):
-        if isinstance(entry, dict):
-            # v1 → v2: wrap single dict in a list
-            entry.setdefault("call_index", 0)
-            entry.setdefault("input_hash", "")
-            workers[name] = [entry]
+        raise ValueError("unsupported checkpoint schema: workers must be a mapping")
+    for worker_name, calls in workers.items():
+        if not isinstance(worker_name, str) or not isinstance(calls, list):
+            raise ValueError(
+                "unsupported checkpoint schema: each worker must contain a list of calls"
+            )
+        if not all(isinstance(call, dict) for call in calls):
+            raise ValueError(
+                "unsupported checkpoint schema: worker calls must be mappings"
+            )
     return tree
 
 
@@ -198,7 +192,7 @@ def _apply_task_event(tree: dict | None, event: dict, fallback_task_id: str = ""
             ):
                 if field not in replaced and field in tree:
                     replaced[field] = tree[field]
-        return _migrate_task_tree_workers(_jsonable(replaced))
+        return _require_current_task_tree(_jsonable(replaced))
 
     if tree is None:
         tree = {
@@ -258,8 +252,9 @@ def _apply_task_event(tree: dict | None, event: dict, fallback_task_id: str = ""
         if worker_name:
             calls = workers.setdefault(worker_name, [])
             if not isinstance(calls, list):
-                calls = [calls]
-                workers[worker_name] = calls
+                raise ValueError(
+                    "unsupported checkpoint schema: each worker must contain a list of calls"
+                )
             call_index = _coerce_call_index(event.get("call_index"), len(calls))
             call = _find_worker_call(calls, call_index)
             if call is None:
@@ -285,8 +280,9 @@ def _apply_task_event(tree: dict | None, event: dict, fallback_task_id: str = ""
         if worker_name:
             calls = workers.setdefault(worker_name, [])
             if not isinstance(calls, list):
-                calls = [calls]
-                workers[worker_name] = calls
+                raise ValueError(
+                    "unsupported checkpoint schema: each worker must contain a list of calls"
+                )
             call_index = _coerce_call_index(event.get("call_index"), len(calls))
             call = _find_worker_call(calls, call_index)
             if call is None:
@@ -310,8 +306,9 @@ def _apply_task_event(tree: dict | None, event: dict, fallback_task_id: str = ""
         if worker_name:
             calls = workers.setdefault(worker_name, [])
             if not isinstance(calls, list):
-                calls = [calls]
-                workers[worker_name] = calls
+                raise ValueError(
+                    "unsupported checkpoint schema: each worker must contain a list of calls"
+                )
             call_index = _coerce_call_index(event.get("call_index"), len(calls))
             call = _find_worker_call(calls, call_index)
             if call is None:
@@ -328,8 +325,9 @@ def _apply_task_event(tree: dict | None, event: dict, fallback_task_id: str = ""
         if worker_name:
             calls = workers.setdefault(worker_name, [])
             if not isinstance(calls, list):
-                calls = [calls]
-                workers[worker_name] = calls
+                raise ValueError(
+                    "unsupported checkpoint schema: each worker must contain a list of calls"
+                )
             call_index = _coerce_call_index(event.get("call_index"), len(calls))
             call = _find_worker_call(calls, call_index)
             if call is None:
@@ -347,7 +345,7 @@ def _apply_task_event(tree: dict | None, event: dict, fallback_task_id: str = ""
                 call["error"] = event.get("error")
             workers[worker_name] = _sorted_worker_calls(calls)
 
-    return _migrate_task_tree_workers(tree)
+    return _require_current_task_tree(tree)
 
 
 def _project_task_tree_from_events(events: list[dict], fallback_task_id: str = "") -> dict | None:
@@ -360,7 +358,7 @@ def _project_task_tree_from_events(events: list[dict], fallback_task_id: str = "
         return None
     tree.setdefault("task_id", fallback_task_id)
     tree.setdefault("workers", {})
-    return _migrate_task_tree_workers(tree)
+    return _require_current_task_tree(tree)
 
 
 # =========================================================================
@@ -420,7 +418,7 @@ class CheckpointManager:
 
         self._tree_lock = threading.Lock()
         self._goal_lock = threading.RLock()
-        self._legacy_todos: Any = None
+        self._todos: Any = None
         self._task_storages: dict[Path, SecureDirectory] = {}
         if self._checkpoint_dir is not None and self._checkpoint_dir.is_dir():
             self._task_storages[self._checkpoint_dir] = SecureDirectory(
@@ -574,22 +572,22 @@ class CheckpointManager:
         ):
             return None
 
-    def _legacy_todo_store(self):
-        """Compatibility only; native runtimes never initialize this store."""
+    def _todo_store(self):
+        """Return the lazily initialized smolagents Todo store."""
         with self._tree_lock:
-            if self._legacy_todos is None:
+            if self._todos is None:
                 from agentloom.adapters.smolagents.todo.store import TodoStore
 
-                self._legacy_todos = TodoStore(self.task_storage)
-            return self._legacy_todos
+                self._todos = TodoStore(self.task_storage)
+            return self._todos
 
     def load_todos(self, task_id: str, agent_path: str) -> dict[str, Any]:
-        """Legacy smol API; new callers use the adapter's TodoStateProvider."""
-        return self._legacy_todo_store().load_todos(task_id, agent_path)
+        """Load smolagents Todo state through the canonical checkpoint store."""
+        return self._todo_store().load_todos(task_id, agent_path)
 
     def replace_todos(self, task_id: str, agent_path: str, items: Any) -> dict[str, Any]:
-        """Legacy smol API; retained while external callers migrate."""
-        return self._legacy_todo_store().replace_todos(task_id, agent_path, items)
+        """Replace smolagents Todo state in the canonical checkpoint store."""
+        return self._todo_store().replace_todos(task_id, agent_path, items)
 
     def load_goal(self, task_id: str) -> dict[str, Any] | None:
         """Load strict Goal state; corruption is terminal rather than fail-open."""
@@ -679,17 +677,18 @@ class CheckpointManager:
 
     def _load_task_tree_unlocked(self, task_id: str) -> dict | None:
         """Load task tree projection. Caller must hold ``_tree_lock``."""
+        events_path = self._task_events_path(task_id)
         event_tree = _project_task_tree_from_events(
-            self._read_task_events_from_path(self._task_events_path(task_id)),
+            self._read_task_events_from_path(events_path),
             fallback_task_id=task_id,
         )
         if event_tree is not None:
             return event_tree
-
-        tree = self._read_json(self._task_tree_path(task_id))
-        if tree is not None:
-            tree = _migrate_task_tree_workers(tree)
-        return tree
+        if self._task_tree_path(task_id).is_file():
+            raise ValueError(
+                "unsupported checkpoint schema: task_events.jsonl is required"
+            )
+        return None
 
     def _load_task_tree_from_dir(self, task_dir: Path) -> dict | None:
         event_tree = _project_task_tree_from_events(
@@ -698,16 +697,16 @@ class CheckpointManager:
         )
         if event_tree is not None:
             return event_tree
-
-        tree = self._read_json(task_dir / "task_tree.json")
-        if tree is not None:
-            tree = _migrate_task_tree_workers(tree)
-        return tree
+        if (task_dir / "task_tree.json").is_file():
+            raise ValueError(
+                "unsupported checkpoint schema: task_events.jsonl is required"
+            )
+        return None
 
     def _write_task_tree_projection_unlocked(self, task_id: str, tree: dict) -> Path:
-        """Persist the compatibility projection. Caller must hold ``_tree_lock``."""
+        """Persist the bounded task-tree projection. Caller must hold ``_tree_lock``."""
         p = self._task_tree_path(task_id)
-        self._write_json(p, _migrate_task_tree_workers(_jsonable(tree)))
+        self._write_json(p, _require_current_task_tree(_jsonable(tree)))
         return p
 
     def _append_event_and_refresh_projection_unlocked(self, task_id: str, event: dict) -> dict:
@@ -729,13 +728,13 @@ class CheckpointManager:
         """Persist the execution-tree metadata (thread-safe).
 
         New code treats ``task_events.jsonl`` as the source of truth and this
-        method as a compatibility escape hatch: it appends a full replacement
-        event, then writes the legacy ``task_tree.json`` projection.
+        method appends a full replacement event, then refreshes the maintained
+        ``task_tree.json`` projection.
         """
         with self._tree_lock:
             event = {
                 "type": "task_tree_replaced",
-                "tree": _migrate_task_tree_workers(_jsonable(tree)),
+                "tree": _require_current_task_tree(_jsonable(tree)),
             }
             self._append_event_and_refresh_projection_unlocked(task_id, event)
             return self._task_tree_path(task_id)
@@ -772,7 +771,7 @@ class CheckpointManager:
                 RuntimeError,
             ):
                 return None
-            return _migrate_task_tree_workers(tree) if isinstance(tree, dict) else None
+            return _require_current_task_tree(tree) if isinstance(tree, dict) else None
 
     def load_task_events(self, task_id: str) -> list[dict]:
         """Return a stable copy of the append-only events for one task."""
@@ -795,7 +794,7 @@ class CheckpointManager:
         with self._tree_lock:
             tree = self._load_task_tree_unlocked(task_id) or {}
             updated = updater(tree)
-            updated = _migrate_task_tree_workers(_jsonable(updated))
+            updated = _require_current_task_tree(_jsonable(updated))
             self._append_event_and_refresh_projection_unlocked(
                 task_id,
                 {"type": "task_tree_replaced", "tree": updated},
@@ -1220,19 +1219,7 @@ class CheckpointManager:
                     "run_id": tree.get("run_id", ""),
                 }
             else:
-                # Fallback: derive from supervisor checkpoint
-                sup = self._read_json(task_dir / "checkpoint.json")
-                if sup:
-                    entry = {
-                        "task_id": sup.get("task_id", task_dir.name),
-                        "agent_name": sup.get("agent_name", self._supervisor_name),
-                        "status": sup.get("status", "unknown"),
-                        "created_at": sup.get("saved_at", ""),
-                        "interrupted_at": sup.get("saved_at", ""),
-                        "run_id": sup.get("run_id", ""),
-                    }
-                else:
-                    continue
+                continue
 
             # Read heartbeat for crash detection + dashboard metadata.
             hb = self._read_json(task_dir / "heartbeat.json")
@@ -1351,7 +1338,7 @@ class CheckpointManager:
 # =========================================================================
 
 
-_TASK_MARKERS = ("task_events.jsonl", "task_tree.json", "checkpoint.json")
+_TASK_MARKERS = ("task_events.jsonl",)
 _EXPIRABLE_TASK_STATUSES = frozenset(
     {
         "cancelled",
@@ -1627,7 +1614,8 @@ def _cleanup_expired_task(
             return False
 
         # The task lease closes the pre-heartbeat and cross-process race; the
-        # second heartbeat check still protects non-run legacy writers.
+        # The second heartbeat check still protects a writer that appeared
+        # after the first inspection.
         if _task_heartbeat_state(task_dir) != "inactive":
             return False
         return manager.delete_task(task_id)

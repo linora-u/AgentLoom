@@ -1,6 +1,6 @@
 name: "test_shell_audit_log"
 agent_runtime: smolagents
-description: "Validate shell security audit log — verify that blocked commands produce JSONL events in the current .agentloom run"
+description: "Validate shell security audit log — verify that blocked commands produce JSONL events in the current canonical run"
 
 model_type: "powerful"
 
@@ -24,9 +24,8 @@ workflow: |
      `Command not allowed: wget`.
   3. Attempt `echo hello ; echo world` exactly once. Require an error containing
      `Operator not allowed: ;`.
-  4. Locate the newest current-run audit with
-     `ls -dt .agentloom/runs/test_shell_audit/run_*/audit/shell.jsonl | head -1`,
-     then call `shell_tool` to read that exact file.
+  4. Read the current-run audit from the runtime-provided canonical path with
+     `cat "$AGENTLOOM_SHELL_AUDIT_PATH"`.
   5. Parse each valid JSON line from the actual audit content. Require a
      `WHITELIST_REJECT` event for `wget http://example.com` whose message lists
      `Allowed commands: cat, echo, find, grep, head, ls, pwd, tail, wc`

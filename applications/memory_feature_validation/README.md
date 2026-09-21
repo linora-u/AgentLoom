@@ -153,7 +153,7 @@ Re-audit captured evidence without another provider call:
 
 ```bash
 uv run python applications/memory_feature_validation/scripts/audit_memory_review_campaign.py \
-  .agentloom/validation/memory_feature_validation/<campaign_id>
+  "$AGENTLOOM_RUNTIME_ROOT/validation/memory_feature_validation/<campaign_id>"
 ```
 
 Every real run uses an isolated runtime root; each logical case uses an
@@ -186,7 +186,7 @@ comes from this line; durable effects come independently from `memory_items`,
 `review_candidates`, `review_batches`, and `review_batch_runs`.
 
 Artifacts are written under
-`.agentloom/validation/memory_feature_validation/<campaign_id>/` and include
+`{runtime.root_dir}/validation/memory_feature_validation/<campaign_id>/` and include
 the plan, environment, results, usage, privacy audit, failures, report, and
 `reproduction_commands.json` for any failed runs.
 Each entry contains one `uv run python ... --reproduce-campaign ... --run-id`
@@ -208,7 +208,8 @@ and scoped state transitions exercise production invariants. A separate
 literal v4 fixture validates migration directly to v6; removed v5 tables are
 migration inputs, never compatibility surfaces.
 
-The default release run also opens the current `.agentloom/self_learning.db`
+The default release run also opens the current
+`{runtime.root_dir}/self_learning.db`
 with SQLite `mode=ro&immutable=1`. It records only run/event counts, byte-length
 percentiles, and hashed event-type distribution; event/task/final text is
 never selected or copied into the campaign.
@@ -222,7 +223,7 @@ uv run python applications/memory_feature_validation/scripts/run_offline_memory_
 uv run python applications/memory_feature_validation/scripts/run_offline_memory_campaign.py
 uv run python applications/memory_feature_validation/scripts/run_offline_memory_campaign.py \
   --baseline-metrics \
-  .agentloom/validation/memory_feature_validation/<baseline-campaign>/metrics.json
+  "$AGENTLOOM_RUNTIME_ROOT/validation/memory_feature_validation/<baseline-campaign>/metrics.json"
 ```
 
 Only the default 100,000-event, 10,000-migration-event shape can become a
@@ -254,7 +255,7 @@ Re-audit an existing campaign without executing production writes:
 
 ```bash
 uv run python applications/memory_feature_validation/scripts/run_offline_memory_campaign.py \
-  --audit .agentloom/validation/memory_feature_validation/<campaign_id>
+  --audit "$AGENTLOOM_RUNTIME_ROOT/validation/memory_feature_validation/<campaign_id>"
 ```
 
 Offline artifacts include `cases.jsonl.gz`, the central `self_learning.db`,

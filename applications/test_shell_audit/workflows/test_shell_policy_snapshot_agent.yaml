@@ -16,9 +16,8 @@ workflow: |
 
   1. Run `echo policy_snapshot_all_allow_ok`; require the marker.
   2. Run `printf 'alpha\nbeta\n' | grep beta`; require `beta`.
-  3. Locate the newest current-run audit using
-     `ls -dt .agentloom/runs/test_shell_audit/run_*/audit/shell.jsonl | head -1`.
-  4. Call `shell_tool` to read that exact file. Parse each valid JSON line.
+  3. Read the current-run audit from the runtime-provided canonical path with
+     `cat "$AGENTLOOM_SHELL_AUDIT_PATH"`. Parse each valid JSON line.
   5. Derive the sibling `logs/runtime.log` path and use `shell_tool` with
      `test -f` to prove it exists.
   6. Require one `POLICY_SNAPSHOT` event whose details contain:

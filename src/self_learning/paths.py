@@ -41,7 +41,7 @@ def _runtime_config_section() -> dict[str, Any]:
 
 
 def self_learning_root(root: str | Path | None = None) -> Path:
-    """Return the durable state root, defaulting to ``.agentloom``."""
+    """Return the durable state root from the canonical RuntimeHome."""
     if root is not None:
         return Path(root).expanduser().resolve()
 

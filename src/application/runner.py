@@ -22,6 +22,17 @@ from pathlib import Path
 from typing import Any
 
 from agentloom.application.definition import prepare_application_definition
+from agentloom.application.lifecycle import (
+    ApplicationRunFinalization,
+    ApplicationRunLifecycle,
+    ApplicationRunResources,
+    _run_event_chunks,  # noqa: F401 - public compatibility re-export
+    _task_events_size,
+)
+from agentloom.application.readiness import (
+    validate_required_yaml_fields,  # noqa: F401 - public compatibility re-export
+    validate_runtime_agent_config,  # noqa: F401 - public compatibility re-export
+)
 from agentloom.application.revision import application_revision
 from agentloom.application.run import (
     ApplicationRunError,
@@ -34,17 +45,20 @@ from agentloom.application.run import (
     RunRejectedEvent,
     RunRejection,
 )
-from agentloom.application.lifecycle import (
-    ApplicationRunFinalization,
-    ApplicationRunLifecycle,
-    ApplicationRunResources,
-    _run_event_chunks,  # noqa: F401 - public compatibility re-export
-    _task_events_size,
+from agentloom.configuration import C, build_effective_agent_config, get_config
+from agentloom.configuration.config import bind_config, fresh_invocation_config
+from agentloom.runtime import (
+    bind_run_context,
+    generate_runtime_id,
+    resolve_application_id,
+    resolve_runtime_home,
 )
 from agentloom.runtime.checkpoint import CheckpointManager
 from agentloom.runtime.checkpoint.file_history import FileHistoryManager
-from agentloom.configuration import C, build_effective_agent_config, get_config
-from agentloom.configuration.config import bind_config, fresh_invocation_config
+from agentloom.runtime.factory import (
+    YamlAgentFactory,
+    YamlConfiguredSupervisorAgent,
+)
 from agentloom.runtime.goal import normalize_goal_config
 from agentloom.runtime.heartbeat import SupervisorHeartbeat
 from agentloom.runtime.logging import (
@@ -52,20 +66,6 @@ from agentloom.runtime.logging import (
     bind_logger_backend,
     get_logger,
     initialize_run_logger,
-)
-from agentloom.runtime import (
-    bind_run_context,
-    generate_runtime_id,
-    resolve_application_id,
-    resolve_runtime_home,
-)
-from agentloom.application.readiness import (
-    validate_required_yaml_fields,  # noqa: F401 - public compatibility re-export
-    validate_runtime_agent_config,  # noqa: F401 - public compatibility re-export
-)
-from agentloom.runtime.factory import (
-    YamlAgentFactory,
-    YamlConfiguredSupervisorAgent,
 )
 
 _TASK_TREE_CLEANUP_MAX_BYTES = 1024 * 1024
@@ -180,11 +180,8 @@ def _checkpoint_age_seconds(created_at: Any) -> float:
         parsed = datetime.fromisoformat(created_at.strip().replace("Z", "+00:00"))
     except ValueError as exc:
         raise ValueError("checkpoint created_at is invalid") from exc
-    # Legacy migration interprets naive timestamps as UTC. Resume must use the
-    # same rule so a migrated task is not selected and then rejected solely
-    # because its original timestamp omitted an offset.
     if parsed.tzinfo is None or parsed.utcoffset() is None:
-        parsed = parsed.replace(tzinfo=UTC)
+        raise ValueError("checkpoint created_at must include a timezone offset")
     return (datetime.now(UTC) - parsed.astimezone(UTC)).total_seconds()
 
 
