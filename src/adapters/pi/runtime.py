@@ -1,42 +1,42 @@
 """Pi implementation of a complete Agent invocation, including the platform Stop gate."""
 from __future__ import annotations
 
-from uuid import uuid4
-from pathlib import Path
 from dataclasses import replace
-from threading import Lock
+from pathlib import Path
 from typing import cast
+from uuid import uuid4
 
-from agentloom.adapters.pi.metadata import BRIDGE_VERSION, CAPABILITIES, SDK_VERSION, validate_model, validate_options
-from agentloom.adapters.pi.protocol import PI_BRIDGE_PROTOCOL_VERSION
-from agentloom.adapters.pi.protocol import (
-    Handshake, HandshakeResult, ModelSelection, Run, RunResult,
-    Prepare, Dispatch, PrepareResult, Settle, SettleResult, TerminalRecord,
-    PlatformInvoke, PlatformResult, PlatformPrepare, PlatformPrepared, ModelPrepare, ModelPermit,
-    SessionCheckpoint, SessionCheckpointResult,
-)
 from agentloom.adapters.pi.checkpoint import PiCheckpointStore
-from agentloom.adapters.pi.recovery import reconcile
-from agentloom.runtime import get_current_run_context
-from agentloom.runtime.native_tool_host import NativeToolHost
-from agentloom.runtime.native_tools import NativeCallIdentity, NativeCommitAck
-from agentloom.runtime.tool_protocol import ToolCallRecord
-from agentloom.runtime.tool_gateway import PreparedToolCall, PreparedToolGateway
-from agentloom.adapters.pi.transport import PiTransport
-from agentloom.runtime.agent_runtime import (
-    AgentRuntimeError, AgentRuntimeRequest, AgentRuntimeResult, RuntimeCheckpointEnvelope, RuntimeDefinition, RuntimeEvent, RuntimeUsage,
+from agentloom.adapters.pi.metadata import BRIDGE_VERSION, CAPABILITIES, SDK_VERSION, validate_model, validate_options
+from agentloom.adapters.pi.protocol import (
+    PI_BRIDGE_PROTOCOL_VERSION,
+    Handshake,
+    HandshakeResult,
+    ModelSelection,
+    Run,
+    RunResult,
 )
+from agentloom.adapters.pi.protocol_handlers import PiProtocolCoordinator
+from agentloom.adapters.pi.recovery import reconcile
+from agentloom.adapters.pi.transport import PiTransport
+from agentloom.runtime import get_current_run_context
+from agentloom.runtime.agent_runtime import (
+    AgentRuntimeError,
+    AgentRuntimeRequest,
+    AgentRuntimeResult,
+    RuntimeCheckpointEnvelope,
+    RuntimeDefinition,
+    RuntimeEvent,
+    RuntimeUsage,
+)
+from agentloom.runtime.goal import get_current_goal_provider
 from agentloom.runtime.hooks import HookEvent
-from agentloom.runtime.trace import capture_explicit_execution_context
-from agentloom.runtime.goal import GoalCompleteError, get_current_goal_provider
 from agentloom.runtime.invocation import goal_continuation_prompt
+from agentloom.runtime.native_tool_host import NativeToolHost
+from agentloom.runtime.native_tools import NativeCallIdentity
+from agentloom.runtime.tool_gateway import PreparedToolGateway
+from agentloom.runtime.trace import capture_explicit_execution_context
 from agentloom.tools.tool_meta import tool_is_concurrency_safe
-
-
-def _terminal(record: ToolCallRecord) -> TerminalRecord:
-    values = record.to_dict()
-    values["error"] = record.error
-    return TerminalRecord(**values)
 
 
 class PiRuntime:
@@ -129,16 +129,21 @@ class PiRuntime:
         descriptions = {tool.name: tool.description for tool in definition.tool_gateway.definitions}
         wire_tools = [tool if tool.owner == "runtime" else replace(tool, parameters={
             **tool.parameters, "description": descriptions[tool.visible_name]}) for tool in definition.tool_manifest]
-        model_calls = set()
-        platform_calls: set[NativeCallIdentity] = set()
-        platform_pending: dict[NativeCallIdentity, PreparedToolCall] = {}
-        platform_lock = Lock()
-        emitted_commits = set()
-        store = None
-
-        def record_tool(record, entry, identity):
-            emit("tool", {"record": record.to_dict(), "owner": entry.owner, "provider": entry.provider,
-                          "instance_id": identity.instance_id, "hook_run_id": execution.local_run_id})
+        protocol = PiProtocolCoordinator(
+            request=request,
+            definition=definition,
+            run_id=run_id,
+            instance_id=self.transport.instance_id,
+            private_directory=self.transport.private_directory,
+            execution=execution,
+            hook=hook,
+            shared_goal=shared_goal,
+            native=native,
+            native_entries=native_entries,
+            platform_entries=platform_entries,
+            emit=emit,
+            set_checkpoint=lambda checkpoint: setattr(self, "_checkpoint", checkpoint),
+        )
 
         def cancel_callbacks():
             from agentloom.runtime.resources import close_instance_resources, close_run_resources
@@ -147,126 +152,20 @@ class PiRuntime:
             else:
                 close_instance_resources(self.transport.instance_id)
 
-        def callback(payload):
-            if isinstance(payload, SessionCheckpoint):
-                if store is None:
-                    raise AgentRuntimeError("Pi checkpoint was not requested", category="internal")
-                self._checkpoint = store.save(payload.sha256)
-                emit("checkpoint", {"progress": self._checkpoint.progress})
-                return SessionCheckpointResult(method="session_checkpoint", checkpoint=self._checkpoint)
-            if isinstance(payload, ModelPrepare):
-                identity = payload.identity
-                with platform_lock:
-                    if ((identity.application_id, identity.task_id, identity.run_id, identity.instance_id) != (
-                            request.application_id or "standalone", request.task_id or "standalone", run_id,
-                            self.transport.instance_id) or identity.call_id in model_calls):
-                        raise AgentRuntimeError("Invalid Pi model callback identity", category="internal")
-                    model_calls.add(identity.call_id)
-                state = "work"
-                if shared_goal is not None:
-                    try:
-                        final = shared_goal.assert_request_allowed(local_run_id=execution.local_run_id,
-                                                                  allow_completion_settlement=True)
-                        shared_goal.mark_started()
-                        state = "final" if final else "work"
-                    except GoalCompleteError:
-                        state = "denied"
-                return ModelPermit(method="model_prepare", identity=identity, state=state,
-                    agent_context=hook.consume_pending_agent_context() if hook is not None and state != "denied" else [])
-            if isinstance(payload, (PlatformPrepare, PlatformInvoke, Prepare, Dispatch)) and shared_goal is not None:
-                if shared_goal.snapshot().status == "complete":
-                    raise AgentRuntimeError("Goal is complete; further tool work is forbidden", category="tool")
-            if isinstance(payload, PlatformPrepare):
-                identity = payload.identity
-                with platform_lock:
-                    if ((identity.application_id, identity.task_id, identity.run_id, identity.instance_id) != (
-                            request.application_id, request.task_id, run_id, self.transport.instance_id)
-                            or payload.tool_name not in platform_entries or identity in platform_calls):
-                        raise AgentRuntimeError("Invalid Pi platform callback identity or selection", category="internal")
-                    platform_calls.add(identity)
-                prepared = cast(PreparedToolGateway, definition.tool_gateway).prepare(call_id=identity.call_id, tool_name=payload.tool_name,
-                                                            arguments=payload.arguments)
-                if isinstance(prepared, ToolCallRecord):
-                    if prepared.status == "completed":
-                        raise AgentRuntimeError("Pi preparation cannot report an executed tool", category="internal")
-                    arguments = dict(prepared.input) if isinstance(prepared.input, dict) else dict(payload.arguments)
-                else:
-                    arguments = dict(prepared.arguments)
-                if store is not None:
-                    store.prepare_platform(identity, payload.tool_name, arguments)
-                if isinstance(prepared, ToolCallRecord):
-                    if store is not None:
-                        store.reject_platform(identity, prepared)
-                    record_tool(prepared, platform_entries[payload.tool_name], identity)
-                    return PlatformPrepared(method="platform_prepare", arguments=arguments, rejection=_terminal(prepared))
-                with platform_lock:
-                    platform_pending[identity] = prepared
-                return PlatformPrepared(method="platform_prepare", arguments=arguments)
-            if isinstance(payload, PlatformInvoke):
-                identity = payload.identity
-                with platform_lock:
-                    pending = platform_pending.pop(identity, None)
-                if (pending is None or pending.tool_name != payload.tool_name
-                        or dict(pending.arguments) != payload.arguments):
-                    raise AgentRuntimeError("Pi platform invocation does not match preparation", category="internal")
-                if store is not None:
-                    store.start_platform(identity, payload.tool_name, payload.arguments)
-                record = cast(PreparedToolGateway, definition.tool_gateway).execute_prepared(pending)
-                if store is not None:
-                    store.commit_platform(identity, record)
-                record_tool(record, platform_entries[payload.tool_name], identity)
-                return PlatformResult(method="platform_invoke", record=_terminal(record))
-            if native is not None and isinstance(payload, Prepare):
-                prepared = native.prepare(payload.call)
-                if prepared.rejection is not None:
-                    record_tool(prepared.rejection, payload.call.tool, payload.call.identity)
-                return PrepareResult(method="tool_prepare",
-                    authorization=prepared.authorization,
-                    rejection=_terminal(prepared.rejection) if prepared.rejection else None)
-            if native is not None and isinstance(payload, Dispatch):
-                from agentloom.runtime.tool_protocol import ToolPolicyBlockedError
-                try:
-                    grant = native.start_execution(payload.authorization)
-                except ToolPolicyBlockedError:
-                    raw = native.receipt(payload.authorization.identity)["dispatch_rejection"]
-                    rejected = ToolCallRecord.from_dict(raw)
-                    record_tool(rejected, payload.authorization.tool, payload.authorization.identity)
-                    return PrepareResult(method="tool_dispatch", rejection=_terminal(rejected))
-                return PrepareResult(method="tool_dispatch", authorization=grant)
-            if native is not None and isinstance(payload, Settle):
-                from agentloom.adapters.pi.capture import read_capture
-                if payload.outcome.output is not None:
-                    raise AgentRuntimeError("Pi results must use the capture artifact", category="internal")
-                output, capture = read_capture(self.transport.private_directory, payload.outcome.authorization_id,
-                    payload.capture.sha256, completed=payload.outcome.status == "completed")
-                settled = native.settle(replace(payload.outcome, output=output), capture=capture)
-                if isinstance(settled, NativeCommitAck):
-                    with platform_lock:
-                        if settled.commit_id not in emitted_commits:
-                            entry = next(tool for tool in native_entries if tool.visible_name == settled.record.tool_name)
-                            record_tool(settled.record, entry, settled.identity)
-                            emitted_commits.add(settled.commit_id)
-                return SettleResult(method="tool_settle", identity=payload.outcome.identity,
-                    authorization_id=payload.outcome.authorization_id,
-                    state="committed" if isinstance(settled, NativeCommitAck) else "uncertain",
-                    commit_id=settled.commit_id if isinstance(settled, NativeCommitAck) else None,
-                    record=_terminal(settled.record) if isinstance(settled, NativeCommitAck) else None)
-            raise AgentRuntimeError("Unexpected Pi tool callback", category="internal")
-
         try:
             if request.checkpoint_sink is not None or request.checkpoint is not None or request.requirements.checkpoint_resume:
                 runtime_context = get_current_run_context(required=True)
                 assert runtime_context is not None
-                store = PiCheckpointStore(runtime_context, definition, self.transport.private_directory,
-                                          self.transport.instance_id, request.checkpoint_sink or (lambda _: None))
+                protocol.store = PiCheckpointStore(runtime_context, definition, self.transport.private_directory,
+                                                     self.transport.instance_id, request.checkpoint_sink or (lambda _: None))
                 if request.checkpoint is not None:
                     try:
-                        plan = reconcile(store, store.load(request.checkpoint))
+                        plan = reconcile(protocol.store, protocol.store.load(request.checkpoint))
                         if native is not None:
                             for call in plan["bundle"]["calls"]:
                                 if call["owner"] == "runtime":
                                     native.restore_observation(NativeCallIdentity(**call["identity"]))
-                        store.private.atomic_write_json("restore.json", plan)
+                        protocol.store.private.atomic_write_json("restore.json", plan)
                     except AgentRuntimeError:
                         raise
                     except Exception as exc:
@@ -284,9 +183,9 @@ class PiRuntime:
                         model_id=selection.model_id, protocol=selection.protocol, settings=dict(selection.settings),
                         request_headers=dict(selection.request_headers)), tools=wire_tools, serial_tools=serial_tools, runtime_options=dict(definition.runtime_options),
                     continue_session=request.continue_session or attempt > 0, record_task=request.record_task,
-                    additional_args=dict(request.additional_args), checkpoint_enabled=store is not None,
+                    additional_args=dict(request.additional_args), checkpoint_enabled=protocol.store is not None,
                     checkpoint=request.checkpoint if attempt == 0 else None)
-                response = self.transport.request(wire, run_id=run_id, observe=observe, callback=callback,
+                response = self.transport.request(wire, run_id=run_id, observe=observe, callback=protocol.handle,
                                                   cancel_callbacks=cancel_callbacks)
                 result = response.payload
                 assert isinstance(result, RunResult)
@@ -330,8 +229,7 @@ class PiRuntime:
         finally:
             if native is not None:
                 native.close()
-            if store is not None:
-                store.close()
+            protocol.close()
 
     def close(self):
         try:

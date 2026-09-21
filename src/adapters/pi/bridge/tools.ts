@@ -2,37 +2,19 @@
 import { capturedExecutor } from "./capture.js";
 import type { SessionPersistence } from "./checkpoint.js";
 import { isDeepStrictEqual } from "node:util";
-import { Ajv2020 } from "ajv/dist/2020.js";
 import { createReadToolDefinition, createWriteToolDefinition, createEditToolDefinition, createBashToolDefinition, type ExtensionFactory, type ToolDefinition } from "@earendil-works/pi-coding-agent";
+import { BridgeToolCoordinator, type BridgeInvoke, type Identity, type Obj } from "./tool-coordinator.js";
 
-type Obj = Record<string, any>;
-type Callback = (payload: Obj) => Promise<Obj>;
-type Identity = (id: string, nativeParentId?: string | null) => Obj;
-
-export function nativeTools(manifest: Obj[], cwd: string, invoke: Callback, identity: Identity, canUseTools: () => boolean, serialTools: string[], agentDir: string, failRun: () => void, persistence: SessionPersistence) {
-  const permits = new Map<string, Obj>();
-  const seen = new Set<string>();
-  const active = new Map<string, string>();
-  const serial = new Set(serialTools);
-  const selected = new Map(manifest.map(tool => [tool.visible_name, tool]));
-  const ajv = new Ajv2020({strict: true, coerceTypes: false, useDefaults: false});
-  const validators = new Map(manifest.filter(tool => tool.owner === "runtime").map(tool => [tool.visible_name, ajv.compile(tool.parameters)]));
-  const callKey = (parentId: string | null, callId: string) => JSON.stringify([parentId, callId]);
-  const internalParameters = (entry: Obj) => serial.has(entry.visible_name)
-    ? {type: "object", additionalProperties: true}
-    : entry.parameters;
+export function nativeTools(manifest: Obj[], cwd: string, invoke: BridgeInvoke, identity: Identity, canUseTools: () => boolean, serialTools: string[], agentDir: string, failRun: () => void, persistence: SessionPersistence) {
+  const context = new BridgeToolCoordinator({manifest, cwd, invoke, identity, canUseTools, serialTools,
+    persistence});
   const tools: ToolDefinition<any, any>[] = manifest.map(entry => {
     if (entry.owner !== "runtime") {
       if (entry.operation === "write" || entry.operation === "shell") throw new Error("Unsupported platform tool");
       return {name: entry.visible_name, label: entry.visible_name, description: entry.parameters.description || entry.capability,
-        parameters: internalParameters(entry), executionMode: serial.has(entry.visible_name) ? "sequential" : "parallel",
+        parameters: context.internalParameters(entry), executionMode: context.executionMode(entry),
         execute: async (callId: string, args: any) => {
-          const key = active.get(callId);
-          const permit = key === undefined ? undefined : permits.get(key);
-          if (key !== undefined) {
-            active.delete(callId);
-            permits.delete(key);
-          }
+          const permit = context.consumePermit(callId);
           if (!permit?.platform || !isDeepStrictEqual(permit.arguments, args))
             throw new Error("Missing platform tool preparation");
           let completed: Obj;
@@ -56,15 +38,10 @@ export function nativeTools(manifest: Obj[], cwd: string, invoke: Callback, iden
     const parameters = {...official.parameters, additionalProperties: false};
     // No lossy schema projection, silent aliases or alternate basic implementation.
     if (!isDeepStrictEqual(JSON.parse(JSON.stringify(parameters)), entry.parameters)) throw new Error("Native tool schema mismatch");
-    return {...official, parameters: internalParameters(entry), prepareArguments: undefined, renderCall: undefined, renderResult: undefined,
-      executionMode: serial.has(entry.visible_name) ? "sequential" : "parallel",
+    return {...official, parameters: context.internalParameters(entry), prepareArguments: undefined, renderCall: undefined, renderResult: undefined,
+      executionMode: context.executionMode(entry),
       execute: async (callId: string, args: any, signal: AbortSignal | undefined, onUpdate: any, ctx: any) => {
-        const key = active.get(callId);
-        const permit = key === undefined ? undefined : permits.get(key);
-        if (key !== undefined) {
-          active.delete(callId);
-          permits.delete(key);
-        }
+        const permit = context.consumePermit(callId);
         if (!permit?.authorization || !isDeepStrictEqual(permit.authorization.final_arguments, args) ||
             permit.authorization.tool.visible_name !== entry.visible_name) throw new Error("Missing native authorization");
         try {await persistence.save();} catch (error) {failRun(); throw error;}
@@ -101,95 +78,37 @@ export function nativeTools(manifest: Obj[], cwd: string, invoke: Callback, iden
     };
   });
   const extension: ExtensionFactory = pi => {
-    const assistantCall = (callId: string): {entry: Obj; call: Obj} => {
-      for (const entry of [...persistence.manager.getEntries()].reverse()) {
-        if (entry.type !== "message" || entry.message.role !== "assistant") continue;
-        const call = entry.message.content.find((part: Obj) => part.type === "toolCall" && part.id === callId);
-        if (call) return {entry, call};
-      }
-      throw new Error("Pi serial tool call is missing its assistant anchor");
-    };
-    const prepare = async (part: Obj, nativeParentId?: string | null) => {
-      const entry = selected.get(part.name)!;
-      const callIdentity = identity(part.id, nativeParentId);
-      const key = callKey(callIdentity.native_parent_id, part.id);
-      if (entry.owner !== "runtime") {
-        const prepared = await invoke({method: "platform_prepare", identity: callIdentity,
-          tool_name: part.name, arguments: part.arguments});
-        part.arguments = prepared.arguments;
-        persistence.register(callIdentity, part.name, part.arguments, entry.owner);
-        permits.set(key, {platform: true, identity: callIdentity, arguments: structuredClone(part.arguments),
-          rejection: prepared.rejection});
-        return;
-      }
-      const prepared = await invoke({method: "tool_prepare", call: {identity: callIdentity, tool: entry, cwd,
-        raw_arguments: part.arguments}});
-      const grant = prepared.authorization;
-      if (grant && (!isDeepStrictEqual(grant.identity, callIdentity) || !isDeepStrictEqual(grant.tool, entry) ||
-          grant.cwd !== cwd || !validators.get(part.name)!(grant.final_arguments)))
-        throw new Error("Invalid native authorization");
-      permits.set(key, prepared);
-      if (grant) part.arguments = grant.final_arguments;
-      persistence.register(callIdentity, part.name, part.arguments, entry.owner);
-    };
     pi.on("session_before_compact", async () => {
       try {await persistence.save();} catch (error) {failRun(); throw error;}
     });
     pi.on("session_compact", async () => {
       try {await persistence.save();} catch (error) {failRun(); throw error;}
     });
-    pi.on("message_end", async ({message}) => {
-      if (message.role === "toolResult") {
-        const {entry} = assistantCall(message.toolCallId);
-        const key = callKey(entry.parentId, message.toolCallId);
-        const permit = permits.get(key);
-        if (!permit?.rejection) return;
-        if (permit.rejection.call_id !== message.toolCallId ||
-            permit.rejection.tool_name !== message.toolName)
-          throw new Error("AgentLoom rejection identity mismatch");
-        active.delete(message.toolCallId);
-        permits.delete(key);
-        const text = permit.rejection.error?.message || "AgentLoom preparation rejected";
-        return {message: {...message, content: [{type: "text", text}], details: {}, isError: true}};
-      }
+    const onMessageEnd = async ({message}: any) => {
+      if (message.role === "toolResult") return context.recoverPreparedRejection(message);
       if (message.role !== "assistant") return;
       const replacement = structuredClone(message);
-      const parentId = persistence.manager.getLeafId();
-      const batch = new Set<string>();
-      for (const part of replacement.content) {
-        if (part.type !== "toolCall") continue;
-        const key = callKey(parentId, part.id);
-        if (!canUseTools() || seen.has(key) || batch.has(part.id) || active.has(part.id) || !selected.has(part.name)) {
-          permits.clear();
-          active.clear();
-          throw new Error("Unselected or duplicate tool call");
-        }
-        batch.add(part.id);
-        seen.add(key);
-        active.set(part.id, key);
-      }
-      const deferBatch = replacement.content.some(
-        (part: Obj) => part.type === "toolCall" && serial.has(part.name),
-      );
+      const {parentId, deferBatch} = context.registerAssistantBatch(replacement.content);
       const parallel: Promise<void>[] = [];
       for (const part of replacement.content) {
         if (part.type !== "toolCall") continue;
-        if (!deferBatch) parallel.push(prepare(part, parentId));
+        if (!deferBatch) parallel.push(context.prepare(part, parentId));
       }
       await Promise.all(parallel);
       return {message: replacement};
-    });
+    };
+    pi.on("message_end", onMessageEnd);
     pi.on("tool_call", async ({toolCallId, toolName, input}) => {
-      const {entry, call} = assistantCall(toolCallId);
-      const key = callKey(entry.parentId, toolCallId);
-      if (!permits.has(key)) {
-        await prepare(call, entry.parentId);
+      const {entry, call} = context.assistantCall(toolCallId);
+      const key = context.callKey(entry.parentId, toolCallId);
+      if (!context.hasPermit(key)) {
+        await context.prepare(call, entry.parentId);
         const mutable = input as Obj;
         for (const key of Object.keys(mutable)) delete mutable[key];
         Object.assign(mutable, structuredClone(call.arguments));
       }
       await persistence.save();
-      const permit = permits.get(key);
+      const permit = context.permit(key);
       if (permit?.platform) {
         if (permit.rejection) return {block: true, reason: permit.rejection.error?.message || "AgentLoom preparation rejected"};
         if (isDeepStrictEqual(permit.arguments, input)) return;
