@@ -752,16 +752,6 @@ class RuntimeRegistration:
     factory: RuntimeFactory | None = None
 
 
-SMOLAGENTS_CAPABILITIES = RuntimeCapabilities(
-    structured_tools=True,
-    parallel_tools=True,
-    checkpoint_resume=True,
-    subagents=True,
-    goal=True,
-    stop_hooks=True,
-)
-
-
 class RuntimeRegistry:
     """Explicit registry for complete Agent runtime adapters."""
 
