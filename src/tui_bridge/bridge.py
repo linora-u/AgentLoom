@@ -11,9 +11,9 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any, NoReturn
 
 import yaml
-
 from agentloom.runtime.context import (
     RuntimeRunLease,
+    resolve_runtime_home,
     safe_application_id,
     validate_runtime_id,
 )
@@ -474,6 +474,7 @@ class TuiBridge:
             systems,
             runs,
             definition_cache=definition_cache,
+            runtime_root=runtime_root,
         )
         worker_invocations, worker_invocations_incomplete = self._latest_worker_invocations(
             runs,
@@ -558,7 +559,10 @@ class TuiBridge:
             ],
             "worker_invocations": copy.deepcopy(index.worker_invocations),
             "worker_invocations_incomplete": (index.worker_invocations_incomplete or discovery_incomplete),
-            "schedules": schedule_catalog(self.project_root),
+            "schedules": schedule_catalog(
+                self.project_root,
+                runtime_root=runtime_root,
+            ),
         }
 
     def system_detail(self, system_id: str) -> dict[str, Any]:
@@ -1869,15 +1873,10 @@ class TuiBridge:
 
     def _runtime_root(self) -> Path:
         config = self._read_yaml(self.project_root / "config" / "system.yaml")
-        runtime = config.get("runtime", {}) if isinstance(config, dict) else {}
-        if not isinstance(runtime, dict):
-            runtime = {}
-        configured = Path(
-            os.environ.get("AGENTLOOM_RUNTIME_ROOT", "").strip() or str(runtime.get("root_dir") or ".agentloom")
-        ).expanduser()
-        if not configured.is_absolute():
-            configured = self.project_root / configured
-        return configured.absolute()
+        return resolve_runtime_home(
+            config,
+            agent_root=self.project_root,
+        ).root_dir
 
     def _canonical_run_dir(
         self,

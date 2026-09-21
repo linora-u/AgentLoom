@@ -8,8 +8,6 @@ from collections import Counter
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
-import yaml
-
 from agentloom.tui_bridge.bridge import TuiBridge
 from agentloom.tui_bridge.catalog import project_catalog
 
@@ -411,6 +409,43 @@ def test_schedule_projection_includes_target_trigger_last_execution_and_service(
         "claimed_count": 0,
         "execution_count": 2,
     }
+
+
+def test_schedule_projection_follows_configured_canonical_runtime_home(
+    tmp_path: Path,
+) -> None:
+    _write(tmp_path / "config/system.yaml", "runtime:\n  root_dir: state/runtime\n")
+    schedules_dir = tmp_path / "state/runtime/schedules"
+    schedules_dir.mkdir(parents=True)
+    (schedules_dir / "jobs.json").write_text(
+        json.dumps(
+            {
+                "version": 1,
+                "jobs": [
+                    {
+                        "id": "job-canonical",
+                        "name": "canonical schedule",
+                        "yaml_path": "applications/demo/workflows/demo.yaml",
+                        "schedule": {"kind": "interval", "seconds": 3600},
+                        "state": "scheduled",
+                        "next_run_at": (NOW + timedelta(hours=1)).isoformat(),
+                        "last_run_at": None,
+                        "last_status": None,
+                        "run_count": 0,
+                        "claim": None,
+                    }
+                ],
+                "executions": [],
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    catalog = project_catalog(tmp_path, [], [], now=NOW)
+
+    assert [item["id"] for item in catalog["schedules"]["items"]] == [
+        "job-canonical"
+    ]
 
 
 def test_empty_catalog_is_read_only_and_does_not_create_schedule_storage(tmp_path: Path) -> None:

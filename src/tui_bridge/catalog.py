@@ -16,6 +16,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 import yaml
+from agentloom.runtime.context import RuntimeHome, resolve_runtime_home
 
 if TYPE_CHECKING:
     from agentloom.application.definition import AgentDefinitionCache
@@ -33,6 +34,7 @@ def project_catalog(
     *,
     now: datetime | None = None,
     definition_cache: AgentDefinitionCache | None = None,
+    runtime_root: Path | None = None,
 ) -> dict[str, Any]:
     """Project Applications, Agent trees, Skills, and durable schedules.
 
@@ -94,7 +96,7 @@ def project_catalog(
         "applications": applications,
         "agents": agents,
         "skills": skills,
-        "schedules": schedule_catalog(root, now=now),
+        "schedules": schedule_catalog(root, now=now, runtime_root=runtime_root),
     }
 
 
@@ -465,19 +467,38 @@ def schedule_catalog(
     project_root: str | Path,
     *,
     now: datetime | None = None,
+    runtime_root: Path | None = None,
 ) -> dict[str, Any]:
     """Return only durable schedule and service-heartbeat projections."""
 
     root = Path(project_root).expanduser().resolve()
     checked_at = _as_utc(now)
-    schedules_dir = root / ".agentloom" / "schedules"
+    if runtime_root is None:
+        system = _read_yaml_object(root, root / "config" / "system.yaml")
+        runtime_home = resolve_runtime_home(system, agent_root=root)
+    else:
+        runtime_home = RuntimeHome(runtime_root)
+    try:
+        runtime_root = runtime_home.validate_root()
+    except RuntimeError:
+        return {
+            "items": [],
+            "service": _schedule_service_summary(
+                [],
+                [],
+                {},
+                checked_at=checked_at,
+                document_error="Schedule storage is unreadable.",
+            ),
+        }
+    schedules_dir = runtime_root / "schedules"
     document, document_error = _read_json_object(
-        root,
+        runtime_root,
         schedules_dir / "jobs.json",
         max_bytes=SCHEDULE_DOCUMENT_MAX_BYTES,
     )
     heartbeat, _ = _read_json_object(
-        root,
+        runtime_root,
         schedules_dir / "serve-status.json",
         max_bytes=128 * 1024,
     )
@@ -490,10 +511,14 @@ def schedule_catalog(
         document_error = "Schedule storage is unreadable."
     if document is None:
         document = {"jobs": [], "executions": []}
-    jobs = document.get("jobs") if isinstance(document.get("jobs"), list) else []
-    executions = document.get("executions") if isinstance(document.get("executions"), list) else []
-    jobs = [item for item in jobs if isinstance(item, Mapping)]
-    executions = [item for item in executions if isinstance(item, Mapping)]
+    raw_jobs = document.get("jobs")
+    raw_executions = document.get("executions")
+    jobs = [item for item in raw_jobs if isinstance(item, Mapping)] if isinstance(raw_jobs, list) else []
+    executions = (
+        [item for item in raw_executions if isinstance(item, Mapping)]
+        if isinstance(raw_executions, list)
+        else []
+    )
 
     executions_by_job: dict[str, list[Mapping[str, Any]]] = {}
     for execution in executions:

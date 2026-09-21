@@ -441,9 +441,9 @@ loom run applications/<app>/workflows/<agent>.yaml --no-file-log
 
 ### 7.2 保留策略与存储边界
 
-自动清理最多按配置间隔执行一次；`loom clean-runtime` 可显式应用同一策略。它只删除符合条件的 run 目录或其中的 raw artifacts，永不遍历 checkpoints、`.agentloom/legacy/`、`.agentloom/workspaces/` 或 Application 自有 output 目录。
+自动清理最多按配置间隔执行一次；`loom clean-runtime` 可显式应用同一策略。它只删除符合条件的 run 目录或其中的 raw artifacts，永不遍历 checkpoints、workspaces、self-learning 状态或 Application 自有 output 目录。
 
-Agent 的持久 recall 使用 `.agentloom/workspaces/agents/<application_id>/<agent_path>/`。当前任务的 Todo 使用 canonical checkpoint 内的 `todos.json`，不迁移已删除的 Markdown 旧机制。`loom migrate-runtime --dry-run` 会预览旧 checkpoint 候选和未分域的 `.runtime`；`loom migrate-runtime --apply` 会迁移 checkpoints、把 `.logs` 归档到 `.agentloom/legacy/`，并将缺少 Application/task 来源信息的 `.runtime` 原子归档到 `.agentloom/workspaces/legacy-unscoped/`。
+Agent 的持久 recall 使用 `.agentloom/workspaces/agents/<application_id>/<agent_path>/`。当前任务的 Todo 使用 canonical checkpoint 内的 `todos.json`。持久 Schedule 与调度服务状态使用 `.agentloom/schedules/`。所有框架运行状态消费者都遵循同一个 `runtime.root_dir`；Application 自有 output 目录保持独立。
 
 验证真实 attempt 时必须读取 `manifest.json` 及其引用的日志、审计与产物，不能只看退出码。
 
@@ -843,7 +843,7 @@ Run 证据与 task 恢复状态在同一个 runtime root 下保持独立生命�
 │   ├── logs/runtime.log[.1-.3]
 │   ├── audit/{shell.jsonl[.1-.2],task_tree.json,task_events.jsonl,goal.json}
 │   └── artifacts/{result.txt,shell,background,skills}/
-└── checkpoints/<application_id>/<task_id>/
+├── checkpoints/<application_id>/<task_id>/
     ├── task_events.jsonl
     ├── task_tree.json
     ├── checkpoint.json
@@ -851,7 +851,8 @@ Run 证据与 task 恢复状态在同一个 runtime root 下保持独立生命�
     ├── heartbeat.json
     ├── workers/<worker_name>/calls/<call_index>/checkpoint.json
     ├── context_store/
-    └── file-history/
+│   └── file-history/
+└── schedules/{jobs.json,serve-status.json,executions/}
 ```
 
 除 `manifest.json` 外，这些 run 条目只会在启用对应日志或真实证据存在时生成。

@@ -58,7 +58,6 @@ cover/
 *.pot
 
 # Django stuff:
-*.logs/
 local_settings.py
 db.sqlite3
 db.sqlite3-journal
@@ -178,7 +177,6 @@ llm_config.yaml
 .claude/
 AGENTS.md
 
-.runtime/
 .repo_map/
 .agentloom/
 skills/generated/proposals/

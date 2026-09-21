@@ -435,9 +435,9 @@ checkpoint:
   heartbeat_interval: 5
 ```
 
-每次 attempt 都写入 `.agentloom/runs/<application_id>/<run_id>/manifest.json`。启用 file log 时才有 `logs/runtime.log`；有 shell/tool 证据时才有对应 artifacts；成功结果存在时才写 `artifacts/result.txt`；checkpoint 证据存在时才复制 `audit/{task_tree.json,task_events.jsonl}`。Manifest 只指向真实存在的文件。逻辑任务状态独立写入 `.agentloom/checkpoints/<application_id>/<task_id>/`，包含 Supervisor checkpoint、heartbeat、ContextStore、file-history 和 Worker per-call checkpoint。Agent 工作区位于 `.agentloom/workspaces/agents/<application_id>/<agent_path>/`，任务状态隔离在 `tasks/<task_id>/`。日志关闭、轮转和 run 清理不能影响 checkpoint、workspace 或 Application outputs。
+每次 attempt 都写入 `.agentloom/runs/<application_id>/<run_id>/manifest.json`。启用 file log 时才有 `logs/runtime.log`；有 shell/tool 证据时才有对应 artifacts；成功结果存在时才写 `artifacts/result.txt`；checkpoint 证据存在时才复制 `audit/{task_tree.json,task_events.jsonl}`。Manifest 只指向真实存在的文件。逻辑任务状态独立写入 `.agentloom/checkpoints/<application_id>/<task_id>/`，包含 Supervisor checkpoint、heartbeat、ContextStore、file-history 和 Worker per-call checkpoint。Agent 工作区位于 `.agentloom/workspaces/agents/<application_id>/<agent_path>/`，任务状态隔离在 `tasks/<task_id>/`；持久 Schedule 位于 `.agentloom/schedules/`。这些状态随同一个 runtime root 一起移动。日志关闭、轮转和 run 清理不能影响 checkpoint、workspace 或 Application outputs。
 
-CLI 契约：文件日志默认按配置落盘，单次关闭用 `loom run --no-file-log`；不存在 `--log-to-file`。`loom list-tasks`、`loom clean-tasks`、`loom run --resume <task_id>` 验证 checkpoint；`loom clean-runtime` 应用 run retention；`loom migrate-runtime --dry-run|--apply` 迁移/归档旧 `.logs`。真实运行必须读 manifest、runtime.log 与 shell.jsonl，不能只看退出码。
+CLI 契约：文件日志默认按配置落盘，单次关闭用 `loom run --no-file-log`；不存在 `--log-to-file`。`loom list-tasks`、`loom clean-tasks`、`loom run --resume <task_id>` 验证 checkpoint；`loom clean-runtime` 应用 run retention。真实运行必须读 manifest、runtime.log 与 shell.jsonl，不能只看退出码。
 
 ## MCP 配置
 
