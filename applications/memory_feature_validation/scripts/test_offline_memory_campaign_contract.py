@@ -260,7 +260,16 @@ def test_runtime_path_loader_is_strict_and_uses_the_project_config(
         canonical_runtime_root(tmp_path)
 
     (config / "system.yaml").unlink()
-    with pytest.raises(FileNotFoundError, match="system config does not exist"):
+    with pytest.raises(FileNotFoundError, match="Configuration file does not exist"):
+        canonical_runtime_root(tmp_path)
+
+    (config / "system.yaml").mkdir()
+    with pytest.raises(ValueError, match="must be a regular file"):
+        canonical_runtime_root(tmp_path)
+
+    (config / "system.yaml").rmdir()
+    (config / "system.yaml").symlink_to(config / "missing-system.yaml")
+    with pytest.raises(ValueError, match="must not be a symlink"):
         canonical_runtime_root(tmp_path)
 
 
@@ -278,7 +287,9 @@ def test_release_source_gate_ignores_unrelated_worktree_changes(
         "src/lib/runtime/context.py",
         "src/lib/trusted_memory_evidence.py",
         "applications/memory_feature_validation/scripts/runtime_paths.py",
-        "src/lib/config/config.py",
+        "src/lib/config/__init__.py",
+        "src/lib/config/layered_builder.py",
+        "src/lib/config/system_loader.py",
         "src/lib/config/yaml_loader.py",
     } <= set(offline_runner._SOURCE_FILES)
     assert (

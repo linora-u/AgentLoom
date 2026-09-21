@@ -12,7 +12,7 @@ _LAZY_EXPORTS = {
     "get_config": (".config", "get_config"),
     "get_default_toolsets": (".config", "get_default_toolsets"),
     "get_model_config": (".config", "get_model_config"),
-    "load_project_system_config": (".config", "load_project_system_config"),
+    "load_project_system_config": (".system_loader", "load_project_system_config"),
     "RootSettings": (".config_validation", "RootSettings"),
     "LoggingSettings": (".config_validation", "LoggingSettings"),
     "RuntimeSettings": (".config_validation", "RuntimeSettings"),

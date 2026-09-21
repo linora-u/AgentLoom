@@ -4,11 +4,13 @@
 确保两个配置域之间不存在交叉泄露。
 """
 
+import pytest
 from agentloom.configuration.config import (
-    _LLM_ONLY_TOP_LEVEL_KEYS,
     _WORKFLOW_OVERLAY_KEYS,
     _filter_llm_only_top_level_keys,
+    load_project_config,
 )
+from agentloom.configuration.system_loader import _LLM_ONLY_TOP_LEVEL_KEYS
 
 # ─── 测试：_filter_llm_only_top_level_keys 边界条件 ───
 
@@ -86,3 +88,11 @@ def test_llm_only_keys_contains_expected_members():
     assert expected.issubset(_LLM_ONLY_TOP_LEVEL_KEYS), (
         f"Missing expected LLM-only keys: {expected - _LLM_ONLY_TOP_LEVEL_KEYS}"
     )
+
+
+def test_project_loader_rejects_non_file_system_config(tmp_path):
+    system_path = tmp_path / "config" / "system.yaml"
+    system_path.mkdir(parents=True)
+
+    with pytest.raises(ValueError, match="must be a regular file"):
+        load_project_config(tmp_path)
