@@ -145,7 +145,7 @@ assert len(bridge.bootstrap()['systems']) == 1
 assert bridge.system_detail(sys.argv[2])['definition']['workflow'] == 'Run the declared task.'
 assert bridge.dispatch('application.detail', {'application_id':'nested/markdown'})['application']['health'] == 'healthy'
 assert main(['--project', str(root), 'application.validate', '{"application_id":"nested/markdown"}']) == 0
-for prefix in ('litellm', 'agentloom.runtime.agent', 'agentloom.application.runner', 'agentloom.runtimes.smolagents.tools.file_ops', 'agentloom.runtimes.smolagents.tools.shell', 'agentloom.runtimes.smolagents.tools.search'):
+for prefix in ('litellm', 'agentloom.application.agent', 'agentloom.application.runner', 'agentloom.runtimes.smolagents.tools.file_ops', 'agentloom.runtimes.smolagents.tools.shell', 'agentloom.runtimes.smolagents.tools.search'):
     assert not any(name == prefix or name.startswith(prefix + '.') for name in sys.modules), prefix
 assert not (root / '.agentloom').exists()
 assert not (root / 'must-not-exist').exists()

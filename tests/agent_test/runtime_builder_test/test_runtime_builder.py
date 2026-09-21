@@ -8,8 +8,8 @@ from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import MagicMock
 
-import agentloom.runtime.agent as base_agent_module
-import agentloom.runtime.invocation as invocation_module
+import agentloom.application.agent as base_agent_module
+import agentloom.application.invocation as invocation_module
 import pytest
 import yaml
 from agentloom.runtimes.smolagents.agents import ToolCallingAgentV2

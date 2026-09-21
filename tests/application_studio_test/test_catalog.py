@@ -483,7 +483,7 @@ def test_catalog_import_does_not_load_agent_or_model_runtime() -> None:
                 "import sys; "
                 "from agentloom.application.studio.catalog import project_catalog; "
                 "assert project_catalog; "
-                "assert 'agentloom.runtime.agent' not in sys.modules; "
+                "assert 'agentloom.application.agent' not in sys.modules; "
                 "assert 'agentloom.application.runner' not in sys.modules; "
                 "assert 'litellm' not in sys.modules"
             ),

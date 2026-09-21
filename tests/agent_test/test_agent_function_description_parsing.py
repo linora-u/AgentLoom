@@ -1,4 +1,4 @@
-from agentloom.runtime.factory import YamlConfiguredAgent
+from agentloom.application.factory import YamlConfiguredAgent
 
 
 def test_agent_function_schema_docstring_rendering():

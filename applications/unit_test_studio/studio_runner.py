@@ -21,7 +21,7 @@ if str(PROJECT_ROOT) not in sys.path:
 from agentloom.runtime.trace import generate_id
 from agentloom.application.workflows import get_supervisor_agent_yaml_path
 from agentloom.runtime.logging import initialize_global_logger_once, resolve_logger
-from agentloom.runtime.factory import YamlAgentFactory, YamlConfiguredSupervisorAgent
+from agentloom.application.factory import YamlAgentFactory, YamlConfiguredSupervisorAgent
 
 
 def run_unit_test_studio(

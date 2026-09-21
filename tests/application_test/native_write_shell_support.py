@@ -115,7 +115,7 @@ def external_write_runtime(model_factory, observations):
 
     registry = build_builtin_runtime_registry()
     registry.register("native-write-acceptance", capabilities=Runtime.capabilities, factory=Runtime)
-    with patch("agentloom.application.validation.build_builtin_runtime_registry", lambda: registry), patch("agentloom.runtime.agent.build_builtin_runtime_registry", lambda: registry):
+    with patch("agentloom.application.validation.build_builtin_runtime_registry", lambda: registry), patch("agentloom.application.agent.build_builtin_runtime_registry", lambda: registry):
         yield
 
 

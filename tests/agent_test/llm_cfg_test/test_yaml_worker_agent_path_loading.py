@@ -1,9 +1,9 @@
 from pathlib import Path
 
-import agentloom.runtime.factory as yaml_factory_module
+import agentloom.application.factory as yaml_factory_module
 import pytest
+from agentloom.application.factory import YamlAgentFactory, YamlConfiguredSupervisorAgent
 from agentloom.application.validation import AgentConfigNormalizer
-from agentloom.runtime.factory import YamlAgentFactory, YamlConfiguredSupervisorAgent
 from agentloom.runtime.model_binding import ModelTurnBinding
 from agentloom.runtime.model_protocol import ModelTurnResult
 

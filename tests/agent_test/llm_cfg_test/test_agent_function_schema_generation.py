@@ -2,8 +2,8 @@ import json
 from inspect import signature
 from pathlib import Path
 
-import agentloom.runtime.factory as yaml_agent_factory
-from agentloom.runtime.factory import YamlAgentFactory, YamlConfiguredAgent
+import agentloom.application.factory as yaml_agent_factory
+from agentloom.application.factory import YamlAgentFactory, YamlConfiguredAgent
 from smolagents.tools import get_json_schema
 
 FIXTURE_ROOT = Path(__file__).resolve().parent / "fixtures"

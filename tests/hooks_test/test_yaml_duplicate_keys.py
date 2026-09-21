@@ -27,7 +27,7 @@ def test_system_config_rejects_duplicate_hook_event_keys(tmp_path: Path) -> None
 
 
 def test_agent_yaml_rejects_duplicate_hook_event_keys(tmp_path: Path) -> None:
-    from agentloom.runtime.factory import YamlAgentFactory
+    from agentloom.application.factory import YamlAgentFactory
 
     path = tmp_path / "agent.yaml"
     path.write_text(_DUPLICATE_HOOKS, encoding="utf-8")

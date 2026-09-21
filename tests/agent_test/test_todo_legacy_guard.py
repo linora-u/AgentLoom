@@ -13,7 +13,7 @@ def test_legacy_todo_runtime_and_prompt_contracts_are_absent() -> None:
     assert not any(path.exists() for path in removed_paths)
     runtime_files = [
         PROJECT_ROOT / "src/runtimes/smolagents/loom_mixin.py",
-        PROJECT_ROOT / "src/runtime/agent.py",
+        PROJECT_ROOT / "src/application/agent.py",
         PROJECT_ROOT / "src/runtimes/smolagents/tools/todo/todo_write.py",
     ]
     prompt_files = list((PROJECT_ROOT / "src/runtimes/smolagents/prompts").glob("**/*.example.yaml"))
