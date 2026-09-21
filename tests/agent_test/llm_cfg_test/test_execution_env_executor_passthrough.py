@@ -1,5 +1,6 @@
 import agentloom.runtime.agent as base_agent_module
 from agentloom.runtimes.smolagents.loom_mixin import LoomAgentMixin
+from agentloom.runtimes.smolagents.terminal import final_answer_binding
 import pytest
 from agentloom.runtimes.smolagents.options import normalize_runtime_options
 from agentloom.runtime.factory import (
@@ -16,7 +17,6 @@ from agentloom.runtime.model_protocol import (
 from agentloom.runtime.skills.catalog import SkillCatalog
 from agentloom.runtime.tool_gateway import (
     AgentLoomToolGateway,
-    final_answer_binding,
 )
 from agentloom.runtime.trace.task_context import (
     clear_current_hook_run,

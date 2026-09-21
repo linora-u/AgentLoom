@@ -53,7 +53,7 @@ Shell process/session/background/watchdog/output、退出码解释和审计资�
 - `runtime.todo`、`tools.todo`、`runtime.error_recovery`、`runtime.prompts.prompt_builder` 及 prompt 包的旧导出：测试和外部 Python 调用者仍使用；生产 smol 调用已改为新路径。
 - `CheckpointManager.load_todos/replace_todos` 与 Coordinator 同名入口：测试/旧调用者兼容；生产 smol provider 不再通过它们执行。`_todos_path` 也是旧辅助入口。
 - `application.validation` 的旧执行/Todo validator、`application.runtime_options.SMOL_DEFAULTS/LEGACY_OPTIONS`：兼容转发；实现位于 smol options，且不加载 SDK。
-- RuntimeDefinition 的旧 smol 字段、BaseAgent 的旧 `max_steps` 子类覆盖、公共 Gateway 的旧 `final_answer_binding`：保留 02 expand 合同。final_answer 实现和 manifest 已由 smol 持有。
+- RuntimeDefinition 的旧 smol 字段、BaseAgent 的旧 `max_steps` 子类覆盖：保留 02 expand 合同。公共 Gateway 的旧 `final_answer_binding` 已在调用方迁移后删除；final_answer 的唯一实现和 manifest 归 `runtimes.smolagents.terminal`。
 - `tools.shell.subprocess_env`：唯一实现在公共 runtime；smol、Hook 等生产调用已直接指向公共实现。
 
 14 只在确认调用者迁走后清理内部别名。旧 YAML 和用户显式模板路径不是可删除的内部别名。

@@ -6,12 +6,12 @@ import json
 from dataclasses import replace
 
 from agentloom.runtimes.smolagents.agents import ToolCallingAgentV2
+from agentloom.runtimes.smolagents.terminal import final_answer_binding
 from agentloom.runtime.hooks import HookPlan, HookRun
 from agentloom.runtimes.smolagents.todo import TodoStateProvider, bind_todo_state_provider
 from agentloom.runtime.tool_gateway import (
     AgentLoomToolGateway,
     bind_tool,
-    final_answer_binding,
 )
 from agentloom.runtime.trace import bind_explicit_execution_context, capture_explicit_execution_context
 from agentloom.runtimes.smolagents.tools.todo import todo_write
