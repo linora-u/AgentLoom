@@ -1,7 +1,7 @@
 # 14 集成与交付记录
 
-状态：最终代码候选 `f5b8a0f` 已完成验收，等待本记录提交后正式快进
-main 并清理本次 worktree。机器可读结果见
+状态：已完成。最终代码候选 `f5b8a0f` 已完成验收，验收记录提交后
+main 快进至 `8df3eaa0`；本次实现与平台准备 worktree 已清理。机器可读结果见
 [14-validation.json](14-validation.json)。
 
 ## 当前决策与改动
@@ -39,4 +39,4 @@ main 并清理本次 worktree。机器可读结果见
 
 A01–A14 对应测试、发行摘要、artifact SHA、live 报告和失败历史见
 [14-validation.json](14-validation.json)。候选后的文档提交不改变受检源码；
-main 交付 SHA 与 worktree 清理结果在实际完成后补记。
+main 从 `36a7e6a1` 快进至 `8df3eaa0`，保留 13 个阶段提交；源码和测试与受检 `f5b8a0f` 一致，后续差异仅为本目录验收文档。main 上 Pi 安装/readiness 通过。本次 `pi-t12-recovery` 与 `pi-platform-prepare` worktree 已删除，分支、冻结引用、项目外证据和两个既有 stash 保留；未推送远端。
