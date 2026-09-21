@@ -63,6 +63,29 @@ def _read_up_to(fd: int, limit: int) -> bytes:
     return b"".join(chunks)
 
 
+def _open_regular_source_fd(
+    source: str | Path,
+    *,
+    error_message: str,
+    dir_fd: int | None = None,
+    nofollow: bool = False,
+) -> int:
+    fd = -1
+    try:
+        flags = os.O_RDONLY | os.O_NONBLOCK
+        if nofollow:
+            flags |= _NOFOLLOW
+        fd = os.open(source, flags, dir_fd=dir_fd)
+        if not stat.S_ISREG(os.fstat(fd).st_mode):
+            raise RuntimeError(error_message)
+        os.set_blocking(fd, True)
+        return fd
+    except BaseException:
+        if fd >= 0:
+            os.close(fd)
+        raise
+
+
 class SecureDirectory:
     """Keep storage anchored to one directory inode across pathname changes."""
 
@@ -293,13 +316,24 @@ class SecureDirectory:
                     os.close(fd)
             os.close(parent_fd)
 
+    def _open_regular_reader_fd(
+        self,
+        parent_fd: int,
+        name: str,
+        relative: str | Path,
+    ) -> int:
+        return _open_regular_source_fd(
+            name,
+            error_message=f"storage source is not regular: {self.path / str(relative)}",
+            dir_fd=parent_fd,
+            nofollow=True,
+        )
+
     def read_bytes(self, relative: str | Path) -> bytes:
         parent_fd, name = self._open_parent(relative, create=False)
         fd = -1
         try:
-            fd = os.open(name, os.O_RDONLY | _NOFOLLOW, dir_fd=parent_fd)
-            if not stat.S_ISREG(os.fstat(fd).st_mode):
-                raise RuntimeError(f"storage source is not regular: {self.path / str(relative)}")
+            fd = self._open_regular_reader_fd(parent_fd, name, relative)
             chunks: list[bytes] = []
             while True:
                 chunk = os.read(fd, 1024 * 1024)
@@ -352,9 +386,7 @@ class SecureDirectory:
         fd = -1
         stream: BinaryIO | None = None
         try:
-            fd = os.open(name, os.O_RDONLY | _NOFOLLOW, dir_fd=parent_fd)
-            if not stat.S_ISREG(os.fstat(fd).st_mode):
-                raise RuntimeError(f"storage source is not regular: {self.path / str(relative)}")
+            fd = self._open_regular_reader_fd(parent_fd, name, relative)
             stream = os.fdopen(fd, "rb", closefd=True)
             fd = -1
             yield stream
@@ -528,10 +560,11 @@ class SecureDirectory:
                 existing = None
             if existing is not None and not stat.S_ISREG(existing.st_mode):
                 raise RuntimeError(f"storage target is not regular: {self.path / str(relative)}")
-            source_fd = os.open(source, os.O_RDONLY)
+            source_fd = _open_regular_source_fd(
+                source,
+                error_message=f"copy source is not regular: {source}",
+            )
             source_stat = os.fstat(source_fd)
-            if not stat.S_ISREG(source_stat.st_mode):
-                raise RuntimeError(f"copy source is not regular: {source}")
             destination_fd = os.open(
                 temporary,
                 os.O_WRONLY | os.O_CREAT | os.O_EXCL | _NOFOLLOW,
@@ -571,14 +604,12 @@ class SecureDirectory:
         try:
             source_parent_fd, source_name = self._open_parent(relative, create=False)
             target_parent_fd = os.open(target.parent, _DIRECTORY_FLAGS)
-            source_fd = os.open(
+            source_fd = self._open_regular_reader_fd(
+                source_parent_fd,
                 source_name,
-                os.O_RDONLY | _NOFOLLOW,
-                dir_fd=source_parent_fd,
+                relative,
             )
             source_stat = os.fstat(source_fd)
-            if not stat.S_ISREG(source_stat.st_mode):
-                raise RuntimeError(f"storage source is not regular: {self.path / str(relative)}")
             try:
                 existing = os.stat(
                     target.name,
@@ -627,12 +658,11 @@ class SecureDirectory:
         source_fd = -1
         try:
             parent_fd, name = self._open_parent(relative, create=False)
-            stored_fd = os.open(name, os.O_RDONLY | _NOFOLLOW, dir_fd=parent_fd)
-            source_fd = os.open(source, os.O_RDONLY)
-            if not stat.S_ISREG(os.fstat(stored_fd).st_mode):
-                return False
-            if not stat.S_ISREG(os.fstat(source_fd).st_mode):
-                return False
+            stored_fd = self._open_regular_reader_fd(parent_fd, name, relative)
+            source_fd = _open_regular_source_fd(
+                source,
+                error_message=f"comparison source is not regular: {source}",
+            )
             while True:
                 stored = _read_up_to(stored_fd, _COPY_CHUNK_BYTES)
                 current = _read_up_to(source_fd, _COPY_CHUNK_BYTES)
