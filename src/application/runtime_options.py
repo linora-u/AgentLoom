@@ -3,19 +3,11 @@ from __future__ import annotations
 
 from pathlib import Path
 from typing import Any
-from agentloom.configuration.config import EffectiveAgentConfigSnapshot
 
-def runtime_config_layers(config: dict, snapshot: EffectiveAgentConfigSnapshot | None):
-    source = str(config.get("_yaml_file_path") or config.get("name", "agent"))
-    layers = [(source, config)] if snapshot is None else [
-        (str(layer.source_path), layer.data)
-        for layer in snapshot.layers
-    ]
-    # The effective snapshot contains project/application overlays. Append the
-    # Agent definition so its runtime_options retain highest precedence.
-    if snapshot is not None:
-        layers.append((source, config))
-    return source, layers
+from agentloom.configuration.config import EffectiveAgentConfigSnapshot
+from agentloom.configuration.runtime_options import (
+    runtime_config_layers as _runtime_config_layers,
+)
 
 
 def normalize_runtime_options(
@@ -27,7 +19,7 @@ def normalize_runtime_options(
         from agentloom.runtimes.smolagents.options import normalize_runtime_options as normalize_smol
 
         return normalize_smol(config, snapshot=snapshot, agent_root=agent_root)
-    _, layers = runtime_config_layers(config, snapshot)
+    _, layers = _runtime_config_layers(config, snapshot)
     options: dict[str, Any] = {}
     sources: dict[str, str] = {}
     for layer_source, data in layers:

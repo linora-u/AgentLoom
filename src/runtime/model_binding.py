@@ -8,8 +8,8 @@ from dataclasses import dataclass, field
 from types import MappingProxyType
 from typing import Any
 
+from agentloom.configuration.model_adapters import AdapterKind
 from agentloom.runtime.model_protocol import (
-    AdapterKind,
     ModelItem,
     ModelTurnAdapter,
     ModelTurnRequest,
