@@ -14,7 +14,8 @@ from unittest.mock import patch
 from uuid import uuid4
 
 import yaml
-from agentloom.runtime.agent_runtime import AgentRuntimeResult, RuntimeCapabilities, build_builtin_runtime_registry
+from agentloom.application.composition import build_builtin_runtime_registry
+from agentloom.runtime.agent_runtime import AgentRuntimeResult, RuntimeCapabilities
 from agentloom.runtime.model_protocol import FunctionCallItem, FunctionCallOutputItem, MessageItem, ToolDefinition
 from agentloom.runtime.native_tool_host import NativeReadToolHost
 from agentloom.runtime.native_tools import (

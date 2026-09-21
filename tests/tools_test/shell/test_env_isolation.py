@@ -2,8 +2,8 @@ import pytest
 import os
 import sys
 import shutil
-from agentloom.tools.shell.shell_tool import shell_tool
-from agentloom.tools.shell.process import ShellProcessRegistry
+from agentloom.runtimes.smolagents.tools.shell.shell_tool import shell_tool
+from agentloom.runtimes.smolagents.tools.shell.process import ShellProcessRegistry
 
 @pytest.fixture(autouse=True)
 def clean_registry():
@@ -122,7 +122,7 @@ def test_cross_agent_env_ephemeral(monkeypatch):
     This is by design (stateless subprocess, no env delta tracking).
     """
     from agentloom.runtime.trace.task_context import task_context, sub_task_context, set_current_agent_id
-    import agentloom.tools.shell.validator as validator_module
+    import agentloom.runtime.tool_governance.shell.validator as validator_module
 
     monkeypatch.setattr(validator_module, 'load_allowed_commands', lambda: ['export', 'echo'])
 
@@ -169,7 +169,7 @@ def test_bash_load_profile_isolation(clean_registry, monkeypatch):
         monkeypatch.setenv("SSH_CLIENT", "127.0.0.1 10000 22")
         monkeypatch.setenv("SSH_CONNECTION", "127.0.0.1 10000 127.0.0.1 22")
         # Clear shell detection cache so it picks up the new $SHELL.
-        from agentloom.tools.shell.process import find_suitable_shell
+        from agentloom.runtimes.smolagents.tools.shell.process import find_suitable_shell
         find_suitable_shell.cache_clear()
 
         from agentloom.runtime.trace.task_context import task_context, sub_task_context, set_current_agent_id

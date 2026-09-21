@@ -1,9 +1,9 @@
 import unittest
 from unittest.mock import MagicMock, patch
 
-from agentloom.tools.shell import shell_tool
-from agentloom.tools.shell import validator as validator_module
-from agentloom.tools.shell.shell_tool import ShellCommandError
+from agentloom.runtimes.smolagents.tools.shell import shell_tool
+from agentloom.runtime.tool_governance.shell import validator as validator_module
+from agentloom.runtimes.smolagents.tools.shell.shell_tool import ShellCommandError
 
 
 class TestShellTool(unittest.TestCase):
@@ -134,7 +134,7 @@ class TestShellTool(unittest.TestCase):
     def test_shell_tool_logs_policy_snapshot_for_successful_command(self):
         mock_audit = MagicMock()
         with patch(
-            "agentloom.tools.shell.shell_audit_log.get_shell_audit_logger",
+            "agentloom.runtimes.smolagents.tools.shell.shell_audit_log.get_shell_audit_logger",
             return_value=mock_audit,
         ):
             result = shell_tool("echo audit_policy_ok")

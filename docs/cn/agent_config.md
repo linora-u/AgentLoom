@@ -496,7 +496,7 @@ runtime_options:
 ```
 
 相对路径基于项目根目录解析，绝对路径直接使用。模板内容必须是合法 YAML mapping。
-显式路径优先；未配置时，smol adapter 依次选择 `src/adapters/smolagents/prompts/` 下已激活的模型家族模板、本地模板，再使用 smolagents 内置模板。`.example.yaml` 只是参考资源。
+显式路径优先；未配置时，smol adapter 依次选择 `src/runtimes/smolagents/prompts/` 下已激活的模型家族模板、本地模板，再使用 smolagents 内置模板。`.example.yaml` 只是参考资源。
 
 ---
 
@@ -596,7 +596,7 @@ tool = YamlAgentFactory.create_agent_as_tool("worker.yaml")
 # 构造任务列表
 tasks = [
     {"dir_path": "src/api", "index_content": "..."},
-    {"dir_path": "src/utils", "index_content": "..."},
+    {"dir_path": "src/application/imports", "index_content": "..."},
     {"dir_path": "src/core", "index_content": "..."},
 ]
 
@@ -1268,7 +1268,7 @@ agent_function_schema:
     对单个目录进行 LLM 架构分析，返回 Markdown 格式分析文本。
   inputs:
     dir_path:
-      description: "要分析的相对目录路径，如 src/utils"
+      description: "要分析的相对目录路径，如 src/application/imports"
       required: true
     index_content:
       description: "该目录 index.md 的完整文本内容"

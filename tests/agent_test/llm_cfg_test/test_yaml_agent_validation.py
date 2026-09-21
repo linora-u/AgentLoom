@@ -7,7 +7,7 @@ from agentloom.application.validation import (
     NormalizedAgentConfig,
 )
 from agentloom.runtime.factory import YamlConfiguredAgent, YamlConfiguredSupervisorAgent
-from agentloom.adapters.smolagents.options import normalize_runtime_options
+from agentloom.runtimes.smolagents.options import normalize_runtime_options
 
 
 @pytest.fixture(autouse=True)

@@ -7,8 +7,8 @@ from dataclasses import dataclass
 from pathlib import Path
 
 import pytest
-from agentloom.adapters.smolagents.agents import ToolCallingAgentV2
-from agentloom.adapters.smolagents.tool_proxy import (
+from agentloom.runtimes.smolagents.agents import ToolCallingAgentV2
+from agentloom.runtimes.smolagents.tool_proxy import (
     SmolagentsToolGatewayProxy,
     build_smolagents_tool_proxies,
 )
@@ -294,7 +294,7 @@ def test_proxy_builder_requires_explicit_final_answer() -> None:
 
 def test_agents_source_can_execute_tools_only_through_gateway() -> None:
     source = (
-        ROOT / "src/adapters/smolagents/agents.py"
+        ROOT / "src/runtimes/smolagents/agents.py"
     ).read_text(encoding="utf-8")
     tree = ast.parse(source)
     forbidden_names = {
@@ -321,9 +321,9 @@ def test_agents_source_can_execute_tools_only_through_gateway() -> None:
 
 
 def test_removed_tool_shim_cannot_restore_a_second_execution_path() -> None:
-    shim = ROOT / "src/adapters/smolagents/tool_shim.py"
+    shim = ROOT / "src/runtimes/smolagents/tool_shim.py"
     protocol = (
-        ROOT / "src/adapters/smolagents/tool_protocol.py"
+        ROOT / "src/runtimes/smolagents/tool_protocol.py"
     ).read_text(encoding="utf-8")
 
     assert not shim.exists()

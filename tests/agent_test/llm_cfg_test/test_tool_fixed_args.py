@@ -8,7 +8,7 @@ import pytest
 
 from agentloom.runtime import factory as yaml_agent_factory
 from agentloom.runtime.factory import YamlAgentFactory
-from agentloom.adapters.smolagents.tools.tools import ensure_tool_wrapped
+from agentloom.runtimes.smolagents.tools.tools import ensure_tool_wrapped
 
 
 def sample_tool(prompt: str, cwd: str = ".", sandbox: str = "", search: str = "") -> str:

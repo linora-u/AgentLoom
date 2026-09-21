@@ -8,10 +8,12 @@ Verifies that:
 import pytest
 
 from agentloom.tools.loader import resolve_tool_function
-from agentloom.tools.search import (
-    ast_grep_search_file,
+from agentloom.runtimes.smolagents.tools.search import (
     glob_search,
     grep_search,
+)
+from agentloom.tools.search import (
+    ast_grep_search_file,
     lsp_find_definition,
     lsp_find_references,
     lsp_get_document_symbols,

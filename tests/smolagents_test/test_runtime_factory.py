@@ -7,17 +7,17 @@ from types import SimpleNamespace
 from typing import Any
 
 import pytest
-from agentloom.adapters.smolagents import runtime_factory as factory_module
-from agentloom.adapters.smolagents.model_turn_bridge import (
+from agentloom.runtimes.smolagents import runtime_factory as factory_module
+from agentloom.runtimes.smolagents.model_turn_bridge import (
     SmolagentsModelTurnBridge,
 )
-from agentloom.adapters.smolagents.runtime_adapter import (
+from agentloom.runtimes.smolagents.runtime_adapter import (
     SmolagentsRuntimeAdapter,
 )
-from agentloom.adapters.smolagents.runtime_factory import (
+from agentloom.runtimes.smolagents.runtime_factory import (
     SmolagentsRuntimeFactory,
 )
-from agentloom.adapters.smolagents.tool_proxy import (
+from agentloom.runtimes.smolagents.tool_proxy import (
     SmolagentsToolGatewayProxy,
 )
 from agentloom.runtime.agent_runtime import RuntimeDefinition
@@ -452,7 +452,7 @@ def test_factory_rejects_non_smolagents_definition() -> None:
 def test_smol_adapter_owns_todo_and_terminal_tools(mode, present):
     from dataclasses import replace
     from agentloom.runtime.tool_gateway import AgentLoomToolGateway, bind_tool
-    from agentloom.tools.todo import todo_write
+    from agentloom.runtimes.smolagents.tools.todo import todo_write
 
     definition = _definition()
     definition = replace(definition, runtime_options={**definition.runtime_options, "todo_mode": mode},

@@ -5,16 +5,16 @@ from __future__ import annotations
 import json
 from dataclasses import replace
 
-from agentloom.adapters.smolagents.agents import ToolCallingAgentV2
+from agentloom.runtimes.smolagents.agents import ToolCallingAgentV2
 from agentloom.runtime.hooks import HookPlan, HookRun
-from agentloom.runtime.todo import TodoStateProvider, bind_todo_state_provider
+from agentloom.runtimes.smolagents.todo import TodoStateProvider, bind_todo_state_provider
 from agentloom.runtime.tool_gateway import (
     AgentLoomToolGateway,
     bind_tool,
     final_answer_binding,
 )
 from agentloom.runtime.trace import bind_explicit_execution_context, capture_explicit_execution_context
-from agentloom.tools.todo import todo_write
+from agentloom.runtimes.smolagents.tools.todo import todo_write
 from smolagents.models import (
     ChatMessage,
     ChatMessageToolCall,

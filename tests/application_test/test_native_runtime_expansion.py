@@ -41,7 +41,7 @@ def native_project(tmp_path, monkeypatch):
             definitions.append(definition)
 
         def run(self, request):
-            from agentloom.runtime.todo import get_current_todo_provider
+            from agentloom.runtimes.smolagents.todo import get_current_todo_provider
             assert get_current_todo_provider() is None
             from agentloom.runtime.trace import capture_explicit_execution_context
             context = capture_explicit_execution_context()
@@ -58,7 +58,7 @@ def native_project(tmp_path, monkeypatch):
         def close(self):
             pass
 
-    from agentloom.runtime.agent_runtime import build_builtin_runtime_registry
+    from agentloom.application.composition import build_builtin_runtime_registry
     registry = build_builtin_runtime_registry()
     registry.register("native-fixture", capabilities=NativeRuntime.capabilities, factory=NativeRuntime)
     monkeypatch.setattr("agentloom.application.validation.build_builtin_runtime_registry", lambda: registry)

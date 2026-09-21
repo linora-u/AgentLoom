@@ -44,7 +44,7 @@ ToolRecoveryDescriptor = Callable[[Mapping[str, Any]], Mapping[str, str]]
 
 def final_answer_binding() -> ToolBinding:
     """Temporary compatibility import; terminal behavior belongs to smolagents."""
-    from agentloom.adapters.smolagents.terminal import final_answer_binding as binding
+    from agentloom.runtimes.smolagents.terminal import final_answer_binding as binding
 
     return binding()
 

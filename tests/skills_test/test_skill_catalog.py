@@ -4,7 +4,7 @@ from types import SimpleNamespace
 
 from agentloom.runtime import RuntimeHome, bind_run_context
 from agentloom.runtime.agent import AgentRoleProfile, AgentType, RoleDrivenAgent
-from agentloom.runtime.prompts.prompt_builder import build_prompt_templates
+from agentloom.runtimes.smolagents.prompts.prompt_builder import build_prompt_templates
 from agentloom.runtime.skills.catalog import SkillCatalog, SkillSource
 from agentloom.runtime.skills.parser import build_skills_prompt
 from agentloom.runtime.trace.task_context import clear_current_skill_catalog, set_current_skill_catalog
@@ -103,7 +103,7 @@ def test_prompt_exposes_catalogue_only_when_skill_tool_is_available(monkeypatch,
     prompt_path = tmp_path / "prompt.yaml"
     prompt_path.write_text("system_prompt: base\n", encoding="utf-8")
 
-    import agentloom.runtime.prompts.prompt_builder as prompt_builder_module
+    import agentloom.runtimes.smolagents.prompts.prompt_builder as prompt_builder_module
 
     monkeypatch.setattr(
         prompt_builder_module,

@@ -242,7 +242,7 @@ Options merge through system, Application and Agent layers, with validation owne
 
 Historical top-level `smart_summary`, `prompt`, `todo`, `max_steps`, `planning_interval`, and `max_consecutive_parse_errors` are silently ignored, without conversion or rejection. They no longer provide system defaults.
 
-Set a custom smol template with a string `runtime_options.prompt_template_path` in Agent YAML. Bundled reference templates live under `src/adapters/smolagents/prompts/`.
+Set a custom smol template with a string `runtime_options.prompt_template_path` in Agent YAML. Bundled reference templates live under `src/runtimes/smolagents/prompts/`.
 
 ---
 
@@ -308,7 +308,7 @@ lsp_servers:
 | `max_restarts` | `int` | `3` | Max crash recovery attempts per server |
 | `servers` | `list` | `[python]` | Languages to start (40+ supported) |
 
-> Servers are managed by `agentloom.adapters.lsp.lsp_server_manager.LSPServerManager`. Unsupported languages automatically fall back to tree-sitter AST analysis (46+ languages).
+> Servers are managed by `agentloom.integrations.lsp.lsp_server_manager.LSPServerManager`. Unsupported languages automatically fall back to tree-sitter AST analysis (46+ languages).
 
 ---
 

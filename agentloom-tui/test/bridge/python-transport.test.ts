@@ -32,7 +32,7 @@ describe("PythonTransport", () => {
       "-I",
       "-u",
       "-m",
-      "agentloom.tui_bridge",
+      "agentloom_tui_bridge",
     ])
 
     const projectPython = join(projectRoot, ".venv", "bin", "python")
@@ -43,7 +43,7 @@ describe("PythonTransport", () => {
       "-I",
       "-u",
       "-m",
-      "agentloom.tui_bridge",
+      "agentloom_tui_bridge",
     ])
 
     await rm(join(projectRoot, ".venv"), { recursive: true })
@@ -54,11 +54,11 @@ describe("PythonTransport", () => {
       "-I",
       "-u",
       "-m",
-      "agentloom.tui_bridge",
+      "agentloom_tui_bridge",
     ])
   })
 
-  test("loads the installed bridge instead of a project-local agentloom.tui_bridge", async () => {
+  test("loads the installed bridge instead of a project-local agentloom_tui_bridge", async () => {
     const projectRoot = await mkdtemp(join(tmpdir(), "agentloom-isolated-bridge-"))
     temporaryDirectories.push(projectRoot)
     const fakeBridge = join(projectRoot, "src", "tui_bridge")

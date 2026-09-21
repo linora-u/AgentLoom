@@ -1,21 +1,7 @@
-"""
-AI Agents package.
-"""
-
-import os
+"""AgentLoom public package surface."""
 
 if __name__ != "agentloom":
     raise ImportError("Import AgentLoom as 'agentloom'; install the project first.")
-
-# LiteLLM fetches its model-price catalog during import unless this is set.
-# AgentLoom imports provider adapters from offline validation, CLI inspection,
-# and checkpoint subprocesses, so imports must not depend on external network
-# availability. Preserve an explicit user override.
-os.environ.setdefault("LITELLM_LOCAL_MODEL_COST_MAP", "True")
-
-from agentloom.encoding.terminal import configure_terminal_encoding
-
-configure_terminal_encoding()
 
 __version__ = "1.0.1"
 

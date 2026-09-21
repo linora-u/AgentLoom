@@ -25,8 +25,8 @@ _TOOLSETS: dict[str, tuple[str, ...]] | None = None
 
 
 def _build_catalog() -> dict[str, ToolSpec]:
-    from agentloom.adapters.smolagents.tool_catalog import tool_specs as smol_specs
-    from agentloom.adapters.pi.tool_catalog import tool_specs as pi_specs
+    from agentloom.runtimes.smolagents.tool_catalog import tool_specs as smol_specs
+    from agentloom.runtimes.pi.tool_catalog import tool_specs as pi_specs
     from .platform_catalog import tool_specs as platform_specs
     from .optional_catalog import tool_specs as optional_specs
 

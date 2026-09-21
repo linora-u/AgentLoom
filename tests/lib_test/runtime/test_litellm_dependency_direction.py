@@ -25,7 +25,7 @@ def test_litellm_adapter_does_not_depend_on_smolagents() -> None:
     for path in sorted(LITELLM_ADAPTER_ROOT.rglob("*.py")):
         for imported in sorted(_imports(path)):
             if imported == "smolagents" or imported.startswith(
-                "agentloom.adapters.smolagents"
+                "agentloom.runtimes.smolagents"
             ):
                 violations.append(
                     f"{path.relative_to(PROJECT_ROOT)} imports {imported}"

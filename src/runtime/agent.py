@@ -15,6 +15,7 @@ from typing import TYPE_CHECKING, Any
 if TYPE_CHECKING:
     from agentloom.application.lifecycle import ApplicationRunLifecycle
 
+from agentloom.application.composition import build_builtin_runtime_registry
 from agentloom.application.validation import (
     AgentConfigNormalizer,
 )
@@ -31,7 +32,6 @@ from agentloom.runtime.agent_runtime import (
     RuntimeDefinition,
     RuntimeEvent,
     RuntimeModelSelection,
-    build_builtin_runtime_registry,
     require_runtime_state,
 )
 from agentloom.runtime.hooks import (
@@ -169,7 +169,7 @@ class BaseAgent(ABC):
         *,
         model_cache: bool,
     ) -> ModelTurnBinding:
-        from agentloom.adapters.litellm.model_binding import (
+        from agentloom.integrations.litellm.model_binding import (
             resolve_litellm_model_turn_binding,
         )
 

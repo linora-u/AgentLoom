@@ -3,8 +3,8 @@
 from __future__ import annotations
 
 import pytest
-from agentloom.adapters.smolagents.options import normalize_runtime_options
-from agentloom.runtime.prompts.prompt_builder import todo_policy_for_mode
+from agentloom.runtimes.smolagents.options import normalize_runtime_options
+from agentloom.runtimes.smolagents.prompts.prompt_builder import todo_policy_for_mode
 
 
 @pytest.mark.parametrize("mode", ["auto", "on", "off"])
@@ -70,8 +70,8 @@ def test_off_policy_is_empty() -> None:
 def test_current_snapshot_is_injected_as_trusted_system_context() -> None:
     from dataclasses import replace
 
-    from agentloom.adapters.smolagents.loom_mixin import append_current_todo_state
-    from agentloom.runtime.todo import TodoStateProvider, bind_todo_state_provider
+    from agentloom.runtimes.smolagents.loom_mixin import append_current_todo_state
+    from agentloom.runtimes.smolagents.todo import TodoStateProvider, bind_todo_state_provider
     from agentloom.runtime.trace import bind_explicit_execution_context, capture_explicit_execution_context
     from smolagents.models import ChatMessage, MessageRole
 
@@ -98,8 +98,8 @@ def test_current_snapshot_is_injected_as_trusted_system_context() -> None:
 
 
 def test_current_snapshot_is_not_injected_when_off_or_empty() -> None:
-    from agentloom.adapters.smolagents.loom_mixin import append_current_todo_state
-    from agentloom.runtime.todo import TodoStateProvider, bind_todo_state_provider
+    from agentloom.runtimes.smolagents.loom_mixin import append_current_todo_state
+    from agentloom.runtimes.smolagents.todo import TodoStateProvider, bind_todo_state_provider
     from smolagents.models import ChatMessage, MessageRole
 
     messages = [ChatMessage(role=MessageRole.USER, content="continue")]
@@ -112,8 +112,8 @@ def test_current_snapshot_is_not_injected_when_off_or_empty() -> None:
 def test_summary_mode_model_context_also_receives_current_snapshot() -> None:
     from dataclasses import replace
 
-    from agentloom.adapters.smolagents.loom_mixin import LoomAgentMixin
-    from agentloom.runtime.todo import TodoStateProvider, bind_todo_state_provider
+    from agentloom.runtimes.smolagents.loom_mixin import LoomAgentMixin
+    from agentloom.runtimes.smolagents.todo import TodoStateProvider, bind_todo_state_provider
     from agentloom.runtime.trace import bind_explicit_execution_context, capture_explicit_execution_context
     from smolagents.models import ChatMessage, MessageRole
 

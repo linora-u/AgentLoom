@@ -21,7 +21,7 @@ For Pi:
 
 ```sh
 uv sync --locked --no-dev --extra pi
-uv run --locked --no-dev --extra pi loom install-runtime pi
+uv run --locked --no-dev --extra pi loom runtime install pi
 uv run --locked --no-dev --extra pi loom run path/to/application.yaml
 ```
 
@@ -30,15 +30,15 @@ runs its installer; the installer uses `npm ci` and the committed npm lock to
 download Pi. No upstream SDK source needs to be copied into this repository.
 For the complete source installation, `./install --runtime pi` performs both
 steps automatically. `agentloom update` preserves this runtime choice. The
-download lives under `adapters/pi/bridge/node_modules/` inside the installed
-package; editable development uses `src/adapters/pi/bridge/node_modules/`.
+download lives under `runtimes/pi/bridge/node_modules/` inside the installed
+package; editable development uses `src/runtimes/pi/bridge/node_modules/`.
 
 When selecting professional code tools in YAML, add `--extra code` to **both**
 `uv sync` and subsequent `uv run` commands; otherwise uv removes unused extras:
 
 ```sh
 uv sync --locked --no-dev --extra pi --extra code
-uv run --locked --no-dev --extra pi --extra code loom install-runtime pi
+uv run --locked --no-dev --extra pi --extra code loom runtime install pi
 uv run --locked --no-dev --extra pi --extra code loom run path/to/application.yaml
 ```
 
@@ -58,7 +58,7 @@ For development and the complete test suite:
 
 ```sh
 uv sync --locked --all-groups --extra smol --extra code
-uv run --locked --extra smol --extra code loom install-runtime pi
+uv run --locked --extra smol --extra code loom runtime install pi
 cp config/llm.example.yaml config/llm.yaml  # Only when no local config exists.
 uv run --locked --extra smol --extra code pytest tests/
 ```
@@ -77,7 +77,7 @@ uv venv --python 3.12 /tmp/agentloom-pi-env
 uv pip sync --python /tmp/agentloom-pi-env/bin/python --require-hashes /tmp/agentloom-pi.txt
 uv pip install --python /tmp/agentloom-pi-env/bin/python --no-deps /tmp/agentloom-release/agentloom-1.0.1-py3-none-any.whl
 cd /path/to/your/application-project
-/tmp/agentloom-pi-env/bin/loom install-runtime pi
+/tmp/agentloom-pi-env/bin/loom runtime install pi
 /tmp/agentloom-pi-env/bin/loom run applications/example/workflows/root.yaml
 ```
 
@@ -89,9 +89,9 @@ Do not use an editable install to validate a release.
 
 The Python package includes AgentLoom's bridge TypeScript, JSON schema, npm
 manifest/lock and professional tool query files. It contains no upstream Pi SDK,
-`node_modules`, compiled bridge or local install marker. `loom install-runtime pi`
+`node_modules`, compiled bridge or local install marker. `loom runtime install pi`
 downloads the fixed SDK **0.79.4** with `npm ci`, builds the bridge inside the
-installed `agentloom/adapters/pi/bridge/` directory and validates its assets.
+installed `agentloom/runtimes/pi/bridge/` directory and validates its assets.
 The environment must be writable during this explicit installation step.
 
 Source, schema or npm lock changes invalidate the installation fingerprint.

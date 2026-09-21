@@ -339,7 +339,7 @@ def validate_effective_definition(
         )
         if prompt_path and not Path(prompt_path).is_file():
             raise ValueError(f"Prompt template does not exist: {prompt_path}")
-    from agentloom.adapters.mcp.config import parse_mcp_yaml_value
+    from agentloom.integrations.mcp.config import parse_mcp_yaml_value
 
     snapshot.values["_mcp_settings_snapshot"] = parse_mcp_yaml_value(
         snapshot.values.get("mcp_servers"),

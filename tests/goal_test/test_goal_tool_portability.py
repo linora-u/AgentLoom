@@ -13,7 +13,7 @@ def test_goal_tools_construct_without_importing_a_runtime_sdk():
 
             class NoSmol(importlib.abc.MetaPathFinder):
                 def find_spec(self, fullname, path=None, target=None):
-                    if fullname == 'smolagents' or fullname.startswith(('smolagents.', 'agentloom.adapters.smolagents')):
+                    if fullname == 'smolagents' or fullname.startswith(('smolagents.', 'agentloom.runtimes.smolagents')):
                         raise ImportError(f'Runtime dependency in platform Goal: {fullname}')
 
             sys.meta_path.insert(0, NoSmol())

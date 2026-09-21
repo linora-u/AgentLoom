@@ -29,14 +29,14 @@ def test_tools_package_is_not_a_public_export_facade() -> None:
         import agentloom.tools as tools
 
         implementation_prefixes = (
-            "agentloom.adapters.smolagents.tools",
+            "agentloom.runtimes.smolagents.tools",
             "agentloom.tools.context",
             "agentloom.tools.file_ops",
             "agentloom.tools.search",
             "agentloom.tools.self_learning",
-            "agentloom.tools.shell",
+            "agentloom.runtimes.smolagents.tools.shell",
             "agentloom.tools.skills",
-            "agentloom.tools.todo",
+            "agentloom.runtimes.smolagents.tools.todo",
         )
         loaded = sorted(
             name
@@ -70,14 +70,14 @@ def test_catalog_metadata_does_not_load_tool_implementations() -> None:
 
         specs = list_tool_specs()
         implementation_prefixes = (
-            "agentloom.adapters.smolagents.tools",
+            "agentloom.runtimes.smolagents.tools",
             "agentloom.tools.context",
             "agentloom.tools.file_ops",
             "agentloom.tools.search",
             "agentloom.tools.self_learning",
-            "agentloom.tools.shell",
+            "agentloom.runtimes.smolagents.tools.shell",
             "agentloom.tools.skills",
-            "agentloom.tools.todo",
+            "agentloom.runtimes.smolagents.tools.todo",
         )
         loaded = sorted(
             name
@@ -109,8 +109,8 @@ def test_loader_imports_only_the_selected_tool_implementation() -> None:
         resolved = resolve_tool_function("grep_search")
         sibling_prefixes = (
             "agentloom.tools.search.ast_grep_tool",
-            "agentloom.tools.search.glob_tool",
-            "agentloom.adapters.smolagents.tools.search.glob_tool",
+            "agentloom.runtimes.smolagents.tools.search.glob_tool",
+            "agentloom.runtimes.smolagents.tools.search.glob_tool",
             "agentloom.tools.search.lsp_tool",
         )
         loaded_siblings = sorted(
@@ -128,7 +128,7 @@ def test_loader_imports_only_the_selected_tool_implementation() -> None:
 
     assert state == {
         "name": "grep_search",
-        "module": "agentloom.adapters.smolagents.tools.search.grep_tool.grep_tool",
+        "module": "agentloom.runtimes.smolagents.tools.search.grep_tool.grep_tool",
         "loaded_siblings": [],
     }
 
@@ -139,11 +139,11 @@ def test_lazy_group_exports_survive_same_named_submodule_imports() -> None:
         import importlib
         import json
 
-        importlib.import_module("agentloom.tools.shell.shell_tool")
-        importlib.import_module("agentloom.tools.file_ops.read_file")
+        importlib.import_module("agentloom.runtimes.smolagents.tools.shell.shell_tool")
+        importlib.import_module("agentloom.runtimes.smolagents.tools.file_ops.read_file")
 
-        from agentloom.tools.file_ops import read_file
-        from agentloom.tools.shell import shell_tool
+        from agentloom.runtimes.smolagents.tools.file_ops import read_file
+        from agentloom.runtimes.smolagents.tools.shell import shell_tool
 
         print(json.dumps({
             "read_file_callable": callable(read_file),
@@ -220,14 +220,14 @@ def test_tui_definition_validation_does_not_load_implementations() -> None:
             catalog=("powerful", {"powerful": {"model": "openai/test"}}),
         )
         implementation_prefixes = (
-            "agentloom.adapters.smolagents.tools",
+            "agentloom.runtimes.smolagents.tools",
             "agentloom.tools.context",
             "agentloom.tools.file_ops",
             "agentloom.tools.search",
             "agentloom.tools.self_learning",
-            "agentloom.tools.shell",
+            "agentloom.runtimes.smolagents.tools.shell",
             "agentloom.tools.skills",
-            "agentloom.tools.todo",
+            "agentloom.runtimes.smolagents.tools.todo",
         )
         loaded = sorted(
             name
@@ -259,14 +259,14 @@ def test_context_engine_metadata_lookup_does_not_load_implementations() -> None:
 
         config = ContextEngineConfig()
         implementation_prefixes = (
-            "agentloom.adapters.smolagents.tools",
+            "agentloom.runtimes.smolagents.tools",
             "agentloom.tools.context",
             "agentloom.tools.file_ops",
             "agentloom.tools.search",
             "agentloom.tools.self_learning",
-            "agentloom.tools.shell",
+            "agentloom.runtimes.smolagents.tools.shell",
             "agentloom.tools.skills",
-            "agentloom.tools.todo",
+            "agentloom.runtimes.smolagents.tools.todo",
         )
         loaded = sorted(
             name

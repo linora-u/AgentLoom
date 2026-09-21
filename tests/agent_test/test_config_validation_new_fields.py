@@ -147,7 +147,7 @@ class TestMissingFieldsDefault:
             RootSettings(runtime={"cleanup_interval_hours": 23})
 
     def test_smart_summary_default_belongs_to_smol_options(self, tmp_path):
-        from agentloom.adapters.smolagents.options import normalize_runtime_options
+        from agentloom.runtimes.smolagents.options import normalize_runtime_options
 
         settings = RootSettings()
         assert "smart_summary" not in settings.model_dump()

@@ -4,8 +4,8 @@ import json
 from dataclasses import dataclass
 
 import pytest
-from agentloom.adapters.smolagents.model_turn_bridge import SmolagentsModelTurnBridge
-from agentloom.runtime.error_recovery import RUNTIME_FEEDBACK_RAW_KEY
+from agentloom.runtimes.smolagents.model_turn_bridge import SmolagentsModelTurnBridge
+from agentloom.runtimes.smolagents.error_recovery import RUNTIME_FEEDBACK_RAW_KEY
 from agentloom.runtime.goal import GoalCompleteError, GoalState
 from agentloom.runtime.goal.provider import (
     GoalStateProvider,

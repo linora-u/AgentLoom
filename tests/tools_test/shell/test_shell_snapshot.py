@@ -12,7 +12,7 @@ import sys
 
 import pytest
 
-from agentloom.tools.shell.shell_snapshot import (
+from agentloom.runtimes.smolagents.tools.shell.shell_snapshot import (
     create_snapshot,
     remove_snapshot,
     _build_bash_snapshot_script,

@@ -10,7 +10,7 @@ def test_checkpoint_import_does_not_load_backend_todo_state():
         import sys
         from agentloom.runtime.checkpoint.checkpoint_manager import CheckpointManager
         assert not any(name.startswith((
-            "agentloom.runtime.todo", "agentloom.adapters.smolagents.todo",
+            "agentloom.runtimes.smolagents.todo", "agentloom.runtimes.smolagents.todo",
         )) for name in sys.modules)
     ''')], capture_output=True, text=True)
     assert result.returncode == 0, result.stderr
@@ -25,7 +25,7 @@ def test_platform_run_logging_does_not_load_smol_tools(tmp_path):
         with bind_run_context(context), bind_logger_backend(NullLoggerBackend(), context=context):
             pass
         assert not any(name.startswith((
-            "agentloom.tools.shell", "agentloom.adapters.smolagents.tools",
+            "agentloom.runtimes.smolagents.tools.shell", "agentloom.runtimes.smolagents.tools",
         )) for name in sys.modules)
     '''), str(tmp_path / "runtime")], capture_output=True, text=True)
     assert result.returncode == 0, result.stderr

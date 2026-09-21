@@ -1,6 +1,6 @@
 # Byte-compiled / optimized / DLL files
-# A locally ignored upstream pi/ checkout must not hide the production adapter.
-!/src/adapters/pi/
+# A locally ignored upstream pi/ checkout must not hide the production runtime.
+!/src/runtimes/pi/
 __pycache__/
 *.py[cod]
 *$py.class
@@ -198,3 +198,7 @@ applications/web_search/config/.mcp.anysearch.json
 # Isolated real-Application acceptance definitions and artifacts.
 **/.architecture_acceptance/
 /applications/architecture_acceptance_*/
+
+src/runtimes/pi/bridge/node_modules/
+src/runtimes/pi/bridge/dist/
+src/runtimes/pi/bridge/.agentloom-install.*

@@ -21,7 +21,7 @@ def test_native_sdk_death_preserves_exact_durable_state(tmp_path, boundary):
     launcher.write_text(f'''#!{sys.executable}
 import subprocess,sys,threading,json,os
 from pathlib import Path
-if sys.argv[1:]==['--version']:os.execv({binary!r},[{binary!r},'--version'])
+if sys.argv[1:]==['--version'] or sys.argv[1:3]==['-p','process.versions.modules']:os.execv({binary!r},[{binary!r},*sys.argv[1:]])
 p=subprocess.Popen([{binary!r},*sys.argv[1:]],stdin=subprocess.PIPE,stdout=subprocess.PIPE,stderr=subprocess.DEVNULL)
 def terminate(value):
  Path({str(marker)!r}).write_text(json.dumps({{'pid':p.pid,'frame':value}}))

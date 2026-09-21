@@ -32,14 +32,14 @@ RUNTIME_OWNER = PROJECT_ROOT / "src" / "runtime" / "agent.py"
 
 _FORBIDDEN_RUNTIME_IMPORT_PREFIXES = (
     "smolagents",
-    "agentloom.adapters.smolagents",
+    "agentloom.runtimes.smolagents",
 )
 _FORBIDDEN_RUNTIME_SYMBOLS = (
     "ToolCallingAgentV2",
     "SmolagentsModelTurnBridge",
 )
 _FORBIDDEN_RUNTIME_SOURCE_FRAGMENTS = (
-    "agentloom.adapters.smolagents",
+    "agentloom.runtimes.smolagents",
     "ToolCallingAgentV2",
     "SmolagentsModelTurnBridge",
     "adapters.smolagents.models.model_manager",

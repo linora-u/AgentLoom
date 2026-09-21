@@ -15,7 +15,7 @@ from unittest.mock import patch
 
 import pytest
 
-from agentloom.tools.shell.process import ExecResult, ShellProcess
+from agentloom.runtimes.smolagents.tools.shell.process import ExecResult, ShellProcess
 
 
 # ---------------------------------------------------------------------------
@@ -81,6 +81,6 @@ class TestExecutableParam:
         """24b: When no shell is found, ShellProcess.__init__ raises FileNotFoundError."""
         monkeypatch.delenv("SHELL", raising=False)
         monkeypatch.setattr("shutil.which", lambda cmd: None)
-        monkeypatch.setattr("agentloom.tools.shell.process._is_executable", lambda p: False)
+        monkeypatch.setattr("agentloom.runtimes.smolagents.tools.shell.process._is_executable", lambda p: False)
         with pytest.raises(FileNotFoundError):
             ShellProcess(session_scoped=False)

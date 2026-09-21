@@ -202,8 +202,8 @@ Supervisor 中断必须等到初始化副作用 ledger 与预期文件均落盘�
 
 ```bash
 rg -n "_WORKFLOW_OVERLAY_KEYS|_LLM_ONLY_TOP_LEVEL_KEYS|extract_workflow_overlay" src/configuration/config.py
-rg -n "class RootSettings|class ToolAccessControlSettings|class LlmModelTypeSettings|extra_completion_params|supports_structured_output|supports_native_tool_calls|tool_choice" src/configuration src/adapters/smolagents/models docs/en docs/cn agentloom-framework-skill
-rg -n "agent_runtime|ModelTurnAdapter|schema-bound|openai_responses|anthropic_messages" src/adapters/smolagents src/configuration tests docs/en docs/cn agentloom-framework-skill
+rg -n "class RootSettings|class ToolAccessControlSettings|class LlmModelTypeSettings|extra_completion_params|supports_structured_output|supports_native_tool_calls|tool_choice" src/configuration src/runtimes/smolagents/models docs/en docs/cn agentloom-framework-skill
+rg -n "agent_runtime|ModelTurnAdapter|schema-bound|openai_responses|anthropic_messages" src/runtimes/smolagents src/configuration tests docs/en docs/cn agentloom-framework-skill
 rg -n "skills.paths|Duplicate skill name|hooks:" src/runtime/skills src/runtime/hooks src/application/definition.py docs/en agentloom-framework-skill
 rg -n "mcp_servers|parse_mcp_servers_yaml_value" src tests docs/en agentloom-framework-skill
 ```

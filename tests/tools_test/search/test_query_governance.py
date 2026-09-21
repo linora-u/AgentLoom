@@ -7,7 +7,7 @@ from agentloom.runtime.trace.task_context import set_current_agent_config, clear
 @pytest.mark.parametrize("backend", ["rg", "python"])
 @pytest.mark.parametrize("tool", ["grep", "glob"])
 def test_absolute_exclusion_and_include_cannot_reintroduce_secret(tmp_path, backend, tool):
-    module = import_module(f"agentloom.adapters.smolagents.tools.search.{tool}_tool.{tool}_tool")
+    module = import_module(f"agentloom.runtimes.smolagents.tools.search.{tool}_tool.{tool}_tool")
     if backend == "rg" and not module._RG_PATH:
         pytest.skip("ripgrep unavailable")
     (tmp_path / "secrets").mkdir()
@@ -28,7 +28,7 @@ def test_absolute_exclusion_and_include_cannot_reintroduce_secret(tmp_path, back
 
 @pytest.mark.parametrize("tool", ["grep", "glob"])
 def test_python_search_cannot_follow_alias_into_excluded_directory(tmp_path, tool):
-    module = import_module(f"agentloom.adapters.smolagents.tools.search.{tool}_tool.{tool}_tool")
+    module = import_module(f"agentloom.runtimes.smolagents.tools.search.{tool}_tool.{tool}_tool")
     (tmp_path / "secrets").mkdir()
     secret = tmp_path / "secrets" / "hidden.txt"
     secret.write_text("MATCH_SECRET")
@@ -49,7 +49,7 @@ def test_python_search_cannot_follow_alias_into_excluded_directory(tmp_path, too
 @pytest.mark.parametrize("backend", ["rg", "python"])
 @pytest.mark.parametrize("absolute", [True, False])
 def test_exclusion_alias_protects_canonical_directory(tmp_path, backend, absolute):
-    module = import_module("agentloom.adapters.smolagents.tools.search.grep_tool.grep_tool")
+    module = import_module("agentloom.runtimes.smolagents.tools.search.grep_tool.grep_tool")
     if backend == "rg" and not module._RG_PATH:
         pytest.skip("ripgrep unavailable")
     (tmp_path / "secrets").mkdir()

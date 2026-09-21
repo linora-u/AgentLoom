@@ -80,16 +80,16 @@ class TestToolsets:
 
 
 class TestDynamicModuleLoading:
-    def test_grep_search_from_search_module(self):
-        mod = importlib.import_module("agentloom.tools.search")
+    def test_grep_search_from_smol_runtime_module(self):
+        mod = importlib.import_module("agentloom.runtimes.smolagents.tools.search")
         assert callable(mod.grep_search)
 
-    def test_read_file_from_file_ops_module(self):
-        mod = importlib.import_module("agentloom.tools.file_ops")
+    def test_read_file_from_smol_runtime_file_ops_module(self):
+        mod = importlib.import_module("agentloom.runtimes.smolagents.tools.file_ops")
         assert callable(mod.read_file)
 
     def test_resolved_function_matches_module_function(self):
-        from agentloom.tools.search import grep_search as direct
+        from agentloom.runtimes.smolagents.tools.search import grep_search as direct
 
         assert resolve_tool_function("grep_search") is direct
 
@@ -151,8 +151,8 @@ class TestCatalogInvariants:
         for spec in list_tool_specs():
             assert get_tool_spec(spec.name) is spec
             if spec.owner == "runtime":
-                providers = {"smolagents": "agentloom.adapters.smolagents.tools.",
-                             "pi": "agentloom.adapters.pi.native_tools"}
+                providers = {"smolagents": "agentloom.runtimes.smolagents.tools.",
+                             "pi": "agentloom.runtimes.pi.native_tools"}
                 assert spec.provider in providers
                 assert spec.implementation.module.startswith(providers[spec.provider])
             else:

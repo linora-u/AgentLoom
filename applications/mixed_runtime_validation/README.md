@@ -8,7 +8,7 @@
 两条 workflow 共用 `inspect_note(query)` 契约和 `fixtures/note.txt`。不使用写入/Shell 或 checkpoint/resume；Pi SDK 按项目锁定版本安装：
 
 ```sh
-uv run --locked loom install-runtime pi
+uv run --locked loom runtime install pi
 ```
 
 确定性验证只替换 HTTP 模型服务，两个 runtime、基础工具、公共 Hook、Goal、记忆库与审核门禁均真实执行：

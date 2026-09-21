@@ -1,8 +1,8 @@
 """Strict native tool-call configuration and bridge state."""
 
 import pytest
-from agentloom.adapters.smolagents.model_turn_bridge import SmolagentsModelTurnBridge
-from agentloom.adapters.smolagents.models.model_types import ModelConfig
+from agentloom.runtimes.smolagents.model_turn_bridge import SmolagentsModelTurnBridge
+from agentloom.runtimes.smolagents.models.model_types import ModelConfig
 from agentloom.configuration.llm_config import LLMConfig, LlmModelTypeSettings
 from agentloom.runtime.model_binding import ModelTurnBinding
 from agentloom.runtime.model_protocol import ModelTurnRequest, ModelTurnResult

@@ -80,7 +80,7 @@ class Loader(importlib.abc.Loader):
         )
 class Finder(importlib.abc.MetaPathFinder):
     def find_spec(self, fullname, path=None, target=None):
-        if fullname == 'agentloom.adapters.litellm.model_binding':
+        if fullname == 'agentloom.integrations.litellm.model_binding':
             spec = importlib.machinery.PathFinder.find_spec(fullname, path)
             spec.loader = Loader(spec.loader)
             return spec
@@ -180,13 +180,13 @@ def probe(workspace: Path) -> dict:
         from importlib.resources import files
         from agentloom.configuration import C
         from agentloom.tools.loader import resolve_tool_function
-        from agentloom.utils.dynamic_import import load_function
+        from agentloom.application.imports.dynamic_import import load_function
         assert importlib.util.find_spec('src') is None
         assert importlib.util.find_spec('agentloom._compat') is None
         assert not any(type(f).__name__ == '_LegacyFinder' for f in sys.meta_path)
-        assert load_function('agentloom.tools.file_ops.read_file.read_file', 'read_file') is resolve_tool_function('read_file')
+        assert load_function('agentloom.runtimes.smolagents.tools.file_ops.read_file.read_file', 'read_file') is resolve_tool_function('read_file')
         root = files('agentloom')
-        assert root.joinpath('adapters/smolagents/prompts/toolcalling_agent.example.yaml').read_text()
+        assert root.joinpath('runtimes/smolagents/prompts/toolcalling_agent.example.yaml').read_text()
         query_root = root.joinpath('tools/queries')
         queries = list(query_root.rglob('*.scm'))
         assert len(queries) == 56, len(queries)
@@ -224,7 +224,7 @@ def probe(workspace: Path) -> dict:
     (shadow / "__init__.py").write_text(f"from pathlib import Path\nPath({str(shadow_marker)!r}).touch()\nraise RuntimeError('shadow')\n")
     shadow_env = env.copy()
     shadow_env["PYTHONPATH"] = str(project)
-    response = run([sys.executable, "-I", "-u", "-m", "agentloom.tui_bridge"], cwd=project, child_env=shadow_env,
+    response = run([sys.executable, "-I", "-u", "-m", "agentloom_tui_bridge"], cwd=project, child_env=shadow_env,
                    input=json.dumps({"id": "probe", "method": "bootstrap", "params": {}}) + "\n")
     rows = [json.loads(line) for line in response.splitlines()]
     assert rows and rows[0]["ok"] is True, rows

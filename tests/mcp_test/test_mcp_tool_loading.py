@@ -12,7 +12,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from agentloom.adapters.mcp.config import McpSettings, McpServerConfig
+from agentloom.integrations.mcp.config import McpSettings, McpServerConfig
 
 
 # ---------------------------------------------------------------------------
@@ -75,9 +75,9 @@ class TestReturnType:
 
 class TestMcpToolsLoading:
 
-    @patch("agentloom.adapters.mcp.manager.McpManager")
-    @patch("agentloom.adapters.mcp.config.parse_mcp_yaml_value")
-    @patch("agentloom.adapters.mcp.config.merge_mcp_configs")
+    @patch("agentloom.integrations.mcp.manager.McpManager")
+    @patch("agentloom.integrations.mcp.config.parse_mcp_yaml_value")
+    @patch("agentloom.integrations.mcp.config.merge_mcp_configs")
     def test_mcp_tools_appended(
         self, mock_merge, mock_parse, MockManager, tmp_path
     ):

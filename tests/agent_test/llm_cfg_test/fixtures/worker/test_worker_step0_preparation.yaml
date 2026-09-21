@@ -47,10 +47,10 @@ workflow: |
   - `/workspace/src/services/cache_service.py`
 
   **工具模块：**
-  - `/workspace/src/utils/validators.py`
-  - `/workspace/src/utils/serializers.py`
-  - `/workspace/src/utils/pagination.py`
-  - `/workspace/src/utils/logging_config.py`
+  - `/workspace/src/application/imports/validators.py`
+  - `/workspace/src/application/imports/serializers.py`
+  - `/workspace/src/application/imports/pagination.py`
+  - `/workspace/src/application/imports/logging_config.py`
 
   **配置文件：**
   - `/workspace/config/settings.yaml`

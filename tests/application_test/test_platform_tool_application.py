@@ -65,7 +65,7 @@ def platform_project(tmp_path, monkeypatch):
         def close(self):
             self.definition.tool_gateway.close()
 
-    from agentloom.runtime.agent_runtime import build_builtin_runtime_registry
+    from agentloom.application.composition import build_builtin_runtime_registry
     registry = build_builtin_runtime_registry()
     registry.register("platform-fixture", capabilities=PlatformRuntime.capabilities, factory=PlatformRuntime)
     monkeypatch.setattr("agentloom.application.validation.build_builtin_runtime_registry", lambda: registry)
@@ -89,12 +89,12 @@ def test_application_without_optional_tools_does_not_load_lsp(platform_project, 
 
     class NoLsp(importlib.abc.MetaPathFinder):
         def find_spec(self, fullname, path=None, target=None):
-            if fullname == "agentloom.adapters.lsp" or fullname.startswith("agentloom.adapters.lsp."):
+            if fullname == "agentloom.integrations.lsp" or fullname.startswith("agentloom.integrations.lsp."):
                 attempted.append(fullname)
                 raise ImportError("Unselected optional LSP dependency")
 
     for name in list(sys.modules):
-        if name == "agentloom.adapters.lsp" or name.startswith("agentloom.adapters.lsp."):
+        if name == "agentloom.integrations.lsp" or name.startswith("agentloom.integrations.lsp."):
             monkeypatch.delitem(sys.modules, name)
     monkeypatch.setattr(sys, "meta_path", [NoLsp(), *sys.meta_path])
     assert run().output == "done"
@@ -125,7 +125,7 @@ def language_servers(monkeypatch):
         def stop(self):
             self.is_healthy = False
 
-    monkeypatch.setattr("agentloom.adapters.lsp.lsp_server_manager.LSPServerInstance", LanguageServer)
+    monkeypatch.setattr("agentloom.integrations.lsp.lsp_server_manager.LSPServerInstance", LanguageServer)
     return servers
 
 
@@ -137,8 +137,8 @@ def enable_lsp(root):
 
 
 def test_duplicate_lsp_configuration_rejected_before_starting_any_server(language_servers):
-    from agentloom.adapters.lsp.config import LSPConfig
-    from agentloom.adapters.lsp.lsp_server_manager import LSPServerManager
+    from agentloom.integrations.lsp.config import LSPConfig
+    from agentloom.integrations.lsp.lsp_server_manager import LSPServerManager
 
     manager = LSPServerManager()
     try:
@@ -232,7 +232,7 @@ def test_closing_one_worker_keeps_the_other_workers_lsp_alive(platform_project, 
 
 @pytest.mark.parametrize("failure", [RuntimeError, KeyboardInterrupt])
 def test_application_releases_lsp_created_before_startup_failure(platform_project, language_servers, monkeypatch, failure):
-    from agentloom.adapters.lsp.lsp_server_manager import LSPServerInstance
+    from agentloom.integrations.lsp.lsp_server_manager import LSPServerInstance
 
     root, _, programs, _, run = platform_project
     source = root / "answer.py"
