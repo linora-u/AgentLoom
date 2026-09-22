@@ -69,7 +69,7 @@ def validate(output, profiles, node):
             assert "agentloom/runtimes/pi/bridge/" + name in names, name
         assert len([name for name in names if "/tools/queries/" in name and name.endswith(".scm")]) == 56
         assert not any("/node_modules/" in name or "/dist/" in name or ".agentloom-install." in name for name in names)
-        assert "agentloom/adapters/smolagents/prompts/toolcalling_agent.example.yaml" in names
+        assert "agentloom/runtimes/smolagents/prompts/toolcalling_agent.example.yaml" in names
     with tarfile.open(sdist) as archive:
         assert not any("/node_modules/" in name or "/bridge/dist/" in name or ".agentloom-install." in name for name in archive.getnames())
     report["artifacts"] = {path.name: digest(path) for path in (wheel, sdist)}
