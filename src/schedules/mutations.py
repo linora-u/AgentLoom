@@ -107,11 +107,17 @@ class ScheduleMutationService:
         normalized = normalize_schedule_spec(schedule)
         target = self._supervisor_target(yaml_path)
 
+        def revalidate_target(_job: dict[str, Any]) -> None:
+            current = self._supervisor_target(target.yaml_path)
+            if current != target:
+                raise ValueError("Schedule target changed before commit")
+
         with self._store() as store:
             return store.add_job(
                 name=normalized_name,
                 yaml_path=target,
                 schedule=normalized,
+                validate_before_commit=revalidate_target,
             )
 
     def mutate(self, action: ScheduleMutation, *, job_id: str) -> dict[str, Any]:

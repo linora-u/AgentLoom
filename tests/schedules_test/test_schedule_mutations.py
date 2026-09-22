@@ -6,7 +6,10 @@ import pytest
 import yaml
 from agentloom.application.composition import build_schedule_mutations
 from agentloom.schedules.mutations import ScheduleMutationService
-from agentloom.schedules.schema import APPLICATION_SUPERVISOR_VALIDATION
+from agentloom.schedules.schema import (
+    APPLICATION_SUPERVISOR_VALIDATION,
+    ValidatedScheduleTarget,
+)
 from agentloom.schedules.store import ScheduleStore
 
 
@@ -118,6 +121,32 @@ def test_schedule_add_rejects_untyped_resolver_result_before_storage(
         )
 
     assert not (tmp_path / ".agentloom").exists()
+
+
+def test_schedule_add_revalidates_target_inside_store_transaction(
+    tmp_path: Path,
+) -> None:
+    target = ValidatedScheduleTarget("applications/demo/workflows/root.yaml")
+    resolver_calls: list[str | Path] = []
+
+    def resolver(path: str | Path) -> ValidatedScheduleTarget:
+        resolver_calls.append(path)
+        if len(resolver_calls) == 2:
+            raise ValueError("target changed before commit")
+        return target
+
+    with pytest.raises(ValueError, match="target changed before commit"):
+        ScheduleMutationService(
+            tmp_path,
+            target_resolver=resolver,
+        ).add(
+            yaml_path=target.yaml_path,
+            name="job",
+            schedule={"kind": "interval", "every": "1h", "timezone": "UTC"},
+        )
+
+    assert resolver_calls == [target.yaml_path, target.yaml_path]
+    assert ScheduleStore(tmp_path).list_jobs() == []
 
 
 def test_application_composition_adds_only_valid_project_supervisor(
