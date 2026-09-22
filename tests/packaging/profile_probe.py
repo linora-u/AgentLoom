@@ -179,6 +179,16 @@ def configure(workspace, profile, case, url):
     return app, calls, marker
 
 
+def _pi_damage_target(case):
+    if case == "stale_bridge":
+        import agentloom
+        return Path(agentloom.__file__).parent / "runtimes/pi/bridge/tools.ts"
+    if case == "missing_asset":
+        from agentloom.runtimes.pi.install import pi_runtime_root
+        return pi_runtime_root() / "bridge/dist/tools.js"
+    raise ValueError(f"Unsupported Pi damage case: {case}")
+
+
 def run(profile, case, workspace, code_tools=False):
     workspace.mkdir(parents=True, exist_ok=False)
     evidence = identity(profile, code_tools)
@@ -196,9 +206,7 @@ def run(profile, case, workspace, code_tools=False):
             damaged = None
             original = None
             if case in {"stale_bridge", "missing_asset"}:
-                import agentloom
-                bridge = Path(agentloom.__file__).parent / "runtimes/pi/bridge"
-                damaged = bridge / ("tools.ts" if case == "stale_bridge" else "dist/tools.js")
+                damaged = _pi_damage_target(case)
                 original = damaged.read_bytes()
                 if case == "stale_bridge":
                     damaged.write_bytes(original + b"\n// newly installed package source\n")
