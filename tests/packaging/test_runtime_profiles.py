@@ -3,12 +3,24 @@ from __future__ import annotations
 
 from email.parser import BytesParser
 from pathlib import Path
+import runpy
 import shutil
 import subprocess
+import sys
 from zipfile import ZipFile
 
 from packaging.requirements import Requirement
 import pytest
+
+
+def test_missing_pi_asset_targets_the_installed_runtime(tmp_path, monkeypatch):
+    prefix = tmp_path / "isolated-env"
+    monkeypatch.setattr(sys, "prefix", str(prefix))
+    probe = runpy.run_path(str(Path(__file__).with_name("profile_probe.py")))
+
+    assert probe["_pi_damage_target"]("missing_asset") == (
+        prefix.resolve() / "share/pi/bridge/dist/tools.js"
+    )
 
 
 @pytest.mark.parametrize("rename_schema", [False, True], ids=["current-schema", "next-schema-filename"])
