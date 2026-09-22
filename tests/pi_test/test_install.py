@@ -1,19 +1,18 @@
 """Public installer behavior with controlled external npm packages."""
 from __future__ import annotations
 
-from concurrent.futures import ThreadPoolExecutor
 import json
 import os
-from pathlib import Path
 import shutil
 import subprocess
 import sys
 import tempfile
+from concurrent.futures import ThreadPoolExecutor
+from pathlib import Path
 
-from click.testing import CliRunner
 import pytest
-
 from agentloom.runtimes.pi.install import install_pi
+from click.testing import CliRunner
 
 
 @pytest.fixture
@@ -61,7 +60,7 @@ input.on('line',line=>{
     realpathSync(process.env.XDG_CONFIG_HOME)!==privateDir ||
     realpathSync(process.env.TMPDIR)!==privateDir) process.exit(5);
  const frame=JSON.parse(line);
- const payload={method:'handshake',runtime_id:'pi',protocol_version:2,bridge_version:1,sdk_version:'${sdkVersion}',node_version:process.versions.node,native_tool_contract:1,capabilities:{structured_tools:true,parallel_tools:true,checkpoint_resume:true,subagents:true,goal:true,stop_hooks:true}};
+ const payload={method:'handshake',runtime_id:'pi',protocol_version:2,bridge_version:1,sdk_version:'${sdkVersion}',node_version:process.versions.node,native_tool_contract:1,capabilities:{structured_tools:true,parallel_tools:true,checkpoint_resume:true,subagents:true,goal:true,stop_hooks:true,structured_output:true}};
  const response=JSON.stringify({version:2,kind:'response',instance_id:frame.instance_id,run_id:null,request_id:frame.request_id,payload,error:null});
  process.stdout.write(response+(${oversized} ? ' '.repeat(8*1024*1024) : '')+(${missingNewline} ? '' : '\\n'));
 });

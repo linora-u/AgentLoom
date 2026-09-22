@@ -569,6 +569,29 @@
       "title": "NativePrepareRequest",
       "type": "object"
     },
+    "OutputContract": {
+      "additionalProperties": false,
+      "properties": {
+        "name": {
+          "minLength": 1,
+          "title": "Name",
+          "type": "string"
+        },
+        "schema": {
+          "additionalProperties": {
+            "$ref": "#/$defs/JsonValue"
+          },
+          "title": "Schema",
+          "type": "object"
+        }
+      },
+      "required": [
+        "name",
+        "schema"
+      ],
+      "title": "OutputContract",
+      "type": "object"
+    },
     "PlatformInvoke": {
       "additionalProperties": false,
       "properties": {
@@ -1034,6 +1057,17 @@
           "title": "Runtime Options",
           "type": "object"
         },
+        "output_contract": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/OutputContract"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
         "continue_session": {
           "default": false,
           "title": "Continue Session",
@@ -1176,6 +1210,11 @@
         "stop_hooks": {
           "default": false,
           "title": "Stop Hooks",
+          "type": "boolean"
+        },
+        "structured_output": {
+          "default": false,
+          "title": "Structured Output",
           "type": "boolean"
         }
       },

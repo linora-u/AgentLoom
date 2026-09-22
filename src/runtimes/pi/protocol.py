@@ -46,6 +46,11 @@ class ModelSelection(WireValue):
     request_headers: dict[str, str] = Field(repr=False)
 
 
+class OutputContract(WireValue):
+    name: NonEmpty
+    schema_: dict[str, JsonValue] = Field(alias="schema", repr=False)
+
+
 class Run(WireValue):
     method: Literal["run"]
     application_id: NonEmpty
@@ -57,6 +62,7 @@ class Run(WireValue):
     tools: list[ToolManifestEntry]
     serial_tools: list[NonEmpty] = Field(default_factory=list)
     runtime_options: dict[str, JsonValue] = Field(repr=False)
+    output_contract: OutputContract | None = Field(default=None, repr=False)
     continue_session: bool = False
     record_task: bool = True
     additional_args: dict[str, JsonValue] = Field(default_factory=dict, repr=False)
@@ -352,7 +358,12 @@ def decode_message(line: str) -> Request | Response | Event:
 def encode_message(message: Request | Response | Event) -> str:
     def wire(value: Any) -> Any:
         if isinstance(value, BaseModel):
-            return {name: wire(getattr(value, name)) for name in type(value).model_fields}
+            return {
+                (field.serialization_alias or field.alias or name): wire(
+                    getattr(value, name)
+                )
+                for name, field in type(value).model_fields.items()
+            }
         if is_dataclass(value) and not isinstance(value, type):
             return {item.name: wire(getattr(value, item.name)) for item in fields(value)}
         if isinstance(value, Mapping):

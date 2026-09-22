@@ -32,6 +32,7 @@ from agentloom.runtimes.pi.protocol import (
     Handshake,
     HandshakeResult,
     ModelSelection,
+    OutputContract,
     Run,
     RunResult,
 )
@@ -186,6 +187,9 @@ class PiRuntime:
                     instructions=definition.instructions or "", model=ModelSelection(model_type=selection.model_type,
                         model_id=selection.model_id, protocol=selection.protocol, settings=dict(selection.settings),
                         request_headers=dict(selection.request_headers)), tools=wire_tools, serial_tools=serial_tools, runtime_options=dict(definition.runtime_options),
+                    output_contract=(OutputContract(name=definition.output_contract.name,
+                        schema=dict(definition.output_contract.schema))
+                        if definition.output_contract is not None else None),
                     continue_session=request.continue_session or attempt > 0, record_task=request.record_task,
                     additional_args=dict(request.additional_args), checkpoint_enabled=protocol.store is not None,
                     checkpoint=request.checkpoint if attempt == 0 else None)
@@ -201,6 +205,10 @@ class PiRuntime:
                     error = result.error
                     raise AgentRuntimeError(error.message, category="internal" if error.category == "protocol" else error.category,
                                             retryable=error.retryable)
+                if definition.output_contract is not None and result.state == "success":
+                    result = result.model_copy(
+                        update={"output": definition.output_contract.validate(result.output)}
+                    )
                 if result.state != "success" or hook is None:
                     break
                 decision = hook.dispatch(HookEvent.STOP, "final_answer", {"final_answer": result.output})
