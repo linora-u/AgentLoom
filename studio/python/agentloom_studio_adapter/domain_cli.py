@@ -8,8 +8,10 @@ import sys
 from pathlib import Path
 from typing import Any
 
-from agentloom.application.studio.domain_actions import execute_domain_action
-from agentloom.application.studio.errors import StudioServiceError
+from agentloom_studio_adapter.dispatcher import (
+    StudioAdapterError,
+    StudioDispatcher,
+)
 
 CONTRACT_VERSION = 1
 _MAX_PARAMS_BYTES = 1024 * 1024
@@ -24,12 +26,11 @@ def main(argv: list[str] | None = None) -> int:
 
     try:
         params = _params(args.params)
-        result = execute_domain_action(
-            Path(args.project),
+        result = StudioDispatcher(Path(args.project)).dispatch_domain_action(
             args.action,
             params,
         )
-    except StudioServiceError as error:
+    except StudioAdapterError as error:
         _write(
             {
                 "contract_version": CONTRACT_VERSION,
