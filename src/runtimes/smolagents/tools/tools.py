@@ -6,7 +6,7 @@ import warnings
 from collections.abc import Callable
 from functools import wraps
 
-from agentloom.runtime.trusted_memory_evidence import TRUSTED_MEMORY_EVIDENCE_ATTR
+from agentloom.execution.trusted_memory_evidence import TRUSTED_MEMORY_EVIDENCE_ATTR
 from smolagents.tools import Tool, TypeHintParsingException, get_json_schema
 
 

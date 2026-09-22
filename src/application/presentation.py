@@ -77,7 +77,7 @@ def configuration_projection(snapshot: EffectiveAgentConfigSnapshot, root: Path)
     values = public_value(snapshot.values)
     # Hooks compose by stable ID, not by recursive dict/list merging. Present
     # the same compiled plan that execution consumes, with per-handler origins.
-    from agentloom.runtime.hooks.config import HookConfigLayer, HookPlanCompiler
+    from agentloom.execution.hooks.config import HookConfigLayer, HookPlanCompiler
 
     plan = HookPlanCompiler().compile(
         tuple(

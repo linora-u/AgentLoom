@@ -10,17 +10,17 @@ from agentloom.runtimes.smolagents.context_compression import (
     summarize_conversation,
 )
 from agentloom.runtimes.smolagents.model_turn_bridge import SmolagentsModelTurnBridge
-from agentloom.runtime.goal import GoalCompleteError, GoalState
-from agentloom.runtime.goal.provider import GoalStateProvider, bind_goal_state_provider
-from agentloom.runtime.model_binding import ModelTurnBinding
-from agentloom.runtime.model_protocol import (
+from agentloom.execution.goal import GoalCompleteError, GoalState
+from agentloom.execution.goal.provider import GoalStateProvider, bind_goal_state_provider
+from agentloom.execution.model_binding import ModelTurnBinding
+from agentloom.execution.model_protocol import (
     FunctionCallItem,
     MessageItem,
     ModelTurnRequest,
     ModelTurnResult,
     ModelUsage,
 )
-from agentloom.runtime.trace import bind_local_run
+from agentloom.execution.trace import bind_local_run
 from smolagents.models import ChatMessage, MessageRole
 
 

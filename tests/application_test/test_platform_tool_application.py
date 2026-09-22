@@ -16,7 +16,7 @@ import yaml
 from agentloom.application.run import ApplicationRunInterrupted
 from agentloom.application.runner import execute_app
 from agentloom.configuration.config import bind_config, load_project_config
-from agentloom.runtime.agent_runtime import AgentRuntimeResult, RuntimeCapabilities, RuntimeCheckpointEnvelope
+from agentloom.execution.agent_runtime import AgentRuntimeResult, RuntimeCapabilities, RuntimeCheckpointEnvelope
 
 
 @pytest.fixture
@@ -193,7 +193,7 @@ def test_closing_one_worker_keeps_the_other_workers_lsp_alive(platform_project, 
     release_second = Event()
 
     def worker_program(definition, request):
-        from agentloom.runtime.trace import capture_explicit_execution_context
+        from agentloom.execution.trace import capture_explicit_execution_context
         assert capture_explicit_execution_context().agent_id == definition.instance_id
         def hover(call_id):
             result = definition.tool_gateway.invoke(call_id=call_id, tool_name="lsp_hover", arguments={
@@ -286,7 +286,7 @@ def test_parallel_worker_applications_own_mcp_connections_and_run_context(platfo
     observed = []
 
     def worker_program(definition, request):
-        from agentloom.runtime.trace import capture_explicit_execution_context
+        from agentloom.execution.trace import capture_explicit_execution_context
         context = capture_explicit_execution_context()
         result = definition.tool_gateway.invoke(
             call_id=f"lookup-{definition.instance_id}", tool_name="mcp__facts__lookup",
@@ -606,7 +606,7 @@ def test_native_application_retrieves_original_mcp_content_with_context_ref(plat
     config.write_text(json.dumps({"mcpServers": {"facts": {"command": sys.executable, "args": [str(server)]}}}))
 
     def retrieve(definition, request):
-        from agentloom.runtime.context_engine.runtime import get_active_context_engine
+        from agentloom.execution.context_engine.runtime import get_active_context_engine
         assert get_active_context_engine() is not None
         created = definition.tool_gateway.invoke(call_id="payload", tool_name="mcp__facts__context_payload", arguments={"query": "full artifact"})
         assert created.status == "completed", created.model_content()

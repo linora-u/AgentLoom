@@ -9,11 +9,11 @@ from agentloom.runtimes.smolagents.recoverable_errors import (
     is_recoverable_agent_error,
 )
 from agentloom.runtimes.smolagents.error_recovery import RUNTIME_FEEDBACK_RAW_KEY
-from agentloom.runtime.model_protocol import (
+from agentloom.execution.model_protocol import (
     MODEL_ITEMS_RAW_KEY,
     MODEL_RESPONSE_ID_RAW_KEY,
 )
-from agentloom.runtime.tool_protocol import (
+from agentloom.execution.tool_protocol import (
     TOOL_CALL_RAW_KEY,
     TOOL_RESULT_RAW_KEY,
     ToolCallRecord,

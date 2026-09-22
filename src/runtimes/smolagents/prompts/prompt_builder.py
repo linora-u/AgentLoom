@@ -24,9 +24,9 @@ from typing import Any
 
 import yaml
 from agentloom.runtimes.smolagents.options import resolve_execution_prompt_template_path
-from agentloom.runtime.prompts.environment import get_agent_environment_prompt
-from agentloom.runtime.skills.catalog import SkillCatalog
-from agentloom.runtime.skills.parser import build_skills_prompt
+from agentloom.execution.prompts.environment import get_agent_environment_prompt
+from agentloom.execution.skills.catalog import SkillCatalog
+from agentloom.execution.skills.parser import build_skills_prompt
 
 # ---------------------------------------------------------------------------
 # Paths

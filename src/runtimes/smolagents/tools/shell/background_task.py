@@ -23,8 +23,8 @@ if TYPE_CHECKING:
     from agentloom.runtimes.smolagents.tools.shell.stall_watchdog import StallWatchdog
 
 from agentloom.configuration import C
-from agentloom.runtime.logging import get_logger
-from agentloom.runtime import copy_runtime_context, get_current_run_context
+from agentloom.execution.logging import get_logger
+from agentloom.execution import copy_runtime_context, get_current_run_context
 from agentloom.runtimes.smolagents.tools.shell.output_reader import AnchoredOutputReader
 from agentloom.runtimes.smolagents.tools.shell.tree_kill import SizeWatchdog, graceful_kill
 
@@ -344,7 +344,7 @@ class BackgroundTaskRegistry:
         )
         monitor.start()
 
-        from agentloom.runtime.resources import register_resource
+        from agentloom.execution.resources import register_resource
 
         def close_task() -> None:
             self._terminate_keys([self._task_key(task_id, runtime_key)])

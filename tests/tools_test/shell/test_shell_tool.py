@@ -2,14 +2,14 @@ import unittest
 from unittest.mock import MagicMock, patch
 
 from agentloom.runtimes.smolagents.tools.shell import shell_tool
-from agentloom.runtime.tool_governance.shell import validator as validator_module
+from agentloom.execution.tool_governance.shell import validator as validator_module
 from agentloom.runtimes.smolagents.tools.shell.shell_tool import ShellCommandError
 
 
 class TestShellTool(unittest.TestCase):
     def setUp(self):
         # Ensure no agent context bleeds in from prior tests
-        from agentloom.runtime.trace.task_context import clear_current_agent_config, clear_current_agent_id
+        from agentloom.execution.trace.task_context import clear_current_agent_config, clear_current_agent_id
         try:
             clear_current_agent_id()
         except Exception:

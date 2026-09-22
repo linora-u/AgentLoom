@@ -24,10 +24,10 @@ def bypass_shell_security(monkeypatch):
     env isolation, etc.) and do NOT need the security/path validation layer.
     """
     monkeypatch.setattr(
-        "agentloom.runtime.tool_governance.shell.validator.validate_command_security",
+        "agentloom.execution.tool_governance.shell.validator.validate_command_security",
         lambda cmd: None,
     )
     monkeypatch.setattr(
-        "agentloom.runtime.tool_governance.shell.validator.check_path_constraints",
+        "agentloom.execution.tool_governance.shell.validator.check_path_constraints",
         lambda cmd, **kwargs: None,
     )

@@ -19,7 +19,7 @@ from agentloom.runtimes.smolagents.tools.search.glob_tool.glob_tool import (
 # The mock target is the same as in test_grep_exclude.py — the shared
 # _resolve_tool_access_control_config function in path_validators.
 _RESOLVE_MOCK_TARGET = (
-    "agentloom.runtime.permissions.workspace._resolve_tool_access_control_config"
+    "agentloom.execution.permissions.workspace._resolve_tool_access_control_config"
 )
 
 

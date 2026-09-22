@@ -8,7 +8,7 @@ import time
 from pathlib import Path
 
 import pytest
-from agentloom.runtime.context import RuntimeRunLease
+from agentloom.execution.context import RuntimeRunLease
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
 

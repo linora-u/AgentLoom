@@ -18,9 +18,9 @@ PROJECT_ROOT = Path(__file__).resolve().parents[2]
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
-from agentloom.runtime.trace import generate_id
+from agentloom.execution.trace import generate_id
 from agentloom.application.workflows import get_supervisor_agent_yaml_path
-from agentloom.runtime.logging import initialize_global_logger_once, resolve_logger
+from agentloom.execution.logging import initialize_global_logger_once, resolve_logger
 from agentloom.application.factory import YamlAgentFactory, YamlConfiguredSupervisorAgent
 
 

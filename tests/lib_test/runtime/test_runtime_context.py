@@ -4,7 +4,7 @@ import pytest
 
 
 def test_runtime_home_builds_run_and_checkpoint_paths(tmp_path: Path) -> None:
-    from agentloom.runtime import RuntimeHome
+    from agentloom.execution import RuntimeHome
 
     home = RuntimeHome(tmp_path / ".agentloom")
 
@@ -24,7 +24,7 @@ def test_runtime_home_builds_run_and_checkpoint_paths(tmp_path: Path) -> None:
 
 
 def test_runtime_context_builds_canonical_agent_workspace_paths(tmp_path: Path) -> None:
-    from agentloom.runtime import RuntimeHome
+    from agentloom.execution import RuntimeHome
 
     context = RuntimeHome(tmp_path / ".agentloom").context(
         application_id="web/search",
@@ -50,7 +50,7 @@ def test_runtime_context_builds_canonical_agent_workspace_paths(tmp_path: Path) 
 
 
 def test_agent_insights_are_shared_but_task_workspace_is_isolated(tmp_path: Path) -> None:
-    from agentloom.runtime import RuntimeHome
+    from agentloom.execution import RuntimeHome
 
     home = RuntimeHome(tmp_path / ".agentloom")
     first = home.context(application_id="app", task_id="task_1", run_id="run_1")
@@ -65,7 +65,7 @@ def test_agent_insights_are_shared_but_task_workspace_is_isolated(tmp_path: Path
 
 
 def test_agent_workspace_rejects_absolute_and_traversal_paths(tmp_path: Path) -> None:
-    from agentloom.runtime import RuntimeHome
+    from agentloom.execution import RuntimeHome
 
     context = RuntimeHome(tmp_path / ".agentloom").context(
         application_id="app",
@@ -81,7 +81,7 @@ def test_agent_workspace_rejects_absolute_and_traversal_paths(tmp_path: Path) ->
 def test_prepare_agent_workspace_creates_only_canonical_runtime_directories(
     tmp_path: Path,
 ) -> None:
-    from agentloom.runtime import RuntimeHome
+    from agentloom.execution import RuntimeHome
 
     context = RuntimeHome(tmp_path / ".agentloom").context(
         application_id="app",
@@ -98,7 +98,7 @@ def test_prepare_agent_workspace_creates_only_canonical_runtime_directories(
 
 
 def test_runtime_home_resolves_relative_root_against_agent_root(tmp_path: Path) -> None:
-    from agentloom.runtime import resolve_runtime_home
+    from agentloom.execution import resolve_runtime_home
 
     home = resolve_runtime_home(
         {"runtime": {"root_dir": "state/runtime"}},
@@ -109,7 +109,7 @@ def test_runtime_home_resolves_relative_root_against_agent_root(tmp_path: Path) 
 
 
 def test_runtime_context_rejects_path_traversal(tmp_path: Path) -> None:
-    from agentloom.runtime import RuntimeContext, RuntimeHome
+    from agentloom.execution import RuntimeContext, RuntimeHome
 
     home = RuntimeHome(tmp_path)
     with pytest.raises(ValueError):
@@ -121,7 +121,7 @@ def test_runtime_context_rejects_path_traversal(tmp_path: Path) -> None:
 
 
 def test_runtime_ids_reject_lossy_sanitization_and_cannot_collide(tmp_path: Path) -> None:
-    from agentloom.runtime import RuntimeHome
+    from agentloom.execution import RuntimeHome
 
     home = RuntimeHome(tmp_path)
     canonical = home.context(application_id="app", task_id="task_x", run_id="run_x")
@@ -137,7 +137,7 @@ def test_runtime_ids_reject_lossy_sanitization_and_cannot_collide(tmp_path: Path
 
 
 def test_external_workflow_application_id_is_stable_and_collision_safe(tmp_path: Path) -> None:
-    from agentloom.runtime import resolve_application_id
+    from agentloom.execution import resolve_application_id
 
     first = tmp_path / "one" / "agent.yaml"
     second = tmp_path / "two" / "agent.yaml"
@@ -147,7 +147,7 @@ def test_external_workflow_application_id_is_stable_and_collision_safe(tmp_path:
 
 
 def test_unicode_application_ids_use_stable_portable_components() -> None:
-    from agentloom.runtime import safe_application_id
+    from agentloom.execution import safe_application_id
 
     first = safe_application_id("中文应用")
     second = safe_application_id("另一个应用")
@@ -159,7 +159,7 @@ def test_unicode_application_ids_use_stable_portable_components() -> None:
 
 
 def test_unicode_external_workflow_name_falls_back_to_safe_name_and_hash(tmp_path: Path) -> None:
-    from agentloom.runtime import fallback_application_id
+    from agentloom.execution import fallback_application_id
 
     workflow = tmp_path / "测试.yaml"
     application_id = fallback_application_id(workflow, name_hint="中文名字")
@@ -170,7 +170,7 @@ def test_unicode_external_workflow_name_falls_back_to_safe_name_and_hash(tmp_pat
 
 
 def test_generated_attempt_ids_do_not_collide_within_the_same_clock_tick() -> None:
-    from agentloom.runtime import generate_runtime_id
+    from agentloom.execution import generate_runtime_id
 
     generated = {generate_runtime_id("run") for _ in range(100)}
 
@@ -178,7 +178,7 @@ def test_generated_attempt_ids_do_not_collide_within_the_same_clock_tick() -> No
 
 
 def test_failed_root_memory_read_freezes_an_empty_snapshot() -> None:
-    from agentloom.runtime import RootRunState
+    from agentloom.execution import RootRunState
 
     state = RootRunState("root-memory-read-failed")
     calls = 0
@@ -196,7 +196,7 @@ def test_failed_root_memory_read_freezes_an_empty_snapshot() -> None:
 
 
 def test_artifact_allocator_rejects_cross_run_symlink(tmp_path: Path) -> None:
-    from agentloom.runtime import RuntimeHome
+    from agentloom.execution import RuntimeHome
 
     home = RuntimeHome(tmp_path / ".agentloom")
     first = home.context(application_id="first", task_id="task", run_id="run")
@@ -217,7 +217,7 @@ def test_artifact_allocator_rejects_cross_run_symlink(tmp_path: Path) -> None:
 
 def test_bound_run_home_owns_self_learning_state(tmp_path: Path, monkeypatch) -> None:
     from agentloom.self_learning.paths import self_learning_root
-    from agentloom.runtime import RuntimeHome, bind_run_context
+    from agentloom.execution import RuntimeHome, bind_run_context
 
     context = RuntimeHome(tmp_path / "canonical").context(
         application_id="app",
@@ -252,7 +252,7 @@ def test_canonical_runtime_env_moves_every_runtime_consumer_together(
     monkeypatch,
 ) -> None:
     from agentloom.self_learning.paths import self_learning_root
-    from agentloom.runtime import resolve_runtime_home
+    from agentloom.execution import resolve_runtime_home
 
     override = tmp_path / "isolated-runtime"
     monkeypatch.setenv("AGENTLOOM_RUNTIME_ROOT", str(override))

@@ -8,7 +8,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from agentloom.runtime import RuntimeHome, bind_run_context
+from agentloom.execution import RuntimeHome, bind_run_context
 from agentloom.runtimes.smolagents.tools.shell.background_task import BackgroundTaskRegistry
 from agentloom.runtimes.smolagents.tools.shell.background_task_tools import (
     check_background_task,

@@ -10,7 +10,7 @@ from typing import Any
 
 import anyio
 from agentloom.integrations.mcp.adapter import AgentLoomMCPAdapter
-from agentloom.runtime.tool_gateway import ToolBinding
+from agentloom.execution.tool_gateway import ToolBinding
 from anyio.from_thread import start_blocking_portal
 from mcp import ClientSession
 from mcp.types import CallToolResult

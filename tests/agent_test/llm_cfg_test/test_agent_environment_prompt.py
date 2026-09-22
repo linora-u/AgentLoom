@@ -1,6 +1,6 @@
 from pathlib import Path
 
-import agentloom.runtime.prompts.environment as agent_env_module
+import agentloom.execution.prompts.environment as agent_env_module
 
 
 class _DummyConfig:

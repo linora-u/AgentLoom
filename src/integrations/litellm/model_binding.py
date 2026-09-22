@@ -19,9 +19,9 @@ from agentloom.integrations.litellm.tool_error_projection import (
 )
 from agentloom.configuration import C
 from agentloom.configuration.llm_config import LlmModelTypeSettings
-from agentloom.runtime.concurrency.rate_limiter import GlobalRateLimiterRegistry
-from agentloom.runtime.model_binding import ModelTurnBinding
-from agentloom.runtime.model_protocol import ModelTurnAdapter
+from agentloom.execution.concurrency.rate_limiter import GlobalRateLimiterRegistry
+from agentloom.execution.model_binding import ModelTurnBinding
+from agentloom.execution.model_protocol import ModelTurnAdapter
 
 AdapterFactory = Callable[..., ModelTurnAdapter]
 

@@ -19,8 +19,8 @@ import pytest
 
 def _build_backend(monkeypatch, tmp_path: Path, level: str):
     """Build the runtime-neutral Rich backend with the given level string."""
-    from agentloom.runtime import RuntimeHome
-    from agentloom.runtime.logging import LoggingConfigBuilder, initialize_run_logger
+    from agentloom.execution import RuntimeHome
+    from agentloom.execution.logging import LoggingConfigBuilder, initialize_run_logger
 
     context = RuntimeHome(tmp_path / ".agentloom").context(
         application_id="test-log-levels", task_id="task", run_id="run"
@@ -189,7 +189,7 @@ def test_file_content_has_no_ansi_codes(monkeypatch, tmp_path: Path):
 # ---------------------------------------------------------------------------
 
 def test_agent_loom_log_level_from_str():
-    from agentloom.runtime.logging import AgentLoomLogLevel
+    from agentloom.execution.logging import AgentLoomLogLevel
 
     assert AgentLoomLogLevel.from_str("debug")   == AgentLoomLogLevel.DEBUG
     assert AgentLoomLogLevel.from_str("INFO")    == AgentLoomLogLevel.INFO
@@ -201,7 +201,7 @@ def test_agent_loom_log_level_from_str():
 
 
 def test_agent_loom_log_level_from_str_invalid():
-    from agentloom.runtime.logging import AgentLoomLogLevel
+    from agentloom.execution.logging import AgentLoomLogLevel
 
     with pytest.raises(ValueError):
         AgentLoomLogLevel.from_str("NONSENSE")
@@ -210,7 +210,7 @@ def test_agent_loom_log_level_from_str_invalid():
 def test_agent_loom_log_level_from_int():
     import logging as _logging
 
-    from agentloom.runtime.logging import AgentLoomLogLevel
+    from agentloom.execution.logging import AgentLoomLogLevel
 
     assert AgentLoomLogLevel.from_int(_logging.DEBUG)   == AgentLoomLogLevel.DEBUG
     assert AgentLoomLogLevel.from_int(_logging.INFO)    == AgentLoomLogLevel.INFO

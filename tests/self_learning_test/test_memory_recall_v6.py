@@ -147,7 +147,7 @@ def test_model_memory_tool_exposes_candidate_only_contract() -> None:
 def test_root_snapshot_freezes_memory_mutations_until_the_next_root(
     tmp_path: Path,
 ) -> None:
-    from agentloom.runtime.trace import bind_root_run, require_root_run_state
+    from agentloom.execution.trace import bind_root_run, require_root_run_state
 
     config = _config()
     db_path = tmp_path / "self_learning.db"
@@ -190,7 +190,7 @@ def test_concurrent_workers_compute_one_shared_root_snapshot(
     tmp_path: Path,
     monkeypatch,
 ) -> None:
-    from agentloom.runtime.trace import (
+    from agentloom.execution.trace import (
         bind_explicit_execution_context,
         bind_root_run,
         capture_explicit_execution_context,

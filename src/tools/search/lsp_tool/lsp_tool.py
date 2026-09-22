@@ -29,7 +29,7 @@ from collections import OrderedDict
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple
 
-from agentloom.runtime.logging import get_logger
+from agentloom.execution.logging import get_logger
 
 from . import treesitter_fallback as ts_fb
 

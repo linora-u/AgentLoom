@@ -25,17 +25,17 @@ from agentloom.runtimes.pi.protocol import (
     SettleResult,
     TerminalRecord,
 )
-from agentloom.runtime.agent_runtime import (
+from agentloom.execution.agent_runtime import (
     AgentRuntimeError,
     AgentRuntimeRequest,
     RuntimeCheckpointEnvelope,
     RuntimeDefinition,
 )
-from agentloom.runtime.goal import GoalCompleteError
-from agentloom.runtime.native_tool_host import NativeToolHost
-from agentloom.runtime.native_tools import NativeCallIdentity, NativeCommitAck, ToolManifestEntry
-from agentloom.runtime.tool_gateway import PreparedToolCall, PreparedToolGateway
-from agentloom.runtime.tool_protocol import ToolCallRecord, ToolPolicyBlockedError
+from agentloom.execution.goal import GoalCompleteError
+from agentloom.execution.native_tool_host import NativeToolHost
+from agentloom.execution.native_tools import NativeCallIdentity, NativeCommitAck, ToolManifestEntry
+from agentloom.execution.tool_gateway import PreparedToolCall, PreparedToolGateway
+from agentloom.execution.tool_protocol import ToolCallRecord, ToolPolicyBlockedError
 
 
 def terminal(record: ToolCallRecord) -> TerminalRecord:

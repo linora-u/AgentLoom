@@ -26,7 +26,7 @@ from agentloom.integrations.litellm.litellm_retry import (
     limit_provider_calls,
     patch_litellm_completion,
 )
-from agentloom.runtime.concurrency.rate_limiter import GlobalRateLimiterRegistry
+from agentloom.execution.concurrency.rate_limiter import GlobalRateLimiterRegistry
 from litellm.exceptions import RateLimitError, Timeout
 
 

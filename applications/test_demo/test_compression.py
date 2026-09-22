@@ -26,11 +26,11 @@ from agentloom.application.factory import (  # noqa: E402
     YamlAgentFactory,
     YamlConfiguredSupervisorAgent,
 )
-from agentloom.runtime.logging import (  # noqa: E402
+from agentloom.execution.logging import (  # noqa: E402
     get_global_logger,
     initialize_global_logger_once,
 )
-from agentloom.runtime.trace import generate_id  # noqa: E402
+from agentloom.execution.trace import generate_id  # noqa: E402
 from smolagents.models import (  # noqa: E402
     ChatMessage,
     ChatMessageToolCall,

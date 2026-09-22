@@ -20,8 +20,8 @@ _AUDIT_WORKERS = {
 }
 _EVIDENCE_FILES = {
     "contract": (
-        "src/runtime/goal/model.py",
-        "src/runtime/goal/provider.py",
+        "src/execution/goal/model.py",
+        "src/execution/goal/provider.py",
         "src/application/readiness.py",
         "src/application/factory.py",
         "tests/goal_test/test_goal_config.py",
@@ -30,11 +30,11 @@ _EVIDENCE_FILES = {
         "tests/agent_test/runtime_builder_test/test_runtime_builder.py",
     ),
     "lifecycle": (
-        "src/runtime/goal/model.py",
-        "src/runtime/goal/provider.py",
+        "src/execution/goal/model.py",
+        "src/execution/goal/provider.py",
         "src/application/agent.py",
-        "src/runtime/checkpoint/checkpoint_manager.py",
-        "src/runtime/checkpoint/coordinator.py",
+        "src/execution/checkpoint/checkpoint_manager.py",
+        "src/execution/checkpoint/coordinator.py",
         "src/application/runner.py",
         "tests/goal_test/test_goal_model_accounting.py",
         "tests/agent_test/runtime_builder_test/test_runtime_builder.py",
@@ -200,7 +200,7 @@ def run_parallel_goal_probe(tasks_json: str, concurrency: int = 6) -> str:
         concurrency: Positive Worker concurrency for this batch.
     """
 
-    from agentloom.runtime.goal import get_current_goal_provider
+    from agentloom.execution.goal import get_current_goal_provider
 
     provider = get_current_goal_provider(required=True)
     existing = json.loads(inspect_parallel_goal_report())
@@ -267,7 +267,7 @@ def run_parallel_goal_probe(tasks_json: str, concurrency: int = 6) -> str:
 def inspect_parallel_goal_report() -> str:
     """Report whether persisted parallel evidence belongs to the current Goal."""
 
-    from agentloom.runtime.goal import get_current_goal_provider
+    from agentloom.execution.goal import get_current_goal_provider
 
     state = get_current_goal_provider(required=True).snapshot()
     target = _OUTPUT_ROOT / "parallel.md"

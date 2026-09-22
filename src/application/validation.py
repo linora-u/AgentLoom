@@ -8,10 +8,10 @@ from dataclasses import field as dataclass_field
 from pathlib import Path
 from typing import Any
 
-from agentloom.runtime.agent_runtime import (
+from agentloom.execution.agent_runtime import (
     RuntimeRequirements,
 )
-from agentloom.runtime.goal import GoalConfig, normalize_goal_config
+from agentloom.execution.goal import GoalConfig, normalize_goal_config
 
 
 @dataclass

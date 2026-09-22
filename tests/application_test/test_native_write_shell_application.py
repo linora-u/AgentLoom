@@ -5,7 +5,7 @@ import pytest
 import yaml
 from agentloom.application.runner import execute_app
 from agentloom.configuration.config import bind_config, load_project_config
-from agentloom.runtime.model_protocol import FunctionCallItem, MessageItem, ModelTurnResult
+from agentloom.execution.model_protocol import FunctionCallItem, MessageItem, ModelTurnResult
 from tests.application_test.native_write_shell_support import SCENARIOS, external_write_runtime, planned_calls, verify_native, write_application
 
 @pytest.mark.parametrize("scenario", SCENARIOS)

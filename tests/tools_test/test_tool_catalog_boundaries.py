@@ -255,7 +255,7 @@ def test_context_engine_metadata_lookup_does_not_load_implementations() -> None:
         """
         import json
         import sys
-        from agentloom.runtime.context_engine.config import ContextEngineConfig
+        from agentloom.execution.context_engine.config import ContextEngineConfig
 
         config = ContextEngineConfig()
         implementation_prefixes = (

@@ -357,7 +357,7 @@ def test_model_memory_never_uses_another_threads_global_application_fallback(
 ) -> None:
     import json
 
-    from agentloom.runtime.trace import bind_root_run, clear_current_agent_config, set_current_agent_config
+    from agentloom.execution.trace import bind_root_run, clear_current_agent_config, set_current_agent_config
     from agentloom.tools.self_learning.memory_tool import memory
 
     runtime_root = tmp_path / ".agentloom"

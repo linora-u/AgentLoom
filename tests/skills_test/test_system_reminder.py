@@ -1,6 +1,6 @@
 from pathlib import Path
 
-from agentloom.runtime.hooks import HookPlan, HookRun, wrap_in_system_reminder
+from agentloom.execution.hooks import HookPlan, HookRun, wrap_in_system_reminder
 
 
 def test_system_reminder_wraps_once_and_ignores_blank_text() -> None:

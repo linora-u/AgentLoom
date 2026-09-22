@@ -8,7 +8,7 @@ from agentloom.application.lifecycle import (
     ApplicationRunLifecycle,
     ApplicationRunResources,
 )
-from agentloom.runtime.agent_runtime import (
+from agentloom.execution.agent_runtime import (
     AgentRuntimeResult,
     RuntimeCheckpointEnvelope,
     RuntimeEvent,
@@ -193,7 +193,7 @@ def test_finalization_failure_can_replace_an_execution_failure() -> None:
 
 
 def test_terminal_checkpoint_precedes_coordinator_deactivation(monkeypatch) -> None:
-    from agentloom.runtime.checkpoint.coordinator import CheckpointCoordinator
+    from agentloom.execution.checkpoint.coordinator import CheckpointCoordinator
 
     lifecycle = ApplicationRunLifecycle()
     coordinator = MagicMock()
@@ -244,7 +244,7 @@ def test_terminal_checkpoint_precedes_coordinator_deactivation(monkeypatch) -> N
 def test_checkpoint_resources_close_when_coordinator_deactivation_fails(
     monkeypatch,
 ) -> None:
-    from agentloom.runtime.checkpoint.coordinator import CheckpointCoordinator
+    from agentloom.execution.checkpoint.coordinator import CheckpointCoordinator
 
     lifecycle = ApplicationRunLifecycle()
     coordinator = MagicMock()

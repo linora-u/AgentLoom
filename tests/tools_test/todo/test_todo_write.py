@@ -12,7 +12,7 @@ import pytest
 @pytest.fixture
 def todo_runtime():
     from agentloom.runtimes.smolagents.todo import TodoStateProvider, bind_todo_state_provider
-    from agentloom.runtime.trace import bind_explicit_execution_context, capture_explicit_execution_context
+    from agentloom.execution.trace import bind_explicit_execution_context, capture_explicit_execution_context
 
     provider = TodoStateProvider()
     execution = replace(

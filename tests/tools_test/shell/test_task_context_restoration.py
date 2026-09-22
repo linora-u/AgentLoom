@@ -2,7 +2,7 @@
 
 from threading import Thread
 
-from agentloom.runtime.trace.task_context import (
+from agentloom.execution.trace.task_context import (
     capture_explicit_execution_context, clear_current_task_id,
     set_current_task_id, task_context,
 )

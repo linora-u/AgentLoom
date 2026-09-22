@@ -7,8 +7,8 @@ from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 from agentloom.__main__ import main
-from agentloom.runtime import RuntimeHome
-from agentloom.runtime.checkpoint import CheckpointManager
+from agentloom.execution import RuntimeHome
+from agentloom.execution.checkpoint import CheckpointManager
 from click.testing import CliRunner
 
 

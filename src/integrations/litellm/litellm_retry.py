@@ -16,7 +16,7 @@ from typing import Any
 # process state during the root agentloom import.
 os.environ.setdefault("LITELLM_LOCAL_MODEL_COST_MAP", "True")
 
-from agentloom.runtime.logging import get_logger
+from agentloom.execution.logging import get_logger
 from litellm.exceptions import (
     APIConnectionError,
     AuthenticationError,
@@ -190,7 +190,7 @@ def create_retry_wrapper(
         state = None
         if model_type:
             try:
-                from agentloom.runtime.concurrency.rate_limiter import (
+                from agentloom.execution.concurrency.rate_limiter import (
                     GlobalRateLimiterRegistry,
                 )
 

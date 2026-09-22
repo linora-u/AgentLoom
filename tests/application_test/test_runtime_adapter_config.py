@@ -12,21 +12,21 @@ from agentloom.application.definition import load_agent_definition
 from agentloom.application.factory import YamlAgentFactory
 from agentloom.application.readiness import validate_runtime_agent_config
 from agentloom.configuration.llm_config import LLMConfig
-from agentloom.runtime.agent_runtime import (
+from agentloom.execution.agent_runtime import (
     RuntimeCapabilities,
     RuntimeDefinition,
     RuntimeRegistry,
     RuntimeRequirements,
     UnsupportedRuntimeError,
 )
-from agentloom.runtime.model_binding import ModelTurnBinding
-from agentloom.runtime.model_protocol import (
+from agentloom.execution.model_binding import ModelTurnBinding
+from agentloom.execution.model_protocol import (
     MessageItem,
     ModelTurnRequest,
     ModelTurnResult,
     ToolDefinition,
 )
-from agentloom.runtime.tool_protocol import ToolCallRecord
+from agentloom.execution.tool_protocol import ToolCallRecord
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 

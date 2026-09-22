@@ -9,8 +9,8 @@ from collections.abc import Callable
 from copy import deepcopy
 from typing import Any
 
-from agentloom.runtime.model_protocol import ToolDefinition
-from agentloom.runtime.tool_gateway import ToolBinding
+from agentloom.execution.model_protocol import ToolDefinition
+from agentloom.execution.tool_gateway import ToolBinding
 from jsonschema.validators import validator_for
 from mcp.types import CallToolResult, TextContent, Tool
 from mcpadapt.core import ToolAdapter

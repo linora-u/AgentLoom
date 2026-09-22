@@ -11,13 +11,13 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any, NoReturn, Protocol
 
 import yaml
-from agentloom.runtime.context import (
+from agentloom.execution.context import (
     RuntimeRunLease,
     resolve_runtime_home,
     safe_application_id,
     validate_runtime_id,
 )
-from agentloom.runtime.storage import SecureDirectory
+from agentloom.execution.storage import SecureDirectory
 
 if TYPE_CHECKING:
     from agentloom.application.definition import AgentDefinitionCache
@@ -1919,7 +1919,7 @@ class TuiBridge:
             )
         if goal is None:
             return None
-        from agentloom.runtime.goal import GoalState
+        from agentloom.execution.goal import GoalState
 
         # Display historical snapshots without reviving their obsolete budget.
         projection = {

@@ -8,10 +8,10 @@ from typing import Any
 
 from agentloom.runtimes.smolagents.monkey_patch import install_agentloom_runtime_adapters
 from agentloom.runtimes.smolagents.tool_proxy import build_smolagents_tool_proxies
-from agentloom.runtime.agent_runtime import require_runtime_state
-from agentloom.runtime.model_protocol import ModelProtocolError
-from agentloom.runtime.tool_gateway import ToolGateway
-from agentloom.runtime.tool_protocol import ToolCallRecord
+from agentloom.execution.agent_runtime import require_runtime_state
+from agentloom.execution.model_protocol import ModelProtocolError
+from agentloom.execution.tool_gateway import ToolGateway
+from agentloom.execution.tool_protocol import ToolCallRecord
 from smolagents import (
     AgentAudio,
     AgentGenerationError,

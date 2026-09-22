@@ -1,4 +1,4 @@
-"""Tests for ``agentloom.runtime.checkpoint.checkpoint_manager.CheckpointManager``."""
+"""Tests for ``agentloom.execution.checkpoint.checkpoint_manager.CheckpointManager``."""
 
 from __future__ import annotations
 
@@ -9,8 +9,8 @@ from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 import pytest
-from agentloom.runtime.agent_runtime import RuntimeCheckpointEnvelope
-from agentloom.runtime.checkpoint.checkpoint_manager import (
+from agentloom.execution.agent_runtime import RuntimeCheckpointEnvelope
+from agentloom.execution.checkpoint.checkpoint_manager import (
     CheckpointManager,
     cleanup_expired_tasks,
     list_all_tasks,

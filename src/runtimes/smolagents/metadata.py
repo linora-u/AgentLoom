@@ -1,6 +1,6 @@
 """Static capabilities owned by the smolagents runtime."""
 
-from agentloom.runtime.agent_runtime import RuntimeCapabilities
+from agentloom.execution.agent_runtime import RuntimeCapabilities
 
 CAPABILITIES = RuntimeCapabilities(
     structured_tools=True,

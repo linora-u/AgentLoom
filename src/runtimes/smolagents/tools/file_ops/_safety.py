@@ -12,7 +12,7 @@ import re
 from pathlib import Path
 from typing import Union
 
-from agentloom.runtime.logging import get_logger
+from agentloom.execution.logging import get_logger
 
 logger = get_logger(__name__)
 
@@ -148,4 +148,4 @@ def is_binary_file(path: Union[str, Path]) -> bool:
 # Path normalization
 # ---------------------------------------------------------------------------
 
-from agentloom.runtime.tool_governance.files import normalize_path, validate_file_access
+from agentloom.execution.tool_governance.files import normalize_path, validate_file_access

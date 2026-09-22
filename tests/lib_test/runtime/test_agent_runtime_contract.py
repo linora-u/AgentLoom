@@ -6,7 +6,7 @@ from typing import Any
 
 import pytest
 from agentloom.application.composition import build_builtin_runtime_registry
-from agentloom.runtime.agent_runtime import (
+from agentloom.execution.agent_runtime import (
     RUNTIME_EVENT_KINDS,
     AgentRuntimeError,
     AgentRuntimeRequest,
@@ -23,15 +23,15 @@ from agentloom.runtime.agent_runtime import (
     UnsupportedRuntimeError,
     require_runtime_state,
 )
-from agentloom.runtime.model_binding import ModelTurnBinding
-from agentloom.runtime.model_protocol import (
+from agentloom.execution.model_binding import ModelTurnBinding
+from agentloom.execution.model_protocol import (
     MessageItem,
     ModelTurnRequest,
     ModelTurnResult,
     ToolDefinition,
 )
-from agentloom.runtime.tool_gateway import ToolGateway
-from agentloom.runtime.tool_protocol import ToolCallRecord
+from agentloom.execution.tool_gateway import ToolGateway
+from agentloom.execution.tool_protocol import ToolCallRecord
 
 
 class _ModelAdapter:
@@ -68,7 +68,7 @@ class _ToolGateway:
 
 def test_runtime_definition_exposes_selected_tool_manifest_and_keeps_legacy_gateway():
     from dataclasses import replace
-    from agentloom.runtime.tool_gateway import AgentLoomToolGateway, bind_tool
+    from agentloom.execution.tool_gateway import AgentLoomToolGateway, bind_tool
     from agentloom.tools.loader import resolve_tool_function
 
     legacy = _definition("test")
@@ -93,7 +93,7 @@ def test_runtime_definition_exposes_selected_tool_manifest_and_keeps_legacy_gate
 @pytest.mark.parametrize("mismatch", ["missing", "schema", "duplicate_definition"])
 def test_runtime_definition_rejects_manifest_that_disagrees_with_selected_tools(mismatch):
     from dataclasses import replace
-    from agentloom.runtime.tool_gateway import AgentLoomToolGateway, bind_tool
+    from agentloom.execution.tool_gateway import AgentLoomToolGateway, bind_tool
     from agentloom.tools.loader import resolve_tool_function
 
     gateway = AgentLoomToolGateway([bind_tool(resolve_tool_function("read_file"))])

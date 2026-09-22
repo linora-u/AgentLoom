@@ -3,8 +3,8 @@
 from __future__ import annotations
 
 from agentloom.integrations.mcp.config import McpSettings
-from agentloom.runtime.model_protocol import ToolDefinition
-from agentloom.runtime.tool_gateway import ToolBinding
+from agentloom.execution.model_protocol import ToolDefinition
+from agentloom.execution.tool_gateway import ToolBinding
 from agentloom.integrations.mcp.tool_wrapper import wrap_mcp_tools, _sanitize_name
 
 

@@ -3,7 +3,7 @@
 The bridge checks the installed SDK schema before accepting this declaration.
 Unknown input properties are rejected by AgentLoom's native host.
 """
-from agentloom.runtime.model_protocol import ToolDefinition
+from agentloom.execution.model_protocol import ToolDefinition
 
 
 def read(path: str, offset: float | None = None, limit: float | None = None):

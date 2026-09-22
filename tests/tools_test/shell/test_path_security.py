@@ -13,7 +13,7 @@ import pytest
 from pathlib import Path
 from unittest.mock import patch, MagicMock
 
-from agentloom.runtime.tool_governance.shell.path_validation import (
+from agentloom.execution.tool_governance.shell.path_validation import (
     check_path_constraints,
     _build_allowed_roots,
 )
@@ -41,7 +41,7 @@ def _make_config_mock(
 def _patch_config(mock_fn):
     """Return a patch decorator for the shell config path."""
     return patch(
-        "agentloom.runtime.tool_governance.shell.path_validation._get_shell_config_path",
+        "agentloom.execution.tool_governance.shell.path_validation._get_shell_config_path",
         side_effect=mock_fn,
     )
 
@@ -54,7 +54,7 @@ def _patch_allowed_dirs(*dirs):
     """
     resolved = [Path(d).resolve() for d in dirs]
     return patch(
-        "agentloom.runtime.tool_governance.shell.path_validation.get_allowed_directories",
+        "agentloom.execution.tool_governance.shell.path_validation.get_allowed_directories",
         return_value=resolved,
     )
 

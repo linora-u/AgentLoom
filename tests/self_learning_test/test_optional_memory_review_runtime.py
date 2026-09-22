@@ -166,8 +166,8 @@ def test_review_prompt_is_candidate_only_and_forbids_all_write_tools() -> None:
 
 
 def test_review_model_resolution_disables_provider_retry(monkeypatch) -> None:
-    from agentloom.runtime.model_binding import ModelTurnBinding
-    from agentloom.runtime.model_protocol import ModelTurnResult
+    from agentloom.execution.model_binding import ModelTurnBinding
+    from agentloom.execution.model_protocol import ModelTurnResult
     from agentloom.self_learning import review_orchestration, reviewer
 
     captured = {}
@@ -230,8 +230,8 @@ def test_concurrent_review_of_one_root_calls_model_exactly_once(
     tmp_path: Path,
     monkeypatch,
 ) -> None:
-    from agentloom.runtime.model_binding import ModelTurnBinding
-    from agentloom.runtime.model_protocol import (
+    from agentloom.execution.model_binding import ModelTurnBinding
+    from agentloom.execution.model_protocol import (
         MessageItem,
         ModelTurnRequest,
         ModelTurnResult,
@@ -294,8 +294,8 @@ def test_provider_error_content_is_never_logged(
     monkeypatch,
     caplog,
 ) -> None:
-    from agentloom.runtime.model_binding import ModelTurnBinding
-    from agentloom.runtime.model_protocol import ModelTurnRequest, ModelTurnResult
+    from agentloom.execution.model_binding import ModelTurnBinding
+    from agentloom.execution.model_protocol import ModelTurnRequest, ModelTurnResult
     from agentloom.self_learning import reviewer
 
     db_path = tmp_path / "self_learning.db"

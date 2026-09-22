@@ -20,8 +20,8 @@ import json
 from pathlib import Path
 import runpy
 import sys
-from agentloom.runtime.model_binding import ModelTurnBinding
-from agentloom.runtime.model_protocol import (
+from agentloom.execution.model_binding import ModelTurnBinding
+from agentloom.execution.model_protocol import (
     FunctionCallItem,
     FunctionCallOutputItem,
     ModelTurnResult,

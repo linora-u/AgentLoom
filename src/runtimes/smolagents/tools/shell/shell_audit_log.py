@@ -43,8 +43,8 @@ from pathlib import Path
 from typing import Any
 
 from agentloom.configuration import C
-from agentloom.runtime.logging import get_logger
-from agentloom.runtime import (
+from agentloom.execution.logging import get_logger
+from agentloom.execution import (
     RuntimeContext,
     RuntimeRotatingTextSink,
     get_current_run_context,
@@ -245,8 +245,8 @@ def _scope_for_context(
 ) -> _AuditScope:
     runtime_key = _context_key(runtime_context)
     assert runtime_key is not None
-    from agentloom.runtime.logging.logger_manager import LogScopeClosed, get_logger_resource
-    from agentloom.runtime.resources import register_resource
+    from agentloom.execution.logging.logger_manager import LogScopeClosed, get_logger_resource
+    from agentloom.execution.resources import register_resource
 
     def create_scope() -> _AuditScope:
         created = _AuditScope(runtime_key=runtime_key, sink=_AuditSink(
@@ -301,7 +301,7 @@ def _coerce_bool(value: Any) -> bool:
 def _get_shell_config_with_source(key: str, *, default: Any = None) -> tuple[Any, str]:
     """Read effective shell config and identify where it came from."""
     try:
-        from agentloom.runtime.trace import get_current_agent_config
+        from agentloom.execution.trace import get_current_agent_config
         agent_cfg = get_current_agent_config()
         if isinstance(agent_cfg, dict):
             shell = agent_cfg.get("shell_settings")
@@ -790,7 +790,7 @@ def get_shell_audit_logger(
     """
     if agent_name is None:
         try:
-            from agentloom.runtime.trace import capture_explicit_execution_context
+            from agentloom.execution.trace import capture_explicit_execution_context
 
             agent_name = capture_explicit_execution_context().agent_name or "_global"
         except Exception:

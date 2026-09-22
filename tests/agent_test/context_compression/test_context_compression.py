@@ -23,7 +23,7 @@ from agentloom.runtimes.smolagents.context_compression import (
     to_internal_messages,
     truncate_conversation,
 )
-from agentloom.runtime.model_protocol import (
+from agentloom.execution.model_protocol import (
     MODEL_ITEMS_RAW_KEY,
     MODEL_RESPONSE_ID_RAW_KEY,
     FunctionCallItem,

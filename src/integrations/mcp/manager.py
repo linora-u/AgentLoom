@@ -10,11 +10,11 @@ from __future__ import annotations
 
 from typing import Any
 
-from agentloom.runtime.logging import get_logger
+from agentloom.execution.logging import get_logger
 from agentloom.integrations.mcp.client import AgentLoomMCPClient as MCPClient
 from agentloom.integrations.mcp.config import McpServerConfig, McpSettings, to_mcp_client_params
 from agentloom.integrations.mcp.tool_wrapper import wrap_mcp_tools
-from agentloom.runtime.tool_gateway import ToolBinding
+from agentloom.execution.tool_gateway import ToolBinding
 
 logger = get_logger(__name__)
 

@@ -5,13 +5,13 @@ import os
 from pathlib import Path
 
 import agentloom.configuration.config as config_module
-from agentloom.runtime.hooks.path_validators import (
+from agentloom.execution.hooks.path_validators import (
     has_suspicious_windows_pattern,
     is_vulnerable_unc_path,
     resolve_symlink_chain,
     validate_workspace_path,
 )
-from agentloom.runtime.hooks.types import HookContext
+from agentloom.execution.hooks.types import HookContext
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -29,7 +29,7 @@ def _patch_config(monkeypatch, raw: dict, root: Path) -> None:
 
 def _patch_no_agent(monkeypatch) -> None:
     monkeypatch.setattr(
-        "agentloom.runtime.hooks.path_validators.get_current_agent_config",
+        "agentloom.execution.hooks.path_validators.get_current_agent_config",
         lambda: None,
     )
 

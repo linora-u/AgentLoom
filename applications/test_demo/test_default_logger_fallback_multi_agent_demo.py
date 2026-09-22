@@ -11,7 +11,7 @@ project_root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(_
 if project_root not in sys.path:
     sys.path.insert(0, project_root)
 
-from agentloom.runtime.logging import get_global_logger, resolve_logger
+from agentloom.execution.logging import get_global_logger, resolve_logger
 from agentloom.application.factory import YamlAgentFactory, YamlConfiguredSupervisorAgent
 
 

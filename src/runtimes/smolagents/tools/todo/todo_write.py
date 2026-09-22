@@ -39,7 +39,7 @@ def todo_write(todos: list[dict[str, str]]) -> str:
         new canonical list revision.
     """
     from agentloom.runtimes.smolagents.todo import get_current_todo_provider, todo_counts
-    from agentloom.runtime.trace import get_current_agent_name, get_current_runtime_agent_path
+    from agentloom.execution.trace import get_current_agent_name, get_current_runtime_agent_path
 
     provider = get_current_todo_provider(required=True)
     agent_path = get_current_runtime_agent_path() or get_current_agent_name() or "default"

@@ -1,7 +1,7 @@
 import pytest
 
-from agentloom.runtime.tool_governance.shell import validator as validator_module
-from agentloom.runtime.tool_governance.shell.validator import analyze_command, validate_command
+from agentloom.execution.tool_governance.shell import validator as validator_module
+from agentloom.execution.tool_governance.shell.validator import analyze_command, validate_command
 
 
 class _DummyConfig:

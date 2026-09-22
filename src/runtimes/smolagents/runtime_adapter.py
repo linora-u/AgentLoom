@@ -19,7 +19,7 @@ from agentloom.runtimes.smolagents.metadata import CAPABILITIES
 from agentloom.runtimes.smolagents.recoverable_errors import (
     is_recoverable_agent_error,
 )
-from agentloom.runtime.agent_runtime import (
+from agentloom.execution.agent_runtime import (
     AgentRuntimeError,
     AgentRuntimeRequest,
     AgentRuntimeResult,
@@ -31,11 +31,11 @@ from agentloom.runtime.agent_runtime import (
     RuntimeUsage,
     require_runtime_state,
 )
-from agentloom.runtime.logging import get_logger
-from agentloom.runtime.model_binding import ModelTurnBinding
-from agentloom.runtime.model_protocol import ModelProtocolError, ModelTurnResult
-from agentloom.runtime.tool_gateway import ToolGateway
-from agentloom.runtime.tool_protocol import ToolCallRecord
+from agentloom.execution.logging import get_logger
+from agentloom.execution.model_binding import ModelTurnBinding
+from agentloom.execution.model_protocol import ModelProtocolError, ModelTurnResult
+from agentloom.execution.tool_gateway import ToolGateway
+from agentloom.execution.tool_protocol import ToolCallRecord
 
 try:
     _SMOLAGENTS_VERSION = version("smolagents")
@@ -58,7 +58,7 @@ def _exception_chain(error: Exception) -> tuple[Exception, ...]:
 
 
 def _goal_control_error(error: Exception) -> Exception | None:
-    from agentloom.runtime.goal import GoalCompleteError
+    from agentloom.execution.goal import GoalCompleteError
 
     return next(
         (
@@ -214,7 +214,7 @@ class SmolagentsRuntimeAdapter:
         request = self._request_context.get()
         application_context = None
         if request is None:
-            from agentloom.runtime import get_current_run_context
+            from agentloom.execution import get_current_run_context
 
             application_context = get_current_run_context()
         return RuntimeCheckpointEnvelope(

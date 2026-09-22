@@ -11,15 +11,15 @@ from collections.abc import Mapping
 from dataclasses import fields, is_dataclass
 from typing import Annotated, Any, Literal, Union
 
-from agentloom.runtime.agent_runtime import RuntimeCapabilities, RuntimeCheckpointEnvelope, RuntimeState
-from agentloom.runtime.native_tools import (
+from agentloom.execution.agent_runtime import RuntimeCapabilities, RuntimeCheckpointEnvelope, RuntimeState
+from agentloom.execution.native_tools import (
     NativeAuthorization,
     NativeCallIdentity,
     NativeExecutionOutcome,
     NativePrepareRequest,
     ToolManifestEntry,
 )
-from agentloom.runtime.tool_protocol import ToolCallRecord, ToolErrorRecord
+from agentloom.execution.tool_protocol import ToolCallRecord, ToolErrorRecord
 from pydantic import BaseModel, ConfigDict, Field, JsonValue, TypeAdapter, model_validator
 
 PI_BRIDGE_PROTOCOL_VERSION = 2

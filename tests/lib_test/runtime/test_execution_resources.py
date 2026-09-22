@@ -1,11 +1,11 @@
 """The public cleanup boundary closes real smol resources by Run and instance."""
 
-from agentloom.runtime import RuntimeHome, bind_run_context
+from agentloom.execution import RuntimeHome, bind_run_context
 from agentloom.runtimes.smolagents.tools.shell.process import ShellProcessRegistry
 
 
 def test_closing_one_instance_preserves_other_shell_session(tmp_path):
-    from agentloom.runtime.resources import close_instance_resources, close_run_resources
+    from agentloom.execution.resources import close_instance_resources, close_run_resources
 
     context = RuntimeHome(tmp_path / ".agentloom").context(
         application_id="resources",
@@ -34,8 +34,8 @@ def test_instance_cleanup_kills_only_its_real_background_process(tmp_path):
     import sys
     from dataclasses import replace
 
-    from agentloom.runtime.resources import close_instance_resources, close_run_resources
-    from agentloom.runtime.trace import bind_explicit_execution_context, capture_explicit_execution_context
+    from agentloom.execution.resources import close_instance_resources, close_run_resources
+    from agentloom.execution.trace import bind_explicit_execution_context, capture_explicit_execution_context
     from agentloom.runtimes.smolagents.tools.shell.background_task import BackgroundTaskRegistry
 
     context = RuntimeHome(tmp_path / ".agentloom").context(
@@ -76,7 +76,7 @@ def test_instance_cleanup_kills_only_its_real_background_process(tmp_path):
 
 
 def test_late_resource_registration_is_closed_within_its_cancelled_owner(tmp_path):
-    from agentloom.runtime.resources import register_resource, close_instance_resources, close_run_resources
+    from agentloom.execution.resources import register_resource, close_instance_resources, close_run_resources
     context = RuntimeHome(tmp_path / '.agentloom').context(application_id='resources', task_id='late', run_id='run')
     closed = []
     with bind_run_context(context):
@@ -92,8 +92,8 @@ def test_late_resource_registration_is_closed_within_its_cancelled_owner(tmp_pat
 def test_cancelled_run_cannot_start_a_new_captured_process(tmp_path):
     import os
     import pytest
-    from agentloom.runtime.process import run_captured_process
-    from agentloom.runtime.resources import close_run_resources
+    from agentloom.execution.process import run_captured_process
+    from agentloom.execution.resources import close_run_resources
     context = RuntimeHome(tmp_path / '.agentloom').context(application_id='resources', task_id='no-spawn', run_id='run')
     marker = tmp_path / 'must-not-start'
     with bind_run_context(context):

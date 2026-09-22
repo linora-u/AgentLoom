@@ -5,7 +5,7 @@ from __future__ import annotations
 import json
 from typing import Any
 
-from agentloom.runtime import safe_agent_path
+from agentloom.execution import safe_agent_path
 
 TODO_SCHEMA_VERSION = 1
 TODO_STATUSES = ("pending", "in_progress", "completed", "cancelled")

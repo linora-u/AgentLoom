@@ -5,7 +5,7 @@ from __future__ import annotations
 import json
 from concurrent.futures import ThreadPoolExecutor
 
-from agentloom.runtime.checkpoint.checkpoint_manager import CheckpointManager
+from agentloom.execution.checkpoint.checkpoint_manager import CheckpointManager
 
 
 def _manager(tmp_path, task_id: str = "task") -> CheckpointManager:
@@ -157,7 +157,7 @@ def test_replace_does_not_overwrite_corrupt_evidence_when_quarantine_fails(
     tmp_path,
     monkeypatch,
 ) -> None:
-    from agentloom.runtime import SecureDirectory
+    from agentloom.execution import SecureDirectory
 
     manager = _manager(tmp_path)
     storage = manager.task_storage("task")

@@ -7,7 +7,7 @@ PROJECT_ROOT = Path(__file__).resolve().parents[2]
 
 def test_legacy_todo_runtime_and_prompt_contracts_are_absent() -> None:
     removed_paths = [
-        PROJECT_ROOT / "src/runtime/todo",
+        PROJECT_ROOT / "src/execution/todo",
         PROJECT_ROOT / "src/tools/todo",
     ]
     assert not any(path.exists() for path in removed_paths)

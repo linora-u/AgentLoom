@@ -2,7 +2,7 @@
 
 import pytest
 
-from agentloom.runtime.tool_governance.shell.readonly_validation import is_read_only_command
+from agentloom.execution.tool_governance.shell.readonly_validation import is_read_only_command
 
 
 # =========================================================================

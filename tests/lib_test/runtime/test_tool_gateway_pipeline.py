@@ -5,20 +5,20 @@ from threading import Lock
 from unittest.mock import patch
 
 import pytest
-from agentloom.runtime.hooks import (
+from agentloom.execution.hooks import (
     HookEvent,
     HookHandler,
     HookPlan,
     HookResult,
     HookRun,
 )
-from agentloom.runtime.model_protocol import ToolDefinition
-from agentloom.runtime.tool_gateway import (
+from agentloom.execution.model_protocol import ToolDefinition
+from agentloom.execution.tool_gateway import (
     AgentLoomToolGateway,
     ToolBinding,
     bind_tool,
 )
-from agentloom.runtime.trace import (
+from agentloom.execution.trace import (
     ExplicitExecutionContext,
     bind_explicit_execution_context,
 )
@@ -67,7 +67,7 @@ def _invoke(gateway, run, *, call_id="provider-call", name="echo", arguments=Non
     with (
         bind_explicit_execution_context(execution),
         patch(
-            "agentloom.runtime.hooks.path_validators.enforce_core_tool_guard",
+            "agentloom.execution.hooks.path_validators.enforce_core_tool_guard",
             return_value=HookResult(),
         ),
     ):

@@ -9,7 +9,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from agentloom.runtime.logging import get_logger
+from agentloom.execution.logging import get_logger
 
 from .._read_file_state import get_read_file_state
 from .._safety import MAX_EDIT_FILE_SIZE, normalize_path, validate_file_access

@@ -10,14 +10,14 @@ from agentloom.integrations.litellm.tool_error_projection import (
 from agentloom.runtimes.smolagents.agents import ToolCallingAgentV2
 from agentloom.runtimes.smolagents.model_turn_bridge import SmolagentsModelTurnBridge
 from agentloom.runtimes.smolagents.terminal import final_answer_binding
-from agentloom.runtime.hooks import HookEvent, HookHandler, HookPlan, HookResult, HookRun
-from agentloom.runtime.model_binding import ModelTurnBinding
-from agentloom.runtime.tool_gateway import (
+from agentloom.execution.hooks import HookEvent, HookHandler, HookPlan, HookResult, HookRun
+from agentloom.execution.model_binding import ModelTurnBinding
+from agentloom.execution.tool_gateway import (
     AgentLoomToolGateway,
     bind_tool,
 )
-from agentloom.runtime.tool_protocol import ToolCallRecord, ToolErrorRecord
-from agentloom.runtime.trace import (
+from agentloom.execution.tool_protocol import ToolCallRecord, ToolErrorRecord
+from agentloom.execution.trace import (
     ExplicitExecutionContext,
     bind_explicit_execution_context,
     capture_explicit_execution_context,

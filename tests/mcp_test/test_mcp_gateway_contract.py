@@ -4,9 +4,9 @@ from dataclasses import replace
 
 import pytest
 from agentloom.integrations.mcp.adapter import AgentLoomMCPAdapter
-from agentloom.runtime.hooks import HookEvent, HookHandler, HookPlan, HookResult, HookRun
-from agentloom.runtime.tool_gateway import AgentLoomToolGateway
-from agentloom.runtime.trace import bind_explicit_execution_context, capture_explicit_execution_context
+from agentloom.execution.hooks import HookEvent, HookHandler, HookPlan, HookResult, HookRun
+from agentloom.execution.tool_gateway import AgentLoomToolGateway
+from agentloom.execution.trace import bind_explicit_execution_context, capture_explicit_execution_context
 from mcp.types import CallToolResult, Tool
 
 SCHEMA = {
@@ -25,9 +25,9 @@ def test_invalid_mcp_schema_blocks_before_guard_history_and_recording(arguments,
         Tool(name="lookup", inputSchema=SCHEMA),
     )
     for target in (
-        "agentloom.runtime.hooks.path_validators.enforce_core_tool_guard",
-        "agentloom.runtime.checkpoint.file_history_hook.record_active_file_history",
-        "agentloom.runtime.tool_gateway._observe_final_tool_input",
+        "agentloom.execution.hooks.path_validators.enforce_core_tool_guard",
+        "agentloom.execution.checkpoint.file_history_hook.record_active_file_history",
+        "agentloom.execution.tool_gateway._observe_final_tool_input",
     ):
         monkeypatch.setattr(target, lambda *args, **kwargs: phases.append("unexpected") or HookResult())
     run = HookRun(HookPlan(), local_run_id="local", root_run_id="root")

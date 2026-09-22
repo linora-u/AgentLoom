@@ -17,8 +17,8 @@ from agentloom.integrations.litellm.model_binding import (
     ModelProfileOverlay,
     resolve_litellm_model_turn_binding,
 )
-from agentloom.runtime.model_binding import ModelTurnBinding
-from agentloom.runtime.model_protocol import MessageItem, ModelTurnResult, ReasoningItem
+from agentloom.execution.model_binding import ModelTurnBinding
+from agentloom.execution.model_protocol import MessageItem, ModelTurnResult, ReasoningItem
 
 from .application_scope import safe_application_id
 from .paths import review_config, self_learning_root

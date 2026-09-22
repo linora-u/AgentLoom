@@ -2,7 +2,7 @@
 from importlib import import_module
 import pytest
 from agentloom.configuration.config import bind_config, load_project_config
-from agentloom.runtime.trace.task_context import set_current_agent_config, clear_current_agent_config
+from agentloom.execution.trace.task_context import set_current_agent_config, clear_current_agent_config
 
 @pytest.mark.parametrize("backend", ["rg", "python"])
 @pytest.mark.parametrize("tool", ["grep", "glob"])

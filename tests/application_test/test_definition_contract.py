@@ -346,7 +346,7 @@ def test_skill_instructions_are_pinned_for_each_runtime_definition_and_refresh_o
     from agentloom.application.agent import AgentRoleProfile, AgentType, RoleDrivenAgent
     from agentloom.application.definition import prepare_application_definition
     from agentloom.application.presentation import configuration_projection
-    from agentloom.runtime.skills.catalog import SkillCatalog
+    from agentloom.execution.skills.catalog import SkillCatalog
 
     class SnapshotAgent(RoleDrivenAgent):
         def _role_profile(self):
@@ -387,7 +387,7 @@ def test_skill_instructions_are_pinned_for_each_runtime_definition_and_refresh_o
 def test_studio_uses_the_catalog_parsed_during_its_single_definition_inspection(tmp_path, monkeypatch):
     import json
 
-    from agentloom.runtime.skills.catalog import SkillCatalog
+    from agentloom.execution.skills.catalog import SkillCatalog
     from agentloom.application.studio.application_studio import application_detail
 
     project_config(tmp_path)

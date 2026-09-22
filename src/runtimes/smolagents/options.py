@@ -7,7 +7,7 @@ from typing import TYPE_CHECKING, Any
 from agentloom.configuration.config import EffectiveAgentConfigSnapshot
 
 if TYPE_CHECKING:
-    from agentloom.runtime.agent_runtime import RuntimeDefinition
+    from agentloom.execution.agent_runtime import RuntimeDefinition
 
 
 SMOL_DEFAULTS = {
