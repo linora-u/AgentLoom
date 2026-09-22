@@ -1,26 +1,23 @@
-"""Unit tests for agentloom.adapters.mcp.tool_wrapper — name prefixing, sanitization, description enrichment."""
+"""Unit tests for agentloom.integrations.mcp.tool_wrapper — name prefixing, sanitization, description enrichment."""
 
 from __future__ import annotations
 
-import types
-from unittest.mock import MagicMock
-
-import pytest
-
-from agentloom.adapters.mcp.config import McpSettings, McpServerConfig
-from agentloom.adapters.mcp.tool_wrapper import wrap_mcp_tools, _sanitize_name
+from agentloom.integrations.mcp.config import McpSettings
+from agentloom.execution.model_protocol import ToolDefinition
+from agentloom.execution.tool_gateway import ToolBinding
+from agentloom.integrations.mcp.tool_wrapper import wrap_mcp_tools, _sanitize_name
 
 
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
 
-def _make_fake_tool(name: str, description: str = "A tool") -> MagicMock:
-    """Create a mock tool that behaves like a smolagents.Tool."""
-    tool = MagicMock()
-    tool.name = name
-    tool.description = description
-    return tool
+def _make_fake_tool(name: str, description: str = "A tool") -> ToolBinding:
+    return ToolBinding(
+        definition=ToolDefinition(name=name, description=description, parameters={"type": "object", "properties": {}}),
+        forward=lambda: "called",
+        inputs_schema={},
+    )
 
 
 def _make_settings(prefix: bool = True) -> McpSettings:
@@ -58,27 +55,27 @@ class TestWrapMcpToolsPrefixEnabled:
         wrapped = wrap_mcp_tools("filesystem", tools, settings)
 
         assert len(wrapped) == 2
-        assert wrapped[0].name == "mcp__filesystem__read_file"
-        assert wrapped[1].name == "mcp__filesystem__write_file"
+        assert wrapped[0].definition.name == "mcp__filesystem__read_file"
+        assert wrapped[1].definition.name == "mcp__filesystem__write_file"
 
     def test_server_name_sanitized(self):
         tools = [_make_fake_tool("query")]
         settings = _make_settings(prefix=True)
         wrapped = wrap_mcp_tools("web-search", tools, settings)
-        assert wrapped[0].name == "mcp__web_search__query"
+        assert wrapped[0].definition.name == "mcp__web_search__query"
 
     def test_description_enriched(self):
         tools = [_make_fake_tool("query", description="Search the web")]
         settings = _make_settings(prefix=True)
         wrapped = wrap_mcp_tools("search", tools, settings)
-        assert wrapped[0].description == "[MCP:search] Search the web"
+        assert wrapped[0].definition.description == "[MCP:search] Search the web"
 
     def test_no_double_enrichment(self):
         """If description already has origin hint, don't add again."""
         tools = [_make_fake_tool("q", description="[MCP:search] Already tagged")]
         settings = _make_settings(prefix=True)
         wrapped = wrap_mcp_tools("search", tools, settings)
-        assert wrapped[0].description == "[MCP:search] Already tagged"
+        assert wrapped[0].definition.description == "[MCP:search] Already tagged"
 
     def test_original_not_mutated(self):
         original = _make_fake_tool("read_file", "Read a file")
@@ -98,13 +95,13 @@ class TestWrapMcpToolsPrefixDisabled:
         tools = [_make_fake_tool("read_file")]
         settings = _make_settings(prefix=False)
         wrapped = wrap_mcp_tools("filesystem", tools, settings)
-        assert wrapped[0].name == "read_file"
+        assert wrapped[0].definition.name == "read_file"
 
     def test_description_still_enriched(self):
         tools = [_make_fake_tool("query", "Search")]
         settings = _make_settings(prefix=False)
         wrapped = wrap_mcp_tools("search", tools, settings)
-        assert wrapped[0].description.startswith("[MCP:search]")
+        assert wrapped[0].definition.description.startswith("[MCP:search]")
 
 
 # ---------------------------------------------------------------------------
@@ -120,10 +117,9 @@ class TestWrapMcpToolsEdgeCases:
     def test_tool_with_empty_description(self):
         tools = [_make_fake_tool("t", description="")]
         wrapped = wrap_mcp_tools("s", tools, _make_settings())
-        assert "[MCP:s]" in wrapped[0].description
+        assert "[MCP:s]" in wrapped[0].definition.description
 
     def test_tool_with_none_description(self):
-        tool = _make_fake_tool("t")
-        tool.description = None
+        tool = _make_fake_tool("t", description=None)
         wrapped = wrap_mcp_tools("s", [tool], _make_settings())
-        assert "[MCP:s]" in wrapped[0].description
+        assert "[MCP:s]" in wrapped[0].definition.description

@@ -10,7 +10,7 @@ from pathlib import Path
 
 import pytest
 
-from agentloom.tools.search.glob_tool.glob_tool import (
+from agentloom.runtimes.smolagents.tools.search.glob_tool.glob_tool import (
     glob_search,
     _filter_excluded_paths,
     _glob_with_python,
@@ -19,7 +19,7 @@ from agentloom.tools.search.glob_tool.glob_tool import (
 # The mock target is the same as in test_grep_exclude.py — the shared
 # _resolve_tool_access_control_config function in path_validators.
 _RESOLVE_MOCK_TARGET = (
-    "agentloom.runtime.permissions.workspace._resolve_tool_access_control_config"
+    "agentloom.execution.permissions.workspace._resolve_tool_access_control_config"
 )
 
 
@@ -73,10 +73,10 @@ class TestFilterExcludedPaths:
             _RESOLVE_MOCK_TARGET,
             _mock_resolve_factory(_make_tac_config(rules)),
         )
-        files = ["src/main.py", "src/utils.py", "secrets/key.pem", "secrets/config.py"]
+        files = ["src/main.py", "src/application/imports.py", "secrets/key.pem", "secrets/config.py"]
         filtered = _filter_excluded_paths(files)
         assert "src/main.py" in filtered
-        assert "src/utils.py" in filtered
+        assert "src/application/imports.py" in filtered
         assert not any("secrets" in f for f in filtered)
 
     def test_excludes_multiple_directories(self, monkeypatch):
@@ -175,9 +175,9 @@ class TestGlobGrepConsistency:
 
     def test_both_use_same_shared_util(self):
         """Both tools import from search_utils, not independent implementations."""
-        from agentloom.tools.search import search_utils
-        import agentloom.tools.search.grep_tool.grep_tool as grep_mod
-        import agentloom.tools.search.glob_tool.glob_tool as glob_mod
+        from agentloom.runtimes.smolagents.tools.search import search_utils
+        import agentloom.runtimes.smolagents.tools.search.grep_tool.grep_tool as grep_mod
+        import agentloom.runtimes.smolagents.tools.search.glob_tool.glob_tool as glob_mod
 
         # Both tools should import get_search_exclude_patterns from search_utils
         assert grep_mod.get_search_exclude_patterns is search_utils.get_search_exclude_patterns

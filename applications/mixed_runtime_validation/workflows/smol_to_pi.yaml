@@ -1,0 +1,13 @@
+name: smol_to_pi
+agent_runtime: smolagents
+runtime_options:
+  smart_summary: false
+description: Verify a release note using a different Agent runtime.
+workflow: Call inspect_note with query applications/mixed_runtime_validation/fixtures/note.txt.
+  Report its actual verification token.
+toolsets: []
+tools: []
+checkpoint:
+  enabled: false
+worker_agents:
+- path: pi_reader.yaml

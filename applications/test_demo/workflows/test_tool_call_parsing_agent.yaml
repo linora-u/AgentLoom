@@ -4,7 +4,9 @@ description: |
   Test agent for validating strict AgentLoom tool-call parsing behavior.
 
 model_type: "powerful"
-max_steps: 4
+runtime_options:
+  max_steps: 4
+  smart_summary: false
 
 workflow: |
   # Tool Call Parser Validation

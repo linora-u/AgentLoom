@@ -45,10 +45,10 @@ AgentLoom 将“一次执行尝试”和“需要恢复的逻辑任务”分开�
 │   │   └── heartbeat.json
 │   ├── context_store/
 │   └── file-history/
+├── schedules/{jobs.json,serve-status.json,executions/}
 ├── sessions/
 ├── learning/
-├── self_learning.db
-└── legacy/logs-v1-<timestamp>/
+└── self_learning.db
 ```
 
 关键边界：
@@ -59,6 +59,7 @@ AgentLoom 将“一次执行尝试”和“需要恢复的逻辑任务”分开�
 - 即使 `cleanup_on_success` 删除了可恢复 checkpoint，这些紧凑证据仍可检查；raw artifact retention 仍可清理体积较大的 shell/background/skill artifacts。
 - Checkpoint 直接按 `<application_id>/<task_id>` 定位，不依赖日志目录、`.task_index.json` 或历史 run 扫描。
 - 用户交付物仍由 Application 的 `output_dir` 管理，runtime 清理不会遍历 Application output 目录。
+- 持久 Schedule 与调度服务状态位于同一 runtime root 的 `schedules/` 下，覆盖 root 时会一起移动。
 - Agent 的持久 recall 使用 `.agentloom/workspaces/agents/<application_id>/<agent_path>/` 下、归 Application 所有的 `insights.md`。当前任务的 Todo 在启用 checkpoint 时随 `<application_id>/<task_id>/todos.json` 共同恢复和清理；未启用 checkpoint 时只保存在本次 run 的内存中。它既不是 run artifact，也不承担长期项目管理。
 - Goal Mode 使用 task-scoped `goal.json` 保存 objective 指纹、`goal_started`、状态和 evidence。`active`、`interrupted`、`failed`、`crashed` 都保留 checkpoint；只有显式完成后才进入现有成功清理流程。清理前状态会复制到 run manifest 和 `audit/goal.json`。
 
@@ -171,7 +172,7 @@ Supervisor 与 Worker heartbeat 都记录当前 `run_id`。崩溃检测会检查
 - 失败/中断 run：默认保留 30 天；
 - 原始 `artifacts/`：默认保留 3 天；
 - manifest 状态为 running 或未知：保留；
-- `.agentloom/legacy/`、checkpoints、workspaces 和 Application outputs：run 清理永不删除。
+- checkpoints、workspaces、self-learning 状态和 Application outputs：run 清理永不删除。
 
 也可以显式执行同一策略：
 
@@ -180,26 +181,6 @@ loom clean-runtime
 ```
 
 Checkpoint 过期与删除保持 task-scoped：`max_resume_age` 决定任务是否还能 resume，`cleanup_on_success` 删除成功任务状态，`loom clean-tasks` 提供显式 checkpoint 清理。
-
-## 从 `.logs` 一次性迁移
-
-先预览：
-
-```bash
-loom migrate-runtime --dry-run
-```
-
-扫描会完全忽略旧 `.task_index.json`，直接读取真实 checkpoint 目录及 task events/tree；测试任务、过期任务会被排除，只选择仍有可恢复 memory、ContextStore 或 file-history 进度的任务。
-
-确认候选后应用：
-
-```bash
-loom migrate-runtime --apply
-```
-
-Apply 会经过 staging，校验 checksum 和可恢复进度，再原子 rename 到 `.agentloom/checkpoints/<application_id>/<task_id>/`。全部候选验证成功后，整个旧 `.logs` 会被原子归档到 `.agentloom/legacy/logs-v1-<timestamp>/`；新运行时不会双读该归档。
-
-迁移完成后，应对每个重要任务执行真实 resume，并验证旧 ContextRef retrieve 与 file-history 状态，再把迁移判定为通过。
 
 ## 检查真实运行证据
 
@@ -228,12 +209,8 @@ find .agentloom/checkpoints/<application_id>/<task_id> -maxdepth 5 -type f -prin
 
 ### Resume 失败：`Checkpoint expired`
 
-该逻辑任务原始 `created_at` 已超过 `checkpoint.max_resume_age`。迁移和 resume 不会重写 `created_at` 来复活过期任务。
+该逻辑任务原始 `created_at` 已超过 `checkpoint.max_resume_age`。Resume 不会重写 `created_at` 来复活过期任务。
 
 ### 没有 `runtime.log`
 
 检查 `logging.file_enabled`，以及本次运行是否使用了 `--no-file-log`。关闭文件日志不会关闭 checkpoint 或 Shell audit。
-
-### `.logs` 仍然存在
-
-新运行不会再写 `.logs`。先用 `loom migrate-runtime --dry-run` 检查，再用 `--apply` 归档旧目录；验证可恢复任务之前不要直接删除它。

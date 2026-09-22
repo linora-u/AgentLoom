@@ -9,7 +9,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any
 
-from agentloom.runtime.logging import get_logger
+from agentloom.execution.logging import get_logger
 
 from .application_scope import current_application_scope
 from .paths import active_skills_dir, skill_proposals_dir

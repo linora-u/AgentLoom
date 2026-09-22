@@ -24,7 +24,7 @@ def _config(*, project_budget: int = 8000) -> dict:
 
 
 def test_model_facing_memory_schema_has_one_canonical_write_contract() -> None:
-    from agentloom.adapters.smolagents.tools.tools import ensure_tool_wrapped
+    from agentloom.runtimes.smolagents.tools.tools import ensure_tool_wrapped
     from agentloom.tools.self_learning.memory_tool import memory
 
     model_tool = ensure_tool_wrapped([memory])[0]
@@ -223,7 +223,7 @@ def test_memory_target_special_characters_still_match_their_literal_text(
 
 
 def test_memory_cli_exposes_only_the_simplified_public_commands() -> None:
-    from agentloom.__main__ import memory
+    from agentloom.self_learning.cli import memory
 
     result = CliRunner().invoke(memory, ["--help"])
     assert result.exit_code == 0
@@ -357,7 +357,7 @@ def test_model_memory_never_uses_another_threads_global_application_fallback(
 ) -> None:
     import json
 
-    from agentloom.runtime.trace import bind_root_run, clear_current_agent_config, set_current_agent_config
+    from agentloom.execution.trace import bind_root_run, clear_current_agent_config, set_current_agent_config
     from agentloom.tools.self_learning.memory_tool import memory
 
     runtime_root = tmp_path / ".agentloom"

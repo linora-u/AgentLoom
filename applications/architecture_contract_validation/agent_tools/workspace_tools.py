@@ -39,7 +39,7 @@ def _path(root: Path, relative_path: str) -> Path:
 
 
 def _ledger(root: Path, operation: str, **values: object) -> None:
-    from agentloom.runtime.trace.task_context import capture_explicit_execution_context
+    from agentloom.execution.trace.task_context import capture_explicit_execution_context
 
     context = capture_explicit_execution_context()
     marker = json.loads((root / ".architecture-case.json").read_text())
@@ -116,7 +116,7 @@ def write_workspace_file(workspace: str, relative_path: str, content: str) -> st
 
 def _validate_final_report(root: Path, content: str) -> None:
     """Reject malformed claims before writing; never construct or repair a report."""
-    from agentloom.runtime.trace.task_context import capture_explicit_execution_context
+    from agentloom.execution.trace.task_context import capture_explicit_execution_context
 
     try:
         report = json.loads(content)

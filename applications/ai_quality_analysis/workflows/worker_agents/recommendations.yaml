@@ -1,5 +1,7 @@
 name: "recommendations"
 agent_runtime: smolagents
+runtime_options:
+  smart_summary: false
 description: "Synthesizes findings from all analysis stages into prioritized, actionable remediation plans with effort estimates and side-effect assessments."
 model_type: "powerful"
 toolsets:

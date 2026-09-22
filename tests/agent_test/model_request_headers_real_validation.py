@@ -26,10 +26,10 @@ if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
 import agentloom.configuration.config as config_module  # noqa: E402
-from agentloom.adapters.litellm.request_headers import (  # noqa: E402
+from agentloom.configuration.model_request_headers import (  # noqa: E402
     GENERIC_MODEL_USER_AGENT,
 )
-from agentloom.adapters.smolagents.models import (  # noqa: E402
+from agentloom.runtimes.smolagents.models import (  # noqa: E402
     model_manager as model_manager_module,
 )
 from agentloom.application.runner import run_app  # noqa: E402

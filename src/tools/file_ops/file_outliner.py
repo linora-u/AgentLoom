@@ -13,7 +13,7 @@ get_file_outline()
 """
 
 import json
-from agentloom.runtime.logging import get_logger
+from agentloom.execution.logging import get_logger
 import re
 import warnings
 from collections import namedtuple
@@ -439,7 +439,6 @@ _FALLBACK_PATTERNS = [
     # JS / TS
     (re.compile(r"^(\s*)(?:export\s+)?(?:default\s+)?class\s+(\w+)"), "class"),
     (re.compile(r"^(\s*)(?:export\s+)?(?:async\s+)?function\s+(\w+)"), "function"),
-    (re.compile(r"^(\s*)(?:export\s+)?(?:const|let|var)\s+(\w+)\s*=\s*(?:\([^)]*\)|[^=])*=>"), "function"),
     # Go
     (re.compile(r"^func\s+(?:\([^)]*\)\s+)?(\w+)\s*\("), "function"),
     (re.compile(r"^type\s+(\w+)\s+(?:struct|interface)"), "type"),
@@ -456,6 +455,35 @@ _FALLBACK_PATTERNS = [
     (re.compile(r"^#define\s+(\w+)"), "macro"),
 ]
 
+_FALLBACK_ARROW_PREFIX = re.compile(
+    r"^(\s*)(?:export\s+)?(?:const|let|var)\s+(\w+)\s*=\s*"
+)
+
+
+def _has_fallback_arrow_suffix(line: str, start: int) -> bool:
+    """Recognize fallback arrow suffix syntax in linear time.
+
+    ``outside`` tracks a path between repeated regex alternatives, while
+    ``inside_parentheses`` tracks a path within the parenthesized alternative.
+    Both can be true because an opening parenthesis can also be plain content.
+    """
+    outside = True
+    inside_parentheses = False
+    for index in range(start, len(line)):
+        char = line[index]
+        if outside and line.startswith("=>", index):
+            return True
+
+        outside, inside_parentheses = (
+            (outside and char != "=")
+            or (inside_parentheses and char == ")"),
+            (inside_parentheses and char != ")")
+            or (outside and char == "("),
+        )
+        if not (outside or inside_parentheses):
+            return False
+    return False
+
 
 def _regex_fallback_outline(
     lines: List[str],
@@ -466,6 +494,11 @@ def _regex_fallback_outline(
     """Simple multi-language regex fallback when tree-sitter is unavailable."""
     defs: List[Def] = []
     for i, line in enumerate(lines):
+        arrow_match = _FALLBACK_ARROW_PREFIX.match(line)
+        if arrow_match and _has_fallback_arrow_suffix(line, arrow_match.end()):
+            defs.append(Def(name=arrow_match.group(2), kind="function", line=i))
+            continue
+
         for pattern, kind in _FALLBACK_PATTERNS:
             m = pattern.match(line)
             if m:

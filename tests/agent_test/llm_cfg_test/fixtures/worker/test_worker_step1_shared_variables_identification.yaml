@@ -1,5 +1,7 @@
 name: "step1_shared_variables_identification"
 agent_runtime: smolagents
+runtime_options:
+  smart_summary: false
 description: "数据一致性检查智能体，负责分析模块级数据一致性、跨核并发及共享变量保护。"
 model_type: "powerful"
 tools: []

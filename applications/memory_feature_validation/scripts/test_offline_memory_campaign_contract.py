@@ -44,6 +44,9 @@ from applications.memory_feature_validation.scripts.run_offline_memory_campaign 
     audit_campaign,
     run_campaign,
 )
+from applications.memory_feature_validation.scripts.runtime_paths import (  # noqa: E402
+    canonical_runtime_root,
+)
 
 
 def test_default_offline_campaign_ids_are_collision_resistant_path_components() -> None:
@@ -218,7 +221,56 @@ def test_cli_defaults_are_the_only_release_eligible_shape() -> None:
     assert args.seed == DEFAULT_SEED
     assert args.only_case is None
     assert args.source_db == REPO_ROOT / ".agentloom" / "self_learning.db"
+    assert args.output_root == REPO_ROOT / "applications" / "memory_feature_validation" / "outputs"
     assert args.baseline_metrics is None
+
+
+def test_cli_state_follows_runtime_override_but_deliverables_do_not(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    runtime_root = tmp_path / "configured-runtime"
+    monkeypatch.setenv("AGENTLOOM_RUNTIME_ROOT", str(runtime_root))
+
+    args = _parser().parse_args([])
+
+    assert args.source_db == runtime_root / "self_learning.db"
+    assert args.output_root == REPO_ROOT / "applications" / "memory_feature_validation" / "outputs"
+
+
+def test_runtime_path_loader_is_strict_and_uses_the_project_config(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.delenv("AGENTLOOM_RUNTIME_ROOT", raising=False)
+    config = tmp_path / "config"
+    config.mkdir()
+    (config / "system.yaml").write_text(
+        "runtime:\n  root_dir: state/runtime\n",
+        encoding="utf-8",
+    )
+
+    assert canonical_runtime_root(tmp_path) == tmp_path / "state" / "runtime"
+
+    (config / "system.yaml").write_text(
+        "runtime:\n  root_dir: first\n  root_dir: second\n",
+        encoding="utf-8",
+    )
+    with pytest.raises(ValueError, match="Duplicate YAML mapping key"):
+        canonical_runtime_root(tmp_path)
+
+    (config / "system.yaml").unlink()
+    with pytest.raises(FileNotFoundError, match="Configuration file does not exist"):
+        canonical_runtime_root(tmp_path)
+
+    (config / "system.yaml").mkdir()
+    with pytest.raises(ValueError, match="must be a regular file"):
+        canonical_runtime_root(tmp_path)
+
+    (config / "system.yaml").rmdir()
+    (config / "system.yaml").symlink_to(config / "missing-system.yaml")
+    with pytest.raises(ValueError, match="must not be a symlink"):
+        canonical_runtime_root(tmp_path)
 
 
 @pytest.mark.parametrize("layout", ["historical", "responsibility", "canonical"])
@@ -234,7 +286,16 @@ def test_release_source_gate_ignores_unrelated_worktree_changes(
         "src/extensions/self_learning/review_types.py",
         "src/lib/runtime/context.py",
         "src/lib/trusted_memory_evidence.py",
+        "applications/memory_feature_validation/scripts/runtime_paths.py",
+        "src/lib/config/__init__.py",
+        "src/lib/config/layered_builder.py",
+        "src/lib/config/system_loader.py",
+        "src/lib/config/yaml_loader.py",
     } <= set(offline_runner._SOURCE_FILES)
+    assert (
+        "applications/memory_feature_validation/scripts/runtime_paths.py"
+        in offline_runner._TRUSTED_DRIVER_FILES
+    )
 
     repo = tmp_path / "repo"
     repo.mkdir()
@@ -290,7 +351,7 @@ def test_release_source_gate_ignores_unrelated_worktree_changes(
     assert unknown_global_state["dirty"] is False
     assert unknown_global_state["worktree_dirty"] is None
 
-    bound_path = repo / source_paths[-1]
+    bound_path = repo / "applications/memory_feature_validation/scripts/runtime_paths.py"
     bound_path.write_text("changed production source\n", encoding="utf-8")
     bound_dirty = offline_runner._git_source_state()
     assert bound_dirty["dirty"] is True

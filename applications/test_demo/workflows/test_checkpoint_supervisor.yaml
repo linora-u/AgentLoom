@@ -55,4 +55,6 @@ tools:
 worker_agents:
   - path: "applications/test_demo/workflows/worker_agents/test_checkpoint_worker.yaml"
 
-max_steps: 20
+runtime_options:
+  max_steps: 20
+  smart_summary: false

@@ -1,4 +1,6 @@
 # Byte-compiled / optimized / DLL files
+# A locally ignored upstream pi/ checkout must not hide the production runtime.
+!/src/runtimes/pi/
 __pycache__/
 *.py[cod]
 *$py.class
@@ -56,7 +58,6 @@ cover/
 *.pot
 
 # Django stuff:
-*.logs/
 local_settings.py
 db.sqlite3
 db.sqlite3-journal
@@ -176,7 +177,6 @@ llm_config.yaml
 .claude/
 AGENTS.md
 
-.runtime/
 .repo_map/
 .agentloom/
 skills/generated/proposals/
@@ -198,3 +198,11 @@ applications/web_search/config/.mcp.anysearch.json
 # Isolated real-Application acceptance definitions and artifacts.
 **/.architecture_acceptance/
 /applications/architecture_acceptance_*/
+
+src/runtimes/pi/bridge/node_modules/
+src/runtimes/pi/bridge/dist/
+src/runtimes/pi/bridge/.agentloom-install.*
+
+# Local upstream reference checkouts used for architecture research.
+/codex/
+/temp/

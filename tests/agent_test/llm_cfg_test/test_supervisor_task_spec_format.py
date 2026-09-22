@@ -1,7 +1,7 @@
 from pathlib import Path
 
-import agentloom.runtime.factory as yaml_agent_factory
-from agentloom.runtime.factory import YamlAgentFactory, YamlConfiguredSupervisorAgent
+import agentloom.application.factory as yaml_agent_factory
+from agentloom.application.factory import YamlAgentFactory, YamlConfiguredSupervisorAgent
 
 FIXTURE_ROOT = Path(__file__).resolve().parent / "fixtures"
 WORKFLOW_INTRO = yaml_agent_factory.WORKFLOW_EXECUTION_INTRO

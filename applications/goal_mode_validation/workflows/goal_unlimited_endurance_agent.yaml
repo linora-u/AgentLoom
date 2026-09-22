@@ -4,7 +4,9 @@ description: |
   Run a deep, read-only, multi-Worker acceptance audit of the AgentLoom Goal Mode
   implementation and persist a reproducible evidence report.
 model_type: "powerful"
-max_steps: 30
+runtime_options:
+  max_steps: 30
+  smart_summary: false
 goal: true
 
 workflow: |
@@ -25,12 +27,12 @@ workflow: |
   2. goal_lifecycle_adversary: audit premature final/max_steps; explicit completion and
      parallel Worker ownership; stable identity on resume; completion-commit crash recovery.
   3. goal_observability_auditor: audit Python/manifest; CLI/JSONL; schedule status;
-     TUI bridge/TypeScript presentation.
+     Studio adapter/TypeScript presentation.
   4. goal_documentation_auditor: audit root docs; cn/en Goal docs; config/checkpoint
      docs; framework-skill contract and validation guidance.
 
   Each query must name its acceptance criterion and the relevant paths under src/,
-  tests/, docs/, agentloom-tui/, and agentloom-framework-skill/. Collect every
+  tests/, docs/, studio/, and agentloom-framework-skill/. Collect every
   TaskResult. Fail if any status is not completed. Send a JSON representation of
   all results to goal_evidence_synthesizer. Persist its Markdown using
   persist_goal_validation_report(run_name="unlimited_endurance", report=...).

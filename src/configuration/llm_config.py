@@ -19,8 +19,8 @@ from agentloom.configuration.defaults import (
     DEFAULT_MODEL_TEMPERATURE,
     DEFAULT_MODEL_TIMEOUT,
 )
+from agentloom.configuration.model_adapters import MODEL_ADAPTERS, AdapterKind
 from agentloom.configuration.yaml_loader import load_unique_yaml
-from agentloom.runtime.model_protocol import MODEL_ADAPTERS, AdapterKind
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 _RESERVED_MODEL_KEYS = {"default_model_type", "common"}

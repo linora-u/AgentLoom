@@ -37,4 +37,6 @@ workflow: |
      cleanup. Overall is PASS only when all five actual checks passed.
 
 worker_agents: []
-max_steps: 20
+runtime_options:
+  max_steps: 20
+  smart_summary: false

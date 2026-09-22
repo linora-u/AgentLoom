@@ -122,7 +122,7 @@ def metadata(workflow: Path) -> dict:
             "workflow": str(workflow), "workflow_sha256": hashlib.sha256(workflow.read_bytes()).hexdigest(),
             "model_type": model_type, "model": C.get_model_config(model_type, "model"),
             "agent_runtime": cfg.get("agent_runtime"),
-            "max_steps": cfg.get("max_steps", 80), "goal": cfg.get("goal"),
+            "runtime_options": cfg.get("runtime_options", {}), "goal": cfg.get("goal"),
             "definition_files": {str(path): hashlib.sha256(path.read_bytes()).hexdigest()
                                  for path in workflow.parent.rglob("*") if path.suffix in {".yaml", ".yml", ".md"}},
             "interpreter": sys.executable}

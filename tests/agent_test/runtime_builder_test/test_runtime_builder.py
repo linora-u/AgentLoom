@@ -8,15 +8,16 @@ from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import MagicMock
 
-import agentloom.runtime.agent as base_agent_module
-import agentloom.runtime.invocation as invocation_module
+import agentloom.application.agent as base_agent_module
+import agentloom.application.invocation as invocation_module
 import pytest
 import yaml
-from agentloom.adapters.smolagents.agents import ToolCallingAgentV2
-from agentloom.adapters.smolagents.loom_mixin import LoomAgentMixin
-from agentloom.adapters.smolagents.tools.tools import tool
-from agentloom.runtime import RuntimeHome, bind_run_context
-from agentloom.runtime.agent_runtime import (
+from agentloom.runtimes.smolagents.agents import ToolCallingAgentV2
+from agentloom.runtimes.smolagents.loom_mixin import LoomAgentMixin
+from agentloom.runtimes.smolagents.terminal import final_answer_binding
+from agentloom.runtimes.smolagents.tools.tools import tool
+from agentloom.execution import RuntimeHome, bind_run_context
+from agentloom.execution.agent_runtime import (
     AgentRuntimeRequest,
     AgentRuntimeResult,
     RuntimeCapabilities,
@@ -26,11 +27,11 @@ from agentloom.runtime.agent_runtime import (
     RuntimeUsage,
     require_runtime_state,
 )
-from agentloom.runtime.hooks import HookEvent, HookHandler, HookPlan, HookResult, HookRun
-from agentloom.runtime.model_binding import ModelTurnBinding
-from agentloom.runtime.model_protocol import ModelTurnRequest, ModelTurnResult
-from agentloom.runtime.tool_gateway import AgentLoomToolGateway, final_answer_binding
-from agentloom.runtime.trace import (
+from agentloom.execution.hooks import HookEvent, HookHandler, HookPlan, HookResult, HookRun
+from agentloom.execution.model_binding import ModelTurnBinding
+from agentloom.execution.model_protocol import ModelTurnRequest, ModelTurnResult
+from agentloom.execution.tool_gateway import AgentLoomToolGateway
+from agentloom.execution.trace import (
     bind_explicit_execution_context,
     capture_explicit_execution_context,
     clear_current_hook_run,
@@ -276,6 +277,7 @@ def test_invocation_uses_runtime_neutral_request(monkeypatch):
     assert request.task_id == "task-runtime-neutral"
     assert request.run_id
     assert request.requirements == RuntimeRequirements(
+        structured_tools=True,
         checkpoint_resume=True,
     )
     assert callable(request.event_sink)
@@ -356,8 +358,8 @@ def test_standalone_checkpoint_failure_still_deactivates_coordinator(
     tmp_path,
     monkeypatch,
 ):
-    from agentloom.runtime.checkpoint import CheckpointManager
-    from agentloom.runtime.checkpoint.coordinator import CheckpointCoordinator
+    from agentloom.execution.checkpoint import CheckpointManager
+    from agentloom.execution.checkpoint.coordinator import CheckpointCoordinator
 
     agent = _make_agent(logger=DummyLoggerBackend())
     runtime = RecordingAgentRuntime("reported-result")
@@ -383,7 +385,7 @@ def test_standalone_checkpoint_failure_still_deactivates_coordinator(
 
 
 def test_standalone_base_exception_is_persisted_as_failure(tmp_path, monkeypatch):
-    from agentloom.runtime.checkpoint import CheckpointManager
+    from agentloom.execution.checkpoint import CheckpointManager
 
     agent = _make_agent(logger=DummyLoggerBackend())
     runtime = RecordingAgentRuntime(exc=SystemExit("runtime exited"))
@@ -474,12 +476,11 @@ def test_runtime_definition_contains_complete_neutral_runtime_input(
             "name": "definition_agent",
             "description": "Complete neutral definition.",
             "workflow": "Use the proof tool.",
-            "prompt": {"path": "prompts/custom.yaml"},
-            "planning_interval": 3,
-            "smart_summary": False,
-            "todo": {"mode": "on"},
-            "max_steps": 11,
-            "max_consecutive_parse_errors": 7,
+            "runtime_options": {
+                "prompt_template_path": "prompts/custom.yaml", "planning_interval": 3,
+                "smart_summary": False, "todo_mode": "on", "max_steps": 11,
+                "max_consecutive_model_errors": 7,
+            },
         },
         model_binding=model_binding,
         logger=DummyLoggerBackend(),
@@ -491,8 +492,7 @@ def test_runtime_definition_contains_complete_neutral_runtime_input(
     )
     agent._effective_agent_config = {
         **agent._effective_agent_config,
-        "prompt": {"path": "prompts/custom.yaml"},
-        "planning_interval": 3,
+        "runtime_options": {"prompt_template_path": "prompts/custom.yaml", "planning_interval": 3},
     }
 
     @tool
@@ -511,11 +511,6 @@ def test_runtime_definition_contains_complete_neutral_runtime_input(
         "get_agent_environment_prompt",
         lambda: "environment",
     )
-    monkeypatch.setattr(
-        base_agent_module,
-        "todo_policy_for_mode",
-        lambda mode: f"todo:{mode}",
-    )
 
     definition = agent._build_runtime_definition()
 
@@ -523,19 +518,17 @@ def test_runtime_definition_contains_complete_neutral_runtime_input(
     assert definition.name == "definition_agent"
     assert definition.description == "Complete neutral definition."
     assert definition.model is model_binding
-    assert definition.max_steps == 11
-    assert definition.planning_interval == 3
-    assert definition.smart_summary is False
-    assert definition.todo_mode == "on"
-    assert definition.instructions == "environment\n\ntodo:on"
-    assert definition.prompt_template_path == str(prompt_path.resolve())
+    assert definition.runtime_options["max_steps"] == 11
+    assert definition.runtime_options["planning_interval"] == 3
+    assert definition.runtime_options["smart_summary"] is False
+    assert definition.runtime_options["todo_mode"] == "on"
+    assert definition.instructions == "environment"
+    assert definition.runtime_options["prompt_template_path"] == str(prompt_path.resolve())
     assert definition.project_root == str(tmp_path)
-    assert definition.max_consecutive_model_errors == 7
+    assert definition.runtime_options["max_consecutive_model_errors"] == 7
     assert definition.metadata == {}
     assert tuple(item.name for item in definition.tool_gateway.definitions) == (
         "proof",
-        "todo_write",
-        "final_answer",
     )
 
 
@@ -576,47 +569,14 @@ def test_task_created_is_emitted_once_through_runtime_request(monkeypatch):
     assert [request.task for request in runtime.requests] == ["one task"]
 
 
-@pytest.mark.parametrize("mode", ["auto", "on"])
-def test_todo_enabled_modes_expose_tool_independent_of_planning_interval(
-    monkeypatch,
-    mode: str,
-) -> None:
+@pytest.mark.parametrize("mode", ["auto", "on", "off"])
+def test_common_runtime_does_not_inject_smol_tools(monkeypatch, mode):
     agent = DummyAgent(
-        config={"name": "runtime_dummy", "todo": {"mode": mode}},
-        model_binding=_model_binding(),
-        logger=DummyLoggerBackend(),
+        config={"name": "runtime_dummy", "runtime_options": {"todo_mode": mode}},
+        model_binding=_model_binding(), logger=DummyLoggerBackend(),
     )
-    sentinel = type("TodoTool", (), {"name": "todo_write"})()
     monkeypatch.setattr(agent, "get_all_tools", lambda agent_type: [])
-    monkeypatch.setattr(
-        base_agent_module,
-        "resolve_tool_function",
-        lambda name: sentinel,
-    )
-
-    tools = agent._build_runtime_tools(agent._role_profile())
-
-    assert tools == [sentinel]
-    assert "planning_interval" not in agent._config
-
-
-def test_todo_off_hides_even_explicit_tool_with_planning_enabled(monkeypatch) -> None:
-    agent = DummyAgent(
-        config={
-            "name": "runtime_dummy",
-            "todo": {"mode": "off"},
-            "planning_interval": 2,
-        },
-        model_binding=_model_binding(),
-        logger=DummyLoggerBackend(),
-    )
-    explicit = type("TodoTool", (), {"name": "todo_write"})()
-    other = type("OtherTool", (), {"name": "read_file"})()
-    monkeypatch.setattr(agent, "get_all_tools", lambda agent_type: [explicit, other])
-
-    tools = agent._build_runtime_tools(agent._role_profile())
-
-    assert tools == [other]
+    assert agent._build_tool_gateway().definitions == ()
 
 
 def test_base_run_emits_task_complete_on_success(monkeypatch):
@@ -647,6 +607,7 @@ def test_base_run_emits_task_complete_on_success(monkeypatch):
     assert request.task_id == "task-complete"
     assert request.run_id
     assert request.requirements == RuntimeRequirements(
+        structured_tools=True,
         checkpoint_resume=True,
     )
     assert callable(request.event_sink)
@@ -655,7 +616,7 @@ def test_base_run_emits_task_complete_on_success(monkeypatch):
 
 
 def test_base_run_binds_root_before_memory_snapshot_and_only_owner_emits_session(monkeypatch):
-    from agentloom.runtime.trace import bind_root_run, get_current_session_run_id, require_root_run_id
+    from agentloom.execution.trace import bind_root_run, get_current_session_run_id, require_root_run_id
 
     agent = _make_agent(logger=DummyLoggerBackend())
     runtimes: list[RecordingAgentRuntime] = []
@@ -707,7 +668,7 @@ def test_base_run_binds_root_before_memory_snapshot_and_only_owner_emits_session
 
 
 def test_main_agent_and_worker_inject_the_same_frozen_root_memory_snapshot() -> None:
-    from agentloom.runtime.trace import bind_root_run
+    from agentloom.execution.trace import bind_root_run
     from agentloom.self_learning.persistence.memory_store import MemoryStore
 
     config = {
@@ -747,7 +708,7 @@ def test_main_agent_and_worker_inject_the_same_frozen_root_memory_snapshot() -> 
 def test_failed_initial_memory_store_open_freezes_empty_for_workers(
     monkeypatch,
 ) -> None:
-    from agentloom.runtime.trace import bind_root_run
+    from agentloom.execution.trace import bind_root_run
     from agentloom.self_learning.persistence import (
         memory_store as memory_store_module,
     )
@@ -782,7 +743,7 @@ def test_failed_initial_memory_store_open_freezes_empty_for_workers(
 
 
 def test_base_run_uses_runner_supplied_run_id_for_root_lifecycle(monkeypatch):
-    from agentloom.runtime.trace import capture_explicit_execution_context
+    from agentloom.execution.trace import capture_explicit_execution_context
 
     agent = _make_agent(logger=DummyLoggerBackend())
     runtime_agent = RecordingAgentRuntime(output="ok")
@@ -801,7 +762,7 @@ def test_base_run_uses_runner_supplied_run_id_for_root_lifecycle(monkeypatch):
 
 
 def test_base_run_releases_owned_root_after_failure(monkeypatch):
-    from agentloom.runtime.trace import get_current_session_run_id, require_root_run_id
+    from agentloom.execution.trace import get_current_session_run_id, require_root_run_id
 
     agent = _make_agent(logger=DummyLoggerBackend())
     runtime_agent = RecordingAgentRuntime(exc=RuntimeError("boom-root"))
@@ -846,7 +807,7 @@ def test_runtime_close_failure_does_not_replace_run_failure(monkeypatch):
 
 
 def test_root_memory_review_runs_after_session_end_inside_owned_root(monkeypatch):
-    from agentloom.runtime.trace import bind_root_run, require_root_run_id
+    from agentloom.execution.trace import bind_root_run, require_root_run_id
     from agentloom.self_learning import reviewer
 
     agent = _make_review_agent(logger=DummyLoggerBackend())
@@ -1001,8 +962,8 @@ def test_max_steps_root_is_a_failure_and_never_runs_memory_review(monkeypatch):
 
 
 def test_max_steps_worker_is_failed_before_checkpoint_success(tmp_path, monkeypatch):
-    from agentloom.runtime.checkpoint import CheckpointManager
-    from agentloom.runtime.checkpoint.coordinator import CheckpointCoordinator
+    from agentloom.execution.checkpoint import CheckpointManager
+    from agentloom.execution.checkpoint.coordinator import CheckpointCoordinator
 
     class MaxStepsWorkerRuntime:
         runtime_id = "test"
@@ -1061,8 +1022,8 @@ def test_max_steps_worker_is_failed_before_checkpoint_success(tmp_path, monkeypa
 
 @pytest.mark.parametrize("output", ["worker answer", "", None])
 def test_completed_worker_resume_replays_output_in_requested_shape(tmp_path, monkeypatch, output):
-    from agentloom.runtime.checkpoint import CheckpointManager
-    from agentloom.runtime.checkpoint.coordinator import CheckpointCoordinator
+    from agentloom.execution.checkpoint import CheckpointManager
+    from agentloom.execution.checkpoint.coordinator import CheckpointCoordinator
 
 
     class SuccessfulRuntime:
@@ -1125,8 +1086,8 @@ def test_max_steps_managed_worker_fails_before_call_discards_state(
     tmp_path,
     monkeypatch,
 ):
-    from agentloom.runtime.checkpoint import CheckpointManager
-    from agentloom.runtime.checkpoint.coordinator import CheckpointCoordinator
+    from agentloom.execution.checkpoint import CheckpointManager
+    from agentloom.execution.checkpoint.coordinator import CheckpointCoordinator
     from smolagents import RunResult
 
     native_runtime = ToolCallingAgentV2(
@@ -1157,7 +1118,7 @@ def test_max_steps_managed_worker_fails_before_call_discards_state(
         "task-max-steps-managed-worker",
         "delegate managed work",
     )
-    from agentloom.adapters.smolagents.runtime_adapter import (
+    from agentloom.runtimes.smolagents.runtime_adapter import (
         SmolagentsRuntimeAdapter,
     )
     worker = base_agent_module.SubTaskTrackedAgent(
@@ -1499,7 +1460,7 @@ def test_custom_session_end_telemetry_cannot_create_orphan_review_audit(
 
 
 def test_same_base_agent_concurrent_top_level_runs_do_not_cross_context(monkeypatch):
-    from agentloom.runtime.trace import (
+    from agentloom.execution.trace import (
         capture_explicit_execution_context,
         clear_current_task_id,
         set_current_task_id,
@@ -1759,7 +1720,7 @@ def test_subagent_lifecycle_belongs_to_parent_while_worker_tools_belong_to_child
 
 
 def test_worker_subtask_cannot_emit_root_task_lifecycle() -> None:
-    from agentloom.runtime.trace import sub_task_context
+    from agentloom.execution.trace import sub_task_context
 
     events: list[HookEvent] = []
     agent = _make_agent(logger=DummyLoggerBackend())
@@ -1794,7 +1755,7 @@ def test_worker_subtask_cannot_emit_root_task_lifecycle() -> None:
 
 
 def test_root_task_lifecycle_never_reads_legacy_subtask_fallback() -> None:
-    from agentloom.runtime.trace import clear_current_sub_task_id, set_current_sub_task_id
+    from agentloom.execution.trace import clear_current_sub_task_id, set_current_sub_task_id
 
     events: list[HookEvent] = []
     agent = _make_agent(logger=DummyLoggerBackend())
@@ -1870,7 +1831,7 @@ def test_each_run_rebinds_message_sink_for_fresh_runtime(monkeypatch):
 
 
 def test_same_base_agent_serializes_fresh_runtime_runs(monkeypatch):
-    from agentloom.runtime.trace import require_root_run_id
+    from agentloom.execution.trace import require_root_run_id
 
     agent = _make_agent(logger=DummyLoggerBackend())
 
@@ -1986,7 +1947,7 @@ def test_base_run_executes_transformed_tasks_sequentially_with_reset_false(tmp_p
     assert all(request.run_id for request in runtime_agent.requests)
     assert all(
         request.requirements
-        == RuntimeRequirements(checkpoint_resume=True)
+        == RuntimeRequirements(structured_tools=True, checkpoint_resume=True)
         for request in runtime_agent.requests
     )
     assert all(
@@ -2050,7 +2011,7 @@ def test_invocation_collects_ordered_runtime_events_without_sink_duplicates(
 
 
 def test_goal_mode_continues_after_normal_final_until_update_goal(monkeypatch):
-    from agentloom.runtime.goal import get_current_goal_provider
+    from agentloom.execution.goal import get_current_goal_provider
 
     agent = DummyGoalAgent(
         config={
@@ -2087,7 +2048,7 @@ def test_goal_mode_continues_after_normal_final_until_update_goal(monkeypatch):
 
 
 def test_goal_mode_treats_max_steps_as_continuation_boundary(monkeypatch):
-    from agentloom.runtime.goal import get_current_goal_provider
+    from agentloom.execution.goal import get_current_goal_provider
 
     agent = DummyGoalAgent(
         config={
@@ -2115,7 +2076,7 @@ def test_goal_mode_treats_max_steps_as_continuation_boundary(monkeypatch):
 
 
 def test_goal_mode_uses_evidence_when_max_steps_final_delivery_failed(monkeypatch):
-    from agentloom.runtime.goal import get_current_goal_provider
+    from agentloom.execution.goal import get_current_goal_provider
 
     agent = DummyGoalAgent(
         config={
@@ -2142,7 +2103,7 @@ def test_goal_mode_uses_evidence_when_max_steps_final_delivery_failed(monkeypatc
 
 
 def test_goal_mode_ignores_legacy_budget_and_continues_until_completed(monkeypatch):
-    from agentloom.runtime.goal import get_current_goal_provider
+    from agentloom.execution.goal import get_current_goal_provider
 
     agent = DummyGoalAgent(
         config={
@@ -2173,8 +2134,8 @@ def test_goal_mode_resume_after_completion_commit_does_not_restart_work(
     tmp_path,
     monkeypatch,
 ):
-    from agentloom.runtime.checkpoint import CheckpointManager
-    from agentloom.runtime.goal import get_current_goal_provider
+    from agentloom.execution.checkpoint import CheckpointManager
+    from agentloom.execution.goal import get_current_goal_provider
 
     config = {
         "name": "goal-runtime",
@@ -2234,7 +2195,7 @@ def test_goal_tools_are_absent_when_goal_mode_is_disabled(monkeypatch, goal):
         "name": "goal-runtime",
         "description": "Finish all work.",
         "workflow": "Implement and verify.",
-        "todo": {"mode": "off"},
+        "runtime_options": {"todo_mode": "off"},
     }
     if goal is not None:
         config["goal"] = goal
@@ -2255,16 +2216,18 @@ def test_goal_tools_are_added_only_for_enabled_root_supervisor(monkeypatch):
             "description": "Finish all work.",
             "workflow": "Implement and verify.",
             "goal": True,
-            "todo": {"mode": "off"},
+            "runtime_options": {"todo_mode": "off"},
         },
         model_binding=_model_binding(),
         logger=DummyLoggerBackend(),
     )
     monkeypatch.setattr(agent, "get_all_tools", lambda agent_type: [])
 
-    names = {tool.name for tool in agent._build_runtime_tools(agent._role_profile())}
+    gateway = agent._build_tool_gateway()
+    names = {tool.name for tool in gateway.definitions}
 
     assert names == {"get_goal", "update_goal"}
+    assert {entry.owner for entry in gateway.manifest} == {"platform"}
 
 
 def test_loom_runtime_can_keep_task_step_for_sequential_reset_false():

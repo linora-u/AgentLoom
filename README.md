@@ -43,7 +43,7 @@ prompt conventions.
 
 Every allocated Run receives an immutable `run_id`, manifest, and versioned
 lifecycle events, with bounded file logs when enabled plus audit records and
-artifacts. A logical `task_id` survives resume. The TUI, CLI JSON/JSONL, and
+artifacts. A logical `task_id` survives resume. The Studio, CLI JSON/JSONL, and
 Python API read the same canonical state. Preflight rejection occurs before a
 Run or its storage is allocated.
 
@@ -70,7 +70,7 @@ access remains governed by Agent configuration and permissions.
 
 ## Quick start
 
-The source installer builds the TUI and prepares a locked Python environment for
+The source installer builds the Studio and prepares a locked Python environment for
 the current checkout:
 
 ```bash
@@ -87,6 +87,12 @@ compatible unit under `~/.agentloom`. Open a new terminal and verify it:
 agentloom --version
 agentloom --snapshot
 ```
+
+The source installer defaults to `smol` plus professional `code` tools. For Pi
+without smol, use `./install --runtime pi` with Node 22.19+ and npm available;
+it automatically downloads the pinned SDK and builds AgentLoom's bridge. See
+[runtime installation profiles](docs/en/runtime_installation.md) for locked
+checkout/release commands and clean Application verification.
 
 Create the local model configuration:
 
@@ -139,7 +145,7 @@ run.” It does not turn static validation into a success claim.
 
 ## Application Studio
 
-The TUI is an Applications-first control plane, not a thin log viewer.
+The Studio is an Applications-first control plane, not a thin log viewer.
 
 - **Application workspace:** browse Effective Config, Supervisor/Worker
   topology, source attribution, models, Tools, Skills, Hooks, MCP, permissions,
@@ -170,7 +176,7 @@ The TUI is an Applications-first control plane, not a thin log viewer.
 | Diagnose the selected failed Run | `a` |
 | Close detail, reject a decision, or interrupt the Agent Loop | `Esc` |
 
-See [Application Studio](agentloom-tui/README.md) for screen behavior,
+See [Application Studio](studio/README.md) for screen behavior,
 architecture, updates, schedules, and contributor commands.
 
 ## Define an Application
@@ -190,6 +196,8 @@ applications/release_review/
 └── sysprompt/                  # optional prompt templates
 ```
 
+Backend-specific execution settings belong only in `runtime_options`. Historical top-level smol fields are silently ignored without conversion or rejection.
+
 A Supervisor references Worker definitions:
 
 ```yaml
@@ -206,7 +214,8 @@ workflow: |
   Ask both Workers for evidence, reconcile conflicts, and return one release decision.
 
 tools: []
-max_steps: 12
+runtime_options:
+  max_steps: 12
 goal:
   enabled: true
 ```
@@ -233,13 +242,14 @@ workflow: |
 
 tools: []
 worker_agents: []
-max_steps: 8
+runtime_options:
+  max_steps: 8
 ```
 
 Run the Supervisor directly:
 
 ```bash
-uv run loom run applications/release_review/workflows/release_review_agent.yaml
+uv run --locked --extra smol --extra code loom run applications/release_review/workflows/release_review_agent.yaml
 ```
 
 Or ask a Skill-aware coding assistant to read
@@ -285,14 +295,14 @@ corresponding feature is configured or used.
 Run the included code-review Application without creating a new Application:
 
 ```bash
-uv run loom run applications/ai_quality_analysis/workflows/code_review_agent.yaml
+uv run --locked --extra smol --extra code loom run applications/ai_quality_analysis/workflows/code_review_agent.yaml
 ```
 
 Use machine-readable lifecycle events when another program owns execution:
 
 ```bash
-uv run loom run <workflow> --output-format json
-uv run loom run <workflow> --output-format jsonl
+uv run --locked --extra smol --extra code loom run <workflow> --output-format json
+uv run --locked --extra smol --extra code loom run <workflow> --output-format jsonl
 ```
 
 For programmatic execution, `execute_app()` returns an `ApplicationRunResult`
@@ -305,11 +315,11 @@ result = execute_app("applications/release_review/workflows/release_review_agent
 print(result.output, result.run.run_id)
 ```
 
-Framework source lives directly in `src/application/`, `src/runtime/`,
-`src/adapters/`, and the other responsibility modules. Installation maps `src/`
+Framework source lives directly in `src/application/`, `src/execution/`,
+`src/integrations/`, and the other responsibility modules. Installation maps `src/`
 to the Python package name `agentloom`: the import above loads
 `src/application/runner.py`. There is no extra `agentloom` source directory.
-Use `uv sync --python 3.12 --locked --all-groups` to install the checkout before
+Use `uv sync --python 3.12 --locked --all-groups --extra smol --extra code` to install the checkout before
 calling Python APIs. The old `src.*` imports and module commands are removed;
 supported commands are `loom` and `python -m agentloom`. See the
 [architecture and migration map](docs/specs/architecture-migration-inventory.md)
@@ -320,7 +330,7 @@ Post-allocation failures carry the same receipt; preflight rejection emits
 [Structured Run API](docs/en/run_observability.md).
 
 Durable schedules use the same Application contract and Run lifecycle. Their
-automatic firing is a separate foreground service, so closing the TUI does not
+automatic firing is a separate foreground service, so closing the Studio does not
 leave a hidden daemon:
 
 ```bash
@@ -334,7 +344,6 @@ agentloom schedules --project /path/to/project serve
 | `ai_quality_analysis` | Twelve specialized Workers coordinated into staged code review |
 | `unit_test_studio` | Strict pytest generation with a deterministic Python entrypoint |
 | `repo_map` | Deterministic preprocessing, bottom-up Agent analysis, batching, and progress persistence |
-| `codex_exec_demo` | Local `codex exec` exposed as normal Agent tools with fixed arguments |
 | `goal_mode_validation` | Explicit Goal completion, continuation, and checkpoint resume |
 | `self_learning_smoke` | Session history, memory proposals, evidence, and review boundaries |
 
@@ -356,17 +365,17 @@ agentloom schedules --project /path/to/project serve
 
 ```bash
 # Framework
-uv run pytest tests -q
+uv run --locked --extra smol --extra code pytest tests -q
 
-# TUI
-cd agentloom-tui
+# Studio
+cd studio
 bun test
 bun run typecheck
 ```
 
 - Issues: [github.com/linora-u/AgentLoom/issues](https://github.com/linora-u/AgentLoom/issues)
 - Contact: [raine_walker@163.com](mailto:raine_walker@163.com?subject=AgentLoom%20Collaboration)
-- TUI provenance and notices: [agentloom-tui/upstream/README.md](agentloom-tui/upstream/README.md)
+- Studio provenance and notices: [studio/upstream/README.md](studio/upstream/README.md)
 
 If AgentLoom helps your project, consider starring the repository or
 contributing a focused Application, fix, or validation case.

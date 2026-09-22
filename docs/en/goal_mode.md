@@ -54,7 +54,7 @@ uv run loom run applications/<app>/workflows/<agent>.yaml --resume <task_id>
 
 Run manifests and lifecycle events include canonical Goal state. Before successful
 checkpoint cleanup, evidence is copied to `audit/goal.json`. CLI text shows Goal
-status; TUI shows its objective, state, and completion evidence. Ordinary model
+status; Studio shows its objective, state, and completion evidence. Ordinary model
 usage remains in runtime audit records, independently of Goal state.
 
 Schedules run the same YAML with the same continuation, completion, and recovery

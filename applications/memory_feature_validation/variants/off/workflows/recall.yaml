@@ -2,7 +2,9 @@ name: "memory_review_off_recall"
 agent_runtime: smolagents
 description: "Answer one follow-up using only the run-start persistent-memory snapshot."
 model_type: "summary"
-max_steps: 5
+runtime_options:
+  max_steps: 5
+  smart_summary: false
 
 workflow: |
   Read only the curated persistent-memory snapshot supplied at run start. Do

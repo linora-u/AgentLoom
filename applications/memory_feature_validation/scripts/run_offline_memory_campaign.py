@@ -35,20 +35,6 @@ _BOOTSTRAP_ROOT = Path(__file__).resolve().parents[3]
 if str(_BOOTSTRAP_ROOT) not in sys.path:
     sys.path.insert(0, str(_BOOTSTRAP_ROOT))
 
-from applications.memory_feature_validation.scripts.campaign_identity import (  # noqa: E402
-    default_campaign_id as _default_campaign_id,
-)
-from applications.memory_feature_validation.scripts.offline_memory_campaign_common import (  # noqa: E402
-    CATEGORY_WEIGHTS,
-    DEFAULT_EVENTS,
-    DEFAULT_SEED,
-    OfflineCase,
-    allocate_quotas,
-    build_case_plan,
-    case_artifact_row,
-    private_marker,
-    safe_marker,
-)
 from agentloom.self_learning.event_schema import CanonicalSessionEvent  # noqa: E402
 from agentloom.self_learning.persistence.database import (  # noqa: E402
     SelfLearningDatabase,
@@ -68,9 +54,37 @@ from agentloom.self_learning.review_types import (  # noqa: E402
     ReviewConflictError,
 )
 
+from applications.memory_feature_validation.scripts.campaign_identity import (  # noqa: E402
+    default_campaign_id as _default_campaign_id,
+)
+from applications.memory_feature_validation.scripts.offline_memory_campaign_common import (  # noqa: E402
+    CATEGORY_WEIGHTS,
+    DEFAULT_EVENTS,
+    DEFAULT_SEED,
+    OfflineCase,
+    allocate_quotas,
+    build_case_plan,
+    case_artifact_row,
+    private_marker,
+    safe_marker,
+)
+from applications.memory_feature_validation.scripts.runtime_paths import (  # noqa: E402
+    canonical_runtime_root,
+)
+
 REPO_ROOT = _BOOTSTRAP_ROOT
-DEFAULT_OUTPUT_ROOT = REPO_ROOT / ".agentloom" / "validation" / "memory_feature_validation"
-DEFAULT_SOURCE_DB = REPO_ROOT / ".agentloom" / "self_learning.db"
+
+
+def _runtime_root() -> Path:
+    return canonical_runtime_root(REPO_ROOT)
+
+
+def _default_output_root() -> Path:
+    return REPO_ROOT / "applications" / "memory_feature_validation" / "outputs"
+
+
+def _default_source_db() -> Path:
+    return _runtime_root() / "self_learning.db"
 RELEASE_MIGRATION_EVENTS = 10_000
 EXPECTED_SOURCE_RUNS = 82
 EXPECTED_SOURCE_EVENTS = 1_706
@@ -112,6 +126,7 @@ _SOURCE_FILES = (
     "applications/memory_feature_validation/scripts/campaign_identity.py",
     "applications/memory_feature_validation/scripts/offline_memory_campaign_common.py",
     "applications/memory_feature_validation/scripts/run_offline_memory_campaign.py",
+    "applications/memory_feature_validation/scripts/runtime_paths.py",
     "src/extensions/self_learning/event_schema.py",
     "src/extensions/self_learning/persistence/database.py",
     "src/extensions/self_learning/persistence/ledger.py",
@@ -124,35 +139,44 @@ _SOURCE_FILES = (
     "src/lib/runtime/__init__.py",
     "src/lib/runtime/context.py",
     "src/lib/runtime/storage.py",
+    "src/lib/config/__init__.py",
     "src/lib/config/config_validation.py",
+    "src/lib/config/layered_builder.py",
     "src/lib/config/model_request_header_profiles.py",
+    "src/lib/config/system_loader.py",
+    "src/lib/config/yaml_loader.py",
     "src/lib/logging/__init__.py",
     "src/lib/logging/logger_manager.py",
     "src/lib/trusted_memory_evidence.py",
 )
-_TRUSTED_DRIVER_FILES = frozenset(_SOURCE_FILES[:3])
+_TRUSTED_DRIVER_FILES = frozenset(_SOURCE_FILES[:4])
 # Preserve the baseline paths for historical Git blobs. The same semantic
 # sources have moved twice; choose one complete layout for each source tree,
 # never substitute another revision's content when a bound file is missing.
-_SOURCE_OWNER_MOVES = (
-    ("src/extensions/self_learning/", "src/self_learning/"),
-    ("src/lib/runtime/", "src/runtime/"),
-    ("src/lib/config/", "src/configuration/"),
-    ("src/lib/logging/", "src/runtime/logging/"),
-    ("src/lib/trusted_memory_evidence.py", "src/runtime/trusted_memory_evidence.py"),
-)
-
-
 def _source_paths_for_tree(paths: set[str]) -> tuple[str, ...]:
     if "agentloom/self_learning/event_schema.py" in paths:
         namespace = "agentloom"
+        execution_owner = "runtime"
     elif "src/self_learning/event_schema.py" in paths:
         namespace = "src"
+        execution_owner = (
+            "execution" if "src/execution/__init__.py" in paths else "runtime"
+        )
     else:
         return _SOURCE_FILES
+    owner_moves = (
+        ("src/extensions/self_learning/", "src/self_learning/"),
+        ("src/lib/runtime/", f"src/{execution_owner}/"),
+        ("src/lib/config/", "src/configuration/"),
+        ("src/lib/logging/", f"src/{execution_owner}/logging/"),
+        (
+            "src/lib/trusted_memory_evidence.py",
+            f"src/{execution_owner}/trusted_memory_evidence.py",
+        ),
+    )
     result: list[str] = []
     for relative in _SOURCE_FILES:
-        for old, new in _SOURCE_OWNER_MOVES:
+        for old, new in owner_moves:
             if relative.startswith(old):
                 relative = new + relative[len(old):]
                 break
@@ -191,7 +215,10 @@ def _source_manifest() -> list[dict[str, Any]]:
     rows: list[dict[str, Any]] = []
     layout_markers = {
         relative for relative in (
-            "agentloom/self_learning/event_schema.py", "src/self_learning/event_schema.py"
+            "agentloom/self_learning/event_schema.py",
+            "src/self_learning/event_schema.py",
+            "src/execution/__init__.py",
+            "src/runtime/__init__.py",
         ) if (REPO_ROOT / relative).is_file()
     }
     for relative in _source_paths_for_tree(layout_markers):
@@ -2493,7 +2520,7 @@ def audit_campaign(campaign_dir: Path) -> dict[str, Any]:
         )
         if bool(manifest.get("source_shape_exact")) != source_shape_exact:
             issues.append("source_shape_exact_mismatch")
-        if source_is_default and source_shape != _source_shape(DEFAULT_SOURCE_DB):
+        if source_is_default and source_shape != _source_shape(_default_source_db()):
             issues.append("source_shape_mismatch")
         expected_release_shape = (
             requested_events == DEFAULT_EVENTS
@@ -2794,7 +2821,10 @@ def run_campaign(
     full_plan = build_case_plan(events, seed)
     cases = _select_cases(full_plan, only_case)
     source_shape = _source_shape(source_db)
-    source_is_default = source_db is not None and Path(source_db).expanduser().resolve() == DEFAULT_SOURCE_DB.resolve()
+    source_is_default = (
+        source_db is not None
+        and Path(source_db).expanduser().resolve() == _default_source_db().resolve()
+    )
     source_shape_exact = (
         int(source_shape.get("runs") or -1) == EXPECTED_SOURCE_RUNS
         and int(source_shape.get("events") or -1) == EXPECTED_SOURCE_EVENTS
@@ -3108,9 +3138,9 @@ def _parser() -> argparse.ArgumentParser:
     parser.add_argument("--only-case")
     parser.add_argument("--dry-run", action="store_true")
     parser.add_argument("--audit", type=Path)
-    parser.add_argument("--source-db", type=Path, default=DEFAULT_SOURCE_DB)
+    parser.add_argument("--source-db", type=Path, default=_default_source_db())
     parser.add_argument("--baseline-metrics", type=Path)
-    parser.add_argument("--output-root", type=Path, default=DEFAULT_OUTPUT_ROOT)
+    parser.add_argument("--output-root", type=Path, default=_default_output_root())
     parser.add_argument("--campaign-id")
     parser.add_argument(
         "--internal-baseline-probe",

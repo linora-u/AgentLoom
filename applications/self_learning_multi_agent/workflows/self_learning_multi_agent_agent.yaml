@@ -3,7 +3,9 @@ agent_runtime: smolagents
 description: "Multi-subagent functional validation for AgentLoom self-learning."
 
 model_type: "powerful"
-max_steps: 18
+runtime_options:
+  max_steps: 18
+  smart_summary: false
 
 toolsets: []
 

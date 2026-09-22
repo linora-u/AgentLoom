@@ -1,5 +1,7 @@
 name: "report_integration"
 agent_runtime: smolagents
+runtime_options:
+  smart_summary: false
 description: "Integrates all analysis stage outputs into a comprehensive final review report with executive summary and risk dashboard."
 model_type: "powerful"
 toolsets:

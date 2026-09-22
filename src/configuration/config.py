@@ -9,7 +9,9 @@ Configuration precedence (low -> high):
 
 from __future__ import annotations
 
+import logging
 import os
+from collections.abc import Mapping
 from contextlib import contextmanager
 from contextvars import ContextVar
 from copy import deepcopy
@@ -18,7 +20,6 @@ from pathlib import Path
 from typing import Any
 
 import yaml
-from agentloom.runtime.logging import get_logger
 
 from .config_validation import (
     RootSettings,
@@ -29,6 +30,11 @@ from .config_validation import (
 from .defaults import DEFAULT_MODEL_REQUESTS_PER_MINUTE
 from .layered_builder import LayeredConfigBuilder
 from .llm_config import LLMConfig
+from .system_loader import (
+    filter_llm_only_top_level_keys as _filter_llm_only_top_level_keys,
+)
+from .system_loader import load_config_mapping as _load_yaml
+from .system_loader import load_project_system_config
 from .yaml_loader import load_unique_yaml
 
 SYSTEM_CONFIG_NAME = "system.yaml"
@@ -40,7 +46,7 @@ _PROJECT_NAME = "AgentLoom"
 _WORKFLOW_OVERLAY_KEYS = {
     "system",
     "model_request_headers",
-    "smart_summary",
+    "runtime_options",
     "context_engine",
     "tool_access_control",
     "tools",
@@ -49,17 +55,14 @@ _WORKFLOW_OVERLAY_KEYS = {
     "shell_settings",
     "default_toolsets",
     "toolsets",
-    "prompt",
     "mcp_servers",
     "self_learning",
     "hooks",
-    "todo",
     "skills",
 }
-_LLM_ONLY_TOP_LEVEL_KEYS = {"model", "llm", "langfuse"}
 _GLOBAL_ONLY_TOP_LEVEL_KEYS = {"runtime", "logging"}
 
-logger = get_logger(__name__)
+logger = logging.getLogger(__name__)
 
 
 def _validate_review_model_references(
@@ -105,16 +108,6 @@ class EffectiveAgentConfigSnapshot:
     layers: tuple[ConfigLayerSnapshot, ...]
 
 
-def _load_yaml(path: Path) -> dict[str, Any]:
-    if not path.exists():
-        return {}
-    with path.open("r", encoding="utf-8") as f:
-        loaded = load_unique_yaml(f) or {}
-    if not isinstance(loaded, dict):
-        raise ValueError(f"Configuration file must contain a mapping: {path}")
-    return loaded
-
-
 def _load_llm_config(path: Path) -> LLMConfig:
     """Load one capsule-only config pipe, otherwise use the normal disk file.
 
@@ -144,28 +137,6 @@ def _load_llm_config(path: Path) -> LLMConfig:
     if not isinstance(raw, dict):
         raise ValueError("in-memory campaign LLM configuration must be a mapping")
     return LLMConfig.from_dict(raw)
-
-
-def _filter_llm_only_top_level_keys(
-    config_map: dict[str, Any] | None,
-    *,
-    source_name: str,
-) -> dict[str, Any]:
-    if not config_map:
-        return {}
-
-    filtered: dict[str, Any] = {}
-    for key, value in config_map.items():
-        if key in _LLM_ONLY_TOP_LEVEL_KEYS:
-            logger.warning(
-                "Ignoring top-level key '%s' in %s; LLM settings must come from config/%s only.",
-                key,
-                source_name,
-                LLM_CONFIG_NAME,
-            )
-            continue
-        filtered[key] = value
-    return filtered
 
 
 def _reject_application_global_only_keys(
@@ -278,7 +249,12 @@ def _discover_agent_root(config_dir: Path | str | None = None) -> Path:
     )
 
 
-def _resolve_app_root_from_yaml(agent_root: Path, yaml_config_path: Path) -> Path:
+def _resolve_app_root_from_yaml(
+    agent_root: Path,
+    yaml_config_path: Path,
+    *,
+    source_path_is_pinned: bool = False,
+) -> Path:
     """Determine the application root from an Agent YAML file path.
 
     Walks **upward** from *yaml_config_path* looking for a directory whose
@@ -291,7 +267,15 @@ def _resolve_app_root_from_yaml(agent_root: Path, yaml_config_path: Path) -> Pat
         ValueError: If no ``workflows/`` directory can be found in the
             ancestor chain — every application **must** have one.
     """
-    current = yaml_config_path.resolve().parent
+    if source_path_is_pinned:
+        source_path = Path(os.path.normpath(yaml_config_path))
+        try:
+            source_path.relative_to(agent_root)
+        except ValueError as exc:
+            raise ValueError("Pinned Agent source path must stay inside the project") from exc
+    else:
+        source_path = yaml_config_path.resolve()
+    current = source_path.parent
     while current != current.parent:
         if current.name == "workflows":
             app_root = current.parent
@@ -330,6 +314,8 @@ class UnifiedConfig:
         )
         self._agent_root = agent_root
         self._llm_config = llm_config
+        self._loaded_raw: dict[str, Any] | None = None
+        self._loaded_llm: dict[str, Any] | None = None
 
     @property
     def raw(self) -> dict[str, Any]:
@@ -434,18 +420,8 @@ def load_project_config(project_root: Path | str) -> UnifiedConfig:
     """Read an explicit project without mutating the process-wide config."""
     agent_root = Path(project_root).expanduser().resolve()
     config_root = agent_root / "config"
-    layered_builder = LayeredConfigBuilder(
-        validate_hook=lambda snapshot, overlay: validate_system_snapshot(snapshot, overlay.name)
-    )
-    system_yaml = _filter_llm_only_top_level_keys(
-        _load_yaml(config_root / SYSTEM_CONFIG_NAME),
-        source_name="config/system.yaml",
-    )
+    merged = load_project_system_config(agent_root, require_exists=False)
     llm_config = _load_llm_config(config_root / LLM_CONFIG_NAME)
-
-    layered_builder.apply_mapping("config/system.yaml", system_yaml)
-
-    merged = layered_builder.build()
     config = UnifiedConfig(merged, agent_root=agent_root, llm_config=llm_config)
     # Programmatic configs and the credential-pipe campaign are explicit
     # overrides. Only unchanged disk-loaded bases may be refreshed for a Run.
@@ -581,6 +557,8 @@ def build_effective_agent_config_snapshot(
     *,
     source_name: str = "agent",
     base_config: UnifiedConfig | None = None,
+    source_path_is_pinned: bool = False,
+    application_config: Mapping[str, Any] | None = None,
 ) -> EffectiveAgentConfigSnapshot:
     """Build merged Agent values while retaining every unmerged source.
 
@@ -618,10 +596,17 @@ def build_effective_agent_config_snapshot(
     if isinstance(agent_config, dict):
         yaml_file_path = agent_config.get("_yaml_file_path")
         if yaml_file_path:
-            agent_source_path = Path(str(yaml_file_path)).expanduser().resolve()
+            raw_source_path = Path(str(yaml_file_path)).expanduser()
+            agent_source_path = (
+                Path(os.path.normpath(raw_source_path))
+                if source_path_is_pinned
+                else raw_source_path.resolve()
+            )
             try:
                 app_root = _resolve_app_root_from_yaml(
-                    base.agent_root, Path(yaml_file_path)
+                    base.agent_root,
+                    agent_source_path,
+                    source_path_is_pinned=source_path_is_pinned,
                 )
             except ValueError:
                 logger.warning(
@@ -630,11 +615,23 @@ def build_effective_agent_config_snapshot(
                     yaml_file_path,
                 )
             else:
-                agent_layer_root = app_root.resolve()
+                agent_layer_root = (
+                    app_root
+                    if source_path_is_pinned
+                    else app_root.resolve()
+                )
                 app_config_path = app_root / APP_CONFIG_RELATIVE_PATH
                 if app_root != base.agent_root:
+                    if source_path_is_pinned and application_config is None:
+                        raise ValueError(
+                            "Pinned Agent source requires a captured Application config"
+                        )
                     app_system_yaml = _filter_llm_only_top_level_keys(
-                        _load_yaml(app_config_path),
+                        (
+                            deepcopy(dict(application_config))
+                            if application_config is not None
+                            else _load_yaml(app_config_path)
+                        ),
                         source_name=str(app_config_path),
                     )
                     app_system_yaml = _reject_application_global_only_keys(
@@ -648,8 +645,12 @@ def build_effective_agent_config_snapshot(
                         ConfigLayerSnapshot(
                             name="application_system",
                             data=deepcopy(app_system_yaml),
-                            root=app_root.resolve(),
-                            source_path=app_config_path.resolve(),
+                            root=agent_layer_root,
+                            source_path=(
+                                app_config_path
+                                if source_path_is_pinned
+                                else app_config_path.resolve()
+                            ),
                         )
                     )
 
@@ -674,6 +675,10 @@ def build_effective_agent_config_snapshot(
                 )
             )
     merged = layered_builder.build()
+    if any("model_request_headers" in layer.data for layer in layers):
+        from .model_request_headers import merge_model_request_header_layers
+
+        merged["model_request_headers"] = merge_model_request_header_layers(layer.data for layer in layers)
     normalized = RootSettings.model_validate(merged).model_dump(exclude_unset=True)
     merged.update(normalized)
     normalize_tool_access_control_section(merged, base.agent_root)
@@ -688,6 +693,9 @@ def build_effective_agent_config_snapshot(
         # (self-learning memory layering, learning artifacts) reads the workflow
         # path from the effective config at hook time.
         merged["_yaml_file_path"] = str(agent_config["_yaml_file_path"])
+    for layer in layers:
+        if "default_toolsets" in layer.data:
+            merged["_default_toolsets_source"] = layer.name
     return EffectiveAgentConfigSnapshot(values=merged, layers=tuple(layers))
 
 

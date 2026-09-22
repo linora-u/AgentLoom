@@ -15,7 +15,6 @@ model_request_headers:
   profile: "opencode"  # agentloom | none | cline | kimicode | openclaw | opencode | roo
   headers: {}
 
-smart_summary: false
 
 # Reversible context compression. Large tool/worker outputs are stored locally
 # and shown to the model as compact previews with ContextRef handles that can be
@@ -63,10 +62,6 @@ lsp_servers:
 #   tool_timeout: 60          # per-tool call timeout (seconds)
 #   tool_name_prefix: true    # add mcp__{server}__ prefix to tool names
 
-# Current-task Todo capability: auto (model decides), on (strongly required
-# for non-trivial multi-step work), or off (tool and state are hidden).
-todo:
-  mode: "auto"
 
 runtime:
   root_dir: ".agentloom"

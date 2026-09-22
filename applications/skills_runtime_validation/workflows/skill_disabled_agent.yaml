@@ -4,9 +4,10 @@ description: "Validate that removing the Skill tool still permits an ordinary re
 
 model_type: "powerful"
 toolsets: []
-todo:
-  mode: "off"
-max_steps: 3
+runtime_options:
+  todo_mode: "off"
+  max_steps: 3
+  smart_summary: false
 
 workflow: |
   Return exactly `SKILL_TOOL_DISABLED_OK`. Do not add punctuation or explanation.

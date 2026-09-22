@@ -12,7 +12,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from agentloom.adapters.mcp.config import McpSettings, McpServerConfig
+from agentloom.integrations.mcp.config import McpSettings, McpServerConfig
 
 
 # ---------------------------------------------------------------------------
@@ -43,7 +43,7 @@ class TestReturnType:
 
     def test_returns_tuple_without_mcp(self):
         """When no mcp_servers configured, returns (tools, None)."""
-        from agentloom.runtime.factory import YamlAgentFactory
+        from agentloom.application.factory import YamlAgentFactory
 
         result = YamlAgentFactory.get_tools_from_config(
             {"tools": []},
@@ -57,7 +57,7 @@ class TestReturnType:
 
     def test_returns_tuple_no_tools_key(self):
         """Config without 'tools' key still returns tuple."""
-        from agentloom.runtime.factory import YamlAgentFactory
+        from agentloom.application.factory import YamlAgentFactory
 
         result = YamlAgentFactory.get_tools_from_config(
             {},
@@ -75,14 +75,14 @@ class TestReturnType:
 
 class TestMcpToolsLoading:
 
-    @patch("agentloom.adapters.mcp.manager.McpManager")
-    @patch("agentloom.adapters.mcp.config.parse_mcp_yaml_value")
-    @patch("agentloom.adapters.mcp.config.merge_mcp_configs")
+    @patch("agentloom.integrations.mcp.manager.McpManager")
+    @patch("agentloom.integrations.mcp.config.parse_mcp_yaml_value")
+    @patch("agentloom.integrations.mcp.config.merge_mcp_configs")
     def test_mcp_tools_appended(
         self, mock_merge, mock_parse, MockManager, tmp_path
     ):
         """When mcp_servers is configured and servers connect, tools are appended."""
-        from agentloom.runtime.factory import YamlAgentFactory
+        from agentloom.application.factory import YamlAgentFactory
 
         # Set up mocks
         fake_mcp_tool = _fake_tool("mcp__srv__search")
@@ -117,7 +117,7 @@ class TestMcpToolsLoading:
 class TestNoMcpServers:
 
     def test_no_mcp_servers_loads_default_toolsets(self):
-        from agentloom.runtime.factory import YamlAgentFactory
+        from agentloom.application.factory import YamlAgentFactory
 
         config = {}  # no tools, no mcp_servers
         tools, mcp_mgr = YamlAgentFactory.get_tools_from_config(

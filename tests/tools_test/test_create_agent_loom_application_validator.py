@@ -214,7 +214,7 @@ def test_validator_accepts_todo_modes(tmp_path: Path, mode: str) -> None:
     app_root = _create_min_project(tmp_path)
     workflow_file = app_root / "workflows" / "demo_agent.yaml"
     config = yaml.safe_load(workflow_file.read_text(encoding="utf-8"))
-    config["todo"] = {"mode": mode}
+    config["runtime_options"] = {"todo_mode": mode}
     _write_yaml(workflow_file, config)
 
     completed, payload = _run_validator(tmp_path)
@@ -223,7 +223,7 @@ def test_validator_accepts_todo_modes(tmp_path: Path, mode: str) -> None:
     assert payload["summary"]["valid"] is True
 
 
-def test_validator_accepts_empty_todo_mapping_as_default_auto(tmp_path: Path) -> None:
+def test_validator_ignores_empty_legacy_todo_mapping(tmp_path: Path) -> None:
     app_root = _create_min_project(tmp_path)
     workflow_file = app_root / "workflows" / "demo_agent.yaml"
     config = yaml.safe_load(workflow_file.read_text(encoding="utf-8"))
@@ -236,12 +236,12 @@ def test_validator_accepts_empty_todo_mapping_as_default_auto(tmp_path: Path) ->
     assert payload["summary"]["valid"] is True
 
 
-@pytest.mark.parametrize("todo", ["on", {"mode": "always"}, {"mode": "on", "extra": True}])
+@pytest.mark.parametrize("todo", ["always", False, {"mode": "on"}])
 def test_validator_rejects_invalid_todo_config(tmp_path: Path, todo) -> None:
     app_root = _create_min_project(tmp_path)
     workflow_file = app_root / "workflows" / "demo_agent.yaml"
     config = yaml.safe_load(workflow_file.read_text(encoding="utf-8"))
-    config["todo"] = todo
+    config["runtime_options"] = {"todo_mode": todo}
     _write_yaml(workflow_file, config)
 
     completed, payload = _run_validator(tmp_path)
@@ -629,7 +629,7 @@ except SystemExit as exc:
     assert exc.code == 0, exc.code
 scanner = runpy.run_path(str(script.with_name('scan_tools.py')))
 assert 'should_not_import.py' in scanner['scan_app_structure'](str(app))
-for prefix in ('litellm', 'agentloom.runtime.agent', 'agentloom.tools.file_ops', 'agentloom.tools.shell', 'agentloom.tools.search'):
+for prefix in ('litellm', 'agentloom.application.agent', 'agentloom.runtimes.smolagents.tools.file_ops', 'agentloom.runtimes.smolagents.tools.shell', 'agentloom.runtimes.smolagents.tools.search'):
     assert not any(name == prefix or name.startswith(prefix + '.') for name in sys.modules), prefix
 assert not Path('.agentloom').exists()
 assert not Path('must-not-exist').exists()

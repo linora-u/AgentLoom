@@ -40,8 +40,9 @@ print(scan_app_structure('applications/<app_name>'))
 - Worker 数量是否符合设计。
 - 每个 Worker 是否有 `agent_function_schema`。
 - `tools` 是否与 workflow 动作匹配。
-- `agent_runtime`、`model_type`、`max_steps` 是否合理。
-- Agent YAML 是否误写 LLM 参数、无效 `planning_interval`/`todo.mode`/`concurrency`、错误 `prompt`、错误 `fixed_args`、错误 `mcp_servers`。
+- `agent_runtime`、`model_type`、所选基座的 `runtime_options` 是否合理。
+- Agent YAML 是否误写 LLM 参数、无效 `runtime_options.planning_interval` / `runtime_options.todo_mode` / `concurrency`、非字符串 `runtime_options.prompt_template_path`、错误 `fixed_args` 或 `mcp_servers`。
+- 生成器不得输出旧顶层 smol 参数：运行时会静默忽略，不会替作者转换或拒绝。`todo_mode` 的 `"on"` / `"off"` 必须加引号。
 - Goal mapping 是否显式配置 `enabled`、Worker 是否错误配置 Goal；Goal workflow list 是否按一个编号上下文运行。
 
 ```bash
@@ -123,12 +124,12 @@ export AGENTLOOM_RUNTIME_ROOT=/tmp/agentloom-runtime-checkpoint
 - 新 checkpoint 有 `task_events.jsonl`；`task_tree.json` 只是投影且能被 `loom list-tasks --detail` 展示。
 - 多 Worker 或重复 Worker 调用场景下，`workers/<worker>/calls/<call_index>/checkpoint.json` 存在，`call_index` 不互相覆盖。
 - resume 场景要实际执行 `loom run <workflow.yaml> --resume <task_id>`；若为了制造中断而提前停止，记录中断方式和恢复结果。
-- Goal 改动必须真实验证：普通 final 与 `max_steps` 后 continuation、根工具完成、Worker 工具隔离、旧预算字段静默忽略、旧预算耗尽 checkpoint resume、目标指纹拒绝、manifest/JSONL/TUI canonical Goal 对象。至少一条应是 30 分钟级复杂多 Worker Application，不能用简单问答替代。
+- Goal 改动必须真实验证：普通 final 与 `max_steps` 后 continuation、根工具完成、Worker 工具隔离、旧预算字段静默忽略、旧预算耗尽 checkpoint resume、目标指纹拒绝、manifest/JSONL/Studio canonical Goal 对象。至少一条应是 30 分钟级复杂多 Worker Application，不能用简单问答替代。
 - Resume 后必须证明 `task_id` 不变、`run_id` 改变，新旧 attempt 分属两个 run 目录，但都关联同一个 task checkpoint；heartbeat 和 run event 使用新 `run_id`。
 - 涉及 subagent/Worker checkpoint 时，要分别验证 Supervisor 中断恢复和 Worker 半路中断恢复；Worker 恢复必须证明没有新开重复 `call_index`，且能从 per-call memory checkpoint 继续。
 - file-history 场景要检查 `file-history/snapshots.json` 和备份文件，确认早期备份没有被后续 snapshot 覆盖。
-- Checkpoint 清理场景要实际跑 `loom clean-tasks --all`；run retention 要跑 `loom clean-runtime`，证明不会删除 checkpoint、`.agentloom/workspaces/`、`.agentloom/legacy/` 或 Application outputs。
-- 迁移要先跑 `loom migrate-runtime --dry-run`，再在隔离副本跑 `--apply`，证明忽略坏 `.task_index.json`、幂等/失败回滚、checksum 校验、有效 task resume、旧 ContextRef retrieve 与 file-history 恢复；最后确认旧 `.logs` 整体进入 `.agentloom/legacy/logs-v1-<timestamp>/`，新运行不再写 `.logs`。
+- Checkpoint 清理场景要实际跑 `loom clean-tasks --all`；run retention 要跑 `loom clean-runtime`，证明不会删除 checkpoint、`.agentloom/workspaces/`、self-learning 状态或 Application outputs。
+- 存储根或运行路径改动完成后，运行 `uv run python tests/acceptance/clean_checkout_storage_validation.py --revision HEAD`；它在干净临时 worktree 跑受支持全量套件，并拒绝重新生成顶层 `.runtime` 或 `.logs`。
 
 ContextEngine/CCR 额外必须验证：
 
@@ -201,9 +202,9 @@ Supervisor 中断必须等到初始化副作用 ledger 与预期文件均落盘�
 
 ```bash
 rg -n "_WORKFLOW_OVERLAY_KEYS|_LLM_ONLY_TOP_LEVEL_KEYS|extract_workflow_overlay" src/configuration/config.py
-rg -n "class RootSettings|class ToolAccessControlSettings|class LlmModelTypeSettings|extra_completion_params|supports_structured_output|supports_native_tool_calls|tool_choice" src/configuration src/adapters/smolagents/models docs/en docs/cn agentloom-framework-skill
-rg -n "agent_runtime|ModelTurnAdapter|schema-bound|openai_responses|anthropic_messages" src/adapters/smolagents src/configuration tests docs/en docs/cn agentloom-framework-skill
-rg -n "skills.paths|Duplicate skill name|hooks:" src/runtime/skills src/runtime/hooks src/application/definition.py docs/en agentloom-framework-skill
+rg -n "class RootSettings|class ToolAccessControlSettings|class LlmModelTypeSettings|extra_completion_params|supports_structured_output|supports_native_tool_calls|tool_choice" src/configuration src/runtimes/smolagents/models docs/en docs/cn agentloom-framework-skill
+rg -n "agent_runtime|ModelTurnAdapter|schema-bound|openai_responses|anthropic_messages" src/runtimes/smolagents src/configuration tests docs/en docs/cn agentloom-framework-skill
+rg -n "skills.paths|Duplicate skill name|hooks:" src/execution/skills src/execution/hooks src/application/definition.py docs/en agentloom-framework-skill
 rg -n "mcp_servers|parse_mcp_servers_yaml_value" src tests docs/en agentloom-framework-skill
 ```
 

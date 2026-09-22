@@ -8,7 +8,7 @@ same config sources as enforcement.
 import pytest
 from unittest.mock import patch, MagicMock
 
-from agentloom.runtime.permissions.policy_summary import (
+from agentloom.execution.permissions.policy_summary import (
     SECURITY_CHECK_DESCRIPTIONS,
     DENIAL_BEHAVIOR_TEXT,
     SECURITY_BEHAVIOR_TEXT,
@@ -27,8 +27,8 @@ from agentloom.runtime.permissions.policy_summary import (
 class TestBuildShellSecuritySection:
     """Tests for the shell_tool description security section builder."""
 
-    @patch("agentloom.runtime.permissions.policy_summary.get_allowed_directories")
-    @patch("agentloom.runtime.permissions.policy_summary._load_enabled_checks")
+    @patch("agentloom.execution.permissions.policy_summary.get_allowed_directories")
+    @patch("agentloom.execution.permissions.policy_summary._load_enabled_checks")
     def test_default_config_returns_non_empty(self, mock_checks, mock_dirs):
         """With default config (all checks enabled, some dirs), output is non-empty."""
         mock_dirs.return_value = ["/workspace/project"]
@@ -37,8 +37,8 @@ class TestBuildShellSecuritySection:
         assert result
         assert "Security sandbox" in result
 
-    @patch("agentloom.runtime.permissions.policy_summary.get_allowed_directories")
-    @patch("agentloom.runtime.permissions.policy_summary._load_enabled_checks")
+    @patch("agentloom.execution.permissions.policy_summary.get_allowed_directories")
+    @patch("agentloom.execution.permissions.policy_summary._load_enabled_checks")
     def test_all_checks_enabled_all_descriptions_present(self, mock_checks, mock_dirs):
         """When all checks are enabled, all descriptions appear in output."""
         mock_dirs.return_value = ["/workspace"]
@@ -47,8 +47,8 @@ class TestBuildShellSecuritySection:
         for check_id, desc in SECURITY_CHECK_DESCRIPTIONS.items():
             assert desc in result, f"Missing description for '{check_id}'"
 
-    @patch("agentloom.runtime.permissions.policy_summary.get_allowed_directories")
-    @patch("agentloom.runtime.permissions.policy_summary._load_enabled_checks")
+    @patch("agentloom.execution.permissions.policy_summary.get_allowed_directories")
+    @patch("agentloom.execution.permissions.policy_summary._load_enabled_checks")
     def test_all_checks_disabled_no_restrictions_section(self, mock_checks, mock_dirs):
         """When all checks are disabled, no active restrictions section."""
         mock_dirs.return_value = []
@@ -57,8 +57,8 @@ class TestBuildShellSecuritySection:
         result = build_shell_security_section()
         assert result == ""
 
-    @patch("agentloom.runtime.permissions.policy_summary.get_allowed_directories")
-    @patch("agentloom.runtime.permissions.policy_summary._load_enabled_checks")
+    @patch("agentloom.execution.permissions.policy_summary.get_allowed_directories")
+    @patch("agentloom.execution.permissions.policy_summary._load_enabled_checks")
     def test_custom_allowed_directories_all_listed(self, mock_checks, mock_dirs):
         """All custom allowed directories appear in the output."""
         dirs = ["/workspace/project", "/data/shared", "/tmp/sandbox"]
@@ -68,8 +68,8 @@ class TestBuildShellSecuritySection:
         for d in dirs:
             assert d in result, f"Directory '{d}' not listed in output"
 
-    @patch("agentloom.runtime.permissions.policy_summary.get_allowed_directories")
-    @patch("agentloom.runtime.permissions.policy_summary._load_enabled_checks")
+    @patch("agentloom.execution.permissions.policy_summary.get_allowed_directories")
+    @patch("agentloom.execution.permissions.policy_summary._load_enabled_checks")
     def test_workspace_root_only(self, mock_checks, mock_dirs):
         """Single workspace root directory is listed."""
         mock_dirs.return_value = ["/home/user/project"]
@@ -78,8 +78,8 @@ class TestBuildShellSecuritySection:
         assert "/home/user/project" in result
         assert "Allowed directories" in result
 
-    @patch("agentloom.runtime.permissions.policy_summary.get_allowed_directories")
-    @patch("agentloom.runtime.permissions.policy_summary._load_enabled_checks")
+    @patch("agentloom.execution.permissions.policy_summary.get_allowed_directories")
+    @patch("agentloom.execution.permissions.policy_summary._load_enabled_checks")
     def test_denial_behavior_included_when_restrictions_exist(self, mock_checks, mock_dirs):
         """Denial behavior text is included when there are any restrictions."""
         mock_dirs.return_value = ["/workspace"]
@@ -87,8 +87,8 @@ class TestBuildShellSecuritySection:
         result = build_shell_security_section()
         assert "Do NOT retry the same command" in result
 
-    @patch("agentloom.runtime.permissions.policy_summary.get_allowed_directories")
-    @patch("agentloom.runtime.permissions.policy_summary._load_enabled_checks")
+    @patch("agentloom.execution.permissions.policy_summary.get_allowed_directories")
+    @patch("agentloom.execution.permissions.policy_summary._load_enabled_checks")
     def test_single_source_of_truth_directories(self, mock_checks, mock_dirs):
         """Output directories match exactly what get_allowed_directories returns."""
         expected_dirs = ["/a/b/c", "/d/e/f"]
@@ -100,8 +100,8 @@ class TestBuildShellSecuritySection:
         # Verify no extra phantom directories
         assert "/phantom" not in result
 
-    @patch("agentloom.runtime.permissions.policy_summary.get_allowed_directories")
-    @patch("agentloom.runtime.permissions.policy_summary._load_enabled_checks")
+    @patch("agentloom.execution.permissions.policy_summary.get_allowed_directories")
+    @patch("agentloom.execution.permissions.policy_summary._load_enabled_checks")
     def test_partial_checks_only_enabled_shown(self, mock_checks, mock_dirs):
         """Only enabled checks appear in output."""
         mock_dirs.return_value = ["/workspace"]
@@ -123,8 +123,8 @@ class TestBuildShellSecuritySection:
         assert SECURITY_CHECK_DESCRIPTIONS["env_injection"] not in result
         assert SECURITY_CHECK_DESCRIPTIONS["dangerous_shell_prefix"] not in result
 
-    @patch("agentloom.runtime.permissions.policy_summary.get_allowed_directories")
-    @patch("agentloom.runtime.permissions.policy_summary._load_enabled_checks")
+    @patch("agentloom.execution.permissions.policy_summary.get_allowed_directories")
+    @patch("agentloom.execution.permissions.policy_summary._load_enabled_checks")
     def test_get_allowed_directories_exception_handled(self, mock_checks, mock_dirs):
         """If get_allowed_directories raises, function handles gracefully."""
         mock_dirs.side_effect = RuntimeError("config unavailable")
@@ -168,21 +168,21 @@ class TestBuildSecurityBehaviorSection:
 
 class TestGetActiveCheckIds:
 
-    @patch("agentloom.runtime.permissions.policy_summary._load_enabled_checks")
+    @patch("agentloom.execution.permissions.policy_summary._load_enabled_checks")
     def test_all_default_enabled(self, mock_load):
         """With empty overrides, all checks default to enabled."""
         mock_load.return_value = {}
         active = _get_active_check_ids()
         assert set(active) == set(SECURITY_CHECK_DESCRIPTIONS.keys())
 
-    @patch("agentloom.runtime.permissions.policy_summary._load_enabled_checks")
+    @patch("agentloom.execution.permissions.policy_summary._load_enabled_checks")
     def test_all_explicitly_disabled(self, mock_load):
         """With all checks explicitly disabled, returns empty list."""
         mock_load.return_value = {k: False for k in SECURITY_CHECK_DESCRIPTIONS}
         active = _get_active_check_ids()
         assert active == []
 
-    @patch("agentloom.runtime.permissions.policy_summary._load_enabled_checks")
+    @patch("agentloom.execution.permissions.policy_summary._load_enabled_checks")
     def test_partial_disable(self, mock_load):
         """Partially disabling checks returns only enabled ones."""
         mock_load.return_value = {

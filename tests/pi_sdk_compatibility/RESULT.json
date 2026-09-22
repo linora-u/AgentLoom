@@ -1,0 +1,61 @@
+{
+  "status": "PASS",
+  "recordedAt": "2026-09-20T08:33:19.769Z",
+  "node": "v25.9.0",
+  "executable": "/opt/homebrew/Cellar/node/25.9.0_2/bin/node",
+  "platform": "darwin",
+  "architecture": "arm64",
+  "python": "Python 3.9.6",
+  "gitHeadAtRun": "45ddbfdc26744129ed84e9ed9ddfd74f0e088018",
+  "sdk": {
+    "version": "0.79.4",
+    "importPath": "node_modules/@earendil-works/pi-coding-agent/dist/index.js",
+    "tarball": "https://registry.npmjs.org/@earendil-works/pi-coding-agent/-/pi-coding-agent-0.79.4.tgz",
+    "integrity": "sha512-PthzVzM5m4XH/hrU+2fVjuwuH5M4eMFWbd0NCRScH14XKpwlPc8/Fh6JDz0jQb5kTBT9oQT183YLTHVVulFL9A==",
+    "nodeRequirement": ">=22.19.0",
+    "lockedDependencyCount": 143
+  },
+  "source": {
+    "sha256": "b1fb67a087a6cccdda4c40304a6077ef34f95a6b35a97063e36bb58d9273a04e",
+    "files": {
+      "crash-child.mjs": "5584b28f6567bf20bd7cb769adee1b9d2ab3b17131e0955c62102eed9567ba86",
+      "harness.mjs": "9893ce2ab07cb54876002c1800d193ce941982ffc55256bcc9ea097673aec4ca",
+      "host.py": "701b90f5ffa95d5da1881da7d3c57230e94f7bbf6518cd4c934d29343c4f48d4",
+      "npm-distribution.json": "5a463903f66ecdcf01dfde983dfbb51e39ba2b77df95665c2203ff91ed2bd271",
+      "npm-pi-transitives.json": "f73a93ef615796ed83ae40585a7a34a2f47427fbc4345c349c445e61328821b4",
+      "package-lock.json": "48707a2dfdfb9ac0bf2844a1fe90392d816159256773f3b97ffc5f040df51c2c",
+      "package.json": "a1df2b6cfbbc4f5b508ed5ecf751e7cbfe55ad37f00f4241b2283384fd723ded",
+      "provider.mjs": "7070c1bc4714fa163a723735e3b6e03415b6f2bf40e685af1693217dedb1648c",
+      "recovery.mjs": "15ab0895ce491347d39c22af9b17d4f0c5134f96007a37fd3b4f54565a93c458",
+      "test/compaction.test.mjs": "a03ad4a9078932863eba8c80a1357815b00ca244c7c88e47b0a76e219f5f3bc3",
+      "test/hooks.test.mjs": "2cecd568d6ca225f046c42f2681c8e3313285cfd4ea80f13b5cfa41a565cd9a5",
+      "test/recovery.test.mjs": "ce257e7a85b06a05a08a258adea74ef83feee7a08201f61a9c9662a1593ceec7",
+      "tsconfig.json": "b4431b04337d8009fe2076f08953dc51976d71b74140cff82111ee19624d6f26",
+      "verify.mjs": "c9014f3592feabbcca28533f0117e87a29213a7b80df49d5f845175af8a04ad9"
+    }
+  },
+  "checks": [
+    {
+      "name": "typecheck",
+      "command": "node node_modules/typescript/bin/tsc --noEmit",
+      "status": "PASS",
+      "exitCode": 0,
+      "signal": null,
+      "stdout": "",
+      "stderr": ""
+    },
+    {
+      "name": "sdk-tests",
+      "command": "node --test --test-concurrency=1 --test-reporter=tap test/compaction.test.mjs test/hooks.test.mjs test/recovery.test.mjs",
+      "status": "PASS",
+      "exitCode": 0,
+      "signal": null,
+      "stdout": "TAP version 13\n# Subtest: AgentSession automatically compacts through the native provider and reuses its summary\nok 1 - AgentSession automatically compacts through the native provider and reuses its summary\n  ---\n  duration_ms: 79.663417\n  type: 'test'\n  ...\n# Subtest: strict official write schema permits invalid raw input only after async Python repair\nok 2 - strict official write schema permits invalid raw input only after async Python repair\n  ---\n  duration_ms: 226.848167\n  type: 'test'\n  ...\n# Subtest: public request hook can opt the write schema into provider strict generation without relaxing types\nok 3 - public request hook can opt the write schema into provider strict generation without relaxing types\n  ---\n  duration_ms: 145.639166\n  type: 'test'\n  ...\n# Subtest: without repair the same invalid raw arguments fail final strict validation\nok 4 - without repair the same invalid raw arguments fail final strict validation\n  ---\n  duration_ms: 88.104458\n  type: 'test'\n  ...\n# Subtest: Python Hook deny prevents a valid write and never retries the Hook\nok 5 - Python Hook deny prevents a valid write and never retries the Hook\n  ---\n  duration_ms: 86.760916\n  type: 'test'\n  ...\n# Subtest: Python Hook fail prevents a valid write and never retries the Hook\nok 6 - Python Hook fail prevents a valid write and never retries the Hook\n  ---\n  duration_ms: 86.933167\n  type: 'test'\n  ...\n# Subtest: missing message transformation cannot bypass the separate execution gate\nok 7 - missing message transformation cannot bypass the separate execution gate\n  ---\n  duration_ms: 23.564\n  type: 'test'\n  ...\n# Subtest: arguments changed after Python authorization are rejected by the execution gate\nok 8 - arguments changed after Python authorization are rejected by the execution gate\n  ---\n  duration_ms: 98.55\n  type: 'test'\n  ...\n# Subtest: strict final schema rejects an unexpected property without executing\nok 9 - strict final schema rejects an unexpected property without executing\n  ---\n  duration_ms: 87.093\n  type: 'test'\n  ...\n# Subtest: multi-tool batch preserves identity and sequential Hook order before execution\nok 10 - multi-tool batch preserves identity and sequential Hook order before execution\n  ---\n  duration_ms: 331.345208\n  type: 'test'\n  ...\n# Subtest: a repeated call identity cannot authorize another operation\nok 11 - a repeated call identity cannot authorize another operation\n  ---\n  duration_ms: 120.33975\n  type: 'test'\n  ...\n# Subtest: real SIGKILL after host commit recovers native result without rerunning official bash\nok 12 - real SIGKILL after host commit recovers native result without rerunning official bash\n  ---\n  duration_ms: 804.836209\n  type: 'test'\n  ...\n# Subtest: uncertain or mismatched host records refuse recovery without changing native state\nok 13 - uncertain or mismatched host records refuse recovery without changing native state\n  ---\n  duration_ms: 702.904291\n  type: 'test'\n  ...\n1..13\n# tests 13\n# suites 0\n# pass 13\n# fail 0\n# cancelled 0\n# skipped 0\n# todo 0\n# duration_ms 4598.588291\n",
+      "stderr": ""
+    }
+  ],
+  "liveProvider": {
+    "status": "NOT-RUN",
+    "reason": "Ticket 01 uses deterministic loopback responses through the real native provider; no live credentials are required."
+  }
+}

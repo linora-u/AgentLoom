@@ -25,7 +25,7 @@ def test_review_orchestration_has_no_smolagents_or_legacy_model_imports() -> Non
         imported
         for imported in imports
         if imported == "smolagents"
-        or imported.startswith("agentloom.adapters.smolagents")
+        or imported.startswith("agentloom.runtimes.smolagents")
     )
     assert forbidden == []
     assert "model_manager" not in source

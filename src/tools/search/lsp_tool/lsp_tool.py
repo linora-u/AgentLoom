@@ -5,7 +5,7 @@ Architecture::
 
     system.yaml lsp_servers config
          │
-    runner.py → LSPServerManager.initialize() (pre-warm at startup)
+    selected tool invocation → instance-owned LSPServerManager.initialize()
          │
     lsp_find_definition() etc.
          │
@@ -29,7 +29,7 @@ from collections import OrderedDict
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple
 
-from agentloom.runtime.logging import get_logger
+from agentloom.execution.logging import get_logger
 
 from . import treesitter_fallback as ts_fb
 
@@ -76,8 +76,9 @@ def _find_project_root(file_path: str) -> str:
 def _get_lsp_instance(file_path: str):
     """Get the LSPServerInstance for a file, or None if unavailable."""
     try:
-        from agentloom.adapters.lsp import LSPServerManager
-        manager = LSPServerManager.get_instance()
+        from .resources import get_lsp_manager
+
+        manager = get_lsp_manager()
         if not manager.is_initialized:
             return None
         return manager.get_server_for_file(file_path)
@@ -159,7 +160,7 @@ def lsp_find_references(
     falls back to ripgrep word-boundary search.
 
     Examples:
-        lsp_find_references("src/utils.py", line=10, character=5)
+        lsp_find_references("src/application/imports.py", line=10, character=5)
 
     Args:
         file_path: Path to the file containing the symbol.
@@ -324,8 +325,9 @@ def lsp_get_workspace_symbols(
     instance = None
     if language:
         try:
-            from agentloom.adapters.lsp import LSPServerManager
-            manager = LSPServerManager.get_instance()
+            from .resources import get_lsp_manager
+
+            manager = get_lsp_manager()
             instance = manager.get_server_for_language(language)
         except Exception:
             pass

@@ -6,12 +6,17 @@ PROJECT_ROOT = Path(__file__).resolve().parents[2]
 
 
 def test_legacy_todo_runtime_and_prompt_contracts_are_absent() -> None:
-    runtime_files = [
-        PROJECT_ROOT / "src/adapters/smolagents/loom_mixin.py",
-        PROJECT_ROOT / "src/runtime/agent.py",
-        PROJECT_ROOT / "src/tools/todo/todo_write.py",
+    removed_paths = [
+        PROJECT_ROOT / "src/execution/todo",
+        PROJECT_ROOT / "src/tools/todo",
     ]
-    prompt_files = list((PROJECT_ROOT / "src/runtime/prompts").glob("**/*.example.yaml"))
+    assert not any(path.exists() for path in removed_paths)
+    runtime_files = [
+        PROJECT_ROOT / "src/runtimes/smolagents/loom_mixin.py",
+        PROJECT_ROOT / "src/application/agent.py",
+        PROJECT_ROOT / "src/runtimes/smolagents/tools/todo/todo_write.py",
+    ]
+    prompt_files = list((PROJECT_ROOT / "src/runtimes/smolagents/prompts").glob("**/*.example.yaml"))
     source = "\n".join(path.read_text(encoding="utf-8") for path in runtime_files)
     prompts = "\n".join(path.read_text(encoding="utf-8") for path in prompt_files)
 

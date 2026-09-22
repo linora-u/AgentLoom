@@ -2,7 +2,9 @@ name: "memory_scope_app_b_recall"
 agent_runtime: smolagents
 description: "Recall scoped memory from validation Application B."
 model_type: "summary"
-max_steps: 5
+runtime_options:
+  max_steps: 5
+  smart_summary: false
 
 workflow: |
   Read only the curated persistent-memory snapshot supplied at run start. Do

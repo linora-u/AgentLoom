@@ -20,8 +20,8 @@ import json
 from pathlib import Path
 import runpy
 import sys
-from agentloom.runtime.model_binding import ModelTurnBinding
-from agentloom.runtime.model_protocol import (
+from agentloom.execution.model_binding import ModelTurnBinding
+from agentloom.execution.model_protocol import (
     FunctionCallItem,
     FunctionCallOutputItem,
     ModelTurnResult,
@@ -80,7 +80,7 @@ class Loader(importlib.abc.Loader):
         )
 class Finder(importlib.abc.MetaPathFinder):
     def find_spec(self, fullname, path=None, target=None):
-        if fullname == 'agentloom.adapters.litellm.model_binding':
+        if fullname == 'agentloom.integrations.litellm.model_binding':
             spec = importlib.machinery.PathFinder.find_spec(fullname, path)
             spec.loader = Loader(spec.loader)
             return spec
@@ -116,8 +116,6 @@ def probe(workspace: Path) -> dict:
         lsp_servers:
           enabled: false
         default_toolsets: []
-        todo:
-          mode: off
     """))
     (config / "llm.yaml").write_text(
         "model:\n"
@@ -154,7 +152,9 @@ def probe(workspace: Path) -> dict:
         agent_runtime: smolagents
         description: Exercise installed Application execution.
         model_type: probe
-        max_steps: 3
+        runtime_options:
+          max_steps: 3
+          todo_mode: "off"
         toolsets: []
         tools:
           - name: write_probe
@@ -180,15 +180,23 @@ def probe(workspace: Path) -> dict:
         from importlib.resources import files
         from agentloom.configuration import C
         from agentloom.tools.loader import resolve_tool_function
-        from agentloom.utils.dynamic_import import load_function
+        from agentloom.application.imports.dynamic_import import load_function
         assert importlib.util.find_spec('src') is None
         assert importlib.util.find_spec('agentloom._compat') is None
         assert not any(type(f).__name__ == '_LegacyFinder' for f in sys.meta_path)
-        assert load_function('agentloom.tools.file_ops.read_file.read_file', 'read_file') is resolve_tool_function('read_file')
+        assert load_function('agentloom.runtimes.smolagents.tools.file_ops.read_file.read_file', 'read_file') is resolve_tool_function('read_file')
         root = files('agentloom')
-        assert root.joinpath('runtime/prompts/toolcalling_agent.example.yaml').read_text()
-        queries = list(root.joinpath('tools/queries').rglob('*.scm'))
-        assert len(queries) == 112, len(queries)
+        assert root.joinpath('runtimes/smolagents/prompts/toolcalling_agent.example.yaml').read_text()
+        query_root = root.joinpath('tools/queries')
+        queries = list(query_root.rglob('*.scm'))
+        assert len(queries) == 56, len(queries)
+        assert not query_root.joinpath('queries').exists()
+        from agentloom.tools.file_ops.file_outliner import _get_scm_path as outline_query
+        from agentloom.tools.search.lsp_tool.treesitter_fallback import _get_scm_path as lsp_query
+        for language in ('python', 'typescript'):
+            outline_path = outline_query(language)
+            assert outline_path == lsp_query(language)
+            assert outline_path is not None and outline_path.read_text()
         print(json.dumps({'package_origin': agentloom.__file__, 'project_root': str(C.agent_root), 'queries': len(queries)}))
     ''')]))
     assert identity["project_root"] == str(project)
@@ -216,7 +224,7 @@ def probe(workspace: Path) -> dict:
     (shadow / "__init__.py").write_text(f"from pathlib import Path\nPath({str(shadow_marker)!r}).touch()\nraise RuntimeError('shadow')\n")
     shadow_env = env.copy()
     shadow_env["PYTHONPATH"] = str(project)
-    response = run([sys.executable, "-I", "-u", "-m", "agentloom.tui_bridge"], cwd=project, child_env=shadow_env,
+    response = run([sys.executable, "-I", "-u", "-m", "agentloom_studio_adapter"], cwd=project, child_env=shadow_env,
                    input=json.dumps({"id": "probe", "method": "bootstrap", "params": {}}) + "\n")
     rows = [json.loads(line) for line in response.splitlines()]
     assert rows and rows[0]["ok"] is True, rows

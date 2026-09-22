@@ -8,9 +8,9 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from agentloom.runtime import RuntimeHome, bind_run_context
-from agentloom.tools.shell.background_task import BackgroundTaskRegistry
-from agentloom.tools.shell.background_task_tools import (
+from agentloom.execution import RuntimeHome, bind_run_context
+from agentloom.runtimes.smolagents.tools.shell.background_task import BackgroundTaskRegistry
+from agentloom.runtimes.smolagents.tools.shell.background_task_tools import (
     check_background_task,
     kill_background_task,
     list_background_tasks,
@@ -107,7 +107,7 @@ class TestCheckBackgroundTask:
         assert "Last 20 lines" in result
 
     def test_check_shows_stall_warning_from_watchdog(self):
-        with patch("agentloom.tools.shell.background_task.C") as mock_c:
+        with patch("agentloom.runtimes.smolagents.tools.shell.background_task.C") as mock_c:
             mock_c.get_nested = MagicMock(
                 side_effect=lambda *args, **kwargs: {
                     ("shell_settings", "background_tasks", "max_concurrent"): 10,

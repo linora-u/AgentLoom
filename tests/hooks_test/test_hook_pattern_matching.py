@@ -8,7 +8,7 @@ Validates the three-level matching system:
 
 import unittest
 
-from agentloom.runtime.hooks.hook_helpers import matches_pattern
+from agentloom.execution.hooks.hook_helpers import matches_pattern
 
 
 class TestMatchesPattern(unittest.TestCase):

@@ -41,7 +41,7 @@ Worker 通过 `agent_function_schema` 声明接口，Runtime 将它转换成 Sup
 
 每个已分配存储的 Run 都有独立的 `run_id`、manifest 和带版本的生命周期事件；
 启用文件日志时还会生成有界日志，并保留审计记录和产物。逻辑任务使用稳定的
-`task_id` 恢复。TUI、CLI JSON/JSONL 和 Python API 读取同一份权威状态。预检
+`task_id` 恢复。Studio、CLI JSON/JSONL 和 Python API 读取同一份权威状态。预检
 拒绝发生在 Run 及其存储分配之前。
 
 ### 长任务有明确的完成责任人
@@ -63,7 +63,7 @@ Skill 是按需加载的模型上下文包。Hook 是独立显式授权的 Runti
 
 ## 快速开始
 
-源码安装器会针对当前代码版本构建 TUI，并准备锁定依赖的 Python 环境：
+源码安装器会针对当前代码版本构建 Studio，并准备锁定依赖的 Python 环境：
 
 ```bash
 git clone https://github.com/linora-u/AgentLoom.git
@@ -130,7 +130,7 @@ Studio 直接修改当前 Application，并展示每次 Diff。它按照下面�
 
 ## Application Studio
 
-TUI 是围绕 Application 设计的控制面，不是简单的日志查看器。
+Studio 是围绕 Application 设计的控制面，不是简单的日志查看器。
 
 - **Application 工作区：**查看 Effective Config、Supervisor/Worker 拓扑、配置
   来源、模型、Tool、Skill、Hook、MCP、权限和校验结果。
@@ -158,7 +158,7 @@ TUI 是围绕 Application 设计的控制面，不是简单的日志查看器。
 | 关闭详情、拒绝决策或中断 Agent Loop | `Esc` |
 
 界面行为、架构、更新、调度和开发命令见
-[Application Studio](../../agentloom-tui/README.md)。
+[Application Studio](../../studio/README.md)。
 
 ## 定义 Application
 
@@ -178,6 +178,8 @@ applications/release_review/
 
 Supervisor 引用 Worker 定义：
 
+基座执行参数只写在 `runtime_options` 中。旧顶层 smol 字段静默忽略，不转换、不拒绝。
+
 ```yaml
 name: "release_review"
 agent_runtime: "smolagents"
@@ -192,7 +194,8 @@ workflow: |
   Ask both Workers for evidence, reconcile conflicts, and return one release decision.
 
 tools: []
-max_steps: 12
+runtime_options:
+  max_steps: 12
 goal:
   enabled: true
 ```
@@ -219,7 +222,8 @@ workflow: |
 
 tools: []
 worker_agents: []
-max_steps: 8
+runtime_options:
+  max_steps: 8
 ```
 
 直接运行 Supervisor：
@@ -290,7 +294,7 @@ result = execute_app("applications/release_review/workflows/release_review_agent
 print(result.output, result.run.run_id)
 ```
 
-框架源码直接放在 `src/application/`、`src/runtime/`、`src/adapters/` 等职责模块中。
+框架源码直接放在 `src/application/`、`src/execution/`、`src/runtimes/`、`src/integrations/` 等职责模块中。
 安装配置将 `src/` 映射为 Python 包名 `agentloom`，所以上面的导入实际加载
 `src/application/runner.py`，磁盘上不需要再套一层 `agentloom` 目录。
 先运行 `uv sync --python 3.12 --locked --all-groups` 安装项目，再调用 Python API。
@@ -301,7 +305,7 @@ print(result.output, result.run.run_id)
 `run.rejected` 事件。详见[结构化 Run API](run_observability.md)。
 
 持久化 Schedule 复用相同的 Application 契约与 Run 生命周期。自动触发由单独的
-前台服务负责，关闭 TUI 不会留下隐藏 daemon：
+前台服务负责，关闭 Studio 不会留下隐藏 daemon：
 
 ```bash
 agentloom schedules --project /path/to/project serve
@@ -314,7 +318,6 @@ agentloom schedules --project /path/to/project serve
 | `ai_quality_analysis` | 十二个专业 Worker 协作完成分阶段代码审查 |
 | `unit_test_studio` | 通过确定性 Python 入口执行严格的 pytest 生成流程 |
 | `repo_map` | 确定性预处理、自底向上 Agent 分析、批处理和进度持久化 |
-| `codex_exec_demo` | 将本地 `codex exec` 作为带固定参数的普通 Agent Tool |
 | `goal_mode_validation` | Goal 显式完成、自动续跑和 checkpoint 恢复 |
 | `self_learning_smoke` | Session 历史、记忆提案、证据和审核边界 |
 
@@ -338,15 +341,15 @@ agentloom schedules --project /path/to/project serve
 # Framework
 uv run pytest tests -q
 
-# TUI
-cd agentloom-tui
+# Studio
+cd studio
 bun test
 bun run typecheck
 ```
 
 - Issue：[github.com/linora-u/AgentLoom/issues](https://github.com/linora-u/AgentLoom/issues)
 - 联系方式：[raine_walker@163.com](mailto:raine_walker@163.com?subject=AgentLoom%20Collaboration)
-- TUI 来源与声明：[agentloom-tui/upstream/README.md](../../agentloom-tui/upstream/README.md)
+- Studio 来源与声明：[studio/upstream/README.md](../../studio/upstream/README.md)
 
 如果 AgentLoom 对你的项目有帮助，欢迎 Star，或贡献一个边界清晰的 Application、
 修复或验证用例。

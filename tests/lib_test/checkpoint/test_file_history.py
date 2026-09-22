@@ -1,5 +1,5 @@
 """
-Tests for agentloom.runtime.checkpoint.file_history.
+Tests for agentloom.execution.checkpoint.file_history.
 
 Covers:
 - track_edit: backup creation, idempotency, null-backup, auto-create dir
@@ -16,12 +16,12 @@ import time
 
 import pytest
 
-from agentloom.runtime.checkpoint.file_history import (
+from agentloom.execution.checkpoint.file_history import (
     MAX_SNAPSHOTS,
     FileHistoryManager,
     FileHistorySnapshot,
 )
-from agentloom.runtime import RuntimeHome
+from agentloom.execution import RuntimeHome
 
 
 @pytest.fixture

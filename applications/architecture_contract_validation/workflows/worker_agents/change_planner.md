@@ -5,9 +5,10 @@ name: change_planner
 agent_runtime: smolagents
 description: Architecture contract change planner
 model_type: powerful
-max_steps: 24
-todo:
-  mode: 'off'
+runtime_options:
+  max_steps: 24
+  todo_mode: 'off'
+  smart_summary: false
 toolsets: []
 context_engine:
   min_chars: 80000

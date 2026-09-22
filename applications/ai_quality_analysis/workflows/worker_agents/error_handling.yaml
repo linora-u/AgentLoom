@@ -1,5 +1,7 @@
 name: "error_handling"
 agent_runtime: smolagents
+runtime_options:
+  smart_summary: false
 description: "Evaluates error handling robustness: uncaught exceptions, resource leaks, missing null checks, and error propagation patterns."
 model_type: "powerful"
 toolsets:

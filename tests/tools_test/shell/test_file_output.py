@@ -12,7 +12,7 @@ import sys
 
 import pytest
 
-from agentloom.tools.shell.process import ShellProcess
+from agentloom.runtimes.smolagents.tools.shell.process import ShellProcess
 
 
 pytestmark = pytest.mark.skipif(

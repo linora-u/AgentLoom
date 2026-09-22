@@ -1,5 +1,9 @@
 # AgentLoom Pluggable Agent Runtime and Model Protocol Spec
 
+> 2026-09-20 架构决策更新：后续多基座开发以 [AgentLoom 可替换 Agent 基座与 Pi 接入](docs/specs/agent-runtime-pi-integration.md) 及其 [并行开发计划](docs/tickets/agent-runtime-pi/worktree-plan.md) 为准。下文保留历史实现背景，但其中“第二基座为 LangGraph”“所有基座强制使用同一 Python ModelTurnBinding”“禁止受治理的原生工具实现”“所有基座强制 final_answer/统一 Todo 机制”的要求已被新规格替代。smol 已实现的模型协议、结构化工具调用、Hook/权限、记忆证据与同基座恢复契约继续有效；此说明不表示 Pi 已实现。
+>
+> 下文关于统一 canonical 模型历史的实现约束继续适用于现有 smol 模型协议与恢复，不再要求 Pi 等其他基座采用同一内部消息表示。
+
 ## Problem Statement
 
 AgentLoom 当前把具体的 smolagents 实现当成主运行时接口。Application 调用链、Agent 构造、Worker 调用、checkpoint、context compression 和错误恢复会直接接触 smolagents 的 `RunResult`、`ActionStep`、`ChatMessage`、`memory.steps` 与 `reset` 语义。代码虽然已经把部分上游集成放进 smolagents adapter 目录，但仅靠目录归类并没有形成可替换的 runtime seam。

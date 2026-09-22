@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from agentloom.application.composition import build_builtin_runtime_registry
 import inspect
 from collections.abc import Callable
 from dataclasses import dataclass
@@ -7,12 +8,10 @@ from dataclasses import field as dataclass_field
 from pathlib import Path
 from typing import Any
 
-from agentloom.configuration.config_validation import TODO_MODES, normalize_todo_mode_value
-from agentloom.runtime.agent_runtime import (
+from agentloom.execution.agent_runtime import (
     RuntimeRequirements,
-    build_builtin_runtime_registry,
 )
-from agentloom.runtime.goal import GoalConfig, normalize_goal_config
+from agentloom.execution.goal import GoalConfig, normalize_goal_config
 
 
 @dataclass
@@ -26,162 +25,13 @@ _WORKFLOW_VALIDATION_ERROR = (
 )
 
 
-@dataclass(frozen=True)
-class NormalizedExecutionConfig:
-    """Supported execution settings shared by preflight and construction."""
-
-    prompt_template_path: str | None
-    planning_interval: int | None = None
-
-
-def _resolve_agent_root(agent_root: Path | str) -> Path:
-    return Path(agent_root).expanduser().resolve()
-
-
-def resolve_execution_prompt_template_path(
-    raw_path: str,
-    source: str,
-    *,
-    agent_root: Path | str,
-) -> Path:
-    if not isinstance(raw_path, str) or not raw_path.strip():
-        raise ValueError(f"{source} must be a non-empty string path")
-    path_obj = Path(raw_path.strip()).expanduser()
-    if not path_obj.is_absolute():
-        path_obj = (_resolve_agent_root(agent_root) / path_obj).resolve()
-    else:
-        path_obj = path_obj.resolve()
-    return path_obj
-
-
-def normalize_execution_prompt_template_path_value(
-    raw_prompt: Any,
-    source: str,
-    *,
-    agent_root: Path | str,
-) -> str | None:
-    if raw_prompt is None:
-        return None
-
-    raw_path: Any
-    if isinstance(raw_prompt, str):
-        raw_path = raw_prompt
-    elif isinstance(raw_prompt, dict):
-        if "path" not in raw_prompt:
-            raise ValueError(f"{source} must include 'path' when prompt is a mapping")
-        raw_path = raw_prompt.get("path")
-    else:
-        raise ValueError(f"{source} must be a string or mapping with 'path'")
-
-    resolved = resolve_execution_prompt_template_path(
-        raw_path,
-        f"{source} path",
-        agent_root=agent_root,
-    )
-    return str(resolved)
-
-
-def normalize_execution_prompt_template_path(
-    config: dict,
-    source: str,
-    *,
-    agent_root: Path | str,
-) -> str | None:
-    return normalize_execution_prompt_template_path_value(
-        config.get("prompt"),
-        source,
-        agent_root=agent_root,
-    )
-
-
-def normalize_execution_planning_interval_value(raw_value: Any) -> int | None:
-    return normalize_positive_int_value(raw_value)
-
-
-def validate_todo_config(config: dict, *, source: str) -> str:
-    """Validate and return the effective current-task Todo mode."""
-
-    raw_todo = config.get("todo", {})
-    if not isinstance(raw_todo, dict):
-        raise ValueError(f"{source}.todo must be a mapping")
-    unexpected = sorted(set(raw_todo) - {"mode"})
-    if unexpected:
-        raise ValueError(
-            f"{source}.todo has unsupported field(s): {', '.join(unexpected)}"
-        )
-    raw_mode = normalize_todo_mode_value(raw_todo.get("mode", "auto"))
-    if not isinstance(raw_mode, str) or raw_mode not in TODO_MODES:
-        allowed = ", ".join(sorted(TODO_MODES))
-        raise ValueError(f"{source}.todo.mode must be one of: {allowed}")
-    return raw_mode
-
-
-def normalize_positive_int_value(raw_value: Any) -> int | None:
-    if raw_value is None:
-        return None
-    if isinstance(raw_value, bool):
-        return None
-    if isinstance(raw_value, int):
-        return raw_value if raw_value > 0 else None
-    if isinstance(raw_value, str):
-        text = raw_value.strip()
-        if not text:
-            return None
-        try:
-            parsed = int(text)
-        except ValueError:
-            return None
-        return parsed if parsed > 0 else None
-    return None
-
-
-def build_normalized_execution_config(
-    config: dict,
-    *,
-    source_name: str,
-    agent_root: Path | str,
-) -> NormalizedExecutionConfig:
-    name = str(config.get("name", source_name))
-    prompt_template_path = normalize_execution_prompt_template_path(
-        config,
-        source=f"{name}.prompt",
-        agent_root=agent_root,
-    )
-    planning_interval = normalize_execution_planning_interval_value(config.get("planning_interval"))
-
-    return NormalizedExecutionConfig(
-        prompt_template_path=prompt_template_path,
-        planning_interval=planning_interval,
-    )
-
-
-def validate_execution_config_payload(normalized: Any) -> NormalizedExecutionConfig:
-    if not isinstance(normalized, NormalizedExecutionConfig):
-        raise ValueError("execution normalized config must be NormalizedExecutionConfig")
-
-    prompt_template_path = normalized.prompt_template_path
-    if prompt_template_path is not None:
-        if not isinstance(prompt_template_path, str) or not prompt_template_path.strip():
-            raise ValueError("execution normalized prompt_template_path must be a non-empty string when provided")
-        prompt_template_path = prompt_template_path.strip()
-
-    planning_interval = normalized.planning_interval
-    if planning_interval is not None:
-        if isinstance(planning_interval, bool) or not isinstance(planning_interval, int) or planning_interval <= 0:
-            raise ValueError("execution normalized planning_interval must be a positive integer when provided")
-
-    return NormalizedExecutionConfig(
-        prompt_template_path=prompt_template_path,
-        planning_interval=planning_interval,
-    )
-
-
 class AgentConfigNormalizer:
     @staticmethod
     def validate_agent_runtime_config(
         config: dict,
         *,
         effective_config: dict[str, Any] | None = None,
+        hook_plan=None,
     ) -> str:
         """Return the explicitly selected, currently registered Agent runtime."""
 
@@ -194,32 +44,44 @@ class AgentConfigNormalizer:
                 "Configuration is missing required 'agent_runtime' field; "
                 f"available runtimes: {available}"
             )
-        effective = effective_config or config
-        checkpoint = effective.get("checkpoint")
-        checkpoint_resume = (
-            isinstance(checkpoint, dict)
-            and checkpoint.get("enabled") is True
-        )
-        concurrency = config.get("concurrency")
-        parallel_tools = (
-            concurrency == "auto"
-            or (
-                isinstance(concurrency, int)
-                and not isinstance(concurrency, bool)
-                and concurrency > 1
-            )
-        )
-        requirements = RuntimeRequirements(
-            structured_tools=True,
-            parallel_tools=parallel_tools,
-            checkpoint_resume=checkpoint_resume,
-            subagents=bool(config.get("worker_agents")),
+        requirements = AgentConfigNormalizer.runtime_requirements(
+            config, effective_config=effective_config, hook_plan=hook_plan,
         )
         build_builtin_runtime_registry().validate(
             runtime_id,
             requirements=requirements,
         )
         return runtime_id
+
+    @staticmethod
+    def runtime_requirements(config: dict, *, effective_config: dict | None = None, hook_plan=None) -> RuntimeRequirements:
+        """Derive requirements from selected functions, not from an engine assumption."""
+        from agentloom.tools.selection import resolve_runtime_toolsets
+
+        effective = effective_config if effective_config is not None else config
+        AgentConfigNormalizer.validate_tools_config_entries(effective.get("tools"))
+        selected_tools = resolve_runtime_toolsets(config, effective_config)
+        tools_selected = bool(effective.get("tools") or selected_tools)
+        checkpoint = effective.get("checkpoint", {})
+        concurrency = effective.get("concurrency", config.get("concurrency"))
+        goal = normalize_goal_config(config, source=str(config.get("name", "agent"))).enabled
+        subagents = bool(effective.get("worker_agents", config.get("worker_agents")))
+        mcp = effective.get("mcp_servers")
+        # smol's own terminal tool is installed by its adapter.
+        structured_tools = bool(tools_selected or mcp or subagents or goal or config.get("agent_runtime") == "smolagents")
+        return RuntimeRequirements(
+            structured_tools=structured_tools,
+            parallel_tools=structured_tools and (concurrency == "auto" or (
+                isinstance(concurrency, int) and not isinstance(concurrency, bool) and concurrency > 1
+            )),
+            checkpoint_resume=isinstance(checkpoint, dict) and checkpoint.get("enabled") is True,
+            subagents=subagents,
+            goal=goal,
+            stop_hooks=bool(hook_plan is not None and any(
+                handler.event.value == "Stop" and handler.source != "internal"
+                for handler in hook_plan.handlers
+            )),
+        )
 
     @staticmethod
     def validate_tools_config_entries(tool_configs: Any) -> None:
@@ -233,6 +95,7 @@ class AgentConfigNormalizer:
             return
         if not isinstance(tool_configs, list):
             raise ValueError("tools configuration must be a list when provided")
+        seen_names: set[str] = set()
         for tool_config in tool_configs:
             if not isinstance(tool_config, dict):
                 raise ValueError("Tool configuration must be a dictionary")
@@ -241,6 +104,9 @@ class AgentConfigNormalizer:
             tool_name = tool_config["name"]
             if not isinstance(tool_name, str) or not tool_name.strip():
                 raise ValueError("Tool configuration 'name' must be a non-empty string")
+            if tool_name in seen_names:
+                raise ValueError(f"Duplicate tool name: {tool_name}")
+            seen_names.add(tool_name)
             if "module" in tool_config or "function" in tool_config:
                 if "module" not in tool_config or "function" not in tool_config:
                     raise ValueError(
@@ -325,14 +191,6 @@ class AgentConfigNormalizer:
         if unknown_args:
             joined_args = ", ".join(sorted(unknown_args))
             raise ValueError(f"Unknown fixed_args for tool '{tool_name}': {joined_args}")
-
-    @staticmethod
-    def validate_max_steps_config(config: dict) -> None:
-        if "max_steps" not in config:
-            return
-        max_steps = config["max_steps"]
-        if isinstance(max_steps, bool) or not isinstance(max_steps, int) or max_steps <= 0:
-            raise ValueError("max_steps must be a positive integer when provided")
 
     @staticmethod
     def validate_workflow_config(config: dict) -> None:

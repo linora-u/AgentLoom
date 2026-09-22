@@ -1,10 +1,10 @@
 from pathlib import Path
 
 import pytest
-from agentloom.runtime.factory import YamlAgentFactory
-from agentloom.runtime.logging import get_global_logger, initialize_global_logger_once, set_global_logger
-from agentloom.runtime.model_binding import ModelTurnBinding
-from agentloom.runtime.model_protocol import ModelTurnResult
+from agentloom.application.factory import YamlAgentFactory
+from agentloom.execution.logging import get_global_logger, initialize_global_logger_once, set_global_logger
+from agentloom.execution.model_binding import ModelTurnBinding
+from agentloom.execution.model_protocol import ModelTurnResult
 
 
 class _NoopAdapter:

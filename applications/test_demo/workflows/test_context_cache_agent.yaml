@@ -17,7 +17,7 @@ workflow: |
 
   ## Step 2: Read the model-turn adapter source
   Use grep_search to find `_apply_system_prompt_cache` and `cache_control` in
-  "src/adapters/litellm/model_turn.py".
+  "src/integrations/litellm/model_turn.py".
   Expected: caching is implemented at the provider protocol adapter boundary.
 
   ## Step 3: Check LLM config
@@ -26,7 +26,7 @@ workflow: |
   Verify: output shows "context_cache: true".
 
   ## Step 4: Verify no provider-specific code remains
-  Use shell_tool to run: grep -c "is_claude\|is_gpt\|_enable_anthropic_caching\|_enable_openai_caching" src/adapters/litellm/model_turn.py || echo "CLEAN: 0 matches"
+  Use shell_tool to run: grep -c "is_claude\|is_gpt\|_enable_anthropic_caching\|_enable_openai_caching" src/integrations/litellm/model_turn.py || echo "CLEAN: 0 matches"
   Expected: No provider-specific caching code should exist.
   Verify: output shows "CLEAN: 0 matches" or count is 0.
 
@@ -47,4 +47,6 @@ tools:
   - name: "grep_search"
 
 worker_agents: []
-max_steps: 15
+runtime_options:
+  max_steps: 15
+  smart_summary: false

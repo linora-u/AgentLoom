@@ -5,8 +5,8 @@ from unittest.mock import patch
 
 import pytest
 
-from agentloom.tools.shell.background_task import BackgroundTaskRegistry
-from agentloom.tools.shell.process import ExecResult, ShellProcess
+from agentloom.runtimes.smolagents.tools.shell.background_task import BackgroundTaskRegistry
+from agentloom.runtimes.smolagents.tools.shell.process import ExecResult, ShellProcess
 
 
 @pytest.fixture(autouse=True)

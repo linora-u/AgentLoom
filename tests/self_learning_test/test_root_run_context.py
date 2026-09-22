@@ -11,8 +11,8 @@ from importlib.metadata import version
 from pathlib import Path
 
 import pytest
-from agentloom.runtime.hooks import HookEvent, HookHandler, HookPlan, HookResult, HookRun
-from agentloom.runtime.trace import (
+from agentloom.execution.hooks import HookEvent, HookHandler, HookPlan, HookResult, HookRun
+from agentloom.execution.trace import (
     ExplicitExecutionContext,
     MissingRunContextError,
     bind_explicit_execution_context,
@@ -28,7 +28,8 @@ def test_smolagents_context_patch_dependency_is_exactly_pinned() -> None:
     project_root = Path(__file__).parents[2]
     project = tomllib.loads((project_root / "pyproject.toml").read_text())
     dependency = next(
-        Requirement(raw) for raw in project["project"]["dependencies"] if Requirement(raw).name == "smolagents"
+        Requirement(raw) for raw in project["project"]["optional-dependencies"]["smol"]
+        if Requirement(raw).name == "smolagents"
     )
 
     assert str(dependency.specifier) == "==1.26.0"
@@ -45,7 +46,7 @@ def test_bind_root_run_owns_outer_binding_and_nested_calls_inherit_it() -> None:
 
 
 def test_bind_root_run_reuses_one_state_and_next_root_gets_a_fresh_state():
-    from agentloom.runtime.trace import require_root_run_state
+    from agentloom.execution.trace import require_root_run_state
 
     with bind_root_run("shared-root-state"):
         first = require_root_run_state()
@@ -132,7 +133,7 @@ def test_session_search_excludes_explicit_root(
 
 
 def test_canonical_event_carries_hook_run_local_and_root_ids() -> None:
-    from agentloom.runtime.hooks import HookContext
+    from agentloom.execution.hooks import HookContext
     from agentloom.self_learning.session_recorder import event_from_hook_context
 
     event = event_from_hook_context(
@@ -156,7 +157,7 @@ def test_canonical_event_carries_hook_run_local_and_root_ids() -> None:
 def test_application_disable_prevents_session_recorder_write(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    from agentloom.runtime.hooks import HookContext
+    from agentloom.execution.hooks import HookContext
     from agentloom.self_learning.session_recorder import SessionRecorder
 
     recorder = SessionRecorder()
@@ -264,7 +265,7 @@ def test_tool_wrapper_propagates_and_refreshes_root_across_executor_thread(
     monkeypatch.setenv(
         "AGENTLOOM_RUNTIME_ROOT", str(tmp_path / ".agentloom")
     )
-    from agentloom.runtime.tool_gateway import AgentLoomToolGateway
+    from agentloom.execution.tool_gateway import AgentLoomToolGateway
     from agentloom.self_learning.persistence.memory_store import MemoryStore
     from agentloom.tools.self_learning import memory_tool
     from agentloom.tools.self_learning.memory_tool import memory

@@ -4,11 +4,11 @@ import logging
 import threading
 from pathlib import Path
 
-from agentloom.runtime import RuntimeHome, bind_run_context, copy_runtime_context
+from agentloom.execution import RuntimeHome, bind_run_context, copy_runtime_context
 
 
 def test_null_backend_suppresses_only_the_bound_context(caplog) -> None:
-    from agentloom.runtime.logging import NullLoggerBackend, bind_logger_backend, get_logger
+    from agentloom.execution.logging import NullLoggerBackend, bind_logger_backend, get_logger
 
     muted = get_logger("tests.context_muted")
     visible = logging.getLogger("tests.context_visible")
@@ -22,7 +22,7 @@ def test_null_backend_suppresses_only_the_bound_context(caplog) -> None:
 
 
 def test_lazy_logger_is_bound_to_each_run_without_cross_writes(tmp_path: Path) -> None:
-    from agentloom.runtime.logging import (
+    from agentloom.execution.logging import (
         LoggingConfigBuilder,
         bind_logger_backend,
         get_logger,
@@ -68,7 +68,7 @@ def test_lazy_logger_is_bound_to_each_run_without_cross_writes(tmp_path: Path) -
 
 
 def test_thread_logging_requires_explicit_context_propagation(tmp_path: Path) -> None:
-    from agentloom.runtime.logging import (
+    from agentloom.execution.logging import (
         LoggingConfigBuilder,
         bind_logger_backend,
         get_logger,
@@ -102,7 +102,7 @@ def test_thread_logging_requires_explicit_context_propagation(tmp_path: Path) ->
 def test_bound_run_logger_rejects_missing_or_different_runtime_context(
     tmp_path: Path,
 ) -> None:
-    from agentloom.runtime.logging import (
+    from agentloom.execution.logging import (
         LoggingConfigBuilder,
         bind_logger_backend,
         get_logger,
@@ -145,7 +145,7 @@ def test_bound_run_logger_rejects_missing_or_different_runtime_context(
 
 
 def test_runtime_log_rotation_is_bounded_per_run(tmp_path: Path) -> None:
-    from agentloom.runtime.logging import (
+    from agentloom.execution.logging import (
         LoggingConfigBuilder,
         bind_logger_backend,
         get_logger,
@@ -178,7 +178,7 @@ def test_runtime_log_rotation_is_bounded_per_run(tmp_path: Path) -> None:
 def test_runtime_log_rotation_keeps_opened_directory_when_path_is_replaced(
     tmp_path: Path,
 ) -> None:
-    from agentloom.runtime.logging import (
+    from agentloom.execution.logging import (
         LoggingConfigBuilder,
         bind_logger_backend,
         get_logger,
@@ -220,9 +220,9 @@ def test_runtime_log_rotation_keeps_opened_directory_when_path_is_replaced(
 def test_agent_log_prefix_never_reads_process_global_trace_fallbacks(monkeypatch) -> None:
     import importlib
 
-    from agentloom.runtime.logging import AgentLoomLogLevel, RichLoggerBackend
+    from agentloom.execution.logging import AgentLoomLogLevel, RichLoggerBackend
 
-    task_context_module = importlib.import_module("agentloom.runtime.trace.task_context")
+    task_context_module = importlib.import_module("agentloom.execution.trace.task_context")
 
     monkeypatch.setattr(task_context_module, "_global_task_id_fallback", "wrong-task")
     monkeypatch.setattr(task_context_module, "_global_sub_task_id_fallback", "wrong-subtask")
