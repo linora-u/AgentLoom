@@ -25,7 +25,7 @@ AgentLoom currently depends on:
 
 Runtime coupling today:
 
-- `agentloom.runtime.agent.BaseAgent` creates models through `get_model(..., "smolagents", ...)`.
+- `agentloom.application.agent.BaseAgent` creates models through `get_model(..., "smolagents", ...)`.
 - `RoleDrivenAgent` still allows `("tool_call", "code_act")`, defaults to `"tool_call"`, and selects between `ToolCallingAgentV2` and `CodeAgentV2`.
 - `build_runtime_agent()` currently branches on `self.tool_call_type`: `tool_call` builds `ToolCallingAgentV2`; otherwise it builds `CodeAgentV2`.
 - `NormalizedExecutionConfig` and `build_normalized_execution_config()` still normalize `execution_env`, `executor_type`, and `executor_kwargs`.

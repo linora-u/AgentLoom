@@ -215,7 +215,7 @@ task`. Prefer one multiline workflow. A list is numbered and merged into one
 initial objective context instead of using the ordinary sequential multi-run
 semantics above. Normal final answers and `max_steps` end only one continuation
 segment; the root Supervisor must call `update_goal(complete, evidence)`. Ordinary model usage remains in runtime audit records. See [Goal Mode](goal_mode.md)
-for lifecycle, resume, persistence, CLI, TUI, and schedule behavior.
+for lifecycle, resume, persistence, CLI, Studio, and schedule behavior.
 
 #### Workflow Writing Guidelines and Recommendations
 

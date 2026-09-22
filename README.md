@@ -43,7 +43,7 @@ prompt conventions.
 
 Every allocated Run receives an immutable `run_id`, manifest, and versioned
 lifecycle events, with bounded file logs when enabled plus audit records and
-artifacts. A logical `task_id` survives resume. The TUI, CLI JSON/JSONL, and
+artifacts. A logical `task_id` survives resume. The Studio, CLI JSON/JSONL, and
 Python API read the same canonical state. Preflight rejection occurs before a
 Run or its storage is allocated.
 
@@ -70,7 +70,7 @@ access remains governed by Agent configuration and permissions.
 
 ## Quick start
 
-The source installer builds the TUI and prepares a locked Python environment for
+The source installer builds the Studio and prepares a locked Python environment for
 the current checkout:
 
 ```bash
@@ -145,7 +145,7 @@ run.” It does not turn static validation into a success claim.
 
 ## Application Studio
 
-The TUI is an Applications-first control plane, not a thin log viewer.
+The Studio is an Applications-first control plane, not a thin log viewer.
 
 - **Application workspace:** browse Effective Config, Supervisor/Worker
   topology, source attribution, models, Tools, Skills, Hooks, MCP, permissions,
@@ -176,7 +176,7 @@ The TUI is an Applications-first control plane, not a thin log viewer.
 | Diagnose the selected failed Run | `a` |
 | Close detail, reject a decision, or interrupt the Agent Loop | `Esc` |
 
-See [Application Studio](agentloom-tui/README.md) for screen behavior,
+See [Application Studio](studio/README.md) for screen behavior,
 architecture, updates, schedules, and contributor commands.
 
 ## Define an Application
@@ -330,7 +330,7 @@ Post-allocation failures carry the same receipt; preflight rejection emits
 [Structured Run API](docs/en/run_observability.md).
 
 Durable schedules use the same Application contract and Run lifecycle. Their
-automatic firing is a separate foreground service, so closing the TUI does not
+automatic firing is a separate foreground service, so closing the Studio does not
 leave a hidden daemon:
 
 ```bash
@@ -367,15 +367,15 @@ agentloom schedules --project /path/to/project serve
 # Framework
 uv run --locked --extra smol --extra code pytest tests -q
 
-# TUI
-cd agentloom-tui
+# Studio
+cd studio
 bun test
 bun run typecheck
 ```
 
 - Issues: [github.com/linora-u/AgentLoom/issues](https://github.com/linora-u/AgentLoom/issues)
 - Contact: [raine_walker@163.com](mailto:raine_walker@163.com?subject=AgentLoom%20Collaboration)
-- TUI provenance and notices: [agentloom-tui/upstream/README.md](agentloom-tui/upstream/README.md)
+- Studio provenance and notices: [studio/upstream/README.md](studio/upstream/README.md)
 
 If AgentLoom helps your project, consider starring the repository or
 contributing a focused Application, fix, or validation case.

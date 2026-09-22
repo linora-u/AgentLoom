@@ -25,14 +25,14 @@ supported aliases.
 | --- | --- | --- |
 | `src.runner`, `src.application_run*`, `src.application_revision`, scattered definition interpretation | `src/application/` | `agentloom.application`: shared definition, paths, validation, presentation, Run identity, revision, lifecycle and execution |
 | `src.lib.config` | `src/configuration/` | `agentloom.configuration`: project/model configuration, normalization, provenance and invocation binding |
-| `src.lib.smolagents.agent` orchestration and assembly | `src/application/{agent,factory,invocation}.py` | `agentloom.application`: Supervisor/Worker construction, delegation and Application-owned orchestration |
+| `src.lib.smolagents.agent` orchestration and assembly | `src/application/{agent,factory,invocation}.py` | `agentloom.application`: Supervisor/Worker construction, delegation and runtime selection |
 | `src.lib.smolagents.agent` runtime-specific mixin | `src/runtimes/smolagents/loom_mixin.py` | `agentloom.runtimes.smolagents`: smolagents-specific execution behavior |
 | Hook policy, Skills, prompts, checkpoint, Goal, ContextEngine, storage/context | `src/execution/` responsibility modules | `agentloom.execution`: invocation state, authorization, recovery, usage, context and persistence |
 | `src.lib.smolagents` upstream Agent subclasses, model adapters, patches and Tool conversion | `src/runtimes/smolagents/` | `agentloom.runtimes.smolagents`: actual coupling to fixed smolagents 1.26.0 |
 | `src.mcp`, `src.services.lsp` | `src/integrations/{mcp,lsp}/` | `agentloom.integrations.mcp`, `agentloom.integrations.lsp`: external protocol connections |
 | `src.tools` | `src/tools/` | `agentloom.tools`: lightweight catalog and selective implementation loading |
 | `src.extensions.self_learning` | `src/self_learning/` | `agentloom.self_learning`: existing persistence, recording and review responsibilities |
-| `src.__main__`, scaffold, TUI bridge, schedules | `src/__main__.py`, `src/application/scaffold.py`, `agentloom-tui/python/agentloom_tui_bridge/`, `src/schedules/` | Canonical CLI, Studio and scheduling adapters consume Application and Run owners |
+| `src.__main__`, scaffold, Studio adapter, schedules | `src/__main__.py`, `src/application/scaffold.py`, `studio/python/agentloom_studio_adapter/`, `src/schedules/` | Canonical CLI, Studio and scheduling adapters consume Application and Run owners |
 
 `agentloom.application.agent` owns orchestration; upstream CodeAgent/ToolCallingAgent
 subclasses live in `agentloom.runtimes.smolagents.agents`.
@@ -55,9 +55,9 @@ removed when the user rejected compatibility. It is not part of the final layout
 - Supported commands are `loom` and `python -m agentloom`. CLI parameters, exit
   states, JSONL output and resume/task semantics are preserved. Old
   `python -m src` and `src.tui_bridge` commands are unsupported.
-- TUI uses `python -I -u -m agentloom_tui_bridge`; installed-interpreter and
+- Studio uses `python -I -u -m agentloom_studio_adapter`; installed-interpreter and
   project/uv selection must both resolve the installed package. The domain CLI
-  uses `agentloom_tui_bridge.domain_cli` with explicit project context.
+  uses `agentloom_studio_adapter.domain_cli` with explicit project context.
 - Framework Tool strings and generated scaffolds use `agentloom.*`. Tools owned
   by Applications retain `applications.*` imports resolved from explicit project
   context. External integrations must migrate old framework import strings.
@@ -85,7 +85,7 @@ removed when the user rejected compatibility. It is not part of the final layout
 
 The required Python suite includes the full CI command and its two explicit
 memory-campaign contract files, plus affected Application tests. Record collection
-and pass/fail/error/skip totals. TUI requires tests, typecheck and build. Python
+and pass/fail/error/skip totals. Studio requires tests, typecheck and build. Python
 3.12 follows CI; the baseline Python 3.14 attempt failed in pinned `sqlean-py`,
 so the migration does not change the dependency lock to use that interpreter.
 
