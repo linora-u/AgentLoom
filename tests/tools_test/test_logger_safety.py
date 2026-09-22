@@ -24,7 +24,7 @@ import pytest
 
 def _reset_global_logger():
     """Reset the logger binding in this execution context."""
-    import agentloom.runtime.logging.logger_manager as lm
+    import agentloom.execution.logging.logger_manager as lm
 
     lm.set_global_logger(None)
 
@@ -46,7 +46,7 @@ class TestModuleLevelSafety:
 
     def test_get_logger_str_does_not_init_global(self):
         """Calling get_logger with a string must not initialise the global backend."""
-        from agentloom.runtime.logging.logger_manager import LazyLoggerAdapter, get_global_logger, get_logger
+        from agentloom.execution.logging.logger_manager import LazyLoggerAdapter, get_global_logger, get_logger
 
         logger = get_logger("my.module")
         assert isinstance(logger, LazyLoggerAdapter)
@@ -54,7 +54,7 @@ class TestModuleLevelSafety:
 
     def test_get_logger_none_does_not_init_global(self):
         """Calling get_logger(None) must not initialise the global backend."""
-        from agentloom.runtime.logging.logger_manager import LazyLoggerAdapter, get_global_logger, get_logger
+        from agentloom.execution.logging.logger_manager import LazyLoggerAdapter, get_global_logger, get_logger
 
         logger = get_logger(None)
         assert isinstance(logger, LazyLoggerAdapter)
@@ -62,7 +62,7 @@ class TestModuleLevelSafety:
 
     def test_lazy_logger_log_call_does_not_init_global(self):
         """Logging through a lazy logger must NOT trigger global init."""
-        from agentloom.runtime.logging.logger_manager import get_global_logger, get_logger
+        from agentloom.execution.logging.logger_manager import get_global_logger, get_logger
 
         logger = get_logger("test.lazy")
 
@@ -84,7 +84,7 @@ class TestRuntimeBinding:
 
     def test_lazy_logger_picks_up_global_after_init(self):
         """A lazy logger created BEFORE init must use the global backend AFTER init."""
-        from agentloom.runtime.logging.logger_manager import (
+        from agentloom.execution.logging.logger_manager import (
             get_logger,
             initialize_global_logger_once,
         )
@@ -104,7 +104,7 @@ class TestRuntimeBinding:
 
     def test_log_dir_follows_app_name(self, tmp_path: Path):
         """The file path comes only from the canonical RuntimeContext."""
-        from agentloom.runtime import RuntimeHome
+        from agentloom.execution import RuntimeHome
 
         context = RuntimeHome(tmp_path / ".agentloom").context(
             application_id="my_custom_app", task_id="task", run_id="run"
@@ -123,7 +123,7 @@ class TestRuntimeBinding:
         """Importing runner must not trigger global logger initialisation."""
         # The import itself was tested above; this test ensures the contract
         # holds for the full import chain.
-        from agentloom.runtime.logging.logger_manager import get_global_logger
+        from agentloom.execution.logging.logger_manager import get_global_logger
 
         assert get_global_logger() is None
 
@@ -137,7 +137,7 @@ class TestExplicitBackendWrapping:
 
     def test_wrap_explicit_backend(self):
         """Wrapping a backend object returns LoggerAdapter with that backend."""
-        from agentloom.runtime.logging.logger_manager import LoggerAdapter, get_logger
+        from agentloom.execution.logging.logger_manager import LoggerAdapter, get_logger
 
         backend = MagicMock()
         adapter = get_logger(backend, "my.module")
@@ -146,7 +146,7 @@ class TestExplicitBackendWrapping:
 
     def test_wrap_stdlib_logger(self):
         """Wrapping a stdlib Logger returns LoggerAdapter."""
-        from agentloom.runtime.logging.logger_manager import LoggerAdapter, get_logger
+        from agentloom.execution.logging.logger_manager import LoggerAdapter, get_logger
 
         stdlib_logger = logging.getLogger("test.stdlib")
         adapter = get_logger(stdlib_logger, "test.stdlib")
@@ -155,7 +155,7 @@ class TestExplicitBackendWrapping:
 
     def test_idempotent_for_logger_adapter(self):
         """Passing a LoggerAdapter returns it unchanged."""
-        from agentloom.runtime.logging.logger_manager import LoggerAdapter, get_logger
+        from agentloom.execution.logging.logger_manager import LoggerAdapter, get_logger
 
         backend = MagicMock()
         adapter = LoggerAdapter(backend, "test")
@@ -164,7 +164,7 @@ class TestExplicitBackendWrapping:
 
     def test_idempotent_for_lazy_logger(self):
         """Passing a LazyLoggerAdapter returns it unchanged."""
-        from agentloom.runtime.logging.logger_manager import LazyLoggerAdapter, get_logger
+        from agentloom.execution.logging.logger_manager import LazyLoggerAdapter, get_logger
 
         lazy = LazyLoggerAdapter("test.lazy")
         result = get_logger(lazy)
@@ -180,14 +180,14 @@ class TestDispatchFallbackSafety:
 
     def test_dispatch_fallback_uses_stdlib_not_init(self):
         """When backend method is missing, fallback to stdlib, not global init."""
-        from agentloom.runtime.logging.logger_manager import LoggerAdapter
+        from agentloom.execution.logging.logger_manager import LoggerAdapter
 
         # Backend with no .info method
         broken_backend = object()
         adapter = LoggerAdapter(broken_backend, "test.dispatch")
 
         with patch(
-            "agentloom.runtime.logging.logger_manager.initialize_global_logger_once"
+            "agentloom.execution.logging.logger_manager.initialize_global_logger_once"
         ) as mock_init:
             adapter.info("test message")
 
@@ -195,12 +195,12 @@ class TestDispatchFallbackSafety:
             "_dispatch must never call initialize_global_logger_once"
         )
 
-        from agentloom.runtime.logging.logger_manager import get_global_logger
+        from agentloom.execution.logging.logger_manager import get_global_logger
         assert get_global_logger() is None
 
     def test_dispatch_uses_global_when_available(self):
         """When global backend exists, _dispatch falls back to it."""
-        from agentloom.runtime.logging.logger_manager import (
+        from agentloom.execution.logging.logger_manager import (
             LoggerAdapter,
             initialize_global_logger_once,
         )
@@ -227,22 +227,22 @@ class TestBackwardCompatibility:
 
     def test_resolve_logger_alias_exists(self):
         """resolve_logger is exported as an alias for get_logger."""
-        from agentloom.runtime.logging import get_logger, resolve_logger
+        from agentloom.execution.logging import get_logger, resolve_logger
 
         assert resolve_logger is get_logger
 
     def test_resolve_logger_returns_same_types(self):
         """resolve_logger(None, name) returns LazyLoggerAdapter."""
-        from agentloom.runtime.logging import resolve_logger
-        from agentloom.runtime.logging.logger_manager import LazyLoggerAdapter
+        from agentloom.execution.logging import resolve_logger
+        from agentloom.execution.logging.logger_manager import LazyLoggerAdapter
 
         result = resolve_logger(None, "test")
         assert isinstance(result, LazyLoggerAdapter)
 
     def test_resolve_logger_wraps_backend(self):
         """resolve_logger(backend, name) returns LoggerAdapter."""
-        from agentloom.runtime.logging import resolve_logger
-        from agentloom.runtime.logging.logger_manager import LoggerAdapter
+        from agentloom.execution.logging import resolve_logger
+        from agentloom.execution.logging.logger_manager import LoggerAdapter
 
         backend = MagicMock()
         result = resolve_logger(backend, "test")

@@ -6,20 +6,20 @@ import json
 import time
 
 import pytest
-from agentloom.adapters.smolagents.checkpoint_codec import (
+from agentloom.runtimes.smolagents.checkpoint_codec import (
     SmolagentsCheckpointCodec as CheckpointSerializer,
 )
-from agentloom.adapters.smolagents.model_turn_bridge import (
+from agentloom.runtimes.smolagents.model_turn_bridge import (
     MODEL_ITEMS_RAW_KEY,
     MODEL_RESPONSE_ID_RAW_KEY,
 )
-from agentloom.runtime.error_recovery import RUNTIME_FEEDBACK_RAW_KEY
-from agentloom.runtime.model_protocol import (
+from agentloom.runtimes.smolagents.error_recovery import RUNTIME_FEEDBACK_RAW_KEY
+from agentloom.execution.model_protocol import (
     FunctionCallItem,
     ReasoningItem,
     model_item_to_dict,
 )
-from agentloom.runtime.tool_protocol import ToolCallRecord, ToolErrorRecord
+from agentloom.execution.tool_protocol import ToolCallRecord, ToolErrorRecord
 from smolagents.agents import (
     AgentExecutionError,
     AgentParsingError,

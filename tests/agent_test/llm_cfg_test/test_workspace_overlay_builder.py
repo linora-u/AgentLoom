@@ -8,8 +8,7 @@ import pytest
 def _patch_base_config(monkeypatch, agent_root: Path) -> None:
     base_raw = {
         "tool_access_control": {"exclude_paths": ["Tools"]},
-        "smart_summary": True,
-        "todo": {"mode": "auto"},
+        "runtime_options": {"smart_summary": True, "todo_mode": "auto"},
     }
     monkeypatch.setattr(
         config_module,
@@ -50,7 +49,7 @@ def test_todo_mode_uses_global_application_agent_precedence(
     workflow_path.write_text("name: demo_agent\n", encoding="utf-8")
     app_config = app_root / "config" / "system.yaml"
     app_config.parent.mkdir(parents=True)
-    app_config.write_text('todo:\n  mode: "off"\n', encoding="utf-8")
+    app_config.write_text('runtime_options:\n  todo_mode: "off"\n', encoding="utf-8")
 
     application_effective = config_module.build_effective_agent_config(
         {"_yaml_file_path": str(workflow_path)},
@@ -59,13 +58,13 @@ def test_todo_mode_uses_global_application_agent_precedence(
     agent_effective = config_module.build_effective_agent_config(
         {
             "_yaml_file_path": str(workflow_path),
-            "todo": {"mode": "on"},
+            "runtime_options": {"todo_mode": "on"},
         },
         source_name=str(workflow_path),
     )
 
-    assert application_effective["todo"]["mode"] == "off"
-    assert agent_effective["todo"]["mode"] == "on"
+    assert application_effective["runtime_options"] == {"todo_mode": "off", "smart_summary": True}
+    assert agent_effective["runtime_options"] == {"todo_mode": "on", "smart_summary": True}
 
 
 def test_worker_effective_snapshot_is_independent_from_supervisor(monkeypatch, tmp_path: Path):
@@ -74,6 +73,7 @@ def test_worker_effective_snapshot_is_independent_from_supervisor(monkeypatch, t
 
     supervisor_cfg = {
         "tool_access_control": {"exclude_paths": ["Build"]},
+        "runtime_options": {"todo_mode": "on"},
     }
     worker_cfg = {
         "tool_access_control": {"exclude_paths": ["Temp"]},
@@ -84,6 +84,8 @@ def test_worker_effective_snapshot_is_independent_from_supervisor(monkeypatch, t
 
     assert supervisor_effective["tool_access_control"]["exclude_paths"] == ["Build"]
     assert worker_effective["tool_access_control"]["exclude_paths"] == ["Temp"]
+    assert supervisor_effective["runtime_options"]["todo_mode"] == "on"
+    assert worker_effective["runtime_options"]["todo_mode"] == "auto"
 
 
 def test_build_effective_agent_config_rejects_project_key(monkeypatch, tmp_path: Path):
@@ -146,14 +148,14 @@ def test_build_effective_agent_config_does_not_mutate_base_snapshot(monkeypatch,
     assert base_before == base_after
 
 
-def test_build_effective_agent_config_applies_top_level_smart_summary_override(monkeypatch, tmp_path: Path):
+def test_build_effective_agent_config_applies_runtime_options_smart_summary_override(monkeypatch, tmp_path: Path):
     agent_root = tmp_path / "agent"
     _patch_base_config(monkeypatch, agent_root)
 
     effective = config_module.build_effective_agent_config(
-        {"smart_summary": False},
+        {"runtime_options": {"smart_summary": False}},
         source_name="worker.yaml",
     )
 
-    assert effective["smart_summary"] is False
-    assert config_module.get_config().raw["smart_summary"] is True
+    assert effective["runtime_options"]["smart_summary"] is False
+    assert config_module.get_config().raw["runtime_options"]["smart_summary"] is True

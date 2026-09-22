@@ -4,12 +4,12 @@ from __future__ import annotations
 
 from unittest.mock import MagicMock, patch
 
-from agentloom.adapters.smolagents.models.model_manager import (
+from agentloom.runtimes.smolagents.models.model_manager import (
     ModelConfigBuilder,
     ModelConfigOverlay,
     ModelManager,
 )
-from agentloom.adapters.smolagents.models.model_types import (
+from agentloom.runtimes.smolagents.models.model_types import (
     ModelConfig,
     ModelType,
     ModelTypeManager,

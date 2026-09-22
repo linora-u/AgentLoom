@@ -5,28 +5,28 @@ from collections.abc import Mapping
 from pathlib import Path
 from typing import Any
 
+import agentloom.application.agent as agent_module
 import agentloom.application.validation as validation_module
-import agentloom.runtime.agent as agent_module
 import pytest
 from agentloom.application.definition import load_agent_definition
+from agentloom.application.factory import YamlAgentFactory
 from agentloom.application.readiness import validate_runtime_agent_config
 from agentloom.configuration.llm_config import LLMConfig
-from agentloom.runtime.agent_runtime import (
+from agentloom.execution.agent_runtime import (
     RuntimeCapabilities,
     RuntimeDefinition,
     RuntimeRegistry,
     RuntimeRequirements,
     UnsupportedRuntimeError,
 )
-from agentloom.runtime.factory import YamlAgentFactory
-from agentloom.runtime.model_binding import ModelTurnBinding
-from agentloom.runtime.model_protocol import (
+from agentloom.execution.model_binding import ModelTurnBinding
+from agentloom.execution.model_protocol import (
     MessageItem,
     ModelTurnRequest,
     ModelTurnResult,
     ToolDefinition,
 )
-from agentloom.runtime.tool_protocol import ToolCallRecord
+from agentloom.execution.tool_protocol import ToolCallRecord
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 
@@ -80,7 +80,7 @@ def _runtime_definition(
             adapter=_ModelAdapter(),
         ),
         tool_gateway=gateway,
-        max_steps=5,
+        runtime_options={'max_steps': 5},
     )
     return definition, gateway
 
@@ -267,7 +267,7 @@ def test_runtime_preflight_uses_registry_capabilities(
         tmp_path / "agent.yaml",
         agent_root=tmp_path,
     )
-    assert observed == [RuntimeRequirements(structured_tools=True)]
+    assert observed == [RuntimeRequirements(structured_tools=False)]
 
     with pytest.raises(
         UnsupportedRuntimeError,
@@ -309,13 +309,26 @@ def test_unknown_model_adapter_fails_at_config_load() -> None:
 
 
 def test_live_agent_definitions_use_the_current_runtime_contract() -> None:
+    import subprocess
+
     roots = (
         PROJECT_ROOT / "applications",
         PROJECT_ROOT / "tests/agent_test/llm_cfg_test/fixtures",
     )
+    # Validate shipped/current source definitions, not ignored local experiments
+    # or a user's private application. Include new, not-yet-committed sources.
+    source_paths = None
+    if (PROJECT_ROOT / ".git").exists():
+        listed = subprocess.check_output([
+            "git", "ls-files", "--cached", "--others", "--exclude-standard", "-z", "--",
+            *(str(root.relative_to(PROJECT_ROOT)) for root in roots),
+        ], cwd=PROJECT_ROOT)
+        source_paths = {PROJECT_ROOT / name.decode() for name in listed.split(b"\0") if name}
     definitions: list[tuple[Path, dict[str, object]]] = []
     for root in roots:
         for path in sorted((*root.rglob("*.yaml"), *root.rglob("*.yml"))):
+            if source_paths is not None and path not in source_paths:
+                continue
             try:
                 parsed = load_agent_definition(path)
             except ValueError:
@@ -330,7 +343,8 @@ def test_live_agent_definitions_use_the_current_runtime_contract() -> None:
 
     assert definitions
     for path, definition in definitions:
-        assert definition.get("agent_runtime") == "smolagents", path
+        # Shipped mixed Applications can select either supported native runtime.
+        assert definition.get("agent_runtime") in {"smolagents", "pi"}, path
         assert "tool_call_type" not in definition, path
         assert "execution_env" not in definition, path
         assert "code_agent" not in definition, path
@@ -443,3 +457,46 @@ def test_context_engine_supervisors_fix_retrieval_parameters(
     }
 
     assert configured_tools == expected_tools
+
+
+def test_smol_runtime_options_keep_explicit_layers_and_source(tmp_path):
+    from agentloom.application.runtime_options import normalize_runtime_options
+    from agentloom.configuration.config import ConfigLayerSnapshot, EffectiveAgentConfigSnapshot
+
+    config = _agent_config(agent_runtime="smolagents", runtime_options={"max_steps": 6, "planning_interval": 2})
+    config["_yaml_file_path"] = str(tmp_path / "agent.yaml")
+    snapshot = EffectiveAgentConfigSnapshot(
+        values={"runtime_options": {"smart_summary": False}},
+        layers=(ConfigLayerSnapshot("global_system", {"runtime_options": {"smart_summary": False}}, tmp_path, tmp_path / "system.yaml"),),
+    )
+    options, sources = normalize_runtime_options(config, snapshot=snapshot, agent_root=tmp_path)
+    assert options["max_steps"] == 6
+    assert options["planning_interval"] == 2
+    assert options["smart_summary"] is False
+    assert sources["smart_summary"] == f"{tmp_path / 'system.yaml'}:runtime_options.smart_summary"
+    assert sources["max_steps"] == f"{tmp_path / 'agent.yaml'}:runtime_options.max_steps"
+    assert sources["todo_mode"] == "default:smolagents"
+
+
+def test_old_smol_options_are_ignored_even_when_conflicting(tmp_path):
+    from agentloom.application.runtime_options import normalize_runtime_options
+
+    config = _agent_config(agent_runtime="smolagents", max_steps={"invalid": True},
+                          todo=False, prompt=["missing"], smart_summary="invalid",
+                          runtime_options={"max_steps": 7})
+    options, sources = normalize_runtime_options(config, agent_root=tmp_path)
+    assert options["max_steps"] == 7
+    assert options["todo_mode"] == "auto"
+    assert options["prompt_template_path"] is None
+    assert options["smart_summary"] is True
+    assert sources["todo_mode"] == "default:smolagents"
+
+
+def test_legacy_prompt_does_not_affect_canonical_template_path(tmp_path):
+    from agentloom.application.runtime_options import normalize_runtime_options
+
+    options, _ = normalize_runtime_options(_agent_config(
+        agent_runtime="smolagents", prompt={"path": "missing/ignored.yaml"},
+        runtime_options={"prompt_template_path": "prompts/custom.yaml"},
+    ), agent_root=tmp_path)
+    assert options["prompt_template_path"] == str(tmp_path / "prompts/custom.yaml")

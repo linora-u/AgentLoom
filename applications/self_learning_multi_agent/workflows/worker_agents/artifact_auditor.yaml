@@ -3,7 +3,9 @@ agent_runtime: smolagents
 description: "Audit durable self-learning artifacts created by other workers."
 
 model_type: "powerful"
-max_steps: 10
+runtime_options:
+  max_steps: 10
+  smart_summary: false
 
 toolsets: []
 worker_agents: []

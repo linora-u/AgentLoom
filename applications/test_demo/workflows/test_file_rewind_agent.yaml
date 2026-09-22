@@ -13,11 +13,13 @@ description: |
   - Step 3: Edit original.txt again (second modification)
   - Step 4: Verify the file contains the third version of content
   - Step 5: Report that all edits completed — the test harness will
-            verify that file-history backups exist under
-            .agentloom/checkpoints/test_demo/<task_id>/file-history/
+            verify that file-history backups exist under the runtime-provided
+            `$AGENTLOOM_CHECKPOINT_DIR/file-history/` directory
 
 model_type: "powerful"
-max_steps: 8
+runtime_options:
+  max_steps: 8
+  smart_summary: false
 
 workflow: |
   # File Rewind Test Workflow

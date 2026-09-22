@@ -1,6 +1,6 @@
 """Tests for shell command exit code semantic interpretation."""
 
-from agentloom.tools.shell.command_semantics import (
+from agentloom.runtimes.smolagents.tools.shell.command_semantics import (
     _extract_last_command_name,
     interpret_exit_code,
     is_search_or_read_command,

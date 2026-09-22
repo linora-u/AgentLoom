@@ -14,7 +14,7 @@ def test_sessions_prune_rejects_negative_days_before_constructing_ledger(
     monkeypatch,
 ) -> None:
     import agentloom.self_learning.persistence.ledger as ledger_module
-    from agentloom.__main__ import sessions_prune
+    from agentloom.self_learning.cli import sessions_prune
 
     constructed = False
 
@@ -44,7 +44,7 @@ def test_sessions_prune_accepts_zero_as_the_explicit_full_history_cutoff(
     monkeypatch,
 ) -> None:
     import agentloom.self_learning.persistence.ledger as ledger_module
-    from agentloom.__main__ import sessions_prune
+    from agentloom.self_learning.cli import sessions_prune
 
     received_days: list[int] = []
 

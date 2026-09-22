@@ -20,8 +20,8 @@
 - [快速参考：代表性 YAML 结构](#快速参考代表性-yaml-结构)
 - [1. system — 系统元数据](#1-system--系统元数据)
 - [1.5 model_request_headers — 模型请求头隐私配置](#15-model_request_headers--模型请求头隐私配置)
-- [2. smart_summary — 上下文压缩策略](#2-smart_summary--上下文压缩策略)
-- [3. prompt — 顶层 System Prompt 覆盖](#3-prompt--顶层-system-prompt-覆盖)
+- [2. runtime_options — 基座专属参数](#2-runtime_options--基座专属参数)
+- [3. 旧执行字段](#3-旧执行字段)
 - [4. skills — 全局 Skills 配置](#4-skills--全局-skills-配置)
 - [4.5 hooks — 独立 Hook Runtime](#45-hooks--独立-hook-runtime)
 - [5. lsp_servers — LSP 语言服务器配置](#5-lsp_servers--lsp-语言服务器配置)
@@ -58,17 +58,6 @@ system:
 model_request_headers:
   profile: "opencode"  # agentloom | none | kimicode | openclaw | opencode
   headers: {}
-
-# ============================================
-# 上下文压缩策略
-# ============================================
-smart_summary: false
-
-# ============================================
-# 顶层 Prompt 配置（支持 overlay）
-# ============================================
-prompt:
-  path: "sysprompt/system_prompt.yaml"
 
 # ============================================
 # 运行时存储与保留策略
@@ -233,45 +222,25 @@ model_request_headers:
 
 ---
 
-## 2. smart_summary — 上下文压缩策略
+## 2. runtime_options — 基座专属参数
 
-控制对话历史的上下文压缩行为。当 Token 超限时，决定使用 LLM 智能摘要还是简单截断。
-该字段在系统配置与应用级覆盖合并后会按原值透传到最终配置；请直接写 `true` / `false`，字符串值可能在不同解析路径下产生歧义。
-
-**YAML 路径**：`smart_summary` (顶层字段)
-**Pydantic 字段**：`RootSettings.smart_summary`
-
-| 参数 | 类型 | 默认值 | 必选 | 说明 |
-|------|------|--------|------|------|
-| `smart_summary` | `bool` | `true` | ❌ 否 | `true`：对话历史超限时使用 LLM 进行智能摘要压缩；`false`：回退到简单截断 |
-
-**示例**：
+后端只解释 `runtime_options`。规划、摘要、Todo 和模板属于所选基座；混合应用推荐在各 Agent YAML 中配置，避免全局 smol 参数传给 Pi。
 
 ```yaml
-# 启用智能摘要（推荐用于长对话任务）
-smart_summary: true
-
-# 禁用智能摘要（回退到截断，减少 LLM 调用）
-smart_summary: false
+# smol Agent YAML
+agent_runtime: smolagents
+runtime_options:
+  smart_summary: false
+  todo_mode: "off"
 ```
 
-## 3. prompt — 顶层 System Prompt 覆盖
+`runtime_options` 可按系统、Application、Agent 层级合并，但参数合法性由具体 adapter 校验。smol 完整字段见 [Agent 配置](agent_config.md)。
 
-`prompt` 是顶层 overlay 配置键，代码会在 `build_effective_agent_config()` 中保留它并透传到最终合并结果。它支持字符串路径或包含 `path` 的映射，作用是为 Agent 提供自定义 System Prompt 模板。
+## 3. 旧执行字段
 
-**YAML 路径**：`prompt` (顶层字段)
-**Pydantic 视角**：`RootSettings` 的 extra key；不单独建模，但会参与 overlay 合并
+旧顶层 `smart_summary`、`prompt`、`todo`、`max_steps`、`planning_interval` 和 `max_consecutive_parse_errors` 静默忽略，不转换、不拒绝。它们不再是有效的系统默认参数。
 
-| 参数 | 类型 | 默认值 | 必选 | 说明 |
-|------|------|--------|------|------|
-| `prompt` | `str` \| `dict` | — | ❌ 否 | 自定义 System Prompt 模板路径。字符串形式直接指定路径，映射形式使用 `path` 键。最终值按原样进入 effective config |
-
-**示例**：
-
-```yaml
-prompt:
-  path: "applications/my_app/sysprompt/system_prompt.yaml"
-```
+自定义 smol 模板使用 Agent YAML 的 `runtime_options.prompt_template_path`，且值必须是字符串路径。内置参考资源在 `src/runtimes/smolagents/prompts/`。
 
 ---
 
@@ -333,7 +302,7 @@ lsp_servers:
 | `max_restarts` | `int` | `3` | 服务器崩溃后自动重启的最大次数 |
 | `servers` | `list` | `[python]` | 语言列表，支持 40+ 种语言 |
 
-> 服务器由 `agentloom.adapters.lsp.lsp_server_manager.LSPServerManager` 统一管理，采用三层架构（Manager → Instance → solidlsp）。
+> 服务器由 `agentloom.integrations.lsp.lsp_server_manager.LSPServerManager` 统一管理，采用三层架构（Manager → Instance → solidlsp）。
 > 不支持的语言自动回退到 tree-sitter AST 分析（46+ 语言）。
 
 ---
@@ -472,9 +441,9 @@ loom run applications/<app>/workflows/<agent>.yaml --no-file-log
 
 ### 7.2 保留策略与存储边界
 
-自动清理最多按配置间隔执行一次；`loom clean-runtime` 可显式应用同一策略。它只删除符合条件的 run 目录或其中的 raw artifacts，永不遍历 checkpoints、`.agentloom/legacy/`、`.agentloom/workspaces/` 或 Application 自有 output 目录。
+自动清理最多按配置间隔执行一次；`loom clean-runtime` 可显式应用同一策略。它只删除符合条件的 run 目录或其中的 raw artifacts，永不遍历 checkpoints、workspaces、self-learning 状态或 Application 自有 output 目录。
 
-Agent 的持久 recall 使用 `.agentloom/workspaces/agents/<application_id>/<agent_path>/`。当前任务的 Todo 使用 canonical checkpoint 内的 `todos.json`，不迁移已删除的 Markdown 旧机制。`loom migrate-runtime --dry-run` 会预览旧 checkpoint 候选和未分域的 `.runtime`；`loom migrate-runtime --apply` 会迁移 checkpoints、把 `.logs` 归档到 `.agentloom/legacy/`，并将缺少 Application/task 来源信息的 `.runtime` 原子归档到 `.agentloom/workspaces/legacy-unscoped/`。
+Agent 的持久 recall 使用 `.agentloom/workspaces/agents/<application_id>/<agent_path>/`。当前任务的 Todo 使用 canonical checkpoint 内的 `todos.json`。持久 Schedule 与调度服务状态使用 `.agentloom/schedules/`。所有框架运行状态消费者都遵循同一个 `runtime.root_dir`；Application 自有 output 目录保持独立。
 
 验证真实 attempt 时必须读取 `manifest.json` 及其引用的日志、审计与产物，不能只看退出码。
 
@@ -874,7 +843,7 @@ Run 证据与 task 恢复状态在同一个 runtime root 下保持独立生命�
 │   ├── logs/runtime.log[.1-.3]
 │   ├── audit/{shell.jsonl[.1-.2],task_tree.json,task_events.jsonl,goal.json}
 │   └── artifacts/{result.txt,shell,background,skills}/
-└── checkpoints/<application_id>/<task_id>/
+├── checkpoints/<application_id>/<task_id>/
     ├── task_events.jsonl
     ├── task_tree.json
     ├── checkpoint.json
@@ -882,7 +851,8 @@ Run 证据与 task 恢复状态在同一个 runtime root 下保持独立生命�
     ├── heartbeat.json
     ├── workers/<worker_name>/calls/<call_index>/checkpoint.json
     ├── context_store/
-    └── file-history/
+│   └── file-history/
+└── schedules/{jobs.json,serve-status.json,executions/}
 ```
 
 除 `manifest.json` 外，这些 run 条目只会在启用对应日志或真实证据存在时生成。
@@ -997,7 +967,6 @@ checkpoint:
 | `tool_access_control` | `ToolAccessControlSettings` | `ToolAccessControlSettings()` |
 | `runtime` | `RuntimeSettings` | `RuntimeSettings()` |
 | `logging` | `LoggingSettings` | `LoggingSettings()` |
-| `smart_summary` | `bool` | `True` |
 | `context_engine` | `dict[str, Any]` | `{}` |
 | `model` | `dict[str, Any]` | `{}` |
 | `tools` | `list[Any]` | `[]` |
@@ -1009,17 +978,17 @@ checkpoint:
 | `self_learning` | `SelfLearningSettings` | `SelfLearningSettings()` |
 | `hooks` | `dict[str, Any]` | `{}` |
 
-> `RootSettings` 允许扩展字段，因此 `prompt` 等顶层字段仍可参与 overlay 合并。`RuntimeSettings` 与 `LoggingSettings` 刻意使用 `extra="forbid"`；已删除的 runtime/logging key 会直接校验失败，不会静默启用第二套存储路径。
+> `RootSettings` 允许扩展字段；`runtime_options` 由选中基座校验。旧顶层 `prompt` 等 smol 字段即使保留在原始配置中也不参与运行解释。`RuntimeSettings` 与 `LoggingSettings` 刻意使用 `extra="forbid"`；已删除的 runtime/logging key 会直接校验失败，不会静默启用第二套存储路径。
 
 **容错解析工具集**：
 
 | 解析器 | 用途 | 位于 |
 |--------|------|------|
-| `BoolParser` | 兼容布尔输入归一化，用于日志与部分 LLM 配置开关 | `config_validation.py` / `src/runtime/logging/logger_manager.py` / `src/configuration/llm_config.py` |
+| `BoolParser` | 兼容布尔输入归一化，用于日志与部分 LLM 配置开关 | `config_validation.py` / `src/execution/logging/logger_manager.py` / `src/configuration/llm_config.py` |
 | `IntParser` | 宽容整数解析；旧配置 `max_tokens: "max"` 现在会解析为有限的模型默认值 | `config_validation.py` / `src/configuration/llm_config.py` |
 | `FloatParser` | 兼容浮点与整数字符串输入，实际用于模型配置里的 `temperature`、`retry_delay`、`max_retry_delay` | `config_validation.py` / `src/configuration/llm_config.py` |
 | `EnumParser` | 通用枚举归一化辅助函数，当前未在 system.yaml 主链路中直接消费 | `config_validation.py` |
-| `LogLevelParser` | 解析 `logging.level`，支持标准 `logging` 级别与 `OFF` | `config_validation.py` / `src/runtime/logging/logger_manager.py` |
+| `LogLevelParser` | 解析 `logging.level`，支持标准 `logging` 级别与 `OFF` | `config_validation.py` / `src/execution/logging/logger_manager.py` |
 
 ---
 
@@ -1071,14 +1040,13 @@ applications/my_app/
 | 配置键 | 全局 system.yaml | 应用级 system.yaml | Agent YAML |
 |--------|----------------|-----------------|-----------|
 | `system` | ✅ 支持 | ✅ 支持 | ✅ 支持 |
-| `smart_summary` | ✅ 支持 | ✅ 支持 | ✅ 支持 |
+| `runtime_options` | ✅ 支持 | ✅ 支持 | ✅ 支持，按基座校验 |
 | `skills` | ✅ 支持 | ✅ 支持 | ✅ 支持 (Agent私有) |
 | `runtime` | ✅ 支持 | ❌ 拒绝 | ❌ 拒绝 |
 | `logging` | ✅ 支持 | ❌ 拒绝 | ❌ 拒绝 |
 | `checkpoint` | ✅ 支持 | ✅ 支持 | ❌ 忽略 |
 | `tool_access_control` | ✅ 支持 | ✅ 支持 | ✅ 支持 |
 | `tools` | ✅ 支持 | ✅ 支持 | ✅ 支持 (覆盖字典) |
-| `prompt` | ✅ 支持 | ✅ 支持 | ✅ 支持 |
 
 ```yaml
 # applications/my_app/config/system.yaml

@@ -1,5 +1,7 @@
 name: "architecture_review"
 agent_runtime: smolagents
+runtime_options:
+  smart_summary: false
 description: "Reviews architectural quality: coupling/cohesion, SOLID principles, API design, layering, and module boundary clarity."
 model_type: "powerful"
 toolsets:

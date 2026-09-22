@@ -2,7 +2,9 @@ name: "zsxq_owner_post_scraper"
 agent_runtime: smolagents
 description: "Scrape the group-owner posts from a zsxq.com group via the user's real Chrome and write them to CSV."
 model_type: "powerful"
-max_steps: 6
+runtime_options:
+  max_steps: 6
+  smart_summary: false
 toolsets: []
 skills: []
 

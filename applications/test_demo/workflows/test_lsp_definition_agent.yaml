@@ -26,4 +26,6 @@ tools:
   - name: "lsp_find_definition"
 
 worker_agents: []
-max_steps: 10
+runtime_options:
+  max_steps: 10
+  smart_summary: false

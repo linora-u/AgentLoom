@@ -5,7 +5,7 @@ import time
 
 import pytest
 
-from agentloom.tools.shell.stall_watchdog import PROMPT_PATTERNS, StallWatchdog
+from agentloom.runtimes.smolagents.tools.shell.stall_watchdog import PROMPT_PATTERNS, StallWatchdog
 
 
 class TestPromptPatterns:

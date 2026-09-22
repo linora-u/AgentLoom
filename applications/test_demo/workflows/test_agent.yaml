@@ -1,5 +1,7 @@
 name: "test_agent"
 agent_runtime: smolagents
+runtime_options:
+  smart_summary: false
 description: |
   测试专用agent，用于调试代码。
 

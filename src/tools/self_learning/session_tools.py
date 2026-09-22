@@ -29,7 +29,7 @@ _TOOL_RESULT_FIELDS = (
 
 def _disabled_response() -> str | None:
     from agentloom.self_learning.paths import self_learning_enabled
-    from agentloom.runtime.trace import capture_explicit_execution_context
+    from agentloom.execution.trace import capture_explicit_execution_context
 
     context = capture_explicit_execution_context()
     agent_config = (
@@ -46,7 +46,7 @@ def _disabled_response() -> str | None:
 
 
 def _current_run_id() -> str:
-    from agentloom.runtime.trace import MissingRunContextError, require_root_run_id
+    from agentloom.execution.trace import MissingRunContextError, require_root_run_id
 
     try:
         return require_root_run_id()

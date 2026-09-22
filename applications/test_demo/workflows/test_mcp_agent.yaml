@@ -29,4 +29,6 @@ workflow: |
   - The search query used
   - The search results summary
 
-max_steps: 10
+runtime_options:
+  max_steps: 10
+  smart_summary: false

@@ -1,0 +1,78 @@
+"""Distribution metadata is the installer's public dependency contract."""
+from __future__ import annotations
+
+from email.parser import BytesParser
+from pathlib import Path
+import runpy
+import shutil
+import subprocess
+import sys
+from zipfile import ZipFile
+
+from packaging.requirements import Requirement
+import pytest
+
+
+def test_missing_pi_asset_targets_the_installed_runtime(tmp_path, monkeypatch):
+    prefix = tmp_path / "isolated-env"
+    monkeypatch.setattr(sys, "prefix", str(prefix))
+    probe = runpy.run_path(str(Path(__file__).with_name("profile_probe.py")))
+
+    assert probe["_pi_damage_target"]("missing_asset") == (
+        prefix.resolve() / "share/pi/bridge/dist/tools.js"
+    )
+
+
+@pytest.mark.parametrize("rename_schema", [False, True], ids=["current-schema", "next-schema-filename"])
+def test_built_wheel_selects_smol_only_through_its_explicit_profile(tmp_path, rename_schema):
+    root = Path(__file__).resolve().parents[2]
+    constraints = tmp_path / "build-constraints.txt"
+    exported = subprocess.run(
+        ["uv", "export", "--locked", "--only-group", "build", "--no-emit-project", "-o", str(constraints)],
+        cwd=root, capture_output=True, text=True, timeout=60,
+    )
+    assert exported.returncode == 0, exported.stdout + exported.stderr
+    source = root
+    if rename_schema:
+        source = tmp_path / "future-package"
+        shutil.copytree(root / "src", source / "src", ignore=shutil.ignore_patterns(
+            "node_modules", "dist", "__pycache__", "*.pyc", ".agentloom-install.*"))
+        shutil.copytree(root / "studio/python", source / "studio/python", ignore=shutil.ignore_patterns(
+            "__pycache__", "*.pyc"))
+        for name in ("pyproject.toml", "README.md"):
+            shutil.copyfile(root / name, source / name)
+        schema = next((source / "src/runtimes/pi").glob("bridge-v*.schema.json"))
+        version = int(schema.name.split("-v")[1].split(".")[0])
+        schema.rename(schema.with_name(f"bridge-v{version + 1}.schema.json"))
+    built = subprocess.run(
+        ["uv", "build", "--wheel", str(source), "--out-dir", str(tmp_path),
+         "--build-constraints", str(constraints), "--require-hashes"],
+        capture_output=True, text=True, timeout=120,
+    )
+    assert built.returncode == 0, built.stdout + built.stderr
+    with ZipFile(next(tmp_path.glob("*.whl"))) as wheel:
+        names_in_wheel = wheel.namelist()
+        assert not any("/node_modules/" in name or "/bridge/dist/" in name
+                       or ".agentloom-install." in name for name in names_in_wheel)
+        assert "agentloom/runtimes/pi/bridge/tools.ts" in names_in_wheel
+        assert "agentloom/runtimes/pi/bridge/model.ts" in names_in_wheel
+        assert "agentloom/runtimes/smolagents/prompts/toolcalling_agent.example.yaml" in names_in_wheel
+        schemas = list((source / "src/runtimes/pi").glob("bridge-v*.schema.json"))
+        assert schemas
+        assert all("agentloom/runtimes/pi/" + path.name in names_in_wheel for path in schemas)
+        assert "agentloom_studio_adapter/__main__.py" in names_in_wheel
+        metadata = BytesParser().parsebytes(wheel.read(next(
+            name for name in wheel.namelist() if name.endswith(".dist-info/METADATA")
+        )))
+    requirements = [Requirement(value) for value in metadata.get_all("Requires-Dist") or []]
+    def names(extra):
+        return {r.name for r in requirements if r.marker is None or r.marker.evaluate({"extra": extra})}
+    assert "smolagents" not in names("pi")
+    assert "openinference-instrumentation-smolagents" not in names("pi")
+    assert {"smolagents", "openinference-instrumentation-smolagents"} <= names("smol")
+    professional = {"serena-agent", "ast-grep-cli", "grep-ast", "tree-sitter-language-pack",
+                    "go-bin", "nodejs-bin", "libclang", "tree-sitter-c", "networkx"}
+    assert not professional & names("pi")
+    assert professional <= names("code")
+    assert {"tree-sitter", "tree-sitter-bash"} <= names("pi")  # Shared Shell governance.
+    assert {"pi", "smol", "code"} <= set(metadata.get_all("Provides-Extra") or [])

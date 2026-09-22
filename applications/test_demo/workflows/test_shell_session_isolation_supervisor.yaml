@@ -1,5 +1,7 @@
 name: "shell_session_isolation_supervisor"
 agent_runtime: smolagents
+runtime_options:
+  smart_summary: false
 description: |
   主 agent，负责自身的 shell 操作并调度 worker agent，验证两者 shell session 互相隔离。
 

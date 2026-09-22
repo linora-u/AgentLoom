@@ -6,14 +6,14 @@ import uuid
 from threading import RLock
 from typing import TYPE_CHECKING, Any
 
-from agentloom.runtime.logging import get_logger
-from agentloom.runtime.trusted_memory_evidence import (
+from agentloom.execution.logging import get_logger
+from agentloom.execution.trusted_memory_evidence import (
     TRUSTED_MEMORY_EVIDENCE_RESPONSE_KEY,
     TrustedMemoryEvidenceEnvelope,
 )
 
 if TYPE_CHECKING:
-    from agentloom.runtime.hooks.types import HookContext, HookResult
+    from agentloom.execution.hooks.types import HookContext, HookResult
 
 from .application_scope import resolve_application_scope
 from .event_schema import CanonicalSessionEvent, compact_content, now_iso, safe_run_id
@@ -231,7 +231,7 @@ class SessionRecorder:
         return indexed
 
     def record_hook(self, context: HookContext) -> HookResult:
-        from agentloom.runtime.hooks.types import HookResult
+        from agentloom.execution.hooks.types import HookResult
 
         agent_config = context.agent_config if isinstance(context.agent_config, dict) and context.agent_config else None
         if not self_learning_enabled(agent_config):

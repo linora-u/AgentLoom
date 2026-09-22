@@ -47,7 +47,7 @@ uv run loom run applications/<app>/workflows/<agent>.yaml --resume <task_id>
 ```
 
 Run manifest 和生命周期事件携带 canonical Goal 状态；成功清理 checkpoint 前会复制到
-`audit/goal.json`。CLI 文本显示 Goal 状态，TUI 显示目标、状态和完成证据。普通模型
+`audit/goal.json`。CLI 文本显示 Goal 状态，Studio 显示目标、状态和完成证据。普通模型
 用量仍保留在运行时审计记录中，独立于 Goal 状态。
 
 Schedule 使用同一 YAML 和相同的续跑、完成与恢复语义，直到显式完成、中断或错误。

@@ -8,7 +8,8 @@ Covers:
 
 import os
 
-from agentloom.tools.shell.subprocess_env import _INJECT, _SCRUB_EXACT, build_subprocess_env
+from agentloom.execution import RuntimeHome, bind_run_context
+from agentloom.execution.subprocess_env import _INJECT, _SCRUB_EXACT, build_subprocess_env
 
 # ---------------------------------------------------------------------------
 # Sensitive variable filtering — 6 cases
@@ -113,6 +114,22 @@ class TestProtectiveVarInjection:
         monkeypatch.setenv("GIT_EDITOR", "vim")
         env = build_subprocess_env()
         assert env.get("GIT_EDITOR") == "true"
+
+    def test_current_runtime_paths_are_injected(self, tmp_path, monkeypatch):
+        context = RuntimeHome(tmp_path / "state" / "runtime").context(
+            application_id="app",
+            task_id="task_test",
+            run_id="run_test",
+        )
+        monkeypatch.setenv("AGENTLOOM_RUNTIME_ROOT", "/wrong/root")
+
+        with bind_run_context(context):
+            env = build_subprocess_env()
+
+        assert env["AGENTLOOM_RUNTIME_ROOT"] == str(context.root_dir)
+        assert env["AGENTLOOM_RUN_DIR"] == str(context.run_dir)
+        assert env["AGENTLOOM_CHECKPOINT_DIR"] == str(context.checkpoint_dir)
+        assert env["AGENTLOOM_SHELL_AUDIT_PATH"] == str(context.shell_audit_path)
 
 
 # ---------------------------------------------------------------------------

@@ -1,13 +1,7 @@
-"""
-AI Agents package.
-"""
+"""AgentLoom public package surface."""
 
 if __name__ != "agentloom":
     raise ImportError("Import AgentLoom as 'agentloom'; install the project first.")
-
-from agentloom.encoding.terminal import configure_terminal_encoding
-
-configure_terminal_encoding()
 
 __version__ = "1.0.1"
 

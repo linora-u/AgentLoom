@@ -66,7 +66,7 @@ def test_export_items_returns_active_only(seeded_store: MemoryStore) -> None:
 
 
 def test_export_json_payload_separates_active_and_pending(seeded_store: MemoryStore) -> None:
-    from agentloom.__main__ import memory_export
+    from agentloom.self_learning.cli import memory_export
 
     result = CliRunner().invoke(memory_export, [])
     assert result.exit_code == 0, result.output
@@ -88,7 +88,7 @@ def test_export_json_payload_separates_active_and_pending(seeded_store: MemorySt
 
 
 def test_export_markdown_contains_only_active_memory(seeded_store: MemoryStore) -> None:
-    from agentloom.__main__ import memory_export
+    from agentloom.self_learning.cli import memory_export
 
     result = CliRunner().invoke(memory_export, ["--format", "markdown"])
     assert result.exit_code == 0, result.output
@@ -98,7 +98,7 @@ def test_export_markdown_contains_only_active_memory(seeded_store: MemoryStore) 
 
 
 def test_export_to_file(seeded_store: MemoryStore, tmp_path: Path) -> None:
-    from agentloom.__main__ import memory_export
+    from agentloom.self_learning.cli import memory_export
 
     out_file = tmp_path / "memory_dump.json"
     result = CliRunner().invoke(memory_export, ["--out", str(out_file)])

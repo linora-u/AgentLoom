@@ -630,6 +630,20 @@ def test_trusted_launcher_creation_is_exclusive(tmp_path: Path) -> None:
     assert loom.stat().st_ino == original_inode
 
 
+def test_runtime_layout_accepts_current_distribution_package_mappings(
+    tmp_path: Path,
+) -> None:
+    (tmp_path / "pyproject.toml").write_text(
+        '[project.scripts]\nloom = "agentloom.__main__:main"\n'
+        '[tool.setuptools.package-dir]\n'
+        'agentloom = "src"\n'
+        'agentloom_studio_adapter = "studio/python/agentloom_studio_adapter"\n',
+        encoding="utf-8",
+    )
+
+    assert capsule_module._capsule_runtime_layout(tmp_path) == ("agentloom", "src")
+
+
 @pytest.mark.parametrize("runtime_package,source_directory", [
     ("src", "src"), ("agentloom", "agentloom"), ("agentloom", "src"),
 ])
@@ -738,6 +752,8 @@ def test_mapped_canonical_capsule_launcher_executes_only_approved_source(
 @pytest.mark.parametrize("mapping", [
     'agentloom = "../src"', 'agentloom = "/mutable/src"', 'agentloom = "src/application"',
     'agentloom = "src"\nother = "src"', 'src = "src"', '"" = "src"',
+    'agentloom = "src"\nagentloom_studio_adapter = "../studio"',
+    'agentloom = "src"\nagentloom_studio_adapter = "studio/python/agentloom_studio_adapter"\nother = "src"',
 ])
 def test_trusted_launcher_rejects_unsupported_source_mappings(tmp_path: Path, mapping: str) -> None:
     root = tmp_path / "capsule"

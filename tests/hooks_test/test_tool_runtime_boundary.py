@@ -6,13 +6,13 @@ from threading import Barrier, Lock
 from unittest.mock import MagicMock, patch
 
 import pytest
-from agentloom.adapters.smolagents.tools.tools import tool
-from agentloom.runtime.hooks import HookEvent, HookHandler, HookPlan, HookResult, HookRun
-from agentloom.runtime.hooks.types import Blocked
-from agentloom.runtime.tool_gateway import AgentLoomToolGateway
-from agentloom.runtime.tool_protocol import ToolCallRecord, ToolPolicyBlockedError
-from agentloom.runtime.trace import bind_explicit_execution_context, capture_explicit_execution_context
-from agentloom.runtime.trusted_memory_evidence import (
+from agentloom.runtimes.smolagents.tools.tools import tool
+from agentloom.execution.hooks import HookEvent, HookHandler, HookPlan, HookResult, HookRun
+from agentloom.execution.hooks.types import Blocked
+from agentloom.execution.tool_gateway import AgentLoomToolGateway
+from agentloom.execution.tool_protocol import ToolCallRecord, ToolPolicyBlockedError
+from agentloom.execution.trace import bind_explicit_execution_context, capture_explicit_execution_context
+from agentloom.execution.trusted_memory_evidence import (
     TRUSTED_MEMORY_EVIDENCE_ATTR,
     TRUSTED_MEMORY_EVIDENCE_KIND,
     TRUSTED_MEMORY_EVIDENCE_RESPONSE_KEY,
@@ -126,7 +126,7 @@ def test_context_engine_remains_the_only_large_result_compression_boundary() -> 
     engine.compress_tool_result.return_value = "[ContextRef ctx_123] preview"
 
     with patch(
-        "agentloom.runtime.context_engine.runtime.get_active_context_engine",
+        "agentloom.execution.context_engine.runtime.get_active_context_engine",
         return_value=engine,
     ):
         result = _invoke(_tool("large_tool", "x" * 60_000), run)
@@ -165,7 +165,7 @@ def test_trusted_evidence_is_captured_before_result_compression() -> None:
     engine.compress_tool_result.return_value = "[ContextRef ctx_123] preview"
 
     with patch(
-        "agentloom.runtime.context_engine.runtime.get_active_context_engine",
+        "agentloom.execution.context_engine.runtime.get_active_context_engine",
         return_value=engine,
     ):
         assert _invoke(tool, run) == "[ContextRef ctx_123] preview"
@@ -375,11 +375,11 @@ def test_final_input_pipeline_order_is_guard_history_recorder_tool_post() -> Non
 
     with (
         patch(
-            "agentloom.runtime.hooks.path_validators.enforce_core_tool_guard",
+            "agentloom.execution.hooks.path_validators.enforce_core_tool_guard",
             side_effect=guard,
         ),
         patch(
-            "agentloom.runtime.checkpoint.file_history_hook.record_active_file_history",
+            "agentloom.execution.checkpoint.file_history_hook.record_active_file_history",
             side_effect=history,
         ),
         patch(
@@ -437,11 +437,11 @@ def test_core_guard_block_is_not_tool_failure_and_has_no_side_effect() -> None:
 
     with (
         patch(
-            "agentloom.runtime.hooks.path_validators.enforce_core_tool_guard",
+            "agentloom.execution.hooks.path_validators.enforce_core_tool_guard",
             side_effect=guard,
         ),
         patch(
-            "agentloom.runtime.checkpoint.file_history_hook.record_active_file_history"
+            "agentloom.execution.checkpoint.file_history_hook.record_active_file_history"
         ) as history,
         patch("agentloom.self_learning.session_recorder.session_recorder_hook") as recorder,
     ):

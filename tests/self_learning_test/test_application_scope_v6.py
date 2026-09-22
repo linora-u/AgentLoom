@@ -5,7 +5,7 @@ def test_self_learning_uses_the_runtime_canonical_application_id() -> None:
     from agentloom.self_learning.application_scope import (
         safe_application_id as self_learning_application_id,
     )
-    from agentloom.runtime import safe_application_id as runtime_application_id
+    from agentloom.execution import safe_application_id as runtime_application_id
 
     raw = "commerce/中文应用"
 
@@ -14,7 +14,7 @@ def test_self_learning_uses_the_runtime_canonical_application_id() -> None:
 
 def test_bound_runtime_application_id_wins_over_config_fallback(tmp_path) -> None:
     from agentloom.self_learning.application_scope import resolve_application_scope
-    from agentloom.runtime import RuntimeContext, bind_run_context
+    from agentloom.execution import RuntimeContext, bind_run_context
 
     runtime = RuntimeContext(
         root_dir=tmp_path / ".agentloom",

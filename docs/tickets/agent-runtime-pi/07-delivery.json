@@ -1,0 +1,60 @@
+{
+  "ticket": "07",
+  "status": "PASS",
+  "main_branch": "main",
+  "main_head": "9d5a88915efbd402d0f2697318125933fc1500e0",
+  "main_index_empty": true,
+  "delivery": "unstaged/uncommitted Changes",
+  "frozen_ref": "refs/agentloom/ticket07-frozen",
+  "frozen_commit": "eca311eeca103dc6cd64eef959428e8b01eb22b2",
+  "integration_commit": "0b5c4f4ed32244ef97b107361dcb45dbe2be149e",
+  "incremental_commits": [
+    "6e79e1861c2d697c635f4385b0e48c6be143fd81",
+    "d47d0de528389f9024522d186f741863b4aaca95",
+    "f38470ec311592be79cb25b69f2a0855d9694ecc",
+    "d79b674ed7df1aa456dc66faa73fe34653ce2044",
+    "a7907669f39408944b55afd47acf96a91964172a",
+    "eca311eeca103dc6cd64eef959428e8b01eb22b2"
+  ],
+  "integration_verification": {
+    "tests_passed": 97,
+    "seconds": 55.31,
+    "exit_code": 0,
+    "log": "/Users/bytedance/code/data_clear/AgentLoom-worktrees/evidence/t07/main-integration.log",
+    "log_sha256": "69f83b2b11359a7378027546c63c44f6a6d78a65bc813e47acd6b703d54c77e7",
+    "live_passed": 1,
+    "live_total": 1,
+    "live_report": "/Users/bytedance/code/data_clear/AgentLoom-worktrees/evidence/t07/main-live/report.json"
+  },
+  "source_files_sha256": {
+    "src/adapters/pi/README.md": "3c8c53386fa718dc64dbde415b87d864f0acb0c9f65c6cc913b7e0121cb805f9",
+    "src/adapters/pi/bridge/.gitignore": "790e3169bc19b046fe55ba1da6d13b976c28363c8c00462a2195fe5faf260910",
+    "src/adapters/pi/bridge/index.ts": "e76f993412f6750dfd71583315127c14f29942f6ef7a527e39223e1c3814661d",
+    "src/adapters/pi/bridge/package-lock.json": "653413002f575c53909dee7d8c16ab7475ca13609d7c6b7e0d0e25cceecc3be8",
+    "src/adapters/pi/bridge/package.json": "6b8217297e9fca1f618f6b77d520fbb76cdc22b60dcdc7ba46ef1f5bcad82681",
+    "src/adapters/pi/bridge/protocol.ts": "2c17c70183d6934455c586c9c2c2670e26b9eb5c958bbbab7ae892957171c89e",
+    "src/adapters/pi/bridge/tsconfig.json": "57bb122447d40487461383c017f712376574b839732232e962e2d81b40761eb4",
+    "src/adapters/pi/metadata.py": "7312e8d4123187bac29226918c73157865751a68859f298d4015fb3a3fcb8f81",
+    "src/adapters/pi/runtime.py": "b5f9139b0a7073d5c6bf1c2fe6f9bc7d32eb80adfbdb5f96f96798ac1a9936fd",
+    "src/adapters/pi/transport.py": "16dc8be14fa0968d41ee94a3c177cff3dd220de0fad63ab1e32c1fa1ce765bf6",
+    "src/application/runtime_options.py": "acf2c8da189ce567d7853b6f3edb205c7d37dcb3d9872e6d668e94eac46354d1",
+    "src/runtime/agent_runtime.py": "dcee3532332d34f0a729cf46e49e4f5eaf7b23be53e3a7bafdafe1f2906ae859",
+    "tests/pi_test/run_live_applications.py": "ba1e1fdce4a4b7755ed25f6df7efe2650c808e4aa5af56a41b629b66aa6efd23",
+    "tests/pi_test/test_application.py": "966ac0cbe19125dc15572c09484b3096459bb2a6a2f244e9e220870b15657dd1",
+    "tests/pi_test/test_process_lifecycle.py": "c60d55cf381766ab026a24bc48d671f0f49c4bb2a837e5743a7579191391c97e"
+  },
+  "runtime_options_integration": "Inserted Pi validation into Ticket 04 layout; removing that addition exactly restores the pre-delivery file.",
+  "protected_files_checked": 135,
+  "intentional_plan_updates": [
+    "docs/tickets/agent-runtime-pi/README.md",
+    "docs/tickets/agent-runtime-pi/worktree-plan.md"
+  ],
+  "concurrent_document_updates_preserved": [
+    "docs/tickets/agent-runtime-pi/08-portable-platform-tools.md"
+  ],
+  "other_protected_files_unchanged": true,
+  "worktree_removed": "/Users/bytedance/code/data_clear/AgentLoom-worktrees/t07",
+  "branch_and_commits_retained": true,
+  "other_worktrees_not_modified": true,
+  "evidence_directory": "/Users/bytedance/code/data_clear/AgentLoom-worktrees/evidence/t07"
+}

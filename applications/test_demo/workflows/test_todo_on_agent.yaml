@@ -3,10 +3,11 @@ agent_runtime: smolagents
 description: "Inspect three project sources and synthesize verified metadata"
 
 model_type: "powerful"
-max_steps: 12
+runtime_options:
+  max_steps: 12
+  todo_mode: "on"
+  smart_summary: false
 
-todo:
-  mode: "on"
 
 workflow: |
   This is an acceptance run for the system-defined execution-state tracking

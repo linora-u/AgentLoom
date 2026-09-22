@@ -13,9 +13,9 @@ from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
-from agentloom.runtime.agent_runtime import RuntimeCheckpointEnvelope
-from agentloom.runtime.checkpoint import CheckpointManager
-from agentloom.runtime.checkpoint.coordinator import CheckpointCoordinator
+from agentloom.execution.agent_runtime import RuntimeCheckpointEnvelope
+from agentloom.execution.checkpoint import CheckpointManager
+from agentloom.execution.checkpoint.coordinator import CheckpointCoordinator
 
 # ── fixtures ─────────────────────────────────────────────────────────────
 
@@ -113,7 +113,7 @@ class TestWorkerCheckpoint:
                 pass
 
         monkeypatch.setattr(
-            "agentloom.runtime.checkpoint.coordinator.WorkerHeartbeat",
+            "agentloom.execution.checkpoint.coordinator.WorkerHeartbeat",
             _Heartbeat,
         )
 
@@ -153,6 +153,104 @@ class TestWorkerCheckpoint:
         assert heartbeat.start_count == 3
 
         coord.stop_all_worker_heartbeats()
+
+    def test_completed_worker_result_requires_one_exact_original_run_match(
+        self,
+        tmp_path: Path,
+    ):
+        task_id = "task_worker_reconcile"
+        manager = CheckpointManager(
+            "supervisor",
+            checkpoints_root=tmp_path,
+            run_id="run-original",
+        )
+        manager.save_task_tree(
+            task_id,
+            {
+                "task_id": task_id,
+                "status": "running",
+                "agent_name": "supervisor",
+                "workers": {
+                    "worker": [
+                        {
+                            "call_index": 0,
+                            "status": "completed",
+                            "attempt_run_id": "run-original",
+                            "input_hash": "hash",
+                            "task_input": "task",
+                            "result": "durable-result",
+                        }
+                    ]
+                },
+            },
+        )
+        coordinator = CheckpointCoordinator(
+            manager,
+            task_id,
+            "supervise",
+            resume=True,
+        )
+        assert coordinator.completed_worker_result(
+            agent_name="worker",
+            input_hash="hash",
+            task_input="task",
+            run_id="run-original",
+        ) == (True, "durable-result")
+        for changed in (
+            {"agent_name": "other"},
+            {"input_hash": "other"},
+            {"task_input": "other"},
+            {"run_id": "run-other"},
+        ):
+            arguments = {
+                "agent_name": "worker",
+                "input_hash": "hash",
+                "task_input": "task",
+                "run_id": "run-original",
+                **changed,
+            }
+            assert coordinator.completed_worker_result(**arguments) == (False, "")
+
+        for result in ("", None):
+            manager.update_task_tree(
+                task_id,
+                lambda tree, value=result: {
+                    **tree,
+                    "workers": {
+                        **tree["workers"],
+                        "worker": [
+                            dict(tree["workers"]["worker"][0], result=value),
+                        ],
+                    },
+                },
+            )
+            assert coordinator.completed_worker_result(
+                agent_name="worker",
+                input_hash="hash",
+                task_input="task",
+                run_id="run-original",
+            ) == (True, "")
+
+        manager.update_task_tree(
+            task_id,
+            lambda tree: {
+                **tree,
+                "workers": {
+                    **tree["workers"],
+                    "worker": [
+                        *tree["workers"]["worker"],
+                        dict(tree["workers"]["worker"][0], call_index=1),
+                    ],
+                },
+            },
+        )
+        with pytest.raises(ValueError, match="ambiguous"):
+            coordinator.completed_worker_result(
+                agent_name="worker",
+                input_hash="hash",
+                task_input="task",
+                run_id="run-original",
+            )
 
     def test_worker_completed_in_tree(self, cm: CheckpointManager, task_id: str):
         cm.save_task_tree(task_id, {"task_id": task_id, "status": "running", "agent_name": "sup", "workers": {}})

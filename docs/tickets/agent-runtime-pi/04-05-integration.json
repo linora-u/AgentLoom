@@ -1,0 +1,61 @@
+{
+  "tickets": [
+    "04",
+    "05"
+  ],
+  "status": "verified",
+  "date": "2026-09-20",
+  "ticket04_revision": "49eba895ba333c68cafa0f25ded3ac64ed1dbe22",
+  "ticket05_revision": "196ece736925f14070a8207fd5062acaea331356",
+  "integration_code_revision": "da4824f052bd8edb89370ef554b57ae629769e84",
+  "source_tree": "8229e7b0dbf86571fdd14c56fe58a2d809ad76b7",
+  "test_tree": "960b871755d72db7fff36f85be930bea1089ad0d",
+  "freeze_ref": "refs/agentloom/ticket04-05-integrated",
+  "full_suite": {
+    "passed": 4292,
+    "skipped": 1,
+    "warnings": 3,
+    "log": "integrated-04-05-clean-full-suite.log",
+    "checkout": "6560bf9a45977e9fc1c2ada98ce114c1929318bd"
+  },
+  "live_integration": {
+    "passed": 10,
+    "native_fixture": 8,
+    "smolagents": 2,
+    "evidence": "integrated-live-validation.json"
+  },
+  "ticket04_live": {
+    "passed_scenarios": 17,
+    "not_run": [
+      "anthropic_messages"
+    ],
+    "report": "04-validation.json"
+  },
+  "main_delivery": {
+    "head": "9d5a88915efbd402d0f2697318125933fc1500e0",
+    "unstaged": true,
+    "uncommitted": true,
+    "index_preserved": true,
+    "existing_changes_preserved": true
+  },
+  "worktree_removed": "/Users/bytedance/code/data_clear/AgentLoom-worktrees/t04",
+  "branch_preserved": "codex/pi-t04-smol",
+  "evidence_root": "/Users/bytedance/code/data_clear/AgentLoom-worktrees/evidence/t04",
+  "known_delivery_constraint": "The source-manifest test fails closed on main while legacy template deletions remain unstaged in the original Git index. It passes in the clean integrated checkout; retained failure evidence: unstaged-delivery-manifest-limitation.json.",
+  "concurrent_ticket07": {
+    "revision": "eca311eeca103dc6cd64eef959428e8b01eb22b2",
+    "integration_code_revision": "da4824f052bd8edb89370ef554b57ae629769e84",
+    "focused_passed": 181,
+    "focused_log": "integrated-04-05-07-focused.log",
+    "real_pi_applications_passed": 1,
+    "real_pi_evidence": "live-integrated-04-05-07-pi/report.json"
+  },
+  "unlocked": [
+    "06"
+  ],
+  "still_waiting": {
+    "09": [
+      "08"
+    ]
+  }
+}

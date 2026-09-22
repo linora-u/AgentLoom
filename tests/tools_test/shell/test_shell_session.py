@@ -12,7 +12,7 @@ import tempfile
 
 import pytest
 
-from agentloom.tools.shell.shell_session import ShellSession
+from agentloom.runtimes.smolagents.tools.shell.shell_session import ShellSession
 
 
 # ---------------------------------------------------------------------------

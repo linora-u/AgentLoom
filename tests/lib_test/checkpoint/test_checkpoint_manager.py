@@ -1,4 +1,4 @@
-"""Tests for ``agentloom.runtime.checkpoint.checkpoint_manager.CheckpointManager``."""
+"""Tests for ``agentloom.execution.checkpoint.checkpoint_manager.CheckpointManager``."""
 
 from __future__ import annotations
 
@@ -9,8 +9,8 @@ from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 import pytest
-from agentloom.runtime.agent_runtime import RuntimeCheckpointEnvelope
-from agentloom.runtime.checkpoint.checkpoint_manager import (
+from agentloom.execution.agent_runtime import RuntimeCheckpointEnvelope
+from agentloom.execution.checkpoint.checkpoint_manager import (
     CheckpointManager,
     cleanup_expired_tasks,
     list_all_tasks,
@@ -99,7 +99,7 @@ class TestTaskEvents:
         assert loaded["workers"]["worker_a"][0]["status"] == "completed"
         assert loaded["workers"]["worker_a"][0]["result"] == "done"
 
-    def test_legacy_task_tree_without_events_still_loads(self, cm: CheckpointManager):
+    def test_task_tree_without_canonical_event_log_is_rejected(self, cm: CheckpointManager):
         task_id = "task_legacy_only"
         path = cm._task_tree_path(task_id)
         path.parent.mkdir(parents=True, exist_ok=True)
@@ -115,10 +115,24 @@ class TestTaskEvents:
             encoding="utf-8",
         )
 
-        loaded = cm.load_task_tree(task_id)
-        assert loaded["status"] == "interrupted"
-        assert isinstance(loaded["workers"]["legacy_worker"], list)
-        assert loaded["workers"]["legacy_worker"][0]["call_index"] == 0
+        with pytest.raises(
+            ValueError,
+            match="unsupported checkpoint schema: task_events.jsonl is required",
+        ):
+            cm.load_task_tree(task_id)
+
+    def test_worker_dictionary_schema_is_rejected(self, cm: CheckpointManager):
+        with pytest.raises(
+            ValueError,
+            match="each worker must contain a list of calls",
+        ):
+            cm.save_task_tree(
+                "task_old_worker_schema",
+                {
+                    "task_id": "task_old_worker_schema",
+                    "workers": {"worker": {"status": "completed"}},
+                },
+            )
 
     def test_malformed_event_line_is_skipped(self, cm: CheckpointManager):
         task_id = "task_malformed_events"

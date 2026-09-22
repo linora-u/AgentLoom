@@ -25,4 +25,6 @@ tools:
   - name: "shell_tool"
 
 worker_agents: []
-max_steps: 8
+runtime_options:
+  max_steps: 8
+  smart_summary: false

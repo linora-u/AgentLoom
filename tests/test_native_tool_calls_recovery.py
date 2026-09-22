@@ -8,23 +8,23 @@ import time
 from concurrent.futures import ThreadPoolExecutor
 
 import pytest
-from agentloom.adapters.smolagents.agents import ToolCallingAgentV2
-from agentloom.adapters.smolagents.model_turn_bridge import SmolagentsModelTurnBridge
-from agentloom.runtime.hooks import HookPlan, HookRun
-from agentloom.runtime.logging import NullLoggerBackend
-from agentloom.runtime.model_binding import ModelTurnBinding
-from agentloom.runtime.model_protocol import (
+from agentloom.runtimes.smolagents.agents import ToolCallingAgentV2
+from agentloom.runtimes.smolagents.model_turn_bridge import SmolagentsModelTurnBridge
+from agentloom.runtimes.smolagents.terminal import final_answer_binding
+from agentloom.execution.hooks import HookPlan, HookRun
+from agentloom.execution.logging import NullLoggerBackend
+from agentloom.execution.model_binding import ModelTurnBinding
+from agentloom.execution.model_protocol import (
     FunctionCallItem,
     ModelProtocolError,
     ModelTurnRequest,
     ModelTurnResult,
 )
-from agentloom.runtime.tool_gateway import (
+from agentloom.execution.tool_gateway import (
     AgentLoomToolGateway,
     bind_tool,
-    final_answer_binding,
 )
-from agentloom.runtime.trace import (
+from agentloom.execution.trace import (
     bind_explicit_execution_context,
     capture_explicit_execution_context,
 )

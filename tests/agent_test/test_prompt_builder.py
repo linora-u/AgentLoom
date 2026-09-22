@@ -1,4 +1,4 @@
-"""Unit tests for agentloom.runtime.prompts.prompt_builder.
+"""Unit tests for agentloom.runtimes.smolagents.prompts.prompt_builder.
 
 These tests verify the prompt resolution chain and assembly logic
 independently of BaseAgent.
@@ -9,15 +9,46 @@ from __future__ import annotations
 import logging
 from pathlib import Path
 
-import agentloom.runtime.prompts.prompt_builder as pb_module
+import agentloom.runtimes.smolagents.prompts.prompt_builder as pb_module
 import pytest
-from agentloom.runtime.prompts.prompt_builder import (
+from agentloom.runtimes.smolagents.prompts.prompt_builder import (
     build_prompt_templates,
     load_base_prompt_templates,
     resolve_model_family_prompt_path,
     resolve_prompt_path,
 )
-from agentloom.runtime.skills.catalog import SkillCatalog, SkillSource
+from agentloom.execution.skills.catalog import SkillCatalog, SkillSource
+
+
+@pytest.mark.parametrize("family", ["", "anthropic", "openai", "gemini"])
+@pytest.mark.parametrize("absolute", [False, True])
+def test_canonical_shipped_template_paths_are_loadable(family, absolute):
+    from agentloom.runtimes.smolagents.options import normalize_runtime_options
+
+    root = Path(__file__).resolve().parents[2]
+    relative = Path("src/runtimes/smolagents/prompts") / family / "toolcalling_agent.example.yaml"
+    configured = str(root / relative if absolute else relative)
+    options, _ = normalize_runtime_options(
+        {"runtime_options": {"prompt_template_path": configured}}, agent_root=root,
+    )
+    assert Path(options["prompt_template_path"]) == root / relative
+    templates = load_base_prompt_templates(
+        prompt_template_path=options["prompt_template_path"], model_id=None, agent_root=root,
+        logger=logging.getLogger(__name__),
+    )
+    assert templates and templates["system_prompt"]
+
+
+def test_explicit_user_template_is_loaded_without_path_remapping(tmp_path):
+    custom = tmp_path / "custom/prompts/agent.yaml"
+    custom.parent.mkdir(parents=True)
+    custom.write_text("system_prompt: Keep my exact custom prompt\n")
+    templates = load_base_prompt_templates(
+        prompt_template_path=str(custom), model_id=None, agent_root=tmp_path,
+        logger=logging.getLogger(__name__),
+    )
+    assert templates == {"system_prompt": "Keep my exact custom prompt"}
+
 
 # ---------------------------------------------------------------------------
 # Helpers

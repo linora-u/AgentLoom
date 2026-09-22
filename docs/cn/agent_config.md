@@ -1,13 +1,16 @@
 # AgentLoom Agent YAML 配置完整参考
 
+**后端配置入口：** 只解释 `runtime_options`。旧顶层 `max_steps`、`planning_interval`、`smart_summary`、`todo`、`prompt`、`max_consecutive_parse_errors` 静默忽略，不转换、不拒绝。smol 的参数不要复制给 Pi；在各 Agent 定义中选择对应基座的参数。
+
+
 > **文档定位**：本文档详细说明 Agent YAML 的**每一个**配置参数。
 > 关于配置文件之间的覆盖关系，请参阅 [配置体系总览](config-overview.md)。
 > 关于 `config/system.yaml`，请参阅 [系统配置文档](system_config.md)。
 > 关于 `config/llm.yaml`，请参阅 [LLM 配置文档](llm_config.md)。
 
 Agent YAML 是 AgentLoom 框架中**定义单个 Agent 行为**的配置文件，控制 Agent 的角色描述、工作流指令、可用工具、模型选择、执行环境、技能包等。Agent 分为 **Supervisor**（多 Agent 编排者）和 **Worker**（具体任务执行者）两种角色。
-Agent 运行时通过必填的 `agent_runtime` 选择；当前唯一已注册值是
-`smolagents`。所有 Tool 均通过模型原生结构化 tool call 调用。
+Agent 运行时通过必填的 `agent_runtime` 选择；当前注册值为
+`smolagents` 和 `pi`。所有 Tool 均通过模型原生结构化 tool call 调用。
 
 两种角色都支持 `.yaml`、`.yml` 和 `.md` 定义。Markdown 在 `yaml` 围栏代码块中
 声明配置，代码块外非空正文成为 `workflow`。Application Studio 的目录、详情、
@@ -32,9 +35,9 @@ Supervisor，并复用执行入口的定义读取器。Worker 仍通过 Supervis
   - [3.6 结构化工具调用](#36-结构化工具调用)
   - [3.7 model_type — 模型选择](#37-model_type--模型选择)
   - [3.8 skills — 技能包配置](#38-skills--技能包配置)
-  - [3.9 prompt — 自定义 Prompt](#39-prompt--自定义-prompt)
-  - [3.10 planning_interval — 规划间隔](#310-planning_interval--规划间隔)
-  - [3.11 todo.mode — 任务跟踪](#311-todomode--任务跟踪)
+  - [3.9 runtime_options.prompt_template_path — 自定义 Prompt](#39-runtime_optionsprompt_template_path--自定义-prompt)
+  - [3.10 runtime_options.planning_interval — 规划间隔](#310-runtime_optionsplanning_interval--规划间隔)
+  - [3.11 runtime_options.todo_mode — 任务跟踪](#311-runtime_optionstodo_mode--任务跟踪)
   - [3.11 concurrency — 并发度配置](#311-concurrency--并发度配置)
   - [3.12 mcp_servers — MCP 外部工具集成](#312-mcp_servers--mcp-外部工具集成)
 - [4. 工具配置详解](#4-工具配置详解)
@@ -102,8 +105,8 @@ worker_agents:
   - path: "applications/my_app/workflows/worker_agents/project_scan.yaml"
   - path: "applications/my_app/workflows/worker_agents/data_analysis.yaml"
 
-prompt:
-  path: "applications/my_app/sysprompt/agent_prompt.yaml"
+runtime_options:
+  prompt_template_path: "applications/my_app/sysprompt/agent_prompt.yaml"
 
 skills:
   paths:
@@ -138,9 +141,10 @@ tools:
     function: "get_module_context"
 
 model_type: "powerful"
-max_steps: 40                            # 最大执行步数 (默认: 80)
-planning_interval: 3                     # 每 N 步强制规划
-todo: {mode: "auto"}                     # auto | on | off
+runtime_options:
+  max_steps: 40                            # 最大执行步数 (默认: 80)
+  planning_interval: 3                     # 每 N 步强制规划
+  todo_mode: "auto"                     # auto | on | off
 
 # ---- Worker 专属: 可调用工具契约 ----
 # 注意：inputs 下的参数名可自定义，只要是合法 Python 标识符即可
@@ -169,7 +173,7 @@ Supervisor 和 Worker 共有 4 个必填字段：
 | 字段 | 类型 | 校验规则 | 说明 |
 |------|------|----------|------|
 | `name` | `str` | 非空字符串 | Agent 唯一标识符。Worker 中同时作为导出工具的函数名 |
-| `agent_runtime` | `str` | 必须是已注册值；当前仅 `smolagents` | 选择完整 Agent runtime。缺失或未知值在预检阶段失败 |
+| `agent_runtime` | `str` | 必须是已注册值：`smolagents` / `pi` | 选择完整 Agent runtime。缺失或未知值在预检阶段失败 |
 | `description` | `str` | 非空字符串 | Agent 角色描述。Supervisor 的单字符串 workflow 会参与任务拼装；列表 workflow 项按用户编写内容直接执行 |
 | `workflow` | `str` 或 `list[str]` | 非空字符串，或非空且每项为非空字符串的列表 | 工作流指令文本。支持 Markdown 和 Mermaid 流程图。详见下方 [书写规范](#workflow-书写规范与建议) |
 
@@ -396,15 +400,17 @@ workflow: |
 |------|------|--------|------|
 | `tools` | `list[dict]` | `[]` | 工具列表。详见 [第 4 节](#4-工具配置详解) |
 | `model_type` | `str` | 已配置的全局 `default_model_type` | 模型选择。详见 [3.7](#37-model_type--模型选择) |
-| `prompt` | `str` 或 `dict` | 框架内置 | 自定义 System Prompt 模板。详见 [3.9](#39-prompt--自定义-prompt) |
-| `planning_interval` | `int` | 不设置 | 每 N 步强制规划。详见 [3.10](#310-planning_interval--规划间隔) |
-| `todo` | `dict` | `{mode: "auto"}` | 当前任务进度跟踪。详见 [3.11](#311-todomode--任务跟踪) |
+| `runtime_options.prompt_template_path` | `str` | 不设置 | smol 模板路径，仅字符串 |
+| `runtime_options.planning_interval` | `int` | 不设置 | 每 N 步强制规划。详见 [3.10](#310-runtime_optionsplanning_interval--规划间隔) |
+| `runtime_options.todo_mode` | `str` | "auto" | smol 当前任务跟踪；"on" / "off" 必须加引号 |
 | `concurrency` | `int`/`str` | 不设置 | 并发度：此 Agent 被批量调用时的最大并发数。详见 [3.11](#311-concurrency--并发度配置) |
 | `skills` | `list`/`dict`/`str` | 不设置 | 私有技能包配置。详见 [3.8](#38-skills--技能包配置) |
 | `hooks` | `dict` | 不设置 | 独立直接 Hook 与显式 Hook Bundle。详见 [Hooks](hooks.md) |
-| `max_steps` | `int` | `80` | 最大执行步数。超过后 Agent 强制终止 |
+| `runtime_options.max_steps` | `int` | `80` | 最大执行步数。超过后 Agent 强制终止 |
 
 ---
+
+以上 `runtime_options.*` 为 smol 专属参数；`smart_summary` 接受 bool，默认 `true`；`max_consecutive_model_errors` 接受正整数，默认 `5`。Pi 使用自己的 options，不能复制 smol 参数。
 
 ### 3.3 Supervisor 专属字段
 
@@ -432,7 +438,7 @@ workflow: |
 agent_runtime: "smolagents"
 ```
 
-当前唯一已注册值为 `smolagents`。缺失、空值、`langgraph` 或其他未知值都会在
+当前注册值为 `smolagents` 和 `pi`，需安装所选基座。缺失、空值、`langgraph` 或其他未知值都会在
 Application 预检阶段失败，不会默认选择或回退到其他 runtime。这个字段与
 `config/system.yaml` 中负责存储目录的全局 `runtime` mapping 无关。
 
@@ -480,86 +486,41 @@ skills:
 
 ---
 
-### 3.9 `prompt` — 自定义 Prompt
+### 3.9 `runtime_options.prompt_template_path` — 自定义 Prompt
 
-用于覆盖框架内置的 System Prompt 模板。
-
-#### 两种写法
+smol 的自定义 System Prompt 模板使用非空字符串路径，不接受 `{path: ...}` 映射：
 
 ```yaml
-# 写法 1：直接字符串路径
-prompt: "applications/my_app/sysprompt/agent_prompt.yaml"
-
-# 写法 2：字典形式（必须包含 path 键）
-prompt:
-  path: "applications/my_app/sysprompt/agent_prompt.yaml"
+runtime_options:
+  prompt_template_path: "applications/my_app/sysprompt/agent_prompt.yaml"
 ```
 
-#### 路径解析规则
-
-- **相对路径**：基于 `AGENT_ROOT`（包含 `config/system.yaml` 的项目根目录）解析
-- **绝对路径**：直接使用
-
-#### Prompt 解析优先级（从高到低）
-
-| 优先级 | 来源 | 说明 |
-|--------|------|------|
-| 1 | 函数参数 `prompt_template_path` | 代码中显式传入 |
-| 2 | Agent YAML `prompt` 字段 | 当前文档配置 |
-| 3 | 模型家族变体 | `<prompts_dir>/<family>/toolcalling_agent.yaml`（用户从 `.example.yaml` 去掉后缀激活） |
-| 4 | 本地覆盖 | `<prompts_dir>/toolcalling_agent.yaml`（用户从 `.example.yaml` 去掉后缀激活） |
-| 5 | smolagents 内置默认 | smolagents 包自带的内置 prompt（无需任何文件） |
-
-> **自定义方式**：所有 `.example.yaml` 文件（包括 `anthropic/`、`openai/`、`gemini/` 目录下的）均为参考模板。要激活自定义 prompt，只需去掉 `.example` 后缀即可：
-> ```bash
-> # 激活 anthropic 模型家族变体
-> mv anthropic/toolcalling_agent.example.yaml anthropic/toolcalling_agent.yaml
-> ```
-> 要恢复默认，重新加回 `.example` 后缀即可。
-
-**校验**：字典形式时必须包含 `path` key，否则报错 `must include 'path' when prompt is a mapping`。prompt 文件必须是合法 YAML mapping。
-
-> 此字段可在 Agent YAML 中覆盖系统配置（属于 [overlay 白名单](#92-可覆盖字段白名单)）。
+相对路径基于项目根目录解析，绝对路径直接使用。模板内容必须是合法 YAML mapping。
+显式路径优先；未配置时，smol adapter 依次选择 `src/runtimes/smolagents/prompts/` 下已激活的模型家族模板、本地模板，再使用 smolagents 内置模板。`.example.yaml` 只是参考资源。
 
 ---
 
-### 3.10 `planning_interval` — 规划间隔
+### 3.10 `runtime_options.planning_interval` — 规划间隔
 
-设置后，Agent 每执行 N 步会强制进行一次规划（planning step）。
-
-**类型**：`int`（正整数）
-**默认值**：不设置（不启用定期规划）
-
-**校验规则**：
-
-| 输入值 | 解析结果 | 说明 |
-|--------|---------|------|
-| `3` | `3` | 正常正整数 |
-| `"3"` | `3` | 支持字符串整数自动转换 |
-| `0` / `-1` | 不设置 | 零和负数等同不设置 |
-| `null` / 省略 | 不设置 | 不启用 |
-| `true` / `false` | 不设置 | bool 类型被忽略（`true` 不会变成 `1`） |
-| `""` / `"abc"` | 不设置 | 空字符串或非数字字符串被忽略 |
-
-**示例**：
+仅供 smol 使用。设为正整数时，每 N 步进行一次规划；省略或 `null` 表示关闭。字符串、布尔值、零和负数均不接受。
 
 ```yaml
-planning_interval: 3    # 每 3 步强制规划一次
+runtime_options:
+  planning_interval: 3
 ```
 
-`planning_interval` 只控制模型的周期性 planning，不再启用、禁用或调度 Todo。
-Todo 由 [`todo.mode`](#311-todomode--任务跟踪) 独立配置。
+规划与 `runtime_options.todo_mode` 独立。
 
 ---
 
-### 3.11 `todo.mode` — 任务跟踪
+### 3.11 `runtime_options.todo_mode` — 任务跟踪
 
 Todo 只跟踪当前任务中当前 Agent 的执行进度，不承担长期项目管理职责；
 它与 `planning_interval` 和 Agent 显式声明的 `tools` 列表相互独立。
 
 ```yaml
-todo:
-  mode: "auto"  # auto | on | off；YAML 1.1 中 on/off 建议加引号
+runtime_options:
+  todo_mode: "auto"  # auto | on | off；YAML 1.1 中 on/off 建议加引号
 ```
 
 | 模式 | 行为 |
@@ -568,8 +529,7 @@ todo:
 | `on` | 提供 `todo_write`。范围已经清晰的非简单多步骤任务中，强提示模型把单独的 `todo_write` 作为首个工具调用；仅当可靠列表确实需要更多事实时，才允许先做最少只读调查。 |
 | `off` | 不向模型暴露工具、Todo 提示策略或当前 Todo 快照。 |
 
-该配置可写在 `config/system.yaml`、Application YAML 或 Agent YAML 中，
-更具体的层级覆盖上层；仅接受 `auto`、`on`、`off`。
+`runtime_options` 按配置层级合并；混合基座应用应在每个 smol Agent 上配置 `todo_mode`。只接受字符串 `"auto"`、`"on"`、`"off"`，`on`/`off` 必须加引号。
 
 `todo_write` 每次原子替换完整列表。每项包含 `content`，状态只能是
 `pending`、`in_progress`、`completed` 或 `cancelled`，且最多一个
@@ -636,7 +596,7 @@ tool = YamlAgentFactory.create_agent_as_tool("worker.yaml")
 # 构造任务列表
 tasks = [
     {"dir_path": "src/api", "index_content": "..."},
-    {"dir_path": "src/utils", "index_content": "..."},
+    {"dir_path": "src/application/imports", "index_content": "..."},
     {"dir_path": "src/core", "index_content": "..."},
 ]
 
@@ -809,7 +769,7 @@ toolset 归属、implementation 加载规则和真实验收矩阵见
 #### 4.4.3 核心 API：`YamlAgentFactory.create_agent_as_tool()`
 
 ```python
-from agentloom.runtime.factory import YamlAgentFactory
+from agentloom.application.factory import YamlAgentFactory
 
 tools = YamlAgentFactory.create_agent_as_tool(
     config_path,        # str | Path | dict — Worker YAML 路径（相对于 AGENT_ROOT）或配置字典
@@ -844,8 +804,8 @@ tools = YamlAgentFactory.create_agent_as_tool(
 from __future__ import annotations
 from pathlib import Path
 
-from agentloom.runtime.logging import get_logger
-from agentloom.runtime.factory import YamlAgentFactory
+from agentloom.execution.logging import get_logger
+from agentloom.application.factory import YamlAgentFactory
 
 _AGENT_YAML = "applications/<app>/workflows/worker_agents/<worker>.yaml"
 
@@ -902,8 +862,8 @@ import json
 import traceback
 from pathlib import Path
 
-from agentloom.runtime.logging import get_logger
-from agentloom.runtime.factory import YamlAgentFactory
+from agentloom.execution.logging import get_logger
+from agentloom.application.factory import YamlAgentFactory
 
 _AGENT_YAML = "applications/<app>/workflows/worker_agents/<worker>.yaml"
 
@@ -1230,7 +1190,7 @@ worker_agents:
 | 报错信息 | 修复 |
 |----------|------|
 | `missing required 'agent_runtime'` | 添加 `agent_runtime: smolagents` |
-| `agent_runtime must name a registered runtime` | 当前只使用 `smolagents` |
+| `agent_runtime must name a registered runtime` | 选择已安装的 `smolagents` 或 `pi` |
 | `skills must be a list, dict, or string path` | 用列表/字典/字符串 |
 
 ---
@@ -1308,7 +1268,7 @@ agent_function_schema:
     对单个目录进行 LLM 架构分析，返回 Markdown 格式分析文本。
   inputs:
     dir_path:
-      description: "要分析的相对目录路径，如 src/utils"
+      description: "要分析的相对目录路径，如 src/application/imports"
       required: true
     index_content:
       description: "该目录 index.md 的完整文本内容"
@@ -1385,18 +1345,16 @@ Agent YAML 中以下顶层字段能覆盖系统配置（源码 `_WORKFLOW_OVERLA
 |------|----------|------|
 | `system` | `dict` | 系统元数据（name, version, user_agent） |
 | `model_request_headers` | `dict` | 模型请求头 profile |
-| `smart_summary` | `any` | 上下文压缩策略 |
+| `runtime_options` | `dict` | 由选中基座解释的参数，Worker 独立构建 |
 | `context_engine` | `dict` | 可逆上下文压缩限制 |
 | `tool_access_control` | `dict` | 工作目录和路径过滤 |
 | `tools` | `list` | Agent 工具列表及其最终配置覆盖 |
 | `shell_settings` | `any` | Shell 安全配置 |
 | `default_toolsets` / `toolsets` | `any` | 默认工具集或工具集替换 |
-| `prompt` | `str`/`dict` | 自定义 System Prompt 模板路径 |
 | `mcp_servers` | `str`/`list`/`dict` | MCP server 配置 |
 | `self_learning` | `dict` | History 与可选 memory review 策略 |
-| `todo` | `dict` | Todo 模式（`auto`、`on` 或 `off`） |
 
-> ⚠️ **重要**：上面的白名单是按 **每个 Agent YAML 独立计算** 的，不是按调用链传递。Supervisor 调用 Worker 时，Worker 的 `tool_access_control`、`shell_settings`、`prompt` 等覆盖项会从 Worker YAML 重新构建，而不是自动继承 Supervisor。
+> ⚠️ **重要**：上面的白名单是按 **每个 Agent YAML 独立计算** 的，不是按调用链传递。Supervisor 调用 Worker 时，Worker 的 `tool_access_control`、`shell_settings`、`runtime_options` 等覆盖项会从 Worker YAML 重新构建，而不是自动继承 Supervisor。
 >
 > ```yaml
 > # 如果 Supervisor 和 Worker 都要访问同一份 workspace 外部目录，
@@ -1419,7 +1377,6 @@ Agent YAML 中以下顶层字段能覆盖系统配置（源码 `_WORKFLOW_OVERLA
 | `worker_agents` / `agent_function_schema` | 角色专属属性 |
 | `skills` | 独立三层叠加加载（详见 [3.8](#38-skills--技能包配置)） |
 | `agent_runtime` / `model_type` | Agent runtime 与模型类型选择参数 |
-| `max_steps` / `planning_interval` | Agent 执行参数 |
 
 ### 9.4 LLM 配置隔离
 
@@ -1450,7 +1407,8 @@ WARNING: Ignoring top-level key 'model' in agent config;
 
 ```yaml
 # Agent 级别禁用智能摘要
-smart_summary: false
+runtime_options:
+  smart_summary: false
 ```
 
 ### 9.7 Per-Agent Shell 安全配置覆盖
@@ -1662,17 +1620,19 @@ rg 'SECURITY_BLOCK|WHITELIST_REJECT|PATH_VIOLATION' "$run_dir/audit/shell.jsonl"
 | 字段 | 必填 | Supervisor | Worker | 类型 | 默认值 |
 |------|------|-----------|--------|------|--------|
 | `name` | ✅ | ✅ | ✅ | `str` | — |
-| `agent_runtime` | ✅ | ✅ | ✅ | `str` | `smolagents`（必须显式写出） |
+| `agent_runtime` | ✅ | ✅ | ✅ | `str` | 无默认；显式选择 `smolagents` / `pi` |
 | `description` | ✅ | ✅ | ✅ | `str` | — |
 | `workflow` | ✅ | ✅ | ✅ | `str`/`list[str]` | — |
 | `goal` | ❌ | ✅ | ❌ | `bool`/`dict` | `false` |
 | `tools` | ❌ | ✅ | ✅ | `list[dict]` | `[]` |
 | `model_type` | ❌ | ✅ | ✅ | `str` | `config/llm.yaml` 中的 `model.default_model_type`；无隐式默认值 |
-| `prompt` | ❌ | ✅ | ✅ | `str`/`dict` | 框架内置 |
-| `planning_interval` | ❌ | ✅ | ✅ | `int` | 不设置 |
-| `todo` | ❌ | ✅ | ✅ | `dict` | `{mode: "auto"}` |
+| `runtime_options.prompt_template_path` | ❌ | ✅ | ✅ | `str` | 不设置 |
+| `runtime_options.planning_interval` | ❌ | ✅ | ✅ | `int` | 不设置 |
+| `runtime_options.todo_mode` | ❌ | ✅ | ✅ | `str` | `"auto"` |
 | `concurrency` | ❌ | ✅ | ✅ | `int`/`str` | 不设置 (`auto`) |
 | `skills` | ❌ | ✅ | ✅ | `list`/`dict`/`str` | 自动加载 |
 | `worker_agents` | ❌ | ✅ | ❌ | `list[dict]` | `[]` |
-| `max_steps` | ❌ | ✅ | ✅ | `int` | `80` |
+| `runtime_options.smart_summary` | ❌ | ✅ | ✅ | `bool` | `true` |
+| `runtime_options.max_consecutive_model_errors` | ❌ | ✅ | ✅ | `int` | `5` |
+| `runtime_options.max_steps` | ❌ | ✅ | ✅ | `int` | `80` |
 | `agent_function_schema` | ❌ | ❌ | ✅ | `dict` | 不设置 |

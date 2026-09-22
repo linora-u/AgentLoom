@@ -34,9 +34,8 @@ workflow: |
      - `date`, `whoami`, and `uname -a` must report
        `Allowed commands: cat, echo, grep, ls, printf, pwd, wc`.
      - `echo first ; echo second` must report `Allowed operators: &&, |`.
-  3. Locate the current audit with
-     `ls -dt .agentloom/runs/test_shell_allowlist_matrix/run_*/audit/shell.jsonl`
-     and use the first returned path. Read it with `cat`.
+  3. Read the current audit from the runtime-provided canonical path with
+     `cat "$AGENTLOOM_SHELL_AUDIT_PATH"`.
   4. Parse every valid JSON line. Require one `POLICY_SNAPSHOT` whose details
      contain the exact allowed command list, `allowed_operators="|, &&"`, and
      `command_success_logging="false"`.
@@ -52,4 +51,6 @@ workflow: |
      Never mark PASS from expectation alone.
 
 worker_agents: []
-max_steps: 24
+runtime_options:
+  max_steps: 24
+  smart_summary: false

@@ -11,15 +11,40 @@ from pathlib import Path
 from threading import Event, Thread
 
 import pytest
-from click.testing import CliRunner
-
 from agentloom.__main__ import main
 from agentloom.schedules.runner import ScheduleRunner
 from agentloom.schedules.schedule import once_schedule
 from agentloom.schedules.service import ScheduleService
 from agentloom.schedules.store import ScheduleStore
+from click.testing import CliRunner
 
 NOW = datetime(2026, 7, 18, 8, 0, tzinfo=UTC)
+
+
+def _supervisor(project_root: Path, relative: str = "applications/test/workflows/agent.yaml") -> Path:
+    config = project_root / "config"
+    config.mkdir(parents=True, exist_ok=True)
+    (config / "llm.yaml").write_text(
+        (
+            "model:\n"
+            "  default_model_type: test\n"
+            "  test: {model: openai/test, adapter: openai_chat}\n"
+            "  summary: {model: openai/test-summary, adapter: openai_chat}\n"
+        ),
+        encoding="utf-8",
+    )
+    yaml_path = project_root / relative
+    yaml_path.parent.mkdir(parents=True, exist_ok=True)
+    yaml_path.write_text(
+        (
+            "name: test\n"
+            "agent_runtime: smolagents\n"
+            "description: Scheduled test supervisor.\n"
+            "workflow: Run the scheduled test task.\n"
+        ),
+        encoding="utf-8",
+    )
+    return yaml_path
 
 
 def _job(store: ScheduleStore, tmp_path: Path) -> dict:
@@ -47,6 +72,112 @@ def test_runner_uses_canonical_agentloom_command_by_default(tmp_path: Path) -> N
         "--output-format",
         "jsonl",
     ]
+
+
+def test_runner_requires_application_validation_for_new_schedule_job(
+    tmp_path: Path,
+) -> None:
+    yaml_path = _supervisor(tmp_path)
+    result = CliRunner().invoke(
+        main,
+        [
+            "schedules",
+            "--project",
+            str(tmp_path),
+            "add",
+            yaml_path.relative_to(tmp_path).as_posix(),
+            "--every",
+            "1h",
+            "--json",
+        ],
+    )
+    assert result.exit_code == 0, result.output
+    job = json.loads(result.output)
+
+    assert ScheduleRunner(ScheduleStore(tmp_path)).command_for(job)[-1] == ("--require-valid-supervisor-target")
+
+
+def test_runner_keeps_legacy_job_command_compatible(tmp_path: Path) -> None:
+    store = ScheduleStore(tmp_path)
+    job = _job(store, tmp_path)
+
+    assert "--require-valid-supervisor-target" not in ScheduleRunner(store).command_for(job)
+
+
+def test_custom_command_cannot_bypass_new_schedule_target_validation(
+    tmp_path: Path,
+) -> None:
+    yaml_path = _supervisor(tmp_path)
+    added = CliRunner().invoke(
+        main,
+        [
+            "schedules",
+            "--project",
+            str(tmp_path),
+            "add",
+            yaml_path.relative_to(tmp_path).as_posix(),
+            "--every",
+            "1h",
+            "--json",
+        ],
+    )
+    assert added.exit_code == 0, added.output
+    job = json.loads(added.output)
+
+    with pytest.raises(RuntimeError, match="cannot bypass"):
+        ScheduleRunner(
+            ScheduleStore(tmp_path),
+            command_factory=lambda _job: ["true"],
+        ).command_for(job)
+
+    store = ScheduleStore(tmp_path)
+    execution = ScheduleRunner(
+        store,
+        command_factory=lambda _job: ["true"],
+    ).run_now(job["id"])
+
+    assert execution["status"] == "failed"
+    assert "cannot bypass" in execution["error"]
+    assert store.get_job(job["id"])["claim"] is None
+
+
+@pytest.mark.parametrize("replacement", ["symlink", "invalid"])
+def test_runner_revalidates_new_schedule_target_before_run_allocation(
+    tmp_path: Path,
+    replacement: str,
+) -> None:
+    yaml_path = _supervisor(tmp_path)
+    added = CliRunner().invoke(
+        main,
+        [
+            "schedules",
+            "--project",
+            str(tmp_path),
+            "add",
+            yaml_path.relative_to(tmp_path).as_posix(),
+            "--every",
+            "1h",
+            "--json",
+        ],
+    )
+    assert added.exit_code == 0, added.output
+    job = json.loads(added.output)
+    if replacement == "symlink":
+        outside = tmp_path.parent / f"{tmp_path.name}-outside.yaml"
+        outside.write_text(yaml_path.read_text(encoding="utf-8"), encoding="utf-8")
+        yaml_path.unlink()
+        yaml_path.symlink_to(outside)
+    else:
+        yaml_path.write_text("name: invalid\n", encoding="utf-8")
+
+    execution = ScheduleRunner(
+        ScheduleStore(tmp_path),
+        poll_seconds=0.01,
+    ).run_now(job["id"])
+
+    assert execution["status"] == "failed"
+    assert execution["pid"] is not None
+    assert not (tmp_path / ".agentloom/runs").exists()
 
 
 @pytest.mark.parametrize("package", ["src", "agentloom"])
@@ -198,8 +329,7 @@ def test_run_now_keyboard_interrupt_still_finishes_the_claim(tmp_path: Path) -> 
 def test_cli_registers_all_schedule_operations_and_can_add_list_pause_resume_remove(
     tmp_path: Path,
 ) -> None:
-    yaml_path = tmp_path / "agent.yaml"
-    yaml_path.write_text("name: test\n", encoding="utf-8")
+    yaml_path = _supervisor(tmp_path)
     runner = CliRunner()
     prefix = ["schedules", "--project", str(tmp_path)]
 
@@ -213,7 +343,7 @@ def test_cli_registers_all_schedule_operations_and_can_add_list_pause_resume_rem
         prefix
         + [
             "add",
-            str(yaml_path),
+            yaml_path.relative_to(tmp_path).as_posix(),
             "--name",
             "hourly",
             "--every",
@@ -251,6 +381,133 @@ def test_cli_registers_all_schedule_operations_and_can_add_list_pause_resume_rem
     assert ScheduleStore(tmp_path).list_jobs() == []
 
 
+@pytest.mark.parametrize(
+    "target",
+    ["plain_yaml", "worker", "outside", "missing", "invalid"],
+)
+def test_cli_schedule_add_rejects_non_supervisor_before_storage_creation(
+    tmp_path: Path,
+    target: str,
+) -> None:
+    supervisor = _supervisor(tmp_path)
+    if target == "plain_yaml":
+        candidate_path = tmp_path / "plain.yaml"
+        candidate_path.write_text("name: plain\n", encoding="utf-8")
+        candidate = candidate_path.relative_to(tmp_path).as_posix()
+    elif target == "worker":
+        candidate_path = supervisor.parent / "worker_agents/worker.yaml"
+        candidate_path.parent.mkdir()
+        candidate_path.write_text(
+            (
+                "name: worker\n"
+                "agent_runtime: smolagents\n"
+                "description: Worker.\n"
+                "agent_function_schema:\n"
+                "  description: Work.\n"
+                "  inputs: {task: {description: Task, required: true}}\n"
+                "  output: {description: Result}\n"
+            ),
+            encoding="utf-8",
+        )
+        candidate = candidate_path.relative_to(tmp_path).as_posix()
+    elif target == "outside":
+        candidate_path = tmp_path.parent / f"{tmp_path.name}-outside.yaml"
+        candidate_path.write_text(
+            supervisor.read_text(encoding="utf-8"),
+            encoding="utf-8",
+        )
+        candidate = str(candidate_path)
+    elif target == "missing":
+        candidate = (supervisor.parent / "missing.yaml").relative_to(tmp_path).as_posix()
+    else:
+        supervisor.write_text("name: invalid\n", encoding="utf-8")
+        candidate = supervisor.relative_to(tmp_path).as_posix()
+
+    result = CliRunner().invoke(
+        main,
+        [
+            "schedules",
+            "--project",
+            str(tmp_path),
+            "add",
+            candidate,
+            "--every",
+            "1h",
+        ],
+    )
+
+    assert result.exit_code != 0
+    assert "yaml_path" in result.output or "valid supervisor" in result.output
+    assert not (tmp_path / ".agentloom").exists()
+
+
+def test_cli_schedule_add_rejects_invalid_trigger_before_storage_creation(
+    tmp_path: Path,
+) -> None:
+    supervisor = _supervisor(tmp_path)
+
+    result = CliRunner().invoke(
+        main,
+        [
+            "schedules",
+            "--project",
+            str(tmp_path),
+            "add",
+            supervisor.relative_to(tmp_path).as_posix(),
+            "--every",
+            "invalid",
+        ],
+    )
+
+    assert result.exit_code != 0
+    assert not (tmp_path / ".agentloom").exists()
+
+
+def test_cli_schedule_add_rejects_invalid_name_before_storage_creation(
+    tmp_path: Path,
+) -> None:
+    supervisor = _supervisor(tmp_path)
+
+    result = CliRunner().invoke(
+        main,
+        [
+            "schedules",
+            "--project",
+            str(tmp_path),
+            "add",
+            supervisor.relative_to(tmp_path).as_posix(),
+            "--every",
+            "1h",
+            "--name",
+            "bad\nname",
+        ],
+    )
+
+    assert result.exit_code != 0
+    assert "control characters" in result.output
+    assert not (tmp_path / ".agentloom").exists()
+
+
+@pytest.mark.parametrize("command", ["pause", "remove"])
+def test_cli_schedule_mutations_report_noncanonical_job_id(
+    tmp_path: Path,
+    command: str,
+) -> None:
+    result = CliRunner().invoke(
+        main,
+        [
+            "schedules",
+            "--project",
+            str(tmp_path),
+            command,
+            " job_1 ",
+        ],
+    )
+
+    assert result.exit_code != 0
+    assert "job_id must not contain surrounding whitespace" in result.output
+
+
 def test_one_tick_server_writes_a_stopped_health_record(tmp_path: Path) -> None:
     store = ScheduleStore(tmp_path)
     service = ScheduleService(store)
@@ -261,6 +518,59 @@ def test_one_tick_server_writes_a_stopped_health_record(tmp_path: Path) -> None:
     assert status["state"] == "stopped"
     assert status["heartbeat"]["last_success_at"] is not None
     assert status["heartbeat"]["stopped_at"] is not None
+
+
+def test_service_preserves_version_one_nul_error_heartbeat(tmp_path: Path) -> None:
+    from agentloom.schedules.presentation import schedule_catalog
+
+    class FailingRunner:
+        def run_due(self, **_kwargs) -> list[dict]:
+            raise RuntimeError("boom\x00detail")
+
+    store = ScheduleStore(tmp_path)
+    service = ScheduleService(store, runner=FailingRunner())
+
+    service.serve(tick_seconds=0.1, max_ticks=1)
+
+    status = service.status()
+    projection = schedule_catalog(tmp_path)
+    assert status["state"] == "stopped"
+    assert status["heartbeat"]["last_error"] == "RuntimeError: boom\x00detail"
+    assert projection["service"]["state"] == "stopped"
+    assert projection["service"]["last_error"] == "RuntimeError: boomdetail"
+
+
+def test_manual_run_does_not_publish_server_heartbeat(tmp_path: Path) -> None:
+    store = ScheduleStore(tmp_path)
+    job = _job(store, tmp_path)
+    service = ScheduleService(
+        store,
+        runner=ScheduleRunner(
+            store,
+            command_factory=lambda _job: [
+                sys.executable,
+                "-c",
+                "print('manual')",
+            ],
+            poll_seconds=0.01,
+        ),
+    )
+
+    execution = service.run_now(job["id"])
+
+    assert execution["status"] == "succeeded"
+    assert not service.heartbeat_path.exists()
+    assert ScheduleService(store).status()["state"] == "stopped"
+
+
+def test_one_off_tick_does_not_publish_server_heartbeat(tmp_path: Path) -> None:
+    store = ScheduleStore(tmp_path)
+    service = ScheduleService(store)
+
+    assert service.tick(now=NOW) == []
+
+    assert not service.heartbeat_path.exists()
+    assert ScheduleService(store).status(now=NOW)["state"] == "stopped"
 
 
 def test_persistent_server_reports_running_until_its_stop_event(tmp_path: Path) -> None:
@@ -284,6 +594,191 @@ def test_persistent_server_reports_running_until_its_stop_event(tmp_path: Path) 
     thread.join(timeout=3)
     assert not thread.is_alive()
     assert ScheduleService(store).status()["state"] == "stopped"
+
+
+def test_service_and_projection_agree_future_heartbeat_is_stale(
+    tmp_path: Path,
+) -> None:
+    from agentloom.schedules.presentation import schedule_catalog
+
+    store = ScheduleStore(tmp_path)
+    future = (datetime.now(UTC) + timedelta(days=1)).isoformat()
+    heartbeat = {
+        "pid": os.getpid(),
+        "started_at": datetime.now(UTC).isoformat(),
+        "last_tick_at": future,
+        "last_success_at": None,
+        "last_error": None,
+        "tick_seconds": 1.0,
+        "stopped_at": None,
+    }
+    store.write_state_json("serve-status.json", heartbeat)
+
+    assert ScheduleService(store).status()["state"] == "stale"
+    assert schedule_catalog(tmp_path)["service"]["state"] == "stale"
+
+
+def test_service_and_projection_treat_naive_now_as_utc(tmp_path: Path) -> None:
+    from agentloom.schedules.presentation import schedule_catalog
+
+    store = ScheduleStore(tmp_path)
+    checked_at = datetime(2026, 7, 18, 8, 0)
+    heartbeat = {
+        "pid": os.getpid(),
+        "started_at": "2026-07-18T07:00:00+00:00",
+        "last_tick_at": "2026-07-18T07:59:59+00:00",
+        "last_success_at": None,
+        "last_error": None,
+        "tick_seconds": 1.0,
+        "stopped_at": None,
+    }
+    store.write_state_json("serve-status.json", heartbeat)
+
+    assert ScheduleService(store).status(now=checked_at)["state"] == "running"
+    assert schedule_catalog(tmp_path, now=checked_at)["service"]["state"] == "running"
+
+
+def test_service_and_projection_accept_legacy_one_off_heartbeat_as_stale(
+    tmp_path: Path,
+) -> None:
+    from agentloom.schedules.presentation import schedule_catalog
+
+    store = ScheduleStore(tmp_path)
+    heartbeat = {
+        "pid": os.getpid(),
+        "started_at": None,
+        "last_tick_at": NOW.isoformat(),
+        "last_success_at": None,
+        "last_error": None,
+        "tick_seconds": 1.0,
+        "stopped_at": None,
+    }
+    store.write_state_json("serve-status.json", heartbeat)
+
+    assert ScheduleService(store).status(now=NOW)["state"] == "stale"
+    assert schedule_catalog(tmp_path, now=NOW)["service"]["state"] == "stale"
+
+
+def test_service_and_projection_accept_legacy_long_heartbeat_error(
+    tmp_path: Path,
+) -> None:
+    from agentloom.schedules.presentation import schedule_catalog
+
+    store = ScheduleStore(tmp_path)
+    heartbeat = {
+        "pid": None,
+        "started_at": (NOW - timedelta(minutes=1)).isoformat(),
+        "last_tick_at": NOW.isoformat(),
+        "last_success_at": None,
+        "last_error": "x" * 4097,
+        "tick_seconds": 1.0,
+        "stopped_at": (NOW + timedelta(seconds=1)).isoformat(),
+    }
+    store.write_state_json("serve-status.json", heartbeat)
+
+    assert ScheduleService(store).status(now=NOW)["heartbeat"]["last_error"] == ("x" * 4097)
+    projection = schedule_catalog(tmp_path, now=NOW)["service"]
+    assert projection["state"] == "stopped"
+    assert projection["last_error"] == "x" * 4096
+
+
+def test_service_and_projection_reject_duplicate_heartbeat_keys(
+    tmp_path: Path,
+) -> None:
+    from agentloom.schedules.presentation import schedule_catalog
+
+    store = ScheduleStore(tmp_path)
+    store._storage.atomic_write_text(
+        "serve-status.json",
+        (
+            '{"pid":null,"started_at":null,"last_tick_at":"2026-01-01T00:00:00Z",'
+            '"last_success_at":null,"last_error":null,"tick_seconds":1,'
+            '"stopped_at":"2026-01-01T00:00:00Z","stopped_at":null}'
+        ),
+    )
+
+    assert ScheduleService(store).status()["state"] == "error"
+    assert schedule_catalog(tmp_path)["service"]["state"] == "error"
+
+
+@pytest.mark.parametrize(
+    "heartbeat",
+    [
+        {
+            "pid": os.getpid(),
+            "started_at": "2026-07-18T08:00:01+00:00",
+            "last_tick_at": "2026-07-18T08:00:00+00:00",
+            "last_success_at": None,
+            "last_error": None,
+            "tick_seconds": 1.0,
+            "stopped_at": None,
+        },
+        {
+            "pid": os.getpid(),
+            "started_at": "2026-07-18T08:00:00+00:00",
+            "last_tick_at": "2026-07-18T08:00:01+00:00",
+            "last_success_at": "2026-07-18T08:00:02+00:00",
+            "last_error": None,
+            "tick_seconds": 1.0,
+            "stopped_at": None,
+        },
+        {
+            "pid": None,
+            "started_at": "2026-07-18T08:00:00+00:00",
+            "last_tick_at": "2026-07-18T08:00:02+00:00",
+            "last_success_at": "2026-07-18T08:00:01+00:00",
+            "last_error": None,
+            "tick_seconds": 1.0,
+            "stopped_at": "2026-07-18T08:00:01+00:00",
+        },
+    ],
+)
+def test_service_and_projection_reject_impossible_heartbeat_lifecycle(
+    tmp_path: Path,
+    heartbeat: dict[str, object],
+) -> None:
+    from agentloom.schedules.presentation import schedule_catalog
+
+    store = ScheduleStore(tmp_path)
+    store._storage.atomic_write(
+        "serve-status.json",
+        (json.dumps(heartbeat) + "\n").encode(),
+    )
+
+    assert ScheduleService(store).status(now=NOW)["state"] == "error"
+    assert schedule_catalog(tmp_path, now=NOW)["service"]["state"] == "error"
+
+
+def test_heartbeat_writer_rejects_invalid_or_oversized_state_before_publish(
+    tmp_path: Path,
+) -> None:
+    store = ScheduleStore(tmp_path)
+    invalid = {
+        "pid": os.getpid(),
+        "started_at": (NOW + timedelta(seconds=1)).isoformat(),
+        "last_tick_at": NOW.isoformat(),
+        "last_success_at": None,
+        "last_error": None,
+        "tick_seconds": 1.0,
+        "stopped_at": None,
+    }
+
+    with pytest.raises(ValueError, match="invalid schedule state"):
+        store.write_state_json("serve-status.json", invalid)
+    assert not (store.schedules_dir / "serve-status.json").exists()
+
+    oversized = {
+        "pid": None,
+        "started_at": (NOW - timedelta(minutes=1)).isoformat(),
+        "last_tick_at": NOW.isoformat(),
+        "last_success_at": None,
+        "last_error": "x" * (128 * 1024),
+        "tick_seconds": 1.0,
+        "stopped_at": (NOW + timedelta(seconds=1)).isoformat(),
+    }
+    with pytest.raises(ValueError, match="storage size limit"):
+        store.write_state_json("serve-status.json", oversized)
+    assert not (store.schedules_dir / "serve-status.json").exists()
 
 
 def test_stop_event_interrupts_the_running_due_agent_and_stops_claiming(

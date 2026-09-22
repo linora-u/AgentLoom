@@ -20,7 +20,9 @@ tools:
     module: "applications.web_search.agent_tools.market_time"
     function: "get_market_time_context"
 
-max_steps: 24
+runtime_options:
+  max_steps: 24
+  smart_summary: false
 
 workflow: |
   # 美股收盘后隔夜重点企业行业映射

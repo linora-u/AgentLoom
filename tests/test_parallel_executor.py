@@ -1,5 +1,5 @@
 """
-Tests for agentloom.runtime.concurrency.parallel_executor.ParallelAgentExecutor.
+Tests for agentloom.execution.concurrency.parallel_executor.ParallelAgentExecutor.
 
 Covers: basic execution, error isolation, back-pressure, circuit breaker,
 progress callbacks, log isolation, max_workers auto-calculation, execute_groups.
@@ -14,9 +14,9 @@ import time
 
 import pytest
 
-from agentloom.runtime.concurrency.models import TaskResult
-from agentloom.runtime.concurrency.parallel_executor import ParallelAgentExecutor
-from agentloom.runtime.concurrency.rate_limiter import GlobalRateLimiterRegistry
+from agentloom.execution.concurrency.models import TaskResult
+from agentloom.execution.concurrency.parallel_executor import ParallelAgentExecutor
+from agentloom.execution.concurrency.rate_limiter import GlobalRateLimiterRegistry
 
 
 @pytest.fixture(autouse=True)
@@ -346,8 +346,8 @@ class TestExecuteGroups:
 class TestParallelExecutorContextPropagation:
     def test_checkpoint_coordinator_context_visible_in_worker_thread(self, tmp_path):
         """ThreadPoolExecutor workers inherit the active checkpoint coordinator."""
-        from agentloom.runtime.checkpoint.checkpoint_manager import CheckpointManager
-        from agentloom.runtime.checkpoint.coordinator import CheckpointCoordinator, _current_coordinator
+        from agentloom.execution.checkpoint.checkpoint_manager import CheckpointManager
+        from agentloom.execution.checkpoint.coordinator import CheckpointCoordinator, _current_coordinator
 
         cm = CheckpointManager(
             "parallel_context",

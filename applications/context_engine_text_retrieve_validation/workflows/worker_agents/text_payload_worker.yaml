@@ -2,7 +2,9 @@ name: "text_payload_worker"
 agent_runtime: smolagents
 description: "Worker that returns a large text payload for ContextEngine validation."
 model_type: "powerful"
-max_steps: 4
+runtime_options:
+  max_steps: 4
+  smart_summary: false
 
 workflow: |
   # Text Payload Worker

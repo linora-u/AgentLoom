@@ -1,10 +1,10 @@
 """
-Tests for agentloom.runtime.concurrency.models.TaskResult dataclass.
+Tests for agentloom.execution.concurrency.models.TaskResult dataclass.
 """
 
 from __future__ import annotations
 
-from agentloom.runtime.concurrency.models import TaskResult
+from agentloom.execution.concurrency.models import TaskResult
 
 
 class TestTaskResult:

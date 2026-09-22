@@ -79,7 +79,7 @@ if project_root not in sys.path:
 import fire
 from pathlib import Path
 
-from agentloom.runtime.logging import initialize_global_logger_once
+from agentloom.execution.logging import initialize_global_logger_once
 
 
 # ---------------------------------------------------------------------------

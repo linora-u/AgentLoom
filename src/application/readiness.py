@@ -11,11 +11,8 @@ from pathlib import Path
 
 from agentloom.application.validation import (
     AgentConfigNormalizer,
-    build_normalized_execution_config,
-    validate_execution_config_payload,
-    validate_todo_config,
 )
-from agentloom.runtime.goal import normalize_goal_config
+from agentloom.execution.goal import normalize_goal_config
 
 REQUIRED_YAML_FIELDS = ("name", "agent_runtime", "workflow", "description")
 
@@ -63,21 +60,16 @@ def validate_runtime_agent_config(
 ) -> None:
     AgentConfigNormalizer.validate_removed_fields(config)
     AgentConfigNormalizer.validate_agent_runtime_config(config)
+    from agentloom.application.runtime_options import normalize_runtime_options
+
+    normalize_runtime_options(config, agent_root=agent_root)
     validate_required_yaml_fields(config, yaml_path)
     AgentConfigNormalizer.validate_runtime_tool_references(config)
     AgentConfigNormalizer.validate_workflow_config(config)
     AgentConfigNormalizer.validate_skills_config(config)
-    AgentConfigNormalizer.validate_max_steps_config(config)
     AgentConfigNormalizer.validate_agent_function_schema(config)
     AgentConfigNormalizer.validate_worker_agents_config(config.get("worker_agents", []))
-    validate_todo_config(config, source=str(yaml_path))
     normalize_goal_config(config, source=str(yaml_path))
-    normalized_execution = build_normalized_execution_config(
-        config,
-        source_name=str(yaml_path),
-        agent_root=agent_root,
-    )
-    validate_execution_config_payload(normalized_execution)
 
 
 def validate_runtime_worker_config(

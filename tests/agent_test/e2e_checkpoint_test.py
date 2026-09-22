@@ -62,8 +62,8 @@ def phase_check():
     """List all saved checkpoints."""
     print("[E2E] Phase 2: Checking saved checkpoints...")
     from agentloom.configuration import C
-    from agentloom.runtime.checkpoint.checkpoint_manager import list_all_tasks
-    from agentloom.runtime import resolve_runtime_home
+    from agentloom.execution.checkpoint.checkpoint_manager import list_all_tasks
+    from agentloom.execution import resolve_runtime_home
 
     checkpoints_root = resolve_runtime_home(C.raw, agent_root=C.agent_root).root_dir / "checkpoints"
     tasks = list_all_tasks(checkpoints_root=checkpoints_root)
