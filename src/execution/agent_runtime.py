@@ -5,13 +5,17 @@ from __future__ import annotations
 import math
 import time
 from collections.abc import Callable, Mapping
+from copy import deepcopy
 from dataclasses import dataclass, field
 from types import MappingProxyType
-from typing import Literal, Protocol, cast, runtime_checkable
+from typing import Any, Literal, Protocol, cast, runtime_checkable
 
 from agentloom.execution.model_binding import ModelTurnBinding
 from agentloom.execution.native_tools import ToolManifestEntry
 from agentloom.execution.tool_gateway import ToolGateway, tool_manifest_snapshot
+from jsonschema import Draft202012Validator
+from jsonschema.exceptions import SchemaError, ValidationError
+from referencing import Registry
 
 RuntimeState = Literal[
     "success",
@@ -139,6 +143,77 @@ def _optional_non_empty_string(
     if not isinstance(value, str) or not value.strip():
         raise ValueError(f"{field_name} must be a non-empty string when provided")
     return value.strip()
+
+
+def _reject_remote_schema_refs(value: JSONValue, *, path: str = "$") -> None:
+    if isinstance(value, dict):
+        for key, child in value.items():
+            child_path = f"{path}.{key}"
+            if key in {"$ref", "$dynamicRef"}:
+                if not isinstance(child, str) or not child.startswith("#"):
+                    raise ValueError(
+                        f"output schema contains a remote reference at {child_path}"
+                    )
+            _reject_remote_schema_refs(child, path=child_path)
+    elif isinstance(value, list):
+        for index, child in enumerate(value):
+            _reject_remote_schema_refs(child, path=f"{path}[{index}]")
+
+
+@dataclass(frozen=True, slots=True)
+class OutputContract:
+    """One validated Draft 2020-12 contract for an Agent's final output."""
+
+    name: str
+    schema: Mapping[str, JSONValue]
+    _validator: Any = field(init=False, repr=False, compare=False)
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.name, str) or not self.name.strip():
+            raise ValueError("output contract name must be a non-empty string")
+        if not isinstance(self.schema, Mapping):
+            raise TypeError("output contract schema must be a mapping")
+
+        normalized_schema = _copy_json_value(
+            self.schema,
+            field_name="output contract schema",
+        )
+        if not isinstance(normalized_schema, dict):
+            raise TypeError("output contract schema must be a mapping")
+        _reject_remote_schema_refs(normalized_schema)
+        try:
+            Draft202012Validator.check_schema(normalized_schema)
+        except SchemaError as exc:
+            raise ValueError(
+                f"output schema must be valid Draft 2020-12: {exc.message}"
+            ) from exc
+
+        validator_schema = deepcopy(normalized_schema)
+        object.__setattr__(self, "name", self.name.strip())
+        object.__setattr__(
+            self,
+            "schema",
+            MappingProxyType(deepcopy(normalized_schema)),
+        )
+        object.__setattr__(
+            self,
+            "_validator",
+            Draft202012Validator(validator_schema, registry=Registry()),
+        )
+
+    def validate(self, value: object) -> JSONValue:
+        """Return a defensive JSON value after validating the output contract."""
+
+        normalized = _copy_json_value(value, field_name="output")
+        try:
+            self._validator.validate(normalized)
+        except ValidationError as exc:
+            location = ".".join(str(part) for part in exc.absolute_path)
+            suffix = f" at {location}" if location else ""
+            raise ValueError(
+                f"output does not satisfy schema{suffix}: {exc.message}"
+            ) from exc
+        return normalized
 
 
 class UnsupportedRuntimeError(ValueError):
@@ -475,6 +550,7 @@ class RuntimeDefinition:
     option_sources: Mapping[str, JSONValue] = field(default_factory=dict)
     requirements: RuntimeRequirements = field(default_factory=RuntimeRequirements)
     instructions: str = ""
+    output_contract: OutputContract | None = None
     project_root: str | None = None
     metadata: Mapping[str, JSONValue] = field(default_factory=dict, repr=False)
 
@@ -501,6 +577,11 @@ class RuntimeDefinition:
             raise ValueError("runtime definition requires model_selection or a legacy model binding")
         if not isinstance(self.requirements, RuntimeRequirements):
             raise TypeError("requirements must be RuntimeRequirements")
+        if self.output_contract is not None and not isinstance(
+            self.output_contract,
+            OutputContract,
+        ):
+            raise TypeError("output_contract must be an OutputContract")
         if not isinstance(self.tool_gateway, ToolGateway):
             raise TypeError("tool_gateway must satisfy ToolGateway")
         object.__setattr__(self, "tool_manifest", tool_manifest_snapshot(self.tool_gateway))

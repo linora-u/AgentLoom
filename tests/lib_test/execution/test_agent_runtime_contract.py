@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from collections.abc import Mapping
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import Any
 
 import pytest
@@ -11,6 +11,7 @@ from agentloom.execution.agent_runtime import (
     AgentRuntimeError,
     AgentRuntimeRequest,
     AgentRuntimeResult,
+    OutputContract,
     RuntimeArtifact,
     RuntimeCapabilities,
     RuntimeCheckpointEnvelope,
@@ -67,7 +68,6 @@ class _ToolGateway:
 
 
 def test_runtime_definition_exposes_selected_tool_manifest_and_keeps_legacy_gateway():
-    from dataclasses import replace
     from agentloom.execution.tool_gateway import AgentLoomToolGateway, bind_tool
     from agentloom.tools.loader import resolve_tool_function
 
@@ -92,7 +92,6 @@ def test_runtime_definition_exposes_selected_tool_manifest_and_keeps_legacy_gate
 
 @pytest.mark.parametrize("mismatch", ["missing", "schema", "duplicate_definition"])
 def test_runtime_definition_rejects_manifest_that_disagrees_with_selected_tools(mismatch):
-    from dataclasses import replace
     from agentloom.execution.tool_gateway import AgentLoomToolGateway, bind_tool
     from agentloom.tools.loader import resolve_tool_function
 
@@ -124,6 +123,56 @@ def _definition(runtime_id: str) -> RuntimeDefinition:
         tool_gateway=gateway,
         runtime_options={'max_steps': 5},
     )
+
+
+def test_output_contract_validates_draft_2020_12_values_and_local_refs() -> None:
+    contract = OutputContract(
+        name="review_result",
+        schema={
+            "$schema": "https://json-schema.org/draft/2020-12/schema",
+            "$defs": {
+                "finding": {
+                    "type": "object",
+                    "properties": {"message": {"type": "string"}},
+                    "required": ["message"],
+                    "additionalProperties": False,
+                },
+            },
+            "type": "array",
+            "items": {"$ref": "#/$defs/finding"},
+        },
+    )
+
+    assert contract.validate([{"message": "missing guard"}]) == [
+        {"message": "missing guard"}
+    ]
+    with pytest.raises(ValueError, match="output does not satisfy"):
+        contract.validate([{"message": 3}])
+
+
+def test_output_contract_rejects_invalid_or_remote_schemas() -> None:
+    with pytest.raises(ValueError, match="valid Draft 2020-12"):
+        OutputContract(name="invalid", schema={"type": "not-a-json-type"})
+
+    with pytest.raises(ValueError, match="remote"):
+        OutputContract(
+            name="remote",
+            schema={"$ref": "https://schemas.example.test/result.json"},
+        )
+
+
+def test_runtime_definition_carries_an_immutable_output_contract() -> None:
+    source_schema = {
+        "type": "object",
+        "properties": {"answer": {"type": "string"}},
+        "required": ["answer"],
+    }
+    contract = OutputContract(name="answer", schema=source_schema)
+    definition = replace(_definition("test"), output_contract=contract)
+    source_schema["properties"]["answer"]["type"] = "integer"
+
+    assert definition.output_contract is contract
+    assert definition.output_contract.schema["properties"]["answer"]["type"] == "string"
 
 
 @dataclass
