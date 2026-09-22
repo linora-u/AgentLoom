@@ -140,6 +140,7 @@ class AgentConfigNormalizer:
                 handler.event.value == "Stop" and handler.source != "internal"
                 for handler in hook_plan.handlers
             )),
+            structured_output="output_schema" in config,
         )
 
     @staticmethod
