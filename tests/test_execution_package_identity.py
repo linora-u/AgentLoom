@@ -42,3 +42,13 @@ def test_execution_package_has_no_legacy_namespace_imports() -> None:
             offenders.append(str(source_path.relative_to(ROOT)))
 
     assert offenders == []
+
+
+def test_checkpoint_package_does_not_import_runtime_adapters() -> None:
+    offenders = []
+    for source_path in (ROOT / "src" / "execution" / "checkpoint").rglob("*.py"):
+        source = source_path.read_text(encoding="utf-8")
+        if re.search(r"\bagentloom\.runtimes(?:\.|\b)", source):
+            offenders.append(str(source_path.relative_to(ROOT)))
+
+    assert offenders == []
