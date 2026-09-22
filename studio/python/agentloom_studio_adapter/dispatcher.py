@@ -5,6 +5,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any, Protocol
 
+from agentloom.application.studio.domain_actions import execute_domain_action
 from agentloom.application.studio.errors import StudioServiceError
 from agentloom.application.studio.query_service import StudioQueryService
 
@@ -92,7 +93,7 @@ class StudioDispatcher:
                     )
                 )
             if method == "run.detail":
-                return self._run_detail(params)
+                return self.dispatch_domain_action(method, params)
             if method == "schedule.add":
                 return self._schedule_add(params)
             if method in {
@@ -117,25 +118,17 @@ class StudioDispatcher:
             raise StudioAdapterError(error.code, str(error)) from error
         raise StudioAdapterError("method_not_found", f"unknown method: {method}")
 
-    def _run_detail(self, params: dict[str, Any]) -> dict[str, Any]:
-        expected = {"run_id", "application_id"}
-        if "system_id" in params:
-            expected.add("system_id")
-        self._exact_params(params, expected, method="run.detail")
-        system_id = params.get("system_id")
-        if system_id is not None:
-            system_id = self._required_wire_string(
-                system_id,
-                field="system_id",
-            )
-        return self._queries.run_detail(
-            self._required_wire_string(params["run_id"], field="run_id"),
-            application_id=self._required_wire_string(
-                params["application_id"],
-                field="application_id",
-            ),
-            system_id=system_id,
-        )
+    def dispatch_domain_action(
+        self,
+        action: str,
+        params: dict[str, Any],
+    ) -> dict[str, Any]:
+        """Route one-shot and long-lived domain calls through one adapter."""
+
+        try:
+            return execute_domain_action(self.project_root, action, params)
+        except StudioServiceError as error:
+            raise StudioAdapterError(error.code, str(error)) from error
 
     def _schedule_add(self, params: dict[str, Any]) -> dict[str, Any]:
         from agentloom.schedules.store import (
