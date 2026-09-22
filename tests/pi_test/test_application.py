@@ -15,7 +15,7 @@ from agentloom.configuration.config import bind_config, load_project_config
 
 
 @contextmanager
-def model_service(*, responses=False, fail_count=0, error_status=500, stall=None, finish="stop", stall_stream=False, turns=None, fail_requests=None, on_request=None):
+def model_service(*, responses=False, fail_count=0, error_status=500, stall=None, finish="stop", stall_stream=False, turns=None, fail_requests=None, on_request=None, outputs=None):
     requests = []
     request_lock = Lock()
 
@@ -44,8 +44,13 @@ def model_service(*, responses=False, fail_count=0, error_status=500, stall=None
             if stall_stream:
                 self.wfile.flush()
                 stall.wait(timeout=5)
+            output_text = (
+                outputs[request_number - 1]
+                if outputs is not None and request_number <= len(outputs)
+                else "Pi answer"
+            )
             chunks = [
-                {"choices": [{"index": 0, "delta": {"role": "assistant", "content": "Pi answer"}, "finish_reason": None}]},
+                {"choices": [{"index": 0, "delta": {"role": "assistant", "content": output_text}, "finish_reason": None}]},
                 {"choices": [{"index": 0, "delta": {}, "finish_reason": finish}], "usage": {"prompt_tokens": 12, "completion_tokens": 3, "total_tokens": 15}},
             ]
             if turns is not None and request_number <= len(turns) and turns[request_number - 1] is not None:
@@ -66,13 +71,13 @@ def model_service(*, responses=False, fail_count=0, error_status=500, stall=None
                     chunks[1]["choices"][0]["finish_reason"] = "stop"
             if responses:
                 message = {"type": "message", "id": "msg_1", "role": "assistant", "status": "completed",
-                           "content": [{"type": "output_text", "text": "Pi answer", "annotations": []}]}
+                           "content": [{"type": "output_text", "text": output_text, "annotations": []}]}
                 events = [
                     {"type": "response.created", "response": {"id": "resp_1", "model": request["model"], "status": "in_progress", "output": []}},
                     {"type": "response.output_item.added", "output_index": 0, "item": {**message, "content": []}},
                     {"type": "response.content_part.added", "item_id": "msg_1", "output_index": 0, "content_index": 0,
                      "part": {"type": "output_text", "text": "", "annotations": []}},
-                    {"type": "response.output_text.delta", "item_id": "msg_1", "output_index": 0, "content_index": 0, "delta": "Pi answer"},
+                    {"type": "response.output_text.delta", "item_id": "msg_1", "output_index": 0, "content_index": 0, "delta": output_text},
                     {"type": "response.output_item.done", "output_index": 0, "item": message},
                     {"type": "response.completed", "response": {"id": "resp_1", "model": request["model"], "status": "completed", "output": [message],
                         "usage": {"input_tokens": 12, "output_tokens": 3, "total_tokens": 15, "input_tokens_details": {"cached_tokens": 0}}}},
@@ -162,6 +167,91 @@ def test_responses_profile_uses_native_responses_request(tmp_path):
     assert payload["max_output_tokens"] == 100
     assert payload["metadata"] == {"case": "responses"}
     assert not payload.get("tools")
+
+
+@pytest.mark.parametrize(
+    ("responses", "expected_path"),
+    [
+        (False, "/v1/chat/completions"),
+        (True, "/v1/responses"),
+    ],
+)
+def test_structured_output_uses_native_wire_and_validates_json(
+    tmp_path,
+    responses,
+    expected_path,
+):
+    with model_service(
+        responses=responses,
+        outputs=['{"findings":["missing guard"]}'],
+    ) as (url, requests):
+        app = project(tmp_path, url)
+        config = yaml.safe_load(app.read_text())
+        config["output_schema"] = {
+            "type": "object",
+            "properties": {
+                "findings": {
+                    "type": "array",
+                    "items": {"type": "string"},
+                },
+            },
+            "required": ["findings"],
+            "additionalProperties": False,
+        }
+        app.write_text(yaml.safe_dump(config))
+        if responses:
+            change_model(tmp_path, adapter="openai_responses")
+        with bind_config(load_project_config(tmp_path)):
+            result = execute_app(app, file_logging=False)
+
+    assert result.run.manifest_path.is_file()
+    path, payload, _ = requests[0]
+    assert path == expected_path
+    if responses:
+        assert payload["text"]["format"] == {
+            "type": "json_schema",
+            "name": "pi_output",
+            "schema": config["output_schema"],
+            "strict": True,
+        }
+    else:
+        assert payload["response_format"] == {
+            "type": "json_schema",
+            "json_schema": {
+                "name": "pi_output",
+                "schema": config["output_schema"],
+                "strict": True,
+            },
+        }
+
+
+def test_invalid_structured_output_is_corrected_in_same_session_without_tools(
+    tmp_path,
+):
+    with model_service(
+        outputs=["not-json", '{"findings":["fixed"]}'],
+    ) as (url, requests):
+        app = project(tmp_path, url)
+        config = yaml.safe_load(app.read_text())
+        config["output_schema"] = {
+            "type": "object",
+            "properties": {
+                "findings": {
+                    "type": "array",
+                    "items": {"type": "string"},
+                },
+            },
+            "required": ["findings"],
+            "additionalProperties": False,
+        }
+        app.write_text(yaml.safe_dump(config))
+        with bind_config(load_project_config(tmp_path)):
+            result = execute_app(app, file_logging=False)
+
+    assert result.run.manifest_path.is_file()
+    assert len(requests) == 2
+    assert not requests[1][1].get("tools")
+    assert "not valid JSON" in json.dumps(requests[1][1])
 
 
 @pytest.mark.parametrize("status,retries,expected", [(500, 2, 2), (429, 1, 2), (401, 3, 1), (400, 3, 1), (500, 0, 1)])
