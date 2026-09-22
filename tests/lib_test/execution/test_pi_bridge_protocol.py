@@ -55,6 +55,7 @@ def test_pi_handshake_roundtrip_and_rejects_unknown_protocol():
                 "subagents": True,
                 "goal": True,
                 "stop_hooks": True,
+                "structured_output": True,
             },
         },
         "error": None,

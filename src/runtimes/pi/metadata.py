@@ -1,12 +1,20 @@
 """Pure Pi configuration checks; importing these never starts Node or an SDK."""
-from collections.abc import Mapping
 import math
+from collections.abc import Mapping
 
 from agentloom.execution.agent_runtime import RuntimeCapabilities, RuntimeModelSelection
 
 SDK_VERSION = "0.79.4"
 BRIDGE_VERSION = 1
-CAPABILITIES = RuntimeCapabilities(True, True, True, True, goal=True, stop_hooks=True)
+CAPABILITIES = RuntimeCapabilities(
+    True,
+    True,
+    True,
+    True,
+    goal=True,
+    stop_hooks=True,
+    structured_output=True,
+)
 
 
 def validate_options(options: Mapping) -> None:

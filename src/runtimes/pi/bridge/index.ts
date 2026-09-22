@@ -2,6 +2,8 @@
 import { createInterface } from "node:readline";
 import { readFileSync } from "node:fs";
 import { isDeepStrictEqual } from "node:util";
+import { Ajv2020 } from "ajv/dist/2020.js";
+import type { ValidateFunction } from "ajv";
 import { configureModel } from "./model.js";
 import { decode } from "./protocol.js";
 import { nativeTools } from "./tools.js";
@@ -16,7 +18,7 @@ type Obj = Record<string, any>;
 type Frame = {version: 2; kind: string; instance_id: string; run_id: string | null; request_id: string; payload: Obj};
 const sdkPackage = new URL("../package.json", import.meta.resolve("@earendil-works/pi-coding-agent"));
 const sdkVersion = JSON.parse(readFileSync(sdkPackage, "utf8")).version as string;
-const capabilities = {structured_tools: true, parallel_tools: true, checkpoint_resume: true, subagents: true, goal: true, stop_hooks: true};
+const capabilities = {structured_tools: true, parallel_tools: true, checkpoint_resume: true, subagents: true, goal: true, stop_hooks: true, structured_output: true};
 const agentDir = process.argv[2];
 let instance: string | undefined;
 let session: AgentSession | undefined;
@@ -27,6 +29,7 @@ let closing = false;
 let nativeIncomplete = false;
 let modelFailure = {timedOut: false, status: 0};
 let reportRetry: ((attempt: number) => void) | undefined;
+let outputCorrection = false;
 const seen = new Set<string>();
 const callbacks = new Map<string, {runId: string | null; method: string; resolve: (value: Obj) => void; reject: (error: Error) => void}>();
 const write = (value: unknown) => process.stdout.write(JSON.stringify(value) + "\n");
@@ -50,6 +53,7 @@ function rejectCallbacks() {
 
 async function createSession(p: Obj): Promise<AgentSession> {
   nativeIncomplete = false;
+  outputCorrection = false;
   const s = p.model.settings;
   const auth = AuthStorage.inMemory();
   auth.setRuntimeApiKey("agentloom", s.api_key || "no-key");
@@ -114,10 +118,23 @@ async function createSession(p: Obj): Promise<AgentSession> {
         ? {...tool, function: {...tool.function, parameters}}
         : {...tool, parameters};
     });
-    if (finalDelivery) {
+    if (finalDelivery || outputCorrection) {
       delete projected.tools;
       delete projected.tool_choice;
       delete projected.parallel_tool_calls;
+    }
+    if (p.output_contract) {
+      if (api === "openai-responses") {
+        projected.text = {...(projected.text || {}), format: {
+          type: "json_schema", name: p.output_contract.name,
+          schema: p.output_contract.schema, strict: true,
+        }};
+      } else {
+        projected.response_format = {type: "json_schema", json_schema: {
+          name: p.output_contract.name, schema: p.output_contract.schema,
+          strict: true,
+        }};
+      }
     }
     return projected;
   };
@@ -126,12 +143,22 @@ async function createSession(p: Obj): Promise<AgentSession> {
 
 async function run(frame: Frame, abort: AbortController) {
   const p = frame.payload;
+  outputCorrection = false;
   let seq = 0;
   const event = (kind: string, payload: Obj) => write({version: 2, kind: "event", instance_id: frame.instance_id,
     run_id: frame.run_id, request_id: frame.request_id, sequence: ++seq, event: kind, payload});
   const usage = {input_tokens: 0, output_tokens: 0, total_tokens: 0, cached_input_tokens: 0};
   let unavailableTool = false;
   let unsubscribe: (() => void) | undefined;
+  let outputValidator: ValidateFunction | undefined;
+  if (p.output_contract) {
+    outputValidator = new Ajv2020({
+      strict: true,
+      strictNumbers: true,
+      allErrors: false,
+      validateFormats: false,
+    }).compile(p.output_contract.schema);
+  }
   try {
     if (p.checkpoint && session) throw new Error("Cannot restore into an active Pi session");
     if (!p.continue_session || !session) {
@@ -158,24 +185,54 @@ async function run(frame: Frame, abort: AbortController) {
       }
     });
     reportRetry = attempt => event("model", {phase: "retry", attempt});
+    const trigger = async (content: string | null, correction = false) => {
+      if (correction) {
+        await session!.sendCustomMessage({
+          customType: "agentloom_output_validation",
+          display: false,
+          content: content || "",
+        }, {triggerTurn: true});
+      } else if (content === null) {
+        await session!.sendCustomMessage({
+          customType: "agentloom_instruction_turn", display: false, content: "",
+        }, {triggerTurn: true});
+      } else {
+        await session!.prompt(content, {expandPromptTemplates: false});
+      }
+    };
     if (p.checkpoint && !p.record_task) {
       if (restoredPhase !== "complete") await session.sendCustomMessage({
         customType: "agentloom_resume", display: false,
         content: "Resume the interrupted task from the restored conversation and committed tool results. Do not repeat completed work.",
       }, {triggerTurn: true});
-    } else if (p.task === null) {
-      await session.sendCustomMessage({
-        customType: "agentloom_instruction_turn", display: false, content: "",
-      }, {triggerTurn: true});
-    } else {
-      await session.prompt(p.task, {expandPromptTemplates: false});
+    } else await trigger(p.task);
+    let last = session.messages.at(-1);
+    while (outputValidator && last?.role === "assistant" && last.stopReason !== "error") {
+      const text = last.content.filter((b: Obj) => b.type === "text").map((b: Obj) => b.text).join("");
+      let parsed: unknown;
+      try {
+        parsed = JSON.parse(text);
+      } catch {
+        outputCorrection = true;
+        await trigger("Your previous final output was not valid JSON. Return a corrected value matching the required JSON Schema.", true);
+        last = session.messages.at(-1);
+        continue;
+      }
+      if (!outputValidator(parsed)) {
+        const detail = outputValidator.errors?.[0]?.message || "schema validation failed";
+        outputCorrection = true;
+        await trigger(`Your previous final output did not match the required JSON Schema: ${detail}. Return a corrected value.`, true);
+        last = session.messages.at(-1);
+        continue;
+      }
+      break;
     }
-    const last = session.messages.at(-1);
     if (nativeIncomplete || modelFailure.timedOut || unavailableTool || abort.signal.aborted ||
         (last?.role === "assistant" && last.stopReason === "aborted")) throw new Error("Interrupted");
     const state = last?.role !== "assistant" || last.stopReason === "error" ? "failed" :
       last.stopReason === "length" ? "max_steps_error" : "success";
-    const output = last?.role === "assistant" ? last.content.filter((b: Obj) => b.type === "text").map((b: Obj) => b.text).join("") : "";
+    const outputText = last?.role === "assistant" ? last.content.filter((b: Obj) => b.type === "text").map((b: Obj) => b.text).join("") : "";
+    const output = outputValidator && state === "success" ? JSON.parse(outputText) : outputText;
     if (state === "success") await persistence!.save("complete");
     event("usage", usage);
     // Host emits the public terminal event only after its Stop gate.
