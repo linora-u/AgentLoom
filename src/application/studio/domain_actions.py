@@ -419,15 +419,22 @@ def _run_detail(
     application_id = params.get("application_id")
     run_id = params.get("run_id")
     system_id = params.get("system_id")
-    if not isinstance(application_id, str) or not isinstance(run_id, str):
+    if (
+        not isinstance(application_id, str)
+        or not application_id.strip()
+        or not isinstance(run_id, str)
+        or not run_id.strip()
+    ):
         raise StudioServiceError(
             "invalid_params",
             "run.detail requires application_id and run_id",
         )
-    if system_id is not None and not isinstance(system_id, str):
+    if system_id is not None and (
+        not isinstance(system_id, str) or not system_id.strip()
+    ):
         raise StudioServiceError(
             "invalid_params",
-            "run.detail system_id must be a string",
+            "system_id must be a non-empty string",
         )
     return queries.run_detail(
         run_id,
