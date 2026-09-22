@@ -12,7 +12,7 @@ from agentloom_tui_bridge import __main__ as bridge_main
 def _run_main(monkeypatch, bridge, *requests: dict) -> list[dict]:
     stdin = io.StringIO("".join(json.dumps(request) + "\n" for request in requests))
     stdout = io.StringIO()
-    monkeypatch.setattr(bridge_main, "TuiBridge", lambda _project_root: bridge)
+    monkeypatch.setattr(bridge_main, "TuiBridge", lambda _project_root, **_kwargs: bridge)
     monkeypatch.setattr(sys, "stdin", stdin)
     monkeypatch.setattr(sys, "stdout", stdout)
 
@@ -108,7 +108,7 @@ def test_oversized_utf8_request_is_rejected_and_the_next_request_is_processed(mo
     stdin = io.BytesIO(f"{oversized}\n{valid}\n".encode())
     stdout = io.StringIO()
     monkeypatch.setattr(bridge_main, "_MAX_REQUEST_BYTES", 96)
-    monkeypatch.setattr(bridge_main, "TuiBridge", lambda _project_root: BootstrapBridge())
+    monkeypatch.setattr(bridge_main, "TuiBridge", lambda _project_root, **_kwargs: BootstrapBridge())
     monkeypatch.setattr(sys, "stdin", stdin)
     monkeypatch.setattr(sys, "stdout", stdout)
 
@@ -166,7 +166,7 @@ def test_observation_request_completes_while_builder_send_is_blocked(monkeypatch
         )
     )
     stdout = io.StringIO()
-    monkeypatch.setattr(bridge_main, "TuiBridge", lambda _project_root: bridge)
+    monkeypatch.setattr(bridge_main, "TuiBridge", lambda _project_root, **_kwargs: bridge)
     monkeypatch.setattr(sys, "stdin", stdin)
     monkeypatch.setattr(sys, "stdout", stdout)
     failures: list[BaseException] = []
@@ -354,7 +354,7 @@ def test_concurrent_responses_are_complete_ndjson_lines_and_eof_waits(monkeypatc
     ]
     stdin = io.StringIO("".join(json.dumps(request) + "\n" for request in requests))
     stdout = DetectingStream()
-    monkeypatch.setattr(bridge_main, "TuiBridge", lambda _project_root: NoisyObservationBridge())
+    monkeypatch.setattr(bridge_main, "TuiBridge", lambda _project_root, **_kwargs: NoisyObservationBridge())
     monkeypatch.setattr(sys, "stdin", stdin)
     monkeypatch.setattr(sys, "stdout", stdout)
 

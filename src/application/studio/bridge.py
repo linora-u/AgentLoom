@@ -8,7 +8,7 @@ import os
 import stat
 from dataclasses import dataclass
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, NoReturn
+from typing import TYPE_CHECKING, Any, NoReturn, Protocol
 
 import yaml
 from agentloom.runtime.context import (
@@ -88,14 +88,33 @@ class BridgeError(RuntimeError):
         self.code = code
 
 
+class ScheduleMutations(Protocol):
+    def add(
+        self,
+        *,
+        yaml_path: str,
+        name: str,
+        schedule: Any,
+    ) -> dict[str, Any]: ...
+
+    def mutate(self, action: str, *, job_id: str) -> dict[str, Any]: ...
+
+
 class TuiBridge:
     """Project projection and bounded Builder operations for one project."""
 
-    def __init__(self, project_root: Path, *, builder_service: Any | None = None) -> None:
+    def __init__(
+        self,
+        project_root: Path,
+        *,
+        builder_service: Any | None = None,
+        schedule_mutations: ScheduleMutations | None = None,
+    ) -> None:
         self.project_root = project_root.expanduser().resolve()
         # Model/Agent construction is intentionally lazy. Read-only workspace
         # observation must not import LiteLLM or the complete execution stack.
         self._builder = builder_service
+        self._schedule_mutations = schedule_mutations
         # ``runtime.summary`` is a live projection, not a second bootstrap.  A
         # successful bootstrap records the validated static Agent identities
         # and resolved runtime root so later refreshes never rescan YAML,
@@ -283,105 +302,6 @@ class TuiBridge:
             raise BridgeError("invalid_params", f"{field} must be a non-empty string")
         return value
 
-    def _schedule_target(self, yaml_path: str) -> Path:
-        relative = Path(yaml_path)
-        parts = relative.parts
-        candidate = self.project_root / relative
-        try:
-            workflow_index = parts.index("workflows")
-        except ValueError:
-            workflow_index = -1
-        structurally_valid = (
-            yaml_path == yaml_path.strip()
-            and "\\" not in yaml_path
-            and not relative.is_absolute()
-            and len(parts) >= 4
-            and parts[0] == "applications"
-            and workflow_index >= 2
-            and workflow_index < len(parts) - 1
-            and "worker_agents" not in parts
-            and relative.suffix.lower() in {".yaml", ".yml", ".md"}
-        )
-        try:
-            if not structurally_valid or self._has_symlink_component(candidate, self.project_root):
-                raise ValueError
-            resolved = candidate.resolve(strict=True)
-            canonical = resolved.relative_to(self.project_root).as_posix()
-        except (OSError, ValueError) as error:
-            raise BridgeError(
-                "invalid_params",
-                "yaml_path must identify a real, non-symlink project Supervisor Agent definition",
-            ) from error
-        if canonical != yaml_path or not resolved.is_file():
-            raise BridgeError(
-                "invalid_params",
-                "yaml_path must identify a real, non-symlink project Supervisor Agent definition",
-            )
-        try:
-            summary, validated_path, _ = self._direct_system_summary(yaml_path)
-        except BridgeError as error:
-            raise BridgeError(
-                "invalid_params",
-                "yaml_path must identify a real, non-symlink project Supervisor Agent definition",
-            ) from error
-        validation = summary.get("validation")
-        if not isinstance(validation, dict) or validation.get("valid") is not True:
-            raise BridgeError(
-                "invalid_params",
-                "yaml_path must identify a valid supervisor Agent definition",
-            )
-        if validated_path != resolved:
-            raise BridgeError(
-                "invalid_params",
-                "yaml_path changed while it was being validated",
-            )
-        return resolved
-
-    @classmethod
-    def _schedule_from_wire(cls, raw: Any) -> dict[str, Any]:
-        from agentloom.schedules.schedule import cron_schedule, interval_schedule, once_schedule
-
-        if not isinstance(raw, dict):
-            raise BridgeError("invalid_params", "schedule must be an object")
-        kind = raw.get("kind")
-        if not isinstance(kind, str):
-            raise BridgeError("invalid_params", "schedule.kind must be a string")
-        expected_by_kind = {
-            "once": {"kind", "at", "timezone"},
-            "interval": {"kind", "every", "timezone"},
-            "cron": {"kind", "expression", "timezone"},
-        }
-        expected = expected_by_kind.get(kind)
-        if expected is None:
-            raise BridgeError("invalid_params", f"unknown schedule kind: {kind!r}")
-        cls._exact_params(raw, expected, method="schedule")
-        timezone = cls._required_wire_string(raw["timezone"], field="schedule.timezone")
-        if timezone != timezone.strip():
-            raise BridgeError(
-                "invalid_params",
-                "schedule.timezone must not contain surrounding whitespace",
-            )
-        try:
-            if kind == "once":
-                at = cls._required_wire_string(raw["at"], field="schedule.at")
-                if at != at.strip():
-                    raise ValueError("schedule.at must not contain surrounding whitespace")
-                return once_schedule(at, timezone=timezone)
-            if kind == "interval":
-                every = cls._required_wire_string(raw["every"], field="schedule.every")
-                if every != every.strip():
-                    raise ValueError("schedule.every must not contain surrounding whitespace")
-                return interval_schedule(every, timezone=timezone)
-            expression = cls._required_wire_string(
-                raw["expression"],
-                field="schedule.expression",
-            )
-            if expression != expression.strip():
-                raise ValueError("schedule.expression must not contain surrounding whitespace")
-            return cron_schedule(expression, timezone=timezone)
-        except ValueError as error:
-            raise BridgeError("invalid_params", str(error)) from error
-
     @staticmethod
     def _schedule_result(action: str, job: dict[str, Any]) -> dict[str, Any]:
         return {
@@ -401,35 +321,27 @@ class TuiBridge:
             raise BridgeError("busy", str(error)) from error
         raise BridgeError("schedule_failed", str(error)) from error
 
+    def _schedule_mutation_service(self) -> ScheduleMutations:
+        if self._schedule_mutations is None:
+            raise BridgeError("internal_error", "Schedule mutations are unavailable")
+        return self._schedule_mutations
+
     def _schedule_add(self, params: dict[str, Any]) -> dict[str, Any]:
-        from agentloom.schedules.store import ScheduleStore, ScheduleStoreError
+        from agentloom.schedules.store import ScheduleStoreError
 
         self._exact_params(
             params,
             {"yaml_path", "name", "schedule"},
             method="schedule.add",
         )
-        yaml_path = self._required_wire_string(params["yaml_path"], field="yaml_path")
-        name = params["name"]
-        if not isinstance(name, str):
-            raise BridgeError("invalid_params", "name must be a string")
-        target = self._schedule_target(yaml_path)
-        schedule = self._schedule_from_wire(params["schedule"])
-
-        def validate_before_commit(candidate: dict[str, Any]) -> None:
-            persisted_target = self._schedule_target(yaml_path)
-            if persisted_target != target or candidate.get("yaml_path") != yaml_path:
-                raise BridgeError(
-                    "invalid_params",
-                    "yaml_path changed while the schedule was being added",
-                )
-
         try:
-            job = ScheduleStore(self.project_root).add_job(
-                name=name,
-                yaml_path=target,
-                schedule=schedule,
-                validate_before_commit=validate_before_commit,
+            job = self._schedule_mutation_service().add(
+                yaml_path=self._required_wire_string(
+                    params["yaml_path"],
+                    field="yaml_path",
+                ),
+                name=params["name"],
+                schedule=params["schedule"],
             )
         except ValueError as error:
             raise BridgeError("invalid_params", str(error)) from error
@@ -442,20 +354,18 @@ class TuiBridge:
         method: str,
         params: dict[str, Any],
     ) -> dict[str, Any]:
-        from agentloom.schedules.store import ScheduleStore, ScheduleStoreError
+        from agentloom.schedules.store import ScheduleStoreError
 
         self._exact_params(params, {"job_id"}, method=method)
-        job_id = self._required_wire_string(params["job_id"], field="job_id")
-        if job_id != job_id.strip():
-            raise BridgeError(
-                "invalid_params",
-                "job_id must not contain surrounding whitespace",
-            )
-        action = method.removeprefix("schedule.")
-        store = ScheduleStore(self.project_root)
         try:
-            mutation = getattr(store, action)
-            job = mutation(job_id)
+            action = method.removeprefix("schedule.")
+            job = self._schedule_mutation_service().mutate(
+                action,
+                job_id=self._required_wire_string(
+                    params["job_id"],
+                    field="job_id",
+                ),
+            )
         except ValueError as error:
             raise BridgeError("invalid_params", str(error)) from error
         except ScheduleStoreError as error:

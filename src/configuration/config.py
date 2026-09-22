@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import logging
 import os
+from collections.abc import Mapping
 from contextlib import contextmanager
 from contextvars import ContextVar
 from copy import deepcopy
@@ -248,7 +249,12 @@ def _discover_agent_root(config_dir: Path | str | None = None) -> Path:
     )
 
 
-def _resolve_app_root_from_yaml(agent_root: Path, yaml_config_path: Path) -> Path:
+def _resolve_app_root_from_yaml(
+    agent_root: Path,
+    yaml_config_path: Path,
+    *,
+    source_path_is_pinned: bool = False,
+) -> Path:
     """Determine the application root from an Agent YAML file path.
 
     Walks **upward** from *yaml_config_path* looking for a directory whose
@@ -261,7 +267,15 @@ def _resolve_app_root_from_yaml(agent_root: Path, yaml_config_path: Path) -> Pat
         ValueError: If no ``workflows/`` directory can be found in the
             ancestor chain — every application **must** have one.
     """
-    current = yaml_config_path.resolve().parent
+    if source_path_is_pinned:
+        source_path = Path(os.path.normpath(yaml_config_path))
+        try:
+            source_path.relative_to(agent_root)
+        except ValueError as exc:
+            raise ValueError("Pinned Agent source path must stay inside the project") from exc
+    else:
+        source_path = yaml_config_path.resolve()
+    current = source_path.parent
     while current != current.parent:
         if current.name == "workflows":
             app_root = current.parent
@@ -543,6 +557,8 @@ def build_effective_agent_config_snapshot(
     *,
     source_name: str = "agent",
     base_config: UnifiedConfig | None = None,
+    source_path_is_pinned: bool = False,
+    application_config: Mapping[str, Any] | None = None,
 ) -> EffectiveAgentConfigSnapshot:
     """Build merged Agent values while retaining every unmerged source.
 
@@ -580,10 +596,17 @@ def build_effective_agent_config_snapshot(
     if isinstance(agent_config, dict):
         yaml_file_path = agent_config.get("_yaml_file_path")
         if yaml_file_path:
-            agent_source_path = Path(str(yaml_file_path)).expanduser().resolve()
+            raw_source_path = Path(str(yaml_file_path)).expanduser()
+            agent_source_path = (
+                Path(os.path.normpath(raw_source_path))
+                if source_path_is_pinned
+                else raw_source_path.resolve()
+            )
             try:
                 app_root = _resolve_app_root_from_yaml(
-                    base.agent_root, Path(yaml_file_path)
+                    base.agent_root,
+                    agent_source_path,
+                    source_path_is_pinned=source_path_is_pinned,
                 )
             except ValueError:
                 logger.warning(
@@ -592,11 +615,23 @@ def build_effective_agent_config_snapshot(
                     yaml_file_path,
                 )
             else:
-                agent_layer_root = app_root.resolve()
+                agent_layer_root = (
+                    app_root
+                    if source_path_is_pinned
+                    else app_root.resolve()
+                )
                 app_config_path = app_root / APP_CONFIG_RELATIVE_PATH
                 if app_root != base.agent_root:
+                    if source_path_is_pinned and application_config is None:
+                        raise ValueError(
+                            "Pinned Agent source requires a captured Application config"
+                        )
                     app_system_yaml = _filter_llm_only_top_level_keys(
-                        _load_yaml(app_config_path),
+                        (
+                            deepcopy(dict(application_config))
+                            if application_config is not None
+                            else _load_yaml(app_config_path)
+                        ),
                         source_name=str(app_config_path),
                     )
                     app_system_yaml = _reject_application_global_only_keys(
@@ -610,8 +645,12 @@ def build_effective_agent_config_snapshot(
                         ConfigLayerSnapshot(
                             name="application_system",
                             data=deepcopy(app_system_yaml),
-                            root=app_root.resolve(),
-                            source_path=app_config_path.resolve(),
+                            root=agent_layer_root,
+                            source_path=(
+                                app_config_path
+                                if source_path_is_pinned
+                                else app_config_path.resolve()
+                            ),
                         )
                     )
 

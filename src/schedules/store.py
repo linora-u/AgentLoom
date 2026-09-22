@@ -16,14 +16,17 @@ from agentloom.runtime import SecureDirectory, resolve_runtime_home
 
 from .schedule import next_run, parse_datetime, validate_schedule
 from .schema import (
+    APPLICATION_SUPERVISOR_VALIDATION,
     JOB_NAME_MAX_BYTES,
     MAX_PID,
     MAX_SAFE_INTEGER,
     SCHEDULE_DOCUMENT_MAX_BYTES,
     SCHEDULE_HEARTBEAT_MAX_BYTES,
+    ValidatedScheduleTarget,
     decode_json_object,
     execution_rank,
     execution_sequence,
+    normalize_schedule_job_name,
     validate_heartbeat,
     validate_schedule_document,
 )
@@ -465,7 +468,7 @@ class ScheduleStore:
         self,
         *,
         name: str,
-        yaml_path: str | Path,
+        yaml_path: str | Path | ValidatedScheduleTarget,
         schedule: dict[str, Any],
         now: datetime | None = None,
         validate_before_commit: Callable[[dict[str, Any]], None] | None = None,
@@ -473,18 +476,21 @@ class ScheduleStore:
         normalized = validate_schedule(schedule)
         created = _as_utc(now)
         first = next_run(normalized, after=created)
+        if isinstance(yaml_path, ValidatedScheduleTarget):
+            stored_yaml_path = yaml_path.yaml_path
+            effective_target_validation = APPLICATION_SUPERVISOR_VALIDATION
+        else:
+            stored_yaml_path = None
+            effective_target_validation = None
         with self._locked(exclusive=True):
-            raw_name = str(name).strip() or Path(yaml_path).stem
-            if any(character in raw_name for character in ("\x00", "\n", "\r")):
-                raise ValueError("Schedule name contains unsupported control characters")
-            job_name = self._bounded_text(
-                raw_name,
-                JOB_NAME_MAX_BYTES,
+            job_name = normalize_schedule_job_name(
+                name,
+                fallback=Path(stored_yaml_path if stored_yaml_path is not None else yaml_path).stem,
             )
             job = {
                 "id": f"job_{uuid.uuid4().hex[:12]}",
                 "name": job_name,
-                "yaml_path": self._stored_yaml_path(yaml_path),
+                "yaml_path": (stored_yaml_path if stored_yaml_path is not None else self._stored_yaml_path(yaml_path)),
                 "schedule": normalized,
                 "state": "scheduled",
                 "created_at": created.isoformat(),
@@ -495,11 +501,12 @@ class ScheduleStore:
                 "run_count": 0,
                 "claim": None,
             }
+            if effective_target_validation is not None:
+                job["target_validation"] = effective_target_validation
             if validate_before_commit is not None:
-                # The callback runs after the target's canonical stored path is
-                # known and before the job is visible. It must not call back
-                # into this ScheduleStore instance because the lock is not
-                # reentrant.
+                # Compatibility hook for transaction-local callers. New
+                # Schedule target safety is enforced by Application again at
+                # execution time.
                 validate_before_commit(copy.deepcopy(job))
             payload = self._read_unlocked()
             payload["jobs"].append(job)

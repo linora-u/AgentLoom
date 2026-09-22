@@ -12,6 +12,7 @@ from pathlib import Path
 from types import TracebackType
 from typing import Any
 
+from agentloom.application.composition import build_schedule_mutations
 from agentloom.application.studio.bridge import BridgeError, TuiBridge
 
 _BUILDER_METHODS = frozenset({"assistant.send", "builder.send", "builder.draft", "draft.apply"})
@@ -156,7 +157,11 @@ def _read_request_line(stream: Any) -> tuple[str | None, str | None]:
 
 
 def main() -> None:
-    bridge = TuiBridge(Path.cwd())
+    project_root = Path.cwd()
+    bridge = TuiBridge(
+        project_root,
+        schedule_mutations=build_schedule_mutations(project_root),
+    )
     protocol_stdout = sys.stdout
     writer = _ResponseWriter(protocol_stdout)
     # stdout belongs exclusively to NDJSON. Keep incidental third-party output

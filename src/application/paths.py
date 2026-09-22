@@ -3,7 +3,14 @@
 from pathlib import Path
 
 
-def resolve_worker_reference(path_value: str, worker_folder: Path, *, project_root: Path | str) -> Path:
+def worker_reference_candidate(
+    path_value: str,
+    worker_folder: Path,
+    *,
+    project_root: Path | str,
+) -> Path:
+    """Return the absolute lexical path selected by one Worker reference."""
+
     value = path_value.strip()
     configured = Path(value).expanduser()
     root = Path(project_root).expanduser().resolve()
@@ -20,10 +27,19 @@ def resolve_worker_reference(path_value: str, worker_folder: Path, *, project_ro
             f"worker_agents path '{value}' is missing a file extension; "
             f"must end with .yaml, .yml, or .md (e.g. '{value}.yaml')"
         )
+    return candidate.absolute()
+
+
+def resolve_worker_reference(path_value: str, worker_folder: Path, *, project_root: Path | str) -> Path:
+    candidate = worker_reference_candidate(
+        path_value,
+        worker_folder,
+        project_root=project_root,
+    )
+    root = Path(project_root).expanduser().resolve()
     # Inspect the lexical path before resolve() erases symlink components.
     # Explicit absolute references are supported, but a symlink must not turn
     # a project-contained declaration into an unexpected external definition.
-    candidate = candidate.absolute()
     try:
         parts = candidate.relative_to(root).parts
         current = root
