@@ -33,7 +33,7 @@ export async function startProvider(responses) {
     } catch (error) {
       errors.push(String(error));
       if (!res.headersSent) res.writeHead(500);
-      res.end(String(error));
+      res.end('Provider request failed');
     }
   });
   await new Promise((resolve) => server.listen(0, '127.0.0.1', () => resolve(undefined)));
