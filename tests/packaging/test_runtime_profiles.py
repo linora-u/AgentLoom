@@ -44,6 +44,7 @@ def test_built_wheel_selects_smol_only_through_its_explicit_profile(tmp_path, re
                        or ".agentloom-install." in name for name in names_in_wheel)
         assert "agentloom/runtimes/pi/bridge/tools.ts" in names_in_wheel
         assert "agentloom/runtimes/pi/bridge/model.ts" in names_in_wheel
+        assert "agentloom/runtimes/smolagents/prompts/toolcalling_agent.example.yaml" in names_in_wheel
         schemas = list((source / "src/runtimes/pi").glob("bridge-v*.schema.json"))
         assert schemas
         assert all("agentloom/runtimes/pi/" + path.name in names_in_wheel for path in schemas)
