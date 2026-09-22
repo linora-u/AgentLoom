@@ -11,9 +11,10 @@ from typing import Any
 import pytest
 
 import agentloom.execution.context as runtime_context_module
-import agentloom.application.studio.bridge as bridge_module
+import agentloom.application.studio.query_service as bridge_module
 from agentloom.execution.context import RuntimeRunLease
-from agentloom.application.studio.bridge import BridgeError, TuiBridge
+from agentloom.application.studio.errors import StudioServiceError
+from agentloom.application.studio.query_service import StudioQueryService
 
 
 def _write(path: Path, content: str) -> Path:
@@ -74,16 +75,16 @@ def test_run_scan_does_not_suppress_unrelated_process_logs(
         json.dumps({"task_id": "task-1", "run_id": "run-1", "status": "completed", "workers": {}}),
     )
     audit_logger = logging.getLogger("agentloom.test.builder-audit")
-    original_projection = TuiBridge._task_projection
+    original_projection = StudioQueryService._task_projection
 
-    def projection_with_concurrent_audit(bridge: TuiBridge, *args: Any, **kwargs: Any) -> dict[str, Any] | None:
+    def projection_with_concurrent_audit(bridge: StudioQueryService, *args: Any, **kwargs: Any) -> dict[str, Any] | None:
         audit_logger.warning("builder tool audit remains visible")
         return original_projection(bridge, *args, **kwargs)
 
-    monkeypatch.setattr(TuiBridge, "_task_projection", projection_with_concurrent_audit)
+    monkeypatch.setattr(StudioQueryService, "_task_projection", projection_with_concurrent_audit)
 
     with caplog.at_level(logging.WARNING, logger=audit_logger.name):
-        TuiBridge(tmp_path)._scan_runs([])
+        StudioQueryService(tmp_path)._scan_runs([])
 
     assert "builder tool audit remains visible" in caplog.messages
 
@@ -94,14 +95,14 @@ def test_bounded_json_read_distinguishes_missing_from_invalid_source(
     runtime_root = tmp_path / "runtime"
     runtime_root.mkdir()
 
-    assert TuiBridge._read_json_object_bounded_secure_with_status(
+    assert StudioQueryService._read_json_object_bounded_secure_with_status(
         runtime_root,
         Path("missing.json"),
         max_bytes=128,
     ) == (None, False)
 
     _write(runtime_root / "invalid.json", "{not-json")
-    assert TuiBridge._read_json_object_bounded_secure_with_status(
+    assert StudioQueryService._read_json_object_bounded_secure_with_status(
         runtime_root,
         Path("invalid.json"),
         max_bytes=128,
@@ -125,14 +126,14 @@ def test_run_scan_never_replays_the_unbounded_checkpoint_event_catalog(
     )
 
     def fail_if_events_are_replayed(*_args: Any, **_kwargs: Any) -> list[dict[str, Any]]:
-        raise AssertionError("TUI status scan must not replay cumulative task events")
+        raise AssertionError("Studio status scan must not replay cumulative task events")
 
     monkeypatch.setattr(
         "agentloom.execution.checkpoint.checkpoint_manager.CheckpointManager._read_task_events_from_path",
         fail_if_events_are_replayed,
     )
 
-    bootstrap = TuiBridge(tmp_path).bootstrap()
+    bootstrap = StudioQueryService(tmp_path).bootstrap()
 
     assert bootstrap["runs"][0]["status"] == "completed"
 
@@ -154,7 +155,7 @@ def test_catalog_preserves_same_id_unlinked_runs_from_different_applications(
             "name: second\ndescription: second candidate\nworkflow: answer\n",
         )
 
-    bridge = TuiBridge(tmp_path)
+    bridge = StudioQueryService(tmp_path)
     bootstrap = bridge.bootstrap()
 
     assert {(run["application_id"], run["run_id"], run["system_id"]) for run in bootstrap["runs"]} == {
@@ -162,9 +163,10 @@ def test_catalog_preserves_same_id_unlinked_runs_from_different_applications(
         ("beta", "shared-run", None),
     }
     for application_id in ("alpha", "beta"):
-        detail = bridge.dispatch(
-            "run.detail",
-            {"application_id": application_id, "run_id": "shared-run"},
+        detail = bridge.run_detail(
+            "shared-run",
+            application_id=application_id,
+            system_id=None,
         )
         assert detail["summary"]["application_id"] == application_id
 
@@ -174,16 +176,17 @@ def test_run_detail_directly_addresses_one_run_without_scanning_the_catalog(
     monkeypatch,
 ) -> None:
     _run(tmp_path, status="completed")
-    bridge = TuiBridge(tmp_path)
+    bridge = StudioQueryService(tmp_path)
 
     def fail_if_snapshot_is_scanned() -> None:
         raise AssertionError("run.detail must not scan unrelated systems or runs")
 
     monkeypatch.setattr(bridge, "_snapshot", fail_if_snapshot_is_scanned)
 
-    detail = bridge.dispatch(
-        "run.detail",
-        {"run_id": "run-1", "application_id": "reports"},
+    detail = bridge.run_detail(
+        "run-1",
+        application_id="reports",
+        system_id=None,
     )
 
     assert detail["summary"]["run_id"] == "run-1"
@@ -194,7 +197,7 @@ def test_system_detail_directly_addresses_one_definition_without_full_snapshot(
     monkeypatch,
 ) -> None:
     workflow = _workflow(tmp_path)
-    bridge = TuiBridge(tmp_path)
+    bridge = StudioQueryService(tmp_path)
 
     def fail_if_snapshot_is_scanned() -> None:
         raise AssertionError("system.detail must not rescan the project catalog")
@@ -217,10 +220,11 @@ def test_run_detail_rejects_an_oversized_manifest_without_parsing_it(
     manifest["padding"] = "x" * 512
     _write(manifest_path, json.dumps(manifest))
 
-    with pytest.raises(BridgeError, match="run not found") as error:
-        TuiBridge(tmp_path).dispatch(
-            "run.detail",
-            {"run_id": "run-1", "application_id": "reports"},
+    with pytest.raises(StudioServiceError, match="run not found") as error:
+        StudioQueryService(tmp_path).run_detail(
+            "run-1",
+            application_id="reports",
+            system_id=None,
         )
 
     assert error.value.code == "not_found"
@@ -245,7 +249,7 @@ def test_failed_run_does_not_expose_worker_result_as_final_result(tmp_path: Path
         ],
     )
 
-    detail = TuiBridge(tmp_path).dispatch("run.detail", {"run_id": "run-1", "application_id": "reports"})
+    detail = StudioQueryService(tmp_path).run_detail("run-1", application_id="reports", system_id=None)
 
     assert detail["summary"]["status"] == "failed"
     assert detail["result_state"] == "unavailable"
@@ -259,7 +263,7 @@ def test_failed_run_detail_exposes_the_manifest_failure_reason(tmp_path: Path) -
         manifest_extra={"error": "provider timed out after 30 seconds"},
     )
 
-    detail = TuiBridge(tmp_path).dispatch("run.detail", {"run_id": "run-1", "application_id": "reports"})
+    detail = StudioQueryService(tmp_path).run_detail("run-1", application_id="reports", system_id=None)
 
     assert detail["error"] == "provider timed out after 30 seconds"
 
@@ -270,12 +274,13 @@ def test_interrupted_run_status_is_preserved_in_summary_and_detail(
     manifest_status: str,
 ) -> None:
     _run(tmp_path, status=manifest_status)
-    bridge = TuiBridge(tmp_path)
+    bridge = StudioQueryService(tmp_path)
 
     bootstrap = bridge.bootstrap()
-    detail = bridge.dispatch(
-        "run.detail",
-        {"run_id": "run-1", "application_id": "reports"},
+    detail = bridge.run_detail(
+        "run-1",
+        application_id="reports",
+        system_id=None,
     )
 
     assert bootstrap["runs"][0]["status"] == "interrupted"
@@ -289,12 +294,13 @@ def test_unclassified_run_status_is_not_misreported_as_failed(
     manifest_status: str,
 ) -> None:
     _run(tmp_path, status=manifest_status)
-    bridge = TuiBridge(tmp_path)
+    bridge = StudioQueryService(tmp_path)
 
     bootstrap = bridge.bootstrap()
-    detail = bridge.dispatch(
-        "run.detail",
-        {"run_id": "run-1", "application_id": "reports"},
+    detail = bridge.run_detail(
+        "run-1",
+        application_id="reports",
+        system_id=None,
     )
 
     assert bootstrap["runs"][0]["status"] == "unknown"
@@ -316,7 +322,7 @@ def test_active_manifest_preserves_interrupted_task_projection(tmp_path: Path) -
         ),
     )
 
-    summary = TuiBridge(tmp_path)._run_record_from_manifest(
+    summary = StudioQueryService(tmp_path)._run_record_from_manifest(
         run_dir / "manifest.json",
         runtime_root=tmp_path / ".agentloom",
         runs_root=tmp_path / ".agentloom/runs",
@@ -361,9 +367,10 @@ def test_structured_run_error_precedes_interruption_diagnostic(tmp_path: Path) -
         ],
     )
 
-    detail = TuiBridge(tmp_path).dispatch(
-        "run.detail",
-        {"run_id": "run-1", "application_id": "reports"},
+    detail = StudioQueryService(tmp_path).run_detail(
+        "run-1",
+        application_id="reports",
+        system_id=None,
     )
 
     assert detail["error"] == "operator stopped the provider migration"
@@ -372,9 +379,10 @@ def test_structured_run_error_precedes_interruption_diagnostic(tmp_path: Path) -
 def test_crashed_run_without_structured_error_has_readable_diagnostic(tmp_path: Path) -> None:
     _run(tmp_path, status="crashed")
 
-    detail = TuiBridge(tmp_path).dispatch(
-        "run.detail",
-        {"run_id": "run-1", "application_id": "reports"},
+    detail = StudioQueryService(tmp_path).run_detail(
+        "run-1",
+        application_id="reports",
+        system_id=None,
     )
 
     assert detail["summary"]["status"] == "crashed"
@@ -400,7 +408,7 @@ def test_nonterminal_task_tree_result_is_not_a_final_result(tmp_path: Path) -> N
         ],
     )
 
-    detail = TuiBridge(tmp_path).dispatch("run.detail", {"run_id": "run-1", "application_id": "reports"})
+    detail = StudioQueryService(tmp_path).run_detail("run-1", application_id="reports", system_id=None)
 
     assert detail["result_state"] == "unavailable"
     assert detail["result"] is None
@@ -433,7 +441,7 @@ def test_only_latest_matching_task_tree_can_supply_final_result(tmp_path: Path) 
         ],
     )
 
-    detail = TuiBridge(tmp_path).dispatch("run.detail", {"run_id": "run-1", "application_id": "reports"})
+    detail = StudioQueryService(tmp_path).run_detail("run-1", application_id="reports", system_id=None)
 
     assert detail["result_state"] == "unavailable"
     assert detail["result"] is None
@@ -465,7 +473,7 @@ def test_matching_completed_task_tree_supplies_final_result(tmp_path: Path) -> N
         ],
     )
 
-    detail = TuiBridge(tmp_path).dispatch("run.detail", {"run_id": "run-1", "application_id": "reports"})
+    detail = StudioQueryService(tmp_path).run_detail("run-1", application_id="reports", system_id=None)
 
     assert detail["result_state"] == "available"
     assert detail["result"] == '{"answer": "final report"}'
@@ -497,8 +505,8 @@ def test_run_detail_projects_cumulative_task_events_to_the_selected_run(tmp_path
     ]
     _events(tmp_path, "reports", "task-shared", events)
 
-    first = TuiBridge(tmp_path).dispatch("run.detail", {"run_id": "run-1", "application_id": "reports"})
-    second = TuiBridge(tmp_path).dispatch("run.detail", {"run_id": "run-2", "application_id": "reports"})
+    first = StudioQueryService(tmp_path).run_detail("run-1", application_id="reports", system_id=None)
+    second = StudioQueryService(tmp_path).run_detail("run-2", application_id="reports", system_id=None)
 
     assert first["events"] == events[:4]
     assert [worker["agent_name"] for worker in first["workers"]] == ["first"]
@@ -519,7 +527,7 @@ def test_resumed_run_never_inherits_unmarked_legacy_worker_or_result_events(tmp_
     ]
     _events(tmp_path, "reports", "task-shared", events)
 
-    detail = TuiBridge(tmp_path).dispatch("run.detail", {"run_id": "run-2", "application_id": "reports"})
+    detail = StudioQueryService(tmp_path).run_detail("run-2", application_id="reports", system_id=None)
 
     assert detail["events"] == events[2:]
     assert [worker["agent_name"] for worker in detail["workers"]] == ["new"]
@@ -559,7 +567,7 @@ def test_run_detail_projects_resume_claim_as_running_worker_for_selected_run(
         ],
     )
 
-    detail = TuiBridge(tmp_path).dispatch("run.detail", {"run_id": "run-2", "application_id": "reports"})
+    detail = StudioQueryService(tmp_path).run_detail("run-2", application_id="reports", system_id=None)
 
     assert detail["workers"] == [
         {
@@ -608,7 +616,7 @@ def test_run_detail_projects_cached_claim_as_cached_worker_for_selected_run(
         ],
     )
 
-    detail = TuiBridge(tmp_path).dispatch("run.detail", {"run_id": "run-2", "application_id": "reports"})
+    detail = StudioQueryService(tmp_path).run_detail("run-2", application_id="reports", system_id=None)
 
     assert detail["workers"] == [
         {
@@ -654,7 +662,7 @@ def test_held_run_lease_is_running_even_with_stale_heartbeat(tmp_path: Path) -> 
     lease = RuntimeRunLease(run_dir)
     lease.acquire()
     try:
-        bootstrap = TuiBridge(tmp_path).bootstrap()
+        bootstrap = StudioQueryService(tmp_path).bootstrap()
     finally:
         lease.release()
 
@@ -693,7 +701,7 @@ def test_released_run_lease_is_crashed_even_with_live_pid_and_fresh_heartbeat(
         ),
     )
 
-    bootstrap = TuiBridge(tmp_path).bootstrap()
+    bootstrap = StudioQueryService(tmp_path).bootstrap()
 
     run = next(item for item in bootstrap["runs"] if item["run_id"] == "run-1")
     assert run["status"] == "crashed"
@@ -728,12 +736,12 @@ def test_concurrent_read_only_scans_do_not_make_an_orphaned_run_look_active(
     first_result: list[dict[str, Any]] = []
 
     def first_scan() -> None:
-        first_result.append(TuiBridge(tmp_path).bootstrap())
+        first_result.append(StudioQueryService(tmp_path).bootstrap())
 
     first_thread = threading.Thread(target=first_scan)
     first_thread.start()
     assert first_probe_acquired.wait(timeout=1)
-    second_result = TuiBridge(tmp_path).bootstrap()
+    second_result = StudioQueryService(tmp_path).bootstrap()
     release_first_probe.set()
     first_thread.join(timeout=2)
 
@@ -772,7 +780,7 @@ def test_released_run_lease_uses_terminal_task_state(tmp_path: Path) -> None:
             ),
         )
 
-    bootstrap = TuiBridge(tmp_path).bootstrap()
+    bootstrap = StudioQueryService(tmp_path).bootstrap()
 
     statuses = {run["task_id"]: run["status"] for run in bootstrap["runs"]}
     assert statuses == expected
@@ -807,7 +815,7 @@ def test_external_runtime_uses_stable_run_relative_log_and_artifact_paths(
     log = _write(run_dir / "logs/runtime.log", "done\n")
     artifact = _write(run_dir / "artifacts/report.txt", "report\n")
 
-    detail = TuiBridge(project_root).dispatch("run.detail", {"run_id": "run-1", "application_id": "reports"})
+    detail = StudioQueryService(project_root).run_detail("run-1", application_id="reports", system_id=None)
 
     assert detail["logs"] == [
         {
@@ -864,7 +872,7 @@ def test_run_detail_enforces_explicit_event_log_artifact_and_result_budgets(
         _write(run_dir / f"logs/worker-{index}.log", f"log-{index}-" * 8)
         _write(run_dir / f"artifacts/report-{index}.txt", f"artifact-{index}")
 
-    detail = TuiBridge(tmp_path).dispatch("run.detail", {"run_id": "run-1", "application_id": "reports"})
+    detail = StudioQueryService(tmp_path).run_detail("run-1", application_id="reports", system_id=None)
 
     assert len(detail["events"]) <= 3
     assert (
@@ -937,9 +945,10 @@ def test_truncated_legacy_event_source_never_claims_that_no_result_was_saved(
         ],
     )
 
-    detail = TuiBridge(tmp_path).dispatch(
-        "run.detail",
-        {"run_id": "run-1", "application_id": "reports"},
+    detail = StudioQueryService(tmp_path).run_detail(
+        "run-1",
+        application_id="reports",
+        system_id=None,
     )
 
     assert detail["result_state"] == "unavailable"
@@ -996,8 +1005,8 @@ def test_bounded_cumulative_events_never_attribute_a_newer_resume_tail_to_an_old
         ),
     )
 
-    old_detail = TuiBridge(tmp_path).dispatch("run.detail", {"run_id": "run-1", "application_id": "reports"})
-    latest_detail = TuiBridge(tmp_path).dispatch("run.detail", {"run_id": "run-2", "application_id": "reports"})
+    old_detail = StudioQueryService(tmp_path).run_detail("run-1", application_id="reports", system_id=None)
+    latest_detail = StudioQueryService(tmp_path).run_detail("run-2", application_id="reports", system_id=None)
 
     assert old_detail["events"] == []
     assert old_detail["workers"] == []
@@ -1024,7 +1033,7 @@ def test_system_state_is_running_when_any_linked_run_is_active(tmp_path: Path) -
         started_at="2026-07-17T11:00:00+00:00",
     )
     lease = RuntimeRunLease(active_run_dir)
-    bridge = TuiBridge(tmp_path)
+    bridge = StudioQueryService(tmp_path)
     lease.acquire()
     try:
         bootstrap = bridge.bootstrap()
@@ -1050,7 +1059,7 @@ def test_system_catalog_rejects_symlinked_yaml_files(tmp_path: Path) -> None:
     linked.parent.mkdir(parents=True)
     linked.symlink_to(external)
 
-    bootstrap = TuiBridge(tmp_path / "project").bootstrap()
+    bootstrap = StudioQueryService(tmp_path / "project").bootstrap()
 
     assert bootstrap["systems"] == []
 
@@ -1065,6 +1074,6 @@ def test_system_catalog_rejects_symlinked_applications_root(tmp_path: Path) -> N
     project_root.mkdir()
     (project_root / "applications").symlink_to(external_root, target_is_directory=True)
 
-    bootstrap = TuiBridge(project_root).bootstrap()
+    bootstrap = StudioQueryService(project_root).bootstrap()
 
     assert bootstrap["systems"] == []

@@ -1,4 +1,4 @@
-"""Lightweight, read-only workspace projections for the TUI.
+"""Lightweight, read-only workspace projections for AgentLoom Studio.
 
 This module consumes the shared lightweight definition reader.  Merely
 opening the workspace catalog must never construct a model, import the Agent
@@ -36,7 +36,7 @@ def project_catalog(
 ) -> dict[str, Any]:
     """Project Applications, Agent trees, Skills, and durable schedules.
 
-    ``systems`` and ``runs`` are the bridge's already-computed summaries.  The
+    ``systems`` and ``runs`` are the query service's already-computed summaries. The
     catalog enriches them from local configuration without importing the
     execution stack.  Invalid, external, or symlinked paths are ignored.
     """

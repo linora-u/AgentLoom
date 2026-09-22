@@ -1,4 +1,4 @@
-"""Bounded conversational assistant used by the AgentLoom TUI.
+"""Bounded conversational assistant used by AgentLoom Studio.
 
 The configured model answers ordinary questions and can optionally inspect
 Agent definitions or edit an in-memory YAML proposal. It cannot run commands,
@@ -598,7 +598,7 @@ class _ValidateAgentDraftTool:
 
 
 class BuilderService:
-    """Secure draft state plus the independent short-session TUI agent."""
+    """Secure draft state plus the independent short-session Studio agent."""
 
     def __init__(
         self,
@@ -640,14 +640,14 @@ class BuilderService:
         if len(message) > _MAX_BUILDER_MESSAGE_CHARS:
             raise ValueError(f"message must not exceed {_MAX_BUILDER_MESSAGE_CHARS:,} characters")
 
-        return self._send_with_tui_chat_agent(
+        return self._send_with_studio_chat_agent(
             session_id=session_id,
             message=message,
             model_type=model_type,
             on_event=on_event,
         )
 
-    def _send_with_tui_chat_agent(
+    def _send_with_studio_chat_agent(
         self,
         *,
         session_id: str,
@@ -664,14 +664,14 @@ class BuilderService:
         tools = self._tools(working_draft)
 
         if self._chat_agent is None:
-            from agentloom.application.studio.chat_agent import TuiChatAgent
+            from agentloom.application.studio.chat_agent import StudioChatAgent
 
             kwargs: dict[str, object] = {}
             if self._chat_client_factory is not None:
                 kwargs["client_factory"] = self._chat_client_factory
             if self._retry_sleep is not None:
                 kwargs["retry_sleep"] = self._retry_sleep
-            self._chat_agent = TuiChatAgent(self._project_root, **kwargs)
+            self._chat_agent = StudioChatAgent(self._project_root, **kwargs)
 
         result = self._chat_agent.run(
             history=candidate_history,

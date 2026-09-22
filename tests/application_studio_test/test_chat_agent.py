@@ -8,9 +8,8 @@ from pathlib import Path
 
 import httpx
 import pytest
-from agentloom.application.studio.bridge import BridgeError, TuiBridge
 from agentloom.application.studio.builder import BuilderService
-from agentloom.application.studio.chat_agent import ChatModelProfile
+from agentloom.application.studio.chat_agent import ChatAgentError, ChatModelProfile
 from openai import OpenAI
 
 
@@ -194,12 +193,11 @@ def test_tool_choice_none_rejects_forged_provider_tool_calls_locally(tmp_path: P
         )
 
     service = BuilderService(tmp_path, chat_client_factory=_client_factory(handler))
-    bridge = TuiBridge(tmp_path, builder_service=service)
-
-    with pytest.raises(BridgeError) as error:
-        bridge.dispatch(
-            "assistant.send",
-            {"session_id": "chat-1", "message": "hello", "model_type": "powerful"},
+    with pytest.raises(ChatAgentError) as error:
+        service.send(
+            session_id="chat-1",
+            message="hello",
+            model_type="powerful",
         )
 
     assert error.value.code == "assistant_protocol"
@@ -225,15 +223,13 @@ def test_invalid_tool_choice_fails_before_client_construction(tmp_path: Path) ->
         client_created = True
         raise AssertionError("invalid tool policy must fail before client construction")
 
-    bridge = TuiBridge(
-        tmp_path,
-        builder_service=BuilderService(tmp_path, chat_client_factory=create_client),
-    )
+    service = BuilderService(tmp_path, chat_client_factory=create_client)
 
-    with pytest.raises(BridgeError) as error:
-        bridge.dispatch(
-            "assistant.send",
-            {"session_id": "chat-1", "message": "hello", "model_type": "powerful"},
+    with pytest.raises(ChatAgentError) as error:
+        service.send(
+            session_id="chat-1",
+            message="hello",
+            model_type="powerful",
         )
 
     assert client_created is False
@@ -392,21 +388,21 @@ def test_timeout_is_retried_once_without_committing_failed_history(tmp_path: Pat
         chat_client_factory=_client_factory(handler),
         retry_sleep=lambda _seconds: None,
     )
-    bridge = TuiBridge(tmp_path, builder_service=service)
-
-    with pytest.raises(BridgeError) as error:
-        bridge.dispatch(
-            "assistant.send",
-            {"session_id": "chat-1", "message": "失败的消息", "model_type": "powerful"},
+    with pytest.raises(ChatAgentError) as error:
+        service.send(
+            session_id="chat-1",
+            message="失败的消息",
+            model_type="powerful",
         )
 
     assert error.value.code == "assistant_timeout"
     assert "secret upstream details" not in str(error.value)
     assert service.history("chat-1") == []
 
-    recovered = bridge.dispatch(
-        "assistant.send",
-        {"session_id": "chat-1", "message": "新的消息", "model_type": "powerful"},
+    recovered = service.send(
+        session_id="chat-1",
+        message="新的消息",
+        model_type="powerful",
     )
 
     assert recovered["assistant"] == "恢复了"
@@ -496,19 +492,17 @@ def test_long_retry_after_returns_rate_limit_without_retrying_early(tmp_path: Pa
             json={"error": {"message": "rate limited"}},
         )
 
-    bridge = TuiBridge(
+    service = BuilderService(
         tmp_path,
-        builder_service=BuilderService(
-            tmp_path,
-            chat_client_factory=_client_factory(handler),
-            retry_sleep=delays.append,
-        ),
+        chat_client_factory=_client_factory(handler),
+        retry_sleep=delays.append,
     )
 
-    with pytest.raises(BridgeError) as error:
-        bridge.dispatch(
-            "assistant.send",
-            {"session_id": "chat-1", "message": "hello", "model_type": "powerful"},
+    with pytest.raises(ChatAgentError) as error:
+        service.send(
+            session_id="chat-1",
+            message="hello",
+            model_type="powerful",
         )
 
     assert error.value.code == "assistant_rate_limit"
@@ -526,12 +520,11 @@ def test_auth_error_is_not_retried_and_is_safe_for_the_rpc(tmp_path: Path) -> No
         return httpx.Response(401, json={"error": {"message": "secret credential detail"}})
 
     service = BuilderService(tmp_path, chat_client_factory=_client_factory(handler))
-    bridge = TuiBridge(tmp_path, builder_service=service)
-
-    with pytest.raises(BridgeError) as error:
-        bridge.dispatch(
-            "assistant.send",
-            {"session_id": "chat-1", "message": "hello", "model_type": "powerful"},
+    with pytest.raises(ChatAgentError) as error:
+        service.send(
+            session_id="chat-1",
+            message="hello",
+            model_type="powerful",
         )
 
     assert calls == 1
@@ -561,15 +554,13 @@ def test_invalid_openai_compatible_base_url_is_a_local_config_error(
         client_created = True
         raise AssertionError("invalid configuration must fail before client construction")
 
-    bridge = TuiBridge(
-        tmp_path,
-        builder_service=BuilderService(tmp_path, chat_client_factory=create_client),
-    )
+    service = BuilderService(tmp_path, chat_client_factory=create_client)
 
-    with pytest.raises(BridgeError) as error:
-        bridge.dispatch(
-            "assistant.send",
-            {"session_id": "chat-1", "message": "hello", "model_type": "powerful"},
+    with pytest.raises(ChatAgentError) as error:
+        service.send(
+            session_id="chat-1",
+            message="hello",
+            model_type="powerful",
         )
 
     assert client_created is False
@@ -598,15 +589,13 @@ def test_custom_endpoint_never_receives_an_ambient_openai_api_key(
         client_created = True
         raise AssertionError("missing project credentials must fail before client construction")
 
-    bridge = TuiBridge(
-        tmp_path,
-        builder_service=BuilderService(tmp_path, chat_client_factory=create_client),
-    )
+    service = BuilderService(tmp_path, chat_client_factory=create_client)
 
-    with pytest.raises(BridgeError) as error:
-        bridge.dispatch(
-            "assistant.send",
-            {"session_id": "chat-1", "message": "hello", "model_type": "powerful"},
+    with pytest.raises(ChatAgentError) as error:
+        service.send(
+            session_id="chat-1",
+            message="hello",
+            model_type="powerful",
         )
 
     assert client_created is False
@@ -631,15 +620,13 @@ def test_default_openai_endpoint_rejects_non_openai_litellm_model_prefix(tmp_pat
         client_created = True
         raise AssertionError("unsupported provider must fail before client construction")
 
-    bridge = TuiBridge(
-        tmp_path,
-        builder_service=BuilderService(tmp_path, chat_client_factory=create_client),
-    )
+    service = BuilderService(tmp_path, chat_client_factory=create_client)
 
-    with pytest.raises(BridgeError) as error:
-        bridge.dispatch(
-            "assistant.send",
-            {"session_id": "chat-1", "message": "hello", "model_type": "powerful"},
+    with pytest.raises(ChatAgentError) as error:
+        service.send(
+            session_id="chat-1",
+            message="hello",
+            model_type="powerful",
         )
 
     assert client_created is False

@@ -1,5 +1,6 @@
-"""Studio-facing Application services used by the private TUI adapter."""
+"""Application services consumed by AgentLoom Studio."""
 
-from .bridge import BridgeError, TuiBridge
+from .errors import StudioServiceError
+from .query_service import StudioQueryService
 
-__all__ = ["BridgeError", "TuiBridge"]
+__all__ = ["StudioQueryService", "StudioServiceError"]

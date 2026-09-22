@@ -1,7 +1,7 @@
-"""Independent short-session chat agent for the AgentLoom TUI.
+"""Independent short-session chat agent for AgentLoom Studio.
 
 This module deliberately uses the OpenAI-compatible SDK directly.  It does
-not import the AgentLoom execution Agent, smolagents, or LiteLLM.  The TUI
+not import the AgentLoom execution Agent, smolagents, or LiteLLM.  The Studio
 agent owns a small conversation/tool loop and can call only the draft tools
 provided by :mod:`agentloom.application.studio.builder`.
 """
@@ -51,7 +51,7 @@ class _ChatTool(Protocol):
 
 @dataclass(frozen=True, slots=True)
 class ChatModelProfile:
-    """One safe, bounded TUI projection of an ``llm.yaml`` model entry."""
+    """One safe, bounded Studio projection of an ``llm.yaml`` model entry."""
 
     model_type: str
     model_id: str
@@ -300,7 +300,7 @@ def _tool_schema(tool: _ChatTool) -> dict[str, object]:
 
 def _system_prompt(profile: ChatModelProfile) -> str:
     return (
-        "You are the independent AgentLoom TUI assistant. Your scope is short conversation, "
+        "You are the independent AgentLoom Studio assistant. Your scope is short conversation, "
         "project observation, and proposing Agent YAML.\n"
         "Answer ordinary questions directly. Do not turn a normal question into an Agent task.\n"
         "Use tools only when the user asks you to inspect an Agent System or create/change Agent YAML.\n"
@@ -317,8 +317,8 @@ def _system_prompt(profile: ChatModelProfile) -> str:
     )
 
 
-class TuiChatAgent:
-    """A small OpenCode/Hermes-style provider + tool loop for the TUI."""
+class StudioChatAgent:
+    """A small OpenCode/Hermes-style provider and tool loop for Studio."""
 
     def __init__(
         self,
