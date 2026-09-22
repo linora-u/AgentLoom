@@ -12,10 +12,6 @@ import agentloom.application.agent as base_agent_module
 import agentloom.application.invocation as invocation_module
 import pytest
 import yaml
-from agentloom.runtimes.smolagents.agents import ToolCallingAgentV2
-from agentloom.runtimes.smolagents.loom_mixin import LoomAgentMixin
-from agentloom.runtimes.smolagents.terminal import final_answer_binding
-from agentloom.runtimes.smolagents.tools.tools import tool
 from agentloom.execution import RuntimeHome, bind_run_context
 from agentloom.execution.agent_runtime import (
     AgentRuntimeRequest,
@@ -37,6 +33,10 @@ from agentloom.execution.trace import (
     clear_current_hook_run,
     set_current_hook_run,
 )
+from agentloom.runtimes.smolagents.agents import ToolCallingAgentV2
+from agentloom.runtimes.smolagents.loom_mixin import LoomAgentMixin
+from agentloom.runtimes.smolagents.terminal import final_answer_binding
+from agentloom.runtimes.smolagents.tools.tools import tool
 from agentloom.self_learning.persistence.review_engine import ReviewEngine
 
 
@@ -522,7 +522,7 @@ def test_runtime_definition_contains_complete_neutral_runtime_input(
     assert definition.runtime_options["planning_interval"] == 3
     assert definition.runtime_options["smart_summary"] is False
     assert definition.runtime_options["todo_mode"] == "on"
-    assert definition.instructions == "environment"
+    assert definition.instructions == "Use the proof tool.\n\nenvironment"
     assert definition.runtime_options["prompt_template_path"] == str(prompt_path.resolve())
     assert definition.project_root == str(tmp_path)
     assert definition.runtime_options["max_consecutive_model_errors"] == 7

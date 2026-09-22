@@ -436,9 +436,5 @@ def _same_json(value, expected) -> bool:
 
 
 def _checkpoint_query(task_input: str) -> str:
-    """Extract the one declared typed query from its persisted input envelope."""
-    block = task_input.split("\n<inputs>\n", 1)[1].split("\n</inputs>", 1)[0]
-    # This Application owns a single query input and its description; use that
-    # contract rather than scanning JSON in unrelated workflow instructions.
-    description = "1. JSON result from the previous stage, with absolute workspace and unique case_nonce.: "
-    return block.split(description, 1)[1].strip()
+    """Return the persisted single query input."""
+    return task_input.strip()

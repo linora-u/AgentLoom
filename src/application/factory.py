@@ -2,7 +2,6 @@ import copy
 import hashlib
 import inspect
 import json
-import re
 from collections.abc import Callable
 from functools import wraps
 from pathlib import Path
@@ -15,8 +14,6 @@ from agentloom.application.validation import AgentConfigNormalizer, NormalizedAg
 from agentloom.application.workflows import get_worker_agent_yaml_path, infer_category_from_yaml_path
 from agentloom.configuration import C
 from agentloom.configuration.config import EffectiveAgentConfigSnapshot
-from agentloom.configuration.yaml_loader import load_unique_yaml
-from agentloom.execution.goal import normalize_goal_config, normalize_workflow_for_goal
 from agentloom.execution.logging import (
     get_logger,
 )
@@ -25,41 +22,6 @@ from agentloom.execution.tool_gateway import ToolBinding, bind_tool
 from agentloom.tools.loader import resolve_tool_function
 from agentloom.tools.selection import resolve_runtime_toolsets
 
-# Prompt protocol constants are externalized in prompts/ YAML to keep wording/template
-# configuration centralized and editable without changing implementation logic.
-_PROMPT_PROTOCOL_PATH = (
-    Path(__file__).resolve().parent
-    / "prompts"
-    / "agent_tool_behavior_spec.yaml"
-).resolve()
-_PROMPT_PROTOCOL_REQUIRED_STRING_KEYS = (
-    "task_spec_section_header",
-    "task_spec_section_guidance_base",
-    "task_spec_workflow_guidance",
-    "task_spec_section_guidance_tail",
-    "task_spec_block_template",
-    "workflow_block_template",
-    "task_request_section_header",
-    "task_request_section_guidance",
-    "task_request_block_template",
-    "task_spec_warning_header",
-    "inputs_section_header",
-    "inputs_section_guidance",
-    "inputs_list_intro_line",
-    "inputs_empty_line",
-    "inputs_block_template",
-    "output_section_header",
-    "output_section_guidance",
-    "output_rule_header",
-    "output_block_template",
-    "final_bridge_instruction",
-    "supervisor_bridge_instruction",
-    "workflow_execution_intro",
-    "workflow_outer_indent",
-    "workflow_inner_indent",
-)
-_PROMPT_PROTOCOL_REQUIRED_KEYS = _PROMPT_PROTOCOL_REQUIRED_STRING_KEYS + ("output_rule_lines",)
-_PROMPT_PROTOCOL_VAR_PATTERN = re.compile(r"\$\{([A-Za-z_][A-Za-z0-9_]*)\}")
 _FIXED_ARGS_CONFIG_KEY = "fixed_args"
 
 
@@ -108,290 +70,6 @@ def _bind_fixed_tool_args(tool_func: Callable, tool_name: str, fixed_args: dict[
     fixed_args_tool._agentloom_fixed_args = tuple(sorted(fixed_args))  # type: ignore[attr-defined]
     fixed_args_tool._agentloom_fixed_values = copy.deepcopy(fixed_args)  # type: ignore[attr-defined]
     return fixed_args_tool
-
-
-def _resolve_prompt_protocol_symbols(raw_symbols: dict[str, str], config_path: Path) -> dict[str, str]:
-    resolved_symbols: dict[str, str] = {}
-    resolving_symbols: set[str] = set()
-
-    def _resolve(name: str) -> str:
-        if name in resolved_symbols:
-            return resolved_symbols[name]
-        if name in resolving_symbols:
-            raise ValueError(f"Cyclic prompt protocol variable reference detected for '{name}' in {config_path}.")
-        if name not in raw_symbols:
-            raise ValueError(f"Prompt protocol references undefined variable '{name}' in {config_path}.")
-
-        resolving_symbols.add(name)
-        raw_value = raw_symbols[name]
-
-        def _replace(match: re.Match[str]) -> str:
-            ref_name = match.group(1)
-            if ref_name not in raw_symbols:
-                raise ValueError(f"Prompt protocol references undefined variable '{ref_name}' in {config_path}.")
-            return _resolve(ref_name)
-
-        try:
-            resolved_value = _PROMPT_PROTOCOL_VAR_PATTERN.sub(_replace, raw_value)
-        finally:
-            resolving_symbols.remove(name)
-
-        resolved_symbols[name] = resolved_value
-        return resolved_value
-
-    for symbol_name in raw_symbols:
-        _resolve(symbol_name)
-    return resolved_symbols
-
-
-def _expand_prompt_protocol_string(value: str, symbols: dict[str, str], config_path: Path) -> str:
-    def _replace(match: re.Match[str]) -> str:
-        symbol_name = match.group(1)
-        if symbol_name not in symbols:
-            raise ValueError(f"Prompt protocol references undefined variable '{symbol_name}' in {config_path}.")
-        return symbols[symbol_name]
-
-    return _PROMPT_PROTOCOL_VAR_PATTERN.sub(_replace, value)
-
-
-def _load_prompt_protocol_config(path: Path | None = None) -> dict[str, Any]:
-    config_path = Path(path) if path is not None else _PROMPT_PROTOCOL_PATH
-    if not config_path.exists():
-        raise RuntimeError(f"Prompt protocol config file not found: {config_path}")
-
-    try:
-        with config_path.open("r", encoding="utf-8") as fp:
-            raw = load_unique_yaml(fp)
-    except Exception as exc:
-        raise RuntimeError(f"Failed to load prompt protocol config from {config_path}: {exc}") from exc
-
-    if not isinstance(raw, dict):
-        raise ValueError(f"Prompt protocol config root must be a mapping in {config_path}.")
-
-    prompt_protocol = raw.get("prompt_protocol")
-    if not isinstance(prompt_protocol, dict):
-        raise ValueError(f"Prompt protocol config requires a 'prompt_protocol' mapping in {config_path}.")
-    prompt_protocol = dict(prompt_protocol)
-
-    missing_keys = [key for key in _PROMPT_PROTOCOL_REQUIRED_KEYS if key not in prompt_protocol]
-    if missing_keys:
-        missing = ", ".join(sorted(missing_keys))
-        raise ValueError(f"Prompt protocol config missing required fields in {config_path}: {missing}")
-
-    for key in _PROMPT_PROTOCOL_REQUIRED_STRING_KEYS:
-        value = prompt_protocol[key]
-        if not isinstance(value, str):
-            raise ValueError(f"Prompt protocol field '{key}' must be a string in {config_path}.")
-
-    output_rule_lines = prompt_protocol["output_rule_lines"]
-    if not isinstance(output_rule_lines, list) or any(not isinstance(item, str) for item in output_rule_lines):
-        raise ValueError(f"Prompt protocol field 'output_rule_lines' must be list[str] in {config_path}.")
-
-    variables = prompt_protocol.get("variables", {})
-    if variables is None:
-        variables = {}
-    if not isinstance(variables, dict):
-        raise ValueError(f"Prompt protocol field 'variables' must be a mapping in {config_path}.")
-    if any(not isinstance(name, str) or not name for name in variables):
-        raise ValueError(f"Prompt protocol field 'variables' must use non-empty string keys in {config_path}.")
-    if any(not isinstance(value, str) for value in variables.values()):
-        raise ValueError(f"Prompt protocol field 'variables' must map to string values in {config_path}.")
-
-    reserved_collisions = set(variables) & set(_PROMPT_PROTOCOL_REQUIRED_STRING_KEYS)
-    if reserved_collisions:
-        collided = ", ".join(sorted(reserved_collisions))
-        raise ValueError(
-            f"Prompt protocol variables cannot reuse reserved prompt field names in {config_path}: {collided}"
-        )
-
-    raw_symbols: dict[str, str] = {**variables}
-    for key in _PROMPT_PROTOCOL_REQUIRED_STRING_KEYS:
-        raw_symbols[key] = prompt_protocol[key]
-    resolved_symbols = _resolve_prompt_protocol_symbols(raw_symbols, config_path)
-
-    resolved_prompt_protocol = dict(prompt_protocol)
-    for key in _PROMPT_PROTOCOL_REQUIRED_STRING_KEYS:
-        resolved_prompt_protocol[key] = resolved_symbols[key]
-    resolved_prompt_protocol["output_rule_lines"] = [
-        _expand_prompt_protocol_string(line, resolved_symbols, config_path) for line in output_rule_lines
-    ]
-    if variables:
-        resolved_prompt_protocol["variables"] = {
-            key: resolved_symbols[key] for key in variables
-        }
-
-    return resolved_prompt_protocol
-
-
-_PROMPT_PROTOCOL = _load_prompt_protocol_config()
-
-TASK_SPEC_SECTION_HEADER = _PROMPT_PROTOCOL["task_spec_section_header"]
-TASK_SPEC_SECTION_GUIDANCE_BASE = _PROMPT_PROTOCOL["task_spec_section_guidance_base"]
-TASK_SPEC_WORKFLOW_GUIDANCE = _PROMPT_PROTOCOL["task_spec_workflow_guidance"]
-TASK_SPEC_SECTION_GUIDANCE_TAIL = _PROMPT_PROTOCOL["task_spec_section_guidance_tail"]
-TASK_SPEC_BLOCK_TEMPLATE = _PROMPT_PROTOCOL["task_spec_block_template"]
-WORKFLOW_BLOCK_TEMPLATE = _PROMPT_PROTOCOL["workflow_block_template"]
-TASK_REQUEST_SECTION_HEADER = _PROMPT_PROTOCOL["task_request_section_header"]
-TASK_REQUEST_SECTION_GUIDANCE = _PROMPT_PROTOCOL["task_request_section_guidance"]
-TASK_REQUEST_BLOCK_TEMPLATE = _PROMPT_PROTOCOL["task_request_block_template"]
-TASK_SPEC_WARNING_HEADER = _PROMPT_PROTOCOL["task_spec_warning_header"]
-INPUTS_SECTION_HEADER = _PROMPT_PROTOCOL["inputs_section_header"]
-INPUTS_SECTION_GUIDANCE = _PROMPT_PROTOCOL["inputs_section_guidance"]
-INPUTS_LIST_INTRO_LINE = _PROMPT_PROTOCOL["inputs_list_intro_line"]
-INPUTS_EMPTY_LINE = _PROMPT_PROTOCOL["inputs_empty_line"]
-INPUTS_BLOCK_TEMPLATE = _PROMPT_PROTOCOL["inputs_block_template"]
-OUTPUT_SECTION_HEADER = _PROMPT_PROTOCOL["output_section_header"]
-OUTPUT_SECTION_GUIDANCE = _PROMPT_PROTOCOL["output_section_guidance"]
-OUTPUT_RULE_HEADER = _PROMPT_PROTOCOL["output_rule_header"]
-OUTPUT_RULE_LINES = tuple(_PROMPT_PROTOCOL["output_rule_lines"])
-OUTPUT_BLOCK_TEMPLATE = _PROMPT_PROTOCOL["output_block_template"]
-FINAL_BRIDGE_INSTRUCTION = _PROMPT_PROTOCOL["final_bridge_instruction"]
-SUPERVISOR_BRIDGE_INSTRUCTION = _PROMPT_PROTOCOL["supervisor_bridge_instruction"]
-WORKFLOW_EXECUTION_INTRO = _PROMPT_PROTOCOL["workflow_execution_intro"]
-WORKFLOW_OUTER_INDENT = _PROMPT_PROTOCOL["workflow_outer_indent"]
-WORKFLOW_INNER_INDENT = _PROMPT_PROTOCOL["workflow_inner_indent"]
-
-MERMAID_BLOCK_PATTERN = re.compile(r"```mermaid\s*\n(.*?)\n\s*```", flags=re.DOTALL | re.IGNORECASE)
-_TASK_SPEC_RENDER_CACHE: dict[str, tuple[str, tuple[str, ...], bool]] = {}
-_MERMAID_VALIDATION_CACHE: dict[str, str | None] = {}
-_MERMAID_VALIDATOR = None
-_MERMAID_VALIDATOR_IMPORT_ERROR: str | None = None
-
-
-def _get_mermaid_validator():
-    """Resolve mermaid syntax validator lazily to avoid hard import failures."""
-    global _MERMAID_VALIDATOR, _MERMAID_VALIDATOR_IMPORT_ERROR
-    if _MERMAID_VALIDATOR is not None:
-        return _MERMAID_VALIDATOR
-    if _MERMAID_VALIDATOR_IMPORT_ERROR is not None:
-        return None
-    try:
-        # Third-party package: mermaid-syntax-parser
-        from mermaid_parser import validate_mermaid
-        _MERMAID_VALIDATOR = validate_mermaid
-    except Exception as exc:
-        _MERMAID_VALIDATOR_IMPORT_ERROR = str(exc)
-        return None
-    return _MERMAID_VALIDATOR
-
-
-def _validate_mermaid_text(mermaid_text: str) -> str | None:
-    """
-    Validate Mermaid content and return warning text when invalid.
-
-    Returns:
-        Optional[str]: warning message when invalid/unavailable, otherwise None.
-    """
-    validator = _get_mermaid_validator()
-    if validator is None:
-        details = _MERMAID_VALIDATOR_IMPORT_ERROR or "validator unavailable"
-        return f"Mermaid validation skipped: {details}"
-
-    try:
-        is_valid = bool(validator(mermaid_text))
-    except Exception as exc:
-        return f"Mermaid validation failed with exception: {exc}"
-
-    if not is_valid:
-        return "Mermaid syntax validation failed for workflow block #1."
-    return None
-
-
-def _render_indented_workflow_block(mermaid_text: str) -> str:
-    """Render workflow block with stable visual indentation."""
-    workflow_lines = [f"{WORKFLOW_OUTER_INDENT}<workflow>"]
-    for line in mermaid_text.splitlines():
-        workflow_lines.append(f"{WORKFLOW_INNER_INDENT}{line}" if line else "")
-    workflow_lines.append(f"{WORKFLOW_OUTER_INDENT}</workflow>")
-    return "\n".join(workflow_lines)
-
-
-def _build_task_spec_guidance(has_workflow: bool) -> str:
-    guidance_parts = [TASK_SPEC_SECTION_GUIDANCE_BASE]
-    if has_workflow:
-        guidance_parts.append(TASK_SPEC_WORKFLOW_GUIDANCE)
-    guidance_parts.append(TASK_SPEC_SECTION_GUIDANCE_TAIL)
-    return " ".join(guidance_parts)
-
-
-def _render_task_spec_content(task_spec_source: str) -> tuple[str, list[str], bool]:
-    """
-    Render task spec content:
-    - keep non-mermaid text as task context
-    - wrap mermaid blocks with <workflow>
-    - append validation warnings for invalid mermaid
-    """
-    normalized_source = (task_spec_source or "").strip()
-    if not normalized_source:
-        normalized_source = "No task specification was provided."
-
-    source_hash = hashlib.sha256(normalized_source.encode("utf-8")).hexdigest()
-    cached = _TASK_SPEC_RENDER_CACHE.get(source_hash)
-    if cached is not None:
-        rendered_content, warning_tuple, has_workflow = cached
-        return rendered_content, list(warning_tuple), has_workflow
-
-    rendered_parts: list[str] = []
-    warnings: list[str] = []
-    has_workflow = False
-    block_index = 0
-    cursor = 0
-
-    matches = list(MERMAID_BLOCK_PATTERN.finditer(normalized_source))
-    if not matches:
-        _TASK_SPEC_RENDER_CACHE[source_hash] = (normalized_source, tuple(), False)
-        return normalized_source, [], False
-
-    for match in matches:
-        text_prefix = normalized_source[cursor:match.start()].strip()
-        if text_prefix:
-            rendered_parts.append(text_prefix)
-
-        block_index += 1
-        mermaid_text = match.group(1).strip()
-        if mermaid_text:
-            has_workflow = True
-            indented_workflow_block = _render_indented_workflow_block(mermaid_text)
-            rendered_parts.append(f"{WORKFLOW_EXECUTION_INTRO}\n{indented_workflow_block}")
-            block_hash = hashlib.sha256(mermaid_text.encode("utf-8")).hexdigest()
-            warning = _MERMAID_VALIDATION_CACHE.get(block_hash)
-            if warning is None and block_hash not in _MERMAID_VALIDATION_CACHE:
-                warning = _validate_mermaid_text(mermaid_text)
-                _MERMAID_VALIDATION_CACHE[block_hash] = warning
-            if warning:
-                if "block #1" in warning:
-                    warning = warning.replace("block #1", f"block #{block_index}")
-                warnings.append(warning)
-
-        cursor = match.end()
-
-    text_suffix = normalized_source[cursor:].strip()
-    if text_suffix:
-        rendered_parts.append(text_suffix)
-
-    rendered_content = "\n\n".join(part for part in rendered_parts if part).strip()
-    if not rendered_content:
-        rendered_content = normalized_source
-
-    _TASK_SPEC_RENDER_CACHE[source_hash] = (rendered_content, tuple(warnings), has_workflow)
-    return rendered_content, warnings, has_workflow
-
-
-def _build_task_spec_block(task_spec_source: str, logger: Any = None) -> tuple[str, bool]:
-    rendered_content, warnings, has_workflow = _render_task_spec_content(task_spec_source)
-    log = get_logger(logger, __name__)
-    if warnings:
-        for warning in warnings:
-            log.warning(f"[YamlAgentFactory] {warning}")
-        warning_lines = [TASK_SPEC_WARNING_HEADER]
-        warning_lines.extend([f"{idx}. {msg}" for idx, msg in enumerate(warnings, start=1)])
-        rendered_content = f"{rendered_content}\n\n" + "\n".join(warning_lines)
-    return TASK_SPEC_BLOCK_TEMPLATE.format(content=rendered_content), has_workflow
-
-
-def _workflow_to_task_spec_source(workflow: Any) -> str:
-    """Render validated workflow text without adding list-stage labels."""
-    return "\n\n".join(AgentConfigNormalizer.normalize_workflow_items(workflow))
 
 
 class YamlConfiguredAgent(RoleDrivenAgent):
@@ -499,25 +177,6 @@ class YamlConfiguredAgent(RoleDrivenAgent):
                 sort_keys=True,
             )
 
-        def _build_formatted_query(input_payload: dict[str, Any]) -> str:
-            """Build the legacy task wrapper until Prompt Protocol is removed."""
-            query = INPUTS_BLOCK_TEMPLATE.format(
-                content=_build_user_input(input_payload)
-            )
-            workflow = _workflow_to_task_spec_source(_frozen_config['workflow'])
-            task_spec_block, has_workflow = _build_task_spec_block(workflow, logger=_shared_logger)
-            task_spec_guidance = _build_task_spec_guidance(has_workflow)
-            formatted_query = (
-                f"{TASK_SPEC_SECTION_HEADER}\n"
-                f"{task_spec_guidance}\n"
-                f"{task_spec_block}\n\n"
-                f"{INPUTS_SECTION_HEADER}\n"
-                f"{INPUTS_SECTION_GUIDANCE}\n"
-                f"{query}\n\n"
-                f"{FINAL_BRIDGE_INSTRUCTION}"
-            )
-            return formatted_query
-
         # Dynamically create the tool function (factory mode)
         def dynamic_agent_tool(*args, **kwargs):
             if len(args) > len(ordered_input_names):
@@ -545,13 +204,12 @@ class YamlConfiguredAgent(RoleDrivenAgent):
 
             assert normalized.input_validator is not None
             normalized.input_validator(input_payload)
-            formatted_query = _build_formatted_query(input_payload)
+            user_input = _build_user_input(input_payload)
 
             # Factory mode: create a NEW agent for each call (thread-safe)
             agent = _create_fresh_agent()
             result = agent.run(
-                formatted_query,
-                additional_args=input_payload,
+                user_input,
             )
             if not isinstance(result, str):
                 return result
@@ -656,9 +314,9 @@ class YamlConfiguredAgent(RoleDrivenAgent):
         dynamic_agent_tool._agentloom_recovery_descriptor = lambda arguments: {  # type: ignore[attr-defined]
             "agent_name": function_name,
             "input_hash": hashlib.sha256(
-                _build_formatted_query(dict(arguments)).encode()
+                _build_user_input(dict(arguments)).encode()
             ).hexdigest()[:16],
-            "task_input": _build_formatted_query(dict(arguments)),
+            "task_input": _build_user_input(dict(arguments)),
         }
 
         # Fail fast through AgentLoom's runtime-neutral Tool schema seam.
@@ -736,39 +394,16 @@ class YamlConfiguredSupervisorAgent(RoleDrivenAgent):
             inject_default_file_tools=False,
         )
 
-    def _transform_task(self, task: str, *, workflow_override: str | None = None) -> str:
-        workflow_content = (
-            workflow_override
-            if workflow_override is not None
-            else _workflow_to_task_spec_source(self._config['workflow'])
-        )
-        description = self._config.get('description', '').strip()
-        task_spec_source = workflow_content.strip()
-        if description:
-            task_spec_source = f"{description}\n\n{task_spec_source}" if task_spec_source else description
+    def _transform_task(
+        self,
+        task: str | None,
+        *,
+        workflow_override: str | None = None,
+    ) -> str | None:
+        _ = workflow_override
+        return task
 
-        logger = getattr(self, "logger", None) or getattr(self, "_logger", None)
-        task_spec_block, has_workflow = _build_task_spec_block(task_spec_source, logger=logger)
-        task_spec_guidance = _build_task_spec_guidance(has_workflow)
-        task_request_block = TASK_REQUEST_BLOCK_TEMPLATE.format(content=task)
-
-        enhanced_task = (
-            f"{TASK_SPEC_SECTION_HEADER}\n"
-            f"{task_spec_guidance}\n"
-            f"{task_spec_block}\n\n"
-            f"{TASK_REQUEST_SECTION_HEADER}\n"
-            f"{TASK_REQUEST_SECTION_GUIDANCE}\n"
-            f"{task_request_block}\n\n"
-            f"{SUPERVISOR_BRIDGE_INSTRUCTION}"
-        )
-        return enhanced_task
-
-    def _transform_tasks(self, task: str) -> list[str]:
-        workflow_content = self._config['workflow']
-        goal = normalize_goal_config(self._config, source=self._config.get("name", "supervisor"))
-        if goal.enabled:
-            merged_workflow = normalize_workflow_for_goal(workflow_content)
-            return [self._transform_task(task, workflow_override=merged_workflow)]
+    def _transform_tasks(self, task: str | None) -> list[str | None]:
         return [self._transform_task(task)]
 
     def _get_tools(self) -> list:
@@ -1113,7 +748,7 @@ class YamlAgentFactory:
 
         Returns a single callable tool function with a ``.batch()`` method
         for parallel execution, or ``None`` if the YAML has no
-        ``agent_function_schema`` (meaning the agent is not exported as a tool).
+        the Agent's input schema (or the default ``task`` schema).
 
         Each creation captures a fresh definition and configuration snapshot.
         The returned callable retains that snapshot for its lifetime.

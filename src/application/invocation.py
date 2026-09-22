@@ -62,7 +62,7 @@ class AgentInvocation:
     """Execute exactly one Agent invocation and release everything it owns."""
 
     owner: Any
-    task: str
+    task: str | None
     task_id: str | None = None
     checkpoint_manager: Any | None = None
     application_lifecycle: ApplicationRunLifecycle | None = None
@@ -87,7 +87,9 @@ class AgentInvocation:
         # its trusted wrapper in lifecycle events would make the untrusted
         # history sanitizer correctly treat the wrapper as a forged fence.
         transformed_tasks = owner._inject_memory_snapshot(lifecycle_tasks)
-        transformed_task = "\n\n".join(transformed_tasks)
+        transformed_task = "\n\n".join(
+            task for task in transformed_tasks if task is not None
+        )
 
         goal_config = normalize_goal_config(
             owner._config,
@@ -175,8 +177,8 @@ class AgentInvocation:
     def _execute_bound(
         self,
         *,
-        transformed_tasks: list[str],
-        lifecycle_tasks: list[str],
+        transformed_tasks: list[str | None],
+        lifecycle_tasks: list[str | None],
         final_task_id: str,
         goal_config: Any,
         goal_provider: Any,
@@ -187,7 +189,9 @@ class AgentInvocation:
         from agentloom.execution.goal import bind_goal_state_provider
 
         owner = self.owner
-        lifecycle_task = "\n\n".join(lifecycle_tasks)
+        lifecycle_task = "\n\n".join(
+            task for task in lifecycle_tasks if task is not None
+        )
         session_started = False
         session_result = None
         runtime_result = None
@@ -341,8 +345,8 @@ class AgentInvocation:
         self,
         runtime_agent: Any,
         *,
-        transformed_tasks: list[str],
-        lifecycle_tasks: list[str],
+        transformed_tasks: list[str | None],
+        lifecycle_tasks: list[str | None],
         goal_provider: Any,
         lifecycle: ApplicationRunLifecycle | None,
         runtime_checkpoint: Any = None,
@@ -411,7 +415,7 @@ class AgentInvocation:
             for task_index, current_task in enumerate(transformed_tasks):
                 self.owner._emit_task_start(
                     runtime_agent,
-                    lifecycle_tasks[task_index],
+                    lifecycle_tasks[task_index] or "",
                     additional_args=self.additional_args or {},
                 )
                 segment_start = len(runtime_events)
@@ -459,7 +463,8 @@ class AgentInvocation:
             try:
                 self.owner._emit_task_start(
                     runtime_agent,
-                    lifecycle_tasks[0] if use_initial_context else current_task,
+                    (lifecycle_tasks[0] if use_initial_context else current_task)
+                    or "",
                     additional_args=self.additional_args or {},
                 )
                 segment_start = len(runtime_events)

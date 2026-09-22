@@ -6,19 +6,6 @@ from pathlib import Path
 from typing import cast
 from uuid import uuid4
 
-from agentloom.runtimes.pi.checkpoint import PiCheckpointStore
-from agentloom.runtimes.pi.metadata import BRIDGE_VERSION, CAPABILITIES, SDK_VERSION, validate_model, validate_options
-from agentloom.runtimes.pi.protocol import (
-    PI_BRIDGE_PROTOCOL_VERSION,
-    Handshake,
-    HandshakeResult,
-    ModelSelection,
-    Run,
-    RunResult,
-)
-from agentloom.runtimes.pi.protocol_handlers import PiProtocolCoordinator
-from agentloom.runtimes.pi.recovery import reconcile
-from agentloom.runtimes.pi.transport import PiTransport
 from agentloom.execution import get_current_run_context
 from agentloom.execution.agent_runtime import (
     AgentRuntimeError,
@@ -38,6 +25,19 @@ from agentloom.execution.native_tool_host import NativeToolHost
 from agentloom.execution.native_tools import NativeCallIdentity
 from agentloom.execution.tool_gateway import PreparedToolGateway
 from agentloom.execution.trace import capture_explicit_execution_context
+from agentloom.runtimes.pi.checkpoint import PiCheckpointStore
+from agentloom.runtimes.pi.metadata import BRIDGE_VERSION, CAPABILITIES, SDK_VERSION, validate_model, validate_options
+from agentloom.runtimes.pi.protocol import (
+    PI_BRIDGE_PROTOCOL_VERSION,
+    Handshake,
+    HandshakeResult,
+    ModelSelection,
+    Run,
+    RunResult,
+)
+from agentloom.runtimes.pi.protocol_handlers import PiProtocolCoordinator
+from agentloom.runtimes.pi.recovery import reconcile
+from agentloom.runtimes.pi.transport import PiTransport
 from agentloom.tools.tool_meta import tool_is_concurrency_safe
 
 
@@ -178,7 +178,9 @@ class PiRuntime:
                 if hook is not None:
                     context = hook.consume_pending_agent_context()
                     if context:
-                        task += "\n" + "\n".join(context)
+                        task = "\n".join(
+                            item for item in (task, *context) if item
+                        )
                 wire = Run(method="run", application_id=request.application_id or "standalone",
                     task_id=request.task_id or "standalone", task=task, cwd=cwd,
                     instructions=definition.instructions or "", model=ModelSelection(model_type=selection.model_type,

@@ -9,7 +9,7 @@ from __future__ import annotations
 import json
 from collections.abc import Mapping
 from dataclasses import fields, is_dataclass
-from typing import Annotated, Any, Literal, Union
+from typing import Annotated, Any, Literal
 
 from agentloom.execution.agent_runtime import RuntimeCapabilities, RuntimeCheckpointEnvelope, RuntimeState
 from agentloom.execution.native_tools import (
@@ -50,7 +50,7 @@ class Run(WireValue):
     method: Literal["run"]
     application_id: NonEmpty
     task_id: NonEmpty
-    task: NonEmpty
+    task: NonEmpty | None = None
     cwd: NonEmpty
     instructions: str
     model: ModelSelection = Field(repr=False)
@@ -122,7 +122,7 @@ class PlatformPrepare(WireValue):
 
 
 RequestPayload = Annotated[
-    Union[Handshake, Run, Snapshot, Cancel, Close, Prepare, Dispatch, Settle, PlatformInvoke, PlatformPrepare, ModelPrepare, SessionCheckpoint], Field(discriminator="method")
+    Handshake | Run | Snapshot | Cancel | Close | Prepare | Dispatch | Settle | PlatformInvoke | PlatformPrepare | ModelPrepare | SessionCheckpoint, Field(discriminator="method")
 ]
 
 
@@ -248,7 +248,7 @@ class PlatformPrepared(WireValue):
 
 
 ResultPayload = Annotated[
-    Union[HandshakeResult, RunResult, SnapshotResult, ControlResult, PrepareResult, SettleResult, PlatformResult, PlatformPrepared, ModelPermit, SessionCheckpointResult],
+    HandshakeResult | RunResult | SnapshotResult | ControlResult | PrepareResult | SettleResult | PlatformResult | PlatformPrepared | ModelPermit | SessionCheckpointResult,
     Field(discriminator="method"),
 ]
 
@@ -319,7 +319,7 @@ class Event(Envelope):
     payload: dict[str, JsonValue] = Field(repr=False)
 
 
-Message = Annotated[Union[Request, Response, Event], Field(discriminator="kind")]
+Message = Annotated[Request | Response | Event, Field(discriminator="kind")]
 _message: TypeAdapter[Request | Response | Event] = TypeAdapter(Message)
 
 

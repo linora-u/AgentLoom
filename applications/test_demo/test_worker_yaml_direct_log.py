@@ -30,8 +30,8 @@ def run_worker_direct_log_demo(worker_yaml: Path) -> None:
         raise FileNotFoundError(f"Worker yaml not found: {worker_yaml}")
 
     config = YamlAgentFactory._load_config_from_file(worker_yaml)
-    print("\n--- agent_function_schema ---")
-    print(config.get("agent_function_schema"))
+    print("\n--- input_schema ---")
+    print(config.get("input_schema"))
 
     tool_fn = YamlAgentFactory.create_agent_as_tool(config)
 
@@ -51,9 +51,6 @@ def run_worker_direct_log_demo(worker_yaml: Path) -> None:
         "Schema note: parameters.type represents the function argument container, "
         f"current value={parameters_schema.get('type')!r} (expected 'object')."
     )
-    return_schema = schema.get("return") or {}
-    print(f"Schema return: type={return_schema.get('type')!r}, description={return_schema.get('description')!r}")
-
     print("\n--- Direct Invocation (manual review target) ---")
     expected_keys = {
         "query",
@@ -79,11 +76,6 @@ def run_worker_direct_log_demo(worker_yaml: Path) -> None:
     ]
     if non_string_fields:
         raise ValueError(f"Expected all schema parameter types to be string, got non-string fields: {non_string_fields}")
-    if return_schema.get("type") != "string":
-        raise ValueError(f"Expected return type to be string, got: {return_schema.get('type')}")
-    if not isinstance(return_schema.get("description"), str) or not return_schema.get("description", "").strip():
-        raise ValueError("Expected return.description to be a non-empty string")
-
     demo_inputs = {
         "query": "请把我传给你的所有参数完整输出出来（包含每个参数名和参数值）。",
         "tag": "demo-tag",
@@ -95,10 +87,9 @@ def run_worker_direct_log_demo(worker_yaml: Path) -> None:
         "checkpoints": "[\"schema\", \"invoke\", \"output\"]",
     }
     print("\n--- Manual Runtime Log Checklist ---")
-    print("1) Prompt starts with 'Task specification (what you must follow in this task):'")
-    print("2) Prompt contains <task_spec>, <inputs>, and <output> sections in this order")
-    print("3) <workflow> appears only when workflow contains mermaid block(s)")
-    print("4) Final model output satisfies return.description contract")
+    print("1) workflow is delivered through Runtime instructions")
+    print("2) Invocation arguments are the Worker user input")
+    print("3) No AgentLoom XML prompt wrapper is generated")
     print(f"Invocation input kwargs: {demo_inputs}")
     result = tool_fn(**demo_inputs)
     if not isinstance(result, str):
