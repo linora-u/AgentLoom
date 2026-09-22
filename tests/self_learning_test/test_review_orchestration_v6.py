@@ -4,8 +4,8 @@ import json
 from pathlib import Path
 
 import pytest
-from agentloom.runtime.model_binding import ModelTurnBinding
-from agentloom.runtime.model_protocol import (
+from agentloom.execution.model_binding import ModelTurnBinding
+from agentloom.execution.model_protocol import (
     MessageItem,
     ReasoningItem,
     FunctionCallItem,
@@ -636,7 +636,7 @@ def test_project_collection_does_not_repropose_an_existing_project_candidate(
 def test_project_collection_consumes_direct_project_evidence_once(
     tmp_path: Path,
 ) -> None:
-    from agentloom.runtime.trusted_memory_evidence import TRUSTED_MEMORY_EVIDENCE_KIND
+    from agentloom.execution.trusted_memory_evidence import TRUSTED_MEMORY_EVIDENCE_KIND
     from agentloom.self_learning.event_schema import CanonicalSessionEvent
     from agentloom.self_learning.persistence.ledger import SelfLearningLedger
     from agentloom.self_learning.persistence.review_engine import ReviewEngine
@@ -702,7 +702,7 @@ def test_artifact_failure_rolls_back_activation_and_keeps_source_run_retryable(
     import sqlite3
 
     import pytest
-    from agentloom.runtime.trusted_memory_evidence import TRUSTED_MEMORY_EVIDENCE_KIND
+    from agentloom.execution.trusted_memory_evidence import TRUSTED_MEMORY_EVIDENCE_KIND
     from agentloom.self_learning.event_schema import CanonicalSessionEvent
     from agentloom.self_learning.persistence.evidence_gate import SQLiteEvidenceGate
     from agentloom.self_learning.persistence.ledger import SelfLearningLedger

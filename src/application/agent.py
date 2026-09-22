@@ -23,7 +23,7 @@ from agentloom.configuration import (
     C,
     build_effective_agent_config_snapshot,
 )
-from agentloom.runtime.agent_runtime import (
+from agentloom.execution.agent_runtime import (
     AgentRuntime,
     AgentRuntimeRequest,
     AgentRuntimeResult,
@@ -34,27 +34,27 @@ from agentloom.runtime.agent_runtime import (
     RuntimeModelSelection,
     require_runtime_state,
 )
-from agentloom.runtime.hooks import (
+from agentloom.execution.hooks import (
     HookConfigLayer,
     HookEvent,
     HookPlan,
     HookPlanCompiler,
     builtin_hook_handlers,
 )
-from agentloom.runtime.logging import (
+from agentloom.execution.logging import (
     get_global_logger,
     get_logger,
 )
-from agentloom.runtime.model_binding import ModelTurnBinding
-from agentloom.runtime.prompts.environment import get_agent_environment_prompt
-from agentloom.runtime.skills.catalog import SkillCatalog
-from agentloom.runtime.skills.parser import build_skills_prompt
-from agentloom.runtime.tool_gateway import (
+from agentloom.execution.model_binding import ModelTurnBinding
+from agentloom.execution.prompts.environment import get_agent_environment_prompt
+from agentloom.execution.skills.catalog import SkillCatalog
+from agentloom.execution.skills.parser import build_skills_prompt
+from agentloom.execution.tool_gateway import (
     AgentLoomToolGateway,
     ToolBinding,
     bind_tool,
 )
-from agentloom.runtime.trace import (
+from agentloom.execution.trace import (
     bind_local_run,
     bind_root_run,
     capture_explicit_execution_context,
@@ -63,7 +63,7 @@ from agentloom.runtime.trace import (
     require_root_run_state,
     sub_task_context,
 )
-from agentloom.runtime.workspace import ensure_workspace_mounted_once
+from agentloom.execution.workspace import ensure_workspace_mounted_once
 
 
 class AgentType(Enum):
@@ -623,7 +623,7 @@ class RoleDrivenAgent(BaseAgent):
     def _build_runtime_tools(self, profile: AgentRoleProfile) -> list:
         tools = self.get_all_tools(agent_type=profile.agent_type.value.lower())
         if profile.agent_type is AgentType.SUPERVISOR:
-            from agentloom.runtime.goal import normalize_goal_config
+            from agentloom.execution.goal import normalize_goal_config
 
             goal = normalize_goal_config(
                 self._config,
@@ -631,7 +631,7 @@ class RoleDrivenAgent(BaseAgent):
             )
             if goal.enabled:
                 from agentloom.tools.goal import get_goal, update_goal
-                from agentloom.runtime.native_tools import ToolManifestEntry
+                from agentloom.execution.native_tools import ToolManifestEntry
 
                 tools = list(tools)
                 for tool, capability in ((get_goal, "goal.read"), (update_goal, "goal.update")):
@@ -857,7 +857,7 @@ class SubTaskTrackedAgent:
         work first, otherwise claims one completed result, or allocates a new
         call.  Fresh runs always allocate and execute.
         """
-        from agentloom.runtime.checkpoint.coordinator import CheckpointCoordinator
+        from agentloom.execution.checkpoint.coordinator import CheckpointCoordinator
 
         with sub_task_context(self._agent_name, agent_id=self._instance_id) as sub_task_id:
             started_event = self._subagent_event(

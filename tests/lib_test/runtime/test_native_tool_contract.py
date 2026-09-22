@@ -6,7 +6,7 @@ import pytest
 
 
 def test_native_authorization_binds_final_input_provider_and_instance():
-    from agentloom.runtime.native_tools import (
+    from agentloom.execution.native_tools import (
         NativeAuthorization,
         NativeCallIdentity,
         ToolManifestEntry,
@@ -42,7 +42,7 @@ def test_native_authorization_binds_final_input_provider_and_instance():
 
 
 def test_python_tool_gateway_exposes_selected_owned_manifest():
-    from agentloom.runtime.tool_gateway import AgentLoomToolGateway, bind_tool
+    from agentloom.execution.tool_gateway import AgentLoomToolGateway, bind_tool
     from agentloom.tools.loader import resolve_tool_function
 
     gateway = AgentLoomToolGateway([bind_tool(resolve_tool_function("read_file"))])
@@ -60,7 +60,7 @@ def test_python_tool_gateway_exposes_selected_owned_manifest():
 
 @pytest.fixture
 def write_contract(tmp_path):
-    from agentloom.runtime.native_tools import NativeCallIdentity, NativePrepareRequest, ToolManifestEntry
+    from agentloom.execution.native_tools import NativeCallIdentity, NativePrepareRequest, ToolManifestEntry
     from native_contract_fixture import ContractHostFixture
 
     request = NativePrepareRequest(
@@ -75,7 +75,7 @@ def write_contract(tmp_path):
 def test_shared_contract_repairs_before_backup_and_commits_before_ack(write_contract):
     import json
 
-    from agentloom.runtime.native_tools import NativeExecutionOutcome
+    from agentloom.execution.native_tools import NativeExecutionOutcome
 
     host, request, target = write_contract
     target.write_text("original")
@@ -106,8 +106,8 @@ def test_shared_contract_denial_prevents_effect_and_backup(write_contract):
 
 @pytest.mark.parametrize("committed", [False, True])
 def test_shared_contract_crash_windows_never_reexecute(write_contract, committed):
-    from agentloom.runtime.native_tools import NativeExecutionOutcome
-    from agentloom.runtime.tool_protocol import ToolErrorRecord
+    from agentloom.execution.native_tools import NativeExecutionOutcome
+    from agentloom.execution.tool_protocol import ToolErrorRecord
 
     host, request, target = write_contract
     grant = host.prepare(request).authorization
@@ -170,7 +170,7 @@ def test_shared_execution_gate_rejects_tampered_authorization(write_contract, ta
 
 
 def test_gateway_projects_execution_metadata_without_recognizing_tool_names():
-    from agentloom.runtime.tool_gateway import bind_tool
+    from agentloom.execution.tool_gateway import bind_tool
     from agentloom.tools.catalog import get_tool_spec
 
     def backend_command(command: str) -> str:

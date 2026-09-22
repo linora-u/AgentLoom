@@ -13,14 +13,14 @@ from threading import RLock
 from typing import Any, Callable
 
 from agentloom.runtimes.pi.metadata import BRIDGE_VERSION, SDK_VERSION
-from agentloom.runtime.agent_runtime import (
+from agentloom.execution.agent_runtime import (
     AgentRuntimeError, RuntimeCheckpointEnvelope, RuntimeDefinition,
 )
-from agentloom.runtime.context import RuntimeContext
-from agentloom.runtime.native_journal import recovery_receipt, snapshot
-from agentloom.runtime.native_tools import NativeCallIdentity
-from agentloom.runtime.storage import SecureDirectory
-from agentloom.runtime.tool_protocol import ToolCallRecord
+from agentloom.execution.context import RuntimeContext
+from agentloom.execution.native_journal import recovery_receipt, snapshot
+from agentloom.execution.native_tools import NativeCallIdentity
+from agentloom.execution.storage import SecureDirectory
+from agentloom.execution.tool_protocol import ToolCallRecord
 
 STATE_VERSION = 2
 MAX_SESSION_BYTES = 128 * 1024 * 1024

@@ -16,7 +16,7 @@ _LIST_MAX_ITEMS = 20
 
 def _current_agent_config() -> dict[str, Any] | None:
     try:
-        from agentloom.runtime.trace import capture_explicit_execution_context
+        from agentloom.execution.trace import capture_explicit_execution_context
 
         # Never consult task_context's process-global fallback here: two
         # concurrent roots may have different Application identities/policies.

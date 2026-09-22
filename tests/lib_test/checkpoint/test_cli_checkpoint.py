@@ -8,8 +8,8 @@ import pytest
 from click.testing import CliRunner
 
 from agentloom.__main__ import main
-from agentloom.runtime.checkpoint.checkpoint_manager import CheckpointManager
-from agentloom.runtime import RuntimeHome
+from agentloom.execution.checkpoint.checkpoint_manager import CheckpointManager
+from agentloom.execution import RuntimeHome
 
 
 @pytest.fixture()

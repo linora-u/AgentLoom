@@ -6,8 +6,8 @@ from typing import Any
 import pytest
 from agentloom.integrations.litellm import model_binding as litellm_binding
 from agentloom.configuration.llm_config import LLMConfig, LlmModelTypeSettings
-from agentloom.runtime.model_binding import ModelTurnBinding
-from agentloom.runtime.model_protocol import (
+from agentloom.execution.model_binding import ModelTurnBinding
+from agentloom.execution.model_protocol import (
     MessageItem,
     ModelTurnRequest,
     ModelTurnResult,

@@ -30,7 +30,7 @@ SKIP_DIRS = frozenset({
 })
 
 
-from agentloom.runtime.tool_governance.search import load_exclude_paths as _load_exclude_paths
+from agentloom.execution.tool_governance.search import load_exclude_paths as _load_exclude_paths
 
 
 def get_search_exclude_patterns(tool_name: str = "grep_search", root=None) -> List[str]:
@@ -46,7 +46,7 @@ def get_search_exclude_patterns(tool_name: str = "grep_search", root=None) -> Li
     """
     if root is None:
         return [f"!**/{d}/**" for d in _load_exclude_paths(tool_name)]
-    from agentloom.runtime.tool_governance.search import search_excludes
+    from agentloom.execution.tool_governance.search import search_excludes
     patterns = []
     for value in search_excludes(tool_name, root):
         if value == "*":

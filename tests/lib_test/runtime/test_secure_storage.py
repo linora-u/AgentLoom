@@ -8,7 +8,7 @@ import textwrap
 from pathlib import Path
 
 import pytest
-from agentloom.runtime import SecureDirectory
+from agentloom.execution import SecureDirectory
 
 
 def test_atomic_write_fsyncs_file_and_parent_directory(
@@ -171,7 +171,7 @@ def test_secure_reader_rejects_fifo_without_blocking(
                 """
                 import sys
                 from pathlib import Path
-                from agentloom.runtime import SecureDirectory
+                from agentloom.execution import SecureDirectory
 
                 with SecureDirectory(Path(sys.argv[1]), create=False) as storage:
                     try:
@@ -225,7 +225,7 @@ def test_external_reader_rejects_fifo_without_blocking(
                 """
                 import sys
                 from pathlib import Path
-                from agentloom.runtime import SecureDirectory
+                from agentloom.execution import SecureDirectory
 
                 state = Path(sys.argv[1])
                 source = Path(sys.argv[2])

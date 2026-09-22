@@ -10,9 +10,9 @@ import re
 from dataclasses import replace
 from typing import TYPE_CHECKING
 
-from agentloom.runtime.logging import get_logger
-from agentloom.runtime.native_tools import ToolManifestEntry
-from agentloom.runtime.tool_gateway import ToolBinding
+from agentloom.execution.logging import get_logger
+from agentloom.execution.native_tools import ToolManifestEntry
+from agentloom.execution.tool_gateway import ToolBinding
 
 if TYPE_CHECKING:
     from agentloom.integrations.mcp.config import McpSettings

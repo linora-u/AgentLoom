@@ -19,8 +19,8 @@ from agentloom.runtimes.pi.protocol import (
 from agentloom.runtimes.pi.protocol_handlers import PiProtocolCoordinator
 from agentloom.runtimes.pi.recovery import reconcile
 from agentloom.runtimes.pi.transport import PiTransport
-from agentloom.runtime import get_current_run_context
-from agentloom.runtime.agent_runtime import (
+from agentloom.execution import get_current_run_context
+from agentloom.execution.agent_runtime import (
     AgentRuntimeError,
     AgentRuntimeRequest,
     AgentRuntimeResult,
@@ -29,15 +29,15 @@ from agentloom.runtime.agent_runtime import (
     RuntimeEvent,
     RuntimeUsage,
 )
-from agentloom.runtime.goal import (
+from agentloom.execution.goal import (
     get_current_goal_provider,
     goal_continuation_prompt,
 )
-from agentloom.runtime.hooks import HookEvent
-from agentloom.runtime.native_tool_host import NativeToolHost
-from agentloom.runtime.native_tools import NativeCallIdentity
-from agentloom.runtime.tool_gateway import PreparedToolGateway
-from agentloom.runtime.trace import capture_explicit_execution_context
+from agentloom.execution.hooks import HookEvent
+from agentloom.execution.native_tool_host import NativeToolHost
+from agentloom.execution.native_tools import NativeCallIdentity
+from agentloom.execution.tool_gateway import PreparedToolGateway
+from agentloom.execution.trace import capture_explicit_execution_context
 from agentloom.tools.tool_meta import tool_is_concurrency_safe
 
 
@@ -79,7 +79,7 @@ class PiRuntime:
         except BaseException:
             self.transport.close()
             raise
-        from agentloom.runtime.resources import register_resource
+        from agentloom.execution.resources import register_resource
         register_resource(f"pi-runtime:{self.transport.instance_id}", self.close,
                           instance_id=self.transport.instance_id)
 
@@ -148,7 +148,7 @@ class PiRuntime:
         )
 
         def cancel_callbacks():
-            from agentloom.runtime.resources import close_instance_resources, close_run_resources
+            from agentloom.execution.resources import close_instance_resources, close_run_resources
             if execution.local_run_id == execution.root_run_id:
                 close_run_resources()
             else:

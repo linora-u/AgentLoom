@@ -21,7 +21,7 @@ def test_mcp_constructs_and_calls_without_smol_using_full_input_schema():
             from agentloom.integrations.mcp.adapter import AgentLoomMCPAdapter
             from agentloom.integrations.mcp.config import McpSettings
             from agentloom.integrations.mcp.tool_wrapper import wrap_mcp_tools
-            from agentloom.runtime.tool_gateway import ToolBinding
+            from agentloom.execution.tool_gateway import ToolBinding
             from jsonschema import ValidationError
 
             schema = {

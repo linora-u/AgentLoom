@@ -33,7 +33,7 @@ from agentloom.configuration.yaml_loader import load_unique_yaml
 from pydantic import ValidationError
 
 if TYPE_CHECKING:
-    from agentloom.runtime.skills.catalog import SkillCatalog
+    from agentloom.execution.skills.catalog import SkillCatalog
 
 _MARKDOWN_YAML = re.compile(r"```yaml\s*\n(.*?)\n```", re.DOTALL)
 _AGENT_DEFINITION_EXTENSIONS = frozenset({".yaml", ".yml", ".md"})
@@ -778,7 +778,7 @@ def validate_effective_definition(
     snapshot: EffectiveAgentConfigSnapshot, root: Path, source: str, *,
     runtime_id: object = "smolagents", runtime_options: dict | None = None,
 ):
-    from agentloom.runtime.hooks.config import HookConfigLayer, HookPlanCompiler
+    from agentloom.execution.hooks.config import HookConfigLayer, HookPlanCompiler
 
     # Keep the parsed catalog available for inspection even if another
     # capability (for example a tool reference) makes the definition invalid.
@@ -948,7 +948,7 @@ def _prepare_inspected_definition(
 
 def skill_catalog(snapshot: EffectiveAgentConfigSnapshot, *, logger=None) -> SkillCatalog:
     """Parse Skill instructions once for this definition's effective sources."""
-    from agentloom.runtime.skills.catalog import SkillCatalog
+    from agentloom.execution.skills.catalog import SkillCatalog
 
     catalog = snapshot.values.get("_skill_catalog_snapshot")
     if catalog is None:
@@ -959,7 +959,7 @@ def skill_catalog(snapshot: EffectiveAgentConfigSnapshot, *, logger=None) -> Ski
 
 def skill_sources(snapshot: EffectiveAgentConfigSnapshot):
     """Resolve Skill roots with the same layer and path rules for every adapter."""
-    from agentloom.runtime.skills.catalog import SkillSource
+    from agentloom.execution.skills.catalog import SkillSource
 
     sources = []
     for layer in snapshot.layers:

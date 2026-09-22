@@ -20,17 +20,17 @@ from agentloom.runtimes.smolagents.runtime_factory import (
 from agentloom.runtimes.smolagents.tool_proxy import (
     SmolagentsToolGatewayProxy,
 )
-from agentloom.runtime.agent_runtime import RuntimeDefinition
-from agentloom.runtime.logging import RichLoggerBackend
-from agentloom.runtime.model_binding import ModelTurnBinding
-from agentloom.runtime.model_protocol import (
+from agentloom.execution.agent_runtime import RuntimeDefinition
+from agentloom.execution.logging import RichLoggerBackend
+from agentloom.execution.model_binding import ModelTurnBinding
+from agentloom.execution.model_protocol import (
     MessageItem,
     ModelTurnRequest,
     ModelTurnResult,
     ToolDefinition,
 )
-from agentloom.runtime.tool_gateway import ToolGateway
-from agentloom.runtime.tool_protocol import ToolCallRecord
+from agentloom.execution.tool_gateway import ToolGateway
+from agentloom.execution.tool_protocol import ToolCallRecord
 from rich.console import Console
 from smolagents import AgentLogger
 
@@ -451,7 +451,7 @@ def test_factory_rejects_non_smolagents_definition() -> None:
 @pytest.mark.parametrize("mode,present", [("auto", True), ("on", True), ("off", False)])
 def test_smol_adapter_owns_todo_and_terminal_tools(mode, present):
     from dataclasses import replace
-    from agentloom.runtime.tool_gateway import AgentLoomToolGateway, bind_tool
+    from agentloom.execution.tool_gateway import AgentLoomToolGateway, bind_tool
     from agentloom.runtimes.smolagents.tools.todo import todo_write
 
     definition = _definition()

@@ -13,8 +13,8 @@ from agentloom.runtimes.smolagents.tool_proxy import (
     build_smolagents_tool_proxies,
 )
 from agentloom.runtimes.smolagents.terminal import final_answer_binding
-from agentloom.runtime.model_protocol import ToolDefinition
-from agentloom.runtime.tool_protocol import ToolCallRecord
+from agentloom.execution.model_protocol import ToolDefinition
+from agentloom.execution.tool_protocol import ToolCallRecord
 from smolagents.memory import ActionStep
 from smolagents.models import (
     ChatMessage,

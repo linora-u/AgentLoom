@@ -16,7 +16,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
-    from agentloom.runtime import RootRunState
+    from agentloom.execution import RootRunState
 
 from ..application_scope import resolve_application_scope, safe_application_id
 from ..event_schema import safe_run_id
@@ -40,7 +40,7 @@ def current_session_run_id() -> str:
     """Return the explicitly bound root run id; never guess global state."""
 
     try:
-        from agentloom.runtime.trace import require_root_run_id
+        from agentloom.execution.trace import require_root_run_id
 
         return safe_run_id(require_root_run_id())
     except Exception:
@@ -105,7 +105,7 @@ class MemoryStore:
         else:
             # RuntimeContext is the canonical identity when a run is bound.
             try:
-                from agentloom.runtime import get_current_run_context
+                from agentloom.execution import get_current_run_context
 
                 runtime = get_current_run_context()
             except Exception:

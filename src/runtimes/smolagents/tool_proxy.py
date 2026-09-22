@@ -6,8 +6,8 @@ import uuid
 from copy import deepcopy
 from typing import Any
 
-from agentloom.runtime.model_protocol import ToolDefinition
-from agentloom.runtime.tool_gateway import ToolGateway
+from agentloom.execution.model_protocol import ToolDefinition
+from agentloom.execution.tool_gateway import ToolGateway
 from smolagents import Tool
 
 

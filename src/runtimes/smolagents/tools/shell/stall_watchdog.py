@@ -14,8 +14,8 @@ import threading
 import time
 from typing import Callable, Optional
 
-from agentloom.runtime.logging import get_logger
-from agentloom.runtime import copy_runtime_context
+from agentloom.execution.logging import get_logger
+from agentloom.execution import copy_runtime_context
 from agentloom.runtimes.smolagents.tools.shell.output_reader import AnchoredOutputReader
 
 logger = get_logger(__name__)

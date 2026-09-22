@@ -23,7 +23,7 @@ from agentloom.integrations.litellm.tool_error_projection import (
 )
 from agentloom.runtimes.smolagents.model_turn_bridge import SmolagentsModelTurnBridge
 from agentloom.configuration.llm_config import LlmModelTypeSettings
-from agentloom.runtime.logging import get_logger
+from agentloom.execution.logging import get_logger
 from smolagents import AgentLogger
 
 from .model_types import ModelConfig, ModelType, ModelTypeManager

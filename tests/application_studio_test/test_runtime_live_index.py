@@ -8,7 +8,7 @@ from typing import Any
 
 import pytest
 
-from agentloom.runtime.context import RuntimeRunLease
+from agentloom.execution.context import RuntimeRunLease
 from agentloom.application.studio.bridge import TuiBridge
 
 SYSTEM_ID = "applications/demo/workflows/demo.yaml"

@@ -5,7 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Dict, List, Optional
 
-from agentloom.runtime.logging import get_logger
+from agentloom.execution.logging import get_logger
 
 logger = get_logger(__name__)
 

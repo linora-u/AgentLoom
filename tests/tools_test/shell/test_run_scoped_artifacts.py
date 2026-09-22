@@ -7,7 +7,7 @@ from unittest.mock import patch
 
 import pytest
 
-from agentloom.runtime import RuntimeHome, bind_run_context, copy_runtime_context
+from agentloom.execution import RuntimeHome, bind_run_context, copy_runtime_context
 
 
 def test_shell_audit_is_jsonl_in_the_current_run(tmp_path: Path) -> None:
@@ -316,7 +316,7 @@ def test_concurrent_runs_keep_shell_audit_contexts_isolated(tmp_path: Path) -> N
 
 
 def test_run_logger_scope_closes_shell_audit_handler(tmp_path: Path) -> None:
-    from agentloom.runtime.logging import (
+    from agentloom.execution.logging import (
         LoggingConfigBuilder,
         bind_logger_backend,
         initialize_run_logger,
@@ -350,12 +350,12 @@ def test_shell_audit_agent_never_reads_process_global_trace_fallback(
     from dataclasses import replace
 
     from agentloom.runtimes.smolagents.tools.shell.shell_audit_log import get_shell_audit_logger, reset_audit_loggers
-    from agentloom.runtime.trace import (
+    from agentloom.execution.trace import (
         bind_explicit_execution_context,
         capture_explicit_execution_context,
     )
 
-    task_context_module = importlib.import_module("agentloom.runtime.trace.task_context")
+    task_context_module = importlib.import_module("agentloom.execution.trace.task_context")
 
     context = RuntimeHome(tmp_path / ".agentloom").context(
         application_id="search",

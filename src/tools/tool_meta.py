@@ -6,7 +6,7 @@ from dataclasses import fields, replace
 from typing import Any
 
 from agentloom.configuration import C
-from agentloom.runtime.logging import get_logger
+from agentloom.execution.logging import get_logger
 
 from .catalog import ToolSpec, get_tool_spec
 

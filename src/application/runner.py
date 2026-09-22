@@ -54,17 +54,17 @@ from agentloom.application.run import (
 )
 from agentloom.configuration import C, build_effective_agent_config, get_config
 from agentloom.configuration.config import bind_config, fresh_invocation_config
-from agentloom.runtime import (
+from agentloom.execution import (
     bind_run_context,
     generate_runtime_id,
     resolve_application_id,
     resolve_runtime_home,
 )
-from agentloom.runtime.checkpoint import CheckpointManager
-from agentloom.runtime.checkpoint.file_history import FileHistoryManager
-from agentloom.runtime.goal import normalize_goal_config
-from agentloom.runtime.heartbeat import SupervisorHeartbeat
-from agentloom.runtime.logging import (
+from agentloom.execution.checkpoint import CheckpointManager
+from agentloom.execution.checkpoint.file_history import FileHistoryManager
+from agentloom.execution.goal import normalize_goal_config
+from agentloom.execution.heartbeat import SupervisorHeartbeat
+from agentloom.execution.logging import (
     LoggingConfigBuilder,
     bind_logger_backend,
     get_logger,
@@ -395,7 +395,7 @@ def _execute_app(
                     log.info("Loading supervisor config: %s", resolved_path)
 
                     try:
-                        from agentloom.runtime.retention import prune_runtime_if_due
+                        from agentloom.execution.retention import prune_runtime_if_due
 
                         prune_runtime_if_due(
                             runtime_home.root_dir,
@@ -459,7 +459,7 @@ def _execute_app(
                                 )
                         tree_status = tree.get("status", "unknown")
                         if tree_status == "running":
-                            from agentloom.runtime.heartbeat.status import detect_crashed_status
+                            from agentloom.execution.heartbeat.status import detect_crashed_status
 
                             heartbeat_payload = checkpoint_mgr._read_json(
                                 runtime_context.heartbeat_path
@@ -543,7 +543,7 @@ def _execute_app(
                         )
                         heartbeat.start()
 
-                        from agentloom.runtime.checkpoint.coordinator import (
+                        from agentloom.execution.checkpoint.coordinator import (
                             CheckpointCoordinator as _CC,
                         )
 

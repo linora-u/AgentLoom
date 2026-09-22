@@ -8,8 +8,8 @@ Covers:
 
 import os
 
-from agentloom.runtime import RuntimeHome, bind_run_context
-from agentloom.runtime.subprocess_env import _INJECT, _SCRUB_EXACT, build_subprocess_env
+from agentloom.execution import RuntimeHome, bind_run_context
+from agentloom.execution.subprocess_env import _INJECT, _SCRUB_EXACT, build_subprocess_env
 
 # ---------------------------------------------------------------------------
 # Sensitive variable filtering — 6 cases

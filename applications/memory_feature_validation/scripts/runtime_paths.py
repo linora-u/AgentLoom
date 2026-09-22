@@ -5,7 +5,7 @@ from __future__ import annotations
 from pathlib import Path
 
 from agentloom.configuration.system_loader import load_project_system_config
-from agentloom.runtime import resolve_runtime_home
+from agentloom.execution import resolve_runtime_home
 
 
 def canonical_runtime_root(repo_root: Path) -> Path:

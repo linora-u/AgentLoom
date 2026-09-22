@@ -9,7 +9,7 @@ import os
 import pytest
 from unittest.mock import patch
 
-from agentloom.runtime.tool_governance.shell.security import (
+from agentloom.execution.tool_governance.shell.security import (
     SecurityCheckResult,
     check_command_security,
     validate_command_security,
@@ -47,7 +47,7 @@ class TestSecurityCheckResultAlternative:
 
 class TestCommandSubstitutionAlternative:
 
-    @patch("agentloom.runtime.tool_governance.shell.security._load_enabled_checks", return_value={})
+    @patch("agentloom.execution.tool_governance.shell.security._load_enabled_checks", return_value={})
     def test_dollar_paren_has_alternative(self, _mock):
         """$() substitution error includes file-tool suggestion."""
         failures = check_command_security("echo $(whoami)")
@@ -57,7 +57,7 @@ class TestCommandSubstitutionAlternative:
         assert cmd_sub[0].alternative
         assert "write_file" in cmd_sub[0].alternative or "edit_file" in cmd_sub[0].alternative
 
-    @patch("agentloom.runtime.tool_governance.shell.security._load_enabled_checks", return_value={})
+    @patch("agentloom.execution.tool_governance.shell.security._load_enabled_checks", return_value={})
     def test_backtick_has_alternative(self, _mock):
         """Backtick substitution error includes alternative."""
         failures = check_command_security("echo `whoami`")
@@ -65,7 +65,7 @@ class TestCommandSubstitutionAlternative:
         assert cmd_sub
         assert cmd_sub[0].alternative != ""
 
-    @patch("agentloom.runtime.tool_governance.shell.security._load_enabled_checks", return_value={})
+    @patch("agentloom.execution.tool_governance.shell.security._load_enabled_checks", return_value={})
     def test_validate_raises_with_alternative(self, _mock):
         """validate_command_security() includes 'Suggested alternative:' in error."""
         with pytest.raises(ValueError, match="Suggested alternative:"):
@@ -79,7 +79,7 @@ class TestCommandSubstitutionAlternative:
 
 class TestEnvInjectionAlternative:
 
-    @patch("agentloom.runtime.tool_governance.shell.security._load_enabled_checks", return_value={})
+    @patch("agentloom.execution.tool_governance.shell.security._load_enabled_checks", return_value={})
     def test_env_injection_has_alternative(self, _mock):
         """Dangerous env var error includes YAML config suggestion."""
         failures = check_command_security("LD_PRELOAD=/lib/evil.so ls")
@@ -95,7 +95,7 @@ class TestEnvInjectionAlternative:
 
 class TestDangerousShellPrefixAlternative:
 
-    @patch("agentloom.runtime.tool_governance.shell.security._load_enabled_checks", return_value={})
+    @patch("agentloom.execution.tool_governance.shell.security._load_enabled_checks", return_value={})
     def test_sudo_has_alternative(self, _mock):
         """sudo error includes 'directly without sudo' suggestion."""
         failures = check_command_security("sudo ls -la")
@@ -111,7 +111,7 @@ class TestDangerousShellPrefixAlternative:
 
 class TestDestructivePatternAlternative:
 
-    @patch("agentloom.runtime.tool_governance.shell.security._load_enabled_checks", return_value={})
+    @patch("agentloom.execution.tool_governance.shell.security._load_enabled_checks", return_value={})
     def test_rm_rf_root_has_alternative(self, _mock):
         """rm -rf / error includes targeted operations suggestion."""
         failures = check_command_security("rm -rf /")
@@ -119,7 +119,7 @@ class TestDestructivePatternAlternative:
         assert destr
         assert "targeted" in destr[0].alternative.lower() or "specific" in destr[0].alternative.lower()
 
-    @patch("agentloom.runtime.tool_governance.shell.security._load_enabled_checks", return_value={})
+    @patch("agentloom.execution.tool_governance.shell.security._load_enabled_checks", return_value={})
     def test_git_reset_hard_has_alternative(self, _mock):
         """git reset --hard error includes alternative."""
         failures = check_command_security("git reset --hard HEAD~5")
@@ -135,7 +135,7 @@ class TestDestructivePatternAlternative:
 
 class TestProcessSubstitutionAlternative:
 
-    @patch("agentloom.runtime.tool_governance.shell.security._load_enabled_checks", return_value={})
+    @patch("agentloom.execution.tool_governance.shell.security._load_enabled_checks", return_value={})
     def test_process_sub_has_alternative(self, _mock):
         """<() process substitution error includes file-based alternative."""
         failures = check_command_security("diff <(ls dir1) <(ls dir2)")
@@ -151,7 +151,7 @@ class TestProcessSubstitutionAlternative:
 
 class TestNoAlternativeChecks:
 
-    @patch("agentloom.runtime.tool_governance.shell.security._load_enabled_checks", return_value={})
+    @patch("agentloom.execution.tool_governance.shell.security._load_enabled_checks", return_value={})
     def test_control_characters_no_alternative(self, _mock):
         """Control characters check has empty alternative."""
         failures = check_command_security("echo \x07hello")
@@ -159,7 +159,7 @@ class TestNoAlternativeChecks:
         assert ctrl
         assert ctrl[0].alternative == ""
 
-    @patch("agentloom.runtime.tool_governance.shell.security._load_enabled_checks", return_value={})
+    @patch("agentloom.execution.tool_governance.shell.security._load_enabled_checks", return_value={})
     def test_validate_no_alternative_no_suggested_line(self, _mock):
         """When alternative is empty, error message has no 'Suggested alternative:'."""
         with pytest.raises(ValueError) as exc_info:
@@ -174,7 +174,7 @@ class TestNoAlternativeChecks:
 
 class TestErrorMessageFormat:
 
-    @patch("agentloom.runtime.tool_governance.shell.security._load_enabled_checks", return_value={})
+    @patch("agentloom.execution.tool_governance.shell.security._load_enabled_checks", return_value={})
     def test_no_duplicate_punctuation(self, _mock):
         """Error message doesn't have double periods or trailing issues."""
         with pytest.raises(ValueError) as exc_info:
@@ -183,7 +183,7 @@ class TestErrorMessageFormat:
         assert ".." not in msg
         assert msg.strip() == msg  # no leading/trailing whitespace
 
-    @patch("agentloom.runtime.tool_governance.shell.security._load_enabled_checks", return_value={})
+    @patch("agentloom.execution.tool_governance.shell.security._load_enabled_checks", return_value={})
     def test_newline_separates_alternative(self, _mock):
         """Alternative text is on a separate line."""
         with pytest.raises(ValueError) as exc_info:
@@ -202,6 +202,6 @@ class TestPathValidationGuidance:
 
     def test_path_error_includes_guidance_suffix(self):
         """Path violation error messages include tool alternative guidance."""
-        from agentloom.runtime.tool_governance.shell.path_validation import _PATH_GUIDANCE
+        from agentloom.execution.tool_governance.shell.path_validation import _PATH_GUIDANCE
         assert "read_file" in _PATH_GUIDANCE
         assert "grep_search" in _PATH_GUIDANCE

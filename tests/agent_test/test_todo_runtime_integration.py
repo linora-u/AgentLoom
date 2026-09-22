@@ -7,13 +7,13 @@ from dataclasses import replace
 
 from agentloom.runtimes.smolagents.agents import ToolCallingAgentV2
 from agentloom.runtimes.smolagents.terminal import final_answer_binding
-from agentloom.runtime.hooks import HookPlan, HookRun
+from agentloom.execution.hooks import HookPlan, HookRun
 from agentloom.runtimes.smolagents.todo import TodoStateProvider, bind_todo_state_provider
-from agentloom.runtime.tool_gateway import (
+from agentloom.execution.tool_gateway import (
     AgentLoomToolGateway,
     bind_tool,
 )
-from agentloom.runtime.trace import bind_explicit_execution_context, capture_explicit_execution_context
+from agentloom.execution.trace import bind_explicit_execution_context, capture_explicit_execution_context
 from agentloom.runtimes.smolagents.tools.todo import todo_write
 from smolagents.models import (
     ChatMessage,
@@ -126,8 +126,8 @@ def test_pending_todo_is_hydrated_without_extra_call_or_final_gate() -> None:
 
 
 def test_checkpoint_snapshot_is_visible_on_first_resumed_model_action(tmp_path) -> None:
-    from agentloom.runtime.checkpoint.checkpoint_manager import CheckpointManager
-    from agentloom.runtime.checkpoint.coordinator import CheckpointCoordinator
+    from agentloom.execution.checkpoint.checkpoint_manager import CheckpointManager
+    from agentloom.execution.checkpoint.coordinator import CheckpointCoordinator
 
     task_id = "resume-task"
     manager = CheckpointManager(

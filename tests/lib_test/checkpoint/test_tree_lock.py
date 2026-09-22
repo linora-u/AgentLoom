@@ -12,8 +12,8 @@ import threading
 
 import pytest
 
-from agentloom.runtime.checkpoint.checkpoint_manager import CheckpointManager
-from agentloom.runtime.checkpoint.coordinator import CheckpointCoordinator
+from agentloom.execution.checkpoint.checkpoint_manager import CheckpointManager
+from agentloom.execution.checkpoint.coordinator import CheckpointCoordinator
 
 
 @pytest.fixture

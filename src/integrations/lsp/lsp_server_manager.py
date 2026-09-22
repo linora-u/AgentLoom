@@ -14,7 +14,7 @@ import os
 from pathlib import Path
 from typing import Dict, List, Optional
 
-from agentloom.runtime.logging import get_logger
+from agentloom.execution.logging import get_logger
 
 from .config import LSPConfig, LSPServerConfig
 from .lsp_server_instance import LSPServerInstance, ensure_lsp_paths

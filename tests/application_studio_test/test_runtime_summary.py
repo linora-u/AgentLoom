@@ -7,7 +7,7 @@ import agentloom.application.studio.bridge as bridge_module
 import pytest
 import yaml
 from agentloom.application.studio.bridge import BridgeError, TuiBridge
-from agentloom.runtime.context import RuntimeRunLease
+from agentloom.execution.context import RuntimeRunLease
 
 SYSTEM_ID = "applications/demo/workflows/demo.yaml"
 

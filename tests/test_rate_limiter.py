@@ -1,5 +1,5 @@
 """
-Tests for agentloom.runtime.concurrency.rate_limiter — thread-safe rate limiting.
+Tests for agentloom.execution.concurrency.rate_limiter — thread-safe rate limiting.
 
 Covers:
 - ThreadSafeRateLimiter: single-thread, multi-thread, RPM enforcement
@@ -17,7 +17,7 @@ from unittest.mock import patch
 
 import pytest
 
-from agentloom.runtime.concurrency.rate_limiter import (
+from agentloom.execution.concurrency.rate_limiter import (
     GlobalRateLimiterRegistry,
     GlobalRateLimitState,
     ThreadSafeRateLimiter,

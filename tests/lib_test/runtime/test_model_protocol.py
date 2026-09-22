@@ -9,7 +9,7 @@ from agentloom.integrations.litellm import (
     OpenAIResponsesModelTurnAdapter,
     create_model_turn_adapter,
 )
-from agentloom.runtime.model_protocol import (
+from agentloom.execution.model_protocol import (
     FunctionCallItem,
     FunctionCallOutputItem,
     MessageItem,

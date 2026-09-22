@@ -7,7 +7,7 @@ import math
 import re
 from typing import Any
 
-from agentloom.runtime.logging import get_logger
+from agentloom.execution.logging import get_logger
 _LOG = get_logger(__name__)
 
 _RE_INTEGER = re.compile(r"^-?(?:0|[1-9]\d*)$")

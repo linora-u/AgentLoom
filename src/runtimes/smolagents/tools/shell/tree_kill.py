@@ -16,7 +16,7 @@ import threading
 import time
 from typing import Optional
 
-from agentloom.runtime.logging import get_logger
+from agentloom.execution.logging import get_logger
 from agentloom.runtimes.smolagents.tools.shell.output_reader import AnchoredOutputReader
 
 logger = get_logger(__name__)
@@ -169,7 +169,7 @@ class SizeWatchdog:
 
     def start(self) -> None:
         """Start the watchdog polling thread."""
-        from agentloom.runtime import copy_runtime_context
+        from agentloom.execution import copy_runtime_context
 
         self._stopped = False
         runtime_context = copy_runtime_context()

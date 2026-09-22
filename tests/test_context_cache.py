@@ -7,7 +7,7 @@ from agentloom.integrations.litellm import (
     AnthropicMessagesModelTurnAdapter,
     OpenAIChatModelTurnAdapter,
 )
-from agentloom.runtime.model_protocol import MessageItem, ModelTurnRequest
+from agentloom.execution.model_protocol import MessageItem, ModelTurnRequest
 
 
 def _chat_response() -> dict:

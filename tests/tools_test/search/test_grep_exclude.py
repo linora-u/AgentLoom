@@ -17,7 +17,7 @@ from agentloom.runtimes.smolagents.tools.search.search_utils import (
 # inside _get_search_exclude_patterns.  We mock it at its origin module so
 # the import inside the function picks up the mock.
 _RESOLVE_MOCK_TARGET = (
-    "agentloom.runtime.permissions.workspace._resolve_tool_access_control_config"
+    "agentloom.execution.permissions.workspace._resolve_tool_access_control_config"
 )
 
 

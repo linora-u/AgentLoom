@@ -72,7 +72,7 @@ def test_current_snapshot_is_injected_as_trusted_system_context() -> None:
 
     from agentloom.runtimes.smolagents.loom_mixin import append_current_todo_state
     from agentloom.runtimes.smolagents.todo import TodoStateProvider, bind_todo_state_provider
-    from agentloom.runtime.trace import bind_explicit_execution_context, capture_explicit_execution_context
+    from agentloom.execution.trace import bind_explicit_execution_context, capture_explicit_execution_context
     from smolagents.models import ChatMessage, MessageRole
 
     provider = TodoStateProvider()
@@ -114,7 +114,7 @@ def test_summary_mode_model_context_also_receives_current_snapshot() -> None:
 
     from agentloom.runtimes.smolagents.loom_mixin import LoomAgentMixin
     from agentloom.runtimes.smolagents.todo import TodoStateProvider, bind_todo_state_provider
-    from agentloom.runtime.trace import bind_explicit_execution_context, capture_explicit_execution_context
+    from agentloom.execution.trace import bind_explicit_execution_context, capture_explicit_execution_context
     from smolagents.models import ChatMessage, MessageRole
 
     class MemoryWriter:

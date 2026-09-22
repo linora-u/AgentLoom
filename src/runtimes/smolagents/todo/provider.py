@@ -8,7 +8,7 @@ from contextlib import contextmanager
 from contextvars import ContextVar
 from typing import Any, Literal, overload
 
-from agentloom.runtime import safe_agent_path
+from agentloom.execution import safe_agent_path
 
 from .model import empty_todo_snapshot, validate_todo_items
 from .store import TodoStore
@@ -25,7 +25,7 @@ class TodoStateProvider:
 
     @staticmethod
     def _coordinator() -> Any | None:
-        from agentloom.runtime.checkpoint.coordinator import CheckpointCoordinator
+        from agentloom.execution.checkpoint.coordinator import CheckpointCoordinator
 
         return CheckpointCoordinator.current()
 

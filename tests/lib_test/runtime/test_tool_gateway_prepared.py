@@ -8,10 +8,10 @@ from threading import Barrier
 from unittest.mock import patch
 
 import pytest
-from agentloom.runtime.hooks import HookEvent, HookHandler, HookPlan, HookResult, HookRun
-from agentloom.runtime.tool_gateway import AgentLoomToolGateway, PreparedToolCall, ToolGateway, bind_tool
-from agentloom.runtime.tool_protocol import ToolCallRecord
-from agentloom.runtime.trace import (
+from agentloom.execution.hooks import HookEvent, HookHandler, HookPlan, HookResult, HookRun
+from agentloom.execution.tool_gateway import AgentLoomToolGateway, PreparedToolCall, ToolGateway, bind_tool
+from agentloom.execution.tool_protocol import ToolCallRecord
+from agentloom.execution.trace import (
     ExplicitExecutionContext,
     bind_explicit_execution_context,
     capture_explicit_execution_context,
@@ -76,9 +76,9 @@ def test_prepare_repairs_input_but_delays_guard_history_observer_and_setup():
     assert isinstance(gateway, ToolGateway)
     with (
         bind_explicit_execution_context(_context(run)),
-        patch("agentloom.runtime.hooks.path_validators.enforce_core_tool_guard", side_effect=guard),
-        patch("agentloom.runtime.checkpoint.file_history_hook.record_active_file_history", side_effect=history),
-        patch("agentloom.runtime.tool_gateway._observe_final_tool_input", side_effect=observe),
+        patch("agentloom.execution.hooks.path_validators.enforce_core_tool_guard", side_effect=guard),
+        patch("agentloom.execution.checkpoint.file_history_hook.record_active_file_history", side_effect=history),
+        patch("agentloom.execution.tool_gateway._observe_final_tool_input", side_effect=observe),
     ):
         prepared = _prepare(gateway, {"count": "malformed"})
         assert prepared.call_id == "provider-call"

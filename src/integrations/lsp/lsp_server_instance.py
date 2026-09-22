@@ -22,7 +22,7 @@ import sys
 from enum import Enum
 from typing import Any, Optional
 
-from agentloom.runtime.logging import get_logger
+from agentloom.execution.logging import get_logger
 
 logger = get_logger(__name__)
 

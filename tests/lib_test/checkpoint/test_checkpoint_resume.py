@@ -13,9 +13,9 @@ from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
-from agentloom.runtime.agent_runtime import RuntimeCheckpointEnvelope
-from agentloom.runtime.checkpoint import CheckpointManager
-from agentloom.runtime.checkpoint.coordinator import CheckpointCoordinator
+from agentloom.execution.agent_runtime import RuntimeCheckpointEnvelope
+from agentloom.execution.checkpoint import CheckpointManager
+from agentloom.execution.checkpoint.coordinator import CheckpointCoordinator
 
 # ── fixtures ─────────────────────────────────────────────────────────────
 
@@ -113,7 +113,7 @@ class TestWorkerCheckpoint:
                 pass
 
         monkeypatch.setattr(
-            "agentloom.runtime.checkpoint.coordinator.WorkerHeartbeat",
+            "agentloom.execution.checkpoint.coordinator.WorkerHeartbeat",
             _Heartbeat,
         )
 

@@ -17,7 +17,7 @@ from agentloom.runtimes.smolagents.prompts.prompt_builder import (
     resolve_model_family_prompt_path,
     resolve_prompt_path,
 )
-from agentloom.runtime.skills.catalog import SkillCatalog, SkillSource
+from agentloom.execution.skills.catalog import SkillCatalog, SkillSource
 
 
 @pytest.mark.parametrize("family", ["", "anthropic", "openai", "gemini"])

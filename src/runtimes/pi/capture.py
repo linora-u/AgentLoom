@@ -6,7 +6,7 @@ import stat
 from pathlib import Path
 from typing import Any
 
-from agentloom.runtime.native_tools import NativeResultCapture
+from agentloom.execution.native_tools import NativeResultCapture
 
 
 def read_capture(directory: Path, authorization_id: str, digest: str, *, completed: bool) -> tuple[Any, NativeResultCapture]:

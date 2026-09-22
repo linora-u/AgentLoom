@@ -22,7 +22,7 @@ from agentloom.application.presentation import configuration_projection, display
 from agentloom.application.revision import application_revision
 from agentloom.configuration.config import load_project_config
 from agentloom.configuration.yaml_loader import load_unique_yaml
-from agentloom.runtime.context import resolve_runtime_home
+from agentloom.execution.context import resolve_runtime_home
 
 _MAX_REVISION_FILES = 4096
 _MAX_REVISION_BYTES = 64 * 1024 * 1024

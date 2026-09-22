@@ -49,7 +49,7 @@ def self_learning_root(root: str | Path | None = None) -> Path:
     # legacy standalone/test override split sessions or memory from that run's
     # logs and checkpoints.
     try:
-        from agentloom.runtime import get_current_run_context
+        from agentloom.execution import get_current_run_context
 
         runtime_context = get_current_run_context()
         if runtime_context is not None:
@@ -57,7 +57,7 @@ def self_learning_root(root: str | Path | None = None) -> Path:
     except Exception:
         pass
 
-    from agentloom.runtime import resolve_runtime_home
+    from agentloom.execution import resolve_runtime_home
 
     return resolve_runtime_home(
         {"runtime": _runtime_config_section()},

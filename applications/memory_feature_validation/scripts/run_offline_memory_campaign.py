@@ -153,25 +153,30 @@ _TRUSTED_DRIVER_FILES = frozenset(_SOURCE_FILES[:4])
 # Preserve the baseline paths for historical Git blobs. The same semantic
 # sources have moved twice; choose one complete layout for each source tree,
 # never substitute another revision's content when a bound file is missing.
-_SOURCE_OWNER_MOVES = (
-    ("src/extensions/self_learning/", "src/self_learning/"),
-    ("src/lib/runtime/", "src/runtime/"),
-    ("src/lib/config/", "src/configuration/"),
-    ("src/lib/logging/", "src/runtime/logging/"),
-    ("src/lib/trusted_memory_evidence.py", "src/runtime/trusted_memory_evidence.py"),
-)
-
-
 def _source_paths_for_tree(paths: set[str]) -> tuple[str, ...]:
     if "agentloom/self_learning/event_schema.py" in paths:
         namespace = "agentloom"
+        execution_owner = "runtime"
     elif "src/self_learning/event_schema.py" in paths:
         namespace = "src"
+        execution_owner = (
+            "execution" if "src/execution/__init__.py" in paths else "runtime"
+        )
     else:
         return _SOURCE_FILES
+    owner_moves = (
+        ("src/extensions/self_learning/", "src/self_learning/"),
+        ("src/lib/runtime/", f"src/{execution_owner}/"),
+        ("src/lib/config/", "src/configuration/"),
+        ("src/lib/logging/", f"src/{execution_owner}/logging/"),
+        (
+            "src/lib/trusted_memory_evidence.py",
+            f"src/{execution_owner}/trusted_memory_evidence.py",
+        ),
+    )
     result: list[str] = []
     for relative in _SOURCE_FILES:
-        for old, new in _SOURCE_OWNER_MOVES:
+        for old, new in owner_moves:
             if relative.startswith(old):
                 relative = new + relative[len(old):]
                 break
@@ -210,7 +215,10 @@ def _source_manifest() -> list[dict[str, Any]]:
     rows: list[dict[str, Any]] = []
     layout_markers = {
         relative for relative in (
-            "agentloom/self_learning/event_schema.py", "src/self_learning/event_schema.py"
+            "agentloom/self_learning/event_schema.py",
+            "src/self_learning/event_schema.py",
+            "src/execution/__init__.py",
+            "src/runtime/__init__.py",
         ) if (REPO_ROOT / relative).is_file()
     }
     for relative in _source_paths_for_tree(layout_markers):

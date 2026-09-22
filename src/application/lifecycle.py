@@ -17,11 +17,11 @@ from threading import RLock
 from typing import Any, Literal
 
 from agentloom.application.run import RunPhase
-from agentloom.runtime.agent_runtime import (
+from agentloom.execution.agent_runtime import (
     AgentRuntimeResult,
     RuntimeEvent,
 )
-from agentloom.runtime.checkpoint import CheckpointManager
+from agentloom.execution.checkpoint import CheckpointManager
 
 _RUN_ARTIFACT_COPY_CHUNK_BYTES = 1024 * 1024
 
@@ -424,7 +424,7 @@ class ApplicationRunLifecycle:
         """Close all resources scoped to active Agent execution."""
 
         try:
-            from agentloom.runtime.resources import close_run_resources
+            from agentloom.execution.resources import close_run_resources
 
             close_run_resources()
         except Exception as exc:
@@ -461,7 +461,7 @@ class ApplicationRunLifecycle:
             target = self._invocation.coordinator
         if target is None:
             return
-        from agentloom.runtime.checkpoint.coordinator import CheckpointCoordinator
+        from agentloom.execution.checkpoint.coordinator import CheckpointCoordinator
 
         try:
             CheckpointCoordinator.deactivate(target)
