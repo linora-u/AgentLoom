@@ -21,7 +21,7 @@ from agentloom.execution.native_tool_host import NativeToolHost
 from agentloom.execution.native_tools import NativeCallIdentity, NativeCommitAck, NativeExecutionOutcome, NativePrepareRequest
 from agentloom.execution.tool_protocol import ToolErrorRecord
 from tests.application_test.native_read_support import READ
-from tests.lib_test.runtime.test_native_write_shell_host import write_manifest, shell_manifest
+from tests.lib_test.execution.test_native_write_shell_host import write_manifest, shell_manifest
 
 WRITE = write_manifest()
 SHELL = shell_manifest()
