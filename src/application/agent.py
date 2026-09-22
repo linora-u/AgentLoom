@@ -630,8 +630,8 @@ class RoleDrivenAgent(BaseAgent):
                 source=self._config.get("name", "supervisor"),
             )
             if goal.enabled:
-                from agentloom.tools.goal import get_goal, update_goal
                 from agentloom.execution.native_tools import ToolManifestEntry
+                from agentloom.tools.goal import get_goal, update_goal
 
                 tools = list(tools)
                 for tool, capability in ((get_goal, "goal.read"), (update_goal, "goal.update")):
@@ -671,6 +671,7 @@ class RoleDrivenAgent(BaseAgent):
         runtime_id = AgentConfigNormalizer.validate_agent_runtime_config(
             self._config
         )
+        normalized = self._ensure_normalized()
         if runtime_id == "smolagents":
             from importlib.util import find_spec
 
@@ -701,6 +702,7 @@ class RoleDrivenAgent(BaseAgent):
                 hook_plan=self._hook_plan,
             ),
             instructions=self._build_runtime_instructions(gateway),
+            output_contract=getattr(normalized, "output_contract", None),
             project_root=str(C.agent_root),
         )
 

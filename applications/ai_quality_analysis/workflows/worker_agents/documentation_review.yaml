@@ -112,21 +112,14 @@ workflow: |
 
   **Important: Use `write_markdown_file` tool with `sections` parameter. For large content, use `append_markdown_sections`.**
 
-agent_function_schema:
-  description: |
-    Evaluates documentation quality including function/class docs, README completeness,
-    API documentation, and inline comments.
-
-    Core capabilities:
-    1. Assess project-level and code-level documentation coverage
-    2. Evaluate inline comment quality and API docs completeness
-    3. Measure overall maintainability and onboarding friendliness
-  inputs:
+input_schema:
+  type: object
+  properties:
     query:
-      description: |
-        Analysis task description with target module/files and project context.
-      required: true
-  output:
-    description: |
-      str: Analysis summary. Detailed report written to:
-              - QA_Documentation.md containing documentation assessment
+      type: string
+      description: 'Analysis task description with target module/files and project context.
+
+        '
+  required:
+  - query
+  additionalProperties: false

@@ -107,21 +107,14 @@ workflow: |
 
   **Important: Use `write_markdown_file` tool with `sections` parameter. For large content, use `append_markdown_sections`.**
 
-agent_function_schema:
-  description: |
-    Synthesizes findings from all analysis stages into prioritized, actionable
-    remediation plans with effort estimates and side-effect assessments.
-
-    Core capabilities:
-    1. Consolidate and deduplicate findings across all categories
-    2. Design concrete fix strategies with effort estimates
-    3. Assess side effects and create implementation roadmap
-  inputs:
+input_schema:
+  type: object
+  properties:
     query:
-      description: |
-        Analysis task description with all prior stage findings.
-      required: true
-  output:
-    description: |
-      str: Analysis summary. Detailed report written to:
-              - QA_Recommendations.md containing prioritized remediation plan
+      type: string
+      description: 'Analysis task description with all prior stage findings.
+
+        '
+  required:
+  - query
+  additionalProperties: false

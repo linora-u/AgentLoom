@@ -11,17 +11,17 @@ workflow: |
   2. 使用 bash/shell 工具执行对应的 cd, pwd 等命令
   3. 必须返回真实的指令执行结果
 
-agent_function_schema:
-  description: |
-    子 agent，用于隔离 shell 执行环境
-  inputs:
+input_schema:
+  type: object
+  properties:
     query:
-      description: |
-        传递给 worker 的具体 shell 执行指令或任务描述。
-      required: true
-  output:
-    description: |
-      Worker execution result text
+      type: string
+      description: '传递给 worker 的具体 shell 执行指令或任务描述。
+
+        '
+  required:
+  - query
+  additionalProperties: false
 tools:
   - name: "shell_tool"
 

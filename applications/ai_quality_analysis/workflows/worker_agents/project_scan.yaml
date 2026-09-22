@@ -91,21 +91,14 @@ tools:
     function: "get_module_context"
     description: "Retrieve module context including module description and related code file list. Must be called before any analysis agent."
 
-agent_function_schema:
-  description: |
-    Scans project structure, classifies file roles, maps dependencies, and identifies
-    typical execution scenarios. Produces foundational data for all subsequent review stages.
-
-    Core capabilities:
-    1. Scan and classify module source files by role
-    2. Map module dependency relationships
-    3. Identify typical execution / runtime scenarios
-  inputs:
+input_schema:
+  type: object
+  properties:
     query:
-      description: |
-        Analysis task description containing the target module name and project context.
-      required: true
-  output:
-    description: |
-      str: Analysis summary. Detailed report written to workspace:
-              - QA_ProjectStructure.md containing file scan, dependency analysis, and scenario mapping
+      type: string
+      description: 'Analysis task description containing the target module name and project context.
+
+        '
+  required:
+  - query
+  additionalProperties: false

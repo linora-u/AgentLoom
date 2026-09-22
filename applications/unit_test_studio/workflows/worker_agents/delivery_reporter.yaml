@@ -55,12 +55,12 @@ tools:
     module: "applications.unit_test_studio.agent_tools.unit_test_tools"
     function: "collect_generation_report"
 
-agent_function_schema:
-  description: |
-    Build the final English report for generated test files.
-  inputs:
+input_schema:
+  type: object
+  properties:
     query:
+      type: string
       description: JSON output from test_refiner.
-      required: true
-  output:
-    description: English markdown report text.
+  required:
+  - query
+  additionalProperties: false

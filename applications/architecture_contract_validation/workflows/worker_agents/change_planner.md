@@ -13,15 +13,15 @@ toolsets: []
 context_engine:
   min_chars: 80000
   preview_max_chars: 80000
-agent_function_schema:
-  description: change planner
-  inputs:
+input_schema:
+  type: object
+  properties:
     query:
-      description: JSON result from the previous stage, with absolute workspace and
-        unique case_nonce.
-      required: true
-  output:
-    description: Structured JSON stage evidence, preserving workspace and case_nonce.
+      type: string
+      description: JSON result from the previous stage, with absolute workspace and unique case_nonce.
+  required:
+  - query
+  additionalProperties: false
 tools:
 - name: read_workspace_file
   module: applications.architecture_contract_validation.agent_tools.workspace_tools

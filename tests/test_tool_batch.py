@@ -22,18 +22,16 @@ def _make_config(concurrency=None):
         "workflow": "Process the query.",
         "model_type": "powerful",
         "agent_runtime": "smolagents",
-        "agent_function_schema": {
-            "description": "Batch test tool",
-            "inputs": {
+        "input_schema": {
+            "type": "object",
+            "properties": {
                 "query": {
-                    "description": "Input query",
                     "type": "string",
-                    "required": True,
+                    "description": "Input query",
                 },
             },
-            "output": {
-                "description": "Result text",
-            },
+            "required": ["query"],
+            "additionalProperties": False,
         },
     }
     if concurrency is not None:
@@ -63,7 +61,7 @@ def _create_tool(config):
         def process_tool_query(self, q):
             return q
 
-        def run(self, q):
+        def run(self, q, additional_args=None):
             return "mock_result"
 
         def agent_as_tool(self):

@@ -132,25 +132,14 @@ tools:
     function: "get_module_context"
     description: "获取指定模块的上下文信息，包括模块描述和相关代码文件列表。在调用具体的检查 Agent 之前，必须先调用此工具获取上下文。"
 
-agent_function_schema:
-  description: |
-    代码质量检查智能体，负责分析模块级代码质量、依赖关系及潜在问题。
-    
-    该智能体专注于高并发环境下的代码质量，识别性能瓶颈、
-    安全漏洞、架构问题和代码规范。
-    
-    核心能力：
-    1. 扫描模块代码文件
-    2. 自动识别模块依赖关系
-    3. 识别典型场景（如果未提供）
-  inputs:
+input_schema:
+  type: object
+  properties:
     query:
-      description: |
-        检查任务描述，包含待检查的模块名称和项目上下文。
-      required: true
-  output:
-    description: |
-      str: 检查结果摘要，详细报告将生成在 workspace 中, 包含：
-              - API_FileScan.md 包含文件扫描结果
-              - API_Dependencies.md 包含依赖关系分析
-              - API_Scenarios.md 包含典型运行场景分析
+      type: string
+      description: '检查任务描述，包含待检查的模块名称和项目上下文。
+
+        '
+  required:
+  - query
+  additionalProperties: false
