@@ -272,6 +272,7 @@ class RuntimeCapabilities:
     subagents: bool
     goal: bool = False
     stop_hooks: bool = False
+    structured_output: bool = False
 
 
 @dataclass(frozen=True, slots=True)
@@ -284,6 +285,7 @@ class RuntimeRequirements:
     subagents: bool = False
     goal: bool = False
     stop_hooks: bool = False
+    structured_output: bool = False
 
     def unsupported_by(
         self,
@@ -298,6 +300,7 @@ class RuntimeRequirements:
                 "subagents",
                 "goal",
                 "stop_hooks",
+                "structured_output",
             )
             if getattr(self, name) and not getattr(capabilities, name)
         )
@@ -899,6 +902,10 @@ class RuntimeRegistry:
         requirements = replace(
             definition.requirements,
             structured_tools=(definition.requirements.structured_tools or bool(definition.tool_gateway.definitions)),
+            structured_output=(
+                definition.requirements.structured_output
+                or definition.output_contract is not None
+            ),
         )
         registration = self.validate(definition.runtime_id, requirements=requirements)
         if registration.factory is None:

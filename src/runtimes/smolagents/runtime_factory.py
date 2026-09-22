@@ -4,6 +4,10 @@ from __future__ import annotations
 
 from typing import Any
 
+from agentloom.execution.agent_runtime import RuntimeDefinition
+from agentloom.execution.logging import get_global_logger, get_logger
+from agentloom.execution.tool_gateway import AgentLoomToolGateway, bind_tool, tool_manifest_snapshot
+from agentloom.execution.trace import get_current_hook_run
 from agentloom.runtimes.smolagents.agent_logger import (
     adapt_smolagents_logger_backend,
 )
@@ -11,21 +15,18 @@ from agentloom.runtimes.smolagents.agents import ToolCallingAgentV2
 from agentloom.runtimes.smolagents.model_turn_bridge import (
     SmolagentsModelTurnBridge,
 )
-from agentloom.runtimes.smolagents.runtime_adapter import (
-    SmolagentsRuntimeAdapter,
-)
-from agentloom.execution.agent_runtime import RuntimeDefinition
-from agentloom.execution.logging import get_global_logger, get_logger
 from agentloom.runtimes.smolagents.options import options_from_definition
 from agentloom.runtimes.smolagents.prompts.prompt_builder import (
     _append_to_system_prompt,
     load_base_prompt_templates,
     todo_policy_for_mode,
 )
-from agentloom.execution.trace import get_current_hook_run
-from agentloom.execution.tool_gateway import AgentLoomToolGateway, bind_tool, tool_manifest_snapshot
+from agentloom.runtimes.smolagents.runtime_adapter import (
+    SmolagentsRuntimeAdapter,
+)
 from agentloom.runtimes.smolagents.terminal import final_answer_binding
 from agentloom.tools.loader import resolve_tool_function
+
 from smolagents import LogLevel
 
 logger = get_logger(__name__)
@@ -47,17 +48,26 @@ def _run_scoped_stop_check(
 class _SmolToolGateway:
     """Add only smol's execution tools, preserving common tool governance."""
 
-    def __init__(self, delegate, todo_mode: str) -> None:
+    def __init__(
+        self,
+        delegate,
+        todo_mode: str,
+        output_contract=None,
+    ) -> None:
         self.delegate = delegate
-        selected = tuple(tool for tool in delegate.definitions if todo_mode != "off" or tool.name != "todo_write")
+        selected = tuple(
+            tool
+            for tool in delegate.definitions
+            if tool.name != "final_answer"
+            and (todo_mode != "off" or tool.name != "todo_write")
+        )
         names = {tool.name for tool in selected}
-        extras = []
-        if "final_answer" not in names:
-            extras.append(final_answer_binding())
+        extras = [final_answer_binding(output_contract)]
         if todo_mode != "off" and "todo_write" not in names:
             extras.append(bind_tool(resolve_tool_function("todo_write")))
         self.extra = AgentLoomToolGateway(extras)
         self.definitions = (*selected, *self.extra.definitions)
+        self._selected_names = {tool.name for tool in selected}
         self._extra_names = {tool.name for tool in self.extra.definitions}
         self._names = {tool.name for tool in self.definitions}
 
@@ -65,7 +75,7 @@ class _SmolToolGateway:
     def manifest(self):
         return (
             *(entry for entry in tool_manifest_snapshot(self.delegate)
-              if entry.visible_name in self._names),
+              if entry.visible_name in self._selected_names),
             *self.extra.manifest,
         )
 
@@ -104,7 +114,11 @@ class SmolagentsRuntimeFactory:
         if definition.project_root is None:
             raise ValueError("Smolagents runtime requires RuntimeDefinition.project_root")
         options = options_from_definition(definition)
-        gateway = _SmolToolGateway(definition.tool_gateway, options["todo_mode"])
+        gateway = _SmolToolGateway(
+            definition.tool_gateway,
+            options["todo_mode"],
+            definition.output_contract,
+        )
         try:
             instructions = "\n\n".join(filter(None, (
                 definition.instructions, todo_policy_for_mode(options["todo_mode"]),

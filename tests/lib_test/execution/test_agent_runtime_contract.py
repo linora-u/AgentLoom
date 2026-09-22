@@ -265,11 +265,24 @@ def test_builtin_registry_registers_only_explicit_smolagents_factory() -> None:
     requests: list[AgentRuntimeRequest] = []
     created: list[str] = []
 
+    class BuiltinSmolRuntime(_RecordingRuntime):
+        @property
+        def capabilities(self) -> RuntimeCapabilities:
+            return RuntimeCapabilities(
+                structured_tools=True,
+                parallel_tools=True,
+                checkpoint_resume=True,
+                subagents=True,
+                goal=True,
+                stop_hooks=True,
+                structured_output=True,
+            )
+
     def build_smolagents(
         _definition: RuntimeDefinition,
-    ) -> _RecordingRuntime:
+    ) -> BuiltinSmolRuntime:
         created.append("smolagents")
-        return _RecordingRuntime("smolagents", requests)
+        return BuiltinSmolRuntime("smolagents", requests)
 
     registry = build_builtin_runtime_registry(
         smolagents_factory=build_smolagents,
@@ -317,6 +330,33 @@ def test_registry_validates_capabilities_without_constructing_runtime() -> None:
         )
     with pytest.raises(UnsupportedRuntimeError, match="no runtime factory"):
         registry.create(_definition("minimal"))
+
+
+def test_registry_requires_structured_output_for_an_output_contract() -> None:
+    registry = RuntimeRegistry()
+    registry.register(
+        "minimal",
+        capabilities=RuntimeCapabilities(
+            structured_tools=True,
+            parallel_tools=False,
+            checkpoint_resume=False,
+            subagents=False,
+        ),
+        factory=lambda _definition: _RecordingRuntime("minimal", []),
+    )
+    definition = replace(
+        _definition("minimal"),
+        output_contract=OutputContract(
+            name="answer",
+            schema={"type": "string"},
+        ),
+    )
+
+    with pytest.raises(
+        UnsupportedRuntimeError,
+        match="structured_output",
+    ):
+        registry.create(definition)
 
 
 def test_registry_closes_runtime_whose_capabilities_drift_from_registration() -> None:
