@@ -124,7 +124,7 @@ export AGENTLOOM_RUNTIME_ROOT=/tmp/agentloom-runtime-checkpoint
 - 新 checkpoint 有 `task_events.jsonl`；`task_tree.json` 只是投影且能被 `loom list-tasks --detail` 展示。
 - 多 Worker 或重复 Worker 调用场景下，`workers/<worker>/calls/<call_index>/checkpoint.json` 存在，`call_index` 不互相覆盖。
 - resume 场景要实际执行 `loom run <workflow.yaml> --resume <task_id>`；若为了制造中断而提前停止，记录中断方式和恢复结果。
-- Goal 改动必须真实验证：普通 final 与 `max_steps` 后 continuation、根工具完成、Worker 工具隔离、旧预算字段静默忽略、旧预算耗尽 checkpoint resume、目标指纹拒绝、manifest/JSONL/TUI canonical Goal 对象。至少一条应是 30 分钟级复杂多 Worker Application，不能用简单问答替代。
+- Goal 改动必须真实验证：普通 final 与 `max_steps` 后 continuation、根工具完成、Worker 工具隔离、旧预算字段静默忽略、旧预算耗尽 checkpoint resume、目标指纹拒绝、manifest/JSONL/Studio canonical Goal 对象。至少一条应是 30 分钟级复杂多 Worker Application，不能用简单问答替代。
 - Resume 后必须证明 `task_id` 不变、`run_id` 改变，新旧 attempt 分属两个 run 目录，但都关联同一个 task checkpoint；heartbeat 和 run event 使用新 `run_id`。
 - 涉及 subagent/Worker checkpoint 时，要分别验证 Supervisor 中断恢复和 Worker 半路中断恢复；Worker 恢复必须证明没有新开重复 `call_index`，且能从 per-call memory checkpoint 继续。
 - file-history 场景要检查 `file-history/snapshots.json` 和备份文件，确认早期备份没有被后续 snapshot 覆盖。
