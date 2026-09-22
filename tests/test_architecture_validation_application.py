@@ -323,9 +323,7 @@ def _trace_fixture(tmp_path, tamper=None, application_id="app"):
             output["test_report"] = "reports/pytest-verifier.json"
             output["verified"] = True
         started, ended = _trace_time(index * 10), _trace_time(index * 10 + 8)
-        task_input = ("task\n<inputs>\nPlease process the following call inputs in order:\n"
-                      "1. JSON result from the previous stage, with absolute workspace and unique case_nonce.: "
-                      + json.dumps(json.dumps(query)) + "\n</inputs>")
+        task_input = json.dumps(json.dumps(query))
         input_hash = hashlib.sha256(task_input.encode()).hexdigest()[:16]
         events.extend([
             {"type": "worker_call_started", "agent_name": name, "call_index": 0,
@@ -365,8 +363,7 @@ def _trace_fixture(tmp_path, tamper=None, application_id="app"):
 
 
 def _trace_replace_query(checkpoint, query):
-    prefix = checkpoint["task_input"].split(".: ", 1)[0] + ".: "
-    checkpoint["task_input"] = prefix + json.dumps(json.dumps(query)) + "\n</inputs>"
+    checkpoint["task_input"] = json.dumps(json.dumps(query))
     checkpoint["input_hash"] = hashlib.sha256(checkpoint["task_input"].encode()).hexdigest()[:16]
 
 
@@ -526,7 +523,8 @@ def test_native_definition_has_four_real_typed_workers():
     for item in definition["worker_agents"]:
         worker_source = source.parent / item["path"]
         worker = YamlAgentFactory._load_config_from_file(worker_source)
-        assert worker["agent_function_schema"]["inputs"]["query"]["required"] is True
+        assert worker["input_schema"]["properties"]["query"]["type"] == "string"
+        assert "query" in worker["input_schema"]["required"]
         assert worker["tools"]
         names.add(worker["name"])
     assert names == set(WORKERS)
@@ -665,7 +663,7 @@ def test_trace_accepts_only_intact_json_fragment_with_original_call_identity(tmp
     serialized = json.dumps(supplied)
     prefix = '{"other_context": ["bad"]], "prior": '
     query = prefix + serialized + "}"
-    verifier["task_input"] = verifier["task_input"].split(".: ", 1)[0] + ".: " + query + "\n</inputs>"
+    verifier["task_input"] = query
     verifier["input_hash"] = hashlib.sha256(verifier["task_input"].encode()).hexdigest()[:16]
     events_path = checkpoints / "task_events.jsonl"
     events = [json.loads(line) for line in events_path.read_text().splitlines()]

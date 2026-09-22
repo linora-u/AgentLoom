@@ -1,16 +1,15 @@
 """Real Application and published Pi SDK; only the model HTTP service is a fixture."""
 from __future__ import annotations
 
+import json
+import time
 from contextlib import contextmanager
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
-import json
 from pathlib import Path
 from threading import Lock, Thread
-import time
 
 import pytest
 import yaml
-
 from agentloom.application.runner import execute_app
 from agentloom.configuration.config import bind_config, load_project_config
 
@@ -124,6 +123,16 @@ def test_real_yaml_pi_no_tools_returns_receipt_and_exact_model_request(tmp_path)
     assert payload["temperature"] == 0.25
     assert payload.get("max_tokens", payload.get("max_completion_tokens")) == 100
     assert not payload.get("tools")
+    messages = payload["messages"]
+    assert any(
+        message["role"] == "system" and "Say Pi answer." in message["content"]
+        for message in messages
+    )
+    assert not any(
+        message["role"] == "user"
+        and "Answer directly." in str(message.get("content"))
+        for message in messages
+    )
     assert headers["X-Fixture"] == "selected-profile"
     assert "todo_write" not in json.dumps(payload)
     assert "final_answer" not in json.dumps(payload)
@@ -253,6 +262,7 @@ def test_incomplete_or_unselected_tool_turn_does_not_report_success(tmp_path, fi
 
 def test_profile_timeout_bounds_an_open_sse_stream(tmp_path):
     from threading import Event
+
     from agentloom.application.run import ApplicationRunError
     release = Event()
     request_times = []

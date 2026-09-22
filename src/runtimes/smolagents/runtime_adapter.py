@@ -8,17 +8,6 @@ from importlib.metadata import PackageNotFoundError, version
 from threading import RLock
 from typing import Any
 
-from agentloom.runtimes.smolagents.checkpoint_codec import (
-    CANONICAL_MODEL_ITEMS_KEY,
-    SmolagentsCheckpointCodec,
-)
-from agentloom.runtimes.smolagents.conversation_recovery import (
-    prepare_steps_for_resume,
-)
-from agentloom.runtimes.smolagents.metadata import CAPABILITIES
-from agentloom.runtimes.smolagents.recoverable_errors import (
-    is_recoverable_agent_error,
-)
 from agentloom.execution.agent_runtime import (
     AgentRuntimeError,
     AgentRuntimeRequest,
@@ -36,6 +25,17 @@ from agentloom.execution.model_binding import ModelTurnBinding
 from agentloom.execution.model_protocol import ModelProtocolError, ModelTurnResult
 from agentloom.execution.tool_gateway import ToolGateway
 from agentloom.execution.tool_protocol import ToolCallRecord
+from agentloom.runtimes.smolagents.checkpoint_codec import (
+    CANONICAL_MODEL_ITEMS_KEY,
+    SmolagentsCheckpointCodec,
+)
+from agentloom.runtimes.smolagents.conversation_recovery import (
+    prepare_steps_for_resume,
+)
+from agentloom.runtimes.smolagents.metadata import CAPABILITIES
+from agentloom.runtimes.smolagents.recoverable_errors import (
+    is_recoverable_agent_error,
+)
 
 try:
     _SMOLAGENTS_VERSION = version("smolagents")
@@ -433,10 +433,12 @@ class SmolagentsRuntimeAdapter:
 
             continue_session = request.continue_session or request.checkpoint is not None
             run_kwargs: dict[str, Any] = {
-                "task": request.task,
+                "task": request.task or "",
                 "return_full_result": True,
                 "reset": not continue_session,
             }
+            if request.task is None:
+                run_kwargs["_skip_task_step"] = True
             if continue_session and request.record_task:
                 run_kwargs["_skip_task_step_on_reset_false"] = False
             if request.additional_args:

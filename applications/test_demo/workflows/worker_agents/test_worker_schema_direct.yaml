@@ -3,14 +3,14 @@ agent_runtime: smolagents
 runtime_options:
   smart_summary: false
 description: |
-  直连测试 worker，用于验证 agent_function_schema 是否驱动 tool 注册，以及工具调用时是否收到了输入并返回输出。
+  直连测试 worker，用于验证 input_schema 是否驱动 Tool 注册，以及工具调用时是否收到了输入并返回输出。
 model_type: "powerful"
 workflow: |
   你是一个直连验证 worker。
 
   任务要求：
   1. 阅读用户输入内容。
-  2. 如果输入中包含 <inputs> JSON 片段，请一起考虑。
+  2. 多参数输入是一个 JSON 对象，请按字段读取。
   3. 输出一段简短文本，必须包含：
      - query 的核心内容
      - 是否收到了额外参数
@@ -19,9 +19,9 @@ workflow: |
   ```mermaid
   flowchart TD
     A[接收用户输入] --> B[解析 query 与附加参数]
-    B --> C{是否包含 <inputs> JSON?}
-    C -->|是| D[合并 JSON 片段与显式参数]
-    C -->|否| E[仅使用显式参数]
+    B --> C{是否为多字段 JSON?}
+    C -->|是| D[读取 JSON 字段]
+    C -->|否| E[读取单一任务文本]
     D --> F[提取 query 核心内容]
     E --> F
     F --> G[判断是否收到额外参数]

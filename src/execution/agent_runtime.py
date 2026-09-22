@@ -722,7 +722,7 @@ class RuntimeCheckpointEnvelope:
 class AgentRuntimeRequest:
     """Input for one complete Agent runtime execution."""
 
-    task: str
+    task: str | None
     application_id: str | None = None
     task_id: str | None = None
     run_id: str | None = None
@@ -735,8 +735,12 @@ class AgentRuntimeRequest:
     checkpoint_sink: Callable[[RuntimeCheckpointEnvelope], None] | None = None
 
     def __post_init__(self) -> None:
-        if not isinstance(self.task, str) or not self.task:
-            raise ValueError("runtime task must be a non-empty string")
+        if self.task is not None and (
+            not isinstance(self.task, str) or not self.task.strip()
+        ):
+            raise ValueError(
+                "runtime task must be a non-empty string when provided"
+            )
         for field_name in ("application_id", "task_id", "run_id"):
             object.__setattr__(
                 self,
