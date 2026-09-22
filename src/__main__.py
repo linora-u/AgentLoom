@@ -23,6 +23,7 @@ from typing import Any, TextIO
 
 import click
 from agentloom.application.composition import build_schedule_mutations
+from agentloom.runtimes.pi.cli import runtime
 from agentloom.schedules.cli import (
     SCHEDULE_CLI_DEPENDENCIES_KEY,
     ScheduleCliDependencies,
@@ -179,46 +180,6 @@ def main(context: click.Context):
             os.chdir(agent_root)
     except Exception:
         pass  # discovery may fail here; let sub-commands report the real error
-
-
-@main.group("runtime")
-def runtime_group() -> None:
-    """Install, inspect and remove Agent runtime assets."""
-
-
-@runtime_group.command("install")
-@click.argument("runtime", type=click.Choice(["pi"]))
-def runtime_install(runtime: str) -> None:
-    """Download locked dependencies and build the selected Agent runtime."""
-    from agentloom.runtimes.pi.install import install_pi
-    from agentloom.runtimes.pi.metadata import SDK_VERSION
-
-    try:
-        entry = install_pi()
-    except RuntimeError as exc:
-        raise click.ClickException(str(exc)) from None
-    click.echo(f"Pi SDK {SDK_VERSION} ready: {entry}")
-
-
-@runtime_group.command("status")
-@click.argument("runtime", type=click.Choice(["pi"]))
-def runtime_status(runtime: str) -> None:
-    """Report whether the selected Agent runtime is installed and ready."""
-    import json as _json
-
-    from agentloom.runtimes.pi.install import pi_runtime_status
-
-    click.echo(_json.dumps(pi_runtime_status(), ensure_ascii=False, indent=2, default=str))
-
-
-@runtime_group.command("uninstall")
-@click.argument("runtime", type=click.Choice(["pi"]))
-def runtime_uninstall(runtime: str) -> None:
-    """Remove installed assets for the selected Agent runtime."""
-    from agentloom.runtimes.pi.install import uninstall_pi
-
-    removed = uninstall_pi()
-    click.echo(f"Removed Pi runtime assets: {removed}")
 
 
 def _has_transient_provider_error(error: BaseException) -> bool:
@@ -1010,6 +971,7 @@ def create(yaml_path: str, output: str | None):
 
 # Keep the durable scheduler in its own lightweight package so TUI and CLI
 # share one backend without importing the Agent/model runtime for list/status.
+main.add_command(runtime)
 main.add_command(_schedules_command)
 
 

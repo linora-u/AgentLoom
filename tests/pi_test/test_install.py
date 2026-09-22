@@ -296,5 +296,6 @@ def test_install_runtime_command_is_discoverable_and_rejects_unknown_runtime():
 
     runner = CliRunner()
     assert "runtime" in runner.invoke(main, ["--help"]).output
+    assert main.commands["runtime"].callback.__module__ == "agentloom.runtimes.pi.cli"
     assert "install" in runner.invoke(main, ["runtime", "--help"]).output
     assert runner.invoke(main, ["runtime", "install", "unknown"]).exit_code == 2
