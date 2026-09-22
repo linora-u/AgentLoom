@@ -11,6 +11,13 @@ import tree_sitter_bash
 
 
 _OPERATOR_TOKEN_PATTERN = re.compile(r"^[|&;<>]+$")
+_RUNTIME_EXPANSION_NODE_TYPES = frozenset({
+    "arithmetic_expansion",
+    "command_substitution",
+    "expansion",
+    "process_substitution",
+    "simple_expansion",
+})
 
 
 @dataclass(frozen=True)
@@ -64,8 +71,9 @@ def _node_text(node, source_bytes: bytes) -> str:
 
 
 class _TreeSitterBashCollector:
-    def __init__(self, source_bytes: bytes):
+    def __init__(self, source_bytes: bytes, *, static_commands_only: bool = False):
         self.source_bytes = source_bytes
+        self.static_commands_only = static_commands_only
         self.commands: List[ShellCommandInvocation] = []
         self.operators: List[str] = []
         self.redirections: List[ShellCommandRedirection] = []
@@ -86,16 +94,16 @@ class _TreeSitterBashCollector:
             invocation = self._extract_command_invocation(node)
             if invocation is not None:
                 self.commands.append(invocation)
-        elif node_type == "pipeline":
+        elif not self.static_commands_only and node_type == "pipeline":
             pipeline_commands = self._extract_pipeline_commands(node)
             if pipeline_commands:
                 self.pipelines.append(pipeline_commands)
-        elif "redirect" in node_type:
+        elif not self.static_commands_only and "redirect" in node_type:
             redirection = self._extract_redirection(node)
             if redirection is not None:
                 self.redirections.append(redirection)
 
-        if not node.is_named:
+        if not self.static_commands_only and not node.is_named:
             token = _node_text(node, self.source_bytes).strip()
             if token and _OPERATOR_TOKEN_PATTERN.fullmatch(token):
                 self.operators.append(token)
@@ -110,15 +118,15 @@ class _TreeSitterBashCollector:
         
         if node_type in ("declaration_command", "unset_command"):
             if command_node.children:
-                name = _node_text(command_node.children[0], self.source_bytes).strip()
+                name = self._command_token_text(command_node.children[0])
                 for child in command_node.children[1:]:
-                    args.append(_node_text(child, self.source_bytes).strip())
+                    args.append(self._command_token_text(child))
         else:
             for idx, child in enumerate(command_node.children):
                 field_name = command_node.field_name_for_child(idx)
                 if field_name not in {"name", "argument"}:
                     continue
-                token = _node_text(child, self.source_bytes).strip()
+                token = self._command_token_text(child)
                 if not token:
                     continue
                 if field_name == "name":
@@ -132,8 +140,23 @@ class _TreeSitterBashCollector:
         return ShellCommandInvocation(
             name=name,
             args=args,
-            source=_node_text(command_node, self.source_bytes).strip(),
+            source="" if self.static_commands_only else _node_text(command_node, self.source_bytes).strip(),
         )
+
+    def _command_token_text(self, node) -> str:
+        if self.static_commands_only and self._has_runtime_expansion(node):
+            return "$"
+        return _node_text(node, self.source_bytes).strip()
+
+    @staticmethod
+    def _has_runtime_expansion(node) -> bool:
+        pending = [node]
+        while pending:
+            current = pending.pop()
+            if getattr(current, "type", "") in _RUNTIME_EXPANSION_NODE_TYPES:
+                return True
+            pending.extend(current.children)
+        return False
 
     def _extract_pipeline_commands(self, pipeline_node) -> List[str]:
         names: List[str] = []
@@ -168,7 +191,13 @@ class _TreeSitterBashCollector:
         return ShellCommandRedirection(operator=operator, target=target)
 
 
-def analyze_shell_command(command: str) -> ShellCommandAnalysis:
+def analyze_shell_command(command: str, *, static_commands_only: bool = False) -> ShellCommandAnalysis:
+    """Parse shell syntax, optionally retaining only static command tokens.
+
+    ``static_commands_only`` avoids copying nested dynamic argument and source
+    spans. Security checks use it because nested commands are collected as
+    their own invocations and dynamic parent arguments cannot be proved safe.
+    """
     if not isinstance(command, str) or not command.strip():
         raise ValueError("command must be a non-empty string")
 
@@ -179,5 +208,8 @@ def analyze_shell_command(command: str) -> ShellCommandAnalysis:
     if root.has_error:
         raise ValueError(f"Invalid shell command: {command}")
 
-    collector = _TreeSitterBashCollector(source_bytes=source_bytes)
+    collector = _TreeSitterBashCollector(
+        source_bytes=source_bytes,
+        static_commands_only=static_commands_only,
+    )
     return collector.collect(root)
