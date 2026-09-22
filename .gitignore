@@ -202,3 +202,7 @@ applications/web_search/config/.mcp.anysearch.json
 src/runtimes/pi/bridge/node_modules/
 src/runtimes/pi/bridge/dist/
 src/runtimes/pi/bridge/.agentloom-install.*
+
+# Local upstream reference checkouts used for architecture research.
+/codex/
+/temp/
