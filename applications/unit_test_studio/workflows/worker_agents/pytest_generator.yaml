@@ -77,12 +77,12 @@ tools:
     module: "applications.unit_test_studio.agent_tools.unit_test_tools"
     function: "upsert_pytest_file"
 
-agent_function_schema:
-  description: |
-    Generate and persist pytest files for planned scenario items.
-  inputs:
+input_schema:
+  type: object
+  properties:
     query:
+      type: string
       description: JSON output from scenario_planner.
-      required: true
-  output:
-    description: JSON with target_root, output_dir, and generated_files list.
+  required:
+  - query
+  additionalProperties: false

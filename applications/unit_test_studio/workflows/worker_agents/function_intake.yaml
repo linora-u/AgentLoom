@@ -62,14 +62,14 @@ tools:
     module: "applications.unit_test_studio.agent_tools.unit_test_tools"
     function: "resolve_function_targets"
 
-agent_function_schema:
-  description: |
-    Validate and normalize function targets for downstream test generation workers.
-  inputs:
+input_schema:
+  type: object
+  properties:
     query:
-      description: |
-        JSON string containing target_root, targets, and optional output_dir.
-      required: true
-  output:
-    description: |
-      JSON string containing normalized target items and output_dir.
+      type: string
+      description: 'JSON string containing target_root, targets, and optional output_dir.
+
+        '
+  required:
+  - query
+  additionalProperties: false

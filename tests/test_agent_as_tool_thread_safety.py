@@ -22,18 +22,16 @@ def _make_minimal_config(concurrency=None):
         "workflow": "Analyze the input and return a result.",
         "model_type": "powerful",
         "agent_runtime": "smolagents",
-        "agent_function_schema": {
-            "description": "Test tool",
-            "inputs": {
+        "input_schema": {
+            "type": "object",
+            "properties": {
                 "query": {
-                    "description": "The query to process",
                     "type": "string",
-                    "required": True,
+                    "description": "The query to process",
                 },
             },
-            "output": {
-                "description": "Analysis result",
-            },
+            "required": ["query"],
+            "additionalProperties": False,
         },
     }
     if concurrency is not None:

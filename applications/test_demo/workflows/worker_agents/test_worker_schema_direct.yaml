@@ -31,46 +31,52 @@ workflow: |
 
   输出用普通文本即可。
 
-agent_function_schema:
-  description: |
-    直连 worker tool，用于验证输入参数透传和输出返回。
-  inputs:
+input_schema:
+  type: object
+  properties:
     query:
-      description: |
-        主任务文本。
-      required: true
-    tag:
-      description: |
-        可选标记参数，用于验证多参数输入透传。
-      required: false
-    scene:
-      description: |
-        调用场景标记，例如 smoke-test、manual-review。
-      required: false
-    retry_count:
-      description: |
-        重试次数示例参数，用于验证 integer 类型透传。
-      required: false
-    dry_run:
-      description: |
-        是否仅做演练，用于验证 boolean 类型透传。
-      required: false
-    threshold:
-      description: |
-        阈值示例参数，用于验证 number 类型透传。
-      required: false
-    context:
-      description: |
-        上下文对象示例参数，用于验证 object 类型透传。
-      required: false
-    checkpoints:
-      description: |
-        检查点数组示例参数，用于验证 array 类型透传。
-      required: false
-  output:
-    description: |
-      worker 返回的文本结果。
+      type: string
+      description: '主任务文本。
 
+        '
+    tag:
+      type: string
+      description: '可选标记参数，用于验证多参数输入透传。
+
+        '
+    scene:
+      type: string
+      description: '调用场景标记，例如 smoke-test、manual-review。
+
+        '
+    retry_count:
+      type: string
+      description: '重试次数示例参数，用于验证 integer 类型透传。
+
+        '
+    dry_run:
+      type: string
+      description: '是否仅做演练，用于验证 boolean 类型透传。
+
+        '
+    threshold:
+      type: string
+      description: '阈值示例参数，用于验证 number 类型透传。
+
+        '
+    context:
+      type: string
+      description: '上下文对象示例参数，用于验证 object 类型透传。
+
+        '
+    checkpoints:
+      type: string
+      description: '检查点数组示例参数，用于验证 array 类型透传。
+
+        '
+  required:
+  - query
+  additionalProperties: false
 tools: []
 
 worker_agents: []

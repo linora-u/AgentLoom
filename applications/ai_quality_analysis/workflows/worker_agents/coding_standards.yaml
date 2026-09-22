@@ -82,21 +82,14 @@ workflow: |
 
   **Important: Use `write_markdown_file` tool with `sections` parameter. For large content, use `append_markdown_sections`.**
 
-agent_function_schema:
-  description: |
-    Analyzes code for naming conventions, formatting, magic numbers, dead code,
-    and duplication issues. Produces a structured coding standards report.
-
-    Core capabilities:
-    1. Check naming conventions and formatting consistency
-    2. Detect magic numbers, dead code, and duplication
-    3. Classify findings by severity and provide fix suggestions
-  inputs:
+input_schema:
+  type: object
+  properties:
     query:
-      description: |
-        Analysis task description with target module/files and project context.
-      required: true
-  output:
-    description: |
-      str: Analysis summary. Detailed report written to:
-              - QA_CodingStandards.md containing all coding standards findings
+      type: string
+      description: 'Analysis task description with target module/files and project context.
+
+        '
+  required:
+  - query
+  additionalProperties: false

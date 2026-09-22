@@ -115,21 +115,14 @@ workflow: |
 
   **Important: Use `write_markdown_file` tool with `sections` parameter. For large content, use `append_markdown_sections`.**
 
-agent_function_schema:
-  description: |
-    Assesses code testability including test structure, mock-friendliness,
-    coverage gaps, and test quality.
-
-    Core capabilities:
-    1. Inventory existing tests and assess coverage
-    2. Evaluate mock-friendliness and identify untestable patterns
-    3. Review test quality and recommend improvements
-  inputs:
+input_schema:
+  type: object
+  properties:
     query:
-      description: |
-        Analysis task description with target module/files and project context.
-      required: true
-  output:
-    description: |
-      str: Analysis summary. Detailed report written to:
-              - QA_Testability.md containing testability assessment
+      type: string
+      description: 'Analysis task description with target module/files and project context.
+
+        '
+  required:
+  - query
+  additionalProperties: false

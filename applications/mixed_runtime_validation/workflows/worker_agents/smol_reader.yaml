@@ -8,11 +8,12 @@ workflow: Read the file in query using read_file. Use an absolute file path. Ret
 toolsets: []
 tools:
 - name: read_file
-agent_function_schema:
-  description: Read a release note with a separate Agent runtime.
-  inputs:
+input_schema:
+  type: object
+  properties:
     query:
+      type: string
       description: Path of the requested note.
-      required: true
-  output:
-    description: Actual verification token from the file.
+  required:
+  - query
+  additionalProperties: false

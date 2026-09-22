@@ -2,13 +2,10 @@ import json
 from inspect import signature
 from pathlib import Path
 
-import agentloom.application.factory as yaml_agent_factory
 from agentloom.application.factory import YamlAgentFactory, YamlConfiguredAgent
-from smolagents.tools import get_json_schema
+from agentloom.execution.tool_gateway import bind_tool
 
 FIXTURE_ROOT = Path(__file__).resolve().parent / "fixtures"
-WORKFLOW_INTRO = yaml_agent_factory.WORKFLOW_EXECUTION_INTRO
-WORKFLOW_GUIDANCE = yaml_agent_factory.TASK_SPEC_WORKFLOW_GUIDANCE
 
 
 def _build_worker(config: dict) -> YamlConfiguredAgent:
@@ -31,13 +28,20 @@ def test_generated_function_signature_from_schema():
         "description": "test agent desc",
         "workflow": "test workflow",
         "tools": [],
-        "agent_function_schema": {
-            "description": "子 agent，用于隔离 shell 执行环境。",
-            "inputs": {
-                "query": {"description": "传递给 worker 的具体 shell 执行指令或任务描述。"},
-                "source": {"description": "请求来源标识", "required": False},
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "query": {
+                    "type": "string",
+                    "description": "传递给 worker 的具体 shell 执行指令或任务描述。",
+                },
+                "source": {
+                    "type": "string",
+                    "description": "请求来源标识",
+                },
             },
-            "output": {"description": "worker 输出结果文本"},
+            "required": ["query"],
+            "additionalProperties": False,
         },
     }
 
@@ -55,9 +59,9 @@ def test_generated_function_signature_from_schema():
 
     assert tool.__name__ == "test_agent"
     assert list(sig.parameters.keys()) == ["query", "source"]
-    assert sig.parameters["query"].annotation is str
+    assert sig.parameters["query"].annotation is not str
     assert sig.parameters["source"].default is None
-    assert sig.return_annotation is str
+    assert bind_tool(tool).definition.parameters == config["input_schema"]
 
 
 def test_print_function_schema_generation_from_worker_yaml():
@@ -67,31 +71,26 @@ def test_print_function_schema_generation_from_worker_yaml():
     worker = _build_worker(config)
     tool_fn = worker.agent_as_tool()
 
-    schema = get_json_schema(tool_fn)["function"]
+    schema = bind_tool(tool_fn).definition
 
     print("\n=== Input (YAML) ===")
     print(f"path: {worker_yaml}")
-    print(json.dumps(config["agent_function_schema"], ensure_ascii=False, indent=2))
+    print(json.dumps(config["input_schema"], ensure_ascii=False, indent=2))
 
     print("\n=== Output (Function Schema) ===")
-    print(json.dumps(schema, ensure_ascii=False, indent=2))
+    print(json.dumps(dict(schema.parameters), ensure_ascii=False, indent=2))
 
-    assert schema["name"] == "shell_worker"
-    assert schema["parameters"]["properties"]["query"]["type"] == "string"
-    assert "query" in schema["parameters"]["required"]
-    assert schema["return"]["type"] == "string"
+    assert schema.name == "shell_worker"
+    assert schema.description == config["description"].strip()
+    assert schema.parameters["properties"]["query"]["type"] == "string"
+    assert "query" in schema.parameters["required"]
     result = tool_fn("pwd")
     assert result.startswith("RUN::Task specification (what you must follow in this task):")
     assert "<task_spec>" in result
     assert "<inputs>" in result
-    assert "<output>" in result
-    assert "Expected output (what result you must produce):" in result
-    assert config["agent_function_schema"]["output"]["description"].strip() in result
     assert "<workflow>" not in result
-    assert WORKFLOW_INTRO not in result
-    assert WORKFLOW_GUIDANCE not in result
-    assert result.index("<task_spec>") < result.index("<inputs>") < result.index("<output>")
-    assert "1. 传递给 worker 的具体 shell 执行指令或任务描述。: pwd" in result
+    assert result.index("<task_spec>") < result.index("<inputs>")
+    assert "\npwd\n" in result
 
 
 def test_generated_tool_includes_optional_inputs_in_payload_block():
@@ -101,14 +100,15 @@ def test_generated_tool_includes_optional_inputs_in_payload_block():
         "description": "test agent desc",
         "workflow": "test workflow",
         "tools": [],
-        "agent_function_schema": {
-            "description": "demo worker",
-            "inputs": {
-                "query": {"description": "primary request"},
-                "tag": {"description": "optional tag", "required": False},
-                "retry": {"description": "retry count", "required": False},
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "query": {"type": "string", "description": "primary request"},
+                "tag": {"type": "string", "description": "optional tag"},
+                "retry": {"type": "integer", "description": "retry count"},
             },
-            "output": {"description": "worker result"},
+            "required": ["query"],
+            "additionalProperties": False,
         },
     }
 
@@ -122,14 +122,7 @@ def test_generated_tool_includes_optional_inputs_in_payload_block():
     print(result)
 
     assert "<inputs>" in result
-    assert "<output>" in result
-    assert "Expected output (what result you must produce):" in result
-    assert "worker result" in result
     assert "<task_spec>" in result
     assert "<workflow>" not in result
-    assert WORKFLOW_INTRO not in result
-    assert WORKFLOW_GUIDANCE not in result
-    assert result.index("<task_spec>") < result.index("<inputs>") < result.index("<output>")
-    assert "1. primary request: run command" in result
-    assert "2. optional tag: nightly" in result
-    assert "3. retry count: 2" in result
+    assert result.index("<task_spec>") < result.index("<inputs>")
+    assert '{"query":"run command","retry":2,"tag":"nightly"}' in result

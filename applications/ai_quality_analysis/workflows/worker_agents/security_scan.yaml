@@ -116,21 +116,14 @@ workflow: |
 
   **Important: Use `write_markdown_file` tool with `sections` parameter. For large content, use `append_markdown_sections`.**
 
-agent_function_schema:
-  description: |
-    Scans for security vulnerabilities including input validation gaps, injection risks,
-    buffer overflows, hardcoded secrets, and cryptographic misuse.
-
-    Core capabilities:
-    1. Identify trust boundaries and validate input handling
-    2. Detect injection, memory safety, and access control issues
-    3. Find hardcoded secrets and cryptographic misuse
-  inputs:
+input_schema:
+  type: object
+  properties:
     query:
-      description: |
-        Analysis task description with target module/files and project context.
-      required: true
-  output:
-    description: |
-      str: Analysis summary. Detailed report written to:
-              - QA_Security.md containing all security findings
+      type: string
+      description: 'Analysis task description with target module/files and project context.
+
+        '
+  required:
+  - query
+  additionalProperties: false
