@@ -330,8 +330,8 @@ def test_profile_request_rate_applies_between_internal_pi_model_turns(tmp_path):
                        on_request=lambda *_: times.append(time.monotonic())) as (url, requests):
         app = project(tmp_path, url)
         select(app, tools=[{'name': 'read'}])
-        change_model(tmp_path, requests_per_minute=60)
+        change_model(tmp_path, requests_per_minute=30, timeout=1)
         with bind_config(load_project_config(tmp_path)):
             execute_app(app, file_logging=False)
     assert len(requests) == 2
-    assert times[1] - times[0] >= 0.95
+    assert times[1] - times[0] >= 1.95

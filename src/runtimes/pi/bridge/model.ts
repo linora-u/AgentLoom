@@ -30,12 +30,10 @@ export function configureModel(session: AgentSession, settings: Obj, headers: Ob
         messages: permit.agent_context.length ? [...context.messages,
           {role: "user" as const, content: permit.agent_context.join("\n"), timestamp: Date.now()}] : context.messages};
       for (let attempt = 0; ; attempt++) {
-        await delay(Math.max(0, nextRequestAt - performance.now()), undefined, {signal: options?.signal});
-        nextRequestAt = performance.now() + 60000 / settings.requests_per_minute;
         failure.timedOut = false;
         failure.status = 0;
         const timeoutAbort = new AbortController();
-        const timeout = setTimeout(() => {failure.timedOut = true; timeoutAbort.abort();}, settings.timeout * 1000);
+        let timeout: ReturnType<typeof setTimeout> | undefined;
         const signal = options?.signal ? AbortSignal.any([options.signal, timeoutAbort.signal]) : timeoutAbort.signal;
         let stream;
         let errorText = "";
@@ -43,6 +41,13 @@ export function configureModel(session: AgentSession, settings: Obj, headers: Ob
           stream = await nativeStream(model, selectedContext, {...options, signal,
             temperature: settings.temperature, maxTokens: settings.max_output_tokens, headers,
             cacheRetention: settings.context_cache ? "short" : "none", transport: "sse",
+            onPayload: async (payload, selectedModel) => {
+              const projected = await options?.onPayload?.(payload, selectedModel);
+              await delay(Math.max(0, nextRequestAt - performance.now()), undefined, {signal: options?.signal});
+              nextRequestAt = performance.now() + 60000 / settings.requests_per_minute;
+              timeout = setTimeout(() => {failure.timedOut = true; timeoutAbort.abort();}, settings.timeout * 1000);
+              return projected;
+            },
             onResponse: async (response, selectedModel) => {
               failure.status = response.status;
               await options?.onResponse?.(response, selectedModel);
@@ -55,7 +60,7 @@ export function configureModel(session: AgentSession, settings: Obj, headers: Ob
         } catch (error) {
           errorText = error instanceof Error ? error.message : "";
         } finally {
-          clearTimeout(timeout);
+          if (timeout !== undefined) clearTimeout(timeout);
         }
         const errorStatus = /^(\d{3})\b/.exec(errorText);
         if (errorStatus) failure.status = Number(errorStatus[1]);
