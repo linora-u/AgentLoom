@@ -1,7 +1,7 @@
 # AgentLoom 源码架构与 Pi 开发运行环境重构
 
 规格日期：2026-09-21
-状态：设计已完成，待实施
+状态：已实施
 
 ## Problem Statement
 
@@ -43,17 +43,17 @@ Pi SDK 安装目前直接写入 Python package 或源码目录中的 bridge 目�
 
 Pi SDK 只安装到当前仓库开发虚拟环境的 `share/pi`。运行环境以 SDK 精确版本、bridge 内容指纹、协议版本、操作系统、CPU 架构和 Node ABI 共同判断是否可复用。身份和完整性均一致时不执行 npm 或编译；任一不一致或安装损坏时，在 staging 中重新安装和验证，成功后替换当前目录并删除旧 SDK。删除仓库 `.venv` 即清除 Pi 安装资产。
 
-根目录现有的 `agentloom-tui` 继续作为唯一 Studio/TUI 产品，并同时拥有 TypeScript 客户端和私有的薄 Python NDJSON 进程适配器：
+根目录 `studio` 是唯一的交互产品，同时拥有 TypeScript 客户端和私有的薄 Python NDJSON 进程适配器：
 
 ```text
-agentloom-tui/
+studio/
 ├── src/       TypeScript/Bun 客户端
 └── python/    Python NDJSON 适配器
 ```
 
-Python 适配器只负责协议编解码、输入限制、并发、事件转发、错误投影和服务分发。现有 Python bridge 中的 Application 查询与修改、Run 投影、Schedule 修改和 Builder 编排分别迁回 Application、Schedules 及相应业务所有者。长驻 Python 进程继续支持 Builder 会话和流式事件；OpenCode Studio 使用的一次性 domain action 入口与长驻入口共享同一套薄分发层。Python 源码顶层不再保留第二个 Studio/TUI module。
+Python 适配器只负责协议编解码、输入限制、并发、事件转发、错误投影和服务分发。原 Python bridge 中的 Application 查询与修改、Run 投影、Schedule 修改和 Builder 编排分别迁回 Application、Schedules 及相应业务所有者。长驻 Python 进程继续支持 Builder 会话和流式事件；OpenCode Studio 使用的一次性 domain action 入口与长驻入口共享同一套薄分发层。Python 源码顶层不再保留第二个 Studio module。
 
-CLI 统一提供 `loom runtime install pi`、`loom runtime status pi` 和 `loom runtime uninstall pi`。删除旧的 `loom runtime install pi`，不提供别名。旧 Dashboard 与 `loom dashboard` 完整删除；保留 `loom run`、调度和维护类命令，并将命令实现放回所属业务 module。
+CLI 统一提供 `loom runtime install pi`、`loom runtime status pi` 和 `loom runtime uninstall pi`。删除旧的 `loom install-runtime pi`，不提供别名。旧 Dashboard 与 `loom dashboard` 完整删除；保留 `loom run`、调度和维护类命令，并将命令实现放回所属业务 module。
 
 ## User Stories
 
@@ -65,7 +65,7 @@ CLI 统一提供 `loom runtime install pi`、`loom runtime status pi` 和 `loom 
 6. As an AgentLoom maintainer, I want external protocols grouped as integrations, so that LiteLLM, MCP and LSP ownership is clear.
 7. As an AgentLoom maintainer, I want Schedules to remain a first-class capability, so that its data model and lifecycle are not hidden under helpers.
 8. As an AgentLoom maintainer, I want Self-learning to remain a first-class capability, so that review and persistence ownership remains local.
-9. As an AgentLoom maintainer, I want the Studio-specific Python adapter owned by the existing TUI project and limited to transport concerns, so that presentation transport does not become a second Application service layer or another top-level Python module.
+9. As an AgentLoom maintainer, I want the Studio-specific Python adapter owned by the existing Studio project and limited to transport concerns, so that presentation transport does not become a second Application service layer or another top-level Python module.
 10. As an AgentLoom maintainer, I want Application queries and mutations implemented by Application services, so that Studio and CLI consume the same business behavior.
 11. As an AgentLoom maintainer, I want the source directory mapped directly to the `agentloom` package, so that the repository does not gain an unnecessary nesting layer.
 12. As an AgentLoom maintainer, I want old deep-import aliases deleted, so that the new module boundaries become the only supported API.
@@ -97,7 +97,7 @@ CLI 统一提供 `loom runtime install pi`、`loom runtime status pi` 和 `loom 
 38. As an AgentLoom library consumer, I want importing AgentLoom to leave stdout, stderr and locale settings unchanged, so that the package does not mutate my process unexpectedly.
 39. As an AgentLoom protocol implementer, I want UTF-8 enforced at protocol boundaries, so that wire messages remain deterministic without global process mutation.
 40. As an AgentLoom CLI user, I want terminal encoding handled by the CLI boundary, so that Unicode failures are reported without changing unrelated streams.
-41. As an AgentLoom Studio user, I want one supported Studio shell in the existing TUI project, so that an undocumented legacy Dashboard or duplicate Python Studio package does not create another operational interface.
+41. As an AgentLoom Studio user, I want one supported Studio shell in the existing Studio project, so that an undocumented legacy Dashboard or duplicate Python Studio package does not create another operational interface.
 42. As an AgentLoom Studio user, I want Run inspection and mutations backed by Application services, so that Studio reflects runtime truth.
 43. As an AgentLoom CLI user, I want noninteractive run and maintenance commands retained, so that scripts and CI do not depend on Studio.
 44. As an AgentLoom CLI maintainer, I want the root command to register feature commands, so that one large command module does not own every workflow.
@@ -132,14 +132,14 @@ CLI 统一提供 `loom runtime install pi`、`loom runtime status pi` 和 `loom 
 5. Built-in runtime discovery does not use Python entry points, import-time registration or conditional imports. A future plugin system requires a separate specification.
 6. LiteLLM, MCP and LSP are integrations because they adapt external protocols or services. They do not own Agent execution loops.
 7. Schedules and Self-learning remain independent bounded contexts because each has its own model, lifecycle and persistence rules.
-8. The existing root TUI project owns the private Python subprocess adapter required to reach AgentLoom's Python services. The adapter is not a public `agentloom` namespace and is limited to NDJSON encoding, bounded concurrency, event forwarding, error projection and dispatch. Application queries and mutations move to Application services; Run projections move to Application Run query services; schedule mutations move to Schedules; Builder orchestration moves to its Application owner.
-9. The TUI's long-lived bridge entry and OpenCode Studio's one-shot domain action entry use the same private Python adapter and the same business services. They do not maintain separate catalog, validation or mutation rules.
+8. The existing root Studio project owns the private Python subprocess adapter required to reach AgentLoom's Python services. The adapter is not a public `agentloom` namespace and is limited to NDJSON encoding, bounded concurrency, event forwarding, error projection and dispatch. Application queries and mutations move to Application services; Run projections move to Application Run query services; schedule mutations move to Schedules; Builder orchestration moves to its Application owner.
+9. The Studio's long-lived bridge entry and OpenCode Studio's one-shot domain action entry use the same private Python adapter and the same business services. They do not maintain separate catalog, validation or mutation rules.
 10. The CLI root performs command registration and common error presentation. Feature command implementations live with their owning modules.
 11. Dependency cycles are resolved by moving contracts toward the owner and performing construction in the composition root. Forwarding modules are not an accepted way to break a cycle.
 
 ### Deletions and compatibility policy
 
-12. The previous adapter grouping, encoding package, legacy UI package, old TUI bridge name, top-level utilities package and root scaffold module do not exist in the final source tree.
+12. The previous adapter grouping, encoding package, legacy UI package, old Studio adapter name, top-level utilities package and root scaffold module do not exist in the final source tree.
 13. The Textual Dashboard, its CLI command, its direct tests and the Textual dependency are deleted when no remaining production consumer exists. Studio remains the supported interactive shell.
 14. Old Python deep-import paths, `sys.modules` aliases, forwarding modules and alias-identity tests are deleted. No deprecation window or compatibility package is provided.
 15. Repository behavior tests move to canonical imports. Tests whose only purpose is to prove a legacy import aliases the canonical module are deleted.
@@ -180,7 +180,7 @@ CLI 统一提供 `loom runtime install pi`、`loom runtime status pi` 和 `loom 
 
 ### Migration sequencing
 
-41. Work is delivered in reviewable stages while remaining one initiative: establish the final ownership map and dependency checks; move integrations and concrete runtimes; introduce explicit composition; relocate tools and shared functions; remove Encoding, Dashboard and compatibility modules; move Studio business logic to its owners and leave the thin adapter with the existing TUI project; restructure CLI; move Pi assets; then update documentation and run final validation.
+41. Work is delivered in reviewable stages while remaining one initiative: establish the final ownership map and dependency checks; move integrations and concrete runtimes; introduce explicit composition; relocate tools and shared functions; remove Encoding, Dashboard and compatibility modules; move Studio business logic to its owners and leave the thin adapter with the existing Studio project; restructure CLI; move Pi assets; then update documentation and run final validation.
 42. Each stage removes its obsolete source after consumers and behavior tests move. The final tree contains no compatibility aliases, temporary forwarding modules or duplicate implementations.
 43. Mechanical moves should preserve history where practical. Behavior changes such as encoding removal, runtime assembly and Pi installation are reviewed and tested as distinct changes within the initiative.
 44. Current public Application behavior, YAML names, runtime state, checkpoint data and self-learning data are preserved unless this specification explicitly removes a surface.
@@ -198,7 +198,7 @@ CLI 统一提供 `loom runtime install pi`、`loom runtime status pi` 和 `loom 
 8. Pi update tests begin with a valid old tree. A failed staged installation must preserve it; a successful staged installation must publish the new identity and remove the old SDK. No test expects two completed SDK versions to remain.
 9. Pi transport tests resolve the compiled entry through the runtime asset resolver and start Node from the returned absolute path. They verify bridge-local SDK resolution and a real handshake without consulting package-relative `node_modules`.
 10. Tool catalog tests verify that top-level Tools exposes only registry, platform and professional capabilities; Pi native tools and smolagents private tools remain owned by their runtimes. Existing YAML-visible tool names continue to resolve.
-11. Studio adapter tests continue at the NDJSON request/response seam and live with the existing TUI project. Python business behavior is tested through Application, Application Run query and Schedules services; adapter tests cover framing, dispatch, concurrency, cancellation and error projection.
+11. Studio adapter tests continue at the NDJSON request/response seam and live with the existing Studio project. Python business behavior is tested through Application, Application Run query and Schedules services; adapter tests cover framing, dispatch, concurrency, cancellation and error projection.
 12. Dashboard tests and tests that only assert deleted compatibility imports are removed. Their removal is verified by the absence of the command, module and unused dependency rather than replacement tests for deleted code.
 13. Execution, schedule, self-learning and Application persistence tests verify that project `.agentloom` data remains in place and is not mixed with Pi SDK assets.
 14. The final validation runs the relevant unit and integration suites after all moves, followed by controlled real Application executions for both built-in runtimes. Existing acceptance evidence conventions are reused; model self-report is not treated as proof of tool behavior.

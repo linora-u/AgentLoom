@@ -44,13 +44,13 @@ _EVIDENCE_FILES = {
         "src/application/runner.py",
         "src/schedules/runner.py",
         "src/schedules/store.py",
-        "agentloom-tui/python/agentloom_tui_bridge/__main__.py",
-        "agentloom-tui/python/agentloom_tui_bridge/domain_cli.py",
-        "agentloom-tui/src/app/presentation.ts",
-        "agentloom-tui/src/domain/status.ts",
+        "studio/python/agentloom_studio_adapter/__main__.py",
+        "studio/python/agentloom_studio_adapter/domain_cli.py",
+        "studio/src/app/presentation.ts",
+        "studio/src/domain/status.ts",
         "tests/schedules_test/test_schedule_runner_cli.py",
         "tests/application_studio_test/test_runtime_summary.py",
-        "agentloom-tui/test/app/view.test.tsx",
+        "studio/test/app/view.test.tsx",
     ),
     "documentation": (
         "README.md",
@@ -66,7 +66,7 @@ _EVIDENCE_FILES = {
 }
 _EVIDENCE_PATTERN = re.compile(
     r"goal|workflow|continu|resume|checkpoint|"
-    r"supervisor|worker|manifest|schedule|status|tui|jsonl|目标|恢复",
+    r"supervisor|worker|manifest|schedule|status|studio|jsonl|目标|恢复",
     re.IGNORECASE,
 )
 _EVIDENCE_LINES_PER_FILE = 4

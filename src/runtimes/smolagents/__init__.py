@@ -3,7 +3,7 @@
 Importing a lightweight submodule such as ``agent.agent_validation`` used to
 execute this package initializer and eagerly import ``base_agent``.  That in
 turn loads LiteLLM, every Agent tool, and provider integrations even for
-read-only callers such as the TUI workspace index.  Keep the compatibility
+read-only callers such as the Studio workspace index.  Keep the compatibility
 surface, but resolve heavyweight symbols only when a caller actually asks for
 them.
 """
