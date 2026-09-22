@@ -1,11 +1,15 @@
 """Tests for shell command security validation module."""
 
+import subprocess
+import sys
+
 import pytest
 from unittest.mock import patch
 
 from agentloom.execution.tool_governance.shell.security import (
     check_command_security,
     validate_command_security,
+    _check_destructive_patterns,
     _extract_unquoted_content,
     _has_unescaped_backtick,
     SecurityCheckResult,
@@ -174,6 +178,36 @@ class TestDestructivePatterns:
     def test_destructive_pattern_blocked(self, mock_config, cmd, desc):
         failures = check_command_security(cmd)
         assert len(failures) > 0, f"Expected block for {desc}: '{cmd}'"
+
+    @pytest.mark.parametrize("cmd,blocked", [
+        ("rm -afbf /", True),
+        ("rm -ff -rf --force /", True),
+        ("rm -r -f /", False),
+        ("rm -F /", False),
+        ("rm -f -- /", False),
+        ("rm /tmp", False),
+    ])
+    def test_force_flag_matching_preserves_existing_boundaries(self, cmd, blocked):
+        result = _check_destructive_patterns(cmd, cmd)
+        assert (result is not None) is blocked
+
+    def test_repeated_force_flags_are_checked_without_backtracking(self):
+        script = """
+from agentloom.execution.tool_governance.shell.security import _check_destructive_patterns
+
+repeated_flags = "-ff " * 10_000
+assert _check_destructive_patterns(f"rm {repeated_flags}/tmp", "") is None
+result = _check_destructive_patterns(f"rm {repeated_flags}~user/path", "")
+assert result is not None
+assert result.check_id == "destructive_patterns"
+"""
+        subprocess.run(
+            [sys.executable, "-c", script],
+            check=True,
+            capture_output=True,
+            text=True,
+            timeout=3,
+        )
 
 
 class TestControlCharacters:
