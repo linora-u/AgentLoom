@@ -6,6 +6,7 @@ import json
 import math
 import os
 from collections.abc import Callable, Mapping
+from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
@@ -22,9 +23,29 @@ EXECUTION_COMMAND_MAX_ITEMS = 32
 EXECUTION_COMMAND_MAX_BYTES = 4 * 1024
 EXECUTION_COMMAND_ITEM_MAX_BYTES = 1024
 EXECUTION_ERROR_MAX_BYTES = 4 * 1024
+APPLICATION_SUPERVISOR_VALIDATION = "application_supervisor_v1"
 _JOB_STATES = frozenset({"scheduled", "paused", "completed"})
 _EXECUTION_STATES = frozenset({"claimed", "running", "succeeded", "failed", "abandoned"})
 _EXECUTION_TRIGGERS = frozenset({"manual", "scheduled"})
+
+
+@dataclass(frozen=True)
+class ValidatedScheduleTarget:
+    """A canonical project-relative target validated by Application."""
+
+    yaml_path: str
+
+    def __post_init__(self) -> None:
+        if (
+            not isinstance(self.yaml_path, str)
+            or not self.yaml_path
+            or self.yaml_path != self.yaml_path.strip()
+            or "\\" in self.yaml_path
+        ):
+            raise ValueError("invalid validated Schedule target")
+        path = Path(self.yaml_path)
+        if path.is_absolute() or any(part in {"", ".", ".."} for part in path.parts):
+            raise ValueError("invalid validated Schedule target")
 
 
 def decode_json_object(payload: bytes) -> dict[str, Any]:
@@ -205,6 +226,18 @@ def safe_nonnegative_int(value: Any, *, field: str) -> int:
     return result
 
 
+def normalize_schedule_job_name(value: Any, *, fallback: str) -> str:
+    """Normalize one newly written job name to the durable write contract."""
+
+    raw_name = str(value).strip() or str(fallback).strip()
+    if any(character in raw_name for character in ("\x00", "\n", "\r")):
+        raise ValueError("Schedule name contains unsupported control characters")
+    encoded = raw_name.encode("utf-8", errors="replace")
+    if len(encoded) <= JOB_NAME_MAX_BYTES:
+        return raw_name
+    return encoded[:JOB_NAME_MAX_BYTES].decode("utf-8", errors="ignore")
+
+
 def _validate_job(
     job: Mapping[str, Any],
     *,
@@ -273,6 +306,9 @@ def _validate_job(
         expires_at = _required_instant(claim["expires_at"])
         if expires_at <= claimed_at:
             raise ValueError("job claim must expire after it was claimed")
+    target_validation = job.get("target_validation")
+    if target_validation is not None and target_validation != APPLICATION_SUPERVISOR_VALIDATION:
+        raise ValueError("invalid job.target_validation")
 
 
 def _validate_execution(execution: Mapping[str, Any]) -> None:

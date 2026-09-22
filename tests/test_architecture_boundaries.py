@@ -162,6 +162,60 @@ def test_application_invocation_does_not_reexport_goal_rendering_helpers() -> No
     """)
 
 
+def test_schedules_do_not_depend_on_application_implementations() -> None:
+    offenders: list[str] = []
+    for source_path in (ROOT / "src" / "schedules").rglob("*.py"):
+        tree = ast.parse(source_path.read_text(encoding="utf-8"))
+        for node in ast.walk(tree):
+            if isinstance(node, ast.Import):
+                names = [alias.name for alias in node.names]
+            elif isinstance(node, ast.ImportFrom) and node.module is not None:
+                names = [node.module]
+            else:
+                continue
+            for name in names:
+                if name == "agentloom.application" or name.startswith(
+                    "agentloom.application."
+                ):
+                    offenders.append(
+                        f"{source_path.relative_to(ROOT)}:{node.lineno}:{name}"
+                    )
+    assert offenders == []
+
+
+def test_studio_bridge_does_not_assemble_schedule_business_dependencies() -> None:
+    source_path = ROOT / "src/application/studio/bridge.py"
+    source = source_path.read_text(encoding="utf-8")
+    tree = ast.parse(source)
+    forbidden_imports: list[str] = []
+    forbidden_calls: list[str] = []
+    for node in ast.walk(tree):
+        if isinstance(node, ast.ImportFrom) and node.module is not None:
+            forbidden_imports.extend(
+                f"{node.module}.{alias.name}"
+                for alias in node.names
+                if (
+                    node.module == "agentloom.application.definition"
+                    and alias.name == "resolve_valid_supervisor_definition"
+                )
+                or (
+                    node.module == "agentloom.schedules.mutations"
+                    and alias.name == "ScheduleMutationService"
+                )
+            )
+        if (
+            isinstance(node, ast.Call)
+            and isinstance(node.func, ast.Name)
+            and node.func.id == "ScheduleMutationService"
+        ):
+            forbidden_calls.append(
+                f"{source_path.relative_to(ROOT)}:{node.lineno}"
+            )
+
+    assert forbidden_imports == []
+    assert forbidden_calls == []
+
+
 def test_tool_terminal_records_and_hook_outcomes_do_not_load_the_engine() -> None:
     run_fresh("""
         import sys
