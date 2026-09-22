@@ -128,6 +128,7 @@ def test_pending_todo_is_hydrated_without_extra_call_or_final_gate() -> None:
 def test_checkpoint_snapshot_is_visible_on_first_resumed_model_action(tmp_path) -> None:
     from agentloom.execution.checkpoint.checkpoint_manager import CheckpointManager
     from agentloom.execution.checkpoint.coordinator import CheckpointCoordinator
+    from agentloom.runtimes.smolagents.todo.store import TodoStore
 
     task_id = "resume-task"
     manager = CheckpointManager(
@@ -135,7 +136,7 @@ def test_checkpoint_snapshot_is_visible_on_first_resumed_model_action(tmp_path) 
         checkpoint_dir=tmp_path / "checkpoints" / "app" / task_id,
         run_id="resume-run",
     )
-    manager.replace_todos(
+    TodoStore(manager.task_storage).replace_todos(
         task_id,
         "supervisor",
         [{"content": "Restored from checkpoint", "status": "in_progress"}],
