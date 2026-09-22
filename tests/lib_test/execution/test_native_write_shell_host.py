@@ -3,7 +3,7 @@ from dataclasses import replace
 from pathlib import Path
 
 from agentloom.execution.native_tools import NativeExecutionOutcome
-from tests.lib_test.runtime.test_native_read_host import native_scope, read_manifest
+from tests.lib_test.execution.test_native_read_host import native_scope, read_manifest
 
 
 def write_manifest():
