@@ -223,7 +223,7 @@ def test_memory_target_special_characters_still_match_their_literal_text(
 
 
 def test_memory_cli_exposes_only_the_simplified_public_commands() -> None:
-    from agentloom.__main__ import memory
+    from agentloom.self_learning.cli import memory
 
     result = CliRunner().invoke(memory, ["--help"])
     assert result.exit_code == 0
